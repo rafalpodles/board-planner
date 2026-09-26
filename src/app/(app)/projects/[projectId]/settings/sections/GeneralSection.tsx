@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";
@@ -13,6 +13,7 @@ import { IconPicker } from "@/components/ui/IconPicker";
 import { SettingsCard, ListRow } from "@/components/settings/SettingsCard";
 import { DangerAction } from "@/components/settings/DangerAction";
 import { SettingRow } from "@/components/settings/SettingRow";
+import { LoadFailed } from "@/components/ui/LoadFailed";
 import { useDirtyGroup } from "@/components/settings/settings-context";
 import { SectionProps } from "./types";
 
@@ -59,12 +60,33 @@ export function GeneralSection({
   });
 
   const [members, setMembers] = useState<ApiProjectMember[]>([]);
+  // Nothing on the list can be changed before it has been read: a change made on a list still
+  // empty was applied to that empty list, and the people it did not touch vanished (BP-784)
+  const [membersRead, setMembersRead] = useState<"loading" | "loaded" | "failed">("loading");
+  const latestMembersRead = useRef(0);
+
+  async function loadMembers() {
+    const read = ++latestMembersRead.current;
+    try {
+      const loaded: ApiProjectMember[] = await api.get(`/api/projects/${projectId}/members`);
+      if (read !== latestMembersRead.current) return;
+      setMembers(loaded);
+      setMembersRead("loaded");
+    } catch (error) {
+      if (read === latestMembersRead.current) {
+        setMembersRead((state) => (state === "loaded" ? state : "failed"));
+      }
+      throw error;
+    }
+  }
+
+  function readMembers() {
+    setMembersRead((state) => (state === "loaded" ? state : "loading"));
+    loadMembers().catch(() => {});
+  }
 
   useEffect(() => {
-    api
-      .get(`/api/projects/${projectId}/members`)
-      .then(setMembers)
-      .catch(() => {});
+    readMembers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
@@ -207,7 +229,7 @@ export function GeneralSection({
 
     // Its own failure is not the write's: the access change landed (BP-583)
     try {
-      setMembers(await api.get(`/api/projects/${projectId}/members`));
+      await loadMembers();
     } catch {
       toast(LIST_REFRESH_FAILED, "error");
     }
@@ -284,6 +306,19 @@ export function GeneralSection({
         title="Who can use this board"
         description="Owners can change everything on this page. Members work on tasks and sprints. Instance admins always have full access and are listed for reference."
       >
+        {membersRead === "loading" && (
+          <p role="status" className="text-sm text-text-muted">
+            Loading who can use this board…
+          </p>
+        )}
+        {membersRead === "failed" && (
+          <LoadFailed
+            className="py-4"
+            message="Could not load who can use this board."
+            onRetry={readMembers}
+          />
+        )}
+        {membersRead === "loaded" && (
         <div className="space-y-3">
           <div className="relative">
             <Input
@@ -341,6 +376,7 @@ export function GeneralSection({
             ))}
           </div>
         </div>
+        )}
       </SettingsCard>
 
       {project.canAdmin && (

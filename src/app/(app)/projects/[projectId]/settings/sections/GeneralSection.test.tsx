@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { StrictMode } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent, waitFor, act } from "@testing-library/react";
 import { GeneralSection } from "./GeneralSection";
@@ -574,5 +575,147 @@ describe("GeneralSection add person", () => {
 
     await waitFor(() => expect(screen.queryByLabelText("Access for dee")).toBeNull());
     expect(accessGroup()?.count).toBe(0);
+  });
+});
+
+// BP-784: an answer that arrived after a later read used to put the older list back
+describe("GeneralSection members read", () => {
+  function held() {
+    let resolve!: (rows: ApiProjectMember[]) => void;
+    const promise = new Promise<ApiProjectMember[]>((res) => {
+      resolve = res;
+    });
+    return { promise, resolve };
+  }
+
+  const aliceAs = (relation: "owner" | "member") => [{ ...members[0], relation }, ...members.slice(1)];
+
+  it("keeps the second mount's list when the first mount's read answers last", async () => {
+    const first = held();
+    api.get.mockReset();
+    api.get.mockReturnValueOnce(first.promise).mockResolvedValueOnce(members);
+
+    render(
+      <StrictMode>
+        <SettingsProvider register={register} unregister={vi.fn()}>
+          <GeneralSection
+            projectId="p1"
+            project={project()}
+            patchProject={vi.fn()}
+            replaceProject={replaceProject}
+            isAdmin={false}
+            stats={null}
+          />
+        </SettingsProvider>
+      </StrictMode>
+    );
+    expect(await screen.findByLabelText("Access for alice")).toHaveProperty("value", "owner");
+
+    await act(async () => first.resolve(aliceAs("member")));
+
+    expect(screen.getByLabelText("Access for alice")).toHaveProperty("value", "owner");
+  });
+
+  it("keeps the newest re-read when an older one answers after it", async () => {
+    const olderRefresh = held();
+    api.get.mockReset();
+    api.get
+      .mockResolvedValueOnce(members)
+      .mockReturnValueOnce(olderRefresh.promise)
+      .mockResolvedValueOnce(aliceAs("member"));
+    renderSection();
+    const alice = await screen.findByLabelText("Access for alice");
+
+    // First save: its re-read is held
+    fireEvent.change(screen.getByLabelText("Access for bob"), { target: { value: "member" } });
+    await act(async () => {
+      void accessGroup().save();
+    });
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2));
+
+    // Second save lands and its re-read answers
+    fireEvent.change(alice, { target: { value: "member" } });
+    await save();
+    await waitFor(() => expect(alice).toHaveProperty("value", "member"));
+
+    await act(async () => olderRefresh.resolve(members));
+
+    expect(screen.getByLabelText("Access for alice")).toHaveProperty("value", "member");
+  });
+
+  // Review: a change made while the list was still empty was applied to that empty list, and the
+  // people it did not touch vanished once the re-read failed
+  it("offers nothing to change until the list has been read", async () => {
+    const first = held();
+    api.get.mockReset();
+    api.get.mockReturnValueOnce(first.promise);
+    renderSection();
+
+    expect(await screen.findByRole("status")).toHaveProperty("textContent", "Loading who can use this board…");
+    expect(screen.queryByLabelText("Add person")).toBeNull();
+
+    await act(async () => first.resolve(members));
+
+    expect(await screen.findByLabelText("Add person")).toBeTruthy();
+    expect(screen.getByLabelText("Access for alice")).toHaveProperty("value", "owner");
+    expect(screen.queryByText("Loading who can use this board…")).toBeNull();
+  });
+
+  it("says so, and reads again on Retry, when the list cannot be read", async () => {
+    api.get.mockReset();
+    api.get.mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce(members);
+    renderSection();
+
+    const failure = await screen.findByRole("alert");
+    expect(failure.textContent).toContain("Could not load who can use this board.");
+    expect(screen.queryByLabelText("Add person")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(await screen.findByLabelText("Access for alice")).toHaveProperty("value", "owner");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  // Strict Mode reads twice; the first one failing says nothing while the second is still out
+  it("does not report a failure from a read another has replaced", async () => {
+    const second = held();
+    api.get.mockReset();
+    api.get.mockRejectedValueOnce(new Error("offline")).mockReturnValueOnce(second.promise);
+    render(
+      <StrictMode>
+        <SettingsProvider register={register} unregister={vi.fn()}>
+          <GeneralSection
+            projectId="p1"
+            project={project()}
+            patchProject={vi.fn()}
+            replaceProject={replaceProject}
+            isAdmin={false}
+            stats={null}
+          />
+        </SettingsProvider>
+      </StrictMode>
+    );
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2));
+    await act(async () => {});
+
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe("Loading who can use this board…");
+
+    await act(async () => second.resolve(members));
+
+    expect(await screen.findByLabelText("Access for alice")).toHaveProperty("value", "owner");
+  });
+
+  it("keeps the list it has when only a later re-read fails", async () => {
+    renderSection();
+    fireEvent.change(await screen.findByLabelText("Access for bob"), { target: { value: "member" } });
+    api.get.mockRejectedValueOnce(new Error("offline"));
+
+    await save();
+
+    expect(toast).toHaveBeenCalledWith(LIST_REFRESH_FAILED, "error");
+    expect(screen.getByLabelText("Access for alice")).toHaveProperty("value", "owner");
+    expect(screen.getByLabelText("Access for bob")).toHaveProperty("value", "member");
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

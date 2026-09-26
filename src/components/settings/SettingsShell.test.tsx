@@ -28,6 +28,43 @@ const sidebar = () => document.querySelector('[data-settings-nav="sidebar"]')!;
 const pills = () => document.querySelector('[data-settings-nav="pills"]')!;
 
 describe("SettingsShell", () => {
+  // BP-783: whatever lies under a sticky bar in its own column is where it rests at the end of the
+  // page, above where it sticks — padding there, or the column ending before the page does
+  it("puts a bottom bar last in the content column, under a spacer that takes up the slack", () => {
+    render(
+      <SettingsShell groups={SELECTED} active="general" bottomBar={<div data-testid="bar" />}>
+        <p>body</p>
+      </SettingsShell>
+    );
+    const bar = screen.getByTestId("bar");
+    const column = bar.parentElement!;
+    expect(column.contains(screen.getByText("body"))).toBe(true);
+    expect(column.parentElement).toBe(sidebar().parentElement);
+    expect(column.lastElementChild).toBe(bar);
+    expect(bar.previousElementSibling).toBe(screen.getByTestId("bottom-bar-spacer"));
+    expect(screen.getByTestId("bottom-bar-spacer").className).toMatch(/\bflex-1\b/);
+  });
+
+  it("fills the page down to the bottom when it has a bar, with nothing padded under it", () => {
+    const { container } = render(
+      <SettingsShell groups={SELECTED} active="general" bottomBar={<div data-testid="bar" />}>
+        body
+      </SettingsShell>
+    );
+    const column = screen.getByTestId("bar").parentElement!;
+    for (let el: Element | null = column; el && el !== container; el = el.parentElement) {
+      expect(el.className, el.outerHTML.slice(0, 80)).toMatch(/(^|\s)flex(\s|$)/);
+      expect(el.className, el.outerHTML.slice(0, 80)).toMatch(/\bflex-col\b/);
+      expect(el.className, el.outerHTML.slice(0, 80)).toMatch(/\bflex-1\b/);
+      expect(el.className).not.toMatch(/\bpb-/);
+    }
+  });
+
+  it("keeps its bottom padding when there is no bar", () => {
+    const { container } = render(<SettingsShell groups={SELECTED} active="general">body</SettingsShell>);
+    expect(container.firstElementChild!.className).toMatch(/\bpb-8\b/);
+  });
+
   it("puts the page title in the one h1 and keeps the subtitle", () => {
     render(<SettingsShell title="Settings" subtitle="This account and this instance" groups={ROUTED} active="profile">body</SettingsShell>);
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);

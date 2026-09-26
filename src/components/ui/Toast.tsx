@@ -222,14 +222,14 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     });
 
     window.addEventListener("resize", remeasure);
-    // Both obstacles are `sticky`, not `fixed` — `SaveBar` and `MobileCommentBar` are both
-    // `sticky bottom-0` — so their place in the viewport changes when their scrollport reaches the
-    // point where they un-stick. That is no resize and no mutation, so nothing else here notices,
-    // and the offset computed when the toast was raised is simply wrong from then on: scroll a
-    // settings column to its end while a failure toast is up and the toast stays where the Save
-    // bar used to be (BP-625). Capture, because the scroll happens in a container rather than on
-    // the window; passive, because nothing is cancelled; and armed only while a toast is up, which
-    // the effect's own bail-out already guarantees.
+    // The bars are `sticky`, not `fixed`, so a bar whose column ends before its scrollport does
+    // moves when the scroll reaches the point where it un-sticks. That is no resize and no mutation,
+    // so nothing else here notices, and the offset computed when the toast was raised is wrong
+    // from then on (BP-625). Neither bar un-sticks today — the settings column runs to the foot of
+    // the page since BP-783, and the comment bar is the last thing in its scroller — so this is
+    // the guard for the next one. Capture, because the scroll happens in a container rather than
+    // on the window; passive, because nothing is cancelled; and armed only while a toast is up,
+    // which the effect's own bail-out already guarantees.
     document.addEventListener("scroll", remeasure, { capture: true, passive: true });
     return () => {
       sizes?.disconnect();

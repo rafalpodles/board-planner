@@ -194,8 +194,20 @@ export default function ProjectSettingsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Strict Mode's first mount read can answer after a save and put the old project back (BP-784)
   useEffect(() => {
-    api.get(`/api/projects/${projectId}`).then(setProject).catch(setLoadFailure);
+    let current = true;
+    api
+      .get(`/api/projects/${projectId}`)
+      .then((loaded) => {
+        if (current) setProject(loaded);
+      })
+      .catch((error) => {
+        if (current) setLoadFailure(error);
+      });
+    return () => {
+      current = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, loadAttempt]);
 
@@ -311,6 +323,7 @@ export default function ProjectSettingsPage() {
       pillItems={visible.map(navItem)}
       active={active}
       onSelect={goToSection}
+      bottomBar={<SaveBar pending={pending} total={total} onGoToSection={goToSection} />}
       sidebarTop={
         <div className="relative mb-3">
           <input
@@ -370,7 +383,6 @@ export default function ProjectSettingsPage() {
           </div>
         ))}
       </SettingsProvider>
-      <SaveBar pending={pending} total={total} onGoToSection={goToSection} />
     </SettingsShell>
   );
 }

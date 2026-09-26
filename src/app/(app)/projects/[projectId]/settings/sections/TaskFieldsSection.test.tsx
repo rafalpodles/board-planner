@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { useState } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render as rtlRender, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { render as rtlRender, screen, cleanup, fireEvent, waitFor, act } from "@testing-library/react";
 import { TaskFieldsSection } from "./TaskFieldsSection";
 import { SettingsProvider, useDirtyRegistry } from "@/components/settings/settings-context";
 import { ApiCustomField, ApiProject } from "@/types";
@@ -66,7 +66,9 @@ function DirtyHarness({ initial }: { initial: ApiProject }) {
   return (
     <SettingsProvider register={register} unregister={unregister}>
       <span data-testid="pending-total">{total}</span>
+      <span data-testid="saved-estimate-field-id">{project.estimateFieldId}</span>
       <button onClick={() => pending.forEach((g) => g.save())}>Save all</button>
+      <button onClick={() => pending.forEach((g) => g.discard())}>Discard all</button>
       <TaskFieldsSection
         projectId="p1"
         project={project}
@@ -323,12 +325,197 @@ describe("TaskFieldsSection estimate field", () => {
     expect(select.value).toBe(numberFieldId);
   });
 
-  it("saves the designation on the project", async () => {
-    render(<TaskFieldsSection {...props} />);
+  // BP-785: it used to be written the moment it was picked, under a footer saying nothing was unsaved
+  it("waits for Save: picking a field sends nothing and counts as one unsaved change", async () => {
+    rtlRender(<DirtyHarness initial={project} />);
+    const select = screen.getByLabelText("Estimate field") as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: numberFieldId } });
+
+    await waitFor(() => expect(screen.getByTestId("pending-total").textContent).toBe("1"));
+    expect(select.value).toBe(numberFieldId);
+    expect(select.className).toContain("border-warning/60");
+    expect(api.put).not.toHaveBeenCalled();
+  });
+
+  it("Save sends the designation and leaves nothing pending", async () => {
+    api.put.mockResolvedValue({});
+    rtlRender(<DirtyHarness initial={project} />);
     fireEvent.change(screen.getByLabelText("Estimate field"), { target: { value: numberFieldId } });
-    await waitFor(() =>
-      expect(api.put).toHaveBeenCalledWith("/api/projects/p1", { estimateFieldId: numberFieldId })
+    await waitFor(() => expect(screen.getByTestId("pending-total").textContent).toBe("1"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Save all" }));
+
+    await waitFor(() => expect(screen.getByTestId("pending-total").textContent).toBe("0"));
+    expect(api.put).toHaveBeenCalledWith("/api/projects/p1", { estimateFieldId: numberFieldId });
+    expect(screen.getByTestId("saved-estimate-field-id").textContent).toBe(numberFieldId);
+  });
+
+  it("Discard puts the saved choice back", async () => {
+    rtlRender(
+      <DirtyHarness initial={{ ...project, customFields: twoNumericFields, estimateFieldId: numberFieldId }} />
     );
+    const select = screen.getByLabelText("Estimate field") as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "" } });
+    await waitFor(() => expect(screen.getByTestId("pending-total").textContent).toBe("1"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Discard all" }));
+
+    await waitFor(() => expect(screen.getByTestId("pending-total").textContent).toBe("0"));
+    expect(select.value).toBe(numberFieldId);
+    expect(api.put).not.toHaveBeenCalled();
+  });
+
+  it("keeps a refused choice pending, to retry or discard", async () => {
+    api.put.mockRejectedValue(apiError("Estimate field not found", 400));
+    rtlRender(<DirtyHarness initial={project} />);
+    fireEvent.change(screen.getByLabelText("Estimate field"), { target: { value: numberFieldId } });
+    await waitFor(() => expect(screen.getByTestId("pending-total").textContent).toBe("1"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Save all" }));
+
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("Estimate field not found", "error"));
+    expect(screen.getByTestId("pending-total").textContent).toBe("1");
+    expect(screen.getByTestId("saved-estimate-field-id").textContent).toBe("");
+  });
+
+  it("leaves nothing pending when the saved designation's field is deleted", async () => {
+    api.del.mockResolvedValue([twoNumericFields[1]]);
+    rtlRender(
+      <DirtyHarness initial={{ ...project, customFields: twoNumericFields, estimateFieldId: numberFieldId }} />
+    );
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[0]);
+    fireEvent.click(await screen.findByRole("button", { name: "Delete field" }));
+
+    await waitFor(() => expect(screen.getByTestId("saved-estimate-field-id").textContent).toBe(""));
+    expect(screen.getByTestId("pending-total").textContent).toBe("0");
+    expect((screen.getByLabelText("Estimate field") as HTMLSelectElement).value).toBe("");
+  });
+
+  // Review: None here would un-designate the saved field on the next Save, which nobody asked for
+  it("puts an unsaved choice of a deleted field back to the saved one, not to None", async () => {
+    api.del.mockResolvedValue([twoNumericFields[0]]);
+    rtlRender(
+      <DirtyHarness initial={{ ...project, customFields: twoNumericFields, estimateFieldId: numberFieldId }} />
+    );
+    const select = screen.getByLabelText("Estimate field") as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: otherFieldId } });
+    await waitFor(() => expect(screen.getByTestId("pending-total").textContent).toBe("1"));
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[1]);
+    fireEvent.click(await screen.findByRole("button", { name: "Delete field" }));
+
+    await waitFor(() => expect(screen.getByTestId("pending-total").textContent).toBe("0"));
+    expect((screen.getByLabelText("Estimate field") as HTMLSelectElement).value).toBe(numberFieldId);
+    expect(screen.getByTestId("saved-estimate-field-id").textContent).toBe(numberFieldId);
+    expect(api.put).not.toHaveBeenCalled();
+  });
+
+  it("falls back to a choice saved during this visit, not to the one the page opened with", async () => {
+    api.put.mockResolvedValue({});
+    api.del.mockResolvedValue([twoNumericFields[0]]);
+    rtlRender(<DirtyHarness initial={{ ...project, customFields: twoNumericFields }} />);
+    const select = screen.getByLabelText("Estimate field") as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: numberFieldId } });
+    fireEvent.click(screen.getByRole("button", { name: "Save all" }));
+    await waitFor(() => expect(screen.getByTestId("saved-estimate-field-id").textContent).toBe(numberFieldId));
+
+    fireEvent.change(select, { target: { value: otherFieldId } });
+    fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[1]);
+    fireEvent.click(await screen.findByRole("button", { name: "Delete field" }));
+
+    await waitFor(() => expect(screen.getByTestId("pending-total").textContent).toBe("0"));
+    expect(select.value).toBe(numberFieldId);
+  });
+
+  // The fallback is read after the delete's await, so a save landing during it must count
+  it("follows a choice saved while the delete was still out", async () => {
+    let answerDelete!: (fields: unknown) => void;
+    api.del.mockImplementation(() => new Promise((resolve) => (answerDelete = resolve)));
+    api.put.mockResolvedValue({});
+    rtlRender(
+      <DirtyHarness initial={{ ...project, customFields: twoNumericFields, estimateFieldId: numberFieldId }} />
+    );
+    const select = screen.getByLabelText("Estimate field") as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: otherFieldId } });
+    fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[1]);
+    fireEvent.click(await screen.findByRole("button", { name: "Delete field" }));
+    await waitFor(() => expect(api.del).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("button", { name: "Save all" }));
+    await waitFor(() => expect(screen.getByTestId("saved-estimate-field-id").textContent).toBe(otherFieldId));
+    await act(async () => answerDelete([twoNumericFields[0]]));
+
+    await waitFor(() => expect(screen.getByTestId("saved-estimate-field-id").textContent).toBe(""));
+    expect(select.value).toBe("");
+    expect(screen.getByTestId("pending-total").textContent).toBe("0");
+  });
+
+  it("leaves a saved choice and an unsaved one alone when another field is removed", async () => {
+    api.del.mockResolvedValue([twoNumericFields[0], twoNumericFields[1]]);
+    const withThird = [
+      ...twoNumericFields,
+      { ...twoNumericFields[1], _id: "f-third", name: "Hours", order: 2 },
+    ];
+    rtlRender(
+      <DirtyHarness initial={{ ...project, customFields: withThird, estimateFieldId: numberFieldId }} />
+    );
+    fireEvent.change(screen.getByLabelText("Estimate field"), { target: { value: otherFieldId } });
+    await waitFor(() => expect(screen.getByTestId("pending-total").textContent).toBe("1"));
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[2]);
+    fireEvent.click(await screen.findByRole("button", { name: "Delete field" }));
+
+    await waitFor(() => expect(screen.queryByText("Hours")).toBeNull());
+    expect((screen.getByLabelText("Estimate field") as HTMLSelectElement).value).toBe(otherFieldId);
+    expect(screen.getByTestId("saved-estimate-field-id").textContent).toBe(numberFieldId);
+    expect(screen.getByTestId("pending-total").textContent).toBe("1");
+  });
+
+  it("keeps the designation when the designated field is renamed", async () => {
+    api.patch.mockResolvedValue([{ ...twoNumericFields[0], name: "Points" }, twoNumericFields[1]]);
+    rtlRender(
+      <DirtyHarness initial={{ ...project, customFields: twoNumericFields, estimateFieldId: numberFieldId }} />
+    );
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Points" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save field" }));
+
+    await waitFor(() => expect(api.patch).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Save field" })).toBeNull());
+    expect(screen.getByTestId("saved-estimate-field-id").textContent).toBe(numberFieldId);
+    expect((screen.getByLabelText("Estimate field") as HTMLSelectElement).value).toBe(numberFieldId);
+    expect(screen.getByTestId("pending-total").textContent).toBe("0");
+  });
+
+  it("Create leaves the new field chosen and nothing pending", async () => {
+    const created = { ...twoNumericFields[0], _id: "f-new" };
+    api.post.mockResolvedValue([...noNumericFields, created]);
+    api.put.mockResolvedValue({});
+    rtlRender(<DirtyHarness initial={{ ...project, customFields: noNumericFields }} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Create .Story points./ }));
+
+    const select = (await screen.findByLabelText("Estimate field")) as HTMLSelectElement;
+    await waitFor(() => expect(select.value).toBe("f-new"));
+    expect(screen.getByTestId("pending-total").textContent).toBe("0");
+    expect(screen.getByTestId("saved-estimate-field-id").textContent).toBe("f-new");
+  });
+
+  it("drops an unsaved choice of a field that is then deleted", async () => {
+    api.del.mockResolvedValue([twoNumericFields[1]]);
+    rtlRender(<DirtyHarness initial={{ ...project, customFields: twoNumericFields }} />);
+    const select = screen.getByLabelText("Estimate field") as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: numberFieldId } });
+    await waitFor(() => expect(screen.getByTestId("pending-total").textContent).toBe("1"));
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[0]);
+    fireEvent.click(await screen.findByRole("button", { name: "Delete field" }));
+
+    await waitFor(() => expect(screen.getByTestId("pending-total").textContent).toBe("0"));
+    expect((screen.getByLabelText("Estimate field") as HTMLSelectElement).value).toBe("");
+    expect(api.put).not.toHaveBeenCalled();
   });
 
   it("disables the row for somebody who does not own the project, and greys it out", () => {
@@ -420,9 +607,10 @@ describe("TaskFieldsSection estimate field", () => {
     );
     fireEvent.click(screen.getAllByRole("button", { name: "Archive" })[1]);
 
-    await waitFor(() =>
-      expect(screen.getByTestId("estimate-field-id").textContent).toBe(numberFieldId)
-    );
+    // Once the archive has landed: before it, the assertion below holds whatever the code does
+    await waitFor(() => expect(screen.getByText("Effort").closest("div")?.textContent).toMatch(/Archived/));
+    expect(screen.getByTestId("estimate-field-id").textContent).toBe(numberFieldId);
+    expect((screen.getByLabelText("Estimate field") as HTMLSelectElement).value).toBe(numberFieldId);
   });
 
   it("clears the local designation when the designated field is deleted", async () => {

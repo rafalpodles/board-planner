@@ -92,18 +92,24 @@ export function SaveBar({ pending, total, onGoToSection }: SaveBarProps) {
                 </button>
               )}
             </div>
-            <span className="flex-1" />
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={saving || !open}
-              onClick={() => pending.forEach((g) => g.discard())}
-            >
-              Discard
-            </Button>
-            <Button size="sm" disabled={saving || !open} onClick={saveAll}>
-              {saving ? "Saving..." : "Save changes"}
-            </Button>
+            {/* -ml-3 takes back the gap, or beside a long label it wraps onto a row of its own */}
+            <span className="-ml-3 flex-1" />
+            {/* Together, so a bar too narrow for one row moves both to the left of the next one,
+                clear of the raised PM launcher; split, Discard stayed at the right under it (BP-783) */}
+            <div className="flex flex-wrap gap-3">
+              <Button
+                size="sm"
+                variant="secondary"
+                className="whitespace-nowrap"
+                disabled={saving || !open}
+                onClick={() => pending.forEach((g) => g.discard())}
+              >
+                Discard
+              </Button>
+              <Button size="sm" className="whitespace-nowrap" disabled={saving || !open} onClick={saveAll}>
+                {saving ? "Saving..." : "Save changes"}
+              </Button>
+            </div>
           </div>
         </div>
       )}

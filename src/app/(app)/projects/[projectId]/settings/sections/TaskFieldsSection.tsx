@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useApi } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/Toast";
 import {
@@ -66,6 +66,12 @@ export function TaskFieldsSection({
     activeFields(project.customFields || []).filter((f) => f.fieldType === "number"),
   );
   const [creatingEstimateField, setCreatingEstimateField] = useState(false);
+  const estimate = useDraft({ fieldId: project.estimateFieldId ?? "" });
+  // Read after an await, where the render's own copy may be older than what has been saved since
+  const savedEstimate = useRef(estimate.baseline.fieldId);
+  useEffect(() => {
+    savedEstimate.current = estimate.baseline.fieldId;
+  });
 
   // Explicit, because a row added here has no _id until it is saved
   const categories = useDraft<{ categories: CategoryDraft[] }>({
@@ -209,6 +215,36 @@ export function TaskFieldsSection({
     },
   );
 
+  useDirtyGroup(
+    {
+      id: "fields-estimate",
+      section: "fields",
+      label: "Task fields · Estimate field",
+      count: estimate.count,
+    },
+    {
+      save: async () => {
+        const { fieldId } = estimate.value;
+        try {
+          await api.put(`/api/projects/${projectId}`, { estimateFieldId: fieldId });
+          patchProject({ estimateFieldId: fieldId });
+          estimate.rebase({ fieldId });
+        } catch (err) {
+          fail(err, "Failed to save estimate field");
+        }
+      },
+      discard: estimate.discard,
+    },
+  );
+
+  // An unsaved choice of a removed field falls back to the saved one: None would un-designate it
+  function forgetEstimateField(fieldId: string) {
+    const saved = savedEstimate.current === fieldId ? "" : savedEstimate.current;
+    patchProject((p) => (p.estimateFieldId === fieldId ? { estimateFieldId: "" } : {}));
+    estimate.rebase((prev) => (prev.fieldId === fieldId ? { fieldId: "" } : prev));
+    estimate.setValue((prev) => (prev.fieldId === fieldId ? { fieldId: saved } : prev));
+  }
+
   // Throws rather than toasting: the form stays open on failure and shows the reason
   // beside the field, instead of closing and dropping what was typed
   async function addCustomField(draft: FieldDraft) {
@@ -228,12 +264,8 @@ export function TaskFieldsSection({
       `/api/projects/${projectId}/custom-fields/${fieldId}`,
       patch,
     );
-    const nowArchived = customFields.find((f) => f._id === fieldId)?.archived;
-    patchProject(
-      nowArchived && project.estimateFieldId === fieldId
-        ? { customFields, estimateFieldId: "" }
-        : { customFields },
-    );
+    patchProject({ customFields });
+    if (customFields.find((f) => f._id === fieldId)?.archived) forgetEstimateField(fieldId);
     setFieldForm(null);
   }
 
@@ -242,20 +274,19 @@ export function TaskFieldsSection({
       const customFields: ApiCustomField[] = await api.del(
         `/api/projects/${projectId}/custom-fields/${fieldId}`,
       );
-      patchProject(
-        project.estimateFieldId === fieldId
-          ? { customFields, estimateFieldId: "" }
-          : { customFields },
-      );
+      patchProject({ customFields });
+      forgetEstimateField(fieldId);
     } catch (err) {
       fail(err, "Failed to remove custom field");
     }
   }
 
+  // Not staged: "Create" is a button that saves, like the field form, and it designates in the same click
   async function designateEstimateField(fieldId: string) {
     try {
       await api.put(`/api/projects/${projectId}`, { estimateFieldId: fieldId });
       patchProject({ estimateFieldId: fieldId });
+      estimate.commit({ fieldId });
     } catch (err) {
       fail(err, "Failed to save estimate field");
     }
@@ -454,13 +485,14 @@ export function TaskFieldsSection({
           >
             <Select
               aria-label="Estimate field"
-              value={project.estimateFieldId}
+              value={estimate.value.fieldId}
+              dirty={estimate.count > 0}
               disabled={!project.canAdmin}
               options={[
                 { value: "", label: "None" },
                 ...numericFields.map((f) => ({ value: f._id, label: f.name })),
               ]}
-              onChange={(e) => designateEstimateField(e.target.value)}
+              onChange={(e) => estimate.set("fieldId", e.target.value)}
             />
           </SettingRow>
         )}

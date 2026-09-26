@@ -75,6 +75,95 @@ for (const width of [420, 700, 1023, 1280]) {
   });
 }
 
+// Scrolled again on every look: sections finish loading after the first paint and the page grows
+async function scrollToTheEnd(page: Page) {
+  await expect
+    .poll(() =>
+      page.locator("#main-content").evaluate((el) => {
+        el.scrollTo({ top: el.scrollHeight });
+        return Math.ceil(el.scrollTop + el.clientHeight) >= el.scrollHeight;
+      })
+    )
+    .toBe(true);
+}
+
+/** Square pixels of the button the launcher is painted over */
+async function launcherOver(page: Page, name: string) {
+  return page.getByRole("button", { name, exact: true }).evaluate((el) => {
+    const b = el.getBoundingClientRect();
+    const l = document.querySelector('[data-testid="pm-chat-launcher"]')!.getBoundingClientRect();
+    const across = Math.max(0, Math.min(b.right, l.right) - Math.max(b.left, l.left));
+    const down = Math.max(0, Math.min(b.bottom, l.bottom) - Math.max(b.top, l.top));
+    return across * down;
+  });
+}
+
+/**
+ * BP-783. The tests above never scroll, so the bar they measure is the one stuck to the bottom. At
+ * the end of the page the bar stopped sticking and rested on the padding under it, higher than the
+ * launcher's raise allows for — and the launcher sat on Save changes, or on Discard on a phone.
+ */
+// 800 and 768: with the app sidebar open the content column is about 250px there, too narrow for
+// both buttons on one row (review)
+for (const [width, height] of [
+  [1280, 600],
+  [800, 800],
+  [768, 800],
+  [390, 640],
+  [360, 640],
+] as const) {
+  test(`the launcher clears Discard and Save changes at ${width}px, scrolled or not`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height });
+    await signIn(page);
+    await makeDirty(page);
+
+    for (const name of ["Discard", "Save changes"]) {
+      expect(await launcherOver(page, name), `${name}, at the top`).toBe(0);
+    }
+
+    const main = page.locator("#main-content");
+    expect(await main.evaluate((el) => el.scrollHeight > el.clientHeight + 100)).toBe(true);
+    await scrollToTheEnd(page);
+
+    for (const name of ["Discard", "Save changes"]) {
+      expect(await launcherOver(page, name), `${name}, at the end`).toBe(0);
+    }
+  });
+}
+
+/**
+ * Review of BP-783. A section shorter than the settings nav, or than the screen, ended its column
+ * before the page ended, and the bar rested there — in the launcher's band — instead of where it
+ * sticks.
+ */
+// 1280×480 scrolls, but the settings nav is taller than the section; at 1440×540 nothing scrolls
+// and the section ends where the bar used to rest in the launcher's band; 390×800 is the same on a
+// phone, where the sections are pills instead of a sidebar
+for (const [width, height] of [
+  [1280, 480],
+  [1440, 540],
+  [390, 800],
+] as const) {
+  test(`on a short section the launcher clears Discard and Save changes at ${width}×${height}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height });
+    await signIn(page);
+    await makeDirty(page);
+    const nav = width < 768 ? '[data-settings-nav="pills"]' : '[data-settings-nav="sidebar"]';
+    await page.locator(nav).getByRole("button", { name: "Audit log" }).click();
+    await expect(page.getByRole("heading", { name: "Audit log", level: 2 })).toBeVisible();
+
+    await scrollToTheEnd(page);
+
+    for (const name of ["Discard", "Save changes"]) {
+      expect(await launcherOver(page, name), name).toBe(0);
+    }
+  });
+}
+
 /**
  * A control rather than the proof: measured, this click reaches Save with the fix reverted too —
  * Playwright re-checks actionability and the overlap band does not cover the button's vertical
