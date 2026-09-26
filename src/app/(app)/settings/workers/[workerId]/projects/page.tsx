@@ -173,8 +173,9 @@ export default function MachineProjectsPage() {
         the app offers to remove the checkout, asking on the machine first.
       </p>
       <p data-testid="without-the-app" className="mt-2 text-sm text-text-muted">
-        A machine run without the app — a Linux box, a container, a worker started by hand — acts on
-        none of this: clone the repository there yourself and list it in repos.json.
+        A machine run without the app — a Linux box, a container, a worker started by hand — gets no
+        checkout from ticking a project here: clone the repository there yourself and list it in
+        repos.json.
       </p>
 
       <div className="mt-6 space-y-2">
