@@ -1,5 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Fill in every placeholder before loading this file; worker/README.md has a sed line that does it.
+    REPO_DIR      the board-planner checkout this worker runs from
+    HOME_DIR      your home directory
+    BOARD_URL     your board's address, such as https://app.board-planner.com
+    MACHINE_NAME  what the board calls this machine
+  The enrolment token goes in HOME_DIR/.boardplanner/token, never in this file.
+  /opt/homebrew/bin/node is Homebrew's node on Apple silicon; on an Intel Mac it is /usr/local/bin/node.
+-->
 <plist version="1.0">
 <dict>
   <key>Label</key>
@@ -14,11 +23,11 @@
   <key>EnvironmentVariables</key>
   <dict>
     <key>CP_API_URL</key>
-    <string>https://app.board-planner.com</string>
+    <string>BOARD_URL</string>
     <key>CP_ENROLMENT_TOKEN_FILE</key>
     <string>HOME_DIR/.boardplanner/token</string>
     <key>CP_WORKER_NAME</key>
-    <string>owner-laptop</string>
+    <string>MACHINE_NAME</string>
     <key>CP_STATE_DIR</key>
     <string>HOME_DIR/.boardplanner</string>
     <key>HOME</key>

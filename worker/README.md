@@ -201,11 +201,13 @@ run the `unload` and `load` below again. A worker that has already registered
 never uses the token, so a leftover file there does not stop it. The inline variable still works
 for a container, where there is no file to protect.
 
-Then install the plist and load it. It ships with `REPO_DIR` and `HOME_DIR` placeholders rather than
-one developer's absolute paths, so substitute them as you install it:
+Then install the plist and load it. It ships with four placeholders rather than one developer's
+values, named in the comment at its top: `REPO_DIR`, `HOME_DIR`, `BOARD_URL` and `MACHINE_NAME`.
+Substitute all four as you install it, with your own board's address if it is not the hosted one:
 
 ```bash
 sed -e "s|REPO_DIR|$(cd .. && pwd)|g" -e "s|HOME_DIR|$HOME|g" \
+    -e "s|BOARD_URL|https://app.board-planner.com|g" -e "s|MACHINE_NAME|$(hostname -s)|g" \
   launchd/com.boardplanner.worker.plist > ~/Library/LaunchAgents/com.boardplanner.worker.plist
 launchctl unload ~/Library/LaunchAgents/com.boardplanner.worker.plist 2>/dev/null
 launchctl load ~/Library/LaunchAgents/com.boardplanner.worker.plist
@@ -217,6 +219,9 @@ the new plist.
 Loading it before the token is in place starts a worker that stays unregistered: it reads the token
 only when it starts, so it logs every 30 seconds that it has none until you `launchctl unload` and
 `load` it again.
+
+A worker whose `CP_API_URL` is still `BOARD_URL`, or is not an `http` or `https` address at all,
+stops at start and says so in the error log rather than retrying an address it cannot reach.
 
 The plist carries the paths for this machine — check `ProgramArguments` and `PATH` before loading
 it anywhere else. Logs go to `/tmp/boardplanner-worker.log` and
