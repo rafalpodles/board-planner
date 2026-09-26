@@ -34,6 +34,19 @@ describe("saveAllGroups", () => {
     expect(failed).toEqual(["B"]);
   });
 
+  // Board access can take the reader's own ownership away, and everything saved after it would be
+  // refused — so it goes last, whatever order the groups were changed in
+  it("saves a group marked to go last after all the others", async () => {
+    const log: string[] = [];
+    await saveAllGroups([
+      { ...group("Access", "ok", log), saveLast: true },
+      group("Identity", "ok", log),
+      group("Board", "ok", log),
+    ]);
+
+    expect(log).toEqual(["Identity", "Board", "Access"]);
+  });
+
   it("names every group that failed", async () => {
     const log: string[] = [];
     const failed = await saveAllGroups([

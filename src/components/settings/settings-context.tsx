@@ -7,6 +7,7 @@ export interface DirtyGroup {
   section: string;
   label: string;
   count: number;
+  saveLast?: boolean;
   save: () => Promise<void>;
   discard: () => void;
 }
@@ -60,7 +61,7 @@ export function useDirtyGroup(
   if (!ctx) throw new Error("useDirtyGroup must be used inside SettingsProvider");
   const { register, unregister } = ctx;
 
-  const { id, section, label, count } = group;
+  const { id, section, label, count, saveLast } = group;
 
   useEffect(() => {
     register({
@@ -68,9 +69,10 @@ export function useDirtyGroup(
       section,
       label,
       count,
+      saveLast,
       save: () => latest.current.save(),
       discard: () => latest.current.discard(),
     });
     return () => unregister(id);
-  }, [id, section, label, count, register, unregister]);
+  }, [id, section, label, count, saveLast, register, unregister]);
 }

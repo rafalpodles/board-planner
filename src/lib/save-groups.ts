@@ -1,5 +1,6 @@
 interface SavableGroup {
   label: string;
+  saveLast?: boolean;
   save: () => Promise<void>;
 }
 
@@ -11,8 +12,10 @@ interface SavableGroup {
  */
 export async function saveAllGroups(groups: SavableGroup[]): Promise<string[]> {
   const failed: string[] = [];
+  // A group that can take the reader's own access away goes last, or what follows it is refused
+  const ordered = [...groups].sort((a, b) => Number(!!a.saveLast) - Number(!!b.saveLast));
 
-  for (const group of groups) {
+  for (const group of ordered) {
     try {
       await group.save();
     } catch {

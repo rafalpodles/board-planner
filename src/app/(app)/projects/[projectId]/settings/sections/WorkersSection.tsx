@@ -370,7 +370,7 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
             value={defaultAgent.value.agentId}
             disabled={!canEdit || store.loading}
             onChange={(e) => defaultAgent.set("agentId", e.target.value)}
-            className={`w-full rounded-lg border bg-bg-input min-h-11 px-2 py-1.5 text-sm sm:min-h-0 ${
+            className={`focus-ring w-full rounded-lg border bg-bg-input min-h-11 px-2 py-1.5 text-sm sm:min-h-0 ${
               defaultAgent.count > 0 ? "border-warning/60" : "border-border"
             }`}
           >

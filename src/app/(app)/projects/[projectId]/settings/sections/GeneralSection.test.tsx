@@ -6,14 +6,15 @@ import { SettingsProvider } from "@/components/settings/settings-context";
 import { ApiProject, ApiProjectMember } from "@/types";
 import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";
 
-const { api, toast } = vi.hoisted(() => ({
+const { api, toast, routerReplace } = vi.hoisted(() => ({
   api: { get: vi.fn(), put: vi.fn(), del: vi.fn() },
   toast: vi.fn(),
+  routerReplace: vi.fn(),
 }));
 
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast }) }));
-vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn() }) }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: routerReplace }) }));
 
 function project(over: Partial<ApiProject> = {}): ApiProject {
   return {
@@ -44,15 +45,18 @@ async function save() {
   });
 }
 
-function renderSection() {
+const replaceProject = vi.fn();
+
+function renderSection(as: { currentUserId?: string; isAdmin?: boolean } = {}) {
   return render(
     <SettingsProvider register={register} unregister={vi.fn()}>
       <GeneralSection
         projectId="p1"
         project={project()}
         patchProject={vi.fn()}
-        replaceProject={vi.fn()}
-        isAdmin={false}
+        replaceProject={replaceProject}
+        isAdmin={as.isAdmin ?? false}
+        currentUserId={as.currentUserId}
         stats={null}
       />
     </SettingsProvider>
@@ -61,6 +65,8 @@ function renderSection() {
 
 beforeEach(() => {
   register.mockReset();
+  replaceProject.mockReset();
+  routerReplace.mockReset();
   api.get.mockReset();
   api.put.mockReset();
   api.del.mockReset();
@@ -297,6 +303,100 @@ describe("GeneralSection member access", () => {
     ]);
   });
 
+  describe("the reader's own access", () => {
+    // Alice owns the board with Dave. Were her step-down sent first, she would own it no more
+    // and the removal behind it would be refused
+    const board: ApiProjectMember[] = [
+      { _id: "u1", username: "alice", fullName: "Alice A", relation: "owner", instanceAdmin: false },
+      { _id: "u2", username: "bob", fullName: "", relation: "member", instanceAdmin: false },
+      { _id: "u4", username: "dave", fullName: "Dave D", relation: "owner", instanceAdmin: false },
+    ];
+
+    beforeEach(() => {
+      api.get.mockImplementation(async (url: string) =>
+        url.endsWith("/members") ? board : { ...project(), canAdmin: false }
+      );
+    });
+
+    it("is sent after everybody else's", async () => {
+      renderSection({ currentUserId: "u1" });
+      fireEvent.change(await screen.findByLabelText("Access for alice"), {
+        target: { value: "member" },
+      });
+      fireEvent.change(screen.getByLabelText("Access for bob"), { target: { value: "none" } });
+      await waitFor(() => expect(accessGroup()?.count).toBe(2));
+
+      await save();
+
+      expect(api.del).toHaveBeenCalledWith("/api/projects/p1/members?userId=u2");
+      expect(api.del.mock.invocationCallOrder[0]).toBeLessThan(api.put.mock.invocationCallOrder[0]);
+      expect(api.put).toHaveBeenCalledWith("/api/projects/p1/members", {
+        userId: "u1",
+        relation: "member",
+      });
+    });
+
+    it("once stepped down, re-reads the board rather than the owners' members list", async () => {
+      renderSection({ currentUserId: "u1" });
+      fireEvent.change(await screen.findByLabelText("Access for alice"), {
+        target: { value: "member" },
+      });
+
+      await save();
+
+      expect(api.get).toHaveBeenLastCalledWith("/api/projects/p1");
+      expect(replaceProject).toHaveBeenCalledWith(expect.objectContaining({ canAdmin: false }));
+      expect(toast).not.toHaveBeenCalledWith(LIST_REFRESH_FAILED, "error");
+    });
+
+    it("once removed, leaves the board", async () => {
+      renderSection({ currentUserId: "u1" });
+      fireEvent.change(await screen.findByLabelText("Access for alice"), {
+        target: { value: "none" },
+      });
+
+      await save();
+
+      expect(routerReplace).toHaveBeenCalledWith("/projects");
+    });
+
+    // An instance admin keeps the board whatever their own grant says
+    it("keeps an instance admin where they are", async () => {
+      renderSection({ currentUserId: "u1", isAdmin: true });
+      fireEvent.change(await screen.findByLabelText("Access for alice"), {
+        target: { value: "none" },
+      });
+
+      await save();
+
+      expect(routerReplace).not.toHaveBeenCalled();
+      expect(api.get).toHaveBeenLastCalledWith("/api/projects/p1/members");
+    });
+  });
+
+  it("holds every access control still while a save is in flight", async () => {
+    let answer: (value: unknown) => void = () => {};
+    api.put.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    renderSection();
+    const select = (await screen.findByLabelText("Access for bob")) as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "owner" } });
+    await waitFor(() => expect(accessGroup()?.count).toBe(1));
+
+    let saving: Promise<void> = Promise.resolve();
+    act(() => {
+      saving = accessGroup().save();
+    });
+
+    await waitFor(() => expect(select.disabled).toBe(true));
+    expect((screen.getByLabelText("Add person") as HTMLInputElement).disabled).toBe(true);
+
+    await act(async () => {
+      answer({ ok: true });
+      await saving;
+    });
+    expect(select.disabled).toBe(false);
+  });
+
   it("keeps a refused change pending while the others land", async () => {
     api.put.mockImplementation(async (_url: string, body: { userId: string }) => {
       if (body.userId === "u1") throw new Error("A board must keep at least one owner");
@@ -398,6 +498,26 @@ describe("GeneralSection add person", () => {
 
     expect(api.put).toHaveBeenCalled();
     expect(api.del).not.toHaveBeenCalled();
+  });
+
+  it("offers nobody already on the list or already waiting to be added", async () => {
+    mockCandidates([
+      { _id: "u3", username: "carol", fullName: "Carol C" },
+      { _id: "u9", username: "dee", fullName: "Dee D" },
+    ]);
+    renderSection();
+    const input = await screen.findByLabelText("Add person");
+
+    fireEvent.change(input, { target: { value: "ee" } });
+    // The control: somebody who is neither is still offered
+    expect(await screen.findByRole("button", { name: "Dee D" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Carol C" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Dee D" }));
+    await screen.findByLabelText("Access for dee");
+    fireEvent.change(input, { target: { value: "ee" } });
+
+    expect(await screen.findByText("No matches")).toBeTruthy();
   });
 
   it("drops somebody added but not yet saved on Discard", async () => {

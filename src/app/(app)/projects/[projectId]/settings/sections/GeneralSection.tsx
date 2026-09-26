@@ -21,9 +21,11 @@ const MIN_QUERY = 2;
 
 type Access = GrantRelation | "none";
 
-// Grants before removals, so handing ownership over and stepping down in one save never leaves the
-// board without an owner in between — the server refuses that step
+// Grants before removals, so handing ownership over never leaves the board without an owner in
+// between — the server refuses that step. The reader's own change goes after all of them: once it
+// lands they may own the board no more, and everything sent after it would be refused.
 const APPLY_ORDER: Record<Access, number> = { owner: 0, member: 1, none: 2 };
+const OWN_CHANGE = 3;
 
 function withAccessApplied(
   rows: ApiProjectMember[],
@@ -38,7 +40,14 @@ function withAccessApplied(
   return newcomer ? [...rows, { ...newcomer, relation, instanceAdmin: false }] : rows;
 }
 
-export function GeneralSection({ projectId, project, replaceProject, stats }: SectionProps) {
+export function GeneralSection({
+  projectId,
+  project,
+  replaceProject,
+  isAdmin,
+  currentUserId,
+  stats,
+}: SectionProps) {
   const api = useApi();
   const router = useRouter();
   const { toast } = useToast();
@@ -110,6 +119,7 @@ export function GeneralSection({ projectId, project, replaceProject, stats }: Se
   // Only what differs from the list on screen: staged like the rest of the page (BP-741)
   const [accessEdits, setAccessEdits] = useState<Record<string, Access>>({});
   const [newcomers, setNewcomers] = useState<Record<string, ApiMemberCandidate>>({});
+  const [savingAccess, setSavingAccess] = useState(false);
 
   function chooseAccess(userId: string, relation: Access) {
     const current = members.find((m) => m._id === userId)?.relation ?? "none";
@@ -134,38 +144,61 @@ export function GeneralSection({ projectId, project, replaceProject, stats }: Se
   }
 
   async function saveAccess() {
-    const sent = Object.entries(accessEdits).sort(
-      ([, a], [, b]) => APPLY_ORDER[a] - APPLY_ORDER[b]
-    );
+    const order = (userId: string, relation: Access) =>
+      userId === currentUserId ? OWN_CHANGE : APPLY_ORDER[relation];
+    const sent = Object.entries(accessEdits).sort(([a, ra], [b, rb]) => order(a, ra) - order(b, rb));
     const refused: string[] = [];
     let landed = 0;
+    let ownLanded: Access | null = null;
 
-    for (const [userId, relation] of sent) {
-      try {
-        if (relation === "none") {
-          await api.del(`/api/projects/${projectId}/members?userId=${userId}`);
-        } else {
-          await api.put(`/api/projects/${projectId}/members`, { userId, relation });
+    setSavingAccess(true);
+    try {
+      for (const [userId, relation] of sent) {
+        try {
+          if (relation === "none") {
+            await api.del(`/api/projects/${projectId}/members?userId=${userId}`);
+          } else {
+            await api.put(`/api/projects/${projectId}/members`, { userId, relation });
+          }
+        } catch (err) {
+          refused.push(
+            `${nameOf(userId)}: ${err instanceof Error ? err.message : "Failed to update access"}`
+          );
+          continue;
         }
-      } catch (err) {
-        refused.push(`${nameOf(userId)}: ${err instanceof Error ? err.message : "Failed to update access"}`);
-        continue;
+        landed++;
+        if (userId === currentUserId) ownLanded = relation;
+        setAccessEdits((prev) => {
+          if (prev[userId] !== relation) return prev;
+          const next = { ...prev };
+          delete next[userId];
+          return next;
+        });
+        // The row carries what the server did even if the re-read below fails. A revocation drops
+        // it: `GET …/members` never returns a non-admin holding no relation (BP-592)
+        setMembers((prev) => withAccessApplied(prev, userId, relation, newcomers[userId]));
       }
-      landed++;
-      setAccessEdits((prev) => {
-        if (prev[userId] !== relation) return prev;
-        const next = { ...prev };
-        delete next[userId];
-        return next;
-      });
-      // The row carries what the server did even if the re-read below fails. A revocation drops
-      // it: `GET …/members` never returns a non-admin holding no relation (BP-592)
-      setMembers((prev) => withAccessApplied(prev, userId, relation, newcomers[userId]));
+    } finally {
+      setSavingAccess(false);
     }
 
     if (refused.length > 0) toast(refused.join(" · "), "error");
     if (landed === 0) return;
     if (refused.length === 0) toast("Access updated", "success");
+
+    // Stepping down changes what this page may show, and the members list is an owner's to read
+    if (ownLanded && !isAdmin) {
+      if (ownLanded === "none") {
+        router.replace("/projects");
+        return;
+      }
+      try {
+        replaceProject(await api.get(`/api/projects/${projectId}`));
+      } catch {
+        toast(LIST_REFRESH_FAILED, "error");
+      }
+      return;
+    }
 
     // Its own failure is not the write's: the access change landed (BP-583)
     try {
@@ -181,8 +214,14 @@ export function GeneralSection({ projectId, project, replaceProject, stats }: Se
       section: "general",
       label: "General · Access",
       count: Object.keys(accessEdits).length,
+      saveLast: true,
     },
     { save: saveAccess, discard: () => setAccessEdits({}) }
+  );
+
+  // Somebody already listed — an instance admin among them — or already pending has nothing to add
+  const offered = candidates.filter(
+    (c) => !members.some((m) => m._id === c._id) && !(c._id in accessEdits)
   );
 
   const pendingNewcomers = Object.keys(accessEdits)
@@ -247,13 +286,14 @@ export function GeneralSection({ projectId, project, replaceProject, stats }: Se
               onChange={(e) => setCandidateQuery(e.target.value)}
               placeholder="Add a person by username or name…"
               aria-label="Add person"
+              disabled={savingAccess}
             />
             {trimmedCandidateQuery.length >= MIN_QUERY && (
               <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-lg border border-border bg-bg-card shadow-lg">
-                {candidates.length === 0 ? (
+                {offered.length === 0 ? (
                   <p className="px-3 py-2 text-sm text-text-muted">No matches</p>
                 ) : (
-                  candidates.map((c) => (
+                  offered.map((c) => (
                     <button
                       key={c._id}
                       type="button"
@@ -277,6 +317,7 @@ export function GeneralSection({ projectId, project, replaceProject, stats }: Se
                 ) : (
                   <select
                     value={accessEdits[m._id] ?? m.relation ?? "none"}
+                    disabled={savingAccess}
                     onChange={(e) => chooseAccess(m._id, e.target.value as Access)}
                     className={`focus-ring rounded-lg border bg-bg-input min-h-11 px-2 py-1.5 text-sm sm:min-h-0 ${
                       m._id in accessEdits ? "border-warning/60" : "border-border"

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, cleanup, fireEvent, screen } from "@testing-library/react";
+import { render, cleanup, fireEvent, screen, act } from "@testing-library/react";
 import { SaveBar } from "./SaveBar";
 
 /**
@@ -74,6 +74,24 @@ describe("SaveBar once it has closed", () => {
     fireEvent.transitionEnd(screen.getByRole("button", { name: "Discard", hidden: true }));
 
     expect(summary()).toContain("1 unsaved change");
+  });
+
+  // A close that runs no transition fires no transitionend, and the summary must go all the same
+  it("drops the summary even when no transition tells it the slide has ended", () => {
+    vi.useFakeTimers();
+    try {
+      const { rerender } = render(<SaveBar pending={[group]} total={1} onGoToSection={vi.fn()} />);
+      rerender(<SaveBar pending={[]} total={0} onGoToSection={vi.fn()} />);
+      expect(summary()).toContain("1 unsaved change");
+
+      act(() => {
+        vi.advanceTimersByTime(400);
+      });
+
+      expect(summary()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shows the new summary when something is changed again after it slid away", () => {

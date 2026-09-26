@@ -1,10 +1,13 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import { saveAllGroups } from "@/lib/save-groups";
 import { DirtyGroup } from "./settings-context";
+
+// The slide's duration-200, twice over: the fallback for a close that runs no transition at all
+const SLID_AWAY_AFTER_MS = 400;
 
 interface SaveBarProps {
   pending: DirtyGroup[];
@@ -33,6 +36,12 @@ export function SaveBar({ pending, total, onGoToSection }: SaveBarProps) {
   // The held summary is for the slide only: clipped to nothing, it still reads as pending work (BP-738)
   const [slidAway, setSlidAway] = useState(!open);
   if (open && slidAway) setSlidAway(false);
+
+  useEffect(() => {
+    if (open || slidAway) return;
+    const timer = setTimeout(() => setSlidAway(true), SLID_AWAY_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, [open, slidAway]);
 
   async function saveAll() {
     setSaving(true);

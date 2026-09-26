@@ -64,8 +64,8 @@ export function AuditSection({ projectId, active }: { projectId: string; active:
       ) : (
         // A table, so the columns line up across rows: separate flex rows each sized
         // themselves, which is why "settings updated" wrapped in one row and not the next.
-        // Four columns need width the phone has not got — three of them nowrap, and the one
-        // that carries the change truncates to nothing — so below sm each entry is a block.
+        // Four columns need width the phone has not got — three of them nowrap, which leaves the
+        // one that carries the change a sliver — so below sm each entry is a block.
         <div className="max-h-[420px] overflow-y-auto">
           <table className="w-full text-xs">
             <tbody>
