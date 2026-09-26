@@ -643,4 +643,39 @@ describe("GeneralSection members read", () => {
 
     expect(screen.getByLabelText("Access for alice")).toHaveProperty("value", "member");
   });
+
+  // Review: a slow first read landing between two writes of one save put the list back to before
+  // the first, and with the re-read failing it stayed that way
+  it("keeps a change that landed after the first read went out, even when the re-read fails", async () => {
+    const first = held();
+    api.get.mockReset();
+    api.get.mockImplementation((url: string) => {
+      if (url.includes("/members/candidates")) {
+        return Promise.resolve([
+          { _id: "u8", username: "dee", fullName: "Dee D" },
+          { _id: "u9", username: "eve", fullName: "Eve E" },
+        ]);
+      }
+      return api.get.mock.calls.filter(([u]) => !String(u).includes("candidates")).length === 1
+        ? first.promise
+        : Promise.reject(new Error("offline"));
+    });
+    api.put.mockImplementation(async (_url: string, body: { userId: string }) => {
+      // The first read answers between the two grants: after Dee's landed, before Eve's
+      if (body.userId === "u9") await act(async () => first.resolve(members));
+      return { ok: true };
+    });
+    renderSection();
+    const input = await screen.findByLabelText("Add person");
+    for (const name of ["Dee D", "Eve E"]) {
+      fireEvent.change(input, { target: { value: name.slice(0, 3).toLowerCase() } });
+      fireEvent.click(await screen.findByRole("button", { name }));
+    }
+
+    await save();
+
+    expect(screen.getByLabelText("Access for dee")).toHaveProperty("value", "member");
+    expect(screen.getByLabelText("Access for eve")).toHaveProperty("value", "member");
+    expect(toast).toHaveBeenCalledWith(LIST_REFRESH_FAILED, "error");
+  });
 });

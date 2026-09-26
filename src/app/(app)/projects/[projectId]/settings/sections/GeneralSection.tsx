@@ -184,7 +184,9 @@ export function GeneralSection({
           return next;
         });
         // The row carries what the server did even if the re-read below fails. A revocation drops
-        // it: `GET …/members` never returns a non-admin holding no relation (BP-592)
+        // it: `GET …/members` never returns a non-admin holding no relation (BP-592). A read
+        // already out when this lands is older than it, so its answer no longer applies (BP-784)
+        latestMembersRead.current++;
         setMembers((prev) => withAccessApplied(prev, userId, relation, newcomers[userId]));
       }
     } finally {
