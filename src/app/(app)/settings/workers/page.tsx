@@ -113,7 +113,7 @@ function PreflightCell({ preflight }: { preflight: ApiWorkerPreflight | null }) 
     // `preflight.ok` is untouched by a warning, so the machine is not permanently red and nobody
     // learns to read past it. The row still opens with `ready`, because it is — and the check's
     // name follows it in amber. The sentence itself is on the full-width line under the worker
-    // (`PreflightWarning`): this cell is one truncated column in a table that scrolls sideways,
+    // (`MachineLines`): this cell is one truncated column in a table that scrolls sideways,
     // and measured at 1280×720 it starts past the right edge of the viewport — so a warning that
     // lived only here would be one nobody reads (BP-606).
     return (
@@ -135,13 +135,6 @@ function PreflightCell({ preflight }: { preflight: ApiWorkerPreflight | null }) 
   );
 }
 
-/**
- * The cost a passing check carries, on the full-width line under the worker.
- *
- * Where it can be read: the Preflight column is the eighth of ten in a table that scrolls
- * sideways, and an instance admin who never scrolls it would have met this machine as `ready`.
- * Nothing is duplicated — the cell names the check, this says what it means (BP-606).
- */
 /**
  * A machine's state, as a word. Quiet by default because "on" and "unlocked" are the ordinary
  * case and a table of ordinary rows should not be a wall of filled buttons; colour arrives only
@@ -214,10 +207,24 @@ function CommandIcon({
   );
 }
 
-function PreflightWarning({ preflight }: { preflight: ApiWorkerPreflight | null }) {
-  const warned = (preflight?.checks ?? []).filter((c) => c.ok && c.warn);
-  if (warned.length === 0) return null;
-
+/**
+ * What the two rightmost cells hold, on full-width lines under the worker: a check that failed, the
+ * binding error, and the cost a passing check carries. The Preflight and Binding error columns are
+ * the last two of ten in a table that scrolls sideways, and an instance admin who never scrolls it
+ * would have met a failing machine as a clean row (BP-606, BP-689). The cells stay; these say
+ * what they mean.
+ */
+function RowLine({
+  testId,
+  tone,
+  label,
+  text,
+}: {
+  testId: string;
+  tone: "danger" | "warning";
+  label: string;
+  text: string;
+}) {
   return (
     // Wrapped at a reading width, and never wider than the viewport: this sits in a `colSpan`
     // cell, so its own 100% is the TABLE's width — wider than the screen — and the sentence ran
@@ -228,14 +235,42 @@ function PreflightWarning({ preflight }: { preflight: ApiWorkerPreflight | null 
     // edge is the TABLE's, so scrolling right to reach the Preflight column — the very act the
     // move was made for — used to carry the sentence off the left instead (found in review).
     <div
-      className="sticky left-3 mb-1.5 max-w-[min(40rem,calc(100vw-4rem))] whitespace-normal break-words text-xs text-warning"
-      data-testid="preflight-warning"
+      className={`sticky left-3 mb-1.5 max-w-[min(40rem,calc(100vw-4rem))] whitespace-normal break-words text-xs ${
+        tone === "danger" ? "text-danger" : "text-warning"
+      }`}
+      data-testid={testId}
     >
-      {/* The amber is the second signal. Without the word this line is a warning only to somebody
-          who can tell it from the muted grey three lines up. */}
-      <span className="font-medium">Warning:</span>{" "}
-      {warned.map((c) => `${c.name} — ${c.detail}`).join(" · ")}
+      {/* The colour is the second signal. Without the word this line reads as one more detail to
+          somebody who cannot tell it from the muted grey three lines up. */}
+      <span className="font-medium">{label}</span> {text}
     </div>
+  );
+}
+
+function MachineLines({
+  preflight,
+  bindingError,
+}: {
+  preflight: ApiWorkerPreflight | null;
+  bindingError: string;
+}) {
+  const checks = preflight?.checks ?? [];
+  const failed = checks.filter((c) => !c.ok);
+  const warned = checks.filter((c) => c.ok && c.warn);
+  const describe = (list: typeof checks) => list.map((c) => `${c.name} — ${c.detail}`).join(" · ");
+
+  return (
+    <>
+      {failed.length > 0 && (
+        <RowLine testId="preflight-failure" tone="danger" label="Failed:" text={describe(failed)} />
+      )}
+      {bindingError && (
+        <RowLine testId="binding-error-line" tone="danger" label="Binding error:" text={bindingError} />
+      )}
+      {warned.length > 0 && (
+        <RowLine testId="preflight-warning" tone="warning" label="Warning:" text={describe(warned)} />
+      )}
+    </>
   );
 }
 
@@ -544,14 +579,14 @@ export default function AdminWorkersPage() {
                       </div>
                     </td>
                   </tr>,
-                  // colSpan over every column, the pinned one included: `PreflightWarning` below
+                  // colSpan over every column, the pinned one included: `MachineLines` below
                   // holds itself at the scroller's left edge with `sticky left-3`, and sticky is
                   // clamped to its containing block — so a cell one column short carries the
                   // sentence off the left exactly as BP-606 found it. The pinned column's edge
                   // therefore stops at this row rather than running through it.
                   <tr key={`${worker._id}-policy`} className="border-b border-border last:border-b-0">
                     <td colSpan={10} className="px-3 pb-3 pt-0">
-                      <PreflightWarning preflight={worker.preflight} />
+                      <MachineLines preflight={worker.preflight} bindingError={worker.bindingError} />
                       <div className="flex flex-wrap gap-1.5">
                         {workerPolicyRows(worker as never).map((row) => (
                           <span

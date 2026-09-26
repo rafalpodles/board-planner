@@ -317,7 +317,8 @@ describe("a check that passed at a cost", () => {
 
     render(<WorkersPage />);
 
-    expect(await screen.findByText(/there is no sandbox here/)).toBeTruthy();
+    // Said twice since BP-689, in the cell and on the line under the row
+    expect((await screen.findAllByText(/there is no sandbox here/)).length).toBe(2);
     expect(screen.queryByTestId("preflight-warning")).toBeNull();
   });
 
@@ -339,8 +340,81 @@ describe("a check that passed at a cost", () => {
 
     render(<WorkersPage />);
 
-    expect(await screen.findByText(/there is no sandbox here/)).toBeTruthy();
+    // Said twice since BP-689, in the cell and on the line under the row
+    expect((await screen.findAllByText(/there is no sandbox here/)).length).toBe(2);
     expect(screen.queryByTestId("preflight-warning")).toBeNull();
     expect(screen.queryByText(/^ready/)).toBeNull();
+  });
+});
+
+/**
+ * BP-689. A check that FAILED, and the binding error, were each said in one place only: the two
+ * rightmost of ten columns, behind the pinned controls at 1440 and off the edge at 1280.
+ */
+describe("what the rightmost columns hold, said under the row", () => {
+  const report = (checks: { name: string; ok: boolean; warn?: boolean; detail: string }[]) => ({
+    ok: checks.every((c) => c.ok),
+    account: "owner",
+    checks,
+    reportedAt: new Date().toISOString(),
+  });
+  const FAILED = { name: "gh", ok: false, detail: "not signed in: run gh auth login" };
+  const WARNED = { name: "sandbox", ok: true, warn: true, detail: "CP_ALLOW_UNCONFINED_AGENT is set" };
+  const BINDING = "68b1000000000000000000a1: /private/tmp/bp is under the sensitive directory /private/tmp";
+
+  function spansTheTable(line: HTMLElement) {
+    return line.closest("td")?.colSpan === 10;
+  }
+
+  it("says a failed check on its own red line, where no sideways scroll is needed", async () => {
+    api.get.mockResolvedValue([worker({ preflight: report([FAILED]) })]);
+
+    render(<WorkersPage />);
+
+    const line = await screen.findByTestId("preflight-failure");
+    expect(line.textContent).toBe("Failed: gh — not signed in: run gh auth login");
+    expect(line.className).toContain("text-danger");
+    expect(spansTheTable(line)).toBe(true);
+    expect(screen.queryByTestId("binding-error-line")).toBeNull();
+  });
+
+  it("says the binding error on its own red line", async () => {
+    api.get.mockResolvedValue([worker({ preflight: report([]), bindingError: BINDING })]);
+
+    render(<WorkersPage />);
+
+    const line = await screen.findByTestId("binding-error-line");
+    expect(line.textContent).toBe(`Binding error: ${BINDING}`);
+    expect(line.className).toContain("text-danger");
+    expect(spansTheTable(line)).toBe(true);
+    expect(screen.queryByTestId("preflight-failure")).toBeNull();
+  });
+
+  it("says a failure, a binding error and a warning together, each on its own line and the warning still amber", async () => {
+    api.get.mockResolvedValue([
+      worker({ preflight: report([FAILED, WARNED]), bindingError: BINDING }),
+    ]);
+
+    render(<WorkersPage />);
+
+    expect((await screen.findByTestId("preflight-failure")).textContent).toContain("gh — not signed in");
+    expect(screen.getByTestId("binding-error-line").textContent).toContain("/private/tmp/bp");
+    const warning = screen.getByTestId("preflight-warning");
+    expect(warning.textContent).toBe("Warning: sandbox — CP_ALLOW_UNCONFINED_AGENT is set");
+    expect(warning.className).toContain("text-warning");
+    expect(warning.textContent).not.toContain("gh");
+  });
+
+  it("says nothing under a machine that passed and binds", async () => {
+    api.get.mockResolvedValue([
+      worker({ preflight: report([{ name: "gh", ok: true, detail: "owner" }]), bindingError: "" }),
+    ]);
+
+    render(<WorkersPage />);
+
+    expect(await screen.findByText(/^ready/)).toBeTruthy();
+    expect(screen.queryByTestId("preflight-failure")).toBeNull();
+    expect(screen.queryByTestId("binding-error-line")).toBeNull();
+    expect(screen.queryByTestId("preflight-warning")).toBeNull();
   });
 });
