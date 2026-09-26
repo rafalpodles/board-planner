@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useApi } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/Toast";
 import {
@@ -67,6 +67,11 @@ export function TaskFieldsSection({
   );
   const [creatingEstimateField, setCreatingEstimateField] = useState(false);
   const estimate = useDraft({ fieldId: project.estimateFieldId ?? "" });
+  // Read after an await, where the render's own copy may be older than what has been saved since
+  const savedEstimate = useRef(estimate.baseline.fieldId);
+  useEffect(() => {
+    savedEstimate.current = estimate.baseline.fieldId;
+  });
 
   // Explicit, because a row added here has no _id until it is saved
   const categories = useDraft<{ categories: CategoryDraft[] }>({
@@ -232,11 +237,12 @@ export function TaskFieldsSection({
     },
   );
 
-  // The server clears the saved designation with the field; an unsaved choice of it goes too
+  // An unsaved choice of a removed field falls back to the saved one: None would un-designate it
   function forgetEstimateField(fieldId: string) {
+    const saved = savedEstimate.current === fieldId ? "" : savedEstimate.current;
     patchProject((p) => (p.estimateFieldId === fieldId ? { estimateFieldId: "" } : {}));
     estimate.rebase((prev) => (prev.fieldId === fieldId ? { fieldId: "" } : prev));
-    estimate.setValue((prev) => (prev.fieldId === fieldId ? { fieldId: "" } : prev));
+    estimate.setValue((prev) => (prev.fieldId === fieldId ? { fieldId: saved } : prev));
   }
 
   // Throws rather than toasting: the form stays open on failure and shows the reason
