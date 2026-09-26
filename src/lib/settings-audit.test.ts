@@ -149,6 +149,15 @@ describe("describeSettingsChanges", () => {
 
     // The overrides list a save sends was computed from an earlier read: a pin another save made in
     // between is dropped by it, and the field goes back to its default without having been named
+    it("records a branch that differs only past where the row shortens it", () => {
+      const head = `release/${"x".repeat(90)}`;
+      const before = { worker: { policy: { baseBranch: `${head}-a` }, policyOverrides: ["baseBranch"] } };
+
+      expect(changes(before, { "worker.policy.baseBranch": `${head}-b` })).toEqual([
+        "Base branch changed",
+      ]);
+    });
+
     it("records a pin a save dropped without naming its field", () => {
       const before = { worker: { policy: { baseBranch: "develop" }, policyOverrides: ["baseBranch"] } };
 
@@ -277,6 +286,14 @@ describe("describeSettingsChanges", () => {
           { pm: { ...pm, contextNotes: "New notes", mcpServers: [reordered] } }
         )
       ).toEqual(["PM project context: none → New notes"]);
+    });
+
+    it("records a link moved to another page of the same site", () => {
+      const moved = { ...pm, links: [{ label: "Docs", url: "https://docs.example/new-page" }] };
+
+      expect(
+        changes({ pm: { ...pm, links: [{ label: "Docs", url: "https://docs.example/old-page" }] } }, { pm: moved })
+      ).toEqual(["PM links changed"]);
     });
 
     it("names links by label and address", () => {

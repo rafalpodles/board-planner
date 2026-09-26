@@ -184,12 +184,20 @@ function policyChanges(before: Stored, after: Stored): string[] {
   // drop a pin, and that changes what a worker runs just the same
   for (const field of Object.keys(PROJECT_POLICY_DEFAULTS) as ProjectPolicyField[]) {
     const resolved = (doc: Stored, pins: Set<string>) =>
-      pins.has(field)
-        ? auditValue(at(doc, `worker.policy.${field}`))
-        : `${auditValue(PROJECT_POLICY_DEFAULTS[field])} (default)`;
+      pins.has(field) ? at(doc, `worker.policy.${field}`) : PROJECT_POLICY_DEFAULTS[field];
     const was = resolved(before, pinnedBefore);
     const is = resolved(after, pinnedAfter);
-    if (was !== is) lines.push(`${POLICY_FIELD_LABELS[field]}: ${was} → ${is}`);
+    if (same(was, is) && pinnedBefore.has(field) === pinnedAfter.has(field)) continue;
+
+    const shown = (value: unknown, pinned: boolean) =>
+      pinned ? auditValue(value) : `${auditValue(value)} (default)`;
+    const wasText = shown(was, pinnedBefore.has(field));
+    const isText = shown(is, pinnedAfter.has(field));
+    lines.push(
+      wasText === isText
+        ? `${POLICY_FIELD_LABELS[field]} changed`
+        : `${POLICY_FIELD_LABELS[field]}: ${wasText} → ${isText}`
+    );
   }
   return lines;
 }
@@ -251,12 +259,14 @@ function mcpChanges(before: unknown, after: unknown): string[] {
   return lines;
 }
 
-function linkList(value: unknown): string[] {
+// Compared whole, shown masked: two addresses on one host read the same once masked
+function links(value: unknown): { label?: string; url?: string }[] {
   if (!Array.isArray(value)) return [];
-  return (value as { label?: string; url?: string }[]).map(
-    (l) => `${auditValue(l.label)} (${capabilityUrl(l.url)})`
-  );
+  return (value as { label?: string; url?: string }[]).map((l) => ({ label: l.label, url: l.url }));
 }
+
+const shownLinks = (value: unknown) =>
+  auditValue(links(value).map((l) => `${auditValue(l.label)} (${capabilityUrl(l.url)})`));
 
 function pmChanges(before: Stored, after: Stored): string[] {
   const lines = PM_FIELDS.map((field) => {
@@ -264,7 +274,7 @@ function pmChanges(before: Stored, after: Stored): string[] {
     return auditChange(LABELS[key], stored(before, key), stored(after, key), SHOWN_AS[key]);
   });
   lines.push(
-    auditChange("PM links", linkList(at(before, "pm.links")), linkList(at(after, "pm.links")))
+    auditChange("PM links", links(at(before, "pm.links")), links(at(after, "pm.links")), shownLinks)
   );
   return [
     ...lines.filter((line): line is string => line !== null),
