@@ -22,6 +22,11 @@ function placeholdersNamedInTheComment(plist: string): string[] {
   return [...comment.matchAll(/^\s+([A-Z][A-Z_]+)\s{2,}\S/gm)].map((m) => m[1]).sort();
 }
 
+function placeholdersLeftIn(plist: string): string[] {
+  const values = [...plist.matchAll(/<string>([^<]*)<\/string>/g)].map((m) => m[1]).join("\n");
+  return [...new Set(values.match(/\b[A-Z][A-Z0-9_]+\b/g) ?? [])].sort();
+}
+
 function placeholdersTheReadmeFills(): string[] {
   const readme = readFileSync(README, "utf8");
   const install = /```bash\n(sed [\s\S]*?launchd\/com\.boardplanner\.worker\.plist)/.exec(readme)?.[1] ?? "";
@@ -43,13 +48,14 @@ describe("the launchd plist the worker ships with", () => {
   it("names in its comment every placeholder the README's install line fills, and no other", () => {
     expect(placeholdersNamedInTheComment(shipped())).toEqual(["BOARD_URL", "HOME_DIR", "MACHINE_NAME", "REPO_DIR"]);
     expect(placeholdersTheReadmeFills()).toEqual(placeholdersNamedInTheComment(shipped()));
+    expect(placeholdersLeftIn(shipped())).toEqual(placeholdersTheReadmeFills());
   });
 
   it("filled in the README's way, starts a worker for that board under that name, with nothing left to fill", () => {
     const plist = filledIn(shipped(), MACHINE);
     const bootstrap = loadBootstrap(environmentOf(plist), () => "cpe_minted");
 
-    for (const name of Object.keys(MACHINE)) expect(plist).not.toContain(name);
+    expect(placeholdersLeftIn(plist)).toEqual([]);
     expect(bootstrap.apiBaseUrl).toBe("https://board.example.com");
     expect(bootstrap.workerName).toBe("op-mac");
     expect(bootstrap.enrolmentTokenFile).toBe("/Users/op/.boardplanner/token");
