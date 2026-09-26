@@ -121,8 +121,18 @@ function blank(value: unknown): boolean {
   );
 }
 
+// Key order is no change: a stored document keeps the order it was written in, a document built
+// by the schema has the schema's
+function canonical(value: unknown): string {
+  return JSON.stringify(value ?? null, (_key, v) =>
+    v && typeof v === "object" && !Array.isArray(v)
+      ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b)))
+      : v
+  );
+}
+
 function same(a: unknown, b: unknown): boolean {
-  return (blank(a) && blank(b)) || JSON.stringify(a) === JSON.stringify(b);
+  return (blank(a) && blank(b)) || canonical(a) === canonical(b);
 }
 
 function stored(doc: unknown, key: string): unknown {
@@ -189,7 +199,7 @@ interface McpServer {
 
 // Replacing the list gives every server a fresh _id, stored as well, so an id is no change
 function withoutIds(value: unknown): unknown {
-  return JSON.parse(JSON.stringify(value ?? null, (key, v) => (key === "_id" ? undefined : v)));
+  return JSON.parse(canonical(value), (key, v) => (key === "_id" ? undefined : v));
 }
 
 function mcpChanges(before: unknown, after: unknown): string[] {

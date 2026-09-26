@@ -20,8 +20,8 @@ export async function logProjectAudit(
   action: ProjectAuditAction,
   detail?: string | string[]
 ): Promise<void> {
-  const lines = (Array.isArray(detail) ? detail : [detail ?? ""]).map(oneLine).filter(Boolean);
   try {
+    const lines = (Array.isArray(detail) ? detail : [detail ?? ""]).map(oneLine).filter(Boolean);
     await ProjectAuditLog.create({
       project: projectId,
       user: userId,

@@ -257,6 +257,28 @@ describe("describeSettingsChanges", () => {
       ]);
     });
 
+    // A server stored before a field of it existed keeps its keys in the order it was written in,
+    // while the save rebuilds it in the schema's: that is no change to the server
+    it("says nothing of a server whose fields only come back in another order", () => {
+      const connected = {
+        ...github,
+        authType: "oauth",
+        oauth: { tokenEndpoint: "https://a/token", status: "connected", clientId: "c1" },
+      };
+      const reordered = {
+        ...github,
+        authType: "oauth",
+        oauth: { clientId: "c1", status: "connected", tokenEndpoint: "https://a/token" },
+      };
+
+      expect(
+        changes(
+          { pm: { ...pm, mcpServers: [connected] } },
+          { pm: { ...pm, contextNotes: "New notes", mcpServers: [reordered] } }
+        )
+      ).toEqual(["PM project context: none → New notes"]);
+    });
+
     it("names links by label and address", () => {
       expect(changes({ pm }, { pm: { ...pm, links: [] } })).toEqual([
         "PM links: Docs (https://docs.example/••••) → none",

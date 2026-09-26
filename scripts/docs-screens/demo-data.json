@@ -3005,6 +3005,10 @@
         },
         "action": "settings_updated",
         "detail": "PM scheduled review: off → on\nPM reviews \"Needs human review\": off → on",
+        "lines": [
+          "PM scheduled review: off → on",
+          "PM reviews \"Needs human review\": off → on"
+        ],
         "createdAt": {
           "$date": "2026-07-30T21:25:00Z"
         }

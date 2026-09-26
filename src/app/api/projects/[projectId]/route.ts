@@ -102,6 +102,10 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     }
   }
 
+  // null has always cleared a field through the API; the name alone cannot be cleared
+  for (const field of Object.keys(updates)) {
+    if (updates[field] === null && field !== "name") updates[field] = "";
+  }
   // Mongoose would cast an object to the string it carries, and the token branch below encrypts only
   // what is already a string — so an object here was stored in the clear
   const notText = Object.keys(updates).find((field) => typeof updates[field] !== "string");
