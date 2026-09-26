@@ -5,6 +5,8 @@ import { check } from "@/lib/grants";
 import { Agent } from "@/models/agent";
 import { Project } from "@/models/project";
 import { isRunnable, normaliseComposition } from "@/lib/agent-rules";
+import { logProjectAudit } from "@/lib/projectAudit";
+import { auditValue } from "@/lib/settings-audit";
 
 // Its own route rather than a field on the worker policy: policy travels in the assignment payload
 // and this does not. Since BP-358 it does
@@ -31,11 +33,11 @@ export const PUT = withProjectAccess(async (request, { params, user }) => {
   // The empty string, and only that, clears it. A default that could be set and never unset left
   // a project stuck with a suggestion it had outgrown, and the picker with no way back (BP-458).
   if (!agentId) {
-    await Project.updateOne({ _id: projectId }, { $set: { "worker.agent": null } });
+    await setDefaultAgent(projectId, null, String(user._id));
     return NextResponse.json({ ok: true });
   }
 
-  const agent = await Agent.findById(agentId, "scope project composition").lean();
+  const agent = await Agent.findById(agentId, "name scope project composition").lean();
   if (!agent) return NextResponse.json({ error: "No such agent" }, { status: 404 });
   if (agent.scope === "project" && String(agent.project) !== String(projectId)) {
     return NextResponse.json({ error: "That agent belongs to another project" }, { status: 400 });
@@ -54,6 +56,35 @@ export const PUT = withProjectAccess(async (request, { params, user }) => {
     );
   }
 
-  await Project.updateOne({ _id: projectId }, { $set: { "worker.agent": agentId } });
+  await setDefaultAgent(projectId, { id: agentId, name: agent.name }, String(user._id));
   return NextResponse.json({ ok: true });
 });
+
+async function setDefaultAgent(
+  projectId: string,
+  next: { id: string; name: string } | null,
+  userId: string
+): Promise<void> {
+  const before = await Project.findOneAndUpdate(
+    { _id: projectId },
+    { $set: { "worker.agent": next ? next.id : null } },
+    { returnDocument: "before", projection: { "worker.agent": 1 } }
+  ).lean();
+
+  const previousId = before?.worker?.agent ? String(before.worker.agent) : "";
+  if (!before || previousId === (next?.id.toLowerCase() ?? "")) return;
+
+  // After the write, so a failed read costs the name and never the entry or the response
+  const previous = previousId
+    ? await Agent.findById(previousId, "name")
+        .lean()
+        .catch(() => ({ name: `agent ${previousId}` }))
+    : null;
+  const was = previousId ? (previous?.name ?? "a deleted agent") : "";
+  logProjectAudit(
+    projectId,
+    userId,
+    "settings_updated",
+    `Default agent: ${auditValue(was)} → ${auditValue(next?.name)}`
+  );
+}

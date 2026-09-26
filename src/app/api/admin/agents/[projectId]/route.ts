@@ -4,6 +4,8 @@ import { connectDB } from "@/lib/db";
 import { withAdmin } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { logProjectAudit } from "@/lib/projectAudit";
+import { describeSettingsChanges } from "@/lib/settings-audit";
+import { projectWriteImages } from "@/lib/project-write-images";
 
 const MAX_MODEL_LENGTH = 100;
 
@@ -65,17 +67,39 @@ export const PATCH = withAdmin(async (request, { params, user }) => {
   }
 
   await connectDB();
-  const project = await Project.findByIdAndUpdate(projectId, { $set: updates }, {
-    returnDocument: "after",
+  const beforeImage = await Project.findByIdAndUpdate(projectId, { $set: updates }, {
+    returnDocument: "before",
   }).lean();
-  if (!project) {
+  if (!beforeImage) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
-
-  const detail = Object.entries(updates)
-    .map(([field, value]) => `${field.replace("pm.", "")}=${String(value)}`)
-    .join(", ");
-  await logProjectAudit(projectId, String(user._id), "settings_updated", `instance admin: ${detail}`);
+  let project: {
+    _id: unknown;
+    key?: string;
+    pm?: { enabled?: unknown; lockedByInstance?: unknown; model?: unknown; dailyTurnCap?: unknown };
+  } = {
+    ...beforeImage,
+    pm: {
+      ...beforeImage.pm,
+      ...Object.fromEntries(
+        Object.entries(updates).map(([key, value]) => [key.slice("pm.".length), value])
+      ),
+    },
+  };
+  let changes: string[];
+  try {
+    const images = projectWriteImages(beforeImage, updates);
+    project = images.after.toObject();
+    changes = describeSettingsChanges(images.before, project, Object.keys(updates));
+  } catch {
+    changes = [`Changed: ${Object.keys(updates).join(", ")}`];
+  }
+  if (changes.length > 0) {
+    await logProjectAudit(projectId, String(user._id), "settings_updated", [
+      "Instance admin console",
+      ...changes,
+    ]);
+  }
 
   return NextResponse.json({
     _id: String(project._id),

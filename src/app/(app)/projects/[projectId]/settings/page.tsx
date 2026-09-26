@@ -158,7 +158,7 @@ const SECTIONS: SectionMeta[] = [
 export default function ProjectSettingsPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const api = useApi();
-  const { isAdmin } = useAuth();
+  const { isAdmin, user } = useAuth();
   const { toast } = useToast();
 
   const [project, setProject] = useState<ApiProject | null>(null);
@@ -291,6 +291,7 @@ export default function ProjectSettingsPage() {
     patchProject,
     replaceProject,
     isAdmin,
+    currentUserId: user?._id,
     stats,
   };
 

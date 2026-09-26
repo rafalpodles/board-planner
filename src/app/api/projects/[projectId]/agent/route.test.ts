@@ -3,13 +3,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const getAuthUser = vi.fn();
 const check = vi.fn();
 const agentFindById = vi.fn();
-const projectUpdateOne = vi.fn();
+const projectFindOneAndUpdate = vi.fn();
+const logProjectAudit = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ getAuthUser, RateLimitError: class extends Error {} }));
 vi.mock("@/lib/grants", () => ({ check }));
 vi.mock("@/models/agent", () => ({ Agent: { findById: agentFindById } }));
-vi.mock("@/models/project", () => ({ Project: { updateOne: projectUpdateOne } }));
+vi.mock("@/models/project", () => ({ Project: { findOneAndUpdate: projectFindOneAndUpdate } }));
+vi.mock("@/lib/projectAudit", () => ({ logProjectAudit }));
 
 const { PUT } = await import("./route");
 
@@ -32,17 +34,30 @@ const RUNNABLE = { implementation: [{ key: "claude-code" }] };
 /** The agent as stored. Scope decides who may choose it; composition decides whether it can run. */
 function agent(overrides: Record<string, unknown> = {}) {
   agentFindById.mockReturnValue({
-    lean: async () => ({ scope: "global", project: null, composition: RUNNABLE, ...overrides }),
+    lean: async () => ({
+      name: "Ship it",
+      scope: "global",
+      project: null,
+      composition: RUNNABLE,
+      ...overrides,
+    }),
   });
 }
 
-const stored = () => projectUpdateOne.mock.calls[0]?.[1];
+/** The project as the write found it. */
+function previously(agentId: string | null) {
+  projectFindOneAndUpdate.mockReturnValue({
+    lean: async () => ({ _id: PROJECT_ID, worker: { agent: agentId } }),
+  });
+}
+
+const stored = () => projectFindOneAndUpdate.mock.calls[0]?.[1];
 
 beforeEach(() => {
   vi.clearAllMocks();
   getAuthUser.mockResolvedValue({ _id: "u1", role: "member" });
   check.mockResolvedValue(true);
-  projectUpdateOne.mockResolvedValue({});
+  previously(null);
   agent();
 });
 
@@ -51,7 +66,11 @@ describe("PUT /api/projects/:projectId/agent", () => {
     const res = await put({ agentId: AGENT_ID });
 
     expect(res.status).toBe(200);
-    expect(projectUpdateOne).toHaveBeenCalledWith({ _id: PROJECT_ID }, expect.anything());
+    expect(projectFindOneAndUpdate).toHaveBeenCalledWith(
+      { _id: PROJECT_ID },
+      expect.anything(),
+      expect.objectContaining({ returnDocument: "before" })
+    );
     expect(stored()).toEqual({ $set: { "worker.agent": AGENT_ID } });
   });
 
@@ -79,7 +98,94 @@ describe("PUT /api/projects/:projectId/agent", () => {
     const res = await put(body);
 
     expect(res.status).toBe(400);
-    expect(projectUpdateOne).not.toHaveBeenCalled();
+    expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  // BP-740: the one settings change the project's audit log did not carry
+  describe("the audit trail", () => {
+    const OLD_ID = "507f1f77bcf86cd799439031";
+
+    function namedAgents(names: Record<string, string>) {
+      agentFindById.mockImplementation((id: string) => ({
+        lean: async () =>
+          id === AGENT_ID
+            ? { name: names[AGENT_ID], scope: "global", project: null, composition: RUNNABLE }
+            : names[id]
+              ? { name: names[id] }
+              : null,
+      }));
+    }
+
+    it("names the agent it replaced and the one it set", async () => {
+      previously(OLD_ID);
+      namedAgents({ [AGENT_ID]: "Ship it", [OLD_ID]: "Careful" });
+
+      await put({ agentId: AGENT_ID });
+
+      expect(logProjectAudit).toHaveBeenCalledWith(
+        PROJECT_ID,
+        "u1",
+        "settings_updated",
+        "Default agent: Careful → Ship it"
+      );
+    });
+
+    it("names the agent a clear removed", async () => {
+      previously(OLD_ID);
+      namedAgents({ [OLD_ID]: "Careful" });
+
+      await put({ agentId: "" });
+
+      expect(logProjectAudit).toHaveBeenCalledWith(
+        PROJECT_ID,
+        "u1",
+        "settings_updated",
+        "Default agent: Careful → none"
+      );
+    });
+
+    it("says so when the agent it replaced no longer exists", async () => {
+      previously(OLD_ID);
+      namedAgents({ [AGENT_ID]: "Ship it" });
+
+      await put({ agentId: AGENT_ID });
+
+      expect(logProjectAudit.mock.calls[0][3]).toBe("Default agent: a deleted agent → Ship it");
+    });
+
+    it("still records the change, and answers, when the old agent's name cannot be read", async () => {
+      previously(OLD_ID);
+      agentFindById.mockImplementation((id: string) => ({
+        lean: () =>
+          id === AGENT_ID
+            ? Promise.resolve({ name: "Ship it", scope: "global", project: null, composition: RUNNABLE })
+            : Promise.reject(new Error("the read gave up")),
+      }));
+
+      const res = await put({ agentId: AGENT_ID });
+
+      expect(res.status).toBe(200);
+      expect(logProjectAudit.mock.calls[0][3]).toBe(`Default agent: agent ${OLD_ID} → Ship it`);
+    });
+
+    it("records nothing when the default already was that agent", async () => {
+      previously(AGENT_ID);
+
+      const res = await put({ agentId: AGENT_ID.toUpperCase() });
+
+      expect(res.status).toBe(200);
+      expect(logProjectAudit).not.toHaveBeenCalled();
+    });
+
+    // Two agents may share a name; what moved is the id, and the log must not drop that
+    it("records a change between two agents of the same name", async () => {
+      previously(OLD_ID);
+      namedAgents({ [AGENT_ID]: "Default", [OLD_ID]: "Default" });
+
+      await put({ agentId: AGENT_ID });
+
+      expect(logProjectAudit.mock.calls[0][3]).toBe("Default agent: Default → Default");
+    });
   });
 
   describe("which agents may be a project's default", () => {
@@ -104,7 +210,7 @@ describe("PUT /api/projects/:projectId/agent", () => {
 
       expect(res.status).toBe(400);
       expect(await res.json()).toEqual({ error: "That agent belongs to another project" });
-      expect(projectUpdateOne).not.toHaveBeenCalled();
+      expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
     });
 
     // A personal agent is its owner's, and a project default is offered to everybody on the
@@ -115,14 +221,14 @@ describe("PUT /api/projects/:projectId/agent", () => {
       const res = await put({ agentId: AGENT_ID });
 
       expect(res.status).toBe(400);
-      expect(projectUpdateOne).not.toHaveBeenCalled();
+      expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
     });
 
     it("404s for an agent that does not exist", async () => {
       agentFindById.mockReturnValue({ lean: async () => null });
 
       expect((await put({ agentId: AGENT_ID })).status).toBe(404);
-      expect(projectUpdateOne).not.toHaveBeenCalled();
+      expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
     });
 
     // Offering an empty agent first would suggest one that cannot run, and a task naming it is
@@ -133,7 +239,7 @@ describe("PUT /api/projects/:projectId/agent", () => {
       const res = await put({ agentId: AGENT_ID });
 
       expect(res.status).toBe(400);
-      expect(projectUpdateOne).not.toHaveBeenCalled();
+      expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
     });
 
     // The stored shape predates entries, so a bucket of bare key strings still reads as runnable
@@ -170,7 +276,7 @@ describe("PUT /api/projects/:projectId/agent", () => {
 
       expect(res.status).toBe(403);
       expect(await res.json()).toEqual({ error: "Only a project admin can change this" });
-      expect(projectUpdateOne).not.toHaveBeenCalled();
+      expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
     });
   });
 });

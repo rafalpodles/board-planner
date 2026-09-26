@@ -8,7 +8,24 @@ import { Grant } from "@/models/grant";
 import { Notification } from "@/models/notification";
 import { Project } from "@/models/project";
 import { createNotifications } from "@/lib/in-app-notifications";
+import { logProjectAudit } from "@/lib/projectAudit";
 import { GRANT_RELATIONS, GrantRelation } from "@/types";
+
+function auditAccess(
+  projectId: string,
+  actorId: unknown,
+  username: string,
+  from: GrantRelation | undefined,
+  to: GrantRelation | undefined
+): void {
+  const action = !from ? "member_added" : !to ? "member_removed" : "member_role_changed";
+  void logProjectAudit(
+    projectId,
+    String(actorId),
+    action,
+    `${username}: ${from ?? "no access"} → ${to ?? "no access"}`
+  );
+}
 
 async function ownerCount(projectId: string): Promise<number> {
   return Grant.countDocuments({ objectType: "project", object: projectId, relation: "owner" });
@@ -62,7 +79,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
   const userId = new Types.ObjectId(rawUserId).toString();
 
   await connectDB();
-  const target = await User.findById(userId).select("_id role kind");
+  const target = await User.findById(userId).select("_id role kind username");
   if (!target || target.kind === "machine") {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
@@ -96,6 +113,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
   }
 
   if (before?.relation !== relation) {
+    auditAccess(projectId, user._id, target.username, before?.relation, relation);
     void announceAccess({
       projectId,
       recipientId: userId,
@@ -144,20 +162,20 @@ async function announceAccess(change: {
   }
 }
 
-export const DELETE = withProjectOwner(async (request, { params }) => {
+export const DELETE = withProjectOwner(async (request, { params, user }) => {
   const { projectId } = await params;
   const userId = new URL(request.url).searchParams.get("userId");
   if (!userId) {
     return NextResponse.json({ error: "userId is required" }, { status: 400 });
   }
-  // PUT validates this and DELETE did not, so anything unparseable reached Grant.deleteOne and
+  // PUT validates this and DELETE did not, so anything unparseable reached the grant delete and
   // left the handler as a CastError-shaped 500.
   if (!isValidObjectId(userId)) {
     return NextResponse.json({ error: "userId must be an object id" }, { status: 400 });
   }
   // Normalised once, because the check below compares this against a stored subject as strings and
   // BSON accepts a hex id in either case: the same id shouted was a different string and the same
-  // row, so it skipped the last-owner refusal while `deleteOne` cast it back and removed the grant.
+  // row, so it skipped the last-owner refusal while the delete cast it back and removed the grant.
   // Same defect as BP-546, one route over, and reachable here by any board owner.
   const subject = new Types.ObjectId(userId).toString();
 
@@ -177,7 +195,14 @@ export const DELETE = withProjectOwner(async (request, { params }) => {
     }
   }
 
-  await Grant.deleteOne({ subject, objectType: "project", object: projectId });
+  // Read before the delete: nothing after it may turn into a failed response
+  const person = await User.findById(subject).select("username");
+  const removed = await Grant.findOneAndDelete({ subject, objectType: "project", object: projectId })
+    .select("relation")
+    .lean();
+  if (removed) {
+    auditAccess(projectId, user._id, person?.username ?? "a deleted user", removed.relation, undefined);
+  }
 
   // Hygiene, NOT containment: what makes a lost board unreadable is the filter on the read
   // routes, which is authoritative and covers every way access can end — including the ones that

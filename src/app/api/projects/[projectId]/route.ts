@@ -16,6 +16,8 @@ import { Sprint } from "@/models/sprint";
 import { Notification } from "@/models/notification";
 import { PmMessage } from "@/models/pmMessage";
 import { logProjectAudit } from "@/lib/projectAudit";
+import { describeSettingsChanges } from "@/lib/settings-audit";
+import { projectWriteImages } from "@/lib/project-write-images";
 import { tokensInvalidatedByHostChange } from "@/lib/host-bound-secrets";
 import { encryptSecret, isEncryptionConfigured } from "@/lib/encryption";
 import { isAllowedMcpServerUrl } from "@/lib/url-validation";
@@ -55,10 +57,10 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
 
   const allowed = ["name", "description", "icon", "estimateFieldId", "repositoryUrl", "githubToken", "gitlabHost", "gitlabToken", "codaHost", "codaDocId", "codaTableId", "codaToken"];
   const updates: Record<string, unknown> = {};
-  let workerAudit: PendingWorkerAudit[] = [];
   for (const field of allowed) {
     if (body[field] !== undefined) {
-      updates[field] = body[field];
+      // null clears a field, the way "" does
+      updates[field] = body[field] === null ? "" : body[field];
     }
   }
   if (body.key !== undefined) {
@@ -99,6 +101,16 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
         );
       }
     }
+  }
+
+  // Mongoose would cast an object to the string it carries, and the token branch below encrypts only
+  // what is already a string — so an object here was stored in the clear
+  const notText = Object.keys(updates).find((field) => typeof updates[field] !== "string");
+  if (notText) {
+    return NextResponse.json({ error: `${notText} must be a string` }, { status: 400 });
+  }
+  if (updates.name !== undefined && !String(updates.name).trim()) {
+    return NextResponse.json({ error: "A project needs a name" }, { status: 400 });
   }
 
   if (body.worker !== undefined) {
@@ -148,16 +160,6 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
       return NextResponse.json({ error: WORKERS_LOCKED_MESSAGE }, { status: 403 });
     }
     Object.assign(updates, parsed.update);
-
-    // Decided here, where the old values are in hand, and written after the update lands. Firing
-    // it here would record decisions that never happened: five later branches still return 400,
-    // and this handler is one request — a rejected gitlabHost would leave a row saying a project
-    // had been committed to workers.
-    workerAudit = pendingWorkerAudit(
-      existing as never,
-      updates,
-      existing.key || String(projectId)
-    );
   }
 
   if (body.pm !== undefined) {
@@ -270,30 +272,37 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     }
   }
 
-  
-
-  const project = await Project.findByIdAndUpdate(projectId, updates, {
-    returnDocument: "after",
-  }).populate("createdBy", "username fullName");
-
-  if (!project) {
+  const beforeImage = await Project.findByIdAndUpdate(projectId, updates, {
+    returnDocument: "before",
+  }).lean();
+  if (!beforeImage) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
-
+  // Both trails before anything else can fail: the write has landed, and a retry would find
+  // nothing left to record
+  const workerAudit = pendingWorkerAudit(
+    beforeImage as never,
+    updates,
+    String(beforeImage.key || projectId)
+  );
   for (const entry of workerAudit) {
     void logInstanceAudit({ ...entry, user: String(user._id), actorUsername: user.username });
   }
 
-  const changedFields = Object.keys(updates)
-    .filter((f) => f !== "githubToken" && f !== "gitlabToken")
-    .join(", ");
-  const auditDetail = updates.githubToken !== undefined
-    ? `Changed: ${changedFields ? changedFields + ", " : ""}GitHub token`
-    : `Changed: ${changedFields}`;
-  logProjectAudit(projectId, user._id, "settings_updated", auditDetail);
+  let images: ReturnType<typeof projectWriteImages> | null = null;
+  let changes: string[];
+  try {
+    images = projectWriteImages(beforeImage, updates);
+    changes = describeSettingsChanges(images.before, images.after.toObject(), Object.keys(updates));
+  } catch {
+    changes = [`Changed: ${Object.keys(updates).join(", ")}`];
+  }
+  if (changes.length > 0) {
+    logProjectAudit(projectId, user._id, "settings_updated", changes);
+  }
 
-  // Its own entry, not folded into the "Changed: …" list. Somebody reading the trail after a
-  // suspected leak needs to see that a credential's destination moved, and when.
+  // Its own entry as well: somebody reading the trail after a suspected leak needs to see that a
+  // credential's destination moved, and why the token went with it
   if (clearedByHostChange.length > 0) {
     logProjectAudit(
       projectId,
@@ -303,6 +312,11 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     );
   }
 
+  const project = images?.after ?? (await Project.findById(projectId));
+  if (!project) {
+    return NextResponse.json({ error: "Project not found" }, { status: 404 });
+  }
+  await project.populate("createdBy", "username fullName");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const obj: any = sanitizeProjectSecrets(project.toObject());
   // One repository field, resolved here so no consumer has to know the legacy pair still exists

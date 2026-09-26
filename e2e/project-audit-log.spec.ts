@@ -1,5 +1,5 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
-import { PROJECT_KEY, seed } from "./seed";
+import { MEMBER_USERNAME, OUTSIDER_FULL_NAME, PROJECT_KEY, seed, seedAssignmentOutsider } from "./seed";
 import { signIn } from "./session";
 
 /**
@@ -111,6 +111,96 @@ test("each change is its own row, newest first", async ({ page }) => {
   await expect(rows(page)).toHaveCount(2);
   await expect(cells(rows(page).nth(0)).nth(3)).toHaveText("Category added: chore");
   await expect(cells(rows(page).nth(1)).nth(3)).toHaveText("Category added: spike");
+});
+
+const saveChanges = async (page: Page) => {
+  await page.getByRole("button", { name: "Save changes" }).click();
+  // The button is "Saving..." until every group has answered, and hidden once the bar has closed;
+  // waiting on the first label alone returns at click time and the next navigation aborts the save
+  await expect(page.getByRole("button", { name: /^(Save changes|Saving\.\.\.)$/ })).toHaveCount(0);
+};
+
+async function detailsOnceStored(page: Page, count: number): Promise<StoredRow[]> {
+  let stored: StoredRow[] = [];
+  await expect(async () => {
+    stored = await openAuditLog(page);
+    expect(stored).toHaveLength(count);
+  }).toPass({ timeout: 20_000 });
+  return stored;
+}
+
+/**
+ * BP-742. The log used to say "Changed: repositoryUrl" and "Changed: worker.enabled" — which
+ * setting, never what it became, so it could not say which repository machines were pointed at.
+ */
+test("a settings save names each value before and after, and never a token", async ({ page }) => {
+  const TOKEN = "ghp_e2e_audit_never_in_the_log";
+  await signIn(page);
+  expect(await openAuditLog(page)).toEqual([]);
+
+  await page.goto(`${SETTINGS}?section=integrations`);
+  await page.getByLabel("Repository URL").fill("https://github.com/orbit-dev/orbit");
+  await page.getByRole("button", { name: /^GitHub/ }).first().click();
+  await page.getByLabel("Access token").fill(TOKEN);
+  await saveChanges(page);
+
+  await page.goto(`${SETTINGS}?section=workers`);
+  await page.getByLabel("Base branch").fill("develop");
+  await page.getByLabel("Timeout for one step (ms)").fill("600000");
+  await saveChanges(page);
+
+  const stored = await detailsOnceStored(page, 3);
+  expect(stored.map((row) => row.detail).sort()).toEqual([
+    "Base branch: main (default) → develop\nTimeout for one step (ms): 1800000 (default) → 600000",
+    "GitHub token set",
+    "Repository: none → https://github.com/orbit-dev/orbit",
+  ]);
+  expect(JSON.stringify(stored)).not.toContain(TOKEN);
+
+  // One save, one row, a line per setting — rendered as lines, not run together into one
+  const workersRow = page.getByTestId("audit-detail").filter({ hasText: "Base branch" });
+  expect(await workersRow.evaluate((cell) => (cell as HTMLElement).innerText.split("\n"))).toEqual([
+    "Base branch: main (default) → develop",
+    "Timeout for one step (ms): 1800000 (default) → 600000",
+  ]);
+
+  // On screen whole, the value after the arrow included: truncated, the cell used to end first
+  const repositoryRow = page
+    .getByTestId("audit-detail")
+    .filter({ hasText: "Repository: none → https://github.com/orbit-dev/orbit" });
+  await expect(repositoryRow).toBeVisible();
+  const clipped = await repositoryRow.evaluate((cell) => cell.scrollWidth > cell.clientWidth);
+  expect(clipped, "the detail is cut off").toBe(false);
+});
+
+/**
+ * BP-741. Adding somebody, promoting them and demoting them back reached no audit log at all.
+ * Each is now its own row: the row's user is who did it, the detail whom and from what to what.
+ */
+test("every grant, promotion and removal is a row naming whom, from and to", async ({ page }) => {
+  await seedAssignmentOutsider();
+  await signIn(page);
+  expect(await openAuditLog(page)).toEqual([]);
+
+  await page.goto(`${SETTINGS}?section=general`);
+  await page.getByLabel(`Access for ${MEMBER_USERNAME}`).selectOption("owner");
+  await page.getByLabel("Add person").fill("outsider");
+  await page.getByRole("button", { name: OUTSIDER_FULL_NAME }).click();
+  await saveChanges(page);
+
+  await page.getByLabel(`Access for ${MEMBER_USERNAME}`).selectOption("none");
+  await saveChanges(page);
+
+  const stored = await detailsOnceStored(page, 3);
+  // Sorted: the first two are one save, written fire-and-forget, so their order is not the subject
+  expect(stored.map(({ action, detail }) => `${action} ${detail}`).sort()).toEqual([
+    "member_added outsider: no access → member",
+    `member_removed ${MEMBER_USERNAME}: owner → no access`,
+    `member_role_changed ${MEMBER_USERNAME}: member → owner`,
+  ]);
+  expect(stored.every((row) => row.user?.username === "admin")).toBe(true);
+
+  await expect(cells(rows(page).first()).nth(2)).toHaveText("member removed");
 });
 
 test("a member is not shown the log at all", async ({ page }) => {

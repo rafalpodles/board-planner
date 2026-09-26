@@ -28,6 +28,17 @@ export const PROJECT_POLICY_DEFAULTS = {
   reviewModel: "opus",
 } as const;
 
+export const POLICY_FIELD_LABELS: Record<keyof typeof PROJECT_POLICY_DEFAULTS, string> = {
+  baseBranch: "Base branch",
+  taskTimeoutMs: "Timeout for one step (ms)",
+  runCeilingMs: "Timeout for the whole run (ms)",
+  maxDiffLines: "Largest diff (lines)",
+  maxDiffFiles: "Largest diff (files)",
+  model: "Model",
+  fallbackModel: "Fallback model",
+  reviewModel: "Review model",
+};
+
 // Moved onto the blocks that use them — the Size gate, the Reviewed gate, the steps' models — and
 // kept only as the fallback a project pinned before agents existed. The screen no longer offers
 // them, so only an instance admin may still write one; anybody who may edit the project may clear it.

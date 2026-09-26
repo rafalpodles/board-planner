@@ -64,8 +64,8 @@ export function AuditSection({ projectId, active }: { projectId: string; active:
       ) : (
         // A table, so the columns line up across rows: separate flex rows each sized
         // themselves, which is why "settings updated" wrapped in one row and not the next.
-        // Four columns need width the phone has not got — three of them nowrap, and the one
-        // that carries the change truncates to nothing — so below sm each entry is a block.
+        // Four columns need width the phone has not got — three of them nowrap, which leaves the
+        // one that carries the change a sliver — so below sm each entry is a block.
         <div className="max-h-[420px] overflow-y-auto">
           <table className="w-full text-xs">
             <tbody>
@@ -83,14 +83,14 @@ export function AuditSection({ projectId, active }: { projectId: string; active:
                   <td className="align-top text-text-muted sm:table-cell sm:whitespace-nowrap sm:py-1.5 sm:pr-3">
                     {log.action.replace(/_/g, " ")}
                   </td>
-                  {/* w-full + max-w-0 is what lets a table cell truncate instead of pushing
-                      the table past its container; below sm it gets the whole next line
-                      instead, because truncated to a phone's width it showed nothing */}
+                  {/* w-full + max-w-0 keeps the cell from pushing the table past its container;
+                      the detail wraps inside it, one line per changed setting, because truncated
+                      it cut off the value after the arrow — the part that matters */}
                   <td
-                    className="w-full align-top text-text sm:table-cell sm:max-w-0 sm:truncate sm:py-1.5"
-                    title={log.detail || undefined}
+                    data-testid="audit-detail"
+                    className="w-full whitespace-pre-line break-words align-top text-text sm:table-cell sm:max-w-0 sm:py-1.5"
                   >
-                    {log.detail}
+                    {log.lines?.length ? log.lines.join("\n") : (log.detail ?? "").replace(/\s+/g, " ")}
                   </td>
                 </tr>
               ))}

@@ -8,7 +8,12 @@ import { Input } from "@/components/ui/Input";
 import { Switch } from "@/components/ui/Switch";
 import { SettingsCard } from "@/components/settings/SettingsCard";
 import { useDirtyGroup } from "@/components/settings/settings-context";
-import { PROJECT_POLICY_DEFAULTS, PROJECT_POLICY_FIELDS_MOVED_TO_BLOCKS } from "@/lib/worker-policy";
+import {
+  POLICY_FIELD_LABELS,
+  PROJECT_POLICY_DEFAULTS,
+  PROJECT_POLICY_FIELDS_MOVED_TO_BLOCKS,
+  type ProjectPolicyField,
+} from "@/lib/worker-policy";
 import { projectRemotes, sameRepo } from "@/lib/repo-match";
 import { ApiAgentRun, ApiProject, ApiWorker } from "@/types";
 import { SectionProps } from "./types";
@@ -23,18 +28,6 @@ function sentence(clause: string): string {
 }
 
 const NUMBER_FIELDS = new Set(["taskTimeoutMs", "runCeilingMs", "maxDiffLines", "maxDiffFiles"]);
-const LABELS: Record<string, string> = {
-  autoMerge: "Merge automatically",
-  reviewGate: "Review the diff before delivering",
-  baseBranch: "Base branch",
-  taskTimeoutMs: "Timeout for one step (ms)",
-  runCeilingMs: "Timeout for the whole run (ms)",
-  maxDiffLines: "Largest diff (lines)",
-  maxDiffFiles: "Largest diff (files)",
-  model: "Model",
-  fallbackModel: "Fallback model",
-  reviewModel: "Review model",
-};
 
 type PolicyValue = string | number | boolean;
 type Draft = Record<string, PolicyValue>;
@@ -70,7 +63,7 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
   const policyFieldId = useId();
   const store = useStore();
   const agentApi = useApi();
-  const [defaultAgent, setDefaultAgent] = useState(String(project.worker?.agent ?? ""));
+  const defaultAgent = useDraft({ agentId: String(project.worker?.agent ?? "") });
   const [runs, setRuns] = useState<ApiAgentRun[]>([]);
 
   useEffect(() => {
@@ -80,21 +73,31 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
       .catch(() => setRuns([]));
   }, [agentApi, projectId]);
 
-  const saveDefaultAgent = async (agentId: string) => {
-    const previous = defaultAgent;
-    setDefaultAgent(agentId);
-    try {
-      await agentApi.put(`/api/projects/${projectId}/agent`, { agentId });
-    } catch (error) {
-      setDefaultAgent(previous);
-      // The control snapping back on its own said nothing at all, and the server's refusals are
-      // specific — which board the agent belongs to, or that it has nothing in it yet. `save()`
-      // in this same component already toasts, so this is the pattern beside it.
-      toast(error instanceof Error ? error.message : "Could not set the default agent", "error");
-    }
-  };
   const api = useApi();
   const { toast } = useToast();
+
+  useDirtyGroup(
+    {
+      id: "workers-agent",
+      section: "workers",
+      label: "Workers · Default agent",
+      count: defaultAgent.count,
+    },
+    {
+      save: async () => {
+        const { agentId } = defaultAgent.value;
+        try {
+          await agentApi.put(`/api/projects/${projectId}/agent`, { agentId });
+          defaultAgent.rebase({ agentId });
+        } catch (error) {
+          // The server's refusals are specific — which board the agent belongs to, or that it has
+          // nothing in it yet — so they are shown as they are, and the choice stays to retry
+          toast(error instanceof Error ? error.message : "Could not set the default agent", "error");
+        }
+      },
+      discard: defaultAgent.discard,
+    }
+  );
 
   const [workers, setWorkers] = useState<ApiWorker[] | null>(null);
   const draft = useDraft<Draft>(draftFrom(project));
@@ -288,7 +291,7 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
         <div className="space-y-3">
           {FIELDS.map((field) => {
             const value = draft.value[field];
-            const label = LABELS[field] ?? field;
+            const label = POLICY_FIELD_LABELS[field as ProjectPolicyField];
             const fieldId = `${policyFieldId}-${field}`;
             // What the row will mean once saved, not what is stored right now
             const inherits = unpinned.has(field) || (!pinned.has(field) && !draft.isDirty(field));
@@ -353,15 +356,23 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
         description="Offered first when somebody picks the agent for a task here. It runs nothing by itself — a task with no agent chosen is one a person is doing."
       >
         <div className="max-w-md">
-          <label htmlFor={defaultAgentId} className="text-sm font-medium mb-2 block">
+          <label
+            htmlFor={defaultAgentId}
+            className="mb-2 flex items-center gap-2 text-sm font-medium"
+          >
             Default agent
+            {defaultAgent.count > 0 && (
+              <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-warning" title="Unsaved" />
+            )}
           </label>
           <select
             id={defaultAgentId}
-            value={defaultAgent}
+            value={defaultAgent.value.agentId}
             disabled={!canEdit || store.loading}
-            onChange={(e) => saveDefaultAgent(e.target.value)}
-            className="w-full rounded-lg border border-border bg-bg-input min-h-11 px-2 py-1.5 text-sm sm:min-h-0"
+            onChange={(e) => defaultAgent.set("agentId", e.target.value)}
+            className={`focus-ring w-full rounded-lg border bg-bg-input min-h-11 px-2 py-1.5 text-sm sm:min-h-0 ${
+              defaultAgent.count > 0 ? "border-warning/60" : "border-border"
+            }`}
           >
             <option value="">No default — the task picker starts empty</option>
             {store.allAgents
@@ -377,7 +388,7 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
               ))}
           </select>
           <p className="mt-1 text-xs text-text-muted">
-            {store.allAgents.find((a) => a._id === defaultAgent)?.description ?? ""}{" "}
+            {store.allAgents.find((a) => a._id === defaultAgent.value.agentId)?.description ?? ""}{" "}
             <Link href="/agents" className="text-primary hover:underline">
               Manage agents
             </Link>

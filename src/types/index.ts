@@ -543,6 +543,7 @@ export interface ProjectWorkerPolicy {
   reviewGate: boolean;
   baseBranch: string;
   taskTimeoutMs: number;
+  runCeilingMs: number;
   maxDiffLines: number;
   maxDiffFiles: number;
   model: string;
@@ -1462,6 +1463,7 @@ export type ProjectAuditAction =
   | "template_removed"
   | "template_updated"
   | "member_added"
+  | "member_role_changed"
   | "member_removed"
   | "task_created"
   | "task_deleted"
@@ -1548,6 +1550,7 @@ export interface IProjectAuditLog {
   user: Types.ObjectId | IUser;
   action: ProjectAuditAction;
   detail: string;
+  lines?: string[];
   createdAt: Date;
 }
 
@@ -1557,6 +1560,7 @@ export interface ApiProjectAuditLog {
   user: { _id: string; username: string; fullName: string } | string;
   action: ProjectAuditAction;
   detail: string;
+  lines?: string[];
   createdAt: string;
 }
 

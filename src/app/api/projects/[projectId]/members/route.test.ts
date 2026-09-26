@@ -7,7 +7,9 @@ const grantFindOne = vi.fn();
 const grantFindOneLean = vi.fn();
 const grantUpsert = vi.fn();
 const grantUpsertLean = vi.fn();
-const grantDeleteOne = vi.fn();
+const grantDelete = vi.fn();
+const grantDeleteLean = vi.fn();
+const logProjectAudit = vi.fn();
 const grantCountDocuments = vi.fn();
 const userFind = vi.fn();
 const userFindLean = vi.fn();
@@ -35,7 +37,9 @@ vi.mock("@/models/grant", () => ({
     findOneAndUpdate: (...a: unknown[]) => (
       grantUpsert(...a), { select: () => ({ lean: grantUpsertLean }) }
     ),
-    deleteOne: grantDeleteOne,
+    findOneAndDelete: (...a: unknown[]) => (
+      grantDelete(...a), { select: () => ({ lean: grantDeleteLean }) }
+    ),
     countDocuments: grantCountDocuments,
   },
 }));
@@ -52,6 +56,7 @@ vi.mock("@/lib/in-app-notifications", () => ({
   createNotifications: (params: unknown) => createNotifications(params),
 }));
 vi.mock("@/models/task", () => ({ Task: {} }));
+vi.mock("@/lib/projectAudit", () => ({ logProjectAudit }));
 vi.mock("@/models/notification", () => ({
   Notification: { deleteMany: (filter: unknown) => notificationDeleteMany(filter) },
 }));
@@ -82,10 +87,11 @@ beforeEach(() => {
   grantFindLean.mockResolvedValue([]);
   grantFindOneLean.mockResolvedValue(null);
   userFindLean.mockResolvedValue([]);
-  userFindByIdSelect.mockResolvedValue({ _id: "u1", role: "member", kind: "human" });
+  userFindByIdSelect.mockResolvedValue({ _id: "u1", role: "member", kind: "human", username: "uma" });
   grantCountDocuments.mockResolvedValue(2);
   recipientsWithAccess.mockResolvedValue([]);
   grantUpsertLean.mockResolvedValue(null);
+  grantDeleteLean.mockResolvedValue({ relation: "member" });
 });
 
 describe("GET members", () => {
@@ -232,7 +238,7 @@ describe("DELETE members", () => {
     const url = `http://x/api/projects/${PROJECT}/members?userId=${U2}`;
     const res = await DELETE(new Request(url, { method: "DELETE" }), { params });
     expect(res.status).toBe(200);
-    expect(grantDeleteOne).toHaveBeenCalledWith({
+    expect(grantDelete).toHaveBeenCalledWith({
       subject: U2,
       objectType: "project",
       object: PROJECT,
@@ -241,7 +247,7 @@ describe("DELETE members", () => {
 
   // BP-546's shape, one route over and found by the review of that fix: the last-owner check
   // compared the raw query value while the stored subject is lower-case hex, so the same id
-  // shouted skipped the 409 — and `Grant.deleteOne` cast it back and removed the row, leaving a
+  // shouted skipped the 409 — and `Grant.findOneAndDelete` cast it back and removed the row, leaving a
   // board with no owner at all.
   it("refuses to remove the last owner however the id is spelled", async () => {
     grantCountDocuments.mockResolvedValue(1);
@@ -249,7 +255,7 @@ describe("DELETE members", () => {
     const url = `http://x/api/projects/${PROJECT}/members?userId=${U2.toUpperCase()}`;
     const res = await DELETE(new Request(url, { method: "DELETE" }), { params });
     expect(res.status).toBe(409);
-    expect(grantDeleteOne).not.toHaveBeenCalled();
+    expect(grantDelete).not.toHaveBeenCalled();
   });
 
   it("refuses to remove the last owner", async () => {
@@ -258,7 +264,7 @@ describe("DELETE members", () => {
     const url = `http://x/api/projects/${PROJECT}/members?userId=${U2}`;
     const res = await DELETE(new Request(url, { method: "DELETE" }), { params });
     expect(res.status).toBe(409);
-    expect(grantDeleteOne).not.toHaveBeenCalled();
+    expect(grantDelete).not.toHaveBeenCalled();
   });
 
   // BP-328. The watcher rows stay, so a re-add restores the feed; what does not stay is the
@@ -301,7 +307,7 @@ describe("DELETE members", () => {
     const res = await DELETE(new Request(url, { method: "DELETE" }), { params });
 
     expect(res.status).toBe(400);
-    expect(grantDeleteOne).not.toHaveBeenCalled();
+    expect(grantDelete).not.toHaveBeenCalled();
     expect(notificationDeleteMany).not.toHaveBeenCalled();
   });
 
@@ -450,5 +456,93 @@ describe("PUT members tells the person", () => {
       process.off("unhandledRejection", unhandled);
       logged.mockRestore();
     }
+  });
+});
+
+/**
+ * BP-741. Adding somebody, promoting them and demoting them back reached neither the project's
+ * audit log nor the instance's. Each entry says whom it concerned and from what to what; the row's
+ * user is who did it. Both are read off the write's own before-image, so a repeat or a race that
+ * changed nothing records nothing.
+ */
+describe("the audit trail of board access", () => {
+  const url = `http://x/api/projects/${PROJECT}/members?userId=${U2}`;
+
+  it("records a grant to somebody who had none", async () => {
+    await PUT(put({ userId: U2, relation: "member" }), { params });
+
+    expect(logProjectAudit).toHaveBeenCalledWith(PROJECT, "o1", "member_added", "uma: no access → member");
+  });
+
+  it("records a promotion with where it came from", async () => {
+    grantUpsertLean.mockResolvedValue({ relation: "member" });
+
+    await PUT(put({ userId: U2, relation: "owner" }), { params });
+
+    expect(logProjectAudit).toHaveBeenCalledWith(
+      PROJECT,
+      "o1",
+      "member_role_changed",
+      "uma: member → owner"
+    );
+  });
+
+  it("records nothing when the grant already held that relation", async () => {
+    grantUpsertLean.mockResolvedValue({ relation: "owner" });
+
+    const res = await PUT(put({ userId: U2, relation: "owner" }), { params });
+
+    expect(res.status).toBe(200);
+    expect(logProjectAudit).not.toHaveBeenCalled();
+  });
+
+  it("records nothing for the losing side of a concurrent double submit", async () => {
+    grantUpsertLean.mockRejectedValue(Object.assign(new Error("dup"), { code: 11000 }));
+
+    const res = await PUT(put({ userId: U2, relation: "member" }), { params });
+
+    expect(res.status).toBe(200);
+    expect(logProjectAudit).not.toHaveBeenCalled();
+  });
+
+  it("records a removal with the relation it took away", async () => {
+    grantDeleteLean.mockResolvedValue({ relation: "owner" });
+
+    await DELETE(new Request(url, { method: "DELETE" }), { params });
+
+    expect(logProjectAudit).toHaveBeenCalledWith(
+      PROJECT,
+      "o1",
+      "member_removed",
+      "uma: owner → no access"
+    );
+  });
+
+  it("records nothing when there was no grant to remove", async () => {
+    grantDeleteLean.mockResolvedValue(null);
+
+    const res = await DELETE(new Request(url, { method: "DELETE" }), { params });
+
+    expect(res.status).toBe(200);
+    expect(logProjectAudit).not.toHaveBeenCalled();
+  });
+
+  // Read before the delete: after it, a failure would answer 500 for a removal that happened, and
+  // the retry would find no grant left to record
+  it("removes nothing when the name cannot be read", async () => {
+    userFindByIdSelect.mockRejectedValue(new Error("the read gave up"));
+
+    await DELETE(new Request(url, { method: "DELETE" }), { params }).catch(() => undefined);
+
+    expect(grantDelete).not.toHaveBeenCalled();
+    expect(logProjectAudit).not.toHaveBeenCalled();
+  });
+
+  it("still names a removal whose account has since been deleted", async () => {
+    userFindByIdSelect.mockResolvedValue(null);
+
+    await DELETE(new Request(url, { method: "DELETE" }), { params });
+
+    expect(logProjectAudit.mock.calls[0][3]).toBe("a deleted user: member → no access");
   });
 });

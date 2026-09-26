@@ -260,6 +260,8 @@ test.describe("who can use this board", () => {
       (r) => new URL(r.url()).pathname.endsWith("/members") && r.request().method() === "PUT"
     );
     await page.getByRole("button", { name: fullName }).click();
+    // Staged like the rest of the page since BP-741: nothing is granted until it is saved
+    await page.getByRole("button", { name: "Save changes" }).click();
     expect((await granted).status()).toBe(200);
   }
 
@@ -295,6 +297,47 @@ test.describe("who can use this board", () => {
     }
   });
 
+  /**
+   * BP-741. Every other control on this page waits for the Save bar; this one wrote the moment it
+   * changed, under a footer that said there was nothing to save. Driven as a board owner, the
+   * role that holds this page without being an instance admin.
+   */
+  test("an access change waits for Save, and Discard takes it back", async ({ page }) => {
+    await arriveSignedIn(page, "owner");
+    await openSettings(page, PROJECT_KEY);
+    const access = page.getByLabel(`Access for ${MEMBER_USERNAME}`);
+    await expect(access).toHaveValue("member");
+    const save = page.getByRole("button", { name: "Save changes" });
+
+    const writes: string[] = [];
+    page.on("request", (r) => {
+      if (new URL(r.url()).pathname.endsWith("/members") && r.method() !== "GET") {
+        writes.push(r.method());
+      }
+    });
+
+    await access.selectOption("owner");
+    await expect(save).toBeEnabled();
+    // Settled before the negative: a write sent on change would have gone out by now
+    await page.waitForTimeout(1_000);
+    expect(writes, "nothing is written before Save").toEqual([]);
+
+    await page.getByRole("button", { name: "Discard" }).click();
+    await expect(access).toHaveValue("member");
+    await expect(save).toHaveCount(0);
+
+    await access.selectOption("owner");
+    const written = page.waitForResponse(
+      (r) => new URL(r.url()).pathname.endsWith("/members") && r.request().method() === "PUT"
+    );
+    await save.click();
+    expect((await written).status()).toBe(200);
+    expect(writes).toEqual(["PUT"]);
+
+    await page.reload();
+    await expect(page.getByLabel(`Access for ${MEMBER_USERNAME}`)).toHaveValue("owner");
+  });
+
   test("and taking it back closes the board again", async ({ browser }) => {
     const outsider = await contextFor(browser, OUTSIDER_USERNAME, OUTSIDER_PASSWORD);
     const admin = await contextFor(browser, ADMIN_USERNAME, ADMIN_PASSWORD);
@@ -316,6 +359,7 @@ test.describe("who can use this board", () => {
       await admin.page
         .getByLabel(`Access for ${OUTSIDER_USERNAME}`)
         .selectOption("none");
+      await admin.page.getByRole("button", { name: "Save changes" }).click();
       expect((await revoked).status()).toBe(200);
 
       await outsider.page.reload();

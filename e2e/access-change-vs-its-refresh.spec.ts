@@ -24,6 +24,12 @@ async function openMembers(page: Page) {
   await expect(page.getByLabel(`Access for ${MEMBER_USERNAME}`)).toBeVisible();
 }
 
+// Access is staged behind the page's Save bar since BP-741, so a change reaches the server here
+async function makeOwner(page: Page) {
+  await page.getByLabel(`Access for ${MEMBER_USERNAME}`).selectOption("owner");
+  await page.getByRole("button", { name: "Save changes" }).click();
+}
+
 /**
  * The refresh, told apart from a mount read by what it carries rather than by when it arrives:
  * `next dev` runs the mount effect twice, and the second read is still in flight when the select
@@ -63,7 +69,7 @@ test("a grant that landed is not reported as a failure when only its refresh fai
       r.request().method() === "PUT" &&
       r.ok()
   );
-  await page.getByLabel(`Access for ${MEMBER_USERNAME}`).selectOption("owner");
+  await makeOwner(page);
   await written;
 
   await expect(page.getByText(LIST_REFRESH_FAILED)).toBeVisible();
@@ -93,14 +99,19 @@ test("a refused grant still says the access was not updated", async ({ page }) =
     });
   });
 
-  await page.getByLabel(`Access for ${MEMBER_USERNAME}`).selectOption("owner");
+  await makeOwner(page);
 
   // The server's own words, not a generic fallback, and not the refresh's line
   await expect(page.getByText("the write was refused")).toBeVisible();
   expect(await page.getByText(LIST_REFRESH_FAILED).count(), LIST_REFRESH_FAILED).toBe(0);
   expect(await page.getByText("Access updated").count(), "Access updated").toBe(0);
 
-  // Nothing moved: the row still shows what the server still holds
+  // The choice stays on screen, still unsaved, to be tried again — and the server moved nothing
+  await expect(page.getByLabel(`Access for ${MEMBER_USERNAME}`)).toHaveValue("owner");
+  await expect(page.getByRole("button", { name: "Save changes" })).toBeEnabled();
+  await page.unroute("**/api/projects/*/members");
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.reload();
   await expect(page.getByLabel(`Access for ${MEMBER_USERNAME}`)).toHaveValue("member");
 });
 
@@ -124,7 +135,7 @@ test("a grant that lands and refreshes says so once", async ({ page }) => {
   });
 
   const refreshed = refreshCarrying(page, "owner");
-  await page.getByLabel(`Access for ${MEMBER_USERNAME}`).selectOption("owner");
+  await makeOwner(page);
   await refreshed;
 
   await expect(page.getByText("Access updated")).toBeVisible();
