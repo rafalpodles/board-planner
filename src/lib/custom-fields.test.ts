@@ -13,6 +13,7 @@ import {
   resolveFieldsByName,
   customFieldActivityChanges,
   parseOptions,
+  sameFieldName,
 } from "./custom-fields";
 import { DEFAULT_OPTION_COLOR, ICustomField } from "@/types";
 
@@ -532,5 +533,27 @@ describe("customFieldActivityChanges", () => {
 
   it("returns nothing when the project defines no fields", () => {
     expect(customFieldActivityChanges({ "f-diff": "opt-m" }, {}, [])).toEqual([]);
+  });
+});
+
+// BP-782 review: a name goes into a $regex, so its metacharacters must match themselves
+describe("sameFieldName", () => {
+  const matches = (name: string, stored: string) => {
+    const { $regex, $options } = sameFieldName(name);
+    return new RegExp($regex, $options).test(stored);
+  };
+
+  it("matches the same name in any case, and nothing else", () => {
+    expect(matches("Story Points", "story points")).toBe(true);
+    expect(matches("Story Points", "Story Points 2")).toBe(false);
+  });
+
+  it("reads regex metacharacters as the characters they are", () => {
+    expect(matches("Size (m2)", "size (M2)")).toBe(true);
+    expect(matches("Size (m2)", "Size m2")).toBe(false);
+    expect(matches("C++", "c++")).toBe(true);
+    expect(matches("Gam.a", "Gamma")).toBe(false);
+    expect(() => sameFieldName("Cost (EUR")).not.toThrow();
+    expect(matches("Cost (EUR", "cost (eur")).toBe(true);
   });
 });
