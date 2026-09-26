@@ -81,6 +81,11 @@ describe("GET /api/users/me/machines", () => {
         _id: "6a7309535eb49af333b85a06",
         name: "paused here",
         halt: { paused: true, by: "machine", command: "pause", reportedAt: new Date() },
+      }),
+      machine({
+        _id: "6a7309535eb49af333b85a07",
+        name: "no sandbox",
+        preflight: { ok: false, account: "", checks: [{ name: "sandbox", ok: false, detail: "seatbelt is macOS only" }], reportedAt: new Date() },
       })
     );
 
@@ -91,6 +96,7 @@ describe("GET /api/users/me/machines", () => {
       ["quiet", "stale", null],
       ["off", "disabled", null],
       ["paused here", "paused", "machine"],
+      ["no sandbox", "failing", null],
     ]);
   });
 
