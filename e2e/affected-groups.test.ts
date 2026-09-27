@@ -94,6 +94,20 @@ describe("computeAffectedGroups", () => {
     expect(computeAffectedGroups(["src/components/kanban/BoardHeader.tsx"])).toEqual(["board", "project"]);
   });
 
+  it("sends a machine's own screens to the automation group, whose enrolment specs drive them", () => {
+    for (const file of [
+      "src/app/(app)/settings/machines/page.tsx",
+      "src/app/api/users/me/machines/route.ts",
+      "src/app/enrol/[userCode]/page.tsx",
+    ]) {
+      expect(computeAffectedGroups([file])).toEqual(["automation"]);
+    }
+  });
+
+  it("sends the hand-over readiness route to the tasks group, whose task-screen specs read it", () => {
+    expect(computeAffectedGroups(["src/app/api/projects/[projectId]/handover/route.ts"])).toEqual(["tasks"]);
+  });
+
   it("falls back to every group for a non-spec e2e helper file", () => {
     expect(computeAffectedGroups(["e2e/api.ts"])).toEqual([...GROUP_NAMES]);
     expect(computeAffectedGroups(["e2e/groups.ts"])).toEqual([...GROUP_NAMES]);

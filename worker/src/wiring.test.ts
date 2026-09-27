@@ -2095,3 +2095,48 @@ describe("preflight's place in the wiring", () => {
     expect(seen.heartbeat?.preflight?.()).toBeUndefined();
   });
 });
+
+// BP-762 review. Both joins are one line each in createWorker, and without them a restart silently
+// stops restoring the halt, and a new registration never relabels it
+describe("the halt kept across a restart, in the wiring", () => {
+  const ID = "6a7c686f70ed274cf658b1b3";
+
+  function stores(files: Record<string, string>) {
+    const made = new Map<string, Store>();
+    return {
+      made,
+      createStore: (path: string) => {
+        const name = path.split("/").pop() ?? path;
+        const store = memoryStore(files[name] ?? "");
+        made.set(name, store);
+        return store;
+      },
+    };
+  }
+
+  it("restores a halt saved under this machine's record, and reports it on the heartbeat", () => {
+    const { createStore } = stores({
+      "worker.json": IDENTITY,
+      "halt.json": JSON.stringify({ paused: true, by: "machine", command: "pause", boardIssuedAt: null, workerId: ID }),
+    });
+
+    const { seen } = harness({ createStore });
+
+    expect(seen.heartbeat?.halt?.()).toEqual({ paused: true, by: "machine", command: "pause" });
+  });
+
+  it("makes a board halt the machine's once a registration has stored another record", () => {
+    const { createStore, made } = stores({
+      "worker.json": IDENTITY,
+      "halt.json": JSON.stringify({ paused: true, by: "board", command: "stop", boardIssuedAt: null, workerId: ID }),
+    });
+    const { seen } = harness({ createStore });
+
+    made
+      .get("worker.json")
+      ?.write(JSON.stringify({ workerId: "6a7c686f70ed274cf658b1b4", credential: "cpw_y", heartbeatMs: 60_000 }));
+    seen.heartbeat?.onRegistered?.();
+
+    expect(seen.heartbeat?.halt?.()).toEqual({ paused: true, by: "machine", command: "stop" });
+  });
+});

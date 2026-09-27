@@ -73,6 +73,18 @@ const workerSchema = new Schema<IWorker>(
     command: { type: String, enum: ["", "pause", "resume", "stop"], default: "" },
     commandIssuedAt: { type: Date, default: null },
     commandAckedAt: { type: Date, default: null },
+    halt: {
+      type: new Schema(
+        {
+          paused: { type: Boolean, required: true },
+          by: { type: String, enum: ["board", "machine", null], default: null },
+          command: { type: String, enum: ["pause", "stop", null], default: null },
+          reportedAt: { type: Date, required: true },
+        },
+        { _id: false }
+      ),
+      default: null,
+    },
   },
   { timestamps: true }
 );

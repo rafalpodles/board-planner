@@ -39,6 +39,7 @@ const {
   PROTOCOL_VERSION,
   WORKER_STALE_MS,
   WORKER_HEARTBEAT_MS,
+  toApiWorker,
 } = await import("./worker-service");
 
 // Reach is resolved from the owner's grants by the caller and handed in, so every case that is not
@@ -899,8 +900,16 @@ describe("machineStateFor", () => {
     expect(state([machine({ lastSeenAt: old })])).toBe("stale");
   });
 
-  it("is stale when the machine with the checkout is switched off", () => {
-    expect(state([machine({ enabled: false })])).toBe("stale");
+  // BP-762. Switched off, it is refused its heartbeat and goes stale too — and "check it is running"
+  // was advice its owner could not act on
+  it("is disabled when the machine with the checkout is switched off, however recently it reported", () => {
+    expect(state([machine({ enabled: false })])).toBe("disabled");
+    expect(state([machine({ enabled: false, lastSeenAt: old })])).toBe("disabled");
+  });
+
+  it("prefers a stale machine, which its owner can see to, over a switched-off one", () => {
+    expect(state([machine({ enabled: false }), machine({ lastSeenAt: old })])).toBe("stale");
+    expect(state([machine({ lastSeenAt: old }), machine({ enabled: false })])).toBe("stale");
   });
 
   it("is live when any one of several machines serves it", () => {
@@ -926,6 +935,7 @@ describe("machineStateFor", () => {
       expect(machineReadinessFor([worker], board, NOW)).toEqual({
         state: "unbound",
         bindingError: refusal,
+        haltedBy: null,
       });
     });
 
@@ -934,6 +944,7 @@ describe("machineStateFor", () => {
       expect(machineReadinessFor([machine({ bindingError: "" })], board, NOW)).toEqual({
         state: "live",
         bindingError: "",
+        haltedBy: null,
       });
     });
 
@@ -1017,5 +1028,104 @@ describe("machineStateFor", () => {
 
   it("is stale, not paused, when a paused machine has also stopped reporting in", () => {
     expect(state([commanded("pause", { lastSeenAt: old })])).toBe("stale");
+  });
+
+  // BP-762. A pause or resume made at the machine goes through its local socket, and the board
+  // learns of it only from what the heartbeat says
+  describe("a machine that reports its own halt", () => {
+    const halted = (paused: boolean, by: string | null, command: string | null) => ({
+      halt: { paused, by, command, reportedAt: NOW },
+    });
+    const readiness = (workers: unknown[]) => machineReadinessFor(workers as never[], board, NOW);
+
+    it("is paused by the machine when the pause was made there, with nothing issued from the board", () => {
+      expect(readiness([machine(halted(true, "machine", "pause"))])).toEqual({
+        state: "paused",
+        bindingError: "",
+        haltedBy: "machine",
+      });
+    });
+
+    it("is stopped by the board when it says the board stopped it", () => {
+      expect(readiness([commanded("stop", halted(true, "board", "stop"))])).toMatchObject({
+        state: "stopped",
+        haltedBy: "board",
+      });
+    });
+
+    it("is live when it says it runs, although the board's pause stands acknowledged", () => {
+      expect(readiness([commanded("pause", halted(false, null, null))])).toEqual({
+        state: "live",
+        bindingError: "",
+        haltedBy: null,
+      });
+    });
+
+    it("is read from the command it acknowledged when it is too old to report, as the board's", () => {
+      expect(readiness([commanded("pause")])).toMatchObject({ state: "paused", haltedBy: "board" });
+    });
+
+    // A machine whose worker was replaced by one too old to report goes on heartbeating without it,
+    // and what it once said must not stand for ever
+    it("is read from its command again once its report is older than a heartbeat can be late", () => {
+      const long = new Date(NOW.getTime() - WORKER_STALE_MS - 1000);
+      const said = { halt: { paused: true, by: "machine", command: "pause", reportedAt: long } };
+
+      expect(readiness([machine(said)])).toMatchObject({ state: "live", haltedBy: null });
+      expect(readiness([commanded("pause", said)])).toMatchObject({ state: "paused", haltedBy: "board" });
+    });
+
+    it("is the board's when it does not say who, while the board's pause stands, and the machine's otherwise", () => {
+      expect(readiness([commanded("pause", halted(true, null, "pause"))])).toMatchObject({
+        haltedBy: "board",
+      });
+      expect(readiness([machine(halted(true, null, "pause"))])).toMatchObject({ haltedBy: "machine" });
+    });
+  });
+});
+
+// BP-762. The fleet console reads a machine's halt off the same field, and ages it the same way
+describe("the halt the fleet console is sent", () => {
+  const NOW = new Date("2026-09-26T12:00:00Z");
+  const doc = (reportedAt: Date) =>
+    ({
+      _id: "6a7309535eb49af333b85a04",
+      name: "MacBook",
+      host: "ada.local",
+      repos: [],
+      policyOverrides: [],
+      enabled: true,
+      lastSeenAt: NOW,
+      command: "",
+      halt: { paused: true, by: "machine", command: "pause", reportedAt },
+      createdAt: NOW,
+      updatedAt: NOW,
+    }) as never;
+
+  it("is what the machine said on its last heartbeat", () => {
+    expect(toApiWorker(doc(new Date(NOW.getTime() - 1000)), NOW).halt).toEqual({
+      paused: true,
+      by: "machine",
+      command: "pause",
+    });
+  });
+
+  it("is nothing once the report is older than a heartbeat can be late", () => {
+    expect(toApiWorker(doc(new Date(NOW.getTime() - WORKER_STALE_MS - 1000)), NOW).halt).toBeNull();
+  });
+
+  // One reading for every screen that says what a machine is doing, the project list among them
+  it("comes with the machine's condition, read the way the task reads it", () => {
+    expect(toApiWorker(doc(new Date(NOW.getTime() - 1000)), NOW).condition).toEqual({
+      state: "paused",
+      haltedBy: "machine",
+    });
+    const older = {
+      ...(doc(new Date(NOW.getTime() - WORKER_STALE_MS - 1000)) as object),
+      command: "stop",
+      commandIssuedAt: new Date(NOW.getTime() - 60_000),
+      commandAckedAt: new Date(NOW.getTime() - 30_000),
+    };
+    expect(toApiWorker(older as never, NOW).condition).toEqual({ state: "stopped", haltedBy: "board" });
   });
 });

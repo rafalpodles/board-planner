@@ -144,6 +144,45 @@ describe("machines offering this repository", () => {
     expect(screen.getByTestId("offering-machine-state").textContent).toBe("live");
     expect(screen.queryByTestId("offering-machine-error")).toBeNull();
   });
+
+  // BP-762. Switched off, it is refused its heartbeat, and read here as not reporting
+  it("says a machine an instance admin switched off is switched off, not that it has gone quiet", async () => {
+    await listed([worker({ stale: true, condition: { state: "disabled", haltedBy: null } })]);
+
+    expect(screen.getByTestId("offering-machine-state").textContent).toBe("switched off");
+  });
+
+  // The server's reading, the one the task rail and Settings → Machines use: a machine's own report
+  // while it is fresh, and an older worker's acknowledged command otherwise
+  it.each([
+    ["paused", "machine"],
+    ["stopped", "board"],
+  ] as const)("says a machine the server reads as %s is %s, whoever halted it", async (state, haltedBy) => {
+    await listed([worker({ condition: { state, haltedBy } })]);
+
+    expect(screen.getByTestId("offering-machine-state").textContent).toBe(state);
+  });
+
+  it("says a machine whose sandbox check failed is failing it, not live", async () => {
+    await listed([worker({ condition: { state: "failing", haltedBy: null } })]);
+
+    const state = screen.getByTestId("offering-machine-state");
+    expect(state.textContent).toBe("failing its sandbox check");
+    expect(state.className).toContain("text-danger");
+  });
+
+  it("colours a halted machine as halted even when it also refuses its checkout", async () => {
+    await listed([
+      worker({
+        condition: { state: "paused", haltedBy: "machine" },
+        bindingError: `${PROJECT_OID}: /private/tmp/bp is under the sensitive directory /private/tmp`,
+      }),
+    ]);
+
+    const state = screen.getByTestId("offering-machine-state");
+    expect(state.textContent).toBe("paused");
+    expect(state.className).toContain("text-warning");
+  });
 });
 
 function run(over: Record<string, unknown> = {}) {

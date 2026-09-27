@@ -7,6 +7,7 @@ function worker(overrides: {
   command?: "" | WorkerCommand;
   commandIssuedAt?: string | null;
   commandAckedAt?: string | null;
+  halt?: { paused: boolean; by: "board" | "machine" | null; command: "pause" | "stop" | null } | null;
 }) {
   return {
     command: "pause" as const,
@@ -77,5 +78,53 @@ describe("commandStatus", () => {
       commandAckedAt: new Date(T0 + 1_000).toISOString(),
     });
     expect(commandStatus(appliedWorker, T0 + 2_000)).toEqual({ text: applied, tone: "applied" });
+  });
+
+  // BP-762. The fleet console said nothing of a pause made at the machine, and "Paused" of one the
+  // machine had since resumed
+  describe("what the machine says it is doing", () => {
+    const acked = { commandIssuedAt: new Date(T0).toISOString(), commandAckedAt: new Date(T0 + 1_000).toISOString() };
+
+    it.each([
+      ["pause", "Paused on the machine"],
+      ["stop", "Stopped on the machine"],
+    ] as const)("a %s made at the machine shows with no board command behind it", (command, text) => {
+      const w = worker({ command: "", halt: { paused: true, by: "machine", command } });
+      expect(commandStatus(w, T0)).toEqual({ text, tone: "applied" });
+    });
+
+    it("a board pause the machine resumed reads as resumed there, not as paused", () => {
+      const w = worker({ ...acked, halt: { paused: false, by: null, command: null } });
+      expect(commandStatus(w, T0 + 2_000)).toEqual({ text: "Resumed on the machine", tone: "applied" });
+    });
+
+    it("a board command still on its way shows as on its way, whatever the machine did before it", () => {
+      const w = worker({
+        command: "stop",
+        commandIssuedAt: new Date(T0).toISOString(),
+        halt: { paused: true, by: "machine", command: "pause" },
+      });
+      expect(commandStatus(w, T0 + 1_000)).toEqual({ text: "Stopping…", tone: "pending" });
+    });
+
+    it("the board's own pause, reported as the board's, keeps the command's label", () => {
+      const w = worker({ ...acked, halt: { paused: true, by: "board", command: "pause" } });
+      expect(commandStatus(w, T0 + 2_000)).toEqual({ text: "Paused", tone: "applied" });
+    });
+
+    // BP-762 review. A machine that registered again as a new record can report a halt this record
+    // never issued, and the console showed nothing at all
+    it.each([
+      ["stop", "Stopped"],
+      ["pause", "Paused"],
+    ] as const)("a board %s no standing command explains still shows as %s", (command, text) => {
+      const w = worker({ command: "", halt: { paused: true, by: "board", command } });
+      expect(commandStatus(w, T0)).toEqual({ text, tone: "applied" });
+    });
+
+    it("a resume the board issued and the machine applied stays Resumed", () => {
+      const w = worker({ command: "resume", ...acked, halt: { paused: false, by: null, command: null } });
+      expect(commandStatus(w, T0 + 2_000)).toEqual({ text: "Resumed", tone: "applied" });
+    });
   });
 });

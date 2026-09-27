@@ -11,11 +11,13 @@ import MachineProjectsPage from "./page";
  * two contradictory answers.
  */
 
-const { api } = vi.hoisted(() => ({
+const { api, auth } = vi.hoisted(() => ({
   api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), del: vi.fn() },
+  auth: { isAdmin: false },
 }));
 
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
+vi.mock("@/hooks/use-auth", () => ({ useAuth: () => auth }));
 vi.mock("next/navigation", () => ({ useParams: () => ({ workerId: "w1" }) }));
 
 const VIEW = {
@@ -37,6 +39,7 @@ const VIEW = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  auth.isAdmin = false;
   api.get.mockResolvedValue(VIEW);
   api.put.mockResolvedValue({ leftDisabled: [] });
 });
@@ -386,5 +389,36 @@ describe("saving the machine's projects", () => {
 
     expect(screen.queryByText("the read that nobody is waiting for")).toBeNull();
     expect(document.querySelectorAll("p.text-danger")).toHaveLength(0);
+  });
+});
+
+// BP-761. Every member now reaches this from Settings → Machines, a Linux box's owner among them,
+// and only the menubar app sets up a checkout for what is ticked here
+describe("what the page says a tick does", () => {
+  it("says it is the menubar app that clones, and what a machine without it needs instead", async () => {
+    render(<MachineProjectsPage />);
+
+    await screen.findByText(/Tick a project and the menubar app on this machine sets up a checkout/);
+    const withoutTheApp = screen.getByTestId("without-the-app").textContent;
+    expect(withoutTheApp).toContain("gets no checkout from ticking a project here");
+    expect(withoutTheApp).toContain("clone the repository there yourself and list it in repos.json");
+  });
+});
+
+// BP-761. The way back led to the fleet console, which turns away everybody but an instance admin
+describe("the way back from a machine's projects", () => {
+  it("leads a machine's owner back to their own machines", async () => {
+    render(<MachineProjectsPage />);
+
+    const back = await screen.findByRole("link", { name: "Back to machines" });
+    expect(back.getAttribute("href")).toBe("/settings/machines");
+  });
+
+  it("leads an instance admin back to the fleet console", async () => {
+    auth.isAdmin = true;
+    render(<MachineProjectsPage />);
+
+    const back = await screen.findByRole("link", { name: "Back to machines" });
+    expect(back.getAttribute("href")).toBe("/settings/workers");
   });
 });

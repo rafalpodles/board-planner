@@ -967,6 +967,7 @@ describe("the hand-over notice, with the board judged too", () => {
     columns: BOARD.map((c) => ({ role: c.role })),
     machine: "live",
     bindingError: "",
+    haltedBy: null,
   };
 
   function withBoard(
@@ -1103,22 +1104,27 @@ describe("the hand-over notice, with the board judged too", () => {
     withBoard({ machine: "stale" });
 
     expect(notice().dataset.reason).toBe("machine-stale");
+    // Switched off by an instance admin has its own sentence since BP-762
+    expect(notice().textContent).toBe(
+      "Nothing will run this yet. Your machine with this board's repository has not reported in for over five minutes. Check it is running"
+    );
     expect(screen.getByRole("link", { name: "Check it is running" }).getAttribute("href")).toBe(
       "https://board-planner.com/docs/ai/execution-workers/#setting-one-up"
     );
   });
 
   // A pause or stop comes only from the fleet console, which only an instance admin can open —
-  // telling anyone else to resume it there would send them to a page that turns them away
+  // telling anyone else to resume it there would send them to a page that turns them away. The
+  // menubar app's Resume lifts it too, which is the one thing the assignee can do themselves.
   it.each([
     ["paused", "machine-paused"],
     ["stopped", "machine-stopped"],
-  ] as const)("tells a non-admin assignee their machine was %s, and that only an admin can resume it", (state, reason) => {
+  ] as const)("tells a non-admin assignee their machine was %s by an admin, and how they can resume it", (state, reason) => {
     withBoard({ machine: state });
 
     expect(notice().dataset.reason).toBe(reason);
     expect(notice().textContent).toBe(
-      `Nothing will run this yet. Your machine is connected but not taking work: an instance admin ${state} it, and only an instance admin can resume it.`
+      `Nothing will run this yet. Your machine is connected but not taking work: an instance admin ${state} it. Resume it from the menubar app on that machine, or ask an instance admin to.`
     );
     expect(screen.queryByRole("link", { name: "Settings → Workers" })).toBeNull();
     expect(screen.queryByTestId("handover-waiting")).toBeNull();
@@ -1130,13 +1136,52 @@ describe("the hand-over notice, with the board judged too", () => {
       withBoard({ machine: state }, {}, { viewerIsInstanceAdmin: true });
 
       expect(notice().textContent).toBe(
-        `Nothing will run this yet. Your machine is connected but not taking work: it is ${state}. Resume it in Settings → Workers.`
+        `Nothing will run this yet. Your machine is connected but not taking work: it is ${state}. Resume it in Settings → Workers, or from the menubar app on that machine.`
       );
       expect(screen.getByRole("link", { name: "Settings → Workers" }).getAttribute("href")).toBe(
         "/settings/workers"
       );
     }
   );
+
+  it.each([
+    ["paused", "machine-paused"],
+    ["stopped", "machine-stopped"],
+  ] as const)(
+    "tells the assignee a machine %s at the machine itself is resumed there, not by an admin",
+    (state, reason) => {
+      withBoard({ machine: state, haltedBy: "machine" }, {}, { viewerIsInstanceAdmin: true });
+
+      expect(notice().dataset.reason).toBe(reason);
+      expect(notice().textContent).toBe(
+        `Nothing will run this yet. Your machine is connected but not taking work: it was ${state} on the machine itself. Resume it from the menubar app there.`
+      );
+      expect(screen.queryByRole("link", { name: "Settings → Workers" })).toBeNull();
+    }
+  );
+
+  // BP-762. Switched off by an instance admin, it is refused its heartbeat and went stale, and the
+  // task told its owner to check it was running — which they cannot fix.
+  it("tells a non-admin their machine was switched off by an instance admin, with no advice they cannot take", () => {
+    withBoard({ machine: "disabled" });
+
+    expect(notice().dataset.reason).toBe("machine-disabled");
+    expect(notice().textContent).toBe(
+      "Nothing will run this yet. An instance admin switched your machine off, so it takes no work, and only an instance admin can switch it back on."
+    );
+    expect(screen.queryByRole("link", { name: "Check it is running" })).toBeNull();
+  });
+
+  it("tells an instance admin where their switched-off machine is switched back on", () => {
+    withBoard({ machine: "disabled" }, {}, { viewerIsInstanceAdmin: true });
+
+    expect(notice().textContent).toBe(
+      "Nothing will run this yet. Your machine is switched off in Settings → Workers, so it takes no work — switch it back on there."
+    );
+    expect(screen.getByRole("link", { name: "Settings → Workers" }).getAttribute("href")).toBe(
+      "/settings/workers"
+    );
+  });
 
   // BP-777. A machine whose checkout the worker refuses reported in like any other, and the task
   // said it was waiting for it.

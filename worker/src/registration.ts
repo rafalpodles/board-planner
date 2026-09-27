@@ -1,5 +1,5 @@
 import { RepoInventory } from "./config.js";
-import { CommandHandlers, isWorkerCommand } from "./commands.js";
+import { CommandHandlers, HaltReport, isWorkerCommand } from "./commands.js";
 import { PreflightCheck } from "./preflight.js";
 
 export const PROTOCOL_VERSION = 1;
@@ -45,6 +45,11 @@ export interface HeartbeatDeps {
   store: Store;
   // The command channel that survives SSE loss and a restart, so this is the durable one
   handlers: CommandHandlers;
+  // Called once a registration has stored a new identity
+  onRegistered?: () => void;
+  // Whether the loop is paused and who paused it. The board cannot see a pause made on the machine
+  // any other way.
+  halt?: () => HaltReport;
   fetchImpl?: typeof fetch;
   log?: (message: string) => void;
 }
@@ -105,6 +110,18 @@ function parseHeartbeatMs(text: string): number | null {
   }
 }
 
+// fetch reports every network failure as the same "fetch failed"; what failed is its cause, and a
+// host with two addresses fails with an AggregateError that says nothing but its code
+function describeFailure(error: unknown): string {
+  const cause = (error as { cause?: unknown } | null)?.cause;
+  if (!cause) return String(error);
+  const text = String(cause);
+  const code = (cause as { code?: unknown }).code;
+  return typeof code === "string" && !text.includes(code)
+    ? `${String(error)} (${code}: ${text})`
+    : `${String(error)} (${text})`;
+}
+
 export function loadIdentity(store: Pick<Store, "read">): Identity | null {
   return parseIdentity(store.read());
 }
@@ -118,6 +135,7 @@ export function startHeartbeat(deps: HeartbeatDeps): Heartbeat {
   let cached: StoredIdentity | null = null;
   let acked: string | undefined;
   let bindingError = "";
+  let lastUnreachableReason = "";
 
   async function register(): Promise<StoredIdentity | null> {
     if (!deps.enrolmentToken) {
@@ -127,9 +145,11 @@ export function startHeartbeat(deps: HeartbeatDeps): Heartbeat {
               "Fix the file, then restart the worker."
           : deps.enrolmentTokenFile
           ? `no identity on disk and CP_ENROLMENT_TOKEN_FILE (${deps.enrolmentTokenFile}) is missing ` +
-              "or empty: mint a token in Settings -> Workers and write it there, chmod 600."
-          : "no identity on disk and no CP_ENROLMENT_TOKEN: mint one in Settings -> Workers and set " +
-              "CP_ENROLMENT_TOKEN_FILE. It is spent by the first registration; delete it afterwards."
+              "or empty: mint a token under Settings -> Machines -> Connect a machine, write it " +
+              "there, chmod 600, then restart the worker."
+          : "no identity on disk and no CP_ENROLMENT_TOKEN: mint one under Settings -> Machines -> " +
+              "Connect a machine, point CP_ENROLMENT_TOKEN_FILE at it and restart the worker. The " +
+              "first registration spends it, and the worker deletes the file itself."
       );
       return null;
     }
@@ -173,6 +193,7 @@ export function startHeartbeat(deps: HeartbeatDeps): Heartbeat {
       } catch (error) {
         log(`could not remove the spent enrolment token: ${String(error)}`);
       }
+      deps.onRegistered?.();
       return identity;
     } catch (error) {
       log(`worker registration failed: ${String(error)}`);
@@ -208,6 +229,7 @@ export function startHeartbeat(deps: HeartbeatDeps): Heartbeat {
 
     const reported = deps.repos?.();
     const preflight = deps.preflight?.();
+    const halt = deps.halt?.();
 
     try {
       const response = await fetchImpl(`${deps.apiBaseUrl}/api/workers/${identity.workerId}/heartbeat`, {
@@ -227,9 +249,12 @@ export function startHeartbeat(deps: HeartbeatDeps): Heartbeat {
           // being told this machine suddenly has nothing.
           ...(reported === undefined ? {} : { repos: reported }),
           ...(preflight === undefined ? {} : { preflight }),
+          ...(halt === undefined ? {} : { halt }),
           ...(acked !== undefined ? { acked } : {}),
         }),
       });
+      if (lastUnreachableReason) log("heartbeat reached the server again");
+      lastUnreachableReason = "";
 
       if (response.status === 403) {
         for (const cb of abortCallbacks) cb();
@@ -250,7 +275,12 @@ export function startHeartbeat(deps: HeartbeatDeps): Heartbeat {
         }
       }
     } catch (error) {
-      log(`heartbeat could not reach the server: ${String(error)}`);
+      // Keyed on the failure, not its cause: a flapping resolver alternates causes every beat
+      const reason = String(error);
+      if (reason !== lastUnreachableReason) {
+        log(`heartbeat could not reach the server: ${describeFailure(error)}`);
+        lastUnreachableReason = reason;
+      }
     }
 
     scheduleNext(identity.heartbeatMs);

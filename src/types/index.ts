@@ -661,8 +661,29 @@ export interface IWorker {
   command: "" | "pause" | "resume" | "stop";
   commandIssuedAt: Date | null;
   commandAckedAt: Date | null;
+  // What the machine says its loop is doing, whoever halted it. Absent from a worker too old to
+  // say, which is then read from the command it acknowledged.
+  halt?: WorkerHalt | null;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export type WorkerHaltSource = "board" | "machine";
+
+export interface ApiWorkerHalt {
+  paused: boolean;
+  by: WorkerHaltSource | null;
+  command: "pause" | "stop" | null;
+}
+
+/** Whether a machine is taking work at all, whatever project is asking */
+export interface ApiMachineCondition {
+  state: "disabled" | "stale" | "paused" | "stopped" | "failing" | "live";
+  haltedBy: WorkerHaltSource | null;
+}
+
+export interface WorkerHalt extends ApiWorkerHalt {
+  reportedAt: Date;
 }
 
 export interface ApiWorker {
@@ -684,6 +705,8 @@ export interface ApiWorker {
   command: "" | "pause" | "resume" | "stop";
   commandIssuedAt: string | null;
   commandAckedAt: string | null;
+  halt: ApiWorkerHalt | null;
+  condition: ApiMachineCondition;
   createdAt: string;
   updatedAt: string;
   stale: boolean;
@@ -1739,6 +1762,7 @@ export interface ApiAgentBlock {
 
 export type MachineState =
   | "none"
+  | "disabled"
   | "stale"
   | "unbound"
   | "paused"
@@ -1757,6 +1781,20 @@ export interface ApiHandoverReadiness {
   machine: MachineState;
   /** Why the reader's machine cannot use its checkout of this board, when `machine` is "unbound" */
   bindingError: string;
+  /** Who halted the reader's machine, when `machine` is "paused" or "stopped" */
+  haltedBy: WorkerHaltSource | null;
+}
+
+/** One of the reader's own machines, as Settings → Machines lists it */
+export interface ApiMyMachine {
+  _id: string;
+  name: string;
+  host: string;
+  version: string;
+  lastSeenAt: string | null;
+  state: ApiMachineCondition["state"];
+  haltedBy: WorkerHaltSource | null;
+  checkouts: number;
 }
 
 export interface ApiAgent {

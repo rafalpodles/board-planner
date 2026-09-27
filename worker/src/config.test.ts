@@ -94,6 +94,24 @@ describe("loadBootstrap", () => {
   it("throws when the worker name is missing", () => {
     expect(() => loadBootstrap({ ...base, CP_WORKER_NAME: undefined })).toThrow(/CP_WORKER_NAME/);
   });
+
+  it("refuses the shipped plist's placeholder address and says what belongs there", () => {
+    expect(() => loadBootstrap({ ...base, CP_API_URL: "BOARD_URL" })).toThrow(
+      `CP_API_URL must be your board's address, such as https://app.board-planner.com, not "BOARD_URL"`
+    );
+  });
+
+  it("refuses an address that is not http or https", () => {
+    expect(() => loadBootstrap({ ...base, CP_API_URL: "ftp://app.example.com" })).toThrow(
+      /CP_API_URL must be your board's address/
+    );
+  });
+
+  it("accepts a plain http address, which a board on a local network may have", () => {
+    expect(loadBootstrap({ ...base, CP_API_URL: "http://board.local:3000/" }).apiBaseUrl).toBe(
+      "http://board.local:3000"
+    );
+  });
 });
 
 // Nothing reads this any more; it is still parsed so an existing plist keeps booting unchanged.

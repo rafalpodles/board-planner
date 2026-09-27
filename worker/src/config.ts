@@ -226,6 +226,22 @@ function required(env: Env, key: string): string {
   return value.trim();
 }
 
+function boardAddress(env: Env): string {
+  const value = required(env, "CP_API_URL").replace(/\/$/, "");
+  let protocol = "";
+  try {
+    protocol = new URL(value).protocol;
+  } catch {
+    protocol = "";
+  }
+  if (protocol !== "https:" && protocol !== "http:") {
+    throw new Error(
+      `CP_API_URL must be your board's address, such as https://app.board-planner.com, not "${value}"`
+    );
+  }
+  return value;
+}
+
 // Resolvable before anything else is: `--preflight` runs on a machine that has not enrolled yet,
 // with none of the variables loadBootstrap insists on, and it still has to find the state
 // directory to read the operator's pinned GitHub account out of.
@@ -236,7 +252,7 @@ export function stateDirFrom(env: Env): string {
 export function loadBootstrap(env: Env, readSecret: SecretReader = readSecretFile): Bootstrap {
   const enrolment = enrolmentSecret(env, "CP_ENROLMENT_TOKEN", readSecret);
   return {
-    apiBaseUrl: required(env, "CP_API_URL").replace(/\/$/, ""),
+    apiBaseUrl: boardAddress(env),
     // Optional since CP-237: the worker holds one credential, minted by registration, whose scope
     // tracks its assignments. Still read when present so an existing plist keeps booting.
     apiToken: ignoredSecret(env, "CP_API_TOKEN", readSecret),

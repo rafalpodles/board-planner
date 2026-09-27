@@ -29,7 +29,7 @@ import {
   PickerRow,
 } from "./FieldRow";
 import type { TaskDraft } from "./useTaskEditor";
-import type { ApiAgent, ApiTask } from "@/types";
+import type { ApiAgent, ApiTask, WorkerHaltSource } from "@/types";
 import {
   awaitingClaim,
   handoverOf,
@@ -96,6 +96,8 @@ interface BlockerContext {
   locked: boolean;
   /** Why the reader's own machine refuses its checkout of this board, as the worker said it */
   bindingError: string;
+  /** Who paused or stopped the reader's own machine: the board, or somebody at the machine */
+  haltedBy: WorkerHaltSource | null;
 }
 
 function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }) {
@@ -184,26 +186,50 @@ function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }
     case "machine-stale":
       return (
         <>
-          Your machine with this board&apos;s repository has not reported in for over five minutes,
-          or is switched off. <MachineLink>Check it is running</MachineLink>
+          Your machine with this board&apos;s repository has not reported in for over five minutes.{" "}
+          <MachineLink>Check it is running</MachineLink>
+        </>
+      );
+    case "machine-disabled":
+      return ctx.viewerIsInstanceAdmin ? (
+        <>
+          Your machine is switched off in{" "}
+          <a href="/settings/workers" className="underline">
+            Settings → Workers
+          </a>
+          , so it takes no work — switch it back on there.
+        </>
+      ) : (
+        <>
+          An instance admin switched your machine off, so it takes no work, and only an instance
+          admin can switch it back on.
         </>
       );
     case "machine-paused":
     case "machine-stopped": {
       const done = blocker.reason === "machine-paused" ? "paused" : "stopped";
-      // A pause or stop only ever comes from the fleet console, and only an instance admin opens it
+      if (ctx.haltedBy === "machine") {
+        return (
+          <>
+            Your machine is connected but not taking work: it was {done} on the machine itself.
+            Resume it from the menubar app there.
+          </>
+        );
+      }
+      // The board's own pause or stop comes from the fleet console, which only an instance admin
+      // opens — and the menubar app's Resume lifts it too
       return ctx.viewerIsInstanceAdmin ? (
         <>
           Your machine is connected but not taking work: it is {done}. Resume it in{" "}
           <a href="/settings/workers" className="underline">
             Settings → Workers
           </a>
-          .
+          , or from the menubar app on that machine.
         </>
       ) : (
         <>
-          Your machine is connected but not taking work: an instance admin {done} it, and only an
-          instance admin can resume it.
+          Your machine is connected but not taking work: an instance admin {done} it. Resume it from
+          the menubar app on that machine, or ask an instance admin to.
         </>
       );
     }
@@ -217,8 +243,8 @@ function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }
     case "machine-failing":
       return (
         <>
-          Your machine is connected but not taking work: its sandbox check failed. The menubar app
-          says what to fix.
+          Your machine is connected but not taking work: its sandbox check failed. The menubar app,
+          or the worker&apos;s log on that machine, says what to fix.
         </>
       );
     case "attempts-exhausted":
@@ -281,6 +307,7 @@ function HandoverNotice({
     columns: board?.columns ?? [],
     locked: gaps.includes("runs-locked"),
     bindingError: board?.bindingError ?? "",
+    haltedBy: board?.haltedBy ?? null,
   };
 
   if (blockers.length === 0) {

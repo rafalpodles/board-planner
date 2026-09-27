@@ -4,9 +4,55 @@ export type WorkerCommand = "pause" | "resume" | "stop";
 export type CommandHandlers = Record<WorkerCommand, (issuedAt?: string) => void>;
 export type LocalCommands = Record<WorkerCommand, () => void>;
 
+export type HaltSource = "board" | "machine";
+
+export interface HaltReport {
+  paused: boolean;
+  by: HaltSource | null;
+  command: "pause" | "stop" | null;
+}
+
 export interface CommandChannels {
   remote: CommandHandlers;
   local: LocalCommands;
+  halt(): HaltReport;
+  // A new registration is a new record on the board, which never issued the command behind a
+  // board halt this process carries
+  registered(): void;
+}
+
+export interface HaltMemory {
+  read(): string;
+  write(text: string): void;
+}
+
+interface SavedHalt {
+  paused: boolean;
+  by: HaltSource;
+  command: "pause" | "stop";
+  boardIssuedAt: string | null;
+  workerId: string | null;
+}
+
+const MAX_ISSUANCE_LENGTH = 64;
+
+function readSavedHalt(memory: HaltMemory | undefined): SavedHalt | null {
+  if (!memory) return null;
+  try {
+    const saved = JSON.parse(memory.read()) as Record<string, unknown> | null;
+    if (!saved || typeof saved.paused !== "boolean") return null;
+    const issued = saved.boardIssuedAt;
+    return {
+      paused: saved.paused,
+      by: saved.by === "board" ? "board" : "machine",
+      command: saved.command === "stop" ? "stop" : "pause",
+      boardIssuedAt:
+        typeof issued === "string" && issued.length <= MAX_ISSUANCE_LENGTH ? issued : null,
+      workerId: typeof saved.workerId === "string" ? saved.workerId : null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 const COMMANDS = new Set<string>(["pause", "resume", "stop"]);
@@ -50,6 +96,11 @@ export interface CommandDeps {
   loop: Pick<Loop, "pause" | "resume" | "paused">;
   runs: Pick<RunGuard, "abort">;
   ack: (command: WorkerCommand) => void;
+  // Where the halt outlives a restart. Without it a restart forgets a pause made on this machine,
+  // and re-applies a board pause that was resumed here.
+  memory?: HaltMemory;
+  // The record the halt belongs to: a file written under another one is not restored
+  workerId?: () => string | null;
 }
 
 export function createCommandHandlers(deps: CommandDeps): CommandChannels {
@@ -63,8 +114,67 @@ export function createCommandHandlers(deps: CommandDeps): CommandChannels {
   // would make one local pause silently swallow a later board-issued stop — the emergency brake,
   // dropped, while the run carries on to merge.
   let lastAppliedAt = -Infinity;
+  let haltedBy: { by: HaltSource; command: "pause" | "stop" } | null = null;
+
+  const stored = readSavedHalt(deps.memory);
+  let registeredAs = deps.workerId?.() ?? null;
+  const saved = stored && registeredAs !== null && stored.workerId === registeredAs ? stored : null;
+  let boardIssuedAt = saved?.boardIssuedAt ?? null;
+  // Matched by equality and never ordered against anything: the file sits on the machine's own disk,
+  // so it may only spare the one board command it names, never gate a later one.
+  let appliedBeforeRestart = boardIssuedAt;
+  if (saved?.paused) {
+    deps.loop.pause();
+    haltedBy = { by: saved.by, command: saved.command };
+  }
+
+  function halt(): HaltReport {
+    if (!deps.loop.paused()) return { paused: false, by: null, command: null };
+    return { paused: true, by: haltedBy?.by ?? null, command: haltedBy?.command ?? null };
+  }
+
+  function persist(): void {
+    try {
+      deps.memory?.write(
+        JSON.stringify({ ...halt(), boardIssuedAt, workerId: deps.workerId?.() ?? null })
+      );
+    } catch {
+      // Only the halt's survival across a restart is lost; this process still holds it
+    }
+  }
+
+  function record(command: WorkerCommand, by: HaltSource): void {
+    haltedBy = command === "resume" ? null : { by, command };
+    persist();
+  }
+
+  // The loop stays as it is, and a board halt is the machine's to lift now: the record that issued
+  // it is not the one this process reports to, and that board's instants order nothing here
+  function registered(): void {
+    const id = deps.workerId?.() ?? null;
+    // Registering again as the same machine reclaims its record, standing command and all — only
+    // what was written down while worker.json was blank needs the id stamped back on
+    if (id !== null && id === registeredAs) {
+      persist();
+      return;
+    }
+    registeredAs = id;
+    if (haltedBy?.by === "board") haltedBy = { by: "machine", command: haltedBy.command };
+    lastAppliedAt = -Infinity;
+    boardIssuedAt = null;
+    appliedBeforeRestart = null;
+    persist();
+  }
 
   function apply(command: WorkerCommand, issuedAt: string | undefined, effect: () => void): void {
+    if (issuedAt !== undefined && issuedAt === appliedBeforeRestart) {
+      appliedBeforeRestart = null;
+      const instant = Date.parse(issuedAt);
+      if (!Number.isNaN(instant)) lastAppliedAt = instant;
+      settle(command);
+      return;
+    }
+
     const instant = issuedAt ? Date.parse(issuedAt) : NaN;
     if (Number.isNaN(instant)) {
       // Undated pause/stop is a safe default to apply; undated resume is not — see commit message.
@@ -72,9 +182,13 @@ export function createCommandHandlers(deps: CommandDeps): CommandChannels {
     } else {
       if (instant <= lastAppliedAt) return;
       lastAppliedAt = instant;
+      // Superseded: a late answer still carrying the spared issuance must not move the guard back
+      appliedBeforeRestart = null;
     }
 
     effect();
+    boardIssuedAt = issuedAt ?? null;
+    record(command, "board");
     settle(command);
   }
 
@@ -96,6 +210,7 @@ export function createCommandHandlers(deps: CommandDeps): CommandChannels {
   // redelivered and never reordered, so it needs no recency guard — and must not touch one.
   function applyLocal(command: WorkerCommand): void {
     effects[command]();
+    record(command, "machine");
     settle(command);
   }
 
@@ -110,5 +225,7 @@ export function createCommandHandlers(deps: CommandDeps): CommandChannels {
       resume: () => applyLocal("resume"),
       stop: () => applyLocal("stop"),
     },
+    halt,
+    registered,
   };
 }

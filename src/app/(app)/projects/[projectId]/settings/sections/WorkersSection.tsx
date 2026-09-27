@@ -242,7 +242,22 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
                 ) : (
                   <ul className="border border-border rounded-lg divide-y divide-border">
                     {offering.map((w) => {
-                      const refused = w.stale ? "" : bindingErrorFor(w.bindingError, String(project._id));
+                      const state = w.condition?.state ?? (w.stale ? "stale" : "live");
+                      const quiet = state === "disabled" || state === "stale";
+                      const refused = quiet ? "" : bindingErrorFor(w.bindingError, String(project._id));
+                      const halted = state === "paused" || state === "stopped" ? state : "";
+                      const label =
+                        state === "disabled"
+                          ? "switched off"
+                          : state === "stale"
+                            ? "not reporting"
+                            : halted ||
+                              (state === "failing"
+                                ? "failing its sandbox check"
+                                : refused
+                                  ? "cannot use its checkout"
+                                  : "live");
+                      const tone = halted ? "text-warning" : label === "live" ? "text-success" : "text-danger";
                       return (
                         <li
                           key={w._id}
@@ -251,11 +266,8 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
                         >
                           <span className="font-medium">{w.name}</span>
                           <span className="text-text-muted">{w.host}</span>
-                          <span
-                            data-testid="offering-machine-state"
-                            className={`ml-auto text-xs ${w.stale || refused ? "text-danger" : "text-success"}`}
-                          >
-                            {w.stale ? "not reporting" : refused ? "cannot use its checkout" : "live"}
+                          <span data-testid="offering-machine-state" className={`ml-auto text-xs ${tone}`}>
+                            {label}
                           </span>
                           {refused && (
                             <p

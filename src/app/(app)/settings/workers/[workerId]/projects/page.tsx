@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
+import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/Button";
 import { PageHeader } from "@/components/shell/PageHeader";
 
@@ -55,6 +56,7 @@ export default function MachineProjectsPage() {
   const params = useParams();
   const workerId = String(params.workerId ?? "");
   const api = useApi();
+  const { isAdmin } = useAuth();
 
   const [view, setView] = useState<View | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -167,8 +169,13 @@ export default function MachineProjectsPage() {
         subtitle={view.worker.host || undefined}
       />
       <p className="mt-2 text-text-muted">
-        Tick a project and this machine sets up a checkout for it. Untick one and the app offers to
-        remove the checkout, asking on the machine first.
+        Tick a project and the menubar app on this machine sets up a checkout for it. Untick one and
+        the app offers to remove the checkout, asking on the machine first.
+      </p>
+      <p data-testid="without-the-app" className="mt-2 text-sm text-text-muted">
+        A machine run without the app — a Linux box, a container, a worker started by hand — gets no
+        checkout from ticking a project here: clone the repository there yourself and list it in
+        repos.json.
       </p>
 
       <div className="mt-6 space-y-2">
@@ -255,7 +262,7 @@ export default function MachineProjectsPage() {
         <Button onClick={save} disabled={saving}>
           {saving ? "Saving…" : "Save"}
         </Button>
-        <Link href="/settings/workers" className="text-sm text-text-muted underline">
+        <Link href={isAdmin ? "/settings/workers" : "/settings/machines"} className="text-sm text-text-muted underline">
           Back to machines
         </Link>
       </div>

@@ -27,6 +27,7 @@ const seedAgents = vi.fn(() => Promise.resolve());
 const countDocuments = vi.fn(() => Promise.resolve(1));
 const setupCode = vi.fn();
 const markPmAsMachine = vi.fn(() => Promise.resolve());
+const repairMachineNames = vi.fn(() => Promise.resolve(0));
 const startPmScheduler = vi.fn();
 const startGithubSyncScheduler = vi.fn(() => ({ started: true as const, tickMs: 300_000 }));
 const startDigestScheduler = vi.fn(() => ({ started: true as const, tickMs: 300_000 }));
@@ -36,6 +37,7 @@ vi.mock("@/lib/agent-seed", () => ({ seedAgents }));
 vi.mock("@/models/user", () => ({ User: { countDocuments } }));
 vi.mock("@/lib/setup-code", () => ({ setupCode }));
 vi.mock("@/lib/pm/pm-user", () => ({ markPmAsMachine }));
+vi.mock("@/lib/worker-user", () => ({ repairMachineNames }));
 vi.mock("@/lib/pm/scheduler", () => ({ startPmScheduler }));
 vi.mock("@/lib/github-sync", () => ({ startGithubSyncScheduler }));
 vi.mock("@/lib/digest", () => ({
@@ -192,6 +194,24 @@ describe("register — a database that is down at boot", () => {
     expect(connectDB).toHaveBeenCalledTimes(2);
     expect(markPmAsMachine).toHaveBeenCalledTimes(1);
     expect(seedAgents).toHaveBeenCalledTimes(1);
+    expect(repairMachineNames).toHaveBeenCalledTimes(1);
+  });
+
+  // BP-425. Every boot, like the catalog seed, and just as unable to keep the schedulers down
+  it("repairs machine names at boot, and still starts the schedulers when that fails", async () => {
+    process.env.NEXT_RUNTIME = "nodejs";
+    delete process.env.ENCRYPTION_KEY;
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    connectDB.mockImplementation(() => Promise.resolve());
+    repairMachineNames.mockImplementationOnce(() => Promise.reject(new Error("users collection is gone")));
+    const { register } = await import("./instrumentation");
+
+    await register();
+
+    expect(repairMachineNames).toHaveBeenCalledTimes(1);
+    expect(error).toHaveBeenCalledWith("Failed to repair machine names:", expect.any(Error));
+    expect(startPmScheduler).toHaveBeenCalledTimes(1);
   });
 
   // The test above proves the retry happens within 30s; this pins it to that value specifically,

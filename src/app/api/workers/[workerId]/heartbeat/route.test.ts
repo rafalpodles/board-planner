@@ -457,6 +457,64 @@ describe("the preflight report a worker sends", () => {
   });
 });
 
+// BP-762. The only way a pause or resume made at the machine reaches the board
+describe("the halt a worker reports", () => {
+  function haltPatch() {
+    return touchWorker.mock.calls[0]?.[1]?.halt;
+  }
+
+  it("stores a pause made at the machine, as the machine's", async () => {
+    const { req, ctx } = request({ halt: { paused: true, by: "machine", command: "pause" } });
+
+    await POST(req, ctx);
+
+    expect(haltPatch()).toMatchObject({ paused: true, by: "machine", command: "pause" });
+    expect(haltPatch()?.reportedAt).toBeInstanceOf(Date);
+  });
+
+  it("stores running as running, whoever the worker says had halted it before", async () => {
+    const { req, ctx } = request({ halt: { paused: false, by: "board", command: "stop" } });
+
+    await POST(req, ctx);
+
+    expect(haltPatch()).toMatchObject({ paused: false, by: null, command: null });
+  });
+
+  it("keeps a pause whose source or kind it does not recognise, without either", async () => {
+    const { req, ctx } = request({ halt: { paused: true, by: "somebody", command: "reboot" } });
+
+    await POST(req, ctx);
+
+    expect(haltPatch()).toMatchObject({ paused: true, by: null, command: null });
+  });
+
+  it("leaves the stored halt alone when a worker too old to report one sends none", async () => {
+    const { req, ctx } = request({ version: "1.0.0" });
+
+    await POST(req, ctx);
+
+    expect(touchWorker.mock.calls[0]?.[1]).not.toHaveProperty("halt");
+  });
+
+  it("drops a halt whose paused is not a boolean", async () => {
+    const { req, ctx } = request({ halt: { paused: "yes", by: "machine", command: "pause" } });
+
+    await POST(req, ctx);
+
+    expect(touchWorker.mock.calls[0]?.[1]).not.toHaveProperty("halt");
+  });
+
+  it("stores nothing for a switched-off machine, which is refused before anything is written", async () => {
+    verifyWorkerCredential.mockResolvedValue(workerDoc({ enabled: false }));
+    const { req, ctx } = request({ halt: { paused: true, by: "machine", command: "pause" } });
+
+    const res = await POST(req, ctx);
+
+    expect(res.status).toBe(403);
+    expect(touchWorker).not.toHaveBeenCalled();
+  });
+});
+
 // BP-323: every other worker's claim and heartbeat read this inventory back
 describe("POST heartbeat — what one worker may store about itself", () => {
   const storedRepos = () => workerUpdateOne.mock.calls[0][1].$set.repos as { remote: string }[];

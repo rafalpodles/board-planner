@@ -187,7 +187,8 @@ same path from the same state directory, so nothing needs configuring (BP-778).
 As a macOS service:
 
 Write the enrolment token first, to a file only you can read — never into the plist, which sits
-at `0644` and rides along into Time Machine. With the token copied from the Enrol dialog:
+at `0644` and rides along into Time Machine. With the token copied from Settings → Machines →
+"Connect a machine":
 
 ```bash
 mkdir -p -m 700 ~/.boardplanner
@@ -201,11 +202,13 @@ run the `unload` and `load` below again. A worker that has already registered
 never uses the token, so a leftover file there does not stop it. The inline variable still works
 for a container, where there is no file to protect.
 
-Then install the plist and load it. It ships with `REPO_DIR` and `HOME_DIR` placeholders rather than
-one developer's absolute paths, so substitute them as you install it:
+Then install the plist and load it. It ships with four placeholders rather than one developer's
+values, named in the comment at its top: `REPO_DIR`, `HOME_DIR`, `BOARD_URL` and `MACHINE_NAME`.
+Substitute all four as you install it, with your own board's address if it is not the hosted one:
 
 ```bash
 sed -e "s|REPO_DIR|$(cd .. && pwd)|g" -e "s|HOME_DIR|$HOME|g" \
+    -e "s|BOARD_URL|https://app.board-planner.com|g" -e "s|MACHINE_NAME|$(hostname -s)|g" \
   launchd/com.boardplanner.worker.plist > ~/Library/LaunchAgents/com.boardplanner.worker.plist
 launchctl unload ~/Library/LaunchAgents/com.boardplanner.worker.plist 2>/dev/null
 launchctl load ~/Library/LaunchAgents/com.boardplanner.worker.plist
@@ -217,6 +220,11 @@ the new plist.
 Loading it before the token is in place starts a worker that stays unregistered: it reads the token
 only when it starts, so it logs every 30 seconds that it has none until you `launchctl unload` and
 `load` it again.
+
+A worker whose `CP_API_URL` is still `BOARD_URL`, or is not an `http` or `https` address at all,
+stops at start and says so in the error log rather than retrying an address it cannot reach —
+`launchd` starts it again every 30 seconds, so the line repeats until you fix the plist and unload
+and load it.
 
 The plist carries the paths for this machine — check `ProgramArguments` and `PATH` before loading
 it anywhere else. Logs go to `/tmp/boardplanner-worker.log` and
@@ -304,8 +312,9 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   Refusing alone would only hand the same clone to the next attempt, so the checkout is
   **quarantined**: this machine stops claiming for every project bound to it — the poison is in the
   path's config, not in a project — and the task is handed back with its attempt refunded, because
-  it did nothing wrong. Settings → Workers shows it as a failed check naming the key, and the
-  worker's log says the same thing. The quarantine is deliberately not lifted by the next rebind,
+  it did nothing wrong. The worker's log names the key, and so does the menubar app on that
+  project's row; an instance admin also sees it as a failed check in Settings → Workers. The
+  quarantine is deliberately not lifted by the next rebind,
   because a re-scan reading clean thirty seconds later is exactly what re-planting produces. Remove
   the key, then restart the worker.
 
@@ -690,7 +699,7 @@ uses: claiming, reporting status, commenting, releasing, and all of `/api/worker
 outside the worker API accepts it.
 
 **`CP_ENROLMENT_TOKEN` / `CP_ENROLMENT_TOKEN_FILE`** — single-use, one hour to live. Mint one from
-Settings → Workers → "Enrol a worker" and put it on the machine. The first registration spends it
+Settings → Machines → "Connect a machine" and put it on the machine. The first registration spends it
 server-side, the worker deletes the file, and it is never needed again — a worker with an identity
 in `worker.json` does not re-register. Optional by design: an enrolled worker must keep booting
 after you remove it, so a token file that is gone is not an error. One that is there but readable
