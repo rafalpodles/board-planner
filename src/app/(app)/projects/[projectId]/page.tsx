@@ -11,23 +11,21 @@ import { projectPath } from "@/lib/urls";
 import { BoardHeader } from "@/components/kanban/BoardHeader";
 import { sprintScopeFromParam, sprintScopeToQuery, isSprintScopeShape } from "@/lib/sprint-scope";
 import { APP_NAME } from "@/lib/brand";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 import { BoardLoadFailed } from "@/components/ui/LoadFailed";
 
-function useBoardDocumentTitle(project: ApiProject | null, tasks: ApiTask[]) {
-  useEffect(() => {
-    if (!project) return;
-    // By role: a board that renamed these columns counted nothing and showed a bare project name
-    const approved = new Set(columnIdsWithRole(project, "approved"));
-    const active = new Set(columnIdsWithRole(project, "active"));
-    const todoCount = tasks.filter((t) => approved.has(t.status)).length;
-    const inProgressCount = tasks.filter((t) => active.has(t.status)).length;
-    const parts: string[] = [];
-    if (inProgressCount > 0) parts.push(`${inProgressCount} in progress`);
-    if (todoCount > 0) parts.push(`${todoCount} todo`);
-    const suffix = parts.length > 0 ? ` (${parts.join(", ")})` : "";
-    document.title = `${project.name}${suffix} — ${APP_NAME}`;
-    return () => { document.title = APP_NAME; };
-  }, [project, tasks]);
+function boardDocumentTitle(project: ApiProject | null, tasks: ApiTask[]): string | null {
+  if (!project) return null;
+  // By role: a board that renamed these columns counted nothing and showed a bare project name
+  const approved = new Set(columnIdsWithRole(project, "approved"));
+  const active = new Set(columnIdsWithRole(project, "active"));
+  const todoCount = tasks.filter((t) => approved.has(t.status)).length;
+  const inProgressCount = tasks.filter((t) => active.has(t.status)).length;
+  const parts: string[] = [];
+  if (inProgressCount > 0) parts.push(`${inProgressCount} in progress`);
+  if (todoCount > 0) parts.push(`${todoCount} todo`);
+  const suffix = parts.length > 0 ? ` (${parts.join(", ")})` : "";
+  return `${project.name}${suffix} — ${APP_NAME}`;
 }
 
 export default function KanbanPage() {
@@ -53,7 +51,7 @@ export default function KanbanPage() {
   }, [rawScope, projectId]);
 
   useCanonicalUrl(board.project?.key);
-  useBoardDocumentTitle(board.project, board.tasks);
+  useDocumentTitle(boardDocumentTitle(board.project, board.tasks));
 
   if (board.loading || (!board.project && !board.loadError)) {
     return (

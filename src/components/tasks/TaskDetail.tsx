@@ -17,6 +17,8 @@ import {
   RunConflict,
 } from "@/types";
 import { useStore } from "@/app/(app)/agents/store";
+import { useDocumentTitle } from "@/hooks/use-document-title";
+import { APP_NAME } from "@/lib/brand";
 import { effectiveColumns } from "@/lib/columns";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Modal } from "@/components/ui/Modal";
@@ -263,6 +265,7 @@ function TaskDetailView({
   const scope = { key: project.key, formerKeys: project.formerKeys };
   const triggers = useEditorTriggers(projectId, project.key);
   const taskKey = `${project.key}-${task.taskNumber}`;
+  useDocumentTitle(`${taskKey} ${draft.title.trim() || task.title} — ${APP_NAME}`);
   // Not a plain lookup in the roster: that holds only people who reach the board, so a task
   // assigned before somebody lost access resolved to nothing and the mobile chip printed
   // "Unassigned" over it. Same rule the rail's picker uses, so the two cannot disagree.

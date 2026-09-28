@@ -1,7 +1,9 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, waitFor, act, within } from "@testing-library/react";
+import { render, screen, cleanup, waitFor, act, within, fireEvent } from "@testing-library/react";
 import { TaskDetail } from "./TaskDetail";
+import { useDocumentTitle } from "@/hooks/use-document-title";
+import { APP_NAME } from "@/lib/brand";
 
 const { api, auth, toast } = vi.hoisted(() => ({
   toast: vi.fn(),
@@ -1273,5 +1275,54 @@ describe("TaskDetail telling the history panel it wrote there", () => {
     await act(async () => screen.getByRole("button", { name: "stub: saved" }).click());
 
     expect(key()).toBeGreaterThan(before);
+  });
+});
+
+describe("TaskDetail, the browser tab's title", () => {
+  beforeEach(() => {
+    document.title = APP_NAME;
+  });
+
+  it("names the task by its key and title once it has loaded", async () => {
+    renderDetail();
+    await loaded();
+    await waitFor(() => expect(document.title).toBe(`TP-6 Recurring one — ${APP_NAME}`));
+  });
+
+  it("follows the title as it is edited", async () => {
+    renderDetail();
+    await loaded();
+    fireEvent.change(screen.getByLabelText("Task title"), { target: { value: "Renamed on the page" } });
+    await waitFor(() => expect(document.title).toBe(`TP-6 Renamed on the page — ${APP_NAME}`));
+  });
+
+  it("claims nothing for a task that could not be read", async () => {
+    api.get.mockImplementation((url: string) => {
+      if (url === "/api/projects/TP/assignable-users") return Promise.resolve([]);
+      if (url.startsWith("/api/agent")) return Promise.resolve([]);
+      if (url.includes("/tasks/")) return Promise.reject(Object.assign(new Error("no"), { status: 404 }));
+      if (url.includes("/sprints")) return Promise.resolve([]);
+      return Promise.resolve(project);
+    });
+    renderDetail();
+    await screen.findByText("There is no task here — the link may be stale.");
+    expect(document.title).toBe(APP_NAME);
+  });
+
+  it("gives the tab back to the board beneath it when it closes", async () => {
+    function Board() {
+      useDocumentTitle(`Test Project (1 todo) — ${APP_NAME}`);
+      return null;
+    }
+    const view = render(<Board />);
+    const detail = renderDetail();
+    await loaded();
+    await waitFor(() => expect(document.title).toBe(`TP-6 Recurring one — ${APP_NAME}`));
+
+    detail.unmount();
+    expect(document.title).toBe(`Test Project (1 todo) — ${APP_NAME}`);
+
+    view.unmount();
+    expect(document.title).toBe(APP_NAME);
   });
 });
