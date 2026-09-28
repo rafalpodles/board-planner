@@ -776,7 +776,7 @@ test.describe("whose task a personal agent may go on", () => {
     const handle = await db();
     const rows = await handle.collection("activitylogs").find({ task: own, field: "agent" }).toArray();
     expect(rows.map((r) => [String(r.oldValue), String(r.newValue ?? "")])).toEqual([
-      [String(MINE), ""],
+      ["Member's own", ""],
     ]);
   });
 
