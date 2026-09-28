@@ -61,6 +61,10 @@ test.describe("an agent change", () => {
     await page.getByRole("option", { name: PROJECT_AGENT_NAME }).click();
     expect((await saved).status()).toBe(200);
 
+    // The name is what is stored, so it survives the agent being deleted later
+    const stored = (await storedActivity(SIBLING_TASK_ID)).find((row) => row.field === "agent");
+    expect(stored).toMatchObject({ oldValue: "", newValue: PROJECT_AGENT_NAME });
+
     const panel = await openHistory(page);
     await expect(sentence(panel, `changed agent from no agent to ${PROJECT_AGENT_NAME}`)).toBeVisible();
     await expect(panel.getByText(String(PROJECT_AGENT_ID))).toHaveCount(0);
