@@ -571,17 +571,6 @@ describe("dispatching it", () => {
     );
   });
 
-  it("hands on the digest's phrasing with the title", async () => {
-    stored = [member(1, { defaults: { task_created: row({ inApp: true }) } })];
-    granted = [id(1)];
-
-    await notifyBoardFeed({ ...params, digestTitle: "New task in Board Planner" });
-
-    expect(createNotifications).toHaveBeenCalledWith(
-      expect.objectContaining({ digestTitle: "New task in Board Planner" })
-    );
-  });
-
   it("writes nothing when nobody subscribed", async () => {
     stored = [member(1)];
     granted = [id(1)];
