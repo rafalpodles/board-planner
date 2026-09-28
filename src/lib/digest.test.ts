@@ -155,6 +155,7 @@ describe("when the digest is due", () => {
       ["25", 23],
       ["-1", 0],
       ["0", 0],
+      [" 8 ", 8],
     ];
     for (const [value, hour] of cases) {
       if (value === undefined) delete process.env.DIGEST_HOUR;
