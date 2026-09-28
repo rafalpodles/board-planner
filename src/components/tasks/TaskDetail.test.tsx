@@ -1326,3 +1326,46 @@ describe("TaskDetail, the browser tab's title", () => {
     expect(document.title).toBe(APP_NAME);
   });
 });
+
+describe("TaskDetail, the agent list the rail offers from", () => {
+  const carrying = { ...task, agent: { _id: "ag1", name: "Board default" } };
+  const BOARD_AGENT = { _id: "ag1", name: "Board default", scope: "project", projectId: "p1", description: "" };
+
+  function serve(agents: () => Promise<unknown>) {
+    api.get.mockImplementation((url: string) => {
+      if (url === "/api/projects/TP/assignable-users") return Promise.resolve([]);
+      if (url === "/api/agents") return agents();
+      if (url.startsWith("/api/agent")) return Promise.resolve([]);
+      if (url.includes("/tasks/")) return Promise.resolve(carrying);
+      if (url.includes("/sprints")) return Promise.resolve([]);
+      return Promise.resolve(project);
+    });
+  }
+  const rail = () => within(screen.getByRole("complementary"));
+
+  it("claims nothing about the task's agent while the list is on its way", async () => {
+    serve(() => new Promise(() => {}));
+    renderDetail();
+    await loaded();
+
+    expect(rail().queryByText(/Not yours to choose/)).toBeNull();
+    expect(rail().getByTestId("agent-unread").textContent).toBe("Board default");
+  });
+
+  it("says the list could not be loaded, and a retry that answers brings the picker back", async () => {
+    let failing = true;
+    serve(() => (failing ? Promise.reject(new Error("down")) : Promise.resolve([BOARD_AGENT])));
+    renderDetail();
+    await loaded();
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(rail().queryByText(/Not yours to choose/)).toBeNull();
+    const alert = await waitFor(() => rail().getByTestId("agents-unread"));
+
+    failing = false;
+    await act(async () => within(alert).getByRole("button", { name: "Retry" }).click());
+
+    await waitFor(() => expect(rail().getByRole("combobox", { name: "Agent" }).textContent).toContain("Board default"));
+    expect(rail().queryByTestId("agents-unread")).toBeNull();
+  });
+});

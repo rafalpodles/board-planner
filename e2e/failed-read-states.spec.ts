@@ -3,6 +3,8 @@ import {
   DECOY_TASK_TITLE,
   PERSONAL_AGENT_ID,
   PERSONAL_AGENT_NAME,
+  PROJECT_AGENT_ID,
+  PROJECT_AGENT_NAME,
   PROJECT_ID,
   PROJECT_KEY,
   SIBLING_TASK_ID,
@@ -481,4 +483,85 @@ test("the History tab drops its count when a reload of the history fails", async
   await expect(historyTab, "no number beside a panel that cannot count").toHaveText("History", {
     timeout: 1_000,
   });
+});
+
+/**
+ * The task's Agent row, which read the agent list and ignored whether it had answered: while it
+ * loaded, and for good once it failed, a task carrying its own board's agent was called somebody
+ * else's personal agent, and a task with none read as though no agent existed.
+ */
+async function taskCarryingTheBoardAgent(request: APIRequestContext) {
+  await seedAgents();
+  const set = await request.put(`/api/projects/${PROJECT_ID}/tasks/${SIBLING_TASK_ID}`, {
+    headers: ADMIN_AUTH,
+    data: { agent: String(PROJECT_AGENT_ID) },
+  });
+  expect(set.status(), await set.text()).toBe(200);
+}
+
+test("a task's Agent row says the agent list failed rather than calling the agent somebody else's", async ({
+  page,
+  request,
+}) => {
+  await taskCarryingTheBoardAgent(request);
+  await signIn(page);
+  const stopFailing = await failUntilTold(page, AGENTS_READ);
+  await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
+  await expect(page.getByRole("textbox", { name: "Task title" })).toHaveValue(SIBLING_TASK_TITLE);
+
+  const rail = page.getByRole("complementary");
+  await expect(page.getByText(/Not yours to choose/)).toHaveCount(0);
+  await expect(rail.getByTestId("agents-unread")).toBeVisible();
+  await expect(rail.getByTestId("agent-unread")).toHaveText(PROJECT_AGENT_NAME);
+  await page.waitForTimeout(AFTER_THE_TOAST);
+  await expect(rail.getByTestId("agents-unread")).toBeVisible();
+  await expect(page.getByText(/Not yours to choose/)).toHaveCount(0);
+
+  stopFailing();
+  await rail.getByTestId("agents-unread").getByRole("button", { name: "Retry" }).click();
+  await expect(rail.getByRole("combobox", { name: "Agent" })).toContainText(PROJECT_AGENT_NAME);
+  await expect(rail.getByTestId("agents-unread")).toHaveCount(0);
+});
+
+test("a task's Agent row makes no claim while the agent list is on its way", async ({ page, request }) => {
+  await taskCarryingTheBoardAgent(request);
+  await signIn(page);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(AGENTS_READ, async (route) => {
+    await held;
+    await route.fallback();
+  });
+  await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
+  await expect(page.getByRole("textbox", { name: "Task title" })).toHaveValue(SIBLING_TASK_TITLE);
+
+  const rail = page.getByRole("complementary");
+  await expect(page.getByText(/Not yours to choose/)).toHaveCount(0);
+  await expect(rail.getByTestId("agent-unread")).toHaveText(PROJECT_AGENT_NAME);
+  await expect(rail.getByTestId("agents-unread")).toHaveCount(0);
+
+  release();
+  await expect(rail.getByRole("combobox", { name: "Agent" })).toContainText(PROJECT_AGENT_NAME);
+  await expect(page.getByText(/Not yours to choose/)).toHaveCount(0);
+});
+
+// The control: a task carrying another person's agent is still told it is not theirs to choose
+test("a task's Agent row still says a personal agent is not the reader's once the list answers", async ({
+  page,
+  request,
+}) => {
+  await seedAgents();
+  const set = await request.put(`/api/projects/${PROJECT_ID}/tasks/${SIBLING_TASK_ID}`, {
+    headers: ADMIN_AUTH,
+    data: { agent: String(PERSONAL_AGENT_ID), assignee: "admin" },
+  });
+  expect(set.status(), await set.text()).toBe(200);
+  await signIn(page, "member");
+  await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
+
+  const rail = page.getByRole("complementary");
+  await expect(rail.getByTestId("agent-not-offered-reason")).toBeVisible();
+  await expect(rail.getByTestId("agents-unread")).toHaveCount(0);
 });

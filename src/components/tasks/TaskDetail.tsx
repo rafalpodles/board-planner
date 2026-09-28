@@ -34,7 +34,7 @@ import { InlineTitle } from "@/components/tasks/detail/InlineTitle";
 import { LinkedWork } from "@/components/tasks/detail/LinkedWork";
 import { MobileCommentBar } from "@/components/tasks/detail/MobileCommentBar";
 import { MobileSummary } from "@/components/tasks/detail/MobileSummary";
-import { PropertyRail } from "@/components/tasks/detail/PropertyRail";
+import { PropertyRail, type AgentsStatus } from "@/components/tasks/detail/PropertyRail";
 import { assigneeToShow } from "@/components/tasks/detail/assignee-display";
 import { TaskTopBar } from "@/components/tasks/detail/TaskTopBar";
 import { useScrolledBehind } from "@/components/tasks/detail/atoms";
@@ -71,7 +71,13 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
   const [project, setProject] = useState<ApiProject | null>(null);
   const [sprints, setSprints] = useState<ApiSprint[]>([]);
   const [readiness, setReadiness] = useState<ApiHandoverReadiness | null>(null);
-  const { allAgents: agents } = useStore();
+  const agentStore = useStore();
+  const agentCatalog: AgentCatalog = {
+    agents: agentStore.allAgents,
+    status: agentStore.failed ? "failed" : agentStore.loading ? "loading" : "loaded",
+    retrying: agentStore.failed && agentStore.loading,
+    retry: agentStore.retry,
+  };
   const [users, setUsers] = useState<ApiUserSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [refusal, setRefusal] = useState<string | null>(null);
@@ -190,7 +196,7 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
       task={task}
       project={project}
       sprints={sprints}
-      agents={agents}
+      agentCatalog={agentCatalog}
       users={users}
       readiness={readiness}
       onClose={onClose}
@@ -201,12 +207,19 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
   );
 }
 
+interface AgentCatalog {
+  agents: ApiAgent[];
+  status: AgentsStatus;
+  retrying: boolean;
+  retry: () => void;
+}
+
 interface TaskDetailViewProps {
   projectId: string;
   task: ApiTask;
   project: ApiProject;
   sprints: ApiSprint[];
-  agents: ApiAgent[];
+  agentCatalog: AgentCatalog;
   users: ApiUserSummary[];
   readiness: ApiHandoverReadiness | null;
   onClose: () => void;
@@ -220,7 +233,7 @@ function TaskDetailView({
   task,
   project,
   sprints,
-  agents,
+  agentCatalog,
   users,
   readiness,
   onClose,
@@ -546,7 +559,10 @@ function TaskDetailView({
               set={set}
               users={users}
               sprints={sprints}
-              agents={agents}
+              agents={agentCatalog.agents}
+              agentsStatus={agentCatalog.status}
+              onRetryAgents={agentCatalog.retry}
+              retryingAgents={agentCatalog.retrying}
               projectId={String(project._id)}
               projectDefaultAgent={projectDefaultAgent}
               stored={task}
@@ -586,7 +602,10 @@ function TaskDetailView({
           set={set}
           users={users}
           sprints={sprints}
-          agents={agents}
+          agents={agentCatalog.agents}
+          agentsStatus={agentCatalog.status}
+          onRetryAgents={agentCatalog.retry}
+          retryingAgents={agentCatalog.retrying}
           projectId={String(project._id)}
           projectDefaultAgent={projectDefaultAgent}
           stored={task}

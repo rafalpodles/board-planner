@@ -19,6 +19,7 @@ import { categoryColor } from "@/lib/category-colors";
 import { roundForDisplay } from "@/lib/estimates";
 import { EXECUTION_DOCS_URL } from "@/lib/docs-urls";
 import { Switch } from "@/components/ui/Switch";
+import { LoadFailed } from "@/components/ui/LoadFailed";
 import { Avatar, PriorityBars, SectionLabel } from "./atoms";
 import {
   ComboboxRow,
@@ -377,6 +378,10 @@ interface PropertyRailProps {
   users: ApiUserSummary[];
   sprints: ApiSprint[];
   agents: ApiAgent[];
+  /** Until the list has answered, `agents` says nothing about which agents exist */
+  agentsStatus: AgentsStatus;
+  onRetryAgents?: () => void;
+  retryingAgents?: boolean;
   /** This task's board. A project agent runs on its own board's tasks and nowhere else. */
   projectId: string;
   /** Offered first in the picker once a machine is being chosen; never a fallback */
@@ -416,12 +421,17 @@ interface PropertyRailProps {
   touch?: boolean;
 }
 
+export type AgentsStatus = "loading" | "failed" | "loaded";
+
 export function PropertyRail({
   draft,
   set,
   users,
   sprints,
   agents,
+  agentsStatus,
+  onRetryAgents,
+  retryingAgents = false,
   projectId,
   projectDefaultAgent,
   stored,
@@ -496,14 +506,16 @@ export function PropertyRail({
    * row stops being a picker and becomes what it can honestly be: the name, and why it is not
    * yours to choose. Re-offering it instead would be a control that 400s on click.
    */
-  const notOffered = !!draft.agent && !agents.some((a) => a._id === draft.agent);
-  const notOfferedName =
+  const agentsRead = agentsStatus === "loaded";
+  const notOffered = agentsRead && !!draft.agent && !agents.some((a) => a._id === draft.agent);
+  const storedAgentName =
     stored.agent && typeof stored.agent === "object" ? stored.agent.name : null;
   // Not while the row is a read-only name: a note explaining a shortened list, printed where there
   // is no list, is the same kind of lie one row up.
   // Counted on the personal rule alone. Comparing the two lengths would print "your own agents are
   // not offered here" over a list shortened by another board's agent, which is a different fact.
-  const personalAgentsWithheld = !notOffered && agents.some((a) => !mayRunForThisPerson(a));
+  const personalAgentsWithheld =
+    agentsRead && !notOffered && agents.some((a) => !mayRunForThisPerson(a));
 
   return (
     <div className="flex h-full flex-col gap-6">
@@ -541,10 +553,21 @@ export function PropertyRail({
         {/* Whoever may edit the task. It was instance-admin under BP-345, when choosing an agent
             could arm a machine belonging to somebody else; a claim now takes only what its own
             owner assigned to themselves, so the routing holds that boundary instead of the bar. */}
-        {notOffered ? (
+        {!agentsRead ? (
+          <FieldRow label="Agent" touch={touch}>
+            <span data-testid="agent-unread" className="truncate">
+              {storedAgentName ??
+                (agentsStatus === "failed" && !storedAgent ? (
+                  <EmptyValue>No agent</EmptyValue>
+                ) : (
+                  <EmptyValue>{agentsStatus === "loading" ? "Loading…" : "An agent"}</EmptyValue>
+                ))}
+            </span>
+          </FieldRow>
+        ) : notOffered ? (
           <FieldRow label="Agent" touch={touch}>
             <span data-testid="agent-not-offered" className="truncate">
-              {notOfferedName ?? "An agent you cannot see"}
+              {storedAgentName ?? "An agent you cannot see"}
             </span>
           </FieldRow>
         ) : (
@@ -583,6 +606,17 @@ export function PropertyRail({
               )
             }
           </ComboboxRow>
+        )}
+
+        {agentsStatus === "failed" && (
+          <LoadFailed
+            variant="row"
+            className="mt-1"
+            testId="agents-unread"
+            message="The agents could not be loaded, so none can be chosen here."
+            onRetry={onRetryAgents}
+            busy={retryingAgents}
+          />
         )}
 
         {notOffered && (
