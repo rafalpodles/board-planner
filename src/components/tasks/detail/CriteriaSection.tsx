@@ -20,6 +20,8 @@ interface CriteriaSectionProps {
 // Stable identity, so a criteria list without triggers does not rebuild them every render
 const EMPTY: Trigger[] = [];
 
+let lastClientKey = 0;
+
 export function CriteriaSection({ items, onChange, triggers, scope }: CriteriaSectionProps) {
   // One at a time: a criterion shows its rendered text until somebody asks to change it
   const [editing, setEditing] = useState<number | null>(null);
@@ -28,7 +30,7 @@ export function CriteriaSection({ items, onChange, triggers, scope }: CriteriaSe
 
   function add() {
     if (!draft.trim()) return;
-    onChange([...items, { text: draft.trim(), done: false }]);
+    onChange([...items, { clientKey: `new-${++lastClientKey}`, text: draft.trim(), done: false }]);
     setDraft("");
   }
 
@@ -49,7 +51,7 @@ export function CriteriaSection({ items, onChange, triggers, scope }: CriteriaSe
       <div className="flex flex-col">
         {items.map((item, i) => (
           <div
-            key={item._id || `new-${i}`}
+            key={item.clientKey || item._id || `new-${i}`}
             className="group -mx-2.5 flex items-start gap-3 rounded-lg px-2.5 py-2 transition-colors hover:bg-bg-hover"
           >
             <button

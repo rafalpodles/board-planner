@@ -193,13 +193,19 @@ function refId(ref: unknown): string {
     : String(ref ?? "");
 }
 
+export const CRITERION_ROWS_PER_WRITE = 20;
+
 // History stores the agent's name. An id is the fallback, which the activity route resolves again.
 async function storedAgentName(ref: unknown): Promise<string> {
   const id = refId(ref);
   if (!id) return "";
-  const { Agent } = await import("@/models/agent");
-  const found = await Agent.findById(id, "name").lean<{ name?: string }>();
-  return found?.name || id;
+  try {
+    const { Agent } = await import("@/models/agent");
+    const found = await Agent.findById(id, "name").lean<{ name?: string }>();
+    return found?.name || id;
+  } catch {
+    return id;
+  }
 }
 
 function populatedAgentName(ref: unknown): string {
@@ -1291,17 +1297,21 @@ export async function updateTask(
   }
 
   if (updates.checklist !== undefined) {
+    const changes = criterionChanges(oldTask.checklist ?? [], task.checklist ?? []);
+    // A whole list rewritten over MCP would otherwise push the rest of the task's history out of view
     activities.push(
-      logActivities(
-        criterionChanges(oldTask.checklist ?? [], task.checklist ?? []).map((change) => ({
-          taskId,
-          userId: actorId,
-          action: change.action,
-          field: change.id,
-          oldValue: change.before,
-          newValue: change.after,
-        }))
-      )
+      changes.length > CRITERION_ROWS_PER_WRITE
+        ? logActivity(taskId, actorId, "updated", "checklist", "", String(changes.length))
+        : logActivities(
+            changes.map((change) => ({
+              taskId,
+              userId: actorId,
+              action: change.action,
+              field: change.id,
+              oldValue: change.before,
+              newValue: change.after,
+            }))
+          )
     );
   }
 

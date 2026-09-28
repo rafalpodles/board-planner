@@ -52,7 +52,7 @@ function actionIcon(action: string) {
     case "criterion_checked":
       return "✓";
     case "criterion_unchecked":
-      return "↔";
+      return "○";
     default:
       return "•";
   }
@@ -94,6 +94,10 @@ function formatValue(field: string, value: string): string {
   return value;
 }
 
+function agentLabel(name: string): string {
+  return name ? `“${formatValue("agent", name)}”` : "no agent";
+}
+
 // A link's address, shortened from the front. `formatValue` cuts the tail, which on a pull request
 // url is the repository and the number — the only part worth reading.
 function linkLabel(url: string): string {
@@ -129,7 +133,10 @@ function describeAction(log: ApiActivityLog): string {
         return `${userName} changed assignee from ${from} to ${to}`;
       }
       if (log.field === "agent" && !log.customField) {
-        return `${userName} changed agent from ${log.oldValue || "no agent"} to ${log.newValue || "no agent"}`;
+        return `${userName} changed agent from ${agentLabel(log.oldValue)} to ${agentLabel(log.newValue)}`;
+      }
+      if (log.field === "checklist" && !log.customField && log.newValue) {
+        return `${userName} rewrote the acceptance criteria (${log.newValue} changes)`;
       }
       // createNextRecurrence writes a sentence into newValue rather than a before/after pair,
       // so reading it as one would claim the recurrence config had been edited
@@ -176,16 +183,17 @@ function describeAction(log: ApiActivityLog): string {
         self: "this task",
         other: log.oldValue,
       });
+    // Whole, not clipped: an edit past the sixtieth character would read as a change to nothing
     case "criterion_added":
-      return `${userName} added criterion “${formatValue("", log.newValue)}”`;
+      return `${userName} added criterion “${log.newValue}”`;
     case "criterion_removed":
-      return `${userName} removed criterion “${formatValue("", log.oldValue)}”`;
+      return `${userName} removed criterion “${log.oldValue}”`;
     case "criterion_edited":
-      return `${userName} changed criterion “${formatValue("", log.oldValue)}” to “${formatValue("", log.newValue)}”`;
+      return `${userName} changed criterion “${log.oldValue}” to “${log.newValue}”`;
     case "criterion_checked":
-      return `${userName} checked “${formatValue("", log.newValue)}”`;
+      return `${userName} checked criterion “${log.newValue}”`;
     case "criterion_unchecked":
-      return `${userName} unchecked “${formatValue("", log.newValue)}”`;
+      return `${userName} unchecked criterion “${log.newValue}”`;
     default:
       return `${userName} performed an action`;
   }
@@ -297,7 +305,7 @@ export function ActivityTimeline({
             >
               {actionIcon(log.action)}
             </span>
-            <div className="flex-1 min-w-0 text-text-muted">
+            <div className="flex-1 min-w-0 break-words text-text-muted">
               {describeAction(log)}
               {log.action === "updated" && log.field === "description" && !log.customField && log.oldValue && (
                 <details className="mt-1">

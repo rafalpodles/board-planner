@@ -214,6 +214,7 @@ const {
   EXECUTION_LEASE_MS,
   personalAgentAlienTo,
   heldRunRefusal,
+  CRITERION_ROWS_PER_WRITE,
 } = await import("./task-service");
 
 const { logActivity, logActivities } = await import("@/lib/activity");
@@ -5222,12 +5223,70 @@ describe("updateTask writing acceptance criteria changes to the history", () => 
     ]);
   });
 
+  // What another writer changed between the read and this write is not this actor's doing
   it("writes nothing about criteria an update left alone", async () => {
-    setup([item("a", "Loads")], [item("a", "Loads")]);
+    setup([item("a", "Loads")], [item("a", "Loads", true)]);
 
     await updateTask("p1", "t1", { title: "y" }, "actor");
 
     expect(criterionRows()).toEqual([]);
+  });
+});
+
+describe("updateTask rewriting many criteria at once", () => {
+  it("writes one row that counts them rather than a row each", async () => {
+    vi.clearAllMocks();
+    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    const stored = (checklist: unknown[]) => ({ _id: "t1", taskNumber: 7, status: "doing", title: "x", checklist });
+    const many = (prefix: string) =>
+      Array.from({ length: CRITERION_ROWS_PER_WRITE }, (_, i) => ({ _id: `${prefix}${i}`, text: `${prefix} ${i}`, done: false }));
+    findOne.mockReturnValue({
+      lean: () => Promise.resolve(stored(many("old"))),
+      populate: () => ({ lean: () => Promise.resolve(stored(many("old"))) }),
+    });
+    findOneAndUpdate.mockReturnValue({ populate: () => Promise.resolve(stored(many("new"))) });
+
+    await updateTask("p1", "t1", { acceptanceCriteria: "- rewritten" }, "actor");
+
+    expect(logActivity).toHaveBeenCalledWith("t1", "actor", "updated", "checklist", "", String(CRITERION_ROWS_PER_WRITE * 2));
+    expect(vi.mocked(logActivities).mock.calls.flatMap(([rows]) => rows).filter((row) => row.action.startsWith("criterion_"))).toEqual([]);
+  });
+
+  it("still writes a row each at the limit", async () => {
+    vi.clearAllMocks();
+    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    const stored = (checklist: unknown[]) => ({ _id: "t1", taskNumber: 7, status: "doing", title: "x", checklist });
+    const added = Array.from({ length: CRITERION_ROWS_PER_WRITE }, (_, i) => ({ _id: `n${i}`, text: `new ${i}`, done: false }));
+    findOne.mockReturnValue({
+      lean: () => Promise.resolve(stored([])),
+      populate: () => ({ lean: () => Promise.resolve(stored([])) }),
+    });
+    findOneAndUpdate.mockReturnValue({ populate: () => Promise.resolve(stored(added)) });
+
+    await updateTask("p1", "t1", { checklist: [] }, "actor");
+
+    expect(vi.mocked(logActivities).mock.calls.flatMap(([rows]) => rows)).toHaveLength(CRITERION_ROWS_PER_WRITE);
+  });
+});
+
+describe("updateTask when the agent's name cannot be read", () => {
+  it("still answers the write it already made, and keeps the id", async () => {
+    vi.clearAllMocks();
+    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    const stored = { _id: "t1", taskNumber: 7, status: "doing", title: "x", agent: "6ab0f94eadb2609f98d84da1" };
+    findOne.mockReturnValue({
+      lean: () => Promise.resolve(stored),
+      populate: () => ({ lean: () => Promise.resolve(stored) }),
+    });
+    findOneAndUpdate.mockReturnValue({ populate: () => Promise.resolve({ ...stored, agent: null }) });
+    agentFindById.mockImplementation(() => ({ lean: () => Promise.reject(new Error("db down")) }));
+
+    const result = await updateTask("p1", "t1", { agent: "" }, "actor");
+
+    expect(result.ok).toBe(true);
+    expect(vi.mocked(logActivity).mock.calls.filter((c) => c[3] === "agent")).toEqual([
+      ["t1", "actor", "updated", "agent", "6ab0f94eadb2609f98d84da1", ""],
+    ]);
   });
 });
 

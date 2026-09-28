@@ -259,48 +259,93 @@ describe("useTaskEditor", () => {
 });
 
 describe("a criterion added on this screen", () => {
+  type Item = { _id?: string; clientKey?: string; text: string; done: boolean };
+  let edit: (change: (items: Item[]) => Item[]) => void;
+
   function Criteria({ task }: { task: ApiTask }) {
     const { draft, set } = useTaskEditor("p1", task);
-    return (
-      <div>
-        <button onClick={() => set("checklist", [...draft.checklist, { text: "Loads", done: false }])}>add</button>
-        <button onClick={() => set("checklist", draft.checklist.map((c) => ({ ...c, text: `${c.text} fast` })))}>
-          reword
-        </button>
-      </div>
-    );
+    edit = (change) => set("checklist", change(draft.checklist));
+    return null;
+  }
+
+  const lastChecklist = () => (api.put.mock.lastCall?.[1] as { checklist: Item[] }).checklist;
+
+  async function settle(ms = 700) {
+    await act(async () => {
+      vi.advanceTimersByTime(ms);
+    });
   }
 
   it("carries the id its save minted into the next save", async () => {
     api.put.mockResolvedValueOnce({ checklist: [{ _id: "c1", text: "Loads", done: false }] });
     render(<Criteria task={baseTask} />);
 
-    await act(async () => screen.getByText("add").click());
-    await act(async () => {
-      vi.advanceTimersByTime(700);
-    });
+    await act(async () => edit((items) => [...items, { clientKey: "k1", text: "Loads", done: false }]));
+    await settle();
     await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
 
-    await act(async () => screen.getByText("reword").click());
-    await act(async () => {
-      vi.advanceTimersByTime(700);
-    });
+    await act(async () => edit((items) => items.map((c) => ({ ...c, text: `${c.text} fast` }))));
+    await settle();
 
     await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2));
-    expect(api.put).toHaveBeenLastCalledWith("/api/projects/p1/tasks/t1", {
-      checklist: [{ _id: "c1", text: "Loads fast", done: false }],
-    });
+    expect(lastChecklist()).toEqual([expect.objectContaining({ _id: "c1", text: "Loads fast" })]);
   });
 
   it("sends nothing more once the minted id is all that differs", async () => {
     api.put.mockResolvedValueOnce({ checklist: [{ _id: "c1", text: "Loads", done: false }] });
     render(<Criteria task={baseTask} />);
 
-    await act(async () => screen.getByText("add").click());
-    await act(async () => {
-      vi.advanceTimersByTime(2_000);
-    });
+    await act(async () => edit((items) => [...items, { clientKey: "k1", text: "Loads", done: false }]));
+    await settle();
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+    await settle(2_000);
 
     expect(api.put).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives the minted id to the criterion that was sent, not to one added while the save was out", async () => {
+    let answer!: (task: unknown) => void;
+    api.put.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+    const stored = { ...baseTask, checklist: [{ _id: "x", text: "Old", done: false }] } as unknown as ApiTask;
+    render(<Criteria task={stored} />);
+
+    await act(async () => edit((items) => [...items, { clientKey: "kA", text: "A", done: false }]));
+    await settle();
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+
+    await act(async () =>
+      edit((items) => [...items.filter((c) => c._id !== "x"), { clientKey: "kC", text: "C", done: false }])
+    );
+    await act(async () =>
+      answer({ checklist: [{ _id: "x", text: "Old", done: false }, { _id: "idA", text: "A", done: false }] })
+    );
+    await settle();
+
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2));
+    expect(lastChecklist().map((c) => [c.text, c._id])).toEqual([
+      ["A", "idA"],
+      ["C", undefined],
+    ]);
+  });
+
+  it("holds a save back until the one before it has answered with the new criterion's id", async () => {
+    let answer!: (task: unknown) => void;
+    api.put.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+    render(<Criteria task={baseTask} />);
+
+    await act(async () => edit((items) => [...items, { clientKey: "k1", text: "Loads", done: false }]));
+    await settle();
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+
+    await act(async () => edit((items) => items.map((c) => ({ ...c, text: "Loads fast" }))));
+    await settle(2_000);
+    expect(api.put).toHaveBeenCalledTimes(1);
+
+    await act(async () => answer({ checklist: [{ _id: "c1", text: "Loads", done: false }] }));
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2));
+    expect(lastChecklist()).toEqual([expect.objectContaining({ _id: "c1", text: "Loads fast" })]);
+
+    await settle(2_000);
+    expect(api.put).toHaveBeenCalledTimes(2);
   });
 });

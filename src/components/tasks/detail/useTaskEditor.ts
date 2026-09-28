@@ -15,8 +15,11 @@ const AUTOSAVE_DEBOUNCE_MS = 700;
 
 export type AutoSaveState = "idle" | "saving" | "saved" | "error";
 
-/** A criterion the user just typed has no id until the server assigns one */
-export type ChecklistDraftItem = { _id?: string; text: string; done: boolean };
+/**
+ * A criterion the user just typed has no id until the server assigns one. `clientKey` names it
+ * until then, and is what the id that save minted is matched back to.
+ */
+export type ChecklistDraftItem = { _id?: string; clientKey?: string; text: string; done: boolean };
 
 /**
  * Everything the detail view edits in place. `status` is absent because moving a task is its own
@@ -67,13 +70,30 @@ export function draftFromTask(task: ApiTask): TaskDraft {
   };
 }
 
-const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+const withoutClientKeys = (key: string, value: unknown) => (key === "clientKey" ? undefined : value);
+const same = (a: unknown, b: unknown) =>
+  JSON.stringify(a, withoutClientKeys) === JSON.stringify(b, withoutClientKeys);
 
-// A criterion typed here has no id until the save answers. Without it the next save sends it bare,
-// the server mints another, and History reads an edit as a removal and an addition.
-function withMintedIds(items: ChecklistDraftItem[], stored: { _id?: string }[] | undefined): ChecklistDraftItem[] {
-  if (!stored || stored.length !== items.length) return items;
-  return items.map((item, i) => (item._id || !stored[i]._id ? item : { ...item, _id: stored[i]._id }));
+type MintedIds = Map<string, string>;
+
+function withMintedIds(items: ChecklistDraftItem[], minted: MintedIds): ChecklistDraftItem[] {
+  if (!items.some((item) => !item._id && item.clientKey && minted.has(item.clientKey))) return items;
+  return items.map((item) =>
+    item._id || !item.clientKey || !minted.has(item.clientKey) ? item : { ...item, _id: minted.get(item.clientKey) }
+  );
+}
+
+// Sent bare, a criterion gets a fresh id on every save, and History reads its edit as a removal and an addition
+function withKnownIds(edited: Partial<TaskDraft>, minted: MintedIds): Partial<TaskDraft> {
+  return edited.checklist ? { ...edited, checklist: withMintedIds(edited.checklist, minted) } : edited;
+}
+
+function recordMinted(sent: ChecklistDraftItem[], stored: { _id?: string }[] | undefined, minted: MintedIds) {
+  if (!stored || stored.length !== sent.length) return;
+  sent.forEach((item, i) => {
+    const id = stored[i]._id;
+    if (!item._id && item.clientKey && id) minted.set(item.clientKey, id);
+  });
 }
 
 export function useTaskEditor(projectId: string, task: ApiTask, onRefused?: (err: unknown) => boolean) {
@@ -121,16 +141,22 @@ export function useTaskEditor(projectId: string, task: ApiTask, onRefused?: (err
 
   const signature = JSON.stringify(editedFields());
 
-  const persist = useCallback(
-    async (edited: Partial<TaskDraft>) => {
-      if (Object.keys(edited).length === 0) return;
+  const minted = useRef<MintedIds>(new Map());
+  // One save at a time, so a save never leaves before the one that mints the ids it needs has answered
+  const lastSave = useRef<Promise<void>>(Promise.resolve());
+
+  const save = useCallback(
+    async (pending: Partial<TaskDraft>) => {
       setAutoSaveState("saving");
       try {
+        const edited = withKnownIds(pending, minted.current);
         const saved: Partial<ApiTask> | undefined = await api.put(`/api/projects/${projectId}/tasks/${task._id}`, edited);
-        if (edited.checklist) edited = { ...edited, checklist: withMintedIds(edited.checklist, saved?.checklist) };
-        serverValues.current = { ...serverValues.current, ...edited };
-        const sent = edited.checklist;
-        if (sent) setDraft((d) => (d.checklist.length === sent.length ? { ...d, checklist: withMintedIds(d.checklist, sent) } : d));
+        if (edited.checklist) recordMinted(edited.checklist, saved?.checklist, minted.current);
+        serverValues.current = { ...serverValues.current, ...withKnownIds(edited, minted.current) };
+        setDraft((d) => {
+          const checklist = withMintedIds(d.checklist, minted.current);
+          return checklist === d.checklist ? d : { ...d, checklist };
+        });
         setAutoSaveError(null);
         setAutoSaveState("saved");
         setSavedCount((n) => n + 1);
@@ -143,6 +169,16 @@ export function useTaskEditor(projectId: string, task: ApiTask, onRefused?: (err
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [projectId, task._id]
+  );
+
+  const persist = useCallback(
+    (edited: Partial<TaskDraft>) => {
+      if (Object.keys(edited).length === 0) return Promise.resolve();
+      const run = lastSave.current.then(() => save(edited));
+      lastSave.current = run.catch(() => {});
+      return run;
+    },
+    [save]
   );
 
   useEffect(() => {
@@ -161,7 +197,7 @@ export function useTaskEditor(projectId: string, task: ApiTask, onRefused?: (err
       const pending = pendingRef.current;
       if (pending === "{}") return;
       api
-        .put(`/api/projects/${projectId}/tasks/${taskId}`, JSON.parse(pending))
+        .put(`/api/projects/${projectId}/tasks/${taskId}`, withKnownIds(JSON.parse(pending), minted.current))
         .then(() => emitBoardRefresh(projectId))
         .catch(() => {});
     };
@@ -179,7 +215,7 @@ export function useTaskEditor(projectId: string, task: ApiTask, onRefused?: (err
       fetch(`/api/projects/${projectId}/tasks/${taskId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: pending,
+        body: JSON.stringify(withKnownIds(JSON.parse(pending), minted.current)),
         keepalive: true,
       }).catch(() => {});
     };

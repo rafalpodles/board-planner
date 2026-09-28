@@ -66,7 +66,7 @@ test.describe("an agent change", () => {
     expect(stored).toMatchObject({ oldValue: "", newValue: PROJECT_AGENT_NAME });
 
     const panel = await openHistory(page);
-    await expect(sentence(panel, `changed agent from no agent to ${PROJECT_AGENT_NAME}`)).toBeVisible();
+    await expect(sentence(panel, `changed agent from no agent to “${PROJECT_AGENT_NAME}”`)).toBeVisible();
     await expect(panel.getByText(String(PROJECT_AGENT_ID))).toHaveCount(0);
   });
 
@@ -89,7 +89,7 @@ test.describe("an agent change", () => {
     await openTask(page);
     const panel = await openHistory(page);
 
-    await expect(sentence(panel, `changed agent from ${PROJECT_AGENT_NAME} to a deleted agent`)).toBeVisible();
+    await expect(sentence(panel, `changed agent from “${PROJECT_AGENT_NAME}” to “a deleted agent”`)).toBeVisible();
   });
 });
 
@@ -136,10 +136,10 @@ test.describe("acceptance criteria", () => {
     await page.reload();
     const panel = await openHistory(page);
     await expect(sentence(panel, "added criterion “Loads”")).toBeVisible();
-    await expect(sentence(panel, "checked “Loads”")).toBeVisible();
+    await expect(sentence(panel, "checked criterion “Loads”")).toBeVisible();
     await expect(sentence(panel, "changed criterion “Loads” to “Loads fast, cached”")).toBeVisible();
     await expect(panel.getByText(/changed criterion/)).toHaveCount(1);
-    await expect(sentence(panel, "unchecked “Loads fast, cached”")).toBeVisible();
+    await expect(sentence(panel, "unchecked criterion “Loads fast, cached”")).toBeVisible();
     await expect(sentence(panel, "removed criterion “Loads fast, cached”")).toBeVisible();
   });
 });

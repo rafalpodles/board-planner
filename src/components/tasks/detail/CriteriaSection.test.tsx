@@ -100,7 +100,7 @@ describe("CriteriaSection", () => {
     await act(async () => {
       field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     });
-    expect(onChange).toHaveBeenCalledWith([...items, { text: "Third", done: false }]);
+    expect(onChange).toHaveBeenCalledWith([...items, { clientKey: expect.any(String), text: "Third", done: false }]);
   });
 
   // Typing something and clicking away should not silently discard it
@@ -109,7 +109,7 @@ describe("CriteriaSection", () => {
     const field = addField();
     await act(async () => type(field, "Fourth"));
     await act(async () => blur(field));
-    expect(onChange).toHaveBeenCalledWith([...items, { text: "Fourth", done: false }]);
+    expect(onChange).toHaveBeenCalledWith([...items, { clientKey: expect.any(String), text: "Fourth", done: false }]);
   });
 
   it("ignores an empty add", async () => {
