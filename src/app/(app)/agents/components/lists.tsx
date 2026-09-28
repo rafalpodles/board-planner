@@ -74,7 +74,7 @@ export function BlockList({
   onEdit,
 }: {
   rows: ApiAgentBlock[];
-  onDelete: (blockId: string) => Promise<void>;
+  onDelete?: (blockId: string) => Promise<void>;
   onEdit: (block: ApiAgentBlock) => void;
 }) {
   return (
@@ -94,7 +94,7 @@ export function BlockList({
               {summary && (
                 <span className="ml-auto shrink-0 text-[11px] text-text-muted">{summary}</span>
               )}
-              {!row.builtIn && (
+              {onDelete && !row.builtIn && (
                 <DeleteButton label={row.name} onDelete={() => onDelete(row._id)} />
               )}
             </div>

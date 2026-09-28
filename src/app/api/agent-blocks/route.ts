@@ -3,6 +3,12 @@ import { connectDB } from "@/lib/db";
 import { withAdmin, withAuth } from "@/lib/middleware";
 import { AgentBlock } from "@/models/agentBlock";
 import { allBlocks, freeBlockKey, toApiBlock } from "@/lib/agent-service";
+import {
+  capabilityRefusal,
+  gateKindRefusal,
+  gateParams,
+  modelRefusal,
+} from "@/lib/agent-block-input";
 import { BLOCK_KINDS, STEP_CAPABILITIES, StepCapability } from "@/types";
 
 export const GET = withAuth(async () => {
@@ -26,16 +32,16 @@ export const POST = withAdmin(async (request, { user }) => {
   const name = typeof body.name === "string" ? body.name.trim() : "";
   if (!name) return NextResponse.json({ error: "A name is required" }, { status: 400 });
 
-  const key = await freeBlockKey(name);
+  const gate = kind === "gate" ? gateParams(body.gateKind, body.params) : null;
+  const refusal =
+    kind === "gate"
+      ? (gateKindRefusal(body.gateKind) ?? gate!.refusal)
+      : (capabilityRefusal(body.capability) ??
+        modelRefusal(body.model, "model") ??
+        modelRefusal(body.fallbackModel, "fallbackModel"));
+  if (refusal) return NextResponse.json({ error: refusal }, { status: 400 });
 
-  // Parameters are values, never patterns or commands: the worker owns what a gate does and this
-  // only says how strictly. Anything unrecognised is dropped rather than passed through.
-  const params: Record<string, string> = {};
-  if (body.params && typeof body.params === "object") {
-    for (const [k, v] of Object.entries(body.params as Record<string, unknown>)) {
-      if (typeof v === "string" || typeof v === "number") params[k] = String(v);
-    }
-  }
+  const key = await freeBlockKey(name);
 
   const capability: StepCapability =
     STEP_CAPABILITIES.find((c) => c === body.capability) ?? "read-only";
@@ -46,8 +52,9 @@ export const POST = withAdmin(async (request, { user }) => {
     name,
     description: typeof body.description === "string" ? body.description.trim() : "",
     builtIn: false,
-    gateKind: kind === "gate" && typeof body.gateKind === "string" ? body.gateKind : "",
-    params: kind === "gate" ? params : {},
+    gateKind: kind === "gate" ? body.gateKind : "",
+    // Values, never patterns or commands: the worker owns what a gate does, this says how strictly
+    params: gate?.params ?? {},
     prompt: kind === "step" && typeof body.prompt === "string" ? body.prompt.trim() : "",
     capability: kind === "step" ? capability : "read-only",
     model: kind === "step" && typeof body.model === "string" ? body.model : "",

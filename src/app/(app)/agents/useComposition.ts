@@ -6,6 +6,7 @@ import { arrayMove } from "@dnd-kit/sortable";
 import { AGENT_BUCKETS, AgentBucket, AgentComposition, ApiAgentBlock } from "@/types";
 import { BUCKET_PREFIX, Entry, Lookup, NEW_PREFIX } from "./components/blocks";
 import { emptyComposition } from "./catalog";
+import { landsAfter } from "./drag";
 import { normaliseComposition } from "@/lib/agent-rules";
 
 type Entries = Record<AgentBucket, Entry[]>;
@@ -77,13 +78,16 @@ export function useComposition(source: AgentComposition | undefined, lookup: Loo
     setDragging(lookup(key ?? "") ?? null);
   }
 
-  function onDragEnd({ active, over }: DragEndEvent) {
+  function onDragEnd({ active, over, collisions }: DragEndEvent) {
     setDragging(null);
     if (!over) return;
 
     const activeId = String(active.id);
     const target = resolveTarget(String(over.id));
     if (!target) return;
+    // An insert, unlike a move within its own bucket, has no arrayMove to decide which side it lands
+    const inserting = activeId.startsWith(NEW_PREFIX) || bucketOf(activeId) !== target.bucket;
+    if (inserting && landsAfter(collisions?.[0])) target.index += 1;
 
     if (activeId.startsWith(NEW_PREFIX)) {
       const key = activeId.slice(NEW_PREFIX.length);

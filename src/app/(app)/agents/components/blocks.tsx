@@ -216,7 +216,11 @@ export function Bucket({
           isOver ? "border-primary bg-primary/5" : "border-border"
         }`}
       >
-        <SortableContext items={entries.map((e) => e.uid)} strategy={verticalListSortingStrategy}>
+        <SortableContext
+          id={`${BUCKET_PREFIX}${id}`}
+          items={entries.map((e) => e.uid)}
+          strategy={verticalListSortingStrategy}
+        >
           {entries.map((entry) => (
             <SortableEntry
               key={entry.uid}

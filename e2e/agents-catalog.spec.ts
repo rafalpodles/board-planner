@@ -187,6 +187,31 @@ async function dragOnto(page: Page, item: Locator, target: Locator) {
   await page.waitForTimeout(150);
 }
 
+/** Aimed where the target sits when the drag begins; `dragOnto` re-reads it after it slid away. */
+async function dragTo(page: Page, item: Locator, end: { x: number; y: number }) {
+  const from = (await item.boundingBox())!;
+  const start = { x: from.x + from.width / 2, y: from.y + from.height / 2 };
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  for (let i = 1; i <= 12; i++) {
+    await page.mouse.move(start.x + ((end.x - start.x) * i) / 12, start.y + ((end.y - start.y) * i) / 12);
+    await page.waitForTimeout(16);
+  }
+  for (let i = 0; i < 4; i++) {
+    await page.mouse.move(end.x, end.y);
+    await page.waitForTimeout(80);
+  }
+  await page.mouse.up();
+  await page.mouse.move(0, 0);
+  // The overlay animates onto the drop for 250 ms and takes a press meant for the card under it
+  await page.waitForTimeout(400);
+}
+
+async function dragWithin(page: Page, item: Locator, target: Locator) {
+  const to = (await target.boundingBox())!;
+  await dragTo(page, item, { x: to.x + to.width / 2, y: to.y + to.height / 2 });
+}
+
 test.describe("the catalog as it ships", () => {
   test("shows what comes with Board Planner, and says the shelf is otherwise bare", async ({
     page,
@@ -439,6 +464,116 @@ test.describe("editing what an agent does", () => {
           { key: "review" },
         ],
       });
+  });
+
+  async function openWithDelivery(page: Page, name: string, delivery: string[]) {
+    await withDb(async (db) => {
+      await db.collection("agents").insertOne({
+        name,
+        description: "",
+        scope: "user",
+        owner: ADMIN_ID,
+        project: null,
+        builtIn: false,
+        composition: {
+          analysis: [],
+          implementation: [{ key: "implement" }],
+          verification: [],
+          delivery: delivery.map((key) => ({ key })),
+        },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    });
+    await signIn(page);
+    const id = await agentIdByName(name);
+    await page.goto(`/agents/${id}`);
+    await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
+    return id;
+  }
+
+  // BP-745. The editor says to drag, and a card dropped on another card in its own phase stayed
+  // exactly where it was; only removing it and adding it again moved it.
+  test("a card dragged onto another in its own phase moves there, and the order is kept", async ({
+    page,
+  }) => {
+    // A laptop's height, where Delivery opens whole at the foot of the screen with nothing scrolled
+    await page.setViewportSize({ width: 1280, height: 900 });
+    const id = await openWithDelivery(page, "Out of order", ["merge", "push", "pull-request"]);
+    const delivery = rowsIn(page, "Delivery");
+    await expect(delivery).toHaveText([/^Merge/, /^Push/, /^Pull request/]);
+    const target = (await delivery.nth(2).boundingBox())!;
+    expect(target.y + target.height, "the card aimed at is not fully on screen").toBeLessThan(900);
+    // Where it ran away from: inside the bottom fifth, the band dnd-kit scrolls in by default
+    expect(target.y + target.height / 2).toBeGreaterThan(900 * 0.8);
+    // With nothing to scroll there is nothing to run away, and the drag below would prove nothing
+    const scrollable = await page
+      .locator("#main-content")
+      .evaluate((el) => el.scrollHeight - el.clientHeight);
+    expect(scrollable, "the page does not scroll, so autoscroll cannot move the card").toBeGreaterThan(0);
+    const complaint = page.getByText(/Move Merge to the end|Put Pull request before it/);
+    await expect(complaint.first()).toBeVisible();
+
+    await dragWithin(page, delivery.nth(0), delivery.nth(2));
+
+    await expect(delivery).toHaveText([/^Push/, /^Pull request/, /^Merge/]);
+    await expect(complaint).toHaveCount(0);
+
+    // And upwards, which is the other half of the index arithmetic
+    await dragWithin(page, delivery.nth(2), delivery.nth(1));
+    await expect(delivery).toHaveText([/^Push/, /^Merge/, /^Pull request/]);
+    await dragWithin(page, delivery.nth(1), delivery.nth(2));
+    await expect(delivery).toHaveText([/^Push/, /^Pull request/, /^Merge/]);
+
+    const saved = page.waitForResponse(
+      (r) => r.request().method() === "PUT" && new URL(r.url()).pathname === `/api/agents/${id}`
+    );
+    await page.getByRole("button", { name: "Save" }).click();
+    expect((await saved).status()).toBe(200);
+    expect((await storedAgent("Out of order"))?.composition).toMatchObject({
+      delivery: [{ key: "push" }, { key: "pull-request" }, { key: "merge" }],
+    });
+
+    await page.reload();
+    await expect(rowsIn(page, "Delivery")).toHaveText([/^Push/, /^Pull request/, /^Merge/]);
+  });
+
+  // Between two cards is not on either, and the phase alone meant "append": a card dropped there
+  // went to the end whatever it was aimed between.
+  test("a card dropped in the gap above the first card goes first, not last", async ({ page }) => {
+    await openWithDelivery(page, "Gaps", ["push", "pull-request", "merge"]);
+    const delivery = rowsIn(page, "Delivery");
+    await expect(delivery).toHaveText([/^Push/, /^Pull request/, /^Merge/]);
+    // Clear of either scrolling band, so this is about the gap and nothing else
+    await bucket(page, "Delivery").evaluate((el) => el.scrollIntoView({ block: "center" }));
+
+    const list = (await bucket(page, "Delivery").boundingBox())!;
+    const first = (await delivery.nth(0).boundingBox())!;
+    expect(first.y - list.y, "no padding above the first card to drop into").toBeGreaterThan(4);
+    await dragTo(page, delivery.nth(1), { x: first.x + first.width / 2, y: list.y + 3 });
+
+    await expect(delivery).toHaveText([/^Pull request/, /^Push/, /^Merge/]);
+  });
+
+  // A palette block has no place of its own to move from: which side of the nearest card it lands
+  // on is the pointer's to say, and it always went before, so the upper half of a gap put it first.
+  test("a palette block dropped just under a card goes after it", async ({ page }) => {
+    await openWithDelivery(page, "Between", ["push", "pull-request"]);
+    const delivery = rowsIn(page, "Delivery");
+    await expect(delivery).toHaveText([/^Push/, /^Pull request/]);
+    await bucket(page, "Delivery").evaluate((el) => el.scrollIntoView({ block: "center" }));
+
+    const push = (await delivery.nth(0).locator("xpath=ancestor::li[1]").boundingBox())!;
+    const pr = (await delivery.nth(1).locator("xpath=ancestor::li[1]").boundingBox())!;
+    const gap = pr.y - (push.y + push.height);
+    expect(gap, "no gap between the cards to drop into").toBeGreaterThan(3);
+    const palette = page.locator("#main-content aside");
+    await dragTo(page, palette.getByRole("button", { name: /^Merge/ }), {
+      x: push.x + push.width / 2,
+      y: push.y + push.height + 1,
+    });
+
+    await expect(delivery).toHaveText([/^Push/, /^Merge/, /^Pull request/]);
   });
 
   test("a block can be taken back out again", async ({ page }) => {
