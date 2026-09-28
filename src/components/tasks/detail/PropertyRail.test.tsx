@@ -5,6 +5,7 @@ import { PropertyRail } from "./PropertyRail";
 import type { TaskDraft } from "./useTaskEditor";
 import { ApiCustomField, ApiSprint, ApiTask, ApiUser } from "@/types";
 import type { AnyColumn } from "@/lib/columns";
+import { pinTimezone } from "@/lib/testing/pin-timezone";
 
 afterEach(cleanup);
 
@@ -1497,5 +1498,23 @@ describe("the Agent row explains itself", () => {
     expect(rules.querySelector("a")?.getAttribute("href")).toBe(
       "https://board-planner.com/docs/ai/execution-workers/"
     );
+  });
+});
+
+describe("PropertyRail dates, read west of UTC", () => {
+  pinTimezone("America/Los_Angeles");
+
+  it("shows the due day that was picked", () => {
+    expect(new Date(2026, 9, 15).getTimezoneOffset(), "the timezone did not actually change").toBe(420);
+    renderRail({ draft: { ...draft, dueDate: "2026-10-15" } });
+    expect(screen.getByText("Oct 15, 2026")).toBeTruthy();
+    expect(screen.queryByText("Oct 14, 2026")).toBeNull();
+  });
+
+  it("shows the day a series stops on", () => {
+    renderRail({
+      draft: { ...draft, recurrence: { frequency: "weekly", interval: 1, endDate: "2026-12-31" } },
+    });
+    expect(screen.getByText("Every week until Dec 31, 2026")).toBeTruthy();
   });
 });

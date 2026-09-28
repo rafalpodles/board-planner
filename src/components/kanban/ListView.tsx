@@ -41,6 +41,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Combobox, ComboboxOption } from "@/components/ui/Combobox";
 import { categoryColor, categoryTint } from "@/lib/category-colors";
 import { timeAgo } from "@/lib/time";
+import { DUE_URGENCY_CLASS, daysUntil, dueUrgency, formatDateOnly } from "@/lib/date-only";
 import { RunDot } from "@/components/kanban/RunDot";
 import { PullRequestBadge } from "@/components/tasks/PullRequestBadge";
 
@@ -173,12 +174,8 @@ function EnumCell({
 }
 
 function sprintTiming(sprint: ApiSprint): "active" | "past" | "upcoming" {
-  const now = Date.now();
-  const start = new Date(sprint.startDate).getTime();
-  const end = new Date(sprint.endDate);
-  end.setHours(23, 59, 59, 999);
-  if (now > end.getTime()) return "past";
-  if (now < start) return "upcoming";
+  if (daysUntil(sprint.endDate) < 0) return "past";
+  if (daysUntil(sprint.startDate) > 0) return "upcoming";
   return "active";
 }
 
@@ -416,27 +413,10 @@ export function ListView({
           <tbody>
             {sorted.map((task, index) => {
               const dueDateInfo = task.dueDate
-                ? (() => {
-                    const due = new Date(task.dueDate);
-                    const now = new Date();
-                    now.setHours(0, 0, 0, 0);
-                    const diff = Math.ceil(
-                      (due.getTime() - now.getTime()) / 86400000,
-                    );
-                    const color =
-                      diff < 0
-                        ? "text-danger"
-                        : diff <= 2
-                          ? "text-warning"
-                          : "text-text-muted";
-                    return {
-                      formatted: due.toLocaleDateString(undefined, {
-                        month: "short",
-                        day: "numeric",
-                      }),
-                      color,
-                    };
-                  })()
+                ? {
+                    formatted: formatDateOnly(task.dueDate, { month: "short", day: "numeric" }),
+                    color: DUE_URGENCY_CLASS[dueUrgency(task.dueDate)],
+                  }
                 : null;
 
               const selected = selectedTasks?.has(task._id) ?? false;
@@ -729,6 +709,7 @@ export function ListView({
                   )}
                   {show("dueDate") && (
                     <td
+                      data-testid="list-due"
                       className={`px-2 py-2 text-xs max-w-24 ${dueDateInfo?.color || "text-text-muted"}`}
                     >
                       <div className="truncate">

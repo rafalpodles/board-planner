@@ -3,6 +3,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup, act } from "@testing-library/react";
 import { ListView } from "./ListView";
 import { ApiCustomField, ApiSprint, ApiTask } from "@/types";
+import { pinTimezone } from "@/lib/testing/pin-timezone";
 
 const sprints = [
   { _id: "s1", name: "Sprint 2026-Q3 hardening and cleanup", startDate: "2026-07-01", endDate: "2026-07-14", status: "completed" },
@@ -480,5 +481,49 @@ describe("ListView, a task a worker is running", () => {
     renderList();
     expect(screen.queryByTestId("row-run-live")).toBeNull();
     expect(screen.queryByTestId("row-run-quiet")).toBeNull();
+  });
+});
+
+describe("ListView dates, read west of UTC", () => {
+  pinTimezone("America/Los_Angeles");
+  afterEach(() => vi.useRealTimers());
+
+  const at = (when: Date) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(when);
+    expect(when.getTimezoneOffset(), "the timezone did not actually change").toBe(420);
+  };
+
+  it("shows the due day that was picked, and overdue only from the next day", () => {
+    const due = [{ ...tasks[0], dueDate: "2026-10-15T00:00:00.000Z" }] as ApiTask[];
+
+    at(new Date(2026, 9, 15, 23, 30));
+    renderList({ tasks: due });
+    expect(screen.getByTestId("list-due").textContent).toBe("Oct 15");
+    expect(screen.getByTestId("list-due").className).toContain("text-warning");
+
+    cleanup();
+    at(new Date(2026, 9, 16, 0, 30));
+    renderList({ tasks: due });
+    expect(screen.getByTestId("list-due").className).toContain("text-danger");
+  });
+
+  it("treats a sprint as running on its first and last day", () => {
+    const running = [{ ...sprints[0], status: "active" }] as ApiSprint[];
+    const sprintCell = () => screen.getByTitle(sprints[0].name).parentElement!.className;
+
+    at(new Date(2026, 6, 14, 12));
+    renderList({ sprints: running });
+    expect(sprintCell()).toContain("font-medium");
+
+    cleanup();
+    at(new Date(2026, 5, 30, 20));
+    renderList({ sprints: running });
+    expect(sprintCell()).not.toContain("font-medium");
+
+    cleanup();
+    at(new Date(2026, 6, 15, 0, 30));
+    renderList({ sprints: running });
+    expect(sprintCell()).not.toContain("font-medium");
   });
 });

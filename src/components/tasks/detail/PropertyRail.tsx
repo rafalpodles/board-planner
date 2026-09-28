@@ -44,6 +44,7 @@ import { describeBindingError } from "@/lib/binding-error";
 import { assigneeToShow } from "./assignee-display";
 import type { AnyColumn } from "@/lib/columns";
 import { MAX_RECURRENCE_INTERVAL, clampInterval } from "@/lib/recurrence";
+import { formatDateOnly } from "@/lib/date-only";
 
 const RECURRENCE_UNITS: Record<RecurrenceFrequency, string> = {
   daily: "day",
@@ -60,11 +61,7 @@ function recurrenceLabel(recurrence: TaskDraft["recurrence"]): string | null {
 }
 
 function formatDate(value: string): string {
-  return new Date(value).toLocaleDateString(undefined, {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
+  return formatDateOnly(value, { day: "numeric", month: "short", year: "numeric" });
 }
 
 const CONNECT_MACHINE_URL = `${EXECUTION_DOCS_URL}#setting-one-up`;
