@@ -87,9 +87,7 @@ export function useComposition(source: AgentComposition | undefined, lookup: Loo
     if (!target) return;
     // An insert, unlike a move within its own bucket, has no arrayMove to decide which side it lands
     const inserting = activeId.startsWith(NEW_PREFIX) || bucketOf(activeId) !== target.bucket;
-    if (inserting && !String(over.id).startsWith(BUCKET_PREFIX) && landsAfter(collisions?.[0])) {
-      target.index += 1;
-    }
+    if (inserting && landsAfter(collisions?.[0])) target.index += 1;
 
     if (activeId.startsWith(NEW_PREFIX)) {
       const key = activeId.slice(NEW_PREFIX.length);
