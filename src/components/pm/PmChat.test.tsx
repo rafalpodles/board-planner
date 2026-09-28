@@ -221,3 +221,93 @@ describe("a PM page that could not read its board", () => {
     expect(await screen.findByRole("textbox")).toBeTruthy();
   });
 });
+
+// BP-787
+describe("loading older messages", () => {
+  const id = (n: number) => n.toString(16).padStart(24, "0");
+  const page = (from: number, to: number) =>
+    Array.from({ length: to - from + 1 }, (_, i) => ({
+      _id: id(from + i),
+      project: "p1",
+      role: "user",
+      content: `message ${from + i}`,
+      actions: [],
+      attachments: [],
+      trigger: { type: "chat" },
+      triggeredBy: null,
+      createdAt: new Date(0).toISOString(),
+    }));
+
+  function serve(older: () => Promise<unknown>) {
+    api.get.mockImplementation((path: string) =>
+      path.includes("before=")
+        ? older()
+        : path.includes("/pm/messages")
+          ? Promise.resolve({ messages: page(51, 100), nextCursor: id(51) })
+          : path.includes("/tasks")
+            ? Promise.resolve([])
+            : Promise.resolve(PROJECT)
+    );
+  }
+
+  const olderRequests = () => api.get.mock.calls.filter(([path]) => String(path).includes("before=")).length;
+
+  it("asks once and shows the page once when the button is clicked twice", async () => {
+    let release!: () => void;
+    serve(() => new Promise((resolve) => (release = () => resolve({ messages: page(1, 50), nextCursor: null }))));
+    render(<PmChat projectId="p1" preloadedProject={PROJECT as never} />);
+    const button = await screen.findByRole("button", { name: "Load older messages" });
+
+    await act(async () => {
+      button.click();
+      button.click();
+    });
+    await act(async () => {
+      release();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(screen.getByText("message 1")).toBeTruthy());
+    expect(olderRequests()).toBe(1);
+    expect(screen.getAllByText("message 1")).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Load older messages" })).toBeNull();
+  });
+
+  it("says so when the older page cannot be read, and lets the reader try again", async () => {
+    serve(() => Promise.reject(new Error("boom")));
+    render(<PmChat projectId="p1" preloadedProject={PROJECT as never} />);
+    const button = await screen.findByRole("button", { name: "Load older messages" });
+
+    await act(async () => button.click());
+
+    expect(await screen.findByText("Could not load older messages.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Load older messages" })).toBeTruthy();
+  });
+
+  it("keeps the older page when the newest page is read again", async () => {
+    serve(() => Promise.resolve({ messages: page(1, 50), nextCursor: null }));
+    render(<PmChat projectId="p1" preloadedProject={PROJECT as never} />);
+    const button = await screen.findByRole("button", { name: "Load older messages" });
+    await act(async () => button.click());
+    await waitFor(() => expect(screen.getByText("message 1")).toBeTruthy());
+
+    api.get.mockImplementation((path: string) =>
+      path.includes("/pm/messages")
+        ? Promise.resolve({ messages: page(52, 101), nextCursor: id(52) })
+        : path.includes("/tasks")
+          ? Promise.resolve([])
+          : Promise.resolve(PROJECT)
+    );
+    api.stream.mockResolvedValue(new Response("event: done\ndata: {}\n\n", { status: 200 }));
+    const box = screen.getByRole("textbox");
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(box, "one more");
+      box.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => screen.getByRole("button", { name: /send/i }).click());
+
+    await waitFor(() => expect(screen.getByText("message 101")).toBeTruthy());
+    expect(screen.getByText("message 1"), "the page read earlier is still there").toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Load older messages" })).toBeNull();
+  });
+});

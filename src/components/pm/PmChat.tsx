@@ -15,6 +15,7 @@ import { taskPath } from "@/lib/urls";
 import { useOpenTask } from "@/hooks/use-open-task";
 import { Modal } from "@/components/ui/Modal";
 import { BoardLoadFailed } from "@/components/ui/LoadFailed";
+import { EMPTY_THREAD, withNewestPage, withOlderPage, type ThreadPage } from "./thread-paging";
 
 const MAX_ATTACHMENTS = 4;
 const MAX_INPUT_HEIGHT = 200;
@@ -55,8 +56,10 @@ export function PmChat({
   const api = useApi();
 
   const [project, setProject] = useState<ApiProject | null>(preloadedProject ?? null);
-  const [messages, setMessages] = useState<ApiPmMessage[]>([]);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [thread, setThread] = useState<ThreadPage>(EMPTY_THREAD);
+  const { messages, nextCursor } = thread;
+  const loadingOlder = useRef(false);
+  const [olderFailed, setOlderFailed] = useState(false);
   const [taskIdByKey, setTaskIdByKey] = useState<Record<string, string>>({});
   const openTask = useOpenTask();
   const [input, setInput] = useState("");
@@ -109,10 +112,10 @@ export function PmChat({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, project]);
 
-  const loadMessages = useCallback(async () => {
+  const loadMessages = useCallback(async (replace = false) => {
     const data = await api.get(`/api/projects/${projectId}/pm/messages?limit=50`);
-    setMessages(data.messages);
-    setNextCursor(data.nextCursor);
+    const newest: ThreadPage = { messages: data.messages, nextCursor: data.nextCursor };
+    setThread((current) => (replace ? newest : withNewestPage(current, newest)));
     return data.messages as ApiPmMessage[];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
@@ -121,7 +124,7 @@ export function PmChat({
     const projectPromise = preloadedProject
       ? Promise.resolve(preloadedProject).then(setProject)
       : api.get(`/api/projects/${projectId}`).then(setProject, setProjectFailure);
-    Promise.all([projectPromise, loadMessages().catch(() => {})]).finally(() => setLoading(false));
+    Promise.all([projectPromise, loadMessages(true).catch(() => {})]).finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, loadAttempt]);
 
@@ -286,20 +289,23 @@ export function PmChat({
     setPending([]);
 
     const optimisticId = `local-${optimisticSeq.current++}`;
-    setMessages((prev) => [
-      ...prev,
-      {
-        _id: optimisticId,
-        project: projectId,
-        role: "user",
-        content: message,
-        actions: [],
-        attachments: sentAttachments,
-        trigger: { type: "chat" },
-        triggeredBy: null,
-        createdAt: new Date().toISOString(),
-      },
-    ]);
+    setThread((current) => ({
+      ...current,
+      messages: [
+        ...current.messages,
+        {
+          _id: optimisticId,
+          project: projectId,
+          role: "user",
+          content: message,
+          actions: [],
+          attachments: sentAttachments,
+          trigger: { type: "chat" },
+          triggeredBy: null,
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    }));
 
     // The thumbnails come back rather than being cleared on the way out: the upload survives in
     // GridFS but nothing on screen could reach it (BP-451).
@@ -310,7 +316,7 @@ export function PmChat({
     function unsend(reason: string, worthRetrying: boolean) {
       setWorking(false);
       setWorkingStatus("");
-      setMessages((prev) => prev.filter((m) => m._id !== optimisticId));
+      setThread((current) => ({ ...current, messages: current.messages.filter((m) => m._id !== optimisticId) }));
       setInput(message);
       // Merged rather than overwritten, because onDrop is not gated on `working` and anything added
       // mid-flight would otherwise be discarded with its upload orphaned. Clamped, because nothing
@@ -406,12 +412,20 @@ export function PmChat({
   }
 
   async function loadOlder() {
-    if (!nextCursor) return;
-    const data = await api.get(
-      `/api/projects/${projectId}/pm/messages?limit=50&before=${nextCursor}`
-    );
-    setMessages((prev) => [...data.messages, ...prev]);
-    setNextCursor(data.nextCursor);
+    const before = nextCursor;
+    if (!before || loadingOlder.current) return;
+    loadingOlder.current = true;
+    setOlderFailed(false);
+    try {
+      const data = await api.get(`/api/projects/${projectId}/pm/messages?limit=50&before=${before}`);
+      setThread((current) =>
+        withOlderPage(current, before, { messages: data.messages, nextCursor: data.nextCursor })
+      );
+    } catch {
+      setOlderFailed(true);
+    } finally {
+      loadingOlder.current = false;
+    }
   }
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -511,6 +525,11 @@ export function PmChat({
             <button onClick={loadOlder} className="text-xs text-text-muted hover:text-text cursor-pointer">
               Load older messages
             </button>
+            {olderFailed && (
+              <p role="status" className="mt-1 text-xs text-danger">
+                Could not load older messages.
+              </p>
+            )}
           </div>
         )}
         {messages.length === 0 && !working && (

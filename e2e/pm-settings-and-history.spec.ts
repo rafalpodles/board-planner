@@ -122,3 +122,20 @@ test("a thread of exactly one page offers no older messages", async ({ page }) =
   await expect(page.getByText(/^history message \d\d$/)).toHaveCount(PAGE_SIZE);
   await expect(page.getByRole("button", { name: "Load older messages" })).toHaveCount(0);
 });
+
+// BP-787. A double click sent the same cursor twice and put the older page on screen twice
+test("a double click on Load older messages shows the older page once", async ({ page }) => {
+  await seedThread(THREAD_LENGTH);
+
+  await signIn(page, "admin");
+  await page.goto(PM_URL);
+  await expect(page.getByText(label(THREAD_LENGTH), { exact: true })).toBeVisible();
+
+  const older = page.waitForResponse((r) => r.url().includes("/pm/messages?limit=50&before="));
+  await page.getByRole("button", { name: "Load older messages" }).dblclick();
+  expect((await older).ok()).toBe(true);
+
+  await expect(page.getByText(label(1), { exact: true })).toBeVisible();
+  await expect(page.getByText(/^history message \d\d$/)).toHaveCount(THREAD_LENGTH);
+  await expect(page.getByText(label(1), { exact: true })).toHaveCount(1);
+});
