@@ -102,7 +102,8 @@ describe("changing what a block runs as (BP-743, BP-755)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getAuthUser.mockResolvedValue(ADMIN);
-    agentFind.mockReturnValue({ lean: () => Promise.resolve([]) });
+    const lean = () => Promise.resolve([]);
+    agentFind.mockReturnValue({ lean, populate: () => ({ lean }) });
     allBlocks.mockResolvedValue([]);
   });
 
@@ -228,8 +229,19 @@ describe("changing what a step may touch, under agents that already use it (BP-7
   const push = { key: "push", kind: "step", name: "Push", deterministic: true };
   const implement = { key: "implement", kind: "step", name: "Implement", capability: "edit" };
 
-  function agentsUsingIt(...agents: { name: string; composition: Record<string, unknown> }[]) {
-    agentFind.mockReturnValue({ lean: () => Promise.resolve(agents) });
+  function agentsUsingIt(...agents: Record<string, unknown>[]) {
+    const lean = () => Promise.resolve(agents);
+    agentFind.mockReturnValue({ lean, populate: () => ({ lean }) });
+  }
+
+  // Investigate starts writing, and nothing after it pushes
+  const breaksOnWrite = { analysis: [{ key: "a-key" }], verification: [{ key: "build" }] };
+
+  async function refusal() {
+    blockFindById.mockResolvedValue(block({ ...investigate }));
+    const response = await put({ capability: "edit" });
+    expect(response.status).toBe(409);
+    return ((await response.json()) as { error: string }).error;
   }
 
   beforeEach(() => {
@@ -279,6 +291,65 @@ describe("changing what a step may touch, under agents that already use it (BP-7
     blockFindById.mockResolvedValue(doc);
 
     expect((await put({ capability: "edit" })).status).toBe(200);
+  });
+
+  // /api/agents sends a personal agent only to its owner, so its name is not the admin's to read
+  it("does not name another person's personal agent, only whose it is", async () => {
+    agentsUsingIt({
+      name: "Bob's scratch",
+      scope: "user",
+      owner: { _id: "bob-1", username: "bob" },
+      composition: breaksOnWrite,
+    });
+
+    const error = await refusal();
+
+    expect(error).not.toContain("Bob's scratch");
+    expect(error).toMatch(/^This would break a personal agent of bob: /);
+  });
+
+  it("names the admin's own personal agent, and a project's", async () => {
+    agentsUsingIt(
+      { name: "My scratch", scope: "user", owner: { _id: "admin-1", username: "admin" }, composition: breaksOnWrite },
+      { name: "Triage", scope: "project", owner: null, composition: breaksOnWrite }
+    );
+
+    const error = await refusal();
+
+    expect(error).toMatch(/^This would break My scratch: .+ This would break Triage: /);
+  });
+
+  it("says why for each agent, and counts the ones past the third", async () => {
+    agentsUsingIt(
+      ...["One", "Two", "Three", "Four", "Five"].map((name) => ({
+        name,
+        scope: "global",
+        owner: null,
+        composition: breaksOnWrite,
+      }))
+    );
+
+    const error = await refusal();
+
+    expect(error.match(/This would break /g)).toHaveLength(3);
+    expect(error).not.toContain("Four");
+    expect(error).toMatch(/ And 2 more\.$/);
+  });
+
+  // "Merge is not last" names the blocks after it, so a rename alone changed that message's text
+  it("does not read a rename in the same save as breaking an agent that was broken already", async () => {
+    agentsUsingIt({
+      name: "Merges early",
+      scope: "global",
+      owner: null,
+      composition: {
+        delivery: [{ key: "push" }, { key: "pull-request" }, { key: "merge" }, { key: "a-key" }, { key: "push" }],
+      },
+    });
+    const doc = block({ ...investigate });
+    blockFindById.mockResolvedValue(doc);
+
+    expect((await put({ name: "Look around", capability: "edit" })).status).toBe(200);
   });
 
   it("does not look at agents when what it may touch is resent unchanged", async () => {

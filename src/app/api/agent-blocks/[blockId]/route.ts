@@ -50,23 +50,41 @@ function fieldRefusal(block: IAgentBlock, body: Body): string | null {
   return capabilityRefusal(body.capability) ?? modelRefusal(body.model, "model");
 }
 
-/** Agents already naming the block that its new form would leave broken, with the first reason. */
-async function agentsBrokenBy(changed: ApiAgentBlock): Promise<string | null> {
-  const agents = await Agent.find(agentsNaming(changed.key), "name composition").lean();
+const MOST_NAMED = 3;
+
+/** Each agent already naming the block that its new capability would leave broken, and why. */
+async function agentsBrokenBy(
+  changed: ApiAgentBlock,
+  previousCapability: ApiAgentBlock["capability"],
+  viewerId: string
+): Promise<string | null> {
+  const agents = await Agent.find(agentsNaming(changed.key), "name composition scope owner")
+    .populate<{ owner: { _id: unknown; username: string } | null }>("owner", "username")
+    .lean();
   if (agents.length === 0) return null;
 
   const blocks = (await allBlocks()).map(toApiBlock);
-  const before = (key: string) => blocks.find((b) => b.key === key);
-  const after = (key: string) => (key === changed.key ? changed : before(key));
+  const stored = (key: string) => blocks.find((b) => b.key === key);
+  // Only the capability differs between the two, so a rename in the same save cannot read as a new problem
+  const before = (key: string) =>
+    key === changed.key ? { ...changed, capability: previousCapability } : stored(key);
+  const after = (key: string) => (key === changed.key ? changed : stored(key));
 
   const broken = agents.flatMap((agent) => {
     const composition = normaliseComposition(agent.composition as StoredComposition);
     const already = new Set(brokenProblems(composition, before).map((p) => p.message));
     const fresh = brokenProblems(composition, after).filter((p) => !already.has(p.message));
-    return fresh.length > 0 ? [{ name: agent.name, reason: fresh[0].message }] : [];
+    if (fresh.length === 0) return [];
+    // Somebody else's personal agent is not the admin's to see, only whom to ask about it
+    const someoneElses = agent.scope === "user" && String(agent.owner?._id) !== viewerId;
+    const label = someoneElses
+      ? `a personal agent of ${agent.owner?.username ?? "a deleted account"}`
+      : agent.name;
+    return [`This would break ${label}: ${fresh[0].message}`];
   });
   if (broken.length === 0) return null;
-  return `This would break ${broken.map((b) => b.name).join(", ")}: ${broken[0].reason}`;
+  const rest = broken.length - MOST_NAMED;
+  return [...broken.slice(0, MOST_NAMED), ...(rest > 0 ? [`And ${rest} more.`] : [])].join(" ");
 }
 
 // The key is the contract with the worker and with every agent that already names it, so a rename
@@ -100,7 +118,8 @@ export const PUT = withAuth(async (request, { params, user }) => {
   const refusal = fieldRefusal(block, body);
   if (refusal) return NextResponse.json({ error: refusal }, { status: 400 });
 
-  const capabilityChanged = body.capability !== undefined && body.capability !== block.capability;
+  const previousCapability = block.capability;
+  const capabilityChanged = body.capability !== undefined && body.capability !== previousCapability;
   if (typeof body.name === "string" && body.name.trim()) block.name = body.name.trim();
   if (typeof body.description === "string") block.description = body.description.trim();
   if (block.kind === "step" && typeof body.prompt === "string") block.prompt = body.prompt.trim();
@@ -111,7 +130,11 @@ export const PUT = withAuth(async (request, { params, user }) => {
   }
 
   if (capabilityChanged) {
-    const breaks = await agentsBrokenBy(toApiBlock(block.toObject()));
+    const breaks = await agentsBrokenBy(
+      toApiBlock(block.toObject()),
+      previousCapability,
+      String(user._id)
+    );
     if (breaks) return NextResponse.json({ error: breaks }, { status: 409 });
   }
 
