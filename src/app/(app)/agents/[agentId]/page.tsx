@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import {
-  CollisionDetection,
   DndContext,
   DragOverlay,
   KeyboardCode,
@@ -13,8 +12,6 @@ import {
   PointerSensor,
   closestCorners,
   getFirstCollision,
-  pointerWithin,
-  rectIntersection,
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
@@ -31,14 +28,7 @@ import { BUCKETS } from "../catalog";
 import { useStore } from "../store";
 import { sameComposition, useComposition } from "../useComposition";
 import { BlockBody, Bucket, Palette } from "../components/blocks";
-
-// Corner distance picks a neighbouring bucket's first row over the bucket the cursor is actually
-// inside; the pointer is the only honest signal here. rectIntersection is the keyboard fallback,
-// where there is no pointer at all.
-const collisionDetection: CollisionDetection = (args) => {
-  const byPointer = pointerWithin(args);
-  return byPointer.length > 0 ? byPointer : rectIntersection(args);
-};
+import { AUTO_SCROLL, collisionDetection } from "../drag";
 
 const ARROWS: string[] = [
   KeyboardCode.Down,
@@ -330,6 +320,7 @@ export default function AgentDetailPage() {
       <DndContext
         sensors={sensors}
         collisionDetection={collisionDetection}
+        autoScroll={AUTO_SCROLL}
         onDragStart={onDragStart}
         onDragEnd={onDragEnd}
       >
