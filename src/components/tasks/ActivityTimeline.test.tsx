@@ -53,6 +53,7 @@ describe("ActivityTimeline", () => {
   it.each([
     [{ field: "agent", oldValue: "Default", newValue: "Plan to ship" }, "changed agent from “Default” to “Plan to ship”"],
     [{ field: "agent", oldValue: "", newValue: "Default" }, "changed agent from no agent to “Default”"],
+    [{ field: "agent", oldValue: "Default", newValue: "a deleted agent" }, "changed agent from “Default” to a deleted agent"],
   ])("names the agents on an agent change", async (row, sentence) => {
     api.get.mockResolvedValue([{ ...log, action: "updated", ...row }]);
     render(<ActivityTimeline projectId="TP" taskId="t1" />);
@@ -63,7 +64,7 @@ describe("ActivityTimeline", () => {
     api.get.mockResolvedValue([{ ...log, action: "updated", field: "checklist", newValue: "37" }]);
     render(<ActivityTimeline projectId="TP" taskId="t1" />);
     await waitFor(() =>
-      expect(screen.getByText("Owner Name rewrote the acceptance criteria (37 changes)")).toBeTruthy()
+      expect(screen.getByText("Owner Name changed 37 acceptance criteria at once")).toBeTruthy()
     );
   });
 

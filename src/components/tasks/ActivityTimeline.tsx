@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { LoadFailed } from "@/components/ui/LoadFailed";
-import { ApiActivityLog, LinkDirection, STATUS_LABELS, TaskStatus } from "@/types";
+import { ApiActivityLog, DELETED_AGENT, LinkDirection, STATUS_LABELS, TaskStatus } from "@/types";
 import { timeAgo } from "@/lib/time";
 import { describeLinkChange } from "@/lib/link-phrasing";
 
@@ -95,7 +95,8 @@ function formatValue(field: string, value: string): string {
 }
 
 function agentLabel(name: string): string {
-  return name ? `“${formatValue("agent", name)}”` : "no agent";
+  if (!name) return "no agent";
+  return name === DELETED_AGENT ? name : `“${formatValue("agent", name)}”`;
 }
 
 // A link's address, shortened from the front. `formatValue` cuts the tail, which on a pull request
@@ -136,7 +137,7 @@ function describeAction(log: ApiActivityLog): string {
         return `${userName} changed agent from ${agentLabel(log.oldValue)} to ${agentLabel(log.newValue)}`;
       }
       if (log.field === "checklist" && !log.customField && log.newValue) {
-        return `${userName} rewrote the acceptance criteria (${log.newValue} changes)`;
+        return `${userName} changed ${log.newValue} acceptance criteria at once`;
       }
       // createNextRecurrence writes a sentence into newValue rather than a before/after pair,
       // so reading it as one would claim the recurrence config had been edited

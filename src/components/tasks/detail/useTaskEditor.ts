@@ -12,6 +12,8 @@ import {
 } from "@/types";
 
 const AUTOSAVE_DEBOUNCE_MS = 700;
+// How long a save waits for the one before it: a request that never settles must not hold every later edit
+const SAVE_QUEUE_WAIT_MS = 15_000;
 
 export type AutoSaveState = "idle" | "saving" | "saved" | "error";
 
@@ -70,11 +72,22 @@ export function draftFromTask(task: ApiTask): TaskDraft {
   };
 }
 
-const withoutClientKeys = (key: string, value: unknown) => (key === "clientKey" ? undefined : value);
-const same = (a: unknown, b: unknown) =>
-  JSON.stringify(a, withoutClientKeys) === JSON.stringify(b, withoutClientKeys);
+// Key order is whatever the server serialised, and `clientKey` exists only on this screen
+const canonical = (_key: string, value: unknown) =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? Object.fromEntries(
+        Object.keys(value)
+          .filter((key) => key !== "clientKey")
+          .sort()
+          .map((key) => [key, (value as Record<string, unknown>)[key]])
+      )
+    : value;
+const same = (a: unknown, b: unknown) => JSON.stringify(a, canonical) === JSON.stringify(b, canonical);
 
 type MintedIds = Map<string, string>;
+
+const afterAtMost = (previous: Promise<void>) =>
+  Promise.race([previous, new Promise<void>((resolve) => setTimeout(resolve, SAVE_QUEUE_WAIT_MS))]);
 
 function withMintedIds(items: ChecklistDraftItem[], minted: MintedIds): ChecklistDraftItem[] {
   if (!items.some((item) => !item._id && item.clientKey && minted.has(item.clientKey))) return items;
@@ -142,8 +155,10 @@ export function useTaskEditor(projectId: string, task: ApiTask, onRefused?: (err
   const signature = JSON.stringify(editedFields());
 
   const minted = useRef<MintedIds>(new Map());
-  // One save at a time, so a save never leaves before the one that mints the ids it needs has answered
+  // Autosaves go one at a time, so each leaves after the one that mints the ids it needs has answered
   const lastSave = useRef<Promise<void>>(Promise.resolve());
+  // A flush carries every pending edit, so the autosaves still queued behind it would only write older values
+  const generation = useRef(0);
 
   const save = useCallback(
     async (pending: Partial<TaskDraft>) => {
@@ -174,7 +189,8 @@ export function useTaskEditor(projectId: string, task: ApiTask, onRefused?: (err
   const persist = useCallback(
     (edited: Partial<TaskDraft>) => {
       if (Object.keys(edited).length === 0) return Promise.resolve();
-      const run = lastSave.current.then(() => save(edited));
+      const queuedIn = generation.current;
+      const run = afterAtMost(lastSave.current).then(() => (queuedIn === generation.current ? save(edited) : undefined));
       lastSave.current = run.catch(() => {});
       return run;
     },
@@ -196,8 +212,9 @@ export function useTaskEditor(projectId: string, task: ApiTask, onRefused?: (err
     return () => {
       const pending = pendingRef.current;
       if (pending === "{}") return;
-      api
-        .put(`/api/projects/${projectId}/tasks/${taskId}`, withKnownIds(JSON.parse(pending), minted.current))
+      generation.current++;
+      afterAtMost(lastSave.current)
+        .then(() => api.put(`/api/projects/${projectId}/tasks/${taskId}`, withKnownIds(JSON.parse(pending), minted.current)))
         .then(() => emitBoardRefresh(projectId))
         .catch(() => {});
     };
@@ -212,6 +229,7 @@ export function useTaskEditor(projectId: string, task: ApiTask, onRefused?: (err
     const flush = () => {
       const pending = pendingRef.current;
       if (pending === "{}") return;
+      generation.current++;
       fetch(`/api/projects/${projectId}/tasks/${taskId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },

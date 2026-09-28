@@ -1470,6 +1470,9 @@ export interface IActivityLog {
   createdAt: Date;
 }
 
+// What History says for an agent that no longer exists, where a stored row names it only by id
+export const DELETED_AGENT = "a deleted agent";
+
 export interface ApiActivityLog {
   _id: string;
   task: string;

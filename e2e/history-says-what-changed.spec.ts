@@ -89,7 +89,7 @@ test.describe("an agent change", () => {
     await openTask(page);
     const panel = await openHistory(page);
 
-    await expect(sentence(panel, `changed agent from “${PROJECT_AGENT_NAME}” to “a deleted agent”`)).toBeVisible();
+    await expect(sentence(panel, `changed agent from “${PROJECT_AGENT_NAME}” to a deleted agent`)).toBeVisible();
   });
 });
 

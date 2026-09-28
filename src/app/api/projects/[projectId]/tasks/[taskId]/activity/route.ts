@@ -5,7 +5,7 @@ import { ActivityLog } from "@/models/activityLog";
 import { Task } from "@/models/task";
 import { Agent } from "@/models/agent";
 import { editSessions, presentSessions, type ActivityHeader } from "@/lib/activity";
-import type { IActivityLog } from "@/types";
+import { DELETED_AGENT, type IActivityLog } from "@/types";
 
 const SHOWN = 100;
 const SCANNED = 1000;
@@ -51,7 +51,7 @@ async function withAgentNames(logs: IActivityLog[]): Promise<IActivityLog[]> {
   if (ids.size === 0) return logs;
   const agents = await Agent.find({ _id: { $in: [...ids] } }, "name").lean<{ _id: unknown; name: string }[]>();
   const names = new Map(agents.map((agent) => [String(agent._id), agent.name]));
-  const named = (value: string) => (OBJECT_ID.test(value) ? names.get(value) ?? "a deleted agent" : value);
+  const named = (value: string) => (OBJECT_ID.test(value) ? names.get(value) ?? DELETED_AGENT : value);
   return logs.map((log) =>
     agentRow(log) ? { ...log, oldValue: named(log.oldValue), newValue: named(log.newValue) } : log
   );

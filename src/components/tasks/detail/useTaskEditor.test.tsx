@@ -262,9 +262,11 @@ describe("a criterion added on this screen", () => {
   type Item = { _id?: string; clientKey?: string; text: string; done: boolean };
   let edit: (change: (items: Item[]) => Item[]) => void;
   let retitle: (title: string) => void;
+  let current: Item[];
 
   function Criteria({ task }: { task: ApiTask }) {
     const { draft, set } = useTaskEditor("p1", task);
+    current = draft.checklist;
     edit = (change) => set("checklist", change(draft.checklist));
     retitle = (title) => set("title", title);
     return null;
@@ -343,6 +345,56 @@ describe("a criterion added on this screen", () => {
       ["A", "idA"],
       ["C", undefined],
     ]);
+  });
+
+  // The key names the row, so losing it on the reload that follows a save would remount the row being edited
+  it("keeps the criterion's client key when the reload brings the saved list", async () => {
+    const saved = [{ _id: "c1", text: "Loads", done: false }];
+    api.put.mockResolvedValueOnce({ checklist: saved });
+    const { rerender } = render(<Criteria task={baseTask} />);
+
+    await act(async () => edit((items) => [...items, { clientKey: "k1", text: "Loads", done: false }]));
+    await settle();
+    await waitFor(() => expect(current[0]?._id).toBe("c1"));
+
+    rerender(<Criteria task={{ ...baseTask, checklist: saved } as unknown as ApiTask} />);
+
+    expect(current).toEqual([{ _id: "c1", clientKey: "k1", text: "Loads", done: false }]);
+  });
+
+  it("lets a closing flush be the last write, dropping an older save still queued", async () => {
+    let answer!: (task: unknown) => void;
+    api.put.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+    const { unmount } = render(<Criteria task={baseTask} />);
+
+    await act(async () => retitle("E1"));
+    await settle();
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+    await act(async () => retitle("E2"));
+    await settle();
+    await act(async () => retitle("E3"));
+    await act(async () => unmount());
+
+    await act(async () => answer({}));
+    await settle(2_000);
+
+    expect(api.put.mock.calls.map((call) => (call[1] as { title: string }).title)).toEqual(["E1", "E3"]);
+  });
+
+  it("stops waiting for a save that never answers", async () => {
+    api.put.mockImplementationOnce(() => new Promise(() => {}));
+    render(<Criteria task={baseTask} />);
+
+    await act(async () => retitle("E1"));
+    await settle();
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+    await act(async () => retitle("E2"));
+    await settle();
+    expect(api.put).toHaveBeenCalledTimes(1);
+
+    await settle(15_000);
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2));
+    expect(api.put).toHaveBeenLastCalledWith("/api/projects/p1/tasks/t1", { title: "E2" });
   });
 
   it("holds a save back until the one before it has answered with the new criterion's id", async () => {

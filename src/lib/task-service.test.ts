@@ -5270,6 +5270,8 @@ describe("updateTask rewriting many criteria at once", () => {
 });
 
 describe("updateTask when the agent's name cannot be read", () => {
+  afterEach(() => agentFindById.mockReset());
+
   it("still answers the write it already made, and keeps the id", async () => {
     vi.clearAllMocks();
     findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
