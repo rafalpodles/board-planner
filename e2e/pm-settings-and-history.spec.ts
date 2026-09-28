@@ -27,6 +27,25 @@ const storedPm = () =>
 
 const label = (n: number) => `history message ${String(n).padStart(2, "0")}`;
 
+function seedThread(length: number) {
+  const start = Date.now() - 2 * 86_400_000;
+  return withDb((db) =>
+    db.collection("pmmessages").insertMany(
+      Array.from({ length }, (_, i) => ({
+        _id: mongoose.Types.ObjectId.createFromTime(Math.floor(start / 1000) + i),
+        project: PROJECT_ID,
+        role: i % 2 === 0 ? "user" : "assistant",
+        content: label(i + 1),
+        actions: [],
+        attachments: [],
+        trigger: { type: "chat", taskKey: "" },
+        triggeredBy: ADMIN_ID,
+        createdAt: new Date(start + i * 1000),
+      }))
+    )
+  );
+}
+
 test.beforeEach(seed);
 
 test("project context, tokens per day, the on/off switch and the review schedule are saved and read back", async ({ page }) => {
@@ -70,22 +89,7 @@ test("project context, tokens per day, the on/off switch and the review schedule
 });
 
 test("a thread longer than a page shows its older messages only after Load older messages", async ({ page }) => {
-  const start = Date.now() - 2 * 86_400_000;
-  await withDb((db) =>
-    db.collection("pmmessages").insertMany(
-      Array.from({ length: THREAD_LENGTH }, (_, i) => ({
-        _id: mongoose.Types.ObjectId.createFromTime(Math.floor(start / 1000) + i),
-        project: PROJECT_ID,
-        role: i % 2 === 0 ? "user" : "assistant",
-        content: label(i + 1),
-        actions: [],
-        attachments: [],
-        trigger: { type: "chat", taskKey: "" },
-        triggeredBy: ADMIN_ID,
-        createdAt: new Date(start + i * 1000),
-      }))
-    )
-  );
+  await seedThread(THREAD_LENGTH);
   const oldest = THREAD_LENGTH - PAGE_SIZE;
 
   await signIn(page, "admin");
@@ -104,5 +108,17 @@ test("a thread longer than a page shows its older messages only after Load older
   }
   await expect(page.getByText(/^history message \d\d$/)).toHaveCount(THREAD_LENGTH);
   await expect(page.getByText(/^history message \d\d$/).first()).toHaveText(label(1));
+  await expect(page.getByRole("button", { name: "Load older messages" })).toHaveCount(0);
+});
+
+// BP-752. At exactly one page the chat offered "Load older messages", and the click loaded nothing
+test("a thread of exactly one page offers no older messages", async ({ page }) => {
+  await seedThread(PAGE_SIZE);
+
+  await signIn(page, "admin");
+  await page.goto(PM_URL);
+  await expect(page.getByText(label(PAGE_SIZE), { exact: true })).toBeVisible();
+  await expect(page.getByText(label(1), { exact: true })).toBeVisible();
+  await expect(page.getByText(/^history message \d\d$/)).toHaveCount(PAGE_SIZE);
   await expect(page.getByRole("button", { name: "Load older messages" })).toHaveCount(0);
 });

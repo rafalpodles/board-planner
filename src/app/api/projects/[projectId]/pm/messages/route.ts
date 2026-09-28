@@ -37,16 +37,17 @@ export const GET = withProjectAccess(async (request, { params, user }) => {
     filter._id = { $lt: before };
   }
 
-  const messages = await PmMessage.find(filter)
+  const newestFirst = await PmMessage.find(filter)
     .sort({ _id: -1 })
-    .limit(limit)
+    .limit(limit + 1)
     .populate("triggeredBy", "username fullName");
+  const hasOlder = newestFirst.length > limit;
 
   // Ascending for rendering; cursor for the next page is the first (oldest) _id
-  messages.reverse();
+  const messages = newestFirst.slice(0, limit).reverse();
 
   return NextResponse.json({
     messages,
-    nextCursor: messages.length === limit ? String(messages[0]._id) : null,
+    nextCursor: hasOlder ? String(messages[0]._id) : null,
   });
 });
