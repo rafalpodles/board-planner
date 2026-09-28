@@ -261,10 +261,12 @@ describe("useTaskEditor", () => {
 describe("a criterion added on this screen", () => {
   type Item = { _id?: string; clientKey?: string; text: string; done: boolean };
   let edit: (change: (items: Item[]) => Item[]) => void;
+  let retitle: (title: string) => void;
 
   function Criteria({ task }: { task: ApiTask }) {
     const { draft, set } = useTaskEditor("p1", task);
     edit = (change) => set("checklist", change(draft.checklist));
+    retitle = (title) => set("title", title);
     return null;
   }
 
@@ -289,6 +291,21 @@ describe("a criterion added on this screen", () => {
 
     await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2));
     expect(lastChecklist()).toEqual([expect.objectContaining({ _id: "c1", text: "Loads fast" })]);
+  });
+
+  it("counts the criterion as saved, so the next edit elsewhere does not carry the list again", async () => {
+    api.put.mockResolvedValueOnce({ checklist: [{ _id: "c1", text: "Loads", done: false }] });
+    render(<Criteria task={baseTask} />);
+
+    await act(async () => edit((items) => [...items, { clientKey: "k1", text: "Loads", done: false }]));
+    await settle();
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+
+    await act(async () => retitle("Renamed"));
+    await settle();
+
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2));
+    expect(api.put).toHaveBeenLastCalledWith("/api/projects/p1/tasks/t1", { title: "Renamed" });
   });
 
   it("sends nothing more once the minted id is all that differs", async () => {
