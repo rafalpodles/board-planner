@@ -3,6 +3,8 @@ import { User } from "@/models/user";
 import { projectAudienceFilter } from "@/lib/grants";
 import { resolveChannels } from "@/lib/notification-prefs";
 import { createNotifications, NotificationEmail } from "@/lib/in-app-notifications";
+import { isEmailConfigured } from "@/lib/email";
+import { readableSecretPatterns } from "@/lib/encryption";
 
 /**
  * `task_created` is the one row of the grid whose recipients cannot be filtered out of a list the
@@ -24,10 +26,12 @@ export const BOARD_FEED_FANOUT_LIMIT = 200;
 
 const OBJECT_ID = /^[0-9a-fA-F]{24}$/;
 
-const CHAT_CONNECTED = {
-  "notifications.chat.kind": { $nin: ["", null] },
-  "notifications.chat.webhookUrl": { $nin: ["", null] },
-};
+function chatDeliverable(): Clause {
+  return {
+    "notifications.chat.kind": { $nin: ["", null] },
+    "notifications.chat.webhookUrl": { $nin: ["", null], $in: readableSecretPatterns() },
+  };
+}
 
 const HAS_ADDRESS = { email: { $gt: "" } };
 
@@ -39,14 +43,15 @@ function prefixed(prefix: string, clause: Clause): Clause {
 
 /**
  * The cells that make resolveChannels answer yes, for the query that has to find them by path —
- * and, for mail, an address to send it to, since a tick with none delivers nothing either.
- * `within` is where the row lives relative to the user document.
+ * narrowed to what createNotifications can actually deliver: mail needs a mail server and an
+ * address, chat a webhook one of the configured keys can decrypt. `within` is where the row lives
+ * relative to the user document.
  */
 function deliverable(row: string, within: (clause: Clause) => Clause): Clause[] {
   return [
     within({ [`${row}.inApp`]: true }),
-    { $and: [within({ [`${row}.email`]: true }), HAS_ADDRESS] },
-    { $and: [within({ [`${row}.chat`]: true }), CHAT_CONNECTED] },
+    ...(isEmailConfigured() ? [{ $and: [within({ [`${row}.email`]: true }), HAS_ADDRESS] }] : []),
+    { $and: [within({ [`${row}.chat`]: true }), chatDeliverable()] },
   ];
 }
 
@@ -55,8 +60,8 @@ function deliverable(row: string, within: (clause: Clause) => Clause): Clause[] 
  *
  * The whole of resolveChannels' verdict is in the query, not sifted afterwards, because the cap
  * is applied by the query: a candidate dropped after it — a global tick this board's override
- * switches off, a chat tick with nothing connected, a mail tick with no address, the actor —
- * would spend a place that somebody who did qualify was then refused (BP-705). resolveChannels
+ * switches off, a chat tick with nothing connected, a mail tick with no address or no mail server,
+ * the actor — would spend a place that somebody who did qualify was then refused (BP-705, BP-735). resolveChannels
  * still runs on what comes back, and a candidate the query admitted but it refuses is logged.
  */
 export async function boardFeedSubscribers(

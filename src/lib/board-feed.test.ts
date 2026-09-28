@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const PROJECT = "507f1f77bcf86cd799439021";
 const OTHER_PROJECT = "507f1f77bcf86cd799439022";
@@ -33,31 +33,39 @@ function matches(doc: Record<string, unknown>, filter: Record<string, unknown>):
 
     const actual = key === "_id" ? doc._id : valueAt(doc, key);
 
-    if (condition && typeof condition === "object") {
-      const clause = condition as Record<string, unknown>;
-      if ("$in" in clause) {
-        return (clause.$in as unknown[]).map(String).includes(String(actual));
-      }
-      if ("$ne" in clause) return String(actual) !== String(clause.$ne);
-      if ("$gt" in clause) return typeof actual === "string" && actual > String(clause.$gt);
-      if ("$type" in clause) {
-        if (clause.$type !== "object") throw new Error(`mock does not model $type ${clause.$type}`);
-        return actual !== null && typeof actual === "object" && !Array.isArray(actual);
-      }
-      if ("$nin" in clause) {
-        return !(clause.$nin as unknown[]).some((v) =>
-          v === null ? actual === null || actual === undefined : String(v) === String(actual)
-        );
-      }
-      if ("$elemMatch" in clause) {
-        const inner = clause.$elemMatch as Record<string, unknown>;
-        return (Array.isArray(actual) ? actual : []).some((entry) =>
-          matches(entry as Record<string, unknown>, inner)
-        );
-      }
+    if (condition && typeof condition === "object" && Object.keys(condition).some((k) => k.startsWith("$"))) {
+      return Object.entries(condition as Record<string, unknown>).every(([op, operand]) =>
+        satisfies(actual, op, operand)
+      );
     }
     return String(actual) === String(condition);
   });
+}
+
+function satisfies(actual: unknown, op: string, operand: unknown): boolean {
+  switch (op) {
+    case "$in":
+      return (operand as unknown[]).some((v) =>
+        v instanceof RegExp ? typeof actual === "string" && v.test(actual) : String(v) === String(actual)
+      );
+    case "$ne":
+      return String(actual) !== String(operand);
+    case "$gt":
+      return typeof actual === "string" && actual > String(operand);
+    case "$type":
+      if (operand !== "object") throw new Error(`mock does not model $type ${operand}`);
+      return actual !== null && typeof actual === "object" && !Array.isArray(actual);
+    case "$nin":
+      return !(operand as unknown[]).some((v) =>
+        v === null ? actual === null || actual === undefined : String(v) === String(actual)
+      );
+    case "$elemMatch":
+      return (Array.isArray(actual) ? actual : []).some((entry) =>
+        matches(entry as Record<string, unknown>, operand as Record<string, unknown>)
+      );
+    default:
+      throw new Error(`mock does not model ${op}`);
+  }
 }
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
@@ -98,10 +106,13 @@ vi.mock("@/models/user", () => ({
 vi.mock("@/lib/in-app-notifications", () => ({
   createNotifications: (...a: unknown[]) => createNotifications(...a),
 }));
+let mailConfigured = true;
+vi.mock("@/lib/email", () => ({ isEmailConfigured: () => mailConfigured }));
 
 const { boardFeedSubscribers, notifyBoardFeed, BOARD_FEED_FANOUT_LIMIT } = await import(
   "@/lib/board-feed"
 );
+const { encryptSecret } = await import("@/lib/encryption");
 
 const id = (n: number) => `507f1f77bcf86cd7994${String(n).padStart(5, "0")}`;
 
@@ -139,6 +150,7 @@ beforeEach(() => {
   grantFind.mockClear();
   stored = [];
   granted = [];
+  mailConfigured = true;
 });
 
 describe("who hears that a task was created", () => {
@@ -366,6 +378,104 @@ describe("a board with more subscribers than the cap", () => {
       granted = stored.map((u) => String(u._id));
 
       expect(await boardFeedSubscribers(PROJECT)).toEqual([id(BOARD_FEED_FANOUT_LIMIT + 1)]);
+    });
+
+    // BP-735. createNotifications sends no mail at all on an instance without a mail server, so a
+    // tick there is no more a subscription than a tick with no address.
+    it("a mail tick on an instance with no mail server", async () => {
+      mailConfigured = false;
+      const unmailable = Array.from({ length: BOARD_FEED_FANOUT_LIMIT }, (_, i) =>
+        i % 2
+          ? {
+              ...member(i + 1, { defaults: { task_created: row({ email: true }) } }),
+              email: `m${i}@example.com`,
+            }
+          : {
+              ...member(i + 1, {
+                projects: [{ project: PROJECT, matrix: { task_created: row({ email: true }) } }],
+              }),
+              email: `m${i}@example.com`,
+            }
+      );
+      stored = [...unmailable, subscriber()];
+      granted = stored.map((u) => String(u._id));
+
+      expect(await boardFeedSubscribers(PROJECT)).toEqual([id(BOARD_FEED_FANOUT_LIMIT + 1)]);
+    });
+
+    it("still counts a mail tick once a mail server is configured", async () => {
+      const mailOnly = {
+        ...member(1, { defaults: { task_created: row({ email: true }) } }),
+        email: "someone@example.com",
+      };
+      stored = [mailOnly];
+      granted = [id(1)];
+
+      mailConfigured = false;
+      expect(await boardFeedSubscribers(PROJECT)).toEqual([]);
+      mailConfigured = true;
+      expect(await boardFeedSubscribers(PROJECT)).toEqual([id(1)]);
+    });
+
+    describe("a chat tick whose webhook no configured key can open", () => {
+      const KEY = "a".repeat(64);
+      const LOST_KEY = "b".repeat(64);
+      const saved = { key: process.env.ENCRYPTION_KEY, old: process.env.ENCRYPTION_KEYS_OLD };
+      const sealedWith = (key: string) => {
+        process.env.ENCRYPTION_KEY = key;
+        return encryptSecret("https://hooks.slack.com/services/T0/B0/x");
+      };
+      const chatOnly = (n: number, webhookUrl: string) =>
+        member(n, {
+          defaults: { task_created: row({ chat: true }) },
+          chat: { kind: "slack", webhookUrl },
+        });
+
+      afterEach(() => {
+        for (const [name, value] of [
+          ["ENCRYPTION_KEY", saved.key],
+          ["ENCRYPTION_KEYS_OLD", saved.old],
+        ] as const) {
+          if (value === undefined) delete process.env[name];
+          else process.env[name] = value;
+        }
+      });
+
+      // sendPersonalChat skips a webhook it cannot decrypt, so a key rotation that dropped the old
+      // key leaves every tick sealed with it delivering nothing
+      it("does not spend the cap", async () => {
+        const sealed = sealedWith(LOST_KEY);
+        process.env.ENCRYPTION_KEY = KEY;
+        delete process.env.ENCRYPTION_KEYS_OLD;
+        stored = [
+          ...Array.from({ length: BOARD_FEED_FANOUT_LIMIT }, (_, i) => chatOnly(i + 1, sealed)),
+          subscriber(),
+        ];
+        granted = stored.map((u) => String(u._id));
+
+        expect(await boardFeedSubscribers(PROJECT)).toEqual([id(BOARD_FEED_FANOUT_LIMIT + 1)]);
+      });
+
+      it("nor with no key configured at all", async () => {
+        const sealed = sealedWith(LOST_KEY);
+        delete process.env.ENCRYPTION_KEY;
+        delete process.env.ENCRYPTION_KEYS_OLD;
+        stored = [chatOnly(1, sealed)];
+        granted = [id(1)];
+
+        expect(await boardFeedSubscribers(PROJECT)).toEqual([]);
+      });
+
+      it("counts one sealed with the current key, or with a retired one still configured", async () => {
+        const current = sealedWith(KEY);
+        const retired = sealedWith(LOST_KEY);
+        process.env.ENCRYPTION_KEY = KEY;
+        process.env.ENCRYPTION_KEYS_OLD = LOST_KEY;
+        stored = [chatOnly(1, current), chatOnly(2, retired)];
+        granted = [id(1), id(2)];
+
+        expect(await boardFeedSubscribers(PROJECT)).toEqual([id(1), id(2)]);
+      });
     });
 
     it("still counts a mail tick from somebody with an address", async () => {

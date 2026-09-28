@@ -201,3 +201,51 @@ describe("isEncryptedSecret", () => {
     expect(isEncryptedSecret(null)).toBe(false);
   });
 });
+
+// BP-735. The board feed asks the database which stored webhooks are deliverable, so these
+// patterns have to agree with what decryptSecret will actually open.
+describe("readableSecretPatterns", () => {
+  const readable = (patterns: RegExp[], value: string) => patterns.some((p) => p.test(value));
+
+  it("matches exactly what decryptSecret opens with the keys configured now", async () => {
+    process.env.ENCRYPTION_KEY = KEY_B;
+    const lost = (await load()).encryptSecret("https://hooks.example.com/lost");
+    process.env.ENCRYPTION_KEY = KEY_A;
+    const current = (await load()).encryptSecret("https://hooks.example.com/current");
+    const { readableSecretPatterns, decryptSecret } = await load();
+    const patterns = readableSecretPatterns();
+
+    for (const value of [current, lost, "https://hooks.example.com/plain"]) {
+      let opens = true;
+      try {
+        decryptSecret(value);
+      } catch {
+        opens = false;
+      }
+      expect(readable(patterns, value), value).toBe(opens);
+    }
+    expect(readable(patterns, lost)).toBe(false);
+  });
+
+  it("admits a retired key's envelope while that key stays configured", async () => {
+    process.env.ENCRYPTION_KEY = KEY_B;
+    const retired = (await load()).encryptSecret("x");
+    process.env.ENCRYPTION_KEY = KEY_A;
+    process.env.ENCRYPTION_KEYS_OLD = KEY_B;
+    const { readableSecretPatterns } = await load();
+
+    expect(readable(readableSecretPatterns(), retired)).toBe(true);
+  });
+
+  it("admits no envelope at all when no key is configured", async () => {
+    process.env.ENCRYPTION_KEY = KEY_A;
+    const sealed = (await load()).encryptSecret("x");
+    delete process.env.ENCRYPTION_KEY;
+    const { readableSecretPatterns } = await load();
+    const patterns = readableSecretPatterns();
+
+    expect(readable(patterns, sealed)).toBe(false);
+    expect(readable(patterns, "enc:v1:abc")).toBe(false);
+    expect(readable(patterns, "https://hooks.example.com/plain")).toBe(true);
+  });
+});

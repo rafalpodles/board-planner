@@ -90,6 +90,16 @@ export function isEncryptionConfigured(): boolean {
   return primaryKey() !== null;
 }
 
+/** Stored values `decryptSecret` can open with the keys configured now, as patterns a query can match. */
+export function readableSecretPatterns(): RegExp[] {
+  const keys = allKeys();
+  return [
+    new RegExp(`^(?!${PREFIX_V1}|${PREFIX_V2})`),
+    ...(keys.length > 0 ? [new RegExp(`^${PREFIX_V1}`)] : []),
+    ...keys.map((key) => new RegExp(`^${PREFIX_V2}${key.id}:`)),
+  ];
+}
+
 export function isEncryptedSecret(value: string | undefined | null): boolean {
   return !!value && (value.startsWith(PREFIX_V1) || value.startsWith(PREFIX_V2));
 }
