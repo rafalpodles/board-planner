@@ -69,6 +69,13 @@ export function draftFromTask(task: ApiTask): TaskDraft {
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
+// A criterion typed here has no id until the save answers. Without it the next save sends it bare,
+// the server mints another, and History reads an edit as a removal and an addition.
+function withMintedIds(items: ChecklistDraftItem[], stored: { _id?: string }[] | undefined): ChecklistDraftItem[] {
+  if (!stored || stored.length !== items.length) return items;
+  return items.map((item, i) => (item._id || !stored[i]._id ? item : { ...item, _id: stored[i]._id }));
+}
+
 export function useTaskEditor(projectId: string, task: ApiTask, onRefused?: (err: unknown) => boolean) {
   const refused = useRef(onRefused);
   refused.current = onRefused;
@@ -119,8 +126,11 @@ export function useTaskEditor(projectId: string, task: ApiTask, onRefused?: (err
       if (Object.keys(edited).length === 0) return;
       setAutoSaveState("saving");
       try {
-        await api.put(`/api/projects/${projectId}/tasks/${task._id}`, edited);
+        const saved: Partial<ApiTask> | undefined = await api.put(`/api/projects/${projectId}/tasks/${task._id}`, edited);
+        if (edited.checklist) edited = { ...edited, checklist: withMintedIds(edited.checklist, saved?.checklist) };
         serverValues.current = { ...serverValues.current, ...edited };
+        const sent = edited.checklist;
+        if (sent) setDraft((d) => (d.checklist.length === sent.length ? { ...d, checklist: withMintedIds(d.checklist, sent) } : d));
         setAutoSaveError(null);
         setAutoSaveState("saved");
         setSavedCount((n) => n + 1);

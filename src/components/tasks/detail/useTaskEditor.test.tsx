@@ -257,3 +257,50 @@ describe("useTaskEditor", () => {
     expect(screen.getByTestId("agent").textContent).toBe("a9");
   });
 });
+
+describe("a criterion added on this screen", () => {
+  function Criteria({ task }: { task: ApiTask }) {
+    const { draft, set } = useTaskEditor("p1", task);
+    return (
+      <div>
+        <button onClick={() => set("checklist", [...draft.checklist, { text: "Loads", done: false }])}>add</button>
+        <button onClick={() => set("checklist", draft.checklist.map((c) => ({ ...c, text: `${c.text} fast` })))}>
+          reword
+        </button>
+      </div>
+    );
+  }
+
+  it("carries the id its save minted into the next save", async () => {
+    api.put.mockResolvedValueOnce({ checklist: [{ _id: "c1", text: "Loads", done: false }] });
+    render(<Criteria task={baseTask} />);
+
+    await act(async () => screen.getByText("add").click());
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+
+    await act(async () => screen.getByText("reword").click());
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2));
+    expect(api.put).toHaveBeenLastCalledWith("/api/projects/p1/tasks/t1", {
+      checklist: [{ _id: "c1", text: "Loads fast", done: false }],
+    });
+  });
+
+  it("sends nothing more once the minted id is all that differs", async () => {
+    api.put.mockResolvedValueOnce({ checklist: [{ _id: "c1", text: "Loads", done: false }] });
+    render(<Criteria task={baseTask} />);
+
+    await act(async () => screen.getByText("add").click());
+    await act(async () => {
+      vi.advanceTimersByTime(2_000);
+    });
+
+    expect(api.put).toHaveBeenCalledTimes(1);
+  });
+});
