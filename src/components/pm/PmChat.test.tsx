@@ -284,6 +284,20 @@ describe("loading older messages", () => {
     expect(screen.getByRole("button", { name: "Load older messages" })).toBeTruthy();
   });
 
+  it("leaves the reader where they were rather than scrolling to the bottom", async () => {
+    serve(() => Promise.resolve({ messages: page(1, 50), nextCursor: null }));
+    const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
+    render(<PmChat projectId="p1" preloadedProject={PROJECT as never} />);
+    const button = await screen.findByRole("button", { name: "Load older messages" });
+    const before = scroll.mock.calls.length;
+
+    await act(async () => button.click());
+    await waitFor(() => expect(screen.getByText("message 1")).toBeTruthy());
+
+    expect(scroll.mock.calls.length).toBe(before);
+    scroll.mockRestore();
+  });
+
   it("keeps the older page when the newest page is read again", async () => {
     serve(() => Promise.resolve({ messages: page(1, 50), nextCursor: null }));
     render(<PmChat projectId="p1" preloadedProject={PROJECT as never} />);

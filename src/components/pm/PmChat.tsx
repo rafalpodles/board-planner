@@ -58,6 +58,7 @@ export function PmChat({
   const [project, setProject] = useState<ApiProject | null>(preloadedProject ?? null);
   const [thread, setThread] = useState<ThreadPage>(EMPTY_THREAD);
   const { messages, nextCursor } = thread;
+  const newestId = messages.at(-1)?._id;
   const loadingOlder = useRef(false);
   const [olderFailed, setOlderFailed] = useState(false);
   const [taskIdByKey, setTaskIdByKey] = useState<Record<string, string>>({});
@@ -116,6 +117,7 @@ export function PmChat({
     const data = await api.get(`/api/projects/${projectId}/pm/messages?limit=50`);
     const newest: ThreadPage = { messages: data.messages, nextCursor: data.nextCursor };
     setThread((current) => (replace ? newest : withNewestPage(current, newest)));
+    setOlderFailed(false);
     return data.messages as ApiPmMessage[];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
@@ -135,7 +137,7 @@ export function PmChat({
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "end" });
-  }, [messages, liveActions, working]);
+  }, [newestId, liveActions, working]);
 
   // Stream lost mid-turn: poll history until the assistant message is finalized (BP-452).
   const recoveryPoll = useCallback(async () => {
