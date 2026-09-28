@@ -35,7 +35,11 @@ function Footer({
   // disable its own Cancel while the backdrop still dismissed everything (BP-565).
   return (
     <>
-      {error && <p className="mt-2 text-[13px] text-danger">{error}</p>}
+      {error && (
+        <p role="alert" className="mt-2 text-[13px] text-danger">
+          {error}
+        </p>
+      )}
       <div className="mt-2 flex justify-end gap-2">
         <Button variant="secondary" onClick={onCancel} disabled={busy}>
           Cancel
@@ -384,6 +388,11 @@ export function EditBlockDialog({
   if (!modelOptions.some((m) => m.value === block.model)) {
     modelOptions.unshift({ value: block.model, label: block.model || "The worker's own" });
   }
+  // A value stored through the API may be one the form does not offer; shown, not swapped for the first
+  const withStored = (options: { value: string; label: string }[], stored?: string) =>
+    stored && !options.some((o) => o.value === stored)
+      ? [{ value: stored, label: stored }, ...options]
+      : options;
 
   return (
     <Modal
@@ -460,7 +469,7 @@ export function EditBlockDialog({
                 value={params[param.key] ?? param.options?.[0]?.value ?? ""}
                 onChange={(value) => setParams((v) => ({ ...v, [param.key]: value }))}
                 readOnly={readOnly}
-                options={param.options ?? []}
+                options={withStored(param.options ?? [], block.params?.[param.key])}
               />
             ) : (
               <div key={param.key}>
@@ -477,7 +486,11 @@ export function EditBlockDialog({
             )
           )}
 
-        {error && <p className="text-[13px] text-danger">{error}</p>}
+        {error && (
+          <p role="alert" className="text-[13px] text-danger">
+            {error}
+          </p>
+        )}
 
         <div className="mt-2 flex justify-end gap-2">
           <Button variant="secondary" onClick={onClose} disabled={busy}>

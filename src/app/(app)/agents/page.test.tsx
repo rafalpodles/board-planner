@@ -187,7 +187,10 @@ describe("a refusal from the server", () => {
     fireEvent.change(select("What it may touch"), { target: { value: "edit" } });
     await act(async () => screen.getByRole("button", { name: "Save" }).click());
 
-    expect(screen.getByText("This would break Careful: Nothing pushes the work.")).not.toBeNull();
+    // Announced: focus stays on Save, so text that is only painted is never heard
+    expect(screen.getByRole("alert").textContent).toBe(
+      "This would break Careful: Nothing pushes the work."
+    );
     expect(screen.queryByRole("dialog")).not.toBeNull();
     expect(select("What it may touch").value).toBe("edit");
   });
@@ -231,6 +234,18 @@ describe("a gate, for a reader who may not change it", () => {
     expect(focus.value).toBe("Security");
     expect(focus.readOnly).toBe(true);
     expect((screen.getByLabelText("Model") as HTMLInputElement).readOnly).toBe(true);
+  });
+
+  it("shows a stored model the form does not offer as itself, rather than as the first option", async () => {
+    catalog.gates = [
+      { ...SIZE, _id: "b-review", key: "review", name: "Reviewed", gateKind: "review", params: { focus: "general", model: "haiku" } },
+    ];
+    await openTab("Gates");
+    await act(async () => screen.getByRole("button", { name: "Reviewed" }).click());
+
+    const model = select("Model");
+    expect(model.value).toBe("haiku");
+    expect(model.selectedOptions[0].textContent).toBe("haiku");
   });
 
   it("lets an admin change them", async () => {
