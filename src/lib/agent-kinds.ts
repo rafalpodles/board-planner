@@ -97,21 +97,3 @@ export const CAPABILITIES = [
 export function gateKindByKey(key: string): GateKind | undefined {
   return GATE_KINDS.find((k) => k.key === key);
 }
-
-export function gateKindRefusal(value: unknown): string | null {
-  if (typeof value === "string" && gateKindByKey(value)) return null;
-  return `gateKind must be one of ${GATE_KINDS.map((k) => k.key).join(", ")}`;
-}
-
-// Absent and empty both mean "not set": the worker then runs the model it is configured with.
-export function modelRefusal(value: unknown, field: string): string | null {
-  if (value === undefined || value === "") return null;
-  if (MODELS.some((m) => m.value === value)) return null;
-  return `${field} must be one of ${MODELS.map((m) => m.value).join(", ")}`;
-}
-
-export function capabilityRefusal(value: unknown): string | null {
-  if (value === undefined) return null;
-  if (CAPABILITIES.some((c) => c.value === value)) return null;
-  return `capability must be one of ${CAPABILITIES.map((c) => c.value).join(", ")}`;
-}

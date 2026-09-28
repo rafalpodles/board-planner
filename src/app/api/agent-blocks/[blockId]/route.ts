@@ -4,9 +4,70 @@ import { connectDB } from "@/lib/db";
 import { withAuth } from "@/lib/middleware";
 import { Agent } from "@/models/agent";
 import { AgentBlock } from "@/models/agentBlock";
-import { toApiBlock } from "@/lib/agent-service";
-import { capabilityRefusal, gateKindRefusal, modelRefusal } from "@/lib/agent-kinds";
-import { AGENT_BUCKETS } from "@/types";
+import { allBlocks, toApiBlock } from "@/lib/agent-service";
+import {
+  capabilityRefusal,
+  gateKindRefusal,
+  gateParams,
+  modelRefusal,
+} from "@/lib/agent-block-input";
+import { brokenProblems, normaliseComposition } from "@/lib/agent-rules";
+import { AGENT_BUCKETS, ApiAgentBlock, IAgentBlock, StoredComposition } from "@/types";
+
+// Both shapes are stored. $elemMatch, not a bare string: the path is a subdocument array, and a
+// bare string there is a CastError that took the whole request down (BP-460).
+function agentsNaming(key: string) {
+  return {
+    $or: AGENT_BUCKETS.flatMap((bucket) => [
+      { [`composition.${bucket}.key`]: key },
+      { [`composition.${bucket}`]: { $elemMatch: { $eq: key } } },
+    ]),
+  };
+}
+
+type Body = Record<string, unknown>;
+
+function fieldRefusal(block: IAgentBlock, body: Body): string | null {
+  const sent = (field: string) => body[field] !== undefined;
+  if (block.kind === "gate") {
+    if (sent("gateKind")) {
+      const unknown = gateKindRefusal(body.gateKind);
+      if (unknown) return unknown;
+      if (body.gateKind !== block.gateKind) {
+        return "A gate's kind is fixed. Create a new gate to check something else.";
+      }
+    }
+    const stepOnly = ["prompt", "capability", "model"].find(sent);
+    if (stepOnly) return `A gate has no ${stepOnly}`;
+    return sent("params") ? gateParams(block.gateKind, body.params).refusal : null;
+  }
+  if (sent("gateKind")) return "A step has no gateKind";
+  if (sent("params")) return "A step has no params";
+  if (block.deterministic) {
+    const modelOnly = ["capability", "model"].find(sent);
+    return modelOnly ? `This step is an action the worker takes, so it has no ${modelOnly}` : null;
+  }
+  return capabilityRefusal(body.capability) ?? modelRefusal(body.model, "model");
+}
+
+/** Agents already naming the block that its new form would leave broken, with the first reason. */
+async function agentsBrokenBy(changed: ApiAgentBlock): Promise<string | null> {
+  const agents = await Agent.find(agentsNaming(changed.key), "name composition").lean();
+  if (agents.length === 0) return null;
+
+  const blocks = (await allBlocks()).map(toApiBlock);
+  const before = (key: string) => blocks.find((b) => b.key === key);
+  const after = (key: string) => (key === changed.key ? changed : before(key));
+
+  const broken = agents.flatMap((agent) => {
+    const composition = normaliseComposition(agent.composition as StoredComposition);
+    const already = new Set(brokenProblems(composition, before).map((p) => p.message));
+    const fresh = brokenProblems(composition, after).filter((p) => !already.has(p.message));
+    return fresh.length > 0 ? [{ name: agent.name, reason: fresh[0].message }] : [];
+  });
+  if (broken.length === 0) return null;
+  return `This would break ${broken.map((b) => b.name).join(", ")}: ${broken[0].reason}`;
+}
 
 // The key is the contract with the worker and with every agent that already names it, so a rename
 // changes the label and never the key.
@@ -36,30 +97,22 @@ export const PUT = withAuth(async (request, { params, user }) => {
   }
 
   const body = await request.json();
-  const callsModel = block.kind === "step" && !block.deterministic;
-  const refusal =
-    block.kind === "gate"
-      ? body.gateKind === undefined
-        ? null
-        : gateKindRefusal(body.gateKind)
-      : callsModel
-        ? (capabilityRefusal(body.capability) ?? modelRefusal(body.model, "model"))
-        : null;
+  const refusal = fieldRefusal(block, body);
   if (refusal) return NextResponse.json({ error: refusal }, { status: 400 });
 
+  const capabilityChanged = body.capability !== undefined && body.capability !== block.capability;
   if (typeof body.name === "string" && body.name.trim()) block.name = body.name.trim();
   if (typeof body.description === "string") block.description = body.description.trim();
   if (block.kind === "step" && typeof body.prompt === "string") block.prompt = body.prompt.trim();
-  if (callsModel && body.capability !== undefined) block.capability = body.capability;
-  if (callsModel && body.model !== undefined) block.model = body.model;
-  if (block.kind === "gate" && body.gateKind !== undefined) block.gateKind = body.gateKind;
-
+  if (body.capability !== undefined) block.capability = body.capability;
+  if (body.model !== undefined) block.model = body.model;
   if (block.kind === "gate" && body.params && typeof body.params === "object") {
-    const params: Record<string, string> = {};
-    for (const [k, v] of Object.entries(body.params as Record<string, unknown>)) {
-      if (typeof v === "string" || typeof v === "number") params[k] = String(v);
-    }
-    block.params = params;
+    block.params = gateParams(block.gateKind, body.params).params;
+  }
+
+  if (capabilityChanged) {
+    const breaks = await agentsBrokenBy(toApiBlock(block.toObject()));
+    if (breaks) return NextResponse.json({ error: breaks }, { status: 409 });
   }
 
   await block.save();
@@ -91,17 +144,7 @@ export const DELETE = withAuth(async (_request, { params, user }) => {
 
   // Deleting a block an agent still names would leave that agent referring to nothing, and the
   // worker refuses an unknown key mid-run rather than at the moment somebody caused it.
-  const users = await Agent.find(
-    {
-      $or: AGENT_BUCKETS.flatMap((bucket) => [
-        // Both shapes are stored. $elemMatch, not a bare string: the path is a subdocument array,
-        // and a bare string there is a CastError that took the whole request down (BP-460).
-        { [`composition.${bucket}.key`]: block.key },
-        { [`composition.${bucket}`]: { $elemMatch: { $eq: block.key } } },
-      ]),
-    },
-    "name"
-  ).lean();
+  const users = await Agent.find(agentsNaming(block.key), "name").lean();
 
   if (users.length > 0) {
     return NextResponse.json(
