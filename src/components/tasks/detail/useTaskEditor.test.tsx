@@ -276,6 +276,8 @@ describe("a criterion added on this screen", () => {
   const pagehide = (persisted: boolean) =>
     Object.defineProperty(new Event("pagehide"), "persisted", { value: persisted });
 
+  afterEach(() => vi.unstubAllGlobals());
+
   const lastChecklist = () => (api.put.mock.lastCall?.[1] as { checklist: Item[] }).checklist;
 
   async function settle(ms = 700) {
@@ -422,7 +424,19 @@ describe("a criterion added on this screen", () => {
     );
     await settle(15_000);
     expect(api.put).toHaveBeenCalledTimes(1);
-    vi.unstubAllGlobals();
+  });
+
+  it("forgets a closing flush once it has gone out, so a later page unload does not resend it", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response());
+    vi.stubGlobal("fetch", fetchMock);
+    const { unmount } = render(<Criteria task={baseTask} />);
+
+    await act(async () => retitle("E1"));
+    await act(async () => unmount());
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith("/api/projects/p1/tasks/t1", { title: "E1" }));
+    window.dispatchEvent(pagehide(false));
+
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("keeps queued saves when the page is only put in the back-forward cache", async () => {
@@ -437,11 +451,14 @@ describe("a criterion added on this screen", () => {
     await act(async () => retitle("E2"));
     await settle();
     window.dispatchEvent(pagehide(true));
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/projects/p1/tasks/t1",
+      expect.objectContaining({ keepalive: true, body: JSON.stringify({ title: "E2" }) })
+    );
     await act(async () => answer({}));
 
     await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2));
     expect(api.put).toHaveBeenLastCalledWith("/api/projects/p1/tasks/t1", { title: "E2" });
-    vi.unstubAllGlobals();
   });
 
   it("stops waiting for a save that never answers", async () => {
