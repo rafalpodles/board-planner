@@ -21,7 +21,9 @@ export const DIGEST_ROW_LIMIT = 25;
 export const DIGEST_SCAN_LIMIT = 500;
 
 export function digestHour(): number {
-  const raw = Math.trunc(Number(process.env.DIGEST_HOUR));
+  const configured = process.env.DIGEST_HOUR?.trim();
+  if (!configured) return 7;
+  const raw = Math.trunc(Number(configured));
   return Number.isFinite(raw) ? Math.min(Math.max(raw, 0), 23) : 7;
 }
 

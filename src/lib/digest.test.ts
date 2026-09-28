@@ -144,6 +144,24 @@ describe("when the digest is due", () => {
     process.env.DIGEST_HOUR = "-3";
     expect(digestHour()).toBe(0);
   });
+
+  // BP-770. `Number("")` is 0, so an empty `DIGEST_HOUR=` line in .env meant midnight
+  it("reads a blank hour as unset, not as midnight", () => {
+    const cases: [string | undefined, number][] = [
+      ["", 7],
+      ["  ", 7],
+      [undefined, 7],
+      ["abc", 7],
+      ["25", 23],
+      ["-1", 0],
+      ["0", 0],
+    ];
+    for (const [value, hour] of cases) {
+      if (value === undefined) delete process.env.DIGEST_HOUR;
+      else process.env.DIGEST_HOUR = value;
+      expect(digestHour(), JSON.stringify(value)).toBe(hour);
+    }
+  });
 });
 
 // BP-692. `lineFor` strips the row's own key from the title so it is not printed twice — once as
