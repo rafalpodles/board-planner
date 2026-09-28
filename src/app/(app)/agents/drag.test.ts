@@ -25,8 +25,9 @@ const layout: [DroppableContainer, ClientRect][] = [
   [container("push", "bucket:delivery"), rect(108, 50)],
   [container("pull-request", "bucket:delivery"), rect(166, 50)],
   [container("merge", "bucket:delivery"), rect(224, 50)],
-  [container("bucket:verification"), rect(400, 100)],
-  [container("build", "bucket:verification"), rect(408, 50)],
+  // A deep top padding, so the nearest card to its top edge is Delivery's last one
+  [container("bucket:verification"), rect(310, 110)],
+  [container("build", "bucket:verification"), rect(360, 50)],
   [container("bucket:analysis"), rect(600, 72)],
 ];
 
@@ -64,12 +65,12 @@ describe("where a drag lands", () => {
     expect(detect({ x: 300, y: 630 })).toEqual(["bucket:analysis"]);
   });
 
-  it("never picks a card from a phase the pointer is not in", () => {
-    expect(detect({ x: 300, y: 403 })[0]).toBe("build");
+  it("takes the nearest card from the phase the pointer is in, never from its neighbour", () => {
+    expect(detect({ x: 300, y: 315 })[0]).toBe("build");
   });
 
   it("falls back to the dragged rectangle when there is no pointer, as from the keyboard", () => {
-    expect(detect(null, rect(410, 30))).toContain("build");
+    expect(detect(null, rect(365, 30))).toContain("build");
   });
 
   it("is nothing when the pointer and the dragged rectangle are over nothing", () => {
