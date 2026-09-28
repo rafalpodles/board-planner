@@ -237,7 +237,7 @@ test.describe("editing a block an agent is built from", () => {
       name: "Map the change",
       description: "Lists every file it will touch",
       prompt: "List the files the task will change, and why.",
-      // Not on the edit form, so not the edit's to change
+      // Left as they were in the form, so not sent and not changed
       capability: "read-only",
       model: "opus",
     });
@@ -297,6 +297,64 @@ test.describe("editing a block an agent is built from", () => {
     await expect(verification.getByText("Keeps a change reviewable")).toBeVisible();
     await expect(verification.getByText("Builds", { exact: true })).toBeVisible();
     await expect(verification.locator("li [aria-roledescription]")).toHaveCount(2);
+  });
+
+  // BP-743. The row said "read and write · opus" and the dialog behind it showed neither.
+  test("a shipped step shows its model and what it may touch, and an admin can change both", async ({
+    page,
+  }) => {
+    await signIn(page);
+    await openCatalog(page, "Steps");
+    await expect(blockRow(page, "Implement")).toContainText("read and write · opus");
+    await page.getByRole("button", { name: "Implement", exact: true }).click();
+
+    const dialog = page.getByRole("dialog", { name: "Implement (default)" });
+    await expect(dialog.getByLabel("Name")).toHaveValue("Implement");
+    const model = dialog.getByLabel("Model", { exact: true });
+    const touch = dialog.getByLabel("What it may touch");
+    await expect(model).toHaveValue("opus");
+    await expect(touch).toHaveValue("edit");
+    await expect(model).toBeEnabled();
+    await expect(touch).toBeEnabled();
+
+    await model.selectOption({ label: "Sonnet" });
+    await touch.selectOption({ label: "Read only" });
+    await expect(dialog.getByText("Can read the repository. Cannot change anything.")).toBeVisible();
+
+    const saved = blockWrite(page, "PUT");
+    await dialog.getByRole("button", { name: "Save" }).click();
+    const response = await saved;
+    expect(response.status(), await response.text()).toBe(200);
+
+    expect(await storedBlock({ key: "implement" })).toMatchObject({
+      name: "Implement",
+      model: "sonnet",
+      capability: "read-only",
+      builtIn: true,
+    });
+    await expect(blockRow(page, "Implement")).toContainText("read only · sonnet");
+  });
+
+  test("a member reads a step's model and what it may touch, and is offered no way to change them", async ({
+    page,
+  }) => {
+    await signIn(page, "member");
+    await openCatalog(page, "Steps");
+    await page.getByRole("button", { name: "Implement", exact: true }).click();
+
+    const dialog = page.getByRole("dialog", { name: "Implement (default)" });
+    await expect(dialog.getByLabel("Name")).toHaveValue("Implement");
+    await expect(dialog.getByLabel("Model", { exact: true })).toHaveValue("opus");
+    await expect(dialog.getByLabel("What it may touch")).toHaveValue("edit");
+    await expect(dialog.getByLabel("Model", { exact: true })).toBeDisabled();
+    await expect(dialog.getByLabel("What it may touch")).toBeDisabled();
+    await expect(dialog.getByLabel("Name")).not.toBeEditable();
+    await expect(dialog.getByLabel("What it should do")).not.toBeEditable();
+    await expect(dialog.getByRole("button", { name: "Save" })).toHaveCount(0);
+
+    await dialog.getByRole("button", { name: "Done" }).click();
+    await expect(dialog).toBeHidden();
+    expect(await storedBlock({ key: "implement" })).toMatchObject({ model: "opus", capability: "edit" });
   });
 
   test("a step the worker performs itself offers no prompt, and keeps having none", async ({ page }) => {

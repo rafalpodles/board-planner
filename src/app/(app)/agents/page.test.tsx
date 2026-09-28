@@ -1,21 +1,27 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, cleanup, act } from "@testing-library/react";
+import { render, screen, cleanup, act, fireEvent } from "@testing-library/react";
+import type { ApiAgentBlock } from "@/types";
 
 const isAdmin = vi.hoisted(() => ({ value: true }));
 vi.mock("@/hooks/use-auth", () => ({
   useAuth: () => ({ isAdmin: isAdmin.value, onUnauthorized: vi.fn(), noteApiStatus: vi.fn() }),
 }));
 vi.mock("@/hooks/use-projects", () => ({ useProjects: () => ({ projects: [] }) }));
+const catalog = vi.hoisted(() => ({
+  steps: [] as ApiAgentBlock[],
+  gates: [] as ApiAgentBlock[],
+  updateBlock: vi.fn(),
+}));
 vi.mock("./store", () => ({
   useStore: () => ({
     loading: false,
     allAgents: [],
-    allSteps: [],
-    allGates: [],
+    allSteps: catalog.steps,
+    allGates: catalog.gates,
     addAgent: vi.fn(),
     addBlock: vi.fn(),
-    updateBlock: vi.fn(),
+    updateBlock: catalog.updateBlock,
     removeBlock: vi.fn(),
     removeAgent: vi.fn(),
   }),
@@ -26,6 +32,9 @@ const { default: AgentsPage } = await import("./page");
 afterEach(() => {
   cleanup();
   isAdmin.value = true;
+  catalog.steps = [];
+  catalog.gates = [];
+  catalog.updateBlock.mockReset();
 });
 
 async function openTab(label: string) {
@@ -63,5 +72,131 @@ describe("who is offered the catalog's actions", () => {
     const name = `New ${tab.toLowerCase().slice(0, -1)}`;
     expect(screen.queryByRole("button", { name })).not.toBeNull();
     expect(screen.queryByText(/instance admin authors/i)).toBeNull();
+  });
+});
+
+const IMPLEMENT: ApiAgentBlock = {
+  _id: "b-implement",
+  key: "implement",
+  kind: "step",
+  name: "Implement",
+  description: "Reads the task, makes the change, writes a test for it.",
+  builtIn: true,
+  gateKind: "",
+  params: {},
+  prompt: "Make the change.",
+  capability: "edit",
+  model: "opus",
+  fallbackModel: "sonnet",
+  deterministic: false,
+};
+
+const PUSH: ApiAgentBlock = {
+  ...IMPLEMENT,
+  _id: "b-push",
+  key: "push",
+  name: "Push",
+  prompt: "",
+  capability: "read-only",
+  model: "",
+  fallbackModel: "",
+  deterministic: true,
+};
+
+async function openStep(block: ApiAgentBlock) {
+  catalog.steps = [block];
+  await openTab("Steps");
+  await act(async () => screen.getByRole("button", { name: block.name }).click());
+  return screen.getByRole("dialog");
+}
+
+const select = (label: string) => screen.getByLabelText(label) as HTMLSelectElement;
+
+// BP-743. The list says "read and write · opus" and New step asks for both; the edit dialog of the
+// same step showed neither.
+describe("editing a step shows what it runs as", () => {
+  it("shows an admin the step's model and what it may touch, and saves a change to either", async () => {
+    catalog.updateBlock.mockResolvedValue(undefined);
+    await openStep(IMPLEMENT);
+
+    expect(select("Model").value).toBe("opus");
+    expect(select("What it may touch").value).toBe("edit");
+    expect(select("Model").disabled).toBe(false);
+    expect(select("What it may touch").disabled).toBe(false);
+    expect(screen.getByText("Can change files. The worker commits afterwards.")).not.toBeNull();
+
+    fireEvent.change(select("Model"), { target: { value: "sonnet" } });
+    await act(async () => screen.getByRole("button", { name: "Save" }).click());
+
+    expect(catalog.updateBlock).toHaveBeenCalledOnce();
+    const [id, patch] = catalog.updateBlock.mock.calls[0];
+    expect(id).toBe("b-implement");
+    expect(patch).toMatchObject({ name: "Implement", model: "sonnet" });
+    // Unchanged, so not sent: a value stored before the server checked it must not block a rename
+    expect(patch).not.toHaveProperty("capability");
+  });
+
+  it("shows a reader who may not change it the same values, and nothing that edits them", async () => {
+    isAdmin.value = false;
+    await openStep(IMPLEMENT);
+
+    expect(select("Model").value).toBe("opus");
+    expect(select("What it may touch").value).toBe("edit");
+    expect(select("Model").disabled).toBe(true);
+    expect(select("What it may touch").disabled).toBe(true);
+    expect((screen.getByLabelText("Name") as HTMLInputElement).readOnly).toBe(true);
+    expect((screen.getByLabelText("What it should do") as HTMLTextAreaElement).readOnly).toBe(true);
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Done" })).not.toBeNull();
+  });
+
+  it("offers neither on a step the worker performs itself", async () => {
+    await openStep(PUSH);
+
+    expect(screen.queryByLabelText("Model")).toBeNull();
+    expect(screen.queryByLabelText("What it may touch")).toBeNull();
+    expect(screen.getByText(/calls no model/)).not.toBeNull();
+  });
+
+  it("shows a step with no model of its own as running the worker's, rather than as Opus", async () => {
+    await openStep({ ...IMPLEMENT, model: "" });
+
+    expect(select("Model").value).toBe("");
+    expect(select("Model").selectedOptions[0].textContent).toBe("The worker's own");
+  });
+});
+
+describe("a gate, for a reader who may not change it", () => {
+  const SIZE: ApiAgentBlock = {
+    ...IMPLEMENT,
+    _id: "b-size",
+    key: "diff-size",
+    kind: "gate",
+    name: "Size",
+    gateKind: "diff-size",
+    params: { maxLines: "400", maxFiles: "10" },
+    prompt: "",
+    model: "",
+  };
+
+  it("shows its parameters without letting them be typed into or saved", async () => {
+    isAdmin.value = false;
+    catalog.gates = [SIZE];
+    await openTab("Gates");
+    await act(async () => screen.getByRole("button", { name: "Size" }).click());
+
+    const lines = screen.getByLabelText("Most lines") as HTMLInputElement;
+    expect(lines.value).toBe("400");
+    expect(lines.readOnly).toBe(true);
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+  });
+
+  it("lets an admin change them", async () => {
+    catalog.gates = [SIZE];
+    await openTab("Gates");
+    await act(async () => screen.getByRole("button", { name: "Size" }).click());
+
+    expect((screen.getByLabelText("Most lines") as HTMLInputElement).readOnly).toBe(false);
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeNull();
   });
 });

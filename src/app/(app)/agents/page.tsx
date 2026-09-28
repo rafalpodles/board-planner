@@ -205,6 +205,7 @@ export default function AgentsPage() {
 
       <EditBlockDialog
         block={editing}
+        readOnly={!isAdmin}
         onClose={() => setEditing(null)}
         onSave={store.updateBlock}
       />

@@ -321,16 +321,20 @@ export function NewStepDialog({
  */
 export function EditBlockDialog({
   block,
+  readOnly = false,
   onClose,
   onSave,
 }: {
   block: ApiAgentBlock | null;
+  readOnly?: boolean;
   onClose: () => void;
   onSave: (blockId: string, patch: Partial<NewBlock>) => Promise<void>;
 }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [prompt, setPrompt] = useState("");
+  const [capability, setCapability] = useState("");
+  const [model, setModel] = useState("");
   const [params, setParams] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -341,6 +345,8 @@ export function EditBlockDialog({
     setName(block.name);
     setDescription(block.description);
     setPrompt(block.prompt);
+    setCapability(block.capability);
+    setModel(block.model);
     setParams(block.params ?? {});
     setError("");
     setBusy(false);
@@ -348,6 +354,14 @@ export function EditBlockDialog({
 
   if (!block) return null;
   const kind = block.gateKind ? gateKindByKey(block.gateKind) : undefined;
+  const callsModel = block.kind === "step" && !block.deterministic;
+  const modelOptions: { value: string; label: string }[] = MODELS.map((m) => ({
+    value: m.value,
+    label: m.label,
+  }));
+  if (!modelOptions.some((m) => m.value === block.model)) {
+    modelOptions.unshift({ value: block.model, label: block.model || "The worker's own" });
+  }
 
   return (
     <Modal
@@ -357,21 +371,56 @@ export function EditBlockDialog({
       title={block.builtIn ? `${block.name} (default)` : block.name}
     >
       <div className="flex flex-col gap-4">
-        <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} required />
+        {readOnly && (
+          <p className="text-[13px] text-text-muted">
+            An instance admin changes {block.kind === "step" ? "steps" : "gates"}. You can read this
+            one here.
+          </p>
+        )}
+        <Input
+          label="Name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          readOnly={readOnly}
+          required
+        />
         <Textarea
           label="Description"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
+          readOnly={readOnly}
           rows={2}
         />
 
-        {block.kind === "step" && !block.deterministic && (
-          <Textarea
-            label="What it should do"
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            rows={4}
-          />
+        {callsModel && (
+          <>
+            <Textarea
+              label="What it should do"
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              readOnly={readOnly}
+              rows={4}
+            />
+            <Select
+              label="Model"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              disabled={readOnly}
+              options={modelOptions}
+            />
+            <div>
+              <Select
+                label="What it may touch"
+                value={capability}
+                onChange={(e) => setCapability(e.target.value)}
+                disabled={readOnly}
+                options={CAPABILITIES.map((c) => ({ value: c.value, label: c.label }))}
+              />
+              <p className="mt-1 text-[12px] text-text-muted">
+                {CAPABILITIES.find((c) => c.value === capability)?.hint}
+              </p>
+            </div>
+          </>
         )}
 
         {block.kind === "step" && block.deterministic && (
@@ -388,6 +437,7 @@ export function EditBlockDialog({
                 label={param.label}
                 value={params[param.key] ?? param.options?.[0]?.value ?? ""}
                 onChange={(e) => setParams((v) => ({ ...v, [param.key]: e.target.value }))}
+                disabled={readOnly}
                 options={param.options ?? []}
               />
             ) : (
@@ -398,6 +448,7 @@ export function EditBlockDialog({
                   value={params[param.key] ?? ""}
                   placeholder={param.placeholder}
                   onChange={(e) => setParams((v) => ({ ...v, [param.key]: e.target.value }))}
+                  readOnly={readOnly}
                 />
                 {param.hint && <p className="mt-1 text-[12px] text-text-muted">{param.hint}</p>}
               </div>
@@ -408,29 +459,33 @@ export function EditBlockDialog({
 
         <div className="mt-2 flex justify-end gap-2">
           <Button variant="secondary" onClick={onClose} disabled={busy}>
-            Cancel
+            {readOnly ? "Done" : "Cancel"}
           </Button>
-          <Button
-            disabled={!name.trim() || busy}
-            onClick={async () => {
-              setError("");
-              setBusy(true);
-              try {
-                await onSave(block._id, {
-                  name: name.trim(),
-                  description: description.trim(),
-                  ...(block.kind === "step" ? { prompt: prompt.trim() } : { params }),
-                });
-                onClose();
-              } catch (err) {
-                setError(err instanceof Error ? err.message : "Could not save");
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            {busy ? "Saving…" : "Save"}
-          </Button>
+          {!readOnly && (
+            <Button
+              disabled={!name.trim() || busy}
+              onClick={async () => {
+                setError("");
+                setBusy(true);
+                try {
+                  await onSave(block._id, {
+                    name: name.trim(),
+                    description: description.trim(),
+                    ...(block.kind === "gate" ? { params } : { prompt: prompt.trim() }),
+                    ...(callsModel && model !== block.model ? { model } : {}),
+                    ...(callsModel && capability !== block.capability ? { capability } : {}),
+                  });
+                  onClose();
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : "Could not save");
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              {busy ? "Saving…" : "Save"}
+            </Button>
+          )}
         </div>
       </div>
     </Modal>

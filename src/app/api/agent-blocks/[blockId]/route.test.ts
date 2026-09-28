@@ -158,7 +158,7 @@ describe("changing what a block runs as (BP-743, BP-755)", () => {
     expect(response.status).toBe(400);
     expect((await response.json()).error).toMatch(/^gateKind must be one of diff-size, /);
     expect(doc.save).not.toHaveBeenCalled();
-    expect(doc.gateKind).toBe("diff-size");
+    expect(doc).toMatchObject({ gateKind: "diff-size" });
   });
 
   it("changes a gate to a kind the worker implements", async () => {
@@ -166,7 +166,7 @@ describe("changing what a block runs as (BP-743, BP-755)", () => {
     blockFindById.mockResolvedValue(doc);
 
     expect((await put({ gateKind: "test-run" })).status).toBe(200);
-    expect(doc.gateKind).toBe("test-run");
+    expect(doc).toMatchObject({ gateKind: "test-run" });
     expect(doc.save).toHaveBeenCalledOnce();
   });
 
