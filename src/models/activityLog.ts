@@ -12,6 +12,11 @@ const ACTIONS = [
   "pr_unlinked",
   "link_added",
   "link_removed",
+  "criterion_added",
+  "criterion_removed",
+  "criterion_edited",
+  "criterion_checked",
+  "criterion_unchecked",
 ];
 
 const activityLogSchema = new Schema<IActivityLog>(

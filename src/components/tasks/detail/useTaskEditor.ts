@@ -12,11 +12,16 @@ import {
 } from "@/types";
 
 const AUTOSAVE_DEBOUNCE_MS = 700;
+// How long a save waits for the one before it: a request that never settles must not hold every later edit
+const SAVE_QUEUE_WAIT_MS = 15_000;
 
 export type AutoSaveState = "idle" | "saving" | "saved" | "error";
 
-/** A criterion the user just typed has no id until the server assigns one */
-export type ChecklistDraftItem = { _id?: string; text: string; done: boolean };
+/**
+ * A criterion the user just typed has no id until the server assigns one. `clientKey` names it
+ * until then, and is what the id that save minted is matched back to.
+ */
+export type ChecklistDraftItem = { _id?: string; clientKey?: string; text: string; done: boolean };
 
 /**
  * Everything the detail view edits in place. `status` is absent because moving a task is its own
@@ -67,7 +72,51 @@ export function draftFromTask(task: ApiTask): TaskDraft {
   };
 }
 
-const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+// Key order is whatever the server serialised, and `clientKey` exists only on this screen
+const canonical = (_key: string, value: unknown) =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? Object.fromEntries(
+        Object.keys(value)
+          .filter((key) => key !== "clientKey")
+          .sort()
+          .map((key) => [key, (value as Record<string, unknown>)[key]])
+      )
+    : value;
+const same = (a: unknown, b: unknown) => JSON.stringify(a, canonical) === JSON.stringify(b, canonical);
+
+type MintedIds = Map<string, string>;
+
+function keepaliveFlush(url: string, body: Partial<TaskDraft>) {
+  fetch(url, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    keepalive: true,
+  }).catch(() => {});
+}
+
+const afterAtMost = (previous: Promise<void>) =>
+  Promise.race([previous, new Promise<void>((resolve) => setTimeout(resolve, SAVE_QUEUE_WAIT_MS))]);
+
+function withMintedIds(items: ChecklistDraftItem[], minted: MintedIds): ChecklistDraftItem[] {
+  if (!items.some((item) => !item._id && item.clientKey && minted.has(item.clientKey))) return items;
+  return items.map((item) =>
+    item._id || !item.clientKey || !minted.has(item.clientKey) ? item : { ...item, _id: minted.get(item.clientKey) }
+  );
+}
+
+// Sent bare, a criterion gets a fresh id on every save, and History reads its edit as a removal and an addition
+function withKnownIds(edited: Partial<TaskDraft>, minted: MintedIds): Partial<TaskDraft> {
+  return edited.checklist ? { ...edited, checklist: withMintedIds(edited.checklist, minted) } : edited;
+}
+
+function recordMinted(sent: ChecklistDraftItem[], stored: { _id?: string }[] | undefined, minted: MintedIds) {
+  if (!stored || stored.length !== sent.length) return;
+  sent.forEach((item, i) => {
+    const id = stored[i]._id;
+    if (!item._id && item.clientKey && id) minted.set(item.clientKey, id);
+  });
+}
 
 export function useTaskEditor(projectId: string, task: ApiTask, onRefused?: (err: unknown) => boolean) {
   const refused = useRef(onRefused);
@@ -114,13 +163,24 @@ export function useTaskEditor(projectId: string, task: ApiTask, onRefused?: (err
 
   const signature = JSON.stringify(editedFields());
 
-  const persist = useCallback(
-    async (edited: Partial<TaskDraft>) => {
-      if (Object.keys(edited).length === 0) return;
+  const minted = useRef<MintedIds>(new Map());
+  // Autosaves go one at a time, so each leaves after the one that mints the ids it needs has answered
+  const lastSave = useRef<Promise<void>>(Promise.resolve());
+  // A flush carries every pending edit, so the autosaves still queued behind it would only write older values
+  const generation = useRef(0);
+
+  const save = useCallback(
+    async (pending: Partial<TaskDraft>) => {
       setAutoSaveState("saving");
       try {
-        await api.put(`/api/projects/${projectId}/tasks/${task._id}`, edited);
-        serverValues.current = { ...serverValues.current, ...edited };
+        const edited = withKnownIds(pending, minted.current);
+        const saved: Partial<ApiTask> | undefined = await api.put(`/api/projects/${projectId}/tasks/${task._id}`, edited);
+        if (edited.checklist) recordMinted(edited.checklist, saved?.checklist, minted.current);
+        serverValues.current = { ...serverValues.current, ...withKnownIds(edited, minted.current) };
+        setDraft((d) => {
+          const checklist = withMintedIds(d.checklist, minted.current);
+          return checklist === d.checklist ? d : { ...d, checklist };
+        });
         setAutoSaveError(null);
         setAutoSaveState("saved");
         setSavedCount((n) => n + 1);
@@ -133,6 +193,17 @@ export function useTaskEditor(projectId: string, task: ApiTask, onRefused?: (err
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [projectId, task._id]
+  );
+
+  const persist = useCallback(
+    (edited: Partial<TaskDraft>) => {
+      if (Object.keys(edited).length === 0) return Promise.resolve();
+      const queuedIn = generation.current;
+      const run = afterAtMost(lastSave.current).then(() => (queuedIn === generation.current ? save(edited) : undefined));
+      lastSave.current = run.catch(() => {});
+      return run;
+    },
+    [save]
   );
 
   useEffect(() => {
@@ -150,8 +221,21 @@ export function useTaskEditor(projectId: string, task: ApiTask, onRefused?: (err
     return () => {
       const pending = pendingRef.current;
       if (pending === "{}") return;
-      api
-        .put(`/api/projects/${projectId}/tasks/${taskId}`, JSON.parse(pending))
+      generation.current++;
+      const url = `/api/projects/${projectId}/tasks/${taskId}`;
+      const body = () => withKnownIds(JSON.parse(pending), minted.current);
+      // Waiting behind a save is waiting on the document, which may be closed before the wait ends
+      let sent = false;
+      const sendOnUnload = () => {
+        sent = true;
+        keepaliveFlush(url, body());
+      };
+      window.addEventListener("pagehide", sendOnUnload, { once: true });
+      afterAtMost(lastSave.current)
+        .then(() => {
+          window.removeEventListener("pagehide", sendOnUnload);
+          if (!sent) return api.put(url, body());
+        })
         .then(() => emitBoardRefresh(projectId))
         .catch(() => {});
     };
@@ -163,15 +247,12 @@ export function useTaskEditor(projectId: string, task: ApiTask, onRefused?: (err
   // (BP-521). `keepalive` is what lets the write outlive the document it started in.
   useEffect(() => {
     const taskId = task._id;
-    const flush = () => {
+    const flush = (event: PageTransitionEvent) => {
       const pending = pendingRef.current;
       if (pending === "{}") return;
-      fetch(`/api/projects/${projectId}/tasks/${taskId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: pending,
-        keepalive: true,
-      }).catch(() => {});
+      // A page kept in the back-forward cache comes back, and its queued saves are still the way out
+      if (!event.persisted) generation.current++;
+      keepaliveFlush(`/api/projects/${projectId}/tasks/${taskId}`, withKnownIds(JSON.parse(pending), minted.current));
     };
     window.addEventListener("pagehide", flush);
     return () => window.removeEventListener("pagehide", flush);

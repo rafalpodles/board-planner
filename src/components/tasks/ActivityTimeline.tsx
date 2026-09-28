@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { LoadFailed } from "@/components/ui/LoadFailed";
-import { ApiActivityLog, LinkDirection, STATUS_LABELS, TaskStatus } from "@/types";
+import { ApiActivityLog, DELETED_AGENT, LinkDirection, STATUS_LABELS, TaskStatus } from "@/types";
 import { timeAgo } from "@/lib/time";
 import { describeLinkChange } from "@/lib/link-phrasing";
 
@@ -43,6 +43,16 @@ function actionIcon(action: string) {
       return "↗";
     case "link_removed":
       return "×";
+    case "criterion_added":
+      return "+";
+    case "criterion_removed":
+      return "×";
+    case "criterion_edited":
+      return "✎";
+    case "criterion_checked":
+      return "✓";
+    case "criterion_unchecked":
+      return "○";
     default:
       return "•";
   }
@@ -57,7 +67,10 @@ function actionColor(action: string) {
     case "comment_deleted":
     case "pr_unlinked":
     case "link_removed":
+    case "criterion_removed":
       return "text-danger";
+    case "criterion_checked":
+      return "text-success";
     default:
       return "text-text-muted";
   }
@@ -79,6 +92,11 @@ function formatValue(field: string, value: string): string {
   if (!value) return "(empty)";
   if (value.length > 60) return value.slice(0, 60) + "…";
   return value;
+}
+
+function agentLabel(name: string): string {
+  if (!name) return "no agent";
+  return name === DELETED_AGENT ? name : `“${formatValue("agent", name)}”`;
 }
 
 // A link's address, shortened from the front. `formatValue` cuts the tail, which on a pull request
@@ -114,6 +132,12 @@ function describeAction(log: ApiActivityLog): string {
         const from = log.oldValue || "unassigned";
         const to = log.newValue || "unassigned";
         return `${userName} changed assignee from ${from} to ${to}`;
+      }
+      if (log.field === "agent" && !log.customField) {
+        return `${userName} changed agent from ${agentLabel(log.oldValue)} to ${agentLabel(log.newValue)}`;
+      }
+      if (log.field === "checklist" && !log.customField && log.newValue) {
+        return `${userName} made ${log.newValue} changes to the acceptance criteria at once`;
       }
       // createNextRecurrence writes a sentence into newValue rather than a before/after pair,
       // so reading it as one would claim the recurrence config had been edited
@@ -160,6 +184,17 @@ function describeAction(log: ApiActivityLog): string {
         self: "this task",
         other: log.oldValue,
       });
+    // Whole, not clipped: an edit past the sixtieth character would read as a change to nothing
+    case "criterion_added":
+      return `${userName} added criterion “${log.newValue}”`;
+    case "criterion_removed":
+      return `${userName} removed criterion “${log.oldValue}”`;
+    case "criterion_edited":
+      return `${userName} changed criterion “${log.oldValue}” to “${log.newValue}”`;
+    case "criterion_checked":
+      return `${userName} checked criterion “${log.newValue}”`;
+    case "criterion_unchecked":
+      return `${userName} unchecked criterion “${log.newValue}”`;
     default:
       return `${userName} performed an action`;
   }
@@ -271,7 +306,7 @@ export function ActivityTimeline({
             >
               {actionIcon(log.action)}
             </span>
-            <div className="flex-1 min-w-0 text-text-muted">
+            <div className="flex-1 min-w-0 break-words text-text-muted">
               {describeAction(log)}
               {log.action === "updated" && log.field === "description" && !log.customField && log.oldValue && (
                 <details className="mt-1">

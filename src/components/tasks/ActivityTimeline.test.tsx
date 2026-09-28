@@ -50,6 +50,45 @@ describe("ActivityTimeline", () => {
     );
   });
 
+  it.each([
+    [{ field: "agent", oldValue: "Default", newValue: "Plan to ship" }, "changed agent from “Default” to “Plan to ship”"],
+    [{ field: "agent", oldValue: "", newValue: "Default" }, "changed agent from no agent to “Default”"],
+    [{ field: "agent", oldValue: "Default", newValue: "a deleted agent" }, "changed agent from “Default” to a deleted agent"],
+  ])("names the agents on an agent change", async (row, sentence) => {
+    api.get.mockResolvedValue([{ ...log, action: "updated", ...row }]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    await waitFor(() => expect(screen.getByText(`Owner Name ${sentence}`)).toBeTruthy());
+  });
+
+  it("counts a rewrite of many criteria in one row", async () => {
+    api.get.mockResolvedValue([{ ...log, action: "updated", field: "checklist", newValue: "37" }]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    await waitFor(() =>
+      expect(screen.getByText("Owner Name made 37 changes to the acceptance criteria at once")).toBeTruthy()
+    );
+  });
+
+  it("shows a long criterion whole, so an edit near its end is visible", async () => {
+    const before = "A".repeat(70);
+    api.get.mockResolvedValue([{ ...log, action: "criterion_edited", field: "c1", oldValue: before, newValue: `${before} sorted` }]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    await waitFor(() =>
+      expect(screen.getByText(`Owner Name changed criterion “${before}” to “${before} sorted”`)).toBeTruthy()
+    );
+  });
+
+  it.each([
+    ["criterion_added", "", "Loads fast", "added criterion “Loads fast”"],
+    ["criterion_removed", "Loads fast", "", "removed criterion “Loads fast”"],
+    ["criterion_edited", "Loads", "Loads fast", "changed criterion “Loads” to “Loads fast”"],
+    ["criterion_checked", "", "Loads fast", "checked criterion “Loads fast”"],
+    ["criterion_unchecked", "", "Loads fast", "unchecked criterion “Loads fast”"],
+  ])("says what %s did to which criterion", async (action, oldValue, newValue, sentence) => {
+    api.get.mockResolvedValue([{ ...log, action, field: "c1", oldValue, newValue }]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    await waitFor(() => expect(screen.getByText(`Owner Name ${sentence}`)).toBeTruthy());
+  });
+
   it("offers the whole of what a description said before, rather than a clipped sentence", async () => {
     const before = "A long first paragraph that is well over sixty characters in length.\nAnd a second line.";
     api.get.mockResolvedValue([

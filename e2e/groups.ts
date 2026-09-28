@@ -29,6 +29,7 @@ export const GROUPS = {
     "task-detail-remainder.spec.ts",
     "handover-readiness.spec.ts",
     "link-leaves-a-trace.spec.ts",
+    "history-says-what-changed.spec.ts",
     "first-use-gaps.spec.ts",
     "task-composing-controls.spec.ts",
   ],

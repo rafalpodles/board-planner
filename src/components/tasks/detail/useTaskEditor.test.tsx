@@ -257,3 +257,244 @@ describe("useTaskEditor", () => {
     expect(screen.getByTestId("agent").textContent).toBe("a9");
   });
 });
+
+describe("a criterion added on this screen", () => {
+  type Item = { _id?: string; clientKey?: string; text: string; done: boolean };
+  let edit: (change: (items: Item[]) => Item[]) => void;
+  let retitle: (title: string) => void;
+  let current: Item[];
+
+  function Criteria({ task }: { task: ApiTask }) {
+    const { draft, set } = useTaskEditor("p1", task);
+    current = draft.checklist;
+    edit = (change) => set("checklist", change(draft.checklist));
+    retitle = (title) => set("title", title);
+    return null;
+  }
+
+  // happy-dom leaves `persisted` off the event it builds
+  const pagehide = (persisted: boolean) =>
+    Object.defineProperty(new Event("pagehide"), "persisted", { value: persisted });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  const lastChecklist = () => (api.put.mock.lastCall?.[1] as { checklist: Item[] }).checklist;
+
+  async function settle(ms = 700) {
+    await act(async () => {
+      vi.advanceTimersByTime(ms);
+    });
+  }
+
+  it("carries the id its save minted into the next save", async () => {
+    api.put.mockResolvedValueOnce({ checklist: [{ _id: "c1", text: "Loads", done: false }] });
+    render(<Criteria task={baseTask} />);
+
+    await act(async () => edit((items) => [...items, { clientKey: "k1", text: "Loads", done: false }]));
+    await settle();
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+
+    await act(async () => edit((items) => items.map((c) => ({ ...c, text: `${c.text} fast` }))));
+    await settle();
+
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2));
+    expect(lastChecklist()).toEqual([expect.objectContaining({ _id: "c1", text: "Loads fast" })]);
+  });
+
+  it("counts the criterion as saved, so the next edit elsewhere does not carry the list again", async () => {
+    api.put.mockResolvedValueOnce({ checklist: [{ _id: "c1", text: "Loads", done: false }] });
+    render(<Criteria task={baseTask} />);
+
+    await act(async () => edit((items) => [...items, { clientKey: "k1", text: "Loads", done: false }]));
+    await settle();
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+
+    await act(async () => retitle("Renamed"));
+    await settle();
+
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2));
+    expect(api.put).toHaveBeenLastCalledWith("/api/projects/p1/tasks/t1", { title: "Renamed" });
+  });
+
+  it("sends nothing more once the minted id is all that differs", async () => {
+    api.put.mockResolvedValueOnce({ checklist: [{ _id: "c1", text: "Loads", done: false }] });
+    render(<Criteria task={baseTask} />);
+
+    await act(async () => edit((items) => [...items, { clientKey: "k1", text: "Loads", done: false }]));
+    await settle();
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+    await settle(2_000);
+
+    expect(api.put).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives the minted id to the criterion that was sent, not to one added while the save was out", async () => {
+    let answer!: (task: unknown) => void;
+    api.put.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+    const stored = { ...baseTask, checklist: [{ _id: "x", text: "Old", done: false }] } as unknown as ApiTask;
+    render(<Criteria task={stored} />);
+
+    await act(async () => edit((items) => [...items, { clientKey: "kA", text: "A", done: false }]));
+    await settle();
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+
+    await act(async () =>
+      edit((items) => [...items.filter((c) => c._id !== "x"), { clientKey: "kC", text: "C", done: false }])
+    );
+    await act(async () =>
+      answer({ checklist: [{ _id: "x", text: "Old", done: false }, { _id: "idA", text: "A", done: false }] })
+    );
+    await settle();
+
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2));
+    expect(lastChecklist().map((c) => [c.text, c._id])).toEqual([
+      ["A", "idA"],
+      ["C", undefined],
+    ]);
+  });
+
+  // The key names the row, so losing it on the reload that follows a save would remount the row being edited
+  it("keeps the criterion's client key when the reload brings the saved list", async () => {
+    const saved = [{ _id: "c1", text: "Loads", done: false }];
+    api.put.mockResolvedValueOnce({ checklist: saved });
+    const { rerender } = render(<Criteria task={baseTask} />);
+
+    await act(async () => edit((items) => [...items, { clientKey: "k1", text: "Loads", done: false }]));
+    await settle();
+    await waitFor(() => expect(current[0]?._id).toBe("c1"));
+
+    rerender(<Criteria task={{ ...baseTask, checklist: saved } as unknown as ApiTask} />);
+
+    expect(current).toEqual([{ _id: "c1", clientKey: "k1", text: "Loads", done: false }]);
+  });
+
+  it("lets a closing flush be the last write, dropping an older save still queued", async () => {
+    let answer!: (task: unknown) => void;
+    api.put.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+    const { unmount } = render(<Criteria task={baseTask} />);
+
+    await act(async () => retitle("E1"));
+    await settle();
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+    await act(async () => retitle("E2"));
+    await settle();
+    await act(async () => retitle("E3"));
+    await act(async () => unmount());
+
+    await act(async () => answer({}));
+    await settle(2_000);
+
+    expect(api.put.mock.calls.map((call) => (call[1] as { title: string }).title)).toEqual(["E1", "E3"]);
+  });
+
+  it("sends a closing flush after the save that mints its criterion's id, carrying that id", async () => {
+    let answer!: (task: unknown) => void;
+    api.put.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+    const { unmount } = render(<Criteria task={baseTask} />);
+
+    await act(async () => edit((items) => [...items, { clientKey: "k1", text: "Loads", done: false }]));
+    await settle();
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+    await act(async () => edit((items) => items.map((c) => ({ ...c, text: "Loads fast" }))));
+    await act(async () => unmount());
+    expect(api.put).toHaveBeenCalledTimes(1);
+
+    await act(async () => answer({ checklist: [{ _id: "c1", text: "Loads", done: false }] }));
+
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2));
+    expect(lastChecklist()).toEqual([expect.objectContaining({ _id: "c1", text: "Loads fast" })]);
+  });
+
+  it("sends a flush still waiting behind a save when the page goes away", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response());
+    vi.stubGlobal("fetch", fetchMock);
+    api.put.mockImplementationOnce(() => new Promise(() => {}));
+    const { unmount } = render(<Criteria task={baseTask} />);
+
+    await act(async () => retitle("E1"));
+    await settle();
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+    await act(async () => retitle("E2"));
+    await act(async () => unmount());
+    window.dispatchEvent(pagehide(false));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/projects/p1/tasks/t1",
+      expect.objectContaining({ method: "PUT", keepalive: true, body: JSON.stringify({ title: "E2" }) })
+    );
+    await settle(15_000);
+    expect(api.put).toHaveBeenCalledTimes(1);
+  });
+
+  it("forgets a closing flush once it has gone out, so a later page unload does not resend it", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response());
+    vi.stubGlobal("fetch", fetchMock);
+    const { unmount } = render(<Criteria task={baseTask} />);
+
+    await act(async () => retitle("E1"));
+    await act(async () => unmount());
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith("/api/projects/p1/tasks/t1", { title: "E1" }));
+    window.dispatchEvent(pagehide(false));
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps queued saves when the page is only put in the back-forward cache", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response()));
+    let answer!: (task: unknown) => void;
+    api.put.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+    render(<Criteria task={baseTask} />);
+
+    await act(async () => retitle("E1"));
+    await settle();
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+    await act(async () => retitle("E2"));
+    await settle();
+    window.dispatchEvent(pagehide(true));
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/projects/p1/tasks/t1",
+      expect.objectContaining({ keepalive: true, body: JSON.stringify({ title: "E2" }) })
+    );
+    await act(async () => answer({}));
+
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2));
+    expect(api.put).toHaveBeenLastCalledWith("/api/projects/p1/tasks/t1", { title: "E2" });
+  });
+
+  it("stops waiting for a save that never answers", async () => {
+    api.put.mockImplementationOnce(() => new Promise(() => {}));
+    render(<Criteria task={baseTask} />);
+
+    await act(async () => retitle("E1"));
+    await settle();
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+    await act(async () => retitle("E2"));
+    await settle();
+    expect(api.put).toHaveBeenCalledTimes(1);
+
+    await settle(15_000);
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2));
+    expect(api.put).toHaveBeenLastCalledWith("/api/projects/p1/tasks/t1", { title: "E2" });
+  });
+
+  it("holds a save back until the one before it has answered with the new criterion's id", async () => {
+    let answer!: (task: unknown) => void;
+    api.put.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+    render(<Criteria task={baseTask} />);
+
+    await act(async () => edit((items) => [...items, { clientKey: "k1", text: "Loads", done: false }]));
+    await settle();
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+
+    await act(async () => edit((items) => items.map((c) => ({ ...c, text: "Loads fast" }))));
+    await settle(2_000);
+    expect(api.put).toHaveBeenCalledTimes(1);
+
+    await act(async () => answer({ checklist: [{ _id: "c1", text: "Loads", done: false }] }));
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2));
+    expect(lastChecklist()).toEqual([expect.objectContaining({ _id: "c1", text: "Loads fast" })]);
+
+    await settle(2_000);
+    expect(api.put).toHaveBeenCalledTimes(2);
+  });
+});

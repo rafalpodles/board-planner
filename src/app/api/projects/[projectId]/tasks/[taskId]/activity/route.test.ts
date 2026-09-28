@@ -6,6 +6,8 @@ const find = vi.fn();
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/task", () => ({ Task: { exists } }));
 vi.mock("@/models/activityLog", () => ({ ActivityLog: { find } }));
+const agentFind = vi.fn();
+vi.mock("@/models/agent", () => ({ Agent: { find: agentFind } }));
 vi.mock("@/lib/middleware", () => ({
   withProjectAccess:
     (handler: (req: Request, ctx: unknown) => Promise<Response>) => (req: Request, ctx: unknown) =>
@@ -67,6 +69,7 @@ async function read(): Promise<Row[]> {
 beforeEach(() => {
   exists.mockReset().mockResolvedValue(true);
   find.mockReset();
+  agentFind.mockReset().mockReturnValue({ lean: () => Promise.resolve([]) });
 });
 
 describe("GET task activity", () => {
@@ -129,6 +132,36 @@ describe("GET task activity", () => {
     serve(all);
 
     expect((await read()).map((r) => r._id)).toEqual(["st", "e0"]);
+  });
+
+  describe("an agent change written before BP-730, which holds ids", () => {
+    const KEPT = "6ab0f94eadb2609f98d84da1";
+    const GONE = "6ab0f94eadb2609f98d84da9";
+
+    it("names an agent that still exists, and calls one that does not a deleted agent", async () => {
+      agentFind.mockReturnValue({ lean: () => Promise.resolve([{ _id: KEPT, name: "Merges its own work" }]) });
+      serve([row("a", 1, { field: "agent", oldValue: GONE, newValue: KEPT })]);
+
+      const shown = await read();
+
+      expect(agentFind).toHaveBeenCalledWith({ _id: { $in: [GONE, KEPT] } }, "name");
+      expect(shown[0]).toMatchObject({ oldValue: "a deleted agent", newValue: "Merges its own work" });
+    });
+
+    it("leaves a row that already holds names alone, and asks for nothing", async () => {
+      serve([row("a", 1, { field: "agent", oldValue: "Default", newValue: "" })]);
+
+      const shown = await read();
+
+      expect(agentFind).not.toHaveBeenCalled();
+      expect(shown[0]).toMatchObject({ oldValue: "Default", newValue: "" });
+    });
+
+    it("leaves a project field called agent alone", async () => {
+      serve([row("a", 1, { field: "agent", customField: true, fieldType: "text", oldValue: GONE, newValue: "x" })]);
+
+      expect((await read())[0]).toMatchObject({ oldValue: GONE });
+    });
   });
 
   it("refuses a task from another project", async () => {

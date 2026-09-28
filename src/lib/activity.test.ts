@@ -166,6 +166,26 @@ describe("editSessions", () => {
     expect(editSessions(rows as never)).toHaveLength(3);
   });
 
+  it("folds one criterion's saves while its text is typed", () => {
+    const rows = [0, 1, 2].map((m) => row(m, { action: "criterion_edited", field: "c1" }));
+    expect(editSessions(rows as never)).toHaveLength(1);
+  });
+
+  it.each([
+    ["another criterion", { action: "criterion_edited", field: "c2" }],
+    ["ticking the same criterion", { action: "criterion_checked", field: "c1" }],
+    ["adding a criterion", { action: "criterion_added", field: "c1" }],
+  ])("keeps a criterion edit apart from %s", (_label, over) => {
+    const edit = { action: "criterion_edited", field: "c1" };
+    const rows = [row(1, edit), row(2, over), row(3, edit)];
+    expect(editSessions(rows as never)).toHaveLength(3);
+  });
+
+  it("does not fold a criterion edit into an edit of a field that shares its name", () => {
+    const rows = [row(1, { action: "criterion_edited", field: "title" }), row(2, { field: "title" })];
+    expect(editSessions(rows as never)).toHaveLength(2);
+  });
+
   it("ends a session after a pause longer than the window", () => {
     const rows = [row(0), row(EDIT_SESSION_MS / 60_000 + 1)];
     expect(editSessions(rows as never)).toHaveLength(2);
