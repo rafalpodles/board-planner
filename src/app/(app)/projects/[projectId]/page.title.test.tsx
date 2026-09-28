@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, cleanup, waitFor } from "@testing-library/react";
 import KanbanPage from "./page";
 import { APP_NAME } from "@/lib/brand";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 import { ApiProject, ApiTask } from "@/types";
 import type { ProjectBoard } from "@/hooks/use-project-board";
 
@@ -207,5 +208,27 @@ describe("the browser tab's title", () => {
     view.rerender(<KanbanPage />);
 
     await expectTitle(`Test Project (1 in progress) — ${APP_NAME}`);
+  });
+
+  // BP-746: a task opened over the board holds the tab while the board's counts move beneath it
+  it("leaves the tab to a task opened over it, and takes it back with the counts it has by then", async () => {
+    function TaskOnTop() {
+      useDocumentTitle(`TP-1 Task t1 — ${APP_NAME}`);
+      return null;
+    }
+    const sameProject = project();
+    const view = renderBoard(sameProject, [task("t1", "queued")]);
+    await expectTitle(`Test Project (1 todo) — ${APP_NAME}`);
+
+    const onTop = render(<TaskOnTop />);
+    await expectTitle(`TP-1 Task t1 — ${APP_NAME}`);
+
+    boardOverride.current = board(sameProject, [task("t1", "doing")]);
+    view.rerender(<KanbanPage />);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(document.title).toBe(`TP-1 Task t1 — ${APP_NAME}`);
+
+    onTop.unmount();
+    expect(document.title).toBe(`Test Project (1 in progress) — ${APP_NAME}`);
   });
 });
