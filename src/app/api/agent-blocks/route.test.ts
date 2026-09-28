@@ -122,7 +122,11 @@ describe("POST /api/agent-blocks — what the worker must be able to run", () =>
     await post({ kind: "step", name: "bare" });
 
     expect(create.mock.calls[0][0]).toMatchObject({ model: "sonnet", fallbackModel: "opus" });
-    expect(create.mock.calls[1][0]).toMatchObject({ capability: "read-only", model: "", fallbackModel: "" });
+    expect(create.mock.calls[1][0]).toMatchObject({
+      capability: "read-only",
+      model: "",
+      fallbackModel: "",
+    });
   });
 });
 

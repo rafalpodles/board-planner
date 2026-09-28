@@ -42,6 +42,16 @@ function block(overrides: Record<string, unknown> = {}) {
 
 const params = { params: Promise.resolve({ blockId: ID }) };
 
+const sortedBy = vi.fn();
+function found(rows: Record<string, unknown>[]) {
+  const query = {
+    sort: (order: unknown) => (sortedBy(order), query),
+    populate: () => query,
+    lean: () => Promise.resolve(rows),
+  };
+  return query;
+}
+
 function put(body: Record<string, unknown>) {
   return PUT(
     new Request(`http://localhost/api/agent-blocks/${ID}`, {
@@ -61,7 +71,7 @@ function put(body: Record<string, unknown>) {
 describe("changing a block", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    agentFind.mockReturnValue({ lean: () => Promise.resolve([]) });
+    agentFind.mockReturnValue(found([]));
   });
 
   it("refuses the member who created it", async () => {
@@ -102,8 +112,7 @@ describe("changing what a block runs as (BP-743, BP-755)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getAuthUser.mockResolvedValue(ADMIN);
-    const lean = () => Promise.resolve([]);
-    agentFind.mockReturnValue({ lean, populate: () => ({ lean }) });
+    agentFind.mockReturnValue(found([]));
     allBlocks.mockResolvedValue([]);
   });
 
@@ -155,8 +164,16 @@ describe("changing what a block runs as (BP-743, BP-755)", () => {
 
   // A 200 for a field that was dropped tells the client it set something it did not
   it.each([
-    ["a model on a step the worker performs itself", block({ deterministic: true }), { model: "opus" }],
-    ["a capability on a step the worker performs itself", block({ deterministic: true }), { capability: "edit" }],
+    [
+      "a model on a step the worker performs itself",
+      block({ deterministic: true }),
+      { model: "opus" },
+    ],
+    [
+      "a capability on a step the worker performs itself",
+      block({ deterministic: true }),
+      { capability: "edit" },
+    ],
     ["a model on a gate", gate(), { model: "opus" }],
     ["a capability on a gate", gate(), { capability: "edit" }],
     ["a prompt on a gate", gate(), { prompt: "do it" }],
@@ -225,13 +242,17 @@ describe("changing what a block runs as (BP-743, BP-755)", () => {
 describe("changing what a step may touch, under agents that already use it (BP-743)", () => {
   const investigate = { key: "a-key", kind: "step", name: "Investigate", capability: "read-only" };
   const build = { key: "build", kind: "gate", name: "Builds", gateKind: "build" };
-  const guard = { key: "protected-paths", kind: "gate", name: "Protected files", gateKind: "protected-paths" };
+  const guard = {
+    key: "protected-paths",
+    kind: "gate",
+    name: "Protected files",
+    gateKind: "protected-paths",
+  };
   const push = { key: "push", kind: "step", name: "Push", deterministic: true };
   const implement = { key: "implement", kind: "step", name: "Implement", capability: "edit" };
 
   function agentsUsingIt(...agents: Record<string, unknown>[]) {
-    const lean = () => Promise.resolve(agents);
-    agentFind.mockReturnValue({ lean, populate: () => ({ lean }) });
+    agentFind.mockReturnValue(found(agents));
   }
 
   // Investigate starts writing, and nothing after it pushes
@@ -310,13 +331,27 @@ describe("changing what a step may touch, under agents that already use it (BP-7
 
   it("names the admin's own personal agent, and a project's", async () => {
     agentsUsingIt(
-      { name: "My scratch", scope: "user", owner: { _id: "admin-1", username: "admin" }, composition: breaksOnWrite },
+      {
+        name: "My scratch",
+        scope: "user",
+        owner: { _id: "admin-1", username: "admin" },
+        composition: breaksOnWrite,
+      },
       { name: "Triage", scope: "project", owner: null, composition: breaksOnWrite }
     );
 
     const error = await refusal();
 
     expect(error).toMatch(/^This would break My scratch: .+ This would break Triage: /);
+  });
+
+  it("says whose it was when the owner's account is gone", async () => {
+    agentsUsingIt({ name: "Orphan", scope: "user", owner: null, composition: breaksOnWrite });
+
+    const error = await refusal();
+
+    expect(error).not.toContain("Orphan");
+    expect(error).toMatch(/^This would break a personal agent of a deleted account: /);
   });
 
   it("says why for each agent, and counts the ones past the third", async () => {
@@ -331,6 +366,7 @@ describe("changing what a step may touch, under agents that already use it (BP-7
 
     const error = await refusal();
 
+    expect(sortedBy).toHaveBeenCalledWith({ name: 1 });
     expect(error.match(/This would break /g)).toHaveLength(3);
     expect(error).not.toContain("Four");
     expect(error).toMatch(/ And 2 more\.$/);
@@ -343,7 +379,13 @@ describe("changing what a step may touch, under agents that already use it (BP-7
       scope: "global",
       owner: null,
       composition: {
-        delivery: [{ key: "push" }, { key: "pull-request" }, { key: "merge" }, { key: "a-key" }, { key: "push" }],
+        delivery: [
+          { key: "push" },
+          { key: "pull-request" },
+          { key: "merge" },
+          { key: "a-key" },
+          { key: "push" },
+        ],
       },
     });
     const doc = block({ ...investigate });
@@ -375,7 +417,7 @@ describe("deleting a block", () => {
     vi.clearAllMocks();
     agentFind.mockImplementation((query: Record<string, unknown>) => {
       castThroughMongoose(query);
-      return { lean: () => Promise.resolve([]) };
+      return found([]);
     });
   });
 
@@ -442,5 +484,29 @@ describe("deleting a block", () => {
 
     expect((await del()).status).toBe(200);
     expect(doc.deleteOne).toHaveBeenCalledOnce();
+  });
+  // The same labelling as the refused edit: another person's personal agent is never named
+  it("refuses one in use, naming what the admin may see and saying whose the rest are", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+    const doc = block();
+    blockFindById.mockResolvedValue(doc);
+    agentFind.mockReturnValue(
+      found([
+        { name: "Bob's scratch", scope: "user", owner: { _id: "bob-1", username: "bob" } },
+        { name: "My scratch", scope: "user", owner: { _id: "admin-1", username: "admin" } },
+        { name: "Orphan", scope: "user", owner: null },
+        { name: "Triage", scope: "project", owner: null },
+      ])
+    );
+
+    const response = await del();
+
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toBe(
+      "Still used by a personal agent of bob, My scratch, a personal agent of a deleted account, " +
+        "Triage. Take it out of those agents first."
+    );
+    expect(sortedBy).toHaveBeenCalledWith({ name: 1 });
+    expect(doc.deleteOne).not.toHaveBeenCalled();
   });
 });

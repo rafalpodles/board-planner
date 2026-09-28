@@ -25,6 +25,26 @@ function agentsNaming(key: string) {
   };
 }
 
+interface AgentNamingBlock {
+  name: string;
+  scope: string;
+  composition?: unknown;
+  owner: { _id: unknown; username: string } | null;
+}
+
+function agentsUsing(key: string, fields: string): Promise<AgentNamingBlock[]> {
+  return Agent.find(agentsNaming(key), `${fields} scope owner`)
+    .sort({ name: 1 })
+    .populate<{ owner: AgentNamingBlock["owner"] }>("owner", "username")
+    .lean() as Promise<AgentNamingBlock[]>;
+}
+
+// /api/agents sends a personal agent only to its owner: an admin is told whom to ask, not its name
+function agentLabel(agent: AgentNamingBlock, viewerId: string): string {
+  if (agent.scope !== "user" || String(agent.owner?._id) === viewerId) return agent.name;
+  return `a personal agent of ${agent.owner?.username ?? "a deleted account"}`;
+}
+
 type Body = Record<string, unknown>;
 
 function fieldRefusal(block: IAgentBlock, body: Body): string | null {
@@ -58,9 +78,7 @@ async function agentsBrokenBy(
   previousCapability: ApiAgentBlock["capability"],
   viewerId: string
 ): Promise<string | null> {
-  const agents = await Agent.find(agentsNaming(changed.key), "name composition scope owner")
-    .populate<{ owner: { _id: unknown; username: string } | null }>("owner", "username")
-    .lean();
+  const agents = await agentsUsing(changed.key, "name composition");
   if (agents.length === 0) return null;
 
   const blocks = (await allBlocks()).map(toApiBlock);
@@ -75,12 +93,7 @@ async function agentsBrokenBy(
     const already = new Set(brokenProblems(composition, before).map((p) => p.message));
     const fresh = brokenProblems(composition, after).filter((p) => !already.has(p.message));
     if (fresh.length === 0) return [];
-    // Somebody else's personal agent is not the admin's to see, only whom to ask about it
-    const someoneElses = agent.scope === "user" && String(agent.owner?._id) !== viewerId;
-    const label = someoneElses
-      ? `a personal agent of ${agent.owner?.username ?? "a deleted account"}`
-      : agent.name;
-    return [`This would break ${label}: ${fresh[0].message}`];
+    return [`This would break ${agentLabel(agent, viewerId)}: ${fresh[0].message}`];
   });
   if (broken.length === 0) return null;
   const rest = broken.length - MOST_NAMED;
@@ -167,13 +180,12 @@ export const DELETE = withAuth(async (_request, { params, user }) => {
 
   // Deleting a block an agent still names would leave that agent referring to nothing, and the
   // worker refuses an unknown key mid-run rather than at the moment somebody caused it.
-  const users = await Agent.find(agentsNaming(block.key), "name").lean();
+  const users = await agentsUsing(block.key, "name");
 
   if (users.length > 0) {
+    const named = users.map((agent) => agentLabel(agent, String(user._id))).join(", ");
     return NextResponse.json(
-      {
-        error: `Still used by ${users.map((a) => a.name).join(", ")}. Take it out of those agents first.`,
-      },
+      { error: `Still used by ${named}. Take it out of those agents first.` },
       { status: 409 }
     );
   }
