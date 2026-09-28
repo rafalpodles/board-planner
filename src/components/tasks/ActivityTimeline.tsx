@@ -137,7 +137,7 @@ function describeAction(log: ApiActivityLog): string {
         return `${userName} changed agent from ${agentLabel(log.oldValue)} to ${agentLabel(log.newValue)}`;
       }
       if (log.field === "checklist" && !log.customField && log.newValue) {
-        return `${userName} changed ${log.newValue} acceptance criteria at once`;
+        return `${userName} made ${log.newValue} changes to the acceptance criteria at once`;
       }
       // createNextRecurrence writes a sentence into newValue rather than a before/after pair,
       // so reading it as one would claim the recurrence config had been edited

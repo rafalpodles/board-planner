@@ -64,7 +64,7 @@ describe("ActivityTimeline", () => {
     api.get.mockResolvedValue([{ ...log, action: "updated", field: "checklist", newValue: "37" }]);
     render(<ActivityTimeline projectId="TP" taskId="t1" />);
     await waitFor(() =>
-      expect(screen.getByText("Owner Name changed 37 acceptance criteria at once")).toBeTruthy()
+      expect(screen.getByText("Owner Name made 37 changes to the acceptance criteria at once")).toBeTruthy()
     );
   });
 

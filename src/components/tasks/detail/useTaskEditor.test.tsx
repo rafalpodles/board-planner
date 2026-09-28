@@ -272,6 +272,10 @@ describe("a criterion added on this screen", () => {
     return null;
   }
 
+  // happy-dom leaves `persisted` off the event it builds
+  const pagehide = (persisted: boolean) =>
+    Object.defineProperty(new Event("pagehide"), "persisted", { value: persisted });
+
   const lastChecklist = () => (api.put.mock.lastCall?.[1] as { checklist: Item[] }).checklist;
 
   async function settle(ms = 700) {
@@ -397,6 +401,47 @@ describe("a criterion added on this screen", () => {
 
     await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2));
     expect(lastChecklist()).toEqual([expect.objectContaining({ _id: "c1", text: "Loads fast" })]);
+  });
+
+  it("sends a flush still waiting behind a save when the page goes away", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response());
+    vi.stubGlobal("fetch", fetchMock);
+    api.put.mockImplementationOnce(() => new Promise(() => {}));
+    const { unmount } = render(<Criteria task={baseTask} />);
+
+    await act(async () => retitle("E1"));
+    await settle();
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+    await act(async () => retitle("E2"));
+    await act(async () => unmount());
+    window.dispatchEvent(pagehide(false));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/projects/p1/tasks/t1",
+      expect.objectContaining({ method: "PUT", keepalive: true, body: JSON.stringify({ title: "E2" }) })
+    );
+    await settle(15_000);
+    expect(api.put).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps queued saves when the page is only put in the back-forward cache", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response()));
+    let answer!: (task: unknown) => void;
+    api.put.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+    render(<Criteria task={baseTask} />);
+
+    await act(async () => retitle("E1"));
+    await settle();
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+    await act(async () => retitle("E2"));
+    await settle();
+    window.dispatchEvent(pagehide(true));
+    await act(async () => answer({}));
+
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2));
+    expect(api.put).toHaveBeenLastCalledWith("/api/projects/p1/tasks/t1", { title: "E2" });
+    vi.unstubAllGlobals();
   });
 
   it("stops waiting for a save that never answers", async () => {

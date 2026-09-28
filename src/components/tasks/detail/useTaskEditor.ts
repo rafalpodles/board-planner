@@ -86,6 +86,15 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a, canonical) === JSON.s
 
 type MintedIds = Map<string, string>;
 
+function keepaliveFlush(url: string, body: Partial<TaskDraft>) {
+  fetch(url, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    keepalive: true,
+  }).catch(() => {});
+}
+
 const afterAtMost = (previous: Promise<void>) =>
   Promise.race([previous, new Promise<void>((resolve) => setTimeout(resolve, SAVE_QUEUE_WAIT_MS))]);
 
@@ -213,8 +222,20 @@ export function useTaskEditor(projectId: string, task: ApiTask, onRefused?: (err
       const pending = pendingRef.current;
       if (pending === "{}") return;
       generation.current++;
+      const url = `/api/projects/${projectId}/tasks/${taskId}`;
+      const body = () => withKnownIds(JSON.parse(pending), minted.current);
+      // Waiting behind a save is waiting on the document, which may be closed before the wait ends
+      let sent = false;
+      const sendOnUnload = () => {
+        sent = true;
+        keepaliveFlush(url, body());
+      };
+      window.addEventListener("pagehide", sendOnUnload, { once: true });
       afterAtMost(lastSave.current)
-        .then(() => api.put(`/api/projects/${projectId}/tasks/${taskId}`, withKnownIds(JSON.parse(pending), minted.current)))
+        .then(() => {
+          window.removeEventListener("pagehide", sendOnUnload);
+          if (!sent) return api.put(url, body());
+        })
         .then(() => emitBoardRefresh(projectId))
         .catch(() => {});
     };
@@ -226,16 +247,12 @@ export function useTaskEditor(projectId: string, task: ApiTask, onRefused?: (err
   // (BP-521). `keepalive` is what lets the write outlive the document it started in.
   useEffect(() => {
     const taskId = task._id;
-    const flush = () => {
+    const flush = (event: PageTransitionEvent) => {
       const pending = pendingRef.current;
       if (pending === "{}") return;
-      generation.current++;
-      fetch(`/api/projects/${projectId}/tasks/${taskId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(withKnownIds(JSON.parse(pending), minted.current)),
-        keepalive: true,
-      }).catch(() => {});
+      // A page kept in the back-forward cache comes back, and its queued saves are still the way out
+      if (!event.persisted) generation.current++;
+      keepaliveFlush(`/api/projects/${projectId}/tasks/${taskId}`, withKnownIds(JSON.parse(pending), minted.current));
     };
     window.addEventListener("pagehide", flush);
     return () => window.removeEventListener("pagehide", flush);
