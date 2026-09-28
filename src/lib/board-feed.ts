@@ -138,6 +138,7 @@ export async function notifyBoardFeed(params: {
   projectId: string;
   actorId: string;
   title: string;
+  digestTitle?: string;
   body?: string;
   email?: () => Promise<NotificationEmail> | NotificationEmail;
 }): Promise<void> {

@@ -4297,6 +4297,15 @@ describe("createTask handing the task to somebody", () => {
     });
   });
 
+  // BP-725. The digest labels the row with its key already; the title it reads beside that key
+  // must not name the task a second time.
+  it("gives the digest a phrasing that does not repeat the task's own key", async () => {
+    await createTask("p1", "actor", { title: "Session cookie survives a change" });
+
+    const [feed] = notifyBoardFeedMock.mock.calls.at(-1) ?? [];
+    expect(feed.digestTitle).toBe("New task in Board Planner");
+  });
+
   // A different audience and a different switch from the one above: a room nobody subscribed to
   // individually. The webhook beside it is asserted; this dispatch was not.
   it("tells the project's shared chat channel", async () => {

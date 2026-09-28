@@ -715,6 +715,7 @@ export async function createTask(
     projectId,
     actorId,
     title: `New task ${createdKey} in ${project.name}`,
+    digestTitle: `New task in ${project.name}`,
     body: task.title,
     email: async () => {
       const column = getProjectColumns(project).find((c) => c.id === status);

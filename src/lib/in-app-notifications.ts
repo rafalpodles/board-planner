@@ -39,6 +39,7 @@ interface NotifyParams {
   projectId: string;
   actorId: string;
   title: string;
+  digestTitle?: string;
   body?: string;
   recipientIds: string[];
   email?: NotificationEmail;
@@ -67,6 +68,7 @@ async function notify({
   projectId,
   actorId,
   title,
+  digestTitle,
   body,
   recipientIds,
   email,
@@ -122,6 +124,7 @@ async function notify({
         project: new Types.ObjectId(projectId),
         actor: new Types.ObjectId(actorId),
         title,
+        digestTitle,
         body: body || "",
         // Stored regardless, hidden if the bell is off for this row: the digest reads these
         // documents, and skipping the write would take the morning mail down with the bell.

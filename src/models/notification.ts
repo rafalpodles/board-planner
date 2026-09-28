@@ -14,6 +14,8 @@ const notificationSchema = new Schema<INotification>(
     project: { type: Schema.Types.ObjectId, ref: "Project", required: true },
     actor: { type: Schema.Types.ObjectId, ref: "User", required: true },
     title: { type: String, required: true },
+    // The title as read beside the row's own task key, for writers whose title names it mid-sentence
+    digestTitle: { type: String },
     body: { type: String, default: "" },
     read: { type: Boolean, default: false, index: true },
     // Whether the bell shows this row. The document is written either way: the digest is built

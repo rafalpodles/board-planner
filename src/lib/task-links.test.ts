@@ -843,6 +843,36 @@ describe("what leaves the building", () => {
     });
   });
 
+  // BP-725. The digest labels a row with its own key, so the phrasing written for it names the
+  // task at the other end and calls its own "this task" — at whichever position the direction
+  // puts it, including the one that used to trail the sentence.
+  it("gives each end a digest phrasing that does not repeat its own key", async () => {
+    store = [
+      task("old", 9, { relations: [{ task: "child", type: "parent_of" }] }),
+      task("new", 10),
+      task("child", 11),
+      task("a", 1),
+      task("b", 2),
+    ];
+
+    await addTaskLink(P, "a", "b", "blocked_by", ACTOR);
+    await addTaskLink(P, "new", "child", "parent_of", ACTOR);
+
+    const digestTitles = Object.fromEntries(
+      createNotifications.mock.calls.map((c) => {
+        const n = c[0] as { taskId: string; digestTitle?: string };
+        return [n.taskId, n.digestTitle];
+      })
+    );
+    expect(digestTitles).toEqual({
+      a: "rafal marked this task as blocked by BP-2",
+      b: "rafal marked BP-1 as blocked by this task",
+      old: "rafal removed BP-11 from this task's children",
+      new: "rafal made this task the parent of BP-11",
+      child: "rafal made BP-10 the parent of this task",
+    });
+  });
+
   it("gives the e-mail everything it needs to render a row", async () => {
     store = [task("a", 1, { assignee: "u-assignee" }), task("b", 2)];
 

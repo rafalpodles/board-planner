@@ -228,6 +228,22 @@ describe("notification emails", () => {
     await sentMails();
   });
 
+  // BP-725. The digest prints the row's key beside its title, and only the writer knows where in
+  // the sentence that key sits — so the writer's key-less phrasing has to reach every document.
+  it("stores the writer's digest phrasing on every recipient's row", async () => {
+    await createNotifications({
+      ...NOTIFICATION,
+      type: "task_linked",
+      title: "owner marked BP-142 as blocked by BP-7",
+      digestTitle: "owner marked this task as blocked by BP-7",
+    });
+
+    expect(insertMany.mock.calls[0][0]).toEqual([
+      expect.objectContaining({ digestTitle: "owner marked this task as blocked by BP-7" }),
+      expect.objectContaining({ digestTitle: "owner marked this task as blocked by BP-7" }),
+    ]);
+  });
+
   it("sends no mail for a project the recipient muted, while another project still arrives", async () => {
     prefs[WATCHER] = {
       notifications: {
