@@ -107,7 +107,11 @@ describe("where a dropped block goes in a bucket that holds some", () => {
     delivery: [{ key: "push" }, { key: "pull-request" }],
   };
 
-  function drop(activeId: (uids: Record<string, string>) => string, overKey: string, after: boolean) {
+  function drop(
+    activeId: (uids: Record<string, string>) => string,
+    overKey: string,
+    after: boolean
+  ) {
     const { result } = renderHook(() => useComposition(delivery, () => undefined));
     const uids = Object.fromEntries(
       Object.values(result.current.entries).flat().map((e) => [e.key, e.uid])

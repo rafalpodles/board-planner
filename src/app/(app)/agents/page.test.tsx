@@ -12,6 +12,7 @@ const catalog = vi.hoisted(() => ({
   steps: [] as ApiAgentBlock[],
   gates: [] as ApiAgentBlock[],
   updateBlock: vi.fn(),
+  addBlock: vi.fn(),
 }));
 vi.mock("./store", () => ({
   useStore: () => ({
@@ -20,7 +21,7 @@ vi.mock("./store", () => ({
     allSteps: catalog.steps,
     allGates: catalog.gates,
     addAgent: vi.fn(),
-    addBlock: vi.fn(),
+    addBlock: catalog.addBlock,
     updateBlock: catalog.updateBlock,
     removeBlock: vi.fn(),
     removeAgent: vi.fn(),
@@ -35,6 +36,7 @@ afterEach(() => {
   catalog.steps = [];
   catalog.gates = [];
   catalog.updateBlock.mockReset();
+  catalog.addBlock.mockReset();
 });
 
 async function openTab(label: string) {
@@ -196,6 +198,22 @@ describe("a refusal from the server", () => {
   });
 });
 
+describe("a refusal while creating a block", () => {
+  it("is announced, and the dialog keeps what was typed", async () => {
+    catalog.addBlock.mockRejectedValue(new Error("model must be a model name such as opus or sonnet"));
+    await openTab("Steps");
+    await act(async () => screen.getByRole("button", { name: "New step" }).click());
+
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Write the tests" } });
+    await act(async () => screen.getByRole("button", { name: "Create" }).click());
+
+    expect(screen.getByRole("alert").textContent).toBe(
+      "model must be a model name such as opus or sonnet"
+    );
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Write the tests");
+  });
+});
+
 describe("a gate, for a reader who may not change it", () => {
   const SIZE: ApiAgentBlock = {
     ...IMPLEMENT,
@@ -224,7 +242,14 @@ describe("a gate, for a reader who may not change it", () => {
   it("shows a chosen parameter as a read-only field with its label", async () => {
     isAdmin.value = false;
     catalog.gates = [
-      { ...SIZE, _id: "b-review", key: "review", name: "Reviewed", gateKind: "review", params: { focus: "security", model: "opus" } },
+      {
+        ...SIZE,
+        _id: "b-review",
+        key: "review",
+        name: "Reviewed",
+        gateKind: "review",
+        params: { focus: "security", model: "opus" },
+      },
     ];
     await openTab("Gates");
     await act(async () => screen.getByRole("button", { name: "Reviewed" }).click());
@@ -238,7 +263,14 @@ describe("a gate, for a reader who may not change it", () => {
 
   it("shows a stored model the form does not offer as itself, rather than as the first option", async () => {
     catalog.gates = [
-      { ...SIZE, _id: "b-review", key: "review", name: "Reviewed", gateKind: "review", params: { focus: "general", model: "haiku" } },
+      {
+        ...SIZE,
+        _id: "b-review",
+        key: "review",
+        name: "Reviewed",
+        gateKind: "review",
+        params: { focus: "general", model: "haiku" },
+      },
     ];
     await openTab("Gates");
     await act(async () => screen.getByRole("button", { name: "Reviewed" }).click());
