@@ -140,11 +140,22 @@ describe("editing a step shows what it runs as", () => {
     isAdmin.value = false;
     await openStep(IMPLEMENT);
 
-    expect(select("Model").value).toBe("opus");
-    expect(select("What it may touch").value).toBe("edit");
-    expect(select("Model").disabled).toBe(true);
-    expect(select("What it may touch").disabled).toBe(true);
-    expect((screen.getByLabelText("Name") as HTMLInputElement).readOnly).toBe(true);
+    // Read-only fields rather than disabled selects: those are dimmed and skipped by Tab
+    for (const [label, shown] of [
+      ["Model", "Opus"],
+      ["What it may touch", "Read and write"],
+    ]) {
+      const field = screen.getByLabelText(label) as HTMLInputElement;
+      expect(field.tagName, label).toBe("INPUT");
+      expect(field.value, label).toBe(shown);
+      expect(field.readOnly, label).toBe(true);
+      expect(field.disabled, label).toBe(false);
+    }
+    expect(screen.getByText("Can change files. The worker commits afterwards.")).not.toBeNull();
+    const name = screen.getByLabelText("Name") as HTMLInputElement;
+    expect(name.readOnly).toBe(true);
+    expect(name.required).toBe(false);
+    expect((screen.getByLabelText("Description") as HTMLTextAreaElement).readOnly).toBe(true);
     expect((screen.getByLabelText("What it should do") as HTMLTextAreaElement).readOnly).toBe(true);
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
     expect(screen.getByRole("button", { name: "Done" })).not.toBeNull();
@@ -163,6 +174,22 @@ describe("editing a step shows what it runs as", () => {
 
     expect(select("Model").value).toBe("");
     expect(select("Model").selectedOptions[0].textContent).toBe("The worker's own");
+  });
+});
+
+describe("a refusal from the server", () => {
+  it("is shown in the dialog, which stays open with the edit in it", async () => {
+    catalog.updateBlock.mockRejectedValue(
+      new Error("This would break Careful: Nothing pushes the work.")
+    );
+    await openStep({ ...IMPLEMENT, capability: "read-only" });
+
+    fireEvent.change(select("What it may touch"), { target: { value: "edit" } });
+    await act(async () => screen.getByRole("button", { name: "Save" }).click());
+
+    expect(screen.getByText("This would break Careful: Nothing pushes the work.")).not.toBeNull();
+    expect(screen.queryByRole("dialog")).not.toBeNull();
+    expect(select("What it may touch").value).toBe("edit");
   });
 });
 
@@ -191,6 +218,21 @@ describe("a gate, for a reader who may not change it", () => {
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
   });
 
+  it("shows a chosen parameter as a read-only field with its label", async () => {
+    isAdmin.value = false;
+    catalog.gates = [
+      { ...SIZE, _id: "b-review", key: "review", name: "Reviewed", gateKind: "review", params: { focus: "security", model: "opus" } },
+    ];
+    await openTab("Gates");
+    await act(async () => screen.getByRole("button", { name: "Reviewed" }).click());
+
+    const focus = screen.getByLabelText("Looking for") as HTMLInputElement;
+    expect(focus.tagName).toBe("INPUT");
+    expect(focus.value).toBe("Security");
+    expect(focus.readOnly).toBe(true);
+    expect((screen.getByLabelText("Model") as HTMLInputElement).readOnly).toBe(true);
+  });
+
   it("lets an admin change them", async () => {
     catalog.gates = [SIZE];
     await openTab("Gates");
@@ -198,5 +240,26 @@ describe("a gate, for a reader who may not change it", () => {
 
     expect((screen.getByLabelText("Most lines") as HTMLInputElement).readOnly).toBe(false);
     expect(screen.queryByRole("button", { name: "Save" })).not.toBeNull();
+  });
+});
+
+// Deleting a block is instance-admin on the server, so the control was a 403 waiting to happen
+describe("who is offered Delete on a block", () => {
+  const MINE: ApiAgentBlock = { ...IMPLEMENT, _id: "b-mine", key: "mine", name: "Mine", builtIn: false };
+
+  it("withholds it from a reader who may not delete", async () => {
+    isAdmin.value = false;
+    catalog.steps = [MINE];
+    await openTab("Steps");
+
+    expect(screen.getByRole("button", { name: "Mine" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete Mine" })).toBeNull();
+  });
+
+  it("offers it to an instance admin", async () => {
+    catalog.steps = [MINE];
+    await openTab("Steps");
+
+    expect(screen.queryByRole("button", { name: "Delete Mine" })).not.toBeNull();
   });
 });

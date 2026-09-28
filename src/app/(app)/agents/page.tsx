@@ -185,7 +185,7 @@ export default function AgentsPage() {
           title="Gates"
           hint="Checks that can stop a change. A gate never edits anything — it only says yes or no."
         >
-          <BlockList rows={store.allGates} onDelete={store.removeBlock} onEdit={setEditing} />
+          <BlockList rows={store.allGates} onDelete={isAdmin ? store.removeBlock : undefined} onEdit={setEditing} />
         </Section>
       </div>
 
@@ -199,7 +199,7 @@ export default function AgentsPage() {
           title="Steps"
           hint="Work an agent does. Each step is its own session, with a fresh head."
         >
-          <BlockList rows={store.allSteps} onDelete={store.removeBlock} onEdit={setEditing} />
+          <BlockList rows={store.allSteps} onDelete={isAdmin ? store.removeBlock : undefined} onEdit={setEditing} />
         </Section>
       </div>
 

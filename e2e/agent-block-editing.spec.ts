@@ -230,6 +230,12 @@ test.describe("editing a block an agent is built from", () => {
     const response = await saved;
     expect(response.status(), await response.text()).toBe(200);
     await expect(dialog).toBeHidden();
+    // Left as they were in the form, so not sent: a value stored before the server checked it
+    // must not stand in the way of a rename
+    const sent = response.request().postDataJSON() as Record<string, unknown>;
+    expect(sent).toMatchObject({ name: "Map the change" });
+    expect(sent).not.toHaveProperty("model");
+    expect(sent).not.toHaveProperty("capability");
 
     const block = await storedBlock({ key });
     expect(block).toMatchObject({
@@ -237,7 +243,6 @@ test.describe("editing a block an agent is built from", () => {
       name: "Map the change",
       description: "Lists every file it will touch",
       prompt: "List the files the task will change, and why.",
-      // Left as they were in the form, so not sent and not changed
       capability: "read-only",
       model: "opus",
     });
@@ -344,17 +349,69 @@ test.describe("editing a block an agent is built from", () => {
 
     const dialog = page.getByRole("dialog", { name: "Implement (default)" });
     await expect(dialog.getByLabel("Name")).toHaveValue("Implement");
-    await expect(dialog.getByLabel("Model", { exact: true })).toHaveValue("opus");
-    await expect(dialog.getByLabel("What it may touch")).toHaveValue("edit");
-    await expect(dialog.getByLabel("Model", { exact: true })).toBeDisabled();
-    await expect(dialog.getByLabel("What it may touch")).toBeDisabled();
+    const model = dialog.getByLabel("Model", { exact: true });
+    const touch = dialog.getByLabel("What it may touch");
+    await expect(model).toHaveValue("Opus");
+    await expect(touch).toHaveValue("Read and write");
+    await expect(dialog.getByText("Can change files. The worker commits afterwards.")).toBeVisible();
+    // Readable and reachable by Tab, not dimmed and skipped the way a disabled select is
+    for (const field of [model, touch]) {
+      await expect(field).toBeEnabled();
+      await expect(field).not.toBeEditable();
+    }
+    await expect(dialog.getByLabel("Description")).not.toBeEditable();
     await expect(dialog.getByLabel("Name")).not.toBeEditable();
     await expect(dialog.getByLabel("What it should do")).not.toBeEditable();
     await expect(dialog.getByRole("button", { name: "Save" })).toHaveCount(0);
 
     await dialog.getByRole("button", { name: "Done" }).click();
     await expect(dialog).toBeHidden();
-    expect(await storedBlock({ key: "implement" })).toMatchObject({ model: "opus", capability: "edit" });
+  });
+
+  // Agent rules run when an agent is saved, and a step edited underneath one never passed through them
+  test("letting a step write is refused while an agent using it would be left broken, and says which", async ({
+    page,
+  }) => {
+    await signIn(page);
+    const created = await page.request.post("/api/agent-blocks", {
+      headers: ADMIN_AUTH,
+      data: { kind: "step", name: "Investigate", prompt: "Read and report.", capability: "read-only" },
+    });
+    expect(created.status(), await created.text()).toBe(201);
+    const { key } = (await created.json()) as { key: string };
+    await withDb((db) =>
+      db.collection("agents").insertOne({
+        name: AGENT_NAME,
+        description: "",
+        scope: "global",
+        owner: null,
+        project: null,
+        builtIn: false,
+        composition: { analysis: [{ key }], implementation: [], verification: [{ key: "build" }], delivery: [] },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+    );
+
+    await openCatalog(page, "Steps");
+    await page.getByRole("button", { name: "Investigate", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Investigate" });
+    await expect(dialog.getByLabel("What it may touch")).toHaveValue("read-only");
+    await dialog.getByLabel("What it may touch").selectOption({ label: "Read and write" });
+
+    const refused = blockWrite(page, "PUT");
+    await dialog.getByRole("button", { name: "Save" }).click();
+    expect((await refused).status()).toBe(409);
+    await expect(dialog.getByText(`This would break ${AGENT_NAME}:`, { exact: false })).toBeVisible();
+    await expect(dialog).toBeVisible();
+    expect(await storedBlock({ key })).toMatchObject({ capability: "read-only" });
+
+    // The control: the same edit, once the agent no longer carries the step
+    await withDb((db) => db.collection("agents").deleteOne({ name: AGENT_NAME }));
+    const saved = blockWrite(page, "PUT");
+    await dialog.getByRole("button", { name: "Save" }).click();
+    expect((await saved).status()).toBe(200);
+    expect(await storedBlock({ key })).toMatchObject({ capability: "edit" });
   });
 
   test("a step the worker performs itself offers no prompt, and keeps having none", async ({ page }) => {
@@ -428,7 +485,7 @@ test.describe("editing a block an agent is built from", () => {
 // BP-755. A kind no worker implements used to be stored as sent; the run found out at that gate,
 // after every step before it had spent model time.
 test.describe("a gate kind the worker does not implement", () => {
-  test("is refused when the gate is made and when it is changed, and a kind it does implement is not", async ({
+  test("is refused when the gate is made and when it is changed, and a gate keeps the kind it was made with", async ({
     page,
   }) => {
     const refused = await page.request.post("/api/agent-blocks", {
@@ -453,11 +510,21 @@ test.describe("a gate kind the worker does not implement", () => {
     expect(changedToNothing.status()).toBe(400);
     expect(await storedBlock({ name: "Real" })).toMatchObject({ gateKind: "build" });
 
-    const changed = await page.request.put(`/api/agent-blocks/${_id}`, {
+    // A gate's kind is fixed: Protected files turned into Size would pass every rule its agents
+    // were saved under
+    const changedKind = await page.request.put(`/api/agent-blocks/${_id}`, {
       headers: ADMIN_AUTH,
       data: { gateKind: "test-run" },
     });
-    expect(changed.status(), await changed.text()).toBe(200);
-    expect(await storedBlock({ name: "Real" })).toMatchObject({ gateKind: "test-run" });
+    expect(changedKind.status()).toBe(400);
+    expect((await changedKind.json()).error).toMatch(/^A gate's kind is fixed/);
+    expect(await storedBlock({ name: "Real" })).toMatchObject({ gateKind: "build" });
+
+    const sameKind = await page.request.put(`/api/agent-blocks/${_id}`, {
+      headers: ADMIN_AUTH,
+      data: { gateKind: "build", name: "Still real" },
+    });
+    expect(sameKind.status(), await sameKind.text()).toBe(200);
+    expect(await storedBlock({ name: "Still real" })).toMatchObject({ gateKind: "build" });
   });
 });

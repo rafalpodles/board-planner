@@ -315,6 +315,28 @@ export function NewStepDialog({
   );
 }
 
+function Choice({
+  label,
+  value,
+  options,
+  readOnly,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: { value: string; label: string }[];
+  readOnly: boolean;
+  onChange: (value: string) => void;
+}) {
+  if (readOnly) {
+    const shown = options.find((o) => o.value === value)?.label ?? value;
+    return <Input label={label} value={shown} readOnly />;
+  }
+  return (
+    <Select label={label} value={value} onChange={(e) => onChange(e.target.value)} options={options} />
+  );
+}
+
 /**
  * Editing never touches the key. The key is what an agent's composition names and what the worker
  * resolves against its own source, so a rename here changes the label and nothing else.
@@ -382,7 +404,7 @@ export function EditBlockDialog({
           value={name}
           onChange={(e) => setName(e.target.value)}
           readOnly={readOnly}
-          required
+          required={!readOnly}
         />
         <Textarea
           label="Description"
@@ -401,19 +423,19 @@ export function EditBlockDialog({
               readOnly={readOnly}
               rows={4}
             />
-            <Select
+            <Choice
               label="Model"
               value={model}
-              onChange={(e) => setModel(e.target.value)}
-              disabled={readOnly}
+              onChange={setModel}
+              readOnly={readOnly}
               options={modelOptions}
             />
             <div>
-              <Select
+              <Choice
                 label="What it may touch"
                 value={capability}
-                onChange={(e) => setCapability(e.target.value)}
-                disabled={readOnly}
+                onChange={setCapability}
+                readOnly={readOnly}
                 options={CAPABILITIES.map((c) => ({ value: c.value, label: c.label }))}
               />
               <p className="mt-1 text-[12px] text-text-muted">
@@ -432,12 +454,12 @@ export function EditBlockDialog({
         {block.kind === "gate" &&
           kind?.params.map((param) =>
             param.type === "select" ? (
-              <Select
+              <Choice
                 key={param.key}
                 label={param.label}
                 value={params[param.key] ?? param.options?.[0]?.value ?? ""}
-                onChange={(e) => setParams((v) => ({ ...v, [param.key]: e.target.value }))}
-                disabled={readOnly}
+                onChange={(value) => setParams((v) => ({ ...v, [param.key]: value }))}
+                readOnly={readOnly}
                 options={param.options ?? []}
               />
             ) : (
