@@ -5,6 +5,7 @@ import { withAuth } from "@/lib/middleware";
 import { Agent } from "@/models/agent";
 import { AgentBlock } from "@/models/agentBlock";
 import { toApiBlock } from "@/lib/agent-service";
+import { capabilityRefusal, gateKindRefusal, modelRefusal } from "@/lib/agent-kinds";
 import { AGENT_BUCKETS } from "@/types";
 
 // The key is the contract with the worker and with every agent that already names it, so a rename
@@ -35,9 +36,23 @@ export const PUT = withAuth(async (request, { params, user }) => {
   }
 
   const body = await request.json();
+  const callsModel = block.kind === "step" && !block.deterministic;
+  const refusal =
+    block.kind === "gate"
+      ? body.gateKind === undefined
+        ? null
+        : gateKindRefusal(body.gateKind)
+      : callsModel
+        ? (capabilityRefusal(body.capability) ?? modelRefusal(body.model, "model"))
+        : null;
+  if (refusal) return NextResponse.json({ error: refusal }, { status: 400 });
+
   if (typeof body.name === "string" && body.name.trim()) block.name = body.name.trim();
   if (typeof body.description === "string") block.description = body.description.trim();
   if (block.kind === "step" && typeof body.prompt === "string") block.prompt = body.prompt.trim();
+  if (callsModel && body.capability !== undefined) block.capability = body.capability;
+  if (callsModel && body.model !== undefined) block.model = body.model;
+  if (block.kind === "gate" && body.gateKind !== undefined) block.gateKind = body.gateKind;
 
   if (block.kind === "gate" && body.params && typeof body.params === "object") {
     const params: Record<string, string> = {};

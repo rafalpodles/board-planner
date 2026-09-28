@@ -94,6 +94,91 @@ describe("changing a block", () => {
   });
 });
 
+describe("changing what a block runs as (BP-743, BP-755)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getAuthUser.mockResolvedValue(ADMIN);
+  });
+
+  const step = () => block({ capability: "read-only", model: "opus" });
+  const gate = () => block({ kind: "gate", gateKind: "diff-size", params: {} });
+
+  it("sets a step's model and what it may touch", async () => {
+    const doc = step();
+    blockFindById.mockResolvedValue(doc);
+
+    const response = await put({ model: "sonnet", capability: "edit" });
+
+    expect(response.status).toBe(200);
+    expect(doc).toMatchObject({ model: "sonnet", capability: "edit" });
+    expect(doc.save).toHaveBeenCalledOnce();
+  });
+
+  it("leaves both alone when the edit does not name them", async () => {
+    const doc = step();
+    blockFindById.mockResolvedValue(doc);
+
+    expect((await put({ name: "Renamed" })).status).toBe(200);
+    expect(doc).toMatchObject({ name: "Renamed", model: "opus", capability: "read-only" });
+  });
+
+  it.each([
+    ["capability", { capability: "write" }],
+    ["model", { model: "gpt-4" }],
+  ])("refuses an unknown %s and writes nothing else either", async (_f, extra) => {
+    const doc = step();
+    blockFindById.mockResolvedValue(doc);
+
+    const response = await put({ name: "Renamed", ...extra });
+
+    expect(response.status).toBe(400);
+    expect(doc.save).not.toHaveBeenCalled();
+    expect(doc).toMatchObject({ model: "opus", capability: "read-only" });
+    expect(doc).not.toHaveProperty("name");
+  });
+
+  it("gives a step the worker performs itself no model to take", async () => {
+    const doc = block({ deterministic: true, capability: "read-only", model: "" });
+    blockFindById.mockResolvedValue(doc);
+
+    expect((await put({ model: "opus", capability: "edit" })).status).toBe(200);
+    expect(doc).toMatchObject({ model: "", capability: "read-only" });
+  });
+
+  it.each([
+    ["a kind no worker implements", "no-such-gate"],
+    ["an empty kind", ""],
+    ["a kind that is not a string", 7],
+  ])("refuses a gate changed to %s", async (_name, gateKind) => {
+    const doc = gate();
+    blockFindById.mockResolvedValue(doc);
+
+    const response = await put({ gateKind });
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toMatch(/^gateKind must be one of diff-size, /);
+    expect(doc.save).not.toHaveBeenCalled();
+    expect(doc.gateKind).toBe("diff-size");
+  });
+
+  it("changes a gate to a kind the worker implements", async () => {
+    const doc = gate();
+    blockFindById.mockResolvedValue(doc);
+
+    expect((await put({ gateKind: "test-run" })).status).toBe(200);
+    expect(doc.gateKind).toBe("test-run");
+    expect(doc.save).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a gate's kind when the edit does not name one", async () => {
+    const doc = gate();
+    blockFindById.mockResolvedValue(doc);
+
+    expect((await put({ params: { maxLines: "150" } })).status).toBe(200);
+    expect(doc).toMatchObject({ gateKind: "diff-size", params: { maxLines: "150" } });
+  });
+});
+
 // Mongoose's own caster, over the real schema. It needs no connection, and it is the only thing
 // that answers "would this query have 500ed" without guessing which shapes are illegal (BP-460).
 const { agentSchema } = await vi.importActual<typeof import("@/models/agent")>("@/models/agent");

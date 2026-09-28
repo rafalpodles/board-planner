@@ -68,3 +68,54 @@ describe("POST /api/agent-blocks", () => {
     expect(create.mock.calls[0][0]).toMatchObject({ kind: "step", capability: "edit" });
   });
 });
+
+// A gate kind the worker does not implement used to be stored as sent, and the run failed only once
+// it reached that gate — after every step before it had spent model time (BP-755).
+describe("POST /api/agent-blocks — what the worker must be able to run", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getAuthUser.mockResolvedValue(ADMIN);
+    create.mockResolvedValue({ toObject: () => ({ key: "a-key" }) });
+  });
+
+  it.each([
+    ["a kind no worker implements", "no-such-gate"],
+    ["a kind's display name rather than its key", "Size"],
+    ["an empty kind", ""],
+    ["no kind at all", undefined],
+    ["a kind that is not a string", 7],
+  ])("refuses a gate with %s", async (_name, gateKind) => {
+    const response = await post({ kind: "gate", name: "Mine", gateKind });
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toMatch(/^gateKind must be one of diff-size, /);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("stores a gate whose kind the worker implements", async () => {
+    const response = await post({ kind: "gate", name: "Mine", gateKind: "review" });
+
+    expect(response.status).toBe(201);
+    expect(create.mock.calls[0][0]).toMatchObject({ kind: "gate", gateKind: "review" });
+  });
+
+  it.each([
+    ["capability", { capability: "write" }, /^capability must be one of read-only, edit$/],
+    ["model", { model: "gpt-4" }, /^model must be one of opus, sonnet$/],
+    ["fallbackModel", { fallbackModel: "haiku" }, /^fallbackModel must be one of opus, sonnet$/],
+  ])("refuses a step with an unknown %s rather than storing or coercing it", async (_f, extra, error) => {
+    const response = await post({ ...STEP, ...extra });
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toMatch(error);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("stores a step's model and fallback, and leaves an unset model unset", async () => {
+    await post({ ...STEP, model: "sonnet", fallbackModel: "opus" });
+    await post({ kind: "step", name: "bare" });
+
+    expect(create.mock.calls[0][0]).toMatchObject({ model: "sonnet", fallbackModel: "opus" });
+    expect(create.mock.calls[1][0]).toMatchObject({ capability: "read-only", model: "", fallbackModel: "" });
+  });
+});
