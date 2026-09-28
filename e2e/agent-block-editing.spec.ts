@@ -424,3 +424,40 @@ test.describe("editing a block an agent is built from", () => {
     expect((await storedAgent(AGENT_NAME))?.composition).toEqual(composition);
   });
 });
+
+// BP-755. A kind no worker implements used to be stored as sent; the run found out at that gate,
+// after every step before it had spent model time.
+test.describe("a gate kind the worker does not implement", () => {
+  test("is refused when the gate is made and when it is changed, and a kind it does implement is not", async ({
+    page,
+  }) => {
+    const refused = await page.request.post("/api/agent-blocks", {
+      headers: ADMIN_AUTH,
+      data: { kind: "gate", name: "Imaginary", gateKind: "lint" },
+    });
+    expect(refused.status()).toBe(400);
+    expect((await refused.json()).error).toMatch(/^gateKind must be one of diff-size, /);
+    expect(await storedBlock({ name: "Imaginary" })).toBeNull();
+
+    const made = await page.request.post("/api/agent-blocks", {
+      headers: ADMIN_AUTH,
+      data: { kind: "gate", name: "Real", gateKind: "build" },
+    });
+    expect(made.status(), await made.text()).toBe(201);
+    const { _id } = (await made.json()) as { _id: string };
+
+    const changedToNothing = await page.request.put(`/api/agent-blocks/${_id}`, {
+      headers: ADMIN_AUTH,
+      data: { gateKind: "lint", name: "Renamed" },
+    });
+    expect(changedToNothing.status()).toBe(400);
+    expect(await storedBlock({ name: "Real" })).toMatchObject({ gateKind: "build" });
+
+    const changed = await page.request.put(`/api/agent-blocks/${_id}`, {
+      headers: ADMIN_AUTH,
+      data: { gateKind: "test-run" },
+    });
+    expect(changed.status(), await changed.text()).toBe(200);
+    expect(await storedBlock({ name: "Real" })).toMatchObject({ gateKind: "test-run" });
+  });
+});
