@@ -1430,7 +1430,16 @@ export type ActivityAction =
   // than the stored relation type, because one write lands on both ends and each end reads it
   // from its own side (BP-658).
   | "link_added"
-  | "link_removed";
+  | "link_removed"
+  // `field` holds the criterion's id, so an edit is folded per criterion rather than per list
+  | CriterionAction;
+
+export type CriterionAction =
+  | "criterion_added"
+  | "criterion_removed"
+  | "criterion_edited"
+  | "criterion_checked"
+  | "criterion_unchecked";
 
 /**
  * A relation as the task whose timeline you are reading experiences it. The stored types are

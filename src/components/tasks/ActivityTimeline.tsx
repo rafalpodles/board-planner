@@ -43,6 +43,16 @@ function actionIcon(action: string) {
       return "↗";
     case "link_removed":
       return "×";
+    case "criterion_added":
+      return "+";
+    case "criterion_removed":
+      return "×";
+    case "criterion_edited":
+      return "✎";
+    case "criterion_checked":
+      return "✓";
+    case "criterion_unchecked":
+      return "↔";
     default:
       return "•";
   }
@@ -57,7 +67,10 @@ function actionColor(action: string) {
     case "comment_deleted":
     case "pr_unlinked":
     case "link_removed":
+    case "criterion_removed":
       return "text-danger";
+    case "criterion_checked":
+      return "text-success";
     default:
       return "text-text-muted";
   }
@@ -115,6 +128,9 @@ function describeAction(log: ApiActivityLog): string {
         const to = log.newValue || "unassigned";
         return `${userName} changed assignee from ${from} to ${to}`;
       }
+      if (log.field === "agent" && !log.customField) {
+        return `${userName} changed agent from ${log.oldValue || "no agent"} to ${log.newValue || "no agent"}`;
+      }
       // createNextRecurrence writes a sentence into newValue rather than a before/after pair,
       // so reading it as one would claim the recurrence config had been edited
       if (log.field === "recurrence" && !log.oldValue && log.newValue) {
@@ -160,6 +176,16 @@ function describeAction(log: ApiActivityLog): string {
         self: "this task",
         other: log.oldValue,
       });
+    case "criterion_added":
+      return `${userName} added criterion “${formatValue("", log.newValue)}”`;
+    case "criterion_removed":
+      return `${userName} removed criterion “${formatValue("", log.oldValue)}”`;
+    case "criterion_edited":
+      return `${userName} changed criterion “${formatValue("", log.oldValue)}” to “${formatValue("", log.newValue)}”`;
+    case "criterion_checked":
+      return `${userName} checked “${formatValue("", log.newValue)}”`;
+    case "criterion_unchecked":
+      return `${userName} unchecked “${formatValue("", log.newValue)}”`;
     default:
       return `${userName} performed an action`;
   }

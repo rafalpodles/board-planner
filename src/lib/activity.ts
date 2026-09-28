@@ -98,12 +98,14 @@ export interface EditSession<T extends ActivityHeader = ActivityHeader> {
 }
 
 function typedEdit(row: ActivityHeader) {
+  if (row.action === "criterion_edited") return true;
   if (row.action !== "updated") return false;
   return row.customField ? TYPED_PROJECT_FIELDS.has(row.fieldType ?? "") : TYPED_FIELDS.has(row.field);
 }
 
 function sameEdit(a: ActivityHeader, b: ActivityHeader) {
   return (
+    a.action === b.action &&
     a.field === b.field &&
     !!a.customField === !!b.customField &&
     String(a.user) === String(b.user) &&

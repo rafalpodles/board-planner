@@ -32,7 +32,7 @@ import {
 } from "@/lib/in-app-notifications";
 import { notifyBoardFeed } from "@/lib/board-feed";
 import { pillToneForRole } from "@/lib/email-template";
-import { parseChecklistString } from "@/lib/checklist";
+import { criterionChanges, parseChecklistString } from "@/lib/checklist";
 import { undoneChecklist } from "@/lib/task-duplicate";
 import {
   COMMENT_BODY_MAX_LENGTH,
@@ -191,6 +191,20 @@ function refId(ref: unknown): string {
   return ref && typeof ref === "object" && "_id" in ref
     ? String((ref as { _id: unknown })._id)
     : String(ref ?? "");
+}
+
+// History stores the agent's name. An id is the fallback, which the activity route resolves again.
+async function storedAgentName(ref: unknown): Promise<string> {
+  const id = refId(ref);
+  if (!id) return "";
+  const { Agent } = await import("@/models/agent");
+  const found = await Agent.findById(id, "name").lean<{ name?: string }>();
+  return found?.name || id;
+}
+
+function populatedAgentName(ref: unknown): string {
+  const name = ref && typeof ref === "object" ? (ref as { name?: unknown }).name : undefined;
+  return typeof name === "string" && name ? name : refId(ref);
 }
 
 export type TaskServiceResult<T = ITask> =
@@ -1256,19 +1270,39 @@ export async function updateTask(
 
   // Log field changes (parallel)
   const activities: Promise<void>[] = [];
-  // "agent" is on this list because it is the field that decides what runs on somebody's machine.
-  // Without it there is no answer to "who pointed the machine at that prompt" (BP-345).
-  const trackFields = ["title", "description", "priority", "category", "status", "agent"];
+  const trackFields = ["title", "description", "priority", "category", "status"];
   for (const field of trackFields) {
-    // Through refId, not String(): `oldTask` is lean and holds a raw ObjectId while `task` comes
-    // back with `agent` populated, and String() on a populated document is its inspect output —
-    // so a plain comparison would log an agent change on every update that changed nothing.
     const oldVal = refId(oldTask[field as keyof typeof oldTask]);
     const newVal = refId(task[field as keyof typeof task]);
     if (oldVal !== newVal) {
       const action = field === "status" ? "status_changed" as const : "updated" as const;
       activities.push(logActivity(taskId, actorId, action, field, oldVal, newVal));
     }
+  }
+
+  // The agent decides what runs on somebody's machine, so who pointed it where is recorded (BP-345).
+  // Through refId: `oldTask` is lean and holds a raw ObjectId while `task` comes back populated.
+  if (refId(oldTask.agent) !== refId(task.agent)) {
+    activities.push(
+      storedAgentName(oldTask.agent).then((before) =>
+        logActivity(taskId, actorId, "updated", "agent", before, populatedAgentName(task.agent))
+      )
+    );
+  }
+
+  if (updates.checklist !== undefined) {
+    activities.push(
+      logActivities(
+        criterionChanges(oldTask.checklist ?? [], task.checklist ?? []).map((change) => ({
+          taskId,
+          userId: actorId,
+          action: change.action,
+          field: change.id,
+          oldValue: change.before,
+          newValue: change.after,
+        }))
+      )
+    );
   }
 
   // Since CP-213 the fields a project defines are most of what people actually edit, so a

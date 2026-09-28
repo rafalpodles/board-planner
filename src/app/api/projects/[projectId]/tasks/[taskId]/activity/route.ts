@@ -3,6 +3,7 @@ import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { ActivityLog } from "@/models/activityLog";
 import { Task } from "@/models/task";
+import { Agent } from "@/models/agent";
 import { editSessions, presentSessions, type ActivityHeader } from "@/lib/activity";
 import type { IActivityLog } from "@/types";
 
@@ -34,7 +35,24 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   const rows = await ActivityLog.find({ _id: { $in: [...ids] } })
     .populate("user", "username fullName")
     .lean<IActivityLog[]>();
-  const logs = presentSessions(sessions, rows);
+  const logs = await withAgentNames(presentSessions(sessions, rows));
 
   return NextResponse.json(logs);
 });
+
+const OBJECT_ID = /^[a-f\d]{24}$/i;
+
+// Agent rows written before BP-730 hold ids, not names
+async function withAgentNames(logs: IActivityLog[]): Promise<IActivityLog[]> {
+  const agentRow = (log: IActivityLog) => log.action === "updated" && log.field === "agent" && !log.customField;
+  const ids = new Set(
+    logs.filter(agentRow).flatMap((log) => [log.oldValue, log.newValue].filter((v) => OBJECT_ID.test(v)))
+  );
+  if (ids.size === 0) return logs;
+  const agents = await Agent.find({ _id: { $in: [...ids] } }, "name").lean<{ _id: unknown; name: string }[]>();
+  const names = new Map(agents.map((agent) => [String(agent._id), agent.name]));
+  const named = (value: string) => (OBJECT_ID.test(value) ? names.get(value) ?? "a deleted agent" : value);
+  return logs.map((log) =>
+    agentRow(log) ? { ...log, oldValue: named(log.oldValue), newValue: named(log.newValue) } : log
+  );
+}

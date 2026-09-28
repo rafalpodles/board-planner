@@ -50,6 +50,27 @@ describe("ActivityTimeline", () => {
     );
   });
 
+  it.each([
+    [{ field: "agent", oldValue: "Default", newValue: "Merges its own work" }, "changed agent from Default to Merges its own work"],
+    [{ field: "agent", oldValue: "", newValue: "Default" }, "changed agent from no agent to Default"],
+  ])("names the agents on an agent change", async (row, sentence) => {
+    api.get.mockResolvedValue([{ ...log, action: "updated", ...row }]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    await waitFor(() => expect(screen.getByText(new RegExp(sentence))).toBeTruthy());
+  });
+
+  it.each([
+    ["criterion_added", "", "Loads fast", "added criterion “Loads fast”"],
+    ["criterion_removed", "Loads fast", "", "removed criterion “Loads fast”"],
+    ["criterion_edited", "Loads", "Loads fast", "changed criterion “Loads” to “Loads fast”"],
+    ["criterion_checked", "", "Loads fast", "checked “Loads fast”"],
+    ["criterion_unchecked", "", "Loads fast", "unchecked “Loads fast”"],
+  ])("says what %s did to which criterion", async (action, oldValue, newValue, sentence) => {
+    api.get.mockResolvedValue([{ ...log, action, field: "c1", oldValue, newValue }]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    await waitFor(() => expect(screen.getByText(`Owner Name ${sentence}`)).toBeTruthy());
+  });
+
   it("offers the whole of what a description said before, rather than a clipped sentence", async () => {
     const before = "A long first paragraph that is well over sixty characters in length.\nAnd a second line.";
     api.get.mockResolvedValue([
