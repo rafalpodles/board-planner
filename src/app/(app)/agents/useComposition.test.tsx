@@ -4,6 +4,7 @@ import { useLayoutEffect } from "react";
 import { act, renderHook } from "@testing-library/react";
 import { sameComposition, useComposition } from "./useComposition";
 import type { AgentComposition } from "@/types";
+import type { DragEndEvent } from "@dnd-kit/core";
 
 const empty: AgentComposition = { analysis: [], implementation: [], verification: [], delivery: [] };
 
@@ -96,5 +97,59 @@ describe("useComposition", () => {
   it("reads an agent stored before entries existed as the same composition", () => {
     const legacy = { ...empty, implementation: ["implement"] } as unknown as AgentComposition;
     expect(sameComposition(stored, legacy)).toBe(true);
+  });
+});
+
+describe("where a dropped block goes in a bucket that holds some", () => {
+  const delivery: AgentComposition = {
+    ...empty,
+    implementation: [{ key: "implement" }],
+    delivery: [{ key: "push" }, { key: "pull-request" }],
+  };
+
+  function drop(activeId: (uids: Record<string, string>) => string, overKey: string, after: boolean) {
+    const { result } = renderHook(() => useComposition(delivery, () => undefined));
+    const uids = Object.fromEntries(
+      Object.values(result.current.entries).flat().map((e) => [e.key, e.uid])
+    );
+    const over = uids[overKey];
+    act(() =>
+      result.current.onDragEnd({
+        active: { id: activeId(uids) },
+        over: { id: over },
+        collisions: [{ id: over, data: { after } }],
+      } as unknown as DragEndEvent)
+    );
+    return result.current.composition;
+  }
+
+  it("puts a palette block after the card when the pointer was below its middle", () => {
+    expect(drop(() => "new:merge", "push", true).delivery.map((e) => e.key)).toEqual([
+      "push",
+      "merge",
+      "pull-request",
+    ]);
+  });
+
+  it("puts it before the card when the pointer was above its middle", () => {
+    expect(drop(() => "new:merge", "pull-request", false).delivery.map((e) => e.key)).toEqual([
+      "push",
+      "merge",
+      "pull-request",
+    ]);
+  });
+
+  it("does the same for a card coming from another bucket", () => {
+    const moved = drop((uids) => uids.implement, "push", true);
+    expect(moved.delivery.map((e) => e.key)).toEqual(["push", "implement", "pull-request"]);
+    expect(moved.implementation).toEqual([]);
+  });
+
+  // Within its own bucket arrayMove already lands a card where the preview showed it
+  it("leaves a move inside one bucket to the sortable order", () => {
+    expect(drop((uids) => uids["pull-request"], "push", true).delivery.map((e) => e.key)).toEqual([
+      "pull-request",
+      "push",
+    ]);
   });
 });

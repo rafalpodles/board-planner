@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { ClientRect, CollisionDetection, DroppableContainer } from "@dnd-kit/core";
-import { collisionDetection } from "./drag";
+import { collisionDetection, landsAfter } from "./drag";
 
 type Args = Parameters<CollisionDetection>[0];
 
@@ -31,7 +31,7 @@ const layout: [DroppableContainer, ClientRect][] = [
   [container("bucket:analysis"), rect(600, 72)],
 ];
 
-function detect(pointer: { x: number; y: number } | null, collisionRect = rect(0, 10)) {
+function collide(pointer: { x: number; y: number } | null, collisionRect = rect(0, 10)) {
   const args: Args = {
     active: { id: "dragged" } as Args["active"],
     collisionRect,
@@ -39,8 +39,10 @@ function detect(pointer: { x: number; y: number } | null, collisionRect = rect(0
     droppableContainers: layout.map(([c]) => c),
     pointerCoordinates: pointer,
   };
-  return collisionDetection(args).map((hit) => hit.id);
+  return collisionDetection(args);
 }
+
+const detect = (...args: Parameters<typeof collide>) => collide(...args).map((hit) => hit.id);
 
 describe("where a drag lands", () => {
   it("is the card under the pointer", () => {
@@ -75,5 +77,26 @@ describe("where a drag lands", () => {
 
   it("is nothing when the pointer and the dragged rectangle are over nothing", () => {
     expect(detect({ x: 300, y: 1_000 }, rect(1_000, 10))).toEqual([]);
+  });
+});
+
+// A palette block has no position of its own to move from, so which side of the card it lands on
+// is the pointer's to say
+describe("which side of the card a drop lands", () => {
+  it.each([
+    ["the upper half of a card", 180, "pull-request", false],
+    ["the lower half of a card", 205, "pull-request", true],
+    ["the upper half of a gap, nearest the card above", 217, "pull-request", true],
+    ["the lower half of a gap, nearest the card below", 222, "merge", false],
+    ["the padding above the first card", 103, "push", false],
+  ])("is decided by the pointer in %s", (_where, y, card, after) => {
+    const [hit] = collide({ x: 300, y });
+
+    expect(hit.id).toBe(card);
+    expect(landsAfter(hit)).toBe(after);
+  });
+
+  it("is not claimed when there is no pointer", () => {
+    expect(collide(null, rect(365, 30)).some(landsAfter)).toBe(false);
   });
 });
