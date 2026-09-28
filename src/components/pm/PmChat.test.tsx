@@ -289,6 +289,8 @@ describe("loading older messages", () => {
     const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
     render(<PmChat projectId="p1" preloadedProject={PROJECT as never} />);
     const button = await screen.findByRole("button", { name: "Load older messages" });
+    // The first page's scroll is a passive effect, which can still be pending when the button shows
+    await waitFor(() => expect(scroll).toHaveBeenCalled());
     const before = scroll.mock.calls.length;
 
     await act(async () => button.click());

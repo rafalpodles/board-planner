@@ -83,12 +83,7 @@ test.beforeEach(async () => {
 
 async function openAgentPicker(page: Page) {
   await signIn(page);
-  // The list this row is built from, not the rendered text: the row renders its read-only
-  // branch while `agents` is still the empty array it mounts with, so waiting on what is on
-  // screen means asserting the pre-fetch state.
-  const listed = page.waitForResponse((r) => r.url().includes("/api/agents") && r.ok());
   await page.goto(`/projects/${PROJECT_KEY}/tasks/${DECOY_TASK_NUMBER}`);
-  await listed;
   await expect(page.getByText(DECOY_TASK_TITLE).first()).toBeVisible();
 
   // `Combobox` renders `role="combobox"` unconditionally; the read-only branch is a plain div
@@ -101,13 +96,14 @@ async function openAgentPicker(page: Page) {
 
 test("the picker offers this board's agent and withholds another board's", async ({ page }) => {
   const options = await openAgentPicker(page);
-  const names = (await options.allTextContents()).join("|");
 
   // The control: withholding everything would satisfy the second line just as well. Both agents
   // reach this reader — an admin's project list is every project that exists — so the absence
-  // below is the client filter's doing and not the server's.
-  expect(names).toContain(OURS);
-  expect(names).not.toContain(THEIRS);
+  // below is the client filter's doing and not the server's. The list opens as "No agent" alone
+  // until `/api/agents` and `/api/agent-blocks` have both answered, so the absence is only read
+  // once the fetched list is on screen.
+  await expect(options.filter({ hasText: OURS })).toHaveCount(1);
+  await expect(options.filter({ hasText: THEIRS })).toHaveCount(0);
 });
 
 test("a task already carrying another board's agent still names it", async ({ page }) => {
@@ -120,8 +116,7 @@ test("a task already carrying another board's agent still names it", async ({ pa
     );
 
   // Hiding the current value would render "No agent" over a task that is carrying one — the lie
-  // the personal-agent rule beside this one is careful to avoid. Waiting on `/api/agents` inside
-  // the helper is what stops this asserting the mount state, where `agents` is still `[]`.
+  // the personal-agent rule beside this one is careful to avoid.
   const options = await openAgentPicker(page);
-  expect((await options.allTextContents()).join("|")).toContain(THEIRS);
+  await expect(options.filter({ hasText: THEIRS })).toHaveCount(1);
 });

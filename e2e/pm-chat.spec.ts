@@ -283,6 +283,17 @@ test.describe("a turn whose server went away", () => {
     });
   }
 
+  /** Until the newest stored assistant message reads `content`; "" is the stub a running turn writes. */
+  async function storedReplyReads(content: string, timeout?: number) {
+    await withDb(async (db) => {
+      const newest = () =>
+        db
+          .collection("pmmessages")
+          .findOne({ project: PROJECT_ID, role: "assistant" }, { sort: { _id: -1 } });
+      await expect.poll(async () => (await newest())?.content ?? null, { timeout }).toBe(content);
+    });
+  }
+
   test("says what happened instead of sitting there typing for ever", async ({ page }) => {
     // BP-484. The bubble rendered "…", which reads as still typing, under a red line saying the
     // connection was lost — and it stayed that way across every reload, because it is a real
@@ -310,19 +321,17 @@ test.describe("a turn whose server went away", () => {
     await say(page, "Take your time.", { delayMs: 20_000, say: "Finished in the end." });
     await expect(page.getByText("PM is thinking…")).toBeVisible();
 
-    // Reloaded in a loop rather than once: "PM is thinking…" is the composer's own optimism, set
-    // before the request leaves the browser, so a single reload can beat the stub into existence.
-    await expect(async () => {
-      await page.reload();
-      await expect(reply(page)).toContainText("…", { timeout: 2000 });
-    }).toPass({ timeout: 15_000 });
+    // "PM is thinking…" is set before the request leaves the browser, and a reload that beats the
+    // route to the body cancels the send: it reads an empty body, answers 400, and no turn runs.
+    await storedReplyReads("");
+    await page.reload();
+    await expect(reply(page)).toContainText("…");
     await expect(page.getByText(NOTICE)).toHaveCount(0);
 
     // And the answer it was still writing lands in that same bubble
-    await expect(async () => {
-      await page.reload();
-      await expect(reply(page)).toContainText("Finished in the end.", { timeout: 3000 });
-    }).toPass({ timeout: 45_000 });
+    await storedReplyReads("Finished in the end.", 45_000);
+    await page.reload();
+    await expect(reply(page)).toContainText("Finished in the end.");
     await expect(page.getByText(NOTICE)).toHaveCount(0);
   });
 });
