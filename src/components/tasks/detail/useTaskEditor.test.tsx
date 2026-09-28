@@ -381,6 +381,24 @@ describe("a criterion added on this screen", () => {
     expect(api.put.mock.calls.map((call) => (call[1] as { title: string }).title)).toEqual(["E1", "E3"]);
   });
 
+  it("sends a closing flush after the save that mints its criterion's id, carrying that id", async () => {
+    let answer!: (task: unknown) => void;
+    api.put.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+    const { unmount } = render(<Criteria task={baseTask} />);
+
+    await act(async () => edit((items) => [...items, { clientKey: "k1", text: "Loads", done: false }]));
+    await settle();
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+    await act(async () => edit((items) => items.map((c) => ({ ...c, text: "Loads fast" }))));
+    await act(async () => unmount());
+    expect(api.put).toHaveBeenCalledTimes(1);
+
+    await act(async () => answer({ checklist: [{ _id: "c1", text: "Loads", done: false }] }));
+
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2));
+    expect(lastChecklist()).toEqual([expect.objectContaining({ _id: "c1", text: "Loads fast" })]);
+  });
+
   it("stops waiting for a save that never answers", async () => {
     api.put.mockImplementationOnce(() => new Promise(() => {}));
     render(<Criteria task={baseTask} />);
