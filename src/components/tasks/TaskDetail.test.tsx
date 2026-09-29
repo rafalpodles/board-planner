@@ -1352,19 +1352,24 @@ describe("TaskDetail, the agent list the rail offers from", () => {
     expect(rail().getByTestId("agent-unread").textContent).toBe("Board default");
   });
 
-  it("says the list could not be loaded, and a retry that answers brings the picker back", async () => {
-    let failing = true;
-    serve(() => (failing ? Promise.reject(new Error("down")) : Promise.resolve([BOARD_AGENT])));
+  it("says the list could not be loaded, keeps saying so while a retry runs, and an answer brings the picker back", async () => {
+    let answer: () => Promise<unknown> = () => Promise.reject(new Error("down"));
+    serve(() => answer());
     renderDetail();
     await loaded();
 
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(rail().queryByText(/Not yours to choose/)).toBeNull();
     const alert = await waitFor(() => rail().getByTestId("agents-unread"));
+    expect(rail().queryByText(/Not yours to choose/)).toBeNull();
 
-    failing = false;
+    let release!: () => void;
+    answer = () => new Promise((resolve) => (release = () => resolve([BOARD_AGENT])));
     await act(async () => within(alert).getByRole("button", { name: "Retry" }).click());
 
+    const retrying = within(rail().getByTestId("agents-unread")).getByRole("button");
+    expect(retrying.textContent).toBe("Retrying…");
+    expect((retrying as HTMLButtonElement).disabled).toBe(true);
+
+    await act(async () => release());
     await waitFor(() => expect(rail().getByRole("combobox", { name: "Agent" }).textContent).toContain("Board default"));
     expect(rail().queryByTestId("agents-unread")).toBeNull();
   });
