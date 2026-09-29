@@ -482,7 +482,7 @@ export function IntegrationsSection({
             <p className="mt-1.5 text-xs text-text-muted">
               {providerLabel
                 ? `Recognised as ${providerLabel}, so its connection is listed below.`
-                : "Not a host this instance recognises. A self-hosted GitLab is recognised once its GitLab host below matches, and a GitHub Enterprise host once the operator has pointed this instance at it; anything else links no pull requests."}
+                : "Not a host this instance recognises. A self-hosted GitLab is recognised once its GitLab host below is saved, and a GitHub Enterprise host once the operator has pointed this instance at it; anything else links no pull requests."}
             </p>
           )}
         </SettingRow>
