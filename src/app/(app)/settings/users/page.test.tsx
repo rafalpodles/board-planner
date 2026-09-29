@@ -342,3 +342,41 @@ describe("adding a new account to a board", () => {
     expect(screen.getByRole("dialog", { name: "Add Grace Hopper to a board" })).toBeTruthy();
   });
 });
+
+describe("the users page, when a delete is refused", () => {
+  const REFUSAL =
+    "ada is the only owner of Orbit (ORB). Make someone else an owner there before deleting this account.";
+
+  async function refuseDelete() {
+    api.del.mockRejectedValue(Object.assign(new Error(REFUSAL), { status: 409 }));
+    render(<UsersPage />);
+    await screen.findByText("Ada");
+    act(() => screen.getByText("Ada").click());
+    await screen.findByRole("dialog", { name: /Edit Ada/ });
+    act(() => screen.getByRole("button", { name: "Delete" }).click());
+    await act(async () => {
+      screen.getByRole("button", { name: "Delete User" }).click();
+    });
+  }
+
+  it("keeps the dialog open and shows the server's reason in it", async () => {
+    await refuseDelete();
+
+    const dialog = screen.getByRole("dialog", { name: "Delete User" });
+    expect(dialog.querySelector('[role="alert"]')?.textContent).toBe(REFUSAL);
+    expect(toast).not.toHaveBeenCalledWith("User deleted", "success");
+  });
+
+  it("does not carry the reason into the next time the dialog opens", async () => {
+    await refuseDelete();
+    act(() => screen.getByRole("button", { name: "Cancel" }).click());
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Delete User" })).toBeNull());
+
+    act(() => screen.getByText("Ada").click());
+    await screen.findByRole("dialog", { name: /Edit Ada/ });
+    act(() => screen.getByRole("button", { name: "Delete" }).click());
+
+    const dialog = await screen.findByRole("dialog", { name: "Delete User" });
+    expect(dialog.querySelector('[role="alert"]')).toBeNull();
+  });
+});

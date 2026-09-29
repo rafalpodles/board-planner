@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { Types, isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withProjectOwner } from "@/lib/middleware";
-import { audienceFilterFrom, recipientsWithAccess } from "@/lib/grants";
+import { audienceFilterFrom, ownerCount, recipientsWithAccess } from "@/lib/grants";
 import { User } from "@/models/user";
 import { Grant } from "@/models/grant";
 import { Notification } from "@/models/notification";
@@ -25,10 +25,6 @@ function auditAccess(
     action,
     `${username}: ${from ?? "no access"} → ${to ?? "no access"}`
   );
-}
-
-async function ownerCount(projectId: string): Promise<number> {
-  return Grant.countDocuments({ objectType: "project", object: projectId, relation: "owner" });
 }
 
 export const GET = withProjectOwner(async (_request, { params }) => {

@@ -17,6 +17,7 @@ interface ConfirmDialogProps {
    */
   loadingLabel?: string;
   loading?: boolean;
+  error?: string;
 }
 
 export function ConfirmDialog({
@@ -28,10 +29,16 @@ export function ConfirmDialog({
   confirmLabel = "Delete",
   loadingLabel = "Deleting...",
   loading = false,
+  error,
 }: ConfirmDialogProps) {
   return (
     <Modal open={open} onClose={onClose} closeDisabled={loading} title={title}>
       <p className="text-sm text-text-muted mb-6">{message}</p>
+      {error && (
+        <p role="alert" className="text-sm text-danger -mt-3 mb-6">
+          {error}
+        </p>
+      )}
       <div className="flex justify-end gap-3">
         <Button variant="secondary" size="sm" onClick={onClose} disabled={loading}>
           Cancel

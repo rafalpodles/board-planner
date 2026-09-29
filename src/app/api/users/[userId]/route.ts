@@ -11,6 +11,8 @@ import { cancelEmailChange } from "@/lib/email-change";
 import { clearAccountAttempts } from "@/lib/rate-limit";
 import { duplicateKeyField } from "@/lib/mongo-errors";
 import { withAdmin } from "@/lib/middleware";
+import { boardsOnlyOwnedBy } from "@/lib/grants";
+import { Grant } from "@/models/grant";
 import { revokeUserCredentials, revokeUserSessions } from "@/lib/session";
 import { User } from "@/models/user";
 
@@ -298,6 +300,18 @@ export const DELETE = withAdmin(async (_request, { params, user: admin }) => {
     }
   }
 
+  const soleOwned = await boardsOnlyOwnedBy(String(user._id));
+  if (soleOwned.length > 0) {
+    const names = soleOwned.map((b) => `${b.name} (${b.key})`).join(", ");
+    return NextResponse.json(
+      {
+        error: `${user.username} is the only owner of ${names}. Make someone else an owner there before deleting this account.`,
+        boards: soleOwned,
+      },
+      { status: 409 }
+    );
+  }
+
   // The delete's own answer, not a discarded one: two administrators deleting the same account
   // otherwise both hear that they did it, and the checks above are read-then-write.
   const deleted = await User.findByIdAndDelete(user._id);
@@ -317,6 +331,7 @@ export const DELETE = withAdmin(async (_request, { params, user: admin }) => {
     detail: user.role === "admin" ? "an administrator" : "a member",
   });
 
+  await Grant.deleteMany({ subject: user._id });
   await revokeUserSessions(user._id);
 
   return NextResponse.json({ message: "User deleted" });

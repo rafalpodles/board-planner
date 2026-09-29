@@ -127,9 +127,20 @@ vi.mock("@/models/grant", () => ({
 vi.mock("@/models/user", () => ({
   User: { find: (...args: unknown[]) => userFind(...args) },
 }));
+const projectFind = vi.fn();
+vi.mock("@/models/project", () => ({
+  Project: { find: (...args: unknown[]) => projectFind(...args) },
+}));
 
-const { check, accessibleProjectIds, administeredProjectIds, recipientsWithAccess, canBeAssigned } =
-  await import("./grants");
+const {
+  check,
+  accessibleProjectIds,
+  administeredProjectIds,
+  recipientsWithAccess,
+  canBeAssigned,
+  ownerCounts,
+  boardsOnlyOwnedBy,
+} = await import("./grants");
 
 function lean(value: unknown) {
   return { select: () => ({ lean: () => Promise.resolve(value) }) };
@@ -402,5 +413,84 @@ describe("recipientsWithAccess", () => {
     grant(MEMBER);
     grant(REMOVED);
     expect(await recipientsWithAccess([REMOVED, MEMBER], P)).toEqual([REMOVED, MEMBER]);
+  });
+});
+
+describe("owner counting", () => {
+  const ALICE = "507f1f77bcf86cd799439011";
+  const BOB = "507f1f77bcf86cd799439012";
+  const GONE = "507f1f77bcf86cd799439013";
+  let ownerRows: { subject: string; object: string }[];
+  let accounts: string[];
+
+  beforeEach(() => {
+    find.mockReset();
+    userFind.mockReset();
+    projectFind.mockReset();
+    ownerRows = [];
+    accounts = [ALICE, BOB];
+    find.mockImplementation((filter: { subject?: string; object?: { $in: string[] } }) =>
+      lean(
+        filter.subject
+          ? ownerRows.filter((g) => g.subject === filter.subject).map((g) => ({ object: g.object }))
+          : ownerRows.filter((g) => filter.object!.$in.includes(g.object))
+      )
+    );
+    userFind.mockImplementation((filter: { _id: { $in: string[] } }) =>
+      lean(accounts.filter((id) => filter._id.$in.includes(id)).map((id) => ({ _id: id })))
+    );
+    projectFind.mockImplementation((filter: { _id: { $in: string[] } }) => ({
+      select: () => ({
+        sort: () => ({
+          lean: () =>
+            Promise.resolve(filter._id.$in.map((id) => ({ _id: id, name: `Board ${id}`, key: "K" }))),
+        }),
+      }),
+    }));
+  });
+
+  it("counts every owner a board has, and zero for a board with none", async () => {
+    ownerRows = [
+      { subject: ALICE, object: P },
+      { subject: BOB, object: P },
+    ];
+    const counts = await ownerCounts([P, OTHER]);
+    expect(counts.get(P)).toBe(2);
+    expect(counts.get(OTHER)).toBe(0);
+    expect(find).toHaveBeenCalledWith(expect.objectContaining({ relation: "owner", objectType: "project" }));
+  });
+
+  it("does not count an owner row whose account is gone", async () => {
+    ownerRows = [
+      { subject: ALICE, object: P },
+      { subject: GONE, object: P },
+    ];
+    expect((await ownerCounts([P])).get(P)).toBe(1);
+  });
+
+  it("names the boards the person owns alone, and not the ones they share", async () => {
+    ownerRows = [
+      { subject: ALICE, object: P },
+      { subject: ALICE, object: OTHER },
+      { subject: BOB, object: OTHER },
+    ];
+    expect(await boardsOnlyOwnedBy(ALICE)).toEqual([{ _id: P, name: `Board ${P}`, key: "K" }]);
+  });
+
+  it("treats a co-owner who was deleted as no co-owner at all", async () => {
+    ownerRows = [
+      { subject: ALICE, object: P },
+      { subject: GONE, object: P },
+    ];
+    expect((await boardsOnlyOwnedBy(ALICE)).map((b) => b._id)).toEqual([P]);
+  });
+
+  it("names nothing, and loads no board, for somebody who shares every board they own", async () => {
+    ownerRows = [
+      { subject: ALICE, object: P },
+      { subject: BOB, object: P },
+    ];
+    expect(await boardsOnlyOwnedBy(ALICE)).toEqual([]);
+    expect(projectFind).not.toHaveBeenCalled();
   });
 });

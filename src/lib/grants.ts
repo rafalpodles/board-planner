@@ -1,6 +1,7 @@
 import { IUser, GrantRelation } from "@/types";
 import { connectDB } from "./db";
 import { Grant } from "@/models/grant";
+import { Project } from "@/models/project";
 import { User } from "@/models/user";
 
 export type Need = "access" | "admin";
@@ -201,4 +202,56 @@ export function audienceFilterFrom(subjects: unknown[]): Record<string, unknown>
  */
 export async function canBeAssigned(userId: string, projectId: string): Promise<boolean> {
   return (await recipientsWithAccess([String(userId)], projectId)).length > 0;
+}
+
+export async function ownerCounts(projectIds: string[]): Promise<Map<string, number>> {
+  const counts = new Map(projectIds.map((id) => [String(id), 0]));
+  if (projectIds.length === 0) return counts;
+
+  await connectDB();
+  const owners = await Grant.find({
+    objectType: "project",
+    relation: "owner",
+    object: { $in: projectIds },
+  })
+    .select("subject object")
+    .lean();
+  const holders = await User.find({ _id: { $in: owners.map((g) => g.subject) } })
+    .select("_id")
+    .lean();
+  const living = new Set(holders.map((u) => String(u._id)));
+
+  for (const grant of owners) {
+    // A deleted account's leftover owner row is nobody who can manage the board
+    if (!living.has(String(grant.subject))) continue;
+    const board = String(grant.object);
+    counts.set(board, (counts.get(board) ?? 0) + 1);
+  }
+  return counts;
+}
+
+export async function ownerCount(projectId: string): Promise<number> {
+  return (await ownerCounts([projectId])).get(String(projectId)) ?? 0;
+}
+
+export interface OwnedBoard {
+  _id: string;
+  name: string;
+  key: string;
+}
+
+export async function boardsOnlyOwnedBy(userId: string): Promise<OwnedBoard[]> {
+  await connectDB();
+  const owned = await Grant.find({ subject: userId, objectType: "project", relation: "owner" })
+    .select("object")
+    .lean();
+  const counts = await ownerCounts(owned.map((g) => String(g.object)));
+  const sole = [...counts].filter(([, owners]) => owners <= 1).map(([id]) => id);
+  if (sole.length === 0) return [];
+
+  const boards = await Project.find({ _id: { $in: sole } })
+    .select("name key")
+    .sort({ name: 1 })
+    .lean();
+  return boards.map((b) => ({ _id: String(b._id), name: b.name, key: b.key }));
 }

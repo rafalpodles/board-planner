@@ -25,7 +25,10 @@ vi.mock("@/lib/auth", () => ({
   PASSWORD_COST_FACTOR: 10,
   MIN_PASSWORD_LENGTH: 8,
 }));
-vi.mock("@/lib/grants", () => ({ check, accessibleProjectIds: vi.fn() }));
+const boardsOnlyOwnedBy = vi.fn();
+const grantDeleteMany = vi.fn();
+vi.mock("@/lib/grants", () => ({ check, accessibleProjectIds: vi.fn(), boardsOnlyOwnedBy }));
+vi.mock("@/models/grant", () => ({ Grant: { deleteMany: grantDeleteMany } }));
 vi.mock("@/lib/session", () => ({ revokeUserSessions, revokeUserCredentials }));
 vi.mock("@/lib/password-reset", () => ({ invalidateResetTokens }));
 const cancelEmailChange = vi.fn();
@@ -503,6 +506,47 @@ describe("DELETE /api/users/:id", () => {
     getAuthUser.mockResolvedValue({ ...ADMIN_DOC, viaMachineCredential: false });
     userCountDocuments.mockResolvedValue(2);
     userFindByIdAndDelete.mockResolvedValue(person());
+    boardsOnlyOwnedBy.mockResolvedValue([]);
+  });
+
+  it("refuses the only owner of a board, naming every such board", async () => {
+    found(person());
+    boardsOnlyOwnedBy.mockResolvedValue([
+      { _id: "p1", name: "Alpha", key: "AL" },
+      { _id: "p2", name: "Beta", key: "BE" },
+    ]);
+
+    const res = await DELETE(...del(TARGET_HEX.toUpperCase()));
+
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error).toBe(
+      "target is the only owner of Alpha (AL), Beta (BE). Make someone else an owner there before deleting this account."
+    );
+    expect(body.boards).toHaveLength(2);
+    expect(boardsOnlyOwnedBy).toHaveBeenCalledWith(TARGET_HEX);
+    expect(userFindByIdAndDelete).not.toHaveBeenCalled();
+    expect(grantDeleteMany).not.toHaveBeenCalled();
+    expect(revokeUserSessions).not.toHaveBeenCalled();
+    expect(logInstanceAudit).not.toHaveBeenCalled();
+  });
+
+  it("removes every grant the deleted account held", async () => {
+    found(person());
+
+    const res = await DELETE(...del(TARGET_HEX));
+
+    expect(res.status).toBe(200);
+    expect(grantDeleteMany).toHaveBeenCalledWith({ subject: TARGET_HEX });
+  });
+
+  it("leaves the grants alone when the account was not deleted", async () => {
+    found(person());
+    userFindByIdAndDelete.mockResolvedValue(null);
+
+    await DELETE(...del(TARGET_HEX));
+
+    expect(grantDeleteMany).not.toHaveBeenCalled();
   });
 
   it("deletes the account it was asked about, and ends that account's sessions", async () => {
