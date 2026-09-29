@@ -86,7 +86,7 @@ final class OnboardingTests: XCTestCase {
         let reloaded = Onboarding.load(defaults: store)
 
         XCTAssertEqual(reloaded.toolPaths, paths)
-        XCTAssertFalse(reloaded.needsToolsResolved(isExecutable: { _ in true }))
+        XCTAssertFalse(reloaded.needsToolsResolved(ghPinned: false, isExecutable: { _ in true }))
     }
 
     // A machine onboarded before the paths were recorded. Failing to decode it would answer with a
@@ -104,7 +104,7 @@ final class OnboardingTests: XCTestCase {
         XCTAssertEqual(reloaded.step, .running)
         XCTAssertEqual(reloaded.checkoutsFolder, "/checkout")
         XCTAssertEqual(reloaded.toolPaths, [:])
-        XCTAssertTrue(reloaded.needsToolsResolved(isExecutable: { _ in true }))
+        XCTAssertTrue(reloaded.needsToolsResolved(ghPinned: false, isExecutable: { _ in true }))
     }
 
     func testRecordingTheToolsLaterMovesNothingElse() {
@@ -117,12 +117,12 @@ final class OnboardingTests: XCTestCase {
         XCTAssertEqual(after.step, .running)
         XCTAssertEqual(after.checkoutsFolder, "/checkout")
         XCTAssertEqual(after.toolPath, "/opt/homebrew/bin")
-        XCTAssertFalse(after.needsToolsResolved(isExecutable: { _ in true }))
+        XCTAssertFalse(after.needsToolsResolved(ghPinned: false, isExecutable: { _ in true }))
     }
 
     func testABareNameIsNotAResolvedTool() {
         let state = OnboardingState(toolPaths: ["git": "git", "gh": "/opt/homebrew/bin/gh"])
-        XCTAssertTrue(state.needsToolsResolved(isExecutable: { _ in true }))
+        XCTAssertTrue(state.needsToolsResolved(ghPinned: false, isExecutable: { _ in true }))
     }
 
     // Homebrew uninstalled or moved: the recorded path is still absolute and no longer there, and
@@ -131,16 +131,28 @@ final class OnboardingTests: XCTestCase {
         let paths = ["git": "/opt/homebrew/bin/git", "gh": "/opt/homebrew/bin/gh"]
         let state = OnboardingState(toolPaths: paths)
 
-        XCTAssertTrue(state.needsToolsResolved(isExecutable: { $0 != "/opt/homebrew/bin/git" }))
-        XCTAssertTrue(state.needsToolsResolved(isExecutable: { $0 != "/opt/homebrew/bin/gh" }))
-        XCTAssertFalse(state.needsToolsResolved(isExecutable: { _ in true }))
+        XCTAssertTrue(state.needsToolsResolved(ghPinned: false, isExecutable: { $0 != "/opt/homebrew/bin/git" }))
+        XCTAssertTrue(state.needsToolsResolved(ghPinned: false, isExecutable: { $0 != "/opt/homebrew/bin/gh" }))
+        XCTAssertFalse(state.needsToolsResolved(ghPinned: false, isExecutable: { _ in true }))
     }
 
     // Otherwise a machine without gh would run the whole check before every launch's worker start
     func testAGhTheCheckNeverFoundIsNotLookedForAtEveryLaunch() {
         let state = OnboardingState(toolPaths: ["git": "/usr/bin/git"])
 
-        XCTAssertFalse(state.needsToolsResolved(isExecutable: { _ in true }))
+        XCTAssertFalse(state.needsToolsResolved(ghPinned: false, isExecutable: { _ in true }))
+    }
+
+    // A pin expects gh: without one on record the app's clone and push probe would act as gh's
+    // active account while the worker pushes as the pinned one — so a gh reinstalled after a check
+    // that did not find it has to be looked for again
+    func testAPinnedAccountLooksForAGhTheLastCheckDidNotFind() {
+        let state = OnboardingState(toolPaths: ["git": "/usr/bin/git"])
+
+        XCTAssertTrue(state.needsToolsResolved(ghPinned: true, isExecutable: { _ in true }))
+        XCTAssertFalse(
+            OnboardingState(toolPaths: ["git": "/usr/bin/git", "gh": "/opt/homebrew/bin/gh"])
+                .needsToolsResolved(ghPinned: true, isExecutable: { _ in true }))
     }
 
     func testChoosingAnotherFolderWhileRunningDoesNotRestartTheFlow() {

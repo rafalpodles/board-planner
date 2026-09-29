@@ -33,11 +33,12 @@ final class ToolCommandTests: XCTestCase {
     }
 
     // A running machine has no setup screen, so the way out named is the one that re-resolves
-    func testTheRefusalNamesTheToolAndAWayOutARunningMachineHas() {
+    func testTheRefusalNamesTheToolAndAWayOutAtEveryStep() {
         let reason = UnresolvedTool(tool: .gh).localizedDescription
 
         XCTAssertTrue(reason.contains("No gh was found"), reason)
-        XCTAssertTrue(reason.contains("Quit and reopen the app"), reason)
-        XCTAssertFalse(reason.contains("setup check"), reason)
+        XCTAssertTrue(reason.contains("quit and reopen the app once it is set up"), reason)
+        // …and the one a machine still in setup has, whose screen offers the check instead
+        XCTAssertTrue(reason.contains("press Check this machine during setup"), reason)
     }
 }

@@ -83,14 +83,16 @@ public struct OnboardingState: Codable, Equatable, Sendable {
 
     public var isOnboarded: Bool { step == .running }
 
-    /// Whether launch has to look for the tools again: git has no usable recorded path — never
-    /// recorded, or gone since — or gh has one recorded that is gone. A gh the check never found is
-    /// not asked about again at every launch; the check already said it is missing.
+    /// Whether the tools have to be looked for again: git has no usable recorded path — never
+    /// recorded, or gone since — or gh has none while it is expected. A pinned account expects it:
+    /// without gh the app's clone and push probe act as gh's active account, not the pinned one.
+    /// Unpinned, a gh the check never found is not looked for before every launch's worker start.
     public func needsToolsResolved(
+        ghPinned: Bool,
         isExecutable: (String) -> Bool = FileManager.default.isExecutableFile(atPath:)
     ) -> Bool {
         if !ToolPath.usable(toolPaths[ResolvedTool.git.rawValue], isExecutable: isExecutable) { return true }
-        guard let gh = toolPaths[ResolvedTool.gh.rawValue] else { return false }
+        guard let gh = toolPaths[ResolvedTool.gh.rawValue] else { return ghPinned }
         return !ToolPath.usable(gh, isExecutable: isExecutable)
     }
 }

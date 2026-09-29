@@ -9,7 +9,7 @@ public struct UnresolvedTool: LocalizedError, Equatable, Sendable {
     public let tool: ResolvedTool
 
     public var errorDescription: String? {
-        "No \(tool.rawValue) was found where this app last looked for it. Quit and reopen the app to look again — it will not run \(tool.rawValue) by name on PATH."
+        "No \(tool.rawValue) was found where this app last looked for it. To look again, press Check this machine during setup, or quit and reopen the app once it is set up — it will not run \(tool.rawValue) by name on PATH."
     }
 }
 

@@ -40,7 +40,7 @@ private struct ConnectionTab: View {
             }
             LabeledContent("Worker", value: model.config?.workerName ?? "—")
             LabeledContent("Projects", value: model.config.map { "\($0.projectCount)" } ?? "—")
-            GithubAccountRow(accounts: model.config?.githubAccounts ?? [])
+            GithubAccountRow(accounts: model.config?.githubAccounts ?? [], onboarding: onboarding)
             Text("This app reads the worker over a local socket and holds no credential of its own. "
                  + "Registration is done on the worker.")
                 .font(.caption)
@@ -71,6 +71,7 @@ private struct ConnectionTab: View {
 // a second account to a machine that has been running fine for months.
 private struct GithubAccountRow: View {
     let accounts: [GithubAccountChoice]
+    let onboarding: OnboardingModel
     // Read into `@State`, which SwiftUI evaluates once for the life of the row and never again —
     // so pointing the app at another state directory used to leave the previous machine's account
     // on screen, and a save then wrote that stale reading into the new directory's file (BP-600).
@@ -119,6 +120,8 @@ private struct GithubAccountRow: View {
                     try GithubAccountFile(path: GithubAccountFile.defaultPath()).write(login)
                     pinned = login
                     error = ""
+                    // A pin expects gh, so one the last check did not find is looked for now
+                    Task { await onboarding.resolveToolsIfUnrecorded() }
                 } catch {
                     self.error = "Could not write the GitHub account: \(error.localizedDescription)"
                 }

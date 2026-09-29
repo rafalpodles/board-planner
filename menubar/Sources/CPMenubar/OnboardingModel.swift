@@ -224,8 +224,8 @@ final class OnboardingModel {
     // git and gh are refused without a usable recorded path (BP-733): none on a machine onboarded
     // before paths were recorded, or a stale one after Homebrew moved. A running machine has no
     // setup screen to re-run the check from, so launch does it — which is what the refusal says.
-    private func resolveToolsIfUnrecorded() async {
-        guard state.isOnboarded, state.needsToolsResolved() else { return }
+    func resolveToolsIfUnrecorded() async {
+        guard state.isOnboarded, state.needsToolsResolved(ghPinned: !pinnedGithubAccount.isEmpty) else { return }
         let folder = state.checkoutsFolder
         guard let report = await Task.detached(operation: { try? WorkerProcess.preflight(checkout: folder) }).value
         else { return }
