@@ -7,28 +7,37 @@ final class ToolCommandTests: XCTestCase {
 
     func testSpawnsTheResolvedPathWithTheArgumentsUnchanged() {
         XCTAssertEqual(
-            try ToolCommand.make(.gh, ["auth", "token", "--user", "octocat"], resolved: resolved).get(),
+            try ToolCommand.make(.gh, ["auth", "token", "--user", "octocat"], resolved: resolved, isExecutable: { _ in true }).get(),
             ToolCommand(executable: "/opt/homebrew/bin/gh", arguments: ["auth", "token", "--user", "octocat"]))
         XCTAssertEqual(
-            try ToolCommand.make(.git, ["status"], resolved: resolved).get().executable, "/opt/homebrew/bin/git")
+            try ToolCommand.make(.git, ["status"], resolved: resolved, isExecutable: { _ in true }).get().executable, "/opt/homebrew/bin/git")
     }
 
     func testRefusesAToolPreflightResolvedNoPathFor() {
         XCTAssertEqual(
-            ToolCommand.make(.gh, ["auth", "token"], resolved: ["git": "/usr/bin/git"]),
+            ToolCommand.make(.gh, ["auth", "token"], resolved: ["git": "/usr/bin/git"], isExecutable: { _ in true }),
             .failure(UnresolvedTool(tool: .gh)))
     }
 
     func testRefusesTheBareNameRatherThanHandingItToThePath() {
         XCTAssertEqual(
-            ToolCommand.make(.git, ["status"], resolved: ["git": "git"]),
+            ToolCommand.make(.git, ["status"], resolved: ["git": "git"], isExecutable: { _ in true }),
             .failure(UnresolvedTool(tool: .git)))
     }
 
-    func testTheRefusalNamesTheToolAndTheWayOut() {
+    // The recorded path is where preflight found it once; a gh uninstalled since is not there
+    func testRefusesARecordedPathThatIsNoLongerThere() {
+        XCTAssertEqual(
+            ToolCommand.make(.gh, ["auth"], resolved: resolved, isExecutable: { _ in false }),
+            .failure(UnresolvedTool(tool: .gh)))
+    }
+
+    // A running machine has no setup screen, so the way out named is the one that re-resolves
+    func testTheRefusalNamesTheToolAndAWayOutARunningMachineHas() {
         let reason = UnresolvedTool(tool: .gh).localizedDescription
 
-        XCTAssertTrue(reason.contains("No absolute gh path was resolved"), reason)
-        XCTAssertTrue(reason.contains("run the setup check again"), reason)
+        XCTAssertTrue(reason.contains("No gh was found"), reason)
+        XCTAssertTrue(reason.contains("Quit and reopen the app"), reason)
+        XCTAssertFalse(reason.contains("setup check"), reason)
     }
 }

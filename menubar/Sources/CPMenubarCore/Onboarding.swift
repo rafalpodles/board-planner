@@ -83,10 +83,15 @@ public struct OnboardingState: Codable, Equatable, Sendable {
 
     public var isOnboarded: Bool { step == .running }
 
-    /// Whether the tools this app spawns have a resolved path yet — false for a state saved before
-    /// they were recorded.
-    public var hasResolvedTools: Bool {
-        [ResolvedTool.git, .gh].allSatisfy { toolPaths[$0.rawValue]?.hasPrefix("/") == true }
+    /// Whether launch has to look for the tools again: git has no usable recorded path — never
+    /// recorded, or gone since — or gh has one recorded that is gone. A gh the check never found is
+    /// not asked about again at every launch; the check already said it is missing.
+    public func needsToolsResolved(
+        isExecutable: (String) -> Bool = FileManager.default.isExecutableFile(atPath:)
+    ) -> Bool {
+        if !ToolPath.usable(toolPaths[ResolvedTool.git.rawValue], isExecutable: isExecutable) { return true }
+        guard let gh = toolPaths[ResolvedTool.gh.rawValue] else { return false }
+        return !ToolPath.usable(gh, isExecutable: isExecutable)
     }
 }
 

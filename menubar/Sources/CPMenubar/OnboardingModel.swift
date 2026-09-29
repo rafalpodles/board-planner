@@ -221,11 +221,11 @@ final class OnboardingModel {
         startWorker()
     }
 
-    // A machine onboarded before the resolved paths were recorded has none, and git and gh are
-    // refused without them (BP-733) — so the check that records them runs once at launch, rather
-    // than leaving every sync refused until somebody opens setup again.
+    // git and gh are refused without a usable recorded path (BP-733): none on a machine onboarded
+    // before paths were recorded, or a stale one after Homebrew moved. A running machine has no
+    // setup screen to re-run the check from, so launch does it — which is what the refusal says.
     private func resolveToolsIfUnrecorded() async {
-        guard state.isOnboarded, !state.hasResolvedTools else { return }
+        guard state.isOnboarded, state.needsToolsResolved() else { return }
         let folder = state.checkoutsFolder
         guard let report = await Task.detached(operation: { try? WorkerProcess.preflight(checkout: folder) }).value
         else { return }

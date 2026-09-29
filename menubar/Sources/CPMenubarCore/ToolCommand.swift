@@ -9,7 +9,18 @@ public struct UnresolvedTool: LocalizedError, Equatable, Sendable {
     public let tool: ResolvedTool
 
     public var errorDescription: String? {
-        "No absolute \(tool.rawValue) path was resolved — run the setup check again. Refusing to run \(tool.rawValue) by name on PATH."
+        "No \(tool.rawValue) was found where this app last looked for it. Quit and reopen the app to look again — it will not run \(tool.rawValue) by name on PATH."
+    }
+}
+
+public enum ToolPath {
+    /// Recorded, absolute, and still there: a path whose tool was uninstalled or moved since the
+    /// check that recorded it is as unresolved as one never recorded.
+    public static func usable(
+        _ path: String?, isExecutable: (String) -> Bool = FileManager.default.isExecutableFile(atPath:)
+    ) -> Bool {
+        guard let path, path.hasPrefix("/") else { return false }
+        return isExecutable(path)
     }
 }
 
@@ -22,9 +33,10 @@ public struct ToolCommand: Equatable, Sendable {
     public let arguments: [String]
 
     public static func make(
-        _ tool: ResolvedTool, _ arguments: [String], resolved: [String: String]
+        _ tool: ResolvedTool, _ arguments: [String], resolved: [String: String],
+        isExecutable: (String) -> Bool = FileManager.default.isExecutableFile(atPath:)
     ) -> Result<ToolCommand, UnresolvedTool> {
-        guard let path = resolved[tool.rawValue], path.hasPrefix("/") else {
+        guard let path = resolved[tool.rawValue], ToolPath.usable(path, isExecutable: isExecutable) else {
             return .failure(UnresolvedTool(tool: tool))
         }
         return .success(ToolCommand(executable: path, arguments: arguments))
