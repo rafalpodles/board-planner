@@ -92,6 +92,7 @@ async function notifyWatchers(
     projectId: String(trigger.project),
     actorId: pmUserId,
     title: `PM reviewed ${trigger.taskKey} — needs your call`,
+    digestTitle: "PM reviewed this task — needs your call",
     body: summary.slice(0, 120),
     recipientIds: collectRecipients(task),
     email: {

@@ -43,8 +43,8 @@ interface DigestLine {
   url?: string;
 }
 
-// For rows written without a `digestTitle`. Only a key at either end is stripped: those titles name
-// exactly one task, while a mid-sentence key is a grammatical object that blanking would garble.
+// Rows stored before `digestTitle` existed. Only a key at either end is stripped; one mid-sentence
+// is part of the sentence, and blanking it would garble it.
 function stripKey(title: string, key: string): string {
   if (!key) return title;
   if (title.startsWith(`${key} `)) return title.slice(key.length + 1);

@@ -852,6 +852,7 @@ describe("releaseExpiredTasks", () => {
 
       const [notification] = createNotificationsMock.mock.calls.at(-1) ?? [];
       expect(notification.title).toBe("TP-9 needs a human — the run was abandoned");
+      expect(notification.digestTitle).toBe("needs a human — the run was abandoned");
       expect(notification.recipientIds).toEqual([WATCHER]);
       expect(notification.email.kicker).toBe("Run abandoned");
       expect(notification.email.taskPills).toEqual([{ label: "Escalated", tone: "review" }]);
@@ -4261,6 +4262,7 @@ describe("createTask handing the task to somebody", () => {
     expect(notification.type).toBe("task_assigned");
     expect(notification.recipientIds).toEqual([ASSIGNEE]);
     expect(notification.title).toBe("BP-7 assigned to you");
+    expect(notification.digestTitle).toBe("assigned to you");
     expect(notification.email.taskPills[0]).toEqual({ label: "Ready", tone: "todo" });
     expect(notification.email.projectRef).toBe("BP");
     expect(notification.email.taskNumber).toBe(7);
@@ -4358,6 +4360,23 @@ describe("a comment mentioning a watcher", () => {
     expect(byType.mentioned.recipientIds).toEqual([MENTIONED_WATCHER]);
   });
 
+  // BP-725. The digest labels each row with its key, so a phrasing that ends on it would print
+  // it twice, and one cut before it ends mid-sentence
+  it("gives the digest whole sentences that do not name the task", async () => {
+    setup([MENTIONED_WATCHER], [WATCHER, MENTIONED_WATCHER]);
+    await addComment("p1", "t1", "@bob look at this", { id: "actor", username: "owner" });
+
+    const byType = notificationsByType();
+    expect(byType.comment_added).toMatchObject({
+      title: "New comment on TP-7",
+      digestTitle: "New comment",
+    });
+    expect(byType.mentioned).toMatchObject({
+      title: "owner mentioned you in TP-7",
+      digestTitle: "owner mentioned you",
+    });
+  });
+
   // BP-323
   it("refuses a comment past the length cap and stores nothing", async () => {
     setup([], [WATCHER]);
@@ -4440,6 +4459,7 @@ describe("what a rewritten updateTask still tells the assignee", () => {
     expect(notification.type).toBe("task_assigned");
     expect(notification.recipientIds).toEqual(["u2"]);
     expect(notification.title).toBe("TP-4 assigned to you");
+    expect(notification.digestTitle).toBe("assigned to you");
     // The column's label, not the raw id, and the priority beside it
     expect(notification.email.taskPills).toEqual([
       { label: "Doing", tone: "progress" },
@@ -4509,6 +4529,7 @@ describe("what a status change tells a watcher", () => {
     const [notification] = createNotificationsMock.mock.calls.at(-1) ?? [];
     expect(notification.type).toBe("status_changed");
     expect(notification.title).toBe("TP-9 moved to Under review");
+    expect(notification.digestTitle).toBe("moved to Under review");
     expect(notification.email.taskPills).toEqual([
       { label: "Doing", tone: "progress" },
       "arrow",

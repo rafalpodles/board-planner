@@ -333,10 +333,9 @@ test("a row the reader has already opened is not repeated in the morning", async
  * Each notification type is produced here by the gesture that produces it, and every row is
  * matched as a whole line of the text part, so a key printed twice fails wherever it sits.
  *
- * Two rows name their own key mid-sentence — the board feed's "New task TP-9 in …" and task_linked's
- * sentence about two tasks — and since BP-725 each is printed from the phrasing its writer stored
- * for the digest rather than by cutting the key out of the title. An unresolved row has no key to
- * label it with, so it keeps its title whole.
+ * Since BP-725 every writer whose title names its own task also stores the phrasing the digest
+ * prints beside that key, so no row is printed by cutting the key out of its title. An unresolved
+ * row has no key to label it with, so it keeps its title whole.
  *
  * The admin reads the digest and the member does everything, because the one row no gesture can
  * produce — a project that no longer resolves — is planted, and only an instance admin's digest
@@ -450,8 +449,8 @@ test("every kind of row reaches the morning message as a line of its own", async
     `${key}: New task in ${PROJECT_NAME}`,
     `${key}: assigned to you`,
     `${key}: moved to In Progress`,
-    `${key}: New comment on`,
-    `${key}: ${MEMBER_USERNAME} mentioned you in`,
+    `${key}: New comment`,
+    `${key}: ${MEMBER_USERNAME} mentioned you`,
     `${key}: ${MEMBER_USERNAME} linked this task to ${other}`,
     `—: ${unresolved}`,
   ];

@@ -745,6 +745,7 @@ export async function createTask(
       projectId,
       actorId,
       title: `${taskKey} assigned to you`,
+      digestTitle: "assigned to you",
       body: task.title,
       recipientIds: [String(assigneeId)],
       email: {
@@ -930,6 +931,7 @@ async function announceStatusChange(a: StatusChangeAnnouncement): Promise<void> 
     projectId: a.projectId,
     actorId: a.actorId,
     title: `${taskKey} moved to ${toLabel}`,
+    digestTitle: `moved to ${toLabel}`,
     body: a.task.title,
     recipientIds: collectRecipients(a.task),
     email: {
@@ -1391,6 +1393,7 @@ export async function updateTask(
       projectId,
       actorId,
       title: `${taskKey} assigned to you`,
+      digestTitle: "assigned to you",
       body: task.title,
       recipientIds: [newAssigneeId],
       email: {
@@ -1494,6 +1497,7 @@ export async function addComment(
       projectId,
       actorId: actor.id,
       title: `New comment on ${taskKey}`,
+      digestTitle: "New comment",
       body: excerpt,
       recipientIds: commentRecipients,
       email: { kicker: "New comment", ...sharedEmail },
@@ -1507,6 +1511,7 @@ export async function addComment(
       projectId,
       actorId: actor.id,
       title: `${actor.username} mentioned you in ${taskKey}`,
+      digestTitle: `${actor.username} mentioned you`,
       body: excerpt,
       recipientIds: mentionedIds,
       email: { kicker: "You were mentioned", ...sharedEmail },
@@ -1686,6 +1691,7 @@ async function announceAbandonedRuns(
       projectId,
       actorId: String(actor._id),
       title: `${taskKey} needs a human — the run was abandoned`,
+      digestTitle: "needs a human — the run was abandoned",
       body: task.title,
       recipientIds: recipients,
       email: {

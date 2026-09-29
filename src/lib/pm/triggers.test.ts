@@ -138,6 +138,7 @@ describe("what an autonomous PM review tells the watchers", () => {
       projectId: "p1",
       actorId: "pm-user-id",
       title: "PM reviewed BP-1 — needs your call",
+      digestTitle: "PM reviewed this task — needs your call",
       body: "Blocked on the OIDC redirect",
       recipientIds: [WATCHER],
     });
