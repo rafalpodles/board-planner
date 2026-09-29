@@ -469,3 +469,17 @@ describe.each([
     expect(dueChip(new Date(2026, 9, 12, 23, 30)).className).toContain("text-text-muted");
   });
 });
+
+describe("TaskCard with a due date that is not a date", () => {
+  it("draws no due chip rather than an empty or invalid one", () => {
+    renderCard({ task: { ...task, dueDate: "not a date" } as ApiTask });
+    expect(screen.getByRole("link").textContent).toContain("A task");
+    expect(screen.queryByTestId("task-card-due")).toBeNull();
+  });
+
+  // The control: a real day does draw it
+  it("draws the chip for a real day", () => {
+    renderCard({ task: { ...task, dueDate: "2026-10-15T00:00:00.000Z" } as ApiTask });
+    expect(screen.getByTestId("task-card-due")).toBeTruthy();
+  });
+});
