@@ -20,6 +20,8 @@ vi.mock("@/lib/encryption", () => ({
   encryptSecret: (v: string) => `enc:${v}`,
   isEncryptionConfigured: () => true,
 }));
+let mailServer = true;
+vi.mock("@/lib/email", () => ({ isEmailConfigured: () => mailServer }));
 const DESTINATION = { allowLoopback: "the webhook destination" };
 const isAllowed = vi.fn((u: string, _o?: unknown) => u.startsWith("https://"));
 vi.mock("@/lib/url-validation", () => ({
@@ -28,7 +30,7 @@ vi.mock("@/lib/url-validation", () => ({
   isAllowedWebhookUrl: (u: string, o: unknown) => isAllowed(u, o),
 }));
 
-const { PUT } = await import("@/app/api/users/me/notifications/route");
+const { GET, PUT } = await import("@/app/api/users/me/notifications/route");
 const { NOTIFICATION_TYPES } = await import("@/types");
 
 const grid = (chat: boolean) =>
@@ -54,6 +56,33 @@ beforeEach(() => {
   findByIdAndUpdate.mockResolvedValue({});
   caller = { _id: "u1" };
   stored(CONNECTED);
+  mailServer = true;
+});
+
+// BP-735. The screen closes the e-mail column when nothing can be sent there, and only the server
+// knows whether a mail server is configured.
+describe("what the screen is told about mail", () => {
+  const get = async () =>
+    (await (GET as unknown as (req: Request) => Promise<Response>)(
+      new Request("http://x/api/users/me/notifications")
+    )).json();
+  const account = (email: string) =>
+    findById.mockReturnValue({ lean: async () => ({ _id: "u1", email, notifications: CONNECTED }) });
+
+  it("says whether the instance has a mail server and the account an address", async () => {
+    account("someone@example.com");
+    expect((await get()).email).toEqual({ server: true, address: true });
+
+    mailServer = false;
+    account("");
+    expect((await get()).email).toEqual({ server: false, address: false });
+  });
+
+  it("reads the address it reports on", async () => {
+    account("someone@example.com");
+    await get();
+    expect(findById.mock.calls.at(-1)?.[1]).toMatch(/\bemail\b/);
+  });
 });
 
 describe("what a PUT is allowed to clear", () => {

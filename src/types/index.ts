@@ -1654,6 +1654,7 @@ export interface INotification {
   project: Types.ObjectId | IProject;
   actor: Types.ObjectId | IUser;
   title: string;
+  digestTitle?: string;
   body: string;
   read: boolean;
   /** Whether the bell shows this row. The document is stored either way, because the digest is

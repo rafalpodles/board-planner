@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { createHash } from "crypto";
 import mongoose from "mongoose";
 import {
   ADMIN_ID,
@@ -7,6 +8,7 @@ import {
   BYSTANDER_ID,
   BYSTANDER_PASSWORD,
   BYSTANDER_USERNAME,
+  E2E_ENCRYPTION_KEY,
   E2E_MONGODB_URI,
   MEMBER_ID,
   MEMBER_PASSWORD,
@@ -259,6 +261,12 @@ async function seedMembers(people: SeededMember[]) {
   );
 }
 
+/** The id a v2 envelope names its key by — derived the way `encryption.ts` derives it. */
+const keyIdOf = (hexKey: string) =>
+  createHash("sha256").update(Buffer.from(hexKey, "hex")).digest("hex").slice(0, 8);
+const CURRENT_KEY_ID = keyIdOf(E2E_ENCRYPTION_KEY);
+const LOST_KEY_ID = keyIdOf("0".repeat(64));
+
 async function announcedTo(title: string): Promise<string[]> {
   const handle = await db();
   const task = await handle.collection("tasks").findOne({ title });
@@ -297,7 +305,22 @@ const TRAPS: { name: string; person: (_id: mongoose.Types.ObjectId) => SeededMem
     name: "a mail tick with no address",
     person: (_id) => ({ _id, defaults: cell({ email: true }) }),
   },
+  // BP-735. sendPersonalChat cannot decrypt a webhook sealed with a key the instance no longer
+  // has, so it delivers nothing — the one check of the key-id pattern against a real MongoDB 4.4
+  {
+    name: "a chat tick whose webhook was sealed with a key the instance has lost",
+    person: (_id) => ({
+      _id,
+      defaults: cell({ chat: true }),
+      chat: { kind: "slack", webhookUrl: `enc:v2:${LOST_KEY_ID}:AAAA` },
+    }),
+  },
 ];
+
+test("the lost key is not the one the instance holds", () => {
+  expect(CURRENT_KEY_ID).toMatch(/^[0-9a-f]{8}$/);
+  expect(LOST_KEY_ID).not.toBe(CURRENT_KEY_ID);
+});
 
 for (const trap of TRAPS) {
   test(`${trap.name} does not spend the cap meant for somebody who subscribed`, async ({
@@ -332,6 +355,39 @@ for (const trap of TRAPS) {
     await adminContext.close();
   });
 }
+
+// The control for the trap above: the same query has to go on admitting a webhook it can read, or
+// a pattern that matched nothing at all would pass it too
+test("a chat tick sealed with the key the instance holds, or stored in plain, still counts", async ({
+  browser,
+}) => {
+  const sealed = behindTheMember(1);
+  const plain = behindTheMember(2);
+  await seedMembers([
+    {
+      _id: sealed,
+      defaults: cell({ chat: true }),
+      chat: { kind: "slack", webhookUrl: `enc:v2:${CURRENT_KEY_ID}:AAAA` },
+    },
+    {
+      _id: plain,
+      defaults: cell({ chat: true }),
+      chat: { kind: "discord", webhookUrl: "https://hooks.example.invalid/e2e" },
+    },
+  ]);
+
+  const adminContext = await browser.newContext();
+  const admin = await adminContext.newPage();
+  const title = "Announced to the webhooks the instance can open";
+  await signIn(admin, ADMIN_USERNAME, ADMIN_PASSWORD);
+  await createTask(admin, title);
+
+  await expect
+    .poll(() => announcedTo(title), { timeout: 30_000 })
+    .toEqual([String(sealed), String(plain)].sort());
+
+  await adminContext.close();
+});
 
 test("a board with more subscribers than the cap tells the first of them, and exactly that many", async ({
   browser,

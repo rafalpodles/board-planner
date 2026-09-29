@@ -5,6 +5,7 @@ import { User } from "@/models/user";
 import { defaultMatrix, matrixInForce, normaliseMatrix } from "@/lib/notification-prefs";
 import { PERSONAL_CHAT_KINDS, PersonalChatKind } from "@/types";
 import { encryptSecret, isEncryptionConfigured } from "@/lib/encryption";
+import { isEmailConfigured } from "@/lib/email";
 import { isAllowedWebhookUrl, WEBHOOK_DESTINATION, WEBHOOK_DESTINATION_REFUSED } from "@/lib/url-validation";
 
 const WEBHOOK_KEPT = "__kept__";
@@ -12,7 +13,7 @@ const WEBHOOK_KEPT = "__kept__";
 export const GET = withAuth(async (_request, { user }) => {
   await connectDB();
 
-  const stored = await User.findById(user._id, "emailNotifications notifications").lean();
+  const stored = await User.findById(user._id, "email emailNotifications notifications").lean();
 
   return NextResponse.json({
     defaults: defaultMatrix(stored),
@@ -31,6 +32,7 @@ export const GET = withAuth(async (_request, { user }) => {
       // The URL is a credential and never travels back — the screen only needs to know there is one
       configured: !!stored?.notifications?.chat?.webhookUrl,
     },
+    email: { server: isEmailConfigured(), address: !!stored?.email },
   });
 });
 

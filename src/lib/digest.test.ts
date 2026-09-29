@@ -170,7 +170,7 @@ describe("when the digest is due", () => {
 // unambiguously safe. One case per shape here is what would have caught the original bug (only
 // the leading shape was stripped); the mid-sentence cases below are the control that keeps a
 // blanket "strip anywhere" from coming back — two independent reviews found it corrupts
-// task_linked's sentences (see the comment on stripKey and BP-725).
+// task_linked's sentences. Since BP-725 those cases are rows written before `digestTitle`.
 describe("lineFor", () => {
   const PROJECT_REF = { _id: PROJECT, key: "TP" };
   const origin = "https://app.example.com";
@@ -303,6 +303,77 @@ describe("lineFor", () => {
       origin
     );
     expect(line.title).toBe("rafal removed TP-4 from TP-3's children");
+  });
+
+  // BP-725. A row that carries its writer's key-less phrasing is printed with that, whatever
+  // position the sentence gave the row's own key; the title is not operated on at all.
+  describe("a row written with its digest phrasing", () => {
+    const linked = (title: string, digestTitle: string) =>
+      lineFor(
+        { type: "task_linked", title, digestTitle, task: { taskNumber: 3 }, project: PROJECT_REF },
+        origin
+      );
+
+    it("prints a task_linked row's own key once when it sits mid-sentence", () => {
+      const line = linked(
+        "rafal marked TP-3 as blocked by TP-4",
+        "rafal marked this task as blocked by TP-4"
+      );
+      expect(line).toEqual({
+        key: "TP-3",
+        title: "rafal marked this task as blocked by TP-4",
+        url: "https://app.example.com/projects/TP/tasks/3",
+      });
+    });
+
+    it("prints it once when the direction puts it last", () => {
+      const line = linked(
+        "rafal marked TP-4 as blocked by TP-3",
+        "rafal marked TP-4 as blocked by this task"
+      );
+      expect(line.title).toBe("rafal marked TP-4 as blocked by this task");
+    });
+
+    it("prints it once in a possessive", () => {
+      const line = linked(
+        "rafal removed TP-4 from TP-3's children",
+        "rafal removed TP-4 from this task's children"
+      );
+      expect(line.title).toBe("rafal removed TP-4 from this task's children");
+    });
+
+    it("prints the board feed's key once", () => {
+      const line = lineFor(
+        {
+          type: "task_created",
+          title: "New task TP-5 in Board Planner",
+          digestTitle: "New task in Board Planner",
+          task: { taskNumber: 5 },
+          project: PROJECT_REF,
+        },
+        origin
+      );
+      expect(line).toEqual({
+        key: "TP-5",
+        title: "New task in Board Planner",
+        url: "https://app.example.com/projects/TP/tasks/5",
+      });
+    });
+
+    // The row's label is a dash then, so the title is the only place the task is named
+    it("keeps the full title when the project cannot be resolved", () => {
+      const line = lineFor(
+        {
+          type: "task_created",
+          title: "New task TP-5 in Board Planner",
+          digestTitle: "New task in Board Planner",
+          task: { taskNumber: 5 },
+          project: null,
+        },
+        origin
+      );
+      expect(line).toEqual({ key: "—", title: "New task TP-5 in Board Planner", url: undefined });
+    });
   });
 
   // TP-2 must not eat the leading digit of TP-20 — a plain substring replace would

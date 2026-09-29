@@ -87,3 +87,28 @@ describe("NotificationsSection across a change of project", () => {
     ).toHaveLength(0);
   });
 });
+
+// BP-735. The same closing on a board's own grid, which the reader can only tick while overriding.
+describe("the e-mail column on a board's own grid", () => {
+  const CELL = "A task is assigned to you — E-mail";
+  const overriding = (email: { server: boolean; address: boolean }) =>
+    api.get.mockResolvedValue({ ...prefs("a", grid(false)), email });
+
+  it("is closed, with the reason, when nothing can be sent", async () => {
+    overriding({ server: false, address: true });
+    render(<NotificationsSection {...props("a")} />);
+
+    const cell = (await screen.findByLabelText(CELL)) as HTMLInputElement;
+    expect((screen.getByLabelText("Use my own settings for this project") as HTMLInputElement).checked).toBe(true);
+    expect(cell.disabled).toBe(true);
+    expect(screen.getByText(/no mail server/)).toBeTruthy();
+  });
+
+  it("is open when mail can be sent", async () => {
+    overriding({ server: true, address: true });
+    render(<NotificationsSection {...props("a")} />);
+
+    const cell = (await screen.findByLabelText(CELL)) as HTMLInputElement;
+    expect(cell.disabled).toBe(false);
+  });
+});

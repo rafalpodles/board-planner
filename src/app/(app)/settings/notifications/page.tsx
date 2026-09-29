@@ -1,11 +1,15 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useId } from "react";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
-import { NotificationMatrixEditor } from "@/components/settings/NotificationMatrix";
+import {
+  mailUnavailable,
+  MailAvailability,
+  NotificationMatrixEditor,
+} from "@/components/settings/NotificationMatrix";
 import { NotificationMatrix, PERSONAL_CHAT_KINDS, PersonalChatKind } from "@/types";
 
 
@@ -17,6 +21,7 @@ function messageOf(err: unknown, fallback: string): string {
 interface Loaded {
   defaults: NotificationMatrix;
   chat: { kind: PersonalChatKind | ""; configured: boolean };
+  email?: MailAvailability;
 }
 
 export default function NotificationsPage() {
@@ -28,10 +33,14 @@ export default function NotificationsPage() {
   const [chatKind, setChatKind] = useState<PersonalChatKind | "">("");
   const [webhookUrl, setWebhookUrl] = useState("");
   const [chatConfigured, setChatConfigured] = useState(false);
+  const [mail, setMail] = useState<MailAvailability | undefined>();
   const [emailDigest, setEmailDigest] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
+
+  const unavailable = mailUnavailable(mail);
+  const mailHintId = useId();
 
   // Delivery needs both a service and an address; either alone sends nothing and says nothing
   const chatReady = !!chatKind && (chatConfigured || !!webhookUrl.trim());
@@ -54,6 +63,7 @@ export default function NotificationsPage() {
         setMatrix(prefs.defaults);
         setChatKind(prefs.chat.kind);
         setChatConfigured(prefs.chat.configured);
+        setMail(prefs.email);
         setEmailDigest(me.emailDigest ?? false);
       })
       .catch(() => {
@@ -137,6 +147,8 @@ export default function NotificationsPage() {
         onChange={setMatrix}
         chatDisabled={!chatReady}
         chatDisabledHint="Connect Slack or Discord below before sending anything there."
+        emailUnavailable={unavailable}
+        emailHintId={mailHintId}
       />
 
       <div className="mt-6 flex items-center gap-3">
@@ -144,10 +156,12 @@ export default function NotificationsPage() {
           type="checkbox"
           id="emailDigest"
           checked={emailDigest}
+          disabled={!!unavailable}
+          aria-describedby={unavailable ? mailHintId : undefined}
           onChange={(e) => toggleDigest(e.target.checked)}
-          className="focus-ring rounded border-border"
+          className="focus-ring rounded border-border disabled:opacity-40"
         />
-        <label htmlFor="emailDigest" className="text-sm cursor-pointer">
+        <label htmlFor="emailDigest" className={`text-sm ${unavailable ? "" : "cursor-pointer"}`}>
           Collect the e-mail column into one daily digest
         </label>
       </div>

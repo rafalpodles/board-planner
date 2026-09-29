@@ -207,3 +207,72 @@ describe("the notifications page while its load effect is running twice", () => 
     await screen.findByLabelText(ASSIGNED_EMAIL);
   });
 });
+
+// BP-735. The e-mail column is closed where it would deliver nothing, the way the chat column is.
+describe("the e-mail column on the global grid", () => {
+  const withMail = (email: { server: boolean; address: boolean }, emailDigest = false) =>
+    api.get.mockImplementation(async (path: string) =>
+      path === "/api/users/me/notifications" ? { ...prefs(grid(false)), email } : { emailDigest }
+    );
+  const DIGEST = "Collect the e-mail column into one daily digest";
+
+  it("is closed, with the reason, on an instance with no mail server", async () => {
+    withMail({ server: false, address: true });
+    render(<NotificationsPage />);
+
+    const cell = (await screen.findByLabelText(ASSIGNED_EMAIL)) as HTMLInputElement;
+    expect(cell.disabled).toBe(true);
+    expect(screen.getByText(/no mail server/)).toBeTruthy();
+  });
+
+  it("is closed for an account with no address", async () => {
+    withMail({ server: true, address: false });
+    render(<NotificationsPage />);
+
+    const cell = (await screen.findByLabelText(ASSIGNED_EMAIL)) as HTMLInputElement;
+    expect(cell.disabled).toBe(true);
+    expect(screen.getByRole("link", { name: "your profile" })).toBeTruthy();
+  });
+
+  it("is open when both are there", async () => {
+    withMail({ server: true, address: true });
+    render(<NotificationsPage />);
+
+    const cell = (await screen.findByLabelText(ASSIGNED_EMAIL)) as HTMLInputElement;
+    expect(cell.disabled).toBe(false);
+  });
+
+  // The digest is the same column collected into one message, so it closes on the same grounds
+  it("closes the digest box too, keeping a stored tick, and says why", async () => {
+    withMail({ server: false, address: true }, true);
+    render(<NotificationsPage />);
+
+    const digest = (await screen.findByLabelText(DIGEST)) as HTMLInputElement;
+    expect(digest.disabled).toBe(true);
+    expect(digest.checked).toBe(true);
+    // One reason on the page, under the grid, and the digest box is described by it
+    const reason = screen.getAllByText(/no mail server/);
+    expect(reason).toHaveLength(1);
+    expect(digest.getAttribute("aria-describedby")).toBe(reason[0].id);
+    expect(screen.getByText(DIGEST).className).not.toMatch(/cursor-pointer/);
+  });
+
+  it("closes the digest box for an account with no address", async () => {
+    withMail({ server: true, address: false });
+    render(<NotificationsPage />);
+
+    const digest = (await screen.findByLabelText(DIGEST)) as HTMLInputElement;
+    expect(digest.disabled).toBe(true);
+    expect(screen.getAllByRole("link", { name: "your profile" })).toHaveLength(1);
+  });
+
+  it("leaves the digest box open when mail can be sent", async () => {
+    withMail({ server: true, address: true });
+    render(<NotificationsPage />);
+
+    const digest = (await screen.findByLabelText(DIGEST)) as HTMLInputElement;
+    expect(digest.disabled).toBe(false);
+    expect(digest.hasAttribute("aria-describedby")).toBe(false);
+    expect(screen.getByText(DIGEST).className).toMatch(/cursor-pointer/);
+  });
+});

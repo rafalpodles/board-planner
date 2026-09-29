@@ -4,7 +4,11 @@ import { useEffect, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
-import { NotificationMatrixEditor } from "@/components/settings/NotificationMatrix";
+import {
+  mailUnavailable,
+  MailAvailability,
+  NotificationMatrixEditor,
+} from "@/components/settings/NotificationMatrix";
 import { NotificationMatrix } from "@/types";
 
 import Link from "next/link";
@@ -19,6 +23,7 @@ interface Prefs {
   defaults: NotificationMatrix;
   projects: { project: string; matrix: NotificationMatrix }[];
   chat: { configured: boolean };
+  email?: MailAvailability;
 }
 
 export function NotificationsSection({ project }: SectionProps) {
@@ -29,6 +34,7 @@ export function NotificationsSection({ project }: SectionProps) {
   const [matrix, setMatrix] = useState<NotificationMatrix | null>(null);
   const [overriding, setOverriding] = useState(false);
   const [chatConfigured, setChatConfigured] = useState(false);
+  const [mail, setMail] = useState<MailAvailability | undefined>();
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -56,6 +62,7 @@ export function NotificationsSection({ project }: SectionProps) {
         setMatrix(own?.matrix ?? prefs.defaults);
         setOverriding(!!own);
         setChatConfigured(prefs.chat.configured);
+        setMail(prefs.email);
       })
       .catch(() => {
         if (!ignore) setLoadFailed(true);
@@ -156,6 +163,7 @@ export function NotificationsSection({ project }: SectionProps) {
         disabled={!overriding}
         chatDisabled={!chatConfigured}
         chatDisabledHint="Connect Slack or Discord on your global Notifications page first."
+        emailUnavailable={mailUnavailable(mail)}
         scope="project"
       />
 

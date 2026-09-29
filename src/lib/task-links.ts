@@ -476,6 +476,7 @@ async function announce(
       projectId,
       actorId,
       title: summary,
+      digestTitle: sentence(row, "this task"),
       body: row.subject.title,
       recipientIds: collectRecipients(row.subject),
       email: {
