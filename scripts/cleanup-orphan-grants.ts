@@ -22,7 +22,7 @@ function list(label: string, rows: OrphanGrant[]) {
 
 async function main() {
   const { uri, source } = resolveUri();
-  await mongoose.connect(uri, dbName() ? { dbName: dbName() } : undefined);
+  await mongoose.connect(uri, { autoIndex: false, ...(dbName() ? { dbName: dbName() } : {}) });
   console.log(`Connected via ${source} to database "${mongoose.connection.name}"${APPLY ? "" : " (dry run)"}`);
 
   const orphans = await findOrphanGrants();
