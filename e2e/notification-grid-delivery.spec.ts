@@ -394,3 +394,60 @@ test("a personal chat connection is saved through its own form and survives the 
 test.afterAll(async () => {
   if (mongoose.connection.readyState !== 0) await mongoose.disconnect();
 });
+
+/**
+ * BP-735. The e-mail column used to take a tick from an account with nowhere to send it, and then
+ * deliver nothing, where the chat column beside it already refused. This server has a mail server,
+ * so what separates the two readers is the address alone; the no-mail-server branch is a unit test,
+ * since the rig's one app server always has one.
+ */
+test("the e-mail column is open to an account with an address, and closed to one without", async ({
+  browser,
+}) => {
+  const NO_ADDRESS = "Add an e-mail address on your profile before sending anything there.";
+  const admin = await (await browser.newContext()).newPage();
+  const member = await (await browser.newContext()).newPage();
+
+  const adminRecord = await (await db()).collection("users").findOne({ username: ADMIN_USERNAME });
+  expect(adminRecord?.email ?? "", "the admin is the reader with no address").toBe("");
+
+  await signIn(member, MEMBER_USERNAME, MEMBER_PASSWORD);
+  await signIn(admin, ADMIN_USERNAME, ADMIN_PASSWORD);
+
+  await test.step("a reader with a mailbox can tick it", async () => {
+    await member.goto("/settings/notifications");
+    await expect(member.getByRole("checkbox", { name: `${ASSIGNED_ROW} — In app` })).toBeEnabled();
+    await expect(member.getByRole("checkbox", { name: `${ASSIGNED_ROW} — E-mail` })).toBeEnabled();
+    await expect(member.getByText(NO_ADDRESS)).toHaveCount(0);
+  });
+
+  await test.step("a reader with none cannot, and is told why", async () => {
+    await admin.goto("/settings/notifications");
+    await expect(admin.getByRole("checkbox", { name: `${ASSIGNED_ROW} — In app` })).toBeEnabled();
+    await expect(admin.getByRole("checkbox", { name: `${ASSIGNED_ROW} — E-mail` })).toBeDisabled();
+    await expect(admin.getByText(NO_ADDRESS)).toBeVisible();
+  });
+
+  await test.step("nor on a board's own grid, once it takes over", async () => {
+    await admin.goto(`/projects/${PROJECT_KEY}/settings`);
+    await admin.getByRole("button", { name: "Notifications", exact: true }).first().click();
+    const override = admin.waitForResponse(
+      (r) => r.request().method() === "PUT" && /\/notifications\//.test(new URL(r.url()).pathname)
+    );
+    await admin.getByLabel("Use my own settings for this project").check();
+    await override;
+
+    await expect(admin.getByRole("checkbox", { name: `${ASSIGNED_ROW} — In app` })).toBeEnabled();
+    await expect(admin.getByRole("checkbox", { name: `${ASSIGNED_ROW} — E-mail` })).toBeDisabled();
+    await expect(admin.getByText(NO_ADDRESS)).toBeVisible();
+  });
+
+  await test.step("and the column opens once the reader has an address", async () => {
+    await giveThemMailboxes({ [ADMIN_USERNAME]: "admin@e2e.invalid" });
+    await admin.goto("/settings/notifications");
+    await expect(admin.getByRole("checkbox", { name: `${ASSIGNED_ROW} — E-mail` })).toBeEnabled();
+  });
+
+  await admin.context().close();
+  await member.context().close();
+});

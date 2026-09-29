@@ -21,6 +21,18 @@ const PROJECT_ROW_LABEL: Partial<Record<NotificationType, string>> = {
 
 const OFF = { inApp: false, email: false, chat: false };
 
+export interface MailAvailability {
+  server: boolean;
+  address: boolean;
+}
+
+export function emailUnavailableHint(mail: MailAvailability | undefined): string | undefined {
+  if (!mail) return undefined;
+  if (!mail.server) return "This instance has no mail server, so nothing can be sent by e-mail.";
+  if (!mail.address) return "Add an e-mail address on your profile before sending anything there.";
+  return undefined;
+}
+
 const COLUMNS = [
   { key: "inApp", label: "In app" },
   { key: "email", label: "E-mail" },
@@ -33,6 +45,8 @@ export function NotificationMatrixEditor({
   disabled = false,
   chatDisabled = false,
   chatDisabledHint,
+  emailDisabled = false,
+  emailDisabledHint,
   scope = "global",
 }: {
   value: NotificationMatrix;
@@ -41,6 +55,9 @@ export function NotificationMatrixEditor({
   /** No personal webhook configured: ticking the column would deliver nowhere, which fails silently */
   chatDisabled?: boolean;
   chatDisabledHint?: string;
+  /** No mail server on the instance, or no address on the account: the column would send nothing */
+  emailDisabled?: boolean;
+  emailDisabledHint?: string;
   /** Which board the grid is being read against, for the rows that say "a board" otherwise */
   scope?: "global" | "project";
 }) {
@@ -65,6 +82,9 @@ export function NotificationMatrixEditor({
                 {c.key === "chat" && chatDisabled && (
                   <span className="block text-[11px] font-normal">not connected</span>
                 )}
+                {c.key === "email" && emailDisabled && (
+                  <span className="block text-[11px] font-normal">unavailable</span>
+                )}
               </th>
             ))}
           </tr>
@@ -74,7 +94,10 @@ export function NotificationMatrixEditor({
             <tr key={type} className="border-b border-border last:border-0">
               <td className="py-2.5 pr-4">{labelOf(type)}</td>
               {COLUMNS.map((c) => {
-                const off = disabled || (c.key === "chat" && chatDisabled);
+                const off =
+                  disabled ||
+                  (c.key === "chat" && chatDisabled) ||
+                  (c.key === "email" && emailDisabled);
                 return (
                   <td key={c.key} className="py-2.5 text-center">
                     <input
@@ -93,6 +116,9 @@ export function NotificationMatrixEditor({
         </tbody>
       </table>
 
+      {emailDisabled && emailDisabledHint && (
+        <p className="mt-3 text-xs text-text-muted">{emailDisabledHint}</p>
+      )}
       {chatDisabled && chatDisabledHint && (
         <p className="mt-3 text-xs text-text-muted">{chatDisabledHint}</p>
       )}

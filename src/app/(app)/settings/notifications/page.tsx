@@ -5,7 +5,11 @@ import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
-import { NotificationMatrixEditor } from "@/components/settings/NotificationMatrix";
+import {
+  emailUnavailableHint,
+  MailAvailability,
+  NotificationMatrixEditor,
+} from "@/components/settings/NotificationMatrix";
 import { NotificationMatrix, PERSONAL_CHAT_KINDS, PersonalChatKind } from "@/types";
 
 
@@ -17,6 +21,7 @@ function messageOf(err: unknown, fallback: string): string {
 interface Loaded {
   defaults: NotificationMatrix;
   chat: { kind: PersonalChatKind | ""; configured: boolean };
+  email?: MailAvailability;
 }
 
 export default function NotificationsPage() {
@@ -28,6 +33,7 @@ export default function NotificationsPage() {
   const [chatKind, setChatKind] = useState<PersonalChatKind | "">("");
   const [webhookUrl, setWebhookUrl] = useState("");
   const [chatConfigured, setChatConfigured] = useState(false);
+  const [mail, setMail] = useState<MailAvailability | undefined>();
   const [emailDigest, setEmailDigest] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -54,6 +60,7 @@ export default function NotificationsPage() {
         setMatrix(prefs.defaults);
         setChatKind(prefs.chat.kind);
         setChatConfigured(prefs.chat.configured);
+        setMail(prefs.email);
         setEmailDigest(me.emailDigest ?? false);
       })
       .catch(() => {
@@ -137,6 +144,8 @@ export default function NotificationsPage() {
         onChange={setMatrix}
         chatDisabled={!chatReady}
         chatDisabledHint="Connect Slack or Discord below before sending anything there."
+        emailDisabled={!!emailUnavailableHint(mail)}
+        emailDisabledHint={emailUnavailableHint(mail)}
       />
 
       <div className="mt-6 flex items-center gap-3">

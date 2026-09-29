@@ -207,3 +207,37 @@ describe("the notifications page while its load effect is running twice", () => 
     await screen.findByLabelText(ASSIGNED_EMAIL);
   });
 });
+
+// BP-735. The e-mail column is closed where it would deliver nothing, the way the chat column is.
+describe("the e-mail column on the global grid", () => {
+  const withMail = (email: { server: boolean; address: boolean }) =>
+    api.get.mockImplementation(async (path: string) =>
+      path === "/api/users/me/notifications" ? { ...prefs(grid(false)), email } : { emailDigest: false }
+    );
+
+  it("is closed, with the reason, on an instance with no mail server", async () => {
+    withMail({ server: false, address: true });
+    render(<NotificationsPage />);
+
+    const cell = (await screen.findByLabelText(ASSIGNED_EMAIL)) as HTMLInputElement;
+    expect(cell.disabled).toBe(true);
+    expect(screen.getByText(/no mail server/)).toBeTruthy();
+  });
+
+  it("is closed for an account with no address", async () => {
+    withMail({ server: true, address: false });
+    render(<NotificationsPage />);
+
+    const cell = (await screen.findByLabelText(ASSIGNED_EMAIL)) as HTMLInputElement;
+    expect(cell.disabled).toBe(true);
+    expect(screen.getByText(/e-mail address on your profile/)).toBeTruthy();
+  });
+
+  it("is open when both are there", async () => {
+    withMail({ server: true, address: true });
+    render(<NotificationsPage />);
+
+    const cell = (await screen.findByLabelText(ASSIGNED_EMAIL)) as HTMLInputElement;
+    expect(cell.disabled).toBe(false);
+  });
+});
