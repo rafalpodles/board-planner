@@ -16,7 +16,7 @@ REST API, so coding agents pick up the same tasks under the same rules as everyb
 <img src="https://img.shields.io/badge/Next.js-16-000?logo=nextdotjs&logoColor=white" alt="Next.js 16">
 <img src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white" alt="TypeScript">
 <img src="https://img.shields.io/badge/MongoDB-4.4%2B-47A248?logo=mongodb&logoColor=white" alt="MongoDB 4.4+">
-<img src="https://img.shields.io/badge/MCP-12%20tools-5b8cff" alt="MCP: 12 tools">
+<img src="https://img.shields.io/badge/MCP-14%20tools-5b8cff" alt="MCP: 14 tools">
 <img src="https://img.shields.io/badge/self--hosted-docker%20compose-2496ED?logo=docker&logoColor=white" alt="Self-hosted">
 
 <br><br>
@@ -35,13 +35,11 @@ dragging the card, and leaves the same trail in the same history.
 
 Self-hosted, single instance, no tenants. `docker compose up` and it is yours.
 
-## The part nobody else ships
+## Handing work to a machine
 
-Plenty of tools can now make a machine write code. The interesting problem is not that — it is
-everything around it: **who proposed the work, who approved it, what the machine was allowed to
-touch, what had to pass before anything landed, and where it stops and gives the work back.** That
-is the part Board Planner is actually about, and it is a first-class product surface rather than a
-webhook you wire up yourself.
+Plenty of tools can now make a machine write code. Board Planner is about everything around it:
+**who proposed the work, who approved it, what the machine was allowed to touch, what had to pass
+before anything landed, and where it stops and gives the work back.**
 
 Two agents, at the two ends of that arc: a **PM agent** that proposes and writes things down, and
 an **execution worker** that takes an approved task and does it. Neither decides anything you did
@@ -52,20 +50,20 @@ not let it decide.
   <img src="docs/images/pipeline.svg" alt="A run: claim, worktree, agent, gates, push, pull request — then a wall, because the review column is where it stops and hands the task back to you" width="100%">
 </picture>
 
-### It starts as a question, not a queue of tickets
+### A PM agent that brings you the decision
 
 The **PM agent** is a project manager that lives in the project. It reads the board, notices what
-is stuck, duplicated or missing, and brings you the decision — rather than filing a pile of tickets
+is stuck, duplicated or missing, and brings you the decision rather than filing a pile of tickets
 nobody asked for. It is good at the work nobody enjoys: writing the acceptance criteria a task was
 created without, finding the duplicate, saying where a sprint actually stands.
 
 <img src="docs/images/pm-agent.png" alt="The PM agent thread: asked to write acceptance criteria for ORB-9 without moving it, it writes four, explains the one worth arguing about, and says it left the task where it was" width="100%">
 
-Two things about that screenshot are the point. **The badge under the reply is the action** — the
-message and the write are one record, so you can see a reply also changed `ORB-9` rather than
-merely talking about it. And **it left the task where it was**, because it was told to. Board
-reviews run with `change_status` and `create_task` withheld, so the autonomous path can tell you
-something is wrong without quietly reorganising your board overnight.
+In that screenshot, **the badge under the reply is the action** — the message and the write are one
+record, so you can see a reply also changed `ORB-9` rather than merely talking about it. And **it
+left the task where it was**, because it was told to. Board reviews run with `change_status` and
+`create_task` withheld, so the autonomous path can tell you something is wrong without quietly
+reorganising your board overnight.
 
 It is off by default, per project, and metered rather than trusted: a daily cap on turns and an
 optional cap on tokens, both spent by autonomous turns as well as yours, and an instance
@@ -81,7 +79,7 @@ Assign the task, name an agent, drag it into the column you approve from. **That
 hand-over** — nothing runs on a task that names no agent, and there is no falling back to a project
 default. A task somebody else assigned to you is a proposal, not a job queued on your machine.
 
-### An agent is composed, not configured
+### An agent is a list of steps and gates
 
 An **agent** is an ordered list of blocks, and there are exactly two kinds:
 
@@ -90,18 +88,18 @@ An **agent** is an ordered list of blocks, and there are exactly two kinds:
 | **Step** — Implement, Push, Pull request, Merge | yes | no |
 | **Gate** — Size, Protected files, Test written, Builds, Tests pass, Reviewed | no | yes |
 
-A step cannot refuse and a gate cannot write. That single boundary is what makes a composition
-readable: every block that could stop the run is a gate, and you can see all of them at a glance.
+A step cannot refuse and a gate cannot write, so every block that could stop the run is a gate, and
+you can see all of them at a glance.
 
 Each step is **its own model session**. Two steps in one agent share the task and the worktree and
-nothing else — which is why *analyse, then implement* is genuinely different from asking one model
+nothing else, which is why *analyse, then implement* is different from asking one model
 to do both: the second step reads what the first wrote, not what it was thinking.
 
 **Merging is a step, not a switch.** There is no "auto-merge" checkbox and no rule that ties it to
 a review setting. An agent merges because its sequence ends with a Merge block; leave it out and
-the run stops at the pull request. What you read is what runs.
+the run stops at the pull request.
 
-Three agents ship with it — **Default**, **With security review**, **Merges its own work** — and a
+Three agents ship with it: **Default**, **With security review** and **Merges its own work**. A
 project that never opens the editor runs Default.
 
 ### The machine is not trusted, by construction
@@ -133,7 +131,7 @@ branch, edits, which gate said no, how much model quota is left. No side channel
 
 Columns you name, in an order you choose. Each one is mapped to a role automation understands
 (`backlog`, `approved`, `active`, `review`, `blocked`, `done`), so renaming *Up next* to *Ready*
-breaks nothing — and any column with the `review` role is a stop sign for automation, where work
+breaks nothing. Any column with the `review` role is a stop sign for automation, where work
 waits for a person. Drag-and-drop board, list view, sprints, dependencies and subtasks, recurring
 tasks, and ⌘K search across every task from anywhere in the app.
 
@@ -144,8 +142,8 @@ It follows your system theme, and the whole app is built for both:
 ### A task holds everything the work needs
 
 Acceptance criteria that tick off one by one, dependencies, the pull request that closes it, custom
-fields you define per project, every comment and every change since it was created. Nothing lives in
-a side channel. Name a branch `bp-8/dark-mode` and the pull request finds its task on its own.
+fields you define per project, every comment and every change since it was created. Name a branch
+`bp-8/dark-mode` and the pull request finds its task on its own.
 
 <img src="docs/images/task.png" alt="A task with acceptance criteria, a linked pull request, a blocked-by dependency, custom fields and comments" width="100%">
 
@@ -189,13 +187,6 @@ sign in. To run 1.1.1 with it, put `COOKIE_ALLOW_INSECURE=1` in `.env`.
 **From a clone, run `docker compose up -d --build`.** Plain `docker compose up -d` pulls and runs
 the last *release*, not the code you have checked out; `--build` builds the checkout and runs that.
 
-### Upgrading from a build before the published image
-
-Rename `NEXT_PUBLIC_APP_URL` in your `.env` to `PUBLIC_ORIGIN`. The app no longer reads the old name
-at all; `docker-compose.yml` still passes it on as `PUBLIC_ORIGIN` when `PUBLIC_ORIGIN` is unset, so
-an untouched `.env` keeps its links, but that fallback lives in the compose file only — any other
-way of running the image needs `PUBLIC_ORIGIN` itself.
-
 Open <http://localhost:3000>. The first account created on the sign-in page becomes the instance
 administrator; every account after that is made from **Settings → Users**.
 
@@ -207,6 +198,13 @@ set `BOOTSTRAP_TOKEN` there instead.
 
 Stop it with `docker compose down`. The database lives in the `mongo-data` volume and survives that;
 `docker compose down -v` deletes it.
+
+### Upgrading from a build before the published image
+
+Rename `NEXT_PUBLIC_APP_URL` in your `.env` to `PUBLIC_ORIGIN`. The app no longer reads the old name
+at all; `docker-compose.yml` still passes it on as `PUBLIC_ORIGIN` when `PUBLIC_ORIGIN` is unset, so
+an untouched `.env` keeps its links, but that fallback lives in the compose file only — any other
+way of running the image needs `PUBLIC_ORIGIN` itself.
 
 ### Without Docker
 
@@ -281,8 +279,6 @@ Everything is optional except the database. Put overrides in a `.env` file next 
 | `GITHUB_SYNC_TICK_MS` | `300000` | How often projects with a GitHub token are re-synced; `0` turns the background sync off |
 | `GITHUB_API_BASE_URL` | `https://api.github.com` | Where GitHub's API is, for GitHub Enterprise Server |
 
-A few of these have sharp edges worth reading once.
-
 <details>
 <summary><strong><code>COOKIE_ALLOW_INSECURE</code> and <code>APP_ORIGIN</code></strong> — behind TLS, set <code>PUBLIC_ORIGIN</code> to the https address</summary>
 
@@ -327,7 +323,7 @@ refused as not matching what you described — every caller then shares the anon
 bounded but shared. Set it **too low** and the address counted is one your proxy chain writes rather
 than the client's, so every request on earth may land in the same bucket — and because that bucket
 looks to the app like a genuine address, it is metered at the *tight* per-address ceilings rather
-than the raised anonymous ones. Too low throttles the whole world as though it were one caller.
+than the raised anonymous ones.
 
 **Measure it rather than guess.** At `0`, a request carrying `X-Forwarded-For` to a route that
 throttles by address — sign-in, password reset, the OAuth endpoints, machine enrolment, account
@@ -375,7 +371,7 @@ and costs none of the four.
 It encrypts the GitHub, GitLab, Coda and MCP credentials the app stores, and the Slack/Discord
 webhook URLs behind a project's team channels and a person's own notifications — an incoming-webhook
 URL is a bearer credential, and anyone holding it posts into that room as the integration. Generate
-one with `openssl rand -hex 32`. Without it those fields simply cannot be saved — the app answers
+one with `openssl rand -hex 32`. Without it those fields cannot be saved — the app answers
 the save with an error rather than writing the secret in cleartext, and says so at startup. **A
 board that used team channels before this instance had a key still has those URLs in cleartext:
 `npx tsx scripts/migrate-channel-webhooks.ts` rewrites them, and they are worth rotating in Slack
@@ -465,7 +461,6 @@ E2E_PORT=3200 PM_STUB_PORT=3201 E2E_MONGODB_URI=mongodb://localhost:27017/local_
 
 **[board-planner.com](https://board-planner.com)** is the product tour — a board you can actually
 drag a card on, a worker run you can try to interrupt while it is going, and the gate that refuses.
-If this README interested you, that page is the five minutes worth spending next.
 
 **[board-planner.com/docs](https://board-planner.com/docs)** is the manual, twenty-eight pages of
 it, and the single source of truth: it lives in the `board-planner-site` repository and publishes
