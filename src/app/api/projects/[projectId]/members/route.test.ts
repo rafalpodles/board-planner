@@ -10,7 +10,7 @@ const grantUpsertLean = vi.fn();
 const grantDelete = vi.fn();
 const grantDeleteLean = vi.fn();
 const logProjectAudit = vi.fn();
-const grantCountDocuments = vi.fn();
+const ownerCount = vi.fn();
 const userFind = vi.fn();
 const userFindLean = vi.fn();
 const userFindById = vi.fn();
@@ -28,7 +28,7 @@ vi.mock("@/lib/auth", () => ({
 }));
 vi.mock("@/lib/grants", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/grants")>();
-  return { ...actual, check, accessibleProjectIds: vi.fn(), recipientsWithAccess };
+  return { ...actual, check, accessibleProjectIds: vi.fn(), recipientsWithAccess, ownerCount };
 });
 vi.mock("@/models/grant", () => ({
   Grant: {
@@ -40,7 +40,6 @@ vi.mock("@/models/grant", () => ({
     findOneAndDelete: (...a: unknown[]) => (
       grantDelete(...a), { select: () => ({ lean: grantDeleteLean }) }
     ),
-    countDocuments: grantCountDocuments,
   },
 }));
 vi.mock("@/models/user", () => ({
@@ -88,7 +87,7 @@ beforeEach(() => {
   grantFindOneLean.mockResolvedValue(null);
   userFindLean.mockResolvedValue([]);
   userFindByIdSelect.mockResolvedValue({ _id: "u1", role: "member", kind: "human", username: "uma" });
-  grantCountDocuments.mockResolvedValue(2);
+  ownerCount.mockResolvedValue(2);
   recipientsWithAccess.mockResolvedValue([]);
   grantUpsertLean.mockResolvedValue(null);
   grantDeleteLean.mockResolvedValue({ relation: "member" });
@@ -179,7 +178,7 @@ describe("PUT members", () => {
 
   it("allows granting member to someone who was never an owner, even with only one owner on the board", async () => {
     grantFindOneLean.mockResolvedValue(null);
-    grantCountDocuments.mockResolvedValue(1);
+    ownerCount.mockResolvedValue(1);
     const res = await PUT(put({ userId: U2, relation: "member" }), { params });
     expect(res.status).toBe(200);
     expect(grantUpsert).toHaveBeenCalledWith(
@@ -191,7 +190,7 @@ describe("PUT members", () => {
 
   it("refuses to demote the last owner", async () => {
     grantFindOneLean.mockResolvedValue({ relation: "owner" });
-    grantCountDocuments.mockResolvedValue(1);
+    ownerCount.mockResolvedValue(1);
     const res = await PUT(put({ userId: U1, relation: "member" }), { params });
     expect(res.status).toBe(409);
     expect(grantFindOne).toHaveBeenCalledWith({ subject: U1, objectType: "project", object: PROJECT });
@@ -200,7 +199,7 @@ describe("PUT members", () => {
 
   it("lets one owner demote another, leaving the board with one owner", async () => {
     grantFindOneLean.mockResolvedValue({ relation: "owner" });
-    grantCountDocuments.mockResolvedValue(2);
+    ownerCount.mockResolvedValue(2);
     const res = await PUT(put({ userId: U2, relation: "member" }), { params });
     expect(res.status).toBe(200);
     expect(grantUpsert).toHaveBeenCalledWith(
@@ -250,7 +249,7 @@ describe("DELETE members", () => {
   // shouted skipped the 409 — and `Grant.findOneAndDelete` cast it back and removed the row, leaving a
   // board with no owner at all.
   it("refuses to remove the last owner however the id is spelled", async () => {
-    grantCountDocuments.mockResolvedValue(1);
+    ownerCount.mockResolvedValue(1);
     grantFindLean.mockResolvedValue([{ subject: U2, relation: "owner" }]);
     const url = `http://x/api/projects/${PROJECT}/members?userId=${U2.toUpperCase()}`;
     const res = await DELETE(new Request(url, { method: "DELETE" }), { params });
@@ -259,7 +258,7 @@ describe("DELETE members", () => {
   });
 
   it("refuses to remove the last owner", async () => {
-    grantCountDocuments.mockResolvedValue(1);
+    ownerCount.mockResolvedValue(1);
     grantFindLean.mockResolvedValue([{ subject: U2, relation: "owner" }]);
     const url = `http://x/api/projects/${PROJECT}/members?userId=${U2}`;
     const res = await DELETE(new Request(url, { method: "DELETE" }), { params });
@@ -324,7 +323,7 @@ describe("DELETE members", () => {
   });
 
   it("clears nothing when the removal itself was refused", async () => {
-    grantCountDocuments.mockResolvedValue(1);
+    ownerCount.mockResolvedValue(1);
     grantFindLean.mockResolvedValue([{ subject: U2, relation: "owner" }]);
     const url = `http://x/api/projects/${PROJECT}/members?userId=${U2}`;
     await DELETE(new Request(url, { method: "DELETE" }), { params });
@@ -399,7 +398,7 @@ describe("PUT members tells the person", () => {
 
   it("nothing when the change was refused", async () => {
     grantFindOneLean.mockResolvedValue({ relation: "owner" });
-    grantCountDocuments.mockResolvedValue(1);
+    ownerCount.mockResolvedValue(1);
 
     const res = await PUT(put({ userId: U1, relation: "member" }), { params });
     await settle();

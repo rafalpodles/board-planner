@@ -45,6 +45,7 @@ export default function UsersPage() {
     null
   );
   const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   const [mailWorks, setMailWorks] = useState(false);
   const [addingToBoard, setAddingToBoard] = useState<ApiUser | null>(null);
 
@@ -210,10 +211,11 @@ export default function UsersPage() {
   async function handleDelete() {
     if (!confirmDeleteUser || deleting) return;
     setDeleting(true);
+    setDeleteError("");
     try {
       await api.del(`/api/users/${confirmDeleteUser._id}`);
     } catch (err) {
-      toast(err instanceof Error ? err.message : "Failed to delete user", "error");
+      setDeleteError(err instanceof Error ? err.message : "Failed to delete user");
       setDeleting(false);
       return;
     }
@@ -487,12 +489,16 @@ export default function UsersPage() {
 
       <ConfirmDialog
         open={!!confirmDeleteUser}
-        onClose={() => setConfirmDeleteUser(null)}
+        onClose={() => {
+          setConfirmDeleteUser(null);
+          setDeleteError("");
+        }}
         onConfirm={handleDelete}
         title="Delete User"
         message={`Are you sure you want to delete "${confirmDeleteUser?.fullName}"? This action cannot be undone.`}
         confirmLabel="Delete User"
         loading={deleting}
+        error={deleteError}
       />
     </div>
   );
