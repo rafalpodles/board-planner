@@ -39,6 +39,8 @@ export default function NotificationsPage() {
   const [loaded, setLoaded] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
 
+  const mailUnavailable = emailUnavailableHint(mail);
+
   // Delivery needs both a service and an address; either alone sends nothing and says nothing
   const chatReady = !!chatKind && (chatConfigured || !!webhookUrl.trim());
 
@@ -144,8 +146,8 @@ export default function NotificationsPage() {
         onChange={setMatrix}
         chatDisabled={!chatReady}
         chatDisabledHint="Connect Slack or Discord below before sending anything there."
-        emailDisabled={!!emailUnavailableHint(mail)}
-        emailDisabledHint={emailUnavailableHint(mail)}
+        emailDisabled={!!mailUnavailable}
+        emailDisabledHint={mailUnavailable}
       />
 
       <div className="mt-6 flex items-center gap-3">
@@ -153,8 +155,9 @@ export default function NotificationsPage() {
           type="checkbox"
           id="emailDigest"
           checked={emailDigest}
+          disabled={!!mailUnavailable}
           onChange={(e) => toggleDigest(e.target.checked)}
-          className="focus-ring rounded border-border"
+          className="focus-ring rounded border-border disabled:opacity-40"
         />
         <label htmlFor="emailDigest" className="text-sm cursor-pointer">
           Collect the e-mail column into one daily digest
@@ -164,6 +167,7 @@ export default function NotificationsPage() {
         One message each morning listing what you have not read yet, instead of a mail per event.
         Password and account-security notices are never held back.
       </p>
+      {mailUnavailable && <p className="mt-1 text-xs text-text-muted">{mailUnavailable}</p>}
 
       <h3 className="mt-10 mb-1 text-sm font-semibold">Your chat connection</h3>
       <p className="mb-4 text-xs text-text-muted">

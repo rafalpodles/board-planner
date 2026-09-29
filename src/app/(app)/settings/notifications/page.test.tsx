@@ -210,10 +210,11 @@ describe("the notifications page while its load effect is running twice", () => 
 
 // BP-735. The e-mail column is closed where it would deliver nothing, the way the chat column is.
 describe("the e-mail column on the global grid", () => {
-  const withMail = (email: { server: boolean; address: boolean }) =>
+  const withMail = (email: { server: boolean; address: boolean }, emailDigest = false) =>
     api.get.mockImplementation(async (path: string) =>
-      path === "/api/users/me/notifications" ? { ...prefs(grid(false)), email } : { emailDigest: false }
+      path === "/api/users/me/notifications" ? { ...prefs(grid(false)), email } : { emailDigest }
     );
+  const DIGEST = "Collect the e-mail column into one daily digest";
 
   it("is closed, with the reason, on an instance with no mail server", async () => {
     withMail({ server: false, address: true });
@@ -221,7 +222,7 @@ describe("the e-mail column on the global grid", () => {
 
     const cell = (await screen.findByLabelText(ASSIGNED_EMAIL)) as HTMLInputElement;
     expect(cell.disabled).toBe(true);
-    expect(screen.getByText(/no mail server/)).toBeTruthy();
+    expect(screen.getAllByText(/no mail server/).length).toBeGreaterThan(0);
   });
 
   it("is closed for an account with no address", async () => {
@@ -230,7 +231,7 @@ describe("the e-mail column on the global grid", () => {
 
     const cell = (await screen.findByLabelText(ASSIGNED_EMAIL)) as HTMLInputElement;
     expect(cell.disabled).toBe(true);
-    expect(screen.getByText(/e-mail address on your profile/)).toBeTruthy();
+    expect(screen.getAllByText(/e-mail address on your profile/).length).toBeGreaterThan(0);
   });
 
   it("is open when both are there", async () => {
@@ -239,5 +240,34 @@ describe("the e-mail column on the global grid", () => {
 
     const cell = (await screen.findByLabelText(ASSIGNED_EMAIL)) as HTMLInputElement;
     expect(cell.disabled).toBe(false);
+  });
+
+  // The digest is the same column collected into one message, so it closes on the same grounds
+  it("closes the digest box too, keeping a stored tick, and says why", async () => {
+    withMail({ server: false, address: true }, true);
+    render(<NotificationsPage />);
+
+    const digest = (await screen.findByLabelText(DIGEST)) as HTMLInputElement;
+    expect(digest.disabled).toBe(true);
+    expect(digest.checked).toBe(true);
+    // Once under the grid, once under the digest box
+    expect(screen.getAllByText(/no mail server/)).toHaveLength(2);
+  });
+
+  it("closes the digest box for an account with no address", async () => {
+    withMail({ server: true, address: false });
+    render(<NotificationsPage />);
+
+    const digest = (await screen.findByLabelText(DIGEST)) as HTMLInputElement;
+    expect(digest.disabled).toBe(true);
+    expect(screen.getAllByText(/e-mail address on your profile/)).toHaveLength(2);
+  });
+
+  it("leaves the digest box open when mail can be sent", async () => {
+    withMail({ server: true, address: true });
+    render(<NotificationsPage />);
+
+    const digest = (await screen.findByLabelText(DIGEST)) as HTMLInputElement;
+    expect(digest.disabled).toBe(false);
   });
 });

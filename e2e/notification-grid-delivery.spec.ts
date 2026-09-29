@@ -405,6 +405,7 @@ test("the e-mail column is open to an account with an address, and closed to one
   browser,
 }) => {
   const NO_ADDRESS = "Add an e-mail address on your profile before sending anything there.";
+  const DIGEST_BOX = "Collect the e-mail column into one daily digest";
   const admin = await (await browser.newContext()).newPage();
   const member = await (await browser.newContext()).newPage();
 
@@ -418,6 +419,7 @@ test("the e-mail column is open to an account with an address, and closed to one
     await member.goto("/settings/notifications");
     await expect(member.getByRole("checkbox", { name: `${ASSIGNED_ROW} — In app` })).toBeEnabled();
     await expect(member.getByRole("checkbox", { name: `${ASSIGNED_ROW} — E-mail` })).toBeEnabled();
+    await expect(member.getByLabel(DIGEST_BOX)).toBeEnabled();
     await expect(member.getByText(NO_ADDRESS)).toHaveCount(0);
   });
 
@@ -425,7 +427,9 @@ test("the e-mail column is open to an account with an address, and closed to one
     await admin.goto("/settings/notifications");
     await expect(admin.getByRole("checkbox", { name: `${ASSIGNED_ROW} — In app` })).toBeEnabled();
     await expect(admin.getByRole("checkbox", { name: `${ASSIGNED_ROW} — E-mail` })).toBeDisabled();
-    await expect(admin.getByText(NO_ADDRESS)).toBeVisible();
+    await expect(admin.getByLabel(DIGEST_BOX)).toBeDisabled();
+    // Under the grid and under the digest box
+    await expect(admin.getByText(NO_ADDRESS)).toHaveCount(2);
   });
 
   await test.step("nor on a board's own grid, once it takes over", async () => {
@@ -446,6 +450,8 @@ test("the e-mail column is open to an account with an address, and closed to one
     await giveThemMailboxes({ [ADMIN_USERNAME]: "admin@e2e.invalid" });
     await admin.goto("/settings/notifications");
     await expect(admin.getByRole("checkbox", { name: `${ASSIGNED_ROW} — E-mail` })).toBeEnabled();
+    await expect(admin.getByLabel(DIGEST_BOX)).toBeEnabled();
+    await expect(admin.getByText(NO_ADDRESS)).toHaveCount(0);
   });
 
   await admin.context().close();
