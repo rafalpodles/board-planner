@@ -76,6 +76,7 @@ describe.skipIf(!uri)("connectDB against a real mongod — a starved stale check
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await mongoose.disconnect();
     delete (globalThis as { mongooseCache?: unknown }).mongooseCache;
   });
@@ -92,13 +93,16 @@ describe.skipIf(!uri)("connectDB against a real mongod — a starved stale check
   });
 
   it("lets a query already running on the replaced client finish", async () => {
-    const running = settled(Thing.find({ $where: "sleep(1000) || true" }).lean());
+    const running = settled(
+      Thing.find({ $where: "sleep(1000) || true" })
+        .sort({ n: 1 })
+        .lean()
+        .then((docs) => docs.map((doc) => doc.n))
+    );
 
     await replaceUnderStarvation(connectDB);
 
-    const outcome = await running;
-    expect(outcome).not.toHaveProperty("error");
-    expect(outcome).toEqual({ value: expect.arrayContaining([expect.objectContaining({ n: 1 })]) });
+    expect(await running).toEqual({ value: [1, 2, 3] });
   }, 30_000);
 
   it("lets a cursor read halfway through on the replaced client be read to the end", async () => {
@@ -118,15 +122,17 @@ describe.skipIf(!uri)("connectDB against a real mongod — a starved stale check
     expect(rest).toEqual({ value: [2, 3] });
   }, 30_000);
 
-  it("still closes the replaced client once its work is done", async () => {
+  it("closes the replaced client once its work is done, not before", async () => {
+    const close = vi.spyOn(MongoClient.prototype, "close");
     const running = settled(Thing.find({ $where: "sleep(1000) || true" }).lean());
 
     const abandoned = await replaceUnderStarvation(connectDB);
-    const close = vi.spyOn(abandoned, "close");
-    expect(close).not.toHaveBeenCalled();
+    const closesOfAbandoned = () =>
+      close.mock.contexts.filter((client) => client === abandoned).length;
+    expect(closesOfAbandoned()).toBe(0);
 
     await running;
-    await expect.poll(() => close.mock.calls.length, { timeout: 5_000 }).toBe(1);
+    await expect.poll(closesOfAbandoned, { timeout: 5_000 }).toBe(1);
     // And the replacement is the one answering
     await expect(Thing.countDocuments()).resolves.toBe(3);
   }, 30_000);
@@ -139,7 +145,7 @@ describe.skipIf(!uri)("connectDB against a real mongod — a starved stale check
     for (let cycle = 0; cycle < 6; cycle++) {
       const running = settled(Thing.find({ $where: "sleep(500) || true" }).lean());
       await replaceUnderStarvation(connectDB);
-      expect(await running).not.toHaveProperty("error");
+      expect(await running).toEqual({ value: expect.any(Array) });
     }
 
     await expect
