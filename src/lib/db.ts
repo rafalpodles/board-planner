@@ -71,28 +71,72 @@ const FAILURE_COOLDOWN_MS = 1_000;
 // twice over.
 const STALE_CHECK_TIMEOUT_MS = 2_000;
 
+// How long an abandoned client may keep work in flight before it is closed regardless. Each round
+// trip is already bounded by SOCKET_TIMEOUT_MS, so a session or cursor still open after four of
+// those is one nobody is going to end, and holding the client longer only holds its monitor.
+const ABANDONED_CLIENT_GRACE_MS = 60_000;
+const ABANDONED_CLIENT_DRAIN_POLL_MS = 250;
+
+type ClientInternals = { s?: { activeSessions?: Set<unknown>; activeCursors?: Set<unknown> } };
+
 /**
- * Let go of a MongoClient the connection has replaced.
+ * What `client.close()` would interrupt: it ends every active session and closes every active
+ * cursor, which is how a request still running on a replaced client failed with
+ * MongoExpiredSessionError, MongoPoolClosedError or MongoClientClosedError, and how a half-read
+ * cursor reported itself exhausted (BP-789). Every operation holds a session, implicit or not,
+ * from before server selection until it settles, so an empty set means nothing is left to break.
+ *
+ * Driver internals, read defensively: a driver that no longer exposes them is treated as busy, so
+ * the close waits out the grace period instead of interrupting anything.
+ */
+function hasWorkInFlight(client: MongoClient): boolean {
+  const state = (client as unknown as ClientInternals).s;
+  if (!state?.activeSessions || !state.activeCursors) return true;
+  return state.activeSessions.size > 0 || state.activeCursors.size > 0;
+}
+
+async function closeQuietly(client: MongoClient): Promise<void> {
+  try {
+    await client.close();
+  } catch {
+    // The client is being thrown away either way; nobody is waiting on this to succeed.
+  }
+}
+
+/**
+ * Let go of a MongoClient the connection has replaced, once nothing is still running on it.
  *
  * `mongoose.connect` assigns its client to the connection *before* awaiting `client.connect()` and
  * the next call overwrites that reference, so a connection the database went away under leaves a
  * client nobody holds with its topology monitor still polling. Measured against a real mongod:
  * without this, six outage/restore cycles took the connections through the proxy from 2 to 13.
  *
+ * Not at once: a reset is decided on a ping that lost a race, and a starved event loop loses it
+ * against a client that is still answering — the requests already running on it would be cut off
+ * mid-flight. Their models move to the replacement on its `open`, so only work begun before that
+ * can hold the old client, and it drains on its own; on a client that really is dead it fails
+ * within the connection's own timeouts and drains the same way.
+ *
  * The client rather than `mongoose.connection.close()`, which deletes every model's `$init` and
  * makes the reconnect re-run `createCollection` and `createIndexes` for all of them.
  *
  * Never the client the connection ended up with: `openUri` hands back the existing one when the
  * monitor has meanwhile marked the server usable again, and closing that is closing the live one.
+ *
+ * Not awaited by the caller: a request that only wanted a connection must neither wait for another
+ * request's work to drain nor be answered with a failure to close.
  */
-async function releaseAbandonedClient(client: MongoClient | undefined): Promise<void> {
+function releaseAbandonedClient(client: MongoClient | undefined): void {
   if (!client || client === mongoose.connection.getClient()) return;
-  try {
-    await client.close();
-  } catch {
-    // The client is being thrown away either way; a failure to close it is not the caller's problem
-    // and must not become the answer to a request that only wanted a connection.
-  }
+  const deadline = Date.now() + ABANDONED_CLIENT_GRACE_MS;
+  const closeOnceDrained = () => {
+    if (hasWorkInFlight(client) && Date.now() < deadline) {
+      setTimeout(closeOnceDrained, ABANDONED_CLIENT_DRAIN_POLL_MS).unref();
+      return;
+    }
+    void closeQuietly(client);
+  };
+  closeOnceDrained();
 }
 
 function openConnection(uri: string): Promise<typeof mongoose> {
@@ -169,10 +213,10 @@ export async function connectDB(): Promise<typeof mongoose> {
     // this resolves — `cached.conn` says which is still true.
     if ((await staleCheck) && cached.conn) {
       cached.conn = null;
-      // The old client is released after the replacement has been attempted, not before it.
-      // readyState 0 says the driver marked the server unknown, not that the client is dead — it
-      // goes on answering queries for seconds afterwards — so closing it first kills the requests
-      // already holding it, and does so while nothing else is connected yet.
+      // The old client is released after the replacement has been attempted, not before it, and
+      // only once the requests already holding it have finished: readyState 0 says the driver
+      // marked the server unknown, not that the client is dead — it goes on answering queries for
+      // seconds afterwards.
       const abandoned = mongoose.connection.getClient();
       cached.promise = openConnection(uri).finally(() => releaseAbandonedClient(abandoned));
     }

@@ -4,14 +4,20 @@ const connect = vi.fn();
 const close = vi.fn();
 // `client` rather than the connection's own `close`: the code closes the MongoClient, because
 // closing the connection would make mongoose rebuild every model's indexes on the reconnect.
-type FakeClient = { close: () => Promise<void>; db?: () => { command: (cmd: unknown) => Promise<unknown> } };
+type FakeClient = {
+  close: () => Promise<void>;
+  db?: () => { command: (cmd: unknown) => Promise<unknown> };
+  s?: { activeSessions: Set<unknown>; activeCursors: Set<unknown> };
+};
+// The driver state releaseAbandonedClient reads to tell whether anything still runs on a client
+const idle = () => ({ activeSessions: new Set<unknown>(), activeCursors: new Set<unknown>() });
 const connection: {
   readyState: number;
   client?: FakeClient;
   getClient: () => FakeClient | undefined;
 } = {
   readyState: 1,
-  client: { close },
+  client: { close, s: idle() },
   getClient: () => connection.client,
 };
 
@@ -46,7 +52,7 @@ describe("connectDB", () => {
     connect.mockReset();
     close.mockReset();
     close.mockResolvedValue(undefined);
-    connection.client = { close };
+    connection.client = { close, s: idle() };
     connection.readyState = 1;
     delete (globalThis as { mongooseCache?: unknown }).mongooseCache;
   });
@@ -162,7 +168,7 @@ describe("connectDB — a wrong deployment is not an outage", () => {
     connect.mockReset();
     close.mockReset();
     close.mockResolvedValue(undefined);
-    connection.client = { close };
+    connection.client = { close, s: idle() };
     connection.readyState = 1;
     delete (globalThis as { mongooseCache?: unknown }).mongooseCache;
   });
@@ -272,7 +278,7 @@ describe("connectDB — the state the tests could not see", () => {
     connect.mockReset();
     close.mockReset();
     close.mockResolvedValue(undefined);
-    connection.client = { close };
+    connection.client = { close, s: idle() };
     connection.readyState = 1;
     delete (globalThis as { mongooseCache?: unknown }).mongooseCache;
   });
@@ -400,7 +406,7 @@ describe("connectDB — the client a reconnect abandons", () => {
     connect.mockReset();
     close.mockReset();
     close.mockResolvedValue(undefined);
-    connection.client = { close };
+    connection.client = { close, s: idle() };
     connection.readyState = 1;
     delete (globalThis as { mongooseCache?: unknown }).mongooseCache;
   });
@@ -418,6 +424,7 @@ describe("connectDB — the client a reconnect abandons", () => {
     connect.mockImplementation(async () => {
       const client = {
         close: vi.fn(async () => void order.push(`close #${clients.indexOf(client)}`)),
+        s: idle(),
       };
       clients.push(client);
       connection.client = client;
@@ -456,14 +463,14 @@ describe("connectDB — the client a reconnect abandons", () => {
 
   it("closes it even when the replacement could not be opened", async () => {
     vi.useFakeTimers();
-    const abandoned = { close };
+    const abandoned = { close, s: idle() };
     connection.client = abandoned;
     const { connectDB } = await freshModule();
     vi.spyOn(console, "error").mockImplementation(() => {});
     connect
       .mockResolvedValueOnce({ ok: true })
       .mockImplementation(async () => {
-        connection.client = { close: vi.fn() };
+        connection.client = { close: vi.fn(), s: idle() };
         throw refused();
       });
 
@@ -508,6 +515,7 @@ describe("connectDB — the client a reconnect abandons", () => {
         close: vi.fn(async () => {
           throw new Error("topology already closed");
         }),
+        s: idle(),
       };
       return { ok: true };
     });
@@ -544,7 +552,7 @@ describe("connectDB — the client a reconnect abandons", () => {
     const order: string[] = [];
     connect.mockImplementation(async () => {
       order.push("connect");
-      connection.client = { close };
+      connection.client = { close, s: idle() };
       return { ok: true };
     });
     close.mockImplementation(async () => void order.push("close"));
@@ -578,7 +586,7 @@ describe("connectDB — a readyState that lied", () => {
     close.mockReset();
     close.mockResolvedValue(undefined);
     ping.mockReset();
-    connection.client = { close, db: () => ({ command: ping }) };
+    connection.client = { close, db: () => ({ command: ping }), s: idle() };
     connection.readyState = 1;
     delete (globalThis as { mongooseCache?: unknown }).mongooseCache;
   });
@@ -604,7 +612,7 @@ describe("connectDB — a readyState that lied", () => {
 
   it("still reconnects when the ping fails too", async () => {
     connect.mockImplementationOnce(async () => ({ ok: true })).mockImplementationOnce(async () => {
-      connection.client = { close: vi.fn(), db: () => ({ command: ping }) };
+      connection.client = { close: vi.fn(), db: () => ({ command: ping }), s: idle() };
       return { ok: true };
     });
     ping.mockRejectedValue(named("MongoNetworkError", "no route to host"));
@@ -668,5 +676,107 @@ describe("connectDB — a readyState that lied", () => {
 
     expect(ping).toHaveBeenCalledTimes(1);
     expect(connect).toHaveBeenCalledTimes(1);
+  });
+});
+
+// BP-789: a reset is decided on a ping that lost a race, and a starved event loop loses it against a
+// client that is still answering. Closing that client at once ended the requests still running on
+// it — MongoExpiredSessionError, MongoPoolClosedError, MongoClientClosedError — so the close now
+// waits for them.
+describe("connectDB — work still running on the client it abandons", () => {
+  let abandoned: Required<Pick<FakeClient, "close" | "s">>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    process.env.MONGODB_URI = "mongodb://127.0.0.1:27017/test";
+    connect.mockReset();
+    close.mockReset();
+    close.mockResolvedValue(undefined);
+    abandoned = { close, s: idle() };
+    connection.client = abandoned;
+    connection.readyState = 1;
+    delete (globalThis as { mongooseCache?: unknown }).mongooseCache;
+    connect
+      .mockResolvedValueOnce({ ok: true })
+      .mockImplementation(async () => {
+        connection.client = { close: vi.fn(), s: idle() };
+        return { ok: true };
+      });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("waits for an operation still holding a session before closing", async () => {
+    const { connectDB } = await freshModule();
+    await connectDB();
+    const operation = {};
+    abandoned.s.activeSessions.add(operation);
+
+    connection.readyState = 0;
+    await expect(connectDB()).resolves.toEqual({ ok: true });
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(close).not.toHaveBeenCalled();
+
+    abandoned.s.activeSessions.delete(operation);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for a cursor that has not been read to the end", async () => {
+    const { connectDB } = await freshModule();
+    await connectDB();
+    const cursor = {};
+    abandoned.s.activeCursors.add(cursor);
+
+    connection.readyState = 0;
+    await connectDB();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(close).not.toHaveBeenCalled();
+
+    abandoned.s.activeCursors.delete(cursor);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  // The leak BP-520 fixed must not come back through a session nobody ends
+  it("closes it anyway once the grace period is over", async () => {
+    const { connectDB } = await freshModule();
+    await connectDB();
+    abandoned.s.activeSessions.add({});
+
+    connection.readyState = 0;
+    await connectDB();
+    await vi.advanceTimersByTimeAsync(59_000);
+    expect(close).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1_250);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats a driver whose bookkeeping it cannot read as busy, not as idle", async () => {
+    const { connectDB } = await freshModule();
+    await connectDB();
+    connection.client = { close };
+
+    connection.readyState = 0;
+    await connectDB();
+    await vi.advanceTimersByTimeAsync(59_000);
+    expect(close).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1_250);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes an idle one straight away", async () => {
+    const { connectDB } = await freshModule();
+    await connectDB();
+
+    connection.readyState = 0;
+    await connectDB();
+
+    expect(close).toHaveBeenCalledTimes(1);
   });
 });
