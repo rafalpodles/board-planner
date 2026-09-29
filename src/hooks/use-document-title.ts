@@ -14,7 +14,7 @@ function applyTitle() {
   document.title = top?.title ?? APP_NAME;
 }
 
-// The caller mounted last owns the tab: a task modal keeps it while the board underneath re-titles itself
+// The caller whose mount effect ran last owns the tab: a task modal keeps it while the board beneath re-titles itself
 export function useDocumentTitle(title: string | null) {
   const claim = useRef<Claim | null>(null);
 
@@ -23,7 +23,8 @@ export function useDocumentTitle(title: string | null) {
     claims.push(mine);
     claim.current = mine;
     return () => {
-      claims.splice(claims.indexOf(mine), 1);
+      const at = claims.indexOf(mine);
+      if (at >= 0) claims.splice(at, 1);
       claim.current = null;
       applyTitle();
     };
