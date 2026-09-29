@@ -222,7 +222,7 @@ describe("the e-mail column on the global grid", () => {
 
     const cell = (await screen.findByLabelText(ASSIGNED_EMAIL)) as HTMLInputElement;
     expect(cell.disabled).toBe(true);
-    expect(screen.getAllByText(/no mail server/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/no mail server/)).toBeTruthy();
   });
 
   it("is closed for an account with no address", async () => {
@@ -231,7 +231,7 @@ describe("the e-mail column on the global grid", () => {
 
     const cell = (await screen.findByLabelText(ASSIGNED_EMAIL)) as HTMLInputElement;
     expect(cell.disabled).toBe(true);
-    expect(screen.getAllByText(/e-mail address on your profile/).length).toBeGreaterThan(0);
+    expect(screen.getByRole("link", { name: "your profile" })).toBeTruthy();
   });
 
   it("is open when both are there", async () => {
@@ -250,8 +250,11 @@ describe("the e-mail column on the global grid", () => {
     const digest = (await screen.findByLabelText(DIGEST)) as HTMLInputElement;
     expect(digest.disabled).toBe(true);
     expect(digest.checked).toBe(true);
-    // Once under the grid, once under the digest box
-    expect(screen.getAllByText(/no mail server/)).toHaveLength(2);
+    // One reason on the page, under the grid, and the digest box is described by it
+    const reason = screen.getAllByText(/no mail server/);
+    expect(reason).toHaveLength(1);
+    expect(digest.getAttribute("aria-describedby")).toBe(reason[0].id);
+    expect(screen.getByText(DIGEST).className).not.toMatch(/cursor-pointer/);
   });
 
   it("closes the digest box for an account with no address", async () => {
@@ -260,7 +263,7 @@ describe("the e-mail column on the global grid", () => {
 
     const digest = (await screen.findByLabelText(DIGEST)) as HTMLInputElement;
     expect(digest.disabled).toBe(true);
-    expect(screen.getAllByText(/e-mail address on your profile/)).toHaveLength(2);
+    expect(screen.getAllByRole("link", { name: "your profile" })).toHaveLength(1);
   });
 
   it("leaves the digest box open when mail can be sent", async () => {
@@ -269,5 +272,7 @@ describe("the e-mail column on the global grid", () => {
 
     const digest = (await screen.findByLabelText(DIGEST)) as HTMLInputElement;
     expect(digest.disabled).toBe(false);
+    expect(digest.hasAttribute("aria-describedby")).toBe(false);
+    expect(screen.getByText(DIGEST).className).toMatch(/cursor-pointer/);
   });
 });

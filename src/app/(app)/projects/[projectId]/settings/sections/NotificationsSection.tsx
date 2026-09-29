@@ -5,7 +5,7 @@ import { useApi } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
 import {
-  emailUnavailableHint,
+  mailUnavailable,
   MailAvailability,
   NotificationMatrixEditor,
 } from "@/components/settings/NotificationMatrix";
@@ -163,8 +163,7 @@ export function NotificationsSection({ project }: SectionProps) {
         disabled={!overriding}
         chatDisabled={!chatConfigured}
         chatDisabledHint="Connect Slack or Discord on your global Notifications page first."
-        emailDisabled={!!emailUnavailableHint(mail)}
-        emailDisabledHint={emailUnavailableHint(mail)}
+        emailUnavailable={mailUnavailable(mail)}
         scope="project"
       />
 

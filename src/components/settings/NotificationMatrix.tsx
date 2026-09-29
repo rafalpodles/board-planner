@@ -1,5 +1,7 @@
 "use client";
 
+import { useId } from "react";
+import Link from "next/link";
 import { NOTIFICATION_TYPES, NotificationMatrix, NotificationType } from "@/types";
 
 const ROW_LABEL: Record<NotificationType, string> = {
@@ -26,11 +28,32 @@ export interface MailAvailability {
   address: boolean;
 }
 
-export function emailUnavailableHint(mail: MailAvailability | undefined): string | undefined {
+export type MailUnavailable = "server" | "address";
+
+export function mailUnavailable(mail: MailAvailability | undefined): MailUnavailable | undefined {
   if (!mail) return undefined;
-  if (!mail.server) return "This instance has no mail server, so nothing can be sent by e-mail.";
-  if (!mail.address) return "Add an e-mail address on your profile before sending anything there.";
+  if (!mail.server) return "server";
+  if (!mail.address) return "address";
   return undefined;
+}
+
+function MailHint({ reason, withDigest }: { reason: MailUnavailable; withDigest: boolean }) {
+  if (reason === "server") {
+    return withDigest ? (
+      <>This instance has no mail server, so e-mail and the daily digest are off — ask an administrator.</>
+    ) : (
+      <>This instance has no mail server, so e-mail is off — ask an administrator.</>
+    );
+  }
+  return (
+    <>
+      Add an e-mail address to{" "}
+      <Link href="/settings/profile" className="underline">
+        your profile
+      </Link>{" "}
+      to get {withDigest ? "these and the daily digest" : "these"} by e-mail.
+    </>
+  );
 }
 
 const COLUMNS = [
@@ -45,8 +68,8 @@ export function NotificationMatrixEditor({
   disabled = false,
   chatDisabled = false,
   chatDisabledHint,
-  emailDisabled = false,
-  emailDisabledHint,
+  emailUnavailable,
+  emailHintId,
   scope = "global",
 }: {
   value: NotificationMatrix;
@@ -56,11 +79,18 @@ export function NotificationMatrixEditor({
   chatDisabled?: boolean;
   chatDisabledHint?: string;
   /** No mail server on the instance, or no address on the account: the column would send nothing */
-  emailDisabled?: boolean;
-  emailDisabledHint?: string;
+  emailUnavailable?: MailUnavailable;
+  /** For a control outside the grid that the same hint explains, like the digest box */
+  emailHintId?: string;
   /** Which board the grid is being read against, for the rows that say "a board" otherwise */
   scope?: "global" | "project";
 }) {
+  const ownHintId = useId();
+  const mailHintId = emailHintId ?? `${ownHintId}-mail`;
+  const chatHintId = `${ownHintId}-chat`;
+  const emailDisabled = !!emailUnavailable;
+  const showChatHint = chatDisabled && !!chatDisabledHint;
+
   const labelOf = (type: NotificationType) =>
     (scope === "project" && PROJECT_ROW_LABEL[type]) || ROW_LABEL[type];
 
@@ -98,6 +128,12 @@ export function NotificationMatrixEditor({
                   disabled ||
                   (c.key === "chat" && chatDisabled) ||
                   (c.key === "email" && emailDisabled);
+                const describedBy =
+                  c.key === "email" && emailDisabled
+                    ? mailHintId
+                    : c.key === "chat" && showChatHint
+                      ? chatHintId
+                      : undefined;
                 return (
                   <td key={c.key} className="py-2.5 text-center">
                     <input
@@ -105,6 +141,7 @@ export function NotificationMatrixEditor({
                       aria-label={`${labelOf(type)} — ${c.label}`}
                       checked={!!value[type]?.[c.key]}
                       disabled={off}
+                      aria-describedby={describedBy}
                       onChange={() => toggle(type, c.key)}
                       className="focus-ring rounded border-border disabled:opacity-40"
                     />
@@ -116,11 +153,15 @@ export function NotificationMatrixEditor({
         </tbody>
       </table>
 
-      {emailDisabled && emailDisabledHint && (
-        <p className="mt-3 text-xs text-text-muted">{emailDisabledHint}</p>
+      {emailUnavailable && (
+        <p id={mailHintId} className="mt-3 text-xs text-text-muted">
+          <MailHint reason={emailUnavailable} withDigest={scope === "global"} />
+        </p>
       )}
-      {chatDisabled && chatDisabledHint && (
-        <p className="mt-3 text-xs text-text-muted">{chatDisabledHint}</p>
+      {showChatHint && (
+        <p id={chatHintId} className="mt-3 text-xs text-text-muted">
+          {chatDisabledHint}
+        </p>
       )}
     </div>
   );

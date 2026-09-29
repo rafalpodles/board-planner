@@ -404,7 +404,7 @@ test.afterAll(async () => {
 test("the e-mail column is open to an account with an address, and closed to one without", async ({
   browser,
 }) => {
-  const NO_ADDRESS = "Add an e-mail address on your profile before sending anything there.";
+  const NO_ADDRESS = /Add an e-mail address to your profile to get these (and the daily digest )?by e-mail\./;
   const DIGEST_BOX = "Collect the e-mail column into one daily digest";
   const admin = await (await browser.newContext()).newPage();
   const member = await (await browser.newContext()).newPage();
@@ -428,8 +428,10 @@ test("the e-mail column is open to an account with an address, and closed to one
     await expect(admin.getByRole("checkbox", { name: `${ASSIGNED_ROW} — In app` })).toBeEnabled();
     await expect(admin.getByRole("checkbox", { name: `${ASSIGNED_ROW} — E-mail` })).toBeDisabled();
     await expect(admin.getByLabel(DIGEST_BOX)).toBeDisabled();
-    // Under the grid and under the digest box
-    await expect(admin.getByText(NO_ADDRESS)).toHaveCount(2);
+    await expect(admin.getByText(NO_ADDRESS)).toHaveCount(1);
+    await expect(admin.getByRole("checkbox", { name: `${ASSIGNED_ROW} — E-mail` })).toHaveAccessibleDescription(NO_ADDRESS);
+    await expect(admin.getByLabel(DIGEST_BOX)).toHaveAccessibleDescription(NO_ADDRESS);
+    await expect(admin.getByRole("link", { name: "your profile" })).toHaveAttribute("href", "/settings/profile");
   });
 
   await test.step("nor on a board's own grid, once it takes over", async () => {

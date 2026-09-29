@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useId } from "react";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
 import {
-  emailUnavailableHint,
+  mailUnavailable,
   MailAvailability,
   NotificationMatrixEditor,
 } from "@/components/settings/NotificationMatrix";
@@ -39,7 +39,8 @@ export default function NotificationsPage() {
   const [loaded, setLoaded] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
 
-  const mailUnavailable = emailUnavailableHint(mail);
+  const unavailable = mailUnavailable(mail);
+  const mailHintId = useId();
 
   // Delivery needs both a service and an address; either alone sends nothing and says nothing
   const chatReady = !!chatKind && (chatConfigured || !!webhookUrl.trim());
@@ -146,8 +147,8 @@ export default function NotificationsPage() {
         onChange={setMatrix}
         chatDisabled={!chatReady}
         chatDisabledHint="Connect Slack or Discord below before sending anything there."
-        emailDisabled={!!mailUnavailable}
-        emailDisabledHint={mailUnavailable}
+        emailUnavailable={unavailable}
+        emailHintId={mailHintId}
       />
 
       <div className="mt-6 flex items-center gap-3">
@@ -155,11 +156,12 @@ export default function NotificationsPage() {
           type="checkbox"
           id="emailDigest"
           checked={emailDigest}
-          disabled={!!mailUnavailable}
+          disabled={!!unavailable}
+          aria-describedby={unavailable ? mailHintId : undefined}
           onChange={(e) => toggleDigest(e.target.checked)}
           className="focus-ring rounded border-border disabled:opacity-40"
         />
-        <label htmlFor="emailDigest" className="text-sm cursor-pointer">
+        <label htmlFor="emailDigest" className={`text-sm ${unavailable ? "" : "cursor-pointer"}`}>
           Collect the e-mail column into one daily digest
         </label>
       </div>
@@ -167,7 +169,6 @@ export default function NotificationsPage() {
         One message each morning listing what you have not read yet, instead of a mail per event.
         Password and account-security notices are never held back.
       </p>
-      {mailUnavailable && <p className="mt-1 text-xs text-text-muted">{mailUnavailable}</p>}
 
       <h3 className="mt-10 mb-1 text-sm font-semibold">Your chat connection</h3>
       <p className="mb-4 text-xs text-text-muted">
