@@ -593,6 +593,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       gh?: { token?: string; user?: string };
       unresolvedTools?: string[];
       deliverable?: boolean;
+      preflightThrows?: boolean;
       // Run between passes, after the clock jump — the one hook point available to change what is
       // on disk mid-run, for a test about recovering from a failure and then repeating it.
       onSleep?: (stateDir: string, sleepIndex: number) => void;
@@ -673,6 +674,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       hostname: () => "host-1",
       // Found only through the probe above, so a tool the probe does not answer is really missing
       isExecutable: () => false,
+      ...(opts.preflightThrows ? { runPreflight: () => Promise.reject(new Error("no shell on this machine")) } : {}),
       // the loop only sleeps once it has nothing left to claim, which is one pass after the run
       sleep: async () => {
         clockOffset += opts.clockJumpOnSleepMs ?? 0;
@@ -867,6 +869,26 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       expect(pushEnvs).toHaveLength(1);
       expect(pushEnvs[0].GH_TOKEN).toBe("gho_owner");
     });
+  });
+
+  it("names both when preflight found neither", async () => {
+    const { claims, logError } = await runOneTask(undefined, undefined, { unresolvedTools: ["claude", "npm"] });
+
+    expect(claims).toBe(0);
+    expect(logError).toHaveBeenCalledWith(
+      "not claiming any work: claude and npm could not be found on this machine, and every task needs them"
+    );
+  });
+
+  // A preflight that could not run resolved no tool at all, so every step would be refused the same
+  it("claims nothing at all when preflight could not run", async () => {
+    const { claims, logError } = await runOneTask(undefined, undefined, { preflightThrows: true });
+
+    expect(claims).toBe(0);
+    expect(logError).toHaveBeenCalledWith(expect.stringContaining("preflight could not run"));
+    expect(logError).toHaveBeenCalledWith(
+      "not claiming any work: preflight could not run, so no tool a step spawns was resolved"
+    );
   });
 
   // gh fails delivery through the ordinary, charged path, which ends; blocking on it is not needed

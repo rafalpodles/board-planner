@@ -805,7 +805,8 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     if (row && !row.ok) return row.detail;
     if (!preflight) return preflightFailed ? "preflight could not run, so no tool a step spawns was resolved" : "";
     const missing = TOOLS_A_STEP_SPAWNS.filter((tool) => !isAbsolute(preflight?.paths[tool] ?? ""));
-    return missing.length ? `${missing.join(" and ")} could not be found on this machine, and every task needs it` : "";
+    if (!missing.length) return "";
+    return `${missing.join(" and ")} could not be found on this machine, and every task needs ${missing.length > 1 ? "them" : "it"}`;
   }
 
   const loop = createLoop({
