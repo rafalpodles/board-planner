@@ -1089,6 +1089,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     const { everyCall } = await runOneTask();
 
     const agent = everyCall.find(([command, ...args]) => command === SANDBOX_COMMAND && !args.includes("/bin/sh"));
+    expect(agent, "the agent was never handed to the sandbox").toBeDefined();
     expect(agent).toContain("/opt/homebrew/bin/claude");
     expect(agent).not.toContain("claude");
   });
