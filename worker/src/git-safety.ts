@@ -1,4 +1,5 @@
 import { childEnv } from "./env.js";
+import { requireToolPath } from "./tool-path.js";
 
 // A linked worktree shares .git with the main clone, and the agent holds Write, so it can drop a
 // pre-commit hook or set core.hooksPath and have a later git call execute it. protected-paths
@@ -131,25 +132,7 @@ export function gitArgs(args: string[]): string[] {
   return withConfig(SAFE_CONFIG, refuseOptionShapedPositionals(args));
 }
 
-/**
- * The one place every call site's "what if git was never resolved" decision is made, so it is the
- * same decision everywhere rather than one a future call site picks for itself (BP-641).
- *
- * Refuses rather than falling back to the bare name `"git"`, which `sandbox.ts` already gives the
- * reason for about the other program of this kind: a wrapper whose job is to constrain what runs
- * must not itself be findable at a name, because anything earlier on the PATH this process
- * assembled would silently become it. `runner.run` resolves its `command` argument the same way a
- * shell does when it is not an absolute path, so the same hazard applies to git.
- *
- * Not reachable in the ordinary case: preflight resolves git's absolute path before a worker takes
- * any work, and every caller here is handed the value preflight found. It matters only when git
- * could not be found at all, which preflight already logs loudly on its own.
- */
+// The rationale, and the rule for gh, claude and npm, are in tool-path.ts (BP-641, BP-733).
 export function requireGitPath(gitPath: string): string {
-  if (!gitPath) {
-    throw new Error(
-      "no absolute git path was resolved — refusing to run git by name on PATH",
-    );
-  }
-  return gitPath;
+  return requireToolPath("git", gitPath);
 }

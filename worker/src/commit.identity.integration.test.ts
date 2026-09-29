@@ -5,8 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { commitAll, resolveCommitIdentity } from "./commit.js";
 import { createRunner } from "./exec.js";
+import { installedToolPath } from "./__fixtures__/tool-paths.js";
 
-const gitPath = "git";
+const gitPath = installedToolPath("git");
 
 /**
  * BP-516. Neutralising `~/.gitconfig` on the calls that stage and commit takes `user.email` with

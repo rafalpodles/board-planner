@@ -58,7 +58,7 @@ final class ProjectSyncRunner {
         let state = Onboarding.load()
 
         let granted = (try? file.read()) ?? []
-        let checkouts = await originsOf(granted, toolPath: state.toolPath)
+        let checkouts = await originsOf(granted, tools: state)
         let plan = ProjectSync.plan(catalogue: catalogue, checkouts: checkouts)
         // After the plan, not before it: the message names the projects it could not act on, and
         // the plan is the only thing that knows them (BP-602).
@@ -81,12 +81,12 @@ final class ProjectSyncRunner {
 
         let token = WorkerProcess.githubToken(
             account: (try? GithubAccountFile(path: GithubAccountFile.defaultPath()).read()) ?? "",
-            toolPath: state.toolPath)
+            tools: state)
         let setup = ProjectSetup(
-            clone: WorkerProcess.cloneStep(toolPath: state.toolPath, githubToken: token),
+            clone: WorkerProcess.cloneStep(tools: state, githubToken: token),
             repos: file)
         let removal = CheckoutRemoval(run: { args, cwd in
-            WorkerProcess.git(args, cwd: cwd, toolPath: state.toolPath)
+            WorkerProcess.git(args, cwd: cwd, tools: state)
         })
 
         let deletion = CheckoutDeletion(
@@ -114,11 +114,11 @@ final class ProjectSyncRunner {
 
     /// What each allowlisted checkout says its origin is — the only way to tell which project a
     /// directory belongs to, since the socket never carries a path.
-    private func originsOf(_ paths: [String], toolPath: String) async -> [String: String] {
+    private func originsOf(_ paths: [String], tools: OnboardingState) async -> [String: String] {
         await Task.detached {
             var found: [String: String] = [:]
             for path in paths {
-                let result = WorkerProcess.git(["-C", path, "remote", "get-url", "origin"], cwd: path, toolPath: toolPath)
+                let result = WorkerProcess.git(["-C", path, "remote", "get-url", "origin"], cwd: path, tools: tools)
                 guard result.code == 0 else { continue }
                 let remote = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !remote.isEmpty { found[path] = remote }

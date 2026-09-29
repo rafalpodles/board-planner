@@ -28,6 +28,9 @@ public struct OnboardingState: Codable, Equatable, Sendable {
     // The PATH `--preflight` resolved. Persisted because the worker has to be spawned with it on
     // every later launch too, not only the one where preflight happened to run.
     public var toolPath: String
+    /// The absolute path `--preflight` resolved for each tool, which is what git and gh are spawned
+    /// by (BP-733). Absent from a state saved before it existed, and then empty until the next check.
+    public var toolPaths: [String: String]
 
     public init(
         step: OnboardingStep = .needsPreflight,
@@ -39,7 +42,8 @@ public struct OnboardingState: Codable, Equatable, Sendable {
         verificationURL: String = "",
         deviceCode: String = "",
         workerID: String = "",
-        toolPath: String = ""
+        toolPath: String = "",
+        toolPaths: [String: String] = [:]
     ) {
         self.step = step
         self.apiURL = apiURL
@@ -51,9 +55,46 @@ public struct OnboardingState: Codable, Equatable, Sendable {
         self.deviceCode = deviceCode
         self.workerID = workerID
         self.toolPath = toolPath
+        self.toolPaths = toolPaths
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case step, apiURL, workerName, checkoutsFolder, checkoutPath, userCode, verificationURL
+        case deviceCode, workerID, toolPath, toolPaths
+    }
+
+    // Written by hand for one key: a state saved before toolPaths existed would otherwise fail to
+    // decode, and `load()` answers that with a fresh state — walking an onboarded machine back to
+    // the first-run screen.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        step = try container.decode(OnboardingStep.self, forKey: .step)
+        apiURL = try container.decode(String.self, forKey: .apiURL)
+        workerName = try container.decode(String.self, forKey: .workerName)
+        checkoutsFolder = try container.decode(String.self, forKey: .checkoutsFolder)
+        checkoutPath = try container.decode(String.self, forKey: .checkoutPath)
+        userCode = try container.decode(String.self, forKey: .userCode)
+        verificationURL = try container.decode(String.self, forKey: .verificationURL)
+        deviceCode = try container.decode(String.self, forKey: .deviceCode)
+        workerID = try container.decode(String.self, forKey: .workerID)
+        toolPath = try container.decode(String.self, forKey: .toolPath)
+        toolPaths = try container.decodeIfPresent([String: String].self, forKey: .toolPaths) ?? [:]
     }
 
     public var isOnboarded: Bool { step == .running }
+
+    /// Whether the tools have to be looked for again: git has no usable recorded path — never
+    /// recorded, or gone since — or gh has none while it is expected. A pinned account expects it:
+    /// without gh the app's clone and push probe act as gh's active account, not the pinned one.
+    /// Unpinned, a gh the check never found is not looked for before every launch's worker start.
+    public func needsToolsResolved(
+        ghPinned: Bool,
+        isExecutable: (String) -> Bool = FileManager.default.isExecutableFile(atPath:)
+    ) -> Bool {
+        if !ToolPath.usable(toolPaths[ResolvedTool.git.rawValue], isExecutable: isExecutable) { return true }
+        guard let gh = toolPaths[ResolvedTool.gh.rawValue] else { return ghPinned }
+        return !ToolPath.usable(gh, isExecutable: isExecutable)
+    }
 }
 
 // Every transition is a plain function over the state, so re-entering a step is re-running one of
@@ -84,7 +125,8 @@ public enum Onboarding {
         _ state: OnboardingState,
         apiURL: String,
         workerName: String,
-        toolPath: String
+        toolPath: String,
+        toolPaths: [String: String]
     ) -> OnboardingState {
         var next = state
         // Stored in the form everything downstream needs, so there is one canonical value rather
@@ -92,9 +134,21 @@ public enum Onboarding {
         next.apiURL = BoardURL.normalise(apiURL)
         next.workerName = workerName
         next.toolPath = toolPath
+        next.toolPaths = toolPaths
         // Only ever forward from the step it answers. A machine already running must not be walked
         // back to "pick a folder" because someone opened preflight again out of curiosity.
         if next.step == .needsPreflight { next.step = .needsFolder }
+        return next
+    }
+
+    /// A later check's answer about the machine alone, for a state that has no paths recorded:
+    /// nothing about the step, the board or the credential moves.
+    public static func toolsResolved(
+        _ state: OnboardingState, toolPath: String, toolPaths: [String: String]
+    ) -> OnboardingState {
+        var next = state
+        next.toolPath = toolPath
+        next.toolPaths = toolPaths
         return next
     }
 

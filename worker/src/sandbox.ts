@@ -1,5 +1,7 @@
 import { realpathSync } from "fs";
+import { isAbsolute } from "path";
 import { UNCONFINED_ESCAPE_HATCH, unconfinedAgentAllowed } from "./env.js";
+import { ResolvedTool, unresolvedToolReason } from "./tool-path.js";
 
 /**
  * Runs the agent under a kernel sandbox that cannot write outside the worktree.
@@ -142,6 +144,10 @@ function profileFor(names: string[]): string {
  * containing a quote would otherwise close the string it sits in and append rules of its own.
  */
 export function confine(command: string, args: string[], options: ConfineOptions): Confinement {
+  // Held to SANDBOX_COMMAND's rule, confined or not (BP-733)
+  if (!isAbsolute(command)) {
+    return { refusal: `refusing to run ${JSON.stringify(command)} by name on PATH: confine needs its absolute path` };
+  }
   if (unconfinedAgentAllowed(options.env)) return { command, args };
 
   const platform = options.platform ?? process.platform;
@@ -174,4 +180,14 @@ export function confine(command: string, args: string[], options: ConfineOptions
       ...args,
     ],
   };
+}
+
+export function confineTool(
+  tool: ResolvedTool,
+  path: string,
+  args: string[],
+  options: ConfineOptions
+): Confinement {
+  if (!isAbsolute(path)) return { refusal: unresolvedToolReason(tool) };
+  return confine(path, args, options);
 }

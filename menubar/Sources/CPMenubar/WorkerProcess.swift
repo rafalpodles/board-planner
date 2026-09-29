@@ -110,17 +110,27 @@ enum WorkerProcess {
         return process
     }
 
-    // git runs on the PATH preflight resolved, not the one Finder handed this app — the same trap
-    // the worker itself hits, one level up.
+    // git runs by the path preflight resolved, on the PATH it repaired, not the one Finder handed
+    // this app — the same trap the worker itself hits, one level up.
     //
     // githubToken pins the identity the clone and its push probe act as. Without it the probe would
     // prove that *whichever account gh has active* can push, while the worker pushes as the pinned
     // one — the check and the thing it checks would be two different machines' worth of access.
-    static func cloneStep(toolPath: String, githubToken: String = "") -> CloneStep {
-        CloneStep(run: { tool, args, cwd in
+    static func cloneStep(tools: OnboardingState, githubToken: String = "") -> CloneStep {
+        let toolPath = tools.toolPath
+        let toolPaths = tools.toolPaths
+        return CloneStep(run: { tool, args, cwd in
+            guard let known = ResolvedTool(rawValue: tool) else {
+                return (1, "Refusing to run \(tool): the setup check resolves no path for it.")
+            }
+            let command: ToolCommand
+            switch ToolCommand.make(known, args, resolved: toolPaths) {
+            case .success(let resolved): command = resolved
+            case .failure(let refusal): return (1, refusal.localizedDescription)
+            }
             let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = [tool] + args
+            process.executableURL = URL(fileURLWithPath: command.executable)
+            process.arguments = command.arguments
             var environment = ProcessInfo.processInfo.environment
             if !toolPath.isEmpty { environment["PATH"] = toolPath }
             if !githubToken.isEmpty {
@@ -140,14 +150,19 @@ enum WorkerProcess {
         })
     }
 
-    // One git, run the way every other child here is run: on the PATH preflight resolved, not the
-    // one Finder handed this app.
-    static func git(_ args: [String], cwd: String, toolPath: String) -> (code: Int32, output: String) {
+    // One git, run the way every other child here is run: by the path preflight resolved, on the
+    // PATH it repaired, not the one Finder handed this app.
+    static func git(_ args: [String], cwd: String, tools: OnboardingState) -> (code: Int32, output: String) {
+        let command: ToolCommand
+        switch ToolCommand.make(.git, args, resolved: tools.toolPaths) {
+        case .success(let resolved): command = resolved
+        case .failure(let refusal): return (1, refusal.localizedDescription)
+        }
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["git"] + args
+        process.executableURL = URL(fileURLWithPath: command.executable)
+        process.arguments = command.arguments
         var environment = ProcessInfo.processInfo.environment
-        if !toolPath.isEmpty { environment["PATH"] = toolPath }
+        if !tools.toolPath.isEmpty { environment["PATH"] = tools.toolPath }
         process.environment = GitSafeEnvironment.apply(to: environment)
         if FileManager.default.fileExists(atPath: cwd) {
             process.currentDirectoryURL = URL(fileURLWithPath: cwd)
@@ -165,15 +180,20 @@ enum WorkerProcess {
     // Asked of gh by name rather than taken from whatever is active, which is the whole point of
     // the pin. Empty when nothing is pinned, or when gh has no session for it — the caller carries
     // on either way, because gh resolving its own identity is what always used to happen.
-    static func githubToken(account: String, toolPath: String) -> String {
+    //
+    // No resolved gh answers "" too, rather than asking whatever answers to the name for a token.
+    static func githubToken(account: String, tools: OnboardingState) -> String {
         let login = account.trimmingCharacters(in: .whitespaces)
-        guard !login.isEmpty else { return "" }
+        guard !login.isEmpty,
+            case .success(let command) = ToolCommand.make(
+                .gh, ["auth", "token", "--user", login], resolved: tools.toolPaths)
+        else { return "" }
 
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["gh", "auth", "token", "--user", login]
+        process.executableURL = URL(fileURLWithPath: command.executable)
+        process.arguments = command.arguments
         var environment = ProcessInfo.processInfo.environment
-        if !toolPath.isEmpty { environment["PATH"] = toolPath }
+        if !tools.toolPath.isEmpty { environment["PATH"] = tools.toolPath }
         process.environment = environment
 
         let pipe = Pipe()

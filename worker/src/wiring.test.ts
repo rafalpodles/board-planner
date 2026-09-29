@@ -1,5 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { agentArgs, answerSandboxProbe, isAgentSpawn, isSandboxProbe } from "./__fixtures__/agent-spawn.js";
+import { SANDBOX_COMMAND } from "./sandbox.js";
 import { tmpdir } from "os";
 import { join } from "path";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -285,6 +286,12 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
   // rather than the bare name — so the runners in this file answer the probe with a fixed path and
   // match on it, the same way they used to match on the literal "git".
   const GIT_PATH = "/opt/homebrew/bin/git";
+  // The same for gh, claude and npm since BP-733: each spawn reads back the path preflight found.
+  const toolPathFor = (probe: string) => `/opt/homebrew/bin/${probe.split(" ").pop()}`;
+  const isPreflightAsking = (command: string, args: string[]) =>
+    command.startsWith("/opt/homebrew/bin/") &&
+    !command.endsWith("/git") &&
+    (args[0] === "--version" || (args[0] === "auth" && args[1] === "status"));
 
   const CLAIMED: ClaimedTask = {
     taskId: "t1",
@@ -379,7 +386,12 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     plantAfterBind = false,
     // What `gh auth token` and `gh api user` answer, and the environment each staging call got
     gh: { token?: string; user?: string } = {},
-    stagingEnvs: NodeJS.ProcessEnv[] = []
+    stagingEnvs: NodeJS.ProcessEnv[] = [],
+    // Tools preflight finds nowhere on this machine
+    unresolvedTools: string[] = [],
+    // A run whose change is there to review and to deliver: a diff, one commit, and a pull request
+    deliverable = false,
+    pushEnvs: NodeJS.ProcessEnv[] = []
   ): Runner {
     // `bindRepository` asks `rev-parse --show-toplevel` first and scans second, so the scan that
     // follows one in the same directory is the bind's. Nothing else tells the two apart: since
@@ -389,6 +401,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     // between the two — a toplevel that does not match the path — would leave the mark set, and
     // the next scan in that directory is the *run's*: it would read clean and quietly disarm every
     // assertion after it. No test does that today; one that wants to must not use plantAfterBind.
+    let committed = false;
     const binding = new Set<string>();
     const scopedFor = (cwd?: string) => {
       const planted =
@@ -411,8 +424,16 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         }
         // establishPreflight's own resolution call, ahead of everything else: answered with the
         // fixed path every check below matches on.
-        if (args[0] === "-lc" && args[1] === "command -v git") {
-          return { code: 0, stdout: `${GIT_PATH}\n`, stderr: "", timedOut: false };
+        if (args[0] === "-lc" && args[1]?.startsWith("command -v ")) {
+          if (unresolvedTools.includes(args[1].split(" ").pop() ?? "")) {
+            return { code: 1, stdout: "", stderr: "", timedOut: false };
+          }
+          return { code: 0, stdout: `${toolPathFor(args[1])}\n`, stderr: "", timedOut: false };
+        }
+        // Preflight asking each resolved tool whether it runs, which is not the agent spawn below
+        // even though it is the same absolute path
+        if (!isSandboxProbe(command, args) && isPreflightAsking(command, args)) {
+          return { code: 0, stdout: "", stderr: "", timedOut: false };
         }
         // Who the run commits as, asked once before the agent starts (BP-516). A machine git will
         // not name one for is refused at `create`, so the fake has to answer it.
@@ -433,6 +454,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         if (command === GIT_PATH && (args[0] === "ls-remote" || args[0] === "fetch")) {
           remoteCalls.push({ args, env: opts.env ?? {} });
         }
+        if (command === GIT_PATH && args[0] === "push") pushEnvs.push(opts.env ?? {});
         // A machine whose sandbox row is red claims nothing at all since BP-349, so the probe has
         // to be answered or the loop below never reaches a task.
         if (isSandboxProbe(command, args)) {
@@ -465,13 +487,35 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
           }
         }
         if (isAgentSpawn(command, args)) {
-          claudeCalls.push(agentArgs(command, args));
+          const asked = agentArgs(command, args);
+          // The review gate asks for one JSON object rather than a stream, and is answered with an
+          // approval, so a sequence that reaches it can go on to delivery
+          if (asked[asked.indexOf("--output-format") + 1] === "json") {
+            const verdict = JSON.stringify({ approved: true, reason: "fine" });
+            return { code: 0, stdout: JSON.stringify({ result: verdict }), stderr: "", timedOut: false };
+          }
+          claudeCalls.push(asked);
           onAgentStart?.(claudeCalls.length);
           for (const part of pipeFlushes(AGENT_STREAM)) {
             opts.onStdout?.(part);
             await new Promise((resolve) => setImmediate(resolve));
           }
           return { code: 0, stdout: AGENT_STREAM, stderr: "", timedOut: false };
+        }
+        if (deliverable) {
+          const answer = (stdout: string) => ({ code: 0, stdout, stderr: "", timedOut: false });
+          if (command.endsWith("/gh") && args.includes("create")) return answer("https://github.com/o/r/pull/1\n");
+          const commit = "1234567812345678123456781234567812345678";
+          if (command === GIT_PATH && args.includes("commit")) committed = true;
+          if (command === GIT_PATH && args.includes("status") && args.includes("--porcelain")) {
+            return answer(committed ? "" : " M src/a.ts\n");
+          }
+          if (command === GIT_PATH && args.includes("rev-list")) return answer(`${commit}\n`);
+          if (command === GIT_PATH && args.includes("rev-parse") && args.at(-1) === "HEAD") return answer(`${commit}\n`);
+          if (command === GIT_PATH && args.includes("diff") && args.includes("--numstat")) return answer("1\t0\tsrc/a.ts\n");
+          if (command === GIT_PATH && args.includes("diff") && !args.includes("--raw")) {
+            return answer("diff --git a/src/a.ts b/src/a.ts\n+one\n");
+          }
         }
         // The base is resolved off the wire now, so ls-remote has to answer with the ref it was
         // asked for; whether the *right* ref is picked out is gate-integrity's subject, on real git
@@ -547,6 +591,9 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       // all, rather than one answering something to parse.
       fetchImpl?: typeof fetch;
       gh?: { token?: string; user?: string };
+      unresolvedTools?: string[];
+      deliverable?: boolean;
+      preflightThrows?: boolean;
       // Run between passes, after the clock jump — the one hook point available to change what is
       // on disk mid-run, for a test about recovering from a failure and then repeating it.
       onSleep?: (stateDir: string, sleepIndex: number) => void;
@@ -567,6 +614,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     const claudeCalls: string[][] = [];
     const everyCall: string[][] = [];
     const remoteCalls: RemoteCall[] = [];
+    const pushEnvs: NodeJS.ProcessEnv[] = [];
     const bindingErrors: string[] = [];
     const stagingEnvs: NodeJS.ProcessEnv[] = [];
     const queue = opts.tasks ?? [CLAIMED];
@@ -618,9 +666,15 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         opts.sandboxBroken,
         opts.plantAfterBind,
         opts.gh,
-        stagingEnvs
+        stagingEnvs,
+        opts.unresolvedTools,
+        opts.deliverable,
+        pushEnvs
       ),
       hostname: () => "host-1",
+      // Found only through the probe above, so a tool the probe does not answer is really missing
+      isExecutable: () => false,
+      ...(opts.preflightThrows ? { runPreflight: () => Promise.reject(new Error("no shell on this machine")) } : {}),
       // the loop only sleeps once it has nothing left to claim, which is one pass after the run
       sleep: async () => {
         clockOffset += opts.clockJumpOnSleepMs ?? 0;
@@ -710,6 +764,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       claimed: claudeCalls.length > 0,
       everyCall,
       remoteCalls,
+      pushEnvs,
       workspacePaths: claudeCalls.flat(),
       phases: posted.map((event) => event.phase),
       telemetry,
@@ -741,6 +796,108 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     expect(logError).toHaveBeenCalledWith(expect.stringContaining("not claiming any work"));
   });
 
+  // BP-733. Without the tool the step is refused as a machine fault and the task released with its
+  // attempt refunded — so a worker still claiming would take the same task on every poll, and for
+  // npm run the whole paid Implement step before the build gate refused it.
+  it.each([["npm"], ["claude"]])("claims nothing at all when preflight found no %s", async (tool) => {
+    const { claims, claimed, logError, claudeArgs } = await runOneTask(undefined, undefined, {
+      unresolvedTools: [tool],
+    });
+
+    expect(claims).toBe(0);
+    expect(claimed).toBe(false);
+    expect(claudeArgs).toEqual([]);
+    expect(logError).toHaveBeenCalledWith(
+      `not claiming any work: ${tool} could not be found on this machine, and every task needs it`
+    );
+  });
+
+  // BP-733, at the one composition point: each tool path preflight resolved reaches the spawn that
+  // uses it. Build, test and review are the gates; push and pull request are delivery.
+  describe("the resolved tool paths, through a whole run", () => {
+    const THROUGH_EVERY_TOOL: ClaimedTask = {
+      ...CLAIMED,
+      agent: {
+        agentId: "a1",
+        name: "Every tool",
+        sequence: [
+          { key: "implement", kind: "step", name: "Implement", prompt: "make the change", capability: "edit" },
+          { key: "build", kind: "gate", name: "Builds", gateKind: "build" },
+          { key: "test-run", kind: "gate", name: "Tests pass", gateKind: "test-run" },
+          { key: "review", kind: "gate", name: "Reviewed", gateKind: "review" },
+          { key: "push", kind: "step", name: "Push", deterministic: true },
+          { key: "pull-request", kind: "step", name: "Pull request", deterministic: true },
+        ],
+      },
+    };
+    const confined = (everyCall: string[][]) =>
+      everyCall.filter(([command, ...args]) => command === SANDBOX_COMMAND && !args.includes("/bin/sh"));
+
+    it("hands the build and test gates the npm, and the review gate the claude", async () => {
+      const { everyCall } = await runOneTask(undefined, undefined, { tasks: [THROUGH_EVERY_TOOL], deliverable: true });
+
+      const programs = confined(everyCall).map((argv) => argv.find((arg) => /\/(npm|claude)$/.test(arg)));
+      expect(programs).toEqual([
+        "/opt/homebrew/bin/claude",
+        "/opt/homebrew/bin/npm",
+        "/opt/homebrew/bin/npm",
+        "/opt/homebrew/bin/npm",
+        "/opt/homebrew/bin/claude",
+      ]);
+    });
+
+    it("hands delivery the gh, which opens the pull request", async () => {
+      const { everyCall, pushEnvs } = await runOneTask(undefined, undefined, {
+        tasks: [THROUGH_EVERY_TOOL],
+        deliverable: true,
+      });
+
+      expect(pushEnvs).toHaveLength(1);
+      expect(Object.values(pushEnvs[0])).toContain("!'/opt/homebrew/bin/gh' auth git-credential");
+      expect(everyCall).toContainEqual(expect.arrayContaining(["/opt/homebrew/bin/gh", "pr", "create"]));
+    });
+
+    // The pinned account's token is asked of the same gh, per run — and is what the push carries
+    it("pushes with the token the resolved gh gave for the pinned account", async () => {
+      const { pushEnvs } = await runOneTask(undefined, undefined, {
+        tasks: [THROUGH_EVERY_TOOL],
+        deliverable: true,
+        stateFiles: { "github.json": JSON.stringify({ account: "owner" }) },
+        gh: { token: "gho_owner" },
+      });
+
+      expect(pushEnvs).toHaveLength(1);
+      expect(pushEnvs[0].GH_TOKEN).toBe("gho_owner");
+    });
+  });
+
+  it("names both when preflight found neither", async () => {
+    const { claims, logError } = await runOneTask(undefined, undefined, { unresolvedTools: ["claude", "npm"] });
+
+    expect(claims).toBe(0);
+    expect(logError).toHaveBeenCalledWith(
+      "not claiming any work: claude and npm could not be found on this machine, and every task needs them"
+    );
+  });
+
+  // A preflight that could not run resolved no tool at all, so every step would be refused the same
+  it("claims nothing at all when preflight could not run", async () => {
+    const { claims, logError } = await runOneTask(undefined, undefined, { preflightThrows: true });
+
+    expect(claims).toBe(0);
+    expect(logError).toHaveBeenCalledWith(expect.stringContaining("preflight could not run"));
+    expect(logError).toHaveBeenCalledWith(
+      "not claiming any work: preflight could not run, so no tool a step spawns was resolved"
+    );
+  });
+
+  // gh fails delivery through the ordinary, charged path, which ends; blocking on it is not needed
+  it("still claims when only gh is missing", async () => {
+    const { claims } = await runOneTask(undefined, undefined, { unresolvedTools: ["gh"] });
+
+    expect(claims).toBeGreaterThan(0);
+  });
+
   // The control, on the same harness: without it a wiring mistake that stops every claim would
   // satisfy the assertion above and look like the feature working.
   it("claims as usual on a machine whose sandbox probe answered", async () => {
@@ -763,8 +920,13 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
 
     const hangingRunner: Runner = {
       async run(command, args, opts) {
-        if (args[0] === "-lc" && args[1] === "command -v git") {
-          return { code: 0, stdout: `${GIT_PATH}\n`, stderr: "", timedOut: false };
+        if (args[0] === "-lc" && args[1]?.startsWith("command -v ")) {
+          return { code: 0, stdout: `${toolPathFor(args[1])}\n`, stderr: "", timedOut: false };
+        }
+        // Preflight asking each resolved tool whether it runs, which is not the agent spawn below
+        // even though it is the same absolute path
+        if (!isSandboxProbe(command, args) && isPreflightAsking(command, args)) {
+          return { code: 0, stdout: "", stderr: "", timedOut: false };
         }
         if (isSandboxProbe(command, args)) {
           answerSandboxProbe(args);
@@ -878,6 +1040,10 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
   // satisfy bindRepository/checkRepo.
   const unreachableRemote: Runner = {
     async run(command, args) {
+      // Every tool resolved: a machine missing claude or npm claims nothing at all (BP-733)
+      if (args[0] === "-lc" && args[1]?.startsWith("command -v ")) {
+        return { code: 0, stdout: `${toolPathFor(args[1])}\n`, stderr: "", timedOut: false };
+      }
       // The machine itself is fine here — it is the remote that is unreachable — so its sandbox
       // probe has to succeed, or it would stop claiming for a different reason than the one under
       // test and the counts below would both read zero (BP-349).
@@ -1066,6 +1232,28 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     expect(claudeArgs[claudeArgs.indexOf("--fallback-model") + 1]).toBe("opus");
   });
 
+  // BP-733. The one composition point: what preflight resolved is what the confined spawn names,
+  // rather than `claude` for sandbox-exec to look up on the PATH this worker assembled.
+  it("hands the sandbox the agent's path as preflight resolved it", async () => {
+    const { everyCall } = await runOneTask();
+
+    const agent = everyCall.find(([command, ...args]) => command === SANDBOX_COMMAND && !args.includes("/bin/sh"));
+    expect(agent, "the agent was never handed to the sandbox").toBeDefined();
+    expect(agent).toContain("/opt/homebrew/bin/claude");
+    expect(agent).not.toContain("claude");
+  });
+
+  // The base is fetched with the same credential helper delivery pushes with, so it names gh by the
+  // same resolved path — shell-quoted, because git hands it to a shell
+  it("names gh by its resolved path in the helper the base is fetched with", async () => {
+    const { remoteCalls } = await runOneTask();
+
+    expect(remoteCalls.length).toBeGreaterThan(0);
+    for (const call of remoteCalls) {
+      expect(Object.values(call.env)).toContain("!'/opt/homebrew/bin/gh' auth git-credential");
+    }
+  });
+
   // BP-373. `gh auth switch` is global machine state any terminal can flip, so the identity a run
   // pushes as has to be resolved by name at the start of that run rather than left to whichever
   // account gh happens to have active when delivery reaches the remote.
@@ -1075,7 +1263,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     });
 
     expect(everyCall).toContainEqual([
-      expect.stringContaining("gh"),
+      "/opt/homebrew/bin/gh",
       "auth",
       "token",
       "--user",

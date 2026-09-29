@@ -9,6 +9,7 @@ const task = claimedTask();
 
 // Not the literal "git" — see commit.test.ts's gitPath comment (BP-641 review).
 const gitPath = "/opt/homebrew/bin/git";
+const ghPath = "/opt/homebrew/bin/gh";
 
 const ok: CommandResult = { code: 0, stdout: "", stderr: "", timedOut: false };
 
@@ -31,7 +32,7 @@ function fakeCli(responses: Record<string, Partial<CommandResult>>) {
     // regardless of gitPath's actual value. Normalised back to that shorthand for matching only;
     // what's recorded on `run.mock.calls`, which the command-argument assertions elsewhere in this
     // file read, is the real, unmodified argument.
-    const normalisedCommand = command === gitPath ? "git" : command;
+    const normalisedCommand = command === gitPath ? "git" : command === ghPath ? "gh" : command;
     const line = `${normalisedCommand} ${withoutConfigFlags(args).join(" ")}`;
     const key = Object.keys(responses).find((prefix) => line.startsWith(prefix));
     return { ...ok, ...(key ? responses[key] : {}) };
@@ -75,7 +76,7 @@ const COMMIT = "sha1";
 describe("push", () => {
   it("pushes the commit into the branch, so the ref store cannot decide what is sent", async () => {
     const run = vi.fn().mockResolvedValue(ok);
-    await createDelivery({ run }, gitPath).push("/wt", "cp-158/worker", COMMIT);
+    await createDelivery({ run }, gitPath, ghPath).push("/wt", "cp-158/worker", COMMIT);
 
     expect(run).toHaveBeenCalledWith(
       gitPath,
@@ -95,14 +96,14 @@ describe("push", () => {
 
   it("does not send the bare branch name as its own argument", async () => {
     const run = vi.fn().mockResolvedValue(ok);
-    await createDelivery({ run }, gitPath).push("/wt", "cp-158/worker", COMMIT);
+    await createDelivery({ run }, gitPath, ghPath).push("/wt", "cp-158/worker", COMMIT);
 
     expect(argsOf(run)).not.toContain("cp-158/worker");
   });
 
   it("refuses to push without a commit to name", async () => {
     const run = vi.fn().mockResolvedValue(ok);
-    await expect(createDelivery({ run }, gitPath).push("/wt", "cp-158/worker", "")).rejects.toThrow(
+    await expect(createDelivery({ run }, gitPath, ghPath).push("/wt", "cp-158/worker", "")).rejects.toThrow(
       /commit/i
     );
     expect(run).not.toHaveBeenCalled();
@@ -110,7 +111,7 @@ describe("push", () => {
 
   it("replaces the branch a previous attempt pushed, under a lease rather than a blind force", async () => {
     const run = vi.fn().mockResolvedValue(ok);
-    await createDelivery({ run }, gitPath).push("/wt", "cp-158/worker", COMMIT);
+    await createDelivery({ run }, gitPath, ghPath).push("/wt", "cp-158/worker", COMMIT);
 
     const args = argsOf(run);
     expect(args).toContain("--force-with-lease");
@@ -119,14 +120,14 @@ describe("push", () => {
 
   it("throws when the push is rejected", async () => {
     const { runner } = fakeCli({ "git push": { code: 1, stderr: "! [rejected] (non-fast-forward)" } });
-    await expect(createDelivery(runner, gitPath).push("/wt", "cp-158/worker", COMMIT)).rejects.toThrow(
+    await expect(createDelivery(runner, gitPath, ghPath).push("/wt", "cp-158/worker", COMMIT)).rejects.toThrow(
       /non-fast-forward/
     );
   });
 
   it("names the timeout instead of throwing an empty error when the push hangs", async () => {
     const { runner } = fakeCli({ "git push": { code: -1, timedOut: true } });
-    await expect(createDelivery(runner, gitPath).push("/wt", "cp-158/worker", COMMIT)).rejects.toThrow(
+    await expect(createDelivery(runner, gitPath, ghPath).push("/wt", "cp-158/worker", COMMIT)).rejects.toThrow(
       /timed out/
     );
   });
@@ -137,14 +138,14 @@ describe("push", () => {
     const { runner } = fakeCli({
       "git config --list": { stdout: scopedConfigListZ("core.sshcommand=curl attacker") },
     });
-    await expect(createDelivery(runner, gitPath).push("/wt", "cp-158/worker", COMMIT)).rejects.toThrow(
+    await expect(createDelivery(runner, gitPath, ghPath).push("/wt", "cp-158/worker", COMMIT)).rejects.toThrow(
       /core\.sshcommand/
     );
   });
 
   it("does not push when the config cannot be read at all", async () => {
     const { runner, run } = fakeCli({ "git config --list": { code: 128 } });
-    await expect(createDelivery(runner, gitPath).push("/wt", "cp-158/worker", COMMIT)).rejects.toThrow(
+    await expect(createDelivery(runner, gitPath, ghPath).push("/wt", "cp-158/worker", COMMIT)).rejects.toThrow(
       /refusing/
     );
     expect(run.mock.calls.some(([, args]) => (args as string[]).includes("push"))).toBe(false);
@@ -155,7 +156,7 @@ describe("push", () => {
   // against a real git and a really planted hook.
   it("neutralises every config file git would otherwise read", async () => {
     const run = vi.fn().mockResolvedValue(ok);
-    await createDelivery({ run }, gitPath).push("/wt", "cp-158/worker", COMMIT);
+    await createDelivery({ run }, gitPath, ghPath).push("/wt", "cp-158/worker", COMMIT);
 
     const env = envOf(run);
     expect(env.GIT_CONFIG_NOSYSTEM).toBe("1");
@@ -170,7 +171,7 @@ describe("push", () => {
     ["core.pager", "cat"],
   ])("overrides %s, which the repository config could otherwise point at a program", async (key, value) => {
     const run = vi.fn().mockResolvedValue(ok);
-    await createDelivery({ run }, gitPath).push("/wt", "cp-158/worker", COMMIT);
+    await createDelivery({ run }, gitPath, ghPath).push("/wt", "cp-158/worker", COMMIT);
 
     expect(configuredBy(envOf(run))).toContainEqual([key, value]);
   });
@@ -182,7 +183,7 @@ describe("push", () => {
     ["protocol.file.allow", "never"],
   ])("refuses the %s transport, whichever way the remote url was rewritten", async (key, value) => {
     const run = vi.fn().mockResolvedValue(ok);
-    await createDelivery({ run }, gitPath).push("/wt", "cp-158/worker", COMMIT);
+    await createDelivery({ run }, gitPath, ghPath).push("/wt", "cp-158/worker", COMMIT);
 
     expect(configuredBy(envOf(run))).toContainEqual([key, value]);
   });
@@ -192,7 +193,7 @@ describe("push", () => {
   // The environment is where it is won, and empty there means no proxy rather than fall through.
   it("empties the proxy command in the environment, where config cannot outrank it", async () => {
     const run = vi.fn().mockResolvedValue(ok);
-    await createDelivery({ run }, gitPath).push("/wt", "cp-158/worker", COMMIT);
+    await createDelivery({ run }, gitPath, ghPath).push("/wt", "cp-158/worker", COMMIT);
 
     const env = envOf(run);
     expect(env.GIT_PROXY_COMMAND).toBe("");
@@ -203,22 +204,42 @@ describe("push", () => {
   // setting outranks any override and only the command line wins
   it("names the receive-pack on the command line, where config cannot outrank it", async () => {
     const run = vi.fn().mockResolvedValue(ok);
-    await createDelivery({ run }, gitPath).push("/wt", "cp-158/worker", COMMIT);
+    await createDelivery({ run }, gitPath, ghPath).push("/wt", "cp-158/worker", COMMIT);
 
     expect(argsOf(run)).toContain("--receive-pack=git-receive-pack");
     expect(configuredBy(envOf(run)).map(([key]) => key)).not.toContain("remote.origin.receivepack");
+  });
+
+  // BP-733: git runs the helper through a shell, which would find `gh` by name on the PATH this
+  // process assembled — and hand it GH_TOKEN
+  it.each([[""], ["gh"]])("names no credential helper when gh's path is %j", async (ghPathGiven) => {
+    const run = vi.fn().mockResolvedValue(ok);
+    await createDelivery({ run }, gitPath, ghPathGiven).push("/wt", "cp-158/worker", COMMIT);
+
+    const helpers = configuredBy(envOf(run)).filter(([key]) => key === "credential.helper");
+    expect(helpers).toEqual([["credential.helper", ""]]);
+  });
+
+  it("quotes gh's path in the helper, which git hands to a shell", async () => {
+    const run = vi.fn().mockResolvedValue(ok);
+    await createDelivery({ run }, gitPath, "/Users/o'brien/bin/gh").push("/wt", "cp-158/worker", COMMIT);
+
+    expect(configuredBy(envOf(run))).toContainEqual([
+      "credential.helper",
+      `!'/Users/o'\\''brien/bin/gh' auth git-credential`,
+    ]);
   });
 
   // Clearing the helper list is what makes GIT_CONFIG_GLOBAL safe to set; naming ours after it is
   // what keeps an https remote authenticating once the global file is gone
   it("clears inherited credential helpers and names the one it trusts, in that order", async () => {
     const run = vi.fn().mockResolvedValue(ok);
-    await createDelivery({ run }, gitPath).push("/wt", "cp-158/worker", COMMIT);
+    await createDelivery({ run }, gitPath, ghPath).push("/wt", "cp-158/worker", COMMIT);
 
     const helpers = configuredBy(envOf(run)).filter(([key]) => key === "credential.helper");
     expect(helpers).toEqual([
       ["credential.helper", ""],
-      ["credential.helper", "!gh auth git-credential"],
+      ["credential.helper", `!'${ghPath}' auth git-credential`],
     ]);
   });
 
@@ -228,9 +249,9 @@ describe("push", () => {
     const { runner, run } = fakeCli({
       "gh pr create": { stdout: "https://github.com/o/r/pull/1\n" },
     });
-    await createDelivery(runner, gitPath).openPr("/wt", task, "summary");
+    await createDelivery(runner, gitPath, ghPath).openPr("/wt", task, "summary");
 
-    const ghCall = run.mock.calls.find((call) => call[0] === "gh");
+    const ghCall = run.mock.calls.find((call) => call[0] === ghPath);
     const env = (ghCall?.[2] as { env: Record<string, string> }).env;
     expect(env.GIT_CONFIG_GLOBAL).toBe("/dev/null");
     expect(env.GIT_PROXY_COMMAND).toBe("");
@@ -245,7 +266,7 @@ describe("openPr", () => {
       .fn()
       .mockResolvedValue({ ...ok, stdout: "https://github.com/x/y/pull/7\n" });
 
-    const url = await createDelivery({ run }, gitPath).openPr("/wt", task, "did the thing");
+    const url = await createDelivery({ run }, gitPath, ghPath).openPr("/wt", task, "did the thing");
 
     expect(url).toBe("https://github.com/x/y/pull/7");
     expect(argsOf(run)).toContain("--title");
@@ -253,7 +274,7 @@ describe("openPr", () => {
 
   it("prefixes the pr title with the task key", async () => {
     const run = vi.fn().mockResolvedValue({ ...ok, stdout: "https://github.com/x/y/pull/7" });
-    await createDelivery({ run }, gitPath).openPr("/wt", task, "summary");
+    await createDelivery({ run }, gitPath, ghPath).openPr("/wt", task, "summary");
 
     expect(valueOf(argsOf(run), "--title")).toBe("CP-158: Add a thing");
   });
@@ -269,7 +290,7 @@ describe("openPr", () => {
       ].join("\n"),
     });
 
-    const url = await createDelivery({ run }, gitPath).openPr("/wt", task, "summary");
+    const url = await createDelivery({ run }, gitPath, ghPath).openPr("/wt", task, "summary");
     expect(url).toBe("https://github.com/x/y/pull/7");
   });
 
@@ -278,7 +299,7 @@ describe("openPr", () => {
       .fn()
       .mockResolvedValue({ ...ok, stdout: "Warning: 1 uncommitted change\n" });
 
-    await expect(createDelivery({ run }, gitPath).openPr("/wt", task, "summary")).rejects.toThrow(
+    await expect(createDelivery({ run }, gitPath, ghPath).openPr("/wt", task, "summary")).rejects.toThrow(
       /no pull request url/
     );
   });
@@ -292,7 +313,7 @@ describe("openPr", () => {
       },
     });
 
-    const url = await createDelivery(runner, gitPath).openPr("/wt", task, "summary");
+    const url = await createDelivery(runner, gitPath, ghPath).openPr("/wt", task, "summary");
     expect(url).toBe("https://github.com/x/y/pull/7");
   });
 
@@ -300,14 +321,14 @@ describe("openPr", () => {
     const { runner } = fakeCli({
       "gh pr create": { code: 1, stderr: "gh: authentication required" },
     });
-    await expect(createDelivery(runner, gitPath).openPr("/wt", task, "summary")).rejects.toThrow(
+    await expect(createDelivery(runner, gitPath, ghPath).openPr("/wt", task, "summary")).rejects.toThrow(
       /authentication required/
     );
   });
 
   it("caps a runaway summary so the body cannot exceed the argument limit", async () => {
     const run = vi.fn().mockResolvedValue({ ...ok, stdout: "https://github.com/x/y/pull/7" });
-    await createDelivery({ run }, gitPath).openPr("/wt", task, "x".repeat(200_000));
+    await createDelivery({ run }, gitPath, ghPath).openPr("/wt", task, "x".repeat(200_000));
 
     const body = valueOf(argsOf(run), "--body");
     expect(body.length).toBeLessThan(40_000);
@@ -316,21 +337,21 @@ describe("openPr", () => {
 
   it("targets the configured base branch", async () => {
     const run = vi.fn().mockResolvedValue({ ...ok, stdout: "https://github.com/x/y/pull/7" });
-    await createDelivery({ run }, gitPath, "develop").openPr("/wt", task, "summary");
+    await createDelivery({ run }, gitPath, ghPath, "develop").openPr("/wt", task, "summary");
 
     expect(valueOf(argsOf(run), "--base")).toBe("develop");
   });
 
   it("leaves the base to the repository default when none is configured", async () => {
     const run = vi.fn().mockResolvedValue({ ...ok, stdout: "https://github.com/x/y/pull/7" });
-    await createDelivery({ run }, gitPath).openPr("/wt", task, "summary");
+    await createDelivery({ run }, gitPath, ghPath).openPr("/wt", task, "summary");
 
     expect(argsOf(run)).not.toContain("--base");
   });
 
   it("keeps the pr title on a single line", async () => {
     const run = vi.fn().mockResolvedValue({ ...ok, stdout: "https://github.com/x/y/pull/7" });
-    await createDelivery({ run }, gitPath).openPr("/wt", { ...task, title: "Add\na  thing" }, "summary");
+    await createDelivery({ run }, gitPath, ghPath).openPr("/wt", { ...task, title: "Add\na  thing" }, "summary");
 
     expect(valueOf(argsOf(run), "--title")).toBe("CP-158: Add a thing");
   });
@@ -341,14 +362,14 @@ describe("merge", () => {
     const run = vi
       .fn()
       .mockResolvedValue({ code: 1, stdout: "", stderr: "not mergeable", timedOut: false });
-    await expect(createDelivery({ run }, gitPath).merge("/wt", "https://x/pull/7")).rejects.toThrow(
+    await expect(createDelivery({ run }, gitPath, ghPath).merge("/wt", "https://x/pull/7")).rejects.toThrow(
       /not mergeable/
     );
   });
 
   it("merges and deletes the branch", async () => {
     const { runner, run } = fakeCli({});
-    await createDelivery(runner, gitPath).merge("/wt", "https://github.com/x/y/pull/7");
+    await createDelivery(runner, gitPath, ghPath).merge("/wt", "https://github.com/x/y/pull/7");
 
     const args = argsOf(run);
     expect(args.slice(0, 3)).toEqual(["pr", "merge", "https://github.com/x/y/pull/7"]);
@@ -358,28 +379,28 @@ describe("merge", () => {
 
   it("targets the pull request's own repository so gh leaves the worktree checkout alone", async () => {
     const { runner, run } = fakeCli({});
-    await createDelivery(runner, gitPath).merge("/wt", "https://github.com/x/y/pull/7");
+    await createDelivery(runner, gitPath, ghPath).merge("/wt", "https://github.com/x/y/pull/7");
 
     expect(valueOf(argsOf(run), "--repo")).toBe("x/y");
   });
 
   it("keeps the enterprise host in the repository argument", async () => {
     const { runner, run } = fakeCli({});
-    await createDelivery(runner, gitPath).merge("/wt", "https://ghe.example.com/x/y/pull/7");
+    await createDelivery(runner, gitPath, ghPath).merge("/wt", "https://ghe.example.com/x/y/pull/7");
 
     expect(valueOf(argsOf(run), "--repo")).toBe("ghe.example.com/x/y");
   });
 
   it("keeps a non-default port in the repository argument", async () => {
     const { runner, run } = fakeCli({});
-    await createDelivery(runner, gitPath).merge("/wt", "https://ghe.example.com:8443/x/y/pull/7");
+    await createDelivery(runner, gitPath, ghPath).merge("/wt", "https://ghe.example.com:8443/x/y/pull/7");
 
     expect(valueOf(argsOf(run), "--repo")).toBe("ghe.example.com:8443/x/y");
   });
 
   it("leaves the repository to gh when the url is not a recognisable pull request url", async () => {
     const { runner, run } = fakeCli({});
-    await createDelivery(runner, gitPath).merge("/wt", "https://x/pull/7");
+    await createDelivery(runner, gitPath, ghPath).merge("/wt", "https://x/pull/7");
 
     expect(argsOf(run)).not.toContain("--repo");
   });
@@ -394,7 +415,7 @@ describe("merge", () => {
     });
 
     await expect(
-      createDelivery(runner, gitPath).merge("/wt", "https://github.com/x/y/pull/7")
+      createDelivery(runner, gitPath, ghPath).merge("/wt", "https://github.com/x/y/pull/7")
     ).resolves.toBeUndefined();
   });
 
@@ -407,7 +428,7 @@ describe("merge", () => {
       "gh pr view": { stdout: '{"state":"OPEN"}' },
     });
 
-    const error = await createDelivery(runner, gitPath)
+    const error = await createDelivery(runner, gitPath, ghPath)
       .merge("/wt", "https://github.com/x/y/pull/7")
       .then(() => new Error("merge resolved"))
       .catch((thrown: unknown) => thrown);
@@ -423,14 +444,14 @@ describe("merge", () => {
     });
 
     await expect(
-      createDelivery(runner, gitPath).merge("/wt", "https://github.com/x/y/pull/7")
+      createDelivery(runner, gitPath, ghPath).merge("/wt", "https://github.com/x/y/pull/7")
     ).rejects.toThrow(/merge state could not be confirmed/);
   });
 
   it("names the timeout when the merge hangs", async () => {
     const run = vi.fn().mockResolvedValue({ code: -1, stdout: "", stderr: "", timedOut: true });
     await expect(
-      createDelivery({ run }, gitPath).merge("/wt", "https://github.com/x/y/pull/7")
+      createDelivery({ run }, gitPath, ghPath).merge("/wt", "https://github.com/x/y/pull/7")
     ).rejects.toThrow(/timed out/);
   });
 });
@@ -438,7 +459,7 @@ describe("merge", () => {
 describe("push argument boundaries", () => {
   it("separates the refspec from git's options with --", async () => {
     const run = vi.fn().mockResolvedValue(ok);
-    await createDelivery({ run }, gitPath).push("/wt", "bp-327/fix", COMMIT);
+    await createDelivery({ run }, gitPath, ghPath).push("/wt", "bp-327/fix", COMMIT);
 
     const args = argsOf(run);
     const refspec = `${COMMIT}:refs/heads/bp-327/fix`;
@@ -453,7 +474,7 @@ describe("push argument boundaries", () => {
     const run = vi.fn().mockResolvedValue(ok);
 
     await expect(
-      createDelivery({ run }, gitPath).push("/wt", "--receive-pack=/bin/echo", COMMIT)
+      createDelivery({ run }, gitPath, ghPath).push("/wt", "--receive-pack=/bin/echo", COMMIT)
     ).rejects.toThrow(/not a git ref name/i);
   });
 
@@ -466,7 +487,7 @@ describe("push argument boundaries", () => {
     const run = vi.fn().mockResolvedValue(ok);
 
     await expect(
-      createDelivery({ run }, gitPath).push("/wt", `evil:refs/heads/other`, COMMIT)
+      createDelivery({ run }, gitPath, ghPath).push("/wt", `evil:refs/heads/other`, COMMIT)
     ).rejects.toThrow(/not a git ref name/i);
     expect(run).not.toHaveBeenCalled();
   });
@@ -475,11 +496,11 @@ describe("push argument boundaries", () => {
     const run = vi.fn().mockResolvedValue({ ...ok, stdout: "https://github.com/x/y/pull/1" });
     const task = { taskKey: "BP-1", title: "t" } as never;
 
-    await createDelivery({ run }, gitPath, "--output=/tmp/pwned").openPr("/wt", task, "s");
+    await createDelivery({ run }, gitPath, ghPath, "--output=/tmp/pwned").openPr("/wt", task, "s");
     expect(argsOf(run)).not.toContain("--base");
 
     run.mockClear();
-    await createDelivery({ run }, gitPath, "develop").openPr("/wt", task, "s");
+    await createDelivery({ run }, gitPath, ghPath, "develop").openPr("/wt", task, "s");
     expect(argsOf(run)).toEqual(expect.arrayContaining(["--base", "develop"]));
   });
 });
@@ -492,7 +513,7 @@ describe("the github identity delivery acts as", () => {
 
   it("carries the pinned account's token on the push", async () => {
     const run = vi.fn().mockResolvedValue(ok);
-    await createDelivery({ run }, gitPath, "main", PINNED).push("/wt", "bp-373/pin", COMMIT);
+    await createDelivery({ run }, gitPath, ghPath, "main", PINNED).push("/wt", "bp-373/pin", COMMIT);
 
     expect(envOf(run).GH_TOKEN).toBe(PINNED);
   });
@@ -501,7 +522,7 @@ describe("the github identity delivery acts as", () => {
     const { runner, run } = fakeCli({
       "gh pr create": { stdout: "https://github.com/x/y/pull/9" },
     });
-    const delivery = createDelivery(runner, gitPath, "main", PINNED);
+    const delivery = createDelivery(runner, gitPath, ghPath, "main", PINNED);
 
     await delivery.openPr("/wt", task as ClaimedTask, "summary");
     await delivery.merge("/wt", "https://github.com/x/y/pull/9");
@@ -514,7 +535,7 @@ describe("the github identity delivery acts as", () => {
   // back — the failure being pushing as an account that does have access, under the wrong name.
   it("overrides an inherited GITHUB_TOKEN rather than letting it win", async () => {
     const run = vi.fn().mockResolvedValue(ok);
-    await createDelivery({ run }, gitPath, "main", PINNED).push("/wt", "bp-373/pin", COMMIT);
+    await createDelivery({ run }, gitPath, ghPath, "main", PINNED).push("/wt", "bp-373/pin", COMMIT);
 
     expect(envOf(run).GITHUB_TOKEN).toBe(PINNED);
   });
@@ -523,11 +544,62 @@ describe("the github identity delivery acts as", () => {
   // behaviour it had — gh resolves its own identity from the keyring.
   it("sets no token at all when no account is pinned", async () => {
     const run = vi.fn().mockResolvedValue(ok);
-    await createDelivery({ run }, gitPath, "main").push("/wt", "bp-373/pin", COMMIT);
+    await createDelivery({ run }, gitPath, ghPath, "main").push("/wt", "bp-373/pin", COMMIT);
 
     const env = envOf(run);
     expect("GH_TOKEN" in env).toBe(false);
     expect("GITHUB_TOKEN" in env).toBe(false);
+  });
+});
+
+// BP-733. The token rides in gh's environment, so whatever answers to the name `gh` on the PATH
+// this process assembled would be handed it.
+describe("the gh that carries the token", () => {
+  const PINNED = "gho_pinned_account_token";
+
+  it("is spawned by its resolved absolute path, on pr create, pr merge and pr view", async () => {
+    const { runner, run } = fakeCli({
+      "gh pr create": { stdout: "https://github.com/x/y/pull/9" },
+      "gh pr merge": { code: 1, stderr: "merge failed" },
+      "gh pr view": { stdout: JSON.stringify({ state: "MERGED" }) },
+    });
+    const delivery = createDelivery(runner, gitPath, ghPath, "main", PINNED);
+
+    await delivery.openPr("/wt", task, "summary");
+    await delivery.merge("/wt", "https://github.com/x/y/pull/9");
+
+    const spawned = run.mock.calls.map(([command, args, opts]) => ({
+      command,
+      subcommand: (args as string[]).slice(0, 2).join(" "),
+      token: (opts as RunOpts).env?.GH_TOKEN,
+    }));
+    expect(spawned).toEqual([
+      { command: ghPath, subcommand: "pr create", token: PINNED },
+      { command: ghPath, subcommand: "pr merge", token: PINNED },
+      { command: ghPath, subcommand: "pr view", token: PINNED },
+    ]);
+  });
+
+  it("refuses rather than spawning gh by name when no path was resolved", async () => {
+    const run = vi.fn().mockResolvedValue({ ...ok, stdout: "https://github.com/x/y/pull/9" });
+    const delivery = createDelivery({ run }, gitPath, "", "main", PINNED);
+
+    await expect(delivery.openPr("/wt", task, "summary")).rejects.toThrow(
+      "no absolute gh path was resolved — refusing to run gh by name on PATH",
+    );
+    await expect(delivery.merge("/wt", "https://github.com/x/y/pull/9")).rejects.toThrow(
+      "no absolute gh path was resolved",
+    );
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("refuses a bare name as firmly as an empty one", async () => {
+    const run = vi.fn().mockResolvedValue(ok);
+
+    await expect(createDelivery({ run }, gitPath, "gh", "main", PINNED).openPr("/wt", task, "summary")).rejects.toThrow(
+      "no absolute gh path was resolved",
+    );
+    expect(run).not.toHaveBeenCalled();
   });
 });
 
@@ -536,7 +608,7 @@ describe("the checks listed on a pull request", () => {
   it("puts the gates the run passed under the summary, with their commands and durations", async () => {
     const run = vi.fn().mockResolvedValue({ ...ok, stdout: "https://github.com/x/y/pull/7" });
 
-    await createDelivery({ run }, gitPath).openPr("/wt", task, "did the thing", [
+    await createDelivery({ run }, gitPath, ghPath).openPr("/wt", task, "did the thing", [
       { name: "protected-paths", commands: [], durationMs: 40 },
       { name: "build", commands: ["npm ci --ignore-scripts", "npm run build"], durationMs: 83_400 },
       { name: "test-run", commands: ["npm test"], durationMs: 12_200 },
@@ -560,7 +632,7 @@ describe("the checks listed on a pull request", () => {
   it("leaves the body as the summary alone when no gate ran", async () => {
     const run = vi.fn().mockResolvedValue({ ...ok, stdout: "https://github.com/x/y/pull/7" });
 
-    await createDelivery({ run }, gitPath).openPr("/wt", task, "did the thing");
+    await createDelivery({ run }, gitPath, ghPath).openPr("/wt", task, "did the thing");
 
     expect(valueOf(argsOf(run), "--body")).toBe("did the thing");
   });

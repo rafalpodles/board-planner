@@ -1,7 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { agentArgs, isAgentSpawn } from "../__fixtures__/agent-spawn.js";
 import { gateFromEntry } from "./from-entry.js";
 import { GateContext, SnapshotEntry } from "../types.js";
+import { CLAUDE_PATH, NPM_PATH } from "../__fixtures__/tool-paths.js";
 
 function entry(over: Partial<SnapshotEntry>): SnapshotEntry {
   return {
@@ -31,6 +35,7 @@ function ctx(changedLines: number): GateContext {
 const idleRunner = { run: vi.fn() } as never;
 // Not the literal "git" — see commit.test.ts's gitPath comment (BP-641 review).
 const gitPath = "/opt/homebrew/bin/git";
+const tools = { git: gitPath, npm: NPM_PATH, claude: CLAUDE_PATH };
 
 // What a block that names no parameter of its own falls back to: the project's worker policy,
 // deliberately not the built-in constants — a project that pinned a limit before the catalog
@@ -50,13 +55,13 @@ function reviewerArgv(run: { mock: { calls: unknown[][] } }): string[] {
 describe("gateFromEntry", () => {
   // Two Size gates in one agent have to be distinguishable in the comment that refuses
   it("names the gate after the block, not after the kind", () => {
-    expect(gateFromEntry(entry({ key: "size-strict" }), idleRunner, gitPath, 1000, FALLBACKS)?.name).toBe(
+    expect(gateFromEntry(entry({ key: "size-strict" }), idleRunner, tools, 1000, FALLBACKS)?.name).toBe(
       "size-strict"
     );
   });
 
   it("takes the threshold from the entry rather than from the worker's config", async () => {
-    const gate = gateFromEntry(entry({ params: { maxLines: "10" } }), idleRunner, gitPath, 1000, FALLBACKS);
+    const gate = gateFromEntry(entry({ params: { maxLines: "10" } }), idleRunner, tools, 1000, FALLBACKS);
     const verdict = await gate!.run(ctx(50));
 
     expect(verdict.ok).toBe(false);
@@ -66,7 +71,7 @@ describe("gateFromEntry", () => {
   // A threshold of zero refuses every change, which reads as a broken gate rather than a strict one
   it("falls back to the built-in default when a parameter is not a positive number", async () => {
     for (const maxLines of ["lots", "0", "-5", ""]) {
-      const gate = gateFromEntry(entry({ params: { maxLines } }), idleRunner, gitPath, 1000, FALLBACKS);
+      const gate = gateFromEntry(entry({ params: { maxLines } }), idleRunner, tools, 1000, FALLBACKS);
       expect((await gate!.run(ctx(5))).ok).toBe(true);
     }
   });
@@ -74,7 +79,7 @@ describe("gateFromEntry", () => {
   // The project's own setting, not the built-in 400: a project that pinned 2000 before the catalog
   // existed keeps it, and a block that names no limit inherits it
   it("falls back to the project's pinned limit, not to the built-in one", async () => {
-    const gate = gateFromEntry(entry({ params: {} }), idleRunner, gitPath, 1000, {
+    const gate = gateFromEntry(entry({ params: {} }), idleRunner, tools, 1000, {
       ...FALLBACKS,
       maxDiffLines: 2000,
     });
@@ -83,7 +88,7 @@ describe("gateFromEntry", () => {
   });
 
   it("returns null for a kind this worker does not implement", () => {
-    expect(gateFromEntry(entry({ gateKind: "invented" }), idleRunner, gitPath, 1000, FALLBACKS)).toBeNull();
+    expect(gateFromEntry(entry({ gateKind: "invented" }), idleRunner, tools, 1000, FALLBACKS)).toBeNull();
   });
 
   it("passes the entry's model and focus down to a review gate", async () => {
@@ -101,7 +106,7 @@ describe("gateFromEntry", () => {
         params: { model: "sonnet", focus: "security" },
       }),
       { run } as never,
-      gitPath,
+      tools,
       1000,
       FALLBACKS
     );
@@ -124,7 +129,7 @@ describe("gateFromEntry", () => {
     const gate = gateFromEntry(
       entry({ key: "review", gateKind: "review", params: {} }),
       { run } as never,
-      gitPath,
+      tools,
       1000,
       { ...FALLBACKS, reviewModel: "sonnet" }
     );
@@ -135,12 +140,29 @@ describe("gateFromEntry", () => {
     expect(argv[argv.indexOf("--append-system-prompt") + 1]).not.toMatch(/injection/i);
   });
 
+  // BP-733: each gate is handed the path of the tool it spawns, not a neighbour's
+  it.each(["build", "test-run"])("hands the %s gate the npm preflight resolved", async (gateKind) => {
+    const worktreePath = mkdtempSync(join(tmpdir(), "cp-from-entry-"));
+    const run = vi.fn(async (..._args: unknown[]) => ({ code: 0, stdout: "", stderr: "", timedOut: false }));
+    try {
+      await gateFromEntry(entry({ gateKind }), { run } as never, tools, 1000, FALLBACKS)!.run({
+        ...ctx(5),
+        worktreePath,
+      });
+    } finally {
+      rmSync(worktreePath, { recursive: true, force: true });
+    }
+
+    expect(run).toHaveBeenCalled();
+    for (const [, args] of run.mock.calls) expect(args).toContain(NPM_PATH);
+  });
+
   // That this list IS the catalog's is asserted in catalog-contract.test.ts, which reads the app's
   // source rather than importing it — drift is what makes a run die mid-task with "this worker
   // implements no gate of kind …", after the agent has already done the work.
   it("builds every kind the catalog offers", () => {
     for (const gateKind of ["diff-size", "protected-paths", "test-presence", "build", "test-run", "review"]) {
-      expect(gateFromEntry(entry({ gateKind }), idleRunner, gitPath, 1000, FALLBACKS)).not.toBeNull();
+      expect(gateFromEntry(entry({ gateKind }), idleRunner, tools, 1000, FALLBACKS)).not.toBeNull();
     }
   });
 });

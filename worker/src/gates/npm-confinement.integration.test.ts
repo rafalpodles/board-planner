@@ -6,6 +6,7 @@ import { createRunner } from "../exec.js";
 import { claimedTask } from "../__fixtures__/task.js";
 import { GateContext } from "../types.js";
 import { testRunGate } from "./test-run.js";
+import { installedToolPath } from "../__fixtures__/tool-paths.js";
 
 /**
  * BP-608, driven through the real kernel and a real `npm`.
@@ -30,6 +31,7 @@ describe.skipIf(!onMac)("the test gate against the real sandbox", () => {
   let outside = "";
 
   const runner = createRunner();
+  const npmPath = onMac ? installedToolPath("npm") : "";
 
   function context(): GateContext {
     return {
@@ -82,7 +84,7 @@ describe.skipIf(!onMac)("the test gate against the real sandbox", () => {
       `require("fs").writeFileSync(${JSON.stringify(join(outside, "settings.json"))}, "planted");`
     );
 
-    const result = await testRunGate(runner, 120_000).run(context());
+    const result = await testRunGate(runner, npmPath, 120_000).run(context());
 
     // The suite fails because the write was denied, which is also how the operator finds out
     expect(result.ok).toBe(false);
@@ -93,7 +95,7 @@ describe.skipIf(!onMac)("the test gate against the real sandbox", () => {
     const planted = join(outside, "new-hook.json");
     suiteThat(`require("fs").writeFileSync(${JSON.stringify(planted)}, "planted");`);
 
-    const result = await testRunGate(runner, 120_000).run(context());
+    const result = await testRunGate(runner, npmPath, 120_000).run(context());
 
     expect(result.ok).toBe(false);
     expect(existsSync(planted)).toBe(false);
@@ -112,7 +114,7 @@ describe.skipIf(!onMac)("the test gate against the real sandbox", () => {
     suiteThat(`require("fs").writeFileSync(${JSON.stringify(planted)}, "planted");`);
 
     try {
-      const result = await testRunGate(runner, 120_000).run(context());
+      const result = await testRunGate(runner, npmPath, 120_000).run(context());
 
       expect(result.ok).toBe(false);
       expect(readFileSync(planted, "utf8")).toBe("original\n");
@@ -128,7 +130,7 @@ describe.skipIf(!onMac)("the test gate against the real sandbox", () => {
       `require("fs").writeFileSync(${JSON.stringify(join(worktree, "coverage.txt"))}, "100%");`
     );
 
-    const result = await testRunGate(runner, 120_000).run(context());
+    const result = await testRunGate(runner, npmPath, 120_000).run(context());
 
     expect(result.ok, result.reason).toBe(true);
     expect(readFileSync(join(worktree, "coverage.txt"), "utf8")).toBe("100%");
@@ -144,7 +146,7 @@ describe.skipIf(!onMac)("the test gate against the real sandbox", () => {
        writeFileSync(join(mkdtempSync(join(tmpdir(), "suite-")), "scratch.txt"), "fine");`
     );
 
-    const result = await testRunGate(runner, 120_000).run(context());
+    const result = await testRunGate(runner, npmPath, 120_000).run(context());
 
     expect(result.ok, result.reason).toBe(true);
   });

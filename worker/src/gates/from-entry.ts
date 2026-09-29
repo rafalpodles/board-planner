@@ -20,6 +20,13 @@ export interface GateFallbacks {
   reviewModel: string;
 }
 
+/** The absolute paths preflight resolved for what the gates spawn (BP-641, BP-733). */
+export interface GateTools {
+  git: string;
+  npm: string;
+  claude: string;
+}
+
 // A value this worker cannot read is the built-in default, never NaN and never zero — a threshold
 // of zero refuses every change, which reads as a broken gate rather than a strict one.
 function numberOr(value: string | undefined, fallback: number): number {
@@ -42,7 +49,7 @@ function named(gate: Gate, name: string): Gate {
 export function gateFromEntry(
   entry: SnapshotEntry,
   runner: Runner,
-  gitPath: string,
+  tools: GateTools,
   timeoutMs: number,
   fallbacks: GateFallbacks
 ): Gate | null {
@@ -62,12 +69,12 @@ export function gateFromEntry(
     case "test-presence":
       return named(testPresenceGate(), entry.key);
     case "build":
-      return named(buildGate(runner, timeoutMs), entry.key);
+      return named(buildGate(runner, tools.npm, timeoutMs), entry.key);
     case "test-run":
-      return named(testRunGate(runner, timeoutMs), entry.key);
+      return named(testRunGate(runner, tools.npm, timeoutMs), entry.key);
     case "review":
       return named(
-        reviewGate(runner, gitPath, timeoutMs, params.model || fallbacks.reviewModel, params.focus),
+        reviewGate(runner, tools.git, tools.claude, timeoutMs, params.model || fallbacks.reviewModel, params.focus),
         entry.key
       );
     default:

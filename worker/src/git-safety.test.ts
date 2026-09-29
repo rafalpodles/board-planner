@@ -18,6 +18,11 @@ describe("requireGitPath", () => {
     expect(() => requireGitPath("")).toThrow(/no absolute git path was resolved/);
   });
 
+  // BP-733: absolute, not merely non-empty — preflight only ever resolves one
+  it("refuses the bare name as firmly as an empty path", () => {
+    expect(() => requireGitPath("git")).toThrow(/no absolute git path was resolved/);
+  });
+
   it("passes an already-resolved path through unchanged", () => {
     expect(requireGitPath("/opt/homebrew/bin/git")).toBe("/opt/homebrew/bin/git");
   });

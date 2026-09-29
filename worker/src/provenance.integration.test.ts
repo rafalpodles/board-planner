@@ -5,8 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { unexpectedHistory } from "./provenance.js";
 import { createRunner } from "./exec.js";
+import { installedToolPath } from "./__fixtures__/tool-paths.js";
 
-const gitPath = "git";
+const gitPath = installedToolPath("git");
 
 /**
  * provenance.test.ts proves the comparison logic against a mocked runner that answers to

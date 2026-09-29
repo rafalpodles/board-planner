@@ -8,6 +8,7 @@ import { GateContext } from "../types.js";
 import { claimedTask } from "../__fixtures__/task.js";
 import { SANDBOX_COMMAND, UNCONFINED_REASON } from "../sandbox.js";
 import { npmCacheDir } from "./confined-npm.js";
+import { NPM_PATH } from "../__fixtures__/tool-paths.js";
 
 const TIMEOUT_MS = 5000;
 
@@ -60,7 +61,7 @@ describe("buildGate", () => {
   it("installs dependencies before building a fresh worktree", async () => {
     const { runner: r, run } = runner(ok, ok);
 
-    const result = await buildGate(r, TIMEOUT_MS).run(context);
+    const result = await buildGate(r, NPM_PATH, TIMEOUT_MS).run(context);
 
     expect(result.ok).toBe(true);
     expect(result.commands).toEqual(["npm ci --ignore-scripts --no-audit --no-fund", "npm run build"]);
@@ -68,14 +69,14 @@ describe("buildGate", () => {
     expect(run.mock.calls[0][0]).toBe(SANDBOX_COMMAND);
     // The install's own arguments, after everything the sandbox wrapper put in front of them
     expect(run.mock.calls[0][1].slice(-5)).toEqual([
-      "npm",
+      NPM_PATH,
       "ci",
       "--ignore-scripts",
       "--no-audit",
       "--no-fund",
     ]);
     expect(run.mock.calls[0][2].cwd).toBe(worktree);
-    expect(run.mock.calls[1][1].slice(-3)).toEqual(["npm", "run", "build"]);
+    expect(run.mock.calls[1][1].slice(-3)).toEqual([NPM_PATH, "run", "build"]);
     expect(run.mock.calls[1][2].cwd).toBe(worktree);
   });
 
@@ -87,7 +88,7 @@ describe("buildGate", () => {
   it("confines the install to the worktree, a temp directory and the npm cache", async () => {
     const { runner: r, run } = runner(ok, ok);
 
-    await buildGate(r, TIMEOUT_MS).run(context);
+    await buildGate(r, NPM_PATH, TIMEOUT_MS).run(context);
 
     const args = run.mock.calls[0][1];
     const writable = args.filter((_, index) => args[index - 1] === "-D");
@@ -108,7 +109,7 @@ describe("buildGate", () => {
   it("does not give the build the npm cache", async () => {
     const { runner: r, run } = runner(ok, ok);
 
-    await buildGate(r, TIMEOUT_MS).run(context);
+    await buildGate(r, NPM_PATH, TIMEOUT_MS).run(context);
 
     const args = run.mock.calls[1][1];
     // The list, not its length: two entries with the cache swapped in for the scratch directory is
@@ -126,7 +127,7 @@ describe("buildGate", () => {
     Object.defineProperty(process, "platform", { value: "linux", configurable: true });
 
     try {
-      const result = await buildGate(r, TIMEOUT_MS).run(context);
+      const result = await buildGate(r, NPM_PATH, TIMEOUT_MS).run(context);
 
       expect(result.ok).toBe(false);
       expect(result.reason).toContain(UNCONFINED_REASON);
@@ -137,11 +138,25 @@ describe("buildGate", () => {
     }
   });
 
+  // BP-733
+  it("refuses as a machine fault, installing nothing, when no npm path was resolved", async () => {
+    const { runner: r, run } = runner(ok, ok);
+
+    const result = await buildGate(r, "", TIMEOUT_MS).run(context);
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "no absolute npm path was resolved — refusing to run npm by name on PATH",
+      machineFault: true,
+    });
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it("passes the signal through to both the install and the build, so a stop can kill either", async () => {
     const controller = new AbortController();
     const { runner: r, run } = runner(ok, ok);
 
-    await buildGate(r, TIMEOUT_MS).run({ ...context, signal: controller.signal });
+    await buildGate(r, NPM_PATH, TIMEOUT_MS).run({ ...context, signal: controller.signal });
 
     expect(run.mock.calls[0][2].signal).toBe(controller.signal);
     expect(run.mock.calls[1][2].signal).toBe(controller.signal);
@@ -152,7 +167,7 @@ describe("buildGate", () => {
   it("reports a failing build as the change's, not the machine's", async () => {
     const { runner: r } = runner(ok, { ...ok, code: 1, stderr: "Type error on line 4" });
 
-    const result = await buildGate(r, TIMEOUT_MS).run(context);
+    const result = await buildGate(r, NPM_PATH, TIMEOUT_MS).run(context);
 
     expect(result.ok).toBe(false);
     expect(result.machineFault).toBeFalsy();
@@ -161,7 +176,7 @@ describe("buildGate", () => {
   it("rejects and carries the tail of the output", async () => {
     const { runner: r } = runner(ok, { ...ok, code: 1, stderr: "Type error on line 4" });
 
-    const result = await buildGate(r, TIMEOUT_MS).run(context);
+    const result = await buildGate(r, NPM_PATH, TIMEOUT_MS).run(context);
 
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/Type error on line 4/);
@@ -170,7 +185,7 @@ describe("buildGate", () => {
   it("names the exit code when the build fails without printing anything", async () => {
     const { runner: r } = runner(ok, { ...ok, code: 127 });
 
-    const result = await buildGate(r, TIMEOUT_MS).run(context);
+    const result = await buildGate(r, NPM_PATH, TIMEOUT_MS).run(context);
 
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/127/);
@@ -184,7 +199,7 @@ describe("buildGate", () => {
       stderr: "(node:1) DeprecationWarning: punycode",
     });
 
-    const result = await buildGate(r, TIMEOUT_MS).run(context);
+    const result = await buildGate(r, NPM_PATH, TIMEOUT_MS).run(context);
 
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/Type error: no such property/);
@@ -193,7 +208,7 @@ describe("buildGate", () => {
   it("rejects on timeout", async () => {
     const { runner: r } = runner(ok, { code: -1, stdout: "", stderr: "", timedOut: true });
 
-    const result = await buildGate(r, TIMEOUT_MS).run(context);
+    const result = await buildGate(r, NPM_PATH, TIMEOUT_MS).run(context);
 
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/timed out/i);
@@ -206,7 +221,7 @@ describe("buildGate", () => {
       stderr: "npm error code ENOTFOUND",
     });
 
-    const result = await buildGate(r, TIMEOUT_MS).run(context);
+    const result = await buildGate(r, NPM_PATH, TIMEOUT_MS).run(context);
 
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/install/i);
@@ -217,7 +232,7 @@ describe("buildGate", () => {
   it("rejects when the dependency install times out", async () => {
     const { runner: r } = runner({ code: -1, stdout: "", stderr: "", timedOut: true });
 
-    const result = await buildGate(r, TIMEOUT_MS).run(context);
+    const result = await buildGate(r, NPM_PATH, TIMEOUT_MS).run(context);
 
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/install .*timed out/i);
@@ -227,7 +242,7 @@ describe("buildGate", () => {
     const stdout = `${"noise\n".repeat(2000)}Type error: the last line matters`;
     const { runner: r } = runner(ok, { ...ok, code: 1, stdout });
 
-    const result = await buildGate(r, TIMEOUT_MS).run(context);
+    const result = await buildGate(r, NPM_PATH, TIMEOUT_MS).run(context);
 
     expect(result.reason).toMatch(/Type error: the last line matters/);
     expect(result.reason).toMatch(/truncated/i);
@@ -237,7 +252,7 @@ describe("buildGate", () => {
   it("gives the build only the time the install left", async () => {
     const { runner: r, run } = slowInstall(3000);
 
-    await buildGate(r, TIMEOUT_MS).run(context);
+    await buildGate(r, NPM_PATH, TIMEOUT_MS).run(context);
 
     expect(run.mock.calls[1][2].timeoutMs).toBe(TIMEOUT_MS - 3000);
   });
@@ -250,7 +265,7 @@ describe("buildGate", () => {
       timedOut: true,
     });
 
-    const result = await buildGate(r, TIMEOUT_MS).run(context);
+    const result = await buildGate(r, NPM_PATH, TIMEOUT_MS).run(context);
 
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/timed out after 1000ms/);
@@ -260,7 +275,7 @@ describe("buildGate", () => {
   it("says the build never started when the install consumed the budget", async () => {
     const { runner: r, run } = slowInstall(TIMEOUT_MS);
 
-    const result = await buildGate(r, TIMEOUT_MS).run(context);
+    const result = await buildGate(r, NPM_PATH, TIMEOUT_MS).run(context);
 
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/never started/);

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { collectDiff } from "./diff.js";
 import { createRunner } from "./exec.js";
+import { installedToolPath } from "./__fixtures__/tool-paths.js";
 
 /**
  * refs/replace/<sha> is a file the agent can write directly (it lives under .git, which git never
@@ -90,7 +91,7 @@ describe("collectDiff against a planted refs/replace mapping", () => {
   });
 
   it("collectDiff reports the commit's true content, not the replace ref's decoy", async () => {
-    const diff = await collectDiff(createRunner(), "git", work, baseSha);
+    const diff = await collectDiff(createRunner(), installedToolPath("git"), work, baseSha);
 
     expect(diff.patch).toContain(REAL);
     expect(diff.patch).not.toContain(DECOY);

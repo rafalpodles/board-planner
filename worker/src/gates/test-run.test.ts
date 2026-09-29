@@ -7,6 +7,7 @@ import { CommandResult, Runner } from "../exec.js";
 import { GateContext } from "../types.js";
 import { claimedTask } from "../__fixtures__/task.js";
 import { SANDBOX_COMMAND, UNCONFINED_REASON } from "../sandbox.js";
+import { NPM_PATH } from "../__fixtures__/tool-paths.js";
 
 const TIMEOUT_MS = 5000;
 
@@ -42,13 +43,13 @@ describe("testRunGate", () => {
   it("accepts a passing suite", async () => {
     const { runner } = runnerReturning(ok);
 
-    expect((await testRunGate(runner, TIMEOUT_MS).run(context)).ok).toBe(true);
+    expect((await testRunGate(runner, NPM_PATH, TIMEOUT_MS).run(context)).ok).toBe(true);
   });
 
   it("names the command it ran, for the pull request (BP-780)", async () => {
     const { runner } = runnerReturning(ok);
 
-    expect((await testRunGate(runner, TIMEOUT_MS).run(context)).commands).toEqual(["npm test"]);
+    expect((await testRunGate(runner, NPM_PATH, TIMEOUT_MS).run(context)).commands).toEqual(["npm test"]);
   });
 
   it("rejects a failing suite and carries the output", async () => {
@@ -58,7 +59,7 @@ describe("testRunGate", () => {
       stdout: "FAIL src/a.test.ts > adds two numbers",
     });
 
-    const result = await testRunGate(runner, TIMEOUT_MS).run(context);
+    const result = await testRunGate(runner, NPM_PATH, TIMEOUT_MS).run(context);
 
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/adds two numbers/);
@@ -71,7 +72,7 @@ describe("testRunGate", () => {
       stderr: "Error: Cannot find module './missing.js'",
     });
 
-    const result = await testRunGate(runner, TIMEOUT_MS).run(context);
+    const result = await testRunGate(runner, NPM_PATH, TIMEOUT_MS).run(context);
 
     expect(result.reason).toMatch(/Cannot find module/);
   });
@@ -79,7 +80,7 @@ describe("testRunGate", () => {
   it("names the exit code when the suite fails without printing anything", async () => {
     const { runner } = runnerReturning({ ...ok, code: 127 });
 
-    const result = await testRunGate(runner, TIMEOUT_MS).run(context);
+    const result = await testRunGate(runner, NPM_PATH, TIMEOUT_MS).run(context);
 
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/127/);
@@ -88,7 +89,7 @@ describe("testRunGate", () => {
   it("rejects on timeout naming the budget", async () => {
     const { runner } = runnerReturning({ code: -1, stdout: "", stderr: "", timedOut: true });
 
-    const result = await testRunGate(runner, TIMEOUT_MS).run(context);
+    const result = await testRunGate(runner, NPM_PATH, TIMEOUT_MS).run(context);
 
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/timed out after 5000ms/);
@@ -98,7 +99,7 @@ describe("testRunGate", () => {
     const stdout = `${"noise\n".repeat(2000)}FAIL src/a.test.ts > the last line matters`;
     const { runner } = runnerReturning({ ...ok, code: 1, stdout });
 
-    const result = await testRunGate(runner, TIMEOUT_MS).run(context);
+    const result = await testRunGate(runner, NPM_PATH, TIMEOUT_MS).run(context);
 
     expect(result.reason).toMatch(/the last line matters/);
     expect(result.reason).toMatch(/truncated/i);
@@ -108,11 +109,11 @@ describe("testRunGate", () => {
   it("runs the suite in the worktree", async () => {
     const { runner, run } = runnerReturning(ok);
 
-    await testRunGate(runner, TIMEOUT_MS).run(context);
+    await testRunGate(runner, NPM_PATH, TIMEOUT_MS).run(context);
 
     const [command, args, opts] = run.mock.calls[0];
     expect(command).toBe(SANDBOX_COMMAND);
-    expect(args.slice(-2)).toEqual(["npm", "test"]);
+    expect(args.slice(-2)).toEqual([NPM_PATH, "test"]);
     expect(opts.cwd).toBe(worktree);
     expect(opts.timeoutMs).toBe(TIMEOUT_MS);
   });
@@ -125,7 +126,7 @@ describe("testRunGate", () => {
   it("confines the suite to the worktree and a temp directory, and to nothing else", async () => {
     const { runner, run } = runnerReturning(ok);
 
-    await testRunGate(runner, TIMEOUT_MS).run(context);
+    await testRunGate(runner, NPM_PATH, TIMEOUT_MS).run(context);
 
     const args = run.mock.calls[0][1];
     const writable = args.filter((_, index) => args[index - 1] === "-D");
@@ -142,7 +143,7 @@ describe("testRunGate", () => {
   it("is not given the npm cache", async () => {
     const { runner, run } = runnerReturning(ok);
 
-    await testRunGate(runner, TIMEOUT_MS).run(context);
+    await testRunGate(runner, NPM_PATH, TIMEOUT_MS).run(context);
 
     const args = run.mock.calls[0][1];
     expect(args.filter((_, index) => args[index - 1] === "-D")).toHaveLength(2);
@@ -157,7 +158,7 @@ describe("testRunGate", () => {
     Object.defineProperty(process, "platform", { value: "linux", configurable: true });
 
     try {
-      const result = await testRunGate(runner, TIMEOUT_MS).run(context);
+      const result = await testRunGate(runner, NPM_PATH, TIMEOUT_MS).run(context);
 
       expect(result.ok).toBe(false);
       expect(result.reason).toContain(UNCONFINED_REASON);
@@ -170,11 +171,26 @@ describe("testRunGate", () => {
     }
   });
 
+  // BP-733. Inside the sandbox the suite still runs agent-written code, and a `npm` found by name on
+  // the PATH this worker assembled would be whatever answers to it first
+  it("refuses as a machine fault when no npm path was resolved", async () => {
+    const { runner, run } = runnerReturning(ok);
+
+    const result = await testRunGate(runner, "", TIMEOUT_MS).run(context);
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "no absolute npm path was resolved — refusing to run npm by name on PATH",
+      machineFault: true,
+    });
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it("passes the signal through to the runner, so a stop can kill the suite", async () => {
     const controller = new AbortController();
     const { runner, run } = runnerReturning(ok);
 
-    await testRunGate(runner, TIMEOUT_MS).run({ ...context, signal: controller.signal });
+    await testRunGate(runner, NPM_PATH, TIMEOUT_MS).run({ ...context, signal: controller.signal });
 
     expect(run.mock.calls[0][2].signal).toBe(controller.signal);
   });

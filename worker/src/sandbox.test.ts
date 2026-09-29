@@ -1,13 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { confine, SANDBOX_COMMAND, UNCONFINED_REASON } from "./sandbox.js";
+import { confine, confineTool, SANDBOX_COMMAND, UNCONFINED_REASON } from "./sandbox.js";
 import { UNCONFINED_ESCAPE_HATCH } from "./env.js";
+import { CLAUDE_PATH } from "./__fixtures__/tool-paths.js";
 
 const identity = (path: string) => path;
 
 // Empty rather than process.env: an operator who has accepted the risk in their own shell would
 // otherwise turn the confinement off inside every test below, and each one would still be green.
 function confined(writable: string[], platform: NodeJS.Platform = "darwin") {
-  return confine("claude", ["-p", "hello"], { writable, platform, realpath: identity, env: {} });
+  return confine(CLAUDE_PATH, ["-p", "hello"], { writable, platform, realpath: identity, env: {} });
 }
 
 function profileOf(result: ReturnType<typeof confined>): string {
@@ -40,7 +41,7 @@ describe("confine", () => {
     if (!("command" in result)) throw new Error("expected a confined spawn");
 
     expect(result.command).toBe(SANDBOX_COMMAND);
-    expect(result.args.slice(-3)).toEqual(["claude", "-p", "hello"]);
+    expect(result.args.slice(-3)).toEqual([CLAUDE_PATH, "-p", "hello"]);
   });
 
   // The whole shape of the profile: everything is allowed except writing, and writing is allowed
@@ -83,7 +84,7 @@ describe("confine", () => {
   // one of them is the one the kernel will check. Handing it the unresolved form is a profile that
   // looks right and permits nothing — measured: the worktree write failed, not the escape.
   it("resolves each path before it becomes a rule", () => {
-    const result = confine("claude", [], {
+    const result = confine(CLAUDE_PATH, [], {
       writable: ["/tmp/run-7"],
       platform: "darwin",
       env: {},
@@ -96,7 +97,7 @@ describe("confine", () => {
   // A path that cannot be resolved is not a path this can confine anything to. Refusing beats
   // falling back to the unresolved string, which would install a rule matching nothing.
   it("refuses when a path cannot be resolved", () => {
-    const result = confine("claude", [], {
+    const result = confine(CLAUDE_PATH, [], {
       writable: ["/gone"],
       platform: "darwin",
       env: {},
@@ -144,9 +145,49 @@ describe("confine", () => {
   });
 });
 
+// BP-733. sandbox-exec looks the program it wraps up by name on the PATH this process assembled, so
+// the program is held to the rule SANDBOX_COMMAND already is — and the unconfined spawn runs it
+// directly, where the same lookup applies.
+describe("the program inside the wrapper", () => {
+  it("is refused by name, confined or not", () => {
+    const options = { writable: ["/work/bp-1"], platform: "darwin" as const, realpath: identity, env: {} };
+
+    expect(confine("claude", ["-p"], options)).toEqual({
+      refusal: 'refusing to run "claude" by name on PATH: confine needs its absolute path',
+    });
+    expect(
+      confine("claude", ["-p"], { ...options, env: { [UNCONFINED_ESCAPE_HATCH]: "1" } }),
+    ).toHaveProperty("refusal");
+  });
+
+  it("is refused by the tool's own name when preflight resolved no path for it", () => {
+    const result = confineTool("npm", "", ["test"], {
+      writable: ["/work/bp-1"],
+      platform: "darwin",
+      realpath: identity,
+      env: {},
+    });
+
+    expect(result).toEqual({ refusal: "no absolute npm path was resolved — refusing to run npm by name on PATH" });
+  });
+
+  it("wraps the resolved path when there is one", () => {
+    const result = confineTool("npm", "/opt/homebrew/bin/npm", ["test"], {
+      writable: ["/work/bp-1"],
+      platform: "darwin",
+      realpath: identity,
+      env: {},
+    });
+    if (!("command" in result)) throw new Error(`expected a confined spawn, got ${result.refusal}`);
+
+    expect(result.command).toBe(SANDBOX_COMMAND);
+    expect(result.args.slice(-2)).toEqual(["/opt/homebrew/bin/npm", "test"]);
+  });
+});
+
 describe("the operator's escape hatch", () => {
   const withHatch = (value: string, platform: NodeJS.Platform = "linux") =>
-    confine("claude", ["-p", "hello"], {
+    confine(CLAUDE_PATH, ["-p", "hello"], {
       writable: ["/work/bp-1"],
       platform,
       realpath: identity,
@@ -157,7 +198,7 @@ describe("the operator's escape hatch", () => {
     const result = withHatch("1");
     if (!("command" in result)) throw new Error(`expected a spawn, got ${result.refusal}`);
 
-    expect(result.command).toBe("claude");
+    expect(result.command).toBe(CLAUDE_PATH);
     expect(result.args).toEqual(["-p", "hello"]);
   });
 
@@ -186,7 +227,7 @@ describe("the operator's escape hatch", () => {
   });
 
   it("is off when the variable is absent, so nothing turns the sandbox off by accident", () => {
-    const result = confine("claude", [], {
+    const result = confine(CLAUDE_PATH, [], {
       writable: ["/work/bp-1"],
       platform: "linux",
       realpath: identity,

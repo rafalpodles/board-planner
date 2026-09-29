@@ -11,14 +11,20 @@
 import { writeFileSync } from "node:fs";
 import { SANDBOX_COMMAND } from "../sandbox.js";
 
+// An absolute path ending in `claude`, never the bare name (BP-733): a spawn that went back to
+// resolving the CLI on PATH stops being recognised as the agent, and the test reaching it fails.
+function isClaude(value: string): boolean {
+  return value.startsWith("/") && value.endsWith("/claude");
+}
+
 export function isAgentSpawn(command: string, args: readonly string[]): boolean {
-  return command === "claude" || args.includes("claude");
+  return isClaude(command) || args.some(isClaude);
 }
 
 /** What the CLI itself was asked, with any confinement wrapper stripped off the front. */
 export function agentArgs(command: string, args: readonly string[]): string[] {
-  if (command === "claude") return [...args];
-  const start = args.indexOf("claude");
+  if (isClaude(command)) return [...args];
+  const start = args.findIndex(isClaude);
   return start === -1 ? [...args] : args.slice(start + 1);
 }
 
