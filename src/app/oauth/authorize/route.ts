@@ -519,6 +519,7 @@ export async function POST(req: Request) {
 }
 
 async function handleConsent(req: Request, form: FormData): Promise<Response> {
+  const nonce = req.headers.get("x-nonce");
   const ticket = String(form.get("ticket") || "");
   // Only "all" is the wide grant. Absent, misspelt, or anything a hand-built form put there is the
   // narrow one: an authorization decision must not fail open on a value nobody recognises.
@@ -562,7 +563,7 @@ async function handleConsent(req: Request, form: FormData): Promise<Response> {
     const denied = new URL(consent.redirectUri);
     denied.searchParams.set("error", "access_denied");
     if (consent.state) denied.searchParams.set("state", consent.state);
-    return returnToClient(denied.toString(), client.clientName, req.headers.get("x-nonce"), "Not authorized");
+    return returnToClient(denied.toString(), client.clientName, nonce, "Not authorized");
   }
 
   let allowedProjects: string[] = [];
@@ -579,7 +580,7 @@ async function handleConsent(req: Request, form: FormData): Promise<Response> {
       // This branch re-renders without consuming the ticket, and costs more than the GET that
       // issued it, so it answers to the same budget.
       await recordFailedAttempt(consentKey(String(consent.user)));
-      return consentForm(ticket, client.clientName, consent.redirectUri, accessible, req.headers.get("x-nonce"), {
+      return consentForm(ticket, client.clientName, consent.redirectUri, accessible, nonce, {
         signedInAs: user.username,
         switchAccountHref: switchAccountHref(paramsOfConsent(consent)),
         error: accessible.length
@@ -622,5 +623,5 @@ async function handleConsent(req: Request, form: FormData): Promise<Response> {
   url.searchParams.set("code", code);
   if (consent.state) url.searchParams.set("state", consent.state);
 
-  return returnToClient(url.toString(), client.clientName, req.headers.get("x-nonce"));
+  return returnToClient(url.toString(), client.clientName, nonce);
 }
