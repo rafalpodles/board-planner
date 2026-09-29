@@ -512,18 +512,23 @@ describe("ListView dates, read west of UTC", () => {
     const running = [{ ...sprints[0], status: "active" }] as ApiSprint[];
     const sprintCell = () => screen.getByTitle(sprints[0].name).parentElement!.className;
 
-    at(new Date(2026, 6, 14, 12));
+    at(new Date(2026, 6, 1, 0, 30));
     renderList({ sprints: running });
-    expect(sprintCell()).toContain("font-medium");
+    expect(sprintCell(), "its first day").toContain("font-medium");
+
+    cleanup();
+    at(new Date(2026, 6, 14, 20));
+    renderList({ sprints: running });
+    expect(sprintCell(), "the evening of its last day").toContain("font-medium");
 
     cleanup();
     at(new Date(2026, 5, 30, 20));
     renderList({ sprints: running });
-    expect(sprintCell()).not.toContain("font-medium");
+    expect(sprintCell(), "the evening before it").not.toContain("font-medium");
 
     cleanup();
     at(new Date(2026, 6, 15, 0, 30));
     renderList({ sprints: running });
-    expect(sprintCell()).not.toContain("font-medium");
+    expect(sprintCell(), "the day after it").not.toContain("font-medium");
   });
 });
