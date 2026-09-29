@@ -51,7 +51,8 @@ test.describe("west of UTC", () => {
 
     await page.goto(BOARD);
     await expect(cardDue(page)).toHaveText("Oct 15");
-    // Its own day, not over yet
+    // Due soon on its own day. West of UTC the instant-based colour was right as well; the day it
+    // got wrong is east of UTC, below.
     await expect(cardDue(page)).toHaveClass(/text-warning/);
     await expect(cardDue(page)).not.toHaveClass(/text-danger/);
 
@@ -75,6 +76,49 @@ test.describe("west of UTC", () => {
 
     await expect(cardDue(page)).toHaveText("Oct 15");
     await expect(cardDue(page)).toHaveClass(/text-danger/);
+  });
+});
+
+test.describe("a sprint, west of UTC", () => {
+  test.use({ timezoneId: "America/Los_Angeles" });
+
+  test("is dated by the days picked, and still running on the evening of its last day", async ({
+    page,
+    request,
+  }) => {
+    const created = await request.post(`/api/projects/${PROJECT_ID}/sprints`, {
+      headers: ADMIN_AUTH,
+      data: { name: "Autumn sprint", startDate: "2026-10-01", endDate: "2026-10-15" },
+    });
+    expect(created.status(), await created.text()).toBe(201);
+    const sprintId = (await created.json())._id as string;
+    const started = await request.put(`/api/projects/${PROJECT_ID}/sprints/${sprintId}`, {
+      headers: ADMIN_AUTH,
+      data: { status: "active" },
+    });
+    expect(started.status(), await started.text()).toBe(200);
+    const moved = await request.put(`/api/projects/${PROJECT_ID}/tasks/${SIBLING_TASK_ID}`, {
+      headers: ADMIN_AUTH,
+      data: { sprint: sprintId },
+    });
+    expect(moved.status(), await moved.text()).toBe(200);
+
+    // 20:00 on the 15th in Los Angeles, when UTC is already on the 16th
+    await page.clock.setFixedTime(new Date("2026-10-16T03:00:00Z"));
+    await signIn(page);
+    await page.goto(`${BOARD}/sprints?sprint=${sprintId}`);
+    await expect(page.getByTestId("sprint-name")).toHaveText("Autumn sprint");
+    await expect(page.getByText("Oct 1 — Oct 15, 2026")).toBeVisible();
+    await expect(page.getByText("ends today")).toBeVisible();
+    await expect(page.getByText(/day over/)).toHaveCount(0);
+
+    await page.goto(BOARD);
+    await page.getByRole("button", { name: "List", exact: true }).click();
+    const sprintCell = page
+      .getByRole("row", { name: new RegExp(SIBLING_TASK_TITLE) })
+      .getByTitle("Autumn sprint")
+      .locator("xpath=..");
+    await expect(sprintCell).toHaveClass(/font-medium/);
   });
 });
 
