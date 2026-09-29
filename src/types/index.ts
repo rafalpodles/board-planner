@@ -1159,6 +1159,8 @@ export interface ApiProject {
   repositoryUrl: string;
   // Which of the two integrations that URL's host resolves to, "" when neither
   repositoryProvider: "github" | "gitlab" | "";
+  // This instance's GitHub web origin, so a draft URL is classified the way the server will
+  githubWebBase?: string;
   githubTokenSet: boolean;
   gitlabHost?: string;
   gitlabTokenSet?: boolean;

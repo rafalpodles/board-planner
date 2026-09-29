@@ -6,6 +6,7 @@ import { webhookDeliveryStatus } from "@/lib/webhook-delivery-status";
 import { useDraft } from "@/hooks/use-draft";
 import { CODA_COLUMNS, CODA_KEY_COLUMN } from "@/lib/coda";
 import { clearsStoredToken } from "@/lib/host-bound-secrets";
+import { repositoryProvider } from "@/lib/repository";
 import { useToast } from "@/components/ui/Toast";
 import {
   ApiWebhook,
@@ -426,12 +427,30 @@ export function IntegrationsSection({
   const [opened, setOpened] = useState<IntegrationId[]>([]);
   const [expanded, setExpanded] = useState<IntegrationId | null>(null);
 
+  const draftProvider = repositoryProvider(
+    {
+      repositoryUrl: repository.value.repositoryUrl,
+      gitlabHost: project.gitlabHost,
+    },
+    project.githubWebBase,
+  );
   const providerLabel =
-    project.repositoryProvider === "github"
+    draftProvider === "github"
       ? "GitHub"
-      : project.repositoryProvider === "gitlab"
+      : draftProvider === "gitlab"
         ? "GitLab"
         : "";
+
+  const draftOf: Record<IntegrationId, { count: number; discard: () => void }> = {
+    github,
+    gitlab,
+    coda,
+    channels,
+    webhooks,
+  };
+  const unsavedRows = (Object.keys(draftOf) as IntegrationId[]).filter(
+    (id) => draftOf[id].count > 0,
+  );
 
   return (
     <>
@@ -463,7 +482,7 @@ export function IntegrationsSection({
             <p className="mt-1.5 text-xs text-text-muted">
               {providerLabel
                 ? `Recognised as ${providerLabel}, so its connection is listed below.`
-                : "Not a host this instance recognises. A self-hosted GitLab is recognised once its GitLab host below matches, and a GitHub Enterprise host once the operator has pointed this instance at it; anything else links no pull requests."}
+                : "Not a host this instance recognises. A self-hosted GitLab is recognised once its GitLab host below is saved, and a GitHub Enterprise host once the operator has pointed this instance at it; anything else links no pull requests."}
             </p>
           )}
         </SettingRow>
@@ -471,11 +490,14 @@ export function IntegrationsSection({
 
       <Connections
         project={project}
+        repositoryProvider={draftProvider}
         opened={opened}
+        unsaved={unsavedRows}
         expanded={expanded}
         onExpand={setExpanded}
         onOpen={(id) => setOpened((o) => (o.includes(id) ? o : [...o, id]))}
         onRemove={(id) => {
+          draftOf[id].discard();
           setOpened((o) => o.filter((x) => x !== id));
           setExpanded((e) => (e === id ? null : e));
         }}

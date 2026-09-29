@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { ApiProject } from "@/types";
+import type { RepositoryProvider } from "@/lib/repository";
 import { BrandIcon, type BrandId } from "@/components/ui/BrandIcon";
 import { Button } from "@/components/ui/Button";
 
@@ -19,7 +20,7 @@ interface Definition {
    * True when the repository URL already implies this connection. Such a row is never
    * offered in the picker — pasting the URL is what adds it.
    */
-  impliedByRepository?: (project: ApiProject) => boolean;
+  impliedByRepository?: (provider: RepositoryProvider) => boolean;
 }
 
 export const INTEGRATIONS: Definition[] = [
@@ -31,7 +32,7 @@ export const INTEGRATIONS: Definition[] = [
     isConfigured: (p) => !!p.githubTokenSet,
     summary: (p) =>
       p.githubTokenSet ? "Linking pull requests" : "Needs an access token",
-    impliedByRepository: (p) => p.repositoryProvider === "github",
+    impliedByRepository: (provider) => provider === "github",
   },
   {
     id: "gitlab",
@@ -41,7 +42,7 @@ export const INTEGRATIONS: Definition[] = [
     isConfigured: (p) => !!p.gitlabTokenSet,
     summary: (p) =>
       p.gitlabTokenSet ? "Linking merge requests" : "Needs an access token",
-    impliedByRepository: (p) => p.repositoryProvider === "gitlab",
+    impliedByRepository: (provider) => provider === "gitlab",
   },
   {
     id: "coda",
@@ -81,8 +82,12 @@ export const INTEGRATIONS: Definition[] = [
 
 interface Props {
   project: ApiProject;
+  /** What the repository URL on screen resolves to, which may not be saved yet */
+  repositoryProvider: RepositoryProvider;
   /** Rows the user added by hand this session; the rest are derived from the project */
   opened: IntegrationId[];
+  /** Rows holding unsaved edits, kept on screen whatever the rest of the page says */
+  unsaved: IntegrationId[];
   expanded: IntegrationId | null;
   onExpand: (id: IntegrationId | null) => void;
   onOpen: (id: IntegrationId) => void;
@@ -97,7 +102,9 @@ interface Props {
  */
 export function Connections({
   project,
+  repositoryProvider,
   opened,
+  unsaved,
   expanded,
   onExpand,
   onOpen,
@@ -109,8 +116,9 @@ export function Connections({
   const visible = INTEGRATIONS.filter(
     (i) =>
       i.isConfigured(project) ||
-      i.impliedByRepository?.(project) ||
-      opened.includes(i.id),
+      i.impliedByRepository?.(repositoryProvider) ||
+      opened.includes(i.id) ||
+      unsaved.includes(i.id),
   );
   // A repository URL adds GitHub or GitLab on its own, but they stay in the picker anyway:
   // dropping them meant someone looking for "GitHub" found nothing and concluded it was gone
@@ -131,7 +139,8 @@ export function Connections({
         {visible.map((integration) => {
           const open = expanded === integration.id;
           const connected = integration.isConfigured(project);
-          const implied = integration.impliedByRepository?.(project) ?? false;
+          const implied =
+            integration.impliedByRepository?.(repositoryProvider) ?? false;
 
           return (
             <div key={integration.id}>

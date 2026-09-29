@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
@@ -80,7 +80,7 @@ vi.mock("@/models/projectAuditLog", () => ({
   ProjectAuditLog: { deleteMany: projectAuditLogDeleteMany },
 }));
 
-const { DELETE, PUT } = await import("./route");
+const { DELETE, GET, PUT } = await import("./route");
 
 const OWNER = { _id: "u1", role: "member" };
 const MEMBER = { _id: "u2", role: "member" };
@@ -841,5 +841,31 @@ describe("PUT /api/projects/[projectId] PM settings", () => {
     const res = await PUT(putRequest(adminSave), ctx());
 
     expect(res.status).toBe(404);
+  });
+});
+
+// BP-739: the settings field classifies a draft URL in the browser, which cannot read this
+// instance's GITHUB_API_BASE_URL, so both answers carry the GitHub origin it derives
+describe("the project answer names this instance's GitHub", () => {
+  beforeEach(() => {
+    check.mockResolvedValue(true);
+    vi.stubEnv("GITHUB_API_BASE_URL", "https://ghe.corp.example/api/v3");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("on a read", async () => {
+    const res = await GET(new Request("http://localhost/api/projects/p1"), ctx());
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).githubWebBase).toBe("https://ghe.corp.example");
+  });
+
+  it("on a save", async () => {
+    const res = await PUT(putRequest({ name: "Renamed" }), ctx());
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).githubWebBase).toBe("https://ghe.corp.example");
   });
 });

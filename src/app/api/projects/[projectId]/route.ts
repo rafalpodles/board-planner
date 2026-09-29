@@ -25,6 +25,7 @@ import { validatePmConfig, isPmAvailable, mergeMcpServerTokens, sanitizeMcpServe
 import { sanitizeProjectSecrets } from "@/lib/project-secrets";
 import { PROJECT_ICONS, type IPmMcpServer } from "@/types";
 import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
+import { githubWebBase } from "@/lib/github-host";
 
 export const GET = withProjectAccessOrWorker(async (_request, { params, user }) => {
   await connectDB();
@@ -42,6 +43,7 @@ export const GET = withProjectAccessOrWorker(async (_request, { params, user }) 
   // One repository field, resolved here so no consumer has to know the legacy pair still exists
   obj.repositoryUrl = projectRepositoryUrl(obj);
   obj.repositoryProvider = repositoryProvider(obj);
+  obj.githubWebBase = githubWebBase();
   delete obj.githubRepo;
   delete obj.gitlabRepo;
   if (obj.pm) obj.pm.mcpServers = sanitizeMcpServers(obj.pm.mcpServers);
@@ -378,6 +380,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
   // One repository field, resolved here so no consumer has to know the legacy pair still exists
   obj.repositoryUrl = projectRepositoryUrl(obj);
   obj.repositoryProvider = repositoryProvider(obj);
+  obj.githubWebBase = githubWebBase();
   delete obj.githubRepo;
   delete obj.gitlabRepo;
   if (obj.pm) obj.pm.mcpServers = sanitizeMcpServers(obj.pm.mcpServers);
