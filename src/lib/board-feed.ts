@@ -43,9 +43,9 @@ function prefixed(prefix: string, clause: Clause): Clause {
 
 /**
  * The cells that make resolveChannels answer yes, for the query that has to find them by path —
- * narrowed to what createNotifications can actually deliver: mail needs a mail server and an
- * address, chat a webhook one of the configured keys can decrypt. `within` is where the row lives
- * relative to the user document.
+ * narrowed to what createNotifications can deliver: mail needs a mail server and an address, chat
+ * a webhook whose envelope names a key configured now. `within` is where the row lives relative to
+ * the user document.
  */
 function deliverable(row: string, within: (clause: Clause) => Clause): Clause[] {
   return [
@@ -61,8 +61,9 @@ function deliverable(row: string, within: (clause: Clause) => Clause): Clause[] 
  * The whole of resolveChannels' verdict is in the query, not sifted afterwards, because the cap
  * is applied by the query: a candidate dropped after it — a global tick this board's override
  * switches off, a chat tick with nothing connected, a mail tick with no address or no mail server,
- * the actor — would spend a place that somebody who did qualify was then refused (BP-705, BP-735). resolveChannels
- * still runs on what comes back, and a candidate the query admitted but it refuses is logged.
+ * the actor — would spend a place that somebody who did qualify was then refused (BP-705,
+ * BP-735). resolveChannels still runs on what comes back, and a candidate the query admitted but
+ * it refuses is logged.
  */
 export async function boardFeedSubscribers(
   projectId: string,

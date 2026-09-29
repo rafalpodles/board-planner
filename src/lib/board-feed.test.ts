@@ -14,9 +14,9 @@ let granted: string[] = [];
 
 /**
  * Enough of a query engine to answer the filter this module actually sends, and no more. It
- * honours $and/$or/$nor/$elemMatch/$ne/$nin/$gt/$type and dotted paths, so a query that forgot the
- * access half, or looked up the wrong project's override, returns the wrong people here rather
- * than passing anyway.
+ * honours $and/$or/$nor/$elemMatch/$in (regexes included)/$ne/$nin/$gt/$type, several operators on
+ * one field, and dotted paths, so a query that forgot the access half, or looked up the wrong
+ * project's override, returns the wrong people here rather than passing anyway.
  */
 function valueAt(doc: unknown, path: string): unknown {
   return path.split(".").reduce<unknown>((node, key) => {
@@ -568,6 +568,20 @@ describe("dispatching it", () => {
 
     expect(createNotifications).toHaveBeenCalledWith(
       expect.objectContaining({ type: "task_created", recipientIds: [id(1)] })
+    );
+  });
+
+  it("hands the digest's phrasing on with the title", async () => {
+    stored = [member(1, { defaults: { task_created: row({ inApp: true }) } })];
+    granted = [id(1)];
+
+    await notifyBoardFeed({ ...params, digestTitle: "New task in Board Planner" });
+
+    expect(createNotifications).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "New task BP-7 in Board Planner",
+        digestTitle: "New task in Board Planner",
+      })
     );
   });
 

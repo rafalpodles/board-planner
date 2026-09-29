@@ -90,7 +90,11 @@ export function isEncryptionConfigured(): boolean {
   return primaryKey() !== null;
 }
 
-/** Stored values `decryptSecret` can open with the keys configured now, as patterns a query can match. */
+/**
+ * Stored values whose envelope names a key configured now, as patterns a query can match:
+ * plaintext, a v2 value by its key id, and any v1 value once some key exists, since v1 carries no
+ * id. A match is not a promise that `decryptSecret` succeeds — a corrupt payload matches too.
+ */
 export function readableSecretPatterns(): RegExp[] {
   const keys = allKeys();
   return [

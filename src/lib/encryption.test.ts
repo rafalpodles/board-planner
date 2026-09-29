@@ -207,7 +207,7 @@ describe("isEncryptedSecret", () => {
 describe("readableSecretPatterns", () => {
   const readable = (patterns: RegExp[], value: string) => patterns.some((p) => p.test(value));
 
-  it("matches exactly what decryptSecret opens with the keys configured now", async () => {
+  it("agrees with decryptSecret on plaintext, the current key's envelope and a lost key's", async () => {
     process.env.ENCRYPTION_KEY = KEY_B;
     const lost = (await load()).encryptSecret("https://hooks.example.com/lost");
     process.env.ENCRYPTION_KEY = KEY_A;
