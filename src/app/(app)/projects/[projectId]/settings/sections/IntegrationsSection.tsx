@@ -430,7 +430,7 @@ export function IntegrationsSection({
   const draftProvider = repositoryProvider(
     {
       repositoryUrl: repository.value.repositoryUrl,
-      gitlabHost: gitlab.value.gitlabHost,
+      gitlabHost: project.gitlabHost,
     },
     project.githubWebBase,
   );
@@ -440,6 +440,17 @@ export function IntegrationsSection({
       : draftProvider === "gitlab"
         ? "GitLab"
         : "";
+
+  const draftOf: Record<IntegrationId, { count: number; discard: () => void }> = {
+    github,
+    gitlab,
+    coda,
+    channels,
+    webhooks,
+  };
+  const unsavedRows = (Object.keys(draftOf) as IntegrationId[]).filter(
+    (id) => draftOf[id].count > 0,
+  );
 
   return (
     <>
@@ -478,12 +489,15 @@ export function IntegrationsSection({
       </SettingsCard>
 
       <Connections
-        project={{ ...project, repositoryProvider: draftProvider }}
+        project={project}
+        repositoryProvider={draftProvider}
         opened={opened}
+        unsaved={unsavedRows}
         expanded={expanded}
         onExpand={setExpanded}
         onOpen={(id) => setOpened((o) => (o.includes(id) ? o : [...o, id]))}
         onRemove={(id) => {
+          draftOf[id].discard();
           setOpened((o) => o.filter((x) => x !== id));
           setExpanded((e) => (e === id ? null : e));
         }}

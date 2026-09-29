@@ -413,4 +413,32 @@ test.describe("the repository URL field", () => {
     expect(writes).toEqual([]);
     expect((await storedProject()).repositoryUrl || "").toBe("");
   });
+
+  test("keeps a row on screen while its own field is being edited", async ({ page }) => {
+    await (await db())
+      .collection("projects")
+      .updateOne(
+        { _id: PROJECT_ID },
+        { $set: { repositoryUrl: "https://git.corp.example/g/r", gitlabHost: "https://git.corp.example" } }
+      );
+    await signIn(page);
+    await page.goto(SETTINGS);
+
+    await expect(page.getByText("Recognised as GitLab, so its connection is listed below.")).toBeVisible();
+    await expect(async () => {
+      await page.getByRole("button", { name: "Configure GitLab" }).click({ timeout: 1_000 });
+      await expect(page.getByLabel("Host")).toBeVisible({ timeout: 1_000 });
+    }).toPass({ timeout: 15_000 });
+
+    await page.getByLabel("Host").fill("https://git.corp.exampl");
+    await page.waitForTimeout(500);
+
+    await expect(page.getByLabel("Host")).toHaveValue("https://git.corp.exampl");
+    await expect(page.getByRole("button", { name: "Collapse GitLab" })).toBeVisible();
+    await expect(page.getByText("Recognised as GitLab, so its connection is listed below.")).toBeVisible();
+
+    await page.getByLabel("Repository URL").fill("https://git.unknown.example/g/r");
+    await expect(page.getByText("Host not recognised", { exact: true })).toBeVisible();
+    await expect(page.getByLabel("Host")).toHaveValue("https://git.corp.exampl");
+  });
 });

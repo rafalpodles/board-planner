@@ -99,3 +99,51 @@ describe("IntegrationsSection classifying the repository URL as it is typed", ()
     expect(screen.getByText("Recognised as GitLab, so its connection is listed below.")).toBeTruthy();
   });
 });
+
+const change = (label: string, value: string) =>
+  fireEvent.change(screen.getByLabelText(label), { target: { value } });
+
+describe("IntegrationsSection rows holding an unsaved edit", () => {
+  it("keeps an implied GitLab row, and its Host field, while the host is edited", () => {
+    renderSection({
+      repositoryUrl: "https://git.corp.example/g/r",
+      repositoryProvider: "gitlab",
+      gitlabHost: "https://git.corp.example",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Configure GitLab" }));
+
+    change("Host", "https://git.corp.exampl");
+
+    expect(screen.getByLabelText("Host")).toHaveProperty("value", "https://git.corp.exampl");
+    expect(screen.getByRole("button", { name: "Collapse GitLab" })).toBeTruthy();
+    expect(screen.getByText("Recognised as GitLab, so its connection is listed below.")).toBeTruthy();
+  });
+
+  it("keeps a GitHub row with a typed token when the URL moves off GitHub, until it is removed", () => {
+    renderSection();
+    type("https://github.com/owner/repo");
+    fireEvent.click(screen.getByRole("button", { name: "Configure GitHub" }));
+    change("Access token", "ghp_unsaved");
+
+    type("https://git.unknown.example/owner/repo");
+
+    expect(screen.getByText("Host not recognised")).toBeTruthy();
+    expect(screen.getByLabelText("Access token")).toHaveProperty("value", "ghp_unsaved");
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove GitHub" }));
+    expect(screen.queryByRole("button", { name: /GitHub$/ })).toBeNull();
+  });
+});
+
+describe("IntegrationsSection and a GitLab host that is not saved yet", () => {
+  it("does not call a URL GitLab on the strength of a host the server may still refuse", () => {
+    renderSection();
+    fireEvent.click(screen.getByRole("button", { name: /^GitLab/ }));
+    change("Host", "http://git.corp.example");
+
+    type("https://git.corp.example/g/r");
+
+    expect(screen.getByText("Host not recognised")).toBeTruthy();
+    expect(screen.queryByText("Recognised as GitLab, so its connection is listed below.")).toBeNull();
+  });
+});
