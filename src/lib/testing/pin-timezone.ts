@@ -5,6 +5,10 @@ export function pinTimezone(timeZone: string) {
   beforeAll(() => {
     wasTz = process.env.TZ;
     process.env.TZ = timeZone;
+    const resolved = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (resolved !== timeZone) {
+      throw new Error(`pinTimezone: asked for ${timeZone}, the runtime is on ${resolved}`);
+    }
   });
   afterAll(() => {
     // `process.env.TZ = undefined` stores the string "undefined", which is not a zone
