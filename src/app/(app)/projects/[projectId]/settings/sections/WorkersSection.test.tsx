@@ -357,7 +357,7 @@ describe("the project's default agent", () => {
       store.loading = true;
       renderSection(true, withDefault);
 
-      expect(picker().selectedOptions[0]?.textContent).not.toContain("No default");
+      expect(picker().selectedOptions[0]?.textContent).toBe("Loading…");
       expect(picker().disabled).toBe(true);
       expect(picker().getAttribute("aria-busy")).toBe("true");
       expect(screen.queryByTestId("default-agent-unread")).toBeNull();
@@ -403,6 +403,14 @@ describe("the project's default agent", () => {
 
     expect(picker().value).toBe("gone");
     expect(picker().selectedOptions[0]?.textContent).toContain("no longer offers");
+  });
+
+  it("describes only a default it offers, not one from another board", () => {
+    store.allAgents = [{ ...THEIRS, description: "Runs on the other board" }, GLOBAL] as never;
+    renderSection(true, { worker: { ...project().worker!, agent: THEIRS._id } } as Partial<ApiProject>);
+
+    expect(picker().selectedOptions[0]?.textContent).toContain("no longer offers");
+    expect(screen.queryByText(/Runs on the other board/)).toBeNull();
   });
 
   it("says why a save was refused, and keeps the choice to try again", async () => {

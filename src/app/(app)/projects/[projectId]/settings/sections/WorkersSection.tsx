@@ -421,7 +421,7 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
             />
           )}
           <p className="mt-1 text-xs text-text-muted">
-            {store.allAgents.find((a) => a._id === defaultAgent.value.agentId)?.description ?? ""}{" "}
+            {offeredDefaults.find((a) => a._id === defaultAgent.value.agentId)?.description ?? ""}{" "}
             <Link href="/agents" className="text-primary hover:underline">
               Manage agents
             </Link>
