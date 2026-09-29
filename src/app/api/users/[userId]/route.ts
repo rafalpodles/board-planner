@@ -331,8 +331,8 @@ export const DELETE = withAdmin(async (_request, { params, user: admin }) => {
     detail: user.role === "admin" ? "an administrator" : "a member",
   });
 
-  await revokeUserSessions(user._id);
   await Grant.deleteMany({ subject: user._id });
+  await revokeUserSessions(user._id);
 
   return NextResponse.json({ message: "User deleted" });
 });
