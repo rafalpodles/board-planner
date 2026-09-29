@@ -565,3 +565,57 @@ test("a task's Agent row still says a personal agent is not the reader's once th
   await expect(rail.getByTestId("agent-not-offered-reason")).toBeVisible();
   await expect(rail.getByTestId("agents-unread")).toHaveCount(0);
 });
+
+/**
+ * The same blindness on the board's settings: the Default agent picker was disabled only while the
+ * list loaded, so after a failed read it offered "No default" over a default that is set.
+ */
+async function boardWithDefaultAgent(request: APIRequestContext) {
+  await seedAgents();
+  const set = await request.put(`/api/projects/${PROJECT_ID}/agent`, {
+    headers: ADMIN_AUTH,
+    data: { agentId: String(PROJECT_AGENT_ID) },
+  });
+  expect(set.status(), await set.text()).toBe(200);
+}
+
+test("the default agent picker says the agent list failed rather than showing no default", async ({
+  page,
+  request,
+}) => {
+  await boardWithDefaultAgent(request);
+  await signIn(page);
+  const stopFailing = await failUntilTold(page, AGENTS_READ);
+  const failedRead = page.waitForResponse((r) => AGENTS_READ(new URL(r.url())));
+  await page.goto(`/projects/${PROJECT_KEY}/settings?section=workers`);
+  expect((await failedRead).status()).toBe(500);
+
+  const picker = page.getByLabel("Default agent");
+  await expect(picker).toBeVisible();
+  await page.waitForTimeout(500);
+  await expect(picker.locator("option:checked")).not.toHaveText(/^No default/);
+  await expect(picker).toBeDisabled();
+  await expect(page.getByTestId("default-agent-unread")).toBeVisible();
+  await expect(picker).toHaveValue(String(PROJECT_AGENT_ID));
+  await page.waitForTimeout(AFTER_THE_TOAST);
+  await expect(page.getByTestId("default-agent-unread")).toBeVisible();
+  await expect(picker).toHaveValue(String(PROJECT_AGENT_ID));
+
+  stopFailing();
+  await page.getByTestId("default-agent-unread").getByRole("button", { name: "Retry" }).click();
+  await expect(picker).toBeEnabled();
+  await expect(picker.locator("option:checked")).toHaveText(PROJECT_AGENT_NAME);
+  await expect(page.getByTestId("default-agent-unread")).toHaveCount(0);
+});
+
+// The control: a board with no default still says so when the list answers
+test("the default agent picker still says no default when the list answers", async ({ page }) => {
+  await seedAgents();
+  await signIn(page);
+  await page.goto(`/projects/${PROJECT_KEY}/settings?section=workers`);
+
+  const picker = page.getByLabel("Default agent");
+  await expect(picker).toBeEnabled();
+  await expect(picker.locator("option:checked")).toHaveText(/^No default/);
+  await expect(page.getByTestId("default-agent-unread")).toHaveCount(0);
+});

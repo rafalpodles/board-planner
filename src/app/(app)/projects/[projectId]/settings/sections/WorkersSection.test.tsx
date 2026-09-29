@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, cleanup, waitFor, fireEvent, within } from "@testing-library/react";
 import { WorkersSection } from "./WorkersSection";
 import { SettingsProvider } from "@/components/settings/settings-context";
 import { ApiProject } from "@/types";
@@ -8,7 +8,12 @@ import { ApiProject } from "@/types";
 const { api, toast, store } = vi.hoisted(() => ({
   api: { get: vi.fn(), put: vi.fn() },
   toast: vi.fn(),
-  store: { allAgents: [] as Record<string, unknown>[], loading: false },
+  store: {
+    allAgents: [] as Record<string, unknown>[],
+    loading: false,
+    failed: false,
+    retry: vi.fn(),
+  },
 }));
 
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
@@ -69,6 +74,9 @@ beforeEach(() => {
   api.get.mockResolvedValue([]);
   api.put.mockResolvedValue({ ok: true });
   store.allAgents = [];
+  store.loading = false;
+  store.failed = false;
+  store.retry.mockReset();
 });
 afterEach(cleanup);
 
@@ -340,6 +348,61 @@ describe("the project's default agent", () => {
     await agentGroup().save();
 
     expect(api.put).toHaveBeenCalledWith("/api/projects/TP/agent", { agentId: "" });
+  });
+
+  describe("before the agent list has answered", () => {
+    const withDefault = { worker: { ...project().worker!, agent: "a1" } } as Partial<ApiProject>;
+
+    it("does not claim there is no default while the list loads", () => {
+      store.loading = true;
+      renderSection(true, withDefault);
+
+      expect(picker().selectedOptions[0]?.textContent).not.toContain("No default");
+      expect(picker().disabled).toBe(true);
+      expect(picker().getAttribute("aria-busy")).toBe("true");
+      expect(screen.queryByTestId("default-agent-unread")).toBeNull();
+    });
+
+    it("says the list failed, offers it again, and keeps the default out of reach of a save", async () => {
+      store.failed = true;
+      renderRegistered(withDefault);
+
+      expect(picker().selectedOptions[0]?.textContent).not.toContain("No default");
+      expect(picker().value).toBe("a1");
+      expect(picker().disabled).toBe(true);
+      const alert = screen.getByTestId("default-agent-unread");
+      expect(alert.textContent).toMatch(/could not be loaded/);
+      fireEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+      expect(store.retry).toHaveBeenCalledOnce();
+      expect(agentGroup()?.count ?? 0).toBe(0);
+    });
+
+    it("shows the retry as running while it runs", () => {
+      store.failed = true;
+      store.loading = true;
+      renderSection(true, withDefault);
+
+      const button = within(screen.getByTestId("default-agent-unread")).getByRole("button");
+      expect(button.textContent).toBe("Retrying…");
+    });
+
+    // The control: an answered list is the picker again, and names the default it holds
+    it("names the default and is the picker once the list answers", () => {
+      store.allAgents = [OURS, GLOBAL] as never;
+      renderSection(true, withDefault);
+
+      expect(picker().selectedOptions[0]?.textContent).toBe("Ours");
+      expect(picker().disabled).toBe(false);
+      expect(screen.queryByTestId("default-agent-unread")).toBeNull();
+    });
+  });
+
+  it("does not show a default this board no longer offers as no default", () => {
+    store.allAgents = [GLOBAL] as never;
+    renderSection(true, { worker: { ...project().worker!, agent: "gone" } } as Partial<ApiProject>);
+
+    expect(picker().value).toBe("gone");
+    expect(picker().selectedOptions[0]?.textContent).toContain("no longer offers");
   });
 
   it("says why a save was refused, and keeps the choice to try again", async () => {

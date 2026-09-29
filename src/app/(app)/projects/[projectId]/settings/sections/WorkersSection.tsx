@@ -20,6 +20,7 @@ import { SectionProps } from "./types";
 import { endedBadly, endState } from "@/lib/run-outcome";
 import Link from "next/link";
 import { useStore } from "@/app/(app)/agents/store";
+import { LoadFailed } from "@/components/ui/LoadFailed";
 import { isWorkerLockedByInstance } from "@/lib/worker-gate";
 import { bindingErrorFor, describeBindingError } from "@/lib/binding-error";
 
@@ -64,6 +65,12 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
   const store = useStore();
   const agentApi = useApi();
   const defaultAgent = useDraft({ agentId: String(project.worker?.agent ?? "") });
+  const agentsRead = !store.loading && !store.failed;
+  const offeredDefaults = store.allAgents.filter(
+    (a) => a.scope !== "user" && (a.scope !== "project" || a.projectId === String(project._id))
+  );
+  const chosenAgentUnlisted =
+    !!defaultAgent.value.agentId && !offeredDefaults.some((a) => a._id === defaultAgent.value.agentId);
   const [runs, setRuns] = useState<ApiAgentRun[]>([]);
 
   useEffect(() => {
@@ -380,25 +387,39 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
           <select
             id={defaultAgentId}
             value={defaultAgent.value.agentId}
-            disabled={!canEdit || store.loading}
+            disabled={!canEdit || !agentsRead}
+            aria-busy={store.loading || undefined}
             onChange={(e) => defaultAgent.set("agentId", e.target.value)}
             className={`focus-ring w-full rounded-lg border bg-bg-input min-h-11 px-2 py-1.5 text-sm sm:min-h-0 ${
               defaultAgent.count > 0 ? "border-warning/60" : "border-border"
             }`}
           >
             <option value="">No default — the task picker starts empty</option>
-            {store.allAgents
-              .filter(
-                (a) =>
-                  a.scope !== "user" &&
-                  (a.scope !== "project" || a.projectId === String(project._id))
-              )
-              .map((a) => (
-                <option key={a._id} value={a._id}>
-                  {a.name}
-                </option>
-              ))}
+            {chosenAgentUnlisted && (
+              <option value={defaultAgent.value.agentId}>
+                {store.failed
+                  ? "An agent — the list could not be loaded"
+                  : store.loading
+                    ? "Loading…"
+                    : "An agent this board no longer offers"}
+              </option>
+            )}
+            {offeredDefaults.map((a) => (
+              <option key={a._id} value={a._id}>
+                {a.name}
+              </option>
+            ))}
           </select>
+          {store.failed && (
+            <LoadFailed
+              variant="row"
+              className="mt-2"
+              testId="default-agent-unread"
+              message="The agents could not be loaded, so the default cannot be changed here."
+              onRetry={store.retry}
+              busy={store.loading}
+            />
+          )}
           <p className="mt-1 text-xs text-text-muted">
             {store.allAgents.find((a) => a._id === defaultAgent.value.agentId)?.description ?? ""}{" "}
             <Link href="/agents" className="text-primary hover:underline">
