@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CommandResult, Runner, RunOpts } from "../exec.js";
 import { childEnv, npmCacheOverride, tempDirOverride } from "../env.js";
-import { confine } from "../sandbox.js";
+import { confineTool } from "../sandbox.js";
 
 /**
  * The npm gates, run where the agent's own tools already are.
@@ -83,6 +83,7 @@ export interface ConfinedNpmOptions extends RunOpts {
  */
 export async function runConfinedNpm(
   runner: Runner,
+  npmPath: string,
   args: string[],
   options: ConfinedNpmOptions
 ): Promise<CommandResult | { refusal: string }> {
@@ -107,7 +108,7 @@ export async function runConfinedNpm(
   try {
     // `env` left to `confine`'s own default unless a test said otherwise, so the operator's risk
     // acceptance is read in the one place that owns it.
-    const spawn = confine("npm", args, source ? { writable, env: source } : { writable });
+    const spawn = confineTool("npm", npmPath, args, source ? { writable, env: source } : { writable });
     if ("refusal" in spawn) return spawn;
 
     return await runner.run(spawn.command, spawn.args, {

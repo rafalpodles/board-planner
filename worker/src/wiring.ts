@@ -80,6 +80,7 @@ import {
   TelemetryUpdate,
 } from "./telemetry.js";
 import { scrubPatch } from "./scrub.js";
+import { ResolvedTool } from "./tool-path.js";
 import { ClaimedTask } from "./types.js";
 import { createWorkspace, reapOrphans } from "./workspace.js";
 import { entryDirectory, workerVersion } from "./version.js";
@@ -128,9 +129,9 @@ export interface WorkerRuntime {
 // The workspace freshens its base with the same pinned credential delivery pushes with, composed
 // here rather than in workspace.ts: that module resolves task keys into filesystem paths and must
 // not also learn what an operator's GitHub identity is.
-function remoteFetchEnv(githubToken: string): () => NodeJS.ProcessEnv {
+function remoteFetchEnv(githubToken: string, ghPath: string): () => NodeJS.ProcessEnv {
   return () => ({
-    ...hardenedGitConfig(),
+    ...hardenedGitConfig(ghPath),
     ...(githubToken ? { GH_TOKEN: githubToken, GITHUB_TOKEN: githubToken } : {}),
   });
 }
@@ -367,15 +368,19 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     }
   }
 
-  // The one composition point every git-spawning call site reads its absolute path from, the same
-  // way `githubIdentityToken` reads `preflight?.paths.gh`. `establishPreflight` runs exactly once,
+  // The one composition point every spawn of a preflight-resolved tool reads its absolute path
+  // from — git since BP-641, and gh, claude and npm since BP-733. `establishPreflight` runs exactly once,
   // at the top of `run()`, and sets the outer `preflight` this reads — a live read of that variable
   // rather than a value snapshotted into a second one, so every caller shares the one place the
   // resolution lives instead of each being handed its own copy (BP-641). Empty before that first
-  // preflight completes, or if git was never found; every reader downstream refuses on empty rather
-  // than falling back to the bare name "git" on PATH.
+  // preflight completes, or if the tool was never found; every reader downstream refuses on empty
+  // rather than falling back to the bare name on PATH.
+  function resolvedToolPath(tool: ResolvedTool): string {
+    return preflight?.paths[tool] ?? "";
+  }
+
   function resolvedGitPath(): string {
-    return preflight?.paths.git ?? "";
+    return resolvedToolPath("git");
   }
 
   // A failure keeps the previous inventory rather than reporting an empty one: the server would
@@ -636,7 +641,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     const account = pinnedAccount(deps.readFile, bootstrap.stateDir);
     if (!account) return "";
 
-    const ghPath = preflight?.paths.gh ?? "";
+    const ghPath = resolvedToolPath("gh");
     const token = await resolveGhToken(deps.runner, ghPath, account, childEnv([], deps.env));
     if (!token) {
       // Loud, and then out of the way: falling back to gh's active account is what happens next,
@@ -657,7 +662,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     if (!account || !githubToken) return undefined;
     const identity = await accountCommitIdentity(
       deps.runner,
-      preflight?.paths.gh ?? "",
+      resolvedToolPath("gh"),
       githubToken,
       childEnv([], deps.env)
     );
@@ -682,6 +687,9 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     const githubToken = await githubIdentityToken();
     const commitIdentity = await pinnedCommitIdentity(githubToken);
     const gitPath = resolvedGitPath();
+    const ghPath = resolvedToolPath("gh");
+    const claudePath = resolvedToolPath("claude");
+    const npmPath = resolvedToolPath("npm");
     // The same value rebind() matched this project's checkout against — the server's own record
     // of the project's repository, never re-read from repoPath/.git at execution time.
     const remoteUrl = bound.get(task.projectId)?.remote;
@@ -695,19 +703,19 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
           boardColumns: (projectId) => api.boardColumns(projectId),
           createReporter: (client, statusIds) =>
             createReporter(client, statusIds, (message) => deps.logError(message), outbox, releaseComments),
-          createDelivery: (runner, baseBranch) => createDelivery(runner, gitPath, baseBranch, githubToken),
+          createDelivery: (runner, baseBranch) => createDelivery(runner, gitPath, ghPath, baseBranch, githubToken),
           workspace: createWorkspace(
             taskConfig,
             deps.runner,
             gitPath,
-            remoteFetchEnv(githubToken),
+            remoteFetchEnv(githubToken, ghPath),
             remoteUrl,
             commitIdentity
           ),
-          executor: createExecutor(taskConfig, deps.runner),
+          executor: createExecutor(taskConfig, deps.runner, claudePath),
           collectDiff: (runner, worktreePath, baseSha) => collectDiff(runner, gitPath, worktreePath, baseSha),
           gateFor: (entry, runner, timeoutMs, fallbacks) =>
-            gateFromEntry(entry, runner, gitPath, timeoutMs, fallbacks),
+            gateFromEntry(entry, runner, { git: gitPath, npm: npmPath, claude: claudePath }, timeoutMs, fallbacks),
           gitPath,
           recordRun: (project, record) => outbox.add({ kind: "run", projectId: project, record }),
           logError: deps.logError,
@@ -737,7 +745,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     return {
       worktreeRoot: taskConfig.worktreeRoot,
       destroyWorktree: (taskKey) => workspace.destroy(taskKey),
-      delivery: createDelivery(deps.runner, gitPath, taskConfig.baseBranch, githubToken),
+      delivery: createDelivery(deps.runner, gitPath, resolvedToolPath("gh"), taskConfig.baseBranch, githubToken),
       runner: deps.runner,
       gitPath,
       collectDiff: (runner, worktreePath, baseSha) => collectDiff(runner, gitPath, worktreePath, baseSha),

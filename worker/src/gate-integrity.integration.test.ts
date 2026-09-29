@@ -11,6 +11,7 @@ import { createRunner } from "./exec.js";
 import { createWorkspace } from "./workspace.js";
 import { hardenedGitConfig } from "./delivery.js";
 import { WorkerConfig } from "./config.js";
+import { GH_PATH, installedToolPath } from "./__fixtures__/tool-paths.js";
 
 /**
  * The headline attack this task is about: the agent advances refs/heads/<baseBranch> to its own
@@ -36,7 +37,7 @@ function plantRedirect(repoPath: string, from: string, to: string): void {
   appendFileSync(configPath, `[url "${to}"]\n\tinsteadOf = ${from}\n`);
 }
 
-const gitPath = "git";
+const gitPath = installedToolPath("git");
 
 describe("a run's own diff cannot be narrowed from inside the worktree", () => {
   let dir: string;
@@ -290,7 +291,7 @@ describe("a run's own diff cannot be narrowed from inside the worktree", () => {
 
 // Mirrors wiring.ts's remoteFetchEnv, minus the operator's token, which a daemon does not want.
 // That function is private to wiring.ts; hardenedGitConfig is the part of it under test.
-const productionRemoteEnv = (): NodeJS.ProcessEnv => ({ ...hardenedGitConfig() });
+const productionRemoteEnv = (): NodeJS.ProcessEnv => ({ ...hardenedGitConfig(GH_PATH) });
 
 const freePort = (): Promise<number> =>
   new Promise((resolve) => {

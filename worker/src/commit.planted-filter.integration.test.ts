@@ -5,8 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { commitAll } from "./commit.js";
 import { createRunner } from "./exec.js";
+import { installedToolPath } from "./__fixtures__/tool-paths.js";
 
-const gitPath = "git";
+const gitPath = installedToolPath("git");
 
 /**
  * BP-403. `filter.<name>.clean` is the write-path twin of the `diff.<driver>.textconv` leaf BP-382

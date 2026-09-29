@@ -8,6 +8,7 @@ import { UNCONFINED_ESCAPE_HATCH } from "./env.js";
 import { parseStream, StreamEvent } from "./stream.js";
 import { claimedTask } from "./__fixtures__/task.js";
 import { workerConfig } from "./__fixtures__/config.js";
+import { CLAUDE_PATH } from "./__fixtures__/tool-paths.js";
 
 // Whole but for the policy fields, which the tests below leave unset on purpose — model and
 // fallbackModel are optional on WorkerConfig, and what the executor does without them is the thing
@@ -115,7 +116,7 @@ describe("createExecutor", () => {
     };
     const { runner } = runnerReturning({ code: 0, stdout: completed(payload), stderr: "", timedOut: false });
 
-    const outcome = await createExecutor(config, runner).execute(options);
+    const outcome = await createExecutor(config, runner, CLAUDE_PATH).execute(options);
 
     expect(outcome).toEqual({ kind: "result", result: payload });
   });
@@ -124,7 +125,7 @@ describe("createExecutor", () => {
     expect(FIXTURE).toContain('"status":"allowed_warning"');
     const { runner } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
 
-    const outcome = await createExecutor(config, runner).execute(options);
+    const outcome = await createExecutor(config, runner, CLAUDE_PATH).execute(options);
 
     expect(outcome).toEqual({ kind: "result", result: FIXTURE_RESULT });
   });
@@ -133,7 +134,7 @@ describe("createExecutor", () => {
   it("gives the implementer no shell", async () => {
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
 
-    await createExecutor(config, runner).execute(options);
+    await createExecutor(config, runner, CLAUDE_PATH).execute(options);
 
     const args = run.mock.calls[0][1] as string[];
     expect(args[args.indexOf("--tools") + 1]).toBe("Read Edit Write Grep Glob");
@@ -144,7 +145,7 @@ describe("createExecutor", () => {
   it("gives a read-only step no way to change anything", async () => {
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
 
-    await createExecutor(config, runner).execute({
+    await createExecutor(config, runner, CLAUDE_PATH).execute({
       ...options,
       brief: { ...options.brief, capability: "read-only" },
     });
@@ -162,7 +163,7 @@ describe("createExecutor", () => {
   it("keeps the untrusted-data framing ahead of the block's own prompt", async () => {
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
 
-    await createExecutor(config, runner).execute({
+    await createExecutor(config, runner, CLAUDE_PATH).execute({
       ...options,
       brief: { ...options.brief, prompt: "tidy the imports" },
     });
@@ -176,7 +177,7 @@ describe("createExecutor", () => {
   it("tells the agent the worker commits, since it no longer can", async () => {
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
 
-    await createExecutor(config, runner).execute(options);
+    await createExecutor(config, runner, CLAUDE_PATH).execute(options);
 
     const args = run.mock.calls[0][1] as string[];
     expect(args[args.indexOf("--append-system-prompt") + 1]).toMatch(/Do not commit/);
@@ -186,7 +187,7 @@ describe("createExecutor", () => {
   it("tells the agent which checks the worker runs after it, so it does not disclaim them", async () => {
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
 
-    await createExecutor(config, runner).execute({
+    await createExecutor(config, runner, CLAUDE_PATH).execute({
       ...options,
       brief: { ...options.brief, laterChecks: ["protected-paths", "build", "test-run", "review"] },
     });
@@ -201,7 +202,7 @@ describe("createExecutor", () => {
   it("promises no checks to an agent that has none after the step", async () => {
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
 
-    await createExecutor(config, runner).execute({
+    await createExecutor(config, runner, CLAUDE_PATH).execute({
       ...options,
       brief: { ...options.brief, laterChecks: ["protected-paths", "review"] },
     });
@@ -213,7 +214,7 @@ describe("createExecutor", () => {
   it("asks the CLI for a stream, with the --verbose it refuses to stream without", async () => {
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
 
-    await createExecutor(config, runner).execute(options);
+    await createExecutor(config, runner, CLAUDE_PATH).execute(options);
 
     const args = run.mock.calls[0][1] as string[];
     expect(args[args.indexOf("--output-format") + 1]).toBe("stream-json");
@@ -225,7 +226,7 @@ describe("createExecutor", () => {
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
     const policyConfig = { ...config, model: "haiku", fallbackModel: "opus" };
 
-    await createExecutor(policyConfig, runner).execute(options);
+    await createExecutor(policyConfig, runner, CLAUDE_PATH).execute(options);
 
     const args = run.mock.calls[0][1] as string[];
     expect(args[args.indexOf("--model") + 1]).toBe("haiku");
@@ -237,7 +238,7 @@ describe("createExecutor", () => {
   it("falls back to the models it has always used when the policy names none", async () => {
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
 
-    await createExecutor(config, runner).execute(options);
+    await createExecutor(config, runner, CLAUDE_PATH).execute(options);
 
     const args = run.mock.calls[0][1] as string[];
     expect(args[args.indexOf("--model") + 1]).toBe("opus");
@@ -250,7 +251,7 @@ describe("createExecutor", () => {
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
     const blank = { ...config, model: "   ", fallbackModel: "" };
 
-    await createExecutor(blank, runner).execute(options);
+    await createExecutor(blank, runner, CLAUDE_PATH).execute(options);
 
     const args = run.mock.calls[0][1] as string[];
     expect(args[args.indexOf("--model") + 1]).toBe("opus");
@@ -267,7 +268,7 @@ describe("createExecutor", () => {
       timedOut: false,
     });
 
-    await createExecutor(config, runner).execute(options);
+    await createExecutor(config, runner, CLAUDE_PATH).execute(options);
 
     expect(run.mock.calls[0][2].env.ANTHROPIC_API_KEY).toBeUndefined();
     expect(run.mock.calls[0][2].env.PATH).toBe(process.env.PATH);
@@ -281,17 +282,17 @@ describe("createExecutor", () => {
       timedOut: false,
     });
 
-    expect(await createExecutor(config, runner).execute(options)).toEqual({ kind: "usage_limit" });
+    expect(await createExecutor(config, runner, CLAUDE_PATH).execute(options)).toEqual({ kind: "usage_limit" });
   });
 
   it("reports a timeout", async () => {
     const { runner } = runnerReturning({ code: -1, stdout: "", stderr: "", timedOut: true });
-    expect(await createExecutor(config, runner).execute(options)).toEqual({ kind: "timeout" });
+    expect(await createExecutor(config, runner, CLAUDE_PATH).execute(options)).toEqual({ kind: "timeout" });
   });
 
   it("reports unparseable output as an error", async () => {
     const { runner } = runnerReturning({ code: 0, stdout: "not json", stderr: "", timedOut: false });
-    const outcome = await createExecutor(config, runner).execute(options);
+    const outcome = await createExecutor(config, runner, CLAUDE_PATH).execute(options);
     expect(outcome.kind).toBe("error");
   });
 
@@ -305,7 +306,7 @@ describe("createExecutor", () => {
     };
     const { runner } = runnerReturning({ code: 0, stdout: completed(payload), stderr: "", timedOut: false });
 
-    const outcome = await createExecutor(config, runner).execute(options);
+    const outcome = await createExecutor(config, runner, CLAUDE_PATH).execute(options);
 
     expect(outcome).toEqual({ kind: "result", result: payload });
   });
@@ -321,7 +322,7 @@ describe("createExecutor", () => {
       timedOut: false,
     });
 
-    expect(await createExecutor(config, runner).execute(options)).toEqual({ kind: "usage_limit" });
+    expect(await createExecutor(config, runner, CLAUDE_PATH).execute(options)).toEqual({ kind: "usage_limit" });
   });
 
   it("still classifies it when the CLI does declare the error", async () => {
@@ -334,7 +335,7 @@ describe("createExecutor", () => {
       timedOut: false,
     });
 
-    expect(await createExecutor(config, runner).execute(options)).toEqual({ kind: "usage_limit" });
+    expect(await createExecutor(config, runner, CLAUDE_PATH).execute(options)).toEqual({ kind: "usage_limit" });
   });
 
   // The agent writes `result`, so a task about this detection code can put the phrase there. A free
@@ -353,7 +354,7 @@ describe("createExecutor", () => {
       timedOut: false,
     });
 
-    const outcome = await createExecutor(config, runner).execute(options);
+    const outcome = await createExecutor(config, runner, CLAUDE_PATH).execute(options);
     expect(outcome.kind).toBe("error");
   });
 
@@ -374,7 +375,7 @@ describe("createExecutor", () => {
       timedOut: false,
     });
 
-    expect(await createExecutor(config, runner).execute(options)).toEqual({ kind: "result", result: payload });
+    expect(await createExecutor(config, runner, CLAUDE_PATH).execute(options)).toEqual({ kind: "result", result: payload });
   });
 
   it("does not take a successful run's summary about usage limits as a usage limit", async () => {
@@ -387,7 +388,7 @@ describe("createExecutor", () => {
     };
     const { runner } = runnerReturning({ code: 0, stdout: completed(payload), stderr: "", timedOut: false });
 
-    expect(await createExecutor(config, runner).execute(options)).toEqual({ kind: "result", result: payload });
+    expect(await createExecutor(config, runner, CLAUDE_PATH).execute(options)).toEqual({ kind: "result", result: payload });
   });
 
   it("classifies a rejected rate_limit_event as a usage limit", async () => {
@@ -398,7 +399,7 @@ describe("createExecutor", () => {
       timedOut: false,
     });
 
-    expect(await createExecutor(config, runner).execute(options)).toEqual({ kind: "usage_limit" });
+    expect(await createExecutor(config, runner, CLAUDE_PATH).execute(options)).toEqual({ kind: "usage_limit" });
   });
 
   it("treats an allowed_warning rate_limit_event as normal, so a 75% run is not stalled", async () => {
@@ -415,7 +416,7 @@ describe("createExecutor", () => {
       timedOut: false,
     });
 
-    expect(await createExecutor(config, runner).execute(options)).toEqual({
+    expect(await createExecutor(config, runner, CLAUDE_PATH).execute(options)).toEqual({
       kind: "result",
       result: FIXTURE_RESULT,
     });
@@ -431,7 +432,7 @@ describe("createExecutor", () => {
     expect(stdout).toContain("usage limit reached");
     const { runner } = runnerReturning({ code: 0, stdout, stderr: "", timedOut: false });
 
-    const outcome = await createExecutor(config, runner).execute(options);
+    const outcome = await createExecutor(config, runner, CLAUDE_PATH).execute(options);
 
     expect(outcome).toEqual({ kind: "result", result: FIXTURE_RESULT });
   });
@@ -451,7 +452,7 @@ describe("createExecutor", () => {
       timedOut: false,
     });
 
-    const outcome = await createExecutor(config, runner).execute(options);
+    const outcome = await createExecutor(config, runner, CLAUDE_PATH).execute(options);
 
     expect(outcome).toEqual({ kind: "result", result: payload });
   });
@@ -459,7 +460,7 @@ describe("createExecutor", () => {
   it("reports a non-zero exit without a usage-limit phrase as a plain error", async () => {
     const { runner } = runnerReturning({ code: 1, stdout: "", stderr: "unexpected crash", timedOut: false });
 
-    expect(await createExecutor(config, runner).execute(options)).toEqual({
+    expect(await createExecutor(config, runner, CLAUDE_PATH).execute(options)).toEqual({
       kind: "error",
       message: "the agent exited 1\nunexpected crash",
     });
@@ -478,7 +479,7 @@ describe("createExecutor", () => {
       timedOut: false,
     });
 
-    const outcome = await createExecutor(config, runner).execute(options);
+    const outcome = await createExecutor(config, runner, CLAUDE_PATH).execute(options);
 
     expect(outcome).toEqual({
       kind: "error",
@@ -489,7 +490,7 @@ describe("createExecutor", () => {
   it("still says something when the failing process said nothing at all", async () => {
     const { runner } = runnerReturning({ code: 1, stdout: "", stderr: "", timedOut: false });
 
-    expect(await createExecutor(config, runner).execute(options)).toEqual({
+    expect(await createExecutor(config, runner, CLAUDE_PATH).execute(options)).toEqual({
       kind: "error",
       message: "the agent exited 1",
     });
@@ -504,7 +505,7 @@ describe("createExecutor", () => {
       timedOut: false,
     });
 
-    const outcome = await createExecutor(config, runner).execute(options);
+    const outcome = await createExecutor(config, runner, CLAUDE_PATH).execute(options);
 
     expect(outcome).toEqual({ kind: "result", result: payload });
   });
@@ -518,7 +519,7 @@ describe("createExecutor", () => {
       timedOut: false,
     });
 
-    const outcome = await createExecutor(config, runner).execute(options);
+    const outcome = await createExecutor(config, runner, CLAUDE_PATH).execute(options);
 
     expect(outcome).toEqual({ kind: "result", result: payload });
   });
@@ -531,7 +532,7 @@ describe("createExecutor", () => {
       timedOut: false,
     });
 
-    const outcome = await createExecutor(config, runner).execute(options);
+    const outcome = await createExecutor(config, runner, CLAUDE_PATH).execute(options);
 
     expect(outcome.kind).toBe("error");
   });
@@ -540,7 +541,7 @@ describe("createExecutor", () => {
     const controller = new AbortController();
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
 
-    await createExecutor(config, runner).execute({ ...options, signal: controller.signal });
+    await createExecutor(config, runner, CLAUDE_PATH).execute({ ...options, signal: controller.signal });
 
     expect(run.mock.calls[0][2].signal).toBe(controller.signal);
   });
@@ -553,7 +554,7 @@ describe("createExecutor", () => {
       timedOut: false,
     });
 
-    await createExecutor(config, runner).execute(options);
+    await createExecutor(config, runner, CLAUDE_PATH).execute(options);
 
     const args = run.mock.calls[0][1] as string[];
     const flagIndex = args.indexOf("--append-system-prompt");
@@ -581,7 +582,7 @@ describe("createExecutor", () => {
       }),
     };
 
-    await createExecutor(config, runner).execute(retried);
+    await createExecutor(config, runner, CLAUDE_PATH).execute(retried);
 
     const args = run.mock.calls[0][1] as string[];
     const prompt = args[args.lastIndexOf("-p") + 1];
@@ -596,7 +597,7 @@ describe("createExecutor", () => {
       timedOut: false,
     });
 
-    await createExecutor(config, runner).execute(options);
+    await createExecutor(config, runner, CLAUDE_PATH).execute(options);
 
     const args = run.mock.calls[0][1] as string[];
     const prompt = args[args.lastIndexOf("-p") + 1];
@@ -630,7 +631,7 @@ describe("reporting the stream as it arrives", () => {
       const seen: StreamEvent[] = [];
       const { runner } = chunkedRunner(FIXTURE, fixedChunks(FIXTURE, size));
 
-      await createExecutor(config, runner).execute({ ...options, onEvent: (event) => seen.push(event) });
+      await createExecutor(config, runner, CLAUDE_PATH).execute({ ...options, onEvent: (event) => seen.push(event) });
 
       expect(seen).toEqual(parseStream(FIXTURE));
     }
@@ -649,7 +650,7 @@ describe("reporting the stream as it arrives", () => {
       return { code: 0, stdout: stream, stderr: "", timedOut: false };
     });
 
-    await createExecutor(config, { run } as never).execute({ ...options, onEvent: (event) => seen.push(event) });
+    await createExecutor(config, { run } as never, CLAUDE_PATH).execute({ ...options, onEvent: (event) => seen.push(event) });
 
     expect(reportedAfterTheFirstHalf).toBe(0);
     expect(seen).toEqual([{ type: "system", subtype: "init" }]);
@@ -670,7 +671,7 @@ describe("reporting the stream as it arrives", () => {
       return { code: 0, stdout: "", stderr: "", timedOut: false };
     });
 
-    await createExecutor(config, { run } as never).execute({ ...options, onEvent: (event) => seen.push(event) });
+    await createExecutor(config, { run } as never, CLAUDE_PATH).execute({ ...options, onEvent: (event) => seen.push(event) });
 
     // the oversized event never arrives, and the next whole line still does
     expect(seen).toEqual([{ type: "system", subtype: "compact_boundary" }]);
@@ -681,7 +682,7 @@ describe("reporting the stream as it arrives", () => {
     const seen: StreamEvent[] = [];
     const { runner } = chunkedRunner(stream, [stream]);
 
-    await createExecutor(config, runner).execute({ ...options, onEvent: (event) => seen.push(event) });
+    await createExecutor(config, runner, CLAUDE_PATH).execute({ ...options, onEvent: (event) => seen.push(event) });
 
     expect(seen).toEqual([{ type: "system", subtype: "init" }]);
   });
@@ -694,7 +695,7 @@ describe("reporting the stream as it arrives", () => {
       return { code: 0, stdout: completed(FIXTURE_RESULT), stderr: "", timedOut: false };
     });
 
-    await createExecutor(config, { run } as never).execute({ ...options, onEvent: (event) => seen.push(event) });
+    await createExecutor(config, { run } as never, CLAUDE_PATH).execute({ ...options, onEvent: (event) => seen.push(event) });
 
     expect(late).toBeDefined();
     late?.(`${JSON.stringify({ type: "system", subtype: "late" })}\n`);
@@ -705,7 +706,7 @@ describe("reporting the stream as it arrives", () => {
   it("asks for no incremental stdout at all when nobody is listening", async () => {
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
 
-    await createExecutor(config, runner).execute(options);
+    await createExecutor(config, runner, CLAUDE_PATH).execute(options);
 
     expect(run.mock.calls[0][2].onStdout).toBeUndefined();
   });
@@ -724,7 +725,7 @@ describe("the environment handed to the agent", () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "sk-secret");
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
 
-    await createExecutor(config, runner).execute(options);
+    await createExecutor(config, runner, CLAUDE_PATH).execute(options);
 
     const env = run.mock.calls[0][2].env;
     expect(env.CP_API_TOKEN).toBeUndefined();
@@ -738,7 +739,7 @@ describe("the environment handed to the agent", () => {
     vi.stubEnv("PATH", "/usr/bin");
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
 
-    await createExecutor(config, runner).execute(options);
+    await createExecutor(config, runner, CLAUDE_PATH).execute(options);
 
     const env = run.mock.calls[0][2].env;
     expect(env.HOME).toBe("/Users/owner");
@@ -760,7 +761,7 @@ describe("the agent is confined to its worktree", () => {
   it("spawns the CLI through the sandbox rather than directly", async () => {
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
 
-    await createExecutor(config, runner).execute(options);
+    await createExecutor(config, runner, CLAUDE_PATH).execute(options);
 
     expect(run.mock.calls[0][0]).toBe(SANDBOX_COMMAND);
   });
@@ -770,7 +771,7 @@ describe("the agent is confined to its worktree", () => {
   it("names the worktree as the only writable path", async () => {
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
 
-    await createExecutor(config, runner).execute(options);
+    await createExecutor(config, runner, CLAUDE_PATH).execute(options);
 
     const args = run.mock.calls[0][1] as string[];
     const params = args.filter((_, index) => args[index - 1] === "-D");
@@ -787,7 +788,7 @@ describe("the agent is confined to its worktree", () => {
   it("reports a machine fault instead of spawning when it cannot be confined", async () => {
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
 
-    const outcome = await createExecutor(config, runner).execute({
+    const outcome = await createExecutor(config, runner, CLAUDE_PATH).execute({
       ...options,
       worktreePath: join(worktreePath, "never-created"),
     });
@@ -796,13 +797,37 @@ describe("the agent is confined to its worktree", () => {
     expect(outcome.kind).toBe("machine_fault");
   });
 
+  // BP-733. Handed to sandbox-exec by name, the CLI is whatever answers to `claude` first on the
+  // PATH this worker assembled — so a machine where preflight found none runs nothing.
+  it("reports a machine fault instead of spawning when no claude path was resolved", async () => {
+    const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
+
+    const outcome = await createExecutor(config, runner, "").execute(options);
+
+    expect(run).not.toHaveBeenCalled();
+    expect(outcome).toEqual({
+      kind: "machine_fault",
+      message: "no absolute claude path was resolved — refusing to run claude by name on PATH",
+    });
+  });
+
+  it("hands the sandbox the resolved path, not the name", async () => {
+    const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
+
+    await createExecutor(config, runner, CLAUDE_PATH).execute(options);
+
+    const args = run.mock.calls[0][1] as string[];
+    expect(args).toContain(CLAUDE_PATH);
+    expect(args).not.toContain("claude");
+  });
+
   // What the operator accepted, honoured: the run happens, and it happens unwrapped.
   it("runs the CLI directly once the operator has accepted the risk", async () => {
     vi.stubEnv(UNCONFINED_ESCAPE_HATCH, "1");
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
 
-    await createExecutor(config, runner).execute(options);
+    await createExecutor(config, runner, CLAUDE_PATH).execute(options);
 
-    expect(run.mock.calls[0][0]).toBe("claude");
+    expect(run.mock.calls[0][0]).toBe(CLAUDE_PATH);
   });
 });

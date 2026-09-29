@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { collectDiff } from "./diff.js";
 import { createRunner } from "./exec.js";
+import { installedToolPath } from "./__fixtures__/tool-paths.js";
 
 /**
  * BP-509. Real git, because the claim is about what `--numstat` can and cannot express — and the
@@ -65,7 +66,7 @@ describe("collectDiff and the symlinks a change adds", () => {
   });
 
   it("reports each symlink with its target, and the plain file as neither", async () => {
-    const diff = await collectDiff(createRunner(), "git", work, baseSha);
+    const diff = await collectDiff(createRunner(), installedToolPath("git"), work, baseSha);
 
     expect(diff.symlinks).toEqual(
       expect.arrayContaining([
@@ -106,7 +107,7 @@ describe("collectDiff and the symlinks a change adds", () => {
     const raw = git(renamed, "diff", "--raw", "-M", base, "HEAD", "--").trim();
     expect(raw.split("\t")).toHaveLength(3);
 
-    const diff = await collectDiff(createRunner(), "git", renamed, base);
+    const diff = await collectDiff(createRunner(), installedToolPath("git"), renamed, base);
 
     expect(diff.symlinks.map((s) => s.path)).toEqual(["after"]);
     rmSync(dir2, { recursive: true, force: true });
@@ -126,7 +127,7 @@ describe("collectDiff and the symlinks a change adds", () => {
     git(plain, "add", "-A");
     git(plain, "commit", "--quiet", "-m", "edit");
 
-    expect((await collectDiff(createRunner(), "git", plain, base)).symlinks).toEqual([]);
+    expect((await collectDiff(createRunner(), installedToolPath("git"), plain, base)).symlinks).toEqual([]);
     rmSync(dir2, { recursive: true, force: true });
   });
 });

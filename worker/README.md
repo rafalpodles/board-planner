@@ -461,7 +461,10 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   **What it costs.** `~/.gitconfig` is not read on those calls, so anything an operator keeps there
   no longer applies to delivery: a deploy key set through `core.sshCommand`, a `url.*.insteadOf`
   rewrite pointing at a mirror, or an https credential helper other than `gh`'s. Delivery
-  authenticates over ssh with the agent socket, or over https through `gh auth git-credential`.
+  authenticates over ssh with the agent socket, or over https through `gh auth git-credential` —
+  named by the absolute path preflight resolved for gh, like every spawn of git, gh, `claude` and
+  `npm`, so nothing earlier on the worker's PATH answers instead; a machine where gh was not found
+  has no https helper at all (BP-641, BP-733).
 
   Since BP-516 that cost is the same on the local calls, and two lines of it are worth naming.
 

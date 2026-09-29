@@ -1,3 +1,4 @@
+import { isAbsolute } from "node:path";
 import { isGitRefName } from "./config.js";
 import { childEnv } from "./env.js";
 import { CommandResult, Runner } from "./exec.js";
@@ -5,6 +6,7 @@ import { GIT_SAFE_ENV, refuseOptionShapedPositionals, NO_GLOBAL_CONFIG, requireG
 import { plantedConfig } from "./repos.js";
 import { ClaimedTask, PassedCheck } from "./types.js";
 import { scrub } from "./scrub.js";
+import { requireToolPath } from "./tool-path.js";
 
 const TIMEOUT_MS = 120_000;
 const MAX_TITLE_CHARS = 256;
@@ -131,33 +133,43 @@ type MergeState = "merged" | "unmerged" | "unknown";
 // file configured, and the entry after it names the one helper we trust. Clearing alone would be a
 // regression — GIT_CONFIG_GLOBAL below also hides the helper `gh auth setup-git` installs, so an
 // https remote would stop authenticating.
-const HARDENED_CONFIG: ReadonlyArray<readonly [string, string]> = [
-  ["core.hooksPath", "/dev/null"],
-  ["core.fsmonitor", "false"],
-  ["core.pager", "cat"],
-  ["core.sshCommand", "ssh"],
-  // Named by git when it wants a password and no helper answered. Empty disables it.
-  ["core.askPass", ""],
-  ["credential.helper", ""],
-  ["credential.helper", "!gh auth git-credential"],
-  // The transport, not the configuration, was the way through: `ext::` hands the URL to a program.
-  // The agent cannot set our environment, but it can rewrite where the push goes —
-  // `remote.origin.pushurl`, `remote.origin.url`, or `url.<ext::…>.insteadOf` — and the transport
-  // is the one chokepoint that catches all three at once.
-  //
-  // `file` is refused for the same reason. It looks harmless — no program in the URL — but a local
-  // push runs git-receive-pack against the destination, and that repository's own post-receive
-  // hook then runs holding this environment. It does NOT inherit the hooksPath above; that was
-  // assumed here once and the test written to confirm it failed instead.
-  ["protocol.ext.allow", "never"],
-  ["protocol.file.allow", "never"],
-  // Signing runs a program the checkout gets to name — `gpg.program`, or ssh's key command — and
-  // `push.gpgSign` reaches it on the push the same way `commit.gpgsign` reaches it on the commit.
-  // The scan in front of the push refuses those keys since BP-516, so this is the second line; it
-  // is here because the commit path has both and the push had only the scan.
-  ["commit.gpgSign", "false"],
-  ["push.gpgSign", "false"],
-];
+function hardenedConfig(ghPath: string): ReadonlyArray<readonly [string, string]> {
+  return [
+    ["core.hooksPath", "/dev/null"],
+    ["core.fsmonitor", "false"],
+    ["core.pager", "cat"],
+    ["core.sshCommand", "ssh"],
+    // Named by git when it wants a password and no helper answered. Empty disables it.
+    ["core.askPass", ""],
+    ["credential.helper", ""],
+    // By its resolved path, like every other gh here: git runs the helper through a shell, which
+    // would otherwise look `gh` up on the PATH this process assembled — with GH_TOKEN in its
+    // environment (BP-733). No gh means no helper, so an https remote fails to authenticate rather
+    // than asking whatever answers to the name.
+    ...(isAbsolute(ghPath) ? [["credential.helper", `!${shellQuoted(ghPath)} auth git-credential`] as const] : []),
+    // The transport, not the configuration, was the way through: `ext::` hands the URL to a program.
+    // The agent cannot set our environment, but it can rewrite where the push goes —
+    // `remote.origin.pushurl`, `remote.origin.url`, or `url.<ext::…>.insteadOf` — and the transport
+    // is the one chokepoint that catches all three at once.
+    //
+    // `file` is refused for the same reason. It looks harmless — no program in the URL — but a local
+    // push runs git-receive-pack against the destination, and that repository's own post-receive
+    // hook then runs holding this environment. It does NOT inherit the hooksPath above; that was
+    // assumed here once and the test written to confirm it failed instead.
+    ["protocol.ext.allow", "never"],
+    ["protocol.file.allow", "never"],
+    // Signing runs a program the checkout gets to name — `gpg.program`, or ssh's key command — and
+    // `push.gpgSign` reaches it on the push the same way `commit.gpgsign` reaches it on the commit.
+    // The scan in front of the push refuses those keys since BP-516, so this is the second line; it
+    // is here because the commit path has both and the push had only the scan.
+    ["commit.gpgSign", "false"],
+    ["push.gpgSign", "false"],
+  ];
+}
+
+function shellQuoted(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
 
 // `remote.<name>.receivepack` is deliberately not in the list above: git keeps the **first** value
 // it is given for it rather than the last, so a repository setting wins over any override — with
@@ -177,14 +189,15 @@ const RECEIVE_PACK = "--receive-pack=git-receive-pack";
 // NOSYSTEM drops /etc/gitconfig; GLOBAL=/dev/null drops ~/.gitconfig, which is as reachable to the
 // agent as the repository's own — it holds HOME. The repository config cannot be pointed elsewhere,
 // so the keys above override it instead, at the highest precedence git has.
-export function hardenedGitConfig(): NodeJS.ProcessEnv {
+export function hardenedGitConfig(ghPath: string): NodeJS.ProcessEnv {
+  const config = hardenedConfig(ghPath);
   const env: NodeJS.ProcessEnv = {
     ...GIT_SAFE_ENV,
     GIT_CONFIG_GLOBAL: NO_GLOBAL_CONFIG,
     GIT_PROXY_COMMAND: "",
-    GIT_CONFIG_COUNT: String(HARDENED_CONFIG.length),
+    GIT_CONFIG_COUNT: String(config.length),
   };
-  HARDENED_CONFIG.forEach(([key, value], index) => {
+  config.forEach(([key, value], index) => {
     env[`GIT_CONFIG_KEY_${index}`] = key;
     env[`GIT_CONFIG_VALUE_${index}`] = value;
   });
@@ -199,6 +212,7 @@ export function hardenedGitConfig(): NodeJS.ProcessEnv {
 export function createDelivery(
   runner: Runner,
   gitPath: string,
+  ghPath: string,
   baseBranch?: string,
   githubToken?: string,
 ): Delivery {
@@ -223,7 +237,7 @@ export function createDelivery(
   //
   // Through GIT_CONFIG_* rather than `-c`, because the environment reaches the git that `gh`
   // shells out to; `-c` covers only the process we spawn ourselves. That is also why delivery does
-  // not use git-safety's gitArgs like every other call site: HARDENED_CONFIG carries the same keys
+  // not use git-safety's gitArgs like every other call site: hardenedConfig() carries the same keys
   // and more, at the same precedence, and reaches gh's inner invocations as well.
   function run(
     command: string,
@@ -242,12 +256,12 @@ export function createDelivery(
           "XDG_CONFIG_HOME",
         ]),
         ...pinnedIdentity,
-        ...hardenedGitConfig(),
+        ...hardenedGitConfig(ghPath),
       },
     });
   }
 
-  // A second line, not the first: HARDENED_CONFIG overrides the keys it names, and this refuses
+  // A second line, not the first: hardenedConfig() overrides the keys it names, and this refuses
   // the push outright if the agent wrote an executable key at all — including one the list does
   // not name. Push is where it is worth paying for, being the call that hands the checkout's own
   // config a credential; gh carries its token in the environment, so openPr and merge do not.
@@ -265,7 +279,7 @@ export function createDelivery(
     prUrl: string,
   ): Promise<MergeState> {
     const result = await run(
-      "gh",
+      requireToolPath("gh", ghPath),
       ["pr", "view", prUrl, "--json", "state", ...repoArgs(prUrl)],
       worktreePath,
     );
@@ -332,7 +346,7 @@ export function createDelivery(
 
     async openPr(worktreePath, task, summary, checks = []) {
       const result = await run(
-        "gh",
+        requireToolPath("gh", ghPath),
         [
           "pr",
           "create",
@@ -368,7 +382,7 @@ export function createDelivery(
       // --repo keeps gh out of the local checkout: --delete-branch otherwise switches the worktree
       // to the base branch first, which git refuses while the main clone has it checked out
       const result = await run(
-        "gh",
+        requireToolPath("gh", ghPath),
         [
           "pr",
           "merge",

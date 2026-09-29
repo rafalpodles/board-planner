@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { collectDiff } from "./diff.js";
 import { createRunner } from "./exec.js";
+import { installedToolPath } from "./__fixtures__/tool-paths.js";
 
 /**
  * diff.external (a repo-wide git config key) and diff.<driver>.textconv (a per-path attribute,
@@ -95,7 +96,7 @@ describe("collectDiff against a planted diff.external and diff.*.textconv", () =
   });
 
   it("collectDiff reports the real patch and never runs diff.external", async () => {
-    const diff = await collectDiff(createRunner(), "git", work, baseSha);
+    const diff = await collectDiff(createRunner(), installedToolPath("git"), work, baseSha);
 
     expect(diff.patch).toContain(REAL.trim());
     expect(diff.patch).not.toContain(DECOY.trim());
@@ -118,7 +119,7 @@ describe("collectDiff against a planted diff.external and diff.*.textconv", () =
   });
 
   it("collectDiff reports the real patch and never runs diff.*.textconv", async () => {
-    const diff = await collectDiff(createRunner(), "git", work, baseSha);
+    const diff = await collectDiff(createRunner(), installedToolPath("git"), work, baseSha);
 
     expect(diff.patch).toContain(REAL.trim());
     expect(diff.patch).not.toContain(DECOY.trim());

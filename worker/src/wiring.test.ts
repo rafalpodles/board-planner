@@ -1,5 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { agentArgs, answerSandboxProbe, isAgentSpawn, isSandboxProbe } from "./__fixtures__/agent-spawn.js";
+import { SANDBOX_COMMAND } from "./sandbox.js";
 import { tmpdir } from "os";
 import { join } from "path";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -285,6 +286,12 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
   // rather than the bare name — so the runners in this file answer the probe with a fixed path and
   // match on it, the same way they used to match on the literal "git".
   const GIT_PATH = "/opt/homebrew/bin/git";
+  // The same for gh, claude and npm since BP-733: each spawn reads back the path preflight found.
+  const toolPathFor = (probe: string) => `/opt/homebrew/bin/${probe.split(" ").pop()}`;
+  const isPreflightAsking = (command: string, args: string[]) =>
+    command.startsWith("/opt/homebrew/bin/") &&
+    !command.endsWith("/git") &&
+    (args[0] === "--version" || (args[0] === "auth" && args[1] === "status"));
 
   const CLAIMED: ClaimedTask = {
     taskId: "t1",
@@ -411,8 +418,13 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         }
         // establishPreflight's own resolution call, ahead of everything else: answered with the
         // fixed path every check below matches on.
-        if (args[0] === "-lc" && args[1] === "command -v git") {
-          return { code: 0, stdout: `${GIT_PATH}\n`, stderr: "", timedOut: false };
+        if (args[0] === "-lc" && args[1]?.startsWith("command -v ")) {
+          return { code: 0, stdout: `${toolPathFor(args[1])}\n`, stderr: "", timedOut: false };
+        }
+        // Preflight asking each resolved tool whether it runs, which is not the agent spawn below
+        // even though it is the same absolute path
+        if (!isSandboxProbe(command, args) && isPreflightAsking(command, args)) {
+          return { code: 0, stdout: "", stderr: "", timedOut: false };
         }
         // Who the run commits as, asked once before the agent starts (BP-516). A machine git will
         // not name one for is refused at `create`, so the fake has to answer it.
@@ -763,8 +775,13 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
 
     const hangingRunner: Runner = {
       async run(command, args, opts) {
-        if (args[0] === "-lc" && args[1] === "command -v git") {
-          return { code: 0, stdout: `${GIT_PATH}\n`, stderr: "", timedOut: false };
+        if (args[0] === "-lc" && args[1]?.startsWith("command -v ")) {
+          return { code: 0, stdout: `${toolPathFor(args[1])}\n`, stderr: "", timedOut: false };
+        }
+        // Preflight asking each resolved tool whether it runs, which is not the agent spawn below
+        // even though it is the same absolute path
+        if (!isSandboxProbe(command, args) && isPreflightAsking(command, args)) {
+          return { code: 0, stdout: "", stderr: "", timedOut: false };
         }
         if (isSandboxProbe(command, args)) {
           answerSandboxProbe(args);
@@ -1064,6 +1081,16 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
 
     expect(claudeArgs[claudeArgs.indexOf("--model") + 1]).toBe("haiku");
     expect(claudeArgs[claudeArgs.indexOf("--fallback-model") + 1]).toBe("opus");
+  });
+
+  // BP-733. The one composition point: what preflight resolved is what the confined spawn names,
+  // rather than `claude` for sandbox-exec to look up on the PATH this worker assembled.
+  it("hands the sandbox the agent's path as preflight resolved it", async () => {
+    const { everyCall } = await runOneTask();
+
+    const agent = everyCall.find(([command, ...args]) => command === SANDBOX_COMMAND && !args.includes("/bin/sh"));
+    expect(agent).toContain("/opt/homebrew/bin/claude");
+    expect(agent).not.toContain("claude");
   });
 
   // BP-373. `gh auth switch` is global machine state any terminal can flip, so the identity a run

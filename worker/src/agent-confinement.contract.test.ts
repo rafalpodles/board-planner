@@ -55,7 +55,7 @@ describe("every spawn of the agent is confined", () => {
   });
 
   it("only the implementer step and the review gate run the agent at all", () => {
-    expect(filesMatching(/confine\(\s*"claude"/)).toEqual(MAY_SPAWN_THE_AGENT);
+    expect(filesMatching(/confineTool\(\s*"claude"/)).toEqual(MAY_SPAWN_THE_AGENT);
   });
 
   // What each of them does with a refusal is behaviour, and asserted as behaviour: executor.test.ts

@@ -8,8 +8,9 @@ import { createRunner } from "./exec.js";
 import { acceptability } from "./decisions.js";
 import { isProtectedPath, protectedPathsGate, workflowPaths } from "./gates/protected-paths.js";
 import { GateContext } from "./types.js";
+import { installedToolPath } from "./__fixtures__/tool-paths.js";
 
-const gitPath = "git";
+const gitPath = installedToolPath("git");
 
 /**
  * BP-381. Two ways an agent makes the patch a person is asked to accept describe something other

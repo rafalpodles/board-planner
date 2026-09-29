@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createWorkspace } from "./workspace.js";
 import { createRunner } from "./exec.js";
+import { installedToolPath } from "./__fixtures__/tool-paths.js";
 
 /**
  * BP-504. BP-403 taught `commitAll` to refuse a checkout whose config carries an executable key,
@@ -54,7 +55,7 @@ describe("workspace.create against a planted config", () => {
         baseBranch: "main",
       } as never,
       createRunner(),
-      "git",
+      installedToolPath("git"),
       () => process.env,
       origin
     );

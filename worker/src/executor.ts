@@ -2,7 +2,7 @@ import { DEFAULT_FALLBACK_MODEL, DEFAULT_MODEL, modelOr, WorkerConfig } from "./
 import { childEnv } from "./env.js";
 import { PROTECTED_PATHS_BRIEF } from "./gates/protected-paths.js";
 import { Runner } from "./exec.js";
-import { confine } from "./sandbox.js";
+import { confineTool } from "./sandbox.js";
 import { isRateLimitEvent, lastResultEvent, parseStream, ResultEvent, StreamEvent } from "./stream.js";
 import { ClaimedTask, ExecutionResult, RunOutcome } from "./types.js";
 
@@ -216,7 +216,7 @@ export interface Executor {
   execute(options: ExecuteOptions): Promise<RunOutcome>;
 }
 
-export function createExecutor(config: WorkerConfig, runner: Runner): Executor {
+export function createExecutor(config: WorkerConfig, runner: Runner, claudePath: string): Executor {
   return {
     async execute({ task, worktreePath, brief, signal, onEvent }) {
       // The CLI authenticates from its logged-in session under HOME, so the allowlist both keeps
@@ -257,7 +257,7 @@ export function createExecutor(config: WorkerConfig, runner: Runner): Executor {
       // CLI needs no write access to `~/.claude` or `~/.claude.json` to run, so the allowance is
       // one directory rather than a denylist of the instruction channels inside the operator's
       // home. See sandbox.ts for why this is not a per-run HOME.
-      const spawn = confine("claude", claudeArgs, { writable: [worktreePath] });
+      const spawn = confineTool("claude", claudePath, claudeArgs, { writable: [worktreePath] });
 
       // Before the spawn, not after: a step that cannot be confined does not run half-confined and
       // does not run at all. A machine fault rather than an error, because it is the machine that

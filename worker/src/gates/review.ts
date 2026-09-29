@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { DEFAULT_REVIEW_MODEL, modelOr } from "../config.js";
 import { childEnv } from "../env.js";
 import { CommandResult, Runner } from "../exec.js";
-import { confine } from "../sandbox.js";
+import { confineTool } from "../sandbox.js";
 import { gitArgs, localGitEnv, requireGitPath } from "../git-safety.js";
 import { plantedConfig } from "../repos.js";
 import { Gate, GateContext } from "../types.js";
@@ -248,6 +248,7 @@ async function discardCheckout(
 export function reviewGate(
   runner: Runner,
   gitPath: string,
+  claudePath: string,
   timeoutMs: number,
   reviewModel?: string,
   focus?: string,
@@ -333,7 +334,7 @@ export function reviewGate(
         // confine. It is what keeps the gate shut if either of those changes: a write tool added to
         // the reviewer's capability, or `--safe-mode` narrowed. Confined to the clean checkout,
         // which is a throwaway directory, so nothing it leaves survives the gate that made it.
-        const spawn = confine("claude", reviewArgs, { writable: [checkout.path] });
+        const spawn = confineTool("claude", claudePath, reviewArgs, { writable: [checkout.path] });
         // machineFault, not a plain refusal: an unconfinable machine has not judged the change, and
         // reporting it as the reviewer rejecting one would blame the diff and push its branch.
         if ("refusal" in spawn) {

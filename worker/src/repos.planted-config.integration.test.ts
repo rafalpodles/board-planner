@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { plantedConfig } from "./repos.js";
 import { createRunner } from "./exec.js";
 import { gitArgs, localGitEnv, operatorGitEnv } from "./git-safety.js";
+import { installedToolPath } from "./__fixtures__/tool-paths.js";
 
 /**
  * BP-346. `plantedConfig` read `--local --list`, and three things live outside that scope: an
@@ -31,7 +32,7 @@ describe("plantedConfig against a real repository", () => {
   let home: string;
   let realHome: string | undefined;
 
-  const scan = (cwd = work) => plantedConfig(createRunner(), "git", cwd);
+  const scan = (cwd = work) => plantedConfig(createRunner(), installedToolPath("git"), cwd);
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "bp346-"));

@@ -13,7 +13,7 @@ function outputTail(result: CommandResult): string {
   return `[output truncated to the last ${MAX_REASON_CHARS} characters]\n${output.slice(-MAX_REASON_CHARS)}`;
 }
 
-export function buildGate(runner: Runner, timeoutMs: number): Gate {
+export function buildGate(runner: Runner, npmPath: string, timeoutMs: number): Gate {
   return {
     name: "build",
     async run({ worktreePath, signal }) {
@@ -21,7 +21,7 @@ export function buildGate(runner: Runner, timeoutMs: number): Gate {
 
       // a worktree is a fresh checkout with no node_modules — skip this and every build fails with "next: command not found"
       // The one command allowed the npm cache, and the reason `confined-npm.ts` has a cache at all
-      const install = await runConfinedNpm(runner, INSTALL_ARGS, {
+      const install = await runConfinedNpm(runner, npmPath, INSTALL_ARGS, {
         cwd: worktreePath,
         timeoutMs,
         signal,
@@ -52,7 +52,7 @@ export function buildGate(runner: Runner, timeoutMs: number): Gate {
 
       // No cache: the install has already filled node_modules, and this runs the worktree's own
       // build script — agent-written, like the tests
-      const build = await runConfinedNpm(runner, ["run", "build"], {
+      const build = await runConfinedNpm(runner, npmPath, ["run", "build"], {
         cwd: worktreePath,
         timeoutMs: remainingMs,
         signal,

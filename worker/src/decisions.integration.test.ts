@@ -320,7 +320,7 @@ function makeRunner(seen: GitCall[], registeredWorktree = ""): Runner {
       }
 
       // gh pr create, for the settlement's own delivery
-      if (command === "gh" && args.includes("create")) return ok(`${PR_URL}\n`);
+      if (command === `${TOOL_DIR}/gh` && args.includes("create")) return ok(`${PR_URL}\n`);
 
       if (args[0] === "ls-remote") return ok(`${BASE_SHA}\t${args[args.length - 1]}\n`);
 
@@ -491,7 +491,7 @@ describe("a refused change, offered and then accepted, over a real HTTP surface"
 
     expect(push).toBeDefined();
     expect(push!.args).toContain(`${HEAD_SHA}:refs/heads/${BRANCH}`);
-    expect(settlement.git.some((call) => call.command === "gh" && call.args.includes("create"))).toBe(
+    expect(settlement.git.some((call) => call.command === `${TOOL_DIR}/gh` && call.args.includes("create"))).toBe(
       true
     );
   });

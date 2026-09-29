@@ -19,6 +19,8 @@ import { unexpectedHistory } from "./provenance.js";
 import { claimedTask } from "./__fixtures__/task.js";
 import { isAgentSpawn } from "./__fixtures__/agent-spawn.js";
 import { WorkerConfig } from "./config.js";
+import { installedToolPath } from "./__fixtures__/tool-paths.js";
+import { CLAUDE_PATH, GH_PATH } from "./__fixtures__/tool-paths.js";
 
 /**
  * `child-env.contract.test.ts` is a source scan: it cannot see a key that arrives already inside an
@@ -41,7 +43,7 @@ import { WorkerConfig } from "./config.js";
  * `github-account.ts`, and `gates/confined-npm.ts` (a real `npm ci`/`npm test`, not attempted here).
  *
  * The permitted set is derived from those building blocks (`ALLOWED`, `GIT_SAFE_ENV`,
- * `hardenedGitConfig()`) rather than hand-copied, so it tracks them if they change; the handful of
+ * `hardenedGitConfig(GH_PATH)`) rather than hand-copied, so it tracks them if they change; the handful of
  * per-call-site extras (GIT_DIR, the identity keys, delivery's five) are named once here because
  * they live as inline literals in their call sites, not as an exported constant.
  */
@@ -66,10 +68,10 @@ const KNOWN_EXTRAS = [
   "GIT_DIR", "GIT_CEILING_DIRECTORIES", // workspace.ts's neutral base-lookup env
   "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", // commit.ts
   "SSH_AUTH_SOCK", "GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR", "XDG_CONFIG_HOME", // delivery.ts's alsoAllow
-  ...Object.keys(hardenedGitConfig()), // delivery.ts's git hardening
+  ...Object.keys(hardenedGitConfig(GH_PATH)), // delivery.ts's git hardening
 ];
 const PERMITTED = new Set<string>([...ALLOWED, ...KNOWN_EXTRAS]);
-const gitPath = "git";
+const gitPath = installedToolPath("git");
 
 interface RecordedCall {
   command: string;
@@ -204,14 +206,14 @@ describe("every real env-building call site stays inside the allowlist, across a
       expect(diff.changedFiles).toContain("change.txt");
 
       const task = claimedTask();
-      const outcome = await createExecutor(config, runner).execute({
+      const outcome = await createExecutor(config, runner, CLAUDE_PATH).execute({
         task,
         worktreePath: worktree.path,
         brief: { prompt: "say hi", capability: "edit", model: "", fallbackModel: "", timeoutMs: 30_000 },
       });
       expect(outcome.kind).toBe("result");
 
-      const verdict = await reviewGate(runner, gitPath, 30_000).run({
+      const verdict = await reviewGate(runner, gitPath, CLAUDE_PATH, 30_000).run({
         worktreePath: worktree.path,
         task,
         result: {
