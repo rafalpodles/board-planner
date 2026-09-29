@@ -30,7 +30,7 @@
     "bcryptjs": "^3.0.3",
     "mcp-handler": "^1.1.0",
     "mdast-util-find-and-replace": "3.0.2",
-    "mongoose": "^9.2.3",
+    "mongoose": "^9.10.3",
     "next": "^16.3.2",
     "nodemailer": "^9.0.5",
     "openai": "^6.25.0",

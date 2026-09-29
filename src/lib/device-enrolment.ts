@@ -77,7 +77,7 @@ export async function startDeviceEnrolment(
 ): Promise<StartedEnrolment> {
   await connectDB();
 
-  const live = { status: "pending", expiresAt: { $gt: now } };
+  const live = { status: "pending", expiresAt: { $gt: now } } as const;
   const pending = await DeviceEnrolment.countDocuments(live);
   if (pending >= MAX_PENDING_ENROLMENTS) {
     const surplus = await DeviceEnrolment.find(live)
