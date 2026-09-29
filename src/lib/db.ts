@@ -86,13 +86,15 @@ type ClientInternals = { s?: { activeSessions?: Set<unknown>; activeCursors?: Se
  * cursor reported itself exhausted (BP-789). Every operation holds a session, implicit or not,
  * from before server selection until it settles, so an empty set means nothing is left to break.
  *
- * Driver internals, read defensively: a driver that no longer exposes them is treated as busy, so
- * the close waits out the grace period instead of interrupting anything.
+ * Driver internals, read defensively: a driver that no longer exposes them as Sets is treated as
+ * busy, so the close waits out the grace period instead of interrupting anything.
  */
 function hasWorkInFlight(client: MongoClient): boolean {
   const state = (client as unknown as ClientInternals).s;
-  if (!state?.activeSessions || !state.activeCursors) return true;
-  return state.activeSessions.size > 0 || state.activeCursors.size > 0;
+  const sessions = state?.activeSessions;
+  const cursors = state?.activeCursors;
+  if (!(sessions instanceof Set) || !(cursors instanceof Set)) return true;
+  return sessions.size > 0 || cursors.size > 0;
 }
 
 async function closeQuietly(client: MongoClient): Promise<void> {

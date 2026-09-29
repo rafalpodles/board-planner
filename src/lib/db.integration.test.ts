@@ -50,12 +50,36 @@ const settled = <T>(promise: Promise<T>) =>
     (error: Error) => ({ error: `${error.name}: ${error.message}` })
   );
 
+const APP_NAME = "db-integration-test";
+const appUri = uri && `${uri}${uri.includes("?") ? "&" : "?"}appName=${APP_NAME}`;
+
 describe.skipIf(!uri)("connectDB against a real mongod — a starved stale check", () => {
   let observer: MongoClient;
   let connectDB: Db["connectDB"];
 
-  const connections = async (): Promise<number> =>
-    (await observer.db("admin").command({ serverStatus: 1 })).connections.current;
+  // Scoped to this file's own clients by appName, so other users of the server do not count
+  const currentOps = async (match: Record<string, unknown>) =>
+    observer
+      .db("admin")
+      .aggregate([
+        { $currentOp: { allUsers: true, idleConnections: true } },
+        { $match: { appName: APP_NAME, ...match } },
+      ])
+      .toArray();
+  const connections = async (): Promise<number> => (await currentOps({})).length;
+  const findStillRunning = async (): Promise<boolean> =>
+    (await currentOps({ active: true, "command.find": "db_integration_things" })).length > 0;
+
+  const halfReadCursor = async () => {
+    const cursor = Thing.find().sort({ n: 1 }).batchSize(1).lean().cursor();
+    const first = await cursor.next();
+    expect(first?.n).toBe(1);
+    return async () => {
+      const seen: number[] = [];
+      for (let doc = await cursor.next(); doc; doc = await cursor.next()) seen.push(doc.n);
+      return seen;
+    };
+  };
 
   beforeAll(async () => {
     observer = await new MongoClient(uri!).connect();
@@ -66,7 +90,7 @@ describe.skipIf(!uri)("connectDB against a real mongod — a starved stale check
   });
 
   beforeEach(async () => {
-    process.env.MONGODB_URI = uri;
+    process.env.MONGODB_URI = appUri;
     delete (globalThis as { mongooseCache?: unknown }).mongooseCache;
     vi.resetModules();
     ({ connectDB } = await import("./db"));
@@ -93,59 +117,61 @@ describe.skipIf(!uri)("connectDB against a real mongod — a starved stale check
   });
 
   it("lets a query already running on the replaced client finish", async () => {
+    // 3 x 2.5 s on the server against a 2.5 s spin, and checked below rather than assumed
     const running = settled(
-      Thing.find({ $where: "sleep(1000) || true" })
+      Thing.find({ $where: "sleep(2500) || true" })
         .sort({ n: 1 })
         .lean()
         .then((docs) => docs.map((doc) => doc.n))
     );
 
     await replaceUnderStarvation(connectDB);
+    expect(await findStillRunning()).toBe(true);
 
     expect(await running).toEqual({ value: [1, 2, 3] });
   }, 30_000);
 
   it("lets a cursor read halfway through on the replaced client be read to the end", async () => {
-    const cursor = Thing.find().sort({ n: 1 }).batchSize(1).lean().cursor();
-    const first = await cursor.next();
+    const readRest = await halfReadCursor();
 
     await replaceUnderStarvation(connectDB);
 
-    const rest = await settled(
-      (async () => {
-        const seen: number[] = [];
-        for (let doc = await cursor.next(); doc; doc = await cursor.next()) seen.push(doc.n);
-        return seen;
-      })()
-    );
-    expect(first?.n).toBe(1);
-    expect(rest).toEqual({ value: [2, 3] });
+    expect(await settled(readRest())).toEqual({ value: [2, 3] });
   }, 30_000);
 
+  // Held open by the test itself, so how fast the machine is decides nothing
   it("closes the replaced client once its work is done, not before", async () => {
     const close = vi.spyOn(MongoClient.prototype, "close");
-    const running = settled(Thing.find({ $where: "sleep(1000) || true" }).lean());
+    const readRest = await halfReadCursor();
 
     const abandoned = await replaceUnderStarvation(connectDB);
     const closesOfAbandoned = () =>
       close.mock.contexts.filter((client) => client === abandoned).length;
     expect(closesOfAbandoned()).toBe(0);
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    expect(closesOfAbandoned()).toBe(0);
 
-    await running;
+    expect(await readRest()).toEqual([2, 3]);
     await expect.poll(closesOfAbandoned, { timeout: 5_000 }).toBe(1);
-    // And the replacement is the one answering
     await expect(Thing.countDocuments()).resolves.toBe(3);
   }, 30_000);
 
-  // BP-520's leak, through this path: every replaced client has to be released, or the count
-  // climbs by a client's worth of sockets per cycle
+  // BP-520's leak, through the drain path: each cycle leaves work on the client it replaces, and
+  // every one of those clients has to be released once that work is done
   it("does not leave connections behind across repeated replacements", async () => {
+    const close = vi.spyOn(MongoClient.prototype, "close");
     const baseline = await connections();
+    expect(baseline).toBeGreaterThan(0);
 
     for (let cycle = 0; cycle < 6; cycle++) {
-      const running = settled(Thing.find({ $where: "sleep(500) || true" }).lean());
-      await replaceUnderStarvation(connectDB);
-      expect(await running).toEqual({ value: expect.any(Array) });
+      const readRest = await halfReadCursor();
+      const abandoned = await replaceUnderStarvation(connectDB);
+      const closesOfAbandoned = () =>
+        close.mock.contexts.filter((client) => client === abandoned).length;
+      expect(closesOfAbandoned()).toBe(0);
+
+      expect(await readRest()).toEqual([2, 3]);
+      await expect.poll(closesOfAbandoned, { timeout: 5_000 }).toBe(1);
     }
 
     await expect

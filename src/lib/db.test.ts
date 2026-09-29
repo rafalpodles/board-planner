@@ -507,25 +507,33 @@ describe("connectDB — the client a reconnect abandons", () => {
     expect(close).not.toHaveBeenCalled();
   });
 
-  // The close is chained onto the promise the caller awaits, so a close that throws would be
-  // handed to the request as the answer to `connectDB()` — the one thing it must never be
-  it("reconnects even when the close fails, rather than answering with that failure", async () => {
+  // The close runs detached from the promise the caller awaits, so a close that throws must be
+  // swallowed there: nobody is left to handle it, and an unhandled rejection can end the process
+  it("reconnects even when the close fails, and leaves that failure unhandled nowhere", async () => {
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+    const failingClose = vi.fn(async () => {
+      throw new Error("topology already closed");
+    });
     connect.mockImplementation(async () => {
-      connection.client = {
-        close: vi.fn(async () => {
-          throw new Error("topology already closed");
-        }),
-        s: idle(),
-      };
+      connection.client = { close: failingClose, s: idle() };
       return { ok: true };
     });
     const { connectDB } = await freshModule();
 
-    await connectDB();
-    connection.readyState = 0;
+    try {
+      await connectDB();
+      connection.readyState = 0;
 
-    await expect(connectDB()).resolves.toEqual({ ok: true });
-    expect(connect).toHaveBeenCalledTimes(2);
+      await expect(connectDB()).resolves.toEqual({ ok: true });
+      expect(connect).toHaveBeenCalledTimes(2);
+      expect(failingClose).toHaveBeenCalledTimes(1);
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      process.off("unhandledRejection", unhandled);
+    }
   });
 
   it("reports a reconnect that fails as an outage, not as a connection", async () => {
@@ -548,7 +556,7 @@ describe("connectDB — the client a reconnect abandons", () => {
     await expect(connectDB()).resolves.toEqual({ ok: true });
   });
 
-  it("does not open a client while the close of the last one is still in flight", async () => {
+  it("shares one reconnect between concurrent callers, and closes the old client once", async () => {
     const order: string[] = [];
     connect.mockImplementation(async () => {
       order.push("connect");
@@ -567,7 +575,7 @@ describe("connectDB — the client a reconnect abandons", () => {
     await expect(first).resolves.toEqual({ ok: true });
     await expect(second).resolves.toEqual({ ok: true });
     // One reconnect between them: the second caller waits on the promise the first one put in the
-    // cache, rather than opening a client of its own
+    // cache, rather than opening a client of its own. The old client is idle, so it closes at once.
     expect(order).toEqual(["connect", "connect", "close"]);
   });
 });
@@ -749,10 +757,10 @@ describe("connectDB — work still running on the client it abandons", () => {
 
     connection.readyState = 0;
     await connectDB();
-    await vi.advanceTimersByTimeAsync(59_000);
+    await vi.advanceTimersByTimeAsync(59_999);
     expect(close).not.toHaveBeenCalled();
 
-    await vi.advanceTimersByTimeAsync(1_250);
+    await vi.advanceTimersByTimeAsync(1);
     expect(close).toHaveBeenCalledTimes(1);
   });
 
@@ -763,12 +771,34 @@ describe("connectDB — work still running on the client it abandons", () => {
 
     connection.readyState = 0;
     await connectDB();
-    await vi.advanceTimersByTimeAsync(59_000);
+    await vi.advanceTimersByTimeAsync(59_999);
     expect(close).not.toHaveBeenCalled();
 
-    await vi.advanceTimersByTimeAsync(1_250);
+    await vi.advanceTimersByTimeAsync(1);
     expect(close).toHaveBeenCalledTimes(1);
   });
+
+  // A driver that kept the fields but changed their shape must not read as idle: `.size` of
+  // anything else is undefined, which compares as "nothing in flight"
+  for (const [shape, state] of [
+    ["cursors that are not a Set", { activeSessions: new Set(), activeCursors: [{}] }],
+    ["sessions that are not a Set", { activeSessions: new Map([[{}, {}]]), activeCursors: new Set() }],
+    ["no cursors at all", { activeSessions: new Set() }],
+  ] as const) {
+    it(`treats ${shape} as busy`, async () => {
+      const { connectDB } = await freshModule();
+      await connectDB();
+      connection.client = { close, s: state } as unknown as FakeClient;
+
+      connection.readyState = 0;
+      await connectDB();
+      await vi.advanceTimersByTimeAsync(59_999);
+      expect(close).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(close).toHaveBeenCalledTimes(1);
+    });
+  }
 
   it("closes an idle one straight away", async () => {
     const { connectDB } = await freshModule();
