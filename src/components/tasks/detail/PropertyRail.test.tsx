@@ -1540,12 +1540,26 @@ describe("PropertyRail before the agent list has answered", () => {
       expect(agentRow()).toBeUndefined();
     });
 
-    it("says it is loading rather than that there is no agent", () => {
+    // "No agent" is read off the task itself, which the list has no say in
+    it("says a task with no agent has none, and that the row is still busy", () => {
       renderRail({ agentsStatus: "loading" });
 
-      expect(screen.queryByText("No agent")).toBeNull();
-      expect(screen.getByTestId("agent-unread").textContent).toBe("Loading…");
+      const row = screen.getByTestId("agent-unread");
+      expect(row.textContent).toBe("No agent");
+      expect(row.getAttribute("aria-busy")).toBe("true");
       expect(screen.queryByTestId("agents-unread")).toBeNull();
+    });
+
+    it("says there is an agent when the task carries one it cannot name", () => {
+      renderRail({
+        agentsStatus: "loading",
+        draft: { ...draft, agent: "a1" },
+        stored: { ...carrying, agent: "a1" } as unknown as ApiTask,
+      });
+
+      const row = screen.getByTestId("agent-unread");
+      expect(row.textContent).toBe("An agent");
+      expect(row.querySelector(".text-text-muted"), "styled as a value, not as an empty one").toBeNull();
     });
   });
 

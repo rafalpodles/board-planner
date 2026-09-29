@@ -555,13 +555,12 @@ export function PropertyRail({
             owner assigned to themselves, so the routing holds that boundary instead of the bar. */}
         {!agentsRead ? (
           <FieldRow label="Agent" touch={touch}>
-            <span data-testid="agent-unread" className="truncate">
-              {storedAgentName ??
-                (agentsStatus === "failed" && !storedAgent ? (
-                  <EmptyValue>No agent</EmptyValue>
-                ) : (
-                  <EmptyValue>{agentsStatus === "loading" ? "Loading…" : "An agent"}</EmptyValue>
-                ))}
+            <span
+              data-testid="agent-unread"
+              aria-busy={agentsStatus === "loading" || undefined}
+              className="truncate"
+            >
+              {draft.agent ? storedAgentName ?? "An agent" : <EmptyValue>No agent</EmptyValue>}
             </span>
           </FieldRow>
         ) : notOffered ? (
