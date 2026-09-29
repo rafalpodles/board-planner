@@ -591,12 +591,10 @@ test("the default agent picker says the agent list failed rather than showing no
   expect((await failedRead).status()).toBe(500);
 
   const picker = page.getByLabel("Default agent");
-  await expect(picker).toBeVisible();
-  await page.waitForTimeout(500);
+  await expect(picker).toHaveValue(String(PROJECT_AGENT_ID));
   await expect(picker.locator("option:checked")).not.toHaveText(/^No default/);
   await expect(picker).toBeDisabled();
   await expect(page.getByTestId("default-agent-unread")).toBeVisible();
-  await expect(picker).toHaveValue(String(PROJECT_AGENT_ID));
   await page.waitForTimeout(AFTER_THE_TOAST);
   await expect(page.getByTestId("default-agent-unread")).toBeVisible();
   await expect(picker).toHaveValue(String(PROJECT_AGENT_ID));
