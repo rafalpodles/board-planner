@@ -470,6 +470,23 @@ describe.each([
   });
 });
 
+describe("TaskCard due date, read in a German reader's locale", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("formats the day the reader's way rather than a fixed locale's", () => {
+    const toLocaleDateString = Date.prototype.toLocaleDateString;
+    vi.spyOn(Date.prototype, "toLocaleDateString").mockImplementation(function (
+      this: Date,
+      locales?: Intl.LocalesArgument,
+      options?: Intl.DateTimeFormatOptions,
+    ) {
+      return toLocaleDateString.call(this, locales ?? "de-DE", options);
+    });
+    renderCard({ task: { ...task, dueDate: "2026-10-15T00:00:00.000Z" } as ApiTask });
+    expect(screen.getByTestId("task-card-due").textContent).toBe("15. Okt.");
+  });
+});
+
 describe("TaskCard with a due date that is not a date", () => {
   it("draws no due chip rather than an empty or invalid one", () => {
     renderCard({ task: { ...task, dueDate: "not a date" } as ApiTask });
