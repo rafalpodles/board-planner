@@ -229,3 +229,33 @@ describe("an instance whose GitHub is not github.com", () => {
     );
   });
 });
+
+// BP-739: the settings field classifies a draft in the browser, where the environment is not the
+// server's, so the instance's GitHub arrives as an argument
+describe("repositoryProvider given the instance's GitHub explicitly", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("recognises the corporate host it is handed, whatever this process's environment says", () => {
+    vi.stubEnv("GITHUB_API_BASE_URL", "");
+    expect(
+      repositoryProvider(
+        { repositoryUrl: "https://ghe.corp.example/owner/repo" },
+        "https://ghe.corp.example"
+      )
+    ).toBe("github");
+    expect(
+      projectRepositoryUrl({ githubRepo: "owner/repo" }, "https://ghe.corp.example")
+    ).toBe("https://ghe.corp.example/owner/repo");
+  });
+
+  it("still recognises github.com and still refuses an unknown host", () => {
+    expect(
+      repositoryProvider({ repositoryUrl: "https://github.com/owner/repo" }, "https://ghe.corp.example")
+    ).toBe("github");
+    expect(
+      repositoryProvider({ repositoryUrl: "https://evil.example.com/owner/repo" }, "https://ghe.corp.example")
+    ).toBe("");
+  });
+});

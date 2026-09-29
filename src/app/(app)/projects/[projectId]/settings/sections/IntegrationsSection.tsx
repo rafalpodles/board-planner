@@ -6,6 +6,7 @@ import { webhookDeliveryStatus } from "@/lib/webhook-delivery-status";
 import { useDraft } from "@/hooks/use-draft";
 import { CODA_COLUMNS, CODA_KEY_COLUMN } from "@/lib/coda";
 import { clearsStoredToken } from "@/lib/host-bound-secrets";
+import { repositoryProvider } from "@/lib/repository";
 import { useToast } from "@/components/ui/Toast";
 import {
   ApiWebhook,
@@ -426,10 +427,17 @@ export function IntegrationsSection({
   const [opened, setOpened] = useState<IntegrationId[]>([]);
   const [expanded, setExpanded] = useState<IntegrationId | null>(null);
 
+  const draftProvider = repositoryProvider(
+    {
+      repositoryUrl: repository.value.repositoryUrl,
+      gitlabHost: gitlab.value.gitlabHost,
+    },
+    project.githubWebBase,
+  );
   const providerLabel =
-    project.repositoryProvider === "github"
+    draftProvider === "github"
       ? "GitHub"
-      : project.repositoryProvider === "gitlab"
+      : draftProvider === "gitlab"
         ? "GitLab"
         : "";
 
@@ -470,7 +478,7 @@ export function IntegrationsSection({
       </SettingsCard>
 
       <Connections
-        project={project}
+        project={{ ...project, repositoryProvider: draftProvider }}
         opened={opened}
         expanded={expanded}
         onExpand={setExpanded}

@@ -83,7 +83,10 @@ export function repositoryUrlCandidates(project: RepositoryFields): string[] {
   ].filter(Boolean);
 }
 
-export function projectRepositoryUrl(project: RepositoryFields): string {
+export function projectRepositoryUrl(
+  project: RepositoryFields,
+  instanceGithubWeb = githubWebBase()
+): string {
   const explicit = project.repositoryUrl?.trim();
   if (explicit) return explicit;
 
@@ -92,7 +95,7 @@ export function projectRepositoryUrl(project: RepositoryFields): string {
   // repository somebody else owns — and, through `repositoryProvider` below, a sync that refuses
   // to run (BP-634).
   const github = project.githubRepo?.trim();
-  if (github) return absolute(github, githubWebBase());
+  if (github) return absolute(github, instanceGithubWeb);
 
   const gitlab = project.gitlabRepo?.trim();
   if (gitlab) return absolute(gitlab, project.gitlabHost?.trim() || "https://gitlab.com");
@@ -103,8 +106,11 @@ export function projectRepositoryUrl(project: RepositoryFields): string {
 // Derived from the host rather than from a column, so one field can serve every provider. The
 // self-hosted GitLab case has no telling hostname, and needs the hint the project already carries:
 // gitlabHost, without which none of its API calls could have worked in the first place.
-export function repositoryProvider(project: RepositoryFields): RepositoryProvider {
-  const host = hostOf(projectRepositoryUrl(project));
+export function repositoryProvider(
+  project: RepositoryFields,
+  instanceGithubWeb = githubWebBase()
+): RepositoryProvider {
+  const host = hostOf(projectRepositoryUrl(project, instanceGithubWeb));
   if (!host) return "";
 
   const bare = bareHost(host);
@@ -117,7 +123,7 @@ export function repositoryProvider(project: RepositoryFields): RepositoryProvide
   // This instance's own GitHub, when it is not github.com. Last, so a project that went to the
   // trouble of naming a self-hosted GitLab keeps it even if the two hosts somehow coincide: a
   // per-project hint beats an instance-wide default.
-  const instance = hostOf(githubWebBase());
+  const instance = hostOf(instanceGithubWeb);
   if (instance && instance === host) return "github";
 
   return "";
