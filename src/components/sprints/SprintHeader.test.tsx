@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent, within } from "@testing-library/react";
 import { SprintHeader } from "./SprintHeader";
 import { ApiSprint } from "@/types";
+import { pinTimezone } from "@/lib/testing/pin-timezone";
 
 function sprint(over: Partial<ApiSprint> & { _id: string }): ApiSprint {
   return {
@@ -185,20 +186,25 @@ describe("a board with no Done column", () => {
 });
 
 /**
- * BP-480. `daysLeft` has three branches around a `Math.ceil` and fourteen tests above it touched
- * none of them. It is not decoration: a sprint that reads "1 day left" on its final day is a
- * planning error, and the boundary between that and "ends today" is where an off-by-one lands.
+ * BP-480. `daysLeft` has three branches and the boundary between "1 day left", "ends today" and
+ * "1 day over" is where an off-by-one lands. BP-754: the end date is a picked day stored as its
+ * UTC midnight, so the count is in calendar days from the viewer's today — read in Los Angeles at
+ * 20:00, when UTC is already on tomorrow, which is where an instant-based count went wrong.
  *
- * Time is pinned rather than computed from the real clock, and only `Date` is faked — faking
- * timers as well would take React's scheduling with it.
+ * Only `Date` is faked — faking timers as well would take React's scheduling with it.
  */
 describe("the countdown", () => {
-  const NOW = new Date("2026-03-10T12:00:00Z");
-  const hours = (n: number) => new Date(NOW.getTime() + n * 3_600_000).toISOString();
+  pinTimezone("America/Los_Angeles");
+  // Built when called, not when collected: the zone is pinned in `beforeAll`
+  const evening = () => new Date(2026, 2, 10, 20, 0);
+  const morning = () => new Date(2026, 2, 10, 0, 30);
+  const day = (offset: number) =>
+    new Date(Date.UTC(2026, 2, 10 + offset)).toISOString();
 
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(NOW);
+    vi.setSystemTime(evening());
+    expect(new Date().getUTCDate(), "the timezone did not actually change").toBe(11);
   });
   afterEach(() => {
     vi.useRealTimers();
@@ -216,36 +222,37 @@ describe("the countdown", () => {
   }
 
   it("counts the days that are left", () => {
-    expect(countdown(hours(24 * 5))).toContain("5 days left");
+    expect(countdown(day(5))).toContain("5 days left");
   });
 
   it("says day, not days, for the last one", () => {
-    // 25 hours: ceil puts it at 2, so the singular is read from a day and a bit under
-    expect(countdown(hours(23))).toContain("1 day left");
-    expect(countdown(hours(25))).toContain("2 days left");
+    expect(countdown(day(1))).toContain("1 day left");
+    expect(countdown(day(2))).toContain("2 days left");
   });
 
-  /**
-   * The part-day case, and the reason `Math.ceil` is not interchangeable with `Math.floor`: six
-   * hours from now is 0.25 of a day, which rounds up to one. Flooring it would call the same
-   * moment "ends today", a day early.
-   */
-  it("rounds a part day up rather than down", () => {
-    expect(countdown(hours(6))).toContain("1 day left");
-    expect(countdown(hours(6))).not.toContain("ends today");
+  it("says it ends today all through its last day", () => {
+    expect(countdown(day(0))).toContain("ends today");
+    vi.setSystemTime(morning());
+    expect(countdown(day(0))).toContain("ends today");
+    expect(countdown(day(1))).toContain("1 day left");
   });
 
-  it("says it ends today from the moment it is due until a day after", () => {
-    expect(countdown(hours(0))).toContain("ends today");
-    // An hour past due is still today's sprint: ceil(-0.04) is -0, which is neither negative nor
-    // a day over
-    expect(countdown(hours(-1))).toContain("ends today");
-    expect(countdown(hours(-23))).toContain("ends today");
+  it("counts the days it is over by, from the day after its last", () => {
+    expect(countdown(day(-1))).toContain("1 day over");
+    expect(countdown(day(-2))).toContain("2 days over");
   });
 
-  it("counts the days it is over by, once it is a whole day over", () => {
-    expect(countdown(hours(-25))).toContain("1 day over");
-    expect(countdown(hours(-49))).toContain("2 days over");
+  it("dates its range by the days that were picked", () => {
+    const text = countdown(null, {
+      sprint: sprint({
+        _id: "f",
+        name: "Sprint 6",
+        status: "active",
+        startDate: "2026-01-01T00:00:00.000Z",
+        endDate: "2026-01-15T00:00:00.000Z",
+      }),
+    });
+    expect(text).toContain("Jan 1 — Jan 15, 2026");
   });
 
   /**
@@ -254,7 +261,7 @@ describe("the countdown", () => {
    * countdown on a finished sprint is a question about the prop, not about the record.
    */
   it("says nothing at all once the board is read-only", () => {
-    const text = countdown(hours(24 * 5), { readOnly: true });
+    const text = countdown(day(5), { readOnly: true });
     // Anchored: without this the assertions below are equally happy with a header that rendered
     // nothing at all, which is a different bug wearing this test's green
     expect(text).toContain("Sprint 6");
@@ -262,7 +269,7 @@ describe("the countdown", () => {
     expect(text).not.toContain("ends today");
 
     // The control, same sprint, same end date: without readOnly it does count
-    expect(countdown(hours(24 * 5))).toContain("5 days left");
+    expect(countdown(day(5))).toContain("5 days left");
   });
 
   it("says nothing at all for a sprint with no end date", () => {

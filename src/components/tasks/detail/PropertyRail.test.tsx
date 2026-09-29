@@ -1,10 +1,11 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, cleanup, act, fireEvent } from "@testing-library/react";
+import { render, screen, cleanup, act, fireEvent, within } from "@testing-library/react";
 import { PropertyRail } from "./PropertyRail";
 import type { TaskDraft } from "./useTaskEditor";
 import { ApiCustomField, ApiSprint, ApiTask, ApiUser } from "@/types";
 import type { AnyColumn } from "@/lib/columns";
+import { pinTimezone } from "@/lib/testing/pin-timezone";
 
 afterEach(cleanup);
 
@@ -70,6 +71,7 @@ function renderRail(over: Partial<React.ComponentProps<typeof PropertyRail>> = {
       users={users}
       sprints={sprints}
       agents={[]}
+      agentsStatus="loaded"
       projectId={PROJECT_ID}
       categories={[
         { _id: "c1", name: "user-story", color: "#3b82f6" },
@@ -1497,5 +1499,107 @@ describe("the Agent row explains itself", () => {
     expect(rules.querySelector("a")?.getAttribute("href")).toBe(
       "https://board-planner.com/docs/ai/execution-workers/"
     );
+  });
+});
+
+describe("PropertyRail dates, read west of UTC", () => {
+  pinTimezone("America/Los_Angeles");
+
+  it("shows the due day that was picked", () => {
+    expect(new Date(2026, 9, 15).getTimezoneOffset(), "the timezone did not actually change").toBe(420);
+    renderRail({ draft: { ...draft, dueDate: "2026-10-15" } });
+    expect(screen.getByText("Oct 15, 2026")).toBeTruthy();
+    expect(screen.queryByText("Oct 14, 2026")).toBeNull();
+  });
+
+  it("shows the day a series stops on", () => {
+    renderRail({
+      draft: { ...draft, recurrence: { frequency: "weekly", interval: 1, endDate: "2026-12-31" } },
+    });
+    expect(screen.getByText("Every week until Dec 31, 2026")).toBeTruthy();
+  });
+});
+
+describe("PropertyRail before the agent list has answered", () => {
+  const carrying = {
+    agent: { _id: "a1", name: "Board default" },
+    assignee: null,
+    assignedBy: null,
+    status: "todo",
+  } as unknown as ApiTask;
+  const agentRow = () =>
+    [...screen.queryAllByRole("combobox")].find((el) => (el.textContent || "").startsWith("Agent"));
+
+  describe("while it loads", () => {
+    it("names the agent the task carries without calling it somebody else's", () => {
+      renderRail({ agentsStatus: "loading", draft: { ...draft, agent: "a1" }, stored: carrying });
+
+      expect(screen.queryByText(/Not yours to choose/)).toBeNull();
+      expect(screen.queryByTestId("agent-not-offered-reason")).toBeNull();
+      expect(screen.getByTestId("agent-unread").textContent).toBe("Board default");
+      expect(agentRow()).toBeUndefined();
+    });
+
+    // "No agent" is read off the task itself, which the list has no say in
+    it("says a task with no agent has none, and that the row is still busy", () => {
+      renderRail({ agentsStatus: "loading" });
+
+      const row = screen.getByTestId("agent-unread");
+      expect(row.textContent).toBe("No agent");
+      expect(row.getAttribute("aria-busy")).toBe("true");
+      expect(screen.queryByTestId("agents-unread")).toBeNull();
+    });
+
+    it("says there is an agent when the task carries one it cannot name", () => {
+      renderRail({
+        agentsStatus: "loading",
+        draft: { ...draft, agent: "a1" },
+        stored: { ...carrying, agent: "a1" } as unknown as ApiTask,
+      });
+
+      const row = screen.getByTestId("agent-unread");
+      expect(row.textContent).toBe("An agent");
+      expect(row.querySelector(".text-text-muted"), "styled as a value, not as an empty one").toBeNull();
+    });
+  });
+
+  describe("when it failed", () => {
+    it("says the list could not be loaded, and offers the read again", async () => {
+      const retry = vi.fn();
+      renderRail({ agentsStatus: "failed", onRetryAgents: retry });
+
+      const alert = screen.getByTestId("agents-unread");
+      expect(alert.textContent).toMatch(/could not be loaded/);
+      await act(async () => within(alert).getByRole("button", { name: "Retry" }).click());
+      expect(retry).toHaveBeenCalledOnce();
+      // The task's own value, beside the failure rather than instead of it
+      expect(screen.getByTestId("agent-unread").textContent).toBe("No agent");
+      expect(agentRow()).toBeUndefined();
+    });
+
+    it("keeps naming the agent the task carries, and never calls it somebody else's", () => {
+      renderRail({ agentsStatus: "failed", draft: { ...draft, agent: "a1" }, stored: carrying });
+
+      expect(screen.queryByText(/Not yours to choose/)).toBeNull();
+      expect(screen.getByTestId("agent-unread").textContent).toBe("Board default");
+      expect(screen.getByTestId("agents-unread")).toBeTruthy();
+    });
+
+    it("shows the retry as running while it runs", () => {
+      renderRail({ agentsStatus: "failed", onRetryAgents: () => {}, retryingAgents: true });
+
+      const button = within(screen.getByTestId("agents-unread")).getByRole("button");
+      expect(button.textContent).toBe("Retrying…");
+      expect((button as HTMLButtonElement).disabled).toBe(true);
+    });
+  });
+
+  // The control: once the list has answered, the row is the picker again and no failure is claimed
+  it("is the picker once the list has answered", () => {
+    renderRail({ agentsStatus: "loaded" });
+
+    expect(agentRow()).toBeTruthy();
+    expect(screen.queryByTestId("agent-unread")).toBeNull();
+    expect(screen.queryByTestId("agents-unread")).toBeNull();
   });
 });

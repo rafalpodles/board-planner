@@ -32,6 +32,8 @@ export const GROUPS = {
     "history-says-what-changed.spec.ts",
     "first-use-gaps.spec.ts",
     "task-composing-controls.spec.ts",
+    "due-date-in-the-viewers-day.spec.ts",
+    "task-tab-title.spec.ts",
   ],
   "task-fields": [
     "field-history.spec.ts",

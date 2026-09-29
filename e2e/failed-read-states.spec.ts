@@ -3,6 +3,8 @@ import {
   DECOY_TASK_TITLE,
   PERSONAL_AGENT_ID,
   PERSONAL_AGENT_NAME,
+  PROJECT_AGENT_ID,
+  PROJECT_AGENT_NAME,
   PROJECT_ID,
   PROJECT_KEY,
   SIBLING_TASK_ID,
@@ -481,4 +483,137 @@ test("the History tab drops its count when a reload of the history fails", async
   await expect(historyTab, "no number beside a panel that cannot count").toHaveText("History", {
     timeout: 1_000,
   });
+});
+
+/**
+ * The task's Agent row, which read the agent list and ignored whether it had answered: while it
+ * loaded, and for good once it failed, a task carrying its own board's agent was called somebody
+ * else's personal agent, and a task with none read as though no agent existed.
+ */
+async function taskCarryingTheBoardAgent(request: APIRequestContext) {
+  await seedAgents();
+  const set = await request.put(`/api/projects/${PROJECT_ID}/tasks/${SIBLING_TASK_ID}`, {
+    headers: ADMIN_AUTH,
+    data: { agent: String(PROJECT_AGENT_ID) },
+  });
+  expect(set.status(), await set.text()).toBe(200);
+}
+
+test("a task's Agent row says the agent list failed rather than calling the agent somebody else's", async ({
+  page,
+  request,
+}) => {
+  await taskCarryingTheBoardAgent(request);
+  await signIn(page);
+  const stopFailing = await failUntilTold(page, AGENTS_READ);
+  await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
+  await expect(page.getByRole("textbox", { name: "Task title" })).toHaveValue(SIBLING_TASK_TITLE);
+
+  const rail = page.getByRole("complementary");
+  await expect(page.getByText(/Not yours to choose/)).toHaveCount(0);
+  await expect(rail.getByTestId("agents-unread")).toBeVisible();
+  await expect(rail.getByTestId("agent-unread")).toHaveText(PROJECT_AGENT_NAME);
+  await page.waitForTimeout(AFTER_THE_TOAST);
+  await expect(rail.getByTestId("agents-unread")).toBeVisible();
+  await expect(page.getByText(/Not yours to choose/)).toHaveCount(0);
+
+  stopFailing();
+  await rail.getByTestId("agents-unread").getByRole("button", { name: "Retry" }).click();
+  await expect(rail.getByRole("combobox", { name: "Agent" })).toContainText(PROJECT_AGENT_NAME);
+  await expect(rail.getByTestId("agents-unread")).toHaveCount(0);
+});
+
+test("a task's Agent row makes no claim while the agent list is on its way", async ({ page, request }) => {
+  await taskCarryingTheBoardAgent(request);
+  await signIn(page);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(AGENTS_READ, async (route) => {
+    await held;
+    await route.fallback();
+  });
+  await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
+  await expect(page.getByRole("textbox", { name: "Task title" })).toHaveValue(SIBLING_TASK_TITLE);
+
+  const rail = page.getByRole("complementary");
+  await expect(page.getByText(/Not yours to choose/)).toHaveCount(0);
+  await expect(rail.getByTestId("agent-unread")).toHaveText(PROJECT_AGENT_NAME);
+  await expect(rail.getByTestId("agents-unread")).toHaveCount(0);
+
+  release();
+  await expect(rail.getByRole("combobox", { name: "Agent" })).toContainText(PROJECT_AGENT_NAME);
+  await expect(page.getByText(/Not yours to choose/)).toHaveCount(0);
+});
+
+// The control: a task carrying another person's agent is still told it is not theirs to choose
+test("a task's Agent row still says a personal agent is not the reader's once the list answers", async ({
+  page,
+  request,
+}) => {
+  await seedAgents();
+  const set = await request.put(`/api/projects/${PROJECT_ID}/tasks/${SIBLING_TASK_ID}`, {
+    headers: ADMIN_AUTH,
+    data: { agent: String(PERSONAL_AGENT_ID), assignee: "admin" },
+  });
+  expect(set.status(), await set.text()).toBe(200);
+  await signIn(page, "member");
+  await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
+
+  const rail = page.getByRole("complementary");
+  await expect(rail.getByTestId("agent-not-offered-reason")).toBeVisible();
+  await expect(rail.getByTestId("agents-unread")).toHaveCount(0);
+});
+
+/**
+ * The same blindness on the board's settings: the Default agent picker was disabled only while the
+ * list loaded, so after a failed read it offered "No default" over a default that is set.
+ */
+async function boardWithDefaultAgent(request: APIRequestContext) {
+  await seedAgents();
+  const set = await request.put(`/api/projects/${PROJECT_ID}/agent`, {
+    headers: ADMIN_AUTH,
+    data: { agentId: String(PROJECT_AGENT_ID) },
+  });
+  expect(set.status(), await set.text()).toBe(200);
+}
+
+test("the default agent picker says the agent list failed rather than showing no default", async ({
+  page,
+  request,
+}) => {
+  await boardWithDefaultAgent(request);
+  await signIn(page);
+  const stopFailing = await failUntilTold(page, AGENTS_READ);
+  const failedRead = page.waitForResponse((r) => AGENTS_READ(new URL(r.url())));
+  await page.goto(`/projects/${PROJECT_KEY}/settings?section=workers`);
+  expect((await failedRead).status()).toBe(500);
+
+  const picker = page.getByLabel("Default agent");
+  await expect(picker).toHaveValue(String(PROJECT_AGENT_ID));
+  await expect(picker.locator("option:checked")).not.toHaveText(/^No default/);
+  await expect(picker).toBeDisabled();
+  await expect(page.getByTestId("default-agent-unread")).toBeVisible();
+  await page.waitForTimeout(AFTER_THE_TOAST);
+  await expect(page.getByTestId("default-agent-unread")).toBeVisible();
+  await expect(picker).toHaveValue(String(PROJECT_AGENT_ID));
+
+  stopFailing();
+  await page.getByTestId("default-agent-unread").getByRole("button", { name: "Retry" }).click();
+  await expect(picker).toBeEnabled();
+  await expect(picker.locator("option:checked")).toHaveText(PROJECT_AGENT_NAME);
+  await expect(page.getByTestId("default-agent-unread")).toHaveCount(0);
+});
+
+// The control: a board with no default still says so when the list answers
+test("the default agent picker still says no default when the list answers", async ({ page }) => {
+  await seedAgents();
+  await signIn(page);
+  await page.goto(`/projects/${PROJECT_KEY}/settings?section=workers`);
+
+  const picker = page.getByLabel("Default agent");
+  await expect(picker).toBeEnabled();
+  await expect(picker.locator("option:checked")).toHaveText(/^No default/);
+  await expect(page.getByTestId("default-agent-unread")).toHaveCount(0);
 });

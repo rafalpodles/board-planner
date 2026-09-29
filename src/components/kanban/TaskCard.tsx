@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/Badge";
 import { categoryColor, categoryTint } from "@/lib/category-colors";
 import { cardBadges } from "@/lib/custom-fields";
 import { taskPath } from "@/lib/urls";
+import { dateOnlyKey, dueDateClass, formatDateOnly } from "@/lib/date-only";
 import { CopyTaskLink } from "@/components/tasks/CopyTaskLink";
 import { PullRequestState } from "@/components/tasks/PullRequestBadge";
 
@@ -284,21 +285,17 @@ export function TaskCard({
             <span>{task.assignee.fullName || task.assignee.username}</span>
           </span>
         ) : <span />}
-        {task.dueDate && (() => {
-          const due = new Date(task.dueDate);
-          const now = new Date();
-          now.setHours(0, 0, 0, 0);
-          const diff = Math.ceil((due.getTime() - now.getTime()) / 86400000);
-          const color = diff < 0 ? "text-danger" : diff <= 2 ? "text-warning" : "text-text-muted";
-          return (
-            <span className={`text-[10px] ${color} flex items-center gap-0.5`}>
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
-              {due.toLocaleDateString(undefined, { month: "short", day: "numeric" })}
-            </span>
-          );
-        })()}
+        {task.dueDate && dateOnlyKey(task.dueDate) && (
+          <span
+            data-testid="task-card-due"
+            className={`text-[10px] ${dueDateClass(task.dueDate)} flex items-center gap-0.5`}
+          >
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+            {formatDateOnly(task.dueDate, { month: "short", day: "numeric" })}
+          </span>
+        )}
       </div>
     </a>
 

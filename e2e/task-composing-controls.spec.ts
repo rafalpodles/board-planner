@@ -228,7 +228,8 @@ test.describe("the Markdown toolbar", () => {
 });
 
 test.describe("the new-task form", () => {
-  test.use({ timezoneId: "UTC" });
+  // West of UTC, where a picked day read as an instant falls on the day before (BP-754)
+  test.use({ timezoneId: "America/Los_Angeles" });
 
   test("a template, a checklist, a due date and every kind of custom field reach the task", async ({
     page,
@@ -348,8 +349,8 @@ test.describe("the new-task form", () => {
     for (const item of ["changelog written", "tag pushed", "announcement sent"]) {
       await expect(page.getByRole("checkbox", { name: item, exact: true })).toBeVisible();
     }
-    // Pinned to UTC above: in a zone behind UTC the rail shows the day before (BP-754)
     await expect(page.getByText("Oct 15, 2026", { exact: true })).toBeVisible();
+    await expect(page.getByText("Oct 14, 2026", { exact: true })).toHaveCount(0);
     await expect(page.getByRole("switch", { name: FIELDS.spike.name, exact: true })).toBeChecked();
     await expect(page.locator(`input[aria-label="${FIELDS.points.name}"]`)).toHaveValue("5");
     await expect(page.locator(`input[aria-label="${FIELDS.target.name}"]`)).toHaveValue("2026-11-01");

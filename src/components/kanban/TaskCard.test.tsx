@@ -3,6 +3,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup, act } from "@testing-library/react";
 import { TaskCard } from "./TaskCard";
 import { ApiTask, ApiProjectCategory } from "@/types";
+import { pinTimezone } from "@/lib/testing/pin-timezone";
 
 const task = {
   _id: "t1",
@@ -429,5 +430,56 @@ describe("the parent a card belongs to", () => {
     expect(screen.getByText("Parent TP-644")).toBeTruthy();
     expect(screen.getByText("Blocked (1)")).toBeTruthy();
     expect(screen.getByText("Relates (1)")).toBeTruthy();
+  });
+});
+
+describe.each([
+  ["America/Los_Angeles", 420],
+  ["Asia/Tokyo", -540],
+])("TaskCard due date, read in %s", (zone, offset) => {
+  pinTimezone(zone);
+  afterEach(() => vi.useRealTimers());
+
+  const due = { ...task, dueDate: "2026-10-15T00:00:00.000Z" } as ApiTask;
+  const dueChip = (at: Date) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(at);
+    expect(at.getTimezoneOffset(), "the timezone did not actually change").toBe(offset);
+    renderCard({ task: due });
+    return screen.getByTestId("task-card-due");
+  };
+
+  it("shows the day that was picked", () => {
+    expect(dueChip(new Date(2026, 9, 10, 12)).textContent).toBe("Oct 15");
+  });
+
+  it("is due, not overdue, all through the day itself", () => {
+    const chip = dueChip(new Date(2026, 9, 15, 23, 30));
+    expect(chip.className).toContain("text-warning");
+    expect(chip.className).not.toContain("text-danger");
+  });
+
+  it("turns overdue the moment the next day starts", () => {
+    expect(dueChip(new Date(2026, 9, 16, 0, 30)).className).toContain("text-danger");
+  });
+
+  it("warns two calendar days ahead and not three", () => {
+    expect(dueChip(new Date(2026, 9, 13, 0, 30)).className).toContain("text-warning");
+    cleanup();
+    expect(dueChip(new Date(2026, 9, 12, 23, 30)).className).toContain("text-text-muted");
+  });
+});
+
+describe("TaskCard with a due date that is not a date", () => {
+  it("draws no due chip rather than an empty or invalid one", () => {
+    renderCard({ task: { ...task, dueDate: "not a date" } as ApiTask });
+    expect(screen.getByRole("link").textContent).toContain("A task");
+    expect(screen.queryByTestId("task-card-due")).toBeNull();
+  });
+
+  // The control: a real day does draw it
+  it("draws the chip for a real day", () => {
+    renderCard({ task: { ...task, dueDate: "2026-10-15T00:00:00.000Z" } as ApiTask });
+    expect(screen.getByTestId("task-card-due")).toBeTruthy();
   });
 });

@@ -5,6 +5,7 @@ import { ApiSprint, SprintStatus, SPRINT_STATUS_LABELS } from "@/types";
 import { Button } from "@/components/ui/Button";
 import { roundForDisplay } from "@/lib/estimates";
 import { groupSprints, sprintOptionLabel } from "@/lib/sprint-selection";
+import { daysUntil, formatDateOnly } from "@/lib/date-only";
 
 interface SprintHeaderProps {
   sprint: ApiSprint;
@@ -46,21 +47,15 @@ function statusBadge(status: SprintStatus) {
 
 function dateRange(sprint: ApiSprint): string | null {
   if (!sprint.startDate || !sprint.endDate) return null;
-  const start = new Date(sprint.startDate);
-  const end = new Date(sprint.endDate);
-  return `${start.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-  })} — ${end.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  })}`;
+  return `${formatDateOnly(sprint.startDate, { month: "short", day: "numeric" })} — ${formatDateOnly(
+    sprint.endDate,
+    { month: "short", day: "numeric", year: "numeric" }
+  )}`;
 }
 
 function daysLeft(sprint: ApiSprint, closed: boolean): string | null {
   if (closed || !sprint.endDate) return null;
-  const days = Math.ceil((new Date(sprint.endDate).getTime() - Date.now()) / 86400000);
+  const days = daysUntil(sprint.endDate);
   if (Number.isNaN(days)) return null;
   if (days < 0) return `${-days} ${-days === 1 ? "day" : "days"} over`;
   if (days === 0) return "ends today";
