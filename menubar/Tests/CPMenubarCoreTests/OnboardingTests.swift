@@ -15,7 +15,7 @@ final class OnboardingTests: XCTestCase {
     // Stored canonical, so the next consumer does not have to know it needs fixing up
     func testWhatSomebodyTypesIsStoredAsAnAddressThatWorks() {
         let state = Onboarding.preflightPassed(
-            OnboardingState(), apiURL: "localhost:3973", workerName: "mac", toolPath: "/bin")
+            OnboardingState(), apiURL: "localhost:3973", workerName: "mac", toolPath: "/bin", toolPaths: [:])
 
         XCTAssertEqual(state.apiURL, "http://localhost:3973")
     }
@@ -23,7 +23,7 @@ final class OnboardingTests: XCTestCase {
     func testSurvivesARelaunch() {
         let store = defaults()
         var state = OnboardingState()
-        state = Onboarding.preflightPassed(state, apiURL: "https://app", workerName: "mac", toolPath: "/opt/bin")
+        state = Onboarding.preflightPassed(state, apiURL: "https://app", workerName: "mac", toolPath: "/opt/bin", toolPaths: [:])
         state = Onboarding.folderChosen(state, path: "/checkout")
         Onboarding.save(state, defaults: store)
 
@@ -67,10 +67,62 @@ final class OnboardingTests: XCTestCase {
         state = Onboarding.started(state)
         XCTAssertTrue(state.isOnboarded)
 
-        let after = Onboarding.preflightPassed(state, apiURL: "https://app", workerName: "mac", toolPath: "/new/bin")
+        let after = Onboarding.preflightPassed(state, apiURL: "https://app", workerName: "mac", toolPath: "/new/bin", toolPaths: [:])
 
         XCTAssertEqual(after.step, .running, "already running must stay running")
         XCTAssertEqual(after.toolPath, "/new/bin", "but a freshly resolved PATH is still adopted")
+    }
+
+    // BP-733. What git and gh are spawned by, so it has to survive a relaunch like the PATH does.
+    func testTheResolvedToolPathsAreKeptAcrossARelaunch() {
+        let store = defaults()
+        let paths = ["git": "/opt/homebrew/bin/git", "gh": "/opt/homebrew/bin/gh"]
+        Onboarding.save(
+            Onboarding.preflightPassed(
+                OnboardingState(), apiURL: "https://app", workerName: "mac", toolPath: "/opt/homebrew/bin",
+                toolPaths: paths),
+            defaults: store)
+
+        let reloaded = Onboarding.load(defaults: store)
+
+        XCTAssertEqual(reloaded.toolPaths, paths)
+        XCTAssertTrue(reloaded.hasResolvedTools)
+    }
+
+    // A machine onboarded before the paths were recorded. Failing to decode it would answer with a
+    // fresh state, putting a running machine back on the first-run screen.
+    func testAStateSavedBeforeToolPathsExistedStillLoads() throws {
+        let store = defaults()
+        let running = Onboarding.started(Onboarding.folderChosen(OnboardingState(toolPath: "/bin"), path: "/checkout"))
+        var legacy = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(running)) as? [String: Any])
+        legacy.removeValue(forKey: "toolPaths")
+        store.set(try JSONSerialization.data(withJSONObject: legacy), forKey: Onboarding.defaultsKey)
+
+        let reloaded = Onboarding.load(defaults: store)
+
+        XCTAssertEqual(reloaded.step, .running)
+        XCTAssertEqual(reloaded.checkoutsFolder, "/checkout")
+        XCTAssertEqual(reloaded.toolPaths, [:])
+        XCTAssertFalse(reloaded.hasResolvedTools)
+    }
+
+    func testRecordingTheToolsLaterMovesNothingElse() {
+        let running = Onboarding.started(Onboarding.folderChosen(OnboardingState(), path: "/checkout"))
+
+        let after = Onboarding.toolsResolved(
+            running, toolPath: "/opt/homebrew/bin",
+            toolPaths: ["git": "/opt/homebrew/bin/git", "gh": "/opt/homebrew/bin/gh"])
+
+        XCTAssertEqual(after.step, .running)
+        XCTAssertEqual(after.checkoutsFolder, "/checkout")
+        XCTAssertEqual(after.toolPath, "/opt/homebrew/bin")
+        XCTAssertTrue(after.hasResolvedTools)
+    }
+
+    func testABareNameIsNotAResolvedTool() {
+        XCTAssertFalse(OnboardingState(toolPaths: ["git": "git", "gh": "/opt/homebrew/bin/gh"]).hasResolvedTools)
+        XCTAssertFalse(OnboardingState(toolPaths: ["git": "/usr/bin/git"]).hasResolvedTools)
     }
 
     func testChoosingAnotherFolderWhileRunningDoesNotRestartTheFlow() {
@@ -86,7 +138,7 @@ final class OnboardingTests: XCTestCase {
     func testEachStepIsSafeToRepeat() {
         var state = OnboardingState()
         for _ in 0..<3 {
-            state = Onboarding.preflightPassed(state, apiURL: "https://app", workerName: "mac", toolPath: "/bin")
+            state = Onboarding.preflightPassed(state, apiURL: "https://app", workerName: "mac", toolPath: "/bin", toolPaths: [:])
         }
         XCTAssertEqual(state.step, .needsFolder)
 

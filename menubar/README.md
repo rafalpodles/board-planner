@@ -34,6 +34,7 @@ arrives over HTTP.
 | project `key` | the same | `<parent>/<key>`, and then a line in `repos.json` | `CloneInputs.isProjectKey` — one directory name, the same shape the worker demands of a task key — plus `isContained`, because `appendingPathComponent` does not normalise `..` |
 | checkout paths | `repos.json`, written by the step above | `git -C <path> …` | option values, never positionals; contained once the key above is |
 | `apiURL`, `workerName`, `toolPath` | the operator, through onboarding | the worker's environment | not the server's to set |
+| `toolPaths` | `--preflight`, through onboarding | the executable every git and gh the app spawns runs as | `ToolCommand.make` — an absolute path or no spawn at all, never a name looked up on `PATH` (BP-733) |
 | status, config, telemetry | the worker's socket | rendered | display only |
 
 **Two transports run a program, and neither is refused by looking at the URL.** `ext::` hands the

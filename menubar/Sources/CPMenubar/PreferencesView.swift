@@ -277,10 +277,10 @@ private struct RepositoriesTab: View {
 
         let setup = ProjectSetup(
             clone: WorkerProcess.cloneStep(
-                toolPath: state.toolPath,
+                tools: state,
                 githubToken: WorkerProcess.githubToken(
                     account: (try? GithubAccountFile(path: GithubAccountFile.defaultPath()).read()) ?? "",
-                    toolPath: state.toolPath)),
+                    tools: state)),
             repos: file)
 
         // Off the main actor: a clone of a large repository would otherwise freeze the window, and
@@ -312,10 +312,10 @@ private struct RepositoriesTab: View {
         panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let path = panel.url?.path else { return }
 
-        let toolPath = Onboarding.load().toolPath
+        let tools = Onboarding.load()
         Task.detached {
             let verdict = CheckoutGrant.check(path: path) { args, cwd in
-                WorkerProcess.git(args, cwd: cwd, toolPath: toolPath)
+                WorkerProcess.git(args, cwd: cwd, tools: tools)
             }
             await MainActor.run {
                 switch verdict {

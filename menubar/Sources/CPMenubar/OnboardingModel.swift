@@ -49,7 +49,8 @@ final class OnboardingModel {
                 githubAccount = report.githubAccount ?? ""
                 if report.ok {
                     state = Onboarding.preflightPassed(
-                        state, apiURL: apiURL, workerName: workerName, toolPath: report.path)
+                        state, apiURL: apiURL, workerName: workerName, toolPath: report.path,
+                        toolPaths: report.paths)
                     persist()
                 }
             } catch {
@@ -165,9 +166,9 @@ final class OnboardingModel {
         // The probe pushes as the account the worker will push as, not as whichever one gh has
         // active — otherwise it proves access this machine will never use.
         switch WorkerProcess.cloneStep(
-            toolPath: state.toolPath,
+            tools: state,
             githubToken: WorkerProcess.githubToken(
-                account: pinnedGithubAccount, toolPath: state.toolPath)
+                account: pinnedGithubAccount, tools: state)
         ).run(
             repositoryURL: repositoryURL, parent: state.checkoutsFolder, projectKey: projectKey)
         {
@@ -209,6 +210,7 @@ final class OnboardingModel {
     /// Run when the app comes up, so an already-onboarded machine has a worker rather than a panel
     /// retrying a socket forever.
     func resumeWorker(listening: () async -> Bool = OnboardingModel.somethingIsListening) async {
+        await resolveToolsIfUnrecorded()
         guard
             WorkerResume.shouldStart(
                 isOnboarded: state.isOnboarded,
@@ -217,6 +219,18 @@ final class OnboardingModel {
         else { return }
 
         startWorker()
+    }
+
+    // A machine onboarded before the resolved paths were recorded has none, and git and gh are
+    // refused without them (BP-733) — so the check that records them runs once at launch, rather
+    // than leaving every sync refused until somebody opens setup again.
+    private func resolveToolsIfUnrecorded() async {
+        guard state.isOnboarded, !state.hasResolvedTools else { return }
+        let folder = state.checkoutsFolder
+        guard let report = await Task.detached(operation: { try? WorkerProcess.preflight(checkout: folder) }).value
+        else { return }
+        state = Onboarding.toolsResolved(state, toolPath: report.path, toolPaths: report.paths)
+        persist()
     }
 
     private static func somethingIsListening() async -> Bool {
