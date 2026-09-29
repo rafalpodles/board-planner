@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { dateOnlyKey, daysUntil, dueUrgency, formatDateOnly } from "./date-only";
+import { dateOnlyKey, daysUntil, dueDateClass, dueUrgency, formatDateOnly } from "./date-only";
 import { pinTimezone } from "./testing/pin-timezone";
 
 const STORED_15TH = "2026-10-15T00:00:00.000Z";
@@ -40,8 +40,17 @@ describe.each(["America/Los_Angeles", "Pacific/Kiritimati", "UTC"])("a picked da
 });
 
 describe("a value that is not a date", () => {
-  it("has no day and no urgency to speak of", () => {
+  it("has no day, no urgency and no text to speak of", () => {
     expect(dateOnlyKey("not a date")).toBeNull();
     expect(daysUntil("not a date", new Date(2026, 9, 15))).toBeNaN();
+    expect(dueUrgency("not a date", new Date(2026, 9, 15))).toBeNull();
+    expect(dueDateClass("not a date", new Date(2026, 9, 15))).toBe("text-text-muted");
+    expect(formatDateOnly("not a date", { month: "short", day: "numeric" })).toBe("");
+  });
+
+  // The control: the same call on a day that has passed does carry an urgency
+  it("is not mistaken for a real date's urgency", () => {
+    expect(dueUrgency("2026-10-14", new Date(2026, 9, 15))).toBe("overdue");
+    expect(dueDateClass("2026-10-14", new Date(2026, 9, 15))).toBe("text-danger");
   });
 });

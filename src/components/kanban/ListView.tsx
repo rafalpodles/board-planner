@@ -41,7 +41,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Combobox, ComboboxOption } from "@/components/ui/Combobox";
 import { categoryColor, categoryTint } from "@/lib/category-colors";
 import { timeAgo } from "@/lib/time";
-import { DUE_URGENCY_CLASS, daysUntil, dueUrgency, formatDateOnly } from "@/lib/date-only";
+import { daysUntil, dueDateClass, formatDateOnly } from "@/lib/date-only";
 import { RunDot } from "@/components/kanban/RunDot";
 import { PullRequestBadge } from "@/components/tasks/PullRequestBadge";
 
@@ -415,7 +415,7 @@ export function ListView({
               const dueDateInfo = task.dueDate
                 ? {
                     formatted: formatDateOnly(task.dueDate, { month: "short", day: "numeric" }),
-                    color: DUE_URGENCY_CLASS[dueUrgency(task.dueDate)],
+                    color: dueDateClass(task.dueDate),
                   }
                 : null;
 
