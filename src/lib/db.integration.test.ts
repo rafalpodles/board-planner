@@ -126,9 +126,12 @@ describe.skipIf(!uri)("connectDB against a real mongod — a starved stale check
     );
 
     await replaceUnderStarvation(connectDB);
-    expect(await findStillRunning()).toBe(true);
+    const stillRunning = await findStillRunning();
 
-    expect(await running).toEqual({ value: [1, 2, 3] });
+    expect({ stillRunning, outcome: await running }).toEqual({
+      stillRunning: true,
+      outcome: { value: [1, 2, 3] },
+    });
   }, 30_000);
 
   it("lets a cursor read halfway through on the replaced client be read to the end", async () => {

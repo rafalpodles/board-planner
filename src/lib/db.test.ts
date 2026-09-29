@@ -782,7 +782,7 @@ describe("connectDB — work still running on the client it abandons", () => {
   // anything else is undefined, which compares as "nothing in flight"
   for (const [shape, state] of [
     ["cursors that are not a Set", { activeSessions: new Set(), activeCursors: [{}] }],
-    ["sessions that are not a Set", { activeSessions: new Map([[{}, {}]]), activeCursors: new Set() }],
+    ["sessions that are not a Set", { activeSessions: [{}], activeCursors: new Set() }],
     ["no cursors at all", { activeSessions: new Set() }],
   ] as const) {
     it(`treats ${shape} as busy`, async () => {
