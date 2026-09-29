@@ -415,7 +415,6 @@ export const DELETE = withProjectOwner(async (_request, { params }) => {
   // Delete project audit logs and the project itself
   await ProjectAuditLog.deleteMany({ project: projectId });
   await Project.findByIdAndDelete(projectId);
-  // After the project, so a failure part-way leaves orphan rows for cleanup rather than a live board with no owner
   await Grant.deleteMany({ objectType: "project", object: projectId });
 
   return NextResponse.json({ message: "Project deleted" });

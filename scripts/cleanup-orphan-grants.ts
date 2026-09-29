@@ -28,6 +28,8 @@ async function main() {
   const orphans = await findOrphanGrants();
   list("Grants on a deleted project", orphans.deletedProject);
   list("Grants held by a deleted user", orphans.deletedUser);
+  list("Grants stored with a non-ObjectId subject or project (never deleted here)", orphans.notObjectIds);
+  console.log(`Checked against ${orphans.projectCount} project(s) and ${orphans.userCount} user(s)`);
 
   if (!APPLY) {
     console.log("\nNothing deleted. Re-run with --apply to delete them.");

@@ -1,3 +1,4 @@
+import { Types } from "mongoose";
 import { IUser, GrantRelation } from "@/types";
 import { connectDB } from "./db";
 import { Grant } from "@/models/grant";
@@ -266,31 +267,66 @@ export interface OrphanGrant {
 export interface OrphanGrants {
   deletedProject: OrphanGrant[];
   deletedUser: OrphanGrant[];
+  notObjectIds: OrphanGrant[];
+  projectCount: number;
+  userCount: number;
 }
 
-function asOrphan(g: { _id: unknown; subject: unknown; object: unknown; relation: GrantRelation }): OrphanGrant {
+type StoredGrant = { _id: unknown; subject: unknown; object: unknown; relation: GrantRelation };
+
+function asOrphan(g: StoredGrant): OrphanGrant {
   return { _id: String(g._id), subject: String(g.subject), object: String(g.object), relation: g.relation };
 }
 
+// Grants before parents: every writer creates the parent first, so a parent made mid-scan is still seen
 export async function findOrphanGrants(): Promise<OrphanGrants> {
+  const grants: StoredGrant[] = await Grant.find({ objectType: "project" })
+    .select("subject object relation")
+    .lean();
   const [projectIds, userIds] = await Promise.all([Project.distinct("_id"), User.distinct("_id")]);
+  const projects = new Set(projectIds.map(String));
+  const users = new Set(userIds.map(String));
 
-  const deletedProject = await Grant.find({ objectType: "project", object: { $nin: projectIds } })
-    .select("subject object relation")
-    .lean();
-  const deletedUser = await Grant.find({
-    subject: { $nin: userIds },
-    _id: { $nin: deletedProject.map((g) => g._id) },
-  })
-    .select("subject object relation")
-    .lean();
-
-  return { deletedProject: deletedProject.map(asOrphan), deletedUser: deletedUser.map(asOrphan) };
+  const result: OrphanGrants = {
+    deletedProject: [],
+    deletedUser: [],
+    notObjectIds: [],
+    projectCount: projects.size,
+    userCount: users.size,
+  };
+  for (const g of grants) {
+    if (!(g.subject instanceof Types.ObjectId) || !(g.object instanceof Types.ObjectId)) {
+      result.notObjectIds.push(asOrphan(g));
+    } else if (!projects.has(String(g.object))) {
+      result.deletedProject.push(asOrphan(g));
+    } else if (!users.has(String(g.subject))) {
+      result.deletedUser.push(asOrphan(g));
+    }
+  }
+  return result;
 }
 
 export async function deleteOrphanGrants(orphans: OrphanGrants): Promise<number> {
-  const ids = [...orphans.deletedProject, ...orphans.deletedUser].map((g) => g._id);
+  if (orphans.projectCount === 0 || orphans.userCount === 0) {
+    throw new Error(
+      `Refusing to delete: this database has ${orphans.projectCount} project(s) and ` +
+        `${orphans.userCount} user(s), which looks like the wrong database`
+    );
+  }
+  const candidates = [...orphans.deletedProject, ...orphans.deletedUser];
+  if (candidates.length === 0) return 0;
+
+  const [projectIds, userIds] = await Promise.all([
+    Project.distinct("_id", { _id: { $in: candidates.map((g) => g.object) } }),
+    User.distinct("_id", { _id: { $in: candidates.map((g) => g.subject) } }),
+  ]);
+  const projects = new Set(projectIds.map(String));
+  const users = new Set(userIds.map(String));
+  const ids = candidates
+    .filter((g) => !projects.has(g.object) || !users.has(g.subject))
+    .map((g) => g._id);
   if (ids.length === 0) return 0;
+
   const { deletedCount } = await Grant.deleteMany({ _id: { $in: ids } });
   return deletedCount ?? 0;
 }
