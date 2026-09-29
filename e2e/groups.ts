@@ -67,6 +67,7 @@ export const GROUPS = {
   ],
   project: [
     "project-lifecycle.spec.ts",
+    "project-delete-grants.spec.ts",
     "access-change-vs-its-refresh.spec.ts",
     "project-settings.spec.ts",
     "toast-finds-its-place.spec.ts",

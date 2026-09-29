@@ -255,3 +255,42 @@ export async function boardsOnlyOwnedBy(userId: string): Promise<OwnedBoard[]> {
     .lean();
   return boards.map((b) => ({ _id: String(b._id), name: b.name, key: b.key }));
 }
+
+export interface OrphanGrant {
+  _id: string;
+  subject: string;
+  object: string;
+  relation: GrantRelation;
+}
+
+export interface OrphanGrants {
+  deletedProject: OrphanGrant[];
+  deletedUser: OrphanGrant[];
+}
+
+function asOrphan(g: { _id: unknown; subject: unknown; object: unknown; relation: GrantRelation }): OrphanGrant {
+  return { _id: String(g._id), subject: String(g.subject), object: String(g.object), relation: g.relation };
+}
+
+export async function findOrphanGrants(): Promise<OrphanGrants> {
+  const [projectIds, userIds] = await Promise.all([Project.distinct("_id"), User.distinct("_id")]);
+
+  const deletedProject = await Grant.find({ objectType: "project", object: { $nin: projectIds } })
+    .select("subject object relation")
+    .lean();
+  const deletedUser = await Grant.find({
+    subject: { $nin: userIds },
+    _id: { $nin: deletedProject.map((g) => g._id) },
+  })
+    .select("subject object relation")
+    .lean();
+
+  return { deletedProject: deletedProject.map(asOrphan), deletedUser: deletedUser.map(asOrphan) };
+}
+
+export async function deleteOrphanGrants(orphans: OrphanGrants): Promise<number> {
+  const ids = [...orphans.deletedProject, ...orphans.deletedUser].map((g) => g._id);
+  if (ids.length === 0) return 0;
+  const { deletedCount } = await Grant.deleteMany({ _id: { $in: ids } });
+  return deletedCount ?? 0;
+}
