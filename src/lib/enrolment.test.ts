@@ -73,7 +73,7 @@ describe("consumeEnrolmentToken", () => {
     expect(findOneAndUpdate).toHaveBeenCalledWith(
       { _id: "e1", usedAt: null },
       { $set: { usedAt: now } },
-      { new: true }
+      { returnDocument: "after" }
     );
   });
 

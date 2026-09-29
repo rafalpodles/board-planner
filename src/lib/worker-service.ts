@@ -539,7 +539,7 @@ export async function registerWorker(input: {
           lastSeenAt: new Date(),
         },
       },
-      { new: true, upsert: true, setDefaultsOnInsert: true }
+      { returnDocument: "after", upsert: true, setDefaultsOnInsert: true }
     );
   } catch (error) {
     if ((error as { code?: number })?.code === 11000) throw new WorkerAlreadyOwned();

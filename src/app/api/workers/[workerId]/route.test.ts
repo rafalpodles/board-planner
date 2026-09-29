@@ -206,7 +206,7 @@ describe("PATCH /api/workers/:workerId", () => {
     expect(workerFindByIdAndUpdate).toHaveBeenCalledWith(
       WORKER_ID,
       { $set: { name: "rig", enabled: false } },
-      { new: true }
+      { returnDocument: "after" }
     );
   });
 
@@ -269,7 +269,7 @@ describe("PATCH /api/workers/:workerId", () => {
       expect(workerFindByIdAndUpdate).toHaveBeenCalledWith(
         WORKER_ID,
         { $set: { name: "evilrig" } },
-        { new: true }
+        { returnDocument: "after" }
       );
     });
 

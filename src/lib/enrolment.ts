@@ -74,7 +74,7 @@ export async function consumeEnrolmentToken(
     const spent = await EnrolmentToken.findOneAndUpdate(
       { _id: candidate._id, usedAt: null },
       { $set: { usedAt: now } },
-      { new: true }
+      { returnDocument: "after" }
     );
     if (!spent) return { ok: false, reason: "used" };
     return { ok: true, tokenId: String(candidate._id) };

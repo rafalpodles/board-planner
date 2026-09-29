@@ -104,7 +104,7 @@ describe("POST /api/workers/:workerId/command", () => {
     expect(workerFindByIdAndUpdate).toHaveBeenCalledWith(
       WORKER_ID,
       { $set: { command: "pause", commandIssuedAt: expect.any(Date), commandAckedAt: null } },
-      { new: true }
+      { returnDocument: "after" }
     );
     const json = await response.json();
     expect(json).toEqual({ command: "pause", issuedAt: "2026-08-01T12:00:00.000Z" });
