@@ -212,9 +212,9 @@ describe("push", () => {
 
   // BP-733: git runs the helper through a shell, which would find `gh` by name on the PATH this
   // process assembled — and hand it GH_TOKEN
-  it("names no credential helper by name when gh was never resolved", async () => {
+  it.each([[""], ["gh"]])("names no credential helper when gh's path is %j", async (ghPathGiven) => {
     const run = vi.fn().mockResolvedValue(ok);
-    await createDelivery({ run }, gitPath, "").push("/wt", "cp-158/worker", COMMIT);
+    await createDelivery({ run }, gitPath, ghPathGiven).push("/wt", "cp-158/worker", COMMIT);
 
     const helpers = configuredBy(envOf(run)).filter(([key]) => key === "credential.helper");
     expect(helpers).toEqual([["credential.helper", ""]]);

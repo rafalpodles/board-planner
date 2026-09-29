@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from "fs";
 import { hostname } from "os";
-import { dirname, join } from "path";
+import { dirname, isAbsolute, join } from "path";
 import { ApiClient, createApiClient } from "./api.js";
 import { createCommandHandlers, createRunGuard, SHUTDOWN_SIGNAL } from "./commands.js";
 import {
@@ -86,6 +86,9 @@ import { createWorkspace, reapOrphans } from "./workspace.js";
 import { entryDirectory, workerVersion } from "./version.js";
 
 const MIN_REFRESH_INTERVAL_MS = 30_000;
+
+// gh is not here: without it delivery fails through the ordinary, charged path, so it ends.
+const TOOLS_A_STEP_SPAWNS = ["claude", "npm"] as const;
 
 // Every ambient thing the wiring used to reach for directly. main.ts is the one place that supplies
 // none of them; a test supplies whichever it needs to watch. The point of the split is that the
@@ -242,6 +245,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   // What this machine can actually do, established once at startup. Null until then, and reported
   // as undefined while it is, so a worker mid-startup never claims to be broken.
   let preflight: PreflightReport | null = null;
+  let preflightFailed = false;
   // The gates' own requirements, which only exist relative to a bound repository, so they are
   // recomputed on every rebind rather than once at startup
   let repoChecks: PreflightCheck[] = [];
@@ -354,6 +358,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       });
     } catch (error) {
       deps.logError(`preflight could not run: ${String(error)}`);
+      preflightFailed = true;
       return;
     }
 
@@ -368,8 +373,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     }
   }
 
-  // The one composition point every spawn of a preflight-resolved tool reads its absolute path
-  // from — git since BP-641, and gh, claude and npm since BP-733. `establishPreflight` runs exactly once,
+  // Where every spawn of a preflight-resolved tool reads its path from (BP-641, BP-733). `establishPreflight` runs exactly once,
   // at the top of `run()`, and sets the outer `preflight` this reads — a live read of that variable
   // rather than a value snapshotted into a second one, so every caller shares the one place the
   // resolution lives instead of each being handed its own copy (BP-641). Empty before that first
@@ -790,13 +794,18 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
    * beside it: a worker that cannot confine the agent cannot run any step of any task.
    *
    * Read off the preflight row rather than asking the platform, because the row is the answer for
-   * this machine — it confined a probe and watched it fail to escape. A worker whose preflight
-   * could not run at all reports nothing here and keeps claiming, which is the behaviour every
-   * other check already has.
+   * this machine — it confined a probe and watched it fail to escape.
+   *
+   * So is a tool a step spawns that preflight never resolved (BP-733): the step is refused as a
+   * machine fault with the attempt refunded, so without this every poll would claim the same task
+   * again — for npm, after a full paid Implement step.
    */
-  function sandboxBlocked(): string {
+  function claimBlocked(): string {
     const row = preflight?.checks.find((check) => check.name === SANDBOX_CHECK);
-    return row && !row.ok ? row.detail : "";
+    if (row && !row.ok) return row.detail;
+    if (!preflight) return preflightFailed ? "preflight could not run, so no tool a step spawns was resolved" : "";
+    const missing = TOOLS_A_STEP_SPAWNS.filter((tool) => !isAbsolute(preflight?.paths[tool] ?? ""));
+    return missing.length ? `${missing.join(" and ")} could not be found on this machine, and every task needs it` : "";
   }
 
   const loop = createLoop({
@@ -811,7 +820,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     execute,
     sleep: deps.sleep,
     drain,
-    claimBlocked: sandboxBlocked,
+    claimBlocked,
     log: deps.logError,
   });
 
@@ -900,7 +909,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
         // sitting on this project for a reason this project can fix, and showing a per-project
         // answer would send the operator to the wrong place.
         blocked:
-          sandboxBlocked() ||
+          claimBlocked() ||
           (quarantineReasonFor(project) ?? unusable.get(project) ?? loop.unclaimable(project)),
         baseBranch: repo.config.baseBranch,
         model: repo.config.model,

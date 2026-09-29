@@ -156,6 +156,13 @@ describe("resolveGhToken", () => {
     expect(deps.run).not.toHaveBeenCalled();
   });
 
+  // BP-733: gh answers with the token, so one found by name on PATH would decide the identity
+  it.each([[""], ["gh"]])("asks nothing of a gh whose path is %j", async (ghPath) => {
+    const deps = runner({ stdout: "gho_whoever_answered\n" });
+    await expect(resolveGhToken(deps, ghPath, "owner", {})).resolves.toBe("");
+    expect(deps.run).not.toHaveBeenCalled();
+  });
+
   // The caller decides what an unresolvable pin means — preflight refuses it, delivery falls back
   // to gh's own resolution. Neither wants an exception thrown through it.
   it("resolves nothing when gh refuses", async () => {
@@ -211,6 +218,10 @@ describe("the identity a pinned machine commits as (BP-779)", () => {
 
   it("answers nothing without a token, or when GitHub will not say", async () => {
     expect(await accountCommitIdentity(runner({}), "/bin/gh", "", {})).toBeNull();
+    // BP-733: the call carries the pinned token, so never to a gh found by name
+    const byName = runner({ stdout: JSON.stringify({ login: "octocat", id: 1 }) });
+    expect(await accountCommitIdentity(byName, "gh", "gho_pinned", {})).toBeNull();
+    expect(byName.run).not.toHaveBeenCalled();
     expect(await accountCommitIdentity(runner({ code: 1, stderr: "HTTP 401" }), "/bin/gh", "t", {})).toBeNull();
     expect(await accountCommitIdentity(runner({ stdout: "{}" }), "/bin/gh", "t", {})).toBeNull();
   });

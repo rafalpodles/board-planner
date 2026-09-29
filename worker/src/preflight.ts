@@ -14,8 +14,9 @@ import {
   usableAccount,
 } from "./github-account.js";
 
-// The four binaries the worker shells out to. Nothing here is optional: without any one of them a
-// task is claimed, run, and failed — three times, until the attempt cap routes it to a human.
+// The four binaries the worker shells out to. Nothing here is optional. Each is spawned by the path
+// found here and refused without one (BP-733); a missing claude or npm stops the worker claiming at
+// all, and a missing git or gh fails the task until the attempt cap routes it to a human.
 export const TOOLS = ["git", "npm", "claude", "gh"] as const;
 export type ToolName = (typeof TOOLS)[number];
 

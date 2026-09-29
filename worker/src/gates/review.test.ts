@@ -366,7 +366,7 @@ describe("reviewGate", () => {
       reason: "no absolute claude path was resolved — refusing to run claude by name on PATH",
       machineFault: true,
     });
-    expect(run.mock.calls.some(([command, args]) => command === "claude" || args.includes("claude"))).toBe(false);
+    expect(run.mock.calls.filter(([command]) => command !== gitPath)).toEqual([]);
   });
 
   // Without this the gate reviews an EMPTY directory and can return approved: the checkout failed,

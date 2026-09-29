@@ -144,8 +144,7 @@ function profileFor(names: string[]): string {
  * containing a quote would otherwise close the string it sits in and append rules of its own.
  */
 export function confine(command: string, args: string[], options: ConfineOptions): Confinement {
-  // The program inside the wrapper is found the same way the wrapper would be, so it is held to
-  // the same rule as SANDBOX_COMMAND — and so is the unconfined spawn, which runs it directly.
+  // Held to SANDBOX_COMMAND's rule, confined or not (BP-733)
   if (!isAbsolute(command)) {
     return { refusal: `refusing to run ${JSON.stringify(command)} by name on PATH: confine needs its absolute path` };
   }
@@ -183,7 +182,6 @@ export function confine(command: string, args: string[], options: ConfineOptions
   };
 }
 
-/** `confine` for a tool preflight resolves, refusing by the tool's name when it resolved none (BP-733). */
 export function confineTool(
   tool: ResolvedTool,
   path: string,

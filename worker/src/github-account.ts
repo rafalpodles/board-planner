@@ -1,4 +1,4 @@
-import { join } from "path";
+import { isAbsolute, join } from "path";
 import type { CommitIdentity } from "./commit.js";
 import { Runner } from "./exec.js";
 
@@ -118,7 +118,7 @@ export async function accountCommitIdentity(
   env: NodeJS.ProcessEnv,
   cwd = "/"
 ): Promise<CommitIdentity | null> {
-  if (!ghPath || !token) return null;
+  if (!isAbsolute(ghPath) || !token) return null;
   const result = await runner.run(ghPath, ["api", "user"], {
     cwd,
     timeoutMs: TIMEOUT_MS,
@@ -154,7 +154,7 @@ export async function resolveGhToken(
   cwd = "/"
 ): Promise<string> {
   const login = account.trim();
-  if (!login || !ghPath) return "";
+  if (!login || !isAbsolute(ghPath)) return "";
 
   const result = await runner.run(ghPath, ["auth", "token", "--user", login], {
     cwd,

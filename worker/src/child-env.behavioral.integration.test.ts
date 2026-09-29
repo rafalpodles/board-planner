@@ -19,8 +19,7 @@ import { unexpectedHistory } from "./provenance.js";
 import { claimedTask } from "./__fixtures__/task.js";
 import { isAgentSpawn } from "./__fixtures__/agent-spawn.js";
 import { WorkerConfig } from "./config.js";
-import { installedToolPath } from "./__fixtures__/tool-paths.js";
-import { CLAUDE_PATH, GH_PATH } from "./__fixtures__/tool-paths.js";
+import { CLAUDE_PATH, GH_PATH, installedToolPath } from "./__fixtures__/tool-paths.js";
 
 /**
  * `child-env.contract.test.ts` is a source scan: it cannot see a key that arrives already inside an
@@ -227,7 +226,15 @@ describe("every real env-building call site stays inside the allowlist, across a
       });
       expect(verdict.ok).toBe(true);
 
-      await createDelivery(runner, gitPath, config.baseBranch).push(worktree.path, "bp-310/child-env-test", sha);
+      await createDelivery(runner, gitPath, GH_PATH, config.baseBranch).push(
+        worktree.path,
+        "bp-310/child-env-test",
+        sha
+      );
+      // The push is the call carrying the credential helper; without gh's path it has none, and the
+      // allowlist check below would not be looking at that key at all
+      const push = calls.find((call) => call.args.includes("push"));
+      expect(Object.values(push?.env ?? {})).toContain(`!'${GH_PATH}' auth git-credential`);
       const pushed = execFileSync("git", ["ls-remote", remoteUrl, "refs/heads/bp-310/child-env-test"], {
         encoding: "utf8",
       });

@@ -142,10 +142,7 @@ function hardenedConfig(ghPath: string): ReadonlyArray<readonly [string, string]
     // Named by git when it wants a password and no helper answered. Empty disables it.
     ["core.askPass", ""],
     ["credential.helper", ""],
-    // By its resolved path, like every other gh here: git runs the helper through a shell, which
-    // would otherwise look `gh` up on the PATH this process assembled — with GH_TOKEN in its
-    // environment (BP-733). No gh means no helper, so an https remote fails to authenticate rather
-    // than asking whatever answers to the name.
+    // By path: git runs the helper through a shell, with GH_TOKEN set (BP-733). No gh, no helper.
     ...(isAbsolute(ghPath) ? [["credential.helper", `!${shellQuoted(ghPath)} auth git-credential`] as const] : []),
     // The transport, not the configuration, was the way through: `ext::` hands the URL to a program.
     // The agent cannot set our environment, but it can rewrite where the push goes —
