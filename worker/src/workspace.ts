@@ -1,6 +1,7 @@
-import { mkdtempSync, rmSync } from "fs";
+import { randomBytes } from "crypto";
+import { chmodSync, lstatSync, mkdtempSync, readdirSync, renameSync, rmSync } from "fs";
 import { tmpdir } from "os";
-import { join, resolve, sep } from "path";
+import { basename, dirname, join, resolve, sep } from "path";
 import {
   CommitIdentity,
   MissingIdentityError,
@@ -111,6 +112,74 @@ export interface Workspace {
   listWorktrees(): Promise<string[]>;
 }
 
+/**
+ * What the worker does to the worktree root with its own, unconfined, uid (BP-804).
+ *
+ * `git worktree remove` deletes by path and re-resolves it as it goes, so a worktree a leftover
+ * confined process swapped for a symlink had git empty the symlink's target. `discard` never hands
+ * a path to anything that deletes: it renames the entry into a fresh directory no sandbox rule
+ * names — a symlink moves as a link — and removes it there, which follows no symlink.
+ */
+export interface WorktreeDisk {
+  names(root: string): string[];
+  discard(root: string, path: string): void;
+  /** Each attempt's worktree gets a name no earlier attempt's confinement can have named. */
+  nonce(): string;
+}
+
+export const nodeWorktreeDisk: WorktreeDisk = {
+  names(root) {
+    try {
+      return readdirSync(root);
+    } catch {
+      return [];
+    }
+  },
+  discard(root, path) {
+    try {
+      lstatSync(path);
+    } catch {
+      return;
+    }
+    // Beside it rather than into a directory of its own: moving a directory to another parent needs
+    // write access to the directory itself, which a confined step can take away with `chmod`
+    const trash = join(root, `${DISCARDED}${randomBytes(6).toString("hex")}`);
+    renameSync(path, trash);
+    removeDiscarded(trash);
+  },
+  nonce: () => randomBytes(6).toString("hex"),
+};
+
+const DISCARDED = ".discard-";
+
+// Never throws: the path is already free, and a tree a step made unwritable is retried by the next clear
+function removeDiscarded(trash: string): void {
+  try {
+    rmSync(trash, { recursive: true, force: true });
+    return;
+  } catch {
+    // made unwritable from inside; below
+  }
+  try {
+    makeWritable(trash);
+    rmSync(trash, { recursive: true, force: true });
+  } catch {
+    // left for the next clear
+  }
+}
+
+function makeWritable(path: string): void {
+  const stat = lstatSync(path);
+  if (!stat.isDirectory()) return;
+  chmodSync(path, 0o700);
+  for (const name of readdirSync(path)) makeWritable(join(path, name));
+}
+
+/** The task a directory under the root belongs to: `<KEY>` or, since BP-804, `<KEY>.<nonce>`. */
+export function taskKeyOf(name: string): string {
+  return name.split(".")[0];
+}
+
 // A worktree under the worker's own root belongs to a run that died with its process. Nothing
 // holds it, and leaving it there makes the next attempt on that task collide with its own branch
 //
@@ -123,11 +192,11 @@ export async function reapOrphans(
   held: ReadonlySet<string>
 ): Promise<number> {
   const prefix = worktreeRoot.endsWith(sep) ? worktreeRoot : `${worktreeRoot}${sep}`;
-  const orphans = (await workspace.listWorktrees().catch(() => []))
+  const names = (await workspace.listWorktrees().catch(() => []))
     .filter((path) => path.startsWith(prefix))
     .map((path) => path.slice(prefix.length))
-    .filter((taskKey) => taskKey.length > 0 && !taskKey.includes(sep))
-    .filter((taskKey) => !held.has(taskKey));
+    .filter((name) => name.length > 0 && !name.includes(sep));
+  const orphans = [...new Set(names.map(taskKeyOf))].filter((taskKey) => taskKey.length > 0 && !held.has(taskKey));
 
   for (const taskKey of orphans) {
     await workspace.destroy(taskKey).catch(() => {});
@@ -143,7 +212,8 @@ export function createWorkspace(
   remoteUrl?: string,
   // The pinned GitHub account's identity; without one, whatever git config names (BP-779)
   pinnedIdentity?: CommitIdentity,
-  files: PointerFiles = nodePointerFiles
+  files: PointerFiles = nodePointerFiles,
+  disk: WorktreeDisk = nodeWorktreeDisk
 ): Workspace {
   // api.ts refuses a key that is not a name; this is the sink where a key becomes a path, and the
   // only place that can still tell a traversal from a directory name
@@ -181,10 +251,21 @@ export function createWorkspace(
       .map((line) => line.slice("worktree ".length).trim());
   }
 
-  async function removeIfRegistered(path: string): Promise<void> {
-    if ((await registeredWorktreePaths()).includes(path)) {
-      await git(["worktree", "remove", "--force", "--", path]);
+  // Every attempt's entry for the key, registered or merely on disk: a leftover symlink that git
+  // never registered would otherwise fail every later `worktree add` with "already exists"
+  async function clear(taskKey: string): Promise<void> {
+    const root = resolve(config.worktreeRoot);
+    pathFor(taskKey);
+    const ours = (path: string) =>
+      (dirname(path) === root || dirname(path) === files.realpath(root)) &&
+      taskKeyOf(basename(path)) === taskKey;
+    const registered = (await registeredWorktreePaths()).filter(ours);
+    const onDisk = disk.names(root).filter((name) => taskKeyOf(name) === taskKey).map((name) => join(root, name));
+    for (const path of new Set([...registered.map((path) => join(root, basename(path))), ...onDisk])) {
+      disk.discard(root, path);
     }
+    for (const name of disk.names(root).filter((name) => name.startsWith(DISCARDED))) disk.discard(root, join(root, name));
+    if (registered.length > 0) await git(["worktree", "prune"]);
   }
 
   // The answer must not come from anything repoPath/.git can redirect, and passing `url` rather
@@ -374,7 +455,7 @@ export function createWorkspace(
 
   return {
     async create(taskKey, slug) {
-      const path = pathFor(taskKey);
+      const path = `${pathFor(taskKey)}.${disk.nonce()}`;
       const branch = `${taskKey.toLowerCase()}/${slug}`;
 
       // First, ahead of the fetch and well ahead of `worktree add`. That command checks files
@@ -415,7 +496,7 @@ export function createWorkspace(
         );
       }
 
-      await removeIfRegistered(path);
+      await clear(taskKey);
       // Again, immediately before the checkout. The scan above and this command are separate
       // processes with a fetch between them — two network round-trips, which is a window an
       // attacker with a watcher can win: measured, replanting 50ms after the first scan got the
@@ -440,7 +521,7 @@ export function createWorkspace(
     },
 
     async destroy(taskKey) {
-      await removeIfRegistered(pathFor(taskKey));
+      await clear(taskKey);
     },
 
     listWorktrees() {

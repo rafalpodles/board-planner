@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, type Mock } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, realpathSync, renameSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DecisionSettlement } from "./api.js";
@@ -19,6 +19,7 @@ import {
 } from "./decisions.js";
 import { claimedTask } from "./__fixtures__/task.js";
 import { DiffStats } from "./types.js";
+import { recordDir } from "./sandbox.js";
 
 function memoryFs(): MarkerFs & { files: Map<string, string>; modes: string[] } {
   const files = new Map<string, string>();
@@ -179,6 +180,7 @@ describe("opening a decision", () => {
       worktreeRoot: "/wt",
       baseSha: "base1",
       pin: PIN,
+      dir: { path: "/wt/CP-158", dev: 1, ino: 2 },
     };
   }
 
@@ -423,6 +425,40 @@ describe("acting on a verdict", () => {
       expect(h.settled[0].error).toMatch(/^the worktree now has its \.git file reading "gitdir: .*\/\.y"/);
     } finally {
       rmSync(workTree, { recursive: true, force: true });
+    }
+  });
+
+  // BP-804: pinTampering reads `.git` through the path, so a symlink to a copy of the pointer file
+  // passed it, and the push, the pull request and the destroy all followed the link
+  it("refuses the push when the worktree is now a symlink to a copy of itself", async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "bp804-decision-")));
+    try {
+      const workTree = join(dir, "CP-158");
+      const pointer = "gitdir: /repo/.git/worktrees/CP-158\n";
+      mkdirSync(workTree);
+      writeFileSync(join(workTree, ".git"), pointer);
+      const recorded = recordDir(workTree);
+      renameSync(workTree, join(dir, "was"));
+      mkdirSync(join(dir, "victim"));
+      writeFileSync(join(dir, "victim", ".git"), pointer);
+      symlinkSync(join(dir, "victim"), workTree);
+      const h = harness();
+      h.markers.write({
+        ...h.markers.read("CP-158")!,
+        worktreePath: workTree,
+        pin: { workTree, gitDir: "/repo/.git/worktrees/CP-158", pointer, flagged: [] },
+        dir: recorded,
+      });
+
+      await settleDecisions(h.deps, [decision()], LATER);
+
+      expect(h.push).not.toHaveBeenCalled();
+      expect(h.settled[0]).toMatchObject({
+        state: "refused",
+        error: `the worktree now has its directory ${workTree} replaced by a symlink`,
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 

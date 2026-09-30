@@ -26,7 +26,7 @@ export interface RunState {
   /**
    * Whether a commit was attempted and did not happen, which means work the agent wrote is in the
    * worktree and in no history. The `finally` that destroys the worktree is then the only thing
-   * between that work and `worktree remove --force`, so this keeps it — for a refusal, where the
+   * between that work and its removal, so this keeps it — for a refusal, where the
    * tree is also the evidence, and for the ordinary failures of `status`, `add`, `commit` and
    * `rev-parse`, where it is simply the one copy (BP-506).
    *

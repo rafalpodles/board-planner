@@ -393,7 +393,12 @@ export function createDelivery(
 
     async merge(worktreePath, prUrl) {
       // --repo keeps gh out of the local checkout: --delete-branch otherwise switches the worktree
-      // to the base branch first, which git refuses while the main clone has it checked out
+      // to the base branch first, which git refuses while the main clone has it checked out — and
+      // which checks the base out through whatever the worktree's path now is (BP-804)
+      const repo = repoArgs(prUrl);
+      if (repo.length === 0) {
+        throw new Error(`refusing to merge ${prUrl}: it names no repository, so gh would check the base branch out in the worktree`);
+      }
       const result = await run(
         requireToolPath("gh", ghPath),
         [
@@ -402,7 +407,7 @@ export function createDelivery(
           prUrl,
           "--merge",
           "--delete-branch",
-          ...repoArgs(prUrl),
+          ...repo,
         ],
         worktreePath,
       );

@@ -3,7 +3,7 @@ import { agentArgs, answerSandboxProbe, isAgentSpawn, isSandboxProbe } from "./_
 import { createServer, IncomingMessage, Server, ServerResponse } from "http";
 import { AddressInfo } from "net";
 import { tmpdir } from "os";
-import { join } from "path";
+import { basename, join } from "path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CommandResult, Runner, RunOpts } from "./exec.js";
 import { createWorker } from "./wiring.js";
@@ -505,7 +505,8 @@ describe("a refused change, offered and then accepted, over a real HTTP surface"
     const create = settlement.git.find((call) => call.command === `${TOOL_DIR}/gh` && call.args.includes("create"));
 
     const marker = JSON.parse(markerAfterRefusal!);
-    expect(marker.pin.gitDir).toBe(join(realpathSync(REPO), "worktrees", TASK_KEY));
+    expect(basename(marker.worktreePath)).toMatch(new RegExp(`^${TASK_KEY}\\.[0-9a-f]+$`));
+    expect(marker.pin.gitDir).toBe(join(realpathSync(REPO), "worktrees", basename(marker.worktreePath)));
     for (const call of [push, create]) {
       expect(call?.env).toMatchObject({ GIT_DIR: marker.pin.gitDir, GIT_WORK_TREE: marker.worktreePath });
     }
@@ -520,7 +521,7 @@ describe("a refused change, offered and then accepted, over a real HTTP surface"
    */
   it("does not reap the held worktree before the push", () => {
     const removedAt = settlement.git.findIndex(
-      (call) => call.args.includes("worktree") && call.args.includes("remove")
+      (call) => call.args.includes("worktree") && (call.args.includes("remove") || call.args.includes("prune"))
     );
     const pushedAt = settlement.git.findIndex((call) => call.args.includes("push"));
 
@@ -539,8 +540,10 @@ describe("a refused change, offered and then accepted, over a real HTTP surface"
   // Until the pull request exists this worktree is the only copy of the work; afterwards it is not
   it("gives the worktree back once the pull request is open", () => {
     expect(existsSync(join(stateDir, "decisions", `${TASK_KEY}.json`))).toBe(false);
+    // Discarded by the worker itself and then pruned, never handed to `git worktree remove` (BP-804)
     expect(
-      settlement.git.some((call) => call.args.includes("worktree") && call.args.includes("remove"))
+      settlement.git.some((call) => call.args.includes("worktree") && call.args.includes("prune"))
     ).toBe(true);
+    expect(existsSync(JSON.parse(markerAfterRefusal!).worktreePath)).toBe(false);
   });
 });

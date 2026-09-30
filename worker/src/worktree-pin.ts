@@ -147,7 +147,9 @@ export async function recordPin(
     throw new Error(`could not tell where the clone's git dir is: ${asked.stderr || asked.stdout || "git said nothing"}`);
   }
   const commonDir = files.realpath(named);
-  const pointerPath = join(files.realpath(workTree), ".git");
+  // The parent resolved and not the worktree: `worktree add` checks out through a symlink left at
+  // the path and registers where it points, and that registration must not match (BP-804)
+  const pointerPath = join(files.realpath(dirname(resolve(workTree))), basename(workTree), ".git");
 
   const admins = files
     .list(join(commonDir, "worktrees"))

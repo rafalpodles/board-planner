@@ -799,7 +799,7 @@ export async function runTask(
           // only the machine is broken.
           //
           // Kept until the next attempt claims this task, not kept for good: workspace.create()
-          // calls removeIfRegistered() before `worktree add -B`. So this buys a person a window to
+          // clears every earlier attempt's entry before `worktree add -B`. So this buys a person a window to
           // look at what the run produced, and the comment above carries the path to look at — it
           // does not make the work durable, and the run is repeated either way.
           //
@@ -854,6 +854,7 @@ export async function runTask(
                 worktreeRoot: config.worktreeRoot,
                 baseSha: worktree.baseSha,
                 pin: worktree.pin,
+                dir: worktree.dir,
               });
             } catch (error) {
               deps.logError?.(

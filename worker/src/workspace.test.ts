@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { describe, it, expect, vi } from "vitest";
-import { createWorkspace, reapOrphans, Workspace } from "./workspace.js";
+import { createWorkspace, reapOrphans, Workspace, WorktreeDisk } from "./workspace.js";
 import { CommandResult, RunOpts } from "./exec.js";
 import { gitArgs } from "./git-safety.js";
 import { scopedConfigListZ } from "./config-list.fixtures.js";
@@ -57,10 +57,15 @@ const POINTER_FILES = {
     return pointer ? `gitdir: /repo/.git/worktrees/${pointer[1]}\n` : "";
   },
   kind: () => "file" as const,
-  list: (dir: string) => (dir === "/repo/.git/worktrees" ? ["CP-158", "BP-1", "CP-1"] : []),
+  list: (dir: string) => (dir === "/repo/.git/worktrees" ? ["CP-158.a1", "BP-1.a1", "CP-1.a1"] : []),
   realpath: (path: string) => path,
   lstat: () => ({ dev: 1, ino: 1, isDirectory: () => true, isSymbolicLink: () => false }),
 };
+
+// Nothing on disk, and every attempt's name ends in `.a1`
+function fakeDisk(names: string[] = []) {
+  return { names: vi.fn(() => names), discard: vi.fn<WorktreeDisk["discard"]>(), nonce: () => "a1" };
+}
 
 function fakeGit(responses: Record<string, Partial<CommandResult>>) {
   const run = vi.fn(async (_command: string, args: string[], _opts: RunOpts): Promise<CommandResult> => {
@@ -87,7 +92,7 @@ function baseFromRemote(sha: string, extra: Record<string, Partial<CommandResult
 }
 
 function withRemote(runner: Parameters<typeof createWorkspace>[1], env: () => NodeJS.ProcessEnv = () => ({})) {
-  return createWorkspace(config, runner, gitPath, env, REMOTE_URL, undefined, POINTER_FILES);
+  return createWorkspace(config, runner, gitPath, env, REMOTE_URL, undefined, POINTER_FILES, fakeDisk());
 }
 
 function ranAny(run: { mock: { calls: unknown[][] } }, fragment: string): boolean {
@@ -131,7 +136,7 @@ describe("createWorkspace", () => {
       const { runner, run } = fakeGit(baseFromRemote("base1"));
       const pinned = { name: "Octo Cat", email: "1+octocat@users.noreply.github.com" };
 
-      const result = await createWorkspace(config, runner, gitPath, () => ({}), REMOTE_URL, pinned, POINTER_FILES).create(
+      const result = await createWorkspace(config, runner, gitPath, () => ({}), REMOTE_URL, pinned, POINTER_FILES, fakeDisk()).create(
         "CP-158",
         "worker",
       );
@@ -192,11 +197,11 @@ describe("createWorkspace", () => {
     const { runner, run } = fakeGit(baseFromRemote("base1"));
     const result = await withRemote(runner).create("CP-158", "worker");
 
-    expect(result.path).toBe("/worktrees/CP-158");
+    expect(result.path).toBe("/worktrees/CP-158.a1");
     expect(result.baseSha).toBe("base1");
     expect(run).toHaveBeenCalledWith(
       gitPath,
-      [...HARDENING_PREFIX, "worktree", "add", "-B", "cp-158/worker", "--", "/worktrees/CP-158", "base1"],
+      [...HARDENING_PREFIX, "worktree", "add", "-B", "cp-158/worker", "--", "/worktrees/CP-158.a1", "base1"],
       expect.objectContaining({ cwd: "/repo", env: expect.objectContaining({ GIT_CONFIG_NOSYSTEM: "1" }) }),
     );
     expect(run).not.toHaveBeenCalledWith(
@@ -213,7 +218,7 @@ describe("createWorkspace", () => {
     expect(result.baseSha).toBe("base111");
     expect(run).toHaveBeenCalledWith(
       gitPath,
-      [...HARDENING_PREFIX, "worktree", "add", "-B", "bp-1/worker", "--", "/worktrees/BP-1", "base111"],
+      [...HARDENING_PREFIX, "worktree", "add", "-B", "bp-1/worker", "--", "/worktrees/BP-1.a1", "base111"],
       expect.anything(),
     );
   });
@@ -347,7 +352,7 @@ describe("createWorkspace", () => {
   it("refuses to run at all when no remote is configured, rather than reading the local ref", async () => {
     for (const env of [undefined, () => ({})]) {
       const { runner, run } = fakeGit(baseFromRemote("local1"));
-      const workspace = createWorkspace(config, runner, gitPath, env, env ? undefined : REMOTE_URL, undefined, POINTER_FILES);
+      const workspace = createWorkspace(config, runner, gitPath, env, env ? undefined : REMOTE_URL, undefined, POINTER_FILES, fakeDisk());
       await expect(workspace.create("BP-1", "worker")).rejects.toThrow(/no remote is configured/);
       expect(readsLocalRef(run)).toBe(false);
     }
@@ -654,7 +659,7 @@ describe("createWorkspace", () => {
   it("throws when git fails to create the worktree", async () => {
     const { runner } = fakeGit(
       baseFromRemote("base1", {
-        "worktree add -B cp-158/worker -- /worktrees/CP-158 base1": { code: 1, stderr: "exists" },
+        "worktree add -B cp-158/worker -- /worktrees/CP-158.a1 base1": { code: 1, stderr: "exists" },
       })
     );
     await expect(withRemote(runner).create("CP-158", "worker")).rejects.toThrow(/exists/);
@@ -690,7 +695,7 @@ describe("createWorkspace", () => {
           timedOut: false,
         };
       }
-      if (args[0] === "worktree" && args[1] === "remove") {
+      if (args[0] === "worktree" && args[1] === "prune") {
         worktreeExists = false;
         return { code: 0, stdout: "", stderr: "", timedOut: false };
       }
@@ -708,53 +713,68 @@ describe("createWorkspace", () => {
       return { code: 0, stdout: "", stderr: "", timedOut: false };
     });
 
-    const result = await withRemote({ run }).create("CP-158", "worker");
-
-    expect(result.path).toBe("/worktrees/CP-158");
-    expect(run).toHaveBeenCalledWith(
-      gitPath,
-      [...HARDENING_PREFIX, "worktree", "remove", "--force", "--", "/worktrees/CP-158"],
-      expect.anything(),
+    const disk = fakeDisk();
+    const result = await createWorkspace(config, { run }, gitPath, () => ({}), REMOTE_URL, undefined, POINTER_FILES, disk).create(
+      "CP-158",
+      "worker",
     );
+
+    expect(result.path).toBe("/worktrees/CP-158.a1");
+    expect(disk.discard).toHaveBeenCalledWith("/worktrees", "/worktrees/CP-158");
+    expect(run).toHaveBeenCalledWith(gitPath, [...HARDENING_PREFIX, "worktree", "prune"], expect.anything());
     expect(run).toHaveBeenCalledWith(
       gitPath,
-      [...HARDENING_PREFIX, "worktree", "add", "-B", "cp-158/worker", "--", "/worktrees/CP-158", "base9"],
+      [...HARDENING_PREFIX, "worktree", "add", "-B", "cp-158/worker", "--", "/worktrees/CP-158.a1", "base9"],
       expect.anything(),
     );
   });
 
-  it("removes an existing worktree", async () => {
+  // BP-804: git deletes by path and re-resolves it, so a worktree swapped for a symlink had it empty
+  // the symlink's target. The worker discards the entry itself and only asks git to forget it.
+  it("discards an existing worktree itself, and never hands git a path to delete", async () => {
     const { runner, run } = fakeGit({
-      "worktree list --porcelain": { stdout: "worktree /worktrees/CP-158\n" },
+      "worktree list --porcelain": { stdout: "worktree /worktrees/CP-158.b2\n" },
     });
-    await createWorkspace(config, runner, gitPath).destroy("CP-158");
+    const disk = fakeDisk();
+    await createWorkspace(config, runner, gitPath, undefined, undefined, undefined, POINTER_FILES, disk).destroy("CP-158");
 
-    expect(run).toHaveBeenCalledWith(
-      gitPath,
-      [...HARDENING_PREFIX, "worktree", "remove", "--force", "--", "/worktrees/CP-158"],
-      expect.anything(),
-    );
+    expect(disk.discard).toHaveBeenCalledWith("/worktrees", "/worktrees/CP-158.b2");
+    expect(run).toHaveBeenCalledWith(gitPath, [...HARDENING_PREFIX, "worktree", "prune"], expect.anything());
+    expect(ranAny(run, "worktree remove")).toBe(false);
+  });
+
+  it("discards every attempt's entry for the key on disk, registered or not, and nothing else", async () => {
+    const { runner, run } = runnerReturning();
+    const disk = fakeDisk(["CP-158", "CP-158.old", "CP-1580", "CP-15.x", ".discard-f00"]);
+    await createWorkspace(config, runner, gitPath, undefined, undefined, undefined, POINTER_FILES, disk).destroy("CP-158");
+
+    expect(disk.discard.mock.calls.map(([, path]) => path)).toEqual([
+      "/worktrees/CP-158",
+      "/worktrees/CP-158.old",
+      "/worktrees/.discard-f00",
+    ]);
+    expect(ranAny(run, "worktree prune")).toBe(false);
   });
 
   it("is a no-op when the worktree is already gone", async () => {
     const { runner, run } = runnerReturning();
-    await expect(createWorkspace(config, runner, gitPath).destroy("CP-158")).resolves.toBeUndefined();
+    const disk = fakeDisk();
+    await expect(
+      createWorkspace(config, runner, gitPath, undefined, undefined, undefined, POINTER_FILES, disk).destroy("CP-158"),
+    ).resolves.toBeUndefined();
 
-    expect(run).not.toHaveBeenCalledWith(
-      gitPath,
-      [...HARDENING_PREFIX, "worktree", "remove", "--force", "--", "/worktrees/CP-158"],
-      expect.anything(),
-    );
+    expect(disk.discard).not.toHaveBeenCalled();
+    expect(ranAny(run, "worktree prune")).toBe(false);
   });
 
-  it("propagates a genuine removal failure instead of swallowing it", async () => {
+  it("propagates a genuine prune failure instead of swallowing it", async () => {
     const { runner } = fakeGit({
       "worktree list --porcelain": { stdout: "worktree /worktrees/CP-158\n" },
-      "worktree remove --force -- /worktrees/CP-158": { code: 1, stderr: "permission denied" },
+      "worktree prune": { code: 1, stderr: "permission denied" },
     });
-    await expect(createWorkspace(config, runner, gitPath).destroy("CP-158")).rejects.toThrow(
-      /permission denied/,
-    );
+    await expect(
+      createWorkspace(config, runner, gitPath, undefined, undefined, undefined, POINTER_FILES, fakeDisk()).destroy("CP-158"),
+    ).rejects.toThrow(/permission denied/);
   });
 
   it("parses existing worktree paths", async () => {
@@ -834,6 +854,13 @@ describe("reapOrphans", () => {
    * run that made it has ended, and nothing on this machine holds it. The marker is the only thing
    * that tells them apart, and without it the reaper destroys the one copy of the change.
    */
+  it("reaps a task once however many attempts it left, and holds each attempt of a held task", async () => {
+    const workspace = workspaceListing(["/worktrees/CP-1.a1", "/worktrees/CP-1.b2", "/worktrees/CP-2.c3", "/worktrees/CP-3"]);
+
+    expect(await reapOrphans(workspace, "/worktrees", new Set(["CP-2"]))).toBe(2);
+    expect(workspace.destroy.mock.calls.map(([key]) => key)).toEqual(["CP-1", "CP-3"]);
+  });
+
   it("leaves a worktree a decision is holding, and reaps its neighbour", async () => {
     const workspace = workspaceListing(["/worktrees/CP-1", "/worktrees/CP-2"]);
 

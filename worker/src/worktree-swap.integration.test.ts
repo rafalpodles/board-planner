@@ -214,17 +214,24 @@ describe.skipIf(process.platform !== "darwin")("a worktree a confined process re
   // The path is reused across attempts, so what an earlier attempt left running can swap the new
   // worktree before it is recorded
   it("refuses a worktree that is already a symlink when it is recorded", async () => {
+    let added = "";
     const racing: Runner = {
       async run(command, args, opts) {
         const result = await createRunner().run(command, args, opts);
         if (args.includes("worktree") && args.includes("add")) {
-          rmSync(join(dir, "wt", "BP-2"), { recursive: true, force: true });
-          symlinkSync(home, join(dir, "wt", "BP-2"));
+          added = args[args.indexOf("--") + 1];
+          rmSync(added, { recursive: true, force: true });
+          symlinkSync(home, added);
         }
         return result;
       },
     };
 
-    await expect(workspaceOver(racing).create("BP-2", "worker")).rejects.toThrow(`${join(dir, "wt", "BP-2")} is a symlink`);
+    const refused = await workspaceOver(racing).create("BP-2", "worker").then(
+      () => null,
+      (error: Error) => error.message,
+    );
+
+    expect(refused).toBe(`${added} is a symlink, not a directory`);
   });
 });
