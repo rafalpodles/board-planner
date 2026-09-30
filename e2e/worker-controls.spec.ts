@@ -1273,6 +1273,52 @@ test("the fleet screen says whether a machine confines the agent it runs", async
 });
 
 /**
+ * BP-793. A worker whose preflight threw claims nothing, and used to send no report at all — which
+ * the heartbeat route reads as a worker too old to report one, so it kept the green report from an
+ * earlier boot and the fleet screen said `ready` about a machine taking no work. It now sends a
+ * failing sandbox row naming the reason, exactly as worker/src/wiring.ts composes it.
+ */
+test("a machine whose preflight could not run says why on the fleet screen, not its last green report", async ({
+  page,
+  request,
+}) => {
+  const REASON = "preflight could not run: spawn /bin/zsh ENOENT";
+  const GREEN = {
+    ok: true,
+    account: "owner",
+    checks: [{ name: "sandbox", ok: true, detail: "the agent can only write inside its own worktree" }],
+  };
+
+  // The earlier boot, and the control: the same row reads ready
+  await heartbeat(request, { preflight: GREEN });
+  await signIn(page);
+  await page.goto("/settings/workers");
+  await expect(fleetRow(page, WORKER_NAME).getByText(/^ready/)).toBeVisible();
+
+  await heartbeat(request, {
+    preflight: { ok: false, account: "", checks: [{ name: "sandbox", ok: false, detail: REASON }] },
+  });
+  await page.reload();
+  const row = fleetRow(page, WORKER_NAME);
+  await expect(row).toContainText(`sandbox — ${REASON}`);
+  await expect(page.getByTestId("preflight-failure")).toHaveText(`Failed: sandbox — ${REASON}`);
+  await expect(row.getByText(/^ready/), "the machine still reads ready").toHaveCount(0);
+
+  // The old-worker rule still holds: a heartbeat carrying no report keeps the one stored, and here
+  // that is the failure, not a return to green
+  await heartbeat(request, {});
+  await page.reload();
+  await expect(page.getByTestId("preflight-failure")).toHaveText(`Failed: sandbox — ${REASON}`);
+
+  // Preflight ran on a later poll: its report replaces the failure
+  await heartbeat(request, { preflight: GREEN });
+  await page.reload();
+  await expect(fleetRow(page, WORKER_NAME).getByText(/^ready/)).toBeVisible();
+  await expect(page.getByTestId("preflight-failure")).toHaveCount(0);
+  await expect(page.locator("table")).not.toContainText(REASON);
+});
+
+/**
  * BP-689. A check that FAILED, and the binding error, were each said in one cell only — the last
  * two of ten columns, off the right edge at 1280 and behind the pinned controls at 1440. The line
  * under the row that BP-606 gave a warning now carries them too.
