@@ -1,9 +1,24 @@
 import { test, expect, type APIRequestContext, type APIResponse, type Browser } from "@playwright/test";
 import mongoose from "mongoose";
 import { SAME_ORIGIN } from "./api";
-import { ADMIN_USERNAME, E2E_MONGODB_URI, MEMBER_USERNAME, OWNER_USERNAME, PROJECT_ID, PROJECT_KEY, seed } from "./seed";
+import {
+  ADMIN_USERNAME,
+  E2E_MONGODB_URI,
+  FIELDS,
+  MEMBER_ID,
+  MEMBER_USERNAME,
+  OWNER_ID,
+  OWNER_USERNAME,
+  PROJECT_AGENT_ID,
+  PROJECT_ID,
+  PROJECT_KEY,
+  seed,
+  seedAgents,
+  seedCustomFields,
+  seedMachine,
+} from "./seed";
 import { signInContext } from "./session";
-import { scanOwnerGatedRoutes } from "./owner-gated-routes";
+import { scanInlineOwnerChecks, scanOwnerGatedRoutes } from "./owner-gated-routes";
 
 /**
  * BP-699. Every `withProjectOwner` route + method, driven once by a genuine board owner (a Grant
@@ -25,13 +40,17 @@ type Recipe = {
   handled: { status: number; body: RegExp };
 };
 
-async function onProject(update: Record<string, unknown>) {
+async function inDb<T>(work: (db: NonNullable<typeof mongoose.connection.db>) => Promise<T>): Promise<T> {
   await mongoose.connect(E2E_MONGODB_URI);
   try {
-    await mongoose.connection.db!.collection("projects").updateOne({ _id: PROJECT_ID }, { $set: update });
+    return await work(mongoose.connection.db!);
   } finally {
     await mongoose.disconnect();
   }
+}
+
+async function onProject(update: Record<string, unknown>) {
+  await inDb((db) => db.collection("projects").updateOne({ _id: PROJECT_ID }, { $set: update }));
 }
 
 const PROBE_SERVER = "gate-probe";
@@ -54,7 +73,7 @@ const probeServer = () =>
 
 const get = (request: APIRequestContext, path: string) => request.get(path);
 const withBody =
-  (method: "post" | "put" | "delete", data: unknown) => (request: APIRequestContext, path: string) =>
+  (method: "post" | "put" | "patch" | "delete", data: unknown) => (request: APIRequestContext, path: string) =>
     request[method](path, { headers: SAME_ORIGIN, data });
 
 const JSON_ARRAY = /^\[/;
@@ -176,7 +195,9 @@ function concrete(path: string): string {
     .replace("[fieldId]", new mongoose.Types.ObjectId().toString());
 }
 
-async function signedIn(browser: Browser, baseURL: string | undefined, who: "owner" | "member") {
+type Who = "owner" | "member";
+
+async function signedIn(browser: Browser, baseURL: string | undefined, who: Who) {
   const context = await browser.newContext({ baseURL });
   await signInContext(context, who);
   return context;
@@ -228,6 +249,229 @@ for (const route of ROUTES) {
       const body = await handled.text();
       expect(handled.status(), body).toBe(recipe.handled.status);
       expect(body).toMatch(recipe.handled.body);
+    } finally {
+      await member.close();
+      await owner.close();
+    }
+  });
+}
+
+/**
+ * BP-748. The owner-only behaviour a route decides inline — `check(…, "admin")` or
+ * `administeredProjectIds` — rather than through `withProjectOwner`, scanned the same way and held
+ * to the same rule. Not every one refuses: some only answer the owner differently, so each recipe
+ * names what the member and the owner are each told, read from the field that decides it.
+ */
+
+type Answer = { status: number; body: RegExp };
+
+type InlineRecipe = {
+  setup?: () => Promise<void>;
+  send: (request: APIRequestContext, path: string, who: Who) => Promise<APIResponse>;
+  read?: (response: APIResponse) => Promise<string>;
+  member: Answer;
+  owner: Answer;
+};
+
+const field =
+  <T>(pick: (body: T) => unknown) =>
+  async (response: APIResponse): Promise<string> =>
+    response.ok() ? JSON.stringify(pick(await response.json())) : response.text();
+
+type Listed = { key?: string; project?: string; canEnable?: boolean; canAdmin?: boolean };
+const onTheBoard = (list: Listed[]) => list.find((p) => p.key === PROJECT_KEY);
+
+const OAUTH_STATE: Record<Who, string> = { member: "gate-state-member", owner: "gate-state-owner" };
+const PERSONA_ID: Record<Who, mongoose.Types.ObjectId> = { member: MEMBER_ID, owner: OWNER_ID };
+const REPOSITORY = "https://github.com/e2e/owner-gate";
+
+const oauthStates = async () => {
+  await inDb((db) =>
+    db.collection("pmoauthstates").insertMany(
+      (["member", "owner"] as const).map((who) => ({
+        state: OAUTH_STATE[who],
+        project: PROJECT_ID,
+        serverName: PROBE_SERVER,
+        codeVerifier: "gate-verifier",
+        initiatedBy: PERSONA_ID[who],
+        createdAt: new Date(),
+      }))
+    )
+  );
+};
+
+const workersOff = () => onProject({ "worker.enabled": false, repositoryUrl: REPOSITORY });
+
+async function personaMachines() {
+  await seedMachine(REPOSITORY, { owner: MEMBER_ID });
+  await seedMachine(REPOSITORY, { owner: OWNER_ID });
+}
+
+const machineOf = (who: Who) =>
+  inDb(async (db) => {
+    const machine = await db.collection("workers").findOne({ name: `laptop-${PERSONA_ID[who]}` });
+    return String(machine!._id);
+  });
+
+async function enrolmentFor(request: APIRequestContext, who: Who): Promise<string> {
+  const started = await request.post("/api/workers/enrolment/device", {
+    headers: { ...SAME_ORIGIN, "x-cp-protocol": "1" },
+    data: { name: `gate-${who}`, host: `gate-${who}.local` },
+  });
+  expect(started.status(), await started.text()).toBe(201);
+  return (await started.json()).userCode;
+}
+
+const FORBIDDEN = /^\{"error":"Forbidden"\}$/;
+const NO = /^false$/;
+const YES = /^true$/;
+
+const INLINE_RECIPES: Record<string, InlineRecipe> = {
+  "GET /api/pm/oauth/callback": {
+    // Each persona completes a flow it started itself, so only the grant tells the two apart
+    setup: oauthStates,
+    send: (request, path, who) => request.get(`${path}?state=${OAUTH_STATE[who]}`, { maxRedirects: 0 }),
+    read: async (response) => response.headers()["location"] ?? "",
+    member: { status: 302, body: /mcp_oauth=error%3Awrong_user$/ },
+    owner: { status: 302, body: /mcp_oauth=error%3Amissing_code$/ },
+  },
+  "GET /api/projects": {
+    send: get,
+    read: field((list: Listed[]) => onTheBoard(list)?.canAdmin),
+    member: { status: 200, body: NO },
+    owner: { status: 200, body: YES },
+  },
+  "GET /api/projects/[projectId]": {
+    send: get,
+    read: field((project: Listed) => project.canAdmin),
+    member: { status: 200, body: NO },
+    owner: { status: 200, body: YES },
+  },
+  "PUT /api/projects/[projectId]": {
+    send: withBody("put", {}),
+    read: field((project: Listed) => project.canAdmin),
+    member: { status: 403, body: FORBIDDEN },
+    owner: { status: 200, body: YES },
+  },
+  "PUT /api/projects/[projectId]/agent": {
+    send: withBody("put", { agentId: "" }),
+    member: { status: 403, body: /Only a project admin can change this/ },
+    owner: { status: 200, body: /"ok":true/ },
+  },
+  "PATCH /api/projects/[projectId]/custom-fields/[fieldId]": {
+    // Dropping a saved option is the one PATCH a member may not make
+    setup: () => seedCustomFields(),
+    send: withBody("patch", { options: [FIELDS.difficulty.options[0]] }),
+    member: { status: 403, body: /Only a project owner can remove an option a field already has/ },
+    owner: { status: 200, body: new RegExp(`^\\[(?!.*"${FIELDS.difficulty.options[1].id}").*"${FIELDS.difficulty.options[0].id}"`) },
+  },
+  "GET /api/projects/[projectId]/handover": {
+    send: get,
+    read: field((readiness: Listed) => readiness.canAdmin),
+    member: { status: 200, body: NO },
+    owner: { status: 200, body: YES },
+  },
+  "POST /api/agents": {
+    // Only an agent for a project is the project's owner's to add
+    send: withBody("post", { name: "Gate probe", projectId: String(PROJECT_ID) }),
+    member: { status: 403, body: /Only a project admin can add an agent to a project/ },
+    owner: { status: 201, body: new RegExp(`"scope":"project","projectId":"${PROJECT_ID}"`) },
+  },
+  "PUT /api/agents/[agentId]": {
+    setup: seedAgents,
+    send: withBody("put", { name: "Renamed by the owner gate" }),
+    member: { status: 403, body: /Not yours to change/ },
+    owner: { status: 200, body: /"name":"Renamed by the owner gate"/ },
+  },
+  "DELETE /api/agents/[agentId]": {
+    setup: seedAgents,
+    send: (request, path) => request.delete(path, { headers: SAME_ORIGIN }),
+    member: { status: 403, body: /Not yours to delete/ },
+    owner: { status: 200, body: /"ok":true/ },
+  },
+  "GET /api/workers/enrolment/device/[userCode]": {
+    send: async (request, path, who) => request.get(path.replace("[userCode]", await enrolmentFor(request, who))),
+    read: field((enrolment: { projects: Listed[] }) => onTheBoard(enrolment.projects)?.canEnable),
+    member: { status: 200, body: NO },
+    owner: { status: 200, body: YES },
+  },
+  "POST /api/workers/enrolment/device/[userCode]/approve": {
+    // Both confirm their own machine; only the owner's confirmation switches the board's workers on
+    setup: workersOff,
+    send: async (request, path, who) =>
+      request.post(path.replace("[userCode]", await enrolmentFor(request, who)), {
+        headers: SAME_ORIGIN,
+        data: { projectId: String(PROJECT_ID) },
+      }),
+    read: field((approved: { workersEnabled: boolean }) => approved.workersEnabled),
+    member: { status: 200, body: NO },
+    owner: { status: 200, body: YES },
+  },
+  "GET /api/workers/[workerId]/projects": {
+    setup: personaMachines,
+    send: async (request, path, who) => request.get(path.replace("[workerId]", await machineOf(who))),
+    read: field((screen: { catalogue: Listed[] }) => onTheBoard(screen.catalogue)?.canEnable),
+    member: { status: 200, body: NO },
+    owner: { status: 200, body: YES },
+  },
+  "PUT /api/workers/[workerId]/projects": {
+    setup: async () => {
+      await workersOff();
+      await personaMachines();
+    },
+    send: async (request, path, who) =>
+      request.put(path.replace("[workerId]", await machineOf(who)), {
+        headers: SAME_ORIGIN,
+        data: { projects: [String(PROJECT_ID)] },
+      }),
+    read: field((picked: { leftDisabled: string[] }) => picked.leftDisabled),
+    member: { status: 200, body: new RegExp(`^\\["${PROJECT_KEY}"\\]$`) },
+    owner: { status: 200, body: /^\[\]$/ },
+  },
+};
+
+const INLINE = scanInlineOwnerChecks();
+
+function concreteInline(path: string): string {
+  return path
+    .replace("[projectId]", PROJECT_KEY)
+    .replace("[fieldId]", String(FIELDS.difficulty._id))
+    .replace("[agentId]", String(PROJECT_AGENT_ID));
+}
+
+test("the scan found the inline owner checks, and every one of them has a recipe", () => {
+  expect(INLINE.length, "the inline scan found nothing — every case below would be vacuous").toBeGreaterThanOrEqual(14);
+  const scanned = INLINE.map((c) => c.key);
+  expect(
+    INLINE.filter((c) => !INLINE_RECIPES[c.key]).map((c) => `${c.key} (line ${c.line})`),
+    "inline owner checks with no recipe here"
+  ).toEqual([]);
+  expect(Object.keys(INLINE_RECIPES).filter((key) => !scanned.includes(key)), "recipes for checks no longer inline").toEqual([]);
+  expect(
+    Object.entries(INLINE_RECIPES)
+      .filter(([, r]) => r.member.status === r.owner.status && r.member.body.source === r.owner.body.source)
+      .map(([key]) => key),
+    "recipes that cannot tell the owner from the member"
+  ).toEqual([]);
+});
+
+for (const site of INLINE) {
+  test(`${site.key}: the board owner is answered as one, a plain member is not`, async ({ browser, baseURL }) => {
+    const recipe = INLINE_RECIPES[site.key];
+    expect(recipe, `no request recipe for ${site.key} (line ${site.line}) — add one to INLINE_RECIPES`).toBeDefined();
+    await recipe.setup?.();
+
+    const path = concreteInline(site.path);
+    const read = recipe.read ?? ((response: APIResponse) => response.text());
+    const member = await signedIn(browser, baseURL, "member");
+    const owner = await signedIn(browser, baseURL, "owner");
+    try {
+      for (const [who, context] of [["member", member], ["owner", owner]] as const) {
+        const response = await recipe.send(context.request, path, who);
+        const body = await read(response);
+        expect(response.status(), `${who}: ${body}`).toBe(recipe[who].status);
+        expect(body, who).toMatch(recipe[who].body);
+      }
     } finally {
       await member.close();
       await owner.close();
