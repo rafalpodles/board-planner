@@ -3,7 +3,8 @@ import {
   confine,
   confineTool,
   DirStat,
-  NAMED_SERVICE_DENIES,
+  OWN_SANDBOX_SIGNALS_ONLY,
+  PROFILE_TAIL,
   profileWith,
   SANDBOX_COMMAND,
   UNCONFINED_REASON,
@@ -76,16 +77,26 @@ describe("confine", () => {
 
   // Unlike the write rules above, this order was measured to matter: a network-outbound allow that
   // comes later reopens the named sockets (BP-810). The kernel half is in sandbox.integration.test.ts.
-  it("ends every profile with the named-service denies, after any rules a mode adds", () => {
-    const tail = (profile: string) => profile.split("\n").slice(-NAMED_SERVICE_DENIES.length);
+  it("ends every profile with the named-service denies and the signal rules, after any rules a mode adds", () => {
+    const tail = (profile: string) => profile.split("\n").slice(-PROFILE_TAIL.length);
     const modeRule = "(allow network-outbound (remote unix-socket))";
 
-    expect(tail(profileOf(confined(["/work/bp-1"])))).toEqual(NAMED_SERVICE_DENIES);
-    expect(tail(profileWith(["W0"], [modeRule]))).toEqual(NAMED_SERVICE_DENIES);
+    expect(tail(profileOf(confined(["/work/bp-1"])))).toEqual(PROFILE_TAIL);
+    expect(tail(profileWith(["W0"], [modeRule]))).toEqual(PROFILE_TAIL);
     expect(profileWith(["W0"], [modeRule])).toContain(modeRule);
   });
 
-  it("ends the gates' loopback-only profile with the named-service denies too", () => {
+  // BP-809. The kernel half, including that a later `(allow signal)` is what the tail is placed to
+  // outrank, is in sandbox.integration.test.ts.
+  it("confines every profile's signals to its own sandbox, as the last rules of all", () => {
+    const profile = profileWith(["W0"], ["(allow signal)"]);
+
+    expect(OWN_SANDBOX_SIGNALS_ONLY).toEqual(["(deny signal)", "(allow signal (target same-sandbox))"]);
+    expect(profile.split("\n").slice(-2)).toEqual(OWN_SANDBOX_SIGNALS_ONLY);
+    expect(profileOf(confined(["/work/bp-1"])).split("\n").slice(-2)).toEqual(OWN_SANDBOX_SIGNALS_ONLY);
+  });
+
+  it("ends the gates' loopback-only profile with the same tail", () => {
     const loopback = confine(CLAUDE_PATH, ["-p", "hello"], {
       writable: ["/work/bp-1"],
       network: "loopback",
@@ -97,7 +108,7 @@ describe("confine", () => {
     const profile = profileOf(loopback);
 
     expect(profile).toContain('(allow network-outbound (remote ip "localhost:*") (remote unix-socket))');
-    expect(profile.split("\n").slice(-NAMED_SERVICE_DENIES.length)).toEqual(NAMED_SERVICE_DENIES);
+    expect(profile.split("\n").slice(-PROFILE_TAIL.length)).toEqual(PROFILE_TAIL);
   });
 
   // A path travels as a -D parameter rather than as text inside the profile, so a directory name
@@ -273,7 +284,7 @@ describe("the network (BP-720)", () => {
 
   // Every mode refuses the named local services' sockets (BP-810); nothing else about the network.
   it("leaves the network alone unless asked, so the agent's own spawns still reach the API", () => {
-    const withoutNamedDenies = withNetwork().split("\n").slice(0, -NAMED_SERVICE_DENIES.length).join("\n");
+    const withoutNamedDenies = withNetwork().split("\n").slice(0, -PROFILE_TAIL.length).join("\n");
 
     expect(withoutNamedDenies).not.toContain("network");
     expect(withNetwork()).not.toContain("(deny network-outbound)");
@@ -285,7 +296,7 @@ describe("the network (BP-720)", () => {
 
     expect(profile).toContain("(deny network-outbound)");
     expect(profile).toContain('(allow network-outbound (remote ip "localhost:*") (remote unix-socket))');
-    const openRules = withNetwork().split("\n").slice(0, -NAMED_SERVICE_DENIES.length).join("\n");
+    const openRules = withNetwork().split("\n").slice(0, -PROFILE_TAIL.length).join("\n");
     expect(profile.startsWith(openRules)).toBe(true);
   });
 

@@ -552,6 +552,22 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   as above, every service not named. Preflight tries an `open` at boot, so a macOS that moves *that*
   launch elsewhere shows up as a red sandbox row rather than as an escape.
 
+  **A signal to a process outside the spawn** (**BP-809**): `(allow default)` let a step or a test
+  `kill -STOP` or `kill -KILL` any process of yours — the worker itself, so it stops claiming or dies
+  before it reaps; the reaper helper and its probe; your editor or shell. The profile now ends with
+  `(deny signal)` and `(allow signal (target same-sandbox))`, so a confined process can signal itself,
+  its children and anything they `setsid`, and nothing else: measured, `kill` from inside answers
+  `Operation not permitted` for a process you started, for the worker, and for another confined
+  spawn even under the same profile, so a daemon an earlier gate left cannot signal a later one. It
+  holds in the gates' loopback-only mode too, and these are the profile's last rules because a later
+  `(allow signal)` was measured to reopen it. Signals *into* the sandbox are untouched: the worker's
+  timeout, its SIGKILL after the grace period, a stop and the reaper still kill a confined process.
+  What it cost was measured: `npm ci`, `npm run build` and `npm test` with a vitest forks pool and a
+  two-worker jest pool, each test spawning and killing a child; git; `claude --version`; and the
+  executor's real `claude -p` (haiku, an edit step writing one file) all still succeed. A program
+  that probes whether a process outside is alive with signal 0 now gets `EPERM` rather than an
+  answer.
+
   **A file git will not print** (**BP-603**). Four things take a file's contents out of a patch: a
   bare `-diff` attribute, a `diff=<name>` driver declared binary in the config, a file git decides
   is binary on its own, and a submodule pointer. The **submodule pointer is refused** by

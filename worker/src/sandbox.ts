@@ -206,7 +206,7 @@ const LOOPBACK_ONLY = [
 //
 // Between two rules on one operation that both match, order was measured to matter: a
 // network-outbound allow placed after a named unix-socket deny reopened it (BP-810). That is why
-// `profileWith` puts NAMED_SERVICE_DENIES after everything else.
+// `profileWith` puts PROFILE_TAIL after everything else.
 //
 // Reads are deliberately untouched. The agent has `Read` over the disk already — scrub.ts is built
 // on that being true — and confining reads would take the CLI's own session with it.
@@ -258,9 +258,18 @@ export const NAMED_SERVICE_DENIES = [
   '(deny process-exec (literal "/bin/launchctl"))',
 ];
 
-// Rules for a mode go in `modeRules`, never after the result: the named denies must come last.
+// BP-809: `(allow default)` let a confined process stop or kill any process of this uid — the
+// worker, the reaper and its probe, the operator's shell. `same-sandbox` is this spawn's own
+// sandbox instance: itself, its children, and what they setsid; not another spawn with the same
+// profile. Measured, a signal from outside into the sandbox is unaffected, so the worker's timeout
+// and the reaper still kill; a later `(allow signal)` reopens it, so it sits in the tail.
+export const OWN_SANDBOX_SIGNALS_ONLY = ["(deny signal)", "(allow signal (target same-sandbox))"];
+
+export const PROFILE_TAIL = [...NAMED_SERVICE_DENIES, ...OWN_SANDBOX_SIGNALS_ONLY];
+
+// Rules for a mode go in `modeRules`, never after the result: the tail must come last.
 export function profileWith(names: string[], modeRules: string[] = []): string {
-  return [profileFor(names), ...modeRules, ...NAMED_SERVICE_DENIES].join("\n");
+  return [profileFor(names), ...modeRules, ...PROFILE_TAIL].join("\n");
 }
 
 /**

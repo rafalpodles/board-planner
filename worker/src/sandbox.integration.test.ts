@@ -823,4 +823,125 @@ describe.skipIf(!onMac)("confine against the real sandbox", () => {
       }
     });
   });
+
+  /**
+   * BP-809: under `(allow default)` a confined process could `kill -STOP` the worker, the reaper or
+   * any process of the operator's. Each refusal has a control with the escape hatch set, where the
+   * same command reaches the same sleeper, so a kill that failed for another reason cannot pass.
+   * Only sleepers this test started are ever sent a real signal; the worker gets signal 0.
+   */
+  describe("signals", { timeout: 60_000 }, () => {
+    const sleepers: ChildProcess[] = [];
+
+    function outsideSleeper(): ChildProcess {
+      const sleeper = spawn("/bin/sleep", ["60"], { stdio: "ignore" });
+      sleepers.push(sleeper);
+      return sleeper;
+    }
+
+    const alive = (pid: number) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    async function shAs(script: string, env: NodeJS.ProcessEnv, network?: "open" | "loopback") {
+      const spawned = confine("/bin/sh", ["-c", script], { writable: [worktree], env, network });
+      if (!("command" in spawned)) throw new Error(`refused: ${spawned.refusal}`);
+      return runner.run(spawned.command, spawned.args, { cwd: worktree, timeoutMs: 30_000 });
+    }
+
+    const exited = (child: ChildProcess) =>
+      child.exitCode !== null || child.signalCode !== null
+        ? Promise.resolve()
+        : new Promise<void>((resolve) => child.once("exit", () => resolve()));
+
+    afterEach(async () => {
+      for (const sleeper of sleepers.splice(0)) {
+        sleeper.kill("SIGTERM");
+        await exited(sleeper);
+      }
+    });
+
+    it("kills a process started outside when nothing confines it — the control", async () => {
+      const sleeper = outsideSleeper();
+
+      const result = await shAs(`kill -TERM ${sleeper.pid}`, { [UNCONFINED_ESCAPE_HATCH]: "1" });
+      await Promise.race([exited(sleeper), new Promise((resolve) => setTimeout(resolve, 5_000))]);
+
+      expect(result.code, result.stderr).toBe(0);
+      expect(sleeper.signalCode).toBe("SIGTERM");
+    });
+
+    for (const network of ["open", "loopback"] as const) {
+      it(`cannot signal a process started outside its sandbox, in ${network} mode`, async () => {
+        const sleeper = outsideSleeper();
+
+        const result = await shAs(`kill -TERM ${sleeper.pid}`, {}, network);
+
+        expect(result.code).not.toBe(0);
+        expect(result.stderr).toContain("Operation not permitted");
+        expect(alive(sleeper.pid!)).toBe(true);
+      });
+
+      it(`can still signal itself and its own child, in ${network} mode`, async () => {
+        const result = await shAs("kill -0 $$ || exit 9; /bin/sleep 30 & kill -TERM $! || exit 8; wait $!; echo $?", {}, network);
+
+        expect(result.code, result.stderr).toBe(0);
+        expect(result.stdout.trim()).toBe("143");
+      });
+    }
+
+    it("reaches the worker's own process only when nothing confines it", async () => {
+      const probe = `kill -0 ${process.pid}`;
+
+      expect((await shAs(probe, { [UNCONFINED_ESCAPE_HATCH]: "1" })).code).toBe(0);
+      const confined = await shAs(probe, {});
+      expect(confined.code).not.toBe(0);
+      expect(confined.stderr).toContain("Operation not permitted");
+    });
+
+    // A daemon an earlier gate left running sits in a sandbox of its own, with this same profile
+    it("cannot signal another confined spawn, even one under the same profile", async () => {
+      const other = confine("/bin/sleep", ["60"], { writable: [worktree], env: {} });
+      if (!("command" in other)) throw new Error(`refused: ${other.refusal}`);
+      const sibling = spawn(other.command, other.args, { stdio: "ignore" });
+      sleepers.push(sibling);
+
+      const result = await shAs(`kill -TERM ${sibling.pid}`, {});
+
+      expect(result.stderr).toContain("Operation not permitted");
+      expect(alive(sibling.pid!)).toBe(true);
+    });
+
+    // The rule binds the sender, and the worker is outside: its timeout and a stop still kill in
+    it("still lets the worker's timeout kill a confined process that ignores SIGTERM", async () => {
+      const spawned = confine("/bin/sh", ["-c", "trap '' TERM; /bin/sleep 60 & wait"], { writable: [worktree], env: {} });
+      if (!("command" in spawned)) throw new Error(`refused: ${spawned.refusal}`);
+      const started = Date.now();
+
+      const result = await runner.run(spawned.command, spawned.args, { cwd: worktree, timeoutMs: 500 });
+
+      expect(result.timedOut).toBe(true);
+      expect(result.machineFault).toBeUndefined();
+      expect(Date.now() - started).toBeLessThan(20_000);
+    });
+
+    it("still lets an abort kill a confined process", async () => {
+      const spawned = confine("/bin/sh", ["-c", "/bin/sleep 60"], { writable: [worktree], env: {} });
+      if (!("command" in spawned)) throw new Error(`refused: ${spawned.refusal}`);
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), 300);
+      const started = Date.now();
+
+      const result = await runner.run(spawned.command, spawned.args, { cwd: worktree, timeoutMs: 30_000, signal: controller.signal });
+
+      expect(result.code).not.toBe(0);
+      expect(result.machineFault).toBeUndefined();
+      expect(Date.now() - started).toBeLessThan(10_000);
+    });
+  });
 });
