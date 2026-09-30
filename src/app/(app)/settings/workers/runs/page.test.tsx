@@ -80,6 +80,32 @@ describe("the fleet's run history", () => {
     expect(screen.getByText("BP-158")).toBeTruthy();
   });
 
+  it("keeps every clamped name whole in its cell's title", async () => {
+    const agentName = "Implement, review twice, run the full end-to-end suite and merge";
+    const workerName = "rafal-macbook-pro-m3-max-studio-office-second-desk";
+    const projectName = "Customer onboarding and billing platform migration board";
+    api.get.mockResolvedValue([run({ agentName, workerName, projectName })]);
+
+    render(<FleetRunsPage />);
+
+    await screen.findByText(agentName);
+    for (const name of [agentName, workerName, projectName]) {
+      expect(screen.getByTitle(name).tagName).toBe("TD");
+    }
+  });
+
+  it("labels each value for the narrow layout, which has no column headers", async () => {
+    api.get.mockResolvedValue([run({ agentName: "", workerName: "" })]);
+
+    render(<FleetRunsPage />);
+
+    const row = await screen.findByTestId("fleet-run");
+    const cells = Array.from(row.querySelectorAll("td")).map((cell) => cell.textContent);
+    expect(cells).toEqual(
+      expect.arrayContaining(["ProjectBoard Planner", "Agent—", "Machine—", "Took4 min", "Cost$0.42"])
+    );
+  });
+
   it("says how the run ended", async () => {
     api.get.mockResolvedValue([run()]);
 
