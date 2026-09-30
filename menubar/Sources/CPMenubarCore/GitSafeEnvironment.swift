@@ -27,8 +27,11 @@ import Foundation
 /// `credential.helper=osxkeychain` and `init.defaultBranch=main`) and `~/.gitconfig` are read.
 /// `GIT_CONFIG_NOSYSTEM` is removed rather than set, because on Apple git it drops the vendor file
 /// too, and with it the only credential helper most operators have (BP-798, measured on
-/// Apple git 2.54.0 and 2.50.1). A Homebrew git keeps its osxkeychain in the system file, so it
-/// has none here unless `~/.gitconfig` names one.
+/// Apple git 2.54.0 and 2.50.1). A Homebrew git keeps its osxkeychain in the system file, so for the
+/// clone step's git `credential.helper=osxkeychain` is put back on the command line, but only
+/// when that git has no vendor file naming a helper, `git-credential-osxkeychain` is installed, and
+/// `~/.gitconfig` names no helper at all — an empty `credential.helper=` there is a deliberate
+/// reset and is respected.
 ///
 /// `~/.gitconfig` is left readable deliberately, which is where this parts company with the
 /// worker: delivery drops it because the agent shares that filesystem, whereas this runs during
@@ -47,5 +50,77 @@ public enum GitSafeEnvironment {
             hardened.removeValue(forKey: redirect)
         }
         return hardened
+    }
+
+    public static func apply(
+        to environment: [String: String], git: String?, probe: KeychainHelperProbe = .live
+    ) -> [String: String] {
+        var hardened = apply(to: environment)
+        guard let git, probe.keychainHelperNeeded(git: git, environment: hardened) else { return hardened }
+        let index = Int(hardened["GIT_CONFIG_COUNT"] ?? "") ?? 0
+        hardened["GIT_CONFIG_COUNT"] = String(index + 1)
+        hardened["GIT_CONFIG_KEY_\(index)"] = "credential.helper"
+        hardened["GIT_CONFIG_VALUE_\(index)"] = "osxkeychain"
+        return hardened
+    }
+}
+
+public struct KeychainHelperProbe: Sendable {
+    public typealias Check = @Sendable (_ git: String, _ environment: [String: String]) -> Bool
+
+    public var vendorFileNamesHelper: Check
+    public var osxkeychainInstalled: Check
+    public var globalConfigNamesHelper: Check
+
+    public init(vendorFileNamesHelper: @escaping Check, osxkeychainInstalled: @escaping Check,
+                globalConfigNamesHelper: @escaping Check) {
+        self.vendorFileNamesHelper = vendorFileNamesHelper
+        self.osxkeychainInstalled = osxkeychainInstalled
+        self.globalConfigNamesHelper = globalConfigNamesHelper
+    }
+
+    func keychainHelperNeeded(git: String, environment: [String: String]) -> Bool {
+        !vendorFileNamesHelper(git, environment)
+            && !globalConfigNamesHelper(git, environment)
+            && osxkeychainInstalled(git, environment)
+    }
+
+    // Each check only reads config or stats a file; none runs a credential helper.
+    public static let live = KeychainHelperProbe(
+        vendorFileNamesHelper: { git, environment in
+            let answer = run(git, ["config", "--show-scope", "--get-all", "credential.helper"], environment)
+            return answer.output.split(separator: "\n").contains { $0.hasPrefix("unknown\t") }
+        },
+        osxkeychainInstalled: { git, environment in
+            let execPath = run(git, ["--exec-path"], environment).output
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let onPath = (environment["PATH"] ?? "").split(separator: ":").map(String.init)
+            return ([execPath] + onPath).filter { !$0.isEmpty }.contains {
+                FileManager.default.isExecutableFile(atPath: "\($0)/git-credential-osxkeychain")
+            }
+        },
+        // Exit 1 is git's "no such key"; any other answer, an unreadable file included, is taken as
+        // the operator having a say.
+        globalConfigNamesHelper: { git, environment in
+            run(git, ["config", "--global", "--get-all", "credential.helper"], environment).code != 1
+        }
+    )
+
+    private static func run(_ git: String, _ args: [String], _ environment: [String: String])
+        -> (code: Int32, output: String)
+    {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: git)
+        process.arguments = args
+        process.environment = environment
+        process.currentDirectoryURL = FileManager.default.temporaryDirectory
+        process.standardInput = FileHandle.nullDevice
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return (-1, "") }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return (process.terminationStatus, String(data: data, encoding: .utf8) ?? "")
     }
 }

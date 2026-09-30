@@ -137,7 +137,7 @@ enum WorkerProcess {
                 environment["GH_TOKEN"] = githubToken
                 environment["GITHUB_TOKEN"] = githubToken
             }
-            process.environment = GitSafeEnvironment.apply(to: environment)
+            process.environment = GitSafeEnvironment.apply(to: environment, git: known == .git ? command.executable : nil)
             if let cwd { process.currentDirectoryURL = URL(fileURLWithPath: cwd) }
 
             let pipe = Pipe()
