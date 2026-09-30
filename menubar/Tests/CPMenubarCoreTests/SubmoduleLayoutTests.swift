@@ -30,6 +30,28 @@ import XCTest
     return (task.terminationStatus, String(data: data, encoding: .utf8) ?? "")
 }
 
+struct SubmoduleFixtureFailed: Error {}
+
+/// A failure, never a skip, when a `submodule add` fixture did not produce a submodule. On CI's
+/// Homebrew git 2.55.0, which has no Xcode `gitconfig` setting `init.defaultBranch=main`, a bare
+/// origin's HEAD named an unborn `master`, the add stopped at "You are on a branch yet to be born",
+/// and no gitlink was staged — measured. A skip kept every submodule test here dark on CI for
+/// exactly that reason, and a fixture that carries on checks an ordinary nested clone instead.
+///
+/// `checkedOut` is the caller's own file-exists check, and it is still needed: a spawn into a cwd
+/// that does not exist blocks in `readDataToEndOfFile()` and hangs the suite rather than failing.
+func requireSubmoduleFixture(
+    added: (code: Int32, output: String), staged: String, checkedOut: Bool,
+    file: StaticString = #filePath, line: UInt = #line
+) throws {
+    guard added.code == 0, staged.hasPrefix("160000 "), checkedOut else {
+        XCTFail(
+            "the fixture is not a submodule: `submodule add` exited \(added.code) (\(added.output)), index has [\(staged)], checked out: \(checkedOut)",
+            file: file, line: line)
+        throw SubmoduleFixtureFailed()
+    }
+}
+
 /// BP-734. Real submodules in the layouts where the git-dir git reports carries no `/.git/modules/`
 /// segment, driven through all three readers of `LinkedWorktreeCheck`. Measured on git 2.54.0: with
 /// the superproject's `.git` a symlink, or made by `init --separate-git-dir`, both `--git-dir` and
@@ -124,24 +146,13 @@ final class SubmoduleLayoutTests: XCTestCase {
         return (superproject, submodulePath)
     }
 
-    private struct FixtureFailed: Error {}
-
-    /// A failure, never a skip: on CI's Homebrew git 2.55.0, which has no Xcode `gitconfig` setting
-    /// `init.defaultBranch=main`, a bare origin's HEAD named an unborn `master`, the add stopped at
-    /// "You are on a branch yet to be born", and the superproject never got a gitlink. The clone was
-    /// left behind, `checkout main` filled it in, and every test then checked an ordinary nested
-    /// clone — which is correctly a repository — and read as the detection failing.
-    ///
-    /// It also keeps a missing `vendor` from hanging the suite: a spawn into a cwd that does not
-    /// exist blocks in `readDataToEndOfFile()` (see CheckoutRemovalWorktreeTests).
     private func requireGitlink(
         _ relativePath: String, in superproject: String, after added: (code: Int32, output: String)
     ) throws {
-        let staged = git(superproject, ["ls-files", "--stage", "--", relativePath]).output
-        guard added.code == 0, staged.hasPrefix("160000 ") else {
-            XCTFail("the fixture is not a submodule: `submodule add` exited \(added.code) (\(added.output)), index has \(staged)")
-            throw FixtureFailed()
-        }
+        try requireSubmoduleFixture(
+            added: added,
+            staged: git(superproject, ["ls-files", "--stage", "--", relativePath]).output,
+            checkedOut: true)
     }
 
     private func assertTheFixtureIsTheLayoutItClaims(_ layout: Layout, _ submodulePath: String) {
