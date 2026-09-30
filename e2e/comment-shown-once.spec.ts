@@ -2,13 +2,6 @@ import { test, expect, type Page, type Route } from "@playwright/test";
 import { PROJECT_KEY, SIBLING_TASK_NUMBER, seed } from "./seed";
 import { signIn } from "./session";
 
-/**
- * BP-800. A read of the comments that was already in flight when a comment was posted can answer
- * after the server saved it but before the post's own answer reaches the page. The composer used to
- * empty itself only on that answer, so for that moment the new comment sat in the list and, word
- * for word, in the box it was typed into.
- */
-
 const TASK = `/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`;
 const PHONE = { width: 390, height: 844 };
 const DESKTOP = { width: 1280, height: 800 };
@@ -23,10 +16,6 @@ function deferred() {
   return { promise, resolve };
 }
 
-/**
- * Holds every read of the comments until the post has been saved, then lets them answer — with the
- * new comment in them — while the post's own answer is still held back.
- */
 async function interleave(page: Page) {
   const saved = deferred();
   const answerPost = deferred();

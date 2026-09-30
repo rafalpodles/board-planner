@@ -127,4 +127,17 @@ describe("while the post is in flight", () => {
     expect(onPosted).toHaveBeenCalledTimes(1);
     expect(field().value).toBe("");
   });
+
+  it("does not overwrite what was typed while a failing post was in flight", async () => {
+    let refuse: (reason: unknown) => void = () => {};
+    api.post.mockReturnValue(new Promise((_, reject) => (refuse = reject)));
+    renderBar();
+    await act(async () => type("First try"));
+    await act(async () => screen.getByRole("button", { name: "Post comment" }).click());
+
+    await act(async () => type("Second thought"));
+    await act(async () => refuse(new Error("nope")));
+
+    expect(field().value).toBe("Second thought");
+  });
 });

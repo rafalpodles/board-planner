@@ -603,4 +603,20 @@ describe("posting a comment", () => {
 
     expect(box.value).toBe("Second thought");
   });
+
+  it("does not start a second post on Cmd+Enter while one is in flight", async () => {
+    serve([]);
+    const post = deferred<unknown>();
+    api.post.mockReturnValue(post.promise);
+    render(<Comments projectId="TP" taskId="t1" />);
+
+    const box = await typeAndSend("First try");
+    fireEvent.change(box, { target: { value: "Second thought" } });
+    await act(async () => {
+      fireEvent.keyDown(box, { key: "Enter", metaKey: true });
+    });
+
+    expect(api.post).toHaveBeenCalledTimes(1);
+    await act(async () => post.resolve(saved));
+  });
 });

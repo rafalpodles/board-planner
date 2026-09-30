@@ -109,7 +109,7 @@ export function Comments({
 
   async function postComment() {
     const draft = body;
-    if (!draft.trim()) return;
+    if (loading || !draft.trim()) return;
     setLoading(true);
     // At send, not on the answer: an earlier read can show the saved comment first (BP-800)
     setBody("");
