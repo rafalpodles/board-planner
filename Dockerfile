@@ -23,6 +23,8 @@ ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
+# The standalone server.js reads this instead of --keepAliveTimeout; above a proxy's 60 s idle limit (BP-814)
+ENV KEEP_ALIVE_TIMEOUT=65000
 
 RUN addgroup -S nodejs && adduser -S -G nodejs nextjs
 

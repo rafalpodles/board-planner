@@ -118,6 +118,7 @@ export const GROUPS = {
     "day-zero.spec.ts",
     "bounded-bodies.spec.ts",
     "content-security-policy.spec.ts",
+    "keep-alive-timeout.spec.ts",
     "entitlements.spec.ts",
     "sessions-and-auth.spec.ts",
     "proxied-login-throttle.spec.ts",

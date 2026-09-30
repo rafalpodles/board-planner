@@ -190,7 +190,8 @@ jobs:
 
   e2e_production_csp:
     # The CSP nonce is a production-build behaviour — dev adds 'unsafe-eval' and scripts of its
-    # own — and every other e2e job runs `next dev`. One spec, against `next start` (BP-313).
+    # own — and every other e2e job runs `next dev`. Started through `npm start`, the way Railway
+    # starts it, which is also what the keep-alive spec is about (BP-313, BP-814).
     name: End to end — CSP against a production build
     runs-on: ubuntu-latest
     services:
@@ -227,7 +228,7 @@ jobs:
       - name: Tests
         env:
           E2E_PROD: "1"
-        run: npx playwright test e2e/content-security-policy.spec.ts
+        run: npx playwright test e2e/content-security-policy.spec.ts e2e/keep-alive-timeout.spec.ts
       - uses: actions/upload-artifact@v7
         if: failure()
         with:

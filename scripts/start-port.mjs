@@ -28,3 +28,16 @@ export function startPort(dir, env) {
   }
   return DEFAULT_PORT;
 }
+
+// Above Railway's edge, which closes idle HTTP/1.1 connections after 60 s (BP-814)
+export const KEEP_ALIVE_TIMEOUT_MS = "65000";
+
+/**
+ * @param {string} dir
+ * @param {Record<string, string | undefined>} env
+ * @param {string[]} extra
+ * @returns {string[]}
+ */
+export function nextStartArgs(dir, env, extra) {
+  return ["start", "-H", "0.0.0.0", "-p", startPort(dir, env), "--keepAliveTimeout", KEEP_ALIVE_TIMEOUT_MS, ...extra];
+}

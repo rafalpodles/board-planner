@@ -80,7 +80,7 @@ export const RUN_PROXIED_SERVER = process.env.E2E_PROXIED_SERVER === "1";
 
 // `next start` over a fresh build instead of `next dev`, for the specs whose subject only exists in
 // production output — the CSP nonce, where dev adds 'unsafe-eval' and scripts of its own (BP-313).
-// Only content-security-policy.spec.ts is run this way; the rest of the suite leans on dev-only
+// Only content-security-policy.spec.ts and keep-alive-timeout.spec.ts are run this way; the rest of the suite leans on dev-only
 // surfaces such as /api/e2e/digest and loopback webhooks.
 export const RUN_AGAINST_PRODUCTION_BUILD = process.env.E2E_PROD === "1";
 
@@ -335,7 +335,7 @@ export default defineConfig({
     },
     {
       command: RUN_AGAINST_PRODUCTION_BUILD
-        ? `npm run build && npx next start --port ${PORT}`
+        ? `npm run build && npm start`
         : `npm run dev -- --port ${PORT}`,
       url: BASE_URL,
       reuseExistingServer: false,
@@ -343,8 +343,10 @@ export default defineConfig({
       timeout: RUN_AGAINST_PRODUCTION_BUILD ? 600_000 : 240_000,
       stdout: "pipe",
       stderr: "pipe",
+      // Started the way Railway starts it, and without the keep-alive preload, whose
+      // keepAliveTimeout of 0 would hide the one `npm start` sets (BP-814)
       env: RUN_AGAINST_PRODUCTION_BUILD
-        ? { ...devServerEnv(BASE_URL), NEXT_DIST_DIR: ".next-e2e-prod" }
+        ? { ...devServerEnv(BASE_URL), NODE_OPTIONS: process.env.NODE_OPTIONS ?? "", PORT: String(PORT), NEXT_DIST_DIR: ".next-e2e-prod" }
         : devServerEnv(BASE_URL),
     },
     // Opt-in (RUN_PROXIED_SERVER): see the constant above. Same app, same seeded database, only

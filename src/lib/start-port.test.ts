@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DEFAULT_PORT, startPort } from "../../scripts/start-port.mjs";
+import { DEFAULT_PORT, nextStartArgs, startPort } from "../../scripts/start-port.mjs";
 
 const dirs: string[] = [];
 
@@ -36,5 +36,23 @@ describe("the port npm start listens on", () => {
   it("stays on 3000 when nothing names a port", () => {
     expect(startPort(project({ ".env": "MONGODB_URI=mongodb://x\n" }), {})).toBe(DEFAULT_PORT);
     expect(startPort(project({}), { PORT: " " })).toBe("3000");
+  });
+});
+
+// BP-814. Railway's edge keeps idle upstream connections for 60 s; Node's default closes them at 5.
+describe("the arguments npm start gives next start", () => {
+  const RAILWAY_EDGE_IDLE_MS = 60_000;
+
+  it("keeps idle connections open longer than Railway's edge does", () => {
+    const args = nextStartArgs(project({}), {}, []);
+
+    expect(Number(args[args.indexOf("--keepAliveTimeout") + 1])).toBeGreaterThan(RAILWAY_EDGE_IDLE_MS);
+  });
+
+  it("puts the caller's own flags last, so they win", () => {
+    const args = nextStartArgs(project({}), { PORT: "8080" }, ["--keepAliveTimeout", "1000"]);
+
+    expect(args.slice(-2)).toEqual(["--keepAliveTimeout", "1000"]);
+    expect(args.slice(0, 5)).toEqual(["start", "-H", "0.0.0.0", "-p", "8080"]);
   });
 });
