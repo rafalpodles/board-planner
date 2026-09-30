@@ -28,6 +28,7 @@ const patch = [
 function context(diff: Partial<DiffStats> = {}, task: Partial<ClaimedTask> = {}): GateContext {
   return {
     worktreePath: "/wt",
+    worktreeDir: { path: "/wt", dev: 0, ino: 0 },
     task: claimedTask(task),
     result: {
       status: "completed",

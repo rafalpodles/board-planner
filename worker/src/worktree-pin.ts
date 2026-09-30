@@ -3,6 +3,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "pat
 import { childEnv } from "./env.js";
 import { Runner } from "./exec.js";
 import { gitArgs, localGitEnv, requireGitPath } from "./git-safety.js";
+import { DirStat } from "./sandbox.js";
 
 const TIMEOUT_MS = 60_000;
 const QUOTED_AT_MOST = 160;
@@ -33,6 +34,7 @@ export interface PointerFiles {
   kind(path: string): "file" | "directory" | "symlink" | "other" | "missing";
   list(dir: string): string[];
   realpath(path: string): string;
+  lstat(path: string): DirStat;
 }
 
 export const nodePointerFiles: PointerFiles = {
@@ -44,6 +46,7 @@ export const nodePointerFiles: PointerFiles = {
       return [];
     }
   },
+  lstat: (path) => lstatSync(path),
   realpath: (path) => {
     try {
       return realpathSync(path);

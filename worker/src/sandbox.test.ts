@@ -1,14 +1,21 @@
 import { describe, it, expect } from "vitest";
-import { confine, confineTool, SANDBOX_COMMAND, UNCONFINED_REASON } from "./sandbox.js";
+import { confine, confineTool, DirStat, SANDBOX_COMMAND, UNCONFINED_REASON } from "./sandbox.js";
 import { UNCONFINED_ESCAPE_HATCH } from "./env.js";
 import { CLAUDE_PATH } from "./__fixtures__/tool-paths.js";
 
 const identity = (path: string) => path;
+const stat = (kind: "directory" | "symlink" | "file", ino = 7): DirStat => ({
+  dev: 1,
+  ino,
+  isDirectory: () => kind === "directory",
+  isSymbolicLink: () => kind === "symlink",
+});
+const aDirectory = () => stat("directory");
 
 // Empty rather than process.env: an operator who has accepted the risk in their own shell would
 // otherwise turn the confinement off inside every test below, and each one would still be green.
 function confined(writable: string[], platform: NodeJS.Platform = "darwin") {
-  return confine(CLAUDE_PATH, ["-p", "hello"], { writable, platform, realpath: identity, env: {} });
+  return confine(CLAUDE_PATH, ["-p", "hello"], { writable, platform, realpath: identity, lstat: aDirectory, env: {} });
 }
 
 function profileOf(result: ReturnType<typeof confined>): string {
@@ -62,7 +69,7 @@ describe("confine", () => {
   // A path travels as a -D parameter rather than as text inside the profile, so a directory name
   // containing a quote or a backslash cannot close the string it sits in and add rules of its own.
   it("passes each writable path as a parameter, never as profile text", () => {
-    const evil = '/work/a" (allow file-write* (subpath "/'
+    const evil = '/work/a" (allow file-write* (subpath "/x'
     const result = confined([evil, "/work/b"]);
 
     expect(profileOf(result)).not.toContain(evil);
@@ -88,10 +95,78 @@ describe("confine", () => {
       writable: ["/tmp/run-7"],
       platform: "darwin",
       env: {},
-      realpath: (path) => (path === "/tmp/run-7" ? "/private/tmp/run-7" : path),
+      realpath: (path) => (path === "/tmp" ? "/private/tmp" : path),
+      lstat: aDirectory,
     });
 
     expect(Object.values(paramsOf(result))).toEqual(["/private/tmp/run-7"]);
+  });
+
+  // BP-804. Any process that was allowed a directory can replace it with a symlink, and resolving it
+  // would hand the next confinement wherever that points — `$HOME`, measured.
+  it("resolves only the parent, and refuses a path that is itself a symlink", () => {
+    const resolved: string[] = [];
+    const result = confine(CLAUDE_PATH, [], {
+      writable: ["/work/bp-1"],
+      platform: "darwin",
+      env: {},
+      realpath: (path) => {
+        resolved.push(path);
+        return path === "/work/bp-1" ? "/Users/operator" : path;
+      },
+      lstat: () => stat("symlink"),
+    });
+
+    expect(resolved).toEqual(["/work"]);
+    expect("refusal" in result && result.refusal).toMatch(/\/work\/bp-1 is a symlink/);
+  });
+
+  it("refuses a path that is not a directory", () => {
+    const result = confine(CLAUDE_PATH, [], {
+      writable: ["/work/bp-1"],
+      platform: "darwin",
+      env: {},
+      realpath: identity,
+      lstat: () => stat("file"),
+    });
+
+    expect("refusal" in result && result.refusal).toMatch(/not a directory/);
+  });
+});
+
+describe("a directory recorded at creation (BP-804)", () => {
+  const recorded = { path: "/private/work/bp-1", dev: 1, ino: 7 };
+  const confinedTo = (lstat: (path: string) => DirStat) =>
+    confine(CLAUDE_PATH, [], {
+      writable: [recorded],
+      platform: "darwin",
+      env: {},
+      realpath: () => {
+        throw new Error("a recorded directory is never resolved again");
+      },
+      lstat,
+    });
+
+  it("is the rule as it was recorded, never resolved again", () => {
+    expect(Object.values(paramsOf(confinedTo(aDirectory)))).toEqual(["/private/work/bp-1"]);
+  });
+
+  it.each([
+    ["a symlink", () => stat("symlink"), /replaced by a symlink/],
+    ["another directory at the same path", () => stat("directory", 8), /replaced by another directory/],
+    ["something that is not a directory", () => stat("file"), /not a directory/],
+    [
+      "nothing",
+      () => {
+        throw new Error("ENOENT");
+      },
+      /removed/,
+    ],
+  ] as const)("is refused once it is %s", (_, lstat, reason) => {
+    const result = confinedTo(lstat);
+
+    expect("refusal" in result && result.refusal).toMatch(reason);
+    expect("refusal" in result && result.refusal).toContain("/private/work/bp-1");
   });
 
   // A path that cannot be resolved is not a path this can confine anything to. Refusing beats
@@ -160,7 +235,7 @@ describe("confine", () => {
 // directly, where the same lookup applies.
 describe("the program inside the wrapper", () => {
   it("is refused by name, confined or not", () => {
-    const options = { writable: ["/work/bp-1"], platform: "darwin" as const, realpath: identity, env: {} };
+    const options = { writable: ["/work/bp-1"], platform: "darwin" as const, realpath: identity, lstat: aDirectory, env: {} };
 
     expect(confine("claude", ["-p"], options)).toEqual({
       refusal: 'refusing to run "claude" by name on PATH: confine needs its absolute path',
@@ -174,7 +249,7 @@ describe("the program inside the wrapper", () => {
     const result = confineTool("npm", "", ["test"], {
       writable: ["/work/bp-1"],
       platform: "darwin",
-      realpath: identity,
+      realpath: identity, lstat: aDirectory,
       env: {},
     });
 
@@ -185,7 +260,7 @@ describe("the program inside the wrapper", () => {
     const result = confineTool("npm", "/opt/homebrew/bin/npm", ["test"], {
       writable: ["/work/bp-1"],
       platform: "darwin",
-      realpath: identity,
+      realpath: identity, lstat: aDirectory,
       env: {},
     });
     if (!("command" in result)) throw new Error(`expected a confined spawn, got ${result.refusal}`);
@@ -200,7 +275,7 @@ describe("the operator's escape hatch", () => {
     confine(CLAUDE_PATH, ["-p", "hello"], {
       writable: ["/work/bp-1"],
       platform,
-      realpath: identity,
+      realpath: identity, lstat: aDirectory,
       env: { [UNCONFINED_ESCAPE_HATCH]: value },
     });
 
@@ -240,7 +315,7 @@ describe("the operator's escape hatch", () => {
     const result = confine(CLAUDE_PATH, [], {
       writable: ["/work/bp-1"],
       platform: "linux",
-      realpath: identity,
+      realpath: identity, lstat: aDirectory,
       env: {},
     });
 

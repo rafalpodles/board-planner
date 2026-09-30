@@ -97,12 +97,12 @@ describe.skipIf(!onMac)("confine against the real sandbox", () => {
   // form that resolves elsewhere again. A profile built from the unresolved path denies the
   // worktree write — the failure looks like the sandbox working, which is why it is pinned from
   // the permitted side as well as the denied one.
-  it("resolves the worktree path, so a symlinked temp directory is still writable", async () => {
+  it("resolves the worktree's parent, so a symlinked temp directory is still writable", async () => {
     const linked = join(dir, "linked");
-    symlinkSync(worktree, linked);
+    symlinkSync(dir, linked);
 
-    const spawn = confine("/bin/sh", ["-c", `echo via-link > ${linked}/through.txt`], {
-      writable: [linked],
+    const spawn = confine("/bin/sh", ["-c", `echo via-link > ${linked}/worktree/through.txt`], {
+      writable: [join(linked, "worktree")],
       env: {},
     });
     if (!("command" in spawn)) throw new Error(`refused: ${spawn.refusal}`);
@@ -110,6 +110,16 @@ describe.skipIf(!onMac)("confine against the real sandbox", () => {
 
     expect(result.code).toBe(0);
     expect(readFileSync(join(worktree, "through.txt"), "utf8")).toBe("via-link\n");
+  });
+
+  // BP-804: never the directory itself, which whatever was allowed it can have replaced
+  it("refuses a writable path that is itself a symlink, rather than allowing its target", () => {
+    const linked = join(dir, "linked");
+    symlinkSync(outside, linked);
+
+    const spawn = confine("/bin/sh", ["-c", "true"], { writable: [linked], env: {} });
+
+    expect("refusal" in spawn && spawn.refusal).toMatch(/is a symlink/);
   });
 
   /**

@@ -11,6 +11,7 @@ import { WorkerConfig } from "./config.js";
 import { plantedConfig, UNREADABLE_CONFIG } from "./repos.js";
 import { CommandResult, Runner } from "./exec.js";
 import { gitArgs, localGitEnv, requireGitPath } from "./git-safety.js";
+import { dirReplaced, RecordedDir, recordDir } from "./sandbox.js";
 import { GitPin, nodePointerFiles, pinTampering, PointerFiles, recordPin } from "./worktree-pin.js";
 
 const GIT_TIMEOUT_MS = 60_000;
@@ -98,7 +99,9 @@ export interface Worktree {
   commitIdentity: CommitIdentity;
   /** Every git and gh call against `path` runs with this git dir, never through `path/.git` (BP-794). */
   pin: GitPin;
-  /** What a step or gate has done to `.git` or the index flags since creation, or null. */
+  /** `path` as `worktree add` left it; every confinement of the run is to this and never to `path` resolved again (BP-804). */
+  dir: RecordedDir;
+  /** What a step or gate has done to the directory, `.git` or the index flags since creation, or null. */
   tampering(): Promise<string | null>;
 }
 
@@ -421,13 +424,18 @@ export function createWorkspace(
       await refuseIfPoisoned();
       // -B resets the branch instead of failing if a crashed previous attempt already created it
       await git(["worktree", "add", "-B", branch, "--", path, baseSha]);
+      const dir = recordDir(path, files.realpath, files.lstat);
       const pin = await recordPin(runner, gitPath, config.repoPath, path, files);
       return {
         path,
         baseSha,
         commitIdentity: identity.identity,
         pin,
-        tampering: () => pinTampering(runner, gitPath, pin, files),
+        dir,
+        tampering: async () => {
+          const replaced = dirReplaced(dir, files.lstat);
+          return replaced ? `its directory ${replaced}` : pinTampering(runner, gitPath, pin, files);
+        },
       };
     },
 

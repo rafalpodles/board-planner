@@ -9,6 +9,7 @@ import { parseStream, StreamEvent } from "./stream.js";
 import { claimedTask } from "./__fixtures__/task.js";
 import { workerConfig } from "./__fixtures__/config.js";
 import { CLAUDE_PATH } from "./__fixtures__/tool-paths.js";
+import { recordDir } from "./sandbox.js";
 
 // Whole but for the policy fields, which the tests below leave unset on purpose — model and
 // fallbackModel are optional on WorkerConfig, and what the executor does without them is the thing
@@ -30,6 +31,7 @@ afterAll(() => rmSync(worktreePath, { recursive: true, force: true }));
 const options = {
   task,
   worktreePath,
+  worktreeDir: recordDir(worktreePath),
   brief: {
     prompt: "Make the change the task describes.",
     capability: "edit" as const,
@@ -819,7 +821,7 @@ describe("the agent is confined to its worktree", () => {
 
     const outcome = await createExecutor(config, runner, CLAUDE_PATH).execute({
       ...options,
-      worktreePath: join(worktreePath, "never-created"),
+      worktreeDir: { ...options.worktreeDir, path: join(worktreePath, "never-created") },
     });
 
     expect(run).not.toHaveBeenCalled();

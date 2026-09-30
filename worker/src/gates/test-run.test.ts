@@ -6,7 +6,7 @@ import { testRunGate } from "./test-run.js";
 import { CommandResult, Runner } from "../exec.js";
 import { GateContext } from "../types.js";
 import { claimedTask } from "../__fixtures__/task.js";
-import { SANDBOX_COMMAND, UNCONFINED_REASON } from "../sandbox.js";
+import { recordDir, SANDBOX_COMMAND, UNCONFINED_REASON } from "../sandbox.js";
 import { NPM_PATH } from "../__fixtures__/tool-paths.js";
 
 const TIMEOUT_MS = 5000;
@@ -19,6 +19,7 @@ let worktree = "";
 beforeEach(() => {
   worktree = mkdtempSync(join(tmpdir(), "bp608-test-run-"));
   context.worktreePath = worktree;
+  context.worktreeDir = recordDir(worktree);
 });
 
 afterEach(() => {
@@ -27,6 +28,7 @@ afterEach(() => {
 
 const context: GateContext = {
   worktreePath: "/wt",
+  worktreeDir: { path: "/wt", dev: 0, ino: 0 },
   task: claimedTask({ title: "t", description: "d" }),
   result: { status: "completed", summary: "", filesChanged: [], testsAdded: [], blockedReason: "" },
   diff: { changedLines: 10, changedFiles: ["src/a.ts"], patch: "", truncated: false, headSha: "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c" , symlinks: [], suppressedDiffs: [], gitlinks: []},

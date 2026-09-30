@@ -595,6 +595,7 @@ export async function runTask(
         // summarise(), whose result type cannot hold a file body, a prompt or a diff
         const outcome = await runStep(entry, {
           worktreePath: worktree.path,
+          worktreeDir: worktree.dir,
           branch,
           task,
           executor,
@@ -764,6 +765,7 @@ export async function runTask(
         const gateStartedAt = now();
         const verdict = await gate.run({
           worktreePath: worktree.path,
+          worktreeDir: worktree.dir,
           task,
           result: state.lastResult,
           diff,

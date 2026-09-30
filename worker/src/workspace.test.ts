@@ -59,6 +59,7 @@ const POINTER_FILES = {
   kind: () => "file" as const,
   list: (dir: string) => (dir === "/repo/.git/worktrees" ? ["CP-158", "BP-1", "CP-1"] : []),
   realpath: (path: string) => path,
+  lstat: () => ({ dev: 1, ino: 1, isDirectory: () => true, isSymbolicLink: () => false }),
 };
 
 function fakeGit(responses: Record<string, Partial<CommandResult>>) {

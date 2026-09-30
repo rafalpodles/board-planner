@@ -1,5 +1,5 @@
-import { realpathSync } from "fs";
-import { isAbsolute } from "path";
+import { lstatSync, realpathSync } from "fs";
+import { basename, dirname, isAbsolute, join, resolve } from "path";
 import { UNCONFINED_ESCAPE_HATCH, unconfinedAgentAllowed } from "./env.js";
 import { ResolvedTool, unresolvedToolReason } from "./tool-path.js";
 
@@ -102,12 +102,65 @@ export const UNCONFINED_ACCEPTED_DETAIL =
  */
 export type Confinement = { command: string; args: string[] } | { refusal: string };
 
+/** A directory as it was when the worker made it: its real path, and which directory that was. */
+export interface RecordedDir {
+  path: string;
+  dev: number;
+  ino: number;
+}
+
+export interface DirStat {
+  dev: number;
+  ino: number;
+  isDirectory(): boolean;
+  isSymbolicLink(): boolean;
+}
+
 export interface ConfineOptions {
-  /** Absolute paths the child may write to. Everything else is denied, including `$HOME`. */
-  writable: string[];
+  /**
+   * Directories the child may write to. Everything else is denied, including `$HOME`. The worktree
+   * is always a `RecordedDir`: a confined step can replace the directory it was given with a
+   * symlink, so a path resolved at the next spawn would be wherever that symlink points (BP-804).
+   */
+  writable: (string | RecordedDir)[];
   platform?: NodeJS.Platform;
   realpath?: (path: string) => string;
+  lstat?: (path: string) => DirStat;
   env?: NodeJS.ProcessEnv;
+}
+
+/**
+ * The parent is resolved and the directory itself never is. Every writable directory is a child of
+ * one no confined process may write, so the parent cannot have been swapped; the leaf can, by any
+ * process that was allowed it, and a leaf that is now a symlink is refused rather than followed.
+ * Seatbelt matches the resolved path of each access, so a literal path that becomes a symlink after
+ * this check permits nothing through it — measured on macOS 26.6.2.
+ */
+export function recordDir(
+  path: string,
+  realpath: (path: string) => string = realpathSync,
+  lstat: (path: string) => DirStat = lstatSync,
+): RecordedDir {
+  const absolute = resolve(path);
+  const real = join(realpath(dirname(absolute)), basename(absolute));
+  const stat = lstat(real);
+  if (stat.isSymbolicLink()) throw new Error(`${real} is a symlink, not a directory`);
+  if (!stat.isDirectory()) throw new Error(`${real} is not a directory`);
+  return { path: real, dev: stat.dev, ino: stat.ino };
+}
+
+/** How `dir` differs from the directory recorded, or null while it is that same directory. */
+export function dirReplaced(dir: RecordedDir, lstat: (path: string) => DirStat = lstatSync): string | null {
+  let stat: DirStat;
+  try {
+    stat = lstat(dir.path);
+  } catch {
+    return `${dir.path} removed`;
+  }
+  if (stat.isSymbolicLink()) return `${dir.path} replaced by a symlink`;
+  if (!stat.isDirectory()) return `${dir.path} replaced by something that is not a directory`;
+  if (stat.dev !== dir.dev || stat.ino !== dir.ino) return `${dir.path} replaced by another directory`;
+  return null;
 }
 
 // `(allow default)` sets the default decision for operations the profile has no filter for. It is
@@ -169,15 +222,21 @@ export function confine(command: string, args: string[], options: ConfineOptions
     return { refusal: "refusing to confine an agent with no writable path: it could not even edit the worktree" };
   }
 
-  const resolve = options.realpath ?? realpathSync;
+  const lstat = options.lstat ?? lstatSync;
   const resolved: string[] = [];
-  for (const path of options.writable) {
+  for (const entry of options.writable) {
+    if (typeof entry !== "string") {
+      const replaced = dirReplaced(entry, lstat);
+      if (replaced) return { refusal: `refusing to confine the agent to ${entry.path}: ${replaced} since it was created` };
+      resolved.push(entry.path);
+      continue;
+    }
     try {
       // Seatbelt matches the resolved path, so an unresolved `/tmp/x` installs a rule for a
       // directory the kernel never sees — a profile that reads correctly and permits nothing.
-      resolved.push(resolve(path));
+      resolved.push(recordDir(entry, options.realpath ?? realpathSync, lstat).path);
     } catch (error) {
-      return { refusal: `cannot confine the agent to ${path}: ${String(error)}` };
+      return { refusal: `cannot confine the agent to ${entry}: ${String(error)}` };
     }
   }
 

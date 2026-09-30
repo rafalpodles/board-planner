@@ -348,6 +348,19 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   the reviewer. The kernel refuses, so it holds for `Write`, for `Edit`, for a symlink planted inside
   the worktree and written through, and for a process the CLI spawns writing a file itself.
 
+  **The directory is the one recorded at creation, never the path resolved again** (**BP-804**). The
+  profile's allowance covers the worktree itself, so a confined process — a daemon a Test gate left
+  running, say — can delete it and put a symlink to `$HOME` in its place, and a path resolved at the
+  next spawn would then allow the next step to write your home. The worker records the worktree's
+  real path and its device and inode when it creates it, and refuses to confine anything to it once
+  it is a symlink, missing, or a different directory; the same check runs before every step, agent
+  steps included, as well as before every gate and delivery. Between that check and the spawn, the
+  profile names the recorded path literally, and seatbelt checks the resolved path of each write, so
+  a symlink put there afterwards permits nothing through it (measured on macOS 26.6.2). Every other
+  directory a confinement allows — a gate's scratch directory, the npm cache, the review checkout —
+  is resolved through its parent only and refused if it is itself a symlink, so a `CP_NPM_CACHE`
+  that is a symlink is refused rather than followed; point it at the real directory.
+
   **What it closes.** A step runs with `--permission-mode bypassPermissions`, so `Write` used to take
   any absolute path this user can reach. `$HOME/.claude/settings.json` is the shortest one: a hook
   there runs a shell command on the next `claude` — a later step in the same run, and, with a much
@@ -567,7 +580,7 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   and every git and `gh` call the worker makes in the worktree names it through
   `GIT_DIR`/`GIT_WORK_TREE` — derived from the main clone's own record of the worktree, never from
   the worktree's `.git` file. Before
-  each commit, each gate and each push, pull request or merge, the worker also compares the `.git`
+  each step, each commit, each gate and each push, pull request or merge, the worker also compares the `.git`
   file with what git wrote and lists the index for `skip-worktree`/`assume-unchanged` flags the
   checkout did not start with; either one refuses the run and says what changed (BP-794). A sparse
   checkout's own flags are recorded at creation and pass. A worktree refused this way cannot be

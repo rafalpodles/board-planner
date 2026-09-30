@@ -18,7 +18,7 @@ function listing(stdout: string, commonDir = "/repo/.git\n") {
 }
 
 function files(kind: ReturnType<PointerFiles["kind"]>, text = POINTER, workTree: ReturnType<PointerFiles["kind"]> = "directory"): PointerFiles {
-  return { kind: (path) => (path === "/wt" ? workTree : kind), read: () => text, list: () => [], realpath: (path) => path };
+  return { kind: (path) => (path === "/wt" ? workTree : kind), read: () => text, list: () => [], realpath: (path) => path, lstat: () => { throw new Error("unused"); } };
 }
 
 // A clone with an admin dir per entry, each `gitdir` naming the worktree git made it for
@@ -29,6 +29,7 @@ function clone(
   return {
     list: (dir) => (dir === "/repo/.git/worktrees" ? Object.keys(admins) : []),
     realpath: (path) => path,
+    lstat: () => { throw new Error("unused"); },
     kind: (path) => (path === "/wt/.git" && pointer !== null ? "file" : "missing"),
     read(path) {
       if (path === "/wt/.git" && pointer !== null) return pointer;

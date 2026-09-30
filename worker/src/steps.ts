@@ -3,6 +3,7 @@ import { Delivery } from "./delivery.js";
 import { Executor } from "./executor.js";
 import { Runner } from "./exec.js";
 import { unexpectedHistory } from "./provenance.js";
+import { RecordedDir } from "./sandbox.js";
 import { StreamEvent } from "./stream.js";
 import { ClaimedTask, ExecutionResult, PassedCheck, SnapshotEntry } from "./types.js";
 
@@ -50,6 +51,7 @@ export interface RunState {
 
 export interface StepContext {
   worktreePath: string;
+  worktreeDir: RecordedDir;
   branch: string;
   task: ClaimedTask;
   executor: Executor;
@@ -159,9 +161,21 @@ export async function runStep(
 ): Promise<StepOutcome> {
   if (entry.deterministic) return runWorkerAction(entry, ctx);
 
+  // A step is the next confinement, and what the one before it left behind can have replaced the
+  // worktree itself (BP-804) — so the same check a gate and a delivery get, before the spawn.
+  const tampered = await ctx.tampering();
+  if (tampered) {
+    return {
+      kind: "tampered",
+      finding: tampered,
+      message: `refusing to run ${entry.name}: the checkout now has ${tampered}`,
+    };
+  }
+
   const outcome = await ctx.executor.execute({
     task: ctx.task,
     worktreePath: ctx.worktreePath,
+    worktreeDir: ctx.worktreeDir,
     signal: ctx.signal,
     onEvent: ctx.onEvent,
     brief: {

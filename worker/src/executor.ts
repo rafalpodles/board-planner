@@ -2,7 +2,7 @@ import { DEFAULT_FALLBACK_MODEL, DEFAULT_MODEL, modelOr, WorkerConfig } from "./
 import { agentEnv } from "./env.js";
 import { PROTECTED_PATHS_BRIEF } from "./gates/protected-paths.js";
 import { Runner } from "./exec.js";
-import { confineTool } from "./sandbox.js";
+import { confineTool, RecordedDir } from "./sandbox.js";
 import { isRateLimitEvent, lastResultEvent, parseStream, ResultEvent, StreamEvent } from "./stream.js";
 import { ClaimedTask, ExecutionResult, RunOutcome } from "./types.js";
 
@@ -207,6 +207,8 @@ export interface StepBrief {
 export interface ExecuteOptions {
   task: ClaimedTask;
   worktreePath: string;
+  /** What the worktree was at creation; the confinement is to this and not to `worktreePath` resolved now (BP-804). */
+  worktreeDir: RecordedDir;
   brief: StepBrief;
   signal?: AbortSignal;
   onEvent?: StreamListener;
@@ -218,7 +220,7 @@ export interface Executor {
 
 export function createExecutor(config: WorkerConfig, runner: Runner, claudePath: string): Executor {
   return {
-    async execute({ task, worktreePath, brief, signal, onEvent }) {
+    async execute({ task, worktreePath, worktreeDir, brief, signal, onEvent }) {
       // The CLI authenticates from its logged-in session under HOME, so the allowlist both keeps
       // ANTHROPIC_API_KEY out (which would bill per token) and keeps CP_API_TOKEN out of the
       // hands of the agent it is about to run with bypassPermissions
@@ -257,7 +259,7 @@ export function createExecutor(config: WorkerConfig, runner: Runner, claudePath:
       // CLI needs no write access to `~/.claude` or `~/.claude.json` to run, so the allowance is
       // one directory rather than a denylist of the instruction channels inside the operator's
       // home. See sandbox.ts for why this is not a per-run HOME.
-      const spawn = confineTool("claude", claudePath, claudeArgs, { writable: [worktreePath] });
+      const spawn = confineTool("claude", claudePath, claudeArgs, { writable: [worktreeDir] });
 
       // Before the spawn, not after: a step that cannot be confined does not run half-confined and
       // does not run at all. A machine fault rather than an error, because it is the machine that

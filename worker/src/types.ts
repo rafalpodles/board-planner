@@ -1,3 +1,5 @@
+import { RecordedDir } from "./sandbox.js";
+
 /**
  * One position in the agent the claim resolved. The prompt and the parameter values travel; a tool
  * list never does — `capability` is a name this side maps to a list of its own, so a server cannot
@@ -121,6 +123,8 @@ export interface DiffStats {
 
 export interface GateContext {
   worktreePath: string;
+  /** What a gate that confines anything confines to, rather than `worktreePath` resolved again (BP-804). */
+  worktreeDir: RecordedDir;
   task: ClaimedTask;
   result: ExecutionResult;
   diff: DiffStats;

@@ -6,6 +6,7 @@ import { claimedTask } from "../__fixtures__/task.js";
 function context(diff: Partial<DiffStats>): GateContext {
   return {
     worktreePath: "/wt",
+    worktreeDir: { path: "/wt", dev: 0, ino: 0 },
     task: claimedTask({ taskKey: "CP-1", taskNumber: 1, title: "t", description: "d" }),
     result: {
       status: "completed",
