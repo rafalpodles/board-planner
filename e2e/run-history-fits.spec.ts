@@ -94,8 +94,9 @@ async function expectWhollyOnScreen(page: Page, locator: ReturnType<Page["getByT
 }
 
 for (const viewport of [
+  { width: 1590, height: 900 },
+  { width: 1560, height: 900 },
   { width: 1440, height: 900 },
-  { width: 1330, height: 900 },
   { width: 1280, height: 800 },
   { width: 768, height: 1024 },
   { width: 390, height: 844 },
@@ -135,8 +136,42 @@ for (const viewport of [
   });
 }
 
+const MEDIUM_NAMES = {
+  project: "Customer onboarding and billing board",
+  agent: "Implement, review and merge twice",
+  machine: "rafal-macbook-pro-m3-max-studio",
+};
+const TABLE_FROM = 1590;
+
+for (const width of [1590, 1560, 1440, 1280]) {
+  test(`the table appears only where a name fits on two lines, at ${width} px`, async ({ page }) => {
+    const handle = await db();
+    await handle.collection("projects").updateOne({ _id: PROJECT_ID }, { $set: { name: MEDIUM_NAMES.project } });
+    await handle.collection("workers").updateOne({ _id: WORKER_ID }, { $set: { name: MEDIUM_NAMES.machine } });
+    await handle.collection("agentruns").updateMany({}, { $set: { agentName: MEDIUM_NAMES.agent } });
+
+    await page.setViewportSize({ width, height: 900 });
+    await signIn(page);
+    await page.goto("/settings/workers/runs");
+    const recent = page.getByTestId("fleet-run").filter({ hasText: RECENT_KEY });
+    await expect(recent).toBeVisible();
+    const header = page.getByRole("columnheader", { name: "Machine" });
+    if (width >= TABLE_FROM) await expect.soft(header).toBeVisible();
+    else await expect.soft(header).toBeHidden();
+
+    for (const name of Object.values(MEDIUM_NAMES)) {
+      const text = recent.getByText(name, { exact: true });
+      await expect(text).toBeVisible();
+      const lines = await text.evaluate(
+        (el) => el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)
+      );
+      expect(lines, name).toBeLessThanOrEqual(2.5);
+    }
+  });
+}
+
 test("the wide table keeps its column headers for assistive technology", async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.setViewportSize({ width: 1600, height: 900 });
   await signIn(page);
   await page.goto("/settings/workers/runs");
 
