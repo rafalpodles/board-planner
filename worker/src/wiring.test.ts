@@ -589,7 +589,8 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       // sandbox looks like from here (BP-349)
       sandboxBroken?: boolean;
       // What the startup reap answers (BP-796); the runner has none when unset
-      leftovers?: { answer: string; calls: { stateDir: string; runnerCallsBefore: number }[] };
+      // An array is answered in turn, its last entry from then on
+      leftovers?: { answer: string | string[]; calls: { stateDir: string; runnerCallsBefore: number }[] };
       // Replaces the default 200-with-assignments response — a server this worker cannot reach at
       // all, rather than one answering something to parse.
       fetchImpl?: typeof fetch;
@@ -622,6 +623,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     const stagingEnvs: NodeJS.ProcessEnv[] = [];
     const queue = opts.tasks ?? [CLAIMED];
     const logError = vi.fn();
+    const log = vi.fn();
     let claims = 0;
     let slept = 0;
     // wiring reads Date.now() directly for the refresh throttle, so this is what lets a test move
@@ -665,7 +667,8 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
           ? {
               reapLeftovers: async (dir: string) => {
                 opts.leftovers?.calls.push({ stateDir: dir, runnerCallsBefore: everyCall.length });
-                return opts.leftovers?.answer ?? "";
+                const answer = opts.leftovers?.answer ?? "";
+                return typeof answer === "string" ? answer : answer.length > 1 ? (answer.shift() ?? "") : (answer[0] ?? "");
               },
             }
           : {}),
@@ -694,7 +697,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         opts.onSleep?.(stateDir, slept);
         if (++slept >= (opts.passes ?? 1)) stop();
       },
-      log: vi.fn(),
+      log,
       logError,
       uid: 501,
       realpath: (path) => path,
@@ -772,6 +775,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       api,
       posted,
       bindingErrors,
+      log,
       logError,
       claims,
       claimed: claudeCalls.length > 0,
@@ -827,6 +831,25 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
 
     expect(claims).toBe(0);
     expect(logError).toHaveBeenCalledWith(`not claiming any work: ${leftovers.answer}`);
+  });
+
+  it("clears the block once a retried reap succeeds, without a restart", async () => {
+    const failure = "a process an earlier run of this worker confined may still be running: the reaper did not answer within 5s";
+    const leftovers = { answer: [failure, ""], calls: [] as { stateDir: string; runnerCallsBefore: number }[] };
+    const { claimed, log, logError } = await runOneTask(undefined, undefined, { leftovers });
+
+    expect(leftovers.calls).toHaveLength(2);
+    expect(logError).toHaveBeenCalledWith(`preflight: sandbox — ${failure}`);
+    expect(log).toHaveBeenCalledWith("what an earlier run of this worker left behind is gone; claiming again");
+    expect(claimed).toBe(true);
+  });
+
+  it("keeps retrying while the reap keeps failing, and claims nothing", async () => {
+    const leftovers = { answer: "cannot kill process 42", calls: [] as { stateDir: string; runnerCallsBefore: number }[] };
+    const { claims } = await runOneTask(undefined, undefined, { leftovers, passes: 3 });
+
+    expect(claims).toBe(0);
+    expect(leftovers.calls.length).toBeGreaterThanOrEqual(3);
   });
 
   it("reaps this worker's leftovers before preflight's probe runs, and then claims", async () => {

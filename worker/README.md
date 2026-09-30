@@ -172,9 +172,10 @@ Without a clone: every release carries `board-planner-worker-X.Y.Z.tar.gz`, buil
 `pack.sh` — this directory's `dist/`, `launchd/` and a `package.json` with nothing to install.
 Unpack it and run `npm start` (or `node dist/main.js`) inside the `worker/` it contains. A tarball
 a browser downloaded is quarantined, and so is everything `tar` unpacks from it, including the
-process reaper at `dist/bin/cp-reap`; release it once with `xattr -dr com.apple.quarantine worker`
-before the first start, or the worker builds its own reaper with `/usr/bin/cc` instead, and takes no
-work if it cannot.
+process reaper at `dist/bin/cp-reap`. The worker does not run a quarantined reaper — the first run
+of one from an unsigned build, or offline, can wait on Gatekeeper indefinitely — so release it once
+with `xattr -dr com.apple.quarantine worker` before the first start. Otherwise the worker builds its
+own reaper with the command-line tools, and takes no work if they are not installed.
 
 The worker reports its version to the server on every heartbeat, read from the `package.json` it
 ships with: beside `main.js` in the menubar app, beside `dist/` in the tarball and in a clone. The
@@ -405,10 +406,11 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   and notarised on its own by `sign-reaper.sh`). A bundled helper is refused if it was built from
   other source than the worker it ships with, if anyone other than this user, root or the owner of
   the worker's own code could replace it, or if the spawn about to run may write where it lives, and
-  it must find and kill a confined probe within five seconds before it is trusted. A bundled helper
-  that fails any of that — a quarantined download hangs on its first run — gives way to one built
-  with `/usr/bin/cc` where there is a compiler, and the reason names the quarantine when there is
-  one. **It fails closed**: a helper that
+  it must find and kill a confined probe within five seconds before it is trusted. A quarantined one
+  is not run at all. A bundled helper that is quarantined or fails any of those checks gives way to
+  one built with `/usr/bin/cc` when `xcode-select -p` finds the command-line tools — asked that way
+  because `/usr/bin/cc` itself offers to install them — and the worker logs a warning naming why the
+  bundled one was not used. **It fails closed**: a helper that
   cannot be built or trusted refuses every confined spawn before it starts, and a process the helper
   cannot kill, or one that keeps reappearing, makes that run a **machine fault** and refuses every
   later confined spawn until a retry finds nothing left. The preflight sandbox row reports only what

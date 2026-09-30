@@ -171,13 +171,13 @@ describe("when a confined spawn cannot be reaped", () => {
     const dir = mkdtempSync(join(tmpdir(), "bp796-unbuilt-"));
     const ran = join(dir, "ran");
     try {
-      const runner = createRunner({ reaper: createReaper({ compiler: "/nonexistent/cc" }) });
+      const runner = createRunner({ reaper: createReaper({ compiler: "/usr/bin/false", bundled: join(dir, "absent") }) });
       const result = await runner.run(SANDBOX_COMMAND, ["-p", "(version 1)\n(allow default)", "/usr/bin/touch", ran], {
         cwd: dir,
         timeoutMs: 10_000,
       });
 
-      expect(result.machineFault).toContain("could not build the process reaper with /nonexistent/cc");
+      expect(result.machineFault).toContain("could not build the process reaper with /usr/bin/false");
       expect(existsSync(ran)).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -250,21 +250,38 @@ describe.skipIf(!onMac)("the helper it trusts", () => {
     return stub;
   }
 
-  it("names a quarantined helper that hangs, and how to release it, within seconds", async () => {
+  it("does not run a quarantined helper at all, and says how to release it", async () => {
+    const ran = join(dir, "ran");
+    const stub = join(dir, "bin", "quarantined");
+    writeFileSync(stub, `#!/bin/sh\n# cp-reap-source:${REAPER_SOURCE_HASH}\ntouch '${ran}'\nexec /bin/sleep 30\n`);
+    chmodSync(stub, 0o755);
+
+    const failure = await createReaper({ compiler: "/nonexistent/cc", bundled: stub, quarantined: async () => true }).ready([]);
+
+    expect(failure).toContain("quarantined");
+    expect(failure).toContain(`xattr -dr com.apple.quarantine ${dir}`);
+    expect(existsSync(ran)).toBe(false);
+  });
+
+  it("names a helper that hangs within seconds, rather than waiting out a minute", async () => {
     const started = Date.now();
-    const reaper = createReaper({
+    const failure = await createReaper({
       compiler: "/nonexistent/cc",
       bundled: hangingHelper(),
       probeTimeoutMs: 300,
-      quarantined: async () => true,
-    });
-
-    const failure = await reaper.ready([]);
+      quarantined: async () => false,
+    }).ready([]);
 
     expect(failure).toContain("did not answer within 0.3s");
-    expect(failure).toContain("quarantined");
-    expect(failure).toContain(`xattr -dr com.apple.quarantine ${dir}`);
     expect(Date.now() - started).toBeLessThan(5_000);
+  });
+
+  it("never offers to install the command-line tools when they are missing", async () => {
+    const toolchain = vi.fn(async () => false);
+    const failure = await createReaper({ bundled: join(dir, "absent"), toolchain }).ready([]);
+
+    expect(toolchain).toHaveBeenCalled();
+    expect(failure).toContain("no compiler to build one");
   });
 
   // On a data file that is never run, so nothing asks Gatekeeper about it
@@ -276,12 +293,20 @@ describe.skipIf(!onMac)("the helper it trusts", () => {
     expect(await isQuarantined(file)).toBe(true);
   });
 
-  it("builds one here instead when the bundled helper cannot be used and a compiler exists", async () => {
-    const quarantined = vi.fn(async () => false);
-    const reaper = createReaper({ bundled: hangingHelper(), probeTimeoutMs: 300, quarantined });
+  it("builds one here instead when the bundled helper cannot be used, and warns which was used", async () => {
+    const warn = vi.fn();
+    const reaper = createReaper({ bundled: hangingHelper(), probeTimeoutMs: 300, quarantined: async () => false, warn });
 
     expect(await reaper.ready([])).toBe("");
-    expect(quarantined).toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/^warning: the bundled process reaper was not used \(the reaper did not answer within 0\.3s\); using one built with \/usr\/bin\/cc instead$/));
+  });
+
+  it("builds one here instead of a quarantined one, without running it", async () => {
+    const warn = vi.fn();
+    const reaper = createReaper({ bundled: hangingHelper(), quarantined: async () => true, warn });
+
+    expect(await reaper.ready([])).toBe("");
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("it is quarantined"));
   });
 
   it("does not use a helper built from other source than this worker's", async () => {
@@ -291,7 +316,9 @@ describe.skipIf(!onMac)("the helper it trusts", () => {
 
     const alone = await createReaper({ compiler: "/nonexistent/cc", bundled: stale, quarantined: async () => false }).ready([]);
     expect(alone).toContain("built from other source");
-    expect(await createReaper({ bundled: stale, quarantined: async () => false }).ready([])).toBe("");
+    const warn = vi.fn();
+    expect(await createReaper({ bundled: stale, quarantined: async () => false, warn }).ready([])).toBe("");
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("built from other source"));
   });
 
   it("refuses a path that does not resolve to a file", () => {

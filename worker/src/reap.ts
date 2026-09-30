@@ -417,7 +417,9 @@ interface ResolveOptions {
   bundled: string;
   probeTimeoutMs: number;
   quarantined: (path: string) => Promise<boolean>;
+  toolchain: () => Promise<boolean>;
   trust: TrustOptions;
+  warn: (message: string) => void;
 }
 
 async function trusted(helper: string, options: ResolveOptions, checkSource: boolean): Promise<string> {
@@ -427,22 +429,41 @@ async function trusted(helper: string, options: ResolveOptions, checkSource: boo
   return (await sealed(resolved)) || (await proveHelper(resolved, options.probeTimeoutMs));
 }
 
+// /usr/bin/cc is a shim that exists on every Mac and offers to install the command-line tools when
+// they are missing; xcode-select answers the same question without a dialog
+export async function toolchainInstalled(): Promise<boolean> {
+  const selected = await execute("/usr/bin/xcode-select", ["-p"], undefined, 5_000);
+  return selected.code === 0 && existsSync(selected.stdout.trim());
+}
+
+async function compilerAvailable(options: ResolveOptions): Promise<boolean> {
+  if (!existsSync(options.compiler)) return false;
+  return options.compiler === COMPILER ? options.toolchain() : true;
+}
+
 async function resolveHelper(options: ResolveOptions): Promise<Resolved> {
   let bundledFailure = "";
   if (existsSync(options.bundled)) {
-    bundledFailure = await trusted(options.bundled, options, true);
+    // Not run at all when quarantined: its first run is a Gatekeeper assessment, which can hang
+    bundledFailure = (await options.quarantined(options.bundled))
+      ? `it is quarantined, as a download is until released, so it was not run; release it with: xattr -dr com.apple.quarantine ${dirname(dirname(options.bundled))}`
+      : await trusted(options.bundled, options, true);
     if (!bundledFailure) return { helper: realpathSync(options.bundled) };
-    if (await options.quarantined(options.bundled)) {
-      bundledFailure +=
-        ` — it is quarantined, as a download is until it is opened, and macOS may be holding it for approval;` +
-        ` run: xattr -dr com.apple.quarantine ${dirname(dirname(options.bundled))}`;
+    if (!(await compilerAvailable(options))) {
+      return { failure: `the bundled process reaper cannot be used, and there is no compiler to build one: ${bundledFailure}` };
     }
-    if (!existsSync(options.compiler)) return { failure: `the bundled process reaper cannot be used: ${bundledFailure}` };
+  } else if (!(await compilerAvailable(options))) {
+    return { failure: `there is no process reaper beside this worker and no compiler to build one (${options.compiler}, or the command-line tools behind it)` };
   }
 
   const compiled = await compileHelper(options.compiler);
   const failure = "failure" in compiled ? compiled.failure : await trusted(compiled.helper, options, false);
-  if (!failure && "helper" in compiled) return { helper: realpathSync(compiled.helper) };
+  if (!failure && "helper" in compiled) {
+    if (bundledFailure) {
+      options.warn(`warning: the bundled process reaper was not used (${bundledFailure}); using one built with ${options.compiler} instead`);
+    }
+    return { helper: realpathSync(compiled.helper) };
+  }
   return { failure: bundledFailure ? `the bundled process reaper cannot be used: ${bundledFailure}; nor can one built here: ${failure}` : failure };
 }
 
@@ -456,7 +477,9 @@ export interface ReaperOptions {
   bundled?: string;
   probeTimeoutMs?: number;
   quarantined?: (path: string) => Promise<boolean>;
+  toolchain?: () => Promise<boolean>;
   trust?: TrustOptions;
+  warn?: (message: string) => void;
 }
 
 export function createReaper({
@@ -464,12 +487,14 @@ export function createReaper({
   bundled = bundledHelperPath(),
   probeTimeoutMs = PROBE_TIMEOUT_MS,
   quarantined = isQuarantined,
+  toolchain = toolchainInstalled,
   trust = {},
+  warn = (message) => console.error(message),
 }: ReaperOptions = {}): Reaper {
   let resolving: Promise<Resolved> | undefined;
 
   async function helper(): Promise<Resolved> {
-    resolving ??= resolveHelper({ compiler, bundled, probeTimeoutMs, quarantined, trust });
+    resolving ??= resolveHelper({ compiler, bundled, probeTimeoutMs, quarantined, toolchain, trust, warn });
     const outcome = await resolving;
     if ("failure" in outcome) resolving = undefined;
     return outcome;

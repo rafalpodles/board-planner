@@ -228,6 +228,12 @@ jobs:
       - name: Package
         run: |
           test -f menubar/.build/CPMenubar.app/Contents/Resources/worker/main.js
+          if [ "$SIGNED" = "true" ]; then
+            REAPER="$RUNNER_TEMP/tarball-cp-reap"
+            tar -xzf "$OUT/board-planner-worker-$VERSION.tar.gz" -O worker/dist/bin/cp-reap > "$REAPER"
+            codesign -dv --verbose=4 "$REAPER" 2>&1 | grep -q "^Authority=Developer ID Application" \
+              || { echo "::error::the tarball's process reaper is not signed with a Developer ID"; exit 1; }
+          fi
           lipo menubar/.build/CPMenubar.app/Contents/Resources/worker/bin/cp-reap -verify_arch arm64 x86_64
           ditto -c -k --keepParent menubar/.build/CPMenubar.app "$OUT/board-planner-menubar-$VERSION.zip"
           cd "$OUT"

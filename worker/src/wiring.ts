@@ -248,6 +248,30 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   let preflight: PreflightReport | null = null;
   let preflightFailed = false;
   let leftovers = "";
+  let probedSandboxRow: PreflightCheck | undefined;
+
+  function showLeftovers(): void {
+    if (!preflight) return;
+    const report = preflight;
+    probedSandboxRow ??= report.checks.find((check) => check.name === SANDBOX_CHECK);
+    report.checks = report.checks.map((check) =>
+      check.name !== SANDBOX_CHECK
+        ? check
+        : leftovers
+          ? { ...check, ok: false, warn: false, detail: leftovers }
+          : (probedSandboxRow ?? check)
+    );
+    report.ok = report.checks.every((check) => check.ok);
+  }
+
+  // Once per poll while it is blocking claims: a startup reap that failed for a transient reason,
+  // such as a slow first run of the helper, should not need a restart to clear
+  async function retryLeftovers(): Promise<void> {
+    if (!leftovers) return;
+    leftovers = (await deps.runner.reapLeftovers?.(bootstrap.stateDir)) ?? "";
+    if (!leftovers) deps.log("what an earlier run of this worker left behind is gone; claiming again");
+    showLeftovers();
+  }
   // The gates' own requirements, which only exist relative to a bound repository, so they are
   // recomputed on every rebind rather than once at startup
   let repoChecks: PreflightCheck[] = [];
@@ -370,13 +394,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       deps.log("PATH extended with the directories the required tools were found in");
     }
 
-    if (leftovers) {
-      const report = preflight;
-      report.checks = report.checks.map((check) =>
-        check.name === SANDBOX_CHECK ? { ...check, ok: false, warn: false, detail: leftovers } : check
-      );
-      report.ok = false;
-    }
+    showLeftovers();
 
     for (const check of preflight.checks) {
       if (!check.ok) deps.logError(`preflight: ${check.name} — ${check.detail}`);
@@ -769,6 +787,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   }
 
   async function drain(): Promise<void> {
+    await retryLeftovers().catch((error) => deps.logError(`reaping what an earlier run left failed: ${String(error)}`));
     await refreshServerState();
     // Before the flush, so a settlement this pass produces goes out with it rather than waiting a
     // whole poll interval. Drained here rather than in the claim loop because `drain` runs even
