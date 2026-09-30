@@ -1,12 +1,24 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach } from "vitest";
-import { execFileSync } from "node:child_process";
+import { ChildProcess, execFileSync, spawn } from "node:child_process";
 import { createServer, Server } from "node:http";
 import { AddressInfo } from "node:net";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir, userInfo } from "node:os";
+import { dirname, join } from "node:path";
 import { confine } from "./sandbox.js";
-import { UNCONFINED_ESCAPE_HATCH } from "./env.js";
+import { childEnv, UNCONFINED_ESCAPE_HATCH } from "./env.js";
 import { createRunner } from "./exec.js";
 
 /**
@@ -523,5 +535,292 @@ describe.skipIf(!onMac)("confine against the real sandbox", () => {
       seen = [];
       expect(await confinedRun(command, args(), "loopback")).not.toContain("DUMMY");
     }, 60_000);
+  });
+
+  // Daemons that run a command or a container for whoever connects to their socket (BP-810).
+  // Played by sockets this test owns at the paths the real ones use, since no CI runner has Docker,
+  // colima, OrbStack, podman or watchman running; tmux and screen are also driven for real below.
+  // Paths are relative to `dir` because a socket path is capped at 104 bytes.
+  describe("a local daemon reached over a unix socket", { timeout: 60_000 }, () => {
+    const uid = process.getuid!();
+    const user = userInfo().username;
+    const SERVE =
+      'const { mkdirSync } = require("fs"), { dirname } = require("path"), net = require("net");' +
+      "const paths = process.argv.slice(1); let listening = 0;" +
+      "for (const p of paths) { mkdirSync(dirname(p), { recursive: true });" +
+      'net.createServer((c) => c.end()).listen(p, () => { if (++listening === paths.length) console.log("ready") }) }';
+    const CONNECT =
+      'require("net").connect(process.argv[1])' +
+      '.on("connect", function () { console.log("connected"); this.destroy() })' +
+      '.on("error", (e) => console.log(e.code))';
+
+    // Two daemons put their socket at a fixed system path rather than in a home, so their fixtures
+    // are there too, named for this process and removed afterwards.
+    const userTemp = onMac ? realpathSync(execFileSync("/usr/bin/getconf", ["DARWIN_USER_TEMP_DIR"], { encoding: "utf8" }).trim()) : "";
+    const podmanApi = join(userTemp, "podman", `bp810-probe-${process.pid}.sock`);
+    const tmuxDefault = `/private/tmp/tmux-${uid}/bp810-probe-${process.pid}`;
+
+    const named = [
+      ["a docker.sock anywhere", "var/run/docker.sock"],
+      ["another socket of Docker's in ~/.docker", ".docker/sandboxes/sandboxd.sock"],
+      ["Docker Desktop's own sockets", "Library/Containers/com.docker.docker/Data/docker-cli.sock"],
+      ["colima", ".colima/default/containerd.sock"],
+      ["colima under ~/.config", ".config/colima/default/containerd.sock"],
+      ["OrbStack", ".orbstack/vmcontrol.sock"],
+      ["podman's machine API in the user's temp directory", podmanApi],
+      ["podman's older machine socket", ".local/share/containers/podman/machine/qemu/podman.sock"],
+      ["a tmux server in tmux's default directory", tmuxDefault],
+      ["a tmux server under a $TMUX_TMPDIR the worker's environment does not name", `tmux-home/tmux-${uid}/default`],
+      ["a screen that listens on a socket", ".screen/4242.ttys001.host"],
+      ["a screen in the system socket directory", `screens/S-${user}/4242.ttys001.host`],
+      ["watchman", `watchman/${user}-state/sock`],
+    ] as const;
+    // The last two are directories named like a daemon's in a place no daemon uses: an honest
+    // project's own sockets, which the patterns must not reach.
+    const ordinary = [
+      "app.sock",
+      "worktree/test-server.sock",
+      "dockerish.sock",
+      "worktree/podman/x.sock",
+      "worktree/colima/t.sock",
+    ];
+
+    let server: ChildProcess | undefined;
+    const createdDirs: string[] = [];
+
+    beforeEach(async () => {
+      for (const system of [dirname(podmanApi), dirname(tmuxDefault)]) {
+        if (existsSync(system)) continue;
+        mkdirSync(system, { mode: 0o700 });
+        createdDirs.push(system);
+      }
+      const child = spawn(process.execPath, ["-e", SERVE, ...named.map(([, path]) => path), ...ordinary], {
+        cwd: dir,
+        stdio: ["ignore", "pipe", "inherit"],
+      });
+      server = child;
+      await new Promise<void>((resolve, reject) => {
+        child.stdout!.on("data", (chunk) => String(chunk).includes("ready") && resolve());
+        child.on("exit", (code) => reject(new Error(`the socket server exited with ${code}`)));
+      });
+    });
+
+    afterEach(() => {
+      server?.kill();
+      server = undefined;
+      rmSync(podmanApi, { force: true });
+      rmSync(tmuxDefault, { force: true });
+      for (const created of createdDirs.splice(0)) {
+        try {
+          rmdirSync(created);
+        } catch {
+          // something of the operator's now lives there
+        }
+      }
+    });
+
+    async function connectAs(env: NodeJS.ProcessEnv, path: string) {
+      const spawned = confine(process.execPath, ["-e", CONNECT, path], { writable: [worktree], env });
+      if (!("command" in spawned)) throw new Error(`refused: ${spawned.refusal}`);
+      return (await runner.run(spawned.command, spawned.args, { cwd: dir, timeoutMs: 30_000 })).stdout.trim();
+    }
+
+    for (const [daemon, path] of named) {
+      it(`connects to ${daemon} when nothing confines it — the control`, async () => {
+        expect(await connectAs({ [UNCONFINED_ESCAPE_HATCH]: "1" }, path)).toBe("connected");
+      });
+
+      it(`cannot connect to ${daemon} under the profile`, async () => {
+        expect(await connectAs({}, path)).toBe("EPERM");
+      });
+    }
+
+    it("still connects to an ordinary socket under the profile, the worktree's own included", async () => {
+      for (const path of ordinary) expect(await connectAs({}, path), path).toBe("connected");
+    });
+
+    // The build and test gates' mode (BP-720) allows every unix socket back; the named denies come
+    // after it, so they still hold there.
+    it("still refuses every named socket in the gates' loopback-only mode", async () => {
+      const connectInLoopback = async (path: string) => {
+        const spawned = confine(process.execPath, ["-e", CONNECT, path], {
+          writable: [worktree],
+          network: "loopback",
+          env: {},
+        });
+        if (!("command" in spawned)) throw new Error(`refused: ${spawned.refusal}`);
+        return (await runner.run(spawned.command, spawned.args, { cwd: dir, timeoutMs: 30_000 })).stdout.trim();
+      };
+
+      for (const [, path] of named) expect(await connectInLoopback(path), path).toBe("EPERM");
+      for (const path of ordinary) expect(await connectInLoopback(path), path).toBe("connected");
+    });
+
+    it("refuses a named socket reached through a symlink the agent put in its worktree", async () => {
+      symlinkSync(join(dir, "var/run/docker.sock"), join(worktree, "innocent"));
+
+      expect(await connectAs({ [UNCONFINED_ESCAPE_HATCH]: "1" }, "worktree/innocent")).toBe("connected");
+      expect(await connectAs({}, "worktree/innocent")).toBe("EPERM");
+    });
+
+    // Measured before the deny: `run-shell` from inside the profile ran with the server as its
+    // parent, outside the sandbox, and wrote where a direct write could not.
+    const TMUX = ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"].find((path) => existsSync(path));
+
+    // Under a `$TMUX_TMPDIR` the confined process is not told about, as a LaunchAgent is not.
+    describe.skipIf(!TMUX)("a tmux server started outside the sandbox", () => {
+      let tmuxTmpdir: string;
+      let socket: string;
+
+      beforeEach(async () => {
+        tmuxTmpdir = join(dir, "tmux-home");
+        socket = join(tmuxTmpdir, `tmux-${uid}`, "probe");
+        mkdirSync(dirname(socket), { recursive: true, mode: 0o700 });
+        const started = await runner.run(TMUX!, ["-S", socket, "-f", "/dev/null", "new-session", "-d", "sleep 600"], {
+          cwd: dir,
+          timeoutMs: 30_000,
+        });
+        expect(started.code, started.stderr).toBe(0);
+      });
+
+      afterEach(async () => {
+        await runner.run(TMUX!, ["-S", socket, "kill-server"], { cwd: dir, timeoutMs: 30_000 });
+      });
+
+      async function runShellAs(env: NodeJS.ProcessEnv, marker: string) {
+        const spawned = confine(TMUX!, ["-S", socket, "run-shell", `echo ran > ${join(outside, marker)}`], {
+          writable: [worktree],
+          env,
+        });
+        if (!("command" in spawned)) throw new Error(`refused: ${spawned.refusal}`);
+        await runner.run(spawned.command, spawned.args, { cwd: dir, timeoutMs: 30_000 });
+        return existsSync(join(outside, marker));
+      }
+
+      it("runs a command for the caller when nothing confines it — the control", async () => {
+        expect(await runShellAs({ [UNCONFINED_ESCAPE_HATCH]: "1" }, "tmux-unconfined")).toBe(true);
+      });
+
+      it("runs nothing for a caller under the profile", async () => {
+        expect(await runShellAs({}, "tmux-confined")).toBe(false);
+      });
+    });
+
+    // macOS's own screen listens on a FIFO rather than a socket, and opening it for writing is a
+    // write outside the worktree, so the write deny refuses it without a rule of its own.
+    const SCREEN = "/usr/bin/screen";
+
+    describe.skipIf(!existsSync(SCREEN))("macOS's screen, started outside the sandbox", () => {
+      const session = `bp810-${process.pid}`;
+      let env: NodeJS.ProcessEnv;
+      let windowPid: string;
+
+      beforeEach(async () => {
+        windowPid = join(dir, "screen-window.pid");
+        const screendir = join(dir, ".screen-fifo");
+        mkdirSync(screendir, { mode: 0o700 });
+        env = { ...childEnv(), SCREENDIR: screendir };
+        await runner.run(SCREEN, ["-dmS", session, "/bin/sh", "-c", `echo $$ > ${windowPid}; exec /bin/sleep 600`], {
+          cwd: dir,
+          timeoutMs: 30_000,
+          env,
+        });
+        for (const deadline = Date.now() + 10_000; readdirSync(screendir).length === 0 && Date.now() < deadline; ) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+      });
+
+      // `quit` leaves the window running under screen's `login` wrapper, reparented to launchd
+      afterEach(async () => {
+        await runner.run(SCREEN, ["-S", session, "-X", "quit"], { cwd: dir, timeoutMs: 30_000, env });
+        try {
+          process.kill(Number(readFileSync(windowPid, "utf8")), "SIGKILL");
+        } catch {
+          // already gone, or never started
+        }
+      });
+
+      async function openWindowAs(hatch: NodeJS.ProcessEnv, marker: string) {
+        const spawned = confine(SCREEN, ["-S", session, "-X", "screen", "/bin/sh", "-c", `echo ran > ${join(outside, marker)}`], {
+          writable: [worktree],
+          env: hatch,
+        });
+        if (!("command" in spawned)) throw new Error(`refused: ${spawned.refusal}`);
+        await runner.run(spawned.command, spawned.args, { cwd: dir, timeoutMs: 30_000, env });
+        for (const deadline = Date.now() + 3_000; !existsSync(join(outside, marker)) && Date.now() < deadline; ) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        return existsSync(join(outside, marker));
+      }
+
+      it("runs a command for the caller when nothing confines it — the control", async () => {
+        expect(await openWindowAs({ [UNCONFINED_ESCAPE_HATCH]: "1" }, "screen-unconfined")).toBe(true);
+      });
+
+      it("runs nothing for a caller under the profile", async () => {
+        expect(await openWindowAs({}, "screen-confined")).toBe(false);
+      });
+    });
+  });
+
+  // `launchctl disable gui/<uid>/<label>` worked from inside the profile and persists across
+  // reboots; `bootout` stopped a job. Probed only with subcommands that change nothing even if a
+  // regression let them through, so no failure can write to launchd's database.
+  describe("launchctl", () => {
+    const LAUNCHCTL = "/bin/launchctl";
+    const domain = `gui/${process.getuid!()}`;
+    const label = "com.board-planner.worker.sandbox-probe.absent";
+
+    async function launchctlAs(env: NodeJS.ProcessEnv, args: string[]) {
+      const spawned = confine(LAUNCHCTL, args, { writable: [worktree], env });
+      if (!("command" in spawned)) throw new Error(`refused: ${spawned.refusal}`);
+      return runner.run(spawned.command, spawned.args, { cwd: dir, timeoutMs: 30_000 });
+    }
+
+    it("runs when nothing confines it — the control", async () => {
+      const result = await launchctlAs({ [UNCONFINED_ESCAPE_HATCH]: "1" }, ["version"]);
+
+      expect(result.code, result.stderr).toBe(0);
+      expect(result.stdout).toContain("Bootstrapper");
+    });
+
+    // Known gap: the deny names the binary, not launchd. A plain copy is killed by AMFI for its
+    // entitlements; one re-signed ad hoc is not, and runs. If this starts failing, macOS has closed
+    // the gap and the README's "still open" can say so. Skipped where a re-signed copy does not run
+    // even unconfined — an ad hoc signature on the arm64e slice is not accepted everywhere.
+    it("KNOWN GAP: a copy re-signed ad hoc in the worktree still runs under the profile", async (ctx) => {
+      const probe = join(dir, "launchctl-probe");
+      const signed = await runner.run(
+        "/bin/sh",
+        ["-c", `cp ${LAUNCHCTL} ${probe} && /usr/bin/codesign -f -s - ${probe} && ${probe} version`],
+        { cwd: dir, timeoutMs: 30_000 },
+      );
+      if (signed.code !== 0 || !signed.stdout.includes("Bootstrapper")) {
+        ctx.skip(`a re-signed launchctl does not run here even unconfined (exit ${signed.code}): nothing to measure`);
+      }
+
+      const copy = join(worktree, "launchctl");
+      const spawned = confine(
+        "/bin/sh",
+        ["-c", `cp ${LAUNCHCTL} ${copy} && /usr/bin/codesign -f -s - ${copy} && ${copy} version`],
+        { writable: [worktree], env: {} },
+      );
+      if (!("command" in spawned)) throw new Error(`refused: ${spawned.refusal}`);
+
+      const result = await runner.run(spawned.command, spawned.args, { cwd: dir, timeoutMs: 30_000 });
+
+      expect(result.code, result.stderr).toBe(0);
+      expect(result.stdout).toContain("Bootstrapper");
+    });
+
+    it("cannot run under the profile, not even to read", async () => {
+      for (const args of [["version"], ["print-disabled", domain], ["kickstart", `${domain}/${label}`]]) {
+        const result = await launchctlAs({}, args);
+
+        expect(result.code, args.join(" ")).not.toBe(0);
+        expect(result.stderr, args.join(" ")).toContain("Operation not permitted");
+        expect(result.stdout, args.join(" ")).toBe("");
+      }
+    });
   });
 });

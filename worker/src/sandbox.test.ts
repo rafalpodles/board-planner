@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { confine, confineTool, DirStat, SANDBOX_COMMAND, UNCONFINED_REASON } from "./sandbox.js";
+import {
+  confine,
+  confineTool,
+  DirStat,
+  NAMED_SERVICE_DENIES,
+  profileWith,
+  SANDBOX_COMMAND,
+  UNCONFINED_REASON,
+} from "./sandbox.js";
 import { UNCONFINED_ESCAPE_HATCH } from "./env.js";
 import { CLAUDE_PATH } from "./__fixtures__/tool-paths.js";
 
@@ -64,6 +72,32 @@ describe("confine", () => {
 
     expect(profile).toContain("(deny file-write*)");
     expect(profile).toContain("(allow file-write* (subpath (param \"W0\")))");
+  });
+
+  // Unlike the write rules above, this order was measured to matter: a network-outbound allow that
+  // comes later reopens the named sockets (BP-810). The kernel half is in sandbox.integration.test.ts.
+  it("ends every profile with the named-service denies, after any rules a mode adds", () => {
+    const tail = (profile: string) => profile.split("\n").slice(-NAMED_SERVICE_DENIES.length);
+    const modeRule = "(allow network-outbound (remote unix-socket))";
+
+    expect(tail(profileOf(confined(["/work/bp-1"])))).toEqual(NAMED_SERVICE_DENIES);
+    expect(tail(profileWith(["W0"], [modeRule]))).toEqual(NAMED_SERVICE_DENIES);
+    expect(profileWith(["W0"], [modeRule])).toContain(modeRule);
+  });
+
+  it("ends the gates' loopback-only profile with the named-service denies too", () => {
+    const loopback = confine(CLAUDE_PATH, ["-p", "hello"], {
+      writable: ["/work/bp-1"],
+      network: "loopback",
+      realpath: identity,
+      lstat: aDirectory,
+      env: {},
+      platform: "darwin",
+    });
+    const profile = profileOf(loopback);
+
+    expect(profile).toContain('(allow network-outbound (remote ip "localhost:*") (remote unix-socket))');
+    expect(profile.split("\n").slice(-NAMED_SERVICE_DENIES.length)).toEqual(NAMED_SERVICE_DENIES);
   });
 
   // A path travels as a -D parameter rather than as text inside the profile, so a directory name
@@ -237,8 +271,12 @@ describe("the network (BP-720)", () => {
   const withNetwork = (network?: "open" | "loopback") =>
     profileOf(confine(CLAUDE_PATH, ["-p"], { writable: ["/work/bp-1"], network, realpath: identity, lstat: aDirectory, platform: "darwin", env: {} }));
 
+  // Every mode refuses the named local services' sockets (BP-810); nothing else about the network.
   it("leaves the network alone unless asked, so the agent's own spawns still reach the API", () => {
-    expect(withNetwork()).not.toContain("network");
+    const withoutNamedDenies = withNetwork().split("\n").slice(0, -NAMED_SERVICE_DENIES.length).join("\n");
+
+    expect(withoutNamedDenies).not.toContain("network");
+    expect(withNetwork()).not.toContain("(deny network-outbound)");
     expect(withNetwork("open")).toBe(withNetwork());
   });
 
@@ -247,7 +285,8 @@ describe("the network (BP-720)", () => {
 
     expect(profile).toContain("(deny network-outbound)");
     expect(profile).toContain('(allow network-outbound (remote ip "localhost:*") (remote unix-socket))');
-    expect(profile.startsWith(withNetwork())).toBe(true);
+    const openRules = withNetwork().split("\n").slice(0, -NAMED_SERVICE_DENIES.length).join("\n");
+    expect(profile.startsWith(openRules)).toBe(true);
   });
 
   it("denies the daemons that fetch on a process's behalf in loopback mode, and only there", () => {
