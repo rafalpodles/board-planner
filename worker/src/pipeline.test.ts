@@ -888,7 +888,7 @@ describe("runTask", () => {
       const comment = h.reporter.failed.mock.calls[0][1];
       expect(comment).toContain(`refusing to run Implement: the checkout now has ${FINDING}`);
       expect(comment).toContain("Nothing was pushed. The worktree is kept at `/wt`");
-      expect(comment).toContain("until the next attempt on this task discards it.");
+      expect(comment).toContain("until the next attempt on this task, or a restart of the worker, discards it.");
       expect(comment).not.toMatch(/staged|config that was found/);
     });
 

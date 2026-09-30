@@ -266,7 +266,7 @@ function tamperedEvidence(state: RunState, branch: string, path: string): string
   const landed = state.pushed
     ? `\`${branch}\` was pushed by an earlier step${state.prUrl ? ` and ${state.prUrl} is open` : ""}, and nothing since.`
     : "Nothing was pushed.";
-  return `\n\n${landed} The worktree is kept at \`${path}\` on the worker host as the check found it, until the next attempt on this task discards it.`;
+  return `\n\n${landed} The worktree is kept at \`${path}\` on the worker host as the check found it, until the next attempt on this task, or a restart of the worker, discards it.`;
 }
 
 function keptWorktree(path: string): string {
