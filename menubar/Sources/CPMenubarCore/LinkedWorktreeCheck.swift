@@ -4,9 +4,9 @@ public enum GitCheckoutKind: Equatable, Sendable {
     case repository
     case linkedWorktree
     /// The working directory of a submodule. `--git-dir` and `--git-common-dir` agree, same as an
-    /// ordinary repository, so this is git's own `--show-superproject-working-tree` naming a
-    /// superproject. Deleting it leaves that superproject's gitlink pointing at a directory that is
-    /// gone (BP-507).
+    /// ordinary repository, so this is either git's own `--show-superproject-working-tree` naming a
+    /// superproject or a git-dir under a superproject's `.git/modules/`. Deleting it leaves that
+    /// superproject's gitlink pointing at a directory that is gone (BP-507).
     case submodule
 }
 
@@ -21,7 +21,7 @@ public enum GitCheckoutKind: Equatable, Sendable {
 /// This matters because the repository's `.git` holds the object store every worktree of it shares,
 /// so deleting it takes them all, including ones nobody named (BP-422).
 public enum LinkedWorktreeCheck {
-    /// `nil` when any answer could not be read. Deciding what an unexamined directory means is the
+    /// `nil` when an answer needed to decide could not be read. Deciding what an unexamined directory means is the
     /// caller's: refusing an irreversible act on it (`CloneStep` adopting one, `CheckoutRemoval`
     /// deleting one) answers no; granting it access (`CheckoutGrant`, BP-505) is not irreversible,
     /// and answers yes — the picker accepted every such folder before this discriminator existed
@@ -46,7 +46,7 @@ public enum LinkedWorktreeCheck {
         superproject: (code: Int32, output: String),
         relativeTo path: String
     ) -> GitCheckoutKind? {
-        guard gitDir.code == 0, commonDir.code == 0, superproject.code == 0 else { return nil }
+        guard gitDir.code == 0, commonDir.code == 0 else { return nil }
 
         // git answers relative to the directory it was run in when the git dir is itself relative —
         // `.git` for an ordinary checkout, absolute for a worktree — so both are resolved against
@@ -68,14 +68,19 @@ public enum LinkedWorktreeCheck {
         }
         guard git == common else { return .linkedWorktree }
 
-        // Not the git-dir's `/.git/modules/` segment, which BP-507 read: git reports the git-dir
-        // resolved, so a superproject whose `.git` is a symlink or `--separate-git-dir` answers
-        // `<elsewhere>/modules/vendor`, and a legacy submodule with its own `.git` directory answers
-        // `.git`. `--show-superproject-working-tree` asks the parent directory's index for a gitlink
-        // at this path instead, and named the superproject in all three on git 2.54.0 (BP-734).
-        // Empty is git's answer for "no superproject". A git that does not know the flag echoes it
-        // and exits 0, as with `--git-common-dir` above, so that is refused the same way.
+        // Either answer alone misses a submodule, measured on git 2.54.0 (BP-734). The git-dir's
+        // `/.git/modules/` segment, which BP-507 read, is absent when the superproject's `.git` is
+        // a symlink or `--separate-git-dir` (git reports `<elsewhere>/modules/vendor`, resolved) and
+        // in the legacy layout (`.git`). `--show-superproject-working-tree` names the superproject
+        // in all three, but it looks for a gitlink in the parent's index and answers empty, exit
+        // 0, when that index is unreadable or has none — a superproject checked out to a branch
+        // predating the submodule leaves `vendor/` behind, still pointing into `.git/modules/`.
+        // Empty therefore means "no superproject found", not "none", and only both saying no is
+        // a repository.
+        if git.contains("/.git/modules/") { return .submodule }
+        guard superproject.code == 0 else { return nil }
         let owner = superproject.output.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A git that does not know the flag echoes it and exits 0, as with `--git-common-dir`
         guard !owner.hasPrefix("-") else { return nil }
         return owner.isEmpty ? .repository : .submodule
     }

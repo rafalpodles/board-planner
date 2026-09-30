@@ -2,18 +2,25 @@ import XCTest
 @testable import CPMenubarCore
 
 // Free function, not a method: CheckoutRemoval.RunGit is @Sendable, and an XCTestCase is not.
-@Sendable private func fixtureGit(_ cwd: String, _ args: [String]) -> (code: Int32, output: String) {
+/// `appInheriting` spawns the way the app does, through `GitSafeEnvironment`, on top of what the
+/// app inherited. Only for the checks under test: under its `GIT_CONFIG_NOSYSTEM=1`, Apple git
+/// 2.54.0 failed this file's local-path `submodule add` ("You are on a branch yet to be born").
+@Sendable private func fixtureGit(
+    _ cwd: String, _ args: [String], appInheriting inherited: [String: String]? = nil
+) -> (code: Int32, output: String) {
     let task = Process()
     task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
     task.arguments = ["git"] + args
     task.currentDirectoryURL = URL(fileURLWithPath: cwd)
-    task.environment = [
+    let fixture = [
         "PATH": ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin",
         "GIT_CONFIG_GLOBAL": "/dev/null",
         "GIT_CONFIG_SYSTEM": "/dev/null",
         "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
         "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
     ]
+    task.environment = inherited.map { GitSafeEnvironment.apply(to: $0.merging(fixture) { _, mine in mine }) }
+        ?? fixture
     let pipe = Pipe()
     task.standardOutput = pipe
     task.standardError = pipe
@@ -73,11 +80,14 @@ final class SubmoduleLayoutTests: XCTestCase {
     /// `-c protocol.file.allow=always` for the same reason `CheckoutRemovalWorktreeTests` gives: a
     /// direct, operator-initiated `submodule add` of a local path, not the recursive case git's
     /// default guards against.
-    private func submodule(in layout: Layout) throws -> (superproject: String, submodulePath: String) {
+    /// The superproject's first commit predates the submodule, on a branch named `before`.
+    private func submodule(
+        in layout: Layout, at relativePath: String = "vendor"
+    ) throws -> (superproject: String, submodulePath: String) {
         let subOrigin = pushedRepository("sub")
         let superOrigin = dir + "/super-origin.git"
         let superproject = dir + "/super"
-        let submodulePath = superproject + "/vendor"
+        let submodulePath = superproject + "/" + relativePath
         _ = git(dir, ["init", "-q", "--bare", superOrigin])
 
         if layout == .separateGitDir {
@@ -86,12 +96,15 @@ final class SubmoduleLayoutTests: XCTestCase {
             _ = git(dir, ["init", "-q", "-b", "main", superproject])
         }
 
+        _ = git(superproject, ["commit", "-q", "--allow-empty", "-m", "before the submodule"])
+        _ = git(superproject, ["branch", "before"])
+
         if layout == .legacy {
             // `submodule add` of a path that already holds a clone keeps that clone's own `.git`
             // directory ("Adding existing repo at 'vendor' to the index") — the pre-1.7.8 shape
-            _ = git(superproject, ["clone", "-q", subOrigin, "vendor"])
+            _ = git(superproject, ["clone", "-q", subOrigin, relativePath])
         }
-        _ = git(superproject, ["-c", "protocol.file.allow=always", "submodule", "add", "-q", subOrigin, "vendor"])
+        _ = git(superproject, ["-c", "protocol.file.allow=always", "submodule", "add", "-q", subOrigin, relativePath])
         _ = git(superproject, ["commit", "-qm", "add submodule"])
         _ = git(superproject, ["remote", "add", "origin", superOrigin])
         _ = git(superproject, ["push", "-q", "-u", "origin", "HEAD"])
@@ -196,6 +209,43 @@ final class SubmoduleLayoutTests: XCTestCase {
 
     func testCloneRefusesToAdoptALegacySubmodule() throws {
         try assertCloneRefusesToAdopt(.legacy)
+    }
+
+    // MARK: - BP-734 review: an empty superproject answer is also "could not read it"
+
+    /// `--show-superproject-working-tree` looks for a gitlink in the parent's index, and answers
+    /// empty with exit 0 when there is none. Checking the superproject out to a branch that
+    /// predates the submodule leaves `vendor/` behind (git: "unable to rmdir 'vendor'") with its
+    /// `.git` file still pointing into `.git/modules/`, and no gitlink for it anywhere — measured.
+    /// Trusting the empty answer alone made it a `.go` and an `.allowed`.
+    func testASubmoduleLeftBehindByABranchThatPredatesItIsStillLeftAlone() throws {
+        let (superproject, submodulePath) = try submodule(in: .ordinary)
+        _ = git(superproject, ["checkout", "-q", "before"])
+        XCTAssertEqual(
+            git(submodulePath, ["rev-parse", "--show-superproject-working-tree"]).output
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+            "", "the premise: git no longer names a superproject")
+
+        guard case .linkedWorktree(let reason) = CheckoutRemoval(run: { args, cwd in fixtureGit(cwd, args) })
+            .check(path: submodulePath, workerIsBusy: false)
+        else { return XCTFail("the leftover submodule was offered for removal") }
+        XCTAssertTrue(reason.contains("submodule"), reason)
+        guard case .refused = CheckoutGrant.check(path: submodulePath, run: { args, cwd in fixtureGit(cwd, args) })
+        else { return XCTFail("the leftover submodule was granted") }
+    }
+
+    /// `GIT_CEILING_DIRECTORIES` naming the superproject stops the lookup one level up from
+    /// `libs/deep`, and the answer is empty, exit 0 — measured. With a symlinked superproject `.git`
+    /// the git-dir has no `/.git/modules/` either, so nothing else would catch it: the variable has
+    /// to be kept from reaching git at all, through the same `GitSafeEnvironment` every app spawn
+    /// uses.
+    func testAnInheritedCeilingDoesNotHideTheSuperproject() throws {
+        let (superproject, submodulePath) = try submodule(in: .symlinkedGitDir, at: "libs/deep")
+        let inherited = ["GIT_CEILING_DIRECTORIES": superproject]
+
+        guard case .linkedWorktree = CheckoutRemoval(run: { args, cwd in fixtureGit(cwd, args, appInheriting: inherited) })
+            .check(path: submodulePath, workerIsBusy: false)
+        else { return XCTFail("a ceiling in the environment made the submodule removable") }
     }
 
     /// The controls: the layout BP-507 already caught still is, through all three readers.

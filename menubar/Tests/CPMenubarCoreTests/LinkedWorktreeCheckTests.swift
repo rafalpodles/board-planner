@@ -74,12 +74,24 @@ final class LinkedWorktreeCheckTests: XCTestCase {
             .submodule)
     }
 
-    /// The other direction: a `modules/` segment is no longer evidence on its own — only git naming
-    /// a superproject is.
-    func testAModulesSegmentWithNoSuperprojectIsARepository() {
+    /// An empty superproject answer is also what git gives when it could not read the parent's
+    /// index, or found no gitlink there for a submodule left behind by a checkout (BP-734 review).
+    /// A git-dir under `/.git/modules/` is then still a submodule's — and so is it when the
+    /// superproject question failed outright, rather than unexamined.
+    func testAModulesSegmentIsASubmoduleWhateverTheSuperprojectAnswer() {
         XCTAssertEqual(
-            kind((0, "/work/.git/modules/x"), (0, "/work/.git/modules/x"), at: "/work/x"),
-            .repository)
+            kind((0, "/super/.git/modules/vendor"), (0, "/super/.git/modules/vendor"), at: "/super/vendor"),
+            .submodule)
+        XCTAssertEqual(
+            kind(
+                (0, "/super/.git/modules/vendor"), (0, "/super/.git/modules/vendor"),
+                superproject: (128, "fatal"), at: "/super/vendor"),
+            .submodule)
+        XCTAssertEqual(
+            kind(
+                (0, "/super/.git/modules/vendor"), (0, "/super/.git/modules/vendor"),
+                superproject: (0, "--show-superproject-working-tree\n"), at: "/super/vendor"),
+            .submodule)
     }
 
     /// The control: an ordinary repository answers the superproject question with nothing.

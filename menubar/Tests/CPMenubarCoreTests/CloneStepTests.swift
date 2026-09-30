@@ -304,12 +304,16 @@ final class GitSafeEnvironmentTests: XCTestCase {
             "GIT_COMMON_DIR": "/elsewhere/.git",
             "GIT_WORK_TREE": "/elsewhere",
             "GIT_INDEX_FILE": "/elsewhere/.git/index",
+            "GIT_CEILING_DIRECTORIES": "/elsewhere",
         ])
 
         XCTAssertNil(hardened["GIT_DIR"])
         XCTAssertNil(hardened["GIT_COMMON_DIR"])
         XCTAssertNil(hardened["GIT_WORK_TREE"])
         XCTAssertNil(hardened["GIT_INDEX_FILE"])
+        // BP-734 review: a ceiling at the superproject stops `--show-superproject-working-tree`
+        // looking for it, and a submodule answers as an ordinary repository
+        XCTAssertNil(hardened["GIT_CEILING_DIRECTORIES"])
         // Removed, not emptied: an empty GIT_DIR is a git dir named "", not an absent one
         XCTAssertFalse(hardened.keys.contains("GIT_DIR"))
         XCTAssertEqual(hardened["PATH"], "/usr/bin", "the control — hardening is not a wipe")
