@@ -1,11 +1,13 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { realpathSync } from "node:fs";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 import { DEFAULT_REVIEW_MODEL, modelOr } from "../config.js";
 import { agentEnv } from "../env.js";
 import { CommandResult, Runner } from "../exec.js";
 import { confineTool } from "../sandbox.js";
+import { nodeWorktreeDisk, WorktreeDisk } from "../worktree-disk.js";
 import { gitArgs, localGitEnv, requireGitPath } from "../git-safety.js";
 import { plantedConfig } from "../repos.js";
 import { Gate, GateContext } from "../types.js";
@@ -221,26 +223,33 @@ async function reviewCheckout(
   return { path };
 }
 
-/// Both halves: `worktree remove` unregisters it, and the directory goes whether or not git agreed
-/// to — a review checkout left behind is a copy of the change sitting in a world-readable tmpdir.
+/// Both halves, and the directory goes whether or not git can be asked: a review checkout left
+/// behind is a copy of the change sitting in a world-readable tmpdir. Not `worktree remove`, which
+/// deletes by path — the reviewer was confined to this one, and could have swapped it (BP-804).
 async function discardCheckout(
   runner: Runner,
   gitPath: string,
   worktreePath: string,
   path: string,
+  disk: WorktreeDisk = nodeWorktreeDisk,
 ): Promise<void> {
-  await runner
-    .run(
-      requireGitPath(gitPath),
-      gitArgs(["-C", worktreePath, "worktree", "remove", "--force", path]),
-      {
-        cwd: worktreePath,
-        timeoutMs: CHECKOUT_TIMEOUT_MS,
-        env: localGitEnv(),
-      },
-    )
-    .catch(() => undefined);
-  await rm(path, { recursive: true, force: true }).catch(() => undefined);
+  const registeredAs = join(realpathSync(dirname(path)), basename(path));
+  try {
+    disk.discard(dirname(path), path);
+  } catch {
+    // unregistered below all the same
+  }
+  const asked = await runner
+    .run(requireGitPath(gitPath), gitArgs(["-C", worktreePath, "rev-parse", "--git-common-dir"]), {
+      cwd: worktreePath,
+      timeoutMs: CHECKOUT_TIMEOUT_MS,
+      env: localGitEnv(),
+    })
+    .catch(() => null);
+  const commonDir = asked?.code === 0 ? asked.stdout.replace(/\n$/, "") : "";
+  if (commonDir) {
+    disk.forget(join(resolve(worktreePath, commonDir), "worktrees"), (workTree) => workTree === registeredAs);
+  }
 }
 
 // reviewModel is its own policy field, never policy.model: turning the implementer down for cost

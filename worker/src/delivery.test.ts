@@ -374,7 +374,7 @@ describe("merge", () => {
     const run = vi
       .fn()
       .mockResolvedValue({ code: 1, stdout: "", stderr: "not mergeable", timedOut: false });
-    await expect(createDelivery({ run }, gitPath, ghPath).merge("/wt", "https://x/pull/7")).rejects.toThrow(
+    await expect(createDelivery({ run }, gitPath, ghPath).merge("/wt", "https://github.com/x/y/pull/7")).rejects.toThrow(
       /not mergeable/
     );
   });
@@ -410,11 +410,14 @@ describe("merge", () => {
     expect(valueOf(argsOf(run), "--repo")).toBe("ghe.example.com:8443/x/y");
   });
 
-  it("leaves the repository to gh when the url is not a recognisable pull request url", async () => {
+  // BP-804: without --repo, --delete-branch checks the base out through the worktree's path
+  it("refuses a url it cannot name the repository of, rather than letting gh use the checkout", async () => {
     const { runner, run } = fakeCli({});
-    await createDelivery(runner, gitPath, ghPath).merge("/wt", "https://x/pull/7");
 
-    expect(argsOf(run)).not.toContain("--repo");
+    await expect(createDelivery(runner, gitPath, ghPath).merge("/wt", "https://x/pull/7")).rejects.toThrow(
+      "refusing to merge https://x/pull/7: it names no repository",
+    );
+    expect(run).not.toHaveBeenCalled();
   });
 
   it("reports a merge the pull request actually took, even when gh exits non-zero afterwards", async () => {

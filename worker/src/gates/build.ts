@@ -1,6 +1,6 @@
 import { CommandResult, Runner } from "../exec.js";
 import { Gate } from "../types.js";
-import { runConfinedNpm } from "./confined-npm.js";
+import { refused, runConfinedNpm } from "./confined-npm.js";
 
 const MAX_REASON_CHARS = 2000;
 // --ignore-scripts: a lifecycle script from the worktree or any dependency would run as the
@@ -16,21 +16,20 @@ function outputTail(result: CommandResult): string {
 export function buildGate(runner: Runner, npmPath: string, timeoutMs: number): Gate {
   return {
     name: "build",
-    async run({ worktreePath, signal }) {
+    async run({ worktreePath, worktreeDir, signal }) {
       const deadline = Date.now() + timeoutMs;
 
       // a worktree is a fresh checkout with no node_modules — skip this and every build fails with "next: command not found"
       // The one command allowed the npm cache, and the reason `confined-npm.ts` has a cache at all
       const install = await runConfinedNpm(runner, npmPath, INSTALL_ARGS, {
         cwd: worktreePath,
+        worktree: worktreeDir,
         timeoutMs,
         signal,
         withCache: true,
       });
       // machineFault: this machine has judged nothing — see the same call in test-run.ts
-      if ("refusal" in install) {
-        return { ok: false, reason: install.refusal, machineFault: true };
-      }
+      if ("refusal" in install) return refused(install);
       if (install.timedOut) {
         return { ok: false, reason: `dependency install timed out after ${timeoutMs}ms` };
       }
@@ -54,12 +53,11 @@ export function buildGate(runner: Runner, npmPath: string, timeoutMs: number): G
       // build script — agent-written, like the tests
       const build = await runConfinedNpm(runner, npmPath, ["run", "build"], {
         cwd: worktreePath,
+        worktree: worktreeDir,
         timeoutMs: remainingMs,
         signal,
       });
-      if ("refusal" in build) {
-        return { ok: false, reason: build.refusal, machineFault: true };
-      }
+      if ("refusal" in build) return refused(build);
       if (build.timedOut) {
         return {
           ok: false,

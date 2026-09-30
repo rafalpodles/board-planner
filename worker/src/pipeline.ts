@@ -262,6 +262,13 @@ function whatLanded(state: RunState, branch: string): string {
 
 // What this run wrote is in the tree and nowhere else, so the comment that ends the run says where
 // it is. Kept until the next attempt rebuilds the worktree — a window for a person, not durability.
+function tamperedEvidence(state: RunState, branch: string, path: string): string {
+  const landed = state.pushed
+    ? `\`${branch}\` was pushed by an earlier step${state.prUrl ? ` and ${state.prUrl} is open` : ""}, and nothing since.`
+    : "Nothing was pushed.";
+  return `\n\n${landed} The worktree is kept at \`${path}\` on the worker host as the check found it.`;
+}
+
 function keptWorktree(path: string): string {
   return `\n\nThe worktree is kept at \`${path}\` on the worker host, with what this run wrote, until the next attempt on this task rebuilds it.`;
 }
@@ -595,6 +602,7 @@ export async function runTask(
         // summarise(), whose result type cannot hold a file body, a prompt or a diff
         const outcome = await runStep(entry, {
           worktreePath: worktree.path,
+          worktreeDir: worktree.dir,
           branch,
           task,
           executor,
@@ -681,11 +689,9 @@ export async function runTask(
         // requeued for the same reason — a requeue sends the next attempt at the same checkout,
         // and `worktree add -B` would have taken the evidence with it (BP-506).
         if (outcome.kind === "tampered") {
+          keepWorktree = true;
           settle("failed", outcome.message);
-          await reporter.failed(
-            task,
-            `${outcome.message}\n\nNothing was staged and nothing was pushed. The worktree is kept at \`${worktree.path}\` on the worker host, with what the agent wrote and what the refusal names still in it.`,
-          );
+          await reporter.failed(task, `${outcome.message}${tamperedEvidence(state, branch, worktree.path)}`);
           return;
         }
         if (outcome.kind === "error") {
@@ -764,6 +770,7 @@ export async function runTask(
         const gateStartedAt = now();
         const verdict = await gate.run({
           worktreePath: worktree.path,
+          worktreeDir: worktree.dir,
           task,
           result: state.lastResult,
           diff,
@@ -792,13 +799,20 @@ export async function runTask(
           // only the machine is broken.
           //
           // Kept until the next attempt claims this task, not kept for good: workspace.create()
-          // calls removeIfRegistered() before `worktree add -B`. So this buys a person a window to
+          // clears every earlier attempt's entry before `worktree add -B`. So this buys a person a window to
           // look at what the run produced, and the comment above carries the path to look at — it
           // does not make the work durable, and the run is repeated either way.
           //
           // The usage-limit branch below does not keep it, and that asymmetry is deliberate: a
           // usage limit is this account waiting for a clock, and the same machine will run the
           // task again.
+          if (verdict.tampered) {
+            keepWorktree = true;
+            const message = `refusing to run the ${gate.name} gate: the checkout now has ${verdict.tampered}`;
+            settle("failed", message);
+            await reporter.failed(task, `${message}${tamperedEvidence(state, branch, worktree.path)}`);
+            return;
+          }
           if (verdict.machineFault) {
             keepWorktree = true;
             // With the reason, for what the base-branch path above says: on this path it is
@@ -840,6 +854,7 @@ export async function runTask(
                 worktreeRoot: config.worktreeRoot,
                 baseSha: worktree.baseSha,
                 pin: worktree.pin,
+                dir: worktree.dir,
               });
             } catch (error) {
               deps.logError?.(

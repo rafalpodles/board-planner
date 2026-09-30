@@ -209,12 +209,14 @@ describe("every real env-building call site stays inside the allowlist, across a
       const outcome = await createExecutor(config, runner, CLAUDE_PATH).execute({
         task,
         worktreePath: worktree.path,
+        worktreeDir: worktree.dir,
         brief: { prompt: "say hi", capability: "edit", model: "", fallbackModel: "", timeoutMs: 30_000 },
       });
       expect(outcome.kind).toBe("result");
 
       const verdict = await reviewGate(runner, gitPath, CLAUDE_PATH, 30_000).run({
         worktreePath: worktree.path,
+        worktreeDir: worktree.dir,
         task,
         result: {
           status: "completed",

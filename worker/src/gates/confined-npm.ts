@@ -2,8 +2,9 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CommandResult, Runner, RunOpts } from "../exec.js";
+import { GateResult } from "../types.js";
 import { agentEnv, npmCacheOverride, tempDirOverride } from "../env.js";
-import { confineTool } from "../sandbox.js";
+import { confineTool, RecordedDir } from "../sandbox.js";
 
 /**
  * The npm gates, run where the agent's own tools already are.
@@ -63,6 +64,8 @@ export function npmTempBase(env?: NodeJS.ProcessEnv): string {
 }
 
 export interface ConfinedNpmOptions extends RunOpts {
+  /** The worktree `cwd` is, as it was recorded at creation (BP-804). */
+  worktree: RecordedDir;
   /** Whether this command is the install, which is the only one allowed the cache. */
   withCache?: boolean;
   /**
@@ -86,8 +89,8 @@ export async function runConfinedNpm(
   npmPath: string,
   args: string[],
   options: ConfinedNpmOptions
-): Promise<CommandResult | { refusal: string }> {
-  const { withCache, env: source, ...runOptions } = options;
+): Promise<CommandResult | { refusal: string; replaced?: string }> {
+  const { withCache, env: source, worktree, ...runOptions } = options;
   const cache = npmCacheDir(source);
 
   // This run's own scratch directory, inside the machine's. Created before `confine` resolves it:
@@ -102,7 +105,7 @@ export async function runConfinedNpm(
     return { refusal: `could not prepare a directory for this gate to write in: ${String(error)}` };
   }
 
-  const writable = [options.cwd, temp];
+  const writable: (string | RecordedDir)[] = [worktree, temp];
   if (withCache) writable.push(cache);
 
   try {
@@ -126,4 +129,11 @@ export async function runConfinedNpm(
   } finally {
     rmSync(temp, { recursive: true, force: true });
   }
+}
+
+/** A refusal as a gate reports it: the worktree swapped under it is the run's, anything else the machine's. */
+export function refused(refusal: { refusal: string; replaced?: string }): GateResult {
+  return refusal.replaced
+    ? { ok: false, reason: refusal.refusal, tampered: `its directory ${refusal.replaced}` }
+    : { ok: false, reason: refusal.refusal, machineFault: true };
 }

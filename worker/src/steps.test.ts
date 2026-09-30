@@ -41,6 +41,7 @@ function ctx(over: Partial<StepContext> = {}) {
   };
   const context = {
     worktreePath: "/wt",
+    worktreeDir: { path: "/private/wt", dev: 1, ino: 2 },
     branch: "cp-1/x",
     task: { taskKey: "CP-1", title: "t", description: "", acceptanceCriteria: [] },
     executor: { execute: vi.fn(async () => ({ kind: "result", result: completed })) },
@@ -78,6 +79,42 @@ describe("runStep — a model step", () => {
 
     expect(outcome).toEqual({ kind: "ok" });
     expect(c.commit).toHaveBeenCalled();
+  });
+
+  // BP-804: a read-only step is confined too, and a replaced worktree would be its writable path
+  it.each(["edit", "read-only"] as const)("refuses a %s step over a tampered checkout without spawning it", async (capability) => {
+    const c = ctx({ tampering: vi.fn(async () => "its directory /private/wt replaced by a symlink") });
+
+    const outcome = await runStep(entry({ capability }), c);
+
+    expect(outcome).toEqual({
+      kind: "tampered",
+      finding: "its directory /private/wt replaced by a symlink",
+      message: "refusing to run Implement: the checkout now has its directory /private/wt replaced by a symlink",
+    });
+    expect(c.executor.execute).not.toHaveBeenCalled();
+    expect(c.commit).not.toHaveBeenCalled();
+  });
+
+  it("reports a worktree the executor found replaced as tampering, not as a machine fault", async () => {
+    const c = ctx();
+    c.executor.execute.mockResolvedValue({ kind: "tampered", finding: "its directory /private/wt replaced by a symlink" });
+
+    const outcome = await runStep(entry({ capability: "edit" }), c);
+
+    expect(outcome).toEqual({
+      kind: "tampered",
+      finding: "its directory /private/wt replaced by a symlink",
+      message: "refusing to run Implement: the checkout now has its directory /private/wt replaced by a symlink",
+    });
+    expect(c.commit).not.toHaveBeenCalled();
+  });
+
+  it("hands the executor the directory recorded at creation", async () => {
+    const c = ctx();
+    await runStep(entry({ capability: "edit" }), c);
+
+    expect(c.executor.execute.mock.calls[0][0]).toMatchObject({ worktreeDir: { path: "/private/wt", dev: 1, ino: 2 } });
   });
 
   it("does not commit after a read-only step, which cannot have written anything", async () => {

@@ -116,7 +116,7 @@ const IDENTITY = { name: "The Operator", email: "operator@example.com" };
 const PIN = { workTree: "/wt", gitDir: "/repo/.git/worktrees/wt", pointer: "gitdir: /repo/.git/worktrees/wt\n", flagged: [] };
 
 function worktreeAt(baseSha: string, tampering: () => Promise<string | null> = async () => null) {
-  return { path: "/wt", baseSha, commitIdentity: IDENTITY, pin: PIN, tampering };
+  return { path: "/wt", baseSha, commitIdentity: IDENTITY, pin: PIN, dir: { path: "/wt", dev: 0, ino: 0 }, tampering };
 }
 
 // A worktree that starts dirty, the way the implement step actually leaves one, and goes clean the
@@ -830,7 +830,7 @@ describe("runTask", () => {
 
     it("refuses to commit, and keeps the tree", async () => {
       const h = harness();
-      h.workspace.create.mockResolvedValue(worktreeAt("base1", tamperedAfter(0)));
+      h.workspace.create.mockResolvedValue(worktreeAt("base1", tamperedAfter(1)));
       const gate = passingGate("diff-size");
       h.deps.gateFor = () => gate;
 
@@ -849,8 +849,8 @@ describe("runTask", () => {
       const h = harness({
         gateFor: (entry) => (entry.key === "build" ? build : entry.key === "test-run" ? tests : passingGate(entry.key)),
       });
-      // commit, then before build — the build is what rewrote it
-      h.workspace.create.mockResolvedValue(worktreeAt("base1", tamperedAfter(2)));
+      // before the step, the commit, then before build — the build is what rewrote it
+      h.workspace.create.mockResolvedValue(worktreeAt("base1", tamperedAfter(3)));
 
       await runTask(h.deps, running("implement", "build", "test-run", "push"));
 
@@ -863,9 +863,74 @@ describe("runTask", () => {
       expect(h.workspace.destroy).not.toHaveBeenCalled();
     });
 
+    // BP-804: what a gate left behind can replace the worktree itself, and the next step is a spawn
+    it("refuses to run a step after a gate rewrote it", async () => {
+      const h = harness({ gateFor: (entry) => passingGate(entry.key) });
+      h.workspace.create.mockResolvedValue(worktreeAt("base1", tamperedAfter(3)));
+
+      await runTask(h.deps, running("implement", "test-run", "implement", "push"));
+
+      expect(h.executor.execute).toHaveBeenCalledTimes(1);
+      expect(h.delivery.push).not.toHaveBeenCalled();
+      expect(h.reporter.failed.mock.calls[0][1]).toContain(`refusing to run Implement: the checkout now has ${FINDING}`);
+      expect(h.workspace.destroy).not.toHaveBeenCalled();
+    });
+
+    // BP-804 review: with nothing committed yet, only the refusal itself can keep the evidence
+    it("keeps the worktree when the first thing refused is a step", async () => {
+      const h = harness({ gateFor: (entry) => passingGate(entry.key) });
+      h.workspace.create.mockResolvedValue(worktreeAt("base1", tamperedAfter(1)));
+
+      await runTask(h.deps, running("test-run", "implement", "push"));
+
+      expect(h.executor.execute).not.toHaveBeenCalled();
+      expect(h.workspace.destroy).not.toHaveBeenCalled();
+      const comment = h.reporter.failed.mock.calls[0][1];
+      expect(comment).toContain(`refusing to run Implement: the checkout now has ${FINDING}`);
+      expect(comment).toContain("Nothing was pushed. The worktree is kept at `/wt`");
+      expect(comment).not.toMatch(/staged|config that was found/);
+    });
+
+    it("says what an earlier step already pushed rather than that nothing was", async () => {
+      const h = harness({ gateFor: (entry) => passingGate(entry.key) });
+      // before the step, its commit, before the push — then before the second step
+      h.workspace.create.mockResolvedValue(worktreeAt("base1", tamperedAfter(3)));
+
+      await runTask(h.deps, running("implement", "push", "implement"));
+
+      expect(h.delivery.push).toHaveBeenCalledTimes(1);
+      const comment = h.reporter.failed.mock.calls[0][1];
+      expect(comment).toContain("was pushed by an earlier step, and nothing since.");
+      expect(comment).not.toContain("Nothing was pushed");
+    });
+
+    // A swap between the check and the gate's own confinement is the run's doing: a machine fault
+    // would refund the attempt and stop this worker claiming, on a process the agent controls
+    it("fails, not releases, a gate that found the worktree replaced under it", async () => {
+      const replaced = {
+        name: "test-run",
+        run: vi.fn<Gate["run"]>(async () => ({
+          ok: false,
+          reason: "refusing to confine the agent to /wt: /wt replaced by a symlink since it was created",
+          tampered: "its directory /wt replaced by a symlink",
+        })),
+      };
+      const h = harness({ gateFor: () => replaced });
+
+      const outcome = await runTask(h.deps, running("test-run", "push"));
+
+      expect(outcome).not.toBe("machine-fault");
+      expect(h.reporter.released).not.toHaveBeenCalled();
+      expect(h.delivery.push).not.toHaveBeenCalled();
+      expect(h.workspace.destroy).not.toHaveBeenCalled();
+      expect(h.reporter.failed.mock.calls[0][1]).toContain(
+        "refusing to run the test-run gate: the checkout now has its directory /wt replaced by a symlink",
+      );
+    });
+
     it("refuses to push after the last gate rewrote it", async () => {
       const h = harness({ gateFor: (entry) => passingGate(entry.key) });
-      h.workspace.create.mockResolvedValue(worktreeAt("base1", tamperedAfter(2)));
+      h.workspace.create.mockResolvedValue(worktreeAt("base1", tamperedAfter(3)));
 
       await runTask(h.deps, running("implement", "test-run", "push", "pull-request"));
 
@@ -878,7 +943,7 @@ describe("runTask", () => {
     it("does not push a gate-rejected branch either", async () => {
       const refusing = { name: "diff-size", run: vi.fn<Gate["run"]>(async () => ({ ok: false, reason: "too big" })) };
       const h = harness({ gateFor: () => refusing });
-      h.workspace.create.mockResolvedValue(worktreeAt("base1", tamperedAfter(2)));
+      h.workspace.create.mockResolvedValue(worktreeAt("base1", tamperedAfter(3)));
 
       await runTask(h.deps, running("implement", "diff-size"));
 
@@ -1137,6 +1202,7 @@ describe("runTask", () => {
 
     expect(gate.run).toHaveBeenCalledWith({
       worktreePath: "/wt",
+      worktreeDir: { path: "/wt", dev: 0, ino: 0 },
       task: merging,
       result: completed,
       diff,

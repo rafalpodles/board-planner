@@ -1,8 +1,9 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { dirname, join } from "path";
 import { childEnv, unconfinedAgentAllowed } from "./env.js";
-import { confine, SANDBOX_COMMAND, UNCONFINED_ACCEPTED_DETAIL } from "./sandbox.js";
+import { confine, recordDir, SANDBOX_COMMAND, UNCONFINED_ACCEPTED_DETAIL } from "./sandbox.js";
+import { npmCacheDir } from "./gates/confined-npm.js";
 import { Runner } from "./exec.js";
 import { CommitIdentity, resolveCommitIdentity } from "./commit.js";
 import {
@@ -496,6 +497,30 @@ async function sandboxCheck(deps: PreflightDeps, env: NodeJS.ProcessEnv): Promis
   }
 }
 
+export const NPM_CACHE_CHECK = "npm cache";
+
+// The Build gate confines its install to the cache, and refuses one that is a symlink (BP-804) —
+// said here, before a claim, rather than as a machine fault at the first Build gate
+export function npmCacheCheck(env: NodeJS.ProcessEnv, lstat = lstatSync): PreflightCheck {
+  const name = NPM_CACHE_CHECK;
+  const cache = npmCacheDir(env);
+  if (unconfinedAgentAllowed(env)) return { name, ok: true, detail: cache };
+  try {
+    lstat(cache);
+  } catch {
+    return { name, ok: true, detail: `${cache}, created at the first install` };
+  }
+  try {
+    return { name, ok: true, detail: recordDir(cache, undefined, lstat).path };
+  } catch (error) {
+    return {
+      name,
+      ok: false,
+      detail: `point CP_NPM_CACHE at a real directory: the Build gate cannot confine its install to ${cache} (${error instanceof Error ? error.message : String(error)})`,
+    };
+  }
+}
+
 export async function runPreflight(deps: PreflightDeps): Promise<PreflightReport> {
   // Resolve everything before verifying anything. Asking `npm --version` on the PATH this process
   // was started with is how a working npm reports itself broken: its shebang is `env node`, and the
@@ -555,6 +580,7 @@ export async function runPreflight(deps: PreflightDeps): Promise<PreflightReport
     })
   );
   checks.push(await sandboxCheck(deps, env));
+  checks.push(npmCacheCheck(deps.env));
 
   return {
     ok: checks.every((c) => c.ok),

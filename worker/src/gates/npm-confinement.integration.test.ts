@@ -8,6 +8,7 @@ import { claimedTask } from "../__fixtures__/task.js";
 import { GateContext } from "../types.js";
 import { testRunGate } from "./test-run.js";
 import { installedToolPath } from "../__fixtures__/tool-paths.js";
+import { recordDir } from "../sandbox.js";
 
 /**
  * BP-608, driven through the real kernel and a real `npm`.
@@ -37,6 +38,7 @@ describe.skipIf(!onMac)("the test gate against the real sandbox", () => {
   function context(): GateContext {
     return {
       worktreePath: worktree,
+      worktreeDir: recordDir(worktree),
       task: claimedTask({ title: "t", description: "d" }),
       result: {
         status: "completed",

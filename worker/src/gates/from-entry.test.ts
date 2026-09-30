@@ -6,6 +6,7 @@ import { agentArgs, isAgentSpawn } from "../__fixtures__/agent-spawn.js";
 import { gateFromEntry } from "./from-entry.js";
 import { GateContext, SnapshotEntry } from "../types.js";
 import { CLAUDE_PATH, NPM_PATH } from "../__fixtures__/tool-paths.js";
+import { recordDir } from "../sandbox.js";
 
 function entry(over: Partial<SnapshotEntry>): SnapshotEntry {
   return {
@@ -21,6 +22,7 @@ function entry(over: Partial<SnapshotEntry>): SnapshotEntry {
 function ctx(changedLines: number): GateContext {
   return {
     worktreePath: "/wt",
+    worktreeDir: { path: "/wt", dev: 0, ino: 0 },
     task: { taskKey: "CP-1", title: "t", description: "", acceptanceCriteria: [] } as never,
     result: {} as never,
     diff: {
@@ -148,6 +150,7 @@ describe("gateFromEntry", () => {
       await gateFromEntry(entry({ gateKind }), { run } as never, tools, 1000, FALLBACKS)!.run({
         ...ctx(5),
         worktreePath,
+        worktreeDir: recordDir(worktreePath),
       });
     } finally {
       rmSync(worktreePath, { recursive: true, force: true });

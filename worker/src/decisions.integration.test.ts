@@ -3,7 +3,7 @@ import { agentArgs, answerSandboxProbe, isAgentSpawn, isSandboxProbe } from "./_
 import { createServer, IncomingMessage, Server, ServerResponse } from "http";
 import { AddressInfo } from "net";
 import { tmpdir } from "os";
-import { join } from "path";
+import { basename, join } from "path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CommandResult, Runner, RunOpts } from "./exec.js";
 import { createWorker } from "./wiring.js";
@@ -265,12 +265,14 @@ interface GitCall {
   command: string;
   args: string[];
   env?: NodeJS.ProcessEnv;
+  /** Whether the directory the call ran in was still there when it ran. */
+  cwdExisted?: boolean;
 }
 
 function makeRunner(seen: GitCall[], registeredWorktree = ""): Runner {
   return {
     async run(command, args, runOpts: RunOpts) {
-      seen.push({ command, args, env: runOpts.env });
+      seen.push({ command, args, env: runOpts.env, cwdExisted: existsSync(runOpts.cwd) });
 
       // BP-349 confines the agent to its worktree, and seatbelt is given the resolved path — so a
       // worktree that exists only in this stub's answers cannot be confined to, and the run fails
@@ -505,7 +507,8 @@ describe("a refused change, offered and then accepted, over a real HTTP surface"
     const create = settlement.git.find((call) => call.command === `${TOOL_DIR}/gh` && call.args.includes("create"));
 
     const marker = JSON.parse(markerAfterRefusal!);
-    expect(marker.pin.gitDir).toBe(join(realpathSync(REPO), "worktrees", TASK_KEY));
+    expect(basename(marker.worktreePath)).toMatch(new RegExp(`^${TASK_KEY}\\.[0-9a-f]+$`));
+    expect(marker.pin.gitDir).toBe(join(realpathSync(REPO), "worktrees", basename(marker.worktreePath)));
     for (const call of [push, create]) {
       expect(call?.env).toMatchObject({ GIT_DIR: marker.pin.gitDir, GIT_WORK_TREE: marker.worktreePath });
     }
@@ -518,15 +521,14 @@ describe("a refused change, offered and then accepted, over a real HTTP surface"
    * so a pass that forgot to hand it over would destroy the work before the push, with both halves
    * of the feature unit-tested and green.
    */
+  // Observed at the push itself: since BP-804 the worker discards a worktree without asking git,
+  // so no git call marks when the reap happened
   it("does not reap the held worktree before the push", () => {
-    const removedAt = settlement.git.findIndex(
-      (call) => call.args.includes("worktree") && call.args.includes("remove")
-    );
-    const pushedAt = settlement.git.findIndex((call) => call.args.includes("push"));
+    const push = settlement.git.find((call) => call.args.includes("push"));
+    const marker = JSON.parse(markerAfterRefusal!);
 
-    expect(pushedAt).toBeGreaterThanOrEqual(0);
-    // Removed after the pull request exists, or not at all — never before
-    expect(removedAt === -1 || removedAt > pushedAt).toBe(true);
+    expect(push?.env?.GIT_WORK_TREE).toBe(marker.worktreePath);
+    expect(push?.cwdExisted).toBe(true);
   });
 
   it("tells the board what came of it", () => {
@@ -539,8 +541,12 @@ describe("a refused change, offered and then accepted, over a real HTTP surface"
   // Until the pull request exists this worktree is the only copy of the work; afterwards it is not
   it("gives the worktree back once the pull request is open", () => {
     expect(existsSync(join(stateDir, "decisions", `${TASK_KEY}.json`))).toBe(false);
+    // Discarded and unregistered by the worker itself, never handed to git by path (BP-804)
+    const marker = JSON.parse(markerAfterRefusal!);
+    expect(existsSync(marker.worktreePath)).toBe(false);
+    expect(existsSync(marker.pin.gitDir)).toBe(false);
     expect(
-      settlement.git.some((call) => call.args.includes("worktree") && call.args.includes("remove"))
-    ).toBe(true);
+      settlement.git.some((call) => call.args.includes("worktree") && (call.args.includes("remove") || call.args.includes("prune")))
+    ).toBe(false);
   });
 });

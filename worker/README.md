@@ -339,7 +339,7 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   refuses the same staging, but as an ordinary failure, so the task requeues and the comment names
   the path alone, because there is no key to name. Every ordinary commit failure keeps the tree the
   same way — whichever call threw, the agent's work is in it and in no history, and the `finally`
-  that tidies up is the only thing between it and `worktree remove --force` — but only until the
+  that tidies up is the only thing between it and the worktree's removal — but only until the
   next attempt rebuilds the worktree. Where it stops: a step that never reaches its commit, on a
   timeout, a usage limit or a block, does not set the flag that keeps it, and the tree goes.
 - **The agent's own writes cannot leave its worktree.** Both calls to the CLI — the step that
@@ -347,6 +347,38 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   write and allows back exactly one directory: the worktree for the step, the throwaway checkout for
   the reviewer. The kernel refuses, so it holds for `Write`, for `Edit`, for a symlink planted inside
   the worktree and written through, and for a process the CLI spawns writing a file itself.
+
+  **The directory is the one recorded at creation, never the path resolved again** (**BP-804**). The
+  profile's allowance covers the worktree itself, so a confined process — a daemon a Test gate left
+  running, say — can delete it and put a symlink to `$HOME` in its place, and a path resolved at the
+  next spawn would then allow the next step to write your home. The worker records the worktree's
+  real path and its device and inode when it creates it, and refuses to confine anything to it once
+  it is a symlink, missing, or a different directory; the same check runs before every step, agent
+  steps included, as well as before every gate and delivery. Between that check and the spawn, the
+  profile names the recorded path literally, and seatbelt checks the resolved path of each write, so
+  a symlink put there afterwards permits nothing through it (measured on macOS 26.6.2). Every other
+  directory a confinement allows — a gate's scratch directory, the npm cache, the review checkout —
+  is resolved through its parent only and refused if it is itself a symlink, so a `CP_NPM_CACHE`
+  that is a symlink is refused rather than followed — preflight reads red on it before the machine
+  claims anything; point it at the real directory. A worktree found replaced, before a step or gate
+  or at its confinement, fails the run and keeps the worktree as evidence; it is not reported as a
+  machine that cannot confine, so it neither refunds the attempt nor stops the worker claiming.
+
+  **What the worker itself does to a worktree follows no symlink either.** `git worktree remove`
+  deletes by path and resolves it again as it goes, so a worktree swapped for a symlink to a
+  directory holding a copy of its `.git` file had git empty that directory; `worktree add` checked
+  out through a symlink left at the path. The worker no longer asks git to delete a worktree or a
+  review checkout: it renames the entry to a `.discard-*` name beside it — a symlink moves as a
+  link, and no sandbox rule names the new path — and removes it there, first clearing `uchg`/`uappnd`
+  flags and making writable a tree a step locked. Then it removes the clone's admin entries for
+  that task's attempts under its own root and no others — not `git worktree prune`, which would also
+  unregister any worktree of yours whose directory is missing at that moment. An entry that still
+  will not move is left in place and the next attempt uses a fresh name. Every entry for the task under the root is cleared that way before
+  each attempt, registered or not, so a leftover symlink cannot wedge the task. Each attempt's
+  worktree has a fresh name, `<taskKey>.<nonce>`, so a process an earlier attempt left running holds
+  no rule over it. A decision's settlement checks the recorded directory too before it pushes, and a
+  merge refuses a pull request URL it cannot name the repository of, because without `--repo`
+  `gh pr merge --delete-branch` checks the base out in the worktree.
 
   **What it closes.** A step runs with `--permission-mode bypassPermissions`, so `Write` used to take
   any absolute path this user can reach. `$HOME/.claude/settings.json` is the shortest one: a hook
@@ -567,11 +599,11 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   and every git and `gh` call the worker makes in the worktree names it through
   `GIT_DIR`/`GIT_WORK_TREE` — derived from the main clone's own record of the worktree, never from
   the worktree's `.git` file. Before
-  each commit, each gate and each push, pull request or merge, the worker also compares the `.git`
+  each step, each commit, each gate and each push, pull request or merge, the worker also compares the `.git`
   file with what git wrote and lists the index for `skip-worktree`/`assume-unchanged` flags the
   checkout did not start with; either one refuses the run and says what changed (BP-794). A sparse
-  checkout's own flags are recorded at creation and pass. A worktree refused this way cannot be
-  removed by `git worktree remove` until its `.git` file is put back.
+  checkout's own flags are recorded at creation and pass. A worktree refused this way is kept until
+  the next attempt on the task, which discards it like any other.
 
   **A nested repository fails the run.** git checks a submodule for changes by running itself
   inside it, under that repository's own config — so a clean filter in a `.git/config` the Test
@@ -653,7 +685,7 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   | `baseBranch` | project policy | `git ls-remote -- <url> refs/heads/<baseBranch>`, `git fetch --no-tags -- <url> <baseBranch>`, `gh pr create --base` | a git ref name, refused where an admin sets it and again in `applyPolicy`; delivery re-checks it and drops `--base` rather than pass a value that is not one, and the two remote calls keep it behind `--`. It no longer reaches `git diff` at all: since BP-382 the gates diff against the resolved base **sha**, and that sink refuses anything that is not `[0-9a-f]{7,64}` |
   | `model`, `fallbackModel`, `reviewModel` | project policy, a step, a review gate's params | `claude --model` | a model name, at `modelOr` — the one place all three overrides meet |
   | limits and timeouts | policy, gate params | numbers | parsed as numbers; a value that is not one is the default, never zero |
-  | `taskKey` | the project's key and the task number | a directory under the worktree root, and a git branch | `^[A-Za-z0-9][A-Za-z0-9_-]*-\d+$`, `pathFor` refuses a path that leaves the root, and `push` refuses a branch that is not a git ref name before building `<commit>:refs/heads/<branch>` out of it — git splits a push refspec at its *last* colon |
+  | `taskKey` | the project's key and the task number | a directory under the worktree root (`<taskKey>.<nonce>`, a new name on every attempt), and a git branch | `^[A-Za-z0-9][A-Za-z0-9_-]*-\d+$`, `pathFor` refuses a path that leaves the root, and `push` refuses a branch that is not a git ref name before building `<commit>:refs/heads/<branch>` out of it — git splits a push refspec at its *last* colon |
   | `capability`, `gateKind` | agent snapshot | a tool list, a gate | closed maps this side, so a server cannot widen what a step may do |
   | `title`, `description`, `prompt`, `focus`, summaries | claim, agent snapshot | prompt text, the PR title and body | option *values*, never positionals, and scrubbed before they reach a pull request. Prompt injection is a different problem and nothing here claims to solve it |
 

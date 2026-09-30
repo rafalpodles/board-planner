@@ -7,7 +7,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { join, resolve, sep } from "node:path";
+import { join, resolve } from "node:path";
 import { ApiClient, DecisionSettlement } from "./api.js";
 import { Delivery } from "./delivery.js";
 import { Runner } from "./exec.js";
@@ -15,6 +15,7 @@ import { gitArgs, localGitEnv, requireGitPath } from "./git-safety.js";
 import { protectedPaths, workflowPaths } from "./gates/protected-paths.js";
 import { ClaimedTask, DiffStats } from "./types.js";
 import { GitPin, pinTampering } from "./worktree-pin.js";
+import { dirReplaced, RecordedDir } from "./sandbox.js";
 import { scrub } from "./scrub.js";
 
 /**
@@ -41,6 +42,8 @@ export interface DecisionMarker {
   createdAt: string;
   /** The git dir the run pinned; absent on a marker written before BP-794. */
   pin?: GitPin;
+  /** The worktree as it was created; absent on a marker written before BP-804. */
+  dir?: RecordedDir;
   /**
    * How many times this machine has tried to act on a verdict, counted HERE rather than read off
    * the record.
@@ -175,16 +178,6 @@ export function sha256(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");
 }
 
-/** Where a task's worktree is, by the one rule every assignment follows: the machine resolves it. */
-export function worktreePathFor(worktreeRoot: string, taskKey: string): string {
-  const root = resolve(worktreeRoot);
-  const path = resolve(root, taskKey);
-  if (!path.startsWith(`${root}${sep}`)) {
-    throw new Error(`refusing task key ${JSON.stringify(taskKey)}: its path falls outside ${root}`);
-  }
-  return path;
-}
-
 /**
  * Whether accepting is on offer at all, and the sentence that says why not.
  *
@@ -257,6 +250,7 @@ export interface OpenDecisionInput {
   worktreeRoot: string;
   baseSha: string;
   pin: GitPin;
+  dir: RecordedDir;
 }
 
 /**
@@ -289,6 +283,7 @@ export async function openDecision(
     baseSha: input.baseSha,
     createdAt: new Date().toISOString(),
     pin: input.pin,
+    dir: input.dir,
   });
 
   try {
@@ -477,6 +472,10 @@ async function whyNotPushable(
     return `this machine holds ${marker.commit} for ${decision.taskKey}, not the accepted ${decision.commit}`;
   }
 
+  // Before pinTampering, which reads `.git` through the path: a symlink to a copy of the pointer
+  // file passes it, and the push, the pull request and the destroy would all follow the link
+  const replaced = marker.dir ? dirReplaced(marker.dir) : null;
+  if (replaced) return `the worktree now has its directory ${replaced}`;
   if (marker.pin && !existsSync(marker.pin.workTree)) {
     return `the worktree at ${marker.pin.workTree} is gone`;
   }

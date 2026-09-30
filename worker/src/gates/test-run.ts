@@ -1,6 +1,6 @@
 import { CommandResult, Runner } from "../exec.js";
 import { Gate } from "../types.js";
-import { runConfinedNpm } from "./confined-npm.js";
+import { refused, runConfinedNpm } from "./confined-npm.js";
 
 const MAX_REASON_CHARS = 2000;
 
@@ -13,17 +13,15 @@ function outputTail(result: CommandResult): string {
 export function testRunGate(runner: Runner, npmPath: string, timeoutMs: number): Gate {
   return {
     name: "test-run",
-    async run({ worktreePath, signal }) {
+    async run({ worktreePath, worktreeDir, signal }) {
       // Confined, because this is the command that runs the agent's own code: a test file the
       // Implement step wrote is inside the worktree, so the agent's sandbox permitted writing it,
       // and this is where it executes (BP-608).
-      const result = await runConfinedNpm(runner, npmPath, ["test"], { cwd: worktreePath, timeoutMs, signal });
+      const result = await runConfinedNpm(runner, npmPath, ["test"], { cwd: worktreePath, worktree: worktreeDir, timeoutMs, signal });
       // machineFault, not a plain refusal, and the same call the review gate makes: a machine that
       // cannot confine has judged nothing, so reporting it as the suite failing would blame the
       // diff, spend the attempt and push the branch.
-      if ("refusal" in result) {
-        return { ok: false, reason: result.refusal, machineFault: true };
-      }
+      if ("refusal" in result) return refused(result);
 
       if (result.timedOut) {
         return { ok: false, reason: `the test suite timed out after ${timeoutMs}ms` };

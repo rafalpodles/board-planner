@@ -9,6 +9,7 @@ import { parseStream, StreamEvent } from "./stream.js";
 import { claimedTask } from "./__fixtures__/task.js";
 import { workerConfig } from "./__fixtures__/config.js";
 import { CLAUDE_PATH } from "./__fixtures__/tool-paths.js";
+import { recordDir } from "./sandbox.js";
 
 // Whole but for the policy fields, which the tests below leave unset on purpose — model and
 // fallbackModel are optional on WorkerConfig, and what the executor does without them is the thing
@@ -30,6 +31,7 @@ afterAll(() => rmSync(worktreePath, { recursive: true, force: true }));
 const options = {
   task,
   worktreePath,
+  worktreeDir: recordDir(worktreePath),
   brief: {
     prompt: "Make the change the task describes.",
     capability: "edit" as const,
@@ -808,22 +810,20 @@ describe("the agent is confined to its worktree", () => {
   });
 
   // The step that cannot be confined does not run half-confined, and does not run at all. A
-  // worktree that cannot be resolved is the reachable form of that here; a machine with no seatbelt
-  // is the other, and sandbox.test.ts pins it.
-  //
-  // `machine_fault`, not `error`: the difference decides whether the attempt is charged. An error
-  // requeues and charges, so three tasks in the approved column would walk into the escalation
-  // column over one machine that cannot confine anything — and nothing resets execution.attempts.
-  it("reports a machine fault instead of spawning when it cannot be confined", async () => {
+  // recorded worktree that is gone is the run's doing rather than the machine's (BP-804), so it is
+  // tampering: a machine fault would refund the attempt and stop this worker claiming over a
+  // process the agent controls. The machine-fault form is the missing claude path below.
+  it("reports a recorded worktree that is gone as tampering, without spawning", async () => {
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
+    const gone = join(worktreePath, "never-created");
 
     const outcome = await createExecutor(config, runner, CLAUDE_PATH).execute({
       ...options,
-      worktreePath: join(worktreePath, "never-created"),
+      worktreeDir: { ...options.worktreeDir, path: gone },
     });
 
     expect(run).not.toHaveBeenCalled();
-    expect(outcome.kind).toBe("machine_fault");
+    expect(outcome).toEqual({ kind: "tampered", finding: `its directory ${gone} removed` });
   });
 
   // BP-733. Handed to sandbox-exec by name, the CLI is whatever answers to `claude` first on the

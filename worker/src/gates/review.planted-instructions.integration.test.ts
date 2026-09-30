@@ -99,6 +99,7 @@ describe("the review gate against an ignored instruction file", () => {
   function context(): GateContext {
     return {
       worktreePath: work,
+      worktreeDir: { path: work, dev: 0, ino: 0 },
       task: claimedTask({}),
       result: {
         status: "completed",

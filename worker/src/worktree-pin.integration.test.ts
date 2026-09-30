@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { ApiClient } from "./api.js";
 import { agentEnv, childEnv } from "./env.js";
 import { commitAll } from "./commit.js";
@@ -160,13 +160,15 @@ describe.skipIf(process.platform !== "darwin")("a worktree whose .git file a con
   // BP-794 review: the worktree path is reused across attempts, so a process an earlier attempt left
   // behind can rewrite the new .git between `worktree add` and the pin being recorded
   it("refuses a worktree whose .git file was rewritten before the pin was recorded", async () => {
-    const fake = join(dir, "wt", "BP-2", "node_modules", ".y");
+    let fake = "";
     const inner = createRunner();
     const racing: Runner = {
       async run(command, args, opts) {
         const result = await inner.run(command, args, opts);
         if (args.includes("worktree") && args.includes("add")) {
-          writeFileSync(join(dir, "wt", "BP-2", ".git"), `gitdir: ${fake}\n`);
+          const path = args[args.indexOf("--") + 1];
+          fake = join(path, "node_modules", ".y");
+          writeFileSync(join(path, ".git"), `gitdir: ${fake}\n`);
         }
         return result;
       },
@@ -180,13 +182,16 @@ describe.skipIf(process.platform !== "darwin")("a worktree whose .git file a con
       { name: "worker", email: "worker@example.com" },
     );
 
-    await expect(racedWorkspace.create("BP-2", "worker")).rejects.toThrow(
-      `refusing the new worktree: its .git file reads ${JSON.stringify(`gitdir: ${fake}`)}`,
+    const refused = await racedWorkspace.create("BP-2", "worker").then(
+      () => null,
+      (error: Error) => error.message,
     );
+
+    expect(refused).toContain(`refusing the new worktree: its .git file reads ${JSON.stringify(`gitdir: ${fake}`)}`);
   });
 
   it("records the clone's own admin dir, not whatever .git names", () => {
-    expect(worktree.pin.gitDir).toBe(join(realpathSync(parent), ".git", "worktrees", "BP-1"));
+    expect(worktree.pin.gitDir).toBe(join(realpathSync(parent), ".git", "worktrees", basename(worktree.path)));
     expect(worktree.pin.pointer).toBe(`gitdir: ${worktree.pin.gitDir}\n`);
   });
 
@@ -325,7 +330,7 @@ describe.skipIf(process.platform !== "darwin")("a worktree whose .git file a con
 
     it("refuses the run when a step hides an edit to a tracked file behind skip-worktree", async () => {
       const h = run(async (path) => {
-        const pinned = { ...process.env, GIT_DIR: join(parent, ".git", "worktrees", "BP-1"), GIT_WORK_TREE: path };
+        const pinned = { ...process.env, GIT_DIR: join(parent, ".git", "worktrees", basename(path)), GIT_WORK_TREE: path };
         execFileSync("git", ["update-index", "--skip-worktree", "package.json"], { cwd: path, env: pinned });
         writeFileSync(join(path, "package.json"), '{"name":"t","scripts":{"postinstall":"sh x"}}\n');
       });

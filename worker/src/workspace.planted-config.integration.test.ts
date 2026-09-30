@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createWorkspace } from "./workspace.js";
@@ -206,9 +206,11 @@ describe("workspace.create against a planted config", () => {
     });
 
     expect(existsSync(marker), "the planted filter ran anyway").toBe(false);
-    expect(existsSync(join(dir, "cp-worktrees", "BP-1")), "the worktree was created anyway").toBe(
-      false
-    );
+    const root = join(dir, "cp-worktrees");
+    expect(
+      (existsSync(root) ? readdirSync(root) : []).filter((name) => name.startsWith("BP-1")),
+      "the worktree was created anyway",
+    ).toEqual([]);
   }, REAL_GIT_TIMEOUT_MS);
 
   /**
@@ -280,7 +282,7 @@ describe("workspace.create against a planted config", () => {
   it("still creates the worktree on the same repository with nothing planted", async () => {
     const worktree = await workspaceFor(main).create("BP-1", "worker");
 
-    expect(worktree.path).toBe(join(dir, "cp-worktrees", "BP-1"));
+    expect(worktree.path.startsWith(join(dir, "cp-worktrees", "BP-1."))).toBe(true);
     expect(existsSync(join(worktree.path, "a.txt"))).toBe(true);
     expect(worktree.baseSha).toBe(git(main, "rev-parse", "HEAD").trim());
   }, REAL_GIT_TIMEOUT_MS);
