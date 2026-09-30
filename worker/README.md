@@ -411,7 +411,20 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   write-only deny. What no measurement here covers is a program that reads a preference *only*
   through that daemon: it sees the default instead, which for a run is the answer a fresh account
   would give. Every other daemon reachable the same way is still open, and no list of service
-  names closes that; so are reads, and the network, neither of which this touches at all.
+  names closes that; so are reads, which this does not touch at all.
+
+  **The network is loopback-only for `npm run build` and `npm test`** (**BP-720**). Reads stay
+  open — the agent has `Read` over the disk anyway, and confining reads would take the CLI's own
+  session with it — so a test the agent wrote can read a credential under your home, `~/.npmrc`,
+  `~/.config/gh`, `~/.aws`, and the only thing between it and the internet was nothing. Those two
+  commands now run with every outbound connection refused except to this machine, and there is no
+  setting to turn it back on; `npm ci` keeps the network for the registry, and both `claude` spawns
+  keep it for the API. A suite that starts a server on `127.0.0.1` or `::1` and talks to it still
+  passes; one that reaches off the machine fails with `connect EPERM`, and the gate's reason says
+  the network was loopback-only. What this does not close: seatbelt's `localhost` is every address
+  this machine holds, so a listener here that forwards — an HTTP proxy, an SSH tunnel — is still a
+  way out; unix sockets stay open (BP-810), and with them name resolution through mDNSResponder, so
+  a lookup of a name that encodes a secret still reaches a DNS server.
 
   **Everything that inherits a confined spawn's sandbox is killed when the spawn ends**
   (**BP-796**). A process group is not enough: a step or a test that runs `setsid`, double-forks or

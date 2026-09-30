@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { CommandResult, Runner, RunOpts } from "../exec.js";
 import { GateResult } from "../types.js";
 import { agentEnv, npmCacheOverride, tempDirOverride } from "../env.js";
-import { confineTool, RecordedDir } from "../sandbox.js";
+import { confineTool, Network, RecordedDir } from "../sandbox.js";
 
 /**
  * The npm gates, run where the agent's own tools already are.
@@ -63,11 +63,16 @@ export function npmTempBase(env?: NodeJS.ProcessEnv): string {
   return (env ? (env.TMPDIR?.trim() ?? "") : tempDirOverride()) || tmpdir();
 }
 
+// A refused connection prints only `connect EPERM <address>`, which reads like a firewall
+export const LOOPBACK_ONLY_NOTE = "outbound network is loopback-only under the worker";
+
 export interface ConfinedNpmOptions extends RunOpts {
   /** The worktree `cwd` is, as it was recorded at creation (BP-804). */
   worktree: RecordedDir;
   /** Whether this command is the install, which is the only one allowed the cache. */
   withCache?: boolean;
+  /** "loopback" for a command that runs agent-written code; the install needs the registry. */
+  network?: Network;
   /**
    * The worker's own environment, for a test that needs to say what it is. Absent in production:
    * `env.ts` owns reading this process's environment, and reading it here would put a second
@@ -90,7 +95,7 @@ export async function runConfinedNpm(
   args: string[],
   options: ConfinedNpmOptions
 ): Promise<CommandResult | { refusal: string; replaced?: string }> {
-  const { withCache, env: source, worktree, ...runOptions } = options;
+  const { withCache, network, env: source, worktree, ...runOptions } = options;
   const cache = npmCacheDir(source);
 
   // This run's own scratch directory, inside the machine's. Created before `confine` resolves it:
@@ -111,7 +116,7 @@ export async function runConfinedNpm(
   try {
     // `env` left to `confine`'s own default unless a test said otherwise, so the operator's risk
     // acceptance is read in the one place that owns it.
-    const spawn = confineTool("npm", npmPath, args, source ? { writable, env: source } : { writable });
+    const spawn = confineTool("npm", npmPath, args, source ? { writable, network, env: source } : { writable, network });
     if ("refusal" in spawn) return spawn;
 
     const result = await runner.run(spawn.command, spawn.args, {

@@ -131,6 +131,8 @@ export interface ConfineOptions {
   realpath?: (path: string) => string;
   lstat?: (path: string) => DirStat;
   env?: NodeJS.ProcessEnv;
+  /** Defaults to "open"; "loopback" refuses every outbound connection except to this machine. */
+  network?: Network;
 }
 
 /**
@@ -166,6 +168,20 @@ export function dirReplaced(dir: RecordedDir, lstat: (path: string) => DirStat =
   if (stat.dev !== dir.dev || stat.ino !== dir.ino) return `${dir.path} replaced by another directory`;
   return null;
 }
+
+export type Network = "open" | "loopback";
+
+// For the gates that run agent-written code (BP-720): reads stay open, so a test can read a
+// credential under HOME, and this is what stops it sending one off the machine. SBPL accepts only
+// `*` or `localhost` as a host, and `localhost` is every address this machine holds, measured on
+// macOS 26.6: 127.0.0.1, ::1 and its own LAN address connect; 127.0.0.2 and another LAN host get
+// EPERM. So any listener on this machine is reachable, a forwarding proxy included. Unix sockets
+// stay allowed (BP-810), and with them getaddrinfo through mDNSResponder: a name still resolves,
+// which is a DNS channel, while the connection to it is refused.
+const LOOPBACK_ONLY = [
+  "(deny network-outbound)",
+  '(allow network-outbound (remote ip "localhost:*") (remote unix-socket))',
+];
 
 // `(allow default)` sets the default decision for operations the profile has no filter for. It is
 // not a rule competing by position, and the order below is conventional rather than load-bearing:
@@ -251,7 +267,7 @@ export function confine(command: string, args: string[], options: ConfineOptions
     command: SANDBOX_COMMAND,
     args: [
       "-p",
-      profileFor(names),
+      [profileFor(names), ...(options.network === "loopback" ? LOOPBACK_ONLY : [])].join("\n"),
       ...names.flatMap((name, index) => ["-D", `${name}=${resolved[index]}`]),
       command,
       ...args,

@@ -1,6 +1,6 @@
 import { CommandResult, Runner } from "../exec.js";
 import { Gate } from "../types.js";
-import { refused, runConfinedNpm } from "./confined-npm.js";
+import { LOOPBACK_ONLY_NOTE, refused, runConfinedNpm } from "./confined-npm.js";
 
 const MAX_REASON_CHARS = 2000;
 
@@ -17,7 +17,13 @@ export function testRunGate(runner: Runner, npmPath: string, timeoutMs: number):
       // Confined, because this is the command that runs the agent's own code: a test file the
       // Implement step wrote is inside the worktree, so the agent's sandbox permitted writing it,
       // and this is where it executes (BP-608).
-      const result = await runConfinedNpm(runner, npmPath, ["test"], { cwd: worktreePath, worktree: worktreeDir, timeoutMs, signal });
+      const result = await runConfinedNpm(runner, npmPath, ["test"], {
+        cwd: worktreePath,
+        worktree: worktreeDir,
+        timeoutMs,
+        signal,
+        network: "loopback",
+      });
       // machineFault, not a plain refusal, and the same call the review gate makes: a machine that
       // cannot confine has judged nothing, so reporting it as the suite failing would blame the
       // diff, spend the attempt and push the branch.
@@ -29,7 +35,7 @@ export function testRunGate(runner: Runner, npmPath: string, timeoutMs: number):
       if (result.code !== 0) {
         return {
           ok: false,
-          reason: `the test suite failed (exit ${result.code}):\n${outputTail(result)}`,
+          reason: `the test suite failed (exit ${result.code}; ${LOOPBACK_ONLY_NOTE}):\n${outputTail(result)}`,
         };
       }
       return { ok: true, reason: "", commands: ["npm test"] };

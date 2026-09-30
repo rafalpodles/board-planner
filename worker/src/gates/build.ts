@@ -1,6 +1,6 @@
 import { CommandResult, Runner } from "../exec.js";
 import { Gate } from "../types.js";
-import { refused, runConfinedNpm } from "./confined-npm.js";
+import { LOOPBACK_ONLY_NOTE, refused, runConfinedNpm } from "./confined-npm.js";
 
 const MAX_REASON_CHARS = 2000;
 // --ignore-scripts: a lifecycle script from the worktree or any dependency would run as the
@@ -56,6 +56,7 @@ export function buildGate(runner: Runner, npmPath: string, timeoutMs: number): G
         worktree: worktreeDir,
         timeoutMs: remainingMs,
         signal,
+        network: "loopback",
       });
       if ("refusal" in build) return refused(build);
       if (build.timedOut) {
@@ -65,7 +66,7 @@ export function buildGate(runner: Runner, npmPath: string, timeoutMs: number): G
         };
       }
       if (build.code !== 0) {
-        return { ok: false, reason: `build failed (exit ${build.code}):\n${outputTail(build)}` };
+        return { ok: false, reason: `build failed (exit ${build.code}; ${LOOPBACK_ONLY_NOTE}):\n${outputTail(build)}` };
       }
       return { ok: true, reason: "", commands: [`npm ${INSTALL_ARGS.join(" ")}`, "npm run build"] };
     },

@@ -7,6 +7,8 @@ import { createRunner } from "../exec.js";
 import { claimedTask } from "../__fixtures__/task.js";
 import { GateContext } from "../types.js";
 import { testRunGate } from "./test-run.js";
+import { buildGate } from "./build.js";
+import { LOOPBACK_ONLY_NOTE } from "./confined-npm.js";
 import { installedToolPath } from "../__fixtures__/tool-paths.js";
 import { recordDir } from "../sandbox.js";
 
@@ -173,5 +175,68 @@ describe.skipIf(!onMac)("the test gate against the real sandbox", () => {
     const result = await testRunGate(runner, npmPath, 120_000).run(context());
 
     expect(result.ok, result.reason).toBe(true);
+  });
+
+  // BP-720: what a test that read a credential under HOME would do next. TEST-NET-1 is never
+  // routed, so an open network times out rather than answering EPERM; sandbox.integration.test.ts
+  // holds the open-mode control.
+  const SEND_OFF_MACHINE = `require("net").connect({ host: "192.0.2.1", port: 443, timeout: 2000 })
+    .on("connect", () => process.exit(0))
+    .on("timeout", () => process.exit(0))
+    .on("error", (error) => { console.error("send failed: " + error.code); process.exit(1); });`;
+
+  it("refuses a suite's connection off the machine, and says the network was loopback-only", async () => {
+    suiteThat(SEND_OFF_MACHINE);
+
+    const result = await testRunGate(runner, npmPath, 120_000).run(context());
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("send failed: EPERM");
+    expect(result.reason).toContain(LOOPBACK_ONLY_NOTE);
+  });
+
+  it("lets an honest suite serve and fetch on loopback", async () => {
+    suiteThat(
+      `const server = require("http").createServer((_, res) => res.end("pong")).listen(0, "127.0.0.1", async () => {
+         const body = await (await fetch("http://127.0.0.1:" + server.address().port + "/")).text();
+         server.close();
+         process.exit(body === "pong" ? 0 : 1);
+       });`
+    );
+
+    const result = await testRunGate(runner, npmPath, 120_000).run(context());
+
+    expect(result.ok, result.reason).toBe(true);
+  });
+
+  describe("the build gate", () => {
+    function buildThat(script: string) {
+      const pkg = { name: "wt", version: "1.0.0" };
+      writeFileSync(join(worktree, "package.json"), JSON.stringify({ ...pkg, scripts: { build: "node build.js" } }));
+      writeFileSync(
+        join(worktree, "package-lock.json"),
+        JSON.stringify({ ...pkg, lockfileVersion: 3, requires: true, packages: { "": pkg } })
+      );
+      writeFileSync(join(worktree, "build.js"), script);
+    }
+
+    it("refuses the build script's connection off the machine", async () => {
+      buildThat(SEND_OFF_MACHINE);
+
+      const result = await buildGate(runner, npmPath, 120_000).run(context());
+
+      expect(result.ok).toBe(false);
+      expect(result.reason).toMatch(/^build failed/);
+      expect(result.reason).toContain("send failed: EPERM");
+    });
+
+    it("lets an honest build write its output", async () => {
+      buildThat(`require("fs").writeFileSync("dist.js", "built");`);
+
+      const result = await buildGate(runner, npmPath, 120_000).run(context());
+
+      expect(result.ok, result.reason).toBe(true);
+      expect(readFileSync(join(worktree, "dist.js"), "utf8")).toBe("built");
+    });
   });
 });

@@ -7,7 +7,7 @@ import { CommandResult, Runner } from "../exec.js";
 import { GateContext } from "../types.js";
 import { claimedTask } from "../__fixtures__/task.js";
 import { recordDir, SANDBOX_COMMAND, UNCONFINED_REASON } from "../sandbox.js";
-import { npmCacheDir } from "./confined-npm.js";
+import { LOOPBACK_ONLY_NOTE, npmCacheDir } from "./confined-npm.js";
 import { NPM_PATH } from "../__fixtures__/tool-paths.js";
 
 const TIMEOUT_MS = 5000;
@@ -129,6 +129,26 @@ describe("buildGate", () => {
     expect(args.join(" ")).not.toContain(npmCacheDir());
   });
 
+  // BP-720: the build script is the agent's, and reads stay open, so a credential under HOME is one
+  // `fetch` away; the install is the one command that needs the registry.
+  it("builds with the network limited to loopback, and installs with it open", async () => {
+    const { runner: r, run } = runner(ok, ok);
+
+    await buildGate(r, NPM_PATH, TIMEOUT_MS).run(context);
+
+    const profileOf = (call: number) => run.mock.calls[call][1][run.mock.calls[call][1].indexOf("-p") + 1];
+    expect(profileOf(0)).not.toContain("network-outbound");
+    expect(profileOf(1)).toContain("(deny network-outbound)");
+  });
+
+  it("says the network was loopback-only when the build fails", async () => {
+    const { runner: r } = runner(ok, { ...ok, code: 1, stderr: "Error: connect EPERM 1.1.1.1:443" });
+
+    const result = await buildGate(r, NPM_PATH, TIMEOUT_MS).run(context);
+
+    expect(result.reason).toContain(LOOPBACK_ONLY_NOTE);
+  });
+
   it("refuses rather than installing or building unconfined", async () => {
     const { runner: r, run } = runner(ok, ok);
     const real = Object.getOwnPropertyDescriptor(process, "platform")!;
@@ -243,6 +263,7 @@ describe("buildGate", () => {
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/install/i);
     expect(result.reason).toMatch(/ENOTFOUND/);
+    expect(result.reason).not.toContain(LOOPBACK_ONLY_NOTE);
     expect(run).toHaveBeenCalledTimes(1);
   });
 

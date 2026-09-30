@@ -359,4 +359,91 @@ describe.skipIf(!onMac)("confine against the real sandbox", () => {
       });
     });
   });
+
+  /**
+   * BP-720. Reads stay open, so a test the agent wrote can read a credential under HOME; this is
+   * what stops the gate that runs it sending one anywhere. 192.0.2.1 is TEST-NET-1, never routed,
+   * so the control needs no internet: unconfined it times out or is unreachable, and only the
+   * sandbox answers EPERM.
+   */
+  describe("the network", () => {
+    async function confinedNode(script: string, network?: "open" | "loopback") {
+      const spawn = confine(process.execPath, ["-e", script], { writable: [worktree], network, env: {} });
+      if (!("command" in spawn)) throw new Error(`refused: ${spawn.refusal}`);
+      return runner.run(spawn.command, spawn.args, { cwd: worktree, timeoutMs: 30_000 });
+    }
+
+    const OFF_MACHINE = `
+      const net = require("net"), dgram = require("dgram");
+      const tcp = new Promise((done) => {
+        const socket = net.connect({ host: "192.0.2.1", port: 443, timeout: 2000 });
+        socket.on("connect", () => { socket.destroy(); done("connected"); });
+        socket.on("timeout", () => { socket.destroy(); done("timeout"); });
+        socket.on("error", (error) => done(error.code));
+      });
+      const udp = new Promise((done) => {
+        const socket = dgram.createSocket("udp4");
+        socket.send(Buffer.from("x"), 53, "192.0.2.1", (error) => { socket.close(); done(error ? error.code : "sent"); });
+      });
+      Promise.all([tcp, udp]).then(([t, u]) => console.log(JSON.stringify({ tcp: t, udp: u })));
+    `;
+
+    it("refuses a connection off the machine in loopback mode", async () => {
+      const result = await confinedNode(OFF_MACHINE, "loopback");
+
+      expect(result.code, result.stderr).toBe(0);
+      expect(JSON.parse(result.stdout)).toEqual({ tcp: "EPERM", udp: "EPERM" });
+    });
+
+    it("leaves the same connection alone in open mode — the control", async () => {
+      const result = await confinedNode(OFF_MACHINE);
+
+      expect(result.code, result.stderr).toBe(0);
+      const { tcp, udp } = JSON.parse(result.stdout);
+      expect(tcp).not.toBe("EPERM");
+      expect(udp).toBe("sent");
+    });
+
+    it("lets a loopback server answer its own client in loopback mode, on IPv4 and IPv6", async () => {
+      const result = await confinedNode(
+        `
+        const http = require("http");
+        const roundTrip = (host) => new Promise((done) => {
+          const server = http.createServer((_, res) => res.end("pong")).listen(0, host, async () => {
+            const url = "http://" + (host.includes(":") ? "[" + host + "]" : host) + ":" + server.address().port + "/";
+            const body = await (await fetch(url)).text();
+            server.close();
+            done(body);
+          });
+        });
+        Promise.all([roundTrip("127.0.0.1"), roundTrip("::1")]).then((bodies) => console.log(bodies.join(",")));
+        `,
+        "loopback"
+      );
+
+      expect(result.code, result.stderr).toBe(0);
+      expect(result.stdout.trim()).toBe("pong,pong");
+    });
+
+    // Unix sockets stay open until BP-810 decides otherwise: a suite talking to a local database
+    // over one is honest, and a deny on network-outbound alone refuses it
+    it("lets a unix-socket server answer its own client in loopback mode", async () => {
+      const result = await confinedNode(
+        `
+        const net = require("net");
+        const server = net.createServer((socket) => socket.end("pong")).listen("s.sock", () => {
+          let body = "";
+          net.connect("s.sock").on("data", (chunk) => (body += chunk)).on("end", () => {
+            server.close();
+            console.log(body);
+          }).on("error", (error) => { console.log(error.code); server.close(); });
+        });
+        `,
+        "loopback"
+      );
+
+      expect(result.code, result.stderr).toBe(0);
+      expect(result.stdout.trim()).toBe("pong");
+    });
+  });
 });
