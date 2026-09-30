@@ -202,7 +202,7 @@ export class ClaimRefused extends Error {
 // One line, bounded: the reason goes into the log and onto the menubar as the server wrote it
 const MAX_REASON_CHARS = 300;
 
-function reasonIn(detail: string): string {
+export function reasonIn(detail: string): string {
   let reason = "";
   try {
     const body = JSON.parse(detail) as { error?: unknown };

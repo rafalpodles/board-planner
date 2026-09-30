@@ -1,4 +1,4 @@
-import { ApiClient, ApiError } from "./api.js";
+import { ApiClient, ApiError, reasonIn } from "./api.js";
 import { RunRecord } from "./run-record.js";
 
 // A report that cannot be delivered is worse than a failed run: the merge already happened, so
@@ -37,8 +37,9 @@ const MAX_ENTRIES = 500;
  *
  * Named rather than a range, and the range was the first attempt: most 4xx answers say the request
  * was malformed, and the twenty-first attempt is then the first one identical to the first — while
- * every later report for that task waits behind it, because order within a task matters (BP-613). A worker newer than its board is how that happens in practice: an outcome
- * the board's enum does not know answers `400 Unknown outcome`, once per poll.
+ * later reports wait behind it, because order within a task matters (BP-613). A worker newer than
+ * its board is how that happens in practice: an outcome the board's enum does not know answers
+ * `400 Unknown outcome`, once per poll.
  *
  * But "4xx" swept up three answers that are among the most transient the board gives, and dropping
  * one of those destroys the report this whole module exists to keep — the post-merge comment,
@@ -68,6 +69,30 @@ const PERMANENT_REFUSALS = new Set([400, 405, 410, 413, 414, 415, 422]);
 
 function permanent(error: unknown): boolean {
   return error instanceof ApiError && PERMANENT_REFUSALS.has(error.status);
+}
+
+// `withWorkerAccess` (src/lib/middleware.ts) in its own words; outbox-refusals.contract.test.ts
+// pins the text. Every task on that project gets the same answer until the grant comes back.
+export const NOT_ASSIGNED = "this worker is not assigned to this project";
+
+type Hold = { task: string } | { project: string } | "everything";
+
+/**
+ * What a transient failure says is unavailable, which is what the rest of the flush must wait for.
+ *
+ * Only an answer that names its scope narrows the hold: a 409 is another run holding that one task,
+ * and a paused project refuses all of its own tasks and nothing else (BP-797). Anything else — the
+ * network, a 5xx, the redeploy's 404, a 401, a machine-wide 403 or one this does not recognise —
+ * may be the whole server, and stopping the flush charges one op for it instead of one per task,
+ * which is what kept a ten-minute redeploy from costing every task its oldest report.
+ */
+function holdFor(error: unknown, op: OutboxOp, task: string | undefined): Hold {
+  if (!(error instanceof ApiError)) return "everything";
+  if (error.status === 409 && task) return { task };
+  if (error.status === 403 && op.projectId && reasonIn(error.detail) === NOT_ASSIGNED) {
+    return { project: op.projectId };
+  }
+  return "everything";
 }
 
 type Log = (message: string) => void;
@@ -139,17 +164,21 @@ export function createOutbox(store: Store, log: Log = (m) => console.error(m)): 
       const remaining: Entry[] = [];
       let delivered = 0;
       let dropped = 0;
-      const blockedTasks = new Set<string>();
-      let blockedAll = false;
+      const heldTasks = new Set<string>();
+      const heldProjects = new Set<string>();
+      let heldAll = false;
 
       for (const entry of entries) {
         // Order matters within a task — a status move before its comment reads as an empty
-        // decision — so a failure holds back the rest of that task's reports rather than
-        // reordering around it. Nothing orders one task's reports against another's, so a task
-        // refused for a while (a 403 from a project that paused this machine) holds up only itself.
-        // A line naming no task cannot be placed, so it waits behind any hold and holds everything.
+        // decision — so what a failure holds waits rather than being reordered around. Nothing
+        // orders one task's reports against another's, so a hold that names its scope stops only
+        // that. A line naming no task cannot be placed, so it waits behind any hold at all.
         const task = taskOf(entry.op);
-        if (blockedAll || (task ? blockedTasks.has(task) : blockedTasks.size > 0)) {
+        const held =
+          heldAll ||
+          heldProjects.has(entry.op.projectId) ||
+          (task ? heldTasks.has(task) : heldTasks.size + heldProjects.size > 0);
+        if (held) {
           remaining.push(entry);
           continue;
         }
@@ -173,8 +202,10 @@ export function createOutbox(store: Store, log: Log = (m) => console.error(m)): 
             continue;
           }
           remaining.push({ ...entry, attempts });
-          if (task) blockedTasks.add(task);
-          else blockedAll = true;
+          const hold = holdFor(error, entry.op, task);
+          if (hold === "everything") heldAll = true;
+          else if ("task" in hold) heldTasks.add(hold.task);
+          else heldProjects.add(hold.project);
         }
       }
 
