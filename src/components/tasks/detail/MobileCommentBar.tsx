@@ -35,14 +35,17 @@ export function MobileCommentBar({
   const triggers = useEditorTriggers(projectId, projectKey);
 
   async function post() {
-    const text = body.trim();
+    const draft = body;
+    const text = draft.trim();
     if (!text || posting) return;
     setPosting(true);
+    // At send, not on the answer: an earlier read can show the saved comment first (BP-800)
+    setBody("");
     try {
       await api.post(`/api/projects/${projectId}/tasks/${taskId}/comments`, { body: text });
-      setBody("");
       onPosted();
     } catch {
+      setBody((current) => (current.trim() ? current : draft));
       toast("Failed to post comment", "error");
     } finally {
       setPosting(false);

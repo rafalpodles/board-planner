@@ -506,3 +506,101 @@ describe("adding a reaction without a mouse", () => {
     );
   });
 });
+
+// BP-800. A read already in flight when a comment is posted can answer with the saved comment before
+// the post's own answer arrives; the composer then held the same text the list was showing.
+describe("posting a comment", () => {
+  const saved = { ...comment, _id: "c9", body: "Said once", author: auth.user };
+
+  function deferred<T>() {
+    let resolve: (value: T) => void = () => {};
+    let reject: (reason: unknown) => void = () => {};
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
+  function queueReads() {
+    const reads: ReturnType<typeof deferred<unknown[]>>[] = [];
+    api.get.mockImplementation((url: string) => {
+      if (!url.includes("/comments")) return Promise.resolve([]);
+      const read = deferred<unknown[]>();
+      reads.push(read);
+      return read.promise;
+    });
+    return reads;
+  }
+
+  async function typeAndSend(text: string) {
+    const box = (await screen.findByPlaceholderText(/@mention someone/i)) as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: text } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Comment" }));
+    });
+    return box;
+  }
+
+  beforeEach(() => {
+    api.post.mockReset();
+  });
+
+  it("shows the text once when an earlier read lands before the post answers", async () => {
+    const reads = queueReads();
+    const post = deferred<unknown>();
+    api.post.mockReturnValue(post.promise);
+    render(<Comments projectId="TP" taskId="t1" />);
+
+    const box = await typeAndSend("Said once");
+    expect(api.post).toHaveBeenCalledWith("/api/projects/TP/tasks/t1/comments", { body: "Said once" });
+
+    await act(async () => reads[0].resolve([saved]));
+    expect(screen.getAllByText("Said once")).toHaveLength(1);
+    expect(box.value).toBe("");
+
+    await act(async () => post.resolve(saved));
+    await waitFor(() => expect(reads).toHaveLength(2));
+    await act(async () => reads[1].resolve([saved]));
+    expect(screen.getAllByText("Said once")).toHaveLength(1);
+    expect(box.value).toBe("");
+  });
+
+  it("shows the text once when the post answers before an earlier read lands", async () => {
+    const reads = queueReads();
+    api.post.mockResolvedValue(saved);
+    render(<Comments projectId="TP" taskId="t1" />);
+
+    const box = await typeAndSend("Said once");
+    await waitFor(() => expect(reads).toHaveLength(2));
+    await act(async () => reads[1].resolve([saved]));
+    expect(screen.getAllByText("Said once")).toHaveLength(1);
+
+    await act(async () => reads[0].resolve([]));
+    expect(screen.getAllByText("Said once")).toHaveLength(1);
+    expect(box.value).toBe("");
+  });
+
+  it("gives the text back when the post fails", async () => {
+    serve([]);
+    api.post.mockRejectedValue(new Error("Refused"));
+    render(<Comments projectId="TP" taskId="t1" />);
+
+    const box = await typeAndSend("Worth keeping");
+
+    await waitFor(() => expect(box.value).toBe("Worth keeping"));
+  });
+
+  it("does not overwrite what was typed while a failing post was in flight", async () => {
+    serve([]);
+    const post = deferred<unknown>();
+    api.post.mockReturnValue(post.promise);
+    render(<Comments projectId="TP" taskId="t1" />);
+
+    const box = await typeAndSend("First try");
+    fireEvent.change(box, { target: { value: "Second thought" } });
+    await act(async () => post.reject(new Error("Refused")));
+
+    expect(box.value).toBe("Second thought");
+  });
+});
