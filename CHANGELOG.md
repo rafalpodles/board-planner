@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.2.1](https://github.com/rafalpodles/board-planner/compare/v1.2.0...v1.2.1) (2026-09-30)
+
+
+### Bug Fixes
+
+* bump next to 16.3.8 for GHSA-vcvr-r3jv-pc5j (BP-815) ([7f401bb](https://github.com/rafalpodles/board-planner/commit/7f401bb28c5facc55566e6d54cb527875a545a67))
+* bump next to 16.3.8 for GHSA-vcvr-r3jv-pc5j (BP-815) ([88777b7](https://github.com/rafalpodles/board-planner/commit/88777b751972b2dfb9f51c57e1b4f4c94f2728c9))
+* bump next to 16.3.8 for GHSA-vcvr-r3jv-pc5j and the image SSRF (BP-815) ([#502](https://github.com/rafalpodles/board-planner/issues/502)) ([7f401bb](https://github.com/rafalpodles/board-planner/commit/7f401bb28c5facc55566e6d54cb527875a545a67))
+* **worker:** a preflight that failed with no message still blocks claims (BP-793 review) ([5dfbc95](https://github.com/rafalpodles/board-planner/commit/5dfbc954b6b1d18bc86c990b00501794765f2f39))
+* **worker:** report a failing sandbox row when preflight could not run (BP-793) ([2076b8e](https://github.com/rafalpodles/board-planner/commit/2076b8e780522e11b6d18d603ad82f707dc31041))
+* **worker:** report why preflight could not run instead of the last green report (BP-793) ([da61455](https://github.com/rafalpodles/board-planner/commit/da614556768a8300cc8e1e9aa9dfb52aab873fba))
+* **worker:** report why preflight could not run instead of the last green report (BP-793) ([#501](https://github.com/rafalpodles/board-planner/issues/501)) ([da61455](https://github.com/rafalpodles/board-planner/commit/da614556768a8300cc8e1e9aa9dfb52aab873fba))
+
 ## [1.2.0](https://github.com/rafalpodles/board-planner/compare/v1.1.2...v1.2.0) (2026-09-30)
 
 
