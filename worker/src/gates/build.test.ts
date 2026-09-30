@@ -152,6 +152,17 @@ describe("buildGate", () => {
     expect(run.mock.calls[1][2].env).toMatchObject(NPM_CONFIG_PINNED);
   });
 
+  // An empty value loses to a project `.npmrc`, and "null" becomes the literal string for a
+  // string-typed key, so only these two nullable URL keys may be pinned to it
+  it("pins every key to a value that beats a project .npmrc", () => {
+    const nullableNonString = ["npm_config_proxy", "npm_config_https_proxy"];
+
+    for (const [key, value] of Object.entries(NPM_CONFIG_PINNED)) {
+      expect(value, key).not.toBe("");
+      if (value === "null") expect(nullableNonString, key).toContain(key);
+    }
+  });
+
   it("says the network was loopback-only when the build fails", async () => {
     const { runner: r } = runner(ok, { ...ok, code: 1, stderr: "Error: connect EPERM 1.1.1.1:443" });
 

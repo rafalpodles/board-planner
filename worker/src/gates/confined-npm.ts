@@ -63,15 +63,24 @@ export function npmTempBase(env?: NodeJS.ProcessEnv): string {
   return (env ? (env.TMPDIR?.trim() ?? "") : tempDirOverride()) || tmpdir();
 }
 
-// Environment beats a project `.npmrc`, and the install keeps the network: `git=<script>` there runs
-// that script for any git dependency even under --ignore-scripts, and `proxy=` with an http
-// registry hands the operator's `~/.npmrc` token to whoever runs the proxy. Pinned for every
-// command rather than refused by diff, because an untracked `.npmrc` an earlier gate's code wrote
-// reaches no diff. It also overrides a proxy in the operator's own `~/.npmrc`.
+// A project `.npmrc` is read from the worktree — committed, or left untracked by an earlier gate's
+// code, where no diff sees it — and the install keeps the network. These keys are pinned for every
+// command because the environment beats a project `.npmrc`, but only with a non-empty value, and
+// "null" clears only a key that is not a string: a string key takes it literally.
+// - git: `git=<script>` ran that script for any git dependency, --ignore-scripts or not.
+// - proxy, https-proxy: with an http registry they handed the `~/.npmrc` token to the proxy.
+// - node-options: npm exports it as NODE_OPTIONS, and pacote spawns `npm install --force` inside a
+//   git dependency that has a prepare script, so `--require <file>` ran at that child's startup.
+//   The pin is Node's default stack-trace limit, which changes nothing.
+// - strict-ssl, umask: a TLS downgrade, and files written wider than the default.
+// A proxy or node-options in the operator's own `~/.npmrc` is overridden too.
 export const NPM_CONFIG_PINNED = {
   npm_config_git: "git",
   npm_config_proxy: "null",
   npm_config_https_proxy: "null",
+  npm_config_node_options: "--stack-trace-limit=10",
+  npm_config_strict_ssl: "true",
+  npm_config_umask: "022",
 } as const;
 
 // A refused connection prints only `connect EPERM <address>`, which reads like a firewall

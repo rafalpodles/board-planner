@@ -304,27 +304,60 @@ describe.skipIf(!onMac)("the test gate against the real sandbox", () => {
       expect(seen.filter((request) => request.url.startsWith("http://"))).toEqual([]);
     });
 
-    it("does not run a git binary the project names, and still installs a git dependency", async () => {
+    function gitDependency(manifest: object = {}) {
       const dep = join(dir, "dep");
       mkdirSync(dep);
-      writeFileSync(join(dep, "package.json"), JSON.stringify({ name: "gitdep", version: "1.0.0" }));
+      writeFileSync(join(dep, "package.json"), JSON.stringify({ name: "gitdep", version: "1.0.0", ...manifest }));
       const git = (...args: string[]) =>
         execFileSync(installedToolPath("git"), ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: dep, encoding: "utf8" }).trim();
       git("init", "-q");
       git("add", ".");
       git("commit", "-qm", "init");
       const sha = git("rev-parse", "HEAD");
+      project({ gitdep: `git+file://${dep}` }, { "node_modules/gitdep": { version: "1.0.0", resolved: `git+file://${dep}#${sha}` } });
+    }
+
+    it("does not run a git binary the project names, and still installs a git dependency", async () => {
+      gitDependency();
 
       const planted = join(worktree, "planted-git.sh");
       writeFileSync(planted, `#!/bin/sh\necho ran > ${JSON.stringify(join(worktree, "GIT-SCRIPT-RAN"))}\nexec ${installedToolPath("git")} "$@"\n`, { mode: 0o755 });
       writeFileSync(join(worktree, ".npmrc"), `git=${planted}\n`);
-      project({ gitdep: `git+file://${dep}` }, { "node_modules/gitdep": { version: "1.0.0", resolved: `git+file://${dep}#${sha}` } });
 
       const result = await install();
 
       expect(existsSync(join(worktree, "GIT-SCRIPT-RAN"))).toBe(false);
       expect("code" in result && result.code, JSON.stringify(result)).toBe(0);
       expect(existsSync(join(worktree, "node_modules", "gitdep", "package.json"))).toBe(true);
+    });
+
+    // pacote prepares a git dependency that has a prepare script with a child `npm install`, and
+    // npm exports a project's `node-options` to it as NODE_OPTIONS
+    describe("a git dependency with a prepare script, and node-options in the project .npmrc", () => {
+      const marker = () => join(worktree, "NODE-OPTIONS-RAN");
+
+      beforeEach(() => {
+        gitDependency({ scripts: { prepare: "echo prepared" } });
+        writeFileSync(join(worktree, "planted.js"), `require("fs").writeFileSync(${JSON.stringify(marker())}, "ran");`);
+        writeFileSync(join(worktree, ".npmrc"), `node-options=--require ${join(worktree, "planted.js")}\n`);
+      });
+
+      it("runs the planted file when nothing is pinned — the control", () => {
+        spawnSync(npmPath, ["ci", "--ignore-scripts", "--no-audit", "--no-fund"], {
+          cwd: worktree,
+          env: { PATH: process.env.PATH, HOME: home, npm_config_cache: join(dir, "control-cache") },
+          timeout: 120_000,
+        });
+
+        expect(existsSync(marker())).toBe(true);
+      });
+
+      it("does not run it under the install's own environment", async () => {
+        const result = await install();
+
+        expect(existsSync(marker())).toBe(false);
+        expect("code" in result && result.code, JSON.stringify(result)).toBe(0);
+      });
     });
   });
 });

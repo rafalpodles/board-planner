@@ -435,14 +435,20 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   network — and with them name resolution through mDNSResponder, so a lookup of a name that encodes
   a secret still reaches a DNS server.
 
-  **A project `.npmrc` cannot redirect the install.** `npm ci` runs with `git`, `proxy` and
-  `https-proxy` set in its environment, which npm reads ahead of any `.npmrc`: a `git=` naming a
-  script in the worktree used to run it for any git dependency, `--ignore-scripts` or not, and a
-  `proxy=` with an http registry handed the token in your `~/.npmrc` to whoever ran the proxy. The
-  environment rather than a refusal of a changed `.npmrc`, because one an earlier gate's code
-  writes is untracked and reaches no diff. The cost: a proxy set in your own `~/.npmrc` is
-  overridden too. Still open: a project `.npmrc` that points the registry at `http://` sends that
-  registry's token in clear text to the same host, readable by anyone on the path.
+  **What a project `.npmrc` can no longer do to the install.** Every npm command runs with `git`,
+  `proxy`, `https-proxy`, `node-options`, `strict-ssl` and `umask` pinned in its environment, which
+  npm reads ahead of any `.npmrc` — for a non-empty value; `null` clears only a key that is not a
+  string. Measured before the pins: a `git=` naming a script in the worktree ran it for any git
+  dependency, `--ignore-scripts` or not; a `proxy=` with an http registry handed the token in your
+  `~/.npmrc` to whoever ran the proxy; and a `node-options=--require <file>` ran that file during
+  `npm ci`, network open, because npm exports it as `NODE_OPTIONS` and a git dependency with a
+  prepare script is prepared by a child `npm install`. The environment rather than a refusal of a
+  changed `.npmrc`, because one an earlier gate's code writes is untracked and reaches no diff. The
+  cost: a proxy or `node-options` in your own `~/.npmrc` is overridden too. Still open: a git
+  dependency still runs git and that child npm, now without the project's `NODE_OPTIONS`;
+  `ca`, `cafile`, `cert` and `key` cannot be neutralised from the environment, so a project
+  `.npmrc` can make npm trust a certificate someone on the path presents; and a registry pointed at
+  `http://` sends that registry's token in clear text to the same host.
 
   **Everything that inherits a confined spawn's sandbox is killed when the spawn ends**
   (**BP-796**). A process group is not enough: a step or a test that runs `setsid`, double-forks or
