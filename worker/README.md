@@ -170,7 +170,13 @@ npm install && npm run build && npm start
 
 Without a clone: every release carries `board-planner-worker-X.Y.Z.tar.gz`, built by
 `pack.sh` — this directory's `dist/`, `launchd/` and a `package.json` with nothing to install.
-Unpack it and run `npm start` (or `node dist/main.js`) inside the `worker/` it contains.
+Unpack it and run `npm start` (or `node dist/main.js`) inside the `worker/` it contains. A tarball
+a browser downloaded is quarantined, and so is everything `tar` unpacks from it, including the
+process reaper at `dist/bin/cp-reap`. The worker does not run a reaper whose quarantine was never
+approved — the first run of one from an unsigned build, or offline, can wait on Gatekeeper
+indefinitely — so release it once with `xattr -dr com.apple.quarantine worker` before the first
+start. Otherwise the worker builds its
+own reaper with the command-line tools, and takes no work if they are not installed.
 
 The worker reports its version to the server on every heartbeat, read from the `package.json` it
 ships with: beside `main.js` in the menubar app, beside `dist/` in the tarball and in a clone. The
@@ -374,6 +380,45 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   through that daemon: it sees the default instead, which for a run is the answer a fresh account
   would give. Every other daemon reachable the same way is still open, and no list of service
   names closes that; so are reads, and the network, neither of which this touches at all.
+
+  **Everything that inherits a confined spawn's sandbox is killed when the spawn ends**
+  (**BP-796**). A process group is not enough: a step or a test that runs `setsid`, double-forks or
+  backgrounds with `nohup` leaves the group and the session and is reparented to launchd, so it used
+  to keep writing into the worktree after the step ended — between the checks the pipeline makes
+  and the commit that trusts them. What such a process cannot shed is its sandbox: children inherit
+  it and a confined process cannot apply another. So every confined spawn's profile also denies a
+  mach service name of its own, and when the spawn exits — normally, on a timeout or on a stop — the
+  worker kills every live process whose sandbox denies that name while allowing a sibling nobody
+  names, looping until none is left. A second name, stable for this worker's state directory, is
+  denied too, and reaped when the worker starts, before preflight and before the first claim: that
+  is what reaches a survivor of a worker process that crashed, was killed or was restarted. Two
+  workers of one operator have different state directories, so neither kills the other's spawns.
+  A survivor of a worker older than this carries no such name, and a restart does not reach it.
+
+  **Not covered: a program the spawn asks another process to start.** `open` and LaunchServices
+  start it outside the sandbox, so it carries no mark and nothing here sees it — measured in review,
+  and tracked as **BP-807**. `launchctl submit` is refused under the profile, measured; every other
+  daemon is the open category above.
+
+  The check is `sandbox_check`, which Node cannot call, so it runs in a small helper. Releases carry
+  it built — universal, at `bin/cp-reap` in the tarball and in the app, where it is signed with the
+  app and checked against the app's signature before use — and a clone of this repository builds it
+  with `/usr/bin/cc` instead (`build-reaper.sh` makes the release one; the tarball's copy is signed
+  and notarised on its own by `sign-reaper.sh`). A bundled helper is refused if it was built from
+  other source than the worker it ships with, if anyone other than this user, root or the owner of
+  the worker's own code could replace it, or if the spawn about to run may write where it lives, and
+  it must find and kill a confined probe within five seconds before it is trusted. One whose
+  quarantine was never approved (the attribute's flags lack 0x40) is not run at all — except inside
+  an app whose signature still verifies, since the app was assessed when it was opened and
+  unzipping leaves the attribute on every file in it. A bundled helper that is quarantined or fails any of those checks gives way to
+  one built with `/usr/bin/cc` when `xcode-select -p` finds the command-line tools — asked that way
+  because `/usr/bin/cc` itself offers to install them — and the worker logs a warning naming why the
+  bundled one was not used. **It fails closed**: a helper that
+  cannot be built or trusted refuses every confined spawn before it starts, and a process the helper
+  cannot kill, or one that keeps reappearing, makes that run a **machine fault** and refuses every
+  later confined spawn until a retry finds nothing left. The preflight sandbox row reports only what
+  is known when the worker starts — the helper, and the startup reap. Under
+  `CP_ALLOW_UNCONFINED_AGENT=1` there is no sandbox to mark, so none of this applies.
 
   **A file git will not print** (**BP-603**). Four things take a file's contents out of a patch: a
   bare `-diff` attribute, a `diff=<name>` driver declared binary in the config, a file git decides

@@ -133,13 +133,11 @@ jobs:
         run: |
           npm ci --ignore-scripts
           npm run build
+          ./build-reaper.sh
 
       - name: Swift tests
         working-directory: menubar
         run: make test
-
-      - name: Pack the worker
-        run: worker/pack.sh "$VERSION" "$OUT"
 
       - name: Import the Developer ID certificate into a temporary keychain
         if: env.SIGNED == 'true'
@@ -198,6 +196,14 @@ jobs:
             echo "CP_NOTARY_ISSUER=$ASC_ISSUER_ID"
           } >> "$GITHUB_ENV"
 
+      # Before packing: the tarball's copy is the one nothing else signs. bundle.sh re-signs its own.
+      - name: Sign and notarise the tarball's process reaper
+        if: env.SIGNED == 'true'
+        run: worker/sign-reaper.sh
+
+      - name: Pack the worker
+        run: worker/pack.sh "$VERSION" "$OUT"
+
       # `make app` is `make test worker`, done above, followed by this
       - name: Bundle, sign, notarise, staple
         working-directory: menubar
@@ -222,6 +228,14 @@ jobs:
       - name: Package
         run: |
           test -f menubar/.build/CPMenubar.app/Contents/Resources/worker/main.js
+          if [ "$SIGNED" = "true" ]; then
+            REAPER="$RUNNER_TEMP/tarball-cp-reap"
+            tar -xzf "$OUT/board-planner-worker-$VERSION.tar.gz" -O worker/dist/bin/cp-reap > "$REAPER"
+            SIGNATURE="$(codesign -dv --verbose=4 "$REAPER" 2>&1 || true)"
+            grep -q "^Authority=Developer ID Application" <<<"$SIGNATURE" \
+              || { echo "::error::the tarball's process reaper is not signed with a Developer ID"; exit 1; }
+          fi
+          lipo menubar/.build/CPMenubar.app/Contents/Resources/worker/bin/cp-reap -verify_arch arm64 x86_64
           ditto -c -k --keepParent menubar/.build/CPMenubar.app "$OUT/board-planner-menubar-$VERSION.zip"
           cd "$OUT"
           shasum -a 256 "board-planner-menubar-$VERSION.zip" "board-planner-worker-$VERSION.tar.gz" > SHA256SUMS

@@ -8,6 +8,7 @@ test:
 worker:
 	@[ -d ../worker/node_modules ] || npm --prefix ../worker ci
 	npm --prefix ../worker run build
+	../worker/build-reaper.sh
 
 # bundle.sh is the only thing that assembles the app. This target used to do its own copying and
 # drifted from it: it never learned about the worker, so `make app` produced a bundle that could

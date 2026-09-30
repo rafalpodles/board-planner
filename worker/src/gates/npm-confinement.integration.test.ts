@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRunner } from "../exec.js";
@@ -76,8 +77,29 @@ describe.skipIf(!onMac)("the test gate against the real sandbox", () => {
   });
 
   afterEach(() => {
+    spawnSync("/usr/bin/pkill", ["-9", "-f", dir]);
     rmSync(dir, { recursive: true, force: true });
   });
+
+  // BP-796: a detached child is a new session, out of reach of the group the gate's timeout kills
+  it("leaves nothing the suite started writing into the worktree once the gate returns", async () => {
+    const planted = join(worktree, "planted");
+    const writer = `setInterval(() => require("fs").appendFileSync(${JSON.stringify(planted)}, "x"), 50)`;
+    suiteThat(`
+      const { spawn } = require("child_process");
+      const fs = require("fs");
+      spawn(process.execPath, ["-e", ${JSON.stringify(writer)}], { detached: true, stdio: "ignore" }).unref();
+      const wait = () => (fs.existsSync(${JSON.stringify(planted)}) ? process.exit(0) : setTimeout(wait, 20));
+      wait();
+    `);
+
+    const verdict = await testRunGate(runner, npmPath, 60_000).run(context());
+
+    expect(verdict.ok).toBe(true);
+    const size = statSync(planted).size;
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    expect(statSync(planted).size).toBe(size);
+  }, 90_000);
 
   it("does not let the suite write the file a hook would live in", async () => {
     suiteThat(

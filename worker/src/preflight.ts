@@ -418,6 +418,7 @@ async function sandboxCheck(deps: PreflightDeps, env: NodeJS.ProcessEnv): Promis
       timeoutMs: SANDBOX_PROBE_TIMEOUT_MS,
       env,
     });
+    if (result.machineFault) return { name, ok: false, detail: result.machineFault };
 
     if (!existsSync(ran)) {
       const why = result.timedOut

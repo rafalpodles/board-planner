@@ -16,6 +16,10 @@ if [ ! -f "$ROOT/dist/main.js" ]; then
   echo "error: no worker build at $ROOT/dist — run 'npm ci && npm run build' in worker/ first." >&2
   exit 1
 fi
+if [ ! -x "$ROOT/dist/bin/cp-reap" ]; then
+  echo "error: no process reaper at $ROOT/dist/bin/cp-reap — run worker/build-reaper.sh first." >&2
+  exit 1
+fi
 
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT

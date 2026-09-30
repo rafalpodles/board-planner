@@ -346,6 +346,7 @@ export function reviewGate(
           spawn.args,
           { cwd: checkout.path, timeoutMs, env, signal: context.signal },
         );
+        if (result.machineFault) return { ok: false, reason: result.machineFault, machineFault: true };
 
         if (result.timedOut) {
           return {

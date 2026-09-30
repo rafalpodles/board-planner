@@ -247,6 +247,31 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   // as undefined while it is, so a worker mid-startup never claims to be broken.
   let preflight: PreflightReport | null = null;
   let preflightFailed = false;
+  let leftovers = "";
+  let probedSandboxRow: PreflightCheck | undefined;
+
+  function showLeftovers(): void {
+    if (!preflight) return;
+    const report = preflight;
+    probedSandboxRow ??= report.checks.find((check) => check.name === SANDBOX_CHECK);
+    report.checks = report.checks.map((check) =>
+      check.name !== SANDBOX_CHECK
+        ? check
+        : leftovers
+          ? { ...check, ok: false, warn: false, detail: leftovers }
+          : (probedSandboxRow ?? check)
+    );
+    report.ok = report.checks.every((check) => check.ok);
+  }
+
+  // Once per poll while it is blocking claims: a startup reap that failed for a transient reason,
+  // such as a slow first run of the helper, should not need a restart to clear
+  async function retryLeftovers(): Promise<void> {
+    if (!leftovers) return;
+    leftovers = (await deps.runner.reapLeftovers?.(bootstrap.stateDir)) ?? "";
+    if (!leftovers) deps.log("what an earlier run of this worker left behind is gone; claiming again");
+    showLeftovers();
+  }
   // The gates' own requirements, which only exist relative to a bound repository, so they are
   // recomputed on every rebind rather than once at startup
   let repoChecks: PreflightCheck[] = [];
@@ -368,6 +393,8 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       deps.setPath(repaired);
       deps.log("PATH extended with the directories the required tools were found in");
     }
+
+    showLeftovers();
 
     for (const check of preflight.checks) {
       if (!check.ok) deps.logError(`preflight: ${check.name} — ${check.detail}`);
@@ -760,6 +787,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   }
 
   async function drain(): Promise<void> {
+    await retryLeftovers().catch((error) => deps.logError(`reaping what an earlier run left failed: ${String(error)}`));
     await refreshServerState();
     // Before the flush, so a settlement this pass produces goes out with it rather than waiting a
     // whole poll interval. Drained here rather than in the claim loop because `drain` runs even
@@ -804,6 +832,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
    * again — for npm, after a full paid Implement step.
    */
   function claimBlocked(): string {
+    if (leftovers) return leftovers;
     const row = preflight?.checks.find((check) => check.name === SANDBOX_CHECK);
     if (row && !row.ok) return row.detail;
     if (!preflight) return preflightFailed ? "preflight could not run, so no tool a step spawns was resolved" : "";
@@ -940,6 +969,8 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     async run() {
       // First of all, because it repairs the PATH every later child is spawned with — including
       // the git this run's own inventory scan shells out to.
+      // Before preflight's own probe, which is the first confined spawn to carry this worker's mark
+      leftovers = (await deps.runner.reapLeftovers?.(bootstrap.stateDir)) ?? "";
       await establishPreflight();
 
       // Before the first heartbeat, which is what carries it: the server matches projects against
