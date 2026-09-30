@@ -247,6 +247,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   // as undefined while it is, so a worker mid-startup never claims to be broken.
   let preflight: PreflightReport | null = null;
   let preflightFailed = false;
+  let preflightError = "";
   let leftovers = "";
   let probedSandboxRow: PreflightCheck | undefined;
 
@@ -373,6 +374,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   // and, through `claude -p`, every grandchild then inherits. Without this the check passes and
   // every task still fails.
   async function establishPreflight(): Promise<void> {
+    const retrying = preflightFailed;
     try {
       preflight = await deps.runPreflight({
         runner: deps.runner,
@@ -383,10 +385,15 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
         configuredCommitIdentity: configuredCommitIdentity(deps.readFile, bootstrap.stateDir),
       });
     } catch (error) {
-      deps.logError(`preflight could not run: ${String(error)}`);
+      const reason = (error instanceof Error ? error.message : String(error)).trim() || "no reason given";
+      if (!preflightFailed || reason !== preflightError) deps.logError(`preflight could not run: ${reason}`);
       preflightFailed = true;
+      preflightError = reason;
       return;
     }
+    preflightFailed = false;
+    preflightError = "";
+    if (retrying) deps.log("preflight ran this time; its report replaces the failure");
 
     const repaired = pathWithTools(preflight.paths, deps.env.PATH ?? "");
     if (repaired !== deps.env.PATH) {
@@ -401,8 +408,17 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     }
   }
 
-  // Where every spawn of a preflight-resolved tool reads its path from (BP-641, BP-733). `establishPreflight` runs exactly once,
-  // at the top of `run()`, and sets the outer `preflight` this reads — a live read of that variable
+  // Once per poll while preflight could not run, like retryLeftovers: the machine claims nothing
+  // until it has, and a transient failure should not need a restart to clear (BP-793)
+  async function retryPreflight(): Promise<void> {
+    if (!preflightFailed) return;
+    await establishPreflight();
+    // The inventory read before this had no git to scan with
+    if (!preflightFailed) lastRefresh = 0;
+  }
+
+  // Where every spawn of a preflight-resolved tool reads its path from (BP-641, BP-733). `establishPreflight` runs
+  // at the top of `run()`, and again from drain only until it first succeeds, and sets the outer `preflight` this reads — a live read of that variable
   // rather than a value snapshotted into a second one, so every caller shares the one place the
   // resolution lives instead of each being handed its own copy (BP-641). Empty before that first
   // preflight completes, or if the tool was never found; every reader downstream refuses on empty
@@ -788,6 +804,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
 
   async function drain(): Promise<void> {
     await retryLeftovers().catch((error) => deps.logError(`reaping what an earlier run left failed: ${String(error)}`));
+    await retryPreflight();
     await refreshServerState();
     // Before the flush, so a settlement this pass produces goes out with it rather than waiting a
     // whole poll interval. Drained here rather than in the claim loop because `drain` runs even
@@ -835,7 +852,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     if (leftovers) return leftovers;
     const row = preflight?.checks.find((check) => check.name === SANDBOX_CHECK);
     if (row && !row.ok) return row.detail;
-    if (!preflight) return preflightFailed ? "preflight could not run, so no tool a step spawns was resolved" : "";
+    if (!preflight) return preflightFailed ? `preflight could not run: ${preflightError}` : "";
     const missing = TOOLS_A_STEP_SPAWNS.filter((tool) => !isAbsolute(preflight?.paths[tool] ?? ""));
     if (!missing.length) return "";
     return `${missing.join(" and ")} could not be found on this machine, and every task needs ${missing.length > 1 ? "them" : "it"}`;
@@ -872,10 +889,14 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     apiBaseUrl: bootstrap.apiBaseUrl,
     enrolmentToken: bootstrap.enrolmentToken,
     repos: () => (inventoryError ? undefined : inventory),
+    // A preflight that could not run is still reported, as a failing sandbox row: absent tells the
+    // server to keep the last report, which was green, and the sandbox row is the one it reads as
+    // this machine taking no work (BP-793)
     preflight: () => {
-      if (!preflight) return undefined;
-      const checks = [...preflight.checks, ...repoChecks, ...quarantineChecks()];
-      return { ok: checks.every((c) => c.ok), account: preflight.account, checks };
+      if (!preflight && !preflightFailed) return undefined;
+      const own = preflight?.checks ?? [{ name: SANDBOX_CHECK, ok: false, detail: claimBlocked() }];
+      const checks = [...own, ...repoChecks, ...quarantineChecks()];
+      return { ok: checks.every((c) => c.ok), account: preflight?.account ?? "", checks };
     },
     forgetEnrolmentToken: bootstrap.enrolmentTokenFile
       ? () => rmSync(bootstrap.enrolmentTokenFile, { force: true })
