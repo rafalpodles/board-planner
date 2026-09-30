@@ -358,7 +358,9 @@ async function commitIdentityCheck(
   };
 }
 
-const SANDBOX_PROBE_TIMEOUT_MS = 10_000;
+// Generous because the probe's `open` reads the LaunchServices database, which a machine that has
+// just booted may still be building; a bound it could hit reads as a machine that cannot confine.
+const SANDBOX_PROBE_TIMEOUT_MS = 30_000;
 
 /** Enough of a spawn failure to diagnose it from the fleet screen, without pasting a stack there. */
 function firstLine(text: string): string {
@@ -469,7 +471,12 @@ async function sandboxCheck(deps: PreflightDeps, env: NodeJS.ProcessEnv): Promis
     }
 
     if (!existsSync(opened)) {
-      return { name, ok: false, detail: "the sandbox could not be tested because the probe's launch through open never answered" };
+      const why = result.timedOut ? ` — it timed out after ${SANDBOX_PROBE_TIMEOUT_MS}ms` : "";
+      return {
+        name,
+        ok: false,
+        detail: `the sandbox could not be tested because the probe's launch through open never answered${why}`,
+      };
     }
 
     // Exit 0 is the launch accepted: the program may not have written yet when this looks.

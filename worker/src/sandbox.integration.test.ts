@@ -190,7 +190,9 @@ describe.skipIf(!onMac)("confine against the real sandbox", () => {
    * Each route has a control with the escape hatch set, because an `open` that failed for any
    * other reason would read exactly like the confinement working.
    */
-  describe("a program launched on the process's behalf", () => {
+  // A fresh CI runner builds its LaunchServices database on first use, and one `lsregister -dump`
+  // took longer there than vitest's 5 s default for a whole test.
+  describe("a program launched on the process's behalf", { timeout: 120_000 }, () => {
     const LSREGISTER =
       "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
     let app: string;
@@ -219,8 +221,8 @@ describe.skipIf(!onMac)("confine against the real sandbox", () => {
     });
 
     afterEach(async () => {
-      await runner.run(LSREGISTER, ["-u", app], { cwd: dir, timeoutMs: 30_000 });
-    });
+      await runner.run(LSREGISTER, ["-u", app], { cwd: dir, timeoutMs: 60_000 });
+    }, 90_000);
 
     async function launchAs(env: NodeJS.ProcessEnv, argv: string[]) {
       const ran = join(worktree, "ran");
@@ -229,7 +231,7 @@ describe.skipIf(!onMac)("confine against the real sandbox", () => {
         env,
       });
       if (!("command" in spawn)) throw new Error(`refused: ${spawn.refusal}`);
-      await runner.run(spawn.command, spawn.args, { cwd: worktree, timeoutMs: 30_000 });
+      await runner.run(spawn.command, spawn.args, { cwd: worktree, timeoutMs: 60_000 });
       return existsSync(ran);
     }
 
@@ -241,7 +243,7 @@ describe.skipIf(!onMac)("confine against the real sandbox", () => {
       return existsSync(launched);
     }
 
-    const register = () => runner.run(LSREGISTER, ["-f", app], { cwd: dir, timeoutMs: 30_000 });
+    const register = () => runner.run(LSREGISTER, ["-f", app], { cwd: dir, timeoutMs: 60_000 });
 
     const nsworkspace = [
       "/usr/bin/osascript",
@@ -331,7 +333,7 @@ describe.skipIf(!onMac)("confine against the real sandbox", () => {
 
       afterEach(async () => {
         await runner.run("/bin/launchctl", ["remove", label], { cwd: dir, timeoutMs: 30_000 });
-      });
+      }, 60_000);
 
       const submitAs = (env: NodeJS.ProcessEnv) =>
         launchAs(env, ["/bin/launchctl", "submit", "-l", label, "--", "/bin/sh", "-c", `echo ppid=$PPID > ${launched}`]);

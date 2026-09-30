@@ -488,7 +488,7 @@ describe("the sandbox check", () => {
     const report = await runPreflight({ ...depsFor(m), runner });
 
     expect(check(report, "sandbox")).toMatchObject({ ok: true });
-  });
+  }, 45_000);
 
   // A runner that lets the probe's write through is what a machine with no working sandbox looks
   // like from here — whatever the profile said, and whatever the platform claims.
@@ -568,6 +568,21 @@ describe("the sandbox check", () => {
     const row = check(report, "sandbox");
     expect(row.ok).toBe(false);
     expect(row.detail).toMatch(/launch through open never answered/);
+  });
+
+  it("says the probe's open timed out when that is why it never answered", async () => {
+    const m = machine();
+    const runner: Runner = {
+      run: async (command, args, opts) => {
+        if (command !== SANDBOX_COMMAND) return m.runner.run(command, args, opts);
+        writeFileSync(args[args.length - 1], "ran");
+        return { code: -1, stdout: "", stderr: "", timedOut: true };
+      },
+    };
+
+    const report = await runPreflight({ ...depsFor(m), runner });
+
+    expect(check(report, "sandbox").detail).toMatch(/never answered — it timed out after \d+ms/);
   });
 
   // The hole this row was opened with: `createRunner` settles a spawn that never happened as
@@ -707,7 +722,7 @@ describe("the sandbox check", () => {
 
     expect(probed).toHaveLength(1);
     expect(existsSync(probed[0])).toBe(false);
-  });
+  }, 45_000);
 });
 
 // BP-779. A run on a pinned machine used to commit as whatever the global git config named — a
