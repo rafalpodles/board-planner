@@ -14,6 +14,7 @@ const notificationDeleteMany = vi.fn();
 const pmMessageDeleteMany = vi.fn();
 const projectAuditLogDeleteMany = vi.fn();
 const grantDeleteMany = vi.fn();
+const dropProjectReferences = vi.fn();
 
 const logInstanceAudit = vi.fn();
 const logProjectAudit = vi.fn();
@@ -83,6 +84,7 @@ vi.mock("@/models/projectAuditLog", () => ({
 vi.mock("@/models/grant", () => ({
   Grant: { deleteMany: grantDeleteMany },
 }));
+vi.mock("@/lib/project-references", () => ({ dropProjectReferences }));
 
 const { DELETE, GET, PUT } = await import("./route");
 
@@ -183,7 +185,7 @@ describe("DELETE /api/projects/[projectId]", () => {
     );
   });
 
-  it("keeps every grant when the project does not exist", async () => {
+  it("keeps every grant and reference when the project does not exist", async () => {
     check.mockResolvedValue(true);
     projectFindById.mockResolvedValueOnce(null);
 
@@ -191,6 +193,38 @@ describe("DELETE /api/projects/[projectId]", () => {
 
     expect(response.status).toBe(404);
     expect(grantDeleteMany).not.toHaveBeenCalled();
+    expect(dropProjectReferences).not.toHaveBeenCalled();
+  });
+
+  it("drops what other collections hold about the project, by the project's own id", async () => {
+    check.mockResolvedValue(true);
+    const _id = { toString: () => PROJECT_ID };
+    projectFindById.mockResolvedValueOnce({ _id });
+
+    const response = await DELETE(request(), ctx());
+
+    expect(response.status).toBe(200);
+    expect(dropProjectReferences).toHaveBeenCalledTimes(1);
+    expect(dropProjectReferences.mock.calls[0][0]).toBe(_id);
+  });
+
+  it("drops those references only once the project itself is gone", async () => {
+    check.mockResolvedValue(true);
+
+    await DELETE(request(), ctx());
+
+    expect(dropProjectReferences.mock.invocationCallOrder[0]).toBeGreaterThan(
+      projectFindByIdAndDelete.mock.invocationCallOrder[0]
+    );
+  });
+
+  it("leaves every reference alone when a member is refused", async () => {
+    check.mockResolvedValue(false);
+    getAuthUser.mockResolvedValue(MEMBER);
+
+    await DELETE(request(), ctx());
+
+    expect(dropProjectReferences).not.toHaveBeenCalled();
   });
 });
 

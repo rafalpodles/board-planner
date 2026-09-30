@@ -122,6 +122,27 @@ describe("GET /api/admin/runs", () => {
     expect(run.projectKey).toBe("");
   });
 
+  // populate() answers null for a project that no longer exists; the run is kept as history
+  it("keeps a run whose project was deleted, and says so", async () => {
+    mockRuns([runDoc({ project: null })]);
+
+    const response = await call();
+    const [run] = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(run.taskKey).toBe("BP-158");
+    expect(run.projectDeleted).toBe(true);
+    expect(run.projectName).toBe("");
+  });
+
+  it("does not call a live project deleted", async () => {
+    mockRuns([runDoc()]);
+
+    const [run] = await (await call()).json();
+
+    expect(run.projectDeleted).toBe(false);
+  });
+
   it("reads the newest first", async () => {
     await call();
 

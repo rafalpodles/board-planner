@@ -1874,5 +1874,6 @@ export interface ApiAgentRun {
 export interface ApiFleetRun extends ApiAgentRun {
   projectKey: string;
   projectName: string;
+  projectDeleted: boolean;
   workerName: string;
 }
