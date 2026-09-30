@@ -388,10 +388,21 @@ function builtFromThisSource(helper: string): string {
   return `the process reaper at ${helper} was built from other source than this worker's — rebuild it with build-reaper.sh`;
 }
 
-export async function isQuarantined(path: string): Promise<boolean> {
+/** The com.apple.quarantine value, `flags;timestamp;agent;uuid`, or null when there is none. */
+export async function quarantineOf(path: string): Promise<string | null> {
   const result = await execute("/usr/bin/xattr", ["-p", "com.apple.quarantine", path], undefined, 5_000);
-  return result.code === 0;
+  return result.code === 0 ? result.stdout.trim() : null;
 }
+
+// Gatekeeper sets 0x40 once the user has approved the download, and leaves the attribute in place:
+// measured on every downloaded app in /Applications here (01c1, 03c1), inner executables included
+const USER_APPROVED = 0x40;
+
+export function approvedByUser(quarantine: string): boolean {
+  const flags = /^([0-9a-f]{1,8});/i.exec(quarantine)?.[1];
+  return flags !== undefined && (Number.parseInt(flags, 16) & USER_APPROVED) !== 0;
+}
+
 
 type Resolved = { helper: string } | { failure: string };
 
@@ -416,7 +427,7 @@ interface ResolveOptions {
   compiler: string;
   bundled: string;
   probeTimeoutMs: number;
-  quarantined: (path: string) => Promise<boolean>;
+  quarantine: (path: string) => Promise<string | null>;
   toolchain: () => Promise<boolean>;
   trust: TrustOptions;
   warn: (message: string) => void;
@@ -441,12 +452,27 @@ async function compilerAvailable(options: ResolveOptions): Promise<boolean> {
   return options.compiler === COMPILER ? options.toolchain() : true;
 }
 
+// Inside an app whose seal holds, the app was assessed when it was opened, and Archive Utility leaves
+// the attribute on every file of it
+async function heldByQuarantine(options: ResolveOptions): Promise<boolean> {
+  const quarantine = await options.quarantine(options.bundled);
+  if (quarantine === null || approvedByUser(quarantine)) return false;
+  let resolved: string;
+  try {
+    resolved = realpathSync(options.bundled);
+  } catch {
+    return true;
+  }
+  return !(APP_HELPER.test(resolved) && !(await sealed(resolved)));
+}
+
 async function resolveHelper(options: ResolveOptions): Promise<Resolved> {
   let bundledFailure = "";
   if (existsSync(options.bundled)) {
-    // Not run at all when quarantined: its first run is a Gatekeeper assessment, which can hang
-    bundledFailure = (await options.quarantined(options.bundled))
-      ? `it is quarantined, as a download is until released, so it was not run; release it with: xattr -dr com.apple.quarantine ${dirname(dirname(options.bundled))}`
+    // Not run at all while its quarantine is unapproved: that first run is a Gatekeeper assessment,
+    // which can hang
+    bundledFailure = (await heldByQuarantine(options))
+      ? `it is quarantined and was never approved, as a download is until released, so it was not run; release it with: xattr -dr com.apple.quarantine ${dirname(dirname(options.bundled))}`
       : await trusted(options.bundled, options, true);
     if (!bundledFailure) return { helper: realpathSync(options.bundled) };
     if (!(await compilerAvailable(options))) {
@@ -476,7 +502,7 @@ export interface ReaperOptions {
   compiler?: string;
   bundled?: string;
   probeTimeoutMs?: number;
-  quarantined?: (path: string) => Promise<boolean>;
+  quarantine?: (path: string) => Promise<string | null>;
   toolchain?: () => Promise<boolean>;
   trust?: TrustOptions;
   warn?: (message: string) => void;
@@ -486,7 +512,7 @@ export function createReaper({
   compiler = COMPILER,
   bundled = bundledHelperPath(),
   probeTimeoutMs = PROBE_TIMEOUT_MS,
-  quarantined = isQuarantined,
+  quarantine = quarantineOf,
   toolchain = toolchainInstalled,
   trust = {},
   warn = (message) => console.error(message),
@@ -494,7 +520,7 @@ export function createReaper({
   let resolving: Promise<Resolved> | undefined;
 
   async function helper(): Promise<Resolved> {
-    resolving ??= resolveHelper({ compiler, bundled, probeTimeoutMs, quarantined, toolchain, trust, warn });
+    resolving ??= resolveHelper({ compiler, bundled, probeTimeoutMs, quarantine, toolchain, trust, warn });
     const outcome = await resolving;
     if ("failure" in outcome) resolving = undefined;
     return outcome;

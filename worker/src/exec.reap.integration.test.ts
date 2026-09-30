@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,7 +7,8 @@ import { createRunner, Runner } from "./exec.js";
 import {
   compilerDefine,
   createReaper,
-  isQuarantined,
+  approvedByUser,
+  quarantineOf,
   markConfinedSpawn,
   newMarker,
   Reaper,
@@ -191,6 +192,9 @@ describe("when a confined spawn cannot be reaped", () => {
   });
 });
 
+const APPROVED = "01c1;69d8c4bc;Chrome;7BC92DB3-3762-466F-A7F3-E7DD05CD70E8";
+const UNAPPROVED = "0083;69d8c4bc;Chrome;7BC92DB3-3762-466F-A7F3-E7DD05CD70E8";
+
 describe.skipIf(!onMac)("the helper it trusts", () => {
   let dir: string;
   let helper: string;
@@ -256,7 +260,7 @@ describe.skipIf(!onMac)("the helper it trusts", () => {
     writeFileSync(stub, `#!/bin/sh\n# cp-reap-source:${REAPER_SOURCE_HASH}\ntouch '${ran}'\nexec /bin/sleep 30\n`);
     chmodSync(stub, 0o755);
 
-    const failure = await createReaper({ compiler: "/nonexistent/cc", bundled: stub, quarantined: async () => true }).ready([]);
+    const failure = await createReaper({ compiler: "/nonexistent/cc", bundled: stub, quarantine: async () => UNAPPROVED }).ready([]);
 
     expect(failure).toContain("quarantined");
     expect(failure).toContain(`xattr -dr com.apple.quarantine ${dir}`);
@@ -269,7 +273,7 @@ describe.skipIf(!onMac)("the helper it trusts", () => {
       compiler: "/nonexistent/cc",
       bundled: hangingHelper(),
       probeTimeoutMs: 300,
-      quarantined: async () => false,
+      quarantine: async () => null,
     }).ready([]);
 
     expect(failure).toContain("did not answer within 0.3s");
@@ -284,18 +288,56 @@ describe.skipIf(!onMac)("the helper it trusts", () => {
     expect(failure).toContain("no compiler to build one");
   });
 
-  // On a data file that is never run, so nothing asks Gatekeeper about it
-  it("tells a quarantined file from one that is not", async () => {
+  // On a data file that is never run, so nothing asks Gatekeeper about it. The value is one an
+  // approved app in /Applications carries on every file inside it.
+  it("reads a quarantine the user approved as approved, and one never approved as not", async () => {
     const file = join(dir, "downloaded.txt");
     writeFileSync(file, "data");
-    expect(await isQuarantined(file)).toBe(false);
-    spawnSync("/usr/bin/xattr", ["-w", "com.apple.quarantine", "0081;00000000;Safari;", file]);
-    expect(await isQuarantined(file)).toBe(true);
+    expect(await quarantineOf(file)).toBeNull();
+
+    spawnSync("/usr/bin/xattr", ["-w", "com.apple.quarantine", APPROVED, file]);
+    const approved = await quarantineOf(file);
+    expect(approved).toBe(APPROVED);
+    expect(approvedByUser(approved ?? "")).toBe(true);
+
+    spawnSync("/usr/bin/xattr", ["-w", "com.apple.quarantine", UNAPPROVED, file]);
+    expect(approvedByUser((await quarantineOf(file)) ?? "")).toBe(false);
+    expect(approvedByUser("not a quarantine value")).toBe(false);
+  });
+
+  it("runs a helper whose quarantine was approved", async () => {
+    expect(await createReaper({ compiler: "/nonexistent/cc", bundled: helper, quarantine: async () => APPROVED }).ready([])).toBe("");
+  });
+
+  // Archive Utility leaves the attribute on every file of an unzipped app, approved or not
+  it("runs a helper inside an app whose seal holds, whatever its quarantine says", async () => {
+    const app = join(dir, "Probe.app");
+    const bin = join(app, "Contents", "Resources", "worker", "bin");
+    mkdirSync(bin, { recursive: true });
+    mkdirSync(join(app, "Contents", "MacOS"));
+    copyFileSync(helper, join(bin, "cp-reap"));
+    copyFileSync(helper, join(app, "Contents", "MacOS", "Probe"));
+    writeFileSync(
+      join(app, "Contents", "Info.plist"),
+      '<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleExecutable</key><string>Probe</string><key>CFBundleIdentifier</key><string>com.boardplanner.bp796.probe</string></dict></plist>'
+    );
+    for (const target of [join(bin, "cp-reap"), app]) {
+      const signed = spawnSync("/usr/bin/codesign", ["--force", "--sign", "-", target]);
+      if (signed.status !== 0) throw new Error(String(signed.stderr));
+    }
+    const inApp = join(bin, "cp-reap");
+
+    expect(await createReaper({ compiler: "/nonexistent/cc", bundled: inApp, quarantine: async () => UNAPPROVED }).ready([])).toBe("");
+
+    writeFileSync(join(app, "Contents", "Resources", "planted"), "x");
+    expect(await createReaper({ compiler: "/nonexistent/cc", bundled: inApp, quarantine: async () => UNAPPROVED }).ready([])).toContain(
+      "never approved"
+    );
   });
 
   it("builds one here instead when the bundled helper cannot be used, and warns which was used", async () => {
     const warn = vi.fn();
-    const reaper = createReaper({ bundled: hangingHelper(), probeTimeoutMs: 300, quarantined: async () => false, warn });
+    const reaper = createReaper({ bundled: hangingHelper(), probeTimeoutMs: 300, quarantine: async () => null, warn });
 
     expect(await reaper.ready([])).toBe("");
     expect(warn).toHaveBeenCalledWith(expect.stringMatching(/^warning: the bundled process reaper was not used \(the reaper did not answer within 0\.3s\); using one built with \/usr\/bin\/cc instead$/));
@@ -303,7 +345,7 @@ describe.skipIf(!onMac)("the helper it trusts", () => {
 
   it("builds one here instead of a quarantined one, without running it", async () => {
     const warn = vi.fn();
-    const reaper = createReaper({ bundled: hangingHelper(), quarantined: async () => true, warn });
+    const reaper = createReaper({ bundled: hangingHelper(), quarantine: async () => UNAPPROVED, warn });
 
     expect(await reaper.ready([])).toBe("");
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("it is quarantined"));
@@ -314,10 +356,10 @@ describe.skipIf(!onMac)("the helper it trusts", () => {
     const built = spawnSync("/usr/bin/cc", ["-O2", '-DCP_REAP_SOURCE_HASH="0000000000000000"', join(dir, "reap.c"), "-o", stale]);
     if (built.status !== 0) throw new Error(String(built.stderr));
 
-    const alone = await createReaper({ compiler: "/nonexistent/cc", bundled: stale, quarantined: async () => false }).ready([]);
+    const alone = await createReaper({ compiler: "/nonexistent/cc", bundled: stale, quarantine: async () => null }).ready([]);
     expect(alone).toContain("built from other source");
     const warn = vi.fn();
-    expect(await createReaper({ bundled: stale, quarantined: async () => false, warn }).ready([])).toBe("");
+    expect(await createReaper({ bundled: stale, quarantine: async () => null, warn }).ready([])).toBe("");
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("built from other source"));
   });
 

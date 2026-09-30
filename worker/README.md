@@ -172,9 +172,10 @@ Without a clone: every release carries `board-planner-worker-X.Y.Z.tar.gz`, buil
 `pack.sh` — this directory's `dist/`, `launchd/` and a `package.json` with nothing to install.
 Unpack it and run `npm start` (or `node dist/main.js`) inside the `worker/` it contains. A tarball
 a browser downloaded is quarantined, and so is everything `tar` unpacks from it, including the
-process reaper at `dist/bin/cp-reap`. The worker does not run a quarantined reaper — the first run
-of one from an unsigned build, or offline, can wait on Gatekeeper indefinitely — so release it once
-with `xattr -dr com.apple.quarantine worker` before the first start. Otherwise the worker builds its
+process reaper at `dist/bin/cp-reap`. The worker does not run a reaper whose quarantine was never
+approved — the first run of one from an unsigned build, or offline, can wait on Gatekeeper
+indefinitely — so release it once with `xattr -dr com.apple.quarantine worker` before the first
+start. Otherwise the worker builds its
 own reaper with the command-line tools, and takes no work if they are not installed.
 
 The worker reports its version to the server on every heartbeat, read from the `package.json` it
@@ -406,8 +407,10 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   and notarised on its own by `sign-reaper.sh`). A bundled helper is refused if it was built from
   other source than the worker it ships with, if anyone other than this user, root or the owner of
   the worker's own code could replace it, or if the spawn about to run may write where it lives, and
-  it must find and kill a confined probe within five seconds before it is trusted. A quarantined one
-  is not run at all. A bundled helper that is quarantined or fails any of those checks gives way to
+  it must find and kill a confined probe within five seconds before it is trusted. One whose
+  quarantine was never approved (the attribute's flags lack 0x40) is not run at all — except inside
+  an app whose signature still verifies, since the app was assessed when it was opened and
+  unzipping leaves the attribute on every file in it. A bundled helper that is quarantined or fails any of those checks gives way to
   one built with `/usr/bin/cc` when `xcode-select -p` finds the command-line tools — asked that way
   because `/usr/bin/cc` itself offers to install them — and the worker logs a warning naming why the
   bundled one was not used. **It fails closed**: a helper that
