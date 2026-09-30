@@ -40,7 +40,7 @@ import { ResolvedTool, unresolvedToolReason } from "./tool-path.js";
  * Launching is the same shape (BP-807): `open -g -j <bundle>` returned 0 under this profile and the
  * bundle's program ran with ppid 1, unconfined. The deny below names the services a launch and an
  * AppleEvent go through, measured on macOS 26.6.2; `npm ci`, `npm run build`, `npm test`, git and
- * `claude --version` still exit 0 under it. `claude -p` was not re-run for it.
+ * the executor's real `claude -p` still succeed under it.
  *
  * Still open, and it is the same shape: every other daemon reachable by `mach-lookup`. Naming
  * cfprefsd closes the channel somebody measured, not the category — a denylist of service names

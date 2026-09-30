@@ -432,13 +432,18 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   `com.apple.coreservices.appleevents`, so an AppleEvent to another app — `tell application
   "Terminal" to do script …` — fails before it is sent, with no consent prompt. A job handed to
   launchd (`launchctl submit`, `bootstrap`) was already refused by launchd itself, and a setuid
-  `crontab` is refused its exec. What it cost: `npm ci`, `npm run build`, `npm test`, git and
-  `claude --version` exit 0 as before; the full `claude -p` invocation was not re-run for this
-  change. Still open, and not measured: a bundle the system registers on its own (Spotlight
-  indexing a worktree) becoming the handler for a URL you open yourself; an existing Shortcut that
-  runs a shell script (`shortcuts run`); and, as above, every service not named. Preflight tries an
-  `open` at boot, so a macOS that moves *that* launch elsewhere shows up as a red sandbox row rather
-  than as an escape.
+  `crontab` is refused its exec. What it cost: `npm ci`, `npm run build`, `npm test`, git and the
+  executor's real `claude -p` invocation all still succeed under it.
+
+  Still open (**BP-810**): daemons reached over a **unix socket** rather than `mach-lookup` — the
+  Docker socket answers, and a bind mount gives a container write access anywhere in your home; an
+  already running tmux or screen server runs a command outside the sandbox; watchman is reachable
+  and its triggers run commands. So is `launchctl enable`/`disable`/`bootout gui/<uid>/…`, which
+  works from inside and persists. Reachable but untested: SMAppService and login items, an existing
+  Shortcut that runs a shell script (`shortcuts run`), and a bundle the system registers on its own
+  (Spotlight indexing a worktree) becoming the handler for a URL you open yourself. And, as above,
+  every service not named. Preflight tries an `open` at boot, so a macOS that moves *that* launch
+  elsewhere shows up as a red sandbox row rather than as an escape.
 
   **A file git will not print** (**BP-603**). Four things take a file's contents out of a patch: a
   bare `-diff` attribute, a `diff=<name>` driver declared binary in the config, a file git decides
