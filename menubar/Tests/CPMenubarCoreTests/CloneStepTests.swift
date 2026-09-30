@@ -282,7 +282,249 @@ final class GitSafeEnvironmentTests: XCTestCase {
         let hardened = GitSafeEnvironment.apply(to: ["PATH": "/usr/bin"])
 
         XCTAssertEqual(hardened["GIT_PROXY_COMMAND"], "")
-        XCTAssertEqual(hardened["GIT_CONFIG_NOSYSTEM"], "1")
+    }
+
+    func testItPointsTheSystemFileAtNothingAndDropsAnInheritedNoSystem() {
+        let hardened = GitSafeEnvironment.apply(to: [
+            "PATH": "/usr/bin", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_SYSTEM": "/elsewhere/gitconfig",
+        ])
+
+        XCTAssertEqual(hardened["GIT_CONFIG_SYSTEM"], "/dev/null")
+        XCTAssertFalse(hardened.keys.contains("GIT_CONFIG_NOSYSTEM"), "on Apple git it drops the vendor file too")
+    }
+
+    // BP-798: Apple git's vendor file carries credential.helper=osxkeychain, and GIT_CONFIG_NOSYSTEM
+    // dropped it along with /etc/gitconfig. Asks only which helper git would call; runs none.
+    func testAppleGitsVendorCredentialHelperIsStillVisible() throws {
+        var checked: [String] = []
+        for git in Self.installedGits {
+            guard let vendor = Self.vendorConfig(of: git),
+                  let contents = try? String(contentsOfFile: vendor, encoding: .utf8),
+                  contents.contains("osxkeychain")
+            else { continue }
+            let answer = Self.run(git, ["config", "--show-origin", "--get-all", "credential.helper"],
+                                  GitSafeEnvironment.apply(to: Self.isolated(["GIT_CONFIG_NOSYSTEM": "1"])))
+            XCTAssertTrue(answer.contains("file:\(vendor)\tosxkeychain"), "\(git) answered [\(answer)]")
+            checked.append(git)
+        }
+        if checked.isEmpty { throw XCTSkip("no git here ships Apple's vendor gitconfig") }
+    }
+
+    func testAPlantedSystemFileIsNotRead() throws {
+        guard let git = Self.installedGits.first else { throw XCTSkip("no git installed") }
+        let planted = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bp798-\(UUID().uuidString).gitconfig").path
+        try "[credential]\n\thelper = planted-system\n".write(toFile: planted, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(atPath: planted) }
+        let inherited = Self.isolated(["GIT_CONFIG_SYSTEM": planted])
+        let query = ["config", "--get-all", "credential.helper"]
+
+        XCTAssertTrue(Self.run(git, query, inherited).contains("planted-system"), "the control: the fixture is read")
+        XCTAssertFalse(Self.run(git, query, GitSafeEnvironment.apply(to: inherited)).contains("planted-system"))
+    }
+
+    private static func probe(scopes: Set<String>? = [], installed: Bool = true) -> KeychainHelperProbe {
+        KeychainHelperProbe(helperScopes: { _, _ in scopes }, osxkeychainInstalled: { _, _ in installed })
+    }
+
+    func testAGitWithNoHelperAnywhereNeedsOsxkeychain() {
+        XCTAssertTrue(Self.probe().keychainHelperNeeded(git: "/opt/homebrew/bin/git", environment: [:]))
+    }
+
+    func testAVendorFileWithAHelperIsNotGivenASecond() {
+        XCTAssertFalse(Self.probe(scopes: ["unknown"]).keychainHelperNeeded(git: "/usr/bin/git", environment: [:]))
+    }
+
+    // `global` is ~/.gitconfig, the XDG file and their includes; an empty reset reports it too
+    func testAHelperOrAResetInTheGlobalConfigIsRespected() {
+        XCTAssertFalse(Self.probe(scopes: ["global"]).keychainHelperNeeded(git: "/opt/homebrew/bin/git", environment: [:]))
+    }
+
+    func testNoHelperIsNamedWhenOsxkeychainIsNotInstalled() {
+        XCTAssertFalse(Self.probe(installed: false).keychainHelperNeeded(git: "/opt/homebrew/bin/git", environment: [:]))
+    }
+
+    func testNoHelperIsNamedWhenGitCouldNotAnswer() {
+        XCTAssertFalse(Self.probe(scopes: nil).keychainHelperNeeded(git: "/opt/homebrew/bin/git", environment: [:]))
+    }
+
+    func testTheHelperGoesOnTheCommandLineOverTheHardening() {
+        let hardened = GitSafeEnvironment.apply(to: ["PATH": "/usr/bin"], keychainHelper: true)
+
+        XCTAssertEqual(hardened["GIT_CONFIG_COUNT"], "1")
+        XCTAssertEqual(hardened["GIT_CONFIG_KEY_0"], "credential.helper")
+        XCTAssertEqual(hardened["GIT_CONFIG_VALUE_0"], "osxkeychain")
+        XCTAssertEqual(hardened["GIT_CONFIG_SYSTEM"], "/dev/null", "the hardening still applies")
+        XCTAssertNil(GitSafeEnvironment.apply(to: [:], keychainHelper: false)["GIT_CONFIG_COUNT"])
+    }
+
+    func testItAppendsAfterConfigTheCallerAlreadyPassed() {
+        let hardened = GitSafeEnvironment.apply(
+            to: ["GIT_CONFIG_COUNT": "2", "GIT_CONFIG_KEY_1": "core.x", "GIT_CONFIG_VALUE_1": "y"],
+            keychainHelper: true)
+
+        XCTAssertEqual(hardened["GIT_CONFIG_COUNT"], "3")
+        XCTAssertEqual(hardened["GIT_CONFIG_KEY_1"], "core.x")
+        XCTAssertEqual(hardened["GIT_CONFIG_KEY_2"], "credential.helper")
+        XCTAssertEqual(hardened["GIT_CONFIG_VALUE_2"], "osxkeychain")
+    }
+
+    // Real git reading the result; only the vendor file is pretended away, so this runs on an
+    // Apple-only machine too
+    func testRealGitReadsTheAddedHelperFromTheCommandLine() throws {
+        guard let git = Self.installedGits.first(where: { git in
+            let execPath = Self.run(git, ["--exec-path"], Self.isolated([:]))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return FileManager.default.isExecutableFile(atPath: "\(execPath)/git-credential-osxkeychain")
+        }) else { throw XCTSkip("no git here has git-credential-osxkeychain beside it") }
+        let environment = GitSafeEnvironment.apply(to: Self.isolated([:]))
+        XCTAssertTrue(Self.withoutVendor.keychainHelperNeeded(git: git, environment: environment))
+
+        let answer = Self.run(git, ["config", "--show-origin", "--get-all", "credential.helper"],
+                              GitSafeEnvironment.apply(to: Self.isolated([:]), keychainHelper: true))
+        XCTAssertTrue(answer.contains("command line:\tosxkeychain"), "\(git) answered [\(answer)]")
+    }
+
+    func testRealGitReportsAGlobalResetAsNamingAHelper() throws {
+        try Self.assertGlobalHelper(files: [".gitconfig": "[credential]\n\thelper =\n"])
+    }
+
+    // BP-798 review: `git config --global` reads one file and follows no include, so it missed both
+    func testRealGitSeesAResetMadeThroughAnInclude() throws {
+        try Self.assertGlobalHelper(files: [
+            ".gitconfig": "[include]\n\tpath = ~/inc.gitconfig\n",
+            "inc.gitconfig": "[credential]\n\thelper =\n",
+        ])
+    }
+
+    func testRealGitSeesAHelperNamedThroughAnInclude() throws {
+        try Self.assertGlobalHelper(files: [
+            ".gitconfig": "[include]\n\tpath = ~/inc.gitconfig\n",
+            "inc.gitconfig": "[credential]\n\thelper = store\n",
+        ])
+    }
+
+    func testRealGitSeesTheXDGConfigBesideAGitconfig() throws {
+        try Self.assertGlobalHelper(files: [
+            ".gitconfig": "[user]\n\tname = t\n",
+            ".config/git/config": "[credential]\n\thelper = store\n",
+        ])
+    }
+
+    // BP-798 delta review: what `gh auth setup-git` writes is keyed credential.https://github.com.helper
+    func testRealGitSeesAURLScopedResetAndHelper() throws {
+        try Self.assertGlobalHelper(files: [
+            ".gitconfig": "[credential \"https://github.com\"]\n\thelper =\n\thelper = !gh auth git-credential\n",
+        ])
+    }
+
+    func testRealGitSeesAURLScopedResetAlone() throws {
+        try Self.assertGlobalHelper(files: [".gitconfig": "[credential \"https://github.com\"]\n\thelper =\n"])
+    }
+
+    func testRealGitThatCannotReadTheGlobalConfigAddsNoHelper() throws {
+        guard !Self.installedGits.isEmpty else { throw XCTSkip("no git installed") }
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("bp798-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        try "[credential\n".write(to: home.appendingPathComponent(".gitconfig"), atomically: true, encoding: .utf8)
+        let environment = GitSafeEnvironment.apply(to: ["PATH": "/usr/bin:/bin", "HOME": home.path])
+
+        for git in Self.installedGits {
+            XCTAssertNil(KeychainHelperProbe.live.helperScopes(git, environment), git)
+            XCTAssertFalse(Self.withoutVendor.keychainHelperNeeded(git: git, environment: environment), git)
+        }
+    }
+
+    func testRealAppleGitIsNotGivenASecondHelper() throws {
+        var checked = 0
+        for git in Self.installedGits where Self.vendorConfig(of: git) != nil {
+            let environment = GitSafeEnvironment.apply(to: Self.isolated([:]))
+            XCTAssertFalse(KeychainHelperProbe.live.keychainHelperNeeded(git: git, environment: environment), git)
+            checked += 1
+        }
+        if checked == 0 { throw XCTSkip("no git here ships Apple's vendor gitconfig") }
+    }
+
+    func testRealHomebrewGitGetsOsxkeychainBack() throws {
+        guard let git = ["/opt/homebrew/bin/git", "/usr/local/bin/git"]
+            .first(where: { FileManager.default.isExecutableFile(atPath: $0) && Self.vendorConfig(of: $0) == nil })
+        else { throw XCTSkip("no Homebrew git installed") }
+        let inherited = Self.isolated([:])
+        let needed = KeychainHelperProbe.live.keychainHelperNeeded(
+            git: git, environment: GitSafeEnvironment.apply(to: inherited))
+        let environment = GitSafeEnvironment.apply(to: inherited, keychainHelper: needed)
+
+        let answer = Self.run(git, ["config", "--show-origin", "--get-all", "credential.helper"], environment)
+        XCTAssertEqual(answer.trimmingCharacters(in: .whitespacesAndNewlines), "command line:\tosxkeychain")
+    }
+
+    private static let withoutVendor = KeychainHelperProbe(
+        helperScopes: { git, environment in
+            KeychainHelperProbe.live.helperScopes(git, environment).map { $0.subtracting(["unknown"]) }
+        },
+        osxkeychainInstalled: KeychainHelperProbe.live.osxkeychainInstalled)
+
+    /// Writes `files` into a fresh HOME and asks every installed git, through the live probe, what
+    /// it makes of them — with the vendor file pretended away so an Apple git answers as Homebrew's
+    /// would. The control is the same HOME empty.
+    private static func assertGlobalHelper(
+        files: [String: String], file: StaticString = #filePath, line: UInt = #line
+    ) throws {
+        guard !installedGits.isEmpty else { throw XCTSkip("no git installed") }
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("bp798-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let environment = GitSafeEnvironment.apply(to: ["PATH": "/usr/bin:/bin", "HOME": home.path])
+        for git in installedGits {
+            XCTAssertEqual(KeychainHelperProbe.live.helperScopes(git, environment)?.contains("global"), false,
+                           "the control: an empty HOME names no helper (\(git))", file: file, line: line)
+        }
+        for (name, contents) in files {
+            let url = home.appendingPathComponent(name)
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try contents.write(to: url, atomically: true, encoding: .utf8)
+        }
+        for git in installedGits {
+            XCTAssertEqual(KeychainHelperProbe.live.helperScopes(git, environment)?.contains("global"), true,
+                           git, file: file, line: line)
+            XCTAssertFalse(withoutVendor.keychainHelperNeeded(git: git, environment: environment), git,
+                           file: file, line: line)
+        }
+    }
+
+    private static let installedGits = [
+        "/usr/bin/git", "/Library/Developer/CommandLineTools/usr/bin/git",
+        "/opt/homebrew/bin/git", "/usr/local/bin/git",
+    ].filter { FileManager.default.isExecutableFile(atPath: $0) }
+
+    private static func isolated(_ extra: [String: String]) -> [String: String] {
+        ["PATH": "/usr/bin:/bin", "HOME": NSTemporaryDirectory(), "GIT_CONFIG_GLOBAL": "/dev/null"]
+            .merging(extra) { _, mine in mine }
+    }
+
+    private static func vendorConfig(of git: String) -> String? {
+        let execPath = run(git, ["--exec-path"], isolated([:])).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !execPath.isEmpty else { return nil }
+        let vendor = URL(fileURLWithPath: execPath).appendingPathComponent("../../share/git-core/gitconfig")
+            .standardized.path
+        return FileManager.default.fileExists(atPath: vendor) ? vendor : nil
+    }
+
+    private static func run(_ git: String, _ args: [String], _ environment: [String: String]) -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: git)
+        process.arguments = args
+        process.environment = environment
+        process.currentDirectoryURL = FileManager.default.temporaryDirectory
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        guard (try? process.run()) != nil else { return "" }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return String(data: data, encoding: .utf8) ?? ""
     }
 
     func testItKeepsWhatTheCallerAlreadySet() {
