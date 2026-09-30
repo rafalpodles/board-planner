@@ -514,6 +514,9 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   not ignore**. A repository's submodules are otherwise untouched, since a worktree leaves them
   empty, and a change to a submodule pointer is still committed and refused by protected-paths.
   Delivery also pins `push.recurseSubmodules=no` and `fetch.recurseSubmodules=false` (BP-803).
+  **A process a gate leaves running can still win the race**: it can populate a `.git` between the
+  check and the `git add` or `gh`'s own `git status` that follows — one win is enough where the base
+  already has a submodule — and only killing what a gate leaves behind (BP-796) closes that.
 
   **Nothing this worker commits is signed.** `commit.gpgSign=false` and `push.gpgSign=false` ride on
   every call, because signing runs a program the checkout names (`gpg.program`, or ssh's key

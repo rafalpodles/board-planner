@@ -1,6 +1,6 @@
 import { Runner } from "./exec.js";
 import { gitArgs, localGitEnv, operatorGitEnv, requireGitPath } from "./git-safety.js";
-import { hiddenFromGit } from "./hidden-files.js";
+import { hiddenFromGit, PORCELAIN_STATUS } from "./hidden-files.js";
 import { plantedConfig, UNREADABLE_CONFIG } from "./repos.js";
 
 const TIMEOUT_MS = 60_000;
@@ -225,7 +225,7 @@ export async function commitAll(
   if (hidden?.kind === "unreadable") throw new Error(`refusing to stage: ${hidden.detail}`);
   if (hidden) throw new TamperedCheckoutError(hidden.detail);
 
-  const status = await git(["status", "--porcelain", "--ignore-submodules=all"]);
+  const status = await git(PORCELAIN_STATUS);
   if (status.code !== 0)
     throw new Error(`git status failed: ${status.stderr || status.stdout}`);
   if (!status.stdout.trim()) return "";

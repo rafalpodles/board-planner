@@ -12,7 +12,7 @@ import { Delivery } from "./delivery.js";
 import { Runner } from "./exec.js";
 import { Executor } from "./executor.js";
 import { gitArgs, localGitEnv, requireGitPath } from "./git-safety.js";
-import { hiddenFromGit } from "./hidden-files.js";
+import { hiddenFromGit, PORCELAIN_STATUS } from "./hidden-files.js";
 import { pinGit } from "./worktree-pin.js";
 import { Reporter } from "./reporter.js";
 import { SHUTDOWN_SIGNAL } from "./commands.js";
@@ -272,7 +272,7 @@ export async function unfinishedWork(
   worktreePath: string,
   baseSha: string,
 ): Promise<string | null> {
-  const result = await runner.run(requireGitPath(gitPath), gitArgs(["status", "--porcelain", "--ignore-submodules=all"]), {
+  const result = await runner.run(requireGitPath(gitPath), gitArgs(PORCELAIN_STATUS), {
     cwd: worktreePath,
     timeoutMs: GIT_TIMEOUT_MS,
     env: localGitEnv(),
@@ -684,7 +684,7 @@ export async function runTask(
           settle("failed", outcome.message);
           await reporter.failed(
             task,
-            `${outcome.message}\n\nNothing was staged and nothing was pushed. The worktree is kept at \`${worktree.path}\` on the worker host, with what the agent wrote and the config that was found still in it.`,
+            `${outcome.message}\n\nNothing was staged and nothing was pushed. The worktree is kept at \`${worktree.path}\` on the worker host, with what the agent wrote and what the refusal names still in it.`,
           );
           return;
         }
@@ -738,19 +738,20 @@ export async function runTask(
         // code, which can hide a file from git as well as an Implement step can (BP-640, BP-794)
         const tampered = await worktree.tampering();
         const hidden = tampered
-          ? { detail: `the checkout now has ${tampered}` }
+          ? { kind: "tampered" as const, detail: `the checkout now has ${tampered}` }
           : await hiddenFromGit(runner, deps.gitPath, worktree.path, worktree.baseSha);
         if (hidden) {
           keepWorktree = true;
-          settle(
-            "failed",
-            tampered
-              ? `refused to run the ${gate.name} gate over a tampered checkout`
-              : `refused to run the ${gate.name} gate over files git hides`,
-          );
+          const found =
+            hidden.kind === "tampered"
+              ? { over: "a tampered checkout", left: "what the agent changed" }
+              : hidden.kind === "nested"
+                ? { over: "a nested git repository", left: "the nested repository" }
+                : { over: "files git hides", left: "the hidden files" };
+          settle("failed", `refused to run the ${gate.name} gate over ${found.over}`);
           await reporter.failed(
             task,
-            `refusing to run the ${gate.name} gate: ${hidden.detail}\n\nThe worktree is kept at \`${worktree.path}\` on the worker host, with ${tampered ? "what the agent changed" : "the hidden files"} still in it.`,
+            `refusing to run the ${gate.name} gate: ${hidden.detail}\n\nThe worktree is kept at \`${worktree.path}\` on the worker host, with ${found.left} still in it.`,
           );
           return;
         }

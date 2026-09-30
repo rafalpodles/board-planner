@@ -11,6 +11,7 @@ const GITLINK = /^160000 [0-9a-f]+ \d\t(.*)$/s;
 
 export type HiddenFiles =
   | { kind: "hidden"; detail: string }
+  | { kind: "nested"; detail: string }
   | { kind: "unreadable"; detail: string };
 
 class Unreadable extends Error {}
@@ -71,17 +72,26 @@ function gitIn(runner: Runner, gitPath: string, worktreePath: string): Git {
 }
 
 /**
+ * `status` that reports a submodule pointer change — staged, removed, or the directory gone — but
+ * never asks the submodule itself whether it is dirty, which is the question that spawns git inside
+ * it. Measured on git 2.54.0: `=dirty` prints `M lib` for a pointer bump and runs no filter planted
+ * in `lib`; `=untracked` and `=none` run it; `=all` runs nothing and prints nothing for any pointer
+ * change either, so a change that was only a bump was never committed and never reached
+ * protected-paths. The flag outranks a `.gitmodules` `ignore =` in both directions.
+ */
+export const PORCELAIN_STATUS = ["status", "--porcelain", "--ignore-submodules=dirty"];
+
+/**
  * A git repository inside the worktree that git would treat as a submodule (BP-803).
  *
  * Checking whether a submodule is dirty makes git spawn itself inside it with GIT_DIR cleared, and
  * that child reads the nested repository's own `.git/config` and `.gitattributes` — so a
  * `filter.<name>.clean` the agent planted there runs outside the sandbox, as this process's uid.
- * The status calls pass `--ignore-submodules=all`, which a `.gitmodules` entry with `ignore = none`
- * cannot outrank the way it outranks `diff.ignoreSubmodules`, but `git add` has no such switch:
- * measured on git 2.54.0, `add --all` over a staged gitlink runs `git status --porcelain=2 -uno`
- * inside it whatever the config says. So the repository is refused before anything stages. Not
- * `diff.ignoreSubmodules=all` in gitArgs either: it also blanks a gitlink out of the tree-to-tree
- * diff that protected-paths refuses a submodule bump on — measured.
+ * `PORCELAIN_STATUS` keeps the status calls out of it, but `git add` has no such switch: measured on
+ * git 2.54.0, `add --all` over a staged gitlink runs `git status --porcelain=2 -uno` inside it
+ * whatever the config says. So the repository is refused before anything stages. Not
+ * `diff.ignoreSubmodules` in gitArgs either: `.gitmodules` outranks it, and at `all` it also blanks a
+ * gitlink out of the tree-to-tree diff that protected-paths refuses a submodule bump on — measured.
  *
  * Two shapes, both answered without spawning into the nested repository (measured): a gitlink in the
  * index whose path now holds a `.git`, and an untracked nested repository, which `ls-files --others`
@@ -115,7 +125,7 @@ async function nestedIn(git: Git, worktreePath: string): Promise<HiddenFiles | n
   if (found.length === 0) return null;
   const more = found.length > NAMED_AT_MOST ? `, and ${found.length - NAMED_AT_MOST} more` : "";
   return {
-    kind: "hidden",
+    kind: "nested",
     detail: `a git repository nested inside the worktree, whose own config git would run outside the sandbox while checking the worktree, and whose contents reach no diff or gate: ${found.slice(0, NAMED_AT_MOST).join(", ")}${more}`,
   };
 }

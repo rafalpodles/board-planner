@@ -5,16 +5,22 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { commitAll, TamperedCheckoutError } from "./commit.js";
 import { createDelivery } from "./delivery.js";
+import { collectDiff } from "./diff.js";
 import { createRunner } from "./exec.js";
+import { protectedPathsGate } from "./gates/protected-paths.js";
 import { hiddenFromGit } from "./hidden-files.js";
 import { unfinishedWork } from "./pipeline.js";
 import { confine } from "./sandbox.js";
+import { GateContext } from "./types.js";
+import { GitPin, pinGit, recordPin } from "./worktree-pin.js";
 import { claimedTask } from "./__fixtures__/task.js";
 import { installedToolPath } from "./__fixtures__/tool-paths.js";
 
 const gitPath = installedToolPath("git");
 const IDENTITY = { name: "worker", email: "worker@example.com" };
-const runner = createRunner();
+// Pinned the way runTask pins its runner (BP-794), so every call here names the worktree's git dir
+const pins: GitPin[] = [];
+const runner = pinGit(createRunner(), () => pins);
 const confined = process.platform === "darwin";
 
 /**
@@ -91,6 +97,7 @@ describe("a git repository nested inside the worktree (BP-803)", () => {
     git(main, "commit", "--quiet", "-m", "base");
     baseSha = git(main, "rev-parse", "HEAD").trim();
     git(main, "worktree", "add", "--quiet", "-b", "task/worker", worktree, baseSha);
+    pins.splice(0, pins.length, await recordPin(createRunner(), gitPath, main, worktree));
   });
 
   afterEach(() => {
@@ -133,7 +140,7 @@ describe("a git repository nested inside the worktree (BP-803)", () => {
     it("is refused at the checkpoint before every gate", async () => {
       const found = await hiddenFromGit(runner, gitPath, worktree, baseSha);
 
-      expect(found?.kind).toBe("hidden");
+      expect(found?.kind).toBe("nested");
       expect(found?.detail).toMatch(/nested inside the worktree.*sub\/ \(untracked\)/);
     });
 
@@ -156,8 +163,6 @@ describe("a git repository nested inside the worktree (BP-803)", () => {
       // nested repository's HEAD and nothing else
       git(worktree, "add", "--all");
       expect(gitlinks()).toHaveLength(1);
-      // Something else to stage, or `status --ignore-submodules=all` reads the tree clean and `add`
-      // is never reached
       writeFileSync(join(worktree, "a.txt"), "what the edit step wrote\n");
       makeStatDirty();
     });
@@ -222,11 +227,89 @@ describe("a git repository nested inside the worktree (BP-803)", () => {
       const withSubmodule = git(main, "rev-parse", "HEAD").trim();
       const second = join(dir, "second");
       git(main, "worktree", "add", "--quiet", "-b", "task2/worker", second, withSubmodule);
+      pins.push(await recordPin(createRunner(), gitPath, main, second));
       writeFileSync(join(second, "a.txt"), "what the edit step wrote\n");
 
       const sha = await commitAll(runner, gitPath, second, "BP-803: work", IDENTITY, withSubmodule);
 
       expect(sha).toMatch(/^[0-9a-f]{40}$/);
+    });
+
+    // A change that is only a submodule pointer has to be committed, so protected-paths is what
+    // hands it to a person. `--ignore-submodules=all` read each of these as a clean tree: nothing
+    // was committed, the check after the step found nothing, and the change was dropped.
+    describe("a change that is only a submodule pointer, with the submodule left empty", () => {
+      let second: string;
+      let withSubmodule: string;
+      let bumped: string;
+
+      beforeEach(async () => {
+        const upstream = join(dir, "upstream");
+        execFileSync(gitPath, ["init", "--quiet", "-b", "main", upstream], { stdio: "pipe" });
+        for (const content of ["one\n", "two\n"]) {
+          writeFileSync(join(upstream, "lib.txt"), content);
+          git(upstream, "add", "lib.txt");
+          git(upstream, "-c", "user.name=a", "-c", "user.email=a@b", "commit", "--quiet", "-m", content.trim());
+        }
+        bumped = git(upstream, "rev-parse", "HEAD").trim();
+        git(main, "-c", "protocol.file.allow=always", "submodule", "add", "--quiet", upstream, "vendor/lib");
+        git(join(main, "vendor", "lib"), "checkout", "--quiet", "HEAD~1");
+        git(main, "add", "vendor/lib");
+        git(main, "commit", "--quiet", "-m", "vendor a submodule");
+        withSubmodule = git(main, "rev-parse", "HEAD").trim();
+        second = join(dir, "second");
+        git(main, "worktree", "add", "--quiet", "-b", "task2/worker", second, withSubmodule);
+        pins.push(await recordPin(createRunner(), gitPath, main, second));
+      });
+
+      const refusedByProtectedPaths = async () => {
+        const diff = await collectDiff(runner, gitPath, second, withSubmodule);
+        expect(diff.gitlinks).toEqual(["vendor/lib"]);
+        const verdict = await protectedPathsGate().run({ diff } as GateContext);
+        expect(verdict.ok).toBe(false);
+        expect(verdict.reason).toMatch(/submodule pointer/);
+      };
+
+      it("commits a staged bump, and protected-paths refuses it", async () => {
+        git(second, "update-index", "--cacheinfo", `160000,${bumped},vendor/lib`);
+
+        const sha = await commitAll(runner, gitPath, second, "BP-803: work", IDENTITY, withSubmodule);
+
+        expect(sha).toMatch(/^[0-9a-f]{40}$/);
+        await refusedByProtectedPaths();
+      });
+
+      it("commits a new gitlink, and protected-paths refuses it", async () => {
+        mkdirSync(join(second, "vendor", "other"));
+        git(second, "update-index", "--add", "--cacheinfo", `160000,${bumped},vendor/other`);
+
+        const sha = await commitAll(runner, gitPath, second, "BP-803: work", IDENTITY, withSubmodule);
+
+        expect(sha).toMatch(/^[0-9a-f]{40}$/);
+        const diff = await collectDiff(runner, gitPath, second, withSubmodule);
+        expect(diff.gitlinks).toEqual(["vendor/other"]);
+        expect((await protectedPathsGate().run({ diff } as GateContext)).ok).toBe(false);
+      });
+
+      // Nothing is brought in, so protected-paths has nothing to refuse; what matters is that it
+      // is committed rather than dropped
+      it.each([
+        ["a staged removal", (at: string) => git(at, "rm", "--quiet", "--cached", "vendor/lib")],
+        ["the empty directory removed", (at: string) => rmSync(join(at, "vendor", "lib"), { recursive: true })],
+      ])("commits %s", async (_what, change) => {
+        change(second);
+
+        const sha = await commitAll(runner, gitPath, second, "BP-803: work", IDENTITY, withSubmodule);
+
+        expect(sha).toMatch(/^[0-9a-f]{40}$/);
+        expect((await collectDiff(runner, gitPath, second, withSubmodule)).changedFiles).toContain("vendor/lib");
+      });
+
+      it("is reported unclean by the check after a step when it was not committed", async () => {
+        git(second, "update-index", "--cacheinfo", `160000,${bumped},vendor/lib`);
+
+        expect(await unfinishedWork(runner, gitPath, second, withSubmodule)).toMatch(/vendor\/lib/);
+      });
     });
   });
 });
