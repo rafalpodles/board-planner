@@ -15,6 +15,7 @@ import { matchRepo } from "./repo-match";
 import { getTenant } from "./tenant";
 import { can, FeatureKey } from "./entitlements";
 import { projectRunsWorkers } from "@/lib/worker-gate";
+import { EXECUTION_LEASE_MS } from "./execution-lease";
 
 type AuthenticatedHandler = (
   request: Request,
@@ -258,10 +259,13 @@ async function holdsARunIn(projectId: string, workerId: string, taskId?: string)
 const RUN_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
 /**
- * Whether this machine ran `runId` on this task. The claim stamps `execution.lastRunId`, and no exit
- * clears it, so the answer survives the final status change that unsets `execution.runId` — which is
- * what the outcome record is sent after. `execution.runId` is asked too, for a task claimed before
- * `lastRunId` existed and still held. A later claim overwrites both, so it is one record per run.
+ * Whether this machine ran `runId` on this task, recently enough to still be reporting on it. The
+ * claim stamps `execution.lastRunId`, and no exit clears it, so the answer survives the final status
+ * change that unsets `execution.runId` — which is what the outcome record is sent after. A task
+ * claimed before `lastRunId` existed carries none, and is then matched by the machine alone.
+ *
+ * Bounded by the lease, from the claim's own `startedAt`: past it the run would have been swept
+ * anyway, and a machine its project no longer serves has no standing to write history there.
  */
 async function ranThisRun(
   projectId: string,
@@ -274,7 +278,8 @@ async function ranThisRun(
       _id: taskId,
       project: projectId,
       "execution.workerId": workerId,
-      $or: [{ "execution.lastRunId": runId }, { "execution.runId": runId }],
+      "execution.startedAt": { $gte: new Date(Date.now() - EXECUTION_LEASE_MS) },
+      $or: [{ "execution.lastRunId": runId }, { "execution.lastRunId": { $exists: false } }],
     })) !== null
   );
 }
@@ -292,10 +297,14 @@ async function recordNamedBy(
   return { taskId: body.taskId, runId: body.runId };
 }
 
-const NOT_ITS_RUN = () =>
-  // 422, not 403: nothing about this record can change for the better — a later claim only moves
-  // the task further from this run — and the worker's outbox drops a 422 rather than retrying it
-  NextResponse.json({ error: "That run is not this machine's to record" }, { status: 422 });
+function notItsRun(machine: string, record: { taskId: string; runId?: string }) {
+  console.warn(
+    `runs: refused the record of run ${record.runId} on task ${record.taskId} from machine ${machine}`
+  );
+  // 422, not 403: a later claim only moves the task further from this run and the lease only runs
+  // out, so the worker's outbox drops it rather than retrying it behind every later report
+  return NextResponse.json({ error: "That run is not this machine's to record" }, { status: 422 });
+}
 
 /**
  * What a run this machine holds lets it reach when its project would otherwise refuse it.
@@ -304,8 +313,9 @@ const NOT_ITS_RUN = () =>
  *   gets nothing from a held run.
  * - `board` — the project's own read, which a run needs for its columns: reachable while this
  *   machine holds any run in the project.
- * - `runRecord` — `POST /runs`, which reaches exactly the records of runs this machine ran,
- *   assigned or not, and no others.
+ * - `runRecord` — `POST /runs`. A machine the project serves records what it always could. One it
+ *   no longer serves records only the run it ran on the record's task, within the lease, since the
+ *   record arrives after that run has released the task.
  */
 export type WorkerReach = "task" | "board" | "runRecord";
 
@@ -358,23 +368,18 @@ export function withProjectAccessOrWorker(
       if (record === "malformed") {
         return NextResponse.json({ error: "taskId and runId must be ids" }, { status: 400 });
       }
-      if (record.runId !== undefined) {
-        if (!(await ranThisRun(projectId, machine, record.taskId, record.runId))) return NOT_ITS_RUN();
-      } else {
-        // A worker from before BP-758 names no run, so nothing proves which one this is: the task it
-        // ran last, with the reach it had before, and nothing more
-        const ranItLast = await Task.exists({
-          _id: record.taskId,
-          project: projectId,
-          "execution.workerId": machine,
-        });
-        if (!ranItLast) return NOT_ITS_RUN();
-        if (!assigned && !(await holdsARunIn(projectId, machine, record.taskId))) {
-          return NextResponse.json(
-            { error: "this worker is not assigned to this project" },
-            { status: 403 }
-          );
+      // Assigned, it is not narrowed by the run: the task is requeued by a released outcome and
+      // can be claimed again before the outbox flushes, which moves lastRunId on
+      if (!assigned && record.runId !== undefined) {
+        if (!(await ranThisRun(projectId, machine, record.taskId, record.runId))) {
+          return notItsRun(machine, record);
         }
+      } else if (!assigned && !(await holdsARunIn(projectId, machine, record.taskId))) {
+        // A worker from before BP-758 names no run: only the task it still holds
+        return NextResponse.json(
+          { error: "this worker is not assigned to this project" },
+          { status: 403 }
+        );
       }
     } else if (!assigned) {
       const heldTaskId = params.taskId ? await resolveTaskId(projectId, params.taskId) : null;

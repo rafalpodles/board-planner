@@ -617,20 +617,6 @@ describe("releaseTask", () => {
     expect(setStage(update)["execution.attempts"]).toEqual({ $add: ["$execution.attempts", -1] });
   });
 
-  it.each([undefined, { refund: false }])(
-    "clears the run but not the id its record is matched by (%o)",
-    async (options) => {
-      findOneAndUpdate.mockResolvedValue({ _id: "t1", taskNumber: 1 });
-
-      await releaseTask("p1", "t1", options);
-
-      const update = findOneAndUpdate.mock.calls[0][1] as Array<Record<string, unknown>>;
-      const unset = update.find((stage) => "$unset" in stage)?.$unset as string[];
-      expect(unset).toContain("execution.runId");
-      expect(unset).not.toContain("execution.lastRunId");
-    }
-  );
-
   it("never drives attempts below zero", async () => {
     findOneAndUpdate.mockResolvedValue(null);
 
@@ -1111,6 +1097,14 @@ describe("clearing the phase on every exit from the active column", () => {
     await changeStatus("p1", "t1", "checking", "actor");
 
     expect(unsetKeys(findOneAndUpdate.mock.calls[0][1])).toEqual(RUN_KEYS);
+  });
+
+  // BP-758: this is the write the worker's outcome record is sent after, and lastRunId is what the
+  // record is then matched by
+  it("keeps the id the run's record is matched by", async () => {
+    await changeStatus("p1", "t1", "checking", "actor");
+
+    expect(unsetKeys(findOneAndUpdate.mock.calls[0][1])).not.toContain("execution.lastRunId");
   });
 
   it("clears it when the edit form PUTs a new status", async () => {

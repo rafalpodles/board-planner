@@ -58,8 +58,13 @@ export const POST = withProjectAccessOrWorker(async (request, { params, workerId
     if (usable) agentId = body.agentId;
   }
 
-  const startedAt = new Date(body.startedAt ?? Date.now());
-  const finishedAt = new Date(body.finishedAt ?? Date.now());
+  // Never later than now: the newest record is the one the next claim reads its rejection reason
+  // from, so a record dated in the future would speak for every run after it
+  const now = new Date();
+  const notAfterNow = (value: unknown) => {
+    const date = new Date((value as string | number | undefined) ?? now);
+    return Number.isNaN(date.valueOf()) || date > now ? now : date;
+  };
 
   // The reason a gate gave carries build output and model prose, and this is a durable sink; it
   // gets the same length bound the board path already applies.
@@ -72,11 +77,11 @@ export const POST = withProjectAccessOrWorker(async (request, { params, workerId
   // (found in review). The worker still sends the field and it is still the same id; it is simply
   // not the source any more.
   const workerId = caller && Types.ObjectId.isValid(caller) ? caller : null;
-  // Only a machine's, and only once the middleware has matched it to a run that machine ran on
-  // this task. A person's record carries none, so nobody can take a run's id before its worker does.
-  const runId = caller && typeof body.runId === "string" ? body.runId : undefined;
+  // A machine's only; a person's record carries none. Keyed with the machine too, so one machine
+  // naming another's run cannot take the place of that machine's own record.
+  const runId = workerId && typeof body.runId === "string" ? body.runId : undefined;
   const recorded = () =>
-    AgentRun.findOne({ task: body.taskId, runId }).lean<IAgentRun>();
+    AgentRun.findOne({ task: body.taskId, runId, worker: workerId }).lean<IAgentRun>();
 
   if (runId) {
     const existing = await recorded();
@@ -94,8 +99,8 @@ export const POST = withProjectAccessOrWorker(async (request, { params, workerId
     outcome,
     refusedBy: typeof body.refusedBy === "string" ? body.refusedBy.slice(0, MAX_DETAIL) : "",
     detail,
-    startedAt: Number.isNaN(startedAt.valueOf()) ? new Date() : startedAt,
-    finishedAt: Number.isNaN(finishedAt.valueOf()) ? new Date() : finishedAt,
+    startedAt: notAfterNow(body.startedAt),
+    finishedAt: notAfterNow(body.finishedAt),
     costUsd: typeof body.costUsd === "number" && body.costUsd >= 0 ? body.costUsd : 0,
   };
 

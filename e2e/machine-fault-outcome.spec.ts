@@ -59,12 +59,10 @@ function workerHeaders() {
   };
 }
 
-// The seed's held task is mid-run as e2e-run-0001. The sibling is given a run of its own that has
-// ended, since a record is accepted only for a run this machine ran on that task (BP-758).
-const RUN_OF = new Map([
-  [String(HELD_TASK_ID), "e2e-run-0001"],
-  [String(SIBLING_TASK_ID), "e2e-run-sibling"],
-]);
+// This machine serves the project only by the run it holds, so since BP-758 a record for a task it
+// no longer holds must name the run. The held task's records keep the shape a worker from before
+// BP-758 sends — no run id — which is what deploy day hears from every machine not yet upgraded.
+const RUN_OF = new Map([[String(SIBLING_TASK_ID), "e2e-run-sibling"]]);
 
 function postRun(
   request: import("@playwright/test").APIRequestContext,
@@ -94,7 +92,13 @@ test.beforeEach(async () => {
   await giveWorkerAnIdentity(WORKER_ID, "worker-machine-fault");
   await (await db()).collection("tasks").updateOne(
     { _id: SIBLING_TASK_ID },
-    { $set: { "execution.workerId": String(WORKER_ID), "execution.lastRunId": "e2e-run-sibling" } }
+    {
+      $set: {
+        "execution.workerId": String(WORKER_ID),
+        "execution.lastRunId": "e2e-run-sibling",
+        "execution.startedAt": new Date(Date.now() - 10 * 60_000),
+      },
+    }
   );
 });
 

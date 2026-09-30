@@ -55,6 +55,7 @@ import type { NormalisedRecurrence } from "@/lib/recurrence";
 import { onTaskStatusChanged } from "@/lib/pm/triggers";
 import { canBeAssigned } from "@/lib/grants";
 import { workerUsername } from "@/lib/worker-user";
+import { EXECUTION_LEASE_MS } from "@/lib/execution-lease";
 import { pmUserId } from "@/lib/pm/pm-user";
 import { supersedableStates } from "@/lib/task-decisions";
 
@@ -124,9 +125,7 @@ export const CLEAR_WORKER_ASSIGNEE = {
 // spend an attempt for a move somebody made deliberately.
 const STILL_HELD = { "execution.runId": { $nin: ["", null] } };
 
-// Four times the worker's default task timeout. A worker killed mid-run leaves its task in the
-// active column, where claimNextTask can never see it again — nothing else reclaims it.
-export const EXECUTION_LEASE_MS = 2 * 60 * 60 * 1000;
+export { EXECUTION_LEASE_MS };
 
 // Named rather than inlined so the board, both forms, MCP and the PM agent all refuse in the same
 // words — the message is the only thing telling an agent that the account exists and the access

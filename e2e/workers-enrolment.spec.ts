@@ -167,31 +167,16 @@ function fleetRow(page: Page, name: string) {
   return page.getByRole("row").filter({ hasText: name }).first();
 }
 
-/**
- * What a claim of the seeded task by this machine leaves once the run has ended: the machine and
- * the run's id, which is all a run record is matched by since BP-758.
- */
-async function machineRanTheHeldTask(machine: Machine): Promise<string> {
-  const runId = `e2e-run-${new mongoose.Types.ObjectId()}`;
-  await (await db()).collection("tasks").updateOne(
-    { _id: HELD_TASK_ID },
-    { $set: { "execution.workerId": machine.workerId, "execution.lastRunId": runId } }
-  );
-  return runId;
-}
-
 /** A finished run, filed by the machine that ran it — the only writer of this record in production. */
 async function machineRecordsRun(
   request: APIRequestContext,
   machine: Machine,
   run: { outcome: string; refusedBy?: string; detail?: string }
 ) {
-  const runId = await machineRanTheHeldTask(machine);
   const response = await request.post(`/api/projects/${PROJECT_KEY}/runs`, {
     headers: { ...SAME_ORIGIN, ...asMachine(machine) },
     data: {
       taskId: String(HELD_TASK_ID),
-      runId,
       taskKey: HELD_TASK_KEY,
       workerId: machine.workerId,
       agentName: "Default",
@@ -582,12 +567,10 @@ test("a run refused for too large a diff is reported by the machine and read by 
   // machine that says where: it reports its checkouts and the server matches their remotes.
   await machineReportsCheckouts(request, machine, [{ remote: REPOSITORY, path: CHECKOUT }]);
 
-  const runId = await machineRanTheHeldTask(machine);
   const reported = await request.post(`/api/projects/${PROJECT_KEY}/runs`, {
     headers: { ...SAME_ORIGIN, ...asMachine(machine) },
     data: {
       taskId: String(HELD_TASK_ID),
-      runId,
       taskKey: HELD_TASK_KEY,
       workerId: machine.workerId,
       agentName: "Default",

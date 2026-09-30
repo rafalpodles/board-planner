@@ -239,3 +239,97 @@ for (const [what, lock] of [
     expect(own.status(), await own.text()).toBe(201);
   });
 }
+
+// BP-758 review. A released outcome requeues the task, and it can be claimed again — here by
+// another machine — before the first machine's outbox sends the record. A machine the project still
+// serves is not narrowed by the run, so that record is kept rather than refused for good.
+test("a machine the project serves records a run whose task was already claimed again", async ({
+  request,
+}) => {
+  const repository = "https://github.com/e2e/run-record";
+  const handle = await db();
+  await handle.collection("projects").updateOne({ _id: PROJECT_ID }, { $set: { repositoryUrl: repository } });
+  await handle.collection("workers").updateOne(
+    { _id: WORKER_ID },
+    { $set: { owner: ADMIN_ID, repos: [{ remote: `${repository}.git`, path: "/Users/someone/run-record" }] } }
+  );
+
+  const released = await request.post(`/api/projects/${PROJECT_ID}/tasks/${taskId}/release`, {
+    headers: asWorker(),
+  });
+  expect(released.status(), await released.text()).toBe(200);
+  const nextRun = randomUUID();
+  const reclaimed = await claimNextTask(
+    String(PROJECT_ID),
+    String(new mongoose.Types.ObjectId()),
+    nextRun,
+    String(ADMIN_ID)
+  );
+  expect(String(reclaimed?._id)).toBe(String(taskId));
+
+  const sent = await postRecord(request, { ...recordOf(taskId, runId), outcome: "released" });
+  expect(sent.status(), await sent.text()).toBe(201);
+  const resent = await postRecord(request, { ...recordOf(taskId, runId), outcome: "released" });
+  expect(resent.status(), await resent.text()).toBe(200);
+  expect(await recordsOf(runId)).toHaveLength(1);
+});
+
+// Claimed on a server from before BP-758, which wrote no lastRunId, and finished on this one
+test("a run claimed before the upgrade still records its outcome after it ends", async ({ request }) => {
+  await (await db()).collection("tasks").updateOne({ _id: taskId }, { $unset: { "execution.lastRunId": "" } });
+  await setBoardReadiness({ lockedByInstance: true });
+
+  const moved = await request.patch(`/api/projects/${PROJECT_ID}/tasks/${taskId}/status`, {
+    headers: asWorker(),
+    data: { status: TARGET_COLUMN.id },
+  });
+  expect(moved.status(), await moved.text()).toBe(200);
+
+  const sent = await postRecord(request, recordOf(taskId, runId));
+  expect(sent.status(), await sent.text()).toBe(201);
+});
+
+test("the way in for a record ends with the run's lease", async ({ request }) => {
+  await setBoardReadiness({ lockedByInstance: true });
+  const handle = await db();
+  await handle.collection("tasks").updateOne(
+    { _id: taskId },
+    {
+      $unset: { "execution.runId": "" },
+      $set: { status: TARGET_COLUMN.id, "execution.startedAt": new Date(Date.now() - 2 * 60 * 60 * 1000 - 60_000) },
+    }
+  );
+
+  const late = await postRecord(request, recordOf(taskId, runId));
+  expect(late.status(), await late.text()).toBe(422);
+
+  // The control: the same record, inside the lease
+  await handle.collection("tasks").updateOne(
+    { _id: taskId },
+    { $set: { "execution.startedAt": new Date(Date.now() - 60 * 60 * 1000) } }
+  );
+  const inTime = await postRecord(request, recordOf(taskId, runId));
+  expect(inTime.status(), await inTime.text()).toBe(201);
+});
+
+// The run reads the board's columns from the project itself (worker/src/api.ts readColumns)
+test("a run on a locked project still reads the board, and the read ends with the run", async ({
+  request,
+}) => {
+  await setBoardReadiness({ lockedByInstance: true });
+
+  const during = await request.get(`/api/projects/${PROJECT_ID}`, { headers: asWorker() });
+  expect(during.status(), await during.text()).toBe(200);
+  expect(((await during.json()).columns as Array<{ id: string }>).map((c) => c.id)).toContain(
+    TARGET_COLUMN.id
+  );
+
+  const moved = await request.patch(`/api/projects/${PROJECT_ID}/tasks/${taskId}/status`, {
+    headers: asWorker(),
+    data: { status: TARGET_COLUMN.id },
+  });
+  expect(moved.status(), await moved.text()).toBe(200);
+
+  const after = await request.get(`/api/projects/${PROJECT_ID}`, { headers: asWorker() });
+  expect(after.status()).toBe(403);
+});

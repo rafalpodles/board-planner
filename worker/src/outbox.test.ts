@@ -164,9 +164,8 @@ describe("createOutbox", () => {
     expect(await outbox.flush(api)).toEqual({ delivered: 0, pending: 1, dropped: 0 });
   });
 
-  // BP-758: a run record used to be refused 403 whenever its project stopped serving the machine
-  // before the next flush, and was retried to the limit and lost. It now proves itself by its run,
-  // so its 403 is the pause kind and its final refusal is a 422.
+  // BP-758 changed no rule here. These pin the two answers the board now gives a run record, a 403
+  // for a pause and a 422 for a run that is not this machine's, against the rule that handles them.
   describe("a run record", () => {
     const record = {
       taskId: "t1",
@@ -182,7 +181,7 @@ describe("createOutbox", () => {
       costUsd: 0.5,
     };
 
-    it("is kept through a 403, which a paused machine gets", async () => {
+    it("keeps it through a 403, which a paused machine gets (characterises the existing rule)", async () => {
       const outbox = createOutbox(memoryStore(), vi.fn());
       outbox.add({ kind: "run", projectId: "CP", record });
       const api = apiSpy({
@@ -192,7 +191,7 @@ describe("createOutbox", () => {
       expect(await outbox.flush(api)).toEqual({ delivered: 0, pending: 1, dropped: 0 });
     });
 
-    it("is dropped on the 422 that says it is not this machine's run, and holds nothing up", async () => {
+    it("drops it on the 422 the board now answers for another machine's run, holding nothing up (characterises the existing rule)", async () => {
       const outbox = createOutbox(memoryStore(), vi.fn());
       outbox.add({ kind: "run", projectId: "CP", record });
       outbox.add({ kind: "comment", projectId: "CP", taskId: "t2", body: "next" });
@@ -208,7 +207,7 @@ describe("createOutbox", () => {
       expect(api.comment).toHaveBeenCalledWith("CP", "t2", "next");
     });
 
-    it("is sent with the run it names", async () => {
+    it("sends it with the run it names", async () => {
       const outbox = createOutbox(memoryStore(), vi.fn());
       outbox.add({ kind: "run", projectId: "CP", record });
       const postRun = vi.fn<ApiClient["postRun"]>().mockResolvedValue(undefined);

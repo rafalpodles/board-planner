@@ -139,7 +139,8 @@ describe("POST .../runs keeps one record per run", () => {
     const res = await post({ runId: RUN_ID });
 
     expect(res.status).toBe(200);
-    expect(findOne).toHaveBeenCalledWith({ task: TASK_ID, runId: RUN_ID });
+    // The machine is part of the key: one naming another's run must not stand in for its record
+    expect(findOne).toHaveBeenCalledWith({ task: TASK_ID, runId: RUN_ID, worker: WORKER_ID });
     expect(create).not.toHaveBeenCalled();
   });
 
@@ -169,5 +170,33 @@ describe("POST .../runs keeps one record per run", () => {
 
     expect(stored().runId).toBeUndefined();
     expect(findOne).not.toHaveBeenCalled();
+  });
+});
+
+// BP-758 review: the newest record is what the next claim reads the previous rejection from, and
+// every date on it came from the body
+describe("POST .../runs dates a record no later than now", () => {
+  it("brings a finish in the future back to now", async () => {
+    const before = Date.now();
+
+    await post({ startedAt: "2099-01-01T00:00:00.000Z", finishedAt: "2099-01-01T01:00:00.000Z" });
+
+    expect(stored().finishedAt.valueOf()).toBeGreaterThanOrEqual(before);
+    expect(stored().finishedAt.valueOf()).toBeLessThanOrEqual(Date.now());
+    expect(stored().startedAt.valueOf()).toBeLessThanOrEqual(Date.now());
+  });
+
+  it("keeps a date in the past as it was sent", async () => {
+    await post({ startedAt: "2026-09-01T10:00:00.000Z", finishedAt: "2026-09-01T10:05:00.000Z" });
+
+    expect(stored().startedAt.toISOString()).toBe("2026-09-01T10:00:00.000Z");
+    expect(stored().finishedAt.toISOString()).toBe("2026-09-01T10:05:00.000Z");
+  });
+
+  it("dates a record that sends no dates, or nonsense, now", async () => {
+    await post({ finishedAt: "not a date" });
+
+    expect(Number.isNaN(stored().finishedAt.valueOf())).toBe(false);
+    expect(Number.isNaN(stored().startedAt.valueOf())).toBe(false);
   });
 });
