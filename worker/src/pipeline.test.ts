@@ -731,7 +731,7 @@ describe("runTask", () => {
       const inner = defaultRunner();
       return {
         run: vi.fn<Runner["run"]>(async (command, args, opts) => {
-          if (args.includes("ls-files")) return shell(plantedYet() ? "evil.test.ts\0" : "");
+          if (args.includes("--ignored")) return shell(plantedYet() ? "evil.test.ts\0" : "");
           if (args.includes("check-ignore") && args.includes("--verbose")) return shell(EXCLUDE_RULE);
           if (args.includes("check-ignore")) return shell("", { code: 1 });
           return inner.run(command, args, opts);
@@ -763,6 +763,26 @@ describe("runTask", () => {
         /refusing to run the test-run gate: .*evil\.test\.ts \(\/main\/\.git\/info\/exclude:7: "evil\.test\.ts"\)/,
       );
       expect(h.workspace.destroy).not.toHaveBeenCalled();
+    });
+
+    it("names a nested repository as what it found, not hidden files (BP-803)", async () => {
+      const inner = defaultRunner();
+      const runner = {
+        run: vi.fn<Runner["run"]>(async (command, args, opts) =>
+          args.includes("ls-files")
+            ? shell(args.includes("--others") && !args.includes("--ignored") ? "sub/\0" : "")
+            : inner.run(command, args, opts),
+        ),
+      };
+      const gate = passingGate("diff-size");
+      const h = harness({ runner, gateFor: () => gate });
+
+      await runTask(h.deps, running("diff-size"));
+
+      expect(gate.run).not.toHaveBeenCalled();
+      const message = h.reporter.failed.mock.calls[0][1];
+      expect(message).toMatch(/^refusing to run the diff-size gate: a git repository nested inside the worktree.*sub\/ \(untracked\)/);
+      expect(message).toMatch(/with the nested repository still in it\.$/);
     });
 
     it("refuses to run a gate when git will not say what is hidden", async () => {
@@ -878,7 +898,7 @@ describe("runTask", () => {
 
     expect(runner.run).toHaveBeenCalledWith(
       GIT_PATH,
-      gitArgs(["status", "--porcelain"]),
+      gitArgs(["status", "--porcelain", "--ignore-submodules=dirty"]),
       expect.objectContaining({
         cwd: "/wt",
         env: expect.objectContaining({ GIT_CONFIG_NOSYSTEM: "1" }),

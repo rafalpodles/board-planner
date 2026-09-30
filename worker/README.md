@@ -503,6 +503,21 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   checkout's own flags are recorded at creation and pass. A worktree refused this way cannot be
   removed by `git worktree remove` until its `.git` file is put back.
 
+  **A nested repository fails the run.** git checks a submodule for changes by running itself
+  inside it, under that repository's own config — so a clean filter in a `.git/config` the Test
+  gate's code left in the worktree used to run outside the sandbox on the worker's next `git status`
+  or `git add`. At the same checkpoints as the ignore check, and before a push or a pull request,
+  the worker now refuses an untracked repository anywhere outside an ignored directory, and a
+  submodule path that has a `.git` in it. **Running `git submodule update --init` fails the run**,
+  from a gate or from an Implement step — the step's commit refuses it as a tampered checkout — and
+  so does **a test suite that leaves scratch git repositories in a directory the repository does
+  not ignore**. A repository's submodules are otherwise untouched, since a worktree leaves them
+  empty, and a change to a submodule pointer is still committed and refused by protected-paths.
+  Delivery also pins `push.recurseSubmodules=no` and `fetch.recurseSubmodules=false` (BP-803).
+  **A process a gate leaves running can still win the race**: it can populate a `.git` between the
+  check and the `git add` or `gh`'s own `git status` that follows — one win is enough where the base
+  already has a submodule — and only killing what a gate leaves behind (BP-796) closes that.
+
   **Nothing this worker commits is signed.** `commit.gpgSign=false` and `push.gpgSign=false` ride on
   every call, because signing runs a program the checkout names (`gpg.program`, or ssh's key
   command) and that is the sink the scan exists to guard. A repository whose branch protection

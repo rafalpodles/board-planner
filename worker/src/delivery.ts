@@ -3,6 +3,7 @@ import { isGitRefName } from "./config.js";
 import { childEnv } from "./env.js";
 import { CommandResult, Runner } from "./exec.js";
 import { GIT_SAFE_ENV, refuseOptionShapedPositionals, NO_GLOBAL_CONFIG, requireGitPath } from "./git-safety.js";
+import { nestedRepositories } from "./hidden-files.js";
 import { plantedConfig } from "./repos.js";
 import { ClaimedTask, PassedCheck } from "./types.js";
 import { scrub } from "./scrub.js";
@@ -161,6 +162,10 @@ function hardenedConfig(ghPath: string): ReadonlyArray<readonly [string, string]
     // is here because the commit path has both and the push had only the scan.
     ["commit.gpgSign", "false"],
     ["push.gpgSign", "false"],
+    // A push or fetch that recurses into a submodule runs git inside it, under that repository's
+    // own config — both measured on git 2.54.0, and both outrank `submodule.recurse` (BP-803).
+    ["push.recurseSubmodules", "no"],
+    ["fetch.recurseSubmodules", "false"],
   ];
 }
 
@@ -271,6 +276,14 @@ export function createDelivery(
     }
   }
 
+  // After the last gate nothing else asks: a Test gate runs the agent's code and can leave a nested
+  // repository behind, and `gh pr create` counts uncommitted changes with a `git status` of its own
+  // inside the worktree (BP-803).
+  async function refuseIfNested(worktreePath: string, what: string): Promise<void> {
+    const nested = await nestedRepositories(runner, gitPath, worktreePath);
+    if (nested) throw new Error(`refusing to ${what}: ${nested.detail}`);
+  }
+
   async function mergeState(
     worktreePath: string,
     prUrl: string,
@@ -325,6 +338,7 @@ export function createDelivery(
       // branch the operator does not get — and the worktree this run keeps on failure is exactly
       // where somebody would type `git push` and find out.
       await refuseIfPlanted(worktreePath);
+      await refuseIfNested(worktreePath, "push");
       const result = await run(
         requireGitPath(gitPath),
         refuseOptionShapedPositionals([
@@ -342,8 +356,10 @@ export function createDelivery(
     },
 
     async openPr(worktreePath, task, summary, checks = []) {
+      const gh = requireToolPath("gh", ghPath);
+      await refuseIfNested(worktreePath, "open a pull request");
       const result = await run(
-        requireToolPath("gh", ghPath),
+        gh,
         [
           "pr",
           "create",

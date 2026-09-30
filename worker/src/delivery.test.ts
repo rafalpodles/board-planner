@@ -40,12 +40,12 @@ function fakeCli(responses: Record<string, Partial<CommandResult>>) {
   return { runner: { run }, run };
 }
 
-// push begins with a `git config --list -z --show-scope --no-includes` pre-flight (refuseIfPlanted), which runs
-// through git-safety rather than delivery's own hardening and is not the call any of these
-// assertions is about.
+// push begins with a `git config --list -z --show-scope --no-includes` pre-flight (refuseIfPlanted),
+// and push and openPr with the nested-repository listings (BP-803), which run through git-safety
+// rather than delivery's own hardening and are not the calls any of these assertions is about.
 function deliveryCalls(run: ReturnType<typeof vi.fn>): unknown[][] {
   return run.mock.calls.filter(
-    ([, args]) => !/^config (--local|--list)/.test(withoutConfigFlags(args as string[]).join(" "))
+    ([, args]) => !/^(config (--local|--list)|ls-files )/.test(withoutConfigFlags(args as string[]).join(" "))
   );
 }
 
@@ -182,6 +182,18 @@ describe("push", () => {
     ["protocol.ext.allow", "never"],
     ["protocol.file.allow", "never"],
   ])("refuses the %s transport, whichever way the remote url was rewritten", async (key, value) => {
+    const run = vi.fn().mockResolvedValue(ok);
+    await createDelivery({ run }, gitPath, ghPath).push("/wt", "cp-158/worker", COMMIT);
+
+    expect(configuredBy(envOf(run))).toContainEqual([key, value]);
+  });
+
+  // BP-803: either one set by the checkout runs git inside a submodule, under that repository's
+  // own config — measured on git 2.54.0 for a push and a fetch
+  it.each([
+    ["push.recurseSubmodules", "no"],
+    ["fetch.recurseSubmodules", "false"],
+  ])("pins %s, which would otherwise run git inside a submodule", async (key, value) => {
     const run = vi.fn().mockResolvedValue(ok);
     await createDelivery({ run }, gitPath, ghPath).push("/wt", "cp-158/worker", COMMIT);
 
@@ -568,7 +580,7 @@ describe("the gh that carries the token", () => {
     await delivery.openPr("/wt", task, "summary");
     await delivery.merge("/wt", "https://github.com/x/y/pull/9");
 
-    const spawned = run.mock.calls.map(([command, args, opts]) => ({
+    const spawned = deliveryCalls(run).map(([command, args, opts]) => ({
       command,
       subcommand: (args as string[]).slice(0, 2).join(" "),
       token: (opts as RunOpts).env?.GH_TOKEN,

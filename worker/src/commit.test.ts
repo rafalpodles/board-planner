@@ -30,9 +30,10 @@ function callWith(run: ReturnType<typeof vi.fn>, subcommand: string): string[] {
   return call[1] as string[];
 }
 
-// And then the hidden-file listing (BP-640), which finds nothing ignored in these cases
+// And then the hidden-file listing: the index and the untracked listing, which find no nested
+// repository (BP-803), and the ignored listing, which finds nothing ignored (BP-640)
 function runnerReturning(...results: Result[]) {
-  return runnerFor(readableConfig, noPlantedConfig, nothingIgnored, ...results);
+  return runnerFor(readableConfig, noPlantedConfig, ...nothingNested, nothingIgnored, ...results);
 }
 
 const clean = { code: 0, stdout: "" };
@@ -45,6 +46,7 @@ const readableConfig = { code: 0, stdout: "core.bare=false\n" };
 const noPlantedConfig = { code: 0, stdout: local("core.bare=false", "filter.lfs.required=true") };
 const dirty = { code: 0, stdout: " M src/a.ts\n" };
 const nothingIgnored = { code: 0, stdout: "" };
+const nothingNested = [{ code: 0, stdout: "100644 e69de29bb2d1d6434b8b29ae775ad8c2e48c5391 0\tsrc/a.ts\0" }, { code: 0, stdout: "" }];
 
 // Required since BP-516: `~/.gitconfig` is out of the picture on these calls, so the only identity
 // a commit can carry is the one the run resolved before the agent started.
@@ -54,8 +56,8 @@ describe("commitAll", () => {
   it("does nothing when the agent left the tree clean", async () => {
     const { runner, run } = runnerReturning(clean);
     await commitAll(runner, gitPath, "/wt", "BP-1: something", IDENTITY, "base1");
-    // The two scan calls, the hidden-file listing and `status`, and nothing after it
-    expect(run).toHaveBeenCalledTimes(4);
+    // The two scan calls, the three listings and `status`, and nothing after it
+    expect(run).toHaveBeenCalledTimes(6);
   });
 
   it("stages everything and commits when there is something to commit", async () => {
@@ -108,6 +110,7 @@ describe("commitAll", () => {
     const { runner, run } = runnerFor(
       readableConfig,
       noPlantedConfig,
+      ...nothingNested,
       { code: 0, stdout: "evil.test.ts\0" },
       // ls-tree: the base has no .gitignore above it; core.ignoreCase unset; init; the base's
       // check-ignore: not ignored
