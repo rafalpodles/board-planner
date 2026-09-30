@@ -59,6 +59,13 @@ function workerHeaders() {
   };
 }
 
+// The seed's held task is mid-run as e2e-run-0001. The sibling is given a run of its own that has
+// ended, since a record is accepted only for a run this machine ran on that task (BP-758).
+const RUN_OF = new Map([
+  [String(HELD_TASK_ID), "e2e-run-0001"],
+  [String(SIBLING_TASK_ID), "e2e-run-sibling"],
+]);
+
 function postRun(
   request: import("@playwright/test").APIRequestContext,
   outcome: string,
@@ -70,6 +77,7 @@ function postRun(
     headers: workerHeaders(),
     data: {
       taskId: String(taskId),
+      runId: RUN_OF.get(String(taskId)),
       taskKey,
       outcome,
       detail,
@@ -84,6 +92,10 @@ function postRun(
 test.beforeEach(async () => {
   await seed();
   await giveWorkerAnIdentity(WORKER_ID, "worker-machine-fault");
+  await (await db()).collection("tasks").updateOne(
+    { _id: SIBLING_TASK_ID },
+    { $set: { "execution.workerId": String(WORKER_ID), "execution.lastRunId": "e2e-run-sibling" } }
+  );
 });
 
 // The worker's own vocabulary maps machineFault onto this word (worker/src/run-record.ts), so a

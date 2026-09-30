@@ -570,6 +570,18 @@ describe("claimNextTask", () => {
     });
   });
 
+  // BP-758: the run's outcome record arrives after its final status has unset runId, and is matched
+  // to this machine's run by this copy, which nothing but the next claim overwrites
+  it("keeps the run's id where the end of the run does not clear it", async () => {
+    findOneAndUpdate.mockResolvedValue({ _id: "t1", taskNumber: 1 });
+
+    await claimNextTask("p1", "worker-a", "run-1", OWNER);
+
+    expect(claimSet(findOneAndUpdate.mock.calls[0])["execution.lastRunId"]).toEqual({
+      $literal: "run-1",
+    });
+  });
+
   // Each run counts its phases from one, so a phaseSeq left behind by an earlier run would make
   // the ordering guard swallow the first events of this one
   it("drops any phase an earlier run left on the task", async () => {
@@ -604,6 +616,20 @@ describe("releaseTask", () => {
     expect(setStage(update).status).toBe("ready");
     expect(setStage(update)["execution.attempts"]).toEqual({ $add: ["$execution.attempts", -1] });
   });
+
+  it.each([undefined, { refund: false }])(
+    "clears the run but not the id its record is matched by (%o)",
+    async (options) => {
+      findOneAndUpdate.mockResolvedValue({ _id: "t1", taskNumber: 1 });
+
+      await releaseTask("p1", "t1", options);
+
+      const update = findOneAndUpdate.mock.calls[0][1] as Array<Record<string, unknown>>;
+      const unset = update.find((stage) => "$unset" in stage)?.$unset as string[];
+      expect(unset).toContain("execution.runId");
+      expect(unset).not.toContain("execution.lastRunId");
+    }
+  );
 
   it("never drives attempts below zero", async () => {
     findOneAndUpdate.mockResolvedValue(null);

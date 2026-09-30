@@ -21,7 +21,8 @@ vi.mock("@/models/project", () => ({
 }));
 vi.mock("@/models/user", () => ({ User: { findById: userFindById } }));
 const taskExists = vi.fn();
-vi.mock("@/models/task", () => ({ Task: { findOne: vi.fn(), exists: taskExists } }));
+const taskFindOne = vi.fn();
+vi.mock("@/models/task", () => ({ Task: { findOne: taskFindOne, exists: taskExists } }));
 
 const { withProjectAccessOrWorker } = await import("./middleware");
 
@@ -244,12 +245,22 @@ describe("the grant is re-derived on every call", () => {
    * before BP-358 has none, so on the day this deploys every in-flight run would 403.
    */
   describe("a run this machine is already holding", () => {
+    const HELD = "69a52e3b399b27d3cbb2c5d1";
+    const OTHER = "69a52e3b399b27d3cbb2c5d2";
+    const taskContext = (taskId?: string) => ({
+      params: Promise.resolve({ projectId: PROJECT_ID, ...(taskId ? { taskId } : {}) }),
+    });
+    const holdsOnly = (held: string) =>
+      taskExists.mockImplementation(async (query: { _id?: string }) =>
+        query._id === undefined || query._id === held ? { _id: held } : null
+      );
+
     it("reports through even though its owner reaches nothing", async () => {
       verifyWorkerCredential.mockResolvedValue(workerDoc({ owner: null }));
-      taskExists.mockResolvedValue({ _id: "t1" });
+      holdsOnly(HELD);
       const handler = vi.fn().mockResolvedValue(new Response("ok"));
 
-      const res = await withProjectAccessOrWorker(handler)(workerRequest(), context());
+      const res = await withProjectAccessOrWorker(handler)(workerRequest(), taskContext(HELD));
 
       expect(res.status).toBe(200);
       expect(handler).toHaveBeenCalled();
@@ -257,24 +268,27 @@ describe("the grant is re-derived on every call", () => {
 
     it("reports through when the grant was revoked mid-run", async () => {
       accessibleProjectIds.mockResolvedValue(["some-other-project"]);
-      taskExists.mockResolvedValue({ _id: "t1" });
+      holdsOnly(HELD);
       const handler = vi.fn().mockResolvedValue(new Response("ok"));
 
-      expect((await withProjectAccessOrWorker(handler)(workerRequest(), context())).status).toBe(200);
+      expect(
+        (await withProjectAccessOrWorker(handler)(workerRequest(), taskContext(HELD))).status
+      ).toBe(200);
     });
 
     // runId, not workerId: workerId is left behind as history when a run ends, so keying on it
     // would let a finished task grant its worker access to the project for good
-    it("asks for a live run, in this project, held by this worker", async () => {
+    it("asks for a live run of this very task, in this project, held by this worker", async () => {
       verifyWorkerCredential.mockResolvedValue(workerDoc({ owner: null }));
-      taskExists.mockResolvedValue({ _id: "t1" });
+      holdsOnly(HELD);
 
       await withProjectAccessOrWorker(vi.fn().mockResolvedValue(new Response("ok")))(
         workerRequest(),
-        context()
+        taskContext(HELD)
       );
 
       expect(taskExists).toHaveBeenCalledWith({
+        _id: HELD,
         project: PROJECT_ID,
         "execution.workerId": "w1",
         "execution.runId": { $nin: ["", null] },
@@ -282,12 +296,55 @@ describe("the grant is re-derived on every call", () => {
     });
 
     // BP-736: a lock landing mid-run lets that run finish and report, and nothing else
-    describe("when an instance admin has locked the project", () => {
-      const HELD = "69a52e3b399b27d3cbb2c5d1";
-      const OTHER = "69a52e3b399b27d3cbb2c5d2";
-      const lockedContext = (taskId?: string) => ({
-        params: Promise.resolve({ projectId: PROJECT_ID, ...(taskId ? { taskId } : {}) }),
+    // BP-758: the same narrowing without a lock. A grant revoked mid-run, or a project whose
+    // workers were switched off, used to leave the machine every task on the board.
+    describe("when the project merely stopped serving this machine", () => {
+      beforeEach(() => {
+        accessibleProjectIds.mockResolvedValue(["some-other-project"]);
+        holdsOnly(HELD);
       });
+
+      it("refuses a route about any other task on the project", async () => {
+        const handler = vi.fn();
+
+        const res = await withProjectAccessOrWorker(handler)(workerRequest(), taskContext(OTHER));
+
+        expect(res.status).toBe(403);
+        expect(handler).not.toHaveBeenCalled();
+      });
+
+      it("refuses a task route whose number matches nothing", async () => {
+        const handler = vi.fn();
+
+        taskFindOne.mockReturnValue({ select: async () => null });
+
+        const res = await withProjectAccessOrWorker(handler)(workerRequest(), taskContext("999"));
+
+        expect(res.status).toBe(403);
+        expect(handler).not.toHaveBeenCalled();
+      });
+
+      it("gives a route naming no task nothing at all", async () => {
+        const handler = vi.fn();
+
+        expect((await withProjectAccessOrWorker(handler)(workerRequest(), taskContext())).status).toBe(403);
+        expect(handler).not.toHaveBeenCalled();
+      });
+
+      it("still lets it read the board the run reports into", async () => {
+        const handler = vi.fn().mockResolvedValue(new Response("ok"));
+
+        const res = await withProjectAccessOrWorker(handler, { reach: "board" })(
+          workerRequest(),
+          taskContext()
+        );
+
+        expect(res.status).toBe(200);
+      });
+    });
+
+    describe("when an instance admin has locked the project", () => {
+      const lockedContext = taskContext;
 
       beforeEach(() => {
         projectFindById.mockReturnValue({
@@ -296,9 +353,7 @@ describe("the grant is re-derived on every call", () => {
               Promise.resolve(projectDoc({ worker: { enabled: true, lockedByInstance: true } })),
           }),
         });
-        taskExists.mockImplementation(async (query: { _id?: string }) =>
-          query._id === undefined || query._id === HELD ? { _id: HELD } : null
-        );
+        holdsOnly(HELD);
       });
 
       it("lets the held task's own routes through", async () => {
@@ -319,10 +374,13 @@ describe("the grant is re-derived on every call", () => {
         expect(handler).not.toHaveBeenCalled();
       });
 
-      it("keeps the project-level routes the run reports its outcome on", async () => {
+      it("keeps the board read the run needs for its columns", async () => {
         const handler = vi.fn().mockResolvedValue(new Response("ok"));
 
-        expect((await withProjectAccessOrWorker(handler)(workerRequest(), lockedContext())).status).toBe(200);
+        expect(
+          (await withProjectAccessOrWorker(handler, { reach: "board" })(workerRequest(), lockedContext()))
+            .status
+        ).toBe(200);
       });
     });
 
@@ -340,11 +398,197 @@ describe("the grant is re-derived on every call", () => {
     // question and must not be softened by holding a task
     it("does not let a killed worker report either", async () => {
       verifyWorkerCredential.mockResolvedValue(workerDoc({ enabled: false }));
-      taskExists.mockResolvedValue({ _id: "t1" });
+      holdsOnly(HELD);
 
       expect(
-        (await withProjectAccessOrWorker(vi.fn())(workerRequest(), context())).status
+        (await withProjectAccessOrWorker(vi.fn())(workerRequest(), taskContext(HELD))).status
       ).toBe(403);
+    });
+  });
+
+  /**
+   * BP-758. The outcome record leaves the outbox after the run's own final status change has
+   * cleared `execution.runId`, so no held run is left to exempt it — and a project locked, switched
+   * off or ungranted mid-run lost the run's history and cost. The record proves itself instead,
+   * by the run it names, and reaches that run's task and nothing else.
+   */
+  describe("a run's outcome record", () => {
+    const OWN = "69a52e3b399b27d3cbb2c5e1";
+    const OTHER = "69a52e3b399b27d3cbb2c5e2";
+    const RUN_ID = "0f8c1e5a-7d7b-4c43-9a55-3f1f5f0f2a11";
+    const asRecord = withProjectAccessOrWorker;
+
+    function recordRequest(body: Record<string, unknown>) {
+      return new Request(`https://example.com/api/projects/${PROJECT_ID}/runs`, {
+        method: "POST",
+        headers: { authorization: "Bearer cpw_secret", "x-worker-id": "w1" },
+        body: JSON.stringify({ outcome: "merged", taskKey: "BP-1", ...body }),
+      });
+    }
+
+    // The run ended: runId is gone, lastRunId and workerId stay behind on OWN alone
+    function ranOnly(taskId: string, runId: string) {
+      taskExists.mockImplementation(
+        async (query: {
+          _id?: string;
+          "execution.workerId"?: string;
+          "execution.runId"?: unknown;
+          $or?: Array<Record<string, string>>;
+        }) => {
+          if (query._id !== taskId || query["execution.workerId"] !== "w1") return null;
+          if (query["execution.runId"] !== undefined) return null;
+          if (query.$or && !query.$or.some((clause) => clause["execution.lastRunId"] === runId)) {
+            return null;
+          }
+          return { _id: taskId };
+        }
+      );
+    }
+
+    function locked() {
+      projectFindById.mockReturnValue({
+        select: () => ({
+          lean: () =>
+            Promise.resolve(projectDoc({ worker: { enabled: true, lockedByInstance: true } })),
+        }),
+      });
+    }
+
+    it("goes through for the run this machine ran, after it ended, on a locked project", async () => {
+      locked();
+      ranOnly(OWN, RUN_ID);
+      const handler = vi.fn().mockResolvedValue(new Response("ok", { status: 201 }));
+
+      const res = await asRecord(handler, { reach: "runRecord" })(
+        recordRequest({ taskId: OWN, runId: RUN_ID }),
+        context()
+      );
+
+      expect(res.status).toBe(201);
+      expect(taskExists).toHaveBeenCalledWith({
+        _id: OWN,
+        project: PROJECT_ID,
+        "execution.workerId": "w1",
+        $or: [{ "execution.lastRunId": RUN_ID }, { "execution.runId": RUN_ID }],
+      });
+    });
+
+    it("goes through when workers were switched off or the grant revoked mid-run", async () => {
+      projectFindById.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve(projectDoc({ worker: { enabled: false } })) }),
+      });
+      accessibleProjectIds.mockResolvedValue([]);
+      ranOnly(OWN, RUN_ID);
+      const handler = vi.fn().mockResolvedValue(new Response("ok", { status: 201 }));
+
+      const res = await asRecord(handler, { reach: "runRecord" })(
+        recordRequest({ taskId: OWN, runId: RUN_ID }),
+        context()
+      );
+
+      expect(res.status).toBe(201);
+    });
+
+    // The handler reads the body again, so the middleware must not have consumed it
+    it("leaves the body for the handler to read", async () => {
+      ranOnly(OWN, RUN_ID);
+      const handler = vi.fn(async (request: Request) => Response.json(await request.json()));
+
+      const res = await asRecord(handler, { reach: "runRecord" })(
+        recordRequest({ taskId: OWN, runId: RUN_ID }),
+        context()
+      );
+
+      expect((await res.json()).runId).toBe(RUN_ID);
+    });
+
+    it("refuses a record for another task, even from a machine the project is assigned", async () => {
+      ranOnly(OWN, RUN_ID);
+      const handler = vi.fn();
+
+      const res = await asRecord(handler, { reach: "runRecord" })(
+        recordRequest({ taskId: OTHER, runId: RUN_ID }),
+        context()
+      );
+
+      // 422 because it is final: the worker's outbox drops it instead of retrying behind it
+      expect(res.status).toBe(422);
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it("refuses a run this machine did not run on that task", async () => {
+      ranOnly(OWN, RUN_ID);
+      const handler = vi.fn();
+
+      const res = await asRecord(handler, { reach: "runRecord" })(
+        recordRequest({ taskId: OWN, runId: "some-other-run" }),
+        context()
+      );
+
+      expect(res.status).toBe(422);
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it("refuses a run id that is not text before it reaches a query", async () => {
+      const handler = vi.fn();
+
+      const res = await asRecord(handler, { reach: "runRecord" })(
+        recordRequest({ taskId: OWN, runId: { $ne: "" } }),
+        context()
+      );
+
+      expect(res.status).toBe(400);
+      expect(taskExists).not.toHaveBeenCalled();
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it("refuses a record naming no task id", async () => {
+      const res = await asRecord(vi.fn(), { reach: "runRecord" })(
+        recordRequest({ taskId: "not-an-id", runId: RUN_ID }),
+        context()
+      );
+
+      expect(res.status).toBe(400);
+    });
+
+    // A worker from before BP-758 names no run. It keeps what it had on its own task, no more.
+    describe("from a worker that sends no run id", () => {
+      it("goes through for the task it ran last, where the project still serves it", async () => {
+        ranOnly(OWN, RUN_ID);
+        const handler = vi.fn().mockResolvedValue(new Response("ok", { status: 201 }));
+
+        const res = await asRecord(handler, { reach: "runRecord" })(
+          recordRequest({ taskId: OWN }),
+          context()
+        );
+
+        expect(res.status).toBe(201);
+      });
+
+      it("refuses another machine's task", async () => {
+        ranOnly(OWN, RUN_ID);
+
+        const res = await asRecord(vi.fn(), { reach: "runRecord" })(
+          recordRequest({ taskId: OTHER }),
+          context()
+        );
+
+        expect(res.status).toBe(422);
+      });
+
+      it("is refused where the project stopped serving it and the run has ended", async () => {
+        accessibleProjectIds.mockResolvedValue([]);
+        ranOnly(OWN, RUN_ID);
+        const handler = vi.fn();
+
+        const res = await asRecord(handler, { reach: "runRecord" })(
+          recordRequest({ taskId: OWN }),
+          context()
+        );
+
+        expect(res.status).toBe(403);
+        expect(handler).not.toHaveBeenCalled();
+      });
     });
   });
 

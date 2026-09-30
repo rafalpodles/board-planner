@@ -164,6 +164,61 @@ describe("createOutbox", () => {
     expect(await outbox.flush(api)).toEqual({ delivered: 0, pending: 1, dropped: 0 });
   });
 
+  // BP-758: a run record used to be refused 403 whenever its project stopped serving the machine
+  // before the next flush, and was retried to the limit and lost. It now proves itself by its run,
+  // so its 403 is the pause kind and its final refusal is a 422.
+  describe("a run record", () => {
+    const record = {
+      taskId: "t1",
+      runId: "run-1",
+      taskKey: "CP-1",
+      agentId: "a1",
+      agentName: "Default",
+      outcome: "merged",
+      refusedBy: "",
+      detail: "",
+      startedAt: "2026-09-30T00:00:00.000Z",
+      finishedAt: "2026-09-30T00:01:00.000Z",
+      costUsd: 0.5,
+    };
+
+    it("is kept through a 403, which a paused machine gets", async () => {
+      const outbox = createOutbox(memoryStore(), vi.fn());
+      outbox.add({ kind: "run", projectId: "CP", record });
+      const api = apiSpy({
+        postRun: vi.fn().mockRejectedValue(new ApiError("POST failed: 403", 403, "this worker may not run")),
+      });
+
+      expect(await outbox.flush(api)).toEqual({ delivered: 0, pending: 1, dropped: 0 });
+    });
+
+    it("is dropped on the 422 that says it is not this machine's run, and holds nothing up", async () => {
+      const outbox = createOutbox(memoryStore(), vi.fn());
+      outbox.add({ kind: "run", projectId: "CP", record });
+      outbox.add({ kind: "comment", projectId: "CP", taskId: "t2", body: "next" });
+      const api = apiSpy({
+        postRun: vi
+          .fn()
+          .mockRejectedValue(
+            new ApiError("POST failed: 422", 422, "That run is not this machine's to record")
+          ),
+      });
+
+      expect(await outbox.flush(api)).toEqual({ delivered: 1, pending: 0, dropped: 1 });
+      expect(api.comment).toHaveBeenCalledWith("CP", "t2", "next");
+    });
+
+    it("is sent with the run it names", async () => {
+      const outbox = createOutbox(memoryStore(), vi.fn());
+      outbox.add({ kind: "run", projectId: "CP", record });
+      const postRun = vi.fn<ApiClient["postRun"]>().mockResolvedValue(undefined);
+
+      await outbox.flush(apiSpy({ postRun }));
+
+      expect(postRun).toHaveBeenCalledWith("CP", expect.objectContaining({ runId: "run-1" }));
+    });
+  });
+
   // A failure with no status at all — a socket that never connected — is a transient, and the
   // twenty attempts are what it has always had.
   it("keeps retrying a failure that never reached the server", async () => {

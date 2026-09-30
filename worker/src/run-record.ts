@@ -26,6 +26,8 @@ const MAX_DETAIL_CHARS = 2000;
 
 export interface RunRecord {
   taskId: string;
+  /** What the board matches the record to this machine's run by, and keeps one record per. */
+  runId: string;
   taskKey: string;
   agentId: string;
   agentName: string;
@@ -56,6 +58,7 @@ export function recordFor(
   const refused = kind === "gateRejected";
   return {
     taskId: task.taskId,
+    runId: task.runId,
     taskKey: task.taskKey,
     // By name as well as by id: an agent can be renamed or deleted, and what ran must not change
     // when it is.

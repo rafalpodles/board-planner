@@ -1873,6 +1873,7 @@ export async function claimNextTask(
           // before the `$set` and a release deliberately leaves `workerId` behind. Either way the
           // task went active held by a run nothing could address until the lease expired (BP-329).
           "execution.runId": { $literal: runId },
+          "execution.lastRunId": { $literal: runId },
           "execution.startedAt": new Date(),
           "execution.lastError": "",
           "execution.attempts": { $add: [{ $ifNull: ["$execution.attempts", 0] }, 1] },

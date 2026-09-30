@@ -6,10 +6,17 @@ import { OutcomeKind } from "./telemetry.js";
 const task = {
   taskId: "t1",
   taskKey: "CP-1",
+  runId: "run-7",
   agent: { agentId: "a1", name: "Default", sequence: [] },
 } as unknown as ClaimedTask;
 
 describe("recordFor", () => {
+  // BP-758: the record is sent after the final status change has released the task, so the board
+  // matches it to this machine by the run it names — and stores one per run however often it is sent
+  it("names the run it is the record of", () => {
+    expect(recordFor(task, "merged", "", 0, 1000, 0).runId).toBe("run-7");
+  });
+
   // An agent can be renamed or deleted; a record of what ran must not change when it is
   it("carries the agent by name as well as by id", () => {
     expect(recordFor(task, "delivered", "", 0, 1000, 0.5)).toMatchObject({
