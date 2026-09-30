@@ -242,6 +242,26 @@ final class ProjectSyncTests: XCTestCase {
 
     // MARK: - BP-724: a failure that repeats every reconnect does not pile up either
 
+    // The dedupe looks for the project's latest line through this; a case answering nil would make
+    // a step about that project invisible to it.
+    func testEveryStepNamesItsProject() {
+        let cases: [(SyncStep, String?)] = [
+            (.added(project: "A", path: "/a"), "A"),
+            (.removed(project: "B", path: "/b"), "B"),
+            (.forgotten(project: "C", path: "/c"), "C"),
+            (.refused(project: "D", reason: "r"), "D"),
+            (.linkedWorktreeDropped(project: "E", path: "/e"), "E"),
+            (.declined(project: "F", paths: ["/f"]), "F"),
+            (.partiallyRemoved(project: "G", removed: ["/g"], reason: "r"), "G"),
+            (.failed(project: "H", reason: "r"), "H"),
+            (.nowhereToPut(projects: ["I"], where: "w"), nil),
+        ]
+
+        for (step, project) in cases {
+            XCTAssertEqual(step.project, project, "\(step)")
+        }
+    }
+
     func testAnIdenticalFailureIsNotAppendedTwice() {
         let failure: SyncStep = .failed(project: "BP", reason: "“co” couldn’t be removed")
 
