@@ -256,6 +256,50 @@ final class ProjectSyncTests: XCTestCase {
         XCTAssertEqual(ProjectSync.appending(failure, to: [failure, added]), [failure, added])
     }
 
+    // The operator declined, then confirmed and hit the same failure: the latest BP line must not
+    // be "Kept BP" when they have just said delete.
+    func testAFailureRepeatedAfterASameProjectStepIsAppended() {
+        let failure: SyncStep = .failed(project: "BP", reason: "permission denied")
+        let declined: SyncStep = .declined(project: "BP", paths: ["/co"])
+
+        XCTAssertEqual(
+            ProjectSync.appending(failure, to: [failure, declined]), [failure, declined, failure])
+    }
+
+    // Clone failed, then succeeded, was removed, and was re-ticked while offline again.
+    func testAFailureAfterTheProjectWasAddedAndRemovedIsAppended() {
+        let failure: SyncStep = .failed(project: "BP", reason: "could not resolve host")
+        let steps: [SyncStep] = [
+            failure, .added(project: "BP", path: "/checkouts/BP"), .removed(project: "BP", path: "/checkouts/BP"),
+        ]
+
+        XCTAssertEqual(ProjectSync.appending(failure, to: steps), steps + [failure])
+    }
+
+    func testAlternatingFailureCausesAreEachShown() {
+        let a: SyncStep = .failed(project: "BP", reason: "permission denied")
+        let b: SyncStep = .failed(project: "BP", reason: "no space left on device")
+
+        let steps = [a, b, a].reduce(into: [SyncStep]()) { $0 = ProjectSync.appending($1, to: $0) }
+
+        XCTAssertEqual(steps, [a, b, a])
+    }
+
+    func testARefusalRepeatedAfterASameProjectStepIsAppended() {
+        let refusal: SyncStep = .refused(project: "BP", reason: "3 uncommitted changes")
+        let declined: SyncStep = .declined(project: "BP", paths: ["/co"])
+
+        XCTAssertEqual(
+            ProjectSync.appending(refusal, to: [refusal, declined]), [refusal, declined, refusal])
+    }
+
+    func testAnIdenticalRefusalIsNotAppendedWithAnotherProjectInBetween() {
+        let refusal: SyncStep = .refused(project: "BP", reason: "3 uncommitted changes")
+        let other: SyncStep = .added(project: "SB", path: "/checkouts/SB")
+
+        XCTAssertEqual(ProjectSync.appending(refusal, to: [refusal, other]), [refusal, other])
+    }
+
     // The control: a changed failure is news, a verbatim repeat isn't.
     func testAFailureWithADifferentReasonStillJoinsTheList() {
         let first: SyncStep = .failed(project: "BP", reason: "permission denied")

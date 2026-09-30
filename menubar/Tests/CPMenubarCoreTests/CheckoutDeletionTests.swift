@@ -745,6 +745,12 @@ final class RepeatedFailureTests: XCTestCase {
         assertOneFailure(steps)
         XCTAssertTrue(FileManager.default.fileExists(atPath: locked.path))
         XCTAssertEqual(try repos.read(), [checkout.path])
+
+        try FileManager.default.setAttributes([.immutable: false], ofItemAtPath: locked.path)
+        XCTAssertEqual(
+            deletion.perform(project: "BP", path: checkout.path, root: checkout.path, worktrees: []),
+            .removed(project: "BP", path: checkout.path),
+            "the lock, and nothing else, was what kept it")
     }
 
     func testAGrantThatCannotBeDroppedFromAReadOnlyReposFileFailsOnceAcrossReconnects() async throws {

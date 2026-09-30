@@ -62,6 +62,19 @@ public enum SyncStep: Equatable, Sendable {
     case nowhereToPut(projects: [String], where: String)
 }
 
+extension SyncStep {
+    var project: String? {
+        switch self {
+        case .added(let project, _), .removed(let project, _), .forgotten(let project, _),
+            .refused(let project, _), .linkedWorktreeDropped(let project, _),
+            .declined(let project, _), .partiallyRemoved(let project, _, _), .failed(let project, _):
+            return project
+        case .nowhereToPut:
+            return nil
+        }
+    }
+}
+
 /// Where the folder is set, named in the message rather than left for the operator to find.
 ///
 /// The setup screen, and not a Preferences tab: `Preferences` has four — Connection, Repositories,
@@ -122,22 +135,15 @@ public enum ProjectSync {
     }
 
     /**
-     * Where a new step joins `steps`: appended, unless it is a `.refused` or `.failed` identical to
-     * one already there.
-     *
-     * Every other case is a one-time event — `.added`, `.removed`, a `.declined` the operator
-     * answered — so two identical values are two things that happened. `.refused` and `.failed`
-     * name an unresolved condition rather than an event: nothing was resolved, so the same pass
-     * runs again next reconnect and, unless the cause changed, says exactly the same sentence — a
-     * guard's refusal (BP-505), or a delete, drop or clone that throws for a reason that persists:
-     * permissions, a locked file, a read-only `repos.json` (BP-724). Appended plainly, that reads as
-     * the pane growing one line per reconnect for as long as the cause lasts. A changed reason is
-     * a different value and is still appended: a changed failure is news, a verbatim repeat isn't.
+     * Where a new step joins `steps`: appended, unless it is a `.refused` or `.failed` equal to the
+     * latest line about the same project. Those two name a condition that recurs every reconnect
+     * (BP-505, BP-724), so a verbatim repeat is not news — but anything said about that project
+     * since, or a changed reason, makes it news again.
      */
     public static func appending(_ step: SyncStep, to steps: [SyncStep]) -> [SyncStep] {
         switch step {
-        case .refused, .failed:
-            if steps.contains(step) { return steps }
+        case .refused(let project, _), .failed(let project, _):
+            if steps.last(where: { $0.project == project }) == step { return steps }
         default:
             break
         }
