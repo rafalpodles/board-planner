@@ -409,7 +409,7 @@ const { agentSchema } = await vi.importActual<typeof import("@/models/agent")>("
 const CastProbe = mongoose.model("AgentCastProbe", agentSchema);
 
 function castThroughMongoose(query: Record<string, unknown>): void {
-  CastProbe.find(query).cast(CastProbe);
+  CastProbe.find(query).cast();
 }
 
 describe("deleting a block", () => {
