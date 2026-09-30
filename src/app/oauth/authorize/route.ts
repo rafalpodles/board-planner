@@ -31,6 +31,7 @@ import {
 } from "@/lib/oauth";
 import { IOAuthClient, IOAuthConsent, IUser } from "@/types";
 import { APP_NAME } from "@/lib/brand";
+import { NONCE_HEADER } from "@/lib/csp";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -79,6 +80,10 @@ function readParamsFromForm(form: FormData): AuthParams {
     responseType: String(form.get("response_type") || ""),
     scope: String(form.get("scope") || "mcp"),
   };
+}
+
+function inlineScript(source: string, nonce: string | null): string {
+  return `<script${nonce ? ` nonce="${escapeHtml(nonce)}"` : ""}>${source}</script>`;
 }
 
 function htmlPage(body: string, status = 200, head = ""): Response {
@@ -224,6 +229,7 @@ function consentForm(
   clientName: string,
   redirectUri: string,
   projects: { _id: string; name: string; key: string }[],
+  nonce: string | null,
   options: { signedInAs?: string; switchAccountHref?: string; error?: string } = {}
 ): Response {
   const label = clientName ? escapeHtml(clientName) : "An application";
@@ -269,7 +275,7 @@ function consentForm(
       </div>
     </form>
     ${identity}
-    <script>${CONSENT_SCRIPT}</script>`);
+    ${inlineScript(CONSENT_SCRIPT, nonce)}`);
 }
 
 // The authorization has to leave this origin, and a form submission cannot: `form-action 'self'` is
@@ -280,7 +286,12 @@ function consentForm(
 // the zero-second refresh cannot start its timer until the frame completes, so location.replace
 // wins and cancels it — measured as exactly one request at the client. The link covers the case
 // where neither ran.
-function returnToClient(target: string, clientName: string, headline = "Authorized"): Response {
+function returnToClient(
+  target: string,
+  clientName: string,
+  nonce: string | null,
+  headline = "Authorized"
+): Response {
   // Checked when the row was written, and checked again here, at the point where
   // location.replace would run a `javascript:` URI in this origin rather than ignore it the way
   // a Location header does. A check at write time goes stale; this one cannot.
@@ -294,7 +305,7 @@ function returnToClient(target: string, clientName: string, headline = "Authoriz
     `<h1>${headline}</h1>
     <p class="sub">Returning you to ${label}…</p>
     <p class="hint"><a id="return" href="${href}">Continue</a> if nothing happens.</p>
-    <script>location.replace(document.getElementById("return").href);</script>`,
+    ${inlineScript('location.replace(document.getElementById("return").href);', nonce)}`,
     200,
     `<meta http-equiv="refresh" content="0;url=${href}">`
   );
@@ -421,6 +432,7 @@ export async function GET(req: Request) {
         client.clientName,
         p.redirectUri,
         await accessibleProjects(user),
+        req.headers.get(NONCE_HEADER),
         { signedInAs: user.username, switchAccountHref: switchAccountHref(p) }
       );
     }
@@ -508,6 +520,7 @@ export async function POST(req: Request) {
 }
 
 async function handleConsent(req: Request, form: FormData): Promise<Response> {
+  const nonce = req.headers.get(NONCE_HEADER);
   const ticket = String(form.get("ticket") || "");
   // Only "all" is the wide grant. Absent, misspelt, or anything a hand-built form put there is the
   // narrow one: an authorization decision must not fail open on a value nobody recognises.
@@ -551,7 +564,7 @@ async function handleConsent(req: Request, form: FormData): Promise<Response> {
     const denied = new URL(consent.redirectUri);
     denied.searchParams.set("error", "access_denied");
     if (consent.state) denied.searchParams.set("state", consent.state);
-    return returnToClient(denied.toString(), client.clientName, "Not authorized");
+    return returnToClient(denied.toString(), client.clientName, nonce, "Not authorized");
   }
 
   let allowedProjects: string[] = [];
@@ -568,7 +581,7 @@ async function handleConsent(req: Request, form: FormData): Promise<Response> {
       // This branch re-renders without consuming the ticket, and costs more than the GET that
       // issued it, so it answers to the same budget.
       await recordFailedAttempt(consentKey(String(consent.user)));
-      return consentForm(ticket, client.clientName, consent.redirectUri, accessible, {
+      return consentForm(ticket, client.clientName, consent.redirectUri, accessible, nonce, {
         signedInAs: user.username,
         switchAccountHref: switchAccountHref(paramsOfConsent(consent)),
         error: accessible.length
@@ -611,5 +624,5 @@ async function handleConsent(req: Request, form: FormData): Promise<Response> {
   url.searchParams.set("code", code);
   if (consent.state) url.searchParams.set("state", consent.state);
 
-  return returnToClient(url.toString(), client.clientName);
+  return returnToClient(url.toString(), client.clientName, nonce);
 }

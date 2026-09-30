@@ -322,6 +322,16 @@ describe("GET /oauth/authorize", () => {
     expect(await bystander.text()).toContain("Grant access");
   });
 
+  it("carries the request's nonce on the consent screen's script", async () => {
+    resolveSession.mockResolvedValue({ userId: "u1", sessionId: "s1" });
+
+    const body = await (await GET(authorizeGet({}, { ...sessionCookie(), "x-nonce": "n0nce" }))).text();
+
+    expect(body).toContain("Grant access");
+    expect(body).toMatch(/<script nonce="n0nce">\s*\(function/);
+    expect(body.match(/<script/g)).toHaveLength(1);
+  });
+
   it("asks anyway when the request says prompt=login", async () => {
     resolveSession.mockResolvedValue({ userId: "u1", sessionId: "s1" });
 
@@ -414,6 +424,22 @@ describe("POST /oauth/authorize consent phase", () => {
       /<a id="return" href="https:\/\/client\.example\/callback\?code=cpac_[^"]+&amp;state=s"/
     );
     expect(oauthCodeCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("carries the request's nonce on the script that navigates back to the client", async () => {
+    const body = await (await POST(consent({ access: "all" }, { "x-nonce": "n0nce" }))).text();
+
+    expect(body).toContain('<script nonce="n0nce">location.replace(');
+    expect(body.match(/<script/g)).toHaveLength(1);
+  });
+
+  it("carries the request's nonce on the re-rendered consent screen's script", async () => {
+    projects = [{ _id: "p1", name: "Orbit", key: "ORB" }];
+    const body = await (await POST(consent({ access: "limited" }, { "x-nonce": "n0nce" }))).text();
+
+    expect(body).toContain("Select at least one project");
+    expect(body).toMatch(/<script nonce="n0nce">\s*\(function/);
+    expect(body.match(/<script/g)).toHaveLength(1);
   });
 
   it("keeps the whole account off the grant unless it was asked for", async () => {

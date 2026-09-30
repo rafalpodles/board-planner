@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { REPORTING_ENDPOINTS, contentSecurityPolicy } from "./src/lib/csp";
 
 const nextConfig: NextConfig = {
   // Next paints its dev indicator over the bottom-left of every page, which on a phone is where a
@@ -39,32 +40,6 @@ const nextConfig: NextConfig = {
           // includeSubDomains, so a sibling subdomain cannot be served over plain HTTP and used
           // to shadow a cookie. No preload: it is hard to undo and is the deployment's call.
           { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },
-          // The audit found no XSS — the markdown pipeline is genuinely safe — so this is defence
-          // in depth. img-src is deliberately left open: a tracking pixel in a task description and
-          // a legitimately hotlinked screenshot are the same request, and choosing between them is
-          // a product decision, not a hardening one (BP-306).
-          {
-            key: "Content-Security-Policy",
-            value: [
-              "default-src 'self'",
-              // `unsafe-eval` in development only, and never in a production build: React's dev
-              // build uses eval() to reconstruct call stacks that came from another environment,
-              // so without it every page logs a console error and the debugging features it names
-              // are simply off. The production bundle never calls eval, so nothing is loosened
-              // where it would matter.
-              process.env.NODE_ENV === "development"
-                ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
-                : "script-src 'self' 'unsafe-inline'",
-              "style-src 'self' 'unsafe-inline'",
-              "img-src * data: blob:",
-              "font-src 'self' data:",
-              "connect-src 'self'",
-              "frame-ancestors 'none'",
-              "form-action 'self'",
-              "base-uri 'self'",
-              "object-src 'none'",
-            ].join("; "),
-          },
         ],
       },
       {
@@ -72,6 +47,12 @@ const nextConfig: NextConfig = {
         headers: [
           { key: "Cache-Control", value: "private, no-store" },
           { key: "Vary", value: "Cookie" },
+          // Pages get a per-request nonce from src/proxy.ts, which skips /api; nothing here runs a script.
+          {
+            key: "Content-Security-Policy",
+            value: contentSecurityPolicy({ dev: process.env.NODE_ENV === "development" }),
+          },
+          { key: "Reporting-Endpoints", value: REPORTING_ENDPOINTS },
         ],
       },
     ];
