@@ -1,4 +1,4 @@
-import nodemailer from "nodemailer";
+import nodemailer, { type Transporter } from "nodemailer";
 import { APP_NAME, APP_DOMAIN } from "@/lib/brand";
 
 const SMTP_HOST = process.env.SMTP_HOST;
@@ -7,9 +7,9 @@ const SMTP_USER = process.env.SMTP_USER;
 const SMTP_PASS = process.env.SMTP_PASS;
 const SMTP_FROM = process.env.SMTP_FROM || `${APP_NAME} <noreply@${APP_DOMAIN}>`;
 
-let transporter: nodemailer.Transporter | null = null;
+let transporter: Transporter | null = null;
 
-function getTransporter(): nodemailer.Transporter | null {
+function getTransporter(): Transporter | null {
   if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) return null;
   if (!transporter) {
     transporter = nodemailer.createTransport({
