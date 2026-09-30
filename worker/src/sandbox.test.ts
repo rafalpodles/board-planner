@@ -233,6 +233,32 @@ describe("a directory recorded at creation (BP-804)", () => {
 // BP-733. sandbox-exec looks the program it wraps up by name on the PATH this process assembled, so
 // the program is held to the rule SANDBOX_COMMAND already is — and the unconfined spawn runs it
 // directly, where the same lookup applies.
+describe("the network (BP-720)", () => {
+  const withNetwork = (network?: "open" | "loopback") =>
+    profileOf(confine(CLAUDE_PATH, ["-p"], { writable: ["/work/bp-1"], network, realpath: identity, lstat: aDirectory, platform: "darwin", env: {} }));
+
+  it("leaves the network alone unless asked, so the agent's own spawns still reach the API", () => {
+    expect(withNetwork()).not.toContain("network");
+    expect(withNetwork("open")).toBe(withNetwork());
+  });
+
+  it("denies every outbound connection in loopback mode, and allows back only localhost and unix sockets", () => {
+    const profile = withNetwork("loopback");
+
+    expect(profile).toContain("(deny network-outbound)");
+    expect(profile).toContain('(allow network-outbound (remote ip "localhost:*") (remote unix-socket))');
+    expect(profile.startsWith(withNetwork())).toBe(true);
+  });
+
+  it("denies the daemons that fetch on a process's behalf in loopback mode, and only there", () => {
+    const deny =
+      '(deny mach-lookup (global-name "com.apple.nsurlsessiond") (global-name "com.apple.trustd") (global-name "com.apple.trustd.agent") (xpc-service-name "com.apple.WebKit.Networking"))';
+
+    expect(withNetwork("loopback")).toContain(deny);
+    expect(withNetwork()).not.toContain("nsurlsessiond");
+  });
+});
+
 describe("the program inside the wrapper", () => {
   it("is refused by name, confined or not", () => {
     const options = { writable: ["/work/bp-1"], platform: "darwin" as const, realpath: identity, lstat: aDirectory, env: {} };

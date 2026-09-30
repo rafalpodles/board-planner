@@ -411,7 +411,47 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   write-only deny. What no measurement here covers is a program that reads a preference *only*
   through that daemon: it sees the default instead, which for a run is the answer a fresh account
   would give. Every other daemon reachable the same way is still open, and no list of service
-  names closes that; so are reads, and the network, neither of which this touches at all.
+  names closes that; so are reads, which this does not touch at all.
+
+  **The network is loopback-only for `npm run build` and `npm test`** (**BP-720**). Reads stay
+  open — the agent has `Read` over the disk anyway, and confining reads would take the CLI's own
+  session with it — so a test the agent wrote can read a credential under your home, `~/.npmrc`,
+  `~/.config/gh`, `~/.aws`, and the only thing between it and the internet was nothing. Those two
+  commands now run with every outbound connection refused except to this machine, and no setting
+  turns it back on short of `CP_ALLOW_UNCONFINED_AGENT`, which drops it with the rest of the sandbox
+  (the gate's reason then says nothing about the network); `npm ci` keeps the network for the
+  registry, and both `claude` spawns keep it for the API. A suite that starts a server on
+  `127.0.0.1` or `::1` and talks to it still passes; one that reaches off the machine fails with
+  `connect EPERM`, and the gate's reason says the network was loopback-only. Three daemons that
+  fetch a URL on a process's behalf, outside the profile, are denied by name in those two commands:
+  nsurlsessiond (a background `NSURLSession`), trustd (the AIA and OCSP URLs of a certificate the
+  test hands it) and WebKit's networking process — each reached a listener from a process with no
+  network at all. That is a denylist, and it closes those three, not the category. What else this
+  does not close: seatbelt's `localhost` is every address this machine holds, so a listener here
+  that forwards — an HTTP proxy, an SSH tunnel — is still a way out, and it ignores an IPv6 scope,
+  so `fe80::1%en0` or `%utun0` is let through and a packet goes out on that link (narrowing it to
+  IPv4 would refuse `::1`, where node binds `localhost` on macOS); unix sockets stay open (BP-810) —
+  Docker's socket, where it runs, is the obvious one: a container started through it has the
+  network — and with them name resolution through mDNSResponder, so a lookup of a name that encodes
+  a secret still reaches a DNS server.
+
+  **npm settings pinned against a project `.npmrc`.** Every npm command runs with `git`, `proxy`,
+  `https-proxy`, `node-options`, `strict-ssl` and `umask` pinned in its environment, which npm reads
+  ahead of any `.npmrc` — for a non-empty value; `null` clears only a key that is not a string. The
+  pins cover those keys as npm spells them, and only those. Measured before the pins: a `git=` naming a script in the worktree ran it for any git
+  dependency, `--ignore-scripts` or not; a `proxy=` with an http registry handed the token in your
+  `~/.npmrc` to whoever ran the proxy; and a `node-options=--require <file>` ran that file during
+  `npm ci`, network open, because npm exports it as `NODE_OPTIONS` and a git dependency with a
+  prepare script is prepared by a child `npm install`. The environment rather than a refusal of a
+  changed `.npmrc`, because one an earlier gate's code writes is untracked and reaches no diff. The
+  cost: a proxy or `node-options` in your own `~/.npmrc` is overridden too. Still open: a key spelled
+  otherwise — upper case or underscores, `IGNORE_SCRIPTS=false`, `GIT=`, `HTTPS_PROXY=`,
+  `NODE_OPTIONS=` — is exported by npm to the child it spawns for a git dependency, over the pins,
+  so there it can still turn scripts back on or name a git binary, a proxy or node options, with the
+  network open during `npm ci` (**BP-812**); a git dependency still runs git and that child npm;
+  `ca`, `cafile`, `cert` and `key` cannot be neutralised from the environment, so a project
+  `.npmrc` can make npm trust a certificate someone on the path presents; and a registry pointed at
+  `http://` sends that registry's token in clear text to the same host.
 
   **Everything that inherits a confined spawn's sandbox is killed when the spawn ends**
   (**BP-796**). A process group is not enough: a step or a test that runs `setsid`, double-forks or

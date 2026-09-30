@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { CommandResult, Runner, RunOpts } from "../exec.js";
 import { GateResult } from "../types.js";
 import { agentEnv, npmCacheOverride, tempDirOverride } from "../env.js";
-import { confineTool, RecordedDir } from "../sandbox.js";
+import { confineTool, Network, RecordedDir, SANDBOX_COMMAND } from "../sandbox.js";
 
 /**
  * The npm gates, run where the agent's own tools already are.
@@ -63,11 +63,39 @@ export function npmTempBase(env?: NodeJS.ProcessEnv): string {
   return (env ? (env.TMPDIR?.trim() ?? "") : tempDirOverride()) || tmpdir();
 }
 
+// A project `.npmrc` is read from the worktree — committed, or left untracked by an earlier gate's
+// code, where no diff sees it — and the install keeps the network. These keys are pinned for every
+// command because the environment beats a project `.npmrc`, but only with a non-empty value, and
+// "null" clears only a key that is not a string: a string key takes it literally.
+// - git: `git=<script>` ran that script for any git dependency, --ignore-scripts or not.
+// - proxy, https-proxy: with an http registry they handed the `~/.npmrc` token to the proxy.
+// - node-options: npm exports it as NODE_OPTIONS, and pacote spawns `npm install --force` inside a
+//   git dependency that has a prepare script, so `--require <file>` ran at that child's startup.
+//   The pin is Node's default stack-trace limit, which changes nothing.
+// - strict-ssl, umask: a TLS downgrade, and files written wider than the default.
+// A proxy or node-options in the operator's own `~/.npmrc` is overridden too. Canonical spellings
+// only: npm exports a project key spelled otherwise (`IGNORE_SCRIPTS`, `NODE_OPTIONS`) as
+// npm_config_<lowercased> to the child it spawns for a git dependency, over these pins, and there
+// it can turn scripts back on or name a git binary, a proxy or node options (BP-812).
+export const NPM_CONFIG_PINNED = {
+  npm_config_git: "git",
+  npm_config_proxy: "null",
+  npm_config_https_proxy: "null",
+  npm_config_node_options: "--stack-trace-limit=10",
+  npm_config_strict_ssl: "true",
+  npm_config_umask: "022",
+} as const;
+
+// A refused connection prints only `connect EPERM <address>`, which reads like a firewall
+export const LOOPBACK_ONLY_NOTE = "outbound network is loopback-only under the worker";
+
 export interface ConfinedNpmOptions extends RunOpts {
   /** The worktree `cwd` is, as it was recorded at creation (BP-804). */
   worktree: RecordedDir;
   /** Whether this command is the install, which is the only one allowed the cache. */
   withCache?: boolean;
+  /** "loopback" for a command that runs agent-written code; the install needs the registry. */
+  network?: Network;
   /**
    * The worker's own environment, for a test that needs to say what it is. Absent in production:
    * `env.ts` owns reading this process's environment, and reading it here would put a second
@@ -89,8 +117,8 @@ export async function runConfinedNpm(
   npmPath: string,
   args: string[],
   options: ConfinedNpmOptions
-): Promise<CommandResult | { refusal: string; replaced?: string }> {
-  const { withCache, env: source, worktree, ...runOptions } = options;
+): Promise<(CommandResult & { loopbackOnly: boolean }) | { refusal: string; replaced?: string }> {
+  const { withCache, network, env: source, worktree, ...runOptions } = options;
   const cache = npmCacheDir(source);
 
   // This run's own scratch directory, inside the machine's. Created before `confine` resolves it:
@@ -111,9 +139,11 @@ export async function runConfinedNpm(
   try {
     // `env` left to `confine`'s own default unless a test said otherwise, so the operator's risk
     // acceptance is read in the one place that owns it.
-    const spawn = confineTool("npm", npmPath, args, source ? { writable, env: source } : { writable });
+    const spawn = confineTool("npm", npmPath, args, source ? { writable, network, env: source } : { writable, network });
     if ("refusal" in spawn) return spawn;
 
+    // False under the escape hatch, where confine hands back a bare spawn with the network open
+    const loopbackOnly = network === "loopback" && spawn.command === SANDBOX_COMMAND;
     const result = await runner.run(spawn.command, spawn.args, {
       ...runOptions,
       // The cache location and the scratch directory travel as the child's own settings, so they
@@ -121,11 +151,12 @@ export async function runConfinedNpm(
       // here gets: the allowlist, and nothing of the operator's beyond it.
       env: {
         ...(source ? agentEnv([], source) : agentEnv()),
+        ...NPM_CONFIG_PINNED,
         npm_config_cache: cache,
         TMPDIR: temp,
       },
     });
-    return result.machineFault ? { refusal: result.machineFault } : result;
+    return result.machineFault ? { refusal: result.machineFault } : { ...result, loopbackOnly };
   } finally {
     rmSync(temp, { recursive: true, force: true });
   }

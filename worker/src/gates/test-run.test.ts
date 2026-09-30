@@ -8,6 +8,8 @@ import { GateContext } from "../types.js";
 import { claimedTask } from "../__fixtures__/task.js";
 import { recordDir, SANDBOX_COMMAND, UNCONFINED_REASON } from "../sandbox.js";
 import { NPM_PATH } from "../__fixtures__/tool-paths.js";
+import { LOOPBACK_ONLY_NOTE } from "./confined-npm.js";
+import { UNCONFINED_ESCAPE_HATCH } from "../env.js";
 
 const TIMEOUT_MS = 5000;
 
@@ -146,6 +148,40 @@ describe("testRunGate", () => {
       // command ends — not the whole of `/var/folders`, which every process of this user writes to
       expect.stringMatching(/^W1=.*cp-gate-/),
     ]);
+  });
+
+  // BP-720: the suite is the agent's code, and reads stay open, so a credential under HOME is one
+  // `fetch` away.
+  it("runs the suite with the network limited to loopback", async () => {
+    const { runner, run } = runnerReturning(ok);
+
+    await testRunGate(runner, NPM_PATH, TIMEOUT_MS).run(context);
+
+    const args = run.mock.calls[0][1];
+    expect(args[args.indexOf("-p") + 1]).toContain("(deny network-outbound)");
+  });
+
+  it("says the network was loopback-only when the suite fails", async () => {
+    const { runner } = runnerReturning({ ...ok, code: 1, stdout: "Error: connect EPERM 1.1.1.1:443" });
+
+    const result = await testRunGate(runner, NPM_PATH, TIMEOUT_MS).run(context);
+
+    expect(result.reason).toContain(LOOPBACK_ONLY_NOTE);
+  });
+
+  it("does not claim a loopback-only network where the escape hatch left it open", async () => {
+    vi.stubEnv(UNCONFINED_ESCAPE_HATCH, "1");
+    try {
+      const { runner, run } = runnerReturning({ ...ok, code: 1, stdout: "FAIL a.test.ts" });
+
+      const result = await testRunGate(runner, NPM_PATH, TIMEOUT_MS).run(context);
+
+      expect(run.mock.calls[0][0]).toBe(NPM_PATH);
+      expect(result.reason).toMatch(/^the test suite failed \(exit 1\):/);
+      expect(result.reason).not.toContain(LOOPBACK_ONLY_NOTE);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   // The npm cache is the install's, and only the install's: this is the command that runs the

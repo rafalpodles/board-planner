@@ -1,4 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach } from "vitest";
+import { execFileSync } from "node:child_process";
+import { createServer, Server } from "node:http";
+import { AddressInfo } from "node:net";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -358,5 +361,167 @@ describe.skipIf(!onMac)("confine against the real sandbox", () => {
         expect(await launchedWithin(3_000)).toBe(false);
       });
     });
+  });
+
+  /**
+   * BP-720. Reads stay open, so a test the agent wrote can read a credential under HOME; this is
+   * what stops the gate that runs it sending one anywhere. 192.0.2.1 is TEST-NET-1, never routed,
+   * so the control needs no internet: unconfined it times out or is unreachable, and only the
+   * sandbox answers EPERM.
+   */
+  describe("the network", () => {
+    async function confinedNode(script: string, network?: "open" | "loopback") {
+      const spawn = confine(process.execPath, ["-e", script], { writable: [worktree], network, env: {} });
+      if (!("command" in spawn)) throw new Error(`refused: ${spawn.refusal}`);
+      return runner.run(spawn.command, spawn.args, { cwd: worktree, timeoutMs: 30_000 });
+    }
+
+    const OFF_MACHINE = `
+      const net = require("net"), dgram = require("dgram");
+      const tcp = new Promise((done) => {
+        const socket = net.connect({ host: "192.0.2.1", port: 443, timeout: 2000 });
+        socket.on("connect", () => { socket.destroy(); done("connected"); });
+        socket.on("timeout", () => { socket.destroy(); done("timeout"); });
+        socket.on("error", (error) => done(error.code));
+      });
+      const udp = new Promise((done) => {
+        const socket = dgram.createSocket("udp4");
+        socket.send(Buffer.from("x"), 53, "192.0.2.1", (error) => { socket.close(); done(error ? error.code : "sent"); });
+      });
+      Promise.all([tcp, udp]).then(([t, u]) => console.log(JSON.stringify({ tcp: t, udp: u })));
+    `;
+
+    it("refuses a connection off the machine in loopback mode", async () => {
+      const result = await confinedNode(OFF_MACHINE, "loopback");
+
+      expect(result.code, result.stderr).toBe(0);
+      expect(JSON.parse(result.stdout)).toEqual({ tcp: "EPERM", udp: "EPERM" });
+    }, 30_000);
+
+    it("leaves the same connection alone in open mode — the control", async () => {
+      const result = await confinedNode(OFF_MACHINE);
+
+      expect(result.code, result.stderr).toBe(0);
+      const { tcp, udp } = JSON.parse(result.stdout);
+      expect(tcp).not.toBe("EPERM");
+      expect(udp).toBe("sent");
+    }, 30_000);
+
+    it("lets a loopback server answer its own client in loopback mode, on IPv4 and IPv6", async () => {
+      const result = await confinedNode(
+        `
+        const http = require("http");
+        const roundTrip = (host) => new Promise((done) => {
+          const server = http.createServer((_, res) => res.end("pong")).listen(0, host, async () => {
+            const url = "http://" + (host.includes(":") ? "[" + host + "]" : host) + ":" + server.address().port + "/";
+            const body = await (await fetch(url)).text();
+            server.close();
+            done(body);
+          });
+        });
+        Promise.all([roundTrip("127.0.0.1"), roundTrip("::1")]).then((bodies) => console.log(bodies.join(",")));
+        `,
+        "loopback"
+      );
+
+      expect(result.code, result.stderr).toBe(0);
+      expect(result.stdout.trim()).toBe("pong,pong");
+    }, 30_000);
+
+    // Unix sockets stay open until BP-810 decides otherwise: a suite talking to a local database
+    // over one is honest, and a deny on network-outbound alone refuses it
+    it("lets a unix-socket server answer its own client in loopback mode", async () => {
+      const result = await confinedNode(
+        `
+        const net = require("net");
+        const server = net.createServer((socket) => socket.end("pong")).listen("s.sock", () => {
+          let body = "";
+          net.connect("s.sock").on("data", (chunk) => (body += chunk)).on("end", () => {
+            server.close();
+            console.log(body);
+          }).on("error", (error) => { console.log(error.code); server.close(); });
+        });
+        `,
+        "loopback"
+      );
+
+      expect(result.code, result.stderr).toBe(0);
+      expect(result.stdout.trim()).toBe("pong");
+    }, 30_000);
+  });
+
+  /**
+   * BP-720. A daemon fetches outside the profile, so `network-outbound` never sees it: each of these
+   * reached a listener from a process with no network at all. The listener is on 127.0.0.1, which
+   * loopback mode allows the process itself, so a request arriving there in loopback mode can only
+   * have come from a daemon the deny did not stop. Open mode is the control.
+   */
+  describe("a fetch a daemon performs on the process's behalf", () => {
+    let seen: string[] = [];
+    let server: Server;
+    let base = "";
+    let pki = "";
+
+    beforeAll(async () => {
+      server = createServer((req, res) => {
+        seen.push(req.url ?? "");
+        res.end("x");
+      });
+      await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+      base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+      pki = mkdtempSync(join(tmpdir(), "bp720-pki-"));
+      const openssl = (...args: string[]) => execFileSync("/usr/bin/openssl", args, { cwd: pki, stdio: "ignore" });
+      openssl("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", "ca.key", "-out", "ca.pem", "-days", "2", "-subj", "/CN=BP720 probe CA");
+      openssl("req", "-newkey", "rsa:2048", "-nodes", "-keyout", "leaf.key", "-out", "leaf.csr", "-subj", "/CN=probe.bp720.test");
+      writeFileSync(
+        join(pki, "leaf.ext"),
+        `extendedKeyUsage=serverAuth\nsubjectAltName=DNS:probe.bp720.test\nauthorityInfoAccess=caIssuers;URI:${base}/aia-DUMMY,OCSP;URI:${base}/ocsp-DUMMY\n`
+      );
+      openssl("x509", "-req", "-in", "leaf.csr", "-CA", "ca.pem", "-CAkey", "ca.key", "-CAcreateserial", "-out", "leaf.pem", "-days", "1", "-extfile", "leaf.ext");
+    });
+
+    afterAll(() => {
+      server.close();
+      rmSync(pki, { recursive: true, force: true });
+    });
+
+    beforeEach(() => {
+      seen = [];
+    });
+
+    async function confinedRun(command: string, args: string[], network?: "open" | "loopback") {
+      const spawn = confine(command, args, { writable: [worktree], network, env: {} });
+      if (!("command" in spawn)) throw new Error(`refused: ${spawn.refusal}`);
+      await runner.run(spawn.command, spawn.args, { cwd: worktree, timeoutMs: 30_000 });
+      await new Promise((done) => setTimeout(done, 1500));
+      return seen.join(" ");
+    }
+
+    const jxa = (body: string) => ["-l", "JavaScript", "-e", `ObjC.import("Cocoa"); ObjC.import("WebKit"); ${body}`];
+    const backgroundSession = () =>
+      jxa(`
+        var config = $.NSClassFromString("NSURLSessionConfiguration").backgroundSessionConfigurationWithIdentifier("bp720.probe." + Math.random());
+        var task = $.NSClassFromString("NSURLSession").sessionWithConfiguration(config).downloadTaskWithURL($.NSURL.URLWithString("${base}/nsurl-DUMMY"));
+        task.resume;
+        delay(3);
+      `);
+    const webView = () =>
+      jxa(`
+        var view = $.NSClassFromString("WKWebView").alloc.initWithFrameConfiguration($.NSMakeRect(0, 0, 10, 10), $.NSClassFromString("WKWebViewConfiguration").alloc.init);
+        view.loadRequest($.NSURLRequest.requestWithURL($.NSURL.URLWithString("${base}/webkit-DUMMY")));
+        $.NSRunLoop.currentRunLoop.runUntilDate($.NSDate.dateWithTimeIntervalSinceNow(4));
+      `);
+    const verifyCert = () => ["verify-cert", "-c", join(pki, "leaf.pem"), "-r", join(pki, "ca.pem"), "-p", "ssl", "-R", "ocsp", "-R", "require"];
+
+    it.each([
+      ["nsurlsessiond", "/usr/bin/osascript", backgroundSession, "/nsurl-DUMMY"],
+      ["trustd", "/usr/bin/security", verifyCert, "/ocsp-DUMMY"],
+      ["WebKit's networking process", "/usr/bin/osascript", webView, "/webkit-DUMMY"],
+    ])("%s fetches in open mode — the control — and not in loopback mode", async (_, command, args, path) => {
+      expect(await confinedRun(command, args())).toContain(path);
+      seen = [];
+      expect(await confinedRun(command, args(), "loopback")).not.toContain("DUMMY");
+    }, 60_000);
   });
 });
