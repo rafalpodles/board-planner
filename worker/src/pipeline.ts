@@ -266,13 +266,13 @@ function keptWorktree(path: string): string {
   return `\n\nThe worktree is kept at \`${path}\` on the worker host, with what this run wrote, until the next attempt on this task rebuilds it.`;
 }
 
-async function unfinishedWork(
+export async function unfinishedWork(
   runner: Runner,
   gitPath: string,
   worktreePath: string,
   baseSha: string,
 ): Promise<string | null> {
-  const result = await runner.run(requireGitPath(gitPath), gitArgs(["status", "--porcelain"]), {
+  const result = await runner.run(requireGitPath(gitPath), gitArgs(["status", "--porcelain", "--ignore-submodules=all"]), {
     cwd: worktreePath,
     timeoutMs: GIT_TIMEOUT_MS,
     env: localGitEnv(),

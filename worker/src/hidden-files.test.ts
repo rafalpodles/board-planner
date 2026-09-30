@@ -69,7 +69,7 @@ describe("hiddenFromGit on a tree with thousands of ignored directories", () => 
   it("keeps every git call's argument list small, whatever the number of directories", async () => {
     const directories = Array.from({ length: 12_000 }, (_, index) => `pkg/module${index}/__pycache__/`);
     const run = vi.fn<Runner["run"]>(async (_command, args, opts) => {
-      if (args.includes("ls-files")) return shell(directories.map((path) => `${path}\0`).join(""));
+      if (args.includes("--ignored")) return shell(directories.map((path) => `${path}\0`).join(""));
       if (args.includes("ls-tree")) return shell("100644 blob abc123\t.gitignore\0");
       if (args.includes("cat-file")) return shell("abc123 blob 7\n*.pyc/\n\n");
       if (args.includes("config")) return shell("", { code: 1 });
@@ -96,7 +96,7 @@ describe("hiddenFromGit reading the base's .gitignore files", () => {
     ]).toString("latin1");
     const written: Record<string, number[]> = {};
     const run = vi.fn<Runner["run"]>(async (_command, args, opts) => {
-      if (args.includes("ls-files")) return shell("node_modules/\0sub/a.log\0");
+      if (args.includes("--ignored")) return shell("node_modules/\0sub/a.log\0");
       if (args.includes("ls-tree")) return shell("100644 blob aaa111\t.gitignore\x00100644 blob bbb222\tsub/.gitignore\0");
       if (args.includes("cat-file")) return shell(opts.stdoutEncoding === "latin1" ? batch : Buffer.from(batch, "latin1").toString("utf8"));
       if (args.includes("config")) return shell("", { code: 1 });
@@ -118,7 +118,7 @@ describe("hiddenFromGit over tens of thousands of unignored directories", () => 
   it("judges them in well under a second", async () => {
     const directories = Array.from({ length: 20_000 }, (_, index) => `pkg/module${index}/__pycache__/`);
     const run = vi.fn<Runner["run"]>(async (_command, args) => {
-      if (args.includes("ls-files")) return shell(directories.map((path) => `${path}\0`).join(""));
+      if (args.includes("--ignored")) return shell(directories.map((path) => `${path}\0`).join(""));
       if (args.includes("config")) return shell("", { code: 1 });
       if (args.includes("check-ignore")) return shell("", { code: 1 });
       return shell();

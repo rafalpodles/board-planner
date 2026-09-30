@@ -225,7 +225,7 @@ export async function commitAll(
   if (hidden?.kind === "unreadable") throw new Error(`refusing to stage: ${hidden.detail}`);
   if (hidden) throw new TamperedCheckoutError(hidden.detail);
 
-  const status = await git(["status", "--porcelain"]);
+  const status = await git(["status", "--porcelain", "--ignore-submodules=all"]);
   if (status.code !== 0)
     throw new Error(`git status failed: ${status.stderr || status.stdout}`);
   if (!status.stdout.trim()) return "";
