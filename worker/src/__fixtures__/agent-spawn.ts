@@ -37,10 +37,12 @@ export function isSandboxProbe(command: string, args: readonly string[]): boolea
 }
 
 /**
- * A machine whose sandbox works, played by hand: the probe's allowed write lands and its attempt to
- * escape does not. The marker is the positive control `sandboxCheck` insists on — a stub that
- * returned success without it is a machine where nothing ran, which is a failed check now.
+ * A machine whose sandbox works, played by hand: the probe's allowed write lands, its attempt to
+ * escape does not, and its `open` exits non-zero. The marker is the positive control `sandboxCheck`
+ * insists on — a stub that returned success without it is a machine where nothing ran, which is a
+ * failed check now.
  */
 export function answerSandboxProbe(args: readonly string[]): void {
   writeFileSync(args[args.length - 1], "ran");
+  writeFileSync(args[args.length - 3], "1");
 }

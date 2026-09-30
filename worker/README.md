@@ -395,10 +395,10 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   workers of one operator have different state directories, so neither kills the other's spawns.
   A survivor of a worker older than this carries no such name, and a restart does not reach it.
 
-  **Not covered: a program the spawn asks another process to start.** `open` and LaunchServices
-  start it outside the sandbox, so it carries no mark and nothing here sees it — measured in review,
-  and tracked as **BP-807**. `launchctl submit` is refused under the profile, measured; every other
-  daemon is the open category above.
+  **Not covered: a program the spawn asks another process to start.** It would start outside the
+  sandbox and carry no mark, so nothing here sees it. The launch routes measured so far are refused
+  instead — LaunchServices and AppleEvents below (**BP-807**), `launchctl submit` by launchd itself;
+  every other daemon is the open category above.
 
   The check is `sandbox_check`, which Node cannot call, so it runs in a small helper. Releases carry
   it built — universal, at `bin/cp-reap` in the tarball and in the app, where it is signed with the
@@ -419,6 +419,31 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   later confined spawn until a retry finds nothing left. The preflight sandbox row reports only what
   is known when the worker starts — the helper, and the startup reap. Under
   `CP_ALLOW_UNCONFINED_AGENT=1` there is no sandbox to mark, so none of this applies.
+
+  **A program launched on the process's behalf** was the same shape with a worse outcome
+  (**BP-807**): `open -g -j <bundle>` returned 0 under the profile and LaunchServices started the
+  bundle's program with ppid 1, outside the sandbox, where it wrote a file a direct write could not.
+  That is arbitrary code as you, from any step or gate. The profile now also denies `mach-lookup` on
+  the four services those routes go through, measured on macOS 26.6.2:
+  `com.apple.coreservices.quarantine-resolver` (CoreServicesUIAgent, which performs the launch) and
+  `com.apple.runningboard` (what LaunchServices falls back to for a bundle it already knows), so
+  `open` and NSWorkspace launch nothing; `com.apple.lsd.modifydb`, so a bundle in the worktree
+  cannot be registered as the handler a later click on a link would start; and
+  `com.apple.coreservices.appleevents`, so an AppleEvent to another app — `tell application
+  "Terminal" to do script …` — fails before it is sent, with no consent prompt. A job handed to
+  launchd (`launchctl submit`, `bootstrap`) was already refused by launchd itself, and a setuid
+  `crontab` is refused its exec. What it cost: `npm ci`, `npm run build`, `npm test`, git and the
+  executor's real `claude -p` invocation all still succeed under it.
+
+  Still open (**BP-810**): daemons reached over a **unix socket** rather than `mach-lookup` — the
+  Docker socket answers, and a bind mount gives a container write access anywhere in your home; an
+  already running tmux or screen server runs a command outside the sandbox; watchman is reachable
+  and its triggers run commands. So is `launchctl enable`/`disable`/`bootout gui/<uid>/…`, which
+  works from inside and persists. Reachable but untested: SMAppService and login items, an existing
+  Shortcut that runs a shell script (`shortcuts run`), and a bundle the system registers on its own
+  (Spotlight indexing a worktree) becoming the handler for a URL you open yourself. And, as above,
+  every service not named. Preflight tries an `open` at boot, so a macOS that moves *that* launch
+  elsewhere shows up as a red sandbox row rather than as an escape.
 
   **A file git will not print** (**BP-603**). Four things take a file's contents out of a patch: a
   bare `-diff` attribute, a `diff=<name>` driver declared binary in the config, a file git decides

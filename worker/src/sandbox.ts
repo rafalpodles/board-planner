@@ -37,6 +37,11 @@ import { ResolvedTool, unresolvedToolReason } from "./tool-path.js";
  * program that reads one only through cfprefsd sees the default instead, which for the run is the
  * same class of answer as a fresh account.
  *
+ * Launching is the same shape (BP-807): `open -g -j <bundle>` returned 0 under this profile and the
+ * bundle's program ran with ppid 1, unconfined. The deny below names the services a launch and an
+ * AppleEvent go through, measured on macOS 26.6.2; `npm ci`, `npm run build`, `npm test`, git and
+ * the executor's real `claude -p` still succeed under it.
+ *
  * Still open, and it is the same shape: every other daemon reachable by `mach-lookup`. Naming
  * cfprefsd closes the channel somebody measured, not the category — a denylist of service names
  * cannot be completed, for the reason the comment above declines to denylist the instruction
@@ -134,6 +139,13 @@ function profileFor(names: string[]): string {
     // Denying the lookup rather than the exec: `defaults` is one of many clients, and a denylist of
     // programs is the game sandbox.ts already refuses to play.
     '(deny mach-lookup (global-name "com.apple.cfprefsd.daemon") (global-name "com.apple.cfprefsd.agent"))',
+    // A process this one never spawns (BP-807): `open`, NSWorkspace and osascript ask a daemon to
+    // launch an app, and it runs outside the profile with ppid 1. LaunchServices launches through
+    // CoreServicesUIAgent (quarantine-resolver) and falls back to RunningBoard, so both go; lsd's
+    // modifydb registers a bundle's URL handlers for a later launch; appleeventsd hands out the
+    // port an AppleEvent to another app needs.
+    '(deny mach-lookup (global-name "com.apple.coreservices.quarantine-resolver") (global-name "com.apple.runningboard") ' +
+      '(global-name "com.apple.lsd.modifydb") (global-name "com.apple.coreservices.appleevents"))',
   ].join("\n");
 }
 
