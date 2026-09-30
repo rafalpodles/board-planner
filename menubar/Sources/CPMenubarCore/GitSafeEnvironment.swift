@@ -65,7 +65,9 @@ public enum GitSafeEnvironment {
 }
 
 public struct KeychainHelperProbe: Sendable {
-    /// The scope of every `credential.helper` git reads, or nil when git could not answer.
+    /// The scope of every credential helper git reads, URL-scoped ones such as the
+    /// `credential.https://github.com.helper` that `gh auth setup-git` writes included, or nil when
+    /// git could not answer.
     public typealias HelperScopes = @Sendable (_ git: String, _ environment: [String: String]) -> Set<String>?
     public typealias Check = @Sendable (_ git: String, _ environment: [String: String]) -> Bool
 
@@ -87,7 +89,8 @@ public struct KeychainHelperProbe: Sendable {
     // Each check only reads config or stats a file; none runs a credential helper.
     public static let live = KeychainHelperProbe(
         helperScopes: { git, environment in
-            let answer = run(git, ["config", "--show-scope", "--get-all", "credential.helper"], environment)
+            let answer = run(
+                git, ["config", "--show-scope", "--get-regexp", #"^credential\.(.*\.)?helper$"#], environment)
             // Exit 1 is git's "no such key"; anything else but 0, an unreadable file included, is
             // taken as the operator having a say.
             guard answer.code == 0 || answer.code == 1 else { return nil }

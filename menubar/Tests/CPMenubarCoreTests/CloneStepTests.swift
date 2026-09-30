@@ -411,6 +411,17 @@ final class GitSafeEnvironmentTests: XCTestCase {
         ])
     }
 
+    // BP-798 delta review: what `gh auth setup-git` writes is keyed credential.https://github.com.helper
+    func testRealGitSeesAURLScopedResetAndHelper() throws {
+        try Self.assertGlobalHelper(files: [
+            ".gitconfig": "[credential \"https://github.com\"]\n\thelper =\n\thelper = !gh auth git-credential\n",
+        ])
+    }
+
+    func testRealGitSeesAURLScopedResetAlone() throws {
+        try Self.assertGlobalHelper(files: [".gitconfig": "[credential \"https://github.com\"]\n\thelper =\n"])
+    }
+
     func testRealGitThatCannotReadTheGlobalConfigAddsNoHelper() throws {
         guard !Self.installedGits.isEmpty else { throw XCTSkip("no git installed") }
         let home = FileManager.default.temporaryDirectory.appendingPathComponent("bp798-\(UUID().uuidString)")
