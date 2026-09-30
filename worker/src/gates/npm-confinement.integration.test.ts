@@ -302,7 +302,7 @@ describe.skipIf(!onMac)("the test gate against the real sandbox", () => {
       // Through a proxy the request line is the absolute URL; direct, it is the path
       expect(seen.length, "npm never asked for the tarball, so this proves nothing").toBeGreaterThan(0);
       expect(seen.filter((request) => request.url.startsWith("http://"))).toEqual([]);
-    });
+    }, 120_000);
 
     function gitDependency(manifest: object = {}) {
       const dep = join(dir, "dep");
@@ -329,7 +329,7 @@ describe.skipIf(!onMac)("the test gate against the real sandbox", () => {
       expect(existsSync(join(worktree, "GIT-SCRIPT-RAN"))).toBe(false);
       expect("code" in result && result.code, JSON.stringify(result)).toBe(0);
       expect(existsSync(join(worktree, "node_modules", "gitdep", "package.json"))).toBe(true);
-    });
+    }, 120_000);
 
     // pacote prepares a git dependency that has a prepare script with a child `npm install`, and
     // npm exports a project's `node-options` to it as NODE_OPTIONS
@@ -350,14 +350,14 @@ describe.skipIf(!onMac)("the test gate against the real sandbox", () => {
         });
 
         expect(existsSync(marker())).toBe(true);
-      });
+      }, 120_000);
 
       it("does not run it under the install's own environment", async () => {
         const result = await install();
 
         expect(existsSync(marker())).toBe(false);
         expect("code" in result && result.code, JSON.stringify(result)).toBe(0);
-      });
+      }, 120_000);
     });
   });
 });

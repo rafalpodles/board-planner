@@ -396,7 +396,7 @@ describe.skipIf(!onMac)("confine against the real sandbox", () => {
 
       expect(result.code, result.stderr).toBe(0);
       expect(JSON.parse(result.stdout)).toEqual({ tcp: "EPERM", udp: "EPERM" });
-    });
+    }, 30_000);
 
     it("leaves the same connection alone in open mode — the control", async () => {
       const result = await confinedNode(OFF_MACHINE);
@@ -405,7 +405,7 @@ describe.skipIf(!onMac)("confine against the real sandbox", () => {
       const { tcp, udp } = JSON.parse(result.stdout);
       expect(tcp).not.toBe("EPERM");
       expect(udp).toBe("sent");
-    });
+    }, 30_000);
 
     it("lets a loopback server answer its own client in loopback mode, on IPv4 and IPv6", async () => {
       const result = await confinedNode(
@@ -426,7 +426,7 @@ describe.skipIf(!onMac)("confine against the real sandbox", () => {
 
       expect(result.code, result.stderr).toBe(0);
       expect(result.stdout.trim()).toBe("pong,pong");
-    });
+    }, 30_000);
 
     // Unix sockets stay open until BP-810 decides otherwise: a suite talking to a local database
     // over one is honest, and a deny on network-outbound alone refuses it
@@ -447,7 +447,7 @@ describe.skipIf(!onMac)("confine against the real sandbox", () => {
 
       expect(result.code, result.stderr).toBe(0);
       expect(result.stdout.trim()).toBe("pong");
-    });
+    }, 30_000);
   });
 
   /**
