@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
+import { test, expect, type APIRequestContext, type Page, type Request } from "@playwright/test";
 import {
   seed,
   seedAgents,
@@ -53,19 +53,24 @@ async function machineSays(request: APIRequestContext, body: Record<string, unkn
   expect(response.status(), await response.text()).toBe(200);
 }
 
+const isHandoverRead = (req: Request) => req.method() === "GET" && req.url().endsWith("/handover");
+
 async function readAgain(page: Page) {
-  const reread = page.waitForResponse(
-    (res) => res.url().endsWith("/handover") && res.request().method() === "GET"
-  );
+  const reads: string[] = [];
+  page.on("request", (req) => {
+    const path = new URL(req.url()).pathname;
+    if (req.method() === "GET" && /\/(handover|tasks\/[^/]+)$/.test(path)) reads.push(path);
+  });
+  const focusRead = page.waitForRequest(isHandoverRead);
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-  await reread;
+  const response = await (await focusRead).response();
+  expect(response?.status()).toBe(200);
+  return { readiness: await response!.json(), reads };
 }
 
 async function openAs(page: Page, who: "admin" | "member", taskNumber = MEMBER_HANDOVER_TASK_NUMBER) {
   await signIn(page, who);
-  const readiness = page.waitForResponse(
-    (res) => res.url().endsWith(`/handover`) && res.request().method() === "GET"
-  );
+  const readiness = page.waitForResponse((res) => isHandoverRead(res.request()));
   await page.goto(`/projects/${PROJECT_KEY}/tasks/${taskNumber}`);
   const response = await readiness;
   expect(response.status()).toBe(200);
@@ -180,20 +185,12 @@ test.describe("a member's own task, as the board changes under it", () => {
     await expect(notice(page)).toHaveAttribute("data-reason", "no-machine");
 
     await seedMachine("git@github.com:e2e/handover-board.git");
-    // The whole task is reloaded now and then on its own, which also reads /handover; the focus
-    // re-read is the one that reads /handover and nothing else
-    const reads: string[] = [];
-    page.on("request", (req) => {
-      if (req.method() === "GET" && req.url().includes("/api/")) reads.push(new URL(req.url()).pathname);
-    });
-    const reread = page.waitForResponse(
-      (res) => res.url().endsWith("/handover") && res.request().method() === "GET"
-    );
-    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-    await reread;
-    expect(reads.filter((p) => p.includes(`/tasks/${MEMBER_HANDOVER_TASK_NUMBER}`))).toEqual([]);
+    const { readiness, reads } = await readAgain(page);
+    expect(readiness).toMatchObject({ machine: "live" });
 
-    await expect(waiting(page)).toHaveText("Waiting for your machine to take it.", { timeout: 1_000 });
+    await expect(waiting(page)).toHaveText("Waiting for your machine to take it.");
+    // Reloading the whole task also reads /handover; the focus re-read is the only read made
+    expect(reads).toEqual([`/api/projects/${PROJECT_KEY}/handover`]);
   });
 
   test("a paused machine is named as connected but not taking work", async ({ page }) => {
@@ -304,13 +301,11 @@ test.describe("a member's own task, as the board changes under it", () => {
     await expect(notice(page)).toHaveAttribute("data-reason", "runs-off");
 
     await setBoardReadiness({ workerEnabled: true });
-    const reread = page.waitForResponse(
-      (res) => res.url().endsWith("/handover") && res.request().method() === "GET"
-    );
-    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-    await reread;
+    const { readiness, reads } = await readAgain(page);
+    expect(readiness).toMatchObject({ workerEnabled: true });
 
-    await expect(waiting(page)).toHaveText("Waiting for your machine to take it.", { timeout: 1_000 });
+    await expect(waiting(page)).toHaveText("Waiting for your machine to take it.");
+    expect(reads).toEqual([`/api/projects/${PROJECT_KEY}/handover`]);
   });
 
   test("a locked board switched off names the lock first, and the owners' switch after it", async ({
@@ -362,10 +357,12 @@ test.describe("a member's own task, as the board changes under it", () => {
     );
 
     await machineSays(request, { halt: { paused: false, by: null, command: null } });
-    await readAgain(page);
+    const { readiness, reads } = await readAgain(page);
+    expect(readiness).toMatchObject({ machine: "live" });
 
-    await expect(waiting(page)).toHaveText("Waiting for your machine to take it.", { timeout: 1_000 });
+    await expect(waiting(page)).toHaveText("Waiting for your machine to take it.");
     await expect(notice(page)).toHaveCount(0);
+    expect(reads).toEqual([`/api/projects/${PROJECT_KEY}/handover`]);
   });
 
   test("a board pause the machine has since resumed reads as waiting for it, not as paused", async ({

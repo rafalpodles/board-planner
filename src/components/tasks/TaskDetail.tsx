@@ -83,6 +83,13 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
   const [refusal, setRefusal] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
   const shown = useRef(false);
+  // Whole-task reloads finish on their slowest read, so their readiness can land after a newer one
+  const readinessReads = useRef({ issued: 0, shown: 0 });
+  const showReadiness = (read: number, value: ApiHandoverReadiness | null) => {
+    if (read <= readinessReads.current.shown) return;
+    readinessReads.current.shown = read;
+    setReadiness(value);
+  };
 
   const refuse = useCallback((err: unknown, reading = false) => {
     const refused = taskRefusal(err, reading);
@@ -93,6 +100,7 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
   }, []);
 
   const loadData = useCallback(async () => {
+    const readinessRead = ++readinessReads.current.issued;
     try {
       const [t, p, s, r] = await Promise.all([
         api.get(`/api/projects/${projectId}/tasks/${taskId}`),
@@ -103,7 +111,7 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
       setTask(t);
       setProject(p);
       setSprints(s);
-      setReadiness(r ?? null);
+      showReadiness(readinessRead, r ?? null);
       setRefusal(null);
       shown.current = true;
       onLoaded?.(t, p);
@@ -139,9 +147,10 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
     function reread() {
       if (document.visibilityState === "hidden" || inFlight) return;
       inFlight = true;
+      const read = ++readinessReads.current.issued;
       api
         .get(`/api/projects/${projectId}/handover`)
-        .then(setReadiness)
+        .then((r) => showReadiness(read, r))
         .catch(() => {})
         .finally(() => {
           inFlight = false;

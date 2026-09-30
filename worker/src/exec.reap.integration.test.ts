@@ -272,7 +272,7 @@ describe.skipIf(!onMac)("the helper it trusts", () => {
     const failure = await createReaper({
       compiler: "/nonexistent/cc",
       bundled: hangingHelper(),
-      probeTimeoutMs: 300,
+      bundledProbeTimeoutMs: 300,
       quarantine: async () => null,
     }).ready([]);
 
@@ -337,11 +337,39 @@ describe.skipIf(!onMac)("the helper it trusts", () => {
 
   it("builds one here instead when the bundled helper cannot be used, and warns which was used", async () => {
     const warn = vi.fn();
-    const reaper = createReaper({ bundled: hangingHelper(), probeTimeoutMs: 300, quarantine: async () => null, warn });
+    const reaper = createReaper({ bundled: hangingHelper(), bundledProbeTimeoutMs: 300, quarantine: async () => null, warn });
 
     expect(await reaper.ready([])).toBe("");
     expect(warn).toHaveBeenCalledWith(expect.stringMatching(/^warning: the bundled process reaper was not used \(the reaper did not answer within 0\.3s\); using one built with \/usr\/bin\/cc instead$/));
-  });
+  }, 30_000);
+
+  // BP-811: a loaded machine is slow to run a binary it has just linked
+  it("gives the one it built the full probe time, not the bundled helper's", async () => {
+    const slowCompiler = join(dir, "bin", "slow-cc");
+    writeFileSync(
+      slowCompiler,
+      `#!/bin/sh
+out=""; previous=""
+for arg in "$@"; do [ "$previous" = "-o" ] && out="$arg"; previous="$arg"; done
+/usr/bin/cc "$@" || exit $?
+mv "$out" "$out.real"
+printf '#!/bin/sh\\nsleep 1\\nexec "%s" "$@"\\n' "$out.real" > "$out"
+chmod 755 "$out"
+`
+    );
+    chmodSync(slowCompiler, 0o755);
+    const warn = vi.fn();
+    const reaper = createReaper({
+      compiler: slowCompiler,
+      bundled: hangingHelper(),
+      bundledProbeTimeoutMs: 300,
+      quarantine: async () => null,
+      warn,
+    });
+
+    expect(await reaper.ready([])).toBe("");
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("the reaper did not answer within 0.3s"));
+  }, 30_000);
 
   it("builds one here instead of a quarantined one, without running it", async () => {
     const warn = vi.fn();

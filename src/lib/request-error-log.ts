@@ -73,3 +73,8 @@ export function describeRequestError(
 
   return `Unhandled error — ${parts.join(" ")}`;
 }
+
+/** What Node throws into a body read when the client closed the connection before sending it all. */
+export function clientHungUp(error: unknown): boolean {
+  return error instanceof Error && error.message === "aborted" && (error as { code?: unknown }).code === "ECONNRESET";
+}

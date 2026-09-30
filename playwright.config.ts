@@ -190,6 +190,7 @@ function devServerEnv(origin: string) {
     // a deployment to quieten the indicator: outside a production build it opens both of those.
     // Only here; a developer running `next dev` by hand gets none of the three.
     E2E: "1",
+    NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --require ${JSON.stringify(`${__dirname}/e2e/keep-idle-connections.cjs`)}`.trim(),
   };
 }
 

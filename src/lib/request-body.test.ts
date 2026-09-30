@@ -81,6 +81,20 @@ describe("readJsonBody", () => {
     expect(state.cancelled).toBe(true);
   });
 
+  // BP-802: the unread rest of the body is still on the connection, so no request may follow it
+  it("closes the connection behind a refusal, whether on the header or mid-stream", async () => {
+    const declared = countingBody(MAX_JSON_BODY_BYTES * 4);
+    const onTheHeader = await readJsonBody(
+      request(declared.stream, { "content-length": String(MAX_JSON_BODY_BYTES * 4) })
+    );
+    const midStream = await readJsonBody(request(countingBody(MAX_JSON_BODY_BYTES * 8).stream));
+
+    for (const result of [onTheHeader, midStream]) {
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.response.headers.get("connection")).toBe("close");
+    }
+  });
+
   it("stops mid-stream when Content-Length lies about being small", async () => {
     const { stream, state } = countingBody(MAX_JSON_BODY_BYTES * 8);
     const result = await readJsonBody(request(stream, { "content-length": "10" }));
