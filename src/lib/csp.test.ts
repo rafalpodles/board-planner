@@ -80,20 +80,20 @@ describe("the proxy", () => {
     expect(a).not.toBe(b);
   });
 
-  it("overwrites an x-nonce the client sent", async () => {
-    const response = await proxied("/login", { "x-nonce": "attacker" });
-    expect(forwardedRequestHeader(response, "x-nonce")).not.toBe("attacker");
-  });
-
-  it.each<Record<string, string>>([{ "next-router-prefetch": "1" }, { purpose: "prefetch" }])(
-    "gives a prefetch %o a policy without a nonce rather than none",
-    async (headers) => {
-      const response = await proxied("/projects/TP", headers);
+  it.each<Record<string, string>>([{}, { "next-router-prefetch": "1" }, { purpose: "prefetch" }, { rsc: "1" }])(
+    "overwrites a client's own x-nonce and Content-Security-Policy on %o",
+    async (extra) => {
+      const response = await proxied("/projects/TP", {
+        ...extra,
+        "x-nonce": "EVILNONCE",
+        "content-security-policy": "script-src 'unsafe-inline'",
+      });
+      const nonce = forwardedRequestHeader(response, "x-nonce")!;
+      expect(nonce).toMatch(/^[A-Za-z0-9+/]{22}==$/);
+      expect(nonce).not.toBe("EVILNONCE");
       const policy = response.headers.get("content-security-policy")!;
-      expect(directive(policy, "script-src")).toBe("script-src 'self'");
-      expect(policy).toBe(contentSecurityPolicy({ dev: false }));
-      expect(response.headers.get("reporting-endpoints")).toBe('csp-endpoint="/api/csp-report"');
-      expect(forwardedRequestHeader(response, "x-nonce")).toBeNull();
+      expect(forwardedRequestHeader(response, "content-security-policy")).toBe(policy);
+      expect(directive(policy, "script-src")).toBe(`script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`);
     }
   );
 

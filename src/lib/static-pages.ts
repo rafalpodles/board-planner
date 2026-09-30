@@ -7,9 +7,13 @@ export const STATIC_ROUTES_ALLOWED: Record<string, string> = {
 };
 
 export function unexpectedStaticRoutes(manifest: unknown): string[] {
-  const routes = (manifest as { routes?: Record<string, unknown> } | null)?.routes;
-  if (!routes || typeof routes !== "object") {
-    throw new Error("prerender-manifest.json has no routes table — has its shape changed?");
+  const { routes, dynamicRoutes } =
+    (manifest as { routes?: Record<string, unknown>; dynamicRoutes?: Record<string, unknown> } | null) ?? {};
+  if (!routes || typeof routes !== "object" || !dynamicRoutes || typeof dynamicRoutes !== "object") {
+    throw new Error("prerender-manifest.json has no routes or dynamicRoutes table — has its shape changed?");
   }
-  return Object.keys(routes).filter((route) => !(route in STATIC_ROUTES_ALLOWED));
+  return [
+    ...Object.keys(routes).filter((route) => !(route in STATIC_ROUTES_ALLOWED)),
+    ...Object.keys(dynamicRoutes),
+  ];
 }
