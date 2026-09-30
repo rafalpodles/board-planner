@@ -34,6 +34,9 @@ const SAFE_CONFIG = [
   // untracked, shared with the main clone, reaching no diff, and with no key to turn it off, so
   // hidden-files.ts asks `check-ignore -v` which rule hides each ignored path instead (BP-640).
   "core.excludesFile=/dev/null",
+  // `core.ignoreStat=true` makes git set assume-unchanged on every entry it checks out or stages,
+  // which is the flag worktree-pin.ts refuses a run over when the run did not start with it (BP-794)
+  "core.ignoreStat=false",
 ];
 
 // Delivery does not go through here: it carries GH_TOKEN and has to reach the remote, so it

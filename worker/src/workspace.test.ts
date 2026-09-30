@@ -46,9 +46,20 @@ const IDENT_LINE = "The Operator <operator@example.com> 1789000000 +0200\n";
 // …and whether anybody chose that address. git guesses one from the hostname otherwise, and only
 // refuses the guess where the hostname has no dot in it, so asking git alone is host-dependent.
 const IDENT_EMAIL = "config --get user.email";
-// Where the new worktree's git dir is, recorded right after `worktree add` (BP-794)
-const GIT_DIR = "rev-parse --absolute-git-dir";
-const POINTER_FILES = { read: () => "gitdir: /repo/.git/worktrees/CP-158\n", kind: () => "file" as const };
+// Where the new worktree's git dir is, derived from the clone right after `worktree add` (BP-794)
+const GIT_DIR = "rev-parse --path-format=absolute --git-common-dir";
+// A clone whose admin dir for each worktree says what git would write for it
+const POINTER_FILES = {
+  read(path: string): string {
+    const admin = /^\/repo\/\.git\/worktrees\/([^/]+)\/(gitdir|commondir)$/.exec(path);
+    if (admin) return admin[2] === "gitdir" ? `/worktrees/${admin[1]}/.git\n` : "../..\n";
+    const pointer = /^\/worktrees\/([^/]+)\/\.git$/.exec(path);
+    return pointer ? `gitdir: /repo/.git/worktrees/${pointer[1]}\n` : "";
+  },
+  kind: () => "file" as const,
+  list: (dir: string) => (dir === "/repo/.git/worktrees" ? ["CP-158", "BP-1", "CP-1"] : []),
+  realpath: (path: string) => path,
+};
 
 function fakeGit(responses: Record<string, Partial<CommandResult>>) {
   const run = vi.fn(async (_command: string, args: string[], _opts: RunOpts): Promise<CommandResult> => {
@@ -69,7 +80,7 @@ function baseFromRemote(sha: string, extra: Record<string, Partial<CommandResult
     "worktree list --porcelain": { stdout: "" },
     [IDENT]: { stdout: IDENT_LINE },
     [IDENT_EMAIL]: { stdout: "operator@example.com\n" },
-    [GIT_DIR]: { stdout: "/repo/.git/worktrees/CP-158\n" },
+    [GIT_DIR]: { stdout: "/repo/.git\n" },
     ...extra,
   };
 }
@@ -659,7 +670,7 @@ describe("createWorkspace", () => {
       }
       const args = rawArgs.slice(HARDENING_PREFIX.length);
       if (args.join(" ") === GIT_DIR) {
-        return { code: 0, stdout: "/repo/.git/worktrees/CP-158\n", stderr: "", timedOut: false };
+        return { code: 0, stdout: "/repo/.git\n", stderr: "", timedOut: false };
       }
       if (args[0] === "rev-parse") {
         return { code: 0, stdout: "base9\n", stderr: "", timedOut: false };

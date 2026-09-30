@@ -392,6 +392,20 @@ describe("acting on a verdict", () => {
 
   // BP-794: a kept worktree's .git file is still the agent's to have rewritten, and a push through
   // it would read the remote from whatever repository it now names
+  it("says the worktree is gone when its directory is", async () => {
+    const h = harness();
+    const workTree = join(tmpdir(), "bp794-decision-gone-never-created");
+    h.markers.write({
+      ...h.markers.read("CP-158")!,
+      pin: { workTree, gitDir: "/repo/.git/worktrees/CP-158", pointer: "gitdir: /repo/.git/worktrees/CP-158\n", flagged: [] },
+    });
+
+    await settleDecisions(h.deps, [decision()], LATER);
+
+    expect(h.push).not.toHaveBeenCalled();
+    expect(h.settled[0]).toMatchObject({ state: "refused", error: `the worktree at ${workTree} is gone` });
+  });
+
   it("refuses the push when the worktree's .git file is not the one the run recorded", async () => {
     const workTree = mkdtempSync(join(tmpdir(), "bp794-decision-"));
     try {

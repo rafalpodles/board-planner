@@ -1,5 +1,5 @@
-import { lstatSync, readFileSync } from "fs";
-import { basename, isAbsolute, join, resolve, sep } from "path";
+import { lstatSync, readdirSync, readFileSync, realpathSync } from "fs";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "path";
 import { childEnv } from "./env.js";
 import { Runner } from "./exec.js";
 import { gitArgs, localGitEnv, requireGitPath } from "./git-safety.js";
@@ -16,7 +16,8 @@ const NAMED_AT_MOST = 5;
  * main clone's objects, a `HEAD`, a ref, a `config` — then becomes the repository every later git
  * call in that directory uses, remote and index included. `GIT_DIR` and `GIT_WORK_TREE` make git
  * skip that file altogether; the `commondir` it derives the shared repository from sits in the
- * main clone's `.git/worktrees/<name>/`, which the step cannot write.
+ * main clone's `.git/worktrees/<name>/`, which a confined step cannot write. An unconfined one
+ * (`CP_ALLOW_UNCONFINED_AGENT=1`) can, and nothing here holds against it.
  */
 export interface GitPin {
   workTree: string;
@@ -30,10 +31,26 @@ export interface GitPin {
 export interface PointerFiles {
   read(path: string): string;
   kind(path: string): "file" | "directory" | "symlink" | "other" | "missing";
+  list(dir: string): string[];
+  realpath(path: string): string;
 }
 
 export const nodePointerFiles: PointerFiles = {
   read: (path) => readFileSync(path, "latin1"),
+  list: (dir) => {
+    try {
+      return readdirSync(dir);
+    } catch {
+      return [];
+    }
+  },
+  realpath: (path) => {
+    try {
+      return realpathSync(path);
+    } catch {
+      return resolve(path);
+    }
+  },
   kind(path) {
     try {
       const stat = lstatSync(path);
@@ -96,27 +113,61 @@ async function flaggedEntries(runner: Runner, gitPath: string, pin: Pick<GitPin,
     .map((entry) => `${entry[0] === "S" || entry[0] === "s" ? "skip-worktree" : "assume-unchanged"} ${entry.slice(2)}`);
 }
 
-/** Read right after `git worktree add`, while the pointer is still the one git wrote. */
+function resolvedFrom(dir: string, text: string, files: PointerFiles): string {
+  const named = text.replace(/\n$/, "");
+  return files.realpath(isAbsolute(named) ? named : resolve(dir, named));
+}
+
+/**
+ * The pin for a worktree `git worktree add` just made, derived from the main clone and never from
+ * the worktree: its path is reused across attempts, so a process an earlier attempt left behind can
+ * rewrite `<workTree>/.git` before anything here reads it. The admin dir is the one under the
+ * clone's `worktrees/` whose `gitdir` names this worktree — that file and `commondir` are outside
+ * what a confined step can write — and the pointer must already be what git writes for it, in
+ * either of git's two spellings (`worktree.useRelativePaths`).
+ */
 export async function recordPin(
   runner: Runner,
   gitPath: string,
+  repoPath: string,
   workTree: string,
   files: PointerFiles = nodePointerFiles,
 ): Promise<GitPin> {
-  const resolved = await runner.run(requireGitPath(gitPath), gitArgs(["rev-parse", "--absolute-git-dir"]), {
-    cwd: workTree,
-    timeoutMs: TIMEOUT_MS,
-    env: localGitEnv(),
-  });
-  const gitDir = resolved.stdout.trim();
-  if (resolved.code !== 0 || !isAbsolute(gitDir)) {
-    throw new Error(`could not tell where the new worktree's git dir is: ${resolved.stderr || resolved.stdout || "git said nothing"}`);
+  const asked = await runner.run(
+    requireGitPath(gitPath),
+    gitArgs(["rev-parse", "--path-format=absolute", "--git-common-dir"]),
+    { cwd: repoPath, timeoutMs: TIMEOUT_MS, env: localGitEnv() },
+  );
+  const named = asked.stdout.trim();
+  if (asked.code !== 0 || !isAbsolute(named)) {
+    throw new Error(`could not tell where the clone's git dir is: ${asked.stderr || asked.stdout || "git said nothing"}`);
   }
-  const pointerPath = join(workTree, ".git");
-  if (files.kind(pointerPath) !== "file") {
-    throw new Error(`the new worktree has no .git file at ${pointerPath}`);
+  const commonDir = files.realpath(named);
+  const pointerPath = join(files.realpath(workTree), ".git");
+
+  const admins = files
+    .list(join(commonDir, "worktrees"))
+    .map((name) => join(commonDir, "worktrees", name))
+    .filter((admin) => {
+      try {
+        return resolvedFrom(admin, files.read(join(admin, "gitdir")), files) === pointerPath &&
+          resolvedFrom(admin, files.read(join(admin, "commondir")), files) === commonDir;
+      } catch {
+        return false;
+      }
+    });
+  if (admins.length !== 1) {
+    throw new Error(`the clone at ${repoPath} records ${admins.length} git dirs for the worktree at ${workTree}, not one`);
   }
-  const pointer = files.read(pointerPath);
+  const gitDir = admins[0];
+
+  const written = [`gitdir: ${gitDir}\n`, `gitdir: ${relative(dirname(pointerPath), gitDir)}\n`];
+  const pointer = files.kind(pointerPath) === "file" ? files.read(pointerPath) : null;
+  if (pointer === null || !written.includes(pointer)) {
+    throw new Error(
+      `refusing the new worktree: its .git file ${pointer === null ? "is missing" : `reads ${quoted(pointer)}`} where git wrote ${quoted(written[0])}`,
+    );
+  }
   return { workTree, gitDir, pointer, flagged: await flaggedEntries(runner, gitPath, { workTree, gitDir }) };
 }
 
@@ -134,6 +185,9 @@ export async function pinTampering(
 ): Promise<string | null> {
   const pointerPath = join(pin.workTree, ".git");
   const kind = files.kind(pointerPath);
+  if (kind === "missing" && files.kind(pin.workTree) !== "directory") {
+    return `its whole directory removed, ${pin.workTree} included`;
+  }
   if (kind !== "file") {
     return kind === "missing"
       ? `its .git file removed, which git wrote as ${quoted(pin.pointer)}`

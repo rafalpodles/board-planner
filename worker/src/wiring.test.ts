@@ -484,7 +484,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         if (command === GIT_PATH && args.includes("worktree") && args.includes("add")) {
           const separator = args.indexOf("--");
           if (separator !== -1 && args[separator + 1]) {
-            stubWorktree(args[separator + 1]);
+            stubWorktree(args[separator + 1], REPO);
           }
         }
         if (isAgentSpawn(command, args)) {
@@ -949,7 +949,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         if (command === GIT_PATH && args.includes("worktree") && args.includes("add")) {
           const separator = args.indexOf("--");
           if (separator !== -1 && args[separator + 1]) {
-            stubWorktree(args[separator + 1]);
+            stubWorktree(args[separator + 1], REPO);
           }
         }
         if (isAgentSpawn(command, args)) {

@@ -446,7 +446,7 @@ async function runWorkerAgainstTheBoard(opts: { takeTheTask: boolean }): Promise
       }
       if (command === GIT_PATH && args.includes("worktree") && args.includes("add")) {
         const separator = args.indexOf("--");
-        if (separator !== -1 && args[separator + 1]) stubWorktree(args[separator + 1]);
+        if (separator !== -1 && args[separator + 1]) stubWorktree(args[separator + 1], REPO);
       }
       // Order is not load-bearing — the probe's argv carries no "claude" element, so isAgentSpawn
       // cannot match it either way round. It sits here because that is the order they happen in.

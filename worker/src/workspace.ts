@@ -421,7 +421,7 @@ export function createWorkspace(
       await refuseIfPoisoned();
       // -B resets the branch instead of failing if a crashed previous attempt already created it
       await git(["worktree", "add", "-B", branch, "--", path, baseSha]);
-      const pin = await recordPin(runner, gitPath, path, files);
+      const pin = await recordPin(runner, gitPath, config.repoPath, path, files);
       return {
         path,
         baseSha,

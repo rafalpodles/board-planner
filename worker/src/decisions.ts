@@ -477,6 +477,9 @@ async function whyNotPushable(
     return `this machine holds ${marker.commit} for ${decision.taskKey}, not the accepted ${decision.commit}`;
   }
 
+  if (marker.pin && !existsSync(marker.pin.workTree)) {
+    return `the worktree at ${marker.pin.workTree} is gone`;
+  }
   const tampered = marker.pin ? await pinTampering(context.runner, context.gitPath, marker.pin) : null;
   if (tampered) return `the worktree now has ${tampered}`;
 

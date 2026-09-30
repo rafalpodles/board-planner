@@ -156,6 +156,54 @@ describe.skipIf(process.platform !== "darwin")("a worktree whose .git file a con
     expect(found).toContain("assume-unchanged README.md");
   });
 
+  // BP-794 review: the worktree path is reused across attempts, so a process an earlier attempt left
+  // behind can rewrite the new .git between `worktree add` and the pin being recorded
+  it("refuses a worktree whose .git file was rewritten before the pin was recorded", async () => {
+    const fake = join(dir, "wt", "BP-2", "node_modules", ".y");
+    const inner = createRunner();
+    const racing: Runner = {
+      async run(command, args, opts) {
+        const result = await inner.run(command, args, opts);
+        if (args.includes("worktree") && args.includes("add")) {
+          writeFileSync(join(dir, "wt", "BP-2", ".git"), `gitdir: ${fake}\n`);
+        }
+        return result;
+      },
+    };
+    const racedWorkspace = createWorkspace(
+      { repoPath: parent, worktreeRoot: join(dir, "wt"), baseBranch: "main" } as WorkerConfig,
+      racing,
+      gitPath,
+      () => ({}),
+      origin,
+      { name: "worker", email: "worker@example.com" },
+    );
+
+    await expect(racedWorkspace.create("BP-2", "worker")).rejects.toThrow(
+      `refusing the new worktree: its .git file reads ${JSON.stringify(`gitdir: ${fake}`)}`,
+    );
+  });
+
+  it("records the clone's own admin dir, not whatever .git names", () => {
+    expect(worktree.pin.gitDir).toBe(join(realpathSync(parent), ".git", "worktrees", "BP-1"));
+    expect(worktree.pin.pointer).toBe(`gitdir: ${worktree.pin.gitDir}\n`);
+  });
+
+  // BP-794 review: with core.ignoreStat=true git marks every entry it checks out or stages
+  // assume-unchanged, which read as tampering on every run that created a file
+  it("does not take the flags core.ignoreStat would make git set for the worker's own staging", async () => {
+    git(parent, "config", "core.ignoreStat", "true");
+    const fresh = await workspace().create("BP-3", "worker");
+    const runner = pinGit(createRunner(), () => [fresh.pin]);
+    writeFileSync(join(fresh.path, "new.ts"), "export {};\n");
+
+    const sha = await commitAll(runner, gitPath, fresh.path, "BP-3: work", fresh.commitIdentity, fresh.baseSha);
+
+    expect(sha).toMatch(/^[0-9a-f]{40}$/);
+    expect(fresh.pin.flagged).toEqual([]);
+    expect(await fresh.tampering()).toBeNull();
+  });
+
   describe("through a whole run", () => {
     const IMPLEMENT: SnapshotEntry = { key: "implement", kind: "step", name: "Implement", prompt: "p", capability: "edit" };
     const SIZE: SnapshotEntry = { key: "diff-size", kind: "gate", name: "Size", gateKind: "diff-size" };

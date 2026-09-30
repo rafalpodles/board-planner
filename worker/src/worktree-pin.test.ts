@@ -10,15 +10,34 @@ function shell(stdout = "", overrides: Partial<CommandResult> = {}): CommandResu
   return { code: 0, stdout, stderr: "", timedOut: false, ...overrides };
 }
 
-function listing(stdout: string, gitDir = "/repo/.git/worktrees/wt\n") {
+function listing(stdout: string, commonDir = "/repo/.git\n") {
   const run = vi.fn<Runner["run"]>(async (_command, args) =>
-    shell(args.includes("ls-files") ? stdout : args.includes("--absolute-git-dir") ? gitDir : ""),
+    shell(args.includes("ls-files") ? stdout : args.includes("--git-common-dir") ? commonDir : ""),
   );
   return { run };
 }
 
-function files(kind: ReturnType<PointerFiles["kind"]>, text = POINTER): PointerFiles {
-  return { kind: () => kind, read: () => text };
+function files(kind: ReturnType<PointerFiles["kind"]>, text = POINTER, workTree: ReturnType<PointerFiles["kind"]> = "directory"): PointerFiles {
+  return { kind: (path) => (path === "/wt" ? workTree : kind), read: () => text, list: () => [], realpath: (path) => path };
+}
+
+// A clone with an admin dir per entry, each `gitdir` naming the worktree git made it for
+function clone(
+  admins: Record<string, { gitdir: string; commondir?: string }>,
+  pointer: string | null = POINTER,
+): PointerFiles {
+  return {
+    list: (dir) => (dir === "/repo/.git/worktrees" ? Object.keys(admins) : []),
+    realpath: (path) => path,
+    kind: (path) => (path === "/wt/.git" && pointer !== null ? "file" : "missing"),
+    read(path) {
+      if (path === "/wt/.git" && pointer !== null) return pointer;
+      const at = /^\/repo\/\.git\/worktrees\/([^/]+)\/(gitdir|commondir)$/.exec(path);
+      const admin = at ? admins[at[1]] : undefined;
+      if (!admin) throw new Error(`ENOENT ${path}`);
+      return at![2] === "gitdir" ? admin.gitdir : (admin.commondir ?? "../..\n");
+    },
+  };
 }
 
 describe("pinGit", () => {
@@ -43,6 +62,25 @@ describe("pinGit", () => {
     expect(inner.run.mock.calls[0][2].env).toEqual(expect.objectContaining({ PATH: expect.any(String), GIT_DIR: PIN.gitDir }));
   });
 
+  it("pins to whichever of several worktrees the cwd is in", async () => {
+    const inner = { run: vi.fn<Runner["run"]>(async () => shell()) };
+    const second = { workTree: "/other", gitDir: "/repo/.git/worktrees/other" };
+    await pinGit(inner, () => [PIN, second]).run(gitPath, ["status"], { cwd: "/other/src", timeoutMs: 1, env: {} });
+
+    expect(inner.run.mock.calls[0][2].env).toEqual({ GIT_DIR: second.gitDir, GIT_WORK_TREE: "/other" });
+  });
+
+  it("overrides a GIT_DIR or GIT_WORK_TREE the caller set", async () => {
+    const inner = { run: vi.fn<Runner["run"]>(async () => shell()) };
+    await pinGit(inner, () => [PIN]).run(gitPath, ["status"], {
+      cwd: "/wt",
+      timeoutMs: 1,
+      env: { GIT_DIR: "/wt/node_modules/.y", GIT_WORK_TREE: "/elsewhere" },
+    });
+
+    expect(inner.run.mock.calls[0][2].env).toEqual({ GIT_DIR: PIN.gitDir, GIT_WORK_TREE: "/wt" });
+  });
+
   it("leaves a sibling that shares the prefix, and anything that is not git or gh, alone", async () => {
     expect(await spawned(gitPath, "/wt2")).toEqual({ HOME: "/h" });
     expect(await spawned(gitPath, "/tmp/scratch")).toEqual({ HOME: "/h" });
@@ -51,23 +89,58 @@ describe("pinGit", () => {
 });
 
 describe("recordPin", () => {
-  it("records the git dir, the pointer's bytes and the flags the checkout starts with", async () => {
+  it("derives the git dir from the clone, and records the pointer and the flags the checkout starts with", async () => {
     const runner = listing("H a.ts\0S sparse/b.ts\0");
+    const found = clone({ other: { gitdir: "/elsewhere/.git\n" }, wt: { gitdir: "/wt/.git\n" } });
 
-    expect(await recordPin(runner, gitPath, "/wt", files("file"))).toEqual({
+    expect(await recordPin(runner, gitPath, "/repo", "/wt", found)).toEqual({
       ...PIN,
       flagged: ["skip-worktree sparse/b.ts"],
     });
+    expect(runner.run.mock.calls[0][2].cwd).toBe("/repo");
+    expect(runner.run.mock.calls[1][2].env).toEqual(expect.objectContaining({ GIT_DIR: PIN.gitDir, GIT_WORK_TREE: "/wt" }));
   });
 
-  it("refuses a git dir that is not an absolute path", async () => {
-    await expect(recordPin(listing("", ".git\n"), gitPath, "/wt", files("file"))).rejects.toThrow(
-      /could not tell where the new worktree's git dir is/,
+  it("accepts the relative spelling git writes under worktree.useRelativePaths", async () => {
+    const relative = "gitdir: ../repo/.git/worktrees/wt\n";
+    const found = clone({ wt: { gitdir: "../../../../wt/.git\n" } }, relative);
+
+    expect(await recordPin(listing(""), gitPath, "/repo", "/wt", found)).toEqual({ ...PIN, pointer: relative });
+  });
+
+  // BP-794 review: the path is reused across attempts, so something an earlier attempt left running
+  // can rewrite the new .git before this reads it
+  it("refuses a pointer that is already not what git wrote", async () => {
+    const found = clone({ wt: { gitdir: "/wt/.git\n" } }, "gitdir: /wt/node_modules/.y\n");
+
+    await expect(recordPin(listing(""), gitPath, "/repo", "/wt", found)).rejects.toThrow(
+      'refusing the new worktree: its .git file reads "gitdir: /wt/node_modules/.y" where git wrote "gitdir: /repo/.git/worktrees/wt"',
     );
   });
 
   it("refuses a worktree with no .git file", async () => {
-    await expect(recordPin(listing(""), gitPath, "/wt", files("directory"))).rejects.toThrow(/no \.git file/);
+    const found = clone({ wt: { gitdir: "/wt/.git\n" } }, null);
+
+    await expect(recordPin(listing(""), gitPath, "/repo", "/wt", found)).rejects.toThrow(/its \.git file is missing/);
+  });
+
+  it("refuses when no admin dir, or more than one, names the worktree", async () => {
+    await expect(recordPin(listing(""), gitPath, "/repo", "/wt", clone({}))).rejects.toThrow(/records 0 git dirs/);
+    await expect(
+      recordPin(listing(""), gitPath, "/repo", "/wt", clone({ a: { gitdir: "/wt/.git\n" }, b: { gitdir: "/wt/.git\n" } })),
+    ).rejects.toThrow(/records 2 git dirs/);
+  });
+
+  it("does not take an admin dir whose commondir names another repository", async () => {
+    const found = clone({ wt: { gitdir: "/wt/.git\n", commondir: "/wt/node_modules/.y\n" } });
+
+    await expect(recordPin(listing(""), gitPath, "/repo", "/wt", found)).rejects.toThrow(/records 0 git dirs/);
+  });
+
+  it("refuses a common dir that is not an absolute path", async () => {
+    await expect(recordPin(listing("", ".git\n"), gitPath, "/repo", "/wt", clone({}))).rejects.toThrow(
+      /could not tell where the clone's git dir is/,
+    );
   });
 });
 
@@ -94,6 +167,10 @@ describe("pinTampering", () => {
     ["symlink", "a symlink at .git where git wrote a file"],
   ] as const)("names a pointer that is now %s", async (kind, said) => {
     expect(await pinTampering(listing(""), gitPath, PIN, files(kind))).toContain(said);
+  });
+
+  it("says the worktree is gone when the whole directory is", async () => {
+    expect(await pinTampering(listing(""), gitPath, PIN, files("missing", POINTER, "missing"))).toBe("its whole directory removed, /wt included");
   });
 
   it("names a skip-worktree or assume-unchanged flag the checkout did not start with", async () => {

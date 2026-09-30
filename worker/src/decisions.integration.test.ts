@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, existsSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from "fs";
 import { agentArgs, answerSandboxProbe, isAgentSpawn, isSandboxProbe } from "./__fixtures__/agent-spawn.js";
 import { createServer, IncomingMessage, Server, ServerResponse } from "http";
 import { AddressInfo } from "net";
@@ -292,7 +292,7 @@ function makeRunner(seen: GitCall[], registeredWorktree = ""): Runner {
       }
       if (command === GIT_PATH && args.includes("worktree") && args.includes("add")) {
         const separator = args.indexOf("--");
-        if (separator !== -1 && args[separator + 1]) stubWorktree(args[separator + 1]);
+        if (separator !== -1 && args[separator + 1]) stubWorktree(args[separator + 1], REPO);
       }
 
       if (args[0] === "-lc") return ok(`${TOOL_DIR}/${(args[1] ?? "").split(" ").pop() ?? ""}`);
@@ -504,8 +504,10 @@ describe("a refused change, offered and then accepted, over a real HTTP surface"
     const push = settlement.git.find((call) => call.args.includes("push"));
     const create = settlement.git.find((call) => call.command === `${TOOL_DIR}/gh` && call.args.includes("create"));
 
+    const marker = JSON.parse(markerAfterRefusal!);
+    expect(marker.pin.gitDir).toBe(join(realpathSync(REPO), "worktrees", TASK_KEY));
     for (const call of [push, create]) {
-      expect(call?.env).toMatchObject({ GIT_DIR: REPO, GIT_WORK_TREE: JSON.parse(markerAfterRefusal!).worktreePath });
+      expect(call?.env).toMatchObject({ GIT_DIR: marker.pin.gitDir, GIT_WORK_TREE: marker.worktreePath });
     }
   });
 

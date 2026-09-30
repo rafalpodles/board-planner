@@ -494,7 +494,9 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   **The worktree's `.git` file is not trusted once the agent starts.** In a linked worktree it is a
   file inside the worktree, and a confined step can rewrite it to name a git dir of its own, with
   its own remote, ignore rules and index. So the git dir is recorded when the worktree is created,
-  and every git and `gh` call in the worktree names it through `GIT_DIR`/`GIT_WORK_TREE`. Before
+  and every git and `gh` call the worker makes in the worktree names it through
+  `GIT_DIR`/`GIT_WORK_TREE` — derived from the main clone's own record of the worktree, never from
+  the worktree's `.git` file. Before
   each commit, each gate and each push, pull request or merge, the worker also compares the `.git`
   file with what git wrote and lists the index for `skip-worktree`/`assume-unchanged` flags the
   checkout did not start with; either one refuses the run and says what changed (BP-794). A sparse

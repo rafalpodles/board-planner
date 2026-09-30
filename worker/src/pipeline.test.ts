@@ -325,6 +325,19 @@ describe("runTask", () => {
     expect(h.workspace.destroy).toHaveBeenCalledWith("CP-158");
   });
 
+  // The pipeline's own calls — commit, the hidden-file check and the clean-tree check — as well
+  it("runs every git call it makes in the worktree against the pinned git dir", async () => {
+    const h = harness();
+    await runTask(h.deps, running("implement", "diff-size"));
+
+    const inWorktree = vi.mocked(h.runner.run).mock.calls.filter((call) => call[0] === GIT_PATH && call[2].cwd === "/wt");
+    const verbs = new Set(inWorktree.map((call) => call[1].find((arg) => ["status", "add", "commit", "ls-files"].includes(arg))));
+    expect([...verbs].filter(Boolean).sort()).toEqual(["add", "commit", "ls-files", "status"]);
+    for (const call of inWorktree) {
+      expect(call[2].env).toEqual(expect.objectContaining({ GIT_DIR: PIN.gitDir, GIT_WORK_TREE: "/wt" }));
+    }
+  });
+
   it("opens the pull request against the configured base branch", async () => {
     const h = harness({ config: { ...config, baseBranch: "develop" } });
     await runTask(h.deps, task);
@@ -334,12 +347,13 @@ describe("runTask", () => {
 
   // BP-794: `.git` in the worktree is the agent's to rewrite, so delivery, the diff and the gates
   // get a runner that names the git dir recorded at creation instead
-  it("hands delivery and the diff a runner pinned to the worktree's own git dir", async () => {
+  it("hands delivery, the diff and the gates a runner pinned to the worktree's own git dir", async () => {
     const h = harness();
     await runTask(h.deps, task);
 
     const inner = vi.mocked(h.runner.run);
-    for (const pinned of [h.createDelivery.mock.calls[0][0], h.collectDiff.mock.calls[0][0]]) {
+    const gateRunner = h.gateFor.mock.calls[0][1];
+    for (const pinned of [h.createDelivery.mock.calls[0][0], h.collectDiff.mock.calls[0][0], gateRunner]) {
       inner.mockClear();
       await pinned.run("/usr/bin/git", ["status"], { cwd: "/wt/sub", timeoutMs: 1, env: { HOME: "/h" } });
       await pinned.run("/usr/bin/git", ["init"], { cwd: "/tmp/scratch", timeoutMs: 1, env: { HOME: "/h" } });
