@@ -348,6 +348,7 @@ const INLINE_RECIPES: Record<string, InlineRecipe> = {
     owner: { status: 200, body: YES },
   },
   "PUT /api/projects/[projectId]": {
+    // The wrapper refuses the member, so only the owner half reaches the inline check
     send: withBody("put", {}),
     read: field((project: Listed) => project.canAdmin),
     member: { status: 403, body: FORBIDDEN },
@@ -424,9 +425,9 @@ const INLINE_RECIPES: Record<string, InlineRecipe> = {
         headers: SAME_ORIGIN,
         data: { projects: [String(PROJECT_ID)] },
       }),
-    read: field((picked: { leftDisabled: string[] }) => picked.leftDisabled),
-    member: { status: 200, body: new RegExp(`^\\["${PROJECT_KEY}"\\]$`) },
-    owner: { status: 200, body: /^\[\]$/ },
+    read: field((picked: { projects: string[]; leftDisabled: string[] }) => [picked.projects, picked.leftDisabled]),
+    member: { status: 200, body: new RegExp(`^\\[\\["${PROJECT_ID}"\\],\\["${PROJECT_KEY}"\\]\\]$`) },
+    owner: { status: 200, body: new RegExp(`^\\[\\["${PROJECT_ID}"\\],\\[\\]\\]$`) },
   },
 };
 
