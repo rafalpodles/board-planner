@@ -5,10 +5,14 @@ import XCTest
 /// are the two answers `CheckoutGrant` gives from it; the fixtures mirror `LinkedWorktreeCheckTests`
 /// rather than spawning real git, since the discriminator's own git behaviour is proved there.
 final class CheckoutGrantTests: XCTestCase {
-    private func check(gitDir: (Int32, String), commonDir: (Int32, String), at path: String) -> CheckoutGrant {
+    private func check(
+        gitDir: (Int32, String), commonDir: (Int32, String), superproject: (Int32, String) = (0, ""),
+        at path: String
+    ) -> CheckoutGrant {
         CheckoutGrant.check(path: path) { args, _ in
             if args.contains("--git-dir") { return gitDir }
             if args.contains("--git-common-dir") { return commonDir }
+            if args.contains("--show-superproject-working-tree") { return superproject }
             XCTFail("unexpected git call: \(args)")
             return (1, "")
         }
@@ -45,7 +49,7 @@ final class CheckoutGrantTests: XCTestCase {
     func testASubmoduleWorkingDirectoryIsRefused() {
         let verdict = check(
             gitDir: (0, "/super/.git/modules/vendor"), commonDir: (0, "/super/.git/modules/vendor"),
-            at: "/super/vendor")
+            superproject: (0, "/super\n"), at: "/super/vendor")
 
         guard case .refused(let reason) = verdict else {
             return XCTFail("expected a refusal, got \(verdict)")

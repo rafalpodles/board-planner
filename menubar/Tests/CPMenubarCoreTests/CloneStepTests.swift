@@ -101,14 +101,15 @@ final class CloneStepTests: XCTestCase {
         XCTAssertFalse(git.calls.contains { $0.contains("fetch") }, "and it refuses before touching the network")
     }
 
-    /// BP-507. `--git-dir` and `--git-common-dir` agree inside a submodule's working directory too
-    /// (both resolve to the superproject's `.git/modules/<name>`), so left unguarded this would
-    /// adopt a submodule as if it were the project's own checkout.
+    /// BP-507. `--git-dir` and `--git-common-dir` agree inside a submodule's working directory too,
+    /// so left unguarded this would adopt a submodule as if it were the project's own checkout.
+    /// What tells it apart is git naming a superproject (BP-734).
     func testItRefusesToAdoptASubmoduleWorkingDirectory() {
         let git = Git()
         git.present = ["/p/TP/.git"]
         git.results["--git-dir"] = (0, "/elsewhere/super/.git/modules/vendor")
         git.results["--git-common-dir"] = (0, "/elsewhere/super/.git/modules/vendor")
+        git.results["--show-superproject-working-tree"] = (0, "/elsewhere/super\n")
 
         let outcome = git.step().run(repositoryURL: "https://github.com/o/r", parent: "/p", projectKey: "TP")
 

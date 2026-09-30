@@ -83,15 +83,13 @@ public struct CheckoutRemoval: Sendable {
         // wrong thing — `worktree list` names the repository's main checkout first, and this used
         // to hand it back as something to delete, taking the object store every other worktree of
         // that repository shares (BP-422).
-        let gitDir = run(["-C", path, "rev-parse", "--git-dir"], path)
-        let commonDir = run(["-C", path, "rev-parse", "--git-common-dir"], path)
-        switch LinkedWorktreeCheck.kind(gitDir: gitDir, commonDir: commonDir, relativeTo: path) {
+        switch LinkedWorktreeCheck.kind(of: path, run: { run($0, path) }) {
         case .linkedWorktree:
             return .linkedWorktree(
                 reason: "\(path) is a linked worktree, not a repository — this removes a repository together with its worktrees, and cannot remove a worktree from the repository it belongs to.")
         case .submodule:
             return .linkedWorktree(
-                reason: "\(path) is a submodule's working directory, not a repository of its own — its objects live in the superproject and are not lost, but the superproject's gitlink would be left pointing at a directory that is gone.")
+                reason: "\(path) is a submodule's working directory, not a repository of its own — removing it would leave the superproject's gitlink pointing at a directory that is gone.")
         case nil:
             return .refused(
                 reason: "could not tell whether \(path) is a repository or one of its worktrees")

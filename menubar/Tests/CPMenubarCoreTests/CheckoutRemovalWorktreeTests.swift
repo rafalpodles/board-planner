@@ -217,10 +217,7 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
         let (_, submodulePath) = try repoWithSubmodule()
 
         func kind(_ path: String) -> GitCheckoutKind? {
-            LinkedWorktreeCheck.kind(
-                gitDir: git(path, ["rev-parse", "--git-dir"]),
-                commonDir: git(path, ["rev-parse", "--git-common-dir"]),
-                relativeTo: path)
+            LinkedWorktreeCheck.kind(of: path) { git(path, $0) }
         }
 
         XCTAssertEqual(kind(submodulePath), .submodule)
@@ -279,10 +276,7 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
         let (checkout, worktree) = repoWithWorktree()
 
         func kind(_ path: String) -> GitCheckoutKind? {
-            LinkedWorktreeCheck.kind(
-                gitDir: git(path, ["rev-parse", "--git-dir"]),
-                commonDir: git(path, ["rev-parse", "--git-common-dir"]),
-                relativeTo: path)
+            LinkedWorktreeCheck.kind(of: path) { git(path, $0) }
         }
 
         XCTAssertEqual(kind(checkout), .repository)
