@@ -12,6 +12,8 @@ const agentRunSchema = new Schema<IAgentRun>(
     task: { type: Schema.Types.ObjectId, ref: "Task", required: true },
     taskKey: { type: String, required: true },
     worker: { type: Schema.Types.ObjectId, ref: "Worker", default: null },
+    // Absent on a record a person posted or a worker from before BP-758 sent
+    runId: { type: String },
 
     agent: { type: Schema.Types.ObjectId, ref: "Agent", default: null },
     agentName: { type: String, default: "" },
@@ -30,6 +32,11 @@ const agentRunSchema = new Schema<IAgentRun>(
 
 agentRunSchema.index({ project: 1, finishedAt: -1 });
 agentRunSchema.index({ task: 1 });
+// One record per run, so the outbox resending a record it never saw acknowledged stores it once
+agentRunSchema.index(
+  { task: 1, runId: 1, worker: 1 },
+  { unique: true, partialFilterExpression: { runId: { $type: "string" } } }
+);
 // The fleet console reads across projects, which the compound index above cannot serve
 agentRunSchema.index({ finishedAt: -1 });
 

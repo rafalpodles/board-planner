@@ -51,7 +51,7 @@ export const GET = withProjectAccessOrWorker(async (_request, { params, user }) 
   obj.pmAvailable = isPmAvailable();
   obj.canAdmin = await check(user, String(project._id), "admin");
   return NextResponse.json(obj);
-});
+}, { reach: "board" });
 
 const PM_SAVED_FIELDS = [
   "enabled",

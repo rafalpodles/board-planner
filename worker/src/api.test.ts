@@ -235,6 +235,7 @@ describe("createApiClient", () => {
 
     await api.postRun("CP", {
       taskId: "t1",
+      runId: "run-1",
       taskKey: "CP-1",
       agentId: "a1",
       agentName: "Default",
@@ -249,7 +250,11 @@ describe("createApiClient", () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://app.example.com/api/projects/CP/runs");
     expect(init.method).toBe("POST");
-    expect(JSON.parse(init.body)).toMatchObject({ taskKey: "CP-1", workerId: "6a7c686f70ed274cf658b1b3" });
+    expect(JSON.parse(init.body)).toMatchObject({
+      taskKey: "CP-1",
+      runId: "run-1",
+      workerId: "6a7c686f70ed274cf658b1b3",
+    });
   });
 
   it("claims against the project-scoped url", async () => {

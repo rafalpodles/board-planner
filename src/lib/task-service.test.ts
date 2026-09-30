@@ -570,6 +570,18 @@ describe("claimNextTask", () => {
     });
   });
 
+  // BP-758: the run's outcome record arrives after its final status has unset runId, and is matched
+  // to this machine's run by this copy, which nothing but the next claim overwrites
+  it("keeps the run's id where the end of the run does not clear it", async () => {
+    findOneAndUpdate.mockResolvedValue({ _id: "t1", taskNumber: 1 });
+
+    await claimNextTask("p1", "worker-a", "run-1", OWNER);
+
+    expect(claimSet(findOneAndUpdate.mock.calls[0])["execution.lastRunId"]).toEqual({
+      $literal: "run-1",
+    });
+  });
+
   // Each run counts its phases from one, so a phaseSeq left behind by an earlier run would make
   // the ordering guard swallow the first events of this one
   it("drops any phase an earlier run left on the task", async () => {
@@ -1085,6 +1097,14 @@ describe("clearing the phase on every exit from the active column", () => {
     await changeStatus("p1", "t1", "checking", "actor");
 
     expect(unsetKeys(findOneAndUpdate.mock.calls[0][1])).toEqual(RUN_KEYS);
+  });
+
+  // BP-758: this is the write the worker's outcome record is sent after, and lastRunId is what the
+  // record is then matched by
+  it("keeps the id the run's record is matched by", async () => {
+    await changeStatus("p1", "t1", "checking", "actor");
+
+    expect(unsetKeys(findOneAndUpdate.mock.calls[0][1])).not.toContain("execution.lastRunId");
   });
 
   it("clears it when the edit form PUTs a new status", async () => {

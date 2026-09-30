@@ -2,11 +2,11 @@ import { test, expect } from "@playwright/test";
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 import {
+  ADMIN_ID,
   E2E_MONGODB_URI,
   HELD_TASK_ID,
   HELD_TASK_KEY,
   PROJECT_ID,
-  RUN_PHASE,
   SOURCE_COLUMN,
   TARGET_COLUMN,
   WORKER_CREDENTIAL,
@@ -103,16 +103,18 @@ test("the run's own holder reports its outcome the way the worker actually does 
 });
 
 // The control: the same guard has to still refuse somebody who is not the run's own holder, or the
-// exemption above is not an exemption at all — it is the guard doing nothing. A second worker,
-// holding a run of its own elsewhere in the project so it clears the outer "assigned" gate, is the
-// case that separates "the holder" from "any worker".
-test("a different worker holding its own run is still refused the first worker's task", async ({
+// exemption above is not an exemption at all — it is the guard doing nothing. A second worker that
+// serves the project clears the outer "assigned" gate, which is the case that separates "the
+// holder" from "any worker". Holding a run of its own elsewhere on the board used to be enough to
+// clear it too; since BP-758 that reaches only the task held, so it is refused before the guard.
+test("a different worker serving the project is still refused the first worker's task", async ({
   request,
 }) => {
   const otherWorkerId = new mongoose.Types.ObjectId();
   const otherCredential = "e2e-other-worker-credential";
-  const otherTaskId = new mongoose.Types.ObjectId();
   const handle = await db();
+  const repository = "https://github.com/e2e/run-completion";
+  await handle.collection("projects").updateOne({ _id: PROJECT_ID }, { $set: { repositoryUrl: repository } });
 
   await handle.collection("workers").insertOne({
     _id: otherWorkerId,
@@ -122,7 +124,8 @@ test("a different worker holding its own run is still refused the first worker's
     version: "0.0.0-e2e",
     protocolVersion: 1,
     credentialHash: bcrypt.hashSync(otherCredential, 10),
-    repos: [],
+    repos: [{ remote: `${repository}.git`, path: "/Users/someone/run-completion" }],
+    owner: ADMIN_ID,
     policy: { pollIntervalMs: 30_000 },
     policyOverrides: [],
     enabled: true,
@@ -133,27 +136,6 @@ test("a different worker holding its own run is still refused the first worker's
     updatedAt: new Date(),
   });
   await giveWorkerAnIdentity(otherWorkerId, "worker-run-completion-other");
-  // Holding a run of its own is what clears withProjectAccessOrWorker's "assigned" gate without a
-  // repo match — the point here is the inner guard, not the outer one
-  await handle.collection("tasks").insertOne({
-    _id: otherTaskId,
-    project: PROJECT_ID,
-    taskNumber: 9101,
-    title: "held by the other worker",
-    description: "",
-    status: SOURCE_COLUMN.id,
-    category: "bug",
-    priority: "medium",
-    checklist: [],
-    blockedBy: [],
-    watchers: [],
-    relations: [],
-    linkedPRs: [],
-    customFieldValues: {},
-    execution: { runId: "e2e-run-other", workerId: String(otherWorkerId), attempts: 1, startedAt: new Date(), lastError: "", phase: RUN_PHASE },
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  });
 
   const moved = await request.patch(`/api/projects/${PROJECT_ID}/tasks/${HELD_TASK_ID}/status`, {
     headers: workerHeaders(String(otherWorkerId), otherCredential),

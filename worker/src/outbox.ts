@@ -47,7 +47,9 @@ const MAX_ENTRIES = 500;
  * (found in review):
  *
  * - **401** — the operator rotated or revoked this machine's credential. It comes back.
- * - **403** — a grant was being edited, or the worker was paused for a moment.
+ * - **403** — a grant was being edited, or the worker was paused for a moment. A run record is
+ *   never refused this way for good: the board matches it to the run it names rather than to the
+ *   project's grant, and answers **422** for one that is not this machine's, which is final (BP-758).
  * - **409** — `changeStatus` refuses a task another run holds (`task-service.ts`), which is exactly
  *   what an expired lease reclaiming a run looks like. The next flush is after that has settled.
  *

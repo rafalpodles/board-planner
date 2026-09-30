@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const create = vi.fn();
+const findOne = vi.fn();
 const taskExists = vi.fn();
+const declaredReach: unknown[] = [];
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
-vi.mock("@/models/agentRun", () => ({ AgentRun: { create } }));
+vi.mock("@/models/agentRun", () => ({ AgentRun: { create, findOne } }));
 vi.mock("@/models/task", () => ({ Task: { exists: taskExists } }));
 vi.mock("@/models/agent", () => ({ Agent: { findById: () => ({ lean: async () => null }) } }));
 vi.mock("@/lib/agent-service", () => ({ toApiRun: (run: unknown) => run }));
@@ -15,12 +17,15 @@ let callingWorker: string | undefined;
 
 vi.mock("@/lib/middleware", () => ({
   withProjectAccessOrWorker:
-    (handler: (req: Request, ctx: unknown) => Promise<Response>) => (req: Request, ctx: unknown) =>
-      handler(req, {
-        ...(ctx as object),
-        user: { _id: "u1", viaMachineCredential: false },
-        workerId: callingWorker,
-      }),
+    (handler: (req: Request, ctx: unknown) => Promise<Response>, options?: unknown) => {
+      declaredReach.push(options);
+      return (req: Request, ctx: unknown) =>
+        handler(req, {
+          ...(ctx as object),
+          user: { _id: "u1", viaMachineCredential: false },
+          workerId: callingWorker,
+        });
+    },
 }));
 
 const { POST } = await import("./route");
@@ -47,6 +52,7 @@ beforeEach(() => {
   callingWorker = WORKER_ID;
   taskExists.mockResolvedValue(true);
   create.mockImplementation(async (doc: unknown) => ({ toObject: () => doc }));
+  findOne.mockReturnValue({ lean: async () => null });
 });
 
 // BP-620: the route is withProjectAccessOrWorker, so any member of the project can POST these
@@ -108,5 +114,89 @@ describe("POST .../runs bounds what a caller can store", () => {
     await post({ workerId: OTHER_WORKER_ID });
 
     expect(stored().worker).toBe(WORKER_ID);
+  });
+});
+
+// BP-758: the record goes out from the outbox, which resends anything it never saw acknowledged
+describe("POST .../runs keeps one record per run", () => {
+  const RUN_ID = "0f8c1e5a-7d7b-4c43-9a55-3f1f5f0f2a11";
+
+  // What proves the record is the caller's own lives in the middleware; the route has to ask for it
+  it("is guarded as a run record, not as a project route", () => {
+    expect(declaredReach).toContainEqual({ reach: "runRecord" });
+  });
+
+  it("stores the run id a machine's record carries", async () => {
+    const res = await post({ runId: RUN_ID });
+
+    expect(res.status).toBe(201);
+    expect(stored().runId).toBe(RUN_ID);
+  });
+
+  it("answers a resent record with the one already stored and writes nothing", async () => {
+    findOne.mockReturnValue({ lean: async () => ({ _id: "r1", runId: RUN_ID }) });
+
+    const res = await post({ runId: RUN_ID });
+
+    expect(res.status).toBe(200);
+    // The machine is part of the key: one naming another's run must not stand in for its record
+    expect(findOne).toHaveBeenCalledWith({ task: TASK_ID, runId: RUN_ID, worker: WORKER_ID });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("answers the loser of two concurrent sends with the winner's record", async () => {
+    findOne
+      .mockReturnValueOnce({ lean: async () => null })
+      .mockReturnValueOnce({ lean: async () => ({ _id: "r1", runId: RUN_ID }) });
+    create.mockRejectedValue(Object.assign(new Error("E11000 duplicate key"), { code: 11000 }));
+
+    const res = await post({ runId: RUN_ID });
+
+    expect(res.status).toBe(200);
+  });
+
+  it("still fails a write that failed for any other reason", async () => {
+    create.mockRejectedValue(new Error("connection reset"));
+
+    await expect(post({ runId: RUN_ID })).rejects.toThrow("connection reset");
+  });
+
+  // A member could otherwise store a run's id first, and the machine's real record would then be
+  // answered with theirs
+  it("takes no run id from a person", async () => {
+    callingWorker = undefined;
+
+    await post({ runId: RUN_ID });
+
+    expect(stored().runId).toBeUndefined();
+    expect(findOne).not.toHaveBeenCalled();
+  });
+});
+
+// BP-758 review: the newest record is what the next claim reads the previous rejection from, and
+// every date on it came from the body
+describe("POST .../runs dates a record no later than now", () => {
+  it("brings a finish in the future back to now", async () => {
+    const before = Date.now();
+
+    await post({ startedAt: "2099-01-01T00:00:00.000Z", finishedAt: "2099-01-01T01:00:00.000Z" });
+
+    expect(stored().finishedAt.valueOf()).toBeGreaterThanOrEqual(before);
+    expect(stored().finishedAt.valueOf()).toBeLessThanOrEqual(Date.now());
+    expect(stored().startedAt.valueOf()).toBeLessThanOrEqual(Date.now());
+  });
+
+  it("keeps a date in the past as it was sent", async () => {
+    await post({ startedAt: "2026-09-01T10:00:00.000Z", finishedAt: "2026-09-01T10:05:00.000Z" });
+
+    expect(stored().startedAt.toISOString()).toBe("2026-09-01T10:00:00.000Z");
+    expect(stored().finishedAt.toISOString()).toBe("2026-09-01T10:05:00.000Z");
+  });
+
+  it("dates a record that sends no dates, or nonsense, now", async () => {
+    await post({ finishedAt: "not a date" });
+
+    expect(Number.isNaN(stored().finishedAt.valueOf())).toBe(false);
+    expect(Number.isNaN(stored().startedAt.valueOf())).toBe(false);
   });
 });

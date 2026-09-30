@@ -725,6 +725,7 @@ export interface ApiWorkerTask {
 
 export interface ITaskExecution {
   runId: string;
+  lastRunId?: string;
   workerId: string;
   attempts: number;
   startedAt: Date | null;
@@ -1846,6 +1847,7 @@ export interface IAgentRun {
   task: Types.ObjectId | ITask;
   taskKey: string;
   worker: Types.ObjectId | null;
+  runId?: string;
   agent: Types.ObjectId | IAgent | null;
   agentName: string;
   outcome: AgentRunOutcome;

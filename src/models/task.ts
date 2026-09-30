@@ -155,6 +155,9 @@ const taskSchema = new Schema<ITask>(
     },
     execution: {
       runId: { type: String, default: "" },
+      // Set by the claim beside runId and never cleared, so the run a machine last held here can
+      // still be named once its final status has unset runId — which is when its record arrives
+      lastRunId: { type: String },
       workerId: { type: String, default: "" },
       attempts: { type: Number, default: 0 },
       // No default: absent means the claim set the assignee, which is what every task claimed

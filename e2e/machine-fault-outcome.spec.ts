@@ -59,6 +59,11 @@ function workerHeaders() {
   };
 }
 
+// This machine serves the project only by the run it holds, so since BP-758 a record for a task it
+// no longer holds must name the run. The held task's records keep the shape a worker from before
+// BP-758 sends — no run id — which is what deploy day hears from every machine not yet upgraded.
+const RUN_OF = new Map([[String(SIBLING_TASK_ID), "e2e-run-sibling"]]);
+
 function postRun(
   request: import("@playwright/test").APIRequestContext,
   outcome: string,
@@ -70,6 +75,7 @@ function postRun(
     headers: workerHeaders(),
     data: {
       taskId: String(taskId),
+      runId: RUN_OF.get(String(taskId)),
       taskKey,
       outcome,
       detail,
@@ -84,6 +90,16 @@ function postRun(
 test.beforeEach(async () => {
   await seed();
   await giveWorkerAnIdentity(WORKER_ID, "worker-machine-fault");
+  await (await db()).collection("tasks").updateOne(
+    { _id: SIBLING_TASK_ID },
+    {
+      $set: {
+        "execution.workerId": String(WORKER_ID),
+        "execution.lastRunId": "e2e-run-sibling",
+        "execution.startedAt": new Date(Date.now() - 10 * 60_000),
+      },
+    }
+  );
 });
 
 // The worker's own vocabulary maps machineFault onto this word (worker/src/run-record.ts), so a

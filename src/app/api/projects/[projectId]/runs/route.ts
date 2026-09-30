@@ -4,7 +4,7 @@ import { withProjectAccessOrWorker } from "@/lib/middleware";
 import { AgentRun } from "@/models/agentRun";
 import { toApiRun } from "@/lib/agent-service";
 import { Types } from "mongoose";
-import { AGENT_RUN_OUTCOMES, AgentRunOutcome } from "@/types";
+import { AGENT_RUN_OUTCOMES, AgentRunOutcome, IAgentRun } from "@/types";
 
 const MAX_DETAIL = 2000;
 // A key and an agent's name, both of which a member can post directly. Far past anything the
@@ -58,8 +58,13 @@ export const POST = withProjectAccessOrWorker(async (request, { params, workerId
     if (usable) agentId = body.agentId;
   }
 
-  const startedAt = new Date(body.startedAt ?? Date.now());
-  const finishedAt = new Date(body.finishedAt ?? Date.now());
+  // Never later than now: the newest record is the one the next claim reads its rejection reason
+  // from, so a record dated in the future would speak for every run after it
+  const now = new Date();
+  const notAfterNow = (value: unknown) => {
+    const date = new Date((value as string | number | undefined) ?? now);
+    return Number.isNaN(date.valueOf()) || date > now ? now : date;
+  };
 
   // The reason a gate gave carries build output and model prose, and this is a durable sink; it
   // gets the same length bound the board path already applies.
@@ -72,21 +77,40 @@ export const POST = withProjectAccessOrWorker(async (request, { params, workerId
   // (found in review). The worker still sends the field and it is still the same id; it is simply
   // not the source any more.
   const workerId = caller && Types.ObjectId.isValid(caller) ? caller : null;
+  // A machine's only; a person's record carries none. Keyed with the machine too, so one machine
+  // naming another's run cannot take the place of that machine's own record.
+  const runId = workerId && typeof body.runId === "string" ? body.runId : undefined;
+  const recorded = () =>
+    AgentRun.findOne({ task: body.taskId, runId, worker: workerId }).lean<IAgentRun>();
 
-  const run = await AgentRun.create({
+  if (runId) {
+    const existing = await recorded();
+    if (existing) return NextResponse.json(toApiRun(existing), { status: 200 });
+  }
+
+  const record = {
     project: projectId,
     task: body.taskId,
     taskKey: body.taskKey.slice(0, MAX_NAME),
     worker: workerId,
+    ...(runId ? { runId } : {}),
     agent: agentId,
     agentName: typeof body.agentName === "string" ? body.agentName.slice(0, MAX_NAME) : "",
     outcome,
     refusedBy: typeof body.refusedBy === "string" ? body.refusedBy.slice(0, MAX_DETAIL) : "",
     detail,
-    startedAt: Number.isNaN(startedAt.valueOf()) ? new Date() : startedAt,
-    finishedAt: Number.isNaN(finishedAt.valueOf()) ? new Date() : finishedAt,
+    startedAt: notAfterNow(body.startedAt),
+    finishedAt: notAfterNow(body.finishedAt),
     costUsd: typeof body.costUsd === "number" && body.costUsd >= 0 ? body.costUsd : 0,
-  });
+  };
 
-  return NextResponse.json(toApiRun(run.toObject()), { status: 201 });
-});
+  try {
+    const run = await AgentRun.create(record);
+    return NextResponse.json(toApiRun(run.toObject()), { status: 201 });
+  } catch (error) {
+    const duplicate = (error as { code?: number }).code === 11000;
+    const existing = duplicate && runId ? await recorded() : null;
+    if (!existing) throw error;
+    return NextResponse.json(toApiRun(existing), { status: 200 });
+  }
+}, { reach: "runRecord" });
