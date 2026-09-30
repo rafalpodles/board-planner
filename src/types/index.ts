@@ -1054,7 +1054,7 @@ export interface ITask {
   description: string;
   priority: Priority;
   category: Category;
-  status: TaskStatus;
+  status: string;
   assignee: Types.ObjectId | IUser | null;
   // Who set assignee; absent on a task assigned before BP-358
   assignedBy?: Types.ObjectId | null;

@@ -173,7 +173,7 @@ export const PATCH = withAuth(async (request, { params, user }) => {
   // that has one, the console merges that into the row, and its Owner column flashes the red
   // "claims nothing" flag until the next poll corrects it — a false alarm on the very indicator
   // this branch added, raised by the page's most-used control.
-  const updated = await Worker.findByIdAndUpdate(workerId, { $set: update }, { new: true }).populate(
+  const updated = await Worker.findByIdAndUpdate(workerId, { $set: update }, { returnDocument: "after" }).populate(
     "owner",
     "username fullName"
   );

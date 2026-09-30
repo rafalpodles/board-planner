@@ -121,7 +121,7 @@ export async function createDecision(
         },
       },
     },
-    { new: true }
+    { returnDocument: "after" }
   );
 
   if (!updated?.decision) {
@@ -163,7 +163,7 @@ export async function settleDecision(
         "decision.attempts": fields.attempts ?? 0,
       },
     },
-    { new: true }
+    { returnDocument: "after" }
   );
 
   if (!updated?.decision) {
@@ -228,7 +228,7 @@ export async function recordVerdict(
         "decision.attempts": 0,
       },
     },
-    { new: true }
+    { returnDocument: "after" }
   )
     // Both for the answer this returns — which is the route's response body, and a record a
     // caller renders — and `decidedBy`, an ObjectId until somebody populates it.

@@ -35,7 +35,7 @@ export const POST = withAdmin(async (request, { params, user }) => {
   const worker = await Worker.findByIdAndUpdate(
     workerId,
     { $set: { command, commandIssuedAt: new Date(), commandAckedAt: null } },
-    { new: true }
+    { returnDocument: "after" }
   );
   if (!worker) {
     return NextResponse.json({ error: "Worker not found" }, { status: 404 });

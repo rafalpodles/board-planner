@@ -647,6 +647,36 @@ describe("releaseTask", () => {
   });
 });
 
+describe("claim and release ask for the updated document, not the operation's metadata", () => {
+  beforeEach(() => {
+    findOneAndUpdate.mockReset();
+    findOneAndUpdate.mockResolvedValue(null);
+    findById.mockReset();
+    findById.mockReturnValue({ lean: () => Promise.resolve(claimableBoard) });
+    find.mockReset();
+    find.mockReturnValue({ lean: () => Promise.resolve([]) });
+  });
+
+  const writes: [string, () => Promise<unknown>][] = [
+    ["claimNextTask", () => claimNextTask("p1", "worker-a", "run-1", OWNER)],
+    ["releaseTask with a refund", () => releaseTask("p1", "t1")],
+    ["releaseTask without a refund", () => releaseTask("p1", "t1", { refund: false })],
+  ];
+
+  for (const [name, write] of writes) {
+    it(name, async () => {
+      await write();
+
+      expect(findOneAndUpdate).toHaveBeenCalledTimes(1);
+      const options = findOneAndUpdate.mock.calls[0][2];
+      expect(options.returnDocument).toBe("after");
+      for (const wrapsTheResult of ["includeResultMetadata", "rawResult", "new", "returnOriginal"]) {
+        expect(options).not.toHaveProperty(wrapsTheResult);
+      }
+    });
+  }
+});
+
 describe("releaseTask charging the attempt", () => {
   const boardWithReview = {
     columns: [
