@@ -653,3 +653,146 @@ private final class BecomesALinkedWorktreeOnItsSecondLook: @unchecked Sendable {
         return (0, "")
     }
 }
+
+// MARK: - BP-724: a failure with a persistent cause shows once, however many reconnects repeat it
+
+/// Real filesystem conditions rather than an injected throw: the dedupe only holds if the same
+/// cause produces the same sentence every time, and that is `FileManager`'s wording, not ours.
+@MainActor
+final class RepeatedFailureTests: XCTestCase {
+    private var base: URL!
+
+    override func setUpWithError() throws {
+        base = FileManager.default.temporaryDirectory.appendingPathComponent("bp724-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+    }
+
+    override func tearDownWithError() throws {
+        if let found = FileManager.default.enumerator(atPath: base.path) {
+            for case let relative as String in found {
+                let path = base.appendingPathComponent(relative).path
+                try? FileManager.default.setAttributes([.immutable: false, .posixPermissions: 0o755], ofItemAtPath: path)
+            }
+        }
+        try? FileManager.default.removeItem(at: base)
+    }
+
+    private func realDeletion(repos: ReposFile) -> CheckoutDeletion {
+        CheckoutDeletion(
+            remove: { try FileManager.default.removeItem(atPath: $0) },
+            exists: { FileManager.default.fileExists(atPath: $0) },
+            forget: { path in try repos.write(((try? repos.read()) ?? []).filter { $0 != path }) })
+    }
+
+    private func reconnects(_ times: Int, _ pass: () async -> SyncStep) async -> [SyncStep] {
+        var steps: [SyncStep] = []
+        for _ in 0..<times { steps = ProjectSync.appending(await pass(), to: steps) }
+        return steps
+    }
+
+    private func assertOneFailure(_ steps: [SyncStep], file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertEqual(steps.count, 1, "one line, not one per reconnect: \(steps)", file: file, line: line)
+        guard case .failed = steps.first else {
+            return XCTFail("expected a failure, got \(steps)", file: file, line: line)
+        }
+    }
+
+    private func linkedWorktree() -> CheckoutRemoval {
+        CheckoutRemoval(
+            run: { args, _ in
+                if args.contains("--show-toplevel") { return (0, "/co\n") }
+                if args.contains("--git-dir") { return (0, "/repo/.git/worktrees/co\n") }
+                if args.contains("--git-common-dir") { return (0, "/repo/.git\n") }
+                return (0, "")
+            },
+            exists: { _ in true })
+    }
+
+    func testAWorktreeInAFolderWithoutWritePermissionFailsOnceAcrossReconnects() async throws {
+        let shared = base.appendingPathComponent("cp-worktrees")
+        let worktree = shared.appendingPathComponent("one")
+        let checkout = base.appendingPathComponent("co")
+        try FileManager.default.createDirectory(at: worktree, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: checkout, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: shared.path)
+        let repos = ReposFile(path: base.appendingPathComponent("repos.json").path)
+        try repos.write([checkout.path])
+        let deletion = realDeletion(repos: repos)
+
+        let steps = await reconnects(3) {
+            deletion.perform(project: "BP", path: checkout.path, root: checkout.path, worktrees: [worktree.path])
+        }
+
+        assertOneFailure(steps)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: worktree.path))
+        XCTAssertEqual(try repos.read(), [checkout.path])
+    }
+
+    func testACheckoutHoldingALockedFileFailsOnceAcrossReconnects() async throws {
+        let checkout = base.appendingPathComponent("co")
+        try FileManager.default.createDirectory(at: checkout, withIntermediateDirectories: true)
+        let locked = checkout.appendingPathComponent("locked")
+        try Data("x".utf8).write(to: locked)
+        try FileManager.default.setAttributes([.immutable: true], ofItemAtPath: locked.path)
+        let repos = ReposFile(path: base.appendingPathComponent("repos.json").path)
+        try repos.write([checkout.path])
+        let deletion = realDeletion(repos: repos)
+
+        let steps = await reconnects(3) {
+            deletion.perform(project: "BP", path: checkout.path, root: checkout.path, worktrees: [])
+        }
+
+        assertOneFailure(steps)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: locked.path))
+        XCTAssertEqual(try repos.read(), [checkout.path])
+    }
+
+    func testAGrantThatCannotBeDroppedFromAReadOnlyReposFileFailsOnceAcrossReconnects() async throws {
+        let state = base.appendingPathComponent("state")
+        let repos = ReposFile(path: state.appendingPathComponent("repos.json").path)
+        try repos.write(["/co"])
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o444], ofItemAtPath: state.appendingPathComponent("repos.json").path)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: state.path)
+        let deletion = realDeletion(repos: repos)
+        let removal = linkedWorktree()
+
+        let steps = await reconnects(3) {
+            await deletion.removeIfSafe(
+                project: "BP", path: "/co", isBusy: { false }, checking: removal, asking: { _, _ in true })
+        }
+
+        assertOneFailure(steps)
+        XCTAssertEqual(try repos.read(), ["/co"])
+    }
+
+    // The control: the same checkout failing for a new reason is news, and gets its own line.
+    func testACheckoutWhoseCauseChangesBetweenReconnectsIsReportedAgain() async throws {
+        let shared = base.appendingPathComponent("cp-worktrees")
+        let worktree = shared.appendingPathComponent("one")
+        let checkout = base.appendingPathComponent("co")
+        try FileManager.default.createDirectory(at: worktree, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: checkout, withIntermediateDirectories: true)
+        let locked = checkout.appendingPathComponent("locked")
+        try Data("x".utf8).write(to: locked)
+        try FileManager.default.setAttributes([.immutable: true], ofItemAtPath: locked.path)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: shared.path)
+        let repos = ReposFile(path: base.appendingPathComponent("repos.json").path)
+        try repos.write([checkout.path])
+        let deletion = realDeletion(repos: repos)
+        let pass = {
+            deletion.perform(project: "BP", path: checkout.path, root: checkout.path, worktrees: [])
+        }
+        let withWorktree = {
+            deletion.perform(project: "BP", path: checkout.path, root: checkout.path, worktrees: [worktree.path])
+        }
+
+        var steps = ProjectSync.appending(withWorktree(), to: [])
+        steps = ProjectSync.appending(withWorktree(), to: steps)
+        steps = ProjectSync.appending(pass(), to: steps)
+        steps = ProjectSync.appending(pass(), to: steps)
+
+        XCTAssertEqual(steps.count, 2, "\(steps)")
+        XCTAssertNotEqual(steps.first, steps.last)
+    }
+}

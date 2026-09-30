@@ -231,11 +231,50 @@ final class ProjectSyncTests: XCTestCase {
         XCTAssertEqual(ProjectSync.appending(second, to: [first]), [first, second])
     }
 
-    // The other control: every non-refusal case is an event, and two identical events are two
-    // events. Without this, widening the dedupe to every case would still pass the test above.
+    // The other control: every case but `.refused` and `.failed` is an event, and two identical
+    // events are two events. Without this, widening the dedupe to every case would still pass the
+    // tests above.
     func testAnOrdinaryStepIsAppendedEvenWhenItRepeatsExactly() {
         let added: SyncStep = .added(project: "BP", path: "/checkouts/BP")
 
         XCTAssertEqual(ProjectSync.appending(added, to: [added]), [added, added])
+    }
+
+    // MARK: - BP-724: a failure that repeats every reconnect does not pile up either
+
+    func testAnIdenticalFailureIsNotAppendedTwice() {
+        let failure: SyncStep = .failed(project: "BP", reason: "“co” couldn’t be removed")
+
+        XCTAssertEqual(ProjectSync.appending(failure, to: [failure]), [failure])
+    }
+
+    // Same rule as `.refused`: any identical line already in the pane, not only the last one.
+    func testAnIdenticalFailureIsNotAppendedEvenWithAnotherStepAfterIt() {
+        let failure: SyncStep = .failed(project: "BP", reason: "“co” couldn’t be removed")
+        let added: SyncStep = .added(project: "SB", path: "/checkouts/SB")
+
+        XCTAssertEqual(ProjectSync.appending(failure, to: [failure, added]), [failure, added])
+    }
+
+    // The control: a changed failure is news, a verbatim repeat isn't.
+    func testAFailureWithADifferentReasonStillJoinsTheList() {
+        let first: SyncStep = .failed(project: "BP", reason: "permission denied")
+        let second: SyncStep = .failed(project: "BP", reason: "no space left on device")
+
+        XCTAssertEqual(ProjectSync.appending(second, to: [first]), [first, second])
+    }
+
+    func testTheSameFailureForAnotherProjectStillJoinsTheList() {
+        let first: SyncStep = .failed(project: "BP", reason: "permission denied")
+        let second: SyncStep = .failed(project: "SB", reason: "permission denied")
+
+        XCTAssertEqual(ProjectSync.appending(second, to: [first]), [first, second])
+    }
+
+    // `.partiallyRemoved` reports a deletion that happened, so a repeat is a second deletion.
+    func testARepeatedPartialRemovalIsStillAppended() {
+        let partial: SyncStep = .partiallyRemoved(project: "BP", removed: ["/w"], reason: "stopped")
+
+        XCTAssertEqual(ProjectSync.appending(partial, to: [partial]), [partial, partial])
     }
 }

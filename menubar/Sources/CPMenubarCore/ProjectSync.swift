@@ -122,18 +122,25 @@ public enum ProjectSync {
     }
 
     /**
-     * Where a new step joins `steps`: appended, unless it is a `.refused` identical to one already
-     * there.
+     * Where a new step joins `steps`: appended, unless it is a `.refused` or `.failed` identical to
+     * one already there.
      *
      * Every other case is a one-time event — `.added`, `.removed`, a `.declined` the operator
-     * answered — so two identical values are two things that happened. `.refused` is the one case
-     * that names an unresolved condition rather than an event: the project stays unwanted and held,
-     * so the same guard runs again next reconnect and, unless something about the checkout changed,
-     * says exactly the same sentence. Appended plainly, that reads as the pane growing one line per
-     * reconnect for as long as the operator leaves it unresolved — for ever, in practice (BP-505).
+     * answered — so two identical values are two things that happened. `.refused` and `.failed`
+     * name an unresolved condition rather than an event: nothing was resolved, so the same pass
+     * runs again next reconnect and, unless the cause changed, says exactly the same sentence — a
+     * guard's refusal (BP-505), or a delete, drop or clone that throws for a reason that persists:
+     * permissions, a locked file, a read-only `repos.json` (BP-724). Appended plainly, that reads as
+     * the pane growing one line per reconnect for as long as the cause lasts. A changed reason is
+     * a different value and is still appended: a changed failure is news, a verbatim repeat isn't.
      */
     public static func appending(_ step: SyncStep, to steps: [SyncStep]) -> [SyncStep] {
-        if case .refused = step, steps.contains(step) { return steps }
+        switch step {
+        case .refused, .failed:
+            if steps.contains(step) { return steps }
+        default:
+            break
+        }
         return steps + [step]
     }
 
