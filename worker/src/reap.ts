@@ -426,18 +426,18 @@ async function compileHelper(compiler: string): Promise<Resolved> {
 interface ResolveOptions {
   compiler: string;
   bundled: string;
-  probeTimeoutMs: number;
+  bundledProbeTimeoutMs: number;
   quarantine: (path: string) => Promise<string | null>;
   toolchain: () => Promise<boolean>;
   trust: TrustOptions;
   warn: (message: string) => void;
 }
 
-async function trusted(helper: string, options: ResolveOptions, checkSource: boolean): Promise<string> {
+async function trusted(helper: string, options: ResolveOptions, checkSource: boolean, probeTimeoutMs: number): Promise<string> {
   const failure = untamperable(helper, options.trust) || (checkSource ? builtFromThisSource(helper) : "");
   if (failure) return failure;
   const resolved = realpathSync(helper);
-  return (await sealed(resolved)) || (await proveHelper(resolved, options.probeTimeoutMs));
+  return (await sealed(resolved)) || (await proveHelper(resolved, probeTimeoutMs));
 }
 
 // /usr/bin/cc is a shim that exists on every Mac and offers to install the command-line tools when
@@ -473,7 +473,7 @@ async function resolveHelper(options: ResolveOptions): Promise<Resolved> {
     // which can hang
     bundledFailure = (await heldByQuarantine(options))
       ? `it is quarantined and was never approved, as a download is until released, so it was not run; release it with: xattr -dr com.apple.quarantine ${dirname(dirname(options.bundled))}`
-      : await trusted(options.bundled, options, true);
+      : await trusted(options.bundled, options, true, options.bundledProbeTimeoutMs);
     if (!bundledFailure) return { helper: realpathSync(options.bundled) };
     if (!(await compilerAvailable(options))) {
       return { failure: `the bundled process reaper cannot be used, and there is no compiler to build one: ${bundledFailure}` };
@@ -483,7 +483,7 @@ async function resolveHelper(options: ResolveOptions): Promise<Resolved> {
   }
 
   const compiled = await compileHelper(options.compiler);
-  const failure = "failure" in compiled ? compiled.failure : await trusted(compiled.helper, options, false);
+  const failure = "failure" in compiled ? compiled.failure : await trusted(compiled.helper, options, false, PROBE_TIMEOUT_MS);
   if (!failure && "helper" in compiled) {
     if (bundledFailure) {
       options.warn(`warning: the bundled process reaper was not used (${bundledFailure}); using one built with ${options.compiler} instead`);
@@ -501,7 +501,7 @@ export function bundledHelperPath(): string {
 export interface ReaperOptions {
   compiler?: string;
   bundled?: string;
-  probeTimeoutMs?: number;
+  bundledProbeTimeoutMs?: number;
   quarantine?: (path: string) => Promise<string | null>;
   toolchain?: () => Promise<boolean>;
   trust?: TrustOptions;
@@ -511,7 +511,7 @@ export interface ReaperOptions {
 export function createReaper({
   compiler = COMPILER,
   bundled = bundledHelperPath(),
-  probeTimeoutMs = PROBE_TIMEOUT_MS,
+  bundledProbeTimeoutMs = PROBE_TIMEOUT_MS,
   quarantine = quarantineOf,
   toolchain = toolchainInstalled,
   trust = {},
@@ -520,7 +520,7 @@ export function createReaper({
   let resolving: Promise<Resolved> | undefined;
 
   async function helper(): Promise<Resolved> {
-    resolving ??= resolveHelper({ compiler, bundled, probeTimeoutMs, quarantine, toolchain, trust, warn });
+    resolving ??= resolveHelper({ compiler, bundled, bundledProbeTimeoutMs, quarantine, toolchain, trust, warn });
     const outcome = await resolving;
     if ("failure" in outcome) resolving = undefined;
     return outcome;
