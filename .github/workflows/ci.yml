@@ -78,6 +78,34 @@ jobs:
         # semantics of every .js in the repo to silence two lines on one step's stderr.
         run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/audit-production.ts
 
+  db-integration:
+    name: App — connection lifecycle against a real mongod
+    # `npm test` skips db.integration.test.ts, since the app job has no database. 4.4 because
+    # production is, and because the test holds a query open with `$where`/`sleep()`, which
+    # newer servers deprecate
+    runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:4.4
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongo --quiet --eval 'db.runCommand({ ping: 1 })'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+      - name: Integration tests
+        run: npx vitest run src/lib/db.integration.test.ts
+        env:
+          MONGODB_INTEGRATION_URI: mongodb://127.0.0.1:27017/db_integration
+
   worker:
     name: Worker — the package npm test never reaches
     # macOS since BP-349, and not for convenience: the worker confines the agent it runs with
