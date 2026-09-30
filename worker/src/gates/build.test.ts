@@ -7,7 +7,7 @@ import { CommandResult, Runner } from "../exec.js";
 import { GateContext } from "../types.js";
 import { claimedTask } from "../__fixtures__/task.js";
 import { recordDir, SANDBOX_COMMAND, UNCONFINED_REASON } from "../sandbox.js";
-import { LOOPBACK_ONLY_NOTE, NPM_CONFIG_PINNED, npmCacheDir } from "./confined-npm.js";
+import { GIT_DEPENDENCIES_REFUSED_NOTE, LOOPBACK_ONLY_NOTE, NPM_CONFIG_PINNED, npmCacheDir } from "./confined-npm.js";
 import { NPM_PATH } from "../__fixtures__/tool-paths.js";
 import { UNCONFINED_ESCAPE_HATCH } from "../env.js";
 
@@ -164,6 +164,25 @@ describe("buildGate", () => {
     }
   });
 
+  // BP-812: a git dependency is prepared by a child npm that reads non-canonical project keys over
+  // every other pin, so no git dependency is fetched at all
+  it("refuses git dependencies for every npm command", () => {
+    expect(NPM_CONFIG_PINNED.npm_config_allow_git).toBe("none");
+  });
+
+  it("says git dependencies are refused when the install fails on one", async () => {
+    const { runner: r } = runner({
+      ...ok,
+      code: 1,
+      stderr: 'npm error code EALLOWGIT\nnpm error Fetching packages of type "git" have been disabled',
+    });
+
+    const result = await buildGate(r, NPM_PATH, TIMEOUT_MS).run(context);
+
+    expect(result.reason).toMatch(new RegExp(`^dependency install failed \\(exit 1; ${GIT_DEPENDENCIES_REFUSED_NOTE}\\):\\n`));
+    expect(result.reason).toContain("EALLOWGIT");
+  });
+
   it("says the network was loopback-only when the build fails", async () => {
     const { runner: r } = runner(ok, { ...ok, code: 1, stderr: "Error: connect EPERM 1.1.1.1:443" });
 
@@ -302,6 +321,7 @@ describe("buildGate", () => {
     expect(result.reason).toMatch(/install/i);
     expect(result.reason).toMatch(/ENOTFOUND/);
     expect(result.reason).not.toContain(LOOPBACK_ONLY_NOTE);
+    expect(result.reason).not.toContain(GIT_DEPENDENCIES_REFUSED_NOTE);
     expect(run).toHaveBeenCalledTimes(1);
   });
 
