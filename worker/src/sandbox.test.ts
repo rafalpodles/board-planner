@@ -143,6 +143,16 @@ describe("confine", () => {
       '(deny mach-lookup (global-name "com.apple.cfprefsd.daemon") (global-name "com.apple.cfprefsd.agent"))'
     );
   });
+
+  // BP-807. All four in one rule: denying either launch path alone leaves the other one launching.
+  it("denies the services that launch an app or carry an AppleEvent on the process's behalf", () => {
+    const profile = profileOf(confined(["/work/bp-1"]));
+
+    expect(profile).toContain(
+      '(deny mach-lookup (global-name "com.apple.coreservices.quarantine-resolver") (global-name "com.apple.runningboard") ' +
+        '(global-name "com.apple.lsd.modifydb") (global-name "com.apple.coreservices.appleevents"))'
+    );
+  });
 });
 
 // BP-733. sandbox-exec looks the program it wraps up by name on the PATH this process assembled, so

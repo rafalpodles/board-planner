@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { existsSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { CommandResult, createRunner, Runner } from "./exec.js";
 import { SANDBOX_COMMAND, UNCONFINED_REASON } from "./sandbox.js";
 import { UNCONFINED_ESCAPE_HATCH } from "./env.js";
@@ -510,6 +511,63 @@ describe("the sandbox check", () => {
     expect(row.ok).toBe(false);
     expect(row.detail).toMatch(/did not stop a write outside/);
     expect(report.ok).toBe(false);
+  });
+
+  // BP-807: a launch through LaunchServices runs outside the profile, so an `open` the sandbox let
+  // through is a machine that does not confine, whatever the write half said.
+  it("fails when the probe's open was accepted", async () => {
+    const m = machine();
+    const runner: Runner = {
+      run: async (command, args, opts) => {
+        if (command !== SANDBOX_COMMAND) return m.runner.run(command, args, opts);
+        writeFileSync(args[args.length - 1], "ran");
+        writeFileSync(args[args.length - 3], "0");
+        return { code: 0, stdout: "", stderr: "", timedOut: false };
+      },
+    };
+
+    const report = await runPreflight({ ...depsFor(m), runner });
+
+    const row = check(report, "sandbox");
+    expect(row.ok).toBe(false);
+    expect(row.detail).toMatch(/did not stop a program launched through open/);
+    expect(report.ok).toBe(false);
+  });
+
+  it("fails when the launched program wrote outside, even if open said it failed", async () => {
+    const m = machine();
+    const runner: Runner = {
+      run: async (command, args, opts) => {
+        if (command !== SANDBOX_COMMAND) return m.runner.run(command, args, opts);
+        writeFileSync(args[args.length - 1], "ran");
+        writeFileSync(args[args.length - 3], "1");
+        writeFileSync(join(dirname(args[args.length - 4]), "launched.txt"), "launched");
+        return { code: 0, stdout: "", stderr: "", timedOut: false };
+      },
+    };
+
+    const report = await runPreflight({ ...depsFor(m), runner });
+
+    const row = check(report, "sandbox");
+    expect(row.ok).toBe(false);
+    expect(row.detail).toMatch(/did not stop a program launched through open/);
+  });
+
+  it("fails when the probe's open never answered, rather than reading as confined", async () => {
+    const m = machine();
+    const runner: Runner = {
+      run: async (command, args, opts) => {
+        if (command !== SANDBOX_COMMAND) return m.runner.run(command, args, opts);
+        writeFileSync(args[args.length - 1], "ran");
+        return { code: 0, stdout: "", stderr: "", timedOut: false };
+      },
+    };
+
+    const report = await runPreflight({ ...depsFor(m), runner });
+
+    const row = check(report, "sandbox");
+    expect(row.ok).toBe(false);
+    expect(row.detail).toMatch(/launch through open never answered/);
   });
 
   // The hole this row was opened with: `createRunner` settles a spawn that never happened as

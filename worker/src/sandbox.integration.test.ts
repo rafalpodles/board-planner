@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { confine } from "./sandbox.js";
@@ -179,6 +179,172 @@ describe.skipIf(!onMac)("confine against the real sandbox", () => {
 
       expect(ran, "the command never ran, so this proves nothing").toBe(true);
       expect((await readDomain(domain)).stdout).not.toContain("planted");
+    });
+  });
+
+  /**
+   * A process this one never spawns (BP-807): LaunchServices starts the bundle itself, so its program
+   * runs with ppid 1 and outside the profile. Measured before the deny: `open -g -j` returned 0 and
+   * the program wrote where a direct write got EPERM.
+   *
+   * Each route has a control with the escape hatch set, because an `open` that failed for any
+   * other reason would read exactly like the confinement working.
+   */
+  describe("a program launched on the process's behalf", () => {
+    const LSREGISTER =
+      "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
+    let app: string;
+    let bundleId: string;
+    let launched: string;
+
+    beforeEach(() => {
+      bundleId = `com.board-planner.worker.launch-probe.${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+      app = join(dir, "Probe.app");
+      launched = join(dir, "launched");
+      mkdirSync(join(app, "Contents", "MacOS"), { recursive: true });
+      writeFileSync(
+        join(app, "Contents", "Info.plist"),
+        `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+<key>CFBundleExecutable</key><string>Probe</string>
+<key>CFBundleIdentifier</key><string>${bundleId}</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>LSBackgroundOnly</key><true/>
+</dict></plist>
+`,
+      );
+      const program = join(app, "Contents", "MacOS", "Probe");
+      writeFileSync(program, '#!/bin/sh\necho "ppid=$PPID" > "$(dirname "$0")/../../../launched"\n');
+      chmodSync(program, 0o755);
+    });
+
+    afterEach(async () => {
+      await runner.run(LSREGISTER, ["-u", app], { cwd: dir, timeoutMs: 30_000 });
+    });
+
+    async function launchAs(env: NodeJS.ProcessEnv, argv: string[]) {
+      const ran = join(worktree, "ran");
+      const spawn = confine("/bin/sh", ["-c", `"$@"; echo $? > ${ran}`, "sh", ...argv], {
+        writable: [worktree],
+        env,
+      });
+      if (!("command" in spawn)) throw new Error(`refused: ${spawn.refusal}`);
+      await runner.run(spawn.command, spawn.args, { cwd: worktree, timeoutMs: 30_000 });
+      return existsSync(ran);
+    }
+
+    async function launchedWithin(ms: number): Promise<boolean> {
+      for (const deadline = Date.now() + ms; Date.now() < deadline; ) {
+        if (existsSync(launched)) return true;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      return existsSync(launched);
+    }
+
+    const register = () => runner.run(LSREGISTER, ["-f", app], { cwd: dir, timeoutMs: 30_000 });
+
+    const nsworkspace = [
+      "/usr/bin/osascript",
+      "-l",
+      "JavaScript",
+      "-e",
+      'ObjC.import("AppKit"); function run(argv) { return $.NSWorkspace.sharedWorkspace.launchApplication(argv[0]) }',
+    ];
+
+    for (const [route, argv] of [
+      ["open", () => ["/usr/bin/open", "-g", "-j", app]],
+      ["NSWorkspace", () => [...nsworkspace, app]],
+    ] as const) {
+      it(`launches the program through ${route} when nothing confines it — the control`, async () => {
+        const ran = await launchAs({ [UNCONFINED_ESCAPE_HATCH]: "1" }, argv());
+
+        expect(ran, "the command never ran, so this proves nothing").toBe(true);
+        expect(await launchedWithin(10_000)).toBe(true);
+        expect(readFileSync(launched, "utf8")).toBe("ppid=1\n");
+      });
+
+      // Registered first: for a bundle LaunchServices already knows — one Spotlight indexed, or an
+      // earlier run opened — RunningBoard is the path left once CoreServicesUIAgent is denied.
+      it(`launches nothing through ${route} under the profile, even for a registered bundle`, async () => {
+        await register();
+
+        const ran = await launchAs({}, argv());
+
+        expect(ran, "the command never ran, so this proves nothing").toBe(true);
+        expect(await launchedWithin(3_000)).toBe(false);
+      });
+    }
+
+    // A registration is a launch deferred: a bundle's URL types make it the handler the operator's
+    // next click on such a link starts, unconfined.
+    // By dump rather than by bundle id: a bundle under a temp directory is registered and still
+    // answers nil to NSWorkspace's lookup by identifier, measured.
+    const knownToLaunchServices = async () =>
+      (
+        await runner.run("/bin/sh", ["-c", `${LSREGISTER} -dump | grep -c "^identifier: *${bundleId}$"`], {
+          cwd: dir,
+          timeoutMs: 60_000,
+        })
+      ).stdout.trim() !== "0";
+
+    it("registers the bundle when nothing confines it — the control", async () => {
+      expect(await launchAs({ [UNCONFINED_ESCAPE_HATCH]: "1" }, [LSREGISTER, "-f", app])).toBe(true);
+      expect(await knownToLaunchServices()).toBe(true);
+    });
+
+    it("cannot register the bundle under the profile", async () => {
+      expect(await launchAs({}, [LSREGISTER, "-f", app])).toBe(true);
+      expect(await knownToLaunchServices()).toBe(false);
+    });
+
+    // Sending the event itself is not something a test may do: the first one to another app raises
+    // a consent prompt on the operator's screen. The port lookup precedes that prompt, and is what
+    // the deny refuses — measured, `tell application "Finder" to get count of windows` then fails
+    // with -600 and no prompt.
+    async function appleEventsReachableAs(env: NodeJS.ProcessEnv) {
+      const spawn = confine(
+        "/usr/bin/osascript",
+        [
+          "-l",
+          "JavaScript",
+          "-e",
+          'function run() { return $.NSMachBootstrapServer.sharedInstance.portForName("com.apple.coreservices.appleevents").isNil() ? "denied" : "reached" }',
+        ],
+        { writable: [worktree], env },
+      );
+      if (!("command" in spawn)) throw new Error(`refused: ${spawn.refusal}`);
+      return (await runner.run(spawn.command, spawn.args, { cwd: worktree, timeoutMs: 30_000 })).stdout.trim();
+    }
+
+    it("reaches the AppleEvent daemon when nothing confines it — the control", async () => {
+      expect(await appleEventsReachableAs({ [UNCONFINED_ESCAPE_HATCH]: "1" })).toBe("reached");
+    });
+
+    it("cannot reach the AppleEvent daemon under the profile", async () => {
+      expect(await appleEventsReachableAs({})).toBe("denied");
+    });
+
+    // launchd itself refuses to create a job for a sandboxed caller, before and after BP-807. Pinned
+    // so that stays a measurement rather than a memory.
+    describe("a job submitted to launchd", () => {
+      const label = `com.board-planner.worker.launch-probe.${process.pid}`;
+
+      afterEach(async () => {
+        await runner.run("/bin/launchctl", ["remove", label], { cwd: dir, timeoutMs: 30_000 });
+      });
+
+      const submitAs = (env: NodeJS.ProcessEnv) =>
+        launchAs(env, ["/bin/launchctl", "submit", "-l", label, "--", "/bin/sh", "-c", `echo ppid=$PPID > ${launched}`]);
+
+      it("runs when nothing confines it — the control", async () => {
+        expect(await submitAs({ [UNCONFINED_ESCAPE_HATCH]: "1" })).toBe(true);
+        expect(await launchedWithin(10_000)).toBe(true);
+      });
+
+      it("never runs under the profile", async () => {
+        expect(await submitAs({})).toBe(true);
+        expect(await launchedWithin(3_000)).toBe(false);
+      });
     });
   });
 });

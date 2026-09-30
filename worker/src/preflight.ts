@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { dirname, join } from "path";
 import { childEnv, unconfinedAgentAllowed } from "./env.js";
@@ -365,6 +365,25 @@ function firstLine(text: string): string {
   return text.split("\n")[0].trim().slice(0, 200) || "no output";
 }
 
+// An app bundle whose program writes beside it, outside the worktree. A launch through
+// LaunchServices runs it with ppid 1 and outside the profile (BP-807).
+function writeLaunchProbe(root: string): { app: string; launched: string } {
+  const app = join(root, "Probe.app");
+  const program = join(app, "Contents", "MacOS", "Probe");
+  mkdirSync(dirname(program), { recursive: true });
+  writeFileSync(
+    join(app, "Contents", "Info.plist"),
+    '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict>' +
+      "<key>CFBundleExecutable</key><string>Probe</string>" +
+      "<key>CFBundleIdentifier</key><string>com.board-planner.worker.preflight-launch-probe</string>" +
+      "<key>CFBundlePackageType</key><string>APPL</string>" +
+      "<key>LSBackgroundOnly</key><true/></dict></plist>\n"
+  );
+  writeFileSync(program, '#!/bin/sh\nprintf launched > "$(dirname "$0")/../../../launched.txt"\n');
+  chmodSync(program, 0o755);
+  return { app, launched: join(root, "launched.txt") };
+}
+
 /**
  * Whether this machine can actually confine the agent — asked by confining something and watching
  * it fail to escape, not by reading `process.platform`.
@@ -400,17 +419,27 @@ async function sandboxCheck(deps: PreflightDeps, env: NodeJS.ProcessEnv): Promis
     const worktree = join(root, "worktree");
     const beyond = join(root, "beyond.txt");
     const ran = join(worktree, "ran.txt");
+    const opened = join(worktree, "opened.txt");
     mkdirSync(worktree);
+    const { app, launched } = writeLaunchProbe(root);
 
-    // Paths as $0 and $1 rather than inside the script, so nothing about a temp directory's name
-    // can become shell syntax. The allowed write comes first and is the positive control: without
-    // it, every way the probe can fail to execute at all — sandbox-exec not on the machine, a
-    // profile that stopped compiling, the timeout — leaves `beyond` absent and reads exactly like
-    // a sandbox that worked.
-    const spawn = confine("/bin/sh", ["-c", 'printf ran > "$1"; printf escaped > "$0"', beyond, ran], {
-      writable: [worktree],
-      env: deps.env,
-    });
+    // Paths as positional arguments rather than inside the script, so nothing about a temp
+    // directory's name can become shell syntax. The allowed write comes first and is the positive
+    // control: without it, every way the probe can fail to execute at all — sandbox-exec not on the
+    // machine, a profile that stopped compiling, the timeout — leaves `beyond` absent and reads
+    // exactly like a sandbox that worked. `open`'s exit status is the launch half's own control.
+    const spawn = confine(
+      "/bin/sh",
+      [
+        "-c",
+        'printf ran > "$3"; printf escaped > "$2"; /usr/bin/open -g -j "$0" >/dev/null 2>&1; printf %s "$?" > "$1"',
+        app,
+        opened,
+        beyond,
+        ran,
+      ],
+      { writable: [worktree], env: deps.env }
+    );
     if ("refusal" in spawn) return { name, ok: false, detail: spawn.refusal };
 
     const result = await deps.runner.run(spawn.command, spawn.args, {
@@ -436,6 +465,19 @@ async function sandboxCheck(deps: PreflightDeps, env: NodeJS.ProcessEnv): Promis
         name,
         ok: false,
         detail: "the sandbox ran but did not stop a write outside the directory it was given — the agent would not be confined to its worktree",
+      };
+    }
+
+    if (!existsSync(opened)) {
+      return { name, ok: false, detail: "the sandbox could not be tested because the probe's launch through open never answered" };
+    }
+
+    // Exit 0 is the launch accepted: the program may not have written yet when this looks.
+    if (existsSync(launched) || readFileSync(opened, "utf8") === "0") {
+      return {
+        name,
+        ok: false,
+        detail: "the sandbox ran but did not stop a program launched through open — it would run outside the sandbox, with nothing confining it",
       };
     }
 
