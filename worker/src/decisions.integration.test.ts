@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, existsSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from "fs";
 import { agentArgs, answerSandboxProbe, isAgentSpawn, isSandboxProbe } from "./__fixtures__/agent-spawn.js";
 import { createServer, IncomingMessage, Server, ServerResponse } from "http";
 import { AddressInfo } from "net";
@@ -7,6 +7,7 @@ import { join } from "path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CommandResult, Runner, RunOpts } from "./exec.js";
 import { createWorker } from "./wiring.js";
+import { stubWorktree } from "./__fixtures__/stub-worktree.js";
 
 /**
  * BP-381, the seam. `decisions.ts` is unit-tested and so is `pipeline.ts`, but both halves being
@@ -263,12 +264,13 @@ function ok(stdout = ""): CommandResult {
 interface GitCall {
   command: string;
   args: string[];
+  env?: NodeJS.ProcessEnv;
 }
 
 function makeRunner(seen: GitCall[], registeredWorktree = ""): Runner {
   return {
     async run(command, args, runOpts: RunOpts) {
-      seen.push({ command, args });
+      seen.push({ command, args, env: runOpts.env });
 
       // BP-349 confines the agent to its worktree, and seatbelt is given the resolved path — so a
       // worktree that exists only in this stub's answers cannot be confined to, and the run fails
@@ -290,7 +292,7 @@ function makeRunner(seen: GitCall[], registeredWorktree = ""): Runner {
       }
       if (command === GIT_PATH && args.includes("worktree") && args.includes("add")) {
         const separator = args.indexOf("--");
-        if (separator !== -1 && args[separator + 1]) mkdirSync(args[separator + 1], { recursive: true });
+        if (separator !== -1 && args[separator + 1]) stubWorktree(args[separator + 1], REPO);
       }
 
       if (args[0] === "-lc") return ok(`${TOOL_DIR}/${(args[1] ?? "").split(" ").pop() ?? ""}`);
@@ -494,6 +496,19 @@ describe("a refused change, offered and then accepted, over a real HTTP surface"
     expect(settlement.git.some((call) => call.command === `${TOOL_DIR}/gh` && call.args.includes("create"))).toBe(
       true
     );
+  });
+
+  // BP-794: the settlement runs in a worktree whose .git file the run's agent could have rewritten,
+  // so the push and the pull request name the git dir the run recorded, carried on the marker
+  it("pushes and opens the pull request against the git dir the run recorded", () => {
+    const push = settlement.git.find((call) => call.args.includes("push"));
+    const create = settlement.git.find((call) => call.command === `${TOOL_DIR}/gh` && call.args.includes("create"));
+
+    const marker = JSON.parse(markerAfterRefusal!);
+    expect(marker.pin.gitDir).toBe(join(realpathSync(REPO), "worktrees", TASK_KEY));
+    for (const call of [push, create]) {
+      expect(call?.env).toMatchObject({ GIT_DIR: marker.pin.gitDir, GIT_WORK_TREE: marker.worktreePath });
+    }
   });
 
   /**

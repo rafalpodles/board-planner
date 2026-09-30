@@ -7,6 +7,7 @@ import { join } from "path";
 import { beforeAll, describe, expect, it } from "vitest";
 import { CommandResult, Runner, RunOpts } from "./exec.js";
 import { createWorker } from "./wiring.js";
+import { stubWorktree } from "./__fixtures__/stub-worktree.js";
 
 // Everything in wiring.test.ts replaces the api client with an object literal, so the loop it
 // proves is the wiring agreeing with a mock. Here the client is the real one from api.ts, talking
@@ -445,7 +446,7 @@ async function runWorkerAgainstTheBoard(opts: { takeTheTask: boolean }): Promise
       }
       if (command === GIT_PATH && args.includes("worktree") && args.includes("add")) {
         const separator = args.indexOf("--");
-        if (separator !== -1 && args[separator + 1]) mkdirSync(args[separator + 1], { recursive: true });
+        if (separator !== -1 && args[separator + 1]) stubWorktree(args[separator + 1], REPO);
       }
       // Order is not load-bearing — the probe's argv carries no "claude" element, so isAgentSpawn
       // cannot match it either way round. It sits here because that is the order they happen in.

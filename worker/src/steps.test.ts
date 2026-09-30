@@ -50,6 +50,7 @@ function ctx(over: Partial<StepContext> = {}) {
       merge: vi.fn(async () => {}),
     },
     commit: vi.fn(async () => "sha1"),
+    tampering: vi.fn(async () => null),
     state,
     timeoutMs: 1000,
     onEvent: vi.fn(),
@@ -366,6 +367,24 @@ describe("runStep — a worker action", () => {
     const outcome = await runStep(entry({ key: "deploy", deterministic: true }), ctx());
 
     expect(outcome).toEqual({ kind: "error", message: expect.stringContaining("deploy") });
+  });
+
+  it.each([
+    ["push", "refusing to push"],
+    ["pull-request", "refusing to open a pull request"],
+    ["merge", "refusing to merge"],
+  ])("refuses to %s a checkout whose .git file changed (BP-794)", async (key, said) => {
+    const c = ctx({
+      state: { committed: true, uncommittedWork: false, commits: ["sha1"], pushed: true, prUrl: "https://x/pull/7", merged: false, summary: "", checks: [], lastResult: completed },
+      tampering: vi.fn(async () => 'its .git file reading "gitdir: /wt/.y"'),
+    });
+
+    const outcome = await runStep(entry({ key, deterministic: true }), c);
+
+    expect(outcome).toEqual({ kind: "error", message: `${said}: the checkout now has its .git file reading "gitdir: /wt/.y"` });
+    expect(c.delivery.push).not.toHaveBeenCalled();
+    expect(c.delivery.openPr).not.toHaveBeenCalled();
+    expect(c.delivery.merge).not.toHaveBeenCalled();
   });
 
   it("refuses to push a history it did not write", async () => {

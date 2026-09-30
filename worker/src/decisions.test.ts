@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, type Mock } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { DecisionSettlement } from "./api.js";
 import {
   acceptability,
@@ -51,6 +54,7 @@ function diff(over: Partial<DiffStats> = {}): DiffStats {
 
 // Not the literal "git" — see commit.test.ts's gitPath comment (BP-641 review).
 const gitPath = "/opt/homebrew/bin/git";
+const PIN = { workTree: "/wt/CP-158", gitDir: "/repo/.git/worktrees/CP-158", pointer: "gitdir: /repo/.git/worktrees/CP-158\n", flagged: [] };
 
 describe("the marker that holds a worktree back from the reaper", () => {
   it("is written under the state directory, named for the task", () => {
@@ -174,6 +178,7 @@ describe("opening a decision", () => {
       worktreePath: "/wt/CP-158",
       worktreeRoot: "/wt",
       baseSha: "base1",
+      pin: PIN,
     };
   }
 
@@ -383,6 +388,42 @@ describe("acting on a verdict", () => {
     expect(h.push).not.toHaveBeenCalled();
     expect(h.settled[0]).toMatchObject({ state: "refused" });
     expect(h.settled[0].error).toMatch(/not at the accepted/);
+  });
+
+  // BP-794: a kept worktree's .git file is still the agent's to have rewritten, and a push through
+  // it would read the remote from whatever repository it now names
+  it("says the worktree is gone when its directory is", async () => {
+    const h = harness();
+    const workTree = join(tmpdir(), "bp794-decision-gone-never-created");
+    h.markers.write({
+      ...h.markers.read("CP-158")!,
+      pin: { workTree, gitDir: "/repo/.git/worktrees/CP-158", pointer: "gitdir: /repo/.git/worktrees/CP-158\n", flagged: [] },
+    });
+
+    await settleDecisions(h.deps, [decision()], LATER);
+
+    expect(h.push).not.toHaveBeenCalled();
+    expect(h.settled[0]).toMatchObject({ state: "refused", error: `the worktree at ${workTree} is gone` });
+  });
+
+  it("refuses the push when the worktree's .git file is not the one the run recorded", async () => {
+    const workTree = mkdtempSync(join(tmpdir(), "bp794-decision-"));
+    try {
+      writeFileSync(join(workTree, ".git"), `gitdir: ${workTree}/.y\n`);
+      const h = harness();
+      h.markers.write({
+        ...h.markers.read("CP-158")!,
+        pin: { workTree, gitDir: "/repo/.git/worktrees/CP-158", pointer: "gitdir: /repo/.git/worktrees/CP-158\n", flagged: [] },
+      });
+
+      await settleDecisions(h.deps, [decision()], LATER);
+
+      expect(h.push).not.toHaveBeenCalled();
+      expect(h.settled[0]).toMatchObject({ state: "refused" });
+      expect(h.settled[0].error).toMatch(/^the worktree now has its \.git file reading "gitdir: .*\/\.y"/);
+    } finally {
+      rmSync(workTree, { recursive: true, force: true });
+    }
   });
 
   /**

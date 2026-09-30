@@ -1,5 +1,5 @@
 import { DEFAULT_FALLBACK_MODEL, DEFAULT_MODEL, modelOr, WorkerConfig } from "./config.js";
-import { childEnv } from "./env.js";
+import { agentEnv } from "./env.js";
 import { PROTECTED_PATHS_BRIEF } from "./gates/protected-paths.js";
 import { Runner } from "./exec.js";
 import { confineTool } from "./sandbox.js";
@@ -222,7 +222,7 @@ export function createExecutor(config: WorkerConfig, runner: Runner, claudePath:
       // The CLI authenticates from its logged-in session under HOME, so the allowlist both keeps
       // ANTHROPIC_API_KEY out (which would bill per token) and keeps CP_API_TOKEN out of the
       // hands of the agent it is about to run with bypassPermissions
-      const env = childEnv();
+      const env = agentEnv();
       const parser = onEvent ? incrementalParser(onEvent) : undefined;
 
       const claudeArgs = [

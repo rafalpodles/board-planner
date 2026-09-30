@@ -283,8 +283,8 @@ describe("files hidden from git by a rule the repository does not own", () => {
     expect(await hiddenFromGit(createRunner(), gitPath, work, withIgnores)).toBeNull();
   });
 
-  // BP-794 leaves a redirected .git config unscanned before a gate, so no call in here may read a
-  // file through a clean filter such a config defines
+  // Called without the pin (BP-794), a redirected .git names a config no scan has read, so no call
+  // in here may read a file through a clean filter such a config defines
   it("runs no clean filter the checkout defines", async () => {
     const fake = join(worktree, ".y");
     const marker = join(dir, "filter-ran");

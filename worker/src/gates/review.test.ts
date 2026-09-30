@@ -491,6 +491,18 @@ describe("reviewGate", () => {
     expect(claudeCall(run)[2].env?.PATH).toBe(process.env.PATH);
   });
 
+  it("runs the reviewer with core.ignoreStat turned off for any git it runs (BP-794)", async () => {
+    const { runner, run } = claudeReturning({ approved: true, reason: "" });
+
+    await reviewGate(runner, gitPath, CLAUDE_PATH, TIMEOUT_MS).run(context());
+
+    expect(claudeCall(run)[2].env).toMatchObject({
+      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_KEY_0: "core.ignoreStat",
+      GIT_CONFIG_VALUE_0: "false",
+    });
+  });
+
   it("keeps the operator's own credentials out of the reviewer's environment", async () => {
     vi.stubEnv("CP_API_TOKEN", "cp_operator_credential");
     vi.stubEnv("GH_TOKEN", "gh_operator_credential");

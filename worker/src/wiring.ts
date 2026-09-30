@@ -32,6 +32,7 @@ import {
 } from "./config.js";
 import { connectControl, ControlDeps } from "./control.js";
 import { createDelivery, hardenedGitConfig } from "./delivery.js";
+import { pinGit } from "./worktree-pin.js";
 import {
   createMarkerStore,
   DecisionContext,
@@ -746,11 +747,13 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     const githubToken = await githubIdentityToken();
     const gitPath = resolvedGitPath();
     const workspace = createWorkspace(taskConfig, deps.runner, gitPath);
+    const pins = markers.list().flatMap((marker) => (marker.pin ? [marker.pin] : []));
+    const runner = pinGit(deps.runner, () => pins);
     return {
       worktreeRoot: taskConfig.worktreeRoot,
       destroyWorktree: (taskKey) => workspace.destroy(taskKey),
-      delivery: createDelivery(deps.runner, gitPath, resolvedToolPath("gh"), taskConfig.baseBranch, githubToken),
-      runner: deps.runner,
+      delivery: createDelivery(runner, gitPath, resolvedToolPath("gh"), taskConfig.baseBranch, githubToken),
+      runner,
       gitPath,
       collectDiff: (runner, worktreePath, baseSha) => collectDiff(runner, gitPath, worktreePath, baseSha),
     };

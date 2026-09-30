@@ -46,6 +46,20 @@ export function childEnv(
   return env;
 }
 
+// On a clone with `core.ignoreStat=true` git marks what it checks out or stages assume-unchanged,
+// which worktree-pin.ts refuses a run over; the agent's own `git add` must not do it by config
+// (BP-794). Environment config outranks the repository's own.
+export const AGENT_GIT_CONFIG: NodeJS.ProcessEnv = {
+  GIT_CONFIG_COUNT: "1",
+  GIT_CONFIG_KEY_0: "core.ignoreStat",
+  GIT_CONFIG_VALUE_0: "false",
+};
+
+/** `childEnv` for a process that runs agent-written code, or the agent itself, in the worktree. */
+export function agentEnv(alsoAllow: string[] = [], source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return { ...childEnv(alsoAllow, source), ...AGENT_GIT_CONFIG };
+}
+
 /**
  * Where the npm gates keep the cache `npm ci` needs (BP-608).
  *

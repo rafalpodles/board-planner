@@ -14,6 +14,7 @@ import { Runner } from "./exec.js";
 import { gitArgs, localGitEnv, requireGitPath } from "./git-safety.js";
 import { protectedPaths, workflowPaths } from "./gates/protected-paths.js";
 import { ClaimedTask, DiffStats } from "./types.js";
+import { GitPin, pinTampering } from "./worktree-pin.js";
 import { scrub } from "./scrub.js";
 
 /**
@@ -38,6 +39,8 @@ export interface DecisionMarker {
   commit: string;
   baseSha: string;
   createdAt: string;
+  /** The git dir the run pinned; absent on a marker written before BP-794. */
+  pin?: GitPin;
   /**
    * How many times this machine has tried to act on a verdict, counted HERE rather than read off
    * the record.
@@ -253,6 +256,7 @@ export interface OpenDecisionInput {
   worktreePath: string;
   worktreeRoot: string;
   baseSha: string;
+  pin: GitPin;
 }
 
 /**
@@ -284,6 +288,7 @@ export async function openDecision(
     commit: input.diff.headSha,
     baseSha: input.baseSha,
     createdAt: new Date().toISOString(),
+    pin: input.pin,
   });
 
   try {
@@ -471,6 +476,12 @@ async function whyNotPushable(
   if (marker.commit !== decision.commit) {
     return `this machine holds ${marker.commit} for ${decision.taskKey}, not the accepted ${decision.commit}`;
   }
+
+  if (marker.pin && !existsSync(marker.pin.workTree)) {
+    return `the worktree at ${marker.pin.workTree} is gone`;
+  }
+  const tampered = marker.pin ? await pinTampering(context.runner, context.gitPath, marker.pin) : null;
+  if (tampered) return `the worktree now has ${tampered}`;
 
   const branch = branchFor(decision.taskKey);
   const head = await context.runner.run(

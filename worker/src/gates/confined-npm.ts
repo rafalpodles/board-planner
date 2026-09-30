@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CommandResult, Runner, RunOpts } from "../exec.js";
-import { childEnv, npmCacheOverride, tempDirOverride } from "../env.js";
+import { agentEnv, npmCacheOverride, tempDirOverride } from "../env.js";
 import { confineTool } from "../sandbox.js";
 
 /**
@@ -117,7 +117,7 @@ export async function runConfinedNpm(
       // hold for npm and for everything it shells out to. `childEnv` is what every other spawn
       // here gets: the allowlist, and nothing of the operator's beyond it.
       env: {
-        ...(source ? childEnv([], source) : childEnv()),
+        ...(source ? agentEnv([], source) : agentEnv()),
         npm_config_cache: cache,
         TMPDIR: temp,
       },

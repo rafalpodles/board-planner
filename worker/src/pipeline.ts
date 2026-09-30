@@ -1,6 +1,6 @@
 import { ApiClient, BoardColumnRole, StatusIds } from "./api.js";
 import { createBudget } from "./budget.js";
-import { commitAll, MissingIdentityError } from "./commit.js";
+import { commitAll, MissingIdentityError, TamperedCheckoutError } from "./commit.js";
 import { WorkerConfig } from "./config.js";
 import { GateFallbacks } from "./gates/from-entry.js";
 import { unexpectedHistory } from "./provenance.js";
@@ -13,6 +13,7 @@ import { Runner } from "./exec.js";
 import { Executor } from "./executor.js";
 import { gitArgs, localGitEnv, requireGitPath } from "./git-safety.js";
 import { hiddenFromGit } from "./hidden-files.js";
+import { pinGit } from "./worktree-pin.js";
 import { Reporter } from "./reporter.js";
 import { SHUTDOWN_SIGNAL } from "./commands.js";
 import { scrub } from "./scrub.js";
@@ -296,20 +297,22 @@ async function pushFailure(
   baseSha: string,
   expected: string[],
   delivery: Delivery,
-  worktreePath: string,
+  worktree: Worktree,
   branch: string,
   commit: string,
 ): Promise<string | null> {
+  const tampered = await worktree.tampering();
+  if (tampered) return `refusing to push: the checkout now has ${tampered}`;
   const wrong = await unexpectedHistory(
     runner,
     gitPath,
-    worktreePath,
+    worktree.path,
     baseSha,
     expected,
   );
   if (wrong) return `refusing to push: ${wrong}`;
   try {
-    await delivery.push(worktreePath, branch, commit);
+    await delivery.push(worktree.path, branch, commit);
     return null;
   } catch (error) {
     return String(error);
@@ -363,7 +366,7 @@ export async function runTask(
   deps: PipelineDeps,
   task: ClaimedTask,
 ): Promise<RunDisposition> {
-  const { config, workspace, executor, runner, telemetry } = deps;
+  const { config, workspace, executor, telemetry } = deps;
   const now = deps.now ?? Date.now;
   const branch = branchFor(task.taskKey);
 
@@ -439,7 +442,6 @@ export async function runTask(
   }
 
   const reporter = deps.createReporter(deps.api, statusIds);
-  const delivery = deps.createDelivery(runner, config.baseBranch);
 
   let worktree: Worktree;
   try {
@@ -548,6 +550,10 @@ export async function runTask(
     return;
   }
 
+  const pinned = worktree;
+  const runner = pinGit(deps.runner, () => [pinned.pin]);
+  const delivery = deps.createDelivery(runner, config.baseBranch);
+
   let keepWorktree = false;
   const state: RunState = {
     committed: false,
@@ -593,8 +599,12 @@ export async function runTask(
           task,
           executor,
           delivery,
-          commit: (message) =>
-            commitAll(runner, deps.gitPath, worktree.path, message, worktree.commitIdentity, worktree.baseSha),
+          commit: async (message) => {
+            const tampered = await worktree.tampering();
+            if (tampered) throw new TamperedCheckoutError(tampered);
+            return commitAll(runner, deps.gitPath, worktree.path, message, worktree.commitIdentity, worktree.baseSha);
+          },
+          tampering: () => worktree.tampering(),
           state,
           timeoutMs: budget.forEntry(config.taskTimeoutMs),
           signal: deps.signal,
@@ -725,14 +735,22 @@ export async function runTask(
         }
 
         // Before every gate, not only after edit steps: build and test-run execute the agent's own
-        // code, which can hide a file from git as well as an Implement step can (BP-640)
-        const hidden = await hiddenFromGit(runner, deps.gitPath, worktree.path, worktree.baseSha);
+        // code, which can hide a file from git as well as an Implement step can (BP-640, BP-794)
+        const tampered = await worktree.tampering();
+        const hidden = tampered
+          ? { detail: `the checkout now has ${tampered}` }
+          : await hiddenFromGit(runner, deps.gitPath, worktree.path, worktree.baseSha);
         if (hidden) {
           keepWorktree = true;
-          settle("failed", `refused to run the ${gate.name} gate over files git hides`);
+          settle(
+            "failed",
+            tampered
+              ? `refused to run the ${gate.name} gate over a tampered checkout`
+              : `refused to run the ${gate.name} gate over files git hides`,
+          );
           await reporter.failed(
             task,
-            `refusing to run the ${gate.name} gate: ${hidden.detail}\n\nThe worktree is kept at \`${worktree.path}\` on the worker host, with the hidden files still in it.`,
+            `refusing to run the ${gate.name} gate: ${hidden.detail}\n\nThe worktree is kept at \`${worktree.path}\` on the worker host, with ${tampered ? "what the agent changed" : "the hidden files"} still in it.`,
           );
           return;
         }
@@ -820,6 +838,7 @@ export async function runTask(
                 worktreePath: worktree.path,
                 worktreeRoot: config.worktreeRoot,
                 baseSha: worktree.baseSha,
+                pin: worktree.pin,
               });
             } catch (error) {
               deps.logError?.(
@@ -837,7 +856,7 @@ export async function runTask(
                 worktree.baseSha,
                 state.commits,
                 delivery,
-                worktree.path,
+                worktree,
                 branch,
                 state.commits[state.commits.length - 1] ?? "",
               );
