@@ -170,7 +170,11 @@ npm install && npm run build && npm start
 
 Without a clone: every release carries `board-planner-worker-X.Y.Z.tar.gz`, built by
 `pack.sh` — this directory's `dist/`, `launchd/` and a `package.json` with nothing to install.
-Unpack it and run `npm start` (or `node dist/main.js`) inside the `worker/` it contains.
+Unpack it and run `npm start` (or `node dist/main.js`) inside the `worker/` it contains. A tarball
+a browser downloaded is quarantined, and so is everything `tar` unpacks from it, including the
+process reaper at `dist/bin/cp-reap`; release it once with `xattr -dr com.apple.quarantine worker`
+before the first start, or the worker builds its own reaper with `/usr/bin/cc` instead, and takes no
+work if it cannot.
 
 The worker reports its version to the server on every heartbeat, read from the `package.json` it
 ships with: beside `main.js` in the menubar app, beside `dist/` in the tarball and in a clone. The
@@ -397,9 +401,14 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   The check is `sandbox_check`, which Node cannot call, so it runs in a small helper. Releases carry
   it built — universal, at `bin/cp-reap` in the tarball and in the app, where it is signed with the
   app and checked against the app's signature before use — and a clone of this repository builds it
-  with `/usr/bin/cc` instead (`build-reaper.sh` makes the release one). Either way the helper is
-  refused if another user could replace it or if the spawn about to run may write where it lives, and
-  it must find and kill a confined probe before it is trusted. **It fails closed**: a helper that
+  with `/usr/bin/cc` instead (`build-reaper.sh` makes the release one; the tarball's copy is signed
+  and notarised on its own by `sign-reaper.sh`). A bundled helper is refused if it was built from
+  other source than the worker it ships with, if anyone other than this user, root or the owner of
+  the worker's own code could replace it, or if the spawn about to run may write where it lives, and
+  it must find and kill a confined probe within five seconds before it is trusted. A bundled helper
+  that fails any of that — a quarantined download hangs on its first run — gives way to one built
+  with `/usr/bin/cc` where there is a compiler, and the reason names the quarantine when there is
+  one. **It fails closed**: a helper that
   cannot be built or trusted refuses every confined spawn before it starts, and a process the helper
   cannot kill, or one that keeps reappearing, makes that run a **machine fault** and refuses every
   later confined spawn until a retry finds nothing left. The preflight sandbox row reports only what

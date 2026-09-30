@@ -139,9 +139,6 @@ jobs:
         working-directory: menubar
         run: make test
 
-      - name: Pack the worker
-        run: worker/pack.sh "$VERSION" "$OUT"
-
       - name: Import the Developer ID certificate into a temporary keychain
         if: env.SIGNED == 'true'
         env:
@@ -198,6 +195,14 @@ jobs:
             echo "CP_NOTARY_KEY_ID=$ASC_KEY_ID"
             echo "CP_NOTARY_ISSUER=$ASC_ISSUER_ID"
           } >> "$GITHUB_ENV"
+
+      # Before packing: the tarball's copy is the one nothing else signs. bundle.sh re-signs its own.
+      - name: Sign and notarise the tarball's process reaper
+        if: env.SIGNED == 'true'
+        run: worker/sign-reaper.sh
+
+      - name: Pack the worker
+        run: worker/pack.sh "$VERSION" "$OUT"
 
       # `make app` is `make test worker`, done above, followed by this
       - name: Bundle, sign, notarise, staple

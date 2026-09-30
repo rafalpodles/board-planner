@@ -4,7 +4,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRunner, Runner } from "./exec.js";
-import { createReaper, markConfinedSpawn, newMarker, Reaper, REAPER_SOURCE, ReapOutcome, untamperable, workerMarkFor, writableIn } from "./reap.js";
+import {
+  compilerDefine,
+  createReaper,
+  isQuarantined,
+  markConfinedSpawn,
+  newMarker,
+  Reaper,
+  REAPER_SOURCE,
+  REAPER_SOURCE_HASH,
+  ReapOutcome,
+  untamperable,
+  workerMarkFor,
+  writableIn,
+} from "./reap.js";
 import { confine, SANDBOX_COMMAND } from "./sandbox.js";
 
 const onMac = process.platform === "darwin";
@@ -188,7 +201,7 @@ describe.skipIf(!onMac)("the helper it trusts", () => {
     const source = join(dir, "reap.c");
     writeFileSync(source, REAPER_SOURCE);
     helper = join(dir, "bin", "cp-reap");
-    const built = spawnSync("/usr/bin/cc", ["-O2", source, "-o", helper]);
+    const built = spawnSync("/usr/bin/cc", ["-O2", compilerDefine(), source, "-o", helper]);
     if (built.status !== 0) throw new Error(String(built.stderr));
   });
 
@@ -229,13 +242,107 @@ describe.skipIf(!onMac)("the helper it trusts", () => {
     expect(untamperable(helper)).toContain("writable by others");
   });
 
+  // Stubbed rather than a real quarantined download, which would put a Gatekeeper prompt on this Mac
+  function hangingHelper(): string {
+    const stub = join(dir, "bin", "hangs");
+    writeFileSync(stub, `#!/bin/sh\n# cp-reap-source:${REAPER_SOURCE_HASH}\nexec /bin/sleep 30\n`);
+    chmodSync(stub, 0o755);
+    return stub;
+  }
+
+  it("names a quarantined helper that hangs, and how to release it, within seconds", async () => {
+    const started = Date.now();
+    const reaper = createReaper({
+      compiler: "/nonexistent/cc",
+      bundled: hangingHelper(),
+      probeTimeoutMs: 300,
+      quarantined: async () => true,
+    });
+
+    const failure = await reaper.ready([]);
+
+    expect(failure).toContain("did not answer within 0.3s");
+    expect(failure).toContain("quarantined");
+    expect(failure).toContain(`xattr -dr com.apple.quarantine ${dir}`);
+    expect(Date.now() - started).toBeLessThan(5_000);
+  });
+
+  // On a data file that is never run, so nothing asks Gatekeeper about it
+  it("tells a quarantined file from one that is not", async () => {
+    const file = join(dir, "downloaded.txt");
+    writeFileSync(file, "data");
+    expect(await isQuarantined(file)).toBe(false);
+    spawnSync("/usr/bin/xattr", ["-w", "com.apple.quarantine", "0081;00000000;Safari;", file]);
+    expect(await isQuarantined(file)).toBe(true);
+  });
+
+  it("builds one here instead when the bundled helper cannot be used and a compiler exists", async () => {
+    const quarantined = vi.fn(async () => false);
+    const reaper = createReaper({ bundled: hangingHelper(), probeTimeoutMs: 300, quarantined });
+
+    expect(await reaper.ready([])).toBe("");
+    expect(quarantined).toHaveBeenCalled();
+  });
+
+  it("does not use a helper built from other source than this worker's", async () => {
+    const stale = join(dir, "bin", "stale");
+    const built = spawnSync("/usr/bin/cc", ["-O2", '-DCP_REAP_SOURCE_HASH="0000000000000000"', join(dir, "reap.c"), "-o", stale]);
+    if (built.status !== 0) throw new Error(String(built.stderr));
+
+    const alone = await createReaper({ compiler: "/nonexistent/cc", bundled: stale, quarantined: async () => false }).ready([]);
+    expect(alone).toContain("built from other source");
+    expect(await createReaper({ bundled: stale, quarantined: async () => false }).ready([])).toBe("");
+  });
+
   it("refuses a path that does not resolve to a file", () => {
     expect(untamperable(join(dir, "missing"))).toContain("cannot resolve");
     expect(untamperable(join(dir, "bin"))).toContain("not a regular file");
   });
 });
 
+describe("untamperable, on a Mac with more than one user", () => {
+  const file = { uid: 0, mode: 0o100755, isFile: () => true, isDirectory: () => false };
+  const directory = (uid: number, mode = 0o40755) => ({ uid, mode, isFile: () => false, isDirectory: () => true });
+
+  function owned(helperOwner: number, mode = 0o100755) {
+    return (path: string) =>
+      path === "/Applications/CPMenubar.app/Contents/Resources/worker/bin/cp-reap"
+        ? { ...file, uid: helperOwner, mode }
+        : path.includes("CPMenubar.app")
+          ? directory(helperOwner)
+          : path === "/Applications"
+            ? directory(0, 0o40775)
+            : directory(0);
+  }
+  const at = { realpath: (path: string) => path };
+  const helper = "/Applications/CPMenubar.app/Contents/Resources/worker/bin/cp-reap";
+
+  it("trusts a helper owned by whoever owns the worker's own code", () => {
+    expect(untamperable(helper, { ...at, uid: 502, codeOwner: 501, lstat: owned(501) })).toBe("");
+  });
+
+  it("refuses one owned by anybody else", () => {
+    expect(untamperable(helper, { ...at, uid: 502, codeOwner: 503, lstat: owned(501) })).toContain("belongs to a user");
+  });
+
+  it("still refuses one its owner left writable by others", () => {
+    expect(untamperable(helper, { ...at, uid: 502, codeOwner: 501, lstat: owned(501, 0o100775) })).toContain("writable by others");
+  });
+});
+
 describe("markConfinedSpawn", () => {
+  it("gives a state directory the same mark before it exists as after", () => {
+    const base = mkdtempSync(join(tmpdir(), "bp796-state-"));
+    try {
+      const stateDir = join(base, "not", "yet");
+      const before = workerMarkFor(stateDir);
+      mkdirSync(stateDir, { recursive: true });
+      expect(workerMarkFor(stateDir)).toEqual(before);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
   it("adds this worker's mark too, once the worker has one", () => {
     const marker = newMarker();
     const worker = workerMarkFor("/state/a");

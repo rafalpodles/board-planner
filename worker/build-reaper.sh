@@ -21,8 +21,10 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 SOURCE="$WORK/reap.c"
 node --input-type=module -e 'process.stdout.write((await import(process.argv[1])).REAPER_SOURCE)' "$ROOT/dist/reap.js" > "$SOURCE"
+DEFINE="$(node --input-type=module -e 'process.stdout.write((await import(process.argv[1])).compilerDefine())' "$ROOT/dist/reap.js")"
 
 mkdir -p "$ROOT/dist/bin"
-xcrun clang -O2 -Wall -Werror -mmacosx-version-min=14.0 "${ARCH_FLAGS[@]}" "$SOURCE" -o "$ROOT/dist/bin/cp-reap"
+# -Wall without -Werror: a warning a newer Xcode adds should be read, not block a release
+xcrun clang -O2 -Wall -mmacosx-version-min=14.0 "$DEFINE" "${ARCH_FLAGS[@]}" "$SOURCE" -o "$ROOT/dist/bin/cp-reap"
 chmod 755 "$ROOT/dist/bin/cp-reap"
 lipo -info "$ROOT/dist/bin/cp-reap"

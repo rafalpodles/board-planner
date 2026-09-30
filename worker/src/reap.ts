@@ -1,8 +1,8 @@
 import { ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, lstatSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { childEnv } from "./env.js";
 import { SANDBOX_COMMAND } from "./sandbox.js";
@@ -47,7 +47,8 @@ export const SPAWN_MARK_PARAM = "CP_SPAWN_MARK";
 export const WORKER_MARK_PARAM = "CP_WORKER_MARK";
 const COMPILER = "/usr/bin/cc";
 const HELPER_TIMEOUT_MS = 60_000;
-const PROBE_TIMEOUT_MS = 10_000;
+// A helper's first run is the probe, and a quarantined download can hang there behind Gatekeeper
+const PROBE_TIMEOUT_MS = 5_000;
 
 export const REAPER_SOURCE = String.raw`
 #include <errno.h>
@@ -62,6 +63,9 @@ export const REAPER_SOURCE = String.raw`
 #include <unistd.h>
 
 int sandbox_check(pid_t pid, const char *operation, int type, ...);
+
+// Found by reading the file, never by running it, so a helper built from older source is not used
+__attribute__((used)) static const char source_tag[] = "cp-reap-source:" CP_REAP_SOURCE_HASH;
 
 #define FILTER_GLOBAL_NAME 2
 #define CHECK_NO_REPORT 0x40000000
@@ -159,6 +163,13 @@ int main(int argc, char **argv) {
 }
 `;
 
+/** Passed to the compiler as CP_REAP_SOURCE_HASH, and looked for in any helper before it is used. */
+export const REAPER_SOURCE_HASH = createHash("sha256").update(REAPER_SOURCE).digest("hex").slice(0, 16);
+
+export function compilerDefine(): string {
+  return `-DCP_REAP_SOURCE_HASH="${REAPER_SOURCE_HASH}"`;
+}
+
 function markRule(param: string): string {
   return `(deny mach-lookup (global-name (param "${param}")))`;
 }
@@ -171,14 +182,26 @@ export function newMarker(): SpawnMarker {
   return markerNamed(`com.boardplanner.spawn.${randomUUID()}`);
 }
 
-/** Stable across restarts of one worker, and different for two workers of the same operator. */
-export function workerMarkFor(stateDir: string): SpawnMarker {
-  let path = resolve(stateDir);
-  try {
-    path = realpathSync(path);
-  } catch {
-    // not created yet; the resolved path is what a later run resolves to as well
+// The nearest ancestor that exists, resolved, with the rest appended: the same answer before the
+// directory is created as after
+function settledPath(path: string, realpath: (path: string) => string): string {
+  const missing: string[] = [];
+  let current = resolve(path);
+  for (;;) {
+    try {
+      return join(realpath(current), ...missing.reverse());
+    } catch {
+      const parent = dirname(current);
+      if (parent === current) return join(current, ...missing.reverse());
+      missing.push(basename(current));
+      current = parent;
+    }
   }
+}
+
+/** Stable across restarts of one worker, and different for two workers of the same operator. */
+export function workerMarkFor(stateDir: string, realpath: (path: string) => string = realpathSync): SpawnMarker {
+  const path = settledPath(stateDir, realpath);
   return markerNamed(`com.boardplanner.worker.${createHash("sha256").update(path).digest("hex").slice(0, 32)}`);
 }
 
@@ -218,52 +241,58 @@ interface Executed {
   code: number | null;
   stdout: string;
   stderr: string;
+  timedOut: boolean;
 }
 
-function execute(command: string, args: string[], input?: string): Promise<Executed> {
+function execute(command: string, args: string[], input?: string, timeoutMs = HELPER_TIMEOUT_MS): Promise<Executed> {
   return new Promise((resolve) => {
     let stdout = "";
     let stderr = "";
+    let timedOut = false;
     let child: ChildProcessWithoutNullStreams;
     try {
       child = spawn(command, args, { env: childEnv(), stdio: ["pipe", "pipe", "pipe"] });
     } catch (error) {
-      resolve({ code: null, stdout, stderr: String(error) });
+      resolve({ code: null, stdout, stderr: String(error), timedOut });
       return;
     }
-    const timer = setTimeout(() => child.kill("SIGKILL"), HELPER_TIMEOUT_MS);
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+    }, timeoutMs);
     child.stdout.setEncoding("utf8").on("data", (chunk: string) => (stdout += chunk));
     child.stderr.setEncoding("utf8").on("data", (chunk: string) => (stderr += chunk));
     child.stdin.on("error", () => {});
     child.stdin.end(input);
     child.on("error", (error) => {
       clearTimeout(timer);
-      resolve({ code: null, stdout, stderr: String(error) });
+      resolve({ code: null, stdout, stderr: String(error), timedOut });
     });
     child.on("close", (code) => {
       clearTimeout(timer);
-      resolve({ code, stdout, stderr });
+      resolve({ code, stdout, stderr, timedOut });
     });
   });
 }
 
-async function runHelper(helper: string, marker: SpawnMarker): Promise<ReapOutcome> {
-  const result = await execute(helper, [marker.denied, marker.control]);
+async function runHelper(helper: string, marker: SpawnMarker, timeoutMs = HELPER_TIMEOUT_MS): Promise<ReapOutcome> {
+  const result = await execute(helper, [marker.denied, marker.control], undefined, timeoutMs);
+  if (result.timedOut) return { ok: false, reason: `the reaper did not answer within ${timeoutMs / 1000}s` };
   const killed = Number.parseInt(result.stdout.trim(), 10);
   if (result.code === 0 && Number.isInteger(killed)) return { ok: true, killed };
-  return { ok: false, reason: result.stderr.trim() || `the reaper exited ${result.code}` };
+  return { ok: false, reason: result.stderr.trim() || `the reaper exited ${result.code ?? "on a signal"}` };
 }
 
 // Shown a confined sleeper and required to kill it: a macOS whose sandbox_check stopped answering
 // would otherwise reap nothing and report success on every run.
-async function proveHelper(helper: string): Promise<string> {
+async function proveHelper(helper: string, timeoutMs: number): Promise<string> {
   const marker = newMarker();
   const marked = markConfinedSpawn(["-p", "(version 1)\n(allow default)", "/bin/sh", "-c", "echo ready; exec /bin/sleep 60"], marker);
   if ("refusal" in marked) return marked.refusal;
 
   const probe = spawn(SANDBOX_COMMAND, marked.args, { env: childEnv(), stdio: ["ignore", "pipe", "ignore"] });
   const exited = new Promise<void>((resolve) => probe.on("close", () => resolve()));
-  const timer = setTimeout(() => probe.kill("SIGKILL"), PROBE_TIMEOUT_MS);
+  const timer = setTimeout(() => probe.kill("SIGKILL"), PROBE_TIMEOUT_MS + timeoutMs);
   try {
     const ready = await new Promise<boolean>((resolve) => {
       probe.stdout.setEncoding("utf8").once("data", () => resolve(true));
@@ -272,7 +301,7 @@ async function proveHelper(helper: string): Promise<string> {
     });
     if (!ready) return `the reaper's confined probe did not start under ${SANDBOX_COMMAND}`;
 
-    const outcome = await runHelper(helper, marker);
+    const outcome = await runHelper(helper, marker, timeoutMs);
     if (!outcome.ok) return outcome.reason;
     if (outcome.killed < 1) return "the reaper did not find the confined probe it was shown";
     return "";
@@ -287,21 +316,48 @@ function within(path: string, directory: string): boolean {
   return path === directory || path.startsWith(directory.endsWith(sep) ? directory : directory + sep);
 }
 
-// The helper and its own directory are this uid's or root's alone. Above that it shares the trust of
-// the worker's own code, which sits beside it — /Applications is group-writable by admin — so only a
-// directory anyone may write to without the sticky bit is refused there.
-export function untamperable(path: string, uid: number = process.getuid?.() ?? 0): string {
+export interface TrustOptions {
+  uid?: number;
+  /** Whoever owns the directory holding the worker's own code: they could replace that code too. */
+  codeOwner?: number;
+  lstat?: (path: string) => { uid: number; mode: number; isFile(): boolean; isDirectory(): boolean };
+  realpath?: (path: string) => string;
+}
+
+function codeDirectory(): string {
+  return dirname(fileURLToPath(import.meta.url));
+}
+
+function codeOwnerOrNone(): number | undefined {
+  try {
+    return lstatSync(codeDirectory()).uid;
+  } catch {
+    return undefined;
+  }
+}
+
+// The helper and its own directory may be written only by their owner, who is this uid, root or
+// whoever owns the worker's own code. Above that it shares the trust of that code, which sits
+// beside it — /Applications is group-writable by admin — so only a directory anyone may write to
+// without the sticky bit is refused there.
+export function untamperable(path: string, options: TrustOptions = {}): string {
+  const uid = options.uid ?? process.getuid?.() ?? 0;
+  const codeOwner = "codeOwner" in options ? options.codeOwner : codeOwnerOrNone();
+  const lstat = options.lstat ?? lstatSync;
+  const realpath = options.realpath ?? realpathSync;
+  const trusted = (owner: number) => owner === uid || owner === 0 || owner === codeOwner;
+
   let current: string;
   try {
-    current = realpathSync(path);
+    current = realpath(path);
   } catch (error) {
     return `cannot resolve the process reaper at ${path}: ${String(error)}`;
   }
-  if (!lstatSync(current).isFile()) return `the process reaper at ${current} is not a regular file`;
+  if (!lstat(current).isFile()) return `the process reaper at ${current} is not a regular file`;
   for (let depth = 0; ; depth++) {
-    const entry = lstatSync(current);
+    const entry = lstat(current);
     const strict = depth < 2;
-    if (entry.uid !== uid && entry.uid !== 0) return `${current} belongs to another user, who could replace the process reaper`;
+    if (!trusted(entry.uid)) return `${current} belongs to a user this worker does not share its code with, who could replace the process reaper`;
     const sticky = entry.isDirectory() && (entry.mode & 0o1000) !== 0;
     if ((entry.mode & (strict ? 0o022 : 0o002)) !== 0 && !sticky) {
       return `${current} is writable by others, who could replace the process reaper`;
@@ -323,6 +379,20 @@ async function sealed(helper: string): Promise<string> {
   return verified.code === 0 ? "" : `the app carrying the process reaper fails its signature: ${verified.stderr.trim()}`;
 }
 
+function builtFromThisSource(helper: string): string {
+  try {
+    if (readFileSync(helper).includes(`cp-reap-source:${REAPER_SOURCE_HASH}`)) return "";
+  } catch (error) {
+    return `cannot read the process reaper at ${helper}: ${String(error)}`;
+  }
+  return `the process reaper at ${helper} was built from other source than this worker's — rebuild it with build-reaper.sh`;
+}
+
+export async function isQuarantined(path: string): Promise<boolean> {
+  const result = await execute("/usr/bin/xattr", ["-p", "com.apple.quarantine", path], undefined, 5_000);
+  return result.code === 0;
+}
+
 type Resolved = { helper: string } | { failure: string };
 
 async function compileHelper(compiler: string): Promise<Resolved> {
@@ -333,7 +403,7 @@ async function compileHelper(compiler: string): Promise<Resolved> {
     return { failure: `could not make a directory for the process reaper: ${String(error)}` };
   }
   const helper = join(dir, "reap");
-  const compiled = await execute(compiler, ["-O2", "-x", "c", "-", "-o", helper], REAPER_SOURCE);
+  const compiled = await execute(compiler, ["-O2", compilerDefine(), "-x", "c", "-", "-o", helper], REAPER_SOURCE);
   if (compiled.code !== 0) {
     rmSync(dir, { recursive: true, force: true });
     return { failure: `could not build the process reaper with ${compiler}: ${compiled.stderr.trim() || `exit ${compiled.code}`}` };
@@ -342,26 +412,64 @@ async function compileHelper(compiler: string): Promise<Resolved> {
   return { helper };
 }
 
-async function resolveHelper(compiler: string, bundled: string): Promise<Resolved> {
-  const found = existsSync(bundled) ? { helper: bundled } : await compileHelper(compiler);
-  if ("failure" in found) return found;
-  const failure = untamperable(found.helper) || (await sealed(realpathSync(found.helper))) || (await proveHelper(found.helper));
-  return failure ? { failure } : { helper: realpathSync(found.helper) };
+interface ResolveOptions {
+  compiler: string;
+  bundled: string;
+  probeTimeoutMs: number;
+  quarantined: (path: string) => Promise<boolean>;
+  trust: TrustOptions;
+}
+
+async function trusted(helper: string, options: ResolveOptions, checkSource: boolean): Promise<string> {
+  const failure = untamperable(helper, options.trust) || (checkSource ? builtFromThisSource(helper) : "");
+  if (failure) return failure;
+  const resolved = realpathSync(helper);
+  return (await sealed(resolved)) || (await proveHelper(resolved, options.probeTimeoutMs));
+}
+
+async function resolveHelper(options: ResolveOptions): Promise<Resolved> {
+  let bundledFailure = "";
+  if (existsSync(options.bundled)) {
+    bundledFailure = await trusted(options.bundled, options, true);
+    if (!bundledFailure) return { helper: realpathSync(options.bundled) };
+    if (await options.quarantined(options.bundled)) {
+      bundledFailure +=
+        ` — it is quarantined, as a download is until it is opened, and macOS may be holding it for approval;` +
+        ` run: xattr -dr com.apple.quarantine ${dirname(dirname(options.bundled))}`;
+    }
+    if (!existsSync(options.compiler)) return { failure: `the bundled process reaper cannot be used: ${bundledFailure}` };
+  }
+
+  const compiled = await compileHelper(options.compiler);
+  const failure = "failure" in compiled ? compiled.failure : await trusted(compiled.helper, options, false);
+  if (!failure && "helper" in compiled) return { helper: realpathSync(compiled.helper) };
+  return { failure: bundledFailure ? `the bundled process reaper cannot be used: ${bundledFailure}; nor can one built here: ${failure}` : failure };
 }
 
 /** Where a release puts the built helper: beside this module, in the tarball and in the app. */
 export function bundledHelperPath(): string {
-  return join(dirname(fileURLToPath(import.meta.url)), "bin", "cp-reap");
+  return join(codeDirectory(), "bin", "cp-reap");
+}
+
+export interface ReaperOptions {
+  compiler?: string;
+  bundled?: string;
+  probeTimeoutMs?: number;
+  quarantined?: (path: string) => Promise<boolean>;
+  trust?: TrustOptions;
 }
 
 export function createReaper({
   compiler = COMPILER,
   bundled = bundledHelperPath(),
-}: { compiler?: string; bundled?: string } = {}): Reaper {
+  probeTimeoutMs = PROBE_TIMEOUT_MS,
+  quarantined = isQuarantined,
+  trust = {},
+}: ReaperOptions = {}): Reaper {
   let resolving: Promise<Resolved> | undefined;
 
   async function helper(): Promise<Resolved> {
-    resolving ??= resolveHelper(compiler, bundled);
+    resolving ??= resolveHelper({ compiler, bundled, probeTimeoutMs, quarantined, trust });
     const outcome = await resolving;
     if ("failure" in outcome) resolving = undefined;
     return outcome;
