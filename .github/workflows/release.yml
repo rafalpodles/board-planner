@@ -133,6 +133,7 @@ jobs:
         run: |
           npm ci --ignore-scripts
           npm run build
+          ./build-reaper.sh
 
       - name: Swift tests
         working-directory: menubar
@@ -222,6 +223,7 @@ jobs:
       - name: Package
         run: |
           test -f menubar/.build/CPMenubar.app/Contents/Resources/worker/main.js
+          lipo menubar/.build/CPMenubar.app/Contents/Resources/worker/bin/cp-reap -verify_arch arm64 x86_64
           ditto -c -k --keepParent menubar/.build/CPMenubar.app "$OUT/board-planner-menubar-$VERSION.zip"
           cd "$OUT"
           shasum -a 256 "board-planner-menubar-$VERSION.zip" "board-planner-worker-$VERSION.tar.gz" > SHA256SUMS

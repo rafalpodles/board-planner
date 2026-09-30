@@ -1,6 +1,6 @@
 import { ChildProcess, spawn } from "child_process";
-import { childEnv } from "./env.js";
-import { createReaper, markConfinedSpawn, Reaper, SpawnMarker } from "./reap.js";
+import { childEnv, unconfinedAgentAllowed } from "./env.js";
+import { createReaper, markConfinedSpawn, Reaper, SpawnMarker, workerMarkFor, writableIn } from "./reap.js";
 import { SANDBOX_COMMAND } from "./sandbox.js";
 
 export interface CommandResult {
@@ -30,6 +30,11 @@ export interface RunOpts {
 
 export interface Runner {
   run(command: string, args: string[], opts: RunOpts): Promise<CommandResult>;
+  /**
+   * Adopts `stateDir` as this worker's identity for every later confined spawn, and kills whatever an
+   * earlier process of the same worker confined and left running. Empty when nothing is left.
+   */
+  reapLeftovers?(stateDir: string): Promise<string>;
 }
 
 const SIGKILL_GRACE_MS = 5000;
@@ -63,6 +68,8 @@ export function killGroup(
 
 export interface RunnerOptions {
   reaper?: Reaper;
+  platform?: NodeJS.Platform;
+  env?: NodeJS.ProcessEnv;
 }
 
 function faulted(machineFault: string): CommandResult {
@@ -184,6 +191,7 @@ export function createRunner(options: RunnerOptions = {}): Runner {
   };
 
   let reaper = options.reaper;
+  let workerMark: SpawnMarker | undefined;
   const unreaped = new Set<SpawnMarker>();
 
   function theReaper(): Reaper {
@@ -201,6 +209,16 @@ export function createRunner(options: RunnerOptions = {}): Runner {
   }
 
   return {
+    async reapLeftovers(stateDir) {
+      // Where confine never wraps anything there is no mark to look for, and no helper to build
+      if ((options.platform ?? process.platform) !== "darwin" || unconfinedAgentAllowed(options.env)) return "";
+      workerMark = workerMarkFor(stateDir);
+      const unavailable = await theReaper().ready([]);
+      if (unavailable) return unavailable;
+      const outcome = await theReaper().reap(workerMark);
+      return outcome.ok ? "" : `a process an earlier run of this worker confined may still be running: ${outcome.reason}`;
+    },
+
     async run(command, args, opts) {
       if (command !== SANDBOX_COMMAND) return direct.run(command, args, opts);
 
@@ -208,9 +226,9 @@ export function createRunner(options: RunnerOptions = {}): Runner {
         const fault = await reap(marker);
         if (fault) return faulted(fault);
       }
-      const unavailable = await theReaper().ready();
+      const unavailable = await theReaper().ready(writableIn(args));
       if (unavailable) return faulted(unavailable);
-      const marked = markConfinedSpawn(args);
+      const marked = markConfinedSpawn(args, undefined, workerMark);
       if ("refusal" in marked) return faulted(marked.refusal);
 
       const result = await direct.run(command, marked.args, opts);

@@ -56,6 +56,13 @@ if [ ! -f "$WORKER_DIST/main.js" ]; then
   echo "       or use 'make app', which does it for you. The app is not usable without it." >&2
   exit 1
 fi
+# The process reaper (BP-796) is the one native file in it. Without it the worker falls back to
+# compiling one, which a Mac with no command-line tools, or an unaccepted Xcode licence, cannot.
+if [ ! -x "$WORKER_DIST/bin/cp-reap" ]; then
+  echo "error: no process reaper at $WORKER_DIST/bin/cp-reap — run worker/build-reaper.sh," >&2
+  echo "       or use 'make app', which does it for you." >&2
+  exit 1
+fi
 mkdir -p "$APP/Contents/Resources/worker"
 cp -R "$WORKER_DIST"/* "$APP/Contents/Resources/worker/"
 rm -rf "$APP/Contents/Resources/worker/__fixtures__"
@@ -85,6 +92,10 @@ PLIST
 # login-item behaviour get exercised here, instead of being discovered after a notarisation round.
 TIMESTAMP=()
 [ "$IDENTITY" = "-" ] || TIMESTAMP=(--timestamp)
+# Nested code is signed first and on its own: signing the app seals it as a resource but does not
+# sign it, and notarisation refuses an unsigned Mach-O anywhere in the bundle.
+codesign --force --options runtime ${TIMESTAMP[@]+"${TIMESTAMP[@]}"} \
+  --sign "$IDENTITY" "$APP/Contents/Resources/worker/bin/cp-reap"
 codesign --force --options runtime ${TIMESTAMP[@]+"${TIMESTAMP[@]}"} \
   --entitlements "$ROOT/Resources/CPMenubar.entitlements" \
   --sign "$IDENTITY" "$APP"

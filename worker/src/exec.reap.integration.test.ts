@@ -1,10 +1,10 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRunner, Runner } from "./exec.js";
-import { createReaper, markConfinedSpawn, newMarker, Reaper, ReapOutcome } from "./reap.js";
+import { createReaper, markConfinedSpawn, newMarker, Reaper, REAPER_SOURCE, ReapOutcome, untamperable, workerMarkFor, writableIn } from "./reap.js";
 import { confine, SANDBOX_COMMAND } from "./sandbox.js";
 
 const onMac = process.platform === "darwin";
@@ -75,6 +75,25 @@ describe.skipIf(!onMac)("a confined spawn leaves nothing running behind it", () 
     await expectNothingWritten();
   }, 30_000);
 
+  // A worker that crashed, was killed or was restarted never ran its per-spawn reap, and its
+  // markers died with it. What the next process can still name is the worker's own mark.
+  it("kills what a previous process of the same worker left, and nothing of another worker's", async () => {
+    const stateDir = join(dir, "state");
+    const neverReaps: Reaper = { ready: async () => "", reap: async () => ({ ok: true, killed: 0 }) };
+    const crashed = createRunner({ reaper: neverReaps });
+    expect(await crashed.reapLeftovers?.(stateDir)).toBe("");
+    await confinedSh(crashed, backgroundingStep(worktree));
+
+    const anotherWorker = createRunner();
+    expect(await anotherWorker.reapLeftovers?.(join(dir, "other-state"))).toBe("");
+    const before = sizes(worktree);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    for (const [name, size] of Object.entries(sizes(worktree))) expect(size).toBeGreaterThan(before[name]);
+
+    expect(await createRunner().reapLeftovers?.(stateDir)).toBe("");
+    await expectNothingWritten();
+  }, 30_000);
+
   it("leaves another spawn's processes alone", async () => {
     const other = markConfinedSpawn(["-p", "(version 1)\n(allow default)", "/bin/sh", "-c", "echo ready; exec /bin/sleep 60"]);
     if ("refusal" in other) throw new Error(other.refusal);
@@ -129,6 +148,7 @@ describe("when a confined spawn cannot be reaped", () => {
 
       const recovered = await runner.run(SANDBOX_COMMAND, args, { cwd: dir, timeoutMs: 10_000 });
       expect(recovered.machineFault).toBeUndefined();
+      expect(existsSync(ran)).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -158,7 +178,92 @@ describe("when a confined spawn cannot be reaped", () => {
   });
 });
 
+describe.skipIf(!onMac)("the helper it trusts", () => {
+  let dir: string;
+  let helper: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "bp796-helper-"));
+    mkdirSync(join(dir, "bin"));
+    const source = join(dir, "reap.c");
+    writeFileSync(source, REAPER_SOURCE);
+    helper = join(dir, "bin", "cp-reap");
+    const built = spawnSync("/usr/bin/cc", ["-O2", source, "-o", helper]);
+    if (built.status !== 0) throw new Error(String(built.stderr));
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("uses a prebuilt helper without a compiler, once it has killed its probe", async () => {
+    expect(await createReaper({ compiler: "/nonexistent/cc", bundled: helper }).ready([])).toBe("");
+  });
+
+  it("refuses a confined spawn whose writable paths reach the helper", async () => {
+    const reaper = createReaper({ compiler: "/nonexistent/cc", bundled: helper });
+
+    expect(await reaper.ready([join(dir, "elsewhere")])).toBe("");
+    expect(await reaper.ready([dir])).toContain("could rewrite the process reaper");
+    expect(await reaper.ready([join(dir, "bin")])).toContain("could rewrite the process reaper");
+  });
+
+  it("refuses, through the runner, to run a spawn allowed to write where the helper is", async () => {
+    const runner = createRunner({ reaper: createReaper({ compiler: "/nonexistent/cc", bundled: helper }) });
+    const ran = join(dir, "ran");
+    const spawned = confine("/usr/bin/touch", [ran], { writable: [dir], env: {} });
+    if (!("command" in spawned)) throw new Error(spawned.refusal);
+
+    const result = await runner.run(spawned.command, spawned.args, { cwd: dir, timeoutMs: 10_000 });
+
+    expect(result.machineFault).toContain("could rewrite the process reaper");
+    expect(existsSync(ran)).toBe(false);
+  });
+
+  it("refuses a helper, or a directory holding it, that others can write", async () => {
+    chmodSync(helper, 0o775);
+    expect(await createReaper({ compiler: "/nonexistent/cc", bundled: helper }).ready([])).toContain("writable by others");
+
+    chmodSync(helper, 0o755);
+    chmodSync(join(dir, "bin"), 0o777);
+    expect(untamperable(helper)).toContain("writable by others");
+  });
+
+  it("refuses a path that does not resolve to a file", () => {
+    expect(untamperable(join(dir, "missing"))).toContain("cannot resolve");
+    expect(untamperable(join(dir, "bin"))).toContain("not a regular file");
+  });
+});
+
 describe("markConfinedSpawn", () => {
+  it("adds this worker's mark too, once the worker has one", () => {
+    const marker = newMarker();
+    const worker = workerMarkFor("/state/a");
+    const marked = markConfinedSpawn(["-p", "(version 1)", "/bin/sh"], marker, worker);
+
+    expect(marked).toEqual({
+      args: [
+        "-p",
+        '(version 1)\n(deny mach-lookup (global-name (param "CP_SPAWN_MARK")))\n(deny mach-lookup (global-name (param "CP_WORKER_MARK")))',
+        "-D",
+        `CP_SPAWN_MARK=${marker.denied}`,
+        "-D",
+        `CP_WORKER_MARK=${worker.denied}`,
+        "/bin/sh",
+      ],
+      marker,
+    });
+  });
+
+  it("names a worker by its state directory: the same one twice, two different ones apart", () => {
+    expect(workerMarkFor("/state/a")).toEqual(workerMarkFor("/state/a"));
+    expect(workerMarkFor("/state/a").denied).not.toBe(workerMarkFor("/state/b").denied);
+  });
+
+  it("reads the writable paths out of a sandbox-exec argument list", () => {
+    expect(writableIn(["-p", "(version 1)", "-D", "W0=/wt", "-D", "W1=/tmp/x", "-D", "CP_SPAWN_MARK=com.x", "/bin/sh"])).toEqual(["/wt", "/tmp/x"]);
+  });
+
   it("adds the spawn's own deny rule and parameter to the inline profile", () => {
     const marker = newMarker();
     const marked = markConfinedSpawn(["-p", "(version 1)", "-D", "W0=/x", "/bin/sh"], marker);

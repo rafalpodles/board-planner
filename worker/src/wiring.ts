@@ -247,6 +247,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   // as undefined while it is, so a worker mid-startup never claims to be broken.
   let preflight: PreflightReport | null = null;
   let preflightFailed = false;
+  let leftovers = "";
   // The gates' own requirements, which only exist relative to a bound repository, so they are
   // recomputed on every rebind rather than once at startup
   let repoChecks: PreflightCheck[] = [];
@@ -367,6 +368,14 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     if (repaired !== deps.env.PATH) {
       deps.setPath(repaired);
       deps.log("PATH extended with the directories the required tools were found in");
+    }
+
+    if (leftovers) {
+      const report = preflight;
+      report.checks = report.checks.map((check) =>
+        check.name === SANDBOX_CHECK ? { ...check, ok: false, warn: false, detail: leftovers } : check
+      );
+      report.ok = false;
     }
 
     for (const check of preflight.checks) {
@@ -804,6 +813,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
    * again — for npm, after a full paid Implement step.
    */
   function claimBlocked(): string {
+    if (leftovers) return leftovers;
     const row = preflight?.checks.find((check) => check.name === SANDBOX_CHECK);
     if (row && !row.ok) return row.detail;
     if (!preflight) return preflightFailed ? "preflight could not run, so no tool a step spawns was resolved" : "";
@@ -940,6 +950,8 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     async run() {
       // First of all, because it repairs the PATH every later child is spawned with — including
       // the git this run's own inventory scan shells out to.
+      // Before preflight's own probe, which is the first confined spawn to carry this worker's mark
+      leftovers = (await deps.runner.reapLeftovers?.(bootstrap.stateDir)) ?? "";
       await establishPreflight();
 
       // Before the first heartbeat, which is what carries it: the server matches projects against
