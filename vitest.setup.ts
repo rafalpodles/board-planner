@@ -6,6 +6,13 @@ declare global {
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
+{
+  const locale = Intl.DateTimeFormat().resolvedOptions().locale;
+  if (locale !== "en-US") {
+    throw new Error(`vitest.config.ts pins the test locale to en-US, but this worker runs ${locale}`);
+  }
+}
+
 // Node 26 defines localStorage on globalThis and reads it as undefined without
 // --localstorage-file; vitest's happy-dom environment leaves globals it did not create alone, so
 // the DOM's own Storage never lands. sessionStorage needs no such repair — Node's is in-memory
