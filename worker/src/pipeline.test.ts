@@ -876,6 +876,58 @@ describe("runTask", () => {
       expect(h.workspace.destroy).not.toHaveBeenCalled();
     });
 
+    // BP-804 review: with nothing committed yet, only the refusal itself can keep the evidence
+    it("keeps the worktree when the first thing refused is a step", async () => {
+      const h = harness({ gateFor: (entry) => passingGate(entry.key) });
+      h.workspace.create.mockResolvedValue(worktreeAt("base1", tamperedAfter(1)));
+
+      await runTask(h.deps, running("test-run", "implement", "push"));
+
+      expect(h.executor.execute).not.toHaveBeenCalled();
+      expect(h.workspace.destroy).not.toHaveBeenCalled();
+      const comment = h.reporter.failed.mock.calls[0][1];
+      expect(comment).toContain(`refusing to run Implement: the checkout now has ${FINDING}`);
+      expect(comment).toContain("Nothing was pushed. The worktree is kept at `/wt`");
+      expect(comment).not.toMatch(/staged|config that was found/);
+    });
+
+    it("says what an earlier step already pushed rather than that nothing was", async () => {
+      const h = harness({ gateFor: (entry) => passingGate(entry.key) });
+      // before the step, its commit, before the push — then before the second step
+      h.workspace.create.mockResolvedValue(worktreeAt("base1", tamperedAfter(3)));
+
+      await runTask(h.deps, running("implement", "push", "implement"));
+
+      expect(h.delivery.push).toHaveBeenCalledTimes(1);
+      const comment = h.reporter.failed.mock.calls[0][1];
+      expect(comment).toContain("was pushed by an earlier step, and nothing since.");
+      expect(comment).not.toContain("Nothing was pushed");
+    });
+
+    // A swap between the check and the gate's own confinement is the run's doing: a machine fault
+    // would refund the attempt and stop this worker claiming, on a process the agent controls
+    it("fails, not releases, a gate that found the worktree replaced under it", async () => {
+      const replaced = {
+        name: "test-run",
+        run: vi.fn<Gate["run"]>(async () => ({
+          ok: false,
+          reason: "refusing to confine the agent to /wt: /wt replaced by a symlink since it was created",
+          tampered: "its directory /wt replaced by a symlink",
+        })),
+      };
+      const h = harness({ gateFor: () => replaced });
+
+      const outcome = await runTask(h.deps, running("test-run", "push"));
+
+      expect(outcome).not.toBe("machine-fault");
+      expect(h.reporter.released).not.toHaveBeenCalled();
+      expect(h.delivery.push).not.toHaveBeenCalled();
+      expect(h.workspace.destroy).not.toHaveBeenCalled();
+      expect(h.reporter.failed.mock.calls[0][1]).toContain(
+        "refusing to run the test-run gate: the checkout now has its directory /wt replaced by a symlink",
+      );
+    });
+
     it("refuses to push after the last gate rewrote it", async () => {
       const h = harness({ gateFor: (entry) => passingGate(entry.key) });
       h.workspace.create.mockResolvedValue(worktreeAt("base1", tamperedAfter(3)));

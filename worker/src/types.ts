@@ -65,6 +65,8 @@ export type RunOutcome =
   // fail the next task identically. Separate from "error" because the two are accounted for
   // differently — see the released/machine-fault path in pipeline.ts.
   | { kind: "machine_fault"; message: string }
+  // The worktree recorded at creation is no longer that directory, found at the confinement itself
+  | { kind: "tampered"; finding: string }
   | { kind: "error"; message: string };
 
 export interface DiffStats {
@@ -142,6 +144,8 @@ export interface GateResult {
    * its branch; this routes it to the released path instead, with the attempt refunded.
    */
   machineFault?: boolean;
+  /** The worktree was replaced under the gate, which is the run's doing and not the machine's (BP-804). */
+  tampered?: string;
 }
 
 export interface PassedCheck {

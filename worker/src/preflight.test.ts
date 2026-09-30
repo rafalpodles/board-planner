@@ -1,11 +1,12 @@
 import { describe, it, expect, vi } from "vitest";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { CommandResult, createRunner, Runner } from "./exec.js";
 import { SANDBOX_COMMAND, UNCONFINED_REASON } from "./sandbox.js";
 import { UNCONFINED_ESCAPE_HATCH } from "./env.js";
 import { answerSandboxProbe, isSandboxProbe } from "./__fixtures__/agent-spawn.js";
-import { checkRepo, pathWithTools, runPreflight } from "./preflight.js";
+import { checkRepo, npmCacheCheck, pathWithTools, runPreflight } from "./preflight.js";
 
 const LOGGED_IN = JSON.stringify({
   loggedIn: true,
@@ -791,4 +792,44 @@ describe("the identity commits are authored as", () => {
     expect(check(report, "commit identity").detail).toContain("names nobody to commit as (Author identity unknown)");
     expect(report.ok).toBe(true);
   });
+});
+
+// BP-804: the Build gate refuses a cache that is a symlink, which reads as a machine fault at the
+// first Build gate unless it is said here first
+describe("npmCacheCheck", () => {
+  function inScratch(test: (dir: string) => void) {
+    const dir = mkdtempSync(join(tmpdir(), "bp804-cache-"));
+    try {
+      test(dir);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it("refuses a CP_NPM_CACHE that is a symlink", () =>
+    inScratch((dir) => {
+      mkdirSync(join(dir, "real"));
+      symlinkSync(join(dir, "real"), join(dir, "cache"));
+
+      const check = npmCacheCheck({ CP_NPM_CACHE: join(dir, "cache") });
+
+      expect(check.ok).toBe(false);
+      expect(check.detail).toMatch(/^point CP_NPM_CACHE at a real directory/);
+      expect(check.detail).toContain("is a symlink");
+    }));
+
+  it("passes a real directory, and one not created yet", () =>
+    inScratch((dir) => {
+      mkdirSync(join(dir, "cache"));
+
+      expect(npmCacheCheck({ CP_NPM_CACHE: join(dir, "cache") }).ok).toBe(true);
+      expect(npmCacheCheck({ CP_NPM_CACHE: join(dir, "later") }).ok).toBe(true);
+    }));
+
+  it("says nothing against it where the operator runs unconfined", () =>
+    inScratch((dir) => {
+      symlinkSync(dir, join(dir, "cache"));
+
+      expect(npmCacheCheck({ CP_NPM_CACHE: join(dir, "cache"), [UNCONFINED_ESCAPE_HATCH]: "1" }).ok).toBe(true);
+    }));
 });

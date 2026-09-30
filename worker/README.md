@@ -359,7 +359,10 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   a symlink put there afterwards permits nothing through it (measured on macOS 26.6.2). Every other
   directory a confinement allows — a gate's scratch directory, the npm cache, the review checkout —
   is resolved through its parent only and refused if it is itself a symlink, so a `CP_NPM_CACHE`
-  that is a symlink is refused rather than followed; point it at the real directory.
+  that is a symlink is refused rather than followed — preflight reads red on it before the machine
+  claims anything; point it at the real directory. A worktree found replaced, before a step or gate
+  or at its confinement, fails the run and keeps the worktree as evidence; it is not reported as a
+  machine that cannot confine, so it neither refunds the attempt nor stops the worker claiming.
 
   **What it closes.** A step runs with `--permission-mode bypassPermissions`, so `Write` used to take
   any absolute path this user can reach. `$HOME/.claude/settings.json` is the shortest one: a hook

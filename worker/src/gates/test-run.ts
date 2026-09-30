@@ -1,6 +1,6 @@
 import { CommandResult, Runner } from "../exec.js";
 import { Gate } from "../types.js";
-import { runConfinedNpm } from "./confined-npm.js";
+import { refused, runConfinedNpm } from "./confined-npm.js";
 
 const MAX_REASON_CHARS = 2000;
 
@@ -21,9 +21,7 @@ export function testRunGate(runner: Runner, npmPath: string, timeoutMs: number):
       // machineFault, not a plain refusal, and the same call the review gate makes: a machine that
       // cannot confine has judged nothing, so reporting it as the suite failing would blame the
       // diff, spend the attempt and push the branch.
-      if ("refusal" in result) {
-        return { ok: false, reason: result.refusal, machineFault: true };
-      }
+      if ("refusal" in result) return refused(result);
 
       if (result.timedOut) {
         return { ok: false, reason: `the test suite timed out after ${timeoutMs}ms` };

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { WorkerConfig } from "./config.js";
 import { createRunner, Runner } from "./exec.js";
 import { createExecutor } from "./executor.js";
+import { testRunGate } from "./gates/test-run.js";
 import { confine } from "./sandbox.js";
 import { RunState, runStep, StepContext } from "./steps.js";
 import { ClaimedTask, SnapshotEntry } from "./types.js";
@@ -160,10 +161,25 @@ describe.skipIf(process.platform !== "darwin")("a worktree a confined process re
       brief: { prompt: "go", capability: "edit", model: "", fallbackModel: "", timeoutMs: 30_000 },
     });
 
-    expect(outcome).toMatchObject({ kind: "machine_fault" });
-    expect(outcome.kind === "machine_fault" && outcome.message).toContain("replaced by a symlink");
+    expect(outcome).toEqual({ kind: "tampered", finding: `its directory ${worktree.dir.path} replaced by a symlink` });
     expect(spawned).toEqual([]);
     expect(readFileSync(settings, "utf8")).toBe("original\n");
+  });
+
+  it("has a gate refuse it as tampering, not as a machine that cannot confine", async () => {
+    await swapForSymlink();
+
+    const verdict = await testRunGate(recording, installedToolPath("npm"), 30_000).run({
+      worktreePath: worktree.path,
+      worktreeDir: worktree.dir,
+      task: claimedTask({ taskKey: "BP-1" }),
+      result: { status: "completed", summary: "", filesChanged: [], testsAdded: [], blockedReason: "" },
+      diff: { changedLines: 0, changedFiles: [], patch: "", truncated: false, headSha: worktree.baseSha, symlinks: [], suppressedDiffs: [], gitlinks: [] },
+    });
+
+    expect(verdict).toMatchObject({ ok: false, tampered: `its directory ${worktree.dir.path} replaced by a symlink` });
+    expect(verdict.machineFault).toBeUndefined();
+    expect(spawned).toEqual([]);
   });
 
   // The narrower window after the confinement is built: seatbelt matches the resolved path of each

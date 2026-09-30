@@ -100,7 +100,11 @@ export const UNCONFINED_ACCEPTED_DETAIL =
  * request, and the fleet row cannot answer that because it is recomputed at boot. If it is ever
  * asked, it belongs on RunRecord beside `agentName`, which exists for exactly that reason.
  */
-export type Confinement = { command: string; args: string[] } | { refusal: string };
+export type Confinement =
+  | { command: string; args: string[] }
+  // `replaced` when the refusal is a recorded directory that is no longer itself: the run's doing,
+  // not the machine's, so it must not be accounted as a machine that cannot confine
+  | { refusal: string; replaced?: string };
 
 /** A directory as it was when the worker made it: its real path, and which directory that was. */
 export interface RecordedDir {
@@ -227,7 +231,9 @@ export function confine(command: string, args: string[], options: ConfineOptions
   for (const entry of options.writable) {
     if (typeof entry !== "string") {
       const replaced = dirReplaced(entry, lstat);
-      if (replaced) return { refusal: `refusing to confine the agent to ${entry.path}: ${replaced} since it was created` };
+      if (replaced) {
+        return { refusal: `refusing to confine the agent to ${entry.path}: ${replaced} since it was created`, replaced };
+      }
       resolved.push(entry.path);
       continue;
     }

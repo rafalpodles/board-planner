@@ -1,6 +1,6 @@
 import { CommandResult, Runner } from "../exec.js";
 import { Gate } from "../types.js";
-import { runConfinedNpm } from "./confined-npm.js";
+import { refused, runConfinedNpm } from "./confined-npm.js";
 
 const MAX_REASON_CHARS = 2000;
 // --ignore-scripts: a lifecycle script from the worktree or any dependency would run as the
@@ -29,9 +29,7 @@ export function buildGate(runner: Runner, npmPath: string, timeoutMs: number): G
         withCache: true,
       });
       // machineFault: this machine has judged nothing — see the same call in test-run.ts
-      if ("refusal" in install) {
-        return { ok: false, reason: install.refusal, machineFault: true };
-      }
+      if ("refusal" in install) return refused(install);
       if (install.timedOut) {
         return { ok: false, reason: `dependency install timed out after ${timeoutMs}ms` };
       }
@@ -59,9 +57,7 @@ export function buildGate(runner: Runner, npmPath: string, timeoutMs: number): G
         timeoutMs: remainingMs,
         signal,
       });
-      if ("refusal" in build) {
-        return { ok: false, reason: build.refusal, machineFault: true };
-      }
+      if ("refusal" in build) return refused(build);
       if (build.timedOut) {
         return {
           ok: false,

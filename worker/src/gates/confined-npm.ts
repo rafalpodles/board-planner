@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CommandResult, Runner, RunOpts } from "../exec.js";
+import { GateResult } from "../types.js";
 import { agentEnv, npmCacheOverride, tempDirOverride } from "../env.js";
 import { confineTool, RecordedDir } from "../sandbox.js";
 
@@ -88,7 +89,7 @@ export async function runConfinedNpm(
   npmPath: string,
   args: string[],
   options: ConfinedNpmOptions
-): Promise<CommandResult | { refusal: string }> {
+): Promise<CommandResult | { refusal: string; replaced?: string }> {
   const { withCache, env: source, worktree, ...runOptions } = options;
   const cache = npmCacheDir(source);
 
@@ -128,4 +129,11 @@ export async function runConfinedNpm(
   } finally {
     rmSync(temp, { recursive: true, force: true });
   }
+}
+
+/** A refusal as a gate reports it: the worktree swapped under it is the run's, anything else the machine's. */
+export function refused(refusal: { refusal: string; replaced?: string }): GateResult {
+  return refusal.replaced
+    ? { ok: false, reason: refusal.refusal, tampered: `its directory ${refusal.replaced}` }
+    : { ok: false, reason: refusal.refusal, machineFault: true };
 }

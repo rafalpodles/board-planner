@@ -266,7 +266,11 @@ export function createExecutor(config: WorkerConfig, runner: Runner, claudePath:
       // cannot do this and it will be just as unable on the next task — charging the attempt would
       // walk the whole approved queue into the escalation column, which is the reasoning the base
       // branch's own failure already records in pipeline.ts.
-      if ("refusal" in spawn) return { kind: "machine_fault", message: spawn.refusal };
+      if ("refusal" in spawn) {
+        return spawn.replaced
+          ? { kind: "tampered", finding: `its directory ${spawn.replaced}` }
+          : { kind: "machine_fault", message: spawn.refusal };
+      }
 
       const result = await runner.run(
         spawn.command,

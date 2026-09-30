@@ -154,6 +154,10 @@ function laterGateKinds(ctx: StepContext, entry: SnapshotEntry): string[] {
     .map((later) => later.gateKind ?? "");
 }
 
+function refusedOver(entry: SnapshotEntry, finding: string): StepOutcome {
+  return { kind: "tampered", finding, message: `refusing to run ${entry.name}: the checkout now has ${finding}` };
+}
+
 /** One position in the sequence: a call to the model, or something the worker does itself. */
 export async function runStep(
   entry: SnapshotEntry,
@@ -164,13 +168,7 @@ export async function runStep(
   // A step is the next confinement, and what the one before it left behind can have replaced the
   // worktree itself (BP-804) — so the same check a gate and a delivery get, before the spawn.
   const tampered = await ctx.tampering();
-  if (tampered) {
-    return {
-      kind: "tampered",
-      finding: tampered,
-      message: `refusing to run ${entry.name}: the checkout now has ${tampered}`,
-    };
-  }
+  if (tampered) return refusedOver(entry, tampered);
 
   const outcome = await ctx.executor.execute({
     task: ctx.task,
@@ -192,6 +190,8 @@ export async function runStep(
   if (outcome.kind === "timeout") return { kind: "timeout" };
   if (outcome.kind === "machine_fault")
     return { kind: "machine_fault", message: outcome.message };
+  if (outcome.kind === "tampered")
+    return refusedOver(entry, outcome.finding);
   if (outcome.kind === "error")
     return { kind: "error", message: outcome.message };
   if (outcome.result.status === "blocked") {

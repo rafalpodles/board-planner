@@ -96,6 +96,20 @@ describe("runStep — a model step", () => {
     expect(c.commit).not.toHaveBeenCalled();
   });
 
+  it("reports a worktree the executor found replaced as tampering, not as a machine fault", async () => {
+    const c = ctx();
+    c.executor.execute.mockResolvedValue({ kind: "tampered", finding: "its directory /private/wt replaced by a symlink" });
+
+    const outcome = await runStep(entry({ capability: "edit" }), c);
+
+    expect(outcome).toEqual({
+      kind: "tampered",
+      finding: "its directory /private/wt replaced by a symlink",
+      message: "refusing to run Implement: the checkout now has its directory /private/wt replaced by a symlink",
+    });
+    expect(c.commit).not.toHaveBeenCalled();
+  });
+
   it("hands the executor the directory recorded at creation", async () => {
     const c = ctx();
     await runStep(entry({ capability: "edit" }), c);
