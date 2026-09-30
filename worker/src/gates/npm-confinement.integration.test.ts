@@ -10,7 +10,7 @@ import { claimedTask } from "../__fixtures__/task.js";
 import { GateContext } from "../types.js";
 import { testRunGate } from "./test-run.js";
 import { buildGate } from "./build.js";
-import { LOOPBACK_ONLY_NOTE, runConfinedNpm } from "./confined-npm.js";
+import { LOOPBACK_ONLY_NOTE, NPM_CONFIG_PINNED, runConfinedNpm } from "./confined-npm.js";
 import { installedToolPath } from "../__fixtures__/tool-paths.js";
 import { recordDir } from "../sandbox.js";
 
@@ -339,6 +339,17 @@ describe.skipIf(!onMac)("the test gate against the real sandbox", () => {
       expect(seen.filter((request) => request.url.startsWith("http://"))).toEqual([]);
     }, 120_000);
 
+    // The allow-git pin refuses before git or a child npm starts, so it would mask the pin under test
+    function allowingGitDependencies() {
+      const pinned = NPM_CONFIG_PINNED as Record<string, string>;
+      beforeEach(() => {
+        pinned.npm_config_allow_git = "all";
+      });
+      afterEach(() => {
+        pinned.npm_config_allow_git = "none";
+      });
+    }
+
     function gitDependency(manifest: object = {}) {
       const dep = join(dir, "dep");
       mkdirSync(dep);
@@ -352,17 +363,23 @@ describe.skipIf(!onMac)("the test gate against the real sandbox", () => {
       project({ gitdep: `git+file://${dep}` }, { "node_modules/gitdep": { version: "1.0.0", resolved: `git+file://${dep}#${sha}` } });
     }
 
-    it("does not run a git binary the project names", async () => {
-      gitDependency();
+    describe("with git dependencies allowed", () => {
+      allowingGitDependencies();
 
-      const planted = join(worktree, "planted-git.sh");
-      writeFileSync(planted, `#!/bin/sh\necho ran > ${JSON.stringify(join(worktree, "GIT-SCRIPT-RAN"))}\nexec ${installedToolPath("git")} "$@"\n`, { mode: 0o755 });
-      writeFileSync(join(worktree, ".npmrc"), `git=${planted}\n`);
+      it("does not run a git binary the project names, and still installs a git dependency", async () => {
+        gitDependency();
 
-      await install();
+        const planted = join(worktree, "planted-git.sh");
+        writeFileSync(planted, `#!/bin/sh\necho ran > ${JSON.stringify(join(worktree, "GIT-SCRIPT-RAN"))}\nexec ${installedToolPath("git")} "$@"\n`, { mode: 0o755 });
+        writeFileSync(join(worktree, ".npmrc"), `git=${planted}\n`);
 
-      expect(existsSync(join(worktree, "GIT-SCRIPT-RAN"))).toBe(false);
-    }, 120_000);
+        const result = await install();
+
+        expect(existsSync(join(worktree, "GIT-SCRIPT-RAN"))).toBe(false);
+        expect("code" in result && result.code, JSON.stringify(result)).toBe(0);
+        expect(existsSync(join(worktree, "node_modules", "gitdep", "package.json"))).toBe(true);
+      }, 120_000);
+    });
 
     it("still installs a dependency that is not a git one", async () => {
       const dep = join(dir, "local-dep");
@@ -427,11 +444,16 @@ describe.skipIf(!onMac)("the test gate against the real sandbox", () => {
         expect(existsSync(marker())).toBe(true);
       }, 120_000);
 
-      it("does not run it under the install's own environment", async () => {
-        await install();
+      describe("with git dependencies allowed", () => {
+        allowingGitDependencies();
 
-        expect(existsSync(marker())).toBe(false);
-      }, 120_000);
+        it("does not run it under the install's own environment", async () => {
+          const result = await install();
+
+          expect(existsSync(marker())).toBe(false);
+          expect("code" in result && result.code, JSON.stringify(result)).toBe(0);
+        }, 120_000);
+      });
     });
   });
 });
