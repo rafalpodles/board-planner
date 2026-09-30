@@ -15,6 +15,7 @@ import { ProjectAuditLog } from "@/models/projectAuditLog";
 import { Sprint } from "@/models/sprint";
 import { Notification } from "@/models/notification";
 import { PmMessage } from "@/models/pmMessage";
+import { Grant } from "@/models/grant";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { describeSettingsChanges } from "@/lib/settings-audit";
 import { projectWriteImages } from "@/lib/project-write-images";
@@ -414,6 +415,7 @@ export const DELETE = withProjectOwner(async (_request, { params }) => {
   // Delete project audit logs and the project itself
   await ProjectAuditLog.deleteMany({ project: projectId });
   await Project.findByIdAndDelete(projectId);
+  await Grant.deleteMany({ objectType: "project", object: projectId });
 
   return NextResponse.json({ message: "Project deleted" });
 });

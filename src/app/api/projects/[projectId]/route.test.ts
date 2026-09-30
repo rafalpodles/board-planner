@@ -13,6 +13,7 @@ const sprintDeleteMany = vi.fn();
 const notificationDeleteMany = vi.fn();
 const pmMessageDeleteMany = vi.fn();
 const projectAuditLogDeleteMany = vi.fn();
+const grantDeleteMany = vi.fn();
 
 const logInstanceAudit = vi.fn();
 const logProjectAudit = vi.fn();
@@ -79,6 +80,9 @@ vi.mock("@/models/pmMessage", () => ({
 vi.mock("@/models/projectAuditLog", () => ({
   ProjectAuditLog: { deleteMany: projectAuditLogDeleteMany },
 }));
+vi.mock("@/models/grant", () => ({
+  Grant: { deleteMany: grantDeleteMany },
+}));
 
 const { DELETE, GET, PUT } = await import("./route");
 
@@ -135,6 +139,7 @@ beforeEach(() => {
   notificationDeleteMany.mockResolvedValue({ deletedCount: 0 });
   pmMessageDeleteMany.mockResolvedValue({ deletedCount: 0 });
   projectAuditLogDeleteMany.mockResolvedValue({ deletedCount: 0 });
+  grantDeleteMany.mockResolvedValue({ deletedCount: 0 });
 });
 
 describe("DELETE /api/projects/[projectId]", () => {
@@ -155,6 +160,37 @@ describe("DELETE /api/projects/[projectId]", () => {
 
     expect(response.status).toBe(403);
     expect(projectFindByIdAndDelete).not.toHaveBeenCalled();
+    expect(grantDeleteMany).not.toHaveBeenCalled();
+  });
+
+  it("drops the grants on that project and no other", async () => {
+    check.mockResolvedValue(true);
+
+    const response = await DELETE(request(), ctx());
+
+    expect(response.status).toBe(200);
+    expect(grantDeleteMany).toHaveBeenCalledTimes(1);
+    expect(grantDeleteMany).toHaveBeenCalledWith({ objectType: "project", object: PROJECT_ID });
+  });
+
+  it("drops the grants only once the project itself is gone", async () => {
+    check.mockResolvedValue(true);
+
+    await DELETE(request(), ctx());
+
+    expect(grantDeleteMany.mock.invocationCallOrder[0]).toBeGreaterThan(
+      projectFindByIdAndDelete.mock.invocationCallOrder[0]
+    );
+  });
+
+  it("keeps every grant when the project does not exist", async () => {
+    check.mockResolvedValue(true);
+    projectFindById.mockResolvedValueOnce(null);
+
+    const response = await DELETE(request(), ctx());
+
+    expect(response.status).toBe(404);
+    expect(grantDeleteMany).not.toHaveBeenCalled();
   });
 });
 

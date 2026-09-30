@@ -116,20 +116,30 @@ describe("principalOf", () => {
 
 const findOne = vi.fn();
 const find = vi.fn();
+const grantDeleteMany = vi.fn();
 const userFind = vi.fn();
+const userDistinct = vi.fn();
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/grant", () => ({
   Grant: {
     findOne: (...args: unknown[]) => findOne(...args),
     find: (...args: unknown[]) => find(...args),
+    deleteMany: (...args: unknown[]) => grantDeleteMany(...args),
   },
 }));
 vi.mock("@/models/user", () => ({
-  User: { find: (...args: unknown[]) => userFind(...args) },
+  User: {
+    find: (...args: unknown[]) => userFind(...args),
+    distinct: (...args: unknown[]) => userDistinct(...args),
+  },
 }));
 const projectFind = vi.fn();
+const projectDistinct = vi.fn();
 vi.mock("@/models/project", () => ({
-  Project: { find: (...args: unknown[]) => projectFind(...args) },
+  Project: {
+    find: (...args: unknown[]) => projectFind(...args),
+    distinct: (...args: unknown[]) => projectDistinct(...args),
+  },
 }));
 
 const {
@@ -140,6 +150,8 @@ const {
   canBeAssigned,
   ownerCounts,
   boardsOnlyOwnedBy,
+  findOrphanGrants,
+  deleteOrphanGrants,
 } = await import("./grants");
 
 function lean(value: unknown) {
@@ -492,5 +504,187 @@ describe("owner counting", () => {
     ];
     expect(await boardsOnlyOwnedBy(ALICE)).toEqual([]);
     expect(projectFind).not.toHaveBeenCalled();
+  });
+});
+
+describe("orphan grants", () => {
+  const oid = () => new Types.ObjectId();
+  const [LIVE_BOARD, OTHER_BOARD, GONE_BOARD] = [oid(), oid(), oid()];
+  const [LIVING, ALSO_LIVING, GONE_USER] = [oid(), oid(), oid()];
+
+  type Row = { _id: Types.ObjectId; subject: unknown; object: unknown; relation: string; objectType: string };
+  let store: Row[];
+  let projects: Types.ObjectId[];
+  let users: Types.ObjectId[];
+  let afterParentRead: { projects?: () => void; users?: () => void };
+
+  const row = (subject: unknown, object: unknown, relation = "member"): Row => ({
+    _id: oid(),
+    subject,
+    object,
+    relation,
+    objectType: "project",
+  });
+
+  const same = (a: unknown, b: unknown) => String(a) === String(b);
+  const matches = (doc: Record<string, unknown>, query: Record<string, unknown> = {}) =>
+    Object.entries(query).every(([field, cond]) => {
+      const value = doc[field];
+      if (cond && typeof cond === "object" && "$nin" in cond)
+        return !(cond.$nin as unknown[]).some((x) => same(x, value));
+      if (cond && typeof cond === "object" && "$in" in cond)
+        return (cond.$in as unknown[]).some((x) => same(x, value));
+      return same(cond, value);
+    });
+
+  const distinctOf = (ids: () => Types.ObjectId[], after: () => (() => void) | undefined) =>
+    async (_field: string, filter?: Record<string, unknown>) => {
+      const read = ids().filter((id) => matches({ _id: id }, filter));
+      after()?.();
+      return read;
+    };
+
+  beforeEach(() => {
+    projects = [LIVE_BOARD, OTHER_BOARD];
+    users = [LIVING, ALSO_LIVING];
+    afterParentRead = {};
+    store = [
+      row(LIVING, LIVE_BOARD, "owner"),
+      row(ALSO_LIVING, LIVE_BOARD),
+      row(LIVING, OTHER_BOARD, "owner"),
+      row(LIVING, GONE_BOARD, "owner"),
+      row(ALSO_LIVING, GONE_BOARD),
+      row(GONE_USER, OTHER_BOARD, "owner"),
+      row(GONE_USER, GONE_BOARD),
+    ];
+    projectDistinct.mockReset().mockImplementation(distinctOf(() => projects, () => afterParentRead.projects));
+    userDistinct.mockReset().mockImplementation(distinctOf(() => users, () => afterParentRead.users));
+    find.mockReset().mockImplementation((query: Record<string, unknown>) =>
+      lean(store.filter((g) => matches(g, query)).map((g) => ({ ...g })))
+    );
+    grantDeleteMany.mockReset().mockImplementation(async (query: Record<string, unknown>) => {
+      const before = store.length;
+      store = store.filter((g) => !matches(g, query));
+      return { deletedCount: before - store.length };
+    });
+  });
+
+  const pairs = (rows: { subject: unknown; object: unknown }[]) =>
+    rows.map((g) => `${g.subject}@${g.object}`).sort();
+
+  it("finds the rows of a deleted board and of a deleted account, and nothing else", async () => {
+    const orphans = await findOrphanGrants();
+
+    expect(pairs(orphans.deletedProject)).toEqual(
+      pairs([
+        { subject: LIVING, object: GONE_BOARD },
+        { subject: ALSO_LIVING, object: GONE_BOARD },
+        { subject: GONE_USER, object: GONE_BOARD },
+      ])
+    );
+    expect(pairs(orphans.deletedUser)).toEqual([`${GONE_USER}@${OTHER_BOARD}`]);
+    expect(orphans.notObjectIds).toEqual([]);
+  });
+
+  it("counts a row whose board and account are both gone once, under the board", async () => {
+    const orphans = await findOrphanGrants();
+    const all = [...orphans.deletedProject, ...orphans.deletedUser].map((g) => g._id);
+    expect(new Set(all).size).toBe(all.length);
+    expect(pairs(orphans.deletedUser)).not.toContain(`${GONE_USER}@${GONE_BOARD}`);
+  });
+
+  it("finds nothing when every row has its board and its account", async () => {
+    projects = [LIVE_BOARD, OTHER_BOARD, GONE_BOARD];
+    users = [LIVING, ALSO_LIVING, GONE_USER];
+    const orphans = await findOrphanGrants();
+    expect(orphans.deletedProject).toEqual([]);
+    expect(orphans.deletedUser).toEqual([]);
+  });
+
+  it("reports a row stored with string ids apart from the orphans, and never deletes it", async () => {
+    store = [row(LIVING, LIVE_BOARD, "owner"), row(String(LIVING), String(LIVE_BOARD)), row(LIVING, String(GONE_BOARD))];
+
+    const orphans = await findOrphanGrants();
+
+    expect(orphans.deletedProject).toEqual([]);
+    expect(orphans.deletedUser).toEqual([]);
+    expect(orphans.notObjectIds).toHaveLength(2);
+    expect(await deleteOrphanGrants(orphans)).toBe(0);
+    expect(store).toHaveLength(3);
+  });
+
+  it("deletes exactly the orphans, and a second pass finds and deletes nothing", async () => {
+    expect(await deleteOrphanGrants(await findOrphanGrants())).toBe(4);
+    expect(pairs(store)).toEqual(
+      pairs([
+        { subject: LIVING, object: LIVE_BOARD },
+        { subject: ALSO_LIVING, object: LIVE_BOARD },
+        { subject: LIVING, object: OTHER_BOARD },
+      ])
+    );
+
+    grantDeleteMany.mockClear();
+    const again = await findOrphanGrants();
+    expect([...again.deletedProject, ...again.deletedUser]).toEqual([]);
+    expect(await deleteOrphanGrants(again)).toBe(0);
+    expect(grantDeleteMany).not.toHaveBeenCalled();
+    expect(store).toHaveLength(3);
+  });
+
+  it("keeps the owner grant of a board created while the scan reads the boards", async () => {
+    const fresh = oid();
+    const freshOwner = row(LIVING, fresh, "owner");
+    afterParentRead.projects = () => {
+      afterParentRead.projects = undefined;
+      projects.push(fresh);
+      store.push(freshOwner);
+    };
+
+    const orphans = await findOrphanGrants();
+    const found = [...orphans.deletedProject, ...orphans.deletedUser].map((g) => g._id);
+    expect(found).not.toContain(String(freshOwner._id));
+
+    await deleteOrphanGrants(orphans);
+    expect(store).toContainEqual(freshOwner);
+  });
+
+  it("keeps the grant of an account created while the scan reads the accounts", async () => {
+    const newcomer = oid();
+    const theirGrant = row(newcomer, LIVE_BOARD);
+    afterParentRead.users = () => {
+      afterParentRead.users = undefined;
+      users.push(newcomer);
+      store.push(theirGrant);
+    };
+
+    const orphans = await findOrphanGrants();
+    const found = [...orphans.deletedProject, ...orphans.deletedUser].map((g) => g._id);
+    expect(found).not.toContain(String(theirGrant._id));
+
+    await deleteOrphanGrants(orphans);
+    expect(store).toContainEqual(theirGrant);
+  });
+
+  it("keeps a found row whose board is back by the time it would be deleted", async () => {
+    const orphans = await findOrphanGrants();
+    projects.push(GONE_BOARD);
+
+    expect(await deleteOrphanGrants(orphans)).toBe(2);
+    expect(pairs(store)).toContain(`${LIVING}@${GONE_BOARD}`);
+    expect(pairs(store)).toContain(`${ALSO_LIVING}@${GONE_BOARD}`);
+    expect(pairs(store)).not.toContain(`${GONE_USER}@${GONE_BOARD}`);
+    expect(pairs(store)).not.toContain(`${GONE_USER}@${OTHER_BOARD}`);
+  });
+
+  it.each([
+    ["no projects", () => (projects = [])],
+    ["no users", () => (users = [])],
+  ])("refuses to delete anything in a database with %s", async (_label, empty) => {
+    empty();
+    const orphans = await findOrphanGrants();
+
+    await expect(deleteOrphanGrants(orphans)).rejects.toThrow(/wrong database/);
+    expect(grantDeleteMany).not.toHaveBeenCalled();
+    expect(store).toHaveLength(7);
   });
 });
