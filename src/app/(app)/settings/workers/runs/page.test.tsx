@@ -80,6 +80,43 @@ describe("the fleet's run history", () => {
     expect(screen.getByText("BP-158")).toBeTruthy();
   });
 
+  it("shows every long value whole as text rather than only in a title", async () => {
+    const agentName = "Implement, review twice, run the full end-to-end suite and merge";
+    const workerName = "rafal-macbook-pro-m3-max-studio-office-second-desk";
+    const projectName = "Customer onboarding and billing platform migration board";
+    const taskKey = "RECURRODEMOBOARD-1234";
+    api.get.mockResolvedValue([
+      run({ agentName, workerName, projectName, taskKey, minutes: 125, costUsd: 123.45 }),
+    ]);
+
+    render(<FleetRunsPage />);
+
+    await screen.findByText(agentName);
+    for (const text of [agentName, workerName, projectName, taskKey]) {
+      expect(screen.getByText(text).closest("[title]")).toBeNull();
+    }
+    const cells = Array.from(screen.getByTestId("fleet-run").querySelectorAll("td"));
+    expect(cells.map((cell) => cell.textContent)).toEqual(
+      expect.arrayContaining(["Took125 min", "Cost$123.45"])
+    );
+    for (const cell of cells) {
+      expect(cell.className).not.toMatch(/truncate|line-clamp/);
+      expect(cell.innerHTML).not.toMatch(/truncate|line-clamp/);
+    }
+  });
+
+  it("labels each value for the narrow layout, which has no column headers", async () => {
+    api.get.mockResolvedValue([run({ agentName: "", workerName: "" })]);
+
+    render(<FleetRunsPage />);
+
+    const row = await screen.findByTestId("fleet-run");
+    const cells = Array.from(row.querySelectorAll("td")).map((cell) => cell.textContent);
+    expect(cells).toEqual(
+      expect.arrayContaining(["ProjectBoard Planner", "Agent—", "Machine—", "Took4 min", "Cost$0.42"])
+    );
+  });
+
   it("says how the run ended", async () => {
     api.get.mockResolvedValue([run()]);
 

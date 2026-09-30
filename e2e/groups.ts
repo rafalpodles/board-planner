@@ -146,6 +146,7 @@ export const GROUPS = {
     "run-completion.spec.ts",
     "run-record-survives-lock.spec.ts",
     "machine-fault-outcome.spec.ts",
+    "run-history-fits.spec.ts",
     "refused-change-decision.spec.ts",
     "claim-ownership.spec.ts",
     "claim-returns-a-document.spec.ts",
