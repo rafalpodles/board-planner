@@ -145,6 +145,15 @@ describe("buildGate", () => {
   });
 
   // BP-733
+  it("stops at the install, as the machine's fault, when a process the install started survived it", async () => {
+    const { runner: gateRunner, run } = runner({ ...ok, machineFault: "a process a confined step started may still be running: cannot kill process 42" });
+
+    const result = await buildGate(gateRunner, NPM_PATH, TIMEOUT_MS).run(context);
+
+    expect(result).toMatchObject({ ok: false, machineFault: true, reason: "a process a confined step started may still be running: cannot kill process 42" });
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
   it("refuses as a machine fault, installing nothing, when no npm path was resolved", async () => {
     const { runner: r, run } = runner(ok, ok);
 

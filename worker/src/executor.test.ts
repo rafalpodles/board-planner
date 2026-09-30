@@ -121,6 +121,21 @@ describe("createExecutor", () => {
     expect(outcome).toEqual({ kind: "result", result: payload });
   });
 
+  it("reports a step whose processes could not all be killed as the machine's fault, whatever it printed", async () => {
+    const payload = { status: "completed", summary: "done", filesChanged: [], testsAdded: [], blockedReason: "" };
+    const { runner } = runnerReturning({
+      code: 0,
+      stdout: completed(payload),
+      stderr: "",
+      timedOut: false,
+      machineFault: "a process a confined step started may still be running: cannot kill process 42",
+    });
+
+    const outcome = await createExecutor(config, runner, CLAUDE_PATH).execute(options);
+
+    expect(outcome).toEqual({ kind: "machine_fault", message: "a process a confined step started may still be running: cannot kill process 42" });
+  });
+
   it("returns the result of a real captured run, whose stream carries an allowed_warning rate limit", async () => {
     expect(FIXTURE).toContain('"status":"allowed_warning"');
     const { runner } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });

@@ -1,11 +1,16 @@
 import { ChildProcess, spawn } from "child_process";
 import { childEnv } from "./env.js";
+import { createReaper, markConfinedSpawn, Reaper, SpawnMarker } from "./reap.js";
+import { SANDBOX_COMMAND } from "./sandbox.js";
 
 export interface CommandResult {
   code: number;
   stdout: string;
   stderr: string;
   timedOut: boolean;
+  // A confined spawn left a process this runner could not kill, or could not look for one: nothing
+  // after it may trust the worktree, so every caller reports it as the machine's fault
+  machineFault?: string;
 }
 
 export interface RunOpts {
@@ -56,8 +61,18 @@ export function killGroup(
   }
 }
 
-export function createRunner(): Runner {
-  return {
+export interface RunnerOptions {
+  reaper?: Reaper;
+}
+
+function faulted(machineFault: string): CommandResult {
+  return { code: -1, stdout: "", stderr: machineFault, timedOut: false, machineFault };
+}
+
+let processReaper: Reaper | undefined;
+
+export function createRunner(options: RunnerOptions = {}): Runner {
+  const direct: Runner = {
     run(command, args, opts) {
       return new Promise((resolve) => {
         let settled = false;
@@ -165,6 +180,42 @@ export function createRunner(): Runner {
           settle({ code: -1, stdout: "", stderr: String(error), timedOut: false });
         }
       });
+    },
+  };
+
+  let reaper = options.reaper;
+  const unreaped = new Set<SpawnMarker>();
+
+  function theReaper(): Reaper {
+    return (reaper ??= processReaper ??= createReaper());
+  }
+
+  async function reap(marker: SpawnMarker): Promise<string> {
+    const outcome = await theReaper().reap(marker);
+    if (outcome.ok) {
+      unreaped.delete(marker);
+      return "";
+    }
+    unreaped.add(marker);
+    return `a process a confined step started may still be running: ${outcome.reason}`;
+  }
+
+  return {
+    async run(command, args, opts) {
+      if (command !== SANDBOX_COMMAND) return direct.run(command, args, opts);
+
+      for (const marker of [...unreaped]) {
+        const fault = await reap(marker);
+        if (fault) return faulted(fault);
+      }
+      const unavailable = await theReaper().ready();
+      if (unavailable) return faulted(unavailable);
+      const marked = markConfinedSpawn(args);
+      if ("refusal" in marked) return faulted(marked.refusal);
+
+      const result = await direct.run(command, marked.args, opts);
+      const fault = await reap(marked.marker);
+      return fault ? { ...result, machineFault: fault } : result;
     },
   };
 }

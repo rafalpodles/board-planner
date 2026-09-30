@@ -375,6 +375,24 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   would give. Every other daemon reachable the same way is still open, and no list of service
   names closes that; so are reads, and the network, neither of which this touches at all.
 
+  **Nothing a confined spawn started outlives it** (**BP-796**). A process group is not enough: a
+  step or a test that runs `setsid`, double-forks or backgrounds with `nohup` leaves the group and
+  the session and is reparented to launchd, so it used to keep writing into the worktree after the
+  step ended — between the checks the pipeline makes and the commit that trusts them. What such a
+  process cannot shed is its sandbox: children inherit it and a confined process cannot apply
+  another. So every confined spawn's profile also denies one mach service name of its own, and when
+  the spawn exits — normally, on a timeout or on a stop — the worker kills every live process whose
+  sandbox denies that name while allowing a sibling nobody names, looping until none is left. The
+  check is `sandbox_check`, which Node cannot call, so the worker builds a small helper with
+  `/usr/bin/cc` (the command-line tools git already needs) the first time it confines anything,
+  and proves it on a confined probe before trusting it. **It fails closed**: a helper that will not
+  build, a process it cannot kill, or one that keeps appearing makes that spawn a **machine fault**
+  and the sandbox row in preflight red, and every later confined spawn is refused until a retry
+  finds nothing left. Under `CP_ALLOW_UNCONFINED_AGENT=1` there is no sandbox to mark, so none of
+  this applies. What it does not reach is a program the step asks launchd or another daemon to
+  start, which never had the sandbox — `launchctl submit` is refused under the profile, measured;
+  the rest of that category is the daemon problem above.
+
   **A file git will not print** (**BP-603**). Four things take a file's contents out of a patch: a
   bare `-diff` attribute, a `diff=<name>` driver declared binary in the config, a file git decides
   is binary on its own, and a submodule pointer. The **submodule pointer is refused** by

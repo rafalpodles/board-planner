@@ -534,6 +534,22 @@ describe("the sandbox check", () => {
     expect(report.ok).toBe(false);
   });
 
+  it("fails when the probe was confined but what it started could not be reaped", async () => {
+    const m = machine();
+    const runner: Runner = {
+      run: async (command, args, opts) => {
+        if (command !== SANDBOX_COMMAND) return m.runner.run(command, args, opts);
+        writeFileSync(args[args.length - 1], "ran");
+        return { code: 0, stdout: "", stderr: "", timedOut: false, machineFault: "a process a confined step started may still be running: cannot kill process 42" };
+      },
+    };
+
+    const report = await runPreflight({ ...depsFor(m), runner });
+
+    expect(check(report, "sandbox")).toMatchObject({ ok: false, detail: "a process a confined step started may still be running: cannot kill process 42" });
+    expect(report.ok).toBe(false);
+  });
+
   it("fails when the probe times out, and says that is what happened", async () => {
     const m = machine();
     const runner: Runner = {

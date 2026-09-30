@@ -95,6 +95,16 @@ describe("reviewGate", () => {
     expect((await reviewGate(runner, gitPath, CLAUDE_PATH, TIMEOUT_MS).run(context())).ok).toBe(true);
   });
 
+  it("fails as the machine's fault when a process the reviewer started survived it, whatever it answered", async () => {
+    const { runner } = claudeStdout(JSON.stringify({ result: JSON.stringify({ approved: true, reason: "fine" }) }), {
+      machineFault: "a process a confined step started may still be running: cannot kill process 42",
+    });
+
+    const verdict = await reviewGate(runner, gitPath, CLAUDE_PATH, TIMEOUT_MS).run(context());
+
+    expect(verdict).toMatchObject({ ok: false, machineFault: true, reason: "a process a confined step started may still be running: cannot kill process 42" });
+  });
+
   it("rejects and carries the reviewer's reason", async () => {
     const { runner } = claudeReturning({ approved: false, reason: "drops the error branch" });
 

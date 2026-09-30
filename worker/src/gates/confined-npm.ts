@@ -111,7 +111,7 @@ export async function runConfinedNpm(
     const spawn = confineTool("npm", npmPath, args, source ? { writable, env: source } : { writable });
     if ("refusal" in spawn) return spawn;
 
-    return await runner.run(spawn.command, spawn.args, {
+    const result = await runner.run(spawn.command, spawn.args, {
       ...runOptions,
       // The cache location and the scratch directory travel as the child's own settings, so they
       // hold for npm and for everything it shells out to. `childEnv` is what every other spawn
@@ -122,6 +122,7 @@ export async function runConfinedNpm(
         TMPDIR: temp,
       },
     });
+    return result.machineFault ? { refusal: result.machineFault } : result;
   } finally {
     rmSync(temp, { recursive: true, force: true });
   }

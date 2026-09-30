@@ -46,6 +46,14 @@ describe("testRunGate", () => {
     expect((await testRunGate(runner, NPM_PATH, TIMEOUT_MS).run(context)).ok).toBe(true);
   });
 
+  it("fails as the machine's fault, not the suite's, when a process the suite started survived it", async () => {
+    const { runner } = runnerReturning({ ...ok, machineFault: "a process a confined step started may still be running: cannot kill process 42" });
+
+    const verdict = await testRunGate(runner, NPM_PATH, TIMEOUT_MS).run(context);
+
+    expect(verdict).toMatchObject({ ok: false, machineFault: true, reason: "a process a confined step started may still be running: cannot kill process 42" });
+  });
+
   it("names the command it ran, for the pull request (BP-780)", async () => {
     const { runner } = runnerReturning(ok);
 

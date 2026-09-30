@@ -279,6 +279,7 @@ export function createExecutor(config: WorkerConfig, runner: Runner, claudePath:
       );
       parser?.close();
 
+      if (result.machineFault) return { kind: "machine_fault", message: result.machineFault };
       if (result.timedOut) return { kind: "timeout" };
 
       // stdout now carries the content of every file the agent read, so nothing here scans it as
