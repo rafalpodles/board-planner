@@ -49,7 +49,7 @@ describe("the owner-gated route scan", () => {
 describe("the inline owner-check scan", () => {
   const methodsOf = (source: string) => inlineOwnerChecks(source).sites.map((s) => s.method);
 
-  it("finds the four routes BP-748 named", () => {
+  it("finds the routes BP-748 named, with both methods behind the agent helper", () => {
     const keys = scanInlineOwnerChecks().map((c) => c.key);
     expect(keys).toEqual(
       expect.arrayContaining([
@@ -164,4 +164,100 @@ describe("the inline owner-check scan", () => {
     expect(stripped.split("\n").length).toBe(source.split("\n").length);
     expect(stripped).toBe('a     \n    \n     e "//f" `/*${g        }*/`');
   });
+
+  describe("stays loud where a check could otherwise vanish", () => {
+    const unreadOf = (lines: string[]) => inlineOwnerChecks(lines.join("\n")).unread;
+
+    it("reads past a regular expression holding a comment opener", () => {
+      const source = [
+        "export const PUT = withProjectAccess(async () => {",
+        '  const trimmed = raw.replace(/\\/*$/, "").replace(/^[a-z]+:\\/\\//i, "");',
+        '  if (!(await check(user, projectId, "admin"))) return no;',
+        "  return ok; // */",
+        "});",
+      ].join("\n");
+      expect(inlineOwnerChecks(source)).toEqual({ sites: [{ method: "PUT", line: 3 }], unread: [] });
+    });
+
+    it("refuses a check the comment reader hid behind a literal it misjudged", () => {
+      const unread = unreadOf([
+        "export const PUT = withProjectAccess(async () => {",
+        "  if (x) {}",
+        '  /\\/*$/.test(raw);',
+        '  if (!(await check(user, projectId, "admin"))) return no;',
+        "  return ok; // */",
+        "});",
+      ]);
+      expect(unread).toEqual([expect.stringMatching(/^line 4: an owner check the comment reader blanked/)]);
+    });
+
+    it("refuses a helper reached through another helper", () => {
+      const source = [
+        "async function mayEdit(user, agent) {",
+        '  return check(user, String(agent.project), "admin");',
+        "}",
+        "async function mayDelete(user, agent) {",
+        "  return !agent.builtIn && (await mayEdit(user, agent));",
+        "}",
+        "export const PUT = withAuth(async () => { if (!(await mayEdit(user, agent))) return no; });",
+        "export const DELETE = withAuth(async () => { if (!(await mayDelete(user, agent))) return no; });",
+      ].join("\n");
+      expect(inlineOwnerChecks(source)).toEqual({
+        sites: [{ method: "PUT", line: 2 }],
+        unread: [expect.stringMatching(/^line 5: mayEdit, which holds the owner check at line 2, is used other than as a direct call/)],
+      });
+    });
+
+    it("refuses a helper passed by reference or assigned", () => {
+      const helper = ['const mayAdmin = (id) => check(user, id, "admin");'];
+      expect(
+        unreadOf([...helper, "export const GET = withAuth(async () => { const ok = await Promise.all(ids.map(mayAdmin)); });"])
+      ).toEqual([expect.stringMatching(/^line 2: mayAdmin, which holds/), expect.stringMatching(/no exported method calls/)]);
+      expect(
+        unreadOf([...helper, "const can = mayAdmin;", "export const GET = withAuth(async () => { await can(id); });"])
+      ).toEqual([expect.stringMatching(/^line 2: mayAdmin, which holds/), expect.stringMatching(/no exported method calls/)]);
+    });
+
+    it("does not take a helper's name inside a string for a call", () => {
+      const unread = unreadOf([
+        'const mayAdmin = (id) => check(user, id, "admin");',
+        'export const GET = withAuth(async () => { log("mayAdmin(id) was not called"); });',
+      ]);
+      expect(unread).toEqual([expect.stringMatching(/mayAdmin, which no exported method calls directly/)]);
+    });
+
+    it("refuses the grants module reached any way but a named import", () => {
+      expect(
+        unreadOf([
+          'import * as grants from "@/lib/grants";',
+          'export const GET = withAuth(async () => { await grants.check(user, id, "admin"); });',
+        ])
+      ).toEqual([expect.stringMatching(/^line 1: reaches the grants module as `import \* as grants/)]);
+      expect(
+        unreadOf([
+          "export const GET = withAuth(async () => {",
+          '  const { check: can } = await import("@/lib/grants");',
+          '  await can(user, id, "admin");',
+          "});",
+        ])
+      ).toEqual([expect.stringMatching(/^line 2: reaches the grants module/)]);
+      expect(unreadOf(['const grants = require("../../../lib/grants.ts");'])).toEqual([
+        expect.stringMatching(/^line 1: reaches the grants module/),
+      ]);
+    });
+
+    it("refuses an imported grant check that is aliased or passed on rather than called", () => {
+      const imported = 'import { accessibleProjectIds, check } from "@/lib/grants";';
+      expect(unreadOf([imported, "const can = check;"])).toEqual([
+        expect.stringMatching(/^line 2: check used other than as a direct call/),
+      ]);
+      expect(
+        unreadOf([imported, 'export const GET = withAuth(async () => ids.map((id) => [check][0](user, id, "admin")));'])
+      ).toEqual([expect.stringMatching(/^line 2: check used other than as a direct call/)]);
+      expect(
+        unreadOf([imported, 'export const GET = withAuth(async () => { await check(user, id, "admin"); });'])
+      ).toEqual([]);
+    });
+  });
 });
+
