@@ -47,7 +47,7 @@ const IDENT_LINE = "The Operator <operator@example.com> 1789000000 +0200\n";
 // refuses the guess where the hostname has no dot in it, so asking git alone is host-dependent.
 const IDENT_EMAIL = "config --get user.email";
 // Where the new worktree's git dir is, derived from the clone right after `worktree add` (BP-794)
-const GIT_DIR = "rev-parse --path-format=absolute --git-common-dir";
+const GIT_DIR = "rev-parse --git-common-dir";
 // A clone whose admin dir for each worktree says what git would write for it
 const POINTER_FILES = {
   read(path: string): string {

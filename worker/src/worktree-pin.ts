@@ -135,11 +135,12 @@ export async function recordPin(
 ): Promise<GitPin> {
   const asked = await runner.run(
     requireGitPath(gitPath),
-    gitArgs(["rev-parse", "--path-format=absolute", "--git-common-dir"]),
+    gitArgs(["rev-parse", "--git-common-dir"]),
     { cwd: repoPath, timeoutMs: TIMEOUT_MS, env: localGitEnv() },
   );
-  const named = asked.stdout.trim();
-  if (asked.code !== 0 || !isAbsolute(named)) {
+  const answered = asked.stdout.replace(/\n$/, "");
+  const named = resolve(repoPath, answered);
+  if (asked.code !== 0 || !answered) {
     throw new Error(`could not tell where the clone's git dir is: ${asked.stderr || asked.stdout || "git said nothing"}`);
   }
   const commonDir = files.realpath(named);

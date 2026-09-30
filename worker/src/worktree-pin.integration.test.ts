@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ApiClient } from "./api.js";
+import { agentEnv, childEnv } from "./env.js";
 import { commitAll } from "./commit.js";
 import { WorkerConfig } from "./config.js";
 import { Delivery } from "./delivery.js";
@@ -202,6 +203,21 @@ describe.skipIf(process.platform !== "darwin")("a worktree whose .git file a con
     expect(sha).toMatch(/^[0-9a-f]{40}$/);
     expect(fresh.pin.flagged).toEqual([]);
     expect(await fresh.tampering()).toBeNull();
+  });
+
+  // BP-794 review: SAFE_CONFIG reaches only the worker's own calls. The agent's `git add` — or a
+  // gate's test code — reads the shared config, so it runs under agentEnv's override instead
+  it("does not take the flags the agent's own git add would set on an ignoreStat clone", async () => {
+    git(parent, "config", "core.ignoreStat", "true");
+    const fresh = await workspace().create("BP-4", "worker");
+    writeFileSync(join(fresh.path, "a.ts"), "export {};\n");
+    writeFileSync(join(fresh.path, "b.ts"), "export {};\n");
+
+    execFileSync("git", ["add", "a.ts"], { cwd: fresh.path, env: agentEnv() });
+    expect(await fresh.tampering()).toBeNull();
+
+    execFileSync("git", ["add", "b.ts"], { cwd: fresh.path, env: childEnv() });
+    expect(await fresh.tampering()).toContain("assume-unchanged b.ts");
   });
 
   describe("through a whole run", () => {

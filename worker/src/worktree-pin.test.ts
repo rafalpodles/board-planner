@@ -118,6 +118,22 @@ describe("recordPin", () => {
     );
   });
 
+  // Another worktree's admin dir is still under the clone's worktrees/, and still not this one's
+  it.each(["gitdir: ../repo/.git/worktrees/other\n", "gitdir: /repo/.git/worktrees/other\n"])(
+    "refuses a pointer naming another worktree's admin dir: %j",
+    async (pointer) => {
+      const found = clone({ wt: { gitdir: "/wt/.git\n" }, other: { gitdir: "/other/.git\n" } }, pointer);
+
+      await expect(recordPin(listing(""), gitPath, "/repo", "/wt", found)).rejects.toThrow("refusing the new worktree");
+    },
+  );
+
+  it("resolves a relative common dir against the clone", async () => {
+    const found = clone({ wt: { gitdir: "/wt/.git\n" } });
+
+    expect((await recordPin(listing("", ".git\n"), gitPath, "/repo", "/wt", found)).gitDir).toBe(PIN.gitDir);
+  });
+
   it("refuses a worktree with no .git file", async () => {
     const found = clone({ wt: { gitdir: "/wt/.git\n" } }, null);
 
@@ -137,8 +153,8 @@ describe("recordPin", () => {
     await expect(recordPin(listing(""), gitPath, "/repo", "/wt", found)).rejects.toThrow(/records 0 git dirs/);
   });
 
-  it("refuses a common dir that is not an absolute path", async () => {
-    await expect(recordPin(listing("", ".git\n"), gitPath, "/repo", "/wt", clone({}))).rejects.toThrow(
+  it("refuses a clone git will not name a common dir for", async () => {
+    await expect(recordPin(listing("", ""), gitPath, "/repo", "/wt", clone({}))).rejects.toThrow(
       /could not tell where the clone's git dir is/,
     );
   });

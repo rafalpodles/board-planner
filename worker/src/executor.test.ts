@@ -274,6 +274,20 @@ describe("createExecutor", () => {
     expect(run.mock.calls[0][2].env.PATH).toBe(process.env.PATH);
   });
 
+  // BP-794: on a clone with core.ignoreStat=true the agent's own `git add` would mark what it
+  // stages assume-unchanged, which the worker then refuses as tampering
+  it("runs the agent with core.ignoreStat turned off for any git it runs", async () => {
+    const { runner, run } = runnerReturning({ code: 0, stdout: completed(FIXTURE_RESULT), stderr: "", timedOut: false });
+
+    await createExecutor(config, runner, CLAUDE_PATH).execute(options);
+
+    expect(run.mock.calls[0][2].env).toMatchObject({
+      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_KEY_0: "core.ignoreStat",
+      GIT_CONFIG_VALUE_0: "false",
+    });
+  });
+
   it("classifies a usage limit as its own outcome", async () => {
     const { runner } = runnerReturning({
       code: 1,

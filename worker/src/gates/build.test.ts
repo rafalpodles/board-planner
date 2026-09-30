@@ -102,6 +102,12 @@ describe("buildGate", () => {
     // npm is told where it is, or it would reach for the operator's own `~/.npm` and be denied
     expect(run.mock.calls[0][2].env?.npm_config_cache).toBe(npmCacheDir());
     expect(existsSync(npmCacheDir())).toBe(true);
+    // The suite is the agent's code, and a `git add` in it must not set assume-unchanged (BP-794)
+    expect(run.mock.calls[0][2].env).toMatchObject({
+      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_KEY_0: "core.ignoreStat",
+      GIT_CONFIG_VALUE_0: "false",
+    });
   });
 
   // The build does not need the cache, and it runs the agent's own script: a cache it can write is

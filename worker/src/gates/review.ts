@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { DEFAULT_REVIEW_MODEL, modelOr } from "../config.js";
-import { childEnv } from "../env.js";
+import { agentEnv } from "../env.js";
 import { CommandResult, Runner } from "../exec.js";
 import { confineTool } from "../sandbox.js";
 import { gitArgs, localGitEnv, requireGitPath } from "../git-safety.js";
@@ -286,7 +286,7 @@ export function reviewGate(
       // Same allowlist as the implementer: the CLI authenticates from its logged-in session under
       // HOME, and the reviewer judges a diff written by an agent, so it is the last place that
       // should hold the operator's board or GitHub credential
-      const env = childEnv();
+      const env = agentEnv();
 
       const checkout = await reviewCheckout(
         runner,
