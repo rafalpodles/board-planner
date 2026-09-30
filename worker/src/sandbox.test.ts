@@ -249,6 +249,14 @@ describe("the network (BP-720)", () => {
     expect(profile).toContain('(allow network-outbound (remote ip "localhost:*") (remote unix-socket))');
     expect(profile.startsWith(withNetwork())).toBe(true);
   });
+
+  it("denies the daemons that fetch on a process's behalf in loopback mode, and only there", () => {
+    const deny =
+      '(deny mach-lookup (global-name "com.apple.nsurlsessiond") (global-name "com.apple.trustd") (global-name "com.apple.trustd.agent") (xpc-service-name "com.apple.WebKit.Networking"))';
+
+    expect(withNetwork("loopback")).toContain(deny);
+    expect(withNetwork()).not.toContain("nsurlsessiond");
+  });
 });
 
 describe("the program inside the wrapper", () => {

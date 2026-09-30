@@ -1,5 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { spawnSync } from "node:child_process";
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach } from "vitest";
+import { createServer, Server } from "node:http";
+import { AddressInfo } from "node:net";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,7 +10,7 @@ import { claimedTask } from "../__fixtures__/task.js";
 import { GateContext } from "../types.js";
 import { testRunGate } from "./test-run.js";
 import { buildGate } from "./build.js";
-import { LOOPBACK_ONLY_NOTE } from "./confined-npm.js";
+import { LOOPBACK_ONLY_NOTE, runConfinedNpm } from "./confined-npm.js";
 import { installedToolPath } from "../__fixtures__/tool-paths.js";
 import { recordDir } from "../sandbox.js";
 
@@ -237,6 +239,92 @@ describe.skipIf(!onMac)("the test gate against the real sandbox", () => {
 
       expect(result.ok, result.reason).toBe(true);
       expect(readFileSync(join(worktree, "dist.js"), "utf8")).toBe("built");
+    });
+  });
+
+  /**
+   * BP-720. The install keeps the network, and a project `.npmrc` is read from the worktree — one
+   * the agent committed, or one an earlier gate's code left untracked, which reaches no diff. The
+   * operator's `~/.npmrc` is played by a fake HOME holding a dummy token.
+   */
+  describe("the install, against a project .npmrc", () => {
+    let seen: { url: string; authorization: string }[] = [];
+    let listener: Server;
+    let port = 0;
+    let home = "";
+
+    beforeAll(async () => {
+      listener = createServer((req, res) => {
+        seen.push({ url: req.url ?? "", authorization: String(req.headers.authorization ?? "") });
+        res.statusCode = 404;
+        res.end();
+      });
+      await new Promise<void>((done) => listener.listen(0, "127.0.0.1", done));
+      port = (listener.address() as AddressInfo).port;
+    });
+
+    afterAll(() => {
+      listener.close();
+    });
+
+    beforeEach(() => {
+      seen = [];
+      home = join(dir, "fake-home");
+      mkdirSync(home);
+    });
+
+    const install = () =>
+      runConfinedNpm(runner, npmPath, ["ci", "--ignore-scripts", "--no-audit", "--no-fund", "--fetch-retries=0"], {
+        cwd: worktree,
+        worktree: recordDir(worktree),
+        timeoutMs: 120_000,
+        withCache: true,
+        env: { PATH: process.env.PATH, HOME: home, USER: process.env.USER, TMPDIR: process.env.TMPDIR, CP_NPM_CACHE: join(dir, "cache") },
+      });
+
+    function project(dependencies: Record<string, string>, locked: Record<string, object>) {
+      const pkg = { name: "wt", version: "1.0.0", dependencies };
+      writeFileSync(join(worktree, "package.json"), JSON.stringify(pkg));
+      writeFileSync(
+        join(worktree, "package-lock.json"),
+        JSON.stringify({ ...pkg, lockfileVersion: 3, requires: true, packages: { "": pkg, ...locked } })
+      );
+    }
+
+    it("does not hand the operator's registry token to a proxy the project names", async () => {
+      const registry = `http://127.0.0.1:${port}/registry/`;
+      writeFileSync(join(home, ".npmrc"), `//127.0.0.1:${port}/registry/:_authToken=DUMMY-TOKEN\n`);
+      writeFileSync(join(worktree, ".npmrc"), `registry=${registry}\nproxy=http://127.0.0.1:${port}/proxy/\nhttps-proxy=http://127.0.0.1:${port}/proxy/\n`);
+      project({ x: "1.0.0" }, { "node_modules/x": { version: "1.0.0", resolved: `${registry}x/-/x-1.0.0.tgz` } });
+
+      await install();
+
+      // Through a proxy the request line is the absolute URL; direct, it is the path
+      expect(seen.length, "npm never asked for the tarball, so this proves nothing").toBeGreaterThan(0);
+      expect(seen.filter((request) => request.url.startsWith("http://"))).toEqual([]);
+    });
+
+    it("does not run a git binary the project names, and still installs a git dependency", async () => {
+      const dep = join(dir, "dep");
+      mkdirSync(dep);
+      writeFileSync(join(dep, "package.json"), JSON.stringify({ name: "gitdep", version: "1.0.0" }));
+      const git = (...args: string[]) =>
+        execFileSync(installedToolPath("git"), ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: dep, encoding: "utf8" }).trim();
+      git("init", "-q");
+      git("add", ".");
+      git("commit", "-qm", "init");
+      const sha = git("rev-parse", "HEAD");
+
+      const planted = join(worktree, "planted-git.sh");
+      writeFileSync(planted, `#!/bin/sh\necho ran > ${JSON.stringify(join(worktree, "GIT-SCRIPT-RAN"))}\nexec ${installedToolPath("git")} "$@"\n`, { mode: 0o755 });
+      writeFileSync(join(worktree, ".npmrc"), `git=${planted}\n`);
+      project({ gitdep: `git+file://${dep}` }, { "node_modules/gitdep": { version: "1.0.0", resolved: `git+file://${dep}#${sha}` } });
+
+      const result = await install();
+
+      expect(existsSync(join(worktree, "GIT-SCRIPT-RAN"))).toBe(false);
+      expect("code" in result && result.code, JSON.stringify(result)).toBe(0);
+      expect(existsSync(join(worktree, "node_modules", "gitdep", "package.json"))).toBe(true);
     });
   });
 });

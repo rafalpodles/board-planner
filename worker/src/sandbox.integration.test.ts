@@ -1,4 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach } from "vitest";
+import { execFileSync } from "node:child_process";
+import { createServer, Server } from "node:http";
+import { AddressInfo } from "node:net";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -445,5 +448,80 @@ describe.skipIf(!onMac)("confine against the real sandbox", () => {
       expect(result.code, result.stderr).toBe(0);
       expect(result.stdout.trim()).toBe("pong");
     });
+  });
+
+  /**
+   * BP-720. A daemon fetches outside the profile, so `network-outbound` never sees it: each of these
+   * reached a listener from a process with no network at all. The listener is on 127.0.0.1, which
+   * loopback mode allows the process itself, so a request arriving there in loopback mode can only
+   * have come from a daemon the deny did not stop. Open mode is the control.
+   */
+  describe("a fetch a daemon performs on the process's behalf", () => {
+    let seen: string[] = [];
+    let server: Server;
+    let base = "";
+    let pki = "";
+
+    beforeAll(async () => {
+      server = createServer((req, res) => {
+        seen.push(req.url ?? "");
+        res.end("x");
+      });
+      await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+      base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+      pki = mkdtempSync(join(tmpdir(), "bp720-pki-"));
+      const openssl = (...args: string[]) => execFileSync("/usr/bin/openssl", args, { cwd: pki, stdio: "ignore" });
+      openssl("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", "ca.key", "-out", "ca.pem", "-days", "2", "-subj", "/CN=BP720 probe CA");
+      openssl("req", "-newkey", "rsa:2048", "-nodes", "-keyout", "leaf.key", "-out", "leaf.csr", "-subj", "/CN=probe.bp720.test");
+      writeFileSync(
+        join(pki, "leaf.ext"),
+        `extendedKeyUsage=serverAuth\nsubjectAltName=DNS:probe.bp720.test\nauthorityInfoAccess=caIssuers;URI:${base}/aia-DUMMY,OCSP;URI:${base}/ocsp-DUMMY\n`
+      );
+      openssl("x509", "-req", "-in", "leaf.csr", "-CA", "ca.pem", "-CAkey", "ca.key", "-CAcreateserial", "-out", "leaf.pem", "-days", "1", "-extfile", "leaf.ext");
+    });
+
+    afterAll(() => {
+      server.close();
+      rmSync(pki, { recursive: true, force: true });
+    });
+
+    beforeEach(() => {
+      seen = [];
+    });
+
+    async function confinedRun(command: string, args: string[], network?: "open" | "loopback") {
+      const spawn = confine(command, args, { writable: [worktree], network, env: {} });
+      if (!("command" in spawn)) throw new Error(`refused: ${spawn.refusal}`);
+      await runner.run(spawn.command, spawn.args, { cwd: worktree, timeoutMs: 30_000 });
+      await new Promise((done) => setTimeout(done, 1500));
+      return seen.join(" ");
+    }
+
+    const jxa = (body: string) => ["-l", "JavaScript", "-e", `ObjC.import("Cocoa"); ObjC.import("WebKit"); ${body}`];
+    const backgroundSession = () =>
+      jxa(`
+        var config = $.NSClassFromString("NSURLSessionConfiguration").backgroundSessionConfigurationWithIdentifier("bp720.probe." + Math.random());
+        var task = $.NSClassFromString("NSURLSession").sessionWithConfiguration(config).downloadTaskWithURL($.NSURL.URLWithString("${base}/nsurl-DUMMY"));
+        task.resume;
+        delay(3);
+      `);
+    const webView = () =>
+      jxa(`
+        var view = $.NSClassFromString("WKWebView").alloc.initWithFrameConfiguration($.NSMakeRect(0, 0, 10, 10), $.NSClassFromString("WKWebViewConfiguration").alloc.init);
+        view.loadRequest($.NSURLRequest.requestWithURL($.NSURL.URLWithString("${base}/webkit-DUMMY")));
+        $.NSRunLoop.currentRunLoop.runUntilDate($.NSDate.dateWithTimeIntervalSinceNow(4));
+      `);
+    const verifyCert = () => ["verify-cert", "-c", join(pki, "leaf.pem"), "-r", join(pki, "ca.pem"), "-p", "ssl", "-R", "ocsp", "-R", "require"];
+
+    it.each([
+      ["nsurlsessiond", "/usr/bin/osascript", backgroundSession, "/nsurl-DUMMY"],
+      ["trustd", "/usr/bin/security", verifyCert, "/ocsp-DUMMY"],
+      ["WebKit's networking process", "/usr/bin/osascript", webView, "/webkit-DUMMY"],
+    ])("%s fetches in open mode — the control — and not in loopback mode", async (_, command, args, path) => {
+      expect(await confinedRun(command, args())).toContain(path);
+      seen = [];
+      expect(await confinedRun(command, args(), "loopback")).not.toContain("DUMMY");
+    }, 60_000);
   });
 });

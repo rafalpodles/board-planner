@@ -172,15 +172,24 @@ export function dirReplaced(dir: RecordedDir, lstat: (path: string) => DirStat =
 export type Network = "open" | "loopback";
 
 // For the gates that run agent-written code (BP-720): reads stay open, so a test can read a
-// credential under HOME, and this is what stops it sending one off the machine. SBPL accepts only
-// `*` or `localhost` as a host, and `localhost` is every address this machine holds, measured on
-// macOS 26.6: 127.0.0.1, ::1 and its own LAN address connect; 127.0.0.2 and another LAN host get
-// EPERM. So any listener on this machine is reachable, a forwarding proxy included. Unix sockets
-// stay allowed (BP-810), and with them getaddrinfo through mDNSResponder: a name still resolves,
-// which is a DNS channel, while the connection to it is refused.
+// credential under HOME, and this is what stops it sending one off the machine. Measured on macOS
+// 26.6, and what it leaves open:
+// - SBPL accepts only `*` or `localhost` as a host, and `localhost` is every address this machine
+//   holds: 127.0.0.1, ::1 and its own LAN address connect, 127.0.0.2 and another LAN host get EPERM.
+//   Any listener here is reachable, a forwarding proxy included. It also ignores an IPv6 scope, so
+//   fe80::1%en0 or %utun0 passes: UDP is sent and a SYN goes out on that link. `remote ip4` would
+//   close it and costs ::1, where node binds "localhost" on this machine.
+// - Unix sockets stay allowed (BP-810), and with them getaddrinfo through mDNSResponder: a name
+//   still resolves, which is a DNS channel, while the connection to it is refused.
+// - Daemons fetch on a process's behalf, outside the profile: nsurlsessiond (a background
+//   NSURLSession), trustd (a certificate's AIA and OCSP URLs) and WebKit's networking process each
+//   reached a listener from a process with no network at all, and a deny on the name closes each.
+//   The nsurlsessiond deny alone also stops WebKit's here, so no test fails on removing only the
+//   WebKit one. A denylist of service names: it closes these three, not the category.
 const LOOPBACK_ONLY = [
   "(deny network-outbound)",
   '(allow network-outbound (remote ip "localhost:*") (remote unix-socket))',
+  '(deny mach-lookup (global-name "com.apple.nsurlsessiond") (global-name "com.apple.trustd") (global-name "com.apple.trustd.agent") (xpc-service-name "com.apple.WebKit.Networking"))',
 ];
 
 // `(allow default)` sets the default decision for operations the profile has no filter for. It is

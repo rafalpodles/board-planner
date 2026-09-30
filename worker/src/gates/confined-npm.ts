@@ -63,6 +63,17 @@ export function npmTempBase(env?: NodeJS.ProcessEnv): string {
   return (env ? (env.TMPDIR?.trim() ?? "") : tempDirOverride()) || tmpdir();
 }
 
+// Environment beats a project `.npmrc`, and the install keeps the network: `git=<script>` there runs
+// that script for any git dependency even under --ignore-scripts, and `proxy=` with an http
+// registry hands the operator's `~/.npmrc` token to whoever runs the proxy. Pinned for every
+// command rather than refused by diff, because an untracked `.npmrc` an earlier gate's code wrote
+// reaches no diff. It also overrides a proxy in the operator's own `~/.npmrc`.
+export const NPM_CONFIG_PINNED = {
+  npm_config_git: "git",
+  npm_config_proxy: "null",
+  npm_config_https_proxy: "null",
+} as const;
+
 // A refused connection prints only `connect EPERM <address>`, which reads like a firewall
 export const LOOPBACK_ONLY_NOTE = "outbound network is loopback-only under the worker";
 
@@ -128,6 +139,7 @@ export async function runConfinedNpm(
       // here gets: the allowlist, and nothing of the operator's beyond it.
       env: {
         ...(source ? agentEnv([], source) : agentEnv()),
+        ...NPM_CONFIG_PINNED,
         npm_config_cache: cache,
         TMPDIR: temp,
       },

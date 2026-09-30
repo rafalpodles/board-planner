@@ -419,14 +419,30 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   `~/.config/gh`, `~/.aws`, and the only thing between it and the internet was nothing. Those two
   commands now run with every outbound connection refused except to this machine, and no setting
   turns it back on short of `CP_ALLOW_UNCONFINED_AGENT`, which drops it with the rest of the sandbox
-  (the gate's reason then says nothing about the network); `npm ci` keeps the network for the registry, and both `claude` spawns
-  keep it for the API. A suite that starts a server on `127.0.0.1` or `::1` and talks to it still
-  passes; one that reaches off the machine fails with `connect EPERM`, and the gate's reason says
-  the network was loopback-only. What this does not close: seatbelt's `localhost` is every address
-  this machine holds, so a listener here that forwards — an HTTP proxy, an SSH tunnel — is still a
-  way out; unix sockets stay open (BP-810) — Docker's socket, where it runs, is the obvious one: a
-  container started through it has the network — and with them name resolution through
-  mDNSResponder, so a lookup of a name that encodes a secret still reaches a DNS server.
+  (the gate's reason then says nothing about the network); `npm ci` keeps the network for the
+  registry, and both `claude` spawns keep it for the API. A suite that starts a server on
+  `127.0.0.1` or `::1` and talks to it still passes; one that reaches off the machine fails with
+  `connect EPERM`, and the gate's reason says the network was loopback-only. Three daemons that
+  fetch a URL on a process's behalf, outside the profile, are denied by name in those two commands:
+  nsurlsessiond (a background `NSURLSession`), trustd (the AIA and OCSP URLs of a certificate the
+  test hands it) and WebKit's networking process — each reached a listener from a process with no
+  network at all. That is a denylist, and it closes those three, not the category. What else this
+  does not close: seatbelt's `localhost` is every address this machine holds, so a listener here
+  that forwards — an HTTP proxy, an SSH tunnel — is still a way out, and it ignores an IPv6 scope,
+  so `fe80::1%en0` or `%utun0` is let through and a packet goes out on that link (narrowing it to
+  IPv4 would refuse `::1`, where node binds `localhost` on macOS); unix sockets stay open (BP-810) —
+  Docker's socket, where it runs, is the obvious one: a container started through it has the
+  network — and with them name resolution through mDNSResponder, so a lookup of a name that encodes
+  a secret still reaches a DNS server.
+
+  **A project `.npmrc` cannot redirect the install.** `npm ci` runs with `git`, `proxy` and
+  `https-proxy` set in its environment, which npm reads ahead of any `.npmrc`: a `git=` naming a
+  script in the worktree used to run it for any git dependency, `--ignore-scripts` or not, and a
+  `proxy=` with an http registry handed the token in your `~/.npmrc` to whoever ran the proxy. The
+  environment rather than a refusal of a changed `.npmrc`, because one an earlier gate's code
+  writes is untracked and reaches no diff. The cost: a proxy set in your own `~/.npmrc` is
+  overridden too. Still open: a project `.npmrc` that points the registry at `http://` sends that
+  registry's token in clear text to the same host, readable by anyone on the path.
 
   **Everything that inherits a confined spawn's sandbox is killed when the spawn ends**
   (**BP-796**). A process group is not enough: a step or a test that runs `setsid`, double-forks or

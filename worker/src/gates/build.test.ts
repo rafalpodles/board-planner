@@ -7,7 +7,7 @@ import { CommandResult, Runner } from "../exec.js";
 import { GateContext } from "../types.js";
 import { claimedTask } from "../__fixtures__/task.js";
 import { recordDir, SANDBOX_COMMAND, UNCONFINED_REASON } from "../sandbox.js";
-import { LOOPBACK_ONLY_NOTE, npmCacheDir } from "./confined-npm.js";
+import { LOOPBACK_ONLY_NOTE, NPM_CONFIG_PINNED, npmCacheDir } from "./confined-npm.js";
 import { NPM_PATH } from "../__fixtures__/tool-paths.js";
 import { UNCONFINED_ESCAPE_HATCH } from "../env.js";
 
@@ -140,6 +140,16 @@ describe("buildGate", () => {
     const profileOf = (call: number) => run.mock.calls[call][1][run.mock.calls[call][1].indexOf("-p") + 1];
     expect(profileOf(0)).not.toContain("network-outbound");
     expect(profileOf(1)).toContain("(deny network-outbound)");
+  });
+
+  // A project `.npmrc` cannot name the git binary or a proxy for the one command with the network
+  it("pins git and the proxies for the install and the build, over any project .npmrc", async () => {
+    const { runner: r, run } = runner(ok, ok);
+
+    await buildGate(r, NPM_PATH, TIMEOUT_MS).run(context);
+
+    expect(run.mock.calls[0][2].env).toMatchObject(NPM_CONFIG_PINNED);
+    expect(run.mock.calls[1][2].env).toMatchObject(NPM_CONFIG_PINNED);
   });
 
   it("says the network was loopback-only when the build fails", async () => {
