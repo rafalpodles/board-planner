@@ -166,7 +166,7 @@ export function SettingsShell({
   }
 
   return (
-    <div className={bottomBar ? "-mt-6 flex flex-1 flex-col md:mt-0" : "-mt-6 pb-8 md:mt-0"}>
+    <div className={bottomBar ? "-mt-2 flex flex-1 flex-col md:mt-0" : "-mt-2 pb-8 md:mt-0"}>
       <PageHeader title={title} subtitle={subtitle} />
 
       <div

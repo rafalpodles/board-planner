@@ -121,7 +121,7 @@ export default function EmailSettingsPage() {
             ["From", settings.from],
           ].map(([label, value]) => (
             <div key={label} className="flex gap-4 px-4 py-2">
-              <dt className="w-48 shrink-0 text-text-muted">{label}</dt>
+              <dt className="w-24 shrink-0 text-text-muted sm:w-48">{label}</dt>
               <dd className="min-w-0 break-all">{value}</dd>
             </div>
           ))}

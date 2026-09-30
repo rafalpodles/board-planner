@@ -90,6 +90,7 @@ export const GROUPS = {
     "dashboard-says-why.spec.ts",
     "instance-settings.spec.ts",
     "settings-mobile-nav.spec.ts",
+    "phone-width-screens.spec.ts",
     "instance-audit.spec.ts",
     "failed-read-states.spec.ts",
     "agents-catalog.spec.ts",
