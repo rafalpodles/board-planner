@@ -639,17 +639,20 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
 - **Accepting a refused change is the one report that does not go through the outbox.** Everything
   else this worker says is queued and retried until it lands; a decision settlement is not, because
   it can become *permanently* invalid — the decision superseded by a second claim, or given up on —
-  and a 409 that can never succeed would hold every comment, status move and run record behind it
-  for twenty polls. Instead, a settlement the board did not take leaves the worktree and the
-  record as they were, counts the attempt on the marker, and is tried again after one, two, four and
-  eight minutes. After five attempts the record is settled failed with the count in its
+  and a 409 that can never succeed would be retried for twenty polls, holding back every report
+  queued behind it for that task. Instead, a settlement the board did not take leaves the worktree
+  and the record as they were, counts the attempt on the marker, and is tried again after one, two,
+  four and eight minutes. After five attempts the record is settled failed with the count in its
   reason, for a person to accept again once they have looked. Retrying is safe because it is
   idempotent: the same commit to the same branch is already there, and the pull
   request that exists is the one reported.
 - **A report that cannot be delivered is not lost.** Merging to `main` redeploys the app, so the
   report right after a merge is the one most likely to fail — and a lost one would leave the task
   sitting in the active column where nothing can claim it again. Undelivered reports persist to
-  `<CP_STATE_DIR>/outbox.jsonl` and go out before the next task is claimed.
+  `<CP_STATE_DIR>/outbox.jsonl` and go out before the next task is claimed. A failure holds back
+  only what it names — for a 409 that one task, for a project that no longer has this machine,
+  that project — and anything else, a network failure or a redeploy, stops the flush, so an outage
+  costs one attempt rather than one per task.
 - **A task abandoned by a dead worker comes back.** The claim endpoint frees anything whose lease
   has outlived it, without refunding the attempt, so a task that repeatedly outlives its worker
   runs out of attempts and reaches a human.

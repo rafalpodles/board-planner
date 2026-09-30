@@ -362,10 +362,10 @@ export interface SettleDecisionsDeps {
    *
    * Deliberately NOT routed through the outbox, unlike every other report this worker makes, and
    * the difference is the reason. An outbox entry is retried until it succeeds or twenty attempts
-   * run out, and it blocks everything queued behind it in the meantime. A decision settlement can
-   * be *permanently* invalid — `superseded` by a second claim, `abandoned` by a person, or simply
-   * overtaken — and a 409 that can never succeed would hold every comment, status move and run
-   * record on this machine for twenty polls.
+   * run out, and it holds back what its failure names in the meantime — for a 409, everything
+   * queued behind it for that task. A decision settlement can be *permanently* invalid —
+   * `superseded` by a second claim, `abandoned` by a person, or simply overtaken — and a 409 that
+   * can never succeed would hold that task's comments, status moves and run record for twenty polls.
    *
    * Worse, a queued settlement is invisible to the pass that queued it: with `delivered` sitting
    * in the outbox the worktree was destroyed, the marker dropped, and the NEXT pass — seeing the
