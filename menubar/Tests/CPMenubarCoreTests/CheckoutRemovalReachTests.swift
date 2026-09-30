@@ -66,7 +66,7 @@ final class CheckoutRemovalReachTests: XCTestCase {
     private func cleanCheckout(_ name: String = "checkout") -> String {
         let origin = dir + "/\(name)-origin.git"
         let checkout = dir + "/\(name)"
-        _ = git(dir, ["init", "-q", "--bare", origin])
+        _ = git(dir, ["init", "-q", "--bare", "-b", "main", origin])
         _ = git(dir, ["init", "-q", "-b", "main", checkout])
         FileManager.default.createFile(atPath: checkout + "/a.txt", contents: Data("a\n".utf8))
         _ = git(checkout, ["add", "-A"])
@@ -160,7 +160,7 @@ final class CheckoutRemovalReachTests: XCTestCase {
     func testASubmoduleItsOwnGitmodulesSilencedIsStillSeen() throws {
         let checkout = cleanCheckout()
         let subOrigin = dir + "/sub-origin.git"
-        _ = git(dir, ["init", "-q", "--bare", subOrigin])
+        _ = git(dir, ["init", "-q", "--bare", "-b", "main", subOrigin])
         let subSource = dir + "/sub-source"
         _ = git(dir, ["init", "-q", "-b", "main", subSource])
         FileManager.default.createFile(atPath: subSource + "/s.txt", contents: Data("s\n".utf8))
@@ -169,14 +169,14 @@ final class CheckoutRemovalReachTests: XCTestCase {
         _ = git(subSource, ["remote", "add", "origin", subOrigin])
         _ = git(subSource, ["push", "-q", "-u", "origin", "HEAD"])
 
-        _ = git(checkout, ["-c", "protocol.file.allow=always", "submodule", "-q", "add", subOrigin, "sub"])
+        let added = git(checkout, ["-c", "protocol.file.allow=always", "submodule", "-q", "add", subOrigin, "sub"])
+        try requireSubmoduleFixture(
+            added: added, staged: git(checkout, ["ls-files", "--stage", "--", "sub"]).output,
+            checkedOut: FileManager.default.fileExists(atPath: checkout + "/sub/s.txt"))
         _ = git(checkout, ["config", "-f", ".gitmodules", "submodule.sub.ignore", "all"])
         _ = git(checkout, ["add", "-A"])
         _ = git(checkout, ["commit", "-qm", "vendor it, and tell git to look away"])
         _ = git(checkout, ["push", "-q"])
-        try XCTSkipIf(
-            !FileManager.default.fileExists(atPath: checkout + "/sub/s.txt"),
-            "this git refused a file-protocol submodule; the guard is covered by the control below")
 
         FileManager.default.createFile(
             atPath: checkout + "/sub/s.txt", contents: Data("a day of work\n".utf8))
@@ -193,7 +193,7 @@ final class CheckoutRemovalReachTests: XCTestCase {
     func testACleanSubmoduleSilencedTheSameWayStillGoes() throws {
         let checkout = cleanCheckout()
         let subOrigin = dir + "/sub2-origin.git"
-        _ = git(dir, ["init", "-q", "--bare", subOrigin])
+        _ = git(dir, ["init", "-q", "--bare", "-b", "main", subOrigin])
         let subSource = dir + "/sub2-source"
         _ = git(dir, ["init", "-q", "-b", "main", subSource])
         FileManager.default.createFile(atPath: subSource + "/s.txt", contents: Data("s\n".utf8))
@@ -202,14 +202,14 @@ final class CheckoutRemovalReachTests: XCTestCase {
         _ = git(subSource, ["remote", "add", "origin", subOrigin])
         _ = git(subSource, ["push", "-q", "-u", "origin", "HEAD"])
 
-        _ = git(checkout, ["-c", "protocol.file.allow=always", "submodule", "-q", "add", subOrigin, "sub"])
+        let added = git(checkout, ["-c", "protocol.file.allow=always", "submodule", "-q", "add", subOrigin, "sub"])
+        try requireSubmoduleFixture(
+            added: added, staged: git(checkout, ["ls-files", "--stage", "--", "sub"]).output,
+            checkedOut: FileManager.default.fileExists(atPath: checkout + "/sub/s.txt"))
         _ = git(checkout, ["config", "-f", ".gitmodules", "submodule.sub.ignore", "all"])
         _ = git(checkout, ["add", "-A"])
         _ = git(checkout, ["commit", "-qm", "vendor it"])
         _ = git(checkout, ["push", "-q"])
-        try XCTSkipIf(
-            !FileManager.default.fileExists(atPath: checkout + "/sub/s.txt"),
-            "this git refused a file-protocol submodule")
 
         XCTAssertEqual(verdict(checkout), .go(root: resolved(checkout), worktrees: []))
     }
@@ -296,7 +296,7 @@ final class CheckoutRemovalReachTests: XCTestCase {
         let checkout = cleanCheckout()
         let nested = nestedRepo(in: checkout, at: "thesis")
         let nestedOrigin = dir + "/thesis-origin.git"
-        _ = git(dir, ["init", "-q", "--bare", nestedOrigin])
+        _ = git(dir, ["init", "-q", "--bare", "-b", "main", nestedOrigin])
         FileManager.default.createFile(atPath: nested + "/chapter.md", contents: Data("one\n".utf8))
         _ = git(nested, ["add", "-A"])
         _ = git(nested, ["commit", "-qm", "chapter one"])
@@ -396,7 +396,7 @@ final class CheckoutRemovalReachTests: XCTestCase {
         let checkout = cleanCheckout()
         let nested = nestedRepo(in: checkout, at: "thesis")
         let nestedOrigin = dir + "/thesis-origin.git"
-        _ = git(dir, ["init", "-q", "--bare", nestedOrigin])
+        _ = git(dir, ["init", "-q", "--bare", "-b", "main", nestedOrigin])
         FileManager.default.createFile(atPath: nested + "/chapter.md", contents: Data("one\n".utf8))
         _ = git(nested, ["add", "-A"])
         _ = git(nested, ["commit", "-qm", "chapter one"])
@@ -422,7 +422,7 @@ final class CheckoutRemovalReachTests: XCTestCase {
         let checkout = cleanCheckout()
         let nested = nestedRepo(in: checkout, at: "thesis")
         let nestedOrigin = dir + "/thesis-origin.git"
-        _ = git(dir, ["init", "-q", "--bare", nestedOrigin])
+        _ = git(dir, ["init", "-q", "--bare", "-b", "main", nestedOrigin])
         FileManager.default.createFile(atPath: nested + "/chapter.md", contents: Data("one\n".utf8))
         _ = git(nested, ["add", "-A"])
         _ = git(nested, ["commit", "-qm", "chapter one"])

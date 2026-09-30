@@ -4,10 +4,9 @@ public enum GitCheckoutKind: Equatable, Sendable {
     case repository
     case linkedWorktree
     /// The working directory of a submodule. `--git-dir` and `--git-common-dir` agree, same as an
-    /// ordinary repository — but the agreed path lives under the superproject's `.git/modules/`,
-    /// not under this directory's own `.git`. Its objects live in the superproject and are not
-    /// lost if this directory goes; the superproject's gitlink is, left pointing at a directory
-    /// that is gone (BP-507).
+    /// ordinary repository, so this is either git's own `--show-superproject-working-tree` naming a
+    /// superproject or a git-dir under a superproject's `.git/modules/`. Deleting it leaves that
+    /// superproject's gitlink pointing at a directory that is gone (BP-507).
     case submodule
 }
 
@@ -22,14 +21,29 @@ public enum GitCheckoutKind: Equatable, Sendable {
 /// This matters because the repository's `.git` holds the object store every worktree of it shares,
 /// so deleting it takes them all, including ones nobody named (BP-422).
 public enum LinkedWorktreeCheck {
-    /// `nil` when either answer could not be read. Deciding what an unexamined directory means is
-    /// the caller's: refusing an irreversible act on it (`CloneStep` adopting one, `CheckoutRemoval`
+    /// `nil` when an answer needed to decide could not be read. Deciding what an unexamined directory means is the
+    /// caller's: refusing an irreversible act on it (`CloneStep` adopting one, `CheckoutRemoval`
     /// deleting one) answers no; granting it access (`CheckoutGrant`, BP-505) is not irreversible,
     /// and answers yes — the picker accepted every such folder before this discriminator existed
     /// too, and widening that is a decision for its own ticket.
+    ///
+    /// `run` takes `git` arguments and runs them however the caller runs git — every caller's
+    /// runner is the resolved absolute path and `GitSafeEnvironment` (BP-733).
+    public static func kind(
+        of path: String,
+        run: (_ args: [String]) -> (code: Int32, output: String)
+    ) -> GitCheckoutKind? {
+        kind(
+            gitDir: run(["-C", path, "rev-parse", "--git-dir"]),
+            commonDir: run(["-C", path, "rev-parse", "--git-common-dir"]),
+            superproject: run(["-C", path, "rev-parse", "--show-superproject-working-tree"]),
+            relativeTo: path)
+    }
+
     public static func kind(
         gitDir: (code: Int32, output: String),
         commonDir: (code: Int32, output: String),
+        superproject: (code: Int32, output: String),
         relativeTo path: String
     ) -> GitCheckoutKind? {
         guard gitDir.code == 0, commonDir.code == 0 else { return nil }
@@ -53,14 +67,21 @@ public enum LinkedWorktreeCheck {
             return nil
         }
         guard git == common else { return .linkedWorktree }
-        return isSubmoduleGitDir(git) ? .submodule : .repository
-    }
 
-    /// Git's own convention for where a submodule's git-dir lives: always a `modules/<name>` child
-    /// of the superproject's `.git`, never a directory's own `.git`. Measured on git 2.50.1 — a
-    /// nested submodule's git-dir nests the same way (`.git/modules/<outer>/modules/<inner>`), so
-    /// containment rather than a suffix match is what generalises to it.
-    private static func isSubmoduleGitDir(_ resolved: String) -> Bool {
-        resolved.contains("/.git/modules/")
+        // Either answer alone misses a submodule, measured on git 2.54.0 (BP-734). The git-dir's
+        // `/.git/modules/` segment, which BP-507 read, is absent when the superproject's `.git` is
+        // a symlink or `--separate-git-dir` (git reports `<elsewhere>/modules/vendor`, resolved) and
+        // in the legacy layout (`.git`). `--show-superproject-working-tree` names the superproject
+        // in all three, but it looks for a gitlink in the parent's index and answers empty, exit
+        // 0, when that index is unreadable or has none — a superproject checked out to a branch
+        // predating the submodule leaves `vendor/` behind, still pointing into `.git/modules/`.
+        // Empty therefore means "no superproject found", not "none", and only both saying no is
+        // a repository.
+        if git.contains("/.git/modules/") { return .submodule }
+        guard superproject.code == 0 else { return nil }
+        let owner = superproject.output.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A git that does not know the flag echoes it and exits 0, as with `--git-common-dir`
+        guard !owner.hasPrefix("-") else { return nil }
+        return owner.isEmpty ? .repository : .submodule
     }
 }

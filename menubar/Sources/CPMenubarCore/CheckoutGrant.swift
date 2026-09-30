@@ -24,9 +24,7 @@ public enum CheckoutGrant: Equatable, Sendable {
         path: String,
         run: (_ args: [String], _ cwd: String) -> (code: Int32, output: String)
     ) -> CheckoutGrant {
-        let gitDir = run(["-C", path, "rev-parse", "--git-dir"], path)
-        let commonDir = run(["-C", path, "rev-parse", "--git-common-dir"], path)
-        switch LinkedWorktreeCheck.kind(gitDir: gitDir, commonDir: commonDir, relativeTo: path) {
+        switch LinkedWorktreeCheck.kind(of: path, run: { run($0, path) }) {
         case .linkedWorktree:
             return .refused(
                 reason:

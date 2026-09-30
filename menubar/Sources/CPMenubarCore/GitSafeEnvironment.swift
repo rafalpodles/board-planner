@@ -17,6 +17,10 @@ import Foundation
 /// while the path it authorises for deletion is still the one it was given. A GUI launched from
 /// Finder inherits none of them; a developer's terminal, and `swift run`, do.
 ///
+/// `GIT_CEILING_DIRECTORIES` goes with them for the same reason (BP-734 review): naming a
+/// superproject stops `--show-superproject-working-tree` looking one level up, which then answers
+/// empty, exit 0, and a submodule reads as a repository of its own — measured.
+///
 /// `~/.gitconfig` itself is deliberately left readable, which is where this parts company with the
 /// worker: delivery drops it because the agent shares that filesystem, whereas this runs during
 /// onboarding, and dropping it would take the operator's credential helper and any `core.sshCommand`
@@ -27,7 +31,7 @@ public enum GitSafeEnvironment {
         hardened["GIT_CONFIG_NOSYSTEM"] = "1"
         hardened["GIT_PROXY_COMMAND"] = ""
         // Removed rather than emptied: an empty GIT_DIR is not "unset", it is a git dir named "".
-        for redirect in ["GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"] {
+        for redirect in ["GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_CEILING_DIRECTORIES"] {
             hardened.removeValue(forKey: redirect)
         }
         return hardened

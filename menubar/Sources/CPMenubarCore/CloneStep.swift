@@ -64,9 +64,7 @@ public struct CloneStep: Sendable {
             // exactly as its repository does. So every check below passes on one, and the app
             // adopts a directory it did not create, inside a repository it does not own, which
             // unticking the project would then delete along with that repository (BP-422).
-            let gitDir = run("git", ["-C", target, "rev-parse", "--git-dir"], nil)
-            let commonDir = run("git", ["-C", target, "rev-parse", "--git-common-dir"], nil)
-            switch LinkedWorktreeCheck.kind(gitDir: gitDir, commonDir: commonDir, relativeTo: target) {
+            switch LinkedWorktreeCheck.kind(of: target, run: { run("git", $0, nil) }) {
             case .linkedWorktree:
                 return .failed(
                     reason: "\(target) is a linked worktree of another checkout, not a repository of its own. Point this project at a folder of its own.")

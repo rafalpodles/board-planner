@@ -64,7 +64,7 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
         let origin = dir + "/origin.git"
         let checkout = dir + "/checkout"
         let worktree = dir + "/cp-worktrees/BP-1"
-        _ = git(dir, ["init", "-q", "--bare", origin])
+        _ = git(dir, ["init", "-q", "--bare", "-b", "main", origin])
         _ = git(dir, ["init", "-q", checkout])
         FileManager.default.createFile(atPath: checkout + "/a.txt", contents: Data("a\n".utf8))
         _ = git(checkout, ["add", "-A"])
@@ -138,7 +138,7 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
         // A sibling of `checkout`, same as `repoWithWorktree`'s — but not under `cp-worktrees`, so
         // nothing marks it as a worktree this app made.
         let worktree = dir + "/hand-made-worktree"
-        _ = git(dir, ["init", "-q", "--bare", origin])
+        _ = git(dir, ["init", "-q", "--bare", "-b", "main", origin])
         _ = git(dir, ["init", "-q", checkout])
         FileManager.default.createFile(atPath: checkout + "/a.txt", contents: Data("a\n".utf8))
         _ = git(checkout, ["add", "-A"])
@@ -179,7 +179,7 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
     private func repoWithSubmodule() throws -> (superproject: String, submodulePath: String) {
         let subOrigin = dir + "/sub-origin.git"
         let subSeed = dir + "/sub-seed"
-        _ = git(dir, ["init", "-q", "--bare", subOrigin])
+        _ = git(dir, ["init", "-q", "--bare", "-b", "main", subOrigin])
         _ = git(dir, ["init", "-q", "-b", "main", subSeed])
         FileManager.default.createFile(atPath: subSeed + "/a.txt", contents: Data("a\n".utf8))
         _ = git(subSeed, ["add", "-A"])
@@ -189,24 +189,19 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
 
         let superOrigin = dir + "/super-origin.git"
         let superproject = dir + "/super"
-        _ = git(dir, ["init", "-q", "--bare", superOrigin])
+        _ = git(dir, ["init", "-q", "--bare", "-b", "main", superOrigin])
         _ = git(dir, ["init", "-q", "-b", "main", superproject])
-        _ = git(
+        let added = git(
             superproject,
             ["-c", "protocol.file.allow=always", "submodule", "add", "-q", subOrigin, "vendor"])
+        try requireSubmoduleFixture(
+            added: added, staged: git(superproject, ["ls-files", "--stage", "--", "vendor"]).output,
+            checkedOut: FileManager.default.fileExists(atPath: superproject + "/vendor/a.txt"))
         _ = git(superproject, ["commit", "-qm", "add submodule"])
         _ = git(superproject, ["remote", "add", "origin", superOrigin])
         _ = git(superproject, ["push", "-q", "-u", "origin", "HEAD"])
 
         let submodulePath = superproject + "/vendor"
-        // Same guard CheckoutRemovalReachTests' submodule fixtures use, and for the same reason:
-        // without it, a git that refused this file-protocol submodule add leaves `vendor` absent,
-        // and pointing realGit's cwd at a directory that does not exist doesn't fail — the spawn
-        // itself throws, `try? task.run()` swallows it, and `readDataToEndOfFile()` blocks forever
-        // on a pipe nothing will ever close. Measured: a hung `swift test`, not a red one.
-        try XCTSkipIf(
-            !FileManager.default.fileExists(atPath: submodulePath + "/a.txt"),
-            "this git refused a file-protocol submodule")
 
         return (superproject, submodulePath)
     }
@@ -217,10 +212,7 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
         let (_, submodulePath) = try repoWithSubmodule()
 
         func kind(_ path: String) -> GitCheckoutKind? {
-            LinkedWorktreeCheck.kind(
-                gitDir: git(path, ["rev-parse", "--git-dir"]),
-                commonDir: git(path, ["rev-parse", "--git-common-dir"]),
-                relativeTo: path)
+            LinkedWorktreeCheck.kind(of: path) { git(path, $0) }
         }
 
         XCTAssertEqual(kind(submodulePath), .submodule)
@@ -279,10 +271,7 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
         let (checkout, worktree) = repoWithWorktree()
 
         func kind(_ path: String) -> GitCheckoutKind? {
-            LinkedWorktreeCheck.kind(
-                gitDir: git(path, ["rev-parse", "--git-dir"]),
-                commonDir: git(path, ["rev-parse", "--git-common-dir"]),
-                relativeTo: path)
+            LinkedWorktreeCheck.kind(of: path) { git(path, $0) }
         }
 
         XCTAssertEqual(kind(checkout), .repository)
@@ -371,7 +360,7 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
         let origin = dir + "/origin.git"
         let checkout = dir + "/checkout"
         let odd = dir + "/cp-worktrees/we\nird"
-        _ = git(dir, ["init", "-q", "--bare", origin])
+        _ = git(dir, ["init", "-q", "--bare", "-b", "main", origin])
         try? FileManager.default.createDirectory(atPath: checkout, withIntermediateDirectories: true)
         _ = git(checkout, ["init", "-q", "-b", "main"])
         FileManager.default.createFile(atPath: checkout + "/README", contents: Data("hi\n".utf8))
