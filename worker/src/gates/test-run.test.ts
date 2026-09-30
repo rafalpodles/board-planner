@@ -9,6 +9,7 @@ import { claimedTask } from "../__fixtures__/task.js";
 import { recordDir, SANDBOX_COMMAND, UNCONFINED_REASON } from "../sandbox.js";
 import { NPM_PATH } from "../__fixtures__/tool-paths.js";
 import { LOOPBACK_ONLY_NOTE } from "./confined-npm.js";
+import { UNCONFINED_ESCAPE_HATCH } from "../env.js";
 
 const TIMEOUT_MS = 5000;
 
@@ -166,6 +167,21 @@ describe("testRunGate", () => {
     const result = await testRunGate(runner, NPM_PATH, TIMEOUT_MS).run(context);
 
     expect(result.reason).toContain(LOOPBACK_ONLY_NOTE);
+  });
+
+  it("does not claim a loopback-only network where the escape hatch left it open", async () => {
+    vi.stubEnv(UNCONFINED_ESCAPE_HATCH, "1");
+    try {
+      const { runner, run } = runnerReturning({ ...ok, code: 1, stdout: "FAIL a.test.ts" });
+
+      const result = await testRunGate(runner, NPM_PATH, TIMEOUT_MS).run(context);
+
+      expect(run.mock.calls[0][0]).toBe(NPM_PATH);
+      expect(result.reason).toMatch(/^the test suite failed \(exit 1\):/);
+      expect(result.reason).not.toContain(LOOPBACK_ONLY_NOTE);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   // The npm cache is the install's, and only the install's: this is the command that runs the

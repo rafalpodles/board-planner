@@ -66,7 +66,7 @@ export function buildGate(runner: Runner, npmPath: string, timeoutMs: number): G
         };
       }
       if (build.code !== 0) {
-        return { ok: false, reason: `build failed (exit ${build.code}; ${LOOPBACK_ONLY_NOTE}):\n${outputTail(build)}` };
+        return { ok: false, reason: `build failed (exit ${build.code}${build.loopbackOnly ? `; ${LOOPBACK_ONLY_NOTE}` : ""}):\n${outputTail(build)}` };
       }
       return { ok: true, reason: "", commands: [`npm ${INSTALL_ARGS.join(" ")}`, "npm run build"] };
     },

@@ -9,6 +9,7 @@ import { claimedTask } from "../__fixtures__/task.js";
 import { recordDir, SANDBOX_COMMAND, UNCONFINED_REASON } from "../sandbox.js";
 import { LOOPBACK_ONLY_NOTE, npmCacheDir } from "./confined-npm.js";
 import { NPM_PATH } from "../__fixtures__/tool-paths.js";
+import { UNCONFINED_ESCAPE_HATCH } from "../env.js";
 
 const TIMEOUT_MS = 5000;
 
@@ -147,6 +148,21 @@ describe("buildGate", () => {
     const result = await buildGate(r, NPM_PATH, TIMEOUT_MS).run(context);
 
     expect(result.reason).toContain(LOOPBACK_ONLY_NOTE);
+  });
+
+  it("does not claim a loopback-only network where the escape hatch left it open", async () => {
+    vi.stubEnv(UNCONFINED_ESCAPE_HATCH, "1");
+    try {
+      const { runner: r, run } = runner(ok, { ...ok, code: 1, stderr: "Type error" });
+
+      const result = await buildGate(r, NPM_PATH, TIMEOUT_MS).run(context);
+
+      expect(run.mock.calls[1][0]).toBe(NPM_PATH);
+      expect(result.reason).toMatch(/^build failed \(exit 1\):/);
+      expect(result.reason).not.toContain(LOOPBACK_ONLY_NOTE);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("refuses rather than installing or building unconfined", async () => {

@@ -35,7 +35,7 @@ export function testRunGate(runner: Runner, npmPath: string, timeoutMs: number):
       if (result.code !== 0) {
         return {
           ok: false,
-          reason: `the test suite failed (exit ${result.code}; ${LOOPBACK_ONLY_NOTE}):\n${outputTail(result)}`,
+          reason: `the test suite failed (exit ${result.code}${result.loopbackOnly ? `; ${LOOPBACK_ONLY_NOTE}` : ""}):\n${outputTail(result)}`,
         };
       }
       return { ok: true, reason: "", commands: ["npm test"] };

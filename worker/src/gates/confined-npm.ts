@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { CommandResult, Runner, RunOpts } from "../exec.js";
 import { GateResult } from "../types.js";
 import { agentEnv, npmCacheOverride, tempDirOverride } from "../env.js";
-import { confineTool, Network, RecordedDir } from "../sandbox.js";
+import { confineTool, Network, RecordedDir, SANDBOX_COMMAND } from "../sandbox.js";
 
 /**
  * The npm gates, run where the agent's own tools already are.
@@ -94,7 +94,7 @@ export async function runConfinedNpm(
   npmPath: string,
   args: string[],
   options: ConfinedNpmOptions
-): Promise<CommandResult | { refusal: string; replaced?: string }> {
+): Promise<(CommandResult & { loopbackOnly: boolean }) | { refusal: string; replaced?: string }> {
   const { withCache, network, env: source, worktree, ...runOptions } = options;
   const cache = npmCacheDir(source);
 
@@ -119,6 +119,8 @@ export async function runConfinedNpm(
     const spawn = confineTool("npm", npmPath, args, source ? { writable, network, env: source } : { writable, network });
     if ("refusal" in spawn) return spawn;
 
+    // False under the escape hatch, where confine hands back a bare spawn with the network open
+    const loopbackOnly = network === "loopback" && spawn.command === SANDBOX_COMMAND;
     const result = await runner.run(spawn.command, spawn.args, {
       ...runOptions,
       // The cache location and the scratch directory travel as the child's own settings, so they
@@ -130,7 +132,7 @@ export async function runConfinedNpm(
         TMPDIR: temp,
       },
     });
-    return result.machineFault ? { refusal: result.machineFault } : result;
+    return result.machineFault ? { refusal: result.machineFault } : { ...result, loopbackOnly };
   } finally {
     rmSync(temp, { recursive: true, force: true });
   }
