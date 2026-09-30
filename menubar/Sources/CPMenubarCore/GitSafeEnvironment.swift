@@ -21,17 +21,18 @@ import Foundation
 /// superproject stops `--show-superproject-working-tree` looking one level up, which then answers
 /// empty, exit 0, and a submodule reads as a repository of its own — measured.
 ///
-/// Which config files git reads: the system file is dropped (`GIT_CONFIG_SYSTEM=/dev/null`, so
-/// `/etc/gitconfig`, or `$(prefix)/etc/gitconfig` on a Homebrew git), while Apple git's vendor file
-/// beside its binary (`…/usr/share/git-core/gitconfig`, root-owned, carrying
+/// Which config files git reads: the system file is dropped (`GIT_CONFIG_SYSTEM=/dev/null`, which
+/// needs git 2.32 or later; that is `/etc/gitconfig`, or `$(prefix)/etc/gitconfig` on a Homebrew
+/// git), while Apple git's vendor file beside its binary (`…/usr/share/git-core/gitconfig`, root-owned, carrying
 /// `credential.helper=osxkeychain` and `init.defaultBranch=main`) and `~/.gitconfig` are read.
 /// `GIT_CONFIG_NOSYSTEM` is removed rather than set, because on Apple git it drops the vendor file
 /// too, and with it the only credential helper most operators have (BP-798, measured on
 /// Apple git 2.54.0 and 2.50.1). A Homebrew git keeps its osxkeychain in the system file, so for the
 /// clone step's git `credential.helper=osxkeychain` is put back on the command line, but only
 /// when that git has no vendor file naming a helper, `git-credential-osxkeychain` is installed, and
-/// `~/.gitconfig` names no helper at all — an empty `credential.helper=` there is a deliberate
-/// reset and is respected.
+/// the operator's global config — with its includes and the XDG file — names no helper at all. An
+/// empty `credential.helper=` there is a deliberate reset and is respected: a second helper would be
+/// handed every credential git stores, and write into the keychain what the operator kept out of it.
 ///
 /// `~/.gitconfig` is left readable deliberately, which is where this parts company with the
 /// worker: delivery drops it because the agent shares that filesystem, whereas this runs during
@@ -52,11 +53,9 @@ public enum GitSafeEnvironment {
         return hardened
     }
 
-    public static func apply(
-        to environment: [String: String], git: String?, probe: KeychainHelperProbe = .live
-    ) -> [String: String] {
+    public static func apply(to environment: [String: String], keychainHelper: Bool) -> [String: String] {
         var hardened = apply(to: environment)
-        guard let git, probe.keychainHelperNeeded(git: git, environment: hardened) else { return hardened }
+        guard keychainHelper else { return hardened }
         let index = Int(hardened["GIT_CONFIG_COUNT"] ?? "") ?? 0
         hardened["GIT_CONFIG_COUNT"] = String(index + 1)
         hardened["GIT_CONFIG_KEY_\(index)"] = "credential.helper"
@@ -66,30 +65,35 @@ public enum GitSafeEnvironment {
 }
 
 public struct KeychainHelperProbe: Sendable {
+    /// The scope of every `credential.helper` git reads, or nil when git could not answer.
+    public typealias HelperScopes = @Sendable (_ git: String, _ environment: [String: String]) -> Set<String>?
     public typealias Check = @Sendable (_ git: String, _ environment: [String: String]) -> Bool
 
-    public var vendorFileNamesHelper: Check
+    public var helperScopes: HelperScopes
     public var osxkeychainInstalled: Check
-    public var globalConfigNamesHelper: Check
 
-    public init(vendorFileNamesHelper: @escaping Check, osxkeychainInstalled: @escaping Check,
-                globalConfigNamesHelper: @escaping Check) {
-        self.vendorFileNamesHelper = vendorFileNamesHelper
+    public init(helperScopes: @escaping HelperScopes, osxkeychainInstalled: @escaping Check) {
+        self.helperScopes = helperScopes
         self.osxkeychainInstalled = osxkeychainInstalled
-        self.globalConfigNamesHelper = globalConfigNamesHelper
     }
 
-    func keychainHelperNeeded(git: String, environment: [String: String]) -> Bool {
-        !vendorFileNamesHelper(git, environment)
-            && !globalConfigNamesHelper(git, environment)
-            && osxkeychainInstalled(git, environment)
+    /// `unknown` is how git reports Apple's vendor file. `global` covers `~/.gitconfig`,
+    /// `~/.config/git/config` and anything either includes, an empty reset among them.
+    public func keychainHelperNeeded(git: String, environment: [String: String]) -> Bool {
+        guard let scopes = helperScopes(git, environment) else { return false }
+        return !scopes.contains("unknown") && !scopes.contains("global") && osxkeychainInstalled(git, environment)
     }
 
     // Each check only reads config or stats a file; none runs a credential helper.
     public static let live = KeychainHelperProbe(
-        vendorFileNamesHelper: { git, environment in
+        helperScopes: { git, environment in
             let answer = run(git, ["config", "--show-scope", "--get-all", "credential.helper"], environment)
-            return answer.output.split(separator: "\n").contains { $0.hasPrefix("unknown\t") }
+            // Exit 1 is git's "no such key"; anything else but 0, an unreadable file included, is
+            // taken as the operator having a say.
+            guard answer.code == 0 || answer.code == 1 else { return nil }
+            return Set(answer.output.split(separator: "\n").compactMap { line in
+                line.split(separator: "\t", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init)
+            })
         },
         osxkeychainInstalled: { git, environment in
             let execPath = run(git, ["--exec-path"], environment).output
@@ -98,11 +102,6 @@ public struct KeychainHelperProbe: Sendable {
             return ([execPath] + onPath).filter { !$0.isEmpty }.contains {
                 FileManager.default.isExecutableFile(atPath: "\($0)/git-credential-osxkeychain")
             }
-        },
-        // Exit 1 is git's "no such key"; any other answer, an unreadable file included, is taken as
-        // the operator having a say.
-        globalConfigNamesHelper: { git, environment in
-            run(git, ["config", "--global", "--get-all", "credential.helper"], environment).code != 1
         }
     )
 

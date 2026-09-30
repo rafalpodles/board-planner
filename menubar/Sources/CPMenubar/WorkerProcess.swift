@@ -119,6 +119,15 @@ enum WorkerProcess {
     static func cloneStep(tools: OnboardingState, githubToken: String = "") -> CloneStep {
         let toolPath = tools.toolPath
         let toolPaths = tools.toolPaths
+        var inherited = ProcessInfo.processInfo.environment
+        if !toolPath.isEmpty { inherited["PATH"] = toolPath }
+        let keychainHelper: Bool
+        if case .success(let git) = ToolCommand.make(.git, [], resolved: toolPaths) {
+            keychainHelper = KeychainHelperProbe.live.keychainHelperNeeded(
+                git: git.executable, environment: GitSafeEnvironment.apply(to: inherited))
+        } else {
+            keychainHelper = false
+        }
         return CloneStep(run: { tool, args, cwd in
             guard let known = ResolvedTool(rawValue: tool) else {
                 return (1, "Refusing to run \(tool): the setup check resolves no path for it.")
@@ -137,7 +146,7 @@ enum WorkerProcess {
                 environment["GH_TOKEN"] = githubToken
                 environment["GITHUB_TOKEN"] = githubToken
             }
-            process.environment = GitSafeEnvironment.apply(to: environment, git: known == .git ? command.executable : nil)
+            process.environment = GitSafeEnvironment.apply(to: environment, keychainHelper: keychainHelper && known == .git)
             if let cwd { process.currentDirectoryURL = URL(fileURLWithPath: cwd) }
 
             let pipe = Pipe()
