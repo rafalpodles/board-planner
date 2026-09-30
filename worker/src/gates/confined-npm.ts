@@ -73,7 +73,10 @@ export function npmTempBase(env?: NodeJS.ProcessEnv): string {
 //   git dependency that has a prepare script, so `--require <file>` ran at that child's startup.
 //   The pin is Node's default stack-trace limit, which changes nothing.
 // - strict-ssl, umask: a TLS downgrade, and files written wider than the default.
-// A proxy or node-options in the operator's own `~/.npmrc` is overridden too.
+// A proxy or node-options in the operator's own `~/.npmrc` is overridden too. Canonical spellings
+// only: npm exports a project key spelled otherwise (`IGNORE_SCRIPTS`, `NODE_OPTIONS`) as
+// npm_config_<lowercased> to the child it spawns for a git dependency, over these pins, and there
+// it can turn scripts back on or name a git binary, a proxy or node options (BP-812).
 export const NPM_CONFIG_PINNED = {
   npm_config_git: "git",
   npm_config_proxy: "null",
