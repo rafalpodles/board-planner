@@ -235,7 +235,7 @@ describe("a directory recorded at creation (BP-804)", () => {
 // directly, where the same lookup applies.
 describe("the network (BP-720)", () => {
   const withNetwork = (network?: "open" | "loopback") =>
-    profileOf(confine(CLAUDE_PATH, ["-p"], { writable: ["/work/bp-1"], network, realpath: identity, platform: "darwin", env: {} }));
+    profileOf(confine(CLAUDE_PATH, ["-p"], { writable: ["/work/bp-1"], network, realpath: identity, lstat: aDirectory, platform: "darwin", env: {} }));
 
   it("leaves the network alone unless asked, so the agent's own spawns still reach the API", () => {
     expect(withNetwork()).not.toContain("network");
