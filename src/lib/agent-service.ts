@@ -128,6 +128,7 @@ export function toFleetRun(run: IAgentRun): ApiFleetRun {
     ...toApiRun(run),
     projectKey: named(run.project, "key"),
     projectName: named(run.project, "name"),
+    projectDeleted: run.project === null,
     workerName: named(run.worker, "name"),
   };
 }

@@ -30,6 +30,7 @@ function run(over: Partial<ApiFleetRun> = {}): ApiFleetRun {
     finishedAt: new Date().toISOString(),
     projectKey: "BP",
     projectName: "Board Planner",
+    projectDeleted: false,
     workerName: "owner-mac",
     ...over,
   };
@@ -68,6 +69,15 @@ describe("the fleet's run history", () => {
     expect(screen.getByText("Board Planner")).toBeTruthy();
     expect(screen.getByText("Default")).toBeTruthy();
     expect(screen.getByText("owner-mac")).toBeTruthy();
+  });
+
+  it("names a run's project as deleted once the project is gone", async () => {
+    api.get.mockResolvedValue([run({ projectKey: "", projectName: "", projectDeleted: true })]);
+
+    render(<FleetRunsPage />);
+
+    expect(await screen.findByText("Deleted project")).toBeTruthy();
+    expect(screen.getByText("BP-158")).toBeTruthy();
   });
 
   it("says how the run ended", async () => {

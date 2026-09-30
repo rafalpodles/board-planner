@@ -102,7 +102,11 @@ export default function FleetRunsPage() {
                     </td>
                     <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">{run.taskKey}</td>
                     <td className="px-3 py-2 text-text-muted whitespace-nowrap">
-                      {run.projectName || run.projectKey || "—"}
+                      {run.projectDeleted ? (
+                        <span className="italic">Deleted project</span>
+                      ) : (
+                        run.projectName || run.projectKey || "—"
+                      )}
                     </td>
                     <td className="px-3 py-2 text-text-muted whitespace-nowrap">
                       {run.agentName || "—"}
