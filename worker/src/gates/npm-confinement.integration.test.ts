@@ -211,6 +211,40 @@ describe.skipIf(!onMac)("the test gate against the real sandbox", () => {
     expect(result.ok, result.reason).toBe(true);
   });
 
+  /**
+   * BP-813. Under the profile a real watchman cannot reach its socket or write its state directory,
+   * so `get-sockname` exits 1 — and jest 30 then waits on a command that never answers and exits 0
+   * having run no test; jest 29 crashes instead. jest-haste-map reads a spawn failure of
+   * EACCES/ENOENT/ENOTDIR/EPERM as "not installed" and crawls without it. This plays that probe
+   * against a watchman on PATH the way jest-haste-map spawns it, rather than installing jest: these tests do not reach the registry,
+   * and CI's runners have no watchman for a real one to fail against.
+   */
+  it("refuses a watchman on PATH its exec, which jest reads as not installed", async () => {
+    const bin = join(worktree, "bin");
+    const ran = join(worktree, "WATCHMAN-RAN");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "watchman"), `#!/bin/sh\necho ran > ${JSON.stringify(ran)}\nexit 1\n`, { mode: 0o755 });
+    suiteThat(`
+      const env = { ...process.env, PATH: ${JSON.stringify(bin)} + ":" + process.env.PATH };
+      const execFile = require("util").promisify(require("child_process").execFile);
+      (async () => {
+        try {
+          await execFile("watchman", ["--no-pretty", "get-sockname"], { env });
+          console.error("watchman ran: exit 0");
+        } catch (error) {
+          if (["EACCES", "ENOENT", "ENOTDIR", "EPERM"].includes(error.code)) process.exit(0);
+          console.error("watchman ran: exit " + error.code);
+        }
+        process.exit(1);
+      })();
+    `);
+
+    const result = await testRunGate(runner, npmPath, 120_000).run(context());
+
+    expect(result.ok, result.reason).toBe(true);
+    expect(existsSync(ran)).toBe(false);
+  });
+
   describe("the build gate", () => {
     function buildThat(script: string) {
       const pkg = { name: "wt", version: "1.0.0" };

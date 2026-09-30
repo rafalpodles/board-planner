@@ -256,6 +256,11 @@ export const NAMED_SERVICE_DENIES = [
   // which no mach-lookup names. A plain copy is killed by AMFI, but one re-signed ad hoc in the
   // worktree runs, as does anything that speaks to launchd itself (measured, BP-810).
   '(deny process-exec (literal "/bin/launchctl"))',
+  // BP-813: with the socket and state dir refused, `watchman get-sockname` fails with an exit code,
+  // which jest 30 waits on forever and then exits 0 having run no test. An exec refusal is what
+  // jest, metro and fb-watchman read as "not installed", and they crawl without it. Unanchored,
+  // because Homebrew, MacPorts and a manual install all resolve to a different path.
+  '(deny process-exec (regex #"/watchman$"))',
 ];
 
 // BP-809: `(allow default)` let a confined process stop or kill any process of this uid — the

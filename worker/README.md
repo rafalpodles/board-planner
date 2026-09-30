@@ -552,6 +552,20 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   as above, every service not named. Preflight tries an `open` at boot, so a macOS that moves *that*
   launch elsewhere shows up as a red sandbox row rather than as an escape.
 
+  **jest, and anything else that uses watchman, runs without it** (**BP-813**). With its socket and
+  state directory refused, `watchman get-sockname` fails with an exit code, and jest does not fall
+  back from that: jest 29 crashed before running a test, and jest 30 waited on a watchman command
+  that never answered and **exited 0 having run no test**, so a failing suite passed the Test gate.
+  The profile now also refuses to run any executable named `watchman`, wherever it is installed —
+  unanchored, so a program of your own by that name is refused too. A spawn refused `EPERM` is what
+  jest-haste-map, metro and fb-watchman read as "not installed", and they crawl the file system
+  instead. Measured on macOS with watchman 2026.07.27 running: jest 29 and 30 now run the suite and
+  report a failing test as a failure, with no watchman message; vitest, `node --test`, `npm ci` and
+  `npm run build` are unchanged. `CI=true` and a `WATCHMAN_SOCK` pointing nowhere were measured
+  too and fix neither version: jest has no environment setting that turns watchman off, only
+  `--watchman=false` or `watchman: false` in its config. Your own shell is untouched; this holds
+  only inside the sandbox, for the agent's spawns and the gates alike.
+
   **A signal to a process outside the spawn** (**BP-809**): `(allow default)` let a step or a test
   `kill -STOP` or `kill -KILL` any process of yours — the worker itself, so it stops claiming or dies
   before it reaps; the reaper helper and its probe; your editor or shell. The profile now ends with
