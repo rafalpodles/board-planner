@@ -227,7 +227,7 @@ jobs:
       - name: Tests
         env:
           E2E_PROD: "1"
-        run: npx playwright test e2e/content-security-policy.spec.ts
+        run: npx playwright test e2e/content-security-policy.spec.ts e2e/keep-alive-timeout.spec.ts
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
