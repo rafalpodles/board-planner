@@ -1,3 +1,4 @@
+export const NONCE_HEADER = "x-nonce";
 export const CSP_REPORT_PATH = "/api/csp-report";
 export const CSP_REPORT_GROUP = "csp-endpoint";
 export const REPORTING_ENDPOINTS = `${CSP_REPORT_GROUP}="${CSP_REPORT_PATH}"`;

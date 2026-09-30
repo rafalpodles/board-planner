@@ -85,6 +85,18 @@ describe("the proxy", () => {
     expect(forwardedRequestHeader(response, "x-nonce")).not.toBe("attacker");
   });
 
+  it.each<Record<string, string>>([{ "next-router-prefetch": "1" }, { purpose: "prefetch" }])(
+    "gives a prefetch %o a policy without a nonce rather than none",
+    async (headers) => {
+      const response = await proxied("/projects/TP", headers);
+      const policy = response.headers.get("content-security-policy")!;
+      expect(directive(policy, "script-src")).toBe("script-src 'self'");
+      expect(policy).toBe(contentSecurityPolicy({ dev: false }));
+      expect(response.headers.get("reporting-endpoints")).toBe('csp-endpoint="/api/csp-report"');
+      expect(forwardedRequestHeader(response, "x-nonce")).toBeNull();
+    }
+  );
+
   it("adds eval only under a development server", async () => {
     vi.stubEnv("NODE_ENV", "development");
     expect((await proxied()).headers.get("content-security-policy")).toContain("'unsafe-eval'");
@@ -94,7 +106,7 @@ describe("the proxy", () => {
 
   it("covers every page and leaves API routes and build assets alone", async () => {
     const { config } = await import("../proxy");
-    const source = new RegExp(`^${config.matcher[0].source}$`);
+    const source = new RegExp(`^${config.matcher[0]}$`);
     for (const page of ["/", "/login", "/projects/abc/tasks/def", "/settings/tokens", "/oauth/authorize"]) {
       expect(source.test(page), page).toBe(true);
     }
@@ -123,6 +135,10 @@ describe("the API Content-Security-Policy in next.config", () => {
       (h) => h.key === "Content-Security-Policy"
     )!.value;
     expect(directive(csp, "script-src")).toBe("script-src 'self'");
+    expect(csp).toContain("report-to csp-endpoint");
+    expect(
+      (await headersFor("/api/:path*", "production")).find((h) => h.key === "Reporting-Endpoints")?.value
+    ).toBe('csp-endpoint="/api/csp-report"');
   });
 
   it("leaves the page policy to the proxy, so a page is never served two", async () => {

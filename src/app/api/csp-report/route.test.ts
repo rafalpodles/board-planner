@@ -90,6 +90,24 @@ describe("POST /api/csp-report", () => {
     ]);
   });
 
+  it("reads at most ten reports from one batch", async () => {
+    const entry = { type: "csp-violation", body: { documentURL: "https://app.example.com/a", effectiveDirective: "script-src-elem" } };
+    await POST(report(JSON.stringify(Array.from({ length: 15 }, () => entry)), "application/reports+json"));
+    expect(logged()).toHaveLength(10);
+  });
+
+  it("falls back to the report's url when the body names no document", async () => {
+    const batch = [{ type: "csp-violation", url: "https://app.example.com/board?x=1", body: { effectiveDirective: "img-src" } }];
+    await POST(report(JSON.stringify(batch), "application/reports+json"));
+    expect(logged()[0].documentUrl).toBe("https://app.example.com/board");
+  });
+
+  it("falls back to violated-directive when a legacy report has no effective-directive", async () => {
+    const legacy = { "csp-report": { "document-uri": "https://app.example.com/", "violated-directive": "script-src-attr" } };
+    await POST(report(JSON.stringify(legacy)));
+    expect(logged()[0].directive).toBe("script-src-attr");
+  });
+
   it("refuses a body over the cap, whether or not it declares its length", async () => {
     const huge = JSON.stringify({ "csp-report": { "document-uri": "a".repeat(MAX_REPORT_BYTES) } });
     expect((await POST(report(huge))).status).toBe(413);

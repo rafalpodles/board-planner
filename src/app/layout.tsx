@@ -4,6 +4,7 @@ import { AuthProvider } from "@/components/AuthProvider";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import "./globals.css";
 import { APP_NAME } from "@/lib/brand";
+import { NONCE_HEADER } from "@/lib/csp";
 
 export const metadata: Metadata = {
   title: APP_NAME,
@@ -15,7 +16,7 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const nonce = (await headers()).get("x-nonce") ?? undefined;
+  const nonce = (await headers()).get(NONCE_HEADER) ?? undefined;
   return (
     <html lang="en" suppressHydrationWarning>
       <head>

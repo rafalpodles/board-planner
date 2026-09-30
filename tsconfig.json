@@ -42,7 +42,10 @@
     // add on first run: gitignored and empty on a fresh checkout, so the glob matches nothing —
     // but leaving it out means every local run of that server dirties this file the same way.
     ".next-proxied/types/**/*.ts",
-    ".next-proxied/dev/types/**/*.ts"
+    ".next-proxied/dev/types/**/*.ts",
+    // BP-313's production-build e2e server, for the same reason
+    ".next-e2e-prod/types/**/*.ts",
+    ".next-e2e-prod/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",

@@ -78,6 +78,12 @@ export const PROXIED_BASE_URL = `http://localhost:${PROXIED_PORT}`;
 // is what the file's own test.skip() at the top is for.
 export const RUN_PROXIED_SERVER = process.env.E2E_PROXIED_SERVER === "1";
 
+// `next start` over a fresh build instead of `next dev`, for the specs whose subject only exists in
+// production output — the CSP nonce, where dev adds 'unsafe-eval' and scripts of its own (BP-313).
+// Only content-security-policy.spec.ts is run this way; the rest of the suite leans on dev-only
+// surfaces such as /api/e2e/digest and loopback webhooks.
+export const RUN_AGAINST_PRODUCTION_BUILD = process.env.E2E_PROD === "1";
+
 // A stand-in for the Coda API. `codaHost` is a per-project settings field, not a global env var
 // like GITHUB_API_BASE_URL, so this needs no on/off switch of its own — a spec that never types
 // this URL into a project's Host field never reaches it. Out-of-band for the same reason the
@@ -327,14 +333,18 @@ export default defineConfig({
       env: { GITLAB_STUB_PORT: String(GITLAB_STUB_PORT) },
     },
     {
-      command: `npm run dev -- --port ${PORT}`,
+      command: RUN_AGAINST_PRODUCTION_BUILD
+        ? `npm run build && npx next start --port ${PORT}`
+        : `npm run dev -- --port ${PORT}`,
       url: BASE_URL,
       reuseExistingServer: false,
-      // Turbopack compiles the board on first request
-      timeout: 240_000,
+      // Turbopack compiles the board on first request; a production run builds the whole app first
+      timeout: RUN_AGAINST_PRODUCTION_BUILD ? 600_000 : 240_000,
       stdout: "pipe",
       stderr: "pipe",
-      env: devServerEnv(BASE_URL),
+      env: RUN_AGAINST_PRODUCTION_BUILD
+        ? { ...devServerEnv(BASE_URL), NEXT_DIST_DIR: ".next-e2e-prod" }
+        : devServerEnv(BASE_URL),
     },
     // Opt-in (RUN_PROXIED_SERVER): see the constant above. Same app, same seeded database, only
     // TRUSTED_PROXY_HOPS, the compose cookie mode, its own origin and its own `.next` output differ — a second `next dev`

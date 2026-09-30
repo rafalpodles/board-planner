@@ -8,6 +8,7 @@ import {
   seed,
 } from "./seed";
 import { signIn } from "./session";
+import { pkce, redirectReceiver } from "./mcp";
 
 /**
  * BP-313. script-src used to be 'self' 'unsafe-inline', because a nonce needs a request and
@@ -141,8 +142,74 @@ test("signing in, the board, a task and settings all hydrate with zero violation
     await hydrated(page);
   }
 
+  // Violations are dispatched as tasks, so the last page gets a moment to report its own
+  await page.waitForTimeout(1_000);
   expect(violations).toEqual([]);
   expect(consoleErrors).toEqual([]);
+});
+
+// The consent screen is a route handler's own HTML, so Next puts no nonce on its script; the
+// handler does, from the same header the layout reads.
+test("the OAuth consent screen's script runs under the policy, and hands the code back", async ({
+  page,
+  request,
+}) => {
+  const { violations, consoleErrors } = await watchForViolations(page);
+  const receiver = await redirectReceiver();
+  try {
+    const registration = await request.post("/oauth/register", {
+      data: { client_name: "CSP check", redirect_uris: [receiver.url] },
+    });
+    expect(registration.status()).toBe(201);
+    const { client_id: clientId } = await registration.json();
+
+    await signIn(page);
+    const query = new URLSearchParams({
+      response_type: "code",
+      client_id: clientId,
+      redirect_uri: receiver.url,
+      code_challenge: pkce().challenge,
+      code_challenge_method: "S256",
+      scope: "mcp",
+      state: "csp",
+    });
+    const response = await page.goto(`/oauth/authorize?${query.toString()}`);
+    const { nonce } = policyOf(response!.headers());
+    expect(await response!.text()).toContain(`<script nonce="${nonce}">`);
+
+    const boxes = page.locator('input[name="projects"]');
+    await expect(boxes.first()).toBeEnabled();
+    await page.check('input[name="access"][value="all"]');
+    // Only the consent script disables them; without it they stay enabled
+    await expect(boxes.first()).toBeDisabled();
+    for (const box of await boxes.all()) await expect(box).toBeDisabled();
+
+    await page.click('button[name="decision"][value="allow"]');
+    expect((await receiver.waitForRedirect()).get("code")).toMatch(/^cpac_/);
+
+    expect(violations).toEqual([]);
+    expect(consoleErrors).toEqual([]);
+  } finally {
+    await receiver.close();
+  }
+});
+
+// Next prerenders its own fatal-error page once, without a request, so its scripts carry no nonce
+// and are refused wherever that copy is served. Its Reload is a plain form, which needs none.
+test("the prerendered error page is usable with every script refused", async ({ page }) => {
+  test.skip(process.env.E2E_PROD !== "1", "only a production build serves the prerendered copy");
+  const { violations } = await watchForViolations(page);
+
+  const response = await page.goto("/_global-error");
+  expect(response!.status()).toBe(500);
+  expect(response!.headers()["content-security-policy"]).toContain("'nonce-");
+  await expect(page.getByRole("heading", { name: "This page couldn’t load" })).toBeVisible();
+  // The control: this copy really does run under a policy that refuses its scripts
+  await expect.poll(() => violations.length).toBeGreaterThan(0);
+
+  const again = page.waitForRequest((r) => new URL(r.url()).pathname === "/_global-error" && r.isNavigationRequest());
+  await page.getByRole("button", { name: "Reload" }).click();
+  await again;
 });
 
 // The control: without it, a listener that never fires would pass every "zero violations" above.

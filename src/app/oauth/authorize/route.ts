@@ -31,6 +31,7 @@ import {
 } from "@/lib/oauth";
 import { IOAuthClient, IOAuthConsent, IUser } from "@/types";
 import { APP_NAME } from "@/lib/brand";
+import { NONCE_HEADER } from "@/lib/csp";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -431,7 +432,7 @@ export async function GET(req: Request) {
         client.clientName,
         p.redirectUri,
         await accessibleProjects(user),
-        req.headers.get("x-nonce"),
+        req.headers.get(NONCE_HEADER),
         { signedInAs: user.username, switchAccountHref: switchAccountHref(p) }
       );
     }
@@ -519,7 +520,7 @@ export async function POST(req: Request) {
 }
 
 async function handleConsent(req: Request, form: FormData): Promise<Response> {
-  const nonce = req.headers.get("x-nonce");
+  const nonce = req.headers.get(NONCE_HEADER);
   const ticket = String(form.get("ticket") || "");
   // Only "all" is the wide grant. Absent, misspelt, or anything a hand-built form put there is the
   // narrow one: an authorization decision must not fail open on a value nobody recognises.

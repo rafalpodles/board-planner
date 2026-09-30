@@ -1,5 +1,5 @@
 import type { NextConfig } from "next";
-import { contentSecurityPolicy } from "./src/lib/csp";
+import { REPORTING_ENDPOINTS, contentSecurityPolicy } from "./src/lib/csp";
 
 const nextConfig: NextConfig = {
   // Next paints its dev indicator over the bottom-left of every page, which on a phone is where a
@@ -52,6 +52,7 @@ const nextConfig: NextConfig = {
             key: "Content-Security-Policy",
             value: contentSecurityPolicy({ dev: process.env.NODE_ENV === "development" }),
           },
+          { key: "Reporting-Endpoints", value: REPORTING_ENDPOINTS },
         ],
       },
     ];
