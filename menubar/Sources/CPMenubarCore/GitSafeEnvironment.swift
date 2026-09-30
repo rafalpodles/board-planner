@@ -21,17 +21,29 @@ import Foundation
 /// superproject stops `--show-superproject-working-tree` looking one level up, which then answers
 /// empty, exit 0, and a submodule reads as a repository of its own — measured.
 ///
-/// `~/.gitconfig` itself is deliberately left readable, which is where this parts company with the
+/// Which config files git reads: the system file is dropped (`GIT_CONFIG_SYSTEM=/dev/null`, so
+/// `/etc/gitconfig`, or `$(prefix)/etc/gitconfig` on a Homebrew git), while Apple git's vendor file
+/// beside its binary (`…/usr/share/git-core/gitconfig`, root-owned, carrying
+/// `credential.helper=osxkeychain` and `init.defaultBranch=main`) and `~/.gitconfig` are read.
+/// `GIT_CONFIG_NOSYSTEM` is removed rather than set, because on Apple git it drops the vendor file
+/// too, and with it the only credential helper most operators have (BP-798, measured on
+/// Apple git 2.54.0 and 2.50.1). A Homebrew git keeps its osxkeychain in the system file, so it
+/// has none here unless `~/.gitconfig` names one.
+///
+/// `~/.gitconfig` is left readable deliberately, which is where this parts company with the
 /// worker: delivery drops it because the agent shares that filesystem, whereas this runs during
 /// onboarding, and dropping it would take the operator's credential helper and any `core.sshCommand`
 /// deploy key with it — at the one moment a failure is hardest to tell apart from a typo.
 public enum GitSafeEnvironment {
     public static func apply(to environment: [String: String]) -> [String: String] {
         var hardened = environment
-        hardened["GIT_CONFIG_NOSYSTEM"] = "1"
+        hardened["GIT_CONFIG_SYSTEM"] = "/dev/null"
         hardened["GIT_PROXY_COMMAND"] = ""
         // Removed rather than emptied: an empty GIT_DIR is not "unset", it is a git dir named "".
-        for redirect in ["GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_CEILING_DIRECTORIES"] {
+        for redirect in [
+            "GIT_CONFIG_NOSYSTEM", "GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE",
+            "GIT_CEILING_DIRECTORIES",
+        ] {
             hardened.removeValue(forKey: redirect)
         }
         return hardened

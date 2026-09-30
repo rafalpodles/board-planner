@@ -3,8 +3,8 @@ import XCTest
 
 // Free function, not a method: CheckoutRemoval.RunGit is @Sendable, and an XCTestCase is not.
 /// `appInheriting` spawns the way the app does, through `GitSafeEnvironment`, on top of what the
-/// app inherited. Only for the checks under test: under its `GIT_CONFIG_NOSYSTEM=1`, Apple git
-/// 2.54.0 failed this file's local-path `submodule add` ("You are on a branch yet to be born").
+/// app inherited. Only for the checks under test: the fixture's own setup keeps the fixed
+/// environment below, which is what it was measured under.
 @Sendable private func fixtureGit(
     _ cwd: String, _ args: [String], appInheriting inherited: [String: String]? = nil
 ) -> (code: Int32, output: String) {

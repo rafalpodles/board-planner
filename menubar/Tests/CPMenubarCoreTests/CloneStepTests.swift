@@ -282,7 +282,78 @@ final class GitSafeEnvironmentTests: XCTestCase {
         let hardened = GitSafeEnvironment.apply(to: ["PATH": "/usr/bin"])
 
         XCTAssertEqual(hardened["GIT_PROXY_COMMAND"], "")
-        XCTAssertEqual(hardened["GIT_CONFIG_NOSYSTEM"], "1")
+    }
+
+    func testItPointsTheSystemFileAtNothingAndDropsAnInheritedNoSystem() {
+        let hardened = GitSafeEnvironment.apply(to: [
+            "PATH": "/usr/bin", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_SYSTEM": "/elsewhere/gitconfig",
+        ])
+
+        XCTAssertEqual(hardened["GIT_CONFIG_SYSTEM"], "/dev/null")
+        XCTAssertFalse(hardened.keys.contains("GIT_CONFIG_NOSYSTEM"), "on Apple git it drops the vendor file too")
+    }
+
+    // BP-798: Apple git's vendor file carries credential.helper=osxkeychain, and GIT_CONFIG_NOSYSTEM
+    // dropped it along with /etc/gitconfig. Asks only which helper git would call; runs none.
+    func testAppleGitsVendorCredentialHelperIsStillVisible() throws {
+        var checked: [String] = []
+        for git in Self.installedGits {
+            guard let vendor = Self.vendorConfig(of: git),
+                  let contents = try? String(contentsOfFile: vendor, encoding: .utf8),
+                  contents.contains("osxkeychain")
+            else { continue }
+            let answer = Self.run(git, ["config", "--show-origin", "--get-all", "credential.helper"],
+                                  GitSafeEnvironment.apply(to: Self.isolated(["GIT_CONFIG_NOSYSTEM": "1"])))
+            XCTAssertTrue(answer.contains("file:\(vendor)\tosxkeychain"), "\(git) answered [\(answer)]")
+            checked.append(git)
+        }
+        if checked.isEmpty { throw XCTSkip("no git here ships Apple's vendor gitconfig") }
+    }
+
+    func testAPlantedSystemFileIsNotRead() throws {
+        guard let git = Self.installedGits.first else { throw XCTSkip("no git installed") }
+        let planted = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bp798-\(UUID().uuidString).gitconfig").path
+        try "[credential]\n\thelper = planted-system\n".write(toFile: planted, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(atPath: planted) }
+        let inherited = Self.isolated(["GIT_CONFIG_SYSTEM": planted])
+        let query = ["config", "--get-all", "credential.helper"]
+
+        XCTAssertTrue(Self.run(git, query, inherited).contains("planted-system"), "the control: the fixture is read")
+        XCTAssertFalse(Self.run(git, query, GitSafeEnvironment.apply(to: inherited)).contains("planted-system"))
+    }
+
+    private static let installedGits = [
+        "/usr/bin/git", "/Library/Developer/CommandLineTools/usr/bin/git",
+        "/opt/homebrew/bin/git", "/usr/local/bin/git",
+    ].filter { FileManager.default.isExecutableFile(atPath: $0) }
+
+    private static func isolated(_ extra: [String: String]) -> [String: String] {
+        ["PATH": "/usr/bin:/bin", "HOME": NSTemporaryDirectory(), "GIT_CONFIG_GLOBAL": "/dev/null"]
+            .merging(extra) { _, mine in mine }
+    }
+
+    private static func vendorConfig(of git: String) -> String? {
+        let execPath = run(git, ["--exec-path"], isolated([:])).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !execPath.isEmpty else { return nil }
+        let vendor = URL(fileURLWithPath: execPath).appendingPathComponent("../../share/git-core/gitconfig")
+            .standardized.path
+        return FileManager.default.fileExists(atPath: vendor) ? vendor : nil
+    }
+
+    private static func run(_ git: String, _ args: [String], _ environment: [String: String]) -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: git)
+        process.arguments = args
+        process.environment = environment
+        process.currentDirectoryURL = FileManager.default.temporaryDirectory
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        guard (try? process.run()) != nil else { return "" }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return String(data: data, encoding: .utf8) ?? ""
     }
 
     func testItKeepsWhatTheCallerAlreadySet() {
