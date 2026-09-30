@@ -108,18 +108,21 @@ export function Comments({
   }
 
   async function postComment() {
-    if (!body.trim()) return;
+    const draft = body;
+    if (loading || !draft.trim()) return;
     setLoading(true);
+    // At send, not on the answer: an earlier read can show the saved comment first (BP-800)
+    setBody("");
 
     try {
       await api.post(
         `/api/projects/${projectId}/tasks/${taskId}/comments`,
-        { body: body.trim() }
+        { body: draft.trim() }
       );
-      setBody("");
       await loadComments();
       onMutated?.();
     } catch (err) {
+      setBody((current) => (current.trim() ? current : draft));
       toast(err instanceof Error && err.message ? err.message : "Failed to post comment", "error");
     } finally {
       setLoading(false);

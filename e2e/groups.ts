@@ -34,6 +34,7 @@ export const GROUPS = {
     "task-composing-controls.spec.ts",
     "due-date-in-the-viewers-day.spec.ts",
     "task-tab-title.spec.ts",
+    "comment-shown-once.spec.ts",
   ],
   "task-fields": [
     "field-history.spec.ts",

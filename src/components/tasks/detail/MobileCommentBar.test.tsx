@@ -109,3 +109,35 @@ describe("the strip it occupies", () => {
     expect(bar).not.toBeNull();
   });
 });
+
+// BP-800. Emptied at send rather than on the answer, so a read that lands the saved comment first
+// does not find the same text still in the bar.
+describe("while the post is in flight", () => {
+  it("is already empty", async () => {
+    let answer: (value: unknown) => void = () => {};
+    api.post.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    const onPosted = renderBar();
+    await act(async () => type("Said once"));
+    await act(async () => screen.getByRole("button", { name: "Post comment" }).click());
+
+    expect(field().value).toBe("");
+    expect(onPosted).not.toHaveBeenCalled();
+
+    await act(async () => answer({}));
+    expect(onPosted).toHaveBeenCalledTimes(1);
+    expect(field().value).toBe("");
+  });
+
+  it("does not overwrite what was typed while a failing post was in flight", async () => {
+    let refuse: (reason: unknown) => void = () => {};
+    api.post.mockReturnValue(new Promise((_, reject) => (refuse = reject)));
+    renderBar();
+    await act(async () => type("First try"));
+    await act(async () => screen.getByRole("button", { name: "Post comment" }).click());
+
+    await act(async () => type("Second thought"));
+    await act(async () => refuse(new Error("nope")));
+
+    expect(field().value).toBe("Second thought");
+  });
+});
