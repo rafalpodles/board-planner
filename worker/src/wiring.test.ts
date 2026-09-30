@@ -9,7 +9,7 @@ import { ControlDeps } from "./control.js";
 import { Runner } from "./exec.js";
 import { LocalConfigView, LocalServer, LocalServerDeps } from "./local-server.js";
 import { Store } from "./outbox.js";
-import { PreflightReport } from "./preflight.js";
+import { PreflightReport, runPreflight } from "./preflight.js";
 import { Heartbeat, HeartbeatDeps } from "./registration.js";
 import { createTelemetry } from "./telemetry.js";
 import { ClaimedTask } from "./types.js";
@@ -597,13 +597,16 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       gh?: { token?: string; user?: string };
       unresolvedTools?: string[];
       deliverable?: boolean;
-      preflightThrows?: boolean;
+      // How many times runPreflight throws before the real one answers; true is every time
+      preflightThrows?: boolean | number;
       // Run between passes, after the clock jump — the one hook point available to change what is
       // on disk mid-run, for a test about recovering from a failure and then repeating it.
       onSleep?: (stateDir: string, sleepIndex: number) => void;
     } = {}
   ) {
     let seenHeartbeat: HeartbeatDeps | undefined;
+    const reportsBeforePreflight: ReturnType<NonNullable<HeartbeatDeps["preflight"]>>[] = [];
+    let preflightFailures = opts.preflightThrows === true ? Infinity : Number(opts.preflightThrows ?? 0);
     const stateDir = mkdtempSync(join(tmpdir(), "cp-wiring-run-"));
     writeFileSync(join(stateDir, "repos.json"), JSON.stringify({ repos: opts.repos ?? [REPO] }), {
       mode: 0o600,
@@ -690,7 +693,16 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       hostname: () => "host-1",
       // Found only through the probe above, so a tool the probe does not answer is really missing
       isExecutable: () => false,
-      ...(opts.preflightThrows ? { runPreflight: () => Promise.reject(new Error("no shell on this machine")) } : {}),
+      ...(opts.preflightThrows
+        ? {
+            runPreflight: (preflightDeps) => {
+              reportsBeforePreflight.push(seenHeartbeat?.preflight?.());
+              return preflightFailures-- > 0
+                ? Promise.reject(new Error("no shell on this machine"))
+                : runPreflight(preflightDeps);
+            },
+          }
+        : {}),
       // the loop only sleeps once it has nothing left to claim, which is one pass after the run
       sleep: async () => {
         clockOffset += opts.clockJumpOnSleepMs ?? 0;
@@ -789,6 +801,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       claudeArgs: claudeCalls[0] ?? [],
       localConfig,
       heartbeatDeps: seenHeartbeat,
+      reportsBeforePreflight,
       rebinds: serverFetch.mock.calls.length,
       stagingEnvs,
     };
@@ -831,6 +844,17 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
 
     expect(claims).toBe(0);
     expect(logError).toHaveBeenCalledWith(`not claiming any work: ${leftovers.answer}`);
+  });
+
+  it("puts the leftovers on the sandbox row it reports when preflight could not run either", async () => {
+    const leftovers = { answer: "a process an earlier run of this worker confined may still be running: cannot kill process 42", calls: [] };
+    const { heartbeatDeps } = await runOneTask(undefined, undefined, { leftovers, preflightThrows: true });
+
+    expect(heartbeatDeps?.preflight?.()).toEqual({
+      ok: false,
+      account: "",
+      checks: [{ name: "sandbox", ok: false, detail: leftovers.answer }],
+    });
   });
 
   it("clears the block once a retried reap succeeds, without a restart", async () => {
@@ -950,9 +974,49 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
 
     expect(claims).toBe(0);
     expect(logError).toHaveBeenCalledWith(expect.stringContaining("preflight could not run"));
-    expect(logError).toHaveBeenCalledWith(
-      "not claiming any work: preflight could not run, so no tool a step spawns was resolved"
+    expect(logError).toHaveBeenCalledWith("not claiming any work: preflight could not run: no shell on this machine");
+  });
+
+  // BP-793. Absent tells the server to keep the last report, which on a machine that once passed
+  // is green — so the console showed a ready machine that was claiming nothing
+  it("reports a failing sandbox row naming why preflight could not run, on every heartbeat", async () => {
+    const { heartbeatDeps, reportsBeforePreflight } = await runOneTask(undefined, undefined, {
+      preflightThrows: true,
+      passes: 2,
+    });
+
+    const failing = {
+      ok: false,
+      account: "",
+      checks: [{ name: "sandbox", ok: false, detail: "preflight could not run: no shell on this machine" }],
+    };
+    expect(reportsBeforePreflight.slice(1)).toEqual([failing, failing]);
+    expect(heartbeatDeps?.preflight?.()).toEqual(failing);
+  });
+
+  it("replaces the failing row with the real report once a retried preflight runs, and claims", async () => {
+    const { heartbeatDeps, reportsBeforePreflight, claimed, log } = await runOneTask(undefined, undefined, {
+      preflightThrows: 1,
+    });
+
+    expect(reportsBeforePreflight[1]?.checks).toEqual([
+      { name: "sandbox", ok: false, detail: "preflight could not run: no shell on this machine" },
+    ]);
+    const report = heartbeatDeps?.preflight?.();
+    expect(report?.checks.find((check) => check.name === "sandbox")).toMatchObject({ ok: true });
+    expect(report?.checks.map((check) => check.detail)).not.toContain(
+      "preflight could not run: no shell on this machine"
     );
+    expect(log).toHaveBeenCalledWith("preflight ran this time; its report replaces the failure");
+    expect(claimed).toBe(true);
+  });
+
+  it("logs a preflight that keeps failing for the same reason once, not on every poll", async () => {
+    const { logError } = await runOneTask(undefined, undefined, { preflightThrows: true, passes: 3 });
+
+    expect(
+      logError.mock.calls.filter(([line]) => line === "preflight could not run: no shell on this machine")
+    ).toHaveLength(1);
   });
 
   // gh fails delivery through the ordinary, charged path, which ends; blocking on it is not needed
@@ -2344,7 +2408,10 @@ describe("preflight's place in the wiring", () => {
     await expect(running).resolves.toBeUndefined();
 
     expect(logError).toHaveBeenCalledWith(expect.stringContaining("preflight could not run"));
-    expect(seen.heartbeat?.preflight?.()).toBeUndefined();
+    expect(seen.heartbeat?.preflight?.()).toMatchObject({
+      ok: false,
+      checks: [{ name: "sandbox", ok: false, detail: "preflight could not run: no shell on this machine" }],
+    });
   });
 });
 
