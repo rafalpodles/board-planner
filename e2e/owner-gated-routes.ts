@@ -157,7 +157,7 @@ export const withoutComments = (source: string) => blankComments(source, false);
 /** withoutComments, with the insides of strings, templates and regular expressions blanked too. */
 export const codeOnly = (source: string) => blankComments(source, true);
 
-// Deliberately dumb, so a literal the real reader misjudges cannot hide a check from both
+// Deliberately dumb: a second opinion on literals the real reader misjudges, not a proof
 function naiveCommentMask(source: string): boolean[] {
   const mask = new Array<boolean>(source.length).fill(false);
   const opensAt = (k: number) => k === 0 || /[\s;,(){}]/.test(source[k - 1]);
