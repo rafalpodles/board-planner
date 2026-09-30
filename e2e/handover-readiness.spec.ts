@@ -70,19 +70,11 @@ async function readAgain(page: Page) {
 
 async function openAs(page: Page, who: "admin" | "member", taskNumber = MEMBER_HANDOVER_TASK_NUMBER) {
   await signIn(page, who);
-  // Dev mode mounts the page twice; a stale second read must not land after the test's own
-  const openingReads: Request[] = [];
-  const collect = (req: Request) => {
-    if (isHandoverRead(req)) openingReads.push(req);
-  };
-  page.on("request", collect);
   const readiness = page.waitForResponse((res) => isHandoverRead(res.request()));
   await page.goto(`/projects/${PROJECT_KEY}/tasks/${taskNumber}`);
   const response = await readiness;
   expect(response.status()).toBe(200);
   await expect(page.getByText(`${PROJECT_KEY}-${taskNumber}`).first()).toBeVisible();
-  await Promise.all(openingReads.map((req) => req.response()));
-  page.off("request", collect);
   return response.json();
 }
 

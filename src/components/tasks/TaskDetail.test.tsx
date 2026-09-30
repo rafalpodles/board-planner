@@ -759,6 +759,40 @@ describe("TaskDetail, the Agent row's handover notice", () => {
     ).toBe("no-repository");
   });
 
+  // BP-806: a whole-task load waits on its slowest read, so its readiness can arrive stale
+  it("keeps a focus re-read over an older load that finishes after it", async () => {
+    let finishTaskRead: () => void = () => {};
+    const readinessReads = vi
+      .fn()
+      .mockResolvedValueOnce({ ...READY, workerEnabled: false })
+      .mockResolvedValueOnce(READY);
+    api.get.mockImplementation((url: string) => {
+      if (url === "/api/projects/TP/assignable-users") return Promise.resolve([]);
+      if (url.startsWith("/api/agent")) return Promise.resolve([]);
+      if (url.includes("/tasks/"))
+        return new Promise((resolve) => {
+          finishTaskRead = () => resolve({ ...handedOver, ...selfAssigned });
+        });
+      if (url.includes("/sprints")) return Promise.resolve([]);
+      if (url === "/api/projects/TP/handover") return readinessReads();
+      return Promise.resolve(readyBoard);
+    });
+    renderDetail();
+    await waitFor(() => expect(readinessReads).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    expect(readinessReads).toHaveBeenCalledTimes(2);
+    await act(async () => finishTaskRead());
+    await loaded();
+
+    expect(screen.queryByTestId("handover-notice")).toBeNull();
+    expect(
+      within(screen.getByRole("complementary")).getByTestId("handover-waiting").textContent
+    ).toBe("Waiting for your machine to take it.");
+  });
+
   it("names agent runs switched off from the board's own worker setting", async () => {
     serve(selfAssigned, readyBoard, { ...READY, workerEnabled: false });
     renderDetail();
