@@ -257,8 +257,8 @@ export const NAMED_SERVICE_DENIES = [
   // worktree runs, as does anything that speaks to launchd itself (measured, BP-810).
   '(deny process-exec (literal "/bin/launchctl"))',
   // BP-813: with the socket and state dir refused, `watchman get-sockname` fails with an exit code,
-  // which jest 30 waits on forever and then exits 0 having run no test. An exec refusal is what
-  // jest, metro and fb-watchman read as "not installed", and they crawl without it. Unanchored,
+  // which jest 30 waits on forever and then exits 0 having run no test. Refused its exec, jest 30
+  // reads EPERM as "not installed", jest 29 and metro fall back on any error, and they crawl. Unanchored,
   // because Homebrew, MacPorts and a manual install all resolve to a different path.
   '(deny process-exec (regex #"/watchman$"))',
 ];

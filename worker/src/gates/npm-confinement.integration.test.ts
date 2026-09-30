@@ -214,12 +214,13 @@ describe.skipIf(!onMac)("the test gate against the real sandbox", () => {
   /**
    * BP-813. Under the profile a real watchman cannot reach its socket or write its state directory,
    * so `get-sockname` exits 1 — and jest 30 then waits on a command that never answers and exits 0
-   * having run no test; jest 29 crashes instead. jest-haste-map reads a spawn failure of
-   * EACCES/ENOENT/ENOTDIR/EPERM as "not installed" and crawls without it. This plays that probe
-   * against a watchman on PATH the way jest-haste-map spawns it, rather than installing jest: these tests do not reach the registry,
-   * and CI's runners have no watchman for a real one to fail against.
+   * having run no test; jest 29 crashes instead. jest 30's jest-haste-map reads a spawn
+   * failure of EACCES/ENOENT/ENOTDIR/EPERM as "not installed" and crawls without it; jest 29 falls
+   * back on any error. This plays jest 30's probe against a watchman on PATH, rather than
+   * installing jest: these tests do not reach the registry, and CI's runners have no watchman for a
+   * real one to fail against.
    */
-  it("refuses a watchman on PATH its exec, which jest reads as not installed", async () => {
+  it("refuses to exec a watchman on PATH, so jest falls back to crawling", async () => {
     const bin = join(worktree, "bin");
     const ran = join(worktree, "WATCHMAN-RAN");
     mkdirSync(bin);

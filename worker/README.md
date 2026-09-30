@@ -557,9 +557,11 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   back from that: jest 29 crashed before running a test, and jest 30 waited on a watchman command
   that never answered and **exited 0 having run no test**, so a failing suite passed the Test gate.
   The profile now also refuses to run any executable named `watchman`, wherever it is installed —
-  unanchored, so a program of your own by that name is refused too. A spawn refused `EPERM` is what
-  jest-haste-map, metro and fb-watchman read as "not installed", and they crawl the file system
-  instead. Measured on macOS with watchman 2026.07.27 running: jest 29 and 30 now run the suite and
+  unanchored, so a program of your own by that name is refused too. A spawn refused `EPERM` ends every
+  client without watchman: jest 30's jest-haste-map treats `EACCES`, `ENOENT`, `ENOTDIR` and
+  `EPERM` as "not installed", jest 29 and metro fall back on any error from their probe, and
+  fb-watchman reports the error to its caller rather than hanging. jest and metro then crawl the
+  file system instead. Measured on macOS with watchman 2026.07.27 running: jest 29 and 30 now run the suite and
   report a failing test as a failure, with no watchman message; vitest, `node --test`, `npm ci` and
   `npm run build` are unchanged. `CI=true` and a `WATCHMAN_SOCK` pointing nowhere were measured
   too and fix neither version: jest has no environment setting that turns watchman off, only
