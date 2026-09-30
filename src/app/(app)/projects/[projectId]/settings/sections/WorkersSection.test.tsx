@@ -328,7 +328,7 @@ describe("the project's default agent", () => {
     agentGroup().discard();
 
     await waitFor(() => expect(picker().value).toBe("a3"));
-    expect(agentGroup()?.count).toBe(0);
+    await waitFor(() => expect(agentGroup()?.count).toBe(0));
   });
 
   it("can be cleared once one is set", async () => {
