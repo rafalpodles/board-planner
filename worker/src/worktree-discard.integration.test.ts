@@ -156,6 +156,25 @@ describe("the worker's own writes to a worktree a run may have replaced", () => 
     expect(registered()).not.toContain(worktree.path);
   });
 
+  // BP-801: `git worktree remove --force` refuses a worktree whose `.git` file no longer points back
+  // (exit 128), and a run refused as tampered keeps exactly that worktree
+  it("creates the next attempt over a worktree whose .git file was rewritten, and forgets its admin entry", async () => {
+    const worktree = await workspace().create("BP-1", "worker");
+    const fake = join(dir, "fake-gitdir");
+    execFileSync("git", ["init", "--quiet", "--bare", fake], { stdio: "pipe" });
+    writeFileSync(join(worktree.path, ".git"), `gitdir: ${fake}\n`);
+    expect(await worktree.tampering()).toContain("its .git file reading");
+    expect(existsSync(worktree.pin.gitDir)).toBe(true);
+
+    const next = await workspace().create("BP-1", "worker");
+
+    expect(readFileSync(join(next.path, "README.md"), "utf8")).toBe("# t\n");
+    expect(existsSync(worktree.path)).toBe(false);
+    expect(existsSync(worktree.pin.gitDir)).toBe(false);
+    expect(registered()).toEqual([realpathSync(parent), next.path]);
+    expect(existsSync(join(fake, "HEAD"))).toBe(true);
+  });
+
   // BP-804 review: `chflags uchg` is a write a confined step may make to its own worktree, and an
   // immutable directory cannot be renamed
   it("creates the next attempt over a worktree a step made immutable", async () => {
