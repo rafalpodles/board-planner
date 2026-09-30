@@ -78,20 +78,19 @@ export default function FleetRunsPage() {
       ) : (
         <div
           data-testid="fleet-runs"
-          className="@container border border-border rounded-lg overflow-hidden"
+          className="@container border border-border rounded-lg overflow-x-auto"
         >
-          {/* Sized by the card, not the window: at md the two sidebars leave it narrower than a phone */}
-          <table className="w-full text-sm @2xl:table-fixed">
-            <thead className="hidden @2xl:table-header-group">
+          <table className="w-full text-sm">
+            <thead className="hidden @3xl:table-header-group">
               <tr className="bg-bg-input text-text-muted text-xs border-b border-border">
-                <th className="w-[5.25rem] text-left px-3 py-2 font-medium">Finished</th>
-                <th className="w-[4.5rem] text-left px-2 py-2 font-medium">Task</th>
+                <th className="w-px whitespace-nowrap text-left px-3 py-2 font-medium">Finished</th>
+                <th className="w-px whitespace-nowrap text-left px-2 py-2 font-medium">Task</th>
                 <th className="text-left px-2 py-2 font-medium">Project</th>
                 <th className="text-left px-2 py-2 font-medium">Agent</th>
                 <th className="text-left px-2 py-2 font-medium">Machine</th>
-                <th className="w-[8.5rem] text-left px-2 py-2 font-medium">Ended</th>
-                <th className="w-16 text-right px-2 py-2 font-medium">Took</th>
-                <th className="w-[4.75rem] text-right px-3 py-2 font-medium">Cost</th>
+                <th className="text-left px-2 py-2 font-medium">Ended</th>
+                <th className="w-px whitespace-nowrap text-right px-2 py-2 font-medium">Took</th>
+                <th className="w-px whitespace-nowrap text-right px-3 py-2 font-medium">Cost</th>
               </tr>
             </thead>
             <tbody>
@@ -99,17 +98,16 @@ export default function FleetRunsPage() {
                 <tr
                   key={run._id}
                   data-testid="fleet-run"
-                  className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 px-3 pt-2 pb-1.5 @2xl:table-row @2xl:p-0"
+                  className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 px-3 pt-2 pb-1.5 @3xl:table-row @3xl:p-0"
                 >
                   <td
-                    className="text-text-muted whitespace-nowrap @2xl:table-cell @2xl:truncate @2xl:px-3 @2xl:py-2"
+                    className="text-text-muted whitespace-nowrap @3xl:table-cell @3xl:px-3 @3xl:py-2"
                     title={new Date(run.finishedAt).toLocaleString()}
                   >
                     {timeAgo(run.finishedAt)}
                   </td>
                   <td
-                    className="font-mono text-xs whitespace-nowrap @2xl:table-cell @2xl:truncate @2xl:px-2 @2xl:py-2"
-                    title={run.taskKey}
+                    className="font-mono text-xs whitespace-nowrap @3xl:table-cell @3xl:px-2 @3xl:py-2"
                   >
                     {run.taskKey}
                   </td>
@@ -124,25 +122,25 @@ export default function FleetRunsPage() {
                       API, has no worker — and a blank cell is the honest answer for it */}
                   <NameCell label="Machine" value={run.workerName} />
                   <td
-                    className={`order-first w-full font-medium [overflow-wrap:anywhere] @2xl:order-none @2xl:break-words @2xl:table-cell @2xl:w-auto @2xl:px-2 @2xl:py-2 @2xl:font-normal ${
+                    className={`order-first w-full font-medium [overflow-wrap:anywhere] @3xl:order-none @3xl:[overflow-wrap:break-word] @3xl:table-cell @3xl:w-auto @3xl:px-2 @3xl:py-2 @3xl:font-normal ${
                       endedBadly(run) ? "text-danger" : "text-success"
                     }`}
                   >
                     {endState(run)}
                   </td>
-                  <td className="text-text-muted whitespace-nowrap @2xl:table-cell @2xl:truncate @2xl:px-2 @2xl:py-2 @2xl:text-right">
+                  <td className="text-text-muted whitespace-nowrap @3xl:table-cell @3xl:px-2 @3xl:py-2 @3xl:text-right">
                     <NarrowLabel>Took</NarrowLabel>
                     {run.minutes} min
                   </td>
-                  <td className="text-text-muted whitespace-nowrap @2xl:table-cell @2xl:truncate @2xl:px-3 @2xl:py-2 @2xl:text-right">
+                  <td className="text-text-muted whitespace-nowrap @3xl:table-cell @3xl:px-3 @3xl:py-2 @3xl:text-right">
                     <NarrowLabel>Cost</NarrowLabel>${run.costUsd.toFixed(2)}
                   </td>
                 </tr>,
                 <tr
                   key={`${run._id}-detail`}
-                  className="flex border-b border-border px-3 pb-3 last:border-b-0 @2xl:table-row @2xl:p-0"
+                  className="flex border-b border-border px-3 pb-3 last:border-b-0 @3xl:table-row @3xl:p-0"
                 >
-                  <td colSpan={8} className="w-full min-w-0 @2xl:table-cell @2xl:px-3 @2xl:pb-3 @2xl:pt-0">
+                  <td colSpan={8} className="w-full min-w-0 @3xl:table-cell @3xl:px-3 @3xl:pb-3 @3xl:pt-0">
                     {run.detail ? (
                       <p
                         data-testid="run-detail"
@@ -171,7 +169,7 @@ export default function FleetRunsPage() {
 }
 
 function NarrowLabel({ children }: { children: React.ReactNode }) {
-  return <span className="mr-1.5 text-xs text-text-muted/80 @2xl:hidden">{children}</span>;
+  return <span className="mr-1.5 text-xs text-text-muted @3xl:hidden">{children}</span>;
 }
 
 function NameCell({
@@ -184,12 +182,9 @@ function NameCell({
   children?: React.ReactNode;
 }) {
   return (
-    <td
-      className="flex w-full min-w-0 text-text-muted @2xl:table-cell @2xl:px-2 @2xl:py-2"
-      title={value || undefined}
-    >
-      <span className="w-16 shrink-0 text-xs leading-5 text-text-muted/80 @2xl:hidden">{label}</span>
-      <span className="min-w-0 [overflow-wrap:anywhere] @2xl:line-clamp-2 @2xl:break-words">
+    <td className="flex w-full min-w-0 text-text-muted @3xl:table-cell @3xl:w-auto @3xl:px-2 @3xl:py-2">
+      <span className="w-16 shrink-0 text-xs leading-5 text-text-muted @3xl:hidden">{label}</span>
+      <span className="min-w-0 [overflow-wrap:anywhere] @3xl:[overflow-wrap:break-word]">
         {children ?? (value || "—")}
       </span>
     </td>
