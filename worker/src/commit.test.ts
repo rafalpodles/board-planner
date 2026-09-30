@@ -109,8 +109,10 @@ describe("commitAll", () => {
       readableConfig,
       noPlantedConfig,
       { code: 0, stdout: "evil.test.ts\0" },
-      // ls-tree: the base has no .gitignore above it; init; the base's check-ignore: not ignored
+      // ls-tree: the base has no .gitignore above it; core.ignoreCase unset; init; the base's
+      // check-ignore: not ignored
       { code: 0, stdout: "" },
+      { code: 1, stdout: "" },
       { code: 0, stdout: "" },
       { code: 1, stdout: "" },
       { code: 0, stdout: `${exclude}\x007\x00evil.test.ts\x00./evil.test.ts\x00` },

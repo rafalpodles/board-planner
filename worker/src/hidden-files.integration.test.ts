@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { commitAll, TamperedCheckoutError } from "./commit.js";
@@ -189,6 +189,79 @@ describe("files hidden from git by a rule the repository does not own", () => {
     writeFileSync(join(crlfWorktree, "node_modules", "x.js"), "");
 
     expect(await hiddenFromGit(createRunner(), gitPath, crlfWorktree, crlfBase)).toBeNull();
+  });
+
+  function separateRepository(name: string, files: Record<string, string>, ignoreCase: boolean) {
+    const repo = join(dir, `${name}-main`);
+    const work = join(dir, `${name}-worktree`);
+    execFileSync("git", ["init", "--quiet", "-b", "main", repo], { stdio: "pipe" });
+    for (const [path, content] of Object.entries(files)) writeFileSync(join(repo, path), content);
+    git(repo, "add", "--all");
+    git(repo, "commit", "--quiet", "-m", "base");
+    git(repo, "config", "core.ignorecase", String(ignoreCase));
+    const base = git(repo, "rev-parse", "HEAD").trim();
+    git(repo, "worktree", "add", "--quiet", "-b", "work", work, base);
+    return { repo, work, base };
+  }
+
+  // The scratch repository is made on the TMP volume, case-insensitive on a Mac, and took its
+  // core.ignoreCase from there rather than from the worktree's
+  it("judges the base's rules with the worktree's case sensitivity, not the TMP volume's", async () => {
+    const { work, base } = separateRepository("case", { ".gitignore": "Dist/\n" }, false);
+    const exclude = git(work, "rev-parse", "--path-format=absolute", "--git-path", "info/exclude").trim();
+    mkdirSync(join(work, "dist"));
+    writeFileSync(join(work, "dist", "e.test.js"), "it('runs', () => {});\n");
+    expect(git(work, "status", "--porcelain")).toBe("?? dist/\n");
+    appendFileSync(exclude, "dist/\n");
+    expect(git(work, "status", "--porcelain")).toBe("");
+
+    const found = await hiddenFromGit(createRunner(), gitPath, work, base);
+
+    expect(found?.detail).toContain(`dist/ (${exclude}:`);
+  });
+
+  it("still trusts a base rule that matches only case-insensitively where the checkout is", async () => {
+    const { work, base } = separateRepository("nocase", { ".gitignore": "Dist/\n" }, true);
+    mkdirSync(join(work, "dist"));
+    writeFileSync(join(work, "dist", "e.test.js"), "");
+    expect(git(work, "status", "--porcelain")).toBe("");
+
+    expect(await hiddenFromGit(createRunner(), gitPath, work, base)).toBeNull();
+  });
+
+  it("does not read a symlinked base .gitignore as rules, as git does not", async () => {
+    const repo = join(dir, "symlink-main");
+    const work = join(dir, "symlink-worktree");
+    execFileSync("git", ["init", "--quiet", "-b", "main", repo], { stdio: "pipe" });
+    symlinkSync("*", join(repo, ".gitignore"));
+    writeFileSync(join(repo, "package.json"), "{}\n");
+    git(repo, "add", "--all");
+    git(repo, "commit", "--quiet", "-m", "base");
+    const base = git(repo, "rev-parse", "HEAD").trim();
+    git(repo, "worktree", "add", "--quiet", "-b", "work", work, base);
+    const exclude = git(work, "rev-parse", "--path-format=absolute", "--git-path", "info/exclude").trim();
+    appendFileSync(exclude, `${EVIL}\n`);
+    writeFileSync(join(work, EVIL), "it('runs', () => {});\n");
+
+    const found = await hiddenFromGit(createRunner(), gitPath, work, base);
+
+    expect(found?.detail).toContain(`${EVIL} (${exclude}:`);
+  });
+
+  it("leaves no scratch repository behind", async () => {
+    const scratchRoot = join(dir, "tmp");
+    mkdirSync(scratchRoot);
+    const realTmpdir = process.env.TMPDIR;
+    process.env.TMPDIR = scratchRoot;
+    try {
+      hideInInfoExclude();
+      expect((await check())?.kind).toBe("hidden");
+    } finally {
+      if (realTmpdir === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = realTmpdir;
+    }
+
+    expect(readdirSync(scratchRoot)).toEqual([]);
   });
 
   // BP-794 leaves a redirected .git config unscanned before a gate, so no call in here may read a

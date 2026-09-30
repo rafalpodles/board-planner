@@ -123,38 +123,68 @@ export async function hiddenFromGit(
   }
 }
 
+// `cat-file --batch` frames each blob by its size in bytes, which a decoded string cannot count
+function blobsFromBatch(stdout: string, count: number): string[] {
+  const bytes = Buffer.from(stdout, "utf8");
+  const blobs: string[] = [];
+  let at = 0;
+  for (let index = 0; index < count; index += 1) {
+    const headerEnd = bytes.indexOf(0x0a, at);
+    const header = bytes.subarray(at, headerEnd).toString("utf8").split(" ");
+    const size = Number(header[2]);
+    if (headerEnd === -1 || header[1] !== "blob" || !Number.isInteger(size)) {
+      throw new Unreadable("`git cat-file` answered in a shape this does not read");
+    }
+    blobs.push(bytes.subarray(headerEnd + 1, headerEnd + 1 + size).toString("utf8"));
+    at = headerEnd + 1 + size + 1;
+  }
+  return blobs;
+}
+
 async function ignoredByBaseRules(
   git: (what: string, args: string[], options?: { cwd?: string; stdin?: string; okCodes?: number[] }) => Promise<string>,
   baseSha: string,
   paths: string[],
 ): Promise<Set<string>> {
-  const listing = await git("ls-tree", [
-    "ls-tree",
-    "-z",
-    baseSha,
-    "--",
-    ...gitignoresAbove(paths).map((path) => `:(literal)${path}`),
-  ]);
+  // The whole tree in one spawn rather than a pathspec per directory: a repository with thousands of
+  // `__pycache__/` directories took the argument list past E2BIG
+  const above = new Set(gitignoresAbove(paths));
+  const listing = await git("ls-tree", ["ls-tree", "-r", "-z", "--full-tree", baseSha]);
   // A symlinked .gitignore is one git does not read
   const gitignores = nulFields(listing)
     .map((entry) => REGULAR_BLOB.exec(entry))
-    .filter((entry): entry is RegExpExecArray => entry !== null && safeRelative(entry[3]))
+    .filter((entry): entry is RegExpExecArray => entry !== null && above.has(entry[3]) && safeRelative(entry[3]))
     .map((entry) => ({ blob: entry[2], path: entry[3] }));
+  const contents =
+    gitignores.length === 0
+      ? []
+      : blobsFromBatch(
+          await git("cat-file", ["cat-file", "--batch"], {
+            stdin: gitignores.map(({ blob }) => `${blob}\n`).join(""),
+          }),
+          gitignores.length,
+        );
+
+  // Seeded from the TMP volume, which on a Mac is case-insensitive where a clone's may not be: a
+  // base `Dist/` would ignore a `dist/` here that the worktree's git never ignored
+  const ignoreCase = (
+    await git("config", ["config", "--bool", "core.ignoreCase"], { okCodes: [0, 1] })
+  ).trim() === "true";
 
   const scratch = mkdtempSync(join(tmpdir(), "bp-base-ignores-"));
   try {
-    for (const { blob, path } of gitignores) {
+    gitignores.forEach(({ path }, index) => {
       const target = join(scratch, path);
       mkdirSync(dirname(target), { recursive: true });
-      writeFileSync(target, await git("cat-file", ["cat-file", "blob", blob]));
-    }
+      writeFileSync(target, contents[index]);
+    });
     // No template, so no info/exclude: the only rules in here are the base commit's
     await git("init", ["init", "--quiet", "--template="], { cwd: scratch });
-    const echoed = await git("check-ignore", ["check-ignore", "-z", "--stdin"], {
-      cwd: scratch,
-      stdin: pathsOnStdin(paths),
-      okCodes: [0, 1],
-    });
+    const echoed = await git(
+      "check-ignore",
+      ["-c", `core.ignoreCase=${ignoreCase}`, "check-ignore", "-z", "--stdin"],
+      { cwd: scratch, stdin: pathsOnStdin(paths), okCodes: [0, 1] },
+    );
     return new Set(nulFields(echoed).map(fromPath));
   } finally {
     rmSync(scratch, { recursive: true, force: true });

@@ -15,7 +15,8 @@ function runnerFailing(failing: (args: string[]) => boolean, failure: Partial<Co
       if (failing(args)) return shell("", failure);
       if (args.includes("ls-files")) return shell("evil.test.ts\0");
       if (args.includes("ls-tree")) return shell("100644 blob abc123\t.gitignore\0");
-      if (args.includes("cat-file")) return shell("node_modules/\n");
+      if (args.includes("cat-file")) return shell("abc123 blob 13\nnode_modules/\n\n");
+      if (args.includes("config")) return shell("false\n");
       if (args.includes("init")) return shell();
       if (args.includes("check-ignore") && args.includes("--verbose")) {
         return shell("/main/.git/info/exclude\x001\x00evil.test.ts\x00./evil.test.ts\x00");
@@ -30,6 +31,7 @@ describe("hiddenFromGit when git will not answer", () => {
     ["ls-files", (args) => args.includes("ls-files")],
     ["ls-tree", (args) => args.includes("ls-tree")],
     ["cat-file", (args) => args.includes("cat-file")],
+    ["config", (args) => args.includes("config")],
     ["init", (args) => args.includes("init")],
     ["check-ignore", (args) => args.includes("check-ignore") && !args.includes("--verbose")],
     ["check-ignore", (args) => args.includes("check-ignore") && args.includes("--verbose")],
@@ -58,5 +60,23 @@ describe("hiddenFromGit when git will not answer", () => {
     const found = await hiddenFromGit(runnerFailing(() => false, {}), gitPath, "/wt", "base1");
 
     expect(found?.detail).toContain('evil.test.ts (/main/.git/info/exclude:1: "evil.test.ts")');
+  });
+});
+
+describe("hiddenFromGit on a tree with thousands of ignored directories", () => {
+  it("keeps every git call's argument list small, whatever the number of directories", async () => {
+    const directories = Array.from({ length: 12_000 }, (_, index) => `pkg/module${index}/__pycache__/`);
+    const run = vi.fn<Runner["run"]>(async (_command, args, opts) => {
+      if (args.includes("ls-files")) return shell(directories.map((path) => `${path}\0`).join(""));
+      if (args.includes("ls-tree")) return shell("100644 blob abc123\t.gitignore\0");
+      if (args.includes("cat-file")) return shell("abc123 blob 7\n*.pyc/\n\n");
+      if (args.includes("config")) return shell("", { code: 1 });
+      if (args.includes("check-ignore")) return shell(opts.stdin ?? "");
+      return shell();
+    });
+
+    expect(await hiddenFromGit({ run }, gitPath, "/wt", "base1")).toBeNull();
+    const longest = Math.max(...run.mock.calls.map(([, args]) => args.join(" ").length));
+    expect(longest).toBeLessThan(4096);
   });
 });
