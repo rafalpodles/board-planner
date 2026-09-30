@@ -540,10 +540,12 @@ describe("a refused change, offered and then accepted, over a real HTTP surface"
   // Until the pull request exists this worktree is the only copy of the work; afterwards it is not
   it("gives the worktree back once the pull request is open", () => {
     expect(existsSync(join(stateDir, "decisions", `${TASK_KEY}.json`))).toBe(false);
-    // Discarded by the worker itself and then pruned, never handed to `git worktree remove` (BP-804)
+    // Discarded and unregistered by the worker itself, never handed to git by path (BP-804)
+    const marker = JSON.parse(markerAfterRefusal!);
+    expect(existsSync(marker.worktreePath)).toBe(false);
+    expect(existsSync(marker.pin.gitDir)).toBe(false);
     expect(
-      settlement.git.some((call) => call.args.includes("worktree") && call.args.includes("prune"))
-    ).toBe(true);
-    expect(existsSync(JSON.parse(markerAfterRefusal!).worktreePath)).toBe(false);
+      settlement.git.some((call) => call.args.includes("worktree") && (call.args.includes("remove") || call.args.includes("prune")))
+    ).toBe(false);
   });
 });

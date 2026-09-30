@@ -367,10 +367,13 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   **What the worker itself does to a worktree follows no symlink either.** `git worktree remove`
   deletes by path and resolves it again as it goes, so a worktree swapped for a symlink to a
   directory holding a copy of its `.git` file had git empty that directory; `worktree add` checked
-  out through a symlink left at the path. The worker no longer asks git to delete anything: it
-  renames the entry to a `.discard-*` name beside it — a symlink moves as a link, and no sandbox
-  rule names the new path — removes it there, making a tree a step left unwritable writable first,
-  and runs `git worktree prune`. Every entry for the task under the root is cleared that way before
+  out through a symlink left at the path. The worker no longer asks git to delete a worktree or a
+  review checkout: it renames the entry to a `.discard-*` name beside it — a symlink moves as a
+  link, and no sandbox rule names the new path — and removes it there, first clearing `uchg`/`uappnd`
+  flags and making writable a tree a step locked. Then it removes the clone's admin entries for
+  that task's attempts under its own root and no others — not `git worktree prune`, which would also
+  unregister any worktree of yours whose directory is missing at that moment. An entry that still
+  will not move is left in place and the next attempt uses a fresh name. Every entry for the task under the root is cleared that way before
   each attempt, registered or not, so a leftover symlink cannot wedge the task. Each attempt's
   worktree has a fresh name, `<taskKey>.<nonce>`, so a process an earlier attempt left running holds
   no rule over it. A decision's settlement checks the recorded directory too before it pushes, and a

@@ -64,7 +64,12 @@ const POINTER_FILES = {
 
 // Nothing on disk, and every attempt's name ends in `.a1`
 function fakeDisk(names: string[] = []) {
-  return { names: vi.fn(() => names), discard: vi.fn<WorktreeDisk["discard"]>(), nonce: () => "a1" };
+  return {
+    names: vi.fn(() => names),
+    discard: vi.fn<WorktreeDisk["discard"]>(),
+    forget: vi.fn<WorktreeDisk["forget"]>(),
+    nonce: () => "a1",
+  };
 }
 
 function fakeGit(responses: Record<string, Partial<CommandResult>>) {
@@ -695,10 +700,7 @@ describe("createWorkspace", () => {
           timedOut: false,
         };
       }
-      if (args[0] === "worktree" && args[1] === "prune") {
-        worktreeExists = false;
-        return { code: 0, stdout: "", stderr: "", timedOut: false };
-      }
+
       if (args[0] === "worktree" && args[1] === "add") {
         if (worktreeExists) {
           return {
@@ -714,6 +716,9 @@ describe("createWorkspace", () => {
     });
 
     const disk = fakeDisk();
+    disk.forget.mockImplementation(() => {
+      worktreeExists = false;
+    });
     const result = await createWorkspace(config, { run }, gitPath, () => ({}), REMOTE_URL, undefined, POINTER_FILES, disk).create(
       "CP-158",
       "worker",
@@ -721,7 +726,7 @@ describe("createWorkspace", () => {
 
     expect(result.path).toBe("/worktrees/CP-158.a1");
     expect(disk.discard).toHaveBeenCalledWith("/worktrees", "/worktrees/CP-158");
-    expect(run).toHaveBeenCalledWith(gitPath, [...HARDENING_PREFIX, "worktree", "prune"], expect.anything());
+    expect(disk.forget).toHaveBeenCalledWith("/repo/.git/worktrees", expect.any(Function));
     expect(run).toHaveBeenCalledWith(
       gitPath,
       [...HARDENING_PREFIX, "worktree", "add", "-B", "cp-158/worker", "--", "/worktrees/CP-158.a1", "base9"],
@@ -734,13 +739,30 @@ describe("createWorkspace", () => {
   it("discards an existing worktree itself, and never hands git a path to delete", async () => {
     const { runner, run } = fakeGit({
       "worktree list --porcelain": { stdout: "worktree /worktrees/CP-158.b2\n" },
+      [GIT_DIR]: { stdout: "/repo/.git\n" },
     });
     const disk = fakeDisk();
     await createWorkspace(config, runner, gitPath, undefined, undefined, undefined, POINTER_FILES, disk).destroy("CP-158");
 
     expect(disk.discard).toHaveBeenCalledWith("/worktrees", "/worktrees/CP-158.b2");
-    expect(run).toHaveBeenCalledWith(gitPath, [...HARDENING_PREFIX, "worktree", "prune"], expect.anything());
     expect(ranAny(run, "worktree remove")).toBe(false);
+    expect(ranAny(run, "worktree prune")).toBe(false);
+  });
+
+  // BP-804 review: `worktree prune` also unregisters the operator's own worktrees whose directory is
+  // missing at that moment
+  it("unregisters this task's attempts under the root and nothing else", async () => {
+    const { runner } = fakeGit({
+      "worktree list --porcelain": { stdout: "worktree /worktrees/CP-158.b2\n" },
+      [GIT_DIR]: { stdout: "/repo/.git\n" },
+    });
+    const disk = fakeDisk();
+    await createWorkspace(config, runner, gitPath, undefined, undefined, undefined, POINTER_FILES, disk).destroy("CP-158");
+
+    const [adminRoot, owns] = disk.forget.mock.calls[0];
+    expect(adminRoot).toBe("/repo/.git/worktrees");
+    expect(["/worktrees/CP-158", "/worktrees/CP-158.b2", "/worktrees/CP-158.old"].every(owns)).toBe(true);
+    expect(["/worktrees/CP-1580", "/worktrees/CP-15.x", "/elsewhere/CP-158", "/home/me/checkout"].some(owns)).toBe(false);
   });
 
   it("discards every attempt's entry for the key on disk, registered or not, and nothing else", async () => {
@@ -753,7 +775,7 @@ describe("createWorkspace", () => {
       "/worktrees/CP-158.old",
       "/worktrees/.discard-f00",
     ]);
-    expect(ranAny(run, "worktree prune")).toBe(false);
+    expect(disk.forget).not.toHaveBeenCalled();
   });
 
   it("is a no-op when the worktree is already gone", async () => {
@@ -764,13 +786,14 @@ describe("createWorkspace", () => {
     ).resolves.toBeUndefined();
 
     expect(disk.discard).not.toHaveBeenCalled();
+    expect(disk.forget).not.toHaveBeenCalled();
     expect(ranAny(run, "worktree prune")).toBe(false);
   });
 
-  it("propagates a genuine prune failure instead of swallowing it", async () => {
+  it("propagates git's failure to say where the clone keeps its worktrees", async () => {
     const { runner } = fakeGit({
       "worktree list --porcelain": { stdout: "worktree /worktrees/CP-158\n" },
-      "worktree prune": { code: 1, stderr: "permission denied" },
+      [GIT_DIR]: { code: 1, stderr: "permission denied" },
     });
     await expect(
       createWorkspace(config, runner, gitPath, undefined, undefined, undefined, POINTER_FILES, fakeDisk()).destroy("CP-158"),

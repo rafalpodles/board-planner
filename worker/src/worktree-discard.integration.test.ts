@@ -79,6 +79,7 @@ describe("the worker's own writes to a worktree a run may have replaced", () => 
   });
 
   afterEach(() => {
+    execFileSync("chflags", ["-R", "nouchg,nouappnd", dir]);
     execFileSync("chmod", ["-R", "u+w", dir]);
     rmSync(dir, { recursive: true, force: true });
   });
@@ -136,5 +137,36 @@ describe("the worker's own writes to a worktree a run may have replaced", () => 
 
     expect(readdirSync(empty)).toEqual([]);
     expect(registered()).toEqual([realpathSync(parent), worktree.path]);
+  });
+
+  // BP-804 review: `worktree prune` unregistered any of the operator's own worktrees whose
+  // directory was missing when it ran — an unmounted disk's, say
+  it("leaves the operator's own worktree registered while its directory is away", async () => {
+    const own = join(dir, "own");
+    git(parent, "worktree", "add", "--quiet", "-b", "mine", own, "main");
+    const worktree = await workspace().create("BP-1", "worker");
+    renameSync(own, join(dir, "own-unmounted"));
+
+    await workspace().destroy("BP-1");
+    renameSync(join(dir, "own-unmounted"), own);
+
+    expect(registered()).toEqual([realpathSync(parent), own]);
+    expect(git(own, "status", "--porcelain")).toBe("");
+    expect(registered()).not.toContain(worktree.path);
+  });
+
+  // BP-804 review: `chflags uchg` is a write a confined step may make to its own worktree, and an
+  // immutable directory cannot be renamed
+  it("creates the next attempt over a worktree a step made immutable", async () => {
+    const worktree = await workspace().create("BP-1", "worker");
+    writeFileSync(join(worktree.path, "pinned.txt"), "x\n");
+    execFileSync("chflags", ["uchg", join(worktree.path, "pinned.txt")]);
+    execFileSync("chflags", ["uchg", worktree.path]);
+
+    const next = await workspace().create("BP-1", "worker");
+
+    expect(existsSync(worktree.path)).toBe(false);
+    expect(registered()).toEqual([realpathSync(parent), next.path]);
+    expect(readdirSync(root).filter((name) => name.startsWith(".discard-"))).toEqual([]);
   });
 });

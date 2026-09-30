@@ -1,5 +1,4 @@
-import { randomBytes } from "crypto";
-import { chmodSync, lstatSync, mkdtempSync, readdirSync, renameSync, rmSync } from "fs";
+import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { basename, dirname, join, resolve, sep } from "path";
 import {
@@ -14,6 +13,9 @@ import { CommandResult, Runner } from "./exec.js";
 import { gitArgs, localGitEnv, requireGitPath } from "./git-safety.js";
 import { dirReplaced, RecordedDir, recordDir } from "./sandbox.js";
 import { GitPin, nodePointerFiles, pinTampering, PointerFiles, recordPin } from "./worktree-pin.js";
+import { DISCARDED, nodeWorktreeDisk, WorktreeDisk } from "./worktree-disk.js";
+
+export { nodeWorktreeDisk, type WorktreeDisk };
 
 const GIT_TIMEOUT_MS = 60_000;
 
@@ -112,69 +114,6 @@ export interface Workspace {
   listWorktrees(): Promise<string[]>;
 }
 
-/**
- * What the worker does to the worktree root with its own, unconfined, uid (BP-804).
- *
- * `git worktree remove` deletes by path and re-resolves it as it goes, so a worktree a leftover
- * confined process swapped for a symlink had git empty the symlink's target. `discard` never hands
- * a path to anything that deletes: it renames the entry into a fresh directory no sandbox rule
- * names — a symlink moves as a link — and removes it there, which follows no symlink.
- */
-export interface WorktreeDisk {
-  names(root: string): string[];
-  discard(root: string, path: string): void;
-  /** Each attempt's worktree gets a name no earlier attempt's confinement can have named. */
-  nonce(): string;
-}
-
-export const nodeWorktreeDisk: WorktreeDisk = {
-  names(root) {
-    try {
-      return readdirSync(root);
-    } catch {
-      return [];
-    }
-  },
-  discard(root, path) {
-    try {
-      lstatSync(path);
-    } catch {
-      return;
-    }
-    // Beside it rather than into a directory of its own: moving a directory to another parent needs
-    // write access to the directory itself, which a confined step can take away with `chmod`
-    const trash = join(root, `${DISCARDED}${randomBytes(6).toString("hex")}`);
-    renameSync(path, trash);
-    removeDiscarded(trash);
-  },
-  nonce: () => randomBytes(6).toString("hex"),
-};
-
-const DISCARDED = ".discard-";
-
-// Never throws: the path is already free, and a tree a step made unwritable is retried by the next clear
-function removeDiscarded(trash: string): void {
-  try {
-    rmSync(trash, { recursive: true, force: true });
-    return;
-  } catch {
-    // made unwritable from inside; below
-  }
-  try {
-    makeWritable(trash);
-    rmSync(trash, { recursive: true, force: true });
-  } catch {
-    // left for the next clear
-  }
-}
-
-function makeWritable(path: string): void {
-  const stat = lstatSync(path);
-  if (!stat.isDirectory()) return;
-  chmodSync(path, 0o700);
-  for (const name of readdirSync(path)) makeWritable(join(path, name));
-}
-
 /** The task a directory under the root belongs to: `<KEY>` or, since BP-804, `<KEY>.<nonce>`. */
 export function taskKeyOf(name: string): string {
   return name.split(".")[0];
@@ -265,7 +204,15 @@ export function createWorkspace(
       disk.discard(root, path);
     }
     for (const name of disk.names(root).filter((name) => name.startsWith(DISCARDED))) disk.discard(root, join(root, name));
-    if (registered.length > 0) await git(["worktree", "prune"]);
+    // Only this task's entries: `worktree prune` would also unregister any of the operator's own
+    // worktrees whose directory is missing at that moment, an unmounted disk's say
+    if (registered.length > 0) disk.forget(join(await commonDir(), "worktrees"), ours);
+  }
+
+  async function commonDir(): Promise<string> {
+    const answered = (await git(["rev-parse", "--git-common-dir"])).replace(/\n$/, "");
+    if (!answered) throw new Error("git named no common dir for the clone");
+    return resolve(config.repoPath, answered);
   }
 
   // The answer must not come from anything repoPath/.git can redirect, and passing `url` rather

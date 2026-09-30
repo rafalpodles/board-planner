@@ -1,4 +1,4 @@
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { describe, it, expect, vi, afterEach } from "vitest";
@@ -486,10 +486,11 @@ describe("reviewGate", () => {
 
     await reviewGate(runner, gitPath, CLAUDE_PATH, TIMEOUT_MS).run(context());
 
-    const [, removeArgs] = gitCall(run, "remove");
     const [, addArgs] = gitCall(run, "add");
-    expect(removeArgs).toContain("--force");
-    expect(removeArgs[removeArgs.length - 1]).toBe(addArgs[addArgs.length - 2]);
+    expect(existsSync(addArgs[addArgs.length - 2])).toBe(false);
+    // BP-804: removed by the worker itself, never handed to `git worktree remove` by path
+    expect(run.mock.calls.some(([, args]) => args.includes("remove"))).toBe(false);
+    expect(gitCall(run, "--git-common-dir")).toBeDefined();
   });
 
   it("never passes an API key so the subscription is used", async () => {
