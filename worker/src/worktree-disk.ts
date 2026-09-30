@@ -4,6 +4,7 @@ import { execFileSync } from "child_process";
 import { dirname, isAbsolute, join, resolve } from "path";
 
 const CHFLAGS = "/usr/bin/chflags";
+const CHMOD = "/bin/chmod";
 
 /**
  * What the worker does to a worktree with its own, unconfined, uid (BP-804).
@@ -36,7 +37,9 @@ export const nodeWorktreeDisk: WorktreeDisk = {
   },
   discard(root, path) {
     // Beside it rather than into a directory of its own: moving a directory to another parent needs
-    // write access to the directory itself, which a confined step can take away with `chmod`
+    // write access to the directory itself, which a confined step can take away with `chmod`. macOS 15
+    // refuses even this rename for a directory left at 0500 (EACCES, measured on 15.7.9, where 26.6
+    // allows it), so a refusal unlocks it
     // Never throws: a path that will not move stays where it is, and the next attempt's name is
     // a fresh one anyway
     const trash = join(root, `${DISCARDED}${randomBytes(6).toString("hex")}`);
@@ -44,8 +47,9 @@ export const nodeWorktreeDisk: WorktreeDisk = {
       renameSync(path, trash);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
-      // `chflags uchg` is a write a confined step may make to its own worktree
+      // `chflags uchg` and `chmod` are writes a confined step may make to its own worktree
       clearFlags(path);
+      unlock(path);
       try {
         renameSync(path, trash);
       } catch {
@@ -99,6 +103,16 @@ function clearFlags(path: string): void {
     execFileSync(CHFLAGS, ["-R", "nouchg,nouappnd", path], { stdio: "ignore" });
   } catch {
     // what it could not clear, the removal reports by failing
+  }
+}
+
+// `chmod -h` changes a symlink rather than its target: the entry is still at a path a leftover
+// process can swap. Not fs.lchmodSync, which opens the path and fails on a directory with EISDIR.
+export function unlock(path: string): void {
+  try {
+    execFileSync(CHMOD, ["-h", "u+rwx", path], { stdio: "ignore" });
+  } catch {
+    // the rename that follows reports what is still wrong by failing
   }
 }
 

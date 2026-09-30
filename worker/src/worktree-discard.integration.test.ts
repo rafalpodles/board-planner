@@ -107,8 +107,9 @@ describe("the worker's own writes to a worktree a run may have replaced", () => 
 
     const next = await workspace().create("BP-1", "worker");
 
-    expect(existsSync(worktree.path)).toBe(false);
+    // Not wedged first, then gone: the macOS 15 runner once got the first and not the second
     expect(registered()).toEqual([realpathSync(parent), next.path]);
+    expect(existsSync(worktree.path)).toBe(false);
     expect(readdirSync(root).filter((name) => name.startsWith(".discard-"))).toEqual([]);
   });
 
