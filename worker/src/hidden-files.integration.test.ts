@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
-import { appendFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { commitAll, TamperedCheckoutError } from "./commit.js";
-import { createRunner } from "./exec.js";
+import { createRunner, Runner } from "./exec.js";
 import { hiddenFromGit } from "./hidden-files.js";
 import { confine } from "./sandbox.js";
 import { installedToolPath } from "./__fixtures__/tool-paths.js";
@@ -41,6 +41,8 @@ describe("files hidden from git by a rule the repository does not own", () => {
     execFileSync("git", ["init", "--quiet", "-b", "main", main], { stdio: "pipe" });
     writeFileSync(join(main, ".gitignore"), "node_modules/\ndist/\n.env\n");
     writeFileSync(join(main, "package.json"), "{}\n");
+    mkdirSync(join(main, "logs"));
+    writeFileSync(join(main, "logs", ".gitignore"), "*.log\n!keep.log\n");
     git(main, "add", "--all");
     git(main, "commit", "--quiet", "-m", "base");
     baseSha = git(main, "rev-parse", "HEAD").trim();
@@ -108,6 +110,111 @@ describe("files hidden from git by a rule the repository does not own", () => {
     const found = await check();
 
     expect(found?.detail).toContain(`${EVIL} (.gitignore:4: "${EVIL}")`);
+  });
+
+  // check-ignore reads stdin as pathspecs, where `:evil/` means `evil/` from the top — which no rule
+  // ignores, so nothing was printed for it and the path went through as a directory
+  it("refuses a path spelled like pathspec magic, hidden by a committed rule", async () => {
+    appendFileSync(join(worktree, ".gitignore"), ":*/\n");
+    git(worktree, "commit", "--quiet", "-am", "ignore it");
+    mkdirSync(join(worktree, ":evil"));
+    writeFileSync(join(worktree, ":evil", "e.test.js"), "it('runs', () => {});\n");
+    expect(git(worktree, "status", "--porcelain")).toBe("");
+
+    const found = await check();
+
+    expect(found?.detail).toContain(`:evil/ (.gitignore:4: ":*/")`);
+  });
+
+  it("refuses the same through .git/info/exclude", async () => {
+    const exclude = git(worktree, "rev-parse", "--path-format=absolute", "--git-path", "info/exclude").trim();
+    appendFileSync(exclude, ":*/\n");
+    mkdirSync(join(worktree, ":evil"));
+    writeFileSync(join(worktree, ":evil", "e.test.js"), "it('runs', () => {});\n");
+
+    const found = await check();
+
+    expect(found?.detail).toContain(`:evil/ (${exclude}:`);
+  });
+
+  it("refuses a file a base line hides only because the agent deleted the negation after it", async () => {
+    writeFileSync(join(worktree, "logs", ".gitignore"), "*.log\n");
+    writeFileSync(join(worktree, "logs", "keep.log"), "hidden\n");
+    git(worktree, "commit", "--quiet", "-am", "drop the negation");
+
+    const found = await check();
+
+    expect(found?.detail).toContain(`logs/keep.log (logs/.gitignore:1: "*.log")`);
+  });
+
+  it("still trusts the base's rules in a .gitignore the task legitimately edited", async () => {
+    appendFileSync(join(worktree, ".gitignore"), "coverage/\n");
+    git(worktree, "commit", "--quiet", "-am", "ignore coverage");
+    mkdirSync(join(worktree, "node_modules", "pkg"), { recursive: true });
+    writeFileSync(join(worktree, "node_modules", "pkg", "index.js"), "");
+    writeFileSync(join(worktree, "logs", "a.log"), "");
+
+    expect(await check()).toBeNull();
+  });
+
+  it("asks about npm ci's tree as one directory, not as its files", async () => {
+    mkdirSync(join(worktree, "node_modules", "pkg", "lib"), { recursive: true });
+    writeFileSync(join(worktree, "node_modules", "pkg", "lib", "index.js"), "");
+    const real = createRunner();
+    const stdins: string[] = [];
+    const recording: Runner = {
+      run: (command, args, opts) => {
+        if (args.includes("check-ignore")) stdins.push(opts.stdin ?? "");
+        return real.run(command, args, opts);
+      },
+    };
+
+    expect(await hiddenFromGit(recording, gitPath, worktree, baseSha)).toBeNull();
+    expect(stdins.join("")).toContain("./node_modules/\0");
+    expect(stdins.join("")).not.toContain("node_modules/pkg");
+  });
+
+  it("trusts the base's rules in a checkout whose .gitignore has CRLF line endings", async () => {
+    const crlfMain = join(dir, "crlf-main");
+    const crlfWorktree = join(dir, "crlf-worktree");
+    execFileSync("git", ["init", "--quiet", "-b", "main", crlfMain], { stdio: "pipe" });
+    writeFileSync(join(crlfMain, ".gitattributes"), "* text eol=crlf\n");
+    writeFileSync(join(crlfMain, ".gitignore"), "node_modules/\n");
+    git(crlfMain, "add", "--all");
+    git(crlfMain, "commit", "--quiet", "-m", "base");
+    const crlfBase = git(crlfMain, "rev-parse", "HEAD").trim();
+    git(crlfMain, "worktree", "add", "--quiet", "-b", "work", crlfWorktree, crlfBase);
+    expect(readFileSync(join(crlfWorktree, ".gitignore"), "utf8")).toBe("node_modules/\r\n");
+    mkdirSync(join(crlfWorktree, "node_modules"));
+    writeFileSync(join(crlfWorktree, "node_modules", "x.js"), "");
+
+    expect(await hiddenFromGit(createRunner(), gitPath, crlfWorktree, crlfBase)).toBeNull();
+  });
+
+  // BP-794 leaves a redirected .git config unscanned before a gate, so no call in here may read a
+  // file through a clean filter such a config defines
+  it("runs no clean filter the checkout defines", async () => {
+    const fake = join(worktree, ".y");
+    const marker = join(dir, "filter-ran");
+    const payload = join(dir, "payload.sh");
+    writeFileSync(payload, `#!/bin/sh\ntouch "${marker}"\ncat\n`, { mode: 0o755 });
+    mkdirSync(join(fake, "objects", "info"), { recursive: true });
+    mkdirSync(join(fake, "refs", "heads"), { recursive: true });
+    mkdirSync(join(fake, "info"));
+    writeFileSync(join(fake, "objects", "info", "alternates"), `${join(main, ".git", "objects")}\n`);
+    writeFileSync(join(fake, "HEAD"), "ref: refs/heads/work\n");
+    writeFileSync(join(fake, "refs", "heads", "work"), `${baseSha}\n`);
+    writeFileSync(join(fake, "config"), `[core]\n\trepositoryformatversion = 0\n[filter "x"]\n\tclean = ${payload}\n`);
+    writeFileSync(join(fake, "info", "attributes"), "* filter=x\n");
+    writeFileSync(join(fake, "info", "exclude"), `.y\n${EVIL}\n`);
+    writeFileSync(join(worktree, ".git"), `gitdir: ${fake}\n`);
+    appendFileSync(join(worktree, ".gitignore"), "coverage/\n");
+    writeFileSync(join(worktree, EVIL), "it('runs', () => {});\n");
+
+    const found = await check();
+
+    expect(found?.kind).toBe("hidden");
+    expect(existsSync(marker)).toBe(false);
   });
 
   // The route a confined agent has: it cannot write the shared common dir, but `.git` in a linked

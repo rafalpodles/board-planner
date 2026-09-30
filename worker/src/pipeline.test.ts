@@ -684,7 +684,7 @@ describe("runTask", () => {
   });
 
   describe("a file hidden from git by a rule the repository does not own (BP-640)", () => {
-    const EXCLUDE_RULE = "/main/.git/info/exclude\x007\x00evil.test.ts\x00evil.test.ts\x00";
+    const EXCLUDE_RULE = "/main/.git/info/exclude\x007\x00evil.test.ts\x00./evil.test.ts\x00";
 
     // Clean everywhere, until `plantedYet` says the hidden file exists
     function hidingRunner(plantedYet: () => boolean) {
@@ -692,7 +692,8 @@ describe("runTask", () => {
       return {
         run: vi.fn<Runner["run"]>(async (command, args, opts) => {
           if (args.includes("ls-files")) return shell(plantedYet() ? "evil.test.ts\0" : "");
-          if (args.includes("check-ignore")) return shell(EXCLUDE_RULE);
+          if (args.includes("check-ignore") && args.includes("--verbose")) return shell(EXCLUDE_RULE);
+          if (args.includes("check-ignore")) return shell("", { code: 1 });
           return inner.run(command, args, opts);
         }),
       };
@@ -722,6 +723,24 @@ describe("runTask", () => {
         /refusing to run the test-run gate: .*evil\.test\.ts \(\/main\/\.git\/info\/exclude:7: "evil\.test\.ts"\)/,
       );
       expect(h.workspace.destroy).not.toHaveBeenCalled();
+    });
+
+    it("refuses to run a gate when git will not say what is hidden", async () => {
+      const inner = defaultRunner();
+      const runner = {
+        run: vi.fn<Runner["run"]>(async (command, args, opts) =>
+          args.includes("ls-files") ? shell("", { code: 128, stderr: "fatal: index file corrupt" }) : inner.run(command, args, opts),
+        ),
+      };
+      const gate = passingGate("diff-size");
+      const h = harness({ runner, gateFor: () => gate });
+
+      await runTask(h.deps, running("diff-size"));
+
+      expect(gate.run).not.toHaveBeenCalled();
+      expect(h.reporter.failed.mock.calls[0][1]).toMatch(
+        /^refusing to run the diff-size gate: `git ls-files` failed: fatal: index file corrupt/,
+      );
     });
 
     it("refuses the tree after a writing step, even with git status reading it clean", async () => {

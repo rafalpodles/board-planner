@@ -109,7 +109,11 @@ describe("commitAll", () => {
       readableConfig,
       noPlantedConfig,
       { code: 0, stdout: "evil.test.ts\0" },
-      { code: 0, stdout: `${exclude}\x007\x00evil.test.ts\x00evil.test.ts\x00` },
+      // ls-tree: the base has no .gitignore above it; init; the base's check-ignore: not ignored
+      { code: 0, stdout: "" },
+      { code: 0, stdout: "" },
+      { code: 1, stdout: "" },
+      { code: 0, stdout: `${exclude}\x007\x00evil.test.ts\x00./evil.test.ts\x00` },
       dirty,
     );
 
@@ -120,7 +124,7 @@ describe("commitAll", () => {
     expect(run.mock.calls.some(([, args]) => (args as string[]).includes("status"))).toBe(false);
   });
 
-  it("does not call a listing git would not give a tampered checkout", async () => {
+  it("does not call a failed hidden-file listing a tampered checkout", async () => {
     const { runner } = runnerFor(readableConfig, noPlantedConfig, { code: 128, stderr: "fatal: bad index" });
 
     const refused = commitAll(runner, gitPath, "/wt", "m", IDENTITY, "base1");
@@ -196,7 +200,9 @@ describe("commitAll against a planted config", () => {
     const { runner } = runnerFor(readableConfig, { code: 0, stdout: local("filter.z.clean=/tmp/payload.sh") });
 
     await expect(commitAll(runner, gitPath, "/wt", "m", IDENTITY, "base1")).rejects.toBeInstanceOf(TamperedCheckoutError);
-    await expect(commitAll(runnerFor(readableConfig, noPlantedConfig, { code: 1, stderr: "boom" }).runner, gitPath, "/wt", "m", IDENTITY, "base1"))
+    await expect(commitAll(runnerReturning({ code: 1, stderr: "boom" }).runner, gitPath, "/wt", "m", IDENTITY, "base1"))
+      .rejects.toThrow(/git status failed: boom/);
+    await expect(commitAll(runnerReturning({ code: 1, stderr: "boom" }).runner, gitPath, "/wt", "m", IDENTITY, "base1"))
       .rejects.not.toBeInstanceOf(TamperedCheckoutError);
   });
 
