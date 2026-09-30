@@ -226,6 +226,22 @@ describe("createOutbox", () => {
       expect(api.comment).not.toHaveBeenCalled();
     });
 
+    it("sends a line that names no task past another project's hold", async () => {
+      const held = JSON.stringify({
+        op: { kind: "comment", projectId: "P1", taskId: "a", body: "why" },
+        attempts: 0,
+      });
+      const orphan = JSON.stringify({ op: { kind: "run", projectId: "P2" }, attempts: 0 });
+      const outbox = createOutbox(memoryStore(`${held}\n${orphan}\n`), vi.fn());
+      const api = apiSpy({
+        comment: vi.fn().mockRejectedValue(notAssigned()),
+        postRun: vi.fn().mockResolvedValue(undefined),
+      });
+
+      expect(await outbox.flush(api)).toEqual({ delivered: 1, pending: 1, dropped: 0 });
+      expect(api.postRun).toHaveBeenCalledTimes(1);
+    });
+
     it("keeps a line that names no task behind a task already held, which it may belong to", async () => {
       const held = JSON.stringify({
         op: { kind: "comment", projectId: "P1", taskId: "a", body: "why" },

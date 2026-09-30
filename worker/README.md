@@ -650,8 +650,8 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   report right after a merge is the one most likely to fail — and a lost one would leave the task
   sitting in the active column where nothing can claim it again. Undelivered reports persist to
   `<CP_STATE_DIR>/outbox.jsonl` and go out before the next task is claimed. A failure holds back
-  only what it names — a 409 that one task, a project that no longer has this machine that
-  project — and anything else, a network failure or a redeploy, stops the flush, so an outage
+  only what it names — for a 409 that one task, for a project that no longer has this machine,
+  that project — and anything else, a network failure or a redeploy, stops the flush, so an outage
   costs one attempt rather than one per task.
 - **A task abandoned by a dead worker comes back.** The claim endpoint frees anything whose lease
   has outlived it, without refunding the attempt, so a task that repeatedly outlives its worker

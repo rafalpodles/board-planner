@@ -172,12 +172,12 @@ export function createOutbox(store: Store, log: Log = (m) => console.error(m)): 
         // Order matters within a task — a status move before its comment reads as an empty
         // decision — so what a failure holds waits rather than being reordered around. Nothing
         // orders one task's reports against another's, so a hold that names its scope stops only
-        // that. A line naming no task cannot be placed, so it waits behind any hold at all.
+        // that. A line naming no task cannot be placed in a task, so it waits behind any task hold.
         const task = taskOf(entry.op);
         const held =
           heldAll ||
           heldProjects.has(entry.op.projectId) ||
-          (task ? heldTasks.has(task) : heldTasks.size + heldProjects.size > 0);
+          (task ? heldTasks.has(task) : heldTasks.size > 0);
         if (held) {
           remaining.push(entry);
           continue;
