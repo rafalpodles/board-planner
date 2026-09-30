@@ -179,8 +179,9 @@ export type Network = "open" | "loopback";
 //   Any listener here is reachable, a forwarding proxy included. It also ignores an IPv6 scope, so
 //   fe80::1%en0 or %utun0 passes: UDP is sent and a SYN goes out on that link. `remote ip4` would
 //   close it and costs ::1, where node binds "localhost" on this machine.
-// - Unix sockets stay allowed (BP-810), and with them getaddrinfo through mDNSResponder: a name
-//   still resolves, which is a DNS channel, while the connection to it is refused.
+// - Unix sockets stay allowed but for NAMED_SERVICE_DENIES (BP-810), which `profileWith` appends
+//   after this block, and with them getaddrinfo through mDNSResponder: a name still resolves,
+//   which is a DNS channel, while the connection to it is refused.
 // - Daemons fetch on a process's behalf, outside the profile: nsurlsessiond (a background
 //   NSURLSession), trustd (a certificate's AIA and OCSP URLs) and WebKit's networking process each
 //   reached a listener from a process with no network at all, and a deny on the name closes each.
@@ -202,6 +203,10 @@ const LOOPBACK_ONLY = [
 // semantics (`sandbox-exec(1)` documents only `-p`, and both it and `sandbox_init(3)` are marked
 // deprecated), and the third-party accounts say first-match, which does not match the measurement
 // above either. The measurement is the only thing this comment is willing to assert.
+//
+// Between two rules on one operation that both match, order was measured to matter: a
+// network-outbound allow placed after a named unix-socket deny reopened it (BP-810). That is why
+// `profileWith` puts NAMED_SERVICE_DENIES after everything else.
 //
 // Reads are deliberately untouched. The agent has `Read` over the disk already — scrub.ts is built
 // on that being true — and confining reads would take the CLI's own session with it.
@@ -229,6 +234,33 @@ function profileFor(names: string[]): string {
     '(deny mach-lookup (global-name "com.apple.coreservices.quarantine-resolver") (global-name "com.apple.runningboard") ' +
       '(global-name "com.apple.lsd.modifydb") (global-name "com.apple.coreservices.appleevents"))',
   ].join("\n");
+}
+
+// Local daemons that run a command or a container for whoever connects (BP-810): Docker Desktop,
+// colima, OrbStack and podman; tmux and screen servers; watchman, whose triggers spawn commands.
+// A denylist rather than an AF_UNIX deny, so a test suite's own socket still connects. Matched by
+// where each daemon puts its socket rather than by a path resolved here, so a relocated home still
+// matches; seatbelt matches the resolved path, so a symlink does not get round it.
+// Always the last rules of a profile (`profileWith`): measured, a later
+// `(allow network-outbound (remote unix-socket))` reopens every socket named here.
+export const NAMED_SERVICE_DENIES = [
+  "(deny network-outbound (remote unix-socket (path-regex " +
+    '#"/docker\\.sock$" #"/\\.docker/" #"/Library/Containers/com\\.docker\\.docker/" #"/\\.colima/" #"/\\.config/colima/" ' +
+    '#"/\\.orbstack/" #"/\\.local/share/containers/podman/" #"^/private/var/folders/[^/]+/[^/]+/T/podman/")))',
+  // Unanchored for tmux: a `$TMUX_TMPDIR` set only in the operator's shell is invisible to a
+  // LaunchAgent, and tmux always appends `tmux-<uid>` to it. macOS's own screen uses a FIFO in
+  // `.screen`, which the write deny already refuses to open.
+  "(deny network-outbound (remote unix-socket (path-regex " +
+    '#"/tmux-[0-9]+/" #"/\\.screen/" #"/u?screens/S-[^/]+/" #"/watchman/[^/]+-state/")))',
+  // The binary, not launchd: enable/disable/bootout/kickstart reach launchd over the bootstrap port,
+  // which no mach-lookup names. A plain copy is killed by AMFI, but one re-signed ad hoc in the
+  // worktree runs, as does anything that speaks to launchd itself (measured, BP-810).
+  '(deny process-exec (literal "/bin/launchctl"))',
+];
+
+// Rules for a mode go in `modeRules`, never after the result: the named denies must come last.
+export function profileWith(names: string[], modeRules: string[] = []): string {
+  return [profileFor(names), ...modeRules, ...NAMED_SERVICE_DENIES].join("\n");
 }
 
 /**
@@ -276,7 +308,7 @@ export function confine(command: string, args: string[], options: ConfineOptions
     command: SANDBOX_COMMAND,
     args: [
       "-p",
-      [profileFor(names), ...(options.network === "loopback" ? LOOPBACK_ONLY : [])].join("\n"),
+      profileWith(names, options.network === "loopback" ? LOOPBACK_ONLY : []),
       ...names.flatMap((name, index) => ["-D", `${name}=${resolved[index]}`]),
       command,
       ...args,

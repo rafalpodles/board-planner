@@ -430,9 +430,10 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   does not close: seatbelt's `localhost` is every address this machine holds, so a listener here
   that forwards — an HTTP proxy, an SSH tunnel — is still a way out, and it ignores an IPv6 scope,
   so `fe80::1%en0` or `%utun0` is let through and a packet goes out on that link (narrowing it to
-  IPv4 would refuse `::1`, where node binds `localhost` on macOS); unix sockets stay open (BP-810) —
-  Docker's socket, where it runs, is the obvious one: a container started through it has the
-  network — and with them name resolution through mDNSResponder, so a lookup of a name that encodes
+  IPv4 would refuse `::1`, where node binds `localhost` on macOS); unix sockets stay open apart
+  from the named local services below (BP-810) — Docker's usual sockets among them, though one under
+  another name would still start a container with the network — and with them name resolution
+  through mDNSResponder, so a lookup of a name that encodes
   a secret still reaches a DNS server.
 
   **npm settings pinned against a project `.npmrc`.** Every npm command runs with `git`, `proxy`,
@@ -507,15 +508,49 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   `crontab` is refused its exec. What it cost: `npm ci`, `npm run build`, `npm test`, git and the
   executor's real `claude -p` invocation all still succeed under it.
 
-  Still open (**BP-810**): daemons reached over a **unix socket** rather than `mach-lookup` — the
-  Docker socket answers, and a bind mount gives a container write access anywhere in your home; an
-  already running tmux or screen server runs a command outside the sandbox; watchman is reachable
-  and its triggers run commands. So is `launchctl enable`/`disable`/`bootout gui/<uid>/…`, which
-  works from inside and persists. Reachable but untested: SMAppService and login items, an existing
-  Shortcut that runs a shell script (`shortcuts run`), and a bundle the system registers on its own
-  (Spotlight indexing a worktree) becoming the handler for a URL you open yourself. And, as above,
-  every service not named. Preflight tries an `open` at boot, so a macOS that moves *that* launch
-  elsewhere shows up as a red sandbox row rather than as an escape.
+  **A local daemon reached over a unix socket** was the other half of that category (**BP-810**):
+  the Docker socket answered, and a bind mount gives a container write access anywhere in your home;
+  a tmux server you already run ran a command outside the sandbox; watchman answered, and its
+  triggers run commands; and `launchctl enable`/`disable`/`bootout gui/<uid>/…` worked from inside
+  and persists. The profile now refuses a connection to:
+  - Docker: any `docker.sock`, anything under a `.docker` directory, Docker Desktop's own sockets
+    under `~/Library/Containers/com.docker.docker`, colima's under `.colima` or `.config/colima`,
+    OrbStack's under `.orbstack`, and podman's under `.local/share/containers/podman` or in your
+    temp directory's `podman` (`/private/var/folders/…/T/podman`);
+  - tmux under any `tmux-<uid>` directory, wherever it is: tmux always puts its sockets in one, and
+    a `$TMUX_TMPDIR` set only in your shell is invisible to a LaunchAgent, so the worker does not
+    try to resolve it — relative, not yet created or unset, the pattern covers it;
+  - screen's socket directories (`.screen`, `screens/S-<user>`); macOS's own screen listens on a
+    FIFO, which the write deny already refuses;
+  - watchman's (`watchman/<user>-state`).
+
+  Most patterns are matched wherever the path is, not against your home, so a relocated home is
+  still caught, and seatbelt matches the resolved path, so a symlink to one of them does not get
+  round it. The price of that: `docker.sock`, `.docker/`, `Library/Containers/com.docker.docker/`,
+  `.colima/`, `.config/colima/`, `.orbstack/`, `.local/share/containers/podman/`, `.screen/`,
+  `screens/S-<user>/`, `tmux-<digits>/` and `watchman/<name>-state/` are **unanchored**, so an
+  honest project socket under a directory named like that is refused too. Podman's temp directory
+  is anchored where podman puts it, so a `podman/` or `colima/` directory of your own is not.
+  These denies are always the last rules of the profile, because a later rule allowing unix sockets
+  was measured to reopen them. The profile also refuses to run `/bin/launchctl`, read-only
+  subcommands included.
+
+  **It is a denylist**, and what it leaves is worth naming. **launchd itself is not refused**, only
+  that binary: a copy re-signed ad hoc inside the worktree runs (measured, and pinned by a test named
+  as a known gap), as does any program that speaks to launchd directly. A Docker context, `tmux -S`
+  or `WATCHMAN_SOCK` pointing at a socket elsewhere is
+  reachable, and so is every other local daemon — ssh-agent through `SSH_AUTH_SOCK`, an SSH
+  ControlMaster socket (an open connection to another machine), Rancher Desktop's lima `ssh.sock`,
+  and anything not listed above. A project whose tests need Docker (testcontainers, say) cannot
+  reach it from a gate. What it cost was measured: an ordinary unix socket still connects; `npm ci`,
+  `npm run build` and `npm test` (with a test that serves its own socket), git and `claude
+  --version` still succeed; and the executor's real `claude -p` (haiku, an edit step writing one
+  file) completed and wrote it. The CLI does call `launchctl` itself, to install and start its own
+  background daemon; that run did not need it. Reachable but untested: SMAppService and login items,
+  an existing Shortcut that runs a shell script (`shortcuts run`), and a bundle the system registers
+  on its own (Spotlight indexing a worktree) becoming the handler for a URL you open yourself. And,
+  as above, every service not named. Preflight tries an `open` at boot, so a macOS that moves *that*
+  launch elsewhere shows up as a red sandbox row rather than as an escape.
 
   **A file git will not print** (**BP-603**). Four things take a file's contents out of a patch: a
   bare `-diff` attribute, a `diff=<name>` driver declared binary in the config, a file git decides

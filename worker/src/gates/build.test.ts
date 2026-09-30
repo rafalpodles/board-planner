@@ -138,7 +138,8 @@ describe("buildGate", () => {
     await buildGate(r, NPM_PATH, TIMEOUT_MS).run(context);
 
     const profileOf = (call: number) => run.mock.calls[call][1][run.mock.calls[call][1].indexOf("-p") + 1];
-    expect(profileOf(0)).not.toContain("network-outbound");
+    expect(profileOf(0)).not.toContain("(deny network-outbound)");
+    expect(profileOf(0)).not.toContain('(remote ip "localhost:*")');
     expect(profileOf(1)).toContain("(deny network-outbound)");
   });
 
