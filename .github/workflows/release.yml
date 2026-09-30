@@ -231,7 +231,7 @@ jobs:
           if [ "$SIGNED" = "true" ]; then
             REAPER="$RUNNER_TEMP/tarball-cp-reap"
             tar -xzf "$OUT/board-planner-worker-$VERSION.tar.gz" -O worker/dist/bin/cp-reap > "$REAPER"
-            SIGNATURE="$(codesign -dv --verbose=4 "$REAPER" 2>&1)"
+            SIGNATURE="$(codesign -dv --verbose=4 "$REAPER" 2>&1 || true)"
             grep -q "^Authority=Developer ID Application" <<<"$SIGNATURE" \
               || { echo "::error::the tarball's process reaper is not signed with a Developer ID"; exit 1; }
           fi
