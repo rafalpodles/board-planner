@@ -264,6 +264,25 @@ describe("files hidden from git by a rule the repository does not own", () => {
     expect(readdirSync(scratchRoot)).toEqual([]);
   });
 
+  it("reads a base .gitignore that is not UTF-8 beside another one", async () => {
+    const { work, base } = separateRepository("latin1", { "package.json": "{}\n" }, false);
+    const repo = join(dir, "latin1-main");
+    writeFileSync(join(repo, ".gitignore"), Buffer.from("# caf\xe9\nnode_modules/\n", "latin1"));
+    mkdirSync(join(repo, "sub"));
+    writeFileSync(join(repo, "sub", ".gitignore"), "*.log\n");
+    git(repo, "add", "--all");
+    git(repo, "commit", "--quiet", "-m", "ignores");
+    const withIgnores = git(repo, "rev-parse", "HEAD").trim();
+    git(work, "checkout", "--quiet", "--detach", withIgnores);
+    mkdirSync(join(work, "node_modules"));
+    writeFileSync(join(work, "node_modules", "x.js"), "");
+    writeFileSync(join(work, "sub", "a.log"), "");
+    expect(git(work, "status", "--porcelain")).toBe("");
+    expect(base).not.toBe(withIgnores);
+
+    expect(await hiddenFromGit(createRunner(), gitPath, work, withIgnores)).toBeNull();
+  });
+
   // BP-794 leaves a redirected .git config unscanned before a gate, so no call in here may read a
   // file through a clean filter such a config defines
   it("runs no clean filter the checkout defines", async () => {

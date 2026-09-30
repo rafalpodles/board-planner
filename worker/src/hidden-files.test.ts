@@ -1,3 +1,5 @@
+import { readFileSync } from "fs";
+import { join } from "path";
 import { describe, it, expect, vi } from "vitest";
 import { CommandResult, Runner } from "./exec.js";
 import { hiddenFromGit } from "./hidden-files.js";
@@ -78,5 +80,54 @@ describe("hiddenFromGit on a tree with thousands of ignored directories", () => 
     expect(await hiddenFromGit({ run }, gitPath, "/wt", "base1")).toBeNull();
     const longest = Math.max(...run.mock.calls.map(([, args]) => args.join(" ").length));
     expect(longest).toBeLessThan(4096);
+  });
+});
+
+describe("hiddenFromGit reading the base's .gitignore files", () => {
+  it("writes each blob byte for byte, whatever its encoding", async () => {
+    const latin1Comment = Buffer.from("# caf\xe9\nnode_modules/\n", "latin1");
+    const logs = Buffer.from("*.log\n");
+    const batch = Buffer.concat([
+      Buffer.from(`aaa111 blob ${latin1Comment.length}\n`),
+      latin1Comment,
+      Buffer.from(`\nbbb222 blob ${logs.length}\n`),
+      logs,
+      Buffer.from("\n"),
+    ]).toString("latin1");
+    const written: Record<string, number[]> = {};
+    const run = vi.fn<Runner["run"]>(async (_command, args, opts) => {
+      if (args.includes("ls-files")) return shell("node_modules/\0sub/a.log\0");
+      if (args.includes("ls-tree")) return shell("100644 blob aaa111\t.gitignore\x00100644 blob bbb222\tsub/.gitignore\0");
+      if (args.includes("cat-file")) return shell(opts.stdoutEncoding === "latin1" ? batch : Buffer.from(batch, "latin1").toString("utf8"));
+      if (args.includes("config")) return shell("", { code: 1 });
+      if (args.includes("check-ignore")) {
+        written.root = [...readFileSync(join(opts.cwd, ".gitignore"))];
+        written.sub = [...readFileSync(join(opts.cwd, "sub", ".gitignore"))];
+        return shell(opts.stdin ?? "");
+      }
+      return shell();
+    });
+
+    expect(await hiddenFromGit({ run }, gitPath, "/wt", "base1")).toBeNull();
+    expect(written.root).toEqual([...latin1Comment]);
+    expect(written.sub).toEqual([...logs]);
+  });
+});
+
+describe("hiddenFromGit over tens of thousands of unignored directories", () => {
+  it("judges them in well under a second", async () => {
+    const directories = Array.from({ length: 20_000 }, (_, index) => `pkg/module${index}/__pycache__/`);
+    const run = vi.fn<Runner["run"]>(async (_command, args) => {
+      if (args.includes("ls-files")) return shell(directories.map((path) => `${path}\0`).join(""));
+      if (args.includes("config")) return shell("", { code: 1 });
+      if (args.includes("check-ignore")) return shell("", { code: 1 });
+      return shell();
+    });
+
+    const started = performance.now();
+    const found = await hiddenFromGit({ run }, gitPath, "/wt", "base1");
+
+    expect(found?.detail).toContain("and 19995 more");
+    expect(performance.now() - started).toBeLessThan(1_000);
   });
 });

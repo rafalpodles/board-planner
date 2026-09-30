@@ -14,6 +14,9 @@ export interface RunOpts {
   env?: NodeJS.ProcessEnv;
   signal?: AbortSignal;
   stdin?: string;
+  // latin1 maps each byte to one character, so `Buffer.from(stdout, "latin1")` is the bytes the
+  // child wrote; utf8 turns an invalid byte into U+FFFD and the length stops meaning anything
+  stdoutEncoding?: "utf8" | "latin1";
   // Observing only, and only additive: CommandResult.stdout still carries every chunk this saw, so
   // nothing downstream reads a different output because an observer was attached. Without it the
   // whole run is invisible until it ends, which for a 30-minute task is the entire point missed.
@@ -123,7 +126,7 @@ export function createRunner(): Runner {
           // Without this a multibyte character split across a 64KB pipe boundary decodes to two
           // replacement characters — in the accumulated stdout the run is classified from, not just
           // in what an observer sees
-          child.stdout.setEncoding("utf8");
+          child.stdout.setEncoding(opts.stdoutEncoding ?? "utf8");
           child.stderr.setEncoding("utf8");
 
           child.stdout.on("data", (chunk: Buffer | string) => {

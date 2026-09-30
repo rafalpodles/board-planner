@@ -14,6 +14,13 @@ export type HiddenFiles =
 
 class Unreadable extends Error {}
 
+interface GitOptions {
+  cwd?: string;
+  stdin?: string;
+  okCodes?: number[];
+  bytes?: boolean;
+}
+
 function nulFields(stdout: string): string[] {
   const fields = stdout.split("\0");
   if (fields[fields.length - 1] === "") fields.pop();
@@ -66,12 +73,13 @@ export async function hiddenFromGit(
   worktreePath: string,
   baseSha: string,
 ): Promise<HiddenFiles | null> {
-  const git = async (what: string, args: string[], options: { cwd?: string; stdin?: string; okCodes?: number[] } = {}) => {
+  const git = async (what: string, args: string[], options: GitOptions = {}) => {
     const result: CommandResult = await runner.run(requireGitPath(gitPath), gitArgs(args), {
       cwd: options.cwd ?? worktreePath,
       timeoutMs: TIMEOUT_MS,
       env: localGitEnv(),
       ...(options.stdin === undefined ? {} : { stdin: options.stdin }),
+      ...(options.bytes ? { stdoutEncoding: "latin1" as const } : {}),
     });
     if (result.timedOut) throw new Unreadable(`\`git ${what}\` timed out after ${TIMEOUT_MS}ms`);
     if (!(options.okCodes ?? [0]).includes(result.code)) {
@@ -87,13 +95,15 @@ export async function hiddenFromGit(
     if (ignored.length === 0) return null;
 
     const ignoredAtBase = await ignoredByBaseRules(git, baseSha, ignored);
-    const offenders = ignored.filter(
-      (path) =>
-        !ignoredAtBase.has(path) &&
-        // `--directory` also lists an unignored directory whose entries are all ignored, and lists
-        // those entries too — they are what is judged
-        !(path.endsWith("/") && ignored.some((other) => other !== path && other.startsWith(path))),
-    );
+    // `--directory` also lists an unignored directory whose entries are all ignored, and lists
+    // those entries too — they are what is judged
+    const parentsOfListed = new Set<string>();
+    for (const path of ignored) {
+      for (let slash = path.indexOf("/"); slash !== -1 && slash < path.length - 1; slash = path.indexOf("/", slash + 1)) {
+        parentsOfListed.add(path.slice(0, slash + 1));
+      }
+    }
+    const offenders = ignored.filter((path) => !ignoredAtBase.has(path) && !parentsOfListed.has(path));
     if (offenders.length === 0) return null;
 
     const rules = new Map<string, string>();
@@ -123,10 +133,10 @@ export async function hiddenFromGit(
   }
 }
 
-// `cat-file --batch` frames each blob by its size in bytes, which a decoded string cannot count
-function blobsFromBatch(stdout: string, count: number): string[] {
-  const bytes = Buffer.from(stdout, "utf8");
-  const blobs: string[] = [];
+// `cat-file --batch` frames each blob by its size in bytes, so its stdout arrives as latin1
+function blobsFromBatch(stdout: string, count: number): Buffer[] {
+  const bytes = Buffer.from(stdout, "latin1");
+  const blobs: Buffer[] = [];
   let at = 0;
   for (let index = 0; index < count; index += 1) {
     const headerEnd = bytes.indexOf(0x0a, at);
@@ -135,14 +145,14 @@ function blobsFromBatch(stdout: string, count: number): string[] {
     if (headerEnd === -1 || header[1] !== "blob" || !Number.isInteger(size)) {
       throw new Unreadable("`git cat-file` answered in a shape this does not read");
     }
-    blobs.push(bytes.subarray(headerEnd + 1, headerEnd + 1 + size).toString("utf8"));
+    blobs.push(bytes.subarray(headerEnd + 1, headerEnd + 1 + size));
     at = headerEnd + 1 + size + 1;
   }
   return blobs;
 }
 
 async function ignoredByBaseRules(
-  git: (what: string, args: string[], options?: { cwd?: string; stdin?: string; okCodes?: number[] }) => Promise<string>,
+  git: (what: string, args: string[], options?: GitOptions) => Promise<string>,
   baseSha: string,
   paths: string[],
 ): Promise<Set<string>> {
@@ -161,6 +171,7 @@ async function ignoredByBaseRules(
       : blobsFromBatch(
           await git("cat-file", ["cat-file", "--batch"], {
             stdin: gitignores.map(({ blob }) => `${blob}\n`).join(""),
+            bytes: true,
           }),
           gitignores.length,
         );
