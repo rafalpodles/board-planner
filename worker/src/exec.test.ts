@@ -14,6 +14,15 @@ function alive(pid: number): boolean {
 }
 
 describe("createRunner", () => {
+  it("hands back stdout byte for byte when asked for latin1", async () => {
+    const script = "process.stdout.write(Buffer.from([0x63, 0xe9, 0x0a, 0xff]))";
+    const bytes = await createRunner().run("node", ["-e", script], { cwd: tmpdir(), timeoutMs: 10_000, stdoutEncoding: "latin1" });
+    const text = await createRunner().run("node", ["-e", script], { cwd: tmpdir(), timeoutMs: 10_000 });
+
+    expect([...Buffer.from(bytes.stdout, "latin1")]).toEqual([0x63, 0xe9, 0x0a, 0xff]);
+    expect(Buffer.byteLength(text.stdout, "utf8")).not.toBe(4);
+  });
+
   it("captures stdout and a zero exit code", async () => {
     const result = await createRunner().run("node", ["-e", "process.stdout.write('hi')"], {
       cwd: process.cwd(),

@@ -74,7 +74,7 @@ describe("who the worker's commits are by", () => {
     expect(resolved.ok).toBe(true);
     const identity = (resolved as { identity: { name: string; email: string } }).identity;
 
-    await commitAll(createRunner(), gitPath, work, "BP-516: work", identity);
+    await commitAll(createRunner(), gitPath, work, "BP-516: work", identity, "HEAD");
 
     expect(git(work, "log", "-1", "--format=%ae").trim()).toBe("operator@example.com");
     expect(git(work, "log", "-1", "--format=%an").trim()).not.toBe("");
@@ -84,7 +84,7 @@ describe("who the worker's commits are by", () => {
     const resolved = await resolveCommitIdentity(createRunner(), gitPath, work);
     const identity = (resolved as { identity: { name: string; email: string } }).identity;
 
-    const sha = await commitAll(createRunner(), gitPath, work, "BP-516: work", identity);
+    const sha = await commitAll(createRunner(), gitPath, work, "BP-516: work", identity, "HEAD");
 
     expect(identity).toEqual({ name: "The Operator", email: "operator@example.com" });
     expect(sha).toMatch(/^[0-9a-f]{40}$/);
@@ -102,7 +102,7 @@ describe("who the worker's commits are by", () => {
 
     const resolved = await resolveCommitIdentity(createRunner(), gitPath, work);
     const identity = (resolved as { identity: { name: string; email: string } }).identity;
-    await commitAll(createRunner(), gitPath, work, "BP-516: work", identity);
+    await commitAll(createRunner(), gitPath, work, "BP-516: work", identity, "HEAD");
 
     // Both halves: what was resolved, and what the commit carries. The local config would supply
     // the second on its own — it survives `GIT_CONFIG_GLOBAL=/dev/null` — so without the first

@@ -195,7 +195,7 @@ describe("every real env-building call site stays inside the allowlist, across a
       const worktree = await workspace.create("BP-1", "worker");
 
       writeFileSync(join(worktree.path, "change.txt"), "hello\n");
-      const sha = await commitAll(runner, gitPath, worktree.path, "a change", worktree.commitIdentity);
+      const sha = await commitAll(runner, gitPath, worktree.path, "a change", worktree.commitIdentity, worktree.baseSha);
       expect(sha).not.toBe("");
 
       const wrong = await unexpectedHistory(runner, gitPath, worktree.path, worktree.baseSha, [sha]);
