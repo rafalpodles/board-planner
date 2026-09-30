@@ -206,11 +206,14 @@ The lock belongs to the process, not to a file on disk: on macOS it is `flock` o
 `<CP_STATE_DIR>/worker.lock`, on Linux an abstract unix socket named for the directory, and the
 kernel drops either when the process dies, however it dies — a worker killed with `kill -9` or a
 crash never blocks the next start, and there is nothing to delete by hand. `worker.pid` beside it
-only names the holder in that message. `worker.lock` is write-only (`0200`) on purpose: a confined
+only names the holder in that message. `worker.lock` is write-only (`0200`), and set so at every start, on purpose: a confined
 spawn may read the state directory, and holding the lock from a process that outlived its worker
 would keep the next worker from starting — and so from reaping it. `--preflight` takes no lock; it
 neither reaps nor claims. Under `KeepAlive`, a plist worker that loses the race is restarted by
 launchd every ten seconds or so, repeating the message in its error log, until the other one stops.
+On Linux any local user can bind the socket's name first, and the name is per network namespace, so
+two workers in different namespaces do not see each other; Linux takes no work without
+`CP_ALLOW_UNCONFINED_AGENT=1` anyway.
 
 As a macOS service:
 

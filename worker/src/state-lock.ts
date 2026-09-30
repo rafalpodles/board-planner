@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { closeSync, constants, mkdirSync, openSync, readFileSync, realpathSync, writeSync } from "node:fs";
+import { closeSync, constants, fchmodSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, writeSync } from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
 
@@ -36,21 +36,22 @@ function recordedHolder(stateDir: string): number | null {
 }
 
 function recordHolder(stateDir: string): void {
-  const fd = openSync(
-    join(stateDir, STATE_PID_NAME),
-    constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW,
-    0o600
-  );
+  const target = join(stateDir, STATE_PID_NAME);
+  const staged = `${target}.${process.pid}`;
+  rmSync(staged, { force: true });
+  const fd = openSync(staged, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
   try {
     writeSync(fd, `${process.pid}\n`);
   } finally {
     closeSync(fd);
   }
+  renameSync(staged, target);
 }
 
 function lockWithOpenFlag(stateDir: string): void {
+  let fd: number;
   try {
-    openSync(
+    fd = openSync(
       join(stateDir, STATE_LOCK_NAME),
       constants.O_WRONLY | constants.O_CREAT | constants.O_NOFOLLOW | constants.O_NONBLOCK | O_EXLOCK,
       LOCK_MODE
@@ -59,6 +60,7 @@ function lockWithOpenFlag(stateDir: string): void {
     if ((error as NodeJS.ErrnoException).code === "EAGAIN") throw new StateDirBusy(stateDir, recordedHolder(stateDir));
     throw error;
   }
+  fchmodSync(fd, LOCK_MODE);
 }
 
 // Linux has no O_EXLOCK; the kernel unbinds an abstract socket when its process dies

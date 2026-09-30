@@ -1,5 +1,5 @@
 import { ChildProcess, execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -163,5 +163,30 @@ describe("one worker per state directory", () => {
 
     const next = startWorker(stateDir);
     await answering(stateDir, next);
+  }, 60_000);
+
+  it.skipIf(process.platform !== "darwin")("narrows a lock file somebody else left readable, and still locks with it", async () => {
+    const stateDir = newStateDir();
+    writeFileSync(join(stateDir, STATE_LOCK_NAME), "", { mode: 0o644 });
+
+    const first = startWorker(stateDir);
+    await answering(stateDir, first);
+    expect(statSync(join(stateDir, STATE_LOCK_NAME)).mode & 0o777).toBe(0o200);
+
+    const second = startWorker(stateDir);
+    expect(await exitWithin(second, STARTUP_MS)).toBe(1);
+    expect(second.stderr()).toContain(`(pid ${first.child.pid})`);
+  }, 60_000);
+
+  it("replaces a hard link planted at the pid file rather than writing through it", async () => {
+    const stateDir = newStateDir();
+    const elsewhere = join(scratch, `elsewhere-${Date.now()}`);
+    writeFileSync(elsewhere, "keep\n");
+    linkSync(elsewhere, join(stateDir, STATE_PID_NAME));
+
+    const worker = startWorker(stateDir);
+    await answering(stateDir, worker);
+    expect(readFileSync(elsewhere, "utf8")).toBe("keep\n");
+    expect(readFileSync(join(stateDir, STATE_PID_NAME), "utf8").trim()).toBe(String(worker.child.pid));
   }, 60_000);
 });
