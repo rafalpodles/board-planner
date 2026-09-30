@@ -31,8 +31,8 @@ const SAFE_CONFIG = [
   // ignored there reads as a clean tree, reaches no diff and no gate, and is still run by the test
   // gate. The repository's own `.gitignore` is a separate list and is untouched. So is
   // `.git/info/exclude` — and that one is the same hazard with the same owner as `.git/config`:
-  // untracked, shared with the main clone, writable by the agent, and reaching no diff. Telling it
-  // from the repository's own list needs `check-ignore -v`, which is BP-640.
+  // untracked, shared with the main clone, reaching no diff, and with no key to turn it off, so
+  // hidden-files.ts asks `check-ignore -v` which rule hides each ignored path instead (BP-640).
   "core.excludesFile=/dev/null",
 ];
 

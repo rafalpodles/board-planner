@@ -1,5 +1,6 @@
 import { Runner } from "./exec.js";
 import { gitArgs, localGitEnv, operatorGitEnv, requireGitPath } from "./git-safety.js";
+import { hiddenFromGit } from "./hidden-files.js";
 import { plantedConfig, UNREADABLE_CONFIG } from "./repos.js";
 
 const TIMEOUT_MS = 60_000;
@@ -165,6 +166,7 @@ export async function commitAll(
   worktreePath: string,
   message: string,
   identity: CommitIdentity,
+  baseSha: string,
 ): Promise<string> {
   const git = (args: string[]) =>
     runner.run(requireGitPath(gitPath), gitArgs(args), {
@@ -218,6 +220,10 @@ export async function commitAll(
     );
   }
   if (planted) throw new TamperedCheckoutError(planted);
+
+  const hidden = await hiddenFromGit(runner, gitPath, worktreePath, baseSha);
+  if (hidden?.kind === "unreadable") throw new Error(`refusing to stage: ${hidden.detail}`);
+  if (hidden) throw new TamperedCheckoutError(hidden.detail);
 
   const status = await git(["status", "--porcelain"]);
   if (status.code !== 0)

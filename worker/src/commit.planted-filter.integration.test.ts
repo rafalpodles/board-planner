@@ -49,6 +49,7 @@ describe("commitAll against a planted filter", () => {
 
   let dir: string;
   let work: string;
+  let baseSha: string;
   let marker: string;
   let payload: string;
 
@@ -64,6 +65,7 @@ describe("commitAll against a planted filter", () => {
     writeFileSync(join(work, "a.txt"), BASE);
     git(work, "add", "a.txt");
     git(work, "commit", "--quiet", "-m", "base");
+    baseSha = git(work, "rev-parse", "HEAD").trim();
 
     // What the agent did during the run, and what the worker is about to stage.
     writeFileSync(join(work, "a.txt"), EDITED);
@@ -101,7 +103,7 @@ describe("commitAll against a planted filter", () => {
       it("makes commitAll refuse, and no commit is created", async () => {
         const head = git(work, "rev-parse", "HEAD").trim();
 
-        await expect(commitAll(createRunner(), gitPath, work, "BP-403: staged work", IDENTITY)).rejects.toThrow(
+        await expect(commitAll(createRunner(), gitPath, work, "BP-403: staged work", IDENTITY, baseSha)).rejects.toThrow(
           new RegExp(`refusing to stage.*filter\\.z\\.${leaf}`)
         );
 
@@ -110,7 +112,7 @@ describe("commitAll against a planted filter", () => {
 
       if (RUNS_WHEN_STAGING[leaf]) {
         it("never runs the program — not at add, and not at the status before it", async () => {
-          await expect(commitAll(createRunner(), gitPath, work, "BP-403: staged work", IDENTITY)).rejects.toThrow();
+          await expect(commitAll(createRunner(), gitPath, work, "BP-403: staged work", IDENTITY, baseSha)).rejects.toThrow();
           expect(existsSync(marker)).toBe(false);
         });
 
@@ -121,7 +123,7 @@ describe("commitAll against a planted filter", () => {
           writeFileSync(join(work, "a.txt"), BASE);
           writeFileSync(join(work, "new.ts"), NEW_FILE);
 
-          await expect(commitAll(createRunner(), gitPath, work, "BP-403: staged work", IDENTITY)).rejects.toThrow();
+          await expect(commitAll(createRunner(), gitPath, work, "BP-403: staged work", IDENTITY, baseSha)).rejects.toThrow();
           expect(existsSync(marker)).toBe(false);
         });
       }
@@ -173,7 +175,7 @@ describe("commitAll against a planted filter", () => {
     });
 
     it("never runs it when the worker stages, and still commits", async () => {
-      const sha = await commitAll(createRunner(), gitPath, work, "BP-516: staged work", IDENTITY);
+      const sha = await commitAll(createRunner(), gitPath, work, "BP-516: staged work", IDENTITY, baseSha);
 
       expect(existsSync(marker), "the global filter ran anyway").toBe(false);
       expect(sha).toMatch(/^[0-9a-f]{40}$/);
@@ -223,7 +225,7 @@ describe("commitAll against a planted filter", () => {
       }).toString();
       expect(seen, "the ignore list was never live").not.toContain("hidden.ts");
 
-      await commitAll(createRunner(), gitPath, work, "BP-516: staged work", IDENTITY);
+      await commitAll(createRunner(), gitPath, work, "BP-516: staged work", IDENTITY, baseSha);
 
       expect(git(work, "show", "--pretty=format:", "--name-only", "HEAD")).toContain("hidden.ts");
     });
@@ -232,7 +234,7 @@ describe("commitAll against a planted filter", () => {
     // the way into the index, so "the program did not run" and "the content is what was written"
     // are two claims, and the second is the one a reviewer of the pull request depends on.
     it("commits what the agent wrote, not what the filter would have made of it", async () => {
-      await commitAll(createRunner(), gitPath, work, "BP-516: staged work", IDENTITY);
+      await commitAll(createRunner(), gitPath, work, "BP-516: staged work", IDENTITY, baseSha);
 
       expect(git(work, "show", "HEAD:a.txt")).toBe(EDITED);
     });
@@ -270,7 +272,7 @@ describe("commitAll against a planted filter", () => {
     it("is named by the scan when it is in the checkout, the way a filter is", async () => {
       git(work, "config", "gpg.program", payload);
 
-      await expect(commitAll(createRunner(), gitPath, work, "BP-516: staged work", IDENTITY)).rejects.toThrow(
+      await expect(commitAll(createRunner(), gitPath, work, "BP-516: staged work", IDENTITY, baseSha)).rejects.toThrow(
         /refusing to stage.*gpg\.program/,
       );
       expect(existsSync(marker)).toBe(false);
@@ -297,7 +299,7 @@ describe("commitAll against a planted filter", () => {
         expect(existsSync(marker)).toBe(true);
         rmSync(marker, { force: true });
 
-        const sha = await commitAll(createRunner(), gitPath, work, "BP-516: staged work", IDENTITY);
+        const sha = await commitAll(createRunner(), gitPath, work, "BP-516: staged work", IDENTITY, baseSha);
 
         expect(existsSync(marker), "the signing program ran anyway").toBe(false);
         expect(sha).toMatch(/^[0-9a-f]{40}$/);
@@ -312,7 +314,7 @@ describe("commitAll against a planted filter", () => {
   // worktree with nothing staged — would read exactly like a refusal that worked.
   describe("a checkout the agent left alone", () => {
     it("commits, and returns the sha it created", async () => {
-      const sha = await commitAll(createRunner(), gitPath, work, "BP-403: ordinary work", IDENTITY);
+      const sha = await commitAll(createRunner(), gitPath, work, "BP-403: ordinary work", IDENTITY, baseSha);
 
       expect(sha).toMatch(/^[0-9a-f]{40}$/);
       expect(git(work, "rev-parse", "HEAD").trim()).toBe(sha);
@@ -325,7 +327,7 @@ describe("commitAll against a planted filter", () => {
       // config defines is inert, and refusing it would break every ordinary repository.
       git(work, "config", "filter.z.required", "false");
 
-      expect(await commitAll(createRunner(), gitPath, work, "BP-403: ordinary work", IDENTITY)).toMatch(/^[0-9a-f]{40}$/);
+      expect(await commitAll(createRunner(), gitPath, work, "BP-403: ordinary work", IDENTITY, baseSha)).toMatch(/^[0-9a-f]{40}$/);
       expect(existsSync(marker)).toBe(false);
     });
   });

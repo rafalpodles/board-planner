@@ -480,8 +480,12 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   which `SAFE_CONFIG` pins to `/dev/null` for that reason. What that stages is wider than a
   `.DS_Store`: the gates run `npm ci` and the build inside the worktree, so a `node_modules` or a
   `dist` the repository's own `.gitignore` does not name is committed by the next edit step, where
-  the diff-size gates are what make it loud. One list is left:
-  `.git/info/exclude`, untracked and reaching no diff, which is BP-640.
+  the diff-size gates are what make it loud. `.git/info/exclude` has no key that turns it off, so
+  before staging, after every edit step and before every gate the worker asks `git check-ignore -v`
+  which rule hides each ignored path, and refuses the run — naming the rule's file and line — for
+  any path hidden by something other than a `.gitignore` byte-identical to the base commit's. That
+  covers `info/exclude`, a new nested `.gitignore` (which can ignore itself), and a rule added to
+  a tracked one (BP-640).
 
   **Nothing this worker commits is signed.** `commit.gpgSign=false` and `push.gpgSign=false` ride on
   every call, because signing runs a program the checkout names (`gpg.program`, or ssh's key

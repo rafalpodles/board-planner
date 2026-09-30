@@ -100,6 +100,11 @@ function shell(stdout = "", overrides: Partial<CommandResult> = {}): CommandResu
   return { code: 0, stdout, stderr: "", timedOut: false, ...overrides };
 }
 
+// Every call answers `stdout` except the hidden-file listing (BP-640), which finds nothing ignored
+function answering(stdout: string) {
+  return vi.fn<Runner["run"]>(async (_command, args) => shell(args.includes("ls-files") ? "" : stdout));
+}
+
 const IMPLEMENT_COMMIT_SHA = "sha-implement001";
 
 // Not the literal "git" — see commit.test.ts's gitPath comment (BP-641 review).
@@ -678,9 +683,66 @@ describe("runTask", () => {
     expect(h.workspace.destroy).toHaveBeenCalledWith("CP-158");
   });
 
+  describe("a file hidden from git by a rule the repository does not own (BP-640)", () => {
+    const EXCLUDE_RULE = "/main/.git/info/exclude\x007\x00evil.test.ts\x00evil.test.ts\x00";
+
+    // Clean everywhere, until `plantedYet` says the hidden file exists
+    function hidingRunner(plantedYet: () => boolean) {
+      const inner = defaultRunner();
+      return {
+        run: vi.fn<Runner["run"]>(async (command, args, opts) => {
+          if (args.includes("ls-files")) return shell(plantedYet() ? "evil.test.ts\0" : "");
+          if (args.includes("check-ignore")) return shell(EXCLUDE_RULE);
+          return inner.run(command, args, opts);
+        }),
+      };
+    }
+
+    it("runs no later gate once an earlier one has hidden a file, and names the rule", async () => {
+      let built = false;
+      const build = {
+        name: "build",
+        run: vi.fn<Gate["run"]>(async () => {
+          built = true;
+          return { ok: true, reason: "" };
+        }),
+      };
+      const tests = passingGate("test-run");
+      const h = harness({
+        runner: hidingRunner(() => built),
+        gateFor: (entry) => (entry.key === "build" ? build : entry.key === "test-run" ? tests : passingGate(entry.key)),
+      });
+
+      await runTask(h.deps, running("implement", "build", "test-run", "push"));
+
+      expect(build.run).toHaveBeenCalled();
+      expect(tests.run).not.toHaveBeenCalled();
+      expect(h.delivery.push).not.toHaveBeenCalled();
+      expect(h.reporter.failed.mock.calls[0][1]).toMatch(
+        /refusing to run the test-run gate: .*evil\.test\.ts \(\/main\/\.git\/info\/exclude:7: "evil\.test\.ts"\)/,
+      );
+      expect(h.workspace.destroy).not.toHaveBeenCalled();
+    });
+
+    it("refuses the tree after a writing step, even with git status reading it clean", async () => {
+      let listings = 0;
+      const runner = hidingRunner(() => {
+        listings += 1;
+        return listings > 1;
+      });
+      const gate = passingGate("diff-size");
+      const h = harness({ runner, gateFor: () => gate });
+
+      await runTask(h.deps, running("implement", "diff-size"));
+
+      expect(h.reporter.failed.mock.calls[0][1]).toMatch(/Implement left the worktree unclean[\s\S]*info\/exclude:7/);
+      expect(gate.run).not.toHaveBeenCalled();
+    });
+  });
+
   it("refuses to gate a worktree the executor left dirty, and keeps it for a human", async () => {
     const runner = {
-      run: vi.fn<Runner["run"]>().mockResolvedValue(shell("?? .claude/settings.json\n")),
+      run: answering("?? .claude/settings.json\n"),
     };
     const gate = passingGate("diff-size");
     const h = harness({ runner, gateFor: () => gate });
@@ -709,6 +771,7 @@ describe("runTask", () => {
       run: vi.fn<Runner["run"]>(async (_command, args) => {
         // The pre-staging config scan (BP-403) is not one of the calls this fixture counts
         if (args.includes("--list")) return shell("");
+        if (args.includes("ls-files")) return shell("");
         calls += 1;
         return calls === 1
           ? shell("")
@@ -896,7 +959,7 @@ describe("runTask", () => {
 
   // The agent has no Bash any more, so nothing but this puts its work in a commit
   it("commits what the agent wrote, under the task key", async () => {
-    const runner = { run: vi.fn<Runner["run"]>().mockResolvedValue(shell(" M src/a.ts\n")) };
+    const runner = { run: answering(" M src/a.ts\n") };
     const h = harness({ runner });
     await runTask(h.deps, running("implement"));
 
@@ -906,7 +969,7 @@ describe("runTask", () => {
   });
 
   it("does not commit a run the agent reported blocked", async () => {
-    const runner = { run: vi.fn<Runner["run"]>().mockResolvedValue(shell(" M src/a.ts\n")) };
+    const runner = { run: answering(" M src/a.ts\n") };
     const executor = {
       execute: vi.fn<Executor["execute"]>().mockResolvedValue({
         kind: "result",
@@ -1438,6 +1501,7 @@ describe("runTask", () => {
         // shape rather than counted: BP-403 added one call to it and BP-346 a second, and each
         // time the numbering below moved while still reading as though it named the checks
         if (args.includes("--list")) return shell("");
+        if (args.includes("ls-files")) return shell("");
         calls += 1;
         // 1: the first commit's status, 2: the check after step one, 3: the second commit's status,
         // 4: the check after step two — the one that only exists because steps can follow steps
@@ -1472,6 +1536,7 @@ describe("runTask", () => {
         if (args.includes("rev-parse")) return shell("base1");
         // The pre-staging config scan (BP-403) is not one of the calls this fixture counts
         if (args.includes("--list")) return shell("");
+        if (args.includes("ls-files")) return shell("");
         calls += 1;
         return shell(calls > 2 ? "?? dist/main.js\n" : "");
       }),
@@ -1729,6 +1794,7 @@ describe("runTask", () => {
       run: vi.fn<Runner["run"]>(async (_command, args) => {
         // The pre-staging config scan (BP-403) is not one of the calls this fixture counts
         if (args.includes("--list")) return shell("");
+        if (args.includes("ls-files")) return shell("");
         calls += 1;
         // rev-parse HEAD is what commitAll hands back as the sha it made — a real commit always
         // resolves it, so a mock that left it empty would prove nothing about state.committed

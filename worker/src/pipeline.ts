@@ -12,6 +12,7 @@ import { Delivery } from "./delivery.js";
 import { Runner } from "./exec.js";
 import { Executor } from "./executor.js";
 import { gitArgs, localGitEnv, requireGitPath } from "./git-safety.js";
+import { hiddenFromGit } from "./hidden-files.js";
 import { Reporter } from "./reporter.js";
 import { SHUTDOWN_SIGNAL } from "./commands.js";
 import { scrub } from "./scrub.js";
@@ -268,6 +269,7 @@ async function unfinishedWork(
   runner: Runner,
   gitPath: string,
   worktreePath: string,
+  baseSha: string,
 ): Promise<string | null> {
   const result = await runner.run(requireGitPath(gitPath), gitArgs(["status", "--porcelain"]), {
     cwd: worktreePath,
@@ -278,7 +280,11 @@ async function unfinishedWork(
     return `\`git status\` timed out after ${GIT_TIMEOUT_MS}ms`;
   if (result.code !== 0)
     return `\`git status\` failed: ${result.stderr || result.stdout}`;
-  return result.stdout.trim() || null;
+  return (
+    result.stdout.trim() ||
+    (await hiddenFromGit(runner, gitPath, worktreePath, baseSha))?.detail ||
+    null
+  );
 }
 
 // The gate-rejected branch is still delivered for a human to see, so it gets the same provenance
@@ -588,7 +594,7 @@ export async function runTask(
           executor,
           delivery,
           commit: (message) =>
-            commitAll(runner, deps.gitPath, worktree.path, message, worktree.commitIdentity),
+            commitAll(runner, deps.gitPath, worktree.path, message, worktree.commitIdentity, worktree.baseSha),
           state,
           timeoutMs: budget.forEntry(config.taskTimeoutMs),
           signal: deps.signal,
@@ -714,6 +720,19 @@ export async function runTask(
           await reporter.failed(
             task,
             `this worker implements no gate of kind ${JSON.stringify(entry.gateKind ?? "")} (${entry.key}), so the agent could not be run as it was composed. Nothing was pushed; the worktree is kept at \`${worktree.path}\` on the worker host.`,
+          );
+          return;
+        }
+
+        // Before every gate, not only after edit steps: build and test-run execute the agent's own
+        // code, which can hide a file from git as well as an Implement step can (BP-640)
+        const hidden = await hiddenFromGit(runner, deps.gitPath, worktree.path, worktree.baseSha);
+        if (hidden) {
+          keepWorktree = true;
+          settle("failed", `refused to run the ${gate.name} gate over files git hides`);
+          await reporter.failed(
+            task,
+            `refusing to run the ${gate.name} gate: ${hidden.detail}\n\nThe worktree is kept at \`${worktree.path}\` on the worker host, with the hidden files still in it.`,
           );
           return;
         }
@@ -861,7 +880,7 @@ export async function runTask(
       // artifact the target repo does not gitignore would fail a run that did nothing wrong.
       if (entry.kind !== "step" || entry.capability !== "edit") continue;
 
-      const leftover = await unfinishedWork(runner, deps.gitPath, worktree.path);
+      const leftover = await unfinishedWork(runner, deps.gitPath, worktree.path, worktree.baseSha);
       if (leftover) {
         keepWorktree = true;
         settle("failed", `${entry.name} left the worktree unclean`);
