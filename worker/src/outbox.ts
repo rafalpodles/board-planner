@@ -37,8 +37,7 @@ const MAX_ENTRIES = 500;
  *
  * Named rather than a range, and the range was the first attempt: most 4xx answers say the request
  * was malformed, and the twenty-first attempt is then the first one identical to the first — while
- * every later report waits behind it, because order within a task matters and one failure stops
- * the drain (BP-613). A worker newer than its board is how that happens in practice: an outcome
+ * every later report for that task waits behind it, because order within a task matters (BP-613). A worker newer than its board is how that happens in practice: an outcome
  * the board's enum does not know answers `400 Unknown outcome`, once per poll.
  *
  * But "4xx" swept up three answers that are among the most transient the board gives, and dropping
@@ -91,8 +90,8 @@ function serialise(entries: Entry[]): string {
   return entries.map((entry) => JSON.stringify(entry)).join("\n");
 }
 
-function taskOf(op: OutboxOp): string {
-  return op.kind === "run" ? op.record.taskId : op.taskId;
+function taskOf(op: OutboxOp): string | undefined {
+  return op.kind === "run" ? op.record?.taskId : op.taskId;
 }
 
 async function deliver(api: ApiClient, op: OutboxOp): Promise<void> {
@@ -140,12 +139,17 @@ export function createOutbox(store: Store, log: Log = (m) => console.error(m)): 
       const remaining: Entry[] = [];
       let delivered = 0;
       let dropped = 0;
-      let blocked = false;
+      const blockedTasks = new Set<string>();
+      let blockedAll = false;
 
       for (const entry of entries) {
         // Order matters within a task — a status move before its comment reads as an empty
-        // decision — so one failure stops the drain rather than reordering around it
-        if (blocked) {
+        // decision — so a failure holds back the rest of that task's reports rather than
+        // reordering around it. Nothing orders one task's reports against another's, so a task
+        // refused for a while (a 403 from a project that paused this machine) holds up only itself.
+        // A line naming no task cannot be placed, so it waits behind any hold and holds everything.
+        const task = taskOf(entry.op);
+        if (blockedAll || (task ? blockedTasks.has(task) : blockedTasks.size > 0)) {
           remaining.push(entry);
           continue;
         }
@@ -156,7 +160,7 @@ export function createOutbox(store: Store, log: Log = (m) => console.error(m)): 
           if (permanent(error)) {
             dropped += 1;
             log(
-              `outbox: dropping ${entry.op.kind} for task ${taskOf(entry.op)} — the board refused it and will refuse it again: ${String(error)}`
+              `outbox: dropping ${entry.op.kind} for task ${task} — the board refused it and will refuse it again: ${String(error)}`
             );
             continue;
           }
@@ -164,12 +168,13 @@ export function createOutbox(store: Store, log: Log = (m) => console.error(m)): 
           if (attempts >= MAX_ATTEMPTS) {
             dropped += 1;
             log(
-              `outbox: giving up on ${entry.op.kind} for task ${taskOf(entry.op)} after ${attempts} attempts: ${String(error)}`
+              `outbox: giving up on ${entry.op.kind} for task ${task} after ${attempts} attempts: ${String(error)}`
             );
             continue;
           }
           remaining.push({ ...entry, attempts });
-          blocked = true;
+          if (task) blockedTasks.add(task);
+          else blockedAll = true;
         }
       }
 

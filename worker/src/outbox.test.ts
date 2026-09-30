@@ -62,7 +62,7 @@ describe("createOutbox", () => {
   });
 
   // A status move that lands before its comment reads as a decision with no reason given
-  it("stops draining at the first failure rather than reordering around it", async () => {
+  it("holds back the rest of a task's reports at its first failure rather than reordering around it", async () => {
     const store = memoryStore();
     const outbox = createOutbox(store, vi.fn());
     outbox.add({ kind: "comment", projectId: "CP", taskId: "t1", body: "merged" });
@@ -73,6 +73,82 @@ describe("createOutbox", () => {
 
     expect(result).toEqual({ delivered: 0, pending: 2, dropped: 0 });
     expect(api.setStatus).not.toHaveBeenCalled();
+  });
+
+  // BP-797. A project that paused this machine answers 403 for its tasks for as long as the pause
+  // lasts, and every other project's reports used to wait behind it for up to twenty flushes.
+  it("does not hold another task's reports behind a task the board is refusing for now", async () => {
+    const store = memoryStore();
+    const outbox = createOutbox(store, vi.fn());
+    outbox.add({ kind: "comment", projectId: "P1", taskId: "a", body: "paused project" });
+    outbox.add({ kind: "comment", projectId: "P2", taskId: "b", body: "merged" });
+    outbox.add({ kind: "status", projectId: "P2", taskId: "b", status: "done" });
+    const comment = vi.fn<ApiClient["comment"]>(async (_project, taskId) => {
+      if (taskId === "a") throw new ApiError("POST failed: 403", 403, "this worker may not run");
+    });
+    const api = apiSpy({ comment });
+
+    expect(await outbox.flush(api)).toEqual({ delivered: 2, pending: 1, dropped: 0 });
+    expect(comment).toHaveBeenCalledWith("P2", "b", "merged");
+    expect(api.setStatus).toHaveBeenCalledWith("P2", "b", "done");
+  });
+
+  it("keeps a held task's own reports in order behind its failure, across flushes", async () => {
+    const store = memoryStore();
+    const outbox = createOutbox(store, vi.fn());
+    outbox.add({ kind: "comment", projectId: "P1", taskId: "a", body: "why" });
+    outbox.add({ kind: "comment", projectId: "P2", taskId: "b", body: "other" });
+    outbox.add({ kind: "status", projectId: "P1", taskId: "a", status: "review" });
+    const refusing = apiSpy({
+      comment: vi.fn<ApiClient["comment"]>(async (_project, taskId) => {
+        if (taskId === "a") throw new ApiError("POST failed: 403", 403, "paused");
+      }),
+    });
+
+    expect(await outbox.flush(refusing)).toEqual({ delivered: 1, pending: 2, dropped: 0 });
+    expect(refusing.setStatus).not.toHaveBeenCalled();
+
+    const calls: string[] = [];
+    const healed = apiSpy({
+      comment: vi.fn<ApiClient["comment"]>(async (_project, taskId, body) => {
+        calls.push(`comment ${taskId} ${body}`);
+      }),
+      setStatus: vi.fn<ApiClient["setStatus"]>(async (_project, taskId, status) => {
+        calls.push(`status ${taskId} ${status}`);
+      }),
+    });
+
+    expect(await outbox.flush(healed)).toEqual({ delivered: 2, pending: 0, dropped: 0 });
+    expect(calls).toEqual(["comment a why", "status a review"]);
+  });
+
+  it("holds everything behind a failing line that names no task, since it cannot be placed", async () => {
+    const orphan = JSON.stringify({ op: { kind: "run", projectId: "P1" }, attempts: 0 });
+    const later = JSON.stringify({
+      op: { kind: "comment", projectId: "P2", taskId: "b", body: "merged" },
+      attempts: 0,
+    });
+    const outbox = createOutbox(memoryStore(`${orphan}\n${later}\n`), vi.fn());
+    const api = apiSpy({ postRun: vi.fn().mockRejectedValue(new Error("502")) });
+
+    expect(await outbox.flush(api)).toEqual({ delivered: 0, pending: 2, dropped: 0 });
+    expect(api.comment).not.toHaveBeenCalled();
+  });
+
+  it("keeps a line that names no task behind a task already held, which it may belong to", async () => {
+    const held = JSON.stringify({
+      op: { kind: "comment", projectId: "P1", taskId: "a", body: "why" },
+      attempts: 0,
+    });
+    const orphan = JSON.stringify({ op: { kind: "run", projectId: "P1" }, attempts: 0 });
+    const outbox = createOutbox(memoryStore(`${held}\n${orphan}\n`), vi.fn());
+    const api = apiSpy({
+      comment: vi.fn().mockRejectedValue(new ApiError("POST failed: 403", 403, "paused")),
+      postRun: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(await outbox.flush(api)).toEqual({ delivered: 0, pending: 2, dropped: 0 });
+    expect(api.postRun).not.toHaveBeenCalled();
   });
 
   it("delivers on a later flush once the server comes back", async () => {
