@@ -1,5 +1,5 @@
 import { type Instrumentation } from "next";
-import { describeRequestError } from "@/lib/request-error-log";
+import { clientHungUp, describeRequestError } from "@/lib/request-error-log";
 
 // Must live under src/, not at the repo root, even though Turbopack accepts either. The check that
 // decides whether `standalone` output *packages* this file enumerates the app directory's parent —
@@ -183,5 +183,9 @@ async function bootWhenDatabaseIsReady(): Promise<void> {
  * network call is one more thing to fail while something is already failing.
  */
 export const onRequestError: Instrumentation.onRequestError = (error, request, context) => {
+  if (clientHungUp(error)) {
+    console.warn(`Client closed the connection mid-request — ${request.method} ${request.path.split("?")[0]}`);
+    return;
+  }
   console.error(describeRequestError(error, request, context));
 };

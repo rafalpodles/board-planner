@@ -72,6 +72,33 @@ describe("onRequestError", () => {
     expect(logged).toHaveBeenCalledTimes(1);
     expect(logged.mock.calls[0][0]).toContain("POST /oauth/token");
   });
+
+  // BP-802: a browser closing a page mid-autosave is not a crash of this server
+  it("says a client hung up, and not that an error went unhandled", () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    onRequestError(
+      Object.assign(new Error("aborted"), { code: "ECONNRESET" }),
+      { path: "/api/projects/TP/tasks/t1?x=1", method: "PUT", headers: {} },
+      { routerKind: "App Router", routePath: "/api/projects/[projectId]/tasks/[taskId]", routeType: "route", revalidateReason: undefined }
+    );
+
+    expect(logged).not.toHaveBeenCalled();
+    expect(warned).toHaveBeenCalledWith("Client closed the connection mid-request — PUT /api/projects/TP/tasks/t1");
+  });
+
+  it("still reports an ordinary error named aborted as unhandled", () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    onRequestError(
+      new Error("aborted"),
+      { path: "/api/x", method: "GET", headers: {} },
+      { routerKind: "App Router", routePath: "/api/x", routeType: "route", revalidateReason: undefined }
+    );
+
+    expect(logged.mock.calls[0][0]).toContain("Unhandled error");
+  });
 });
 
 /**

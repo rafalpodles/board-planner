@@ -13,6 +13,7 @@
 export const GROUPS = {
   tasks: [
     "task-detail.spec.ts",
+    "connection-reuse.spec.ts",
     "react-without-a-mouse.spec.ts",
     "another-boards-task.spec.ts",
     "task-from-anywhere.spec.ts",

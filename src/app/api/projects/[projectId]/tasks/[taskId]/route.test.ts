@@ -107,6 +107,39 @@ beforeEach(() => {
   heldRunRefusal.mockResolvedValue(null);
 });
 
+// BP-802: a throw here is logged as an unhandled error, and a client hanging up mid-body is one
+describe("PUT .../tasks/:taskId and a body it cannot read", () => {
+  function unreadable(body: BodyInit) {
+    return new Request(`https://app.example.com/api/projects/p1/tasks/${TASK}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body,
+      duplex: "half",
+    } as RequestInit);
+  }
+
+  it("answers 400 for a body that is not JSON", async () => {
+    const res = await PUT(unreadable("{not json"), ctx());
+
+    expect(res.status).toBe(400);
+    expect(updateTask).not.toHaveBeenCalled();
+  });
+
+  it("answers 400 rather than throwing when the client hangs up mid-body", async () => {
+    const hungUp = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"title":"half'));
+        controller.error(Object.assign(new Error("aborted"), { code: "ECONNRESET" }));
+      },
+    });
+
+    const res = await PUT(unreadable(hungUp), ctx());
+
+    expect(res.status).toBe(400);
+    expect(updateTask).not.toHaveBeenCalled();
+  });
+});
+
 // BP-320: PATCH .../status refused force from a machine credential; PUT .../tasks/:id reaches the
 // identical code path with the identical flag and did not. Same outcome, one door locked.
 describe("PUT .../tasks/:taskId and force", () => {

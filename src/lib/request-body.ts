@@ -127,9 +127,10 @@ function tooLarge(maxBytes: number): BodyRefusal {
   return {
     ok: false,
     reason: "too-large",
+    // The rest of the body is never read, so the connection cannot carry another request
     response: NextResponse.json(
       { error: `request body must be at most ${maxBytes} bytes` },
-      { status: 413 }
+      { status: 413, headers: { Connection: "close" } }
     ),
   };
 }

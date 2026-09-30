@@ -112,7 +112,11 @@ export const PUT = withProjectAccess(async (request, { params, user }) => {
   }
   await connectDB();
 
-  const body = await request.json();
+  // Also where a client that hung up mid-body lands, which is not this server's error
+  const body = await request.json().catch(() => undefined);
+  if (body === undefined) {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
 
   // Kept out of the update itself: `force` is a instruction about the write, not a field on the task
   const { force, ...updates } = body ?? {};
