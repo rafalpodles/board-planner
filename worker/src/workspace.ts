@@ -11,6 +11,7 @@ import { WorkerConfig } from "./config.js";
 import { plantedConfig, UNREADABLE_CONFIG } from "./repos.js";
 import { CommandResult, Runner } from "./exec.js";
 import { gitArgs, localGitEnv, requireGitPath } from "./git-safety.js";
+import { GitPin, nodePointerFiles, pinTampering, PointerFiles, recordPin } from "./worktree-pin.js";
 
 const GIT_TIMEOUT_MS = 60_000;
 
@@ -95,6 +96,10 @@ export interface Worktree {
    * agent runs, rather than at the commit an hour of somebody's subscription later.
    */
   commitIdentity: CommitIdentity;
+  /** Every git and gh call against `path` runs with this git dir, never through `path/.git` (BP-794). */
+  pin: GitPin;
+  /** What a step or gate has done to `.git` or the index flags since creation, or null. */
+  tampering(): Promise<string | null>;
 }
 
 export interface Workspace {
@@ -134,7 +139,8 @@ export function createWorkspace(
   remoteEnv?: () => NodeJS.ProcessEnv,
   remoteUrl?: string,
   // The pinned GitHub account's identity; without one, whatever git config names (BP-779)
-  pinnedIdentity?: CommitIdentity
+  pinnedIdentity?: CommitIdentity,
+  files: PointerFiles = nodePointerFiles
 ): Workspace {
   // api.ts refuses a key that is not a name; this is the sink where a key becomes a path, and the
   // only place that can still tell a traversal from a directory name
@@ -415,7 +421,14 @@ export function createWorkspace(
       await refuseIfPoisoned();
       // -B resets the branch instead of failing if a crashed previous attempt already created it
       await git(["worktree", "add", "-B", branch, "--", path, baseSha]);
-      return { path, baseSha, commitIdentity: identity.identity };
+      const pin = await recordPin(runner, gitPath, path, files);
+      return {
+        path,
+        baseSha,
+        commitIdentity: identity.identity,
+        pin,
+        tampering: () => pinTampering(runner, gitPath, pin, files),
+      };
     },
 
     async destroy(taskKey) {

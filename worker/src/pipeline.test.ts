@@ -113,6 +113,11 @@ const GIT_PATH = "/opt/homebrew/bin/git";
 // Resolved by workspace.create before the agent runs, and required from there on: the commit has
 // nowhere else to get one, with `~/.gitconfig` out of the picture (BP-516).
 const IDENTITY = { name: "The Operator", email: "operator@example.com" };
+const PIN = { workTree: "/wt", gitDir: "/repo/.git/worktrees/wt", pointer: "gitdir: /repo/.git/worktrees/wt\n", flagged: [] };
+
+function worktreeAt(baseSha: string, tampering: () => Promise<string | null> = async () => null) {
+  return { path: "/wt", baseSha, commitIdentity: IDENTITY, pin: PIN, tampering };
+}
 
 // A worktree that starts dirty, the way the implement step actually leaves one, and goes clean the
 // moment commitAll's own `git commit` runs — so the sha it hands back is what reaches push, and the
@@ -177,7 +182,7 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
   const delivery = deliverySpy();
   const createDelivery = vi.fn<PipelineDeps["createDelivery"]>(() => delivery);
   const workspace = {
-    create: vi.fn<Workspace["create"]>().mockResolvedValue({ path: "/wt", baseSha: "base1", commitIdentity: IDENTITY }),
+    create: vi.fn<Workspace["create"]>().mockResolvedValue(worktreeAt("base1")),
     destroy: vi.fn<Workspace["destroy"]>().mockResolvedValue(undefined),
     listWorktrees: vi.fn<Workspace["listWorktrees"]>().mockResolvedValue([]),
   };
@@ -324,15 +329,36 @@ describe("runTask", () => {
     const h = harness({ config: { ...config, baseBranch: "develop" } });
     await runTask(h.deps, task);
 
-    expect(h.createDelivery).toHaveBeenCalledWith(h.runner, "develop");
+    expect(h.createDelivery).toHaveBeenCalledWith(expect.anything(), "develop");
+  });
+
+  // BP-794: `.git` in the worktree is the agent's to rewrite, so delivery, the diff and the gates
+  // get a runner that names the git dir recorded at creation instead
+  it("hands delivery and the diff a runner pinned to the worktree's own git dir", async () => {
+    const h = harness();
+    await runTask(h.deps, task);
+
+    const inner = vi.mocked(h.runner.run);
+    for (const pinned of [h.createDelivery.mock.calls[0][0], h.collectDiff.mock.calls[0][0]]) {
+      inner.mockClear();
+      await pinned.run("/usr/bin/git", ["status"], { cwd: "/wt/sub", timeoutMs: 1, env: { HOME: "/h" } });
+      await pinned.run("/usr/bin/git", ["init"], { cwd: "/tmp/scratch", timeoutMs: 1, env: { HOME: "/h" } });
+      await pinned.run("/usr/bin/sandbox-exec", ["npm"], { cwd: "/wt", timeoutMs: 1, env: { HOME: "/h" } });
+
+      expect(inner.mock.calls.map((call) => call[2].env)).toEqual([
+        { HOME: "/h", GIT_DIR: PIN.gitDir, GIT_WORK_TREE: "/wt" },
+        { HOME: "/h" },
+        { HOME: "/h" },
+      ]);
+    }
   });
 
   it("diffs against the worktree's captured base sha, not the configured branch name", async () => {
     const h = harness({ config: { ...config, baseBranch: "develop" } });
-    h.workspace.create.mockResolvedValue({ path: "/wt", baseSha: "base111", commitIdentity: IDENTITY });
+    h.workspace.create.mockResolvedValue(worktreeAt("base111"));
     await runTask(h.deps, task);
 
-    expect(h.collectDiff).toHaveBeenCalledWith(h.runner, "/wt", "base111");
+    expect(h.collectDiff).toHaveBeenCalledWith(expect.anything(), "/wt", "base111");
   });
 
   // A base that could not be established is the machine's failure, not the task's. requeued charges
@@ -756,6 +782,75 @@ describe("runTask", () => {
 
       expect(h.reporter.failed.mock.calls[0][1]).toMatch(/Implement left the worktree unclean[\s\S]*info\/exclude:7/);
       expect(gate.run).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("a checkout whose .git file or index flags changed during the run (BP-794)", () => {
+    const FINDING = 'its .git file reading "gitdir: /wt/.y" where git wrote "gitdir: /repo/.git/worktrees/wt"';
+
+    // Untouched for the first `clean` checks, rewritten from then on
+    function tamperedAfter(clean: number) {
+      let checks = 0;
+      return vi.fn(async () => (++checks > clean ? FINDING : null));
+    }
+
+    it("refuses to commit, and keeps the tree", async () => {
+      const h = harness();
+      h.workspace.create.mockResolvedValue(worktreeAt("base1", tamperedAfter(0)));
+      const gate = passingGate("diff-size");
+      h.deps.gateFor = () => gate;
+
+      await runTask(h.deps, running("implement", "diff-size", "push"));
+
+      expect(vi.mocked(h.runner.run).mock.calls.some((call) => call[1].includes("commit"))).toBe(false);
+      expect(gate.run).not.toHaveBeenCalled();
+      expect(h.delivery.push).not.toHaveBeenCalled();
+      expect(h.reporter.failed.mock.calls[0][1]).toContain(`refusing to stage: the checkout now has ${FINDING}`);
+      expect(h.workspace.destroy).not.toHaveBeenCalled();
+    });
+
+    it("refuses to run a gate after an earlier gate rewrote it", async () => {
+      const build = passingGate("build");
+      const tests = passingGate("test-run");
+      const h = harness({
+        gateFor: (entry) => (entry.key === "build" ? build : entry.key === "test-run" ? tests : passingGate(entry.key)),
+      });
+      // commit, then before build — the build is what rewrote it
+      h.workspace.create.mockResolvedValue(worktreeAt("base1", tamperedAfter(2)));
+
+      await runTask(h.deps, running("implement", "build", "test-run", "push"));
+
+      expect(build.run).toHaveBeenCalled();
+      expect(tests.run).not.toHaveBeenCalled();
+      expect(h.delivery.push).not.toHaveBeenCalled();
+      expect(h.reporter.failed.mock.calls[0][1]).toContain(
+        `refusing to run the test-run gate: the checkout now has ${FINDING}`,
+      );
+      expect(h.workspace.destroy).not.toHaveBeenCalled();
+    });
+
+    it("refuses to push after the last gate rewrote it", async () => {
+      const h = harness({ gateFor: (entry) => passingGate(entry.key) });
+      h.workspace.create.mockResolvedValue(worktreeAt("base1", tamperedAfter(2)));
+
+      await runTask(h.deps, running("implement", "test-run", "push", "pull-request"));
+
+      expect(h.delivery.push).not.toHaveBeenCalled();
+      expect(h.delivery.openPr).not.toHaveBeenCalled();
+      expect(h.reporter.failed.mock.calls[0][1]).toContain(`refusing to push: the checkout now has ${FINDING}`);
+      expect(h.workspace.destroy).not.toHaveBeenCalled();
+    });
+
+    it("does not push a gate-rejected branch either", async () => {
+      const refusing = { name: "diff-size", run: vi.fn<Gate["run"]>(async () => ({ ok: false, reason: "too big" })) };
+      const h = harness({ gateFor: () => refusing });
+      h.workspace.create.mockResolvedValue(worktreeAt("base1", tamperedAfter(2)));
+
+      await runTask(h.deps, running("implement", "diff-size"));
+
+      expect(refusing.run).toHaveBeenCalled();
+      expect(h.delivery.push).not.toHaveBeenCalled();
+      expect(h.reporter.gateRejected.mock.calls[0][2]).toContain(`refusing to push: the checkout now has ${FINDING}`);
     });
   });
 
@@ -1464,7 +1559,7 @@ describe("runTask", () => {
 
   it("never rejects, even when the cleanup itself throws", async () => {
     const workspace = {
-      create: vi.fn<Workspace["create"]>().mockResolvedValue({ path: "/wt", baseSha: "base1", commitIdentity: IDENTITY }),
+      create: vi.fn<Workspace["create"]>().mockResolvedValue(worktreeAt("base1")),
       destroy: vi.fn<Workspace["destroy"]>(() => {
         throw new Error("worktree is locked");
       }),

@@ -55,6 +55,8 @@ export interface StepContext {
   executor: Executor;
   delivery: Delivery;
   commit: (message: string) => Promise<string>;
+  /** What the run has done to `.git` or the index flags, checked before anything is delivered (BP-794). */
+  tampering: () => Promise<string | null>;
   state: RunState;
   timeoutMs: number;
   signal?: AbortSignal;
@@ -83,6 +85,11 @@ async function deliver(
   entry: SnapshotEntry,
   ctx: StepContext,
 ): Promise<StepOutcome> {
+  const tampered = await ctx.tampering();
+  if (tampered) {
+    const act = entry.key === "pull-request" ? "open a pull request" : entry.key;
+    return { kind: "error", message: `refusing to ${act}: the checkout now has ${tampered}` };
+  }
   switch (entry.key) {
     case "push": {
       const wrong = await unexpectedHistory(

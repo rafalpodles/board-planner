@@ -107,6 +107,7 @@ const FILES_THAT_RUN_GIT = [
   "provenance.ts",
   "repos.ts",
   "workspace.ts",
+  "worktree-pin.ts",
 ];
 
 // Both shapes a git call can be written in, correct and vulnerable alike — this test's job below is

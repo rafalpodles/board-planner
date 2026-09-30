@@ -15,6 +15,7 @@ import { createTelemetry } from "./telemetry.js";
 import { ClaimedTask } from "./types.js";
 import { createWorker, WorkerDeps } from "./wiring.js";
 import { scopedConfigListZ } from "./config-list.fixtures.js";
+import { stubWorktree } from "./__fixtures__/stub-worktree.js";
 
 const STATE_DIR = "/tmp/cp-wiring-test-state";
 
@@ -483,7 +484,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         if (command === GIT_PATH && args.includes("worktree") && args.includes("add")) {
           const separator = args.indexOf("--");
           if (separator !== -1 && args[separator + 1]) {
-            mkdirSync(args[separator + 1], { recursive: true });
+            stubWorktree(args[separator + 1]);
           }
         }
         if (isAgentSpawn(command, args)) {
@@ -948,7 +949,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         if (command === GIT_PATH && args.includes("worktree") && args.includes("add")) {
           const separator = args.indexOf("--");
           if (separator !== -1 && args[separator + 1]) {
-            mkdirSync(args[separator + 1], { recursive: true });
+            stubWorktree(args[separator + 1]);
           }
         }
         if (isAgentSpawn(command, args)) {

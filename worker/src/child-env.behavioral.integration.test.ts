@@ -65,6 +65,7 @@ const KNOWN_EXTRAS = [
   ...Object.keys(GIT_SAFE_ENV), // GIT_CONFIG_NOSYSTEM, GIT_NO_REPLACE_OBJECTS
   "GIT_CONFIG_GLOBAL", // localGitEnv's own addition (git-safety.ts)
   "GIT_DIR", "GIT_CEILING_DIRECTORIES", // workspace.ts's neutral base-lookup env
+  "GIT_WORK_TREE", // worktree-pin.ts, beside the GIT_DIR above (BP-794)
   "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", // commit.ts
   "SSH_AUTH_SOCK", "GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR", "XDG_CONFIG_HOME", // delivery.ts's alsoAllow
   ...Object.keys(hardenedGitConfig(GH_PATH)), // delivery.ts's git hardening

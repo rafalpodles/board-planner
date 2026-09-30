@@ -491,6 +491,16 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   What the base `.gitignore` itself ignores still reaches no diff and can still be run by the Test
   gate — a file under an ignored `dist/`, say — which is BP-795.
 
+  **The worktree's `.git` file is not trusted once the agent starts.** In a linked worktree it is a
+  file inside the worktree, and a confined step can rewrite it to name a git dir of its own, with
+  its own remote, ignore rules and index. So the git dir is recorded when the worktree is created,
+  and every git and `gh` call in the worktree names it through `GIT_DIR`/`GIT_WORK_TREE`. Before
+  each commit, each gate and each push, pull request or merge, the worker also compares the `.git`
+  file with what git wrote and lists the index for `skip-worktree`/`assume-unchanged` flags the
+  checkout did not start with; either one refuses the run and says what changed (BP-794). A sparse
+  checkout's own flags are recorded at creation and pass. A worktree refused this way cannot be
+  removed by `git worktree remove` until its `.git` file is put back.
+
   **Nothing this worker commits is signed.** `commit.gpgSign=false` and `push.gpgSign=false` ride on
   every call, because signing runs a program the checkout names (`gpg.program`, or ssh's key
   command) and that is the sink the scan exists to guard. A repository whose branch protection

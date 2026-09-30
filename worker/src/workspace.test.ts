@@ -46,6 +46,9 @@ const IDENT_LINE = "The Operator <operator@example.com> 1789000000 +0200\n";
 // …and whether anybody chose that address. git guesses one from the hostname otherwise, and only
 // refuses the guess where the hostname has no dot in it, so asking git alone is host-dependent.
 const IDENT_EMAIL = "config --get user.email";
+// Where the new worktree's git dir is, recorded right after `worktree add` (BP-794)
+const GIT_DIR = "rev-parse --absolute-git-dir";
+const POINTER_FILES = { read: () => "gitdir: /repo/.git/worktrees/CP-158\n", kind: () => "file" as const };
 
 function fakeGit(responses: Record<string, Partial<CommandResult>>) {
   const run = vi.fn(async (_command: string, args: string[], _opts: RunOpts): Promise<CommandResult> => {
@@ -66,12 +69,13 @@ function baseFromRemote(sha: string, extra: Record<string, Partial<CommandResult
     "worktree list --porcelain": { stdout: "" },
     [IDENT]: { stdout: IDENT_LINE },
     [IDENT_EMAIL]: { stdout: "operator@example.com\n" },
+    [GIT_DIR]: { stdout: "/repo/.git/worktrees/CP-158\n" },
     ...extra,
   };
 }
 
 function withRemote(runner: Parameters<typeof createWorkspace>[1], env: () => NodeJS.ProcessEnv = () => ({})) {
-  return createWorkspace(config, runner, gitPath, env, REMOTE_URL);
+  return createWorkspace(config, runner, gitPath, env, REMOTE_URL, undefined, POINTER_FILES);
 }
 
 function ranAny(run: { mock: { calls: unknown[][] } }, fragment: string): boolean {
@@ -115,7 +119,7 @@ describe("createWorkspace", () => {
       const { runner, run } = fakeGit(baseFromRemote("base1"));
       const pinned = { name: "Octo Cat", email: "1+octocat@users.noreply.github.com" };
 
-      const result = await createWorkspace(config, runner, gitPath, () => ({}), REMOTE_URL, pinned).create(
+      const result = await createWorkspace(config, runner, gitPath, () => ({}), REMOTE_URL, pinned, POINTER_FILES).create(
         "CP-158",
         "worker",
       );
@@ -331,7 +335,7 @@ describe("createWorkspace", () => {
   it("refuses to run at all when no remote is configured, rather than reading the local ref", async () => {
     for (const env of [undefined, () => ({})]) {
       const { runner, run } = fakeGit(baseFromRemote("local1"));
-      const workspace = createWorkspace(config, runner, gitPath, env, env ? undefined : REMOTE_URL);
+      const workspace = createWorkspace(config, runner, gitPath, env, env ? undefined : REMOTE_URL, undefined, POINTER_FILES);
       await expect(workspace.create("BP-1", "worker")).rejects.toThrow(/no remote is configured/);
       expect(readsLocalRef(run)).toBe(false);
     }
@@ -654,6 +658,9 @@ describe("createWorkspace", () => {
         return { code: 0, stdout: "", stderr: "", timedOut: false };
       }
       const args = rawArgs.slice(HARDENING_PREFIX.length);
+      if (args.join(" ") === GIT_DIR) {
+        return { code: 0, stdout: "/repo/.git/worktrees/CP-158\n", stderr: "", timedOut: false };
+      }
       if (args[0] === "rev-parse") {
         return { code: 0, stdout: "base9\n", stderr: "", timedOut: false };
       }
