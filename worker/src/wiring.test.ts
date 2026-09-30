@@ -599,6 +599,8 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       deliverable?: boolean;
       // How many times runPreflight throws before the real one answers; true is every time
       preflightThrows?: boolean | number;
+      // What it rejects with, when not the default Error
+      preflightRejection?: unknown;
       // Run between passes, after the clock jump — the one hook point available to change what is
       // on disk mid-run, for a test about recovering from a failure and then repeating it.
       onSleep?: (stateDir: string, sleepIndex: number) => void;
@@ -698,7 +700,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
             runPreflight: (preflightDeps) => {
               reportsBeforePreflight.push(seenHeartbeat?.preflight?.());
               return preflightFailures-- > 0
-                ? Promise.reject(new Error("no shell on this machine"))
+                ? Promise.reject("preflightRejection" in opts ? opts.preflightRejection : new Error("no shell on this machine"))
                 : runPreflight(preflightDeps);
             },
           }
@@ -1009,6 +1011,27 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     );
     expect(log).toHaveBeenCalledWith("preflight ran this time; its report replaces the failure");
     expect(claimed).toBe(true);
+  });
+
+  // Review of BP-793: a reason that is empty must still count as a failure, or the machine claims
+  // with nothing resolved
+  it.each([
+    ["an empty string", ""],
+    ["an Error with no message", new Error("")],
+  ])("blocks, reports and retries a preflight rejected with %s", async (_label, rejection) => {
+    const { claims, heartbeatDeps, reportsBeforePreflight } = await runOneTask(undefined, undefined, {
+      preflightThrows: true,
+      preflightRejection: rejection,
+      passes: 2,
+    });
+
+    expect(claims).toBe(0);
+    expect(reportsBeforePreflight.length).toBeGreaterThanOrEqual(2);
+    expect(heartbeatDeps?.preflight?.()).toEqual({
+      ok: false,
+      account: "",
+      checks: [{ name: "sandbox", ok: false, detail: "preflight could not run: no reason given" }],
+    });
   });
 
   it("logs a preflight that keeps failing for the same reason once, not on every poll", async () => {

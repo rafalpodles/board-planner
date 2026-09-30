@@ -246,6 +246,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   // What this machine can actually do, established once at startup. Null until then, and reported
   // as undefined while it is, so a worker mid-startup never claims to be broken.
   let preflight: PreflightReport | null = null;
+  let preflightFailed = false;
   let preflightError = "";
   let leftovers = "";
   let probedSandboxRow: PreflightCheck | undefined;
@@ -373,7 +374,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   // and, through `claude -p`, every grandchild then inherits. Without this the check passes and
   // every task still fails.
   async function establishPreflight(): Promise<void> {
-    const retrying = Boolean(preflightError);
+    const retrying = preflightFailed;
     try {
       preflight = await deps.runPreflight({
         runner: deps.runner,
@@ -384,11 +385,13 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
         configuredCommitIdentity: configuredCommitIdentity(deps.readFile, bootstrap.stateDir),
       });
     } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      if (reason !== preflightError) deps.logError(`preflight could not run: ${reason}`);
+      const reason = (error instanceof Error ? error.message : String(error)).trim() || "no reason given";
+      if (!preflightFailed || reason !== preflightError) deps.logError(`preflight could not run: ${reason}`);
+      preflightFailed = true;
       preflightError = reason;
       return;
     }
+    preflightFailed = false;
     preflightError = "";
     if (retrying) deps.log("preflight ran this time; its report replaces the failure");
 
@@ -408,10 +411,10 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   // Once per poll while preflight could not run, like retryLeftovers: the machine claims nothing
   // until it has, and a transient failure should not need a restart to clear (BP-793)
   async function retryPreflight(): Promise<void> {
-    if (!preflightError) return;
+    if (!preflightFailed) return;
     await establishPreflight();
     // The inventory read before this had no git to scan with
-    if (!preflightError) lastRefresh = 0;
+    if (!preflightFailed) lastRefresh = 0;
   }
 
   // Where every spawn of a preflight-resolved tool reads its path from (BP-641, BP-733). `establishPreflight` runs
@@ -849,7 +852,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     if (leftovers) return leftovers;
     const row = preflight?.checks.find((check) => check.name === SANDBOX_CHECK);
     if (row && !row.ok) return row.detail;
-    if (!preflight) return preflightError ? `preflight could not run: ${preflightError}` : "";
+    if (!preflight) return preflightFailed ? `preflight could not run: ${preflightError}` : "";
     const missing = TOOLS_A_STEP_SPAWNS.filter((tool) => !isAbsolute(preflight?.paths[tool] ?? ""));
     if (!missing.length) return "";
     return `${missing.join(" and ")} could not be found on this machine, and every task needs ${missing.length > 1 ? "them" : "it"}`;
@@ -890,7 +893,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     // server to keep the last report, which was green, and the sandbox row is the one it reads as
     // this machine taking no work (BP-793)
     preflight: () => {
-      if (!preflight && !preflightError) return undefined;
+      if (!preflight && !preflightFailed) return undefined;
       const own = preflight?.checks ?? [{ name: SANDBOX_CHECK, ok: false, detail: claimBlocked() }];
       const checks = [...own, ...repoChecks, ...quarantineChecks()];
       return { ok: checks.every((c) => c.ok), account: preflight?.account ?? "", checks };
