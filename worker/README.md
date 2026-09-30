@@ -190,6 +190,28 @@ socket path at 104 bytes, so when that path would be longer the socket moves to
 mode 0700 and refuses to use if anybody else owns it or can write to it. The menubar derives the
 same path from the same state directory, so nothing needs configuring (BP-778).
 
+**One worker per state directory** (**BP-808**). Two workers on one `CP_STATE_DIR` — a launchd
+plist and the menubar app both on the default `~/.boardplanner`, say — share one credential, and
+the second one's startup reap would kill the first one's running spawns. So the worker takes an
+exclusive lock on the directory before anything else, before the reap and before it replaces the
+socket; a second one exits with status 1 and says so on stderr:
+
+```
+Another Board Planner worker (pid 4242) is already running on /Users/you/.boardplanner. Two workers
+on one state directory share one machine credential and kill each other's runs, so this one is not
+starting. Stop the other worker, or give this one its own CP_STATE_DIR.
+```
+
+The lock belongs to the process, not to a file on disk: on macOS it is `flock` on
+`<CP_STATE_DIR>/worker.lock`, on Linux an abstract unix socket named for the directory, and the
+kernel drops either when the process dies, however it dies — a worker killed with `kill -9` or a
+crash never blocks the next start, and there is nothing to delete by hand. `worker.pid` beside it
+only names the holder in that message. `worker.lock` is write-only (`0200`) on purpose: a confined
+spawn may read the state directory, and holding the lock from a process that outlived its worker
+would keep the next worker from starting — and so from reaping it. `--preflight` takes no lock; it
+neither reaps nor claims. Under `KeepAlive`, a plist worker that loses the race is restarted by
+launchd every ten seconds or so, repeating the message in its error log, until the other one stops.
+
 As a macOS service:
 
 Write the enrolment token first, to a file only you can read — never into the plist, which sits

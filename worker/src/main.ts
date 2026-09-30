@@ -2,6 +2,7 @@ import { defaultWorkerDeps, createWorker } from "./wiring.js";
 import { pathWithTools } from "./preflight.js";
 import { stateDirFrom } from "./config.js";
 import { configuredCommitIdentity, pinnedAccount } from "./github-account.js";
+import { lockStateDir, StateDirBusy } from "./state-lock.js";
 
 // `node dist/main.js --preflight` answers "can this machine do the work" as JSON and exits, without
 // registering anything or claiming anything. The menubar app runs this before it will enrol a
@@ -48,13 +49,16 @@ async function main(): Promise<void> {
     return;
   }
 
-  const worker = createWorker();
+  // Before createWorker, which already replaces the control socket and opens the control stream
+  const deps = defaultWorkerDeps();
+  await lockStateDir(stateDirFrom(deps.env));
+  const worker = createWorker(deps);
   process.on("SIGTERM", () => worker.shutdown());
   process.on("SIGINT", () => worker.shutdown());
   await worker.run();
 }
 
 main().catch((error) => {
-  console.error(error);
+  console.error(error instanceof StateDirBusy ? error.message : error);
   process.exit(1);
 });
