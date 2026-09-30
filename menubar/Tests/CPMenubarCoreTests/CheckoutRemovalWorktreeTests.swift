@@ -179,7 +179,7 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
     private func repoWithSubmodule() throws -> (superproject: String, submodulePath: String) {
         let subOrigin = dir + "/sub-origin.git"
         let subSeed = dir + "/sub-seed"
-        _ = git(dir, ["init", "-q", "--bare", subOrigin])
+        _ = git(dir, ["init", "-q", "--bare", "-b", "main", subOrigin])
         _ = git(dir, ["init", "-q", "-b", "main", subSeed])
         FileManager.default.createFile(atPath: subSeed + "/a.txt", contents: Data("a\n".utf8))
         _ = git(subSeed, ["add", "-A"])

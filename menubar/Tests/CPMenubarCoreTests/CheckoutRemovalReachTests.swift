@@ -160,7 +160,7 @@ final class CheckoutRemovalReachTests: XCTestCase {
     func testASubmoduleItsOwnGitmodulesSilencedIsStillSeen() throws {
         let checkout = cleanCheckout()
         let subOrigin = dir + "/sub-origin.git"
-        _ = git(dir, ["init", "-q", "--bare", subOrigin])
+        _ = git(dir, ["init", "-q", "--bare", "-b", "main", subOrigin])
         let subSource = dir + "/sub-source"
         _ = git(dir, ["init", "-q", "-b", "main", subSource])
         FileManager.default.createFile(atPath: subSource + "/s.txt", contents: Data("s\n".utf8))
@@ -193,7 +193,7 @@ final class CheckoutRemovalReachTests: XCTestCase {
     func testACleanSubmoduleSilencedTheSameWayStillGoes() throws {
         let checkout = cleanCheckout()
         let subOrigin = dir + "/sub2-origin.git"
-        _ = git(dir, ["init", "-q", "--bare", subOrigin])
+        _ = git(dir, ["init", "-q", "--bare", "-b", "main", subOrigin])
         let subSource = dir + "/sub2-source"
         _ = git(dir, ["init", "-q", "-b", "main", subSource])
         FileManager.default.createFile(atPath: subSource + "/s.txt", contents: Data("s\n".utf8))

@@ -67,7 +67,7 @@ final class SubmoduleLayoutTests: XCTestCase {
     private func pushedRepository(_ name: String) -> String {
         let origin = dir + "/\(name)-origin.git"
         let seed = dir + "/\(name)-seed"
-        _ = git(dir, ["init", "-q", "--bare", origin])
+        _ = git(dir, ["init", "-q", "--bare", "-b", "main", origin])
         _ = git(dir, ["init", "-q", "-b", "main", seed])
         FileManager.default.createFile(atPath: seed + "/a.txt", contents: Data("a\n".utf8))
         _ = git(seed, ["add", "-A"])
@@ -80,6 +80,7 @@ final class SubmoduleLayoutTests: XCTestCase {
     /// `-c protocol.file.allow=always` for the same reason `CheckoutRemovalWorktreeTests` gives: a
     /// direct, operator-initiated `submodule add` of a local path, not the recursive case git's
     /// default guards against.
+    ///
     /// The superproject's first commit predates the submodule, on a branch named `before`.
     private func submodule(
         in layout: Layout, at relativePath: String = "vendor"
@@ -88,7 +89,7 @@ final class SubmoduleLayoutTests: XCTestCase {
         let superOrigin = dir + "/super-origin.git"
         let superproject = dir + "/super"
         let submodulePath = superproject + "/" + relativePath
-        _ = git(dir, ["init", "-q", "--bare", superOrigin])
+        _ = git(dir, ["init", "-q", "--bare", "-b", "main", superOrigin])
 
         if layout == .separateGitDir {
             _ = git(dir, ["init", "-q", "-b", "main", "--separate-git-dir", dir + "/super-gitdir", superproject])
@@ -104,7 +105,8 @@ final class SubmoduleLayoutTests: XCTestCase {
             // directory ("Adding existing repo at 'vendor' to the index") — the pre-1.7.8 shape
             _ = git(superproject, ["clone", "-q", subOrigin, relativePath])
         }
-        _ = git(superproject, ["-c", "protocol.file.allow=always", "submodule", "add", "-q", subOrigin, relativePath])
+        let added = git(superproject, ["-c", "protocol.file.allow=always", "submodule", "add", "-q", subOrigin, relativePath])
+        try requireGitlink(relativePath, in: superproject, after: added)
         _ = git(superproject, ["commit", "-qm", "add submodule"])
         _ = git(superproject, ["remote", "add", "origin", superOrigin])
         _ = git(superproject, ["push", "-q", "-u", "origin", "HEAD"])
@@ -119,17 +121,36 @@ final class SubmoduleLayoutTests: XCTestCase {
             try Data("/realgit/\n".utf8).write(to: URL(fileURLWithPath: superproject + "/realgit/info/exclude"))
         }
 
-        // Without it a git that refused the add leaves `vendor` absent, and a spawn into a missing
-        // cwd hangs `readDataToEndOfFile()` rather than failing (see CheckoutRemovalWorktreeTests)
-        try XCTSkipIf(
-            !FileManager.default.fileExists(atPath: submodulePath + "/a.txt"),
-            "this git refused a file-protocol submodule")
         return (superproject, submodulePath)
+    }
+
+    private struct FixtureFailed: Error {}
+
+    /// A failure, never a skip: on CI's Homebrew git 2.55.0, which has no Xcode `gitconfig` setting
+    /// `init.defaultBranch=main`, a bare origin's HEAD named an unborn `master`, the add stopped at
+    /// "You are on a branch yet to be born", and the superproject never got a gitlink. The clone was
+    /// left behind, `checkout main` filled it in, and every test then checked an ordinary nested
+    /// clone — which is correctly a repository — and read as the detection failing.
+    ///
+    /// It also keeps a missing `vendor` from hanging the suite: a spawn into a cwd that does not
+    /// exist blocks in `readDataToEndOfFile()` (see CheckoutRemovalWorktreeTests).
+    private func requireGitlink(
+        _ relativePath: String, in superproject: String, after added: (code: Int32, output: String)
+    ) throws {
+        let staged = git(superproject, ["ls-files", "--stage", "--", relativePath]).output
+        guard added.code == 0, staged.hasPrefix("160000 ") else {
+            XCTFail("the fixture is not a submodule: `submodule add` exited \(added.code) (\(added.output)), index has \(staged)")
+            throw FixtureFailed()
+        }
     }
 
     private func assertTheFixtureIsTheLayoutItClaims(_ layout: Layout, _ submodulePath: String) {
         let gitDir = git(submodulePath, ["rev-parse", "--git-dir"]).output
         XCTAssertFalse(gitDir.contains("/.git/modules/"), "fixture is not the evading shape: \(gitDir)")
+        let named = git(submodulePath, ["rev-parse", "--show-superproject-working-tree"])
+        XCTAssertFalse(
+            named.output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            "this git (exit \(named.code)) names no superproject for this layout, so nothing tells it from a repository")
         if layout == .legacy {
             var isDirectory: ObjCBool = false
             FileManager.default.fileExists(atPath: submodulePath + "/.git", isDirectory: &isDirectory)
@@ -290,9 +311,9 @@ final class SubmoduleLayoutTests: XCTestCase {
         let (superproject, _) = try submodule(in: .ordinary)
         let innerOrigin = pushedRepository("inner")
         let outer = superproject + "/vendor"
-        _ = git(outer, ["-c", "protocol.file.allow=always", "submodule", "add", "-q", innerOrigin, "inner"])
+        let added = git(outer, ["-c", "protocol.file.allow=always", "submodule", "add", "-q", innerOrigin, "inner"])
+        try requireGitlink("inner", in: outer, after: added)
         let inner = outer + "/inner"
-        try XCTSkipIf(!FileManager.default.fileExists(atPath: inner + "/a.txt"), "this git refused a nested submodule")
 
         guard case .linkedWorktree(let reason) = CheckoutRemoval(run: { args, cwd in fixtureGit(cwd, args) })
             .check(path: inner, workerIsBusy: false)
