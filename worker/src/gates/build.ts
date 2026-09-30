@@ -1,6 +1,6 @@
 import { CommandResult, Runner } from "../exec.js";
 import { Gate } from "../types.js";
-import { LOOPBACK_ONLY_NOTE, refused, runConfinedNpm } from "./confined-npm.js";
+import { GIT_DEPENDENCIES_REFUSED_NOTE, LOOPBACK_ONLY_NOTE, refused, runConfinedNpm } from "./confined-npm.js";
 
 const MAX_REASON_CHARS = 2000;
 // --ignore-scripts: a lifecycle script from the worktree or any dependency would run as the
@@ -34,9 +34,10 @@ export function buildGate(runner: Runner, npmPath: string, timeoutMs: number): G
         return { ok: false, reason: `dependency install timed out after ${timeoutMs}ms` };
       }
       if (install.code !== 0) {
+        const gitRefused = /\bEALLOWGIT\b/.test(install.stdout + install.stderr);
         return {
           ok: false,
-          reason: `dependency install failed (exit ${install.code}):\n${outputTail(install)}`,
+          reason: `dependency install failed (exit ${install.code}${gitRefused ? `; ${GIT_DEPENDENCIES_REFUSED_NOTE}` : ""}):\n${outputTail(install)}`,
         };
       }
 

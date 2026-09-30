@@ -470,12 +470,20 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   `npm ci`, network open, because npm exports it as `NODE_OPTIONS` and a git dependency with a
   prepare script is prepared by a child `npm install`. The environment rather than a refusal of a
   changed `.npmrc`, because one an earlier gate's code writes is untracked and reaches no diff. The
-  cost: a proxy or `node-options` in your own `~/.npmrc` is overridden too. Still open: a key spelled
-  otherwise — upper case or underscores, `IGNORE_SCRIPTS=false`, `GIT=`, `HTTPS_PROXY=`,
-  `NODE_OPTIONS=` — is exported by npm to the child it spawns for a git dependency, over the pins,
-  so there it can still turn scripts back on or name a git binary, a proxy or node options, with the
-  network open during `npm ci` (**BP-812**); a git dependency still runs git and that child npm;
-  `ca`, `cafile`, `cert` and `key` cannot be neutralised from the environment, so a project
+  cost: a proxy or `node-options` in your own `~/.npmrc` is overridden too.
+
+  **Git dependencies are not installed** (**BP-812**). `allow-git=none` is pinned the same way, so
+  `npm ci` refuses any dependency that points at a git repository before cloning it, and the build
+  gate fails with `EALLOWGIT` and says the worker does not install git dependencies. That closes the
+  child `npm install` npm spawns to prepare one: it ran the dependency's `prepare` script whatever
+  `--ignore-scripts` said, and a key spelled otherwise in a project `.npmrc` — upper case or
+  underscores, `IGNORE_SCRIPTS=false`, `GIT=`, `HTTPS_PROXY=`, `NODE_OPTIONS=` — reached that child
+  over the pins, with the network open. The cost: a project with a git dependency anywhere in its
+  lockfile does not build under the worker; publish the package to a registry or vendor it. npm 10
+  does not know `allow-git` and ignores it, so the worker needs npm 11 for this to hold (measured on
+  11.17.0 and 11.19.0; 10.9.4 still ran the `prepare` script).
+
+  Still open: `ca`, `cafile`, `cert` and `key` cannot be neutralised from the environment, so a project
   `.npmrc` can make npm trust a certificate someone on the path presents; and a registry pointed at
   `http://` sends that registry's token in clear text to the same host.
 

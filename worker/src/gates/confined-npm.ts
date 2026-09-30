@@ -73,11 +73,14 @@ export function npmTempBase(env?: NodeJS.ProcessEnv): string {
 //   git dependency that has a prepare script, so `--require <file>` ran at that child's startup.
 //   The pin is Node's default stack-trace limit, which changes nothing.
 // - strict-ssl, umask: a TLS downgrade, and files written wider than the default.
-// A proxy or node-options in the operator's own `~/.npmrc` is overridden too. Canonical spellings
-// only: npm exports a project key spelled otherwise (`IGNORE_SCRIPTS`, `NODE_OPTIONS`) as
-// npm_config_<lowercased> to the child it spawns for a git dependency, over these pins, and there
-// it can turn scripts back on or name a git binary, a proxy or node options (BP-812).
+// - allow-git: npm exports a project key spelled otherwise (`IGNORE_SCRIPTS`, `NODE_OPTIONS`) as
+//   npm_config_<lowercased> to the child it spawns for a git dependency, over these pins, so there
+//   it could turn scripts back on or name a git binary, a proxy or node options. "none" refuses
+//   every git dependency before it is cloned, so that child is never spawned (BP-812). npm 10 does
+//   not know the key and ignores it.
+// A proxy or node-options in the operator's own `~/.npmrc` is overridden too.
 export const NPM_CONFIG_PINNED = {
+  npm_config_allow_git: "none",
   npm_config_git: "git",
   npm_config_proxy: "null",
   npm_config_https_proxy: "null",
@@ -88,6 +91,9 @@ export const NPM_CONFIG_PINNED = {
 
 // A refused connection prints only `connect EPERM <address>`, which reads like a firewall
 export const LOOPBACK_ONLY_NOTE = "outbound network is loopback-only under the worker";
+
+// A refused git dependency prints only `EALLOWGIT`, which reads like the project's own setting
+export const GIT_DEPENDENCIES_REFUSED_NOTE = "the worker does not install git dependencies";
 
 export interface ConfinedNpmOptions extends RunOpts {
   /** The worktree `cwd` is, as it was recorded at creation (BP-804). */
