@@ -8,13 +8,13 @@ describe("computeAffectedGroups", () => {
   });
 
   it("narrows to the one group an owned path maps to", () => {
-    expect(computeAffectedGroups(["src/components/kanban/Board.tsx"])).toEqual(["board"]);
+    expect(computeAffectedGroups(["src/components/kanban/Board.tsx"])).toEqual(["board", "a11y"]);
   });
 
   it("unions groups across several owned paths, in group order", () => {
     expect(
       computeAffectedGroups(["src/components/kanban/Board.tsx", "src/app/login/page.tsx"])
-    ).toEqual(["board", "people"]);
+    ).toEqual(["board", "people", "a11y"]);
   });
 
   it("matches the longest owned prefix, not just any ancestor", () => {
@@ -33,6 +33,7 @@ describe("computeAffectedGroups", () => {
     expect(computeAffectedGroups(["src/app/(app)/settings/workers/page.tsx"])).toEqual([
       "people",
       "automation",
+      "a11y",
     ]);
   });
 
@@ -52,7 +53,7 @@ describe("computeAffectedGroups", () => {
     // but board comes before people in GROUP_NAMES.
     expect(
       computeAffectedGroups(["src/app/login/page.tsx", "src/components/kanban/Board.tsx"])
-    ).toEqual(["board", "people"]);
+    ).toEqual(["board", "people", "a11y"]);
   });
 
   it("runs only the group a single changed spec belongs to", () => {
@@ -87,6 +88,7 @@ describe("computeAffectedGroups", () => {
       "tasks",
       "task-fields",
       "board",
+      "a11y",
     ]);
   });
 
@@ -96,23 +98,33 @@ describe("computeAffectedGroups", () => {
       "src/components/tasks/ActivityTimeline.tsx",
       "src/components/tasks/TaskActivityPanel.tsx",
     ]) {
-      expect(computeAffectedGroups([file])).toEqual(["tasks", "task-fields", "board", "project"]);
+      expect(computeAffectedGroups([file])).toEqual(["tasks", "task-fields", "board", "project", "a11y"]);
     }
   });
 
   it("adds project for the two board components a settings spec reads back from", () => {
-    expect(computeAffectedGroups(["src/components/kanban/BoardFilters.tsx"])).toEqual(["board", "project"]);
-    expect(computeAffectedGroups(["src/components/kanban/BoardHeader.tsx"])).toEqual(["board", "project"]);
+    expect(computeAffectedGroups(["src/components/kanban/BoardFilters.tsx"])).toEqual(["board", "project", "a11y"]);
+    expect(computeAffectedGroups(["src/components/kanban/BoardHeader.tsx"])).toEqual(["board", "project", "a11y"]);
   });
 
   it("sends a machine's own screens to the automation group, whose enrolment specs drive them", () => {
     for (const file of [
       "src/app/(app)/settings/machines/page.tsx",
-      "src/app/api/users/me/machines/route.ts",
       "src/app/enrol/[userCode]/page.tsx",
     ]) {
-      expect(computeAffectedGroups([file])).toEqual(["automation"]);
+      expect(computeAffectedGroups([file])).toEqual(["automation", "a11y"]);
     }
+    expect(computeAffectedGroups(["src/app/api/users/me/machines/route.ts"])).toEqual(["automation"]);
+  });
+
+  it("adds the accessibility sweep for a file that renders a screen, and only for one", () => {
+    expect(computeAffectedGroups(["src/app/(app)/agents/page.tsx"])).toEqual(["project", "a11y"]);
+    expect(computeAffectedGroups(["src/components/sprints/SprintPanel.tsx"])).toEqual(["board", "a11y"]);
+    expect(computeAffectedGroups(["src/app/api/agents/route.ts"])).toEqual(["project"]);
+  });
+
+  it("runs only the accessibility sweep when its own spec changes", () => {
+    expect(computeAffectedGroups(["e2e/a11y-sweep.spec.ts"])).toEqual(["a11y"]);
   });
 
   it("sends the hand-over readiness route to the tasks group, whose task-screen specs read it", () => {

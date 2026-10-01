@@ -273,6 +273,7 @@ export const GROUPS = {
     "rows-announce-apart.spec.ts",
     "removed-member-notifications.spec.ts",
   ],
+  a11y: ["a11y-sweep.spec.ts"],
 } as const satisfies Record<string, readonly string[]>;
 
 export type GroupName = keyof typeof GROUPS;
