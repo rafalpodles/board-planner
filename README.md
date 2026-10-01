@@ -239,9 +239,9 @@ the client at one URL:
 }
 ```
 
-Fourteen tools: `list_projects`, `get_project`, `list_tasks`, `get_task`, `create_task`,
-`update_task`, `change_task_status`, `list_sprints`, `create_sprint`, `update_sprint`, `add_comment`,
-`list_comments`, `link_tasks`, `unlink_tasks`.
+Fifteen tools: `list_projects`, `get_project`, `list_tasks`, `get_task`, `create_task`,
+`update_task`, `change_task_status`, `reorder_tasks`, `list_sprints`, `create_sprint`,
+`update_sprint`, `add_comment`, `list_comments`, `link_tasks`, `unlink_tasks`.
 
 Clients that want a connector instead of a pasted token get full **OAuth 2.1 with PKCE** and dynamic
 client registration at the same URL — no client secret. For stdio-only clients, a standalone server

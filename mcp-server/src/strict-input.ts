@@ -72,12 +72,12 @@ const UNREACHABLE_TASK_FIELDS: Record<string, string> = {
   dueDate: "the app — MCP does not set it",
   sprint: "the app — MCP does not set it",
   recurrence: "the app — MCP does not set it",
-  order: "the app — MCP does not reorder a board",
   watchers: "the app — MCP does not set them",
 };
 
 const TASK_FIELD_HINTS: Record<string, string> = {
   ...UNREACHABLE_TASK_FIELDS,
+  order: "the reorder_tasks tool",
   blockedBy: "the link_tasks tool on /api/mcp",
   relations: "the link_tasks tool on /api/mcp",
   checklist: "acceptanceCriteria, a markdown checklist",
@@ -100,3 +100,49 @@ export const UPDATE_TASK_HINTS: Record<string, string> = {
 export const CHANGE_STATUS_HINTS: Record<string, string> = {
   force: UPDATE_TASK_HINTS.force,
 };
+
+const LISTED_PROBLEMS = 5;
+
+export function taskIdsInOrder(
+  projectKey: string,
+  taskKeys: string[],
+  tasks: { _id: string; taskNumber: number }[]
+): string[] {
+  const prefix = `${projectKey.toUpperCase()}-`;
+  const idByNumber = new Map(tasks.map((t) => [t.taskNumber, String(t._id)]));
+  const seen = new Set<number>();
+  const problems: string[] = [];
+  const ids: string[] = [];
+
+  for (const taskKey of taskKeys) {
+    const key = taskKey.trim().toUpperCase();
+    const digits = key.startsWith(prefix) ? key.slice(prefix.length) : "";
+    if (!/^\d+$/.test(digits)) {
+      problems.push(`"${echo(taskKey)}" is not a ${projectKey.toUpperCase()} task key`);
+      continue;
+    }
+    const taskNumber = Number(digits);
+    const canonical = echo(`${prefix}${taskNumber}`);
+    if (seen.has(taskNumber)) {
+      problems.push(`${canonical} is listed more than once`);
+      continue;
+    }
+    seen.add(taskNumber);
+    const id = idByNumber.get(taskNumber);
+    if (!id) {
+      problems.push(`${canonical} does not exist`);
+      continue;
+    }
+    ids.push(id);
+  }
+
+  if (problems.length) {
+    const more = problems.length - LISTED_PROBLEMS;
+    throw new Error(
+      `Refused, nothing was reordered: ${problems.slice(0, LISTED_PROBLEMS).join("; ")}${
+        more > 0 ? `; and ${more} more` : ""
+      }.`
+    );
+  }
+  return ids;
+}

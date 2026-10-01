@@ -3,9 +3,7 @@ import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { Task } from "@/models/task";
-import { manualOrder, placeInto } from "@/lib/reorder";
-
-const MAX_IDS = 1000;
+import { MAX_REORDER_IDS, manualOrder, placeInto } from "@/lib/reorder";
 
 /**
  * Reorders tasks by rewriting `order` across the whole project.
@@ -29,8 +27,8 @@ export const PUT = withProjectAccess(async (request, { params }) => {
       { status: 400 }
     );
   }
-  if (ids.length > MAX_IDS) {
-    return NextResponse.json({ error: `order accepts at most ${MAX_IDS} ids` }, { status: 400 });
+  if (ids.length > MAX_REORDER_IDS) {
+    return NextResponse.json({ error: `order accepts at most ${MAX_REORDER_IDS} ids` }, { status: 400 });
   }
   // Checked before it reaches Mongoose: a malformed id there is a CastError, which
   // would surface as a 500 rather than the 400 this is

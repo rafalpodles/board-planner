@@ -98,6 +98,10 @@ export class PlannerClient {
     return this.request("PATCH", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}/status`, { status });
   }
 
+  async reorderTasks(projectId: string, taskIds: string[]): Promise<unknown> {
+    return this.request("PUT", `/api/projects/${seg(projectId)}/tasks/reorder`, { order: taskIds });
+  }
+
   async addTaskLink(
     projectId: string,
     taskId: string,

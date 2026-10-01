@@ -89,6 +89,10 @@ export class ApiClient {
     return this.request("PATCH", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}/status`, { status });
   }
 
+  async reorderTasks(projectId: string, taskIds: string[]): Promise<unknown> {
+    return this.request("PUT", `/api/projects/${seg(projectId)}/tasks/reorder`, { order: taskIds });
+  }
+
   // Links
   async addTaskLink(
     projectId: string,

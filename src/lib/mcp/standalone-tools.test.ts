@@ -33,6 +33,7 @@ function stubClient() {
     updateTask: vi.fn(async () => ({ _id: "t1" })),
     listAssignableUsers: vi.fn(async () => []),
     listAgents: vi.fn(async () => []),
+    reorderTasks: vi.fn(async () => ({ updated: 2 })),
   };
 }
 
@@ -76,7 +77,7 @@ describe("the standalone MCP server, driven rather than read", () => {
    * /api/mcp only — but the difference has to be a decision somebody wrote down, which is what
    * failing here makes it.
    */
-  it("registers the twelve it is frozen at, and neither of the link tools", async () => {
+  it("registers the thirteen it is frozen at, reorder_tasks among them, and neither of the link tools", async () => {
     const { McpServer, Client, InMemoryTransport, registerTools } = await standalone();
     const server = new McpServer({ name: "boardplanner", version: "1.0.0" });
     registerTools(server, stubClient() as never);
@@ -89,7 +90,8 @@ describe("the standalone MCP server, driven rather than read", () => {
       (t) => t.name
     );
 
-    expect(names).toHaveLength(12);
+    expect(names).toHaveLength(13);
+    expect(names).toContain("reorder_tasks");
     expect(names).not.toContain("link_tasks");
     expect(names).not.toContain("unlink_tasks");
   });
@@ -143,7 +145,7 @@ describe("the standalone MCP server, driven rather than read", () => {
     registerTools(server as never, stubClient() as never);
 
     // guards the guard: an empty map would satisfy the filter below without proving anything
-    expect(schemas.size).toBe(12);
+    expect(schemas.size).toBe(13);
 
     const permissive = [...schemas.entries()].filter(([, schema]) => {
       const result = schema.safeParse({ __stray__: 1 });
@@ -236,5 +238,68 @@ describe("the standalone MCP server, driven rather than read", () => {
     expect(bad.refused).toBe(true);
     expect(bad.said).toContain(`"${"z".repeat(64)}…"`);
     expect(bad.said.length).toBeLessThan(400);
+  });
+});
+
+describe("reorder_tasks in the standalone server", () => {
+  const keys = (n: number) => Array.from({ length: n }, (_, i) => `BP-${i + 1}`);
+
+  function stubBoard(size: number) {
+    const client = stubClient();
+    client.listTasks = vi.fn(async () =>
+      Array.from({ length: size }, (_, i) => ({ _id: `t${i + 1}`, taskNumber: i + 1 }))
+    );
+    return client;
+  }
+
+  it("sends the tasks' ids to the reorder route in the order the keys were listed", async () => {
+    const client = stubBoard(3);
+    const call = await connected(client);
+
+    const { refused } = await call("reorder_tasks", { project: "BP", taskKeys: ["BP-3", "BP-1"] });
+
+    expect(refused).toBe(false);
+    expect(client.reorderTasks).toHaveBeenCalledWith("p1", ["t3", "t1"]);
+  });
+
+  it("refuses an unknown, a duplicate and another board's key, and writes nothing", async () => {
+    const client = stubBoard(3);
+    const call = await connected(client);
+
+    const { refused, said } = await call("reorder_tasks", {
+      project: "BP",
+      taskKeys: ["BP-1", "BP-9", "TRW-1", "BP-1"],
+    });
+
+    expect(refused).toBe(true);
+    expect(said).toContain("BP-9 does not exist");
+    expect(said).toContain('"TRW-1" is not a BP task key');
+    expect(said).toContain("BP-1 is listed more than once");
+    expect(client.reorderTasks).not.toHaveBeenCalled();
+  });
+
+  it("holds the route's limit under its own zod major", async () => {
+    const { MAX_REORDER_IDS } = await import("@/lib/reorder");
+    const client = stubBoard(MAX_REORDER_IDS + 1);
+    const call = await connected(client);
+
+    const over = await call("reorder_tasks", { project: "BP", taskKeys: keys(MAX_REORDER_IDS + 1) });
+    expect(over.refused).toBe(true);
+    expect(client.reorderTasks).not.toHaveBeenCalled();
+
+    const atTheLimit = await call("reorder_tasks", { project: "BP", taskKeys: keys(MAX_REORDER_IDS) });
+    expect(atTheLimit.refused).toBe(false);
+    expect(client.reorderTasks).toHaveBeenCalledTimes(1);
+  });
+
+  it("points an order guess on update_task at the tool", async () => {
+    const client = stubClient();
+    const call = await connected(client);
+
+    const { refused, said } = await call("update_task", { taskKey: "BP-1", title: "x", order: 2 });
+
+    expect(refused).toBe(true);
+    expect(said).toContain('"order" — use the reorder_tasks tool');
+    expect(client.updateTask).not.toHaveBeenCalled();
   });
 });
