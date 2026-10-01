@@ -41,8 +41,10 @@ const BASE_URL = `http://localhost:${Number(process.env.E2E_PORT ?? 3987)}`;
 const HOLD_READY = "Running 1 test";
 const PICK_UP_TIMEOUT_MS = 120_000;
 const HOLD_START_TIMEOUT_MS = 360_000;
+const RUN_TIMEOUT_MS = 15 * 60_000;
 
 const children = new Set<ChildProcess>();
+let stopping = false;
 let hold: ChildProcess | null = null;
 
 const realFs = {
@@ -96,13 +98,12 @@ async function stopChildren() {
   }
 }
 
-let stopping = false;
 for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143], ["SIGHUP", 129]] as const) {
   process.on(signal, () => {
     if (stopping) return;
     stopping = true;
     console.error(`\n[mutation-check] ${signal}: restoring and stopping`);
-    replayJournal(signal);
+    restoreAll(readJournal(), realFs);
     void stopChildren().finally(() => process.exit(code));
   });
 }
@@ -159,9 +160,10 @@ function compiledContains(nonce: string, since: number): boolean {
 async function writeAndAwaitPickUp(file: string, content: string, label: string, probe: string): Promise<boolean> {
   const nonce = `mutation-check:${label}:${randomBytes(6).toString("hex")}`;
   const since = Date.now() - 1_000;
+  if (stopping) throw new Error("stopping; no further writes");
   realFs.write(file, marked(content, nonce));
   const deadline = Date.now() + PICK_UP_TIMEOUT_MS;
-  while (Date.now() < deadline) {
+  while (Date.now() < deadline && !stopping) {
     try {
       await fetch(`${BASE_URL}${probe}`, { redirect: "manual", signal: AbortSignal.timeout(PICK_UP_TIMEOUT_MS) });
     } catch {
@@ -181,7 +183,11 @@ async function runSpec(mutation: Mutation, label: string): Promise<RunSummary> {
     { MUTATION_JSON_OUTPUT: json },
     path.join(WORK_DIR, `${label}.log`)
   );
-  await exited(child, Number.POSITIVE_INFINITY);
+  if (!(await exited(child, RUN_TIMEOUT_MS))) {
+    killGroup(child, "SIGINT");
+    if (!(await exited(child, 30_000))) killGroup(child, "SIGKILL");
+    return { passed: 0, failed: 0, skipped: 0, firstError: `no result within ${RUN_TIMEOUT_MS / 60_000} minutes` };
+  }
   if (!fs.existsSync(json)) return { passed: 0, failed: 0, skipped: 0, firstError: "no report written" };
   return summarise(JSON.parse(fs.readFileSync(json, "utf8")));
 }
@@ -237,7 +243,9 @@ async function main() {
   for (const mutation of mutations) {
     const key = `${mutation.spec}\u0000${mutation.grep}`;
     if (!baselines.has(key)) {
-      baselines.set(key, await runSpec(mutation, `baseline-${mutation.id}`));
+      let baseline = await runSpec(mutation, `baseline-${mutation.id}`);
+      if (classify(baseline) !== "survived") baseline = await runSpec(mutation, `baseline-retry-${mutation.id}`);
+      baselines.set(key, baseline);
     }
     const baseline = baselines.get(key)!;
     const result: Result =

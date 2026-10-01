@@ -17,7 +17,7 @@ export default defineConfig({
   ...base,
   testDir: path.join(ROOT, "e2e"),
   outputDir: path.join(ROOT, "e2e/.artifacts"),
-  globalTeardown: path.join(ROOT, "e2e/global-teardown.ts"),
+  globalTeardown: HOLD ? path.join(ROOT, "e2e/global-teardown.ts") : undefined,
   retries: 0,
   reporter: HOLD
     ? [["list"]]
