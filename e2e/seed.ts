@@ -1786,6 +1786,39 @@ export async function seedExtraCategory() {
   await mongoose.disconnect();
 }
 
+// BP-702: pale yellow vanishes on white, navy on slate. Each is both a column and a category colour.
+export const PALE_YELLOW = "#fef08a";
+export const DARK_NAVY = "#1e3a8a";
+export const PALE_CATEGORY = "bug";
+export const NAVY_CATEGORY = "user-story";
+
+export async function seedHardColours() {
+  const db = (await connect()).db!;
+  await db.collection("projects").updateOne(
+    { _id: PROJECT_ID },
+    {
+      $set: {
+        "columns.$[navy].color": DARK_NAVY,
+        "columns.$[pale].color": PALE_YELLOW,
+        "categories.$[paleCat].color": PALE_YELLOW,
+        "categories.$[navyCat].color": DARK_NAVY,
+      },
+    },
+    {
+      arrayFilters: [
+        { "navy.id": SPARE_COLUMN.id },
+        { "pale.id": SOURCE_COLUMN.id },
+        { "paleCat.name": PALE_CATEGORY },
+        { "navyCat.name": NAVY_CATEGORY },
+      ],
+    }
+  );
+  await db
+    .collection("tasks")
+    .updateOne({ _id: FINISHED_TASK_ID }, { $set: { category: PALE_CATEGORY } });
+  await mongoose.disconnect();
+}
+
 /**
  * Backdates an access token's expiry and reports whether the row is still there.
  *
