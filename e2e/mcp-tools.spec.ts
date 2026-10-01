@@ -817,3 +817,109 @@ test("link_tasks refuses a pair on two boards and names them", async ({ request 
     }),
   ]);
 });
+
+const cardsIn = (column: Locator) =>
+  column
+    .locator("[data-column-body] a[href*='/tasks/']")
+    .evaluateAll((cards) => cards.map((card) => card.getAttribute("href")));
+
+const keyOf = (href: string | null) => `${PROJECT_KEY}-${href?.split("/").pop()}`;
+
+async function storedOrders(request: APIRequestContext, projectId: string) {
+  const response = await request.get(`/api/projects/${projectId}/tasks`, { headers: ADMIN_AUTH });
+  expect(response.status()).toBe(200);
+  const tasks = (await response.json()) as { taskNumber: number; order: number }[];
+  return Object.fromEntries(tasks.map((t) => [t.taskNumber, t.order]));
+}
+
+test("reorder_tasks puts a column's cards in the order given, and the board shows it", async ({
+  page,
+  request,
+}) => {
+  const session = await connected(request);
+  for (const title of ["Filed first", "Filed second", "Filed third"]) {
+    accepted(await session.callTool("create_task", { project: PROJECT_KEY, title, status: SPARE_COLUMN.id }));
+  }
+
+  await openBoard(page);
+  const todo = column(page, SPARE_COLUMN.id);
+  const inProgress = column(page, SOURCE_COLUMN.id);
+  await expect(cardIn(todo, NEXT_TASK_NUMBER + 2)).toBeVisible();
+  const before = (await cardsIn(todo)).map(keyOf);
+  expect(before).toHaveLength(4);
+  const otherColumn = await cardsIn(inProgress);
+  expect(otherColumn.length).toBeGreaterThan(1);
+
+  await test.step("the whole column, reversed", async () => {
+    const wanted = [...before].reverse();
+    const reordered = await session.callTool("reorder_tasks", { project: PROJECT_KEY, taskKeys: wanted });
+    accepted(reordered);
+
+    await page.reload();
+    await expect(cardIn(todo, NEXT_TASK_NUMBER)).toBeVisible();
+    expect((await cardsIn(todo)).map(keyOf)).toEqual(wanted);
+    expect(await cardsIn(inProgress)).toEqual(otherColumn);
+  });
+
+  await test.step("two cards named, the ones between them keep their places", async () => {
+    const [first, second, third, last] = [...before].reverse();
+    const reordered = await session.callTool("reorder_tasks", {
+      project: PROJECT_KEY,
+      taskKeys: [last, first],
+    });
+    accepted(reordered);
+
+    await page.reload();
+    await expect(cardIn(todo, NEXT_TASK_NUMBER)).toBeVisible();
+    expect((await cardsIn(todo)).map(keyOf)).toEqual([last, second, third, first]);
+    expect(await cardsIn(inProgress)).toEqual(otherColumn);
+  });
+});
+
+test("reorder_tasks refuses keys it cannot place, and a board the caller cannot reach, writing nothing", async ({
+  request,
+}) => {
+  await seedSecondProject();
+  await seedDemotableAdmin();
+  const before = await storedOrders(request, PROJECT_ID);
+  const foreignBefore = await storedOrders(request, SECOND_PROJECT_ID);
+
+  const admin = await connected(request);
+  for (const [taskKeys, says] of [
+    [[SIBLING_TASK_KEY, `${PROJECT_KEY}-99`], `${PROJECT_KEY}-99 does not exist`],
+    [[SIBLING_TASK_KEY, HELD_TASK_KEY, SIBLING_TASK_KEY], `${SIBLING_TASK_KEY} is listed more than once`],
+    [[SIBLING_TASK_KEY, KEPT_TASK_KEY], `"${KEPT_TASK_KEY}" is not a ${PROJECT_KEY} task key`],
+  ] as const) {
+    const call = await admin.callTool("reorder_tasks", { project: PROJECT_KEY, taskKeys: [...taskKeys] });
+    refused(call);
+    expect(call.text).toContain(says);
+    expect(call.text).toContain("nothing was reordered");
+  }
+
+  const tooMany = await admin.callTool("reorder_tasks", {
+    project: PROJECT_KEY,
+    taskKeys: Array.from({ length: 1001 }, (_, i) => `${PROJECT_KEY}-${i + 1}`),
+  });
+  expect(tooMany.status).toBe(200);
+  expect(tooMany.raw.result?.isError ?? Boolean(tooMany.raw.error), tooMany.text).toBe(true);
+
+  const member = await connected(request, MEMBER_API_TOKEN);
+  const unreachable = await member.callTool("reorder_tasks", {
+    project: SECOND_PROJECT_KEY,
+    taskKeys: [KEPT_TASK_KEY],
+  });
+  refused(unreachable);
+  expect(unreachable.text).not.toContain(SECOND_PROJECT_NAME);
+
+  expect(await storedOrders(request, PROJECT_ID)).toEqual(before);
+  expect(await storedOrders(request, SECOND_PROJECT_ID)).toEqual(foreignBefore);
+
+  // The control: the same member, on a board it can reach, is not refused
+  const reachable = await member.callTool("reorder_tasks", {
+    project: PROJECT_KEY,
+    taskKeys: [SIBLING_TASK_KEY, HELD_TASK_KEY],
+  });
+  accepted(reachable);
+  const after = await storedOrders(request, PROJECT_ID);
+  expect(after[SIBLING_TASK_NUMBER]).toBeLessThan(after[HELD_TASK_NUMBER]);
+});
