@@ -1786,7 +1786,6 @@ export async function seedExtraCategory() {
   await mongoose.disconnect();
 }
 
-// BP-702: pale yellow vanishes on white, navy on slate. Each is both a column and a category colour.
 export const PALE_YELLOW = "#fef08a";
 export const DARK_NAVY = "#1e3a8a";
 export const PALE_CATEGORY = "bug";
@@ -1816,6 +1815,9 @@ export async function seedHardColours() {
   await db
     .collection("tasks")
     .updateOne({ _id: FINISHED_TASK_ID }, { $set: { category: PALE_CATEGORY } });
+  await db
+    .collection("tasks")
+    .updateMany({ _id: { $in: [FINISHED_TASK_ID, SIBLING_TASK_ID] } }, { $set: { assignee: ADMIN_ID } });
   await mongoose.disconnect();
 }
 

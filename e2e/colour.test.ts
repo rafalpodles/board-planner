@@ -13,6 +13,16 @@ const close = (actual: { r: number; g: number; b: number }, expected: [number, n
   expect(actual.b).toBeCloseTo(expected[2], 0);
 };
 
+const near = (actual: { r: number; g: number; b: number }, expected: [number, number, number]) => {
+  for (const [got, want] of [
+    [actual.r, expected[0]],
+    [actual.g, expected[1]],
+    [actual.b, expected[2]],
+  ]) {
+    expect(Math.abs(got - want)).toBeLessThanOrEqual(1.5);
+  }
+};
+
 describe("parseCssColour", () => {
   it("reads the legacy and the modern rgb syntax", () => {
     expect(parseCssColour("rgb(15, 23, 42)")).toEqual({ r: 15, g: 23, b: 42, a: 1 });
@@ -31,14 +41,29 @@ describe("parseCssColour", () => {
   it("converts oklab and oklch, which Tailwind's opacity modifiers compute to", () => {
     close(parseCssColour("oklab(1 0 0)"), [255, 255, 255]);
     close(parseCssColour("oklab(0 0 0)"), [0, 0, 0]);
-    // #0f172a, converted forward with the reference sRGB-to-OKLab matrices
     close(parseCssColour("oklab(0.20768 -0.00295 -0.03972)"), [15, 23, 42]);
     close(parseCssColour("oklch(0.6279 0.2577 29.23)"), [255, 0, 0]);
     expect(parseCssColour("oklab(0.5 0.1 -0.1 / 0.05)").a).toBe(0.05);
   });
 
+  it("converts CIELAB lab and lch, which Tailwind's palette classes compute to", () => {
+    near(parseCssColour("lab(100 0 0)"), [255, 255, 255]);
+    near(parseCssColour("lab(0 0 0)"), [0, 0, 0]);
+    near(parseCssColour("lab(54.29 80.8 69.89)"), [255, 0, 0]);
+    near(parseCssColour("lch(54.29 106.84 40.85)"), [255, 0, 0]);
+    near(parseCssColour("lab(29.568 68.287 -112.03)"), [0, 0, 255]);
+    expect(parseCssColour("lab(50 20 20 / 0.4)").a).toBe(0.4);
+  });
+
+  it("reads a none component as zero, which makes an achromatic lch or oklch grey", () => {
+    const grey = parseCssColour("oklch(0.6 0.1 none)");
+    expect(grey).toEqual(parseCssColour("oklch(0.6 0.1 0)"));
+    const achromatic = parseCssColour("lch(50 none none)");
+    near(achromatic, [119, 119, 119]);
+  });
+
   it("refuses a value it cannot read rather than guessing", () => {
-    expect(() => parseCssColour("lab(50 20 20)")).toThrow(/unsupported/);
+    expect(() => parseCssColour("hwb(0 0% 0%)")).toThrow(/unsupported/);
     expect(() => parseCssColour("#fff")).toThrow(/not a computed colour/);
   });
 });

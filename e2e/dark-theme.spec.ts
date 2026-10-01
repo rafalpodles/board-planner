@@ -20,21 +20,11 @@ import {
 import { signIn } from "./session";
 
 /**
- * BP-702. Which screens are asserted in dark, and how.
- *
- * Computed colours, not screenshots. The repo has never kept a screenshot baseline: baselines churn
- * on every font or antialiasing change, and a failed one cannot say which colour is wrong. Each
- * check here reads `getComputedStyle` in the browser — the background resolved through transparent
- * ancestors, and the WCAG contrast of named text against it — so a failure names the element and
- * the ratio.
- *
- * Screens: the board, a task, the dashboard and the project settings shell, because together they
- * carry every surface token. Then the places where a colour comes from project data rather than a
- * token — a column's colour on the status chips, a category's on its chip — in both themes, seeded
- * with a pale yellow and a dark navy that each fail one of them.
- *
- * Dark is switched on through the account menu's own theme control, against Playwright's emulated
- * light scheme, so a CSS-only `prefers-color-scheme` path cannot pass for it.
+ * BP-702 decision: computed colours, not screenshots. The repo keeps no screenshot baseline, and a
+ * failed one cannot say which colour is wrong. Asserted in dark: the board, a task, the dashboard
+ * and the settings shell, which between them carry every surface token; in both themes: the chips
+ * whose colour is project data. Dark is chosen through the app's own theme switch, against an
+ * emulated light scheme.
  */
 
 test.use({ colorScheme: "light" });
@@ -60,6 +50,7 @@ async function chooseTheme(page: Page, name: "Light" | "Dark") {
   await page.getByRole("button", { name: /E2E Admin/ }).click();
   await group.getByRole("button", { name, exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", name.toLowerCase());
+  await page.mouse.move(0, 0);
 }
 
 async function painted(locator: Locator): Promise<PaintedText> {
@@ -101,7 +92,9 @@ test("the board, a task, the dashboard and settings all paint dark, with readabl
     await expectReadable("the board title", title);
     await expectReadable("a column header", column.getByRole("heading", { name: "In Review", exact: true }));
     await expectReadable("its count", column.getByText("1", { exact: true }));
-    await expectReadable("a card title", page.locator(cardFor(DECOY_TASK_NUMBER)).getByRole("heading"));
+    const cardTitle = page.locator(cardFor(DECOY_TASK_NUMBER)).getByRole("heading");
+    await expectDarkBehind("a card title", cardTitle);
+    await expectReadable("a card title", cardTitle);
   });
 
   await test.step("a task", async () => {
@@ -116,6 +109,8 @@ test("the board, a task, the dashboard and settings all paint dark, with readabl
     await expectReadable("the details heading", details.getByText("Details", { exact: true }));
     await expectReadable("a property label", details.getByText("Priority", { exact: true }));
     await expectReadable("the empty comments line", main.getByText("No comments yet"));
+    const commentBox = main.getByRole("textbox", { name: /Write a comment/ });
+    await expectDarkBehind("the comment box", commentBox);
   });
 
   await test.step("the dashboard", async () => {
@@ -154,6 +149,7 @@ for (const theme of ["Light", "Dark"] as const) {
     );
     expect(linked.status(), await linked.text()).toBe(200);
     await chooseTheme(page, theme);
+    const main = page.locator("#main-content");
 
     await test.step("category chips on the cards", async () => {
       await open(page, board);
@@ -180,8 +176,37 @@ for (const theme of ["Light", "Dark"] as const) {
       );
     });
 
+    await test.step("the board filter's category chip", async () => {
+      await open(page, board);
+      await page.getByRole("button", { name: "Filters", exact: true }).click();
+      const panel = page.getByRole("dialog", { name: "Filters" });
+      for (const [category, colour] of [
+        [PALE_CATEGORY, "pale yellow"],
+        [NAVY_CATEGORY, "navy"],
+      ]) {
+        await panel.getByLabel("Category").selectOption(category);
+        const chip = panel
+          .getByRole("button", { name: `Remove ${category} filter` })
+          .locator("..")
+          .getByText(category, { exact: true });
+        await expectReadable(`the ${category} filter chip (${colour})`, chip);
+      }
+    });
+
+    await test.step("column colours on My Tasks", async () => {
+      await open(page, "/my-tasks");
+      const row = (n: number) => main.getByRole("link", { name: new RegExp(`${PROJECT_KEY}-${n}\\b`) });
+      await expectReadable(
+        `My Tasks ${SPARE_COLUMN.label} (navy)`,
+        row(FINISHED_TASK_NUMBER).getByText(SPARE_COLUMN.label, { exact: true })
+      );
+      await expectReadable(
+        `My Tasks ${SOURCE_COLUMN.label} (pale yellow)`,
+        row(SIBLING_TASK_NUMBER).getByText(SOURCE_COLUMN.label, { exact: true })
+      );
+    });
+
     await test.step("a task's status, its type, and a linked task's status", async () => {
-      const main = page.locator("#main-content");
       const statusPill = main.getByRole("combobox", { name: "Status" }).locator(".chip");
       const typeChip = (name: string) =>
         main.getByRole("combobox", { name: "Type" }).getByText(name, { exact: true });
