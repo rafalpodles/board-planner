@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties } from "react";
 import {
   ApiTask, ApiCustomField,
   ApiProjectCategory,
@@ -703,21 +703,14 @@ function FilterChip({
   isAssignee?: boolean;
   onRemove: () => void;
 }) {
-  // A project category carries its own colour as data, the way column.color does;
-  // everything else uses theme tokens
-  const tinted = colour
-    ? {
-        backgroundColor: `color-mix(in srgb, ${colour} 15%, transparent)`,
-        color: colour,
-      }
-    : undefined;
+  const tinted = colour ? ({ "--chip": colour } as CSSProperties) : undefined;
 
   return (
     <span
       style={tinted}
       className={`flex h-[26px] items-center gap-1 rounded-full pl-2.5 pr-1.5 text-[12px] font-medium ${
         tinted
-          ? ""
+          ? "chip chip-custom"
           : isAssignee
             ? "bg-primary/15 text-primary"
             : "bg-bg-input text-text-muted"
