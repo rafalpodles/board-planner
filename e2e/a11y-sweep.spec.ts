@@ -260,7 +260,8 @@ for (const screen of SCREENS) {
     await screen.prepare?.();
     if (!screen.signedOut) await signIn(page);
     await screen.open(page);
-    await expect(screen.ready(page)).toBeVisible();
+    // Turbopack compiles a route on its first visit, and a click is not covered by navigationTimeout
+    await expect(screen.ready(page)).toBeVisible({ timeout: 90_000 });
     expect(await violations(page)).toEqual([]);
   });
 }
