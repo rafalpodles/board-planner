@@ -137,7 +137,7 @@ export default function NotificationsPage() {
                   {" \u00b7 "}
                   {timeAgo(n.createdAt)}
                   {n.project && typeof n.project === "object" && (
-                    <span className="ml-1.5 opacity-60">{n.project.key}</span>
+                    <span className="ml-1.5">{n.project.key}</span>
                   )}
                 </p>
               </div>
