@@ -8,9 +8,11 @@ import {
   CREATE_TASK_HINTS,
   UPDATE_TASK_HINTS,
   CHANGE_STATUS_HINTS,
+  taskIdsInOrder,
 } from "./strict-input.js";
 
 const APP_NAME = "Board Planner";
+const MAX_REORDER_IDS = 1000;
 
 /**
  * Separated from the stdio bootstrap so the tools can be driven by a test. index.ts connects a
@@ -311,6 +313,32 @@ export function registerTools(server: McpServer, client: ApiClient): void {
       const { projectId, task } = await resolveTaskKey(taskKey);
       const updated = await client.changeTaskStatus(projectId, (task as { _id: string })._id, status);
       return { content: [{ type: "text", text: JSON.stringify(updated, null, 2) }] };
+    }
+  );
+
+  server.registerTool(
+    "reorder_tasks",
+    {
+      description:
+        "Put tasks in the order given, the way dragging cards on the board does. The listed tasks " +
+        "take, in the order listed, the positions they already hold among the project's tasks; " +
+        "every task not listed keeps its place, and no status changes. Listing a column's cards top " +
+        "to bottom orders that column. Each key at most once, all from this project — an unknown " +
+        "key or one from another board refuses the whole call and nothing is reordered.",
+      inputSchema: strictInput({
+        project: z.string().describe("Project key (e.g. 'CP')"),
+        taskKeys: z
+          .array(z.string())
+          .min(1)
+          .max(MAX_REORDER_IDS)
+          .describe("Task keys in the order they should appear, first on top (e.g. ['CP-7', 'CP-3'])"),
+      }, { writes: true }),
+    },
+    async ({ project, taskKeys }) => {
+      const proj = await client.getProjectByKey(project) as { _id: string };
+      const tasks = await client.listTasks(proj._id) as { _id: string; taskNumber: number }[];
+      const result = await client.reorderTasks(proj._id, taskIdsInOrder(project, taskKeys, tasks));
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     }
   );
 

@@ -22,6 +22,8 @@ export function reorderedIds(ids: string[], activeId: string, overId: string): s
   return moveItem(ids, from, to);
 }
 
+export const MAX_REORDER_IDS = 1000;
+
 export interface ManualRow {
   id: string;
   order: number;

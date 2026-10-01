@@ -5,6 +5,7 @@ import { z } from "zod";
 import { registerPlannerTools } from "./tools";
 import { PlannerClient } from "./planner-client";
 import { DEPENDENCY_TYPES } from "@/types";
+import { MAX_REORDER_IDS } from "@/lib/reorder";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 type Handler = (args: Record<string, unknown>, extra: unknown) => Promise<unknown>;
@@ -444,5 +445,83 @@ describe("link_tasks and unlink_tasks", () => {
     expect(refusal.error!.issues[0].message).toContain(
       '"blockedBy" — use the link_tasks tool on /api/mcp'
     );
+  });
+});
+
+describe("reorder_tasks", () => {
+  const board = [
+    { _id: "t1", taskNumber: 1 },
+    { _id: "t2", taskNumber: 2 },
+    { _id: "t3", taskNumber: 3 },
+  ];
+
+  function stubBoard() {
+    vi.spyOn(PlannerClient.prototype, "getProjectByKey").mockResolvedValue({ _id: "p1" });
+    vi.spyOn(PlannerClient.prototype, "listTasks").mockResolvedValue(board);
+    return vi.spyOn(PlannerClient.prototype, "reorderTasks").mockResolvedValue({ updated: 2 });
+  }
+
+  function callReorder(taskKeys: string[], project = "BP") {
+    return registered().get("reorder_tasks")!.handler({ project, taskKeys }, extra);
+  }
+
+  it("sends the tasks' ids to the reorder route in the order the keys were listed", async () => {
+    const reorder = stubBoard();
+
+    await callReorder(["BP-3", "bp-1", "BP-02"]);
+
+    expect(reorder).toHaveBeenCalledWith("p1", ["t3", "t1", "t2"]);
+  });
+
+  it("refuses unknown, duplicate, malformed and other-board keys together, and writes nothing", async () => {
+    const reorder = stubBoard();
+
+    const refusal = callReorder(["BP-1", "BP-99", "TRW-2", "BP-01", "nonsense"]);
+
+    await expect(refusal).rejects.toThrow(/nothing was reordered/);
+    await expect(refusal).rejects.toThrow(/BP-99 does not exist/);
+    await expect(refusal).rejects.toThrow(/"TRW-2" is not a BP task key/);
+    await expect(refusal).rejects.toThrow(/BP-1 is listed more than once/);
+    await expect(refusal).rejects.toThrow(/"nonsense" is not a BP task key/);
+    expect(reorder).not.toHaveBeenCalled();
+  });
+
+  it("lists only the first few problems of a long refusal, and bounds each key it quotes", async () => {
+    stubBoard();
+    const keys = [`${"z".repeat(50_000)}-1`, ...Array.from({ length: 200 }, (_, i) => `BP-${100 + i}`)];
+
+    const refusal = String(await callReorder(keys).catch((error: Error) => error.message));
+
+    expect(refusal).toContain(`"${"z".repeat(64)}…"`);
+    expect(refusal).toContain("and 196 more");
+    expect(refusal.length).toBeLessThan(400);
+  });
+
+  it("takes a key whose project key carries a hyphen", async () => {
+    vi.spyOn(PlannerClient.prototype, "getProjectByKey").mockResolvedValue({ _id: "p1" });
+    vi.spyOn(PlannerClient.prototype, "listTasks").mockResolvedValue(board);
+    const reorder = vi.spyOn(PlannerClient.prototype, "reorderTasks").mockResolvedValue({});
+
+    await callReorder(["MY-APP-2", "MY-APP-1"], "my-app");
+
+    expect(reorder).toHaveBeenCalledWith("p1", ["t2", "t1"]);
+  });
+
+  it("accepts as many keys as the route does and refuses one more, or none", () => {
+    const { schema } = registered().get("reorder_tasks")!;
+    const keys = (n: number) => Array.from({ length: n }, (_, i) => `BP-${i + 1}`);
+
+    expect(schema.safeParse({ project: "BP", taskKeys: keys(MAX_REORDER_IDS) }).success).toBe(true);
+    expect(schema.safeParse({ project: "BP", taskKeys: keys(MAX_REORDER_IDS + 1) }).success).toBe(false);
+    expect(schema.safeParse({ project: "BP", taskKeys: [] }).success).toBe(false);
+  });
+
+  it("is where update_task points an order guess", () => {
+    const { schema } = registered().get("update_task")!;
+
+    const refusal = schema.safeParse({ taskKey: "BP-1", order: 3 });
+
+    expect(refusal.success).toBe(false);
+    expect(refusal.error!.issues[0].message).toContain('"order" — use the reorder_tasks tool');
   });
 });

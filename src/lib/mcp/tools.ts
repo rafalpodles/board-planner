@@ -12,7 +12,9 @@ import {
   CREATE_TASK_HINTS,
   UPDATE_TASK_HINTS,
   CHANGE_STATUS_HINTS,
+  taskIdsInOrder,
 } from "./strict-input";
+import { MAX_REORDER_IDS } from "@/lib/reorder";
 
 type ToolExtra = { authInfo?: AuthInfo };
 
@@ -314,6 +316,32 @@ export function registerPlannerTools(server: McpServer): void {
       const client = clientFrom(extra);
       const { projectId, taskId } = await client.resolveTaskKey(taskKey);
       return json(await client.changeTaskStatus(projectId, taskId, status));
+    }
+  );
+
+  server.registerTool(
+    "reorder_tasks",
+    {
+      description:
+        "Put tasks in the order given, the way dragging cards on the board does. The listed tasks " +
+        "take, in the order listed, the positions they already hold among the project's tasks; " +
+        "every task not listed keeps its place, and no status changes. Listing a column's cards top " +
+        "to bottom orders that column. Each key at most once, all from this project — an unknown " +
+        "key or one from another board refuses the whole call and nothing is reordered.",
+      inputSchema: strictInput({
+        project: z.string().describe("Project key (e.g. 'CP')"),
+        taskKeys: z
+          .array(z.string())
+          .min(1)
+          .max(MAX_REORDER_IDS)
+          .describe("Task keys in the order they should appear, first on top (e.g. ['CP-7', 'CP-3'])"),
+      }, { writes: true }),
+    },
+    async ({ project, taskKeys }, extra) => {
+      const client = clientFrom(extra);
+      const proj = await client.getProjectByKey(project);
+      const tasks = (await client.listTasks(proj._id)) as { _id: string; taskNumber: number }[];
+      return json(await client.reorderTasks(proj._id, taskIdsInOrder(project, taskKeys, tasks)));
     }
   );
 
