@@ -490,7 +490,7 @@ describe("reorder_tasks", () => {
     stubBoard();
     const keys = [`${"z".repeat(50_000)}-1`, ...Array.from({ length: 200 }, (_, i) => `BP-${100 + i}`)];
 
-    const refusal = await callReorder(keys).catch((error: Error) => error.message);
+    const refusal = String(await callReorder(keys).catch((error: Error) => error.message));
 
     expect(refusal).toContain(`"${"z".repeat(64)}…"`);
     expect(refusal).toContain("and 196 more");

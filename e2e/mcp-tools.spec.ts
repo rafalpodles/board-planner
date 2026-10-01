@@ -825,7 +825,7 @@ const cardsIn = (column: Locator) =>
 
 const keyOf = (href: string | null) => `${PROJECT_KEY}-${href?.split("/").pop()}`;
 
-async function storedOrders(request: APIRequestContext, projectId: string) {
+async function storedOrders(request: APIRequestContext, projectId: { toString(): string }) {
   const response = await request.get(`/api/projects/${projectId}/tasks`, { headers: ADMIN_AUTH });
   expect(response.status()).toBe(200);
   const tasks = (await response.json()) as { taskNumber: number; order: number }[];
