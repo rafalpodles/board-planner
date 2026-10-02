@@ -1,6 +1,5 @@
 import type { Page } from "@playwright/test";
-
-export const BOARD_POLL_MS = 10_000;
+import { BOARD_POLL_MS } from "@/lib/board-poll";
 
 /**
  * Drops the board's ten-second poll before the page loads, so a card that moves or vanishes was

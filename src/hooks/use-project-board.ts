@@ -5,6 +5,7 @@ import { Dispatch, SetStateAction, useCallback, useEffect, useRef, useState } fr
 import { useApi } from "@/hooks/use-api";
 import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
 import { ApiProject, ApiSprint, ApiTask, ApiUserSummary, RunConflict } from "@/types";
+import { BOARD_POLL_MS } from "@/lib/board-poll";
 import { subscribeBoardRefresh } from "@/lib/board-refresh";
 import { duplicatePayload } from "@/lib/task-duplicate";
 import { useToast } from "@/components/ui/Toast";
@@ -245,7 +246,7 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
   }, [loadData, scope]);
 
   // A refused board is asked again, only less often, so a grant given back is picked up
-  usePollWhileVisible(loadData, refused ? 60_000 : 10_000);
+  usePollWhileVisible(loadData, refused ? 60_000 : BOARD_POLL_MS);
 
   // Instant refresh when the PM chat reports a write action (poll stays as fallback).
   // Bursts are coalesced inside subscribeBoardRefresh.
