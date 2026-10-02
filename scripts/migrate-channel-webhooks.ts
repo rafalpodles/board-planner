@@ -4,7 +4,12 @@
  * Usage:
  *   MONGODB_URI=... ENCRYPTION_KEY=... npx tsx scripts/migrate-channel-webhooks.ts --dry-run
  *   MONGODB_URI=... ENCRYPTION_KEY=... npx tsx scripts/migrate-channel-webhooks.ts
- *   ENCRYPTION_KEY=... railway run --service MongoDB -- npx tsx scripts/migrate-channel-webhooks.ts --dry-run
+ *
+ * Against production, through a tunnel: the first command holds it open and prints <port>, the
+ * second runs in another terminal and is where --dry-run is dropped to write:
+ *   railway connect MongoDB --tunnel-only
+ *   ENCRYPTION_KEY=... railway run --service MongoDB -- sh -c 'MONGODB_URI="mongodb://$MONGOUSER:$MONGOPASSWORD@127.0.0.1:<port>/?authSource=admin&directConnection=true" \
+ *     npx tsx scripts/migrate-channel-webhooks.ts --dry-run'
  *
  * The key goes in front even there: `--service MongoDB` injects the database service's variables,
  * and ENCRYPTION_KEY lives on the app service.

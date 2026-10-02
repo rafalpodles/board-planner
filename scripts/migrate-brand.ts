@@ -4,14 +4,18 @@
  *   npx tsx scripts/migrate-brand.ts scan            # default: changes nothing
  *   npx tsx scripts/migrate-brand.ts apply
  *
- * Against production, from a laptop — the app service's URI is on Railway's private
- * network, so go through the database service, and take the snapshot first:
+ * Against production, from a laptop — every URI Railway injects is on its private network,
+ * so go through a tunnel, and take the snapshot first. The first command holds the tunnel open
+ * and prints <port>; the rest run in another terminal, and `apply` goes on the last:
  *
- *   railway run --service MongoDB -- sh -c 'MONGODB_URI="$MONGO_PUBLIC_URL" \
+ *   railway connect MongoDB --tunnel-only
+ *   railway run --service MongoDB -- sh -c 'MONGODB_URI="mongodb://$MONGOUSER:$MONGOPASSWORD@127.0.0.1:<port>/?authSource=admin&directConnection=true" \
  *     npx tsx scripts/dump-collections.ts dump ./backups \
  *     projects,tasks,comments,workers,notifications,pmmessages,activitylogs'
- *   railway run --service MongoDB -- sh -c 'MONGODB_URI="$MONGO_PUBLIC_URL" npx tsx scripts/migrate-brand.ts scan'
- *   railway run --service MongoDB -- sh -c 'MONGODB_URI="$MONGO_PUBLIC_URL" npx tsx scripts/migrate-brand.ts apply'
+ *   railway run --service MongoDB -- sh -c 'MONGODB_URI="mongodb://$MONGOUSER:$MONGOPASSWORD@127.0.0.1:<port>/?authSource=admin&directConnection=true" \
+ *     npx tsx scripts/migrate-brand.ts scan'
+ *   railway run --service MongoDB -- sh -c 'MONGODB_URI="mongodb://$MONGOUSER:$MONGOPASSWORD@127.0.0.1:<port>/?authSource=admin&directConnection=true" \
+ *     npx tsx scripts/migrate-brand.ts apply'
  *
  * Production's database is literally named `test`, so it cannot be recognised by name —
  * read the document count this prints before trusting any verdict. Restoring is

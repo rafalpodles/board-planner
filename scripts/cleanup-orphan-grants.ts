@@ -6,8 +6,11 @@
  *   MONGODB_URI=... npx tsx scripts/cleanup-orphan-grants.ts            # reports, writes nothing
  *   MONGODB_URI=... npx tsx scripts/cleanup-orphan-grants.ts --apply
  *
- * Against production, through the database service:
- *   railway run --service MongoDB -- npx tsx scripts/cleanup-orphan-grants.ts
+ * Against production, through a tunnel: the first command holds it open and prints <port>, the
+ * second runs in another terminal and is where --apply goes:
+ *   railway connect MongoDB --tunnel-only
+ *   railway run --service MongoDB -- sh -c 'MONGODB_URI="mongodb://$MONGOUSER:$MONGOPASSWORD@127.0.0.1:<port>/?authSource=admin&directConnection=true" \
+ *     npx tsx scripts/cleanup-orphan-grants.ts'
  */
 import mongoose from "mongoose";
 import { resolveUri, dbName } from "./mongo-uri";

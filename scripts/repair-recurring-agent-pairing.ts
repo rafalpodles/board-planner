@@ -7,8 +7,11 @@
  *   MONGODB_URI=... npx tsx scripts/repair-recurring-agent-pairing.ts --dry-run
  *   MONGODB_URI=... npx tsx scripts/repair-recurring-agent-pairing.ts
  *
- * Against production, through the database service:
- *   railway run --service MongoDB -- npx tsx scripts/repair-recurring-agent-pairing.ts --dry-run
+ * Against production, through a tunnel: the first command holds it open and prints <port>, the
+ * second runs in another terminal and is where --dry-run is dropped to write:
+ *   railway connect MongoDB --tunnel-only
+ *   railway run --service MongoDB -- sh -c 'MONGODB_URI="mongodb://$MONGOUSER:$MONGOPASSWORD@127.0.0.1:<port>/?authSource=admin&directConnection=true" \
+ *     npx tsx scripts/repair-recurring-agent-pairing.ts --dry-run'
  *
  * Reuses `personalAgentAlienTo` — the same check `updateTask` runs live — rather than a second
  * copy of the rule. Not a security fix: `snapshotFor` already refuses a stale pairing at claim

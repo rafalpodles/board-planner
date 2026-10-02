@@ -5,10 +5,12 @@
  *   MONGODB_URI=... npx tsx scripts/migrate-upload-projects.ts --dry-run
  *   MONGODB_URI=... npx tsx scripts/migrate-upload-projects.ts
  *
- * Against production, through the database service — the app service's URI is on Railway's
- * private network and does not resolve from a laptop. The connection name differs per service,
- * so resolveUri() finds the reachable one rather than requiring MONGODB_URI by name:
- *   railway run --service MongoDB -- npx tsx scripts/migrate-upload-projects.ts --dry-run
+ * Against production, through a tunnel — every URI Railway injects is on its private network and
+ * does not resolve from a laptop. The first command holds the tunnel open and prints <port>, the
+ * second runs in another terminal and is where --dry-run is dropped to write:
+ *   railway connect MongoDB --tunnel-only
+ *   railway run --service MongoDB -- sh -c 'MONGODB_URI="mongodb://$MONGOUSER:$MONGOPASSWORD@127.0.0.1:<port>/?authSource=admin&directConnection=true" \
+ *     npx tsx scripts/migrate-upload-projects.ts --dry-run'
  *
  * Uploads recorded no owner, so the read path had nothing to check and served any file to any
  * authenticated caller. Uploads made from now on carry their project; these are the ones made

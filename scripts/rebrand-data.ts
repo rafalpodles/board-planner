@@ -8,11 +8,13 @@
  * its tasks at once, since a task key is built from it and never stored — see
  * migrate-project-key.ts for what it does to keep the old references working.
  *
- * Against production, from a laptop — the app service's URI is on Railway's private
- * network, so this has to go through the database service:
+ * Against production, from a laptop — every URI Railway injects is on its private network,
+ * so this has to go through a tunnel. The first command holds it open and prints <port>; the
+ * second runs in another terminal and is where --apply goes:
  *
- *   railway run --service MongoDB -- sh -c 'MONGODB_URI="$MONGO_PUBLIC_URL" npx tsx scripts/rebrand-data.ts'
- *   railway run --service MongoDB -- sh -c 'MONGODB_URI="$MONGO_PUBLIC_URL" npx tsx scripts/rebrand-data.ts --apply'
+ *   railway connect MongoDB --tunnel-only
+ *   railway run --service MongoDB -- sh -c 'MONGODB_URI="mongodb://$MONGOUSER:$MONGOPASSWORD@127.0.0.1:<port>/?authSource=admin&directConnection=true" \
+ *     npx tsx scripts/rebrand-data.ts'
  *
  * The snapshot is taken **before** anything is written, even on a dry run, and covers
  * every collection rather than a list written by hand — the migration walks the whole
