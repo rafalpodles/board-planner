@@ -97,6 +97,30 @@ interface Screen {
   widths?: number[];
 }
 
+const PM_PLACEHOLDER_NARROW = "Message the PM… (paste to attach)";
+const PM_PLACEHOLDER_WIDE =
+  "Message the PM… (Enter sends, Shift+Enter for a new line, paste to attach)";
+
+// A textarea's scrollHeight ignores its placeholder, so the placeholder is typed into a clone
+// that shares the box's parent, classes and inline style, and the clone's overflow is read
+async function placeholderOverflow(textarea: Locator): Promise<number> {
+  return textarea.evaluate((el: HTMLTextAreaElement) => {
+    const mirror = el.cloneNode() as HTMLTextAreaElement;
+    mirror.value = el.placeholder;
+    el.parentElement!.appendChild(mirror);
+    try {
+      if (mirror.clientWidth !== el.clientWidth || mirror.clientHeight !== el.clientHeight) {
+        throw new Error(
+          `mirror is ${mirror.clientWidth}x${mirror.clientHeight}, box is ${el.clientWidth}x${el.clientHeight}`
+        );
+      }
+      return mirror.scrollHeight - mirror.clientHeight;
+    } finally {
+      mirror.remove();
+    }
+  });
+}
+
 const button = (page: Page, name: string) => page.getByRole("button", { name, exact: true });
 const heading = (page: Page, name: string) => page.getByRole("heading", { name, exact: true });
 
@@ -116,6 +140,11 @@ const SCREENS: Screen[] = [
       composer: page.getByPlaceholder(/Message the PM/),
       Send: button(page, "Send"),
     }),
+    alsoHolds: async (page) => {
+      const composer = page.getByPlaceholder(/Message the PM/);
+      await expect(composer).toHaveAttribute("placeholder", PM_PLACEHOLDER_NARROW);
+      expect(await placeholderOverflow(composer), "px of the placeholder cut off below the box").toBe(0);
+    },
   },
   {
     name: "agents catalog",
@@ -214,6 +243,15 @@ for (const screen of SCREENS) {
     });
   }
 }
+
+test("the PM composer keeps its keyboard hints on a desktop, where they fit", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 844 });
+  await signIn(page);
+  await page.goto(`/projects/${PROJECT_KEY}/pm`);
+  const composer = page.getByPlaceholder(/Message the PM/);
+  await expect(composer).toHaveAttribute("placeholder", PM_PLACEHOLDER_WIDE);
+  expect(await placeholderOverflow(composer), "px of the placeholder cut off below the box").toBe(0);
+});
 
 const maskOfFleetScroller = (page: Page) =>
   page.evaluate(() => getComputedStyle(document.querySelector("table")!.parentElement!).maskImage);
