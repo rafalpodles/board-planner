@@ -1,6 +1,6 @@
 import { test, expect, type Browser, type Page } from "@playwright/test";
 import mongoose from "mongoose";
-import { bodyOf, mailFor } from "./mailbox";
+import { bodyOf, mailFor, refuseMailFor, stopRefusing } from "./mailbox";
 import {
   ADMIN_PASSWORD,
   ADMIN_USERNAME,
@@ -205,4 +205,26 @@ test("a username already taken keeps the link usable for another try", async ({ 
   await stranger.page.getByRole("button", { name: "Create my account" }).click();
   await expect(stranger.page).toHaveURL(new RegExp(`/projects/${PROJECT_ID}`));
   await stranger.context.close();
+});
+
+test("a mail server that refuses the invitation leaves the admin holding the link", async ({ page, browser }) => {
+  const email = freshAddress("refused");
+  await refuseMailFor(email);
+  try {
+    await signInAsAdmin(page);
+    const { dialog, response } = await invite(page, email);
+    expect(response.status()).toBe(201);
+
+    await expect(dialog.getByText(`The email to ${email} could not be sent.`)).toBeVisible();
+    const link = (await dialog.getByTestId("invitation-link").textContent())!.trim();
+    expect(link).toMatch(/\/invite\?token=cpi_[0-9a-f]+$/);
+    expect(await mailFor(email)).toHaveLength(0);
+
+    const stranger = await asStranger(browser);
+    await accept(stranger.page, link, "linked-person");
+    await expect(stranger.page).toHaveURL(new RegExp(`/projects/${PROJECT_ID}`));
+    await stranger.context.close();
+  } finally {
+    await stopRefusing();
+  }
 });
