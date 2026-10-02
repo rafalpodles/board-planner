@@ -68,6 +68,7 @@ const ctx = () => ({ params: Promise.resolve({ userId: "target-1" }) });
 function targetDoc(overrides: Record<string, unknown> = {}) {
   return {
     _id: "target-1",
+    emailVerifiedAt: new Date("2026-01-01T00:00:00Z") as Date | null,
     username: "target",
     role: "admin",
     email: "target@example.com",
@@ -109,6 +110,8 @@ describe("PUT /api/users/:id", () => {
     expect(res.status).toBe(200);
     expect(target.role).toBe("member");
     expect(target.email).toBe("new.address@example.com");
+    // An address an administrator typed is a claim, never a proof a sign-in provider may link by
+    expect(target.emailVerifiedAt).toBeNull();
     expect(target.kind).toBe("human");
     expect(target.save).toHaveBeenCalled();
     // BP-359 review: a change the account asked for itself would otherwise overwrite this one

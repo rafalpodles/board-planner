@@ -130,7 +130,8 @@ export default function SecurityPage() {
           <Link href="/forgot" className="underline">
             Forgot your password
           </Link>{" "}
-          — the link goes to your address.
+          — the link goes to your address. Setting a password unlinks your providers; link them again
+          here afterwards.
         </p>
         {providersSection}
       </div>

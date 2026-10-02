@@ -179,7 +179,7 @@ export async function notifyIdentityLinked(n: IdentityLinkedNotice): Promise<voi
       { label: "Linked", value: new Date().toUTCString() },
       { label: "Account", value: n.username },
     ],
-    outro: ["If you didn't do this, unlink it under Settings → Security and reset your password."],
+    outro: ["If you didn't do this, change your password: that unlinks every provider, this one included."],
     button: origin ? { label: "Review sign-in providers", url: `${origin}/settings/security` } : undefined,
     footer: ["Sent because a sign-in provider was linked to this account. This notice cannot be turned off."],
   }));

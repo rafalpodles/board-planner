@@ -99,6 +99,18 @@ describe("PUT /api/users/me — changing the address that can reset the password
     expect(userFindByIdAndUpdate).not.toHaveBeenCalled();
   });
 
+  // BP-828: an account made through a provider has no password to prove the change with
+  it("refuses an account with no password, without counting it as a wrong guess", async () => {
+    const record = { _id: "u1", username: "owner", email: "old@example.com" };
+    userFindById.mockReturnValue(Object.assign(Promise.resolve(record), { select: () => Promise.resolve(record) }));
+
+    const response = await PUT(put({ email: "new@example.com", currentPassword: "anything" }), context);
+
+    expect(response.status).toBe(409);
+    expect(compare).not.toHaveBeenCalled();
+    expect(userFindByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
   it("refuses a wrong current password", async () => {
     compare.mockResolvedValue(false);
 

@@ -237,6 +237,15 @@ describe("GET /api/auth/oidc/:provider/callback, linking from settings", () => {
     expect(identityUpdateOne).not.toHaveBeenCalled();
   });
 
+  // A browser navigation cannot carry a bearer token, but the guard does not rely on that
+  it("refuses to link from a machine credential", async () => {
+    finishes("link");
+    getAuthUser.mockResolvedValue({ _id: "u1", username: "ada", viaMachineCredential: true });
+
+    expect(location(await callback())).toBe("/settings/security?link=failed");
+    expect(identityCreate).not.toHaveBeenCalled();
+  });
+
   it("refuses an identity that already belongs to another account", async () => {
     finishes("link");
     identityFindOne.mockReturnValue(lean({ _id: "i1", user: "u9" }));

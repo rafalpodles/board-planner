@@ -143,6 +143,7 @@ describe("what Google vouches for", () => {
   // domain and for the ones a Workspace manages
   it.each([
     ["a gmail.com address", { email: "ada@gmail.com" }, true],
+    ["a googlemail.com address", { email: "ada@googlemail.com" }, true],
     ["a Workspace address", { email: "ada@corp.com", hd: "corp.com" }, true],
     ["a company address on a consumer account", { email: "ada@corp.com" }, false],
   ])("counts %s as verified: %s", async (_label, claims, verified) => {

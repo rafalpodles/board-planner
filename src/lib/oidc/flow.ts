@@ -156,7 +156,11 @@ export async function finishFlow(input: {
  */
 function ownsTheAddress(provider: OidcProvider, email: string, claims: Record<string, unknown>): boolean {
   if (provider.id !== "google") return true;
-  return email.endsWith("@gmail.com") || (typeof claims.hd === "string" && claims.hd.length > 0);
+  return (
+    email.endsWith("@gmail.com") ||
+    email.endsWith("@googlemail.com") ||
+    (typeof claims.hd === "string" && claims.hd.length > 0)
+  );
 }
 
 /** A verified identity waiting for its owner to choose a username, held for one invitation. */
