@@ -1,5 +1,66 @@
 # Changelog
 
+## [1.3.0](https://github.com/rafalpodles/board-planner/compare/v1.2.1...v1.3.0) (2026-10-02)
+
+
+### Features
+
+* board owners invite people by e-mail to their own boards (BP-827) ([366aa38](https://github.com/rafalpodles/board-planner/commit/366aa38dd603dec9d9235bdf4d344a7dd9c5752d))
+* board owners invite people by e-mail to their own boards (BP-827) ([c297117](https://github.com/rafalpodles/board-planner/commit/c29711709cdee11d390167beff6b4d787cf3a31d))
+* board owners invite people by e-mail to their own boards (BP-827) ([#523](https://github.com/rafalpodles/board-planner/issues/523)) ([366aa38](https://github.com/rafalpodles/board-planner/commit/366aa38dd603dec9d9235bdf4d344a7dd9c5752d))
+* invitation model and API — invite, resend, revoke, look up, accept (BP-826) ([f2c9263](https://github.com/rafalpodles/board-planner/commit/f2c9263374a11b504a176e28b029757ec24e9a7b))
+* invite dialog, pending invitations and the accept page (BP-826) ([46c0fcd](https://github.com/rafalpodles/board-planner/commit/46c0fcdbe123695cc1cd50f55dc1958ca1d101ee))
+* invite people by e-mail; the invitee makes their own account (BP-826) ([243e263](https://github.com/rafalpodles/board-planner/commit/243e263700b1628ee93d11a4541958a33696b50b))
+* invite people by e-mail; the invitee makes their own account (BP-826) ([#522](https://github.com/rafalpodles/board-planner/issues/522)) ([243e263](https://github.com/rafalpodles/board-planner/commit/243e263700b1628ee93d11a4541958a33696b50b))
+* offline licence key verified against compiled-in public keys, Settings → Licence (BP-650) ([20211d1](https://github.com/rafalpodles/board-planner/commit/20211d18ec9479fdbe98b3a3e726a907f4c94d44))
+* offline licence key verified against compiled-in public keys, Settings → Licence (BP-650) ([b9ab962](https://github.com/rafalpodles/board-planner/commit/b9ab9629176612c27726a38f5d536af0350da10a))
+* offline licence key verified against compiled-in public keys, Settings → Licence (BP-650) ([#520](https://github.com/rafalpodles/board-planner/issues/520)) ([20211d1](https://github.com/rafalpodles/board-planner/commit/20211d18ec9479fdbe98b3a3e726a907f4c94d44))
+* reorder_tasks MCP tool puts tasks in a given order (BP-819) ([286e6b2](https://github.com/rafalpodles/board-planner/commit/286e6b289c8c805f8b5d181154b04741a4dff152))
+* reorder_tasks MCP tool puts tasks in a given order (BP-819) ([1f56eb5](https://github.com/rafalpodles/board-planner/commit/1f56eb5e51efdd5e618ce845e1ed877c930434a1))
+
+
+### Bug Fixes
+
+* a failed revoke's dialog survives the list emptying instead of reopening later (BP-826) ([de8bf4e](https://github.com/rafalpodles/board-planner/commit/de8bf4eedf3f6837548e5bd080bc044b704d2319))
+* accept the e2e licence key only where the build's own NODE_ENV allows it (BP-650 review) ([28c177a](https://github.com/rafalpodles/board-planner/commit/28c177ad540f458d102a993dd323eb31b4aef8c2))
+* agent editor, settings header and mail settings fit a phone (BP-710) ([f94a36f](https://github.com/rafalpodles/board-planner/commit/f94a36f5d0379ad9683ac43717f6a9aeb30a57e8))
+* an account taking an address withdraws its pending invitation; lookup revokes only what is pending (BP-826) ([54d4281](https://github.com/rafalpodles/board-planner/commit/54d4281bd5e7928ebbca2c0d5c6664ceb8f3dc43))
+* an owner's board never joins an invitation whose link is in somebody's hands; empty-revoke pinned to the row read (BP-827) ([07c81c8](https://github.com/rafalpodles/board-planner/commit/07c81c8b95b04bc7392e1bbdb1071143dc2df113))
+* days left counts UTC calendar days, and the notices speak of the licence, not features nothing gates yet (BP-650 review) ([9b64c36](https://github.com/rafalpodles/board-planner/commit/9b64c3608f04d42776dbc8a2facf35de28306f3b))
+* keep idle connections open past Railway's edge timeout (BP-814) ([c35a637](https://github.com/rafalpodles/board-planner/commit/c35a6373d0931ea38678ce4bca32eaf321a95a16))
+* keep idle connections open past Railway's edge timeout (BP-814) ([d905c97](https://github.com/rafalpodles/board-planner/commit/d905c97c16331e39419924046fbd303d0f52d599))
+* keep Node-only boot out of instrumentation's Edge build (BP-822) ([7761bf7](https://github.com/rafalpodles/board-planner/commit/7761bf7594da2565016dbc9815f5a5a895fd460a))
+* keep Node-only boot out of instrumentation's Edge build (BP-822) ([ccfc252](https://github.com/rafalpodles/board-planner/commit/ccfc252b1dcb7bd41dd46f86f2c9d01d75d4a1e2))
+* keep project-coloured chips readable in both themes, and render four screens dark (BP-702) ([a338d6e](https://github.com/rafalpodles/board-planner/commit/a338d6e16fd0def70cdf3c8b164ebd8d356cbac1))
+* keep project-coloured My Tasks and filter chips readable in both themes (BP-702) ([5fbd1c5](https://github.com/rafalpodles/board-planner/commit/5fbd1c55f29688b99e5742f4aa13a20c40d3e793))
+* keep project-coloured status and category chips readable in both themes (BP-702) ([e267fd6](https://github.com/rafalpodles/board-planner/commit/e267fd63c6c0c87910aae6e69ff7e168548809a5))
+* licence dates read in UTC, the expiry warning names the expiry, rounding pinned (BP-650 review) ([4ef332a](https://github.com/rafalpodles/board-planner/commit/4ef332ab5d2894c86f27899f46d37eb2a8ee72af))
+* lookup refuses an invitation whose address is held, without withdrawing it (BP-826) ([c25e657](https://github.com/rafalpodles/board-planner/commit/c25e6575e71a4cb7b063da8a82beeed4f1684a85))
+* pending invitation buttons sit under the address on a phone (BP-826) ([736288e](https://github.com/rafalpodles/board-planner/commit/736288efd73204e78083880c0793dc36e08fc8a4))
+* point production scripts at the Railway tunnel, not a public URL that is gone (BP-820) ([6ba3589](https://github.com/rafalpodles/board-planner/commit/6ba35899e2ac6808149c546a16555445d8d1bb1e))
+* point the private-network error at the Railway tunnel (BP-820) ([3f5ada5](https://github.com/rafalpodles/board-planner/commit/3f5ada5708518c79fb666c6408f299da8b480abf))
+* resend re-endorses, revoke stops an acceptance in flight, dead invitations refused early (BP-826) ([964c8d6](https://github.com/rafalpodles/board-planner/commit/964c8d6c66bd1016c50c14338613f95d9ec88395))
+* restore only files that still carry the mutation marker, and fail on a run that ran nothing (BP-712) ([07c2bc1](https://github.com/rafalpodles/board-planner/commit/07c2bc133e9b7e487ec2abf70ece9869c4828531))
+* role pill wraps under the user's name instead of truncating it at 768px (BP-818) ([3209f4c](https://github.com/rafalpodles/board-planner/commit/3209f4c8f934c7bf40ea9de9fe1dddf50d41d668))
+* shorter PM composer placeholder below sm so it fits a phone (BP-817) ([ded9b4c](https://github.com/rafalpodles/board-planner/commit/ded9b4cd3048f2d4958e0dad44b6ec49c0756497))
+* shorter PM composer placeholder below sm so it fits a phone (BP-817) ([7c92223](https://github.com/rafalpodles/board-planner/commit/7c92223bbbe66583418507a1913c6ebd5c9f44f9))
+* sign-licence refuses bad flags, keys and dates with a message (BP-650 review) ([0e3a7a6](https://github.com/rafalpodles/board-planner/commit/0e3a7a6d7fea804de420f121ca04cf5338df8276))
+* sign-licence reports a key that cannot sign instead of a stack (BP-650 review nit) ([29c6e31](https://github.com/rafalpodles/board-planner/commit/29c6e316dfe02383655f5540983fc45060f887c5))
+* stop the mutation driver writing once a signal arrives (BP-712) ([aa1335d](https://github.com/rafalpodles/board-planner/commit/aa1335d14d5b463a54a013a54ca988cebe7929e0))
+* the Free plan screen claims no feature is gated before one is (BP-650) ([585e1bc](https://github.com/rafalpodles/board-planner/commit/585e1bce80c80f7ae383dc6c93f485f4e9c7de1d))
+* the startup line for a key in grace names its end, not features (BP-650 review nit) ([7479a3b](https://github.com/rafalpodles/board-planner/commit/7479a3b569d3b9182a7142c3750d953290e678ba))
+* user cards on /settings/users fit and read at tablet width (BP-818) ([3847654](https://github.com/rafalpodles/board-planner/commit/3847654f7b0cb0395ff30347fa4ec23a4581d943))
+* user cards on /settings/users fit the content column at tablet width (BP-818) ([8bf5d3f](https://github.com/rafalpodles/board-planner/commit/8bf5d3f5e2d05aeaea3acef4c869c6dac6ff2545))
+* withdrawing forgets a link typed in capitals; the held refusal says what the owner can actually do; recording delivery never fails a sent invitation (BP-827) ([e6a265b](https://github.com/rafalpodles/board-planner/commit/e6a265b897e9cee0b22eb8eb076a8f63bba2454c))
+* withdrawing invitations never interrupts an address change; acceptance withdraws a re-invite; a deleted inviter backs no board (BP-826) ([8ba75ea](https://github.com/rafalpodles/board-planner/commit/8ba75ea801d73d973a5dff4d6bbad656eeb28441))
+* **worker:** close what the ignored-file listing missed: unstattable paths, unreadable directories, nested trees (BP-795 review) ([12a6e34](https://github.com/rafalpodles/board-planner/commit/12a6e342d371e11cfa1fc847688c2f777499dd2a))
+* **worker:** don't install git dependencies in the worker's npm commands (BP-812) ([913f239](https://github.com/rafalpodles/board-planner/commit/913f239e774891488dad678550771546e1ec5641))
+* **worker:** refuse a gate over ignored files a step wrote since the last gate (BP-795) ([6354dea](https://github.com/rafalpodles/board-planner/commit/6354dea2134dbddf9d78962af45ecbf667cf6be3))
+* **worker:** refuse git dependencies in every confined npm command (BP-812) ([4ede02e](https://github.com/rafalpodles/board-planner/commit/4ede02ed7c27699d43072b77625b44fff52a2a37))
+* **worker:** remove ignored files a step wrote before each gate (BP-795) ([9e9ad51](https://github.com/rafalpodles/board-planner/commit/9e9ad51e9791a32dc499af9eac404ed57cf1b195))
+* **worker:** remove new ignored files a step wrote before each gate instead of refusing (BP-795) ([1bb7e51](https://github.com/rafalpodles/board-planner/commit/1bb7e51188659f26e4eff3ba0e0e3256d4ffbf31))
+* **worker:** run the ignored-file listing's git in the C locale so the stderr check reads English (BP-795 review) ([17f1c21](https://github.com/rafalpodles/board-planner/commit/17f1c212e8d7a1dc61e8b6bc69dff917998c5c2b))
+
 ## [1.2.1](https://github.com/rafalpodles/board-planner/compare/v1.2.0...v1.2.1) (2026-09-30)
 
 
