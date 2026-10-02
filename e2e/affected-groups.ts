@@ -141,6 +141,7 @@ const CRITICAL_PREFIXES: readonly string[] = [
   "src/app/(app)/settings/layout.tsx",
   "src/app/api/e2e/",
   "src/instrumentation.ts",
+  "src/instrumentation-node.ts",
   "e2e/", // helpers, fixtures, groups.ts, this file — everything here but a *.spec.ts
   "package.json",
   "package-lock.json",
