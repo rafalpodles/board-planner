@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { GROUPS } from "./groups";
+import { SMOKES } from "./smoke/smokes";
 
 // Recursive, because `testDir: "./e2e"` is: a spec in a subdirectory is collected by Playwright
 // and would be invisible to a flat listing — running in no job at all, which is the one thing
@@ -46,5 +47,24 @@ describe("every end-to-end spec belongs to exactly one group", () => {
 
   it("puts no spec in two groups, which would run it twice", () => {
     expect(grouped.filter((f, i) => grouped.indexOf(f) !== i)).toEqual([]);
+  });
+});
+
+describe("every live smoke runs in a CI job of its own", () => {
+  const smokeFiles = readdirSync(join(__dirname, "smoke")).filter((f) => f.endsWith(".smoke.ts"));
+
+  it("names every smoke file in SMOKES, and nothing else", () => {
+    expect(Object.values(SMOKES).sort()).toEqual(smokeFiles.sort());
+  });
+
+  it("runs the worker smoke on macOS, where it does not skip itself", () => {
+    const job = workflow.match(/^  smoke_worker:\n(?:(?: {4}.*)?\n)*/m)?.[0] ?? "";
+    expect(job).toMatch(/^ {4}runs-on: macos-/m);
+  });
+
+  it("runs each smoke project from ci.yml", () => {
+    for (const name of Object.keys(SMOKES)) {
+      expect(workflow).toContain(`npx playwright test -c playwright.smoke.config.ts --project=${name}`);
+    }
   });
 });
