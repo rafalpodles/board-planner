@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { useProjects } from "@/hooks/use-projects";
 import { Modal } from "@/components/ui/Modal";
@@ -34,6 +34,11 @@ export function InviteModal({
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [sent, setSent] = useState<Sent | null>(null);
+  const doneButton = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (sent) doneButton.current?.focus();
+  }, [sent]);
 
   function close() {
     setEmail("");
@@ -78,17 +83,18 @@ export function InviteModal({
   return (
     <Modal open={open} onClose={close} closeDisabled={saving} title="Invite someone" size="lg">
       {sent ? (
-        <div className="space-y-4">
+        <div role="status" className="space-y-4">
           {sent.delivery === "email" ? (
-            <p role="status" className="text-sm">
-              Invitation sent to <span className="font-medium">{sent.invitation.email}</span>. The
-              link in it works once and expires in seven days.
+            <p className="text-sm">
+              Invitation sent to <span className="font-medium">{sent.invitation.email}</span>.
             </p>
           ) : (
             <InvitationLink email={sent.invitation.email} link={sent.link} reason={sent.reason} />
           )}
           <div className="flex justify-end">
-            <Button onClick={close}>Done</Button>
+            <Button ref={doneButton} onClick={close}>
+              Done
+            </Button>
           </div>
         </div>
       ) : (

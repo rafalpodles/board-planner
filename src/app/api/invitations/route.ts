@@ -17,10 +17,18 @@ import { GRANT_RELATIONS, GrantRelation } from "@/types";
 const MAX_BOARDS = 100;
 
 
-export const GET = withAdmin(async () => {
+export const GET = withAdmin(async (_request, { user }) => {
+  if (user.viaMachineCredential) {
+    return NextResponse.json({ error: INTERACTIVE_ONLY }, { status: 403 });
+  }
   await connectDB();
   const pending = await Invitation.find({ status: "pending" }).sort({ createdAt: -1 }).lean();
-  return NextResponse.json(await toApiInvitations(pending));
+  const taken = new Set(
+    (await User.find({ email: { $in: pending.map((i) => i.email) } }).select("email").lean()).map(
+      (u) => u.email
+    )
+  );
+  return NextResponse.json(await toApiInvitations(pending.filter((i) => !taken.has(i.email))));
 });
 
 type Parsed<T> = { ok: true; value: T } | { ok: false; error: string };

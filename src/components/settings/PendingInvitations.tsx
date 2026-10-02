@@ -38,7 +38,7 @@ export function PendingInvitations({
     try {
       const result: Reissued = await api.post(`/api/invitations/${invitation._id}/resend`, {});
       if (result.delivery === "email") {
-        toast(`Invitation sent again to ${invitation.email}. The previous link no longer works.`, "success");
+        toast(`Invitation sent again to ${invitation.email}`, "success");
       } else {
         setLinkFor(result);
       }
@@ -59,6 +59,7 @@ export function PendingInvitations({
     } catch (err) {
       setRevokeError(err instanceof Error ? err.message : "The invitation could not be revoked");
       setBusy(null);
+      onChanged();
       return;
     }
     setBusy(null);
@@ -110,8 +111,8 @@ export function PendingInvitations({
               <Button
                 size="sm"
                 variant="secondary"
-                aria-label={`Send the invitation for ${invitation.email} again`}
-                disabled={busy === invitation._id}
+                aria-label={`Resend the invitation for ${invitation.email}`}
+                disabled={!!busy}
                 onClick={() => resend(invitation)}
               >
                 Resend
@@ -120,7 +121,7 @@ export function PendingInvitations({
                 size="sm"
                 variant="danger"
                 aria-label={`Revoke the invitation for ${invitation.email}`}
-                disabled={busy === invitation._id}
+                disabled={!!busy}
                 onClick={() => {
                   setRevokeError("");
                   setRevoking(invitation);
@@ -156,7 +157,8 @@ export function PendingInvitations({
         title="Revoke invitation"
         message={`The link sent to ${revoking?.email ?? ""} will stop working.`}
         confirmLabel="Revoke"
-        loading={!!busy}
+        loadingLabel="Revoking…"
+        loading={!!revoking && busy === revoking._id}
         error={revokeError}
       />
     </section>

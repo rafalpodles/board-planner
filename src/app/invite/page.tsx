@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, Suspense, useEffect, useState } from "react";
+import { FormEvent, Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/hooks/use-auth";
@@ -20,7 +20,8 @@ interface Invitation {
 type Lookup =
   | { state: "loading" }
   | { state: "open"; invitation: Invitation }
-  | { state: "refused"; message: string };
+  | { state: "refused"; message: string }
+  | { state: "failed"; message: string };
 
 async function postJson(path: string, body: unknown) {
   const res = await fetch(path, {
@@ -47,24 +48,29 @@ function AcceptForm() {
   const [saving, setSaving] = useState(false);
   const [accepted, setAccepted] = useState(false);
 
-  // Off the address bar as soon as it is held, for the same reasons as the reset link: Referer,
-  // history, and a screen share
   useEffect(() => {
     if (fromUrl) window.history.replaceState(null, "", "/invite");
   }, [fromUrl]);
 
-  useEffect(() => {
-    if (!token) return;
-    postJson("/api/invitations/lookup", { token })
-      .then(({ ok, data }) =>
-        setLookup(
-          ok
-            ? { state: "open", invitation: data as Invitation }
-            : { state: "refused", message: data.error || "This invitation link is not valid." }
-        )
-      )
-      .catch(() => setLookup({ state: "refused", message: "Something went wrong. Try again." }));
+  const lookUp = useCallback(() => {
+    setLookup({ state: "loading" });
+    fetch("/api/invitations/lookup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token }),
+    })
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) setLookup({ state: "open", invitation: data as Invitation });
+        else if (res.status === 400 && data.reason) setLookup({ state: "refused", message: data.error });
+        else setLookup({ state: "failed", message: data.error || "Something went wrong." });
+      })
+      .catch(() => setLookup({ state: "failed", message: "Something went wrong." }));
   }, [token]);
+
+  useEffect(() => {
+    if (token) lookUp();
+  }, [token, lookUp]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -141,6 +147,20 @@ function AcceptForm() {
     );
   }
 
+  if (lookup.state === "failed") {
+    return (
+      <div className="w-full max-w-sm text-center">
+        <h1 className="text-2xl font-bold mb-2">The invitation could not be loaded</h1>
+        <p role="alert" className="text-sm text-text-muted mb-6">
+          {lookup.message}
+        </p>
+        <Button onClick={lookUp} className="w-full">
+          Try again
+        </Button>
+      </div>
+    );
+  }
+
   const { invitation } = lookup;
 
   return (
@@ -152,10 +172,12 @@ function AcceptForm() {
       </p>
       {invitation.boards.length > 0 && (
         <ul className="mb-6 rounded-lg border border-border divide-y divide-border text-sm">
-          {invitation.boards.map((b) => (
-            <li key={b.name} className="flex justify-between gap-3 px-3 py-2">
+          {invitation.boards.map((b, i) => (
+            <li key={i} className="flex justify-between gap-3 px-3 py-2">
               <span className="truncate">{b.name}</span>
-              <span className="text-text-muted shrink-0">{b.relation}</span>
+              <span className="text-text-muted shrink-0">
+                {b.relation === "owner" ? "Owner" : "Member"}
+              </span>
             </li>
           ))}
         </ul>

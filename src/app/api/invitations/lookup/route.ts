@@ -3,9 +3,10 @@ import { readJsonBody } from "@/lib/request-body";
 import { getClientIp } from "@/lib/auth";
 import { anonymousMultiplier, isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
 import { provenanceRefusal } from "@/lib/session";
-import { findInvitationByToken } from "@/lib/invitations";
+import { findInvitationByToken, markInvitationRevoked } from "@/lib/invitations";
 import { INVITATION_REFUSALS } from "@/lib/invitation-refusals";
 import { toApiInvitations } from "@/lib/invitation-view";
+import { User } from "@/models/user";
 
 const LOOKUPS_PER_SOURCE = 60;
 
@@ -30,6 +31,13 @@ export async function POST(request: Request) {
   if (!found.ok) {
     return NextResponse.json(
       { error: INVITATION_REFUSALS[found.reason], reason: found.reason },
+      { status: 400 }
+    );
+  }
+  if (await User.exists({ email: found.invitation.email })) {
+    await markInvitationRevoked(found.invitation._id);
+    return NextResponse.json(
+      { error: INVITATION_REFUSALS.used, reason: "used" },
       { status: 400 }
     );
   }

@@ -3,8 +3,12 @@ import { isValidObjectId } from "mongoose";
 import { withAdmin } from "@/lib/middleware";
 import { revokeInvitation } from "@/lib/invitations";
 import { logInstanceAudit } from "@/lib/instanceAudit";
+import { INTERACTIVE_ONLY } from "@/lib/invitation-mail";
 
 export const DELETE = withAdmin(async (_request, { params, user }) => {
+  if (user.viaMachineCredential) {
+    return NextResponse.json({ error: INTERACTIVE_ONLY }, { status: 403 });
+  }
   const { invitationId } = await params;
   if (!isValidObjectId(invitationId)) {
     return NextResponse.json({ error: "Invitation not found" }, { status: 404 });

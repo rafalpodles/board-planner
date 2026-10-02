@@ -88,8 +88,19 @@ export async function POST(request: Request) {
     throw err;
   }
 
-  await recordAcceptance(invitation._id, user._id);
+  let stillHeld = true;
+  try {
+    stillHeld = await recordAcceptance(invitation._id, user._id);
+  } catch (err) {
+    // The account exists either way, so its boards are still granted below
+    console.error("Failed to record an invitation's acceptance:", err);
+  }
+  if (!stillHeld) {
+    await User.deleteOne({ _id: user._id }).catch(() => {});
+    return NextResponse.json({ error: INVITATION_REFUSALS.revoked }, { status: 400 });
+  }
 
+  const granted: string[] = [];
   for (const board of authority.boards) {
     try {
       await Grant.findOneAndUpdate(
@@ -103,6 +114,7 @@ export async function POST(request: Request) {
         "member_added",
         `${user.username}: no access → ${board.relation}`
       );
+      granted.push(String(board.project));
     } catch (err) {
       console.error("Failed to grant an invited board:", err);
     }
@@ -125,7 +137,7 @@ export async function POST(request: Request) {
   const response = NextResponse.json(
     {
       username: user.username,
-      landing: authority.boards.length ? String(authority.boards[0].project) : null,
+      landing: granted[0] ?? null,
     },
     { status: 201 }
   );

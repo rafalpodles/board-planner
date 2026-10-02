@@ -6,6 +6,7 @@ import { reissueInvitation } from "@/lib/invitations";
 import { deliverTo, INTERACTIVE_ONLY, NO_ORIGIN_ERROR } from "@/lib/invitation-mail";
 import { describeInvitation, toApiInvitations } from "@/lib/invitation-view";
 import { logInstanceAudit } from "@/lib/instanceAudit";
+import { Invitation } from "@/models/invitation";
 import { Project } from "@/models/project";
 import { User } from "@/models/user";
 
@@ -20,21 +21,25 @@ export const POST = withAdmin(async (_request, { params, user }) => {
   const origin = selfOrigin();
   if (!origin) return NextResponse.json({ error: NO_ORIGIN_ERROR }, { status: 500 });
 
-  const reissued = await reissueInvitation(invitationId);
+  const current = await Invitation.findById(invitationId).select("email").lean();
+  if (current && (await User.exists({ email: current.email }))) {
+    return NextResponse.json(
+      { error: "That address already has an account. Add them to a board instead." },
+      { status: 409 }
+    );
+  }
+  const reissued = await reissueInvitation(invitationId, user._id);
   if (!reissued) return NextResponse.json({ error: "Invitation not found" }, { status: 404 });
   const { invitation, token } = reissued;
 
-  const [projects, inviter] = await Promise.all([
-    Project.find({ _id: { $in: invitation.boards.map((b) => b.project) } })
-      .select("key name")
-      .lean(),
-    User.findById(invitation.invitedBy).select("username fullName").lean(),
-  ]);
+  const projects = await Project.find({ _id: { $in: invitation.boards.map((b) => b.project) } })
+    .select("key name")
+    .lean();
   const delivery = await deliverTo(
     invitation.email,
     token,
     origin,
-    inviter ?? user,
+    user,
     invitation.role,
     invitation.boards,
     projects

@@ -53,8 +53,7 @@ export async function issueInvitation(
   try {
     invitation = await write();
   } catch (err) {
-    // Two upserts for one address both missed and both inserted; the unique index let one through,
-    // and the second is now an ordinary update of that row
+    // Two concurrent upserts both missed; the unique index let one insert, so retry as an update
     if ((err as { code?: number }).code !== DUPLICATE_KEY) throw err;
     invitation = await write();
   }
@@ -62,23 +61,29 @@ export async function issueInvitation(
   return { invitation, token };
 }
 
+/**
+ * A new link, endorsed by whoever sends it. Keeping the original inviter would mail a link that
+ * acceptance refuses whenever that inviter has since been demoted or deleted.
+ */
 export async function reissueInvitation(
-  id: Types.ObjectId | string
+  id: Types.ObjectId | string,
+  sentBy: Types.ObjectId | string
 ): Promise<{ invitation: IInvitation; token: string } | null> {
   await connectDB();
   const { token, tokenHash, expiresAt } = freshSecret();
   const invitation = await Invitation.findOneAndUpdate(
     { _id: id, status: "pending" },
-    { $set: { tokenHash, expiresAt } },
+    { $set: { tokenHash, expiresAt, invitedBy: sentBy, "boards.$[].addedBy": sentBy } },
     { returnDocument: "after" }
   );
   return invitation ? { invitation, token } : null;
 }
 
+/** Also stops an acceptance in flight: its claim is not yet tied to an account, so it is revocable. */
 export async function revokeInvitation(id: Types.ObjectId | string): Promise<IInvitation | null> {
   await connectDB();
   return Invitation.findOneAndUpdate(
-    { _id: id, status: "pending" },
+    { _id: id, $or: [{ status: "pending" }, { status: "accepted", acceptedBy: null }] },
     { $set: { status: "revoked" } },
     { returnDocument: "after" }
   );
@@ -132,18 +137,22 @@ export async function releaseInvitation(id: Types.ObjectId | string): Promise<vo
       { $set: { status: "pending", acceptedAt: null } }
     );
   } catch (err) {
-    // Somebody invited the same address again in the meantime, and that newer invitation is the
-    // pending one now; this one stays spent
+    // The address was invited again meanwhile, and that newer invitation is the pending one now
     if ((err as { code?: number }).code !== DUPLICATE_KEY) throw err;
   }
 }
 
+/** False when the invitation was revoked while the account was being made. */
 export async function recordAcceptance(
   id: Types.ObjectId | string,
   userId: Types.ObjectId | string
-): Promise<void> {
+): Promise<boolean> {
   await connectDB();
-  await Invitation.updateOne({ _id: id }, { $set: { acceptedBy: userId } });
+  const result = await Invitation.updateOne(
+    { _id: id, status: "accepted", acceptedBy: null },
+    { $set: { acceptedBy: userId } }
+  );
+  return result.matchedCount === 1;
 }
 
 export async function markInvitationRevoked(id: Types.ObjectId | string): Promise<void> {
