@@ -74,4 +74,18 @@ describe("GET /api/admin/licence", () => {
       keyId: "e2e",
     });
   });
+
+  // Rounded up, never to the nearest: 30¼ days left is 31, so the 30-day warning has not started
+  it("counts a part day as a whole one", async () => {
+    const expiresAt = new Date(Date.now() + 30 * DAY + 6 * 60 * 60 * 1000);
+    process.env.LICENCE_KEY = signLicence(
+      { customer: "Acme Ltd", plan: "pro", features: [], issuedAt: "2026-01-01T00:00:00.000Z", expiresAt: expiresAt.toISOString() },
+      signing
+    );
+
+    const body = await (await get()).json();
+
+    expect(body.daysLeft).toBe(31);
+    expect(body.graceDaysLeft).toBe(45);
+  });
 });

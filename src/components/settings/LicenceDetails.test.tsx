@@ -58,7 +58,8 @@ describe("LicenceDetails", () => {
     expect(row("Customer")).toBe("Acme Ltd");
     expect(row("Plan")).toBe("Pro");
     expect(row("Features")).toBe("All");
-    expect(row("Expires")).toContain("2027");
+    expect(row("Issued")).toBe("January 1, 2026");
+    expect(row("Expires")).toBe("January 1, 2027");
     expect(row("Days left")).toBe("200");
     expect(screen.queryByTestId("licence-warning")).toBeNull();
     noEditableControl(container);
@@ -70,13 +71,26 @@ describe("LicenceDetails", () => {
     cleanup();
 
     render(<LicenceDetails licence={valid({ daysLeft: 30 })} />);
-    expect(screen.getByTestId("licence-warning").textContent).toContain("expires in 30 days");
+    expect(screen.getByTestId("licence-warning").textContent).toBe(
+      "This licence expires in 30 days, on January 1, 2027. Renew it to keep Pro features on."
+    );
+  });
+
+  it("reads the expiry as the UTC day it was signed for, wherever the viewer is", () => {
+    render(
+      <LicenceDetails
+        licence={valid({ expiresAt: "2027-10-02T23:59:59.999Z", graceEndsAt: "2027-10-16T23:59:59.999Z", daysLeft: 5 })}
+      />
+    );
+
+    expect(row("Expires")).toBe("October 2, 2027");
+    expect(screen.getByTestId("licence-warning").textContent).toContain("on October 2, 2027.");
   });
 
   it("says Pro stays on, and until when, during the grace period", () => {
     render(<LicenceDetails licence={valid({ verdict: "grace", daysLeft: -3, graceDaysLeft: 11 })} />);
 
-    expect(screen.getByRole("alert").textContent).toContain("stay on for 11 days");
+    expect(screen.getByRole("alert").textContent).toContain("stay on for 11 days, until January 15, 2027,");
     expect(row("Days left")).toBe("0");
   });
 

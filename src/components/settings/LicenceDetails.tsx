@@ -28,8 +28,15 @@ const REFUSALS: Record<"invalid_signature" | "unknown_key" | "malformed", string
   malformed: "The value in LICENCE_KEY is not a licence key. It may be truncated or mistyped.",
 };
 
+// Licences are dated in UTC: one signed to expire on a day ends at 23:59:59Z, which a viewer east of
+// Greenwich would otherwise read as the next day
 function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+  return new Date(iso).toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    timeZone: "UTC",
+  });
 }
 
 function planName(plan: string): string {
@@ -58,10 +65,11 @@ function FreePlan({ reason }: { reason?: string }) {
   );
 }
 
-function Notice({ verdict, daysLeft, graceDaysLeft, graceEndsAt }: {
+function Notice({ verdict, daysLeft, graceDaysLeft, expiresAt, graceEndsAt }: {
   verdict: LicenceVerdict;
   daysLeft: number;
   graceDaysLeft: number;
+  expiresAt: string;
   graceEndsAt: string;
 }) {
   if (verdict === "grace") {
@@ -83,8 +91,8 @@ function Notice({ verdict, daysLeft, graceDaysLeft, graceEndsAt }: {
   if (daysLeft <= EXPIRY_WARNING_DAYS) {
     return (
       <p role="status" className="mb-4 rounded-lg border border-border p-4 text-sm" data-testid="licence-warning">
-        This licence expires in {days(daysLeft)}. Renew it before {formatDate(graceEndsAt)} to keep
-        Pro features on.
+        This licence expires {daysLeft > 0 ? `in ${days(daysLeft)}` : "today"}, on{" "}
+        {formatDate(expiresAt)}. Renew it to keep Pro features on.
       </p>
     );
   }
@@ -110,6 +118,7 @@ export function LicenceDetails({ licence }: { licence: LicenceSummary }) {
         verdict={licence.verdict}
         daysLeft={licence.daysLeft}
         graceDaysLeft={licence.graceDaysLeft}
+        expiresAt={licence.expiresAt}
         graceEndsAt={licence.graceEndsAt}
       />
       <dl className="divide-y divide-border rounded-lg border border-border text-sm" data-testid="licence-details">
