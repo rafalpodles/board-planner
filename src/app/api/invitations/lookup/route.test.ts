@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const findInvitationByToken = vi.fn();
-const revokePendingInvitationsFor = vi.fn();
 const userExists = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
@@ -11,7 +10,7 @@ vi.mock("@/models/rateLimit", async () => {
   return { RateLimit: inMemoryRateLimitModel() };
 });
 vi.mock("@/lib/session", () => ({ provenanceRefusal: () => null }));
-vi.mock("@/lib/invitations", () => ({ findInvitationByToken, revokePendingInvitationsFor }));
+vi.mock("@/lib/invitations", () => ({ findInvitationByToken }));
 vi.mock("@/lib/invitation-view", () => ({
   toApiInvitations: async (rows: { email: string }[]) =>
     rows.map((r) => ({
@@ -64,7 +63,7 @@ describe("POST /api/invitations/lookup", () => {
     expect(await res.json()).toEqual({ error: INVITATION_REFUSALS.expired, reason: "expired" });
   });
 
-  it("refuses, and withdraws, an invitation whose address has gained an account", async () => {
+  it("refuses an invitation whose address is held by an account", async () => {
     userExists.mockResolvedValue({ _id: "u2" });
 
     const res = await lookup();
@@ -72,7 +71,6 @@ describe("POST /api/invitations/lookup", () => {
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: INVITATION_REFUSALS.used, reason: "used" });
     expect(userExists).toHaveBeenCalledWith({ email: "ada@example.com" });
-    expect(revokePendingInvitationsFor).toHaveBeenCalledWith("ada@example.com");
   });
 
   it("refuses a request with no token", async () => {

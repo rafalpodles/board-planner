@@ -3,7 +3,7 @@ import { readJsonBody } from "@/lib/request-body";
 import { getClientIp } from "@/lib/auth";
 import { anonymousMultiplier, isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
 import { provenanceRefusal } from "@/lib/session";
-import { findInvitationByToken, revokePendingInvitationsFor } from "@/lib/invitations";
+import { findInvitationByToken } from "@/lib/invitations";
 import { INVITATION_REFUSALS } from "@/lib/invitation-refusals";
 import { toApiInvitations } from "@/lib/invitation-view";
 import { User } from "@/models/user";
@@ -34,8 +34,9 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
+  // Refused without being withdrawn: an address held without confirmation proves nothing, and the
+  // invitation is valid again once it is released
   if (await User.exists({ email: found.invitation.email })) {
-    await revokePendingInvitationsFor(found.invitation.email);
     return NextResponse.json(
       { error: INVITATION_REFUSALS.used, reason: "used" },
       { status: 400 }
