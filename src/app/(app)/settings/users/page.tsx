@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, FormEvent } from "react";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { useRouter } from "next/navigation";
-import { ApiUser } from "@/types";
+import { ApiInvitation, ApiUser } from "@/types";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Card } from "@/components/ui/Card";
@@ -12,6 +12,8 @@ import { Modal } from "@/components/ui/Modal";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
 import { AddToBoardModal } from "@/components/settings/AddToBoardModal";
+import { InviteModal } from "@/components/settings/InviteModal";
+import { PendingInvitations } from "@/components/settings/PendingInvitations";
 import { generatePassword } from "@/lib/password-generator";
 import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";
 
@@ -48,6 +50,8 @@ export default function UsersPage() {
   const [deleteError, setDeleteError] = useState("");
   const [mailWorks, setMailWorks] = useState(false);
   const [addingToBoard, setAddingToBoard] = useState<ApiUser | null>(null);
+  const [showInvite, setShowInvite] = useState(false);
+  const [invitations, setInvitations] = useState<ApiInvitation[]>([]);
 
   const api = useApi();
   const { toast, dismiss } = useToast();
@@ -73,6 +77,8 @@ export default function UsersPage() {
       .catch(() => toast("Failed to load data", "error"))
       .finally(() => setLoading(false));
 
+    refreshInvitations();
+
     // Whether the notice below the password field is a promise or a lie: an instance with no mail
     // server sends nothing, and the admin has to know that before they walk away from the screen
     api
@@ -92,6 +98,14 @@ export default function UsersPage() {
       // they deleted a user — who is still on screen, because this is the fetch that failed — is
       // the one message they cannot act on.
       toast(LIST_REFRESH_FAILED, "error");
+    }
+  }
+
+  async function refreshInvitations() {
+    try {
+      setInvitations(await api.get("/api/invitations"));
+    } catch {
+      toast("The pending invitations could not be loaded", "error");
     }
   }
 
@@ -239,7 +253,12 @@ export default function UsersPage() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-lg font-semibold">Users</h2>
-        <Button onClick={() => setShowNew(true)}>New User</Button>
+        <div className="flex gap-2">
+          <Button variant="secondary" onClick={() => setShowNew(true)}>
+            New User
+          </Button>
+          <Button onClick={() => setShowInvite(true)}>Invite</Button>
+        </div>
       </div>
 
       {/* auto-fill rather than a fixed 1/2/3: at this content width three columns left each card
@@ -277,7 +296,15 @@ export default function UsersPage() {
         ))}
       </div>
 
+      <PendingInvitations invitations={invitations} onChanged={refreshInvitations} />
+
       <AddToBoardModal person={addingToBoard} onClose={() => setAddingToBoard(null)} />
+
+      <InviteModal
+        open={showInvite}
+        onClose={() => setShowInvite(false)}
+        onInvited={refreshInvitations}
+      />
 
       {/* Create User Modal */}
       <Modal
