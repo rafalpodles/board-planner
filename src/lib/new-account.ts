@@ -18,16 +18,14 @@ export interface NewAccountFields {
 
 export type NewAccountCheck = { ok: true; value: NewAccountFields } | { ok: false; error: string };
 
-export function checkNewAccount(body: {
-  username?: unknown;
-  fullName?: unknown;
-  email?: unknown;
-  password?: unknown;
-}): NewAccountCheck {
-  const { username, password, fullName } = body;
-  if (!username || !password || !fullName) {
-    return { ok: false, error: "username, password, and fullName are required" };
-  }
+export type ProfileCheck =
+  | { ok: true; value: { username: string; fullName: string } }
+  | { ok: false; error: string };
+
+/** The two fields every account has, password or not. */
+export function checkProfile(body: { username?: unknown; fullName?: unknown }): ProfileCheck {
+  const { username, fullName } = body;
+  if (!username || !fullName) return { ok: false, error: "username and fullName are required" };
   // Validate what will be stored, trim included — the schema trims, so checking the untrimmed
   // string refused names that would have been stored perfectly well. A username reaches a
   // notification title and from there a chat message, where its characters stop being
@@ -39,6 +37,22 @@ export function checkNewAccount(body: {
   // to "" and refuses it as `required` — a 400 arriving as a 500 (BP-410).
   const storedFullName = normaliseFullName(String(fullName));
   if (!isValidFullName(storedFullName)) return { ok: false, error: FULL_NAME_RULE };
+  return { ok: true, value: { username: storedUsername, fullName: storedFullName } };
+}
+
+export function checkNewAccount(body: {
+  username?: unknown;
+  fullName?: unknown;
+  email?: unknown;
+  password?: unknown;
+}): NewAccountCheck {
+  const { username, password, fullName } = body;
+  if (!username || !password || !fullName) {
+    return { ok: false, error: "username, password, and fullName are required" };
+  }
+  const profile = checkProfile(body);
+  if (!profile.ok) return profile;
+  const { username: storedUsername, fullName: storedFullName } = profile.value;
 
   if (body.email !== undefined && typeof body.email !== "string") {
     return { ok: false, error: "Invalid email" };

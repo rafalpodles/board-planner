@@ -130,6 +130,7 @@ export const GROUPS = {
     "reset-by-email.spec.ts",
     "invitations.spec.ts",
     "board-owner-invitations.spec.ts",
+    "oidc-sign-in.spec.ts",
     "email-on-account.spec.ts",
     "email-change-confirmation.spec.ts",
     "reserved-usernames.spec.ts",

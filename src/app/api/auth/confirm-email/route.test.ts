@@ -60,7 +60,11 @@ describe("POST /api/auth/confirm-email", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, email: "new@example.com" });
-    expect(userUpdateOne).toHaveBeenCalledWith({ _id: "u1" }, { $set: { email: "new@example.com" } });
+    // Confirming is what proves the address, which is what a sign-in provider links by (BP-828)
+    expect(userUpdateOne).toHaveBeenCalledWith(
+      { _id: "u1" },
+      { $set: { email: "new@example.com", emailVerifiedAt: expect.any(Date) } }
+    );
     expect(invalidateResetTokens).toHaveBeenCalledWith("u1");
     // BP-826: an invitation to the address would otherwise come back when this account left it
     expect(revokePendingInvitationsFor).toHaveBeenCalledWith("new@example.com");

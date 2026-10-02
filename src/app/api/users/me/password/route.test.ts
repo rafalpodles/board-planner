@@ -5,6 +5,7 @@ const compare = vi.fn();
 const userFindById = vi.fn();
 const revokeUserCredentials = vi.fn();
 const invalidateResetTokens = vi.fn();
+const logInstanceAudit = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/rateLimit", async () => {
@@ -23,6 +24,7 @@ vi.mock("@/lib/session", () => ({
   ProvenanceError: class ProvenanceError extends Error {},
 }));
 vi.mock("@/lib/password-reset", () => ({ invalidateResetTokens }));
+vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/lib/grants", () => ({ check: vi.fn(), accessibleProjectIds: vi.fn() }));
 vi.mock("bcryptjs", () => ({ default: { compare, hash: vi.fn().mockResolvedValue("new-hash") } }));
 vi.mock("@/models/user", () => ({ User: { findById: userFindById } }));
@@ -72,6 +74,23 @@ describe("PUT /api/users/me/password", () => {
     expect(res.status).toBe(200);
     expect(record.save).toHaveBeenCalled();
     expect(revokeUserCredentials).toHaveBeenCalledWith("u1-changer", SESSION_ID);
+  });
+
+  it("records the providers the change unlinked", async () => {
+    revokeUserCredentials.mockResolvedValue({ identitiesUnlinked: 1 });
+
+    expect((await PUT(put(), ctx())).status).toBe(200);
+    expect(logInstanceAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "identity_unlinked", user: "u1-changer", target: "changer" })
+    );
+  });
+
+  it("records no unlinking for an account that had no provider", async () => {
+    revokeUserCredentials.mockResolvedValue({ identitiesUnlinked: 0 });
+
+    await PUT(put(), ctx());
+
+    expect(logInstanceAudit).not.toHaveBeenCalled();
   });
 
   it("revokes every session when the caller holds a machine token and has none", async () => {

@@ -9,6 +9,7 @@ import { ApiToken } from "@/models/apiToken";
 import { DeviceEnrolment } from "@/models/deviceEnrolment";
 import { EmailChangeToken } from "@/models/emailChangeToken";
 import { EnrolmentToken } from "@/models/enrolmentToken";
+import { Identity } from "@/models/identity";
 import { OAuthCode } from "@/models/oauthCode";
 import { OAuthToken } from "@/models/oauthToken";
 import { Worker } from "@/models/worker";
@@ -244,6 +245,24 @@ function tokenNamed(header: string, name: string): string | null {
   return soleValue(cookieValues(header, name));
 }
 
+/**
+ * A short-lived cookie for a round trip through another site. Named from the deployment alone,
+ * not the request: the leg that sets it is a POST carrying an Origin and the leg that reads it is a
+ * navigation that may carry none, and the two must agree on the name.
+ */
+export function flowCookieName(base: string): string {
+  return allowsInsecureCookie() ? base : `__Host-${base}`;
+}
+
+export function buildFlowCookie(base: string, value: string, maxAgeSeconds: number): string {
+  return cookieHeader(flowCookieName(base), value, maxAgeSeconds);
+}
+
+export function readFlowCookie(request: Request, base: string): string | null {
+  const header = request.headers.get("cookie");
+  return header ? tokenNamed(header, flowCookieName(base)) : null;
+}
+
 export function readSessionCookie(header: string | null): string | null {
   return sessionCookieTokens(header)[0] ?? null;
 }
@@ -382,7 +401,7 @@ export async function revokeSession(token: string): Promise<boolean> {
 export async function revokeUserCredentials(
   userId: Types.ObjectId | string,
   exceptSessionId?: Types.ObjectId | string | null
-): Promise<void> {
+): Promise<{ identitiesUnlinked: number }> {
   await revokeUserSessions(userId, exceptSessionId);
   await ApiToken.deleteMany({ user: userId });
   await OAuthToken.deleteMany({ user: userId });
@@ -395,6 +414,10 @@ export async function revokeUserCredentials(
   // A machine keeps its identity and owner; only the credential it holds stops matching
   const unmatchable = await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 10);
   await Worker.updateMany({ owner: userId }, { $set: { credentialHash: unmatchable } });
+  // A linked sign-in provider is a standing way in like any token: one linked from a borrowed
+  // session would otherwise outlive the password change meant to end it (BP-828)
+  const unlinked = await Identity.deleteMany({ user: userId });
+  return { identitiesUnlinked: unlinked.deletedCount ?? 0 };
 }
 
 export async function revokeUserSessions(

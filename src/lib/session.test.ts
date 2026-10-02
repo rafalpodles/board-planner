@@ -24,6 +24,8 @@ vi.mock("@/models/enrolmentToken", () => ({ EnrolmentToken: { deleteMany: enrolm
 vi.mock("@/models/deviceEnrolment", () => ({ DeviceEnrolment: { deleteMany: deviceEnrolmentDeleteMany } }));
 vi.mock("@/models/worker", () => ({ Worker: { updateMany: workerUpdateMany } }));
 vi.mock("@/models/emailChangeToken", () => ({ EmailChangeToken: { deleteMany: emailChangeDeleteMany } }));
+const identityDeleteMany = vi.fn(async () => ({ deletedCount: 0 }));
+vi.mock("@/models/identity", () => ({ Identity: { deleteMany: identityDeleteMany } }));
 
 const {
   allowsInsecureCookie,
@@ -721,6 +723,15 @@ describe("revokeUserCredentials", () => {
     expect(apiTokenDeleteMany).toHaveBeenCalledWith({ user: "user-1" });
     expect(oauthTokenDeleteMany).toHaveBeenCalledWith({ user: "user-1" });
     expect(oauthCodeDeleteMany).toHaveBeenCalledWith({ user: "user-1" });
+  });
+
+  // BP-828: a provider linked from a borrowed session would otherwise outlive the password
+  // change meant to end that session's hold on the account
+  it("unlinks every sign-in provider, and says how many", async () => {
+    identityDeleteMany.mockResolvedValueOnce({ deletedCount: 2 });
+
+    expect(await revokeUserCredentials("user-1")).toEqual({ identitiesUnlinked: 2 });
+    expect(identityDeleteMany).toHaveBeenCalledWith({ user: "user-1" });
   });
 
   // BP-359 review: a link to a pending address outlived the recovery that was meant to end it

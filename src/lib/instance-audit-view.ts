@@ -31,6 +31,8 @@ const LABELS: Partial<Record<InstanceAuditAction, string>> = {
   invitation_resent: "Invitation sent again",
   invitation_revoked: "Invitation revoked",
   invitation_accepted: "Invitation accepted",
+  identity_linked: "Sign-in provider linked",
+  identity_unlinked: "Sign-in provider unlinked",
   // Three verbs rather than one row with a footnote, the same rule the command trio follows below.
   // "Refused change" names what was answered, because the row is about a change a gate stopped —
   // not about a decision in the abstract.

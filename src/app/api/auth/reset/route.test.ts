@@ -103,7 +103,7 @@ describe("POST /api/auth/reset", () => {
     expect(hash).toHaveBeenCalledWith("a-brand-new-password", 10);
     expect(userUpdateOne).toHaveBeenCalledWith(
       { _id: "u1" },
-      { $set: { password: "new-hash" } }
+      { $set: { password: "new-hash", emailVerifiedAt: expect.any(Date) } }
     );
     // Whoever knew the old password is signed out — usually the reason somebody is resetting
     expect(revokeUserCredentials).toHaveBeenCalledWith("u1");
@@ -159,5 +159,18 @@ describe("POST /api/auth/reset", () => {
 
     expect(res.status).toBe(400);
     expect(userUpdateOne).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/auth/reset and sign-in providers", () => {
+  // A reset is how somebody takes their account back; a provider an intruder linked must not
+  // outlive it (BP-828)
+  it("records the providers the reset unlinked", async () => {
+    revokeUserCredentials.mockResolvedValue({ identitiesUnlinked: 2 });
+
+    const res = await POST(post());
+
+    expect(res.status).toBe(200);
+    expect(logInstanceAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "identity_unlinked" }));
   });
 });

@@ -184,6 +184,12 @@ GITHUB_API_BASE_URL=      # Optional — where GitHub's API is (default https://
                           # provider classification (BP-634). A proxy in front of api.github.com
                           # is neither shape and leaves both at github.com, because a proxy's
                           # address is not a repository's
+OIDC_ISSUER=              # Optional — sign-in through any OpenID Connect provider (Keycloak, Authentik,
+OIDC_CLIENT_ID=           # Entra, Okta…), all three together; the redirect URI is PUBLIC_ORIGIN +
+OIDC_CLIENT_SECRET=       # /api/auth/oidc/oidc/callback. Plain http only for an issuer on loopback
+OIDC_LABEL=               # Optional — the button's name (default "Single sign-on") (BP-828)
+GOOGLE_CLIENT_ID=         # Optional — sign-in with Google, the same code path at Google's issuer;
+GOOGLE_CLIENT_SECRET=     # redirect URI PUBLIC_ORIGIN + /api/auth/oidc/google/callback (BP-828)
 SMTP_HOST=                # Optional — Email notifications
 SMTP_PORT=587
 SMTP_USER=
@@ -219,9 +225,10 @@ PUBLIC_ORIGIN=            # This instance's own address, at runtime. Required fo
                           # /.well-known documents and the PM OAuth redirect_uri, which answer 500
                           # without it rather than falling back to a request header (BP-316).
                           # Falls back to APP_ORIGIN only when that names exactly one origin.
-                          # Every link the app sends (mail, chat, Coda, worker enrolment) is built
-                          # from it; nothing reads NEXT_PUBLIC_APP_URL, which would be a
-                          # build-machine literal in the published image (BP-766).
+                          # Every link the app sends (mail, chat, Coda, worker enrolment) and the
+                          # OIDC sign-in redirect URI are built from it; nothing reads
+                          # NEXT_PUBLIC_APP_URL, which would be a build-machine literal in the
+                          # published image (BP-766).
                           # WARNING: a second origin in APP_ORIGIN with PUBLIC_ORIGIN unset turns
                           # every link off (and MCP, enrolment, password reset refuse)
 ```

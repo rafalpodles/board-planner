@@ -93,10 +93,16 @@ export const PUT = withAuth(async (request, { user }) => {
       if (!record) {
         return NextResponse.json({ error: "User not found" }, { status: 404 });
       }
+      if (!record.password) {
+        return NextResponse.json(
+          { error: "Changing the address needs a password, and this account has none. Set one first." },
+          { status: 409 }
+        );
+      }
       const currentPassword = body.currentPassword;
       const { lockedOut, result: passwordMatches } = await withLockout(
         lockoutKey(getClientIp(request) ?? "-", user.username, "email-change"),
-        async () => ((await bcrypt.compare(currentPassword, record.password)) ? true : null),
+        async () => (record.password && (await bcrypt.compare(currentPassword, record.password)) ? true : null),
         sourceKey(String(user._id), "email-change"),
         EXCLUSIVE_SOURCE_ATTEMPTS
       );
@@ -139,6 +145,7 @@ export const PUT = withAuth(async (request, { user }) => {
         // Clearing the address sends nothing new anywhere, and an instance that cannot send mail
         // has no confirmation to offer
         updates.email = email;
+        updates.emailVerifiedAt = null;
         await cancelEmailChange(user._id);
       }
     }

@@ -31,6 +31,8 @@ const boardsOnlyOwnedBy = vi.fn();
 const grantDeleteMany = vi.fn();
 vi.mock("@/lib/grants", () => ({ check, accessibleProjectIds: vi.fn(), boardsOnlyOwnedBy }));
 vi.mock("@/models/grant", () => ({ Grant: { deleteMany: grantDeleteMany } }));
+const identityDeleteMany = vi.fn();
+vi.mock("@/models/identity", () => ({ Identity: { deleteMany: identityDeleteMany } }));
 vi.mock("@/lib/session", () => ({ revokeUserSessions, revokeUserCredentials }));
 vi.mock("@/lib/password-reset", () => ({ invalidateResetTokens }));
 const cancelEmailChange = vi.fn();
@@ -66,6 +68,7 @@ const ctx = () => ({ params: Promise.resolve({ userId: "target-1" }) });
 function targetDoc(overrides: Record<string, unknown> = {}) {
   return {
     _id: "target-1",
+    emailVerifiedAt: new Date("2026-01-01T00:00:00Z") as Date | null,
     username: "target",
     role: "admin",
     email: "target@example.com",
@@ -107,6 +110,8 @@ describe("PUT /api/users/:id", () => {
     expect(res.status).toBe(200);
     expect(target.role).toBe("member");
     expect(target.email).toBe("new.address@example.com");
+    // An address an administrator typed is a claim, never a proof a sign-in provider may link by
+    expect(target.emailVerifiedAt).toBeNull();
     expect(target.kind).toBe("human");
     expect(target.save).toHaveBeenCalled();
     // BP-359 review: a change the account asked for itself would otherwise overwrite this one
@@ -261,6 +266,26 @@ describe("PUT /api/users/:id — an admin sets a password", () => {
     await PUT(put({ role: "admin" }), ctx());
 
     expect(await isRateLimited(shared, ANONYMOUS_ACCOUNT_ATTEMPTS)).toBe(true);
+  });
+
+  it("records the providers it unlinked, attributed to the administrator", async () => {
+    found(targetDoc({ role: "member" }));
+    revokeUserCredentials.mockResolvedValueOnce({ identitiesUnlinked: 2 });
+
+    await PUT(put({ password: "a-fresh-password" }), ctx());
+
+    expect(logInstanceAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "identity_unlinked", user: "admin-1", target: "target" })
+    );
+  });
+
+  it("records no unlinking when the target had no provider", async () => {
+    found(targetDoc({ role: "member" }));
+    revokeUserCredentials.mockResolvedValueOnce({ identitiesUnlinked: 0 });
+
+    await PUT(put({ password: "a-fresh-password" }), ctx());
+
+    expect(logInstanceAudit).not.toHaveBeenCalledWith(expect.objectContaining({ action: "identity_unlinked" }));
   });
 
   it("hashes it, signs the target out everywhere, and leaves a trace", async () => {
@@ -542,6 +567,15 @@ describe("DELETE /api/users/:id", () => {
 
     expect(res.status).toBe(200);
     expect(grantDeleteMany).toHaveBeenCalledWith({ subject: TARGET_HEX });
+  });
+
+  // A link left behind would refuse the same person's provider as "already linked" for good (BP-828)
+  it("removes every sign-in provider the deleted account had linked", async () => {
+    found(person());
+
+    await DELETE(...del(TARGET_HEX));
+
+    expect(identityDeleteMany).toHaveBeenCalledWith({ user: TARGET_HEX });
   });
 
   it("leaves the grants alone when the account was not deleted", async () => {

@@ -130,8 +130,11 @@ export async function findInvitationByToken(token: string): Promise<InvitationOu
  * together cannot both be told they won.
  */
 export async function claimInvitation(token: string): Promise<InvitationOutcome> {
+  return claimInvitationByHash(sha256(token));
+}
+
+export async function claimInvitationByHash(tokenHash: string): Promise<InvitationOutcome> {
   await connectDB();
-  const tokenHash = sha256(token);
   const now = new Date();
   const claimed = await Invitation.findOneAndUpdate(
     { tokenHash, status: "pending", expiresAt: { $gt: now } },

@@ -89,10 +89,13 @@ export async function POST(request: Request) {
 
   // Every session, including whoever is signed in on the old password — which is the case somebody
   // resetting a password they believe was stolen is trying to end
-  await revokeUserCredentials(user._id);
+  // Providers go with every other credential, an intruder's included; the account's own can be
+  // linked again
+  const revoked = await revokeUserCredentials(user._id);
 
   try {
-    await User.updateOne({ _id: user._id }, { $set: { password: hashed } });
+    // The link reached the account's address, which is the proof a provider links by
+    await User.updateOne({ _id: user._id }, { $set: { password: hashed, emailVerifiedAt: new Date() } });
   } catch (err) {
     // The claim is one-shot, so a write that fails here would otherwise leave somebody signed out
     // of everything, holding a dead link, with their old password still in force and no way back
@@ -128,6 +131,16 @@ export async function POST(request: Request) {
 
   // The other half of "was that me?": the audit row answers it for an administrator reading the
   // log, and this answers it for the person whose account it is.
+  if (revoked?.identitiesUnlinked) {
+    void logInstanceAudit({
+      action: "identity_unlinked",
+      user: user._id,
+      actorUsername: user.username,
+      target: user.username,
+      detail: "every sign-in provider, by a password reset",
+    });
+  }
+
   void notifyPasswordChanged({
     email: user.email,
     username: user.username,

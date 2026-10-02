@@ -26,9 +26,9 @@ const userSchema = new Schema<IUser>({
     lowercase: true,
     trim: true,
   },
+  // Absent for an account that signs in only through an identity provider (BP-828)
   password: {
     type: String,
-    required: true,
     select: false,
   },
   fullName: {
@@ -41,6 +41,13 @@ const userSchema = new Schema<IUser>({
     default: "",
     trim: true,
     lowercase: true,
+  },
+  // When this address was last shown to reach this account: a confirmation, a mailed invitation
+  // or reset link spent, or an identity provider vouching for it. Cleared whenever the address is
+  // set without proof. An identity provider links by address only to a proven one (BP-828).
+  emailVerifiedAt: {
+    type: Date,
+    default: null,
   },
   // Superseded by `notifications` below. Still read for accounts that predate the grid, which is
   // why nothing migrates them: this field IS their stored preference until they save the screen.

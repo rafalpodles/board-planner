@@ -144,6 +144,7 @@ export interface IUser {
   password: string;
   fullName: string;
   email: string;
+  emailVerifiedAt?: Date | null;
   /** @deprecated Superseded by `notifications`. Kept as the fallback for accounts that predate it. */
   emailNotifications: boolean;
   emailDigest: boolean;
@@ -218,6 +219,32 @@ export interface IApiToken {
 
 export const GRANT_RELATIONS = ["owner", "member"] as const;
 export type GrantRelation = (typeof GRANT_RELATIONS)[number];
+
+export interface IIdentity {
+  _id: Types.ObjectId;
+  user: Types.ObjectId;
+  provider: string;
+  issuer: string;
+  subject: string;
+  email: string;
+  linkedAt: Date;
+  lastUsedAt: Date | null;
+}
+
+export interface IOidcFlow {
+  _id: Types.ObjectId;
+  binderHash: string;
+  provider: string;
+  state: string;
+  nonce: string;
+  codeVerifier: string;
+  intent: "signin" | "invite" | "link";
+  invitationTokenHash: string | null;
+  user: Types.ObjectId | null;
+  claims: { issuer: string; subject: string; email: string } | null;
+  expiresAt: Date;
+  createdAt: Date;
+}
 
 export const INVITATION_STATUSES = ["pending", "accepted", "revoked"] as const;
 export type InvitationStatus = (typeof INVITATION_STATUSES)[number];
@@ -1600,6 +1627,8 @@ export const INSTANCE_AUDIT_ACTIONS = [
   "invitation_resent",
   "invitation_revoked",
   "invitation_accepted",
+  "identity_linked",
+  "identity_unlinked",
   // A refused change accepted, declined, or given up on. Audited at the instance rather than the
   // project, because what accepting spends is the machine owner's pinned GitHub identity and the
   // CI minutes of whatever repository the push lands in — neither of which belongs to the board.

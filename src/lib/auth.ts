@@ -43,7 +43,9 @@ export async function verifyCredentials(
     "+password"
   );
 
-  if (!user) {
+  // An account with no password costs the same comparison as one that does not exist, so the
+  // timing does not say which accounts sign in only through an identity provider
+  if (!user || !user.password) {
     await bcrypt.compare(password, ABSENT_USER_HASH);
     return null;
   }
