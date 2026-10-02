@@ -16,6 +16,8 @@ const { api, toast, routerReplace } = vi.hoisted(() => ({
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast }) }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: routerReplace }) }));
+// Its own reads are its own test's business; here they would be counted as the member list's
+vi.mock("@/components/settings/BoardInvitations", () => ({ BoardInvitations: () => null }));
 
 function project(over: Partial<ApiProject> = {}): ApiProject {
   return {

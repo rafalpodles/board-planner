@@ -5,10 +5,11 @@ const findOneAndUpdate = vi.fn();
 const findOne = vi.fn();
 const updateOne = vi.fn();
 const updateMany = vi.fn();
+const create = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/invitation", () => ({
-  Invitation: { findOneAndUpdate, findOne, updateOne, updateMany },
+  Invitation: { findOneAndUpdate, findOne, updateOne, updateMany, create },
 }));
 
 const {
@@ -18,6 +19,9 @@ const {
   recordAcceptance,
   revokeClaimedInvitation,
   revokePendingInvitationsFor,
+  inviteToBoard,
+  removeBoardFromInvitation,
+  revokeIfEmpty,
   claimInvitation,
   findInvitationByToken,
   releaseInvitation,
@@ -258,6 +262,104 @@ describe("revoking because nothing backs it any more", () => {
 
     expect(updateOne).toHaveBeenCalledWith(
       { _id: "inv-1", status: "accepted", acceptedBy: null },
+      { $set: { status: "revoked" } }
+    );
+  });
+});
+
+describe("a board owner inviting", () => {
+  const INVITE = { email: "ada@example.com", project: "p1", relation: "owner" as const, invitedBy: "o1" };
+
+  beforeEach(() => {
+    findOneAndUpdate.mockReset().mockResolvedValue(null);
+    create.mockReset().mockImplementation(async (doc: Record<string, unknown>) => ({ _id: "inv-new", ...doc }));
+    updateMany.mockReset().mockResolvedValue({});
+  });
+
+  it("starts a member invitation for this board alone when none is pending", async () => {
+    const outcome = await inviteToBoard(INVITE);
+
+    expect(outcome.kind).toBe("created");
+    const doc = create.mock.calls[0][0];
+    expect(doc).toMatchObject({
+      email: "ada@example.com",
+      role: "member",
+      boards: [{ project: "p1", relation: "owner", addedBy: "o1" }],
+      invitedBy: "o1",
+      status: "pending",
+    });
+    expect(outcome.kind === "created" && doc.tokenHash).toBe(
+      outcome.kind === "created" ? sha256(outcome.token) : ""
+    );
+  });
+
+  // Somebody else's invitation: an owner may only add their board, never touch its role, its
+  // link or how long it lives
+  it("only adds this board to an invitation already pending, and changes nothing else", async () => {
+    findOneAndUpdate
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ _id: "inv-admin", role: "admin" });
+
+    const outcome = await inviteToBoard(INVITE);
+
+    expect(outcome.kind).toBe("added");
+    expect(create).not.toHaveBeenCalled();
+    const [filter, update] = findOneAndUpdate.mock.calls[1];
+    expect(filter).toMatchObject({ email: "ada@example.com", status: "pending", "boards.project": { $ne: "p1" } });
+    expect(update).toEqual({ $push: { boards: { project: "p1", relation: "owner", addedBy: "o1" } } });
+  });
+
+  it("re-relates this board's entry when it is already on the invitation", async () => {
+    findOneAndUpdate.mockResolvedValueOnce({ _id: "inv-1" });
+
+    await inviteToBoard(INVITE);
+
+    const [filter, update] = findOneAndUpdate.mock.calls[0];
+    expect(filter).toMatchObject({ email: "ada@example.com", status: "pending", "boards.project": "p1" });
+    expect(update).toEqual({ $set: { "boards.$.relation": "owner", "boards.$.addedBy": "o1" } });
+  });
+
+  it("only joins an invitation whose link still works, retiring an expired one first", async () => {
+    await inviteToBoard(INVITE);
+
+    expect(updateMany).toHaveBeenCalledWith(
+      { email: "ada@example.com", status: "pending", expiresAt: { $lte: expect.any(Date) } },
+      { $set: { status: "revoked" } }
+    );
+    expect(findOneAndUpdate.mock.calls[0][0].expiresAt).toEqual({ $gt: expect.any(Date) });
+  });
+
+  it("joins the invitation somebody else created a moment earlier", async () => {
+    create.mockRejectedValueOnce(duplicate);
+    findOneAndUpdate
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ _id: "inv-race" });
+
+    const outcome = await inviteToBoard(INVITE);
+
+    expect(outcome).toEqual({ kind: "added", invitation: { _id: "inv-race" } });
+  });
+});
+
+describe("withdrawing a board from an invitation", () => {
+  it("pulls only that board, only from a pending invitation that has it", async () => {
+    findOneAndUpdate.mockResolvedValueOnce({ _id: "inv-1", boards: [] });
+
+    await removeBoardFromInvitation("inv-1", "p1");
+
+    expect(findOneAndUpdate.mock.calls.at(-1)!.slice(0, 2)).toEqual([
+      { _id: "inv-1", status: "pending", "boards.project": "p1" },
+      { $pull: { boards: { project: "p1" } } },
+    ]);
+  });
+
+  it("revokes only an invitation that is pending and has no boards left", async () => {
+    await revokeIfEmpty("inv-1");
+
+    expect(updateOne).toHaveBeenCalledWith(
+      { _id: "inv-1", status: "pending", boards: { $size: 0 } },
       { $set: { status: "revoked" } }
     );
   });
