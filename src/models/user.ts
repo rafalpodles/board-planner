@@ -26,9 +26,9 @@ const userSchema = new Schema<IUser>({
     lowercase: true,
     trim: true,
   },
+  // Absent for an account that signs in only through an identity provider (BP-828)
   password: {
     type: String,
-    required: true,
     select: false,
   },
   fullName: {

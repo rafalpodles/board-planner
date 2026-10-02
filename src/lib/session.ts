@@ -244,6 +244,25 @@ function tokenNamed(header: string, name: string): string | null {
   return soleValue(cookieValues(header, name));
 }
 
+/** A short-lived cookie for a round trip through another site, named by the session cookie's rules. */
+export function flowCookieName(base: string, request?: Request): string {
+  return allowsInsecureCookie(request) ? base : `__Host-${base}`;
+}
+
+export function buildFlowCookie(
+  base: string,
+  value: string,
+  maxAgeSeconds: number,
+  request?: Request
+): string {
+  return cookieHeader(flowCookieName(base, request), value, maxAgeSeconds);
+}
+
+export function readFlowCookie(request: Request, base: string): string | null {
+  const header = request.headers.get("cookie");
+  return header ? tokenNamed(header, flowCookieName(base, request)) : null;
+}
+
 export function readSessionCookie(header: string | null): string | null {
   return sessionCookieTokens(header)[0] ?? null;
 }

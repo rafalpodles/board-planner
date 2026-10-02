@@ -1,0 +1,18 @@
+import mongoose, { Schema, Model } from "mongoose";
+import { IIdentity } from "@/types";
+
+const identitySchema = new Schema<IIdentity>(
+  {
+    user: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    provider: { type: String, required: true },
+    subject: { type: String, required: true },
+    email: { type: String, default: "" },
+    lastUsedAt: { type: Date, default: null },
+  },
+  { timestamps: { createdAt: "linkedAt", updatedAt: false } }
+);
+
+identitySchema.index({ provider: 1, subject: 1 }, { unique: true });
+
+export const Identity: Model<IIdentity> =
+  mongoose.models.Identity || mongoose.model<IIdentity>("Identity", identitySchema);

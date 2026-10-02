@@ -4,22 +4,11 @@ import { readJsonBody } from "@/lib/request-body";
 import { connectDB } from "@/lib/db";
 import { getClientIp, PASSWORD_COST_FACTOR } from "@/lib/auth";
 import { anonymousMultiplier, isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
-import { buildSessionCookie, createSession, legacySessionCookies, provenanceRefusal } from "@/lib/session";
+import { provenanceRefusal } from "@/lib/session";
 import { checkNewAccount } from "@/lib/new-account";
-import { duplicateKeyField } from "@/lib/mongo-errors";
-import {
-  claimInvitation,
-  revokeClaimedInvitation,
-  revokePendingInvitationsFor,
-  recordAcceptance,
-  releaseInvitation,
-} from "@/lib/invitations";
-import { authorityAtAcceptance } from "@/lib/invitation-authority";
+import { claimInvitation } from "@/lib/invitations";
 import { INVITATION_REFUSALS } from "@/lib/invitation-refusals";
-import { logInstanceAudit } from "@/lib/instanceAudit";
-import { logProjectAudit } from "@/lib/projectAudit";
-import { Grant } from "@/models/grant";
-import { User } from "@/models/user";
+import { completeAcceptance } from "@/lib/invitation-acceptance";
 
 const ATTEMPTS_PER_SOURCE = 20;
 
@@ -59,94 +48,5 @@ export async function POST(request: Request) {
   }
   const invitation = claimed.invitation;
 
-  const authority = await authorityAtAcceptance(invitation);
-  if (!authority) {
-    await revokeClaimedInvitation(invitation._id);
-    return NextResponse.json({ error: INVITATION_REFUSALS.revoked }, { status: 400 });
-  }
-
-  let user;
-  try {
-    user = await User.create({
-      username,
-      password: hashed,
-      fullName,
-      email: invitation.email,
-      role: authority.role,
-    });
-  } catch (err) {
-    await releaseInvitation(invitation._id).catch(() => {});
-    const conflict = duplicateKeyField(err);
-    if (conflict === "email") {
-      return NextResponse.json(
-        { error: "That address already has an account. Sign in instead." },
-        { status: 409 }
-      );
-    }
-    if (conflict) {
-      return NextResponse.json({ error: "Username already exists" }, { status: 409 });
-    }
-    throw err;
-  }
-
-  let stillHeld = true;
-  try {
-    stillHeld = await recordAcceptance(invitation._id, user._id);
-  } catch (err) {
-    // The account exists either way, so its boards are still granted below
-    console.error("Failed to record an invitation's acceptance:", err);
-  }
-  if (!stillHeld) {
-    await User.deleteOne({ _id: user._id }).catch(() => {});
-    return NextResponse.json({ error: INVITATION_REFUSALS.revoked }, { status: 400 });
-  }
-  // A re-invite sent while this acceptance held its claim is a second pending row for the address
-  await revokePendingInvitationsFor(invitation.email);
-
-  const granted: string[] = [];
-  for (const board of authority.boards) {
-    try {
-      await Grant.findOneAndUpdate(
-        { subject: user._id, objectType: "project", object: board.project },
-        { $set: { relation: board.relation }, $setOnInsert: { createdBy: board.addedBy } },
-        { upsert: true }
-      );
-      void logProjectAudit(
-        String(board.project),
-        String(board.addedBy),
-        "member_added",
-        `${user.username}: no access → ${board.relation}`
-      );
-      granted.push(String(board.project));
-    } catch (err) {
-      console.error("Failed to grant an invited board:", err);
-    }
-  }
-
-  void logInstanceAudit({
-    action: "invitation_accepted",
-    user: user._id,
-    actorUsername: user.username,
-    target: invitation.email,
-    detail: `as ${authority.role === "admin" ? "an administrator" : "a member"}, account ${user.username}`,
-  });
-
-  const { token: sessionToken, absoluteExpiresAt } = await createSession({
-    userId: user._id,
-    userAgent: request.headers.get("user-agent"),
-    ip: clientIp,
-  });
-
-  const response = NextResponse.json(
-    {
-      username: user.username,
-      landing: granted[0] ?? null,
-    },
-    { status: 201 }
-  );
-  response.headers.append("Set-Cookie", buildSessionCookie(sessionToken, absoluteExpiresAt, request));
-  for (const cookie of legacySessionCookies(request)) {
-    response.headers.append("Set-Cookie", cookie);
-  }
-  return response;
+  return completeAcceptance(invitation, { username, fullName, passwordHash: hashed }, request, clientIp);
 }
