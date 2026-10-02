@@ -68,3 +68,21 @@ describe("every live smoke runs in a CI job of its own", () => {
     }
   });
 });
+
+describe("the CI passed gate", () => {
+  const jobsBlock = workflow.slice(workflow.indexOf("\njobs:\n"));
+  const jobIds = [...jobsBlock.matchAll(/^ {2}([A-Za-z0-9_-]+):/gm)].map((m) => m[1]);
+  const gate = jobsBlock.match(/^ {2}ci-passed:\n(?:(?: {4}.*)?\n?)*/m)?.[0] ?? "";
+  const needed = [...(gate.match(/^ {4}needs:\n((?: {6}- .*\n)*)/m)?.[1] ?? "").matchAll(/- (\S+)/g)].map(
+    (m) => m[1]
+  );
+
+  it("needs every other job, so a job added later cannot fail unnoticed", () => {
+    expect(jobIds).toContain("ci-passed");
+    expect(needed.sort()).toEqual(jobIds.filter((id) => id !== "ci-passed").sort());
+  });
+
+  it("runs even when a needed job failed", () => {
+    expect(gate).toMatch(/^ {4}if: always\(\)$/m);
+  });
+});
