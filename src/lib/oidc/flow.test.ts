@@ -286,6 +286,16 @@ describe("GitHub, which speaks OAuth 2 without OpenID Connect", () => {
     });
   });
 
+  it("refuses when GitHub names the person but will not list their addresses", async () => {
+    fetchMock.mockImplementation(async (url: string) =>
+      url.endsWith("/user/emails")
+        ? new Response(JSON.stringify({ message: "Server Error" }), { status: 500 })
+        : new Response(JSON.stringify({ id: 4242, login: "ada" }), { status: 200 })
+    );
+
+    expect((await finishFlow({ provider: GITHUB, binder: "cpo_b", origin: ORIGIN, query: "" })).ok).toBe(false);
+  });
+
   it("refuses a person with no id", async () => {
     githubAnswers({ login: "ada" }, [{ email: "ada@corp.example", primary: true, verified: true }]);
 
