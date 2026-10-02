@@ -94,6 +94,7 @@ interface Screen {
   landmark: (page: Page) => Locator;
   actions: (page: Page) => Record<string, Locator>;
   alsoHolds?: (page: Page) => Promise<void>;
+  widths?: number[];
 }
 
 const button = (page: Page, name: string) => page.getByRole("button", { name, exact: true });
@@ -149,6 +150,7 @@ const SCREENS: Screen[] = [
     path: "/settings/users",
     landmark: (page) => heading(page, "Users"),
     actions: (page) => ({ "New User": button(page, "New User") }),
+    widths: [390, 768],
   },
   {
     name: "instance audit",
@@ -183,24 +185,27 @@ const SCREENS: Screen[] = [
 test.beforeEach(seed);
 
 for (const screen of SCREENS) {
-  test(`${screen.name} fits a 390px phone and its primary action is reachable`, async ({ page }) => {
-    await screen.prepare?.();
-    const path = typeof screen.path === "string" ? screen.path : await screen.path();
-    await signIn(page);
-    await page.goto(path);
-    await expect(screen.landmark(page)).toBeVisible();
+  for (const width of screen.widths ?? [390]) {
+    test(`${screen.name} fits a ${width}px screen and its primary action is reachable`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 844 });
+      await screen.prepare?.();
+      const path = typeof screen.path === "string" ? screen.path : await screen.path();
+      await signIn(page);
+      await page.goto(path);
+      await expect(screen.landmark(page)).toBeVisible();
 
-    await expectNoHorizontalPageScroll(page);
-    expect(await cutOffAtTheRight(page), "cut off past the right edge").toEqual([]);
-    expect(await headingClippedAtTheTop(page), "px of the page heading hidden above the scrollport").toBe(0);
-    for (const [name, action] of Object.entries(screen.actions(page))) {
-      await expect(action).toBeAttached();
-      expect(await expectReachable(page, action, name), `${name} needed a sideways scroll`).toBe(
-        "in-place"
-      );
-    }
-    await screen.alsoHolds?.(page);
-  });
+      await expectNoHorizontalPageScroll(page);
+      expect(await cutOffAtTheRight(page), "cut off past the right edge").toEqual([]);
+      expect(await headingClippedAtTheTop(page), "px of the page heading hidden above the scrollport").toBe(0);
+      for (const [name, action] of Object.entries(screen.actions(page))) {
+        await expect(action).toBeAttached();
+        expect(await expectReachable(page, action, name), `${name} needed a sideways scroll`).toBe(
+          "in-place"
+        );
+      }
+      await screen.alsoHolds?.(page);
+    });
+  }
 }
 
 const maskOfFleetScroller = (page: Page) =>
