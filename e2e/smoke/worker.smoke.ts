@@ -15,7 +15,7 @@
  * driving a UI app against a server needs macOS UI automation and this smoke already covers the
  * protocol the menubar wraps.
  *
- * Everything lives under e2e/.artifacts/worker-smoke, never under the real HOME. Not under the OS
+ * Everything lives under e2e/.artifacts/ws, never under the real HOME. Not under the OS
  * temp directory: the worker refuses a checkout under /tmp or /private/var.
  */
 import { test, expect, type APIRequestContext } from "@playwright/test";
@@ -33,7 +33,7 @@ test.describe.configure({ timeout: 8 * 60_000 });
 
 const WORKER_DIR = resolve(__dirname, "..", "..", "worker");
 const ARTIFACTS = resolve(__dirname, "..", ".artifacts");
-const ROOT = join(ARTIFACTS, "worker-smoke");
+const ROOT = join(ARTIFACTS, "ws");
 const HOME = join(ROOT, "home");
 const BIN = join(ROOT, "bin");
 const STATE = join(ROOT, "state");
@@ -293,6 +293,8 @@ test.beforeAll(() => {
 
 test.beforeEach(async () => {
   expect(ROOT.startsWith(`${ARTIFACTS}/`)).toBe(true);
+  // Past 103 bytes the worker moves its socket to /tmp, outside this directory
+  expect(Buffer.byteLength(join(STATE, "worker.sock")), "check this repository out at a shorter path").toBeLessThanOrEqual(103);
   rmSync(ROOT, { recursive: true, force: true });
   for (const dir of [HOME, BIN, join(ROOT, "tmp"), join(ROOT, "npm-cache")]) mkdirSync(dir, { recursive: true });
   mkdirSync(STATE, { recursive: true, mode: 0o700 });
