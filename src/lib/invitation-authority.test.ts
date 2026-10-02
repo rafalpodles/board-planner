@@ -44,7 +44,6 @@ describe("what an invitation may still grant when it is accepted", () => {
     expect(authority).toEqual({ role: "admin", boards: [board("p1", "a1", "owner")] });
   });
 
-  // The control for the case below: same invitation, same world, except the inviter's standing
   // Still owning the board is what keeps the rest of the invitation alive, so only the role check
   // stands between a demoted inviter and a new administrator
   it("refuses an administrator invitation whose inviter has been demoted", async () => {
