@@ -26,6 +26,7 @@ import {
   renderTable,
   restoreAll,
   summarise,
+  untrusted,
   type JournalEntry,
   type Mutation,
   type Result,
@@ -65,10 +66,13 @@ function writeJournal(entries: JournalEntry[]) {
   else fs.writeFileSync(JOURNAL, JSON.stringify(entries));
 }
 
-function replayJournal(reason: string) {
-  const restored = restoreAll(readJournal(), realFs);
-  writeJournal([]);
+function replayJournal(reason: string, clear = true) {
+  const { restored, leftAlone } = restoreAll(readJournal(), realFs);
+  if (clear) writeJournal([]);
   if (restored.length) console.error(`[mutation-check] ${reason}: restored ${restored.join(", ")}`);
+  for (const file of leftAlone) {
+    console.error(`[mutation-check] ${reason}: left ${file} alone — it no longer carries the driver's marker, so it was edited since; its journal entry is dropped`);
+  }
 }
 
 function killGroup(child: ChildProcess, signal: NodeJS.Signals) {
@@ -103,7 +107,7 @@ for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143], ["SIGHUP", 129]
     if (stopping) return;
     stopping = true;
     console.error(`\n[mutation-check] ${signal}: restoring and stopping`);
-    restoreAll(readJournal(), realFs);
+    replayJournal(signal, false);
     void stopChildren().finally(() => process.exit(code));
   });
 }
@@ -226,8 +230,11 @@ async function main() {
 
   const manifestPath = path.join(ROOT, option("--manifest") ?? "e2e/mutations/manifest.json");
   const only = option("--only")?.split(",");
-  const out = path.resolve(option("--out") ?? path.join(WORK_DIR, "results.md"));
-  const mutations = parseManifest(fs.readFileSync(manifestPath, "utf8"))
+  const out = path.resolve(ROOT, option("--out") ?? path.join(WORK_DIR, "results.md"));
+  const manifest = parseManifest(fs.readFileSync(manifestPath, "utf8"));
+  const unknown = only?.filter((id) => !manifest.some((m) => m.id === id)) ?? [];
+  if (unknown.length) throw new Error(`--only names no mutation in the manifest: ${unknown.join(", ")}`);
+  const mutations = manifest
     .filter((m) => !only || only.includes(m.id))
     .sort((a, b) => Number(b.control) - Number(a.control));
   for (const m of mutations) {
@@ -263,8 +270,9 @@ async function main() {
   const table = renderTable(results);
   fs.writeFileSync(out, `${table}\n`);
   console.log(`\n${table}\n\nwritten to ${path.relative(ROOT, out)}`);
-  const untrusted = results.some((r) => r.outcome === "not-picked-up" || (r.mutation.control && r.outcome !== "caught"));
-  process.exitCode = untrusted ? 1 : 0;
+  const doubtful = untrusted(results);
+  for (const r of doubtful) console.error(`[mutation-check] untrusted: ${r.mutation.id} (${r.outcome})`);
+  process.exitCode = doubtful.length ? 1 : 0;
 }
 
 main()

@@ -119,8 +119,14 @@ export function applyEdits(source: string, edits: Edit[]): string {
   }, source);
 }
 
+export const MARKER_PREFIX = "mutation-check:";
+
 export function marked(source: string, marker: string): string {
   return `// ${marker}\n${source}`;
+}
+
+export function carriesMarker(content: string): boolean {
+  return content.startsWith(`// ${MARKER_PREFIX}`);
 }
 
 export function escapeRegExp(literal: string): string {
@@ -132,15 +138,31 @@ export interface FileSystem {
   write(file: string, content: string): void;
 }
 
-export function restoreAll(journal: JournalEntry[], fs: FileSystem): string[] {
-  const restored: string[] = [];
+export interface RestoreReport {
+  restored: string[];
+  leftAlone: string[];
+}
+
+export function restoreAll(journal: JournalEntry[], fs: FileSystem): RestoreReport {
+  const report: RestoreReport = { restored: [], leftAlone: [] };
+  const seen = new Set<string>();
   for (const { file, original } of [...journal].reverse()) {
-    if (fs.read(file) !== original) {
-      fs.write(file, original);
-      restored.push(file);
+    let current: string | null;
+    try {
+      current = fs.read(file);
+    } catch {
+      current = null;
     }
+    if (current === original) continue;
+    if (current === null || !carriesMarker(current)) {
+      if (!seen.has(file)) report.leftAlone.push(file);
+      seen.add(file);
+      continue;
+    }
+    fs.write(file, original);
+    report.restored.push(file);
   }
-  return restored;
+  return report;
 }
 
 interface ReportNode {
@@ -182,6 +204,15 @@ export function classify(summary: RunSummary): Outcome {
   if (summary.failed > 0) return "caught";
   if (summary.passed === 0) return "no-tests";
   return "survived";
+}
+
+export function untrusted(results: Result[]): Result[] {
+  return results.filter(
+    (r) =>
+      r.outcome === "not-picked-up" ||
+      r.outcome === "no-tests" ||
+      (r.mutation.control && r.outcome !== "caught")
+  );
 }
 
 function cell(text: string): string {

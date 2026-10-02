@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyEdits,
+  carriesMarker,
   classify,
   escapeRegExp,
   insideRepo,
@@ -9,7 +10,9 @@ import {
   renderTable,
   restoreAll,
   summarise,
+  untrusted,
   type JournalEntry,
+  type Outcome,
 } from "./lib";
 
 const entry = (overrides: Record<string, unknown> = {}) => ({
@@ -101,31 +104,56 @@ describe("restoreAll", () => {
     return {
       files,
       writes,
-      read: (file: string) => files[file],
+      read: (file: string) => {
+        if (!(file in files)) throw new Error(`ENOENT: ${file}`);
+        return files[file];
+      },
       write: (file: string, content: string) => {
         writes.push(file);
         files[file] = content;
       },
     };
   };
+  const byDriver = (content: string) => marked(content, "mutation-check:a:1");
 
-  it("writes back every original that differs, and only those", () => {
-    const fs = memory({ "a.ts": "mutated", "b.ts": "same" });
+  it("writes back every original the driver left mutated, and only those", () => {
+    const fs = memory({ "a.ts": byDriver("mutated"), "b.ts": "same" });
     const journal: JournalEntry[] = [
       { file: "a.ts", original: "original" },
       { file: "b.ts", original: "same" },
     ];
-    expect(restoreAll(journal, fs)).toEqual(["a.ts"]);
+    expect(restoreAll(journal, fs)).toEqual({ restored: ["a.ts"], leftAlone: [] });
     expect(fs.files).toEqual({ "a.ts": "original", "b.ts": "same" });
     expect(fs.writes).toEqual(["a.ts"]);
   });
 
+  it("leaves a file alone once it no longer carries the marker — someone edited it since", () => {
+    const fs = memory({ "a.ts": "my own edit after switching branch" });
+    expect(restoreAll([{ file: "a.ts", original: "stale original" }], fs)).toEqual({
+      restored: [],
+      leftAlone: ["a.ts"],
+    });
+    expect(fs.files["a.ts"]).toBe("my own edit after switching branch");
+    expect(fs.writes).toEqual([]);
+  });
+
+  it("leaves a file alone that no longer exists, and creates nothing", () => {
+    const fs = memory({});
+    expect(restoreAll([{ file: "gone.ts", original: "x" }], fs)).toEqual({ restored: [], leftAlone: ["gone.ts"] });
+    expect(fs.writes).toEqual([]);
+  });
+
+  it("does not take a marker anywhere but the first line for the driver's", () => {
+    const fs = memory({ "a.ts": `const x = 1;\n${byDriver("y")}` });
+    expect(restoreAll([{ file: "a.ts", original: "o" }], fs).leftAlone).toEqual(["a.ts"]);
+  });
+
   it("ends on the oldest original when one file was journalled twice", () => {
-    const fs = memory({ "a.ts": "second mutation" });
+    const fs = memory({ "a.ts": byDriver("second mutation") });
     restoreAll(
       [
         { file: "a.ts", original: "pristine" },
-        { file: "a.ts", original: "first mutation" },
+        { file: "a.ts", original: byDriver("first mutation") },
       ],
       fs
     );
@@ -134,8 +162,16 @@ describe("restoreAll", () => {
 
   it("does nothing with an empty journal", () => {
     const fs = memory({ "a.ts": "x" });
-    expect(restoreAll([], fs)).toEqual([]);
+    expect(restoreAll([], fs)).toEqual({ restored: [], leftAlone: [] });
     expect(fs.writes).toEqual([]);
+  });
+});
+
+describe("carriesMarker", () => {
+  it("recognises what marked() writes, and nothing else", () => {
+    expect(carriesMarker(marked("x", "mutation-check:id:abc"))).toBe(true);
+    expect(carriesMarker("// mutation check\nx")).toBe(false);
+    expect(carriesMarker("x")).toBe(false);
   });
 });
 
@@ -183,5 +219,24 @@ describe("renderTable", () => {
       "| --- | --- | --- | --- | --- |",
       "| board-delete (control) | board-irreversible.spec.ts | a \\| b | **caught** | x y |",
     ]);
+  });
+});
+
+describe("untrusted", () => {
+  const [plain, control] = parseManifest(manifest(entry(), entry({ id: "the-control", control: true })));
+  const result = (mutation: typeof plain, outcome: Outcome) => ({ mutation, outcome, detail: "" });
+
+  it("flags a mutated run that ran nothing — no report, or a timeout — after a green baseline", () => {
+    expect(untrusted([result(plain, "no-tests")]).map((r) => r.outcome)).toEqual(["no-tests"]);
+  });
+
+  it("flags a mutation the dev server never compiled, and a control that was not caught", () => {
+    expect(untrusted([result(plain, "not-picked-up"), result(control, "survived")])).toHaveLength(2);
+  });
+
+  it("trusts caught, survived and a red baseline, which is reported but measured nothing", () => {
+    expect(
+      untrusted([result(plain, "caught"), result(plain, "survived"), result(plain, "baseline-red"), result(control, "caught")])
+    ).toEqual([]);
   });
 });

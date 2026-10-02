@@ -27,7 +27,7 @@
       "spec": "e2e/kanban-board-core.spec.ts",
       "grep": "a move the server refuses rolls the card back",
       "probe": "/projects/TP",
-      "assertion": "kanban-board-core:220 cardIn(in_review, FINISHED).toHaveCount(0)"
+      "assertion": "kanban-board-core:219 cardIn(todo, FINISHED).toBeVisible() beside :220 cardIn(in_review, FINISHED).toHaveCount(0)"
     },
     {
       "id": "board-delete-local-removal",
