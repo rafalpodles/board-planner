@@ -730,8 +730,18 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   reordered in or deleted from a tracked one; an edit to a `.gitignore` leaves its base rules
   trusted (BP-640). **An entry in the main clone's own `.git/info/exclude` now fails every run that
   leaves a matching file in the worktree**, so move such entries into the repository's `.gitignore`.
-  What the base `.gitignore` itself ignores still reaches no diff and can still be run by the Test
-  gate — a file under an ignored `dist/`, say — which is BP-795.
+  What the base `.gitignore` itself ignores still reaches no diff, so from 1.3.0 the worker also
+  lists every ignored file, one by one with its inode, size and timestamps, when the run starts and
+  again after every gate passes, and refuses to run the next gate if a file in that listing is new
+  or rewritten. Whatever differs at that point was written by a step, so the refusal names it,
+  marked `new` or `changed` with the rule that ignores it: a `dist/evil.test.js` under a base
+  `dist/`, or an `x.log/evil.test.js` under a base `*.log`. What a gate installs or builds is in the
+  listing taken after that gate, and an ignored file that was in the worktree before the run is in
+  the first listing, so neither one trips the check (BP-795). **A step that runs `npm install`, a
+  build or the test suite itself now fails the run** if what it writes is ignored, because a gate
+  would run it unreviewed. Leave installing and building to the Build gate. What a gate writes is
+  still trusted, and the Build and Test gates run the agent's own build script and tests, so an
+  ignored file those write for a later gate to run is still a way past every reviewer.
 
   **The worktree's `.git` file is not trusted once the agent starts.** In a linked worktree it is a
   file inside the worktree, and a confined step can rewrite it to name a git dir of its own, with

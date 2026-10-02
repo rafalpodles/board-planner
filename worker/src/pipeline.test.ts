@@ -803,12 +803,41 @@ describe("runTask", () => {
       );
     });
 
-    it("refuses the tree after a writing step, even with git status reading it clean", async () => {
+    it("refuses to run a gate when the ignored files could not be listed as the run started (BP-795)", async () => {
       let listings = 0;
-      const runner = hidingRunner(() => {
-        listings += 1;
-        return listings > 1;
-      });
+      const inner = defaultRunner();
+      const runner = {
+        run: vi.fn<Runner["run"]>(async (command, args, opts) => {
+          if (args.includes("--ignored") && !args.includes("--directory")) {
+            listings += 1;
+            return listings === 1 ? shell("", { code: 128, stderr: "fatal: unable to read index" }) : shell("");
+          }
+          if (args.includes("--ignored")) return shell("dist/\0");
+          if (args.includes("check-ignore")) return shell("./dist/\0");
+          return inner.run(command, args, opts);
+        }),
+      };
+      const gate = passingGate("diff-size");
+      const h = harness({ runner, gateFor: () => gate });
+
+      await runTask(h.deps, running("diff-size"));
+
+      expect(gate.run).not.toHaveBeenCalled();
+      expect(h.reporter.failed.mock.calls[0][1]).toMatch(
+        /^refusing to run the diff-size gate: `git ls-files` failed: fatal: unable to read index/,
+      );
+    });
+
+    it("refuses the tree after a writing step, even with git status reading it clean", async () => {
+      let committed = false;
+      const hiding = hidingRunner(() => committed);
+      const runner = {
+        run: vi.fn<Runner["run"]>(async (command, args, opts) => {
+          const result = await hiding.run(command, args, opts);
+          if (args.includes("commit")) committed = true;
+          return result;
+        }),
+      };
       const gate = passingGate("diff-size");
       const h = harness({ runner, gateFor: () => gate });
 

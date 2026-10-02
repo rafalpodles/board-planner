@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { dirname, join } from "path";
 import { CommandResult, Runner } from "./exec.js";
@@ -12,6 +12,11 @@ const GITLINK = /^160000 [0-9a-f]+ \d\t(.*)$/s;
 export type HiddenFiles =
   | { kind: "hidden"; detail: string }
   | { kind: "nested"; detail: string }
+  | { kind: "unreviewed"; detail: string }
+  | { kind: "unreadable"; detail: string };
+
+export type IgnoredFiles =
+  | { kind: "listed"; files: ReadonlyMap<string, string> }
   | { kind: "unreadable"; detail: string };
 
 class Unreadable extends Error {}
@@ -155,6 +160,7 @@ export async function hiddenFromGit(
   gitPath: string,
   worktreePath: string,
   baseSha: string,
+  since?: IgnoredFiles,
 ): Promise<HiddenFiles | null> {
   const git = gitIn(runner, gitPath, worktreePath);
 
@@ -177,29 +183,72 @@ export async function hiddenFromGit(
       }
     }
     const offenders = ignored.filter((path) => !ignoredAtBase.has(path) && !parentsOfListed.has(path));
-    if (offenders.length === 0) return null;
-
-    const rules = new Map<string, string>();
-    // 1 is check-ignore's "none of these is ignored", not a failure
-    const fields = nulFields(
-      await git("check-ignore", ["check-ignore", "--verbose", "-z", "--stdin"], {
-        stdin: pathsOnStdin(offenders),
-        okCodes: [0, 1],
-      }),
-    );
-    for (let at = 0; at + 3 < fields.length; at += 4) {
-      rules.set(fromPath(fields[at + 3]), `${fields[at]}:${fields[at + 1]}: ${JSON.stringify(fields[at + 2])}`);
+    if (offenders.length > 0) {
+      return {
+        kind: "hidden",
+        detail: `files git is told to ignore that the repository's own .gitignore as of the base commit does not ignore, so no commit, diff or gate would see them: ${await nameWithRules(git, offenders, () => "")}`,
+      };
     }
+    if (!since) return null;
+    if (since.kind === "unreadable") return since;
 
-    const named = offenders
-      .slice(0, NAMED_AT_MOST)
-      .map((path) => `${path} (${rules.get(path) ?? "git names no rule for it"})`)
-      .join(", ");
-    const more = offenders.length > NAMED_AT_MOST ? `, and ${offenders.length - NAMED_AT_MOST} more` : "";
+    const now = await listIgnored(git, worktreePath);
+    const written = [...now].filter(([path, signature]) => since.files.get(path) !== signature);
+    if (written.length === 0) return null;
     return {
-      kind: "hidden",
-      detail: `files git is told to ignore that the repository's own .gitignore as of the base commit does not ignore, so no commit, diff or gate would see them: ${named}${more}`,
+      kind: "unreviewed",
+      detail: `ignored files written since the run started or the last gate passed, which no commit, diff or reviewer sees while a gate can still run them: ${await nameWithRules(
+        git,
+        written.map(([path]) => path),
+        (path) => (since.files.has(path) ? "changed; " : "new; "),
+      )}`,
     };
+  } catch (error) {
+    if (error instanceof Unreadable) return { kind: "unreadable", detail: error.message };
+    throw error;
+  }
+}
+
+async function nameWithRules(git: Git, paths: string[], prefix: (path: string) => string): Promise<string> {
+  const rules = new Map<string, string>();
+  // 1 is check-ignore's "none of these is ignored", not a failure
+  const fields = nulFields(
+    await git("check-ignore", ["check-ignore", "--verbose", "-z", "--stdin"], {
+      stdin: pathsOnStdin(paths),
+      okCodes: [0, 1],
+    }),
+  );
+  for (let at = 0; at + 3 < fields.length; at += 4) {
+    rules.set(fromPath(fields[at + 3]), `${fields[at]}:${fields[at + 1]}: ${JSON.stringify(fields[at + 2])}`);
+  }
+  const named = paths
+    .slice(0, NAMED_AT_MOST)
+    .map((path) => `${path} (${prefix(path)}${rules.get(path) ?? "git names no rule for it"})`)
+    .join(", ");
+  return `${named}${paths.length > NAMED_AT_MOST ? `, and ${paths.length - NAMED_AT_MOST} more` : ""}`;
+}
+
+// Not `--directory`: a file added under a `dist/` that already existed changes no entry of that
+// listing. ctime is in the signature because a write cannot set it back.
+async function listIgnored(git: Git, worktreePath: string): Promise<Map<string, string>> {
+  const files = new Map<string, string>();
+  for (const path of nulFields(
+    await git("ls-files", ["ls-files", "-z", "--others", "--ignored", "--exclude-standard"]),
+  )) {
+    try {
+      const stat = lstatSync(join(worktreePath, path), { bigint: true });
+      files.set(path, `${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`);
+    } catch {
+      continue;
+    }
+  }
+  return files;
+}
+
+// Taken at the start and after every gate, so what differs at the next gate a step wrote (BP-795)
+export async function ignoredFiles(runner: Runner, gitPath: string, worktreePath: string): Promise<IgnoredFiles> {
+  try {
+    return { kind: "listed", files: await listIgnored(gitIn(runner, gitPath, worktreePath), worktreePath) };
   } catch (error) {
     if (error instanceof Unreadable) return { kind: "unreadable", detail: error.message };
     throw error;

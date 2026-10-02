@@ -12,7 +12,7 @@ import { Delivery } from "./delivery.js";
 import { Runner } from "./exec.js";
 import { Executor } from "./executor.js";
 import { gitArgs, localGitEnv, requireGitPath } from "./git-safety.js";
-import { hiddenFromGit, PORCELAIN_STATUS } from "./hidden-files.js";
+import { hiddenFromGit, ignoredFiles, PORCELAIN_STATUS } from "./hidden-files.js";
 import { pinGit } from "./worktree-pin.js";
 import { Reporter } from "./reporter.js";
 import { SHUTDOWN_SIGNAL } from "./commands.js";
@@ -576,6 +576,7 @@ export async function runTask(
 
   try {
     const budget = createBudget(config.runCeilingMs, now);
+    let ignoredBeforeSteps = await ignoredFiles(runner, deps.gitPath, worktree.path);
 
     for (const [position, entry] of task.agent.sequence.entries()) {
       if (
@@ -745,7 +746,7 @@ export async function runTask(
         const tampered = await worktree.tampering();
         const hidden = tampered
           ? { kind: "tampered" as const, detail: `the checkout now has ${tampered}` }
-          : await hiddenFromGit(runner, deps.gitPath, worktree.path, worktree.baseSha);
+          : await hiddenFromGit(runner, deps.gitPath, worktree.path, worktree.baseSha, ignoredBeforeSteps);
         if (hidden) {
           keepWorktree = true;
           const found =
@@ -753,7 +754,9 @@ export async function runTask(
               ? { over: "a tampered checkout", left: "what the agent changed" }
               : hidden.kind === "nested"
                 ? { over: "a nested git repository", left: "the nested repository" }
-                : { over: "files git hides", left: "the hidden files" };
+                : hidden.kind === "unreviewed"
+                  ? { over: "ignored files a step wrote", left: "those files" }
+                  : { over: "files git hides", left: "the hidden files" };
           settle("failed", `refused to run the ${gate.name} gate over ${found.over}`);
           await reporter.failed(
             task,
@@ -778,6 +781,7 @@ export async function runTask(
         });
         if (await releaseIfAborted(deps, reporter, task)) return;
         if (verdict.ok) {
+          ignoredBeforeSteps = await ignoredFiles(runner, deps.gitPath, worktree.path);
           state.checks.push({
             name: gate.name,
             commands: verdict.commands ?? [],
