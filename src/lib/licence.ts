@@ -202,7 +202,9 @@ export function describeLicenceAtStartup(check: LicenceCheck | null): string {
     case "valid":
       return `LICENCE_KEY: ${check.payload.plan} plan for ${check.payload.customer}, expires ${check.payload.expiresAt}`;
     case "grace":
-      return `LICENCE_KEY expired ${check.payload.expiresAt} and is in its grace period — renew it before features switch off`;
+      return `LICENCE_KEY expired ${check.payload.expiresAt} and stays in force until ${new Date(
+        Date.parse(check.payload.expiresAt) + ENTITLEMENT_GRACE_MS
+      ).toISOString()} — renew it before then`;
     case "expired":
       return `LICENCE_KEY expired ${check.payload.expiresAt}, past its grace period — Free plan`;
     case "unknown_key":
