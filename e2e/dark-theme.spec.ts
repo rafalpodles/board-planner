@@ -1,6 +1,6 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import { ADMIN_AUTH } from "./api";
-import { AA_TEXT, DARK_SURFACE_MAX_LUMINANCE, surfaceLuminance, textContrast, type PaintedText } from "./colour";
+import { AA_TEXT, DARK_INPUT_MAX_LUMINANCE, DARK_SURFACE_MAX_LUMINANCE, surfaceLuminance, textContrast, type PaintedText } from "./colour";
 import {
   DECOY_TASK_NUMBER,
   DECOY_TASK_TITLE,
@@ -69,10 +69,10 @@ async function expectReadable(name: string, locator: Locator) {
   expect.soft(ratio, `${name} reads at ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(AA_TEXT);
 }
 
-async function expectDarkBehind(name: string, locator: Locator) {
+async function expectDarkBehind(name: string, locator: Locator, ceiling = DARK_SURFACE_MAX_LUMINANCE) {
   const luminance = surfaceLuminance((await painted(locator)).backgrounds);
   expect(luminance, `the surface behind ${name} has luminance ${luminance.toFixed(3)}`).toBeLessThanOrEqual(
-    DARK_SURFACE_MAX_LUMINANCE
+    ceiling
   );
 }
 
@@ -110,7 +110,7 @@ test("the board, a task, the dashboard and settings all paint dark, with readabl
     await expectReadable("a property label", details.getByText("Priority", { exact: true }));
     await expectReadable("the empty comments line", main.getByText("No comments yet"));
     const commentBox = main.getByRole("textbox", { name: /Write a comment/ });
-    await expectDarkBehind("the comment box", commentBox);
+    await expectDarkBehind("the comment box", commentBox, DARK_INPUT_MAX_LUMINANCE);
   });
 
   await test.step("the dashboard", async () => {

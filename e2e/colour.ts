@@ -5,7 +5,8 @@ export interface Rgba extends Rgb {
 }
 
 export const AA_TEXT = 4.5;
-export const DARK_SURFACE_MAX_LUMINANCE = 0.1;
+export const DARK_SURFACE_MAX_LUMINANCE = 0.05;
+export const DARK_INPUT_MAX_LUMINANCE = 0.06;
 
 const COMPONENT = String.raw`none|[-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?%?`;
 
