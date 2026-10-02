@@ -146,7 +146,17 @@ test("a callback completed in another browser signs nobody in", async ({ page, b
   await providerButton(page).click();
   await expect.poll(() => carried).not.toBe("");
 
+  // The other browser holds a flow of its own, as anybody who started a sign-in does: what
+  // refuses it has to be which flow its cookie names, not merely that it has one
   const elsewhere = await fresh(browser);
+  let ownStarted = false;
+  await elsewhere.page.route(`${OIDC_STUB_URL}/authorize**`, async (route) => {
+    ownStarted = true;
+    await route.abort();
+  });
+  await elsewhere.page.goto("/login");
+  await providerButton(elsewhere.page).click();
+  await expect.poll(() => ownStarted).toBe(true);
   await elsewhere.page.goto(carried);
   await expect(elsewhere.page).toHaveURL(/\/login\?sso=failed/);
   expect((await elsewhere.page.request.get("/api/auth/me")).status()).toBe(401);
