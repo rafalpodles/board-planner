@@ -5,7 +5,7 @@ import { readJsonBody } from "@/lib/request-body";
 import { withAdmin } from "@/lib/middleware";
 import { isValidEmail, normaliseEmail } from "@/lib/email";
 import { selfOrigin } from "@/lib/session";
-import { issueInvitation, InvitationBoardInput } from "@/lib/invitations";
+import { issueInvitation, InvitationBoardInput, recordDelivery } from "@/lib/invitations";
 import { deliverTo, INTERACTIVE_ONLY, NO_ORIGIN_ERROR } from "@/lib/invitation-mail";
 import { describeInvitation, toApiInvitations } from "@/lib/invitation-view";
 import { logInstanceAudit } from "@/lib/instanceAudit";
@@ -101,6 +101,7 @@ export const POST = withAdmin(async (request, { user }) => {
     invitedBy: user._id,
   });
   const delivery = await deliverTo(invitation.email, token, origin, user, role, boards.value, projects);
+  await recordDelivery(invitation._id, token, delivery.delivery);
 
   void logInstanceAudit({
     action: "invitation_sent",

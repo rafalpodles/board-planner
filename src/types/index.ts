@@ -239,6 +239,7 @@ export interface IInvitation {
   status: InvitationStatus;
   acceptedBy: Types.ObjectId | null;
   acceptedAt: Date | null;
+  deliveredAs: "email" | "link" | null;
   createdAt: Date;
   updatedAt: Date;
 }

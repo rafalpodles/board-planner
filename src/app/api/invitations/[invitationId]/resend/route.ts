@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { withAdmin } from "@/lib/middleware";
 import { selfOrigin } from "@/lib/session";
-import { reissueInvitation } from "@/lib/invitations";
+import { recordDelivery, reissueInvitation } from "@/lib/invitations";
 import { deliverTo, INTERACTIVE_ONLY, NO_ORIGIN_ERROR } from "@/lib/invitation-mail";
 import { describeInvitation, toApiInvitations } from "@/lib/invitation-view";
 import { logInstanceAudit } from "@/lib/instanceAudit";
@@ -44,6 +44,7 @@ export const POST = withAdmin(async (_request, { params, user }) => {
     invitation.boards,
     projects
   );
+  await recordDelivery(invitation._id, token, delivery.delivery);
 
   void logInstanceAudit({
     action: "invitation_resent",

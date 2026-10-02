@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/Toast";
 import { Input } from "@/components/ui/Input";
@@ -10,9 +10,14 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { LoadFailed } from "@/components/ui/LoadFailed";
 import { SettingsCard, ListRow } from "@/components/settings/SettingsCard";
 import { InvitationLink } from "@/components/settings/InvitationLink";
-import { ApiBoardInvitation, GrantRelation, InvitationDelivery } from "@/types";
+import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";
+import { ApiBoardInvitation, GrantRelation } from "@/types";
 
-type Sent = ({ outcome: "created" } & InvitationDelivery) | { outcome: "added" };
+type Sent =
+  | { outcome: "created"; delivery: "email" }
+  | { outcome: "created"; delivery: "link"; link: string; reason: "no_mail_server" | "mail_failed" }
+  | { outcome: "added" }
+  | { outcome: "updated" };
 
 export function BoardInvitations({ projectId }: { projectId: string }) {
   const api = useApi();
@@ -28,15 +33,32 @@ export function BoardInvitations({ projectId }: { projectId: string }) {
   const [removeBusy, setRemoveBusy] = useState(false);
   const [removeError, setRemoveError] = useState("");
 
+  const [retrying, setRetrying] = useState(false);
+  const latestRead = useRef(0);
+  const everLoaded = useRef(false);
+
   const refresh = useCallback(async () => {
+    const mine = ++latestRead.current;
     try {
-      setRows(await api.get(`/api/projects/${projectId}/invitations`));
+      const loaded: ApiBoardInvitation[] = await api.get(`/api/projects/${projectId}/invitations`);
+      if (mine !== latestRead.current) return;
+      setRows(loaded);
       setRead("loaded");
+      everLoaded.current = true;
     } catch {
-      setRead("failed");
+      if (mine !== latestRead.current) return;
+      // A list already on screen stays there: the write that preceded this read landed
+      if (everLoaded.current) toast(LIST_REFRESH_FAILED, "error");
+      else setRead("failed");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
+
+  async function retry() {
+    setRetrying(true);
+    await refresh();
+    setRetrying(false);
+  }
 
   useEffect(() => {
     refresh();
@@ -47,7 +69,6 @@ export function BoardInvitations({ projectId }: { projectId: string }) {
     if (sending) return;
     setSending(true);
     setError("");
-    setLink(null);
     const address = email.trim();
     let sent: Sent;
     try {
@@ -59,8 +80,11 @@ export function BoardInvitations({ projectId }: { projectId: string }) {
     }
     setSending(false);
     setEmail("");
+    setLink(null);
     if (sent.outcome === "added") {
       toast(`${address} already had an invitation waiting; this board was added to it`, "success");
+    } else if (sent.outcome === "updated") {
+      toast(`${address} is already invited to this board. No email sent.`, "success");
     } else if (sent.delivery === "email") {
       toast(`Invitation sent to ${address}`, "success");
     } else {
@@ -83,6 +107,7 @@ export function BoardInvitations({ projectId }: { projectId: string }) {
     }
     setRemoveBusy(false);
     toast(`Invitation for ${removing.email} withdrawn from this board`, "success");
+    if (link?.email === removing.email) setLink(null);
     setRemoving(null);
     await refresh();
   }
@@ -132,7 +157,12 @@ export function BoardInvitations({ projectId }: { projectId: string }) {
       )}
 
       {read === "failed" && (
-        <LoadFailed className="py-4" message="Could not load this board's invitations." onRetry={refresh} />
+        <LoadFailed
+          className="py-4"
+          message="Could not load this board's invitations."
+          onRetry={retry}
+          busy={retrying}
+        />
       )}
       {read === "loaded" && rows.length > 0 && (
         <div className="mt-4 space-y-2" aria-label="Invitations to this board">
