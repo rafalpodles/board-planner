@@ -16,10 +16,14 @@ export function ProviderButtons({
   intent,
   invitationToken,
   verb = "Continue with",
+  exclude = [],
+  divider = true,
 }: {
-  intent: "signin" | "invite";
+  intent: "signin" | "invite" | "link";
   invitationToken?: string;
   verb?: string;
+  exclude?: string[];
+  divider?: boolean;
 }) {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [going, setGoing] = useState<string | null>(null);
@@ -59,16 +63,19 @@ export function ProviderButtons({
     }
   }
 
-  if (providers.length === 0) return null;
+  const offered = providers.filter((p) => !exclude.includes(p.id));
+  if (offered.length === 0) return null;
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-3 text-xs text-text-muted" aria-hidden="true">
-        <span className="h-px flex-1 bg-border" />
-        or
-        <span className="h-px flex-1 bg-border" />
-      </div>
-      {providers.map((provider) => (
+      {divider && (
+        <div className="flex items-center gap-3 text-xs text-text-muted" aria-hidden="true">
+          <span className="h-px flex-1 bg-border" />
+          or
+          <span className="h-px flex-1 bg-border" />
+        </div>
+      )}
+      {offered.map((provider) => (
         <Button
           key={provider.id}
           type="button"
@@ -93,5 +100,7 @@ export const SIGN_IN_REFUSALS: Record<string, string> = {
   failed: "Signing in with that provider did not work. Try again.",
   no_account: "No account here uses that address. Ask an administrator for an invitation.",
   unverified: "That provider has not confirmed your address, so it cannot sign you in here.",
+  unproven:
+    "Your address here has not been confirmed, so a provider cannot sign you in by it. Sign in with your password and link the provider under Settings → Security.",
   throttled: "Too many attempts. Try again in 15 minutes.",
 };

@@ -21,7 +21,7 @@ export interface NewAccount {
   fullName: string;
   /** Null for an account that signs in through an identity provider only. */
   passwordHash: string | null;
-  identity?: { provider: string; subject: string; email: string };
+  identity?: { provider: string; issuer: string; subject: string; email: string };
 }
 
 /**
@@ -48,6 +48,8 @@ export async function completeAcceptance(
       ...(account.passwordHash ? { password: account.passwordHash } : {}),
       fullName: account.fullName,
       email: invitation.email,
+      // Proven when the link travelled by mail, or when a provider vouched for the address
+      emailVerifiedAt: invitation.deliveredAs === "email" || account.identity ? new Date() : null,
       role: authority.role,
     });
   } catch (err) {
@@ -65,22 +67,12 @@ export async function completeAcceptance(
     throw err;
   }
 
-  let stillHeld = true;
-  try {
-    stillHeld = await recordAcceptance(invitation._id, user._id);
-  } catch (err) {
-    // The account exists either way, so its boards are still granted below
-    console.error("Failed to record an invitation's acceptance:", err);
-  }
-  if (!stillHeld) {
-    await User.deleteOne({ _id: user._id }).catch(() => {});
-    return NextResponse.json({ error: INVITATION_REFUSALS.revoked }, { status: 400 });
-  }
   if (account.identity) {
     try {
       await Identity.create({ user: user._id, ...account.identity, lastUsedAt: new Date() });
     } catch (err) {
-      // The identity was linked to another account in the meantime: this one could never sign in
+      // Linked to another account in the meantime, before the claim was tied to anything: both the
+      // account and the claim can still be undone
       await User.deleteOne({ _id: user._id }).catch(() => {});
       await releaseInvitation(invitation._id).catch(() => {});
       if (duplicateKeyField(err)) {
@@ -93,6 +85,18 @@ export async function completeAcceptance(
     }
   }
 
+  let stillHeld = true;
+  try {
+    stillHeld = await recordAcceptance(invitation._id, user._id);
+  } catch (err) {
+    // The account exists either way, so its boards are still granted below
+    console.error("Failed to record an invitation's acceptance:", err);
+  }
+  if (!stillHeld) {
+    await Identity.deleteMany({ user: user._id }).catch(() => {});
+    await User.deleteOne({ _id: user._id }).catch(() => {});
+    return NextResponse.json({ error: INVITATION_REFUSALS.revoked }, { status: 400 });
+  }
   // A re-invite sent while this acceptance held its claim is a second pending row for the address
   await revokePendingInvitationsFor(invitation.email);
 

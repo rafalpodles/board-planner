@@ -144,6 +144,7 @@ export interface IUser {
   password: string;
   fullName: string;
   email: string;
+  emailVerifiedAt?: Date | null;
   /** @deprecated Superseded by `notifications`. Kept as the fallback for accounts that predate it. */
   emailNotifications: boolean;
   emailDigest: boolean;
@@ -223,6 +224,7 @@ export interface IIdentity {
   _id: Types.ObjectId;
   user: Types.ObjectId;
   provider: string;
+  issuer: string;
   subject: string;
   email: string;
   linkedAt: Date;
@@ -236,9 +238,10 @@ export interface IOidcFlow {
   state: string;
   nonce: string;
   codeVerifier: string;
-  intent: "signin" | "invite";
+  intent: "signin" | "invite" | "link";
   invitationTokenHash: string | null;
-  claims: { subject: string; email: string } | null;
+  user: Types.ObjectId | null;
+  claims: { issuer: string; subject: string; email: string } | null;
   expiresAt: Date;
   createdAt: Date;
 }

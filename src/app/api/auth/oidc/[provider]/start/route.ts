@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { readJsonBody } from "@/lib/request-body";
-import { getClientIp } from "@/lib/auth";
+import { getAuthUser, getClientIp } from "@/lib/auth";
 import { anonymousMultiplier, isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
 import { buildFlowCookie, provenanceRefusal, selfOrigin } from "@/lib/session";
 import { providerById } from "@/lib/oidc/providers";
@@ -30,8 +30,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
 
   const read = await readJsonBody<{ intent?: unknown; invitationToken?: unknown }>(request);
   if (!read.ok) return read.response;
-  const intent = read.value.intent === "invite" ? "invite" : "signin";
+  const intent =
+    read.value.intent === "invite" ? "invite" : read.value.intent === "link" ? "link" : "signin";
   let invitationToken: string | undefined;
+  let userId: string | undefined;
+  if (intent === "link") {
+    const current = await getAuthUser(request).catch(() => null);
+    if (!current || current.viaMachineCredential) {
+      return NextResponse.json({ error: "Sign in to link a provider" }, { status: 401 });
+    }
+    userId = String(current._id);
+  }
   if (intent === "invite") {
     if (typeof read.value.invitationToken !== "string" || !read.value.invitationToken) {
       return NextResponse.json({ error: INVITATION_REFUSALS.unknown }, { status: 400 });
@@ -43,18 +52,18 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
 
   let started;
   try {
-    started = await beginFlow({ provider, origin, intent, invitationToken });
+    started = await beginFlow({ provider, origin, intent, invitationToken, userId });
   } catch (err) {
     console.error(`OIDC discovery for ${provider.id} failed:`, err);
     return NextResponse.json(
-      { error: `${provider.label} cannot be reached right now. Try again shortly.` },
+      { error: `Signing in with ${provider.label} is not working right now. Try again shortly.` },
       { status: 502 }
     );
   }
   const response = NextResponse.json({ url: started.url });
   response.headers.append(
     "Set-Cookie",
-    buildFlowCookie(FLOW_COOKIE, started.binder, Math.floor(FLOW_TTL_MS / 1000), request)
+    buildFlowCookie(FLOW_COOKIE, started.binder, Math.floor(FLOW_TTL_MS / 1000))
   );
   return response;
 }

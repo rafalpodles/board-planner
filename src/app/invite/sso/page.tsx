@@ -11,7 +11,7 @@ import { APP_NAME } from "@/lib/brand";
 const REFUSALS: Record<string, string> = {
   invitation: "This invitation can no longer be used. Ask whoever invited you for a new one.",
   unverified: "Your provider has not confirmed your address, so it cannot accept this invitation.",
-  mismatch: "Your provider signed you in with a different address from the one invited. Use the account for the invited address, or accept with a password.",
+  mismatch: "Your provider signed you in with a different address from the one invited. Sign in to the provider with the invited address, or open the invitation link again and choose a password.",
   linked: "That sign-in already belongs to an account here. Sign in with it instead.",
 };
 

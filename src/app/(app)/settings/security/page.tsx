@@ -7,6 +7,13 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useToast } from "@/components/ui/Toast";
 import { LinkedIdentity, SignInMethods } from "@/components/settings/SignInMethods";
+import { ProviderButtons } from "@/components/auth/ProviderButtons";
+
+const LINK_RESULTS: Record<string, { tone: "success" | "error"; text: string }> = {
+  linked: { tone: "success", text: "Linked. You can now sign in with it." },
+  taken: { tone: "error", text: "That sign-in already belongs to another account here." },
+  failed: { tone: "error", text: "Linking did not work. Try again." },
+};
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -22,18 +29,39 @@ export default function SecurityPage() {
   const [methods, setMethods] = useState<{ hasPassword: boolean; identities: LinkedIdentity[] } | null>(
     null
   );
+  const [methodsFailed, setMethodsFailed] = useState(false);
 
   const readMethods = useCallback(() => {
     api
       .get("/api/users/me/identities")
-      .then(setMethods)
-      .catch(() => setMethods({ hasPassword: true, identities: [] }));
+      .then((loaded) => {
+        setMethods(loaded);
+        setMethodsFailed(false);
+      })
+      .catch(() => setMethodsFailed(true));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     readMethods();
+    const result = LINK_RESULTS[new URLSearchParams(window.location.search).get("link") ?? ""];
+    if (result) toast(result.text, result.tone);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readMethods]);
+
+  const providersSection = methods && (
+    <>
+      <SignInMethods identities={methods.identities} onChanged={readMethods} />
+      <div className="mt-6">
+        <ProviderButtons
+          intent="link"
+          verb="Link"
+          divider={false}
+          exclude={methods.identities.map((i) => i.provider)}
+        />
+      </div>
+    </>
+  );
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -62,7 +90,16 @@ export default function SecurityPage() {
     }
   }
 
-  if (methods && !methods.hasPassword) {
+  if (methodsFailed) {
+    return (
+      <p role="alert" className="text-sm text-danger">
+        Could not load how this account signs in. Reload the page to try again.
+      </p>
+    );
+  }
+  if (!methods) return null;
+
+  if (!methods.hasPassword) {
     return (
       <div className="max-w-md">
         <h2 className="text-lg font-semibold mb-1">Password</h2>
@@ -73,7 +110,7 @@ export default function SecurityPage() {
           </Link>{" "}
           — the link goes to your address.
         </p>
-        <SignInMethods identities={methods.identities} onChanged={readMethods} />
+        {providersSection}
       </div>
     );
   }
@@ -139,7 +176,7 @@ export default function SecurityPage() {
           {saving ? "Changing…" : "Change password"}
         </Button>
       </form>
-      {methods && <SignInMethods identities={methods.identities} onChanged={readMethods} />}
+      {providersSection}
     </div>
   );
 }

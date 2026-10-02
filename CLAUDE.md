@@ -225,9 +225,10 @@ PUBLIC_ORIGIN=            # This instance's own address, at runtime. Required fo
                           # /.well-known documents and the PM OAuth redirect_uri, which answer 500
                           # without it rather than falling back to a request header (BP-316).
                           # Falls back to APP_ORIGIN only when that names exactly one origin.
-                          # Every link the app sends (mail, chat, Coda, worker enrolment) is built
-                          # from it; nothing reads NEXT_PUBLIC_APP_URL, which would be a
-                          # build-machine literal in the published image (BP-766).
+                          # Every link the app sends (mail, chat, Coda, worker enrolment) and the
+                          # OIDC sign-in redirect URI are built from it; nothing reads
+                          # NEXT_PUBLIC_APP_URL, which would be a build-machine literal in the
+                          # published image (BP-766).
                           # WARNING: a second origin in APP_ORIGIN with PUBLIC_ORIGIN unset turns
                           # every link off (and MCP, enrolment, password reset refuse)
 ```

@@ -60,7 +60,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "That email is already on another account" }, { status: 409 });
     }
     try {
-      await User.updateOne({ _id: user._id }, { $set: { email: outcome.email } });
+      await User.updateOne({ _id: user._id }, { $set: { email: outcome.email, emailVerifiedAt: new Date() } });
     } catch (err) {
       await releaseEmailChange(token, outcome.claimedAt).catch(() => {});
       if (duplicateKeyField(err) === "email") {

@@ -14,6 +14,7 @@ import { duplicateKeyField } from "@/lib/mongo-errors";
 import { withAdmin } from "@/lib/middleware";
 import { boardsOnlyOwnedBy } from "@/lib/grants";
 import { Grant } from "@/models/grant";
+import { Identity } from "@/models/identity";
 import { revokeUserCredentials, revokeUserSessions } from "@/lib/session";
 import { User } from "@/models/user";
 
@@ -121,6 +122,7 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
     }
     emailWasChanged = email !== previousEmail;
     target.email = email;
+    if (emailWasChanged) target.emailVerifiedAt = null;
   }
 
   let passwordWasSet = false;
@@ -334,6 +336,8 @@ export const DELETE = withAdmin(async (_request, { params, user: admin }) => {
   });
 
   await Grant.deleteMany({ subject: user._id });
+  // A link left behind would refuse the same person's provider as "already linked" for good
+  await Identity.deleteMany({ user: user._id });
   await revokeUserSessions(user._id);
 
   return NextResponse.json({ message: "User deleted" });

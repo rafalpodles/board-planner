@@ -13,9 +13,9 @@ export const ACCEPT_TTL_MS = 15 * 60 * 1000;
 const configs = new Map<string, Promise<client.Configuration>>();
 
 // Plain http is accepted only from an issuer on this machine: a local identity provider in
-// development and the e2e rig's stub. Anything reachable over a network has to be https.
+// development and the e2e rig's stub. Addresses, not names, so no resolver decides it.
 function isLoopback(issuer: URL): boolean {
-  return ["localhost", "127.0.0.1", "[::1]"].includes(issuer.hostname);
+  return ["127.0.0.1", "[::1]"].includes(issuer.hostname);
 }
 
 function configFor(provider: OidcProvider): Promise<client.Configuration> {
@@ -43,8 +43,9 @@ export function redirectUri(provider: OidcProvider, origin: string): string {
 export async function beginFlow(input: {
   provider: OidcProvider;
   origin: string;
-  intent: "signin" | "invite";
+  intent: "signin" | "invite" | "link";
   invitationToken?: string;
+  userId?: string;
 }): Promise<{ url: string; binder: string }> {
   const config = await configFor(input.provider);
   const codeVerifier = client.randomPKCECodeVerifier();
@@ -61,6 +62,7 @@ export async function beginFlow(input: {
     codeVerifier,
     intent: input.intent,
     invitationTokenHash: input.invitationToken ? sha256(input.invitationToken) : null,
+    user: input.userId ?? null,
     expiresAt: new Date(Date.now() + FLOW_TTL_MS),
   });
 
@@ -76,6 +78,7 @@ export async function beginFlow(input: {
 }
 
 export interface VerifiedClaims {
+  issuer: string;
   subject: string;
   email: string;
   emailVerified: boolean;
@@ -83,7 +86,13 @@ export interface VerifiedClaims {
 }
 
 export type FlowOutcome =
-  | { ok: true; intent: "signin" | "invite"; invitationTokenHash: string | null; claims: VerifiedClaims }
+  | {
+      ok: true;
+      intent: "signin" | "invite" | "link";
+      invitationTokenHash: string | null;
+      userId: string | null;
+      claims: VerifiedClaims;
+    }
   | { ok: false; reason: "no_flow" | "rejected" };
 
 /**
@@ -119,15 +128,18 @@ export async function finishFlow(input: {
       }
     );
     const claims = tokens.claims();
-    if (!claims?.sub) return { ok: false, reason: "rejected" };
+    if (!claims?.sub || !claims.iss) return { ok: false, reason: "rejected" };
+    const email = typeof claims.email === "string" ? normaliseEmail(claims.email) : "";
     return {
       ok: true,
       intent: flow.intent,
       invitationTokenHash: flow.invitationTokenHash,
+      userId: flow.user ? String(flow.user) : null,
       claims: {
+        issuer: String(claims.iss),
         subject: String(claims.sub),
-        email: typeof claims.email === "string" ? normaliseEmail(claims.email) : "",
-        emailVerified: claims.email_verified === true,
+        email,
+        emailVerified: claims.email_verified === true && ownsTheAddress(input.provider, email, claims),
         name: typeof claims.name === "string" ? claims.name : "",
       },
     };
@@ -135,6 +147,16 @@ export async function finishFlow(input: {
     console.error(`OIDC callback from ${input.provider.id} refused:`, err);
     return { ok: false, reason: "rejected" };
   }
+}
+
+/**
+ * Google marks any address verified once it has seen one mail arrive there, including a consumer
+ * account opened on a company address years ago. It only speaks for the mailbox for its own
+ * domain, or for one a Workspace (`hd`) manages (Google's own guidance).
+ */
+function ownsTheAddress(provider: OidcProvider, email: string, claims: Record<string, unknown>): boolean {
+  if (provider.id !== "google") return true;
+  return email.endsWith("@gmail.com") || (typeof claims.hd === "string" && claims.hd.length > 0);
 }
 
 /** A verified identity waiting for its owner to choose a username, held for one invitation. */
@@ -153,7 +175,7 @@ export async function holdForAcceptance(input: {
     codeVerifier: "-",
     intent: "invite",
     invitationTokenHash: input.invitationTokenHash,
-    claims: { subject: input.claims.subject, email: input.claims.email },
+    claims: { issuer: input.claims.issuer, subject: input.claims.subject, email: input.claims.email },
     expiresAt: new Date(Date.now() + ACCEPT_TTL_MS),
   });
   return binder;

@@ -19,6 +19,7 @@ import {
 } from "@/lib/password-reset";
 import { provenanceRefusal, revokeUserCredentials } from "@/lib/session";
 import { User } from "@/models/user";
+import { Identity } from "@/models/identity";
 
 const ATTEMPTS_PER_SOURCE = 20;
 
@@ -92,7 +93,8 @@ export async function POST(request: Request) {
   await revokeUserCredentials(user._id);
 
   try {
-    await User.updateOne({ _id: user._id }, { $set: { password: hashed } });
+    // The link reached the account's address, which is the proof a provider links by
+    await User.updateOne({ _id: user._id }, { $set: { password: hashed, emailVerifiedAt: new Date() } });
   } catch (err) {
     // The claim is one-shot, so a write that fails here would otherwise leave somebody signed out
     // of everything, holding a dead link, with their old password still in force and no way back
@@ -109,6 +111,19 @@ export async function POST(request: Request) {
   // throw between the two would leave the password changed, the link spent, and the lockout
   // standing — the exact state this call exists to prevent (BP-353 review).
   await clearAccountAttempts(user.username).catch(() => {});
+
+  // A reset is how somebody takes their account back; a provider an intruder linked would otherwise
+  // outlive it the way an API token did before BP-293. The account's own can be linked again
+  const unlinked = await Identity.deleteMany({ user: user._id }).catch(() => ({ deletedCount: 0 }));
+  if (unlinked.deletedCount > 0) {
+    void logInstanceAudit({
+      action: "identity_unlinked",
+      user: user._id,
+      actorUsername: user.username,
+      target: user.username,
+      detail: "every sign-in provider, by a password reset",
+    });
+  }
 
   // Every other link too, and only once the password is safely written. Issuing is a delete
   // followed by a create, so two requests racing leave two live links; without this, resetting

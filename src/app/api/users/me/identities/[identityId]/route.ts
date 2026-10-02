@@ -3,6 +3,7 @@ import { isValidObjectId } from "mongoose";
 import { withAuth } from "@/lib/middleware";
 import { connectDB } from "@/lib/db";
 import { logInstanceAudit } from "@/lib/instanceAudit";
+import { isEmailConfigured } from "@/lib/email";
 import { providerById } from "@/lib/oidc/providers";
 import { Identity } from "@/models/identity";
 import { User } from "@/models/user";
@@ -19,17 +20,19 @@ export const DELETE = withAuth(async (_request, { params, user }) => {
   const identity = await Identity.findOne({ _id: identityId, user: user._id }).lean();
   if (!identity) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const [record, others] = await Promise.all([
-    User.findById(user._id).select("+password").lean(),
-    Identity.countDocuments({ user: user._id, _id: { $ne: identity._id } }),
-  ]);
-  if (!record?.password && others === 0) {
-    return NextResponse.json(
-      { error: "This is your only way to sign in. Set a password first, from Forgot your password." },
-      { status: 409 }
-    );
+  const record = await User.findById(user._id).select("+password").lean();
+  const lastWayIn = isEmailConfigured()
+    ? "This is your only way to sign in. Set a password first, from Forgot your password."
+    : "This is your only way to sign in. Ask an administrator to set a password for you first.";
+  if (!record?.password && (await Identity.countDocuments({ user: user._id, _id: { $ne: identity._id } })) === 0) {
+    return NextResponse.json({ error: lastWayIn }, { status: 409 });
   }
   await Identity.deleteOne({ _id: identity._id, user: user._id });
+  // Two unlinks in two tabs each counted the other's provider as the way in that remains
+  if (!record?.password && (await Identity.countDocuments({ user: user._id })) === 0) {
+    await Identity.create({ ...identity, _id: identity._id });
+    return NextResponse.json({ error: lastWayIn }, { status: 409 });
+  }
 
   void logInstanceAudit({
     action: "identity_unlinked",

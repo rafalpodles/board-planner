@@ -72,14 +72,19 @@ export async function POST(request: Request) {
     {
       ...checked.value,
       passwordHash: null,
-      identity: { provider: held.provider, subject: held.claims.subject, email: held.claims.email },
+      identity: {
+        provider: held.provider,
+        issuer: held.claims.issuer,
+        subject: held.claims.subject,
+        email: held.claims.email,
+      },
     },
     request,
     clientIp
   );
   if (response.status === 201) {
     await spendAcceptance(binder);
-    response.headers.append("Set-Cookie", buildFlowCookie(ACCEPT_COOKIE, "", 0, request));
+    response.headers.append("Set-Cookie", buildFlowCookie(ACCEPT_COOKIE, "", 0));
   }
   return response;
 }
