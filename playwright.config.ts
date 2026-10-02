@@ -184,7 +184,7 @@ function devServerEnv(origin: string) {
     // them assert a refusal instead of the encryption they exist to prove.
     ENCRYPTION_KEY: E2E_ENCRYPTION_KEY,
     // The suite's own signing key, so licence.spec.ts can sign a key the server accepts. Read only
-    // where E2E=1 is too, and never by a production build.
+    // where E2E=1 is too, and never by `next build` output, whose NODE_ENV is inlined.
     E2E_LICENCE_PUBLIC_KEY,
     // Three things now, and two are not cosmetic. It turns off Next's dev indicator, which
     // paints over the bottom-left of every page and takes a real click meant for a bottom

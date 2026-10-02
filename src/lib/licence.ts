@@ -152,15 +152,21 @@ export function setE2eLicenceKey(key: string | undefined): void {
   globalThis.__bpE2eLicenceKey = { key };
 }
 
-export function licenceKeysInEffect(env: NodeJS.ProcessEnv = process.env): readonly LicencePublicKey[] {
-  if (e2eOnlyMounted(env.E2E, env.NODE_ENV) && env.E2E_LICENCE_PUBLIC_KEY) {
+// `nodeEnv` defaults to the literal `process.env.NODE_ENV`, which the build replaces with
+// "production": read off a passed-in `env` instead, `next start` would take whatever the operator
+// exported, and NODE_ENV=test with E2E=1 would let anyone name a public key of their own
+export function licenceKeysInEffect(
+  env: NodeJS.ProcessEnv = process.env,
+  nodeEnv: string | undefined = process.env.NODE_ENV
+): readonly LicencePublicKey[] {
+  if (e2eOnlyMounted(env.E2E, nodeEnv) && env.E2E_LICENCE_PUBLIC_KEY) {
     return [...LICENCE_PUBLIC_KEYS, { keyId: "e2e", x: env.E2E_LICENCE_PUBLIC_KEY }];
   }
   return LICENCE_PUBLIC_KEYS;
 }
 
-function licenceKeyInEffect(env: NodeJS.ProcessEnv): string | undefined {
-  const override = e2eOnlyMounted(env.E2E, env.NODE_ENV) ? globalThis.__bpE2eLicenceKey : undefined;
+function licenceKeyInEffect(env: NodeJS.ProcessEnv, nodeEnv: string | undefined): string | undefined {
+  const override = e2eOnlyMounted(env.E2E, nodeEnv) ? globalThis.__bpE2eLicenceKey : undefined;
   const key = override ? override.key : env.LICENCE_KEY;
   return key?.trim() ? key : undefined;
 }
@@ -168,11 +174,12 @@ function licenceKeyInEffect(env: NodeJS.ProcessEnv): string | undefined {
 // `null` when no LICENCE_KEY is set, so the caller can tell "no key" from "a key that failed"
 export function currentLicence(
   env: NodeJS.ProcessEnv = process.env,
-  now: number = Date.now()
+  now: number = Date.now(),
+  nodeEnv: string | undefined = process.env.NODE_ENV
 ): LicenceCheck | null {
-  const key = licenceKeyInEffect(env);
+  const key = licenceKeyInEffect(env, nodeEnv);
   if (!key) return null;
-  return verifyLicenceKey(key, { keys: licenceKeysInEffect(env), now });
+  return verifyLicenceKey(key, { keys: licenceKeysInEffect(env, nodeEnv), now });
 }
 
 // `null` means the licence grants nothing and the stored entitlements stand

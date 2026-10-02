@@ -206,12 +206,12 @@ describe("currentLicence", () => {
   const E2E = keypair("e2e");
 
   it("is null with no LICENCE_KEY, and with one that is only whitespace", () => {
-    expect(currentLicence({ NODE_ENV: "production" })).toBeNull();
-    expect(currentLicence({ NODE_ENV: "production", LICENCE_KEY: "  " })).toBeNull();
+    expect(currentLicence({ NODE_ENV: "production" }, 0, "production")).toBeNull();
+    expect(currentLicence({ NODE_ENV: "production", LICENCE_KEY: "  " }, 0, "production")).toBeNull();
   });
 
   it("verifies LICENCE_KEY against the compiled-in keys", () => {
-    expect(currentLicence({ NODE_ENV: "production", LICENCE_KEY: licence(E2E.signing) })).toEqual({
+    expect(currentLicence({ NODE_ENV: "production", LICENCE_KEY: licence(E2E.signing) }, 0, "production")).toEqual({
       verdict: "unknown_key",
     });
   });
@@ -219,15 +219,28 @@ describe("currentLicence", () => {
   it("accepts the end-to-end suite's key only where the suite's surfaces are mounted", () => {
     const env = { E2E: "1", E2E_LICENCE_PUBLIC_KEY: E2E.public.x, LICENCE_KEY: licence(E2E.signing) };
 
-    expect(currentLicence({ ...env, NODE_ENV: "development" }, EXPIRES - DAY)?.verdict).toBe("valid");
-    expect(currentLicence({ ...env, NODE_ENV: "production" }, EXPIRES - DAY)?.verdict).toBe("unknown_key");
-    expect(currentLicence({ ...env, E2E: undefined, NODE_ENV: "development" }, EXPIRES - DAY)?.verdict).toBe(
+    expect(currentLicence({ ...env, NODE_ENV: "development" }, EXPIRES - DAY, "development")?.verdict).toBe(
+      "valid"
+    );
+    expect(currentLicence({ ...env, NODE_ENV: "production" }, EXPIRES - DAY, "production")?.verdict).toBe(
       "unknown_key"
     );
+    expect(
+      currentLicence({ ...env, E2E: undefined, NODE_ENV: "development" }, EXPIRES - DAY, "development")?.verdict
+    ).toBe("unknown_key");
+  });
+
+  // `next start` keeps an exported NODE_ENV; only the value the build inlined may open the door
+  it("refuses the suite's key on a production build whose operator exported NODE_ENV=test", () => {
+    const env = { E2E: "1", NODE_ENV: "test", E2E_LICENCE_PUBLIC_KEY: E2E.public.x, LICENCE_KEY: licence(E2E.signing) } as const;
+
+    expect(currentLicence(env, EXPIRES - DAY, "production")?.verdict).toBe("unknown_key");
   });
 
   it("never drops the compiled-in keys when the suite's key is added", () => {
-    const keys = licenceKeysInEffect({ E2E: "1", NODE_ENV: "development", E2E_LICENCE_PUBLIC_KEY: "x" });
+    const keys = licenceKeysInEffect({ E2E: "1", NODE_ENV: "development", E2E_LICENCE_PUBLIC_KEY: "x" }, "development");
+
+    expect(keys).toHaveLength(LICENCE_PUBLIC_KEYS.length + 1);
 
     expect(keys.slice(0, LICENCE_PUBLIC_KEYS.length)).toEqual(LICENCE_PUBLIC_KEYS);
   });

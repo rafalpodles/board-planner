@@ -1,8 +1,8 @@
 import { signLicence, type LicencePayload } from "../src/lib/licence";
 
-// A keypair the suite owns. The app accepts its public half only where `e2eOnlyMounted` holds, so a
-// licence signed with it opens nothing on a production build — which is why the private half may sit
-// in a public repository.
+// A keypair the suite owns. The app accepts a public key from E2E_LICENCE_PUBLIC_KEY only when
+// E2E=1 and the NODE_ENV the build inlined is not "production", so under `next build` it accepts
+// none, whatever the environment says — which is why the private half may sit in a public repository.
 export const E2E_LICENCE_SIGNING_KEY = {
   keyId: "e2e",
   d: "DPDD3QJcNRYFnq1RAzKLeTTGW4_IRXQWZuI4_MzFDHQ",
