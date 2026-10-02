@@ -66,7 +66,8 @@ function gitIn(runner: Runner, gitPath: string, worktreePath: string): Git {
     const result: CommandResult = await runner.run(requireGitPath(gitPath), gitArgs(args), {
       cwd: options.cwd ?? worktreePath,
       timeoutMs: TIMEOUT_MS,
-      env: localGitEnv(),
+      // The stderr match below reads git's English; a git built with gettext would translate it
+      env: { ...localGitEnv(), LC_ALL: "C" },
       ...(options.stdin === undefined ? {} : { stdin: options.stdin }),
       ...(options.bytes ? { stdoutEncoding: "latin1" as const } : {}),
     });
