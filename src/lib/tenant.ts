@@ -2,6 +2,7 @@ import { cache } from "react";
 import { connectDB } from "./db";
 import { Tenant, ITenant } from "@/models/tenant";
 import { upsertSingleton } from "./singleton";
+import { currentLicence, entitlementsFromLicence } from "./licence";
 
 // React's cache() only dedupes calls made during a Server Component render — confirmed against
 // this app's own Next config (Route Handlers run the handler as a plain function, with no render
@@ -10,7 +11,10 @@ import { upsertSingleton } from "./singleton";
 // Kept anyway: it costs nothing where it doesn't apply, and is correct where it does.
 export const getTenant = cache(async (): Promise<ITenant> => {
   await connectDB();
-  return upsertSingleton(Tenant, {
+  const stored = await upsertSingleton(Tenant, {
     $setOnInsert: { entitlements: { plan: "free", features: [], source: "none" } },
   });
+  // Derived on every read and never written back, so removing the key is all it takes to undo it
+  const fromLicence = entitlementsFromLicence(currentLicence());
+  return fromLicence ? { _id: stored._id, entitlements: fromLicence } : stored;
 });

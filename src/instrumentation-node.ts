@@ -11,6 +11,13 @@ export async function bootNode(): Promise<void> {
       : `TRUSTED_PROXY_HOPS=${hops} — the client address is taken ${hops} entries from the right of X-Forwarded-For`
   );
 
+  // A bad key is a line in the log and the Free plan, never a failed start
+  const { currentLicence, describeLicenceAtStartup } = await import("@/lib/licence");
+  const licence = currentLicence();
+  const licenceLine = describeLicenceAtStartup(licence);
+  if (licence && licence.verdict !== "valid") console.warn(licenceLine);
+  else console.log(licenceLine);
+
   // Above the try for the same reason the hops are: a fumbled value has to be one startup
   // failure naming the variable. `assertEncryptionConfig` throws on a malformed key on purpose
   // (BP-282) — but every other path to this module goes through the PM scheduler, inside the
