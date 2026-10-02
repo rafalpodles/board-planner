@@ -1,0 +1,371 @@
+{
+  "mutations": [
+    {
+      "id": "control-move-failure-toast",
+      "control": true,
+      "file": "src/hooks/use-project-board.ts",
+      "edits": [
+        {
+          "find": "      if (parkIfHeld(err, taskId, retry)) return;\n      toast(\"Failed to move task\", \"error\");\n",
+          "replace": "      if (parkIfHeld(err, taskId, retry)) return;\n"
+        }
+      ],
+      "spec": "e2e/kanban-board-core.spec.ts",
+      "grep": "a move the server refuses rolls the card back",
+      "probe": "/projects/TP",
+      "assertion": "expectToast(page, \"Failed to move task\") — deliberately obvious"
+    },
+    {
+      "id": "board-move-rollback",
+      "file": "src/hooks/use-project-board.ts",
+      "edits": [
+        {
+          "find": "      toast(\"Failed to move task\", \"error\");\n      loadData();\n    }\n  }\n\n  async function forceHeldMove",
+          "replace": "      toast(\"Failed to move task\", \"error\");\n    }\n  }\n\n  async function forceHeldMove"
+        }
+      ],
+      "spec": "e2e/kanban-board-core.spec.ts",
+      "grep": "a move the server refuses rolls the card back",
+      "probe": "/projects/TP",
+      "assertion": "kanban-board-core:220 cardIn(in_review, FINISHED).toHaveCount(0)"
+    },
+    {
+      "id": "board-delete-local-removal",
+      "file": "src/hooks/use-project-board.ts",
+      "edits": [
+        {
+          "find": "      dropReadsInFlight();\n      setTasks((prev) => prev.filter((t) => t._id !== taskId));\n      toast(\"Task deleted\", \"success\");",
+          "replace": "      dropReadsInFlight();\n      toast(\"Task deleted\", \"success\");"
+        }
+      ],
+      "spec": "e2e/board-irreversible.spec.ts",
+      "grep": "from the card's menu: Cancel keeps the task, Delete removes it",
+      "probe": "/projects/TP",
+      "assertion": "board-irreversible:303 card(FINISHED).toHaveCount(0, 1s)"
+    },
+    {
+      "id": "board-forced-delete-reload",
+      "file": "src/hooks/use-project-board.ts",
+      "edits": [
+        {
+          "find": "      setForcing(false);\n      setHeldDelete(null);\n    }\n    loadData();",
+          "replace": "      setForcing(false);\n      setHeldDelete(null);\n    }"
+        }
+      ],
+      "spec": "e2e/board-irreversible.spec.ts",
+      "grep": "a task a worker holds is kept until a person says Delete anyway",
+      "probe": "/projects/TP",
+      "assertion": "board-irreversible:491 card(HELD).toHaveCount(0, 2s)"
+    },
+    {
+      "id": "board-drag-no-local-move",
+      "file": "src/hooks/use-project-board.ts",
+      "edits": [
+        {
+          "find": "    dropReadsInFlight();\n    setTasks((prev) =>\n      prev.map((t) =>\n        t._id === taskId\n          ? { ...t, status: status as ApiTask[\"status\"], order: newOrder }\n          : t\n      )\n    );\n",
+          "replace": "    dropReadsInFlight();\n"
+        },
+        {
+          "find": ")) as Partial<ApiTask>;\n      setTasks((prev) => prev.map((t) => (t._id === taskId ? { ...t, ...updated } : t)));\n    } catch (err) {\n      // A worker is running",
+          "replace": ")) as Partial<ApiTask>;\n      void updated;\n    } catch (err) {\n      // A worker is running"
+        }
+      ],
+      "spec": "e2e/kanban-board-core.spec.ts",
+      "grep": "a free card drags to another column, lands in the right place, and survives a reload",
+      "probe": "/projects/TP",
+      "assertion": "kanban-board-core:175 cardIn(source, DECOY).toHaveCount(0)"
+    },
+    {
+      "id": "board-drag-no-local-move-empty-column",
+      "file": "src/hooks/use-project-board.ts",
+      "edits": [
+        {
+          "find": "    dropReadsInFlight();\n    setTasks((prev) =>\n      prev.map((t) =>\n        t._id === taskId\n          ? { ...t, status: status as ApiTask[\"status\"], order: newOrder }\n          : t\n      )\n    );\n",
+          "replace": "    dropReadsInFlight();\n"
+        },
+        {
+          "find": ")) as Partial<ApiTask>;\n      setTasks((prev) => prev.map((t) => (t._id === taskId ? { ...t, ...updated } : t)));\n    } catch (err) {\n      // A worker is running",
+          "replace": ")) as Partial<ApiTask>;\n      void updated;\n    } catch (err) {\n      // A worker is running"
+        }
+      ],
+      "spec": "e2e/kanban-board-core.spec.ts",
+      "grep": "a card dropped into an empty column becomes its first",
+      "probe": "/projects/TP",
+      "assertion": "kanban-board-core:518 cardIn(source, SIBLING).toHaveCount(0)"
+    },
+    {
+      "id": "board-sprint-scope-filter",
+      "file": "src/hooks/use-project-board.ts",
+      "edits": [
+        {
+          "find": "      return updated.filter((t) => !affected.has(t._id) || t.sprint === wanted);",
+          "replace": "      void wanted;\n      return updated;"
+        }
+      ],
+      "spec": "e2e/board-irreversible.spec.ts",
+      "grep": "on a board scoped to the sprint, a card removed from it leaves the board",
+      "probe": "/projects/TP",
+      "assertion": "board-irreversible:712 card(SIBLING).toHaveCount(0, 1s)"
+    },
+    {
+      "id": "dashboard-refusal-toast",
+      "file": "src/app/(app)/projects/[projectId]/dashboard/page.tsx",
+      "edits": [
+        {
+          "find": "import { useApi } from \"@/hooks/use-api\";\n",
+          "replace": "import { useApi } from \"@/hooks/use-api\";\nimport { useToast } from \"@/components/ui/Toast\";\n"
+        },
+        {
+          "find": "  const api = useApi();\n",
+          "replace": "  const api = useApi();\n  const { toast } = useToast();\n"
+        },
+        {
+          "find": "        setRefused(refusal !== null);\n",
+          "replace": "        setRefused(refusal !== null);\n        if (s.status === \"rejected\") toast(\"Failed to load dashboard\", \"error\");\n"
+        }
+      ],
+      "spec": "e2e/project-dashboard.spec.ts",
+      "grep": "and is refused the board they do not",
+      "probe": "/projects/TP/dashboard",
+      "assertion": "project-dashboard:610 no toast recorded (was getByTestId(\"toast\").toHaveCount(0))"
+    },
+    {
+      "id": "agent-saved-flash-on-refusal",
+      "file": "src/app/(app)/agents/[agentId]/page.tsx",
+      "edits": [
+        {
+          "find": "                  } catch (error) {\n                    setRefusal(error instanceof Error ? error.message : \"Could not save\");",
+          "replace": "                  } catch (error) {\n                    setSavedAs(composition);\n                    setSaved(true);\n                    window.setTimeout(() => setSaved(false), 2000);\n                    setRefusal(error instanceof Error ? error.message : \"Could not save\");"
+        }
+      ],
+      "spec": "e2e/agents-catalog.spec.ts",
+      "grep": "a composition the server refuses says so on the page, and writes nothing",
+      "probe": "/agents/aaaaaaaaaaaaaaaaaaaaaaaa",
+      "assertion": "agents-catalog:1516 button \"Saved\" count is 0, read once (was toHaveCount(0))"
+    },
+    {
+      "id": "task-dependency-removal-refetch",
+      "file": "src/components/tasks/TaskLinks.tsx",
+      "edits": [
+        {
+          "find": "      toast(\"Dependency removed\", \"success\");\n      onChanged();\n",
+          "replace": "      toast(\"Dependency removed\", \"success\");\n"
+        }
+      ],
+      "spec": "e2e/task-detail-remainder.spec.ts",
+      "grep": "a dependency can be removed from the removable side",
+      "probe": "/projects/TP/tasks/1",
+      "assertion": "task-detail-remainder:227 getByText(\"Duplicates\").toHaveCount(0)"
+    },
+    {
+      "id": "board-approved-role-warning-always",
+      "file": "src/app/(app)/projects/[projectId]/settings/sections/BoardSection.tsx",
+      "edits": [
+        {
+          "find": "      {!draft.value.columns.some((c) => c.role === \"approved\") && (",
+          "replace": "      {(draft.value.columns.length > 0 || !draft.value.columns.some((c) => c.role === \"approved\")) && ("
+        }
+      ],
+      "spec": "e2e/project-settings.spec.ts",
+      "grep": "a board with nothing in the approved role says so, and an ordinary board does not",
+      "probe": "/projects/TP/settings",
+      "assertion": "project-settings:485 getByText(WARNING).toBeHidden()"
+    },
+    {
+      "id": "error-boundary-details-open",
+      "file": "src/app/error.tsx",
+      "edits": [
+        {
+          "find": "      <details className=\"w-full max-w-lg rounded-lg border border-border\">",
+          "replace": "      <details open className=\"w-full max-w-lg rounded-lg border border-border\">"
+        }
+      ],
+      "spec": "e2e/error-boundary.spec.ts",
+      "grep": "the stack is there for a bug report, and behind a disclosure until asked for",
+      "probe": "/projects",
+      "assertion": "error-boundary:51 details > pre.toBeHidden()"
+    },
+    {
+      "id": "comments-claim-on-failed-read",
+      "file": "src/components/tasks/Comments.tsx",
+      "edits": [
+        {
+          "find": "        ) : (\n          comments.length === 0 && (\n            <p className=\"text-sm text-text-muted\">No comments yet</p>\n          )\n        )}",
+          "replace": "        ) : null}\n        {!reading && comments.length === 0 && (\n            <p className=\"text-sm text-text-muted\">No comments yet</p>\n        )}"
+        }
+      ],
+      "spec": "e2e/failed-read-states.spec.ts",
+      "grep": "a task whose comments cannot be read does not claim it has none",
+      "probe": "/projects/TP/tasks/1",
+      "assertion": "failed-read-states:208 getByText(\"No comments yet\").toHaveCount(0)"
+    },
+    {
+      "id": "search-claim-on-failed-read",
+      "file": "src/app/(app)/search/page.tsx",
+      "edits": [
+        {
+          "find": "      {!loading && !failed && active && hits.length === 0 && (",
+          "replace": "      {!loading && active && hits.length === 0 && ("
+        }
+      ],
+      "spec": "e2e/failed-read-states.spec.ts",
+      "grep": "a search that fails says so rather than reporting no tasks",
+      "probe": "/search",
+      "assertion": "failed-read-states:168 getByText(\"No tasks found\").toHaveCount(0)"
+    },
+    {
+      "id": "context-menu-escape",
+      "file": "src/components/kanban/TaskContextMenu.tsx",
+      "edits": [
+        {
+          "find": "      if (e.key === \"Escape\") onCloseRef.current();",
+          "replace": "      if (e.key === \"Escape\") void onCloseRef;"
+        }
+      ],
+      "spec": "e2e/shortcut-help-escape.spec.ts",
+      "grep": "Escape closes the card's context menu",
+      "probe": "/projects/TP",
+      "assertion": "shortcut-help-escape:119 contextMenu.toBeHidden()"
+    },
+    {
+      "id": "task-reference-other-project-key",
+      "file": "src/hooks/use-editor-triggers.ts",
+      "edits": [
+        {
+          "find": "${escapeRegex(projectKey)}-([A-Za-z0-9_-]{0,30})$",
+          "replace": "[A-Za-z_]+-([A-Za-z0-9_-]{0,30})$"
+        }
+      ],
+      "spec": "e2e/task-references.spec.ts",
+      "grep": "offers nothing for another project's key",
+      "probe": "/projects/TP/tasks/1",
+      "assertion": "task-references:219 listbox.toBeHidden() after a settle and no suggest request"
+    },
+    {
+      "id": "pm-retry-not-cleared",
+      "file": "src/components/pm/PmChat.tsx",
+      "edits": [
+        {
+          "find": "    setLastFailedInput(\"\");\n    setRetryable(false);\n    answerBefore.current =",
+          "replace": "    answerBefore.current ="
+        }
+      ],
+      "spec": "e2e/pm-chat.spec.ts",
+      "grep": "Retry sends the same message again, and the second attempt lands",
+      "probe": "/projects/TP/pm",
+      "assertion": "pm-chat:482 button \"Retry\".toHaveCount(0)"
+    },
+    {
+      "id": "my-tasks-hide-done-by-id",
+      "file": "src/app/(app)/my-tasks/page.tsx",
+      "edits": [
+        {
+          "find": "tasks.filter((t) => t.statusRole !== \"done\")",
+          "replace": "tasks.filter((t) => t.status !== \"done\")"
+        }
+      ],
+      "spec": "e2e/my-tasks.spec.ts",
+      "grep": "Hide done takes the finished work off the list, and gives it back",
+      "probe": "/my-tasks",
+      "assertion": "my-tasks:143 getByText(MINE_DONE_TITLE).toHaveCount(0)"
+    },
+    {
+      "id": "board-create-no-reload",
+      "file": "src/components/kanban/ProjectBoardView.tsx",
+      "edits": [
+        {
+          "find": "            setShowNewTask(false);\n            reload();\n",
+          "replace": "            setShowNewTask(false);\n"
+        }
+      ],
+      "spec": "e2e/board-irreversible.spec.ts",
+      "grep": "an empty board offers the first task, and the empty state goes with it",
+      "probe": "/projects/TP",
+      "assertion": "board-irreversible:1181 getByText(\"No tasks yet\").toHaveCount(0)"
+    },
+    {
+      "id": "history-empty-state-deleted",
+      "file": "src/components/tasks/ActivityTimeline.tsx",
+      "edits": [
+        {
+          "find": "      {!failed && !reading && logs.length === 0 && (",
+          "replace": "      {false && ("
+        }
+      ],
+      "spec": "e2e/field-history.spec.ts",
+      "grep": "the history says which field changed and what it became",
+      "probe": "/projects/TP/tasks/1",
+      "assertion": "field-history:135 openHistory's loaded gate (was getByText(\"No history yet\").toBeHidden())"
+    },
+    {
+      "id": "board-priority-filter-ignored",
+      "file": "src/components/kanban/BoardFilters.tsx",
+      "edits": [
+        {
+          "find": "      result = result.filter((t) => t.priority === filters.priority);",
+          "replace": "      result = result.filter(() => true);"
+        }
+      ],
+      "spec": "e2e/kanban-board-core.spec.ts",
+      "grep": "filters narrow the board, combine, and survive a reload",
+      "probe": "/projects/TP",
+      "assertion": "kanban-board-core:400 cards.toHaveCount(0)"
+    },
+    {
+      "id": "agent-unsaved-baseline",
+      "file": "src/app/(app)/agents/[agentId]/page.tsx",
+      "edits": [
+        {
+          "find": "                    await store.saveComposition(agent._id, composition);\n                    setSavedAs(composition);\n",
+          "replace": "                    await store.saveComposition(agent._id, composition);\n"
+        }
+      ],
+      "spec": "e2e/first-use-gaps.spec.ts",
+      "grep": "asks before leaving, and says so on the page before anybody tries",
+      "probe": "/agents/aaaaaaaaaaaaaaaaaaaaaaaa",
+      "assertion": "first-use-gaps:196 getByText(\"Unsaved changes\").toHaveCount(0)"
+    },
+    {
+      "id": "mobile-comment-bar-on-desktop",
+      "file": "src/components/tasks/detail/MobileCommentBar.tsx",
+      "edits": [
+        {
+          "find": "pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:hidden\"",
+          "replace": "pb-[max(0.75rem,env(safe-area-inset-bottom))]\""
+        }
+      ],
+      "spec": "e2e/narrow-navigation.spec.ts",
+      "grep": "and is not offered on a desktop, where the page has its own composer",
+      "probe": "/projects/TP/tasks/1",
+      "assertion": "narrow-navigation:196 bar.toBeHidden()"
+    },
+    {
+      "file": "src/app/(app)/agents/[agentId]/page.tsx",
+      "edits": [
+        {
+          "find": "                    await store.saveComposition(agent._id, composition);\n                    setSavedAs(composition);\n",
+          "replace": "                    await store.saveComposition(agent._id, composition);\n"
+        }
+      ],
+      "probe": "/agents/aaaaaaaaaaaaaaaaaaaaaaaa",
+      "id": "agent-unsaved-baseline-reread-fails",
+      "spec": "e2e/first-use-gaps.spec.ts",
+      "grep": "a save that lands is not reported as unsaved when the catalog cannot be read again",
+      "assertion": "first-use-gaps:256 getByText(\"Unsaved changes\").toHaveCount(0) — the case the survivor above cannot see"
+    },
+    {
+      "file": "src/components/pm/PmChat.tsx",
+      "edits": [
+        {
+          "find": "    setLastFailedInput(\"\");\n    setRetryable(false);\n    answerBefore.current =",
+          "replace": "    answerBefore.current ="
+        }
+      ],
+      "probe": "/projects/TP/pm",
+      "id": "pm-retry-not-cleared-later-banner",
+      "spec": "e2e/pm-chat.spec.ts",
+      "grep": "stops blocking the box after 30s, without giving up on the answer",
+      "assertion": "pm-chat:244 button \"Retry\".toHaveCount(0) — the later banner the survivor above cannot see"
+    }
+  ]
+}
