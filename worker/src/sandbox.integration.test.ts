@@ -32,7 +32,8 @@ import { createRunner } from "./exec.js";
  */
 const onMac = process.platform === "darwin";
 
-describe.skipIf(!onMac)("confine against the real sandbox", () => {
+// Each spawn is bounded at 30 s; the first sandbox-exec on a cold CI runner can outlast vitest's 5 s default
+describe.skipIf(!onMac)("confine against the real sandbox", { timeout: 60_000 }, () => {
   let dir: string;
   let worktree: string;
   let outside: string;
