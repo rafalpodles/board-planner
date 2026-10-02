@@ -12,7 +12,8 @@ import { Delivery } from "./delivery.js";
 import { Runner } from "./exec.js";
 import { Executor } from "./executor.js";
 import { gitArgs, localGitEnv, requireGitPath } from "./git-safety.js";
-import { hiddenFromGit, ignoredFiles, PORCELAIN_STATUS } from "./hidden-files.js";
+import { HiddenFiles, hiddenFromGit, ignoredFiles, PORCELAIN_STATUS } from "./hidden-files.js";
+import { removeFromWorktree } from "./ignored-removal.js";
 import { pinGit } from "./worktree-pin.js";
 import { Reporter } from "./reporter.js";
 import { SHUTDOWN_SIGNAL } from "./commands.js";
@@ -744,9 +745,25 @@ export async function runTask(
         // Before every gate, not only after edit steps: build and test-run execute the agent's own
         // code, which can hide a file from git as well as an Implement step can (BP-640, BP-794)
         const tampered = await worktree.tampering();
-        const hidden = tampered
+        let hidden: HiddenFiles | { kind: "tampered"; detail: string } | null = tampered
           ? { kind: "tampered" as const, detail: `the checkout now has ${tampered}` }
           : await hiddenFromGit(runner, deps.gitPath, worktree.path, worktree.baseSha, ignoredBeforeSteps);
+        if (hidden?.kind === "written") {
+          const removal = removeFromWorktree(worktree.path, hidden.paths);
+          if (removal.refused.length > 0) {
+            hidden = {
+              kind: "unreviewed",
+              detail: `${hidden.detail}; and not every one could be removed safely: ${removal.refused.slice(0, 5).join(", ")}`,
+            };
+          } else {
+            const count = removal.removed.length;
+            await reporter.noted(
+              task,
+              `Before the **${gate.name}** gate the worker removed ${count} ignored ${count === 1 ? "file" : "files"} a step wrote, since no commit, diff or reviewer sees them and the gate could still run them: ${hidden.named}`,
+            );
+            hidden = null;
+          }
+        }
         if (hidden) {
           keepWorktree = true;
           const found =

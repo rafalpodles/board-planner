@@ -252,6 +252,7 @@ describe.skipIf(process.platform !== "darwin")("a worktree whose .git file a con
         merged: vi.fn<Reporter["merged"]>(async () => {}),
         delivered: vi.fn<Reporter["delivered"]>(async () => {}),
         failed: vi.fn<Reporter["failed"]>(async () => {}),
+        noted: vi.fn<Reporter["noted"]>(async () => {}),
       };
       const delivery = {
         push: vi.fn<Delivery["push"]>(async () => {}),

@@ -177,6 +177,7 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
     merged: vi.fn<Reporter["merged"]>().mockResolvedValue(undefined),
     delivered: vi.fn<Reporter["delivered"]>().mockResolvedValue(undefined),
     failed: vi.fn<Reporter["failed"]>().mockResolvedValue(undefined),
+    noted: vi.fn<Reporter["noted"]>().mockResolvedValue(undefined),
   };
   const createReporter = vi.fn<PipelineDeps["createReporter"]>(() => reporter);
   const delivery = deliverySpy();

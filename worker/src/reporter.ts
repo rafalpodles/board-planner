@@ -24,6 +24,7 @@ export interface Reporter {
   merged(task: ClaimedTask, prUrl: string, summary: string): Promise<void>;
   delivered(task: ClaimedTask, prUrl: string, summary: string): Promise<void>;
   failed(task: ClaimedTask, reason: string): Promise<void>;
+  noted(task: ClaimedTask, note: string): Promise<void>;
 }
 
 type Log = (message: string) => void;
@@ -186,6 +187,10 @@ export function createReporter(
     async failed(task, reason) {
       const attempt = task.attempts > 0 ? ` on attempt ${task.attempts}` : "";
       await report(task, statusIds.review, `The execution worker gave up${attempt}.\n\n${safeText(reason)}`);
+    },
+
+    async noted(task, note) {
+      await comment(task, safeText(note));
     },
   };
 }

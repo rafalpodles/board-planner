@@ -13,6 +13,7 @@ export type HiddenFiles =
   | { kind: "hidden"; detail: string }
   | { kind: "nested"; detail: string }
   | { kind: "unreviewed"; detail: string }
+  | { kind: "written"; detail: string; paths: string[]; named: string }
   | { kind: "unreadable"; detail: string };
 
 export type IgnoredFiles =
@@ -186,22 +187,31 @@ export async function hiddenFromGit(
     if (offenders.length > 0) {
       return {
         kind: "hidden",
-        detail: `files git is told to ignore that the repository's own .gitignore as of the base commit does not ignore, so no commit, diff or gate would see them: ${await nameWithRules(git, offenders, () => "")}`,
+        detail: `files git is told to ignore that the repository's own .gitignore as of the base commit does not ignore, so no commit, diff or gate would see them: ${await describeWithRules(git, offenders)}`,
       };
     }
     if (!since) return null;
     if (since.kind === "unreadable") return since;
 
     const now = await listIgnored(git, worktreePath);
-    const written = [...now].filter(([path, signature]) => since.files.get(path) !== signature);
+    const written = [...now.keys()]
+      .filter((path) => since.files.get(path) !== now.get(path))
+      .sort((a, b) => Number(since.files.has(b)) - Number(since.files.has(a)));
     if (written.length === 0) return null;
+    const rules = await rulesFor(git, written.slice(0, NAMED_AT_MOST));
+    const changed = written.some((path) => since.files.has(path));
+    const named = namedAtMost(written, (path) => `${since.files.has(path) ? "changed" : "new"}; ${rules.get(path) ?? NO_RULE}`);
+    if (changed) {
+      return {
+        kind: "unreviewed",
+        detail: `ignored files written since the run started or the last gate passed, which no commit, diff or reviewer sees while a gate can still run them: ${named}`,
+      };
+    }
     return {
-      kind: "unreviewed",
-      detail: `ignored files written since the run started or the last gate passed, which no commit, diff or reviewer sees while a gate can still run them: ${await nameWithRules(
-        git,
-        written.map(([path]) => path),
-        (path) => (since.files.has(path) ? "changed; " : "new; "),
-      )}`,
+      kind: "written",
+      detail: `ignored files a step wrote, which no commit, diff or reviewer sees: ${named}`,
+      paths: written,
+      named,
     };
   } catch (error) {
     if (error instanceof Unreadable) return { kind: "unreadable", detail: error.message };
@@ -209,7 +219,9 @@ export async function hiddenFromGit(
   }
 }
 
-async function nameWithRules(git: Git, paths: string[], prefix: (path: string) => string): Promise<string> {
+const NO_RULE = "git names no rule for it";
+
+async function rulesFor(git: Git, paths: string[]): Promise<Map<string, string>> {
   const rules = new Map<string, string>();
   // 1 is check-ignore's "none of these is ignored", not a failure
   const fields = nulFields(
@@ -221,9 +233,18 @@ async function nameWithRules(git: Git, paths: string[], prefix: (path: string) =
   for (let at = 0; at + 3 < fields.length; at += 4) {
     rules.set(fromPath(fields[at + 3]), `${fields[at]}:${fields[at + 1]}: ${JSON.stringify(fields[at + 2])}`);
   }
+  return rules;
+}
+
+async function describeWithRules(git: Git, paths: string[]): Promise<string> {
+  const rules = await rulesFor(git, paths);
+  return namedAtMost(paths, (path) => rules.get(path) ?? NO_RULE);
+}
+
+function namedAtMost(paths: string[], describe: (path: string) => string): string {
   const named = paths
     .slice(0, NAMED_AT_MOST)
-    .map((path) => `${path} (${prefix(path)}${rules.get(path) ?? "git names no rule for it"})`)
+    .map((path) => `${path} (${describe(path)})`)
     .join(", ");
   return `${named}${paths.length > NAMED_AT_MOST ? `, and ${paths.length - NAMED_AT_MOST} more` : ""}`;
 }

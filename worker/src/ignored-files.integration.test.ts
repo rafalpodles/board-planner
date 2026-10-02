@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ApiClient } from "./api.js";
@@ -68,6 +68,7 @@ describe("an ignored file a step wrote, before a gate runs it", () => {
     steps: Record<string, (path: string) => void>,
     gates: Record<string, (path: string) => void> = {},
     afterCreate: (path: string) => void = () => {},
+    seenAt: (created: string) => string = (created) => created,
   ) {
     const reporter = {
       blocked: vi.fn<Reporter["blocked"]>(async () => {}),
@@ -77,6 +78,7 @@ describe("an ignored file a step wrote, before a gate runs it", () => {
       merged: vi.fn<Reporter["merged"]>(async () => {}),
       delivered: vi.fn<Reporter["delivered"]>(async () => {}),
       failed: vi.fn<Reporter["failed"]>(async () => {}),
+      noted: vi.fn<Reporter["noted"]>(async () => {}),
     };
     const delivery = {
       push: vi.fn<Delivery["push"]>(async () => {}),
@@ -117,7 +119,7 @@ describe("an ignored file a step wrote, before a gate runs it", () => {
       async create(taskKey, slug) {
         const created = await real.create(taskKey, slug);
         afterCreate(created.path);
-        return created;
+        return { ...created, path: seenAt(created.path) };
       },
     };
     const task: ClaimedTask = {
@@ -174,43 +176,88 @@ describe("an ignored file a step wrote, before a gate runs it", () => {
     return { done: runTask(deps, task), reporter, delivery, ran };
   }
 
-  it("refuses the run before the Test gate, naming a test file the step wrote under an ignored dist/", async () => {
-    const h = run([IMPLEMENT, TEST, PUSH], {
-      implement: (path) => write(path, "dist/evil.test.js", "it('runs', () => {});\n"),
-    });
+  const noted = (h: ReturnType<typeof run>) => h.reporter.noted.mock.calls.map((call) => call[1]);
+
+  it("removes a test file the step wrote under an ignored dist/ before the Test gate, and carries on", async () => {
+    let seenByTest: boolean | undefined;
+    const h = run(
+      [IMPLEMENT, TEST, PUSH],
+      { implement: (path) => write(path, "dist/evil.test.js", "it('runs', () => {});\n") },
+      { "test-run": (path) => (seenByTest = existsSync(join(path, "dist", "evil.test.js"))) },
+    );
     await h.done;
 
-    expect(h.ran).toEqual([]);
-    expect(h.delivery.push).not.toHaveBeenCalled();
-    expect(h.reporter.failed).toHaveBeenCalledTimes(1);
-    expect(h.reporter.failed.mock.calls[0][1]).toMatch(
-      /^refusing to run the Test gate: ignored files written since the run started or the last gate passed.*dist\/evil\.test\.js \(new; \.gitignore:2: "dist\/"\)/,
-    );
+    expect(h.reporter.failed).not.toHaveBeenCalled();
+    expect(h.ran).toEqual(["test-run"]);
+    expect(seenByTest).toBe(false);
+    expect(h.delivery.push).toHaveBeenCalled();
+    expect(noted(h)).toEqual([
+      'Before the **Test** gate the worker removed 1 ignored file a step wrote, since no commit, diff or reviewer sees them and the gate could still run them: dist/evil.test.js (new; .gitignore:2: "dist/")',
+    ]);
   });
 
-  it("refuses one a later step added under a dist/ the Build gate had already made", async () => {
+  it("removes the node_modules the step's own npm install left, and the Build gate installs its own", async () => {
+    let leftForBuild: boolean | undefined;
+    const h = run(
+      [IMPLEMENT, BUILD, TEST, PUSH],
+      { implement: (path) => write(path, "node_modules/pkg/index.js", "module.exports = 'the step's';\n") },
+      {
+        build: (path) => {
+          leftForBuild = existsSync(join(path, "node_modules", "pkg", "index.js"));
+          write(path, "node_modules/pkg/index.js", "module.exports = 'the install's';\n");
+        },
+        "test-run": (path) => expect(readFileSync(join(path, "node_modules", "pkg", "index.js"), "utf8")).toContain("install"),
+      },
+    );
+    await h.done;
+
+    expect(h.reporter.failed).not.toHaveBeenCalled();
+    expect(leftForBuild).toBe(false);
+    expect(h.ran).toEqual(["build", "test-run"]);
+    expect(h.delivery.push).toHaveBeenCalled();
+    expect(noted(h)).toHaveLength(1);
+    expect(noted(h)[0]).toMatch(/^Before the \*\*Build\*\* gate .*node_modules\/pkg\/index\.js \(new; \.gitignore:1: "node_modules\/"\)/);
+  });
+
+  it("removes one a later step added under a dist/ the Build gate had made, and keeps what the gate built", async () => {
+    let state: { evil: boolean; built: boolean } | undefined;
     const h = run(
       [IMPLEMENT, BUILD, FIX, TEST, PUSH],
       { fix: (path) => write(path, "dist/evil.test.js", "it('runs', () => {});\n") },
-      { build: (path) => write(path, "dist/main.js", "built\n") },
+      {
+        build: (path) => write(path, "dist/main.js", "built\n"),
+        "test-run": (path) =>
+          (state = { evil: existsSync(join(path, "dist", "evil.test.js")), built: existsSync(join(path, "dist", "main.js")) }),
+      },
     );
     await h.done;
 
-    expect(h.ran).toEqual(["build"]);
-    expect(h.reporter.failed.mock.calls[0][1]).toMatch(/dist\/evil\.test\.js \(new; /);
-    expect(h.reporter.failed.mock.calls[0][1]).not.toMatch(/dist\/main\.js/);
+    expect(h.reporter.failed).not.toHaveBeenCalled();
+    expect(state).toEqual({ evil: false, built: true });
+    expect(noted(h)[0]).toMatch(/^Before the \*\*Test\*\* gate .*: dist\/evil\.test\.js \(new; /);
   });
 
-  it("refuses a file the Build gate made that a later step rewrote", async () => {
+  it("still refuses a file the Build gate made that a later step rewrote, and removes nothing", async () => {
+    let worktreePath = "";
     const h = run(
       [IMPLEMENT, BUILD, FIX, TEST, PUSH],
-      { fix: (path) => write(path, "dist/main.test.js", "it('runs', () => {});\n") },
+      {
+        fix: (path) => {
+          worktreePath = path;
+          write(path, "dist/main.test.js", "it('runs', () => {});\n");
+          write(path, "dist/evil.test.js", "it('runs', () => {});\n");
+        },
+      },
       { build: (path) => write(path, "dist/main.test.js", "built\n") },
     );
     await h.done;
 
     expect(h.ran).toEqual(["build"]);
-    expect(h.reporter.failed.mock.calls[0][1]).toMatch(/dist\/main\.test\.js \(changed; \.gitignore:2: "dist\/"\)/);
+    expect(h.reporter.noted).not.toHaveBeenCalled();
+    expect(h.reporter.failed.mock.calls[0][1]).toMatch(
+      /^refusing to run the Test gate: ignored files written since .*: dist\/main\.test\.js \(changed; \.gitignore:2: "dist\/"\)/,
+    );
+    expect(existsSync(join(worktreePath, "dist", "evil.test.js"))).toBe(true);
   });
 
   it("lets through the node_modules and dist a gate installed and built", async () => {
@@ -229,19 +276,51 @@ describe("an ignored file a step wrote, before a gate runs it", () => {
     await h.done;
 
     expect(h.reporter.failed).not.toHaveBeenCalled();
+    expect(h.reporter.noted).not.toHaveBeenCalled();
     expect(h.ran).toEqual(["build", "test-run"]);
     expect(h.delivery.push).toHaveBeenCalled();
   });
 
-  it("lets through an ignored file that was there before the step ran", async () => {
-    const h = run([IMPLEMENT, TEST, PUSH], {}, {}, (path) => {
-      write(path, ".env", "SECRET=1\n");
-      write(path, "dist/old.test.js", "it('runs', () => {});\n");
-    });
+  it("leaves an ignored file that was there before the step ran", async () => {
+    let present: boolean[] = [];
+    const h = run(
+      [IMPLEMENT, TEST, PUSH],
+      {},
+      { "test-run": (path) => (present = [".env", "dist/old.test.js"].map((file) => existsSync(join(path, file)))) },
+      (path) => {
+        write(path, ".env", "SECRET=1\n");
+        write(path, "dist/old.test.js", "it('runs', () => {});\n");
+      },
+    );
     await h.done;
 
     expect(h.reporter.failed).not.toHaveBeenCalled();
-    expect(h.ran).toEqual(["test-run"]);
+    expect(h.reporter.noted).not.toHaveBeenCalled();
+    expect(present).toEqual([true, true]);
     expect(h.delivery.push).toHaveBeenCalled();
+  });
+
+  it("refuses the run, and removes nothing, when a file cannot be removed safely", async () => {
+    let real = "";
+    const h = run(
+      [IMPLEMENT, TEST, PUSH],
+      { implement: (path) => write(path, "dist/evil.test.js", "it('runs', () => {});\n") },
+      {},
+      () => {},
+      (created) => {
+        real = created;
+        const linked = join(dir, "through-a-link");
+        symlinkSync(created, linked);
+        return linked;
+      },
+    );
+    await h.done;
+
+    expect(h.ran).toEqual([]);
+    expect(h.reporter.noted).not.toHaveBeenCalled();
+    expect(h.reporter.failed.mock.calls[0][1]).toMatch(
+      /^refusing to run the Test gate: ignored files a step wrote.*dist\/evil\.test\.js \(new; .*not every one could be removed safely: dist\/evil\.test\.js \(the worktree is not a directory\)/,
+    );
+    expect(existsSync(join(real, "dist", "evil.test.js"))).toBe(true);
   });
 });
