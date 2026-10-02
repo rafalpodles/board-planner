@@ -82,7 +82,7 @@ function githubSignInSite(): string | null {
   if (url && bare && (url.protocol === "https:" || (url.protocol === "http:" && loopback))) return url.origin;
   if (warnedAbout !== named) {
     warnedAbout = named;
-    console.warn(`GitHub's site ${named} is not an https origin; signing in with GitHub is off`);
+    console.warn(`GitHub's site ${url ? url.origin : "(not a URL)"} is not a bare https origin; signing in with GitHub is off`);
   }
   return null;
 }

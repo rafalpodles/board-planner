@@ -328,7 +328,7 @@ describe("GitHub, which speaks OAuth 2 without OpenID Connect", () => {
 
     await finishFlow({ provider: { ...GITHUB, issuer: site }, binder: "cpo_b", origin: ORIGIN, query: "" });
 
-    expect(fetchMock.mock.calls.map(([url]) => url)).toContain(expected);
+    expect(fetchMock.mock.calls.map(([url]) => url).sort()).toEqual([expected, `${expected}/emails`]);
   });
 
   it("refuses when GitHub will not say who it is", async () => {
