@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const claimInvitation = vi.fn();
 const releaseInvitation = vi.fn();
 const recordAcceptance = vi.fn();
-const markInvitationRevoked = vi.fn();
+const revokeClaimedInvitation = vi.fn();
 const authorityAtAcceptance = vi.fn();
 const userCreate = vi.fn();
 const userDeleteOne = vi.fn();
@@ -33,7 +33,7 @@ vi.mock("@/lib/invitations", () => ({
   claimInvitation,
   releaseInvitation,
   recordAcceptance,
-  markInvitationRevoked,
+  revokeClaimedInvitation,
 }));
 vi.mock("@/lib/invitation-authority", () => ({ authorityAtAcceptance }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
@@ -178,7 +178,7 @@ describe("POST /api/invitations/accept", () => {
     const res = await POST(post());
 
     expect(res.status).toBe(400);
-    expect(markInvitationRevoked).toHaveBeenCalledWith("inv-1");
+    expect(revokeClaimedInvitation).toHaveBeenCalledWith("inv-1");
     expect(userCreate).not.toHaveBeenCalled();
   });
 

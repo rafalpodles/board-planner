@@ -9,7 +9,7 @@ import { checkNewAccount } from "@/lib/new-account";
 import { duplicateKeyField } from "@/lib/mongo-errors";
 import {
   claimInvitation,
-  markInvitationRevoked,
+  revokeClaimedInvitation,
   recordAcceptance,
   releaseInvitation,
 } from "@/lib/invitations";
@@ -60,7 +60,7 @@ export async function POST(request: Request) {
 
   const authority = await authorityAtAcceptance(invitation);
   if (!authority) {
-    await markInvitationRevoked(invitation._id);
+    await revokeClaimedInvitation(invitation._id);
     return NextResponse.json({ error: INVITATION_REFUSALS.revoked }, { status: 400 });
   }
 

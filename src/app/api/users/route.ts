@@ -10,6 +10,7 @@ import { duplicateKeyField } from "@/lib/mongo-errors";
 import { ProvenanceError, provenanceRefusal } from "@/lib/session";
 import { withAdmin } from "@/lib/middleware";
 import { logInstanceAudit } from "@/lib/instanceAudit";
+import { revokePendingInvitationsFor } from "@/lib/invitations";
 import { User } from "@/models/user";
 import { IUser } from "@/types";
 
@@ -97,6 +98,7 @@ export async function POST(request: Request) {
       email,
       role: isBootstrap ? "admin" : "member",
     });
+    await revokePendingInvitationsFor(email);
     // The account's own beginning, which nothing recorded: the log knew that somebody's display
     // name changed and not that the account existed. `target` is the username because this row has
     // to still name them after the account is gone.

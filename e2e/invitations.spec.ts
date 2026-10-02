@@ -341,3 +341,34 @@ test("a member cannot list, send, resend or revoke invitations", async ({ browse
   expect(await (await db()).collection("invitations").countDocuments({ status: "pending" })).toBe(1);
   await context.close();
 });
+
+// An account taking the address withdraws the invitation for good: hidden alone, it would come
+// back to life the day that account was deleted, granting what it said a week before
+test("an account made for an invited address withdraws the invitation, even after it is deleted", async ({ page, browser }) => {
+  const email = freshAddress("overtaken");
+  await signInAsAdmin(page);
+  const { dialog } = await invite(page, email);
+  await dialog.getByRole("button", { name: "Done" }).click();
+  const link = await latestLink(email);
+
+  await page.getByRole("button", { name: "New User" }).click();
+  const create = page.getByRole("dialog", { name: "New User" });
+  await create.getByLabel("Username").fill("made-directly");
+  await create.getByLabel("Password").fill("set-by-the-admin");
+  await create.getByLabel("Full Name").fill("Made Directly");
+  await create.getByLabel("Email").fill(email);
+  const [created] = await Promise.all([
+    page.waitForResponse((r) => r.url().endsWith("/api/users") && r.request().method() === "POST"),
+    create.getByRole("button", { name: "Create User" }).click(),
+  ]);
+  expect(created.status()).toBe(201);
+  const account = await (await db()).collection("users").findOne({ username: "made-directly" });
+  await (await db()).collection("users").deleteOne({ _id: account!._id });
+
+  const stranger = await asStranger(browser);
+  await stranger.page.goto(link);
+  await expect(alertOn(stranger.page)).toHaveText(
+    "This invitation was withdrawn. Ask whoever invited you for a new one."
+  );
+  await stranger.context.close();
+});

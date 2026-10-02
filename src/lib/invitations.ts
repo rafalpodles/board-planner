@@ -155,7 +155,21 @@ export async function recordAcceptance(
   return result.matchedCount === 1;
 }
 
-export async function markInvitationRevoked(id: Types.ObjectId | string): Promise<void> {
+/** For an acceptance that found nothing still backing it: revokes its own claim, nothing else. */
+export async function revokeClaimedInvitation(id: Types.ObjectId | string): Promise<void> {
   await connectDB();
-  await Invitation.updateOne({ _id: id }, { $set: { status: "revoked" } });
+  await Invitation.updateOne(
+    { _id: id, status: "accepted", acceptedBy: null },
+    { $set: { status: "revoked" } }
+  );
+}
+
+/**
+ * Called wherever an account takes an address. Left pending, the invitation would come back to
+ * life the day that account is deleted or moves away, granting what it said a week earlier.
+ */
+export async function revokePendingInvitationsFor(email: string): Promise<void> {
+  if (!email) return;
+  await connectDB();
+  await Invitation.updateMany({ email, status: "pending" }, { $set: { status: "revoked" } });
 }

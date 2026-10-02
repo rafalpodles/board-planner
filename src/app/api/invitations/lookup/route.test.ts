@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const findInvitationByToken = vi.fn();
-const markInvitationRevoked = vi.fn();
+const revokePendingInvitationsFor = vi.fn();
 const userExists = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
@@ -11,7 +11,7 @@ vi.mock("@/models/rateLimit", async () => {
   return { RateLimit: inMemoryRateLimitModel() };
 });
 vi.mock("@/lib/session", () => ({ provenanceRefusal: () => null }));
-vi.mock("@/lib/invitations", () => ({ findInvitationByToken, markInvitationRevoked }));
+vi.mock("@/lib/invitations", () => ({ findInvitationByToken, revokePendingInvitationsFor }));
 vi.mock("@/lib/invitation-view", () => ({
   toApiInvitations: async (rows: { email: string }[]) =>
     rows.map((r) => ({
@@ -71,7 +71,7 @@ describe("POST /api/invitations/lookup", () => {
 
     expect(res.status).toBe(400);
     expect((await res.json()).reason).toBe("used");
-    expect(markInvitationRevoked).toHaveBeenCalledWith("inv-1");
+    expect(revokePendingInvitationsFor).toHaveBeenCalledWith("ada@example.com");
   });
 
   it("refuses a request with no token", async () => {

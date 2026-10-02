@@ -8,6 +8,8 @@ const logInstanceAudit = vi.fn();
 const find = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+const revokePendingInvitationsFor = vi.fn();
+vi.mock("@/lib/invitations", () => ({ revokePendingInvitationsFor }));
 vi.mock("@/models/user", () => ({
   User: {
     create: (...a: unknown[]) => create(...a),
@@ -278,5 +280,16 @@ describe("which accounts the list returns", () => {
   it("does not read any other value as the opt-in", async () => {
     await list("?include=machine");
     expect(find).toHaveBeenCalledWith({ kind: { $ne: "machine" } });
+  });
+});
+
+describe("an account taking an address", () => {
+  // BP-826: a pending invitation to that address would otherwise come back to life the day this
+  // account is deleted or moves away
+  it("withdraws any pending invitation for it", async () => {
+    const res = await post({ ...VALID, username: "newcomer", email: " Ada@Example.com " });
+
+    expect(res.status).toBe(201);
+    expect(revokePendingInvitationsFor).toHaveBeenCalledWith("ada@example.com");
   });
 });

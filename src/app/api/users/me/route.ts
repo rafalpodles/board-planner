@@ -8,6 +8,7 @@ import { cancelEmailChange, issueEmailChange } from "@/lib/email-change";
 import { isEmailConfigured } from "@/lib/email";
 import { selfOrigin } from "@/lib/session";
 import { logInstanceAudit } from "@/lib/instanceAudit";
+import { revokePendingInvitationsFor } from "@/lib/invitations";
 import { withAuth } from "@/lib/middleware";
 import { FULL_NAME_RULE, isValidFullName, normaliseFullName } from "@/lib/identifiers";
 import { duplicateKeyField } from "@/lib/mongo-errors";
@@ -233,6 +234,9 @@ export const PUT = withAuth(async (request, { user }) => {
   // caller it worked, and would have audited and mailed about a write that matched nothing.
   if (!updated) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
+  }
+  if (typeof updates.email === "string" && updates.email !== previousEmail) {
+    await revokePendingInvitationsFor(updates.email);
   }
 
   if (typeof updates.fullName === "string") {

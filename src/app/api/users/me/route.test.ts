@@ -11,6 +11,8 @@ const sendEmail = vi.fn();
 const isEmailConfigured = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+const revokePendingInvitationsFor = vi.fn();
+vi.mock("@/lib/invitations", () => ({ revokePendingInvitationsFor }));
 vi.mock("@/models/rateLimit", async () => {
   const { inMemoryRateLimitModel } = await import("@/lib/rate-limit-test-store");
   return { RateLimit: inMemoryRateLimitModel() };
@@ -123,6 +125,7 @@ describe("PUT /api/users/me — changing the address that can reset the password
     expect(issueEmailChange).toHaveBeenCalledWith("u1", "new@example.com");
     expect(invalidateResetTokens).not.toHaveBeenCalled();
     expect(logInstanceAudit).not.toHaveBeenCalled();
+    expect(revokePendingInvitationsFor).not.toHaveBeenCalled();
   });
 
   it("mails the confirmation link to the new address, and nothing to the old one yet", async () => {
@@ -185,6 +188,7 @@ describe("PUT /api/users/me — changing the address that can reset the password
     expect(logInstanceAudit).toHaveBeenCalledWith(
       expect.objectContaining({ action: "user_email_changed_self", detail: expect.stringContaining("old@example.com") })
     );
+    expect(revokePendingInvitationsFor).toHaveBeenCalledWith("new@example.com");
   });
 
   it("removes the address at once, drops any pending change, and tells the address removed", async () => {

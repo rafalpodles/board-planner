@@ -4,10 +4,11 @@ import { createHash } from "crypto";
 const findOneAndUpdate = vi.fn();
 const findOne = vi.fn();
 const updateOne = vi.fn();
+const updateMany = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/invitation", () => ({
-  Invitation: { findOneAndUpdate, findOne, updateOne },
+  Invitation: { findOneAndUpdate, findOne, updateOne, updateMany },
 }));
 
 const {
@@ -15,6 +16,8 @@ const {
   reissueInvitation,
   revokeInvitation,
   recordAcceptance,
+  revokeClaimedInvitation,
+  revokePendingInvitationsFor,
   claimInvitation,
   findInvitationByToken,
   releaseInvitation,
@@ -224,5 +227,32 @@ describe("putting a claimed link back", () => {
     updateOne.mockRejectedValue(duplicate);
 
     await expect(releaseInvitation("inv-1")).resolves.toBeUndefined();
+  });
+});
+
+describe("revoking because nothing backs it any more", () => {
+  // A lookup racing an acceptance in another tab must not kill the account being made
+  it("revokes only pending invitations for an address", async () => {
+    await revokePendingInvitationsFor("ada@example.com");
+
+    expect(updateMany).toHaveBeenCalledWith(
+      { email: "ada@example.com", status: "pending" },
+      { $set: { status: "revoked" } }
+    );
+  });
+
+  it("does nothing for an account with no address", async () => {
+    await revokePendingInvitationsFor("");
+
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it("revokes an acceptance's own claim and never a finished one", async () => {
+    await revokeClaimedInvitation("inv-1");
+
+    expect(updateOne).toHaveBeenCalledWith(
+      { _id: "inv-1", status: "accepted", acceptedBy: null },
+      { $set: { status: "revoked" } }
+    );
   });
 });
