@@ -753,13 +753,15 @@ export async function runTask(
           if (removal.refused.length > 0) {
             hidden = {
               kind: "unreviewed",
-              detail: `${hidden.detail}; and not every one could be removed safely: ${removal.refused.slice(0, 5).join(", ")}`,
+              detail: `${hidden.detail}; and not every one could be removed safely: ${removal.refused.slice(0, 5).join(", ")}${
+                removal.removed.length > 0 ? `. Already removed: ${removal.removed.slice(0, 5).join(", ")}${removal.removed.length > 5 ? `, and ${removal.removed.length - 5} more` : ""}` : ""
+              }`,
             };
           } else {
             const count = removal.removed.length;
             await reporter.noted(
               task,
-              `Before the **${gate.name}** gate the worker removed ${count} ignored ${count === 1 ? "file" : "files"} a step wrote, since no commit, diff or reviewer sees them and the gate could still run them: ${hidden.named}`,
+              `Before the **${gate.name}** gate the worker removed ${count} ignored ${count === 1 ? "entry" : "entries"} a step wrote, since no commit, diff or reviewer sees them and the gate could still run them: ${hidden.named}`,
             );
             hidden = null;
           }

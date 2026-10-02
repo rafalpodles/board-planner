@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { dirname, join } from "path";
 import { CommandResult, Runner } from "./exec.js";
@@ -8,6 +8,7 @@ const TIMEOUT_MS = 60_000;
 const NAMED_AT_MOST = 5;
 const REGULAR_BLOB = /^(100644|100755) blob ([0-9a-f]+)\t(.*)$/s;
 const GITLINK = /^160000 [0-9a-f]+ \d\t(.*)$/s;
+const UNWALKED = /^.*(could not open directory|failed to stat|cannot stat|unable to stat).*$/im;
 
 export type HiddenFiles =
   | { kind: "hidden"; detail: string }
@@ -73,6 +74,9 @@ function gitIn(runner: Runner, gitPath: string, worktreePath: string): Git {
     if (!(options.okCodes ?? [0]).includes(result.code)) {
       throw new Unreadable(`\`git ${what}\` failed: ${result.stderr || result.stdout}`);
     }
+    // git exits 0 over a directory it cannot open, and lists nothing under it (BP-795)
+    const skipped = UNWALKED.exec(result.stderr);
+    if (skipped) throw new Unreadable(`\`git ${what}\` could not read all of the worktree: ${skipped[0]}`);
     return result.stdout;
   };
 }
@@ -194,8 +198,10 @@ export async function hiddenFromGit(
     if (since.kind === "unreadable") return since;
 
     const now = await listIgnored(git, worktreePath);
-    const written = [...now.keys()]
-      .filter((path) => since.files.get(path) !== now.get(path))
+    const differs = [...now.keys()].filter((path) => since.files.get(path) !== now.get(path));
+    const newTrees = differs.filter((path) => now.get(path) === NESTED_TREE && !since.files.has(path));
+    const written = differs
+      .filter((path) => !newTrees.some((tree) => path !== tree && path.startsWith(tree)))
       .sort((a, b) => Number(since.files.has(b)) - Number(since.files.has(a)));
     if (written.length === 0) return null;
     const rules = await rulesFor(git, written.slice(0, NAMED_AT_MOST));
@@ -249,6 +255,45 @@ function namedAtMost(paths: string[], describe: (path: string) => string): strin
   return `${named}${paths.length > NAMED_AT_MOST ? `, and ${paths.length - NAMED_AT_MOST} more` : ""}`;
 }
 
+const NESTED_TREE = "a nested tree";
+let unstattable = 0;
+
+// Never equal to an earlier one: what cannot be read cannot be shown unchanged
+function unreadableSignature(error: unknown): string {
+  unstattable += 1;
+  return `unstattable:${(error as NodeJS.ErrnoException).code ?? "unknown"}:${unstattable}`;
+}
+
+function signature(full: string): string | null {
+  try {
+    const stat = lstatSync(full, { bigint: true });
+    return `${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    return unreadableSignature(error);
+  }
+}
+
+// git lists a nested repository under an ignored directory as one `dir/` entry and never enters it
+function walkNested(worktreePath: string, directory: string, files: Map<string, string>): void {
+  let entries;
+  try {
+    entries = readdirSync(join(worktreePath, directory), { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") files.set(directory, unreadableSignature(error));
+    return;
+  }
+  for (const entry of entries) {
+    const path = `${directory}${entry.name}`;
+    if (entry.isDirectory()) {
+      walkNested(worktreePath, `${path}/`, files);
+      continue;
+    }
+    const found = signature(join(worktreePath, path));
+    if (found) files.set(path, found);
+  }
+}
+
 // Not `--directory`: a file added under a `dist/` that already existed changes no entry of that
 // listing. ctime is in the signature because a write cannot set it back.
 async function listIgnored(git: Git, worktreePath: string): Promise<Map<string, string>> {
@@ -256,12 +301,13 @@ async function listIgnored(git: Git, worktreePath: string): Promise<Map<string, 
   for (const path of nulFields(
     await git("ls-files", ["ls-files", "-z", "--others", "--ignored", "--exclude-standard"]),
   )) {
-    try {
-      const stat = lstatSync(join(worktreePath, path), { bigint: true });
-      files.set(path, `${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`);
-    } catch {
+    if (path.endsWith("/")) {
+      files.set(path, NESTED_TREE);
+      walkNested(worktreePath, path, files);
       continue;
     }
+    const found = signature(join(worktreePath, path));
+    if (found) files.set(path, found);
   }
   return files;
 }

@@ -61,7 +61,11 @@ describe("an ignored file a step wrote, before a gate runs it", () => {
     execFileSync("git", ["clone", "--quiet", origin, parent], { stdio: "pipe" });
   });
 
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  // chmod and rm walk with fts, which reaches what a 0111 directory and a path past PATH_MAX hide
+  afterEach(() => {
+    execFileSync("chmod", ["-R", "u+rwx", dir]);
+    execFileSync("rm", ["-rf", dir]);
+  });
 
   function run(
     sequence: SnapshotEntry[],
@@ -192,7 +196,7 @@ describe("an ignored file a step wrote, before a gate runs it", () => {
     expect(seenByTest).toBe(false);
     expect(h.delivery.push).toHaveBeenCalled();
     expect(noted(h)).toEqual([
-      'Before the **Test** gate the worker removed 1 ignored file a step wrote, since no commit, diff or reviewer sees them and the gate could still run them: dist/evil.test.js (new; .gitignore:2: "dist/")',
+      'Before the **Test** gate the worker removed 1 ignored entry a step wrote, since no commit, diff or reviewer sees them and the gate could still run them: dist/evil.test.js (new; .gitignore:2: "dist/")',
     ]);
   });
 
@@ -322,5 +326,123 @@ describe("an ignored file a step wrote, before a gate runs it", () => {
       /^refusing to run the Test gate: ignored files a step wrote.*dist\/evil\.test\.js \(new; .*not every one could be removed safely: dist\/evil\.test\.js \(the worktree is not a directory\)/,
     );
     expect(existsSync(join(real, "dist", "evil.test.js"))).toBe(true);
+  });
+
+  describe("what the listing could not read", () => {
+    // Short enough relative to the worktree for git, too long once the worktree's own path is in front
+    const deepPath = (path: string) => {
+      const segments: string[] = [];
+      for (let left = 1040 - path.length - "/dist/".length; left > 0; left -= 201) segments.push("d".repeat(Math.min(200, left)));
+      const script = segments.map((segment) => `mkdir ${segment} && cd ${segment}`).join(" && ");
+      execFileSync("/bin/sh", ["-c", `mkdir -p dist && cd dist && ${script} && echo x > evil.test.js`], { cwd: path });
+    };
+    const closedDir = (path: string) => {
+      write(path, "dist/closed/evil.test.js", "it('runs', () => {});\n");
+      execFileSync("chmod", ["644", join(path, "dist", "closed")]);
+    };
+
+    it("refuses a new file whose path is too long to stat, listing what it had already removed", async () => {
+      const h = run([IMPLEMENT, TEST, PUSH], {
+        implement: (path) => {
+          write(path, "dist/plain.test.js", "it('runs', () => {});\n");
+          deepPath(path);
+        },
+      });
+      await h.done;
+
+      expect(h.ran).toEqual([]);
+      const message = h.reporter.failed.mock.calls[0][1];
+      expect(message).toMatch(/^refusing to run the Test gate: .*not every one could be removed safely: dist\/d{200}\/.*ENAMETOOLONG/);
+      expect(message).toMatch(/Already removed: dist\/plain\.test\.js/);
+    });
+
+    it("refuses a new file under a directory that lets it be listed but not stat'd", async () => {
+      const h = run([IMPLEMENT, TEST, PUSH], { implement: closedDir });
+      await h.done;
+
+      expect(h.ran).toEqual([]);
+      expect(h.reporter.failed.mock.calls[0][1]).toMatch(/not every one could be removed safely: dist\/closed\/evil\.test\.js \(.*EACCES/);
+    });
+
+    it("refuses one that was already unreadable before the run, since it cannot be shown unchanged", async () => {
+      const h = run([IMPLEMENT, TEST, PUSH], {}, {}, closedDir);
+      await h.done;
+
+      expect(h.ran).toEqual([]);
+      expect(h.reporter.failed.mock.calls[0][1]).toMatch(/^refusing to run the Test gate: ignored files written since .*dist\/closed\/evil\.test\.js \(changed; /);
+    });
+
+    it("refuses a file a step hid from git under a directory git cannot open", async () => {
+      let worktreePath = "";
+      const h = run([IMPLEMENT, TEST, PUSH], {
+        implement: (path) => {
+          worktreePath = path;
+          write(path, "dist/locked/evil.test.js", "it('runs', () => {});\n");
+          execFileSync("chmod", ["111", join(path, "dist", "locked")]);
+        },
+      });
+      await h.done;
+
+      expect(h.ran).toEqual([]);
+      expect(h.reporter.failed.mock.calls[0][1]).toMatch(
+        /^refusing to run the Test gate: `git ls-files` could not read all of the worktree: warning: could not open directory 'dist\/locked\/'/,
+      );
+      execFileSync("chmod", ["755", join(worktreePath, "dist", "locked")]);
+      expect(existsSync(join(worktreePath, "dist", "locked", "evil.test.js"))).toBe(true);
+    });
+  });
+
+  describe("a nested repository under an ignored directory, which git lists as one entry", () => {
+    const nestedDep = (path: string) => {
+      write(path, "node_modules/dep/index.js", "module.exports = 1;\n");
+      execFileSync("git", ["init", "--quiet", join(path, "node_modules", "dep")], { stdio: "pipe" });
+    };
+
+    it("removes a file a step added inside one that was there before the run", async () => {
+      let seen: boolean | undefined;
+      const h = run(
+        [IMPLEMENT, TEST, PUSH],
+        { implement: (path) => write(path, "node_modules/dep/lib/evil.test.js", "it('runs', () => {});\n") },
+        {
+          "test-run": (path) => {
+            seen = existsSync(join(path, "node_modules", "dep", "lib", "evil.test.js"));
+            expect(existsSync(join(path, "node_modules", "dep", "index.js"))).toBe(true);
+          },
+        },
+        nestedDep,
+      );
+      await h.done;
+
+      expect(h.reporter.failed).not.toHaveBeenCalled();
+      expect(seen).toBe(false);
+      expect(noted(h)[0]).toMatch(/removed 1 ignored entry .*node_modules\/dep\/lib\/evil\.test\.js \(new; /);
+    });
+
+    it("refuses a file a step rewrote inside one", async () => {
+      const h = run(
+        [IMPLEMENT, TEST, PUSH],
+        { implement: (path) => write(path, "node_modules/dep/index.js", "module.exports = 'payload';\n") },
+        {},
+        nestedDep,
+      );
+      await h.done;
+
+      expect(h.ran).toEqual([]);
+      expect(h.reporter.failed.mock.calls[0][1]).toMatch(/node_modules\/dep\/index\.js \(changed; /);
+    });
+
+    it("removes one a step created whole, its .git with it", async () => {
+      let left: boolean | undefined;
+      const h = run(
+        [IMPLEMENT, TEST, PUSH],
+        { implement: nestedDep },
+        { "test-run": (path) => (left = existsSync(join(path, "node_modules", "dep"))) },
+      );
+      await h.done;
+
+      expect(h.reporter.failed).not.toHaveBeenCalled();
+      expect(left).toBe(false);
+      expect(noted(h)[0]).toMatch(/removed 1 ignored entry .*: node_modules\/dep\/ \(new; /);
+    });
   });
 });

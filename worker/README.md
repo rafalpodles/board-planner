@@ -736,7 +736,11 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   written by a step. A **new** file is removed before the gate runs: a `dist/evil.test.js` under a
   base `dist/`, an `x.log/evil.test.js` under a base `*.log`, or the `node_modules` a step's own
   `npm install` left, which the Build gate then installs again. The task gets a comment saying how
-  many files were removed before which gate, naming them with the rule that ignores each. Only
+  many entries were removed before which gate, naming them with the rule that ignores each. A
+  nested repository under an ignored directory, which git lists as one `dir/` entry and never
+  enters, is walked file by file without following symlinks. A file the worker cannot stat is
+  never taken as unchanged, and a directory git cannot open, which git skips with only a warning,
+  refuses the run. Only
   paths git listed are removed, each resolved under the worktree through real directories: a
   symlink is unlinked, never followed, and a path with `..`, an absolute path, a path through a
   symlinked directory or anything inside a `.git` is refused, and so is the run. A **rewritten**
