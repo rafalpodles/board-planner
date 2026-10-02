@@ -63,7 +63,7 @@ async function proveMemberAddress(email: string) {
   await (await db()).collection("users").updateOne({ _id: MEMBER_ID }, { $set: { email, emailVerifiedAt: new Date() } });
 }
 
-async function plantInvitation(email: string) {
+async function plantInvitation(email: string, deliveredAs: "email" | "link" = "email") {
   const token = `cpi_${randomBytes(32).toString("hex")}`;
   await (await db()).collection("invitations").insertOne({
     email,
@@ -75,7 +75,7 @@ async function plantInvitation(email: string) {
     status: "pending",
     acceptedBy: null,
     acceptedAt: null,
-    deliveredAs: "email",
+    deliveredAs,
     createdAt: new Date(),
     updatedAt: new Date(),
   });
@@ -104,7 +104,7 @@ test("GitHub never signs anybody in by address, however verified and proven", as
   await signInWithGitHub(page);
 
   await expect(page).toHaveURL(/\/login\?sso=not_linked/);
-  await expect(alertOn(page)).toContainText("That account is not linked here yet.");
+  await expect(alertOn(page)).toContainText("That sign-in is not linked to an account here yet.");
   expect(await (await db()).collection("identities").countDocuments()).toBe(0);
   expect((await page.request.get("/api/auth/me")).status()).toBe(401);
 });
@@ -158,6 +158,8 @@ test("an invitation is accepted with GitHub, and the account then signs in with 
 
   const account = await (await db()).collection("users").findOne({ username: "octo-invitee" });
   expect(account).toMatchObject({ email });
+  // Proven by the mailed link, not by GitHub
+  expect(account!.emailVerifiedAt).toBeInstanceOf(Date);
   expect(account!.password).toBeUndefined();
   expect(await (await db()).collection("identities").findOne({ subject: String(id) })).toMatchObject({
     user: account!._id,
@@ -172,9 +174,13 @@ test("an invitation is accepted with GitHub, and the account then signs in with 
   await again.context.close();
 });
 
-test("an invitation to a verified address that is not GitHub's primary one is accepted with it", async ({ page }) => {
+// Handed over as a link, so nothing proves the mailbox: GitHub's word must not, or a later Google or
+// OIDC sign-in would link by that address
+test("an invitation to a verified address that is not GitHub's primary one is accepted with it, unproven", async ({
+  page,
+}) => {
   const email = freshAddress("work");
-  const token = await plantInvitation(email);
+  const token = await plantInvitation(email, "link");
   await nextPerson({ id: freshId(), emails: [primary(freshAddress("personal")), { email, primary: false, verified: true }] });
 
   await acceptWithGitHub(page, token);
@@ -185,7 +191,10 @@ test("an invitation to a verified address that is not GitHub's primary one is ac
   await page.getByLabel("Full name").fill("Octo Worker");
   await page.getByRole("button", { name: "Create my account" }).click();
   await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_ID}`));
-  expect(await (await db()).collection("users").findOne({ username: "octo-worker" })).toMatchObject({ email });
+  expect(await (await db()).collection("users").findOne({ username: "octo-worker" })).toMatchObject({
+    email,
+    emailVerifiedAt: null,
+  });
 });
 
 test("an invitation is not accepted with an address GitHub has not verified", async ({ page }) => {

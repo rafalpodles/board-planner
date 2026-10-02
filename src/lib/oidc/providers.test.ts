@@ -68,6 +68,12 @@ describe("which identity providers are configured", () => {
       expect(providerById("github")).toBeNull();
     });
 
+    it("turns GitHub off for a site derived as plain http to another host", () => {
+      Object.assign(process.env, GITHUB_APP, { GITHUB_API_BASE_URL: "http://ghe.example.com/api/v3" });
+
+      expect(providerById("github")).toBeNull();
+    });
+
     it("accepts plain http to this machine, for development", () => {
       Object.assign(process.env, GITHUB_APP, { GITHUB_OAUTH_BASE_URL: "http://127.0.0.1:4010" });
 

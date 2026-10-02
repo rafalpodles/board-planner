@@ -249,7 +249,7 @@ describe("GitHub, which speaks OAuth 2 without OpenID Connect", () => {
       { email: "Ada@Corp.example", primary: true, verified: true },
     ]);
 
-    const outcome = await finishFlow({ provider: GITHUB, binder: "cpo_b", origin: ORIGIN, query: "?code=c&state=state-1" });
+    const outcome = await finishFlow({ provider: { ...GITHUB, issuer: "https://ghe.example.com" }, binder: "cpo_b", origin: ORIGIN, query: "?code=c&state=state-1" });
 
     expect(authorizationCodeGrant.mock.calls[0][2]).toEqual({ pkceCodeVerifier: "verifier", expectedState: "state-1" });
     expect(fetchMock.mock.calls.map(([url]) => url).sort()).toEqual([
@@ -263,7 +263,7 @@ describe("GitHub, which speaks OAuth 2 without OpenID Connect", () => {
       invitationTokenHash: null,
       userId: null,
       claims: {
-        issuer: "https://github.com",
+        issuer: "https://ghe.example.com",
         subject: "4242",
         email: "ada@corp.example",
         emailVerified: true,
@@ -310,6 +310,20 @@ describe("GitHub, which speaks OAuth 2 without OpenID Connect", () => {
     ["a data-residency tenant", "https://acme.ghe.com", "https://api.acme.ghe.com/user"],
     ["an Enterprise Server", "https://ghe.example.com", "https://ghe.example.com/api/v3/user"],
   ])("reads the person from %s's own API when no API base is set", async (_label, site, expected) => {
+    githubAnswers({ id: 1, login: "ada" }, []);
+
+    await finishFlow({ provider: { ...GITHUB, issuer: site }, binder: "cpo_b", origin: ORIGIN, query: "" });
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toContain(expected);
+  });
+
+  it.each([
+    ["github.com's API, for an Enterprise Server", "https://api.github.com", "https://ghe.example.com", "https://ghe.example.com/api/v3/user"],
+    ["another Enterprise Server's API", "https://other.example.com/api/v3", "https://ghe.example.com", "https://ghe.example.com/api/v3/user"],
+    ["a proxy", "https://gh-proxy.corp", "https://ghe.example.com", "https://gh-proxy.corp/user"],
+    ["this site's own API", "https://ghe.example.com/api/v3", "https://ghe.example.com", "https://ghe.example.com/api/v3/user"],
+  ])("given GITHUB_API_BASE_URL naming %s, sends the token only to this site's", async (_l, api, site, expected) => {
+    process.env.GITHUB_API_BASE_URL = api;
     githubAnswers({ id: 1, login: "ada" }, []);
 
     await finishFlow({ provider: { ...GITHUB, issuer: site }, binder: "cpo_b", origin: ORIGIN, query: "" });

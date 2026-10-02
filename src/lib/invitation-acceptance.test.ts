@@ -33,10 +33,10 @@ const { completeAcceptance } = await import("./invitation-acceptance");
 
 const INVITATION = { _id: "inv-1", email: "ada@example.com", role: "member", boards: [], deliveredAs: "link" };
 const IDENTITY = { provider: "oidc", issuer: "https://id.example.com", subject: "s9", email: "ada@example.com" };
-const accept = (identity?: typeof IDENTITY) =>
+const accept = (identity?: typeof IDENTITY, providerProvesAddress = true, deliveredAs = "link") =>
   completeAcceptance(
-    INVITATION as never,
-    { username: "ada", fullName: "Ada", passwordHash: identity ? null : "hash", identity },
+    { ...INVITATION, deliveredAs } as never,
+    { username: "ada", fullName: "Ada", passwordHash: identity ? null : "hash", identity, providerProvesAddress },
     new Request("http://x"),
     null
   );
@@ -62,6 +62,20 @@ describe("completing an acceptance through a sign-in provider", () => {
     expect(doc.password).toBeUndefined();
     expect(doc.emailVerifiedAt).toBeInstanceOf(Date);
     expect(identityCreate).toHaveBeenCalledWith(expect.objectContaining({ user: "u-new", ...IDENTITY }));
+  });
+
+  // GitHub's `verified` is no proof of the mailbox today, so it must not make one either: a later
+  // Google or OIDC sign-in would link by that address
+  it("leaves an address unproven when the link was handed over and only GitHub vouched", async () => {
+    await accept({ ...IDENTITY, provider: "github" }, false);
+
+    expect(userCreate.mock.calls[0][0].emailVerifiedAt).toBeNull();
+  });
+
+  it("proves a mailed invitation's address whichever provider accepted it", async () => {
+    await accept({ ...IDENTITY, provider: "github" }, false, "email");
+
+    expect(userCreate.mock.calls[0][0].emailVerifiedAt).toBeInstanceOf(Date);
   });
 
   it("leaves an address unproven when the link was handed over and no provider vouched", async () => {

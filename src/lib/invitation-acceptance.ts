@@ -22,6 +22,8 @@ export interface NewAccount {
   /** Null for an account that signs in through an identity provider only. */
   passwordHash: string | null;
   identity?: { provider: string; issuer: string; subject: string; email: string };
+  /** Whether that provider's word on the address is proof of the mailbox (not GitHub's). */
+  providerProvesAddress?: boolean;
 }
 
 /**
@@ -48,8 +50,9 @@ export async function completeAcceptance(
       ...(account.passwordHash ? { password: account.passwordHash } : {}),
       fullName: account.fullName,
       email: invitation.email,
-      // Proven when the link travelled by mail, or when a provider vouched for the address
-      emailVerifiedAt: invitation.deliveredAs === "email" || account.identity ? new Date() : null,
+      // Proven when the link travelled by mail, or when a provider whose word is proof vouched
+      emailVerifiedAt:
+        invitation.deliveredAs === "email" || (account.identity && account.providerProvesAddress) ? new Date() : null,
       role: authority.role,
     });
   } catch (err) {

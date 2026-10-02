@@ -2,7 +2,7 @@ import * as client from "openid-client";
 import { connectDB } from "@/lib/db";
 import { normaliseEmail } from "@/lib/email";
 import { randomToken, sha256 } from "@/lib/oauth";
-import { githubApiBase } from "@/lib/github-host";
+import { githubApiBase, githubWebBase } from "@/lib/github-host";
 import { OidcFlow } from "@/models/oidcFlow";
 import { OidcProvider } from "./providers";
 
@@ -227,16 +227,31 @@ async function githubPerson(provider: OidcProvider, accessToken: string): Promis
 }
 
 /**
- * The API of the GitHub the person signed in at: `GITHUB_API_BASE_URL` when the operator named
- * one, as pull-request syncing reads it, otherwise the site's own — never api.github.com for an
- * Enterprise Server's token.
+ * The API of the GitHub the person signed in at: `GITHUB_API_BASE_URL` when it is that GitHub's
+ * API or a proxy in front of one, otherwise the site's own — never another GitHub's API, which
+ * would hand this site's token to a third party.
  */
 function githubSignInApi(site: string): string {
-  if (process.env.GITHUB_API_BASE_URL) return githubApiBase();
+  const named = process.env.GITHUB_API_BASE_URL;
+  if (named && !namesAnotherGitHub(named, site)) return githubApiBase();
   const url = new URL(site);
   if (url.hostname === "github.com") return "https://api.github.com";
   if (/\.ghe\.com$/i.test(url.hostname)) return `${url.protocol}//api.${url.host}`;
   return `${url.origin}/api/v3`;
+}
+
+/** One of GitHub's own API shapes, for a site other than the one signed in at. */
+function namesAnotherGitHub(api: string, site: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(api);
+  } catch {
+    return false;
+  }
+  const shaped =
+    url.pathname.replace(/\/+$/, "") === "/api/v3" ||
+    (url.pathname.replace(/\/+$/, "") === "" && /^api\.(?:github\.com|[a-z0-9-]+\.ghe\.com)$/i.test(url.hostname));
+  return shaped && githubWebBase(api) !== site;
 }
 
 /**

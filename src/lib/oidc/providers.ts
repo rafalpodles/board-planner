@@ -72,8 +72,7 @@ export function configuredProviders(): OidcProvider[] {
 let warnedAbout: string | null = null;
 
 function githubSignInSite(): string | null {
-  const named = process.env.GITHUB_OAUTH_BASE_URL?.trim();
-  if (!named) return githubWebBase();
+  const named = process.env.GITHUB_OAUTH_BASE_URL?.trim() || githubWebBase();
   let url: URL | null = null;
   try {
     url = new URL(named);
@@ -83,7 +82,7 @@ function githubSignInSite(): string | null {
   if (url && bare && (url.protocol === "https:" || (url.protocol === "http:" && loopback))) return url.origin;
   if (warnedAbout !== named) {
     warnedAbout = named;
-    console.warn("GITHUB_OAUTH_BASE_URL is not an https origin; signing in with GitHub is off");
+    console.warn(`GitHub's site ${named} is not an https origin; signing in with GitHub is off`);
   }
   return null;
 }
