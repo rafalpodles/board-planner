@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 import { BOOTSTRAP_TOKEN, E2E_ENCRYPTION_KEY, E2E_MONGODB_URI } from "./e2e/seed";
 import { GROUPS } from "./e2e/groups";
+import { E2E_LICENCE_PUBLIC_KEY } from "./e2e/licence-key";
 
 // 3987, not the usual 3456: a developer's own dev server and other agents share this machine
 const PORT = Number(process.env.E2E_PORT ?? 3987);
@@ -182,6 +183,9 @@ function devServerEnv(origin: string) {
     // notification grid offers. Without it those routes answer 503 and the specs that drive
     // them assert a refusal instead of the encryption they exist to prove.
     ENCRYPTION_KEY: E2E_ENCRYPTION_KEY,
+    // The suite's own signing key, so licence.spec.ts can sign a key the server accepts. Read only
+    // where E2E=1 is too, and never by `next build` output, whose NODE_ENV is inlined.
+    E2E_LICENCE_PUBLIC_KEY,
     // Three things now, and two are not cosmetic. It turns off Next's dev indicator, which
     // paints over the bottom-left of every page and takes a real click meant for a bottom
     // sheet's action row (BP-589); it mounts `POST /api/e2e/digest`, which runs a digest tick

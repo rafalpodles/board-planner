@@ -53,7 +53,7 @@ const OWNED: readonly { prefix: string; groups: readonly GroupName[] }[] = [
   // exercises the longest-prefix rule against a real, non-coincidental case (e2e/affected-groups.test.ts
   // asserts settings/workers/ still resolves to its own entry, not this one, despite array order).
   // Every child below was checked individually against grep -l "/settings/<name>" e2e/*.spec.ts —
-  // admin-only-screens.spec.ts's own SCREENS sweep covers only users/email/agents/workers/audit, not
+  // admin-only-screens.spec.ts's own SCREENS sweep covers only users/email/licence/agents/workers/audit, not
   // every settings page, so it is a partial signal here, never the whole story for any one of them.
   { prefix: "src/app/(app)/settings/", groups: ["project"] },
   { prefix: "src/app/(app)/settings/workers/", groups: ["automation", "people"] },
@@ -62,6 +62,7 @@ const OWNED: readonly { prefix: string; groups: readonly GroupName[] }[] = [
   { prefix: "src/app/(app)/settings/profile/", groups: ["people", "project", "automation"] },
   { prefix: "src/app/(app)/settings/users/", groups: ["people", "automation"] },
   { prefix: "src/app/(app)/settings/email/", groups: ["people", "project"] },
+  { prefix: "src/app/(app)/settings/licence/", groups: ["people"] },
   { prefix: "src/app/(app)/settings/audit/", groups: ["project", "people", "automation"] },
   { prefix: "src/app/(app)/settings/notifications/", groups: ["automation"] },
   { prefix: "src/app/(app)/settings/tokens/", groups: ["board", "project"] },
@@ -105,6 +106,7 @@ const OWNED: readonly { prefix: string; groups: readonly GroupName[] }[] = [
   { prefix: "src/app/api/admin/runs/", groups: ["automation"] },
   { prefix: "src/app/api/admin/workers/", groups: ["automation"] },
   { prefix: "src/app/api/admin/email/", groups: ["people"] },
+  { prefix: "src/app/api/admin/licence/", groups: ["people"] },
   { prefix: "src/app/api/admin/", groups: ["project"] },
   { prefix: "src/app/api/agents/", groups: ["project"] },
   { prefix: "src/app/api/agent-blocks/", groups: ["project", "automation"] },

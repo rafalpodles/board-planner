@@ -122,6 +122,7 @@ export const GROUPS = {
     "content-security-policy.spec.ts",
     "keep-alive-timeout.spec.ts",
     "entitlements.spec.ts",
+    "licence.spec.ts",
     "sessions-and-auth.spec.ts",
     "proxied-login-throttle.spec.ts",
     "compose-cookie.spec.ts",

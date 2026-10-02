@@ -177,6 +177,24 @@ describe("register", () => {
     // A self-hosted instance that stores no secrets is not what this refuses
     expect(exited).not.toHaveBeenCalled();
   });
+
+  // BP-650. Unlike ENCRYPTION_KEY, a bad licence is the Free plan, never a crash-loop
+  it("starts with a malformed LICENCE_KEY and says so once in the log", async () => {
+    process.env.NEXT_RUNTIME = "nodejs";
+    delete process.env.ENCRYPTION_KEY;
+    process.env.LICENCE_KEY = "not-a-licence";
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const exited = vi.spyOn(process, "exit").mockImplementation((() => {}) as never);
+    const { register } = await import("./instrumentation");
+
+    await register();
+
+    expect(exited).not.toHaveBeenCalled();
+    const licenceLines = warned.mock.calls.filter(([line]) => String(line).startsWith("LICENCE_KEY"));
+    expect(licenceLines).toEqual([[expect.stringContaining("is not a licence key")]]);
+  });
 });
 
 /**

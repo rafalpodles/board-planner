@@ -36,6 +36,13 @@ describe("computeAffectedGroups", () => {
     ]);
   });
 
+  // BP-650: the licence screen and its route are swept by licence.spec.ts and admin-only-screens,
+  // both in people; the settings/ and api/admin/ catch-alls would run only project
+  it("sends the licence screen and its route to the group whose specs drive them", () => {
+    expect(computeAffectedGroups(["src/app/(app)/settings/licence/page.tsx"])).toEqual(["people"]);
+    expect(computeAffectedGroups(["src/app/api/admin/licence/route.ts"])).toEqual(["people"]);
+  });
+
   it("orders the result canonically, not by discovery order", () => {
     // src/app/login/ (-> people) is discovered before src/components/kanban/ (-> board) here,
     // but board comes before people in GROUP_NAMES.
