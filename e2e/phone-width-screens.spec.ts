@@ -151,6 +151,13 @@ const SCREENS: Screen[] = [
     landmark: (page) => heading(page, "Users"),
     actions: (page) => ({ "New User": button(page, "New User") }),
     widths: [390, 768],
+    alsoHolds: async (page) => {
+      for (const name of ["E2E Admin", "E2E Member", "E2E Owner"]) {
+        const shown = page.locator("main").getByText(name, { exact: true });
+        const widths = await shown.evaluate((el) => ({ full: el.scrollWidth, visible: el.clientWidth }));
+        expect(widths.full, `${name} is truncated`).toBeLessThanOrEqual(widths.visible);
+      }
+    },
   },
   {
     name: "instance audit",

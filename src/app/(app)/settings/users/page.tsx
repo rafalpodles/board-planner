@@ -256,7 +256,7 @@ export default function UsersPage() {
                 {u.fullName.charAt(0).toUpperCase()}
               </div>
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   <p className="font-medium truncate">{u.fullName}</p>
                   <span
                     className={`shrink-0 text-xs px-2 py-0.5 rounded-full ${
