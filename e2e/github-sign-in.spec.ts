@@ -181,6 +181,11 @@ test("an invitation to a verified address that is not GitHub's primary one is ac
 
   await expect(page).toHaveURL(/\/invite\/sso$/);
   await expect(page.getByText(`GitHub confirmed ${email}. Choose your username to finish.`)).toBeVisible();
+  await page.getByLabel("Username").fill("octo-worker");
+  await page.getByLabel("Full name").fill("Octo Worker");
+  await page.getByRole("button", { name: "Create my account" }).click();
+  await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_ID}`));
+  expect(await (await db()).collection("users").findOne({ username: "octo-worker" })).toMatchObject({ email });
 });
 
 test("an invitation is not accepted with an address GitHub has not verified", async ({ page }) => {
