@@ -6,6 +6,7 @@ const recordAcceptance = vi.fn();
 const markInvitationRevoked = vi.fn();
 const authorityAtAcceptance = vi.fn();
 const userCreate = vi.fn();
+const userDeleteOne = vi.fn();
 const grantUpsert = vi.fn();
 const createSession = vi.fn();
 const logInstanceAudit = vi.fn();
@@ -37,12 +38,13 @@ vi.mock("@/lib/invitations", () => ({
 vi.mock("@/lib/invitation-authority", () => ({ authorityAtAcceptance }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/lib/projectAudit", () => ({ logProjectAudit }));
-vi.mock("@/models/user", () => ({ User: { create: userCreate } }));
+vi.mock("@/models/user", () => ({ User: { create: userCreate, deleteOne: userDeleteOne } }));
 vi.mock("@/models/grant", () => ({ Grant: { findOneAndUpdate: grantUpsert } }));
 vi.mock("bcryptjs", () => ({ default: { hash } }));
 
 const { POST } = await import("./route");
 const { resetRateLimits } = await import("@/lib/rate-limit");
+const { INVITATION_REFUSALS } = await import("@/lib/invitation-refusals");
 
 const INVITATION = {
   _id: "inv-1",
@@ -67,6 +69,8 @@ beforeEach(async () => {
   userCreate.mockImplementation(async (doc: Record<string, unknown>) => ({ _id: "u-new", ...doc }));
   grantUpsert.mockResolvedValue({});
   releaseInvitation.mockResolvedValue(undefined);
+  recordAcceptance.mockResolvedValue(true);
+  userDeleteOne.mockResolvedValue({});
   createSession.mockResolvedValue({ token: "cps_new", absoluteExpiresAt: new Date() });
 });
 
@@ -116,17 +120,57 @@ describe("POST /api/invitations/accept", () => {
     expect(claimInvitation).not.toHaveBeenCalled();
   });
 
-  it.each([["used"], ["expired"], ["revoked"], ["unknown"]])(
-    "refuses a link that is %s",
+  it.each([["used"], ["expired"], ["revoked"], ["unknown"]] as const)(
+    "refuses a link that is %s, and says which",
     async (reason) => {
       claimInvitation.mockResolvedValue({ ok: false, reason });
 
       const res = await POST(post());
 
       expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe(INVITATION_REFUSALS[reason]);
       expect(userCreate).not.toHaveBeenCalled();
     }
   );
+
+  it("undoes the account when the invitation was revoked while it was being made", async () => {
+    recordAcceptance.mockResolvedValue(false);
+
+    const res = await POST(post());
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe(INVITATION_REFUSALS.revoked);
+    expect(userDeleteOne).toHaveBeenCalledWith({ _id: "u-new" });
+    expect(grantUpsert).not.toHaveBeenCalled();
+    expect(createSession).not.toHaveBeenCalled();
+  });
+
+  it("still grants the boards when recording the acceptance fails", async () => {
+    recordAcceptance.mockRejectedValue(new Error("write timeout"));
+
+    const res = await POST(post());
+
+    expect(res.status).toBe(201);
+    expect(grantUpsert).toHaveBeenCalledTimes(1);
+    expect(userDeleteOne).not.toHaveBeenCalled();
+  });
+
+  it("grants the other boards when one fails, and lands on one that was granted", async () => {
+    authorityAtAcceptance.mockResolvedValue({
+      role: "member",
+      boards: [
+        { project: "p1", relation: "owner", addedBy: "admin-1" },
+        { project: "p2", relation: "member", addedBy: "admin-1" },
+      ],
+    });
+    grantUpsert.mockRejectedValueOnce(new Error("write timeout"));
+
+    const res = await POST(post());
+
+    expect(res.status).toBe(201);
+    expect(grantUpsert).toHaveBeenCalledTimes(2);
+    expect((await res.json()).landing).toBe("p2");
+  });
 
   it("refuses, and withdraws, an invitation nobody still stands behind", async () => {
     authorityAtAcceptance.mockResolvedValue(null);
@@ -162,11 +206,10 @@ describe("POST /api/invitations/accept", () => {
     expect((await res.json()).error).toContain("already has an account");
   });
 
-  it("is throttled per source", async () => {
-    for (let i = 0; i < 20; i++) await POST(post({ ...FIELDS, password: "short" }));
+  it("is throttled per source, after twenty attempts", async () => {
+    for (let i = 0; i < 19; i++) await POST(post({ ...FIELDS, password: "short" }));
+    expect((await POST(post({ ...FIELDS, password: "short" }))).status).toBe(400);
 
-    const res = await POST(post());
-
-    expect(res.status).toBe(429);
+    expect((await POST(post())).status).toBe(429);
   });
 });

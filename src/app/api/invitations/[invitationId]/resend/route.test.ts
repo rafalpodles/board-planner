@@ -1,0 +1,99 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+const reissueInvitation = vi.fn();
+const deliverTo = vi.fn();
+const invitationFindById = vi.fn();
+const userExists = vi.fn();
+const projectFind = vi.fn();
+const logInstanceAudit = vi.fn();
+const selfOrigin = vi.fn();
+let caller: Record<string, unknown>;
+
+vi.mock("@/lib/middleware", () => ({
+  withAdmin:
+    (handler: (r: Request, c: unknown) => unknown) =>
+    (request: Request, ctx: { params: Promise<Record<string, string>> }) =>
+      handler(request, { params: ctx.params, user: caller }),
+}));
+vi.mock("@/lib/session", () => ({ selfOrigin }));
+vi.mock("@/lib/invitations", () => ({ reissueInvitation }));
+vi.mock("@/lib/invitation-mail", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/invitation-mail")>("@/lib/invitation-mail");
+  return { ...actual, deliverTo };
+});
+vi.mock("@/lib/invitation-view", () => ({
+  toApiInvitations: async (rows: { email: string }[]) => rows.map((r) => ({ email: r.email })),
+  describeInvitation: () => "described",
+}));
+vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
+vi.mock("@/models/invitation", () => ({ Invitation: { findById: invitationFindById } }));
+vi.mock("@/models/user", () => ({ User: { exists: userExists } }));
+vi.mock("@/models/project", () => ({ Project: { find: projectFind } }));
+
+const { POST } = await import("./route");
+
+const ID = "64b0000000000000000000aa";
+const resend = () =>
+  POST(new Request(`http://x/api/invitations/${ID}/resend`, { method: "POST" }), {
+    params: Promise.resolve({ invitationId: ID }),
+  });
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  caller = { _id: "admin-2", username: "second", fullName: "Second Admin", role: "admin" };
+  selfOrigin.mockReturnValue("https://planner.example");
+  invitationFindById.mockReturnValue({
+    select: () => ({ lean: () => Promise.resolve({ email: "ada@example.com" }) }),
+  });
+  userExists.mockResolvedValue(null);
+  projectFind.mockReturnValue({ select: () => ({ lean: () => Promise.resolve([]) }) });
+  reissueInvitation.mockResolvedValue({
+    invitation: { _id: ID, email: "ada@example.com", role: "member", boards: [] },
+    token: "cpi_new",
+  });
+  deliverTo.mockResolvedValue({ delivery: "email" });
+});
+
+describe("POST /api/invitations/:id/resend", () => {
+  it("issues a new link endorsed by whoever resends it, and mails it in their name", async () => {
+    const res = await resend();
+
+    expect(res.status).toBe(200);
+    expect(reissueInvitation).toHaveBeenCalledWith(ID, "admin-2");
+    expect(deliverTo.mock.calls[0][1]).toBe("cpi_new");
+    expect(deliverTo.mock.calls[0][3]).toBe(caller);
+    expect(JSON.stringify(await res.json())).not.toContain("cpi_new");
+  });
+
+  it("hands the link back when no mail went out", async () => {
+    deliverTo.mockResolvedValue({
+      delivery: "link",
+      link: "https://planner.example/invite?token=cpi_new",
+      reason: "no_mail_server",
+    });
+
+    expect(await (await resend()).json()).toMatchObject({ delivery: "link", reason: "no_mail_server" });
+  });
+
+  // The same escalation POST refuses: an admin API token reading a working admin link back
+  it("refuses a machine credential", async () => {
+    caller = { ...caller, viaMachineCredential: true };
+
+    expect((await resend()).status).toBe(403);
+    expect(reissueInvitation).not.toHaveBeenCalled();
+  });
+
+  it("refuses an address that has gained an account", async () => {
+    userExists.mockResolvedValue({ _id: "u2" });
+
+    expect((await resend()).status).toBe(409);
+    expect(reissueInvitation).not.toHaveBeenCalled();
+  });
+
+  it("answers 404 for an invitation that is no longer pending", async () => {
+    reissueInvitation.mockResolvedValue(null);
+
+    expect((await resend()).status).toBe(404);
+    expect(deliverTo).not.toHaveBeenCalled();
+  });
+});

@@ -3,6 +3,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const issueInvitation = vi.fn();
 const deliverTo = vi.fn();
 const userExists = vi.fn();
+const userFind = vi.fn();
+const invitationFind = vi.fn();
 const projectFind = vi.fn();
 const logInstanceAudit = vi.fn();
 const selfOrigin = vi.fn();
@@ -26,11 +28,11 @@ vi.mock("@/lib/invitation-view", () => ({
   describeInvitation: () => "described",
 }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
-vi.mock("@/models/user", () => ({ User: { exists: userExists } }));
+vi.mock("@/models/user", () => ({ User: { exists: userExists, find: userFind } }));
 vi.mock("@/models/project", () => ({ Project: { find: projectFind } }));
-vi.mock("@/models/invitation", () => ({ Invitation: { find: vi.fn() } }));
+vi.mock("@/models/invitation", () => ({ Invitation: { find: invitationFind } }));
 
-const { POST } = await import("./route");
+const { GET, POST } = await import("./route");
 
 const P1 = "64b000000000000000000001";
 const CTX = { params: Promise.resolve({}) };
@@ -91,10 +93,12 @@ describe("POST /api/invitations", () => {
     expect(body.link).toContain("cpi_secret");
   });
 
-  it("refuses an address that already belongs to an account", async () => {
-    userExists.mockResolvedValue({ _id: "u2" });
+  it("refuses an address that already belongs to an account, compared as stored", async () => {
+    userExists.mockImplementation(async (filter: { email: string }) =>
+      filter.email === "ada@example.com" ? { _id: "u2" } : null
+    );
 
-    const res = await POST(post({ email: "ada@example.com" }), CTX);
+    const res = await POST(post({ email: "  ADA@example.com" }), CTX);
 
     expect(res.status).toBe(409);
     expect(issueInvitation).not.toHaveBeenCalled();
@@ -139,5 +143,32 @@ describe("POST /api/invitations", () => {
 
     expect(res.status).toBe(500);
     expect(issueInvitation).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /api/invitations", () => {
+  function pending(rows: { email: string }[]) {
+    invitationFind.mockReturnValue({ sort: () => ({ lean: () => Promise.resolve(rows) }) });
+  }
+
+  it("lists pending invitations, leaving out an address that has gained an account", async () => {
+    pending([{ email: "ada@example.com" }, { email: "grace@example.com" }]);
+    userFind.mockReturnValue({
+      select: () => ({ lean: () => Promise.resolve([{ email: "grace@example.com" }]) }),
+    });
+
+    const res = await GET(new Request("http://x/api/invitations"), CTX);
+
+    expect(invitationFind).toHaveBeenCalledWith({ status: "pending" });
+    expect(await res.json()).toEqual([{ email: "ada@example.com" }]);
+  });
+
+  it("refuses a machine credential", async () => {
+    caller = { ...caller, viaMachineCredential: true };
+
+    const res = await GET(new Request("http://x/api/invitations"), CTX);
+
+    expect(res.status).toBe(403);
+    expect(invitationFind).not.toHaveBeenCalled();
   });
 });

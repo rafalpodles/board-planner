@@ -1,9 +1,10 @@
 import { test, expect, type Browser, type Page } from "@playwright/test";
+import { createHash, randomBytes } from "crypto";
 import mongoose from "mongoose";
+import { SAME_ORIGIN } from "./api";
+import { signIn, signInContext } from "./session";
 import { bodyOf, mailFor, refuseMailFor, stopRefusing } from "./mailbox";
 import {
-  ADMIN_PASSWORD,
-  ADMIN_USERNAME,
   E2E_MONGODB_URI,
   MEMBER_USERNAME,
   PROJECT_ID,
@@ -30,11 +31,7 @@ function freshAddress(label: string) {
 }
 
 async function signInAsAdmin(page: Page) {
-  await page.goto("/login");
-  await page.getByLabel("Username").fill(ADMIN_USERNAME);
-  await page.getByLabel("Password").fill(ADMIN_PASSWORD);
-  await page.getByRole("button", { name: "Sign In" }).click();
-  await expect(page).toHaveURL(/\/projects/);
+  await signIn(page, "admin");
 }
 
 async function invite(page: Page, email: string) {
@@ -128,7 +125,11 @@ test("an invitation arrives by mail and its link makes an account on the invited
     "This invitation has already been used. Sign in instead."
   );
 
-  await page.reload();
+  const [listed] = await Promise.all([
+    page.waitForResponse((r) => r.url().endsWith("/api/invitations") && r.request().method() === "GET"),
+    page.reload(),
+  ]);
+  expect(await listed.json()).toEqual([]);
   await expect(page.getByText("@invited-person")).toBeVisible();
   await expect(page.getByTestId("pending-invitation")).toHaveCount(0);
 
@@ -146,7 +147,7 @@ test("resend kills the previous link, and revoke kills the current one", async (
   const row = page.getByTestId("pending-invitation").filter({ hasText: email });
   const [resent] = await Promise.all([
     page.waitForResponse((r) => r.url().endsWith("/resend")),
-    row.getByRole("button", { name: `Send the invitation for ${email} again` }).click(),
+    row.getByRole("button", { name: `Resend the invitation for ${email}` }).click(),
   ]);
   expect(resent.status()).toBe(200);
   const second = await latestLink(email, 2);
@@ -227,4 +228,116 @@ test("a mail server that refuses the invitation leaves the admin holding the lin
   } finally {
     await stopRefusing();
   }
+});
+
+/** What the app would have stored for an invitation it had sent, with the raw link in hand */
+async function plantInvitation(email: string, fields: Record<string, unknown> = {}) {
+  const token = `cpi_${randomBytes(32).toString("hex")}`;
+  const ghost = new mongoose.Types.ObjectId();
+  await (await db()).collection("invitations").insertOne({
+    email,
+    role: "member",
+    boards: [{ project: PROJECT_ID, relation: "member", addedBy: ghost }],
+    invitedBy: ghost,
+    tokenHash: createHash("sha256").update(token).digest("hex"),
+    expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    status: "pending",
+    acceptedBy: null,
+    acceptedAt: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    ...fields,
+  });
+  return token;
+}
+
+test("an administrator invitation with an owned board makes an admin who owns it", async ({ page, browser }) => {
+  const email = freshAddress("admin-invitee");
+  await signInAsAdmin(page);
+  await page.goto("/settings/users");
+  await page.getByRole("button", { name: "Invite", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Invite someone" });
+  await dialog.getByLabel("Email").fill(email);
+  await dialog.getByRole("button", { name: "Admin" }).click();
+  await dialog.getByRole("checkbox", { name: new RegExp(PROJECT_NAME) }).check();
+  await dialog.getByLabel(`Role on ${PROJECT_NAME}`).selectOption("owner");
+  await dialog.getByRole("button", { name: "Send invitation" }).click();
+  await expect(dialog.getByRole("status")).toContainText(`Invitation sent to ${email}`);
+
+  const stranger = await asStranger(browser);
+  await accept(stranger.page, await latestLink(email), "new-admin");
+  await expect(stranger.page).toHaveURL(new RegExp(`/projects/${PROJECT_ID}`));
+
+  const account = await (await db()).collection("users").findOne({ username: "new-admin" });
+  expect(account).toMatchObject({ email, role: "admin" });
+  expect(
+    await (await db()).collection("grants").findOne({ subject: account!._id, object: PROJECT_ID })
+  ).toMatchObject({ relation: "owner" });
+  await stranger.context.close();
+});
+
+// Acceptance checks the people an invitation names, so a resend that kept a deleted inviter would
+// mail a link refused only after the invitee filled in the form
+test("an invitation whose inviter was deleted works once another admin resends it", async ({ page, browser }) => {
+  const email = freshAddress("orphan");
+  const oldToken = await plantInvitation(email);
+  await signInAsAdmin(page);
+  await page.goto("/settings/users");
+
+  const row = page.getByTestId("pending-invitation").filter({ hasText: email });
+  await expect(row).toContainText("by a deleted account");
+  const [resent] = await Promise.all([
+    page.waitForResponse((r) => r.url().endsWith("/resend")),
+    row.getByRole("button", { name: `Resend the invitation for ${email}` }).click(),
+  ]);
+  expect(resent.status()).toBe(200);
+  const link = await latestLink(email);
+  expect(link).not.toContain(oldToken);
+
+  const stranger = await asStranger(browser);
+  await accept(stranger.page, link, "rescued-person");
+  await expect(stranger.page).toHaveURL(new RegExp(`/projects/${PROJECT_ID}`));
+  await stranger.context.close();
+});
+
+test("an expired invitation says so, and is marked expired for the admin", async ({ page, browser }) => {
+  const email = freshAddress("late");
+  const token = await plantInvitation(email, { expiresAt: new Date(Date.now() - 60_000) });
+
+  const stranger = await asStranger(browser);
+  await stranger.page.goto(`/invite?token=${token}`);
+  await expect(alertOn(stranger.page)).toHaveText(
+    "This invitation has expired. Ask whoever invited you for a new one."
+  );
+  await stranger.context.close();
+
+  await signInAsAdmin(page);
+  await page.goto("/settings/users");
+  await expect(page.getByTestId("pending-invitation").filter({ hasText: email })).toContainText("Expired");
+});
+
+// The gate itself: every invitation route but the two a link opens is for an administrator, and
+// a member has no screen that would call them, so the requests are the member's own session's
+test("a member cannot list, send, resend or revoke invitations", async ({ browser }) => {
+  const planted = await plantInvitation(freshAddress("gated"));
+  const row = await (await db()).collection("invitations").findOne({
+    tokenHash: createHash("sha256").update(planted).digest("hex"),
+  });
+  const context = await browser.newContext();
+  await signInContext(context, "member");
+  const api = context.request;
+
+  const answers = await Promise.all([
+    api.get("/api/invitations", { headers: SAME_ORIGIN }),
+    api.post("/api/invitations", {
+      headers: SAME_ORIGIN,
+      data: { email: freshAddress("by-member"), role: "admin" },
+    }),
+    api.post(`/api/invitations/${row!._id}/resend`, { headers: SAME_ORIGIN }),
+    api.delete(`/api/invitations/${row!._id}`, { headers: SAME_ORIGIN }),
+  ]);
+
+  expect(answers.map((a) => a.status())).toEqual([403, 403, 403, 403]);
+  expect(await (await db()).collection("invitations").countDocuments({ status: "pending" })).toBe(1);
+  await context.close();
 });
