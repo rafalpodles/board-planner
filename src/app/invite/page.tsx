@@ -7,6 +7,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { APP_NAME } from "@/lib/brand";
+import { ProviderButtons } from "@/components/auth/ProviderButtons";
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -225,6 +226,9 @@ function AcceptForm() {
           {saving || accepted ? "Creating your account…" : "Create my account"}
         </Button>
       </form>
+      <div className="mt-4">
+        <ProviderButtons intent="invite" invitationToken={token} verb="Accept with" />
+      </div>
     </div>
   );
 }

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useAuth } from "@/hooks/use-auth";
 import { APP_NAME } from "@/lib/brand";
+import { ProviderButtons, SIGN_IN_REFUSALS } from "@/components/auth/ProviderButtons";
 
 export default function LoginPage() {
   const [username, setUsername] = useState("");
@@ -22,6 +23,7 @@ export default function LoginPage() {
   const [unclaimed, setUnclaimed] = useState<boolean | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [ssoError, setSsoError] = useState("");
   const { login } = useAuth();
   const router = useRouter();
 
@@ -43,6 +45,11 @@ export default function LoginPage() {
     return () => {
       live = false;
     };
+  }, []);
+
+  useEffect(() => {
+    const reason = new URLSearchParams(window.location.search).get("sso");
+    if (reason) setSsoError(SIGN_IN_REFUSALS[reason] ?? SIGN_IN_REFUSALS.failed);
   }, []);
 
   async function handleSubmit(e: FormEvent) {
@@ -139,6 +146,17 @@ export default function LoginPage() {
                 : "Sign In"}
           </Button>
         </form>
+
+        {!isRegister && (
+          <div className="mt-4 space-y-3">
+            {ssoError && (
+              <p role="alert" className="text-sm text-danger text-center">
+                {ssoError}
+              </p>
+            )}
+            <ProviderButtons intent="signin" />
+          </div>
+        )}
 
         {/* Only when signing in: it answers nothing on a form that is creating an account */}
         {!isRegister && (

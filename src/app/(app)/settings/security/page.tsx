@@ -1,10 +1,12 @@
 "use client";
 
-import { useState, FormEvent } from "react";
+import { useCallback, useEffect, useState, FormEvent } from "react";
+import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useToast } from "@/components/ui/Toast";
+import { LinkedIdentity, SignInMethods } from "@/components/settings/SignInMethods";
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -17,6 +19,21 @@ export default function SecurityPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [methods, setMethods] = useState<{ hasPassword: boolean; identities: LinkedIdentity[] } | null>(
+    null
+  );
+
+  const readMethods = useCallback(() => {
+    api
+      .get("/api/users/me/identities")
+      .then(setMethods)
+      .catch(() => setMethods({ hasPassword: true, identities: [] }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    readMethods();
+  }, [readMethods]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -43,6 +60,22 @@ export default function SecurityPage() {
     } finally {
       setSaving(false);
     }
+  }
+
+  if (methods && !methods.hasPassword) {
+    return (
+      <div className="max-w-md">
+        <h2 className="text-lg font-semibold mb-1">Password</h2>
+        <p className="text-sm text-text-muted">
+          This account has no password. To add one, use{" "}
+          <Link href="/forgot" className="underline">
+            Forgot your password
+          </Link>{" "}
+          — the link goes to your address.
+        </p>
+        <SignInMethods identities={methods.identities} onChanged={readMethods} />
+      </div>
+    );
   }
 
   return (
@@ -106,6 +139,7 @@ export default function SecurityPage() {
           {saving ? "Changing…" : "Change password"}
         </Button>
       </form>
+      {methods && <SignInMethods identities={methods.identities} onChanged={readMethods} />}
     </div>
   );
 }
