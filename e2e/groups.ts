@@ -129,6 +129,7 @@ export const GROUPS = {
     "admin-sets-password.spec.ts",
     "reset-by-email.spec.ts",
     "invitations.spec.ts",
+    "board-owner-invitations.spec.ts",
     "email-on-account.spec.ts",
     "email-change-confirmation.spec.ts",
     "reserved-usernames.spec.ts",

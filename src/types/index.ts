@@ -239,6 +239,7 @@ export interface IInvitation {
   status: InvitationStatus;
   acceptedBy: Types.ObjectId | null;
   acceptedAt: Date | null;
+  deliveredAs: "email" | "link" | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -252,6 +253,15 @@ export interface ApiInvitation {
   expiresAt: string;
   expired: boolean;
   createdAt: string;
+}
+
+export interface ApiBoardInvitation {
+  _id: string;
+  email: string;
+  relation: GrantRelation;
+  addedBy: string | null;
+  expiresAt: string;
+  expired: boolean;
 }
 
 export type InvitationDelivery =
@@ -1542,6 +1552,8 @@ export type ProjectAuditAction =
   | "member_added"
   | "member_role_changed"
   | "member_removed"
+  | "member_invited"
+  | "member_invitation_removed"
   | "task_created"
   | "task_deleted"
   | "bulk_delete"

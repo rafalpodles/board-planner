@@ -22,6 +22,8 @@ const invitationSchema = new Schema<IInvitation>(
     status: { type: String, enum: INVITATION_STATUSES, default: "pending" },
     acceptedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
     acceptedAt: { type: Date, default: null },
+    // Who holds the current link: the invited mailbox, or whoever was shown it. Null until known.
+    deliveredAs: { type: String, enum: ["email", "link"], default: null },
   },
   { timestamps: true }
 );

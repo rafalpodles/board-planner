@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const issueInvitation = vi.fn();
+const recordDelivery = vi.fn();
 const deliverTo = vi.fn();
 const userExists = vi.fn();
 const userFind = vi.fn();
@@ -18,7 +19,7 @@ vi.mock("@/lib/middleware", () => ({
       handler(request, { params: Promise.resolve({}), user: caller }),
 }));
 vi.mock("@/lib/session", () => ({ selfOrigin }));
-vi.mock("@/lib/invitations", () => ({ issueInvitation }));
+vi.mock("@/lib/invitations", () => ({ issueInvitation, recordDelivery }));
 vi.mock("@/lib/invitation-mail", async () => {
   const actual = await vi.importActual<typeof import("@/lib/invitation-mail")>("@/lib/invitation-mail");
   return { ...actual, deliverTo };
@@ -78,6 +79,7 @@ describe("POST /api/invitations", () => {
     });
     const body = await res.json();
     expect(body.delivery).toBe("email");
+    expect(recordDelivery).toHaveBeenCalledWith("inv-1", "cpi_secret", "email");
     expect(JSON.stringify(body)).not.toContain("cpi_secret");
     expect(logInstanceAudit).toHaveBeenCalledWith(
       expect.objectContaining({ action: "invitation_sent", target: "ada@example.com" })

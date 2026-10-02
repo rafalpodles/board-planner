@@ -44,7 +44,14 @@ export async function issueInvitation(
     Invitation.findOneAndUpdate(
       { email: input.email, status: "pending" },
       {
-        $set: { role: input.role, boards, invitedBy: input.invitedBy, tokenHash, expiresAt },
+        $set: {
+          role: input.role,
+          boards,
+          invitedBy: input.invitedBy,
+          tokenHash,
+          expiresAt,
+          deliveredAs: null,
+        },
         $setOnInsert: { email: input.email, status: "pending" },
       },
       { upsert: true, returnDocument: "after" }
@@ -73,7 +80,15 @@ export async function reissueInvitation(
   const { token, tokenHash, expiresAt } = freshSecret();
   const invitation = await Invitation.findOneAndUpdate(
     { _id: id, status: "pending" },
-    { $set: { tokenHash, expiresAt, invitedBy: sentBy, "boards.$[].addedBy": sentBy } },
+    {
+      $set: {
+        tokenHash,
+        expiresAt,
+        deliveredAs: null,
+        invitedBy: sentBy,
+        "boards.$[].addedBy": sentBy,
+      },
+    },
     { returnDocument: "after" }
   );
   return invitation ? { invitation, token } : null;
@@ -177,4 +192,122 @@ export async function revokePendingInvitationsFor(email: string): Promise<void> 
   } catch (err) {
     console.error("Failed to withdraw pending invitations for an address:", err);
   }
+}
+
+/**
+ * Matched on the token, so a delivery is never recorded against a link issued after it. Never
+ * throws: the invitation has already gone out, and a row left unrecorded is merely unjoinable.
+ */
+export async function recordDelivery(
+  id: Types.ObjectId | string,
+  token: string,
+  deliveredAs: "email" | "link"
+): Promise<void> {
+  try {
+    await connectDB();
+    await Invitation.updateOne({ _id: id, tokenHash: sha256(token) }, { $set: { deliveredAs } });
+  } catch (err) {
+    console.error("Failed to record how an invitation was delivered:", err);
+  }
+}
+
+export type BoardInvitation =
+  | { kind: "created"; invitation: IInvitation; token: string }
+  | { kind: "added" | "updated"; invitation: IInvitation }
+  | { kind: "held"; invitedBy: Types.ObjectId };
+
+/**
+ * A board owner's invitation. An invitation already pending for the address only gains (or
+ * re-relates) this board's entry: its role, token and expiry are somebody else's to change, and a
+ * fresh link handed to a non-admin could carry an administrator role.
+ *
+ * It joins only an invitation whose link went to the invited mailbox, or one this owner sent: a
+ * link somebody was shown could be in anybody's hands, and this board would go wherever it does.
+ */
+export async function inviteToBoard(input: {
+  email: string;
+  project: Types.ObjectId | string;
+  relation: GrantRelation;
+  invitedBy: Types.ObjectId | string;
+}): Promise<BoardInvitation> {
+  await connectDB();
+  const { email, project, relation, invitedBy } = input;
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const now = new Date();
+    await Invitation.updateMany(
+      { email, status: "pending", expiresAt: { $lte: now } },
+      { $set: { status: "revoked" } }
+    );
+    const live: Record<string, unknown> = { email, status: "pending", expiresAt: { $gt: now } };
+    const joinable: Record<string, unknown> = { ...live, $or: [{ deliveredAs: "email" }, { invitedBy }] };
+
+    const updated = await Invitation.findOneAndUpdate(
+      { ...joinable, "boards.project": project },
+      { $set: { "boards.$.relation": relation, "boards.$.addedBy": invitedBy } },
+      { returnDocument: "after" }
+    );
+    if (updated) return { kind: "updated", invitation: updated };
+    const added = await Invitation.findOneAndUpdate(
+      { ...joinable, "boards.project": { $ne: project } },
+      { $push: { boards: { project, relation, addedBy: invitedBy } } },
+      { returnDocument: "after" }
+    );
+    if (added) return { kind: "added", invitation: added };
+
+    const held = await Invitation.findOne(live).select("invitedBy").lean<{ invitedBy: Types.ObjectId }>();
+    if (held) return { kind: "held", invitedBy: held.invitedBy };
+
+    const { token, tokenHash, expiresAt } = freshSecret();
+    try {
+      const invitation = await Invitation.create({
+        email,
+        role: "member",
+        boards: [{ project, relation, addedBy: invitedBy }],
+        invitedBy,
+        tokenHash,
+        expiresAt,
+        status: "pending",
+      });
+      return { kind: "created", invitation, token };
+    } catch (err) {
+      // Somebody invited the address in between; the next pass looks at theirs
+      if ((err as { code?: number }).code !== DUPLICATE_KEY) throw err;
+    }
+  }
+  throw new Error("could not settle an invitation for that address");
+}
+
+/** Removes one board from a pending invitation. Null when it was not on one. */
+export async function removeBoardFromInvitation(
+  id: Types.ObjectId | string,
+  project: Types.ObjectId | string
+): Promise<IInvitation | null> {
+  await connectDB();
+  return Invitation.findOneAndUpdate(
+    { _id: id, status: "pending", "boards.project": project },
+    { $pull: { boards: { project } } },
+    { returnDocument: "after" }
+  );
+}
+
+/**
+ * Revokes an invitation left with no boards, and only the one read: matching its inviter and link
+ * too keeps an administrator's re-invite, landing in between on the same row, from being revoked.
+ */
+export async function revokeIfEmpty(
+  invitation: Pick<IInvitation, "_id" | "invitedBy" | "tokenHash">
+): Promise<boolean> {
+  await connectDB();
+  const result = await Invitation.updateOne(
+    {
+      _id: invitation._id,
+      status: "pending",
+      boards: { $size: 0 },
+      invitedBy: invitation.invitedBy,
+      tokenHash: invitation.tokenHash,
+    },
+    { $set: { status: "revoked" } }
+  );
+  return result.modifiedCount === 1;
 }

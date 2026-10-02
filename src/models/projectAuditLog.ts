@@ -13,6 +13,8 @@ const ACTIONS = [
   "member_added",
   "member_role_changed",
   "member_removed",
+  "member_invited",
+  "member_invitation_removed",
   "task_created",
   "task_deleted",
   "bulk_delete",
