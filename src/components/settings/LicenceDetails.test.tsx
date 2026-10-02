@@ -36,7 +36,7 @@ describe("LicenceDetails", () => {
     const { container } = render(<LicenceDetails licence={{ configured: false }} />);
 
     expect(screen.getByText("Free plan")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "How to get one" }).getAttribute("href")).toContain("#licence-key");
+    expect(screen.getByRole("link", { name: "About licences" }).getAttribute("href")).toContain("#licence-key");
     expect(screen.queryByRole("alert")).toBeNull();
     noEditableControl(container);
   });

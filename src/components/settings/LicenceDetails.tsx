@@ -50,9 +50,8 @@ function FreePlan({ reason }: { reason?: string }) {
         </p>
       )}
       <p className="mt-1 text-text-muted">
-        AI features and sync connectors need a Pro licence.{" "}
         <a href={LICENCE_DOCS_URL} target="_blank" rel="noreferrer" className="underline">
-          How to get one
+          About licences
         </a>
       </p>
     </div>

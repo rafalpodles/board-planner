@@ -47,7 +47,7 @@ test("with no key the instance is on the Free plan, and the page says so", async
   await openLicenceSettings(page);
 
   await expect(page.getByTestId("licence-free")).toContainText("Free plan");
-  await expect(page.getByRole("link", { name: "How to get one" })).toHaveAttribute("href", /#licence-key$/);
+  await expect(page.getByRole("link", { name: "About licences" })).toHaveAttribute("href", /#licence-key$/);
   expect(await planSeenByAMember(request)).toBe("free");
 });
 
