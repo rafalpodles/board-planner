@@ -180,7 +180,7 @@ export function TaskLinks({
     const column = columns.find((c) => c.id === status);
     return (
       <span
-        className="chip shrink-0 rounded px-2 py-0.5 text-[11px] font-medium"
+        className="chip chip-custom shrink-0 rounded px-2 py-0.5 text-[11px] font-medium"
         style={{ "--chip": column?.color || "var(--color-text-muted)" } as CSSProperties}
       >
         {column?.label || status}

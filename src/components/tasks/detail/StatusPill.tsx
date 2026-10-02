@@ -37,7 +37,7 @@ export function StatusPill({ columns, status, onChange }: StatusPillProps) {
         // The tint lives here rather than on the trigger: `.chip` resolves `--chip` on
         // its own element, and Combobox owns the trigger's class list
         <span
-          className="chip flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-semibold"
+          className="chip chip-custom flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-semibold"
           style={{ "--chip": accent } as CSSProperties}
         >
           <span

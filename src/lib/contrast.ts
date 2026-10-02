@@ -42,7 +42,7 @@ export function contrastRatio(fg: Rgb, bg: Rgb): number {
 
 export const CHIP_SURFACE_PCT = 18;
 export const CHIP_LABEL_PCT = 85;
-export const CHIP_CUSTOM_LABEL_PCT = 55;
+export const CHIP_CUSTOM_LABEL_PCT = 40;
 
 // The `.chip` rule in globals.css, evaluated in TypeScript so it can be asserted
 export function chipContrast(accent: Rgb, cardBg: Rgb, text: Rgb): number {

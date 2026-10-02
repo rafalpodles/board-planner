@@ -1,7 +1,13 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { chipContrast, chipCustomContrast, contrastRatio, parseHex } from "./contrast";
+import {
+  CHIP_CUSTOM_LABEL_PCT,
+  chipContrast,
+  chipCustomContrast,
+  contrastRatio,
+  parseHex,
+} from "./contrast";
 
 // Colours a project owner can pick for a category or label — vivid, not theme-tuned
 const PROJECT_PICKED = ["#22c55e", "#3b82f6", "#f59e0b", "#ef4444", "#a855f7", "#06b6d4"];
@@ -83,6 +89,29 @@ describe("chip with a project-picked colour", () => {
         expect(ratio).toBeGreaterThanOrEqual(AA);
       });
     }
+  }
+});
+
+describe("chip with any colour a picker can produce", () => {
+  it("mirrors the percentage globals.css actually uses", () => {
+    expect(blockAfter(".chip-custom {")).toContain(`var(--chip) ${CHIP_CUSTOM_LABEL_PCT}%`);
+  });
+
+  for (const [name, theme] of THEMES) {
+    it(`${name}: every sampled sRGB colour clears AA`, () => {
+      const card = parseHex(theme["--color-bg-card"]);
+      const text = parseHex(theme["--color-text"]);
+      let worst = { ratio: Infinity, at: "" };
+      for (let r = 0; r <= 255; r += 15) {
+        for (let g = 0; g <= 255; g += 15) {
+          for (let b = 0; b <= 255; b += 15) {
+            const ratio = chipCustomContrast({ r, g, b }, card, text);
+            if (ratio < worst.ratio) worst = { ratio, at: `rgb(${r}, ${g}, ${b})` };
+          }
+        }
+      }
+      expect(worst.ratio, worst.at).toBeGreaterThanOrEqual(AA);
+    });
   }
 });
 

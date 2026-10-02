@@ -114,6 +114,7 @@ export const GROUPS = {
     "picker-search-announces.spec.ts",
     "agent-block-editing.spec.ts",
     "project-settings-controls.spec.ts",
+    "dark-theme.spec.ts",
   ],
   people: [
     "day-zero.spec.ts",
