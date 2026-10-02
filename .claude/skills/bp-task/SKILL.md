@@ -36,7 +36,7 @@ A task is done when it is merged, documented, cleaned up after, and nobody was a
 
 - Rebase on `origin/main`, rerun the touched e2e groups, the active `gh` account matches the repository owner, PR with what, why, how verified, and the screenshot for a UI change: `references/git-github.md`.
 - Docs, when the task touches what a user sees or does: the product page in `board-planner-site`, its own PR, same review, merged. Technical matter (running, building, configuration) goes to Notion. A touched component with no page gets one.
-- Green is: the last review round found no bugs, and CI passed. Green means merge, without asking. `gh pr merge <n> --merge`, read `state` until it says MERGED, only then delete the branch. Never both in one command. `main` deploys to production.
+- Green is: the last review round found no bugs, and CI passed. Green means merge, without asking. `gh pr merge <n> --merge`, or `--auto --merge` where `main` requires "CI passed" (references/git-github.md), read `state` until it says MERGED, only then delete the branch. Never both in one command. `main` deploys to production.
 
 ## 5. Clean up and close
 

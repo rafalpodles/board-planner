@@ -434,3 +434,28 @@ jobs:
           name: playwright-artifacts-${{ matrix.group }}
           path: e2e/.artifacts
           retention-days: 7
+
+  # The one check main's ruleset requires: a required per-job check would wait forever on an e2e
+  # group plan_e2e left out. `groups.test.ts` fails when a job is missing from `needs`.
+  ci-passed:
+    name: CI passed
+    needs:
+      - app
+      - db-integration
+      - worker
+      - worker-linux
+      - mcp-server
+      - e2e_production_csp
+      - smoke_mcp_stdio
+      - smoke_worker
+      - plan_e2e
+      - e2e
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: No needed job failed or was cancelled
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$NEEDS" | jq -e 'all(.[]; .result == "success" or .result == "skipped")' > /dev/null
