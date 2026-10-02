@@ -68,17 +68,21 @@ export default function SecurityPage() {
           exclude={methods.identities.map((i) => i.provider)}
           extraBody={methods.hasPassword ? { currentPassword: linkPassword } : undefined}
           before={
-            methods.hasPassword && (
-              <Input
-                id="linkPassword"
-                type="password"
-                autoComplete="current-password"
-                aria-label="Current password, to link a provider"
-                placeholder="Current password, to link a provider"
-                value={linkPassword}
-                onChange={(e) => setLinkPassword(e.target.value)}
-              />
-            )
+            <>
+              {methods.identities.length === 0 && (
+                <h2 className="text-lg font-semibold mt-4">Sign-in providers</h2>
+              )}
+              {methods.hasPassword && (
+                <Input
+                  id="linkPassword"
+                  type="password"
+                  autoComplete="current-password"
+                  label="Current password, to link a provider"
+                  value={linkPassword}
+                  onChange={(e) => setLinkPassword(e.target.value)}
+                />
+              )}
+            </>
           }
         />
       </div>
