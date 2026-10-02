@@ -27,6 +27,10 @@ const LABELS: Partial<Record<InstanceAuditAction, string>> = {
   user_deleted: "Account deleted",
   // The direction is in `detail`, the way the address change carries old → new
   user_role_changed: "Role changed",
+  invitation_sent: "Invitation sent",
+  invitation_resent: "Invitation sent again",
+  invitation_revoked: "Invitation revoked",
+  invitation_accepted: "Invitation accepted",
   // Three verbs rather than one row with a footnote, the same rule the command trio follows below.
   // "Refused change" names what was answered, because the row is about a change a gate stopped —
   // not about a decision in the abstract.
