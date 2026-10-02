@@ -1,7 +1,18 @@
 import { NextResponse } from "next/server";
 import { readJsonBody } from "@/lib/request-body";
 import { getAuthUser, getClientIp } from "@/lib/auth";
-import { anonymousMultiplier, isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
+import bcrypt from "bcryptjs";
+import {
+  anonymousMultiplier,
+  clearAttempts,
+  EXCLUSIVE_SOURCE_ATTEMPTS,
+  isRateLimited,
+  lockoutKey,
+  recordFailedAttempt,
+  sourceKey,
+  withLockout,
+} from "@/lib/rate-limit";
+import { User } from "@/models/user";
 import { buildFlowCookie, provenanceRefusal, selfOrigin } from "@/lib/session";
 import { providerById } from "@/lib/oidc/providers";
 import { beginFlow, FLOW_COOKIE, FLOW_TTL_MS } from "@/lib/oidc/flow";
@@ -28,7 +39,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
   const origin = selfOrigin();
   if (!origin) return NextResponse.json({ error: NO_ORIGIN_ERROR }, { status: 500 });
 
-  const read = await readJsonBody<{ intent?: unknown; invitationToken?: unknown }>(request);
+  const read = await readJsonBody<{ intent?: unknown; invitationToken?: unknown; currentPassword?: unknown }>(
+    request
+  );
   if (!read.ok) return read.response;
   const intent =
     read.value.intent === "invite" ? "invite" : read.value.intent === "link" ? "link" : "signin";
@@ -38,6 +51,26 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
     const current = await getAuthUser(request).catch(() => null);
     if (!current || current.viaMachineCredential) {
       return NextResponse.json({ error: "Sign in to link a provider" }, { status: 401 });
+    }
+    // A linked provider is a standing way in, so a borrowed session must not be enough to add one.
+    // An account with no password has nothing else to ask for: its session is all the proof it has
+    const record = await User.findById(current._id).select("+password");
+    if (record?.password) {
+      const typed = read.value.currentPassword;
+      if (typeof typed !== "string" || !typed) {
+        return NextResponse.json({ error: "Enter your current password to link a provider" }, { status: 400 });
+      }
+      const { lockedOut, result: matches } = await withLockout(
+        lockoutKey(clientIp ?? "-", current.username, "link-provider"),
+        async () => ((await bcrypt.compare(typed, record.password)) ? true : null),
+        sourceKey(String(current._id), "link-provider"),
+        EXCLUSIVE_SOURCE_ATTEMPTS
+      );
+      if (lockedOut) {
+        return NextResponse.json({ error: "Too many failed attempts. Try again later." }, { status: 429 });
+      }
+      if (!matches) return NextResponse.json({ error: "Current password is incorrect" }, { status: 400 });
+      await clearAttempts(sourceKey(String(current._id), "link-provider")).catch(() => {});
     }
     userId = String(current._id);
   }

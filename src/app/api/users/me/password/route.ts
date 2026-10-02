@@ -12,6 +12,7 @@ import {
 } from "@/lib/rate-limit";
 import { invalidateResetTokens } from "@/lib/password-reset";
 import { revokeUserCredentials } from "@/lib/session";
+import { logInstanceAudit } from "@/lib/instanceAudit";
 import { User } from "@/models/user";
 
 export const PUT = withAuth(async (request, { user }) => {
@@ -67,7 +68,16 @@ export const PUT = withAuth(async (request, { user }) => {
   }
 
   // Before the save, so a failed revoke never leaves a new password beside the old credentials
-  await revokeUserCredentials(user._id, user.sessionId);
+  const revoked = await revokeUserCredentials(user._id, user.sessionId);
+  if (revoked?.identitiesUnlinked) {
+    void logInstanceAudit({
+      action: "identity_unlinked",
+      user: user._id,
+      actorUsername: user.username,
+      target: user.username,
+      detail: "every sign-in provider, by a password change",
+    });
+  }
   record.password = await bcrypt.hash(newPassword, PASSWORD_COST_FACTOR);
   await record.save();
 

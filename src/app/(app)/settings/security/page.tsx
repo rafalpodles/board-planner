@@ -30,6 +30,7 @@ export default function SecurityPage() {
     null
   );
   const [methodsFailed, setMethodsFailed] = useState(false);
+  const [linkPassword, setLinkPassword] = useState("");
 
   const readMethods = useCallback(() => {
     api
@@ -65,6 +66,20 @@ export default function SecurityPage() {
           verb="Link"
           divider={false}
           exclude={methods.identities.map((i) => i.provider)}
+          extraBody={methods.hasPassword ? { currentPassword: linkPassword } : undefined}
+          before={
+            methods.hasPassword && (
+              <Input
+                id="linkPassword"
+                type="password"
+                autoComplete="current-password"
+                aria-label="Current password, to link a provider"
+                placeholder="Current password, to link a provider"
+                value={linkPassword}
+                onChange={(e) => setLinkPassword(e.target.value)}
+              />
+            )
+          }
         />
       </div>
     </>

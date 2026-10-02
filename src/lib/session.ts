@@ -9,6 +9,7 @@ import { ApiToken } from "@/models/apiToken";
 import { DeviceEnrolment } from "@/models/deviceEnrolment";
 import { EmailChangeToken } from "@/models/emailChangeToken";
 import { EnrolmentToken } from "@/models/enrolmentToken";
+import { Identity } from "@/models/identity";
 import { OAuthCode } from "@/models/oauthCode";
 import { OAuthToken } from "@/models/oauthToken";
 import { Worker } from "@/models/worker";
@@ -400,7 +401,7 @@ export async function revokeSession(token: string): Promise<boolean> {
 export async function revokeUserCredentials(
   userId: Types.ObjectId | string,
   exceptSessionId?: Types.ObjectId | string | null
-): Promise<void> {
+): Promise<{ identitiesUnlinked: number }> {
   await revokeUserSessions(userId, exceptSessionId);
   await ApiToken.deleteMany({ user: userId });
   await OAuthToken.deleteMany({ user: userId });
@@ -413,6 +414,10 @@ export async function revokeUserCredentials(
   // A machine keeps its identity and owner; only the credential it holds stops matching
   const unmatchable = await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 10);
   await Worker.updateMany({ owner: userId }, { $set: { credentialHash: unmatchable } });
+  // A linked sign-in provider is a standing way in like any token: one linked from a borrowed
+  // session would otherwise outlive the password change meant to end it (BP-828)
+  const unlinked = await Identity.deleteMany({ user: userId });
+  return { identitiesUnlinked: unlinked.deletedCount ?? 0 };
 }
 
 export async function revokeUserSessions(

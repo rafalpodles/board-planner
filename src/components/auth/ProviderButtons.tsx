@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import { Button } from "@/components/ui/Button";
 
 interface Provider {
@@ -18,12 +18,17 @@ export function ProviderButtons({
   verb = "Continue with",
   exclude = [],
   divider = true,
+  extraBody,
+  before,
 }: {
   intent: "signin" | "invite" | "link";
   invitationToken?: string;
   verb?: string;
   exclude?: string[];
   divider?: boolean;
+  extraBody?: Record<string, string>;
+  /** Shown above the buttons, and only when there is a button to show. */
+  before?: ReactNode;
 }) {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [going, setGoing] = useState<string | null>(null);
@@ -48,7 +53,7 @@ export function ProviderButtons({
       const res = await fetch(`/api/auth/oidc/${provider.id}/start`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ intent, invitationToken }),
+        body: JSON.stringify({ intent, invitationToken, ...extraBody }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || typeof data.url !== "string") {
@@ -68,6 +73,7 @@ export function ProviderButtons({
 
   return (
     <div className="space-y-3">
+      {before}
       {divider && (
         <div className="flex items-center gap-3 text-xs text-text-muted" aria-hidden="true">
           <span className="h-px flex-1 bg-border" />

@@ -19,7 +19,6 @@ import {
 } from "@/lib/password-reset";
 import { provenanceRefusal, revokeUserCredentials } from "@/lib/session";
 import { User } from "@/models/user";
-import { Identity } from "@/models/identity";
 
 const ATTEMPTS_PER_SOURCE = 20;
 
@@ -90,7 +89,9 @@ export async function POST(request: Request) {
 
   // Every session, including whoever is signed in on the old password — which is the case somebody
   // resetting a password they believe was stolen is trying to end
-  await revokeUserCredentials(user._id);
+  // Providers go with every other credential, an intruder's included; the account's own can be
+  // linked again
+  const revoked = await revokeUserCredentials(user._id);
 
   try {
     // The link reached the account's address, which is the proof a provider links by
@@ -112,19 +113,6 @@ export async function POST(request: Request) {
   // standing — the exact state this call exists to prevent (BP-353 review).
   await clearAccountAttempts(user.username).catch(() => {});
 
-  // A reset is how somebody takes their account back; a provider an intruder linked would otherwise
-  // outlive it the way an API token did before BP-293. The account's own can be linked again
-  const unlinked = await Identity.deleteMany({ user: user._id }).catch(() => ({ deletedCount: 0 }));
-  if (unlinked.deletedCount > 0) {
-    void logInstanceAudit({
-      action: "identity_unlinked",
-      user: user._id,
-      actorUsername: user.username,
-      target: user.username,
-      detail: "every sign-in provider, by a password reset",
-    });
-  }
-
   // Every other link too, and only once the password is safely written. Issuing is a delete
   // followed by a create, so two requests racing leave two live links; without this, resetting
   // with the second leaves the first able to set the password again, in an inbox the person may
@@ -143,6 +131,16 @@ export async function POST(request: Request) {
 
   // The other half of "was that me?": the audit row answers it for an administrator reading the
   // log, and this answers it for the person whose account it is.
+  if (revoked?.identitiesUnlinked) {
+    void logInstanceAudit({
+      action: "identity_unlinked",
+      user: user._id,
+      actorUsername: user.username,
+      target: user.username,
+      detail: "every sign-in provider, by a password reset",
+    });
+  }
+
   void notifyPasswordChanged({
     email: user.email,
     username: user.username,

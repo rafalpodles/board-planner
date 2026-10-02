@@ -30,7 +30,8 @@ export const DELETE = withAuth(async (_request, { params, user }) => {
   await Identity.deleteOne({ _id: identity._id, user: user._id });
   // Two unlinks in two tabs each counted the other's provider as the way in that remains
   if (!record?.password && (await Identity.countDocuments({ user: user._id })) === 0) {
-    await Identity.create({ ...identity, _id: identity._id });
+    // Straight to the collection, so the row comes back exactly as it was, linkedAt included
+    await Identity.collection.insertOne(identity);
     return NextResponse.json({ error: lastWayIn }, { status: 409 });
   }
 

@@ -157,7 +157,16 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
     // the admin has just handed them
     await invalidateResetTokens(target._id);
     // Before the save: a failure revokes too much rather than leaving the old holder a way in
-    await revokeUserCredentials(target._id);
+    const revoked = await revokeUserCredentials(target._id);
+    if (revoked?.identitiesUnlinked) {
+      void logInstanceAudit({
+        action: "identity_unlinked",
+        user: admin._id,
+        actorUsername: admin.username,
+        target: target.username,
+        detail: "every sign-in provider, by an administrator setting the password",
+      });
+    }
   }
 
   try {

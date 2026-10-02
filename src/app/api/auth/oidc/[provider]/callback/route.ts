@@ -29,7 +29,7 @@ function redirectTo(origin: string, path: string, cookies: string[] = []) {
 }
 
 /** The account an identity is linked to, forgetting a link whose account is gone. */
-async function linkedAccount(claims: VerifiedClaims) {
+async function linkedAccount(claims: VerifiedClaims, signingIn = false) {
   const linked = await Identity.findOne({ issuer: claims.issuer, subject: claims.subject }).lean();
   if (!linked) return null;
   const user = await User.findById(linked.user);
@@ -37,11 +37,12 @@ async function linkedAccount(claims: VerifiedClaims) {
     await Identity.deleteOne({ _id: linked._id });
     return null;
   }
-  await Identity.updateOne({ _id: linked._id }, { $set: { lastUsedAt: new Date() } });
+  if (signingIn) await Identity.updateOne({ _id: linked._id }, { $set: { lastUsedAt: new Date() } });
   return user;
 }
 
-async function link(provider: OidcProvider, claims: VerifiedClaims, user: IUser, how: string) {
+/** False when a sign-in racing this one linked the identity first, to whichever account it was. */
+async function link(provider: OidcProvider, claims: VerifiedClaims, user: IUser, how: string): Promise<boolean> {
   try {
     await Identity.create({
       user: user._id,
@@ -52,9 +53,8 @@ async function link(provider: OidcProvider, claims: VerifiedClaims, user: IUser,
       lastUsedAt: new Date(),
     });
   } catch (err) {
-    // Linked by a sign-in racing this one; whichever account won keeps it
     if ((err as { code?: number }).code !== 11000) throw err;
-    return;
+    return false;
   }
   void logInstanceAudit({
     action: "identity_linked",
@@ -69,6 +69,7 @@ async function link(provider: OidcProvider, claims: VerifiedClaims, user: IUser,
     provider: provider.label,
     providerEmail: claims.email,
   });
+  return true;
 }
 
 /**
@@ -78,14 +79,18 @@ async function link(provider: OidcProvider, claims: VerifiedClaims, user: IUser,
  * it would hand that account to whoever holds the mailbox at the provider.
  */
 async function accountFor(provider: OidcProvider, claims: VerifiedClaims) {
-  const linked = await linkedAccount(claims);
+  const linked = await linkedAccount(claims, true);
   if (linked) return { user: linked };
   if (!claims.email) return { refused: "no_account" as const };
   if (!claims.emailVerified) return { refused: "unverified" as const };
   const user = await User.findOne({ email: claims.email, kind: { $ne: "machine" } });
   if (!user) return { refused: "no_account" as const };
   if (!user.emailVerifiedAt) return { refused: "unproven" as const };
-  await link(provider, claims, user, "by its verified address");
+  if (!(await link(provider, claims, user, "by its verified address"))) {
+    // Linked by a racing sign-in: sign in as whichever account it now belongs to
+    const winner = await linkedAccount(claims, true);
+    return winner ? { user: winner } : { refused: "no_account" as const };
+  }
   return { user };
 }
 
@@ -121,8 +126,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
     if (holder) return back(String(holder._id) === String(current._id) ? "linked" : "taken");
     const user = await User.findById(current._id);
     if (!user) return back("failed");
-    await link(provider, claims, user, "from the account's own settings");
-    return back("linked");
+    return back((await link(provider, claims, user, "from the account's own settings")) ? "linked" : "taken");
   }
 
   if (outcome.intent === "invite") {
