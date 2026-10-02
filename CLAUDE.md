@@ -193,6 +193,10 @@ ENCRYPTION_KEY=           # 32 bytes (hex or base64) — without it integration 
                           # URLs (project team channels, personal) cannot be saved; a wrong-length
                           # key stops the app from starting
 ENCRYPTION_KEYS_OLD=      # Optional — comma-separated retired keys, so a rotation can still decrypt
+LICENCE_KEY=              # Optional — a Pro licence, Ed25519-signed, verified against the public keys
+                          # in src/lib/licence-keys.ts on every getTenant(); nothing is stored. A bad
+                          # key is a startup warning and the Free plan; expired keys keep Pro for 14
+                          # days. Signed by the licence service, or scripts/sign-licence.ts (BP-650)
 BOOTSTRAP_TOKEN=          # Optional — setup code for the first account; unset, one is generated and
                           # printed to the server log while the instance has no users (BP-325)
 APP_ORIGIN=               # Comma-separated origins allowed to write — the CSRF allowlist, together
