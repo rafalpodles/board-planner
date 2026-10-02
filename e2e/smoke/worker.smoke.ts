@@ -229,16 +229,21 @@ async function startDaemon(port: number): Promise<ChildProcess> {
     ["daemon", "--reuseaddr", "--export-all", "--enable=receive-pack", `--base-path=${GIT_ROOT}`, `--port=${port}`, "--listen=127.0.0.1", GIT_ROOT],
     { env: OWN_GIT_ENV, stdio: "ignore" }
   );
-  await expect
-    .poll(() => {
-      try {
-        execFileSync("git", ["ls-remote", `git://127.0.0.1:${port}/${REPO}.git`], { env: OWN_GIT_ENV, stdio: "pipe" });
-        return true;
-      } catch {
-        return false;
-      }
-    }, { timeout: 15_000 })
-    .toBe(true);
+  try {
+    await expect
+      .poll(() => {
+        try {
+          execFileSync("git", ["ls-remote", `git://127.0.0.1:${port}/${REPO}.git`], { env: OWN_GIT_ENV, stdio: "pipe" });
+          return true;
+        } catch {
+          return false;
+        }
+      }, { timeout: 15_000 })
+      .toBe(true);
+  } catch (error) {
+    daemon.kill();
+    throw error;
+  }
   return daemon;
 }
 

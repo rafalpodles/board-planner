@@ -57,6 +57,11 @@ describe("every live smoke runs in a CI job of its own", () => {
     expect(Object.values(SMOKES).sort()).toEqual(smokeFiles.sort());
   });
 
+  it("runs the worker smoke on macOS, where it does not skip itself", () => {
+    const job = workflow.match(/^  smoke_worker:\n(?:(?: {4}.*)?\n)*/m)?.[0] ?? "";
+    expect(job).toMatch(/^ {4}runs-on: macos-/m);
+  });
+
   it("runs each smoke project from ci.yml", () => {
     for (const name of Object.keys(SMOKES)) {
       expect(workflow).toContain(`npx playwright test -c playwright.smoke.config.ts --project=${name}`);
