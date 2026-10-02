@@ -18,6 +18,8 @@ vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/hooks/use-open-task", () => ({ useOpenTask: () => vi.fn() }));
 vi.mock("@/lib/board-refresh", () => ({ emitBoardRefresh: vi.fn(), subscribeBoardRefresh: () => () => {} }));
 vi.mock("@/hooks/use-poll-while-visible", () => ({ usePollWhileVisible: () => {} }));
+const media = vi.hoisted(() => ({ wide: true }));
+vi.mock("@/hooks/use-media-query", () => ({ useMediaQuery: () => media.wide }));
 // happy-dom has no canvas, and the real one would reject the one-byte file below
 vi.mock("@/lib/image-resize", () => ({
   downscaleImage: (file: File) => Promise.resolve({ file, width: 10, height: 10 }),
@@ -48,6 +50,7 @@ function heldStream() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  media.wide = true;
   api.get.mockImplementation((path: string) =>
     path.includes("/pm/messages")
       ? Promise.resolve({ messages: [], nextCursor: null })
@@ -325,5 +328,24 @@ describe("loading older messages", () => {
     await waitFor(() => expect(screen.getByText("message 101")).toBeTruthy());
     expect(screen.getByText("message 1"), "the page read earlier is still there").toBeTruthy();
     expect(screen.queryByRole("button", { name: "Load older messages" })).toBeNull();
+  });
+});
+
+describe("the composer's placeholder (BP-817)", () => {
+  it("keeps the keyboard hints where there is room for them", async () => {
+    render(<PmChat projectId="p1" preloadedProject={PROJECT as never} />);
+    expect(await screen.findByRole("textbox")).toHaveProperty(
+      "placeholder",
+      "Message the PM… (Enter sends, Shift+Enter for a new line, paste to attach)"
+    );
+  });
+
+  it("drops them below sm, keeping the paste hint", async () => {
+    media.wide = false;
+    render(<PmChat projectId="p1" preloadedProject={PROJECT as never} />);
+    expect(await screen.findByRole("textbox")).toHaveProperty(
+      "placeholder",
+      "Message the PM… (paste to attach)"
+    );
   });
 });

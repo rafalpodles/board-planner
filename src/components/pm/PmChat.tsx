@@ -13,6 +13,7 @@ import { downscaleImage, estimateImageTokens } from "@/lib/image-resize";
 import { isPmLockedByInstance, isPmRunnable, pmDisabledReason } from "@/lib/pm/gate";
 import { taskPath } from "@/lib/urls";
 import { useOpenTask } from "@/hooks/use-open-task";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import { Modal } from "@/components/ui/Modal";
 import { BoardLoadFailed } from "@/components/ui/LoadFailed";
 import { EMPTY_THREAD, withNewestPage, withOlderPage, type ThreadPage } from "./thread-paging";
@@ -64,6 +65,7 @@ export function PmChat({
   const [taskIdByKey, setTaskIdByKey] = useState<Record<string, string>>({});
   const openTask = useOpenTask();
   const [input, setInput] = useState("");
+  const roomForKeyboardHints = useMediaQuery("(min-width: 640px)");
   const [working, setWorking] = useState(false);
   const [workingStatus, setWorkingStatus] = useState("");
   const [pending, setPending] = useState<PendingAttachment[]>([]);
@@ -702,7 +704,9 @@ export function PmChat({
             placeholder={
               uploading
                 ? "Attaching image…"
-                : "Message the PM… (Enter sends, Shift+Enter for a new line, paste to attach)"
+                : roomForKeyboardHints
+                  ? "Message the PM… (Enter sends, Shift+Enter for a new line, paste to attach)"
+                  : "Message the PM… (paste to attach)"
             }
             rows={2}
             disabled={working}
