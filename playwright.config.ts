@@ -168,6 +168,10 @@ function devServerEnv(origin: string) {
     OIDC_CLIENT_ID: "board-planner-e2e",
     OIDC_CLIENT_SECRET: "e2e-oidc-secret",
     OIDC_LABEL: OIDC_STUB_LABEL,
+    // The GitHub stub is GitHub's sign-in too; its address is not one the site can be derived from
+    GITHUB_OAUTH_CLIENT_ID: "board-planner-e2e-github",
+    GITHUB_OAUTH_CLIENT_SECRET: "e2e-github-secret",
+    GITHUB_OAUTH_BASE_URL: GITHUB_STUB_URL,
     // Effectively never, for the reason PM_SCHEDULER_TICK_MS is. The digest scheduler starts
     // with the app whenever mail is configured, which it has been for every run since BP-465,
     // and at the 5-minute default it has been ticking all run long ever since — reaching the
