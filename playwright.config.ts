@@ -92,6 +92,12 @@ export const RUN_AGAINST_PRODUCTION_BUILD = process.env.E2E_PROD === "1";
 const CODA_STUB_PORT = Number(process.env.CODA_STUB_PORT ?? PORT + 10001);
 export const CODA_STUB_URL = `http://127.0.0.1:${CODA_STUB_PORT}`;
 
+// The identity provider for sign-in through OIDC (BP-828), on loopback so the app's
+// http-only-on-this-machine rule lets it be plain http
+const OIDC_STUB_PORT = Number(process.env.OIDC_STUB_PORT ?? PORT + 10003);
+export const OIDC_STUB_URL = `http://127.0.0.1:${OIDC_STUB_PORT}`;
+export const OIDC_STUB_LABEL = "E2E Identity";
+
 // GitLab's API, the same way: `gitlabHost` is per-project, so only a project pointed here reaches it.
 const GITLAB_STUB_PORT = Number(process.env.GITLAB_STUB_PORT ?? PORT + 10002);
 export const GITLAB_STUB_URL = `http://127.0.0.1:${GITLAB_STUB_PORT}`;
@@ -158,6 +164,10 @@ function devServerEnv(origin: string) {
     SMTP_USER: MAIL_SERVER.user,
     SMTP_PASS: "e2e",
     SMTP_FROM: MAIL_SERVER.from,
+    OIDC_ISSUER: OIDC_STUB_URL,
+    OIDC_CLIENT_ID: "board-planner-e2e",
+    OIDC_CLIENT_SECRET: "e2e-oidc-secret",
+    OIDC_LABEL: OIDC_STUB_LABEL,
     // Effectively never, for the reason PM_SCHEDULER_TICK_MS is. The digest scheduler starts
     // with the app whenever mail is configured, which it has been for every run since BP-465,
     // and at the 5-minute default it has been ticking all run long ever since — reaching the
@@ -318,6 +328,15 @@ export default defineConfig({
       stdout: "pipe",
       stderr: "pipe",
       env: { GITHUB_STUB_PORT: String(GITHUB_STUB_PORT) },
+    },
+    {
+      command: `node e2e/oidc-stub.mjs`,
+      url: `${OIDC_STUB_URL}/health`,
+      reuseExistingServer: false,
+      timeout: 30_000,
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { OIDC_STUB_PORT: String(OIDC_STUB_PORT) },
     },
     {
       command: `node e2e/coda-stub.mjs`,
