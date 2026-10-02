@@ -3,28 +3,38 @@
  *
  * Usage:
  *   LICENCE_SIGNING_KEY='<line 1 of generate-licence-keypair>' \
- *     npx tsx scripts/sign-licence.ts --customer "Acme Ltd" [--plan pro] [--expires 2027-10-02]
+ *     npx tsx scripts/sign-licence.ts --customer "Acme Ltd" [--plan pro|free] [--expires 2027-10-02]
+ *       [--features ai.pm_agent,integrations.coda]
  *
- * --expires defaults to one year from today. Prints the key, the value LICENCE_KEY takes.
+ * --expires is the last UTC day the key is valid, one year from today by default. --features matters
+ * only for --plan free; pro grants every feature. Prints the key, the value LICENCE_KEY takes.
  */
 
 import { parseArgs } from "node:util";
 import { parseSigningKey, signLicence } from "../src/lib/licence";
 import { FEATURE_KEYS } from "../src/lib/entitlements";
 
-const { values } = parseArgs({
-  options: {
-    customer: { type: "string" },
-    plan: { type: "string", default: "pro" },
-    expires: { type: "string" },
-    features: { type: "string" },
-  },
-});
-
 function fail(message: string): never {
   console.error(message);
   process.exit(1);
 }
+
+function parse() {
+  try {
+    return parseArgs({
+      options: {
+        customer: { type: "string" },
+        plan: { type: "string", default: "pro" },
+        expires: { type: "string" },
+        features: { type: "string" },
+      },
+    }).values;
+  } catch (err) {
+    fail(err instanceof Error ? err.message : String(err));
+  }
+}
+
+const values = parse();
 
 const rawKey = process.env.LICENCE_SIGNING_KEY;
 if (!rawKey) fail("LICENCE_SIGNING_KEY is required");
@@ -41,7 +51,17 @@ const now = new Date();
 const expiresAt = values.expires
   ? new Date(`${values.expires}T23:59:59.999Z`)
   : new Date(Date.UTC(now.getUTCFullYear() + 1, now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999));
-if (Number.isNaN(expiresAt.getTime())) fail("--expires is a date, YYYY-MM-DD");
+// The round trip catches a day that does not exist, which Date would roll into the next month
+if (values.expires && (Number.isNaN(expiresAt.getTime()) || expiresAt.toISOString().slice(0, 10) !== values.expires)) {
+  fail("--expires is a date that exists, YYYY-MM-DD");
+}
+
+let signingKey;
+try {
+  signingKey = parseSigningKey(rawKey);
+} catch (err) {
+  fail(err instanceof Error ? err.message : String(err));
+}
 
 console.log(
   signLicence(
@@ -52,6 +72,6 @@ console.log(
       issuedAt: now.toISOString(),
       expiresAt: expiresAt.toISOString(),
     },
-    parseSigningKey(rawKey)
+    signingKey
   )
 );
