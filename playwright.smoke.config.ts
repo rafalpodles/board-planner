@@ -1,10 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 import base from "./playwright.config";
-
-export const SMOKES = {
-  "mcp-stdio": "mcp-stdio.smoke.ts",
-  worker: "worker.smoke.ts",
-} as const;
+import { SMOKES } from "./e2e/smoke/smokes";
 
 export default defineConfig({
   ...base,

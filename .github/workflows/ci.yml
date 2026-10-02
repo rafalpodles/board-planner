@@ -236,6 +236,92 @@ jobs:
           path: e2e/.artifacts
           retention-days: 7
 
+  # The processes the app ships beside itself, each run for real against the e2e app (BP-711):
+  # the built stdio MCP server here, the worker below. Jobs of their own, outside the e2e groups, so
+  # a slow or platform-bound smoke cannot hold up the main suite. Neither opens a page, so neither
+  # installs a browser. The menubar stays on its own Swift job and the contract tests.
+  smoke_mcp_stdio:
+    name: Smoke — the stdio MCP server against the app
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 })'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            mcp-server/package-lock.json
+      - run: npm ci
+      - run: npm ci
+        working-directory: mcp-server
+      - name: Smoke
+        run: npx playwright test -c playwright.smoke.config.ts --project=mcp-stdio
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: smoke-artifacts-mcp-stdio
+          path: e2e/.artifacts
+          retention-days: 7
+
+  # macOS for the reason the worker job above is: the agent runs under seatbelt. No Docker on a
+  # macOS runner, so MongoDB comes from MongoDB's own tarball.
+  smoke_worker:
+    name: Smoke — the real worker against the app
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      MONGODB_VERSION: 7.0.14
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            worker/package-lock.json
+      - uses: actions/cache@v6
+        id: mongodb-cache
+        with:
+          path: ~/mongodb
+          key: mongodb-${{ runner.os }}-${{ runner.arch }}-${{ env.MONGODB_VERSION }}
+      - name: Download MongoDB
+        if: steps.mongodb-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/mongodb
+          curl -fsSL "https://fastdl.mongodb.org/osx/mongodb-macos-arm64-${MONGODB_VERSION}.tgz" \
+            | tar -xz -C ~/mongodb --strip-components=1
+      - name: Start MongoDB
+        run: |
+          mkdir -p "$RUNNER_TEMP/mongo-data"
+          ~/mongodb/bin/mongod --dbpath "$RUNNER_TEMP/mongo-data" --bind_ip 127.0.0.1 --port 27017 \
+            --fork --logpath "$RUNNER_TEMP/mongod.log"
+      - run: npm ci
+      - run: npm ci
+        working-directory: worker
+      - name: Smoke
+        run: npx playwright test -c playwright.smoke.config.ts --project=worker
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: smoke-artifacts-worker
+          path: |
+            e2e/.artifacts
+            ${{ runner.temp }}/mongod.log
+          retention-days: 7
+
   plan_e2e:
     # Decides which of the six groups below this push can possibly affect, so a change confined to
     # one feature area doesn't pay for all six. See e2e/affected-groups.ts for the mapping and the

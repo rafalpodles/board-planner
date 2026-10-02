@@ -250,19 +250,19 @@ async function mintEnrolmentToken(request: APIRequestContext): Promise<string> {
 
 function startWorker(enrolmentToken: string): ChildProcess {
   const env: Record<string, string> = {
-      HOME,
-      USER: process.env.USER ?? "smoke",
-      LANG: "en_US.UTF-8",
-      SHELL: "/bin/sh",
-      PATH: `${BIN}:${dirname(process.execPath)}:/usr/bin:/bin:/usr/sbin:/sbin`,
-      TMPDIR: join(ROOT, "tmp"),
-      XDG_CONFIG_HOME: join(HOME, ".config"),
-      GH_CONFIG_DIR: join(HOME, ".config", "gh"),
-      CP_API_URL: BASE_URL,
-      CP_ENROLMENT_TOKEN: enrolmentToken,
-      CP_WORKER_NAME: WORKER_NAME,
-      CP_STATE_DIR: STATE,
-      CP_NPM_CACHE: join(ROOT, "npm-cache"),
+    HOME,
+    USER: process.env.USER ?? "smoke",
+    LANG: "en_US.UTF-8",
+    SHELL: "/bin/sh",
+    PATH: `${BIN}:${dirname(process.execPath)}:/usr/bin:/bin:/usr/sbin:/sbin`,
+    TMPDIR: join(ROOT, "tmp"),
+    XDG_CONFIG_HOME: join(HOME, ".config"),
+    GH_CONFIG_DIR: join(HOME, ".config", "gh"),
+    CP_API_URL: BASE_URL,
+    CP_ENROLMENT_TOKEN: enrolmentToken,
+    CP_WORKER_NAME: WORKER_NAME,
+    CP_STATE_DIR: STATE,
+    CP_NPM_CACHE: join(ROOT, "npm-cache"),
   };
   const log = createWriteStream(WORKER_LOG);
   const worker = spawn(process.execPath, [join(WORKER_DIR, "dist", "main.js")], {
