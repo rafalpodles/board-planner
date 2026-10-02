@@ -10,6 +10,7 @@ import { duplicateKeyField } from "@/lib/mongo-errors";
 import {
   claimInvitation,
   revokeClaimedInvitation,
+  revokePendingInvitationsFor,
   recordAcceptance,
   releaseInvitation,
 } from "@/lib/invitations";
@@ -99,6 +100,8 @@ export async function POST(request: Request) {
     await User.deleteOne({ _id: user._id }).catch(() => {});
     return NextResponse.json({ error: INVITATION_REFUSALS.revoked }, { status: 400 });
   }
+  // A re-invite sent while this acceptance held its claim is a second pending row for the address
+  await revokePendingInvitationsFor(invitation.email);
 
   const granted: string[] = [];
   for (const board of authority.boards) {

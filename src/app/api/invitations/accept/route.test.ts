@@ -4,6 +4,7 @@ const claimInvitation = vi.fn();
 const releaseInvitation = vi.fn();
 const recordAcceptance = vi.fn();
 const revokeClaimedInvitation = vi.fn();
+const revokePendingInvitationsFor = vi.fn();
 const authorityAtAcceptance = vi.fn();
 const userCreate = vi.fn();
 const userDeleteOne = vi.fn();
@@ -34,6 +35,7 @@ vi.mock("@/lib/invitations", () => ({
   releaseInvitation,
   recordAcceptance,
   revokeClaimedInvitation,
+  revokePendingInvitationsFor,
 }));
 vi.mock("@/lib/invitation-authority", () => ({ authorityAtAcceptance }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
@@ -92,6 +94,8 @@ describe("POST /api/invitations/accept", () => {
       { upsert: true }
     );
     expect(recordAcceptance).toHaveBeenCalledWith("inv-1", "u-new");
+    // A re-invite sent while the claim was held would otherwise outlive this account
+    expect(revokePendingInvitationsFor).toHaveBeenCalledWith("ada@example.com");
     expect(res.headers.get("set-cookie")).toContain("cps_new");
     expect(await res.json()).toEqual({ username: "ada", landing: "p1" });
   });
@@ -141,6 +145,7 @@ describe("POST /api/invitations/accept", () => {
     expect(res.status).toBe(400);
     expect((await res.json()).error).toBe(INVITATION_REFUSALS.revoked);
     expect(userDeleteOne).toHaveBeenCalledWith({ _id: "u-new" });
+    expect(revokePendingInvitationsFor).not.toHaveBeenCalled();
     expect(grantUpsert).not.toHaveBeenCalled();
     expect(createSession).not.toHaveBeenCalled();
   });

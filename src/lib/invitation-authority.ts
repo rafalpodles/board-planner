@@ -36,6 +36,7 @@ export async function authorityAtAcceptance(
       .lean(),
   ]);
 
+  const living = new Set(people.map((p) => id(p._id)));
   const admins = new Set(
     people.filter((p) => p.role === "admin" && p.kind !== "machine").map((p) => id(p._id))
   );
@@ -48,6 +49,7 @@ export async function authorityAtAcceptance(
   const boards = invitation.boards.filter(
     (b) =>
       existing.has(id(b.project)) &&
+      living.has(id(b.addedBy)) &&
       (admins.has(id(b.addedBy)) || owns.has(`${id(b.addedBy)}:${id(b.project)}`))
   );
   if (!inviterIsAdmin && boards.length === 0) return null;

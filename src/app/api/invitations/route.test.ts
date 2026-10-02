@@ -160,6 +160,7 @@ describe("GET /api/invitations", () => {
     const res = await GET(new Request("http://x/api/invitations"), CTX);
 
     expect(invitationFind).toHaveBeenCalledWith({ status: "pending" });
+    expect(userFind).toHaveBeenCalledWith({ email: { $in: ["ada@example.com", "grace@example.com"] } });
     expect(await res.json()).toEqual([{ email: "ada@example.com" }]);
   });
 

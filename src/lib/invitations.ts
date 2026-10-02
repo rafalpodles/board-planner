@@ -167,9 +167,14 @@ export async function revokeClaimedInvitation(id: Types.ObjectId | string): Prom
 /**
  * Called wherever an account takes an address. Left pending, the invitation would come back to
  * life the day that account is deleted or moves away, granting what it said a week earlier.
+ * Never throws: the callers are mid-way through security steps a failure here must not skip.
  */
 export async function revokePendingInvitationsFor(email: string): Promise<void> {
   if (!email) return;
-  await connectDB();
-  await Invitation.updateMany({ email, status: "pending" }, { $set: { status: "revoked" } });
+  try {
+    await connectDB();
+    await Invitation.updateMany({ email, status: "pending" }, { $set: { status: "revoked" } });
+  } catch (err) {
+    console.error("Failed to withdraw pending invitations for an address:", err);
+  }
 }

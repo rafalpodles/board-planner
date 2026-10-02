@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from "vitest";
 vi.mock("@/lib/auth", () => ({ MIN_PASSWORD_LENGTH: 8 }));
 
 const { checkNewAccount } = await import("./new-account");
+const { FULL_NAME_RULE } = await import("@/lib/identifiers");
 
 const VALID = { username: " Ada ", fullName: " Ada Lovelace ", password: "long-enough", email: " Ada@Example.com " };
 
@@ -24,7 +25,7 @@ describe("checking a new account's fields", () => {
     ["a missing username", { ...VALID, username: "" }, "username, password, and fullName are required"],
     ["a missing password", { ...VALID, password: "" }, "username, password, and fullName are required"],
     ["a reserved username", { ...VALID, username: "pm" }, "That username is reserved"],
-    ["a name of only spaces", { ...VALID, fullName: "   " }, undefined],
+    ["a name of only spaces", { ...VALID, fullName: "   " }, FULL_NAME_RULE],
     ["an address that is not a string", { ...VALID, email: 42 }, "Invalid email"],
     ["an address that is not one", { ...VALID, email: "not-an-address" }, "That does not look like an email address"],
     ["a short password", { ...VALID, password: "short" }, "Password must be at least 8 characters"],
@@ -32,7 +33,6 @@ describe("checking a new account's fields", () => {
   ])("refuses %s", (_label, body, error) => {
     const checked = checkNewAccount(body);
 
-    expect(checked.ok).toBe(false);
-    if (error && !checked.ok) expect(checked.error).toBe(error);
+    expect(checked).toEqual({ ok: false, error });
   });
 });

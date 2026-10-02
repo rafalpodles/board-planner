@@ -70,7 +70,8 @@ describe("POST /api/invitations/lookup", () => {
     const res = await lookup();
 
     expect(res.status).toBe(400);
-    expect((await res.json()).reason).toBe("used");
+    expect(await res.json()).toEqual({ error: INVITATION_REFUSALS.used, reason: "used" });
+    expect(userExists).toHaveBeenCalledWith({ email: "ada@example.com" });
     expect(revokePendingInvitationsFor).toHaveBeenCalledWith("ada@example.com");
   });
 

@@ -160,11 +160,16 @@ describe("what an invitation may still grant when it is accepted", () => {
     ).toBeNull();
   });
 
-  it("refuses an invitation whose inviter was deleted", async () => {
-    world({ people: [], projects: [p1], grants: [{ subject: admin, object: p1, relation: "owner" }] });
+  // A grant can outlive its account (a deletion that failed half-way); it still backs nothing
+  it("refuses a board added by somebody since deleted, whatever grant they left behind", async () => {
+    world({ people: [], projects: [p1], grants: [{ subject: owner, object: p1, relation: "owner" }] });
 
     expect(
-      await authorityAtAcceptance({ role: "admin", invitedBy: admin, boards: [] } as never)
+      await authorityAtAcceptance({
+        role: "member",
+        invitedBy: owner,
+        boards: [board(p1, owner)],
+      } as never)
     ).toBeNull();
   });
 });

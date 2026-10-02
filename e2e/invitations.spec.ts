@@ -292,9 +292,12 @@ test("an invitation whose inviter was deleted works once another admin resends i
   ]);
   expect(resent.status()).toBe(200);
   const link = await latestLink(email);
-  expect(link).not.toContain(oldToken);
 
   const stranger = await asStranger(browser);
+  await stranger.page.goto(`/invite?token=${oldToken}`);
+  await expect(alertOn(stranger.page)).toHaveText(
+    "This invitation link is not valid. Ask whoever invited you for a new one."
+  );
   await accept(stranger.page, link, "rescued-person");
   await expect(stranger.page).toHaveURL(new RegExp(`/projects/${PROJECT_ID}`));
   await stranger.context.close();
@@ -340,6 +343,16 @@ test("a member cannot list, send, resend or revoke invitations", async ({ browse
   expect(answers.map((a) => a.status())).toEqual([403, 403, 403, 403]);
   expect(await (await db()).collection("invitations").countDocuments({ status: "pending" })).toBe(1);
   await context.close();
+
+  // The control: the same request, with the same headers, from an administrator's session goes
+  // through — so the four refusals above are the role check, not a provenance refusal
+  const adminContext = await browser.newContext();
+  await signInContext(adminContext, "admin");
+  const allowed = await adminContext.request.delete(`/api/invitations/${row!._id}`, {
+    headers: SAME_ORIGIN,
+  });
+  expect(allowed.status()).toBe(200);
+  await adminContext.close();
 });
 
 // An account taking the address withdraws the invitation for good: hidden alone, it would come

@@ -50,6 +50,9 @@ describe("the invitation page", () => {
     render(<InvitePage />);
 
     expect(await screen.findByText("This invitation cannot be used")).toBeTruthy();
+    expect(
+      screen.getByText("This invitation has expired. Ask whoever invited you for a new one.")
+    ).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
   });
 
@@ -75,6 +78,7 @@ describe("the invitation page", () => {
     render(<InvitePage />);
 
     expect(await screen.findByText("Too many attempts. Try again in 15 minutes.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
     expect(screen.queryByText("This invitation cannot be used")).toBeNull();
   });
 });

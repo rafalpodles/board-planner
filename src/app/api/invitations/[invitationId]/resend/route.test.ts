@@ -87,6 +87,7 @@ describe("POST /api/invitations/:id/resend", () => {
     userExists.mockResolvedValue({ _id: "u2" });
 
     expect((await resend()).status).toBe(409);
+    expect(userExists).toHaveBeenCalledWith({ email: "ada@example.com" });
     expect(reissueInvitation).not.toHaveBeenCalled();
   });
 

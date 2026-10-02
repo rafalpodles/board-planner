@@ -241,6 +241,12 @@ describe("revoking because nothing backs it any more", () => {
     );
   });
 
+  it("never throws: its callers are mid-way through security steps", async () => {
+    updateMany.mockRejectedValue(new Error("write timeout"));
+
+    await expect(revokePendingInvitationsFor("ada@example.com")).resolves.toBeUndefined();
+  });
+
   it("does nothing for an account with no address", async () => {
     await revokePendingInvitationsFor("");
 

@@ -188,7 +188,9 @@ describe("PUT /api/users/me — changing the address that can reset the password
     expect(logInstanceAudit).toHaveBeenCalledWith(
       expect.objectContaining({ action: "user_email_changed_self", detail: expect.stringContaining("old@example.com") })
     );
-    expect(revokePendingInvitationsFor).toHaveBeenCalledWith("new@example.com");
+    // An address claimed with no inbox behind it proves nothing, so it must not withdraw
+    // somebody's invitation for good; the invitation is refused only while the address is held
+    expect(revokePendingInvitationsFor).not.toHaveBeenCalled();
   });
 
   it("removes the address at once, drops any pending change, and tells the address removed", async () => {
