@@ -12,6 +12,7 @@ vi.mock("openid-client", () => ({
   authorizationCodeGrant,
   buildAuthorizationUrl,
   allowInsecureRequests: "allow-insecure",
+  skipStateCheck: Symbol("skip-state-check"),
   randomPKCECodeVerifier: () => "verifier",
   calculatePKCECodeChallenge: async () => "challenge",
   randomState: () => "state-1",

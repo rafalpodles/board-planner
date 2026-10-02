@@ -127,8 +127,38 @@ test("an address no account uses is refused, and no account is made", async ({ p
   expect(await (await db()).collection("users").countDocuments()).toBe(before);
 });
 
-// The round trip is bound to the browser that began it, and spent once
-test("a callback replayed, or arriving in another browser, signs nobody in", async ({ page, browser }) => {
+// The round trip is bound to the browser that began it: a callback carried to another browser —
+// a link somebody is tricked into opening — signs nobody in there
+test("a callback completed in another browser signs nobody in", async ({ page, browser }) => {
+  const email = freshAddress("member");
+  await (await db()).collection("users").updateOne({ _id: MEMBER_ID }, { $set: { email } });
+  await nextPerson({ sub: "carried-sub", email });
+
+  // The first browser starts the flow but never arrives back, so the flow is still live. A
+  // redirect's next hop is not routable, so the provider's answer is read without following it
+  let carried = "";
+  await page.route(`${OIDC_STUB_URL}/authorize**`, async (route) => {
+    const answer = await route.fetch({ maxRedirects: 0 });
+    carried = answer.headers()["location"] ?? "";
+    await route.abort();
+  });
+  await page.goto("/login");
+  await providerButton(page).click();
+  await expect.poll(() => carried).not.toBe("");
+
+  const elsewhere = await fresh(browser);
+  await elsewhere.page.goto(carried);
+  await expect(elsewhere.page).toHaveURL(/\/login\?sso=failed/);
+  expect((await elsewhere.page.request.get("/api/auth/me")).status()).toBe(401);
+  await elsewhere.context.close();
+
+  // The control: the browser that began it completes the same callback
+  await page.unroute(`${OIDC_STUB_URL}/authorize**`);
+  await page.goto(carried);
+  await expect(page).toHaveURL(/\/projects/);
+});
+
+test("a callback replayed after it was used signs nobody in", async ({ page }) => {
   const email = freshAddress("member");
   await (await db()).collection("users").updateOne({ _id: MEMBER_ID }, { $set: { email } });
   await nextPerson({ sub: "replay-sub", email });
@@ -137,18 +167,12 @@ test("a callback replayed, or arriving in another browser, signs nobody in", asy
     signInWithProvider(page),
   ]);
   await expect(page).toHaveURL(/\/projects/);
+  await page.request.post("/api/auth/logout", { headers: { "Sec-Fetch-Site": "same-origin" } });
 
-  const elsewhere = await fresh(browser);
-  await elsewhere.page.goto(callback.url());
-  await expect(elsewhere.page).toHaveURL(/\/login\?sso=failed/);
-  expect((await elsewhere.page.request.get("/api/auth/me")).status()).toBe(401);
-  await elsewhere.context.close();
+  await page.goto(callback.url());
 
-  const replayed = await fresh(browser);
-  await replayed.page.goto("/login");
-  await replayed.page.goto(callback.url());
-  await expect(replayed.page).toHaveURL(/\/login\?sso=failed/);
-  await replayed.context.close();
+  await expect(page).toHaveURL(/\/login\?sso=failed/);
+  expect((await page.request.get("/api/auth/me")).status()).toBe(401);
 });
 
 test("an invitation is accepted with the provider, and the account then signs in with it alone", async ({ browser }) => {
