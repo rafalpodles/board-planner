@@ -44,10 +44,17 @@ export default function SecurityPage() {
 
   useEffect(() => {
     readMethods();
-    const result = LINK_RESULTS[new URLSearchParams(window.location.search).get("link") ?? ""];
-    if (result) toast(result.text, result.tone);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readMethods]);
+
+  // Said once: the answer leaves the address before it is shown, so neither a second effect run
+  // nor a reload repeats it
+  useEffect(() => {
+    const result = LINK_RESULTS[new URLSearchParams(window.location.search).get("link") ?? ""];
+    if (!result) return;
+    window.history.replaceState(null, "", "/settings/security");
+    toast(result.text, result.tone);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const providersSection = methods && (
     <>

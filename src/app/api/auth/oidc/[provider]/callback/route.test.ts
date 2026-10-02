@@ -5,22 +5,24 @@ const holdForAcceptance = vi.fn();
 const identityFindOne = vi.fn();
 const identityCreate = vi.fn();
 const identityUpdateOne = vi.fn();
-const identityExists = vi.fn();
+const identityDeleteOne = vi.fn();
 const userFindById = vi.fn();
 const userFindOne = vi.fn();
 const invitationFindOne = vi.fn();
 const createSession = vi.fn();
+const getAuthUser = vi.fn();
 const logInstanceAudit = vi.fn();
+const notifyIdentityLinked = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
-vi.mock("@/lib/auth", () => ({ getClientIp: () => "203.0.113.9" }));
+vi.mock("@/lib/auth", () => ({ getClientIp: () => "203.0.113.9", getAuthUser }));
 vi.mock("@/models/rateLimit", async () => {
   const { inMemoryRateLimitModel } = await import("@/lib/rate-limit-test-store");
   return { RateLimit: inMemoryRateLimitModel() };
 });
 vi.mock("@/lib/session", () => ({
   selfOrigin: () => "https://planner.example",
-  readFlowCookie: () => "cpo_binder",
+  readFlowCookie: (_request: Request, name: string) => (name === "bp_oidc" ? "cpo_binder" : null),
   buildFlowCookie: (name: string, value: string) => `${name}=${value}`,
   buildSessionCookie: (token: string) => `session=${token}`,
   legacySessionCookies: () => [],
@@ -37,8 +39,14 @@ vi.mock("@/lib/oidc/flow", () => ({
   holdForAcceptance,
 }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
+vi.mock("@/lib/security-mail", () => ({ notifyIdentityLinked }));
 vi.mock("@/models/identity", () => ({
-  Identity: { findOne: identityFindOne, create: identityCreate, updateOne: identityUpdateOne, exists: identityExists },
+  Identity: {
+    findOne: identityFindOne,
+    create: identityCreate,
+    updateOne: identityUpdateOne,
+    deleteOne: identityDeleteOne,
+  },
 }));
 vi.mock("@/models/user", () => ({ User: { findById: userFindById, findOne: userFindOne } }));
 vi.mock("@/models/invitation", () => ({ Invitation: { findOne: invitationFindOne } }));
@@ -46,62 +54,94 @@ vi.mock("@/models/invitation", () => ({ Invitation: { findOne: invitationFindOne
 const { GET } = await import("./route");
 const { resetRateLimits } = await import("@/lib/rate-limit");
 
-const ADA = { _id: "u1", username: "ada", kind: "human" };
+const ISSUER = "https://id.example.com";
+const ADA = { _id: "u1", username: "ada", email: "ada@example.com", kind: "human", emailVerifiedAt: new Date() };
 const callback = (provider = "oidc") =>
   GET(new Request(`https://planner.example/api/auth/oidc/${provider}/callback?code=c&state=s`), {
     params: Promise.resolve({ provider }),
   });
-const location = (res: Response) => new URL(res.headers.get("location")!).pathname + new URL(res.headers.get("location")!).search;
+const location = (res: Response) => {
+  const url = new URL(res.headers.get("location")!);
+  return url.pathname + url.search;
+};
+const lean = (value: unknown) => ({ lean: () => Promise.resolve(value) });
 
-function signinWith(claims: Partial<{ subject: string; email: string; emailVerified: boolean }>) {
+function finishes(intent: "signin" | "invite" | "link", claims: Record<string, unknown> = {}, extra = {}) {
   finishFlow.mockResolvedValue({
     ok: true,
-    intent: "signin",
-    invitationTokenHash: null,
-    claims: { subject: "s1", email: "ada@example.com", emailVerified: true, name: "", ...claims },
+    intent,
+    invitationTokenHash: intent === "invite" ? "h1" : null,
+    userId: intent === "link" ? "u1" : null,
+    claims: { issuer: ISSUER, subject: "s1", email: "ada@example.com", emailVerified: true, name: "", ...claims },
+    ...extra,
   });
 }
-const lean = (value: unknown) => ({ lean: () => Promise.resolve(value) });
 
 beforeEach(async () => {
   vi.clearAllMocks();
   await resetRateLimits();
   identityFindOne.mockReturnValue(lean(null));
   userFindOne.mockResolvedValue(ADA);
+  userFindById.mockResolvedValue(ADA);
   identityCreate.mockResolvedValue({});
   createSession.mockResolvedValue({ token: "cps_new", absoluteExpiresAt: new Date() });
 });
 
 describe("GET /api/auth/oidc/:provider/callback, signing in", () => {
-  it("signs in the account an identity is already linked to, by subject", async () => {
-    signinWith({ email: "somebody-else@example.com", emailVerified: false });
+  it("signs in the account an identity is already linked to, found by issuer and subject", async () => {
+    finishes("signin", { email: "somebody-else@example.com", emailVerified: false });
     identityFindOne.mockReturnValue(lean({ _id: "i1", user: "u1" }));
-    userFindById.mockResolvedValue(ADA);
 
     const res = await callback();
 
+    expect(identityFindOne).toHaveBeenCalledWith({ issuer: ISSUER, subject: "s1" });
     expect(location(res)).toBe("/projects");
     expect(createSession).toHaveBeenCalledWith(expect.objectContaining({ userId: "u1" }));
     expect(res.headers.get("set-cookie")).toContain("session=cps_new");
     expect(identityCreate).not.toHaveBeenCalled();
-    expect(userFindOne).not.toHaveBeenCalled();
   });
 
-  it("links an identity the first time, by the verified address, and records it", async () => {
-    signinWith({});
+  it("links an identity the first time to the account whose address was proven, and tells its mailbox", async () => {
+    finishes("signin");
 
     const res = await callback();
 
     expect(location(res)).toBe("/projects");
     expect(userFindOne).toHaveBeenCalledWith({ email: "ada@example.com", kind: { $ne: "machine" } });
     expect(identityCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ user: "u1", provider: "oidc", subject: "s1", email: "ada@example.com" })
+      expect.objectContaining({ user: "u1", provider: "oidc", issuer: ISSUER, subject: "s1" })
     );
     expect(logInstanceAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "identity_linked", target: "ada" }));
+    expect(notifyIdentityLinked).toHaveBeenCalledWith(expect.objectContaining({ email: "ada@example.com", provider: "Acme" }));
+  });
+
+  // An address an administrator typed, or one set without confirmation, is a claim: linking by it
+  // would hand the account to whoever holds that mailbox at the provider
+  it("refuses to link by an address that was never proven", async () => {
+    finishes("signin");
+    userFindOne.mockResolvedValue({ ...ADA, emailVerifiedAt: null });
+
+    const res = await callback();
+
+    expect(location(res)).toBe("/login?sso=unproven");
+    expect(identityCreate).not.toHaveBeenCalled();
+    expect(createSession).not.toHaveBeenCalled();
+  });
+
+  it("forgets a link whose account is gone, and does not sign in through it", async () => {
+    finishes("signin");
+    identityFindOne.mockReturnValue(lean({ _id: "i-dead", user: "u-gone" }));
+    userFindById.mockResolvedValue(null);
+    userFindOne.mockResolvedValue(null);
+
+    const res = await callback();
+
+    expect(identityDeleteOne).toHaveBeenCalledWith({ _id: "i-dead" });
+    expect(location(res)).toBe("/login?sso=no_account");
   });
 
   it("refuses an address the provider has not verified", async () => {
-    signinWith({ emailVerified: false });
+    finishes("signin", { emailVerified: false });
 
     const res = await callback();
 
@@ -111,7 +151,7 @@ describe("GET /api/auth/oidc/:provider/callback, signing in", () => {
   });
 
   it("refuses an address no account uses, making none", async () => {
-    signinWith({});
+    finishes("signin");
     userFindOne.mockResolvedValue(null);
 
     const res = await callback();
@@ -122,7 +162,7 @@ describe("GET /api/auth/oidc/:provider/callback, signing in", () => {
   });
 
   it("never signs a machine account in, even one linked already", async () => {
-    signinWith({});
+    finishes("signin");
     identityFindOne.mockReturnValue(lean({ _id: "i1", user: "m1" }));
     userFindById.mockResolvedValue({ _id: "m1", username: "pm", kind: "machine" });
 
@@ -142,6 +182,14 @@ describe("GET /api/auth/oidc/:provider/callback, signing in", () => {
     expect(createSession).not.toHaveBeenCalled();
   });
 
+  it("reads the flow from its own cookie", async () => {
+    finishes("signin");
+
+    await callback();
+
+    expect(finishFlow).toHaveBeenCalledWith(expect.objectContaining({ binder: "cpo_binder" }));
+  });
+
   it("refuses a provider that is not set up", async () => {
     const res = await callback("github");
 
@@ -150,26 +198,48 @@ describe("GET /api/auth/oidc/:provider/callback, signing in", () => {
   });
 });
 
+describe("GET /api/auth/oidc/:provider/callback, linking from settings", () => {
+  beforeEach(() => getAuthUser.mockResolvedValue({ _id: "u1", username: "ada" }));
+
+  it("links the identity to the account that started it, whatever its address", async () => {
+    finishes("link", { email: "ada.personal@example.com" });
+
+    const res = await callback();
+
+    expect(location(res)).toBe("/settings/security?link=linked");
+    expect(identityCreate).toHaveBeenCalledWith(expect.objectContaining({ user: "u1", issuer: ISSUER, subject: "s1" }));
+    expect(createSession).not.toHaveBeenCalled();
+  });
+
+  // Started by one account, finished in a browser now signed in as another: never link across
+  it("refuses when the browser is no longer signed in as the account that started it", async () => {
+    finishes("link");
+    getAuthUser.mockResolvedValue({ _id: "u2", username: "bob" });
+
+    expect(location(await callback())).toBe("/settings/security?link=failed");
+    expect(identityCreate).not.toHaveBeenCalled();
+  });
+
+  it("refuses an identity that already belongs to another account", async () => {
+    finishes("link");
+    identityFindOne.mockReturnValue(lean({ _id: "i1", user: "u9" }));
+    userFindById.mockResolvedValue({ _id: "u9", username: "someone" });
+
+    expect(location(await callback())).toBe("/settings/security?link=taken");
+    expect(identityCreate).not.toHaveBeenCalled();
+  });
+});
+
 describe("GET /api/auth/oidc/:provider/callback, accepting an invitation", () => {
   const INVITATION = { tokenHash: "h1", email: "ada@example.com", status: "pending" };
 
-  function inviteWith(claims: Partial<{ email: string; emailVerified: boolean }>) {
-    finishFlow.mockResolvedValue({
-      ok: true,
-      intent: "invite",
-      invitationTokenHash: "h1",
-      claims: { subject: "s9", email: "ada@example.com", emailVerified: true, name: "", ...claims },
-    });
-  }
-
   beforeEach(() => {
     invitationFindOne.mockReturnValue(lean(INVITATION));
-    identityExists.mockResolvedValue(null);
     holdForAcceptance.mockResolvedValue("cpo_held");
   });
 
   it("holds the verified identity for the username form, without making an account", async () => {
-    inviteWith({});
+    finishes("invite");
 
     const res = await callback();
 
@@ -187,26 +257,25 @@ describe("GET /api/auth/oidc/:provider/callback, accepting an invitation", () =>
     ["mismatch", { email: "someone-else@example.com" }],
     ["unverified", { emailVerified: false }],
   ])("refuses as %s", async (reason, claims) => {
-    inviteWith(claims);
+    finishes("invite", claims);
 
-    const res = await callback();
-
-    expect(location(res)).toBe(`/invite/sso?error=${reason}`);
+    expect(location(await callback())).toBe(`/invite/sso?error=${reason}`);
     expect(holdForAcceptance).not.toHaveBeenCalled();
   });
 
   it("refuses an invitation that is no longer pending", async () => {
-    inviteWith({});
+    finishes("invite");
     invitationFindOne.mockReturnValue(lean(null));
 
     expect(location(await callback())).toBe("/invite/sso?error=invitation");
   });
 
   it("refuses an identity that already belongs to an account", async () => {
-    inviteWith({});
-    identityExists.mockResolvedValue({ _id: "i1" });
+    finishes("invite");
+    identityFindOne.mockReturnValue(lean({ _id: "i1", user: "u1" }));
 
     expect(location(await callback())).toBe("/invite/sso?error=linked");
+    expect(identityFindOne).toHaveBeenCalledWith({ issuer: ISSUER, subject: "s1" });
     expect(holdForAcceptance).not.toHaveBeenCalled();
   });
 });

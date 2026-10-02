@@ -31,6 +31,8 @@ const boardsOnlyOwnedBy = vi.fn();
 const grantDeleteMany = vi.fn();
 vi.mock("@/lib/grants", () => ({ check, accessibleProjectIds: vi.fn(), boardsOnlyOwnedBy }));
 vi.mock("@/models/grant", () => ({ Grant: { deleteMany: grantDeleteMany } }));
+const identityDeleteMany = vi.fn();
+vi.mock("@/models/identity", () => ({ Identity: { deleteMany: identityDeleteMany } }));
 vi.mock("@/lib/session", () => ({ revokeUserSessions, revokeUserCredentials }));
 vi.mock("@/lib/password-reset", () => ({ invalidateResetTokens }));
 const cancelEmailChange = vi.fn();
@@ -542,6 +544,15 @@ describe("DELETE /api/users/:id", () => {
 
     expect(res.status).toBe(200);
     expect(grantDeleteMany).toHaveBeenCalledWith({ subject: TARGET_HEX });
+  });
+
+  // A link left behind would refuse the same person's provider as "already linked" for good (BP-828)
+  it("removes every sign-in provider the deleted account had linked", async () => {
+    found(person());
+
+    await DELETE(...del(TARGET_HEX));
+
+    expect(identityDeleteMany).toHaveBeenCalledWith({ user: TARGET_HEX });
   });
 
   it("leaves the grants alone when the account was not deleted", async () => {

@@ -181,7 +181,7 @@ describe("PUT /api/users/me — changing the address that can reset the password
     expect(response.status).toBe(200);
     expect(userFindByIdAndUpdate).toHaveBeenCalledWith(
       "u1",
-      { $set: { email: "new@example.com" } },
+      { $set: { email: "new@example.com", emailVerifiedAt: null } },
       expect.anything()
     );
     expect(issueEmailChange).not.toHaveBeenCalled();
@@ -198,7 +198,11 @@ describe("PUT /api/users/me — changing the address that can reset the password
     await settled();
 
     expect(response.status).toBe(200);
-    expect(userFindByIdAndUpdate).toHaveBeenCalledWith("u1", { $set: { email: "" } }, expect.anything());
+    expect(userFindByIdAndUpdate).toHaveBeenCalledWith(
+      "u1",
+      { $set: { email: "", emailVerifiedAt: null } },
+      expect.anything()
+    );
     expect(cancelEmailChange).toHaveBeenCalledWith("u1");
     expect(issueEmailChange).not.toHaveBeenCalled();
     expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({ to: "old@example.com" }));

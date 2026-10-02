@@ -3,6 +3,7 @@ import { createHash, randomBytes } from "crypto";
 import mongoose from "mongoose";
 import { OIDC_STUB_LABEL, OIDC_STUB_URL } from "../playwright.config";
 import { ADMIN_ID, E2E_MONGODB_URI, MEMBER_ID, MEMBER_USERNAME, PROJECT_ID, seed } from "./seed";
+import { signIn } from "./session";
 
 /**
  * BP-828. Signing in, and accepting an invitation, through an OpenID Connect provider — the e2e
@@ -73,7 +74,7 @@ test.afterEach(async () => {
 
 test("an account signs in with the provider by its verified address, and is linked for next time", async ({ page, browser }) => {
   const email = freshAddress("member");
-  await (await db()).collection("users").updateOne({ _id: MEMBER_ID }, { $set: { email } });
+  await (await db()).collection("users").updateOne({ _id: MEMBER_ID }, { $set: { email, emailVerifiedAt: new Date() } });
   const sub = `sub-${randomBytes(4).toString("hex")}`;
   await nextPerson({ sub, email });
 
@@ -100,9 +101,44 @@ test("an account signs in with the provider by its verified address, and is link
   await later.context.close();
 });
 
+// An address an administrator typed is a claim, not a proof: whoever holds that mailbox at the
+// provider would otherwise sign in as this account
+test("an account whose address was never proven is not linked by it", async ({ page }) => {
+  const email = freshAddress("member");
+  await (await db()).collection("users").updateOne({ _id: MEMBER_ID }, { $set: { email, emailVerifiedAt: null } });
+  await nextPerson({ sub: "unproven-sub", email });
+
+  await signInWithProvider(page);
+
+  await expect(page).toHaveURL(/\/login\?sso=unproven/);
+  await expect(alertOn(page)).toContainText("Your address here has not been confirmed");
+  expect(await (await db()).collection("identities").countDocuments()).toBe(0);
+});
+
+test("a signed-in account links a provider from its settings, then signs in with it", async ({ page, browser }) => {
+  await signIn(page, "member");
+  const sub = `link-${randomBytes(4).toString("hex")}`;
+  await nextPerson({ sub, email: freshAddress("personal") });
+
+  await page.goto("/settings/security");
+  await page.getByRole("button", { name: `Link ${OIDC_STUB_LABEL}` }).click();
+
+  await expect(page.getByTestId("toast").filter({ hasText: "Linked. You can now sign in with it." })).toHaveCount(1);
+  await expect(page).toHaveURL(/\/settings\/security$/);
+  await expect(page.getByRole("button", { name: `Unlink ${OIDC_STUB_LABEL}` })).toBeVisible();
+  expect(await (await db()).collection("identities").findOne({ subject: sub })).toMatchObject({ user: MEMBER_ID });
+
+  const later = await fresh(browser);
+  await nextPerson({ sub, email: freshAddress("personal") });
+  await signInWithProvider(later.page);
+  await expect(later.page).toHaveURL(/\/projects/);
+  expect((await (await later.page.request.get("/api/auth/me")).json()).username).toBe(MEMBER_USERNAME);
+  await later.context.close();
+});
+
 test("an address the provider has not verified does not sign anybody in", async ({ page }) => {
   const email = freshAddress("member");
-  await (await db()).collection("users").updateOne({ _id: MEMBER_ID }, { $set: { email } });
+  await (await db()).collection("users").updateOne({ _id: MEMBER_ID }, { $set: { email, emailVerifiedAt: new Date() } });
   await nextPerson({ sub: "unverified-sub", email, email_verified: false });
 
   await signInWithProvider(page);
@@ -131,7 +167,7 @@ test("an address no account uses is refused, and no account is made", async ({ p
 // a link somebody is tricked into opening — signs nobody in there
 test("a callback completed in another browser signs nobody in", async ({ page, browser }) => {
   const email = freshAddress("member");
-  await (await db()).collection("users").updateOne({ _id: MEMBER_ID }, { $set: { email } });
+  await (await db()).collection("users").updateOne({ _id: MEMBER_ID }, { $set: { email, emailVerifiedAt: new Date() } });
   await nextPerson({ sub: "carried-sub", email });
 
   // The first browser starts the flow but never arrives back, so the flow is still live. A
@@ -170,7 +206,7 @@ test("a callback completed in another browser signs nobody in", async ({ page, b
 
 test("a callback replayed after it was used signs nobody in", async ({ page }) => {
   const email = freshAddress("member");
-  await (await db()).collection("users").updateOne({ _id: MEMBER_ID }, { $set: { email } });
+  await (await db()).collection("users").updateOne({ _id: MEMBER_ID }, { $set: { email, emailVerifiedAt: new Date() } });
   await nextPerson({ sub: "replay-sub", email });
   const [callback] = await Promise.all([
     page.waitForRequest((r) => r.url().includes("/api/auth/oidc/oidc/callback")),

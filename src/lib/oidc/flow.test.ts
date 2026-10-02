@@ -93,7 +93,7 @@ describe("finishing a sign-in", () => {
 
   it("has the library check the code against the state, nonce and verifier it issued", async () => {
     findOneAndDelete.mockResolvedValue(FLOW);
-    grantGives({ sub: "s1", email: "Ada@Example.com", email_verified: true, name: "Ada" });
+    grantGives({ iss: "https://id.example.com", sub: "s1", email: "Ada@Example.com", email_verified: true, name: "Ada" });
 
     const outcome = await finishFlow({ provider: PROVIDER, binder: "cpo_b", origin: ORIGIN, query: "?code=c&state=state-1" });
 
@@ -110,13 +110,14 @@ describe("finishing a sign-in", () => {
       ok: true,
       intent: "signin",
       invitationTokenHash: null,
-      claims: { subject: "s1", email: "ada@example.com", emailVerified: true, name: "Ada" },
+      userId: null,
+      claims: { issuer: "https://id.example.com", subject: "s1", email: "ada@example.com", emailVerified: true, name: "Ada" },
     });
   });
 
   it.each([[undefined], ["true"], [1]])("treats email_verified %j as not verified", async (value) => {
     findOneAndDelete.mockResolvedValue(FLOW);
-    grantGives({ sub: "s1", email: "ada@example.com", email_verified: value });
+    grantGives({ iss: "https://id.example.com", sub: "s1", email: "ada@example.com", email_verified: value });
 
     const outcome = await finishFlow({ provider: PROVIDER, binder: "cpo_b", origin: ORIGIN, query: "" });
 
@@ -131,5 +132,38 @@ describe("finishing a sign-in", () => {
       ok: false,
       reason: "rejected",
     });
+  });
+});
+
+describe("what Google vouches for", () => {
+  const GOOGLE = { ...PROVIDER, id: "google" as const, issuer: "https://accounts.google.com" };
+  const FLOW = { provider: "google", state: "state-1", nonce: "nonce-1", codeVerifier: "verifier", intent: "signin", invitationTokenHash: null };
+
+  // A consumer Google account can be opened on any address; Google only speaks for its own
+  // domain and for the ones a Workspace manages
+  it.each([
+    ["a gmail.com address", { email: "ada@gmail.com" }, true],
+    ["a Workspace address", { email: "ada@corp.com", hd: "corp.com" }, true],
+    ["a company address on a consumer account", { email: "ada@corp.com" }, false],
+  ])("counts %s as verified: %s", async (_label, claims, verified) => {
+    findOneAndDelete.mockResolvedValue(FLOW);
+    authorizationCodeGrant.mockResolvedValue({
+      claims: () => ({ iss: "https://accounts.google.com", sub: "g1", email_verified: true, ...claims }),
+    });
+
+    const outcome = await finishFlow({ provider: GOOGLE, binder: "cpo_b", origin: ORIGIN, query: "" });
+
+    expect(outcome.ok && outcome.claims.emailVerified).toBe(verified);
+  });
+
+  it("leaves a generic issuer's word on verification alone", async () => {
+    findOneAndDelete.mockResolvedValue({ ...FLOW, provider: "oidc" });
+    authorizationCodeGrant.mockResolvedValue({
+      claims: () => ({ iss: "https://id.example.com", sub: "s1", email: "ada@corp.com", email_verified: true }),
+    });
+
+    const outcome = await finishFlow({ provider: PROVIDER, binder: "cpo_b", origin: ORIGIN, query: "" });
+
+    expect(outcome.ok && outcome.claims.emailVerified).toBe(true);
   });
 });

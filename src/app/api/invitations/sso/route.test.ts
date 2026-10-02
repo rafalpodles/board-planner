@@ -5,6 +5,7 @@ const spendAcceptance = vi.fn();
 const claimInvitationByHash = vi.fn();
 const releaseInvitation = vi.fn();
 const completeAcceptance = vi.fn();
+const provenanceRefusal = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ getClientIp: () => "203.0.113.9" }));
@@ -13,8 +14,8 @@ vi.mock("@/models/rateLimit", async () => {
   return { RateLimit: inMemoryRateLimitModel() };
 });
 vi.mock("@/lib/session", () => ({
-  provenanceRefusal: () => null,
-  readFlowCookie: () => "cpo_held",
+  provenanceRefusal,
+  readFlowCookie: (_request: Request, name: string) => (name === "bp_oidc_accept" ? "cpo_held" : null),
   buildFlowCookie: (name: string, value: string) => `${name}=${value}`,
 }));
 vi.mock("@/lib/oidc/flow", () => ({ ACCEPT_COOKIE: "bp_oidc_accept", heldAcceptance, spendAcceptance }));
@@ -27,7 +28,11 @@ vi.mock("@/models/invitation", () => ({ Invitation: { findOne: vi.fn() } }));
 const { POST } = await import("./route");
 const { resetRateLimits } = await import("@/lib/rate-limit");
 
-const HELD = { provider: "oidc", invitationTokenHash: "h1", claims: { subject: "s9", email: "ada@example.com" } };
+const HELD = {
+  provider: "oidc",
+  invitationTokenHash: "h1",
+  claims: { issuer: "https://id.example.com", subject: "s9", email: "ada@example.com" },
+};
 const post = (body: unknown = { username: "Ada", fullName: "Ada Lovelace" }) =>
   POST(new Request("http://x/api/invitations/sso", { method: "POST", body: JSON.stringify(body) }));
 
@@ -35,6 +40,7 @@ beforeEach(async () => {
   vi.clearAllMocks();
   await resetRateLimits();
   heldAcceptance.mockResolvedValue(HELD);
+  provenanceRefusal.mockReturnValue(null);
   releaseInvitation.mockResolvedValue(undefined);
   claimInvitationByHash.mockResolvedValue({ ok: true, invitation: { _id: "inv-1", email: "ada@example.com" } });
   completeAcceptance.mockResolvedValue(new Response(JSON.stringify({ username: "ada" }), { status: 201 }));
@@ -50,10 +56,23 @@ describe("POST /api/invitations/sso", () => {
       username: "ada",
       fullName: "Ada Lovelace",
       passwordHash: null,
-      identity: { provider: "oidc", subject: "s9", email: "ada@example.com" },
+      identity: { provider: "oidc", issuer: "https://id.example.com", subject: "s9", email: "ada@example.com" },
     });
     expect(spendAcceptance).toHaveBeenCalledWith("cpo_held");
     expect(res.headers.get("set-cookie")).toContain("bp_oidc_accept=");
+  });
+
+  it("reads the held sign-in from its own cookie", async () => {
+    await post();
+
+    expect(heldAcceptance).toHaveBeenCalledWith("cpo_held");
+  });
+
+  it("refuses a request from another site", async () => {
+    provenanceRefusal.mockReturnValue(new Response(null, { status: 403 }));
+
+    expect((await post()).status).toBe(403);
+    expect(claimInvitationByHash).not.toHaveBeenCalled();
   });
 
   it("refuses when there is no verified sign-in held for this browser", async () => {

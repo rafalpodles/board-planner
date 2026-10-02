@@ -42,6 +42,8 @@ vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/lib/projectAudit", () => ({ logProjectAudit }));
 vi.mock("@/models/user", () => ({ User: { create: userCreate, deleteOne: userDeleteOne } }));
 vi.mock("@/models/grant", () => ({ Grant: { findOneAndUpdate: grantUpsert } }));
+const identityDeleteMany = vi.fn();
+vi.mock("@/models/identity", () => ({ Identity: { deleteMany: identityDeleteMany, create: vi.fn() } }));
 vi.mock("bcryptjs", () => ({ default: { hash } }));
 
 const { POST } = await import("./route");
@@ -71,6 +73,7 @@ beforeEach(async () => {
   userCreate.mockImplementation(async (doc: Record<string, unknown>) => ({ _id: "u-new", ...doc }));
   grantUpsert.mockResolvedValue({});
   releaseInvitation.mockResolvedValue(undefined);
+  identityDeleteMany.mockResolvedValue({});
   recordAcceptance.mockResolvedValue(true);
   userDeleteOne.mockResolvedValue({});
   createSession.mockResolvedValue({ token: "cps_new", absoluteExpiresAt: new Date() });
@@ -86,6 +89,7 @@ describe("POST /api/invitations/accept", () => {
       password: "hashed",
       fullName: "Ada Lovelace",
       email: "ada@example.com",
+      emailVerifiedAt: null,
       role: "member",
     });
     expect(grantUpsert).toHaveBeenCalledWith(
@@ -98,6 +102,15 @@ describe("POST /api/invitations/accept", () => {
     expect(revokePendingInvitationsFor).toHaveBeenCalledWith("ada@example.com");
     expect(res.headers.get("set-cookie")).toContain("cps_new");
     expect(await res.json()).toEqual({ username: "ada", landing: "p1" });
+  });
+
+  // A link that travelled by mail has proven the address; one an admin handed over has not (BP-828)
+  it("marks the address proven only when the invitation went out by mail", async () => {
+    claimInvitation.mockResolvedValue({ ok: true, invitation: { ...INVITATION, deliveredAs: "email" } });
+
+    await POST(post());
+
+    expect(userCreate.mock.calls[0][0].emailVerifiedAt).toBeInstanceOf(Date);
   });
 
   // The address is the one the link was sent to; whatever the form carries is not
