@@ -334,6 +334,12 @@ describe("a board owner inviting", () => {
 
     expect(outcome).toEqual({ kind: "held", invitedBy: "a1" });
     expect(create).not.toHaveBeenCalled();
+    // Only a live invitation holds the address: an old revoked or accepted one must not
+    expect(findOne).toHaveBeenCalledWith({
+      email: "ada@example.com",
+      status: "pending",
+      expiresAt: { $gt: expect.any(Date) },
+    });
   });
 
   it("retires an expired invitation before looking for one to join", async () => {
@@ -361,6 +367,12 @@ describe("a board owner inviting", () => {
 });
 
 describe("recording how a link went out", () => {
+  it("never throws: the invitation has already gone out", async () => {
+    updateOne.mockRejectedValueOnce(new Error("write timeout"));
+
+    await expect(recordDelivery("inv-1", "cpi_abc", "link")).resolves.toBeUndefined();
+  });
+
   it("ties the record to the link it describes", async () => {
     await recordDelivery("inv-1", "cpi_abc", "link");
 

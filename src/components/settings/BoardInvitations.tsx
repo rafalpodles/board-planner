@@ -107,7 +107,7 @@ export function BoardInvitations({ projectId }: { projectId: string }) {
     }
     setRemoveBusy(false);
     toast(`Invitation for ${removing.email} withdrawn from this board`, "success");
-    if (link?.email === removing.email) setLink(null);
+    if (link?.email.toLowerCase() === removing.email) setLink(null);
     setRemoving(null);
     await refresh();
   }

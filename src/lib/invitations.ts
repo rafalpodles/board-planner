@@ -195,13 +195,18 @@ export async function revokePendingInvitationsFor(email: string): Promise<void> 
 }
 
 /** Matched on the token too, so a delivery is never recorded against a link issued after it. */
+/** Never throws: the invitation has already gone out, and a row left unrecorded is merely unjoinable. */
 export async function recordDelivery(
   id: Types.ObjectId | string,
   token: string,
   deliveredAs: "email" | "link"
 ): Promise<void> {
-  await connectDB();
-  await Invitation.updateOne({ _id: id, tokenHash: sha256(token) }, { $set: { deliveredAs } });
+  try {
+    await connectDB();
+    await Invitation.updateOne({ _id: id, tokenHash: sha256(token) }, { $set: { deliveredAs } });
+  } catch (err) {
+    console.error("Failed to record how an invitation was delivered:", err);
+  }
 }
 
 export type BoardInvitation =

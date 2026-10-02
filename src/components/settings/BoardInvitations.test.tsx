@@ -85,16 +85,21 @@ describe("inviting from a board", () => {
     expect(toast).toHaveBeenCalledWith("Invitation sent to ada@example.com", "success");
   });
 
-  it("forgets the link once that invitation is withdrawn", async () => {
-    api.get.mockResolvedValue([row("ada@example.com")]);
+  // Typed with capitals, stored in lower case: the withdrawn row and the shown link are one invitation
+  it("forgets the link once that invitation is withdrawn, however its address was typed", async () => {
+    api.get.mockResolvedValue([row("ada@example.com"), row("bob@example.com")]);
     render(<BoardInvitations projectId="p1" />);
     api.post.mockResolvedValueOnce({ outcome: "created", delivery: "link", link: LINK, reason: "no_mail_server" });
-    await invite("ada@example.com");
-    api.del.mockResolvedValueOnce({});
+    await invite("Ada@Example.com");
+    expect(screen.getByTestId("invitation-link")).toBeTruthy();
+    api.del.mockResolvedValue({});
+
+    act(() => screen.getByRole("button", { name: "Withdraw the invitation for bob@example.com" }).click());
+    await act(async () => screen.getByRole("button", { name: "Withdraw" }).click());
+    expect(screen.getByTestId("invitation-link")).toBeTruthy();
 
     act(() => screen.getByRole("button", { name: "Withdraw the invitation for ada@example.com" }).click());
     await act(async () => screen.getByRole("button", { name: "Withdraw" }).click());
-
     expect(screen.queryByTestId("invitation-link")).toBeNull();
   });
 });

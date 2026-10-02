@@ -117,7 +117,7 @@ describe("POST /api/projects/:id/invitations", () => {
 
     expect(res.status).toBe(409);
     expect((await res.json()).error).toBe(
-      "ada@example.com has an invitation out as a link from admin. Ask them to add this board, or wait until it is used or withdrawn."
+      "ada@example.com already has an invitation from admin that this board cannot join. Add them by username once they have joined."
     );
     expect(deliverTo).not.toHaveBeenCalled();
   });

@@ -120,7 +120,7 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
     const inviter = await User.findById(outcome.invitedBy).select("username").lean();
     return NextResponse.json(
       {
-        error: `${email} has an invitation out as a link${inviter ? ` from ${inviter.username}` : ""}. Ask them to add this board, or wait until it is used or withdrawn.`,
+        error: `${email} already has an invitation${inviter ? ` from ${inviter.username}` : ""} that this board cannot join. Add them by username once they have joined.`,
       },
       { status: 409 }
     );

@@ -221,8 +221,26 @@ test("an owner cannot add the board to an invitation whose link somebody holds",
 
   expect(response.status()).toBe(409);
   await expect(card.getByRole("alert")).toHaveText(
-    `${email} has an invitation out as a link from admin. Ask them to add this board, or wait until it is used or withdrawn.`
+    `${email} already has an invitation from admin that this board cannot join. Add them by username once they have joined.`
   );
   const row = await (await db()).collection("invitations").findOne({ email, status: "pending" });
   expect(row).toMatchObject({ tokenHash: planted.tokenHash, boards: [] });
+});
+
+// Inviting an address already invited to this board changes their role on it, and sends nothing
+test("re-inviting an address to the same board changes its role there and mails nothing", async ({ page }) => {
+  const email = freshAddress("re-related");
+  await signIn(page, "owner");
+  await inviteFromBoard(page, email, "member");
+  await linkMailedTo(email);
+
+  const { card, response } = await inviteFromBoard(page, email, "owner");
+
+  expect(response.status()).toBe(200);
+  expect(await response.json()).toEqual({ outcome: "updated" });
+  await expect(page.getByText(`${email} is already invited to this board. No email sent.`)).toBeVisible();
+  await expect(card.getByTestId("board-invitation").filter({ hasText: email })).toContainText("Owner");
+  const row = await (await db()).collection("invitations").findOne({ email, status: "pending" });
+  expect(row!.boards).toEqual([{ project: PROJECT_ID, relation: "owner", addedBy: OWNER_ID }]);
+  expect(await mailFor(email)).toHaveLength(1);
 });
