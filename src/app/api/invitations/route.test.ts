@@ -33,6 +33,7 @@ vi.mock("@/models/invitation", () => ({ Invitation: { find: vi.fn() } }));
 const { POST } = await import("./route");
 
 const P1 = "64b000000000000000000001";
+const CTX = { params: Promise.resolve({}) };
 
 function post(body: unknown) {
   return new Request("http://x/api/invitations", { method: "POST", body: JSON.stringify(body) });
@@ -64,7 +65,7 @@ beforeEach(() => {
 
 describe("POST /api/invitations", () => {
   it("invites an address to boards and says it was mailed", async () => {
-    const res = await POST(post({ email: " Ada@Example.com ", boards: [{ project: P1, relation: "owner" }] }));
+    const res = await POST(post({ email: " Ada@Example.com ", boards: [{ project: P1, relation: "owner" }] }), CTX);
 
     expect(res.status).toBe(201);
     expect(issueInvitation).toHaveBeenCalledWith({
@@ -84,7 +85,7 @@ describe("POST /api/invitations", () => {
   it("returns the link when no mail went out", async () => {
     deliverTo.mockResolvedValue({ delivery: "link", link: "https://planner.example/invite?token=cpi_secret", reason: "no_mail_server" });
 
-    const body = await (await POST(post({ email: "ada@example.com" }))).json();
+    const body = await (await POST(post({ email: "ada@example.com" }), CTX)).json();
 
     expect(body).toMatchObject({ delivery: "link", reason: "no_mail_server" });
     expect(body.link).toContain("cpi_secret");
@@ -93,7 +94,7 @@ describe("POST /api/invitations", () => {
   it("refuses an address that already belongs to an account", async () => {
     userExists.mockResolvedValue({ _id: "u2" });
 
-    const res = await POST(post({ email: "ada@example.com" }));
+    const res = await POST(post({ email: "ada@example.com" }), CTX);
 
     expect(res.status).toBe(409);
     expect(issueInvitation).not.toHaveBeenCalled();
@@ -104,7 +105,7 @@ describe("POST /api/invitations", () => {
   it("refuses a machine credential", async () => {
     caller = { ...caller, viaMachineCredential: true };
 
-    const res = await POST(post({ email: "ada@example.com", role: "admin" }));
+    const res = await POST(post({ email: "ada@example.com", role: "admin" }), CTX);
 
     expect(res.status).toBe(403);
     expect(issueInvitation).not.toHaveBeenCalled();
@@ -113,7 +114,7 @@ describe("POST /api/invitations", () => {
   it("refuses a board that does not exist", async () => {
     boardsExist([]);
 
-    const res = await POST(post({ email: "ada@example.com", boards: [{ project: P1, relation: "member" }] }));
+    const res = await POST(post({ email: "ada@example.com", boards: [{ project: P1, relation: "member" }] }), CTX);
 
     expect(res.status).toBe(400);
     expect(issueInvitation).not.toHaveBeenCalled();
@@ -125,7 +126,7 @@ describe("POST /api/invitations", () => {
     [{ email: "ada@example.com", boards: [{ project: "nope", relation: "member" }] }],
     [{ email: "ada@example.com", boards: [{ project: P1, relation: "viewer" }] }],
   ])("refuses %j", async (body) => {
-    const res = await POST(post(body));
+    const res = await POST(post(body), CTX);
 
     expect(res.status).toBe(400);
     expect(issueInvitation).not.toHaveBeenCalled();
@@ -134,7 +135,7 @@ describe("POST /api/invitations", () => {
   it("refuses to build a link with no PUBLIC_ORIGIN", async () => {
     selfOrigin.mockReturnValue(null);
 
-    const res = await POST(post({ email: "ada@example.com" }));
+    const res = await POST(post({ email: "ada@example.com" }), CTX);
 
     expect(res.status).toBe(500);
     expect(issueInvitation).not.toHaveBeenCalled();
