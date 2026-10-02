@@ -63,15 +63,19 @@ try {
   fail(err instanceof Error ? err.message : String(err));
 }
 
-console.log(
-  signLicence(
-    {
-      customer,
-      plan,
-      features,
-      issuedAt: now.toISOString(),
-      expiresAt: expiresAt.toISOString(),
-    },
-    signingKey
-  )
-);
+try {
+  console.log(
+    signLicence(
+      {
+        customer,
+        plan,
+        features,
+        issuedAt: now.toISOString(),
+        expiresAt: expiresAt.toISOString(),
+      },
+      signingKey
+    )
+  );
+} catch (err) {
+  fail(`The signing key could not sign: ${err instanceof Error ? err.message : String(err)}`);
+}
