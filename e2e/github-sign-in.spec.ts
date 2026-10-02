@@ -8,7 +8,8 @@ import { signIn } from "./session";
 /**
  * BP-829. Signing in, linking and accepting an invitation with GitHub, which is OAuth 2 without
  * OpenID Connect: the person is read from the e2e GitHub stub's `/user` and `/user/emails`, and
- * `/oauth/control` names who approves next.
+ * `/oauth/control` names who approves next. GitHub never links by address at sign-in — its
+ * `verified` speaks for no domain — so an identity is linked from Settings or by an invitation.
  */
 
 interface GitHubEmail {
@@ -62,96 +63,7 @@ async function proveMemberAddress(email: string) {
   await (await db()).collection("users").updateOne({ _id: MEMBER_ID }, { $set: { email, emailVerifiedAt: new Date() } });
 }
 
-test.beforeEach(async () => {
-  await seed();
-});
-
-test.afterEach(async () => {
-  if (mongoose.connection.readyState !== 0) await mongoose.disconnect();
-});
-
-test("an account signs in with GitHub by its verified primary address, and is linked by GitHub's id", async ({
-  page,
-  browser,
-}) => {
-  const email = freshAddress("member");
-  await proveMemberAddress(email);
-  const id = freshId();
-  await nextPerson({ id, emails: [{ email: freshAddress("other"), primary: false, verified: true }, primary(email)] });
-
-  await signInWithGitHub(page);
-
-  await expect(page).toHaveURL(/\/projects/);
-  expect(await whoAmI(page)).toBe(MEMBER_USERNAME);
-  expect(await (await db()).collection("identities").findOne({ subject: String(id) })).toMatchObject({
-    user: MEMBER_ID,
-    provider: "github",
-    issuer: GITHUB_STUB_URL,
-    email,
-  });
-
-  const asked = await (await fetch(`${GITHUB_STUB_URL}/oauth/last-authorize`)).json();
-  expect(asked).toMatchObject({ scope: "read:user user:email", code_challenge_method: "S256" });
-  expect(asked.state).toBeTruthy();
-
-  // From now on by id: the address GitHub lists changing changes nothing
-  const later = await fresh(browser);
-  await nextPerson({ id, emails: [primary(freshAddress("renamed"))] });
-  await signInWithGitHub(later.page);
-  await expect(later.page).toHaveURL(/\/projects/);
-  expect(await whoAmI(later.page)).toBe(MEMBER_USERNAME);
-  await later.context.close();
-});
-
-test("an address GitHub has not verified links nobody", async ({ page }) => {
-  const email = freshAddress("member");
-  await proveMemberAddress(email);
-  await nextPerson({ id: freshId(), emails: [primary(email, false)] });
-
-  await signInWithGitHub(page);
-
-  await expect(page).toHaveURL(/\/login\?sso=unverified/);
-  await expect(alertOn(page)).toContainText("That provider has not confirmed your address");
-  expect(await (await db()).collection("identities").countDocuments()).toBe(0);
-  expect((await page.request.get("/api/auth/me")).status()).toBe(401);
-});
-
-test("a verified address that is not the primary one still counts when the primary is unverified", async ({ page }) => {
-  const email = freshAddress("member");
-  await proveMemberAddress(email);
-  await nextPerson({
-    id: freshId(),
-    emails: [primary(freshAddress("unconfirmed"), false), { email, primary: false, verified: true }],
-  });
-
-  await signInWithGitHub(page);
-
-  await expect(page).toHaveURL(/\/projects/);
-  expect(await whoAmI(page)).toBe(MEMBER_USERNAME);
-});
-
-test("a signed-in account links GitHub from its settings, then signs in with it", async ({ page, browser }) => {
-  await signIn(page, "member");
-  const id = freshId();
-  await nextPerson({ id, emails: [primary(freshAddress("personal"))] });
-
-  await page.goto("/settings/security");
-  await page.getByLabel("Your password, to link a provider").fill(MEMBER_PASSWORD);
-  await page.getByRole("button", { name: "Link GitHub" }).click();
-
-  await expect(page.getByTestId("toast").filter({ hasText: "Linked. You can now sign in with it." })).toHaveCount(1);
-  await expect(page.getByRole("button", { name: "Unlink GitHub" })).toBeVisible();
-
-  const later = await fresh(browser);
-  await nextPerson({ id, emails: [primary(freshAddress("personal"))] });
-  await signInWithGitHub(later.page);
-  await expect(later.page).toHaveURL(/\/projects/);
-  expect(await whoAmI(later.page)).toBe(MEMBER_USERNAME);
-  await later.context.close();
-});
-
-test("an invitation is accepted with GitHub, and the account then signs in with it alone", async ({ browser }) => {
-  const email = freshAddress("invitee");
+async function plantInvitation(email: string) {
   const token = `cpi_${randomBytes(32).toString("hex")}`;
   await (await db()).collection("invitations").insertOne({
     email,
@@ -167,12 +79,76 @@ test("an invitation is accepted with GitHub, and the account then signs in with 
     createdAt: new Date(),
     updatedAt: new Date(),
   });
+  return token;
+}
+
+async function acceptWithGitHub(page: Page, token: string) {
+  await page.goto(`/invite?token=${token}`);
+  await page.getByRole("button", { name: "Accept with GitHub" }).click();
+}
+
+test.beforeEach(async () => {
+  await seed();
+});
+
+test.afterEach(async () => {
+  if (mongoose.connection.readyState !== 0) await mongoose.disconnect();
+});
+
+// A mailbox verified on somebody's GitHub years ago is not a mailbox they hold today
+test("GitHub never signs anybody in by address, however verified and proven", async ({ page }) => {
+  const email = freshAddress("member");
+  await proveMemberAddress(email);
+  await nextPerson({ id: freshId(), emails: [primary(email)] });
+
+  await signInWithGitHub(page);
+
+  await expect(page).toHaveURL(/\/login\?sso=not_linked/);
+  await expect(alertOn(page)).toContainText("That account is not linked here yet.");
+  expect(await (await db()).collection("identities").countDocuments()).toBe(0);
+  expect((await page.request.get("/api/auth/me")).status()).toBe(401);
+});
+
+test("a signed-in account links GitHub from its settings, then signs in with it by GitHub's id", async ({
+  page,
+  browser,
+}) => {
+  await signIn(page, "member");
+  const id = freshId();
+  await nextPerson({ id, emails: [primary(freshAddress("personal"))] });
+
+  await page.goto("/settings/security");
+  await page.getByLabel("Your password, to link a provider").fill(MEMBER_PASSWORD);
+  await page.getByRole("button", { name: "Link GitHub" }).click();
+
+  await expect(page.getByTestId("toast").filter({ hasText: "Linked. You can now sign in with it." })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Unlink GitHub" })).toBeVisible();
+  expect(await (await db()).collection("identities").findOne({ subject: String(id) })).toMatchObject({
+    user: MEMBER_ID,
+    provider: "github",
+    issuer: GITHUB_STUB_URL,
+  });
+  const asked = await (await fetch(`${GITHUB_STUB_URL}/oauth/last-authorize`)).json();
+  expect(asked).toMatchObject({ scope: "user:email", code_challenge_method: "S256" });
+  expect(asked.state).toBeTruthy();
+
+  // By id from now on: the address GitHub lists changing changes nothing
+  const later = await fresh(browser);
+  await nextPerson({ id, emails: [primary(freshAddress("renamed"))] });
+  await signInWithGitHub(later.page);
+  await expect(later.page).toHaveURL(/\/projects/);
+  expect(await whoAmI(later.page)).toBe(MEMBER_USERNAME);
+  await later.context.close();
+});
+
+test("an invitation is accepted with GitHub, and the account then signs in with it alone", async ({ browser }) => {
+  const email = freshAddress("invitee");
+  const token = await plantInvitation(email);
   const id = freshId();
   await nextPerson({ id, emails: [primary(email)] });
 
   const { context, page } = await fresh(browser);
-  await page.goto(`/invite?token=${token}`);
-  await page.getByRole("button", { name: "Accept with GitHub" }).click();
+  await acceptWithGitHub(page, token);
   await expect(page).toHaveURL(/\/invite\/sso$/);
   await expect(page.getByText(`GitHub confirmed ${email}. Choose your username to finish.`)).toBeVisible();
   await page.getByLabel("Username").fill("octo-invitee");
@@ -194,4 +170,27 @@ test("an invitation is accepted with GitHub, and the account then signs in with 
   await expect(again.page).toHaveURL(/\/projects/);
   expect(await whoAmI(again.page)).toBe("octo-invitee");
   await again.context.close();
+});
+
+test("an invitation to a verified address that is not GitHub's primary one is accepted with it", async ({ page }) => {
+  const email = freshAddress("work");
+  const token = await plantInvitation(email);
+  await nextPerson({ id: freshId(), emails: [primary(freshAddress("personal")), { email, primary: false, verified: true }] });
+
+  await acceptWithGitHub(page, token);
+
+  await expect(page).toHaveURL(/\/invite\/sso$/);
+  await expect(page.getByText(`GitHub confirmed ${email}. Choose your username to finish.`)).toBeVisible();
+});
+
+test("an invitation is not accepted with an address GitHub has not verified", async ({ page }) => {
+  const email = freshAddress("invitee");
+  const token = await plantInvitation(email);
+  await nextPerson({ id: freshId(), emails: [primary(email, false)] });
+
+  await acceptWithGitHub(page, token);
+
+  await expect(page).toHaveURL(/\/invite\/sso\?error=unverified/);
+  await expect(alertOn(page)).toContainText("Your provider has not confirmed your address");
+  expect(await (await db()).collection("identities").countDocuments()).toBe(0);
 });

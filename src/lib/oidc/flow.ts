@@ -87,7 +87,7 @@ export async function beginFlow(input: {
 
   const url = client.buildAuthorizationUrl(config, {
     redirect_uri: redirectUri(input.provider, input.origin),
-    scope: github ? "read:user user:email" : "openid email profile",
+    scope: github ? "user:email" : "openid email profile",
     code_challenge: await client.calculatePKCECodeChallenge(codeVerifier),
     code_challenge_method: "S256",
     state,
@@ -101,6 +101,8 @@ export interface VerifiedClaims {
   subject: string;
   email: string;
   emailVerified: boolean;
+  /** Every address the provider vouches for: an invitation may name any of them. */
+  verifiedEmails: string[];
   name: string;
 }
 
@@ -173,11 +175,13 @@ function idTokenPerson(
 ): VerifiedClaims | null {
   if (!claims?.sub || !claims.iss) return null;
   const email = typeof claims.email === "string" ? normaliseEmail(claims.email) : "";
+  const emailVerified = Boolean(email) && claims.email_verified === true && ownsTheAddress(provider, email, claims);
   return {
     issuer: String(claims.iss),
     subject: String(claims.sub),
     email,
-    emailVerified: claims.email_verified === true && ownsTheAddress(provider, email, claims),
+    emailVerified,
+    verifiedEmails: emailVerified ? [email] : [],
     name: typeof claims.name === "string" ? claims.name : "",
   };
 }
@@ -195,8 +199,9 @@ interface GitHubEmail {
  */
 async function githubPerson(provider: OidcProvider, accessToken: string): Promise<VerifiedClaims | null> {
   const headers = { Accept: "application/vnd.github+json", Authorization: `Bearer ${accessToken}` };
+  const api = githubSignInApi(provider.issuer);
   const get = async (path: string) => {
-    const res = await fetch(`${githubApiBase()}${path}`, { headers, signal: AbortSignal.timeout(15000) });
+    const res = await fetch(`${api}${path}`, { headers, signal: AbortSignal.timeout(15000) });
     if (!res.ok) throw new Error(`GitHub answered ${res.status} for ${path}`);
     return res.json();
   };
@@ -216,8 +221,22 @@ async function githubPerson(provider: OidcProvider, accessToken: string): Promis
     subject: String(person.id),
     email: chosen ? normaliseEmail(chosen.email) : "",
     emailVerified: chosen?.verified === true,
+    verifiedEmails: listed.filter((e) => e.verified === true).map((e) => normaliseEmail(e.email)),
     name: typeof person.name === "string" && person.name ? person.name : typeof person.login === "string" ? person.login : "",
   };
+}
+
+/**
+ * The API of the GitHub the person signed in at: `GITHUB_API_BASE_URL` when the operator named
+ * one, as pull-request syncing reads it, otherwise the site's own — never api.github.com for an
+ * Enterprise Server's token.
+ */
+function githubSignInApi(site: string): string {
+  if (process.env.GITHUB_API_BASE_URL) return githubApiBase();
+  const url = new URL(site);
+  if (url.hostname === "github.com") return "https://api.github.com";
+  if (/\.ghe\.com$/i.test(url.hostname)) return `${url.protocol}//api.${url.host}`;
+  return `${url.origin}/api/v3`;
 }
 
 /**

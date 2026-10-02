@@ -30,7 +30,7 @@ vi.mock("@/models/oidcFlow", () => ({ OidcFlow: { findOneAndDelete, create, find
 const { beginFlow, finishFlow } = await import("./flow");
 
 const sha256 = (v: string) => createHash("sha256").update(v).digest("hex");
-const PROVIDER = { id: "oidc" as const, kind: "oidc" as const, label: "Acme", issuer: "https://id.example.com", clientId: "c", clientSecret: "s" };
+const PROVIDER = { id: "oidc" as const, kind: "oidc" as const, linksByAddress: true, label: "Acme", issuer: "https://id.example.com", clientId: "c", clientSecret: "s" };
 const ORIGIN = "https://planner.example";
 
 beforeEach(() => {
@@ -117,7 +117,14 @@ describe("finishing a sign-in", () => {
       intent: "signin",
       invitationTokenHash: null,
       userId: null,
-      claims: { issuer: "https://id.example.com", subject: "s1", email: "ada@example.com", emailVerified: true, name: "Ada" },
+      claims: {
+        issuer: "https://id.example.com",
+        subject: "s1",
+        email: "ada@example.com",
+        emailVerified: true,
+        verifiedEmails: ["ada@example.com"],
+        name: "Ada",
+      },
     });
   });
 
@@ -128,6 +135,7 @@ describe("finishing a sign-in", () => {
     const outcome = await finishFlow({ provider: PROVIDER, binder: "cpo_b", origin: ORIGIN, query: "" });
 
     expect(outcome.ok && outcome.claims.emailVerified).toBe(false);
+    expect(outcome.ok && outcome.claims.verifiedEmails).toEqual([]);
   });
 
   it("refuses whatever the library refuses", async () => {
@@ -179,6 +187,7 @@ describe("GitHub, which speaks OAuth 2 without OpenID Connect", () => {
   const GITHUB = {
     id: "github" as const,
     kind: "github" as const,
+    linksByAddress: false,
     label: "GitHub",
     issuer: "https://github.com",
     clientId: "gh",
@@ -218,7 +227,7 @@ describe("GitHub, which speaks OAuth 2 without OpenID Connect", () => {
     ]);
     expect(buildAuthorizationUrl.mock.calls[0][1]).toEqual({
       redirect_uri: "https://planner.example/api/auth/oidc/github/callback",
-      scope: "read:user user:email",
+      scope: "user:email",
       code_challenge: "challenge",
       code_challenge_method: "S256",
       state: "state-1",
@@ -253,7 +262,14 @@ describe("GitHub, which speaks OAuth 2 without OpenID Connect", () => {
       intent: "signin",
       invitationTokenHash: null,
       userId: null,
-      claims: { issuer: "https://github.com", subject: "4242", email: "ada@corp.example", emailVerified: true, name: "Ada Lovelace" },
+      claims: {
+        issuer: "https://github.com",
+        subject: "4242",
+        email: "ada@corp.example",
+        emailVerified: true,
+        verifiedEmails: ["ada@personal.example", "ada@corp.example"],
+        name: "Ada Lovelace",
+      },
     });
   });
 
@@ -275,6 +291,29 @@ describe("GitHub, which speaks OAuth 2 without OpenID Connect", () => {
     const outcome = await finishFlow({ provider: GITHUB, binder: "cpo_b", origin: ORIGIN, query: "" });
 
     expect(outcome.ok && outcome.claims).toMatchObject({ email, emailVerified, name: "ada" });
+  });
+
+  it("vouches for no address GitHub has not verified", async () => {
+    githubAnswers({ id: 4242, login: "ada" }, [
+      { email: "ada@corp.example", primary: true, verified: false },
+      { email: "ada@old.example", primary: false, verified: false },
+    ]);
+
+    const outcome = await finishFlow({ provider: GITHUB, binder: "cpo_b", origin: ORIGIN, query: "" });
+
+    expect(outcome.ok && outcome.claims.verifiedEmails).toEqual([]);
+  });
+
+  it.each([
+    ["github.com", "https://github.com", "https://api.github.com/user"],
+    ["a data-residency tenant", "https://acme.ghe.com", "https://api.acme.ghe.com/user"],
+    ["an Enterprise Server", "https://ghe.example.com", "https://ghe.example.com/api/v3/user"],
+  ])("reads the person from %s's own API when no API base is set", async (_label, site, expected) => {
+    githubAnswers({ id: 1, login: "ada" }, []);
+
+    await finishFlow({ provider: { ...GITHUB, issuer: site }, binder: "cpo_b", origin: ORIGIN, query: "" });
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toContain(expected);
   });
 
   it("refuses when GitHub will not say who it is", async () => {

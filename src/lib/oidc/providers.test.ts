@@ -56,10 +56,28 @@ describe("which identity providers are configured", () => {
       expect(providerById("github")?.issuer).toBe("https://ghe.example.com");
     });
 
-    it("ignores a GITHUB_OAUTH_BASE_URL that is not a URL", () => {
-      Object.assign(process.env, GITHUB_APP, { GITHUB_OAUTH_BASE_URL: "ghe.example.com" });
+    it.each([
+      ["no scheme", "ghe.example.com:8443"],
+      ["plain http to another host", "http://ghe.example.com"],
+      ["another scheme", "ftp://ghe.example.com"],
+      ["not a URL at all", "not a url"],
+    ])("turns GitHub off for a GITHUB_OAUTH_BASE_URL with %s", (_label, value) => {
+      Object.assign(process.env, GITHUB_APP, { GITHUB_OAUTH_BASE_URL: value });
 
-      expect(providerById("github")?.issuer).toBe("https://github.com");
+      expect(providerById("github")).toBeNull();
+    });
+
+    it("accepts plain http to this machine, for development", () => {
+      Object.assign(process.env, GITHUB_APP, { GITHUB_OAUTH_BASE_URL: "http://127.0.0.1:4010" });
+
+      expect(providerById("github")?.issuer).toBe("http://127.0.0.1:4010");
+    });
+
+    it("never links GitHub by address, unlike the OpenID Connect providers", () => {
+      Object.assign(process.env, GITHUB_APP, { GOOGLE_CLIENT_ID: "g", GOOGLE_CLIENT_SECRET: "gs" });
+
+      expect(providerById("github")?.linksByAddress).toBe(false);
+      expect(providerById("google")?.linksByAddress).toBe(true);
     });
   });
 
