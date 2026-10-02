@@ -158,11 +158,6 @@ serve({
       return;
     }
 
-    asked.push(pathname);
-    bearers.push(req.headers.authorization ?? null);
-
-    // Anything not addressed to the repository the spec named is a mis-parsed owner or repo, and
-    // answering it would let a spec matching on a commit sha pass against `/repos/undefined/...`
     if (pathname === "/user" || pathname === "/user/emails") {
       const person = tokens.get((req.headers.authorization ?? "").replace(/^Bearer /, ""));
       if (!person) {
@@ -174,6 +169,11 @@ serve({
       return;
     }
 
+    asked.push(pathname);
+    bearers.push(req.headers.authorization ?? null);
+
+    // Anything not addressed to the repository the spec named is a mis-parsed owner or repo, and
+    // answering it would let a spec matching on a commit sha pass against `/repos/undefined/...`
     const addressed = /^\/repos\/([^/]+\/[^/]+)\//.exec(`${pathname}/`);
     if (addressed && addressed[1] !== repository) {
       json(res, { message: `github stub is not ${addressed[1]}` }, 404);

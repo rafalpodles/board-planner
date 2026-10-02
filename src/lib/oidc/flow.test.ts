@@ -296,12 +296,13 @@ describe("GitHub, which speaks OAuth 2 without OpenID Connect", () => {
   it("vouches for no address GitHub has not verified", async () => {
     githubAnswers({ id: 4242, login: "ada" }, [
       { email: "ada@corp.example", primary: true, verified: false },
-      { email: "ada@old.example", primary: false, verified: false },
+      { email: "ada@old.example", primary: false, verified: "true" },
     ]);
 
     const outcome = await finishFlow({ provider: GITHUB, binder: "cpo_b", origin: ORIGIN, query: "" });
 
     expect(outcome.ok && outcome.claims.verifiedEmails).toEqual([]);
+    expect(outcome.ok && outcome.claims).toMatchObject({ email: "ada@corp.example", emailVerified: false });
   });
 
   it.each([

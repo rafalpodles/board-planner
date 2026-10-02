@@ -66,8 +66,8 @@ export function configuredProviders(): OidcProvider[] {
 /**
  * Where GitHub's sign-in pages are: derived from `GITHUB_API_BASE_URL` as pull-request links are,
  * unless `GITHUB_OAUTH_BASE_URL` names it — an Enterprise Server whose API is reached through a
- * proxy, from which no site address can be derived. A value that is not an https address (or http
- * on this machine) turns GitHub sign-in off rather than quietly sending it somewhere else.
+ * proxy, from which no site address can be derived. A value that is not a bare https origin (or
+ * http on this machine) turns GitHub sign-in off rather than quietly sending it somewhere else.
  */
 let warnedAbout: string | null = null;
 
@@ -79,10 +79,11 @@ function githubSignInSite(): string | null {
     url = new URL(named);
   } catch {}
   const loopback = url && ["127.0.0.1", "[::1]"].includes(url.hostname);
-  if (url && (url.protocol === "https:" || (url.protocol === "http:" && loopback))) return url.origin;
+  const bare = url && url.pathname.replace(/\/+$/, "") === "" && !url.search;
+  if (url && bare && (url.protocol === "https:" || (url.protocol === "http:" && loopback))) return url.origin;
   if (warnedAbout !== named) {
     warnedAbout = named;
-    console.warn("GITHUB_OAUTH_BASE_URL is not an https address; signing in with GitHub is off");
+    console.warn("GITHUB_OAUTH_BASE_URL is not an https origin; signing in with GitHub is off");
   }
   return null;
 }

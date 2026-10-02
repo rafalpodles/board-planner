@@ -61,6 +61,7 @@ describe("which identity providers are configured", () => {
       ["plain http to another host", "http://ghe.example.com"],
       ["another scheme", "ftp://ghe.example.com"],
       ["not a URL at all", "not a url"],
+      ["a path, which sign-in would silently drop", "https://proxy.corp/github"],
     ])("turns GitHub off for a GITHUB_OAUTH_BASE_URL with %s", (_label, value) => {
       Object.assign(process.env, GITHUB_APP, { GITHUB_OAUTH_BASE_URL: value });
 
