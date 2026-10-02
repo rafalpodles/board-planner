@@ -5,6 +5,11 @@ import { withAdmin } from "@/lib/middleware";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+// Calendar days, because the page names the UTC date a key is valid through
+function utcDay(ms: number): number {
+  return Math.floor(ms / DAY_MS);
+}
+
 export const GET = withAdmin(async () => {
   const now = Date.now();
   const check = currentLicence(process.env, now);
@@ -22,8 +27,7 @@ export const GET = withAdmin(async () => {
     issuedAt: check.payload.issuedAt,
     expiresAt: check.payload.expiresAt,
     graceEndsAt: new Date(graceEndsAt).toISOString(),
-    daysLeft: Math.ceil((expiresAt - now) / DAY_MS),
-    graceDaysLeft: Math.ceil((graceEndsAt - now) / DAY_MS),
+    daysLeft: utcDay(expiresAt) - utcDay(now),
     keyId: check.payload.keyId,
   });
 });

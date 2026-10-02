@@ -103,13 +103,13 @@ test("an expired key keeps Pro with a warning through its grace, and is Free aft
   await useLicenceKey(request, e2eLicence({ expiresInDays: -3 }));
   await openLicenceSettings(page);
 
-  await expect(page.getByTestId("licence-warning")).toContainText("This licence has expired. Pro features stay on for 11 days");
+  await expect(page.getByTestId("licence-warning")).toContainText(/^This licence expired on .+\. It stays in force until .+, then this instance moves to the Free plan\./);
   expect(await planSeenByAMember(request)).toBe("pro");
 
   await useLicenceKey(request, e2eLicence({ expiresInDays: -15 }));
   await openLicenceSettings(page);
 
-  await expect(page.getByTestId("licence-warning")).toContainText("its grace period is over");
+  await expect(page.getByTestId("licence-warning")).toContainText(/its grace period ended on .+, so this instance is on the Free plan/);
   await expect(row(page, "Plan")).toHaveText("Pro (expired)");
   expect(await planSeenByAMember(request)).toBe("free");
 });
@@ -118,6 +118,6 @@ test("a key with under 30 days left warns before it runs out", async ({ page, re
   await useLicenceKey(request, e2eLicence({ expiresInDays: 12 }));
   await openLicenceSettings(page);
 
-  await expect(page.getByTestId("licence-warning")).toContainText(/expires in 1[23] days/);
+  await expect(page.getByTestId("licence-warning")).toContainText(/^This licence expires in 12 days, on .+\. Renew it before then\.$/);
   expect(await planSeenByAMember(request)).toBe("pro");
 });

@@ -152,9 +152,7 @@ export function setE2eLicenceKey(key: string | undefined): void {
   globalThis.__bpE2eLicenceKey = { key };
 }
 
-// `nodeEnv` defaults to the literal `process.env.NODE_ENV`, which the build replaces with
-// "production": read off a passed-in `env` instead, `next start` would take whatever the operator
-// exported, and NODE_ENV=test with E2E=1 would let anyone name a public key of their own
+// Build-inlined on purpose: `next start` keeps an exported NODE_ENV, so `env.NODE_ENV` would let an operator in
 export function licenceKeysInEffect(
   env: NodeJS.ProcessEnv = process.env,
   nodeEnv: string | undefined = process.env.NODE_ENV

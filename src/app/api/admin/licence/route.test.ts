@@ -47,45 +47,48 @@ describe("GET /api/admin/licence", () => {
     expect(await (await get()).json()).toEqual({ configured: true, verdict: "malformed" });
   });
 
-  it("describes a valid key with days left counted to its expiry and its grace", async () => {
-    const expiresAt = new Date(Date.now() + 10 * DAY - 60_000);
-    process.env.LICENCE_KEY = signLicence(
-      {
+  describe("with the clock at 2027-10-01 12:00 UTC", () => {
+    beforeEach(() => {
+      vi.useFakeTimers({ now: Date.parse("2027-10-01T12:00:00.000Z"), toFake: ["Date"] });
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    function keyExpiring(expiresAt: string) {
+      return signLicence(
+        { customer: "Acme Ltd", plan: "pro", features: [], issuedAt: "2026-01-01T00:00:00.000Z", expiresAt },
+        signing
+      );
+    }
+
+    it("describes a valid key, its grace end and the calendar days to its expiry", async () => {
+      process.env.LICENCE_KEY = keyExpiring("2027-10-11T23:59:59.999Z");
+
+      expect(await (await get()).json()).toEqual({
+        configured: true,
+        verdict: "valid",
         customer: "Acme Ltd",
         plan: "pro",
         features: [],
         issuedAt: "2026-01-01T00:00:00.000Z",
-        expiresAt: expiresAt.toISOString(),
-      },
-      signing
-    );
-
-    expect(await (await get()).json()).toEqual({
-      configured: true,
-      verdict: "valid",
-      customer: "Acme Ltd",
-      plan: "pro",
-      features: [],
-      issuedAt: "2026-01-01T00:00:00.000Z",
-      expiresAt: expiresAt.toISOString(),
-      graceEndsAt: new Date(expiresAt.getTime() + 14 * DAY).toISOString(),
-      daysLeft: 10,
-      graceDaysLeft: 24,
-      keyId: "e2e",
+        expiresAt: "2027-10-11T23:59:59.999Z",
+        graceEndsAt: "2027-10-25T23:59:59.999Z",
+        daysLeft: 10,
+        keyId: "e2e",
+      });
     });
-  });
 
-  // Rounded up, never to the nearest: 30¼ days left is 31, so the 30-day warning has not started
-  it("counts a part day as a whole one", async () => {
-    const expiresAt = new Date(Date.now() + 30 * DAY + 6 * 60 * 60 * 1000);
-    process.env.LICENCE_KEY = signLicence(
-      { customer: "Acme Ltd", plan: "pro", features: [], issuedAt: "2026-01-01T00:00:00.000Z", expiresAt: expiresAt.toISOString() },
-      signing
-    );
+    // A key valid through tomorrow has 1 day left, not the 2 a rounded-up 35.99 hours would give
+    it.each([
+      ["2027-10-01T23:59:59.999Z", 0],
+      ["2027-10-02T23:59:59.999Z", 1],
+      ["2027-10-31T23:59:59.999Z", 30],
+      ["2027-11-01T00:00:00.000Z", 31],
+    ])("counts %s as %i days left", async (expiresAt, daysLeft) => {
+      process.env.LICENCE_KEY = keyExpiring(expiresAt);
 
-    const body = await (await get()).json();
-
-    expect(body.daysLeft).toBe(31);
-    expect(body.graceDaysLeft).toBe(45);
+      expect((await (await get()).json()).daysLeft).toBe(daysLeft);
+    });
   });
 });

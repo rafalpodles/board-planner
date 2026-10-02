@@ -16,7 +16,6 @@ function valid(overrides: Partial<Extract<LicenceSummary, { customer: string }>>
     expiresAt: "2027-01-01T00:00:00.000Z",
     graceEndsAt: "2027-01-15T00:00:00.000Z",
     daysLeft: 200,
-    graceDaysLeft: 214,
     keyId: "bp-2026-10",
     ...overrides,
   };
@@ -72,7 +71,7 @@ describe("LicenceDetails", () => {
 
     render(<LicenceDetails licence={valid({ daysLeft: 30 })} />);
     expect(screen.getByTestId("licence-warning").textContent).toBe(
-      "This licence expires in 30 days, on January 1, 2027. Renew it to keep Pro features on."
+      "This licence expires in 30 days, on January 1, 2027. Renew it before then."
     );
   });
 
@@ -87,17 +86,30 @@ describe("LicenceDetails", () => {
     expect(screen.getByTestId("licence-warning").textContent).toContain("on October 2, 2027.");
   });
 
-  it("says Pro stays on, and until when, during the grace period", () => {
-    render(<LicenceDetails licence={valid({ verdict: "grace", daysLeft: -3, graceDaysLeft: 11 })} />);
+  it("names the expiry and the end of the grace period while in it", () => {
+    render(<LicenceDetails licence={valid({ verdict: "grace", daysLeft: -3 })} />);
 
-    expect(screen.getByRole("alert").textContent).toContain("stay on for 11 days, until January 15, 2027,");
+    expect(screen.getByRole("alert").textContent).toBe(
+      "This licence expired on January 1, 2027. It stays in force until January 15, 2027, then this instance moves to the Free plan. No data is removed."
+    );
     expect(row("Days left")).toBe("0");
   });
 
   it("says the instance is on Free once the grace period is over", () => {
-    render(<LicenceDetails licence={valid({ verdict: "expired", daysLeft: -20, graceDaysLeft: -6 })} />);
+    render(<LicenceDetails licence={valid({ verdict: "expired", daysLeft: -20 })} />);
 
-    expect(screen.getByRole("alert").textContent).toContain("on the Free plan");
+    expect(screen.getByRole("alert").textContent).toBe(
+      "This licence expired on January 1, 2027 and its grace period ended on January 15, 2027, so this instance is on the Free plan. No data was removed, and a renewed key restores the licence."
+    );
     expect(row("Plan")).toBe("Pro (expired)");
+  });
+
+  it.each([
+    [1, "expires tomorrow, on January 1, 2027."],
+    [0, "expires today, on January 1, 2027."],
+  ])("says %i days left in words", (daysLeft, words) => {
+    render(<LicenceDetails licence={valid({ daysLeft })} />);
+
+    expect(screen.getByTestId("licence-warning").textContent).toContain(words);
   });
 });

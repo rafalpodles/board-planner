@@ -18,7 +18,6 @@ export type LicenceSummary =
       expiresAt: string;
       graceEndsAt: string;
       daysLeft: number;
-      graceDaysLeft: number;
       keyId: string;
     };
 
@@ -43,10 +42,6 @@ function planName(plan: string): string {
   return plan.charAt(0).toUpperCase() + plan.slice(1);
 }
 
-function days(n: number): string {
-  return `${n} ${n === 1 ? "day" : "days"}`;
-}
-
 function FreePlan({ reason }: { reason?: string }) {
   return (
     <div className="rounded-lg border border-border p-4 text-sm" data-testid="licence-free">
@@ -65,34 +60,39 @@ function FreePlan({ reason }: { reason?: string }) {
   );
 }
 
-function Notice({ verdict, daysLeft, graceDaysLeft, expiresAt, graceEndsAt }: {
+function expiresWhen(daysLeft: number): string {
+  if (daysLeft <= 0) return "today";
+  if (daysLeft === 1) return "tomorrow";
+  return `in ${daysLeft} days`;
+}
+
+function Notice({ verdict, daysLeft, expiresAt, graceEndsAt }: {
   verdict: LicenceVerdict;
   daysLeft: number;
-  graceDaysLeft: number;
   expiresAt: string;
   graceEndsAt: string;
 }) {
   if (verdict === "grace") {
     return (
       <p role="alert" className="mb-4 rounded-lg border border-danger p-4 text-sm text-danger" data-testid="licence-warning">
-        This licence has expired. Pro features stay on for {days(graceDaysLeft)}, until{" "}
-        {formatDate(graceEndsAt)}, then switch off. No data is removed.
+        This licence expired on {formatDate(expiresAt)}. It stays in force until {formatDate(graceEndsAt)},
+        then this instance moves to the Free plan. No data is removed.
       </p>
     );
   }
   if (verdict === "expired") {
     return (
       <p role="alert" className="mb-4 rounded-lg border border-danger p-4 text-sm text-danger" data-testid="licence-warning">
-        This licence has expired and its grace period is over, so this instance is on the Free plan. No
-        data was removed; a renewed key turns the features back on.
+        This licence expired on {formatDate(expiresAt)} and its grace period ended on{" "}
+        {formatDate(graceEndsAt)}, so this instance is on the Free plan. No data was removed, and a
+        renewed key restores the licence.
       </p>
     );
   }
   if (daysLeft <= EXPIRY_WARNING_DAYS) {
     return (
       <p role="status" className="mb-4 rounded-lg border border-border p-4 text-sm" data-testid="licence-warning">
-        This licence expires {daysLeft > 0 ? `in ${days(daysLeft)}` : "today"}, on{" "}
-        {formatDate(expiresAt)}. Renew it to keep Pro features on.
+        This licence expires {expiresWhen(daysLeft)}, on {formatDate(expiresAt)}. Renew it before then.
       </p>
     );
   }
@@ -117,7 +117,6 @@ export function LicenceDetails({ licence }: { licence: LicenceSummary }) {
       <Notice
         verdict={licence.verdict}
         daysLeft={licence.daysLeft}
-        graceDaysLeft={licence.graceDaysLeft}
         expiresAt={licence.expiresAt}
         graceEndsAt={licence.graceEndsAt}
       />
