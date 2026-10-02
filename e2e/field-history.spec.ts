@@ -128,11 +128,11 @@ async function openHistory(page: Page): Promise<Locator> {
   // "Show all" exists only above five entries, so whether it is there has to be read AFTER the
   // entries arrive. isVisible() does not wait, and answers false on a panel that is still
   // fetching — leaving the history truncated and the assertion below hunting for a row that was
-  // never expanded into view. The empty-state line is also the loading state, so its going is
-  // what says the entries are in.
+  // never expanded into view. The first row is the signal; the empty-state line is absent while
+  // the read is in flight too, so its absence proves nothing (BP-712).
   const panel = page.locator("#task-panel-history");
   await expect(panel).toBeVisible();
-  await expect(panel.getByText("No history yet")).toBeHidden();
+  await expect(panel.getByRole("time").first()).toBeVisible();
 
   const showAll = page.getByRole("button", { name: /Show all \d+ entries/ });
   if (await showAll.isVisible()) await showAll.click();

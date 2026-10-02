@@ -21,6 +21,7 @@ import {
 } from "./seed";
 import { signIn as arriveSignedIn } from "./session";
 import { dragTo } from "./drag";
+import { silenceBoardPoll } from "./board-poll";
 
 /**
  * BP-384: the board is the product's most-used surface and until now had no coverage of its
@@ -155,6 +156,8 @@ test("a free card drags to another column, lands in the right place, and survive
   page,
   request,
 }) => {
+  // The ten-second poll would carry the card across on its own (BP-712)
+  await silenceBoardPoll(page);
   await signIn(page);
 
   // The decoy, not the finished-run card out of To Do: that exact drag is run-conflict's
@@ -192,6 +195,8 @@ test("a free card drags to another column, lands in the right place, and survive
 });
 
 test("a move the server refuses rolls the card back", async ({ page, request }) => {
+  // Otherwise the next poll rolls the card back with the board's own reload deleted (BP-712)
+  await silenceBoardPoll(page);
   await signIn(page);
   await recordToasts(page);
 
@@ -468,6 +473,7 @@ test("crossing columns with a position lands the card at that position", async (
   page,
   request,
 }) => {
+  await silenceBoardPoll(page);
   await signIn(page);
 
   const source = boardColumn(page, "in_progress");
@@ -490,6 +496,7 @@ test("crossing columns with a position lands the card at that position", async (
 });
 
 test("a card dropped into an empty column becomes its first", async ({ page, request }) => {
+  await silenceBoardPoll(page);
   await signIn(page);
 
   const source = boardColumn(page, "in_progress");

@@ -44,6 +44,7 @@ import {
   storedExecution,
 } from "./seed";
 import { signIn } from "./session";
+import { silenceBoardPoll } from "./board-poll";
 import { expectToast, recordedToasts, recordToasts } from "./toasts";
 
 /**
@@ -444,6 +445,8 @@ test.describe("delete", () => {
     page,
     request,
   }) => {
+    // The 2s window below is a fifth of the poll's period, not proof the board removed it (BP-712)
+    await silenceBoardPoll(page);
     await openBoard(page);
     const heldWording = `${HELD_TASK_KEY} is being executed by ${WORKER_NAME} (phase ${RUN_PHASE}). Deleting it takes the task off that worker`;
 
@@ -1159,6 +1162,8 @@ test.describe("a board with nothing on it, and one that would not load", () => {
     request,
   }) => {
     await seedSecondProject();
+    // Otherwise the poll draws the new card with the board's reload after a create deleted (BP-712)
+    await silenceBoardPoll(page);
     await signIn(page);
     await page.goto(`/projects/${SECOND_PROJECT_KEY}`);
     await expect(page.getByRole("heading", { name: SECOND_PROJECT_NAME })).toBeVisible();

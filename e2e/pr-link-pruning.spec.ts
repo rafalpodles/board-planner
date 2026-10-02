@@ -69,13 +69,13 @@ async function linksOn(request: APIRequestContext, taskNumber: number): Promise<
   );
 }
 
-/** The task's History tab, once its rows are in — the empty line is also the loading state. */
+/** The task's History tab, once its first row is in. */
 async function openHistory(page: Page, taskNumber: number): Promise<Locator> {
   await page.goto(`/projects/${PROJECT_KEY}/tasks/${taskNumber}`);
   await page.getByRole("tab", { name: /^History/ }).click();
   const panel = page.locator("#task-panel-history");
   await expect(panel).toBeVisible();
-  await expect(panel.getByText("No history yet")).toBeHidden();
+  await expect(panel.getByRole("time").first()).toBeVisible();
   const showAll = page.getByRole("button", { name: /Show all \d+ entries/ });
   if (await showAll.isVisible()) await showAll.click();
   return panel;

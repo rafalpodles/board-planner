@@ -1511,7 +1511,9 @@ test.describe("what else points at what", () => {
     await expect(
       page.getByText(/Not saved\. Nothing pushes the work/)
     ).toBeVisible();
-    await expect(page.getByRole("button", { name: "Saved" })).toHaveCount(0);
+    // Read once, in the render that drew the refusal: "Saved" reverts after two seconds, so a
+    // retrying count of zero would wait it out (BP-712)
+    expect(await page.getByRole("button", { name: "Saved" }).count()).toBe(0);
     expect((await storedAgent("Writes and never sends"))?.composition).toMatchObject({
       implementation: [],
     });

@@ -15,6 +15,7 @@ import {
   seedSecondProject,
 } from "./seed";
 import { signIn } from "./session";
+import { recordedToasts, recordToastsFromLoad } from "./toasts";
 
 /**
  * BP-390. The dashboard's chart geometry already has a unit suite of its own
@@ -589,6 +590,7 @@ test.describe("who may read a dashboard", () => {
     });
     expect(stats.status()).toBe(403);
 
+    await recordToastsFromLoad(page);
     await signIn(page, "member");
     await page.goto(dashboardUrl(SECOND_PROJECT_KEY));
 
@@ -603,7 +605,9 @@ test.describe("who may read a dashboard", () => {
     // The heading is chrome and now renders above the banner, deliberately, so the reader can see
     // which page refused them. The charts are the thing that must not be there.
     await expect(page.getByRole("heading", { name: "Status Breakdown" })).toHaveCount(0);
-    await expect(page.getByTestId("toast")).toHaveCount(0);
+    // Recorded, not counted on screen: a toast is gone in three seconds and a retrying count of
+    // zero waits it out (BP-712)
+    expect(await recordedToasts(page)).toEqual([]);
   });
 });
 
