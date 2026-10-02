@@ -52,6 +52,7 @@ const VALID = { password: "password123", fullName: "Somebody" };
 
 beforeEach(() => {
   create.mockReset();
+  revokePendingInvitationsFor.mockReset();
   logInstanceAudit.mockReset();
   create.mockResolvedValue({ _id: "u1", username: "newcomer" });
   countDocuments.mockResolvedValue(5);
