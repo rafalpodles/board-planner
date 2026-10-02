@@ -219,6 +219,45 @@ export interface IApiToken {
 export const GRANT_RELATIONS = ["owner", "member"] as const;
 export type GrantRelation = (typeof GRANT_RELATIONS)[number];
 
+export const INVITATION_STATUSES = ["pending", "accepted", "revoked"] as const;
+export type InvitationStatus = (typeof INVITATION_STATUSES)[number];
+
+export interface IInvitationBoard {
+  project: Types.ObjectId;
+  relation: GrantRelation;
+  addedBy: Types.ObjectId;
+}
+
+export interface IInvitation {
+  _id: Types.ObjectId;
+  email: string;
+  role: "admin" | "member";
+  boards: IInvitationBoard[];
+  invitedBy: Types.ObjectId;
+  tokenHash: string;
+  expiresAt: Date;
+  status: InvitationStatus;
+  acceptedBy: Types.ObjectId | null;
+  acceptedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ApiInvitation {
+  _id: string;
+  email: string;
+  role: "admin" | "member";
+  boards: { project: string; key: string; name: string; relation: GrantRelation }[];
+  invitedBy: { _id: string; username: string; fullName: string } | null;
+  expiresAt: string;
+  expired: boolean;
+  createdAt: string;
+}
+
+export type InvitationDelivery =
+  | { delivery: "email" }
+  | { delivery: "link"; link: string; reason: "no_mail_server" | "mail_failed" };
+
 export interface IGrant {
   _id: Types.ObjectId;
   subject: Types.ObjectId;
@@ -1545,6 +1584,10 @@ export const INSTANCE_AUDIT_ACTIONS = [
   "user_created",
   "user_deleted",
   "user_role_changed",
+  "invitation_sent",
+  "invitation_resent",
+  "invitation_revoked",
+  "invitation_accepted",
   // A refused change accepted, declined, or given up on. Audited at the instance rather than the
   // project, because what accepting spends is the machine owner's pinned GitHub identity and the
   // CI minutes of whatever repository the push lands in — neither of which belongs to the board.

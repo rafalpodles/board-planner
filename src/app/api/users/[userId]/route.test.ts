@@ -14,6 +14,8 @@ const notifyAddressChanged = vi.fn();
 const hash = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+const revokePendingInvitationsFor = vi.fn();
+vi.mock("@/lib/invitations", () => ({ revokePendingInvitationsFor }));
 // Setting a password clears the target's login lockout (BP-353), which reaches the counter store
 vi.mock("@/models/rateLimit", async () => {
   const { inMemoryRateLimitModel } = await import("@/lib/rate-limit-test-store");
@@ -109,6 +111,7 @@ describe("PUT /api/users/:id", () => {
     expect(target.save).toHaveBeenCalled();
     // BP-359 review: a change the account asked for itself would otherwise overwrite this one
     expect(cancelEmailChange).toHaveBeenCalledWith("target-1");
+    expect(revokePendingInvitationsFor).toHaveBeenCalledWith("new.address@example.com");
   });
 
   it("leaves the address alone when the body does not carry one", async () => {
@@ -119,6 +122,7 @@ describe("PUT /api/users/:id", () => {
 
     expect(target.email).toBe("target@example.com");
     expect(cancelEmailChange).not.toHaveBeenCalled();
+    expect(revokePendingInvitationsFor).not.toHaveBeenCalled();
   });
 
   // The only way to undo a typo that took an address somebody else needs

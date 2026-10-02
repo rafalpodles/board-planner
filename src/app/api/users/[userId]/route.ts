@@ -5,6 +5,7 @@ import { connectDB } from "@/lib/db";
 import { MIN_PASSWORD_LENGTH, PASSWORD_COST_FACTOR } from "@/lib/auth";
 import { isValidEmail, normaliseEmail } from "@/lib/email";
 import { logInstanceAudit } from "@/lib/instanceAudit";
+import { revokePendingInvitationsFor } from "@/lib/invitations";
 import { notifyAddressChanged, notifyPasswordChanged } from "@/lib/security-mail";
 import { invalidateResetTokens } from "@/lib/password-reset";
 import { cancelEmailChange } from "@/lib/email-change";
@@ -168,6 +169,7 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
     }
     throw err;
   }
+  if (emailWasChanged) await revokePendingInvitationsFor(target.email);
 
   // What an account may do on this instance, which is the change the branch above gates on
   // `viaMachineCredential` precisely because it is the escalation path — and then left no trace of.

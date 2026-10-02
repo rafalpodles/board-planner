@@ -27,11 +27,14 @@ vi.mock("@/hooks/use-projects", () => ({
 
 const OTHER = { _id: "u2", username: "ada", fullName: "Ada", role: "member", email: "" };
 
+const otherGet = (path: string) =>
+  Promise.resolve(path === "/api/invitations" ? [] : { configured: false });
+
 beforeEach(() => {
   vi.clearAllMocks();
   toast.mockClear();
   api.get.mockImplementation((path: string) =>
-    path === "/api/users" ? Promise.resolve([OTHER]) : Promise.resolve({ configured: false })
+    path === "/api/users" ? Promise.resolve([OTHER]) : otherGet(path)
   );
 });
 afterEach(cleanup);
@@ -72,7 +75,7 @@ describe("the users page, after a save that is followed by a refetch", () => {
     api.get.mockImplementation((path: string) =>
       path === "/api/users"
         ? new Promise((resolve) => (releaseList = resolve))
-        : Promise.resolve({ configured: false })
+        : otherGet(path)
     );
 
     await act(async () => {
@@ -111,7 +114,7 @@ describe("the users page, after a save that is followed by a refetch", () => {
     api.get.mockImplementation((path: string) =>
       path === "/api/users"
         ? new Promise((resolve) => (releaseList = resolve))
-        : Promise.resolve({ configured: false })
+        : otherGet(path)
     );
     await act(async () => {
       screen.getByRole("button", { name: "Create User" }).click();
@@ -147,7 +150,7 @@ describe("the users page, after a save that is followed by a refetch", () => {
     api.get.mockImplementation((path: string) =>
       path === "/api/users"
         ? new Promise((resolve) => (releaseList = resolve))
-        : Promise.resolve({ configured: false })
+        : otherGet(path)
     );
     await act(async () => {
       screen.getByRole("button", { name: "Save" }).click();
@@ -192,7 +195,7 @@ describe("the users page, after a save that is followed by a refetch", () => {
     api.get.mockImplementation((path: string) =>
       path === "/api/users"
         ? Promise.reject(new Error("network down"))
-        : Promise.resolve({ configured: false })
+        : otherGet(path)
     );
     await act(async () => {
       screen.getByRole("button", { name: "Save" }).click();
@@ -219,7 +222,7 @@ describe("the users page, after a save that is followed by a refetch", () => {
     api.get.mockImplementation((path: string) =>
       path === "/api/users"
         ? Promise.reject(new Error("network down"))
-        : Promise.resolve({ configured: false })
+        : otherGet(path)
     );
     await act(async () => {
       screen.getByRole("button", { name: "Delete User" }).click();
@@ -247,7 +250,7 @@ describe("the users page, after a save that is followed by a refetch", () => {
     api.get.mockImplementation((path: string) =>
       path === "/api/users"
         ? Promise.reject(new Error("network down"))
-        : Promise.resolve({ configured: false })
+        : otherGet(path)
     );
     await act(async () => {
       screen.getByRole("button", { name: "Create User" }).click();

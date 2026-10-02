@@ -8,6 +8,8 @@ const logInstanceAudit = vi.fn();
 const find = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+const revokePendingInvitationsFor = vi.fn();
+vi.mock("@/lib/invitations", () => ({ revokePendingInvitationsFor }));
 vi.mock("@/models/user", () => ({
   User: {
     create: (...a: unknown[]) => create(...a),
@@ -50,6 +52,7 @@ const VALID = { password: "password123", fullName: "Somebody" };
 
 beforeEach(() => {
   create.mockReset();
+  revokePendingInvitationsFor.mockReset();
   logInstanceAudit.mockReset();
   create.mockResolvedValue({ _id: "u1", username: "newcomer" });
   countDocuments.mockResolvedValue(5);
@@ -97,10 +100,12 @@ describe("the row an account's creation leaves", () => {
   it("records nothing when the account was refused", async () => {
     create.mockRejectedValue(Object.assign(new Error("dup"), { code: 11000, keyPattern: { username: 1 } }));
 
-    const res = await post({ ...VALID, username: "taken" });
+    const res = await post({ ...VALID, username: "taken", email: "ada@example.com" });
 
     expect(res.status).toBe(409);
     expect(logInstanceAudit).not.toHaveBeenCalled();
+    // No account holds the address, so an invitation to it must survive the refusal
+    expect(revokePendingInvitationsFor).not.toHaveBeenCalled();
   });
 });
 
@@ -278,5 +283,16 @@ describe("which accounts the list returns", () => {
   it("does not read any other value as the opt-in", async () => {
     await list("?include=machine");
     expect(find).toHaveBeenCalledWith({ kind: { $ne: "machine" } });
+  });
+});
+
+describe("an account taking an address", () => {
+  // BP-826: a pending invitation to that address would otherwise come back to life the day this
+  // account is deleted or moves away
+  it("withdraws any pending invitation for it", async () => {
+    const res = await post({ ...VALID, username: "newcomer", email: " Ada@Example.com " });
+
+    expect(res.status).toBe(201);
+    expect(revokePendingInvitationsFor).toHaveBeenCalledWith("ada@example.com");
   });
 });

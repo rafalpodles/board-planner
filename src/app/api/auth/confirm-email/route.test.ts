@@ -10,6 +10,8 @@ const userUpdateOne = vi.fn();
 const userExists = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+const revokePendingInvitationsFor = vi.fn();
+vi.mock("@/lib/invitations", () => ({ revokePendingInvitationsFor }));
 vi.mock("@/lib/auth", () => ({ getClientIp: () => "203.0.113.9" }));
 vi.mock("@/models/rateLimit", async () => {
   const { inMemoryRateLimitModel } = await import("@/lib/rate-limit-test-store");
@@ -60,6 +62,8 @@ describe("POST /api/auth/confirm-email", () => {
     expect(await response.json()).toEqual({ ok: true, email: "new@example.com" });
     expect(userUpdateOne).toHaveBeenCalledWith({ _id: "u1" }, { $set: { email: "new@example.com" } });
     expect(invalidateResetTokens).toHaveBeenCalledWith("u1");
+    // BP-826: an invitation to the address would otherwise come back when this account left it
+    expect(revokePendingInvitationsFor).toHaveBeenCalledWith("new@example.com");
   });
 
   it("audits the change and tells the address that no longer recovers the account", async () => {

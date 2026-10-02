@@ -1,0 +1,264 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { createHash } from "crypto";
+
+const findOneAndUpdate = vi.fn();
+const findOne = vi.fn();
+const updateOne = vi.fn();
+const updateMany = vi.fn();
+
+vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+vi.mock("@/models/invitation", () => ({
+  Invitation: { findOneAndUpdate, findOne, updateOne, updateMany },
+}));
+
+const {
+  issueInvitation,
+  reissueInvitation,
+  revokeInvitation,
+  recordAcceptance,
+  revokeClaimedInvitation,
+  revokePendingInvitationsFor,
+  claimInvitation,
+  findInvitationByToken,
+  releaseInvitation,
+  INVITATION_TOKEN_PREFIX,
+  INVITATION_TTL_MS,
+} = await import("./invitations");
+
+const sha256 = (v: string) => createHash("sha256").update(v).digest("hex");
+const duplicate = Object.assign(new Error("E11000"), { code: 11000 });
+const ISSUE = { email: "ada@example.com", role: "member" as const, boards: [], invitedBy: "admin-1" };
+
+function stored(row: unknown) {
+  findOne.mockReturnValue({ lean: () => Promise.resolve(row) });
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  findOneAndUpdate.mockResolvedValue({ _id: "inv-1", email: "ada@example.com" });
+  stored(null);
+  updateOne.mockResolvedValue({});
+});
+
+describe("issuing an invitation", () => {
+  it("stores only the hash and hands back the one copy of the token", async () => {
+    const { token } = await issueInvitation(ISSUE);
+
+    expect(token.startsWith(INVITATION_TOKEN_PREFIX)).toBe(true);
+    const update = findOneAndUpdate.mock.calls[0][1];
+    expect(update.$set.tokenHash).toBe(sha256(token));
+    expect(JSON.stringify(update)).not.toContain(token);
+  });
+
+  it("expires seven days out", async () => {
+    const before = Date.now();
+    await issueInvitation(ISSUE);
+
+    const { expiresAt } = findOneAndUpdate.mock.calls[0][1].$set;
+    expect(expiresAt.getTime()).toBeGreaterThanOrEqual(before + INVITATION_TTL_MS);
+    expect(expiresAt.getTime()).toBeLessThanOrEqual(Date.now() + INVITATION_TTL_MS);
+    expect(INVITATION_TTL_MS).toBe(7 * 24 * 60 * 60 * 1000);
+  });
+
+  it("replaces the address's pending invitation rather than adding a second one", async () => {
+    await issueInvitation(ISSUE);
+
+    const [filter, , options] = findOneAndUpdate.mock.calls[0];
+    expect(filter).toEqual({ email: "ada@example.com", status: "pending" });
+    expect(options).toMatchObject({ upsert: true });
+  });
+
+  it("records who added each board", async () => {
+    await issueInvitation({ ...ISSUE, boards: [{ project: "p1", relation: "owner" }] });
+
+    expect(findOneAndUpdate.mock.calls[0][1].$set.boards).toEqual([
+      { project: "p1", relation: "owner", addedBy: "admin-1" },
+    ]);
+  });
+
+  it("retries once when a concurrent upsert won the insert", async () => {
+    findOneAndUpdate.mockRejectedValueOnce(duplicate);
+
+    const { invitation } = await issueInvitation(ISSUE);
+
+    expect(findOneAndUpdate).toHaveBeenCalledTimes(2);
+    expect(invitation).toMatchObject({ _id: "inv-1" });
+  });
+
+  it("does not swallow any other failure", async () => {
+    findOneAndUpdate.mockRejectedValueOnce(new Error("disk full"));
+
+    await expect(issueInvitation(ISSUE)).rejects.toThrow("disk full");
+  });
+});
+
+describe("sending again", () => {
+  it("changes the token, so the link mailed before stops working", async () => {
+    const { token } = (await reissueInvitation("inv-1", "admin-2"))!;
+
+    const [filter, update] = findOneAndUpdate.mock.calls[0];
+    expect(filter).toEqual({ _id: "inv-1", status: "pending" });
+    expect(update.$set.tokenHash).toBe(sha256(token));
+  });
+
+  it("starts the seven days again", async () => {
+    const before = Date.now();
+    await reissueInvitation("inv-1", "admin-2");
+
+    expect(findOneAndUpdate.mock.calls[0][1].$set.expiresAt.getTime()).toBeGreaterThanOrEqual(
+      before + INVITATION_TTL_MS
+    );
+  });
+
+  // Acceptance checks the people an invitation names; a resent link naming a deleted inviter
+  // would be refused after the invitee had filled in the form
+  it("is endorsed by whoever sends it, for the role and every board", async () => {
+    await reissueInvitation("inv-1", "admin-2");
+
+    const { $set } = findOneAndUpdate.mock.calls[0][1];
+    expect($set.invitedBy).toBe("admin-2");
+    expect($set["boards.$[].addedBy"]).toBe("admin-2");
+  });
+
+  it("finds nothing to send for an invitation that is no longer pending", async () => {
+    findOneAndUpdate.mockResolvedValue(null);
+
+    expect(await reissueInvitation("inv-1", "admin-2")).toBeNull();
+  });
+});
+
+describe("revoking", () => {
+  it("revokes a pending invitation, and one whose acceptance has not produced an account yet", async () => {
+    await revokeInvitation("inv-1");
+
+    const [filter, update] = findOneAndUpdate.mock.calls[0];
+    expect(filter).toEqual({
+      _id: "inv-1",
+      $or: [{ status: "pending" }, { status: "accepted", acceptedBy: null }],
+    });
+    expect(update).toEqual({ $set: { status: "revoked" } });
+  });
+});
+
+describe("recording an acceptance", () => {
+  it("ties the account only to a claim that is still held", async () => {
+    updateOne.mockResolvedValue({ matchedCount: 1 });
+
+    expect(await recordAcceptance("inv-1", "u1")).toBe(true);
+    expect(updateOne.mock.calls[0]).toEqual([
+      { _id: "inv-1", status: "accepted", acceptedBy: null },
+      { $set: { acceptedBy: "u1" } },
+    ]);
+  });
+
+  it("says so when the invitation was revoked meanwhile", async () => {
+    updateOne.mockResolvedValue({ matchedCount: 0 });
+
+    expect(await recordAcceptance("inv-1", "u1")).toBe(false);
+  });
+});
+
+describe("spending the link", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("claims with one update that matches only a pending, unexpired invitation", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-02T12:00:00Z"));
+
+    const outcome = await claimInvitation("cpi_abc");
+
+    expect(outcome.ok).toBe(true);
+    const [filter, update] = findOneAndUpdate.mock.calls[0];
+    expect(filter).toEqual({
+      tokenHash: sha256("cpi_abc"),
+      status: "pending",
+      expiresAt: { $gt: new Date("2026-10-02T12:00:00Z") },
+    });
+    expect(update.$set.status).toBe("accepted");
+  });
+
+  it.each([
+    [null, "unknown"],
+    [{ status: "accepted", expiresAt: new Date(Date.now() + 1000) }, "used"],
+    [{ status: "revoked", expiresAt: new Date(Date.now() + 1000) }, "revoked"],
+    [{ status: "pending", expiresAt: new Date(Date.now() - 1000) }, "expired"],
+  ])("explains a refusal: %j is %s", async (row, reason) => {
+    findOneAndUpdate.mockResolvedValue(null);
+    stored(row);
+
+    expect(await claimInvitation("cpi_abc")).toEqual({ ok: false, reason });
+  });
+});
+
+describe("reading the link without spending it", () => {
+  it("answers for a pending, unexpired invitation", async () => {
+    stored({ status: "pending", expiresAt: new Date(Date.now() + 1000), email: "ada@example.com" });
+
+    const found = await findInvitationByToken("cpi_abc");
+
+    expect(found.ok).toBe(true);
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("refuses an expired one even though it is still marked pending", async () => {
+    stored({ status: "pending", expiresAt: new Date(Date.now() - 1000) });
+
+    expect(await findInvitationByToken("cpi_abc")).toEqual({ ok: false, reason: "expired" });
+  });
+});
+
+describe("putting a claimed link back", () => {
+  it("only reopens an acceptance that never produced an account, back to pending", async () => {
+    await releaseInvitation("inv-1");
+
+    expect(updateOne.mock.calls[0]).toEqual([
+      { _id: "inv-1", status: "accepted", acceptedBy: null },
+      { $set: { status: "pending", acceptedAt: null } },
+    ]);
+  });
+
+  it("does not swallow any other failure", async () => {
+    updateOne.mockRejectedValue(new Error("disk full"));
+
+    await expect(releaseInvitation("inv-1")).rejects.toThrow("disk full");
+  });
+
+  it("leaves it spent when the address has been invited again since", async () => {
+    updateOne.mockRejectedValue(duplicate);
+
+    await expect(releaseInvitation("inv-1")).resolves.toBeUndefined();
+  });
+});
+
+describe("revoking because nothing backs it any more", () => {
+  // A lookup racing an acceptance in another tab must not kill the account being made
+  it("revokes only pending invitations for an address", async () => {
+    await revokePendingInvitationsFor("ada@example.com");
+
+    expect(updateMany).toHaveBeenCalledWith(
+      { email: "ada@example.com", status: "pending" },
+      { $set: { status: "revoked" } }
+    );
+  });
+
+  it("never throws: its callers are mid-way through security steps", async () => {
+    updateMany.mockRejectedValue(new Error("write timeout"));
+
+    await expect(revokePendingInvitationsFor("ada@example.com")).resolves.toBeUndefined();
+  });
+
+  it("does nothing for an account with no address", async () => {
+    await revokePendingInvitationsFor("");
+
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it("revokes an acceptance's own claim and never a finished one", async () => {
+    await revokeClaimedInvitation("inv-1");
+
+    expect(updateOne).toHaveBeenCalledWith(
+      { _id: "inv-1", status: "accepted", acceptedBy: null },
+      { $set: { status: "revoked" } }
+    );
+  });
+});

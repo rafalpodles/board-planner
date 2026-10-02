@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { getClientIp } from "@/lib/auth";
 import { consumeEmailChange, releaseEmailChange } from "@/lib/email-change";
+import { revokePendingInvitationsFor } from "@/lib/invitations";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { duplicateKeyField } from "@/lib/mongo-errors";
 import { invalidateResetTokens } from "@/lib/password-reset";
@@ -67,6 +68,7 @@ export async function POST(request: Request) {
       }
       throw err;
     }
+    await revokePendingInvitationsFor(outcome.email);
 
     // A link already sent to the old inbox must not outlive the move away from it
     await invalidateResetTokens(user._id);
