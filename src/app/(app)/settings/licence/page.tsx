@@ -44,7 +44,7 @@ export default function LicenceSettingsPage() {
   if (!isAdmin) return null;
 
   return (
-    <div className="max-w-2xl">
+    <div className="max-w-2xl" data-testid="licence-page">
       <h2 className="text-lg font-semibold mb-1">Licence</h2>
       <p className="text-sm text-text-muted mb-6">
         Read from <code>LICENCE_KEY</code> in the environment. To change it, set the variable and restart.

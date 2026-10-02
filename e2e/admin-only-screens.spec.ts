@@ -40,6 +40,7 @@ interface Screen {
 const SCREENS: Screen[] = [
   { path: "/settings/users", heading: "Users", api: "/api/users" },
   { path: "/settings/email", heading: "Email", api: "/api/admin/email" },
+  { path: "/settings/licence", heading: "Licence", api: "/api/admin/licence" },
   { path: "/settings/agents", heading: "PM agents", api: "/api/admin/agents" },
   { path: "/settings/workers", heading: "Worker fleet", api: "/api/admin/workers" },
   { path: "/settings/workers/runs", heading: "Run history", api: "/api/admin/runs" },
