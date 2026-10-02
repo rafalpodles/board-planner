@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const reissueInvitation = vi.fn();
+const recordDelivery = vi.fn();
 const deliverTo = vi.fn();
 const invitationFindById = vi.fn();
 const userExists = vi.fn();
@@ -16,7 +17,7 @@ vi.mock("@/lib/middleware", () => ({
       handler(request, { params: ctx.params, user: caller }),
 }));
 vi.mock("@/lib/session", () => ({ selfOrigin }));
-vi.mock("@/lib/invitations", () => ({ reissueInvitation }));
+vi.mock("@/lib/invitations", () => ({ reissueInvitation, recordDelivery }));
 vi.mock("@/lib/invitation-mail", async () => {
   const actual = await vi.importActual<typeof import("@/lib/invitation-mail")>("@/lib/invitation-mail");
   return { ...actual, deliverTo };
@@ -60,6 +61,7 @@ describe("POST /api/invitations/:id/resend", () => {
 
     expect(res.status).toBe(200);
     expect(reissueInvitation).toHaveBeenCalledWith(ID, "admin-2");
+    expect(recordDelivery).toHaveBeenCalledWith(ID, "cpi_new", "email");
     expect(deliverTo.mock.calls[0][1]).toBe("cpi_new");
     expect(deliverTo.mock.calls[0][3]).toBe(caller);
     expect(JSON.stringify(await res.json())).not.toContain("cpi_new");

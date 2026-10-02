@@ -77,7 +77,7 @@ async function accept(browser: Browser, link: string, username: string) {
   return { context, page };
 }
 
-async function plantAdminInvitation(email: string) {
+async function plantAdminInvitation(email: string, deliveredAs: "email" | "link" = "email") {
   const token = `cpi_${randomBytes(32).toString("hex")}`;
   const tokenHash = createHash("sha256").update(token).digest("hex");
   const expiresAt = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
@@ -91,6 +91,7 @@ async function plantAdminInvitation(email: string) {
     status: "pending",
     acceptedBy: null,
     acceptedAt: null,
+    deliveredAs,
     createdAt: new Date(),
     updatedAt: new Date(),
   });
@@ -109,9 +110,9 @@ test("an owner invites somebody to their board, who joins it as a member of the 
   const email = freshAddress("owners-guest");
   await signIn(page, "owner");
 
-  const { card, response } = await inviteFromBoard(page, email);
+  const { card, response } = await inviteFromBoard(page, email, "owner");
   expect(response.status()).toBe(201);
-  await expect(card.getByTestId("board-invitation").filter({ hasText: email })).toContainText("Member");
+  await expect(card.getByTestId("board-invitation").filter({ hasText: email })).toContainText("Owner");
 
   const { context, page: guest } = await accept(browser, await linkMailedTo(email), "owners-guest");
   await expect(guest).toHaveURL(new RegExp(`/projects/${PROJECT_ID}`));
@@ -120,7 +121,7 @@ test("an owner invites somebody to their board, who joins it as a member of the 
   expect(account).toMatchObject({ email, role: "member" });
   expect(
     await (await db()).collection("grants").findOne({ subject: account!._id, object: PROJECT_ID })
-  ).toMatchObject({ relation: "member" });
+  ).toMatchObject({ relation: "owner" });
   await context.close();
 });
 
@@ -199,11 +200,29 @@ test("an owner withdraws an invitation from the board, and its link stops workin
     page.getByRole("dialog").getByRole("button", { name: "Withdraw" }).click(),
   ]);
   expect(withdrawn.status()).toBe(200);
+  await expect(card.getByText("Invite by email")).toBeVisible();
   await expect(card.getByTestId("board-invitation")).toHaveCount(0);
+  await expect(alertOn(page)).toHaveCount(0);
 
   const context = await browser.newContext();
   const guest = await context.newPage();
   await guest.goto(link);
   await expect(alertOn(guest)).toHaveText("This invitation was withdrawn. Ask whoever invited you for a new one.");
   await context.close();
+});
+
+// A link somebody was shown could be in anybody's hands, and this board would go wherever it does
+test("an owner cannot add the board to an invitation whose link somebody holds", async ({ page }) => {
+  const email = freshAddress("link-held");
+  const planted = await plantAdminInvitation(email, "link");
+  await signIn(page, "owner");
+
+  const { card, response } = await inviteFromBoard(page, email);
+
+  expect(response.status()).toBe(409);
+  await expect(card.getByRole("alert")).toHaveText(
+    `${email} has an invitation out as a link from admin. Ask them to add this board, or wait until it is used or withdrawn.`
+  );
+  const row = await (await db()).collection("invitations").findOne({ email, status: "pending" });
+  expect(row).toMatchObject({ tokenHash: planted.tokenHash, boards: [] });
 });

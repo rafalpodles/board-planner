@@ -4,15 +4,18 @@ const removeBoardFromInvitation = vi.fn();
 const revokeIfEmpty = vi.fn();
 const userFindById = vi.fn();
 const logProjectAudit = vi.fn();
+const logInstanceAudit = vi.fn();
+let caller: Record<string, unknown> = {};
 
 vi.mock("@/lib/middleware", () => ({
   withProjectOwner:
     (handler: (r: Request, c: unknown) => unknown) =>
     (request: Request, ctx: { params: Promise<Record<string, string>> }) =>
-      handler(request, { params: ctx.params, user: { _id: "o1", username: "owner" } }),
+      handler(request, { params: ctx.params, user: caller }),
 }));
 vi.mock("@/lib/invitations", () => ({ removeBoardFromInvitation, revokeIfEmpty }));
 vi.mock("@/lib/projectAudit", () => ({ logProjectAudit }));
+vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/models/user", () => ({ User: { findById: userFindById } }));
 
 const { DELETE } = await import("./route");
@@ -29,7 +32,9 @@ function inviter(user: unknown) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  caller = { _id: "o1", username: "owner" };
   inviter({ role: "member", kind: "human" });
+  revokeIfEmpty.mockResolvedValue(true);
 });
 
 describe("DELETE /api/projects/:id/invitations/:invitationId", () => {
@@ -49,12 +54,44 @@ describe("DELETE /api/projects/:id/invitations/:invitationId", () => {
     );
   });
 
-  it("revokes an owner's invitation left with no boards", async () => {
-    removeBoardFromInvitation.mockResolvedValue({ _id: ID, email: "ada@example.com", boards: [], invitedBy: "o1" });
+  it("revokes the owner's invitation it read once it has no boards, and says so in the instance log", async () => {
+    const row = { _id: ID, email: "ada@example.com", boards: [], invitedBy: "o1", tokenHash: "h1" };
+    removeBoardFromInvitation.mockResolvedValue(row);
 
     await del();
 
-    expect(revokeIfEmpty).toHaveBeenCalledWith(ID);
+    expect(revokeIfEmpty).toHaveBeenCalledWith(row);
+    expect(logInstanceAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "invitation_revoked", target: "ada@example.com" })
+    );
+  });
+
+  it("logs no revocation the empty-check did not make", async () => {
+    removeBoardFromInvitation.mockResolvedValue({ _id: ID, email: "ada@example.com", boards: [], invitedBy: "o1" });
+    revokeIfEmpty.mockResolvedValue(false);
+
+    await del();
+
+    expect(logInstanceAudit).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a deleted inviter", null],
+    ["a machine account", { role: "admin", kind: "machine" }],
+  ])("revokes an empty invitation from %s", async (_label, who) => {
+    removeBoardFromInvitation.mockResolvedValue({ _id: ID, email: "ada@example.com", boards: [], invitedBy: "x1" });
+    inviter(who);
+
+    await del();
+
+    expect(revokeIfEmpty).toHaveBeenCalled();
+  });
+
+  it("refuses a machine credential", async () => {
+    caller = { ...caller, viaMachineCredential: true };
+
+    expect((await del()).status).toBe(403);
+    expect(removeBoardFromInvitation).not.toHaveBeenCalled();
   });
 
   // An administrator's invitation still gives a role on its own

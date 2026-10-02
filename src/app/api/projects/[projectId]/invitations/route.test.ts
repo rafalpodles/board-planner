@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const inviteToBoard = vi.fn();
+const recordDelivery = vi.fn();
+const userFindById = vi.fn();
 const deliverTo = vi.fn();
 const userExists = vi.fn();
 const userFind = vi.fn();
@@ -23,14 +25,14 @@ vi.mock("@/lib/middleware", () => ({
       handler(request, { params: Promise.resolve({ projectId: "p1" }), user: caller }),
 }));
 vi.mock("@/lib/session", () => ({ selfOrigin }));
-vi.mock("@/lib/invitations", () => ({ inviteToBoard }));
+vi.mock("@/lib/invitations", () => ({ inviteToBoard, recordDelivery }));
 vi.mock("@/lib/invitation-mail", async () => {
   const actual = await vi.importActual<typeof import("@/lib/invitation-mail")>("@/lib/invitation-mail");
   return { ...actual, deliverTo };
 });
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/lib/projectAudit", () => ({ logProjectAudit }));
-vi.mock("@/models/user", () => ({ User: { exists: userExists, find: userFind } }));
+vi.mock("@/models/user", () => ({ User: { exists: userExists, find: userFind, findById: userFindById } }));
 vi.mock("@/models/project", () => ({ Project: { findById: projectFindById } }));
 vi.mock("@/models/invitation", () => ({ Invitation: { find: invitationFind } }));
 
@@ -59,6 +61,9 @@ describe("POST /api/projects/:id/invitations", () => {
     const res = await post({ email: " Ada@Example.com ", relation: "owner" });
 
     expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body).toEqual({ outcome: "created", delivery: "email" });
+    expect(recordDelivery).toHaveBeenCalledWith("inv-1", "cpi_secret", "email");
     expect(inviteToBoard).toHaveBeenCalledWith({
       email: "ada@example.com",
       project: "p1",
@@ -72,18 +77,48 @@ describe("POST /api/projects/:id/invitations", () => {
       "member",
       [{ project: "p1", relation: "owner" }],
     ]);
-    expect(JSON.stringify(await res.json())).not.toContain("cpi_secret");
     expect(logProjectAudit).toHaveBeenCalledWith("p1", "o1", "member_invited", "ada@example.com: invited as owner");
   });
 
-  // The invitation already sent is somebody else's: no new link, no mail, nothing to hand back
-  it("adds the board to an invitation already pending without sending or returning a link", async () => {
-    inviteToBoard.mockResolvedValue({ kind: "added", invitation: { _id: "inv-admin" } });
+  it("hands the owner the link when no mail went out, and records that it did", async () => {
+    deliverTo.mockResolvedValue({ delivery: "link", link: "https://planner.example/invite?token=cpi_secret", reason: "no_mail_server" });
 
     const res = await post({ email: "ada@example.com" });
 
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ outcome: "added" });
+    expect(await res.json()).toEqual({
+      outcome: "created",
+      delivery: "link",
+      link: "https://planner.example/invite?token=cpi_secret",
+      reason: "no_mail_server",
+    });
+    expect(recordDelivery).toHaveBeenCalledWith("inv-1", "cpi_secret", "link");
+  });
+
+  // The invitation already sent is somebody else's: no new link, no mail, nothing to hand back
+  it.each([["added"], ["updated"]])(
+    "answers %s for an invitation already pending, without sending or returning a link",
+    async (kind) => {
+      inviteToBoard.mockResolvedValue({ kind, invitation: { _id: "inv-admin" } });
+
+      const res = await post({ email: "ada@example.com" });
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ outcome: kind });
+      expect(deliverTo).not.toHaveBeenCalled();
+      expect(logInstanceAudit).not.toHaveBeenCalled();
+    }
+  );
+
+  it("refuses to add the board to an invitation whose link somebody holds", async () => {
+    inviteToBoard.mockResolvedValue({ kind: "held", invitedBy: "a1" });
+    userFindById.mockReturnValue({ select: () => ({ lean: () => Promise.resolve({ username: "admin" }) }) });
+
+    const res = await post({ email: "ada@example.com" });
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe(
+      "ada@example.com has an invitation out as a link from admin. Ask them to add this board, or wait until it is used or withdrawn."
+    );
     expect(deliverTo).not.toHaveBeenCalled();
   });
 
@@ -93,6 +128,41 @@ describe("POST /api/projects/:id/invitations", () => {
     const res = await post({ email: "ADA@example.com" });
 
     expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("That address already has an account. Add them by username above.");
+    expect(inviteToBoard).not.toHaveBeenCalled();
+  });
+
+  // Each answer to "has this address an account" costs the same as an invitation
+  it("spends the owner's budget on an address that has an account", async () => {
+    userExists.mockResolvedValue({ _id: "u2" });
+    for (let i = 0; i < 30; i++) await post({ email: `probe${i}@example.com` });
+    userExists.mockResolvedValue(null);
+
+    expect((await post({ email: "ada@example.com" })).status).toBe(429);
+  });
+
+  it("holds one address to five invitations a window, whoever sends them", async () => {
+    for (let i = 0; i < 5; i++) {
+      caller = { ...caller, _id: `o${i}` };
+      expect((await post({ email: "ada@example.com" })).status).toBe(201);
+    }
+    caller = { ...caller, _id: "o9" };
+
+    expect((await post({ email: "ada@example.com" })).status).toBe(429);
+    expect((await post({ email: "someone-else@example.com" })).status).toBe(201);
+  });
+
+  it("answers 404 for a board that has gone", async () => {
+    projectFindById.mockReturnValue({ select: () => ({ lean: () => Promise.resolve(null) }) });
+
+    expect((await post({ email: "ada@example.com" })).status).toBe(404);
+    expect(inviteToBoard).not.toHaveBeenCalled();
+  });
+
+  it("refuses to build a link with no PUBLIC_ORIGIN", async () => {
+    selfOrigin.mockReturnValue(null);
+
+    expect((await post({ email: "ada@example.com" })).status).toBe(500);
     expect(inviteToBoard).not.toHaveBeenCalled();
   });
 
@@ -138,6 +208,12 @@ describe("GET /api/projects/:id/invitations", () => {
               ],
             },
             {
+              _id: "inv-3",
+              email: "late@example.com",
+              expiresAt: new Date(Date.now() - 60_000),
+              boards: [{ project: "p1", relation: "owner", addedBy: "o1" }],
+            },
+            {
               _id: "inv-2",
               email: "held@example.com",
               expiresAt: new Date(Date.now() + 86_400_000),
@@ -160,6 +236,14 @@ describe("GET /api/projects/:id/invitations", () => {
     expect(invitationFind).toHaveBeenCalledWith({ status: "pending", "boards.project": "p1" });
     expect(await res.json()).toEqual([
       expect.objectContaining({ _id: "inv-1", email: "ada@example.com", relation: "member", addedBy: "owner", expired: false }),
+      expect.objectContaining({ _id: "inv-3", relation: "owner", expired: true }),
     ]);
+  });
+
+  it("refuses a machine credential", async () => {
+    caller = { ...caller, viaMachineCredential: true };
+
+    expect((await GET(new Request("http://x/api/projects/p1/invitations"), CTX)).status).toBe(403);
+    expect(invitationFind).not.toHaveBeenCalled();
   });
 });
