@@ -184,6 +184,12 @@ GITHUB_API_BASE_URL=      # Optional — where GitHub's API is (default https://
                           # provider classification (BP-634). A proxy in front of api.github.com
                           # is neither shape and leaves both at github.com, because a proxy's
                           # address is not a repository's
+OIDC_ISSUER=              # Optional — sign-in through any OpenID Connect provider (Keycloak, Authentik,
+OIDC_CLIENT_ID=           # Entra, Okta…), all three together; the redirect URI is PUBLIC_ORIGIN +
+OIDC_CLIENT_SECRET=       # /api/auth/oidc/oidc/callback. Plain http only for an issuer on loopback
+OIDC_LABEL=               # Optional — the button's name (default "Single sign-on") (BP-828)
+GOOGLE_CLIENT_ID=         # Optional — sign-in with Google, the same code path at Google's issuer;
+GOOGLE_CLIENT_SECRET=     # redirect URI PUBLIC_ORIGIN + /api/auth/oidc/google/callback (BP-828)
 SMTP_HOST=                # Optional — Email notifications
 SMTP_PORT=587
 SMTP_USER=
