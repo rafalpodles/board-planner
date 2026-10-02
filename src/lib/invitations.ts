@@ -194,8 +194,10 @@ export async function revokePendingInvitationsFor(email: string): Promise<void> 
   }
 }
 
-/** Matched on the token too, so a delivery is never recorded against a link issued after it. */
-/** Never throws: the invitation has already gone out, and a row left unrecorded is merely unjoinable. */
+/**
+ * Matched on the token, so a delivery is never recorded against a link issued after it. Never
+ * throws: the invitation has already gone out, and a row left unrecorded is merely unjoinable.
+ */
 export async function recordDelivery(
   id: Types.ObjectId | string,
   token: string,
