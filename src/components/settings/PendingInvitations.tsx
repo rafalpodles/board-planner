@@ -92,7 +92,7 @@ export function PendingInvitations({
                 data-testid="pending-invitation"
                 className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3"
               >
-                <div className="min-w-0 flex-1">
+                <div className="min-w-0 basis-full flex-1 sm:basis-0">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <p className="font-medium break-all">{invitation.email}</p>
                     <span
