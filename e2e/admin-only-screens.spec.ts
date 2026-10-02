@@ -132,7 +132,7 @@ test.describe("the administration screens", () => {
     await signIn(page, "admin");
     await page.goto("/settings/profile");
     await expect(nav(page).getByRole("heading", { name: "Administration" })).toBeVisible();
-    for (const label of ["Users", "Email", "PM Agents", "Workers", "Audit log"]) {
+    for (const label of ["Users", "Email", "Licence", "PM Agents", "Workers", "Audit log"]) {
       await expect(nav(page).getByRole("link", { name: label, exact: true })).toBeVisible();
     }
 
@@ -146,7 +146,7 @@ test.describe("the administration screens", () => {
     await expect(nav(memberPage).getByRole("link", { name: "Profile" })).toBeVisible();
     await expect(nav(memberPage).getByRole("link", { name: "Security" })).toBeVisible();
     await expect(nav(memberPage).getByRole("heading", { name: "Administration" })).toHaveCount(0);
-    for (const label of ["Users", "Email", "PM Agents", "Workers", "Audit log"]) {
+    for (const label of ["Users", "Email", "Licence", "PM Agents", "Workers", "Audit log"]) {
       await expect(nav(memberPage).getByRole("link", { name: label, exact: true })).toHaveCount(0);
     }
 
