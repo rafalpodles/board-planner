@@ -14,6 +14,7 @@ import { SettingsCard, ListRow } from "@/components/settings/SettingsCard";
 import { DangerAction } from "@/components/settings/DangerAction";
 import { SettingRow } from "@/components/settings/SettingRow";
 import { LoadFailed } from "@/components/ui/LoadFailed";
+import { BoardInvitations } from "@/components/settings/BoardInvitations";
 import { useDirtyGroup } from "@/components/settings/settings-context";
 import { SectionProps } from "./types";
 
@@ -378,6 +379,8 @@ export function GeneralSection({
         </div>
         )}
       </SettingsCard>
+
+      {membersRead === "loaded" && <BoardInvitations projectId={projectId} />}
 
       {project.canAdmin && (
         <SettingsCard

@@ -178,3 +178,83 @@ export async function revokePendingInvitationsFor(email: string): Promise<void> 
     console.error("Failed to withdraw pending invitations for an address:", err);
   }
 }
+
+export type BoardInvitation =
+  | { kind: "created"; invitation: IInvitation; token: string }
+  | { kind: "added"; invitation: IInvitation };
+
+/**
+ * A board owner's invitation. An invitation already pending for the address only gains (or
+ * re-relates) this board's entry: its role, token and expiry are somebody else's to change, and a
+ * fresh link handed to a non-admin could carry an administrator role.
+ */
+export async function inviteToBoard(input: {
+  email: string;
+  project: Types.ObjectId | string;
+  relation: GrantRelation;
+  invitedBy: Types.ObjectId | string;
+}): Promise<BoardInvitation> {
+  await connectDB();
+  const { email, project, relation, invitedBy } = input;
+  const now = new Date();
+  await Invitation.updateMany(
+    { email, status: "pending", expiresAt: { $lte: now } },
+    { $set: { status: "revoked" } }
+  );
+  const live: Record<string, unknown> = { email, status: "pending", expiresAt: { $gt: now } };
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const updated =
+      (await Invitation.findOneAndUpdate(
+        { ...live, "boards.project": project },
+        { $set: { "boards.$.relation": relation, "boards.$.addedBy": invitedBy } },
+        { returnDocument: "after" }
+      )) ??
+      (await Invitation.findOneAndUpdate(
+        { ...live, "boards.project": { $ne: project } },
+        { $push: { boards: { project, relation, addedBy: invitedBy } } },
+        { returnDocument: "after" }
+      ));
+    if (updated) return { kind: "added", invitation: updated };
+
+    const { token, tokenHash, expiresAt } = freshSecret();
+    try {
+      const invitation = await Invitation.create({
+        email,
+        role: "member",
+        boards: [{ project, relation, addedBy: invitedBy }],
+        invitedBy,
+        tokenHash,
+        expiresAt,
+        status: "pending",
+      });
+      return { kind: "created", invitation, token };
+    } catch (err) {
+      // Somebody invited the address in between; the next pass adds this board to theirs
+      if ((err as { code?: number }).code !== DUPLICATE_KEY) throw err;
+    }
+  }
+  throw new Error("could not settle an invitation for that address");
+}
+
+/** Removes one board from a pending invitation. Null when it was not on one. */
+export async function removeBoardFromInvitation(
+  id: Types.ObjectId | string,
+  project: Types.ObjectId | string
+): Promise<IInvitation | null> {
+  await connectDB();
+  return Invitation.findOneAndUpdate(
+    { _id: id, status: "pending", "boards.project": project },
+    { $pull: { boards: { project } } },
+    { returnDocument: "after" }
+  );
+}
+
+/** Revokes an invitation left with no boards. The caller decides whether its role alone is worth keeping. */
+export async function revokeIfEmpty(id: Types.ObjectId | string): Promise<void> {
+  await connectDB();
+  await Invitation.updateOne(
+    { _id: id, status: "pending", boards: { $size: 0 } },
+    { $set: { status: "revoked" } }
+  );
+}

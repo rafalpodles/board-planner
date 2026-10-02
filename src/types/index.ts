@@ -254,6 +254,15 @@ export interface ApiInvitation {
   createdAt: string;
 }
 
+export interface ApiBoardInvitation {
+  _id: string;
+  email: string;
+  relation: GrantRelation;
+  addedBy: string | null;
+  expiresAt: string;
+  expired: boolean;
+}
+
 export type InvitationDelivery =
   | { delivery: "email" }
   | { delivery: "link"; link: string; reason: "no_mail_server" | "mail_failed" };
@@ -1542,6 +1551,8 @@ export type ProjectAuditAction =
   | "member_added"
   | "member_role_changed"
   | "member_removed"
+  | "member_invited"
+  | "member_invitation_removed"
   | "task_created"
   | "task_deleted"
   | "bulk_delete"
