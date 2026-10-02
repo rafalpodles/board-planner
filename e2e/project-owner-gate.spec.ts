@@ -124,6 +124,15 @@ const RECIPES: Record<string, Recipe> = {
     send: (request, path) => request.delete(path, { headers: SAME_ORIGIN }),
     handled: { status: 400, body: /userId is required/ },
   },
+  "GET /api/projects/[projectId]/invitations": { send: get, handled: { status: 200, body: JSON_ARRAY } },
+  "POST /api/projects/[projectId]/invitations": {
+    send: withBody("post", {}),
+    handled: { status: 400, body: /Enter the address to invite/ },
+  },
+  "DELETE /api/projects/[projectId]/invitations/[invitationId]": {
+    send: (request, path) => request.delete(path, { headers: SAME_ORIGIN }),
+    handled: { status: 404, body: /Invitation not found/ },
+  },
   "GET /api/projects/[projectId]/members/candidates": {
     // The instance admin holds no grant on the board, so the lookup must offer it
     send: (request, path) => request.get(`${path}?q=${ADMIN_USERNAME.slice(0, 3)}`),
@@ -192,7 +201,8 @@ const ROUTES = scanOwnerGatedRoutes();
 function concrete(path: string): string {
   return path
     .replace("[projectId]", PROJECT_KEY)
-    .replace("[fieldId]", new mongoose.Types.ObjectId().toString());
+    .replace("[fieldId]", new mongoose.Types.ObjectId().toString())
+    .replace("[invitationId]", new mongoose.Types.ObjectId().toString());
 }
 
 type Who = "owner" | "member";
