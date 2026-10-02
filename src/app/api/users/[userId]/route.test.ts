@@ -268,6 +268,26 @@ describe("PUT /api/users/:id — an admin sets a password", () => {
     expect(await isRateLimited(shared, ANONYMOUS_ACCOUNT_ATTEMPTS)).toBe(true);
   });
 
+  it("records the providers it unlinked, attributed to the administrator", async () => {
+    found(targetDoc({ role: "member" }));
+    revokeUserCredentials.mockResolvedValueOnce({ identitiesUnlinked: 2 });
+
+    await PUT(put({ password: "a-fresh-password" }), ctx());
+
+    expect(logInstanceAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "identity_unlinked", user: "admin-1", target: "target" })
+    );
+  });
+
+  it("records no unlinking when the target had no provider", async () => {
+    found(targetDoc({ role: "member" }));
+    revokeUserCredentials.mockResolvedValueOnce({ identitiesUnlinked: 0 });
+
+    await PUT(put({ password: "a-fresh-password" }), ctx());
+
+    expect(logInstanceAudit).not.toHaveBeenCalledWith(expect.objectContaining({ action: "identity_unlinked" }));
+  });
+
   it("hashes it, signs the target out everywhere, and leaves a trace", async () => {
     const target = targetDoc({ role: "member" });
     found(target);

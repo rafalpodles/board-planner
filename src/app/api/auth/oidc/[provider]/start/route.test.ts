@@ -26,7 +26,7 @@ vi.mock("@/models/user", () => ({ User: { findById: userFindById } }));
 vi.mock("bcryptjs", () => ({ default: { compare } }));
 
 const { POST } = await import("./route");
-const { resetRateLimits } = await import("@/lib/rate-limit");
+const { isRateLimited, lockoutKey, resetRateLimits } = await import("@/lib/rate-limit");
 
 const start = (body: unknown, provider = "oidc") =>
   POST(new Request(`http://x/api/auth/oidc/${provider}/start`, { method: "POST", body: JSON.stringify(body) }), {
@@ -88,6 +88,34 @@ describe("POST /api/auth/oidc/:provider/start", () => {
       expect(res.status).toBe(200);
       expect(compare).toHaveBeenCalledWith("right", "$2a$10$hash");
       expect(beginFlow).toHaveBeenCalledWith(expect.objectContaining({ intent: "link", userId: "u1" }));
+    });
+
+    describe("guessing the password", () => {
+      beforeEach(() => compare.mockImplementation(async (typed: string) => typed === "right"));
+      const guess = (currentPassword: string) => start({ intent: "link", currentPassword });
+
+      it("locks out after ten wrong guesses, even the right password", async () => {
+        for (let i = 0; i < 9; i++) expect((await guess("wrong")).status).toBe(400);
+
+        expect((await guess("wrong")).status).toBe(429);
+        expect((await guess("right")).status).toBe(429);
+        expect(beginFlow).not.toHaveBeenCalled();
+      });
+
+      it("counts in its own family, not the e-mail change's", async () => {
+        for (let i = 0; i < 10; i++) await guess("wrong");
+
+        expect(await isRateLimited(lockoutKey("203.0.113.9", "ada", "link-provider"))).toBe(true);
+        expect(await isRateLimited(lockoutKey("203.0.113.9", "ada", "email-change"))).toBe(false);
+      });
+
+      it("forgets the session's failures once the password matches", async () => {
+        for (let i = 0; i < 9; i++) await guess("wrong");
+        expect((await guess("right")).status).toBe(200);
+
+        expect((await guess("wrong")).status).toBe(400);
+        expect((await guess("right")).status).toBe(200);
+      });
     });
 
     it("asks a password-less account for nothing: its session is all the proof it has", async () => {

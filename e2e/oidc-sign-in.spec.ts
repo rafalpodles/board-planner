@@ -295,6 +295,7 @@ test("changing the password unlinks every provider", async ({ page }) => {
 
   await page.goto("/settings/security");
   await expect(page.getByRole("button", { name: `Unlink ${OIDC_STUB_LABEL}` })).toBeVisible();
+  await expect(page.getByText("Your sign-in providers are unlinked too.")).toBeVisible();
   await page.getByLabel("Current password", { exact: true }).fill(MEMBER_PASSWORD);
   await page.getByLabel("New password", { exact: true }).fill("a-fresh-password-1");
   await page.getByLabel("Confirm new password").fill("a-fresh-password-1");
@@ -303,6 +304,8 @@ test("changing the password unlinks every provider", async ({ page }) => {
     page.getByRole("button", { name: "Change password" }).click(),
   ]);
   expect(changed.status()).toBe(200);
+  await expect(page.getByRole("button", { name: `Link ${OIDC_STUB_LABEL}` })).toBeVisible();
+  await expect(page.getByRole("button", { name: `Unlink ${OIDC_STUB_LABEL}` })).toHaveCount(0);
 
   expect(await (await db()).collection("identities").countDocuments({ subject: sub })).toBe(0);
   // The control: signing in with that provider now finds no link, and no proven address to follow

@@ -115,6 +115,30 @@ describe("GET /api/auth/oidc/:provider/callback, signing in", () => {
     expect(notifyIdentityLinked).toHaveBeenCalledWith(expect.objectContaining({ email: "ada@example.com", provider: "Acme" }));
   });
 
+  it("signs in as whichever account a racing sign-in linked the identity to", async () => {
+    finishes("signin");
+    const winner = { ...ADA, _id: "u2", username: "grace" };
+    identityCreate.mockRejectedValue(Object.assign(new Error("E11000"), { code: 11000 }));
+    identityFindOne.mockReturnValueOnce(lean(null)).mockReturnValue(lean({ _id: "i9", user: "u2" }));
+    userFindById.mockImplementation(async (id: string) => (id === "u2" ? winner : null));
+
+    const res = await callback();
+
+    expect(location(res)).toBe("/projects");
+    expect(createSession).toHaveBeenCalledWith(expect.objectContaining({ userId: "u2" }));
+    expect(createSession).not.toHaveBeenCalledWith(expect.objectContaining({ userId: "u1" }));
+  });
+
+  it("refuses when the account a racing sign-in linked to is gone", async () => {
+    finishes("signin");
+    identityCreate.mockRejectedValue(Object.assign(new Error("E11000"), { code: 11000 }));
+    identityFindOne.mockReturnValueOnce(lean(null)).mockReturnValue(lean({ _id: "i9", user: "u2" }));
+    userFindById.mockResolvedValue(null);
+
+    expect(location(await callback())).toBe("/login?sso=no_account");
+    expect(createSession).not.toHaveBeenCalled();
+  });
+
   // An address an administrator typed, or one set without confirmation, is a claim: linking by it
   // would hand the account to whoever holds that mailbox at the provider
   it("refuses to link by an address that was never proven", async () => {

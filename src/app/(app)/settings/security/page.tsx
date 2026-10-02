@@ -109,6 +109,7 @@ export default function SecurityPage() {
       setNewPassword("");
       setConfirmPassword("");
       toast("Password changed", "success");
+      readMethods();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to change password");
     } finally {
@@ -148,6 +149,7 @@ export default function SecurityPage() {
       <p className="text-sm text-text-muted mb-6">
         You stay signed in on this device. Every other device, API token, connected app such as
         Claude Code, and machine you enrolled is signed out and has to be set up again.
+        {methods.identities.length > 0 && " Your sign-in providers are unlinked too."}
       </p>
 
       <form onSubmit={handleSubmit} className="space-y-4">
