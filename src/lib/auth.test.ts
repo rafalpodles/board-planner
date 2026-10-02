@@ -483,6 +483,17 @@ describe("verifyCredentials and the username oracle", () => {
     expect(await verifyCredentials("owner", "hunter2")).toMatchObject({ username: "owner" });
   });
 
+  // BP-828: an account made through an identity provider has no password at all; it must refuse,
+  // and take as long as a miss, so timing does not say which accounts sign in that way
+  it("refuses an account with no password, comparing against the stand-in hash", async () => {
+    lookupReturns({ username: "sso-only", kind: "human" });
+    bcryptCompare.mockResolvedValue(true);
+
+    expect(await verifyCredentials("sso-only", "anything")).toBeNull();
+    expect(bcryptCompare).toHaveBeenCalledTimes(1);
+    expect(bcryptCompare.mock.calls[0][1]).toBe("$2a$10$absent");
+  });
+
   it("compares against a hash even when no such user exists", async () => {
     lookupReturns(null);
 
