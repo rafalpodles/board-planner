@@ -2,7 +2,7 @@ import { test, expect, type Browser, type Page } from "@playwright/test";
 import { createHash, randomBytes } from "crypto";
 import mongoose from "mongoose";
 import { OIDC_STUB_LABEL, OIDC_STUB_URL } from "../playwright.config";
-import { ADMIN_ID, E2E_MONGODB_URI, MEMBER_ID, MEMBER_USERNAME, PROJECT_ID, seed } from "./seed";
+import { ADMIN_ID, E2E_MONGODB_URI, MEMBER_ID, MEMBER_PASSWORD, MEMBER_USERNAME, PROJECT_ID, seed } from "./seed";
 import { signIn } from "./session";
 
 /**
@@ -121,6 +121,7 @@ test("a signed-in account links a provider from its settings, then signs in with
   await nextPerson({ sub, email: freshAddress("personal") });
 
   await page.goto("/settings/security");
+  await page.getByLabel("Current password, to link a provider").fill(MEMBER_PASSWORD);
   await page.getByRole("button", { name: `Link ${OIDC_STUB_LABEL}` }).click();
 
   await expect(page.getByTestId("toast").filter({ hasText: "Linked. You can now sign in with it." })).toHaveCount(1);
@@ -276,4 +277,39 @@ test("an invitation is not accepted with a provider that confirmed another addre
   await expect(alertOn(page)).toContainText("a different address from the one invited");
   expect(await (await db()).collection("invitations").findOne({ email })).toMatchObject({ status: "pending" });
   await context.close();
+});
+
+// A provider linked from a borrowed session must not outlive the password change meant to end it
+test("changing the password unlinks every provider", async ({ page }) => {
+  await signIn(page, "member");
+  const sub = `changed-${randomBytes(4).toString("hex")}`;
+  await (await db()).collection("identities").insertOne({
+    user: MEMBER_ID,
+    provider: "oidc",
+    issuer: OIDC_STUB_URL,
+    subject: sub,
+    email: "intruder@example.com",
+    linkedAt: new Date(),
+    lastUsedAt: null,
+  });
+
+  await page.goto("/settings/security");
+  await expect(page.getByRole("button", { name: `Unlink ${OIDC_STUB_LABEL}` })).toBeVisible();
+  await page.getByLabel("Current password", { exact: true }).fill(MEMBER_PASSWORD);
+  await page.getByLabel("New password", { exact: true }).fill("a-fresh-password-1");
+  await page.getByLabel("Confirm new password").fill("a-fresh-password-1");
+  const [changed] = await Promise.all([
+    page.waitForResponse((r) => r.url().endsWith("/api/users/me/password")),
+    page.getByRole("button", { name: "Change password" }).click(),
+  ]);
+  expect(changed.status()).toBe(200);
+
+  expect(await (await db()).collection("identities").countDocuments({ subject: sub })).toBe(0);
+  // The control: signing in with that provider now finds no link, and no proven address to follow
+  await nextPerson({ sub, email: "intruder@example.com" });
+  const other = await page.context().browser()!.newContext();
+  const guest = await other.newPage();
+  await signInWithProvider(guest);
+  await expect(guest).toHaveURL(/\/login\?sso=no_account/);
+  await other.close();
 });

@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const identityFindOne = vi.fn();
 const identityCount = vi.fn();
 const identityDelete = vi.fn();
-const identityCreate = vi.fn();
+const identityInsert = vi.fn();
 const isEmailConfigured = vi.fn();
 const userFindById = vi.fn();
 const logInstanceAudit = vi.fn();
@@ -24,7 +24,7 @@ vi.mock("@/models/identity", () => ({
     findOne: identityFindOne,
     countDocuments: identityCount,
     deleteOne: identityDelete,
-    create: identityCreate,
+    collection: { insertOne: identityInsert },
   },
 }));
 vi.mock("@/models/user", () => ({ User: { findById: userFindById } }));
@@ -82,7 +82,7 @@ describe("DELETE /api/users/me/identities/:id", () => {
     identityCount.mockResolvedValueOnce(1).mockResolvedValueOnce(1);
 
     expect((await unlink()).status).toBe(200);
-    expect(identityCreate).not.toHaveBeenCalled();
+    expect(identityInsert).not.toHaveBeenCalled();
   });
 
   // Two tabs, each unlinking one of two providers, each counting the other as the way that remains
@@ -94,7 +94,7 @@ describe("DELETE /api/users/me/identities/:id", () => {
 
     expect(res.status).toBe(409);
     expect(identityCount).toHaveBeenLastCalledWith({ user: "u1" });
-    expect(identityCreate).toHaveBeenCalledWith(expect.objectContaining({ _id: ID }));
+    expect(identityInsert).toHaveBeenCalledWith(expect.objectContaining({ _id: ID, provider: "oidc" }));
   });
 
   it("answers 404 for an identity that is somebody else's", async () => {

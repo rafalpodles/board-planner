@@ -220,6 +220,23 @@ describe("GET /api/auth/oidc/:provider/callback, linking from settings", () => {
     expect(identityCreate).not.toHaveBeenCalled();
   });
 
+  it("says taken when a racing sign-in linked the identity first", async () => {
+    finishes("link");
+    identityCreate.mockRejectedValue(Object.assign(new Error("E11000"), { code: 11000 }));
+
+    expect(location(await callback())).toBe("/settings/security?link=taken");
+  });
+
+  it("moves lastUsedAt only on a sign-in, never on a refusal", async () => {
+    finishes("invite");
+    invitationFindOne.mockReturnValue(lean({ tokenHash: "h1", email: "ada@example.com" }));
+    identityFindOne.mockReturnValue(lean({ _id: "i1", user: "u1" }));
+
+    await callback();
+
+    expect(identityUpdateOne).not.toHaveBeenCalled();
+  });
+
   it("refuses an identity that already belongs to another account", async () => {
     finishes("link");
     identityFindOne.mockReturnValue(lean({ _id: "i1", user: "u9" }));
