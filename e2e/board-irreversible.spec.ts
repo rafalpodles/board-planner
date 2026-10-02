@@ -4,6 +4,7 @@ import {
   type APIRequestContext,
   type Locator,
   type Page,
+  type Request,
   type Response,
 } from "@playwright/test";
 import { ADMIN_AUTH } from "./api";
@@ -885,14 +886,27 @@ test.describe("keyboard", () => {
     await expect(page.locator("tbody tr").first()).toHaveClass(/ring-2/);
     await page.keyboard.press("v");
 
+    // Chromium sometimes drops a background tab's first frameNavigated, and Playwright then never
+    // emits its "page" event (BP-823). The tab's document request is made by the browser either way.
+    const fromBoard = (request: Request) => {
+      try {
+        return request.frame().page() === page;
+      } catch {
+        return false;
+      }
+    };
+    const tabDocuments: Request[] = [];
+    await page.context().route(`**${taskUrl(SIBLING_TASK_NUMBER)}`, (route) => {
+      const request = route.request();
+      if (request.resourceType() === "document" && !fromBoard(request)) tabDocuments.push(request);
+      return route.continue();
+    });
+
     // ⌘/Ctrl-click and a middle click leave the board where it is and open the card elsewhere
-    for (const how of [{ modifiers: ["ControlOrMeta" as const] }, { button: "middle" as const }]) {
-      const opened = page.context().waitForEvent("page");
+    const clicks = [{ modifiers: ["ControlOrMeta" as const] }, { button: "middle" as const }];
+    for (const [i, how] of clicks.entries()) {
       await card(page, SIBLING_TASK_NUMBER).click(how);
-      const tab = await opened;
-      // The page event fires before the new tab has navigated anywhere
-      await expect(tab).toHaveURL(new RegExp(`${taskUrl(SIBLING_TASK_NUMBER)}$`));
-      await tab.close();
+      await expect.poll(() => tabDocuments.length).toBe(i + 1);
       await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_KEY}$`));
     }
   });
