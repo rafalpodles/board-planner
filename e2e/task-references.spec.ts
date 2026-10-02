@@ -205,9 +205,17 @@ test.describe("picking a task from the list", () => {
   test("offers nothing for another project's key", async ({ page }) => {
     await signIn(page);
     await page.goto(`/projects/${PROJECT_KEY}/tasks/1`);
+    const asked: string[] = [];
+    page.on("request", (req) => {
+      if (new URL(req.url()).pathname.endsWith("/tasks/suggest")) asked.push(req.url());
+    });
 
     await page.getByPlaceholder(/comment/i).first().fill("blocked by ACME-");
 
+    // The list arrives after a request, so "hidden" right after typing holds whatever the trigger
+    // matched. Settled first, and the request it would have needed counted (BP-712)
+    await page.waitForTimeout(1_000);
+    expect(asked).toEqual([]);
     await expect(page.getByRole("listbox")).toBeHidden();
   });
 });
