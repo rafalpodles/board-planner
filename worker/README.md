@@ -730,8 +730,28 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   reordered in or deleted from a tracked one; an edit to a `.gitignore` leaves its base rules
   trusted (BP-640). **An entry in the main clone's own `.git/info/exclude` now fails every run that
   leaves a matching file in the worktree**, so move such entries into the repository's `.gitignore`.
-  What the base `.gitignore` itself ignores still reaches no diff and can still be run by the Test
-  gate — a file under an ignored `dist/`, say — which is BP-795.
+  What the base `.gitignore` itself ignores still reaches no diff, so from 1.3.0 the worker also
+  lists every ignored file, one by one with its inode, size and timestamps, when the run starts and
+  again after every gate passes. Before the next gate, whatever differs from that listing was
+  written by a step. A **new** file is removed before the gate runs: a `dist/evil.test.js` under a
+  base `dist/`, an `x.log/evil.test.js` under a base `*.log`, or the `node_modules` a step's own
+  `npm install` left, which the Build gate then installs again. The task gets a comment saying how
+  many entries were removed before which gate, naming them with the rule that ignores each. A
+  nested repository under an ignored directory, which git lists as one `dir/` entry and never
+  enters, is walked file by file without following symlinks. A file the worker cannot stat is
+  never taken as unchanged, and a directory git cannot open, which git skips with only a warning,
+  refuses the run. Only
+  paths git listed are removed, each resolved under the worktree through real directories: a
+  symlink is unlinked, never followed, and a path with `..`, an absolute path, a path through a
+  symlinked directory or anything inside a `.git` is refused, and so is the run. A **rewritten**
+  file, one a gate built that a step changed, refuses the run, because removing it would break the
+  next gate and nothing can restore it. A step that runs the suite over a tree a gate installed
+  can rewrite a cache in it, such as vitest's under `node_modules/.vite`, and that refuses the run
+  too. What a gate installs or builds is in the
+  listing taken after that gate, and an ignored file that was in the worktree before the run is in
+  the first listing, so neither one is touched (BP-795). What a gate writes is still trusted, and
+  the Build and Test gates run the agent's own build script and tests, so an ignored file those
+  write for a later gate to run is still a way past every reviewer.
 
   **The worktree's `.git` file is not trusted once the agent starts.** In a linked worktree it is a
   file inside the worktree, and a confined step can rewrite it to name a git dir of its own, with

@@ -58,6 +58,15 @@ describe("hiddenFromGit when git will not answer", () => {
     expect(found).toEqual({ kind: "unreadable", detail: "`git ls-tree` timed out after 60000ms" });
   });
 
+  it("runs every git call in the C locale, so a translated warning cannot slip past the stderr check", async () => {
+    const runner = runnerFailing(() => false, {});
+    await hiddenFromGit(runner, gitPath, "/wt", "base1");
+
+    const calls = vi.mocked(runner.run).mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    for (const [, , options] of calls) expect(options?.env).toMatchObject({ LC_ALL: "C" });
+  });
+
   it("names the rule when every call answers", async () => {
     const found = await hiddenFromGit(runnerFailing(() => false, {}), gitPath, "/wt", "base1");
 

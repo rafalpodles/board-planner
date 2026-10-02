@@ -12,7 +12,8 @@ import { Delivery } from "./delivery.js";
 import { Runner } from "./exec.js";
 import { Executor } from "./executor.js";
 import { gitArgs, localGitEnv, requireGitPath } from "./git-safety.js";
-import { hiddenFromGit, PORCELAIN_STATUS } from "./hidden-files.js";
+import { HiddenFiles, hiddenFromGit, ignoredFiles, PORCELAIN_STATUS } from "./hidden-files.js";
+import { removeFromWorktree } from "./ignored-removal.js";
 import { pinGit } from "./worktree-pin.js";
 import { Reporter } from "./reporter.js";
 import { SHUTDOWN_SIGNAL } from "./commands.js";
@@ -576,6 +577,7 @@ export async function runTask(
 
   try {
     const budget = createBudget(config.runCeilingMs, now);
+    let ignoredBeforeSteps = await ignoredFiles(runner, deps.gitPath, worktree.path);
 
     for (const [position, entry] of task.agent.sequence.entries()) {
       if (
@@ -743,9 +745,27 @@ export async function runTask(
         // Before every gate, not only after edit steps: build and test-run execute the agent's own
         // code, which can hide a file from git as well as an Implement step can (BP-640, BP-794)
         const tampered = await worktree.tampering();
-        const hidden = tampered
+        let hidden: HiddenFiles | { kind: "tampered"; detail: string } | null = tampered
           ? { kind: "tampered" as const, detail: `the checkout now has ${tampered}` }
-          : await hiddenFromGit(runner, deps.gitPath, worktree.path, worktree.baseSha);
+          : await hiddenFromGit(runner, deps.gitPath, worktree.path, worktree.baseSha, ignoredBeforeSteps);
+        if (hidden?.kind === "written") {
+          const removal = removeFromWorktree(worktree.path, hidden.paths);
+          if (removal.refused.length > 0) {
+            hidden = {
+              kind: "unreviewed",
+              detail: `${hidden.detail}; and not every one could be removed safely: ${removal.refused.slice(0, 5).join(", ")}${
+                removal.removed.length > 0 ? `. Already removed: ${removal.removed.slice(0, 5).join(", ")}${removal.removed.length > 5 ? `, and ${removal.removed.length - 5} more` : ""}` : ""
+              }`,
+            };
+          } else {
+            const count = removal.removed.length;
+            await reporter.noted(
+              task,
+              `Before the **${gate.name}** gate the worker removed ${count} ignored ${count === 1 ? "entry" : "entries"} a step wrote, since no commit, diff or reviewer sees them and the gate could still run them: ${hidden.named}`,
+            );
+            hidden = null;
+          }
+        }
         if (hidden) {
           keepWorktree = true;
           const found =
@@ -753,7 +773,9 @@ export async function runTask(
               ? { over: "a tampered checkout", left: "what the agent changed" }
               : hidden.kind === "nested"
                 ? { over: "a nested git repository", left: "the nested repository" }
-                : { over: "files git hides", left: "the hidden files" };
+                : hidden.kind === "unreviewed"
+                  ? { over: "ignored files a step wrote", left: "those files" }
+                  : { over: "files git hides", left: "the hidden files" };
           settle("failed", `refused to run the ${gate.name} gate over ${found.over}`);
           await reporter.failed(
             task,
@@ -778,6 +800,7 @@ export async function runTask(
         });
         if (await releaseIfAborted(deps, reporter, task)) return;
         if (verdict.ok) {
+          ignoredBeforeSteps = await ignoredFiles(runner, deps.gitPath, worktree.path);
           state.checks.push({
             name: gate.name,
             commands: verdict.commands ?? [],

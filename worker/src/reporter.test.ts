@@ -48,6 +48,16 @@ describe("createReporter", () => {
     expect(api.comment.mock.calls[0][2]).toMatch(/cp-158\/worker/);
   });
 
+  it("posts a note scrubbed, and leaves the task where it is (BP-795)", async () => {
+    const api = apiSpy();
+    await createReporter(api, statuses).noted(task, "removed ghp_0123456789abcdefghijABCDEFGHIJ012345.test.js");
+
+    expect(api.setStatus).not.toHaveBeenCalled();
+    expect(api.release).not.toHaveBeenCalled();
+    expect(api.comment.mock.calls[0][2]).toMatch(/^removed /);
+    expect(api.comment.mock.calls[0][2]).not.toContain("ghp_0123456789");
+  });
+
   it("releases through the release endpoint so the attempt is given back", async () => {
     const api = apiSpy();
     await createReporter(api, statuses).released(task, "usage limit reached");
