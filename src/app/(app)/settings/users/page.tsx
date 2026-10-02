@@ -245,7 +245,7 @@ export default function UsersPage() {
       {/* auto-fill rather than a fixed 1/2/3: at this content width three columns left each card
           145px for a name and its role pill, which needs 165px, so every ordinary name truncated
           while a whole empty column sat beside it (BP-351) */}
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-4">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(min(260px,100%),1fr))] gap-4">
         {users.map((u) => (
           <Card
             key={u._id}
@@ -256,7 +256,7 @@ export default function UsersPage() {
                 {u.fullName.charAt(0).toUpperCase()}
               </div>
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   <p className="font-medium truncate">{u.fullName}</p>
                   <span
                     className={`shrink-0 text-xs px-2 py-0.5 rounded-full ${
