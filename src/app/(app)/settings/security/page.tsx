@@ -77,7 +77,7 @@ export default function SecurityPage() {
                   id="linkPassword"
                   type="password"
                   autoComplete="current-password"
-                  label="Current password, to link a provider"
+                  label="Your password, to link a provider"
                   value={linkPassword}
                   onChange={(e) => setLinkPassword(e.target.value)}
                 />

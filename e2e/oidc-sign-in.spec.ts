@@ -121,7 +121,7 @@ test("a signed-in account links a provider from its settings, then signs in with
   await nextPerson({ sub, email: freshAddress("personal") });
 
   await page.goto("/settings/security");
-  await page.getByLabel("Current password, to link a provider").fill(MEMBER_PASSWORD);
+  await page.getByLabel("Your password, to link a provider").fill(MEMBER_PASSWORD);
   await page.getByRole("button", { name: `Link ${OIDC_STUB_LABEL}` }).click();
 
   await expect(page.getByTestId("toast").filter({ hasText: "Linked. You can now sign in with it." })).toHaveCount(1);
