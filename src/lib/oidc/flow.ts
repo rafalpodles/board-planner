@@ -2,6 +2,7 @@ import * as client from "openid-client";
 import { connectDB } from "@/lib/db";
 import { normaliseEmail } from "@/lib/email";
 import { randomToken, sha256 } from "@/lib/oauth";
+import { githubApiBase } from "@/lib/github-host";
 import { OidcFlow } from "@/models/oidcFlow";
 import { OidcProvider } from "./providers";
 
@@ -18,7 +19,24 @@ function isLoopback(issuer: URL): boolean {
   return ["127.0.0.1", "[::1]"].includes(issuer.hostname);
 }
 
+function githubConfig(provider: OidcProvider): client.Configuration {
+  const site = new URL(provider.issuer);
+  const config = new client.Configuration(
+    {
+      issuer: provider.issuer,
+      authorization_endpoint: `${provider.issuer}/login/oauth/authorize`,
+      token_endpoint: `${provider.issuer}/login/oauth/access_token`,
+    },
+    provider.clientId,
+    undefined,
+    client.ClientSecretPost(provider.clientSecret)
+  );
+  if (site.protocol === "http:" && isLoopback(site)) client.allowInsecureRequests(config);
+  return config;
+}
+
 function configFor(provider: OidcProvider): Promise<client.Configuration> {
+  if (provider.kind === "github") return Promise.resolve(githubConfig(provider));
   const key = `${provider.id}:${provider.issuer}:${provider.clientId}`;
   let config = configs.get(key);
   if (!config) {
@@ -50,7 +68,8 @@ export async function beginFlow(input: {
   const config = await configFor(input.provider);
   const codeVerifier = client.randomPKCECodeVerifier();
   const state = client.randomState();
-  const nonce = client.randomNonce();
+  const github = input.provider.kind === "github";
+  const nonce = github ? "-" : client.randomNonce();
   const binder = randomToken("cpo_");
 
   await connectDB();
@@ -68,11 +87,11 @@ export async function beginFlow(input: {
 
   const url = client.buildAuthorizationUrl(config, {
     redirect_uri: redirectUri(input.provider, input.origin),
-    scope: "openid email profile",
+    scope: github ? "read:user user:email" : "openid email profile",
     code_challenge: await client.calculatePKCECodeChallenge(codeVerifier),
     code_challenge_method: "S256",
     state,
-    nonce,
+    ...(github ? {} : { nonce }),
   });
   return { url: url.href, binder };
 }
@@ -117,36 +136,88 @@ export async function finishFlow(input: {
 
   try {
     const config = await configFor(input.provider);
-    const tokens = await client.authorizationCodeGrant(
-      config,
-      new URL(`${redirectUri(input.provider, input.origin)}${input.query}`),
-      {
+    const callbackUrl = new URL(`${redirectUri(input.provider, input.origin)}${input.query}`);
+    let verified: VerifiedClaims | null;
+    if (input.provider.kind === "github") {
+      const tokens = await client.authorizationCodeGrant(config, callbackUrl, {
+        pkceCodeVerifier: flow.codeVerifier,
+        expectedState: flow.state,
+      });
+      verified = await githubPerson(input.provider, tokens.access_token);
+    } else {
+      const tokens = await client.authorizationCodeGrant(config, callbackUrl, {
         pkceCodeVerifier: flow.codeVerifier,
         expectedState: flow.state,
         expectedNonce: flow.nonce,
         idTokenExpected: true,
-      }
-    );
-    const claims = tokens.claims();
-    if (!claims?.sub || !claims.iss) return { ok: false, reason: "rejected" };
-    const email = typeof claims.email === "string" ? normaliseEmail(claims.email) : "";
+      });
+      verified = idTokenPerson(input.provider, tokens.claims());
+    }
+    if (!verified) return { ok: false, reason: "rejected" };
     return {
       ok: true,
       intent: flow.intent,
       invitationTokenHash: flow.invitationTokenHash,
       userId: flow.user ? String(flow.user) : null,
-      claims: {
-        issuer: String(claims.iss),
-        subject: String(claims.sub),
-        email,
-        emailVerified: claims.email_verified === true && ownsTheAddress(input.provider, email, claims),
-        name: typeof claims.name === "string" ? claims.name : "",
-      },
+      claims: verified,
     };
   } catch (err) {
     console.error(`OIDC callback from ${input.provider.id} refused:`, err);
     return { ok: false, reason: "rejected" };
   }
+}
+
+function idTokenPerson(
+  provider: OidcProvider,
+  claims: client.IDToken | undefined
+): VerifiedClaims | null {
+  if (!claims?.sub || !claims.iss) return null;
+  const email = typeof claims.email === "string" ? normaliseEmail(claims.email) : "";
+  return {
+    issuer: String(claims.iss),
+    subject: String(claims.sub),
+    email,
+    emailVerified: claims.email_verified === true && ownsTheAddress(provider, email, claims),
+    name: typeof claims.name === "string" ? claims.name : "",
+  };
+}
+
+interface GitHubEmail {
+  email: string;
+  primary: boolean;
+  verified: boolean;
+}
+
+/**
+ * GitHub has no ID token: the person is its numeric user id, and the address is the one
+ * `/user/emails` marks verified, the primary first. The issuer is the site, so an Enterprise
+ * Server's ids never meet github.com's.
+ */
+async function githubPerson(provider: OidcProvider, accessToken: string): Promise<VerifiedClaims | null> {
+  const headers = { Accept: "application/vnd.github+json", Authorization: `Bearer ${accessToken}` };
+  const get = async (path: string) => {
+    const res = await fetch(`${githubApiBase()}${path}`, { headers, signal: AbortSignal.timeout(15000) });
+    if (!res.ok) throw new Error(`GitHub answered ${res.status} for ${path}`);
+    return res.json();
+  };
+  const [person, emails] = (await Promise.all([get("/user"), get("/user/emails")])) as [
+    { id?: unknown; login?: unknown; name?: unknown },
+    GitHubEmail[],
+  ];
+  if (typeof person.id !== "number" && typeof person.id !== "string") return null;
+  const listed = Array.isArray(emails) ? emails.filter((e) => typeof e?.email === "string") : [];
+  const chosen =
+    listed.find((e) => e.primary && e.verified === true) ??
+    listed.find((e) => e.verified === true) ??
+    listed.find((e) => e.primary) ??
+    null;
+  return {
+    issuer: provider.issuer,
+    subject: String(person.id),
+    email: chosen ? normaliseEmail(chosen.email) : "",
+    emailVerified: chosen?.verified === true,
+    name: typeof person.name === "string" && person.name ? person.name : typeof person.login === "string" ? person.login : "",
+  };
 }
 
 /**

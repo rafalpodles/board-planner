@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createHash } from "crypto";
 
 const discovery = vi.fn();
@@ -6,12 +6,18 @@ const authorizationCodeGrant = vi.fn();
 const buildAuthorizationUrl = vi.fn();
 const findOneAndDelete = vi.fn();
 const create = vi.fn();
+const allowInsecureRequests = vi.fn();
+const Configuration = vi.fn(function (this: Record<string, unknown>, ...args: unknown[]) {
+  this.args = args;
+});
 
 vi.mock("openid-client", () => ({
   discovery,
   authorizationCodeGrant,
   buildAuthorizationUrl,
-  allowInsecureRequests: "allow-insecure",
+  allowInsecureRequests,
+  Configuration,
+  ClientSecretPost: (secret: string) => ({ post: secret }),
   skipStateCheck: Symbol("skip-state-check"),
   randomPKCECodeVerifier: () => "verifier",
   calculatePKCECodeChallenge: async () => "challenge",
@@ -24,7 +30,7 @@ vi.mock("@/models/oidcFlow", () => ({ OidcFlow: { findOneAndDelete, create, find
 const { beginFlow, finishFlow } = await import("./flow");
 
 const sha256 = (v: string) => createHash("sha256").update(v).digest("hex");
-const PROVIDER = { id: "oidc" as const, label: "Acme", issuer: "https://id.example.com", clientId: "c", clientSecret: "s" };
+const PROVIDER = { id: "oidc" as const, kind: "oidc" as const, label: "Acme", issuer: "https://id.example.com", clientId: "c", clientSecret: "s" };
 const ORIGIN = "https://planner.example";
 
 beforeEach(() => {
@@ -57,7 +63,7 @@ describe("beginning a sign-in", () => {
     await beginFlow({ provider: { ...PROVIDER, issuer: "http://127.0.0.1:9999" }, origin: ORIGIN, intent: "signin" });
     await beginFlow({ provider: { ...PROVIDER, issuer: "http://id.example.com" }, origin: ORIGIN, intent: "signin" });
 
-    expect(discovery.mock.calls[0][4]).toEqual({ execute: ["allow-insecure"] });
+    expect(discovery.mock.calls[0][4]).toEqual({ execute: [allowInsecureRequests] });
     expect(discovery.mock.calls[1][4]).toEqual({ execute: [] });
   });
 });
@@ -166,5 +172,123 @@ describe("what Google vouches for", () => {
     const outcome = await finishFlow({ provider: PROVIDER, binder: "cpo_b", origin: ORIGIN, query: "" });
 
     expect(outcome.ok && outcome.claims.emailVerified).toBe(true);
+  });
+});
+
+describe("GitHub, which speaks OAuth 2 without OpenID Connect", () => {
+  const GITHUB = {
+    id: "github" as const,
+    kind: "github" as const,
+    label: "GitHub",
+    issuer: "https://github.com",
+    clientId: "gh",
+    clientSecret: "gh-secret",
+  };
+  const FLOW = { provider: "github", state: "state-1", nonce: "-", codeVerifier: "verifier", intent: "signin", invitationTokenHash: null };
+  const fetchMock = vi.fn();
+
+  function githubAnswers(person: unknown, emails: unknown, status = 200) {
+    fetchMock.mockImplementation(async (url: string) => {
+      const body = url.endsWith("/user/emails") ? emails : person;
+      return new Response(JSON.stringify(body), { status });
+    });
+  }
+
+  beforeEach(() => {
+    vi.stubGlobal("fetch", fetchMock);
+    delete process.env.GITHUB_API_BASE_URL;
+    findOneAndDelete.mockResolvedValue(FLOW);
+    authorizationCodeGrant.mockResolvedValue({ access_token: "gho_token" });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("asks GitHub's own endpoints for a code, with PKCE and state but no nonce", async () => {
+    await beginFlow({ provider: GITHUB, origin: ORIGIN, intent: "signin" });
+
+    expect(discovery).not.toHaveBeenCalled();
+    expect(Configuration.mock.calls[0]).toEqual([
+      {
+        issuer: "https://github.com",
+        authorization_endpoint: "https://github.com/login/oauth/authorize",
+        token_endpoint: "https://github.com/login/oauth/access_token",
+      },
+      "gh",
+      undefined,
+      { post: "gh-secret" },
+    ]);
+    expect(buildAuthorizationUrl.mock.calls[0][1]).toEqual({
+      redirect_uri: "https://planner.example/api/auth/oidc/github/callback",
+      scope: "read:user user:email",
+      code_challenge: "challenge",
+      code_challenge_method: "S256",
+      state: "state-1",
+    });
+  });
+
+  it("accepts plain http only from a GitHub on this machine", async () => {
+    await beginFlow({ provider: { ...GITHUB, issuer: "http://127.0.0.1:9999" }, origin: ORIGIN, intent: "signin" });
+    expect(allowInsecureRequests).toHaveBeenCalledTimes(1);
+
+    await beginFlow({ provider: { ...GITHUB, issuer: "http://ghe.example.com" }, origin: ORIGIN, intent: "signin" });
+    expect(allowInsecureRequests).toHaveBeenCalledTimes(1);
+  });
+
+  it("checks the code against state and verifier, then reads the person from the API", async () => {
+    process.env.GITHUB_API_BASE_URL = "https://ghe.example.com/api/v3";
+    githubAnswers({ id: 4242, login: "ada", name: "Ada Lovelace" }, [
+      { email: "ada@personal.example", primary: false, verified: true },
+      { email: "Ada@Corp.example", primary: true, verified: true },
+    ]);
+
+    const outcome = await finishFlow({ provider: GITHUB, binder: "cpo_b", origin: ORIGIN, query: "?code=c&state=state-1" });
+
+    expect(authorizationCodeGrant.mock.calls[0][2]).toEqual({ pkceCodeVerifier: "verifier", expectedState: "state-1" });
+    expect(fetchMock.mock.calls.map(([url]) => url).sort()).toEqual([
+      "https://ghe.example.com/api/v3/user",
+      "https://ghe.example.com/api/v3/user/emails",
+    ]);
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe("Bearer gho_token");
+    expect(outcome).toEqual({
+      ok: true,
+      intent: "signin",
+      invitationTokenHash: null,
+      userId: null,
+      claims: { issuer: "https://github.com", subject: "4242", email: "ada@corp.example", emailVerified: true, name: "Ada Lovelace" },
+    });
+  });
+
+  it.each([
+    [
+      "another verified address when the primary is not",
+      [
+        { email: "ada@corp.example", primary: true, verified: false },
+        { email: "ada@personal.example", primary: false, verified: true },
+      ],
+      "ada@personal.example",
+      true,
+    ],
+    ["the primary as unverified when none is verified", [{ email: "ada@corp.example", primary: true, verified: false }], "ada@corp.example", false],
+    ["no address at all when GitHub lists none", [], "", false],
+  ])("takes %s", async (_label, emails, email, emailVerified) => {
+    githubAnswers({ id: 4242, login: "ada" }, emails);
+
+    const outcome = await finishFlow({ provider: GITHUB, binder: "cpo_b", origin: ORIGIN, query: "" });
+
+    expect(outcome.ok && outcome.claims).toMatchObject({ email, emailVerified, name: "ada" });
+  });
+
+  it("refuses when GitHub will not say who it is", async () => {
+    githubAnswers({ message: "Bad credentials" }, [], 401);
+
+    expect(await finishFlow({ provider: GITHUB, binder: "cpo_b", origin: ORIGIN, query: "" })).toEqual({
+      ok: false,
+      reason: "rejected",
+    });
+  });
+
+  it("refuses a person with no id", async () => {
+    githubAnswers({ login: "ada" }, [{ email: "ada@corp.example", primary: true, verified: true }]);
+
+    expect((await finishFlow({ provider: GITHUB, binder: "cpo_b", origin: ORIGIN, query: "" })).ok).toBe(false);
   });
 });
