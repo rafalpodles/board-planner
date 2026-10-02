@@ -99,10 +99,12 @@ describe("the row an account's creation leaves", () => {
   it("records nothing when the account was refused", async () => {
     create.mockRejectedValue(Object.assign(new Error("dup"), { code: 11000, keyPattern: { username: 1 } }));
 
-    const res = await post({ ...VALID, username: "taken" });
+    const res = await post({ ...VALID, username: "taken", email: "ada@example.com" });
 
     expect(res.status).toBe(409);
     expect(logInstanceAudit).not.toHaveBeenCalled();
+    // No account holds the address, so an invitation to it must survive the refusal
+    expect(revokePendingInvitationsFor).not.toHaveBeenCalled();
   });
 });
 
