@@ -84,6 +84,9 @@ export const RUN_PROXIED_SERVER = process.env.E2E_PROXIED_SERVER === "1";
 const PASSWORDLESS_PORT = Number(process.env.E2E_PASSWORDLESS_PORT ?? PORT + 10004);
 export const PASSWORDLESS_BASE_URL = `http://localhost:${PASSWORDLESS_PORT}`;
 export const RUN_PASSWORDLESS_SERVER = process.env.E2E_PASSWORDLESS_SERVER === "1";
+// The same server under a second name, as the OIDC relay (BP-851): providers return there and are
+// forwarded to PASSWORDLESS_BASE_URL, so every provider sign-in on this server crosses the relay
+export const PASSWORDLESS_RELAY_ORIGIN = `http://127.0.0.1:${PASSWORDLESS_PORT}`;
 
 // `next start` over a fresh build instead of `next dev`, for the specs whose subject only exists in
 // production output — the CSP nonce, where dev adds 'unsafe-eval' and scripts of its own (BP-313).
@@ -423,6 +426,7 @@ export default defineConfig({
               // a group to the admin role (BP-833). The default seed's one admin is never demoted,
               // but a second admin signing in here without `groups` in the stub's script would be
               OIDC_ADMIN_GROUP: OIDC_STUB_ADMIN_GROUP,
+              OIDC_RELAY_ORIGIN: PASSWORDLESS_RELAY_ORIGIN,
               APP_ORIGIN: PASSWORDLESS_BASE_URL,
               NEXT_DIST_DIR: ".next-passwordless",
             },
