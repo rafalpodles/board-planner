@@ -149,6 +149,16 @@ describe("PUT members", () => {
     );
   });
 
+  // BP-832. Hidden from the pickers is not enough: a client can still send the id
+  it("gives a deactivated account no grant", async () => {
+    userFindByIdSelect.mockResolvedValue({ _id: "u1", role: "member", kind: "human", username: "uma", deactivatedAt: new Date() });
+
+    const res = await PUT(put({ userId: U1, relation: "member" }), { params });
+
+    expect(res.status).toBe(400);
+    expect(grantUpsert).not.toHaveBeenCalled();
+  });
+
   it("rejects a relation that is not owner or member", async () => {
     const res = await PUT(put({ userId: U1, relation: "root" }), { params });
     expect(res.status).toBe(400);
