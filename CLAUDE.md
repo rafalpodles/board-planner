@@ -200,7 +200,9 @@ PASSWORD_SIGN_IN=         # Optional — on (default) or off. Off: every passwor
                           # code), and a stored password is no way in — linking or unlinking a
                           # provider then needs a sign-in under 10 minutes old instead (RECENT_SIGN_IN_MS),
                           # as it does for any account with no password. Refused at startup unless a
-                          # provider is configured, and for any other value. Admins keep two
+                          # provider is configured, for any other value, and — once the database
+                          # answers — when no active admin could sign in through one, linked or by a
+                          # confirmed address (adminsLockedOut, BP-840). Admins keep two
                           # password-free actions in PUT /api/users/:id: confirmEmail, signOutEverywhere (BP-830)
 GITHUB_OAUTH_CLIENT_SECRET=
 GITHUB_OAUTH_CLIENT_ID=   # Optional, with the secret above — sign-in with GitHub, an OAuth app of its
