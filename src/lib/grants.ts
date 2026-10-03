@@ -142,7 +142,8 @@ export async function recipientsWithAccess(
     Grant.find({ subject: { $in: subjectIds }, objectType: "project", object: projectId })
       .select("subject relation")
       .lean(),
-    User.find({ _id: { $in: subjectIds } }).select("role").lean(),
+    // A deactivated account sees nothing, so it is told nothing and handed nothing (BP-832)
+    User.find({ _id: { $in: subjectIds }, deactivatedAt: null }).select("role").lean(),
   ]);
 
   const relationOf = new Map(grants.map((g) => [String(g.subject), g.relation]));

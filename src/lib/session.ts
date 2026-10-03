@@ -416,7 +416,8 @@ export async function revokeSession(token: string): Promise<boolean> {
 // Everything a stolen password could have minted that outlives a session (BP-325)
 export async function revokeUserCredentials(
   userId: Types.ObjectId | string,
-  exceptSessionId?: Types.ObjectId | string | null
+  exceptSessionId?: Types.ObjectId | string | null,
+  options: { keepIdentities?: boolean } = {}
 ): Promise<{ identitiesUnlinked: number }> {
   await revokeUserSessions(userId, exceptSessionId);
   await ApiToken.deleteMany({ user: userId });
@@ -431,7 +432,9 @@ export async function revokeUserCredentials(
   const unmatchable = await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 10);
   await Worker.updateMany({ owner: userId }, { $set: { credentialHash: unmatchable } });
   // A linked sign-in provider is a standing way in like any token: one linked from a borrowed
-  // session would otherwise outlive the password change meant to end it (BP-828)
+  // session would otherwise outlive the password change meant to end it (BP-828). Kept by a
+  // deactivation, which refuses every sign-in instead and must leave a way back (BP-832)
+  if (options.keepIdentities) return { identitiesUnlinked: 0 };
   const unlinked = await Identity.deleteMany({ user: userId });
   return { identitiesUnlinked: unlinked.deletedCount ?? 0 };
 }

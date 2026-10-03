@@ -131,6 +131,12 @@ export function withWorker(
     // downstream handler can spread it into a response
     worker.credentialHash = "";
 
+    // A machine reaches what its owner reaches, and a deactivated owner reaches nothing (BP-832)
+    const ownerId = (worker.owner as { _id?: unknown } | null)?._id ?? worker.owner;
+    if (ownerId && (await User.exists({ _id: String(ownerId), deactivatedAt: { $ne: null } }))) {
+      return NextResponse.json({ error: "This machine's owner is deactivated" }, { status: 401 });
+    }
+
     // The path segment is authoritative on /api/workers/:id, so a credential must not act on
     // someone else's record just because the route happens to carry an id
     const params = await context.params;

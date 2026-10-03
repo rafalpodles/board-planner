@@ -164,6 +164,7 @@ async function resolveAssignee(value: unknown): Promise<ResolvedAssignee | TaskS
   }
   const user = await User.findOne({ username: value.trim().toLowerCase() });
   if (!user) return { ok: false, error: noSuchAccount(value), status: 400 };
+  if (user.deactivatedAt) return { ok: false, error: `${user.username} is deactivated`, status: 400 };
   return { user: user as unknown as ResolvedAssignee["user"] };
 }
 
@@ -1151,8 +1152,12 @@ export async function updateTask(
     String(updates.assignee) !== storedAssignee &&
     !(await canBeAssigned(String(updates.assignee), projectId))
   ) {
-    const who = await User.findById(updates.assignee, "username").lean();
-    return { ok: false, error: noAccessToAssign(who?.username), status: 400 };
+    const who = await User.findById(updates.assignee, "username deactivatedAt").lean();
+    return {
+      ok: false,
+      error: who?.deactivatedAt ? `${who.username} is deactivated` : noAccessToAssign(who?.username),
+      status: 400,
+    };
   }
   if (updates.assignee !== undefined) {
     const moved = storedAssignee !== String(updates.assignee ?? "");

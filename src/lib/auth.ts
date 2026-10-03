@@ -44,8 +44,9 @@ export async function verifyCredentials(
   );
 
   // An account with no password costs the same comparison as one that does not exist, so the
-  // timing does not say which accounts sign in only through an identity provider
-  if (!user || !user.password) {
+  // timing does not say which accounts sign in only through an identity provider — nor which are
+  // deactivated (BP-832)
+  if (!user || !user.password || user.deactivatedAt) {
     await bcrypt.compare(password, ABSENT_USER_HASH);
     return null;
   }
@@ -82,7 +83,7 @@ async function verifyBearerToken(token: string): Promise<IUser | null> {
       ApiToken.findByIdAndUpdate(candidate._id, { lastUsedAt: new Date() }).catch(() => {});
 
       const user = await User.findById(candidate.user);
-      if (!user) return null;
+      if (!user || user.deactivatedAt) return null;
 
       // Every API token is a machine credential, scoped or not. tokenScoped answers a narrower
       // question — whether project access was narrowed — and an unscoped admin token leaves it
@@ -120,7 +121,7 @@ async function verifyOAuthAccessToken(token: string): Promise<IUser | null> {
   if (!clientStillExists) return null;
 
   const user = await User.findById(record.user);
-  if (!user) return null;
+  if (!user || user.deactivatedAt) return null;
 
   // An OAuth access token is held by an application, not typed by a person at a keyboard
   user.viaMachineCredential = true;
@@ -142,7 +143,9 @@ async function verifySessionCookie(request: Request): Promise<IUser | null> {
 
   await connectDB();
   const user = await User.findById(session.userId);
-  if (!user) return null;
+  // Deactivation revokes every session, so this is the second line: one minted in the moment
+  // between the check and the revoke must not resolve either
+  if (!user || user.deactivatedAt) return null;
 
   user.viaMachineCredential = false;
   user.sessionId = session.sessionId;

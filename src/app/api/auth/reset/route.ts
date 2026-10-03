@@ -79,7 +79,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: REFUSALS[outcome.reason] }, { status: 400 });
   }
 
-  const user = await User.findById(outcome.userId).select("username kind email");
+  const user = await User.findById(outcome.userId).select("username kind email deactivatedAt");
   if (!user) {
     // The account was deleted between the link being sent and used. The token is spent either way.
     return NextResponse.json({ error: REFUSALS.unknown }, { status: 400 });
@@ -87,6 +87,10 @@ export async function POST(request: Request) {
   // An account that became a machine identity after the link was issued must not be signed into
   if (user.kind === "machine") {
     return NextResponse.json({ error: REFUSALS.unknown }, { status: 400 });
+  }
+  // Deactivating spends the account's links, so this is only a link issued in between (BP-832)
+  if (user.deactivatedAt) {
+    return NextResponse.json({ error: "This account is deactivated. Ask an administrator." }, { status: 403 });
   }
 
   // Every session, including whoever is signed in on the old password — which is the case somebody

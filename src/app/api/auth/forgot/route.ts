@@ -92,7 +92,8 @@ export async function POST(request: Request) {
   // than one $or. Nothing stops an account being named `bob@corp.com` while a different account
   // holds that as its address, and with $or which of the two matched is a query-planner detail —
   // so Bob types his own address and the link goes to the other account's inbox.
-  const humans = { kind: { $ne: "machine" } } as const;
+  // A deactivated account is answered exactly like an unknown one: no link, and no difference to see
+  const humans = { kind: { $ne: "machine" }, deactivatedAt: null } as const;
   const fields = "_id username email fullName";
   // Both lookups, always, and in parallel: doing the second only when the first misses makes the
   // miss path measurably slower than the hit path, which is the same oracle read backwards.

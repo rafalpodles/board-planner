@@ -20,6 +20,9 @@ import { revokeUserCredentials, revokeUserSessions } from "@/lib/session";
 import { User } from "@/models/user";
 import { IUser } from "@/types";
 
+// What "the last admin" counts: an administrator who can still sign in and act (BP-832)
+const ACTIVE_ADMINS = { role: "admin", deactivatedAt: null } as const;
+
 export const PUT = withAdmin(async (request, { params, user: admin }) => {
   const { userId } = await params;
   await connectDB();
@@ -32,7 +35,15 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
-  let body: { role?: unknown; password?: unknown; email?: unknown; confirmEmail?: unknown; signOutEverywhere?: unknown };
+  let body: {
+    role?: unknown;
+    password?: unknown;
+    email?: unknown;
+    confirmEmail?: unknown;
+    signOutEverywhere?: unknown;
+    deactivate?: unknown;
+    reactivate?: unknown;
+  };
   try {
     body = await request.json();
   } catch {
@@ -43,14 +54,22 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
   }
   if (body.password !== undefined && !passwordSignInEnabled()) return passwordSignInOff();
 
-  const action = body.confirmEmail === true || body.signOutEverywhere === true;
-  const actions = [body.confirmEmail, body.signOutEverywhere].filter((v) => v === true).length;
+  const chosen = (
+    [
+      ["confirm", body.confirmEmail],
+      ["signOut", body.signOutEverywhere],
+      ["deactivate", body.deactivate],
+      ["reactivate", body.reactivate],
+    ] as const
+  ).filter(([, flag]) => flag === true);
+  const action = chosen.length > 0;
+  const actions = chosen.length;
   const edits = [body.role, body.email, body.password].filter((v) => v !== undefined).length;
   if (actions > 1 || (action && edits > 0)) {
     return NextResponse.json({ error: "One account action at a time, with nothing else" }, { status: 400 });
   }
   if (action) {
-    return accountAction(target, admin, body.confirmEmail === true ? "confirm" : "signOut");
+    return accountAction(target, admin, chosen[0][0]);
   }
 
   const previousRole = target.role;
@@ -78,7 +97,7 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
     }
     // Prevent demoting the last admin
     if (body.role === "member" && target.role === "admin") {
-      const adminCount = await User.countDocuments({ role: "admin" });
+      const adminCount = await User.countDocuments(ACTIVE_ADMINS);
       if (adminCount <= 1) {
         return NextResponse.json(
           { error: "Cannot demote the last admin" },
@@ -317,7 +336,7 @@ export const DELETE = withAdmin(async (_request, { params, user: admin }) => {
   // exactly why it is here: that guard failed once, and an instance with no administrator cannot be
   // repaired from the product.
   if (user.role === "admin") {
-    const adminCount = await User.countDocuments({ role: "admin" });
+    const adminCount = await User.countDocuments(ACTIVE_ADMINS);
     if (adminCount <= 1) {
       return NextResponse.json(
         { error: "Cannot delete the last admin" },
@@ -373,7 +392,7 @@ export const DELETE = withAdmin(async (_request, { params, user: admin }) => {
 async function accountAction(
   target: HydratedDocument<IUser>,
   admin: IUser,
-  action: "confirm" | "signOut"
+  action: "confirm" | "signOut" | "deactivate" | "reactivate"
 ) {
   if (admin.viaMachineCredential) {
     return NextResponse.json({ error: "This action requires an interactive session" }, { status: 403 });
@@ -394,6 +413,41 @@ async function accountAction(
       actorUsername: admin.username,
       target: target.username,
       detail: target.email,
+    });
+    return NextResponse.json({ ok: true });
+  }
+  if (action === "deactivate") {
+    if (target.deactivatedAt) return NextResponse.json({ ok: true });
+    // A deactivated administrator administers nothing, so they no longer count towards keeping one
+    if (target.role === "admin" && (await User.countDocuments(ACTIVE_ADMINS)) <= 1) {
+      return NextResponse.json({ error: "Cannot deactivate the last admin" }, { status: 400 });
+    }
+    target.deactivatedAt = new Date();
+    await target.save();
+    // After the flag, so a session minted in between is refused by getAuthUser anyway. Its sign-in
+    // providers stay linked: every sign-in is refused while deactivated, and a reactivated account
+    // on an instance without passwords needs one to come back by
+    await revokeUserCredentials(target._id, null, { keepIdentities: true });
+    await invalidateResetTokens(target._id);
+    void logInstanceAudit({
+      action: "user_deactivated",
+      user: admin._id,
+      actorUsername: admin.username,
+      target: target.username,
+      detail: "",
+    });
+    return NextResponse.json({ ok: true });
+  }
+  if (action === "reactivate") {
+    if (!target.deactivatedAt) return NextResponse.json({ ok: true });
+    target.deactivatedAt = null;
+    await target.save();
+    void logInstanceAudit({
+      action: "user_reactivated",
+      user: admin._id,
+      actorUsername: admin.username,
+      target: target.username,
+      detail: "",
     });
     return NextResponse.json({ ok: true });
   }
