@@ -193,7 +193,9 @@ GOOGLE_CLIENT_SECRET=     # redirect URI PUBLIC_ORIGIN + /api/auth/oidc/google/c
 PASSWORD_SIGN_IN=         # Optional — on (default) or off. Off: every password endpoint answers 403,
                           # the pages offer providers only, accounts come by invitation, an empty
                           # instance is set up through a provider (intent "bootstrap" with the setup
-                          # code), and a stored password is no way in. Refused at startup unless a
+                          # code), and a stored password is no way in — linking or unlinking a
+                          # provider then needs a sign-in under 10 minutes old instead (RECENT_SIGN_IN_MS),
+                          # as it does for any account with no password. Refused at startup unless a
                           # provider is configured, and for any other value (BP-830)
 GITHUB_OAUTH_CLIENT_SECRET=
 GITHUB_OAUTH_CLIENT_ID=   # Optional, with the secret above — sign-in with GitHub, an OAuth app of its
