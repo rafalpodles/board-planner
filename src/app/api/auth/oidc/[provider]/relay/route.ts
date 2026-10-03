@@ -6,11 +6,19 @@ import { redirectUri } from "@/lib/oidc/flow";
 import { relayOrigin } from "@/lib/oidc/relay";
 import { OidcFlow } from "@/models/oidcFlow";
 
-const PRIVATE = { "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" };
-
 const EXPIRED_PAGE = `<!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sign-in expired</title></head>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign-in expired</title>
+<style>
+:root { color-scheme: light dark; }
+body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; line-height: 1.5; max-width: 32rem; margin: 4rem auto; padding: 0 1rem; }
+h1 { font-size: 1.25rem; margin: 0 0 0.5rem; }
+p { margin: 0; opacity: 0.8; }
+</style>
+</head>
 <body>
 <h1>This sign-in has expired</h1>
 <p>It was already used, or took too long. Go back to your workspace and sign in again.</p>
@@ -21,7 +29,7 @@ const EXPIRED_PAGE = `<!doctype html>
 function expired() {
   return new NextResponse(EXPIRED_PAGE, {
     status: 400,
-    headers: { ...PRIVATE, "Content-Type": "text/html; charset=utf-8" },
+    headers: { "Content-Type": "text/html; charset=utf-8" },
   });
 }
 
@@ -32,13 +40,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
   const state = searchParams.get("state");
   if (!provider || !state) return expired();
 
+  const home = selfOrigin();
+  if (!home) return NextResponse.json({ error: "PUBLIC_ORIGIN is not set" }, { status: 500 });
+
   await connectDB();
   const live = await OidcFlow.exists({ state, provider: provider.id, claims: null, expiresAt: { $gt: new Date() } });
   if (!live) return expired();
-
-  const home = selfOrigin();
-  if (!home) return NextResponse.json({ error: "PUBLIC_ORIGIN is not set" }, { status: 500 });
-  const response = NextResponse.redirect(`${redirectUri(provider, home)}${search}`, 303);
-  for (const [name, value] of Object.entries(PRIVATE)) response.headers.set(name, value);
-  return response;
+  return NextResponse.redirect(`${redirectUri(provider, home)}${search}`, 303);
 }

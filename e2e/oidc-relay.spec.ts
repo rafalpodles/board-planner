@@ -14,7 +14,7 @@ import { E2E_MONGODB_URI, MEMBER_ID, MEMBER_USERNAME, seed } from "./seed";
 /**
  * BP-851. The passwordless server runs with OIDC_RELAY_ORIGIN on 127.0.0.1 while its own address
  * is localhost, so a provider sends the browser back to the relay, which forwards the answer to
- * the callback on the address the sign-in began from — where the binder cookie is.
+ * the callback on PUBLIC_ORIGIN — where the sign-in began, and where the binder cookie is.
  */
 
 const SKIP_REASON =
@@ -53,6 +53,8 @@ function trail(page: Page) {
   return urls;
 }
 
+const RELAY_PATH = (provider: string) => `${PASSWORDLESS_RELAY_ORIGIN}/api/auth/oidc/${provider}/relay?`;
+
 async function whoAmI(page: Page) {
   const res = await page.request.get(at("/api/auth/me"));
   return res.ok() ? (await res.json()).username : null;
@@ -73,6 +75,7 @@ test("an OIDC sign-in returns through the relay and finishes signed in on the in
   await (await db()).collection("users").updateOne({ _id: MEMBER_ID }, { $set: { email, emailVerifiedAt: new Date() } });
   await script(`${OIDC_STUB_URL}/control`, { sub: `sub-${randomBytes(4).toString("hex")}`, email, email_verified: true });
   const urls = trail(page);
+  const hop = page.waitForResponse((r) => r.url().startsWith(RELAY_PATH("oidc")));
 
   await page.goto(at("/login"));
   await page.getByRole("button", { name: `Continue with ${OIDC_STUB_LABEL}` }).click();
@@ -82,10 +85,21 @@ test("an OIDC sign-in returns through the relay and finishes signed in on the in
   expect((await lastAuthorize(`${OIDC_STUB_URL}/last-authorize`)).redirect_uri).toBe(
     `${PASSWORDLESS_RELAY_ORIGIN}/api/auth/oidc/oidc/relay`
   );
-  const relayed = urls.findIndex((u) => u.startsWith(`${PASSWORDLESS_RELAY_ORIGIN}/api/auth/oidc/oidc/relay?`));
+  const relayed = urls.findIndex((u) => u.startsWith(RELAY_PATH("oidc")));
   const called = urls.findIndex((u) => u.startsWith(at("/api/auth/oidc/oidc/callback?")));
   expect(relayed, urls.join("\n")).toBeGreaterThan(-1);
   expect(called, urls.join("\n")).toBeGreaterThan(relayed);
+
+  // The relay's URL carries the provider's code: on the wire, not only in the handler
+  const response = await hop;
+  expect(response.status()).toBe(303);
+  expect(response.headers()["referrer-policy"]).toBe("no-referrer");
+  expect(response.headers()["cache-control"]).toContain("no-store");
+
+  // The callback spent the flow, so the same answer relayed again goes nowhere
+  const again = await page.goto(urls[relayed]);
+  expect(again?.status()).toBe(400);
+  await expect(page.getByRole("heading", { name: "This sign-in has expired" })).toBeVisible();
 });
 
 test("a GitHub sign-in crosses the relay the same way", async ({ page }) => {
@@ -118,18 +132,27 @@ test("a GitHub sign-in crosses the relay the same way", async ({ page }) => {
 
 test("a refusal at the provider is relayed back to the sign-in page", async ({ page }) => {
   await script(`${OIDC_STUB_URL}/control`, { sub: "denied", email: freshAddress("denied"), deny: true });
+  const urls = trail(page);
 
   await page.goto(at("/login"));
   await page.getByRole("button", { name: `Continue with ${OIDC_STUB_LABEL}` }).click();
 
   await expect(page).toHaveURL(at("/login?sso=failed"));
   expect(await whoAmI(page)).toBeNull();
+  // Through the relay, with the provider's refusal carried to the callback that spends the flow
+  const relayed = urls.findIndex((u) => u.startsWith(RELAY_PATH("oidc")) && u.includes("error=access_denied"));
+  const called = urls.findIndex(
+    (u) => u.startsWith(at("/api/auth/oidc/oidc/callback?")) && u.includes("error=access_denied")
+  );
+  expect(relayed, urls.join("\n")).toBeGreaterThan(-1);
+  expect(called, urls.join("\n")).toBeGreaterThan(relayed);
 });
 
 test("a relay link with no sign-in behind it is a dead end, not a redirect", async ({ page }) => {
   const res = await page.goto(`${PASSWORDLESS_RELAY_ORIGIN}/api/auth/oidc/oidc/relay?code=made-up&state=made-up`);
 
   expect(res?.status()).toBe(400);
+  expect(res?.headers()["referrer-policy"]).toBe("no-referrer");
   expect(page.url().startsWith(`${PASSWORDLESS_RELAY_ORIGIN}/`)).toBe(true);
   await expect(page.getByRole("heading", { name: "This sign-in has expired" })).toBeVisible();
 });

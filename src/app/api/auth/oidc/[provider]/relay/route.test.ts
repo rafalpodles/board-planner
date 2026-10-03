@@ -38,8 +38,6 @@ describe("the relay", () => {
     expect(res.headers.get("location")).toBe(
       "https://acme.example/api/auth/oidc/oidc/callback?code=c1&state=st-1&iss=https%3A%2F%2Fid.example.com"
     );
-    expect(res.headers.get("cache-control")).toBe("no-store");
-    expect(res.headers.get("referrer-policy")).toBe("no-referrer");
     expect(flowExists).toHaveBeenCalledWith({
       state: "st-1",
       provider: "oidc",
@@ -52,6 +50,13 @@ describe("the relay", () => {
     const res = await relay("oidc/relay?error=access_denied&state=st-1");
 
     expect(res.headers.get("location")).toBe("https://acme.example/api/auth/oidc/oidc/callback?error=access_denied&state=st-1");
+  });
+
+  it("forwards to the callback of the provider the flow belongs to", async () => {
+    const res = await relay("github/relay?code=c1&state=st-1");
+
+    expect(res.headers.get("location")).toBe("https://acme.example/api/auth/oidc/github/callback?code=c1&state=st-1");
+    expect(flowExists).toHaveBeenCalledWith(expect.objectContaining({ state: "st-1", provider: "github" }));
   });
 
   it("takes the destination from configuration, never from the request's host or query", async () => {
@@ -83,7 +88,6 @@ describe("the relay", () => {
 
     expect(res.status).toBe(400);
     expect(res.headers.get("location")).toBeNull();
-    expect(res.headers.get("cache-control")).toBe("no-store");
     expect(res.headers.get("content-type")).toMatch(/^text\/html/);
     expect(flowExists).toHaveBeenCalledWith(expect.objectContaining({ state: "gone", provider: "github" }));
   });
@@ -104,5 +108,6 @@ describe("the relay", () => {
 
     expect(res.status).toBe(500);
     expect(res.headers.get("location")).toBeNull();
+    expect(flowExists).not.toHaveBeenCalled();
   });
 });

@@ -1,7 +1,8 @@
 /**
- * `OIDC_RELAY_ORIGIN`: the one address providers send the browser back to, which forwards the
- * answer to the origin the sign-in started from. Null when unset; a value that is not a bare https
- * origin (http only to 127.0.0.1/[::1]) throws, and `assertSignInConfig` does so at startup.
+ * `OIDC_RELAY_ORIGIN`: another address of this instance that providers send the browser back to,
+ * which forwards the answer to the callback on `selfOrigin()` (per tenant from BP-666). Null when
+ * unset; a value that is not a bare https origin (http only to 127.0.0.1/[::1]) throws, and
+ * `assertSignInConfig` does so at startup.
  */
 export function relayOrigin(): string | null {
   const raw = process.env.OIDC_RELAY_ORIGIN?.trim();
