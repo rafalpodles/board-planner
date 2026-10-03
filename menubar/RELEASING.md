@@ -9,11 +9,11 @@ keeps one pull request open, *chore(main): release X.Y.Z* on the branch
 `package-lock.json` and `.release-please-manifest.json` and prepends the new section to
 `CHANGELOG.md`, all read from the conventional commits since the last release: `feat` is a minor
 bump, `fix` a patch, `!` or `BREAKING CHANGE` a major; `ci`, `docs`, `test`, `build`, `chore` and
-`refactor` bump nothing and stay out of the changelog. A merged pull request contributes its title
-and each of its commits.
+`refactor` bump nothing and stay out of the changelog. Pull requests are squash-merged, so each
+contributes exactly its title.
 
 **Merging that pull request is the release.** The push it makes to `main` runs the workflow again,
-which tags `vX.Y.Z` on the merge commit, creates the GitHub release as a **draft** with the changelog
+which tags `vX.Y.Z` on that commit, creates the GitHub release as a **draft** with the changelog
 section as its notes, and — in the same run — calls `release.yml` with that tag. The call is needed
 because a tag created with `GITHUB_TOKEN` starts no workflow of its own. The called jobs check out
 the tag, not `main`, so a commit landing in the meantime is not built into the release.
