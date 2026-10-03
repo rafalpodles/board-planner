@@ -634,7 +634,9 @@ export default function UsersPage() {
             {currentUser?._id !== editUser._id && (
               <div className="border-t border-border pt-4 space-y-3">
                 {unsavedEdit && (
-                  <p className="text-sm text-text-muted">Save or cancel your changes first.</p>
+                  <p id="unsavedEditHint" className="text-sm text-text-muted">
+                    Save or cancel your changes first.
+                  </p>
                 )}
                 {editUser.email && !editUser.emailVerifiedAt && (
                   <div>
@@ -647,6 +649,7 @@ export default function UsersPage() {
                       size="sm"
                       variant="secondary"
                       disabled={unsavedEdit}
+                      aria-describedby={unsavedEdit ? "unsavedEditHint" : undefined}
                       onClick={() => {
                         setConfirmAddressOf(editUser);
                         closeEdit();
@@ -664,6 +667,7 @@ export default function UsersPage() {
                       size="sm"
                       variant="secondary"
                       disabled={unsavedEdit}
+                      aria-describedby={unsavedEdit ? "unsavedEditHint" : undefined}
                       onClick={() => {
                         setConfirmSignOut(editUser);
                         closeEdit();
@@ -678,6 +682,7 @@ export default function UsersPage() {
                       variant="secondary"
                       onClick={() => reactivate(editUser)}
                       disabled={togglingActive || unsavedEdit}
+                      aria-describedby={unsavedEdit ? "unsavedEditHint" : undefined}
                     >
                       {togglingActive ? "Reactivating…" : "Reactivate"}
                     </Button>
@@ -686,6 +691,7 @@ export default function UsersPage() {
                       size="sm"
                       variant="secondary"
                       disabled={unsavedEdit}
+                      aria-describedby={unsavedEdit ? "unsavedEditHint" : undefined}
                       onClick={() => {
                         setConfirmDeactivate(editUser);
                         closeEdit();

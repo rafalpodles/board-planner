@@ -36,7 +36,7 @@ export async function deliverInvitation(mail: InvitationMail): Promise<Invitatio
         : `You are invited to ${mail.origin}.`,
       passwordSignInEnabled()
         ? "Choose a username and a password to finish setting up your account."
-        : "Choose a username and sign in with your provider to finish setting up your account.",
+        : "Sign in with your provider and choose a username to finish setting up your account.",
     ],
     rows: mail.boards.map((b) => ({
       label: b.name,

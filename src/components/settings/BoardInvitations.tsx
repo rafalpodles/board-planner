@@ -119,7 +119,7 @@ export function BoardInvitations({ projectId }: { projectId: string }) {
       title="Invite by email"
       description={
         passwordSignIn === false
-          ? "For somebody without an account. They choose a username, sign in with a provider from the link and land on this board."
+          ? "For somebody without an account. They sign in with a provider from the link, choose a username and land on this board."
           : "For somebody without an account. They choose a username and password from the link and land on this board."
       }
     >

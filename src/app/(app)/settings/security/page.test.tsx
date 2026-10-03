@@ -11,12 +11,15 @@ const { api, toast } = vi.hoisted(() => ({
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast, dismiss: vi.fn() }) }));
 vi.mock("@/components/auth/ProviderButtons", () => ({ ProviderButtons: () => <div>provider buttons</div> }));
+const passwordSignIn = vi.hoisted(() => ({ value: true as boolean | null }));
+vi.mock("@/hooks/use-password-sign-in", () => ({ usePasswordSignIn: () => passwordSignIn.value }));
 
 const METHODS = { hasPassword: true, passwordSignIn: true, mailWorks: true, identities: [] };
 
 beforeEach(() => {
   vi.clearAllMocks();
   api.get.mockResolvedValue(METHODS);
+  passwordSignIn.value = true;
 });
 afterEach(cleanup);
 
@@ -30,6 +33,16 @@ describe("Settings → Security", () => {
     expect(await screen.findByText("Could not load your sign-in providers. Reload the page to try again.")).toBeTruthy();
     expect(screen.getByLabelText("Current password")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Change password" })).toBeTruthy();
+  });
+
+  it("offers no password form from a failed read where passwords sign nobody in", async () => {
+    api.get.mockRejectedValue(new Error("down"));
+    passwordSignIn.value = false;
+
+    render(<SecurityPage />);
+
+    expect(await screen.findByText("Could not load your sign-in providers. Reload the page to try again.")).toBeTruthy();
+    expect(screen.queryByLabelText("Current password")).toBeNull();
   });
 
   it("sends an account with no password to Forgot your password while mail goes out", async () => {

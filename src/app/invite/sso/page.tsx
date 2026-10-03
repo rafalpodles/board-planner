@@ -7,11 +7,14 @@ import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { APP_NAME } from "@/lib/brand";
+import { usePasswordSignIn } from "@/hooks/use-password-sign-in";
 
 const REFUSALS: Record<string, string> = {
   invitation: "This invitation can no longer be used. Ask whoever invited you for a new one.",
   unverified: "Your provider has not confirmed your address, so it cannot accept this invitation.",
   mismatch: "Your provider signed you in with a different address from the one invited. Use the invited address at the provider, adding and verifying it there if need be, or open the invitation link again and choose a password.",
+  // The same, on an instance where nobody chooses a password
+  mismatch_no_password: "Your provider signed you in with a different address from the one invited. Use the invited address at the provider, adding and verifying it there if need be, then open the invitation link again.",
   linked: "That sign-in already belongs to an account here. Sign in with it instead.",
 };
 
@@ -28,7 +31,14 @@ function SsoAcceptance() {
   const { refreshUser } = useAuth();
   const refusedFor = useSearchParams().get("error");
   const [held, setHeld] = useState<Held | null>(null);
-  const [failure, setFailure] = useState(refusedFor ? (REFUSALS[refusedFor] ?? REFUSALS.invitation) : "");
+  const passwordSignIn = usePasswordSignIn();
+  const [fetchFailure, setFailure] = useState("");
+  const refusal = !refusedFor
+    ? ""
+    : refusedFor === "mismatch" && passwordSignIn === false
+      ? REFUSALS.mismatch_no_password
+      : (REFUSALS[refusedFor] ?? REFUSALS.invitation);
+  const failure = refusal || fetchFailure;
   const [username, setUsername] = useState("");
   const [fullName, setFullName] = useState("");
   const [error, setError] = useState("");

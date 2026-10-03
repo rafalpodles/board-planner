@@ -475,6 +475,10 @@ describe("the account actions in the edit dialog", () => {
     for (const name of actions) {
       expect((within(dialog).getByRole("button", { name }) as HTMLButtonElement).disabled).toBe(true);
     }
+    // Said to a screen reader too, which otherwise hears only that they are dimmed
+    for (const name of ["Confirm address", "Sign out everywhere", "Deactivate"]) {
+      expect(within(dialog).getByRole("button", { name }).getAttribute("aria-describedby")).toBe("unsavedEditHint");
+    }
   });
 
   it.each([

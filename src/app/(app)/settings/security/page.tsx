@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/Input";
 import { useToast } from "@/components/ui/Toast";
 import { LinkedIdentity, SignInMethods } from "@/components/settings/SignInMethods";
 import { ProviderButtons } from "@/components/auth/ProviderButtons";
+import { usePasswordSignIn } from "@/hooks/use-password-sign-in";
 
 const LINK_RESULTS: Record<string, { tone: "success" | "error"; text: string }> = {
   linked: { tone: "success", text: "Linked. You can now sign in with it." },
@@ -34,6 +35,7 @@ export default function SecurityPage() {
   } | null>(null);
   const [methodsFailed, setMethodsFailed] = useState(false);
   const [linkPassword, setLinkPassword] = useState("");
+  const passwordSignIn = usePasswordSignIn();
 
   const readMethods = useCallback(() => {
     api
@@ -131,6 +133,8 @@ export default function SecurityPage() {
     providersSection
   );
   if (!methods && !methodsFailed) return null;
+  // Not offered from a failed read where passwords sign nobody in: the form would only be refused
+  if (methodsFailed && passwordSignIn === false) return <div className="max-w-md">{providersPart}</div>;
 
   if (methods?.passwordSignIn === false) return <div className="max-w-md">{providersSection}</div>;
 

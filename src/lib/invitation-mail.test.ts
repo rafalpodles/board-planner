@@ -42,7 +42,7 @@ describe("delivering an invitation", () => {
     try {
       await deliverInvitation(MAIL);
       const text = sendEmail.mock.calls[1][0].text;
-      expect(text).toContain("sign in with your provider");
+      expect(text).toContain("Sign in with your provider and choose a username");
       expect(text).not.toContain("a password");
     } finally {
       delete process.env.PASSWORD_SIGN_IN;
