@@ -43,8 +43,9 @@ test("two administrators taking each other's role at once leave one", async ({ b
         write(a.request, "put", `/api/users/${MEMBER_ID}`, { role: "member" }),
         write(b.request, "put", `/api/users/${ADMIN_ID}`, { deactivate: true }),
       ]);
-      // Through, or refused for this rule — both refused at once is the safe answer to a true race
-      for (const answer of answers) expect([200, 409]).toContain(answer.status());
+      // Through, or refused: by the rule (400 counted before, 409 after), or because the other's
+      // deactivation ended this caller first (401/403). What must hold is the count below
+      for (const answer of answers) expect([200, 400, 401, 403, 409]).toContain(answer.status());
 
       const active = await (await db()).collection("users").countDocuments({ role: "admin", deactivatedAt: null });
       expect(active, `round ${round} left no active administrator`).toBeGreaterThanOrEqual(1);
