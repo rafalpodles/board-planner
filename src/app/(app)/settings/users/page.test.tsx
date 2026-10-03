@@ -434,3 +434,46 @@ describe("the users page with password sign-in off (BP-830)", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Confirm address" })).toBeNull());
   });
 });
+
+describe("who the list shows, and how they sign in (BP-831)", () => {
+  const PEOPLE = [
+    { ...OTHER, _id: "u2", username: "ada", fullName: "Ada", lastSignInAt: new Date(Date.now() - 3 * 86_400_000).toISOString(), signInMethods: ["Password", "Acme SSO"] },
+    { ...OTHER, _id: "u3", username: "grace", fullName: "Grace", lastSignInAt: null, signInMethods: [] },
+    { ...OTHER, _id: "u4", username: "linus", fullName: "Linus", deactivatedAt: new Date().toISOString(), signInMethods: ["Password"] },
+  ];
+  const INVITED = [{ _id: "i1", email: "new@example.com", role: "member", boards: [], invitedBy: { username: "owner" }, expiresAt: new Date(Date.now() + 86_400_000).toISOString(), expired: false }];
+
+  beforeEach(() => {
+    api.get.mockImplementation((path: string) =>
+      path === "/api/users" ? Promise.resolve(PEOPLE) : path === "/api/invitations" ? Promise.resolve(INVITED) : otherGet(path)
+    );
+  });
+
+  it("says when each person last signed in, and by what", async () => {
+    render(<UsersPage />);
+    await screen.findByText("Ada");
+
+    expect(screen.getByText("Signed in 3d ago · Password, Acme SSO")).toBeTruthy();
+    expect(screen.getByText("Never signed in · No way to sign in")).toBeTruthy();
+  });
+
+  it("filters by status, counting each", async () => {
+    render(<UsersPage />);
+    await screen.findByText("Ada");
+    expect(screen.getByRole("button", { name: "All 4" })).toBeTruthy();
+
+    act(() => screen.getByRole("button", { name: "Deactivated 1" }).click());
+    expect(screen.queryByText("Ada")).toBeNull();
+    expect(screen.getByText("Linus")).toBeTruthy();
+    expect(screen.queryByText("new@example.com")).toBeNull();
+
+    act(() => screen.getByRole("button", { name: "Invited 1" }).click());
+    expect(screen.queryByText("Linus")).toBeNull();
+    expect(screen.getByText("new@example.com")).toBeTruthy();
+
+    act(() => screen.getByRole("button", { name: "Active 2" }).click());
+    expect(screen.getByText("Ada")).toBeTruthy();
+    expect(screen.getByText("Grace")).toBeTruthy();
+    expect(screen.queryByText("Linus")).toBeNull();
+  });
+});

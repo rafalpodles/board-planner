@@ -95,6 +95,9 @@ export function PendingInvitations({
                 <div className="min-w-0 basis-full flex-1 sm:basis-0">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <p className="font-medium break-all">{invitation.email}</p>
+                    <span className="shrink-0 text-xs px-2 py-0.5 rounded-full bg-warning/15 text-warning">
+                      Invited
+                    </span>
                     <span
                       className={`shrink-0 text-xs px-2 py-0.5 rounded-full ${
                         invitation.role === "admin"

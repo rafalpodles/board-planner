@@ -17,8 +17,18 @@ import { usePasswordSignIn } from "@/hooks/use-password-sign-in";
 import { PendingInvitations } from "@/components/settings/PendingInvitations";
 import { generatePassword } from "@/lib/password-generator";
 import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";
+import { timeAgo } from "@/lib/time";
 
 const MIN_PASSWORD_LENGTH = 8;
+
+type StatusFilter = "all" | "active" | "invited" | "deactivated";
+
+const STATUS_FILTERS: [StatusFilter, string][] = [
+  ["all", "All"],
+  ["active", "Active"],
+  ["invited", "Invited"],
+  ["deactivated", "Deactivated"],
+];
 
 export default function UsersPage() {
   const { user: currentUser, isAdmin, isLoading: authLoading } = useAuth();
@@ -61,6 +71,7 @@ export default function UsersPage() {
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState("");
   const [confirmDeactivate, setConfirmDeactivate] = useState<ApiUser | null>(null);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [togglingActive, setTogglingActive] = useState(false);
   const [deactivateError, setDeactivateError] = useState("");
   const [invitations, setInvitations] = useState<ApiInvitation[]>([]);
@@ -327,6 +338,17 @@ export default function UsersPage() {
     );
   }
 
+  const active = users.filter((u) => !u.deactivatedAt);
+  const deactivated = users.filter((u) => u.deactivatedAt);
+  const counts: Record<StatusFilter, number> = {
+    all: users.length + invitations.length,
+    active: active.length,
+    invited: invitations.length,
+    deactivated: deactivated.length,
+  };
+  const shownUsers = statusFilter === "all" ? users : statusFilter === "active" ? active : statusFilter === "deactivated" ? deactivated : [];
+  const showInvitations = statusFilter === "all" || statusFilter === "invited";
+
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
@@ -341,11 +363,31 @@ export default function UsersPage() {
         </div>
       </div>
 
+      <div className="flex flex-wrap gap-2 mb-4" role="group" aria-label="Show">
+        {STATUS_FILTERS.map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            aria-pressed={statusFilter === value}
+            onClick={() => setStatusFilter(value)}
+            className={`px-3 py-1.5 min-h-11 sm:min-h-0 rounded-lg text-sm border transition-colors ${
+              statusFilter === value ? "border-primary bg-primary/20 text-primary" : "border-border text-text-muted hover:border-text"
+            }`}
+          >
+            {label} <span className="tabular-nums">{counts[value]}</span>
+          </button>
+        ))}
+      </div>
+
+      {shownUsers.length === 0 && !(showInvitations && invitations.length > 0) && (
+        <p className="text-sm text-text-muted">Nobody here.</p>
+      )}
+
       {/* auto-fill rather than a fixed 1/2/3: at this content width three columns left each card
           145px for a name and its role pill, which needs 165px, so every ordinary name truncated
           while a whole empty column sat beside it (BP-351) */}
       <div className="grid grid-cols-[repeat(auto-fill,minmax(min(260px,100%),1fr))] gap-4">
-        {users.map((u) => (
+        {shownUsers.map((u) => (
           <Card
             key={u._id}
             onClick={() => openEdit(u)}
@@ -366,14 +408,23 @@ export default function UsersPage() {
                   >
                     {u.role === "admin" ? "Admin" : "Member"}
                   </span>
-                  {u.deactivatedAt && (
+                  {u.deactivatedAt ? (
                     <span className="shrink-0 text-xs px-2 py-0.5 rounded-full bg-danger/15 text-danger">
                       Deactivated
+                    </span>
+                  ) : (
+                    <span className="shrink-0 text-xs px-2 py-0.5 rounded-full bg-success/15 text-success">
+                      Active
                     </span>
                   )}
                 </div>
                 <p className="text-sm text-text-muted truncate">
                   @{u.username}
+                </p>
+                <p className="text-xs text-text-muted">
+                  {u.lastSignInAt ? `Signed in ${timeAgo(u.lastSignInAt)}` : "Never signed in"}
+                  {" · "}
+                  {u.signInMethods && u.signInMethods.length > 0 ? u.signInMethods.join(", ") : "No way to sign in"}
                 </p>
               </div>
             </div>
@@ -381,7 +432,7 @@ export default function UsersPage() {
         ))}
       </div>
 
-      <PendingInvitations invitations={invitations} onChanged={refreshInvitations} />
+      {showInvitations && <PendingInvitations invitations={invitations} onChanged={refreshInvitations} />}
 
       <AddToBoardModal person={addingToBoard} onClose={() => setAddingToBoard(null)} />
 
