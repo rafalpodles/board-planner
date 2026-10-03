@@ -8,16 +8,23 @@ export function adminGroup(): string | null {
   return process.env.OIDC_ADMIN_GROUP?.trim() || null;
 }
 
+let warnedMissingClaim = false;
+
 /** The groups the generic OIDC provider's ID token names; none when the claim is missing. */
 export function groupsIn(claims: Record<string, unknown>): string[] {
-  const value = claims[process.env.OIDC_GROUPS_CLAIM?.trim() || "groups"];
+  const claim = process.env.OIDC_GROUPS_CLAIM?.trim() || "groups";
+  const value = claims[claim];
+  if (value === undefined && adminGroup() && !warnedMissingClaim) {
+    warnedMissingClaim = true;
+    console.warn(`OIDC_ADMIN_GROUP is set but the ID token has no "${claim}" claim; its administrators are demoted`);
+  }
   if (typeof value === "string") return [value];
   return Array.isArray(value) ? value.filter((g): g is string => typeof g === "string") : [];
 }
 
 /**
- * The identity provider decides who administers: an account signing in through the generic OIDC
- * provider is an admin exactly while it is in `OIDC_ADMIN_GROUP` — never leaving no active admin.
+ * At each sign-in through the generic OIDC provider, `OIDC_ADMIN_GROUP` decides whether the account
+ * is an admin — never leaving no active admin. Nothing re-reads the group between sign-ins.
  */
 export async function applyAdminGroup(user: IUser, providerId: string, groups: string[]): Promise<void> {
   const group = adminGroup();

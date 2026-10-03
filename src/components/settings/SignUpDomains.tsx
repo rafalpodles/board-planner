@@ -14,6 +14,8 @@ interface SignUp {
 
 const asText = (domains: string[]) => domains.join(", ");
 
+const PUBLIC_MAIL = ["gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "yahoo.com", "icloud.com", "proton.me"];
+
 export function SignUpDomains() {
   const api = useApi();
   const { toast } = useToast();
@@ -54,6 +56,7 @@ export function SignUpDomains() {
   if (!saved) return error ? <p className="mt-8 text-sm text-danger">{error}</p> : null;
 
   const providers = saved.providers.join(" or ");
+  const publicMail = saved.domains.filter((d) => PUBLIC_MAIL.includes(d));
   return (
     <section className="mt-8" aria-labelledby="sign-up-domains">
       <h2 id="sign-up-domains" className="text-lg font-semibold mb-1">
@@ -81,6 +84,12 @@ export function SignUpDomains() {
           {saving ? "Saving…" : "Save"}
         </Button>
       </form>
+      {publicMail.length > 0 && (
+        <p className="mt-1 text-sm text-warning">
+          {publicMail.join(", ")} {publicMail.length === 1 ? "is a public mail service" : "are public mail services"}:
+          anybody can sign up with an address there.
+        </p>
+      )}
       {error && (
         <p role="alert" className="mt-1 text-sm text-danger">
           {error}

@@ -391,6 +391,20 @@ describe("the groups an ID token names (BP-833)", () => {
     expect(await finishWith(PROVIDER, { groups: ["admins"], roles: ["planner-admins"] })).toEqual(["planner-admins"]);
   });
 
+  it("warns once, with the admin group set, when the token carries no groups claim", async () => {
+    process.env.OIDC_ADMIN_GROUP = "admins";
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await finishWith(PROVIDER, {});
+      await finishWith(PROVIDER, {});
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0][0]).toContain('no "groups" claim');
+    } finally {
+      warn.mockRestore();
+      delete process.env.OIDC_ADMIN_GROUP;
+    }
+  });
+
   it("takes none from Google, whatever its token carries", async () => {
     const GOOGLE = { ...PROVIDER, id: "google" as const, issuer: "https://accounts.google.com" };
 

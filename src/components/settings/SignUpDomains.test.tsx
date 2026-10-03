@@ -67,4 +67,18 @@ describe("sign-up by domain", () => {
 
     expect(await screen.findByText(/Each sign-in with Acme SSO makes members of the group planner-admins administrators/)).toBeTruthy();
   });
+
+  it("warns that a public mail service opens sign-up to anybody", async () => {
+    api.get.mockResolvedValue({ ...ANSWER, domains: ["corp.example", "gmail.com"] });
+    render(<SignUpDomains />);
+
+    expect(await screen.findByText(/gmail.com is a public mail service: anybody can sign up/)).toBeTruthy();
+  });
+
+  it("gives no such warning for a company's own domain", async () => {
+    render(<SignUpDomains />);
+    await screen.findByLabelText("Domains");
+
+    expect(screen.queryByText(/public mail service/)).toBeNull();
+  });
 });
