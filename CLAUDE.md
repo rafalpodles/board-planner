@@ -190,6 +190,11 @@ OIDC_CLIENT_SECRET=       # /api/auth/oidc/oidc/callback. Plain http only for an
 OIDC_LABEL=               # Optional — the button's name (default "Single sign-on") (BP-828)
 GOOGLE_CLIENT_ID=         # Optional — sign-in with Google, the same code path at Google's issuer;
 GOOGLE_CLIENT_SECRET=     # redirect URI PUBLIC_ORIGIN + /api/auth/oidc/google/callback (BP-828)
+PASSWORD_SIGN_IN=         # Optional — on (default) or off. Off: every password endpoint answers 403,
+                          # the pages offer providers only, accounts come by invitation, an empty
+                          # instance is set up through a provider (intent "bootstrap" with the setup
+                          # code), and a stored password is no way in. Refused at startup unless a
+                          # provider is configured, and for any other value (BP-830)
 GITHUB_OAUTH_CLIENT_SECRET=
 GITHUB_OAUTH_CLIENT_ID=   # Optional, with the secret above — sign-in with GitHub, an OAuth app of its
                           # own (not a project's PR token); redirect URI PUBLIC_ORIGIN +
