@@ -79,6 +79,7 @@ function targetDoc(overrides: Record<string, unknown> = {}) {
     kind: "human",
     password: "old-hash",
     save: vi.fn().mockResolvedValue(undefined),
+    unmarkModified: vi.fn(),
     ...overrides,
   };
 }
@@ -890,6 +891,9 @@ describe("PUT /api/users/:id — the guards that keep an administrator standing"
     expect(res.status).toBe(200);
     expect(target.role).toBe("member");
     expect(userUpdateOne).toHaveBeenCalledWith({ _id: "target-1", role: "admin" }, { $set: { role: "member" } });
+    // Already written: the save must not write it again over a promotion landing in between
+    expect(target.unmarkModified).toHaveBeenCalledWith("role");
+    expect(target.unmarkModified.mock.invocationCallOrder[0]).toBeLessThan(target.save.mock.invocationCallOrder[0]);
   });
 
   // BP-841. The other administrator was demoted or deactivated by a request that counted this one

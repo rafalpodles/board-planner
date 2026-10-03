@@ -197,6 +197,8 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
   if (demotingAnActiveAdmin) {
     const demoted = await User.updateOne({ _id: target._id, role: "admin" }, { $set: { role: "member" } });
     demotedHere = demoted.modifiedCount > 0;
+    // Written above, so the save must not write it again over a promotion landing in between
+    target.unmarkModified("role");
     if (demotedHere && (await User.countDocuments(ACTIVE_ADMINS)) === 0) {
       await User.updateOne({ _id: target._id }, { $set: { role: "admin" } });
       return NextResponse.json({ error: "Cannot demote the last admin" }, { status: 409 });

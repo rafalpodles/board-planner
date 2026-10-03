@@ -242,6 +242,17 @@ describe("PUT members", () => {
     expect(createNotifications).not.toHaveBeenCalled();
   });
 
+  it("records an owner re-created after somebody else removed them meanwhile", async () => {
+    grantFindOneLean.mockResolvedValue({ relation: "owner" });
+    grantUpsertLean.mockResolvedValue({ relation: "owner" });
+    ownerCount.mockResolvedValueOnce(2).mockResolvedValueOnce(0);
+    grantUpdateOne.mockResolvedValueOnce({ upsertedCount: 1 } as never);
+    userFindByIdSelect.mockResolvedValue({ _id: U2, role: "member", kind: "human", username: "uma" });
+
+    expect((await PUT(put({ userId: U2, relation: "member" }), { params })).status).toBe(409);
+    expect(logProjectAudit).toHaveBeenCalledWith(PROJECT, "o1", "member_added", "uma: no access → owner");
+  });
+
   it("keeps an owner's demotion while another active owner remains after the write", async () => {
     grantFindOneLean.mockResolvedValue({ relation: "owner" });
     grantUpsertLean.mockResolvedValue({ relation: "owner" });
@@ -303,6 +314,8 @@ describe("DELETE members", () => {
       { subject: U2, objectType: "project", object: PROJECT },
       { $set: { relation: "owner" } }
     );
+    // Another request's member grant made owner again: an owner's access granted, so recorded
+    expect(logProjectAudit).toHaveBeenCalledWith(PROJECT, "o1", "member_role_changed", "uma: member → owner");
   });
 
   it("keeps an owner's removal while another active owner remains after it", async () => {
