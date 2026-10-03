@@ -258,7 +258,8 @@ test("an account with an unproven address is let in once an administrator confir
   const email = freshAddress("unproven");
   await (await db()).collection("users").updateOne({ _id: MEMBER_ID }, { $set: { email, emailVerifiedAt: null } });
   const member = await fresh(browser);
-  await nextPerson({ sub: `late-${randomBytes(4).toString("hex")}`, email });
+  const sub = `late-${randomBytes(4).toString("hex")}`;
+  await nextPerson({ sub, email });
   await member.page.goto(at("/login"));
   await member.page.getByRole("button", { name: `Continue with ${OIDC_STUB_LABEL}` }).click();
   await expect(member.page).toHaveURL(/sso=unproven/);
@@ -273,6 +274,8 @@ test("an account with an unproven address is let in once an administrator confir
   await admin.page.getByRole("button", { name: "Confirm address" }).click();
   await expect(admin.page.getByRole("button", { name: "Confirm address" })).toHaveCount(0);
 
+  // The stub answers for whoever it was last told; the administrator's sign-in moved it on
+  await nextPerson({ sub, email });
   await member.page.goto(at("/login"));
   await member.page.getByRole("button", { name: `Continue with ${OIDC_STUB_LABEL}` }).click();
   await expect(member.page).toHaveURL(/\/projects/);
