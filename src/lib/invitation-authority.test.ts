@@ -26,13 +26,18 @@ function world({
   projects = [] as Types.ObjectId[],
   grants = [] as GrantRow[],
 }) {
-  userFind.mockImplementation((filter: { _id: { $in: unknown[] }; deactivatedAt?: null }) => ({
+  userFind.mockImplementation((filter: { _id: { $in: unknown[] }; deactivatedAt?: unknown }) => ({
     select: (fields: string) => ({
       lean: () =>
         Promise.resolve(
           people
             .filter((p) => inIds(filter._id.$in, p._id))
-            .filter((p) => !("deactivatedAt" in filter) || !p.deactivatedAt)
+            // As Mongo reads it: null matches a missing field too, anything else is not modelled
+            .filter((p) => {
+              if (!("deactivatedAt" in filter)) return true;
+              if (filter.deactivatedAt === null) return !p.deactivatedAt;
+              throw new Error(`unmodelled deactivatedAt filter ${JSON.stringify(filter.deactivatedAt)}`);
+            })
             .map((p) => ({
               _id: p._id,
               ...(fields.includes("role") ? { role: p.role } : {}),

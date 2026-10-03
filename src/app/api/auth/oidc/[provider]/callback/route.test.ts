@@ -149,6 +149,19 @@ describe("GET /api/auth/oidc/:provider/callback, signing in", () => {
     expect(createSession).not.toHaveBeenCalledWith(expect.objectContaining({ userId: "u1" }));
   });
 
+  // BP-845
+  it("refuses when the account a racing sign-in linked to is deactivated", async () => {
+    finishes("signin");
+    identityCreate.mockRejectedValue(Object.assign(new Error("E11000"), { code: 11000 }));
+    identityFindOne.mockReturnValueOnce(lean(null)).mockReturnValue(lean({ _id: "i9", user: "u2" }));
+    userFindById.mockImplementation(async (id: string) =>
+      id === "u2" ? { ...ADA, _id: "u2", username: "grace", deactivatedAt: new Date() } : null
+    );
+
+    expect(location(await callback())).toBe("/login?sso=deactivated");
+    expect(createSession).not.toHaveBeenCalled();
+  });
+
   it("refuses when the account a racing sign-in linked to is gone", async () => {
     finishes("signin");
     identityCreate.mockRejectedValue(Object.assign(new Error("E11000"), { code: 11000 }));
