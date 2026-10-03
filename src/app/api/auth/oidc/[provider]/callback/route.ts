@@ -175,6 +175,18 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
   const found = await accountFor(provider, claims);
   if ("refused" in found) {
     if (found.refused === "no_account" && (await mayJoin(provider, claims))) {
+      // An invitation names the role and boards meant for this person; signing up would drop them
+      const invited = await Invitation.findOne({
+        email: claims.email,
+        status: "pending",
+        expiresAt: { $gt: new Date() },
+      }).lean();
+      if (invited) {
+        const binder = await holdForAcceptance({ provider, invitationTokenHash: invited.tokenHash, claims });
+        return redirectTo(origin, "/invite/sso", [
+          buildFlowCookie(ACCEPT_COOKIE, binder, Math.floor(ACCEPT_TTL_MS / 1000)),
+        ]);
+      }
       const binder = await holdForSignUp({ provider, claims });
       return redirectTo(origin, "/join/sso", [buildFlowCookie(JOIN_COOKIE, binder, Math.floor(ACCEPT_TTL_MS / 1000))]);
     }

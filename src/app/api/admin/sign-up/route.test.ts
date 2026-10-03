@@ -43,7 +43,17 @@ describe("GET /api/admin/sign-up", () => {
   it("lists the domains, the providers that can open them — never GitHub — and the admin group", async () => {
     const res = await GET(new Request("http://x/api/admin/sign-up"), ctx());
 
-    expect(await res.json()).toEqual({ domains: ["old.example"], providers: ["Acme SSO"], adminGroup: "planner-admins" });
+    expect(await res.json()).toEqual({
+      domains: ["old.example"],
+      providers: ["Acme SSO"],
+      adminGroup: { group: "planner-admins", provider: "Acme SSO" },
+    });
+  });
+
+  it("names no admin group while it is not set", async () => {
+    delete process.env.OIDC_ADMIN_GROUP;
+
+    expect((await (await GET(new Request("http://x/api/admin/sign-up"), ctx())).json()).adminGroup).toBeNull();
   });
 
   it("answers no member", async () => {

@@ -266,6 +266,7 @@ describe("GET /api/auth/oidc/:provider/callback, signing up in an allowed domain
   beforeEach(() => {
     userFindOne.mockResolvedValue(null);
     signUpOpenTo.mockResolvedValue(true);
+    invitationFindOne.mockReturnValue(lean(null));
   });
 
   it("holds a verified newcomer in an allowed domain for the username form, making no account", async () => {
@@ -279,6 +280,22 @@ describe("GET /api/auth/oidc/:provider/callback, signing up in an allowed domain
     expect(res.headers.get("set-cookie")).toContain("bp_oidc_join=cpo_join");
     expect(userCreate).not.toHaveBeenCalled();
     expect(createSession).not.toHaveBeenCalled();
+  });
+
+  it("sends a newcomer with a pending invitation to accept it, keeping its role and boards", async () => {
+    finishes("signin", { email: "grace@corp.example" });
+    invitationFindOne.mockReturnValue(lean({ _id: "inv-1", email: "grace@corp.example", tokenHash: "h-grace" }));
+    holdForAcceptance.mockResolvedValue("cpo_accept");
+
+    const res = await callback();
+
+    expect(invitationFindOne).toHaveBeenCalledWith(
+      expect.objectContaining({ email: "grace@corp.example", status: "pending", expiresAt: { $gt: expect.any(Date) } })
+    );
+    expect(holdForAcceptance).toHaveBeenCalledWith(expect.objectContaining({ invitationTokenHash: "h-grace" }));
+    expect(holdForSignUp).not.toHaveBeenCalled();
+    expect(location(res)).toBe("/invite/sso");
+    expect(res.headers.get("set-cookie")).toContain("bp_oidc_accept=cpo_accept");
   });
 
   it("refuses a newcomer whose domain is not open", async () => {

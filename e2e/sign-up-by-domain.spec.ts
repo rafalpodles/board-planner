@@ -1,8 +1,8 @@
 import { test, expect, type Browser } from "@playwright/test";
-import { randomBytes } from "crypto";
+import { createHash, randomBytes } from "crypto";
 import mongoose from "mongoose";
 import { OIDC_STUB_LABEL, OIDC_STUB_URL } from "../playwright.config";
-import { E2E_MONGODB_URI, seed } from "./seed";
+import { ADMIN_ID, E2E_MONGODB_URI, seed } from "./seed";
 import { signIn } from "./session";
 
 /**
@@ -119,4 +119,36 @@ test("a domain closed while the newcomer chooses a username makes no account", a
   );
   expect(await accountFor(email)).toBeNull();
   await newcomer.context.close();
+});
+
+test("a newcomer with a pending invitation accepts it, keeping the role it names", async ({ browser }) => {
+  await setDomains([DOMAIN]);
+  const email = `invited-${randomBytes(3).toString("hex")}@${DOMAIN}`;
+  await (await db()).collection("invitations").insertOne({
+    email,
+    role: "admin",
+    boards: [],
+    invitedBy: ADMIN_ID,
+    tokenHash: createHash("sha256").update(`cpi_${randomBytes(32).toString("hex")}`).digest("hex"),
+    expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    status: "pending",
+    acceptedBy: null,
+    acceptedAt: null,
+    deliveredAs: "email",
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+  await nextPerson({ email, name: "Invited Person" });
+
+  const newcomer = await arriveThroughProvider(browser);
+  await expect(newcomer.page).toHaveURL(/\/invite\/sso$/);
+  const username = `invited${randomBytes(3).toString("hex")}`;
+  await newcomer.page.getByLabel("Username").fill(username);
+  await newcomer.page.getByLabel("Full name").fill("Invited Person");
+  await newcomer.page.getByRole("button", { name: "Create my account" }).click();
+  await expect(newcomer.page).toHaveURL(/\/projects/);
+  await newcomer.context.close();
+
+  expect(await accountFor(email)).toMatchObject({ username, role: "admin" });
+  expect((await (await db()).collection("invitations").findOne({ email }))?.status).toBe("accepted");
 });

@@ -420,7 +420,8 @@ export default defineConfig({
               ...devServerEnv(PASSWORDLESS_BASE_URL),
               PASSWORD_SIGN_IN: "off",
               // Every sign-in here is through the provider, which makes it the server that maps
-              // a group to the admin role (BP-833); the default seed's one admin is never demoted
+              // a group to the admin role (BP-833). The default seed's one admin is never demoted,
+              // but a second admin signing in here without `groups` in the stub's script would be
               OIDC_ADMIN_GROUP: OIDC_STUB_ADMIN_GROUP,
               APP_ORIGIN: PASSWORDLESS_BASE_URL,
               NEXT_DIST_DIR: ".next-passwordless",

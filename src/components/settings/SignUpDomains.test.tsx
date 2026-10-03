@@ -24,7 +24,7 @@ describe("sign-up by domain", () => {
     render(<SignUpDomains />);
 
     expect(((await screen.findByLabelText("Domains")) as HTMLInputElement).value).toBe("corp.example");
-    expect(screen.getByText(/Anyone Acme SSO or Google confirms/)).toBeTruthy();
+    expect(screen.getByText(/Anyone who signs in with Acme SSO or Google at one of these domains/)).toBeTruthy();
   });
 
   it("saves the list however it was separated, and shows what was stored", async () => {
@@ -52,17 +52,19 @@ describe("sign-up by domain", () => {
     expect(input.value).toBe("*.corp.example");
   });
 
-  it("says sign-up needs a provider that confirms addresses when there is none", async () => {
+  it("says sign-up needs a provider that confirms addresses when there is none, and takes no domains", async () => {
     api.get.mockResolvedValue({ ...ANSWER, providers: [] });
     render(<SignUpDomains />);
 
     expect(await screen.findByText(/Needs single sign-on or Google sign-in/)).toBeTruthy();
+    expect((screen.getByLabelText("Domains") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("names the admin group when one decides administrators", async () => {
-    api.get.mockResolvedValue({ ...ANSWER, adminGroup: "planner-admins" });
+    api.get.mockResolvedValue({ ...ANSWER, adminGroup: { group: "planner-admins", provider: "Acme SSO" } });
     render(<SignUpDomains />);
 
-    expect(await screen.findByText(/Group planner-admins decides who is an administrator/)).toBeTruthy();
+    expect(await screen.findByText(/Each sign-in with Acme SSO makes members of the group planner-admins administrators/)).toBeTruthy();
   });
 });

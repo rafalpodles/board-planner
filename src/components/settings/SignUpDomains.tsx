@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/Input";
 interface SignUp {
   domains: string[];
   providers: string[];
-  adminGroup: string | null;
+  adminGroup: { group: string; provider: string } | null;
 }
 
 const asText = (domains: string[]) => domains.join(", ");
@@ -61,9 +61,10 @@ export function SignUpDomains() {
       </h2>
       <p className="text-sm text-text-muted mb-3">
         {providers
-          ? `Anyone ${providers} confirms at one of these domains can make their own account, as a member with no boards.`
+          ? `Anyone who signs in with ${providers} at one of these domains can make their own account, as a member with no boards.`
           : "Needs single sign-on or Google sign-in configured on this instance."}
-        {saved.adminGroup && ` Group ${saved.adminGroup} decides who is an administrator.`}
+        {saved.adminGroup &&
+          ` Each sign-in with ${saved.adminGroup.provider} makes members of the group ${saved.adminGroup.group} administrators, and makes anyone else a member.`}
       </p>
       <form onSubmit={save} className="flex flex-col sm:flex-row gap-2 sm:items-end">
         <div className="flex-1">
@@ -72,10 +73,11 @@ export function SignUpDomains() {
             placeholder="example.com, example.org"
             value={text}
             onChange={(e) => setText(e.target.value)}
+            disabled={!providers}
             dirty={text !== asText(saved.domains)}
           />
         </div>
-        <Button type="submit" variant="secondary" disabled={saving || text === asText(saved.domains)}>
+        <Button type="submit" variant="secondary" disabled={!providers || saving || text === asText(saved.domains)}>
           {saving ? "Saving…" : "Save"}
         </Button>
       </form>

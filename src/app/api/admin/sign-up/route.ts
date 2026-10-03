@@ -10,13 +10,14 @@ import { configuredProviders } from "@/lib/oidc/providers";
 import { getSettings, Settings } from "@/models/settings";
 
 function view(domains: string[]) {
+  const providers = configuredProviders();
+  const oidc = providers.find((p) => p.id === "oidc");
+  const group = adminGroup();
   return {
     domains,
     // GitHub's `verified` proves no domain, so only these can open sign-up
-    providers: configuredProviders()
-      .filter((p) => p.linksByAddress)
-      .map((p) => p.label),
-    adminGroup: adminGroup(),
+    providers: providers.filter((p) => p.linksByAddress).map((p) => p.label),
+    adminGroup: oidc && group ? { group, provider: oidc.label } : null,
   };
 }
 
