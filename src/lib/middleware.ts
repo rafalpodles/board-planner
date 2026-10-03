@@ -92,18 +92,22 @@ export function withAdmin(handler: AuthenticatedHandler) {
 }
 
 // 402, not 404 or 403, so the UI can upsell rather than treat this as missing or off-limits.
+export async function entitlementRefusal(feature: FeatureKey): Promise<NextResponse | null> {
+  const tenant = await getTenant();
+  if (can(tenant, feature)) return null;
+  return NextResponse.json(
+    { error: "This feature requires a plan upgrade", feature, plan: tenant.entitlements.plan },
+    { status: 402 }
+  );
+}
+
+/** Inside another guard, e.g. `withProjectOwner(requireEntitlement(feature, handler))`. */
+export function requireEntitlement(feature: FeatureKey, handler: AuthenticatedHandler): AuthenticatedHandler {
+  return async (request, context) => (await entitlementRefusal(feature)) ?? handler(request, context);
+}
+
 export function withEntitlement(feature: FeatureKey) {
-  return (handler: AuthenticatedHandler) =>
-    withAuth(async (request, context) => {
-      const tenant = await getTenant();
-      if (!can(tenant, feature)) {
-        return NextResponse.json(
-          { error: "This feature requires a plan upgrade", feature, plan: tenant.entitlements.plan },
-          { status: 402 }
-        );
-      }
-      return handler(request, context);
-    });
+  return (handler: AuthenticatedHandler) => withAuth(requireEntitlement(feature, handler));
 }
 
 export function protocolOf(request: Request): number {

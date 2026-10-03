@@ -1,7 +1,7 @@
 import { readBody, serve } from "./stub-guard.mjs";
 
 /**
- * A stand-in for the Coda API, so a project's Coda sync (`src/lib/coda.ts`) runs end to end
+ * A stand-in for the Coda API, so a project's Coda sync (`src/ee/connectors/coda/client.ts`) runs end to end
  * without a real doc, a real token or a rate limit. `codaHost` is a per-project settings field
  * rather than a global env var, so unlike the OpenAI/OpenRouter stubs nothing here is wired into
  * the app automatically — a spec points a project's Host field at this stub's URL through the

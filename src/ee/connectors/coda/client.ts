@@ -1,5 +1,6 @@
-import { safeFetch, logUpstreamFailure, readBoundedJson, MAX_RESPONSE_BYTES } from "./safe-fetch";
-import { allowLoopbackIn } from "./github";
+// Copyright (c) 2026 Rafał Podleś. Licensed under the Board Planner Enterprise Edition Licence, see src/ee/LICENSE.
+import { safeFetch, logUpstreamFailure, readBoundedJson, MAX_RESPONSE_BYTES } from "@/lib/safe-fetch";
+import { allowLoopbackIn } from "@/lib/github";
 
 // Mirrors GITHUB_DESTINATION: `NODE_ENV` only, so a real deployment (always "production") is
 // unaffected and only a dev/test run — where BP-472's e2e coverage points this at a stub — can
@@ -13,6 +14,8 @@ const MUTATION_POLL_INTERVAL_MS = 1000;
 // Coda allows 10 writes per 6s; one upsert carries the whole batch, so a chunk
 // per request keeps even a large board to a handful of calls
 const UPSERT_CHUNK = 200;
+
+export const CODA_SETTINGS_FIELDS = ["codaHost", "codaDocId", "codaTableId", "codaToken"] as const;
 
 export const CODA_COLUMNS = [
   "Key",

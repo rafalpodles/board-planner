@@ -17,7 +17,7 @@ import { signIn } from "./session";
  * field), but `codaFetch` itself was calling `safeFetch` with no `DestinationOptions` — a silent,
  * always-on refusal regardless of environment. Given `GITHUB_DESTINATION` already carries the
  * identical carve-out for GitHub's sync (BP-443), this file adds the Coda twin (`CODA_DESTINATION`
- * in `src/lib/coda.ts`) rather than leaving Coda's sync unreachable for the same reason chat
+ * in `src/ee/connectors/coda/client.ts`) rather than leaving Coda's sync unreachable for the same reason chat
  * channels are — production is unaffected (`NODE_ENV` is never anything else there), and
  * `e2e/coda-stub.mjs` is what actually exercises the sync route end to end below.
  *
