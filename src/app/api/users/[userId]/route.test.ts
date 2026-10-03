@@ -871,6 +871,15 @@ describe("PUT /api/users/:id — account actions", () => {
     );
   });
 
+  it("refuses both actions at once rather than doing one of them", async () => {
+    const target = targetDoc({ emailVerifiedAt: null });
+    found(target);
+
+    expect((await PUT(put({ confirmEmail: true, signOutEverywhere: true }), ctx())).status).toBe(400);
+    expect(target.save).not.toHaveBeenCalled();
+    expect(revokeUserCredentials).not.toHaveBeenCalled();
+  });
+
   it("refuses to confirm an account with no address", async () => {
     const target = targetDoc({ email: "", emailVerifiedAt: null });
     found(target);
