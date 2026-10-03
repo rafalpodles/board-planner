@@ -499,7 +499,7 @@ export default function UsersPage() {
               />
             </div>
 
-            {passwordSignIn !== false && (
+            {passwordSignIn !== false && !editUser.deactivatedAt && (
             <div className="border-t border-border pt-4">
               {currentUser?._id === editUser._id ? (
                 <>

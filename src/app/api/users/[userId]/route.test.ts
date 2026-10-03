@@ -1015,6 +1015,15 @@ describe("PUT /api/users/:id — deactivating and reactivating", () => {
     expect(logInstanceAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "user_reactivated" }));
   });
 
+  it("sets no password on a deactivated account, which would unlink the providers it keeps", async () => {
+    const target = targetDoc({ role: "member", deactivatedAt: new Date() });
+    found(target);
+
+    expect((await PUT(put({ password: "a-fresh-password" }), ctx())).status).toBe(400);
+    expect(target.save).not.toHaveBeenCalled();
+    expect(revokeUserCredentials).not.toHaveBeenCalled();
+  });
+
   it("does not sign out a deactivated account, which would only unlink the providers it keeps", async () => {
     found(targetDoc({ role: "member", deactivatedAt: new Date() }));
 

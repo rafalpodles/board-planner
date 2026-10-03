@@ -53,6 +53,10 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
   if (body.password !== undefined && !passwordSignInEnabled()) return passwordSignInOff();
+  // It would revoke and unlink like a sign-out, and the account signs in by no path anyway
+  if (body.password !== undefined && target.deactivatedAt) {
+    return NextResponse.json({ error: `${target.username} is deactivated; reactivate them first` }, { status: 400 });
+  }
 
   const chosen = (
     [
