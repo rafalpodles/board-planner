@@ -477,12 +477,23 @@ describe("the account actions in the edit dialog", () => {
     }
   });
 
-  it("says that setting a password unlinks their sign-in providers", async () => {
+  it.each([
+    ["nothing reaches them", false, ""],
+    ["their address is told", true, "ada@example.com"],
+  ])("says that setting a password unlinks their sign-in providers, when %s", async (_label, configured, email) => {
+    api.get.mockImplementation((path: string) =>
+      path === "/api/users"
+        ? Promise.resolve([{ ...OTHER, email }])
+        : path === "/api/invitations"
+          ? Promise.resolve([])
+          : Promise.resolve({ configured })
+    );
     render(<UsersPage />);
     await screen.findByText("Ada");
     act(() => screen.getByText("Ada").click());
     await screen.findByRole("dialog", { name: /Edit Ada/ });
 
+    expect(await screen.findByText(configured ? /is told that it changed/ : /Nothing reaches them either/)).toBeTruthy();
     expect(screen.getByText(/unlinks their sign-in providers/)).toBeTruthy();
   });
 });
