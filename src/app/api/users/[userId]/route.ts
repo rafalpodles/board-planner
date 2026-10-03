@@ -78,6 +78,7 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
 
   const previousRole = target.role;
   let roleWasChanged = false;
+  let demotingAnActiveAdmin = false;
 
   // Update role
   if (body.role !== undefined) {
@@ -109,6 +110,7 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
           { status: 400 }
         );
       }
+      demotingAnActiveAdmin = true;
     }
     roleWasChanged = body.role !== previousRole;
     target.role = body.role as "admin" | "member";
@@ -187,6 +189,16 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
     }
     target.password = await bcrypt.hash(body.password, PASSWORD_COST_FACTOR);
     passwordWasSet = true;
+  }
+
+  // Written and counted again before anything else is: an administrator demoted or deactivated by
+  // a request racing this one counted this one as still there, as this one counted them (BP-841)
+  if (demotingAnActiveAdmin) {
+    const demoted = await User.updateOne({ _id: target._id, role: "admin" }, { $set: { role: "member" } });
+    if (demoted.modifiedCount > 0 && (await User.countDocuments(ACTIVE_ADMINS)) === 0) {
+      await User.updateOne({ _id: target._id }, { $set: { role: "admin" } });
+      return NextResponse.json({ error: "Cannot demote the last admin" }, { status: 409 });
+    }
   }
 
   if (passwordWasSet) {
@@ -360,6 +372,28 @@ export const DELETE = withAdmin(async (_request, { params, user: admin }) => {
       },
       { status: 409 }
     );
+  }
+
+  // A delete cannot be undone, so the account first stops counting, as a deactivated one does, and
+  // the two invariants are counted again without it: a demotion, deactivation or removal racing
+  // this one counted this account as still there (BP-841)
+  if (!user.deactivatedAt) {
+    const marked = await User.updateOne({ _id: user._id, deactivatedAt: null }, { $set: { deactivatedAt: new Date() } });
+    if (marked.modifiedCount > 0) {
+      const lastAdminGone = user.role === "admin" && (await User.countDocuments(ACTIVE_ADMINS)) === 0;
+      const ownerless = lastAdminGone ? [] : await boardsLeftWithoutOwner(String(user._id));
+      if (lastAdminGone || ownerless.length > 0) {
+        await User.updateOne({ _id: user._id }, { $set: { deactivatedAt: null } });
+        return NextResponse.json(
+          {
+            error: lastAdminGone
+              ? "Cannot delete the last admin"
+              : "Another owner of the same board was removed meanwhile",
+          },
+          { status: 409 }
+        );
+      }
+    }
   }
 
   // The delete's own answer, not a discarded one: two administrators deleting the same account

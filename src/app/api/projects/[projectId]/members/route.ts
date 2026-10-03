@@ -113,6 +113,16 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     return NextResponse.json({ ok: true });
   }
 
+  // Counted again after the write: another owner stepping down, removed or deactivated at the same
+  // moment counted this one as still an owner, as this one counted them (BP-841)
+  if (before?.relation === "owner" && relation !== "owner" && (await ownerCount(projectId)) === 0) {
+    await Grant.updateOne(
+      { subject: userId, objectType: "project", object: projectId },
+      { $set: { relation: "owner" } }
+    );
+    return NextResponse.json({ error: "A board must keep at least one owner" }, { status: 409 });
+  }
+
   if (before?.relation !== relation) {
     auditAccess(projectId, user._id, target.username, before?.relation, relation);
     void announceAccess({
@@ -202,8 +212,17 @@ export const DELETE = withProjectOwner(async (request, { params, user }) => {
   // Read before the delete: nothing after it may turn into a failed response
   const person = await User.findById(subject).select("username");
   const removed = await Grant.findOneAndDelete({ subject, objectType: "project", object: projectId })
-    .select("relation")
+    .select("relation createdBy")
     .lean();
+  // Put back if a concurrent removal or deactivation left the board with no active owner (BP-841)
+  if (removed?.relation === "owner" && subjectActive && (await ownerCount(projectId)) === 0) {
+    await Grant.updateOne(
+      { subject, objectType: "project", object: projectId },
+      { $setOnInsert: { relation: "owner", createdBy: removed.createdBy } },
+      { upsert: true }
+    );
+    return NextResponse.json({ error: "A board must keep at least one owner" }, { status: 409 });
+  }
   if (removed) {
     auditAccess(projectId, user._id, person?.username ?? "a deleted user", removed.relation, undefined);
   }
