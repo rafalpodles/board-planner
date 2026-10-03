@@ -76,7 +76,7 @@ export function SignUpDomains() {
             placeholder="example.com, example.org"
             value={text}
             onChange={(e) => setText(e.target.value)}
-            disabled={!providers}
+            disabled={!providers && saved.domains.length === 0}
             dirty={text !== asText(saved.domains)}
           />
         </div>

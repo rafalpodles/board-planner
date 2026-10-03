@@ -53,7 +53,7 @@ describe("sign-up by domain", () => {
   });
 
   it("says sign-up needs a provider that confirms addresses when there is none, and takes no domains", async () => {
-    api.get.mockResolvedValue({ ...ANSWER, providers: [] });
+    api.get.mockResolvedValue({ ...ANSWER, domains: [], providers: [] });
     render(<SignUpDomains />);
 
     expect(await screen.findByText(/Needs single sign-on or Google sign-in/)).toBeTruthy();
@@ -80,5 +80,18 @@ describe("sign-up by domain", () => {
     await screen.findByLabelText("Domains");
 
     expect(screen.queryByText(/public mail service/)).toBeNull();
+  });
+
+  it("still lets domains saved before the provider went be cleared", async () => {
+    api.get.mockResolvedValue({ ...ANSWER, providers: [] });
+    api.put.mockResolvedValue({ ...ANSWER, domains: [], providers: [] });
+    render(<SignUpDomains />);
+    const input = (await screen.findByLabelText("Domains")) as HTMLInputElement;
+
+    expect(input.disabled).toBe(false);
+    fireEvent.change(input, { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith("/api/admin/sign-up", { domains: [] }));
   });
 });
