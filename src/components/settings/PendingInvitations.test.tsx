@@ -54,6 +54,17 @@ describe("pending invitations", () => {
     expect(screen.getByText("grace@example.com")).toBeTruthy();
   });
 
+  it("marks a live invitation Invited and a lapsed one Expired, never both (BP-831)", () => {
+    const lapsed = { ...invitation("late@example.com"), expired: true };
+    render(<PendingInvitations invitations={[invitation("soon@example.com"), lapsed]} onChanged={vi.fn()} />);
+
+    const [live, expired] = screen.getAllByTestId("pending-invitation");
+    expect(live.textContent).toContain("Invited");
+    expect(live.textContent).not.toContain("Expired");
+    expect(expired.textContent).toContain("Expired");
+    expect(expired.textContent).not.toContain("Invited");
+  });
+
   it("renders nothing for an empty list", () => {
     render(<PendingInvitations invitations={[]} onChanged={vi.fn()} />);
 

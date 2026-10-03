@@ -1195,6 +1195,7 @@ export interface ApiUser {
   deactivatedAt?: string | null;
   lastSignInAt?: string | null;
   /** How the account can sign in: "Password" and each linked provider's label (BP-831) */
+  lastActiveAt?: string | null;
   signInMethods?: string[];
 }
 

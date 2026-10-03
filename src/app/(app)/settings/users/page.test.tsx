@@ -437,8 +437,8 @@ describe("the users page with password sign-in off (BP-830)", () => {
 
 describe("who the list shows, and how they sign in (BP-831)", () => {
   const PEOPLE = [
-    { ...OTHER, _id: "u2", username: "ada", fullName: "Ada", lastSignInAt: new Date(Date.now() - 3 * 86_400_000).toISOString(), signInMethods: ["Password", "Acme SSO"] },
-    { ...OTHER, _id: "u3", username: "grace", fullName: "Grace", lastSignInAt: null, signInMethods: [] },
+    { ...OTHER, _id: "u2", username: "ada", fullName: "Ada", lastActiveAt: new Date(Date.now() - 3 * 86_400_000).toISOString(), signInMethods: ["Password", "Acme SSO"] },
+    { ...OTHER, _id: "u3", username: "grace", fullName: "Grace", lastActiveAt: null, signInMethods: [] },
     { ...OTHER, _id: "u4", username: "linus", fullName: "Linus", deactivatedAt: new Date().toISOString(), signInMethods: ["Password"] },
   ];
   const INVITED = [{ _id: "i1", email: "new@example.com", role: "member", boards: [], invitedBy: { username: "owner" }, expiresAt: new Date(Date.now() + 86_400_000).toISOString(), expired: false }];
@@ -453,7 +453,7 @@ describe("who the list shows, and how they sign in (BP-831)", () => {
     render(<UsersPage />);
     await screen.findByText("Ada");
 
-    expect(screen.getByText("Last signed in 3d ago · Password, Acme SSO")).toBeTruthy();
+    expect(screen.getByText("Last active 3d ago · Password, Acme SSO")).toBeTruthy();
     expect(screen.getByText("Never signed in · No way to sign in")).toBeTruthy();
   });
 

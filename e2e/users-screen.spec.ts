@@ -25,6 +25,19 @@ async function fresh(browser: Browser) {
   return { context, page: await context.newPage() };
 }
 
+async function signInByPassword(browser: Browser) {
+  const { context, page } = await fresh(browser);
+  await page.goto("/login");
+  await page.getByLabel("Username").fill(MEMBER_USERNAME);
+  await page.getByLabel("Password").fill(MEMBER_PASSWORD);
+  await page.getByRole("button", { name: "Sign In" }).click();
+  await expect(page).toHaveURL(/\/projects/);
+  await context.close();
+}
+
+// A session's own last use dates activity too, so the stamp is only proved with none left
+const forgetSessions = async () => (await db()).collection("sessions").deleteMany({ user: MEMBER_ID });
+
 test.beforeEach(async () => {
   await seed();
 });
@@ -38,16 +51,11 @@ test("a sign-in by password, then by a provider, is what the list says and how",
   await page.goto("/settings/users");
   await expect(memberCard(page)).toContainText("Never signed in · Password");
 
-  const byPassword = await fresh(browser);
-  await byPassword.page.goto("/login");
-  await byPassword.page.getByLabel("Username").fill(MEMBER_USERNAME);
-  await byPassword.page.getByLabel("Password").fill(MEMBER_PASSWORD);
-  await byPassword.page.getByRole("button", { name: "Sign In" }).click();
-  await expect(byPassword.page).toHaveURL(/\/projects/);
-  await byPassword.context.close();
+  await signInByPassword(browser);
+  await forgetSessions();
 
   await page.reload();
-  await expect(memberCard(page)).toContainText("Last signed in just now · Password");
+  await expect(memberCard(page)).toContainText("Last active just now · Password");
 
   // A provider sign-in stamps it too, and the provider joins the list of ways in
   const email = `member-${randomBytes(4).toString("hex")}@example.com`;
@@ -62,9 +70,22 @@ test("a sign-in by password, then by a provider, is what the list says and how",
   await byProvider.page.getByRole("button", { name: `Continue with ${OIDC_STUB_LABEL}` }).click();
   await expect(byProvider.page).toHaveURL(/\/projects/);
   await byProvider.context.close();
+  await forgetSessions();
 
   await page.reload();
-  await expect(memberCard(page)).toContainText(`Last signed in just now · Password, ${OIDC_STUB_LABEL}`);
+  await expect(memberCard(page)).toContainText(`Last active just now · Password, ${OIDC_STUB_LABEL}`);
+});
+
+test("a session still in use dates the activity, however long ago it signed in", async ({ page, browser }) => {
+  await signInByPassword(browser);
+  await (await db()).collection("users").updateOne(
+    { _id: MEMBER_ID },
+    { $set: { lastSignInAt: new Date(Date.now() - 20 * 24 * 60 * 60 * 1000) } }
+  );
+
+  await signIn(page);
+  await page.goto("/settings/users");
+  await expect(memberCard(page)).toContainText("Last active just now · Password");
 });
 
 test("the list filters by status, and counts each", async ({ page }) => {
