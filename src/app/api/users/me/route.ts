@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { passwordSignInEnabled } from "@/lib/password-sign-in";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
 import { getClientIp } from "@/lib/auth";
@@ -80,6 +81,13 @@ export const PUT = withAuth(async (request, { user }) => {
     // password: the profile form submits this field alongside the notification toggle, so
     // treating an unchanged value as a change would put a password prompt in front of a checkbox.
     if (email !== previousEmail) {
+      // With password sign-in off there is no password to prove it with, and a session alone may not
+      if (!passwordSignInEnabled()) {
+        return NextResponse.json(
+          { error: "Password sign-in is off on this instance, so an administrator changes addresses." },
+          { status: 409 }
+        );
+      }
       // The same proof the password change asks for, because this field can obtain a password.
       // Repointing it takes the account over at the next reset and — unlike a password change —
       // signs nobody out, so a borrowed session was otherwise enough to keep the account for good.

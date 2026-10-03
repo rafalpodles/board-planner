@@ -13,6 +13,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
 import { AddToBoardModal } from "@/components/settings/AddToBoardModal";
 import { InviteModal } from "@/components/settings/InviteModal";
+import { usePasswordSignIn } from "@/hooks/use-password-sign-in";
 import { PendingInvitations } from "@/components/settings/PendingInvitations";
 import { generatePassword } from "@/lib/password-generator";
 import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";
@@ -51,6 +52,8 @@ export default function UsersPage() {
   const [mailWorks, setMailWorks] = useState(false);
   const [addingToBoard, setAddingToBoard] = useState<ApiUser | null>(null);
   const [showInvite, setShowInvite] = useState(false);
+  // Off: accounts come by invitation only, and nobody is handed a password
+  const passwordSignIn = usePasswordSignIn();
   const [invitations, setInvitations] = useState<ApiInvitation[]>([]);
 
   const api = useApi();
@@ -254,9 +257,11 @@ export default function UsersPage() {
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-lg font-semibold">Users</h2>
         <div className="flex gap-2">
-          <Button variant="secondary" onClick={() => setShowNew(true)}>
-            New User
-          </Button>
+          {passwordSignIn && (
+            <Button variant="secondary" onClick={() => setShowNew(true)}>
+              New User
+            </Button>
+          )}
           <Button onClick={() => setShowInvite(true)}>Invite</Button>
         </div>
       </div>
@@ -414,6 +419,7 @@ export default function UsersPage() {
               />
             </div>
 
+            {passwordSignIn && (
             <div className="border-t border-border pt-4">
               {currentUser?._id === editUser._id ? (
                 <>
@@ -483,6 +489,7 @@ export default function UsersPage() {
                 </form>
               )}
             </div>
+            )}
 
             <p className="text-sm text-text-muted">
               Board access is granted per board, under that board&apos;s Settings → General.

@@ -7,6 +7,7 @@ const { auth, fetchMock } = vi.hoisted(() => ({
   fetchMock: vi.fn(),
 }));
 
+vi.mock("@/hooks/use-password-sign-in", () => ({ usePasswordSignIn: () => true }));
 vi.mock("@/hooks/use-auth", () => ({ useAuth: () => auth }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),

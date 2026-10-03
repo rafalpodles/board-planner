@@ -7,6 +7,7 @@ import { isEmailConfigured } from "@/lib/email";
 import { providerById } from "@/lib/oidc/providers";
 import { Identity } from "@/models/identity";
 import { User } from "@/models/user";
+import { passwordSignInEnabled } from "@/lib/password-sign-in";
 
 export const DELETE = withAuth(async (_request, { params, user }) => {
   if (user.viaMachineCredential) {
@@ -21,15 +22,19 @@ export const DELETE = withAuth(async (_request, { params, user }) => {
   if (!identity) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const record = await User.findById(user._id).select("+password").lean();
-  const lastWayIn = isEmailConfigured()
-    ? "This is your only way to sign in. Set a password first, from Forgot your password."
-    : "This is your only way to sign in. Ask an administrator to set a password for you first.";
-  if (!record?.password && (await Identity.countDocuments({ user: user._id, _id: { $ne: identity._id } })) === 0) {
+  // With password sign-in off a password is no way in, however many accounts still hold one
+  const passwordSignsIn = !!record?.password && passwordSignInEnabled();
+  const lastWayIn = !passwordSignInEnabled()
+    ? "This is your only way to sign in. Link another provider first."
+    : isEmailConfigured()
+      ? "This is your only way to sign in. Set a password first, from Forgot your password."
+      : "This is your only way to sign in. Ask an administrator to set a password for you first.";
+  if (!passwordSignsIn && (await Identity.countDocuments({ user: user._id, _id: { $ne: identity._id } })) === 0) {
     return NextResponse.json({ error: lastWayIn }, { status: 409 });
   }
   await Identity.deleteOne({ _id: identity._id, user: user._id });
   // Two unlinks in two tabs each counted the other's provider as the way in that remains
-  if (!record?.password && (await Identity.countDocuments({ user: user._id })) === 0) {
+  if (!passwordSignsIn && (await Identity.countDocuments({ user: user._id })) === 0) {
     // Straight to the collection, so the row comes back exactly as it was, linkedAt included
     await Identity.collection.insertOne(identity);
     return NextResponse.json({ error: lastWayIn }, { status: 409 });

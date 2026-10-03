@@ -4,6 +4,8 @@ import { FormEvent, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import { PasswordSignInOff } from "@/components/auth/PasswordSignInOff";
+import { usePasswordSignIn } from "@/hooks/use-password-sign-in";
 import { APP_NAME } from "@/lib/brand";
 
 export default function ForgotPasswordPage() {
@@ -11,6 +13,7 @@ export default function ForgotPasswordPage() {
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState("");
+  const passwordSignIn = usePasswordSignIn();
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -33,6 +36,14 @@ export default function ForgotPasswordPage() {
     } finally {
       setSending(false);
     }
+  }
+
+  if (!passwordSignIn) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-4">
+        {passwordSignIn === false && <PasswordSignInOff />}
+      </div>
+    );
   }
 
   return (

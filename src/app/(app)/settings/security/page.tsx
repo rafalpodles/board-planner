@@ -26,9 +26,11 @@ export default function SecurityPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [methods, setMethods] = useState<{ hasPassword: boolean; identities: LinkedIdentity[] } | null>(
-    null
-  );
+  const [methods, setMethods] = useState<{
+    hasPassword: boolean;
+    passwordSignIn: boolean;
+    identities: LinkedIdentity[];
+  } | null>(null);
   const [methodsFailed, setMethodsFailed] = useState(false);
   const [linkPassword, setLinkPassword] = useState("");
 
@@ -57,6 +59,8 @@ export default function SecurityPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // A password proves nothing once password sign-in is off, so linking asks for none
+  const asksPassword = !!methods && methods.hasPassword && methods.passwordSignIn !== false;
   const providersSection = methods && (
     <>
       <SignInMethods identities={methods.identities} onChanged={readMethods} />
@@ -66,13 +70,13 @@ export default function SecurityPage() {
           verb="Link"
           divider={false}
           exclude={methods.identities.map((i) => i.provider)}
-          extraBody={methods.hasPassword ? { currentPassword: linkPassword } : undefined}
+          extraBody={asksPassword ? { currentPassword: linkPassword } : undefined}
           before={
             <>
               {methods.identities.length === 0 && (
                 <h2 className="text-lg font-semibold mt-4">Sign-in providers</h2>
               )}
-              {methods.hasPassword && (
+              {asksPassword && (
                 <Input
                   id="linkPassword"
                   type="password"
@@ -125,6 +129,8 @@ export default function SecurityPage() {
     );
   }
   if (!methods) return null;
+
+  if (methods.passwordSignIn === false) return <div className="max-w-md">{providersSection}</div>;
 
   if (!methods.hasPassword) {
     return (

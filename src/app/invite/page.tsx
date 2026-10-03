@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { APP_NAME } from "@/lib/brand";
 import { ProviderButtons } from "@/components/auth/ProviderButtons";
+import { usePasswordSignIn } from "@/hooks/use-password-sign-in";
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -48,6 +49,7 @@ function AcceptForm() {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [accepted, setAccepted] = useState(false);
+  const passwordSignIn = usePasswordSignIn();
 
   useEffect(() => {
     if (fromUrl) window.history.replaceState(null, "", "/invite");
@@ -183,6 +185,7 @@ function AcceptForm() {
           ))}
         </ul>
       )}
+      {passwordSignIn && (
       <form onSubmit={handleSubmit} className="space-y-4">
         <Input
           label="Username"
@@ -226,9 +229,12 @@ function AcceptForm() {
           {saving || accepted ? "Creating your account…" : "Create my account"}
         </Button>
       </form>
-      <div className="mt-4">
-        <ProviderButtons intent="invite" invitationToken={token} verb="Accept with" />
-      </div>
+      )}
+      {passwordSignIn !== null && (
+        <div className={passwordSignIn ? "mt-4" : undefined}>
+          <ProviderButtons intent="invite" invitationToken={token} verb="Accept with" divider={passwordSignIn} />
+        </div>
+      )}
     </div>
   );
 }

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useToast } from "@/components/ui/Toast";
 import Link from "next/link";
+import { usePasswordSignIn } from "@/hooks/use-password-sign-in";
 
 export default function ProfilePage() {
   const api = useApi();
@@ -19,6 +20,7 @@ export default function ProfilePage() {
   const [fullName, setFullName] = useState("");
   const [savedFullName, setSavedFullName] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
+  const passwordSignIn = usePasswordSignIn();
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -151,12 +153,19 @@ export default function ProfilePage() {
           label="Email"
           type="email"
           value={email}
+          readOnly={passwordSignIn === false}
+          aria-describedby={passwordSignIn === false ? "emailByAdmin" : undefined}
           onChange={(e) => {
             edited.current = true;
             setEmail(e.target.value);
           }}
           placeholder="your@email.com"
         />
+        {passwordSignIn === false && (
+          <p id="emailByAdmin" className="-mt-2 text-xs text-text-muted">
+            An administrator changes it on this instance.
+          </p>
+        )}
 
         {emailChanged && (
           <div className="space-y-2 rounded-lg border border-border bg-surface-muted p-3">

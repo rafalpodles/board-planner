@@ -4,6 +4,7 @@ import { connectDB } from "@/lib/db";
 import { providerById } from "@/lib/oidc/providers";
 import { Identity } from "@/models/identity";
 import { User } from "@/models/user";
+import { passwordSignInEnabled } from "@/lib/password-sign-in";
 
 export const GET = withAuth(async (_request, { user }) => {
   if (user.viaMachineCredential) {
@@ -16,6 +17,7 @@ export const GET = withAuth(async (_request, { user }) => {
   ]);
   return NextResponse.json({
     hasPassword: !!record?.password,
+    passwordSignIn: passwordSignInEnabled(),
     identities: identities.map((i) => ({
       _id: String(i._id),
       provider: i.provider,
