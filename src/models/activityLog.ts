@@ -1,5 +1,6 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { IActivityLog } from "@/types";
+import { withTenant } from "@/lib/tenant-field";
 
 const ACTIONS = [
   "created",
@@ -64,6 +65,8 @@ const activityLogSchema = new Schema<IActivityLog>(
 
 activityLogSchema.index({ task: 1, createdAt: -1 });
 activityLogSchema.index({ task: 1, createdAt: -1, _id: -1 });
+
+withTenant(activityLogSchema);
 
 export const ActivityLog: Model<IActivityLog> =
   mongoose.models.ActivityLog ||

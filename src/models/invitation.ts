@@ -1,5 +1,6 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { GRANT_RELATIONS, IInvitation, INVITATION_STATUSES } from "@/types";
+import { withTenant } from "@/lib/tenant-field";
 
 const invitationSchema = new Schema<IInvitation>(
   {
@@ -29,9 +30,11 @@ const invitationSchema = new Schema<IInvitation>(
 );
 
 invitationSchema.index(
-  { email: 1 },
+  { tenant: 1, email: 1 },
   { unique: true, partialFilterExpression: { status: "pending" } }
 );
+
+withTenant(invitationSchema);
 
 export const Invitation: Model<IInvitation> =
   mongoose.models.Invitation || mongoose.model<IInvitation>("Invitation", invitationSchema);

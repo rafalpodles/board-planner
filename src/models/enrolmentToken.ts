@@ -1,5 +1,6 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { IEnrolmentToken } from "@/types";
+import { withTenant } from "@/lib/tenant-field";
 
 // A credential that can do exactly one thing: register one worker, once. It exists so the laptop
 // never has to hold an instance-admin token — the agent runs at the same uid with Read, so anything
@@ -17,6 +18,8 @@ const enrolmentTokenSchema = new Schema<IEnrolmentToken>(
   },
   { timestamps: true }
 );
+
+withTenant(enrolmentTokenSchema);
 
 export const EnrolmentToken: Model<IEnrolmentToken> =
   mongoose.models.EnrolmentToken ||

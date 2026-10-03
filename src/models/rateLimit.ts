@@ -1,4 +1,5 @@
 import mongoose, { Schema, Model } from "mongoose";
+import { withTenant } from "@/lib/tenant-field";
 
 export interface IRateLimit {
   _id: string;
@@ -25,6 +26,8 @@ const rateLimitSchema = new Schema<IRateLimit>({
 });
 
 rateLimitSchema.index({ resetAt: 1 }, { expireAfterSeconds: 0 });
+
+withTenant(rateLimitSchema);
 
 export const RateLimit: Model<IRateLimit> =
   mongoose.models.RateLimit || mongoose.model<IRateLimit>("RateLimit", rateLimitSchema);

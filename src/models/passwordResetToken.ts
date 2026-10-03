@@ -1,5 +1,6 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { IPasswordResetToken } from "@/types";
+import { withTenant } from "@/lib/tenant-field";
 
 // Only the hash is stored, like sessions and API tokens: a database dump, a backup or a stray log
 // must not contain anything that can be spent. The raw token exists once, in one email.
@@ -22,6 +23,8 @@ const passwordResetTokenSchema = new Schema<IPasswordResetToken>(
 // that never existed. Both answers look the same to the person asking; the difference is that the
 // server can say "ask for a new one" instead of implying the link was forged.
 passwordResetTokenSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 60 * 60 * 24 });
+
+withTenant(passwordResetTokenSchema);
 
 export const PasswordResetToken: Model<IPasswordResetToken> =
   mongoose.models.PasswordResetToken ||

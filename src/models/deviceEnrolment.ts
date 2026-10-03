@@ -1,5 +1,6 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { IDeviceEnrolment } from "@/types";
+import { withTenant } from "@/lib/tenant-field";
 
 // An enrolment in progress. The app holds the device code; the person at the machine reads the user
 // code off their own screen and confirms it in a browser. Same shape as oauthCode — hashed secret,
@@ -33,6 +34,8 @@ const deviceEnrolmentSchema = new Schema<IDeviceEnrolment>(
 );
 
 deviceEnrolmentSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+
+withTenant(deviceEnrolmentSchema);
 
 export const DeviceEnrolment: Model<IDeviceEnrolment> =
   mongoose.models.DeviceEnrolment ||
