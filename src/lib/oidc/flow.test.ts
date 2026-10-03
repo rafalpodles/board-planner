@@ -26,9 +26,13 @@ vi.mock("openid-client", () => ({
   randomNonce: () => "nonce-1",
 }));
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
-vi.mock("@/models/oidcFlow", () => ({ OidcFlow: { findOneAndDelete, create, findOne: vi.fn(), deleteOne: vi.fn() } }));
+const flowFindOne = vi.fn();
+const flowDeleteOne = vi.fn();
+vi.mock("@/models/oidcFlow", () => ({
+  OidcFlow: { findOneAndDelete, create, findOne: (...a: unknown[]) => flowFindOne(...a), deleteOne: (...a: unknown[]) => flowDeleteOne(...a) },
+}));
 
-const { beginFlow, finishFlow, holdForSignUp } = await import("./flow");
+const { beginFlow, finishFlow, holdForSignUp, heldAcceptance, heldSignUp, spendAcceptance } = await import("./flow");
 
 const sha256 = (v: string) => createHash("sha256").update(v).digest("hex");
 const PROVIDER = { id: "oidc" as const, kind: "oidc" as const, linksByAddress: true, label: "Acme", issuer: "https://id.example.com", clientId: "c", clientSecret: "s" };
@@ -164,6 +168,9 @@ describe("what Google vouches for", () => {
     ["a googlemail.com address", { email: "ada@googlemail.com" }, true],
     ["a Workspace address", { email: "ada@corp.com", hd: "corp.com" }, true],
     ["a company address on a consumer account", { email: "ada@corp.com" }, false],
+    // BP-845
+    ["a lookalike of gmail.com", { email: "ada@notgmail.com" }, false],
+    ["an empty Workspace domain", { email: "ada@corp.com", hd: "" }, false],
   ])("counts %s as verified: %s", async (_label, claims, verified) => {
     findOneAndDelete.mockResolvedValue(FLOW);
     authorizationCodeGrant.mockResolvedValue({
@@ -422,5 +429,53 @@ describe("the groups an ID token names (BP-833)", () => {
       intent: "signup",
       claims: { issuer: "https://id.example.com", subject: "s1", email: "ada@corp.com", name: "Ada", groups: ["admins"] },
     });
+  });
+});
+
+// BP-845. Each read is bound to its own intent and to a live row, and spending one ends it
+describe("the verified sign-ins held for a form", () => {
+  const NOW = new Date("2026-10-03T08:00:00Z");
+  const HELD = { claims: { email: "ada@corp.com" } };
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+    flowFindOne.mockReturnValue({ lean: async () => HELD });
+    flowDeleteOne.mockResolvedValue({});
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("reads an invitation's hold by its binder, its intent, held claims and a live expiry, and returns it", async () => {
+    expect(await heldAcceptance("cpo_held")).toEqual(HELD);
+
+    expect(flowFindOne).toHaveBeenCalledWith({
+      binderHash: sha256("cpo_held"),
+      intent: "invite",
+      claims: { $ne: null },
+      expiresAt: { $gt: NOW },
+    });
+  });
+
+  it("reads a sign-up's hold only as a sign-up, and returns it", async () => {
+    expect(await heldSignUp("cpo_join")).toEqual(HELD);
+
+    expect(flowFindOne).toHaveBeenCalledWith({
+      binderHash: sha256("cpo_join"),
+      intent: "signup",
+      claims: { $ne: null },
+      expiresAt: { $gt: NOW },
+    });
+  });
+
+  it("reads nothing at all without a binder", async () => {
+    expect(await heldAcceptance(null)).toBeNull();
+    expect(await heldSignUp(null)).toBeNull();
+    expect(flowFindOne).not.toHaveBeenCalled();
+  });
+
+  it("spends a hold by deleting it, and only a held one", async () => {
+    await spendAcceptance("cpo_held");
+
+    expect(flowDeleteOne).toHaveBeenCalledWith({ binderHash: sha256("cpo_held"), claims: { $ne: null } });
   });
 });

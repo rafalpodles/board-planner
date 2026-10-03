@@ -47,6 +47,40 @@ describe("the admin group", () => {
     );
   });
 
+  // BP-845. A deactivated admin administers nothing, so is no admin left
+  it("counts only active administrators when deciding whether one would be left", async () => {
+    await applyAdminGroup(account("admin"), "oidc", []);
+
+    expect(countDocuments).toHaveBeenCalledWith({ role: "admin", deactivatedAt: null });
+  });
+
+  it("records nothing and changes nothing when a racing request promoted them first", async () => {
+    updateOne.mockResolvedValue({ modifiedCount: 0 });
+    const user = account("member");
+
+    await applyAdminGroup(user, "oidc", ["planner-admins"]);
+
+    expect(user.role).toBe("member");
+    expect(logInstanceAudit).not.toHaveBeenCalled();
+  });
+
+  it("records nothing and changes nothing when a racing request demoted them first", async () => {
+    updateOne.mockResolvedValue({ modifiedCount: 0 });
+    const user = account("admin");
+
+    await applyAdminGroup(user, "oidc", []);
+
+    expect(user.role).toBe("admin");
+    expect(logInstanceAudit).not.toHaveBeenCalled();
+  });
+
+  it("changes nothing for a machine account", async () => {
+    await applyAdminGroup(account("member", { kind: "machine" }), "oidc", ["planner-admins"]);
+    await applyAdminGroup(account("admin", { kind: "machine" }), "oidc", []);
+
+    expect(updateOne).not.toHaveBeenCalled();
+  });
+
   it("never demotes the last active admin", async () => {
     countDocuments.mockResolvedValue(1);
     const user = account("admin");

@@ -86,6 +86,8 @@ test("a deactivated account loses every credential at once, its machine too, and
 
   await signIn(page);
   await openMember(page);
+  // Offered while active, so its absence below is about deactivation and not a renamed button
+  await expect(page.getByRole("button", { name: "Sign out everywhere" })).toBeVisible();
   await page.getByRole("button", { name: "Deactivate", exact: true }).click();
   await page.getByRole("dialog", { name: "Deactivate account" }).getByRole("button", { name: "Deactivate", exact: true }).click();
   await expect(page.getByText(`${MEMBER_USERNAME} is deactivated`)).toBeVisible();
