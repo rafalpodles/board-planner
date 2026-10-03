@@ -30,7 +30,11 @@ const invitationSchema = new Schema<IInvitation>(
 );
 
 invitationSchema.index(
-  { tenant: 1, email: 1 },
+  { email: 1 },
+  { unique: true, partialFilterExpression: { status: "pending" } }
+);
+invitationSchema.index(
+  { email: 1, tenant: 1 },
   { unique: true, partialFilterExpression: { status: "pending" } }
 );
 

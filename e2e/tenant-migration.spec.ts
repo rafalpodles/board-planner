@@ -1,22 +1,15 @@
 import { test, expect } from "@playwright/test";
 import mongoose from "mongoose";
-import { E2E_MONGODB_URI } from "./seed";
+import { E2E_MONGODB_URI, e2eDatabaseName } from "./seed";
 import "../src/models/all";
-import { migrateToTenants, REPLACED_UNIQUE_INDEXES } from "../src/lib/tenant-migration";
+import { backfillTenants, backfillTenantsOnce, scopedModelNames } from "../src/lib/tenant-migration";
 import { DEFAULT_TENANT_ID } from "../src/lib/tenant-field";
+import { duplicateKeyField } from "../src/lib/mongo-errors";
 
-/**
- * BP-662. The migration runs against a real mongod, on a database of its own beside the suite's,
- * because the whole point is what MongoDB does with the old and new indexes — a stub cannot say.
- */
-
-// The runner imports the models only to read their schemas; it must not build their indexes or
-// create their collections, here or on the connections later specs open in this worker
 mongoose.set("autoIndex", false);
 mongoose.set("autoCreate", false);
 
-// Beside the suite's database, named from it so two checkouts on one mongod keep their own
-const LEGACY_DB = `${new URL(E2E_MONGODB_URI).pathname.slice(1).replace(/_e2e$/, "")}_tenantmig_e2e`;
+const LEGACY_DB = `${e2eDatabaseName().replace(/_e2e$/, "")}_tenantmig_e2e`;
 const OTHER_TENANT = new mongoose.Types.ObjectId("0000000000000000000000aa");
 const THIRD_TENANT = new mongoose.Types.ObjectId("0000000000000000000000bb");
 
@@ -32,15 +25,13 @@ const LEGACY_INDEXES: Record<string, { key: Record<string, 1>; name: string; par
   agentblocks: [{ key: { key: 1 }, name: "key_1" }],
 };
 
+const LEGACY_TENANT_ROW = { _id: new mongoose.Types.ObjectId("0000000000000000000000cc"), entitlements: { plan: "free", features: [], source: "none" } };
+const PAID_TENANT_ROW = { _id: new mongoose.Types.ObjectId("0000000000000000000000dd"), entitlements: { plan: "pro", features: [], customer: "Acme", source: "service" } };
+
 let conn: mongoose.Connection;
 
-// One fixture document per collection, and the extras above
-const EXPECTED_DOCUMENTS: Record<string, number> = { users: 3, invitations: 3 };
-const expectedIn = (collection: string) => EXPECTED_DOCUMENTS[collection] ?? 1;
-
-function collections() {
-  return mongoose.modelNames().filter((n) => n !== "Tenant").map((n) => mongoose.model(n).collection.name);
-}
+const scopedCollections = () => scopedModelNames().map((name) => mongoose.model(name).collection.name);
+const expectedIn = (collection: string) => ({ users: 3, invitations: 3 })[collection as "users"] ?? 1;
 
 async function legacyDatabase() {
   conn = mongoose.createConnection(E2E_MONGODB_URI, { dbName: LEGACY_DB, autoIndex: false, autoCreate: false });
@@ -56,7 +47,7 @@ async function legacyDatabase() {
       });
     }
   }
-  for (const name of collections()) {
+  for (const name of [...scopedCollections(), "ratelimits"]) {
     await db.collection(name).insertOne({
       legacy: name,
       username: `u-${name}`,
@@ -65,8 +56,6 @@ async function legacyDatabase() {
       tokenHash: `hash-${name}`,
     });
   }
-  // What production has plenty of and the partial filters exist for: accounts with no e-mail, and
-  // invitations that were answered long ago for an address that is invited again
   await db.collection("users").insertMany([
     { username: "blank-a", email: "" },
     { username: "blank-b", email: "" },
@@ -75,25 +64,15 @@ async function legacyDatabase() {
     { email: "again@x.test", status: "accepted", tokenHash: "hash-old-1" },
     { email: "again@x.test", status: "accepted", tokenHash: "hash-old-2" },
   ]);
-  await db.collection("tenants").insertOne({
-    _id: new mongoose.Types.ObjectId(),
-    entitlements: { plan: "pro", features: [], customer: "Legacy Ltd", source: "env" },
-  });
-  return db;
+  await db.collection("tenants").insertMany([LEGACY_TENANT_ROW, PAID_TENANT_ROW]);
 }
 
-test.beforeEach(async () => {
-  await legacyDatabase();
-});
+test.beforeEach(legacyDatabase);
 
 test.afterEach(async () => {
   await conn.dropDatabase();
   await conn.close();
 });
-
-async function indexNames(collection: string) {
-  return (await conn.db!.collection(collection).indexes()).map((i) => String(i.name));
-}
 
 async function wholeDatabase() {
   const db = conn.db!;
@@ -110,151 +89,117 @@ async function wholeDatabase() {
 test("a dry run reports what it would do and writes nothing", async () => {
   const before = await wholeDatabase();
 
-  const report = await migrateToTenants(conn, { apply: false });
+  const report = await backfillTenants(conn, { apply: false });
 
-  expect(report.applied).toBe(false);
-  expect(report.tenantRow).toBe("re-keyed");
-  for (const name of collections()) expect(report.withoutTenant[name], name).toBe(expectedIn(name));
-  expect(report.indexesStillOld).toHaveLength(REPLACED_UNIQUE_INDEXES.length);
-
+  expect(report).toMatchObject({ applied: false, defaultTenant: "created", legacyTenantRows: 1 });
+  for (const name of scopedCollections()) expect(report.withoutTenant[name], name).toBe(expectedIn(name));
   expect(await wholeDatabase()).toBe(before);
 });
 
-test("apply gives every document the default tenant, re-keys the legacy tenant row and replaces the old uniques", async () => {
-  const report = await migrateToTenants(conn, { apply: true });
+test("apply gives every scoped document the default tenant, makes the default tenant row, and touches neither the throttle nor an index", async () => {
+  const indexesBefore = await conn.db!.collection("users").indexes();
 
-  expect(report.tenantRow).toBe("re-keyed");
-  for (const name of collections()) {
+  await backfillTenants(conn, { apply: true });
+
+  for (const name of scopedCollections()) {
     expect(await conn.db!.collection(name).countDocuments({ tenant: DEFAULT_TENANT_ID }), name).toBe(expectedIn(name));
     expect(await conn.db!.collection(name).countDocuments({ tenant: null }), name).toBe(0);
   }
-
-  const tenants = await conn.db!.collection("tenants").find({}).toArray();
-  expect(tenants).toHaveLength(1);
-  expect(String(tenants[0]._id)).toBe(String(DEFAULT_TENANT_ID));
-  expect(tenants[0].entitlements.customer).toBe("Legacy Ltd");
-
-  for (const { model, old, replacement } of REPLACED_UNIQUE_INDEXES) {
-    const collection = mongoose.model(model).collection.name;
-    const names = await indexNames(collection);
-    expect(names, `${collection} keeps ${old}`).not.toContain(old);
-    expect(names, `${collection} lacks ${replacement}`).toContain(replacement);
-  }
+  expect(await conn.db!.collection("ratelimits").countDocuments({ tenant: null })).toBe(1);
+  expect(await conn.db!.collection("tenants").findOne({ _id: DEFAULT_TENANT_ID })).toMatchObject({
+    entitlements: { plan: "free", source: "none" },
+  });
+  expect(await conn.db!.collection("tenants").countDocuments({})).toBe(3);
+  expect(await conn.db!.collection("users").indexes()).toEqual(indexesBefore);
 });
 
 test("a second run changes nothing", async () => {
-  await migrateToTenants(conn, { apply: true });
-  const again = await migrateToTenants(conn, { apply: true });
+  await backfillTenants(conn, { apply: true });
 
-  expect(again.tenantRow).toBe("present");
+  const again = await backfillTenants(conn, { apply: true });
+
+  expect(again.defaultTenant).toBe("present");
   expect(Object.values(again.withoutTenant).every((n) => n === 0)).toBe(true);
-  expect(again.indexesDropped).toEqual([]);
-  expect(again.indexesStillOld).toEqual([]);
 });
 
-test("a tenant added after the migration is left alone by a re-run", async () => {
-  await migrateToTenants(conn, { apply: true });
-  await conn.db!.collection("tenants").insertOne({ _id: OTHER_TENANT, entitlements: { plan: "free", features: [], source: "none" } });
+test("a late tenant-less row is given the default tenant and another tenant's row is left alone", async () => {
+  await backfillTenants(conn, { apply: true });
   await conn.db!.collection("projects").insertOne({ key: "OTHER", tenant: OTHER_TENANT });
   await conn.db!.collection("projects").insertOne({ key: "LATE" });
 
-  await migrateToTenants(conn, { apply: true });
+  await backfillTenants(conn, { apply: true });
 
-  expect(await conn.db!.collection("tenants").countDocuments({})).toBe(2);
   expect(await conn.db!.collection("projects").findOne({ key: "OTHER" })).toMatchObject({ tenant: OTHER_TENANT });
   expect(await conn.db!.collection("projects").findOne({ key: "LATE" })).toMatchObject({ tenant: DEFAULT_TENANT_ID });
 });
 
-test("an empty tenants table gets the default tenant, on the free plan", async () => {
-  await conn.db!.collection("tenants").deleteMany({});
+test("start-up runs the backfill once, removes the legacy tenant row that holds nothing and keeps a paid one", async () => {
+  const first = await backfillTenantsOnce(conn);
 
-  const report = await migrateToTenants(conn, { apply: true });
-
-  expect(report.tenantRow).toBe("created");
+  expect(first).not.toBeNull();
   const rows = await conn.db!.collection("tenants").find({}).toArray();
-  expect(rows).toHaveLength(1);
-  expect(String(rows[0]._id)).toBe(String(DEFAULT_TENANT_ID));
-  expect(rows[0].entitlements).toMatchObject({ plan: "free", source: "none" });
+  expect(rows.map((r) => String(r._id)).sort()).toEqual([String(DEFAULT_TENANT_ID), String(PAID_TENANT_ROW._id)].sort());
+  expect((rows.find((r) => DEFAULT_TENANT_ID.equals(r._id)) as { backfilledAt?: unknown }).backfilledAt).toBeInstanceOf(Date);
+
+  await conn.db!.collection("projects").insertOne({ key: "AFTER" });
+  expect(await backfillTenantsOnce(conn)).toBeNull();
+  expect(await conn.db!.collection("projects").countDocuments({ key: "AFTER", tenant: null })).toBe(1);
 });
 
-test("a re-key that died between its insert and its delete is finished by the next run", async () => {
-  const legacy = await conn.db!.collection("tenants").findOne({});
-  await conn.db!.collection("tenants").insertOne({ ...legacy, _id: DEFAULT_TENANT_ID, rekeyedFrom: legacy!._id });
+test("the per-tenant uniques build beside the old ones on data that already has blank e-mails and answered invitations", async () => {
+  await backfillTenants(conn, { apply: true });
 
-  const report = await migrateToTenants(conn, { apply: true });
+  for (const name of ["User", "Project", "Worker", "Identity", "Invitation", "AgentBlock"]) {
+    await (conn.model(name, mongoose.model(name).schema) as mongoose.Model<mongoose.AnyObject>).createIndexes();
+  }
 
-  expect(report.tenantRow).toBe("present");
-  const rows = await conn.db!.collection("tenants").find({}).toArray();
-  expect(rows).toHaveLength(1);
-  expect(String(rows[0]._id)).toBe(String(DEFAULT_TENANT_ID));
-  expect(rows[0].rekeyedFrom).toBeUndefined();
+  const names = async (collection: string) => (await conn.db!.collection(collection).indexes()).map((i) => i.name);
+  expect(await names("users")).toEqual(expect.arrayContaining(["username_1", "username_1_tenant_1", "email_1", "email_1_tenant_1"]));
+  expect(await names("projects")).toEqual(expect.arrayContaining(["key_1", "key_1_tenant_1"]));
+  expect(await names("workers")).toEqual(expect.arrayContaining(["name_1_host_1", "name_1_host_1_tenant_1"]));
+  expect(await names("identities")).toEqual(expect.arrayContaining(["issuer_1_subject_1", "issuer_1_subject_1_tenant_1"]));
+  expect(await names("invitations")).toEqual(expect.arrayContaining(["email_1", "email_1_tenant_1"]));
+  expect(await names("agentblocks")).toEqual(expect.arrayContaining(["key_1", "key_1_tenant_1"]));
 });
 
-test("the partial filters survive: blank e-mails and answered invitations stay non-unique", async () => {
-  await migrateToTenants(conn, { apply: true });
+type Spec = { model: string; fields: Record<string, number>; options: { partialFilterExpression?: Record<string, unknown> } };
 
-  await conn.db!.collection("users").insertOne({ tenant: DEFAULT_TENANT_ID, username: "blank-c", email: "" });
-  await conn.db!.collection("invitations").insertOne({
-    tenant: DEFAULT_TENANT_ID,
-    email: "again@x.test",
-    status: "accepted",
-    tokenHash: "hash-old-3",
-  });
-  await conn.db!.collection("invitations").insertOne({
-    tenant: DEFAULT_TENANT_ID,
-    email: "again@x.test",
-    status: "pending",
-    tokenHash: "hash-new-1",
-  });
-  const secondPending = await conn.db!.collection("invitations")
-    .insertOne({ tenant: DEFAULT_TENANT_ID, email: "again@x.test", status: "pending", tokenHash: "hash-new-2" })
-    .then(
-      () => "inserted",
-      (err) => (/E11000/.test(String(err)) ? "refused" : String(err))
-    );
-  expect(secondPending).toBe("refused");
-});
+const declaredPerTenantUniques: Spec[] = scopedModelNames().flatMap((model) =>
+  mongoose
+    .model(model)
+    .schema.indexes()
+    .filter(([fields, options]) => options?.unique && "tenant" in fields)
+    .map(([fields, options]) => ({ model, fields: fields as Record<string, number>, options: options as Spec["options"] }))
+);
 
-test("two tenant rows and none on the default id are refused rather than guessed at", async () => {
-  await conn.db!.collection("tenants").insertOne({ _id: new mongoose.Types.ObjectId(), entitlements: {} });
+const insertOutcome = (promise: Promise<unknown>) =>
+  promise.then(
+    () => "inserted" as const,
+    (err) => ({ refused: duplicateKeyField(err) })
+  );
 
-  await expect(migrateToTenants(conn, { apply: true })).rejects.toThrow(/cannot tell which is the legacy one/);
-});
+for (const { model, fields, options } of declaredPerTenantUniques) {
+  const chosen = Object.keys(fields).filter((key) => key !== "tenant");
+  test(`${model} ${chosen.join("+")}: unique per tenant, as declared`, async () => {
+    const col = conn.db!.collection(`fresh_${model}_${chosen.join("_")}`);
+    await col.createIndex(fields as never, { unique: true, ...(options.partialFilterExpression ? { partialFilterExpression: options.partialFilterExpression } : {}) });
+    const partial = options.partialFilterExpression ?? {};
+    const values = Object.fromEntries(chosen.map((key) => [key, `v-${key}`]));
+    const inside = Object.fromEntries(Object.entries(partial).filter(([, v]) => typeof v === "string"));
+    const row = (tenant: mongoose.Types.ObjectId, over: object = {}) => ({ ...values, ...inside, tenant, ...over });
 
-const DUPLICATES: { collection: string; label: string; doc: (tenant: mongoose.Types.ObjectId, n: number) => object }[] = [
-  { collection: "users", label: "users by username", doc: (tenant, n) => ({ tenant, username: "shared", email: n ? `m${n}@x.test` : "shared@x.test" }) },
-  { collection: "users", label: "users by e-mail", doc: (tenant, n) => ({ tenant, username: `by-mail-${n}`, email: "same@x.test" }) },
-  { collection: "projects", label: "projects", doc: (tenant) => ({ tenant, key: "SHARED" }) },
-  { collection: "workers", label: "workers", doc: (tenant) => ({ tenant, name: "mac", host: "laptop" }) },
-  { collection: "identities", label: "identities", doc: (tenant) => ({ tenant, issuer: "https://accounts.example", subject: "42" }) },
-  { collection: "invitations", label: "invitations", doc: (tenant) => ({ tenant, email: "invitee@x.test", status: "pending", tokenHash: String(new mongoose.Types.ObjectId()) }) },
-  { collection: "agentblocks", label: "agentblocks", doc: (tenant) => ({ tenant, key: "reviewer" }) },
-];
+    expect(await insertOutcome(col.insertOne(row(OTHER_TENANT)))).toBe("inserted");
+    expect(await insertOutcome(col.insertOne(row(THIRD_TENANT)))).toBe("inserted");
+    expect(await insertOutcome(col.insertOne(row(OTHER_TENANT)))).toEqual({ refused: chosen[0] });
 
-for (const { collection, label, doc } of DUPLICATES) {
-  test(`${label}: before the migration a second tenant cannot reuse the value, after it two tenants can and one tenant cannot`, async () => {
-    const col = conn.db!.collection(collection);
-    const legacyDuplicate = doc(OTHER_TENANT, 1);
-    await col.deleteMany({});
-    await col.insertOne({ ...doc(OTHER_TENANT, 0) });
-
-    const blockedBefore = await col.insertOne({ ...legacyDuplicate, _id: new mongoose.Types.ObjectId() }).then(
-      () => false,
-      (err) => /E11000/.test(String(err))
-    );
-    expect(blockedBefore, `the legacy ${collection} index should refuse a second tenant's copy`).toBe(true);
-
-    await migrateToTenants(conn, { apply: true });
-    await col.deleteMany({});
-    await col.insertOne({ ...doc(OTHER_TENANT, 0) });
-
-    await col.insertOne({ ...doc(THIRD_TENANT, 1), _id: new mongoose.Types.ObjectId() });
-    expect(await col.countDocuments({})).toBe(2);
-
-    const sameTenant = await col.insertOne({ ...doc(OTHER_TENANT, 2), _id: new mongoose.Types.ObjectId() }).then(
-      () => "inserted",
-      (err) => (/E11000/.test(String(err)) ? "refused" : String(err))
-    );
-    expect(sameTenant).toBe("refused");
+    if (partial.email) {
+      const blank = { email: "" };
+      expect(await insertOutcome(col.insertOne(row(OTHER_TENANT, { ...blank, username: "b1" })))).toBe("inserted");
+      expect(await insertOutcome(col.insertOne(row(OTHER_TENANT, { ...blank, username: "b2" })))).toBe("inserted");
+    }
+    if (partial.status) {
+      expect(await insertOutcome(col.insertOne(row(OTHER_TENANT, { status: "accepted" })))).toBe("inserted");
+      expect(await insertOutcome(col.insertOne(row(OTHER_TENANT, { status: "accepted" })))).toBe("inserted");
+    }
   });
 }

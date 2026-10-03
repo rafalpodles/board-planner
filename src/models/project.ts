@@ -57,6 +57,7 @@ const projectSchema = new Schema<IProject>(
     key: {
       type: String,
       required: true,
+      unique: true,
       uppercase: true,
       trim: true,
     },
@@ -280,7 +281,7 @@ const projectSchema = new Schema<IProject>(
   { timestamps: true }
 );
 
-projectSchema.index({ tenant: 1, key: 1 }, { unique: true });
+projectSchema.index({ key: 1, tenant: 1 }, { unique: true });
 
 withTenant(projectSchema);
 

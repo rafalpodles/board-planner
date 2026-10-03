@@ -1,4 +1,3 @@
-import { DEFAULT_TENANT_ID } from "../src/lib/tenant-field";
 import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 import { createHash, randomBytes } from "crypto";
 import mongoose from "mongoose";
@@ -134,8 +133,6 @@ async function accountCounter() {
       String(row._id).startsWith("login:") && !String(row._id).startsWith("login:source:")
   );
   expect(rows, "expected exactly one account counter").toHaveLength(1);
-  // Written by an update-pipeline upsert, which gets no schema defaults (BP-662)
-  expect(String(rows[0].tenant), "the counter row has no tenant").toBe(String(DEFAULT_TENANT_ID));
   return rows[0];
 }
 

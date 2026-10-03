@@ -90,7 +90,8 @@ const workerSchema = new Schema<IWorker>(
   { timestamps: true }
 );
 
-workerSchema.index({ tenant: 1, name: 1, host: 1 }, { unique: true });
+workerSchema.index({ name: 1, host: 1 }, { unique: true });
+workerSchema.index({ name: 1, host: 1, tenant: 1 }, { unique: true });
 
 withTenant(workerSchema);
 

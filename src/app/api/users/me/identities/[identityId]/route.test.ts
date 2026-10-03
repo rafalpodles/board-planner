@@ -37,6 +37,7 @@ vi.mock("@/models/user", () => ({ User: { findById: userFindById } }));
 const { DELETE } = await import("./route");
 
 const ID = "64b0000000000000000000aa";
+const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
 const unlink = () =>
   DELETE(new Request(`http://x/api/users/me/identities/${ID}`, { method: "DELETE" }), {
     params: Promise.resolve({ identityId: ID }),
@@ -125,6 +126,22 @@ describe("DELETE /api/users/me/identities/:id", () => {
     expect(res.status).toBe(409);
     expect(identityCount).toHaveBeenLastCalledWith({ user: "u1", ...LIVE });
     expect(identityInsert).toHaveBeenCalledWith(expect.objectContaining({ _id: ID, provider: "oidc" }));
+  });
+
+  it("gives the restored row a tenant when the row it read had none, and keeps the one it had", async () => {
+    passwordIs(undefined);
+
+    identityCount.mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+    await unlink();
+    expect(identityInsert).toHaveBeenLastCalledWith(
+      expect.objectContaining({ tenant: DEFAULT_TENANT_ID })
+    );
+
+    const own = { _id: ID, provider: "oidc", tenant: "someone-elses" };
+    identityFindOne.mockReturnValue(lean(own));
+    identityCount.mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+    await unlink();
+    expect(identityInsert).toHaveBeenLastCalledWith(expect.objectContaining({ tenant: "someone-elses" }));
   });
 
   it("asks an account with a password for no recent sign-in: the password stays a way in", async () => {

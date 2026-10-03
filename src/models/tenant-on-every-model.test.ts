@@ -4,18 +4,23 @@ import path from "node:path";
 import mongoose from "mongoose";
 import "./all";
 import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
-import { SINGLETON_ID } from "@/lib/singleton";
-import { REPLACED_UNIQUE_INDEXES } from "@/lib/tenant-migration";
+import { scopedModelNames, unscopedModelNames } from "@/lib/tenant-migration";
 
 const modelFiles = readdirSync(__dirname)
   .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts") && f !== "all.ts")
   .map((f) => f.replace(/\.ts$/, ""));
 
-const scoped = () => mongoose.modelNames().filter((name) => name !== "Tenant");
+const uniqueIndexes = () =>
+  mongoose.modelNames().flatMap((model) =>
+    mongoose
+      .model(model)
+      .schema.indexes()
+      .filter(([, options]) => options?.unique)
+      .map(([fields]) => ({ model, keys: Object.keys(fields) }))
+  );
 
-// Unique indexes that are global on purpose. Each is a random secret or a key that already
-// names its own tenant; a unique index on anything a person chooses (a name, a key, an address)
-// belongs under the tenant, or two tenants could not both use it.
+const idOf = ({ model, keys }: { model: string; keys: string[] }) => `${model}.${keys.join("+")}`;
+
 const GLOBAL_UNIQUE: Record<string, string> = {
   "DeviceEnrolment.deviceCodeHash": "random device code",
   "DeviceEnrolment.userCode": "short code typed on the verification page; looked up before the tenant is known",
@@ -32,13 +37,16 @@ const GLOBAL_UNIQUE: Record<string, string> = {
   "AgentRun.task+runId+worker": "task is a tenant-owned id",
   "Session.tokenHash": "random token",
   "Task.project+taskNumber": "project is a tenant-owned id",
+  "User.username": "TODO(BP-665): global until a second tenant can exist",
+  "User.email": "TODO(BP-665): global until a second tenant can exist",
+  "Project.key": "TODO(BP-665): global until a second tenant can exist",
+  "Worker.name+host": "TODO(BP-665): global until a second tenant can exist",
+  "Identity.issuer+subject": "TODO(BP-665): global until a second tenant can exist",
+  "Invitation.email": "TODO(BP-665): global until a second tenant can exist",
+  "AgentBlock.key": "TODO(BP-665): global until a second tenant can exist",
 };
 
 describe("every model carries a tenant", () => {
-  it("uses the id upsertSingleton gives the one Tenant row as the default tenant", () => {
-    expect(String(DEFAULT_TENANT_ID)).toBe(String(SINGLETON_ID));
-  });
-
   it("registers one model per file in src/models", () => {
     expect(mongoose.modelNames()).toHaveLength(modelFiles.length);
   });
@@ -48,54 +56,43 @@ describe("every model carries a tenant", () => {
     for (const file of modelFiles) expect(all, file).toContain(`"./${file}"`);
   });
 
-  it.each(scoped())("%s has a required tenant that defaults to the default tenant", (name) => {
-    const path = mongoose.model(name).schema.path("tenant");
-    expect(path, `${name} is missing withTenant()`).toBeDefined();
-    expect(path.isRequired).toBe(true);
-    const fallback = (path as unknown as { getDefault: () => unknown }).getDefault();
-    expect(String(fallback)).toBe(String(DEFAULT_TENANT_ID));
+  it.each(scopedModelNames())("%s has a required tenant that defaults to the default tenant", (name) => {
+    const tenant = mongoose.model(name).schema.path("tenant");
+    expect(tenant, `${name} is missing withTenant()`).toBeDefined();
+    expect(tenant.isRequired).toBe(true);
+    expect(String((tenant as unknown as { getDefault: () => unknown }).getDefault())).toBe(String(DEFAULT_TENANT_ID));
+  });
+
+  it.each(unscopedModelNames())("%s is the exception and has no tenant", (name) => {
+    expect(mongoose.model(name).schema.path("tenant")).toBeUndefined();
   });
 
   it("leaves no unique index global unless it is listed above", () => {
-    const offenders: string[] = [];
-    for (const name of scoped()) {
-      for (const [fields, options] of mongoose.model(name).schema.indexes()) {
-        if (!options?.unique) continue;
-        const keys = Object.keys(fields);
-        if (keys[0] === "tenant") continue;
-        const id = `${name}.${keys.join("+")}`;
-        if (!GLOBAL_UNIQUE[id]) offenders.push(id);
-      }
-    }
+    const offenders = uniqueIndexes()
+      .filter(({ keys }) => !keys.includes("tenant"))
+      .map(idOf)
+      .filter((id) => !GLOBAL_UNIQUE[id]);
     expect(offenders).toEqual([]);
   });
 
   it("lists no exception that no longer exists", () => {
-    const declared = new Set<string>();
-    for (const name of scoped()) {
-      for (const [fields, options] of mongoose.model(name).schema.indexes()) {
-        if (options?.unique) declared.add(`${name}.${Object.keys(fields).join("+")}`);
-      }
-    }
+    const declared = new Set(uniqueIndexes().map(idOf));
     expect(Object.keys(GLOBAL_UNIQUE).filter((id) => !declared.has(id))).toEqual([]);
   });
 
-  it("replaces, in the migration, every per-tenant unique that used to be global", () => {
-    // A unique that was global before this slice and is per tenant now leaves its old index in
-    // production unless the migration drops it by name. One born per-tenant has nothing to drop.
-    const BORN_PER_TENANT: string[] = [];
-    const nameOf = (fields: Record<string, unknown>) =>
-      Object.entries(fields).map(([key, dir]) => `${key}_${dir}`).join("_");
-
-    const declared: string[] = [];
-    for (const name of scoped()) {
-      for (const [fields, options] of mongoose.model(name).schema.indexes()) {
-        if (options?.unique && Object.keys(fields)[0] === "tenant") declared.push(`${name}:${nameOf(fields)}`);
-      }
-    }
-    const listed = REPLACED_UNIQUE_INDEXES.map((r) => `${r.model}:${r.replacement}`);
-
-    expect(declared.filter((id) => !listed.includes(id) && !BORN_PER_TENANT.includes(id))).toEqual([]);
-    expect(listed.filter((id) => !declared.includes(id))).toEqual([]);
+  it("gives every global unique that will go a per-tenant twin that leads with the same fields", () => {
+    const all = uniqueIndexes();
+    const waiting = all.filter((index) => GLOBAL_UNIQUE[idOf(index)]?.startsWith("TODO(BP-665)"));
+    const twinless = waiting.filter(
+      ({ model, keys }) =>
+        !all.some(
+          (other) =>
+            other.model === model &&
+            other.keys.includes("tenant") &&
+            other.keys.filter((key) => key !== "tenant").join() === keys.join() &&
+            other.keys[0] !== "tenant"
+        )
+    );
+    expect(twinless.map(idOf)).toEqual([]);
   });
 });

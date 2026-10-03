@@ -12,17 +12,14 @@ describe("duplicateKeyField", () => {
     expect(duplicateKeyField(err)).toBe("email");
   });
 
-  it("names the chosen field when the index is per tenant and leads with tenant", () => {
+  it("names the chosen field when the index ends with tenant", () => {
     const err = Object.assign(new Error("E11000"), {
       code: 11000,
-      keyPattern: { tenant: 1, email: 1 },
-      keyValue: { tenant: "t1", email: "taken@example.com" },
+      keyPattern: { email: 1, tenant: 1 },
+      keyValue: { email: "taken@example.com", tenant: "t1" },
     });
 
     expect(duplicateKeyField(err)).toBe("email");
-    expect(
-      duplicateKeyField({ code: 11000, keyPattern: { tenant: 1, issuer: 1, subject: 1 } })
-    ).toBe("issuer");
   });
 
   it("falls back to keyValue when the driver sends no pattern", () => {

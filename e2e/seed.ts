@@ -134,13 +134,18 @@ const CATEGORIES = [
   { name: "idea", color: "#8b5cf6" },
 ].map((c) => ({ _id: new mongoose.Types.ObjectId(), ...c }));
 
-async function connect() {
+export function e2eDatabaseName() {
   const dbName = new URL(E2E_MONGODB_URI.replace(/^mongodb/, "http")).pathname.slice(1);
   if (!dbName.endsWith("_e2e")) {
     throw new Error(
       `Refusing to touch database "${dbName}": the e2e fixture only runs against a *_e2e database`
     );
   }
+  return dbName;
+}
+
+async function connect() {
+  e2eDatabaseName();
   await mongoose.connect(E2E_MONGODB_URI);
   return mongoose.connection;
 }
@@ -157,18 +162,19 @@ export async function wipe() {
   await mongoose.disconnect();
 }
 
-// Rows written through the raw driver carry no tenant, and the app's own writes carry the default
-// one; a missing tenant is indexed as null, so the two would not collide on a per-tenant unique
-// index. Production has no such rows after the migration, so the fixture gives its rows the same.
+// Raw-driver rows carry no tenant, and a missing tenant is not the default one to a per-tenant unique
 async function stampTenantAndDisconnect() {
-  const db = mongoose.connection.db!;
-  const names = (await db.listCollections().toArray())
-    .map((c) => c.name)
-    .filter((name) => name !== "tenants" && !name.startsWith("system.") && !name.includes("."));
-  await Promise.all(
-    names.map((name) => db.collection(name).updateMany({ tenant: null }, { $set: { tenant: DEFAULT_TENANT_ID } }))
-  );
-  await mongoose.disconnect();
+  try {
+    const db = mongoose.connection.db!;
+    const names = (await db.listCollections().toArray())
+      .map((c) => c.name)
+      .filter((name) => name !== "tenants" && name !== "ratelimits" && !name.startsWith("system.") && !name.includes("."));
+    await Promise.all(
+      names.map((name) => db.collection(name).updateMany({ tenant: null }, { $set: { tenant: DEFAULT_TENANT_ID } }))
+    );
+  } finally {
+    await mongoose.disconnect();
+  }
 }
 
 /**
@@ -181,7 +187,7 @@ export async function storedExecution(
 ): Promise<Record<string, unknown> | undefined> {
   const db = (await connect()).db!;
   const task = await db.collection("tasks").findOne({ _id: taskId }, { projection: { execution: 1 } });
-  await stampTenantAndDisconnect();
+  await mongoose.disconnect();
   return task?.execution as Record<string, unknown> | undefined;
 }
 
@@ -379,7 +385,7 @@ export async function seedCustomFields(values: Record<string, unknown> = {}) {
   await db
     .collection("tasks")
     .updateOne({ _id: SIBLING_TASK_ID }, { $set: { customFieldValues: values } });
-  await stampTenantAndDisconnect();
+  await mongoose.disconnect();
 }
 
 export const LIST_DROPDOWN_FIELD_ID = id("e2e00000000000000000f009");
@@ -418,14 +424,14 @@ export async function seedListVisibleDropdownField() {
       },
     }
   );
-  await stampTenantAndDisconnect();
+  await mongoose.disconnect();
 }
 
 /** When a task was last written, as the database has it — `timestamps: true` maintains this. */
 export async function storedUpdatedAt(taskId: mongoose.Types.ObjectId): Promise<number> {
   const db = (await connect()).db!;
   const task = await db.collection("tasks").findOne({ _id: taskId });
-  await stampTenantAndDisconnect();
+  await mongoose.disconnect();
   if (!task?.updatedAt) throw new Error(`no task ${String(taskId)} to read updatedAt from`);
   return new Date(task.updatedAt).getTime();
 }
@@ -440,7 +446,7 @@ export async function storedActivity(
     .find({ task: taskId })
     .sort({ createdAt: -1, _id: -1 })
     .toArray();
-  await stampTenantAndDisconnect();
+  await mongoose.disconnect();
   return rows.map((r) => ({
     action: String(r.action),
     field: String(r.field ?? ""),
@@ -464,7 +470,7 @@ export async function renameField(
       ...(changes.optionId ? [{ "o.id": changes.optionId }] : []),
     ],
   });
-  await stampTenantAndDisconnect();
+  await mongoose.disconnect();
 }
 
 // A sprint with a done and an undone task already in it, plus a fourth task sitting in the
@@ -823,7 +829,7 @@ export async function demoteDoneColumn() {
       { $set: { "columns.$[column].role": "review" } },
       { arrayFilters: [{ "column.id": "done" }] }
     );
-  await stampTenantAndDisconnect();
+  await mongoose.disconnect();
   // An array filter matching nothing updates nothing and still succeeds, which would leave the
   // board finishing tasks as usual and the failure naming the product rather than this line
   if (result.modifiedCount !== 1) {
@@ -846,7 +852,7 @@ export async function demoteActiveColumn() {
       { $set: { "columns.$[column].role": "review" } },
       { arrayFilters: [{ "column.id": "in_progress" }] }
     );
-  await stampTenantAndDisconnect();
+  await mongoose.disconnect();
   if (result.modifiedCount !== 1) {
     throw new Error(`demoteActiveColumn changed ${result.modifiedCount} boards, expected 1`);
   }
@@ -888,7 +894,7 @@ export async function seedOlderCompletedSprints() {
 export async function storedSprint(sprintId: mongoose.Types.ObjectId) {
   const db = (await connect()).db!;
   const row = await db.collection("sprints").findOne({ _id: sprintId });
-  await stampTenantAndDisconnect();
+  await mongoose.disconnect();
   return row;
 }
 
@@ -896,7 +902,7 @@ export async function storedSprint(sprintId: mongoose.Types.ObjectId) {
 export async function storedTaskSprint(taskNumber: number): Promise<string | null> {
   const db = (await connect()).db!;
   const row = await db.collection("tasks").findOne({ project: PROJECT_ID, taskNumber });
-  await stampTenantAndDisconnect();
+  await mongoose.disconnect();
   if (!row) throw new Error(`no task ${taskNumber} on the seeded board`);
   return row.sprint ? String(row.sprint) : null;
 }
@@ -1244,7 +1250,7 @@ export async function seedSecondEscalationColumn() {
       { _id: PROJECT_ID, "columns.id": "in_review" },
       { $set: { "columns.$.triggersPmReview": true } }
     );
-  await stampTenantAndDisconnect();
+  await mongoose.disconnect();
 }
 
 /**
@@ -1265,7 +1271,7 @@ export async function seedRenamedColumn() {
       { _id: PROJECT_ID, "columns.id": "planned" },
       { $set: { "columns.$.id": RENAMED_COLUMN_ID, "columns.$.label": "Parked" } }
     );
-  await stampTenantAndDisconnect();
+  await mongoose.disconnect();
 }
 
 /** seed(), minus the session rows — see seedBoard. */
@@ -1607,7 +1613,7 @@ export async function seedWebhookDeliveryOutcomes() {
     }
   );
 
-  await stampTenantAndDisconnect();
+  await mongoose.disconnect();
 }
 
 // BP-396. A second board the consent screen offers and the test deliberately leaves unticked, so
@@ -1732,7 +1738,7 @@ export async function seedWebhook(
     { _id: PROJECT_ID },
     { $set: { webhooks: [{ _id: new mongoose.Types.ObjectId(), url, events, enabled: true }] } }
   );
-  await stampTenantAndDisconnect();
+  await mongoose.disconnect();
 }
 
 /** What a project names as its repository. A token planted here is written in the clear, which
@@ -1745,7 +1751,7 @@ export async function seedRepository(fields: {
 }) {
   const db = (await connect()).db!;
   await db.collection("projects").updateOne({ _id: PROJECT_ID }, { $set: fields });
-  await stampTenantAndDisconnect();
+  await mongoose.disconnect();
 }
 
 // What a sync leaves on a task once a pull request has been matched to its key, planted directly
@@ -1786,7 +1792,7 @@ export async function seedLinkedPRs() {
       },
     }
   );
-  await stampTenantAndDisconnect();
+  await mongoose.disconnect();
 }
 
 // BP-396. seed()'s categories are bug/doc/user-story/idea — character for character the fallback
@@ -1801,7 +1807,7 @@ export async function seedExtraCategory() {
     { _id: PROJECT_ID },
     { $set: { categories: [...CATEGORIES, { _id: new mongoose.Types.ObjectId(), name: EXTRA_CATEGORY, color: "#0ea5e9" }] } }
   );
-  await stampTenantAndDisconnect();
+  await mongoose.disconnect();
 }
 
 export const PALE_YELLOW = "#fef08a";
@@ -1836,7 +1842,7 @@ export async function seedHardColours() {
   await db
     .collection("tasks")
     .updateMany({ _id: { $in: [FINISHED_TASK_ID, SIBLING_TASK_ID] } }, { $set: { assignee: ADMIN_ID } });
-  await stampTenantAndDisconnect();
+  await mongoose.disconnect();
 }
 
 /**
@@ -1858,7 +1864,7 @@ export async function stripAccessExpiry(accessToken: string): Promise<boolean> {
     .collection("oauthtokens")
     .updateOne({ accessTokenHash }, { $unset: { accessExpiresAt: "" } });
   const still = await db.collection("oauthtokens").findOne({ accessTokenHash });
-  await stampTenantAndDisconnect();
+  await mongoose.disconnect();
   return !!still;
 }
 
@@ -1869,7 +1875,7 @@ export async function expireAccessToken(accessToken: string): Promise<boolean> {
     .collection("oauthtokens")
     .updateOne({ accessTokenHash }, { $set: { accessExpiresAt: new Date(Date.now() - 60_000) } });
   const still = await db.collection("oauthtokens").findOne({ accessTokenHash });
-  await stampTenantAndDisconnect();
+  await mongoose.disconnect();
   return !!still;
 }
 
@@ -2048,7 +2054,7 @@ export async function seedHandoverStates() {
 export async function storedTask(taskNumber: number): Promise<Record<string, unknown>> {
   const db = (await connect()).db!;
   const row = await db.collection("tasks").findOne({ project: PROJECT_ID, taskNumber });
-  await stampTenantAndDisconnect();
+  await mongoose.disconnect();
   if (!row) throw new Error(`no task ${taskNumber} on the seeded board`);
   return row as Record<string, unknown>;
 }
@@ -2239,7 +2245,7 @@ export async function seedMyTasksAllDone() {
   await db
     .collection<{ columns: unknown[] }>("projects")
     .updateOne({ _id: PROJECT_ID }, { $push: { columns: { $each: EXTRA_COLUMNS } } });
-  await stampTenantAndDisconnect();
+  await mongoose.disconnect();
 
   await addTask(
     {
@@ -2256,7 +2262,7 @@ export async function seedMyTasksAllDone() {
 export async function deleteProjectRow(projectId: mongoose.Types.ObjectId) {
   const db = (await connect()).db!;
   await db.collection("projects").deleteOne({ _id: projectId });
-  await stampTenantAndDisconnect();
+  await mongoose.disconnect();
 }
 
 /**
@@ -2504,7 +2510,7 @@ export async function setBoardReadiness(fields: {
   if (fields.repositoryUrl !== undefined) $set.repositoryUrl = fields.repositoryUrl;
   if (fields.workerEnabled !== undefined) $set["worker.enabled"] = fields.workerEnabled;
   await db.collection("projects").updateOne({ _id: PROJECT_ID }, { $set });
-  await stampTenantAndDisconnect();
+  await mongoose.disconnect();
 }
 
 /** A machine `owner` enrolled, holding a checkout of `remote`, last seen `seenAgoMs` ago. */
@@ -2567,18 +2573,18 @@ export async function seedMachine(
 export async function spendAttempts(taskId: mongoose.Types.ObjectId, attempts: number) {
   const db = (await connect()).db!;
   await db.collection("tasks").updateOne({ _id: taskId }, { $set: { "execution.attempts": attempts } });
-  await stampTenantAndDisconnect();
+  await mongoose.disconnect();
 }
 
 export async function setTaskStatus(taskId: mongoose.Types.ObjectId, status: string) {
   const db = (await connect()).db!;
   await db.collection("tasks").updateOne({ _id: taskId }, { $set: { status } });
-  await stampTenantAndDisconnect();
+  await mongoose.disconnect();
 }
 
 /** Makes `blocked` wait on `blocker`, both on the seeded board. */
 export async function blockTask(blocked: mongoose.Types.ObjectId, blocker: mongoose.Types.ObjectId) {
   const db = (await connect()).db!;
   await db.collection("tasks").updateOne({ _id: blocked }, { $set: { blockedBy: [blocker] } });
-  await stampTenantAndDisconnect();
+  await mongoose.disconnect();
 }

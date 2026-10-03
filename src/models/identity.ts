@@ -16,7 +16,8 @@ const identitySchema = new Schema<IIdentity>(
   { timestamps: { createdAt: "linkedAt", updatedAt: false } }
 );
 
-identitySchema.index({ tenant: 1, issuer: 1, subject: 1 }, { unique: true });
+identitySchema.index({ issuer: 1, subject: 1 }, { unique: true });
+identitySchema.index({ issuer: 1, subject: 1, tenant: 1 }, { unique: true });
 
 withTenant(identitySchema);
 
