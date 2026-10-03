@@ -539,6 +539,15 @@ describe("DELETE /api/users/:id", () => {
     boardsOnlyOwnedBy.mockResolvedValue([]);
   });
 
+  // BP-832. A deactivated administrator no longer counts towards keeping one
+  it("deletes a deactivated administrator while one active one remains", async () => {
+    found(person({ role: "admin", deactivatedAt: new Date() }));
+    userFindByIdAndDelete.mockResolvedValue(person({ role: "admin", deactivatedAt: new Date() }));
+    userCountDocuments.mockResolvedValue(1);
+
+    expect((await DELETE(...del(TARGET_HEX))).status).toBe(200);
+  });
+
   it("refuses the only owner of a board, naming every such board", async () => {
     found(person());
     boardsOnlyOwnedBy.mockResolvedValue([
@@ -998,5 +1007,28 @@ describe("PUT /api/users/:id — deactivating and reactivating", () => {
 
     expect((await PUT(put({ role: "member" }), ctx())).status).toBe(400);
     expect(userCountDocuments).toHaveBeenCalledWith({ role: "admin", deactivatedAt: null });
+  });
+});
+
+describe("PUT /api/users/:id — deactivated administrators and board owners (BP-832)", () => {
+  it("demotes a deactivated administrator while one active one remains", async () => {
+    found(targetDoc({ role: "admin", deactivatedAt: new Date() }));
+    userCountDocuments.mockResolvedValue(1);
+
+    expect((await PUT(put({ role: "member" }), ctx())).status).toBe(200);
+  });
+
+  // The rule deleting keeps: a board owned only by somebody who can do nothing is one nobody runs
+  it("refuses to deactivate the only owner of a board, naming it", async () => {
+    const target = targetDoc({ role: "member" });
+    found(target);
+    boardsOnlyOwnedBy.mockResolvedValue([{ _id: "p1", name: "Alpha", key: "AL" }]);
+
+    const res = await PUT(put({ deactivate: true }), ctx());
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toContain("Alpha (AL)");
+    expect(target.save).not.toHaveBeenCalled();
+    expect(revokeUserCredentials).not.toHaveBeenCalled();
   });
 });

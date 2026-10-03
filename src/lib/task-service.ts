@@ -156,6 +156,12 @@ function noSuchAccount(username: unknown): string {
  * answers with — became `@[object Object]`; `updateTask` let the same value past a `typeof` check
  * and into the cast, where it left the route a 500.
  */
+async function assigneeStillActive(assignee: unknown): Promise<boolean> {
+  const id = (assignee as { _id?: unknown } | null)?._id ?? assignee;
+  if (!id) return false;
+  return !!(await User.exists({ _id: String(id), deactivatedAt: null }));
+}
+
 type ResolvedAssignee = { user: { _id: Types.ObjectId; username: string } };
 
 async function resolveAssignee(value: unknown): Promise<ResolvedAssignee | TaskServiceResult> {
@@ -1566,7 +1572,8 @@ async function createNextRecurrence(
     priority: oldTask.priority || DEFAULT_PRIORITY,
     category: oldTask.category || "user-story",
     status: defaultStatusFor(project),
-    assignee: oldTask.assignee,
+    // Nobody can be handed work they cannot see, and nobody would be told it went to them (BP-832)
+    assignee: (await assigneeStillActive(oldTask.assignee)) ? oldTask.assignee : null,
     // Inherited, not stamped with userId: userId is whoever/whatever closed this occurrence, which
     // may be the worker's own identity finishing its run, not the person who owns the series. The
     // next occurrence continues the same standing assignment, so it carries the same assigner.

@@ -445,6 +445,7 @@ describe("owner counting", () => {
   const BOB = "507f1f77bcf86cd799439012";
   const GONE = "507f1f77bcf86cd799439013";
   let ownerRows: { subject: string; object: string }[];
+  let deactivatedAccounts: string[] = [];
   let accounts: string[];
 
   beforeEach(() => {
@@ -460,8 +461,14 @@ describe("owner counting", () => {
           : ownerRows.filter((g) => filter.object!.$in.includes(g.object))
       )
     );
-    userFind.mockImplementation((filter: { _id: { $in: string[] } }) =>
-      lean(accounts.filter((id) => filter._id.$in.includes(id)).map((id) => ({ _id: id })))
+    deactivatedAccounts = [];
+    userFind.mockImplementation((filter: { _id: { $in: string[] }; deactivatedAt?: null }) =>
+      lean(
+        accounts
+          .filter((id) => filter._id.$in.includes(id))
+          .filter((id) => !("deactivatedAt" in filter) || !deactivatedAccounts.includes(id))
+          .map((id) => ({ _id: id }))
+      )
     );
     projectFind.mockImplementation((filter: { _id: { $in: string[] } }) => ({
       select: () => ({
@@ -489,6 +496,17 @@ describe("owner counting", () => {
       { subject: ALICE, object: P },
       { subject: GONE, object: P },
     ];
+    expect((await ownerCounts([P])).get(P)).toBe(1);
+  });
+
+  // BP-832. A deactivated owner can manage nothing, so they keep no board run
+  it("does not count an owner who is deactivated", async () => {
+    ownerRows = [
+      { subject: ALICE, object: P },
+      { subject: BOB, object: P },
+    ];
+    deactivatedAccounts = [BOB];
+
     expect((await ownerCounts([P])).get(P)).toBe(1);
   });
 

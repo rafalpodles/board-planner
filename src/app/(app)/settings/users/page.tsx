@@ -593,16 +593,20 @@ export default function UsersPage() {
                   </div>
                 )}
                 <div className="flex flex-wrap gap-2">
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => {
-                      setConfirmSignOut(editUser);
-                      closeEdit();
-                    }}
-                  >
-                    Sign out everywhere
-                  </Button>
+                  {/* Deactivating already ended every session; here it would only unlink the
+                      providers deactivation keeps for the way back */}
+                  {!editUser.deactivatedAt && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => {
+                        setConfirmSignOut(editUser);
+                        closeEdit();
+                      }}
+                    >
+                      Sign out everywhere
+                    </Button>
+                  )}
                   {editUser.deactivatedAt ? (
                     <Button size="sm" variant="secondary" onClick={() => reactivate(editUser)} disabled={togglingActive}>
                       {togglingActive ? "Reactivating…" : "Reactivate"}

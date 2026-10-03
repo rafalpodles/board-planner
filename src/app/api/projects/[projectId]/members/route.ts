@@ -42,7 +42,7 @@ export const GET = withProjectOwner(async (_request, { params }) => {
     ...audienceFilterFrom(grants.map((g) => g.subject)),
     kind: { $ne: "machine" },
   })
-    .select("username fullName role")
+    .select("username fullName role deactivatedAt")
     .sort({ username: 1 })
     .lean();
 
@@ -55,6 +55,7 @@ export const GET = withProjectOwner(async (_request, { params }) => {
       fullName: u.fullName,
       relation: byUser.get(String(u._id)) ?? null,
       instanceAdmin: u.role === "admin",
+      deactivated: !!u.deactivatedAt,
     }))
   );
 });

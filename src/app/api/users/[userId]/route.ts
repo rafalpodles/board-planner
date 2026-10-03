@@ -96,7 +96,8 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
       );
     }
     // Prevent demoting the last admin
-    if (body.role === "member" && target.role === "admin") {
+    // A deactivated administrator is no longer one of those keeping the instance administered
+    if (body.role === "member" && target.role === "admin" && !target.deactivatedAt) {
       const adminCount = await User.countDocuments(ACTIVE_ADMINS);
       if (adminCount <= 1) {
         return NextResponse.json(
@@ -335,7 +336,7 @@ export const DELETE = withAdmin(async (_request, { params, user: admin }) => {
   // an admin cannot be looking at the last admin unless they are looking at themselves — which is
   // exactly why it is here: that guard failed once, and an instance with no administrator cannot be
   // repaired from the product.
-  if (user.role === "admin") {
+  if (user.role === "admin" && !user.deactivatedAt) {
     const adminCount = await User.countDocuments(ACTIVE_ADMINS);
     if (adminCount <= 1) {
       return NextResponse.json(
@@ -421,6 +422,19 @@ async function accountAction(
     // A deactivated administrator administers nothing, so they no longer count towards keeping one
     if (target.role === "admin" && (await User.countDocuments(ACTIVE_ADMINS)) <= 1) {
       return NextResponse.json({ error: "Cannot deactivate the last admin" }, { status: 400 });
+    }
+    // The rule deleting an account keeps: a board owned only by somebody who can do nothing is a
+    // board nobody can manage
+    const soleOwned = await boardsOnlyOwnedBy(String(target._id));
+    if (soleOwned.length > 0) {
+      const names = soleOwned.map((b) => `${b.name} (${b.key})`).join(", ");
+      return NextResponse.json(
+        {
+          error: `${target.username} is the only owner of ${names}. Make someone else an owner there before deactivating this account.`,
+          boards: soleOwned,
+        },
+        { status: 409 }
+      );
     }
     target.deactivatedAt = new Date();
     await target.save();

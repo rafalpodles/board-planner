@@ -104,8 +104,8 @@ describe("GET members", () => {
     const body = await (await GET(new Request("http://x"), { params })).json();
 
     expect(body).toEqual([
-      { _id: "u1", username: "ann", fullName: "Ann", relation: "owner", instanceAdmin: false },
-      { _id: "u2", username: "bo", fullName: "Bo", relation: null, instanceAdmin: false },
+      { _id: "u1", username: "ann", fullName: "Ann", relation: "owner", instanceAdmin: false, deactivated: false },
+      { _id: "u2", username: "bo", fullName: "Bo", relation: null, instanceAdmin: false, deactivated: false },
     ]);
   });
 

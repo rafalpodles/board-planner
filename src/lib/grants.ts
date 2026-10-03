@@ -218,7 +218,8 @@ export async function ownerCounts(projectIds: string[]): Promise<Map<string, num
   })
     .select("subject object")
     .lean();
-  const holders = await User.find({ _id: { $in: owners.map((g) => g.subject) } })
+  // An owner who is deactivated manages nothing, so cannot be the owner that keeps a board run
+  const holders = await User.find({ _id: { $in: owners.map((g) => g.subject) }, deactivatedAt: null })
     .select("_id")
     .lean();
   const living = new Set(holders.map((u) => String(u._id)));

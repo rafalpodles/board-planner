@@ -1274,6 +1274,7 @@ export interface ApiProjectMember {
   fullName: string;
   relation: GrantRelation | null;
   instanceAdmin: boolean;
+  deactivated?: boolean;
 }
 
 export interface ApiMemberCandidate {

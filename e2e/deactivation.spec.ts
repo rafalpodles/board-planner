@@ -7,6 +7,7 @@ import {
   MEMBER_PASSWORD,
   MEMBER_USERNAME,
   PROJECT_ID,
+  PROJECT_KEY,
   DECOY_TASK_ID,
   WORKER_CREDENTIAL,
   seed,
@@ -94,15 +95,21 @@ test("a deactivated account loses every credential at once, its machine too, and
   expect((await request.get("/api/auth/me", { headers: MEMBER_AUTH })).status()).toBe(401);
   expect(await machineStatus(request)).toBe(401);
   const refused = await passwordSignIn(browser);
-  await expect(refused.page.locator('[role="alert"]:not(#__next-route-announcer__)')).toBeVisible();
-  await expect(refused.page).toHaveURL(/\/login/);
+  // Answered as an unknown account is, so the password says nothing about the account
+  await expect(refused.page.getByText("Invalid credentials")).toBeVisible();
   await refused.context.close();
+
+  // Still on the board, and marked so
+  await page.goto(`/projects/${PROJECT_KEY}/settings`);
+  await expect(page.getByText("Deactivated", { exact: true })).toBeVisible();
 
   // Nobody can hand them work
   const assignable = await request.get(`/api/projects/${PROJECT_ID}/assignable-users`, { headers: ADMIN_AUTH });
   expect((await assignable.json()).map((u: { username: string }) => u.username)).not.toContain(MEMBER_USERNAME);
 
   await openMember(page);
+  // It would only unlink the providers deactivation keeps for the way back
+  await expect(page.getByRole("button", { name: "Sign out everywhere" })).toHaveCount(0);
   await page.getByRole("button", { name: "Reactivate" }).click();
   await expect(page.getByText(`${MEMBER_USERNAME} can sign in again`)).toBeVisible();
 
