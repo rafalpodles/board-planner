@@ -83,7 +83,8 @@ function ResetForm() {
             whoever knew the old password has just been signed out too, which is usually the point */}
         <p className="text-sm text-text-muted mb-6">
           You have been signed out everywhere — every device, API token, connected app such as Claude
-          Code, and machine you enrolled. Sign in with your new password and set those up again.
+          Code, and machine you enrolled — and your sign-in providers were unlinked. Sign in with your
+          new password and set those up again.
         </p>
         <Button onClick={() => router.push("/login")} className="w-full">
           Sign In

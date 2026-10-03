@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";
-import { render, screen, cleanup, act, waitFor, within } from "@testing-library/react";
+import { render, screen, cleanup, act, waitFor, within, fireEvent } from "@testing-library/react";
 import UsersPage from "./page";
 
 const { api, auth, toast, dismiss, passwordSignIn } = vi.hoisted(() => ({
@@ -435,6 +435,58 @@ describe("the users page with password sign-in off (BP-830)", () => {
   });
 });
 
+// BP-844
+describe("the account actions in the edit dialog", () => {
+  it("re-reads the list after signing somebody out everywhere, whose providers that unlinked", async () => {
+    api.put.mockResolvedValue({ ok: true });
+    render(<UsersPage />);
+    await screen.findByText("Ada");
+    act(() => screen.getByText("Ada").click());
+    await screen.findByRole("dialog", { name: /Edit Ada/ });
+    act(() => screen.getByRole("button", { name: "Sign out everywhere" }).click());
+    const ask = await screen.findByRole("dialog", { name: "Sign out everywhere" });
+    const readsBefore = api.get.mock.calls.filter(([path]) => path === "/api/users").length;
+
+    await act(async () => within(ask).getByRole("button", { name: "Sign out everywhere" }).click());
+
+    await waitFor(() =>
+      expect(api.get.mock.calls.filter(([path]) => path === "/api/users").length).toBeGreaterThan(readsBefore)
+    );
+  });
+
+  it("holds the account actions while something typed in the dialog is unsaved", async () => {
+    api.get.mockImplementation((path: string) =>
+      path === "/api/users"
+        ? Promise.resolve([{ ...OTHER, email: "ada@example.com", emailVerifiedAt: null }])
+        : otherGet(path)
+    );
+    render(<UsersPage />);
+    await screen.findByText("Ada");
+    act(() => screen.getByText("Ada").click());
+    const dialog = await screen.findByRole("dialog", { name: /Edit Ada/ });
+    const actions = ["Confirm address", "Sign out everywhere", "Deactivate", "Delete"];
+    for (const name of actions) {
+      expect((within(dialog).getByRole("button", { name }) as HTMLButtonElement).disabled).toBe(false);
+    }
+
+    fireEvent.change(within(dialog).getByLabelText("Email"), { target: { value: "new@example.com" } });
+
+    expect(within(dialog).getByText("Save or cancel your changes first.")).toBeTruthy();
+    for (const name of actions) {
+      expect((within(dialog).getByRole("button", { name }) as HTMLButtonElement).disabled).toBe(true);
+    }
+  });
+
+  it("says that setting a password unlinks their sign-in providers", async () => {
+    render(<UsersPage />);
+    await screen.findByText("Ada");
+    act(() => screen.getByText("Ada").click());
+    await screen.findByRole("dialog", { name: /Edit Ada/ });
+
+    expect(screen.getByText(/unlinks their sign-in providers/)).toBeTruthy();
+  });
+});
+
 describe("who the list shows, and how they sign in (BP-831)", () => {
   const PEOPLE = [
     { ...OTHER, _id: "u2", username: "ada", fullName: "Ada", lastActiveAt: new Date(Date.now() - 3 * 86_400_000).toISOString(), signInMethods: ["Password", "Acme SSO"] },
@@ -454,7 +506,7 @@ describe("who the list shows, and how they sign in (BP-831)", () => {
     await screen.findByText("Ada");
 
     expect(screen.getByText("Last active 3d ago · Password, Acme SSO")).toBeTruthy();
-    expect(screen.getByText("Never signed in · No way to sign in")).toBeTruthy();
+    expect(screen.getByText("No sign-in recorded · No way to sign in")).toBeTruthy();
   });
 
   it("filters by status, counting each", async () => {

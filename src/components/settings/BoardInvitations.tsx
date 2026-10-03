@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
+import { usePasswordSignIn } from "@/hooks/use-password-sign-in";
 import { useToast } from "@/components/ui/Toast";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
@@ -20,6 +21,7 @@ type Sent =
   | { outcome: "updated" };
 
 export function BoardInvitations({ projectId }: { projectId: string }) {
+  const passwordSignIn = usePasswordSignIn();
   const api = useApi();
   const { toast } = useToast();
   const [rows, setRows] = useState<ApiBoardInvitation[]>([]);
@@ -115,7 +117,11 @@ export function BoardInvitations({ projectId }: { projectId: string }) {
   return (
     <SettingsCard
       title="Invite by email"
-      description="For somebody without an account. They choose a username and password from the link and land on this board."
+      description={
+        passwordSignIn === false
+          ? "For somebody without an account. They choose a username, sign in with a provider from the link and land on this board."
+          : "For somebody without an account. They choose a username and password from the link and land on this board."
+      }
     >
       <form onSubmit={handleInvite} className="flex flex-wrap items-start gap-2">
         <div className="min-w-0 flex-1 basis-full sm:basis-0">

@@ -50,7 +50,7 @@ test("a sign-in by password, then by a provider, is what the list says and how",
   await forgetSessions();
   await signIn(page);
   await page.goto("/settings/users");
-  await expect(memberCard(page)).toContainText("Never signed in · Password");
+  await expect(memberCard(page)).toContainText("No sign-in recorded · Password");
 
   await signInByPassword(browser);
   await forgetSessions();

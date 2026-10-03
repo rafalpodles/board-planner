@@ -33,6 +33,22 @@ describe("delivering an invitation", () => {
     expect(sent.text).toContain("Orbit");
   });
 
+  // BP-844. With passwords off the invitee chooses a username and signs in with a provider
+  it("asks for a password only while passwords sign anybody in", async () => {
+    await deliverInvitation(MAIL);
+    expect(sendEmail.mock.calls[0][0].text).toContain("Choose a username and a password");
+
+    process.env.PASSWORD_SIGN_IN = "off";
+    try {
+      await deliverInvitation(MAIL);
+      const text = sendEmail.mock.calls[1][0].text;
+      expect(text).toContain("sign in with your provider");
+      expect(text).not.toContain("a password");
+    } finally {
+      delete process.env.PASSWORD_SIGN_IN;
+    }
+  });
+
   it("hands the link back when the instance has no mail server", async () => {
     isEmailConfigured.mockReturnValue(false);
 

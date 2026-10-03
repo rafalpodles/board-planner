@@ -11,6 +11,8 @@ const { api, toast } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
+const passwordSignIn = vi.hoisted(() => ({ value: true as boolean | null }));
+vi.mock("@/hooks/use-password-sign-in", () => ({ usePasswordSignIn: () => passwordSignIn.value }));
 vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast, dismiss: vi.fn() }) }));
 
 function row(email: string, over: Partial<ApiBoardInvitation> = {}): ApiBoardInvitation {
@@ -42,10 +44,23 @@ const LINK = "https://planner.example/invite?token=cpi_abc";
 beforeEach(() => {
   vi.clearAllMocks();
   api.get.mockResolvedValue([]);
+  passwordSignIn.value = true;
 });
 afterEach(cleanup);
 
 describe("inviting from a board", () => {
+  // BP-844
+  it("promises a password only while passwords sign anybody in", async () => {
+    render(<BoardInvitations projectId="p1" />);
+    expect(await screen.findByText(/choose a username and password from the link/)).toBeTruthy();
+    cleanup();
+
+    passwordSignIn.value = false;
+    render(<BoardInvitations projectId="p1" />);
+    expect(await screen.findByText(/sign in with a provider from the link/)).toBeTruthy();
+    expect(screen.queryByText(/password/)).toBeNull();
+  });
+
   // A link shown once is the only copy there is; a typo in the next address must not cost it
   it("keeps the one-time link through a later invitation that is refused", async () => {
     render(<BoardInvitations projectId="p1" />);

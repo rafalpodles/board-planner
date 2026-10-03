@@ -5,6 +5,7 @@ import { liveIdentityFilter, providerById } from "@/lib/oidc/providers";
 import { Identity } from "@/models/identity";
 import { User } from "@/models/user";
 import { passwordSignInEnabled } from "@/lib/password-sign-in";
+import { isEmailConfigured } from "@/lib/email";
 
 export const GET = withAuth(async (_request, { user }) => {
   if (user.viaMachineCredential) {
@@ -18,6 +19,8 @@ export const GET = withAuth(async (_request, { user }) => {
   return NextResponse.json({
     hasPassword: !!record?.password,
     passwordSignIn: passwordSignInEnabled(),
+    // Whether "Forgot your password" can reach this account at all
+    mailWorks: isEmailConfigured(),
     identities: identities.map((i) => ({
       _id: String(i._id),
       provider: i.provider,
