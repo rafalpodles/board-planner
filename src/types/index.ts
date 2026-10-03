@@ -233,7 +233,7 @@ export interface IIdentity {
   lastUsedAt: Date | null;
 }
 
-export type OidcIntent = "signin" | "invite" | "link" | "bootstrap";
+export type OidcIntent = "signin" | "invite" | "link" | "bootstrap" | "signup";
 
 export interface IOidcFlow {
   _id: Types.ObjectId;
@@ -249,7 +249,7 @@ export interface IOidcFlow {
   next: string | null;
   /** The first account's profile, for a flow that sets up an empty instance */
   bootstrap: { username: string; fullName: string } | null;
-  claims: { issuer: string; subject: string; email: string } | null;
+  claims: { issuer: string; subject: string; email: string; name?: string; groups?: string[] } | null;
   expiresAt: Date;
   createdAt: Date;
 }

@@ -10,6 +10,7 @@ import {
 import { authorityAtAcceptance } from "@/lib/invitation-authority";
 import { INVITATION_REFUSALS } from "@/lib/invitation-refusals";
 import { logInstanceAudit } from "@/lib/instanceAudit";
+import { applyAdminGroup } from "@/lib/oidc/admin-group";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { Grant } from "@/models/grant";
 import { Identity } from "@/models/identity";
@@ -24,6 +25,8 @@ export interface NewAccount {
   identity?: { provider: string; issuer: string; subject: string; email: string };
   /** Whether that provider's word on the address is proof of the mailbox (not GitHub's). */
   providerProvesAddress?: boolean;
+  /** The groups that identity's provider named, for `OIDC_ADMIN_GROUP`. */
+  groups?: string[];
 }
 
 /**
@@ -130,6 +133,8 @@ export async function completeAcceptance(
     target: invitation.email,
     detail: `as ${authority.role === "admin" ? "an administrator" : "a member"}, account ${user.username}${account.identity ? `, signing in with ${account.identity.provider}` : ""}`,
   });
+
+  if (account.identity) await applyAdminGroup(user, account.identity.provider, account.groups ?? []);
 
   const { token: sessionToken, absoluteExpiresAt } = await createSession({
     userId: user._id,

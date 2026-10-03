@@ -24,6 +24,8 @@ vi.mock("@/lib/invitations", () => ({
 }));
 vi.mock("@/lib/invitation-authority", () => ({ authorityAtAcceptance }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit: vi.fn() }));
+const applyAdminGroup = vi.fn();
+vi.mock("@/lib/oidc/admin-group", () => ({ applyAdminGroup }));
 vi.mock("@/lib/projectAudit", () => ({ logProjectAudit: vi.fn() }));
 vi.mock("@/models/grant", () => ({ Grant: { findOneAndUpdate: vi.fn() } }));
 vi.mock("@/models/identity", () => ({ Identity: { create: identityCreate, deleteMany: identityDeleteMany } }));
@@ -54,6 +56,26 @@ beforeEach(() => {
 });
 
 describe("completing an acceptance through a sign-in provider", () => {
+  it("lets the provider's groups decide the role before the session is made (BP-833)", async () => {
+    applyAdminGroup.mockImplementation(async () => expect(createSession).not.toHaveBeenCalled());
+
+    await completeAcceptance(
+      INVITATION as never,
+      { username: "ada", fullName: "Ada", passwordHash: null, identity: IDENTITY, providerProvesAddress: true, groups: ["admins"] },
+      new Request("http://x"),
+      null
+    );
+
+    expect(applyAdminGroup).toHaveBeenCalledWith(expect.objectContaining({ _id: "u-new" }), "oidc", ["admins"]);
+    expect(createSession).toHaveBeenCalled();
+  });
+
+  it("asks no group anything for a password acceptance", async () => {
+    await accept();
+
+    expect(applyAdminGroup).not.toHaveBeenCalled();
+  });
+
   it("makes a password-less account whose address the provider proved, and links the identity", async () => {
     const res = await accept(IDENTITY);
 

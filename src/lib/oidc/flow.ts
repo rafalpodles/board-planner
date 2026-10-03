@@ -5,10 +5,12 @@ import { randomToken, sha256 } from "@/lib/oauth";
 import { githubApiBase, githubWebBase } from "@/lib/github-host";
 import { OidcFlow } from "@/models/oidcFlow";
 import { OidcIntent } from "@/types";
+import { groupsIn } from "@/lib/oidc/admin-group";
 import { OidcProvider } from "./providers";
 
 export const FLOW_COOKIE = "bp_oidc";
 export const ACCEPT_COOKIE = "bp_oidc_accept";
+export const JOIN_COOKIE = "bp_oidc_join";
 export const FLOW_TTL_MS = 10 * 60 * 1000;
 export const ACCEPT_TTL_MS = 15 * 60 * 1000;
 
@@ -109,6 +111,8 @@ export interface VerifiedClaims {
   /** Every address the provider vouches for: an invitation may name any of them. */
   verifiedEmails: string[];
   name: string;
+  /** The groups the generic OIDC provider names, for `OIDC_ADMIN_GROUP`; empty for any other. */
+  groups: string[];
 }
 
 export type FlowOutcome =
@@ -192,6 +196,7 @@ function idTokenPerson(
     emailVerified,
     verifiedEmails: emailVerified ? [email] : [],
     name: typeof claims.name === "string" ? claims.name : "",
+    groups: provider.id === "oidc" ? groupsIn(claims) : [],
   };
 }
 
@@ -232,6 +237,7 @@ async function githubPerson(provider: OidcProvider, accessToken: string): Promis
     emailVerified: chosen?.verified === true,
     verifiedEmails: listed.filter((e) => e.verified === true).map((e) => normaliseEmail(e.email)),
     name: typeof person.name === "string" && person.name ? person.name : typeof person.login === "string" ? person.login : "",
+    groups: [],
   };
 }
 
@@ -293,10 +299,14 @@ export async function holdForAcceptance(input: {
     codeVerifier: "-",
     intent: "invite",
     invitationTokenHash: input.invitationTokenHash,
-    claims: { issuer: input.claims.issuer, subject: input.claims.subject, email: input.claims.email },
+    claims: heldClaims(input.claims),
     expiresAt: new Date(Date.now() + ACCEPT_TTL_MS),
   });
   return binder;
+}
+
+function heldClaims(claims: VerifiedClaims) {
+  return { issuer: claims.issuer, subject: claims.subject, email: claims.email, name: claims.name, groups: claims.groups };
 }
 
 export async function heldAcceptance(binder: string | null) {
@@ -313,4 +323,32 @@ export async function heldAcceptance(binder: string | null) {
 export async function spendAcceptance(binder: string): Promise<void> {
   await connectDB();
   await OidcFlow.deleteOne({ binderHash: sha256(binder), claims: { $ne: null } });
+}
+
+/** A verified identity in an allowed domain, with no account yet, waiting to choose a username. */
+export async function holdForSignUp(input: { provider: OidcProvider; claims: VerifiedClaims }): Promise<string> {
+  const binder = randomToken("cpo_");
+  await connectDB();
+  await OidcFlow.create({
+    binderHash: sha256(binder),
+    provider: input.provider.id,
+    state: "-",
+    nonce: "-",
+    codeVerifier: "-",
+    intent: "signup",
+    claims: heldClaims(input.claims),
+    expiresAt: new Date(Date.now() + ACCEPT_TTL_MS),
+  });
+  return binder;
+}
+
+export async function heldSignUp(binder: string | null) {
+  if (!binder) return null;
+  await connectDB();
+  return OidcFlow.findOne({
+    binderHash: sha256(binder),
+    intent: "signup",
+    claims: { $ne: null },
+    expiresAt: { $gt: new Date() },
+  }).lean();
 }

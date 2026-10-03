@@ -15,6 +15,7 @@ import { AddToBoardModal } from "@/components/settings/AddToBoardModal";
 import { InviteModal } from "@/components/settings/InviteModal";
 import { usePasswordSignIn } from "@/hooks/use-password-sign-in";
 import { PendingInvitations } from "@/components/settings/PendingInvitations";
+import { SignUpDomains } from "@/components/settings/SignUpDomains";
 import { generatePassword } from "@/lib/password-generator";
 import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";
 import { timeAgo } from "@/lib/time";
@@ -433,6 +434,8 @@ export default function UsersPage() {
       </div>
 
       {showInvitations && <PendingInvitations invitations={invitations} onChanged={refreshInvitations} />}
+
+      <SignUpDomains />
 
       <AddToBoardModal person={addingToBoard} onClose={() => setAddingToBoard(null)} />
 

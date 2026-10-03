@@ -6,6 +6,7 @@ export interface ISettings {
   aiModel: string;
   pmDefaultModel: string;
   pmDefaultDailyTurnCap: number;
+  signUpDomains: string[];
 }
 
 const settingsSchema = new Schema<ISettings>({
@@ -20,6 +21,10 @@ const settingsSchema = new Schema<ISettings>({
   pmDefaultDailyTurnCap: {
     type: Number,
     default: 0,
+  },
+  signUpDomains: {
+    type: [String],
+    default: [],
   },
 });
 
