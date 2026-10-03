@@ -8,11 +8,12 @@ const { api } = vi.hoisted(() => ({ api: { get: vi.fn() } }));
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 
 function Probe({ feature }: { feature: "integrations.coda" | "ai.byok" }) {
-  const { loading, entitled } = useEntitlement(feature);
+  const { loading, entitled, error } = useEntitlement(feature);
   return (
     <div>
       <span data-testid="loading">{String(loading)}</span>
       <span data-testid="entitled">{String(entitled)}</span>
+      <span data-testid="error">{String(error)}</span>
     </div>
   );
 }
@@ -55,13 +56,23 @@ describe("useEntitlement", () => {
     expect(screen.getByTestId("entitled").textContent).toBe("true");
   });
 
-  it("is not entitled when the request fails", async () => {
+  it("is not entitled when the request fails, and says it could not tell", async () => {
     api.get.mockRejectedValue(new Error("boom"));
 
     render(<Probe feature="integrations.coda" />);
 
     await waitFor(() => expect(screen.getByTestId("loading").textContent).toBe("false"));
     expect(screen.getByTestId("entitled").textContent).toBe("false");
+    expect(screen.getByTestId("error").textContent).toBe("true");
+  });
+
+  it("is no error when the plan was read and lacks the feature", async () => {
+    api.get.mockResolvedValue({ plan: "free", features: [], expiresAt: null });
+
+    render(<Probe feature="integrations.coda" />);
+
+    await waitFor(() => expect(screen.getByTestId("loading").textContent).toBe("false"));
+    expect(screen.getByTestId("error").textContent).toBe("false");
   });
 
   it("the verdict changes when the tenant's entitlements change between reads", async () => {

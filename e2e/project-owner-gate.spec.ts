@@ -18,6 +18,7 @@ import {
   seedMachine,
 } from "./seed";
 import { signInContext } from "./session";
+import { useLicenceKey } from "./licence-key";
 import { scanInlineOwnerChecks, scanOwnerGatedRoutes } from "./owner-gated-routes";
 
 /**
@@ -213,7 +214,11 @@ async function signedIn(browser: Browser, baseURL: string | undefined, who: Who)
   return context;
 }
 
-test.beforeEach(seed);
+test.beforeEach(async ({ request }) => {
+  await seed();
+  // The coda/sync recipe expects the plan to refuse past the owner gate: Free, whatever .env.local says
+  await useLicenceKey(request, undefined);
+});
 
 test("the scan found the owner-gated routes, and every one of them has a recipe", () => {
   expect(ROUTES.length, "the route scan found nothing — every case below would be vacuous").toBeGreaterThanOrEqual(20);

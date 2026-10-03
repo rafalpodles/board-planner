@@ -5,6 +5,7 @@ import { ApiProject } from "@/types";
 import type { RepositoryProvider } from "@/lib/repository";
 import { BrandIcon, type BrandId } from "@/components/ui/BrandIcon";
 import { Button } from "@/components/ui/Button";
+import { ProBadge } from "@/components/ui/ProUpsell";
 
 export type IntegrationId =
   "github" | "gitlab" | "coda" | "channels" | "webhooks";
@@ -93,6 +94,8 @@ interface Props {
   onOpen: (id: IntegrationId) => void;
   onRemove: (id: IntegrationId) => void;
   renderBody: (id: IntegrationId) => React.ReactNode;
+  /** Integrations this instance's plan does not include: badged Pro, never "Connected" */
+  needsPro?: IntegrationId[];
 }
 
 /**
@@ -110,6 +113,7 @@ export function Connections({
   onOpen,
   onRemove,
   renderBody,
+  needsPro = [],
 }: Props) {
   const [picking, setPicking] = useState(false);
 
@@ -163,15 +167,19 @@ export function Connections({
                   </span>
                 </button>
 
-                <span
-                  className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                    connected
-                      ? "bg-success/15 text-success"
-                      : "bg-bg-input text-text-muted"
-                  }`}
-                >
-                  {connected ? "Connected" : "Not set up"}
-                </span>
+                {needsPro.includes(integration.id) ? (
+                  <ProBadge />
+                ) : (
+                  <span
+                    className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                      connected
+                        ? "bg-success/15 text-success"
+                        : "bg-bg-input text-text-muted"
+                    }`}
+                  >
+                    {connected ? "Connected" : "Not set up"}
+                  </span>
+                )}
 
                 {/* An implied row cannot be removed here — clearing the repository URL is
                     what removes it, and a button that silently did nothing would be worse */}
@@ -235,8 +243,9 @@ export function Connections({
                     className="h-5 w-5 shrink-0"
                   />
                   <span className="min-w-0">
-                    <span className="block text-sm font-medium">
+                    <span className="flex items-center gap-2 text-sm font-medium">
                       {integration.name}
+                      {needsPro.includes(integration.id) && <ProBadge />}
                     </span>
                     <span className="block text-xs text-text-muted">
                       {integration.blurb}

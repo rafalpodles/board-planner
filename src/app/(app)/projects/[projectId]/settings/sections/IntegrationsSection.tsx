@@ -161,6 +161,9 @@ export function IntegrationsSection({
     },
   );
 
+  // Registered here so Save all keeps Coda between GitLab and the channels, as it was
+  const coda = useCodaSettings({ project, replaceAndReturn, fail });
+
   useDirtyGroup(
     {
       id: "integrations-channels",
@@ -266,7 +269,6 @@ export function IntegrationsSection({
     return updated;
   }
 
-  const coda = useCodaSettings({ project, replaceAndReturn, fail });
 
   function addWebhook() {
     if (!newWebhookUrl.trim()) return;
@@ -405,7 +407,7 @@ export function IntegrationsSection({
   const draftOf: Record<IntegrationId, { count: number; discard: () => void }> = {
     github,
     gitlab,
-    coda,
+    coda: coda.draft,
     channels,
     webhooks,
   };
@@ -451,6 +453,7 @@ export function IntegrationsSection({
 
       <Connections
         project={project}
+        needsPro={!coda.plan.loading && !coda.plan.error && !coda.plan.entitled ? ["coda"] : []}
         repositoryProvider={draftProvider}
         opened={opened}
         unsaved={unsavedRows}

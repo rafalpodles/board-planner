@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, cleanup, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { IntegrationsSection } from "./IntegrationsSection";
 import { SettingsProvider } from "@/components/settings/settings-context";
 import { ApiProject } from "@/types";
@@ -14,6 +14,8 @@ vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast }) }));
 
 afterEach(cleanup);
+// The section reads the plan for Coda (BP-651); Pro unless a test says otherwise
+beforeEach(() => api.get.mockResolvedValue({ plan: "pro", features: [], expiresAt: null }));
 
 function renderSection(over: Partial<ApiProject> = {}) {
   const project = {
@@ -145,5 +147,23 @@ describe("IntegrationsSection and a GitLab host that is not saved yet", () => {
 
     expect(screen.getByText("Host not recognised")).toBeTruthy();
     expect(screen.queryByText("Recognised as GitLab, so its connection is listed below.")).toBeNull();
+  });
+});
+
+describe("IntegrationsSection and Coda on a free instance (BP-651)", () => {
+  it("badges a configured Coda row Pro instead of calling it Connected", async () => {
+    api.get.mockResolvedValue({ plan: "free", features: [], expiresAt: null });
+
+    renderSection({ codaDocId: "doc-1", codaTokenSet: true } as Partial<ApiProject>);
+
+    await waitFor(() => expect(screen.getByText("feature", { exact: false, selector: ".sr-only" })).toBeTruthy());
+    expect(screen.queryByText("Connected")).toBeNull();
+  });
+
+  it("calls the same row Connected on Pro", async () => {
+    renderSection({ codaDocId: "doc-1", codaTokenSet: true } as Partial<ApiProject>);
+
+    await waitFor(() => expect(screen.getByText("Connected")).toBeTruthy());
+    expect(screen.queryByText("feature", { exact: false, selector: ".sr-only" })).toBeNull();
   });
 });

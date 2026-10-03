@@ -404,17 +404,17 @@ describe("PUT /api/projects/[projectId] and a repointed integration host", () =>
   });
 });
 
-/**
- * A key reaches a task URL and from there Slack and Discord message markup (BP-401). The empty
- * string mattered most: the first version validated only a truthy, changed key, and
- * findByIdAndUpdate runs no validators, so `{"key":"  "}` erased the stored key — task keys
- * rendering as `-12`, and the old key never reaching formerKeys, which is what keeps existing
- * pull requests matching.
- */
 describe("PUT /api/projects/[projectId] and Coda on a free instance", () => {
   beforeEach(() => {
     check.mockResolvedValue(true);
     plan.value = "free";
+    // A host in the body makes the route read the stored one, to clear a token it no longer fits
+    projectFindById.mockReturnValue({
+      lean: () => Promise.resolve({ codaHost: "https://coda.io", codaToken: "enc:v2:k:coda" }),
+      select: () => Promise.resolve({ customFields: PROJECT_CUSTOM_FIELDS }),
+      toObject: () => ({ _id: PROJECT_ID, name: "Test Project" }),
+      populate: saved,
+    });
   });
 
   it.each([["codaDocId"], ["codaTableId"], ["codaHost"], ["codaToken"]])(
@@ -427,6 +427,26 @@ describe("PUT /api/projects/[projectId] and Coda on a free instance", () => {
       expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
     }
   );
+
+  it.each([
+    ["Disconnect's payload", { codaDocId: "", codaTableId: "", codaHost: "https://coda.io", codaToken: "" }],
+    ["an emptied token", { codaToken: "" }],
+    ["a null token", { codaToken: null }],
+    ["the default host with a trailing slash", { codaHost: "https://coda.io/" }],
+  ])("lets %s through, since clearing Coda uses no Pro feature", async (_label, body) => {
+    const res = await PUT(putRequest(body), ctx());
+
+    expect(res.status).toBe(200);
+  });
+
+  it.each([
+    ["a new host", { codaHost: "https://coda.example.com" }],
+    ["a clear that also names a doc", { codaToken: "", codaDocId: "doc-2" }],
+  ])("still refuses %s", async (_label, body) => {
+    const res = await PUT(putRequest(body), ctx());
+
+    expect(res.status).toBe(402);
+  });
 
   it("still saves everything else", async () => {
     const res = await PUT(putRequest({ name: "Renamed" }), ctx());
@@ -444,6 +464,13 @@ describe("PUT /api/projects/[projectId] and Coda on a free instance", () => {
   });
 });
 
+/**
+ * A key reaches a task URL and from there Slack and Discord message markup (BP-401). The empty
+ * string mattered most: the first version validated only a truthy, changed key, and
+ * findByIdAndUpdate runs no validators, so `{"key":"  "}` erased the stored key — task keys
+ * rendering as `-12`, and the old key never reaching formerKeys, which is what keeps existing
+ * pull requests matching.
+ */
 describe("the key a project may be renamed to", () => {
   beforeEach(() => {
     check.mockResolvedValue(true);

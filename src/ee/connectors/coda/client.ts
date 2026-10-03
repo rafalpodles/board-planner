@@ -17,6 +17,15 @@ const UPSERT_CHUNK = 200;
 
 export const CODA_SETTINGS_FIELDS = ["codaHost", "codaDocId", "codaTableId", "codaToken"] as const;
 
+/** A write naming Coda fields that only empties them — Disconnect — which a Free plan may still do. */
+export function onlyClearsCoda(updates: Record<string, unknown>): boolean {
+  return CODA_SETTINGS_FIELDS.every((field) => {
+    if (!(field in updates)) return true;
+    const value = String(updates[field] ?? "").trim().replace(/\/+$/, "");
+    return value === "" || (field === "codaHost" && value === DEFAULT_HOST);
+  });
+}
+
 export const CODA_COLUMNS = [
   "Key",
   "Title",
