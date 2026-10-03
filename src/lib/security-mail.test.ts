@@ -10,7 +10,7 @@ vi.mock("@/lib/email", () => ({
 }));
 vi.mock("@/lib/session", () => ({ selfOrigin: () => selfOrigin() }));
 
-const { notifyPasswordChanged, notifyAddressChanged, notifyCredentialCreated, maskAddress } =
+const { notifyPasswordChanged, notifyAddressChanged, notifyCredentialCreated, notifyIdentityLinked, maskAddress } =
   await import("@/lib/security-mail");
 
 const sent = () => sendEmail.mock.calls.at(-1)?.[0] as { to: string; subject: string; html: string; text: string };
@@ -127,5 +127,28 @@ describe("notifyCredentialCreated", () => {
 
     expect(sent().subject).toContain("Claude");
     expect(sent().html).not.toContain("href=\"http");
+  });
+});
+
+describe("notifyIdentityLinked", () => {
+  const LINKED = { email: "owner@example.com", username: "owner", provider: "Acme", providerEmail: "o@acme.example" };
+
+  it("tells the owner to change the password, which unlinks it", async () => {
+    await notifyIdentityLinked(LINKED);
+
+    expect(sent().text).toContain("change your password");
+  });
+
+  // BP-830. There is no password to change on an instance that turned them off
+  it("points somewhere that works when password sign-in is off", async () => {
+    process.env.PASSWORD_SIGN_IN = "off";
+    try {
+      await notifyIdentityLinked(LINKED);
+    } finally {
+      delete process.env.PASSWORD_SIGN_IN;
+    }
+
+    expect(sent().text).not.toContain("change your password");
+    expect(sent().text).toContain("ask an administrator to sign you out everywhere");
   });
 });
