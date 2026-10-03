@@ -25,6 +25,8 @@ vi.mock("@/lib/db", async () => {
 const updateMany = vi.fn(() => Promise.resolve({ modifiedCount: 0 }));
 const seedAgents = vi.fn(() => Promise.resolve());
 const countDocuments = vi.fn(() => Promise.resolve(1));
+const admins = vi.fn((): unknown[] => []);
+const userFind = vi.fn(() => ({ select: () => ({ lean: () => Promise.resolve(admins()) }) }));
 const setupCode = vi.fn();
 const markPmAsMachine = vi.fn(() => Promise.resolve());
 const repairMachineNames = vi.fn(() => Promise.resolve(0));
@@ -34,7 +36,8 @@ const startDigestScheduler = vi.fn(() => ({ started: true as const, tickMs: 300_
 
 vi.mock("@/models/project", () => ({ Project: { updateMany } }));
 vi.mock("@/lib/agent-seed", () => ({ seedAgents }));
-vi.mock("@/models/user", () => ({ User: { countDocuments } }));
+vi.mock("@/models/user", () => ({ User: { countDocuments, find: userFind } }));
+vi.mock("@/models/identity", () => ({ Identity: { exists: () => Promise.resolve(null) } }));
 vi.mock("@/lib/setup-code", () => ({ setupCode }));
 vi.mock("@/lib/pm/pm-user", () => ({ markPmAsMachine }));
 vi.mock("@/lib/worker-user", () => ({ repairMachineNames }));
@@ -257,6 +260,33 @@ describe("register — a database that is down at boot", () => {
     expect(markPmAsMachine).toHaveBeenCalledTimes(1);
     expect(seedAgents).toHaveBeenCalledTimes(1);
     expect(repairMachineNames).toHaveBeenCalledTimes(1);
+  });
+
+  // BP-840. Started anyway, it would serve an instance its administrators cannot enter once their
+  // sessions lapse
+  it("exits once connected when passwords off would leave no administrator a way in", async () => {
+    process.env.NEXT_RUNTIME = "nodejs";
+    delete process.env.ENCRYPTION_KEY;
+    Object.assign(process.env, {
+      PASSWORD_SIGN_IN: "off",
+      OIDC_ISSUER: "https://id.example.com",
+      OIDC_CLIENT_ID: "c",
+      OIDC_CLIENT_SECRET: "s",
+    });
+    admins.mockReturnValue([{ _id: "a1", emailVerifiedAt: null }]);
+    connectDB.mockImplementationOnce(() => Promise.resolve());
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const exit = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`exit:${code}`);
+    }) as never);
+    const { register } = await import("./instrumentation");
+
+    await register();
+    expect(exit).toHaveBeenCalledWith(1);
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining("no active administrator can sign in"));
+    expect(startPmScheduler).not.toHaveBeenCalled();
+    admins.mockReturnValue([]);
   });
 
   // BP-425. Every boot, like the catalog seed, and just as unable to keep the schedulers down

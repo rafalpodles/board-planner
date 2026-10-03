@@ -280,6 +280,26 @@ describe("GET /oauth/authorize", () => {
     expect(oauthConsentCreate).not.toHaveBeenCalled();
   });
 
+  // BP-840. An account made through a provider has no password to type
+  it("offers a provider sign-in that comes back here, beside the password, when one is set up", async () => {
+    Object.assign(process.env, { OIDC_ISSUER: "https://id.example.com", OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s" });
+    try {
+      const body = await (await GET(authorizeGet())).text();
+
+      expect(body).toContain('type="password"');
+      expect(body).toContain("Sign in with a provider instead");
+      expect(body).toMatch(/<form method="get" action="\/login">\s*<input type="hidden" name="next" value="\/oauth\/authorize\?/);
+    } finally {
+      for (const key of ["OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET"]) delete process.env[key];
+    }
+  });
+
+  it("offers no provider sign-in with none set up", async () => {
+    const body = await (await GET(authorizeGet())).text();
+
+    expect(body).not.toContain("Sign in with a provider instead");
+  });
+
   // BP-383: the browser already holds a session cookie, and typing the password again proves
   // nothing that cookie has not already proven.
   it("takes the browser session instead of asking for the password again", async () => {

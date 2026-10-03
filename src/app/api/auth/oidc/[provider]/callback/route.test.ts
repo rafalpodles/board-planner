@@ -21,7 +21,8 @@ const logInstanceAudit = vi.fn();
 const notifyIdentityLinked = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
-vi.mock("@/lib/auth", () => ({ getClientIp: () => "203.0.113.9", getAuthUser }));
+let clientIp: string | null = "203.0.113.9";
+vi.mock("@/lib/auth", () => ({ getClientIp: () => clientIp, getAuthUser }));
 vi.mock("@/models/rateLimit", async () => {
   const { inMemoryRateLimitModel } = await import("@/lib/rate-limit-test-store");
   return { RateLimit: inMemoryRateLimitModel() };
@@ -100,6 +101,7 @@ function finishes(intent: "signin" | "invite" | "link" | "bootstrap", claims: Re
 beforeEach(async () => {
   vi.clearAllMocks();
   await resetRateLimits();
+  clientIp = "203.0.113.9";
   identityFindOne.mockReturnValue(lean(null));
   userFindOne.mockResolvedValue(ADA);
   userFindById.mockResolvedValue(ADA);
@@ -371,7 +373,7 @@ describe("GET /api/auth/oidc/:provider/callback, the admin group (BP-833)", () =
   it("hands the provider's groups to the role mapping before the session is made", async () => {
     finishes("signin", { groups: ["admins"] });
     identityFindOne.mockReturnValue(lean({ _id: "i1", user: "u1" }));
-    applyAdminGroup.mockImplementation(async () => expect(createSession).not.toHaveBeenCalled());
+    applyAdminGroup.mockImplementationOnce(async () => expect(createSession).not.toHaveBeenCalled());
 
     await callback();
 
@@ -394,6 +396,33 @@ describe("GET /api/auth/oidc/:provider/callback, a round trip that failed (BP-84
 
   it("sends a browser with no flow at all to sign in", async () => {
     finishFlow.mockResolvedValue({ ok: false, reason: "no_flow" });
+
+    expect(location(await callback())).toBe("/login?sso=failed");
+  });
+});
+
+describe("GET /api/auth/oidc/:provider/callback, the throttle (BP-840)", () => {
+  const rejected = () => finishFlow.mockResolvedValue({ ok: false, reason: "rejected" });
+
+  it("throttles a known address after its failed round trips", async () => {
+    rejected();
+    for (let i = 0; i < 60; i++) expect(location(await callback())).toBe("/login?sso=failed");
+
+    expect(location(await callback())).toBe("/login?sso=throttled");
+  });
+
+  it("counts no successful sign-in against the address it came from", async () => {
+    finishes("signin");
+    identityFindOne.mockReturnValue(lean({ _id: "i1", user: "u1" }));
+    for (let i = 0; i < 70; i++) await callback();
+
+    expect(location(await callback())).toBe("/projects");
+  });
+
+  it("never throttles callbacks whose address is unknown, which would all share one bucket", async () => {
+    clientIp = null;
+    rejected();
+    for (let i = 0; i < 1250; i++) await callback();
 
     expect(location(await callback())).toBe("/login?sso=failed");
   });
