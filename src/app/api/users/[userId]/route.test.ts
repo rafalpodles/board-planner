@@ -29,7 +29,8 @@ vi.mock("@/lib/auth", () => ({
 }));
 const boardsOnlyOwnedBy = vi.fn();
 const grantDeleteMany = vi.fn();
-vi.mock("@/lib/grants", () => ({ check, accessibleProjectIds: vi.fn(), boardsOnlyOwnedBy }));
+const boardsLeftWithoutOwner = vi.fn(async (_id?: string) => [] as string[]);
+vi.mock("@/lib/grants", () => ({ check, accessibleProjectIds: vi.fn(), boardsOnlyOwnedBy, boardsLeftWithoutOwner }));
 vi.mock("@/models/grant", () => ({ Grant: { deleteMany: grantDeleteMany } }));
 const identityDeleteMany = vi.fn();
 vi.mock("@/models/identity", () => ({ Identity: { deleteMany: identityDeleteMany } }));
@@ -965,6 +966,19 @@ describe("PUT /api/users/:id — deactivating and reactivating", () => {
     expect(res.status).toBe(409);
     expect(target.deactivatedAt).toBeNull();
     expect(target.save).toHaveBeenCalledTimes(2);
+    expect(revokeUserCredentials).not.toHaveBeenCalled();
+  });
+
+  // Two co-owners of a board deactivating each other at once each counted the other as active
+  it("takes it back when a board it owned is left with no active owner", async () => {
+    const target = targetDoc({ role: "member", deactivatedAt: null });
+    found(target);
+    boardsLeftWithoutOwner.mockResolvedValueOnce(["p1"]);
+
+    const res = await PUT(put({ deactivate: true }), ctx());
+
+    expect(res.status).toBe(409);
+    expect(target.deactivatedAt).toBeNull();
     expect(revokeUserCredentials).not.toHaveBeenCalled();
   });
 

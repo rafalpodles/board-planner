@@ -181,7 +181,10 @@ export const DELETE = withProjectOwner(async (request, { params, user }) => {
   const subject = new Types.ObjectId(userId).toString();
 
   await connectDB();
-  if ((await ownerCount(projectId)) <= 1) {
+  // A deactivated owner is not one of those counted as keeping the board run, so taking them off
+  // can never leave it with fewer (BP-832)
+  const subjectActive = !!(await User.exists({ _id: subject, deactivatedAt: null }));
+  if (subjectActive && (await ownerCount(projectId)) <= 1) {
     const remaining = await Grant.find({ objectType: "project", object: projectId })
       .select("subject relation")
       .lean();

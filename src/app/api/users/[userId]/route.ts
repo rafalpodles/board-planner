@@ -13,7 +13,7 @@ import { cancelEmailChange } from "@/lib/email-change";
 import { clearAccountAttempts } from "@/lib/rate-limit";
 import { duplicateKeyField } from "@/lib/mongo-errors";
 import { withAdmin } from "@/lib/middleware";
-import { boardsOnlyOwnedBy } from "@/lib/grants";
+import { boardsLeftWithoutOwner, boardsOnlyOwnedBy } from "@/lib/grants";
 import { Grant } from "@/models/grant";
 import { Identity } from "@/models/identity";
 import { revokeUserCredentials, revokeUserSessions } from "@/lib/session";
@@ -438,12 +438,17 @@ async function accountAction(
     }
     target.deactivatedAt = new Date();
     await target.save();
-    // Two administrators deactivating each other at once each counted the other as still active;
-    // an instance with no administrator cannot be repaired from the product, so one of them yields
-    if (target.role === "admin" && (await User.countDocuments(ACTIVE_ADMINS)) === 0) {
+    // Two administrators, or two co-owners, deactivating each other at once each counted the other
+    // as still active; one of them yields rather than leave nobody to run the instance or a board
+    const lastAdminGone = target.role === "admin" && (await User.countDocuments(ACTIVE_ADMINS)) === 0;
+    const ownerless = lastAdminGone ? [] : await boardsLeftWithoutOwner(String(target._id));
+    if (lastAdminGone || ownerless.length > 0) {
       target.deactivatedAt = null;
       await target.save();
-      return NextResponse.json({ error: "Cannot deactivate the last admin" }, { status: 409 });
+      return NextResponse.json(
+        { error: lastAdminGone ? "Cannot deactivate the last admin" : "Another owner of the same board was deactivated meanwhile" },
+        { status: 409 }
+      );
     }
     // After the flag, so a session minted in between is refused by getAuthUser anyway. Its sign-in
     // providers stay linked: every sign-in is refused while deactivated, and a reactivated account

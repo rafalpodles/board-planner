@@ -127,8 +127,10 @@ vi.mock("@/models/grant", () => ({
     deleteMany: (...args: unknown[]) => grantDeleteMany(...args),
   },
 }));
+const userExists = vi.fn(async (_filter?: unknown) => null as unknown);
 vi.mock("@/models/user", () => ({
   User: {
+    exists: (filter: unknown) => userExists(filter),
     find: (...args: unknown[]) => userFind(...args),
     distinct: (...args: unknown[]) => userDistinct(...args),
   },
@@ -150,6 +152,7 @@ const {
   canBeAssigned,
   ownerCounts,
   boardsOnlyOwnedBy,
+  boardsLeftWithoutOwner,
   findOrphanGrants,
   deleteOrphanGrants,
 } = await import("./grants");
@@ -497,6 +500,26 @@ describe("owner counting", () => {
       { subject: GONE, object: P },
     ];
     expect((await ownerCounts([P])).get(P)).toBe(1);
+  });
+
+  // BP-832. Never counted as an owner, so deleting them leaves every board the owners it has
+  it("names no board as only owned by somebody deactivated", async () => {
+    ownerRows = [{ subject: ALICE, object: P }];
+    userExists.mockResolvedValueOnce({ _id: ALICE });
+
+    expect(await boardsOnlyOwnedBy(ALICE)).toEqual([]);
+    expect(userExists).toHaveBeenCalledWith({ _id: ALICE, deactivatedAt: { $ne: null } });
+  });
+
+  it("names the boards a deactivation left with no active owner", async () => {
+    ownerRows = [
+      { subject: ALICE, object: P },
+      { subject: ALICE, object: OTHER },
+      { subject: BOB, object: OTHER },
+    ];
+    deactivatedAccounts = [ALICE];
+
+    expect(await boardsLeftWithoutOwner(ALICE)).toEqual([P]);
   });
 
   // BP-832. A deactivated owner can manage nothing, so they keep no board run

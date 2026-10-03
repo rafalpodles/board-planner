@@ -42,8 +42,10 @@ vi.mock("@/models/grant", () => ({
     ),
   },
 }));
+const userExists = vi.fn(async (_filter?: unknown) => ({ _id: "active" }) as unknown);
 vi.mock("@/models/user", () => ({
   User: {
+    exists: (filter: unknown) => userExists(filter),
     find: (...a: unknown[]) => (userFind(...a), { select: () => ({ sort: () => ({ lean: userFindLean }) }) }),
     findById: (...a: unknown[]) => (userFindById(...a), { select: userFindByIdSelect }),
   },
@@ -274,6 +276,21 @@ describe("DELETE members", () => {
     const res = await DELETE(new Request(url, { method: "DELETE" }), { params });
     expect(res.status).toBe(409);
     expect(grantDelete).not.toHaveBeenCalled();
+  });
+
+  // BP-832. A deactivated owner is not one of those keeping the board run, and removal is the only
+  // way to clear them off it, since giving them a grant is refused
+  it("removes a deactivated co-owner beside the one active owner", async () => {
+    ownerCount.mockResolvedValue(1);
+    grantFindLean.mockResolvedValue([{ subject: U2, relation: "owner" }]);
+    userExists.mockResolvedValueOnce(null);
+    const url = `http://x/api/projects/${PROJECT}/members?userId=${U2}`;
+
+    const res = await DELETE(new Request(url, { method: "DELETE" }), { params });
+
+    expect(res.status).toBe(200);
+    expect(userExists).toHaveBeenCalledWith({ _id: U2.toLowerCase(), deactivatedAt: null });
+    expect(grantDelete).toHaveBeenCalled();
   });
 
   // BP-328. The watcher rows stay, so a re-add restores the feed; what does not stay is the
