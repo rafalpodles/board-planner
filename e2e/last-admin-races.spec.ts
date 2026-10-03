@@ -29,15 +29,15 @@ test.afterEach(async () => {
 });
 
 test("two administrators taking each other's role at once leave one", async ({ browser }) => {
-  const a = await browser.newContext();
-  const b = await browser.newContext();
-  await signIn(await a.newPage(), "admin");
-  await signIn(await b.newPage(), "member");
-  try {
-    for (let round = 0; round < ROUNDS; round++) {
-      await (await db())
-        .collection("users")
-        .updateMany({ _id: { $in: [ADMIN_ID, MEMBER_ID] } }, { $set: { role: "admin", deactivatedAt: null } });
+  for (let round = 0; round < ROUNDS; round++) {
+    // Fresh sessions each round: the deactivation that wins a round revokes the loser's
+    await seed();
+    await (await db()).collection("users").updateOne({ _id: MEMBER_ID }, { $set: { role: "admin" } });
+    const a = await browser.newContext();
+    const b = await browser.newContext();
+    try {
+      await signIn(await a.newPage(), "admin");
+      await signIn(await b.newPage(), "member");
 
       const answers = await Promise.all([
         write(a.request, "put", `/api/users/${MEMBER_ID}`, { role: "member" }),
@@ -48,10 +48,10 @@ test("two administrators taking each other's role at once leave one", async ({ b
 
       const active = await (await db()).collection("users").countDocuments({ role: "admin", deactivatedAt: null });
       expect(active, `round ${round} left no active administrator`).toBeGreaterThanOrEqual(1);
+    } finally {
+      await a.close();
+      await b.close();
     }
-  } finally {
-    await a.close();
-    await b.close();
   }
 });
 
