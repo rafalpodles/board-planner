@@ -14,7 +14,13 @@ interface SignUp {
 
 const asText = (domains: string[]) => domains.join(", ");
 
-const PUBLIC_MAIL = ["gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "yahoo.com", "icloud.com", "proton.me"];
+const PUBLIC_MAIL = new Set([
+  "gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "msn.com", "yahoo.com", "yahoo.co.uk",
+  "aol.com", "icloud.com", "me.com", "proton.me", "protonmail.com", "pm.me", "gmx.com", "gmx.de", "web.de",
+  "mail.com", "yandex.ru", "mail.ru", "qq.com", "163.com",
+]);
+
+const typedDomains = (text: string) => text.split(/[\s,]+/).filter(Boolean);
 
 export function SignUpDomains() {
   const api = useApi();
@@ -41,7 +47,7 @@ export function SignUpDomains() {
     setError("");
     try {
       const data: SignUp = await api.put("/api/admin/sign-up", {
-        domains: text.split(/[\s,]+/).filter(Boolean),
+        domains: typedDomains(text),
       });
       setSaved(data);
       setText(asText(data.domains));
@@ -56,7 +62,9 @@ export function SignUpDomains() {
   if (!saved) return error ? <p className="mt-8 text-sm text-danger">{error}</p> : null;
 
   const providers = saved.providers.join(" or ");
-  const publicMail = saved.domains.filter((d) => PUBLIC_MAIL.includes(d));
+  const publicMail = typedDomains(text)
+    .map((d) => d.toLowerCase().replace(/^@/, ""))
+    .filter((d) => PUBLIC_MAIL.has(d));
   return (
     <section className="mt-8" aria-labelledby="sign-up-domains">
       <h2 id="sign-up-domains" className="text-lg font-semibold mb-1">
@@ -86,8 +94,8 @@ export function SignUpDomains() {
       </form>
       {publicMail.length > 0 && (
         <p className="mt-1 text-sm text-warning">
-          {publicMail.join(", ")} {publicMail.length === 1 ? "is a public mail service" : "are public mail services"}:
-          anybody can sign up with an address there.
+          {publicMail.join(", ")} {publicMail.length === 1 ? "looks like a public mail service" : "look like public mail services"}:
+          anybody with an address there could sign up.
         </p>
       )}
       {error && (

@@ -72,14 +72,24 @@ describe("sign-up by domain", () => {
     api.get.mockResolvedValue({ ...ANSWER, domains: ["corp.example", "gmail.com"] });
     render(<SignUpDomains />);
 
-    expect(await screen.findByText(/gmail.com is a public mail service: anybody can sign up/)).toBeTruthy();
+    expect(await screen.findByText(/gmail.com looks like a public mail service: anybody with an address there could sign up/)).toBeTruthy();
+  });
+
+  it("warns about a public mail service as it is typed, before it is saved", async () => {
+    render(<SignUpDomains />);
+    const input = await screen.findByLabelText("Domains");
+
+    fireEvent.change(input, { target: { value: "corp.example, @GMail.com" } });
+
+    expect(screen.getByText(/gmail.com looks like a public mail service/)).toBeTruthy();
+    expect(api.put).not.toHaveBeenCalled();
   });
 
   it("gives no such warning for a company's own domain", async () => {
     render(<SignUpDomains />);
     await screen.findByLabelText("Domains");
 
-    expect(screen.queryByText(/public mail service/)).toBeNull();
+    expect(screen.queryByText(/public mail/)).toBeNull();
   });
 
   it("still lets domains saved before the provider went be cleared", async () => {
