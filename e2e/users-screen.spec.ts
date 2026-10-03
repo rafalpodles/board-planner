@@ -47,7 +47,7 @@ test("a sign-in by password, then by a provider, is what the list says and how",
   await byPassword.context.close();
 
   await page.reload();
-  await expect(memberCard(page)).toContainText("Signed in just now · Password");
+  await expect(memberCard(page)).toContainText("Last signed in just now · Password");
 
   // A provider sign-in stamps it too, and the provider joins the list of ways in
   const email = `member-${randomBytes(4).toString("hex")}@example.com`;
@@ -64,7 +64,7 @@ test("a sign-in by password, then by a provider, is what the list says and how",
   await byProvider.context.close();
 
   await page.reload();
-  await expect(memberCard(page)).toContainText(`Signed in just now · Password, ${OIDC_STUB_LABEL}`);
+  await expect(memberCard(page)).toContainText(`Last signed in just now · Password, ${OIDC_STUB_LABEL}`);
 });
 
 test("the list filters by status, and counts each", async ({ page }) => {

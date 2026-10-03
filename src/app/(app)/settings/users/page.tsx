@@ -422,7 +422,7 @@ export default function UsersPage() {
                   @{u.username}
                 </p>
                 <p className="text-xs text-text-muted">
-                  {u.lastSignInAt ? `Signed in ${timeAgo(u.lastSignInAt)}` : "Never signed in"}
+                  {u.lastSignInAt ? `Last signed in ${timeAgo(u.lastSignInAt)}` : "Never signed in"}
                   {" · "}
                   {u.signInMethods && u.signInMethods.length > 0 ? u.signInMethods.join(", ") : "No way to sign in"}
                 </p>

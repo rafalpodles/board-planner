@@ -453,7 +453,7 @@ describe("who the list shows, and how they sign in (BP-831)", () => {
     render(<UsersPage />);
     await screen.findByText("Ada");
 
-    expect(screen.getByText("Signed in 3d ago · Password, Acme SSO")).toBeTruthy();
+    expect(screen.getByText("Last signed in 3d ago · Password, Acme SSO")).toBeTruthy();
     expect(screen.getByText("Never signed in · No way to sign in")).toBeTruthy();
   });
 
