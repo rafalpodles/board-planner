@@ -390,6 +390,22 @@ export async function resolveSession(
   return { sessionId, userId, expiresAt: new Date(expiresAt) };
 }
 
+export const RECENT_SIGN_IN_MS = 10 * 60 * 1000;
+export const RECENT_SIGN_IN_REQUIRED =
+  "For this, sign in again first: sign out, sign back in, and try again within 10 minutes.";
+
+/**
+ * Whether the session was opened in the last few minutes. Where no password can be asked for, a
+ * sign-in just made is the proof that whoever holds the session is its owner rather than somebody
+ * who borrowed it.
+ */
+export async function signedInRecently(sessionId: unknown): Promise<boolean> {
+  if (!sessionId) return false;
+  await connectDB();
+  const row = await Session.findById(sessionId).select("createdAt").lean();
+  return !!row?.createdAt && Date.now() - new Date(row.createdAt).getTime() < RECENT_SIGN_IN_MS;
+}
+
 export async function revokeSession(token: string): Promise<boolean> {
   if (!token) return false;
   await connectDB();

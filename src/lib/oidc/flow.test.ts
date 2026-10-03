@@ -117,6 +117,8 @@ describe("finishing a sign-in", () => {
       intent: "signin",
       invitationTokenHash: null,
       userId: null,
+      next: null,
+      bootstrap: null,
       claims: {
         issuer: "https://id.example.com",
         subject: "s1",
@@ -262,6 +264,8 @@ describe("GitHub, which speaks OAuth 2 without OpenID Connect", () => {
       intent: "signin",
       invitationTokenHash: null,
       userId: null,
+      next: null,
+      bootstrap: null,
       claims: {
         issuer: "https://ghe.example.com",
         subject: "4242",

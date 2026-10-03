@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const claimInvitation = vi.fn();
 const releaseInvitation = vi.fn();
@@ -229,5 +229,17 @@ describe("POST /api/invitations/accept", () => {
     expect((await POST(post({ ...FIELDS, password: "short" }))).status).toBe(400);
 
     expect((await POST(post())).status).toBe(429);
+  });
+});
+
+describe("with password sign-in off (BP-830)", () => {
+  beforeEach(() => {
+    process.env.PASSWORD_SIGN_IN = "off";
+  });
+  afterEach(() => {
+    delete process.env.PASSWORD_SIGN_IN;
+  });
+  it("makes no account with a password from an invitation", async () => {
+    expect((await POST(post())).status).toBe(403);
   });
 });

@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import { PasswordSignInOff } from "@/components/auth/PasswordSignInOff";
+import { usePasswordSignIn } from "@/hooks/use-password-sign-in";
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -133,11 +135,15 @@ function ResetForm() {
 }
 
 export default function ResetPasswordPage() {
+  const passwordSignIn = usePasswordSignIn();
   return (
     <div className="min-h-screen flex items-center justify-center px-4">
-      <Suspense fallback={null}>
-        <ResetForm />
-      </Suspense>
+      {passwordSignIn === false && <PasswordSignInOff />}
+      {passwordSignIn !== false && (
+        <Suspense fallback={null}>
+          <ResetForm />
+        </Suspense>
+      )}
     </div>
   );
 }

@@ -21,7 +21,7 @@ export function ProviderButtons({
   extraBody,
   before,
 }: {
-  intent: "signin" | "invite" | "link";
+  intent: "signin" | "invite" | "link" | "bootstrap";
   invitationToken?: string;
   verb?: string;
   exclude?: string[];
@@ -102,6 +102,14 @@ export function ProviderButtons({
   );
 }
 
+/** Where the ordinary answer is "sign in with your password", which an instance without them cannot do */
+export const SIGN_IN_REFUSALS_PASSWORDS_OFF: Record<string, string> = {
+  unproven:
+    "Your address here has not been confirmed, so a provider cannot sign you in by it. Ask an administrator to confirm it.",
+  not_linked:
+    "That sign-in is not linked to an account here yet. Sign in with a provider you have linked and link it under Settings → Security, or ask an administrator.",
+};
+
 export const SIGN_IN_REFUSALS: Record<string, string> = {
   failed: "Signing in with that provider did not work. Try again.",
   no_account: "No account here uses that address. Ask an administrator for an invitation.",
@@ -111,4 +119,6 @@ export const SIGN_IN_REFUSALS: Record<string, string> = {
   not_linked:
     "That sign-in is not linked to an account here yet. Sign in with your password and link it under Settings → Security, or ask for an invitation.",
   throttled: "Too many attempts. Try again in 15 minutes.",
+  claimed: "This instance is already set up. Sign in instead.",
+  no_email: "That provider gave no address, and the first account needs one. Try another provider.",
 };

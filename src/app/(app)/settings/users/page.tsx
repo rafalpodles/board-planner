@@ -13,6 +13,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
 import { AddToBoardModal } from "@/components/settings/AddToBoardModal";
 import { InviteModal } from "@/components/settings/InviteModal";
+import { usePasswordSignIn } from "@/hooks/use-password-sign-in";
 import { PendingInvitations } from "@/components/settings/PendingInvitations";
 import { generatePassword } from "@/lib/password-generator";
 import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";
@@ -51,6 +52,14 @@ export default function UsersPage() {
   const [mailWorks, setMailWorks] = useState(false);
   const [addingToBoard, setAddingToBoard] = useState<ApiUser | null>(null);
   const [showInvite, setShowInvite] = useState(false);
+  // Off: accounts come by invitation only, and nobody is handed a password
+  const passwordSignIn = usePasswordSignIn();
+  const [confirmingAddress, setConfirmingAddress] = useState(false);
+  const [confirmAddressOf, setConfirmAddressOf] = useState<ApiUser | null>(null);
+  const [confirmAddressError, setConfirmAddressError] = useState("");
+  const [confirmSignOut, setConfirmSignOut] = useState<ApiUser | null>(null);
+  const [signingOut, setSigningOut] = useState(false);
+  const [signOutError, setSignOutError] = useState("");
   const [invitations, setInvitations] = useState<ApiInvitation[]>([]);
 
   const api = useApi();
@@ -222,6 +231,39 @@ export default function UsersPage() {
     await refreshUsers();
   }
 
+  async function confirmAddress() {
+    if (!confirmAddressOf || confirmingAddress) return;
+    setConfirmingAddress(true);
+    setConfirmAddressError("");
+    try {
+      await api.put(`/api/users/${confirmAddressOf._id}`, { confirmEmail: true });
+    } catch (err) {
+      setConfirmAddressError(err instanceof Error ? err.message : "The address could not be confirmed");
+      setConfirmingAddress(false);
+      return;
+    }
+    setConfirmingAddress(false);
+    toast(`${confirmAddressOf.email} confirmed`, "success");
+    setConfirmAddressOf(null);
+    await refreshUsers();
+  }
+
+  async function signOutEverywhere() {
+    if (!confirmSignOut || signingOut) return;
+    setSigningOut(true);
+    setSignOutError("");
+    try {
+      await api.put(`/api/users/${confirmSignOut._id}`, { signOutEverywhere: true });
+    } catch (err) {
+      setSignOutError(err instanceof Error ? err.message : "They could not be signed out");
+      setSigningOut(false);
+      return;
+    }
+    setSigningOut(false);
+    toast(`${confirmSignOut.username} was signed out everywhere`, "success");
+    setConfirmSignOut(null);
+  }
+
   async function handleDelete() {
     if (!confirmDeleteUser || deleting) return;
     setDeleting(true);
@@ -254,9 +296,11 @@ export default function UsersPage() {
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-lg font-semibold">Users</h2>
         <div className="flex gap-2">
-          <Button variant="secondary" onClick={() => setShowNew(true)}>
-            New User
-          </Button>
+          {passwordSignIn !== false && (
+            <Button variant="secondary" onClick={() => setShowNew(true)}>
+              New User
+            </Button>
+          )}
           <Button onClick={() => setShowInvite(true)}>Invite</Button>
         </div>
       </div>
@@ -414,6 +458,7 @@ export default function UsersPage() {
               />
             </div>
 
+            {passwordSignIn !== false && (
             <div className="border-t border-border pt-4">
               {currentUser?._id === editUser._id ? (
                 <>
@@ -483,6 +528,41 @@ export default function UsersPage() {
                 </form>
               )}
             </div>
+            )}
+
+            {currentUser?._id !== editUser._id && (
+              <div className="border-t border-border pt-4 space-y-3">
+                {editUser.email && !editUser.emailVerifiedAt && (
+                  <div>
+                    <p className="text-sm font-medium mb-1">Address not confirmed</p>
+                    <p className="text-sm text-text-muted mb-2">
+                      Nothing has proven that {editUser.email} reaches them, so a sign-in provider cannot sign
+                      them in by it.
+                    </p>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => {
+                        setConfirmAddressOf(editUser);
+                        closeEdit();
+                      }}
+                    >
+                      Confirm address
+                    </Button>
+                  </div>
+                )}
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    setConfirmSignOut(editUser);
+                    closeEdit();
+                  }}
+                >
+                  Sign out everywhere
+                </Button>
+              </div>
+            )}
 
             <p className="text-sm text-text-muted">
               Board access is granted per board, under that board&apos;s Settings → General.
@@ -514,6 +594,38 @@ export default function UsersPage() {
         )}
       </Modal>
 
+      <ConfirmDialog
+        open={!!confirmAddressOf}
+        onClose={() => {
+          setConfirmAddressOf(null);
+          setConfirmAddressError("");
+        }}
+        onConfirm={confirmAddress}
+        title="Confirm address"
+        message={`Whoever holds ${confirmAddressOf?.email ?? ""} at a sign-in provider will be able to sign in as ${confirmAddressOf?.username ?? ""}. Confirm only if you know it is theirs.`}
+        confirmLabel="Confirm address"
+        loadingLabel="Confirming…"
+        loading={confirmingAddress}
+        error={confirmAddressError}
+      />
+      <ConfirmDialog
+        open={!!confirmSignOut}
+        onClose={() => {
+          setConfirmSignOut(null);
+          setSignOutError("");
+        }}
+        onConfirm={signOutEverywhere}
+        title="Sign out everywhere"
+        message={`Ends every session, API token, connected app and enrolled machine of ${confirmSignOut?.fullName ?? ""}, and unlinks their sign-in providers.${
+          passwordSignIn === false
+            ? " They sign back in by a confirmed address with an OpenID Connect or Google provider; GitHub alone cannot sign them in again."
+            : ""
+        }`}
+        confirmLabel="Sign out everywhere"
+        loadingLabel="Signing out…"
+        loading={signingOut}
+        error={signOutError}
+      />
       <ConfirmDialog
         open={!!confirmDeleteUser}
         onClose={() => {

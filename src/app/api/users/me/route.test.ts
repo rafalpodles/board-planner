@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const getAuthUser = vi.fn();
 const compare = vi.fn();
@@ -482,5 +482,20 @@ describe("PUT /api/users/me — changing your own display name", () => {
 
     expect(response.status).toBe(404);
     expect(logInstanceAudit).not.toHaveBeenCalled();
+  });
+});
+
+describe("with password sign-in off (BP-830)", () => {
+  beforeEach(() => {
+    process.env.PASSWORD_SIGN_IN = "off";
+  });
+  afterEach(() => {
+    delete process.env.PASSWORD_SIGN_IN;
+  });
+  it("leaves a change of address to an administrator", async () => {
+    const res = await PUT(put({ email: "new@example.com", currentPassword: "right" }), context);
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toContain("an administrator changes addresses");
   });
 });

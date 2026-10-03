@@ -4,6 +4,7 @@ import { normaliseEmail } from "@/lib/email";
 import { randomToken, sha256 } from "@/lib/oauth";
 import { githubApiBase, githubWebBase } from "@/lib/github-host";
 import { OidcFlow } from "@/models/oidcFlow";
+import { OidcIntent } from "@/types";
 import { OidcProvider } from "./providers";
 
 export const FLOW_COOKIE = "bp_oidc";
@@ -61,9 +62,11 @@ export function redirectUri(provider: OidcProvider, origin: string): string {
 export async function beginFlow(input: {
   provider: OidcProvider;
   origin: string;
-  intent: "signin" | "invite" | "link";
+  intent: OidcIntent;
   invitationToken?: string;
   userId?: string;
+  next?: string;
+  bootstrap?: { username: string; fullName: string };
 }): Promise<{ url: string; binder: string }> {
   const config = await configFor(input.provider);
   const codeVerifier = client.randomPKCECodeVerifier();
@@ -82,6 +85,8 @@ export async function beginFlow(input: {
     intent: input.intent,
     invitationTokenHash: input.invitationToken ? sha256(input.invitationToken) : null,
     user: input.userId ?? null,
+    next: input.next ?? null,
+    bootstrap: input.bootstrap ?? null,
     expiresAt: new Date(Date.now() + FLOW_TTL_MS),
   });
 
@@ -109,9 +114,11 @@ export interface VerifiedClaims {
 export type FlowOutcome =
   | {
       ok: true;
-      intent: "signin" | "invite" | "link";
+      intent: OidcIntent;
       invitationTokenHash: string | null;
       userId: string | null;
+      next: string | null;
+      bootstrap: { username: string; fullName: string } | null;
       claims: VerifiedClaims;
     }
   | { ok: false; reason: "no_flow" | "rejected" };
@@ -161,6 +168,8 @@ export async function finishFlow(input: {
       intent: flow.intent,
       invitationTokenHash: flow.invitationTokenHash,
       userId: flow.user ? String(flow.user) : null,
+      next: flow.next ?? null,
+      bootstrap: flow.bootstrap ? { username: flow.bootstrap.username, fullName: flow.bootstrap.fullName } : null,
       claims: verified,
     };
   } catch (err) {

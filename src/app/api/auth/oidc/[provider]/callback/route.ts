@@ -18,6 +18,7 @@ import { Identity } from "@/models/identity";
 import { Invitation } from "@/models/invitation";
 import { User } from "@/models/user";
 import { IUser } from "@/types";
+import { duplicateKeyField } from "@/lib/mongo-errors";
 
 const CALLBACKS_PER_SOURCE = 60;
 
@@ -151,17 +152,69 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
     ]);
   }
 
+  if (outcome.intent === "bootstrap") {
+    const made = await setUpFirstAccount(provider, claims, outcome.bootstrap);
+    if ("refused" in made) return redirectTo(origin, `/login?sso=${made.refused}`);
+    return signInAs(made.user, request, origin, clientIp, "/projects");
+  }
+
   const found = await accountFor(provider, claims);
   if ("refused" in found) return redirectTo(origin, `/login?sso=${found.refused}`);
   if (found.user.kind === "machine") return redirectTo(origin, "/login?sso=no_account");
+  return signInAs(found.user, request, origin, clientIp, outcome.next ?? "/projects");
+}
 
+async function signInAs(user: IUser, request: Request, origin: string, clientIp: string | null, path: string) {
   const { token, absoluteExpiresAt } = await createSession({
-    userId: found.user._id,
+    userId: user._id,
     userAgent: request.headers.get("user-agent"),
     ip: clientIp,
   });
-  return redirectTo(origin, "/projects", [
-    buildSessionCookie(token, absoluteExpiresAt, request),
-    ...legacySessionCookies(request),
-  ]);
+  return redirectTo(origin, path, [buildSessionCookie(token, absoluteExpiresAt, request), ...legacySessionCookies(request)]);
+}
+
+/**
+ * The first account, on an instance that has none, through a provider: the setup code was checked
+ * when the flow began, and the instance has to be empty still. Its address is proven only when the
+ * provider's word is proof of the mailbox.
+ */
+async function setUpFirstAccount(
+  provider: OidcProvider,
+  claims: VerifiedClaims,
+  profile: { username: string; fullName: string } | null
+) {
+  if (!profile) return { refused: "failed" as const };
+  if ((await User.countDocuments()) > 0) return { refused: "claimed" as const };
+  if (!claims.email) return { refused: "no_email" as const };
+  let user;
+  try {
+    user = await User.create({
+      username: profile.username,
+      fullName: profile.fullName,
+      email: claims.email,
+      emailVerifiedAt: provider.linksByAddress && claims.emailVerified ? new Date() : null,
+      role: "admin",
+    });
+  } catch (err) {
+    // Only a duplicate means somebody else got there first; anything else is a failure to report
+    if (duplicateKeyField(err)) return { refused: "claimed" as const };
+    throw err;
+  }
+  // An administrator with no way in would leave the instance claimed and nobody able to enter it
+  const linked = await link(provider, claims, user, "when the instance was set up").catch(async (err) => {
+    await User.deleteOne({ _id: user._id }).catch(() => {});
+    throw err;
+  });
+  if (!linked) {
+    await User.deleteOne({ _id: user._id }).catch(() => {});
+    return { refused: "linked" as const };
+  }
+  void logInstanceAudit({
+    action: "user_created",
+    user: null,
+    actorUsername: "",
+    target: user.username,
+    detail: `the first account on this instance, made an administrator, signing in with ${provider.label}`,
+  });
+  return { user };
 }

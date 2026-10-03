@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { passwordSignInEnabled, passwordSignInOff } from "@/lib/password-sign-in";
 import bcrypt from "bcryptjs";
 import { readJsonBody } from "@/lib/request-body";
 import { connectDB } from "@/lib/db";
@@ -13,6 +14,7 @@ import { completeAcceptance } from "@/lib/invitation-acceptance";
 const ATTEMPTS_PER_SOURCE = 20;
 
 export async function POST(request: Request) {
+  if (!passwordSignInEnabled()) return passwordSignInOff();
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
 

@@ -454,3 +454,18 @@ describe("POST /api/auth/login — the database is unreachable", () => {
     expect(response.status).toBe(400);
   });
 });
+
+describe("with password sign-in off (BP-830)", () => {
+  beforeEach(() => {
+    process.env.PASSWORD_SIGN_IN = "off";
+  });
+  afterEach(() => {
+    delete process.env.PASSWORD_SIGN_IN;
+  });
+  it("refuses a password, without checking it", async () => {
+    const res = await POST(request());
+
+    expect(res.status).toBe(403);
+    expect(verifyCredentials).not.toHaveBeenCalled();
+  });
+});

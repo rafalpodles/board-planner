@@ -2,11 +2,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, act } from "@testing-library/react";
 
-const { auth, fetchMock } = vi.hoisted(() => ({
+const { auth, fetchMock, passwordSignIn } = vi.hoisted(() => ({
+  passwordSignIn: { value: true as boolean | null },
   auth: { user: null, isLoading: false, logout: vi.fn(), refreshUser: vi.fn() },
   fetchMock: vi.fn(),
 }));
 
+vi.mock("@/hooks/use-password-sign-in", () => ({ usePasswordSignIn: () => passwordSignIn.value }));
 vi.mock("@/hooks/use-auth", () => ({ useAuth: () => auth }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -25,6 +27,7 @@ const OPEN = { email: "ada@example.com", role: "member", boards: [], invitedBy: 
 
 beforeEach(() => {
   vi.clearAllMocks();
+  passwordSignIn.value = true;
   vi.stubGlobal("fetch", fetchMock);
 });
 afterEach(() => {
@@ -80,5 +83,20 @@ describe("the invitation page", () => {
     expect(await screen.findByText("Too many attempts. Try again in 15 minutes.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
     expect(screen.queryByText("This invitation cannot be used")).toBeNull();
+  });
+});
+
+describe("the invitation page with password sign-in off (BP-830)", () => {
+  it("offers no password form, only the providers", async () => {
+    passwordSignIn.value = false;
+    fetchMock.mockImplementation((url: string) =>
+      url === "/api/auth/oidc/providers" ? answer(200, [{ id: "oidc", label: "Acme" }]) : answer(200, OPEN)
+    );
+
+    render(<InvitePage />);
+
+    expect(await screen.findByRole("button", { name: "Accept with Acme" })).toBeTruthy();
+    expect(screen.queryByLabelText("Password")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Create my account" })).toBeNull();
   });
 });

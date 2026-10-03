@@ -3,6 +3,7 @@ import { connectDB } from "@/lib/db";
 import { isDatabaseUnreachable } from "@/lib/db-errors";
 import { databaseUnavailable } from "@/lib/middleware";
 import { User } from "@/models/user";
+import { passwordSignInEnabled } from "@/lib/password-sign-in";
 
 /**
  * Whether this instance has been claimed — that is, whether it has any user at all.
@@ -26,14 +27,20 @@ import { User } from "@/models/user";
  * one to describe as none.
  */
 export async function GET() {
+  // Read from the environment, so it is answered even when the database is not: a page that waited
+  // on it rendered nothing, and one that guessed showed a password form an off instance refuses
+  const passwordSignIn = passwordSignInEnabled();
   try {
     await connectDB();
     const users = await User.countDocuments();
-    return NextResponse.json({ unclaimed: users === 0 });
+    return NextResponse.json({ unclaimed: users === 0, passwordSignIn });
   } catch (e) {
     // Unreachable is not "unclaimed": answering true here would offer to create the first
     // administrator on an instance that may already have one
-    if (isDatabaseUnreachable(e)) return databaseUnavailable();
+    if (isDatabaseUnreachable(e)) {
+      const unavailable = databaseUnavailable();
+      return NextResponse.json({ ...(await unavailable.json()), passwordSignIn }, unavailable);
+    }
     throw e;
   }
 }

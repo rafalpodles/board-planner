@@ -33,6 +33,9 @@ export async function bootNode(): Promise<void> {
     // when the login route first loaded the module, which read as a 500 on sign-in (BP-773)
     const { assertSessionConfig } = await import("@/lib/session");
     assertSessionConfig();
+    // Passwords off with no provider is an instance nobody can sign in to (BP-830)
+    const { assertSignInConfig } = await import("@/lib/password-sign-in");
+    assertSignInConfig();
   } catch (err) {
     // Exiting rather than throwing, and this is not belt-and-braces. `NextServer.prepare()`
     // awaits the real prepare only when `dev` (next/dist/server/next.js), so under `next start`

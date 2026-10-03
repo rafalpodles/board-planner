@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const verifyCredentials = vi.fn();
 const oauthClientFindOne = vi.fn();
@@ -682,5 +682,31 @@ describe("POST /oauth/authorize consent phase", () => {
 
     expect(body).toContain("Account no longer exists");
     expect(oauthCodeCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("with password sign-in off (BP-830)", () => {
+  beforeEach(() => {
+    process.env.PASSWORD_SIGN_IN = "off";
+  });
+  afterEach(() => {
+    delete process.env.PASSWORD_SIGN_IN;
+  });
+  it("offers no password form, and sends the browser to sign in and come back", async () => {
+    resolveSession.mockResolvedValue(null);
+
+    const html = await (await GET(authorizeGet())).text();
+
+    expect(html).not.toContain('type="password"');
+    expect(html).toContain('action="/login"');
+    expect(html).toContain('name="next" value="/oauth/authorize?');
+  });
+
+  it("checks no password posted to it", async () => {
+    const html = await attempt("victim");
+
+    expect(html).not.toContain("Signed in");
+    expect(html).toContain('action="/login"');
+    expect(verifyCredentials).not.toHaveBeenCalled();
   });
 });

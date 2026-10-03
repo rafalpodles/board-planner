@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
+import { passwordSignInEnabled } from "@/lib/password-sign-in";
 import { readJsonBody } from "@/lib/request-body";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
 import { getAuthUser, getClientIp, PASSWORD_COST_FACTOR } from "@/lib/auth";
-import { anonymousMultiplier, isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
-import { setupCodeIsConfigured, setupCodeMatches } from "@/lib/setup-code";
+import { refuseSetupCode } from "@/lib/setup-code";
 import { checkNewAccount } from "@/lib/new-account";
 import { duplicateKeyField } from "@/lib/mongo-errors";
 import { ProvenanceError, provenanceRefusal } from "@/lib/session";
@@ -27,6 +27,15 @@ export const GET = withAdmin(async (request) => {
 });
 
 export async function POST(request: Request) {
+  if (!passwordSignInEnabled()) {
+    return NextResponse.json(
+      {
+        error:
+          "Password sign-in is turned off on this instance: the first account is set up with a sign-in provider, and everyone else is invited.",
+      },
+      { status: 403 }
+    );
+  }
   await connectDB();
 
   const read = await readJsonBody<{
@@ -52,19 +61,8 @@ export async function POST(request: Request) {
   if (isBootstrap) {
     const refusal = provenanceRefusal(request);
     if (refusal) return refusal;
-    // A configured token is throttled before it is compared; a generated code is checked first, so a
-    // stranger filling the shared bucket cannot lock the operator out of an unguessable one
-    const clientIp = getClientIp(request);
-    const throttleKey = sourceKey(clientIp ?? "-", "bootstrap");
-    const throttled = () => isRateLimited(throttleKey, anonymousMultiplier(clientIp, 10));
-    const tooMany = () =>
-      NextResponse.json({ error: "Too many attempts. Try again in 15 minutes." }, { status: 429 });
-    if (setupCodeIsConfigured() && (await throttled())) return tooMany();
-    if (!setupCodeMatches(body.setupCode)) {
-      if (await throttled()) return tooMany();
-      await recordFailedAttempt(throttleKey);
-      return NextResponse.json({ error: "The setup code is missing or wrong." }, { status: 403 });
-    }
+    const refused = await refuseSetupCode(getClientIp(request), body.setupCode);
+    if (refused) return refused;
   } else {
     try {
       authUser = await getAuthUser(request);

@@ -231,6 +231,8 @@ export interface IIdentity {
   lastUsedAt: Date | null;
 }
 
+export type OidcIntent = "signin" | "invite" | "link" | "bootstrap";
+
 export interface IOidcFlow {
   _id: Types.ObjectId;
   binderHash: string;
@@ -238,9 +240,13 @@ export interface IOidcFlow {
   state: string;
   nonce: string;
   codeVerifier: string;
-  intent: "signin" | "invite" | "link";
+  intent: OidcIntent;
   invitationTokenHash: string | null;
   user: Types.ObjectId | null;
+  /** Where a sign-in returns to: a same-origin path, already checked */
+  next: string | null;
+  /** The first account's profile, for a flow that sets up an empty instance */
+  bootstrap: { username: string; fullName: string } | null;
   claims: { issuer: string; subject: string; email: string } | null;
   expiresAt: Date;
   createdAt: Date;
@@ -1182,6 +1188,8 @@ export interface ApiUser {
   collapseEmptyColumns?: boolean;
   role: UserRole;
   createdAt: string;
+  /** When the address was last proven to reach the account; null for an address only typed in */
+  emailVerifiedAt?: string | null;
 }
 
 /** What GET /api/projects/:id/assignable-users returns: enough to name someone and assign them */
@@ -1629,6 +1637,8 @@ export const INSTANCE_AUDIT_ACTIONS = [
   "invitation_accepted",
   "identity_linked",
   "identity_unlinked",
+  "user_email_confirmed",
+  "user_signed_out_everywhere",
   // A refused change accepted, declined, or given up on. Audited at the instance rather than the
   // project, because what accepting spends is the machine owner's pinned GitHub identity and the
   // CI minutes of whatever repository the push lands in — neither of which belongs to the board.

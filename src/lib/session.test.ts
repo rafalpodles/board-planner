@@ -5,10 +5,11 @@ const updateOne = vi.fn();
 const create = vi.fn();
 const deleteOne = vi.fn();
 const deleteMany = vi.fn();
+const findById = vi.fn();
 
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/session", () => ({
-  Session: { findOne, updateOne, create, deleteOne, deleteMany },
+  Session: { findOne, updateOne, create, deleteOne, deleteMany, findById },
 }));
 const apiTokenDeleteMany = vi.fn();
 const oauthTokenDeleteMany = vi.fn();
@@ -48,6 +49,8 @@ const {
   SESSION_IDLE_TTL_MS,
   SESSION_ABSOLUTE_TTL_MS,
   SESSION_SLIDE_THROTTLE_MS,
+  signedInRecently,
+  RECENT_SIGN_IN_MS,
 } = await import("./session");
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -752,5 +755,24 @@ describe("revokeUserCredentials", () => {
     expect(update.$set.credentialHash).toMatch(/^\$2[aby]\$/);
     const bcrypt = (await vi.importActual<typeof import("bcryptjs")>("bcryptjs")).default;
     expect(await bcrypt.compare("", update.$set.credentialHash)).toBe(false);
+  });
+});
+
+describe("signedInRecently (BP-830)", () => {
+  const opened = (msAgo: number) =>
+    findById.mockReturnValue({ select: () => ({ lean: () => Promise.resolve({ createdAt: new Date(Date.now() - msAgo) }) }) });
+
+  it("is true for a session opened minutes ago", async () => {
+    opened(RECENT_SIGN_IN_MS - 60_000);
+    expect(await signedInRecently("s1")).toBe(true);
+  });
+
+  it("is false for one opened longer ago, for none, and for no session at all", async () => {
+    opened(RECENT_SIGN_IN_MS + 60_000);
+    expect(await signedInRecently("s1")).toBe(false);
+
+    findById.mockReturnValue({ select: () => ({ lean: () => Promise.resolve(null) }) });
+    expect(await signedInRecently("s1")).toBe(false);
+    expect(await signedInRecently(undefined)).toBe(false);
   });
 });

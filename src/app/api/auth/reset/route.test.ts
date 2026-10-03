@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const consumeResetToken = vi.fn();
 const invalidateResetTokens = vi.fn();
@@ -172,5 +172,17 @@ describe("POST /api/auth/reset and sign-in providers", () => {
 
     expect(res.status).toBe(200);
     expect(logInstanceAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "identity_unlinked" }));
+  });
+});
+
+describe("with password sign-in off (BP-830)", () => {
+  beforeEach(() => {
+    process.env.PASSWORD_SIGN_IN = "off";
+  });
+  afterEach(() => {
+    delete process.env.PASSWORD_SIGN_IN;
+  });
+  it("sets no password from a link", async () => {
+    expect((await POST(post())).status).toBe(403);
   });
 });

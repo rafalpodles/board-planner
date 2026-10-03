@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { isValidUsername } from "@/lib/identifiers";
 
 const create = vi.fn();
@@ -294,5 +294,18 @@ describe("an account taking an address", () => {
 
     expect(res.status).toBe(201);
     expect(revokePendingInvitationsFor).toHaveBeenCalledWith("ada@example.com");
+  });
+});
+
+describe("with password sign-in off (BP-830)", () => {
+  beforeEach(() => {
+    process.env.PASSWORD_SIGN_IN = "off";
+  });
+  afterEach(() => {
+    delete process.env.PASSWORD_SIGN_IN;
+  });
+  it("makes no account with a password, first or not", async () => {
+    expect((await post({ ...VALID, username: "first", email: "first@example.com", setupCode: "x" })).status).toBe(403);
+    expect(create).not.toHaveBeenCalled();
   });
 });

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { passwordSignInEnabled, passwordSignInOff } from "@/lib/password-sign-in";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
 import { getClientIp, MIN_PASSWORD_LENGTH, PASSWORD_COST_FACTOR } from "@/lib/auth";
@@ -16,6 +17,7 @@ import { logInstanceAudit } from "@/lib/instanceAudit";
 import { User } from "@/models/user";
 
 export const PUT = withAuth(async (request, { user }) => {
+  if (!passwordSignInEnabled()) return passwordSignInOff();
   await connectDB();
 
   let body: { currentPassword?: unknown; newPassword?: unknown };
