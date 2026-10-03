@@ -162,6 +162,23 @@ describe("register", () => {
     expect(logged).toHaveBeenCalledWith(expect.stringContaining("COOKIE_ALLOW_INSECURE=1 requires"));
   });
 
+  // BP-830. Passwords off with no provider is an instance nobody can sign in to
+  it("exits when password sign-in is off and no provider is configured", async () => {
+    process.env.NEXT_RUNTIME = "nodejs";
+    delete process.env.ENCRYPTION_KEY;
+    process.env.PASSWORD_SIGN_IN = "off";
+    for (const key of ["OIDC_ISSUER", "GOOGLE_CLIENT_ID", "GITHUB_OAUTH_CLIENT_ID"]) delete process.env[key];
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`exit:${code}`);
+    }) as never);
+    const { register } = await import("./instrumentation");
+
+    await expect(register()).rejects.toThrow("exit:1");
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining("PASSWORD_SIGN_IN=off needs a sign-in provider"));
+  });
+
   it("starts normally when no key is configured at all", async () => {
     process.env.NEXT_RUNTIME = "nodejs";
     delete process.env.ENCRYPTION_KEY;
