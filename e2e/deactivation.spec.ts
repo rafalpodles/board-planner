@@ -7,12 +7,12 @@ import {
   MEMBER_PASSWORD,
   MEMBER_USERNAME,
   PROJECT_ID,
-  QUIET_TASK_ID,
+  DECOY_TASK_ID,
   WORKER_CREDENTIAL,
   seed,
   seedMachine,
 } from "./seed";
-import { ADMIN_AUTH, MEMBER_AUTH } from "./api";
+import { ADMIN_AUTH, MEMBER_AUTH, SAME_ORIGIN } from "./api";
 import { signIn, signInContext } from "./session";
 
 /**
@@ -116,9 +116,9 @@ test("a deactivated account loses every credential at once, its machine too, and
 });
 
 test("a deactivated watcher is told nothing about the task", async ({ request }) => {
-  await (await db()).collection("tasks").updateOne({ _id: QUIET_TASK_ID }, { $set: { watchers: [MEMBER_ID] } });
+  await (await db()).collection("tasks").updateOne({ _id: DECOY_TASK_ID }, { $set: { watchers: [MEMBER_ID] } });
   const comment = (body: string) =>
-    request.post(`/api/projects/${PROJECT_ID}/tasks/${QUIET_TASK_ID}/comments`, {
+    request.post(`/api/projects/${PROJECT_ID}/tasks/${DECOY_TASK_ID}/comments`, {
       headers: ADMIN_AUTH,
       data: { body },
     });
@@ -142,7 +142,10 @@ test("an administrator is offered no way to deactivate themselves", async ({ pag
   await expect(page.getByRole("dialog")).toBeVisible();
 
   await expect(page.getByRole("button", { name: "Deactivate" })).toHaveCount(0);
-  const refused = await page.request.put(`/api/users/${await adminId(page)}`, { data: { deactivate: true } });
+  const refused = await page.request.put(`/api/users/${await adminId(page)}`, {
+    headers: SAME_ORIGIN,
+    data: { deactivate: true },
+  });
   expect(refused.status()).toBe(400);
 });
 
