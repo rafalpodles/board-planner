@@ -134,3 +134,14 @@ test("a free board can still disconnect the Coda settings it kept", async ({ pag
   expect(stored?.codaDocId).toBe("");
   expect(stored?.codaToken ?? "").toBe("");
 });
+
+test("a plan that cannot be read is said so, not shown to a Pro board as an upsell", async ({ page, request }) => {
+  await useLicenceKey(request, e2eLicence());
+  await signIn(page);
+  await page.route("**/api/entitlements", (route) => route.fulfill({ status: 500, body: "{}" }));
+
+  await openCoda(page);
+
+  await expect(page.getByRole("alert").filter({ hasText: "Couldn't check this instance's plan" })).toBeVisible();
+  await expect(page.getByTestId("pro-upsell")).toHaveCount(0);
+});
