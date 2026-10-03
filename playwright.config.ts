@@ -79,6 +79,12 @@ export const PROXIED_BASE_URL = `http://localhost:${PROXIED_PORT}`;
 // is what the file's own test.skip() at the top is for.
 export const RUN_PROXIED_SERVER = process.env.E2E_PROXIED_SERVER === "1";
 
+// A third, with PASSWORD_SIGN_IN=off (BP-830), for password-sign-in-off.spec.ts. Opt-in for the
+// same reason as the proxied server, and outside the PORT + 0..9 block for the same reason.
+const PASSWORDLESS_PORT = Number(process.env.E2E_PASSWORDLESS_PORT ?? PORT + 10004);
+export const PASSWORDLESS_BASE_URL = `http://localhost:${PASSWORDLESS_PORT}`;
+export const RUN_PASSWORDLESS_SERVER = process.env.E2E_PASSWORDLESS_SERVER === "1";
+
 // `next start` over a fresh build instead of `next dev`, for the specs whose subject only exists in
 // production output — the CSP nonce, where dev adds 'unsafe-eval' and scripts of its own (BP-313).
 // Only content-security-policy.spec.ts and keep-alive-timeout.spec.ts are run this way; the rest of the suite leans on dev-only
@@ -396,6 +402,24 @@ export default defineConfig({
               COOKIE_ALLOW_INSECURE: "auto",
               APP_ORIGIN: PROXIED_BASE_URL,
               NEXT_DIST_DIR: ".next-proxied",
+            },
+          },
+        ]
+      : []),
+    ...(RUN_PASSWORDLESS_SERVER
+      ? [
+          {
+            command: `npm run dev -- --port ${PASSWORDLESS_PORT}`,
+            url: PASSWORDLESS_BASE_URL,
+            reuseExistingServer: false,
+            timeout: 240_000,
+            stdout: "pipe" as const,
+            stderr: "pipe" as const,
+            env: {
+              ...devServerEnv(PASSWORDLESS_BASE_URL),
+              PASSWORD_SIGN_IN: "off",
+              APP_ORIGIN: PASSWORDLESS_BASE_URL,
+              NEXT_DIST_DIR: ".next-passwordless",
             },
           },
         ]

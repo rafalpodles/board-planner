@@ -424,6 +424,8 @@ jobs:
           # see RUN_PROXIED_SERVER in playwright.config.ts. Every other group leaves this unset and
           # gets exactly the servers it already started (BP-409).
           E2E_PROXIED_SERVER: ${{ matrix.group == 'people' && '1' || '' }}
+          # The same for the server with password sign-in off (BP-830)
+          E2E_PASSWORDLESS_SERVER: ${{ matrix.group == 'people' && '1' || '' }}
         run: npx playwright test --project=${{ matrix.group }}
 
       # The trace is the only way to see what the page looked like when a run fails on a machine
