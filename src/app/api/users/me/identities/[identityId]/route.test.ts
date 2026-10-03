@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const identityFindOne = vi.fn();
 const identityCount = vi.fn();
@@ -109,5 +109,23 @@ describe("DELETE /api/users/me/identities/:id", () => {
 
     expect((await unlink()).status).toBe(403);
     expect(identityFindOne).not.toHaveBeenCalled();
+  });
+});
+
+describe("with password sign-in off (BP-830)", () => {
+  afterEach(() => {
+    delete process.env.PASSWORD_SIGN_IN;
+  });
+
+  // The password is still on the account, but it signs nobody in: unlinking the last provider
+  // would leave the account no way in at all
+  it("counts a password as no way in", async () => {
+    process.env.PASSWORD_SIGN_IN = "off";
+
+    const res = await unlink();
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toContain("Link another provider first");
+    expect(identityDelete).not.toHaveBeenCalled();
   });
 });

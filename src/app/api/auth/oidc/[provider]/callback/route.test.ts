@@ -8,6 +8,9 @@ const identityUpdateOne = vi.fn();
 const identityDeleteOne = vi.fn();
 const userFindById = vi.fn();
 const userFindOne = vi.fn();
+const userCount = vi.fn();
+const userCreate = vi.fn();
+const userDeleteOne = vi.fn();
 const invitationFindOne = vi.fn();
 const createSession = vi.fn();
 const getAuthUser = vi.fn();
@@ -53,7 +56,9 @@ vi.mock("@/models/identity", () => ({
     deleteOne: identityDeleteOne,
   },
 }));
-vi.mock("@/models/user", () => ({ User: { findById: userFindById, findOne: userFindOne } }));
+vi.mock("@/models/user", () => ({
+  User: { findById: userFindById, findOne: userFindOne, countDocuments: userCount, create: userCreate, deleteOne: userDeleteOne },
+}));
 vi.mock("@/models/invitation", () => ({ Invitation: { findOne: invitationFindOne } }));
 
 const { GET } = await import("./route");
@@ -71,7 +76,7 @@ const location = (res: Response) => {
 };
 const lean = (value: unknown) => ({ lean: () => Promise.resolve(value) });
 
-function finishes(intent: "signin" | "invite" | "link", claims: Record<string, unknown> = {}, extra = {}) {
+function finishes(intent: "signin" | "invite" | "link" | "bootstrap", claims: Record<string, unknown> = {}, extra = {}) {
   const person = { issuer: ISSUER, subject: "s1", email: "ada@example.com", emailVerified: true, name: "", ...claims };
   finishFlow.mockResolvedValue({
     ok: true,
@@ -369,5 +374,80 @@ describe("GET /api/auth/oidc/:provider/callback, accepting an invitation", () =>
     expect(location(await callback())).toBe("/invite/sso?error=linked");
     expect(identityFindOne).toHaveBeenCalledWith({ issuer: ISSUER, subject: "s1" });
     expect(holdForAcceptance).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /api/auth/oidc/:provider/callback, signing in to go somewhere", () => {
+  it("lands where the sign-in was asked for", async () => {
+    finishes("signin", {}, { next: "/oauth/authorize?client_id=c1" });
+    identityFindOne.mockReturnValue(lean({ _id: "i1", user: "u1" }));
+
+    expect(location(await callback())).toBe("/oauth/authorize?client_id=c1");
+  });
+});
+
+describe("GET /api/auth/oidc/:provider/callback, setting up an empty instance (BP-830)", () => {
+  const PROFILE = { username: "ada", fullName: "Ada Lovelace" };
+
+  beforeEach(() => {
+    userCount.mockResolvedValue(0);
+    userCreate.mockImplementation(async (doc: Record<string, unknown>) => ({ _id: "u-first", ...doc }));
+    userDeleteOne.mockResolvedValue({});
+  });
+
+  it("makes the first administrator, linked to the provider, and signs them in", async () => {
+    finishes("bootstrap", {}, { bootstrap: PROFILE });
+
+    const res = await callback();
+
+    expect(location(res)).toBe("/projects");
+    expect(userCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ username: "ada", fullName: "Ada Lovelace", email: "ada@example.com", role: "admin" })
+    );
+    expect(userCreate.mock.calls[0][0].emailVerifiedAt).toBeInstanceOf(Date);
+    expect(identityCreate).toHaveBeenCalledWith(expect.objectContaining({ user: "u-first", issuer: ISSUER, subject: "s1" }));
+    expect(createSession).toHaveBeenCalledWith(expect.objectContaining({ userId: "u-first" }));
+    expect(logInstanceAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "user_created", target: "ada" }));
+  });
+
+  it("proves no address on a provider whose word is not proof", async () => {
+    finishes("bootstrap", {}, { bootstrap: PROFILE });
+
+    await callback("github");
+
+    expect(userCreate.mock.calls[0][0].emailVerifiedAt).toBeNull();
+  });
+
+  it("refuses once the instance has an account, making none", async () => {
+    finishes("bootstrap", {}, { bootstrap: PROFILE });
+    userCount.mockResolvedValue(1);
+
+    expect(location(await callback())).toBe("/login?sso=claimed");
+    expect(userCreate).not.toHaveBeenCalled();
+  });
+
+  it("refuses a provider that gives no address", async () => {
+    finishes("bootstrap", { email: "", emailVerified: false }, { bootstrap: PROFILE });
+
+    expect(location(await callback())).toBe("/login?sso=no_email");
+    expect(userCreate).not.toHaveBeenCalled();
+  });
+
+  it("undoes the account when the identity is already linked elsewhere", async () => {
+    finishes("bootstrap", {}, { bootstrap: PROFILE });
+    identityCreate.mockRejectedValue(Object.assign(new Error("E11000"), { code: 11000 }));
+
+    expect(location(await callback())).toBe("/login?sso=linked");
+    expect(userDeleteOne).toHaveBeenCalledWith({ _id: "u-first" });
+    expect(createSession).not.toHaveBeenCalled();
+  });
+
+  // An administrator with no way in would leave the instance claimed and nobody able to enter
+  it("undoes the account when linking fails some other way", async () => {
+    finishes("bootstrap", {}, { bootstrap: PROFILE });
+    identityCreate.mockRejectedValue(new Error("mongo is having a moment"));
+
+    await expect(callback()).rejects.toThrow("mongo is having a moment");
+    expect(userDeleteOne).toHaveBeenCalledWith({ _id: "u-first" });
   });
 });

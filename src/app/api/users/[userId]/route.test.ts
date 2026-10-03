@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
@@ -832,5 +832,24 @@ describe("PUT /api/users/:id — the guards that keep an administrator standing"
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ error: "Cannot change your own role" });
     expect(target.save).not.toHaveBeenCalled();
+  });
+});
+
+describe("with password sign-in off (BP-830)", () => {
+  beforeEach(() => {
+    process.env.PASSWORD_SIGN_IN = "off";
+  });
+  afterEach(() => {
+    delete process.env.PASSWORD_SIGN_IN;
+  });
+  it("lets an administrator set no password, and changes nothing else in that request", async () => {
+    const target = targetDoc({ role: "member" });
+    found(target);
+
+    const res = await PUT(put({ password: "a-fresh-password", role: "admin" }), ctx());
+
+    expect(res.status).toBe(403);
+    expect(target.save).not.toHaveBeenCalled();
+    expect(revokeUserCredentials).not.toHaveBeenCalled();
   });
 });

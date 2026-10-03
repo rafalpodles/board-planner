@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const userFindOne = vi.fn();
 const sendEmail = vi.fn();
@@ -188,5 +188,17 @@ describe("POST /api/auth/forgot", () => {
 
       expect((await POST(oversized())).status).toBe(413);
     });
+  });
+});
+
+describe("with password sign-in off (BP-830)", () => {
+  beforeEach(() => {
+    process.env.PASSWORD_SIGN_IN = "off";
+  });
+  afterEach(() => {
+    delete process.env.PASSWORD_SIGN_IN;
+  });
+  it("sends no reset link", async () => {
+    expect((await POST(post())).status).toBe(403);
   });
 });

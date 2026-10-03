@@ -1,10 +1,12 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const beginFlow = vi.fn();
 const getAuthUser = vi.fn();
 const userFindById = vi.fn();
 const findInvitationByToken = vi.fn();
 const compare = vi.fn();
+const userCount = vi.fn();
+const refuseSetupCode = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ getClientIp: () => "203.0.113.9", getAuthUser }));
@@ -22,7 +24,8 @@ vi.mock("@/lib/oidc/providers", () => ({
 }));
 vi.mock("@/lib/oidc/flow", () => ({ beginFlow, FLOW_COOKIE: "bp_oidc", FLOW_TTL_MS: 600_000 }));
 vi.mock("@/lib/invitations", () => ({ findInvitationByToken }));
-vi.mock("@/models/user", () => ({ User: { findById: userFindById } }));
+vi.mock("@/models/user", () => ({ User: { findById: userFindById, countDocuments: userCount } }));
+vi.mock("@/lib/setup-code", () => ({ refuseSetupCode }));
 vi.mock("bcryptjs", () => ({ default: { compare } }));
 
 const { POST } = await import("./route");
@@ -42,6 +45,8 @@ beforeEach(async () => {
   getAuthUser.mockResolvedValue({ _id: "u1", username: "ada" });
   withPassword("$2a$10$hash");
   compare.mockResolvedValue(true);
+  userCount.mockResolvedValue(0);
+  refuseSetupCode.mockResolvedValue(null);
 });
 
 describe("POST /api/auth/oidc/:provider/start", () => {
@@ -133,5 +138,67 @@ describe("POST /api/auth/oidc/:provider/start", () => {
       expect((await start({ intent: "link", currentPassword: "right" })).status).toBe(401);
       expect(beginFlow).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("returning to where sign-in was asked for", () => {
+  it("keeps a same-origin path for after the sign-in", async () => {
+    await start({ next: "/oauth/authorize?client_id=c1" });
+
+    expect(beginFlow).toHaveBeenCalledWith(expect.objectContaining({ next: "/oauth/authorize?client_id=c1" }));
+  });
+
+  it("turns an address elsewhere into the default", async () => {
+    await start({ next: "https://evil.example/x" });
+
+    expect(beginFlow).toHaveBeenCalledWith(expect.objectContaining({ next: "/projects" }));
+  });
+});
+
+describe("setting up an empty instance (BP-830)", () => {
+  const SETUP = { intent: "bootstrap", setupCode: "code", username: "Ada", fullName: "Ada Lovelace" };
+
+  it("starts once the setup code and the profile check out, carrying the profile", async () => {
+    const res = await start(SETUP);
+
+    expect(res.status).toBe(200);
+    expect(refuseSetupCode).toHaveBeenCalledWith("203.0.113.9", "code");
+    expect(beginFlow).toHaveBeenCalledWith(
+      expect.objectContaining({ intent: "bootstrap", bootstrap: { username: "ada", fullName: "Ada Lovelace" } })
+    );
+  });
+
+  it("refuses an instance that already has an account", async () => {
+    userCount.mockResolvedValue(1);
+
+    expect((await start(SETUP)).status).toBe(409);
+    expect(beginFlow).not.toHaveBeenCalled();
+  });
+
+  it("refuses a wrong setup code, as the gate answers", async () => {
+    refuseSetupCode.mockResolvedValue(new Response(null, { status: 403 }));
+
+    expect((await start(SETUP)).status).toBe(403);
+    expect(beginFlow).not.toHaveBeenCalled();
+  });
+
+  it("refuses a username the rules do not allow", async () => {
+    expect((await start({ ...SETUP, username: "no spaces allowed" })).status).toBe(400);
+    expect(beginFlow).not.toHaveBeenCalled();
+  });
+});
+
+describe("linking with password sign-in off (BP-830)", () => {
+  afterEach(() => {
+    delete process.env.PASSWORD_SIGN_IN;
+  });
+
+  // A password is no credential once passwords sign nobody in; the session is the proof, as for an
+  // account that never had one
+  it("asks an account that has a password for nothing", async () => {
+    process.env.PASSWORD_SIGN_IN = "off";
+
+    expect((await start({ intent: "link" })).status).toBe(200);
+    expect(compare).not.toHaveBeenCalled();
   });
 });

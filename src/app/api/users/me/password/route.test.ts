@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const getAuthUser = vi.fn();
 const compare = vi.fn();
@@ -162,5 +162,18 @@ describe("PUT /api/users/me/password", () => {
     expect(response.status).toBe(200);
     expect(await isRateLimited(shared, ANONYMOUS_ACCOUNT_ATTEMPTS)).toBe(false);
     expect(await isRateLimited(fromElsewhere, ANONYMOUS_ACCOUNT_ATTEMPTS)).toBe(false);
+  });
+});
+
+describe("with password sign-in off (BP-830)", () => {
+  beforeEach(() => {
+    process.env.PASSWORD_SIGN_IN = "off";
+  });
+  afterEach(() => {
+    delete process.env.PASSWORD_SIGN_IN;
+  });
+  it("changes no password", async () => {
+    expect((await PUT(put(), ctx())).status).toBe(403);
+    expect(revokeUserCredentials).not.toHaveBeenCalled();
   });
 });
