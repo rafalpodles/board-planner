@@ -30,7 +30,7 @@ export const POST = withAdmin(async (_request, { params, user }) => {
   }
   const reissued = await reissueInvitation(invitationId, user._id);
   if (!reissued) return NextResponse.json({ error: "Invitation not found" }, { status: 404 });
-  const { invitation, token } = reissued;
+  const { invitation, token, dropped } = reissued;
 
   const projects = await Project.find({ _id: { $in: invitation.boards.map((b) => b.project) } })
     .select("key name")
@@ -55,5 +55,9 @@ export const POST = withAdmin(async (_request, { params, user }) => {
   });
 
   const [view] = await toApiInvitations([invitation]);
-  return NextResponse.json({ invitation: view, ...delivery });
+  // Named, since nobody chose to drop them: their adders can no longer grant them (BP-843)
+  const droppedBoards = dropped.length
+    ? (await Project.find({ _id: { $in: dropped.map((b) => b.project) } }).select("key name").lean()).map((p) => p.name)
+    : [];
+  return NextResponse.json({ invitation: view, ...delivery, dropped: droppedBoards });
 });

@@ -13,7 +13,7 @@ import { providerById } from "@/lib/oidc/providers";
 import { Invitation } from "@/models/invitation";
 
 const ATTEMPTS_PER_SOURCE = 20;
-const EXPIRED = "That sign-in has expired. Open the invitation link again.";
+const EXPIRED = "That sign-in has expired. Sign in again, or open the invitation link.";
 
 /** The invitation a verified sign-in is waiting to accept, read without spending anything. */
 export async function GET(request: Request) {

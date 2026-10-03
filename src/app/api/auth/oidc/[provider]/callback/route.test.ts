@@ -107,6 +107,7 @@ beforeEach(async () => {
   createSession.mockResolvedValue({ token: "cps_new", absoluteExpiresAt: new Date() });
   signUpOpenTo.mockResolvedValue(false);
   holdForSignUp.mockResolvedValue("cpo_join");
+  invitationFindOne.mockReturnValue(lean(null));
 });
 
 describe("GET /api/auth/oidc/:provider/callback, signing in", () => {
@@ -313,6 +314,28 @@ describe("GET /api/auth/oidc/:provider/callback, signing up in an allowed domain
     expect(res.headers.get("set-cookie")).toContain("bp_oidc_accept=cpo_accept");
   });
 
+  // BP-839. The provider proving the invited mailbox stands in for the link, open domain or not
+  it("sends an invitee whose domain is not open into the invitation, rather than telling them to ask for one", async () => {
+    finishes("signin", { email: "grace@closed.example" });
+    signUpOpenTo.mockResolvedValue(false);
+    invitationFindOne.mockReturnValue(lean({ _id: "inv-1", email: "grace@closed.example", tokenHash: "h-grace" }));
+    holdForAcceptance.mockResolvedValue("cpo_accept");
+
+    const res = await callback();
+
+    expect(location(res)).toBe("/invite/sso");
+    expect(holdForAcceptance).toHaveBeenCalledWith(expect.objectContaining({ invitationTokenHash: "h-grace" }));
+    expect(holdForSignUp).not.toHaveBeenCalled();
+  });
+
+  it("never routes GitHub into an invitation by address", async () => {
+    finishes("signin", { email: "grace@closed.example" });
+    invitationFindOne.mockReturnValue(lean({ _id: "inv-1", email: "grace@closed.example", tokenHash: "h-grace" }));
+
+    expect(location(await callback("github"))).toBe("/login?sso=not_linked");
+    expect(holdForAcceptance).not.toHaveBeenCalled();
+  });
+
   it("refuses a newcomer whose domain is not open", async () => {
     finishes("signin", { email: "grace@elsewhere.example" });
     signUpOpenTo.mockResolvedValue(false);
@@ -354,6 +377,25 @@ describe("GET /api/auth/oidc/:provider/callback, the admin group (BP-833)", () =
 
     expect(applyAdminGroup).toHaveBeenCalledWith(ADA, "oidc", ["admins"]);
     expect(createSession).toHaveBeenCalled();
+  });
+});
+
+describe("GET /api/auth/oidc/:provider/callback, a round trip that failed (BP-843)", () => {
+  it.each([
+    ["link", "/settings/security?link=failed"],
+    ["invite", "/invite/sso?error=failed"],
+    ["signin", "/login?sso=failed"],
+    ["bootstrap", "/login?sso=failed"],
+  ])("sends a refused %s back to where it began", async (intent, path) => {
+    finishFlow.mockResolvedValue({ ok: false, reason: "rejected", intent });
+
+    expect(location(await callback())).toBe(path);
+  });
+
+  it("sends a browser with no flow at all to sign in", async () => {
+    finishFlow.mockResolvedValue({ ok: false, reason: "no_flow" });
+
+    expect(location(await callback())).toBe("/login?sso=failed");
   });
 });
 

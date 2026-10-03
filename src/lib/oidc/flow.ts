@@ -125,7 +125,9 @@ export type FlowOutcome =
       bootstrap: { username: string; fullName: string } | null;
       claims: VerifiedClaims;
     }
-  | { ok: false; reason: "no_flow" | "rejected" };
+  | { ok: false; reason: "no_flow" }
+  // The flow was found, so where it came from is known and the browser goes back there
+  | { ok: false; reason: "rejected"; intent: OidcIntent };
 
 /**
  * Spends the flow the browser's cookie names — once, whatever happens next — and has the library
@@ -166,7 +168,7 @@ export async function finishFlow(input: {
       });
       verified = idTokenPerson(input.provider, tokens.claims());
     }
-    if (!verified) return { ok: false, reason: "rejected" };
+    if (!verified) return { ok: false, reason: "rejected", intent: flow.intent };
     return {
       ok: true,
       intent: flow.intent,
@@ -178,7 +180,7 @@ export async function finishFlow(input: {
     };
   } catch (err) {
     console.error(`OIDC callback from ${input.provider.id} refused:`, err);
-    return { ok: false, reason: "rejected" };
+    return { ok: false, reason: "rejected", intent: flow.intent };
   }
 }
 

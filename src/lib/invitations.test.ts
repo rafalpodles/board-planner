@@ -8,6 +8,18 @@ const updateMany = vi.fn();
 const create = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+const authorityAtAcceptance = vi.fn();
+vi.mock("./invitation-authority", () => ({ authorityAtAcceptance }));
+let existingUsers: string[] = [];
+vi.mock("@/models/user", () => ({
+  User: {
+    find: (filter: { _id: { $in: unknown[] } }) => ({
+      select: () => ({
+        lean: async () => filter._id.$in.filter((id) => existingUsers.includes(String(id))).map((id) => ({ _id: id })),
+      }),
+    }),
+  },
+}));
 vi.mock("@/models/invitation", () => ({
   Invitation: { findOneAndUpdate, findOne, updateOne, updateMany, create },
 }));
@@ -99,6 +111,63 @@ describe("issuing an invitation", () => {
 });
 
 describe("sending again", () => {
+  const BOARD_A = { project: "p-a", relation: "member", addedBy: "owner-a" };
+  const BOARD_B = { project: "p-b", relation: "owner", addedBy: "owner-b" };
+
+  beforeEach(() => {
+    existingUsers = ["owner-a", "owner-b"];
+    stored({ role: "member", boards: [BOARD_A, BOARD_B] });
+    authorityAtAcceptance.mockResolvedValue({ role: "member", boards: [BOARD_A, BOARD_B] });
+  });
+
+  // BP-843. The resender re-endorses what is left, so what nobody can still grant goes first
+  it("drops a board its adder can no longer grant before endorsing the rest", async () => {
+    authorityAtAcceptance.mockResolvedValue({ role: "member", boards: [BOARD_A] });
+
+    await reissueInvitation("inv-1", "admin-2");
+
+    expect(authorityAtAcceptance).toHaveBeenCalledWith({ role: "member", boards: [BOARD_A, BOARD_B], invitedBy: "admin-2" });
+    expect(updateOne).toHaveBeenCalledWith(
+      { _id: "inv-1", status: "pending" },
+      { $pull: { boards: { $or: [{ project: "p-b", addedBy: "owner-b" }] } } }
+    );
+    expect(updateOne.mock.invocationCallOrder[0]).toBeLessThan(findOneAndUpdate.mock.invocationCallOrder[0]);
+  });
+
+  it("reports as dropped only what the pull removed, not a board an owner re-related meanwhile", async () => {
+    authorityAtAcceptance.mockResolvedValue({ role: "member", boards: [BOARD_A] });
+    findOneAndUpdate.mockResolvedValue({ _id: "inv-1", boards: [BOARD_A, { ...BOARD_B, addedBy: "owner-c" }] });
+
+    const result = await reissueInvitation("inv-1", "admin-2");
+
+    expect(result?.dropped).toEqual([]);
+  });
+
+  it("reports a board the pull removed as dropped", async () => {
+    authorityAtAcceptance.mockResolvedValue({ role: "member", boards: [BOARD_A] });
+    findOneAndUpdate.mockResolvedValue({ _id: "inv-1", boards: [BOARD_A] });
+
+    expect((await reissueInvitation("inv-1", "admin-2"))?.dropped).toEqual([BOARD_B]);
+  });
+
+  // BP-826 decided a resend takes over a deleted inviter's invitation; a deleted account decided
+  // nothing about the board, so it is kept and re-endorsed
+  it("keeps a board whose adder's account was deleted, for the resender to back", async () => {
+    authorityAtAcceptance.mockResolvedValue({ role: "member", boards: [BOARD_A] });
+    existingUsers = ["owner-a"];
+
+    const result = await reissueInvitation("inv-1", "admin-2");
+
+    expect(updateOne).not.toHaveBeenCalled();
+    expect(result?.dropped).toEqual([]);
+  });
+
+  it("pulls nothing while every board is still backed", async () => {
+    await reissueInvitation("inv-1", "admin-2");
+
+    expect(updateOne).not.toHaveBeenCalled();
+  });
+
   it("changes the token, so the link mailed before stops working", async () => {
     const { token } = (await reissueInvitation("inv-1", "admin-2"))!;
 
@@ -152,9 +221,17 @@ describe("recording an acceptance", () => {
 
     expect(await recordAcceptance("inv-1", "u1")).toBe(true);
     expect(updateOne.mock.calls[0]).toEqual([
-      { _id: "inv-1", status: "accepted", acceptedBy: null },
+      { _id: "inv-1", status: "accepted", acceptedBy: { $in: [null, "u1"] } },
       { $set: { acceptedBy: "u1" } },
     ]);
+  });
+
+  // BP-843. A retry after a write that landed but answered with an error must not read as the claim lost
+  it("counts a claim already tied to this same account as held", async () => {
+    updateOne.mockResolvedValue({ matchedCount: 1 });
+
+    expect(await recordAcceptance("inv-1", "u1")).toBe(true);
+    expect(updateOne.mock.calls[0][0].acceptedBy.$in).toContain("u1");
   });
 
   it("says so when the invitation was revoked meanwhile", async () => {
@@ -328,25 +405,27 @@ describe("a board owner inviting", () => {
 
   // A link handed to a person could be in anybody's hands; this board would go with it
   it("refuses to join an invitation whose link somebody else was shown", async () => {
-    stored({ invitedBy: "a1" });
+    stored({ invitedBy: "a1", expiresAt: new Date(Date.now() + 60_000) });
 
     const outcome = await inviteToBoard(INVITE);
 
-    expect(outcome).toEqual({ kind: "held", invitedBy: "a1" });
+    expect(outcome).toEqual({ kind: "held", invitedBy: "a1", expired: false });
     expect(create).not.toHaveBeenCalled();
-    // Only a live invitation holds the address: an old revoked or accepted one must not
-    expect(findOne).toHaveBeenCalledWith({
-      email: "ada@example.com",
-      status: "pending",
-      expiresAt: { $gt: expect.any(Date) },
-    });
+    // A pending invitation holds the address, lapsed or not (BP-843); a revoked or accepted one must not
+    expect(findOne).toHaveBeenCalledWith({ email: "ada@example.com", status: "pending" });
   });
 
-  it("retires an expired invitation before looking for one to join", async () => {
+  it("says when the invitation holding the address has lapsed", async () => {
+    stored({ invitedBy: "a1", expiresAt: new Date(Date.now() - 60_000) });
+
+    expect(await inviteToBoard(INVITE)).toEqual({ kind: "held", invitedBy: "a1", expired: true });
+  });
+
+  it("retires its own expired invitation before looking for one to join", async () => {
     await inviteToBoard(INVITE);
 
     expect(updateMany).toHaveBeenCalledWith(
-      { email: "ada@example.com", status: "pending", expiresAt: { $lte: expect.any(Date) } },
+      { email: "ada@example.com", status: "pending", expiresAt: { $lte: expect.any(Date) }, invitedBy: INVITE.invitedBy },
       { $set: { status: "revoked" } }
     );
   });
@@ -384,6 +463,8 @@ describe("recording how a link went out", () => {
 
   it("forgets it whenever a new link is issued", async () => {
     await issueInvitation(ISSUE);
+    stored({ role: "member", boards: [] });
+    authorityAtAcceptance.mockResolvedValue({ role: "member", boards: [] });
     await reissueInvitation("inv-1", "admin-2");
 
     expect(findOneAndUpdate.mock.calls[0][1].$set.deliveredAs).toBeNull();

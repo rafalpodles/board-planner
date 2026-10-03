@@ -135,6 +135,7 @@ export const GROUPS = {
     "identity-links.spec.ts",
     "users-copy-and-ui.spec.ts",
     "last-admin-races.spec.ts",
+    "invitation-flows.spec.ts",
     "oidc-sign-in.spec.ts",
     "github-sign-in.spec.ts",
     "password-sign-in-off.spec.ts",

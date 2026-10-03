@@ -1,8 +1,10 @@
 import { Types } from "mongoose";
 import { connectDB } from "./db";
+import { authorityAtAcceptance } from "./invitation-authority";
 import { randomToken, sha256 } from "./oauth";
 import { Invitation } from "@/models/invitation";
-import { GrantRelation, IInvitation } from "@/types";
+import { User } from "@/models/user";
+import { GrantRelation, IInvitation, IInvitationBoard } from "@/types";
 
 export const INVITATION_TOKEN_PREFIX = "cpi_";
 export const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -75,8 +77,28 @@ export async function issueInvitation(
 export async function reissueInvitation(
   id: Types.ObjectId | string,
   sentBy: Types.ObjectId | string
-): Promise<{ invitation: IInvitation; token: string } | null> {
+): Promise<{ invitation: IInvitation; token: string; dropped: IInvitationBoard[] } | null> {
   await connectDB();
+  // The resender re-endorses every board left, so a board its adder can no longer grant goes
+  // first: otherwise the resend would grant it again without anybody choosing to (BP-843)
+  const current = await Invitation.findOne({ _id: id, status: "pending" }).select("role boards").lean();
+  if (!current) return null;
+  const authority = await authorityAtAcceptance({ role: current.role, boards: current.boards, invitedBy: sentBy as Types.ObjectId });
+  const backed = new Set((authority?.boards ?? []).map((b) => `${b.project}:${b.addedBy}`));
+  // Only an adder who still exists and has lost the standing to grant it: one whose account was
+  // deleted decided nothing about the board, and the resender takes it over as BP-826 did
+  const lapsed = current.boards.filter((b) => !backed.has(`${b.project}:${b.addedBy}`));
+  const stillThere = new Set(
+    (await User.find({ _id: { $in: lapsed.map((b) => b.addedBy) } }).select("_id").lean()).map((u) => String(u._id))
+  );
+  const unbacked = lapsed.filter((b) => stillThere.has(String(b.addedBy)));
+  if (unbacked.length > 0) {
+    await Invitation.updateOne(
+      { _id: id, status: "pending" },
+      { $pull: { boards: { $or: unbacked.map((b) => ({ project: b.project, addedBy: b.addedBy })) } } }
+    );
+  }
+
   const { token, tokenHash, expiresAt } = freshSecret();
   const invitation = await Invitation.findOneAndUpdate(
     { _id: id, status: "pending" },
@@ -91,7 +113,9 @@ export async function reissueInvitation(
     },
     { returnDocument: "after" }
   );
-  return invitation ? { invitation, token } : null;
+  // What the pull actually removed: a board re-related meanwhile by an owner who can grant it stayed
+  const kept = new Set((invitation?.boards ?? []).map((b) => String(b.project)));
+  return invitation ? { invitation, token, dropped: unbacked.filter((b) => !kept.has(String(b.project))) } : null;
 }
 
 /** Also stops an acceptance in flight: its claim is not yet tied to an account, so it is revocable. */
@@ -166,8 +190,10 @@ export async function recordAcceptance(
   userId: Types.ObjectId | string
 ): Promise<boolean> {
   await connectDB();
+  // Already this account's counts too, so a retry after a write that landed but answered with an
+  // error does not read as the claim lost and take the account back (BP-843)
   const result = await Invitation.updateOne(
-    { _id: id, status: "accepted", acceptedBy: null },
+    { _id: id, status: "accepted", acceptedBy: { $in: [null, userId] } },
     { $set: { acceptedBy: userId } }
   );
   return result.matchedCount === 1;
@@ -217,7 +243,7 @@ export async function recordDelivery(
 export type BoardInvitation =
   | { kind: "created"; invitation: IInvitation; token: string }
   | { kind: "added" | "updated"; invitation: IInvitation }
-  | { kind: "held"; invitedBy: Types.ObjectId };
+  | { kind: "held"; invitedBy: Types.ObjectId; expired: boolean };
 
 /**
  * A board owner's invitation. An invitation already pending for the address only gains (or
@@ -238,8 +264,10 @@ export async function inviteToBoard(input: {
 
   for (let attempt = 0; attempt < 2; attempt++) {
     const now = new Date();
+    // Only this owner's own: another inviter's lapsed invitation, perhaps an administrator's with a
+    // role and boards of its own, is theirs to resend or revoke, and holds the address meanwhile
     await Invitation.updateMany(
-      { email, status: "pending", expiresAt: { $lte: now } },
+      { email, status: "pending", expiresAt: { $lte: now }, invitedBy },
       { $set: { status: "revoked" } }
     );
     const live: Record<string, unknown> = { email, status: "pending", expiresAt: { $gt: now } };
@@ -258,8 +286,10 @@ export async function inviteToBoard(input: {
     );
     if (added) return { kind: "added", invitation: added };
 
-    const held = await Invitation.findOne(live).select("invitedBy").lean<{ invitedBy: Types.ObjectId }>();
-    if (held) return { kind: "held", invitedBy: held.invitedBy };
+    const held = await Invitation.findOne({ email, status: "pending" })
+      .select("invitedBy expiresAt")
+      .lean<{ invitedBy: Types.ObjectId; expiresAt: Date }>();
+    if (held) return { kind: "held", invitedBy: held.invitedBy, expired: held.expiresAt <= now };
 
     const { token, tokenHash, expiresAt } = freshSecret();
     try {

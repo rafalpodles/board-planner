@@ -55,6 +55,31 @@ beforeEach(() => {
   createSession.mockResolvedValue({ token: "cps_new", absoluteExpiresAt: new Date() });
 });
 
+// BP-843. A claim tied to nothing yet must not be left holding the link
+describe("an acceptance that fails part way", () => {
+  it("gives the link back when the authority cannot be read", async () => {
+    authorityAtAcceptance.mockRejectedValue(new Error("db blip"));
+
+    await expect(accept(IDENTITY)).rejects.toThrow("db blip");
+    expect(releaseInvitation).toHaveBeenCalledWith("inv-1");
+    expect(userCreate).not.toHaveBeenCalled();
+  });
+
+  it("records the acceptance a second time when the first write fails", async () => {
+    recordAcceptance.mockRejectedValueOnce(new Error("db blip")).mockResolvedValueOnce(true);
+
+    expect((await accept(IDENTITY)).status).toBe(201);
+    expect(recordAcceptance).toHaveBeenCalledTimes(2);
+  });
+
+  it("undoes the account when the second recording finds the claim gone", async () => {
+    recordAcceptance.mockRejectedValueOnce(new Error("db blip")).mockResolvedValueOnce(false);
+
+    expect((await accept(IDENTITY)).status).toBe(400);
+    expect(userDeleteOne).toHaveBeenCalledWith({ _id: "u-new" });
+  });
+});
+
 describe("completing an acceptance through a sign-in provider", () => {
   it("lets the provider's groups decide the role before the session is made (BP-833)", async () => {
     applyAdminGroup.mockImplementation(async () => expect(createSession).not.toHaveBeenCalled());

@@ -16,6 +16,7 @@ const REFUSALS: Record<string, string> = {
   // The same, on an instance where nobody chooses a password
   mismatch_no_password: "Your provider signed you in with a different address from the one invited. Use the invited address at the provider, adding and verifying it there if need be, then open the invitation link again.",
   linked: "That sign-in already belongs to an account here. Sign in with it instead.",
+  failed: "Signing in with that provider did not work. Open the invitation link again to try again.",
 };
 
 interface Held {

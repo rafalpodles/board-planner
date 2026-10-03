@@ -150,9 +150,11 @@ describe("finishing a sign-in", () => {
     findOneAndDelete.mockResolvedValue(FLOW);
     authorizationCodeGrant.mockRejectedValue(new Error("state mismatch"));
 
+    // With the intent the flow was started for, so the browser goes back to where it began (BP-843)
     expect(await finishFlow({ provider: PROVIDER, binder: "cpo_b", origin: ORIGIN, query: "" })).toEqual({
       ok: false,
       reason: "rejected",
+      intent: "signin",
     });
   });
 });
@@ -348,7 +350,7 @@ describe("GitHub, which speaks OAuth 2 without OpenID Connect", () => {
   it("refuses when GitHub will not say who it is", async () => {
     githubAnswers({ message: "Bad credentials" }, [], 401);
 
-    expect(await finishFlow({ provider: GITHUB, binder: "cpo_b", origin: ORIGIN, query: "" })).toEqual({
+    expect(await finishFlow({ provider: GITHUB, binder: "cpo_b", origin: ORIGIN, query: "" })).toMatchObject({
       ok: false,
       reason: "rejected",
     });
