@@ -12,6 +12,10 @@ import { withAdmin } from "@/lib/middleware";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { revokePendingInvitationsFor } from "@/lib/invitations";
 import { User } from "@/models/user";
+import { Identity } from "@/models/identity";
+import { Session } from "@/models/session";
+import { providerById } from "@/lib/oidc/providers";
+import { HydratedDocument } from "mongoose";
 import { IUser } from "@/types";
 
 // Machines are excluded: worker identities are accounts, but not people to invite, permission or
@@ -23,8 +27,52 @@ export const GET = withAdmin(async (request) => {
   const users = await User.find(includeMachines ? {} : { kind: { $ne: "machine" } }).sort({
     createdAt: 1,
   });
-  return NextResponse.json(users);
+  return NextResponse.json(await withSignInMethods(users));
 });
+
+/**
+ * How each account can sign in, for the Users screen: a password while passwords sign anybody in,
+ * and each configured provider it has linked, by its label. When it was last active: its last
+ * sign-in, or a live session used since — sessions slide for weeks, so a sign-in alone can be
+ * that old for somebody here every day. Three reads for the whole list, never one per person.
+ */
+async function withSignInMethods(users: HydratedDocument<IUser>[]) {
+  const ids = users.map((u) => u._id);
+  const [withPassword, identities, sessionUse] = await Promise.all([
+    passwordSignInEnabled()
+      ? User.find({ _id: { $in: ids }, password: { $nin: [null, ""] } }).select("_id").lean()
+      : Promise.resolve([] as { _id: unknown }[]),
+    Identity.find({ user: { $in: ids } }).select("user provider").sort({ linkedAt: 1 }).lean(),
+    Session.aggregate<{ _id: unknown; lastUsedAt: Date }>([
+      { $match: { user: { $in: ids } } },
+      { $group: { _id: "$user", lastUsedAt: { $max: "$lastUsedAt" } } },
+    ]),
+  ]);
+  const lastSessionUse = new Map(sessionUse.map((s) => [String(s._id), new Date(s.lastUsedAt).getTime()]));
+  const hasPassword = new Set(withPassword.map((u) => String(u._id)));
+  const providersOf = new Map<string, string[]>();
+  for (const identity of identities) {
+    const provider = providerById(identity.provider);
+    if (!provider) continue;
+    const label = provider.label;
+    const list = providersOf.get(String(identity.user)) ?? [];
+    if (!list.includes(label)) list.push(label);
+    providersOf.set(String(identity.user), list);
+  }
+  return users.map((user) => ({
+    ...user.toJSON(),
+    lastActiveAt: latest(user.lastSignInAt?.getTime(), lastSessionUse.get(String(user._id))),
+    signInMethods: [
+      ...(hasPassword.has(String(user._id)) ? ["Password"] : []),
+      ...(providersOf.get(String(user._id)) ?? []),
+    ],
+  }));
+}
+
+function latest(...times: (number | undefined)[]): string | null {
+  const known = times.filter((t): t is number => typeof t === "number" && !Number.isNaN(t));
+  return known.length ? new Date(Math.max(...known)).toISOString() : null;
+}
 
 export async function POST(request: Request) {
   if (!passwordSignInEnabled()) {

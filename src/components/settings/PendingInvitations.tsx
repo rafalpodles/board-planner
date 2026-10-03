@@ -12,8 +12,8 @@ import { ApiInvitation, InvitationDelivery } from "@/types";
 type Reissued = { invitation: ApiInvitation } & InvitationDelivery;
 
 function expiryText(invitation: ApiInvitation): string {
-  if (invitation.expired) return "Expired";
-  return `Expires ${new Date(invitation.expiresAt).toLocaleDateString()}`;
+  const date = new Date(invitation.expiresAt).toLocaleDateString();
+  return invitation.expired ? `Expired ${date}` : `Expires ${date}`;
 }
 
 export function PendingInvitations({
@@ -95,6 +95,15 @@ export function PendingInvitations({
                 <div className="min-w-0 basis-full flex-1 sm:basis-0">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <p className="font-medium break-all">{invitation.email}</p>
+                    {invitation.expired ? (
+                      <span className="shrink-0 text-xs px-2 py-0.5 rounded-full bg-danger/15 text-danger">
+                        Expired
+                      </span>
+                    ) : (
+                      <span className="shrink-0 text-xs px-2 py-0.5 rounded-full bg-warning/15 text-warning">
+                        Invited
+                      </span>
+                    )}
                     <span
                       className={`shrink-0 text-xs px-2 py-0.5 rounded-full ${
                         invitation.role === "admin"

@@ -27,6 +27,8 @@ vi.mock("@/models/worker", () => ({ Worker: { updateMany: workerUpdateMany } }))
 vi.mock("@/models/emailChangeToken", () => ({ EmailChangeToken: { deleteMany: emailChangeDeleteMany } }));
 const identityDeleteMany = vi.fn(async () => ({ deletedCount: 0 }));
 vi.mock("@/models/identity", () => ({ Identity: { deleteMany: identityDeleteMany } }));
+const userUpdateOne = vi.fn(async (_filter?: unknown, _update?: unknown) => ({}));
+vi.mock("@/models/user", () => ({ User: { updateOne: userUpdateOne } }));
 
 const {
   allowsInsecureCookie,
@@ -439,6 +441,22 @@ describe("createSession", () => {
     expect(doc.absoluteExpiresAt.getTime() - before).toBeGreaterThanOrEqual(90 * DAY_MS - 1000);
     expect(doc.expiresAt.getTime()).toBeLessThanOrEqual(doc.absoluteExpiresAt.getTime());
     expect(created.expiresAt).toEqual(doc.expiresAt);
+  });
+
+  // BP-831. Every session is a sign-in, so this is where the Users screen's last sign-in comes from
+  it("stamps the account's last sign-in", async () => {
+    const before = Date.now();
+    await createSession({ userId: "user-1" });
+
+    expect(userUpdateOne).toHaveBeenCalledWith({ _id: "user-1" }, { $set: { lastSignInAt: expect.any(Date) } });
+    const stamped = (userUpdateOne.mock.calls[0][1] as { $set: { lastSignInAt: Date } }).$set.lastSignInAt;
+    expect(stamped.getTime()).toBeGreaterThanOrEqual(before);
+  });
+
+  it("signs in even when the stamp cannot be written", async () => {
+    userUpdateOne.mockRejectedValueOnce(new Error("db down"));
+
+    await expect(createSession({ userId: "user-1" })).resolves.toMatchObject({ token: expect.any(String) });
   });
 });
 

@@ -55,6 +55,12 @@ const userSchema = new Schema<IUser>({
     type: Date,
     default: null,
   },
+  // Every session is a sign-in — password, provider, invitation, MCP authorize — so it is stamped
+  // where sessions are made (BP-831)
+  lastSignInAt: {
+    type: Date,
+    default: null,
+  },
   // Superseded by `notifications` below. Still read for accounts that predate the grid, which is
   // why nothing migrates them: this field IS their stored preference until they save the screen.
   emailNotifications: {

@@ -134,6 +134,7 @@ export const GROUPS = {
     "github-sign-in.spec.ts",
     "password-sign-in-off.spec.ts",
     "deactivation.spec.ts",
+    "users-screen.spec.ts",
     "email-on-account.spec.ts",
     "email-change-confirmation.spec.ts",
     "reserved-usernames.spec.ts",

@@ -198,7 +198,7 @@ test("an administrator is offered no account with a password and no password to 
   await signInAs(page, ADMIN_ID);
 
   await page.goto(at("/settings/users"));
-  await expect(page.getByRole("button", { name: "Invite" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Invite", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "New User" })).toHaveCount(0);
   await page.getByText(`@${MEMBER_USERNAME}`, { exact: true }).first().click();
   await expect(page.getByRole("dialog")).toBeVisible();
