@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { configuredProviders, liveIdentityFilter } from "@/lib/oidc/providers";
+import { relayOrigin } from "@/lib/oidc/relay";
 import { Identity } from "@/models/identity";
 import { User } from "@/models/user";
 
@@ -15,10 +16,11 @@ export function passwordSignInOff(): NextResponse {
 }
 
 /**
- * At startup, so a fumbled value is one failure naming the variable: anything but on/off, and off
- * with no provider configured, which would leave nobody any way in.
+ * At startup, so a fumbled value is one failure naming the variable: anything but on/off, off with
+ * no provider configured, which would leave nobody any way in, and a relay that is not an origin.
  */
 export function assertSignInConfig(): void {
+  relayOrigin();
   const raw = process.env.PASSWORD_SIGN_IN?.trim().toLowerCase();
   if (raw && raw !== "on" && raw !== "off") {
     throw new Error(`PASSWORD_SIGN_IN must be "on" or "off", not "${process.env.PASSWORD_SIGN_IN}"`);

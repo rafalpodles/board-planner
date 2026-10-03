@@ -37,11 +37,26 @@ const KEYS = [
   "GITHUB_OAUTH_BASE_URL",
   "GOOGLE_CLIENT_ID",
   "GOOGLE_CLIENT_SECRET",
+  "OIDC_RELAY_ORIGIN",
 ];
 afterEach(() => KEYS.forEach((k) => delete process.env[k]));
 
 const withOidc = () =>
   Object.assign(process.env, { OIDC_ISSUER: "https://id.example.com", OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s" });
+
+describe("OIDC_RELAY_ORIGIN at startup", () => {
+  it("stops the app on a relay that is not a bare origin", () => {
+    process.env.OIDC_RELAY_ORIGIN = "https://login.example.com/sso";
+
+    expect(() => assertSignInConfig()).toThrow(/OIDC_RELAY_ORIGIN/);
+  });
+
+  it("starts with a relay that is one", () => {
+    process.env.OIDC_RELAY_ORIGIN = "https://login.example.com";
+
+    expect(() => assertSignInConfig()).not.toThrow();
+  });
+});
 
 describe("PASSWORD_SIGN_IN", () => {
   it.each([[undefined], ["on"], ["ON"], [" on "]])("keeps passwords for %j", (value) => {

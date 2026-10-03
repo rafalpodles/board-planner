@@ -7,6 +7,7 @@ import { OidcFlow } from "@/models/oidcFlow";
 import { OidcIntent } from "@/types";
 import { groupsIn } from "@/lib/oidc/admin-group";
 import { OidcProvider } from "./providers";
+import { relayOrigin } from "./relay";
 
 export const FLOW_COOKIE = "bp_oidc";
 export const ACCEPT_COOKIE = "bp_oidc_accept";
@@ -61,6 +62,11 @@ export function redirectUri(provider: OidcProvider, origin: string): string {
   return `${origin}/api/auth/oidc/${provider.id}/callback`;
 }
 
+function returnAddress(provider: OidcProvider, origin: string): string {
+  const relay = relayOrigin();
+  return relay ? `${relay}/api/auth/oidc/${provider.id}/relay` : redirectUri(provider, origin);
+}
+
 export async function beginFlow(input: {
   provider: OidcProvider;
   origin: string;
@@ -76,12 +82,14 @@ export async function beginFlow(input: {
   const github = input.provider.kind === "github";
   const nonce = github ? "-" : client.randomNonce();
   const binder = randomToken("cpo_");
+  const returnTo = returnAddress(input.provider, input.origin);
 
   await connectDB();
   await OidcFlow.create({
     binderHash: sha256(binder),
     provider: input.provider.id,
     state,
+    redirectUri: returnTo,
     nonce,
     codeVerifier,
     intent: input.intent,
@@ -93,7 +101,7 @@ export async function beginFlow(input: {
   });
 
   const url = client.buildAuthorizationUrl(config, {
-    redirect_uri: redirectUri(input.provider, input.origin),
+    redirect_uri: returnTo,
     scope: github ? "user:email" : "openid email profile",
     code_challenge: await client.calculatePKCECodeChallenge(codeVerifier),
     code_challenge_method: "S256",
@@ -151,7 +159,7 @@ export async function finishFlow(input: {
 
   try {
     const config = await configFor(input.provider);
-    const callbackUrl = new URL(`${redirectUri(input.provider, input.origin)}${input.query}`);
+    const callbackUrl = new URL(`${flow.redirectUri ?? redirectUri(input.provider, input.origin)}${input.query}`);
     let verified: VerifiedClaims | null;
     if (input.provider.kind === "github") {
       const tokens = await client.authorizationCodeGrant(config, callbackUrl, {

@@ -241,6 +241,7 @@ export interface IOidcFlow {
   binderHash: string;
   provider: string;
   state: string;
+  redirectUri: string | null;
   nonce: string;
   codeVerifier: string;
   intent: OidcIntent;

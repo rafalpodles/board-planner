@@ -14,6 +14,8 @@ const oidcFlowSchema = new Schema<IOidcFlow>(
     binderHash: { type: String, required: true, unique: true },
     provider: { type: String, required: true },
     state: { type: String, required: true },
+    // The redirect_uri sent to the provider, which the code exchange must repeat
+    redirectUri: { type: String, default: null },
     nonce: { type: String, required: true },
     codeVerifier: { type: String, required: true },
     intent: { type: String, enum: ["signin", "invite", "link", "bootstrap", "signup"], required: true },
@@ -29,6 +31,7 @@ const oidcFlowSchema = new Schema<IOidcFlow>(
 );
 
 oidcFlowSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+oidcFlowSchema.index({ state: 1 });
 
 export const OidcFlow: Model<IOidcFlow> =
   mongoose.models.OidcFlow || mongoose.model<IOidcFlow>("OidcFlow", oidcFlowSchema);

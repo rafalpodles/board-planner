@@ -60,8 +60,26 @@ describe("beginning a sign-in", () => {
     });
     // Only the binder's hash is stored; the browser holds the binder itself
     const row = create.mock.calls[0][0];
-    expect(row).toMatchObject({ binderHash: sha256(binder), state: "state-1", nonce: "nonce-1", codeVerifier: "verifier" });
+    expect(row).toMatchObject({
+      binderHash: sha256(binder),
+      state: "state-1",
+      nonce: "nonce-1",
+      codeVerifier: "verifier",
+      redirectUri: "https://planner.example/api/auth/oidc/oidc/callback",
+    });
     expect(JSON.stringify(row)).not.toContain(binder);
+  });
+
+  it("sends the provider back to the relay when one is configured, and remembers that address", async () => {
+    process.env.OIDC_RELAY_ORIGIN = "https://login.example/";
+    try {
+      await beginFlow({ provider: PROVIDER, origin: ORIGIN, intent: "signin" });
+    } finally {
+      delete process.env.OIDC_RELAY_ORIGIN;
+    }
+
+    expect(buildAuthorizationUrl.mock.calls[0][1].redirect_uri).toBe("https://login.example/api/auth/oidc/oidc/relay");
+    expect(create.mock.calls[0][0].redirectUri).toBe("https://login.example/api/auth/oidc/oidc/relay");
   });
 
   it("accepts plain http only from an issuer on this machine", async () => {
@@ -134,6 +152,17 @@ describe("finishing a sign-in", () => {
         groups: [],
       },
     });
+  });
+
+  it("exchanges the code against the address the flow sent the provider, not one computed now", async () => {
+    findOneAndDelete.mockResolvedValue({ ...FLOW, redirectUri: "https://login.example/api/auth/oidc/oidc/relay" });
+    grantGives({ iss: "https://id.example.com", sub: "s1", email: "ada@example.com", email_verified: true });
+
+    await finishFlow({ provider: PROVIDER, binder: "cpo_b", origin: ORIGIN, query: "?code=c&state=state-1" });
+
+    expect(authorizationCodeGrant.mock.calls[0][1].href).toBe(
+      "https://login.example/api/auth/oidc/oidc/relay?code=c&state=state-1"
+    );
   });
 
   it.each([[undefined], ["true"], [1]])("treats email_verified %j as not verified", async (value) => {
