@@ -3,6 +3,7 @@ import { connectDB } from "./db";
 import { authorityAtAcceptance } from "./invitation-authority";
 import { randomToken, sha256 } from "./oauth";
 import { Invitation } from "@/models/invitation";
+import { User } from "@/models/user";
 import { GrantRelation, IInvitation, IInvitationBoard } from "@/types";
 
 export const INVITATION_TOKEN_PREFIX = "cpi_";
@@ -84,7 +85,13 @@ export async function reissueInvitation(
   if (!current) return null;
   const authority = await authorityAtAcceptance({ role: current.role, boards: current.boards, invitedBy: sentBy as Types.ObjectId });
   const backed = new Set((authority?.boards ?? []).map((b) => `${b.project}:${b.addedBy}`));
-  const unbacked = current.boards.filter((b) => !backed.has(`${b.project}:${b.addedBy}`));
+  // Only an adder who still exists and has lost the standing to grant it: one whose account was
+  // deleted decided nothing about the board, and the resender takes it over as BP-826 did
+  const lapsed = current.boards.filter((b) => !backed.has(`${b.project}:${b.addedBy}`));
+  const stillThere = new Set(
+    (await User.find({ _id: { $in: lapsed.map((b) => b.addedBy) } }).select("_id").lean()).map((u) => String(u._id))
+  );
+  const unbacked = lapsed.filter((b) => stillThere.has(String(b.addedBy)));
   if (unbacked.length > 0) {
     await Invitation.updateOne(
       { _id: id, status: "pending" },

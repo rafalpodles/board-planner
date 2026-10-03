@@ -10,6 +10,16 @@ const create = vi.fn();
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 const authorityAtAcceptance = vi.fn();
 vi.mock("./invitation-authority", () => ({ authorityAtAcceptance }));
+let existingUsers: string[] = [];
+vi.mock("@/models/user", () => ({
+  User: {
+    find: (filter: { _id: { $in: unknown[] } }) => ({
+      select: () => ({
+        lean: async () => filter._id.$in.filter((id) => existingUsers.includes(String(id))).map((id) => ({ _id: id })),
+      }),
+    }),
+  },
+}));
 vi.mock("@/models/invitation", () => ({
   Invitation: { findOneAndUpdate, findOne, updateOne, updateMany, create },
 }));
@@ -105,6 +115,7 @@ describe("sending again", () => {
   const BOARD_B = { project: "p-b", relation: "owner", addedBy: "owner-b" };
 
   beforeEach(() => {
+    existingUsers = ["owner-a", "owner-b"];
     stored({ role: "member", boards: [BOARD_A, BOARD_B] });
     authorityAtAcceptance.mockResolvedValue({ role: "member", boards: [BOARD_A, BOARD_B] });
   });
@@ -137,6 +148,18 @@ describe("sending again", () => {
     findOneAndUpdate.mockResolvedValue({ _id: "inv-1", boards: [BOARD_A] });
 
     expect((await reissueInvitation("inv-1", "admin-2"))?.dropped).toEqual([BOARD_B]);
+  });
+
+  // BP-826 decided a resend takes over a deleted inviter's invitation; a deleted account decided
+  // nothing about the board, so it is kept and re-endorsed
+  it("keeps a board whose adder's account was deleted, for the resender to back", async () => {
+    authorityAtAcceptance.mockResolvedValue({ role: "member", boards: [BOARD_A] });
+    existingUsers = ["owner-a"];
+
+    const result = await reissueInvitation("inv-1", "admin-2");
+
+    expect(updateOne).not.toHaveBeenCalled();
+    expect(result?.dropped).toEqual([]);
   });
 
   it("pulls nothing while every board is still backed", async () => {
