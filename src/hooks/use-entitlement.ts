@@ -10,18 +10,20 @@ interface EntitlementApiResponse {
   expiresAt: string | null;
 }
 
-interface EntitlementState {
+export interface EntitlementState {
   loading: boolean;
   entitled: boolean;
+  /** The plan could not be read; `entitled` is false, which is not the same as "not on Pro" */
+  error: boolean;
 }
 
 export function useEntitlement(feature: FeatureKey): EntitlementState {
   const api = useApi();
-  const [state, setState] = useState<EntitlementState>({ loading: true, entitled: false });
+  const [state, setState] = useState<EntitlementState>({ loading: true, entitled: false, error: false });
 
   useEffect(() => {
     let cancelled = false;
-    setState({ loading: true, entitled: false });
+    setState({ loading: true, entitled: false, error: false });
 
     api
       .get("/api/entitlements")
@@ -37,10 +39,10 @@ export function useEntitlement(feature: FeatureKey): EntitlementState {
           },
           feature
         );
-        setState({ loading: false, entitled });
+        setState({ loading: false, entitled, error: false });
       })
       .catch(() => {
-        if (!cancelled) setState({ loading: false, entitled: false });
+        if (!cancelled) setState({ loading: false, entitled: false, error: true });
       });
 
     return () => {

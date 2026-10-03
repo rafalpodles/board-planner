@@ -16,5 +16,4 @@ Every source file here starts with:
 // Copyright (c) 2026 Rafał Podleś. Licensed under the Board Planner Enterprise Edition Licence, see src/ee/LICENSE.
 ```
 
-Nothing lives here yet. Paid connectors and paid AI features arrive with the entitlement work
-(BP-644 and later).
+`connectors/coda/` is the first paid connector (BP-651), gated by `integrations.coda`.

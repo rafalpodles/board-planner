@@ -85,6 +85,10 @@ vi.mock("@/models/grant", () => ({
   Grant: { deleteMany: grantDeleteMany },
 }));
 vi.mock("@/lib/project-references", () => ({ dropProjectReferences }));
+const plan = vi.hoisted(() => ({ value: "pro" as "free" | "pro" }));
+vi.mock("@/lib/tenant", () => ({
+  getTenant: async () => ({ _id: "t1", entitlements: { plan: plan.value, features: [] } }),
+}));
 
 const { DELETE, GET, PUT } = await import("./route");
 
@@ -121,6 +125,7 @@ const saved = () => Promise.resolve(SAVED);
 
 beforeEach(() => {
   vi.clearAllMocks();
+  plan.value = "pro";
   getAuthUser.mockResolvedValue(OWNER);
   projectFindById.mockReturnValue({
     toObject: () => ({ _id: PROJECT_ID, name: "Test Project" }),
@@ -396,6 +401,68 @@ describe("PUT /api/projects/[projectId] and a repointed integration host", () =>
     expect(
       logProjectAudit.mock.calls.some(([, , , detail]) => /Coda token cleared/.test(String(detail)))
     ).toBe(true);
+  });
+});
+
+describe("PUT /api/projects/[projectId] and Coda on a free instance", () => {
+  beforeEach(() => {
+    check.mockResolvedValue(true);
+    plan.value = "free";
+    // A host in the body makes the route read the stored one, to clear a token it no longer fits
+    projectFindById.mockReturnValue({
+      lean: () => Promise.resolve({ codaHost: "https://coda.io", codaToken: "enc:v2:k:coda" }),
+      select: () => Promise.resolve({ customFields: PROJECT_CUSTOM_FIELDS }),
+      toObject: () => ({ _id: PROJECT_ID, name: "Test Project" }),
+      populate: saved,
+    });
+  });
+
+  it.each([["codaDocId"], ["codaTableId"], ["codaHost"], ["codaToken"]])(
+    "refuses a write naming %s with 402, writing nothing",
+    async (field) => {
+      const res = await PUT(putRequest({ name: "Renamed", [field]: "x" }), ctx());
+
+      expect(res.status).toBe(402);
+      expect(await res.json()).toMatchObject({ feature: "integrations.coda", plan: "free" });
+      expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    ["Disconnect's payload", { codaDocId: "", codaTableId: "", codaHost: "https://coda.io", codaToken: "" }],
+    ["an emptied token", { codaToken: "" }],
+    ["a null token", { codaToken: null }],
+    ["the default host with a trailing slash", { codaHost: "https://coda.io/" }],
+  ])("lets %s through, since clearing Coda uses no Pro feature", async (_label, body) => {
+    const res = await PUT(putRequest(body), ctx());
+
+    expect(res.status).toBe(200);
+  });
+
+  it.each([
+    ["a new host", { codaHost: "https://coda.example.com" }],
+    ["a clear that also names a doc", { codaToken: "", codaDocId: "doc-2" }],
+    ["a token of spaces", { codaToken: "   " }],
+    ["a doc id of a slash", { codaDocId: "/" }],
+  ])("still refuses %s", async (_label, body) => {
+    const res = await PUT(putRequest(body), ctx());
+
+    expect(res.status).toBe(402);
+  });
+
+  it("still saves everything else", async () => {
+    const res = await PUT(putRequest({ name: "Renamed" }), ctx());
+
+    expect(res.status).toBe(200);
+    expect(projectFindOneAndUpdate).toHaveBeenCalled();
+  });
+
+  it("saves Coda again once the plan is Pro", async () => {
+    plan.value = "pro";
+
+    const res = await PUT(putRequest({ codaDocId: "doc-1" }), ctx());
+
+    expect(res.status).toBe(200);
   });
 });
 

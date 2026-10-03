@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import { CODA_STUB_URL, GITHUB_STUB_URL } from "../playwright.config";
 import { E2E_MONGODB_URI, PROJECT_ID, PROJECT_KEY, seed } from "./seed";
 import { signIn } from "./session";
+import { e2eLicence, useLicenceKey } from "./licence-key";
 
 /**
  * BP-472. `IntegrationsSection.tsx`'s webhook half is covered thoroughly; everything beside it —
@@ -17,7 +18,7 @@ import { signIn } from "./session";
  * field), but `codaFetch` itself was calling `safeFetch` with no `DestinationOptions` — a silent,
  * always-on refusal regardless of environment. Given `GITHUB_DESTINATION` already carries the
  * identical carve-out for GitHub's sync (BP-443), this file adds the Coda twin (`CODA_DESTINATION`
- * in `src/lib/coda.ts`) rather than leaving Coda's sync unreachable for the same reason chat
+ * in `src/ee/connectors/coda/client.ts`) rather than leaving Coda's sync unreachable for the same reason chat
  * channels are — production is unaffected (`NODE_ENV` is never anything else there), and
  * `e2e/coda-stub.mjs` is what actually exercises the sync route end to end below.
  *
@@ -199,6 +200,10 @@ test.describe("a channel's masked URL", () => {
 });
 
 test.describe("Coda", () => {
+  // Coda is Pro since BP-651; coda-pro.spec.ts covers it on a free instance
+  test.beforeEach(async ({ request }) => useLicenceKey(request, e2eLicence()));
+  test.afterEach(async ({ request }) => useLicenceKey(request, undefined));
+
   async function configureCoda(page: Page, tableId: string) {
     await openIntegration(page, /^Coda/);
     await page.getByLabel("Doc ID").fill("doc-e2e");

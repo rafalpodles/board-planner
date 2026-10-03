@@ -12,12 +12,12 @@ const safeFetch = vi.fn(
   (_url: string, _init?: RequestInit, _options?: { allowLoopback?: boolean }) =>
     Promise.resolve(new Response(JSON.stringify({ items: [] })))
 );
-vi.mock("./safe-fetch", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./safe-fetch")>()),
+vi.mock("@/lib/safe-fetch", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/safe-fetch")>()),
   safeFetch,
 }));
 
-const { fetchTableColumns } = await import("./coda");
+const { fetchTableColumns } = await import("./client");
 
 describe("fetchTableColumns", () => {
   it("passes a DestinationOptions that allows loopback outside production", async () => {

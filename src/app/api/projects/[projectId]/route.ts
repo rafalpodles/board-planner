@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { withProjectAccess, withProjectOwner, withProjectAccessOrWorker } from "@/lib/middleware";
+import { entitlementRefusal, withProjectAccess, withProjectOwner, withProjectAccessOrWorker } from "@/lib/middleware";
+import { CODA_SETTINGS_FIELDS, onlyClearsCoda } from "@/ee/connectors/coda/client";
 import { check } from "@/lib/grants";
 import { Project } from "@/models/project";
 import { parseProjectWorkerConfig } from "@/lib/project-worker-config";
@@ -122,6 +123,10 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
       // null clears a field, the way "" does
       updates[field] = body[field] === null ? "" : body[field];
     }
+  }
+  if (CODA_SETTINGS_FIELDS.some((field) => field in updates) && !onlyClearsCoda(updates)) {
+    const refusal = await entitlementRefusal("integrations.coda");
+    if (refusal) return refusal;
   }
   if (body.key !== undefined) {
     return NextResponse.json(

@@ -4,7 +4,6 @@ import { useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { webhookDeliveryStatus } from "@/lib/webhook-delivery-status";
 import { useDraft } from "@/hooks/use-draft";
-import { CODA_COLUMNS, CODA_KEY_COLUMN } from "@/lib/coda";
 import { clearsStoredToken } from "@/lib/host-bound-secrets";
 import { repositoryProvider } from "@/lib/repository";
 import { useToast } from "@/components/ui/Toast";
@@ -25,6 +24,7 @@ import { distinctRowNames } from "@/lib/row-names";
 import { SettingsCard, EmptyState } from "@/components/settings/SettingsCard";
 import { Connections, IntegrationId } from "@/components/settings/Connections";
 import { useDirtyGroup } from "@/components/settings/settings-context";
+import { CodaPanel, useCodaSettings } from "@/ee/connectors/coda/settings";
 import { SectionProps } from "./types";
 
 type ChannelDraft = ApiNotificationChannel & {
@@ -47,13 +47,6 @@ export function IntegrationsSection({
   const gitlab = useDraft({
     gitlabHost: project.gitlabHost || "https://gitlab.com",
     gitlabToken: "",
-  });
-
-  const coda = useDraft({
-    codaDocId: project.codaDocId || "",
-    codaTableId: project.codaTableId || "",
-    codaHost: project.codaHost || "https://coda.io",
-    codaToken: "",
   });
 
   // A new row carries a real URL; an existing one only ever has the mask
@@ -81,7 +74,6 @@ export function IntegrationsSection({
   );
 
   const [githubSyncing, setGithubSyncing] = useState(false);
-  const [codaSyncing, setCodaSyncing] = useState(false);
   const [gitlabSyncing, setGitlabSyncing] = useState(false);
   const [newWebhookUrl, setNewWebhookUrl] = useState("");
   const [newChannelType, setNewChannelType] =
@@ -169,38 +161,8 @@ export function IntegrationsSection({
     },
   );
 
-  useDirtyGroup(
-    {
-      id: "integrations-coda",
-      section: "integrations",
-      label: "Integrations · Coda",
-      count: coda.count,
-    },
-    {
-      save: async () => {
-        try {
-          const payload: Record<string, string> = {
-            codaDocId: coda.value.codaDocId.trim(),
-            codaTableId: coda.value.codaTableId.trim(),
-            codaHost: coda.value.codaHost.trim(),
-          };
-          if (coda.value.codaToken.trim())
-            payload.codaToken = coda.value.codaToken.trim();
-          const updated = await replaceAndReturn(payload);
-          coda.commit({
-            codaDocId: updated.codaDocId || "",
-            codaTableId: updated.codaTableId || "",
-            codaHost: updated.codaHost || "https://coda.io",
-            codaToken: "",
-          });
-          toast("Coda settings saved", "success");
-        } catch (err) {
-          fail(err, "Failed to save Coda settings");
-        }
-      },
-      discard: coda.discard,
-    },
-  );
+  // Registered here so Save all keeps Coda between GitLab and the channels, as it was
+  const coda = useCodaSettings({ project, replaceAndReturn, fail });
 
   useDirtyGroup(
     {
@@ -444,7 +406,7 @@ export function IntegrationsSection({
   const draftOf: Record<IntegrationId, { count: number; discard: () => void }> = {
     github,
     gitlab,
-    coda,
+    coda: coda.draft,
     channels,
     webhooks,
   };
@@ -490,6 +452,7 @@ export function IntegrationsSection({
 
       <Connections
         project={project}
+        needsPro={!coda.plan.loading && !coda.plan.error && !coda.plan.entitled ? ["coda"] : []}
         repositoryProvider={draftProvider}
         opened={opened}
         unsaved={unsavedRows}
@@ -686,127 +649,13 @@ export function IntegrationsSection({
               );
             case "coda":
               return (
-                <>
-                  <p className="text-sm text-text-muted">
-                    Mirrors this board into a Coda table. One-way: Coda never
-                    writes back.
-                  </p>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <Input
-                      label="Doc ID"
-                      value={coda.value.codaDocId}
-                      dirty={coda.isDirty("codaDocId")}
-                      onChange={(e) => coda.set("codaDocId", e.target.value)}
-                      placeholder="from the doc URL, e.g. dNc_5Xy0abc"
-                    />
-                    <Input
-                      label="Table ID or name"
-                      value={coda.value.codaTableId}
-                      dirty={coda.isDirty("codaTableId")}
-                      onChange={(e) => coda.set("codaTableId", e.target.value)}
-                      placeholder="grid-abc123 or Tasks"
-                    />
-                  </div>
-                  <Input
-                    label="Host"
-                    value={coda.value.codaHost}
-                    dirty={coda.isDirty("codaHost")}
-                    onChange={(e) => coda.set("codaHost", e.target.value)}
-                    placeholder="https://coda.io"
-                  />
-                  {project.codaTokenSet &&
-                    clearsStoredToken(
-                      coda.value.codaHost,
-                      coda.baseline.codaHost,
-                      coda.value.codaToken,
-                      "https://coda.io"
-                    ) && (
-                      <p className="text-sm text-warning">
-                        The stored token was issued for the old host. Saving a new host clears it —
-                        enter the token for the new host below, or it will have to be re-entered
-                        before the next sync.
-                      </p>
-                    )}
-                  <Input
-                    label="API token"
-                    type="password"
-                    value={coda.value.codaToken}
-                    dirty={coda.isDirty("codaToken")}
-                    onChange={(e) => coda.set("codaToken", e.target.value)}
-                    placeholder={
-                      project.codaTokenSet
-                        ? "Set — enter a new token to replace"
-                        : "Coda API token"
-                    }
-                  />
-                  <p className="text-xs text-text-muted">
-                    The table must already have these columns:{" "}
-                    {CODA_COLUMNS.join(", ")}. Rows are matched on{" "}
-                    {CODA_KEY_COLUMN}, so syncing twice updates instead of
-                    duplicating.
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {project.codaTokenSet &&
-                      project.codaDocId &&
-                      project.codaTableId && (
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          disabled={codaSyncing}
-                          onClick={async () => {
-                            setCodaSyncing(true);
-                            try {
-                              const result = await api.post(
-                                `/api/projects/${projectId}/coda/sync`,
-                                {},
-                              );
-                              toast(
-                                result.allApplied
-                                  ? `Synced ${result.tasksPushed} tasks to Coda`
-                                  : `Sent ${result.tasksPushed} tasks — Coda is still applying them`,
-                                result.allApplied ? "success" : "info",
-                              );
-                            } catch (err) {
-                              fail(err, "Coda sync failed");
-                            } finally {
-                              setCodaSyncing(false);
-                            }
-                          }}
-                        >
-                          {codaSyncing ? "Syncing..." : "Sync tasks now"}
-                        </Button>
-                      )}
-                    {(project.codaTokenSet || project.codaDocId) && (
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={async () => {
-                          try {
-                            replaceProject(
-                              await api.put(`/api/projects/${projectId}`, {
-                                codaDocId: "",
-                                codaTableId: "",
-                                codaHost: "https://coda.io",
-                                codaToken: "",
-                              }),
-                            );
-                            coda.commit({
-                              codaDocId: "",
-                              codaTableId: "",
-                              codaHost: "https://coda.io",
-                              codaToken: "",
-                            });
-                            toast("Coda disconnected", "success");
-                          } catch (err) {
-                            fail(err, "Failed to disconnect Coda");
-                          }
-                        }}
-                      >
-                        Disconnect
-                      </Button>
-                    )}
-                  </div>
-                </>
+                <CodaPanel
+                  projectId={projectId}
+                  project={project}
+                  coda={coda}
+                  replaceProject={replaceProject}
+                  fail={fail}
+                />
               );
             case "channels":
               return (

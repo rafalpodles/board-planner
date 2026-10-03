@@ -18,6 +18,7 @@ import {
   seedMachine,
 } from "./seed";
 import { signInContext } from "./session";
+import { useLicenceKey } from "./licence-key";
 import { scanInlineOwnerChecks, scanOwnerGatedRoutes } from "./owner-gated-routes";
 
 /**
@@ -95,9 +96,9 @@ const RECIPES: Record<string, Recipe> = {
     handled: { status: 400, body: /name is required/ },
   },
   "POST /api/projects/[projectId]/coda/sync": {
-    // The seeded board has no Coda doc, so the handler refuses before it would call out
+    // The suite's server has no licence, so past the owner gate it is the plan that refuses (BP-651)
     send: withBody("post", {}),
-    handled: { status: 400, body: /Coda doc, table and token must be configured/ },
+    handled: { status: 402, body: /requires a plan upgrade/ },
   },
   "GET /api/projects/[projectId]/columns": {
     send: get,
@@ -213,7 +214,11 @@ async function signedIn(browser: Browser, baseURL: string | undefined, who: Who)
   return context;
 }
 
-test.beforeEach(seed);
+test.beforeEach(async ({ request }) => {
+  await seed();
+  // The coda/sync recipe expects the plan to refuse past the owner gate: Free, whatever .env.local says
+  await useLicenceKey(request, undefined);
+});
 
 test("the scan found the owner-gated routes, and every one of them has a recipe", () => {
   expect(ROUTES.length, "the route scan found nothing — every case below would be vacuous").toBeGreaterThanOrEqual(20);

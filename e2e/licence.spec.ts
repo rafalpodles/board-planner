@@ -1,6 +1,6 @@
 import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 import { MEMBER_AUTH } from "./api";
-import { e2eLicence } from "./licence-key";
+import { e2eLicence, useLicenceKey } from "./licence-key";
 import { seed } from "./seed";
 import { signIn } from "./session";
 
@@ -10,11 +10,6 @@ import { signIn } from "./session";
  * Everything after that is the production path: the signature check against the build's keys (plus
  * the suite's own, see e2e/licence-key.ts), the entitlements every route sees, and the page.
  */
-
-async function useLicenceKey(request: APIRequestContext, key: string | undefined) {
-  const response = await request.post("/api/e2e/licence", { data: key === undefined ? {} : { key } });
-  expect(response.status(), await response.text()).toBe(204);
-}
 
 async function planSeenByAMember(request: APIRequestContext): Promise<string> {
   const response = await request.get("/api/entitlements", { headers: MEMBER_AUTH });
