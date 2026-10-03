@@ -182,9 +182,17 @@ describe("recording an acceptance", () => {
 
     expect(await recordAcceptance("inv-1", "u1")).toBe(true);
     expect(updateOne.mock.calls[0]).toEqual([
-      { _id: "inv-1", status: "accepted", acceptedBy: null },
+      { _id: "inv-1", status: "accepted", acceptedBy: { $in: [null, "u1"] } },
       { $set: { acceptedBy: "u1" } },
     ]);
+  });
+
+  // BP-843. A retry after a write that landed but answered with an error must not read as the claim lost
+  it("counts a claim already tied to this same account as held", async () => {
+    updateOne.mockResolvedValue({ matchedCount: 1 });
+
+    expect(await recordAcceptance("inv-1", "u1")).toBe(true);
+    expect(updateOne.mock.calls[0][0].acceptedBy.$in).toContain("u1");
   });
 
   it("says so when the invitation was revoked meanwhile", async () => {
@@ -358,14 +366,20 @@ describe("a board owner inviting", () => {
 
   // A link handed to a person could be in anybody's hands; this board would go with it
   it("refuses to join an invitation whose link somebody else was shown", async () => {
-    stored({ invitedBy: "a1" });
+    stored({ invitedBy: "a1", expiresAt: new Date(Date.now() + 60_000) });
 
     const outcome = await inviteToBoard(INVITE);
 
-    expect(outcome).toEqual({ kind: "held", invitedBy: "a1" });
+    expect(outcome).toEqual({ kind: "held", invitedBy: "a1", expired: false });
     expect(create).not.toHaveBeenCalled();
     // A pending invitation holds the address, lapsed or not (BP-843); a revoked or accepted one must not
     expect(findOne).toHaveBeenCalledWith({ email: "ada@example.com", status: "pending" });
+  });
+
+  it("says when the invitation holding the address has lapsed", async () => {
+    stored({ invitedBy: "a1", expiresAt: new Date(Date.now() - 60_000) });
+
+    expect(await inviteToBoard(INVITE)).toEqual({ kind: "held", invitedBy: "a1", expired: true });
   });
 
   it("retires its own expired invitation before looking for one to join", async () => {

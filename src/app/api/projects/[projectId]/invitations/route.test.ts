@@ -110,7 +110,7 @@ describe("POST /api/projects/:id/invitations", () => {
   );
 
   it("refuses to add the board to an invitation whose link somebody holds", async () => {
-    inviteToBoard.mockResolvedValue({ kind: "held", invitedBy: "a1" });
+    inviteToBoard.mockResolvedValue({ kind: "held", invitedBy: "a1", expired: false });
     userFindById.mockReturnValue({ select: () => ({ lean: () => Promise.resolve({ username: "admin" }) }) });
 
     const res = await post({ email: "ada@example.com" });
@@ -120,6 +120,28 @@ describe("POST /api/projects/:id/invitations", () => {
       "ada@example.com already has an invitation from admin that this board cannot join. Add them by username once they have joined."
     );
     expect(deliverTo).not.toHaveBeenCalled();
+  });
+
+  // BP-843. Nobody joins through a lapsed invitation, so waiting for them to would be waiting for ever
+  it("says when the invitation holding the address has expired, and who can clear it", async () => {
+    inviteToBoard.mockResolvedValue({ kind: "held", invitedBy: "a1", expired: true });
+    userFindById.mockReturnValue({ select: () => ({ lean: () => Promise.resolve({ username: "admin" }) }) });
+
+    const res = await post({ email: "ada@example.com" });
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe(
+      "ada@example.com's invitation from admin has expired. Ask admin or an administrator to send it again or withdraw it, then invite them here."
+    );
+  });
+
+  it("names nobody when the expired invitation's sender is gone", async () => {
+    inviteToBoard.mockResolvedValue({ kind: "held", invitedBy: "a1", expired: true });
+    userFindById.mockReturnValue({ select: () => ({ lean: () => Promise.resolve(null) }) });
+
+    expect((await (await post({ email: "ada@example.com" })).json()).error).toBe(
+      "ada@example.com's invitation has expired. Ask an administrator to send it again or withdraw it, then invite them here."
+    );
   });
 
   it("refuses an address that already has an account", async () => {

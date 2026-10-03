@@ -3,7 +3,7 @@ import { connectDB } from "./db";
 import { authorityAtAcceptance } from "./invitation-authority";
 import { randomToken, sha256 } from "./oauth";
 import { Invitation } from "@/models/invitation";
-import { GrantRelation, IInvitation } from "@/types";
+import { GrantRelation, IInvitation, IInvitationBoard } from "@/types";
 
 export const INVITATION_TOKEN_PREFIX = "cpi_";
 export const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -76,7 +76,7 @@ export async function issueInvitation(
 export async function reissueInvitation(
   id: Types.ObjectId | string,
   sentBy: Types.ObjectId | string
-): Promise<{ invitation: IInvitation; token: string } | null> {
+): Promise<{ invitation: IInvitation; token: string; dropped: IInvitationBoard[] } | null> {
   await connectDB();
   // The resender re-endorses every board left, so a board its adder can no longer grant goes
   // first: otherwise the resend would grant it again without anybody choosing to (BP-843)
@@ -106,7 +106,7 @@ export async function reissueInvitation(
     },
     { returnDocument: "after" }
   );
-  return invitation ? { invitation, token } : null;
+  return invitation ? { invitation, token, dropped: unbacked } : null;
 }
 
 /** Also stops an acceptance in flight: its claim is not yet tied to an account, so it is revocable. */
@@ -181,8 +181,10 @@ export async function recordAcceptance(
   userId: Types.ObjectId | string
 ): Promise<boolean> {
   await connectDB();
+  // Already this account's counts too, so a retry after a write that landed but answered with an
+  // error does not read as the claim lost and take the account back (BP-843)
   const result = await Invitation.updateOne(
-    { _id: id, status: "accepted", acceptedBy: null },
+    { _id: id, status: "accepted", acceptedBy: { $in: [null, userId] } },
     { $set: { acceptedBy: userId } }
   );
   return result.matchedCount === 1;
@@ -232,7 +234,7 @@ export async function recordDelivery(
 export type BoardInvitation =
   | { kind: "created"; invitation: IInvitation; token: string }
   | { kind: "added" | "updated"; invitation: IInvitation }
-  | { kind: "held"; invitedBy: Types.ObjectId };
+  | { kind: "held"; invitedBy: Types.ObjectId; expired: boolean };
 
 /**
  * A board owner's invitation. An invitation already pending for the address only gains (or
@@ -276,9 +278,9 @@ export async function inviteToBoard(input: {
     if (added) return { kind: "added", invitation: added };
 
     const held = await Invitation.findOne({ email, status: "pending" })
-      .select("invitedBy")
-      .lean<{ invitedBy: Types.ObjectId }>();
-    if (held) return { kind: "held", invitedBy: held.invitedBy };
+      .select("invitedBy expiresAt")
+      .lean<{ invitedBy: Types.ObjectId; expiresAt: Date }>();
+    if (held) return { kind: "held", invitedBy: held.invitedBy, expired: held.expiresAt <= now };
 
     const { token, tokenHash, expiresAt } = freshSecret();
     try {

@@ -70,4 +70,18 @@ describe("pending invitations", () => {
 
     expect(screen.queryByText("Pending invitations")).toBeNull();
   });
+
+  // BP-843. Boards a resend left out are named, since nobody chose to drop them
+  it("names the boards a resend left out", async () => {
+    api.post.mockResolvedValue({
+      invitation: invitation("ada@example.com"),
+      delivery: "email",
+      dropped: ["Beta", "Gamma"],
+    });
+    render(<PendingInvitations invitations={[invitation("ada@example.com")]} onChanged={vi.fn()} />);
+
+    await act(async () => screen.getByRole("button", { name: "Resend the invitation for ada@example.com" }).click());
+
+    expect(toast).toHaveBeenCalledWith("Left out Beta, Gamma: whoever added them can no longer grant them.", "info");
+  });
 });

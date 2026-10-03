@@ -51,6 +51,7 @@ beforeEach(() => {
   reissueInvitation.mockResolvedValue({
     invitation: { _id: ID, email: "ada@example.com", role: "member", boards: [] },
     token: "cpi_new",
+    dropped: [],
   });
   deliverTo.mockResolvedValue({ delivery: "email" });
 });
@@ -65,6 +66,18 @@ describe("POST /api/invitations/:id/resend", () => {
     expect(deliverTo.mock.calls[0][1]).toBe("cpi_new");
     expect(deliverTo.mock.calls[0][3]).toBe(caller);
     expect(JSON.stringify(await res.json())).not.toContain("cpi_new");
+  });
+
+  // BP-843. Nobody chose to drop them, so the answer names them
+  it("names the boards the resend left out", async () => {
+    reissueInvitation.mockResolvedValue({
+      invitation: { _id: ID, email: "ada@example.com", role: "member", boards: [] },
+      token: "cpi_new",
+      dropped: [{ project: "p-b", relation: "member", addedBy: "owner-b" }],
+    });
+    projectFind.mockReturnValue({ select: () => ({ lean: () => Promise.resolve([{ _id: "p-b", key: "BB", name: "Beta" }]) }) });
+
+    expect((await (await resend()).json()).dropped).toEqual(["Beta"]);
   });
 
   it("hands the link back when no mail went out", async () => {

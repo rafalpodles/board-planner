@@ -9,7 +9,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { InvitationLink } from "@/components/settings/InvitationLink";
 import { ApiInvitation, InvitationDelivery } from "@/types";
 
-type Reissued = { invitation: ApiInvitation } & InvitationDelivery;
+type Reissued = { invitation: ApiInvitation; dropped?: string[] } & InvitationDelivery;
 
 function expiryText(invitation: ApiInvitation): string {
   const date = new Date(invitation.expiresAt).toLocaleDateString();
@@ -42,6 +42,13 @@ export function PendingInvitations({
         toast(`Invitation sent again to ${invitation.email}`, "success");
       } else {
         setLinkFor(result);
+      }
+      if (result.dropped?.length) {
+        const one = result.dropped.length === 1;
+        toast(
+          `Left out ${result.dropped.join(", ")}: whoever added ${one ? "it" : "them"} can no longer grant ${one ? "it" : "them"}.`,
+          "info",
+        );
       }
       onChanged();
     } catch (err) {

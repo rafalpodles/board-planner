@@ -97,16 +97,24 @@ test("a board owner's invitation leaves an administrator's lapsed one for the ad
   await card.getByLabel("Email to invite").fill(email);
   await card.getByRole("button", { name: "Invite", exact: true }).click();
 
-  await expect(alertOn(page)).toContainText(`${email} already has an invitation from admin`);
+  await expect(alertOn(page)).toContainText(
+    `${email}'s invitation from admin has expired. Ask admin or an administrator to send it again or withdraw it`
+  );
   const held = await (await db()).collection("invitations").find({ email }).toArray();
   expect(held.map((i) => [i.status, i.role])).toEqual([["pending", "admin"]]);
 });
 
-test("a resend drops a board whose adder can no longer grant it", async ({ page }) => {
+test("a resend drops a board whose adder can no longer grant it, and keeps one still backed", async ({ page }) => {
   const email = fresh("resent");
+  const backed = { _id: new mongoose.Types.ObjectId(), name: "Second Board" };
+  await (await db()).collection("projects").insertOne({ ...backed, key: "SB2", taskCounter: 0, createdAt: new Date() });
+  const board = (await (await db()).collection("projects").findOne({ _id: PROJECT_ID }, { projection: { name: 1 } }))!;
   await invitation({
     email,
-    boards: [{ project: PROJECT_ID, relation: "member", addedBy: OWNER_ID }],
+    boards: [
+      { project: PROJECT_ID, relation: "member", addedBy: OWNER_ID },
+      { project: backed._id, relation: "member", addedBy: ADMIN_ID },
+    ],
   });
   await (await db())
     .collection("grants")
@@ -117,6 +125,7 @@ test("a resend drops a board whose adder can no longer grant it", async ({ page 
   await page.getByRole("button", { name: `Resend the invitation for ${email}` }).click();
 
   await expect(page.getByTestId("toast").filter({ hasText: `Invitation sent again to ${email}` })).toHaveCount(1);
+  await expect(page.getByTestId("toast").filter({ hasText: `Left out ${board.name}` })).toHaveCount(1);
   const after = await (await db()).collection("invitations").findOne({ email, status: "pending" });
-  expect(after?.boards).toEqual([]);
+  expect(after?.boards.map((b: { project: unknown }) => String(b.project))).toEqual([String(backed._id)]);
 });

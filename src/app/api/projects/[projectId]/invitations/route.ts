@@ -118,12 +118,11 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
 
   if (outcome.kind === "held") {
     const inviter = await User.findById(outcome.invitedBy).select("username").lean();
-    return NextResponse.json(
-      {
-        error: `${email} already has an invitation${inviter ? ` from ${inviter.username}` : ""} that this board cannot join. Add them by username once they have joined.`,
-      },
-      { status: 409 }
-    );
+    // Nobody joins through a lapsed invitation, so waiting for them to join would be waiting for ever
+    const error = outcome.expired
+      ? `${email}'s invitation${inviter ? ` from ${inviter.username}` : ""} has expired. Ask ${inviter ? `${inviter.username} or ` : ""}an administrator to send it again or withdraw it, then invite them here.`
+      : `${email} already has an invitation${inviter ? ` from ${inviter.username}` : ""} that this board cannot join. Add them by username once they have joined.`;
+    return NextResponse.json({ error }, { status: 409 });
   }
 
   if (outcome.kind !== "created") {
