@@ -19,6 +19,11 @@ import { beginFlow, FLOW_COOKIE, FLOW_TTL_MS } from "@/lib/oidc/flow";
 import { findInvitationByToken } from "@/lib/invitations";
 import { INVITATION_REFUSALS } from "@/lib/invitation-refusals";
 import { NO_ORIGIN_ERROR } from "@/lib/invitation-mail";
+import { passwordSignInEnabled } from "@/lib/password-sign-in";
+import { safeNextPath } from "@/lib/next-path";
+import { refuseSetupCode } from "@/lib/setup-code";
+import { checkProfile } from "@/lib/new-account";
+import { connectDB } from "@/lib/db";
 
 const STARTS_PER_SOURCE = 30;
 
@@ -39,23 +44,31 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
   const origin = selfOrigin();
   if (!origin) return NextResponse.json({ error: NO_ORIGIN_ERROR }, { status: 500 });
 
-  const read = await readJsonBody<{ intent?: unknown; invitationToken?: unknown; currentPassword?: unknown }>(
-    request
-  );
+  const read = await readJsonBody<{
+    intent?: unknown;
+    invitationToken?: unknown;
+    currentPassword?: unknown;
+    next?: unknown;
+    setupCode?: unknown;
+    username?: unknown;
+    fullName?: unknown;
+  }>(request);
   if (!read.ok) return read.response;
-  const intent =
-    read.value.intent === "invite" ? "invite" : read.value.intent === "link" ? "link" : "signin";
+  const intent = (["invite", "link", "bootstrap"] as const).find((known) => known === read.value.intent) ?? "signin";
   let invitationToken: string | undefined;
   let userId: string | undefined;
+  let bootstrap: { username: string; fullName: string } | undefined;
+  const next = intent === "signin" && read.value.next !== undefined ? safeNextPath(read.value.next) : undefined;
   if (intent === "link") {
     const current = await getAuthUser(request).catch(() => null);
     if (!current || current.viaMachineCredential) {
       return NextResponse.json({ error: "Sign in to link a provider" }, { status: 401 });
     }
     // A linked provider is a standing way in, so a borrowed session must not be enough to add one.
-    // An account with no password has nothing else to ask for: its session is all the proof it has
+    // An account with no password has nothing else to ask for: its session is all the proof it has,
+    // and with password sign-in off nobody's password is a credential any more
     const record = await User.findById(current._id).select("+password");
-    if (record?.password) {
+    if (record?.password && passwordSignInEnabled()) {
       const typed = read.value.currentPassword;
       if (typeof typed !== "string" || !typed) {
         return NextResponse.json({ error: "Enter your current password to link a provider" }, { status: 400 });
@@ -83,9 +96,21 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
     invitationToken = read.value.invitationToken;
   }
 
+  if (intent === "bootstrap") {
+    await connectDB();
+    if ((await User.countDocuments()) > 0) {
+      return NextResponse.json({ error: "This instance is already set up. Sign in instead." }, { status: 409 });
+    }
+    const refused = await refuseSetupCode(clientIp, read.value.setupCode);
+    if (refused) return refused;
+    const profile = checkProfile(read.value);
+    if (!profile.ok) return NextResponse.json({ error: profile.error }, { status: 400 });
+    bootstrap = profile.value;
+  }
+
   let started;
   try {
-    started = await beginFlow({ provider, origin, intent, invitationToken, userId });
+    started = await beginFlow({ provider, origin, intent, invitationToken, userId, next, bootstrap });
   } catch (err) {
     console.error(`OIDC discovery for ${provider.id} failed:`, err);
     return NextResponse.json(

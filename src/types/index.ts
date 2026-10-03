@@ -231,6 +231,8 @@ export interface IIdentity {
   lastUsedAt: Date | null;
 }
 
+export type OidcIntent = "signin" | "invite" | "link" | "bootstrap";
+
 export interface IOidcFlow {
   _id: Types.ObjectId;
   binderHash: string;
@@ -238,9 +240,13 @@ export interface IOidcFlow {
   state: string;
   nonce: string;
   codeVerifier: string;
-  intent: "signin" | "invite" | "link";
+  intent: OidcIntent;
   invitationTokenHash: string | null;
   user: Types.ObjectId | null;
+  /** Where a sign-in returns to: a same-origin path, already checked */
+  next: string | null;
+  /** The first account's profile, for a flow that sets up an empty instance */
+  bootstrap: { username: string; fullName: string } | null;
   claims: { issuer: string; subject: string; email: string } | null;
   expiresAt: Date;
   createdAt: Date;
