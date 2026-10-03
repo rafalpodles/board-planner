@@ -86,8 +86,8 @@ test("a deactivated account loses every credential at once, its machine too, and
 
   await signIn(page);
   await openMember(page);
-  await page.getByRole("button", { name: "Deactivate" }).click();
-  await page.getByRole("dialog", { name: "Deactivate account" }).getByRole("button", { name: "Deactivate" }).click();
+  await page.getByRole("button", { name: "Deactivate", exact: true }).click();
+  await page.getByRole("dialog", { name: "Deactivate account" }).getByRole("button", { name: "Deactivate", exact: true }).click();
   await expect(page.getByText(`${MEMBER_USERNAME} is deactivated`)).toBeVisible();
   await expect(page.getByText("Deactivated", { exact: true })).toBeVisible();
 
@@ -150,7 +150,7 @@ test("an administrator is offered no way to deactivate themselves", async ({ pag
   await page.getByText("@admin", { exact: true }).first().click();
   await expect(page.getByRole("dialog")).toBeVisible();
 
-  await expect(page.getByRole("button", { name: "Deactivate" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Deactivate", exact: true })).toHaveCount(0);
   const refused = await page.request.put(`/api/users/${await adminId(page)}`, {
     headers: SAME_ORIGIN,
     data: { deactivate: true },
