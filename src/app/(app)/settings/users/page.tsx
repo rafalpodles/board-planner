@@ -223,7 +223,7 @@ export default function UsersPage() {
       const message = err instanceof Error ? err.message : "Failed to update user";
       // Beside the field it belongs to, not in a toast that clears after three seconds and leaves
       // the offending address sitting there unmarked
-      if (status === 409 || message.includes("email address")) {
+      if ((status === 409 && message.toLowerCase().includes("email")) || message.includes("email address")) {
         setEmailError(message);
       } else {
         toast(message, "error");

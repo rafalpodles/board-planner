@@ -78,6 +78,7 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
 
   const previousRole = target.role;
   let roleWasChanged = false;
+  let demotingAnActiveAdmin = false;
 
   // Update role
   if (body.role !== undefined) {
@@ -109,6 +110,7 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
           { status: 400 }
         );
       }
+      demotingAnActiveAdmin = true;
     }
     roleWasChanged = body.role !== previousRole;
     target.role = body.role as "admin" | "member";
@@ -189,32 +191,59 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
     passwordWasSet = true;
   }
 
-  if (passwordWasSet) {
-    // A link already in the target's inbox would otherwise still work, and overwrite the password
-    // the admin has just handed them
-    await invalidateResetTokens(target._id);
-    // Before the save: a failure revokes too much rather than leaving the old holder a way in
-    const revoked = await revokeUserCredentials(target._id);
-    if (revoked?.identitiesUnlinked) {
-      void logInstanceAudit({
-        action: "identity_unlinked",
-        user: admin._id,
-        actorUsername: admin.username,
-        target: target.username,
-        detail: "every sign-in provider, by an administrator setting the password",
-      });
+  // Written and counted again before anything else is: an administrator demoted or deactivated by
+  // a request racing this one counted this one as still there, as this one counted them (BP-841)
+  let demotedHere = false;
+  if (demotingAnActiveAdmin) {
+    const demoted = await User.updateOne({ _id: target._id, role: "admin" }, { $set: { role: "member" } });
+    demotedHere = demoted.modifiedCount > 0;
+    // Written above, so the save must not write it again over a promotion landing in between
+    target.unmarkModified("role");
+    if (demotedHere && (await User.countDocuments(ACTIVE_ADMINS)) === 0) {
+      await User.updateOne({ _id: target._id }, { $set: { role: "admin" } });
+      return NextResponse.json({ error: "Cannot demote the last admin" }, { status: 409 });
     }
+    // A racing request demoted them first and has recorded it; this one changed nothing
+    if (!demotedHere) roleWasChanged = false;
   }
+  // The demotion is already written, so a request refused or failing after it must take it back:
+  // otherwise it stands unrecorded behind an answer saying nothing was done
+  const undoDemotion = async () => {
+    if (demotedHere) await User.updateOne({ _id: target._id, role: "member" }, { $set: { role: "admin" } });
+  };
 
   try {
-    await target.save();
-  } catch (err) {
-    if (duplicateKeyField(err) === "email") {
-      return NextResponse.json(
-        { error: "That email is already on another account" },
-        { status: 409 }
-      );
+    if (passwordWasSet) {
+      // A link already in the target's inbox would otherwise still work, and overwrite the password
+      // the admin has just handed them
+      await invalidateResetTokens(target._id);
+      // Before the save: a failure revokes too much rather than leaving the old holder a way in
+      const revoked = await revokeUserCredentials(target._id);
+      if (revoked?.identitiesUnlinked) {
+        void logInstanceAudit({
+          action: "identity_unlinked",
+          user: admin._id,
+          actorUsername: admin.username,
+          target: target.username,
+          detail: "every sign-in provider, by an administrator setting the password",
+        });
+      }
     }
+
+    try {
+      await target.save();
+    } catch (err) {
+      if (duplicateKeyField(err) === "email") {
+        await undoDemotion();
+        return NextResponse.json(
+          { error: "That email is already on another account" },
+          { status: 409 }
+        );
+      }
+      throw err;
+    }
+  } catch (err) {
+    await undoDemotion().catch(() => {});
     throw err;
   }
   if (emailWasChanged) await revokePendingInvitationsFor(target.email);
@@ -360,6 +389,30 @@ export const DELETE = withAdmin(async (_request, { params, user: admin }) => {
       },
       { status: 409 }
     );
+  }
+
+  // A delete cannot be undone, so the account first stops counting, as a deactivated one does, and
+  // the two invariants are counted again without it: a demotion, deactivation or removal racing
+  // this one counted this account as still there (BP-841)
+  if (!user.deactivatedAt) {
+    const markedAt = new Date();
+    const marked = await User.updateOne({ _id: user._id, deactivatedAt: null }, { $set: { deactivatedAt: markedAt } });
+    if (marked.modifiedCount > 0) {
+      const lastAdminGone = user.role === "admin" && (await User.countDocuments(ACTIVE_ADMINS)) === 0;
+      const ownerless = lastAdminGone ? [] : await boardsLeftWithoutOwner(String(user._id));
+      if (lastAdminGone || ownerless.length > 0) {
+        // Only this request's own mark: a deactivation landing meanwhile stays
+        await User.updateOne({ _id: user._id, deactivatedAt: markedAt }, { $set: { deactivatedAt: null } });
+        return NextResponse.json(
+          {
+            error: lastAdminGone
+              ? "Cannot delete the last admin"
+              : "Another owner of the same board was removed meanwhile",
+          },
+          { status: 409 }
+        );
+      }
+    }
   }
 
   // The delete's own answer, not a discarded one: two administrators deleting the same account

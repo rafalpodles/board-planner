@@ -42,8 +42,10 @@ vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/lib/security-mail", () => ({ notifyPasswordChanged, notifyAddressChanged }));
 vi.mock("bcryptjs", () => ({ default: { hash } }));
 const userFindByIdAndDelete = vi.fn();
+const userUpdateOne = vi.fn();
 vi.mock("@/models/user", () => ({
   User: {
+    updateOne: userUpdateOne,
     findById: userFindById,
     countDocuments: userCountDocuments,
     exists: userExists,
@@ -77,6 +79,7 @@ function targetDoc(overrides: Record<string, unknown> = {}) {
     kind: "human",
     password: "old-hash",
     save: vi.fn().mockResolvedValue(undefined),
+    unmarkModified: vi.fn(),
     ...overrides,
   };
 }
@@ -91,6 +94,7 @@ beforeEach(async () => {
   getAuthUser.mockResolvedValue(ADMIN);
   userCountDocuments.mockResolvedValue(2);
   userExists.mockResolvedValue(null);
+  userUpdateOne.mockResolvedValue({ modifiedCount: 1 });
   hash.mockResolvedValue("new-hash");
 });
 
@@ -540,6 +544,62 @@ describe("DELETE /api/users/:id", () => {
     boardsOnlyOwnedBy.mockResolvedValue([]);
   });
 
+  // BP-841. A delete cannot be undone, so the account stops counting first and both rules are
+  // counted again without it
+  describe("when a racing request took the other admin or owner", () => {
+    it("marks the account deactivated before deleting it", async () => {
+      found(person());
+
+      expect((await DELETE(...del(TARGET_HEX))).status).toBe(200);
+      expect(userUpdateOne).toHaveBeenCalledWith(
+        { _id: TARGET_HEX, deactivatedAt: null },
+        { $set: { deactivatedAt: expect.any(Date) } }
+      );
+      expect(userUpdateOne.mock.invocationCallOrder[0]).toBeLessThan(userFindByIdAndDelete.mock.invocationCallOrder[0]);
+    });
+
+    it("refuses, deleting nothing, when no active admin would be left", async () => {
+      found(person({ role: "admin" }));
+      userCountDocuments.mockResolvedValueOnce(2).mockResolvedValueOnce(0);
+
+      const res = await DELETE(...del(TARGET_HEX));
+
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: "Cannot delete the last admin" });
+      expect(userCountDocuments).toHaveBeenLastCalledWith({ role: "admin", deactivatedAt: null });
+      // Only its own mark: a deactivation that landed meanwhile stays
+      expect(userUpdateOne).toHaveBeenLastCalledWith(
+        { _id: TARGET_HEX, deactivatedAt: userUpdateOne.mock.calls[0][1].$set.deactivatedAt },
+        { $set: { deactivatedAt: null } }
+      );
+      expect(userFindByIdAndDelete).not.toHaveBeenCalled();
+    });
+
+    it("refuses, deleting nothing, when a board it owns would have no active owner", async () => {
+      found(person());
+      boardsLeftWithoutOwner.mockResolvedValueOnce(["p1"]);
+
+      const res = await DELETE(...del(TARGET_HEX));
+
+      expect(res.status).toBe(409);
+      expect(boardsLeftWithoutOwner).toHaveBeenCalledWith(TARGET_HEX);
+      expect(userUpdateOne).toHaveBeenLastCalledWith(
+        { _id: TARGET_HEX, deactivatedAt: userUpdateOne.mock.calls[0][1].$set.deactivatedAt },
+        { $set: { deactivatedAt: null } }
+      );
+      expect(userFindByIdAndDelete).not.toHaveBeenCalled();
+    });
+
+    it("counts nothing again for an account already deactivated, which counted for nothing", async () => {
+      found(person({ role: "admin", deactivatedAt: new Date() }));
+      userFindByIdAndDelete.mockResolvedValue(person({ role: "admin", deactivatedAt: new Date() }));
+
+      expect((await DELETE(...del(TARGET_HEX))).status).toBe(200);
+      expect(userUpdateOne).not.toHaveBeenCalled();
+      expect(boardsLeftWithoutOwner).not.toHaveBeenCalled();
+    });
+  });
+
   // BP-832. A deactivated administrator no longer counts towards keeping one
   it("deletes a deactivated administrator while one active one remains", async () => {
     found(person({ role: "admin", deactivatedAt: new Date() }));
@@ -830,6 +890,66 @@ describe("PUT /api/users/:id — the guards that keep an administrator standing"
 
     expect(res.status).toBe(200);
     expect(target.role).toBe("member");
+    expect(userUpdateOne).toHaveBeenCalledWith({ _id: "target-1", role: "admin" }, { $set: { role: "member" } });
+    // Already written: the save must not write it again over a promotion landing in between
+    expect(target.unmarkModified).toHaveBeenCalledWith("role");
+    expect(target.unmarkModified.mock.invocationCallOrder[0]).toBeLessThan(target.save.mock.invocationCallOrder[0]);
+  });
+
+  // BP-841. The other administrator was demoted or deactivated by a request that counted this one
+  it("puts the role back, and saves nothing, when its demotion left no active admin", async () => {
+    const target = targetDoc({ role: "admin" });
+    found(target);
+    userCountDocuments.mockResolvedValueOnce(2).mockResolvedValueOnce(0);
+
+    const res = await PUT(put({ role: "member", email: "new@example.com" }), ctx());
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "Cannot demote the last admin" });
+    expect(userCountDocuments).toHaveBeenLastCalledWith({ role: "admin", deactivatedAt: null });
+    expect(userUpdateOne).toHaveBeenLastCalledWith({ _id: "target-1" }, { $set: { role: "admin" } });
+    expect(target.save).not.toHaveBeenCalled();
+    expect(logInstanceAudit).not.toHaveBeenCalled();
+  });
+
+  it("takes its demotion back when the same request is then refused for the address", async () => {
+    const target = targetDoc({ role: "admin" });
+    target.save.mockRejectedValue(Object.assign(new Error("dup"), { code: 11000, keyPattern: { email: 1 } }));
+    found(target);
+
+    const res = await PUT(put({ role: "member", email: "taken@example.com" }), ctx());
+
+    expect(res.status).toBe(409);
+    expect(userUpdateOne).toHaveBeenLastCalledWith({ _id: "target-1", role: "member" }, { $set: { role: "admin" } });
+    expect(logInstanceAudit).not.toHaveBeenCalledWith(expect.objectContaining({ action: "user_role_changed" }));
+  });
+
+  it("takes its demotion back when the save fails outright", async () => {
+    const target = targetDoc({ role: "admin" });
+    target.save.mockRejectedValue(new Error("db down"));
+    found(target);
+
+    await expect(PUT(put({ role: "member" }), ctx())).rejects.toThrow("db down");
+    expect(userUpdateOne).toHaveBeenLastCalledWith({ _id: "target-1", role: "member" }, { $set: { role: "admin" } });
+  });
+
+  it("records no second change of role when a racing request demoted them first", async () => {
+    const target = targetDoc({ role: "admin" });
+    found(target);
+    userUpdateOne.mockResolvedValue({ modifiedCount: 0 });
+
+    expect((await PUT(put({ role: "member" }), ctx())).status).toBe(200);
+    expect(logInstanceAudit).not.toHaveBeenCalledWith(expect.objectContaining({ action: "user_role_changed" }));
+  });
+
+  it("counts nothing again when its own conditional write changed nothing", async () => {
+    const target = targetDoc({ role: "admin" });
+    found(target);
+    userUpdateOne.mockResolvedValue({ modifiedCount: 0 });
+    userCountDocuments.mockResolvedValue(2);
+
+    expect((await PUT(put({ role: "member" }), ctx())).status).toBe(200);
+    expect(userCountDocuments).toHaveBeenCalledTimes(1);
   });
 
   // Not the same refusal: this one is about the caller, and it fires however many admins there are

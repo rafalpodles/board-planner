@@ -387,6 +387,22 @@ describe("the users page, when a delete is refused", () => {
   });
 });
 
+// BP-841. A refusal about the role is not the address field's to show
+describe("a save refused for the role", () => {
+  it("says so in a toast, leaving the address field unmarked", async () => {
+    api.put.mockRejectedValue(Object.assign(new Error("Cannot demote the last admin"), { status: 409 }));
+    render(<UsersPage />);
+    await screen.findByText("Ada");
+    act(() => screen.getByText("Ada").click());
+    const dialog = await screen.findByRole("dialog", { name: /Edit Ada/ });
+
+    await act(async () => within(dialog).getByRole("button", { name: "Save" }).click());
+
+    expect(toast).toHaveBeenCalledWith("Cannot demote the last admin", "error");
+    expect(within(dialog).queryByText("Cannot demote the last admin")).toBeNull();
+  });
+});
+
 describe("the users page with password sign-in off (BP-830)", () => {
   it("offers no account with a password and no password to hand out", async () => {
     passwordSignIn.value = false;

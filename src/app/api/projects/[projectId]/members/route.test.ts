@@ -9,6 +9,7 @@ const grantUpsert = vi.fn();
 const grantUpsertLean = vi.fn();
 const grantDelete = vi.fn();
 const grantDeleteLean = vi.fn();
+const grantUpdateOne = vi.fn(async (..._a: unknown[]) => ({}));
 const logProjectAudit = vi.fn();
 const ownerCount = vi.fn();
 const userFind = vi.fn();
@@ -40,6 +41,7 @@ vi.mock("@/models/grant", () => ({
     findOneAndDelete: (...a: unknown[]) => (
       grantDelete(...a), { select: () => ({ lean: grantDeleteLean }) }
     ),
+    updateOne: (...a: unknown[]) => grantUpdateOne(...a),
   },
 }));
 const userExists = vi.fn(async (_filter?: unknown) => ({ _id: "active" }) as unknown);
@@ -221,6 +223,46 @@ describe("PUT members", () => {
     );
   });
 
+  // BP-841. Another owner stepped down, was removed or deactivated by a request that counted this one
+  it("puts an owner back when its demotion left the board with no active owner", async () => {
+    grantFindOneLean.mockResolvedValue({ relation: "owner" });
+    grantUpsertLean.mockResolvedValue({ relation: "owner" });
+    ownerCount.mockResolvedValueOnce(2).mockResolvedValueOnce(0);
+
+    const res = await PUT(put({ userId: U2, relation: "member" }), { params });
+
+    expect(res.status).toBe(409);
+    // An upsert: a concurrent removal may have taken the row this puts back
+    expect(grantUpdateOne).toHaveBeenCalledWith(
+      { subject: U2, objectType: "project", object: PROJECT },
+      { $set: { relation: "owner" }, $setOnInsert: { createdBy: "o1" } },
+      { upsert: true }
+    );
+    expect(logProjectAudit).not.toHaveBeenCalled();
+    expect(createNotifications).not.toHaveBeenCalled();
+  });
+
+  it("records an owner re-created after somebody else removed them meanwhile", async () => {
+    grantFindOneLean.mockResolvedValue({ relation: "owner" });
+    grantUpsertLean.mockResolvedValue({ relation: "owner" });
+    ownerCount.mockResolvedValueOnce(2).mockResolvedValueOnce(0);
+    grantUpdateOne.mockResolvedValueOnce({ upsertedCount: 1 } as never);
+    userFindByIdSelect.mockResolvedValue({ _id: U2, role: "member", kind: "human", username: "uma" });
+
+    expect((await PUT(put({ userId: U2, relation: "member" }), { params })).status).toBe(409);
+    expect(logProjectAudit).toHaveBeenCalledWith(PROJECT, "o1", "member_added", "uma: no access → owner");
+  });
+
+  it("keeps an owner's demotion while another active owner remains after the write", async () => {
+    grantFindOneLean.mockResolvedValue({ relation: "owner" });
+    grantUpsertLean.mockResolvedValue({ relation: "owner" });
+    ownerCount.mockResolvedValue(1);
+    ownerCount.mockResolvedValueOnce(2);
+
+    expect((await PUT(put({ userId: U2, relation: "member" }), { params })).status).toBe(200);
+    expect(grantUpdateOne).not.toHaveBeenCalled();
+  });
+
   it("survives a concurrent double submit", async () => {
     grantUpsertLean.mockRejectedValueOnce(Object.assign(new Error("dup"), { code: 11000 }));
     const res = await PUT(put({ userId: U1, relation: "owner" }), { params });
@@ -245,6 +287,47 @@ describe("PUT members", () => {
 });
 
 describe("DELETE members", () => {
+  // BP-841
+  it("puts an owner's grant back when its removal left the board with no active owner", async () => {
+    grantDeleteLean.mockResolvedValue({ relation: "owner", createdBy: "o0" });
+    ownerCount.mockResolvedValueOnce(2).mockResolvedValueOnce(0);
+    const url = `http://x/api/projects/${PROJECT}/members?userId=${U2}`;
+
+    const res = await DELETE(new Request(url, { method: "DELETE" }), { params });
+
+    expect(res.status).toBe(409);
+    expect(grantUpdateOne).toHaveBeenCalledWith(
+      { subject: U2, objectType: "project", object: PROJECT },
+      { $setOnInsert: { relation: "owner", createdBy: "o0" } },
+      { upsert: true }
+    );
+    expect(logProjectAudit).not.toHaveBeenCalled();
+  });
+
+  it("makes them owner again when a concurrent write re-added them as a member meanwhile", async () => {
+    grantDeleteLean.mockResolvedValue({ relation: "owner", createdBy: "o0" });
+    ownerCount.mockResolvedValueOnce(2).mockResolvedValueOnce(0).mockResolvedValueOnce(0);
+    const url = `http://x/api/projects/${PROJECT}/members?userId=${U2}`;
+
+    expect((await DELETE(new Request(url, { method: "DELETE" }), { params })).status).toBe(409);
+    expect(grantUpdateOne).toHaveBeenLastCalledWith(
+      { subject: U2, objectType: "project", object: PROJECT },
+      { $set: { relation: "owner" } }
+    );
+    // Another request's member grant made owner again: an owner's access granted, so recorded
+    expect(logProjectAudit).toHaveBeenCalledWith(PROJECT, "o1", "member_role_changed", "uma: member → owner");
+  });
+
+  it("keeps an owner's removal while another active owner remains after it", async () => {
+    grantDeleteLean.mockResolvedValue({ relation: "owner", createdBy: "o0" });
+    ownerCount.mockResolvedValue(1);
+    ownerCount.mockResolvedValueOnce(2);
+    const url = `http://x/api/projects/${PROJECT}/members?userId=${U2}`;
+
+    expect((await DELETE(new Request(url, { method: "DELETE" }), { params })).status).toBe(200);
+    expect(grantUpdateOne).not.toHaveBeenCalled();
+  });
+
   it("removes the grant for the named user", async () => {
     const url = `http://x/api/projects/${PROJECT}/members?userId=${U2}`;
     const res = await DELETE(new Request(url, { method: "DELETE" }), { params });
