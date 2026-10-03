@@ -188,6 +188,10 @@ OIDC_ISSUER=              # Optional — sign-in through any OpenID Connect prov
 OIDC_CLIENT_ID=           # Entra, Okta…), all three together; the redirect URI is PUBLIC_ORIGIN +
 OIDC_CLIENT_SECRET=       # /api/auth/oidc/oidc/callback. Plain http only for an issuer on loopback
 OIDC_LABEL=               # Optional — the button's name (default "Single sign-on") (BP-828)
+OIDC_ADMIN_GROUP=         # Optional — at each sign-in through OIDC_ISSUER, an account in this group is
+                          # made an admin and one outside it a member, never the last active admin;
+                          # no groups claim at all counts as outside (src/lib/oidc/admin-group.ts)
+OIDC_GROUPS_CLAIM=        # Optional — the ID token claim holding the groups (default "groups") (BP-833)
 GOOGLE_CLIENT_ID=         # Optional — sign-in with Google, the same code path at Google's issuer;
 GOOGLE_CLIENT_SECRET=     # redirect URI PUBLIC_ORIGIN + /api/auth/oidc/google/callback (BP-828)
 PASSWORD_SIGN_IN=         # Optional — on (default) or off. Off: every password endpoint answers 403,
