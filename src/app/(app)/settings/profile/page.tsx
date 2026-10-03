@@ -20,6 +20,8 @@ export default function ProfilePage() {
   const [fullName, setFullName] = useState("");
   const [savedFullName, setSavedFullName] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
+  // Changing the address asks for the password, which an account made through a provider lacks
+  const [hasPassword, setHasPassword] = useState<boolean | null>(null);
   const passwordSignIn = usePasswordSignIn();
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -60,6 +62,10 @@ export default function ProfilePage() {
         setLoadFailed(true);
         setLoaded(true);
       });
+    api
+      .get("/api/users/me/identities")
+      .then((data: { hasPassword: boolean }) => setHasPassword(data.hasPassword))
+      .catch(() => {});
     api
       .get("/api/users/me/email-change")
       .then((data: { pending: { email: string } | null }) => setPendingEmail(data.pending?.email ?? ""))
@@ -167,7 +173,13 @@ export default function ProfilePage() {
           </p>
         )}
 
-        {emailChanged && (
+        {emailChanged && hasPassword === false && (
+          <p className="text-sm text-text-muted">
+            Changing your address needs your password, and this account has none. Add one under
+            Settings → Security first, or ask an administrator to change the address.
+          </p>
+        )}
+        {emailChanged && hasPassword !== false && (
           <div className="space-y-2 rounded-lg border border-border bg-surface-muted p-3">
             <Input
               label="Current password"

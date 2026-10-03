@@ -1,3 +1,4 @@
+import { passwordSignInEnabled } from "@/lib/password-sign-in";
 import { APP_NAME } from "@/lib/brand";
 import { isEmailConfigured, sendEmail } from "@/lib/email";
 import { renderEmail } from "@/lib/email-template";
@@ -33,7 +34,9 @@ export async function deliverInvitation(mail: InvitationMail): Promise<Invitatio
       mail.role === "admin"
         ? `You are invited as an administrator of ${mail.origin}.`
         : `You are invited to ${mail.origin}.`,
-      "Choose a username and a password to finish setting up your account.",
+      passwordSignInEnabled()
+        ? "Choose a username and a password to finish setting up your account."
+        : "Sign in with your provider and choose a username to finish setting up your account.",
     ],
     rows: mail.boards.map((b) => ({
       label: b.name,

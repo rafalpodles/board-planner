@@ -178,8 +178,20 @@ export default function LoginPage() {
 
         {passwordSignIn === false && isRegister && (
           <div className="space-y-4">
-            <Input label="Username" value={username} onChange={(e) => setUsername(e.target.value)} required />
-            <Input label="Full Name" value={fullName} onChange={(e) => setFullName(e.target.value)} required />
+            <Input
+              label="Username"
+              autoComplete="username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              required
+            />
+            <Input
+              label="Full Name"
+              autoComplete="name"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              required
+            />
             {setupCodeField}
             <ProviderButtons
               intent="bootstrap"

@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/Input";
 import { useToast } from "@/components/ui/Toast";
 import { LinkedIdentity, SignInMethods } from "@/components/settings/SignInMethods";
 import { ProviderButtons } from "@/components/auth/ProviderButtons";
+import { usePasswordSignIn } from "@/hooks/use-password-sign-in";
 
 const LINK_RESULTS: Record<string, { tone: "success" | "error"; text: string }> = {
   linked: { tone: "success", text: "Linked. You can now sign in with it." },
@@ -29,10 +30,12 @@ export default function SecurityPage() {
   const [methods, setMethods] = useState<{
     hasPassword: boolean;
     passwordSignIn: boolean;
+    mailWorks?: boolean;
     identities: LinkedIdentity[];
   } | null>(null);
   const [methodsFailed, setMethodsFailed] = useState(false);
   const [linkPassword, setLinkPassword] = useState("");
+  const passwordSignIn = usePasswordSignIn();
 
   const readMethods = useCallback(() => {
     api
@@ -121,28 +124,37 @@ export default function SecurityPage() {
     }
   }
 
-  if (methodsFailed) {
-    return (
-      <p role="alert" className="text-sm text-danger">
-        Could not load how this account signs in. Reload the page to try again.
-      </p>
-    );
-  }
-  if (!methods) return null;
+  // The password form does not depend on this read, so a failed one costs only the providers part
+  const providersPart = methodsFailed ? (
+    <p role="alert" className="mt-10 text-sm text-danger">
+      Could not load your sign-in providers. Reload the page to try again.
+    </p>
+  ) : (
+    providersSection
+  );
+  if (!methods && !methodsFailed) return null;
+  // Not offered from a failed read where passwords sign nobody in: the form would only be refused
+  if (methodsFailed && passwordSignIn === false) return <div className="max-w-md">{providersPart}</div>;
 
-  if (methods.passwordSignIn === false) return <div className="max-w-md">{providersSection}</div>;
+  if (methods?.passwordSignIn === false) return <div className="max-w-md">{providersSection}</div>;
 
-  if (!methods.hasPassword) {
+  if (methods && !methods.hasPassword) {
     return (
       <div className="max-w-md">
         <h2 className="text-lg font-semibold mb-1">Password</h2>
         <p className="text-sm text-text-muted">
-          This account has no password. To add one, use{" "}
-          <Link href="/forgot" className="underline">
-            Forgot your password
-          </Link>{" "}
-          — the link goes to your address. Setting a password unlinks your providers; link them again
-          here afterwards.
+          {methods.mailWorks === false ? (
+            <>This account has no password, and this instance sends no mail. Ask an administrator to set one.</>
+          ) : (
+            <>
+              This account has no password. To add one, use{" "}
+              <Link href="/forgot" className="underline">
+                Forgot your password
+              </Link>{" "}
+              — the link goes to your address.
+            </>
+          )}{" "}
+          Setting a password unlinks your providers; link them again here afterwards.
         </p>
         {providersSection}
       </div>
@@ -155,7 +167,7 @@ export default function SecurityPage() {
       <p className="text-sm text-text-muted mb-6">
         You stay signed in on this device. Every other device, API token, connected app such as
         Claude Code, and machine you enrolled is signed out and has to be set up again.
-        {methods.identities.length > 0 && " Your sign-in providers are unlinked too."}
+        {!!methods?.identities.length && " Your sign-in providers are unlinked too."}
       </p>
 
       <form onSubmit={handleSubmit} className="space-y-4">
@@ -211,7 +223,7 @@ export default function SecurityPage() {
           {saving ? "Changing…" : "Change password"}
         </Button>
       </form>
-      {providersSection}
+      {providersPart}
     </div>
   );
 }

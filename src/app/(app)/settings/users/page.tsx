@@ -239,7 +239,7 @@ export default function UsersPage() {
     // password was changed should not wait on a slow list to be re-read.
     toast(
       passwordWasSet
-        ? `Password set for ${username}. They were signed out everywhere, API tokens, connected apps and enrolled machines included.`
+        ? `Password set for ${username}. They were signed out everywhere, API tokens, connected apps and enrolled machines included, and their sign-in providers were unlinked.`
         : "Saved",
       "success"
     );
@@ -277,6 +277,8 @@ export default function UsersPage() {
     setSigningOut(false);
     toast(`${confirmSignOut.username} was signed out everywhere`, "success");
     setConfirmSignOut(null);
+    // Their providers were unlinked, which their card lists
+    await refreshUsers();
   }
 
   async function deactivate() {
@@ -349,6 +351,10 @@ export default function UsersPage() {
   };
   const shownUsers = statusFilter === "all" ? users : statusFilter === "active" ? active : statusFilter === "deactivated" ? deactivated : [];
   const showInvitations = statusFilter === "all" || statusFilter === "invited";
+
+  // Each account action closes this dialog, which would throw away what was typed in it
+  const unsavedEdit =
+    !!editUser && (editRole !== editUser.role || editEmail !== (editUser.email ?? "") || newPassword !== "");
 
   return (
     <div>
@@ -423,7 +429,7 @@ export default function UsersPage() {
                   @{u.username}
                 </p>
                 <p className="text-xs text-text-muted">
-                  {u.lastActiveAt ? `Last active ${timeAgo(u.lastActiveAt)}` : "Never signed in"}
+                  {u.lastActiveAt ? `Last active ${timeAgo(u.lastActiveAt)}` : "No sign-in recorded"}
                   {" · "}
                   {u.signInMethods && u.signInMethods.length > 0 ? u.signInMethods.join(", ") : "No way to sign in"}
                 </p>
@@ -580,8 +586,8 @@ export default function UsersPage() {
                   <p id="newUserPasswordHelp" className="text-sm text-text-muted">
                     The password itself is never emailed — tell {editUser.fullName} yourself.{" "}
                     {mailWorks && editUser.email
-                      ? `${editUser.email} is told that it changed, and saving signs them out everywhere, API tokens, connected apps and enrolled machines included.`
-                      : "Nothing reaches them either, so this is the only way they will know. Saving signs them out everywhere, API tokens, connected apps and enrolled machines included."}
+                      ? `${editUser.email} is told that it changed, and saving signs them out everywhere, API tokens, connected apps and enrolled machines included, and unlinks their sign-in providers.`
+                      : "Nothing reaches them either, so this is the only way they will know. Saving signs them out everywhere, API tokens, connected apps and enrolled machines included, and unlinks their sign-in providers."}
                   </p>
                   <div className="flex items-start gap-2">
                     <Input
@@ -627,6 +633,11 @@ export default function UsersPage() {
 
             {currentUser?._id !== editUser._id && (
               <div className="border-t border-border pt-4 space-y-3">
+                {unsavedEdit && (
+                  <p id="unsavedEditHint" className="text-sm text-text-muted">
+                    Save or cancel your changes first.
+                  </p>
+                )}
                 {editUser.email && !editUser.emailVerifiedAt && (
                   <div>
                     <p className="text-sm font-medium mb-1">Address not confirmed</p>
@@ -637,6 +648,8 @@ export default function UsersPage() {
                     <Button
                       size="sm"
                       variant="secondary"
+                      disabled={unsavedEdit}
+                      aria-describedby={unsavedEdit ? "unsavedEditHint" : undefined}
                       onClick={() => {
                         setConfirmAddressOf(editUser);
                         closeEdit();
@@ -653,6 +666,8 @@ export default function UsersPage() {
                     <Button
                       size="sm"
                       variant="secondary"
+                      disabled={unsavedEdit}
+                      aria-describedby={unsavedEdit ? "unsavedEditHint" : undefined}
                       onClick={() => {
                         setConfirmSignOut(editUser);
                         closeEdit();
@@ -662,13 +677,21 @@ export default function UsersPage() {
                     </Button>
                   )}
                   {editUser.deactivatedAt ? (
-                    <Button size="sm" variant="secondary" onClick={() => reactivate(editUser)} disabled={togglingActive}>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => reactivate(editUser)}
+                      disabled={togglingActive || unsavedEdit}
+                      aria-describedby={unsavedEdit ? "unsavedEditHint" : undefined}
+                    >
                       {togglingActive ? "Reactivating…" : "Reactivate"}
                     </Button>
                   ) : (
                     <Button
                       size="sm"
                       variant="secondary"
+                      disabled={unsavedEdit}
+                      aria-describedby={unsavedEdit ? "unsavedEditHint" : undefined}
                       onClick={() => {
                         setConfirmDeactivate(editUser);
                         closeEdit();
@@ -698,7 +721,7 @@ export default function UsersPage() {
               </Button>
               <Button
                 variant="danger"
-                disabled={editSaving}
+                disabled={editSaving || unsavedEdit}
                 onClick={() => {
                   closeEdit();
                   setConfirmDeleteUser(editUser);
