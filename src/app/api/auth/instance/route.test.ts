@@ -47,9 +47,13 @@ describe("GET /api/auth/instance", () => {
       Object.assign(new Error("connect ECONNREFUSED"), { name: "MongooseServerSelectionError" })
     );
 
+    process.env.PASSWORD_SIGN_IN = "off";
     const res = await GET();
+    delete process.env.PASSWORD_SIGN_IN;
 
     expect(res.status).toBe(503);
+    // Read from the environment: an off instance must not fall back to its password form
+    expect((await res.clone().json()).passwordSignIn).toBe(false);
     expect(await res.json()).not.toMatchObject({ unclaimed: true });
   });
 });

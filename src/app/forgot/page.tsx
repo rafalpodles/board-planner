@@ -38,10 +38,10 @@ export default function ForgotPasswordPage() {
     }
   }
 
-  if (!passwordSignIn) {
+  if (passwordSignIn === false) {
     return (
       <div className="min-h-screen flex items-center justify-center px-4">
-        {passwordSignIn === false && <PasswordSignInOff />}
+        <PasswordSignInOff />
       </div>
     );
   }

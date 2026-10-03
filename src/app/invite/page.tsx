@@ -185,7 +185,7 @@ function AcceptForm() {
           ))}
         </ul>
       )}
-      {passwordSignIn && (
+      {passwordSignIn !== false && (
       <form onSubmit={handleSubmit} className="space-y-4">
         <Input
           label="Username"
@@ -230,11 +230,14 @@ function AcceptForm() {
         </Button>
       </form>
       )}
-      {passwordSignIn !== null && (
-        <div className={passwordSignIn ? "mt-4" : undefined}>
-          <ProviderButtons intent="invite" invitationToken={token} verb="Accept with" divider={passwordSignIn} />
-        </div>
-      )}
+      <div className={passwordSignIn !== false ? "mt-4" : undefined}>
+        <ProviderButtons
+          intent="invite"
+          invitationToken={token}
+          verb="Accept with"
+          divider={passwordSignIn !== false}
+        />
+      </div>
     </div>
   );
 }

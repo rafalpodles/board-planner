@@ -4,14 +4,15 @@ import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";
 import { render, screen, cleanup, act, waitFor } from "@testing-library/react";
 import UsersPage from "./page";
 
-const { api, auth, toast, dismiss } = vi.hoisted(() => ({
+const { api, auth, toast, dismiss, passwordSignIn } = vi.hoisted(() => ({
+  passwordSignIn: { value: true as boolean | null },
   api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), del: vi.fn() },
   auth: { user: { _id: "u1", username: "owner" }, isAdmin: true, isLoading: false },
   toast: vi.fn(),
   dismiss: vi.fn(),
 }));
 
-vi.mock("@/hooks/use-password-sign-in", () => ({ usePasswordSignIn: () => true }));
+vi.mock("@/hooks/use-password-sign-in", () => ({ usePasswordSignIn: () => passwordSignIn.value }));
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/hooks/use-auth", () => ({ useAuth: () => auth }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
@@ -33,6 +34,7 @@ const otherGet = (path: string) =>
 
 beforeEach(() => {
   vi.clearAllMocks();
+  passwordSignIn.value = true;
   toast.mockClear();
   api.get.mockImplementation((path: string) =>
     path === "/api/users" ? Promise.resolve([OTHER]) : otherGet(path)
@@ -382,5 +384,48 @@ describe("the users page, when a delete is refused", () => {
 
     const dialog = await screen.findByRole("dialog", { name: "Delete User" });
     expect(dialog.querySelector('[role="alert"]')).toBeNull();
+  });
+});
+
+describe("the users page with password sign-in off (BP-830)", () => {
+  it("offers no account with a password and no password to hand out", async () => {
+    passwordSignIn.value = false;
+
+    render(<UsersPage />);
+    await screen.findByText("Ada");
+    expect(screen.queryByRole("button", { name: "New User" })).toBeNull();
+
+    act(() => screen.getByText("Ada").click());
+    await screen.findByRole("dialog", { name: /Edit Ada/ });
+    expect(screen.queryByLabelText("Set a new password")).toBeNull();
+    expect(screen.getByRole("button", { name: "Sign out everywhere" })).toBeTruthy();
+  });
+
+  // Drawn as on until the answer comes: the default, and never a blank where the button was
+  it("draws the password actions while the answer is still coming", async () => {
+    passwordSignIn.value = null;
+
+    render(<UsersPage />);
+    await screen.findByText("Ada");
+
+    expect(screen.getByRole("button", { name: "New User" })).toBeTruthy();
+  });
+
+  it("offers to confirm an address nothing has proven, and sends it", async () => {
+    api.get.mockImplementation((path: string) =>
+      path === "/api/users"
+        ? Promise.resolve([{ ...OTHER, email: "ada@example.com", emailVerifiedAt: null }])
+        : otherGet(path)
+    );
+    api.put.mockResolvedValue({ ok: true });
+
+    render(<UsersPage />);
+    await screen.findByText("Ada");
+    act(() => screen.getByText("Ada").click());
+    await screen.findByRole("dialog", { name: /Edit Ada/ });
+    await act(async () => screen.getByRole("button", { name: "Confirm address" }).click());
+
+    expect(api.put).toHaveBeenCalledWith("/api/users/u2", { confirmEmail: true });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Confirm address" })).toBeNull());
   });
 });

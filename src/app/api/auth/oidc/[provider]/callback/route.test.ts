@@ -426,6 +426,20 @@ describe("GET /api/auth/oidc/:provider/callback, setting up an empty instance (B
     expect(userCreate).not.toHaveBeenCalled();
   });
 
+  it("reports a failure to make the account rather than calling the instance claimed", async () => {
+    finishes("bootstrap", {}, { bootstrap: PROFILE });
+    userCreate.mockRejectedValue(new Error("mongo is having a moment"));
+
+    await expect(callback()).rejects.toThrow("mongo is having a moment");
+  });
+
+  it("calls it claimed when another account took the name meanwhile", async () => {
+    finishes("bootstrap", {}, { bootstrap: PROFILE });
+    userCreate.mockRejectedValue(Object.assign(new Error("E11000"), { code: 11000, keyPattern: { username: 1 } }));
+
+    expect(location(await callback())).toBe("/login?sso=claimed");
+  });
+
   it("refuses a provider that gives no address", async () => {
     finishes("bootstrap", { email: "", emailVerified: false }, { bootstrap: PROFILE });
 

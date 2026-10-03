@@ -102,6 +102,14 @@ export function ProviderButtons({
   );
 }
 
+/** Where the ordinary answer is "sign in with your password", which an instance without them cannot do */
+export const SIGN_IN_REFUSALS_PASSWORDS_OFF: Record<string, string> = {
+  unproven:
+    "Your address here has not been confirmed, so a provider cannot sign you in by it. Ask an administrator to confirm it.",
+  not_linked:
+    "That sign-in is not linked to an account here yet. Sign in with a provider you have linked and link it under Settings → Security, or ask an administrator.",
+};
+
 export const SIGN_IN_REFUSALS: Record<string, string> = {
   failed: "Signing in with that provider did not work. Try again.",
   no_account: "No account here uses that address. Ask an administrator for an invitation.",

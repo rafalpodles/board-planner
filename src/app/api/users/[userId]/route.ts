@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { passwordSignInEnabled, passwordSignInOff } from "@/lib/password-sign-in";
-import { isValidObjectId } from "mongoose";
+import { HydratedDocument, isValidObjectId } from "mongoose";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
 import { MIN_PASSWORD_LENGTH, PASSWORD_COST_FACTOR } from "@/lib/auth";
@@ -18,6 +18,7 @@ import { Grant } from "@/models/grant";
 import { Identity } from "@/models/identity";
 import { revokeUserCredentials, revokeUserSessions } from "@/lib/session";
 import { User } from "@/models/user";
+import { IUser } from "@/types";
 
 export const PUT = withAdmin(async (request, { params, user: admin }) => {
   const { userId } = await params;
@@ -31,7 +32,7 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
-  let body: { role?: unknown; password?: unknown; email?: unknown };
+  let body: { role?: unknown; password?: unknown; email?: unknown; confirmEmail?: unknown; signOutEverywhere?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -41,6 +42,10 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
   if (body.password !== undefined && !passwordSignInEnabled()) return passwordSignInOff();
+
+  if (body.confirmEmail === true || body.signOutEverywhere === true) {
+    return accountAction(target, admin, body.confirmEmail === true ? "confirm" : "signOut");
+  }
 
   const previousRole = target.role;
   let roleWasChanged = false;
@@ -353,3 +358,47 @@ export const DELETE = withAdmin(async (_request, { params, user: admin }) => {
 
   return NextResponse.json({ message: "User deleted" });
 });
+
+/**
+ * Two ways an administrator answers "I cannot get in" or "somebody else did" that need no password,
+ * so they still work with password sign-in off: vouch for an address, so a provider can sign in by
+ * it, and end every session and link the account has (BP-830). Each alone in its request.
+ */
+async function accountAction(
+  target: HydratedDocument<IUser>,
+  admin: IUser,
+  action: "confirm" | "signOut"
+) {
+  if (admin.viaMachineCredential) {
+    return NextResponse.json({ error: "This action requires an interactive session" }, { status: 403 });
+  }
+  if (String(target._id) === String(admin._id)) {
+    return NextResponse.json({ error: "Not on your own account" }, { status: 400 });
+  }
+  if (target.kind === "machine") {
+    return NextResponse.json({ error: "A machine account signs in with a token" }, { status: 400 });
+  }
+  if (action === "confirm") {
+    if (!target.email) return NextResponse.json({ error: "This account has no address" }, { status: 400 });
+    target.emailVerifiedAt = new Date();
+    await target.save();
+    void logInstanceAudit({
+      action: "user_email_confirmed",
+      user: admin._id,
+      actorUsername: admin.username,
+      target: target.username,
+      detail: target.email,
+    });
+    return NextResponse.json({ ok: true });
+  }
+  const revoked = await revokeUserCredentials(target._id);
+  await invalidateResetTokens(target._id);
+  void logInstanceAudit({
+    action: "user_signed_out_everywhere",
+    user: admin._id,
+    actorUsername: admin.username,
+    target: target.username,
+    detail: `${revoked?.identitiesUnlinked ?? 0} sign-in provider(s) unlinked`,
+  });
+  return NextResponse.json({ ok: true });
+}

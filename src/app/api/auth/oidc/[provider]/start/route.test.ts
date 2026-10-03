@@ -171,6 +171,19 @@ describe("returning to where sign-in was asked for", () => {
 
 describe("setting up an empty instance (BP-830)", () => {
   const SETUP = { intent: "bootstrap", setupCode: "code", username: "Ada", fullName: "Ada Lovelace" };
+  beforeEach(() => {
+    process.env.PASSWORD_SIGN_IN = "off";
+  });
+  afterEach(() => {
+    delete process.env.PASSWORD_SIGN_IN;
+  });
+
+  it("is only for an instance without passwords: with them, the first account takes one", async () => {
+    delete process.env.PASSWORD_SIGN_IN;
+
+    expect((await start(SETUP)).status).toBe(400);
+    expect(refuseSetupCode).not.toHaveBeenCalled();
+  });
 
   it("starts once the setup code and the profile check out, carrying the profile", async () => {
     const res = await start(SETUP);

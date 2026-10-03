@@ -33,6 +33,8 @@ const LABELS: Partial<Record<InstanceAuditAction, string>> = {
   invitation_accepted: "Invitation accepted",
   identity_linked: "Sign-in provider linked",
   identity_unlinked: "Sign-in provider unlinked",
+  user_email_confirmed: "Address confirmed by an administrator",
+  user_signed_out_everywhere: "Signed out everywhere, providers unlinked",
   // Three verbs rather than one row with a footnote, the same rule the command trio follows below.
   // "Refused change" names what was answered, because the row is about a change a gate stopped —
   // not about a decision in the abstract.

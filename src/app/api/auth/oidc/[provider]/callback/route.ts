@@ -18,6 +18,7 @@ import { Identity } from "@/models/identity";
 import { Invitation } from "@/models/invitation";
 import { User } from "@/models/user";
 import { IUser } from "@/types";
+import { duplicateKeyField } from "@/lib/mongo-errors";
 
 const CALLBACKS_PER_SOURCE = 60;
 
@@ -194,8 +195,10 @@ async function setUpFirstAccount(
       emailVerifiedAt: provider.linksByAddress && claims.emailVerified ? new Date() : null,
       role: "admin",
     });
-  } catch {
-    return { refused: "claimed" as const };
+  } catch (err) {
+    // Only a duplicate means somebody else got there first; anything else is a failure to report
+    if (duplicateKeyField(err)) return { refused: "claimed" as const };
+    throw err;
   }
   // An administrator with no way in would leave the instance claimed and nobody able to enter it
   const linked = await link(provider, claims, user, "when the instance was set up").catch(async (err) => {

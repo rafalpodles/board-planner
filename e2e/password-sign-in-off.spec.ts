@@ -226,3 +226,75 @@ test("an empty instance is set up with a provider, its first account an administ
   expect(await (await db()).collection("identities").countDocuments({ user: account!._id })).toBe(1);
   await context.close();
 });
+
+test("a wrong setup code stops the setup before the provider is asked", async ({ page }) => {
+  await wipe();
+
+  await page.goto(at("/login"));
+  await page.getByRole("button", { name: "First time? Create Account" }).click();
+  await page.getByLabel("Username").fill("operator");
+  await page.getByLabel("Full Name").fill("Ola Operator");
+  await page.getByLabel("Setup code").fill("a-plausible-guess");
+  await page.getByRole("button", { name: `Set up with ${OIDC_STUB_LABEL}` }).click();
+
+  await expect(page.locator('[role="alert"]:not(#__next-route-announcer__)')).toContainText(
+    "The setup code is missing or wrong."
+  );
+  expect(await (await db()).collection("users").countDocuments()).toBe(0);
+});
+
+test("the address on the profile is the administrator's to change", async ({ page }) => {
+  await signInAs(page, MEMBER_ID);
+
+  await page.goto(at("/settings/profile"));
+
+  await expect(page.getByText("An administrator changes it on this instance.")).toBeVisible();
+  await expect(page.getByLabel("Email")).toHaveAttribute("readonly", "");
+});
+
+// Turning passwords off on an instance whose accounts never linked a provider nor proved an
+// address would otherwise leave them no way in at all
+test("an account with an unproven address is let in once an administrator confirms it", async ({ browser }) => {
+  const email = freshAddress("unproven");
+  await (await db()).collection("users").updateOne({ _id: MEMBER_ID }, { $set: { email, emailVerifiedAt: null } });
+  const member = await fresh(browser);
+  await nextPerson({ sub: `late-${randomBytes(4).toString("hex")}`, email });
+  await member.page.goto(at("/login"));
+  await member.page.getByRole("button", { name: `Continue with ${OIDC_STUB_LABEL}` }).click();
+  await expect(member.page).toHaveURL(/sso=unproven/);
+  await expect(member.page.locator('[role="alert"]:not(#__next-route-announcer__)')).toContainText(
+    "Ask an administrator to confirm it."
+  );
+
+  const admin = await fresh(browser);
+  await signInAs(admin.page, ADMIN_ID);
+  await admin.page.goto(at("/settings/users"));
+  await admin.page.getByText(`@${MEMBER_USERNAME}`, { exact: true }).first().click();
+  await admin.page.getByRole("button", { name: "Confirm address" }).click();
+  await expect(admin.page.getByRole("button", { name: "Confirm address" })).toHaveCount(0);
+
+  await member.page.goto(at("/login"));
+  await member.page.getByRole("button", { name: `Continue with ${OIDC_STUB_LABEL}` }).click();
+  await expect(member.page).toHaveURL(/\/projects/);
+  expect((await (await member.page.request.get(at("/api/auth/me"))).json()).username).toBe(MEMBER_USERNAME);
+  await member.context.close();
+  await admin.context.close();
+});
+
+test("an administrator signs somebody out everywhere, providers and all", async ({ browser }) => {
+  const member = await fresh(browser);
+  await signInAs(member.page, MEMBER_ID);
+  const admin = await fresh(browser);
+  await signInAs(admin.page, ADMIN_ID);
+
+  await admin.page.goto(at("/settings/users"));
+  await admin.page.getByText(`@${MEMBER_USERNAME}`, { exact: true }).first().click();
+  await admin.page.getByRole("button", { name: "Sign out everywhere" }).click();
+  await admin.page.getByRole("dialog").getByRole("button", { name: "Sign out everywhere" }).click();
+  await expect(admin.page.getByText(`${MEMBER_USERNAME} was signed out everywhere`)).toBeVisible();
+
+  expect((await member.page.request.get(at("/api/auth/me"))).status()).toBe(401);
+  expect(await (await db()).collection("identities").countDocuments({ user: MEMBER_ID })).toBe(0);
+  await member.context.close();
+  await admin.context.close();
+});

@@ -853,3 +853,62 @@ describe("with password sign-in off (BP-830)", () => {
     expect(revokeUserCredentials).not.toHaveBeenCalled();
   });
 });
+
+// BP-830. An administrator's answers to "I cannot get in" and "somebody else did" that need no
+// password, so they still work once password sign-in is off
+describe("PUT /api/users/:id — account actions", () => {
+  it("confirms an address, so a provider can sign them in by it, and records who did", async () => {
+    const target = targetDoc({ emailVerifiedAt: null });
+    found(target);
+
+    const res = await PUT(put({ confirmEmail: true }), ctx());
+
+    expect(res.status).toBe(200);
+    expect(target.emailVerifiedAt).toBeInstanceOf(Date);
+    expect(target.save).toHaveBeenCalled();
+    expect(logInstanceAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "user_email_confirmed", user: "admin-1", target: "target" })
+    );
+  });
+
+  it("refuses to confirm an account with no address", async () => {
+    const target = targetDoc({ email: "", emailVerifiedAt: null });
+    found(target);
+
+    expect((await PUT(put({ confirmEmail: true }), ctx())).status).toBe(400);
+    expect(target.save).not.toHaveBeenCalled();
+  });
+
+  it("signs somebody out everywhere, unlinking their providers, with passwords on or off", async () => {
+    found(targetDoc());
+    revokeUserCredentials.mockResolvedValue({ identitiesUnlinked: 2 });
+    process.env.PASSWORD_SIGN_IN = "off";
+
+    try {
+      const res = await PUT(put({ signOutEverywhere: true }), ctx());
+
+      expect(res.status).toBe(200);
+      expect(revokeUserCredentials).toHaveBeenCalledWith("target-1");
+      expect(invalidateResetTokens).toHaveBeenCalledWith("target-1");
+      expect(logInstanceAudit).toHaveBeenCalledWith(
+        expect.objectContaining({ action: "user_signed_out_everywhere", user: "admin-1", target: "target" })
+      );
+    } finally {
+      delete process.env.PASSWORD_SIGN_IN;
+    }
+  });
+
+  it.each([
+    ["on your own account", () => found(targetDoc({ _id: "admin-1" })), {}],
+    ["on a machine account", () => found(targetDoc({ kind: "machine" })), {}],
+    ["from a machine credential", () => found(targetDoc()), { viaMachineCredential: true }],
+  ])("refuses %s", async (_label, arrange, caller) => {
+    arrange();
+    getAuthUser.mockResolvedValue({ ...ADMIN, ...caller });
+
+    for (const action of [{ confirmEmail: true }, { signOutEverywhere: true }]) {
+      expect((await PUT(put(action), ctx())).status).toBeGreaterThanOrEqual(400);
+    }
+    expect(revokeUserCredentials).not.toHaveBeenCalled();
+  });
+});

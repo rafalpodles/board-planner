@@ -54,6 +54,10 @@ export default function UsersPage() {
   const [showInvite, setShowInvite] = useState(false);
   // Off: accounts come by invitation only, and nobody is handed a password
   const passwordSignIn = usePasswordSignIn();
+  const [confirmingAddress, setConfirmingAddress] = useState(false);
+  const [confirmSignOut, setConfirmSignOut] = useState<ApiUser | null>(null);
+  const [signingOut, setSigningOut] = useState(false);
+  const [signOutError, setSignOutError] = useState("");
   const [invitations, setInvitations] = useState<ApiInvitation[]>([]);
 
   const api = useApi();
@@ -225,6 +229,38 @@ export default function UsersPage() {
     await refreshUsers();
   }
 
+  async function confirmAddress() {
+    if (!editUser || confirmingAddress) return;
+    setConfirmingAddress(true);
+    try {
+      await api.put(`/api/users/${editUser._id}`, { confirmEmail: true });
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "The address could not be confirmed", "error");
+      setConfirmingAddress(false);
+      return;
+    }
+    setConfirmingAddress(false);
+    setEditUser({ ...editUser, emailVerifiedAt: new Date().toISOString() });
+    toast(`${editUser.email} confirmed`, "success");
+    await refreshUsers();
+  }
+
+  async function signOutEverywhere() {
+    if (!confirmSignOut || signingOut) return;
+    setSigningOut(true);
+    setSignOutError("");
+    try {
+      await api.put(`/api/users/${confirmSignOut._id}`, { signOutEverywhere: true });
+    } catch (err) {
+      setSignOutError(err instanceof Error ? err.message : "They could not be signed out");
+      setSigningOut(false);
+      return;
+    }
+    setSigningOut(false);
+    toast(`${confirmSignOut.username} was signed out everywhere`, "success");
+    setConfirmSignOut(null);
+  }
+
   async function handleDelete() {
     if (!confirmDeleteUser || deleting) return;
     setDeleting(true);
@@ -257,7 +293,7 @@ export default function UsersPage() {
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-lg font-semibold">Users</h2>
         <div className="flex gap-2">
-          {passwordSignIn && (
+          {passwordSignIn !== false && (
             <Button variant="secondary" onClick={() => setShowNew(true)}>
               New User
             </Button>
@@ -419,7 +455,7 @@ export default function UsersPage() {
               />
             </div>
 
-            {passwordSignIn && (
+            {passwordSignIn !== false && (
             <div className="border-t border-border pt-4">
               {currentUser?._id === editUser._id ? (
                 <>
@@ -491,6 +527,33 @@ export default function UsersPage() {
             </div>
             )}
 
+            {currentUser?._id !== editUser._id && (
+              <div className="border-t border-border pt-4 space-y-3">
+                {editUser.email && !editUser.emailVerifiedAt && (
+                  <div>
+                    <p className="text-sm font-medium mb-1">Address not confirmed</p>
+                    <p className="text-sm text-text-muted mb-2">
+                      Nothing has proven that {editUser.email} reaches them, so a sign-in provider cannot sign
+                      them in by it.
+                    </p>
+                    <Button size="sm" variant="secondary" onClick={confirmAddress} disabled={confirmingAddress}>
+                      {confirmingAddress ? "Confirming…" : "Confirm address"}
+                    </Button>
+                  </div>
+                )}
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    setConfirmSignOut(editUser);
+                    closeEdit();
+                  }}
+                >
+                  Sign out everywhere
+                </Button>
+              </div>
+            )}
+
             <p className="text-sm text-text-muted">
               Board access is granted per board, under that board&apos;s Settings → General.
             </p>
@@ -521,6 +584,20 @@ export default function UsersPage() {
         )}
       </Modal>
 
+      <ConfirmDialog
+        open={!!confirmSignOut}
+        onClose={() => {
+          setConfirmSignOut(null);
+          setSignOutError("");
+        }}
+        onConfirm={signOutEverywhere}
+        title="Sign out everywhere"
+        message={`Ends every session, API token, connected app and enrolled machine of ${confirmSignOut?.fullName ?? ""}, and unlinks their sign-in providers.`}
+        confirmLabel="Sign out everywhere"
+        loadingLabel="Signing out…"
+        loading={signingOut}
+        error={signOutError}
+      />
       <ConfirmDialog
         open={!!confirmDeleteUser}
         onClose={() => {

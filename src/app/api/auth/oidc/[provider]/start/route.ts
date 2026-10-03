@@ -106,6 +106,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
   }
 
   if (intent === "bootstrap") {
+    // With passwords on, the first account is made with one, the way the page offers it
+    if (passwordSignInEnabled()) {
+      return NextResponse.json({ error: "Set up the first account with a password here." }, { status: 400 });
+    }
     await connectDB();
     if ((await User.countDocuments()) > 0) {
       return NextResponse.json({ error: "This instance is already set up. Sign in instead." }, { status: 409 });
