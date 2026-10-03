@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const claimInvitation = vi.fn();
+const findInvitationByToken = vi.fn();
 const releaseInvitation = vi.fn();
 const recordAcceptance = vi.fn();
 const revokeClaimedInvitation = vi.fn();
@@ -32,6 +33,7 @@ vi.mock("@/lib/session", () => ({
 }));
 vi.mock("@/lib/invitations", () => ({
   claimInvitation,
+  findInvitationByToken,
   releaseInvitation,
   recordAcceptance,
   revokeClaimedInvitation,
@@ -69,6 +71,7 @@ beforeEach(async () => {
   await resetRateLimits();
   hash.mockResolvedValue("hashed");
   claimInvitation.mockResolvedValue({ ok: true, invitation: INVITATION });
+  findInvitationByToken.mockResolvedValue({ ok: true, invitation: INVITATION });
   authorityAtAcceptance.mockResolvedValue({ role: "member", boards: INVITATION.boards });
   userCreate.mockImplementation(async (doc: Record<string, unknown>) => ({ _id: "u-new", ...doc }));
   grantUpsert.mockResolvedValue({});
@@ -149,6 +152,19 @@ describe("POST /api/invitations/accept", () => {
       expect(userCreate).not.toHaveBeenCalled();
     }
   );
+
+  // BP-840. With no client address nothing else bounds this route, so a made-up link must cost
+  // one read and never a hash
+  it("hashes nothing for a link that cannot be used", async () => {
+    findInvitationByToken.mockResolvedValue({ ok: false, reason: "unknown" });
+
+    const res = await POST(post());
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe(INVITATION_REFUSALS.unknown);
+    expect(hash).not.toHaveBeenCalled();
+    expect(claimInvitation).not.toHaveBeenCalled();
+  });
 
   it("undoes the account when the invitation was revoked while it was being made", async () => {
     recordAcceptance.mockResolvedValue(false);

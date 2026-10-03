@@ -7,7 +7,7 @@ import { getClientIp, PASSWORD_COST_FACTOR } from "@/lib/auth";
 import { isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
 import { provenanceRefusal } from "@/lib/session";
 import { checkNewAccount } from "@/lib/new-account";
-import { claimInvitation } from "@/lib/invitations";
+import { claimInvitation, findInvitationByToken } from "@/lib/invitations";
 import { INVITATION_REFUSALS } from "@/lib/invitation-refusals";
 import { completeAcceptance } from "@/lib/invitation-acceptance";
 
@@ -46,6 +46,10 @@ export async function POST(request: Request) {
   const { username, fullName, password } = checked.value;
 
   await connectDB();
+  // Read first, so the hash below costs only somebody holding a live link: with no client address
+  // nothing else bounds how often this runs (BP-840)
+  const found = await findInvitationByToken(token);
+  if (!found.ok) return NextResponse.json({ error: INVITATION_REFUSALS[found.reason] }, { status: 400 });
   const hashed = await bcrypt.hash(password, PASSWORD_COST_FACTOR);
 
   const claimed = await claimInvitation(token);
