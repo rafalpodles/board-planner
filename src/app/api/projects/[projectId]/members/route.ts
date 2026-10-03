@@ -116,9 +116,11 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
   // Counted again after the write: another owner stepping down, removed or deactivated at the same
   // moment counted this one as still an owner, as this one counted them (BP-841)
   if (before?.relation === "owner" && relation !== "owner" && (await ownerCount(projectId)) === 0) {
+    // An upsert, since a concurrent removal may have taken the row this would put back
     await Grant.updateOne(
       { subject: userId, objectType: "project", object: projectId },
-      { $set: { relation: "owner" } }
+      { $set: { relation: "owner" }, $setOnInsert: { createdBy: user._id } },
+      { upsert: true }
     );
     return NextResponse.json({ error: "A board must keep at least one owner" }, { status: 409 });
   }
@@ -221,6 +223,11 @@ export const DELETE = withProjectOwner(async (request, { params, user }) => {
       { $setOnInsert: { relation: "owner", createdBy: removed.createdBy } },
       { upsert: true }
     );
+    // Somebody re-added them as a member meanwhile, so the insert did nothing: they are made owner
+    // again rather than leave the board with none
+    if ((await ownerCount(projectId)) === 0) {
+      await Grant.updateOne({ subject, objectType: "project", object: projectId }, { $set: { relation: "owner" } });
+    }
     return NextResponse.json({ error: "A board must keep at least one owner" }, { status: 409 });
   }
   if (removed) {

@@ -232,9 +232,11 @@ describe("PUT members", () => {
     const res = await PUT(put({ userId: U2, relation: "member" }), { params });
 
     expect(res.status).toBe(409);
+    // An upsert: a concurrent removal may have taken the row this puts back
     expect(grantUpdateOne).toHaveBeenCalledWith(
       { subject: U2, objectType: "project", object: PROJECT },
-      { $set: { relation: "owner" } }
+      { $set: { relation: "owner" }, $setOnInsert: { createdBy: "o1" } },
+      { upsert: true }
     );
     expect(logProjectAudit).not.toHaveBeenCalled();
     expect(createNotifications).not.toHaveBeenCalled();
@@ -289,6 +291,18 @@ describe("DELETE members", () => {
       { upsert: true }
     );
     expect(logProjectAudit).not.toHaveBeenCalled();
+  });
+
+  it("makes them owner again when a concurrent write re-added them as a member meanwhile", async () => {
+    grantDeleteLean.mockResolvedValue({ relation: "owner", createdBy: "o0" });
+    ownerCount.mockResolvedValueOnce(2).mockResolvedValueOnce(0).mockResolvedValueOnce(0);
+    const url = `http://x/api/projects/${PROJECT}/members?userId=${U2}`;
+
+    expect((await DELETE(new Request(url, { method: "DELETE" }), { params })).status).toBe(409);
+    expect(grantUpdateOne).toHaveBeenLastCalledWith(
+      { subject: U2, objectType: "project", object: PROJECT },
+      { $set: { relation: "owner" } }
+    );
   });
 
   it("keeps an owner's removal while another active owner remains after it", async () => {

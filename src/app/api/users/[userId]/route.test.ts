@@ -566,7 +566,11 @@ describe("DELETE /api/users/:id", () => {
       expect(res.status).toBe(409);
       expect(await res.json()).toEqual({ error: "Cannot delete the last admin" });
       expect(userCountDocuments).toHaveBeenLastCalledWith({ role: "admin", deactivatedAt: null });
-      expect(userUpdateOne).toHaveBeenLastCalledWith({ _id: TARGET_HEX }, { $set: { deactivatedAt: null } });
+      // Only its own mark: a deactivation that landed meanwhile stays
+      expect(userUpdateOne).toHaveBeenLastCalledWith(
+        { _id: TARGET_HEX, deactivatedAt: userUpdateOne.mock.calls[0][1].$set.deactivatedAt },
+        { $set: { deactivatedAt: null } }
+      );
       expect(userFindByIdAndDelete).not.toHaveBeenCalled();
     });
 
@@ -578,7 +582,10 @@ describe("DELETE /api/users/:id", () => {
 
       expect(res.status).toBe(409);
       expect(boardsLeftWithoutOwner).toHaveBeenCalledWith(TARGET_HEX);
-      expect(userUpdateOne).toHaveBeenLastCalledWith({ _id: TARGET_HEX }, { $set: { deactivatedAt: null } });
+      expect(userUpdateOne).toHaveBeenLastCalledWith(
+        { _id: TARGET_HEX, deactivatedAt: userUpdateOne.mock.calls[0][1].$set.deactivatedAt },
+        { $set: { deactivatedAt: null } }
+      );
       expect(userFindByIdAndDelete).not.toHaveBeenCalled();
     });
 
@@ -899,6 +906,36 @@ describe("PUT /api/users/:id — the guards that keep an administrator standing"
     expect(userUpdateOne).toHaveBeenLastCalledWith({ _id: "target-1" }, { $set: { role: "admin" } });
     expect(target.save).not.toHaveBeenCalled();
     expect(logInstanceAudit).not.toHaveBeenCalled();
+  });
+
+  it("takes its demotion back when the same request is then refused for the address", async () => {
+    const target = targetDoc({ role: "admin" });
+    target.save.mockRejectedValue(Object.assign(new Error("dup"), { code: 11000, keyPattern: { email: 1 } }));
+    found(target);
+
+    const res = await PUT(put({ role: "member", email: "taken@example.com" }), ctx());
+
+    expect(res.status).toBe(409);
+    expect(userUpdateOne).toHaveBeenLastCalledWith({ _id: "target-1", role: "member" }, { $set: { role: "admin" } });
+    expect(logInstanceAudit).not.toHaveBeenCalledWith(expect.objectContaining({ action: "user_role_changed" }));
+  });
+
+  it("takes its demotion back when the save fails outright", async () => {
+    const target = targetDoc({ role: "admin" });
+    target.save.mockRejectedValue(new Error("db down"));
+    found(target);
+
+    await expect(PUT(put({ role: "member" }), ctx())).rejects.toThrow("db down");
+    expect(userUpdateOne).toHaveBeenLastCalledWith({ _id: "target-1", role: "member" }, { $set: { role: "admin" } });
+  });
+
+  it("records no second change of role when a racing request demoted them first", async () => {
+    const target = targetDoc({ role: "admin" });
+    found(target);
+    userUpdateOne.mockResolvedValue({ modifiedCount: 0 });
+
+    expect((await PUT(put({ role: "member" }), ctx())).status).toBe(200);
+    expect(logInstanceAudit).not.toHaveBeenCalledWith(expect.objectContaining({ action: "user_role_changed" }));
   });
 
   it("counts nothing again when its own conditional write changed nothing", async () => {
