@@ -2,7 +2,7 @@ import { test, expect, type Browser, type Page } from "@playwright/test";
 import { createHash, randomBytes } from "crypto";
 import mongoose from "mongoose";
 import { OIDC_STUB_LABEL, OIDC_STUB_URL } from "../playwright.config";
-import { ADMIN_ID, E2E_MONGODB_URI, MEMBER_ID, MEMBER_PASSWORD, MEMBER_USERNAME, PROJECT_ID, seed } from "./seed";
+import { BOARD_URL, ADMIN_ID, E2E_MONGODB_URI, MEMBER_ID, MEMBER_PASSWORD, MEMBER_USERNAME, PROJECT_ID, seed } from "./seed";
 import { signIn } from "./session";
 
 /**
@@ -236,7 +236,7 @@ test("an invitation is accepted with the provider, and the account then signs in
   await page.getByLabel("Username").fill("sso-invitee");
   await page.getByLabel("Full name").fill("Sso Invitee");
   await page.getByRole("button", { name: "Create my account" }).click();
-  await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_ID}`));
+  await expect(page).toHaveURL(BOARD_URL);
 
   const handle = await db();
   const account = await handle.collection("users").findOne({ username: "sso-invitee" });

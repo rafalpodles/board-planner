@@ -29,7 +29,12 @@ vi.mock("@/lib/session", () => ({
   createSession,
 }));
 vi.mock("@/lib/oidc/providers", () => ({
-  providerById: (id: string) => (id === "oidc" ? { id: "oidc", label: "Acme" } : null),
+  providerById: (id: string) =>
+    id === "oidc"
+      ? { id: "oidc", label: "Acme", linksByAddress: true }
+      : id === "github"
+        ? { id: "github", label: "GitHub", linksByAddress: false }
+        : null,
 }));
 vi.mock("@/lib/oidc/flow", () => ({
   FLOW_COOKIE: "bp_oidc",
@@ -67,12 +72,13 @@ const location = (res: Response) => {
 const lean = (value: unknown) => ({ lean: () => Promise.resolve(value) });
 
 function finishes(intent: "signin" | "invite" | "link", claims: Record<string, unknown> = {}, extra = {}) {
+  const person = { issuer: ISSUER, subject: "s1", email: "ada@example.com", emailVerified: true, name: "", ...claims };
   finishFlow.mockResolvedValue({
     ok: true,
     intent,
     invitationTokenHash: intent === "invite" ? "h1" : null,
     userId: intent === "link" ? "u1" : null,
-    claims: { issuer: ISSUER, subject: "s1", email: "ada@example.com", emailVerified: true, name: "", ...claims },
+    claims: { verifiedEmails: person.emailVerified ? [person.email] : [], ...person },
     ...extra,
   });
 }
@@ -214,8 +220,28 @@ describe("GET /api/auth/oidc/:provider/callback, signing in", () => {
     expect(finishFlow).toHaveBeenCalledWith(expect.objectContaining({ binder: "cpo_binder" }));
   });
 
-  it("refuses a provider that is not set up", async () => {
+  // GitHub's `verified` is one click, long ago, by whoever held the mailbox then
+  it("never links a GitHub identity by address, however verified and proven", async () => {
+    finishes("signin");
+
     const res = await callback("github");
+
+    expect(location(res)).toBe("/login?sso=not_linked");
+    expect(userFindOne).not.toHaveBeenCalled();
+    expect(identityCreate).not.toHaveBeenCalled();
+    expect(createSession).not.toHaveBeenCalled();
+  });
+
+  it("signs a GitHub identity into the account it was linked to", async () => {
+    finishes("signin");
+    identityFindOne.mockReturnValue(lean({ _id: "i1", user: "u1" }));
+
+    expect(location(await callback("github"))).toBe("/projects");
+    expect(createSession).toHaveBeenCalledWith(expect.objectContaining({ userId: "u1" }));
+  });
+
+  it("refuses a provider that is not set up", async () => {
+    const res = await callback("gitlab");
 
     expect(location(res)).toBe("/login?sso=failed");
     expect(finishFlow).not.toHaveBeenCalled();
@@ -310,6 +336,22 @@ describe("GET /api/auth/oidc/:provider/callback, accepting an invitation", () =>
     finishes("invite", claims);
 
     expect(location(await callback())).toBe(`/invite/sso?error=${reason}`);
+    expect(holdForAcceptance).not.toHaveBeenCalled();
+  });
+
+  it("accepts by any address the provider vouches for, and holds the invited one", async () => {
+    finishes("invite", { email: "ada@personal.example", verifiedEmails: ["ada@personal.example", "ada@example.com"] });
+
+    expect(location(await callback("github"))).toBe("/invite/sso");
+    expect(holdForAcceptance).toHaveBeenCalledWith(
+      expect.objectContaining({ claims: expect.objectContaining({ email: "ada@example.com" }) })
+    );
+  });
+
+  it("refuses an invited address the provider lists but has not verified", async () => {
+    finishes("invite", { email: "ada@example.com", emailVerified: false, verifiedEmails: ["ada@personal.example"] });
+
+    expect(location(await callback("github"))).toBe("/invite/sso?error=mismatch");
     expect(holdForAcceptance).not.toHaveBeenCalled();
   });
 

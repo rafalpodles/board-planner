@@ -5,6 +5,7 @@ import { bodyOf, mailFor } from "./mailbox";
 import { SAME_ORIGIN } from "./api";
 import { signIn, signInContext } from "./session";
 import {
+  BOARD_URL,
   ADMIN_ID,
   E2E_MONGODB_URI,
   OWNER_ID,
@@ -115,7 +116,7 @@ test("an owner invites somebody to their board, who joins it as a member of the 
   await expect(card.getByTestId("board-invitation").filter({ hasText: email })).toContainText("Owner");
 
   const { context, page: guest } = await accept(browser, await linkMailedTo(email), "owners-guest");
-  await expect(guest).toHaveURL(new RegExp(`/projects/${PROJECT_ID}`));
+  await expect(guest).toHaveURL(BOARD_URL);
 
   const account = await (await db()).collection("users").findOne({ username: "owners-guest" });
   expect(account).toMatchObject({ email, role: "member" });
@@ -163,7 +164,7 @@ test("an owner's board joins an administrator's pending invitation without chang
   expect(await mailFor(email)).toHaveLength(0);
 
   const { context, page: guest } = await accept(browser, `/invite?token=${planted.token}`, "admin-with-board");
-  await expect(guest).toHaveURL(new RegExp(`/projects/${PROJECT_ID}`));
+  await expect(guest).toHaveURL(BOARD_URL);
   const account = await (await db()).collection("users").findOne({ username: "admin-with-board" });
   expect(account).toMatchObject({ role: "admin" });
   expect(

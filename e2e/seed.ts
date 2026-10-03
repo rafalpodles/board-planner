@@ -103,6 +103,9 @@ export const ADMIN_ID = id("e2e00000000000000000a001");
 export const MEMBER_ID = id("e2e00000000000000000a002");
 export const OWNER_ID = id("e2e00000000000000000a008");
 export const PROJECT_ID = id("e2e00000000000000000c001");
+// The board's address by id, or by key once the page has rewritten it — which it does on load,
+// so an assertion on either alone races the rewrite
+export const BOARD_URL = new RegExp(`/projects/(?:${PROJECT_ID}|${PROJECT_KEY})(?:$|[/?#])`);
 export const WORKER_ID = id("e2e00000000000000000b001");
 export const GRANT_ID = id("e2e00000000000000000e001");
 export const OWNER_GRANT_ID = id("e2e00000000000000000e004");

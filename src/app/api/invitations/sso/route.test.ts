@@ -19,7 +19,8 @@ vi.mock("@/lib/session", () => ({
   buildFlowCookie: (name: string, value: string) => `${name}=${value}`,
 }));
 vi.mock("@/lib/oidc/flow", () => ({ ACCEPT_COOKIE: "bp_oidc_accept", heldAcceptance, spendAcceptance }));
-vi.mock("@/lib/oidc/providers", () => ({ providerById: () => ({ label: "Acme" }) }));
+const providerById = vi.fn();
+vi.mock("@/lib/oidc/providers", () => ({ providerById }));
 vi.mock("@/lib/invitations", () => ({ claimInvitationByHash, releaseInvitation }));
 vi.mock("@/lib/invitation-acceptance", () => ({ completeAcceptance }));
 vi.mock("@/lib/invitation-view", () => ({ toApiInvitations: vi.fn() }));
@@ -44,6 +45,7 @@ beforeEach(async () => {
   releaseInvitation.mockResolvedValue(undefined);
   claimInvitationByHash.mockResolvedValue({ ok: true, invitation: { _id: "inv-1", email: "ada@example.com" } });
   completeAcceptance.mockResolvedValue(new Response(JSON.stringify({ username: "ada" }), { status: 201 }));
+  providerById.mockReturnValue({ label: "Acme", linksByAddress: true });
 });
 
 describe("POST /api/invitations/sso", () => {
@@ -57,9 +59,21 @@ describe("POST /api/invitations/sso", () => {
       fullName: "Ada Lovelace",
       passwordHash: null,
       identity: { provider: "oidc", issuer: "https://id.example.com", subject: "s9", email: "ada@example.com" },
+      providerProvesAddress: true,
     });
     expect(spendAcceptance).toHaveBeenCalledWith("cpo_held");
     expect(res.headers.get("set-cookie")).toContain("bp_oidc_accept=");
+  });
+
+  it.each([
+    ["GitHub, whose word is no proof of the mailbox", { label: "GitHub", linksByAddress: false }],
+    ["a provider no longer configured", null],
+  ])("does not count %s as proving the address", async (_label, provider) => {
+    providerById.mockReturnValue(provider);
+
+    await post();
+
+    expect(completeAcceptance.mock.calls[0][1].providerProvesAddress).toBe(false);
   });
 
   it("reads the held sign-in from its own cookie", async () => {

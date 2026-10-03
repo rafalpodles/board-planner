@@ -81,6 +81,7 @@ async function link(provider: OidcProvider, claims: VerifiedClaims, user: IUser,
 async function accountFor(provider: OidcProvider, claims: VerifiedClaims) {
   const linked = await linkedAccount(claims, true);
   if (linked) return { user: linked };
+  if (!provider.linksByAddress) return { refused: "not_linked" as const };
   if (!claims.email) return { refused: "no_account" as const };
   if (!claims.emailVerified) return { refused: "unverified" as const };
   const user = await User.findOne({ email: claims.email, kind: { $ne: "machine" } });
@@ -137,13 +138,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
       expiresAt: { $gt: new Date() },
     }).lean();
     if (!invitation) return fail("invitation");
-    if (!claims.email || !claims.emailVerified) return fail("unverified");
-    if (claims.email !== invitation.email) return fail("mismatch");
+    if (claims.verifiedEmails.length === 0) return fail("unverified");
+    if (!claims.verifiedEmails.includes(invitation.email)) return fail("mismatch");
     if (await linkedAccount(claims)) return fail("linked");
     const binder = await holdForAcceptance({
       provider,
       invitationTokenHash: invitation.tokenHash,
-      claims,
+      claims: { ...claims, email: invitation.email },
     });
     return redirectTo(origin, "/invite/sso", [
       buildFlowCookie(ACCEPT_COOKIE, binder, Math.floor(ACCEPT_TTL_MS / 1000)),

@@ -1,3 +1,4 @@
+import { createHash, randomBytes } from "node:crypto";
 import { readBody, serve } from "./stub-guard.mjs";
 
 /**
@@ -22,6 +23,13 @@ import { readBody, serve } from "./stub-guard.mjs";
  *
  * An owner or repository other than the one a spec named is a 404, not an answer. Serving every
  * path alike let an assertion pass against a request for `/repos/undefined/undefined/…`.
+ *
+ * It is also GitHub's sign-in for BP-829: `GITHUB_OAUTH_BASE_URL` points the app's OAuth app here.
+ * `/login/oauth/authorize` approves at once, `/login/oauth/access_token` checks the client's
+ * secret and PKCE and, as GitHub does, answers a bad code with 200 and an `error`; `/user` and
+ * `/user/emails` answer for the token's person. `POST /oauth/control` scripts the next person,
+ * `{ id, login, name, emails: [{ email, primary, verified }] }`, apart from `/control`, so a spec
+ * syncing pull requests never resets who signs in, nor the other way round.
  */
 
 // Loopback only. This serves a project's pull requests and takes a bearer token; on a machine
@@ -36,6 +44,19 @@ let asked = [];
 let bearers = [];
 /** The one repository this stub is GitHub for, as `owner/repo`. */
 let repository = "example/board";
+
+const OAUTH_CLIENT_ID = process.env.GITHUB_STUB_OAUTH_CLIENT_ID ?? "board-planner-e2e-github";
+const OAUTH_CLIENT_SECRET = process.env.GITHUB_STUB_OAUTH_CLIENT_SECRET ?? "e2e-github-secret";
+const DEFAULT_PERSON = {
+  id: 1001,
+  login: "octo-user",
+  name: "Octo User",
+  emails: [{ email: "octo-user@example.com", primary: true, verified: true }],
+};
+let nextPerson = DEFAULT_PERSON;
+let lastAuthorize = null;
+const codes = new Map();
+const tokens = new Map();
 
 function json(res, body, status = 200) {
   const payload = JSON.stringify(body);
@@ -82,12 +103,69 @@ serve({
       return;
     }
 
+    if (req.method === "POST" && pathname === "/oauth/control") {
+      nextPerson = { ...DEFAULT_PERSON, ...JSON.parse((await readBody(req)) || "{}") };
+      json(res, { ok: true });
+      return;
+    }
+
+    if (pathname === "/oauth/last-authorize") {
+      json(res, lastAuthorize);
+      return;
+    }
+
+    if (pathname === "/login/oauth/authorize") {
+      lastAuthorize = Object.fromEntries(searchParams);
+      const redirect = searchParams.get("redirect_uri");
+      if (searchParams.get("client_id") !== OAUTH_CLIENT_ID || !redirect) {
+        res.writeHead(400, { "Content-Type": "text/plain" }).end("unknown client");
+        return;
+      }
+      const back = new URL(redirect);
+      const code = randomBytes(20).toString("hex");
+      codes.set(code, { redirect, challenge: searchParams.get("code_challenge"), person: nextPerson });
+      back.searchParams.set("code", code);
+      if (searchParams.get("state")) back.searchParams.set("state", searchParams.get("state"));
+      res.writeHead(302, { Location: back.href }).end();
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/login/oauth/access_token") {
+      const form = new URLSearchParams(await readBody(req));
+      if (form.get("client_id") !== OAUTH_CLIENT_ID || form.get("client_secret") !== OAUTH_CLIENT_SECRET) {
+        json(res, { error: "incorrect_client_credentials" });
+        return;
+      }
+      const grant = codes.get(form.get("code") ?? "");
+      codes.delete(form.get("code") ?? "");
+      const challenge = createHash("sha256").update(form.get("code_verifier") ?? "").digest("base64url");
+      if (!grant || grant.redirect !== form.get("redirect_uri") || grant.challenge !== challenge) {
+        json(res, { error: "bad_verification_code" });
+        return;
+      }
+      const token = `gho_${randomBytes(16).toString("hex")}`;
+      tokens.set(token, grant.person);
+      json(res, { access_token: token, token_type: "bearer", scope: "read:user,user:email" });
+      return;
+    }
+
     if (pathname === "/reset") {
       pulls = [];
       checks = {};
       asked = [];
       bearers = [];
       json(res, { ok: true });
+      return;
+    }
+
+    if (pathname === "/user" || pathname === "/user/emails") {
+      const person = tokens.get((req.headers.authorization ?? "").replace(/^Bearer /, ""));
+      if (!person) {
+        json(res, { message: "Bad credentials" }, 401);
+        return;
+      }
+      const { emails, ...profile } = person;
+      json(res, pathname === "/user" ? profile : emails);
       return;
     }
 

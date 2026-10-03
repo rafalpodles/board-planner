@@ -108,5 +108,7 @@ export const SIGN_IN_REFUSALS: Record<string, string> = {
   unverified: "That provider has not confirmed your address, so it cannot sign you in here.",
   unproven:
     "Your address here has not been confirmed, so a provider cannot sign you in by it. Sign in with your password and link the provider under Settings → Security.",
+  not_linked:
+    "That sign-in is not linked to an account here yet. Sign in with your password and link it under Settings → Security, or ask for an invitation.",
   throttled: "Too many attempts. Try again in 15 minutes.",
 };

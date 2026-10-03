@@ -190,6 +190,20 @@ OIDC_CLIENT_SECRET=       # /api/auth/oidc/oidc/callback. Plain http only for an
 OIDC_LABEL=               # Optional — the button's name (default "Single sign-on") (BP-828)
 GOOGLE_CLIENT_ID=         # Optional — sign-in with Google, the same code path at Google's issuer;
 GOOGLE_CLIENT_SECRET=     # redirect URI PUBLIC_ORIGIN + /api/auth/oidc/google/callback (BP-828)
+GITHUB_OAUTH_CLIENT_SECRET=
+GITHUB_OAUTH_CLIENT_ID=   # Optional, with the secret above — sign-in with GitHub, an OAuth app of its
+                          # own (not a project's PR token); redirect URI PUBLIC_ORIGIN +
+                          # /api/auth/oidc/github/callback. The person is read from /user and
+                          # /user/emails (GITHUB_API_BASE_URL, else the site's own API). GitHub never
+                          # links by address at sign-in — its `verified` speaks for no domain — only
+                          # from Settings → Security or an invitation, which may name any verified
+                          # GitHub address (BP-829)
+GITHUB_OAUTH_BASE_URL=    # Optional — where GitHub's sign-in pages are, when GITHUB_API_BASE_URL is
+                          # a proxy and the site cannot be derived from it; default derived as for
+                          # pull-request links (github.com, or an Enterprise Server's /api/v3 site).
+                          # An https origin with no path (http only to 127.0.0.1/[::1]); otherwise
+                          # GitHub is off. The site is the GitHub identity's issuer: changing it
+                          # later orphans every existing GitHub link
 SMTP_HOST=                # Optional — Email notifications
 SMTP_PORT=587
 SMTP_USER=
