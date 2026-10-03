@@ -434,30 +434,36 @@ describe("the groups an ID token names (BP-833)", () => {
 
 // BP-845. Each read is bound to its own intent and to a live row, and spending one ends it
 describe("the verified sign-ins held for a form", () => {
+  const NOW = new Date("2026-10-03T08:00:00Z");
+  const HELD = { claims: { email: "ada@corp.com" } };
+
   beforeEach(() => {
-    flowFindOne.mockReturnValue({ lean: async () => ({ claims: { email: "ada@corp.com" } }) });
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+    flowFindOne.mockReturnValue({ lean: async () => HELD });
     flowDeleteOne.mockResolvedValue({});
   });
+  afterEach(() => vi.useRealTimers());
 
-  it("reads an invitation's hold by its binder, its intent, held claims and a live expiry", async () => {
-    await heldAcceptance("cpo_held");
+  it("reads an invitation's hold by its binder, its intent, held claims and a live expiry, and returns it", async () => {
+    expect(await heldAcceptance("cpo_held")).toEqual(HELD);
 
     expect(flowFindOne).toHaveBeenCalledWith({
       binderHash: sha256("cpo_held"),
       intent: "invite",
       claims: { $ne: null },
-      expiresAt: { $gt: expect.any(Date) },
+      expiresAt: { $gt: NOW },
     });
   });
 
-  it("reads a sign-up's hold only as a sign-up", async () => {
-    await heldSignUp("cpo_join");
+  it("reads a sign-up's hold only as a sign-up, and returns it", async () => {
+    expect(await heldSignUp("cpo_join")).toEqual(HELD);
 
     expect(flowFindOne).toHaveBeenCalledWith({
       binderHash: sha256("cpo_join"),
       intent: "signup",
       claims: { $ne: null },
-      expiresAt: { $gt: expect.any(Date) },
+      expiresAt: { $gt: NOW },
     });
   });
 

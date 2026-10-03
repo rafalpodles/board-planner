@@ -64,6 +64,16 @@ describe("the admin group", () => {
     expect(logInstanceAudit).not.toHaveBeenCalled();
   });
 
+  it("records nothing and changes nothing when a racing request demoted them first", async () => {
+    updateOne.mockResolvedValue({ modifiedCount: 0 });
+    const user = account("admin");
+
+    await applyAdminGroup(user, "oidc", []);
+
+    expect(user.role).toBe("admin");
+    expect(logInstanceAudit).not.toHaveBeenCalled();
+  });
+
   it("changes nothing for a machine account", async () => {
     await applyAdminGroup(account("member", { kind: "machine" }), "oidc", ["planner-admins"]);
     await applyAdminGroup(account("admin", { kind: "machine" }), "oidc", []);
