@@ -442,6 +442,8 @@ describe("PUT /api/projects/[projectId] and Coda on a free instance", () => {
   it.each([
     ["a new host", { codaHost: "https://coda.example.com" }],
     ["a clear that also names a doc", { codaToken: "", codaDocId: "doc-2" }],
+    ["a token of spaces", { codaToken: "   " }],
+    ["a doc id of a slash", { codaDocId: "/" }],
   ])("still refuses %s", async (_label, body) => {
     const res = await PUT(putRequest(body), ctx());
 

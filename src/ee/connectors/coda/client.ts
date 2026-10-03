@@ -20,9 +20,9 @@ export const CODA_SETTINGS_FIELDS = ["codaHost", "codaDocId", "codaTableId", "co
 /** A write naming Coda fields that only empties them — Disconnect — which a Free plan may still do. */
 export function onlyClearsCoda(updates: Record<string, unknown>): boolean {
   return CODA_SETTINGS_FIELDS.every((field) => {
-    if (!(field in updates)) return true;
-    const value = String(updates[field] ?? "").trim().replace(/\/+$/, "");
-    return value === "" || (field === "codaHost" && value === DEFAULT_HOST);
+    const value = updates[field];
+    if (value === undefined || value === "") return true;
+    return field === "codaHost" && typeof value === "string" && value.trim().replace(/\/+$/, "") === DEFAULT_HOST;
   });
 }
 
