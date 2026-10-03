@@ -13,8 +13,10 @@ vi.mock("@/models/user", () => ({
 }));
 vi.mock("@/models/identity", () => ({
   Identity: {
-    exists: async (filter: { user: { $in: string[] }; provider: { $in: string[] } }) =>
-      identities.some((i) => filter.user.$in.includes(i.user) && filter.provider.$in.includes(i.provider)) ? { _id: "i" } : null,
+    exists: async (filter: { user: { $in: string[] }; provider?: { $in: string[] } }) =>
+      identities.some((i) => filter.user.$in.includes(i.user) && (!filter.provider || filter.provider.$in.includes(i.provider)))
+        ? { _id: "i" }
+        : null,
   },
 }));
 
