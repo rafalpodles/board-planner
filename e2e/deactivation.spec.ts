@@ -136,6 +136,8 @@ test("a deactivated watcher is told nothing about the task", async ({ request })
 });
 
 test("an administrator is offered no way to deactivate themselves", async ({ page }) => {
+  // A second administrator, so the last-administrator rule is not what refuses it
+  await (await db()).collection("users").updateOne({ _id: MEMBER_ID }, { $set: { role: "admin" } });
   await signIn(page);
   await page.goto("/settings/users");
   await page.getByText("@admin", { exact: true }).first().click();
