@@ -109,7 +109,16 @@ describe("the links a configured provider still signs in through", () => {
     });
   });
 
+  it("also accepts the issuer as a URL parser writes it", () => {
+    Object.assign(process.env, { OIDC_ISSUER: "https://ID.Example.com:443/realms/acme", OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s" });
+
+    const [oidc] = (liveIdentityFilter() as { $or: { issuer: { $in: string[] } }[] }).$or;
+    expect(oidc.issuer.$in).toEqual(
+      expect.arrayContaining(["https://ID.Example.com:443/realms/acme", "https://id.example.com/realms/acme", "https://id.example.com/realms/acme/"])
+    );
+  });
+
   it("matches nothing when no provider is configured", () => {
-    expect(liveIdentityFilter()).toEqual({ _id: null });
+    expect(liveIdentityFilter()).toEqual({ $or: [{ _id: null }] });
   });
 });

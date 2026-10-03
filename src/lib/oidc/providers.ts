@@ -24,11 +24,27 @@ export interface OidcProvider {
  * as one. Matches nothing when no provider is configured.
  */
 export function liveIdentityFilter(): Record<string, unknown> {
-  const live = configuredProviders().map((p) => {
-    const bare = p.issuer.replace(/\/+$/, "");
-    return { provider: p.id, issuer: { $in: [bare, `${bare}/`] } };
-  });
-  return live.length > 0 ? { $or: live } : { _id: null };
+  const live = configuredProviders().map((p) => ({ provider: p.id, issuer: { $in: issuerSpellings(p.issuer) } }));
+  // An `$or` either way, so spreading it never overwrites a caller's own `_id`
+  return { $or: live.length > 0 ? live : [{ _id: null }] };
+}
+
+/** As configured, and as a URL parser writes it (host case, a default port), each with and without a trailing slash. */
+function issuerSpellings(issuer: string): string[] {
+  const forms = new Set<string>();
+  for (const form of [issuer, canonical(issuer)]) {
+    const bare = form.replace(/\/+$/, "");
+    forms.add(bare).add(`${bare}/`);
+  }
+  return [...forms];
+}
+
+function canonical(issuer: string): string {
+  try {
+    return new URL(issuer).href;
+  } catch {
+    return issuer;
+  }
 }
 
 const GOOGLE_ISSUER = "https://accounts.google.com";

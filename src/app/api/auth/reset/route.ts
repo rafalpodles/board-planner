@@ -88,6 +88,11 @@ export async function POST(request: Request) {
   if (user.kind === "machine") {
     return NextResponse.json({ error: REFUSALS.unknown }, { status: 400 });
   }
+  // Mailed to an address the account no longer has: whoever reads that mailbox is not who the
+  // account belongs to now (BP-842)
+  if (outcome.sentTo && user.email !== outcome.sentTo) {
+    return NextResponse.json({ error: REFUSALS.unknown }, { status: 400 });
+  }
   // Deactivating spends the account's links, so this is only a link issued in between (BP-832)
   if (user.deactivatedAt) {
     return NextResponse.json({ error: "This account is deactivated. Ask an administrator." }, { status: 403 });
@@ -101,16 +106,19 @@ export async function POST(request: Request) {
 
   try {
     await User.updateOne({ _id: user._id }, { $set: { password: hashed } });
-    // The link reached the address it was mailed to, which is the proof a provider links by — and
-    // only while that is still the account's address: one changed meanwhile was never reached (BP-842)
-    if (outcome.sentTo) {
-      await User.updateOne({ _id: user._id, email: outcome.sentTo }, { $set: { emailVerifiedAt: new Date() } });
-    }
   } catch (err) {
     // The claim is one-shot, so a write that fails here would otherwise leave somebody signed out
     // of everything, holding a dead link, with their old password still in force and no way back
     await releaseResetToken(token).catch(() => {});
     throw err;
+  }
+  // The link reached the address it was mailed to, which is the proof a provider links by — and
+  // only while that is still the account's address (BP-842). After the password, and on its own:
+  // failing here must not give back a link whose password is already set
+  if (outcome.sentTo) {
+    await User.updateOne({ _id: user._id, email: outcome.sentTo }, { $set: { emailVerifiedAt: new Date() } }).catch(
+      (err) => console.error("Failed to record a reset's proof of address:", err)
+    );
   }
 
   // "I could not get in, so I reset it" has to end with getting in. The login throttle refuses on

@@ -42,7 +42,9 @@ export const DELETE = withAuth(async (_request, { params, user }) => {
   }
   // Removing a way in, with no password left to fall back on, needs the owner and not a borrowed
   // session: otherwise a provider linked by an intruder could be left as the only one
-  if (!passwordSignsIn && removesAWayIn && !(await signedInRecently(user.sessionId))) {
+  // Asked even for a link no longer live: a provider misconfigured for a moment makes every link
+  // look dead, and its owner's real ways in must not then go without re-authentication
+  if (!passwordSignsIn && !(await signedInRecently(user.sessionId))) {
     return NextResponse.json({ error: RECENT_SIGN_IN_REQUIRED }, { status: 403 });
   }
   await Identity.deleteOne({ _id: identity._id, user: user._id });

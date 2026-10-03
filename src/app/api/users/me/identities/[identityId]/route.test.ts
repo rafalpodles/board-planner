@@ -58,10 +58,19 @@ beforeEach(() => {
 
 describe("DELETE /api/users/me/identities/:id", () => {
   // BP-842. A link from a provider's former issuer is no way in, so removing it removes none
-  it("unlinks a former issuer's link from an account with no other way in, without asking for a recent sign-in", async () => {
+  // A provider misconfigured for a moment makes every link look dead; re-authentication still holds
+  it("asks for a recent sign-in even to unlink a former issuer's link, with no password to fall back on", async () => {
     passwordIs();
     identityExists.mockResolvedValue(null);
     signedInRecently.mockResolvedValue(false);
+
+    expect((await unlink()).status).toBe(403);
+    expect(identityDelete).not.toHaveBeenCalled();
+  });
+
+  it("unlinks a former issuer's link from an account with no other way in", async () => {
+    passwordIs();
+    identityExists.mockResolvedValue(null);
 
     const res = await unlink();
 
