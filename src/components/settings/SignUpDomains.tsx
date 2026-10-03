@@ -77,7 +77,7 @@ export function SignUpDomains() {
             dirty={text !== asText(saved.domains)}
           />
         </div>
-        <Button type="submit" variant="secondary" disabled={!providers || saving || text === asText(saved.domains)}>
+        <Button type="submit" variant="secondary" disabled={saving || text === asText(saved.domains)}>
           {saving ? "Saving…" : "Save"}
         </Button>
       </form>

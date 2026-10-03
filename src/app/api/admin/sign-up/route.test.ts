@@ -11,12 +11,10 @@ vi.mock("@/lib/grants", () => ({ check: vi.fn(), accessibleProjectIds: vi.fn() }
 vi.mock("@/lib/singleton", () => ({ upsertSingleton }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/models/settings", () => ({ Settings: {}, getSettings: async () => ({ signUpDomains: stored }) }));
-vi.mock("@/lib/oidc/providers", () => ({
-  configuredProviders: () => [
-    { id: "oidc", label: "Acme SSO", linksByAddress: true },
-    { id: "github", label: "GitHub", linksByAddress: false },
-  ],
-}));
+const OIDC = { id: "oidc", label: "Acme SSO", linksByAddress: true };
+const GITHUB = { id: "github", label: "GitHub", linksByAddress: false };
+let providers = [OIDC, GITHUB];
+vi.mock("@/lib/oidc/providers", () => ({ configuredProviders: () => providers }));
 
 const { GET, PUT } = await import("./route");
 
@@ -28,6 +26,7 @@ const put = (body: unknown) =>
 beforeEach(() => {
   vi.clearAllMocks();
   stored = ["old.example"];
+  providers = [OIDC, GITHUB];
   getAuthUser.mockResolvedValue(ADMIN);
   upsertSingleton.mockImplementation(async (_model: unknown, update: { $set: { signUpDomains: string[] } }) => ({
     signUpDomains: update.$set.signUpDomains,
@@ -52,6 +51,12 @@ describe("GET /api/admin/sign-up", () => {
 
   it("names no admin group while it is not set", async () => {
     delete process.env.OIDC_ADMIN_GROUP;
+
+    expect((await (await GET(new Request("http://x/api/admin/sign-up"), ctx())).json()).adminGroup).toBeNull();
+  });
+
+  it("names no admin group without the OpenID Connect provider it is read from", async () => {
+    providers = [{ id: "google", label: "Google", linksByAddress: true }, GITHUB];
 
     expect((await (await GET(new Request("http://x/api/admin/sign-up"), ctx())).json()).adminGroup).toBeNull();
   });
