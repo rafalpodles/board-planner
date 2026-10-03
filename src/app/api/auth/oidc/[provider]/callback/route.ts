@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { getAuthUser, getClientIp } from "@/lib/auth";
-import { anonymousMultiplier, isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
+import { isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
 import {
   buildFlowCookie,
   buildSessionCookie,
@@ -119,11 +119,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
   if (!provider) return redirectTo(origin, "/login?sso=failed");
 
   const clientIp = getClientIp(request);
-  const throttleKey = sourceKey(clientIp ?? "-", "oidc-callback");
-  if (await isRateLimited(throttleKey, anonymousMultiplier(clientIp, CALLBACKS_PER_SOURCE))) {
+  // Not with no address, where it would be one bucket for everybody (see start); and only failures
+  // count, so an office signing in from one address is not throttled for succeeding
+  const throttleKey = clientIp ? sourceKey(clientIp, "oidc-callback") : null;
+  if (throttleKey && (await isRateLimited(throttleKey, CALLBACKS_PER_SOURCE))) {
     return redirectTo(origin, "/login?sso=throttled");
   }
-  await recordFailedAttempt(throttleKey);
 
   const outcome = await finishFlow({
     provider,
@@ -131,7 +132,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
     origin,
     query: new URL(request.url).search,
   });
-  if (!outcome.ok) return failedRoundTrip(origin, outcome);
+  if (!outcome.ok) {
+    if (throttleKey) await recordFailedAttempt(throttleKey);
+    return failedRoundTrip(origin, outcome);
+  }
   const { claims } = outcome;
   await connectDB();
 

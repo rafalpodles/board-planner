@@ -10,7 +10,8 @@ const refuseSetupCode = vi.fn();
 const signedInRecently = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
-vi.mock("@/lib/auth", () => ({ getClientIp: () => "203.0.113.9", getAuthUser }));
+let clientIp: string | null = "203.0.113.9";
+vi.mock("@/lib/auth", () => ({ getClientIp: () => clientIp, getAuthUser }));
 vi.mock("@/models/rateLimit", async () => {
   const { inMemoryRateLimitModel } = await import("@/lib/rate-limit-test-store");
   return { RateLimit: inMemoryRateLimitModel() };
@@ -44,6 +45,7 @@ const withPassword = (password?: string) =>
 beforeEach(async () => {
   vi.clearAllMocks();
   await resetRateLimits();
+  clientIp = "203.0.113.9";
   beginFlow.mockResolvedValue({ url: "https://id.example.com/authorize?x", binder: "cpo_b" });
   getAuthUser.mockResolvedValue({ _id: "u1", username: "ada" });
   withPassword("$2a$10$hash");
@@ -61,6 +63,21 @@ describe("POST /api/auth/oidc/:provider/start", () => {
     expect(await res.json()).toEqual({ url: "https://id.example.com/authorize?x" });
     expect(res.headers.get("set-cookie")).toBe("bp_oidc=cpo_b");
     expect(beginFlow).toHaveBeenCalledWith(expect.objectContaining({ intent: "signin" }));
+  });
+
+  // BP-840
+  it("throttles a known address", async () => {
+    for (let i = 0; i < 30; i++) expect((await start({})).status).toBe(200);
+
+    expect((await start({})).status).toBe(429);
+  });
+
+  it("never throttles callers whose address is unknown, who would all share one bucket", async () => {
+    clientIp = null;
+
+    for (let i = 0; i < 650; i++) await start({});
+
+    expect((await start({})).status).toBe(200);
   });
 
   it("refuses a provider that is not set up", async () => {

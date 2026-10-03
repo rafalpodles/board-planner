@@ -14,7 +14,8 @@ const identityCreate = vi.fn();
 const providerById = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
-vi.mock("@/lib/auth", () => ({ getClientIp: () => "203.0.113.9" }));
+let clientIp: string | null = "203.0.113.9";
+vi.mock("@/lib/auth", () => ({ getClientIp: () => clientIp }));
 vi.mock("@/models/rateLimit", async () => {
   const { inMemoryRateLimitModel } = await import("@/lib/rate-limit-test-store");
   return { RateLimit: inMemoryRateLimitModel() };
@@ -51,6 +52,7 @@ const duplicate = (field: string) => Object.assign(new Error("dup"), { code: 110
 beforeEach(async () => {
   vi.clearAllMocks();
   await resetRateLimits();
+  clientIp = "203.0.113.9";
   heldSignUp.mockResolvedValue(HELD);
   provenanceRefusal.mockReturnValue(null);
   signUpOpenTo.mockResolvedValue(true);
@@ -100,7 +102,7 @@ describe("POST /api/auth/oidc/signup", () => {
   });
 
   it("hands the held groups to the role mapping before the session is made", async () => {
-    applyAdminGroup.mockImplementation(async () => expect(createSession).not.toHaveBeenCalled());
+    applyAdminGroup.mockImplementationOnce(async () => expect(createSession).not.toHaveBeenCalled());
 
     await post();
 
@@ -168,5 +170,21 @@ describe("POST /api/auth/oidc/signup", () => {
     expect(res.status).toBe(409);
     expect(userDeleteOne).toHaveBeenCalledWith({ _id: "u9" });
     expect(createSession).not.toHaveBeenCalled();
+  });
+
+  // BP-840
+  it("throttles a known address", async () => {
+    heldSignUp.mockResolvedValue(null);
+    for (let i = 0; i < 20; i++) expect((await post()).status).toBe(400);
+
+    expect((await post()).status).toBe(429);
+  });
+
+  it("never throttles callers whose address is unknown, who would all share one bucket", async () => {
+    clientIp = null;
+    heldSignUp.mockResolvedValue(null);
+    for (let i = 0; i < 450; i++) await post();
+
+    expect((await post()).status).toBe(400);
   });
 });

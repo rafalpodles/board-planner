@@ -1,7 +1,43 @@
-import { describe, it, expect, afterEach } from "vitest";
-import { assertSignInConfig, passwordSignInEnabled } from "./password-sign-in";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 
-const KEYS = ["PASSWORD_SIGN_IN", "OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET"];
+let admins: { _id: string; email?: string; emailVerifiedAt?: Date | null }[] = [];
+let identities: { user: string; provider: string; issuer: string }[] = [];
+const userFind = vi.fn();
+vi.mock("@/models/user", () => ({
+  User: {
+    find: (filter: unknown) => {
+      userFind(filter);
+      return { select: () => ({ lean: async () => admins }) };
+    },
+  },
+}));
+vi.mock("@/models/identity", () => ({
+  Identity: {
+    // As Mongo reads `{$and: [{user: {$in}}, {$or: [{provider, issuer: {$in}}]}]}`
+    exists: async (filter: { $and: [{ user: { $in: string[] } }, { $or: Record<string, unknown>[] }] }) => {
+      const [{ user }, { $or }] = filter.$and;
+      const live = (i: (typeof identities)[number]) =>
+        $or.some(
+          (c) => c.provider === i.provider && ((c.issuer as { $in: string[] } | undefined)?.$in ?? []).includes(i.issuer)
+        );
+      return identities.some((i) => user.$in.includes(i.user) && live(i)) ? { _id: "i" } : null;
+    },
+  },
+}));
+
+const { adminsLockedOut, assertSignInConfig, passwordSignInEnabled } = await import("./password-sign-in");
+
+const KEYS = [
+  "PASSWORD_SIGN_IN",
+  "OIDC_ISSUER",
+  "OIDC_CLIENT_ID",
+  "OIDC_CLIENT_SECRET",
+  "GITHUB_OAUTH_CLIENT_ID",
+  "GITHUB_OAUTH_CLIENT_SECRET",
+  "GITHUB_OAUTH_BASE_URL",
+  "GOOGLE_CLIENT_ID",
+  "GOOGLE_CLIENT_SECRET",
+];
 afterEach(() => KEYS.forEach((k) => delete process.env[k]));
 
 const withOidc = () =>
@@ -35,5 +71,97 @@ describe("PASSWORD_SIGN_IN", () => {
     withOidc();
 
     expect(() => assertSignInConfig()).toThrow(/must be "on" or "off"/);
+  });
+});
+
+// BP-840. Passwords off where no administrator can come back through a provider is an instance
+// nobody can administer once their sessions lapse
+describe("whether passwords off would lock every administrator out", () => {
+  const withGitHub = () =>
+    Object.assign(process.env, {
+      GITHUB_OAUTH_CLIENT_ID: "c",
+      GITHUB_OAUTH_CLIENT_SECRET: "s",
+      GITHUB_OAUTH_BASE_URL: "https://github.com",
+    });
+
+  beforeEach(() => {
+    admins = [{ _id: "a1", emailVerifiedAt: null }];
+    identities = [];
+    userFind.mockClear();
+    process.env.PASSWORD_SIGN_IN = "off";
+  });
+
+  it("is no concern while passwords are on", async () => {
+    process.env.PASSWORD_SIGN_IN = "on";
+    withOidc();
+
+    expect(await adminsLockedOut()).toBeNull();
+  });
+
+  it("names the lockout when no active administrator has a provider or a proven address", async () => {
+    withOidc();
+
+    expect(await adminsLockedOut()).toMatch(/no active administrator can sign in through a configured provider/);
+    expect(userFind).toHaveBeenCalledWith({ role: "admin", deactivatedAt: null, kind: { $ne: "machine" } });
+  });
+
+  it("lets an administrator in by a proven address an OpenID Connect provider links by", async () => {
+    withOidc();
+    admins = [{ _id: "a1", emailVerifiedAt: new Date() }];
+
+    expect(await adminsLockedOut()).toBeNull();
+  });
+
+  it("does not count a proven address when only GitHub, which never links by address, is set up", async () => {
+    withGitHub();
+    admins = [{ _id: "a1", emailVerifiedAt: new Date() }];
+
+    expect(await adminsLockedOut()).not.toBeNull();
+  });
+
+  // Google vouches only for its own domains; a Workspace's cannot be told from here
+  it("counts a proven address under Google only when it is a Gmail one", async () => {
+    Object.assign(process.env, { GOOGLE_CLIENT_ID: "g", GOOGLE_CLIENT_SECRET: "gs" });
+    admins = [{ _id: "a1", email: "admin@corp.example", emailVerifiedAt: new Date() }];
+    expect(await adminsLockedOut()).not.toBeNull();
+
+    admins = [{ _id: "a1", email: "admin@gmail.com", emailVerifiedAt: new Date() }];
+    expect(await adminsLockedOut()).toBeNull();
+  });
+
+  it("lets an administrator in through a provider linked to them that is still set up", async () => {
+    withGitHub();
+    identities = [{ user: "a1", provider: "github", issuer: "https://github.com" }];
+
+    expect(await adminsLockedOut()).toBeNull();
+  });
+
+  // BP-842's rule: a link made while the provider signed as another issuer is no way in
+  it("does not count a link from the provider's former issuer", async () => {
+    withOidc();
+    identities = [{ user: "a1", provider: "oidc", issuer: "https://former-issuer.example" }];
+
+    expect(await adminsLockedOut()).not.toBeNull();
+  });
+
+  it("does not count a link to a provider no longer set up", async () => {
+    withOidc();
+    identities = [{ user: "a1", provider: "google", issuer: "https://accounts.google.com" }];
+
+    expect(await adminsLockedOut()).not.toBeNull();
+  });
+
+  it("does not count a link belonging to somebody who is not an administrator", async () => {
+    withOidc();
+    identities = [{ user: "m1", provider: "oidc", issuer: "https://id.example.com" }];
+
+    expect(await adminsLockedOut()).not.toBeNull();
+  });
+
+  it("has nobody to lock out on an instance with no administrator yet", async () => {
+    withOidc();
+    admins = [];
+
+    expect(await adminsLockedOut()).toBeNull();
   });
 });

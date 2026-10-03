@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { readJsonBody } from "@/lib/request-body";
 import { getClientIp } from "@/lib/auth";
-import { anonymousMultiplier, isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
+import { isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
 import {
   buildFlowCookie,
   buildSessionCookie,
@@ -41,11 +41,15 @@ export async function POST(request: Request) {
   if (refusal) return refusal;
 
   const clientIp = getClientIp(request);
-  const throttleKey = sourceKey(clientIp ?? "-", "oidc-signup");
-  if (await isRateLimited(throttleKey, anonymousMultiplier(clientIp, ATTEMPTS_PER_SOURCE))) {
-    return NextResponse.json({ error: "Too many attempts. Try again in 15 minutes." }, { status: 429 });
+  // As at start: the held sign-in's cookie is the secret, and one shared bucket would only let
+  // anybody stop every sign-up
+  const throttleKey = clientIp ? sourceKey(clientIp, "oidc-signup") : null;
+  if (throttleKey) {
+    if (await isRateLimited(throttleKey, ATTEMPTS_PER_SOURCE)) {
+      return NextResponse.json({ error: "Too many attempts. Try again in 15 minutes." }, { status: 429 });
+    }
+    await recordFailedAttempt(throttleKey);
   }
-  await recordFailedAttempt(throttleKey);
 
   const binder = readFlowCookie(request, JOIN_COOKIE);
   const held = await heldSignUp(binder);

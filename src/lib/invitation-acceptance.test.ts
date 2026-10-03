@@ -82,7 +82,7 @@ describe("an acceptance that fails part way", () => {
 
 describe("completing an acceptance through a sign-in provider", () => {
   it("lets the provider's groups decide the role before the session is made (BP-833)", async () => {
-    applyAdminGroup.mockImplementation(async () => expect(createSession).not.toHaveBeenCalled());
+    applyAdminGroup.mockImplementationOnce(async () => expect(createSession).not.toHaveBeenCalled());
 
     await completeAcceptance(
       INVITATION as never,

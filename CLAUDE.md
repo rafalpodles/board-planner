@@ -200,7 +200,10 @@ PASSWORD_SIGN_IN=         # Optional — on (default) or off. Off: every passwor
                           # code), and a stored password is no way in — linking or unlinking a
                           # provider then needs a sign-in under 10 minutes old instead (RECENT_SIGN_IN_MS),
                           # as it does for any account with no password. Refused at startup unless a
-                          # provider is configured, and for any other value. Admins keep two
+                          # provider is configured, and for any other value. Once the database answers,
+                          # a WARNING is logged when no active admin could sign in through one,
+                          # linked or by a confirmed address it vouches for (adminsLockedOut, BP-840);
+                          # it does not stop the app, since a demotion can reach that state. Admins keep two
                           # password-free actions in PUT /api/users/:id: confirmEmail, signOutEverywhere (BP-830)
 GITHUB_OAUTH_CLIENT_SECRET=
 GITHUB_OAUTH_CLIENT_ID=   # Optional, with the secret above — sign-in with GitHub, an OAuth app of its
@@ -239,7 +242,10 @@ TRUSTED_PROXY_HOPS=       # Proxies appending to X-Forwarded-For in front of the
                           # While it is 0, a throttled request carrying the header makes the app warn
                           # how many entries it held; that count is the value to set, measured from a
                           # sign-in attempt of your own. Each new count is reported, then at most one
-                          # per ten minutes past four of them; an empty header is not (BP-774)
+                          # per ten minutes past four of them; an empty header is not (BP-774).
+                          # Provider sign-in (oidc start/callback/signup) and invitation use are not
+                          # throttled at all while it is 0, their secret being a random cookie or
+                          # token: one shared bucket would let anybody stop everybody (BP-840)
 COOKIE_ALLOW_INSECURE=    # 1: plain session cookie (no Secure, no __Host-) for plain HTTP. auto:
                           # the same only while PUBLIC_ORIGIN and every APP_ORIGIN are http:// and
                           # the sign-in's Origin is not https — what docker-compose.yml passes.

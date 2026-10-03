@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { readJsonBody } from "@/lib/request-body";
 import { getClientIp } from "@/lib/auth";
-import { anonymousMultiplier, isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
+import { isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
 import { provenanceRefusal } from "@/lib/session";
 import { findInvitationByToken } from "@/lib/invitations";
 import { INVITATION_REFUSALS } from "@/lib/invitation-refusals";
@@ -15,11 +15,15 @@ export async function POST(request: Request) {
   if (refusal) return refusal;
 
   const clientIp = getClientIp(request);
-  const throttleKey = sourceKey(clientIp ?? "-", "invitation-lookup");
-  if (await isRateLimited(throttleKey, anonymousMultiplier(clientIp, LOOKUPS_PER_SOURCE))) {
-    return NextResponse.json({ error: "Too many attempts. Try again in 15 minutes." }, { status: 429 });
+  // The link is the secret, and a bucket shared by every caller with no address would only let
+  // anybody stop every invitation being used (BP-840)
+  const throttleKey = clientIp ? sourceKey(clientIp, "invitation-lookup") : null;
+  if (throttleKey) {
+    if (await isRateLimited(throttleKey, LOOKUPS_PER_SOURCE)) {
+      return NextResponse.json({ error: "Too many attempts. Try again in 15 minutes." }, { status: 429 });
+    }
+    await recordFailedAttempt(throttleKey);
   }
-  await recordFailedAttempt(throttleKey);
 
   const read = await readJsonBody<{ token?: unknown }>(request);
   if (!read.ok) return read.response;

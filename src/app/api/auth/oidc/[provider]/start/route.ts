@@ -3,7 +3,6 @@ import { readJsonBody } from "@/lib/request-body";
 import { getAuthUser, getClientIp } from "@/lib/auth";
 import bcrypt from "bcryptjs";
 import {
-  anonymousMultiplier,
   clearAttempts,
   EXCLUSIVE_SOURCE_ATTEMPTS,
   isRateLimited,
@@ -41,11 +40,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
   if (!provider) return NextResponse.json({ error: "That sign-in is not set up here" }, { status: 404 });
 
   const clientIp = getClientIp(request);
-  const throttleKey = sourceKey(clientIp ?? "-", "oidc-start");
-  if (await isRateLimited(throttleKey, anonymousMultiplier(clientIp, STARTS_PER_SOURCE))) {
-    return NextResponse.json({ error: "Too many attempts. Try again in 15 minutes." }, { status: 429 });
+  // With no address every caller would share one bucket, which anybody could fill to stop every
+  // sign-in. That lifts the flood limit too; what is guessed here (an invitation token, a setup
+  // code) is random or throttled on its own
+  const throttleKey = clientIp ? sourceKey(clientIp, "oidc-start") : null;
+  if (throttleKey) {
+    if (await isRateLimited(throttleKey, STARTS_PER_SOURCE)) {
+      return NextResponse.json({ error: "Too many attempts. Try again in 15 minutes." }, { status: 429 });
+    }
+    await recordFailedAttempt(throttleKey);
   }
-  await recordFailedAttempt(throttleKey);
 
   const origin = selfOrigin();
   if (!origin) return NextResponse.json({ error: NO_ORIGIN_ERROR }, { status: 500 });
