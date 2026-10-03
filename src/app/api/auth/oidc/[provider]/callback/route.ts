@@ -11,7 +11,18 @@ import {
   selfOrigin,
 } from "@/lib/session";
 import { providerById, OidcProvider } from "@/lib/oidc/providers";
-import { ACCEPT_COOKIE, ACCEPT_TTL_MS, FLOW_COOKIE, finishFlow, holdForAcceptance, VerifiedClaims } from "@/lib/oidc/flow";
+import {
+  ACCEPT_COOKIE,
+  ACCEPT_TTL_MS,
+  FLOW_COOKIE,
+  JOIN_COOKIE,
+  finishFlow,
+  holdForAcceptance,
+  holdForSignUp,
+  VerifiedClaims,
+} from "@/lib/oidc/flow";
+import { applyAdminGroup } from "@/lib/oidc/admin-group";
+import { signUpOpenTo } from "@/lib/sign-up-domains";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { notifyIdentityLinked } from "@/lib/security-mail";
 import { Identity } from "@/models/identity";
@@ -162,9 +173,21 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
   }
 
   const found = await accountFor(provider, claims);
-  if ("refused" in found) return redirectTo(origin, `/login?sso=${found.refused}`);
+  if ("refused" in found) {
+    if (found.refused === "no_account" && (await mayJoin(provider, claims))) {
+      const binder = await holdForSignUp({ provider, claims });
+      return redirectTo(origin, "/join/sso", [buildFlowCookie(JOIN_COOKIE, binder, Math.floor(ACCEPT_TTL_MS / 1000))]);
+    }
+    return redirectTo(origin, `/login?sso=${found.refused}`);
+  }
   if (found.user.kind === "machine") return redirectTo(origin, "/login?sso=no_account");
+  await applyAdminGroup(found.user, provider.id, claims.groups);
   return signInAs(found.user, request, origin, clientIp, outcome.next ?? "/projects");
+}
+
+/** Only a provider whose word proves the mailbox opens sign-up, never GitHub's `verified`. */
+async function mayJoin(provider: OidcProvider, claims: VerifiedClaims) {
+  return provider.linksByAddress && claims.emailVerified && Boolean(claims.email) && (await signUpOpenTo(claims.email));
 }
 
 async function signInAs(user: IUser, request: Request, origin: string, clientIp: string | null, path: string) {

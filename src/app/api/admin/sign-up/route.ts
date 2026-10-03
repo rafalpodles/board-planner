@@ -1,0 +1,47 @@
+import { NextResponse } from "next/server";
+import { connectDB } from "@/lib/db";
+import { withAdmin } from "@/lib/middleware";
+import { readJsonBody } from "@/lib/request-body";
+import { logInstanceAudit } from "@/lib/instanceAudit";
+import { upsertSingleton } from "@/lib/singleton";
+import { parseSignUpDomains } from "@/lib/sign-up-domains";
+import { adminGroup } from "@/lib/oidc/admin-group";
+import { configuredProviders } from "@/lib/oidc/providers";
+import { getSettings, Settings } from "@/models/settings";
+
+function view(domains: string[]) {
+  return {
+    domains,
+    // GitHub's `verified` proves no domain, so only these can open sign-up
+    providers: configuredProviders()
+      .filter((p) => p.linksByAddress)
+      .map((p) => p.label),
+    adminGroup: adminGroup(),
+  };
+}
+
+export const GET = withAdmin(async () => {
+  await connectDB();
+  return NextResponse.json(view((await getSettings()).signUpDomains ?? []));
+});
+
+export const PUT = withAdmin(async (request, { user }) => {
+  if (user.viaMachineCredential) {
+    return NextResponse.json({ error: "Interactive admin session required" }, { status: 403 });
+  }
+  const read = await readJsonBody<{ domains?: unknown }>(request);
+  if (!read.ok) return read.response;
+  const parsed = parseSignUpDomains(read.value.domains);
+  if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
+
+  await connectDB();
+  const before = (await getSettings()).signUpDomains ?? [];
+  const settings = await upsertSingleton(Settings, { $set: { signUpDomains: parsed.value } });
+  void logInstanceAudit({
+    action: "instance_settings_changed",
+    user: user._id,
+    actorUsername: user.username,
+    detail: `sign-up domains: ${before.join(", ") || "none"} → ${parsed.value.join(", ") || "none"}`,
+  });
+  return NextResponse.json(view(settings.signUpDomains ?? []));
+});

@@ -79,6 +79,7 @@ export async function POST(request: Request) {
         email: held.claims.email,
       },
       providerProvesAddress: providerById(held.provider)?.linksByAddress === true,
+      groups: held.claims.groups ?? [],
     },
     request,
     clientIp
