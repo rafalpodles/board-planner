@@ -1,5 +1,6 @@
 import { connectDB } from "@/lib/db";
 import { passwordSignInEnabled } from "@/lib/password-sign-in";
+import { configuredProviders } from "@/lib/oidc/providers";
 import { getClientIp, verifyCredentials } from "@/lib/auth";
 import {
   buildSessionCookie,
@@ -204,7 +205,16 @@ function loginForm(p: AuthParams, clientName: string, error?: string): Response 
       <label for="p">Password</label>
       <input id="p" type="password" name="password" autocomplete="current-password" required>
       <button class="primary" type="submit">Continue</button>
-    </form>`);
+    </form>${
+      // An account made through a provider has no password to type here (BP-840)
+      configuredProviders().length > 0
+        ? `
+    <form method="get" action="/login">
+      <input type="hidden" name="next" value="${escapeHtml(authorizeHref(p))}">
+      <button class="secondary" type="submit">Sign in with a provider instead</button>
+    </form>`
+        : ""
+    }`);
 }
 
 // Picking "All projects" leaves the checkbox list standing, and a list you can still tick while it
