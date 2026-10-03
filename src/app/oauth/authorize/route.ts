@@ -1,4 +1,5 @@
 import { connectDB } from "@/lib/db";
+import { passwordSignInEnabled } from "@/lib/password-sign-in";
 import { getClientIp, verifyCredentials } from "@/lib/auth";
 import {
   buildSessionCookie,
@@ -179,6 +180,17 @@ function originOf(redirectUri: string): string {
 
 function loginForm(p: AuthParams, clientName: string, error?: string): Response {
   const label = clientName ? escapeHtml(clientName) : "An application";
+  if (!passwordSignInEnabled()) {
+    // Signed in at the instance's own sign-in page, with a provider, and brought back here
+    return htmlPage(`
+    <h1>Sign in to ${APP_NAME}</h1>
+    <p class="sub"><span class="app">${label}</span> wants to access your ${APP_NAME} account.</p>
+    ${provenance(clientName, p.redirectUri)}
+    <form method="get" action="/login">
+      <input type="hidden" name="next" value="${escapeHtml(authorizeHref(p))}">
+      <button class="primary" type="submit">Sign in to continue</button>
+    </form>`);
+  }
   return htmlPage(`
     <h1>Sign in to ${APP_NAME}</h1>
     <p class="sub"><span class="app">${label}</span> wants to access your ${APP_NAME} account.</p>
@@ -484,6 +496,7 @@ export async function POST(req: Request) {
     return errorPage("PKCE required: code_challenge with code_challenge_method=S256.");
   }
 
+  if (!passwordSignInEnabled()) return loginForm(p, client.clientName);
   const username = String(form.get("username") || "");
   const password = String(form.get("password") || "");
   const clientIp = getClientIp(req);

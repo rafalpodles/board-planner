@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { passwordSignInEnabled, passwordSignInOff } from "@/lib/password-sign-in";
 import { isValidObjectId } from "mongoose";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
@@ -39,6 +40,7 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
   if (typeof body !== "object" || body === null) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
+  if (body.password !== undefined && !passwordSignInEnabled()) return passwordSignInOff();
 
   const previousRole = target.role;
   let roleWasChanged = false;
