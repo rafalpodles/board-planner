@@ -69,6 +69,7 @@ function targetDoc(overrides: Record<string, unknown> = {}) {
   return {
     _id: "target-1",
     emailVerifiedAt: new Date("2026-01-01T00:00:00Z") as Date | null,
+    deactivatedAt: null as Date | null,
     username: "target",
     role: "admin",
     email: "target@example.com",
@@ -944,6 +945,20 @@ describe("PUT /api/users/:id — deactivating and reactivating", () => {
     );
   });
 
+  // Two administrators deactivating each other at once each counted the other as still active
+  it("takes it back when no active administrator is left after all", async () => {
+    const target = targetDoc({ role: "admin", deactivatedAt: null });
+    found(target);
+    userCountDocuments.mockResolvedValueOnce(2).mockResolvedValueOnce(0);
+
+    const res = await PUT(put({ deactivate: true }), ctx());
+
+    expect(res.status).toBe(409);
+    expect(target.deactivatedAt).toBeNull();
+    expect(target.save).toHaveBeenCalledTimes(2);
+    expect(revokeUserCredentials).not.toHaveBeenCalled();
+  });
+
   it("refuses the last administrator who can still act", async () => {
     const target = targetDoc({ role: "admin", deactivatedAt: null });
     found(target);
@@ -972,7 +987,8 @@ describe("PUT /api/users/:id — deactivating and reactivating", () => {
 
     expect(res.status).toBe(200);
     expect(target.deactivatedAt).toBeNull();
-    expect(revokeUserCredentials).not.toHaveBeenCalled();
+    // Only what was minted between the flag and the first revoke: providers stay, nothing returns
+    expect(revokeUserCredentials).toHaveBeenCalledWith("target-1", null, { keepIdentities: true });
     expect(logInstanceAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "user_reactivated" }));
   });
 

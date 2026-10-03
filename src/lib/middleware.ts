@@ -110,6 +110,17 @@ export function protocolOf(request: Request): number {
   return Number(request.headers.get("x-cp-protocol") ?? NaN);
 }
 
+// A machine reaches what its owner reaches, and a deactivated owner reaches nothing (BP-832).
+// Deactivating also scrambles the machine's credential; this is the second line.
+async function ownerIsDeactivated(worker: IWorker): Promise<boolean> {
+  const ownerId = (worker.owner as { _id?: unknown } | null)?._id ?? worker.owner;
+  return !!ownerId && !!(await User.exists({ _id: String(ownerId), deactivatedAt: { $ne: null } }));
+}
+
+function machineOwnerDeactivated() {
+  return NextResponse.json({ error: "This machine's owner is deactivated" }, { status: 401 });
+}
+
 export function withWorker(
   handler: (
     request: Request,
@@ -131,11 +142,7 @@ export function withWorker(
     // downstream handler can spread it into a response
     worker.credentialHash = "";
 
-    // A machine reaches what its owner reaches, and a deactivated owner reaches nothing (BP-832)
-    const ownerId = (worker.owner as { _id?: unknown } | null)?._id ?? worker.owner;
-    if (ownerId && (await User.exists({ _id: String(ownerId), deactivatedAt: { $ne: null } }))) {
-      return NextResponse.json({ error: "This machine's owner is deactivated" }, { status: 401 });
-    }
+    if (await ownerIsDeactivated(worker)) return machineOwnerDeactivated();
 
     // The path segment is authoritative on /api/workers/:id, so a credential must not act on
     // someone else's record just because the route happens to carry an id
@@ -343,6 +350,7 @@ export function withProjectAccessOrWorker(
     if (!worker.enabled) {
       return NextResponse.json({ error: "this worker may not run" }, { status: 403 });
     }
+    if (await ownerIsDeactivated(worker)) return machineOwnerDeactivated();
 
     const params = await context.params;
     const projectId = params.projectId ? await resolveProjectId(params.projectId) : null;

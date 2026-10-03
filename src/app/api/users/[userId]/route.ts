@@ -424,6 +424,13 @@ async function accountAction(
     }
     target.deactivatedAt = new Date();
     await target.save();
+    // Two administrators deactivating each other at once each counted the other as still active;
+    // an instance with no administrator cannot be repaired from the product, so one of them yields
+    if (target.role === "admin" && (await User.countDocuments(ACTIVE_ADMINS)) === 0) {
+      target.deactivatedAt = null;
+      await target.save();
+      return NextResponse.json({ error: "Cannot deactivate the last admin" }, { status: 409 });
+    }
     // After the flag, so a session minted in between is refused by getAuthUser anyway. Its sign-in
     // providers stay linked: every sign-in is refused while deactivated, and a reactivated account
     // on an instance without passwords needs one to come back by
@@ -440,6 +447,9 @@ async function accountAction(
   }
   if (action === "reactivate") {
     if (!target.deactivatedAt) return NextResponse.json({ ok: true });
+    // Anything minted in the instant between the flag and the first revoke was refused while
+    // deactivated, and would work again from here; it goes now, while sign-in is still refused
+    await revokeUserCredentials(target._id, null, { keepIdentities: true });
     target.deactivatedAt = null;
     await target.save();
     void logInstanceAudit({
