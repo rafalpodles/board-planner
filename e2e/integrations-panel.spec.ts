@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import { CODA_STUB_URL, GITHUB_STUB_URL } from "../playwright.config";
 import { E2E_MONGODB_URI, PROJECT_ID, PROJECT_KEY, seed } from "./seed";
 import { signIn } from "./session";
+import { e2eLicence, useLicenceKey } from "./licence-key";
 
 /**
  * BP-472. `IntegrationsSection.tsx`'s webhook half is covered thoroughly; everything beside it —
@@ -199,6 +200,10 @@ test.describe("a channel's masked URL", () => {
 });
 
 test.describe("Coda", () => {
+  // Coda is Pro since BP-651; coda-pro.spec.ts covers it on a free instance
+  test.beforeEach(async ({ request }) => useLicenceKey(request, e2eLicence()));
+  test.afterEach(async ({ request }) => useLicenceKey(request, undefined));
+
   async function configureCoda(page: Page, tableId: string) {
     await openIntegration(page, /^Coda/);
     await page.getByLabel("Doc ID").fill("doc-e2e");

@@ -100,6 +100,7 @@ export const GROUPS = {
     "project-default-agent.spec.ts",
     "external-integrations.spec.ts",
     "integrations-panel.spec.ts",
+    "coda-pro.spec.ts",
     "gitlab-activity.spec.ts",
     "pr-status.spec.ts",
     "project-channel-secret.spec.ts",

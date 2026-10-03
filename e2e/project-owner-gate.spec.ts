@@ -95,9 +95,9 @@ const RECIPES: Record<string, Recipe> = {
     handled: { status: 400, body: /name is required/ },
   },
   "POST /api/projects/[projectId]/coda/sync": {
-    // The seeded board has no Coda doc, so the handler refuses before it would call out
+    // The suite's server has no licence, so past the owner gate it is the plan that refuses (BP-651)
     send: withBody("post", {}),
-    handled: { status: 400, body: /Coda doc, table and token must be configured/ },
+    handled: { status: 402, body: /requires a plan upgrade/ },
   },
   "GET /api/projects/[projectId]/columns": {
     send: get,

@@ -1,3 +1,4 @@
+import { expect, type APIRequestContext } from "@playwright/test";
 import { signLicence, type LicencePayload } from "../src/lib/licence";
 
 // A keypair the suite owns. The app accepts a public key from E2E_LICENCE_PUBLIC_KEY only when
@@ -27,4 +28,10 @@ export function e2eLicence(
     },
     E2E_LICENCE_SIGNING_KEY
   );
+}
+
+/** Swaps the key the server reads (`POST /api/e2e/licence`); `undefined` puts it back on Free. */
+export async function useLicenceKey(request: APIRequestContext, key: string | undefined) {
+  const response = await request.post("/api/e2e/licence", { data: key === undefined ? {} : { key } });
+  expect(response.status(), await response.text()).toBe(204);
 }
