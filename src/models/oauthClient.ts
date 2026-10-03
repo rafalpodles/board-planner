@@ -4,14 +4,12 @@ import { withTenant } from "@/lib/tenant-field";
 
 const oauthClientSchema = new Schema<IOAuthClient>(
   {
-    clientId: { type: String, required: true },
+    clientId: { type: String, required: true, unique: true, index: true },
     clientName: { type: String, default: "" },
     redirectUris: { type: [String], default: [] },
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );
-
-oauthClientSchema.index({ tenant: 1, clientId: 1 }, { unique: true });
 
 withTenant(oauthClientSchema);
 

@@ -1,3 +1,4 @@
+import { DEFAULT_TENANT_ID } from "./tenant-field";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { inMemoryRateLimitModel } from "./rate-limit-test-store";
 
@@ -28,6 +29,19 @@ beforeEach(async () => {
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe("a row born from a pipeline upsert", () => {
+  // An update pipeline gets no schema defaults, so the tenant has to be in the pipeline itself
+  it("carries the default tenant, whichever write created it", async () => {
+    await recordFailedAttempt("failed");
+    await countAttempt("counted");
+
+    for (const key of ["failed", "counted"]) {
+      const row = store.rows.get(key) as unknown as { tenant?: unknown };
+      expect(String(row.tenant), key).toBe(String(DEFAULT_TENANT_ID));
+    }
+  });
 });
 
 describe("the counter itself", () => {

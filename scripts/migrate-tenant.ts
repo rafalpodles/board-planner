@@ -15,10 +15,8 @@
  */
 
 import mongoose from "mongoose";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { resolveUri, dbName } from "./mongo-uri";
-import { migrateToTenants } from "../src/lib/tenant-migration";
+import { collectionsMissingFromSnapshot, migrateToTenants } from "../src/lib/tenant-migration";
 
 const apply = process.argv.includes("--apply");
 const snapshotArg = process.argv.indexOf("--snapshot-dir");
@@ -26,7 +24,7 @@ const snapshotDir = snapshotArg > -1 ? process.argv[snapshotArg + 1] : undefined
 
 async function main() {
   const { uri, source } = resolveUri();
-  await mongoose.connect(uri, { dbName: dbName(), autoIndex: false });
+  await mongoose.connect(uri, { dbName: dbName(), autoIndex: false, autoCreate: false });
   const db = mongoose.connection.db;
   if (!db) throw new Error("No database handle");
   console.log(`Database: ${db.databaseName} (from ${source}) ${apply ? "APPLYING" : "dry run"}`);
@@ -38,7 +36,7 @@ async function main() {
 
   if (apply) {
     if (!snapshotDir) throw new Error("--apply needs --snapshot-dir <dir> from dump-collections.ts dump <target> all");
-    const missing = collections.filter((name) => !existsSync(join(snapshotDir, `${name}.json`)));
+    const missing = collectionsMissingFromSnapshot(snapshotDir, collections);
     if (missing.length) {
       throw new Error(`The snapshot at ${snapshotDir} has no file for: ${missing.join(", ")}`);
     }

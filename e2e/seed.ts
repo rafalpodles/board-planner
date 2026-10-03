@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import { PM_USERNAME } from "@/lib/pm/username";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 // Never the development database. The URI is passed to the dev server too, so a mistake here
 // would have the browser writing into whatever the developer is using at the time.
@@ -156,6 +157,20 @@ export async function wipe() {
   await mongoose.disconnect();
 }
 
+// Rows written through the raw driver carry no tenant, and the app's own writes carry the default
+// one; a missing tenant is indexed as null, so the two would not collide on a per-tenant unique
+// index. Production has no such rows after the migration, so the fixture gives its rows the same.
+async function stampTenantAndDisconnect() {
+  const db = mongoose.connection.db!;
+  const names = (await db.listCollections().toArray())
+    .map((c) => c.name)
+    .filter((name) => name !== "tenants" && !name.startsWith("system.") && !name.includes("."));
+  await Promise.all(
+    names.map((name) => db.collection(name).updateMany({ tenant: null }, { $set: { tenant: DEFAULT_TENANT_ID } }))
+  );
+  await mongoose.disconnect();
+}
+
 /**
  * The stored run subdocument, which no endpoint returns: the API publishes only what a reader may
  * see, and a released run is invisible there by design. A test asserting on the absence of a
@@ -166,7 +181,7 @@ export async function storedExecution(
 ): Promise<Record<string, unknown> | undefined> {
   const db = (await connect()).db!;
   const task = await db.collection("tasks").findOne({ _id: taskId }, { projection: { execution: 1 } });
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
   return task?.execution as Record<string, unknown> | undefined;
 }
 
@@ -208,7 +223,7 @@ async function addTask(over: Record<string, unknown>, taskNumber: number) {
   await db
     .collection("projects")
     .updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: taskNumber } });
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 /**
@@ -291,7 +306,7 @@ export async function seedTaskInCompletedSprint() {
   await db
     .collection("projects")
     .updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: STRANDED_TASK_NUMBER } });
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 /**
@@ -364,7 +379,7 @@ export async function seedCustomFields(values: Record<string, unknown> = {}) {
   await db
     .collection("tasks")
     .updateOne({ _id: SIBLING_TASK_ID }, { $set: { customFieldValues: values } });
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 export const LIST_DROPDOWN_FIELD_ID = id("e2e00000000000000000f009");
@@ -403,14 +418,14 @@ export async function seedListVisibleDropdownField() {
       },
     }
   );
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 /** When a task was last written, as the database has it — `timestamps: true` maintains this. */
 export async function storedUpdatedAt(taskId: mongoose.Types.ObjectId): Promise<number> {
   const db = (await connect()).db!;
   const task = await db.collection("tasks").findOne({ _id: taskId });
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
   if (!task?.updatedAt) throw new Error(`no task ${String(taskId)} to read updatedAt from`);
   return new Date(task.updatedAt).getTime();
 }
@@ -425,7 +440,7 @@ export async function storedActivity(
     .find({ task: taskId })
     .sort({ createdAt: -1, _id: -1 })
     .toArray();
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
   return rows.map((r) => ({
     action: String(r.action),
     field: String(r.field ?? ""),
@@ -449,7 +464,7 @@ export async function renameField(
       ...(changes.optionId ? [{ "o.id": changes.optionId }] : []),
     ],
   });
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 // A sprint with a done and an undone task already in it, plus a fourth task sitting in the
@@ -493,7 +508,7 @@ export async function seedSecondPlanningSprint() {
     createdAt: now,
     updatedAt: now,
   });
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 export async function seedSprintPlanning() {
@@ -543,7 +558,7 @@ export async function seedSprintPlanning() {
     .collection("projects")
     .updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: PLANNING_BACKLOG_TASK_NUMBER } });
 
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 // BP-208 Task 11: a sprint whose tasks span every shape a numeric field's stored value takes in
@@ -630,7 +645,7 @@ export async function seedSprintEstimates() {
   ]);
   await db.collection("projects").updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: 104 } });
 
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 // BP-389. A board with a sprint history: two sprints already closed, one running with a finished
@@ -792,7 +807,7 @@ export async function seedSprintLifecycle() {
   ]);
   await db.collection("projects").updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: 125 } });
 
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 /**
@@ -808,7 +823,7 @@ export async function demoteDoneColumn() {
       { $set: { "columns.$[column].role": "review" } },
       { arrayFilters: [{ "column.id": "done" }] }
     );
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
   // An array filter matching nothing updates nothing and still succeeds, which would leave the
   // board finishing tasks as usual and the failure naming the product rather than this line
   if (result.modifiedCount !== 1) {
@@ -831,7 +846,7 @@ export async function demoteActiveColumn() {
       { $set: { "columns.$[column].role": "review" } },
       { arrayFilters: [{ "column.id": "in_progress" }] }
     );
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
   if (result.modifiedCount !== 1) {
     throw new Error(`demoteActiveColumn changed ${result.modifiedCount} boards, expected 1`);
   }
@@ -866,14 +881,14 @@ export async function seedOlderCompletedSprints() {
       closed("05", LIFECYCLE_OLDEST_CLOSED_NAME, -104),
       closed("06", "Sprint 2", -88),
     ]);
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 /** A sprint as the database holds it, for assertions the API's derived counts would blur. */
 export async function storedSprint(sprintId: mongoose.Types.ObjectId) {
   const db = (await connect()).db!;
   const row = await db.collection("sprints").findOne({ _id: sprintId });
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
   return row;
 }
 
@@ -881,7 +896,7 @@ export async function storedSprint(sprintId: mongoose.Types.ObjectId) {
 export async function storedTaskSprint(taskNumber: number): Promise<string | null> {
   const db = (await connect()).db!;
   const row = await db.collection("tasks").findOne({ project: PROJECT_ID, taskNumber });
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
   if (!row) throw new Error(`no task ${taskNumber} on the seeded board`);
   return row.sprint ? String(row.sprint) : null;
 }
@@ -922,7 +937,7 @@ export async function seedBoardFeedBystander() {
     updatedAt: now,
   });
 
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 export async function seedQuietTask(quietForMs: number) {
@@ -1209,7 +1224,7 @@ async function seedBoard(withSessions: boolean) {
     }),
   ]);
 
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 export const seed = () => seedBoard(true);
@@ -1229,7 +1244,7 @@ export async function seedSecondEscalationColumn() {
       { _id: PROJECT_ID, "columns.id": "in_review" },
       { $set: { "columns.$.triggersPmReview": true } }
     );
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 /**
@@ -1250,7 +1265,7 @@ export async function seedRenamedColumn() {
       { _id: PROJECT_ID, "columns.id": "planned" },
       { $set: { "columns.$.id": RENAMED_COLUMN_ID, "columns.$.label": "Parked" } }
     );
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 /** seed(), minus the session rows — see seedBoard. */
@@ -1466,7 +1481,7 @@ export async function seedSearchCorpus() {
 
   await db.collection("projects").updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: META_HIT_NUMBER } });
 
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 /**
@@ -1509,7 +1524,7 @@ export async function seedAssignmentOutsider() {
     createdAt: now,
   });
 
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 
   await addTask(
     {
@@ -1592,7 +1607,7 @@ export async function seedWebhookDeliveryOutcomes() {
     }
   );
 
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 // BP-396. A second board the consent screen offers and the test deliberately leaves unticked, so
@@ -1632,7 +1647,7 @@ export async function seedSecondProject() {
     updatedAt: now,
   });
 
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 /**
@@ -1703,7 +1718,7 @@ export async function seedDemotableAdmin() {
     .collection("projects")
     .updateOne({ _id: SECOND_PROJECT_ID }, { $max: { taskCounter: KEPT_TASK_NUMBER } });
 
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 /** A webhook on the seeded project, written straight in: adding one through the settings screen is
@@ -1717,7 +1732,7 @@ export async function seedWebhook(
     { _id: PROJECT_ID },
     { $set: { webhooks: [{ _id: new mongoose.Types.ObjectId(), url, events, enabled: true }] } }
   );
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 /** What a project names as its repository. A token planted here is written in the clear, which
@@ -1730,7 +1745,7 @@ export async function seedRepository(fields: {
 }) {
   const db = (await connect()).db!;
   await db.collection("projects").updateOne({ _id: PROJECT_ID }, { $set: fields });
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 // What a sync leaves on a task once a pull request has been matched to its key, planted directly
@@ -1771,7 +1786,7 @@ export async function seedLinkedPRs() {
       },
     }
   );
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 // BP-396. seed()'s categories are bug/doc/user-story/idea — character for character the fallback
@@ -1786,7 +1801,7 @@ export async function seedExtraCategory() {
     { _id: PROJECT_ID },
     { $set: { categories: [...CATEGORIES, { _id: new mongoose.Types.ObjectId(), name: EXTRA_CATEGORY, color: "#0ea5e9" }] } }
   );
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 export const PALE_YELLOW = "#fef08a";
@@ -1821,7 +1836,7 @@ export async function seedHardColours() {
   await db
     .collection("tasks")
     .updateMany({ _id: { $in: [FINISHED_TASK_ID, SIBLING_TASK_ID] } }, { $set: { assignee: ADMIN_ID } });
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 /**
@@ -1843,7 +1858,7 @@ export async function stripAccessExpiry(accessToken: string): Promise<boolean> {
     .collection("oauthtokens")
     .updateOne({ accessTokenHash }, { $unset: { accessExpiresAt: "" } });
   const still = await db.collection("oauthtokens").findOne({ accessTokenHash });
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
   return !!still;
 }
 
@@ -1854,7 +1869,7 @@ export async function expireAccessToken(accessToken: string): Promise<boolean> {
     .collection("oauthtokens")
     .updateOne({ accessTokenHash }, { $set: { accessExpiresAt: new Date(Date.now() - 60_000) } });
   const still = await db.collection("oauthtokens").findOne({ accessTokenHash });
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
   return !!still;
 }
 
@@ -1892,7 +1907,7 @@ export async function seedAgents() {
     agent({ _id: PROJECT_AGENT_ID, name: PROJECT_AGENT_NAME, scope: "project", project: PROJECT_ID }),
     agent({ _id: PERSONAL_AGENT_ID, name: PERSONAL_AGENT_NAME, scope: "user", owner: ADMIN_ID }),
   ]);
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 /**
@@ -1918,7 +1933,7 @@ export async function seedForeignAgent() {
     createdAt: now,
     updatedAt: now,
   });
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 /**
@@ -1942,7 +1957,7 @@ export async function seedForeignSprint() {
     createdAt: now,
     updatedAt: now,
   });
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 export const PM_USER_ID = id("e2e00000000000000000a009");
@@ -2026,14 +2041,14 @@ export async function seedHandoverStates() {
   await db
     .collection("projects")
     .updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: ASSIGNED_BY_SOMEONE_ELSE_TASK_NUMBER } });
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 /** A task on the seeded board as the database holds it, for the fields the API populates or renames. */
 export async function storedTask(taskNumber: number): Promise<Record<string, unknown>> {
   const db = (await connect()).db!;
   const row = await db.collection("tasks").findOne({ project: PROJECT_ID, taskNumber });
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
   if (!row) throw new Error(`no task ${taskNumber} on the seeded board`);
   return row as Record<string, unknown>;
 }
@@ -2208,7 +2223,7 @@ export async function seedMyTasks() {
     .collection("projects")
     .updateOne({ _id: SECOND_PROJECT_ID }, { $max: { taskCounter: MINE_OTHER_BOARD_NUMBER } });
 
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 /**
@@ -2224,7 +2239,7 @@ export async function seedMyTasksAllDone() {
   await db
     .collection<{ columns: unknown[] }>("projects")
     .updateOne({ _id: PROJECT_ID }, { $push: { columns: { $each: EXTRA_COLUMNS } } });
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 
   await addTask(
     {
@@ -2241,7 +2256,7 @@ export async function seedMyTasksAllDone() {
 export async function deleteProjectRow(projectId: mongoose.Types.ObjectId) {
   const db = (await connect()).db!;
   await db.collection("projects").deleteOne({ _id: projectId });
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 /**
@@ -2292,7 +2307,7 @@ export async function seedNewestProject() {
     updatedAt: now,
   });
 
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 /**
@@ -2313,7 +2328,7 @@ export async function grantMemberOn(projectId: mongoose.Types.ObjectId) {
     createdAt: now,
     updatedAt: now,
   });
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 export const MENTION_CAP_USERNAME_PREFIX = "mention-cap-";
@@ -2341,7 +2356,7 @@ export async function seedManyMentionCandidates() {
       createdAt: now,
     }))
   );
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 /**
@@ -2412,7 +2427,7 @@ export async function seedGitlabProject(host: string) {
     })
   );
 
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 // BP-727, BP-728, BP-731. A task the member handed to themselves, with an agent, in the approved
@@ -2475,7 +2490,7 @@ export async function seedMemberHandover() {
   await db
     .collection("projects")
     .updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: MEMBER_BACKLOG_TASK_NUMBER } });
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 export async function setBoardReadiness(fields: {
@@ -2489,7 +2504,7 @@ export async function setBoardReadiness(fields: {
   if (fields.repositoryUrl !== undefined) $set.repositoryUrl = fields.repositoryUrl;
   if (fields.workerEnabled !== undefined) $set["worker.enabled"] = fields.workerEnabled;
   await db.collection("projects").updateOne({ _id: PROJECT_ID }, { $set });
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 /** A machine `owner` enrolled, holding a checkout of `remote`, last seen `seenAgoMs` ago. */
@@ -2546,24 +2561,24 @@ export async function seedMachine(
     createdAt: now,
     updatedAt: now,
   });
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 export async function spendAttempts(taskId: mongoose.Types.ObjectId, attempts: number) {
   const db = (await connect()).db!;
   await db.collection("tasks").updateOne({ _id: taskId }, { $set: { "execution.attempts": attempts } });
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 export async function setTaskStatus(taskId: mongoose.Types.ObjectId, status: string) {
   const db = (await connect()).db!;
   await db.collection("tasks").updateOne({ _id: taskId }, { $set: { status } });
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 /** Makes `blocked` wait on `blocker`, both on the seeded board. */
 export async function blockTask(blocked: mongoose.Types.ObjectId, blocker: mongoose.Types.ObjectId) {
   const db = (await connect()).db!;
   await db.collection("tasks").updateOne({ _id: blocked }, { $set: { blockedBy: [blocker] } });
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }

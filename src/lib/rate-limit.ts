@@ -27,6 +27,7 @@
  * deploy, and they grew by one entry for every key anybody asked about — and since the key contains
  * a caller-supplied username, an anonymous caller could grow them without bound (BP-318).
  */
+import { DEFAULT_TENANT_ID } from "./tenant-field";
 import { connectDB } from "./db";
 import { sha256 } from "./oauth";
 import { RateLimit } from "@/models/rateLimit";
@@ -104,6 +105,8 @@ export async function recordFailedAttempt(key: string, windowMs = WINDOW_MS): Pr
             $cond: [{ $gt: ["$resetAt", now] }, { $add: [{ $ifNull: ["$count", 0] }, 1] }, 1],
           },
           resetAt: { $cond: [{ $gt: ["$resetAt", now] }, "$resetAt", fresh] },
+          // A pipeline upsert gets no schema defaults, so the row would be born without a tenant
+          tenant: { $ifNull: ["$tenant", DEFAULT_TENANT_ID] },
         },
       },
     ],
@@ -144,6 +147,8 @@ async function incrementAttempt(key: string, windowMs: number): Promise<number> 
             $cond: [{ $gt: ["$resetAt", now] }, { $add: [{ $ifNull: ["$count", 0] }, 1] }, 1],
           },
           resetAt: { $cond: [{ $gt: ["$resetAt", now] }, "$resetAt", fresh] },
+          // A pipeline upsert gets no schema defaults, so the row would be born without a tenant
+          tenant: { $ifNull: ["$tenant", DEFAULT_TENANT_ID] },
         },
       },
     ],

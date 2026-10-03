@@ -1,4 +1,6 @@
 import mongoose from "mongoose";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import "@/models/all";
 import { DEFAULT_TENANT_ID } from "./tenant-field";
 
@@ -10,7 +12,6 @@ export const REPLACED_UNIQUE_INDEXES = [
   { model: "User", old: "email_1", replacement: "tenant_1_email_1" },
   { model: "Project", old: "key_1", replacement: "tenant_1_key_1" },
   { model: "Worker", old: "name_1_host_1", replacement: "tenant_1_name_1_host_1" },
-  { model: "OAuthClient", old: "clientId_1", replacement: "tenant_1_clientId_1" },
   { model: "Identity", old: "issuer_1_subject_1", replacement: "tenant_1_issuer_1_subject_1" },
   { model: "Invitation", old: "email_1", replacement: "tenant_1_email_1" },
   { model: "AgentBlock", old: "key_1", replacement: "tenant_1_key_1" },
@@ -48,10 +49,20 @@ async function normaliseDefaultTenant(
   db: mongoose.mongo.Db,
   apply: boolean
 ): Promise<Pick<TenantMigrationReport, "tenantRow">> {
-  const rows = await db.collection(TENANT_COLLECTION).find({}).toArray();
+  const tenants = db.collection(TENANT_COLLECTION);
+  const rows = await tenants.find({}).toArray();
   const fixed = rows.find((row) => DEFAULT_TENANT_ID.equals(row._id));
 
-  if (fixed) return { tenantRow: "present" };
+  if (fixed) {
+    // The re-key below inserts before it deletes, so a process that died between the two left
+    // both rows; the marker says which one is the leftover.
+    const leftover = fixed.rekeyedFrom ? rows.find((row) => row._id.equals(fixed.rekeyedFrom)) : undefined;
+    if (apply && fixed.rekeyedFrom) {
+      if (leftover) await tenants.deleteOne({ _id: leftover._id });
+      await tenants.updateOne({ _id: fixed._id }, { $unset: { rekeyedFrom: "" } });
+    }
+    return { tenantRow: "present" };
+  }
 
   if (rows.length > 1) {
     throw new Error(
@@ -62,10 +73,18 @@ async function normaliseDefaultTenant(
   const seed = { entitlements: { plan: "free", features: [], source: "none" } };
   const legacy = rows[0];
   if (apply) {
-    await db.collection(TENANT_COLLECTION).insertOne({ ...(legacy ?? seed), _id: DEFAULT_TENANT_ID });
-    if (legacy) await db.collection(TENANT_COLLECTION).deleteOne({ _id: legacy._id });
+    await tenants.insertOne({ ...(legacy ?? seed), _id: DEFAULT_TENANT_ID, ...(legacy ? { rekeyedFrom: legacy._id } : {}) });
+    if (legacy) {
+      await tenants.deleteOne({ _id: legacy._id });
+      await tenants.updateOne({ _id: DEFAULT_TENANT_ID }, { $unset: { rekeyedFrom: "" } });
+    }
   }
   return { tenantRow: legacy ? "re-keyed" : "created" };
+}
+
+/** A snapshot is only a safety net if it holds every collection; one that misses a file is not. */
+export function collectionsMissingFromSnapshot(snapshotDir: string, collections: string[]): string[] {
+  return collections.filter((name) => !existsSync(join(snapshotDir, `${name}.json`)));
 }
 
 export async function migrateToTenants(

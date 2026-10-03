@@ -24,7 +24,9 @@ type Update =
  */
 function evaluate(expr: Expr, doc: Record<string, unknown>): unknown {
   if (typeof expr === "string" && expr.startsWith("$")) return doc[expr.slice(1)];
+  // A literal, like a Date: an ObjectId is a value here, not an operator document
   if (!expr || typeof expr !== "object" || expr instanceof Date) return expr;
+  if ((expr as { _bsontype?: string })._bsontype === "ObjectId") return expr;
 
   if ("$cond" in expr) {
     const [test, whenTrue, whenFalse] = expr.$cond as [Expr, Expr, Expr];
