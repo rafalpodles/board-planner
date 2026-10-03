@@ -483,6 +483,7 @@ describe("digestTick", () => {
     expect(filter).toEqual({
       emailDigest: true,
       email: { $ne: "" },
+      deactivatedAt: null,
       lastDigestDay: { $ne: "2026-08-17" },
     });
   });

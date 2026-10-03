@@ -465,3 +465,22 @@ describe("GET /api/auth/oidc/:provider/callback, setting up an empty instance (B
     expect(userDeleteOne).toHaveBeenCalledWith({ _id: "u-first" });
   });
 });
+
+describe("GET /api/auth/oidc/:provider/callback, a deactivated account (BP-832)", () => {
+  it("signs nobody in through a linked identity", async () => {
+    finishes("signin");
+    identityFindOne.mockReturnValue(lean({ _id: "i1", user: "u1" }));
+    userFindById.mockResolvedValue({ ...ADA, deactivatedAt: new Date() });
+
+    expect(location(await callback())).toBe("/login?sso=deactivated");
+    expect(createSession).not.toHaveBeenCalled();
+  });
+
+  it("links nothing to it by its address", async () => {
+    finishes("signin");
+    userFindOne.mockResolvedValue({ ...ADA, deactivatedAt: new Date() });
+
+    expect(location(await callback())).toBe("/login?sso=deactivated");
+    expect(identityCreate).not.toHaveBeenCalled();
+  });
+});

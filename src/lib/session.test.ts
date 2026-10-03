@@ -737,6 +737,13 @@ describe("revokeUserCredentials", () => {
     expect(identityDeleteMany).toHaveBeenCalledWith({ user: "user-1" });
   });
 
+  // BP-832. A deactivation refuses every sign-in instead, and must leave a way back
+  it("keeps the providers linked when asked to", async () => {
+    expect(await revokeUserCredentials("user-1", null, { keepIdentities: true })).toEqual({ identitiesUnlinked: 0 });
+    expect(identityDeleteMany).not.toHaveBeenCalled();
+    expect(apiTokenDeleteMany).toHaveBeenCalledWith({ user: "user-1" });
+  });
+
   // BP-359 review: a link to a pending address outlived the recovery that was meant to end it
   it("drops a pending address change, so its link cannot move the address after a recovery", async () => {
     await revokeUserCredentials("user-1");

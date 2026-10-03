@@ -293,12 +293,14 @@ describe("recipientsWithAccess", () => {
   /** subject id -> the grant rows that exist for them, whatever project or object type. */
   let grantRows: { subject: string; relation: string; objectType: string; object: string }[] = [];
   let roles: Record<string, string> = {};
+  let deactivated = new Set<string>();
 
   beforeEach(() => {
     find.mockReset();
     userFind.mockReset();
     grantRows = [];
     roles = { [MEMBER]: "member", [REMOVED]: "member", [ADMIN]: "admin" };
+    deactivated = new Set();
 
     find.mockImplementation((filter: Record<string, never>) => ({
       select: () => ({
@@ -318,6 +320,7 @@ describe("recipientsWithAccess", () => {
           (((filter._id as { $in?: string[] })?.$in ?? []) as string[])
             .filter((id) => roles[id] !== undefined)
             .filter((id) => filter.role === undefined || filter.role === roles[id])
+            .filter((id) => !("deactivatedAt" in filter) || !deactivated.has(id))
             .map((id) => ({ _id: id, role: roles[id] })),
       }),
     }));
@@ -330,6 +333,15 @@ describe("recipientsWithAccess", () => {
   it("keeps a recipient who holds a grant on the project", async () => {
     grant(MEMBER);
     expect(await recipientsWithAccess([MEMBER], P)).toEqual([MEMBER]);
+  });
+
+  // BP-832. Sees nothing, so is told nothing and can be handed nothing — admin or not
+  it("drops a deactivated recipient, grant or instance admin role notwithstanding", async () => {
+    grant(MEMBER);
+    deactivated = new Set([MEMBER, ADMIN]);
+
+    expect(await recipientsWithAccess([MEMBER, ADMIN], P)).toEqual([]);
+    expect(await canBeAssigned(MEMBER, P)).toBe(false);
   });
 
   it("keeps an owner as readily as a member", async () => {

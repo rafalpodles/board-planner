@@ -19,7 +19,7 @@ vi.mock("@/lib/auth", () => ({
   RateLimitError: class RateLimitError extends Error {},
 }));
 vi.mock("@/lib/grants", () => ({ check, accessibleProjectIds }));
-vi.mock("@/models/user", () => ({ User: { findById: userFindById } }));
+vi.mock("@/models/user", () => ({ User: { findById: userFindById, exists: async () => null } }));
 // The GET now also asks what refused changes are waiting on this machine. Answering "none" keeps
 // every assertion below about the assignments and the catalogue, which is what they are testing.
 const taskFind = vi.fn(() => ({ select: () => ({ lean: async () => [] }) }));

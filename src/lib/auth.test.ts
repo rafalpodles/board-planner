@@ -542,3 +542,43 @@ describe("verifyCredentials and the username oracle", () => {
     expect(await verifyCredentials("owner", "wrong")).toBeNull();
   });
 });
+
+// BP-832. Every credential is revoked when an account is deactivated; these are the second line,
+// for one minted or presented in between, and for the password that is never revoked
+describe("a deactivated account", () => {
+  const off = () => user({ deactivatedAt: new Date() });
+
+  it("resolves from no session", async () => {
+    sessionFound(sessionRow());
+    userFindById.mockResolvedValue(off());
+
+    expect(await getAuthUser(withCookie(SESSION_TOKEN))).toBeNull();
+  });
+
+  it("resolves from no OAuth access token", async () => {
+    oauthTokenFindOne.mockResolvedValue({ user: "u1", accessExpiresAt: new Date(Date.now() + DAY_MS), allowedProjects: [] });
+    userFindById.mockResolvedValue(off());
+
+    expect(await getAuthUser(request({ authorization: `Bearer ${MACHINE_TOKEN}` }))).toBeNull();
+  });
+
+  it("resolves from no API token", async () => {
+    apiTokenFind.mockReturnValue({
+      lean: () => Promise.resolve([{ _id: "t1", user: "u1", tokenHash: "hashed", allowedProjects: [] }]),
+    });
+    bcryptCompare.mockResolvedValue(true);
+    userFindById.mockResolvedValue(off());
+
+    expect(await getAuthUser(request({ authorization: `Bearer cp_${"c".repeat(64)}` }))).toBeNull();
+  });
+
+  it("signs in with no password, at the cost of an unknown account", async () => {
+    userFindOne.mockReturnValue({
+      select: () => Promise.resolve({ username: "owner", kind: "human", password: "$2a$10$stored", deactivatedAt: new Date() }),
+    });
+    bcryptCompare.mockResolvedValue(true);
+
+    expect(await verifyCredentials("owner", "hunter2")).toBeNull();
+    expect(bcryptCompare).toHaveBeenCalledTimes(1);
+  });
+});

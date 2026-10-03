@@ -2985,6 +2985,16 @@ describe("a task records who assigned it", () => {
     userFindOne.mockResolvedValue({ _id: "u2", username: "kuba" });
   });
 
+  // BP-832. Nobody can hand work to an account that signs in by no path
+  it("refuses a deactivated assignee, naming why", async () => {
+    userFindOne.mockResolvedValue({ _id: "u2", username: "kuba", deactivatedAt: new Date() });
+
+    const result = await updateTask("p1", "t1", { assignee: "kuba" }, "actor");
+
+    expect(result).toMatchObject({ ok: false, status: 400, error: "kuba is deactivated" });
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
   it("stamps the actor when the assignee changes", async () => {
     await updateTask("p1", "t1", { assignee: "kuba" }, "actor");
 

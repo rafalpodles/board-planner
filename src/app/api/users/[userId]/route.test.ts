@@ -660,7 +660,7 @@ describe("DELETE /api/users/:id", () => {
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ error: "Cannot delete the last admin" });
     // The filter, because a count of everybody never reaches 1 on an instance that has anybody
-    expect(userCountDocuments).toHaveBeenCalledWith({ role: "admin" });
+    expect(userCountDocuments).toHaveBeenCalledWith({ role: "admin", deactivatedAt: null });
     expect(userFindByIdAndDelete).not.toHaveBeenCalled();
   });
 
@@ -923,5 +923,64 @@ describe("PUT /api/users/:id — account actions", () => {
       expect((await PUT(put(action), ctx())).status).toBeGreaterThanOrEqual(400);
     }
     expect(revokeUserCredentials).not.toHaveBeenCalled();
+  });
+});
+
+// BP-832. Deactivation keeps the account and its history, and ends everything it can sign in with
+describe("PUT /api/users/:id — deactivating and reactivating", () => {
+  it("deactivates, revoking every credential but the providers, and records who did", async () => {
+    const target = targetDoc({ role: "member", deactivatedAt: null });
+    found(target);
+
+    const res = await PUT(put({ deactivate: true }), ctx());
+
+    expect(res.status).toBe(200);
+    expect(target.deactivatedAt).toBeInstanceOf(Date);
+    expect(target.save).toHaveBeenCalled();
+    expect(revokeUserCredentials).toHaveBeenCalledWith("target-1", null, { keepIdentities: true });
+    expect(invalidateResetTokens).toHaveBeenCalledWith("target-1");
+    expect(logInstanceAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "user_deactivated", user: "admin-1", target: "target" })
+    );
+  });
+
+  it("refuses the last administrator who can still act", async () => {
+    const target = targetDoc({ role: "admin", deactivatedAt: null });
+    found(target);
+    userCountDocuments.mockResolvedValue(1);
+
+    expect((await PUT(put({ deactivate: true }), ctx())).status).toBe(400);
+    expect(userCountDocuments).toHaveBeenCalledWith({ role: "admin", deactivatedAt: null });
+    expect(target.save).not.toHaveBeenCalled();
+    expect(revokeUserCredentials).not.toHaveBeenCalled();
+  });
+
+  it("refuses your own account and a machine's", async () => {
+    found(targetDoc({ _id: "admin-1" }));
+    expect((await PUT(put({ deactivate: true }), ctx())).status).toBe(400);
+
+    found(targetDoc({ kind: "machine" }));
+    expect((await PUT(put({ deactivate: true }), ctx())).status).toBe(400);
+    expect(revokeUserCredentials).not.toHaveBeenCalled();
+  });
+
+  it("reactivates, bringing back sign-in and none of the revoked credentials", async () => {
+    const target = targetDoc({ role: "member", deactivatedAt: new Date() });
+    found(target);
+
+    const res = await PUT(put({ reactivate: true }), ctx());
+
+    expect(res.status).toBe(200);
+    expect(target.deactivatedAt).toBeNull();
+    expect(revokeUserCredentials).not.toHaveBeenCalled();
+    expect(logInstanceAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "user_reactivated" }));
+  });
+
+  it("counts only administrators who can still act as the last one standing", async () => {
+    found(targetDoc({ role: "admin" }));
+    userCountDocuments.mockResolvedValue(1);
+
+    expect((await PUT(put({ role: "member" }), ctx())).status).toBe(400);
+    expect(userCountDocuments).toHaveBeenCalledWith({ role: "admin", deactivatedAt: null });
   });
 });

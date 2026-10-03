@@ -38,6 +38,8 @@ function matches(doc: Record<string, unknown>, filter: Record<string, unknown>):
         satisfies(actual, op, operand)
       );
     }
+    // As Mongo reads it: equal to null is null or no such field at all
+    if (condition === null) return actual === null || actual === undefined;
     return String(actual) === String(condition);
   });
 }
@@ -247,6 +249,14 @@ describe("who is in the audience at all", () => {
   it("does not select a subscriber with no standing on the board", async () => {
     stored = [member(1, { defaults: { task_created: row({ inApp: true }) } })];
     granted = [];
+
+    expect(await boardFeedSubscribers(PROJECT)).toEqual([]);
+  });
+
+  // BP-832. A deactivated account is told nothing, however it ticked the row
+  it("leaves out a deactivated subscriber", async () => {
+    stored = [{ ...member(1, { defaults: { task_created: row({ inApp: true }) } }), deactivatedAt: new Date() }];
+    granted = [id(1)];
 
     expect(await boardFeedSubscribers(PROJECT)).toEqual([]);
   });

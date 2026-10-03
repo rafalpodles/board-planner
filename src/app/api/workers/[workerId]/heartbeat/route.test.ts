@@ -13,7 +13,7 @@ const userFindById = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/grants", () => ({ accessibleProjectIds, check: vi.fn() }));
-vi.mock("@/models/user", () => ({ User: { findById: userFindById } }));
+vi.mock("@/models/user", () => ({ User: { findById: userFindById, exists: async () => null } }));
 vi.mock("@/models/project", () => ({
   Project: {
     find: (query: unknown) => {
