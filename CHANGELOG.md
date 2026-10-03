@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/rafalpodles/board-planner/compare/v1.4.0...v1.5.0) (2026-10-03)
+
+
+### Features
+
+* Coda becomes the first Pro connector, in src/ee behind integrations.coda (BP-651) ([#540](https://github.com/rafalpodles/board-planner/issues/540)) ([0b97bc3](https://github.com/rafalpodles/board-planner/commit/0b97bc34e1e85d5e78bd4a1d60aa6252998c3fc3))
+
 ## [1.4.0](https://github.com/rafalpodles/board-planner/compare/v1.3.0...v1.4.0) (2026-10-03)
 
 
