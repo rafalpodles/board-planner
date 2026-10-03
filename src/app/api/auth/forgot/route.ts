@@ -121,7 +121,7 @@ async function deliverLink(
   origin: string
 ): Promise<void> {
   try {
-    const token = await issueResetToken(user._id as Parameters<typeof issueResetToken>[0]);
+    const token = await issueResetToken(user._id as Parameters<typeof issueResetToken>[0], user.email);
     const link = `${origin}/reset?token=${encodeURIComponent(token)}`;
     const { html, text } = renderEmail({
       preheader: `The link works once and expires in an hour.`,

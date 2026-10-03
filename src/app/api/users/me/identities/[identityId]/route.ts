@@ -4,7 +4,7 @@ import { withAuth } from "@/lib/middleware";
 import { connectDB } from "@/lib/db";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { isEmailConfigured } from "@/lib/email";
-import { providerById } from "@/lib/oidc/providers";
+import { liveIdentityFilter, providerById } from "@/lib/oidc/providers";
 import { Identity } from "@/models/identity";
 import { User } from "@/models/user";
 import { RECENT_SIGN_IN_REQUIRED, signedInRecently } from "@/lib/session";
@@ -30,17 +30,26 @@ export const DELETE = withAuth(async (_request, { params, user }) => {
     : isEmailConfigured()
       ? "This is your only way to sign in. Set a password first, from Forgot your password."
       : "This is your only way to sign in. Ask an administrator to set a password for you first.";
-  if (!passwordSignsIn && (await Identity.countDocuments({ user: user._id, _id: { $ne: identity._id } })) === 0) {
+  // Only a link a configured provider still signs in through is a way in, on either side of this
+  const live = liveIdentityFilter();
+  const removesAWayIn = !!(await Identity.exists({ _id: identity._id, ...live }));
+  if (
+    !passwordSignsIn &&
+    removesAWayIn &&
+    (await Identity.countDocuments({ user: user._id, _id: { $ne: identity._id }, ...live })) === 0
+  ) {
     return NextResponse.json({ error: lastWayIn }, { status: 409 });
   }
   // Removing a way in, with no password left to fall back on, needs the owner and not a borrowed
   // session: otherwise a provider linked by an intruder could be left as the only one
+  // Asked even for a link no longer live: a provider misconfigured for a moment makes every link
+  // look dead, and its owner's real ways in must not then go without re-authentication
   if (!passwordSignsIn && !(await signedInRecently(user.sessionId))) {
     return NextResponse.json({ error: RECENT_SIGN_IN_REQUIRED }, { status: 403 });
   }
   await Identity.deleteOne({ _id: identity._id, user: user._id });
   // Two unlinks in two tabs each counted the other's provider as the way in that remains
-  if (!passwordSignsIn && (await Identity.countDocuments({ user: user._id })) === 0) {
+  if (!passwordSignsIn && removesAWayIn && (await Identity.countDocuments({ user: user._id, ...live })) === 0) {
     // Straight to the collection, so the row comes back exactly as it was, linkedAt included
     await Identity.collection.insertOne(identity);
     return NextResponse.json({ error: lastWayIn }, { status: 409 });

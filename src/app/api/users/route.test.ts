@@ -14,6 +14,7 @@ type Listed = { _id: string; username: string; lastSignInAt?: Date | null };
 let listed: Listed[] = [];
 let withPassword: string[] = [];
 let identities: { user: string; provider: string }[] = [];
+const identityFind = vi.fn();
 let sessionUse: { _id: string; lastUsedAt: Date }[] = [];
 const doc = (fields: Listed) => ({ ...fields, toJSON: () => ({ ...fields }) });
 vi.mock("@/models/user", () => ({
@@ -30,10 +31,16 @@ vi.mock("@/models/user", () => ({
   },
 }));
 vi.mock("@/models/identity", () => ({
-  Identity: { find: () => ({ select: () => ({ sort: () => ({ lean: async () => identities }) }) }) },
+  Identity: {
+    find: (filter: unknown) => {
+      identityFind(filter);
+      return { select: () => ({ sort: () => ({ lean: async () => identities }) }) };
+    },
+  },
 }));
 vi.mock("@/models/session", () => ({ Session: { aggregate: async () => sessionUse } }));
 vi.mock("@/lib/oidc/providers", () => ({
+  liveIdentityFilter: () => ({ live: "only" }),
   providerById: (id: string) => (id === "oidc" ? { label: "Acme SSO" } : id === "github" ? { label: "GitHub" } : null),
 }));
 vi.mock("@/lib/auth", () => ({
@@ -313,6 +320,15 @@ describe("which accounts the list returns", () => {
       ["grace", ["Acme SSO", "GitHub"]],
       ["linus", ["Password", "Acme SSO"]],
     ]);
+  });
+
+  // BP-842. A link from a provider's former issuer is no way in
+  it("reads only the links a configured provider still signs in through", async () => {
+    listed = [{ _id: "u1", username: "ada" }];
+
+    await list();
+
+    expect(identityFind).toHaveBeenCalledWith({ user: { $in: ["u1"] }, live: "only" });
   });
 
   it("counts no link to a provider the instance no longer has as a way in", async () => {

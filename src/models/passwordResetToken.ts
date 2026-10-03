@@ -11,6 +11,9 @@ const passwordResetTokenSchema = new Schema<IPasswordResetToken>(
     // Set once, by an atomic update that also matches on it being null — that match is what makes
     // the link single-use, rather than a read followed by a write two requests can interleave
     usedAt: { type: Date, default: null },
+    // The address the link was mailed to: spending it proves that address, and no other the
+    // account has been given since
+    sentTo: { type: String, default: null },
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );

@@ -18,6 +18,35 @@ export interface OidcProvider {
   clientSecret: string;
 }
 
+/**
+ * Links a configured provider can still sign in through: its id, and the issuer it signs as now.
+ * Repointing a provider orphans the old issuer's links, so they are no way in and must not count
+ * as one. Matches nothing when no provider is configured.
+ */
+export function liveIdentityFilter(): Record<string, unknown> {
+  const live = configuredProviders().map((p) => ({ provider: p.id, issuer: { $in: issuerSpellings(p.issuer) } }));
+  // An `$or` either way, so spreading it never overwrites a caller's own `_id`
+  return { $or: live.length > 0 ? live : [{ _id: null }] };
+}
+
+/** As configured, and as a URL parser writes it (host case, a default port), each with and without a trailing slash. */
+function issuerSpellings(issuer: string): string[] {
+  const forms = new Set<string>();
+  for (const form of [issuer, canonical(issuer)]) {
+    const bare = form.replace(/\/+$/, "");
+    forms.add(bare).add(`${bare}/`);
+  }
+  return [...forms];
+}
+
+function canonical(issuer: string): string {
+  try {
+    return new URL(issuer).href;
+  } catch {
+    return issuer;
+  }
+}
+
 const GOOGLE_ISSUER = "https://accounts.google.com";
 
 /** Read on every call, so the operator's environment is the only source and tests can set it. */

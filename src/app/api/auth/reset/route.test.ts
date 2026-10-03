@@ -50,8 +50,8 @@ function accountIs(user: unknown) {
 beforeEach(async () => {
   vi.clearAllMocks();
   await resetRateLimits();
-  consumeResetToken.mockResolvedValue({ ok: true, userId: "u1" });
-  accountIs({ _id: "u1", username: "owner", kind: "human" });
+  consumeResetToken.mockResolvedValue({ ok: true, userId: "u1", sentTo: "owner@example.com" });
+  accountIs({ _id: "u1", username: "owner", kind: "human", email: "owner@example.com" });
   hash.mockResolvedValue("new-hash");
   userUpdateOne.mockResolvedValue({});
 });
@@ -101,15 +101,45 @@ describe("POST /api/auth/reset", () => {
 
     expect(res.status).toBe(200);
     expect(hash).toHaveBeenCalledWith("a-brand-new-password", 10);
+    expect(userUpdateOne).toHaveBeenCalledWith({ _id: "u1" }, { $set: { password: "new-hash" } });
+    // The link reached the address it was mailed to, and proves that one only while it is still the
+    // account's: an address changed meanwhile was never reached (BP-842)
     expect(userUpdateOne).toHaveBeenCalledWith(
-      { _id: "u1" },
-      { $set: { password: "new-hash", emailVerifiedAt: expect.any(Date) } }
+      { _id: "u1", email: "owner@example.com" },
+      { $set: { emailVerifiedAt: expect.any(Date) } }
     );
     // Whoever knew the old password is signed out — usually the reason somebody is resetting
     expect(revokeUserCredentials).toHaveBeenCalledWith("u1");
     expect(logInstanceAudit).toHaveBeenCalledWith(
       expect.objectContaining({ action: "user_password_reset_by_email", target: "owner" })
     );
+  });
+
+  // BP-842. Whoever reads the old mailbox is not who the account belongs to now
+  it("refuses a link mailed to an address the account no longer has, setting nothing", async () => {
+    accountIs({ _id: "u1", username: "owner", kind: "human", email: "moved@example.com" });
+
+    const res = await POST(post());
+
+    expect(res.status).toBe(400);
+    expect(userUpdateOne).not.toHaveBeenCalled();
+    expect(revokeUserCredentials).not.toHaveBeenCalled();
+  });
+
+  it("keeps the new password when only the proof of address fails to write", async () => {
+    userUpdateOne.mockResolvedValueOnce({}).mockRejectedValueOnce(new Error("db blip"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    expect((await POST(post())).status).toBe(200);
+    expect(releaseResetToken).not.toHaveBeenCalled();
+  });
+
+  it("proves no address for a link issued before it recorded where it was sent", async () => {
+    consumeResetToken.mockResolvedValue({ ok: true, userId: "u1", sentTo: null });
+
+    expect((await POST(post())).status).toBe(200);
+    expect(userUpdateOne).toHaveBeenCalledTimes(1);
+    expect(userUpdateOne).toHaveBeenCalledWith({ _id: "u1" }, { $set: { password: "new-hash" } });
   });
 
   it.each([
@@ -189,7 +219,7 @@ describe("with password sign-in off (BP-830)", () => {
 
 describe("a deactivated account (BP-832)", () => {
   it("sets no password from a link issued before it was deactivated", async () => {
-    accountIs({ _id: "u1", username: "owner", kind: "human", email: "o@example.com", deactivatedAt: new Date() });
+    accountIs({ _id: "u1", username: "owner", kind: "human", email: "owner@example.com", deactivatedAt: new Date() });
 
     const res = await POST(post());
 

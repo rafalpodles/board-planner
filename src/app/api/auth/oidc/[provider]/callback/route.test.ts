@@ -63,6 +63,8 @@ vi.mock("@/models/identity", () => ({
     deleteOne: identityDeleteOne,
   },
 }));
+const sessionExists = vi.fn();
+vi.mock("@/models/session", () => ({ Session: { exists: sessionExists } }));
 vi.mock("@/models/user", () => ({
   User: { findById: userFindById, findOne: userFindOne, countDocuments: userCount, create: userCreate, deleteOne: userDeleteOne },
 }));
@@ -356,7 +358,31 @@ describe("GET /api/auth/oidc/:provider/callback, the admin group (BP-833)", () =
 });
 
 describe("GET /api/auth/oidc/:provider/callback, linking from settings", () => {
-  beforeEach(() => getAuthUser.mockResolvedValue({ _id: "u1", username: "ada" }));
+  beforeEach(() => {
+    getAuthUser.mockResolvedValue({ _id: "u1", username: "ada", sessionId: "s-1" });
+    sessionExists.mockResolvedValue({ _id: "s-1" });
+  });
+
+  // BP-842. A password change or Sign out everywhere landed between the session check and the link
+  it("takes the link back when the session that made it ended meanwhile", async () => {
+    finishes("link");
+    sessionExists.mockResolvedValue(null);
+
+    const res = await callback();
+
+    expect(identityCreate).toHaveBeenCalled();
+    expect(sessionExists).toHaveBeenCalledWith({ _id: "s-1" });
+    expect(identityDeleteOne).toHaveBeenCalledWith({ issuer: ISSUER, subject: "s1", user: "u1" });
+    expect(location(res)).toBe("/settings/security?link=failed");
+    expect(logInstanceAudit).toHaveBeenLastCalledWith(expect.objectContaining({ action: "identity_unlinked" }));
+  });
+
+  it("keeps the link while the session that made it is still there", async () => {
+    finishes("link");
+
+    expect(location(await callback())).toBe("/settings/security?link=linked");
+    expect(identityDeleteOne).not.toHaveBeenCalled();
+  });
 
   it("links the identity to the account that started it, whatever its address", async () => {
     finishes("link", { email: "ada.personal@example.com" });

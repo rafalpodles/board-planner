@@ -25,7 +25,7 @@ beforeEach(() => {
 
 describe("issuing a link", () => {
   it("stores the hash and hands back the only copy of the token", async () => {
-    const token = await issueResetToken("u1");
+    const token = await issueResetToken("u1", "ada@example.com");
 
     expect(token.startsWith(RESET_TOKEN_PREFIX)).toBe(true);
     const stored = create.mock.calls[0][0];
@@ -37,7 +37,7 @@ describe("issuing a link", () => {
 
   it("expires within the hour", async () => {
     const before = Date.now();
-    await issueResetToken("u1");
+    await issueResetToken("u1", "ada@example.com");
 
     const { expiresAt } = create.mock.calls[0][0];
     expect(expiresAt.getTime()).toBeGreaterThan(before);
@@ -47,14 +47,21 @@ describe("issuing a link", () => {
   // Two live links means the older one is still spendable by whoever intercepted it, and the
   // person who asked twice has no way of knowing
   it("kills any link already outstanding for that account", async () => {
-    await issueResetToken("u1");
+    await issueResetToken("u1", "ada@example.com");
 
     expect(deleteMany).toHaveBeenCalledWith({ user: "u1", usedAt: null });
   });
 
+  // BP-842. Spending the link proves this address, and no other the account has been given since
+  it("records the address the link was mailed to", async () => {
+    await issueResetToken("u1", "ada@example.com");
+
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ user: "u1", sentTo: "ada@example.com" }));
+  });
+
   it("never issues the same token twice", async () => {
     const tokens = new Set<string>();
-    for (let i = 0; i < 50; i++) tokens.add(await issueResetToken("u1"));
+    for (let i = 0; i < 50; i++) tokens.add(await issueResetToken("u1", "ada@example.com"));
 
     expect(tokens.size).toBe(50);
   });
@@ -62,11 +69,11 @@ describe("issuing a link", () => {
 
 describe("spending a link", () => {
   it("claims and marks it in one update, matching on it being unspent", async () => {
-    findOneAndUpdate.mockResolvedValue({ user: "u1" });
+    findOneAndUpdate.mockResolvedValue({ user: "u1", sentTo: "ada@example.com" });
 
     const outcome = await consumeResetToken("cpr_abc");
 
-    expect(outcome).toEqual({ ok: true, userId: "u1" });
+    expect(outcome).toEqual({ ok: true, userId: "u1", sentTo: "ada@example.com" });
     const [filter, update] = findOneAndUpdate.mock.calls[0];
     // Single-use lives in this filter. A read followed by a write would let two requests arriving
     // together both be told they won, and the second would overwrite the first person's password.
