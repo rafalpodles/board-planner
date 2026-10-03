@@ -146,6 +146,7 @@ export interface IUser {
   email: string;
   emailVerifiedAt?: Date | null;
   deactivatedAt?: Date | null;
+  lastSignInAt?: Date | null;
   /** @deprecated Superseded by `notifications`. Kept as the fallback for accounts that predate it. */
   emailNotifications: boolean;
   emailDigest: boolean;
@@ -1192,6 +1193,9 @@ export interface ApiUser {
   /** When the address was last proven to reach the account; null for an address only typed in */
   emailVerifiedAt?: string | null;
   deactivatedAt?: string | null;
+  lastSignInAt?: string | null;
+  /** How the account can sign in: "Password" and each linked provider's label (BP-831) */
+  signInMethods?: string[];
 }
 
 /** What GET /api/projects/:id/assignable-users returns: enough to name someone and assign them */

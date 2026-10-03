@@ -13,6 +13,7 @@ import { Identity } from "@/models/identity";
 import { OAuthCode } from "@/models/oauthCode";
 import { OAuthToken } from "@/models/oauthToken";
 import { Worker } from "@/models/worker";
+import { User } from "@/models/user";
 
 export const SESSION_TOKEN_PREFIX = "cps_";
 export const SESSION_IDLE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -357,6 +358,8 @@ export async function createSession(params: {
     userAgent: (params.userAgent ?? "").slice(0, 512),
     ip: (params.ip ?? "").slice(0, 128),
   });
+  // A stamp the Users screen reads; failing to write it must not fail the sign-in
+  await User.updateOne({ _id: params.userId }, { $set: { lastSignInAt: new Date(now) } }).catch(() => {});
 
   return { token, sessionId: row._id, expiresAt, absoluteExpiresAt };
 }

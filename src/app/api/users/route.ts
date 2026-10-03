@@ -12,6 +12,9 @@ import { withAdmin } from "@/lib/middleware";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { revokePendingInvitationsFor } from "@/lib/invitations";
 import { User } from "@/models/user";
+import { Identity } from "@/models/identity";
+import { providerById } from "@/lib/oidc/providers";
+import { HydratedDocument } from "mongoose";
 import { IUser } from "@/types";
 
 // Machines are excluded: worker identities are accounts, but not people to invite, permission or
@@ -23,8 +26,37 @@ export const GET = withAdmin(async (request) => {
   const users = await User.find(includeMachines ? {} : { kind: { $ne: "machine" } }).sort({
     createdAt: 1,
   });
-  return NextResponse.json(users);
+  return NextResponse.json(await withSignInMethods(users));
 });
+
+/**
+ * How each account can sign in, for the Users screen: a password while passwords sign anybody in,
+ * and each linked provider by its label. Two reads for the whole list, never one per person.
+ */
+async function withSignInMethods(users: HydratedDocument<IUser>[]) {
+  const ids = users.map((u) => u._id);
+  const [withPassword, identities] = await Promise.all([
+    passwordSignInEnabled()
+      ? User.find({ _id: { $in: ids }, password: { $nin: [null, ""] } }).select("_id").lean()
+      : Promise.resolve([] as { _id: unknown }[]),
+    Identity.find({ user: { $in: ids } }).select("user provider").sort({ linkedAt: 1 }).lean(),
+  ]);
+  const hasPassword = new Set(withPassword.map((u) => String(u._id)));
+  const providersOf = new Map<string, string[]>();
+  for (const identity of identities) {
+    const label = providerById(identity.provider)?.label ?? identity.provider;
+    const list = providersOf.get(String(identity.user)) ?? [];
+    if (!list.includes(label)) list.push(label);
+    providersOf.set(String(identity.user), list);
+  }
+  return users.map((user) => ({
+    ...user.toJSON(),
+    signInMethods: [
+      ...(hasPassword.has(String(user._id)) ? ["Password"] : []),
+      ...(providersOf.get(String(user._id)) ?? []),
+    ],
+  }));
+}
 
 export async function POST(request: Request) {
   if (!passwordSignInEnabled()) {

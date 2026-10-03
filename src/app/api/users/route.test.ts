@@ -10,15 +10,28 @@ const find = vi.fn();
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 const revokePendingInvitationsFor = vi.fn();
 vi.mock("@/lib/invitations", () => ({ revokePendingInvitationsFor }));
+let listed: { _id: string; username: string }[] = [];
+let withPassword: string[] = [];
+let identities: { user: string; provider: string }[] = [];
+const doc = (fields: { _id: string; username: string }) => ({ ...fields, toJSON: () => ({ ...fields }) });
 vi.mock("@/models/user", () => ({
   User: {
     create: (...a: unknown[]) => create(...a),
     countDocuments: () => countDocuments(),
     find: (...a: unknown[]) => {
       find(...a);
-      return { sort: async () => [] };
+      return {
+        sort: async () => listed.map(doc),
+        select: () => ({ lean: async () => withPassword.map((_id) => ({ _id })) }),
+      };
     },
   },
+}));
+vi.mock("@/models/identity", () => ({
+  Identity: { find: () => ({ select: () => ({ sort: () => ({ lean: async () => identities }) }) }) },
+}));
+vi.mock("@/lib/oidc/providers", () => ({
+  providerById: (id: string) => (id === "oidc" ? { label: "Acme SSO" } : id === "github" ? { label: "GitHub" } : null),
 }));
 vi.mock("@/lib/auth", () => ({
   getAuthUser: (...a: unknown[]) => getAuthUser(...a),
@@ -268,7 +281,47 @@ describe("which accounts the list returns", () => {
   const list = (query = "") =>
     GET(new Request(`http://x/api/users${query}`), { params: Promise.resolve({}) });
 
-  beforeEach(() => find.mockReset());
+  beforeEach(() => {
+    find.mockReset();
+    listed = [];
+    withPassword = [];
+    identities = [];
+  });
+
+  // BP-831. Two reads for the whole list, never one per person
+  it("names how each account signs in: a password, then each linked provider", async () => {
+    listed = [
+      { _id: "u1", username: "ada" },
+      { _id: "u2", username: "grace" },
+      { _id: "u3", username: "linus" },
+    ];
+    withPassword = ["u1", "u3"];
+    identities = [
+      { user: "u2", provider: "oidc" },
+      { user: "u2", provider: "github" },
+      { user: "u3", provider: "oidc" },
+    ];
+
+    const body = await (await list()).json();
+
+    expect(body.map((u: { username: string; signInMethods: string[] }) => [u.username, u.signInMethods])).toEqual([
+      ["ada", ["Password"]],
+      ["grace", ["Acme SSO", "GitHub"]],
+      ["linus", ["Password", "Acme SSO"]],
+    ]);
+  });
+
+  it("counts no password as a way in once password sign-in is off", async () => {
+    listed = [{ _id: "u1", username: "ada" }];
+    withPassword = ["u1"];
+    process.env.PASSWORD_SIGN_IN = "off";
+    try {
+      const body = await (await list()).json();
+      expect(body[0].signInMethods).toEqual([]);
+    } finally {
+      delete process.env.PASSWORD_SIGN_IN;
+    }
+  });
 
   it("leaves machine accounts out by default", async () => {
     await list();
