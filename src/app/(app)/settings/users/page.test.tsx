@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";
-import { render, screen, cleanup, act, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, act, waitFor, within } from "@testing-library/react";
 import UsersPage from "./page";
 
 const { api, auth, toast, dismiss, passwordSignIn } = vi.hoisted(() => ({
@@ -423,9 +423,14 @@ describe("the users page with password sign-in off (BP-830)", () => {
     await screen.findByText("Ada");
     act(() => screen.getByText("Ada").click());
     await screen.findByRole("dialog", { name: /Edit Ada/ });
-    await act(async () => screen.getByRole("button", { name: "Confirm address" }).click());
+    act(() => screen.getByRole("button", { name: "Confirm address" }).click());
+    // Said before it is done: a confirmed address opens the account to whoever holds it at a provider
+    const ask = await screen.findByRole("dialog", { name: "Confirm address" });
+    expect(ask.textContent).toContain("Whoever holds ada@example.com at a sign-in provider will be able to sign in as ada");
+    expect(api.put).not.toHaveBeenCalled();
+    await act(async () => within(ask).getByRole("button", { name: "Confirm address" }).click());
 
     expect(api.put).toHaveBeenCalledWith("/api/users/u2", { confirmEmail: true });
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Confirm address" })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Confirm address" })).toBeNull());
   });
 });

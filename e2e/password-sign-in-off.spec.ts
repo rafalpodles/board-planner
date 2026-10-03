@@ -272,7 +272,7 @@ test("an account with an unproven address is let in once an administrator confir
   await admin.page.goto(at("/settings/users"));
   await admin.page.getByText(`@${MEMBER_USERNAME}`, { exact: true }).first().click();
   await admin.page.getByRole("button", { name: "Confirm address" }).click();
-  await expect(admin.page.getByRole("button", { name: "Confirm address" })).toHaveCount(0);
+  await admin.page.getByRole("dialog").getByRole("button", { name: "Confirm address" }).click();
   await expect
     .poll(async () => (await (await db()).collection("users").findOne({ _id: MEMBER_ID }))?.emailVerifiedAt ?? null)
     .not.toBeNull();

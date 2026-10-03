@@ -55,6 +55,8 @@ export default function UsersPage() {
   // Off: accounts come by invitation only, and nobody is handed a password
   const passwordSignIn = usePasswordSignIn();
   const [confirmingAddress, setConfirmingAddress] = useState(false);
+  const [confirmAddressOf, setConfirmAddressOf] = useState<ApiUser | null>(null);
+  const [confirmAddressError, setConfirmAddressError] = useState("");
   const [confirmSignOut, setConfirmSignOut] = useState<ApiUser | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState("");
@@ -230,18 +232,19 @@ export default function UsersPage() {
   }
 
   async function confirmAddress() {
-    if (!editUser || confirmingAddress) return;
+    if (!confirmAddressOf || confirmingAddress) return;
     setConfirmingAddress(true);
+    setConfirmAddressError("");
     try {
-      await api.put(`/api/users/${editUser._id}`, { confirmEmail: true });
+      await api.put(`/api/users/${confirmAddressOf._id}`, { confirmEmail: true });
     } catch (err) {
-      toast(err instanceof Error ? err.message : "The address could not be confirmed", "error");
+      setConfirmAddressError(err instanceof Error ? err.message : "The address could not be confirmed");
       setConfirmingAddress(false);
       return;
     }
     setConfirmingAddress(false);
-    setEditUser({ ...editUser, emailVerifiedAt: new Date().toISOString() });
-    toast(`${editUser.email} confirmed`, "success");
+    toast(`${confirmAddressOf.email} confirmed`, "success");
+    setConfirmAddressOf(null);
     await refreshUsers();
   }
 
@@ -536,8 +539,15 @@ export default function UsersPage() {
                       Nothing has proven that {editUser.email} reaches them, so a sign-in provider cannot sign
                       them in by it.
                     </p>
-                    <Button size="sm" variant="secondary" onClick={confirmAddress} disabled={confirmingAddress}>
-                      {confirmingAddress ? "Confirming…" : "Confirm address"}
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => {
+                        setConfirmAddressOf(editUser);
+                        closeEdit();
+                      }}
+                    >
+                      Confirm address
                     </Button>
                   </div>
                 )}
@@ -584,6 +594,20 @@ export default function UsersPage() {
         )}
       </Modal>
 
+      <ConfirmDialog
+        open={!!confirmAddressOf}
+        onClose={() => {
+          setConfirmAddressOf(null);
+          setConfirmAddressError("");
+        }}
+        onConfirm={confirmAddress}
+        title="Confirm address"
+        message={`Whoever holds ${confirmAddressOf?.email ?? ""} at a sign-in provider will be able to sign in as ${confirmAddressOf?.username ?? ""}. Confirm only if you know it is theirs.`}
+        confirmLabel="Confirm address"
+        loadingLabel="Confirming…"
+        loading={confirmingAddress}
+        error={confirmAddressError}
+      />
       <ConfirmDialog
         open={!!confirmSignOut}
         onClose={() => {
