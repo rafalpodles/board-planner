@@ -616,7 +616,11 @@ export default function UsersPage() {
         }}
         onConfirm={signOutEverywhere}
         title="Sign out everywhere"
-        message={`Ends every session, API token, connected app and enrolled machine of ${confirmSignOut?.fullName ?? ""}, and unlinks their sign-in providers.`}
+        message={`Ends every session, API token, connected app and enrolled machine of ${confirmSignOut?.fullName ?? ""}, and unlinks their sign-in providers.${
+          passwordSignIn === false
+            ? " They sign back in by a confirmed address with an OpenID Connect or Google provider; GitHub alone cannot sign them in again."
+            : ""
+        }`}
         confirmLabel="Sign out everywhere"
         loadingLabel="Signing out…"
         loading={signingOut}

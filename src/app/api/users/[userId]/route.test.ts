@@ -871,11 +871,15 @@ describe("PUT /api/users/:id — account actions", () => {
     );
   });
 
-  it("refuses both actions at once rather than doing one of them", async () => {
+  it.each([
+    [{ confirmEmail: true, signOutEverywhere: true }],
+    [{ signOutEverywhere: true, role: "member" }],
+    [{ confirmEmail: true, email: "elsewhere@example.com" }],
+  ])("refuses %j rather than doing part of it", async (body) => {
     const target = targetDoc({ emailVerifiedAt: null });
     found(target);
 
-    expect((await PUT(put({ confirmEmail: true, signOutEverywhere: true }), ctx())).status).toBe(400);
+    expect((await PUT(put(body), ctx())).status).toBe(400);
     expect(target.save).not.toHaveBeenCalled();
     expect(revokeUserCredentials).not.toHaveBeenCalled();
   });

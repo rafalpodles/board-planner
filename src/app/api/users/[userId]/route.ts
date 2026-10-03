@@ -43,10 +43,13 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
   }
   if (body.password !== undefined && !passwordSignInEnabled()) return passwordSignInOff();
 
-  if (body.confirmEmail === true && body.signOutEverywhere === true) {
-    return NextResponse.json({ error: "One account action at a time" }, { status: 400 });
+  const action = body.confirmEmail === true || body.signOutEverywhere === true;
+  const actions = [body.confirmEmail, body.signOutEverywhere].filter((v) => v === true).length;
+  const edits = [body.role, body.email, body.password].filter((v) => v !== undefined).length;
+  if (actions > 1 || (action && edits > 0)) {
+    return NextResponse.json({ error: "One account action at a time, with nothing else" }, { status: 400 });
   }
-  if (body.confirmEmail === true || body.signOutEverywhere === true) {
+  if (action) {
     return accountAction(target, admin, body.confirmEmail === true ? "confirm" : "signOut");
   }
 
