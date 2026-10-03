@@ -8,7 +8,8 @@ const completeAcceptance = vi.fn();
 const provenanceRefusal = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
-vi.mock("@/lib/auth", () => ({ getClientIp: () => "203.0.113.9" }));
+let clientIp: string | null = "203.0.113.9";
+vi.mock("@/lib/auth", () => ({ getClientIp: () => clientIp }));
 vi.mock("@/models/rateLimit", async () => {
   const { inMemoryRateLimitModel } = await import("@/lib/rate-limit-test-store");
   return { RateLimit: inMemoryRateLimitModel() };
@@ -40,6 +41,7 @@ const post = (body: unknown = { username: "Ada", fullName: "Ada Lovelace" }) =>
 beforeEach(async () => {
   vi.clearAllMocks();
   await resetRateLimits();
+  clientIp = "203.0.113.9";
   heldAcceptance.mockResolvedValue(HELD);
   provenanceRefusal.mockReturnValue(null);
   releaseInvitation.mockResolvedValue(undefined);
@@ -117,5 +119,16 @@ describe("POST /api/invitations/sso", () => {
 
     expect((await post()).status).toBe(409);
     expect(spendAcceptance).not.toHaveBeenCalled();
+  });
+});
+
+// BP-840
+describe("POST /api/invitations/sso with no client address", () => {
+  it("throttles nobody, where one bucket would be everybody's", async () => {
+    clientIp = null;
+    heldAcceptance.mockResolvedValue(null);
+    for (let i = 0; i < 450; i++) await post();
+
+    expect((await post()).status).toBe(400);
   });
 });

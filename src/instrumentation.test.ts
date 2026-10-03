@@ -262,9 +262,9 @@ describe("register — a database that is down at boot", () => {
     expect(repairMachineNames).toHaveBeenCalledTimes(1);
   });
 
-  // BP-840. Started anyway, it would serve an instance its administrators cannot enter once their
-  // sessions lapse
-  it("exits once connected when passwords off would leave no administrator a way in", async () => {
+  // BP-840. Said, not refused: exiting would make a restart an outage for every member, over a
+  // state a runtime demotion or deactivation can reach
+  it("warns once connected when passwords off would leave no administrator a way in, and keeps serving", async () => {
     process.env.NEXT_RUNTIME = "nodejs";
     delete process.env.ENCRYPTION_KEY;
     Object.assign(process.env, {
@@ -283,9 +283,9 @@ describe("register — a database that is down at boot", () => {
     const { register } = await import("./instrumentation");
 
     await register();
-    expect(exit).toHaveBeenCalledWith(1);
-    expect(logged).toHaveBeenCalledWith(expect.stringContaining("no active administrator can sign in"));
-    expect(startPmScheduler).not.toHaveBeenCalled();
+    expect(exit).not.toHaveBeenCalled();
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining("WARNING: PASSWORD_SIGN_IN=off, but no active administrator"));
+    await vi.waitFor(() => expect(startPmScheduler).toHaveBeenCalledTimes(1));
     admins.mockReturnValue([]);
   });
 

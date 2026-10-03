@@ -4,7 +4,7 @@ import bcrypt from "bcryptjs";
 import { readJsonBody } from "@/lib/request-body";
 import { connectDB } from "@/lib/db";
 import { getClientIp, PASSWORD_COST_FACTOR } from "@/lib/auth";
-import { anonymousMultiplier, isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
+import { isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
 import { provenanceRefusal } from "@/lib/session";
 import { checkNewAccount } from "@/lib/new-account";
 import { claimInvitation } from "@/lib/invitations";
@@ -19,11 +19,15 @@ export async function POST(request: Request) {
   if (refusal) return refusal;
 
   const clientIp = getClientIp(request);
-  const throttleKey = sourceKey(clientIp ?? "-", "invitation-use");
-  if (await isRateLimited(throttleKey, anonymousMultiplier(clientIp, ATTEMPTS_PER_SOURCE))) {
-    return NextResponse.json({ error: "Too many attempts. Try again in 15 minutes." }, { status: 429 });
+  // The link is the secret, and a bucket shared by every caller with no address would only let
+  // anybody stop every invitation being used (BP-840)
+  const throttleKey = clientIp ? sourceKey(clientIp, "invitation-use") : null;
+  if (throttleKey) {
+    if (await isRateLimited(throttleKey, ATTEMPTS_PER_SOURCE)) {
+      return NextResponse.json({ error: "Too many attempts. Try again in 15 minutes." }, { status: 429 });
+    }
+    await recordFailedAttempt(throttleKey);
   }
-  await recordFailedAttempt(throttleKey);
 
   const read = await readJsonBody<{
     token?: unknown;

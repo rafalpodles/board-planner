@@ -40,8 +40,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
   if (!provider) return NextResponse.json({ error: "That sign-in is not set up here" }, { status: 404 });
 
   const clientIp = getClientIp(request);
-  // With no address every caller would share one bucket, which anybody can fill to stop every
-  // sign-in; a flow guesses nothing, so there is nothing for a shared bucket to slow down
+  // With no address every caller would share one bucket, which anybody could fill to stop every
+  // sign-in. That lifts the flood limit too; what is guessed here (an invitation token, a setup
+  // code) is random or throttled on its own
   const throttleKey = clientIp ? sourceKey(clientIp, "oidc-start") : null;
   if (throttleKey) {
     if (await isRateLimited(throttleKey, STARTS_PER_SOURCE)) {

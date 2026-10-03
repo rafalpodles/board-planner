@@ -4,7 +4,8 @@ const findInvitationByToken = vi.fn();
 const userExists = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
-vi.mock("@/lib/auth", () => ({ getClientIp: () => "203.0.113.9" }));
+let clientIp: string | null = "203.0.113.9";
+vi.mock("@/lib/auth", () => ({ getClientIp: () => clientIp }));
 vi.mock("@/models/rateLimit", async () => {
   const { inMemoryRateLimitModel } = await import("@/lib/rate-limit-test-store");
   return { RateLimit: inMemoryRateLimitModel() };
@@ -31,6 +32,7 @@ const lookup = (body: unknown = { token: "cpi_good" }) =>
   POST(new Request("http://x/api/invitations/lookup", { method: "POST", body: JSON.stringify(body) }));
 
 beforeEach(async () => {
+  clientIp = "203.0.113.9";
   vi.clearAllMocks();
   await resetRateLimits();
   findInvitationByToken.mockResolvedValue({
@@ -83,5 +85,16 @@ describe("POST /api/invitations/lookup", () => {
     expect((await lookup()).status).toBe(200);
 
     expect((await lookup()).status).toBe(429);
+  });
+});
+
+// BP-840. The token is the secret; a bucket shared by every caller with no address would let anybody
+// stop every invitation being looked up
+describe("with no client address", () => {
+  it("throttles nobody, where one bucket would be everybody's", async () => {
+    clientIp = null;
+    for (let i = 0; i < 1250; i++) await lookup();
+
+    expect((await lookup()).status).not.toBe(429);
   });
 });

@@ -88,14 +88,11 @@ async function bootWhenDatabaseIsReady(): Promise<void> {
   try {
     console.log("MongoDB connected successfully");
 
-    // Exiting for the reason the config checks above do: a process that stays up would serve an
-    // instance its administrators can no longer enter once their sessions lapse (BP-840)
+    // Said, not refused: the state can arise at runtime (a demotion, a deactivation, an unlink), and
+    // exiting would turn a restart into an outage for every member, not only the administrators
     const { adminsLockedOut } = await import("@/lib/password-sign-in");
     const lockedOut = await adminsLockedOut();
-    if (lockedOut) {
-      console.error(lockedOut);
-      process.exit(1);
-    }
+    if (lockedOut) console.error(`WARNING: ${lockedOut}`);
 
     const { Project } = await import("@/models/project");
     const { DEFAULT_PROJECT_CATEGORIES, DEFAULT_PROJECT_COLUMNS } = await import("@/types");

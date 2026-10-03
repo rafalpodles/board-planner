@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 
-let admins: { _id: string; emailVerifiedAt?: Date | null }[] = [];
+let admins: { _id: string; email?: string; emailVerifiedAt?: Date | null }[] = [];
 let identities: { user: string; provider: string }[] = [];
 const userFind = vi.fn();
 vi.mock("@/models/user", () => ({
@@ -30,6 +30,8 @@ const KEYS = [
   "GITHUB_OAUTH_CLIENT_ID",
   "GITHUB_OAUTH_CLIENT_SECRET",
   "GITHUB_OAUTH_BASE_URL",
+  "GOOGLE_CLIENT_ID",
+  "GOOGLE_CLIENT_SECRET",
 ];
 afterEach(() => KEYS.forEach((k) => delete process.env[k]));
 
@@ -110,6 +112,16 @@ describe("whether passwords off would lock every administrator out", () => {
     admins = [{ _id: "a1", emailVerifiedAt: new Date() }];
 
     expect(await adminsLockedOut()).not.toBeNull();
+  });
+
+  // Google vouches only for its own domains; a Workspace's cannot be told from here
+  it("counts a proven address under Google only when it is a Gmail one", async () => {
+    Object.assign(process.env, { GOOGLE_CLIENT_ID: "g", GOOGLE_CLIENT_SECRET: "gs" });
+    admins = [{ _id: "a1", email: "admin@corp.example", emailVerifiedAt: new Date() }];
+    expect(await adminsLockedOut()).not.toBeNull();
+
+    admins = [{ _id: "a1", email: "admin@gmail.com", emailVerifiedAt: new Date() }];
+    expect(await adminsLockedOut()).toBeNull();
   });
 
   it("lets an administrator in through a provider linked to them that is still set up", async () => {
