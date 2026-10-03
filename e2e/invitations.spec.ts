@@ -5,6 +5,7 @@ import { SAME_ORIGIN } from "./api";
 import { signIn, signInContext } from "./session";
 import { bodyOf, mailFor, refuseMailFor, stopRefusing } from "./mailbox";
 import {
+  BOARD_URL,
   E2E_MONGODB_URI,
   MEMBER_USERNAME,
   PROJECT_ID,
@@ -110,7 +111,7 @@ test("an invitation arrives by mail and its link makes an account on the invited
 
   await accept(stranger.page, link, "invited-person");
 
-  await expect(stranger.page).toHaveURL(new RegExp(`/projects/${PROJECT_ID}`));
+  await expect(stranger.page).toHaveURL(BOARD_URL);
   const account = await (await db()).collection("users").findOne({ username: "invited-person" });
   expect(account).toMatchObject({ email, role: "member" });
   const grant = await (await db())
@@ -204,7 +205,7 @@ test("a username already taken keeps the link usable for another try", async ({ 
 
   await stranger.page.getByLabel("Username").fill("second-choice");
   await stranger.page.getByRole("button", { name: "Create my account" }).click();
-  await expect(stranger.page).toHaveURL(new RegExp(`/projects/${PROJECT_ID}`));
+  await expect(stranger.page).toHaveURL(BOARD_URL);
   await stranger.context.close();
 });
 
@@ -223,7 +224,7 @@ test("a mail server that refuses the invitation leaves the admin holding the lin
 
     const stranger = await asStranger(browser);
     await accept(stranger.page, link, "linked-person");
-    await expect(stranger.page).toHaveURL(new RegExp(`/projects/${PROJECT_ID}`));
+    await expect(stranger.page).toHaveURL(BOARD_URL);
     await stranger.context.close();
   } finally {
     await stopRefusing();
@@ -266,7 +267,7 @@ test("an administrator invitation with an owned board makes an admin who owns it
 
   const stranger = await asStranger(browser);
   await accept(stranger.page, await latestLink(email), "new-admin");
-  await expect(stranger.page).toHaveURL(new RegExp(`/projects/${PROJECT_ID}`));
+  await expect(stranger.page).toHaveURL(BOARD_URL);
 
   const account = await (await db()).collection("users").findOne({ username: "new-admin" });
   expect(account).toMatchObject({ email, role: "admin" });
@@ -299,7 +300,7 @@ test("an invitation whose inviter was deleted works once another admin resends i
     "This invitation link is not valid. Ask whoever invited you for a new one."
   );
   await accept(stranger.page, link, "rescued-person");
-  await expect(stranger.page).toHaveURL(new RegExp(`/projects/${PROJECT_ID}`));
+  await expect(stranger.page).toHaveURL(BOARD_URL);
   await stranger.context.close();
 });
 
