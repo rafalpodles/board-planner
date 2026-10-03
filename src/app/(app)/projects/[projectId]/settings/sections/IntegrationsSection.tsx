@@ -269,7 +269,6 @@ export function IntegrationsSection({
     return updated;
   }
 
-
   function addWebhook() {
     if (!newWebhookUrl.trim()) return;
     webhooks.set("webhooks", [
