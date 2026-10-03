@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 
 let admins: { _id: string; email?: string; emailVerifiedAt?: Date | null }[] = [];
-let identities: { user: string; provider: string }[] = [];
+let identities: { user: string; provider: string; issuer: string }[] = [];
 const userFind = vi.fn();
 vi.mock("@/models/user", () => ({
   User: {
@@ -13,10 +13,15 @@ vi.mock("@/models/user", () => ({
 }));
 vi.mock("@/models/identity", () => ({
   Identity: {
-    exists: async (filter: { user: { $in: string[] }; provider?: { $in: string[] } }) =>
-      identities.some((i) => filter.user.$in.includes(i.user) && (!filter.provider || filter.provider.$in.includes(i.provider)))
-        ? { _id: "i" }
-        : null,
+    // As Mongo reads `{$and: [{user: {$in}}, {$or: [{provider, issuer: {$in}}]}]}`
+    exists: async (filter: { $and: [{ user: { $in: string[] } }, { $or: Record<string, unknown>[] }] }) => {
+      const [{ user }, { $or }] = filter.$and;
+      const live = (i: (typeof identities)[number]) =>
+        $or.some(
+          (c) => c.provider === i.provider && ((c.issuer as { $in: string[] } | undefined)?.$in ?? []).includes(i.issuer)
+        );
+      return identities.some((i) => user.$in.includes(i.user) && live(i)) ? { _id: "i" } : null;
+    },
   },
 }));
 
@@ -126,21 +131,29 @@ describe("whether passwords off would lock every administrator out", () => {
 
   it("lets an administrator in through a provider linked to them that is still set up", async () => {
     withGitHub();
-    identities = [{ user: "a1", provider: "github" }];
+    identities = [{ user: "a1", provider: "github", issuer: "https://github.com" }];
 
     expect(await adminsLockedOut()).toBeNull();
   });
 
+  // BP-842's rule: a link made while the provider signed as another issuer is no way in
+  it("does not count a link from the provider's former issuer", async () => {
+    withOidc();
+    identities = [{ user: "a1", provider: "oidc", issuer: "https://former-issuer.example" }];
+
+    expect(await adminsLockedOut()).not.toBeNull();
+  });
+
   it("does not count a link to a provider no longer set up", async () => {
     withOidc();
-    identities = [{ user: "a1", provider: "google" }];
+    identities = [{ user: "a1", provider: "google", issuer: "https://accounts.google.com" }];
 
     expect(await adminsLockedOut()).not.toBeNull();
   });
 
   it("does not count a link belonging to somebody who is not an administrator", async () => {
     withOidc();
-    identities = [{ user: "m1", provider: "oidc" }];
+    identities = [{ user: "m1", provider: "oidc", issuer: "https://id.example.com" }];
 
     expect(await adminsLockedOut()).not.toBeNull();
   });

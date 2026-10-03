@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { configuredProviders } from "@/lib/oidc/providers";
+import { configuredProviders, liveIdentityFilter } from "@/lib/oidc/providers";
 import { Identity } from "@/models/identity";
 import { User } from "@/models/user";
 
@@ -49,10 +49,8 @@ export async function adminsLockedOut(): Promise<string | null> {
   const googleLinks = providers.some((p) => p.id === "google");
   const vouched = (email: string) => genericLinks || (googleLinks && /@(gmail|googlemail)\.com$/.test(email));
   if (admins.some((a) => a.emailVerifiedAt && vouched(a.email ?? ""))) return null;
-  const linked = await Identity.exists({
-    user: { $in: admins.map((a) => a._id) },
-    provider: { $in: providers.map((p) => p.id) },
-  });
+  // A link only counts while its provider still signs as the issuer that made it (BP-842)
+  const linked = await Identity.exists({ $and: [{ user: { $in: admins.map((a) => a._id) } }, liveIdentityFilter()] });
   if (linked) return null;
   return (
     "PASSWORD_SIGN_IN=off, but no active administrator can sign in through a configured provider: none has one linked, " +
