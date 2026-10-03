@@ -26,6 +26,7 @@ export function SignUpDomains() {
     api
       .get("/api/admin/sign-up")
       .then((data: SignUp) => {
+        if (!Array.isArray(data?.domains)) throw new Error("unexpected answer");
         setSaved(data);
         setText(asText(data.domains));
       })

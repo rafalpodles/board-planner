@@ -60,6 +60,7 @@ describe("POST /api/invitations/sso", () => {
       passwordHash: null,
       identity: { provider: "oidc", issuer: "https://id.example.com", subject: "s9", email: "ada@example.com" },
       providerProvesAddress: true,
+      groups: [],
     });
     expect(spendAcceptance).toHaveBeenCalledWith("cpo_held");
     expect(res.headers.get("set-cookie")).toContain("bp_oidc_accept=");

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createHash } from "crypto";
+import type { OidcProvider } from "./providers";
 
 const discovery = vi.fn();
 const authorizationCodeGrant = vi.fn();
@@ -27,7 +28,7 @@ vi.mock("openid-client", () => ({
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/oidcFlow", () => ({ OidcFlow: { findOneAndDelete, create, findOne: vi.fn(), deleteOne: vi.fn() } }));
 
-const { beginFlow, finishFlow } = await import("./flow");
+const { beginFlow, finishFlow, holdForSignUp } = await import("./flow");
 
 const sha256 = (v: string) => createHash("sha256").update(v).digest("hex");
 const PROVIDER = { id: "oidc" as const, kind: "oidc" as const, linksByAddress: true, label: "Acme", issuer: "https://id.example.com", clientId: "c", clientSecret: "s" };
@@ -126,6 +127,7 @@ describe("finishing a sign-in", () => {
         emailVerified: true,
         verifiedEmails: ["ada@example.com"],
         name: "Ada",
+        groups: [],
       },
     });
   });
@@ -273,6 +275,7 @@ describe("GitHub, which speaks OAuth 2 without OpenID Connect", () => {
         emailVerified: true,
         verifiedEmails: ["ada@personal.example", "ada@corp.example"],
         name: "Ada Lovelace",
+        groups: [],
       },
     });
   });
@@ -358,5 +361,52 @@ describe("GitHub, which speaks OAuth 2 without OpenID Connect", () => {
     githubAnswers({ login: "ada" }, [{ email: "ada@corp.example", primary: true, verified: true }]);
 
     expect((await finishFlow({ provider: GITHUB, binder: "cpo_b", origin: ORIGIN, query: "" })).ok).toBe(false);
+  });
+});
+
+describe("the groups an ID token names (BP-833)", () => {
+  const FLOW = { provider: "oidc", state: "state-1", nonce: "nonce-1", codeVerifier: "verifier", intent: "signin", invitationTokenHash: null };
+  const finishWith = async (provider: OidcProvider, claims: Record<string, unknown>) => {
+    findOneAndDelete.mockResolvedValue({ ...FLOW, provider: provider.id });
+    authorizationCodeGrant.mockResolvedValue({
+      claims: () => ({ iss: provider.issuer, sub: "s1", email: "ada@corp.com", email_verified: true, hd: "corp.com", ...claims }),
+    });
+    const outcome = await finishFlow({ provider, binder: "cpo_b", origin: ORIGIN, query: "" });
+    return outcome.ok ? outcome.claims.groups : null;
+  };
+
+  afterEach(() => {
+    delete process.env.OIDC_GROUPS_CLAIM;
+  });
+
+  it("reads them from the groups claim, a list or a single name", async () => {
+    expect(await finishWith(PROVIDER, { groups: ["staff", "admins", 7] })).toEqual(["staff", "admins"]);
+    expect(await finishWith(PROVIDER, { groups: "admins" })).toEqual(["admins"]);
+    expect(await finishWith(PROVIDER, {})).toEqual([]);
+  });
+
+  it("reads the claim OIDC_GROUPS_CLAIM names instead", async () => {
+    process.env.OIDC_GROUPS_CLAIM = "roles";
+
+    expect(await finishWith(PROVIDER, { groups: ["admins"], roles: ["planner-admins"] })).toEqual(["planner-admins"]);
+  });
+
+  it("takes none from Google, whatever its token carries", async () => {
+    const GOOGLE = { ...PROVIDER, id: "google" as const, issuer: "https://accounts.google.com" };
+
+    expect(await finishWith(GOOGLE, { groups: ["admins"] })).toEqual([]);
+  });
+
+  it("holds a sign-up with the name and groups it will be made with", async () => {
+    const binder = await holdForSignUp({
+      provider: PROVIDER,
+      claims: { issuer: "https://id.example.com", subject: "s1", email: "ada@corp.com", emailVerified: true, verifiedEmails: ["ada@corp.com"], name: "Ada", groups: ["admins"] },
+    });
+
+    expect(create.mock.calls[0][0]).toMatchObject({
+      binderHash: sha256(binder),
+      intent: "signup",
+      claims: { issuer: "https://id.example.com", subject: "s1", email: "ada@corp.com", name: "Ada", groups: ["admins"] },
+    });
   });
 });

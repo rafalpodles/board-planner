@@ -2,6 +2,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const finishFlow = vi.fn();
 const holdForAcceptance = vi.fn();
+const holdForSignUp = vi.fn();
+const signUpOpenTo = vi.fn();
+const applyAdminGroup = vi.fn();
 const identityFindOne = vi.fn();
 const identityCreate = vi.fn();
 const identityUpdateOne = vi.fn();
@@ -43,9 +46,13 @@ vi.mock("@/lib/oidc/flow", () => ({
   FLOW_COOKIE: "bp_oidc",
   ACCEPT_COOKIE: "bp_oidc_accept",
   ACCEPT_TTL_MS: 900_000,
+  JOIN_COOKIE: "bp_oidc_join",
   finishFlow,
   holdForAcceptance,
+  holdForSignUp,
 }));
+vi.mock("@/lib/sign-up-domains", () => ({ signUpOpenTo }));
+vi.mock("@/lib/oidc/admin-group", () => ({ applyAdminGroup }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/lib/security-mail", () => ({ notifyIdentityLinked }));
 vi.mock("@/models/identity", () => ({
@@ -77,7 +84,7 @@ const location = (res: Response) => {
 const lean = (value: unknown) => ({ lean: () => Promise.resolve(value) });
 
 function finishes(intent: "signin" | "invite" | "link" | "bootstrap", claims: Record<string, unknown> = {}, extra = {}) {
-  const person = { issuer: ISSUER, subject: "s1", email: "ada@example.com", emailVerified: true, name: "", ...claims };
+  const person = { issuer: ISSUER, subject: "s1", email: "ada@example.com", emailVerified: true, name: "", groups: [], ...claims };
   finishFlow.mockResolvedValue({
     ok: true,
     intent,
@@ -96,6 +103,8 @@ beforeEach(async () => {
   userFindById.mockResolvedValue(ADA);
   identityCreate.mockResolvedValue({});
   createSession.mockResolvedValue({ token: "cps_new", absoluteExpiresAt: new Date() });
+  signUpOpenTo.mockResolvedValue(false);
+  holdForSignUp.mockResolvedValue("cpo_join");
 });
 
 describe("GET /api/auth/oidc/:provider/callback, signing in", () => {
@@ -250,6 +259,69 @@ describe("GET /api/auth/oidc/:provider/callback, signing in", () => {
 
     expect(location(res)).toBe("/login?sso=failed");
     expect(finishFlow).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /api/auth/oidc/:provider/callback, signing up in an allowed domain (BP-833)", () => {
+  beforeEach(() => {
+    userFindOne.mockResolvedValue(null);
+    signUpOpenTo.mockResolvedValue(true);
+  });
+
+  it("holds a verified newcomer in an allowed domain for the username form, making no account", async () => {
+    finishes("signin", { email: "grace@corp.example", groups: ["staff"] });
+
+    const res = await callback();
+
+    expect(signUpOpenTo).toHaveBeenCalledWith("grace@corp.example");
+    expect(holdForSignUp.mock.calls[0][0].claims).toMatchObject({ email: "grace@corp.example", groups: ["staff"] });
+    expect(location(res)).toBe("/join/sso");
+    expect(res.headers.get("set-cookie")).toContain("bp_oidc_join=cpo_join");
+    expect(userCreate).not.toHaveBeenCalled();
+    expect(createSession).not.toHaveBeenCalled();
+  });
+
+  it("refuses a newcomer whose domain is not open", async () => {
+    finishes("signin", { email: "grace@elsewhere.example" });
+    signUpOpenTo.mockResolvedValue(false);
+
+    expect(location(await callback())).toBe("/login?sso=no_account");
+    expect(holdForSignUp).not.toHaveBeenCalled();
+  });
+
+  it("never opens sign-up to an address the provider has not verified", async () => {
+    finishes("signin", { email: "grace@corp.example", emailVerified: false });
+
+    expect(location(await callback())).toBe("/login?sso=unverified");
+    expect(holdForSignUp).not.toHaveBeenCalled();
+  });
+
+  it("never opens sign-up through GitHub, whose verified proves no domain", async () => {
+    finishes("signin", { email: "grace@corp.example" });
+
+    expect(location(await callback("github"))).toBe("/login?sso=not_linked");
+    expect(holdForSignUp).not.toHaveBeenCalled();
+  });
+
+  it("does not sign up an address an account already holds unproven", async () => {
+    finishes("signin", { email: "ada@example.com" });
+    userFindOne.mockResolvedValue({ ...ADA, emailVerifiedAt: null });
+
+    expect(location(await callback())).toBe("/login?sso=unproven");
+    expect(holdForSignUp).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /api/auth/oidc/:provider/callback, the admin group (BP-833)", () => {
+  it("hands the provider's groups to the role mapping before the session is made", async () => {
+    finishes("signin", { groups: ["admins"] });
+    identityFindOne.mockReturnValue(lean({ _id: "i1", user: "u1" }));
+    applyAdminGroup.mockImplementation(async () => expect(createSession).not.toHaveBeenCalled());
+
+    await callback();
+
+    expect(applyAdminGroup).toHaveBeenCalledWith(ADA, "oidc", ["admins"]);
+    expect(createSession).toHaveBeenCalled();
   });
 });
 
