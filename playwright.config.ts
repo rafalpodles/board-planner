@@ -103,6 +103,7 @@ export const CODA_STUB_URL = `http://127.0.0.1:${CODA_STUB_PORT}`;
 const OIDC_STUB_PORT = Number(process.env.OIDC_STUB_PORT ?? PORT + 10003);
 export const OIDC_STUB_URL = `http://127.0.0.1:${OIDC_STUB_PORT}`;
 export const OIDC_STUB_LABEL = "E2E Identity";
+export const OIDC_STUB_ADMIN_GROUP = "e2e-admins";
 
 // GitLab's API, the same way: `gitlabHost` is per-project, so only a project pointed here reaches it.
 const GITLAB_STUB_PORT = Number(process.env.GITLAB_STUB_PORT ?? PORT + 10002);
@@ -418,6 +419,9 @@ export default defineConfig({
             env: {
               ...devServerEnv(PASSWORDLESS_BASE_URL),
               PASSWORD_SIGN_IN: "off",
+              // Every sign-in here is through the provider, which makes it the server that maps
+              // a group to the admin role (BP-833); the default seed's one admin is never demoted
+              OIDC_ADMIN_GROUP: OIDC_STUB_ADMIN_GROUP,
               APP_ORIGIN: PASSWORDLESS_BASE_URL,
               NEXT_DIST_DIR: ".next-passwordless",
             },
