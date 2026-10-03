@@ -98,7 +98,7 @@ test("a board owner's invitation leaves an administrator's lapsed one for the ad
   await card.getByRole("button", { name: "Invite", exact: true }).click();
 
   await expect(alertOn(page)).toContainText(
-    `${email}'s invitation from admin has expired. Ask admin or an administrator to send it again or withdraw it`
+    `${email}'s invitation from admin has expired. Ask an administrator to send it again or revoke it, or admin to withdraw it`
   );
   const held = await (await db()).collection("invitations").find({ email }).toArray();
   expect(held.map((i) => [i.status, i.role])).toEqual([["pending", "admin"]]);

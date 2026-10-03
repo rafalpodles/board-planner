@@ -123,6 +123,22 @@ describe("sending again", () => {
     expect(updateOne.mock.invocationCallOrder[0]).toBeLessThan(findOneAndUpdate.mock.invocationCallOrder[0]);
   });
 
+  it("reports as dropped only what the pull removed, not a board an owner re-related meanwhile", async () => {
+    authorityAtAcceptance.mockResolvedValue({ role: "member", boards: [BOARD_A] });
+    findOneAndUpdate.mockResolvedValue({ _id: "inv-1", boards: [BOARD_A, { ...BOARD_B, addedBy: "owner-c" }] });
+
+    const result = await reissueInvitation("inv-1", "admin-2");
+
+    expect(result?.dropped).toEqual([]);
+  });
+
+  it("reports a board the pull removed as dropped", async () => {
+    authorityAtAcceptance.mockResolvedValue({ role: "member", boards: [BOARD_A] });
+    findOneAndUpdate.mockResolvedValue({ _id: "inv-1", boards: [BOARD_A] });
+
+    expect((await reissueInvitation("inv-1", "admin-2"))?.dropped).toEqual([BOARD_B]);
+  });
+
   it("pulls nothing while every board is still backed", async () => {
     await reissueInvitation("inv-1", "admin-2");
 

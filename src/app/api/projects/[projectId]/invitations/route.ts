@@ -117,11 +117,14 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
   });
 
   if (outcome.kind === "held") {
-    const inviter = await User.findById(outcome.invitedBy).select("username").lean();
-    // Nobody joins through a lapsed invitation, so waiting for them to join would be waiting for ever
+    const inviter = await User.findById(outcome.invitedBy).select("username deactivatedAt").lean();
+    // Nobody joins through a lapsed invitation, so waiting for them to join would be waiting for ever.
+    // Only an administrator resends; its sender, while active, can withdraw their own board
+    const from = inviter ? ` from ${inviter.username}` : "";
+    const withdrawer = inviter && !inviter.deactivatedAt ? `, or ${inviter.username} to withdraw it` : "";
     const error = outcome.expired
-      ? `${email}'s invitation${inviter ? ` from ${inviter.username}` : ""} has expired. Ask ${inviter ? `${inviter.username} or ` : ""}an administrator to send it again or withdraw it, then invite them here.`
-      : `${email} already has an invitation${inviter ? ` from ${inviter.username}` : ""} that this board cannot join. Add them by username once they have joined.`;
+      ? `${email}'s invitation${from} has expired. Ask an administrator to send it again or revoke it${withdrawer}, then invite them here.`
+      : `${email} already has an invitation${from} that this board cannot join. Add them by username once they have joined.`;
     return NextResponse.json({ error }, { status: 409 });
   }
 

@@ -106,7 +106,9 @@ export async function reissueInvitation(
     },
     { returnDocument: "after" }
   );
-  return invitation ? { invitation, token, dropped: unbacked } : null;
+  // What the pull actually removed: a board re-related meanwhile by an owner who can grant it stayed
+  const kept = new Set((invitation?.boards ?? []).map((b) => String(b.project)));
+  return invitation ? { invitation, token, dropped: unbacked.filter((b) => !kept.has(String(b.project))) } : null;
 }
 
 /** Also stops an acceptance in flight: its claim is not yet tied to an account, so it is revocable. */

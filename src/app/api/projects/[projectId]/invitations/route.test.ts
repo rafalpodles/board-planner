@@ -131,7 +131,16 @@ describe("POST /api/projects/:id/invitations", () => {
 
     expect(res.status).toBe(409);
     expect((await res.json()).error).toBe(
-      "ada@example.com's invitation from admin has expired. Ask admin or an administrator to send it again or withdraw it, then invite them here."
+      "ada@example.com's invitation from admin has expired. Ask an administrator to send it again or revoke it, or admin to withdraw it, then invite them here."
+    );
+  });
+
+  it("does not send the owner to a sender who is deactivated", async () => {
+    inviteToBoard.mockResolvedValue({ kind: "held", invitedBy: "a1", expired: true });
+    userFindById.mockReturnValue({ select: () => ({ lean: () => Promise.resolve({ username: "olga", deactivatedAt: new Date() }) }) });
+
+    expect((await (await post({ email: "ada@example.com" })).json()).error).toBe(
+      "ada@example.com's invitation from olga has expired. Ask an administrator to send it again or revoke it, then invite them here."
     );
   });
 
@@ -140,7 +149,7 @@ describe("POST /api/projects/:id/invitations", () => {
     userFindById.mockReturnValue({ select: () => ({ lean: () => Promise.resolve(null) }) });
 
     expect((await (await post({ email: "ada@example.com" })).json()).error).toBe(
-      "ada@example.com's invitation has expired. Ask an administrator to send it again or withdraw it, then invite them here."
+      "ada@example.com's invitation has expired. Ask an administrator to send it again or revoke it, then invite them here."
     );
   });
 
