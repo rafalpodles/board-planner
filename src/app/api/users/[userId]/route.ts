@@ -475,6 +475,10 @@ async function accountAction(
     });
     return NextResponse.json({ ok: true });
   }
+  // Deactivating ended every session already; this would only unlink the providers it keeps
+  if (target.deactivatedAt) {
+    return NextResponse.json({ error: `${target.username} is deactivated and signed out already` }, { status: 400 });
+  }
   const revoked = await revokeUserCredentials(target._id);
   await invalidateResetTokens(target._id);
   void logInstanceAudit({

@@ -1001,6 +1001,13 @@ describe("PUT /api/users/:id — deactivating and reactivating", () => {
     expect(logInstanceAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "user_reactivated" }));
   });
 
+  it("does not sign out a deactivated account, which would only unlink the providers it keeps", async () => {
+    found(targetDoc({ role: "member", deactivatedAt: new Date() }));
+
+    expect((await PUT(put({ signOutEverywhere: true }), ctx())).status).toBe(400);
+    expect(revokeUserCredentials).not.toHaveBeenCalled();
+  });
+
   it("counts only administrators who can still act as the last one standing", async () => {
     found(targetDoc({ role: "admin" }));
     userCountDocuments.mockResolvedValue(1);
