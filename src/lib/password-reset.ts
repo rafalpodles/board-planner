@@ -10,7 +10,7 @@ export const RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
  * Returns the raw token, which is the only time it exists in this process. Everything stored is a
  * hash, so nothing that survives this call can be spent.
  */
-export async function issueResetToken(userId: Types.ObjectId | string): Promise<string> {
+export async function issueResetToken(userId: Types.ObjectId | string, sentTo: string): Promise<string> {
   await connectDB();
   const token = randomToken(RESET_TOKEN_PREFIX);
 
@@ -23,13 +23,14 @@ export async function issueResetToken(userId: Types.ObjectId | string): Promise<
     user: userId,
     tokenHash: sha256(token),
     expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MS),
+    sentTo,
   });
 
   return token;
 }
 
 export type ResetTokenOutcome =
-  | { ok: true; userId: Types.ObjectId }
+  | { ok: true; userId: Types.ObjectId; sentTo: string | null }
   | { ok: false; reason: "unknown" | "expired" | "used" };
 
 /**
@@ -48,7 +49,7 @@ export async function consumeResetToken(token: string): Promise<ResetTokenOutcom
     { returnDocument: "after" }
   );
 
-  if (claimed) return { ok: true, userId: claimed.user as Types.ObjectId };
+  if (claimed) return { ok: true, userId: claimed.user as Types.ObjectId, sentTo: claimed.sentTo ?? null };
 
   // Nothing was claimed. Naming which of the three it was costs nothing — the token is 32 random
   // bytes, so an attacker learns only that they guessed one that once existed, while the person

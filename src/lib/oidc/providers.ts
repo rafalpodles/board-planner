@@ -18,6 +18,19 @@ export interface OidcProvider {
   clientSecret: string;
 }
 
+/**
+ * Links a configured provider can still sign in through: its id, and the issuer it signs as now.
+ * Repointing a provider orphans the old issuer's links, so they are no way in and must not count
+ * as one. Matches nothing when no provider is configured.
+ */
+export function liveIdentityFilter(): Record<string, unknown> {
+  const live = configuredProviders().map((p) => {
+    const bare = p.issuer.replace(/\/+$/, "");
+    return { provider: p.id, issuer: { $in: [bare, `${bare}/`] } };
+  });
+  return live.length > 0 ? { $or: live } : { _id: null };
+}
+
 const GOOGLE_ISSUER = "https://accounts.google.com";
 
 /** Read on every call, so the operator's environment is the only source and tests can set it. */

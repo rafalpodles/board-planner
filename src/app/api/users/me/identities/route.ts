@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { withAuth } from "@/lib/middleware";
 import { connectDB } from "@/lib/db";
-import { providerById } from "@/lib/oidc/providers";
+import { liveIdentityFilter, providerById } from "@/lib/oidc/providers";
 import { Identity } from "@/models/identity";
 import { User } from "@/models/user";
 import { passwordSignInEnabled } from "@/lib/password-sign-in";
@@ -12,7 +12,7 @@ export const GET = withAuth(async (_request, { user }) => {
   }
   await connectDB();
   const [identities, record] = await Promise.all([
-    Identity.find({ user: user._id }).sort({ linkedAt: 1 }).lean(),
+    Identity.find({ user: user._id, ...liveIdentityFilter() }).sort({ linkedAt: 1 }).lean(),
     User.findById(user._id).select("+password").lean(),
   ]);
   return NextResponse.json({

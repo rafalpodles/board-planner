@@ -205,6 +205,7 @@ export interface IPasswordResetToken {
   user: Types.ObjectId | IUser;
   expiresAt: Date;
   usedAt: Date | null;
+  sentTo?: string | null;
   createdAt: Date;
 }
 

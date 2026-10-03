@@ -26,6 +26,7 @@ import { signUpOpenTo } from "@/lib/sign-up-domains";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { notifyIdentityLinked } from "@/lib/security-mail";
 import { Identity } from "@/models/identity";
+import { Session } from "@/models/session";
 import { Invitation } from "@/models/invitation";
 import { User } from "@/models/user";
 import { IUser } from "@/types";
@@ -142,7 +143,21 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
     if (holder) return back(String(holder._id) === String(current._id) ? "linked" : "taken");
     const user = await User.findById(current._id);
     if (!user) return back("failed");
-    return back((await link(provider, claims, user, "from the account's own settings")) ? "linked" : "taken");
+    if (!(await link(provider, claims, user, "from the account's own settings"))) return back("taken");
+    // A password change or Sign out everywhere landing after the check above unlinked before this
+    // link existed; it must not outlive the session that made it (BP-842)
+    if (current.sessionId && !(await Session.exists({ _id: current.sessionId }))) {
+      await Identity.deleteOne({ issuer: claims.issuer, subject: claims.subject, user: user._id });
+      void logInstanceAudit({
+        action: "identity_unlinked",
+        user: user._id,
+        actorUsername: user.username,
+        target: user.username,
+        detail: `${provider.label}, the session that linked it having ended meanwhile`,
+      });
+      return back("failed");
+    }
+    return back("linked");
   }
 
   if (outcome.intent === "invite") {

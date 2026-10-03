@@ -14,7 +14,7 @@ import { revokePendingInvitationsFor } from "@/lib/invitations";
 import { User } from "@/models/user";
 import { Identity } from "@/models/identity";
 import { Session } from "@/models/session";
-import { providerById } from "@/lib/oidc/providers";
+import { liveIdentityFilter, providerById } from "@/lib/oidc/providers";
 import { HydratedDocument } from "mongoose";
 import { IUser } from "@/types";
 
@@ -42,7 +42,7 @@ async function withSignInMethods(users: HydratedDocument<IUser>[]) {
     passwordSignInEnabled()
       ? User.find({ _id: { $in: ids }, password: { $nin: [null, ""] } }).select("_id").lean()
       : Promise.resolve([] as { _id: unknown }[]),
-    Identity.find({ user: { $in: ids } }).select("user provider").sort({ linkedAt: 1 }).lean(),
+    Identity.find({ user: { $in: ids }, ...liveIdentityFilter() }).select("user provider").sort({ linkedAt: 1 }).lean(),
     Session.aggregate<{ _id: unknown; lastUsedAt: Date }>([
       { $match: { user: { $in: ids } } },
       { $group: { _id: "$user", lastUsedAt: { $max: "$lastUsedAt" } } },

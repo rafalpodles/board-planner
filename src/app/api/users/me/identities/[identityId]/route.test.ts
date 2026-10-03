@@ -18,13 +18,16 @@ vi.mock("@/lib/middleware", () => ({
       handler(request, { params: ctx.params, user: caller }),
 }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
-vi.mock("@/lib/oidc/providers", () => ({ providerById: () => ({ label: "Acme" }) }));
+const LIVE = { $or: [{ provider: "oidc", issuer: { $in: ["https://id.example.com", "https://id.example.com/"] } }] };
+vi.mock("@/lib/oidc/providers", () => ({ providerById: () => ({ label: "Acme" }), liveIdentityFilter: () => LIVE }));
+const identityExists = vi.fn();
 vi.mock("@/lib/email", () => ({ isEmailConfigured }));
 vi.mock("@/lib/session", () => ({ signedInRecently, RECENT_SIGN_IN_REQUIRED: "sign in again" }));
 vi.mock("@/models/identity", () => ({
   Identity: {
     findOne: identityFindOne,
     countDocuments: identityCount,
+    exists: identityExists,
     deleteOne: identityDelete,
     collection: { insertOne: identityInsert },
   },
@@ -47,12 +50,27 @@ beforeEach(() => {
   caller = { _id: "u1", username: "ada" };
   identityFindOne.mockReturnValue(lean({ _id: ID, provider: "oidc" }));
   identityCount.mockResolvedValue(0);
+  identityExists.mockResolvedValue({ _id: ID });
   isEmailConfigured.mockReturnValue(true);
   passwordIs("$2a$10$hash");
   signedInRecently.mockResolvedValue(true);
 });
 
 describe("DELETE /api/users/me/identities/:id", () => {
+  // BP-842. A link from a provider's former issuer is no way in, so removing it removes none
+  it("unlinks a former issuer's link from an account with no other way in, without asking for a recent sign-in", async () => {
+    passwordIs();
+    identityExists.mockResolvedValue(null);
+    signedInRecently.mockResolvedValue(false);
+
+    const res = await unlink();
+
+    expect(res.status).toBe(200);
+    expect(identityExists).toHaveBeenCalledWith({ _id: ID, ...LIVE });
+    expect(identityDelete).toHaveBeenCalled();
+    expect(identityInsert).not.toHaveBeenCalled();
+  });
+
   it("unlinks a provider from an account that also has a password", async () => {
     const res = await unlink();
 
@@ -69,7 +87,7 @@ describe("DELETE /api/users/me/identities/:id", () => {
 
     expect(res.status).toBe(409);
     expect((await res.json()).error).toContain("Forgot your password");
-    expect(identityCount).toHaveBeenCalledWith({ user: "u1", _id: { $ne: ID } });
+    expect(identityCount).toHaveBeenCalledWith({ user: "u1", _id: { $ne: ID }, ...LIVE });
     expect(identityDelete).not.toHaveBeenCalled();
   });
 
@@ -96,7 +114,7 @@ describe("DELETE /api/users/me/identities/:id", () => {
     const res = await unlink();
 
     expect(res.status).toBe(409);
-    expect(identityCount).toHaveBeenLastCalledWith({ user: "u1" });
+    expect(identityCount).toHaveBeenLastCalledWith({ user: "u1", ...LIVE });
     expect(identityInsert).toHaveBeenCalledWith(expect.objectContaining({ _id: ID, provider: "oidc" }));
   });
 

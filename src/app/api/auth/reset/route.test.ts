@@ -50,7 +50,7 @@ function accountIs(user: unknown) {
 beforeEach(async () => {
   vi.clearAllMocks();
   await resetRateLimits();
-  consumeResetToken.mockResolvedValue({ ok: true, userId: "u1" });
+  consumeResetToken.mockResolvedValue({ ok: true, userId: "u1", sentTo: "owner@example.com" });
   accountIs({ _id: "u1", username: "owner", kind: "human" });
   hash.mockResolvedValue("new-hash");
   userUpdateOne.mockResolvedValue({});
@@ -101,15 +101,26 @@ describe("POST /api/auth/reset", () => {
 
     expect(res.status).toBe(200);
     expect(hash).toHaveBeenCalledWith("a-brand-new-password", 10);
+    expect(userUpdateOne).toHaveBeenCalledWith({ _id: "u1" }, { $set: { password: "new-hash" } });
+    // The link reached the address it was mailed to, and proves that one only while it is still the
+    // account's: an address changed meanwhile was never reached (BP-842)
     expect(userUpdateOne).toHaveBeenCalledWith(
-      { _id: "u1" },
-      { $set: { password: "new-hash", emailVerifiedAt: expect.any(Date) } }
+      { _id: "u1", email: "owner@example.com" },
+      { $set: { emailVerifiedAt: expect.any(Date) } }
     );
     // Whoever knew the old password is signed out — usually the reason somebody is resetting
     expect(revokeUserCredentials).toHaveBeenCalledWith("u1");
     expect(logInstanceAudit).toHaveBeenCalledWith(
       expect.objectContaining({ action: "user_password_reset_by_email", target: "owner" })
     );
+  });
+
+  it("proves no address for a link issued before it recorded where it was sent", async () => {
+    consumeResetToken.mockResolvedValue({ ok: true, userId: "u1", sentTo: null });
+
+    expect((await POST(post())).status).toBe(200);
+    expect(userUpdateOne).toHaveBeenCalledTimes(1);
+    expect(userUpdateOne).toHaveBeenCalledWith({ _id: "u1" }, { $set: { password: "new-hash" } });
   });
 
   it.each([

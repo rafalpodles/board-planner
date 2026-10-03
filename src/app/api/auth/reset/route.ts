@@ -100,8 +100,12 @@ export async function POST(request: Request) {
   const revoked = await revokeUserCredentials(user._id);
 
   try {
-    // The link reached the account's address, which is the proof a provider links by
-    await User.updateOne({ _id: user._id }, { $set: { password: hashed, emailVerifiedAt: new Date() } });
+    await User.updateOne({ _id: user._id }, { $set: { password: hashed } });
+    // The link reached the address it was mailed to, which is the proof a provider links by — and
+    // only while that is still the account's address: one changed meanwhile was never reached (BP-842)
+    if (outcome.sentTo) {
+      await User.updateOne({ _id: user._id, email: outcome.sentTo }, { $set: { emailVerifiedAt: new Date() } });
+    }
   } catch (err) {
     // The claim is one-shot, so a write that fails here would otherwise leave somebody signed out
     // of everything, holding a dead link, with their old password still in force and no way back

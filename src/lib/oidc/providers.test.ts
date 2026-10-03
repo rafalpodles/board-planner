@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { configuredProviders, providerById, publicProviders } from "./providers";
+import { configuredProviders, liveIdentityFilter, providerById, publicProviders } from "./providers";
 
 const KEYS = ["OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "OIDC_LABEL", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET",
   "GITHUB_OAUTH_CLIENT_ID", "GITHUB_OAUTH_CLIENT_SECRET", "GITHUB_OAUTH_BASE_URL", "GITHUB_API_BASE_URL"];
@@ -92,5 +92,24 @@ describe("which identity providers are configured", () => {
     Object.assign(process.env, { OIDC_ISSUER: "https://id.example.com", OIDC_CLIENT_ID: "planner", OIDC_CLIENT_SECRET: "s3cret" });
 
     expect(JSON.stringify(publicProviders())).not.toContain("s3cret");
+  });
+});
+
+// BP-842. Repointing a provider orphans its old issuer's links, which then count as no way in
+describe("the links a configured provider still signs in through", () => {
+  it("names each provider by id and by the issuer it signs as now, with or without a trailing slash", () => {
+    Object.assign(process.env, { OIDC_ISSUER: "https://id.example.com/realms/acme", OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s" });
+    Object.assign(process.env, { GOOGLE_CLIENT_ID: "g", GOOGLE_CLIENT_SECRET: "gs" });
+
+    expect(liveIdentityFilter()).toEqual({
+      $or: [
+        { provider: "oidc", issuer: { $in: ["https://id.example.com/realms/acme", "https://id.example.com/realms/acme/"] } },
+        { provider: "google", issuer: { $in: ["https://accounts.google.com", "https://accounts.google.com/"] } },
+      ],
+    });
+  });
+
+  it("matches nothing when no provider is configured", () => {
+    expect(liveIdentityFilter()).toEqual({ _id: null });
   });
 });

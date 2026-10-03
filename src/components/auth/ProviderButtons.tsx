@@ -122,4 +122,5 @@ export const SIGN_IN_REFUSALS: Record<string, string> = {
   claimed: "This instance is already set up. Sign in instead.",
   deactivated: "This account is deactivated. Ask an administrator.",
   no_email: "That provider gave no address, and the first account needs one. Try another provider.",
+  linked: "That sign-in already belongs to an account here. Sign in with it instead.",
 };
