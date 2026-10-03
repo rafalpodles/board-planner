@@ -34,7 +34,7 @@ test.describe("an instance nobody has claimed", () => {
     // The server's own answer, asserted before the page is read: if this were false the toggle's
     // absence below would be correct rather than a bug
     const instance = await request.get("/api/auth/instance");
-    expect(await instance.json()).toEqual({ unclaimed: true });
+    expect(await instance.json()).toEqual({ unclaimed: true, passwordSignIn: true });
 
     await page.goto("/login");
     await expect(page.getByRole("button", { name: TOGGLE })).toBeVisible();
@@ -59,7 +59,7 @@ test.describe("an instance nobody has claimed", () => {
     const me = await page.request.get("/api/auth/me");
     expect(await me.json()).toMatchObject({ username: "firstadmin", role: "admin" });
 
-    expect(await (await request.get("/api/auth/instance")).json()).toEqual({ unclaimed: false });
+    expect(await (await request.get("/api/auth/instance")).json()).toEqual({ unclaimed: false, passwordSignIn: true });
   });
 
   // BP-325: the instance is public before its operator registers, and the first account is an admin
@@ -82,7 +82,7 @@ test.describe("an instance nobody has claimed", () => {
 
     await expect(page.getByText("The setup code is missing or wrong")).toBeVisible();
     await expect(page).toHaveURL(/\/login/);
-    expect(await (await request.get("/api/auth/instance")).json()).toEqual({ unclaimed: true });
+    expect(await (await request.get("/api/auth/instance")).json()).toEqual({ unclaimed: true, passwordSignIn: true });
   });
 
   test("stops offering it once the instance has been claimed", async ({ page, request }) => {
