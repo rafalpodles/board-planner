@@ -55,7 +55,7 @@ test("an administrator opens sign-up to a domain, and a newcomer there makes the
   await signIn(page);
   await page.goto("/settings/users");
   await page.getByLabel("Domains").fill(`  ${DOMAIN.toUpperCase()} `);
-  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await page.getByRole("button", { name: "Save domains" }).click();
   await expect(page.getByLabel("Domains")).toHaveValue(DOMAIN);
 
   const email = `grace-${randomBytes(3).toString("hex")}@${DOMAIN}`;

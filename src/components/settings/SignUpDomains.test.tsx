@@ -33,7 +33,7 @@ describe("sign-up by domain", () => {
     const input = (await screen.findByLabelText("Domains")) as HTMLInputElement;
 
     fireEvent.change(input, { target: { value: "corp.example,  lab.example Lab.example" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save domains" }));
 
     await waitFor(() => expect(input.value).toBe("corp.example, lab.example"));
     expect(api.put).toHaveBeenCalledWith("/api/admin/sign-up", { domains: ["corp.example", "lab.example", "Lab.example"] });
@@ -46,7 +46,7 @@ describe("sign-up by domain", () => {
     const input = (await screen.findByLabelText("Domains")) as HTMLInputElement;
 
     fireEvent.change(input, { target: { value: "*.corp.example" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save domains" }));
 
     expect((await screen.findByRole("alert")).textContent).toBe('"*.corp.example" is not a domain name');
     expect(input.value).toBe("*.corp.example");
@@ -58,7 +58,7 @@ describe("sign-up by domain", () => {
 
     expect(await screen.findByText(/Needs single sign-on or Google sign-in/)).toBeTruthy();
     expect((screen.getByLabelText("Domains") as HTMLInputElement).disabled).toBe(true);
-    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Save domains" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("names the admin group when one decides administrators", async () => {
@@ -100,7 +100,7 @@ describe("sign-up by domain", () => {
 
     expect(input.disabled).toBe(false);
     fireEvent.change(input, { target: { value: "" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save domains" }));
 
     await waitFor(() => expect(api.put).toHaveBeenCalledWith("/api/admin/sign-up", { domains: [] }));
   });

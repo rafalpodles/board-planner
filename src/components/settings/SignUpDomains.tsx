@@ -89,7 +89,7 @@ export function SignUpDomains() {
           />
         </div>
         <Button type="submit" variant="secondary" disabled={saving || text === asText(saved.domains)}>
-          {saving ? "Saving…" : "Save"}
+          {saving ? "Saving…" : "Save domains"}
         </Button>
       </form>
       {publicMail.length > 0 && (
