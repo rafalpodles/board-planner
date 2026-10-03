@@ -1,5 +1,6 @@
 import { Types } from "mongoose";
 import { connectDB } from "./db";
+import { authorityAtAcceptance } from "./invitation-authority";
 import { randomToken, sha256 } from "./oauth";
 import { Invitation } from "@/models/invitation";
 import { GrantRelation, IInvitation } from "@/types";
@@ -77,6 +78,20 @@ export async function reissueInvitation(
   sentBy: Types.ObjectId | string
 ): Promise<{ invitation: IInvitation; token: string } | null> {
   await connectDB();
+  // The resender re-endorses every board left, so a board its adder can no longer grant goes
+  // first: otherwise the resend would grant it again without anybody choosing to (BP-843)
+  const current = await Invitation.findOne({ _id: id, status: "pending" }).select("role boards").lean();
+  if (!current) return null;
+  const authority = await authorityAtAcceptance({ role: current.role, boards: current.boards, invitedBy: sentBy as Types.ObjectId });
+  const backed = new Set((authority?.boards ?? []).map((b) => `${b.project}:${b.addedBy}`));
+  const unbacked = current.boards.filter((b) => !backed.has(`${b.project}:${b.addedBy}`));
+  if (unbacked.length > 0) {
+    await Invitation.updateOne(
+      { _id: id, status: "pending" },
+      { $pull: { boards: { $or: unbacked.map((b) => ({ project: b.project, addedBy: b.addedBy })) } } }
+    );
+  }
+
   const { token, tokenHash, expiresAt } = freshSecret();
   const invitation = await Invitation.findOneAndUpdate(
     { _id: id, status: "pending" },
@@ -238,8 +253,10 @@ export async function inviteToBoard(input: {
 
   for (let attempt = 0; attempt < 2; attempt++) {
     const now = new Date();
+    // Only this owner's own: another inviter's lapsed invitation, perhaps an administrator's with a
+    // role and boards of its own, is theirs to resend or revoke, and holds the address meanwhile
     await Invitation.updateMany(
-      { email, status: "pending", expiresAt: { $lte: now } },
+      { email, status: "pending", expiresAt: { $lte: now }, invitedBy },
       { $set: { status: "revoked" } }
     );
     const live: Record<string, unknown> = { email, status: "pending", expiresAt: { $gt: now } };
@@ -258,7 +275,9 @@ export async function inviteToBoard(input: {
     );
     if (added) return { kind: "added", invitation: added };
 
-    const held = await Invitation.findOne(live).select("invitedBy").lean<{ invitedBy: Types.ObjectId }>();
+    const held = await Invitation.findOne({ email, status: "pending" })
+      .select("invitedBy")
+      .lean<{ invitedBy: Types.ObjectId }>();
     if (held) return { kind: "held", invitedBy: held.invitedBy };
 
     const { token, tokenHash, expiresAt } = freshSecret();

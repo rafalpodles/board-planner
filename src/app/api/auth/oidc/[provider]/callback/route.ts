@@ -19,6 +19,7 @@ import {
   finishFlow,
   holdForAcceptance,
   holdForSignUp,
+  FlowOutcome,
   VerifiedClaims,
 } from "@/lib/oidc/flow";
 import { applyAdminGroup } from "@/lib/oidc/admin-group";
@@ -130,7 +131,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
     origin,
     query: new URL(request.url).search,
   });
-  if (!outcome.ok) return redirectTo(origin, "/login?sso=failed");
+  if (!outcome.ok) return failedRoundTrip(origin, outcome);
   const { claims } = outcome;
   await connectDB();
 
@@ -189,8 +190,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
 
   const found = await accountFor(provider, claims);
   if ("refused" in found) {
-    if (found.refused === "no_account" && (await mayJoin(provider, claims))) {
-      // An invitation names the role and boards meant for this person; signing up would drop them
+    // An invitation names the role and boards meant for this person: the provider proving the
+    // invited mailbox stands in for the link mailed to it, open domain or not (BP-839)
+    if (found.refused === "no_account" && provesTheAddress(provider, claims)) {
       const invited = await Invitation.findOne({
         email: claims.email,
         status: "pending",
@@ -202,6 +204,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
           buildFlowCookie(ACCEPT_COOKIE, binder, Math.floor(ACCEPT_TTL_MS / 1000)),
         ]);
       }
+    }
+    if (found.refused === "no_account" && (await mayJoin(provider, claims))) {
       const binder = await holdForSignUp({ provider, claims });
       return redirectTo(origin, "/join/sso", [buildFlowCookie(JOIN_COOKIE, binder, Math.floor(ACCEPT_TTL_MS / 1000))]);
     }
@@ -212,9 +216,21 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
   return signInAs(found.user, request, origin, clientIp, outcome.next ?? "/projects");
 }
 
-/** Only a provider whose word proves the mailbox opens sign-up, never GitHub's `verified`. */
+/** Back to where the round trip began, which is the page that can say what to do next. */
+function failedRoundTrip(origin: string, outcome: Extract<FlowOutcome, { ok: false }>) {
+  const intent = outcome.reason === "rejected" ? outcome.intent : null;
+  if (intent === "link") return redirectTo(origin, "/settings/security?link=failed");
+  if (intent === "invite") return redirectTo(origin, "/invite/sso?error=failed");
+  return redirectTo(origin, "/login?sso=failed");
+}
+
+/** Only a provider whose word proves the mailbox, never GitHub's `verified`. */
+function provesTheAddress(provider: OidcProvider, claims: VerifiedClaims) {
+  return provider.linksByAddress && claims.emailVerified && Boolean(claims.email);
+}
+
 async function mayJoin(provider: OidcProvider, claims: VerifiedClaims) {
-  return provider.linksByAddress && claims.emailVerified && Boolean(claims.email) && (await signUpOpenTo(claims.email));
+  return provesTheAddress(provider, claims) && (await signUpOpenTo(claims.email));
 }
 
 async function signInAs(user: IUser, request: Request, origin: string, clientIp: string | null, path: string) {

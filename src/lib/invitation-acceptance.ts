@@ -40,7 +40,11 @@ export async function completeAcceptance(
   request: Request,
   clientIp: string | null
 ): Promise<NextResponse> {
-  const authority = await authorityAtAcceptance(invitation);
+  // Nothing exists yet that the claim is tied to, so a failure here gives the link back
+  const authority = await authorityAtAcceptance(invitation).catch(async (err) => {
+    await releaseInvitation(invitation._id).catch(() => {});
+    throw err;
+  });
   if (!authority) {
     await revokeClaimedInvitation(invitation._id);
     return NextResponse.json({ error: INVITATION_REFUSALS.revoked }, { status: 400 });
@@ -95,8 +99,10 @@ export async function completeAcceptance(
   try {
     stillHeld = await recordAcceptance(invitation._id, user._id);
   } catch (err) {
-    // The account exists either way, so its boards are still granted below
+    // The account exists either way, so its boards are still granted below. Tried again, since a
+    // claim left unrecorded stays revocable, and revoking it would mark a used invitation withdrawn
     console.error("Failed to record an invitation's acceptance:", err);
+    stillHeld = await recordAcceptance(invitation._id, user._id).catch(() => true);
   }
   if (!stillHeld) {
     await Identity.deleteMany({ user: user._id }).catch(() => {});

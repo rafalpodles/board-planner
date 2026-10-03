@@ -102,6 +102,9 @@ serve({
       if (state) back.searchParams.set("state", state);
       if (url.searchParams.get("code_challenge_method") !== "S256") {
         back.searchParams.set("error", "invalid_request");
+      } else if (nextPerson.deny) {
+        // The person pressed Cancel at the provider
+        back.searchParams.set("error", "access_denied");
       } else {
         const code = base64url(randomBytes(24));
         codes.set(code, {
