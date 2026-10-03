@@ -47,6 +47,7 @@ test.afterEach(async () => {
 });
 
 test("a sign-in by password, then by a provider, is what the list says and how", async ({ page, browser }) => {
+  await forgetSessions();
   await signIn(page);
   await page.goto("/settings/users");
   await expect(memberCard(page)).toContainText("Never signed in · Password");
