@@ -7,6 +7,7 @@ const findInvitationByToken = vi.fn();
 const compare = vi.fn();
 const userCount = vi.fn();
 const refuseSetupCode = vi.fn();
+const signedInRecently = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ getClientIp: () => "203.0.113.9", getAuthUser }));
@@ -18,6 +19,8 @@ vi.mock("@/lib/session", () => ({
   provenanceRefusal: () => null,
   selfOrigin: () => "https://planner.example",
   buildFlowCookie: (name: string, value: string) => `${name}=${value}`,
+  signedInRecently,
+  RECENT_SIGN_IN_REQUIRED: "sign in again",
 }));
 vi.mock("@/lib/oidc/providers", () => ({
   providerById: (id: string) => (id === "oidc" ? { id: "oidc", label: "Acme" } : null),
@@ -47,6 +50,7 @@ beforeEach(async () => {
   compare.mockResolvedValue(true);
   userCount.mockResolvedValue(0);
   refuseSetupCode.mockResolvedValue(null);
+  signedInRecently.mockResolvedValue(true);
 });
 
 describe("POST /api/auth/oidc/:provider/start", () => {
@@ -123,11 +127,21 @@ describe("POST /api/auth/oidc/:provider/start", () => {
       });
     });
 
-    it("asks a password-less account for nothing: its session is all the proof it has", async () => {
+    it("asks a password-less account for no password, only a sign-in made minutes ago", async () => {
       withPassword(undefined);
 
       expect((await start({ intent: "link" })).status).toBe(200);
       expect(compare).not.toHaveBeenCalled();
+      expect(signedInRecently).toHaveBeenCalled();
+    });
+
+    // A borrowed session is not the owner: with no password to ask, an old one must not add a way in
+    it("refuses a password-less account whose sign-in is not recent", async () => {
+      withPassword(undefined);
+      signedInRecently.mockResolvedValue(false);
+
+      expect((await start({ intent: "link" })).status).toBe(403);
+      expect(beginFlow).not.toHaveBeenCalled();
     });
 
     it("refuses without a session, and from a machine credential", async () => {
@@ -195,10 +209,13 @@ describe("linking with password sign-in off (BP-830)", () => {
 
   // A password is no credential once passwords sign nobody in; the session is the proof, as for an
   // account that never had one
-  it("asks an account that has a password for nothing", async () => {
+  it("asks an account that has a password for a recent sign-in instead", async () => {
     process.env.PASSWORD_SIGN_IN = "off";
 
     expect((await start({ intent: "link" })).status).toBe(200);
     expect(compare).not.toHaveBeenCalled();
+
+    signedInRecently.mockResolvedValue(false);
+    expect((await start({ intent: "link" })).status).toBe(403);
   });
 });

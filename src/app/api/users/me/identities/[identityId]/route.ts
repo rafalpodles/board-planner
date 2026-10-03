@@ -7,6 +7,7 @@ import { isEmailConfigured } from "@/lib/email";
 import { providerById } from "@/lib/oidc/providers";
 import { Identity } from "@/models/identity";
 import { User } from "@/models/user";
+import { RECENT_SIGN_IN_REQUIRED, signedInRecently } from "@/lib/session";
 import { passwordSignInEnabled } from "@/lib/password-sign-in";
 
 export const DELETE = withAuth(async (_request, { params, user }) => {
@@ -31,6 +32,11 @@ export const DELETE = withAuth(async (_request, { params, user }) => {
       : "This is your only way to sign in. Ask an administrator to set a password for you first.";
   if (!passwordSignsIn && (await Identity.countDocuments({ user: user._id, _id: { $ne: identity._id } })) === 0) {
     return NextResponse.json({ error: lastWayIn }, { status: 409 });
+  }
+  // Removing a way in, with no password left to fall back on, needs the owner and not a borrowed
+  // session: otherwise a provider linked by an intruder could be left as the only one
+  if (!passwordSignsIn && !(await signedInRecently(user.sessionId))) {
+    return NextResponse.json({ error: RECENT_SIGN_IN_REQUIRED }, { status: 403 });
   }
   await Identity.deleteOne({ _id: identity._id, user: user._id });
   // Two unlinks in two tabs each counted the other's provider as the way in that remains

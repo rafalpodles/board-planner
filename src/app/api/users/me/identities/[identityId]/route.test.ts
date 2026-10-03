@@ -7,6 +7,7 @@ const identityInsert = vi.fn();
 const isEmailConfigured = vi.fn();
 const userFindById = vi.fn();
 const logInstanceAudit = vi.fn();
+const signedInRecently = vi.fn();
 let caller: Record<string, unknown>;
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
@@ -19,6 +20,7 @@ vi.mock("@/lib/middleware", () => ({
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/lib/oidc/providers", () => ({ providerById: () => ({ label: "Acme" }) }));
 vi.mock("@/lib/email", () => ({ isEmailConfigured }));
+vi.mock("@/lib/session", () => ({ signedInRecently, RECENT_SIGN_IN_REQUIRED: "sign in again" }));
 vi.mock("@/models/identity", () => ({
   Identity: {
     findOne: identityFindOne,
@@ -47,6 +49,7 @@ beforeEach(() => {
   identityCount.mockResolvedValue(0);
   isEmailConfigured.mockReturnValue(true);
   passwordIs("$2a$10$hash");
+  signedInRecently.mockResolvedValue(true);
 });
 
 describe("DELETE /api/users/me/identities/:id", () => {
@@ -95,6 +98,25 @@ describe("DELETE /api/users/me/identities/:id", () => {
     expect(res.status).toBe(409);
     expect(identityCount).toHaveBeenLastCalledWith({ user: "u1" });
     expect(identityInsert).toHaveBeenCalledWith(expect.objectContaining({ _id: ID, provider: "oidc" }));
+  });
+
+  it("asks an account with a password for no recent sign-in: the password stays a way in", async () => {
+    signedInRecently.mockResolvedValue(false);
+
+    expect((await unlink()).status).toBe(200);
+  });
+
+  // Unlinking with no password behind it, from a session that is not fresh, could leave an
+  // intruder's own provider as the account's only way in
+  it("refuses a password-less account whose sign-in is not recent", async () => {
+    passwordIs(undefined);
+    identityCount.mockResolvedValue(1);
+    signedInRecently.mockResolvedValue(false);
+
+    const res = await unlink();
+
+    expect(res.status).toBe(403);
+    expect(identityDelete).not.toHaveBeenCalled();
   });
 
   it("answers 404 for an identity that is somebody else's", async () => {

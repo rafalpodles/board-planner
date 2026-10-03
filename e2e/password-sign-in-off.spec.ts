@@ -179,6 +179,21 @@ test("Security asks for no password, and will not unlink the only provider thoug
   await expect(page.getByRole("dialog")).toContainText("Link another provider first.");
 });
 
+// With no password to ask for, a session that is not fresh may be a borrowed one: it must not be
+// able to add a way in
+test("linking a provider needs a sign-in made minutes ago", async ({ page }) => {
+  await signInAs(page, MEMBER_ID);
+  await (await db())
+    .collection("sessions")
+    .updateMany({ user: MEMBER_ID }, { $set: { createdAt: new Date(Date.now() - 60 * 60 * 1000) } });
+
+  await page.goto(at("/settings/security"));
+  await page.getByRole("button", { name: "Link GitHub" }).click();
+
+  await expect(page.locator('[role="alert"]:not(#__next-route-announcer__)')).toContainText("sign in again first");
+  await expect(page).toHaveURL(/\/settings\/security/);
+});
+
 test("an administrator is offered no account with a password and no password to hand out", async ({ page }) => {
   await signInAs(page, ADMIN_ID);
 

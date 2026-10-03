@@ -13,7 +13,13 @@ import {
   withLockout,
 } from "@/lib/rate-limit";
 import { User } from "@/models/user";
-import { buildFlowCookie, provenanceRefusal, selfOrigin } from "@/lib/session";
+import {
+  buildFlowCookie,
+  provenanceRefusal,
+  RECENT_SIGN_IN_REQUIRED,
+  selfOrigin,
+  signedInRecently,
+} from "@/lib/session";
 import { providerById } from "@/lib/oidc/providers";
 import { beginFlow, FLOW_COOKIE, FLOW_TTL_MS } from "@/lib/oidc/flow";
 import { findInvitationByToken } from "@/lib/invitations";
@@ -64,11 +70,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
     if (!current || current.viaMachineCredential) {
       return NextResponse.json({ error: "Sign in to link a provider" }, { status: 401 });
     }
-    // A linked provider is a standing way in, so a borrowed session must not be enough to add one.
-    // An account with no password has nothing else to ask for: its session is all the proof it has,
-    // and with password sign-in off nobody's password is a credential any more
+    // A linked provider is a standing way in, so a borrowed session must not be enough to add one:
+    // the password where there is one that signs in, otherwise a sign-in made minutes ago
     const record = await User.findById(current._id).select("+password");
-    if (record?.password && passwordSignInEnabled()) {
+    if (!(record?.password && passwordSignInEnabled())) {
+      if (!(await signedInRecently(current.sessionId))) {
+        return NextResponse.json({ error: RECENT_SIGN_IN_REQUIRED }, { status: 403 });
+      }
+    } else {
       const typed = read.value.currentPassword;
       if (typeof typed !== "string" || !typed) {
         return NextResponse.json({ error: "Enter your current password to link a provider" }, { status: 400 });
