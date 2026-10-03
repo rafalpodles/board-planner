@@ -26,7 +26,13 @@ const LEGACY_INDEXES: Record<string, { key: Record<string, 1>; name: string; par
 };
 
 const LEGACY_TENANT_ROW = { _id: new mongoose.Types.ObjectId("0000000000000000000000cc"), entitlements: { plan: "free", features: [], source: "none" } };
-const PAID_TENANT_ROW = { _id: new mongoose.Types.ObjectId("0000000000000000000000dd"), entitlements: { plan: "pro", features: [], customer: "Acme", source: "service" } };
+const row = (n: string, entitlements: object) => ({ _id: new mongoose.Types.ObjectId(`0000000000000000000000${n}`), entitlements });
+const KEPT_TENANT_ROWS = [
+  row("d1", { plan: "pro", features: [], source: "none" }),
+  row("d2", { plan: "free", features: [], source: "env" }),
+  row("d3", { plan: "free", features: ["integrations.coda"], source: "none" }),
+  row("d4", { plan: "free", features: [], source: "none", customer: "Acme" }),
+];
 
 let conn: mongoose.Connection;
 
@@ -64,7 +70,7 @@ async function legacyDatabase() {
     { email: "again@x.test", status: "accepted", tokenHash: "hash-old-1" },
     { email: "again@x.test", status: "accepted", tokenHash: "hash-old-2" },
   ]);
-  await db.collection("tenants").insertMany([LEGACY_TENANT_ROW, PAID_TENANT_ROW]);
+  await db.collection("tenants").insertMany([LEGACY_TENANT_ROW, ...KEPT_TENANT_ROWS]);
 }
 
 test.beforeEach(legacyDatabase);
@@ -109,7 +115,7 @@ test("apply gives every scoped document the default tenant, makes the default te
   expect(await conn.db!.collection("tenants").findOne({ _id: DEFAULT_TENANT_ID })).toMatchObject({
     entitlements: { plan: "free", source: "none" },
   });
-  expect(await conn.db!.collection("tenants").countDocuments({})).toBe(3);
+  expect(await conn.db!.collection("tenants").countDocuments({})).toBe(2 + KEPT_TENANT_ROWS.length);
   expect(await conn.db!.collection("users").indexes()).toEqual(indexesBefore);
 });
 
@@ -133,12 +139,12 @@ test("a late tenant-less row is given the default tenant and another tenant's ro
   expect(await conn.db!.collection("projects").findOne({ key: "LATE" })).toMatchObject({ tenant: DEFAULT_TENANT_ID });
 });
 
-test("start-up runs the backfill once, removes the legacy tenant row that holds nothing and keeps a paid one", async () => {
+test("start-up runs the backfill once, removes the legacy tenant row that holds nothing and keeps every row that holds something", async () => {
   const first = await backfillTenantsOnce(conn);
 
   expect(first).not.toBeNull();
   const rows = await conn.db!.collection("tenants").find({}).toArray();
-  expect(rows.map((r) => String(r._id)).sort()).toEqual([String(DEFAULT_TENANT_ID), String(PAID_TENANT_ROW._id)].sort());
+  expect(rows.map((r) => String(r._id)).sort()).toEqual([String(DEFAULT_TENANT_ID), ...KEPT_TENANT_ROWS.map((r) => String(r._id))].sort());
   expect((rows.find((r) => DEFAULT_TENANT_ID.equals(r._id)) as { backfilledAt?: unknown }).backfilledAt).toBeInstanceOf(Date);
 
   await conn.db!.collection("projects").insertOne({ key: "AFTER" });
@@ -171,6 +177,18 @@ const declaredPerTenantUniques: Spec[] = scopedModelNames().flatMap((model) =>
     .filter(([fields, options]) => options?.unique && "tenant" in fields)
     .map(([fields, options]) => ({ model, fields: fields as Record<string, number>, options: options as Spec["options"] }))
 );
+
+test("all seven per-tenant uniques are declared, so none can drop out of the checks below", () => {
+  expect(declaredPerTenantUniques.map(({ model, fields }) => `${model}:${Object.keys(fields).join("+")}`).sort()).toEqual([
+    "AgentBlock:key+tenant",
+    "Identity:issuer+subject+tenant",
+    "Invitation:email+tenant",
+    "Project:key+tenant",
+    "User:email+tenant",
+    "User:username+tenant",
+    "Worker:name+host+tenant",
+  ]);
+});
 
 const insertOutcome = (promise: Promise<unknown>) =>
   promise.then(

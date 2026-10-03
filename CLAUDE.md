@@ -90,6 +90,7 @@ mcp-server/           # Standalone MCP server (stdio transport)
 - **Auth**: `getAuthUser(req)` tries Bearer token first (`cpat_` OAuth, `cp_` API token), then the session cookie. A presented Bearer that resolves to nothing returns null rather than falling back to the cookie. Basic Auth was removed in BP-293; the browser holds an opaque `cps_` session token in an httpOnly cookie, never a password. Only the cookie path yields `viaMachineCredential = false`.
 - **Middleware**: `withAuth` → `withAdmin` → `withProjectAccess` (composable)
 - **Task numbers**: Auto-increment per project via atomic `$inc` on `Project.taskCounter`
+- **Tenant**: every model except `Tenant` and `RateLimit` has a required `tenant` (`withTenant` in `src/lib/tenant-field.ts`), defaulting to the one default tenant until queries are scoped (BP-663). Documents from before are given it once at start-up (`src/lib/tenant-migration.ts`). Raw-driver and update-pipeline writes get no schema default and must set it themselves. A per-tenant unique leads with the chosen field, never with `tenant`: MongoDB 4.4 cannot use `{tenant, key}` for a query on `key` alone
 - **Task keys**: `PROJECT_KEY-NUMBER` (e.g., `CP-5`), used in MCP and GitHub matching
 - **Activity logging**: a failed write never breaks the request, but `updateTask` awaits its rows
   before answering, because the task view refetches History on the response. Rows are append-only;
