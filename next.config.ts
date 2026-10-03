@@ -55,6 +55,11 @@ const nextConfig: NextConfig = {
           { key: "Reporting-Endpoints", value: REPORTING_ENDPOINTS },
         ],
       },
+      {
+        // After the two above, so it wins: the relay's URL carries a provider's code
+        source: "/api/auth/oidc/:provider/relay",
+        headers: [{ key: "Referrer-Policy", value: "no-referrer" }],
+      },
     ];
   },
 };

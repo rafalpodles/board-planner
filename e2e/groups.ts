@@ -140,6 +140,7 @@ export const GROUPS = {
     "oidc-sign-in.spec.ts",
     "github-sign-in.spec.ts",
     "password-sign-in-off.spec.ts",
+    "oidc-relay.spec.ts",
     "deactivation.spec.ts",
     "users-screen.spec.ts",
     "email-on-account.spec.ts",

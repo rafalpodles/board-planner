@@ -219,6 +219,15 @@ GITHUB_OAUTH_BASE_URL=    # Optional — where GitHub's sign-in pages are, when 
                           # An https origin with no path (http only to 127.0.0.1/[::1]); otherwise
                           # GitHub is off. The site is the GitHub identity's issuer: changing it
                           # later orphans every existing GitHub link
+OIDC_RELAY_ORIGIN=        # Optional — another address of this instance that every provider sends
+                          # the browser back to: redirect URI OIDC_RELAY_ORIGIN +
+                          # /api/auth/oidc/{oidc,google,github}/relay, which finds the sign-in by its
+                          # state and forwards the answer unchanged to the callback on PUBLIC_ORIGIN
+                          # (BP-851; per tenant from BP-666, because Google takes no wildcard redirect
+                          # URI for tenant subdomains). A bare https origin (http only to
+                          # 127.0.0.1/[::1]); anything else stops the app at startup. Unset: providers
+                          # return to PUBLIC_ORIGIN's callback, as before. Set it in a deploy after the
+                          # one that ships it; removing it strands sign-ins begun in the last 10 minutes
 SMTP_HOST=                # Optional — Email notifications
 SMTP_PORT=587
 SMTP_USER=
