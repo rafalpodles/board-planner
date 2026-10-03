@@ -142,7 +142,8 @@ export async function recipientsWithAccess(
     Grant.find({ subject: { $in: subjectIds }, objectType: "project", object: projectId })
       .select("subject relation")
       .lean(),
-    User.find({ _id: { $in: subjectIds } }).select("role").lean(),
+    // A deactivated account sees nothing, so it is told nothing and handed nothing (BP-832)
+    User.find({ _id: { $in: subjectIds }, deactivatedAt: null }).select("role").lean(),
   ]);
 
   const relationOf = new Map(grants.map((g) => [String(g.subject), g.relation]));
@@ -217,7 +218,8 @@ export async function ownerCounts(projectIds: string[]): Promise<Map<string, num
   })
     .select("subject object")
     .lean();
-  const holders = await User.find({ _id: { $in: owners.map((g) => g.subject) } })
+  // An owner who is deactivated manages nothing, so cannot be the owner that keeps a board run
+  const holders = await User.find({ _id: { $in: owners.map((g) => g.subject) }, deactivatedAt: null })
     .select("_id")
     .lean();
   const living = new Set(holders.map((u) => String(u._id)));
@@ -243,6 +245,8 @@ export interface OwnedBoard {
 
 export async function boardsOnlyOwnedBy(userId: string): Promise<OwnedBoard[]> {
   await connectDB();
+  // Never counted as an owner, so whatever they hold, the board keeps the owners it has (BP-832)
+  if (await User.exists({ _id: userId, deactivatedAt: { $ne: null } })) return [];
   const owned = await Grant.find({ subject: userId, objectType: "project", relation: "owner" })
     .select("object")
     .lean();
@@ -255,6 +259,16 @@ export async function boardsOnlyOwnedBy(userId: string): Promise<OwnedBoard[]> {
     .sort({ name: 1 })
     .lean();
   return boards.map((b) => ({ _id: String(b._id), name: b.name, key: b.key }));
+}
+
+/** Boards this person owns that have no active owner left, read after a deactivation (BP-832). */
+export async function boardsLeftWithoutOwner(userId: string): Promise<string[]> {
+  await connectDB();
+  const owned = await Grant.find({ subject: userId, objectType: "project", relation: "owner" })
+    .select("object")
+    .lean();
+  const counts = await ownerCounts(owned.map((g) => String(g.object)));
+  return [...counts].filter(([, owners]) => owners === 0).map(([id]) => id);
 }
 
 export interface OrphanGrant {

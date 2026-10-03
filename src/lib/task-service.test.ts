@@ -116,7 +116,8 @@ vi.mock("@/models/task", async () => ({
   },
 }));
 vi.mock("@/models/project", () => ({ Project: { findById, findOneAndUpdate: projectFindOneAndUpdate } }));
-vi.mock("@/models/user", () => ({ User: { findOne: userFindOne, findById: userFindById } }));
+const userExists = vi.fn(async (_filter?: unknown) => ({ _id: "active" }) as unknown);
+vi.mock("@/models/user", () => ({ User: { findOne: userFindOne, findById: userFindById, exists: userExists } }));
 /**
  * Mocked as its own module, not through the User mock (BP-419). `User.findOne` here is a blanket
  * stub that answers every lookup the same way, and the PM's is one of several — so a test setting
@@ -1935,6 +1936,25 @@ describe("a status change announces the same things whichever path made it", () 
     expect(taskCreate.mock.calls[0]?.[0].assignedBy).toBe("u9");
   });
 
+  // BP-832. Nobody can see work handed to them while deactivated, and nobody would be told
+  it("leaves the next occurrence unassigned when its assignee is deactivated", async () => {
+    setup({ recurrence: { frequency: "weekly", interval: 1 }, assignee: "u9", assignedBy: "u9" });
+    userExists.mockResolvedValueOnce(null);
+    await updateTask("p1", "t1", { status: "shipped" }, "actor");
+    await flush();
+
+    expect(taskCreate.mock.calls[0]?.[0].assignee).toBeNull();
+    expect(userExists).toHaveBeenCalledWith({ _id: "u9", deactivatedAt: null });
+  });
+
+  it("keeps an active assignee on the next occurrence", async () => {
+    setup({ recurrence: { frequency: "weekly", interval: 1 }, assignee: "u9", assignedBy: "u9" });
+    await updateTask("p1", "t1", { status: "shipped" }, "actor");
+    await flush();
+
+    expect(String(taskCreate.mock.calls[0]?.[0].assignee)).toBe("u9");
+  });
+
   // BP-358: choosing an agent is the whole of the hand-over, so an occurrence created without one
   // is a task no machine looks at. A weekly task that ran autonomously for months would simply
   // stop, and the card would look entirely normal — no error, no field a person would notice.
@@ -2983,6 +3003,16 @@ describe("a task records who assigned it", () => {
     // What User.findOne actually resolves to here — updateTask reads `._id` off it directly, with
     // no .lean(), so a mock wrapping the document in one would leave the id undefined
     userFindOne.mockResolvedValue({ _id: "u2", username: "kuba" });
+  });
+
+  // BP-832. Nobody can hand work to an account that signs in by no path
+  it("refuses a deactivated assignee, naming why", async () => {
+    userFindOne.mockResolvedValue({ _id: "u2", username: "kuba", deactivatedAt: new Date() });
+
+    const result = await updateTask("p1", "t1", { assignee: "kuba" }, "actor");
+
+    expect(result).toMatchObject({ ok: false, status: 400, error: "kuba is deactivated" });
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it("stamps the actor when the assignee changes", async () => {

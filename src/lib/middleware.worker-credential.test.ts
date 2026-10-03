@@ -5,6 +5,7 @@ const verifyWorkerCredential = vi.fn();
 const getAuthUser = vi.fn();
 const projectFindById = vi.fn();
 const userFindById = vi.fn();
+const userExists = vi.fn();
 const check = vi.fn();
 const accessibleProjectIds = vi.fn();
 
@@ -20,7 +21,7 @@ vi.mock("./grants", () => ({ check, accessibleProjectIds }));
 vi.mock("@/models/project", () => ({
   Project: { findById: projectFindById, findOne: vi.fn() },
 }));
-vi.mock("@/models/user", () => ({ User: { findById: userFindById } }));
+vi.mock("@/models/user", () => ({ User: { findById: userFindById, exists: userExists } }));
 const taskExists = vi.fn();
 const taskFindOne = vi.fn();
 vi.mock("@/models/task", () => ({ Task: { findOne: taskFindOne, exists: taskExists } }));
@@ -87,6 +88,7 @@ beforeEach(() => {
   accessibleProjectIds.mockResolvedValue([PROJECT_ID]);
   // Nothing in flight unless a test says so
   taskExists.mockResolvedValue(null);
+  userExists.mockResolvedValue(null);
 });
 
 describe("a worker reporting with its own credential", () => {
@@ -97,6 +99,17 @@ describe("a worker reporting with its own credential", () => {
 
     expect(res.status).toBe(200);
     expect(handler).toHaveBeenCalled();
+  });
+
+  // BP-832. The same second line withWorker has: its credential was scrambled at deactivation
+  it("refuses a machine whose owner is deactivated", async () => {
+    userExists.mockResolvedValue({ _id: OWNER_ID });
+    const handler = vi.fn();
+
+    const res = await withProjectAccessOrWorker(handler)(workerRequest(), context());
+
+    expect(res.status).toBe(401);
+    expect(handler).not.toHaveBeenCalled();
   });
 
   // Comments are authored by whoever the handler is handed. Without this a worker's note on a task

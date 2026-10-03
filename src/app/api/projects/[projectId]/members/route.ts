@@ -42,7 +42,7 @@ export const GET = withProjectOwner(async (_request, { params }) => {
     ...audienceFilterFrom(grants.map((g) => g.subject)),
     kind: { $ne: "machine" },
   })
-    .select("username fullName role")
+    .select("username fullName role deactivatedAt")
     .sort({ username: 1 })
     .lean();
 
@@ -55,6 +55,7 @@ export const GET = withProjectOwner(async (_request, { params }) => {
       fullName: u.fullName,
       relation: byUser.get(String(u._id)) ?? null,
       instanceAdmin: u.role === "admin",
+      deactivated: !!u.deactivatedAt,
     }))
   );
 });
@@ -75,9 +76,13 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
   const userId = new Types.ObjectId(rawUserId).toString();
 
   await connectDB();
-  const target = await User.findById(userId).select("_id role kind username");
+  const target = await User.findById(userId).select("_id role kind username deactivatedAt");
   if (!target || target.kind === "machine") {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
+  }
+  // Removing a deactivated account's grant stays open; giving it one does not (BP-832)
+  if (target.deactivatedAt) {
+    return NextResponse.json({ error: `${target.username} is deactivated` }, { status: 400 });
   }
 
   const current = await Grant.findOne({ subject: userId, objectType: "project", object: projectId })
@@ -176,7 +181,10 @@ export const DELETE = withProjectOwner(async (request, { params, user }) => {
   const subject = new Types.ObjectId(userId).toString();
 
   await connectDB();
-  if ((await ownerCount(projectId)) <= 1) {
+  // A deactivated owner is not one of those counted as keeping the board run, so taking them off
+  // can never leave it with fewer (BP-832)
+  const subjectActive = !!(await User.exists({ _id: subject, deactivatedAt: null }));
+  if (subjectActive && (await ownerCount(projectId)) <= 1) {
     const remaining = await Grant.find({ objectType: "project", object: projectId })
       .select("subject relation")
       .lean();

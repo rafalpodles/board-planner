@@ -56,6 +56,7 @@ describe("GET assignable-users", () => {
     expect(userFind).toHaveBeenCalledWith(
       {
         kind: { $ne: "machine" },
+        deactivatedAt: null,
         $or: [{ role: "admin" }, { _id: { $in: [U1] } }],
       },
       "username fullName"

@@ -25,6 +25,7 @@ export const GET = withProjectOwner(async (request, { params }) => {
   const pattern = new RegExp(escapeRegex(q), "i");
   const users = await User.find({
     kind: { $ne: "machine" },
+    deactivatedAt: null,
     _id: { $nin: grantedIds },
     $or: [{ username: pattern }, { fullName: pattern }],
   })

@@ -94,6 +94,13 @@ describe("POST /api/auth/forgot", () => {
     );
   });
 
+  // BP-832. Answered as an unknown account is: no link, and nothing to tell the two apart
+  it("never looks for a deactivated account", async () => {
+    await POST(post());
+
+    expect(userFindOne).toHaveBeenCalledWith(expect.objectContaining({ deactivatedAt: null }));
+  });
+
   // Both lookups run every time, in parallel: doing the second only on a miss makes the miss path
   // slower than the hit path, which is the enumeration oracle read backwards
   it("looks for the address and the username, always, and normalises both", async () => {

@@ -55,6 +55,7 @@ function expectedFilter(over: { nin?: string[]; pattern?: RegExp } = {}) {
   const pattern = over.pattern ?? new RegExp("ann", "i");
   return {
     kind: { $ne: "machine" },
+    deactivatedAt: null,
     _id: { $nin: over.nin ?? [] },
     $or: [{ username: pattern }, { fullName: pattern }],
   };

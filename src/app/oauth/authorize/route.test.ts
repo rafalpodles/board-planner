@@ -293,6 +293,17 @@ describe("GET /oauth/authorize", () => {
     expect(oauthConsentCreate).toHaveBeenCalledTimes(1);
   });
 
+  // BP-832. Its sessions are revoked, so this is a session minted in between: it grants nothing
+  it("takes no session of a deactivated account, and asks for a sign-in instead", async () => {
+    resolveSession.mockResolvedValue({ userId: "u1", sessionId: "s1" });
+    userFindById.mockResolvedValue({ ...USER, deactivatedAt: new Date() });
+
+    const body = await (await GET(authorizeGet({}, sessionCookie()))).text();
+
+    expect(body).not.toContain("Grant access");
+    expect(oauthConsentCreate).not.toHaveBeenCalled();
+  });
+
   // An account with no boards cannot fill a narrow grant, and the answer to that dead end is not to
   // pre-tick the widest credential the account can issue (BP-383 review).
   it("offers the wide grant to an account with no boards without pre-selecting it", async () => {

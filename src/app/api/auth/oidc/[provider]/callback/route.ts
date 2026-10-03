@@ -81,16 +81,19 @@ async function link(provider: OidcProvider, claims: VerifiedClaims, user: IUser,
  */
 async function accountFor(provider: OidcProvider, claims: VerifiedClaims) {
   const linked = await linkedAccount(claims, true);
+  if (linked?.deactivatedAt) return { refused: "deactivated" as const };
   if (linked) return { user: linked };
   if (!provider.linksByAddress) return { refused: "not_linked" as const };
   if (!claims.email) return { refused: "no_account" as const };
   if (!claims.emailVerified) return { refused: "unverified" as const };
   const user = await User.findOne({ email: claims.email, kind: { $ne: "machine" } });
   if (!user) return { refused: "no_account" as const };
+  if (user.deactivatedAt) return { refused: "deactivated" as const };
   if (!user.emailVerifiedAt) return { refused: "unproven" as const };
   if (!(await link(provider, claims, user, "by its verified address"))) {
     // Linked by a racing sign-in: sign in as whichever account it now belongs to
     const winner = await linkedAccount(claims, true);
+    if (winner?.deactivatedAt) return { refused: "deactivated" as const };
     return winner ? { user: winner } : { refused: "no_account" as const };
   }
   return { user };

@@ -145,6 +145,7 @@ export interface IUser {
   fullName: string;
   email: string;
   emailVerifiedAt?: Date | null;
+  deactivatedAt?: Date | null;
   /** @deprecated Superseded by `notifications`. Kept as the fallback for accounts that predate it. */
   emailNotifications: boolean;
   emailDigest: boolean;
@@ -1190,6 +1191,7 @@ export interface ApiUser {
   createdAt: string;
   /** When the address was last proven to reach the account; null for an address only typed in */
   emailVerifiedAt?: string | null;
+  deactivatedAt?: string | null;
 }
 
 /** What GET /api/projects/:id/assignable-users returns: enough to name someone and assign them */
@@ -1272,6 +1274,7 @@ export interface ApiProjectMember {
   fullName: string;
   relation: GrantRelation | null;
   instanceAdmin: boolean;
+  deactivated?: boolean;
 }
 
 export interface ApiMemberCandidate {
@@ -1639,6 +1642,8 @@ export const INSTANCE_AUDIT_ACTIONS = [
   "identity_unlinked",
   "user_email_confirmed",
   "user_signed_out_everywhere",
+  "user_deactivated",
+  "user_reactivated",
   // A refused change accepted, declined, or given up on. Audited at the instance rather than the
   // project, because what accepting spends is the machine owner's pinned GitHub identity and the
   // CI minutes of whatever repository the push lands in — neither of which belongs to the board.

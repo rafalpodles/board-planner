@@ -428,7 +428,8 @@ export async function GET(req: Request) {
   // what is being asked for is the grant, not the identity.
   if (query.get("prompt") !== "login") {
     const session = await browserSession(req);
-    const user = session ? await User.findById(session.userId) : null;
+    const found = session ? await User.findById(session.userId) : null;
+    const user = found && !found.deactivatedAt ? found : null;
     if (session && user) {
       // A GET that writes a row is a GET that can be looped. It is keyed on the account rather
       // than the address: getClientIp returns null unless a proxy hop is configured, so an

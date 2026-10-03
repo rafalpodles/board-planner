@@ -16,7 +16,7 @@ const oid = () => new Types.ObjectId();
 const same = (a: unknown, b: unknown) => String(a) === String(b);
 const inIds = (ids: unknown[], value: unknown) => ids.some((id) => same(id, value));
 
-type Person = { _id: Types.ObjectId; role: string; kind?: string };
+type Person = { _id: Types.ObjectId; role: string; kind?: string; deactivatedAt?: Date | null };
 type GrantRow = { subject: Types.ObjectId; object: Types.ObjectId; relation: string };
 
 // Each mock applies the filter and the projection production sends, so a query that stopped
@@ -26,12 +26,13 @@ function world({
   projects = [] as Types.ObjectId[],
   grants = [] as GrantRow[],
 }) {
-  userFind.mockImplementation((filter: { _id: { $in: unknown[] } }) => ({
+  userFind.mockImplementation((filter: { _id: { $in: unknown[] }; deactivatedAt?: null }) => ({
     select: (fields: string) => ({
       lean: () =>
         Promise.resolve(
           people
             .filter((p) => inIds(filter._id.$in, p._id))
+            .filter((p) => !("deactivatedAt" in filter) || !p.deactivatedAt)
             .map((p) => ({
               _id: p._id,
               ...(fields.includes("role") ? { role: p.role } : {}),
@@ -105,6 +106,31 @@ describe("what an invitation may still grant when it is accepted", () => {
         boards: [board(p1, admin)],
       } as never)
     ).toBeNull();
+  });
+
+  // BP-832. The plainest loss of standing: deactivated for cause, with a link already out
+  it("refuses an administrator invitation whose inviter has been deactivated", async () => {
+    world({ people: [{ _id: admin, role: "admin", deactivatedAt: new Date() }], projects: [p1] });
+
+    expect(
+      await authorityAtAcceptance({ role: "admin", invitedBy: admin, boards: [board(p1, admin, "owner")] } as never)
+    ).toBeNull();
+  });
+
+  it("drops a board added by an owner since deactivated", async () => {
+    world({
+      people: [{ _id: admin, role: "admin" }, { _id: owner, role: "member", deactivatedAt: new Date() }],
+      projects: [p1, p2],
+      grants: [{ subject: owner, object: p2, relation: "owner" }],
+    });
+
+    expect(
+      await authorityAtAcceptance({
+        role: "member",
+        invitedBy: admin,
+        boards: [board(p1, admin), board(p2, owner)],
+      } as never)
+    ).toEqual({ role: "member", boards: [board(p1, admin)] });
   });
 
   it("never counts a machine account as an administrator", async () => {

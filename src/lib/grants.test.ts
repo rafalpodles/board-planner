@@ -127,8 +127,10 @@ vi.mock("@/models/grant", () => ({
     deleteMany: (...args: unknown[]) => grantDeleteMany(...args),
   },
 }));
+const userExists = vi.fn(async (_filter?: unknown) => null as unknown);
 vi.mock("@/models/user", () => ({
   User: {
+    exists: (filter: unknown) => userExists(filter),
     find: (...args: unknown[]) => userFind(...args),
     distinct: (...args: unknown[]) => userDistinct(...args),
   },
@@ -150,6 +152,7 @@ const {
   canBeAssigned,
   ownerCounts,
   boardsOnlyOwnedBy,
+  boardsLeftWithoutOwner,
   findOrphanGrants,
   deleteOrphanGrants,
 } = await import("./grants");
@@ -293,12 +296,14 @@ describe("recipientsWithAccess", () => {
   /** subject id -> the grant rows that exist for them, whatever project or object type. */
   let grantRows: { subject: string; relation: string; objectType: string; object: string }[] = [];
   let roles: Record<string, string> = {};
+  let deactivated = new Set<string>();
 
   beforeEach(() => {
     find.mockReset();
     userFind.mockReset();
     grantRows = [];
     roles = { [MEMBER]: "member", [REMOVED]: "member", [ADMIN]: "admin" };
+    deactivated = new Set();
 
     find.mockImplementation((filter: Record<string, never>) => ({
       select: () => ({
@@ -318,6 +323,7 @@ describe("recipientsWithAccess", () => {
           (((filter._id as { $in?: string[] })?.$in ?? []) as string[])
             .filter((id) => roles[id] !== undefined)
             .filter((id) => filter.role === undefined || filter.role === roles[id])
+            .filter((id) => !("deactivatedAt" in filter) || !deactivated.has(id))
             .map((id) => ({ _id: id, role: roles[id] })),
       }),
     }));
@@ -330,6 +336,15 @@ describe("recipientsWithAccess", () => {
   it("keeps a recipient who holds a grant on the project", async () => {
     grant(MEMBER);
     expect(await recipientsWithAccess([MEMBER], P)).toEqual([MEMBER]);
+  });
+
+  // BP-832. Sees nothing, so is told nothing and can be handed nothing — admin or not
+  it("drops a deactivated recipient, grant or instance admin role notwithstanding", async () => {
+    grant(MEMBER);
+    deactivated = new Set([MEMBER, ADMIN]);
+
+    expect(await recipientsWithAccess([MEMBER, ADMIN], P)).toEqual([]);
+    expect(await canBeAssigned(MEMBER, P)).toBe(false);
   });
 
   it("keeps an owner as readily as a member", async () => {
@@ -433,6 +448,7 @@ describe("owner counting", () => {
   const BOB = "507f1f77bcf86cd799439012";
   const GONE = "507f1f77bcf86cd799439013";
   let ownerRows: { subject: string; object: string }[];
+  let deactivatedAccounts: string[] = [];
   let accounts: string[];
 
   beforeEach(() => {
@@ -448,8 +464,14 @@ describe("owner counting", () => {
           : ownerRows.filter((g) => filter.object!.$in.includes(g.object))
       )
     );
-    userFind.mockImplementation((filter: { _id: { $in: string[] } }) =>
-      lean(accounts.filter((id) => filter._id.$in.includes(id)).map((id) => ({ _id: id })))
+    deactivatedAccounts = [];
+    userFind.mockImplementation((filter: { _id: { $in: string[] }; deactivatedAt?: null }) =>
+      lean(
+        accounts
+          .filter((id) => filter._id.$in.includes(id))
+          .filter((id) => !("deactivatedAt" in filter) || !deactivatedAccounts.includes(id))
+          .map((id) => ({ _id: id }))
+      )
     );
     projectFind.mockImplementation((filter: { _id: { $in: string[] } }) => ({
       select: () => ({
@@ -477,6 +499,37 @@ describe("owner counting", () => {
       { subject: ALICE, object: P },
       { subject: GONE, object: P },
     ];
+    expect((await ownerCounts([P])).get(P)).toBe(1);
+  });
+
+  // BP-832. Never counted as an owner, so deleting them leaves every board the owners it has
+  it("names no board as only owned by somebody deactivated", async () => {
+    ownerRows = [{ subject: ALICE, object: P }];
+    userExists.mockResolvedValueOnce({ _id: ALICE });
+
+    expect(await boardsOnlyOwnedBy(ALICE)).toEqual([]);
+    expect(userExists).toHaveBeenCalledWith({ _id: ALICE, deactivatedAt: { $ne: null } });
+  });
+
+  it("names the boards a deactivation left with no active owner", async () => {
+    ownerRows = [
+      { subject: ALICE, object: P },
+      { subject: ALICE, object: OTHER },
+      { subject: BOB, object: OTHER },
+    ];
+    deactivatedAccounts = [ALICE];
+
+    expect(await boardsLeftWithoutOwner(ALICE)).toEqual([P]);
+  });
+
+  // BP-832. A deactivated owner can manage nothing, so they keep no board run
+  it("does not count an owner who is deactivated", async () => {
+    ownerRows = [
+      { subject: ALICE, object: P },
+      { subject: BOB, object: P },
+    ];
+    deactivatedAccounts = [BOB];
+
     expect((await ownerCounts([P])).get(P)).toBe(1);
   });
 

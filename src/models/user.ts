@@ -49,6 +49,12 @@ const userSchema = new Schema<IUser>({
     type: Date,
     default: null,
   },
+  // Set while an administrator has turned the account off: it keeps its history and signs in by
+  // no path, holds no credential and is offered to nobody (BP-832)
+  deactivatedAt: {
+    type: Date,
+    default: null,
+  },
   // Superseded by `notifications` below. Still read for accounts that predate the grid, which is
   // why nothing migrates them: this field IS their stored preference until they save the screen.
   emailNotifications: {

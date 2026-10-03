@@ -311,6 +311,7 @@ export async function digestTick(now = new Date()): Promise<number> {
     {
       emailDigest: true,
       email: { $ne: "" },
+      deactivatedAt: null,
       lastDigestDay: { $ne: day },
     },
     // `role` for the grant lookup, `notifications` for the grid — the two questions the loop asks —

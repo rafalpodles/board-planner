@@ -84,6 +84,7 @@ export async function boardFeedSubscribers(
     {
       $and: [
         await projectAudienceFilter(projectId),
+        { deactivatedAt: null },
         ...(exceptUserId && OBJECT_ID.test(exceptUserId)
           ? [{ _id: { $ne: new Types.ObjectId(exceptUserId) } }]
           : []),

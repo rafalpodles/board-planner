@@ -24,7 +24,8 @@ export async function authorityAtAcceptance(
   const projectIds = invitation.boards.map((b) => b.project);
 
   const [people, projects, ownerships] = await Promise.all([
-    User.find({ _id: { $in: peopleIds } }).select("role kind").lean(),
+    // Deactivated is the plainest loss of standing there is (BP-832)
+    User.find({ _id: { $in: peopleIds }, deactivatedAt: null }).select("role kind").lean(),
     Project.find({ _id: { $in: projectIds } }).select("_id").lean(),
     Grant.find({
       objectType: "project",

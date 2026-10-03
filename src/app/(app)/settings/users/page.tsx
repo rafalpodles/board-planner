@@ -60,6 +60,9 @@ export default function UsersPage() {
   const [confirmSignOut, setConfirmSignOut] = useState<ApiUser | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState("");
+  const [confirmDeactivate, setConfirmDeactivate] = useState<ApiUser | null>(null);
+  const [togglingActive, setTogglingActive] = useState(false);
+  const [deactivateError, setDeactivateError] = useState("");
   const [invitations, setInvitations] = useState<ApiInvitation[]>([]);
 
   const api = useApi();
@@ -264,6 +267,39 @@ export default function UsersPage() {
     setConfirmSignOut(null);
   }
 
+  async function deactivate() {
+    if (!confirmDeactivate || togglingActive) return;
+    setTogglingActive(true);
+    setDeactivateError("");
+    try {
+      await api.put(`/api/users/${confirmDeactivate._id}`, { deactivate: true });
+    } catch (err) {
+      setDeactivateError(err instanceof Error ? err.message : "The account could not be deactivated");
+      setTogglingActive(false);
+      return;
+    }
+    setTogglingActive(false);
+    toast(`${confirmDeactivate.username} is deactivated`, "success");
+    setConfirmDeactivate(null);
+    await refreshUsers();
+  }
+
+  async function reactivate(person: ApiUser) {
+    if (togglingActive) return;
+    setTogglingActive(true);
+    try {
+      await api.put(`/api/users/${person._id}`, { reactivate: true });
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "The account could not be reactivated", "error");
+      setTogglingActive(false);
+      return;
+    }
+    setTogglingActive(false);
+    closeEdit();
+    toast(`${person.username} can sign in again`, "success");
+    await refreshUsers();
+  }
+
   async function handleDelete() {
     if (!confirmDeleteUser || deleting) return;
     setDeleting(true);
@@ -330,6 +366,11 @@ export default function UsersPage() {
                   >
                     {u.role === "admin" ? "Admin" : "Member"}
                   </span>
+                  {u.deactivatedAt && (
+                    <span className="shrink-0 text-xs px-2 py-0.5 rounded-full bg-danger/15 text-danger">
+                      Deactivated
+                    </span>
+                  )}
                 </div>
                 <p className="text-sm text-text-muted truncate">
                   @{u.username}
@@ -458,7 +499,7 @@ export default function UsersPage() {
               />
             </div>
 
-            {passwordSignIn !== false && (
+            {passwordSignIn !== false && !editUser.deactivatedAt && (
             <div className="border-t border-border pt-4">
               {currentUser?._id === editUser._id ? (
                 <>
@@ -551,16 +592,38 @@ export default function UsersPage() {
                     </Button>
                   </div>
                 )}
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => {
-                    setConfirmSignOut(editUser);
-                    closeEdit();
-                  }}
-                >
-                  Sign out everywhere
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  {/* Deactivating already ended every session; here it would only unlink the
+                      providers deactivation keeps for the way back */}
+                  {!editUser.deactivatedAt && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => {
+                        setConfirmSignOut(editUser);
+                        closeEdit();
+                      }}
+                    >
+                      Sign out everywhere
+                    </Button>
+                  )}
+                  {editUser.deactivatedAt ? (
+                    <Button size="sm" variant="secondary" onClick={() => reactivate(editUser)} disabled={togglingActive}>
+                      {togglingActive ? "Reactivating…" : "Reactivate"}
+                    </Button>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => {
+                        setConfirmDeactivate(editUser);
+                        closeEdit();
+                      }}
+                    >
+                      Deactivate
+                    </Button>
+                  )}
+                </div>
               </div>
             )}
 
@@ -607,6 +670,20 @@ export default function UsersPage() {
         loadingLabel="Confirming…"
         loading={confirmingAddress}
         error={confirmAddressError}
+      />
+      <ConfirmDialog
+        open={!!confirmDeactivate}
+        onClose={() => {
+          setConfirmDeactivate(null);
+          setDeactivateError("");
+        }}
+        onConfirm={deactivate}
+        title="Deactivate account"
+        message={`${confirmDeactivate?.fullName ?? ""} can no longer sign in, and every session, API token, connected app and enrolled machine of theirs ends. Their tasks and history stay, and you can reactivate them.`}
+        confirmLabel="Deactivate"
+        loadingLabel="Deactivating…"
+        loading={togglingActive}
+        error={deactivateError}
       />
       <ConfirmDialog
         open={!!confirmSignOut}

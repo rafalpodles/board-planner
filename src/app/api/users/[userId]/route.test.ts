@@ -29,7 +29,8 @@ vi.mock("@/lib/auth", () => ({
 }));
 const boardsOnlyOwnedBy = vi.fn();
 const grantDeleteMany = vi.fn();
-vi.mock("@/lib/grants", () => ({ check, accessibleProjectIds: vi.fn(), boardsOnlyOwnedBy }));
+const boardsLeftWithoutOwner = vi.fn(async (_id?: string) => [] as string[]);
+vi.mock("@/lib/grants", () => ({ check, accessibleProjectIds: vi.fn(), boardsOnlyOwnedBy, boardsLeftWithoutOwner }));
 vi.mock("@/models/grant", () => ({ Grant: { deleteMany: grantDeleteMany } }));
 const identityDeleteMany = vi.fn();
 vi.mock("@/models/identity", () => ({ Identity: { deleteMany: identityDeleteMany } }));
@@ -69,6 +70,7 @@ function targetDoc(overrides: Record<string, unknown> = {}) {
   return {
     _id: "target-1",
     emailVerifiedAt: new Date("2026-01-01T00:00:00Z") as Date | null,
+    deactivatedAt: null as Date | null,
     username: "target",
     role: "admin",
     email: "target@example.com",
@@ -538,6 +540,15 @@ describe("DELETE /api/users/:id", () => {
     boardsOnlyOwnedBy.mockResolvedValue([]);
   });
 
+  // BP-832. A deactivated administrator no longer counts towards keeping one
+  it("deletes a deactivated administrator while one active one remains", async () => {
+    found(person({ role: "admin", deactivatedAt: new Date() }));
+    userFindByIdAndDelete.mockResolvedValue(person({ role: "admin", deactivatedAt: new Date() }));
+    userCountDocuments.mockResolvedValue(1);
+
+    expect((await DELETE(...del(TARGET_HEX))).status).toBe(200);
+  });
+
   it("refuses the only owner of a board, naming every such board", async () => {
     found(person());
     boardsOnlyOwnedBy.mockResolvedValue([
@@ -660,7 +671,7 @@ describe("DELETE /api/users/:id", () => {
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ error: "Cannot delete the last admin" });
     // The filter, because a count of everybody never reaches 1 on an instance that has anybody
-    expect(userCountDocuments).toHaveBeenCalledWith({ role: "admin" });
+    expect(userCountDocuments).toHaveBeenCalledWith({ role: "admin", deactivatedAt: null });
     expect(userFindByIdAndDelete).not.toHaveBeenCalled();
   });
 
@@ -922,6 +933,132 @@ describe("PUT /api/users/:id — account actions", () => {
     for (const action of [{ confirmEmail: true }, { signOutEverywhere: true }]) {
       expect((await PUT(put(action), ctx())).status).toBeGreaterThanOrEqual(400);
     }
+    expect(revokeUserCredentials).not.toHaveBeenCalled();
+  });
+});
+
+// BP-832. Deactivation keeps the account and its history, and ends everything it can sign in with
+describe("PUT /api/users/:id — deactivating and reactivating", () => {
+  it("deactivates, revoking every credential but the providers, and records who did", async () => {
+    const target = targetDoc({ role: "member", deactivatedAt: null });
+    found(target);
+
+    const res = await PUT(put({ deactivate: true }), ctx());
+
+    expect(res.status).toBe(200);
+    expect(target.deactivatedAt).toBeInstanceOf(Date);
+    expect(target.save).toHaveBeenCalled();
+    expect(revokeUserCredentials).toHaveBeenCalledWith("target-1", null, { keepIdentities: true });
+    expect(invalidateResetTokens).toHaveBeenCalledWith("target-1");
+    expect(logInstanceAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "user_deactivated", user: "admin-1", target: "target" })
+    );
+  });
+
+  // Two administrators deactivating each other at once each counted the other as still active
+  it("takes it back when no active administrator is left after all", async () => {
+    const target = targetDoc({ role: "admin", deactivatedAt: null });
+    found(target);
+    userCountDocuments.mockResolvedValueOnce(2).mockResolvedValueOnce(0);
+
+    const res = await PUT(put({ deactivate: true }), ctx());
+
+    expect(res.status).toBe(409);
+    expect(target.deactivatedAt).toBeNull();
+    expect(target.save).toHaveBeenCalledTimes(2);
+    expect(revokeUserCredentials).not.toHaveBeenCalled();
+  });
+
+  // Two co-owners of a board deactivating each other at once each counted the other as active
+  it("takes it back when a board it owned is left with no active owner", async () => {
+    const target = targetDoc({ role: "member", deactivatedAt: null });
+    found(target);
+    boardsLeftWithoutOwner.mockResolvedValueOnce(["p1"]);
+
+    const res = await PUT(put({ deactivate: true }), ctx());
+
+    expect(res.status).toBe(409);
+    expect(target.deactivatedAt).toBeNull();
+    expect(revokeUserCredentials).not.toHaveBeenCalled();
+  });
+
+  it("refuses the last administrator who can still act", async () => {
+    const target = targetDoc({ role: "admin", deactivatedAt: null });
+    found(target);
+    userCountDocuments.mockResolvedValue(1);
+
+    expect((await PUT(put({ deactivate: true }), ctx())).status).toBe(400);
+    expect(userCountDocuments).toHaveBeenCalledWith({ role: "admin", deactivatedAt: null });
+    expect(target.save).not.toHaveBeenCalled();
+    expect(revokeUserCredentials).not.toHaveBeenCalled();
+  });
+
+  it("refuses your own account and a machine's", async () => {
+    found(targetDoc({ _id: "admin-1" }));
+    expect((await PUT(put({ deactivate: true }), ctx())).status).toBe(400);
+
+    found(targetDoc({ kind: "machine" }));
+    expect((await PUT(put({ deactivate: true }), ctx())).status).toBe(400);
+    expect(revokeUserCredentials).not.toHaveBeenCalled();
+  });
+
+  it("reactivates, bringing back sign-in and none of the revoked credentials", async () => {
+    const target = targetDoc({ role: "member", deactivatedAt: new Date() });
+    found(target);
+
+    const res = await PUT(put({ reactivate: true }), ctx());
+
+    expect(res.status).toBe(200);
+    expect(target.deactivatedAt).toBeNull();
+    // Only what was minted between the flag and the first revoke: providers stay, nothing returns
+    expect(revokeUserCredentials).toHaveBeenCalledWith("target-1", null, { keepIdentities: true });
+    expect(logInstanceAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "user_reactivated" }));
+  });
+
+  it("sets no password on a deactivated account, which would unlink the providers it keeps", async () => {
+    const target = targetDoc({ role: "member", deactivatedAt: new Date() });
+    found(target);
+
+    expect((await PUT(put({ password: "a-fresh-password" }), ctx())).status).toBe(400);
+    expect(target.save).not.toHaveBeenCalled();
+    expect(revokeUserCredentials).not.toHaveBeenCalled();
+  });
+
+  it("does not sign out a deactivated account, which would only unlink the providers it keeps", async () => {
+    found(targetDoc({ role: "member", deactivatedAt: new Date() }));
+
+    expect((await PUT(put({ signOutEverywhere: true }), ctx())).status).toBe(400);
+    expect(revokeUserCredentials).not.toHaveBeenCalled();
+  });
+
+  it("counts only administrators who can still act as the last one standing", async () => {
+    found(targetDoc({ role: "admin" }));
+    userCountDocuments.mockResolvedValue(1);
+
+    expect((await PUT(put({ role: "member" }), ctx())).status).toBe(400);
+    expect(userCountDocuments).toHaveBeenCalledWith({ role: "admin", deactivatedAt: null });
+  });
+});
+
+describe("PUT /api/users/:id — deactivated administrators and board owners (BP-832)", () => {
+  it("demotes a deactivated administrator while one active one remains", async () => {
+    found(targetDoc({ role: "admin", deactivatedAt: new Date() }));
+    userCountDocuments.mockResolvedValue(1);
+
+    expect((await PUT(put({ role: "member" }), ctx())).status).toBe(200);
+  });
+
+  // The rule deleting keeps: a board owned only by somebody who can do nothing is one nobody runs
+  it("refuses to deactivate the only owner of a board, naming it", async () => {
+    const target = targetDoc({ role: "member" });
+    found(target);
+    boardsOnlyOwnedBy.mockResolvedValue([{ _id: "p1", name: "Alpha", key: "AL" }]);
+
+    const res = await PUT(put({ deactivate: true }), ctx());
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toContain("Alpha (AL)");
+    expect(target.save).not.toHaveBeenCalled();
     expect(revokeUserCredentials).not.toHaveBeenCalled();
   });
 });

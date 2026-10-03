@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { verifyWorkerCredential, getAuthUser, getTenant } = vi.hoisted(() => ({
+const { verifyWorkerCredential, getAuthUser, getTenant, userExists } = vi.hoisted(() => ({
+  userExists: vi.fn(),
   verifyWorkerCredential: vi.fn(),
   getAuthUser: vi.fn(),
   getTenant: vi.fn(),
@@ -10,6 +11,7 @@ vi.mock("./worker-service", () => ({ verifyWorkerCredential }));
 vi.mock("./auth", () => ({ getAuthUser }));
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
 vi.mock("./tenant", () => ({ getTenant }));
+vi.mock("@/models/user", () => ({ User: { exists: userExists } }));
 
 const { withWorker, protocolOf, withEntitlement } = await import("./middleware");
 
@@ -81,6 +83,22 @@ describe("withWorker", () => {
     );
 
     expect(res.status).toBe(401);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  // BP-832. A machine reaches what its owner reaches; a deactivated owner reaches nothing
+  it("rejects a machine whose owner is deactivated, with its own credential", async () => {
+    verifyWorkerCredential.mockResolvedValue({ _id: "w1", owner: "u9", credentialHash: "hash" });
+    userExists.mockResolvedValueOnce({ _id: "u9" });
+    const handler = vi.fn();
+
+    const res = await withWorker(handler)(
+      request({ authorization: "Bearer cpw_x", "x-worker-id": "w1" }),
+      { params: paramsOf({ workerId: "w1" }) }
+    );
+
+    expect(res.status).toBe(401);
+    expect(userExists).toHaveBeenCalledWith({ _id: "u9", deactivatedAt: { $ne: null } });
     expect(handler).not.toHaveBeenCalled();
   });
 

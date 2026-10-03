@@ -186,3 +186,14 @@ describe("with password sign-in off (BP-830)", () => {
     expect((await POST(post())).status).toBe(403);
   });
 });
+
+describe("a deactivated account (BP-832)", () => {
+  it("sets no password from a link issued before it was deactivated", async () => {
+    accountIs({ _id: "u1", username: "owner", kind: "human", email: "o@example.com", deactivatedAt: new Date() });
+
+    const res = await POST(post());
+
+    expect(res.status).toBe(403);
+    expect(revokeUserCredentials).not.toHaveBeenCalled();
+  });
+});
