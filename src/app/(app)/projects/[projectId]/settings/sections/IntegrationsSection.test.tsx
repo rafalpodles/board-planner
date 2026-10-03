@@ -162,8 +162,11 @@ describe("IntegrationsSection and Coda on a free instance (BP-651)", () => {
 
   it("calls the same row Connected on Pro", async () => {
     renderSection({ codaDocId: "doc-1", codaTokenSet: true } as Partial<ApiProject>);
+    fireEvent.click(screen.getByRole("button", { name: "Configure Coda" }));
 
-    await waitFor(() => expect(screen.getByText("Connected")).toBeTruthy());
+    // The form renders only once the plan is read and is Pro, so the list below is the loaded one
+    await screen.findByLabelText("Doc ID");
+    expect(screen.getByText("Connected")).toBeTruthy();
     expect(screen.queryByText("feature", { exact: false, selector: ".sr-only" })).toBeNull();
   });
 });
