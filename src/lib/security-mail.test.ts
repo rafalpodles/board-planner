@@ -10,10 +10,10 @@ vi.mock("@/lib/email", () => ({
   isEmailConfigured: () => isEmailConfigured(),
 }));
 vi.mock("@/lib/session", () => ({ selfOrigin: () => selfOrigin() }));
-const tenantSlug = vi.fn<() => string | undefined>(() => undefined);
+const tenantSlug = vi.fn<(id: Types.ObjectId) => string | undefined>(() => undefined);
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/tenant", () => ({
-  Tenant: { findById: () => ({ select: () => ({ lean: async () => ({ slug: tenantSlug() }) }) }) },
+  Tenant: { findById: (id: Types.ObjectId) => ({ select: () => ({ lean: async () => ({ slug: tenantSlug(id) }) }) }) },
 }));
 
 const { notifyPasswordChanged, notifyAddressChanged, notifyCredentialCreated, notifyIdentityLinked, maskAddress } =
@@ -169,7 +169,7 @@ describe("notifyIdentityLinked", () => {
 describe("with TENANT_DOMAIN set, every button leads to the account's own tenant (BP-666)", () => {
   beforeEach(() => {
     process.env.TENANT_DOMAIN = "board-planner.com";
-    tenantSlug.mockReturnValue("acme");
+    tenantSlug.mockImplementation((id) => (id.equals(TENANT) ? "acme" : "elsewhere"));
     forgetTenantSlugs();
   });
 
@@ -186,11 +186,11 @@ describe("with TENANT_DOMAIN set, every button leads to the account's own tenant
 
     await notifyIdentityLinked({ tenant: TENANT, email: "owner@example.com", username: "owner", provider: "Acme", providerEmail: "o@acme.example" });
     expect(sent().html).toContain("https://acme.board-planner.com/settings/security");
-    expect(JSON.stringify(sendEmail.mock.calls)).not.toContain("app.example.com");
+    expect(JSON.stringify(sendEmail.mock.calls)).not.toMatch(/app\.example\.com|elsewhere/);
   });
 
   it("leaves the button out for a tenant with no address, rather than linking to another", async () => {
-    tenantSlug.mockReturnValue(undefined);
+    tenantSlug.mockImplementation(() => undefined);
 
     await notifyPasswordChanged({ tenant: TENANT, email: "owner@example.com", username: "owner", how: "admin" });
 
