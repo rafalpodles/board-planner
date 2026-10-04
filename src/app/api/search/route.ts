@@ -24,7 +24,7 @@ export const GET = withAuth(async (request, { user, db }) => {
   const filter: Record<string, unknown> = {};
 
   // Members can only see tasks from their allowed projects
-  const allowed = user.role === "admin" ? null : ((await accessibleProjectIds(user)) ?? []);
+  const allowed = user.role === "admin" ? null : ((await accessibleProjectIds(db, user)) ?? []);
   if (allowed) {
     filter.project = { $in: allowed };
   }
@@ -65,7 +65,7 @@ export const GET = withAuth(async (request, { user, db }) => {
         .populate("assignee", "username fullName")
         .lean();
 
-      return NextResponse.json(withPriorityDefault(await withApiExecutions(tasks)));
+      return NextResponse.json(withPriorityDefault(await withApiExecutions(db, tasks)));
     }
     if (project) return NextResponse.json([]);
   }
@@ -82,5 +82,5 @@ export const GET = withAuth(async (request, { user, db }) => {
     .limit(50)
     .lean();
 
-  return NextResponse.json(withPriorityDefault(await withApiExecutions(tasks)));
+  return NextResponse.json(withPriorityDefault(await withApiExecutions(db, tasks)));
 });

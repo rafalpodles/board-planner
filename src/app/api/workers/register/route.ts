@@ -17,6 +17,7 @@ import {
   enrolmentTokenOwnerId,
 } from "@/lib/enrolment";
 import { logInstanceAudit } from "@/lib/instanceAudit";
+import { scopedToDefaultTenant } from "@/lib/db-scope";
 
 // Authenticated by a single-use enrolment token, NOT by an admin session or an admin API token.
 //
@@ -31,6 +32,7 @@ function bearerOf(request: Request): string {
 }
 
 export async function POST(request: Request) {
+  const db = scopedToDefaultTenant();
   await connectDB();
 
   // Shape is checked before the token is spent: an operator gets one enrolment token, and burning
@@ -59,7 +61,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const consumed = await consumeEnrolmentToken(bearerOf(request));
+  const consumed = await consumeEnrolmentToken(db, bearerOf(request));
   if (!consumed.ok) {
     // One message for every failure: telling a caller whether a token was real but spent, or never
     // existed, turns this into an oracle for guessing.
@@ -71,14 +73,14 @@ export async function POST(request: Request) {
   // right way round — it makes a token aimed at a colleague's hostname cost the attempt.
   let registered;
   try {
-    registered = await registerWorker({
+    registered = await registerWorker(db, {
       name,
       host,
       platform: String(body.platform ?? ""),
       version: String(body.version ?? "").slice(0, 100),
       // Names the machine's identity after the person who enrolled it — "Owner · MacBook"
-      owner: await enrolmentTokenOwner(consumed.tokenId),
-      ownerId: (await enrolmentTokenOwnerId(consumed.tokenId)) ?? undefined,
+      owner: await enrolmentTokenOwner(db, consumed.tokenId),
+      ownerId: (await enrolmentTokenOwnerId(db, consumed.tokenId)) ?? undefined,
     });
   } catch (error) {
     if (error instanceof WorkerAlreadyOwned) {
@@ -88,12 +90,12 @@ export async function POST(request: Request) {
   }
   const { worker, credential } = registered;
 
-  await attachWorkerToEnrolment(consumed.tokenId, String(worker._id));
+  await attachWorkerToEnrolment(db, consumed.tokenId, String(worker._id));
 
   // No user: the caller here is the machine, holding a token and no session. Which is the fact
   // worth recording — a token minted for one person and spent on an unexpected host is the shape
   // of a leaked enrolment.
-  void logInstanceAudit({
+  void logInstanceAudit(db, {
     action: "enrolment_token_spent",
     target: worker.name,
     detail: `Registered ${host}`,

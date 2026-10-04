@@ -16,7 +16,7 @@ export const GET = withProjectAccess(async (_request, { params, db }) => {
   await connectDB();
 
   const users = await db.User.find(
-    { ...(await projectAudienceFilter(projectId)), kind: { $ne: "machine" }, deactivatedAt: null },
+    { ...(await projectAudienceFilter(db, projectId)), kind: { $ne: "machine" }, deactivatedAt: null },
     "username fullName"
   )
     .sort({ username: 1 })

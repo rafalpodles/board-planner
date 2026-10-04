@@ -71,7 +71,7 @@ export const PUT = withAuth(async (request, { user, db }) => {
   // Before the save, so a failed revoke never leaves a new password beside the old credentials
   const revoked = await revokeUserCredentials(user._id, user.sessionId);
   if (revoked?.identitiesUnlinked) {
-    void logInstanceAudit({
+    void logInstanceAudit(db, {
       action: "identity_unlinked",
       user: user._id,
       actorUsername: user.username,
@@ -89,7 +89,7 @@ export const PUT = withAuth(async (request, { user, db }) => {
 
   // Somebody who changes their password after asking for a reset link has answered the question
   // themselves; the link in their inbox must not still be able to overwrite this
-  await invalidateResetTokens(user._id);
+  await invalidateResetTokens(db, user._id);
 
   return NextResponse.json({ ok: true });
 });

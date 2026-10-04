@@ -64,7 +64,7 @@ export const POST = withProjectAccess(async (request, { params, user, db }) => {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  logProjectAudit(projectId, user._id, "settings_updated", `Category added: ${name.trim()}`);
+  logProjectAudit(db, projectId, user._id, "settings_updated", `Category added: ${name.trim()}`);
 
   return NextResponse.json(added.categories, { status: 201 });
 });
@@ -116,7 +116,7 @@ export const PATCH = withProjectAccess(async (request, { params, user, db }) => 
   if (!renaming) {
     if (color) current.color = color;
     await project.save();
-    logProjectAudit(projectId, user._id, "settings_updated", `Category recoloured: ${name}`);
+    logProjectAudit(db, projectId, user._id, "settings_updated", `Category recoloured: ${name}`);
     return NextResponse.json(project.categories);
   }
 
@@ -140,7 +140,7 @@ export const PATCH = withProjectAccess(async (request, { params, user, db }) => 
   }
   await project.save();
 
-  logProjectAudit(projectId, user._id, "settings_updated", `Category renamed: ${name} → ${target}`);
+  logProjectAudit(db, projectId, user._id, "settings_updated", `Category renamed: ${name} → ${target}`);
 
   return NextResponse.json(project.categories);
 });
@@ -187,7 +187,7 @@ export const DELETE = withProjectOwner(async (request, { params, user, db }) => 
   project.categories = categories.filter((c) => c.name !== name);
   await project.save();
 
-  logProjectAudit(projectId, user._id, "settings_updated", `Category removed: ${name}`);
+  logProjectAudit(db, projectId, user._id, "settings_updated", `Category removed: ${name}`);
 
   return NextResponse.json(project.categories);
 });

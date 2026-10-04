@@ -26,7 +26,7 @@ export const POST = withProjectOwner(async (request, { params, db }) => {
     if (!server) {
       return NextResponse.json({ error: `No MCP server named "${body.name}" — provide a token` }, { status: 404 });
     }
-    token = await resolveServerToken(projectId, server);
+    token = await resolveServerToken(db, projectId, server);
     if (server.authType === "oauth" && !token) {
       return NextResponse.json({ error: "OAuth connection not established — click Connect first" }, { status: 400 });
     }

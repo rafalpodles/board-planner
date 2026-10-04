@@ -147,7 +147,7 @@ export async function POST(request: Request) {
       email,
       role: isBootstrap ? "admin" : "member",
     });
-    await revokePendingInvitationsFor(email);
+    await revokePendingInvitationsFor(db, email);
     if (isBootstrap && organisation.value) {
       await nameOrganisation(organisation.value).catch((err) =>
         console.error("[users] naming the organisation failed; the account was created", err)
@@ -156,7 +156,7 @@ export async function POST(request: Request) {
     // The account's own beginning, which nothing recorded: the log knew that somebody's display
     // name changed and not that the account existed. `target` is the username because this row has
     // to still name them after the account is gone.
-    void logInstanceAudit({
+    void logInstanceAudit(db, {
       action: "user_created",
       user: authUser?._id ?? null,
       actorUsername: authUser?.username ?? "",

@@ -176,6 +176,7 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
   await project.save();
 
   logProjectAudit(
+    db,
     projectId,
     user._id,
     "settings_updated",

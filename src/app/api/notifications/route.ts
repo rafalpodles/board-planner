@@ -12,7 +12,7 @@ export const GET = withAuth(async (request, { user, db }) => {
 
   // Rows banked before a grant was revoked are still addressed to the reader, so keying the feed
   // on the recipient alone hands them back afterwards (BP-328). null means every project.
-  const projectIds = await accessibleProjectIds(user);
+  const projectIds = await accessibleProjectIds(db, user);
   if (projectIds !== null && projectIds.length === 0) return NextResponse.json([]);
 
   // And rows the grid hid from the bell are still stored, because the digest is built from them.

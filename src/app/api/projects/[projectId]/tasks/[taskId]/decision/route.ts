@@ -57,8 +57,8 @@ export const GET = withProjectAccess(async (_request, { params, user, db }) => {
     decision: toApiDecision(
       task.decision,
       worker,
-      await mayDecide(task.decision.workerId, user, worker),
-      await prUrlNamesProjectRepo(task.decision.prUrl, projectId)
+      await mayDecide(db, task.decision.workerId, user, worker),
+      await prUrlNamesProjectRepo(db, task.decision.prUrl, projectId)
     ),
   });
 });
@@ -107,7 +107,7 @@ export const POST = withProjectAccess(async (request, { params, user, db }) => {
     return NextResponse.json({ error: "nothing is waiting on a decision here" }, { status: 404 });
   }
 
-  if (!(await mayDecide(decision.workerId, user))) {
+  if (!(await mayDecide(db, decision.workerId, user))) {
     return NextResponse.json(
       {
         error:
@@ -128,7 +128,7 @@ export const POST = withProjectAccess(async (request, { params, user, db }) => {
   }
 
   // Pinned to the record this request read and judged — see DecisionPin.
-  const result = await recordVerdict(taskId, verdict as Verdict, String(user._id), {
+  const result = await recordVerdict(db, taskId, verdict as Verdict, String(user._id), {
     workerId: decision.workerId,
     commit: decision.commit,
   });
@@ -140,7 +140,7 @@ export const POST = withProjectAccess(async (request, { params, user, db }) => {
     .select("name lastSeenAt")
     .lean<{ name?: string; lastSeenAt?: Date | null } | null>();
 
-  void logInstanceAudit({
+  void logInstanceAudit(db, {
     action: AUDIT[verdict as Verdict],
     // The machine, because that is what the entry is about: what was spent is its owner's pinned
     // GitHub identity. The task and the commit are in the detail.
@@ -160,7 +160,7 @@ export const POST = withProjectAccess(async (request, { params, user, db }) => {
       result.decision,
       worker,
       true,
-      await prUrlNamesProjectRepo(result.decision?.prUrl, projectId)
+      await prUrlNamesProjectRepo(db, result.decision?.prUrl, projectId)
     ),
   });
 });

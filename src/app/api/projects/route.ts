@@ -11,7 +11,7 @@ import { sanitizeProjectSecrets } from "@/lib/project-secrets";
 export const GET = withAuth(async (_request, { user, db }) => {
   await connectDB();
 
-  const accessibleIds = await accessibleProjectIds(user);
+  const accessibleIds = await accessibleProjectIds(db, user);
   const filter = accessibleIds === null ? {} : { _id: { $in: accessibleIds } };
 
   // Manual order first; anything never dragged keeps its default 0 and falls
@@ -48,7 +48,7 @@ export const GET = withAuth(async (_request, { user, db }) => {
     const stats = statsByProject.get(String(p._id));
     obj.taskCount = stats?.taskCount ?? 0;
     obj.hasActiveSprint = withActiveSprint.has(String(p._id));
-    obj.canAdmin = await check(user, String(p._id), "admin");
+    obj.canAdmin = await check(db, user, String(p._id), "admin");
     return obj;
   }));
   return NextResponse.json(sanitized);

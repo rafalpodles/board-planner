@@ -214,11 +214,11 @@ export const PUT = withAdmin(async (request, { params, user: admin, db }) => {
     if (passwordWasSet) {
       // A link already in the target's inbox would otherwise still work, and overwrite the password
       // the admin has just handed them
-      await invalidateResetTokens(target._id);
+      await invalidateResetTokens(db, target._id);
       // Before the save: a failure revokes too much rather than leaving the old holder a way in
       const revoked = await revokeUserCredentials(target._id);
       if (revoked?.identitiesUnlinked) {
-        void logInstanceAudit({
+        void logInstanceAudit(db, {
           action: "identity_unlinked",
           user: admin._id,
           actorUsername: admin.username,
@@ -244,13 +244,13 @@ export const PUT = withAdmin(async (request, { params, user: admin, db }) => {
     await undoDemotion().catch(() => {});
     throw err;
   }
-  if (emailWasChanged) await revokePendingInvitationsFor(target.email);
+  if (emailWasChanged) await revokePendingInvitationsFor(db, target.email);
 
   // What an account may do on this instance, which is the change the branch above gates on
   // `viaMachineCredential` precisely because it is the escalation path — and then left no trace of.
   // The direction is in `detail`, the way the address change carries old → new.
   if (roleWasChanged) {
-    void logInstanceAudit({
+    void logInstanceAudit(db, {
       action: "user_role_changed",
       user: admin._id,
       actorUsername: admin.username,
@@ -266,7 +266,7 @@ export const PUT = withAdmin(async (request, { params, user: admin, db }) => {
     // above there is nothing to undo if it fails.
     await clearAccountAttempts(target.username).catch(() => {});
 
-    void logInstanceAudit({
+    void logInstanceAudit(db, {
       action: "user_password_reset",
       user: admin._id,
       actorUsername: admin.username,
@@ -287,15 +287,15 @@ export const PUT = withAdmin(async (request, { params, user: admin, db }) => {
   if (emailWasChanged) {
     // A link already sent to the old address would otherwise keep working for its hour — which is
     // exactly the address this change is moving away from
-    await invalidateResetTokens(target._id);
+    await invalidateResetTokens(db, target._id);
     // And a change the account itself asked for would otherwise overwrite this one once confirmed
-    await cancelEmailChange(target._id);
+    await cancelEmailChange(db, target._id);
   }
 
   // The quieter half of the same takeover: repointing an address takes an account over at the next
   // reset, and unlike a password change it signs nobody out, so this row is the only trace there is
   if (emailWasChanged) {
-    void logInstanceAudit({
+    void logInstanceAudit(db, {
       action: "user_email_changed",
       user: admin._id,
       actorUsername: admin.username,
@@ -377,7 +377,7 @@ export const DELETE = withAdmin(async (_request, { params, user: admin, db }) =>
     }
   }
 
-  const soleOwned = await boardsOnlyOwnedBy(String(user._id));
+  const soleOwned = await boardsOnlyOwnedBy(db, String(user._id));
   if (soleOwned.length > 0) {
     const names = soleOwned.map((b) => `${b.name} (${b.key})`).join(", ");
     return NextResponse.json(
@@ -397,7 +397,7 @@ export const DELETE = withAdmin(async (_request, { params, user: admin, db }) =>
     const marked = await db.User.updateOne({ _id: user._id, deactivatedAt: null }, { $set: { deactivatedAt: markedAt } });
     if (marked.modifiedCount > 0) {
       const lastAdminGone = user.role === "admin" && (await db.User.countDocuments(ACTIVE_ADMINS)) === 0;
-      const ownerless = lastAdminGone ? [] : await boardsLeftWithoutOwner(String(user._id));
+      const ownerless = lastAdminGone ? [] : await boardsLeftWithoutOwner(db, String(user._id));
       if (lastAdminGone || ownerless.length > 0) {
         // Only this request's own mark: a deactivation landing meanwhile stays
         await db.User.updateOne({ _id: user._id, deactivatedAt: markedAt }, { $set: { deactivatedAt: null } });
@@ -424,7 +424,7 @@ export const DELETE = withAdmin(async (_request, { params, user: admin, db }) =>
   // above — and for the same reason it uses that one. There, nothing is committed until the save,
   // so a failed revoke must leave the account untouched. Here the account is already gone, and a
   // revoke that throws would take the only record of it having existed with it.
-  void logInstanceAudit({
+  void logInstanceAudit(db, {
     action: "user_deleted",
     user: admin._id,
     actorUsername: admin.username,
@@ -464,7 +464,7 @@ async function accountAction(
     if (!target.email) return NextResponse.json({ error: "This account has no address" }, { status: 400 });
     target.emailVerifiedAt = new Date();
     await target.save();
-    void logInstanceAudit({
+    void logInstanceAudit(db, {
       action: "user_email_confirmed",
       user: admin._id,
       actorUsername: admin.username,
@@ -481,7 +481,7 @@ async function accountAction(
     }
     // The rule deleting an account keeps: a board owned only by somebody who can do nothing is a
     // board nobody can manage
-    const soleOwned = await boardsOnlyOwnedBy(String(target._id));
+    const soleOwned = await boardsOnlyOwnedBy(db, String(target._id));
     if (soleOwned.length > 0) {
       const names = soleOwned.map((b) => `${b.name} (${b.key})`).join(", ");
       return NextResponse.json(
@@ -497,7 +497,7 @@ async function accountAction(
     // Two administrators, or two co-owners, deactivating each other at once each counted the other
     // as still active; one of them yields rather than leave nobody to run the instance or a board
     const lastAdminGone = target.role === "admin" && (await db.User.countDocuments(ACTIVE_ADMINS)) === 0;
-    const ownerless = lastAdminGone ? [] : await boardsLeftWithoutOwner(String(target._id));
+    const ownerless = lastAdminGone ? [] : await boardsLeftWithoutOwner(db, String(target._id));
     if (lastAdminGone || ownerless.length > 0) {
       target.deactivatedAt = null;
       await target.save();
@@ -510,8 +510,8 @@ async function accountAction(
     // providers stay linked: every sign-in is refused while deactivated, and a reactivated account
     // on an instance without passwords needs one to come back by
     await revokeUserCredentials(target._id, null, { keepIdentities: true });
-    await invalidateResetTokens(target._id);
-    void logInstanceAudit({
+    await invalidateResetTokens(db, target._id);
+    void logInstanceAudit(db, {
       action: "user_deactivated",
       user: admin._id,
       actorUsername: admin.username,
@@ -527,7 +527,7 @@ async function accountAction(
     await revokeUserCredentials(target._id, null, { keepIdentities: true });
     target.deactivatedAt = null;
     await target.save();
-    void logInstanceAudit({
+    void logInstanceAudit(db, {
       action: "user_reactivated",
       user: admin._id,
       actorUsername: admin.username,
@@ -541,8 +541,8 @@ async function accountAction(
     return NextResponse.json({ error: `${target.username} is deactivated and signed out already` }, { status: 400 });
   }
   const revoked = await revokeUserCredentials(target._id);
-  await invalidateResetTokens(target._id);
-  void logInstanceAudit({
+  await invalidateResetTokens(db, target._id);
+  void logInstanceAudit(db, {
     action: "user_signed_out_everywhere",
     user: admin._id,
     actorUsername: admin.username,

@@ -10,10 +10,12 @@ import { checkNewAccount } from "@/lib/new-account";
 import { claimInvitation, findInvitationByToken } from "@/lib/invitations";
 import { INVITATION_REFUSALS } from "@/lib/invitation-refusals";
 import { completeAcceptance } from "@/lib/invitation-acceptance";
+import { scopedToDefaultTenant } from "@/lib/db-scope";
 
 const ATTEMPTS_PER_SOURCE = 20;
 
 export async function POST(request: Request) {
+  const db = scopedToDefaultTenant();
   if (!passwordSignInEnabled()) return passwordSignInOff();
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
@@ -48,15 +50,15 @@ export async function POST(request: Request) {
   await connectDB();
   // Read first, so the hash below costs only somebody holding a live link: with no client address
   // nothing else bounds how often this runs (BP-840)
-  const found = await findInvitationByToken(token);
+  const found = await findInvitationByToken(db, token);
   if (!found.ok) return NextResponse.json({ error: INVITATION_REFUSALS[found.reason] }, { status: 400 });
   const hashed = await bcrypt.hash(password, PASSWORD_COST_FACTOR);
 
-  const claimed = await claimInvitation(token);
+  const claimed = await claimInvitation(db, token);
   if (!claimed.ok) {
     return NextResponse.json({ error: INVITATION_REFUSALS[claimed.reason] }, { status: 400 });
   }
   const invitation = claimed.invitation;
 
-  return completeAcceptance(invitation, { username, fullName, passwordHash: hashed }, request, clientIp);
+  return completeAcceptance(db, invitation, { username, fullName, passwordHash: hashed }, request, clientIp);
 }

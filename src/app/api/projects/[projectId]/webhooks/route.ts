@@ -56,7 +56,7 @@ export const POST = withProjectOwner(async (request, { params, user, db }) => {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  logProjectAudit(projectId, user._id, "settings_updated", `Webhook added: ${maskSecretUrl(parsedUrl)}`);
+  logProjectAudit(db, projectId, user._id, "settings_updated", `Webhook added: ${maskSecretUrl(parsedUrl)}`);
 
   return NextResponse.json(masked(project), { status: 201 });
 });
@@ -113,7 +113,7 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
   const webhooks = (before.webhooks ?? []).map((w) => (w === was ? { ...w, ...changes } : w));
   if (was) {
     const lines = webhookChanges(was, { ...was, ...changes });
-    if (lines.length > 0) logProjectAudit(projectId, user._id, "settings_updated", lines);
+    if (lines.length > 0) logProjectAudit(db, projectId, user._id, "settings_updated", lines);
   }
 
   return NextResponse.json(sanitizeProjectSecrets({ webhooks }).webhooks);
@@ -138,7 +138,7 @@ export const DELETE = withProjectOwner(async (request, { params, user, db }) => 
   }
 
   const removed = (before.webhooks ?? []).find((w) => String(w._id) === webhookId);
-  if (removed) logProjectAudit(projectId, user._id, "settings_updated", `Webhook removed: ${maskSecretUrl(removed.url)}`);
+  if (removed) logProjectAudit(db, projectId, user._id, "settings_updated", `Webhook removed: ${maskSecretUrl(removed.url)}`);
 
   const webhooks = (before.webhooks ?? []).filter((w) => w !== removed);
   return NextResponse.json(sanitizeProjectSecrets({ webhooks }).webhooks);

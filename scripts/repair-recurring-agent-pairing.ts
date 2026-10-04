@@ -25,10 +25,12 @@ import { resolveUri, dbName } from "./mongo-uri";
 import { Task } from "../src/models/task";
 import { Project } from "../src/models/project";
 import { personalAgentAlienTo } from "../src/lib/task-service";
+import { scopedToDefaultTenant } from "../src/lib/db-scope";
 
 const DRY_RUN = process.argv.includes("--dry-run");
 
 async function main() {
+  const db = scopedToDefaultTenant();
   const { uri, source } = resolveUri();
   await mongoose.connect(uri, dbName() ? { dbName: dbName() } : undefined);
   console.log(`Connected via ${source}${DRY_RUN ? " (dry run)" : ""}`);
@@ -72,7 +74,7 @@ async function main() {
   const verdicts = new Map<string, Promise<boolean>>();
   function alienTo(agent: unknown, assignee: unknown): Promise<boolean> {
     const key = `${String(agent)}::${String(assignee ?? "")}`;
-    if (!verdicts.has(key)) verdicts.set(key, personalAgentAlienTo(agent, assignee));
+    if (!verdicts.has(key)) verdicts.set(key, personalAgentAlienTo(db, agent, assignee));
     return verdicts.get(key)!;
   }
 

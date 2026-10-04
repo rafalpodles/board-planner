@@ -22,8 +22,8 @@ export const GET = withProjectOwner(async (_request, { params, db }) => {
   }
 
   const [turns, spend] = await Promise.all([
-    isOverDailyTurnCap(projectId, project.pm ?? {}),
-    dailyPmSpend(projectId, project.pm ?? {}),
+    isOverDailyTurnCap(db, projectId, project.pm ?? {}),
+    dailyPmSpend(db, projectId, project.pm ?? {}),
   ]);
 
   return NextResponse.json({

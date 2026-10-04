@@ -2,6 +2,7 @@ import { test, expect, type APIRequestContext, type Page } from "@playwright/tes
 import { randomUUID } from "node:crypto";
 import mongoose from "mongoose";
 import { changeStatus, claimNextTask, releaseTask, updateTask } from "@/lib/task-service";
+import { scopedToDefaultTenant } from "@/lib/db-scope";
 // Statically, though nothing here calls it: `agentUsableOnProject` reaches this model through a
 // dynamic import, and under Playwright's loader that resolves the model but not the `@/types` it
 // imports. Naming it here puts it in the module cache first, resolved the ordinary way.
@@ -151,7 +152,7 @@ test.describe("what a claim requires", () => {
     await addTask({ assignee: null, assignedBy: null, agent: null });
 
     expect(
-      await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(OWNER))
+      await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, "run-1", String(OWNER))
     ).toBeNull();
     expect((await read(untouched)).status).toBe(APPROVED);
   });
@@ -159,7 +160,7 @@ test.describe("what a claim requires", () => {
   test("a task the owner assigned to themselves is taken, and stays assigned to them", async () => {
     const handed = await addTask();
 
-    const claimed = await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(OWNER));
+    const claimed = await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, "run-1", String(OWNER));
     expect(String(claimed?._id)).toBe(String(handed));
 
     const after = await read(handed);
@@ -174,7 +175,7 @@ test.describe("what a claim requires", () => {
     await addTask({ assignee: MEMBER_ID, assignedBy: MEMBER_ID });
 
     expect(
-      await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(OWNER))
+      await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, "run-1", String(OWNER))
     ).toBeNull();
   });
 
@@ -184,7 +185,7 @@ test.describe("what a claim requires", () => {
     await addTask({ assignee: OWNER, assignedBy: MEMBER_ID });
 
     expect(
-      await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(OWNER))
+      await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, "run-1", String(OWNER))
     ).toBeNull();
   });
 
@@ -192,7 +193,7 @@ test.describe("what a claim requires", () => {
     await addTask({ assignee: null, assignedBy: null, agent: null });
     const handed = await addTask({ order: 5 });
 
-    const claimed = await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(OWNER));
+    const claimed = await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, "run-1", String(OWNER));
     expect(String(claimed?._id)).toBe(String(handed));
   });
 
@@ -204,7 +205,7 @@ test.describe("what a claim requires", () => {
   test("a task assigned to the machine's own identity is not taken", async () => {
     await addTask({ assignee: IDENTITY, assignedBy: IDENTITY });
 
-    expect(await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(OWNER))).toBeNull();
+    expect(await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, "run-1", String(OWNER))).toBeNull();
   });
 
   // The guard this whole task adds: real ids, a real query, and a real assertion that nothing in
@@ -214,7 +215,7 @@ test.describe("what a claim requires", () => {
   test("claims nothing for a machine whose owner is unset", async () => {
     const untouched = await addTask({ assignee: null, assignedBy: null });
 
-    expect(await claimNextTask(String(PROJECT_ID), WORKER, "run-1", null)).toBeNull();
+    expect(await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, "run-1", null)).toBeNull();
     expect((await read(untouched)).status).toBe(APPROVED);
   });
 });
@@ -233,7 +234,7 @@ test.describe("a task from before assignedBy existed", () => {
   test("is not claimed, even though its assignee is the machine's owner", async () => {
     const legacy = await addLegacyTask();
 
-    expect(await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(OWNER))).toBeNull();
+    expect(await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, "run-1", String(OWNER))).toBeNull();
     expect((await read(legacy)).status).toBe(APPROVED);
   });
 
@@ -253,6 +254,7 @@ test.describe("a task from before assignedBy existed", () => {
     const legacy = await addLegacyTask();
 
     const assigned = await updateTask(
+      scopedToDefaultTenant(),
       String(PROJECT_ID),
       String(legacy),
       { assignee: ADMIN_USERNAME },
@@ -260,7 +262,7 @@ test.describe("a task from before assignedBy existed", () => {
     );
     expect(assigned.ok).toBe(true);
 
-    const claimed = await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(OWNER));
+    const claimed = await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, "run-1", String(OWNER));
     expect(String(claimed?._id)).toBe(String(legacy));
   });
 
@@ -278,6 +280,7 @@ test.describe("a task from before assignedBy existed", () => {
     const legacy = await addLegacyTask();
 
     const echoed = await updateTask(
+      scopedToDefaultTenant(),
       String(PROJECT_ID),
       String(legacy),
       { assignee: ADMIN_USERNAME, title: "renamed by somebody else" },
@@ -288,7 +291,7 @@ test.describe("a task from before assignedBy existed", () => {
     const handle = await db();
     const stored = await handle.collection("tasks").findOne({ _id: legacy });
     expect(stored?.assignedBy ?? null).toBeNull();
-    expect(await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(OWNER))).toBeNull();
+    expect(await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, "run-1", String(OWNER))).toBeNull();
   });
 });
 
@@ -307,7 +310,7 @@ test.describe("blockers", () => {
     const blocked = await addTask({ blockedBy: [blocker], order: 2 });
 
     expect(
-      await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(OWNER))
+      await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, "run-1", String(OWNER))
     ).toBeNull();
     expect((await read(blocked)).status).toBe(APPROVED);
   });
@@ -318,7 +321,7 @@ test.describe("blockers", () => {
     const blocker = await addTask({ order: 2 });
     const blocked = await addTask({ blockedBy: [blocker], order: 1 });
 
-    const claimed = await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(OWNER));
+    const claimed = await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, "run-1", String(OWNER));
 
     expect(String(claimed?._id)).toBe(String(blocker));
     expect((await read(blocked)).status).toBe(APPROVED);
@@ -331,7 +334,7 @@ test.describe("blockers", () => {
     await addTask({ blockedBy: [blocker], order: 2 });
 
     expect(
-      await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(OWNER))
+      await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, "run-1", String(OWNER))
     ).toBeNull();
   });
 
@@ -342,7 +345,7 @@ test.describe("blockers", () => {
     const blocked = await addTask({ blockedBy: [blocker], order: 2 });
     const free = await addTask({ order: 3 });
 
-    const claimed = await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(OWNER));
+    const claimed = await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, "run-1", String(OWNER));
 
     expect(String(claimed?._id)).toBe(String(free));
     expect((await read(blocked)).status).toBe(APPROVED);
@@ -353,13 +356,13 @@ test.describe("blockers", () => {
     const blocked = await addTask({ blockedBy: [blocker], order: 2 });
 
     expect(
-      await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(OWNER))
+      await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, "run-1", String(OWNER))
     ).toBeNull();
 
     const handle = await db();
     await handle.collection("tasks").updateOne({ _id: blocker }, { $set: { status: DONE } });
 
-    const claimed = await claimNextTask(String(PROJECT_ID), WORKER, "run-2", String(OWNER));
+    const claimed = await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, "run-2", String(OWNER));
     expect(String(claimed?._id)).toBe(String(blocked));
     expect((await read(blocked)).status).toBe(ACTIVE);
   });
@@ -369,8 +372,8 @@ test.describe("releasing gives back exactly what the claim took", () => {
   test("a hand-over survives the release, so the task can be retried", async () => {
     const handed = await addTask();
 
-    await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(OWNER));
-    await releaseTask(String(PROJECT_ID), String(handed));
+    await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, "run-1", String(OWNER));
+    await releaseTask(scopedToDefaultTenant(), String(PROJECT_ID), String(handed));
 
     const after = await read(handed);
     expect(after.status).toBe(APPROVED);
@@ -378,7 +381,7 @@ test.describe("releasing gives back exactly what the claim took", () => {
     // nothing would ever pick it up again — a silent loss of work rather than a failure.
     expect(after.assignee).toBe(String(OWNER));
 
-    const again = await claimNextTask(String(PROJECT_ID), WORKER, "run-2", String(OWNER));
+    const again = await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, "run-2", String(OWNER));
     expect(String(again?._id)).toBe(String(handed));
   });
 
@@ -395,7 +398,7 @@ test.describe("releasing gives back exactly what the claim took", () => {
       execution: { workerId: WORKER, runId: "run-1", assignedByRun: true, attempts: 1 },
     });
 
-    await releaseTask(String(PROJECT_ID), String(free));
+    await releaseTask(scopedToDefaultTenant(), String(PROJECT_ID), String(free));
 
     const after = await read(free);
     expect(after.status).toBe(APPROVED);
@@ -408,14 +411,15 @@ test.describe("releasing gives back exactly what the claim took", () => {
   // updateTask passed the whole suite until this existed.
   test("dragging a finished task on the board keeps a fresh assignment", async () => {
     const free = await addTask();
-    await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(OWNER));
-    await releaseTask(String(PROJECT_ID), String(free));
+    await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, "run-1", String(OWNER));
+    await releaseTask(scopedToDefaultTenant(), String(PROJECT_ID), String(free));
 
     const handle = await db();
     await handle.collection("tasks").updateOne({ _id: free }, { $set: { assignee: OWNER } });
 
     // What handleTaskDrop sends: a status and a position, never a status alone
     const moved = await updateTask(
+      scopedToDefaultTenant(),
       String(PROJECT_ID),
       String(free),
       { status: ACTIVE, order: 3 },
@@ -430,9 +434,10 @@ test.describe("releasing gives back exactly what the claim took", () => {
   // claim took: the hand-over stays, so the task is still claimable and gets retried
   test("forcing a held task off a worker keeps the hand-over", async () => {
     const handed = await addTask();
-    await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(OWNER));
+    await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, "run-1", String(OWNER));
 
     const forced = await updateTask(
+      scopedToDefaultTenant(),
       String(PROJECT_ID),
       String(handed),
       { status: APPROVED, order: 1 },
@@ -444,7 +449,7 @@ test.describe("releasing gives back exactly what the claim took", () => {
     const after = await read(handed);
     expect(after.assignee).toBe(String(OWNER));
     expect(
-      await claimNextTask(String(PROJECT_ID), WORKER, "run-2", String(OWNER))
+      await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, "run-2", String(OWNER))
     ).not.toBeNull();
   });
 
@@ -463,7 +468,7 @@ test.describe("releasing gives back exactly what the claim took", () => {
     await handle.collection("tasks").updateOne({ _id: free }, { $set: { assignee: OWNER } });
     expect((await read(free)).execution.workerId).toBe(WORKER);
 
-    const moved = await changeStatus(String(PROJECT_ID), String(free), ACTIVE, String(ADMIN_ID));
+    const moved = await changeStatus(scopedToDefaultTenant(), String(PROJECT_ID), String(free), ACTIVE, String(ADMIN_ID));
     expect(moved.ok).toBe(true);
 
     expect((await read(free)).assignee).toBe(String(OWNER));
@@ -520,6 +525,7 @@ test.describe("whose task a personal agent may go on", () => {
     const own = await addTask({ assignee: MEMBER_ID, assignedBy: MEMBER_ID, agent: null });
 
     const chosen = await updateTask(
+      scopedToDefaultTenant(),
       String(PROJECT_ID),
       String(own),
       { agent: String(MINE) },
@@ -528,7 +534,7 @@ test.describe("whose task a personal agent may go on", () => {
 
     expect(chosen.ok).toBe(true);
     expect(
-      await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(MEMBER_ID))
+      await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, "run-1", String(MEMBER_ID))
     ).not.toBeNull();
   });
 
@@ -538,6 +544,7 @@ test.describe("whose task a personal agent may go on", () => {
     const theirs = await addTask({ assignee: ADMIN_ID, assignedBy: ADMIN_ID, agent: null });
 
     const chosen = await updateTask(
+      scopedToDefaultTenant(),
       String(PROJECT_ID),
       String(theirs),
       { agent: String(MINE) },
@@ -549,7 +556,7 @@ test.describe("whose task a personal agent may go on", () => {
     const handle = await db();
     expect((await handle.collection("tasks").findOne({ _id: theirs }))?.agent).toBeNull();
     // …and with no agent on it there is nothing for the colleague's machine to take
-    expect(await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(ADMIN_ID))).toBeNull();
+    expect(await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, "run-1", String(ADMIN_ID))).toBeNull();
   });
 
   // The other half of the same decision: what the PROJECT sanctioned still goes anywhere the
@@ -558,6 +565,7 @@ test.describe("whose task a personal agent may go on", () => {
     const theirs = await addTask({ assignee: ADMIN_ID, assignedBy: ADMIN_ID, agent: null });
 
     const chosen = await updateTask(
+      scopedToDefaultTenant(),
       String(PROJECT_ID),
       String(theirs),
       { agent: String(PROJECTS) },
@@ -566,7 +574,7 @@ test.describe("whose task a personal agent may go on", () => {
 
     expect(chosen.ok).toBe(true);
     expect(
-      await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(ADMIN_ID))
+      await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, "run-1", String(ADMIN_ID))
     ).not.toBeNull();
   });
 
@@ -583,9 +591,10 @@ test.describe("whose task a personal agent may go on", () => {
    */
   test("does not survive a hand-over to somebody who could not have chosen it", async () => {
     const own = await addTask({ assignee: MEMBER_ID, assignedBy: MEMBER_ID, agent: null });
-    await updateTask(String(PROJECT_ID), String(own), { agent: String(MINE) }, String(MEMBER_ID));
+    await updateTask(scopedToDefaultTenant(), String(PROJECT_ID), String(own), { agent: String(MINE) }, String(MEMBER_ID));
 
     const handed = await updateTask(
+      scopedToDefaultTenant(),
       String(PROJECT_ID),
       String(own),
       { assignee: ADMIN_USERNAME },
@@ -597,7 +606,7 @@ test.describe("whose task a personal agent may go on", () => {
     const after = await handle.collection("tasks").findOne({ _id: own });
     expect(after?.agent).toBeNull();
     expect(String(after?.assignedBy)).toBe(String(MEMBER_ID));
-    expect(await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(ADMIN_ID))).toBeNull();
+    expect(await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, "run-1", String(ADMIN_ID))).toBeNull();
   });
 
   // The other half of the same rule, and the one that separates "the new assignee owns it" from
@@ -618,6 +627,7 @@ test.describe("whose task a personal agent may go on", () => {
     const held = await addTask({ assignee: MEMBER_ID, assignedBy: MEMBER_ID, agent: THEIRS });
 
     const handed = await updateTask(
+      scopedToDefaultTenant(),
       String(PROJECT_ID),
       String(held),
       { assignee: ADMIN_USERNAME },
@@ -629,7 +639,7 @@ test.describe("whose task a personal agent may go on", () => {
     );
     // No machine acts on it yet, and that is the OTHER half of the claim rather than this rule:
     // being handed work is a proposal, so `assignedBy` naming the member is what holds it.
-    expect(await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(ADMIN_ID))).toBeNull();
+    expect(await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, "run-1", String(ADMIN_ID))).toBeNull();
   });
 
   // Keyed on the assignee MOVING, not on the task being written to. An edit that leaves the
@@ -655,7 +665,7 @@ test.describe("whose task a personal agent may go on", () => {
     const renamed = await put(request, own, { title: "renamed" }, ADMIN_AUTH);
     expect(renamed.status(), await renamed.text()).toBe(200);
 
-    const claimed = await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(ADMIN_ID));
+    const claimed = await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, "run-1", String(ADMIN_ID));
     expect(String(claimed?._id)).toBe(String(own));
     expect(String(claimed?.agent)).toBe(String(THEIRS));
   });
@@ -665,7 +675,7 @@ test.describe("whose task a personal agent may go on", () => {
   test("a project's agent survives the same hand-over", async () => {
     const own = await addTask({ assignee: MEMBER_ID, assignedBy: MEMBER_ID, agent: PROJECTS });
 
-    await updateTask(String(PROJECT_ID), String(own), { assignee: ADMIN_USERNAME }, String(MEMBER_ID));
+    await updateTask(scopedToDefaultTenant(), String(PROJECT_ID), String(own), { assignee: ADMIN_USERNAME }, String(MEMBER_ID));
 
     const handle = await db();
     expect(String((await handle.collection("tasks").findOne({ _id: own }))?.agent)).toBe(
@@ -709,7 +719,7 @@ test.describe("whose task a personal agent may go on", () => {
     expect(String(after?.assignee)).toBe(String(ADMIN_ID));
     expect(String(after?.assignedBy)).toBe(String(ADMIN_ID));
     expect(after?.agent).toBeNull();
-    expect(await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(ADMIN_ID))).toBeNull();
+    expect(await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, "run-1", String(ADMIN_ID))).toBeNull();
   });
 
   /**
@@ -735,7 +745,7 @@ test.describe("whose task a personal agent may go on", () => {
     const after = await handle.collection("tasks").findOne({ _id: old });
     expect(String(after?.assignedBy)).toBe(String(ADMIN_ID));
     expect(after?.agent).toBeNull();
-    expect(await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(ADMIN_ID))).toBeNull();
+    expect(await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, "run-1", String(ADMIN_ID))).toBeNull();
   });
 
   // …and the repair still does what it exists for, on the ordinary task: their own agent stays,
@@ -755,6 +765,7 @@ test.describe("whose task a personal agent may go on", () => {
     const old = await addLegacyTask({ assignee: ADMIN_ID, agent: THEIRS });
 
     const repaired = await updateTask(
+      scopedToDefaultTenant(),
       String(PROJECT_ID),
       String(old),
       { assignee: ADMIN_USERNAME },
@@ -762,7 +773,7 @@ test.describe("whose task a personal agent may go on", () => {
     );
     expect(repaired.ok).toBe(true);
 
-    const claimed = await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(ADMIN_ID));
+    const claimed = await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, "run-1", String(ADMIN_ID));
     expect(String(claimed?._id)).toBe(String(old));
     expect(String(claimed?.agent)).toBe(String(THEIRS));
   });
@@ -846,6 +857,7 @@ test.describe("whose task a personal agent may go on", () => {
     const own = await addTask({ assignee: MEMBER_ID, assignedBy: MEMBER_ID, agent: null });
 
     const chosen = await updateTask(
+      scopedToDefaultTenant(),
       String(PROJECT_ID),
       String(own),
       { assignee: ADMIN_USERNAME, agent: String(MINE) },
@@ -968,7 +980,7 @@ test.describe("what the machine refuses at the moment it picks the work up", () 
 
     // The service says the same thing to a caller that does not go through the route
     await expect(
-      claimNextTask(String(PROJECT_ID), WORKER, "run-nowhere", String(OWNER))
+      claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, "run-nowhere", String(OWNER))
     ).rejects.toThrow(/no column meaning In progress/);
   });
 
@@ -1066,7 +1078,7 @@ test.describe("what the machine refuses at the moment it picks the work up", () 
     });
     const handle = await db();
 
-    await changeStatus(String(PROJECT_ID), String(parent), "done", String(OWNER));
+    await changeStatus(scopedToDefaultTenant(), String(PROJECT_ID), String(parent), "done", String(OWNER));
 
     // The next occurrence is created fire-and-forget, after the status change has answered
     await expect
@@ -1079,7 +1091,7 @@ test.describe("what the machine refuses at the moment it picks the work up", () 
     expect(String(copy.assignedBy)).toBe(String(OWNER));
 
     // Approving it is a status change, not an edit, so nothing judges the agent on the way either
-    await changeStatus(String(PROJECT_ID), String(copy._id), APPROVED, String(OWNER));
+    await changeStatus(scopedToDefaultTenant(), String(PROJECT_ID), String(copy._id), APPROVED, String(OWNER));
 
     expect((await claim(request, "run-recurrence")).status()).toBe(204);
     expect((await read(copy._id)).status).toBe(APPROVED);
@@ -1135,7 +1147,7 @@ test.describe("a run identity is text, whatever it looks like", () => {
     const armed = await addTask();
     const runId = randomUUID();
 
-    await claimNextTask(String(PROJECT_ID), WORKER, runId, String(OWNER));
+    await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, runId, String(OWNER));
 
     expect((await read(armed)).execution.runId).toBe(runId);
   });
@@ -1145,7 +1157,7 @@ test.describe("a run identity is text, whatever it looks like", () => {
   test("$$REMOVE is a run identity, not an instruction to drop the field", async () => {
     const armed = await addTask();
 
-    await claimNextTask(String(PROJECT_ID), WORKER, "$$REMOVE", String(OWNER));
+    await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, "$$REMOVE", String(OWNER));
 
     expect((await read(armed)).execution.runId).toBe("$$REMOVE");
   });
@@ -1155,7 +1167,7 @@ test.describe("a run identity is text, whatever it looks like", () => {
   test("a field path is a run identity, not the value of that field", async () => {
     const armed = await addTask();
 
-    await claimNextTask(String(PROJECT_ID), WORKER, "$execution.workerId", String(OWNER));
+    await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, "$execution.workerId", String(OWNER));
 
     const after = await read(armed);
     expect(after.execution.runId).toBe("$execution.workerId");

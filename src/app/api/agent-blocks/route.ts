@@ -10,9 +10,9 @@ import {
 } from "@/lib/agent-block-input";
 import { BLOCK_KINDS, STEP_CAPABILITIES, StepCapability } from "@/types";
 
-export const GET = withAuth(async () => {
+export const GET = withAuth(async (_request, { db }) => {
   await connectDB();
-  const blocks = await allBlocks();
+  const blocks = await allBlocks(db);
   return NextResponse.json(blocks.map(toApiBlock));
 });
 
@@ -40,7 +40,7 @@ export const POST = withAdmin(async (request, { user, db }) => {
         modelRefusal(body.fallbackModel, "fallbackModel"));
   if (refusal) return NextResponse.json({ error: refusal }, { status: 400 });
 
-  const key = await freeBlockKey(name);
+  const key = await freeBlockKey(db, name);
 
   const capability: StepCapability =
     STEP_CAPABILITIES.find((c) => c === body.capability) ?? "read-only";

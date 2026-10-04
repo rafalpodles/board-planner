@@ -31,7 +31,7 @@ const ALLOWED_MIME_TYPES = new Set([
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 ]);
 
-export const POST = withAuth(async (request, { user }) => {
+export const POST = withAuth(async (request, { user, db: scopedDb }) => {
   await connectDB();
 
   // Counted through, not just declared. The file.size check further down cannot be the bound:
@@ -61,11 +61,11 @@ export const POST = withAuth(async (request, { user }) => {
     return NextResponse.json({ error: "projectId is required" }, { status: 400 });
   }
   // Callers hold a project key; grants are keyed on the id
-  const project = await resolveProjectId(projectId);
+  const project = await resolveProjectId(scopedDb, projectId);
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
-  if (!(await check(user, project, "access"))) {
+  if (!(await check(scopedDb, user, project, "access"))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

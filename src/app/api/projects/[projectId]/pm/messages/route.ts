@@ -26,7 +26,7 @@ export const GET = withProjectAccess(async (request, { params, user, db }) => {
     threadUserId = requestedUserId;
   }
 
-  await finalizeAbandonedTurns(projectId, threadUserId);
+  await finalizeAbandonedTurns(db, projectId, threadUserId);
 
   const filter: Record<string, unknown> = pmThreadFilter(projectId, threadUserId);
   if (before) {

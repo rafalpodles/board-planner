@@ -42,7 +42,7 @@ export const POST = withAdmin(async (request, { params, user, db }) => {
 
   // The other way to stop a machine. Recording only the Enabled switch would leave an operator
   // reading a log full of worker_disabled rows and concluding nothing else had stopped anything.
-  void logInstanceAudit({
+  void logInstanceAudit(db, {
     action: "worker_command_sent",
     target: worker.name,
     user: String(user._id),

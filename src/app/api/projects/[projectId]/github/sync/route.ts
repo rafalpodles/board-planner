@@ -35,7 +35,7 @@ export const POST = withProjectAccess(async (request, { params, user, db }) => {
   // HTTP/2 is empty by definition: on Railway that is a red toast with no words in it.
   let result: Awaited<ReturnType<typeof syncGithubPullRequests>>;
   try {
-    result = await syncGithubPullRequests(project, String(user._id), transitionOnly);
+    result = await syncGithubPullRequests(db, project, String(user._id), transitionOnly);
   } catch (err) {
     console.error("GitHub sync failed:", err);
     return NextResponse.json(

@@ -7,7 +7,7 @@ import { projectForUpload, uploadsBucket } from "@/lib/upload-ownership";
 // SVG excluded: served as attachment so scripts never run in the app's origin
 const INLINE_SAFE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
-export const GET = withAuth(async (_request, { params, user }) => {
+export const GET = withAuth(async (_request, { params, user, db }) => {
   const { fileId } = await params;
   await connectDB();
 
@@ -36,7 +36,7 @@ export const GET = withAuth(async (_request, { params, user }) => {
   if (!project) {
     return new Response("File not found", { status: 404 });
   }
-  if (!(await check(user, project, "access"))) {
+  if (!(await check(db, user, project, "access"))) {
     return new Response("File not found", { status: 404 });
   }
 

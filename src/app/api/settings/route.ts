@@ -17,7 +17,7 @@ export const GET = withAuth(async () => {
   });
 });
 
-export const PUT = withAdmin(async (request, { user }) => {
+export const PUT = withAdmin(async (request, { user, db }) => {
   // /api/admin/agents already refuses a machine credential for one project's copy of these (BP-306)
   if (user.viaMachineCredential) {
     return NextResponse.json({ error: "Interactive admin session required" }, { status: 403 });
@@ -64,7 +64,7 @@ export const PUT = withAdmin(async (request, { user }) => {
 
   const settings = await upsertSingleton(Settings, { $set: updates });
 
-  void logInstanceAudit({
+  void logInstanceAudit(db, {
     action: "instance_settings_changed",
     user: user._id,
     actorUsername: user.username,

@@ -72,7 +72,7 @@ export async function GET(request: Request) {
   // The grant this flow started under might not hold anymore — the state's TTL bounds how long
   // the window stays open, not whether the person is still a project owner inside it (BP-749
   // review).
-  if (!(await check(user, projectId, "admin"))) {
+  if (!(await check(db, user, projectId, "admin"))) {
     return refuseWrongUser();
   }
 
@@ -107,7 +107,7 @@ export async function GET(request: Request) {
     });
     // The tokens belong to the client they were exchanged for: if that changed during the
     // exchange, they are not this connection's to store
-    const before = await writeServerOauth(projectId, server, {
+    const before = await writeServerOauth(db, projectId, server, {
       accessToken: encryptSecret(tokens.accessToken),
       refreshToken: tokens.refreshToken ? encryptSecret(tokens.refreshToken) : "",
       expiresAt: tokens.expiresAt,
@@ -119,6 +119,7 @@ export async function GET(request: Request) {
     const was = serverNamed(before.pm?.mcpServers, server.name);
     const label = `PM MCP server ${server.name} · OAuth`;
     logProjectAudit(
+      db,
       projectId,
       user._id,
       "settings_updated",

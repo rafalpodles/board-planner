@@ -16,6 +16,7 @@ import {
   sourceKey,
 } from "@/lib/rate-limit";
 import { provenanceRefusal, selfOrigin } from "@/lib/session";
+import type { ScopedDb } from "@/lib/db-scope";
 
 // One answer for every outcome: account found, no such account, account with no address, machine
 // account. Anything else turns this endpoint into a way to ask "does owner have an account here",
@@ -111,18 +112,19 @@ export async function POST(request: Request) {
     // moment on every path. Issuing writes two rows and sending opens an SMTP connection; awaiting
     // either times the difference between "no such account" and "account exists" for anybody who
     // cares to measure, which is the oracle the uniform answer above exists to close.
-    void deliverLink(user, origin);
+    void deliverLink(db, user, origin);
   }
 
   return NextResponse.json(UNIFORM_ANSWER);
 }
 
 async function deliverLink(
+  db: ScopedDb,
   user: { _id: unknown; username: string; email: string },
   origin: string
 ): Promise<void> {
   try {
-    const token = await issueResetToken(user._id as Parameters<typeof issueResetToken>[0], user.email);
+    const token = await issueResetToken(db, user._id as Parameters<typeof issueResetToken>[1], user.email);
     const link = `${origin}/reset?token=${encodeURIComponent(token)}`;
     const { html, text } = renderEmail({
       preheader: `The link works once and expires in an hour.`,

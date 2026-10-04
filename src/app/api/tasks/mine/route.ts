@@ -13,7 +13,7 @@ export const GET = withAuth(async (_request, { user, db }) => {
 
   // Members can only see tasks from their allowed projects
   if (user.role !== "admin") {
-    const allowed = (await accessibleProjectIds(user)) ?? [];
+    const allowed = (await accessibleProjectIds(db, user)) ?? [];
     filter.project = { $in: allowed };
   }
 
@@ -29,7 +29,7 @@ export const GET = withAuth(async (_request, { user, db }) => {
   //
   // The columns themselves are dropped again: they were loaded to answer one question per task,
   // and sending a board per row would be the same waste in the other direction.
-  const published = await withApiExecutions(tasks);
+  const published = await withApiExecutions(db, tasks);
   return NextResponse.json(
     tasks.map((task, index) => {
       const project = task.project as { columns?: never } | null;

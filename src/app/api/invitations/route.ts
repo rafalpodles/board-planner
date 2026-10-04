@@ -25,7 +25,7 @@ export const GET = withAdmin(async (_request, { user, db }) => {
       (u) => u.email
     )
   );
-  return NextResponse.json(await toApiInvitations(pending.filter((i) => !taken.has(i.email))));
+  return NextResponse.json(await toApiInvitations(db, pending.filter((i) => !taken.has(i.email))));
 });
 
 type Parsed<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -91,16 +91,16 @@ export const POST = withAdmin(async (request, { user, db }) => {
     return NextResponse.json({ error: "One of those boards does not exist" }, { status: 400 });
   }
 
-  const { invitation, token } = await issueInvitation({
+  const { invitation, token } = await issueInvitation(db, {
     email,
     role,
     boards: boards.value,
     invitedBy: user._id,
   });
   const delivery = await deliverTo(invitation.email, token, origin, user, role, boards.value, projects);
-  await recordDelivery(invitation._id, token, delivery.delivery);
+  await recordDelivery(db, invitation._id, token, delivery.delivery);
 
-  void logInstanceAudit({
+  void logInstanceAudit(db, {
     action: "invitation_sent",
     user: user._id,
     actorUsername: user.username,
@@ -108,6 +108,6 @@ export const POST = withAdmin(async (request, { user, db }) => {
     detail: describeInvitation(role, boards.value, projects, delivery.delivery),
   });
 
-  const [view] = await toApiInvitations([invitation]);
+  const [view] = await toApiInvitations(db, [invitation]);
   return NextResponse.json({ invitation: view, ...delivery }, { status: 201 });
 });

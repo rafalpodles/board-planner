@@ -81,7 +81,7 @@ async function agentsBrokenBy(
   const agents = await agentsUsing(db, changed.key, "name composition");
   if (agents.length === 0) return null;
 
-  const blocks = (await allBlocks()).map(toApiBlock);
+  const blocks = (await allBlocks(db)).map(toApiBlock);
   const stored = (key: string) => blocks.find((b) => b.key === key);
   // Only the capability differs between the two, so a rename in the same save cannot read as a new problem
   const before = (key: string) =>

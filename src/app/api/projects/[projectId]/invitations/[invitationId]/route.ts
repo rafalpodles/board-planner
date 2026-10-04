@@ -14,10 +14,11 @@ export const DELETE = withProjectOwner(async (_request, { params, user, db }) =>
   if (!isValidObjectId(invitationId)) {
     return NextResponse.json({ error: "Invitation not found" }, { status: 404 });
   }
-  const updated = await removeBoardFromInvitation(invitationId, projectId);
+  const updated = await removeBoardFromInvitation(db, invitationId, projectId);
   if (!updated) return NextResponse.json({ error: "Invitation not found" }, { status: 404 });
 
   void logProjectAudit(
+    db,
     projectId,
     String(user._id),
     "member_invitation_removed",
@@ -29,8 +30,8 @@ export const DELETE = withProjectOwner(async (_request, { params, user, db }) =>
   if (updated.boards.length === 0) {
     const inviter = await db.User.findById(updated.invitedBy).select("role kind").lean();
     const keepsARole = inviter?.role === "admin" && inviter.kind !== "machine";
-    if (!keepsARole && (await revokeIfEmpty(updated))) {
-      void logInstanceAudit({
+    if (!keepsARole && (await revokeIfEmpty(db, updated))) {
+      void logInstanceAudit(db, {
         action: "invitation_revoked",
         user: user._id,
         actorUsername: user.username,

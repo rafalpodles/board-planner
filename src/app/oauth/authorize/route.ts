@@ -343,7 +343,7 @@ async function validateClientAndRedirect(db: ScopedDb, p: AuthParams): Promise<I
 }
 
 async function accessibleProjects(db: ScopedDb, user: IUser): Promise<{ _id: string; name: string; key: string }[]> {
-  const accessible = await accessibleProjectIds(user);
+  const accessible = await accessibleProjectIds(db, user);
   const filter = accessible === null ? {} : { _id: { $in: accessible } };
   const projects = await db.Project.find(filter).select("_id name key").sort({ key: 1 }).lean();
   return projects.map((p) => ({ _id: String(p._id), name: p.name as string, key: p.key as string }));

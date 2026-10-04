@@ -33,7 +33,7 @@ export const GET = withWorker(async (_request, { worker, db }) => {
     db.Worker.find({ _id: { $ne: worker._id } }).select(
       "_id name host repos enabled lastSeenAt createdAt"
     ),
-    ownerReachableProjectIds(worker),
+    ownerReachableProjectIds(db, worker),
   ]);
 
   return NextResponse.json({
@@ -66,7 +66,7 @@ export const GET = withWorker(async (_request, { worker, db }) => {
     // have not. The pending ones travel too — the worker keeps a marker per task to hold its
     // worktree back from the reaper, and seeing a decision leave this list is the only way it
     // learns a marker should be dropped.
-    decisions: await decisionsForWorker(String(worker._id)),
+    decisions: await decisionsForWorker(db, String(worker._id)),
   });
 });
 
@@ -182,7 +182,7 @@ export const PATCH = withAuth(async (request, { params, user, db }) => {
   // Read off the pre-update document, which is still in hand: the entry describes a transition,
   // and "renamed to X" without the old name answers half the question somebody is asking.
   for (const entry of auditEntries(body, worker)) {
-    void logInstanceAudit({ ...entry, user: String(user._id), actorUsername: user.username });
+    void logInstanceAudit(db, { ...entry, user: String(user._id), actorUsername: user.username });
   }
 
   return NextResponse.json(toApiWorker(updated));

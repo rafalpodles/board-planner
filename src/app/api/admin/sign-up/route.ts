@@ -26,7 +26,7 @@ export const GET = withAdmin(async () => {
   return NextResponse.json(view((await getSettings()).signUpDomains ?? []));
 });
 
-export const PUT = withAdmin(async (request, { user }) => {
+export const PUT = withAdmin(async (request, { user, db }) => {
   if (user.viaMachineCredential) {
     return NextResponse.json({ error: "Interactive admin session required" }, { status: 403 });
   }
@@ -38,7 +38,7 @@ export const PUT = withAdmin(async (request, { user }) => {
   await connectDB();
   const before = (await getSettings()).signUpDomains ?? [];
   const settings = await upsertSingleton(Settings, { $set: { signUpDomains: parsed.value } });
-  void logInstanceAudit({
+  void logInstanceAudit(db, {
     action: "instance_settings_changed",
     user: user._id,
     actorUsername: user.username,

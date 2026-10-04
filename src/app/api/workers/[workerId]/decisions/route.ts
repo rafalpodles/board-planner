@@ -106,7 +106,7 @@ const OBJECT_ID = /^[0-9a-f]{7,64}$/;
  */
 const PR_URL = /^https?:\/\/[A-Za-z0-9.-]+(?::\d+)?(?:\/[A-Za-z0-9._~-]+)*\/pull\/\d+$/;
 
-export const POST = withWorker(async (request, { worker }) => {
+export const POST = withWorker(async (request, { worker, db }) => {
   if (!worker.enabled) {
     return NextResponse.json({ error: "this worker may not run", abort: true }, { status: 403 });
   }
@@ -160,7 +160,7 @@ export const POST = withWorker(async (request, { worker }) => {
   const files = paths(body.value.files);
   const protectedFiles = paths(body.value.protectedFiles);
 
-  const result = await createDecision(taskId, String(worker._id), runId, {
+  const result = await createDecision(db, taskId, String(worker._id), runId, {
     gate,
     files: files.kept,
     fileCount: files.total,
@@ -184,7 +184,7 @@ export const POST = withWorker(async (request, { worker }) => {
 
 const SETTLEMENTS: TaskDecisionState[] = ["delivered", "refused", "failed", "discarded"];
 
-export const PATCH = withWorker(async (request, { worker }) => {
+export const PATCH = withWorker(async (request, { worker, db }) => {
   if (!worker.enabled) {
     return NextResponse.json({ error: "this worker may not run", abort: true }, { status: 403 });
   }
@@ -209,7 +209,7 @@ export const PATCH = withWorker(async (request, { worker }) => {
   }
 
   const attempts = body.value.attempts;
-  const result = await settleDecision(taskId, String(worker._id), state as TaskDecisionState, {
+  const result = await settleDecision(db, taskId, String(worker._id), state as TaskDecisionState, {
     prUrl,
     error: text(body.value.error, MAX_REASON_CHARS).trim(),
     attempts: Number.isSafeInteger(attempts) && (attempts as number) >= 0 ? (attempts as number) : 0,

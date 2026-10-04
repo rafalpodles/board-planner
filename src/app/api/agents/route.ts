@@ -5,10 +5,11 @@ import { accessibleProjectIds, check } from "@/lib/grants";
 import { compositionRefusal, toApiAgent, visibleAgents } from "@/lib/agent-service";
 import { normaliseComposition } from "@/lib/agent-rules";
 import { AgentComposition } from "@/types";
+import type { ScopedDb } from "@/lib/db-scope";
 
 // The editor shows these before you save, but the editor is not the only way in.
-async function refusalFor(composition: AgentComposition) {
-  const refusal = await compositionRefusal(composition);
+async function refusalFor(db: ScopedDb, composition: AgentComposition) {
+  const refusal = await compositionRefusal(db, composition);
   return refusal ? NextResponse.json(refusal, { status: 400 }) : null;
 }
 
@@ -16,11 +17,11 @@ export const GET = withAuth(async (_request, { user, db }) => {
   await connectDB();
 
   // null means every project, which is what an instance admin gets
-  const scoped = await accessibleProjectIds(user);
+  const scoped = await accessibleProjectIds(db, user);
   const projectIds =
     scoped ?? (await db.Project.find({}, "_id").lean()).map((p) => String(p._id));
 
-  const agents = await visibleAgents(user, projectIds);
+  const agents = await visibleAgents(db, user, projectIds);
   return NextResponse.json(agents.map((a) => toApiAgent(a as never)));
 });
 
@@ -35,7 +36,7 @@ export const POST = withAuth(async (request, { user, db }) => {
   if (projectId) {
     // A project agent runs on that project's repository, so authoring one is an administrative act
     // on the project rather than something any member may do.
-    if (!(await check(user, projectId, "admin"))) {
+    if (!(await check(db, user, projectId, "admin"))) {
       return NextResponse.json(
         { error: "Only a project admin can add an agent to a project" },
         { status: 403 }
@@ -44,7 +45,7 @@ export const POST = withAuth(async (request, { user, db }) => {
   }
 
   const composition = normaliseComposition(body.composition);
-  const refusal = await refusalFor(composition);
+  const refusal = await refusalFor(db, composition);
   if (refusal) return refusal;
 
   const agent = await db.Agent.create({

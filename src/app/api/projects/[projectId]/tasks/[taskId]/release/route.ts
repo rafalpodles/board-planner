@@ -4,7 +4,7 @@ import { withProjectAccessOrWorker } from "@/lib/middleware";
 import { releaseTask } from "@/lib/task-service";
 import { withApiExecution } from "@/lib/task-execution-view";
 
-export const POST = withProjectAccessOrWorker(async (request, { params, user, workerId }) => {
+export const POST = withProjectAccessOrWorker(async (request, { params, user, workerId, db }) => {
   const { projectId, taskId } = await params;
   await connectDB();
 
@@ -24,7 +24,7 @@ export const POST = withProjectAccessOrWorker(async (request, { params, user, wo
     );
   }
 
-  const task = await releaseTask(projectId, taskId, {
+  const task = await releaseTask(db, projectId, taskId, {
     refund,
     ...(workerId ? { workerId } : {}),
   });
@@ -32,5 +32,5 @@ export const POST = withProjectAccessOrWorker(async (request, { params, user, wo
     return NextResponse.json({ error: "Task not found or not releasable" }, { status: 404 });
   }
 
-  return NextResponse.json(await withApiExecution(task));
+  return NextResponse.json(await withApiExecution(db, task));
 });

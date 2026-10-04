@@ -23,7 +23,7 @@ export const GET = withProjectAccess(async (_request, { params, user, db }) => {
       { owner: user._id },
       "enabled lastSeenAt repos preflight command commandIssuedAt commandAckedAt bindingError halt"
     ).lean(),
-    check(user, projectId, "admin"),
+    check(db, user, projectId, "admin"),
   ]);
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 

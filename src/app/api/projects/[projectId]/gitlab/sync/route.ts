@@ -106,7 +106,7 @@ export const POST = withProjectAccess(async (_request, { params, user, db }) => 
     );
     await writeProviderLinks(task._id, "gitlab", mrDocs, seenList);
     // The trace a link change leaves on the task, since nothing else does any more (BP-628)
-    await recordLinkChanges(task._id, String(user._id), added, removed);
+    await recordLinkChanges(db, task._id, String(user._id), added, removed);
     unlinked += removed.length;
     linked += mrs.length;
 
@@ -122,7 +122,7 @@ export const POST = withProjectAccess(async (_request, { params, user, db }) => 
       );
       if (moved.modifiedCount === 1) {
         autoTransitioned++;
-        await logActivity(String(task._id), user._id, "status_changed", "status", oldStatus, destination);
+        await logActivity(db, String(task._id), user._id, "status_changed", "status", oldStatus, destination);
       }
     }
   }
@@ -141,7 +141,7 @@ export const POST = withProjectAccess(async (_request, { params, user, db }) => 
       const removed = removedLinks(task.linkedPRs, "gitlab", seen, new Set());
       if (removed.length === 0) continue;
       await writeProviderLinks(task._id, "gitlab", [], seenList);
-      await recordLinkChanges(task._id, String(user._id), [], removed);
+      await recordLinkChanges(db, task._id, String(user._id), [], removed);
       unlinked += removed.length;
     }
   }

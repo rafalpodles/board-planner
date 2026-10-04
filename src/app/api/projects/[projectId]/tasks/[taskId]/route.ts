@@ -72,8 +72,8 @@ export const GET = withProjectAccess(async (_request, { params, user, db }) => {
   taskObj.decision = toApiDecision(
     task.decision,
     decider,
-    task.decision ? await mayDecide(task.decision.workerId, user, decider) : false,
-    await prUrlNamesProjectRepo(task.decision?.prUrl, projectId)
+    task.decision ? await mayDecide(db, task.decision.workerId, user, decider) : false,
+    await prUrlNamesProjectRepo(db, task.decision?.prUrl, projectId)
   );
 
   return NextResponse.json(taskObj);
@@ -121,7 +121,7 @@ export const PUT = withProjectAccess(async (request, { params, user, db }) => {
     return NextResponse.json({ error: MACHINE_FORCE_REFUSAL }, { status: 403 });
   }
 
-  const result = await updateTask(projectId, taskId, updates, String(user._id), force === true);
+  const result = await updateTask(db, projectId, taskId, updates, String(user._id), force === true);
   if (!result.ok) {
     return NextResponse.json(
       { error: result.error, ...(result.runConflict ? { runConflict: result.runConflict } : {}) },
@@ -129,7 +129,7 @@ export const PUT = withProjectAccess(async (request, { params, user, db }) => {
     );
   }
 
-  return NextResponse.json(await withApiExecution(result.data));
+  return NextResponse.json(await withApiExecution(db, result.data));
 });
 
 export const DELETE = withProjectAccess(async (request, { params, user, db }) => {
@@ -165,7 +165,7 @@ export const DELETE = withProjectAccess(async (request, { params, user, db }) =>
 
   if (force !== true) {
     const project = await db.Project.findById(projectId, "key").lean();
-    const refusal = await heldRunRefusal(task, project?.key as string | undefined, "delete");
+    const refusal = await heldRunRefusal(db, task, project?.key as string | undefined, "delete");
     if (refusal) {
       return NextResponse.json(
         { error: refusal.error, ...(refusal.runConflict ? { runConflict: refusal.runConflict } : {}) },
@@ -181,6 +181,7 @@ export const DELETE = withProjectAccess(async (request, { params, user, db }) =>
     db.ActivityLog.deleteMany({ task: taskId }),
     db.Notification.deleteMany({ task: taskId }),
     severLinksToDeletedTask(
+      db,
       projectId,
       taskId,
       { taskNumber: task.taskNumber, title: task.title, status: task.status },

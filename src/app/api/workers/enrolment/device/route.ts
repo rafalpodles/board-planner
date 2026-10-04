@@ -17,6 +17,7 @@ import {
   recordFailedAttempt,
   sourceKey,
 } from "@/lib/rate-limit";
+import { scopedToDefaultTenant } from "@/lib/db-scope";
 
 const ENROLMENTS_PER_WINDOW = 10;
 
@@ -24,6 +25,7 @@ const ENROLMENTS_PER_WINDOW = 10;
 // exists so nobody has to copy a token onto it by hand. Nothing is granted here. A pending row is
 // worth nothing until a signed-in person confirms it, and it reaps itself in fifteen minutes.
 export async function POST(request: Request) {
+  const db = scopedToDefaultTenant();
   await connectDB();
 
   if (protocolOf(request) !== PROTOCOL_VERSION) {
@@ -72,7 +74,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "name is required" }, { status: 400 });
   }
 
-  const started = await startDeviceEnrolment({ machineName, machineHost });
+  const started = await startDeviceEnrolment(db, { machineName, machineHost });
 
   return NextResponse.json(
     {
