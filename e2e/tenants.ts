@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import mongoose from "mongoose";
 import type { BrowserContext } from "@playwright/test";
-import { E2E_MONGODB_URI, PROJECT_ID, seed } from "./seed";
+import { E2E_MONGODB_URI, PROJECT_ID, WORKER_CREDENTIAL, WORKER_ID, seed } from "./seed";
 import { TENANT_DOMAIN, TENANTS_PORT } from "../playwright.config";
 
 const id = (hex: string) => new mongoose.Types.ObjectId(hex);
@@ -16,6 +16,7 @@ export interface TenantFixture {
   sessionToken: string;
   projectId: mongoose.Types.ObjectId;
   projectName: string;
+  workerId: mongoose.Types.ObjectId;
 }
 
 export const USERNAME = "boss";
@@ -30,6 +31,7 @@ export const ACME: TenantFixture = {
   sessionToken: "cps_e2eac002deadbeefdeadbeefdeadbeef",
   projectId: id("e2e0000000000000000ac003"),
   projectName: "Acme Rockets",
+  workerId: id("e2e0000000000000000ac004"),
 };
 
 export const GLOBEX: TenantFixture = {
@@ -41,6 +43,7 @@ export const GLOBEX: TenantFixture = {
   sessionToken: "cps_e2eab002deadbeefdeadbeefdeadbeef",
   projectId: id("e2e0000000000000000ab003"),
   projectName: "Globex Doomsday",
+  workerId: id("e2e0000000000000000ab004"),
 };
 
 export const hostOf = (who: TenantFixture | string) =>
@@ -69,6 +72,7 @@ export async function seedTwoTenants(): Promise<void> {
   const handle = await db();
   const now = new Date();
   const template = await handle.collection("projects").findOne({ _id: PROJECT_ID });
+  const machine = await handle.collection("workers").findOne({ _id: WORKER_ID });
   for (const who of [ACME, GLOBEX]) {
     await handle.collection("tenants").insertOne({ _id: who.tenant, name: who.projectName.split(" ")[0], slug: who.slug });
     await handle.collection("users").insertOne({
@@ -105,6 +109,14 @@ export async function seedTwoTenants(): Promise<void> {
       ip: "",
       createdAt: now,
     });
+    const { _id: _machineId, ...machineRest } = machine!;
+    await handle.collection("workers").insertOne({
+      ...machineRest,
+      _id: who.workerId,
+      tenant: who.tenant,
+      name: `${who.slug}-machine`,
+      owner: who.adminId,
+    });
     const { _id: _ignored, ...rest } = template!;
     await handle.collection("projects").insertOne({
       ...rest,
@@ -131,3 +143,10 @@ export async function signInOn(context: BrowserContext, who: TenantFixture): Pro
     },
   ]);
 }
+
+export const workerHeaders = (who: TenantFixture) => ({
+  authorization: `Bearer ${WORKER_CREDENTIAL}`,
+  "x-worker-id": String(who.workerId),
+  "x-cp-protocol": "1",
+});
+

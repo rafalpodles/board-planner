@@ -1,6 +1,6 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
 import { RUN_TENANTS_SERVER } from "../playwright.config";
-import { ACME, GLOBEX, SHARED_KEY, TENANTS_API, asTenant, bearer, originOf, seedTwoTenants, type TenantFixture } from "./tenants";
+import { ACME, GLOBEX, SHARED_KEY, TENANTS_API, asTenant, bearer, originOf, seedTwoTenants, workerHeaders, type TenantFixture } from "./tenants";
 
 test.skip(!RUN_TENANTS_SERVER, "needs the TENANT_DOMAIN server — set E2E_TENANTS_SERVER=1");
 
@@ -65,6 +65,14 @@ test.describe("BP-670: each organisation's boards are its own", () => {
     expect([a.taskNumber, g.taskNumber]).toEqual([1, 1]);
     expect((await (await get(request, `/api/projects/${SHARED_KEY}/tasks/${SHARED_KEY}-1`, ACME)).json()).title).toBe("Acme first");
     expect((await (await get(request, `/api/projects/${SHARED_KEY}/tasks/${SHARED_KEY}-1`, GLOBEX)).json()).title).toBe("Globex first");
+  });
+
+  test("a machine reports on its own organisation's host, and is no credential on the other's", async ({ request }) => {
+    const heartbeat = (who: TenantFixture, host: TenantFixture) =>
+      request.post(`${TENANTS_API}/api/workers/${who.workerId}/heartbeat`, { headers: { ...asTenant(host), ...workerHeaders(who) }, data: {} });
+
+    expect((await heartbeat(ACME, ACME)).status()).toBe(200);
+    expect((await heartbeat(ACME, GLOBEX)).status()).toBe(401);
   });
 
   test("on screen: the sidebar of each organisation lists only its own boards", async ({ page, request }) => {
