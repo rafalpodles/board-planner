@@ -304,7 +304,7 @@ describe("GET /api/auth/oidc/:provider/callback, signing up in an allowed domain
 
     const res = await callback();
 
-    expect(signUpOpenTo).toHaveBeenCalledWith("grace@corp.example");
+    expect(signUpOpenTo).toHaveBeenCalledWith((await import("@/lib/db-scope")).scopedToDefaultTenant(), "grace@corp.example");
     expect(holdForSignUp.mock.calls[0][1].claims).toMatchObject({ email: "grace@corp.example", groups: ["staff"] });
     expect(location(res)).toBe("/join/sso");
     expect(res.headers.get("set-cookie")).toContain("bp_oidc_join=cpo_join");

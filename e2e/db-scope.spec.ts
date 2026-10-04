@@ -209,11 +209,11 @@ test("a write through the model that names no tenant is refused rather than give
 test("the instance's settings row is created in the default tenant, by a read or by a change", async () => {
   const settings = () => mongoose.connection.db!.collection("settings").find({}).toArray();
 
-  await updateSettings({ $set: { aiModel: "first" } });
+  await updateSettings(scoped(DEFAULT_TENANT_ID), { $set: { aiModel: "first" } });
   expect(await settings()).toMatchObject([{ tenant: DEFAULT_TENANT_ID, aiModel: "first" }]);
 
   await mongoose.connection.db!.collection("settings").deleteMany({});
-  await getSettings();
+  await getSettings(scoped(DEFAULT_TENANT_ID));
   expect(await settings()).toMatchObject([{ tenant: DEFAULT_TENANT_ID }]);
 });
 

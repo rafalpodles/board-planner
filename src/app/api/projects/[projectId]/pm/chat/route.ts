@@ -129,7 +129,7 @@ export async function POST(
 
     // Better a clear refusal than a provider error the user cannot act on. Unknown
     // capability (network failure, unlisted model) is allowed through rather than blocked.
-    const model = await resolvePmModel(project.pm.model);
+    const model = await resolvePmModel(db, project.pm.model);
     if ((await modelAcceptsImages(model)) === false) {
       return NextResponse.json(
         { error: `The configured PM model (${model}) does not accept images. Remove the attachment or switch models in settings.` },

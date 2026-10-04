@@ -186,7 +186,7 @@ export async function runPmTurn(db: ScopedDb, opts: {
   if (!isPmRunnable(project.pm)) return { ok: false, message: null, error: pmDisabledReason(project.pm) };
 
   const pmUser = await getPmUser(db);
-  const model = await resolvePmModel(project.pm.model);
+  const model = await resolvePmModel(db, project.pm.model);
   const trigger = opts.trigger ?? { type: "chat" as const };
 
   const actor = await resolveActor(db, opts.triggeredByUserId);

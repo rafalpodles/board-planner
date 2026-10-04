@@ -1,3 +1,4 @@
+import type { ScopedDb } from "@/lib/db-scope";
 import { getSettings } from "@/models/settings";
 import { DEFAULT_PM_MODEL } from "./openrouter";
 
@@ -14,9 +15,9 @@ export {
 export type { PmGateFields } from "./gate";
 
 // project value → instance setting → env var → hard fallback
-export async function resolvePmModel(projectModel?: string): Promise<string> {
+export async function resolvePmModel(db: ScopedDb, projectModel?: string): Promise<string> {
   if (projectModel) return projectModel;
-  const settings = await getSettings();
+  const settings = await getSettings(db);
   return settings.pmDefaultModel || DEFAULT_PM_MODEL();
 }
 
@@ -35,9 +36,9 @@ export async function resolveDailyTokenCap(projectCap?: number): Promise<number>
   return Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : 0;
 }
 
-export async function resolveDailyTurnCap(projectCap?: number): Promise<number> {
+export async function resolveDailyTurnCap(db: ScopedDb, projectCap?: number): Promise<number> {
   if (projectCap) return projectCap;
-  const settings = await getSettings();
+  const settings = await getSettings(db);
   return (
     settings.pmDefaultDailyTurnCap ||
     Number(process.env.PM_DAILY_TURN_CAP) ||

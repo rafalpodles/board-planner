@@ -20,9 +20,9 @@ function view(domains: string[]) {
   };
 }
 
-export const GET = withAdmin(async () => {
+export const GET = withAdmin(async (_request, { db }) => {
   await connectDB();
-  return NextResponse.json(view((await getSettings()).signUpDomains ?? []));
+  return NextResponse.json(view((await getSettings(db)).signUpDomains ?? []));
 });
 
 export const PUT = withAdmin(async (request, { user, db }) => {
@@ -35,8 +35,8 @@ export const PUT = withAdmin(async (request, { user, db }) => {
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
 
   await connectDB();
-  const before = (await getSettings()).signUpDomains ?? [];
-  const settings = await updateSettings({ $set: { signUpDomains: parsed.value } });
+  const before = (await getSettings(db)).signUpDomains ?? [];
+  const settings = await updateSettings(db, { $set: { signUpDomains: parsed.value } });
   void logInstanceAudit(db, {
     action: "instance_settings_changed",
     user: user._id,

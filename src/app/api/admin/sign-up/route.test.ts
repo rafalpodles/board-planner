@@ -28,7 +28,7 @@ beforeEach(() => {
   stored = ["old.example"];
   providers = [OIDC, GITHUB];
   getAuthUser.mockResolvedValue(ADMIN);
-  updateSettings.mockImplementation(async (update: { $set: { signUpDomains: string[] } }) => ({
+  updateSettings.mockImplementation(async (_db: unknown, update: { $set: { signUpDomains: string[] } }) => ({
     signUpDomains: update.$set.signUpDomains,
   }));
   process.env.OIDC_ADMIN_GROUP = "planner-admins";
@@ -73,7 +73,7 @@ describe("PUT /api/admin/sign-up", () => {
     const res = await put({ domains: ["Corp.Example", "@corp.example", "lab.example"] });
 
     expect(res.status).toBe(200);
-    expect(updateSettings).toHaveBeenCalledWith({ $set: { signUpDomains: ["corp.example", "lab.example"] } });
+    expect(updateSettings).toHaveBeenCalledWith(scopedToDefaultTenant(), { $set: { signUpDomains: ["corp.example", "lab.example"] } });
     expect((await res.json()).domains).toEqual(["corp.example", "lab.example"]);
     expect(logInstanceAudit).toHaveBeenCalledWith(
       scopedToDefaultTenant(),
@@ -87,7 +87,7 @@ describe("PUT /api/admin/sign-up", () => {
   it("closes sign-up with an empty list", async () => {
     await put({ domains: [] });
 
-    expect(updateSettings).toHaveBeenCalledWith({ $set: { signUpDomains: [] } });
+    expect(updateSettings).toHaveBeenCalledWith(scopedToDefaultTenant(), { $set: { signUpDomains: [] } });
     expect(logInstanceAudit.mock.calls[0][1].detail).toBe("sign-up domains: old.example → none");
   });
 

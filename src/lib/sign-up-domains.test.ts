@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 let stored: string[] | undefined = [];
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/settings", () => ({ getSettings: async () => ({ signUpDomains: stored }) }));
+const db = {} as never;
 
 const { parseSignUpDomains, signUpOpenTo, MAX_SIGN_UP_DOMAINS } = await import("./sign-up-domains");
 
@@ -40,18 +41,18 @@ describe("whether sign-up is open to an address", () => {
   });
 
   it("opens to exactly a listed domain, in any case", async () => {
-    expect(await signUpOpenTo("ada@corp.example")).toBe(true);
-    expect(await signUpOpenTo("ada@CORP.example")).toBe(true);
+    expect(await signUpOpenTo(db, "ada@corp.example")).toBe(true);
+    expect(await signUpOpenTo(db, "ada@CORP.example")).toBe(true);
   });
 
   it("opens to none of its subdomains, and no lookalike", async () => {
-    expect(await signUpOpenTo("ada@eu.corp.example")).toBe(false);
-    expect(await signUpOpenTo("ada@evilcorp.example")).toBe(false);
-    expect(await signUpOpenTo("ada@corp.example.evil")).toBe(false);
+    expect(await signUpOpenTo(db, "ada@eu.corp.example")).toBe(false);
+    expect(await signUpOpenTo(db, "ada@evilcorp.example")).toBe(false);
+    expect(await signUpOpenTo(db, "ada@corp.example.evil")).toBe(false);
   });
 
   it("is closed while nothing is listed", async () => {
     stored = undefined;
-    expect(await signUpOpenTo("ada@corp.example")).toBe(false);
+    expect(await signUpOpenTo(db, "ada@corp.example")).toBe(false);
   });
 });

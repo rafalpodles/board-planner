@@ -10,7 +10,7 @@ export const GET = withAdmin(async (_request, { db }) => {
 
   const [projects, settings] = await Promise.all([
     db.Project.find({}, "key name icon pm").sort({ key: 1 }).lean(),
-    getSettings(),
+    getSettings(db),
   ]);
 
   return NextResponse.json({
