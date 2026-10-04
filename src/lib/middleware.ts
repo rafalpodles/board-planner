@@ -55,7 +55,13 @@ export async function refusedOnThisHost(
   request: Request,
   principal: { tenant?: Types.ObjectId | null }
 ): Promise<NextResponse | null> {
-  const host = await tenantOfRequest(request);
+  let host;
+  try {
+    host = await tenantOfRequest(request);
+  } catch (e) {
+    if (isDatabaseUnreachable(e)) return databaseUnavailable();
+    throw e;
+  }
   if (host.kind !== "tenant") return hostNotFound();
   if (!tenantOf(principal).equals(host.tenant)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

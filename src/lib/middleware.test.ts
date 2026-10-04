@@ -16,7 +16,7 @@ vi.mock("./db", () => ({ connectDB: vi.fn() }));
 vi.mock("./tenant", () => ({ getTenant }));
 vi.mock("@/models/user", () => ({ User: { exists: userExists } }));
 
-const { withWorker, withAuth, protocolOf, withEntitlement } = await import("./middleware");
+const { withWorker, withAuth, protocolOf, withEntitlement, refusedOnThisHost } = await import("./middleware");
 const { scoped } = await import("./db-scope");
 const { DEFAULT_TENANT_ID } = await import("./tenant-field");
 
@@ -230,6 +230,16 @@ describe("a credential on another tenant's host (BP-666)", () => {
 
     expect(res.status).toBe(404);
     expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("answers 503, not 500, when the host's tenant cannot be read for a database outage", async () => {
+    const { DatabaseUnavailableError } = await import("./db-errors");
+    tenantOfRequest.mockRejectedValue(new DatabaseUnavailableError(new Error("down")));
+    getAuthUser.mockResolvedValue({ _id: "u1" });
+
+    const res = await refusedOnThisHost(request(), { tenant: null });
+
+    expect(res?.status).toBe(503);
   });
 
   it("answers 404 on the platform host too", async () => {

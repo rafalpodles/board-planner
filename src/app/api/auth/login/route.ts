@@ -17,7 +17,13 @@ export async function POST(request: Request) {
   if (!passwordSignInEnabled()) return passwordSignInOff();
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
-  const db = await scopedForRequest(request);
+  let db;
+  try {
+    db = await scopedForRequest(request);
+  } catch (e) {
+    if (isDatabaseUnreachable(e)) return databaseUnavailable();
+    throw e;
+  }
   if (!db) return hostNotFound();
 
   const read = await readJsonBody<{ username?: unknown; password?: unknown }>(request);
