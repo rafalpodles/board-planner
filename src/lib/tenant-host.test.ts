@@ -6,7 +6,7 @@ const findById = vi.hoisted(() => vi.fn());
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/tenant", () => ({ Tenant: { findOne, findById } }));
 
-const { assertTenantDomainConfig, classifyHost, tenantOfRequest, forgetTenantSlugs, tenantOrigin } = await import("./tenant-host");
+const { assertTenantDomainConfig, classifyHost, tenantOfRequest, forgetTenantSlugs, tenantOrigin, SLUG_CACHE_LIMIT } = await import("./tenant-host");
 const { scopedForRequest } = await import("./db-scope");
 const { DEFAULT_TENANT_ID } = await import("./tenant-field");
 
@@ -63,6 +63,22 @@ describe("TENANT_DOMAIN set: the host names the tenant", () => {
       expect(await tenantOfRequest(on(host)), host).toEqual({ kind: "platform" });
     }
     expect(findOne).not.toHaveBeenCalled();
+  });
+
+  it("refuses a punycode label, so no slug can impersonate another in another script", async () => {
+    expect(await tenantOfRequest(on("xn--acme-1qa.board-planner.com"))).toEqual({ kind: "none" });
+    expect(findOne).not.toHaveBeenCalled();
+  });
+
+  it("keeps at most SLUG_CACHE_LIMIT names, so random hosts cannot grow it without bound", async () => {
+    for (let i = 0; i <= SLUG_CACHE_LIMIT; i++) await tenantOfRequest(on(`r${i}x.board-planner.com`));
+    findOne.mockClear();
+
+    await tenantOfRequest(on("r0x.board-planner.com"));
+    await tenantOfRequest(on(`r${SLUG_CACHE_LIMIT}x.board-planner.com`));
+
+    expect(findOne).toHaveBeenCalledTimes(1);
+    expect(findOne).toHaveBeenCalledWith({ slug: "r0x" });
   });
 
   it("remembers a slug briefly, so a page's requests do not each read the tenant", async () => {

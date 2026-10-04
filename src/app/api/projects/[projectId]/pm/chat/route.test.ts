@@ -9,7 +9,8 @@ const runPmTurn = vi.fn();
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ getAuthUser, RateLimitError: class extends Error {} }));
 vi.mock("@/lib/grants", () => ({ check, accessibleProjectIds: vi.fn() }));
-vi.mock("@/lib/middleware", () => ({ resolveProjectId }));
+const refusedOnThisHost = vi.hoisted(() => vi.fn(async () => null as Response | null));
+vi.mock("@/lib/middleware", () => ({ resolveProjectId, refusedOnThisHost }));
 vi.mock("@/lib/pm/config", () => ({ isPmAvailable }));
 vi.mock("@/lib/pm/agent", () => ({ runPmTurn }));
 
@@ -69,5 +70,19 @@ describe("POST /api/projects/:projectId/pm/chat", () => {
 
     expect(response.status).toBe(400);
     expect(check).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/projects/:id/pm/chat on another tenant's host (BP-666)", () => {
+  it("answers whatever the host check answers and runs no turn", async () => {
+    refusedOnThisHost.mockResolvedValueOnce(new Response(null, { status: 401 }));
+    getAuthUser.mockResolvedValue({ _id: "u1", role: "member" });
+
+    const res = await POST(new Request("http://localhost/api/projects/p1/pm/chat", { method: "POST", body: "{}" }), {
+      params: Promise.resolve({ projectId: "p1" }),
+    });
+
+    expect(res.status).toBe(401);
+    expect(runPmTurn).not.toHaveBeenCalled();
   });
 });

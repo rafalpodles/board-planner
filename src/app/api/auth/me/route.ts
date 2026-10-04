@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/auth";
 import { ProvenanceError } from "@/lib/session";
 import { isDatabaseUnreachable } from "@/lib/db-errors";
-import { databaseUnavailable } from "@/lib/middleware";
+import { databaseUnavailable, refusedOnThisHost } from "@/lib/middleware";
 
 export async function GET(request: Request) {
   let user;
@@ -21,6 +21,8 @@ export async function GET(request: Request) {
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const refusedHere = await refusedOnThisHost(request, user);
+  if (refusedHere) return refusedHere;
 
   return NextResponse.json({
     _id: user._id,

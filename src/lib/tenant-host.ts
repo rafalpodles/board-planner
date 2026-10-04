@@ -26,6 +26,16 @@ export const RESERVED_SLUGS = [
 
 export const SLUG_PATTERN = /^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$/;
 
+export const isSlug = (label: string): boolean => SLUG_PATTERN.test(label) && label.slice(2, 4) !== "--";
+
+export const SLUG_CACHE_LIMIT = 1_000;
+
+function remember<V>(cache: Map<string, V>, key: string, value: V): void {
+  cache.delete(key);
+  cache.set(key, value);
+  if (cache.size > SLUG_CACHE_LIMIT) cache.delete(cache.keys().next().value as string);
+}
+
 const DOMAIN_PATTERN = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 
 export function tenantDomain(): string | null {
@@ -50,7 +60,7 @@ export function classifyHost(host: string | null, domain: string): HostKind {
   if (!name.endsWith(`.${domain}`)) return { kind: "unknown" };
   const label = name.slice(0, -domain.length - 1);
   if (RESERVED_SLUGS.includes(label)) return { kind: "platform" };
-  return SLUG_PATTERN.test(label) ? { kind: "tenant", slug: label } : { kind: "unknown" };
+  return isSlug(label) ? { kind: "tenant", slug: label } : { kind: "unknown" };
 }
 
 const SLUG_CACHE_MS = 30_000;
@@ -62,7 +72,7 @@ async function tenantWithSlug(slug: string): Promise<Types.ObjectId | null> {
   await connectDB();
   const found = await Tenant.findOne({ slug }).select("_id").lean();
   const tenant = found ? found._id : null;
-  slugCache.set(slug, { tenant, at: Date.now() });
+  remember(slugCache, slug, { tenant, at: Date.now() });
   return tenant;
 }
 
@@ -75,7 +85,7 @@ async function slugOfTenant(tenant: Types.ObjectId): Promise<string | null> {
   await connectDB();
   const found = await Tenant.findById(tenant).select("slug").lean();
   const slug = found?.slug ?? null;
-  slugOfTenantCache.set(key, { slug, at: Date.now() });
+  remember(slugOfTenantCache, key, { slug, at: Date.now() });
   return slug;
 }
 

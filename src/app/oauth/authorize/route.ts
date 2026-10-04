@@ -514,7 +514,7 @@ export async function POST(req: Request) {
   const clientIp = getClientIp(req);
   const { lockedOut, result: user } = await withLockout(
     lockoutKey(clientIp ?? "-", username),
-    () => verifyCredentials(username, password),
+    () => verifyCredentials(db, username, password),
     clientIp ? sourceKey(clientIp) : undefined
   );
   if (lockedOut) {

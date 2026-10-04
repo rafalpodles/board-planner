@@ -257,7 +257,7 @@ export function tenantOf(user: { tenant?: Types.ObjectId | string | null }): Typ
 
 export const scopedFor = (user: { tenant?: Types.ObjectId | string | null }): ScopedDb => scoped(tenantOf(user));
 
-// TODO(BP-666): a request with no caller yet takes its tenant from the host; until then there is one
+// TODO(BP-667): background work and the OIDC relay run in the default tenant until they iterate tenants
 export const scopedToDefaultTenant = (): ScopedDb => scoped(DEFAULT_TENANT_ID);
 
 export async function scopedForRequest(request: Request): Promise<ScopedDb | null> {

@@ -11,7 +11,7 @@ import {
   legacySessionCookies,
   readFlowCookie,
 } from "@/lib/session";
-import { originFor } from "@/lib/tenant-host";
+import { originFor, tenantDomain } from "@/lib/tenant-host";
 import { providerById, OidcProvider } from "@/lib/oidc/providers";
 import {
   ACCEPT_COOKIE,
@@ -144,7 +144,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
     const back = (result: string) => redirectTo(origin, `/settings/security?link=${result}`);
     // The session that started the link has to be the one finishing it
     const current = await getAuthUser(request).catch(() => null);
-    if (!current || current.viaMachineCredential || String(current._id) !== outcome.userId) return back("failed");
+    if (!current || current.viaMachineCredential || String(current._id) !== outcome.userId || !tenantOf(current).equals(db.tenant)) {
+      return back("failed");
+    }
     const own = scopedFor(current);
     const holder = await linkedAccount(own, claims);
     if (holder) return back(String(holder._id) === String(current._id) ? "linked" : "taken");
@@ -261,7 +263,7 @@ async function setUpFirstAccount(
   profile: { username: string; fullName: string } | null
 ) {
   if (!profile) return { refused: "failed" as const };
-  if ((await db.User.countDocuments()) > 0) return { refused: "claimed" as const };
+  if (tenantDomain() || (await db.User.countDocuments()) > 0) return { refused: "claimed" as const };
   if (!claims.email) return { refused: "no_email" as const };
   let user;
   try {

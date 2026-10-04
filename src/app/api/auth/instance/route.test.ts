@@ -4,6 +4,13 @@ const countDocuments = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/user", () => ({ User: { countDocuments } }));
+vi.mock("@/lib/tenant-host", async (importOriginal) => {
+  const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
+  return {
+    ...(await importOriginal<typeof import("@/lib/tenant-host")>()),
+    tenantOfRequest: async () => ({ kind: "tenant", tenant: DEFAULT_TENANT_ID }),
+  };
+});
 
 const { GET } = await import("./route");
 
@@ -15,6 +22,18 @@ beforeEach(() => vi.clearAllMocks());
  * itself and refuses a second bootstrap whatever any client believes.
  */
 describe("GET /api/auth/instance", () => {
+  it("offers no first account when organisations live on subdomains (BP-666)", async () => {
+    process.env.TENANT_DOMAIN = "board-planner.com";
+    try {
+      countDocuments.mockResolvedValue(0);
+      const res = await GET(new Request("http://localhost/api/auth/instance"));
+      expect(res.status).toBe(200);
+      expect((await res.json()).unclaimed).toBe(false);
+    } finally {
+      delete process.env.TENANT_DOMAIN;
+    }
+  });
+
   it("says an empty instance is unclaimed", async () => {
     countDocuments.mockResolvedValue(0);
 

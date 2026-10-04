@@ -64,9 +64,19 @@ vi.mock("@/lib/session", () => ({
   ProvenanceError: class ProvenanceError extends Error {},
   provenanceRefusal: () => null,
 }));
+const refusedOnThisHost = vi.hoisted(() => vi.fn(async () => null as Response | null));
+vi.mock("@/lib/tenant-host", async (importOriginal) => {
+  const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
+  return {
+    ...(await importOriginal<typeof import("@/lib/tenant-host")>()),
+    tenantOfRequest: async () => ({ kind: "tenant", tenant: DEFAULT_TENANT_ID }),
+  };
+});
 vi.mock("@/lib/middleware", () => ({
   withAdmin: (h: (r: Request, c: unknown) => unknown) => (r: Request) =>
     h(r, { user: { _id: "a1" }, db: scopedToDefaultTenant() }),
+  refusedOnThisHost,
+  hostNotFound: () => new Response(null, { status: 404 }),
 }));
 
 const nameOrganisation = vi.hoisted(() => vi.fn());
@@ -308,6 +318,33 @@ describe("claiming an instance nobody has claimed", () => {
     expect(res.status).toBe(201);
     expect(create.mock.calls[0][0].tenant).toEqual(tenant);
     expect(revokePendingInvitationsFor.mock.calls[0][0].tenant).toEqual(tenant);
+  });
+
+  it("makes no first account on an organisation's host when organisations live on subdomains (BP-666)", async () => {
+    process.env.TENANT_DOMAIN = "board-planner.com";
+    try {
+      countDocuments.mockResolvedValue(0);
+      getAuthUser.mockResolvedValue(null);
+
+      const res = await post({ ...VALID, username: "firstadmin", setupCode: "operator-held-setup-code", organisation: "Acme" });
+
+      expect(res.status).toBe(403);
+      expect(create).not.toHaveBeenCalled();
+      expect(nameOrganisation).not.toHaveBeenCalled();
+    } finally {
+      delete process.env.TENANT_DOMAIN;
+    }
+  });
+
+  it("refuses an administrator whose session belongs to another organisation's host", async () => {
+    countDocuments.mockResolvedValue(3);
+    getAuthUser.mockResolvedValue({ _id: "a1", role: "admin", username: "owner" });
+    refusedOnThisHost.mockResolvedValueOnce(new Response(null, { status: 401 }));
+
+    const res = await post({ ...VALID, username: "someone" });
+
+    expect(res.status).toBe(401);
+    expect(create).not.toHaveBeenCalled();
   });
 
   it("creates the administrator when the operator's code is given", async () => {

@@ -51,7 +51,7 @@ export function hostNotFound(): NextResponse {
   return NextResponse.json({ error: "Not found" }, { status: 404 });
 }
 
-async function refusedOnThisHost(
+export async function refusedOnThisHost(
   request: Request,
   principal: { tenant?: Types.ObjectId | null }
 ): Promise<NextResponse | null> {

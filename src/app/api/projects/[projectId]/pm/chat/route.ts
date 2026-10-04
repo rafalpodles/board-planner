@@ -11,7 +11,7 @@ import { dailyPmSpend, isOverDailyTurnCap } from "@/lib/pm/turn-cap";
 import { MAX_STEPS } from "@/lib/pm/agent";
 import { isPmRunnable, pmDisabledReason, resolvePmModel } from "@/lib/pm/availability";
 import { IMAGE_MIME_TYPES, MAX_ATTACHMENTS_PER_MESSAGE, anyAttachmentReadable, modelAcceptsImages } from "@/lib/pm/attachments";
-import { databaseUnavailable, resolveProjectId } from "@/lib/middleware";
+import { databaseUnavailable, resolveProjectId, refusedOnThisHost } from "@/lib/middleware";
 import { check } from "@/lib/grants";
 import { PmAttachment } from "@/types";
 
@@ -36,6 +36,8 @@ export async function POST(
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const refusedHere = await refusedOnThisHost(request, user);
+  if (refusedHere) return refusedHere;
   const db = scopedFor(user);
 
   // This route authenticates by hand (it streams SSE) and so never passes through

@@ -28,8 +28,8 @@ import { safeNextPath } from "@/lib/next-path";
 import { refuseSetupCode } from "@/lib/setup-code";
 import { checkProfile } from "@/lib/new-account";
 import { connectDB } from "@/lib/db";
-import { scopedFor, scopedForRequest } from "@/lib/db-scope";
-import { originFor } from "@/lib/tenant-host";
+import { scopedFor, scopedForRequest, tenantOf } from "@/lib/db-scope";
+import { originFor, tenantDomain } from "@/lib/tenant-host";
 
 const STARTS_PER_SOURCE = 30;
 
@@ -74,7 +74,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
   const next = intent === "signin" && read.value.next !== undefined ? safeNextPath(read.value.next) : undefined;
   if (intent === "link") {
     const current = await getAuthUser(request).catch(() => null);
-    if (!current || current.viaMachineCredential) {
+    if (!current || current.viaMachineCredential || !tenantOf(current).equals(db.tenant)) {
       return NextResponse.json({ error: "Sign in to link a provider" }, { status: 401 });
     }
     // A linked provider is a standing way in, so a borrowed session must not be enough to add one:
@@ -118,7 +118,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
       return NextResponse.json({ error: "Set up the first account with a password here." }, { status: 400 });
     }
     await connectDB();
-    if ((await db.User.countDocuments()) > 0) {
+    if (tenantDomain() || (await db.User.countDocuments()) > 0) {
       return NextResponse.json({ error: "This instance is already set up. Sign in instead." }, { status: 409 });
     }
     const refused = await refuseSetupCode(clientIp, read.value.setupCode);
