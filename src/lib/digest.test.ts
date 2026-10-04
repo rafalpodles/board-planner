@@ -429,18 +429,19 @@ describe("digestTick across tenants in their own timezones (BP-667)", () => {
     servedTenants.list = null;
   });
 
-  it("sends to a tenant whose own morning has come and not to one whose has not, at the same instant", async () => {
+  it("sends to a tenant whose own hour has come in its own zone, not to one whose has not, at the same instant", async () => {
     const warsaw = new Types.ObjectId("0000000000000000000000a1");
     const tokyo = new Types.ObjectId("0000000000000000000000b2");
     servedTenants.list = [
-      { _id: warsaw, timezone: "Europe/Warsaw", digestHour: 7 },
-      { _id: tokyo, timezone: "Asia/Tokyo", digestHour: 15 },
+      { _id: warsaw, timezone: "Europe/Warsaw", digestHour: 9 },
+      { _id: tokyo, timezone: "Asia/Tokyo", digestHour: 9 },
     ];
 
+    // 05:30Z is 07:30 in Warsaw and 14:30 in Tokyo: Tokyo's 09:00 has come, Warsaw's 09:00 has not
     await digestTick(new Date("2026-10-05T05:30:00Z"));
 
     const asked = userFind.mock.calls.map(([filter]) => String((filter as { tenant: unknown }).tenant));
-    expect(asked).toEqual([warsaw.toHexString()]);
+    expect(asked).toEqual([tokyo.toHexString()]);
   });
 
   it("falls back to the instance's hour and zone for a tenant that set neither", async () => {
