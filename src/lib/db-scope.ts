@@ -250,12 +250,12 @@ export function scoped(tenant: Types.ObjectId | string): ScopedDb {
   return db;
 }
 
-// TODO(BP-664): a caller with no tenant must be refused, not placed in the default one
+// TODO(BP-665): a caller with no tenant must be refused, not placed in the default one
 export function tenantOf(user: { tenant?: Types.ObjectId | string | null }): Types.ObjectId {
   return user.tenant ? new Types.ObjectId(String(user.tenant)) : DEFAULT_TENANT_ID;
 }
 
 export const scopedFor = (user: { tenant?: Types.ObjectId | string | null }): ScopedDb => scoped(tenantOf(user));
 
-// TODO(BP-664): a request with no caller yet takes its tenant from the host; until then there is one
+// TODO(BP-666): a request with no caller yet takes its tenant from the host; until then there is one
 export const scopedToDefaultTenant = (): ScopedDb => scoped(DEFAULT_TENANT_ID);
