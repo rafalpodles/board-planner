@@ -1,3 +1,4 @@
+import { Types } from "mongoose";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
@@ -389,6 +390,15 @@ describe("POST /api/auth/login — cookie", () => {
       userAgent: "Firefox/1",
       ip: "203.0.113.9",
     });
+  });
+
+  it("puts the session in the signed-in person's own tenant", async () => {
+    const tenant = new Types.ObjectId("0000000000000000000000b2");
+    verifyCredentials.mockResolvedValue({ ...USER, tenant });
+
+    await POST(request({ "sec-fetch-site": "same-origin" }));
+
+    expect(createSession.mock.calls[0][0].tenant).toBe(tenant);
   });
 
   it("issues a fresh row and deletes nothing", async () => {
