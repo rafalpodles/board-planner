@@ -1,6 +1,6 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { IApiToken } from "@/types";
-import { withTenant } from "@/lib/tenant-field";
+import { withOrganisation } from "@/lib/organisation-field";
 
 const apiTokenSchema = new Schema<IApiToken>(
   {
@@ -17,7 +17,7 @@ const apiTokenSchema = new Schema<IApiToken>(
   { timestamps: { createdAt: true, updatedAt: false } }
 );
 
-withTenant(apiTokenSchema);
+withOrganisation(apiTokenSchema);
 
 export const ApiToken: Model<IApiToken> =
   mongoose.models.ApiToken || mongoose.model<IApiToken>("ApiToken", apiTokenSchema);

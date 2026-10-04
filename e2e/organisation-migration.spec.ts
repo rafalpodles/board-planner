@@ -1,17 +1,17 @@
 import { test, expect } from "@playwright/test";
 import mongoose from "mongoose";
 import { E2E_MONGODB_URI, e2eDatabaseName } from "./seed";
-import { backfillTenants, dropGlobalUniques, ensureOrganisation, RETIRED_GLOBAL_UNIQUES, scopedModelNames } from "../src/lib/tenant-migration";
-import { DEFAULT_TENANT_ID } from "../src/lib/tenant-field";
+import { backfillOrganisations, dropGlobalUniques, ensureOrganisation, RETIRED_GLOBAL_UNIQUES, scopedModelNames } from "../src/lib/organisation-migration";
+import { DEFAULT_ORGANISATION_ID } from "../src/lib/organisation-field";
 import { duplicateKeyField } from "../src/lib/mongo-errors";
 
 mongoose.set("autoIndex", false);
 mongoose.set("autoCreate", false);
 
-const LEGACY_DB = `${e2eDatabaseName().replace(/_e2e$/, "")}_tenantmig_e2e`;
-const OTHER_TENANT = new mongoose.Types.ObjectId("0000000000000000000000aa");
-const THIRD_TENANT = new mongoose.Types.ObjectId("0000000000000000000000bb");
-const LEGACY_TENANT_ROW = { _id: new mongoose.Types.ObjectId("0000000000000000000000cc"), entitlements: { plan: "pro", features: [], source: "service" } };
+const LEGACY_DB = `${e2eDatabaseName().replace(/_e2e$/, "")}_organisationmig_e2e`;
+const OTHER_ORGANISATION = new mongoose.Types.ObjectId("0000000000000000000000aa");
+const THIRD_ORGANISATION = new mongoose.Types.ObjectId("0000000000000000000000bb");
+const LEGACY_ORGANISATION_ROW = { _id: new mongoose.Types.ObjectId("0000000000000000000000cc"), entitlements: { plan: "pro", features: [], source: "service" } };
 
 const LEGACY_INDEXES: Record<string, { key: Record<string, 1>; name: string; partial?: object }[]> = {
   users: [
@@ -55,7 +55,7 @@ test.beforeEach(async () => {
     { email: "again@x.test", status: "accepted", tokenHash: "hash-old-1" },
     { email: "again@x.test", status: "accepted", tokenHash: "hash-old-2" },
   ]);
-  await col(collectionOf("Tenant")).insertOne(LEGACY_TENANT_ROW);
+  await col(collectionOf("Organisation")).insertOne(LEGACY_ORGANISATION_ROW);
 });
 
 test.afterEach(async () => {
@@ -77,69 +77,69 @@ async function wholeDatabase() {
 test("a dry run says what it would give and writes nothing", async () => {
   const before = await wholeDatabase();
 
-  const { total, byCollection } = await backfillTenants(conn, { apply: false });
+  const { total, byCollection } = await backfillOrganisations(conn, { apply: false });
 
   for (const name of scopedCollections()) expect(byCollection[name], name).toBe(expectedIn(name));
   expect(total).toBe(scopedCollections().reduce((sum, name) => sum + expectedIn(name), 0));
   expect(await wholeDatabase()).toBe(before);
 });
 
-test("apply gives every scoped document the default tenant and touches nothing else", async () => {
-  const throttleAndTenants = async () =>
-    JSON.stringify([await col(collectionOf("RateLimit")).find({}).toArray(), await col(collectionOf("Tenant")).find({}).toArray()]);
-  const untouchedBefore = await throttleAndTenants();
+test("apply gives every scoped document the default organisation and touches nothing else", async () => {
+  const throttleAndOrganisations = async () =>
+    JSON.stringify([await col(collectionOf("RateLimit")).find({}).toArray(), await col(collectionOf("Organisation")).find({}).toArray()]);
+  const untouchedBefore = await throttleAndOrganisations();
   const indexesBefore = await col("users").indexes();
 
-  await backfillTenants(conn, { apply: true });
+  await backfillOrganisations(conn, { apply: true });
 
   for (const name of scopedCollections()) {
-    expect(await col(name).countDocuments({ tenant: DEFAULT_TENANT_ID }), name).toBe(expectedIn(name));
-    expect(await col(name).countDocuments({ tenant: null }), name).toBe(0);
+    expect(await col(name).countDocuments({ organisation: DEFAULT_ORGANISATION_ID }), name).toBe(expectedIn(name));
+    expect(await col(name).countDocuments({ organisation: null }), name).toBe(0);
   }
-  expect(await throttleAndTenants()).toBe(untouchedBefore);
+  expect(await throttleAndOrganisations()).toBe(untouchedBefore);
   expect(await col("users").indexes()).toEqual(indexesBefore);
 });
 
 test("a second run gives nothing", async () => {
-  await backfillTenants(conn, { apply: true });
+  await backfillOrganisations(conn, { apply: true });
 
-  const { total } = await backfillTenants(conn, { apply: true });
+  const { total } = await backfillOrganisations(conn, { apply: true });
 
   expect(total).toBe(0);
 });
 
-test("a late row, with the field missing or null, is given the default tenant and another tenant's row is left alone", async () => {
-  await backfillTenants(conn, { apply: true });
-  await col("projects").insertMany([{ key: "OTHER", tenant: OTHER_TENANT }, { key: "MISSING" }, { key: "NULLED", tenant: null }]);
+test("a late row, with the field missing or null, is given the default organisation and another organisation's row is left alone", async () => {
+  await backfillOrganisations(conn, { apply: true });
+  await col("projects").insertMany([{ key: "OTHER", organisation: OTHER_ORGANISATION }, { key: "MISSING" }, { key: "NULLED", organisation: null }]);
 
-  const { total } = await backfillTenants(conn, { apply: true });
+  const { total } = await backfillOrganisations(conn, { apply: true });
 
   expect(total).toBe(2);
-  expect(await col("projects").findOne({ key: "OTHER" })).toMatchObject({ tenant: OTHER_TENANT });
-  expect(await col("projects").findOne({ key: "MISSING" })).toMatchObject({ tenant: DEFAULT_TENANT_ID });
-  expect(await col("projects").findOne({ key: "NULLED" })).toMatchObject({ tenant: DEFAULT_TENANT_ID });
+  expect(await col("projects").findOne({ key: "OTHER" })).toMatchObject({ organisation: OTHER_ORGANISATION });
+  expect(await col("projects").findOne({ key: "MISSING" })).toMatchObject({ organisation: DEFAULT_ORGANISATION_ID });
+  expect(await col("projects").findOne({ key: "NULLED" })).toMatchObject({ organisation: DEFAULT_ORGANISATION_ID });
 });
 
-const tenantRows = () => col(collectionOf("Tenant")).find({}).toArray();
+const organisationRows = () => col(collectionOf("Organisation")).find({}).toArray();
 
-test("a legacy tenant row becomes the named organisation, keeping its entitlements, and nothing is written in a dry run", async () => {
+test("a legacy organisation row becomes the named organisation, keeping its entitlements, and nothing is written in a dry run", async () => {
   const before = await wholeDatabase();
 
   expect(await ensureOrganisation(conn, { apply: false, name: "Rafał-org" })).toBe("re-keyed");
   expect(await wholeDatabase()).toBe(before);
 
   expect(await ensureOrganisation(conn, { apply: true, name: "Rafał-org" })).toBe("re-keyed");
-  const rows = await tenantRows();
+  const rows = await organisationRows();
   expect(rows).toHaveLength(1);
-  expect(rows[0]).toMatchObject({ _id: DEFAULT_TENANT_ID, name: "Rafał-org", entitlements: LEGACY_TENANT_ROW.entitlements });
+  expect(rows[0]).toMatchObject({ _id: DEFAULT_ORGANISATION_ID, name: "Rafał-org", entitlements: LEGACY_ORGANISATION_ROW.entitlements });
 });
 
-test("an instance with no tenant row gets one, named", async () => {
-  await col(collectionOf("Tenant")).deleteMany({});
+test("an instance with no organisation row gets one, named", async () => {
+  await col(collectionOf("Organisation")).deleteMany({});
 
   expect(await ensureOrganisation(conn, { apply: true, name: "Acme" })).toBe("created");
 
-  expect(await tenantRows()).toMatchObject([{ _id: DEFAULT_TENANT_ID, name: "Acme", entitlements: { plan: "free", source: "none" } }]);
+  expect(await organisationRows()).toMatchObject([{ _id: DEFAULT_ORGANISATION_ID, name: "Acme", entitlements: { plan: "free", source: "none" } }]);
 });
 
 test("naming an organisation again renames it and a second run changes nothing else", async () => {
@@ -147,56 +147,56 @@ test("naming an organisation again renames it and a second run changes nothing e
 
   expect(await ensureOrganisation(conn, { apply: true, name: "Second" })).toBe("present");
 
-  expect(await tenantRows()).toMatchObject([{ _id: DEFAULT_TENANT_ID, name: "Second", entitlements: LEGACY_TENANT_ROW.entitlements }]);
+  expect(await organisationRows()).toMatchObject([{ _id: DEFAULT_ORGANISATION_ID, name: "Second", entitlements: LEGACY_ORGANISATION_ROW.entitlements }]);
 });
 
-test("two tenant rows and none on the default id are refused rather than guessed at", async () => {
-  await col(collectionOf("Tenant")).insertOne({ _id: new mongoose.Types.ObjectId(), entitlements: {} });
+test("two organisation rows and none on the default id are refused rather than guessed at", async () => {
+  await col(collectionOf("Organisation")).insertOne({ _id: new mongoose.Types.ObjectId(), entitlements: {} });
 
   await expect(ensureOrganisation(conn, { apply: true, name: "X" })).rejects.toThrow(/cannot tell which is the organisation/);
 });
 
 type Spec = { model: string; fields: Record<string, number>; options: { partialFilterExpression?: Record<string, unknown> } };
 
-const declaredPerTenantUniques: Spec[] = scopedModelNames().flatMap((model) =>
+const declaredPerOrganisationUniques: Spec[] = scopedModelNames().flatMap((model) =>
   mongoose
     .model(model)
     .schema.indexes()
-    .filter(([fields, options]) => options?.unique && "tenant" in fields && Object.keys(fields).length > 1)
+    .filter(([fields, options]) => options?.unique && "organisation" in fields && Object.keys(fields).length > 1)
     .map(([fields, options]) => ({ model, fields: fields as Record<string, number>, options: options as Spec["options"] }))
 );
 
-test("the per-tenant uniques build beside the old ones on data that has blank e-mails and answered invitations", async () => {
-  await backfillTenants(conn, { apply: true });
+test("the per-organisation uniques build beside the old ones on data that has blank e-mails and answered invitations", async () => {
+  await backfillOrganisations(conn, { apply: true });
 
-  for (const model of new Set(declaredPerTenantUniques.map((u) => u.model))) {
+  for (const model of new Set(declaredPerOrganisationUniques.map((u) => u.model))) {
     await (conn.model(model, mongoose.model(model).schema) as mongoose.Model<mongoose.AnyObject>).createIndexes();
   }
 
-  for (const { model, fields } of declaredPerTenantUniques) {
+  for (const { model, fields } of declaredPerOrganisationUniques) {
     const names = (await col(collectionOf(model)).indexes()).map((i) => i.name);
     expect(names, model).toContain(Object.entries(fields).map(([k, v]) => `${k}_${v}`).join("_"));
     expect(names.length, `${model} keeps its global twin`).toBeGreaterThan(2);
   }
 });
 
-async function buildPerTenantTwins() {
-  await backfillTenants(conn, { apply: true });
-  for (const model of new Set(declaredPerTenantUniques.map((u) => u.model))) {
+async function buildPerOrganisationTwins() {
+  await backfillOrganisations(conn, { apply: true });
+  for (const model of new Set(declaredPerOrganisationUniques.map((u) => u.model))) {
     await (conn.model(model, mongoose.model(model).schema) as mongoose.Model<mongoose.AnyObject>).createIndexes();
   }
 }
 
 const indexNames = async (collection: string) => (await col(collection).indexes()).map((i) => i.name);
 
-test("BP-665: the global uniques are dropped only where the per-tenant twin already exists", async () => {
+test("BP-665: the global uniques are dropped only where the per-organisation twin already exists", async () => {
   await expect(dropGlobalUniques(conn, { apply: true })).rejects.toThrow(/twin .* is not built yet/);
   for (const { collection, name } of RETIRED_GLOBAL_UNIQUES) expect(await indexNames(collection), collection).toContain(name);
 });
 
 test("BP-665: one missing twin, the last one checked, drops nothing at all", async () => {
-  await buildPerTenantTwins();
-  await col("agentblocks").dropIndex("key_1_tenant_1");
+  await buildPerOrganisationTwins();
+  await col("agentblocks").dropIndex("key_1_organisation_1");
 
   await expect(dropGlobalUniques(conn, { apply: true })).rejects.toThrow(/agentblocks\.key_1/);
 
@@ -204,16 +204,16 @@ test("BP-665: one missing twin, the last one checked, drops nothing at all", asy
 });
 
 test("BP-665: a twin with another partial filter is no twin", async () => {
-  await buildPerTenantTwins();
-  await col("invitations").dropIndex("email_1_tenant_1");
-  await col("invitations").createIndex({ email: 1, tenant: 1 }, { unique: true, partialFilterExpression: { status: "expired" } });
+  await buildPerOrganisationTwins();
+  await col("invitations").dropIndex("email_1_organisation_1");
+  await col("invitations").createIndex({ email: 1, organisation: 1 }, { unique: true, partialFilterExpression: { status: "expired" } });
 
   await expect(dropGlobalUniques(conn, { apply: true })).rejects.toThrow(/invitations\.email_1/);
   expect(await indexNames("invitations")).toContain("email_1");
 });
 
 test("BP-665: a dry run names the seven it would drop and drops none; apply drops them and keeps the twins", async () => {
-  await buildPerTenantTwins();
+  await buildPerOrganisationTwins();
 
   const dry = await dropGlobalUniques(conn, { apply: false });
   expect(dry.map((o) => o.state)).toEqual(Array(7).fill("would drop"));
@@ -230,15 +230,15 @@ test("BP-665: a dry run names the seven it would drop and drops none; apply drop
   expect((await dropGlobalUniques(conn, { apply: true })).map((o) => o.state)).toEqual(Array(7).fill("absent"));
 });
 
-test("BP-665: once dropped, the same username, e-mail and project key live in two tenants", async () => {
-  await buildPerTenantTwins();
+test("BP-665: once dropped, the same username, e-mail and project key live in two organisations", async () => {
+  await buildPerOrganisationTwins();
   await dropGlobalUniques(conn, { apply: true });
 
-  await col("users").insertOne({ username: "alice", email: "alice@x.test", tenant: OTHER_TENANT });
-  await col("users").insertOne({ username: "alice", email: "alice@x.test", tenant: THIRD_TENANT });
-  await col("projects").insertOne({ key: "SAME", tenant: OTHER_TENANT });
-  await col("projects").insertOne({ key: "SAME", tenant: THIRD_TENANT });
-  await expect(col("users").insertOne({ username: "alice", tenant: OTHER_TENANT })).rejects.toThrow(/E11000/);
+  await col("users").insertOne({ username: "alice", email: "alice@x.test", organisation: OTHER_ORGANISATION });
+  await col("users").insertOne({ username: "alice", email: "alice@x.test", organisation: THIRD_ORGANISATION });
+  await col("projects").insertOne({ key: "SAME", organisation: OTHER_ORGANISATION });
+  await col("projects").insertOne({ key: "SAME", organisation: THIRD_ORGANISATION });
+  await expect(col("users").insertOne({ username: "alice", organisation: OTHER_ORGANISATION })).rejects.toThrow(/E11000/);
 
   expect(await col("users").countDocuments({ username: "alice" })).toBe(2);
 });
@@ -249,43 +249,43 @@ const insertOutcome = (promise: Promise<unknown>) =>
     (err) => ({ refused: duplicateKeyField(err) })
   );
 
-test("seven per-tenant uniques are declared, so none can drop out of the checks below", () => {
-  expect(declaredPerTenantUniques).toHaveLength(7);
+test("seven per-organisation uniques are declared, so none can drop out of the checks below", () => {
+  expect(declaredPerOrganisationUniques).toHaveLength(7);
 });
 
-for (const { model, fields, options } of declaredPerTenantUniques) {
-  const chosen = Object.keys(fields).filter((key) => key !== "tenant");
-  test(`${model} ${chosen.join("+")}: unique per tenant, as declared`, async () => {
+for (const { model, fields, options } of declaredPerOrganisationUniques) {
+  const chosen = Object.keys(fields).filter((key) => key !== "organisation");
+  test(`${model} ${chosen.join("+")}: unique per organisation, as declared`, async () => {
     const fresh = col(`fresh_${model}_${chosen.join("_")}`);
     await fresh.createIndex(fields as never, { unique: true, ...(options.partialFilterExpression ? { partialFilterExpression: options.partialFilterExpression } : {}) });
     const partial = options.partialFilterExpression ?? {};
     const values = Object.fromEntries(chosen.map((key) => [key, `v-${key}`]));
     const inside = Object.fromEntries(Object.entries(partial).filter(([, v]) => typeof v === "string"));
-    const row = (tenant: mongoose.Types.ObjectId, over: object = {}) => ({ ...values, ...inside, tenant, ...over });
+    const row = (organisation: mongoose.Types.ObjectId, over: object = {}) => ({ ...values, ...inside, organisation, ...over });
 
-    expect(await insertOutcome(fresh.insertOne(row(OTHER_TENANT)))).toBe("inserted");
-    expect(await insertOutcome(fresh.insertOne(row(THIRD_TENANT)))).toBe("inserted");
-    expect(await insertOutcome(fresh.insertOne(row(OTHER_TENANT)))).toEqual({ refused: chosen[0] });
+    expect(await insertOutcome(fresh.insertOne(row(OTHER_ORGANISATION)))).toBe("inserted");
+    expect(await insertOutcome(fresh.insertOne(row(THIRD_ORGANISATION)))).toBe("inserted");
+    expect(await insertOutcome(fresh.insertOne(row(OTHER_ORGANISATION)))).toEqual({ refused: chosen[0] });
 
     if (partial.email) {
-      expect(await insertOutcome(fresh.insertOne(row(OTHER_TENANT, { email: "", username: "b1" })))).toBe("inserted");
-      expect(await insertOutcome(fresh.insertOne(row(OTHER_TENANT, { email: "", username: "b2" })))).toBe("inserted");
+      expect(await insertOutcome(fresh.insertOne(row(OTHER_ORGANISATION, { email: "", username: "b1" })))).toBe("inserted");
+      expect(await insertOutcome(fresh.insertOne(row(OTHER_ORGANISATION, { email: "", username: "b2" })))).toBe("inserted");
     }
     if (partial.status) {
-      expect(await insertOutcome(fresh.insertOne(row(OTHER_TENANT, { status: "accepted" })))).toBe("inserted");
-      expect(await insertOutcome(fresh.insertOne(row(OTHER_TENANT, { status: "accepted" })))).toBe("inserted");
+      expect(await insertOutcome(fresh.insertOne(row(OTHER_ORGANISATION, { status: "accepted" })))).toBe("inserted");
+      expect(await insertOutcome(fresh.insertOne(row(OTHER_ORGANISATION, { status: "accepted" })))).toBe("inserted");
     }
   });
 }
 
-test("BP-667: Settings is one row per tenant, unique on the tenant alone", async () => {
+test("BP-667: Settings is one row per organisation, unique on the organisation alone", async () => {
   const declared = mongoose.model("Settings").schema.indexes();
-  expect(declared).toContainEqual([{ tenant: 1 }, expect.objectContaining({ unique: true })]);
+  expect(declared).toContainEqual([{ organisation: 1 }, expect.objectContaining({ unique: true })]);
 
   const fresh = col("fresh_settings");
-  await fresh.createIndex({ tenant: 1 }, { unique: true });
-  expect(await insertOutcome(fresh.insertOne({ tenant: OTHER_TENANT }))).toBe("inserted");
-  expect(await insertOutcome(fresh.insertOne({ tenant: THIRD_TENANT }))).toBe("inserted");
-  expect(await insertOutcome(fresh.insertOne({ tenant: OTHER_TENANT }))).toEqual({ refused: "tenant" });
+  await fresh.createIndex({ organisation: 1 }, { unique: true });
+  expect(await insertOutcome(fresh.insertOne({ organisation: OTHER_ORGANISATION }))).toBe("inserted");
+  expect(await insertOutcome(fresh.insertOne({ organisation: THIRD_ORGANISATION }))).toBe("inserted");
+  expect(await insertOutcome(fresh.insertOne({ organisation: OTHER_ORGANISATION }))).toEqual({ refused: "organisation" });
 });
 

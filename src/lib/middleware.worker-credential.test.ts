@@ -11,8 +11,8 @@ const check = vi.fn();
 const accessibleProjectIds = vi.fn();
 
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
-const tenantOfRequest = vi.hoisted(() => vi.fn());
-vi.mock("./tenant-host", () => ({ tenantOfRequest }));
+const organisationOfRequest = vi.hoisted(() => vi.fn());
+vi.mock("./organisation-host", () => ({ organisationOfRequest }));
 vi.mock("./worker-service", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./worker-service")>();
   return { ...actual, verifyWorkerCredential };
@@ -30,8 +30,8 @@ const taskFindOne = vi.fn();
 vi.mock("@/models/task", () => ({ Task: { findOne: taskFindOne, exists: taskExists } }));
 
 const { withProjectAccessOrWorker } = await import("./middleware");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
-const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
+const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
 
 const PROJECT_ID = "69a52e3b399b27d3cbb2c5a5";
 const IDENTITY_ID = "69a52e3b399b27d3cbb2c5b7";
@@ -85,7 +85,7 @@ const context = () => ({ params: Promise.resolve({ projectId: PROJECT_ID }) });
 
 beforeEach(() => {
   vi.clearAllMocks();
-  tenantOfRequest.mockResolvedValue({ kind: "tenant", tenant: DEFAULT_TENANT_ID });
+  organisationOfRequest.mockResolvedValue({ kind: "organisation", organisation: DEFAULT_ORGANISATION_ID });
   verifyWorkerCredential.mockResolvedValue(workerDoc());
   projectFindOne.mockReturnValue({ select: () => ({ lean: () => Promise.resolve(projectDoc()) }) });
   userFindOne.mockImplementation((filter: { _id: string }) =>
@@ -97,9 +97,9 @@ beforeEach(() => {
   userExists.mockResolvedValue(null);
 });
 
-describe("a worker credential on another tenant's host (BP-666)", () => {
+describe("a worker credential on another organisation's host (BP-666)", () => {
   it("is refused before the project is even looked up, and the handler never runs", async () => {
-    tenantOfRequest.mockResolvedValue({ kind: "tenant", tenant: Types.ObjectId.createFromHexString("0000000000000000000000b2") });
+    organisationOfRequest.mockResolvedValue({ kind: "organisation", organisation: Types.ObjectId.createFromHexString("0000000000000000000000b2") });
     const handler = vi.fn();
 
     const res = await withProjectAccessOrWorker(handler)(workerRequest(), context());
@@ -325,7 +325,7 @@ describe("the grant is re-derived on every call", () => {
         project: PROJECT_ID,
         "execution.workerId": "w1",
         "execution.runId": { $nin: ["", null] },
-        tenant: DEFAULT_TENANT_ID,
+        organisation: DEFAULT_ORGANISATION_ID,
       });
     });
 
@@ -461,7 +461,7 @@ describe("the grant is re-derived on every call", () => {
       const stored = docs.map((doc) => ({
         ...doc,
         project: PROJECT_ID,
-        tenant: DEFAULT_TENANT_ID,
+        organisation: DEFAULT_ORGANISATION_ID,
         execution: Object.fromEntries(
           Object.entries(doc.execution).filter(([, value]) => value !== undefined)
         ),
@@ -649,7 +649,7 @@ describe("the grant is re-derived on every call", () => {
     );
 
     expect(accessibleProjectIds).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       expect.objectContaining({ _id: OWNER_ID, username: "owner" })
     );
   });

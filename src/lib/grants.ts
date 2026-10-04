@@ -1,7 +1,7 @@
 import { Types, isValidObjectId } from "mongoose";
 import { IUser, GrantRelation } from "@/types";
 import { connectDB } from "./db";
-import { tenantOf, type ScopedDb } from "@/lib/db-scope";
+import { organisationOf, type ScopedDb } from "@/lib/db-scope";
 
 export type Need = "access" | "admin";
 
@@ -16,14 +16,14 @@ export type Need = "access" | "admin";
  */
 export type AccessSubject = Pick<
   IUser,
-  "role" | "tokenScoped" | "tokenScope" | "instanceAdminBeforeScope" | "tenant"
+  "role" | "tokenScoped" | "tokenScope" | "instanceAdminBeforeScope" | "organisation"
 >;
 
 /** An AccessSubject the grant store can be queried about. principalOf never needs the id. */
 export type IdentifiedSubject = AccessSubject & Pick<IUser, "_id">;
 
 export interface Principal {
-  tenant: Types.ObjectId;
+  organisation: Types.ObjectId;
   instanceAdmin: boolean;
   tokenScoped: boolean;
   tokenScope: string[] | null;
@@ -32,7 +32,7 @@ export interface Principal {
 
 export interface ProjectRef {
   id: string;
-  tenant: Types.ObjectId | null;
+  organisation: Types.ObjectId | null;
 }
 
 export function decide(
@@ -41,7 +41,7 @@ export function decide(
   need: Need,
   project: ProjectRef
 ): boolean {
-  if (!project.tenant || !principal.tenant.equals(project.tenant)) return false;
+  if (!project.organisation || !principal.organisation.equals(project.organisation)) return false;
   const projectId = project.id;
   if (principal.tokenScope && !principal.tokenScope.includes(projectId)) return false;
   if (need === "admin" && principal.tokenScoped) return false;
@@ -52,7 +52,7 @@ export function decide(
 
 export function principalOf(user: AccessSubject): Principal {
   return {
-    tenant: tenantOf(user),
+    organisation: organisationOf(user),
     instanceAdmin: user.role === "admin",
     tokenScoped: !!user.tokenScoped,
     tokenScope: user.tokenScope ? user.tokenScope.map(String) : null,
@@ -60,7 +60,7 @@ export function principalOf(user: AccessSubject): Principal {
   };
 }
 
-async function projectsInTenant(db: ScopedDb, projectIds: string[]): Promise<Set<string>> {
+async function projectsInOrganisation(db: ScopedDb, projectIds: string[]): Promise<Set<string>> {
   const valid = projectIds.filter((id) => isValidObjectId(id));
   if (valid.length === 0) return new Set();
   await connectDB();
@@ -68,19 +68,19 @@ async function projectsInTenant(db: ScopedDb, projectIds: string[]): Promise<Set
   return new Set(found.map((project) => String(project._id)));
 }
 
-const refOf = (db: ScopedDb, inTenant: Set<string>, id: string): ProjectRef => ({
+const refOf = (db: ScopedDb, inOrganisation: Set<string>, id: string): ProjectRef => ({
   id,
-  tenant: inTenant.has(id) ? db.tenant : null,
+  organisation: inOrganisation.has(id) ? db.organisation : null,
 });
 
 export async function check(db: ScopedDb, user: IdentifiedSubject, projectId: string, need: Need): Promise<boolean> {
   const principal = principalOf(user);
-  if (!db.tenant.equals(principal.tenant)) return false;
-  const project = refOf(db, await projectsInTenant(db, [String(projectId)]), String(projectId));
+  if (!db.organisation.equals(principal.organisation)) return false;
+  const project = refOf(db, await projectsInOrganisation(db, [String(projectId)]), String(projectId));
   // The query is skipped where no grant can change the verdict; the verdict itself always
   // comes from decide(), so the rule ordering lives in exactly one place.
   const withoutGrant =
-    !project.tenant ||
+    !project.organisation ||
     principal.instanceAdmin ||
     principal.instanceAdminBeforeScope ||
     (principal.tokenScope !== null && !principal.tokenScope.includes(projectId));
@@ -108,8 +108,8 @@ export async function administeredProjectIds(
 ): Promise<Set<string>> {
   const ids = projectIds.map(String);
   const principal = principalOf(user);
-  if (!db.tenant.equals(principal.tenant)) return new Set();
-  const inTenant = await projectsInTenant(db, ids);
+  if (!db.organisation.equals(principal.organisation)) return new Set();
+  const inOrganisation = await projectsInOrganisation(db, ids);
   const withoutGrant = principal.instanceAdmin || principal.instanceAdminBeforeScope;
   let relationOf = new Map<string, GrantRelation>();
   if (!withoutGrant && ids.length > 0) {
@@ -124,7 +124,7 @@ export async function administeredProjectIds(
     relationOf = new Map(grants.map((g) => [String(g.object), g.relation]));
   }
   return new Set(
-    ids.filter((id) => decide(principal, relationOf.get(id) ?? null, "admin", refOf(db, inTenant, id)))
+    ids.filter((id) => decide(principal, relationOf.get(id) ?? null, "admin", refOf(db, inOrganisation, id)))
   );
 }
 
@@ -164,15 +164,15 @@ export async function recipientsWithAccess(
   if (subjectIds.length === 0) return [];
 
   await connectDB();
-  const [grants, users, inTenant] = await Promise.all([
+  const [grants, users, inOrganisation] = await Promise.all([
     db.Grant.find({ subject: { $in: subjectIds }, objectType: "project", object: projectId })
       .select("subject relation")
       .lean(),
     // A deactivated account sees nothing, so it is told nothing and handed nothing (BP-832)
     db.User.find({ _id: { $in: subjectIds }, deactivatedAt: null }).select("role").lean(),
-    projectsInTenant(db, [String(projectId)]),
+    projectsInOrganisation(db, [String(projectId)]),
   ]);
-  const project = refOf(db, inTenant, String(projectId));
+  const project = refOf(db, inOrganisation, String(projectId));
 
   const relationOf = new Map(grants.map((g) => [String(g.subject), g.relation]));
   const roleOf = new Map(users.map((u) => [String(u._id), u.role]));
@@ -186,7 +186,7 @@ export async function recipientsWithAccess(
     if (!role) return false;
     // Only the stored fields: tokenScoped and its siblings are attached at request time by
     // applyTokenScope and can never be on a recipient loaded from the database.
-    return decide(principalOf({ role, tenant: db.tenant }), relationOf.get(id) ?? null, "access", project);
+    return decide(principalOf({ role, organisation: db.organisation }), relationOf.get(id) ?? null, "access", project);
   });
 }
 

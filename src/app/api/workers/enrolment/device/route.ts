@@ -10,7 +10,7 @@ import {
   startDeviceEnrolment,
 } from "@/lib/device-enrolment";
 import { getClientIp } from "@/lib/auth";
-import { originFor } from "@/lib/tenant-host";
+import { originFor } from "@/lib/organisation-host";
 import {
   anonymousMultiplier,
   isRateLimited,

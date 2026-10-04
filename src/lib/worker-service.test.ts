@@ -41,8 +41,8 @@ const {
   WORKER_HEARTBEAT_MS,
   toApiWorker,
 } = await import("./worker-service");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
-const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
+const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
 
 // Reach is resolved from the owner's grants by the caller and handed in, so every case that is not
 // about reach says "the owner can reach this project" and varies something else. Passed explicitly
@@ -270,7 +270,7 @@ describe("registerWorker", () => {
   }
 
   const alreadyThere = (owner: unknown) =>
-    storedMachine({ name: "rig", host: "mac.home", owner, tenant: DEFAULT_TENANT_ID });
+    storedMachine({ name: "rig", host: "mac.home", owner, organisation: DEFAULT_ORGANISATION_ID });
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -282,7 +282,7 @@ describe("registerWorker", () => {
   it("writes owner as a real ObjectId when ownerId is given", async () => {
     const ownerId = "6a732075133f935b19154cd2";
 
-    await registerWorker(scopedToDefaultTenant(), { name: "rig", host: "mac.home", platform: "darwin", version: "1.0.0", ownerId });
+    await registerWorker(scopedToDefaultOrganisation(), { name: "rig", host: "mac.home", platform: "darwin", version: "1.0.0", ownerId });
 
     const update = findOneAndUpdate.mock.calls[0][1];
     expect(update.$set.owner).toBeInstanceOf(Types.ObjectId);
@@ -294,7 +294,7 @@ describe("registerWorker", () => {
   // owner a previous registration already set. Only setting the key when ownerId is given is what
   // makes that true — a stray `owner: null` here would silently orphan every re-registered machine.
   it("never clears an existing owner when ownerId is omitted", async () => {
-    await registerWorker(scopedToDefaultTenant(), { name: "rig", host: "mac.home", platform: "darwin", version: "1.0.0" });
+    await registerWorker(scopedToDefaultOrganisation(), { name: "rig", host: "mac.home", platform: "darwin", version: "1.0.0" });
 
     const update = findOneAndUpdate.mock.calls[0][1];
     expect(update.$set).not.toHaveProperty("owner");
@@ -312,7 +312,7 @@ describe("registerWorker", () => {
       alreadyThere(SOMEBODY_ELSE);
 
       await expect(
-        registerWorker(scopedToDefaultTenant(), { name: "rig", host: "mac.home", platform: "", version: "", ownerId: OWNER_ID })
+        registerWorker(scopedToDefaultOrganisation(), { name: "rig", host: "mac.home", platform: "", version: "", ownerId: OWNER_ID })
       ).rejects.toBeInstanceOf(WorkerAlreadyOwned);
       // The identity is not touched either: renaming the machine account would retro-label every
       // comment it has ever authored
@@ -326,7 +326,7 @@ describe("registerWorker", () => {
       alreadyThere(SOMEBODY_ELSE);
 
       await expect(
-        registerWorker(scopedToDefaultTenant(), { name: "rig", host: "mac.home", platform: "", version: "", ownerId: OWNER_ID })
+        registerWorker(scopedToDefaultOrganisation(), { name: "rig", host: "mac.home", platform: "", version: "", ownerId: OWNER_ID })
       ).rejects.toBeInstanceOf(WorkerAlreadyOwned);
       expect(findOneAndUpdate).toHaveBeenCalled();
     });
@@ -336,7 +336,7 @@ describe("registerWorker", () => {
     it("lets its own owner register it again", async () => {
       alreadyThere(OWNER_ID);
 
-      await registerWorker(scopedToDefaultTenant(), { name: "rig", host: "mac.home", platform: "", version: "", ownerId: OWNER_ID });
+      await registerWorker(scopedToDefaultOrganisation(), { name: "rig", host: "mac.home", platform: "", version: "", ownerId: OWNER_ID });
 
       expect(findOneAndUpdate).toHaveBeenCalled();
     });
@@ -347,7 +347,7 @@ describe("registerWorker", () => {
     it("recognises its owner through an ObjectId", async () => {
       alreadyThere(new Types.ObjectId(OWNER_ID));
 
-      await registerWorker(scopedToDefaultTenant(), { name: "rig", host: "mac.home", platform: "", version: "", ownerId: OWNER_ID });
+      await registerWorker(scopedToDefaultOrganisation(), { name: "rig", host: "mac.home", platform: "", version: "", ownerId: OWNER_ID });
 
       expect(findOneAndUpdate).toHaveBeenCalled();
     });
@@ -356,7 +356,7 @@ describe("registerWorker", () => {
       alreadyThere(SOMEBODY_ELSE);
 
       await expect(
-        registerWorker(scopedToDefaultTenant(), { name: "rig", host: "mac.home", platform: "", version: "" })
+        registerWorker(scopedToDefaultOrganisation(), { name: "rig", host: "mac.home", platform: "", version: "" })
       ).rejects.toBeInstanceOf(WorkerAlreadyOwned);
     });
   });
@@ -366,7 +366,7 @@ describe("registerWorker", () => {
     it("is allowed", async () => {
       alreadyThere(null);
 
-      await registerWorker(scopedToDefaultTenant(), { name: "rig", host: "mac.home", platform: "", version: "", ownerId: OWNER_ID });
+      await registerWorker(scopedToDefaultOrganisation(), { name: "rig", host: "mac.home", platform: "", version: "", ownerId: OWNER_ID });
 
       expect(findOneAndUpdate.mock.calls[0][1].$set.owner).toBeInstanceOf(Types.ObjectId);
     });
@@ -377,7 +377,7 @@ describe("registerWorker", () => {
     it("does not inherit the last owner's reported checkouts", async () => {
       alreadyThere(null);
 
-      await registerWorker(scopedToDefaultTenant(), { name: "rig", host: "mac.home", platform: "", version: "", ownerId: OWNER_ID });
+      await registerWorker(scopedToDefaultOrganisation(), { name: "rig", host: "mac.home", platform: "", version: "", ownerId: OWNER_ID });
 
       expect(findOneAndUpdate.mock.calls[0][1].$set.repos).toEqual([]);
       expect(findOneAndUpdate.mock.calls[0][1].$set.bindingError).toBe("");
@@ -386,7 +386,7 @@ describe("registerWorker", () => {
     // A machine registering for the first time has nothing to inherit, and blanking repos there
     // would be describing a record that does not exist
     it("leaves a first registration's fields alone", async () => {
-      await registerWorker(scopedToDefaultTenant(), { name: "rig", host: "mac.home", platform: "", version: "", ownerId: OWNER_ID });
+      await registerWorker(scopedToDefaultOrganisation(), { name: "rig", host: "mac.home", platform: "", version: "", ownerId: OWNER_ID });
 
       expect(findOneAndUpdate.mock.calls[0][1].$set).not.toHaveProperty("repos");
     });
@@ -440,7 +440,7 @@ describe("ownerReachableProjectIds", () => {
   // An ownerless machine is the pre-BP-358 enrolment. Falling back to anything wider would keep
   // the race this design replaces alive indefinitely.
   it("reaches nothing for a machine with no owner", async () => {
-    expect(await ownerReachableProjectIds(scopedToDefaultTenant(), { owner: null })).toEqual([]);
+    expect(await ownerReachableProjectIds(scopedToDefaultOrganisation(), { owner: null })).toEqual([]);
     expect(userFindOne).not.toHaveBeenCalled();
   });
 
@@ -449,7 +449,7 @@ describe("ownerReachableProjectIds", () => {
   it("reaches nothing when the owner's account is gone", async () => {
     userFindOne.mockResolvedValue(null);
 
-    expect(await ownerReachableProjectIds(scopedToDefaultTenant(), { owner: "6a732075133f935b19154cd2" } as never)).toEqual([]);
+    expect(await ownerReachableProjectIds(scopedToDefaultOrganisation(), { owner: "6a732075133f935b19154cd2" } as never)).toEqual([]);
   });
 
   it("reaches exactly the projects its owner is granted", async () => {
@@ -458,13 +458,13 @@ describe("ownerReachableProjectIds", () => {
       select: () => ({ lean: () => Promise.resolve([{ object: PROJECT_ID }, { object: "p2" }]) }),
     });
 
-    expect(await ownerReachableProjectIds(scopedToDefaultTenant(), { owner: "u1" } as never)).toEqual([PROJECT_ID, "p2"]);
+    expect(await ownerReachableProjectIds(scopedToDefaultOrganisation(), { owner: "u1" } as never)).toEqual([PROJECT_ID, "p2"]);
   });
 
   it("is unrestricted when its owner is an instance admin", async () => {
     userFindOne.mockResolvedValue({ _id: "u1", role: "admin" });
 
-    expect(await ownerReachableProjectIds(scopedToDefaultTenant(), { owner: "u1" } as never)).toBeNull();
+    expect(await ownerReachableProjectIds(scopedToDefaultOrganisation(), { owner: "u1" } as never)).toBeNull();
   });
 });
 

@@ -189,13 +189,13 @@ export async function resetRateLimits(): Promise<void> {
  * Clearing them all — which is what a password change has to do — is then an indexed range scan on
  * `_id` rather than a scan of the collection looking for a segment in the middle (BP-353).
  */
-export function lockoutKey(tenant: Types.ObjectId, clientIp: string, username: string, scope = "login"): string {
-  return `${accountPrefix(tenant, username, scope)}${clientIp}`;
+export function lockoutKey(organisation: Types.ObjectId, clientIp: string, username: string, scope = "login"): string {
+  return `${accountPrefix(organisation, username, scope)}${clientIp}`;
 }
 
 /** Everything a given account's counters share, whichever address they were reached from. */
-function accountPrefix(tenant: Types.ObjectId, username: string, scope: string): string {
-  return `${scope}:${accountDigest(tenant, username)}:`;
+function accountPrefix(organisation: Types.ObjectId, username: string, scope: string): string {
+  return `${scope}:${accountDigest(organisation, username)}:`;
 }
 
 /**
@@ -209,9 +209,9 @@ function accountPrefix(tenant: Types.ObjectId, username: string, scope: string):
  *
  * Safe to hand a raw username: it is hashed into the prefix, never interpolated into the pattern.
  */
-export async function clearAccountAttempts(tenant: Types.ObjectId, username: string, scope = "login"): Promise<void> {
+export async function clearAccountAttempts(organisation: Types.ObjectId, username: string, scope = "login"): Promise<void> {
   await connectDB();
-  const prefix = accountPrefix(tenant, username, scope);
+  const prefix = accountPrefix(organisation, username, scope);
   // Derived from the prefix's own last character rather than hard-coding the one that follows ":".
   // Written as a literal, a separator later changed to anything ordering above it would make the
   // lower bound exceed the upper, and an empty range clears nothing — leaving everybody locked out,
@@ -227,8 +227,8 @@ export function normaliseUsername(username: string): string {
   return username.trim().toLowerCase();
 }
 
-function accountDigest(tenant: Types.ObjectId, username: string): string {
-  return sha256(`${tenant.toHexString()}:${normaliseUsername(username)}`).slice(0, 32);
+function accountDigest(organisation: Types.ObjectId, username: string): string {
+  return sha256(`${organisation.toHexString()}:${normaliseUsername(username)}`).slice(0, 32);
 }
 
 /** The source dimension: one key per caller, regardless of which account it is guessing at. */

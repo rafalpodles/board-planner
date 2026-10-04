@@ -1,15 +1,15 @@
 import { NextResponse } from "next/server";
 import { withAuth } from "@/lib/middleware";
-import { getTenant } from "@/lib/tenant";
+import { getOrganisation } from "@/lib/organisation";
 
-// Nothing here is secret — any authenticated user can read the tenant's own plan and features,
+// Nothing here is secret — any authenticated user can read the organisation's own plan and features,
 // the way the UI needs it to decide what to upsell.
 export const GET = withAuth(async () => {
-  const tenant = await getTenant();
+  const organisation = await getOrganisation();
   return NextResponse.json({
-    organisation: tenant.name ?? "default",
-    plan: tenant.entitlements.plan,
-    features: tenant.entitlements.features,
-    expiresAt: tenant.entitlements.expiresAt ?? null,
+    organisation: organisation.name ?? "default",
+    plan: organisation.entitlements.plan,
+    features: organisation.entitlements.features,
+    expiresAt: organisation.entitlements.expiresAt ?? null,
   });
 });

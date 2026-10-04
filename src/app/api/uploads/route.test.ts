@@ -18,7 +18,7 @@ vi.mock("@/lib/middleware", async (importOriginal) => ({
 }));
 
 const { POST } = await import("./route");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 
 const USER = { _id: "u1", role: "member" };
 const PROJECT = "69a52e3b399b27d3cbb2c5a5";
@@ -75,7 +75,7 @@ describe("POST /api/uploads", () => {
     const response = await POST(request(form({ file: png(), projectId: "BP" })), ctx());
 
     expect(response.status).toBe(200);
-    expect(check).toHaveBeenCalledWith(scopedToDefaultTenant(), USER, PROJECT, "access");
+    expect(check).toHaveBeenCalledWith(scopedToDefaultOrganisation(), USER, PROJECT, "access");
     expect(uploadedMetadata().project).toBe(PROJECT);
     expect(uploadedMetadata().uploadedBy).toBe("u1");
   });
@@ -120,7 +120,7 @@ describe("POST /api/uploads", () => {
   it("records the resolved id, not the key the caller typed", async () => {
     await POST(request(form({ file: png(), projectId: "BP" })), ctx());
 
-    expect(resolveProjectId).toHaveBeenCalledWith(scopedToDefaultTenant(), "BP");
+    expect(resolveProjectId).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "BP");
     expect(uploadedMetadata().project).toBe(PROJECT);
   });
 

@@ -20,7 +20,7 @@ vi.mock("@/lib/rate-limit", () => ({
   sourceKey: (a: string, b: string) => `${b}:${a}`,
 }));
 
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { POST } = await import("./route");
 
 const SESSION_ADMIN = { _id: "admin-1", role: "admin" };
@@ -59,7 +59,7 @@ describe("POST /api/workers/enrolment", () => {
 
     expect(response.status).toBe(201);
     expect((await response.json()).token).toBe("cpe_secret");
-    expect(mintEnrolmentToken).toHaveBeenCalledWith(scopedToDefaultTenant(), "admin-1", "rig laptop");
+    expect(mintEnrolmentToken).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "admin-1", "rig laptop");
   });
 
   // BP-233: handing out the credential that lets a new machine join is exactly the kind of thing
@@ -70,7 +70,7 @@ describe("POST /api/workers/enrolment", () => {
     await POST(request({ label: "rig laptop" }), { params: Promise.resolve({}) });
 
     expect(logInstanceAudit).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       expect.objectContaining({
         action: "enrolment_token_minted",
         target: "rig laptop",
@@ -108,7 +108,7 @@ describe("POST /api/workers/enrolment", () => {
     const response = await POST(request({ label: "my laptop" }), { params: Promise.resolve({}) });
 
     expect(response.status).toBe(201);
-    expect(mintEnrolmentToken).toHaveBeenCalledWith(scopedToDefaultTenant(), "member-1", "my laptop");
+    expect(mintEnrolmentToken).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "member-1", "my laptop");
   });
 
   // Each mint writes a row and costs a bcrypt hash. Its device-flow sibling has been capped since

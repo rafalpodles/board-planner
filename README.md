@@ -33,7 +33,7 @@ board, the REST API and the MCP server are three doors into one model, with the 
 checks behind each. An agent moving a task to *In Review* passes the same status rules as a person
 dragging the card, and leaves the same trail in the same history.
 
-Self-hosted, single instance, no tenants. `docker compose up` and it is yours.
+Self-hosted, single instance, no organisations. `docker compose up` and it is yours.
 
 ## Handing work to a machine
 

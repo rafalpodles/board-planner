@@ -33,8 +33,8 @@ vi.mock("@/models/oidcFlow", () => ({
 }));
 
 const { beginFlow, finishFlow, holdForSignUp, heldAcceptance, heldSignUp, spendAcceptance } = await import("./flow");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
-const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
+const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
 
 const sha256 = (v: string) => createHash("sha256").update(v).digest("hex");
 const PROVIDER = { id: "oidc" as const, kind: "oidc" as const, linksByAddress: true, label: "Acme", issuer: "https://id.example.com", clientId: "c", clientSecret: "s" };
@@ -49,7 +49,7 @@ beforeEach(() => {
 
 describe("beginning a sign-in", () => {
   it("asks for code + PKCE, with state and nonce, back to this instance's own address", async () => {
-    const { url, binder } = await beginFlow(scopedToDefaultTenant(), { provider: PROVIDER, origin: ORIGIN, intent: "signin" });
+    const { url, binder } = await beginFlow(scopedToDefaultOrganisation(), { provider: PROVIDER, origin: ORIGIN, intent: "signin" });
 
     expect(url).toBe("https://id.example.com/authorize?x=1");
     expect(buildAuthorizationUrl.mock.calls[0][1]).toEqual({
@@ -75,7 +75,7 @@ describe("beginning a sign-in", () => {
   it("sends the provider back to the relay when one is configured, and remembers that address", async () => {
     process.env.OIDC_RELAY_ORIGIN = "https://login.example/";
     try {
-      await beginFlow(scopedToDefaultTenant(), { provider: PROVIDER, origin: ORIGIN, intent: "signin" });
+      await beginFlow(scopedToDefaultOrganisation(), { provider: PROVIDER, origin: ORIGIN, intent: "signin" });
     } finally {
       delete process.env.OIDC_RELAY_ORIGIN;
     }
@@ -85,8 +85,8 @@ describe("beginning a sign-in", () => {
   });
 
   it("accepts plain http only from an issuer on this machine", async () => {
-    await beginFlow(scopedToDefaultTenant(), { provider: { ...PROVIDER, issuer: "http://127.0.0.1:9999" }, origin: ORIGIN, intent: "signin" });
-    await beginFlow(scopedToDefaultTenant(), { provider: { ...PROVIDER, issuer: "http://id.example.com" }, origin: ORIGIN, intent: "signin" });
+    await beginFlow(scopedToDefaultOrganisation(), { provider: { ...PROVIDER, issuer: "http://127.0.0.1:9999" }, origin: ORIGIN, intent: "signin" });
+    await beginFlow(scopedToDefaultOrganisation(), { provider: { ...PROVIDER, issuer: "http://id.example.com" }, origin: ORIGIN, intent: "signin" });
 
     expect(discovery.mock.calls[0][4]).toEqual({ execute: [allowInsecureRequests] });
     expect(discovery.mock.calls[1][4]).toEqual({ execute: [] });
@@ -101,7 +101,7 @@ describe("finishing a sign-in", () => {
   }
 
   it("refuses a callback with no binder cookie, without looking anything up", async () => {
-    expect(await finishFlow(scopedToDefaultTenant(), { provider: PROVIDER, binder: null, origin: ORIGIN, query: "?code=c" })).toEqual({
+    expect(await finishFlow(scopedToDefaultOrganisation(), { provider: PROVIDER, binder: null, origin: ORIGIN, query: "?code=c" })).toEqual({
       ok: false,
       reason: "no_flow",
     });
@@ -111,7 +111,7 @@ describe("finishing a sign-in", () => {
   it("spends the flow its cookie names, once, and only while it is live", async () => {
     findOneAndDelete.mockResolvedValue(null);
 
-    const outcome = await finishFlow(scopedToDefaultTenant(), { provider: PROVIDER, binder: "cpo_b", origin: ORIGIN, query: "?code=c" });
+    const outcome = await finishFlow(scopedToDefaultOrganisation(), { provider: PROVIDER, binder: "cpo_b", origin: ORIGIN, query: "?code=c" });
 
     expect(outcome).toEqual({ ok: false, reason: "no_flow" });
     expect(findOneAndDelete.mock.calls[0][0]).toEqual({
@@ -119,7 +119,7 @@ describe("finishing a sign-in", () => {
       provider: "oidc",
       expiresAt: { $gt: expect.any(Date) },
       claims: null,
-      tenant: DEFAULT_TENANT_ID,
+      organisation: DEFAULT_ORGANISATION_ID,
     });
   });
 
@@ -127,7 +127,7 @@ describe("finishing a sign-in", () => {
     findOneAndDelete.mockResolvedValue(FLOW);
     grantGives({ iss: "https://id.example.com", sub: "s1", email: "Ada@Example.com", email_verified: true, name: "Ada" });
 
-    const outcome = await finishFlow(scopedToDefaultTenant(), { provider: PROVIDER, binder: "cpo_b", origin: ORIGIN, query: "?code=c&state=state-1" });
+    const outcome = await finishFlow(scopedToDefaultOrganisation(), { provider: PROVIDER, binder: "cpo_b", origin: ORIGIN, query: "?code=c&state=state-1" });
 
     expect(authorizationCodeGrant.mock.calls[0][1].href).toBe(
       "https://planner.example/api/auth/oidc/oidc/callback?code=c&state=state-1"
@@ -161,7 +161,7 @@ describe("finishing a sign-in", () => {
     findOneAndDelete.mockResolvedValue({ ...FLOW, redirectUri: "https://login.example/api/auth/oidc/oidc/relay" });
     grantGives({ iss: "https://id.example.com", sub: "s1", email: "ada@example.com", email_verified: true });
 
-    await finishFlow(scopedToDefaultTenant(), { provider: PROVIDER, binder: "cpo_b", origin: ORIGIN, query: "?code=c&state=state-1" });
+    await finishFlow(scopedToDefaultOrganisation(), { provider: PROVIDER, binder: "cpo_b", origin: ORIGIN, query: "?code=c&state=state-1" });
 
     expect(authorizationCodeGrant.mock.calls[0][1].href).toBe(
       "https://login.example/api/auth/oidc/oidc/relay?code=c&state=state-1"
@@ -172,7 +172,7 @@ describe("finishing a sign-in", () => {
     findOneAndDelete.mockResolvedValue(FLOW);
     grantGives({ iss: "https://id.example.com", sub: "s1", email: "ada@example.com", email_verified: value });
 
-    const outcome = await finishFlow(scopedToDefaultTenant(), { provider: PROVIDER, binder: "cpo_b", origin: ORIGIN, query: "" });
+    const outcome = await finishFlow(scopedToDefaultOrganisation(), { provider: PROVIDER, binder: "cpo_b", origin: ORIGIN, query: "" });
 
     expect(outcome.ok && outcome.claims.emailVerified).toBe(false);
     expect(outcome.ok && outcome.claims.verifiedEmails).toEqual([]);
@@ -183,7 +183,7 @@ describe("finishing a sign-in", () => {
     authorizationCodeGrant.mockRejectedValue(new Error("state mismatch"));
 
     // With the intent the flow was started for, so the browser goes back to where it began (BP-843)
-    expect(await finishFlow(scopedToDefaultTenant(), { provider: PROVIDER, binder: "cpo_b", origin: ORIGIN, query: "" })).toEqual({
+    expect(await finishFlow(scopedToDefaultOrganisation(), { provider: PROVIDER, binder: "cpo_b", origin: ORIGIN, query: "" })).toEqual({
       ok: false,
       reason: "rejected",
       intent: "signin",
@@ -211,7 +211,7 @@ describe("what Google vouches for", () => {
       claims: () => ({ iss: "https://accounts.google.com", sub: "g1", email_verified: true, ...claims }),
     });
 
-    const outcome = await finishFlow(scopedToDefaultTenant(), { provider: GOOGLE, binder: "cpo_b", origin: ORIGIN, query: "" });
+    const outcome = await finishFlow(scopedToDefaultOrganisation(), { provider: GOOGLE, binder: "cpo_b", origin: ORIGIN, query: "" });
 
     expect(outcome.ok && outcome.claims.emailVerified).toBe(verified);
   });
@@ -222,7 +222,7 @@ describe("what Google vouches for", () => {
       claims: () => ({ iss: "https://id.example.com", sub: "s1", email: "ada@corp.com", email_verified: true }),
     });
 
-    const outcome = await finishFlow(scopedToDefaultTenant(), { provider: PROVIDER, binder: "cpo_b", origin: ORIGIN, query: "" });
+    const outcome = await finishFlow(scopedToDefaultOrganisation(), { provider: PROVIDER, binder: "cpo_b", origin: ORIGIN, query: "" });
 
     expect(outcome.ok && outcome.claims.emailVerified).toBe(true);
   });
@@ -257,7 +257,7 @@ describe("GitHub, which speaks OAuth 2 without OpenID Connect", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it("asks GitHub's own endpoints for a code, with PKCE and state but no nonce", async () => {
-    await beginFlow(scopedToDefaultTenant(), { provider: GITHUB, origin: ORIGIN, intent: "signin" });
+    await beginFlow(scopedToDefaultOrganisation(), { provider: GITHUB, origin: ORIGIN, intent: "signin" });
 
     expect(discovery).not.toHaveBeenCalled();
     expect(Configuration.mock.calls[0]).toEqual([
@@ -280,10 +280,10 @@ describe("GitHub, which speaks OAuth 2 without OpenID Connect", () => {
   });
 
   it("accepts plain http only from a GitHub on this machine", async () => {
-    await beginFlow(scopedToDefaultTenant(), { provider: { ...GITHUB, issuer: "http://127.0.0.1:9999" }, origin: ORIGIN, intent: "signin" });
+    await beginFlow(scopedToDefaultOrganisation(), { provider: { ...GITHUB, issuer: "http://127.0.0.1:9999" }, origin: ORIGIN, intent: "signin" });
     expect(allowInsecureRequests).toHaveBeenCalledTimes(1);
 
-    await beginFlow(scopedToDefaultTenant(), { provider: { ...GITHUB, issuer: "http://ghe.example.com" }, origin: ORIGIN, intent: "signin" });
+    await beginFlow(scopedToDefaultOrganisation(), { provider: { ...GITHUB, issuer: "http://ghe.example.com" }, origin: ORIGIN, intent: "signin" });
     expect(allowInsecureRequests).toHaveBeenCalledTimes(1);
   });
 
@@ -294,7 +294,7 @@ describe("GitHub, which speaks OAuth 2 without OpenID Connect", () => {
       { email: "Ada@Corp.example", primary: true, verified: true },
     ]);
 
-    const outcome = await finishFlow(scopedToDefaultTenant(), { provider: { ...GITHUB, issuer: "https://ghe.example.com" }, binder: "cpo_b", origin: ORIGIN, query: "?code=c&state=state-1" });
+    const outcome = await finishFlow(scopedToDefaultOrganisation(), { provider: { ...GITHUB, issuer: "https://ghe.example.com" }, binder: "cpo_b", origin: ORIGIN, query: "?code=c&state=state-1" });
 
     expect(authorizationCodeGrant.mock.calls[0][2]).toEqual({ pkceCodeVerifier: "verifier", expectedState: "state-1" });
     expect(fetchMock.mock.calls.map(([url]) => url).sort()).toEqual([
@@ -336,7 +336,7 @@ describe("GitHub, which speaks OAuth 2 without OpenID Connect", () => {
   ])("takes %s", async (_label, emails, email, emailVerified) => {
     githubAnswers({ id: 4242, login: "ada" }, emails);
 
-    const outcome = await finishFlow(scopedToDefaultTenant(), { provider: GITHUB, binder: "cpo_b", origin: ORIGIN, query: "" });
+    const outcome = await finishFlow(scopedToDefaultOrganisation(), { provider: GITHUB, binder: "cpo_b", origin: ORIGIN, query: "" });
 
     expect(outcome.ok && outcome.claims).toMatchObject({ email, emailVerified, name: "ada" });
   });
@@ -347,7 +347,7 @@ describe("GitHub, which speaks OAuth 2 without OpenID Connect", () => {
       { email: "ada@old.example", primary: false, verified: "true" },
     ]);
 
-    const outcome = await finishFlow(scopedToDefaultTenant(), { provider: GITHUB, binder: "cpo_b", origin: ORIGIN, query: "" });
+    const outcome = await finishFlow(scopedToDefaultOrganisation(), { provider: GITHUB, binder: "cpo_b", origin: ORIGIN, query: "" });
 
     expect(outcome.ok && outcome.claims.verifiedEmails).toEqual([]);
     expect(outcome.ok && outcome.claims).toMatchObject({ email: "ada@corp.example", emailVerified: false });
@@ -355,12 +355,12 @@ describe("GitHub, which speaks OAuth 2 without OpenID Connect", () => {
 
   it.each([
     ["github.com", "https://github.com", "https://api.github.com/user"],
-    ["a data-residency tenant", "https://acme.ghe.com", "https://api.acme.ghe.com/user"],
+    ["a data-residency enterprise", "https://acme.ghe.com", "https://api.acme.ghe.com/user"],
     ["an Enterprise Server", "https://ghe.example.com", "https://ghe.example.com/api/v3/user"],
   ])("reads the person from %s's own API when no API base is set", async (_label, site, expected) => {
     githubAnswers({ id: 1, login: "ada" }, []);
 
-    await finishFlow(scopedToDefaultTenant(), { provider: { ...GITHUB, issuer: site }, binder: "cpo_b", origin: ORIGIN, query: "" });
+    await finishFlow(scopedToDefaultOrganisation(), { provider: { ...GITHUB, issuer: site }, binder: "cpo_b", origin: ORIGIN, query: "" });
 
     expect(fetchMock.mock.calls.map(([url]) => url)).toContain(expected);
   });
@@ -374,7 +374,7 @@ describe("GitHub, which speaks OAuth 2 without OpenID Connect", () => {
     process.env.GITHUB_API_BASE_URL = api;
     githubAnswers({ id: 1, login: "ada" }, []);
 
-    await finishFlow(scopedToDefaultTenant(), { provider: { ...GITHUB, issuer: site }, binder: "cpo_b", origin: ORIGIN, query: "" });
+    await finishFlow(scopedToDefaultOrganisation(), { provider: { ...GITHUB, issuer: site }, binder: "cpo_b", origin: ORIGIN, query: "" });
 
     expect(fetchMock.mock.calls.map(([url]) => url).sort()).toEqual([expected, `${expected}/emails`]);
   });
@@ -382,7 +382,7 @@ describe("GitHub, which speaks OAuth 2 without OpenID Connect", () => {
   it("refuses when GitHub will not say who it is", async () => {
     githubAnswers({ message: "Bad credentials" }, [], 401);
 
-    expect(await finishFlow(scopedToDefaultTenant(), { provider: GITHUB, binder: "cpo_b", origin: ORIGIN, query: "" })).toMatchObject({
+    expect(await finishFlow(scopedToDefaultOrganisation(), { provider: GITHUB, binder: "cpo_b", origin: ORIGIN, query: "" })).toMatchObject({
       ok: false,
       reason: "rejected",
     });
@@ -395,13 +395,13 @@ describe("GitHub, which speaks OAuth 2 without OpenID Connect", () => {
         : new Response(JSON.stringify({ id: 4242, login: "ada" }), { status: 200 })
     );
 
-    expect((await finishFlow(scopedToDefaultTenant(), { provider: GITHUB, binder: "cpo_b", origin: ORIGIN, query: "" })).ok).toBe(false);
+    expect((await finishFlow(scopedToDefaultOrganisation(), { provider: GITHUB, binder: "cpo_b", origin: ORIGIN, query: "" })).ok).toBe(false);
   });
 
   it("refuses a person with no id", async () => {
     githubAnswers({ login: "ada" }, [{ email: "ada@corp.example", primary: true, verified: true }]);
 
-    expect((await finishFlow(scopedToDefaultTenant(), { provider: GITHUB, binder: "cpo_b", origin: ORIGIN, query: "" })).ok).toBe(false);
+    expect((await finishFlow(scopedToDefaultOrganisation(), { provider: GITHUB, binder: "cpo_b", origin: ORIGIN, query: "" })).ok).toBe(false);
   });
 });
 
@@ -412,7 +412,7 @@ describe("the groups an ID token names (BP-833)", () => {
     authorizationCodeGrant.mockResolvedValue({
       claims: () => ({ iss: provider.issuer, sub: "s1", email: "ada@corp.com", email_verified: true, hd: "corp.com", ...claims }),
     });
-    const outcome = await finishFlow(scopedToDefaultTenant(), { provider, binder: "cpo_b", origin: ORIGIN, query: "" });
+    const outcome = await finishFlow(scopedToDefaultOrganisation(), { provider, binder: "cpo_b", origin: ORIGIN, query: "" });
     return outcome.ok ? outcome.claims.groups : null;
   };
 
@@ -453,7 +453,7 @@ describe("the groups an ID token names (BP-833)", () => {
   });
 
   it("holds a sign-up with the name and groups it will be made with", async () => {
-    const binder = await holdForSignUp(scopedToDefaultTenant(), {
+    const binder = await holdForSignUp(scopedToDefaultOrganisation(), {
       provider: PROVIDER,
       claims: { issuer: "https://id.example.com", subject: "s1", email: "ada@corp.com", emailVerified: true, verifiedEmails: ["ada@corp.com"], name: "Ada", groups: ["admins"] },
     });
@@ -480,38 +480,38 @@ describe("the verified sign-ins held for a form", () => {
   afterEach(() => vi.useRealTimers());
 
   it("reads an invitation's hold by its binder, its intent, held claims and a live expiry, and returns it", async () => {
-    expect(await heldAcceptance(scopedToDefaultTenant(), "cpo_held")).toEqual(HELD);
+    expect(await heldAcceptance(scopedToDefaultOrganisation(), "cpo_held")).toEqual(HELD);
 
     expect(flowFindOne).toHaveBeenCalledWith({
       binderHash: sha256("cpo_held"),
       intent: "invite",
       claims: { $ne: null },
       expiresAt: { $gt: NOW },
-      tenant: DEFAULT_TENANT_ID,
+      organisation: DEFAULT_ORGANISATION_ID,
     });
   });
 
   it("reads a sign-up's hold only as a sign-up, and returns it", async () => {
-    expect(await heldSignUp(scopedToDefaultTenant(), "cpo_join")).toEqual(HELD);
+    expect(await heldSignUp(scopedToDefaultOrganisation(), "cpo_join")).toEqual(HELD);
 
     expect(flowFindOne).toHaveBeenCalledWith({
       binderHash: sha256("cpo_join"),
       intent: "signup",
       claims: { $ne: null },
       expiresAt: { $gt: NOW },
-      tenant: DEFAULT_TENANT_ID,
+      organisation: DEFAULT_ORGANISATION_ID,
     });
   });
 
   it("reads nothing at all without a binder", async () => {
-    expect(await heldAcceptance(scopedToDefaultTenant(), null)).toBeNull();
-    expect(await heldSignUp(scopedToDefaultTenant(), null)).toBeNull();
+    expect(await heldAcceptance(scopedToDefaultOrganisation(), null)).toBeNull();
+    expect(await heldSignUp(scopedToDefaultOrganisation(), null)).toBeNull();
     expect(flowFindOne).not.toHaveBeenCalled();
   });
 
   it("spends a hold by deleting it, and only a held one", async () => {
-    await spendAcceptance(scopedToDefaultTenant(), "cpo_held");
+    await spendAcceptance(scopedToDefaultOrganisation(), "cpo_held");
 
-    expect(flowDeleteOne).toHaveBeenCalledWith({ binderHash: sha256("cpo_held"), claims: { $ne: null }, tenant: DEFAULT_TENANT_ID });
+    expect(flowDeleteOne).toHaveBeenCalledWith({ binderHash: sha256("cpo_held"), claims: { $ne: null }, organisation: DEFAULT_ORGANISATION_ID });
   });
 });

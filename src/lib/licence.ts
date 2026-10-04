@@ -2,7 +2,7 @@ import { createPrivateKey, createPublicKey, sign, verify } from "node:crypto";
 import { ENTITLEMENT_GRACE_MS, type Plan } from "./entitlements";
 import { e2eOnlyMounted } from "./e2e-only";
 import { LICENCE_PUBLIC_KEYS, type LicencePublicKey } from "./licence-keys";
-import type { ITenantEntitlements } from "@/models/tenant";
+import type { IOrganisationEntitlements } from "@/models/organisation";
 
 export interface LicencePayload {
   v: 1;
@@ -181,7 +181,7 @@ export function currentLicence(
 }
 
 // `null` means the licence grants nothing and the stored entitlements stand
-export function entitlementsFromLicence(check: LicenceCheck | null): ITenantEntitlements | null {
+export function entitlementsFromLicence(check: LicenceCheck | null): IOrganisationEntitlements | null {
   if (!check?.payload) return null;
   if (check.verdict === "expired") {
     return { plan: "free", features: [], source: "env" };

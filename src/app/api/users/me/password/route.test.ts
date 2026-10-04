@@ -1,4 +1,4 @@
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const getAuthUser = vi.fn();
@@ -31,7 +31,7 @@ vi.mock("bcryptjs", () => ({ default: { compare, hash: vi.fn().mockResolvedValue
 vi.mock("@/models/user", () => ({ User: { findOne: userFindOne } }));
 
 const { PUT } = await import("./route");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { resetRateLimits, lockoutKey, recordFailedAttempt, isRateLimited, ANONYMOUS_ACCOUNT_ATTEMPTS } =
   await import("@/lib/rate-limit");
 
@@ -83,7 +83,7 @@ describe("PUT /api/users/me/password", () => {
 
     expect((await PUT(put(), ctx())).status).toBe(200);
     expect(logInstanceAudit).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       expect.objectContaining({ action: "identity_unlinked", user: "u1-changer", target: "changer" })
     );
   });
@@ -153,8 +153,8 @@ describe("PUT /api/users/me/password", () => {
   // one of the three password paths, and the sweep has to work from here too or the rule is only
   // partly true.
   it("lifts the account's login lockout, from every address it was filled from", async () => {
-    const shared = lockoutKey(DEFAULT_TENANT_ID, "-", "changer");
-    const fromElsewhere = lockoutKey(DEFAULT_TENANT_ID, "203.0.113.9", "changer");
+    const shared = lockoutKey(DEFAULT_ORGANISATION_ID, "-", "changer");
+    const fromElsewhere = lockoutKey(DEFAULT_ORGANISATION_ID, "203.0.113.9", "changer");
     for (let i = 0; i < ANONYMOUS_ACCOUNT_ATTEMPTS; i++) {
       await recordFailedAttempt(shared);
       await recordFailedAttempt(fromElsewhere);

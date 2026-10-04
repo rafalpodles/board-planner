@@ -8,13 +8,13 @@ const dailyPmSpend = vi.fn();
 const buildBoardDigest = vi.fn();
 const drainPmTriggers = vi.fn();
 
-const servedTenants = vi.hoisted(() => ({ list: null as null | { _id: unknown; digestHour?: number; timezone?: string }[] }));
-vi.mock("@/lib/tenant-jobs", async () => {
+const servedOrganisations = vi.hoisted(() => ({ list: null as null | { _id: unknown; digestHour?: number; timezone?: string }[] }));
+vi.mock("@/lib/organisation-jobs", async () => {
   const { scoped } = await import("@/lib/db-scope");
-  const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
+  const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
   return {
-    forEachServedTenant: async (_job: string, work: (db: unknown, tenant: unknown) => Promise<void>) => {
-      for (const tenant of servedTenants.list ?? [{ _id: DEFAULT_TENANT_ID }]) await work(scoped(tenant._id as never), tenant);
+    forEachServedOrganisation: async (_job: string, work: (db: unknown, organisation: unknown) => Promise<void>) => {
+      for (const organisation of servedOrganisations.list ?? [{ _id: DEFAULT_ORGANISATION_ID }]) await work(scoped(organisation._id as never), organisation);
     },
   };
 });
@@ -36,9 +36,9 @@ vi.mock("./board-review", () => ({
 const { pmSchedulerTick, startBoardReview } = await import("./scheduler");
 const { isTurnRunning } = await import("./turn-lock");
 const { BOARD_REVIEW_DISALLOWED_TOOLS, currentReviewSlot } = await import("./autonomy");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
-const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
-const db = scopedToDefaultTenant();
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
+const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
+const db = scopedToDefaultOrganisation();
 
 const PM = { enabled: true, dailyTurnCap: 100, autonomy: { dailyReview: true, handleNeedsHumanReview: false, reviewHour: 0, reviewIntervalHours: 24, timezone: "UTC", lastReviewSlot: "" } };
 
@@ -58,7 +58,7 @@ describe("pmSchedulerTick", () => {
     await pmSchedulerTick();
 
     const [filter, update] = findOneAndUpdate.mock.calls[0];
-    expect(filter).toEqual({ _id: "p1", tenant: DEFAULT_TENANT_ID, "pm.autonomy.lastReviewSlot": { $ne: update.$set["pm.autonomy.lastReviewSlot"] } });
+    expect(filter).toEqual({ _id: "p1", organisation: DEFAULT_ORGANISATION_ID, "pm.autonomy.lastReviewSlot": { $ne: update.$set["pm.autonomy.lastReviewSlot"] } });
     expect(findOneAndUpdate.mock.invocationCallOrder[0]).toBeLessThan(runPmTurn.mock.invocationCallOrder[0]);
     expect(runPmTurn).toHaveBeenCalledWith(
       db,

@@ -1,7 +1,7 @@
 import { test, expect, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 import mongoose from "mongoose";
 import { logActivity } from "@/lib/activity";
-import { scopedToDefaultTenant } from "@/lib/db-scope";
+import { scopedToDefaultOrganisation } from "@/lib/db-scope";
 import { GITHUB_STUB_URL } from "../playwright.config";
 import { ADMIN_AUTH } from "./api";
 import {
@@ -330,7 +330,7 @@ test("a row the scheduled sync wrote names the sync, not Unknown", async ({ page
     .findOne({ project: new mongoose.Types.ObjectId(PROJECT_ID), taskNumber: SIBLING_TASK_NUMBER });
 
   await logActivity(
-    scopedToDefaultTenant(),
+    scopedToDefaultOrganisation(),
     String(task!._id),
     null,
     "pr_unlinked",

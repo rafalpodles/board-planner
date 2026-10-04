@@ -1,13 +1,13 @@
 import mongoose from "mongoose";
 import "@/models/all";
-import { DEFAULT_TENANT_ID } from "./tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "./organisation-field";
 
-export const UNSCOPED_MODELS = ["Tenant", "RateLimit"];
+export const UNSCOPED_MODELS = ["Organisation", "RateLimit"];
 
 export const scopedModelNames = () =>
   mongoose.modelNames().filter((name) => !UNSCOPED_MODELS.includes(name));
 
-export async function backfillTenants(
+export async function backfillOrganisations(
   connection: mongoose.Connection,
   { apply }: { apply: boolean }
 ): Promise<{ total: number; byCollection: Record<string, number> }> {
@@ -19,8 +19,8 @@ export async function backfillTenants(
   for (const name of scopedModelNames()) {
     const collection = db.collection(mongoose.model(name).collection.name);
     const count = apply
-      ? (await collection.updateMany({ tenant: null }, { $set: { tenant: DEFAULT_TENANT_ID } })).matchedCount
-      : await collection.countDocuments({ tenant: null });
+      ? (await collection.updateMany({ organisation: null }, { $set: { organisation: DEFAULT_ORGANISATION_ID } })).matchedCount
+      : await collection.countDocuments({ organisation: null });
     byCollection[collection.collectionName] = count;
     total += count;
   }
@@ -33,20 +33,20 @@ export async function ensureOrganisation(
 ): Promise<"present" | "created" | "re-keyed"> {
   const db = connection.db;
   if (!db) throw new Error("No database handle");
-  const tenants = db.collection(mongoose.model("Tenant").collection.name);
+  const organisations = db.collection(mongoose.model("Organisation").collection.name);
 
-  const rows = await tenants.find({}).toArray();
-  if (rows.some((row) => DEFAULT_TENANT_ID.equals(row._id))) {
-    if (apply) await tenants.updateOne({ _id: DEFAULT_TENANT_ID }, { $set: { name } });
+  const rows = await organisations.find({}).toArray();
+  if (rows.some((row) => DEFAULT_ORGANISATION_ID.equals(row._id))) {
+    if (apply) await organisations.updateOne({ _id: DEFAULT_ORGANISATION_ID }, { $set: { name } });
     return "present";
   }
-  if (rows.length > 1) throw new Error(`${rows.length} tenant rows and none with the default id: cannot tell which is the organisation`);
+  if (rows.length > 1) throw new Error(`${rows.length} organisation rows and none with the default id: cannot tell which is the organisation`);
 
   const [legacy] = rows;
   if (apply) {
-    const { _id, ...seed } = new (mongoose.model("Tenant"))({ _id: DEFAULT_TENANT_ID }).toObject();
-    await tenants.insertOne({ ...seed, ...(legacy ?? {}), _id, name });
-    if (legacy) await tenants.deleteOne({ _id: legacy._id });
+    const { _id, ...seed } = new (mongoose.model("Organisation"))({ _id: DEFAULT_ORGANISATION_ID }).toObject();
+    await organisations.insertOne({ ...seed, ...(legacy ?? {}), _id, name });
+    if (legacy) await organisations.deleteOne({ _id: legacy._id });
   }
   return legacy ? "re-keyed" : "created";
 }
@@ -59,13 +59,13 @@ export const RETIRED_GLOBAL_UNIQUES: {
   twin: IndexKey;
   partial?: Record<string, unknown>;
 }[] = [
-  { collection: "users", name: "username_1", twin: { username: 1, tenant: 1 } },
-  { collection: "users", name: "email_1", twin: { email: 1, tenant: 1 }, partial: { email: { $gt: "" } } },
-  { collection: "projects", name: "key_1", twin: { key: 1, tenant: 1 } },
-  { collection: "workers", name: "name_1_host_1", twin: { name: 1, host: 1, tenant: 1 } },
-  { collection: "identities", name: "issuer_1_subject_1", twin: { issuer: 1, subject: 1, tenant: 1 } },
-  { collection: "invitations", name: "email_1", twin: { email: 1, tenant: 1 }, partial: { status: "pending" } },
-  { collection: "agentblocks", name: "key_1", twin: { key: 1, tenant: 1 } },
+  { collection: "users", name: "username_1", twin: { username: 1, organisation: 1 } },
+  { collection: "users", name: "email_1", twin: { email: 1, organisation: 1 }, partial: { email: { $gt: "" } } },
+  { collection: "projects", name: "key_1", twin: { key: 1, organisation: 1 } },
+  { collection: "workers", name: "name_1_host_1", twin: { name: 1, host: 1, organisation: 1 } },
+  { collection: "identities", name: "issuer_1_subject_1", twin: { issuer: 1, subject: 1, organisation: 1 } },
+  { collection: "invitations", name: "email_1", twin: { email: 1, organisation: 1 }, partial: { status: "pending" } },
+  { collection: "agentblocks", name: "key_1", twin: { key: 1, organisation: 1 } },
 ];
 
 export type RetiredIndexOutcome = { collection: string; name: string; state: "absent" | "would drop" | "dropped" };
@@ -92,7 +92,7 @@ export async function dropGlobalUniques(
         JSON.stringify(index.partialFilterExpression ?? null) === JSON.stringify(partial ?? null)
     );
     if (!hasTwin) {
-      throw new Error(`${collection}.${name}: its per-tenant twin ${JSON.stringify(twin)} is not built yet — start the app once so it builds it, then run this again. Nothing was dropped.`);
+      throw new Error(`${collection}.${name}: its per-organisation twin ${JSON.stringify(twin)} is not built yet — start the app once so it builds it, then run this again. Nothing was dropped.`);
     }
     present.push({ collection, name });
   }

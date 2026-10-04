@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const findOne = vi.fn();
 const findOneAndUpdate = vi.fn();
@@ -21,10 +21,10 @@ vi.mock("@/lib/middleware", () => ({
   withProjectOwner:
     (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
     (req: Request, ctx: unknown) =>
-      handler(req, { ...(ctx as object), user: { _id: "owner1" }, db: scopedToDefaultTenant() }),
+      handler(req, { ...(ctx as object), user: { _id: "owner1" }, db: scopedToDefaultOrganisation() }),
 }));
 
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { POST, PUT, DELETE } = await import("./route");
 
 function request(method: string, body?: unknown) {
@@ -61,7 +61,7 @@ beforeEach(() => {
   // assertion itself if a writer starts loading the project — not on a crash inside the route.
   findOneAndUpdate.mockImplementation(() => query(projectDoc([webhook])));
   findOne.mockImplementation((filter: Record<string, unknown>) =>
-    Object.keys(filter).sort().join() === "_id,tenant"
+    Object.keys(filter).sort().join() === "_id,organisation"
       ? Promise.resolve(projectDoc([webhook]))
       : { lean: () => Promise.resolve({ webhooks: [webhook] }) }
   );
@@ -73,7 +73,7 @@ describe("POST /api/projects/:projectId/webhooks", () => {
 
     expect(res.status).toBe(201);
     expect(findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: "p1", "webhooks.19": { $exists: false }, tenant: DEFAULT_TENANT_ID },
+      { _id: "p1", "webhooks.19": { $exists: false }, organisation: DEFAULT_ORGANISATION_ID },
       {
         $push: {
           webhooks: { url: "https://hooks.example.com/b", events: expect.any(Array), enabled: true },
@@ -163,7 +163,7 @@ describe("PUT /api/projects/:projectId/webhooks", () => {
 
     expect(res.status).toBe(200);
     expect(findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: "p1", "webhooks._id": W1, tenant: DEFAULT_TENANT_ID },
+      { _id: "p1", "webhooks._id": W1, organisation: DEFAULT_ORGANISATION_ID },
       {
         $set: {
           "webhooks.$.url": "https://hooks.example.com/c",
@@ -195,7 +195,7 @@ describe("DELETE /api/projects/:projectId/webhooks", () => {
 
     expect(res.status).toBe(200);
     expect(findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: "p1", tenant: DEFAULT_TENANT_ID },
+      { _id: "p1", organisation: DEFAULT_ORGANISATION_ID },
       { $pull: { webhooks: { _id: W1 } } },
       { returnDocument: "before" }
     );
@@ -247,7 +247,7 @@ describe("what a webhook edit records", () => {
 
     expect(res.status).toBe(200);
     const was = "Webhook masked(https://hooks.example.com/a)";
-    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), "p1", "owner1", "settings_updated", [
+    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "p1", "owner1", "settings_updated", [
       `${was} · URL: masked(https://hooks.example.com/a) → masked(https://hooks.example.com/c)`,
       `${was} · Events: task_created → comment_added, task_created`,
       `${was} · Enabled: on → off`,
@@ -274,7 +274,7 @@ describe("what a webhook edit records", () => {
     expect(await res.json()).toEqual([]);
 
     expect(logProjectAudit).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       "p1",
       "owner1",
       "settings_updated",
@@ -318,11 +318,11 @@ describe("an id sent in upper case", () => {
 
     expect(res.status).toBe(200);
     expect(findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: "p1", "webhooks._id": W1, tenant: DEFAULT_TENANT_ID },
+      { _id: "p1", "webhooks._id": W1, organisation: DEFAULT_ORGANISATION_ID },
       { $set: { "webhooks.$.enabled": false } },
       { returnDocument: "before" }
     );
-    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), "p1", "owner1", "settings_updated", [
+    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "p1", "owner1", "settings_updated", [
       "Webhook masked(https://hooks.example.com/a) · Enabled: on → off",
     ]);
   });
@@ -331,12 +331,12 @@ describe("an id sent in upper case", () => {
     await DELETE(request("DELETE", { webhookId: W1.toUpperCase() }), ctx());
 
     expect(findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: "p1", tenant: DEFAULT_TENANT_ID },
+      { _id: "p1", organisation: DEFAULT_ORGANISATION_ID },
       { $pull: { webhooks: { _id: W1 } } },
       { returnDocument: "before" }
     );
     expect(logProjectAudit).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       "p1",
       "owner1",
       "settings_updated",

@@ -6,7 +6,7 @@ import allowed from "./db-scope.ratchet.json";
 const SRC = join(__dirname, "..");
 const ROOT = join(SRC, "..");
 
-const UNSCOPED = ["tenant", "rateLimit"];
+const UNSCOPED = ["organisation", "rateLimit"];
 const MODELS_PATH = String.raw`["'](?:@\/models\/|(?:\.\.?\/)+models\/)([A-Za-z]+)["']`;
 const MODEL_IMPORT = new RegExp(
   String.raw`^\s*(?:import|export)\s+(?!type\b)[^;]*?from\s+${MODELS_PATH}|(?:import|require)\s*\(\s*${MODELS_PATH}|^\s*import\s+${MODELS_PATH}`,
@@ -36,11 +36,11 @@ const raw = sources(SRC)
   .sort();
 
 describe("the ratchet on raw database access (BP-663)", () => {
-  it("lets no new file reach a model or the database without the tenant-scoped accessor", () => {
+  it("lets no new file reach a model or the database without the organisation-scoped accessor", () => {
     const fresh = raw.filter((path) => !allowed.includes(path));
     expect(
       fresh,
-      "These files import a tenant-scoped model or reach mongoose directly. Use `db` from the handler's context (src/lib/db-scope.ts) instead of adding to src/lib/db-scope.ratchet.json."
+      "These files import an organisation-scoped model or reach mongoose directly. Use `db` from the handler's context (src/lib/db-scope.ts) instead of adding to src/lib/db-scope.ratchet.json."
     ).toEqual([]);
   });
 

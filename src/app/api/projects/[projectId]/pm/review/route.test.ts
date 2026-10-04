@@ -16,10 +16,10 @@ vi.mock("@/lib/middleware", () => ({
   withProjectOwner:
     (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
     (req: Request, ctx: object) =>
-      handler(req, { ...ctx, user, db: scopedToDefaultTenant() }),
+      handler(req, { ...ctx, user, db: scopedToDefaultOrganisation() }),
 }));
 
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { POST } = await import("./route");
 
 const run = () =>
@@ -43,7 +43,7 @@ describe("POST /api/projects/:projectId/pm/review", () => {
     const res = await run();
 
     expect(res.status).toBe(202);
-    expect(startBoardReview).toHaveBeenCalledWith(scopedToDefaultTenant(), "p1", "BP", { enabled: true }, "pm-user");
+    expect(startBoardReview).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "p1", "BP", { enabled: true }, "pm-user");
     expect(after).toHaveBeenCalledTimes(1);
     // What after() keeps alive is the review, not some other promise
     expect(after.mock.calls[0][0]()).toBe(done);

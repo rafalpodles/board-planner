@@ -25,7 +25,7 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("useEntitlement", () => {
-  it("starts loading, then reports the verdict for a feature the tenant has", async () => {
+  it("starts loading, then reports the verdict for a feature the organisation has", async () => {
     let resolve: (value: unknown) => void = () => {};
     api.get.mockReturnValue(new Promise((r) => (resolve = r)));
 
@@ -38,7 +38,7 @@ describe("useEntitlement", () => {
     expect(screen.getByTestId("entitled").textContent).toBe("true");
   });
 
-  it("reports not entitled for a feature the tenant lacks", async () => {
+  it("reports not entitled for a feature the organisation lacks", async () => {
     api.get.mockResolvedValue({ plan: "free", features: [], expiresAt: null });
 
     render(<Probe feature="integrations.coda" />);
@@ -75,7 +75,7 @@ describe("useEntitlement", () => {
     expect(screen.getByTestId("error").textContent).toBe("false");
   });
 
-  it("the verdict changes when the tenant's entitlements change between reads", async () => {
+  it("the verdict changes when the organisation's entitlements change between reads", async () => {
     api.get.mockResolvedValue({ plan: "free", features: [], expiresAt: null });
     const first = render(<Probe feature="integrations.coda" />);
     await waitFor(() => expect(screen.getByTestId("entitled").textContent).toBe("false"));

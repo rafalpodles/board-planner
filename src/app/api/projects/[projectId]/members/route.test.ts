@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const getAuthUser = vi.fn();
 const grantFind = vi.fn();
@@ -65,7 +65,7 @@ vi.mock("@/models/notification", () => ({
   Notification: { deleteMany: (filter: unknown) => notificationDeleteMany(filter) },
 }));
 
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { GET, PUT, DELETE } = await import("./route");
 
 const PROJECT = "69a52e3b399b27d3cbb2c5a5";
@@ -117,7 +117,7 @@ describe("GET members", () => {
 
   it("scopes the grant query to this project", async () => {
     await GET(new Request("http://x"), { params });
-    expect(grantFind).toHaveBeenCalledWith({ objectType: "project", object: PROJECT, tenant: DEFAULT_TENANT_ID });
+    expect(grantFind).toHaveBeenCalledWith({ objectType: "project", object: PROJECT, organisation: DEFAULT_ORGANISATION_ID });
   });
 
   it("never offers worker machine identities as grantable members", async () => {
@@ -125,7 +125,7 @@ describe("GET members", () => {
     expect(userFind).toHaveBeenCalledWith({
       kind: { $ne: "machine" },
       $or: [{ role: "admin" }, { _id: { $in: [] } }],
-      tenant: DEFAULT_TENANT_ID,
+      organisation: DEFAULT_ORGANISATION_ID,
     });
   });
 
@@ -141,7 +141,7 @@ describe("GET members", () => {
     expect(userFind).toHaveBeenCalledWith({
       kind: { $ne: "machine" },
       $or: [{ role: "admin" }, { _id: { $in: ["u1"] } }],
-      tenant: DEFAULT_TENANT_ID,
+      organisation: DEFAULT_ORGANISATION_ID,
     });
   });
 });
@@ -151,7 +151,7 @@ describe("PUT members", () => {
     const res = await PUT(put({ userId: U1, relation: "owner" }), { params });
     expect(res.status).toBe(200);
     expect(grantUpsert).toHaveBeenCalledWith(
-      { subject: U1, objectType: "project", object: PROJECT, tenant: DEFAULT_TENANT_ID },
+      { subject: U1, objectType: "project", object: PROJECT, organisation: DEFAULT_ORGANISATION_ID },
       { $set: { relation: "owner" }, $setOnInsert: { createdBy: "o1" } },
       { upsert: true, returnDocument: "before" }
     );
@@ -200,7 +200,7 @@ describe("PUT members", () => {
     const res = await PUT(put({ userId: U2, relation: "member" }), { params });
     expect(res.status).toBe(200);
     expect(grantUpsert).toHaveBeenCalledWith(
-      { subject: U2, objectType: "project", object: PROJECT, tenant: DEFAULT_TENANT_ID },
+      { subject: U2, objectType: "project", object: PROJECT, organisation: DEFAULT_ORGANISATION_ID },
       { $set: { relation: "member" }, $setOnInsert: { createdBy: "o1" } },
       { upsert: true, returnDocument: "before" }
     );
@@ -211,7 +211,7 @@ describe("PUT members", () => {
     ownerCount.mockResolvedValue(1);
     const res = await PUT(put({ userId: U1, relation: "member" }), { params });
     expect(res.status).toBe(409);
-    expect(grantFindOne).toHaveBeenCalledWith({ subject: U1, objectType: "project", object: PROJECT, tenant: DEFAULT_TENANT_ID });
+    expect(grantFindOne).toHaveBeenCalledWith({ subject: U1, objectType: "project", object: PROJECT, organisation: DEFAULT_ORGANISATION_ID });
     expect(grantUpsert).not.toHaveBeenCalled();
   });
 
@@ -221,7 +221,7 @@ describe("PUT members", () => {
     const res = await PUT(put({ userId: U2, relation: "member" }), { params });
     expect(res.status).toBe(200);
     expect(grantUpsert).toHaveBeenCalledWith(
-      { subject: U2, objectType: "project", object: PROJECT, tenant: DEFAULT_TENANT_ID },
+      { subject: U2, objectType: "project", object: PROJECT, organisation: DEFAULT_ORGANISATION_ID },
       { $set: { relation: "member" }, $setOnInsert: { createdBy: "o1" } },
       { upsert: true, returnDocument: "before" }
     );
@@ -238,7 +238,7 @@ describe("PUT members", () => {
     expect(res.status).toBe(409);
     // An upsert: a concurrent removal may have taken the row this puts back
     expect(grantUpdateOne).toHaveBeenCalledWith(
-      { subject: U2, objectType: "project", object: PROJECT, tenant: DEFAULT_TENANT_ID },
+      { subject: U2, objectType: "project", object: PROJECT, organisation: DEFAULT_ORGANISATION_ID },
       { $set: { relation: "owner" }, $setOnInsert: { createdBy: "o1" } },
       { upsert: true }
     );
@@ -254,7 +254,7 @@ describe("PUT members", () => {
     userFindOneSelect.mockResolvedValue({ _id: U2, role: "member", kind: "human", username: "uma" });
 
     expect((await PUT(put({ userId: U2, relation: "member" }), { params })).status).toBe(409);
-    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), PROJECT, "o1", "member_added", "uma: no access → owner");
+    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultOrganisation(), PROJECT, "o1", "member_added", "uma: no access → owner");
   });
 
   it("keeps an owner's demotion while another active owner remains after the write", async () => {
@@ -301,7 +301,7 @@ describe("DELETE members", () => {
 
     expect(res.status).toBe(409);
     expect(grantUpdateOne).toHaveBeenCalledWith(
-      { subject: U2, objectType: "project", object: PROJECT, tenant: DEFAULT_TENANT_ID },
+      { subject: U2, objectType: "project", object: PROJECT, organisation: DEFAULT_ORGANISATION_ID },
       { $setOnInsert: { relation: "owner", createdBy: "o0" } },
       { upsert: true }
     );
@@ -315,11 +315,11 @@ describe("DELETE members", () => {
 
     expect((await DELETE(new Request(url, { method: "DELETE" }), { params })).status).toBe(409);
     expect(grantUpdateOne).toHaveBeenLastCalledWith(
-      { subject: U2, objectType: "project", object: PROJECT, tenant: DEFAULT_TENANT_ID },
+      { subject: U2, objectType: "project", object: PROJECT, organisation: DEFAULT_ORGANISATION_ID },
       { $set: { relation: "owner" } }
     );
     // Another request's member grant made owner again: an owner's access granted, so recorded
-    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), PROJECT, "o1", "member_role_changed", "uma: member → owner");
+    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultOrganisation(), PROJECT, "o1", "member_role_changed", "uma: member → owner");
   });
 
   it("keeps an owner's removal while another active owner remains after it", async () => {
@@ -340,7 +340,7 @@ describe("DELETE members", () => {
       subject: U2,
       objectType: "project",
       object: PROJECT,
-      tenant: DEFAULT_TENANT_ID,
+      organisation: DEFAULT_ORGANISATION_ID,
     });
   });
 
@@ -377,7 +377,7 @@ describe("DELETE members", () => {
     const res = await DELETE(new Request(url, { method: "DELETE" }), { params });
 
     expect(res.status).toBe(200);
-    expect(userExists).toHaveBeenCalledWith({ _id: U2.toLowerCase(), deactivatedAt: null, tenant: DEFAULT_TENANT_ID });
+    expect(userExists).toHaveBeenCalledWith({ _id: U2.toLowerCase(), deactivatedAt: null, organisation: DEFAULT_ORGANISATION_ID });
     expect(grantDelete).toHaveBeenCalled();
   });
 
@@ -391,7 +391,7 @@ describe("DELETE members", () => {
     expect(notificationDeleteMany).toHaveBeenCalledWith({
       recipient: U2,
       project: PROJECT,
-      tenant: DEFAULT_TENANT_ID,
+      organisation: DEFAULT_ORGANISATION_ID,
     });
   });
 
@@ -413,7 +413,7 @@ describe("DELETE members", () => {
     const url = `http://x/api/projects/${PROJECT}/members?userId=${U2}`;
     await DELETE(new Request(url, { method: "DELETE" }), { params });
 
-    expect(recipientsWithAccess).toHaveBeenCalledWith(scopedToDefaultTenant(), [U2], PROJECT);
+    expect(recipientsWithAccess).toHaveBeenCalledWith(scopedToDefaultOrganisation(), [U2], PROJECT);
   });
 
   it("refuses a userId that is not an object id, rather than throwing a 500", async () => {
@@ -586,7 +586,7 @@ describe("the audit trail of board access", () => {
   it("records a grant to somebody who had none", async () => {
     await PUT(put({ userId: U2, relation: "member" }), { params });
 
-    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), PROJECT, "o1", "member_added", "uma: no access → member");
+    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultOrganisation(), PROJECT, "o1", "member_added", "uma: no access → member");
   });
 
   it("records a promotion with where it came from", async () => {
@@ -595,7 +595,7 @@ describe("the audit trail of board access", () => {
     await PUT(put({ userId: U2, relation: "owner" }), { params });
 
     expect(logProjectAudit).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       PROJECT,
       "o1",
       "member_role_changed",
@@ -627,7 +627,7 @@ describe("the audit trail of board access", () => {
     await DELETE(new Request(url, { method: "DELETE" }), { params });
 
     expect(logProjectAudit).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       PROJECT,
       "o1",
       "member_removed",

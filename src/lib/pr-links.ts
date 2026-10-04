@@ -221,7 +221,7 @@ export async function writeProviderLinks(
   seen: string[]
 ): Promise<void> {
   const withIds = docs.map((doc) => ({ _id: new mongoose.Types.ObjectId(), ...doc }));
-  await Task.updateOne({ _id: taskId, tenant: db.tenant }, replaceProviderLinks(provider, withIds, seen), {
+  await Task.updateOne({ _id: taskId, organisation: db.organisation }, replaceProviderLinks(provider, withIds, seen), {
     updatePipeline: true,
     // `updatedAt` means "when somebody changed this task", and a sync is not somebody. Mongoose
     // stamps a pipeline update like any other unless told not to, and `stats/route.ts:70,147`

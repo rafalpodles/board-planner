@@ -36,7 +36,7 @@ vi.mock("./safe-fetch", () => ({
 vi.mock("@/models/project", () => ({ Project: { findOne, updateOne } }));
 
 const { dispatchWebhooks } = await import("./webhooks");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 
 const SECRET = "shhh";
 const ORIGINAL = process.env.WEBHOOK_SIGNING_SECRET;
@@ -83,7 +83,7 @@ describe("dispatchWebhooks", () => {
   it("signs the body it actually sends, over the timestamp it actually states", async () => {
     project([hook()]);
 
-    await dispatchWebhooks(scopedToDefaultTenant(), "p1", "task_created", PAYLOAD);
+    await dispatchWebhooks(scopedToDefaultOrganisation(), "p1", "task_created", PAYLOAD);
 
     const [[url, init]] = deliveries();
     expect(url).toBe("https://example.com/hook");
@@ -113,7 +113,7 @@ describe("dispatchWebhooks", () => {
   it("signs every delivery, not only the first", async () => {
     project([hook(), hook({ url: "https://elsewhere.example/hook" })]);
 
-    await dispatchWebhooks(scopedToDefaultTenant(), "p1", "task_created", PAYLOAD);
+    await dispatchWebhooks(scopedToDefaultOrganisation(), "p1", "task_created", PAYLOAD);
 
     const sent = deliveries();
     expect(sent.map(([url]) => url)).toEqual([
@@ -140,7 +140,7 @@ describe("dispatchWebhooks", () => {
     delete process.env.WEBHOOK_SIGNING_SECRET;
     project([hook()]);
 
-    await dispatchWebhooks(scopedToDefaultTenant(), "p1", "task_created", PAYLOAD);
+    await dispatchWebhooks(scopedToDefaultOrganisation(), "p1", "task_created", PAYLOAD);
 
     const [[, init]] = deliveries();
     // An instance that never configured a secret has receivers that do not check; dropping their
@@ -157,7 +157,7 @@ describe("dispatchWebhooks", () => {
       hook({ url: "https://other-events.example/hook", events: ["comment_added"] }),
     ]);
 
-    await dispatchWebhooks(scopedToDefaultTenant(), "p1", "task_created", PAYLOAD);
+    await dispatchWebhooks(scopedToDefaultOrganisation(), "p1", "task_created", PAYLOAD);
 
     expect(deliveries().map(([url]) => url)).toEqual(["https://subscribed.example/hook"]);
   });
@@ -173,7 +173,7 @@ describe("dispatchWebhooks", () => {
       hook({ url: "https://fine.example/hook" }),
     ]);
 
-    await dispatchWebhooks(scopedToDefaultTenant(), "p1", "task_created", PAYLOAD);
+    await dispatchWebhooks(scopedToDefaultOrganisation(), "p1", "task_created", PAYLOAD);
 
     expect(deliveries().map(([url]) => url)).toEqual(["https://fine.example/hook"]);
   });
@@ -187,7 +187,7 @@ describe("dispatchWebhooks", () => {
     safeFetch.mockImplementation(() => new Promise<Response>((resolve) => landers.push(resolve)));
     project(Array.from({ length: 10 }, (_, i) => hook({ _id: `w${i}`, url: `https://example.com/hook${i}` })));
 
-    await dispatchWebhooks(scopedToDefaultTenant(), "p1", "task_created", PAYLOAD);
+    await dispatchWebhooks(scopedToDefaultOrganisation(), "p1", "task_created", PAYLOAD);
 
     expect(safeFetch).toHaveBeenCalledTimes(4);
     landers.shift()!(new Response("{}", { status: 200 }));
@@ -199,7 +199,7 @@ describe("dispatchWebhooks", () => {
     let land!: (value: Response) => void;
     safeFetch.mockReturnValue(new Promise<Response>((resolve) => (land = resolve)));
 
-    await dispatchWebhooks(scopedToDefaultTenant(), "p1", "task_created", PAYLOAD);
+    await dispatchWebhooks(scopedToDefaultOrganisation(), "p1", "task_created", PAYLOAD);
 
     expect(deliveries()).toHaveLength(1);
     land(new Response("{}", { status: 200 }));
@@ -209,7 +209,7 @@ describe("dispatchWebhooks", () => {
   it("says nothing to anybody when the project has no webhooks", async () => {
     project([]);
 
-    await dispatchWebhooks(scopedToDefaultTenant(), "p1", "task_created", PAYLOAD);
+    await dispatchWebhooks(scopedToDefaultOrganisation(), "p1", "task_created", PAYLOAD);
 
     expect(safeFetch).not.toHaveBeenCalled();
   });

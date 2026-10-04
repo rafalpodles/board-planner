@@ -671,8 +671,8 @@ test.describe("duplicating one of these", () => {
   async function catalogAgentId(): Promise<mongoose.Types.ObjectId> {
     await mongoose.connect(E2E_MONGODB_URI);
     const { seedAgents } = await import("@/lib/agent-seed");
-    const { scopedToDefaultTenant } = await import("@/lib/db-scope");
-    await seedAgents(scopedToDefaultTenant());
+    const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
+    await seedAgents(scopedToDefaultOrganisation());
     await mongoose.disconnect();
 
     const agent = await withDb(async (db) => db.collection("agents").findOne({}));

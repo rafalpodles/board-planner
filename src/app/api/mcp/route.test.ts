@@ -11,8 +11,8 @@ vi.mock("@/lib/db", async (importOriginal) => ({
 }));
 vi.mock("@/models/session", () => ({ Session: {} }));
 const ACME = new Types.ObjectId();
-vi.mock("@/models/tenant", () => ({
-  Tenant: {
+vi.mock("@/models/organisation", () => ({
+  Organisation: {
     findOne: (filter: { slug: string }) => ({
       select: () => ({ lean: async () => (filter.slug === "acme" ? { _id: ACME } : null) }),
     }),
@@ -39,7 +39,7 @@ vi.mock("mcp-handler", async (importOriginal) => {
 
 const { POST } = await import("./route");
 const { DatabaseUnavailableError } = await import("@/lib/db");
-const { forgetTenantSlugs } = await import("@/lib/tenant-host");
+const { forgetOrganisationSlugs } = await import("@/lib/organisation-host");
 
 const ORIGINAL = { ...process.env };
 
@@ -59,7 +59,7 @@ beforeEach(() => {
 
 afterEach(() => {
   process.env = { ...ORIGINAL };
-  forgetTenantSlugs();
+  forgetOrganisationSlugs();
 });
 
 // BP-303 left `getPublicOrigin(req)` as a `??` fallback here, so a token holder sending
@@ -191,24 +191,24 @@ describe("POST /api/mcp when the database is unreachable", () => {
   });
 });
 
-describe("POST /api/mcp with TENANT_DOMAIN set (BP-666)", () => {
+describe("POST /api/mcp with ORGANISATION_DOMAIN set (BP-666)", () => {
   const on = (host: string, headers: Record<string, string> = {}) =>
     new Request(`https://${host}/api/mcp`, { method: "POST", headers: { host, ...headers } });
 
   beforeEach(() => {
-    process.env.TENANT_DOMAIN = "board-planner.com";
+    process.env.ORGANISATION_DOMAIN = "board-planner.com";
     process.env.PUBLIC_ORIGIN = "https://app.board-planner.com";
   });
 
-  it("answers 404 on a host that names no tenant, before asking who the caller is", async () => {
+  it("answers 404 on a host that names no organisation, before asking who the caller is", async () => {
     const response = await POST(on("nobody.board-planner.com", { authorization: "Bearer cpat_x" }));
 
     expect(response.status).toBe(404);
     expect(getAuthUser).not.toHaveBeenCalled();
   });
 
-  it("gives the tools, and the discovery hint, the tenant's own address", async () => {
-    getAuthUser.mockResolvedValue({ username: "owner", tenant: ACME });
+  it("gives the tools, and the discovery hint, the organisation's own address", async () => {
+    getAuthUser.mockResolvedValue({ username: "owner", organisation: ACME });
     const body = await (await POST(on("acme.board-planner.com", { authorization: "Bearer cpat_x" }))).json();
     expect(body.auth.extra.baseUrl).toBe("https://acme.board-planner.com");
 
@@ -218,8 +218,8 @@ describe("POST /api/mcp with TENANT_DOMAIN set (BP-666)", () => {
     );
   });
 
-  it("refuses a token of another tenant at the door, as if it were no token", async () => {
-    getAuthUser.mockResolvedValue({ username: "owner", tenant: new Types.ObjectId() });
+  it("refuses a token of another organisation at the door, as if it were no token", async () => {
+    getAuthUser.mockResolvedValue({ username: "owner", organisation: new Types.ObjectId() });
 
     const refused = await POST(on("acme.board-planner.com", { authorization: "Bearer cpat_x" }));
 

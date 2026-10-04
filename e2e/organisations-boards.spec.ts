@@ -1,23 +1,23 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
-import { RUN_TENANTS_SERVER } from "../playwright.config";
-import { ACME, GLOBEX, SHARED_KEY, TENANTS_API, asTenant, bearer, originOf, seedTwoTenants, workerHeaders, type TenantFixture } from "./tenants";
+import { RUN_ORGANISATIONS_SERVER } from "../playwright.config";
+import { ACME, GLOBEX, SHARED_KEY, ORGANISATIONS_API, asOrganisation, bearer, originOf, seedTwoOrganisations, workerHeaders, type OrganisationFixture } from "./organisations";
 
-test.skip(!RUN_TENANTS_SERVER, "needs the TENANT_DOMAIN server — set E2E_TENANTS_SERVER=1");
+test.skip(!RUN_ORGANISATIONS_SERVER, "needs the ORGANISATION_DOMAIN server — set E2E_ORGANISATIONS_SERVER=1");
 
 test.beforeEach(async () => {
-  await seedTwoTenants();
+  await seedTwoOrganisations();
 });
 
-const session = (who: TenantFixture) => ({
-  ...asTenant(who),
+const session = (who: OrganisationFixture) => ({
+  ...asOrganisation(who),
   cookie: `__Host-bp_session=${who.sessionToken}`,
   origin: originOf(who),
   "content-type": "application/json",
 });
-const post = (request: APIRequestContext, path: string, who: TenantFixture, data: unknown) =>
-  request.post(`${TENANTS_API}${path}`, { headers: session(who), data });
-const get = (request: APIRequestContext, path: string, who: TenantFixture) =>
-  request.get(`${TENANTS_API}${path}`, { headers: { ...asTenant(who), ...bearer(who) } });
+const post = (request: APIRequestContext, path: string, who: OrganisationFixture, data: unknown) =>
+  request.post(`${ORGANISATIONS_API}${path}`, { headers: session(who), data });
+const get = (request: APIRequestContext, path: string, who: OrganisationFixture) =>
+  request.get(`${ORGANISATIONS_API}${path}`, { headers: { ...asOrganisation(who), ...bearer(who) } });
 
 // BP-670: boards, sprints and history, created in one organisation and looked for from the other
 test.describe("BP-670: each organisation's boards are its own", () => {
@@ -68,8 +68,8 @@ test.describe("BP-670: each organisation's boards are its own", () => {
   });
 
   test("a machine reports on its own organisation's host, and is no credential on the other's", async ({ request }) => {
-    const heartbeat = (who: TenantFixture, host: TenantFixture) =>
-      request.post(`${TENANTS_API}/api/workers/${who.workerId}/heartbeat`, { headers: { ...asTenant(host), ...workerHeaders(who) }, data: {} });
+    const heartbeat = (who: OrganisationFixture, host: OrganisationFixture) =>
+      request.post(`${ORGANISATIONS_API}/api/workers/${who.workerId}/heartbeat`, { headers: { ...asOrganisation(host), ...workerHeaders(who) }, data: {} });
 
     expect((await heartbeat(ACME, ACME)).status()).toBe(200);
     expect((await heartbeat(ACME, GLOBEX)).status()).toBe(401);
@@ -81,7 +81,7 @@ test.describe("BP-670: each organisation's boards are its own", () => {
       {
         name: "__Host-bp_session",
         value: ACME.sessionToken,
-        domain: `${ACME.slug}.tenants.localhost`,
+        domain: `${ACME.slug}.organisations.localhost`,
         path: "/",
         httpOnly: true,
         secure: true,

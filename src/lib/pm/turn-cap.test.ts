@@ -8,10 +8,10 @@ vi.mock("@/models/pmMessage", () => ({ PmMessage: { countDocuments } }));
 vi.mock("./availability", () => ({ resolveDailyTurnCap }));
 
 import { isOverDailyTurnCap } from "./turn-cap";
-import { scopedToDefaultTenant } from "@/lib/db-scope";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { scopedToDefaultOrganisation } from "@/lib/db-scope";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
-const db = scopedToDefaultTenant();
+const db = scopedToDefaultOrganisation();
 
 /**
  * BP-453. The cap counted from the server's midnight. Railway runs UTC, so a Warsaw board's
@@ -97,6 +97,6 @@ describe("the day the daily turn cap is counted in", () => {
 
   it("counts only this project's user messages", async () => {
     await isOverDailyTurnCap(db, "p7", {});
-    expect(countDocuments.mock.calls[0][0]).toMatchObject({ project: "p7", role: "user", tenant: DEFAULT_TENANT_ID });
+    expect(countDocuments.mock.calls[0][0]).toMatchObject({ project: "p7", role: "user", organisation: DEFAULT_ORGANISATION_ID });
   });
 });

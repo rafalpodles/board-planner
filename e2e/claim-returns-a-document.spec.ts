@@ -8,7 +8,7 @@ import {
   EXECUTION_LEASE_MS,
   MAX_EXECUTION_ATTEMPTS,
 } from "@/lib/task-service";
-import { scopedToDefaultTenant } from "@/lib/db-scope";
+import { scopedToDefaultOrganisation } from "@/lib/db-scope";
 import "@/models/agent";
 import {
   ADMIN_ID,
@@ -97,7 +97,7 @@ test.describe("what the claim and the release hand back", () => {
     const { _id, taskNumber } = await addTask();
     const runId = randomUUID();
 
-    const claimed = await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, runId, String(OWNER));
+    const claimed = await claimNextTask(scopedToDefaultOrganisation(), String(PROJECT_ID), WORKER, runId, String(OWNER));
 
     expect(claimed).not.toBeNull();
     expectNotAModifyResult(claimed!);
@@ -112,9 +112,9 @@ test.describe("what the claim and the release hand back", () => {
 
   test("a refunded release returns the task as it is after the release", async () => {
     const { _id, taskNumber } = await addTask();
-    await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, randomUUID(), String(OWNER));
+    await claimNextTask(scopedToDefaultOrganisation(), String(PROJECT_ID), WORKER, randomUUID(), String(OWNER));
 
-    const released = await releaseTask(scopedToDefaultTenant(), String(PROJECT_ID), String(_id), { workerId: WORKER });
+    const released = await releaseTask(scopedToDefaultOrganisation(), String(PROJECT_ID), String(_id), { workerId: WORKER });
 
     expect(released).not.toBeNull();
     expectNotAModifyResult(released!);
@@ -127,9 +127,9 @@ test.describe("what the claim and the release hand back", () => {
 
   test("a charged release out of attempts returns the task parked for a person", async () => {
     const { _id, taskNumber } = await addTask({ execution: { attempts: MAX_EXECUTION_ATTEMPTS - 1 } });
-    await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, randomUUID(), String(OWNER));
+    await claimNextTask(scopedToDefaultOrganisation(), String(PROJECT_ID), WORKER, randomUUID(), String(OWNER));
 
-    const released = await releaseTask(scopedToDefaultTenant(), String(PROJECT_ID), String(_id), {
+    const released = await releaseTask(scopedToDefaultOrganisation(), String(PROJECT_ID), String(_id), {
       refund: false,
       workerId: WORKER,
     });

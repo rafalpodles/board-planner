@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 import { claimNextTask } from "@/lib/task-service";
-import { scopedToDefaultTenant } from "@/lib/db-scope";
+import { scopedToDefaultOrganisation } from "@/lib/db-scope";
 import "@/models/agent";
 import { signIn } from "./session";
 import {
@@ -91,7 +91,7 @@ async function claimOne(runId: string): Promise<mongoose.Types.ObjectId> {
     createdAt: new Date(),
     updatedAt: new Date(),
   });
-  const claimed = await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), String(WORKER_ID), runId, String(ADMIN_ID));
+  const claimed = await claimNextTask(scopedToDefaultOrganisation(), String(PROJECT_ID), String(WORKER_ID), runId, String(ADMIN_ID));
   expect(String(claimed?._id)).toBe(String(_id));
   return _id;
 }
@@ -261,7 +261,7 @@ test("a machine the project serves records a run whose task was already claimed 
   expect(released.status(), await released.text()).toBe(200);
   const nextRun = randomUUID();
   const reclaimed = await claimNextTask(
-    scopedToDefaultTenant(),
+    scopedToDefaultOrganisation(),
     String(PROJECT_ID),
     String(new mongoose.Types.ObjectId()),
     nextRun,

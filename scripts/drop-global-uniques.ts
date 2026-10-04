@@ -1,17 +1,17 @@
 /**
- * BP-665: drop the seven global unique indexes that per-tenant twins replaced. Run once by hand,
+ * BP-665: drop the seven global unique indexes that per-organisation twins replaced. Run once by hand,
  * after a deploy of the app has built the twins.
  *
  * Usage (a dry run is the default):
  *   MONGODB_URI=... npx tsx scripts/drop-global-uniques.ts
  *   MONGODB_URI=... npx tsx scripts/drop-global-uniques.ts --apply
  *
- * Refuses an index whose per-tenant twin is missing. Safe to re-run.
+ * Refuses an index whose per-organisation twin is missing. Safe to re-run.
  */
 
 import mongoose from "mongoose";
 import { resolveUri, dbName } from "./mongo-uri";
-import { dropGlobalUniques } from "../src/lib/tenant-migration";
+import { dropGlobalUniques } from "../src/lib/organisation-migration";
 
 const apply = process.argv.includes("--apply");
 

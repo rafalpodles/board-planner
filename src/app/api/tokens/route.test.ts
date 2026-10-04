@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const getAuthUser = vi.fn();
 const accessibleProjectIds = vi.fn();
@@ -81,6 +81,6 @@ describe("POST /api/tokens", () => {
     const response = await POST(request({ name: "ci", allowedProjects: ["p2"] }), ctx());
 
     expect(response.status).toBe(201);
-    expect(projectFind).toHaveBeenCalledWith({ tenant: DEFAULT_TENANT_ID });
+    expect(projectFind).toHaveBeenCalledWith({ organisation: DEFAULT_ORGANISATION_ID });
   });
 });

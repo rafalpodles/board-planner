@@ -16,12 +16,12 @@ vi.mock("@/models/task", () => ({
   Task: { find: () => ({ sort: () => ({ limit: () => ({ lean: async () => [] }) }) }) },
 }));
 vi.mock("@/lib/middleware", async () => {
-  const { scopedToDefaultTenant } = await vi.importActual<typeof import("@/lib/db-scope")>("@/lib/db-scope");
+  const { scopedToDefaultOrganisation } = await vi.importActual<typeof import("@/lib/db-scope")>("@/lib/db-scope");
   return {
     withProjectAccess:
       (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
       (req: Request, ctx: { user?: unknown }) =>
-        handler(req, { ...ctx, user: ctx.user ?? { _id: "u1" }, db: scopedToDefaultTenant() }),
+        handler(req, { ...ctx, user: ctx.user ?? { _id: "u1" }, db: scopedToDefaultOrganisation() }),
   };
 });
 

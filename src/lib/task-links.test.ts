@@ -9,7 +9,7 @@ import sift from "sift";
 
 interface Doc {
   _id: string;
-  tenant?: unknown;
+  organisation?: unknown;
   project: string;
   taskNumber: number;
   title: string;
@@ -168,9 +168,9 @@ vi.mock("@/lib/in-app-notifications", () => ({
 }));
 
 const { addTaskLink, removeTaskLink, severLinksToDeletedTask } = await import("./task-links");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
-const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
-const db = scopedToDefaultTenant();
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
+const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
+const db = scopedToDefaultOrganisation();
 
 const P = "p1";
 const ACTOR = "u-actor";
@@ -178,7 +178,7 @@ const ACTOR = "u-actor";
 function task(id: string, taskNumber: number, extra: Partial<Doc> = {}): Doc {
   return {
     _id: id,
-    tenant: DEFAULT_TENANT_ID,
+    organisation: DEFAULT_ORGANISATION_ID,
     project: P,
     taskNumber,
     title: `Task ${taskNumber}`,
@@ -264,7 +264,7 @@ describe("addTaskLink", () => {
     // Scoped by project like every other write here, not by id alone — and asking for the image
     // from before its own write, which is the only thing that can say whether it added anything
     expect(findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: "a", project: P, tenant: DEFAULT_TENANT_ID },
+      { _id: "a", project: P, organisation: DEFAULT_ORGANISATION_ID },
       { $addToSet: { blockedBy: "b" } },
       { returnDocument: "before", projection: "blockedBy" }
     );

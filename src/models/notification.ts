@@ -1,6 +1,6 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { INotification, NOTIFICATION_TYPES } from "@/types";
-import { withTenant } from "@/lib/tenant-field";
+import { withOrganisation } from "@/lib/organisation-field";
 
 const notificationSchema = new Schema<INotification>(
   {
@@ -51,7 +51,7 @@ notificationSchema.on("index", (err) => {
   if (err) console.error("Notification index build failed:", err);
 });
 
-withTenant(notificationSchema);
+withOrganisation(notificationSchema);
 
 export const Notification: Model<INotification> =
   mongoose.models.Notification || mongoose.model<INotification>("Notification", notificationSchema);

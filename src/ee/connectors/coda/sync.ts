@@ -11,7 +11,7 @@ import {
   upsertTaskRows,
 } from "./client";
 import type { ScopedDb } from "@/lib/db-scope";
-import { originFor } from "@/lib/tenant-host";
+import { originFor } from "@/lib/organisation-host";
 
 export async function syncProjectToCoda(db: ScopedDb, projectId: string): Promise<NextResponse> {
   await connectDB();

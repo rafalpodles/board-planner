@@ -3,7 +3,7 @@ import { Plan } from "@/lib/entitlements";
 
 export type EntitlementSource = "none" | "env" | "service";
 
-export interface ITenantEntitlements {
+export interface IOrganisationEntitlements {
   plan: Plan;
   features: string[];
   customer?: string;
@@ -12,16 +12,16 @@ export interface ITenantEntitlements {
   source: EntitlementSource;
 }
 
-export interface ITenant {
+export interface IOrganisation {
   _id: mongoose.Types.ObjectId;
   name: string;
   slug?: string;
   digestHour?: number;
   timezone?: string;
-  entitlements: ITenantEntitlements;
+  entitlements: IOrganisationEntitlements;
 }
 
-const entitlementsSchema = new Schema<ITenantEntitlements>(
+const entitlementsSchema = new Schema<IOrganisationEntitlements>(
   {
     plan: { type: String, enum: ["free", "pro"], default: "free" },
     features: { type: [String], default: [] },
@@ -33,7 +33,7 @@ const entitlementsSchema = new Schema<ITenantEntitlements>(
   { _id: false }
 );
 
-const tenantSchema = new Schema<ITenant>({
+const organisationSchema = new Schema<IOrganisation>({
   name: { type: String, default: "default", trim: true },
   slug: { type: String, trim: true, lowercase: true },
   digestHour: { type: Number, min: 0, max: 23 },
@@ -44,7 +44,7 @@ const tenantSchema = new Schema<ITenant>({
   },
 });
 
-tenantSchema.index({ slug: 1 }, { unique: true, partialFilterExpression: { slug: { $type: "string" } } });
+organisationSchema.index({ slug: 1 }, { unique: true, partialFilterExpression: { slug: { $type: "string" } } });
 
-export const Tenant: Model<ITenant> =
-  mongoose.models.Tenant || mongoose.model<ITenant>("Tenant", tenantSchema);
+export const Organisation: Model<IOrganisation> =
+  mongoose.models.Organisation || mongoose.model<IOrganisation>("Organisation", organisationSchema);

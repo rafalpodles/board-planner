@@ -3,7 +3,7 @@
  *
  *   npx tsx scripts/migrate-project-key.ts CP BP           # reports, writes nothing
  *   npx tsx scripts/migrate-project-key.ts CP BP --apply
- *   npx tsx scripts/migrate-project-key.ts CP BP --tenant <id>    # another tenant than the default one
+ *   npx tsx scripts/migrate-project-key.ts CP BP --organisation <id>    # another organisation than the default one
  *
  * A task key is never stored — it is built as `${project.key}-${taskNumber}` wherever one
  * is shown. So this single field renames all of a project's tasks at once, and everything
@@ -67,10 +67,10 @@ function walk(value: unknown, path: string, rewrite: (t: string) => string,
 
 async function main() {
   const args = process.argv.slice(2);
-  const tenantArg = args.indexOf("--tenant");
-  const tenant = new ObjectId(tenantArg > -1 ? args[tenantArg + 1] : "000000000000000000000001");
+  const organisationArg = args.indexOf("--organisation");
+  const organisation = new ObjectId(organisationArg > -1 ? args[organisationArg + 1] : "000000000000000000000001");
   const [from, to] = args
-    .filter((a, i) => !a.startsWith("--") && args[i - 1] !== "--tenant")
+    .filter((a, i) => !a.startsWith("--") && args[i - 1] !== "--organisation")
     .map((a) => a.toUpperCase());
   const apply = args.includes("--apply");
   if (!from || !to) throw new Error("Usage: migrate-project-key.ts <FROM> <TO> [--apply]");
@@ -87,15 +87,15 @@ async function main() {
 
   console.log(`connection : ${source}`);
   console.log(`database   : ${db.databaseName}`);
-  console.log(`tenant     : ${tenant.toHexString()}`);
+  console.log(`organisation     : ${organisation.toHexString()}`);
 
   // Accept a project that has already moved to the new key: the key write and the text
   // repointing are separate passes, and text can be left behind by an earlier run
-  let project = await db.collection("projects").findOne({ key: from, tenant });
+  let project = await db.collection("projects").findOne({ key: from, organisation });
   const alreadyMoved = !project;
-  if (!project) project = await db.collection("projects").findOne({ key: to, formerKeys: from, tenant });
+  if (!project) project = await db.collection("projects").findOne({ key: to, formerKeys: from, organisation });
   if (!project) {
-    const keys = (await db.collection("projects").find({ tenant }, { projection: { key: 1 } }).toArray())
+    const keys = (await db.collection("projects").find({ organisation }, { projection: { key: 1 } }).toArray())
       .map((p) => p.key)
       .join(", ");
     throw new Error(
@@ -112,7 +112,7 @@ async function main() {
   const rewrite = referenceRewriter(from, to);
   const rewrites: Rewrite[] = [];
   for (const name of (await db.listCollections().toArray()).map((c) => c.name).sort()) {
-    for (const doc of await db.collection(name).find({ tenant }).toArray()) {
+    for (const doc of await db.collection(name).find({ organisation }).toArray()) {
       walk(doc, "", rewrite, (path, before, after) => {
         rewrites.push({ collection: name, id: doc._id, path, before, after });
       });

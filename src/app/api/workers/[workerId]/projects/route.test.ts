@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const getAuthUser = vi.fn();
 const accessibleProjectIds = vi.fn();
@@ -53,7 +53,7 @@ vi.mock("@/lib/worker-service", async (importOriginal) => {
   return { ...actual, ownerReachableProjectIds };
 });
 
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { GET, PUT } = await import("./route");
 
 const WORKER_ID = "69a52e3b399b27d3cbb2c5a5";
@@ -153,7 +153,7 @@ describe("PUT the selection", () => {
 
     expect(response.status).toBe(200);
     expect(workerUpdateOne).toHaveBeenCalledWith(
-      { _id: WORKER_ID, tenant: DEFAULT_TENANT_ID },
+      { _id: WORKER_ID, organisation: DEFAULT_ORGANISATION_ID },
       { $set: { desiredProjects: [SERVED] } }
     );
   });
@@ -165,11 +165,11 @@ describe("PUT the selection", () => {
     const json = await (await PUT(putRequest({ projects: [SERVED, OFF] }), ctx())).json();
 
     expect(projectUpdateOne).toHaveBeenCalledWith(
-      { _id: OFF, tenant: DEFAULT_TENANT_ID },
+      { _id: OFF, organisation: DEFAULT_ORGANISATION_ID },
       { $set: { "worker.enabled": true } }
     );
     expect(logInstanceAudit).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       expect.objectContaining({ action: "project_workers_enabled", target: "SB" })
     );
     expect(json.leftDisabled).toEqual([]);
@@ -206,11 +206,11 @@ describe("PUT the selection", () => {
     const json = await (await PUT(putRequest({ projects: [SERVED, OFF] }), ctx())).json();
 
     expect(projectUpdateOne).toHaveBeenCalledWith(
-      { _id: OFF, tenant: DEFAULT_TENANT_ID },
+      { _id: OFF, organisation: DEFAULT_ORGANISATION_ID },
       { $set: { "worker.enabled": true } }
     );
     expect(logInstanceAudit).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       expect.objectContaining({ action: "project_workers_enabled", target: "SB" })
     );
     expect(json.leftDisabled).toEqual([]);
@@ -250,7 +250,7 @@ describe("PUT the selection", () => {
     await PUT(putRequest({ projects: [] }), ctx());
 
     expect(workerUpdateOne).toHaveBeenCalledWith(
-      { _id: WORKER_ID, tenant: DEFAULT_TENANT_ID },
+      { _id: WORKER_ID, organisation: DEFAULT_ORGANISATION_ID },
       { $set: { desiredProjects: [] } }
     );
   });

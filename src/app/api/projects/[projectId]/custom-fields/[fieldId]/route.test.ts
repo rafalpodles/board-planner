@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
@@ -42,7 +42,7 @@ vi.mock("@/lib/project-write-images", () => ({
 }));
 
 const { PATCH, DELETE } = await import("./route");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 
 const OWNER = { _id: "u1", role: "member" };
 const PROJECT_ID = "507f1f77bcf86cd799439011";
@@ -159,7 +159,7 @@ describe("DELETE /api/projects/:projectId/custom-fields/:fieldId", () => {
     const res = await DELETE(deleteRequest(), fieldCtx(otherFieldId));
 
     expect(projectFindOneAndUpdate).toHaveBeenCalledWith(
-      { _id: PROJECT_ID, tenant: DEFAULT_TENANT_ID },
+      { _id: PROJECT_ID, organisation: DEFAULT_ORGANISATION_ID },
       { $pull: { customFields: { _id: otherFieldId } } },
       { returnDocument: "before" }
     );
@@ -170,7 +170,7 @@ describe("DELETE /api/projects/:projectId/custom-fields/:fieldId", () => {
   it("records the removal, and the designation that went with it", async () => {
     await DELETE(deleteRequest(), fieldCtx(numberFieldId));
 
-    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), PROJECT_ID, "u1", "settings_updated", [
+    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultOrganisation(), PROJECT_ID, "u1", "settings_updated", [
       "Custom field removed: Points",
       "Estimate field: Points → none",
     ]);
@@ -237,7 +237,7 @@ describe("PATCH /api/projects/:projectId/custom-fields/:fieldId", () => {
         customFields: {
           $not: { $elemMatch: { _id: { $ne: numberFieldId }, name: { $regex: "^Story Points$", $options: "i" } } },
         },
-        tenant: DEFAULT_TENANT_ID,
+        organisation: DEFAULT_ORGANISATION_ID,
       },
       { $set: { "customFields.$.name": "Story Points", "customFields.$.required": true } },
       { returnDocument: "before" }
@@ -250,7 +250,7 @@ describe("PATCH /api/projects/:projectId/custom-fields/:fieldId", () => {
       fieldCtx(numberFieldId)
     );
 
-    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), PROJECT_ID, "u1", "settings_updated", [
+    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultOrganisation(), PROJECT_ID, "u1", "settings_updated", [
       "Custom field Points · Name: Points → Story Points",
       "Custom field Points · Required: off → on",
       "Custom field Points · Archived: off → on",
@@ -327,7 +327,7 @@ describe("PATCH options — who may remove one", () => {
     );
 
     expect(res.status).toBe(200);
-    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), PROJECT_ID, "u1", "settings_updated", [
+    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultOrganisation(), PROJECT_ID, "u1", "settings_updated", [
       "Custom field Size · Options: Small, Large → Tiny, Large, Huge",
     ]);
   });
@@ -343,7 +343,7 @@ describe("PATCH options — who may remove one", () => {
     const res = await PATCH(patchRequest({ options: [saved[0]] }), fieldCtx(dropdownId));
 
     expect(res.status).toBe(200);
-    expect(check).toHaveBeenCalledWith(scopedToDefaultTenant(), OWNER, PROJECT_ID, "admin");
+    expect(check).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OWNER, PROJECT_ID, "admin");
   });
 });
 
@@ -357,10 +357,10 @@ describe("a field id sent in upper case", () => {
     expect(project.customFields.map((f) => f._id)).toEqual([otherFieldId]);
     expect(project.estimateFieldId).toBe("");
     expect(taskUpdateMany).toHaveBeenCalledWith(
-      { project: PROJECT_ID, tenant: DEFAULT_TENANT_ID },
+      { project: PROJECT_ID, organisation: DEFAULT_ORGANISATION_ID },
       { $unset: { [`customFieldValues.${numberFieldId}`]: "" } }
     );
-    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), PROJECT_ID, "u1", "settings_updated", [
+    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultOrganisation(), PROJECT_ID, "u1", "settings_updated", [
       "Custom field removed: Points",
       "Estimate field: Points → none",
     ]);
@@ -370,7 +370,7 @@ describe("a field id sent in upper case", () => {
     await PATCH(patchRequest({ name: "Story Points" }), fieldCtx(numberFieldId.toUpperCase()));
 
     expect(project.customFields[0].name).toBe("Story Points");
-    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), PROJECT_ID, "u1", "settings_updated", [
+    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultOrganisation(), PROJECT_ID, "u1", "settings_updated", [
       "Custom field Points · Name: Points → Story Points",
     ]);
   });
@@ -404,7 +404,7 @@ describe("a rename racing another", () => {
 
     expect(res.status).toBe(200);
     expect(project.customFields[0].required).toBe(true);
-    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), PROJECT_ID, "u1", "settings_updated", [
+    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultOrganisation(), PROJECT_ID, "u1", "settings_updated", [
       "Custom field Points · Required: off → on",
     ]);
   });

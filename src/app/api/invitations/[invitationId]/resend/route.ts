@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { withAdmin } from "@/lib/middleware";
-import { originFor } from "@/lib/tenant-host";
+import { originFor } from "@/lib/organisation-host";
 import { recordDelivery, reissueInvitation } from "@/lib/invitations";
 import { deliverTo, INTERACTIVE_ONLY, NO_ORIGIN_ERROR } from "@/lib/invitation-mail";
 import { describeInvitation, toApiInvitations } from "@/lib/invitation-view";

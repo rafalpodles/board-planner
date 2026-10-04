@@ -88,12 +88,12 @@ export const RUN_PASSWORDLESS_SERVER = process.env.E2E_PASSWORDLESS_SERVER === "
 // forwarded to PASSWORDLESS_BASE_URL, so every provider sign-in on this server crosses the relay
 export const PASSWORDLESS_RELAY_ORIGIN = `http://127.0.0.1:${PASSWORDLESS_PORT}`;
 
-// A fourth, with TENANT_DOMAIN set (BP-670): organisations on <slug>.tenants.localhost, which
+// A fourth, with ORGANISATION_DOMAIN set (BP-670): organisations on <slug>.organisations.localhost, which
 // Chromium resolves to loopback by itself. Opt-in like the two above, in the people job.
-export const TENANTS_PORT = Number(process.env.E2E_TENANTS_PORT ?? PORT + 10005);
-export const TENANT_DOMAIN = "tenants.localhost";
-export const TENANTS_PLATFORM_ORIGIN = `http://${TENANT_DOMAIN}:${TENANTS_PORT}`;
-export const RUN_TENANTS_SERVER = process.env.E2E_TENANTS_SERVER === "1";
+export const ORGANISATIONS_PORT = Number(process.env.E2E_ORGANISATIONS_PORT ?? PORT + 10005);
+export const ORGANISATION_DOMAIN = "organisations.localhost";
+export const ORGANISATIONS_PLATFORM_ORIGIN = `http://${ORGANISATION_DOMAIN}:${ORGANISATIONS_PORT}`;
+export const RUN_ORGANISATIONS_SERVER = process.env.E2E_ORGANISATIONS_SERVER === "1";
 
 // `next start` over a fresh build instead of `next dev`, for the specs whose subject only exists in
 // production output — the CSP nonce, where dev adds 'unsafe-eval' and scripts of its own (BP-313).
@@ -440,20 +440,20 @@ export default defineConfig({
           },
         ]
       : []),
-    ...(RUN_TENANTS_SERVER
+    ...(RUN_ORGANISATIONS_SERVER
       ? [
           {
-            command: `npm run dev -- --port ${TENANTS_PORT}`,
-            url: `http://127.0.0.1:${TENANTS_PORT}`,
+            command: `npm run dev -- --port ${ORGANISATIONS_PORT}`,
+            url: `http://127.0.0.1:${ORGANISATIONS_PORT}`,
             reuseExistingServer: false,
             timeout: 240_000,
             stdout: "pipe" as const,
             stderr: "pipe" as const,
             env: {
-              ...devServerEnv(TENANTS_PLATFORM_ORIGIN),
-              TENANT_DOMAIN,
-              APP_ORIGIN: TENANTS_PLATFORM_ORIGIN,
-              NEXT_DIST_DIR: ".next-tenants",
+              ...devServerEnv(ORGANISATIONS_PLATFORM_ORIGIN),
+              ORGANISATION_DOMAIN,
+              APP_ORIGIN: ORGANISATIONS_PLATFORM_ORIGIN,
+              NEXT_DIST_DIR: ".next-organisations",
             },
           },
         ]

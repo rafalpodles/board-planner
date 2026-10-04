@@ -4,7 +4,7 @@ vi.mock("@/models/worker", () => ({ Worker: { find: () => ({ select: () => ({ le
 vi.mock("@/lib/task-service", () => ({ toApiExecution: () => undefined }));
 
 const { withApiExecution } = await import("./task-execution-view");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 
 /**
  * BP-381. Every writer that echoes a task back goes through here — the status route, the task PUT,
@@ -17,7 +17,7 @@ const { scopedToDefaultTenant } = await import("@/lib/db-scope");
  */
 describe("the shape a task is published in", () => {
   it("does not publish a refused change from a writer's echo", async () => {
-    const published = await withApiExecution(scopedToDefaultTenant(), {
+    const published = await withApiExecution(scopedToDefaultOrganisation(), {
       _id: "t1",
       title: "x",
       decision: { gate: "protected-paths", patch: "SECRET", patchSha256: "b".repeat(64) },
@@ -29,7 +29,7 @@ describe("the shape a task is published in", () => {
 
   // The control: everything else still comes back, or the writers answer with nothing
   it("still publishes the rest of the task", async () => {
-    const published = await withApiExecution(scopedToDefaultTenant(), { _id: "t1", title: "Add a thing" } as never);
+    const published = await withApiExecution(scopedToDefaultOrganisation(), { _id: "t1", title: "Add a thing" } as never);
 
     expect(published).toMatchObject({ _id: "t1", title: "Add a thing" });
   });

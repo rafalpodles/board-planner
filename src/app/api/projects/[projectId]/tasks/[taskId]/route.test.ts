@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const updateTask = vi.fn();
 const heldRunRefusal = vi.fn();
@@ -42,7 +42,7 @@ vi.mock("@/lib/task-decisions", async (importOriginal) => ({
   toApiDecision: (decision: unknown) => decision,
 }));
 vi.mock("@/lib/middleware", async () => {
-  const { scopedToDefaultTenant } = await vi.importActual<typeof import("@/lib/db-scope")>("@/lib/db-scope");
+  const { scopedToDefaultOrganisation } = await vi.importActual<typeof import("@/lib/db-scope")>("@/lib/db-scope");
   return {
     withProjectAccess:
       (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
@@ -56,12 +56,12 @@ vi.mock("@/lib/middleware", async () => {
             role: req.headers.get("x-role") ?? "member",
             viaMachineCredential: req.headers.get("x-machine") !== null,
           },
-          db: scopedToDefaultTenant(),
+          db: scopedToDefaultOrganisation(),
         }),
   };
 });
 
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { GET, PUT, DELETE } = await import("./route");
 
 const TASK = "507f1f77bcf86cd799439011";
@@ -160,21 +160,21 @@ describe("PUT .../tasks/:taskId and force", () => {
     const res = await PUT(request({ status: "done", force: true }), ctx());
 
     expect(res.status).toBe(200);
-    expect(updateTask).toHaveBeenCalledWith(scopedToDefaultTenant(), "p1", TASK, { status: "done" }, "u1", true);
+    expect(updateTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "p1", TASK, { status: "done" }, "u1", true);
   });
 
   it("still lets a machine credential make an ordinary edit", async () => {
     const res = await PUT(request({ title: "renamed" }, true), ctx());
 
     expect(res.status).toBe(200);
-    expect(updateTask).toHaveBeenCalledWith(scopedToDefaultTenant(), "p1", TASK, { title: "renamed" }, "u1", false);
+    expect(updateTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "p1", TASK, { title: "renamed" }, "u1", false);
   });
 
   it("does not treat a non-true force as a force", async () => {
     const res = await PUT(request({ status: "done", force: "yes" }, true), ctx());
 
     expect(res.status).toBe(200);
-    expect(updateTask).toHaveBeenCalledWith(scopedToDefaultTenant(), "p1", TASK, { status: "done" }, "u1", false);
+    expect(updateTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "p1", TASK, { status: "done" }, "u1", false);
   });
 });
 
@@ -208,7 +208,7 @@ describe("PUT .../tasks/:taskId and the agent", () => {
     const res = await PUT(roleOf(role), ctx());
 
     expect(res.status).toBe(200);
-    expect(updateTask).toHaveBeenCalledWith(scopedToDefaultTenant(), "p1", TASK, { agent: AGENT }, "u1", false);
+    expect(updateTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "p1", TASK, { agent: AGENT }, "u1", false);
   });
 
   // A scoped token's role is degraded to member in memory by getAuthUser, and the route no longer
@@ -265,7 +265,7 @@ describe("DELETE .../tasks/:taskId and the run hold", () => {
     const res = await DELETE(deleteRequest(), ctx());
 
     expect(res.status).toBe(200);
-    expect(taskDeleteOne).toHaveBeenCalledWith({ _id: TASK, project: "p1", tenant: DEFAULT_TENANT_ID });
+    expect(taskDeleteOne).toHaveBeenCalledWith({ _id: TASK, project: "p1", organisation: DEFAULT_ORGANISATION_ID });
   });
 
   /**
@@ -286,13 +286,13 @@ describe("DELETE .../tasks/:taskId and the run hold", () => {
   it("takes the comments, activity, notifications and inbound links with it", async () => {
     await DELETE(deleteRequest(), ctx());
 
-    expect(commentDeleteMany).toHaveBeenCalledWith({ task: TASK, tenant: DEFAULT_TENANT_ID });
-    expect(activityDeleteMany).toHaveBeenCalledWith({ task: TASK, tenant: DEFAULT_TENANT_ID });
-    expect(notificationDeleteMany).toHaveBeenCalledWith({ task: TASK, tenant: DEFAULT_TENANT_ID });
+    expect(commentDeleteMany).toHaveBeenCalledWith({ task: TASK, organisation: DEFAULT_ORGANISATION_ID });
+    expect(activityDeleteMany).toHaveBeenCalledWith({ task: TASK, organisation: DEFAULT_ORGANISATION_ID });
+    expect(notificationDeleteMany).toHaveBeenCalledWith({ task: TASK, organisation: DEFAULT_ORGANISATION_ID });
     // BP-690: severing what the rest of the board held onto this task used to be two bare
     // `updateMany` pulls here, with nothing to say why a blocker or a child had vanished.
     expect(severLinksToDeletedTask).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       "p1",
       TASK,
       { taskNumber: 7, title: "Flaky test", status: "in_progress" },

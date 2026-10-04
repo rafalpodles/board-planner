@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
@@ -19,7 +19,7 @@ vi.mock("@/models/project", () => ({
 }));
 
 const { POST } = await import("./route");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 
 const OWNER = { _id: "u1", role: "member" };
 const MEMBER = { _id: "u2", role: "member" };
@@ -54,7 +54,7 @@ describe("POST /api/projects/[projectId]/pm/mcp-oauth/disconnect", () => {
 
     expect(response.status).toBe(404);
     expect(projectFindOneAndUpdate).toHaveBeenCalled();
-    expect(check).toHaveBeenCalledWith(scopedToDefaultTenant(), expect.anything(), PROJECT_ID, "admin");
+    expect(check).toHaveBeenCalledWith(scopedToDefaultOrganisation(), expect.anything(), PROJECT_ID, "admin");
   });
 
   it("denies a plain member", async () => {
@@ -80,7 +80,7 @@ describe("POST /api/projects/[projectId]/pm/mcp-oauth/disconnect — what it wri
       {
         _id: PROJECT_ID,
         "pm.mcpServers": { $elemMatch: { name: "srv", oauth: { $exists: true, $ne: null } } },
-        tenant: DEFAULT_TENANT_ID,
+        organisation: DEFAULT_ORGANISATION_ID,
       },
       {
         $set: {
@@ -100,7 +100,7 @@ describe("POST /api/projects/[projectId]/pm/mcp-oauth/disconnect — what it wri
     await POST(request(), ctx());
 
     expect(logProjectAudit).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       PROJECT_ID,
       "u1",
       "settings_updated",
@@ -114,7 +114,7 @@ describe("POST /api/projects/[projectId]/pm/mcp-oauth/disconnect — what it wri
     await POST(request(), ctx());
 
     expect(logProjectAudit).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       PROJECT_ID,
       "u1",
       "settings_updated",

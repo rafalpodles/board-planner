@@ -3,7 +3,7 @@ import { passwordSignInEnabled } from "@/lib/password-sign-in";
 import { isEmailConfigured, sendEmail } from "@/lib/email";
 import { EmailContent, renderEmail } from "@/lib/email-template";
 import type { Types } from "mongoose";
-import { tenantOrigin } from "@/lib/tenant-host";
+import { organisationOrigin } from "@/lib/organisation-host";
 
 /**
  * The mails that say somebody may be taking the account over.
@@ -30,16 +30,16 @@ async function deliver(
 }
 
 async function buttonTo(
-  tenant: Types.ObjectId,
+  organisation: Types.ObjectId,
   label: string,
   path: string
 ): Promise<{ label: string; url: string } | undefined> {
-  const origin = await tenantOrigin(tenant);
+  const origin = await organisationOrigin(organisation);
   return origin ? { label, url: `${origin}${path}` } : undefined;
 }
 
 export interface PasswordChangedNotice {
-  tenant: Types.ObjectId;
+  organisation: Types.ObjectId;
   email: string;
   username: string;
   /** A reset link the account holder followed, or an administrator setting one for them. */
@@ -81,7 +81,7 @@ export async function notifyPasswordChanged(n: PasswordChangedNotice): Promise<v
       ...(n.from ? [{ label: "Request", value: n.from }] : []),
       ...(byAdmin && n.actor ? [{ label: "Changed by", value: n.actor }] : []),
     ],
-    button: await buttonTo(n.tenant, `Sign in to ${APP_NAME}`, "/login"),
+    button: await buttonTo(n.organisation, `Sign in to ${APP_NAME}`, "/login"),
     footer: [
       "Sent because the password on this account changed. This notice cannot be turned off.",
     ],
@@ -129,7 +129,7 @@ export async function notifyAddressChanged(n: AddressChangedNotice): Promise<voi
 }
 
 export interface CredentialCreatedNotice {
-  tenant: Types.ObjectId;
+  organisation: Types.ObjectId;
   email: string;
   username: string;
   kind: "token" | "oauth";
@@ -160,7 +160,7 @@ export async function notifyCredentialCreated(n: CredentialCreatedNotice): Promi
       { label: "Account", value: n.username },
     ],
     outro: ["If you didn't do this, delete it — it works as you until you do."],
-    button: await buttonTo(n.tenant, "Review your tokens", "/settings/tokens"),
+    button: await buttonTo(n.organisation, "Review your tokens", "/settings/tokens"),
     footer: [
       "Sent because a credential was created on this account. This notice cannot be turned off.",
     ],
@@ -168,7 +168,7 @@ export async function notifyCredentialCreated(n: CredentialCreatedNotice): Promi
 }
 
 export interface IdentityLinkedNotice {
-  tenant: Types.ObjectId;
+  organisation: Types.ObjectId;
   email: string;
   username: string;
   provider: string;
@@ -192,7 +192,7 @@ export async function notifyIdentityLinked(n: IdentityLinkedNotice): Promise<voi
         ? "If you didn't do this, change your password: that unlinks every provider, this one included."
         : "If you didn't do this, unlink it under Settings → Security, and ask an administrator to sign you out everywhere.",
     ],
-    button: await buttonTo(n.tenant, "Review sign-in providers", "/settings/security"),
+    button: await buttonTo(n.organisation, "Review sign-in providers", "/settings/security"),
     footer: ["Sent because a sign-in provider was linked to this account. This notice cannot be turned off."],
   }));
 }

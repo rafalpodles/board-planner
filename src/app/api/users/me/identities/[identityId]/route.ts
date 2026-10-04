@@ -49,8 +49,8 @@ export const DELETE = withAuth(async (_request, { params, user, db }) => {
   await db.Identity.deleteOne({ _id: identity._id, user: user._id });
   // Two unlinks in two tabs each counted the other's provider as the way in that remains
   if (!passwordSignsIn && removesAWayIn && (await db.Identity.countDocuments({ user: user._id, ...live })) === 0) {
-    // Straight to the collection, so the row comes back as it was, linkedAt included, and with a tenant
-    await Identity.collection.insertOne({ tenant: db.tenant, ...identity });
+    // Straight to the collection, so the row comes back as it was, linkedAt included, and with an organisation
+    await Identity.collection.insertOne({ organisation: db.organisation, ...identity });
     return NextResponse.json({ error: lastWayIn }, { status: 409 });
   }
 

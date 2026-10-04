@@ -1,6 +1,6 @@
 import { cache } from "react";
 import { connectDB } from "./db";
-import { Tenant, ITenant } from "@/models/tenant";
+import { Organisation, IOrganisation } from "@/models/organisation";
 import { upsertSingleton } from "./singleton";
 import { currentLicence, entitlementsFromLicence } from "./licence";
 
@@ -20,17 +20,17 @@ export function checkOrganisationName(
 
 export async function nameOrganisation(name: string): Promise<void> {
   await connectDB();
-  await upsertSingleton(Tenant, { $set: { name } });
+  await upsertSingleton(Organisation, { $set: { name } });
 }
 
 // React's cache() only dedupes calls made during a Server Component render — confirmed against
 // this app's own Next config (Route Handlers run the handler as a plain function, with no render
 // dispatcher active), so every call from here today — Route Handlers only — still pays its own
-// query; a future Server Component reading tenant/plan data would share one.
+// query; a future Server Component reading organisation/plan data would share one.
 // Kept anyway: it costs nothing where it doesn't apply, and is correct where it does.
-export const getTenant = cache(async (): Promise<ITenant> => {
+export const getOrganisation = cache(async (): Promise<IOrganisation> => {
   await connectDB();
-  const stored = await upsertSingleton(Tenant, {
+  const stored = await upsertSingleton(Organisation, {
     $setOnInsert: { entitlements: { plan: "free", features: [], source: "none" } },
   });
   // Derived on every read and never written back, so removing the key is all it takes to undo it

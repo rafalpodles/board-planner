@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const getAuthUser = vi.fn();
 const accessibleProjectIds = vi.fn();
@@ -24,7 +24,7 @@ vi.mock("@/models/grant", () => ({ Grant: { create: grantCreate } }));
 vi.mock("@/models/task", () => ({ Task: { aggregate: taskAggregate, findOne: vi.fn() } }));
 vi.mock("@/models/sprint", () => ({ Sprint: { find: sprintFind } }));
 
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { GET, POST } = await import("./route");
 
 const MEMBER = { _id: "u1", role: "member" };
@@ -78,7 +78,7 @@ describe("GET /api/projects", () => {
 
     await GET(request(), ctx());
 
-    expect(projectFind).toHaveBeenCalledWith({ tenant: DEFAULT_TENANT_ID });
+    expect(projectFind).toHaveBeenCalledWith({ organisation: DEFAULT_ORGANISATION_ID });
   });
 
   it("confines the query to the granted projects", async () => {
@@ -86,7 +86,7 @@ describe("GET /api/projects", () => {
 
     await GET(request(), ctx());
 
-    expect(projectFind).toHaveBeenCalledWith({ _id: { $in: ["p1"] }, tenant: DEFAULT_TENANT_ID });
+    expect(projectFind).toHaveBeenCalledWith({ _id: { $in: ["p1"] }, organisation: DEFAULT_ORGANISATION_ID });
   });
 
   // canAdmin gates every project-admin section of the settings page, so it has to be the grant
@@ -98,7 +98,7 @@ describe("GET /api/projects", () => {
     const body = await (await GET(request(), ctx())).json();
 
     expect(administeredProjectIds).toHaveBeenCalledTimes(1);
-    expect(administeredProjectIds).toHaveBeenCalledWith(scopedToDefaultTenant(), MEMBER, ["p1"]);
+    expect(administeredProjectIds).toHaveBeenCalledWith(scopedToDefaultOrganisation(), MEMBER, ["p1"]);
     expect(body[0].canAdmin).toBe(true);
   });
 
@@ -148,7 +148,7 @@ describe("POST /api/projects", () => {
       objectType: "project",
       object: NEW_PROJECT_ID,
       createdBy: ADMIN._id,
-      tenant: DEFAULT_TENANT_ID,
+      organisation: DEFAULT_ORGANISATION_ID,
     });
   });
 
@@ -167,7 +167,7 @@ describe("POST /api/projects", () => {
 
     await expect(POST(post({ name: "New", key: "NEW" }), ctx())).rejects.toThrow("duplicate key");
 
-    expect(projectDeleteOne).toHaveBeenCalledWith({ _id: NEW_PROJECT_ID, tenant: DEFAULT_TENANT_ID });
+    expect(projectDeleteOne).toHaveBeenCalledWith({ _id: NEW_PROJECT_ID, organisation: DEFAULT_ORGANISATION_ID });
   });
 });
 

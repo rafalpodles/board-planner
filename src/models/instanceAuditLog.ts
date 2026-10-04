@@ -1,6 +1,6 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { IInstanceAuditLog, INSTANCE_AUDIT_ACTIONS } from "@/types";
-import { withTenant } from "@/lib/tenant-field";
+import { withOrganisation } from "@/lib/organisation-field";
 
 // The layer above projectAuditLog, for the actions that belong to no project. BP-232 removed
 // stored worker assignments, and the audit call that hung off them went too — so stopping a machine
@@ -43,7 +43,7 @@ const instanceAuditLogSchema = new Schema<IInstanceAuditLog>(
 
 instanceAuditLogSchema.index({ createdAt: -1 });
 
-withTenant(instanceAuditLogSchema);
+withOrganisation(instanceAuditLogSchema);
 
 export const InstanceAuditLog: Model<IInstanceAuditLog> =
   mongoose.models.InstanceAuditLog ||

@@ -15,7 +15,7 @@
 import mongoose from "mongoose";
 import { resolveUri, dbName } from "./mongo-uri";
 import { findOrphanGrants, deleteOrphanGrants, type OrphanGrant } from "../src/lib/grants";
-import { scopedToDefaultTenant } from "../src/lib/db-scope";
+import { scopedToDefaultOrganisation } from "../src/lib/db-scope";
 
 const APPLY = process.argv.includes("--apply");
 
@@ -25,7 +25,7 @@ function list(label: string, rows: OrphanGrant[]) {
 }
 
 async function main() {
-  const db = scopedToDefaultTenant();
+  const db = scopedToDefaultOrganisation();
   const { uri, source } = resolveUri();
   await mongoose.connect(uri, { autoIndex: false, ...(dbName() ? { dbName: dbName() } : {}) });
   console.log(`Connected via ${source} to database "${mongoose.connection.name}"${APPLY ? "" : " (dry run)"}`);

@@ -113,7 +113,7 @@ vi.mock("@/lib/personal-chat", () => ({ sendPersonalChat: (p: unknown) => sendPe
 const { createNotifications, collectRecipients, assigneeIdOf } = await import(
   "@/lib/in-app-notifications"
 );
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 
 const NOTIFICATION = {
   type: "comment_added" as const,
@@ -156,7 +156,7 @@ beforeEach(() => {
 
 describe("notification emails", () => {
   it("links back to the task the notification is about", async () => {
-    await createNotifications(scopedToDefaultTenant(), NOTIFICATION);
+    await createNotifications(scopedToDefaultOrganisation(), NOTIFICATION);
     const [mail] = await sentMails();
 
     expect(mail.html).toContain("https://app.example.com/projects/BP/tasks/142");
@@ -165,7 +165,7 @@ describe("notification emails", () => {
   });
 
   it("offers the reader a way out instead of the spam button", async () => {
-    await createNotifications(scopedToDefaultTenant(), NOTIFICATION);
+    await createNotifications(scopedToDefaultOrganisation(), NOTIFICATION);
     const [mail] = await sentMails();
 
     expect(mail.headers?.["List-Unsubscribe"]).toBe(
@@ -175,7 +175,7 @@ describe("notification emails", () => {
   });
 
   it("tells each recipient why they got it", async () => {
-    await createNotifications(scopedToDefaultTenant(), NOTIFICATION);
+    await createNotifications(scopedToDefaultOrganisation(), NOTIFICATION);
     const mails = await sentMails();
 
     const toAssignee = mails.find((m) => m.to === "assignee@example.com");
@@ -185,7 +185,7 @@ describe("notification emails", () => {
   });
 
   it("says who mentioned them when that is why they were written to", async () => {
-    await createNotifications(scopedToDefaultTenant(), {
+    await createNotifications(scopedToDefaultOrganisation(), {
       ...NOTIFICATION,
       type: "mentioned",
       title: "owner mentioned you in BP-142",
@@ -200,7 +200,7 @@ describe("notification emails", () => {
   // unconfigured instance sends the mail without a link rather than with a wrong one.
   it("still sends when the instance has no configured origin, minus the link", async () => {
     selfOrigin.mockReturnValue(null);
-    await createNotifications(scopedToDefaultTenant(), NOTIFICATION);
+    await createNotifications(scopedToDefaultOrganisation(), NOTIFICATION);
     const [mail] = await sentMails();
 
     expect(mail.html).not.toContain("href=\"http");
@@ -213,7 +213,7 @@ describe("notification emails", () => {
   it("skips the people who chose the daily digest", async () => {
     prefs[ASSIGNEE] = { emailDigest: true };
 
-    await createNotifications(scopedToDefaultTenant(), NOTIFICATION);
+    await createNotifications(scopedToDefaultOrganisation(), NOTIFICATION);
     await sentMails();
 
     const to = sendEmail.mock.calls.map(([p]) => (p as { to: string }).to);
@@ -230,7 +230,7 @@ describe("notification emails", () => {
       },
     };
 
-    await createNotifications(scopedToDefaultTenant(), { ...NOTIFICATION, recipientIds: [WATCHER] });
+    await createNotifications(scopedToDefaultOrganisation(), { ...NOTIFICATION, recipientIds: [WATCHER] });
 
     expect(insertMany.mock.calls[0][0][0]).toMatchObject({ inApp: false });
     await sentMails();
@@ -239,7 +239,7 @@ describe("notification emails", () => {
   // BP-725. The digest prints the row's key beside its title, and only the writer knows where in
   // the sentence that key sits — so the writer's key-less phrasing has to reach every document.
   it("stores the writer's digest phrasing on every recipient's row", async () => {
-    await createNotifications(scopedToDefaultTenant(), {
+    await createNotifications(scopedToDefaultOrganisation(), {
       ...NOTIFICATION,
       type: "task_linked",
       title: "owner marked BP-142 as blocked by BP-7",
@@ -264,7 +264,7 @@ describe("notification emails", () => {
       },
     };
 
-    await createNotifications(scopedToDefaultTenant(), { ...NOTIFICATION, recipientIds: [WATCHER] });
+    await createNotifications(scopedToDefaultOrganisation(), { ...NOTIFICATION, recipientIds: [WATCHER] });
     expect(sendEmail).not.toHaveBeenCalled();
 
     // The bell still rings for it — one channel muted for one board is not the whole row
@@ -272,7 +272,7 @@ describe("notification emails", () => {
 
     // And with the override gone, the same event reaches them
     prefs[WATCHER] = {};
-    await createNotifications(scopedToDefaultTenant(), { ...NOTIFICATION, recipientIds: [WATCHER] });
+    await createNotifications(scopedToDefaultOrganisation(), { ...NOTIFICATION, recipientIds: [WATCHER] });
     await sentMails();
   });
 
@@ -281,12 +281,12 @@ describe("notification emails", () => {
   // reaching the recipient list is enough to cast: `new ObjectId("admin")` throws.
   it("does not reject when a recipient is not an id", async () => {
     await expect(
-      createNotifications(scopedToDefaultTenant(), { ...NOTIFICATION, recipientIds: ["admin"] })
+      createNotifications(scopedToDefaultOrganisation(), { ...NOTIFICATION, recipientIds: ["admin"] })
     ).resolves.toBeUndefined();
   });
 
   it("still writes to the recipients that are ids when one of them is not", async () => {
-    await createNotifications(scopedToDefaultTenant(), { ...NOTIFICATION, recipientIds: ["admin", WATCHER] });
+    await createNotifications(scopedToDefaultOrganisation(), { ...NOTIFICATION, recipientIds: ["admin", WATCHER] });
 
     expect(insertMany.mock.calls[0][0]).toHaveLength(1);
     expect(insertMany.mock.calls[0][0][0]).toMatchObject({ title: NOTIFICATION.title });
@@ -298,14 +298,14 @@ describe("notification emails", () => {
       throw new Error("mongo is having a bad afternoon");
     });
 
-    await expect(createNotifications(scopedToDefaultTenant(), NOTIFICATION)).resolves.toBeUndefined();
+    await expect(createNotifications(scopedToDefaultOrganisation(), NOTIFICATION)).resolves.toBeUndefined();
   });
 
   // BP-753: being given a board is about the board, and a row naming a task that does not exist
   // would send the bell to a task page that 404s
   it("stores a notification that names no task when it is about a board", async () => {
     const { taskId: _taskId, email: _email, ...boardEvent } = NOTIFICATION;
-    await createNotifications(scopedToDefaultTenant(), {
+    await createNotifications(scopedToDefaultOrganisation(), {
       ...boardEvent,
       type: "board_access",
       title: "owner added you to Orbit as a member",
@@ -319,7 +319,7 @@ describe("notification emails", () => {
   });
 
   it("mails a board_access row with a button to the board and its own reason", async () => {
-    await createNotifications(scopedToDefaultTenant(), {
+    await createNotifications(scopedToDefaultOrganisation(), {
       type: "board_access",
       projectId: NOTIFICATION.projectId,
       actorId: ACTOR,
@@ -343,7 +343,7 @@ describe("notification emails", () => {
   });
 
   it("never writes to the person who caused the notification", async () => {
-    await createNotifications(scopedToDefaultTenant(), { ...NOTIFICATION, actorId: ASSIGNEE });
+    await createNotifications(scopedToDefaultOrganisation(), { ...NOTIFICATION, actorId: ASSIGNEE });
 
     expect(insertMany).toHaveBeenCalledWith([expect.objectContaining({ title: NOTIFICATION.title })]);
     expect(insertMany.mock.calls[0][0]).toHaveLength(1);
@@ -378,7 +378,7 @@ describe("the fan-outs nobody awaits", () => {
   it("hands the personal chat fan-out the recipients who asked for it, and the mail payload", async () => {
     prefs[WATCHER] = CHAT_CONNECTED;
 
-    await createNotifications(scopedToDefaultTenant(), { ...NOTIFICATION, recipientIds: [WATCHER] });
+    await createNotifications(scopedToDefaultOrganisation(), { ...NOTIFICATION, recipientIds: [WATCHER] });
 
     const [chat] = sendPersonalChat.mock.calls.at(-1) ?? [];
     expect(chat).toMatchObject({
@@ -395,7 +395,7 @@ describe("the fan-outs nobody awaits", () => {
   });
 
   it("leaves chat alone for somebody who connected nothing", async () => {
-    await createNotifications(scopedToDefaultTenant(), { ...NOTIFICATION, recipientIds: [WATCHER] });
+    await createNotifications(scopedToDefaultOrganisation(), { ...NOTIFICATION, recipientIds: [WATCHER] });
     await sentMails();
 
     expect(sendPersonalChat).not.toHaveBeenCalled();
@@ -407,7 +407,7 @@ describe("the fan-outs nobody awaits", () => {
       throw new Error("origin is misconfigured");
     });
 
-    await expect(createNotifications(scopedToDefaultTenant(), NOTIFICATION)).resolves.toBeUndefined();
+    await expect(createNotifications(scopedToDefaultOrganisation(), NOTIFICATION)).resolves.toBeUndefined();
 
     await vi.waitFor(() =>
       expect(reported).toHaveBeenCalledWith(
@@ -426,7 +426,7 @@ describe("the fan-outs nobody awaits", () => {
     });
 
     await expect(
-      createNotifications(scopedToDefaultTenant(), { ...NOTIFICATION, recipientIds: [WATCHER] })
+      createNotifications(scopedToDefaultOrganisation(), { ...NOTIFICATION, recipientIds: [WATCHER] })
     ).resolves.toBeUndefined();
 
     await vi.waitFor(() =>
@@ -465,7 +465,7 @@ describe("delivery to somebody who can no longer reach the board", () => {
   it("writes no row for a recipient whose grant on the project is gone", async () => {
     granted = [ASSIGNEE];
 
-    await createNotifications(scopedToDefaultTenant(), NOTIFICATION);
+    await createNotifications(scopedToDefaultOrganisation(), NOTIFICATION);
 
     expect(insertMany).toHaveBeenCalledTimes(1);
     expect(recipientIdsOf(insertMany.mock.calls[0])).toEqual([ASSIGNEE]);
@@ -474,7 +474,7 @@ describe("delivery to somebody who can no longer reach the board", () => {
   it("sends no mail to a recipient whose grant on the project is gone", async () => {
     granted = [ASSIGNEE];
 
-    await createNotifications(scopedToDefaultTenant(), NOTIFICATION);
+    await createNotifications(scopedToDefaultOrganisation(), NOTIFICATION);
     const mails = await sentMails();
 
     expect(mails.map((m) => m.to)).toEqual(["assignee@example.com"]);
@@ -483,7 +483,7 @@ describe("delivery to somebody who can no longer reach the board", () => {
   it("still notifies an instance admin, who reaches the board without a grant row", async () => {
     granted = [];
 
-    await createNotifications(scopedToDefaultTenant(), { ...NOTIFICATION, recipientIds: [WATCHER, ADMIN] });
+    await createNotifications(scopedToDefaultOrganisation(), { ...NOTIFICATION, recipientIds: [WATCHER, ADMIN] });
 
     expect(recipientIdsOf(insertMany.mock.calls[0])).toEqual([ADMIN]);
   });
@@ -491,7 +491,7 @@ describe("delivery to somebody who can no longer reach the board", () => {
   it("writes nothing and mails nobody when no recipient can reach the board", async () => {
     granted = [];
 
-    await createNotifications(scopedToDefaultTenant(), NOTIFICATION);
+    await createNotifications(scopedToDefaultOrganisation(), NOTIFICATION);
 
     expect(insertMany).not.toHaveBeenCalled();
     expect(sendEmail).not.toHaveBeenCalled();
@@ -503,7 +503,7 @@ describe("delivery to somebody who can no longer reach the board", () => {
   it("delivers to nobody when it cannot find out who may be told", async () => {
     accessLookupFails = true;
 
-    await createNotifications(scopedToDefaultTenant(), NOTIFICATION);
+    await createNotifications(scopedToDefaultOrganisation(), NOTIFICATION);
 
     expect(insertMany).not.toHaveBeenCalled();
     expect(sendEmail).not.toHaveBeenCalled();
@@ -512,7 +512,7 @@ describe("delivery to somebody who can no longer reach the board", () => {
   it("asks about the project the notification is about, not some other one", async () => {
     granted = [ASSIGNEE, WATCHER];
 
-    await createNotifications(scopedToDefaultTenant(), NOTIFICATION);
+    await createNotifications(scopedToDefaultOrganisation(), NOTIFICATION);
 
     expect(grantFind).toHaveBeenCalledWith(
       expect.objectContaining({ objectType: "project", object: NOTIFICATION.projectId })

@@ -11,8 +11,8 @@ vi.mock("@/models/task", () => ({ Task: { updateOne: taskUpdateOne } }));
 
 const { addedLinks, recordLinkChanges, removedLinks, seenUrls, unseenLinks } =
   await import("./pr-links");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
-const db = scopedToDefaultTenant();
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
+const db = scopedToDefaultOrganisation();
 
 const REPO = "https://github.com/example/board";
 // The address follows the number unless the caller names one: a fixture where it does not is a

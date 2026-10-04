@@ -1,7 +1,7 @@
 import { Types } from "mongoose";
 import { connectDB } from "./db";
-import { DEFAULT_TENANT_ID } from "./tenant-field";
-import { Tenant } from "@/models/tenant";
+import { DEFAULT_ORGANISATION_ID } from "./organisation-field";
+import { Organisation } from "@/models/organisation";
 import { selfOrigin } from "./session";
 import type { ScopedDb } from "./db-scope";
 
@@ -38,21 +38,21 @@ function remember<V>(cache: Map<string, V>, key: string, value: V): void {
 
 const DOMAIN_PATTERN = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 
-export function tenantDomain(): string | null {
-  const value = process.env.TENANT_DOMAIN?.trim().toLowerCase();
+export function organisationDomain(): string | null {
+  const value = process.env.ORGANISATION_DOMAIN?.trim().toLowerCase();
   return value ? value : null;
 }
 
-export function assertTenantDomainConfig(): void {
-  const domain = tenantDomain();
+export function assertOrganisationDomainConfig(): void {
+  const domain = organisationDomain();
   if (domain !== null && !DOMAIN_PATTERN.test(domain)) {
     throw new Error(
-      `TENANT_DOMAIN must be a bare domain such as board-planner.com, with no scheme, port or path; got "${process.env.TENANT_DOMAIN}"`
+      `ORGANISATION_DOMAIN must be a bare domain such as board-planner.com, with no scheme, port or path; got "${process.env.ORGANISATION_DOMAIN}"`
     );
   }
 }
 
-export type HostKind = { kind: "tenant"; slug: string } | { kind: "platform" } | { kind: "unknown" };
+export type HostKind = { kind: "organisation"; slug: string } | { kind: "platform" } | { kind: "unknown" };
 
 export function classifyHost(host: string | null, domain: string): HostKind {
   const name = (host ?? "").trim().toLowerCase().replace(/:\d+$/, "").replace(/\.$/, "");
@@ -60,48 +60,48 @@ export function classifyHost(host: string | null, domain: string): HostKind {
   if (!name.endsWith(`.${domain}`)) return { kind: "unknown" };
   const label = name.slice(0, -domain.length - 1);
   if (RESERVED_SLUGS.includes(label)) return { kind: "platform" };
-  return isSlug(label) ? { kind: "tenant", slug: label } : { kind: "unknown" };
+  return isSlug(label) ? { kind: "organisation", slug: label } : { kind: "unknown" };
 }
 
 const SLUG_CACHE_MS = 30_000;
-const slugCache = new Map<string, { tenant: Types.ObjectId | null; at: number }>();
+const slugCache = new Map<string, { organisation: Types.ObjectId | null; at: number }>();
 
-async function tenantWithSlug(slug: string): Promise<Types.ObjectId | null> {
+async function organisationWithSlug(slug: string): Promise<Types.ObjectId | null> {
   const cached = slugCache.get(slug);
-  if (cached && Date.now() - cached.at < SLUG_CACHE_MS) return cached.tenant;
+  if (cached && Date.now() - cached.at < SLUG_CACHE_MS) return cached.organisation;
   await connectDB();
-  const found = await Tenant.findOne({ slug }).select("_id").lean();
-  const tenant = found ? found._id : null;
-  remember(slugCache, slug, { tenant, at: Date.now() });
-  return tenant;
+  const found = await Organisation.findOne({ slug }).select("_id").lean();
+  const organisation = found ? found._id : null;
+  remember(slugCache, slug, { organisation, at: Date.now() });
+  return organisation;
 }
 
-const slugOfTenantCache = new Map<string, { slug: string | null; at: number }>();
+const slugOfOrganisationCache = new Map<string, { slug: string | null; at: number }>();
 
-async function slugOfTenant(tenant: Types.ObjectId): Promise<string | null> {
-  const key = tenant.toHexString();
-  const cached = slugOfTenantCache.get(key);
+async function slugOfOrganisation(organisation: Types.ObjectId): Promise<string | null> {
+  const key = organisation.toHexString();
+  const cached = slugOfOrganisationCache.get(key);
   if (cached && Date.now() - cached.at < SLUG_CACHE_MS) return cached.slug;
   await connectDB();
-  const found = await Tenant.findById(tenant).select("slug").lean();
+  const found = await Organisation.findById(organisation).select("slug").lean();
   const slug = found?.slug ?? null;
-  remember(slugOfTenantCache, key, { slug, at: Date.now() });
+  remember(slugOfOrganisationCache, key, { slug, at: Date.now() });
   return slug;
 }
 
-export function forgetTenantSlugs(): void {
+export function forgetOrganisationSlugs(): void {
   slugCache.clear();
-  slugOfTenantCache.clear();
+  slugOfOrganisationCache.clear();
 }
 
-export async function tenantOrigin(tenant: Types.ObjectId): Promise<string | null> {
-  const domain = tenantDomain();
+export async function organisationOrigin(organisation: Types.ObjectId): Promise<string | null> {
+  const domain = organisationDomain();
   if (!domain) return selfOrigin();
-  const slug = await slugOfTenant(tenant);
+  const slug = await slugOfOrganisation(organisation);
   if (!slug) return null;
   const host = `${slug}.${domain}`;
   const routesBack = classifyHost(host, domain);
-  if (routesBack.kind !== "tenant" || routesBack.slug !== slug) return null;
+  if (routesBack.kind !== "organisation" || routesBack.slug !== slug) return null;
   return `${platformScheme(domain)}//${host}${platformPort(domain)}`;
 }
 
@@ -118,16 +118,16 @@ const platformPort = (domain: string) => {
   return port ? `:${port}` : "";
 };
 
-export const originFor = (db: ScopedDb): Promise<string | null> => tenantOrigin(db.tenant);
+export const originFor = (db: ScopedDb): Promise<string | null> => organisationOrigin(db.organisation);
 
-export type RequestTenant = { kind: "tenant"; tenant: Types.ObjectId } | { kind: "platform" } | { kind: "none" };
+export type RequestOrganisation = { kind: "organisation"; organisation: Types.ObjectId } | { kind: "platform" } | { kind: "none" };
 
-export async function tenantOfRequest(request: Request): Promise<RequestTenant> {
-  const domain = tenantDomain();
-  if (!domain) return { kind: "tenant", tenant: DEFAULT_TENANT_ID };
+export async function organisationOfRequest(request: Request): Promise<RequestOrganisation> {
+  const domain = organisationDomain();
+  if (!domain) return { kind: "organisation", organisation: DEFAULT_ORGANISATION_ID };
   const host = classifyHost(request.headers.get("host"), domain);
   if (host.kind === "platform") return { kind: "platform" };
   if (host.kind === "unknown") return { kind: "none" };
-  const tenant = await tenantWithSlug(host.slug);
-  return tenant ? { kind: "tenant", tenant } : { kind: "none" };
+  const organisation = await organisationWithSlug(host.slug);
+  return organisation ? { kind: "organisation", organisation } : { kind: "none" };
 }

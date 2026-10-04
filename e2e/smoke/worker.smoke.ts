@@ -138,8 +138,8 @@ async function seedBoard() {
   await mongoose.connect(E2E_MONGODB_URI);
   try {
     const { seedAgents } = await import("@/lib/agent-seed");
-    const { scopedToDefaultTenant } = await import("@/lib/db-scope");
-    await seedAgents(scopedToDefaultTenant());
+    const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
+    await seedAgents(scopedToDefaultOrganisation());
     const db = mongoose.connection.db!;
     const now = new Date();
     await db.collection("projects").updateOne({ _id: PROJECT_ID }, { $set: { githubRepo: REPO } });

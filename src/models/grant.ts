@@ -1,6 +1,6 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { IGrant, GRANT_RELATIONS } from "@/types";
-import { withTenant } from "@/lib/tenant-field";
+import { withOrganisation } from "@/lib/organisation-field";
 
 const grantSchema = new Schema<IGrant>(
   {
@@ -16,7 +16,7 @@ const grantSchema = new Schema<IGrant>(
 grantSchema.index({ subject: 1, objectType: 1, object: 1 }, { unique: true });
 grantSchema.index({ objectType: 1, object: 1 });
 
-withTenant(grantSchema);
+withOrganisation(grantSchema);
 
 export const Grant: Model<IGrant> =
   mongoose.models.Grant || mongoose.model<IGrant>("Grant", grantSchema);

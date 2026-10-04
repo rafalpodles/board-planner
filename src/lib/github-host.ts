@@ -7,7 +7,7 @@
  * a link is a claim about somebody else's instance (BP-634).
  */
 
-/** GitHub's own API hosts: github.com's, and a data-residency tenant's. Nobody else's. */
+/** GitHub's own API hosts: github.com's, and a data-residency enterprise's. Nobody else's. */
 const HOSTED_API = /^api\.(?:github\.com|[a-z0-9-]+\.ghe\.com)$/i;
 
 const DEFAULT_API = "https://api.github.com";
@@ -27,7 +27,7 @@ export function githubApiBase(raw = process.env.GITHUB_API_BASE_URL): string {
  * against, so a proxy origin there would refuse genuine github.com pull requests and offer a
  * machine an address that is not a git remote (found in review).
  *
- * - a host of its own — `api.github.com`, and the data residency form `api.<tenant>.ghe.com`,
+ * - a host of its own — `api.github.com`, and the data residency form `api.<subdomain>.ghe.com`,
  *   where the site is the same name without the label. Those two names and no others: "any host
  *   beginning `api.`" reads `https://api.gh-proxy.corp` as a place repositories live, which is
  *   the very thing this is narrow to avoid (found in review);

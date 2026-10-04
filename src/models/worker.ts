@@ -1,6 +1,6 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { IWorker } from "@/types";
-import { withTenant } from "@/lib/tenant-field";
+import { withOrganisation } from "@/lib/organisation-field";
 
 const workerSchema = new Schema<IWorker>(
   {
@@ -90,9 +90,9 @@ const workerSchema = new Schema<IWorker>(
   { timestamps: true }
 );
 
-workerSchema.index({ name: 1, host: 1, tenant: 1 }, { unique: true });
+workerSchema.index({ name: 1, host: 1, organisation: 1 }, { unique: true });
 
-withTenant(workerSchema);
+withOrganisation(workerSchema);
 
 export const Worker: Model<IWorker> =
   mongoose.models.Worker || mongoose.model<IWorker>("Worker", workerSchema);

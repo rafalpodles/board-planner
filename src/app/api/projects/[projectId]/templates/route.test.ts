@@ -6,7 +6,7 @@ import {
   TASK_TITLE_MAX_LENGTH,
   TEMPLATE_NAME_MAX_LENGTH,
 } from "@/lib/identifiers";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
@@ -23,7 +23,7 @@ vi.mock("@/models/project", () => ({
 }));
 vi.mock("@/lib/projectAudit", () => ({ logProjectAudit }));
 
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { POST, PUT, DELETE } = await import("./route");
 
 const PROJECT_ID = "507f1f77bcf86cd799439011";
@@ -148,7 +148,7 @@ describe("POST /api/projects/:projectId/templates", () => {
   it("records the addition on the project's audit log, under the trimmed name", async () => {
     await call(POST, { name: "  Bug  " });
 
-    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), PROJECT_ID, "u1", "template_added", "Bug");
+    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultOrganisation(), PROJECT_ID, "u1", "template_added", "Bug");
   });
 
   /**
@@ -185,7 +185,7 @@ describe("POST /api/projects/:projectId/templates", () => {
     await call(POST, { name: "Bug" });
 
     expect(projectFindOneAndUpdate).toHaveBeenCalledWith(
-      { _id: PROJECT_ID, [`taskTemplates.${MAX_TASK_TEMPLATES - 1}`]: { $exists: false }, tenant: DEFAULT_TENANT_ID },
+      { _id: PROJECT_ID, [`taskTemplates.${MAX_TASK_TEMPLATES - 1}`]: { $exists: false }, organisation: DEFAULT_ORGANISATION_ID },
       { $push: { taskTemplates: expect.objectContaining({ name: "Bug" }) } },
       { returnDocument: "after" }
     );
@@ -337,7 +337,7 @@ describe("DELETE /api/projects/:projectId/templates", () => {
     await call(DELETE, { templateId: "t1" });
 
     expect(logProjectAudit).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       PROJECT_ID,
       "u1",
       "template_removed",

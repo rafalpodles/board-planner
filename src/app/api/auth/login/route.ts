@@ -5,7 +5,7 @@ import { getClientIp, verifyCredentials } from "@/lib/auth";
 import { isDatabaseUnreachable } from "@/lib/db-errors";
 import { databaseUnavailable, hostNotFound } from "@/lib/middleware";
 import { lockoutKey, sourceKey, withLockout } from "@/lib/rate-limit";
-import { scopedForRequest, tenantOf } from "@/lib/db-scope";
+import { scopedForRequest, organisationOf } from "@/lib/db-scope";
 import {
   buildSessionCookie,
   createSession,
@@ -43,7 +43,7 @@ export async function POST(request: Request) {
   let user: Awaited<ReturnType<typeof verifyCredentials>>;
   try {
     ({ lockedOut, result: user } = await withLockout(
-      lockoutKey(db.tenant, clientIp ?? "-", username),
+      lockoutKey(db.organisation, clientIp ?? "-", username),
       () => verifyCredentials(db, username, password),
       clientIp ? sourceKey(clientIp) : undefined
     ));
@@ -68,7 +68,7 @@ export async function POST(request: Request) {
 
   const { token, absoluteExpiresAt } = await createSession({
     userId: user._id,
-    tenant: tenantOf(user),
+    organisation: organisationOf(user),
     userAgent: request.headers.get("user-agent"),
     ip: clientIp,
   });

@@ -140,7 +140,7 @@ export type UserRole = "admin" | "member";
 // Document interfaces (what Mongoose returns)
 export interface IUser {
   _id: Types.ObjectId;
-  tenant?: Types.ObjectId;
+  organisation?: Types.ObjectId;
   username: string;
   password: string;
   fullName: string;
@@ -179,7 +179,7 @@ export interface IUser {
 }
 
 export interface ISession {
-  tenant?: Types.ObjectId;
+  organisation?: Types.ObjectId;
   _id: Types.ObjectId;
   tokenHash: string;
   user: Types.ObjectId | IUser;
@@ -212,7 +212,7 @@ export interface IPasswordResetToken {
 }
 
 export interface IApiToken {
-  tenant?: Types.ObjectId;
+  organisation?: Types.ObjectId;
   _id: Types.ObjectId;
   user: Types.ObjectId | IUser;
   name: string;
@@ -365,7 +365,7 @@ export interface IOAuthCode {
 }
 
 export interface IOAuthToken {
-  tenant?: Types.ObjectId;
+  organisation?: Types.ObjectId;
   _id: Types.ObjectId;
   accessTokenHash: string;
   refreshTokenHash: string;
@@ -721,7 +721,7 @@ export interface IEnrolmentToken {
 }
 
 export interface IWorker {
-  tenant?: Types.ObjectId;
+  organisation?: Types.ObjectId;
   _id: Types.ObjectId;
   name: string;
   host: string;

@@ -1,4 +1,4 @@
-import { tenantDomain } from "@/lib/tenant-host";
+import { organisationDomain } from "@/lib/organisation-host";
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { scopedForRequest } from "@/lib/db-scope";
@@ -36,7 +36,7 @@ export async function GET(request: Request) {
   try {
     await connectDB();
     const users = await db.User.countDocuments();
-    return NextResponse.json({ unclaimed: users === 0 && !tenantDomain(), passwordSignIn });
+    return NextResponse.json({ unclaimed: users === 0 && !organisationDomain(), passwordSignIn });
   } catch (e) {
     // Unreachable is not "unclaimed": answering true here would offer to create the first
     // administrator on an instance that may already have one

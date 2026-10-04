@@ -29,7 +29,7 @@ vi.mock("@/models/invitation", () => ({ Invitation: { findOne: vi.fn() } }));
 
 const { POST } = await import("./route");
 const { resetRateLimits } = await import("@/lib/rate-limit");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 
 const HELD = {
   provider: "oidc",
@@ -56,8 +56,8 @@ describe("POST /api/invitations/sso", () => {
     const res = await post();
 
     expect(res.status).toBe(201);
-    expect(claimInvitationByHash).toHaveBeenCalledWith(scopedToDefaultTenant(), "h1");
-    expect(completeAcceptance.mock.calls[0][0]).toBe(scopedToDefaultTenant());
+    expect(claimInvitationByHash).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "h1");
+    expect(completeAcceptance.mock.calls[0][0]).toBe(scopedToDefaultOrganisation());
     expect(completeAcceptance.mock.calls[0][2]).toEqual({
       username: "ada",
       fullName: "Ada Lovelace",
@@ -66,7 +66,7 @@ describe("POST /api/invitations/sso", () => {
       providerProvesAddress: true,
       groups: [],
     });
-    expect(spendAcceptance).toHaveBeenCalledWith(scopedToDefaultTenant(), "cpo_held");
+    expect(spendAcceptance).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "cpo_held");
     expect(res.headers.get("set-cookie")).toContain("bp_oidc_accept=");
   });
 
@@ -84,7 +84,7 @@ describe("POST /api/invitations/sso", () => {
   it("reads the held sign-in from its own cookie", async () => {
     await post();
 
-    expect(heldAcceptance).toHaveBeenCalledWith(scopedToDefaultTenant(), "cpo_held");
+    expect(heldAcceptance).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "cpo_held");
   });
 
   it("refuses a request from another site", async () => {
@@ -112,7 +112,7 @@ describe("POST /api/invitations/sso", () => {
     const res = await post();
 
     expect(res.status).toBe(400);
-    expect(releaseInvitation).toHaveBeenCalledWith(scopedToDefaultTenant(), "inv-1");
+    expect(releaseInvitation).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "inv-1");
     expect(completeAcceptance).not.toHaveBeenCalled();
   });
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
@@ -87,11 +87,11 @@ vi.mock("@/models/grant", () => ({
 }));
 vi.mock("@/lib/project-references", () => ({ dropProjectReferences }));
 const plan = vi.hoisted(() => ({ value: "pro" as "free" | "pro" }));
-vi.mock("@/lib/tenant", () => ({
-  getTenant: async () => ({ _id: "t1", entitlements: { plan: plan.value, features: [] } }),
+vi.mock("@/lib/organisation", () => ({
+  getOrganisation: async () => ({ _id: "t1", entitlements: { plan: plan.value, features: [] } }),
 }));
 
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { DELETE, GET, PUT } = await import("./route");
 
 const OWNER = { _id: "u1", role: "member" };
@@ -158,7 +158,7 @@ describe("DELETE /api/projects/[projectId]", () => {
     const response = await DELETE(request(), ctx());
 
     expect(response.status).toBe(200);
-    expect(projectFindOneAndDelete).toHaveBeenCalledWith({ _id: PROJECT_ID, tenant: DEFAULT_TENANT_ID });
+    expect(projectFindOneAndDelete).toHaveBeenCalledWith({ _id: PROJECT_ID, organisation: DEFAULT_ORGANISATION_ID });
   });
 
   it("denies a plain member from deleting", async () => {
@@ -179,7 +179,7 @@ describe("DELETE /api/projects/[projectId]", () => {
 
     expect(response.status).toBe(200);
     expect(grantDeleteMany).toHaveBeenCalledTimes(1);
-    expect(grantDeleteMany).toHaveBeenCalledWith({ objectType: "project", object: PROJECT_ID, tenant: DEFAULT_TENANT_ID });
+    expect(grantDeleteMany).toHaveBeenCalledWith({ objectType: "project", object: PROJECT_ID, organisation: DEFAULT_ORGANISATION_ID });
   });
 
   it("drops the grants only once the project itself is gone", async () => {
@@ -257,7 +257,7 @@ describe("PUT /api/projects/[projectId] key immutability", () => {
 
     expect(res.status).toBe(200);
     expect(projectFindOneAndUpdate).toHaveBeenCalledWith(
-      { _id: PROJECT_ID, tenant: DEFAULT_TENANT_ID },
+      { _id: PROJECT_ID, organisation: DEFAULT_ORGANISATION_ID },
       expect.objectContaining({ name: "Renamed" }),
       expect.anything()
     );
@@ -311,7 +311,7 @@ describe("PUT /api/projects/[projectId] estimateFieldId", () => {
 
     expect(res.status).toBe(200);
     expect(projectFindOneAndUpdate).toHaveBeenCalledWith(
-      { _id: PROJECT_ID, tenant: DEFAULT_TENANT_ID },
+      { _id: PROJECT_ID, organisation: DEFAULT_ORGANISATION_ID },
       expect.objectContaining({ estimateFieldId: "" }),
       expect.anything()
     );
@@ -322,7 +322,7 @@ describe("PUT /api/projects/[projectId] estimateFieldId", () => {
 
     expect(res.status).toBe(200);
     expect(projectFindOneAndUpdate).toHaveBeenCalledWith(
-      { _id: PROJECT_ID, tenant: DEFAULT_TENANT_ID },
+      { _id: PROJECT_ID, organisation: DEFAULT_ORGANISATION_ID },
       expect.objectContaining({ estimateFieldId: numberFieldId }),
       expect.anything()
     );
@@ -544,7 +544,7 @@ describe("PUT /api/projects/[projectId] worker settings", () => {
     expect(response.status).toBe(200);
     expect(lastUpdate()).toMatchObject({ "worker.enabled": true });
     expect(logInstanceAudit).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       expect.objectContaining({ action: "project_workers_enabled", target: "TP", user: "u1" })
     );
   });
@@ -619,7 +619,7 @@ describe("PUT /api/projects/[projectId] worker settings", () => {
     expect(response.status).toBe(200);
     expect(lastUpdate()).toMatchObject({ "worker.lockedByInstance": true });
     expect(logInstanceAudit).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       expect.objectContaining({ action: "project_workers_locked", target: "TP" })
     );
   });
@@ -641,7 +641,7 @@ describe("PUT /api/projects/[projectId] worker settings", () => {
     await PUT(putRequest({ worker: { lockedByInstance: false } }), ctx());
 
     expect(logInstanceAudit).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       expect.objectContaining({ action: "project_workers_unlocked", target: "TP" })
     );
   });
@@ -916,7 +916,7 @@ describe("PUT /api/projects/[projectId] PM settings", () => {
 
     expect(res.status).toBe(200);
     const [filter, update] = projectFindOneAndUpdate.mock.calls[0];
-    expect(filter).toEqual({ _id: PROJECT_ID, tenant: DEFAULT_TENANT_ID });
+    expect(filter).toEqual({ _id: PROJECT_ID, organisation: DEFAULT_ORGANISATION_ID });
     expect(Object.keys(update).sort()).toEqual([
       "pm.autonomy.dailyReview",
       "pm.autonomy.handleNeedsHumanReview",
@@ -940,7 +940,7 @@ describe("PUT /api/projects/[projectId] PM settings", () => {
     expect(filter).toEqual({
       _id: PROJECT_ID,
       $expr: { $eq: [{ $ifNull: ["$pm.mcpServers", []] }, { $literal: [oauthServer("old")] }] },
-      tenant: DEFAULT_TENANT_ID,
+      organisation: DEFAULT_ORGANISATION_ID,
     });
     expect(update).not.toHaveProperty("pm.lockedByInstance");
     expect(update).not.toHaveProperty("pm");

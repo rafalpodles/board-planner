@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
@@ -40,7 +40,7 @@ vi.mock("@/lib/worker-service", async (importOriginal) => {
   return { ...actual, verifyWorkerCredential };
 });
 
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { GET, PATCH } = await import("./route");
 
 const WORKER_ID = "69a52e3b399b27d3cbb2c5a5";
@@ -178,7 +178,7 @@ describe("PATCH releases a machine from its owner", () => {
     await PATCH(patchRequest({ owner: null }), ctx());
 
     expect(logInstanceAudit).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       expect.objectContaining({ action: "worker_released", target: "rig-laptop" })
     );
   });
@@ -207,7 +207,7 @@ describe("PATCH /api/workers/:workerId", () => {
 
     expect(response.status).toBe(200);
     expect(workerFindOneAndUpdate).toHaveBeenCalledWith(
-      { _id: WORKER_ID, tenant: DEFAULT_TENANT_ID },
+      { _id: WORKER_ID, organisation: DEFAULT_ORGANISATION_ID },
       { $set: { name: "rig", enabled: false } },
       { returnDocument: "after" }
     );
@@ -270,7 +270,7 @@ describe("PATCH /api/workers/:workerId", () => {
 
       expect(response.status).toBe(200);
       expect(workerFindOneAndUpdate).toHaveBeenCalledWith(
-        { _id: WORKER_ID, tenant: DEFAULT_TENANT_ID },
+        { _id: WORKER_ID, organisation: DEFAULT_ORGANISATION_ID },
         { $set: { name: "evilrig" } },
         { returnDocument: "after" }
       );

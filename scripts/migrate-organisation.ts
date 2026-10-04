@@ -2,17 +2,17 @@
  * BP-662: put an existing instance into one named organisation. Run once by hand.
  *
  * Usage (a dry run is the default):
- *   MONGODB_URI=... npx tsx scripts/migrate-tenant.ts --name "Rafał-org"
- *   MONGODB_URI=... npx tsx scripts/migrate-tenant.ts --name "Rafał-org" --apply
+ *   MONGODB_URI=... npx tsx scripts/migrate-organisation.ts --name "Rafał-org"
+ *   MONGODB_URI=... npx tsx scripts/migrate-organisation.ts --name "Rafał-org" --apply
  *
- * The organisation is the instance's existing Tenant row (entitlements kept), re-keyed to the
- * default tenant id and named; every document without a tenant is then given it. Safe to re-run.
+ * The organisation is the instance's existing Organisation row (entitlements kept), re-keyed to the
+ * default organisation id and named; every document without an organisation is then given it. Safe to re-run.
  * Snapshot first: `dump-collections.ts dump ./backups all`.
  */
 
 import mongoose from "mongoose";
 import { resolveUri, dbName } from "./mongo-uri";
-import { backfillTenants, ensureOrganisation } from "../src/lib/tenant-migration";
+import { backfillOrganisations, ensureOrganisation } from "../src/lib/organisation-migration";
 
 const apply = process.argv.includes("--apply");
 const nameArg = process.argv.indexOf("--name");
@@ -32,9 +32,9 @@ async function main() {
   }
 
   console.log(`Organisation "${name}": ${await ensureOrganisation(mongoose.connection, { apply, name })}`);
-  const { total, byCollection } = await backfillTenants(mongoose.connection, { apply });
+  const { total, byCollection } = await backfillOrganisations(mongoose.connection, { apply });
   console.log(JSON.stringify(byCollection, null, 2));
-  console.log(apply ? `Done: ${total} documents given a tenant.` : `Dry run: ${total} documents would be given a tenant.`);
+  console.log(apply ? `Done: ${total} documents given an organisation.` : `Dry run: ${total} documents would be given an organisation.`);
   await mongoose.disconnect();
 }
 

@@ -1,24 +1,24 @@
 import { Types } from "mongoose";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { verifyWorkerCredential, getAuthUser, getTenant, userExists } = vi.hoisted(() => ({
+const { verifyWorkerCredential, getAuthUser, getOrganisation, userExists } = vi.hoisted(() => ({
   userExists: vi.fn(),
   verifyWorkerCredential: vi.fn(),
   getAuthUser: vi.fn(),
-  getTenant: vi.fn(),
+  getOrganisation: vi.fn(),
 }));
 
 vi.mock("./worker-service", () => ({ verifyWorkerCredential }));
-const tenantOfRequest = vi.hoisted(() => vi.fn());
-vi.mock("./tenant-host", () => ({ tenantOfRequest }));
+const organisationOfRequest = vi.hoisted(() => vi.fn());
+vi.mock("./organisation-host", () => ({ organisationOfRequest }));
 vi.mock("./auth", () => ({ getAuthUser }));
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
-vi.mock("./tenant", () => ({ getTenant }));
+vi.mock("./organisation", () => ({ getOrganisation }));
 vi.mock("@/models/user", () => ({ User: { exists: userExists } }));
 
 const { withWorker, withAuth, protocolOf, withEntitlement, refusedOnThisHost } = await import("./middleware");
 const { scoped } = await import("./db-scope");
-const { DEFAULT_TENANT_ID } = await import("./tenant-field");
+const { DEFAULT_ORGANISATION_ID } = await import("./organisation-field");
 
 function request(headers: Record<string, string> = {}): Request {
   return new Request("https://example.com/api/workers/w1/heartbeat", {
@@ -103,7 +103,7 @@ describe("withWorker", () => {
     );
 
     expect(res.status).toBe(401);
-    expect(userExists).toHaveBeenCalledWith({ _id: "u9", deactivatedAt: { $ne: null }, tenant: DEFAULT_TENANT_ID });
+    expect(userExists).toHaveBeenCalledWith({ _id: "u9", deactivatedAt: { $ne: null }, organisation: DEFAULT_ORGANISATION_ID });
     expect(handler).not.toHaveBeenCalled();
   });
 
@@ -163,28 +163,28 @@ describe("withWorker", () => {
 });
 
 beforeEach(() => {
-  tenantOfRequest.mockReset().mockResolvedValue({ kind: "tenant", tenant: DEFAULT_TENANT_ID });
+  organisationOfRequest.mockReset().mockResolvedValue({ kind: "organisation", organisation: DEFAULT_ORGANISATION_ID });
 });
 
 describe("the db a handler is handed (BP-663)", () => {
   const OTHER = "0000000000000000000000b2";
   const onOthersHost = () =>
-    tenantOfRequest.mockResolvedValue({ kind: "tenant", tenant: Types.ObjectId.createFromHexString(OTHER) });
+    organisationOfRequest.mockResolvedValue({ kind: "organisation", organisation: Types.ObjectId.createFromHexString(OTHER) });
 
-  it("withAuth confines it to the signed-in user's tenant", async () => {
+  it("withAuth confines it to the signed-in user's organisation", async () => {
     onOthersHost();
-    getAuthUser.mockResolvedValue({ _id: "u1", tenant: OTHER });
+    getAuthUser.mockResolvedValue({ _id: "u1", organisation: OTHER });
     const handler = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
 
     await withAuth(handler)(request(), { params: paramsOf() });
 
     expect(handler.mock.calls[0][1].db).toBe(scoped(OTHER));
-    expect(handler.mock.calls[0][1].db).not.toBe(scoped(DEFAULT_TENANT_ID));
+    expect(handler.mock.calls[0][1].db).not.toBe(scoped(DEFAULT_ORGANISATION_ID));
   });
 
-  it("withWorker confines it to the machine's tenant", async () => {
+  it("withWorker confines it to the machine's organisation", async () => {
     onOthersHost();
-    verifyWorkerCredential.mockResolvedValue({ _id: "w1", tenant: OTHER, credentialHash: "hash" });
+    verifyWorkerCredential.mockResolvedValue({ _id: "w1", organisation: OTHER, credentialHash: "hash" });
     userExists.mockResolvedValue(null);
     const handler = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
 
@@ -196,11 +196,11 @@ describe("the db a handler is handed (BP-663)", () => {
   });
 });
 
-describe("a credential on another tenant's host (BP-666)", () => {
+describe("a credential on another organisation's host (BP-666)", () => {
   const OTHER = "0000000000000000000000b2";
 
   it("is refused like no credential, and the handler never runs", async () => {
-    getAuthUser.mockResolvedValue({ _id: "u1", tenant: OTHER });
+    getAuthUser.mockResolvedValue({ _id: "u1", organisation: OTHER });
     const handler = vi.fn();
 
     const res = await withAuth(handler)(request(), { params: paramsOf() });
@@ -210,7 +210,7 @@ describe("a credential on another tenant's host (BP-666)", () => {
   });
 
   it("refuses a machine credential the same way", async () => {
-    verifyWorkerCredential.mockResolvedValue({ _id: "w1", tenant: OTHER, credentialHash: "hash" });
+    verifyWorkerCredential.mockResolvedValue({ _id: "w1", organisation: OTHER, credentialHash: "hash" });
     const handler = vi.fn();
 
     const res = await withWorker(handler)(request({ authorization: "Bearer cpw_x", "x-worker-id": "w1" }), {
@@ -221,8 +221,8 @@ describe("a credential on another tenant's host (BP-666)", () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
-  it("answers 404 on a host that names no tenant, before anything else", async () => {
-    tenantOfRequest.mockResolvedValue({ kind: "none" });
+  it("answers 404 on a host that names no organisation, before anything else", async () => {
+    organisationOfRequest.mockResolvedValue({ kind: "none" });
     getAuthUser.mockResolvedValue({ _id: "u1" });
     const handler = vi.fn();
 
@@ -232,18 +232,18 @@ describe("a credential on another tenant's host (BP-666)", () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
-  it("answers 503, not 500, when the host's tenant cannot be read for a database outage", async () => {
+  it("answers 503, not 500, when the host's organisation cannot be read for a database outage", async () => {
     const { DatabaseUnavailableError } = await import("./db-errors");
-    tenantOfRequest.mockRejectedValue(new DatabaseUnavailableError(new Error("down")));
+    organisationOfRequest.mockRejectedValue(new DatabaseUnavailableError(new Error("down")));
     getAuthUser.mockResolvedValue({ _id: "u1" });
 
-    const res = await refusedOnThisHost(request(), { tenant: null });
+    const res = await refusedOnThisHost(request(), { organisation: null });
 
     expect(res?.status).toBe(503);
   });
 
   it("answers 404 on the platform host too", async () => {
-    tenantOfRequest.mockResolvedValue({ kind: "platform" });
+    organisationOfRequest.mockResolvedValue({ kind: "platform" });
     getAuthUser.mockResolvedValue({ _id: "u1" });
 
     expect((await withAuth(vi.fn())(request(), { params: paramsOf() })).status).toBe(404);
@@ -259,12 +259,12 @@ describe("withEntitlement", () => {
 
   beforeEach(() => {
     getAuthUser.mockReset();
-    getTenant.mockReset();
+    getOrganisation.mockReset();
     getAuthUser.mockResolvedValue(USER);
   });
 
-  it("answers 402 with the feature and plan for a tenant that lacks it", async () => {
-    getTenant.mockResolvedValue({ entitlements: { plan: "free", features: [] } });
+  it("answers 402 with the feature and plan for an organisation that lacks it", async () => {
+    getOrganisation.mockResolvedValue({ entitlements: { plan: "free", features: [] } });
     const handler = vi.fn();
 
     const res = await withEntitlement("integrations.coda")(handler)(entitlementsRequest(), {
@@ -278,8 +278,8 @@ describe("withEntitlement", () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
-  it("passes through to the handler for a tenant that has the feature", async () => {
-    getTenant.mockResolvedValue({ entitlements: { plan: "pro", features: [] } });
+  it("passes through to the handler for an organisation that has the feature", async () => {
+    getOrganisation.mockResolvedValue({ entitlements: { plan: "pro", features: [] } });
     const handler = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
 
     const res = await withEntitlement("integrations.coda")(handler)(entitlementsRequest(), {
@@ -299,7 +299,7 @@ describe("withEntitlement", () => {
     });
 
     expect(res.status).toBe(401);
-    expect(getTenant).not.toHaveBeenCalled();
+    expect(getOrganisation).not.toHaveBeenCalled();
     expect(handler).not.toHaveBeenCalled();
   });
 });

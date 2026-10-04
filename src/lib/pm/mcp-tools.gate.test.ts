@@ -22,9 +22,9 @@ class McpHttpError extends Error {
 vi.mock("./mcp-client", () => ({ McpClient: McpClientMock, McpHttpError }));
 
 const { discoverMcpTools, callMcpTool } = await import("./mcp-tools");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
-const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
-const db = scopedToDefaultTenant();
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
+const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
+const db = scopedToDefaultOrganisation();
 
 type Tool = { name: string; description?: string; annotations?: { readOnlyHint?: boolean } };
 
@@ -147,7 +147,7 @@ describe("discoverMcpTools — an OAuth server's token", () => {
 
     expect(refreshTokens).toHaveBeenCalledWith(expect.objectContaining({ refreshToken: "the-refresh", resource: "https://acme.example/mcp" }));
     const [filter, update] = updateOne.mock.calls[0];
-    expect(filter).toEqual({ _id: "p1", tenant: DEFAULT_TENANT_ID, "pm.mcpServers": { $elemMatch: { name: "acme", url: "https://acme.example/mcp", "oauth.clientId": "client-1" } } });
+    expect(filter).toEqual({ _id: "p1", organisation: DEFAULT_ORGANISATION_ID, "pm.mcpServers": { $elemMatch: { name: "acme", url: "https://acme.example/mcp", "oauth.clientId": "client-1" } } });
     // The expiry too: without it every later turn would refresh again
     expect(update.$set).toEqual({
       "pm.mcpServers.$.oauth.accessToken": "enc:new-access",
@@ -167,7 +167,7 @@ describe("discoverMcpTools — an OAuth server's token", () => {
     const [filter] = updateOne.mock.calls[0];
     const storedWith = (clientId: string, url = "https://acme.example/mcp") => ({
       _id: "p1",
-      tenant: DEFAULT_TENANT_ID,
+      organisation: DEFAULT_ORGANISATION_ID,
       pm: {
         mcpServers: [
           { name: "other" },
@@ -188,7 +188,7 @@ describe("discoverMcpTools — an OAuth server's token", () => {
     const [filter] = updateOne.mock.calls[0];
     const storedAt = (url: string) => ({
       _id: "p1",
-      tenant: DEFAULT_TENANT_ID,
+      organisation: DEFAULT_ORGANISATION_ID,
       pm: { mcpServers: [{ name: "acme", url, oauth: { clientId: "client-1", status: "connected" } }] },
     });
     expect(sift(filter)(storedAt("https://acme.example/mcp"))).toBe(true);
@@ -217,7 +217,7 @@ describe("discoverMcpTools — an OAuth server's token", () => {
     const runtime = await discoverMcpTools(db, "p1", [oauthServer({})]);
 
     expect(updateOne).toHaveBeenCalledWith(
-      { _id: "p1", tenant: DEFAULT_TENANT_ID, "pm.mcpServers": { $elemMatch: { name: "acme", url: "https://acme.example/mcp", "oauth.clientId": "client-1" } } },
+      { _id: "p1", organisation: DEFAULT_ORGANISATION_ID, "pm.mcpServers": { $elemMatch: { name: "acme", url: "https://acme.example/mcp", "oauth.clientId": "client-1" } } },
       { $set: { "pm.mcpServers.$.oauth.status": "needs_reauth" } }
     );
     expect(McpClientMock).not.toHaveBeenCalled();
@@ -229,7 +229,7 @@ describe("discoverMcpTools — an OAuth server's token", () => {
 
     expect(refreshTokens).not.toHaveBeenCalled();
     expect(updateOne).toHaveBeenCalledWith(
-      { _id: "p1", tenant: DEFAULT_TENANT_ID, "pm.mcpServers": { $elemMatch: { name: "acme", url: "https://acme.example/mcp", "oauth.clientId": "client-1" } } },
+      { _id: "p1", organisation: DEFAULT_ORGANISATION_ID, "pm.mcpServers": { $elemMatch: { name: "acme", url: "https://acme.example/mcp", "oauth.clientId": "client-1" } } },
       { $set: { "pm.mcpServers.$.oauth.status": "needs_reauth" } }
     );
   });
@@ -288,7 +288,7 @@ describe("discoverMcpTools — a 401 despite a stored expiry that still looked f
     expect(refreshTokens).not.toHaveBeenCalled();
     expect(updateOne).toHaveBeenCalledTimes(1);
     expect(updateOne).toHaveBeenCalledWith(
-      { _id: "p1", tenant: DEFAULT_TENANT_ID, "pm.mcpServers": { $elemMatch: { name: "acme", url: "https://acme.example/mcp", "oauth.clientId": "client-1" } } },
+      { _id: "p1", organisation: DEFAULT_ORGANISATION_ID, "pm.mcpServers": { $elemMatch: { name: "acme", url: "https://acme.example/mcp", "oauth.clientId": "client-1" } } },
       { $set: { "pm.mcpServers.$.oauth.status": "needs_reauth" } }
     );
     expect(runtime.serverNames).toEqual([]);

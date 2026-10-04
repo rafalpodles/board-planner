@@ -1,10 +1,10 @@
-import { forEachServedTenant } from "@/lib/tenant-jobs";
+import { forEachServedOrganisation } from "@/lib/organisation-jobs";
 import type { Types } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { APP_NAME } from "@/lib/brand";
 import { isEmailConfigured, sendEmail } from "@/lib/email";
 import { renderEmail } from "@/lib/email-template";
-import { originFor } from "@/lib/tenant-host";
+import { originFor } from "@/lib/organisation-host";
 import { dayKeyInTimezone, hourInTimezone, isValidTimezone } from "@/lib/time";
 import { projectPath, taskPath } from "@/lib/urls";
 import { resolveChannels, wantsMailSomewhere, PrefsSource } from "@/lib/notification-prefs";
@@ -37,9 +37,9 @@ export function dueDigestDay(now: Date, timezone = digestTimezone(), hour = dige
   return hourInTimezone(now, timezone) >= hour ? dayKeyInTimezone(now, timezone) : null;
 }
 
-export function tenantDigestClock(tenant: { digestHour?: number; timezone?: string }): { hour: number; timezone: string } {
-  const hour = Number.isInteger(tenant.digestHour) && tenant.digestHour! >= 0 && tenant.digestHour! <= 23 ? tenant.digestHour! : digestHour();
-  const timezone = tenant.timezone && isValidTimezone(tenant.timezone) ? tenant.timezone : digestTimezone();
+export function organisationDigestClock(organisation: { digestHour?: number; timezone?: string }): { hour: number; timezone: string } {
+  const hour = Number.isInteger(organisation.digestHour) && organisation.digestHour! >= 0 && organisation.digestHour! <= 23 ? organisation.digestHour! : digestHour();
+  const timezone = organisation.timezone && isValidTimezone(organisation.timezone) ? organisation.timezone : digestTimezone();
   return { hour, timezone };
 }
 
@@ -310,8 +310,8 @@ async function digestFailed(
 export async function digestTick(now = new Date()): Promise<number> {
   if (!isEmailConfigured()) return 0;
   let sent = 0;
-  await forEachServedTenant("Digest", async (db, tenant) => {
-    const { hour, timezone } = tenantDigestClock(tenant);
+  await forEachServedOrganisation("Digest", async (db, organisation) => {
+    const { hour, timezone } = organisationDigestClock(organisation);
     const day = dueDigestDay(now, timezone, hour);
     if (day) sent += await digestTickFor(db, now, day);
   });

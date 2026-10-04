@@ -3,7 +3,7 @@ import { isAllowedMcpServerUrl } from "@/lib/url-validation";
 import { safeFetch, readBoundedJson, MAX_RESPONSE_BYTES, readBoundedText } from "@/lib/safe-fetch";
 import type { Types } from "mongoose";
 import { ORIGIN_REQUIRED } from "@/lib/session";
-import { tenantOrigin } from "@/lib/tenant-host";
+import { organisationOrigin } from "@/lib/organisation-host";
 
 // Mirrors the carve-out isAllowedMcpServerUrl makes for local MCP servers outside production
 const MCP_DESTINATION = { allowLoopback: process.env.NODE_ENV !== "production" };
@@ -297,8 +297,8 @@ export function refreshTokens(opts: {
  * that server and must be stable, so it comes from configuration — never from the request that
  * happens to be starting the flow.
  */
-export async function getPmOauthRedirectUri(tenant: Types.ObjectId): Promise<string> {
-  const base = await tenantOrigin(tenant);
+export async function getPmOauthRedirectUri(organisation: Types.ObjectId): Promise<string> {
+  const base = await organisationOrigin(organisation);
   if (!base) throw new Error(ORIGIN_REQUIRED);
   return `${base}/api/pm/oauth/callback`;
 }

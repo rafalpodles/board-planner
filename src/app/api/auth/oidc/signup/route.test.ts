@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const heldSignUp = vi.fn();
 const spendAcceptance = vi.fn();
@@ -39,7 +39,7 @@ vi.mock("@/models/user", () => ({ User: { create: userCreate, deleteOne: userDel
 vi.mock("@/models/identity", () => ({ Identity: { create: identityCreate } }));
 
 const { GET, POST } = await import("./route");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { resetRateLimits } = await import("@/lib/rate-limit");
 
 const HELD = {
@@ -90,14 +90,14 @@ describe("POST /api/auth/oidc/signup", () => {
       email: "grace@corp.example",
       emailVerifiedAt: expect.any(Date),
       role: "member",
-      tenant: DEFAULT_TENANT_ID,
+      organisation: DEFAULT_ORGANISATION_ID,
     });
     expect(identityCreate).toHaveBeenCalledWith(
       expect.objectContaining({ user: "u9", provider: "oidc", issuer: "https://id.example.com", subject: "s9" })
     );
-    expect(spendAcceptance).toHaveBeenCalledWith(scopedToDefaultTenant(), "cpo_join");
-    expect(revokePendingInvitationsFor).toHaveBeenCalledWith(scopedToDefaultTenant(), "grace@corp.example");
-    expect(logInstanceAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), expect.objectContaining({ action: "user_created", target: "grace" }));
+    expect(spendAcceptance).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "cpo_join");
+    expect(revokePendingInvitationsFor).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "grace@corp.example");
+    expect(logInstanceAudit).toHaveBeenCalledWith(scopedToDefaultOrganisation(), expect.objectContaining({ action: "user_created", target: "grace" }));
     expect(createSession).toHaveBeenCalledWith(expect.objectContaining({ userId: "u9" }));
     const cookies = res.headers.get("set-cookie") ?? "";
     expect(cookies).toContain("session=cps_new");
@@ -109,7 +109,7 @@ describe("POST /api/auth/oidc/signup", () => {
 
     await post();
 
-    expect(applyAdminGroup).toHaveBeenCalledWith(scopedToDefaultTenant(), GRACE, "oidc", ["staff"]);
+    expect(applyAdminGroup).toHaveBeenCalledWith(scopedToDefaultOrganisation(), GRACE, "oidc", ["staff"]);
   });
 
   it("refuses once the domain is no longer open, making nothing", async () => {
@@ -118,7 +118,7 @@ describe("POST /api/auth/oidc/signup", () => {
     const res = await post();
 
     expect(res.status).toBe(403);
-    expect(signUpOpenTo).toHaveBeenCalledWith((await import("@/lib/db-scope")).scopedToDefaultTenant(), "grace@corp.example");
+    expect(signUpOpenTo).toHaveBeenCalledWith((await import("@/lib/db-scope")).scopedToDefaultOrganisation(), "grace@corp.example");
     expect(userCreate).not.toHaveBeenCalled();
     expect(createSession).not.toHaveBeenCalled();
   });
@@ -171,7 +171,7 @@ describe("POST /api/auth/oidc/signup", () => {
     const res = await post();
 
     expect(res.status).toBe(409);
-    expect(userDeleteOne).toHaveBeenCalledWith({ _id: "u9", tenant: DEFAULT_TENANT_ID });
+    expect(userDeleteOne).toHaveBeenCalledWith({ _id: "u9", organisation: DEFAULT_ORGANISATION_ID });
     expect(createSession).not.toHaveBeenCalled();
   });
 

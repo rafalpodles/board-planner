@@ -25,8 +25,8 @@ export interface EntitlementGate {
   };
 }
 
-export function can(tenant: EntitlementGate, feature: FeatureKey): boolean {
-  const { entitlements } = tenant;
+export function can(organisation: EntitlementGate, feature: FeatureKey): boolean {
+  const { entitlements } = organisation;
 
   if (entitlements.expiresAt && Date.now() > entitlements.expiresAt.getTime() + ENTITLEMENT_GRACE_MS) {
     return false;

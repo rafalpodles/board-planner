@@ -4,7 +4,7 @@ import { readJsonBody } from "@/lib/request-body";
 import { withProjectOwner } from "@/lib/middleware";
 import { isValidEmail, normaliseEmail } from "@/lib/email";
 import { isRateLimited, recordFailedAttempt } from "@/lib/rate-limit";
-import { originFor } from "@/lib/tenant-host";
+import { originFor } from "@/lib/organisation-host";
 import { inviteToBoard, recordDelivery } from "@/lib/invitations";
 import { deliverTo, INTERACTIVE_ONLY, NO_ORIGIN_ERROR } from "@/lib/invitation-mail";
 import { logInstanceAudit } from "@/lib/instanceAudit";

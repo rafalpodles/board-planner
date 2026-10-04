@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { scopedToDefaultTenant } from "@/lib/db-scope";
+import { scopedToDefaultOrganisation } from "@/lib/db-scope";
 
 let thread: { _id: string }[] = [];
 
@@ -8,7 +8,7 @@ vi.mock("@/lib/middleware", () => ({
   withProjectAccess:
     (handler: (...a: unknown[]) => unknown) =>
     (request: Request, ctx: { params: Promise<{ projectId: string }> }) =>
-      handler(request, { ...ctx, user: { _id: "u1", role: "member" }, db: scopedToDefaultTenant() }),
+      handler(request, { ...ctx, user: { _id: "u1", role: "member" }, db: scopedToDefaultOrganisation() }),
 }));
 vi.mock("@/lib/pm/thread", () => ({ pmThreadFilter: () => ({}) }));
 vi.mock("@/lib/pm/abandoned", () => ({ finalizeAbandonedTurns: vi.fn() }));

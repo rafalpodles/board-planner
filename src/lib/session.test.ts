@@ -431,17 +431,17 @@ describe("provenance", () => {
 });
 
 describe("createSession", () => {
-  const TENANT = new Types.ObjectId("0000000000000000000000b2");
+  const ORGANISATION = new Types.ObjectId("0000000000000000000000b2");
 
-  it("stores the session in the signed-in person's tenant", async () => {
-    await createSession({ userId: "user-1", tenant: TENANT });
+  it("stores the session in the signed-in person's organisation", async () => {
+    await createSession({ userId: "user-1", organisation: ORGANISATION });
 
-    expect(create.mock.calls[0][0].tenant).toBe(TENANT);
+    expect(create.mock.calls[0][0].organisation).toBe(ORGANISATION);
   });
 
   it("mints a cps_ token, stores only its hash and caps the row at 90 days", async () => {
     const before = Date.now();
-    const created = await createSession({ userId: "user-1", tenant: TENANT, userAgent: "UA", ip: "1.2.3.4" });
+    const created = await createSession({ userId: "user-1", organisation: ORGANISATION, userAgent: "UA", ip: "1.2.3.4" });
 
     expect(created.token).toMatch(/^cps_[0-9a-f]{64}$/);
     const doc = create.mock.calls[0][0];
@@ -455,7 +455,7 @@ describe("createSession", () => {
   // BP-831. Every session is a sign-in, so this is where the Users screen's last sign-in comes from
   it("stamps the account's last sign-in", async () => {
     const before = Date.now();
-    await createSession({ userId: "user-1", tenant: TENANT });
+    await createSession({ userId: "user-1", organisation: ORGANISATION });
 
     expect(userUpdateOne).toHaveBeenCalledWith({ _id: "user-1" }, { $set: { lastSignInAt: expect.any(Date) } });
     const stamped = (userUpdateOne.mock.calls[0][1] as { $set: { lastSignInAt: Date } }).$set.lastSignInAt;
@@ -465,7 +465,7 @@ describe("createSession", () => {
   it("signs in even when the stamp cannot be written", async () => {
     userUpdateOne.mockRejectedValueOnce(new Error("db down"));
 
-    await expect(createSession({ userId: "user-1", tenant: TENANT })).resolves.toMatchObject({ token: expect.any(String) });
+    await expect(createSession({ userId: "user-1", organisation: ORGANISATION })).resolves.toMatchObject({ token: expect.any(String) });
   });
 });
 

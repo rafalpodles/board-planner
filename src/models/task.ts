@@ -1,6 +1,6 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { ITask, PRIORITIES, DEFAULT_PRIORITY, RECURRENCE_FREQUENCIES, TASK_DECISION_STATES } from "@/types";
-import { withTenant } from "@/lib/tenant-field";
+import { withOrganisation } from "@/lib/organisation-field";
 
 const taskSchema = new Schema<ITask>(
   {
@@ -256,7 +256,7 @@ taskSchema.index({ recurringParentId: 1 });
 // `task`. Holds while `parent_of` stays the epic relation.
 taskSchema.index({ project: 1, "relations.type": 1 });
 
-withTenant(taskSchema);
+withOrganisation(taskSchema);
 
 export const Task: Model<ITask> =
   mongoose.models.Task || mongoose.model<ITask>("Task", taskSchema);

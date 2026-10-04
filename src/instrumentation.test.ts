@@ -34,14 +34,14 @@ const startPmScheduler = vi.fn();
 const startGithubSyncScheduler = vi.fn(() => ({ started: true as const, tickMs: 300_000 }));
 const startDigestScheduler = vi.fn(() => ({ started: true as const, tickMs: 300_000 }));
 
-const backfillTenants = vi.fn((): Promise<unknown> => Promise.resolve({ total: 0, byCollection: {} }));
-vi.mock("@/lib/tenant-migration", () => ({ backfillTenants }));
-vi.mock("@/lib/tenant-jobs", async () => {
+const backfillOrganisations = vi.fn((): Promise<unknown> => Promise.resolve({ total: 0, byCollection: {} }));
+vi.mock("@/lib/organisation-migration", () => ({ backfillOrganisations }));
+vi.mock("@/lib/organisation-jobs", async () => {
   const { scoped } = await import("@/lib/db-scope");
-  const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
+  const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
   return {
-    forEachServedTenant: async (_job: string, work: (db: unknown, tenant: unknown) => Promise<void>) =>
-      work(scoped(DEFAULT_TENANT_ID), { _id: DEFAULT_TENANT_ID }),
+    forEachServedOrganisation: async (_job: string, work: (db: unknown, organisation: unknown) => Promise<void>) =>
+      work(scoped(DEFAULT_ORGANISATION_ID), { _id: DEFAULT_ORGANISATION_ID }),
   };
 });
 vi.mock("@/models/project", () => ({ Project: { updateMany } }));
@@ -192,10 +192,10 @@ describe("register", () => {
     expect(logged).toHaveBeenCalledWith(expect.stringContaining("PASSWORD_SIGN_IN=off needs a sign-in provider"));
   });
 
-  it("exits on a TENANT_DOMAIN that is not a bare domain (BP-666)", async () => {
+  it("exits on a ORGANISATION_DOMAIN that is not a bare domain (BP-666)", async () => {
     process.env.NEXT_RUNTIME = "nodejs";
     delete process.env.ENCRYPTION_KEY;
-    process.env.TENANT_DOMAIN = "https://board-planner.com";
+    process.env.ORGANISATION_DOMAIN = "https://board-planner.com";
     vi.spyOn(console, "log").mockImplementation(() => {});
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
@@ -204,7 +204,7 @@ describe("register", () => {
     const { register } = await import("./instrumentation");
 
     await expect(register()).rejects.toThrow("exit:1");
-    expect(logged).toHaveBeenCalledWith(expect.stringContaining("TENANT_DOMAIN must be a bare domain"));
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining("ORGANISATION_DOMAIN must be a bare domain"));
   });
 
   it("starts normally when no key is configured at all", async () => {
@@ -338,12 +338,12 @@ describe("register — a database that is down at boot", () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     connectDB.mockImplementation(() => Promise.resolve());
-    backfillTenants.mockReset().mockResolvedValue({ total: 3, byCollection: { tasks: 3 } });
+    backfillOrganisations.mockReset().mockResolvedValue({ total: 3, byCollection: { tasks: 3 } });
     const { register } = await import("./instrumentation");
 
     await register();
 
-    expect(backfillTenants).toHaveBeenCalledWith(expect.anything(), { apply: false });
+    expect(backfillOrganisations).toHaveBeenCalledWith(expect.anything(), { apply: false });
     expect(error).toHaveBeenCalledWith(expect.stringContaining("WARNING: 3 row(s) belong to no organisation"));
     expect(startPmScheduler).toHaveBeenCalledTimes(1);
   });
@@ -354,7 +354,7 @@ describe("register — a database that is down at boot", () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     connectDB.mockImplementation(() => Promise.resolve());
-    backfillTenants.mockReset().mockRejectedValueOnce(new Error("listCollections failed"));
+    backfillOrganisations.mockReset().mockRejectedValueOnce(new Error("listCollections failed"));
     const { register } = await import("./instrumentation");
 
     await register();

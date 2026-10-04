@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const create = vi.fn();
 const findOne = vi.fn();
@@ -17,7 +17,7 @@ vi.mock("@/lib/agent-service", () => ({ toApiRun: (run: unknown) => run }));
 let callingWorker: string | undefined;
 
 vi.mock("@/lib/middleware", async () => {
-  const { scopedToDefaultTenant } = await vi.importActual<typeof import("@/lib/db-scope")>("@/lib/db-scope");
+  const { scopedToDefaultOrganisation } = await vi.importActual<typeof import("@/lib/db-scope")>("@/lib/db-scope");
   return {
     withProjectAccessOrWorker:
       (handler: (req: Request, ctx: unknown) => Promise<Response>, options?: unknown) => {
@@ -27,7 +27,7 @@ vi.mock("@/lib/middleware", async () => {
             ...(ctx as object),
             user: { _id: "u1", viaMachineCredential: false },
             workerId: callingWorker,
-            db: scopedToDefaultTenant(),
+            db: scopedToDefaultOrganisation(),
           });
       },
   };
@@ -145,7 +145,7 @@ describe("POST .../runs keeps one record per run", () => {
 
     expect(res.status).toBe(200);
     // The machine is part of the key: one naming another's run must not stand in for its record
-    expect(findOne).toHaveBeenCalledWith({ task: TASK_ID, runId: RUN_ID, worker: WORKER_ID, tenant: DEFAULT_TENANT_ID });
+    expect(findOne).toHaveBeenCalledWith({ task: TASK_ID, runId: RUN_ID, worker: WORKER_ID, organisation: DEFAULT_ORGANISATION_ID });
     expect(create).not.toHaveBeenCalled();
   });
 

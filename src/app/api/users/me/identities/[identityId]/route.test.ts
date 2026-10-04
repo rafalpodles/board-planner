@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const identityFindOne = vi.fn();
 const identityCount = vi.fn();
@@ -16,7 +16,7 @@ vi.mock("@/lib/middleware", () => ({
   withAuth:
     (handler: (r: Request, c: unknown) => unknown) =>
     (request: Request, ctx: { params: Promise<Record<string, string>> }) =>
-      handler(request, { params: ctx.params, user: caller, db: scopedToDefaultTenant() }),
+      handler(request, { params: ctx.params, user: caller, db: scopedToDefaultOrganisation() }),
 }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 const LIVE = { $or: [{ provider: "oidc", issuer: { $in: ["https://id.example.com", "https://id.example.com/"] } }] };
@@ -36,7 +36,7 @@ vi.mock("@/models/identity", () => ({
 vi.mock("@/models/user", () => ({ User: { findOne: userFindOne } }));
 
 const { DELETE } = await import("./route");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 
 const ID = "64b0000000000000000000aa";
 const unlink = () =>
@@ -77,7 +77,7 @@ describe("DELETE /api/users/me/identities/:id", () => {
     const res = await unlink();
 
     expect(res.status).toBe(200);
-    expect(identityExists).toHaveBeenCalledWith({ _id: ID, ...LIVE, tenant: DEFAULT_TENANT_ID });
+    expect(identityExists).toHaveBeenCalledWith({ _id: ID, ...LIVE, organisation: DEFAULT_ORGANISATION_ID });
     expect(identityDelete).toHaveBeenCalled();
     expect(identityInsert).not.toHaveBeenCalled();
   });
@@ -86,9 +86,9 @@ describe("DELETE /api/users/me/identities/:id", () => {
     const res = await unlink();
 
     expect(res.status).toBe(200);
-    expect(identityFindOne).toHaveBeenCalledWith({ _id: ID, user: "u1", tenant: DEFAULT_TENANT_ID });
-    expect(identityDelete).toHaveBeenCalledWith({ _id: ID, user: "u1", tenant: DEFAULT_TENANT_ID });
-    expect(logInstanceAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), expect.objectContaining({ action: "identity_unlinked" }));
+    expect(identityFindOne).toHaveBeenCalledWith({ _id: ID, user: "u1", organisation: DEFAULT_ORGANISATION_ID });
+    expect(identityDelete).toHaveBeenCalledWith({ _id: ID, user: "u1", organisation: DEFAULT_ORGANISATION_ID });
+    expect(logInstanceAudit).toHaveBeenCalledWith(scopedToDefaultOrganisation(), expect.objectContaining({ action: "identity_unlinked" }));
   });
 
   it("refuses to unlink the only way in, and says how to make another", async () => {
@@ -98,7 +98,7 @@ describe("DELETE /api/users/me/identities/:id", () => {
 
     expect(res.status).toBe(409);
     expect((await res.json()).error).toContain("Forgot your password");
-    expect(identityCount).toHaveBeenCalledWith({ user: "u1", _id: { $ne: ID }, ...LIVE, tenant: DEFAULT_TENANT_ID });
+    expect(identityCount).toHaveBeenCalledWith({ user: "u1", _id: { $ne: ID }, ...LIVE, organisation: DEFAULT_ORGANISATION_ID });
     expect(identityDelete).not.toHaveBeenCalled();
   });
 
@@ -125,24 +125,24 @@ describe("DELETE /api/users/me/identities/:id", () => {
     const res = await unlink();
 
     expect(res.status).toBe(409);
-    expect(identityCount).toHaveBeenLastCalledWith({ user: "u1", ...LIVE, tenant: DEFAULT_TENANT_ID });
+    expect(identityCount).toHaveBeenLastCalledWith({ user: "u1", ...LIVE, organisation: DEFAULT_ORGANISATION_ID });
     expect(identityInsert).toHaveBeenCalledWith(expect.objectContaining({ _id: ID, provider: "oidc" }));
   });
 
-  it("gives the restored row a tenant when the row it read had none, and keeps the one it had", async () => {
+  it("gives the restored row an organisation when the row it read had none, and keeps the one it had", async () => {
     passwordIs(undefined);
 
     identityCount.mockResolvedValueOnce(1).mockResolvedValueOnce(0);
     await unlink();
     expect(identityInsert).toHaveBeenLastCalledWith(
-      expect.objectContaining({ tenant: DEFAULT_TENANT_ID })
+      expect.objectContaining({ organisation: DEFAULT_ORGANISATION_ID })
     );
 
-    const own = { _id: ID, provider: "oidc", tenant: "someone-elses" };
+    const own = { _id: ID, provider: "oidc", organisation: "someone-elses" };
     identityFindOne.mockReturnValue(lean(own));
     identityCount.mockResolvedValueOnce(1).mockResolvedValueOnce(0);
     await unlink();
-    expect(identityInsert).toHaveBeenLastCalledWith(expect.objectContaining({ tenant: "someone-elses" }));
+    expect(identityInsert).toHaveBeenLastCalledWith(expect.objectContaining({ organisation: "someone-elses" }));
   });
 
   it("asks an account with a password for no recent sign-in: the password stays a way in", async () => {

@@ -16,8 +16,8 @@ vi.mock("@/lib/task-service", async (importOriginal) => ({
 }));
 
 const { PM_TOOLS } = await import("./tools");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
-const db = scopedToDefaultTenant();
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
+const db = scopedToDefaultOrganisation();
 
 const ctx = {
   projectId: "p1",

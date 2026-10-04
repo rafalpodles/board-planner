@@ -1,6 +1,6 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { IComment } from "@/types";
-import { withTenant } from "@/lib/tenant-field";
+import { withOrganisation } from "@/lib/organisation-field";
 
 const reactionSchema = new Schema(
   {
@@ -39,7 +39,7 @@ const commentSchema = new Schema<IComment>(
 
 commentSchema.index({ task: 1, createdAt: 1 });
 
-withTenant(commentSchema);
+withOrganisation(commentSchema);
 
 export const Comment: Model<IComment> =
   mongoose.models.Comment ||

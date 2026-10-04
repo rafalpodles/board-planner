@@ -3,7 +3,7 @@ import { metadataCorsOptionsRequestHandler } from "mcp-handler";
 import { ORIGIN_REQUIRED } from "@/lib/session";
 import { scopedForRequest } from "@/lib/db-scope";
 import { hostNotFound } from "@/lib/middleware";
-import { originFor } from "@/lib/tenant-host";
+import { originFor } from "@/lib/organisation-host";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

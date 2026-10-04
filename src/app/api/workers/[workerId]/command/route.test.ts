@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
@@ -103,7 +103,7 @@ describe("POST /api/workers/:workerId/command", () => {
 
     expect(response.status).toBe(200);
     expect(workerFindOneAndUpdate).toHaveBeenCalledWith(
-      { _id: WORKER_ID, tenant: DEFAULT_TENANT_ID },
+      { _id: WORKER_ID, organisation: DEFAULT_ORGANISATION_ID },
       { $set: { command: "pause", commandIssuedAt: expect.any(Date), commandAckedAt: null } },
       { returnDocument: "after" }
     );

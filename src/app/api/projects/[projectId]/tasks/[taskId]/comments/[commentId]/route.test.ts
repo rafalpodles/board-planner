@@ -11,12 +11,12 @@ vi.mock("@/models/comment", () => ({
   Comment: { findOne: commentFindOne },
 }));
 vi.mock("@/lib/middleware", async () => {
-  const { scopedToDefaultTenant } = await vi.importActual<typeof import("@/lib/db-scope")>("@/lib/db-scope");
+  const { scopedToDefaultOrganisation } = await vi.importActual<typeof import("@/lib/db-scope")>("@/lib/db-scope");
   return {
     withProjectAccess:
       (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
       (req: Request, ctx: unknown) =>
-        handler(req, { ...(ctx as object), user: { _id: "author1" }, db: scopedToDefaultTenant() }),
+        handler(req, { ...(ctx as object), user: { _id: "author1" }, db: scopedToDefaultOrganisation() }),
   };
 });
 

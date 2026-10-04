@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const consumeResetToken = vi.fn();
 const invalidateResetTokens = vi.fn();
@@ -33,7 +33,7 @@ vi.mock("@/models/user", () => ({
 }));
 
 const { POST } = await import("./route");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { resetRateLimits, lockoutKey, recordFailedAttempt, isRateLimited, ANONYMOUS_ACCOUNT_ATTEMPTS } =
   await import("@/lib/rate-limit");
 
@@ -64,8 +64,8 @@ describe("POST /api/auth/reset", () => {
   // I reset it" ends in the correct new password being refused, and a link that was just spent
   // looking broken. A reset is the answer to being locked out, so it has to lift the lockout.
   it("lifts a login lockout, including one filled from an address the resetter never used", async () => {
-    const fromSomebodyElse = lockoutKey(DEFAULT_TENANT_ID, "203.0.113.9", "owner");
-    const shared = lockoutKey(DEFAULT_TENANT_ID, "-", "owner");
+    const fromSomebodyElse = lockoutKey(DEFAULT_ORGANISATION_ID, "203.0.113.9", "owner");
+    const shared = lockoutKey(DEFAULT_ORGANISATION_ID, "-", "owner");
     for (let i = 0; i < ANONYMOUS_ACCOUNT_ATTEMPTS; i++) {
       await recordFailedAttempt(fromSomebodyElse);
       await recordFailedAttempt(shared);
@@ -79,7 +79,7 @@ describe("POST /api/auth/reset", () => {
   });
 
   it("leaves another account's lockout in place", async () => {
-    const somebodyElse = lockoutKey(DEFAULT_TENANT_ID, "-", "different-person");
+    const somebodyElse = lockoutKey(DEFAULT_ORGANISATION_ID, "-", "different-person");
     for (let i = 0; i < ANONYMOUS_ACCOUNT_ATTEMPTS; i++) await recordFailedAttempt(somebodyElse);
 
     await POST(post());
@@ -89,7 +89,7 @@ describe("POST /api/auth/reset", () => {
 
   it("does not lift a lockout when the token was refused", async () => {
     consumeResetToken.mockResolvedValue({ ok: false, reason: "expired" });
-    const shared = lockoutKey(DEFAULT_TENANT_ID, "-", "owner");
+    const shared = lockoutKey(DEFAULT_ORGANISATION_ID, "-", "owner");
     for (let i = 0; i < ANONYMOUS_ACCOUNT_ATTEMPTS; i++) await recordFailedAttempt(shared);
 
     const res = await POST(post());
@@ -104,19 +104,19 @@ describe("POST /api/auth/reset", () => {
     expect(res.status).toBe(200);
     expect(hash).toHaveBeenCalledWith("a-brand-new-password", 10);
     expect(userUpdateOne).toHaveBeenCalledWith(
-      { _id: "u1", tenant: DEFAULT_TENANT_ID },
+      { _id: "u1", organisation: DEFAULT_ORGANISATION_ID },
       { $set: { password: "new-hash" } }
     );
     // The link reached the address it was mailed to, and proves that one only while it is still the
     // account's: an address changed meanwhile was never reached (BP-842)
     expect(userUpdateOne).toHaveBeenCalledWith(
-      { _id: "u1", email: "owner@example.com", tenant: DEFAULT_TENANT_ID },
+      { _id: "u1", email: "owner@example.com", organisation: DEFAULT_ORGANISATION_ID },
       { $set: { emailVerifiedAt: expect.any(Date) } }
     );
     // Whoever knew the old password is signed out — usually the reason somebody is resetting
     expect(revokeUserCredentials).toHaveBeenCalledWith("u1");
     expect(logInstanceAudit).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       expect.objectContaining({ action: "user_password_reset_by_email", target: "owner" })
     );
   });
@@ -146,7 +146,7 @@ describe("POST /api/auth/reset", () => {
     expect((await POST(post())).status).toBe(200);
     expect(userUpdateOne).toHaveBeenCalledTimes(1);
     expect(userUpdateOne).toHaveBeenCalledWith(
-      { _id: "u1", tenant: DEFAULT_TENANT_ID },
+      { _id: "u1", organisation: DEFAULT_ORGANISATION_ID },
       { $set: { password: "new-hash" } }
     );
   });
@@ -210,7 +210,7 @@ describe("POST /api/auth/reset and sign-in providers", () => {
     const res = await POST(post());
 
     expect(res.status).toBe(200);
-    expect(logInstanceAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), expect.objectContaining({ action: "identity_unlinked" }));
+    expect(logInstanceAudit).toHaveBeenCalledWith(scopedToDefaultOrganisation(), expect.objectContaining({ action: "identity_unlinked" }));
   });
 });
 

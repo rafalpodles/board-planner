@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Types } from "mongoose";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
@@ -112,7 +112,7 @@ describe("POST /api/projects/:projectId/tasks/:taskId/watch", () => {
 
       expect((await post()).status).toBe(404);
       expect(taskFindOneAndUpdate).not.toHaveBeenCalled();
-      expect(taskFindOne).toHaveBeenCalledWith({ _id: TASK_ID, project: PROJECT_ID, tenant: DEFAULT_TENANT_ID });
+      expect(taskFindOne).toHaveBeenCalledWith({ _id: TASK_ID, project: PROJECT_ID, organisation: DEFAULT_ORGANISATION_ID });
     });
   });
 });

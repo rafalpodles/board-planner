@@ -1,7 +1,7 @@
 import { Types } from "mongoose";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { isValidUsername } from "@/lib/identifiers";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const create = vi.fn();
 const countDocuments = vi.fn();
@@ -65,28 +65,28 @@ vi.mock("@/lib/session", () => ({
   provenanceRefusal: () => null,
 }));
 const refusedOnThisHost = vi.hoisted(() => vi.fn(async () => null as Response | null));
-vi.mock("@/lib/tenant-host", async (importOriginal) => {
-  const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
+vi.mock("@/lib/organisation-host", async (importOriginal) => {
+  const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
   return {
-    ...(await importOriginal<typeof import("@/lib/tenant-host")>()),
-    tenantOfRequest: async () => ({ kind: "tenant", tenant: DEFAULT_TENANT_ID }),
+    ...(await importOriginal<typeof import("@/lib/organisation-host")>()),
+    organisationOfRequest: async () => ({ kind: "organisation", organisation: DEFAULT_ORGANISATION_ID }),
   };
 });
 vi.mock("@/lib/middleware", () => ({
   withAdmin: (h: (r: Request, c: unknown) => unknown) => (r: Request) =>
-    h(r, { user: { _id: "a1" }, db: scopedToDefaultTenant() }),
+    h(r, { user: { _id: "a1" }, db: scopedToDefaultOrganisation() }),
   refusedOnThisHost,
   hostNotFound: () => new Response(null, { status: 404 }),
 }));
 
 const nameOrganisation = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/tenant", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/tenant")>()),
+vi.mock("@/lib/organisation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/organisation")>()),
   nameOrganisation,
 }));
 
 const { GET, POST } = await import("@/app/api/users/route");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 
 const post = (body: unknown) =>
   POST(new Request("http://x/api/users", { method: "POST", body: JSON.stringify(body) }));
@@ -115,7 +115,7 @@ describe("the row an account's creation leaves", () => {
   it("names the account and the administrator who made it", async () => {
     await post({ ...VALID, username: "newcomer" });
 
-    expect(logInstanceAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), {
+    expect(logInstanceAudit).toHaveBeenCalledWith(scopedToDefaultOrganisation(), {
       action: "user_created",
       user: "a1",
       actorUsername: "owner",
@@ -132,7 +132,7 @@ describe("the row an account's creation leaves", () => {
 
     await post({ ...VALID, username: "firstadmin", setupCode: "operator-held-setup-code" });
 
-    expect(logInstanceAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), {
+    expect(logInstanceAudit).toHaveBeenCalledWith(scopedToDefaultOrganisation(), {
       action: "user_created",
       user: null,
       actorUsername: "",
@@ -308,20 +308,20 @@ describe("claiming an instance nobody has claimed", () => {
     expect(nameOrganisation).not.toHaveBeenCalled();
   });
 
-  it("creates a member in the administrator's own tenant, not the default one (BP-663)", async () => {
-    const tenant = Types.ObjectId.createFromHexString("0000000000000000000000b2");
+  it("creates a member in the administrator's own organisation, not the default one (BP-663)", async () => {
+    const organisation = Types.ObjectId.createFromHexString("0000000000000000000000b2");
     countDocuments.mockResolvedValue(3);
-    getAuthUser.mockResolvedValue({ _id: "a1", role: "admin", username: "owner", tenant });
+    getAuthUser.mockResolvedValue({ _id: "a1", role: "admin", username: "owner", organisation });
 
     const res = await post({ ...VALID, username: "someone" });
 
     expect(res.status).toBe(201);
-    expect(create.mock.calls[0][0].tenant).toEqual(tenant);
-    expect(revokePendingInvitationsFor.mock.calls[0][0].tenant).toEqual(tenant);
+    expect(create.mock.calls[0][0].organisation).toEqual(organisation);
+    expect(revokePendingInvitationsFor.mock.calls[0][0].organisation).toEqual(organisation);
   });
 
   it("makes no first account on an organisation's host when organisations live on subdomains (BP-666)", async () => {
-    process.env.TENANT_DOMAIN = "board-planner.com";
+    process.env.ORGANISATION_DOMAIN = "board-planner.com";
     try {
       countDocuments.mockResolvedValue(0);
       getAuthUser.mockResolvedValue(null);
@@ -332,7 +332,7 @@ describe("claiming an instance nobody has claimed", () => {
       expect(create).not.toHaveBeenCalled();
       expect(nameOrganisation).not.toHaveBeenCalled();
     } finally {
-      delete process.env.TENANT_DOMAIN;
+      delete process.env.ORGANISATION_DOMAIN;
     }
   });
 
@@ -441,7 +441,7 @@ describe("which accounts the list returns", () => {
 
     await list();
 
-    expect(identityFind).toHaveBeenCalledWith({ user: { $in: ["u1"] }, live: "only", tenant: DEFAULT_TENANT_ID });
+    expect(identityFind).toHaveBeenCalledWith({ user: { $in: ["u1"] }, live: "only", organisation: DEFAULT_ORGANISATION_ID });
   });
 
   it("counts no link to a provider the instance no longer has as a way in", async () => {
@@ -495,17 +495,17 @@ describe("which accounts the list returns", () => {
 
   it("leaves machine accounts out by default", async () => {
     await list();
-    expect(find).toHaveBeenCalledWith({ kind: { $ne: "machine" }, tenant: DEFAULT_TENANT_ID });
+    expect(find).toHaveBeenCalledWith({ kind: { $ne: "machine" }, organisation: DEFAULT_ORGANISATION_ID });
   });
 
   it("includes them when asked for machines", async () => {
     await list("?include=machines");
-    expect(find).toHaveBeenCalledWith({ tenant: DEFAULT_TENANT_ID });
+    expect(find).toHaveBeenCalledWith({ organisation: DEFAULT_ORGANISATION_ID });
   });
 
   it("does not read any other value as the opt-in", async () => {
     await list("?include=machine");
-    expect(find).toHaveBeenCalledWith({ kind: { $ne: "machine" }, tenant: DEFAULT_TENANT_ID });
+    expect(find).toHaveBeenCalledWith({ kind: { $ne: "machine" }, organisation: DEFAULT_ORGANISATION_ID });
   });
 });
 
@@ -516,7 +516,7 @@ describe("an account taking an address", () => {
     const res = await post({ ...VALID, username: "newcomer", email: " Ada@Example.com " });
 
     expect(res.status).toBe(201);
-    expect(revokePendingInvitationsFor).toHaveBeenCalledWith(scopedToDefaultTenant(), "ada@example.com");
+    expect(revokePendingInvitationsFor).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "ada@example.com");
   });
 });
 

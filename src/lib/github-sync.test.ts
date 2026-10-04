@@ -16,13 +16,13 @@ const { fetchPullRequests, projectFind, taskFindOne, taskUpdateOne, taskFind, lo
     logActivity: vi.fn(),
   }));
 
-const servedTenants = vi.hoisted(() => ({ list: null as null | { _id: unknown; digestHour?: number; timezone?: string }[] }));
-vi.mock("@/lib/tenant-jobs", async () => {
+const servedOrganisations = vi.hoisted(() => ({ list: null as null | { _id: unknown; digestHour?: number; timezone?: string }[] }));
+vi.mock("@/lib/organisation-jobs", async () => {
   const { scoped } = await import("@/lib/db-scope");
-  const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
+  const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
   return {
-    forEachServedTenant: async (_job: string, work: (db: unknown, tenant: unknown) => Promise<void>) => {
-      for (const tenant of servedTenants.list ?? [{ _id: DEFAULT_TENANT_ID }]) await work(scoped(tenant._id as never), tenant);
+    forEachServedOrganisation: async (_job: string, work: (db: unknown, organisation: unknown) => Promise<void>) => {
+      for (const organisation of servedOrganisations.list ?? [{ _id: DEFAULT_ORGANISATION_ID }]) await work(scoped(organisation._id as never), organisation);
     },
   };
 });
@@ -42,9 +42,9 @@ vi.mock("@/lib/github", async (importOriginal) => ({
 }));
 
 const { syncGithubPullRequests, githubSyncTick, syncTickMs } = await import("./github-sync");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
-const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
-const db = scopedToDefaultTenant();
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
+const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
+const db = scopedToDefaultOrganisation();
 
 /** The history rows of one action. A link change writes rows too now, so "nothing was logged" has
  *  to name which nothing it means (BP-628). */
@@ -159,7 +159,7 @@ describe("who asked, and what that earns", () => {
     ]);
     // The status write is the one that must not happen; the link write still must
     expect(taskUpdateOne).toHaveBeenCalledTimes(1);
-    expect(taskUpdateOne.mock.calls[0][0]).toEqual({ _id: "t1", tenant: DEFAULT_TENANT_ID });
+    expect(taskUpdateOne.mock.calls[0][0]).toEqual({ _id: "t1", organisation: DEFAULT_ORGANISATION_ID });
     // The control: the sync ran, so the silence above is the rule rather than an empty fetch
     expect(result).toMatchObject({ prsLinked: 1 });
   });
@@ -190,7 +190,7 @@ describe("the background tick", () => {
   it("asks only about projects that have a token to ask with", async () => {
     await githubSyncTick();
 
-    expect(projectFind.mock.calls[0][0]).toEqual({ githubToken: { $nin: [null, ""] }, tenant: DEFAULT_TENANT_ID });
+    expect(projectFind.mock.calls[0][0]).toEqual({ githubToken: { $nin: [null, ""] }, organisation: DEFAULT_ORGANISATION_ID });
   });
 
   // One unreachable repository must not cost every other board its refresh
@@ -813,7 +813,7 @@ describe("a project whose repository has moved", () => {
       linkedPRs: {
         $elemMatch: { url: { $in: [prUrl(1)] }, provider: { $in: ["github", null] } },
       },
-      tenant: DEFAULT_TENANT_ID,
+      organisation: DEFAULT_ORGANISATION_ID,
     });
   });
 

@@ -5,9 +5,9 @@ import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { getAuthUser } from "@/lib/auth";
 import { isDatabaseUnreachable } from "@/lib/db-errors";
 import { ProvenanceError, ORIGIN_REQUIRED } from "@/lib/session";
-import { scopedForRequest, tenantOf } from "@/lib/db-scope";
+import { scopedForRequest, organisationOf } from "@/lib/db-scope";
 import { hostNotFound } from "@/lib/middleware";
-import { originFor } from "@/lib/tenant-host";
+import { originFor } from "@/lib/organisation-host";
 import { registerPlannerTools } from "@/lib/mcp/tools";
 
 /**
@@ -47,7 +47,7 @@ const baseHandler = createMcpHandler(
  * and the failure arrives here, from the query. So the honest place to notice is where it happens —
  * hence the flag rather than a guard (BP-362 review).
  */
-function makeVerifyToken(origin: string, tenant: Types.ObjectId, onUnreachable: () => void) {
+function makeVerifyToken(origin: string, organisation: Types.ObjectId, onUnreachable: () => void) {
   return async function verifyToken(
     req: Request,
     bearerToken?: string,
@@ -65,7 +65,7 @@ function makeVerifyToken(origin: string, tenant: Types.ObjectId, onUnreachable: 
       }
       throw e;
     }
-    if (!user || !tenantOf(user).equals(tenant)) return undefined;
+    if (!user || !organisationOf(user).equals(organisation)) return undefined;
 
     return {
       token: bearerToken,
@@ -102,7 +102,7 @@ const handler = async (req: Request) => {
   let unreachable = false;
   const response = await withMcpAuth(
     baseHandler,
-    makeVerifyToken(origin, db.tenant, () => {
+    makeVerifyToken(origin, db.organisation, () => {
       unreachable = true;
     }),
     { required: true, resourceUrl: origin },

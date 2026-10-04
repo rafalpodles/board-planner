@@ -13,7 +13,7 @@ vi.mock("@/models/task", () => ({ Task: { findOne: vi.fn() } }));
 vi.mock("./worker-service", () => ({ verifyWorkerCredential: vi.fn() }));
 
 const { withProjectAccess, withProjectOwner } = await import("./middleware");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 
 const PROJECT_ID = "69a52e3b399b27d3cbb2c5a5";
 const MEMBER = { _id: "u1", role: "member" };
@@ -32,7 +32,7 @@ beforeEach(() => {
 });
 
 describe("a project the grant layer refuses to an instance admin (BP-664)", () => {
-  it("answers exactly as for a project that does not exist, so another tenant's ids are no oracle", async () => {
+  it("answers exactly as for a project that does not exist, so another organisation's ids are no oracle", async () => {
     getAuthUser.mockResolvedValue(INSTANCE_ADMIN);
     projectFindOne.mockReturnValue({ select: () => Promise.resolve(null) });
     const unknownKey = await withProjectAccess(vi.fn())(request(), context("NOPE"));
@@ -61,7 +61,7 @@ describe("withProjectAccess", () => {
 
     await withProjectAccess(handler)(request(), context());
 
-    expect(check).toHaveBeenCalledWith(scopedToDefaultTenant(), MEMBER, PROJECT_ID, "access");
+    expect(check).toHaveBeenCalledWith(scopedToDefaultOrganisation(), MEMBER, PROJECT_ID, "access");
   });
 
   it("calls the handler when the grant layer allows it", async () => {
@@ -91,7 +91,7 @@ describe("withProjectAccess", () => {
 
     await withProjectAccess(handler)(request(), context("CP"));
 
-    expect(check).toHaveBeenCalledWith(scopedToDefaultTenant(), MEMBER, PROJECT_ID, "access");
+    expect(check).toHaveBeenCalledWith(scopedToDefaultOrganisation(), MEMBER, PROJECT_ID, "access");
     expect(await handler.mock.calls[0][1].params).toEqual({ projectId: PROJECT_ID });
   });
 
@@ -114,7 +114,7 @@ describe("withProjectOwner", () => {
 
     await withProjectOwner(handler)(request(), context());
 
-    expect(check).toHaveBeenCalledWith(scopedToDefaultTenant(), MEMBER, PROJECT_ID, "admin");
+    expect(check).toHaveBeenCalledWith(scopedToDefaultOrganisation(), MEMBER, PROJECT_ID, "admin");
   });
 
   it("calls the handler when the grant layer allows it", async () => {

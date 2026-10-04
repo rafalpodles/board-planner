@@ -7,7 +7,7 @@ import { auditChange } from "@/lib/settings-audit";
 import { serverNamed, writeServerOauth } from "@/lib/pm/oauth-writes";
 import { encryptSecret } from "@/lib/encryption";
 import { ORIGIN_REQUIRED } from "@/lib/session";
-import { originFor } from "@/lib/tenant-host";
+import { originFor } from "@/lib/organisation-host";
 import {
   discoverOauthConfig,
   registerClient,
@@ -42,7 +42,7 @@ export const POST = withProjectOwner(async (request, { params, user, db }) => {
   if (!origin) {
     return NextResponse.json({ error: ORIGIN_REQUIRED }, { status: 500 });
   }
-  const redirectUri = await getPmOauthRedirectUri(db.tenant);
+  const redirectUri = await getPmOauthRedirectUri(db.organisation);
   const read = { ...(server.oauth ?? {}) } as Record<string, unknown>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const oauth: any = { ...read };

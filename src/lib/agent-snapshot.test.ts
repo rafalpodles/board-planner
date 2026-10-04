@@ -11,7 +11,7 @@ vi.mock("@/models/agentBlock", () => ({
 }));
 
 const { snapshotFor } = await import("./agent-snapshot");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 
 const lean = <T,>(value: T) => ({ lean: () => Promise.resolve(value) });
 
@@ -50,13 +50,13 @@ beforeEach(() => {
 describe("snapshotFor", () => {
   it("reads the buckets in order, so the worker gets one list", async () => {
     agentFindOne.mockReturnValue(lean(AGENT));
-    const snapshot = await snapshotFor(scopedToDefaultTenant(), "p1", "a1", MACHINE_OWNER);
+    const snapshot = await snapshotFor(scopedToDefaultOrganisation(), "p1", "a1", MACHINE_OWNER);
     expect(snapshot?.sequence.map((e) => e.key)).toEqual(["implement", "diff-size", "push"]);
   });
 
   it("carries a step's prompt and a gate's parameters, and never a tool list", async () => {
     agentFindOne.mockReturnValue(lean(AGENT));
-    const snapshot = await snapshotFor(scopedToDefaultTenant(), "p1", "a1", MACHINE_OWNER);
+    const snapshot = await snapshotFor(scopedToDefaultOrganisation(), "p1", "a1", MACHINE_OWNER);
     const step = snapshot!.sequence[0];
     expect(step.prompt).toBe("do it");
     expect(step.capability).toBe("edit");
@@ -68,13 +68,13 @@ describe("snapshotFor", () => {
   // The old chain — task agent, then the project default, then the seeded "Default" — meant an empty
   // field still ran something, and there was no way to say "not this one".
   it("returns nothing when the task names no agent", async () => {
-    expect(await snapshotFor(scopedToDefaultTenant(), "p1", null, MACHINE_OWNER)).toBeNull();
+    expect(await snapshotFor(scopedToDefaultOrganisation(), "p1", null, MACHINE_OWNER)).toBeNull();
   });
 
   it("still resolves the agent a task does name", async () => {
     agentFindOne.mockReturnValue(lean(AGENT));
 
-    const snapshot = await snapshotFor(scopedToDefaultTenant(), "p1", AGENT_ID, MACHINE_OWNER);
+    const snapshot = await snapshotFor(scopedToDefaultOrganisation(), "p1", AGENT_ID, MACHINE_OWNER);
 
     expect(snapshot?.name).toBe("Default");
   });
@@ -84,19 +84,19 @@ describe("snapshotFor", () => {
   it("refuses the whole run when a key has no block, rather than skipping it", async () => {
     agentFindOne.mockReturnValue(lean(AGENT));
     blockFind.mockReturnValue(lean(BLOCKS.filter((b) => b.key !== "diff-size")));
-    expect(await snapshotFor(scopedToDefaultTenant(), "p1", "a1", MACHINE_OWNER)).toBeNull();
+    expect(await snapshotFor(scopedToDefaultOrganisation(), "p1", "a1", MACHINE_OWNER)).toBeNull();
   });
 
   it("refuses a project agent borrowed by another project's task", async () => {
     agentFindOne.mockReturnValue(lean({ ...AGENT, scope: "project", project: "other" }));
-    expect(await snapshotFor(scopedToDefaultTenant(), "p1", "a1", MACHINE_OWNER)).toBeNull();
+    expect(await snapshotFor(scopedToDefaultOrganisation(), "p1", "a1", MACHINE_OWNER)).toBeNull();
   });
 
   it("refuses an agent with nothing in it", async () => {
     agentFindOne.mockReturnValue(
       lean({ ...AGENT, composition: { analysis: [], implementation: [], verification: [], delivery: [] } })
     );
-    expect(await snapshotFor(scopedToDefaultTenant(), "p1", "a1", MACHINE_OWNER)).toBeNull();
+    expect(await snapshotFor(scopedToDefaultOrganisation(), "p1", "a1", MACHINE_OWNER)).toBeNull();
   });
 });
 
@@ -134,13 +134,13 @@ describe("snapshotFor and whose machine is asking", () => {
   it("runs a personal agent on the machine of the person who composed it", async () => {
     agentFindOne.mockReturnValue(lean({ ...MINE, owner: MACHINE_OWNER }));
 
-    expect(await snapshotFor(scopedToDefaultTenant(), "p1", "a1", MACHINE_OWNER)).not.toBeNull();
+    expect(await snapshotFor(scopedToDefaultOrganisation(), "p1", "a1", MACHINE_OWNER)).not.toBeNull();
   });
 
   it("refuses one on a machine belonging to anybody else", async () => {
     agentFindOne.mockReturnValue(lean(MINE));
 
-    expect(await snapshotFor(scopedToDefaultTenant(), "p1", "a1", MACHINE_OWNER)).toBeNull();
+    expect(await snapshotFor(scopedToDefaultOrganisation(), "p1", "a1", MACHINE_OWNER)).toBeNull();
   });
 
   // The machine whose owner was released while it still held work: nobody's machine is not the
@@ -148,7 +148,7 @@ describe("snapshotFor and whose machine is asking", () => {
   it("refuses one to a machine with no owner at all", async () => {
     agentFindOne.mockReturnValue(lean(MINE));
 
-    expect(await snapshotFor(scopedToDefaultTenant(), "p1", "a1", null)).toBeNull();
+    expect(await snapshotFor(scopedToDefaultOrganisation(), "p1", "a1", null)).toBeNull();
   });
 
   // Both sides absent is the case equality alone gets wrong: "" === "" would read two absences as
@@ -156,7 +156,7 @@ describe("snapshotFor and whose machine is asking", () => {
   it("refuses an ownerless personal agent rather than matching it to an ownerless machine", async () => {
     agentFindOne.mockReturnValue(lean({ ...MINE, owner: null }));
 
-    expect(await snapshotFor(scopedToDefaultTenant(), "p1", "a1", null)).toBeNull();
+    expect(await snapshotFor(scopedToDefaultOrganisation(), "p1", "a1", null)).toBeNull();
   });
 
   // The other half of the decision, and the reason the rule is asked of `user` scope alone: a
@@ -165,13 +165,13 @@ describe("snapshotFor and whose machine is asking", () => {
   it("leaves the project's own agent alone, whoever the machine belongs to", async () => {
     agentFindOne.mockReturnValue(lean({ ...MINE, scope: "project", owner: null, project: "p1" }));
 
-    expect(await snapshotFor(scopedToDefaultTenant(), "p1", "a1", MACHINE_OWNER)).not.toBeNull();
+    expect(await snapshotFor(scopedToDefaultOrganisation(), "p1", "a1", MACHINE_OWNER)).not.toBeNull();
   });
 
   it("leaves a global agent alone, which is shipped rather than anybody's own", async () => {
     agentFindOne.mockReturnValue(lean({ ...MINE, scope: "global", owner: null }));
 
-    expect(await snapshotFor(scopedToDefaultTenant(), "p1", "a1", MACHINE_OWNER)).not.toBeNull();
+    expect(await snapshotFor(scopedToDefaultOrganisation(), "p1", "a1", MACHINE_OWNER)).not.toBeNull();
   });
 
   // The task moves back a column with no comment and no activity row, and the route's own line
@@ -180,7 +180,7 @@ describe("snapshotFor and whose machine is asking", () => {
   it("names the agent, whose it is, and whose machine asked", async () => {
     agentFindOne.mockReturnValue(lean(MINE));
 
-    await snapshotFor(scopedToDefaultTenant(), "p1", "a1", MACHINE_OWNER);
+    await snapshotFor(scopedToDefaultOrganisation(), "p1", "a1", MACHINE_OWNER);
 
     const message = String(logged.mock.calls[0]?.[0]);
     expect(message).toContain("a1");
@@ -193,7 +193,7 @@ describe("snapshotFor and whose machine is asking", () => {
   it("reports whose it is even when it is also empty", async () => {
     agentFindOne.mockReturnValue(lean({ ...MINE, composition: EMPTY }));
 
-    expect(await snapshotFor(scopedToDefaultTenant(), "p1", "a1", MACHINE_OWNER)).toBeNull();
+    expect(await snapshotFor(scopedToDefaultOrganisation(), "p1", "a1", MACHINE_OWNER)).toBeNull();
 
     expect(String(logged.mock.calls[0]?.[0])).toContain(COMPOSER);
   });
