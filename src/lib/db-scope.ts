@@ -143,7 +143,9 @@ function stamp(doc: unknown, tenant: Types.ObjectId): Doc {
   return { ...doc, tenant };
 }
 
-function stampCreate(args: unknown[], tenant: Types.ObjectId): unknown[] {
+function stampCreate(given: unknown[], tenant: Types.ObjectId): unknown[] {
+  const args = [...given];
+  while (args.length > 1 && (args[args.length - 1] === undefined || args[args.length - 1] === null)) args.pop();
   const [first, ...rest] = args;
   if (Array.isArray(first)) return [first.map((doc) => stamp(doc, tenant)), ...rest];
   return args.map((doc) => stamp(doc, tenant));

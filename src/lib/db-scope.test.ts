@@ -99,6 +99,13 @@ describe("writes", () => {
     expect(() => db().create({ name: "x" } as never, { tenant: Types.ObjectId.createFromHexString("0000000000000000000000b2") } as never)).toThrow(TenantKeyError);
   });
 
+  it("create drops an absent trailing options argument, as Mongoose does", () => {
+    db().create({ name: "x" } as never, undefined as never);
+    db().create([{ name: "y" }] as never, null as never);
+    expect(model.create).toHaveBeenNthCalledWith(1, { name: "x", tenant: A });
+    expect(model.create).toHaveBeenNthCalledWith(2, [{ name: "y", tenant: A }]);
+  });
+
   it("create keeps the options of the array form", () => {
     db().create([{ name: "x" }] as never, { ordered: true } as never);
     expect(model.create).toHaveBeenCalledWith([{ name: "x", tenant: A }], { ordered: true });
