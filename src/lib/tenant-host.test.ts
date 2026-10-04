@@ -44,7 +44,7 @@ describe("TENANT_DOMAIN set: the host names the tenant", () => {
   });
 
   it("names no tenant for a slug nobody has, another domain, a deeper host or a malformed label", async () => {
-    for (const host of ["nobody.board-planner.com", "acme.example.com", "x.acme.board-planner.com", "-x-.board-planner.com", "ab.board-planner.com", "board-planner.com.evil.com"]) {
+    for (const host of ["nobody.board-planner.com", "acme.example.com", "x.acme.board-planner.com", "-x-.board-planner.com", "ab.board-planner.com", "board-planner.com.evil.com", "acme-board-planner.com", "acmeboard-planner.com"]) {
       expect(await tenantOfRequest(on(host)), host).toEqual({ kind: "none" });
     }
   });
