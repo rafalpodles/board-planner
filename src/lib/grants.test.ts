@@ -5,9 +5,13 @@ import { Types } from "mongoose";
 
 const P = "69a52e3b399b27d3cbb2c5a5";
 const OTHER = "69a52e3b399b27d3cbb2c5a6";
+const HOME = new Types.ObjectId("000000000000000000000001");
+const ELSEWHERE = new Types.ObjectId("0000000000000000000000b2");
+const HERE = { id: P, tenant: HOME };
 
 function principal(over: Partial<Principal> = {}): Principal {
   return {
+    tenant: HOME,
     instanceAdmin: false,
     tokenScoped: false,
     tokenScope: null,
@@ -35,50 +39,67 @@ function fakeUser(over: Partial<IUser> = {}) {
 describe("decide", () => {
   it("gives an instance admin both access and admin without any grant", () => {
     const p = principal({ instanceAdmin: true });
-    expect(decide(p, null, "access", P)).toBe(true);
-    expect(decide(p, null, "admin", P)).toBe(true);
+    expect(decide(p, null, "access", HERE)).toBe(true);
+    expect(decide(p, null, "admin", HERE)).toBe(true);
   });
 
   it("gives an owner both access and admin", () => {
     const p = principal();
-    expect(decide(p, "owner", "access", P)).toBe(true);
-    expect(decide(p, "owner", "admin", P)).toBe(true);
+    expect(decide(p, "owner", "access", HERE)).toBe(true);
+    expect(decide(p, "owner", "admin", HERE)).toBe(true);
   });
 
   it("gives a member access but never admin", () => {
     const p = principal();
-    expect(decide(p, "member", "access", P)).toBe(true);
-    expect(decide(p, "member", "admin", P)).toBe(false);
+    expect(decide(p, "member", "access", HERE)).toBe(true);
+    expect(decide(p, "member", "admin", HERE)).toBe(false);
   });
 
   it("refuses someone with no grant at all", () => {
     const p = principal();
-    expect(decide(p, null, "access", P)).toBe(false);
-    expect(decide(p, null, "admin", P)).toBe(false);
+    expect(decide(p, null, "access", HERE)).toBe(false);
+    expect(decide(p, null, "admin", HERE)).toBe(false);
   });
 
   it("refuses a project outside a token's scope even to an owner", () => {
     const p = principal({ tokenScoped: true, tokenScope: [OTHER] });
-    expect(decide(p, "owner", "access", P)).toBe(false);
+    expect(decide(p, "owner", "access", HERE)).toBe(false);
   });
 
   it("never lets a scoped token administer, even as owner in scope", () => {
     const p = principal({ tokenScoped: true, tokenScope: [P] });
-    expect(decide(p, "owner", "admin", P)).toBe(false);
-    expect(decide(p, "owner", "access", P)).toBe(true);
+    expect(decide(p, "owner", "admin", HERE)).toBe(false);
+    expect(decide(p, "owner", "access", HERE)).toBe(true);
   });
 
   // The regression the spec is built around: applyTokenScope downgrades an instance admin to
   // member, and instance admins hold no grant rows, so a naive lookup strips all their access.
   it("keeps an instance admin's scoped token working inside its scope", () => {
     const p = principal({ tokenScoped: true, tokenScope: [P], instanceAdminBeforeScope: true });
-    expect(decide(p, null, "access", P)).toBe(true);
-    expect(decide(p, null, "admin", P)).toBe(false);
+    expect(decide(p, null, "access", HERE)).toBe(true);
+    expect(decide(p, null, "admin", HERE)).toBe(false);
   });
 
   it("still confines an instance admin's scoped token to its scope", () => {
     const p = principal({ tokenScoped: true, tokenScope: [OTHER], instanceAdminBeforeScope: true });
-    expect(decide(p, null, "access", P)).toBe(false);
+    expect(decide(p, null, "access", HERE)).toBe(false);
+  });
+});
+
+describe("decide across tenants (BP-663)", () => {
+  it("refuses a project of another tenant before anything else, even to an instance admin or an owner", () => {
+    const elsewhere = { id: P, tenant: ELSEWHERE };
+    expect(decide(principal({ instanceAdmin: true }), null, "access", elsewhere)).toBe(false);
+    expect(decide(principal({ instanceAdminBeforeScope: true, tokenScope: [P] }), null, "access", elsewhere)).toBe(false);
+    expect(decide(principal(), "owner", "access", elsewhere)).toBe(false);
+  });
+
+  it("refuses a project whose tenant could not be established", () => {
+    expect(decide(principal({ instanceAdmin: true }), null, "access", { id: P, tenant: null })).toBe(false);
+  });
+
+  it("lets the same principal in at home", () => {
+    expect(decide(principal({ instanceAdmin: true }), null, "admin", HERE)).toBe(true);
   });
 });
 
