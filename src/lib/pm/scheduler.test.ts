@@ -25,6 +25,9 @@ vi.mock("./board-review", () => ({
 const { pmSchedulerTick, startBoardReview } = await import("./scheduler");
 const { isTurnRunning } = await import("./turn-lock");
 const { BOARD_REVIEW_DISALLOWED_TOOLS, currentReviewSlot } = await import("./autonomy");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
+const db = scopedToDefaultTenant();
 
 const PM = { enabled: true, dailyTurnCap: 100, autonomy: { dailyReview: true, handleNeedsHumanReview: false, reviewHour: 0, reviewIntervalHours: 24, timezone: "UTC", lastReviewSlot: "" } };
 
@@ -44,9 +47,10 @@ describe("pmSchedulerTick", () => {
     await pmSchedulerTick();
 
     const [filter, update] = findOneAndUpdate.mock.calls[0];
-    expect(filter).toEqual({ _id: "p1", "pm.autonomy.lastReviewSlot": { $ne: update.$set["pm.autonomy.lastReviewSlot"] } });
+    expect(filter).toEqual({ _id: "p1", tenant: DEFAULT_TENANT_ID, "pm.autonomy.lastReviewSlot": { $ne: update.$set["pm.autonomy.lastReviewSlot"] } });
     expect(findOneAndUpdate.mock.invocationCallOrder[0]).toBeLessThan(runPmTurn.mock.invocationCallOrder[0]);
     expect(runPmTurn).toHaveBeenCalledWith(
+      db,
       expect.objectContaining({
         autonomous: true,
         projectId: "p1",
@@ -79,7 +83,7 @@ describe("pmSchedulerTick", () => {
     finishFirst({ ok: true });
     await tick;
     expect(runPmTurn).toHaveBeenCalledTimes(2);
-    expect(runPmTurn.mock.calls[1][0].projectId).toBe("p2");
+    expect(runPmTurn.mock.calls[1][1].projectId).toBe("p2");
   });
 
   it("leaves the slot unclaimed while another turn holds the project, so the next tick can still run it", async () => {
@@ -118,7 +122,7 @@ describe("startBoardReview", () => {
   it("refuses without a model, rather than spending a turn on a warning", async () => {
     isPmAvailable.mockReturnValueOnce(false);
 
-    const start = await startBoardReview("p1", "BP", PM, "pm-user");
+    const start = await startBoardReview(db, "p1", "BP", PM, "pm-user");
 
     expect(start).toEqual({ status: "skipped", reason: "the PM agent is not configured on this instance" });
     expect(runPmTurn).not.toHaveBeenCalled();
@@ -128,7 +132,7 @@ describe("startBoardReview", () => {
   it("refuses at once when the turn cap is reached, and spends nothing", async () => {
     isOverDailyTurnCap.mockResolvedValue({ over: true, cap: 3 });
 
-    const start = await startBoardReview("p1", "BP", PM, "pm-user");
+    const start = await startBoardReview(db, "p1", "BP", PM, "pm-user");
 
     expect(start).toEqual({ status: "skipped", reason: "the daily turn cap (3) is reached" });
     expect(runPmTurn).not.toHaveBeenCalled();
@@ -139,7 +143,7 @@ describe("startBoardReview", () => {
   it("refuses at once when the token cap is reached", async () => {
     dailyPmSpend.mockResolvedValue({ over: true, tokens: 900, cap: 800, calls: 4 });
 
-    expect(await startBoardReview("p1", "BP", PM, "pm-user")).toEqual({
+    expect(await startBoardReview(db, "p1", "BP", PM, "pm-user")).toEqual({
       status: "skipped",
       reason: "the daily token cap is reached (900 of 800 across 4 calls)",
     });
@@ -150,7 +154,7 @@ describe("startBoardReview", () => {
   it("gives the turn back when the board has nothing to review, without a turn", async () => {
     buildBoardDigest.mockResolvedValue(null);
 
-    const start = await startBoardReview("p1", "BP", PM, "pm-user");
+    const start = await startBoardReview(db, "p1", "BP", PM, "pm-user");
     expect(start.status).toBe("started");
     if (start.status === "started") await start.done;
 
@@ -162,8 +166,8 @@ describe("startBoardReview", () => {
     let finish!: (v: unknown) => void;
     runPmTurn.mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
 
-    const first = await startBoardReview("p1", "BP", PM, "pm-user");
-    const second = await startBoardReview("p1", "BP", PM, "pm-user");
+    const first = await startBoardReview(db, "p1", "BP", PM, "pm-user");
+    const second = await startBoardReview(db, "p1", "BP", PM, "pm-user");
 
     expect(first.status).toBe("started");
     expect(second).toEqual({ status: "skipped", reason: "a PM turn is already running on this project" });
@@ -176,7 +180,7 @@ describe("startBoardReview", () => {
     runPmTurn.mockRejectedValue(new Error("provider down"));
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    const start = await startBoardReview("p1", "BP", PM, "pm-user");
+    const start = await startBoardReview(db, "p1", "BP", PM, "pm-user");
     expect(start.status).toBe("started");
     expect(isTurnRunning("p1")).toBe(true);
     if (start.status === "started") await start.done;

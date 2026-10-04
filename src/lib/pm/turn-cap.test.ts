@@ -8,6 +8,10 @@ vi.mock("@/models/pmMessage", () => ({ PmMessage: { countDocuments } }));
 vi.mock("./availability", () => ({ resolveDailyTurnCap }));
 
 import { isOverDailyTurnCap } from "./turn-cap";
+import { scopedToDefaultTenant } from "@/lib/db-scope";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+
+const db = scopedToDefaultTenant();
 
 /**
  * BP-453. The cap counted from the server's midnight. Railway runs UTC, so a Warsaw board's
@@ -36,21 +40,21 @@ describe("the day the daily turn cap is counted in", () => {
    * which is what made the old code look right on a developer's laptop in Warsaw.
    */
   it("is the project's, not the host's — proved by two zones no host can both be", async () => {
-    await isOverDailyTurnCap("p1", { autonomy: { timezone: "Pacific/Kiritimati" } });
+    await isOverDailyTurnCap(db, "p1", { autonomy: { timezone: "Pacific/Kiritimati" } });
     expect(since()).toBe("2026-08-29T10:00:00.000Z");
 
     countDocuments.mockClear();
-    await isOverDailyTurnCap("p1", { autonomy: { timezone: "Pacific/Niue" } });
+    await isOverDailyTurnCap(db, "p1", { autonomy: { timezone: "Pacific/Niue" } });
     expect(since()).toBe("2026-08-29T11:00:00.000Z");
   });
 
   it("uses Warsaw when the board never named a zone", async () => {
-    await isOverDailyTurnCap("p1", {});
+    await isOverDailyTurnCap(db, "p1", {});
     expect(since()).toBe("2026-08-29T22:00:00.000Z");
   });
 
   it("uses Warsaw when the stored zone is one this server cannot read", async () => {
-    await isOverDailyTurnCap("p1", { autonomy: { timezone: "Warsaw" } });
+    await isOverDailyTurnCap(db, "p1", { autonomy: { timezone: "Warsaw" } });
     expect(since()).toBe("2026-08-29T22:00:00.000Z");
   });
 
@@ -63,13 +67,13 @@ describe("the day the daily turn cap is counted in", () => {
   it("counts the first two hours of the board's day, which the host's boundary drops", async () => {
     vi.setSystemTime(new Date("2026-08-30T21:30:00Z"));
 
-    await isOverDailyTurnCap("p1", { autonomy: { timezone: "Europe/Warsaw" } });
+    await isOverDailyTurnCap(db, "p1", { autonomy: { timezone: "Europe/Warsaw" } });
     expect(since()).toBe("2026-08-29T22:00:00.000Z");
 
     // The contrast, in the same test so neither number can quietly become the other: a UTC board
     // at this same instant counts from a boundary two hours later.
     countDocuments.mockClear();
-    await isOverDailyTurnCap("p1", { autonomy: { timezone: "UTC" } });
+    await isOverDailyTurnCap(db, "p1", { autonomy: { timezone: "UTC" } });
     expect(since()).toBe("2026-08-30T00:00:00.000Z");
   });
 
@@ -77,14 +81,14 @@ describe("the day the daily turn cap is counted in", () => {
   // fires would satisfy every assertion above.
   it("compares the count against the cap, both ways", async () => {
     countDocuments.mockResolvedValue(99);
-    expect(await isOverDailyTurnCap("p1", { dailyTurnCap: 100 })).toMatchObject({
+    expect(await isOverDailyTurnCap(db, "p1", { dailyTurnCap: 100 })).toMatchObject({
       over: false,
       cap: 100,
       used: 99,
     });
 
     countDocuments.mockResolvedValue(100);
-    expect(await isOverDailyTurnCap("p1", { dailyTurnCap: 100 })).toMatchObject({
+    expect(await isOverDailyTurnCap(db, "p1", { dailyTurnCap: 100 })).toMatchObject({
       over: true,
       cap: 100,
       used: 100,
@@ -92,7 +96,7 @@ describe("the day the daily turn cap is counted in", () => {
   });
 
   it("counts only this project's user messages", async () => {
-    await isOverDailyTurnCap("p7", {});
-    expect(countDocuments.mock.calls[0][0]).toMatchObject({ project: "p7", role: "user" });
+    await isOverDailyTurnCap(db, "p7", {});
+    expect(countDocuments.mock.calls[0][0]).toMatchObject({ project: "p7", role: "user", tenant: DEFAULT_TENANT_ID });
   });
 });

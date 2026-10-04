@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const taskFindOne = vi.fn();
-const projectFindById = vi.fn();
+const projectFindOne = vi.fn();
 const assignTaskMock = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/task", () => ({ Task: { find: vi.fn(), countDocuments: vi.fn(), findOne: taskFindOne } }));
-vi.mock("@/models/project", () => ({ Project: { findById: projectFindById } }));
+vi.mock("@/models/project", () => ({ Project: { findOne: projectFindOne } }));
 vi.mock("@/models/comment", () => ({ Comment: { find: vi.fn(), create: vi.fn() } }));
 vi.mock("@/lib/task-service", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/task-service")>()),
@@ -14,6 +14,8 @@ vi.mock("@/lib/task-service", async (importOriginal) => ({
 }));
 
 const { PM_TOOLS } = await import("./tools");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const db = scopedToDefaultTenant();
 
 const ctx = { projectId: "p1", projectKey: "BP", pmUserId: "pm", triggeredByUserId: "u1" };
 
@@ -34,7 +36,7 @@ const SOUND = { taskNumber: 9, agent: "a1", status: "todo", assignee: OWNER, ass
 
 // Honours the projection, so a field the tool forgets to select is absent here too
 function board(over: Record<string, unknown> = {}) {
-  projectFindById.mockImplementation((_id: string, projection: string) => {
+  projectFindOne.mockImplementation((_filter: unknown, projection: string) => {
     const keep = new Set(projection.split(/\s+/));
     const doc = { ...READY_BOARD, ...over } as Record<string, unknown>;
     return { lean: async () => Object.fromEntries(Object.entries(doc).filter(([k]) => keep.has(k))) };
@@ -43,7 +45,7 @@ function board(over: Record<string, unknown> = {}) {
 
 async function assign(task: Record<string, unknown> = {}) {
   assignTaskMock.mockResolvedValue({ ok: true, data: { ...SOUND, ...task } });
-  return PM_TOOLS.assign_task.execute({ taskKey: "BP-9", username: "owner" }, ctx);
+  return PM_TOOLS.assign_task.execute(db, { taskKey: "BP-9", username: "owner" }, ctx);
 }
 
 beforeEach(() => {
@@ -135,7 +137,7 @@ describe("the PM says every reason its hand-over will not run", () => {
     const doc = Object.create({ ...SOUND, agent: null });
     assignTaskMock.mockResolvedValue({ ok: true, data: doc });
 
-    const { result } = await PM_TOOLS.assign_task.execute({ taskKey: "BP-9", username: "owner" }, ctx);
+    const { result } = await PM_TOOLS.assign_task.execute(db, { taskKey: "BP-9", username: "owner" }, ctx);
 
     expect((result as { note: string }).note).toContain("no agent is named on it");
   });
@@ -143,14 +145,14 @@ describe("the PM says every reason its hand-over will not run", () => {
   it("finds a sound document sound", async () => {
     assignTaskMock.mockResolvedValue({ ok: true, data: Object.create(SOUND) });
 
-    const { result } = await PM_TOOLS.assign_task.execute({ taskKey: "BP-9", username: "owner" }, ctx);
+    const { result } = await PM_TOOLS.assign_task.execute(db, { taskKey: "BP-9", username: "owner" }, ctx);
 
     expect(result).toEqual({ task: "BP-9", assignee: "owner" });
   });
 
   // A board deleted between the assignment and this read answers, rather than throwing
   it("does not throw when the project is gone", async () => {
-    projectFindById.mockReturnValue({ lean: async () => null });
+    projectFindOne.mockReturnValue({ lean: async () => null });
 
     expect((await assign()).result).toMatchObject({
       note: "Assigned, but this project is not enabled for workers, so nothing will run it.",

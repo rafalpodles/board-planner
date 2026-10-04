@@ -20,7 +20,7 @@ function filesCalling(name: string): string[] {
       const path = join(dir, entry.name);
       if (entry.isDirectory()) walk(path);
       else if (/\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)) {
-        if (readFileSync(path, "utf8").includes(`${name}({`)) found.push(path);
+        if (readFileSync(path, "utf8").includes(`${name}(db, {`)) found.push(path);
       }
     }
   };
