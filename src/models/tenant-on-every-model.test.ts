@@ -38,13 +38,6 @@ const GLOBAL_UNIQUE: Record<string, string> = {
   "Session.tokenHash": "random token",
   "Tenant.slug": "the subdomain naming the tenant: unique across the platform by definition (BP-666)",
   "Task.project+taskNumber": "project is a tenant-owned id",
-  "User.username": "TODO(BP-665): global until a second tenant can exist",
-  "User.email": "TODO(BP-665): global until a second tenant can exist",
-  "Project.key": "TODO(BP-665): global until a second tenant can exist",
-  "Worker.name+host": "TODO(BP-665): global until a second tenant can exist",
-  "Identity.issuer+subject": "TODO(BP-665): global until a second tenant can exist",
-  "Invitation.email": "TODO(BP-665): global until a second tenant can exist",
-  "AgentBlock.key": "TODO(BP-665): global until a second tenant can exist",
 };
 
 describe("every model carries a tenant", () => {
@@ -84,13 +77,4 @@ describe("every model carries a tenant", () => {
     expect(Object.keys(GLOBAL_UNIQUE).filter((id) => !declared.has(id))).toEqual([]);
   });
 
-  it("gives every global unique that will go a per-tenant twin that leads with the same fields", () => {
-    const all = uniqueIndexes();
-    const waiting = all.filter((index) => GLOBAL_UNIQUE[idOf(index)]?.startsWith("TODO(BP-665)"));
-    const twinless = waiting.filter(
-      ({ model, keys }) =>
-        !all.some((other) => other.model === model && other.keys.join() === [...keys, "tenant"].join())
-    );
-    expect(twinless.map(idOf)).toEqual([]);
-  });
 });

@@ -23,7 +23,6 @@ const userSchema = new Schema<IUser>({
   username: {
     type: String,
     required: true,
-    unique: true,
     lowercase: true,
     trim: true,
   },
@@ -137,7 +136,6 @@ const userSchema = new Schema<IUser>({
 // twice over — the two options cannot be combined, and $ne is not a supported partial expression.
 // Mongoose swallows the CannotCreateIndex, so the index nobody built enforced nothing: two
 // accounts could hold one address, the lookup a password reset by email depends on.
-userSchema.index({ email: 1 }, { unique: true, partialFilterExpression: { email: { $gt: "" } } });
 userSchema.index({ email: 1, tenant: 1 }, { unique: true, partialFilterExpression: { email: { $gt: "" } } });
 userSchema.index({ username: 1, tenant: 1 }, { unique: true });
 

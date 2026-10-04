@@ -57,7 +57,6 @@ const projectSchema = new Schema<IProject>(
     key: {
       type: String,
       required: true,
-      unique: true,
       uppercase: true,
       trim: true,
     },
