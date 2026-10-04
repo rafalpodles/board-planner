@@ -34,6 +34,8 @@ const startPmScheduler = vi.fn();
 const startGithubSyncScheduler = vi.fn(() => ({ started: true as const, tickMs: 300_000 }));
 const startDigestScheduler = vi.fn(() => ({ started: true as const, tickMs: 300_000 }));
 
+const backfillTenants = vi.fn((): Promise<unknown> => Promise.resolve({ total: 0, byCollection: {} }));
+vi.mock("@/lib/tenant-migration", () => ({ backfillTenants }));
 vi.mock("@/models/project", () => ({ Project: { updateMany } }));
 vi.mock("@/lib/agent-seed", () => ({ seedAgents }));
 vi.mock("@/models/user", () => ({ User: { countDocuments, find: userFind } }));
@@ -303,6 +305,39 @@ describe("register — a database that is down at boot", () => {
 
     expect(repairMachineNames).toHaveBeenCalledTimes(1);
     expect(error).toHaveBeenCalledWith("Failed to repair machine names:", expect.any(Error));
+    expect(startPmScheduler).toHaveBeenCalledTimes(1);
+  });
+
+  // BP-663: with queries scoped, a row with no organisation is invisible rather than wrong
+  it("counts rows with no organisation at boot, warns when there are any, and writes nothing", async () => {
+    process.env.NEXT_RUNTIME = "nodejs";
+    delete process.env.ENCRYPTION_KEY;
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    connectDB.mockImplementation(() => Promise.resolve());
+    backfillTenants.mockReset().mockResolvedValue({ total: 3, byCollection: { tasks: 3 } });
+    const { register } = await import("./instrumentation");
+
+    await register();
+
+    expect(backfillTenants).toHaveBeenCalledWith(expect.anything(), { apply: false });
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("WARNING: 3 row(s) belong to no organisation"));
+    expect(startPmScheduler).toHaveBeenCalledTimes(1);
+  });
+
+  it("says nothing when every row has an organisation, and still starts when counting fails", async () => {
+    process.env.NEXT_RUNTIME = "nodejs";
+    delete process.env.ENCRYPTION_KEY;
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    connectDB.mockImplementation(() => Promise.resolve());
+    backfillTenants.mockReset().mockRejectedValueOnce(new Error("listCollections failed"));
+    const { register } = await import("./instrumentation");
+
+    await register();
+
+    expect(error).toHaveBeenCalledWith("Failed to count rows with no organisation:", expect.any(Error));
+    expect(error).not.toHaveBeenCalledWith(expect.stringContaining("belong to no organisation"));
     expect(startPmScheduler).toHaveBeenCalledTimes(1);
   });
 

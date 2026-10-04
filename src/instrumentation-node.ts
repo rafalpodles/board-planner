@@ -90,6 +90,18 @@ async function bootWhenDatabaseIsReady(): Promise<void> {
     const { scopedToDefaultTenant } = await import("@/lib/db-scope");
     const db = scopedToDefaultTenant();
 
+    const { backfillTenants } = await import("@/lib/tenant-migration");
+    const { default: mongoose } = await import("mongoose");
+    const untenanted = await backfillTenants(mongoose.connection, { apply: false }).catch((error) => {
+      console.error("Failed to count rows with no organisation:", error);
+      return null;
+    });
+    if (untenanted && untenanted.total > 0) {
+      console.error(
+        `WARNING: ${untenanted.total} row(s) belong to no organisation and are invisible to every request; scripts/migrate-tenant.ts gives them one`
+      );
+    }
+
     // Said, not refused: the state can arise at runtime (a demotion, a deactivation, an unlink), and
     // exiting would turn a restart into an outage for every member, not only the administrators
     const { adminsLockedOut } = await import("@/lib/password-sign-in");

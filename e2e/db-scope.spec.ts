@@ -4,6 +4,8 @@ import { E2E_MONGODB_URI, e2eDatabaseName } from "./seed";
 import { SCOPED_MODELS, scoped, TenantKeyError, UnscopableError } from "../src/lib/db-scope";
 import { scopedModelNames } from "../src/lib/tenant-migration";
 import { Sprint } from "../src/models/sprint";
+import { getSettings, updateSettings } from "../src/models/settings";
+import { DEFAULT_TENANT_ID } from "../src/lib/tenant-field";
 
 mongoose.set("autoIndex", false);
 mongoose.set("autoCreate", false);
@@ -188,3 +190,30 @@ test("the schema default is not what scopes a scoped write: the default tenant i
   expect(names(await scoped(defaultTenant).Sprint.find({}))).toEqual(["default-one"]);
   expect(await Sprint.countDocuments({})).toBe(4);
 });
+
+test("a document's tenant cannot be moved, by a save or by a raw update", async () => {
+  const doc = await scoped(B).Sprint.findOne({ name: "b-one" });
+  doc!.set("tenant", A);
+  await doc!.save();
+  await Sprint.updateOne({ name: "b-one" }, { $set: { tenant: A } });
+
+  expect(B.equals((await rawRows()).find((row) => row.name === "b-one")?.tenant)).toBe(true);
+});
+
+test("a write through the model that names no tenant is refused rather than given one", async () => {
+  await expect(Sprint.create(sprint("orphan"))).rejects.toThrow(/tenant.*required/i);
+
+  expect((await rawRows()).find((row) => row.name === "orphan")).toBeUndefined();
+});
+
+test("the instance's settings row is created in the default tenant, by a read or by a change", async () => {
+  const settings = () => mongoose.connection.db!.collection("settings").find({}).toArray();
+
+  await updateSettings({ $set: { aiModel: "first" } });
+  expect(await settings()).toMatchObject([{ tenant: DEFAULT_TENANT_ID, aiModel: "first" }]);
+
+  await mongoose.connection.db!.collection("settings").deleteMany({});
+  await getSettings();
+  expect(await settings()).toMatchObject([{ tenant: DEFAULT_TENANT_ID }]);
+});
+
