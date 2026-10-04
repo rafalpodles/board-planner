@@ -149,7 +149,11 @@ export async function POST(request: Request) {
       role: isBootstrap ? "admin" : "member",
     });
     await revokePendingInvitationsFor(email);
-    if (isBootstrap && organisation.value) await nameOrganisation(organisation.value);
+    if (isBootstrap && organisation.value) {
+      await nameOrganisation(organisation.value).catch((err) =>
+        console.error("[users] naming the organisation failed; the account was created", err)
+      );
+    }
     // The account's own beginning, which nothing recorded: the log knew that somebody's display
     // name changed and not that the account existed. `target` is the username because this row has
     // to still name them after the account is gone.

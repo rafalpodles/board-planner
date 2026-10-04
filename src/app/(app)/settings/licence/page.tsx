@@ -21,10 +21,10 @@ export default function LicenceSettingsPage() {
     try {
       const [summary, entitlements] = await Promise.all([
         api.get("/api/admin/licence"),
-        api.get("/api/entitlements"),
+        api.get("/api/entitlements").catch(() => null),
       ]);
       setLicence(summary);
-      setOrganisation(entitlements.organisation ?? "");
+      setOrganisation(entitlements?.organisation ?? "");
     } catch {
       setFailed(true);
     }

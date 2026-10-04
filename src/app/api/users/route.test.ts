@@ -81,7 +81,7 @@ const VALID = { password: "password123", fullName: "Somebody" };
 
 beforeEach(() => {
   create.mockReset();
-  nameOrganisation.mockReset();
+  nameOrganisation.mockReset().mockResolvedValue(undefined);
   revokePendingInvitationsFor.mockReset();
   logInstanceAudit.mockReset();
   create.mockResolvedValue({ _id: "u1", username: "newcomer" });
@@ -249,6 +249,19 @@ describe("claiming an instance nobody has claimed", () => {
 
     expect(res.status).toBe(201);
     expect(nameOrganisation).toHaveBeenCalledWith("Rafał-org");
+  });
+
+  it("still creates the first account when saving its organisation name fails", async () => {
+    countDocuments.mockResolvedValue(0);
+    getAuthUser.mockResolvedValue(null);
+    nameOrganisation.mockRejectedValue(new Error("mongo went away"));
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await post({ ...VALID, username: "firstadmin", setupCode: "operator-held-setup-code", organisation: "Acme" });
+
+    expect(res.status).toBe(201);
+    expect(logged).toHaveBeenCalled();
+    logged.mockRestore();
   });
 
   it("leaves the organisation as it is when the first account gives no name, or a blank one", async () => {
