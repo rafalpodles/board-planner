@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { scopedFor, scopedToDefaultTenant, type ScopedDb } from "@/lib/db-scope";
+import { scopedFor, scopedToDefaultTenant, type ScopedDb, tenantOf } from "@/lib/db-scope";
 import { getAuthUser, getClientIp } from "@/lib/auth";
 import { isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
 import {
@@ -239,6 +239,7 @@ async function mayJoin(provider: OidcProvider, claims: VerifiedClaims) {
 async function signInAs(user: IUser, request: Request, origin: string, clientIp: string | null, path: string) {
   const { token, absoluteExpiresAt } = await createSession({
     userId: user._id,
+    tenant: tenantOf(user),
     userAgent: request.headers.get("user-agent"),
     ip: clientIp,
   });

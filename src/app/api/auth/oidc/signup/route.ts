@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { scopedToDefaultTenant } from "@/lib/db-scope";
+import { scopedToDefaultTenant, tenantOf } from "@/lib/db-scope";
 import { readJsonBody } from "@/lib/request-body";
 import { getClientIp } from "@/lib/auth";
 import { isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
@@ -115,6 +115,7 @@ export async function POST(request: Request) {
 
   const { token, absoluteExpiresAt } = await createSession({
     userId: user._id,
+    tenant: tenantOf(user),
     userAgent: request.headers.get("user-agent"),
     ip: clientIp,
   });

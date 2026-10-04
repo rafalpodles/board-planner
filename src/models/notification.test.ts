@@ -1,9 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { Types } from "mongoose";
 import { Notification } from "./notification";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const row = (extra: Record<string, unknown> = {}) =>
   new Notification({
+    tenant: DEFAULT_TENANT_ID,
     recipient: new Types.ObjectId(),
     type: "board_access",
     project: new Types.ObjectId(),

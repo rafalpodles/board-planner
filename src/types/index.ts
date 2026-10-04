@@ -179,6 +179,7 @@ export interface IUser {
 }
 
 export interface ISession {
+  tenant?: Types.ObjectId;
   _id: Types.ObjectId;
   tokenHash: string;
   user: Types.ObjectId | IUser;

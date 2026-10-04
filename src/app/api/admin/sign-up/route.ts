@@ -3,11 +3,10 @@ import { connectDB } from "@/lib/db";
 import { withAdmin } from "@/lib/middleware";
 import { readJsonBody } from "@/lib/request-body";
 import { logInstanceAudit } from "@/lib/instanceAudit";
-import { upsertSingleton } from "@/lib/singleton";
 import { parseSignUpDomains } from "@/lib/sign-up-domains";
 import { adminGroup } from "@/lib/oidc/admin-group";
 import { configuredProviders } from "@/lib/oidc/providers";
-import { getSettings, Settings } from "@/models/settings";
+import { getSettings, updateSettings } from "@/models/settings";
 
 function view(domains: string[]) {
   const providers = configuredProviders();
@@ -37,7 +36,7 @@ export const PUT = withAdmin(async (request, { user, db }) => {
 
   await connectDB();
   const before = (await getSettings()).signUpDomains ?? [];
-  const settings = await upsertSingleton(Settings, { $set: { signUpDomains: parsed.value } });
+  const settings = await updateSettings({ $set: { signUpDomains: parsed.value } });
   void logInstanceAudit(db, {
     action: "instance_settings_changed",
     user: user._id,

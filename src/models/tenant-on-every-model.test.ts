@@ -56,11 +56,14 @@ describe("every model carries a tenant", () => {
     for (const file of modelFiles) expect(all, file).toContain(`"./${file}"`);
   });
 
-  it.each(scopedModelNames())("%s has a required tenant that defaults to the default tenant", (name) => {
+  it.each(scopedModelNames())("%s has a required, immutable tenant that nothing fills in for the writer", (name) => {
     const tenant = mongoose.model(name).schema.path("tenant");
     expect(tenant, `${name} is missing withTenant()`).toBeDefined();
     expect(tenant.isRequired).toBe(true);
-    expect(String(new (mongoose.model(name))().get("tenant"))).toBe(String(DEFAULT_TENANT_ID));
+    expect((tenant.options as { immutable?: boolean }).immutable).toBe(true);
+    const unstamped = new (mongoose.model(name))();
+    expect(unstamped.get("tenant")).toBeUndefined();
+    expect(unstamped.validateSync()?.errors.tenant, name).toBeDefined();
   });
 
   it.each(UNSCOPED_MODELS)("%s is the exception and has no tenant", (name) => {
