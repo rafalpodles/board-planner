@@ -31,6 +31,30 @@ beforeEach(() => {
   check.mockResolvedValue(true);
 });
 
+describe("a project the grant layer refuses to an instance admin (BP-664)", () => {
+  it("answers exactly as for a project that does not exist, so another tenant's ids are no oracle", async () => {
+    getAuthUser.mockResolvedValue(INSTANCE_ADMIN);
+    projectFindOne.mockReturnValue({ select: () => Promise.resolve(null) });
+    const unknownKey = await withProjectAccess(vi.fn())(request(), context("NOPE"));
+
+    check.mockResolvedValue(false);
+    const refused = await withProjectAccess(vi.fn())(request(), context());
+    const refusedOwner = await withProjectOwner(vi.fn())(request(), context());
+
+    expect(unknownKey.status).toBe(404);
+    for (const res of [refused, refusedOwner]) {
+      expect(res.status).toBe(unknownKey.status);
+      expect(await res.json()).toEqual({ error: "Project not found" });
+    }
+  });
+
+  it("still refuses a member with the same 403 an unknown project gets", async () => {
+    check.mockResolvedValue(false);
+    const res = await withProjectAccess(vi.fn())(request(), context());
+    expect(res.status).toBe(403);
+  });
+});
+
 describe("withProjectAccess", () => {
   it("asks the grant layer for access on the project in the path", async () => {
     const handler = vi.fn().mockResolvedValue(new Response("ok"));

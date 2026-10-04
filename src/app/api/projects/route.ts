@@ -3,7 +3,7 @@ import { duplicateKeyField } from "@/lib/mongo-errors";
 import { isValidProjectKey, PROJECT_KEY_RULE } from "@/lib/identifiers";
 import { connectDB } from "@/lib/db";
 import { withAuth, withAdmin } from "@/lib/middleware";
-import { check, accessibleProjectIds } from "@/lib/grants";
+import { accessibleProjectIds, administeredProjectIds } from "@/lib/grants";
 import { legacyFieldSeeds } from "@/lib/legacy-fields";
 import { sanitizeMcpServers } from "@/lib/pm/config";
 import { sanitizeProjectSecrets } from "@/lib/project-secrets";
@@ -40,7 +40,8 @@ export const GET = withAuth(async (_request, { user, db }) => {
   const statsByProject = new Map(taskStats.map((s) => [String(s._id), s]));
   const withActiveSprint = new Set(activeSprints.map((s) => String(s.project)));
 
-  const sanitized = await Promise.all(projects.map(async (p) => {
+  const administered = await administeredProjectIds(db, user, ids.map(String));
+  const sanitized = projects.map((p) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const obj: any = sanitizeProjectSecrets(p.toObject());
     if (obj.pm) obj.pm.mcpServers = sanitizeMcpServers(obj.pm.mcpServers);
@@ -48,9 +49,9 @@ export const GET = withAuth(async (_request, { user, db }) => {
     const stats = statsByProject.get(String(p._id));
     obj.taskCount = stats?.taskCount ?? 0;
     obj.hasActiveSprint = withActiveSprint.has(String(p._id));
-    obj.canAdmin = await check(db, user, String(p._id), "admin");
+    obj.canAdmin = administered.has(String(p._id));
     return obj;
-  }));
+  });
   return NextResponse.json(sanitized);
 });
 

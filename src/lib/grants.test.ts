@@ -5,9 +5,13 @@ import { Types } from "mongoose";
 
 const P = "69a52e3b399b27d3cbb2c5a5";
 const OTHER = "69a52e3b399b27d3cbb2c5a6";
+const HOME = new Types.ObjectId("000000000000000000000001");
+const ELSEWHERE = new Types.ObjectId("0000000000000000000000b2");
+const HERE = { id: P, tenant: HOME };
 
 function principal(over: Partial<Principal> = {}): Principal {
   return {
+    tenant: HOME,
     instanceAdmin: false,
     tokenScoped: false,
     tokenScope: null,
@@ -35,50 +39,67 @@ function fakeUser(over: Partial<IUser> = {}) {
 describe("decide", () => {
   it("gives an instance admin both access and admin without any grant", () => {
     const p = principal({ instanceAdmin: true });
-    expect(decide(p, null, "access", P)).toBe(true);
-    expect(decide(p, null, "admin", P)).toBe(true);
+    expect(decide(p, null, "access", HERE)).toBe(true);
+    expect(decide(p, null, "admin", HERE)).toBe(true);
   });
 
   it("gives an owner both access and admin", () => {
     const p = principal();
-    expect(decide(p, "owner", "access", P)).toBe(true);
-    expect(decide(p, "owner", "admin", P)).toBe(true);
+    expect(decide(p, "owner", "access", HERE)).toBe(true);
+    expect(decide(p, "owner", "admin", HERE)).toBe(true);
   });
 
   it("gives a member access but never admin", () => {
     const p = principal();
-    expect(decide(p, "member", "access", P)).toBe(true);
-    expect(decide(p, "member", "admin", P)).toBe(false);
+    expect(decide(p, "member", "access", HERE)).toBe(true);
+    expect(decide(p, "member", "admin", HERE)).toBe(false);
   });
 
   it("refuses someone with no grant at all", () => {
     const p = principal();
-    expect(decide(p, null, "access", P)).toBe(false);
-    expect(decide(p, null, "admin", P)).toBe(false);
+    expect(decide(p, null, "access", HERE)).toBe(false);
+    expect(decide(p, null, "admin", HERE)).toBe(false);
   });
 
   it("refuses a project outside a token's scope even to an owner", () => {
     const p = principal({ tokenScoped: true, tokenScope: [OTHER] });
-    expect(decide(p, "owner", "access", P)).toBe(false);
+    expect(decide(p, "owner", "access", HERE)).toBe(false);
   });
 
   it("never lets a scoped token administer, even as owner in scope", () => {
     const p = principal({ tokenScoped: true, tokenScope: [P] });
-    expect(decide(p, "owner", "admin", P)).toBe(false);
-    expect(decide(p, "owner", "access", P)).toBe(true);
+    expect(decide(p, "owner", "admin", HERE)).toBe(false);
+    expect(decide(p, "owner", "access", HERE)).toBe(true);
   });
 
   // The regression the spec is built around: applyTokenScope downgrades an instance admin to
   // member, and instance admins hold no grant rows, so a naive lookup strips all their access.
   it("keeps an instance admin's scoped token working inside its scope", () => {
     const p = principal({ tokenScoped: true, tokenScope: [P], instanceAdminBeforeScope: true });
-    expect(decide(p, null, "access", P)).toBe(true);
-    expect(decide(p, null, "admin", P)).toBe(false);
+    expect(decide(p, null, "access", HERE)).toBe(true);
+    expect(decide(p, null, "admin", HERE)).toBe(false);
   });
 
   it("still confines an instance admin's scoped token to its scope", () => {
     const p = principal({ tokenScoped: true, tokenScope: [OTHER], instanceAdminBeforeScope: true });
-    expect(decide(p, null, "access", P)).toBe(false);
+    expect(decide(p, null, "access", HERE)).toBe(false);
+  });
+});
+
+describe("decide across tenants (BP-664)", () => {
+  it("refuses a project of another tenant before anything else, even to an instance admin or an owner", () => {
+    const elsewhere = { id: P, tenant: ELSEWHERE };
+    expect(decide(principal({ instanceAdmin: true }), null, "access", elsewhere)).toBe(false);
+    expect(decide(principal({ instanceAdminBeforeScope: true, tokenScope: [P] }), null, "access", elsewhere)).toBe(false);
+    expect(decide(principal(), "owner", "access", elsewhere)).toBe(false);
+  });
+
+  it("refuses a project whose tenant could not be established", () => {
+    expect(decide(principal({ instanceAdmin: true }), null, "access", { id: P, tenant: null })).toBe(false);
+  });
+
+  it("lets the same principal in at home", () => {
+    expect(decide(principal({ instanceAdmin: true }), null, "admin", HERE)).toBe(true);
   });
 });
 
@@ -86,6 +107,7 @@ describe("principalOf", () => {
   it("maps a plain user to the right principal", () => {
     const user = fakeUser({ role: "member" });
     expect(principalOf(user)).toEqual({
+      tenant: HOME,
       instanceAdmin: false,
       tokenScoped: false,
       tokenScope: null,
@@ -163,6 +185,15 @@ function lean(value: unknown) {
   return { select: () => ({ lean: () => Promise.resolve(value) }) };
 }
 
+let projectsElsewhere = new Set<string>();
+beforeEach(() => {
+  projectsElsewhere = new Set();
+  projectFind.mockReset();
+  projectFind.mockImplementation((filter: { _id?: { $in?: string[] } }) =>
+    lean((filter?._id?.$in ?? []).filter((id) => !projectsElsewhere.has(String(id))).map((id) => ({ _id: id })))
+  );
+});
+
 describe("check", () => {
   beforeEach(() => {
     findOne.mockReset();
@@ -182,10 +213,32 @@ describe("check", () => {
     expect(await check(scopedToDefaultTenant(), user, P, "access")).toBe(false);
   });
 
-  it("answers for an instance admin without querying at all", async () => {
+  it("answers for an instance admin without reading a grant", async () => {
     const user = { _id: "a1", role: "admin" } as never;
     expect(await check(scopedToDefaultTenant(), user, P, "admin")).toBe(true);
     expect(findOne).not.toHaveBeenCalled();
+  });
+
+  it("refuses a project of another tenant even to an instance admin, without reading a grant (BP-664)", async () => {
+    projectsElsewhere.add(P);
+    const admin = { _id: "a1", role: "admin" } as never;
+    expect(await check(scopedToDefaultTenant(), admin, P, "access")).toBe(false);
+    findOne.mockReturnValue(lean({ relation: "owner" }));
+    expect(await check(scopedToDefaultTenant(), { _id: "u1", role: "member" } as never, P, "access")).toBe(false);
+    expect(findOne).not.toHaveBeenCalled();
+    expect(projectFind).toHaveBeenCalledWith({ _id: { $in: [P] }, tenant: DEFAULT_TENANT_ID });
+  });
+
+  it("refuses when the db it was handed is not the caller's own tenant, before reading anything", async () => {
+    const admin = { _id: "a1", role: "admin", tenant: ELSEWHERE } as never;
+    expect(await check(scopedToDefaultTenant(), admin, P, "access")).toBe(false);
+    expect(projectFind).not.toHaveBeenCalled();
+  });
+
+  it("refuses an id that is not a project id at all, without querying", async () => {
+    const admin = { _id: "a1", role: "admin" } as never;
+    expect(await check(scopedToDefaultTenant(), admin, "BP", "access")).toBe(false);
+    expect(projectFind).not.toHaveBeenCalled();
   });
 
   it("answers out-of-scope tokens without querying at all", async () => {
@@ -290,6 +343,14 @@ describe("administeredProjectIds", () => {
 // ignored the query, which meant the tests passed with `object`, `objectType` or `role` deleted
 // from it — including the mutation that treats every recipient as an instance admin and turns the
 // whole access filter into a no-op. Found by an independent review of this branch.
+describe("administeredProjectIds across tenants (BP-664)", () => {
+  it("leaves out a project of another tenant, even for an instance admin", async () => {
+    projectsElsewhere.add(OTHER);
+    const admin = { _id: "a1", role: "admin" } as never;
+    expect([...(await administeredProjectIds(scopedToDefaultTenant(), admin, [P, OTHER]))]).toEqual([P]);
+  });
+});
+
 describe("recipientsWithAccess", () => {
   const MEMBER = "507f1f77bcf86cd799439011";
   const REMOVED = "507f1f77bcf86cd799439012";
@@ -375,6 +436,12 @@ describe("recipientsWithAccess", () => {
    * BP-400. Assignment asks the same question delivery has asked since BP-328, so that a task
    * cannot be handed to somebody who will never be told about it and cannot open it.
    */
+  it("keeps nobody when the project is not in this tenant, an instance admin included (BP-664)", async () => {
+    grant(MEMBER);
+    projectsElsewhere.add(P);
+    expect(await recipientsWithAccess(scopedToDefaultTenant(), [MEMBER, ADMIN], P)).toEqual([]);
+  });
+
   describe("canBeAssigned", () => {
     it("accepts somebody who holds a grant on this board", async () => {
       grant(MEMBER);

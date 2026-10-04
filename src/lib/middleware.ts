@@ -219,8 +219,8 @@ async function withResolvedIds(
   return { ok: true, context: { ...context, params: Promise.resolve(resolved) } };
 }
 
-// An unknown identifier must look the same to a non-admin as one they cannot
-// reach, otherwise the 400/403 split turns into a project-key oracle
+// An unknown identifier must look the same to a non-admin as one they cannot reach, otherwise the
+// 400/403 split turns into a project-key oracle; and to an admin as one in another tenant (BP-664)
 function unresolvedProject(user: IUser) {
   return user.role === "admin"
     ? NextResponse.json({ error: "Project not found" }, { status: 404 })
@@ -238,7 +238,7 @@ export function withProjectOwner(handler: AuthenticatedHandler) {
     }
 
     if (!(await check(context.db, user, projectId, "admin"))) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      return unresolvedProject(user);
     }
 
     const resolved = await withResolvedIds(context, params, projectId);
@@ -440,7 +440,7 @@ export function withProjectAccess(handler: AuthenticatedHandler) {
     }
 
     if (!(await check(context.db, user, projectId, "access"))) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      return unresolvedProject(user);
     }
 
     const resolved = await withResolvedIds(context, params, projectId);

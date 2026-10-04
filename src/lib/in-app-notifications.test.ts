@@ -31,6 +31,13 @@ const MAILBOXES: Record<string, { email: string; fullName: string }> = {
 
 vi.mock("@/models/notification", () => ({ Notification: { insertMany: (...a: unknown[]) => insertMany(...a) } }));
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+vi.mock("@/models/project", () => ({
+  Project: {
+    find: (filter: { _id: { $in: unknown[] } }) => ({
+      select: () => ({ lean: async () => filter._id.$in.map((_id) => ({ _id })) }),
+    }),
+  },
+}));
 vi.mock("@/models/grant", () => ({
   Grant: {
     find: (...a: unknown[]) => {
