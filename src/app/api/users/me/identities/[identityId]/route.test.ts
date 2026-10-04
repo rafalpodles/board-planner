@@ -39,7 +39,6 @@ const { DELETE } = await import("./route");
 const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 
 const ID = "64b0000000000000000000aa";
-const { currentTenantId } = await import("@/lib/tenant-field");
 const unlink = () =>
   DELETE(new Request(`http://x/api/users/me/identities/${ID}`, { method: "DELETE" }), {
     params: Promise.resolve({ identityId: ID }),
@@ -136,7 +135,7 @@ describe("DELETE /api/users/me/identities/:id", () => {
     identityCount.mockResolvedValueOnce(1).mockResolvedValueOnce(0);
     await unlink();
     expect(identityInsert).toHaveBeenLastCalledWith(
-      expect.objectContaining({ tenant: currentTenantId() })
+      expect.objectContaining({ tenant: DEFAULT_TENANT_ID })
     );
 
     const own = { _id: ID, provider: "oidc", tenant: "someone-elses" };

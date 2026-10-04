@@ -1,6 +1,6 @@
-import mongoose, { Schema, Model } from "mongoose";
+import mongoose, { Schema, Model, type UpdateQuery } from "mongoose";
 import { upsertSingleton } from "@/lib/singleton";
-import { withTenant } from "@/lib/tenant-field";
+import { DEFAULT_TENANT_ID, withTenant } from "@/lib/tenant-field";
 
 export interface ISettings {
   _id: mongoose.Types.ObjectId;
@@ -34,6 +34,14 @@ withTenant(settingsSchema);
 export const Settings: Model<ISettings> =
   mongoose.models.Settings || mongoose.model<ISettings>("Settings", settingsSchema);
 
+// TODO(BP-667): one Settings row per tenant
+export function updateSettings(update: UpdateQuery<ISettings>): Promise<ISettings> {
+  return upsertSingleton(Settings, {
+    ...update,
+    $setOnInsert: { ...(update.$setOnInsert ?? {}), tenant: DEFAULT_TENANT_ID },
+  });
+}
+
 export async function getSettings(): Promise<ISettings> {
-  return upsertSingleton(Settings, { $setOnInsert: { aiModel: "gpt-4o-mini" } });
+  return updateSettings({ $setOnInsert: { aiModel: "gpt-4o-mini" } });
 }

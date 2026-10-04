@@ -1,5 +1,5 @@
 import { connectDB } from "@/lib/db";
-import { scopedToDefaultTenant, type ScopedDb } from "@/lib/db-scope";
+import { scopedToDefaultTenant, type ScopedDb, tenantOf } from "@/lib/db-scope";
 import { passwordSignInEnabled } from "@/lib/password-sign-in";
 import { configuredProviders } from "@/lib/oidc/providers";
 import { getClientIp, verifyCredentials } from "@/lib/auth";
@@ -526,6 +526,7 @@ export async function POST(req: Request) {
   // session-bound ticket, so no ticket is unbound any more (BP-383 review).
   const session = await createSession({
     userId: user._id,
+    tenant: tenantOf(user),
     userAgent: req.headers.get("user-agent"),
     ip: clientIp,
   });

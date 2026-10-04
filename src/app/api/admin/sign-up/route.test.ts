@@ -1,16 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const getAuthUser = vi.fn();
-const upsertSingleton = vi.fn();
+const updateSettings = vi.fn();
 const logInstanceAudit = vi.fn();
 let stored: string[] = [];
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ getAuthUser, RateLimitError: class RateLimitError extends Error {} }));
 vi.mock("@/lib/grants", () => ({ check: vi.fn(), accessibleProjectIds: vi.fn() }));
-vi.mock("@/lib/singleton", () => ({ upsertSingleton }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
-vi.mock("@/models/settings", () => ({ Settings: {}, getSettings: async () => ({ signUpDomains: stored }) }));
+vi.mock("@/models/settings", () => ({ getSettings: async () => ({ signUpDomains: stored }), updateSettings }));
 const OIDC = { id: "oidc", label: "Acme SSO", linksByAddress: true };
 const GITHUB = { id: "github", label: "GitHub", linksByAddress: false };
 let providers = [OIDC, GITHUB];
@@ -29,7 +28,7 @@ beforeEach(() => {
   stored = ["old.example"];
   providers = [OIDC, GITHUB];
   getAuthUser.mockResolvedValue(ADMIN);
-  upsertSingleton.mockImplementation(async (_model: unknown, update: { $set: { signUpDomains: string[] } }) => ({
+  updateSettings.mockImplementation(async (update: { $set: { signUpDomains: string[] } }) => ({
     signUpDomains: update.$set.signUpDomains,
   }));
   process.env.OIDC_ADMIN_GROUP = "planner-admins";
@@ -74,7 +73,7 @@ describe("PUT /api/admin/sign-up", () => {
     const res = await put({ domains: ["Corp.Example", "@corp.example", "lab.example"] });
 
     expect(res.status).toBe(200);
-    expect(upsertSingleton).toHaveBeenCalledWith({}, { $set: { signUpDomains: ["corp.example", "lab.example"] } });
+    expect(updateSettings).toHaveBeenCalledWith({ $set: { signUpDomains: ["corp.example", "lab.example"] } });
     expect((await res.json()).domains).toEqual(["corp.example", "lab.example"]);
     expect(logInstanceAudit).toHaveBeenCalledWith(
       scopedToDefaultTenant(),
@@ -88,7 +87,7 @@ describe("PUT /api/admin/sign-up", () => {
   it("closes sign-up with an empty list", async () => {
     await put({ domains: [] });
 
-    expect(upsertSingleton).toHaveBeenCalledWith({}, { $set: { signUpDomains: [] } });
+    expect(updateSettings).toHaveBeenCalledWith({ $set: { signUpDomains: [] } });
     expect(logInstanceAudit.mock.calls[0][1].detail).toBe("sign-up domains: old.example → none");
   });
 
@@ -96,20 +95,20 @@ describe("PUT /api/admin/sign-up", () => {
     const res = await put({ domains: ["corp.example", "*.corp.example"] });
 
     expect(res.status).toBe(400);
-    expect(upsertSingleton).not.toHaveBeenCalled();
+    expect(updateSettings).not.toHaveBeenCalled();
   });
 
   it("refuses a machine credential, even an admin's", async () => {
     getAuthUser.mockResolvedValue({ ...ADMIN, viaMachineCredential: true });
 
     expect((await put({ domains: ["corp.example"] })).status).toBe(403);
-    expect(upsertSingleton).not.toHaveBeenCalled();
+    expect(updateSettings).not.toHaveBeenCalled();
   });
 
   it("refuses a member", async () => {
     getAuthUser.mockResolvedValue({ ...ADMIN, role: "member" });
 
     expect((await put({ domains: ["corp.example"] })).status).toBe(403);
-    expect(upsertSingleton).not.toHaveBeenCalled();
+    expect(updateSettings).not.toHaveBeenCalled();
   });
 });

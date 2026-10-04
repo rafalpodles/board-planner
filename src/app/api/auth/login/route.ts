@@ -5,6 +5,7 @@ import { getClientIp, verifyCredentials } from "@/lib/auth";
 import { isDatabaseUnreachable } from "@/lib/db-errors";
 import { databaseUnavailable } from "@/lib/middleware";
 import { lockoutKey, sourceKey, withLockout } from "@/lib/rate-limit";
+import { tenantOf } from "@/lib/db-scope";
 import {
   buildSessionCookie,
   createSession,
@@ -59,6 +60,7 @@ export async function POST(request: Request) {
 
   const { token, absoluteExpiresAt } = await createSession({
     userId: user._id,
+    tenant: tenantOf(user),
     userAgent: request.headers.get("user-agent"),
     ip: clientIp,
   });

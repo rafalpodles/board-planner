@@ -334,6 +334,7 @@ export function provenanceRefusal(request: Request): NextResponse | null {
 
 export async function createSession(params: {
   userId: Types.ObjectId | string;
+  tenant: Types.ObjectId;
   userAgent?: string | null;
   ip?: string | null;
 }): Promise<{
@@ -350,6 +351,7 @@ export async function createSession(params: {
   const expiresAt = new Date(Math.min(now + SESSION_IDLE_TTL_MS, absoluteExpiresAt.getTime()));
 
   const row = await Session.create({
+    tenant: params.tenant,
     tokenHash: sha256(token),
     user: params.userId,
     expiresAt,

@@ -3,7 +3,6 @@ import { isValidObjectId } from "mongoose";
 import { withAuth } from "@/lib/middleware";
 import { connectDB } from "@/lib/db";
 import { logInstanceAudit } from "@/lib/instanceAudit";
-import { currentTenantId } from "@/lib/tenant-field";
 import { isEmailConfigured } from "@/lib/email";
 import { liveIdentityFilter, providerById } from "@/lib/oidc/providers";
 import { Identity } from "@/models/identity";
@@ -51,7 +50,7 @@ export const DELETE = withAuth(async (_request, { params, user, db }) => {
   // Two unlinks in two tabs each counted the other's provider as the way in that remains
   if (!passwordSignsIn && removesAWayIn && (await db.Identity.countDocuments({ user: user._id, ...live })) === 0) {
     // Straight to the collection, so the row comes back as it was, linkedAt included, and with a tenant
-    await Identity.collection.insertOne({ tenant: currentTenantId(), ...identity });
+    await Identity.collection.insertOne({ tenant: db.tenant, ...identity });
     return NextResponse.json({ error: lastWayIn }, { status: 409 });
   }
 
