@@ -79,7 +79,7 @@ export const POST = withAuth(async (request, { user, db }) => {
   // A token can only be scoped to projects its owner can access — and a scoped token may not
   // mint one that reaches past its own scope, which accessibleProjectIds already intersects.
   if (scope.length > 0) {
-    const ids = await accessibleProjectIds(user);
+    const ids = await accessibleProjectIds(db, user);
     const accessible = await db.Project.find(ids === null ? {} : { _id: { $in: ids } })
       .select("_id")
       .lean();

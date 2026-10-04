@@ -52,6 +52,7 @@ const {
   digestAttemptLimit,
   lineFor,
 } = await import("@/lib/digest");
+const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
 
 /** What the module's own interval allows, so the fixtures below cannot drift from the rule. */
 const ATTEMPT_LIMIT = digestAttemptLimit();
@@ -445,7 +446,7 @@ describe("digestTick", () => {
     expect(await digestTick(morning)).toBe(0);
     expect(sendEmail).not.toHaveBeenCalled();
     expect(userFindOneAndUpdate).toHaveBeenCalledWith(
-      { _id: "u1", lastDigestDay: { $ne: "2026-08-17" } },
+      { _id: "u1", lastDigestDay: { $ne: "2026-08-17" }, tenant: DEFAULT_TENANT_ID },
       { $set: { lastDigestDay: "2026-08-17" } }
     );
   });
@@ -485,6 +486,7 @@ describe("digestTick", () => {
       email: { $ne: "" },
       deactivatedAt: null,
       lastDigestDay: { $ne: "2026-08-17" },
+      tenant: DEFAULT_TENANT_ID,
     });
   });
 
@@ -562,7 +564,7 @@ describe("digestTick", () => {
     // Back to "", which is the schema's default and what a fresh document holds — and the attempt
     // recorded against today, which is what stops this retrying until midnight
     expect(userUpdateOne).toHaveBeenCalledWith(
-      { _id: "u1", lastDigestDay: MORNING_DAY },
+      { _id: "u1", lastDigestDay: MORNING_DAY, tenant: DEFAULT_TENANT_ID },
       { $set: { lastDigestDay: "", digestRetry: { day: MORNING_DAY, attempts: 1 } } }
     );
     // Named: `email.ts` logs "Failed to send email" without saying whose message it was, so an
@@ -590,7 +592,7 @@ describe("digestTick", () => {
     // The claim stays: no `lastDigestDay: ""` in this write, so the candidate query passes this
     // reader over for the rest of the day
     expect(userUpdateOne).toHaveBeenCalledWith(
-      { _id: "u1", lastDigestDay: MORNING_DAY },
+      { _id: "u1", lastDigestDay: MORNING_DAY, tenant: DEFAULT_TENANT_ID },
       { $set: { digestRetry: { day: MORNING_DAY, attempts: ATTEMPT_LIMIT } } }
     );
     expect(logged).toHaveBeenCalledWith(expect.stringContaining("waiting for tomorrow"));
@@ -610,7 +612,7 @@ describe("digestTick", () => {
     await digestTick(morning);
 
     expect(userUpdateOne).toHaveBeenCalledWith(
-      { _id: "u1", lastDigestDay: MORNING_DAY },
+      { _id: "u1", lastDigestDay: MORNING_DAY, tenant: DEFAULT_TENANT_ID },
       { $set: { lastDigestDay: "", digestRetry: { day: MORNING_DAY, attempts: ATTEMPT_LIMIT - 1 } } }
     );
   });
@@ -627,7 +629,7 @@ describe("digestTick", () => {
     await digestTick(morning);
 
     expect(userUpdateOne).toHaveBeenCalledWith(
-      { _id: "u1", lastDigestDay: MORNING_DAY },
+      { _id: "u1", lastDigestDay: MORNING_DAY, tenant: DEFAULT_TENANT_ID },
       { $set: { lastDigestDay: "", digestRetry: { day: MORNING_DAY, attempts: 1 } } }
     );
   });
@@ -674,7 +676,7 @@ describe("digestTick", () => {
 
     expect(await digestTick(morning)).toBe(0);
     expect(userUpdateOne).toHaveBeenCalledWith(
-      { _id: "u1", lastDigestDay: MORNING_DAY },
+      { _id: "u1", lastDigestDay: MORNING_DAY, tenant: DEFAULT_TENANT_ID },
       { $set: { lastDigestDay: "", digestRetry: { day: MORNING_DAY, attempts: 1 } } }
     );
   });
@@ -872,7 +874,7 @@ describe("how long a failing digest keeps being retried", () => {
 
     try {
       expect(userUpdateOne).toHaveBeenCalledWith(
-        { _id: "u1", lastDigestDay: MORNING_DAY },
+        { _id: "u1", lastDigestDay: MORNING_DAY, tenant: DEFAULT_TENANT_ID },
         { $set: { lastDigestDay: "", digestRetry: { day: MORNING_DAY, attempts: 1 } } }
       );
     } finally {

@@ -376,7 +376,7 @@ describe("what a channel edit records", () => {
       ctx()
     );
 
-    expect(logProjectAudit).toHaveBeenCalledWith("p1", "owner1", "settings_updated", [
+    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), "p1", "owner1", "settings_updated", [
       "Notification channel Slack · Name: Slack → Ops",
       "Notification channel Slack · Webhook URL replaced",
       "Notification channel Slack · Events: task_created → status_changed",
@@ -451,6 +451,7 @@ describe("DELETE /api/projects/:projectId/notifications", () => {
     expect(findOne).not.toHaveBeenCalled();
     expect(save).not.toHaveBeenCalled();
     expect(logProjectAudit).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       "p1",
       "owner1",
       "settings_updated",
@@ -488,7 +489,7 @@ describe("a channel id sent in upper case", () => {
 
     expect(res.status).toBe(200);
     expect(decryptSecret(channel.webhookUrl)).toBe("https://hooks.slack.com/b");
-    expect(logProjectAudit).toHaveBeenCalledWith("p1", "owner1", "settings_updated", [
+    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), "p1", "owner1", "settings_updated", [
       "Notification channel Slack · Webhook URL replaced",
     ]);
   });
@@ -498,6 +499,7 @@ describe("a channel id sent in upper case", () => {
 
     expect(project.notificationChannels).toEqual([]);
     expect(logProjectAudit).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       "p1",
       "owner1",
       "settings_updated",

@@ -39,6 +39,7 @@ vi.mock("@/models/user", () => ({ User: { create: userCreate, deleteOne: userDel
 vi.mock("@/models/identity", () => ({ Identity: { create: identityCreate } }));
 
 const { GET, POST } = await import("./route");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 const { resetRateLimits } = await import("@/lib/rate-limit");
 
 const HELD = {
@@ -94,9 +95,9 @@ describe("POST /api/auth/oidc/signup", () => {
     expect(identityCreate).toHaveBeenCalledWith(
       expect.objectContaining({ user: "u9", provider: "oidc", issuer: "https://id.example.com", subject: "s9" })
     );
-    expect(spendAcceptance).toHaveBeenCalledWith("cpo_join");
-    expect(revokePendingInvitationsFor).toHaveBeenCalledWith("grace@corp.example");
-    expect(logInstanceAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "user_created", target: "grace" }));
+    expect(spendAcceptance).toHaveBeenCalledWith(scopedToDefaultTenant(), "cpo_join");
+    expect(revokePendingInvitationsFor).toHaveBeenCalledWith(scopedToDefaultTenant(), "grace@corp.example");
+    expect(logInstanceAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), expect.objectContaining({ action: "user_created", target: "grace" }));
     expect(createSession).toHaveBeenCalledWith(expect.objectContaining({ userId: "u9" }));
     const cookies = res.headers.get("set-cookie") ?? "";
     expect(cookies).toContain("session=cps_new");
@@ -108,7 +109,7 @@ describe("POST /api/auth/oidc/signup", () => {
 
     await post();
 
-    expect(applyAdminGroup).toHaveBeenCalledWith(GRACE, "oidc", ["staff"]);
+    expect(applyAdminGroup).toHaveBeenCalledWith(scopedToDefaultTenant(), GRACE, "oidc", ["staff"]);
   });
 
   it("refuses once the domain is no longer open, making nothing", async () => {

@@ -21,18 +21,19 @@ export const GET = withAuth(async (_request, { params, user, db }) => {
     return NextResponse.json({ error: "Interactive session required" }, { status: 403 });
   }
 
-  const enrolment = await findPendingByUserCode(userCode);
+  const enrolment = await findPendingByUserCode(db, userCode);
   if (!enrolment) {
     return NextResponse.json({ error: "This code is not valid any more" }, { status: 404 });
   }
 
-  const reachable = await accessibleProjectIds(user);
+  const reachable = await accessibleProjectIds(db, user);
   const projects = await db.Project.find(reachable === null ? {} : { _id: { $in: reachable } })
     .select("_id name key repositoryUrl githubRepo gitlabRepo gitlabHost worker")
     .lean();
   // The same rule PUT /api/projects/:id applies to `worker`: the project's owner (or an instance
   // admin) commits it to machines, and nobody is offered it while an instance admin's lock is on.
   const administered = await administeredProjectIds(
+    db,
     user,
     projects.map((p) => String(p._id))
   );

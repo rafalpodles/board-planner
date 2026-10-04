@@ -119,7 +119,7 @@ export const POST = withProjectOwner(async (request, { params, user, db }) => {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  logProjectAudit(projectId, user._id, "settings_updated", `Notification channel added: ${name.trim()} (${type})`);
+  logProjectAudit(db, projectId, user._id, "settings_updated", `Notification channel added: ${name.trim()} (${type})`);
 
   return NextResponse.json(masked(updated), { status: 201 });
 });
@@ -206,7 +206,7 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
   }
 
   const lines = channelChanges(was, is, newUrl !== null && newUrl !== storedUrl(was.webhookUrl));
-  if (lines.length > 0) logProjectAudit(projectId, user._id, "settings_updated", lines);
+  if (lines.length > 0) logProjectAudit(db, projectId, user._id, "settings_updated", lines);
 
   const notificationChannels = channels.map((ch) => (ch === was ? is : ch));
   return NextResponse.json(masked({ _id: before._id, key: before.key, notificationChannels }));
@@ -233,7 +233,7 @@ export const DELETE = withProjectOwner(async (request, { params, user, db }) => 
   const channels = before.notificationChannels ?? [];
   const removed = channels.find((ch) => String(ch._id) === channelId);
   if (removed) {
-    logProjectAudit(projectId, user._id, "settings_updated", `Notification channel removed: ${removed.name}`);
+    logProjectAudit(db, projectId, user._id, "settings_updated", `Notification channel removed: ${removed.name}`);
   }
 
   const notificationChannels = channels.filter((ch) => ch !== removed);

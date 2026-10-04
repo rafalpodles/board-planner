@@ -1,9 +1,7 @@
 import { Types } from "mongoose";
 import { IUser, GrantRelation } from "@/types";
 import { connectDB } from "./db";
-import { Grant } from "@/models/grant";
-import { Project } from "@/models/project";
-import { User } from "@/models/user";
+import type { ScopedDb } from "@/lib/db-scope";
 
 export type Need = "access" | "admin";
 
@@ -53,7 +51,7 @@ export function principalOf(user: AccessSubject): Principal {
   };
 }
 
-export async function check(user: IdentifiedSubject, projectId: string, need: Need): Promise<boolean> {
+export async function check(db: ScopedDb, user: IdentifiedSubject, projectId: string, need: Need): Promise<boolean> {
   const principal = principalOf(user);
   // The query is skipped where no grant can change the verdict; the verdict itself always
   // comes from decide(), so the rule ordering lives in exactly one place.
@@ -64,7 +62,7 @@ export async function check(user: IdentifiedSubject, projectId: string, need: Ne
   if (withoutGrant) return decide(principal, null, need, projectId);
 
   await connectDB();
-  const grant = await Grant.findOne({
+  const grant = await db.Grant.findOne({
     subject: user._id,
     objectType: "project",
     object: projectId,
@@ -76,10 +74,11 @@ export async function check(user: IdentifiedSubject, projectId: string, need: Ne
 }
 
 /**
- * Which of these projects this person may administer — check(user, id, "admin") for a list, in
+ * Which of these projects this person may administer — check(db, user, id, "admin") for a list, in
  * one query rather than one per project.
  */
 export async function administeredProjectIds(
+  db: ScopedDb,
   user: IdentifiedSubject,
   projectIds: string[]
 ): Promise<Set<string>> {
@@ -89,7 +88,7 @@ export async function administeredProjectIds(
   let relationOf = new Map<string, GrantRelation>();
   if (!withoutGrant && ids.length > 0) {
     await connectDB();
-    const grants = await Grant.find({
+    const grants = await db.Grant.find({
       subject: user._id,
       objectType: "project",
       object: { $in: ids },
@@ -103,14 +102,14 @@ export async function administeredProjectIds(
   );
 }
 
-export async function accessibleProjectIds(user: IdentifiedSubject): Promise<string[] | null> {
+export async function accessibleProjectIds(db: ScopedDb, user: IdentifiedSubject): Promise<string[] | null> {
   const principal = principalOf(user);
   if (principal.instanceAdmin || principal.instanceAdminBeforeScope) {
     return principal.tokenScope;
   }
 
   await connectDB();
-  const grants = await Grant.find({ subject: user._id, objectType: "project" })
+  const grants = await db.Grant.find({ subject: user._id, objectType: "project" })
     .select("object")
     .lean();
 
@@ -132,6 +131,7 @@ export async function accessibleProjectIds(user: IdentifiedSubject): Promise<str
  * `kind: "machine"` account, which is why one never appears; the `pm` account is one too.
  */
 export async function recipientsWithAccess(
+  db: ScopedDb,
   subjectIds: string[],
   projectId: string
 ): Promise<string[]> {
@@ -139,11 +139,11 @@ export async function recipientsWithAccess(
 
   await connectDB();
   const [grants, users] = await Promise.all([
-    Grant.find({ subject: { $in: subjectIds }, objectType: "project", object: projectId })
+    db.Grant.find({ subject: { $in: subjectIds }, objectType: "project", object: projectId })
       .select("subject relation")
       .lean(),
     // A deactivated account sees nothing, so it is told nothing and handed nothing (BP-832)
-    User.find({ _id: { $in: subjectIds }, deactivatedAt: null }).select("role").lean(),
+    db.User.find({ _id: { $in: subjectIds }, deactivatedAt: null }).select("role").lean(),
   ]);
 
   const relationOf = new Map(grants.map((g) => [String(g.subject), g.relation]));
@@ -175,10 +175,11 @@ export async function recipientsWithAccess(
  * a rule added to decide() is enforced whether or not it was mirrored here.
  */
 export async function projectAudienceFilter(
+  db: ScopedDb,
   projectId: string
 ): Promise<Record<string, unknown>> {
   await connectDB();
-  const grants = await Grant.find({ objectType: "project", object: projectId })
+  const grants = await db.Grant.find({ objectType: "project", object: projectId })
     .select("subject")
     .lean();
 
@@ -202,16 +203,16 @@ export function audienceFilterFrom(subjects: unknown[]): Record<string, unknown>
  * since BP-328; assignment did not, so a task could be handed to somebody who would never hear
  * about it and could not open it.
  */
-export async function canBeAssigned(userId: string, projectId: string): Promise<boolean> {
-  return (await recipientsWithAccess([String(userId)], projectId)).length > 0;
+export async function canBeAssigned(db: ScopedDb, userId: string, projectId: string): Promise<boolean> {
+  return (await recipientsWithAccess(db, [String(userId)], projectId)).length > 0;
 }
 
-export async function ownerCounts(projectIds: string[]): Promise<Map<string, number>> {
+export async function ownerCounts(db: ScopedDb, projectIds: string[]): Promise<Map<string, number>> {
   const counts = new Map(projectIds.map((id) => [String(id), 0]));
   if (projectIds.length === 0) return counts;
 
   await connectDB();
-  const owners = await Grant.find({
+  const owners = await db.Grant.find({
     objectType: "project",
     relation: "owner",
     object: { $in: projectIds },
@@ -219,7 +220,7 @@ export async function ownerCounts(projectIds: string[]): Promise<Map<string, num
     .select("subject object")
     .lean();
   // An owner who is deactivated manages nothing, so cannot be the owner that keeps a board run
-  const holders = await User.find({ _id: { $in: owners.map((g) => g.subject) }, deactivatedAt: null })
+  const holders = await db.User.find({ _id: { $in: owners.map((g) => g.subject) }, deactivatedAt: null })
     .select("_id")
     .lean();
   const living = new Set(holders.map((u) => String(u._id)));
@@ -233,8 +234,8 @@ export async function ownerCounts(projectIds: string[]): Promise<Map<string, num
   return counts;
 }
 
-export async function ownerCount(projectId: string): Promise<number> {
-  return (await ownerCounts([projectId])).get(String(projectId)) ?? 0;
+export async function ownerCount(db: ScopedDb, projectId: string): Promise<number> {
+  return (await ownerCounts(db, [projectId])).get(String(projectId)) ?? 0;
 }
 
 export interface OwnedBoard {
@@ -243,18 +244,18 @@ export interface OwnedBoard {
   key: string;
 }
 
-export async function boardsOnlyOwnedBy(userId: string): Promise<OwnedBoard[]> {
+export async function boardsOnlyOwnedBy(db: ScopedDb, userId: string): Promise<OwnedBoard[]> {
   await connectDB();
   // Never counted as an owner, so whatever they hold, the board keeps the owners it has (BP-832)
-  if (await User.exists({ _id: userId, deactivatedAt: { $ne: null } })) return [];
-  const owned = await Grant.find({ subject: userId, objectType: "project", relation: "owner" })
+  if (await db.User.exists({ _id: userId, deactivatedAt: { $ne: null } })) return [];
+  const owned = await db.Grant.find({ subject: userId, objectType: "project", relation: "owner" })
     .select("object")
     .lean();
-  const counts = await ownerCounts(owned.map((g) => String(g.object)));
+  const counts = await ownerCounts(db, owned.map((g) => String(g.object)));
   const sole = [...counts].filter(([, owners]) => owners <= 1).map(([id]) => id);
   if (sole.length === 0) return [];
 
-  const boards = await Project.find({ _id: { $in: sole } })
+  const boards = await db.Project.find({ _id: { $in: sole } })
     .select("name key")
     .sort({ name: 1 })
     .lean();
@@ -262,12 +263,12 @@ export async function boardsOnlyOwnedBy(userId: string): Promise<OwnedBoard[]> {
 }
 
 /** Boards this person owns that have no active owner left, read after a deactivation (BP-832). */
-export async function boardsLeftWithoutOwner(userId: string): Promise<string[]> {
+export async function boardsLeftWithoutOwner(db: ScopedDb, userId: string): Promise<string[]> {
   await connectDB();
-  const owned = await Grant.find({ subject: userId, objectType: "project", relation: "owner" })
+  const owned = await db.Grant.find({ subject: userId, objectType: "project", relation: "owner" })
     .select("object")
     .lean();
-  const counts = await ownerCounts(owned.map((g) => String(g.object)));
+  const counts = await ownerCounts(db, owned.map((g) => String(g.object)));
   return [...counts].filter(([, owners]) => owners === 0).map(([id]) => id);
 }
 
@@ -293,11 +294,11 @@ function asOrphan(g: StoredGrant): OrphanGrant {
 }
 
 // Grants before parents: every writer creates the parent first, so a parent made mid-scan is still seen
-export async function findOrphanGrants(): Promise<OrphanGrants> {
-  const grants: StoredGrant[] = await Grant.find({ objectType: "project" })
+export async function findOrphanGrants(db: ScopedDb): Promise<OrphanGrants> {
+  const grants: StoredGrant[] = await db.Grant.find({ objectType: "project" })
     .select("subject object relation")
     .lean();
-  const [projectIds, userIds] = await Promise.all([Project.distinct("_id"), User.distinct("_id")]);
+  const [projectIds, userIds] = await Promise.all([db.Project.distinct("_id"), db.User.distinct("_id")]);
   const projects = new Set(projectIds.map(String));
   const users = new Set(userIds.map(String));
 
@@ -320,7 +321,7 @@ export async function findOrphanGrants(): Promise<OrphanGrants> {
   return result;
 }
 
-export async function deleteOrphanGrants(orphans: OrphanGrants): Promise<number> {
+export async function deleteOrphanGrants(db: ScopedDb, orphans: OrphanGrants): Promise<number> {
   if (orphans.projectCount === 0 || orphans.userCount === 0) {
     throw new Error(
       `Refusing to delete: this database has ${orphans.projectCount} project(s) and ` +
@@ -331,8 +332,8 @@ export async function deleteOrphanGrants(orphans: OrphanGrants): Promise<number>
   if (candidates.length === 0) return 0;
 
   const [projectIds, userIds] = await Promise.all([
-    Project.distinct("_id", { _id: { $in: candidates.map((g) => g.object) } }),
-    User.distinct("_id", { _id: { $in: candidates.map((g) => g.subject) } }),
+    db.Project.distinct("_id", { _id: { $in: candidates.map((g) => g.object) } }),
+    db.User.distinct("_id", { _id: { $in: candidates.map((g) => g.subject) } }),
   ]);
   const projects = new Set(projectIds.map(String));
   const users = new Set(userIds.map(String));
@@ -341,6 +342,6 @@ export async function deleteOrphanGrants(orphans: OrphanGrants): Promise<number>
     .map((g) => g._id);
   if (ids.length === 0) return 0;
 
-  const { deletedCount } = await Grant.deleteMany({ _id: { $in: ids } });
+  const { deletedCount } = await db.Grant.deleteMany({ _id: { $in: ids } });
   return deletedCount ?? 0;
 }

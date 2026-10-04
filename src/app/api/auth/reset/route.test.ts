@@ -33,6 +33,7 @@ vi.mock("@/models/user", () => ({
 }));
 
 const { POST } = await import("./route");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 const { resetRateLimits, lockoutKey, recordFailedAttempt, isRateLimited, ANONYMOUS_ACCOUNT_ATTEMPTS } =
   await import("@/lib/rate-limit");
 
@@ -115,6 +116,7 @@ describe("POST /api/auth/reset", () => {
     // Whoever knew the old password is signed out — usually the reason somebody is resetting
     expect(revokeUserCredentials).toHaveBeenCalledWith("u1");
     expect(logInstanceAudit).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       expect.objectContaining({ action: "user_password_reset_by_email", target: "owner" })
     );
   });
@@ -208,7 +210,7 @@ describe("POST /api/auth/reset and sign-in providers", () => {
     const res = await POST(post());
 
     expect(res.status).toBe(200);
-    expect(logInstanceAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "identity_unlinked" }));
+    expect(logInstanceAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), expect.objectContaining({ action: "identity_unlinked" }));
   });
 });
 

@@ -247,7 +247,7 @@ describe("what a webhook edit records", () => {
 
     expect(res.status).toBe(200);
     const was = "Webhook masked(https://hooks.example.com/a)";
-    expect(logProjectAudit).toHaveBeenCalledWith("p1", "owner1", "settings_updated", [
+    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), "p1", "owner1", "settings_updated", [
       `${was} · URL: masked(https://hooks.example.com/a) → masked(https://hooks.example.com/c)`,
       `${was} · Events: task_created → comment_added, task_created`,
       `${was} · Enabled: on → off`,
@@ -274,6 +274,7 @@ describe("what a webhook edit records", () => {
     expect(await res.json()).toEqual([]);
 
     expect(logProjectAudit).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       "p1",
       "owner1",
       "settings_updated",
@@ -321,7 +322,7 @@ describe("an id sent in upper case", () => {
       { $set: { "webhooks.$.enabled": false } },
       { returnDocument: "before" }
     );
-    expect(logProjectAudit).toHaveBeenCalledWith("p1", "owner1", "settings_updated", [
+    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), "p1", "owner1", "settings_updated", [
       "Webhook masked(https://hooks.example.com/a) · Enabled: on → off",
     ]);
   });
@@ -335,6 +336,7 @@ describe("an id sent in upper case", () => {
       { returnDocument: "before" }
     );
     expect(logProjectAudit).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       "p1",
       "owner1",
       "settings_updated",

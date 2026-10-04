@@ -6,9 +6,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  * sequencing, the task-row shaping and the response shape are the real sync the route runs.
  */
 
-const { projectFindById, taskFind, decryptSecret, fetchTableColumns, upsertTaskRows } = vi.hoisted(
+const { projectFindOne, taskFind, decryptSecret, fetchTableColumns, upsertTaskRows } = vi.hoisted(
   () => ({
-    projectFindById: vi.fn(),
+    projectFindOne: vi.fn(),
     taskFind: vi.fn(),
     decryptSecret: vi.fn((v: string) => `plain:${v}`),
     fetchTableColumns: vi.fn(),
@@ -18,7 +18,7 @@ const { projectFindById, taskFind, decryptSecret, fetchTableColumns, upsertTaskR
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/encryption", () => ({ decryptSecret }));
-vi.mock("@/models/project", () => ({ Project: { findById: projectFindById } }));
+vi.mock("@/models/project", () => ({ Project: { findOne: projectFindOne } }));
 vi.mock("@/models/task", () => ({ Task: { find: taskFind } }));
 // Partial: normaliseCodaHost and missingColumns are the real, unit-tested rules; only the network
 // calls are replaced.
@@ -29,6 +29,7 @@ vi.mock("./client", async (importOriginal) => ({
 }));
 
 const { syncProjectToCoda } = await import("./sync");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 
 const CODA_COLUMNS = ["Key", "Title", "Status", "Assignee", "Priority", "Difficulty", "Category", "Due", "Link"];
 
@@ -49,7 +50,7 @@ function project(over: Record<string, unknown> = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   decryptSecret.mockImplementation((v: string) => `plain:${v}`);
-  projectFindById.mockReturnValue({ lean: () => Promise.resolve(project()) });
+  projectFindOne.mockReturnValue({ lean: () => Promise.resolve(project()) });
   taskFind.mockReturnValue({
     sort: () => ({
       populate: () => ({ lean: () => Promise.resolve([]) }),
@@ -61,16 +62,16 @@ beforeEach(() => {
 
 describe("POST .../coda/sync — configuration", () => {
   it("refuses when the project has no doc, table or token configured", async () => {
-    projectFindById.mockReturnValue({ lean: () => Promise.resolve(project({ codaDocId: "" })) });
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(project({ codaDocId: "" })) });
 
-    const res = await syncProjectToCoda("p1");
+    const res = await syncProjectToCoda(scopedToDefaultTenant(), "p1");
 
     expect(res.status).toBe(400);
     expect(fetchTableColumns).not.toHaveBeenCalled();
   });
 
   it("decrypts the stored token before calling Coda, never the ciphertext", async () => {
-    await syncProjectToCoda("p1");
+    await syncProjectToCoda(scopedToDefaultTenant(), "p1");
 
     expect(decryptSecret).toHaveBeenCalledWith("enc-token");
     expect(fetchTableColumns).toHaveBeenCalledWith("https://coda.io", "doc1", "table1", "plain:enc-token");
@@ -81,7 +82,7 @@ describe("POST .../coda/sync — the column check", () => {
   it("reports which columns are missing, and does not attempt the upsert", async () => {
     fetchTableColumns.mockResolvedValue(["Key", "Title"]);
 
-    const res = await syncProjectToCoda("p1");
+    const res = await syncProjectToCoda(scopedToDefaultTenant(), "p1");
     const body = await res.json();
 
     expect(res.status).toBe(400);
@@ -93,7 +94,7 @@ describe("POST .../coda/sync — the column check", () => {
   it("proceeds to sync once every column is present, in any case or order", async () => {
     fetchTableColumns.mockResolvedValue([...CODA_COLUMNS].reverse());
 
-    const res = await syncProjectToCoda("p1");
+    const res = await syncProjectToCoda(scopedToDefaultTenant(), "p1");
 
     expect(res.status).toBe(200);
     expect(upsertTaskRows).toHaveBeenCalledTimes(1);
@@ -102,7 +103,7 @@ describe("POST .../coda/sync — the column check", () => {
   it("turns a failed column fetch into a 502, not a 500 or a false pass", async () => {
     fetchTableColumns.mockRejectedValue(new Error("Coda is down"));
 
-    const res = await syncProjectToCoda("p1");
+    const res = await syncProjectToCoda(scopedToDefaultTenant(), "p1");
     const body = await res.json();
 
     expect(res.status).toBe(502);
@@ -133,7 +134,7 @@ describe("POST .../coda/sync — the pushed rows", () => {
       }),
     });
 
-    await syncProjectToCoda("p1");
+    await syncProjectToCoda(scopedToDefaultTenant(), "p1");
 
     const [, , , , rows] = upsertTaskRows.mock.calls[0];
     expect(rows).toEqual([
@@ -172,7 +173,7 @@ describe("POST .../coda/sync — the pushed rows", () => {
       process.env.PUBLIC_ORIGIN = "https://board.example.org";
       process.env.NEXT_PUBLIC_APP_URL = "http://localhost:3000";
 
-      await syncProjectToCoda("p1");
+      await syncProjectToCoda(scopedToDefaultTenant(), "p1");
 
       expect(pushedLink()).toBe("https://board.example.org/projects/BP/tasks/5");
     });
@@ -181,7 +182,7 @@ describe("POST .../coda/sync — the pushed rows", () => {
       oneTask();
       process.env.NEXT_PUBLIC_APP_URL = "http://localhost:3000";
 
-      await syncProjectToCoda("p1");
+      await syncProjectToCoda(scopedToDefaultTenant(), "p1");
 
       expect(pushedLink()).toBe("");
     });
@@ -190,7 +191,7 @@ describe("POST .../coda/sync — the pushed rows", () => {
   it("reports partial application rather than claiming success", async () => {
     upsertTaskRows.mockResolvedValue({ pushed: 3, requests: 1, allApplied: false });
 
-    const res = await syncProjectToCoda("p1");
+    const res = await syncProjectToCoda(scopedToDefaultTenant(), "p1");
     const body = await res.json();
 
     expect(body.synced).toBe(true);
@@ -201,7 +202,7 @@ describe("POST .../coda/sync — the pushed rows", () => {
   it("turns a failed upsert into a 502", async () => {
     upsertTaskRows.mockRejectedValue(new Error("write refused"));
 
-    const res = await syncProjectToCoda("p1");
+    const res = await syncProjectToCoda(scopedToDefaultTenant(), "p1");
     const body = await res.json();
 
     expect(res.status).toBe(502);

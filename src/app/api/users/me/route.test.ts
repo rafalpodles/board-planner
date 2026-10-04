@@ -46,6 +46,7 @@ vi.mock("@/models/user", () => ({
 }));
 
 const { PUT } = await import("./route");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 const { resetRateLimits, sourceKey, recordFailedAttempt, isRateLimited, EXCLUSIVE_SOURCE_ATTEMPTS } =
   await import("@/lib/rate-limit");
 
@@ -135,7 +136,7 @@ describe("PUT /api/users/me — changing the address that can reset the password
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ email: "old@example.com", pendingEmail: "new@example.com" });
     expect(userFindOneAndUpdate).not.toHaveBeenCalled();
-    expect(issueEmailChange).toHaveBeenCalledWith("u1", "new@example.com");
+    expect(issueEmailChange).toHaveBeenCalledWith(scopedToDefaultTenant(), "u1", "new@example.com");
     expect(invalidateResetTokens).not.toHaveBeenCalled();
     expect(logInstanceAudit).not.toHaveBeenCalled();
     expect(revokePendingInvitationsFor).not.toHaveBeenCalled();
@@ -199,6 +200,7 @@ describe("PUT /api/users/me — changing the address that can reset the password
     );
     expect(issueEmailChange).not.toHaveBeenCalled();
     expect(logInstanceAudit).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       expect.objectContaining({ action: "user_email_changed_self", detail: expect.stringContaining("old@example.com") })
     );
     // An address claimed with no inbox behind it proves nothing, so it must not withdraw
@@ -216,7 +218,7 @@ describe("PUT /api/users/me — changing the address that can reset the password
       { $set: { email: "", emailVerifiedAt: null } },
       expect.anything()
     );
-    expect(cancelEmailChange).toHaveBeenCalledWith("u1");
+    expect(cancelEmailChange).toHaveBeenCalledWith(scopedToDefaultTenant(), "u1");
     expect(issueEmailChange).not.toHaveBeenCalled();
     expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({ to: "old@example.com" }));
   });
@@ -428,6 +430,7 @@ describe("PUT /api/users/me — changing your own display name", () => {
     await PUT(put({ fullName: "Ówner Nàme" }), context);
 
     expect(logInstanceAudit).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       expect.objectContaining({
         action: "user_full_name_changed_self",
         target: "owner",
@@ -461,7 +464,7 @@ describe("PUT /api/users/me — changing your own display name", () => {
       { $set: { fullName: "Ówner Nàme" } },
       expect.anything()
     );
-    expect(issueEmailChange).toHaveBeenCalledWith("u1", "new@example.com");
+    expect(issueEmailChange).toHaveBeenCalledWith(scopedToDefaultTenant(), "u1", "new@example.com");
     expect(await response.json()).toMatchObject({ fullName: "Ówner Nàme", pendingEmail: "new@example.com" });
   });
 

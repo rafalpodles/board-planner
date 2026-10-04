@@ -22,6 +22,7 @@ vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/models/user", () => ({ User: { findOne: userFindOne } }));
 
 const { DELETE } = await import("./route");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 
 const ID = "64b0000000000000000000aa";
 const del = (invitationId = ID) =>
@@ -47,9 +48,10 @@ describe("DELETE /api/projects/:id/invitations/:invitationId", () => {
     const res = await del();
 
     expect(res.status).toBe(200);
-    expect(removeBoardFromInvitation).toHaveBeenCalledWith(ID, "p1");
+    expect(removeBoardFromInvitation).toHaveBeenCalledWith(scopedToDefaultTenant(), ID, "p1");
     expect(revokeIfEmpty).not.toHaveBeenCalled();
     expect(logProjectAudit).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       "p1",
       "o1",
       "member_invitation_removed",
@@ -63,8 +65,9 @@ describe("DELETE /api/projects/:id/invitations/:invitationId", () => {
 
     await del();
 
-    expect(revokeIfEmpty).toHaveBeenCalledWith(row);
+    expect(revokeIfEmpty).toHaveBeenCalledWith(scopedToDefaultTenant(), row);
     expect(logInstanceAudit).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       expect.objectContaining({ action: "invitation_revoked", target: "ada@example.com" })
     );
   });

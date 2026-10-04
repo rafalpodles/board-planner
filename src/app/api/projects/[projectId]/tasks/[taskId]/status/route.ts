@@ -5,7 +5,7 @@ import { changeStatus } from "@/lib/task-service";
 import { withApiExecution } from "@/lib/task-execution-view";
 import { machineMayNotForce, MACHINE_FORCE_REFUSAL } from "@/lib/force-guard";
 
-export const PATCH = withProjectAccessOrWorker(async (request, { params, user, workerId }) => {
+export const PATCH = withProjectAccessOrWorker(async (request, { params, user, workerId, db }) => {
   const { projectId, taskId } = await params;
   await connectDB();
 
@@ -21,7 +21,7 @@ export const PATCH = withProjectAccessOrWorker(async (request, { params, user, w
     return NextResponse.json({ error: MACHINE_FORCE_REFUSAL }, { status: 403 });
   }
 
-  const result = await changeStatus(projectId, taskId, status, String(user._id), {
+  const result = await changeStatus(db, projectId, taskId, status, String(user._id), {
     force: force === true,
     workerId,
   });
@@ -35,5 +35,5 @@ export const PATCH = withProjectAccessOrWorker(async (request, { params, user, w
   // The stored execution has defaults on every field, so answering with the raw document tells the
   // board a machine is holding this task and paints the red run indicator on the card the reader
   // just moved (BP-558 review)
-  return NextResponse.json(await withApiExecution(result.data));
+  return NextResponse.json(await withApiExecution(db, result.data));
 });

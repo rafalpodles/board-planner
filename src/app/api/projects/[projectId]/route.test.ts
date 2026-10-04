@@ -91,6 +91,7 @@ vi.mock("@/lib/tenant", () => ({
   getTenant: async () => ({ _id: "t1", entitlements: { plan: plan.value, features: [] } }),
 }));
 
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 const { DELETE, GET, PUT } = await import("./route");
 
 const OWNER = { _id: "u1", role: "member" };
@@ -211,7 +212,7 @@ describe("DELETE /api/projects/[projectId]", () => {
 
     expect(response.status).toBe(200);
     expect(dropProjectReferences).toHaveBeenCalledTimes(1);
-    expect(dropProjectReferences.mock.calls[0][0]).toBe(_id);
+    expect(dropProjectReferences.mock.calls[0][1]).toBe(_id);
   });
 
   it("drops those references only once the project itself is gone", async () => {
@@ -400,7 +401,7 @@ describe("PUT /api/projects/[projectId] and a repointed integration host", () =>
     await PUT(putRequest({ codaHost: "https://collector.attacker.example" }), ctx());
 
     expect(
-      logProjectAudit.mock.calls.some(([, , , detail]) => /Coda token cleared/.test(String(detail)))
+      logProjectAudit.mock.calls.some(([, , , , detail]) => /Coda token cleared/.test(String(detail)))
     ).toBe(true);
   });
 });
@@ -529,7 +530,7 @@ describe("PUT /api/projects/[projectId] worker settings", () => {
   // Honours `need` and the caller, the way grants.check does: OWNER holds the owner grant, MEMBER
   // only the member one, and an instance admin passes everything
   beforeEach(() => {
-    check.mockImplementation(async (user: { _id: string; role: string }, _id: string, need: string) => {
+    check.mockImplementation(async (_db: unknown, user: { _id: string; role: string }, _id: string, need: string) => {
       if (user.role === "admin") return true;
       if (user._id === OWNER._id) return true;
       return user._id === MEMBER._id && need === "access";
@@ -543,6 +544,7 @@ describe("PUT /api/projects/[projectId] worker settings", () => {
     expect(response.status).toBe(200);
     expect(lastUpdate()).toMatchObject({ "worker.enabled": true });
     expect(logInstanceAudit).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       expect.objectContaining({ action: "project_workers_enabled", target: "TP", user: "u1" })
     );
   });
@@ -617,6 +619,7 @@ describe("PUT /api/projects/[projectId] worker settings", () => {
     expect(response.status).toBe(200);
     expect(lastUpdate()).toMatchObject({ "worker.lockedByInstance": true });
     expect(logInstanceAudit).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       expect.objectContaining({ action: "project_workers_locked", target: "TP" })
     );
   });
@@ -638,6 +641,7 @@ describe("PUT /api/projects/[projectId] worker settings", () => {
     await PUT(putRequest({ worker: { lockedByInstance: false } }), ctx());
 
     expect(logInstanceAudit).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       expect.objectContaining({ action: "project_workers_unlocked", target: "TP" })
     );
   });
@@ -706,7 +710,7 @@ describe("PUT /api/projects/[projectId] audit trail", () => {
   }
 
   function auditDetails(): string[] {
-    return logProjectAudit.mock.calls.map(([, , , detail]) =>
+    return logProjectAudit.mock.calls.map(([, , , , detail]) =>
       Array.isArray(detail) ? detail.join("\n") : String(detail)
     );
   }

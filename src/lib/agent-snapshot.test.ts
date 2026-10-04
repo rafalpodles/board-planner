@@ -1,16 +1,17 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 
-const agentFindById = vi.fn();
+const agentFindOne = vi.fn();
 const blockFind = vi.fn();
 
 vi.mock("@/models/agent", () => ({
-  Agent: { findById: (...a: unknown[]) => agentFindById(...a) },
+  Agent: { findOne: (...a: unknown[]) => agentFindOne(...a) },
 }));
 vi.mock("@/models/agentBlock", () => ({
   AgentBlock: { find: (...a: unknown[]) => blockFind(...a) },
 }));
 
 const { snapshotFor } = await import("./agent-snapshot");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 
 const lean = <T,>(value: T) => ({ lean: () => Promise.resolve(value) });
 
@@ -41,21 +42,21 @@ const BLOCKS = [
 ];
 
 beforeEach(() => {
-  agentFindById.mockReset();
+  agentFindOne.mockReset();
   blockFind.mockReset();
   blockFind.mockReturnValue(lean(BLOCKS));
 });
 
 describe("snapshotFor", () => {
   it("reads the buckets in order, so the worker gets one list", async () => {
-    agentFindById.mockReturnValue(lean(AGENT));
-    const snapshot = await snapshotFor("p1", "a1", MACHINE_OWNER);
+    agentFindOne.mockReturnValue(lean(AGENT));
+    const snapshot = await snapshotFor(scopedToDefaultTenant(), "p1", "a1", MACHINE_OWNER);
     expect(snapshot?.sequence.map((e) => e.key)).toEqual(["implement", "diff-size", "push"]);
   });
 
   it("carries a step's prompt and a gate's parameters, and never a tool list", async () => {
-    agentFindById.mockReturnValue(lean(AGENT));
-    const snapshot = await snapshotFor("p1", "a1", MACHINE_OWNER);
+    agentFindOne.mockReturnValue(lean(AGENT));
+    const snapshot = await snapshotFor(scopedToDefaultTenant(), "p1", "a1", MACHINE_OWNER);
     const step = snapshot!.sequence[0];
     expect(step.prompt).toBe("do it");
     expect(step.capability).toBe("edit");
@@ -67,13 +68,13 @@ describe("snapshotFor", () => {
   // The old chain — task agent, then the project default, then the seeded "Default" — meant an empty
   // field still ran something, and there was no way to say "not this one".
   it("returns nothing when the task names no agent", async () => {
-    expect(await snapshotFor("p1", null, MACHINE_OWNER)).toBeNull();
+    expect(await snapshotFor(scopedToDefaultTenant(), "p1", null, MACHINE_OWNER)).toBeNull();
   });
 
   it("still resolves the agent a task does name", async () => {
-    agentFindById.mockReturnValue(lean(AGENT));
+    agentFindOne.mockReturnValue(lean(AGENT));
 
-    const snapshot = await snapshotFor("p1", AGENT_ID, MACHINE_OWNER);
+    const snapshot = await snapshotFor(scopedToDefaultTenant(), "p1", AGENT_ID, MACHINE_OWNER);
 
     expect(snapshot?.name).toBe("Default");
   });
@@ -81,21 +82,21 @@ describe("snapshotFor", () => {
   // A shorter agent than the one somebody composed is worse than a refusal: it runs, and the
   // missing check looks like a check that passed
   it("refuses the whole run when a key has no block, rather than skipping it", async () => {
-    agentFindById.mockReturnValue(lean(AGENT));
+    agentFindOne.mockReturnValue(lean(AGENT));
     blockFind.mockReturnValue(lean(BLOCKS.filter((b) => b.key !== "diff-size")));
-    expect(await snapshotFor("p1", "a1", MACHINE_OWNER)).toBeNull();
+    expect(await snapshotFor(scopedToDefaultTenant(), "p1", "a1", MACHINE_OWNER)).toBeNull();
   });
 
   it("refuses a project agent borrowed by another project's task", async () => {
-    agentFindById.mockReturnValue(lean({ ...AGENT, scope: "project", project: "other" }));
-    expect(await snapshotFor("p1", "a1", MACHINE_OWNER)).toBeNull();
+    agentFindOne.mockReturnValue(lean({ ...AGENT, scope: "project", project: "other" }));
+    expect(await snapshotFor(scopedToDefaultTenant(), "p1", "a1", MACHINE_OWNER)).toBeNull();
   });
 
   it("refuses an agent with nothing in it", async () => {
-    agentFindById.mockReturnValue(
+    agentFindOne.mockReturnValue(
       lean({ ...AGENT, composition: { analysis: [], implementation: [], verification: [], delivery: [] } })
     );
-    expect(await snapshotFor("p1", "a1", MACHINE_OWNER)).toBeNull();
+    expect(await snapshotFor(scopedToDefaultTenant(), "p1", "a1", MACHINE_OWNER)).toBeNull();
   });
 });
 
@@ -131,55 +132,55 @@ describe("snapshotFor and whose machine is asking", () => {
   };
 
   it("runs a personal agent on the machine of the person who composed it", async () => {
-    agentFindById.mockReturnValue(lean({ ...MINE, owner: MACHINE_OWNER }));
+    agentFindOne.mockReturnValue(lean({ ...MINE, owner: MACHINE_OWNER }));
 
-    expect(await snapshotFor("p1", "a1", MACHINE_OWNER)).not.toBeNull();
+    expect(await snapshotFor(scopedToDefaultTenant(), "p1", "a1", MACHINE_OWNER)).not.toBeNull();
   });
 
   it("refuses one on a machine belonging to anybody else", async () => {
-    agentFindById.mockReturnValue(lean(MINE));
+    agentFindOne.mockReturnValue(lean(MINE));
 
-    expect(await snapshotFor("p1", "a1", MACHINE_OWNER)).toBeNull();
+    expect(await snapshotFor(scopedToDefaultTenant(), "p1", "a1", MACHINE_OWNER)).toBeNull();
   });
 
   // The machine whose owner was released while it still held work: nobody's machine is not the
   // composer's machine
   it("refuses one to a machine with no owner at all", async () => {
-    agentFindById.mockReturnValue(lean(MINE));
+    agentFindOne.mockReturnValue(lean(MINE));
 
-    expect(await snapshotFor("p1", "a1", null)).toBeNull();
+    expect(await snapshotFor(scopedToDefaultTenant(), "p1", "a1", null)).toBeNull();
   });
 
   // Both sides absent is the case equality alone gets wrong: "" === "" would read two absences as
   // one person, and an ownerless personal agent would run anywhere
   it("refuses an ownerless personal agent rather than matching it to an ownerless machine", async () => {
-    agentFindById.mockReturnValue(lean({ ...MINE, owner: null }));
+    agentFindOne.mockReturnValue(lean({ ...MINE, owner: null }));
 
-    expect(await snapshotFor("p1", "a1", null)).toBeNull();
+    expect(await snapshotFor(scopedToDefaultTenant(), "p1", "a1", null)).toBeNull();
   });
 
   // The other half of the decision, and the reason the rule is asked of `user` scope alone: a
   // project admin authored this one on the project's behalf, so it goes wherever the project's work
   // goes — clearing it here would refuse every machine but its author's
   it("leaves the project's own agent alone, whoever the machine belongs to", async () => {
-    agentFindById.mockReturnValue(lean({ ...MINE, scope: "project", owner: null, project: "p1" }));
+    agentFindOne.mockReturnValue(lean({ ...MINE, scope: "project", owner: null, project: "p1" }));
 
-    expect(await snapshotFor("p1", "a1", MACHINE_OWNER)).not.toBeNull();
+    expect(await snapshotFor(scopedToDefaultTenant(), "p1", "a1", MACHINE_OWNER)).not.toBeNull();
   });
 
   it("leaves a global agent alone, which is shipped rather than anybody's own", async () => {
-    agentFindById.mockReturnValue(lean({ ...MINE, scope: "global", owner: null }));
+    agentFindOne.mockReturnValue(lean({ ...MINE, scope: "global", owner: null }));
 
-    expect(await snapshotFor("p1", "a1", MACHINE_OWNER)).not.toBeNull();
+    expect(await snapshotFor(scopedToDefaultTenant(), "p1", "a1", MACHINE_OWNER)).not.toBeNull();
   });
 
   // The task moves back a column with no comment and no activity row, and the route's own line
   // says the agent resolved to nothing runnable — which is untrue here and sends a reader hunting
   // through a perfectly good agent. This is the line that says what really happened.
   it("names the agent, whose it is, and whose machine asked", async () => {
-    agentFindById.mockReturnValue(lean(MINE));
+    agentFindOne.mockReturnValue(lean(MINE));
 
-    await snapshotFor("p1", "a1", MACHINE_OWNER);
+    await snapshotFor(scopedToDefaultTenant(), "p1", "a1", MACHINE_OWNER);
 
     const message = String(logged.mock.calls[0]?.[0]);
     expect(message).toContain("a1");
@@ -190,9 +191,9 @@ describe("snapshotFor and whose machine is asking", () => {
   // Diagnosis order, not behaviour: an agent that is somebody else's AND empty is reported as
   // somebody else's. Asking about the composition first would answer null with nothing said at all.
   it("reports whose it is even when it is also empty", async () => {
-    agentFindById.mockReturnValue(lean({ ...MINE, composition: EMPTY }));
+    agentFindOne.mockReturnValue(lean({ ...MINE, composition: EMPTY }));
 
-    expect(await snapshotFor("p1", "a1", MACHINE_OWNER)).toBeNull();
+    expect(await snapshotFor(scopedToDefaultTenant(), "p1", "a1", MACHINE_OWNER)).toBeNull();
 
     expect(String(logged.mock.calls[0]?.[0])).toContain(COMPOSER);
   });

@@ -67,7 +67,7 @@ async function link(db: ScopedDb, provider: OidcProvider, claims: VerifiedClaims
     if ((err as { code?: number }).code !== 11000) throw err;
     return false;
   }
-  void logInstanceAudit({
+  void logInstanceAudit(db, {
     action: "identity_linked",
     user: user._id,
     actorUsername: user.username,
@@ -124,7 +124,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
     return redirectTo(origin, "/login?sso=throttled");
   }
 
-  const outcome = await finishFlow({
+  const outcome = await finishFlow(db, {
     provider,
     binder: readFlowCookie(request, FLOW_COOKIE),
     origin,
@@ -152,7 +152,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
     // link existed; it must not outlive the session that made it (BP-842)
     if (current.sessionId && !(await own.Session.exists({ _id: current.sessionId }))) {
       await own.Identity.deleteOne({ issuer: claims.issuer, subject: claims.subject, user: user._id });
-      void logInstanceAudit({
+      void logInstanceAudit(own, {
         action: "identity_unlinked",
         user: user._id,
         actorUsername: user.username,
@@ -175,7 +175,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
     if (claims.verifiedEmails.length === 0) return fail("unverified");
     if (!claims.verifiedEmails.includes(invitation.email)) return fail("mismatch");
     if (await linkedAccount(db, claims)) return fail("linked");
-    const binder = await holdForAcceptance({
+    const binder = await holdForAcceptance(db, {
       provider,
       invitationTokenHash: invitation.tokenHash,
       claims: { ...claims, email: invitation.email },
@@ -202,20 +202,20 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
         expiresAt: { $gt: new Date() },
       }).lean();
       if (invited) {
-        const binder = await holdForAcceptance({ provider, invitationTokenHash: invited.tokenHash, claims });
+        const binder = await holdForAcceptance(db, { provider, invitationTokenHash: invited.tokenHash, claims });
         return redirectTo(origin, "/invite/sso", [
           buildFlowCookie(ACCEPT_COOKIE, binder, Math.floor(ACCEPT_TTL_MS / 1000)),
         ]);
       }
     }
     if (found.refused === "no_account" && (await mayJoin(provider, claims))) {
-      const binder = await holdForSignUp({ provider, claims });
+      const binder = await holdForSignUp(db, { provider, claims });
       return redirectTo(origin, "/join/sso", [buildFlowCookie(JOIN_COOKIE, binder, Math.floor(ACCEPT_TTL_MS / 1000))]);
     }
     return redirectTo(origin, `/login?sso=${found.refused}`);
   }
   if (found.user.kind === "machine") return redirectTo(origin, "/login?sso=no_account");
-  await applyAdminGroup(found.user, provider.id, claims.groups);
+  await applyAdminGroup(db, found.user, provider.id, claims.groups);
   return signInAs(found.user, request, origin, clientIp, outcome.next ?? "/projects");
 }
 
@@ -282,7 +282,7 @@ async function setUpFirstAccount(
     await db.User.deleteOne({ _id: user._id }).catch(() => {});
     return { refused: "linked" as const };
   }
-  void logInstanceAudit({
+  void logInstanceAudit(db, {
     action: "user_created",
     user: null,
     actorUsername: "",

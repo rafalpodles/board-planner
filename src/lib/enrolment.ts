@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { connectDB } from "./db";
-import { EnrolmentToken } from "@/models/enrolmentToken";
+import type { ScopedDb } from "@/lib/db-scope";
 
 // Long enough that guessing is hopeless, prefixed so a leaked string is recognisable in a log and
 // so the lookup does not have to bcrypt-compare every row.
@@ -15,6 +15,7 @@ export type ConsumeResult =
   | { ok: false; reason: "unknown" | "used" | "expired" };
 
 export async function mintEnrolmentToken(
+  db: ScopedDb,
   createdBy: string,
   label = "",
   now = new Date()
@@ -23,7 +24,7 @@ export async function mintEnrolmentToken(
   const token = `${PREFIX}${crypto.randomBytes(24).toString("hex")}`;
   const expiresAt = new Date(now.getTime() + ENROLMENT_TTL_MS);
 
-  await EnrolmentToken.create({
+  await db.EnrolmentToken.create({
     prefix: token.substring(0, PREFIX_LENGTH),
     tokenHash: await bcrypt.hash(token, 10),
     createdBy,
@@ -38,17 +39,17 @@ export async function mintEnrolmentToken(
 
 // Who enrolled this machine, used to name its identity — "Owner · MacBook". Empty rather than
 // throwing: a machine whose enroller has since been deleted still needs a working identity.
-export async function enrolmentTokenOwner(tokenId: string): Promise<string> {
+export async function enrolmentTokenOwner(db: ScopedDb, tokenId: string): Promise<string> {
   await connectDB();
-  const token = await EnrolmentToken.findById(tokenId).populate("createdBy", "fullName username").lean();
+  const token = await db.EnrolmentToken.findById(tokenId).populate("createdBy", "fullName username").lean();
   const owner = token?.createdBy as { fullName?: string; username?: string } | null | undefined;
   return owner?.fullName?.trim() || owner?.username?.trim() || "";
 }
 
 // Who enrolled this machine, as the id the owner claim keys on — not the display name above.
-export async function enrolmentTokenOwnerId(tokenId: string): Promise<string | null> {
+export async function enrolmentTokenOwnerId(db: ScopedDb, tokenId: string): Promise<string | null> {
   await connectDB();
-  const token = await EnrolmentToken.findById(tokenId).select("createdBy").lean();
+  const token = await db.EnrolmentToken.findById(tokenId).select("createdBy").lean();
   return token?.createdBy ? String(token.createdBy) : null;
 }
 
@@ -56,6 +57,7 @@ export async function enrolmentTokenOwnerId(tokenId: string): Promise<string | n
 // would both pass a read check and both register, which is exactly the second live worker this
 // credential exists to prevent.
 export async function consumeEnrolmentToken(
+  db: ScopedDb,
   token: string,
   now = new Date()
 ): Promise<ConsumeResult> {
@@ -64,14 +66,14 @@ export async function consumeEnrolmentToken(
   }
   await connectDB();
 
-  const candidates = await EnrolmentToken.find({ prefix: token.substring(0, PREFIX_LENGTH) });
+  const candidates = await db.EnrolmentToken.find({ prefix: token.substring(0, PREFIX_LENGTH) });
   for (const candidate of candidates) {
     if (!(await bcrypt.compare(token, candidate.tokenHash))) continue;
 
     // Expiry is reported before spending, so an operator sees why it failed rather than "used"
     if (candidate.expiresAt.getTime() <= now.getTime()) return { ok: false, reason: "expired" };
 
-    const spent = await EnrolmentToken.findOneAndUpdate(
+    const spent = await db.EnrolmentToken.findOneAndUpdate(
       { _id: candidate._id, usedAt: null },
       { $set: { usedAt: now } },
       { returnDocument: "after" }
@@ -83,6 +85,6 @@ export async function consumeEnrolmentToken(
   return { ok: false, reason: "unknown" };
 }
 
-export async function attachWorkerToEnrolment(tokenId: string, workerId: string): Promise<void> {
-  await EnrolmentToken.findByIdAndUpdate(tokenId, { $set: { usedByWorker: workerId } });
+export async function attachWorkerToEnrolment(db: ScopedDb, tokenId: string, workerId: string): Promise<void> {
+  await db.EnrolmentToken.findByIdAndUpdate(tokenId, { $set: { usedByWorker: workerId } });
 }

@@ -16,7 +16,7 @@ const MINTS_PER_WINDOW = 10;
 // Not withAdmin since BP-358: the token names its creator, registration makes that person the
 // machine's owner, and a machine reaches only what its owner reaches. Requiring an admin would gate
 // the headless path on something the browser path stopped needing, and grant no less.
-export const POST = withAuth(async (request, { user }) => {
+export const POST = withAuth(async (request, { user, db }) => {
   await connectDB();
 
   if (user.viaMachineCredential) {
@@ -32,11 +32,11 @@ export const POST = withAuth(async (request, { user }) => {
   const body = await request.json().catch(() => ({}));
   const label = typeof body.label === "string" ? body.label.trim().slice(0, 200) : "";
 
-  const { token, expiresAt } = await mintEnrolmentToken(String(user._id), label);
+  const { token, expiresAt } = await mintEnrolmentToken(db, String(user._id), label);
 
   // The token itself never goes near this log — it is returned once and only its hash is stored,
   // and an audit row is exactly the wrong place to undo that
-  void logInstanceAudit({
+  void logInstanceAudit(db, {
     action: "enrolment_token_minted",
     target: label || "unlabelled",
     user: String(user._id),

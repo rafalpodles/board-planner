@@ -2,6 +2,7 @@ import { test, expect } from "@playwright/test";
 import mongoose from "mongoose";
 import { writeProviderLinks } from "@/lib/pr-links";
 import { E2E_MONGODB_URI, PROJECT_ID } from "./seed";
+import { scopedToDefaultTenant } from "../src/lib/db-scope";
 
 /**
  * BP-559. Both sync routes replace their own provider's links with an aggregation pipeline instead
@@ -75,7 +76,7 @@ async function apply(
   await db();
   // Through the model, exactly as the routes issue it: Mongoose refuses a pipeline update
   // without `updatePipeline`, and every unit test in this repo mocks the model away.
-  await writeProviderLinks(_id, provider, docs, seen.map(urlOf));
+  await writeProviderLinks(scopedToDefaultTenant(), _id, provider, docs, seen.map(urlOf));
 }
 
 async function linksOf(_id: mongoose.Types.ObjectId) {

@@ -1,6 +1,6 @@
-import { User } from "@/models/user";
+import type { ScopedDb } from "@/lib/db-scope";
 
-export async function usernameOf(userId: string): Promise<string> {
-  const user = await User.findById(userId, "username").lean();
+export async function usernameOf(db: ScopedDb, userId: string): Promise<string> {
+  const user = await db.User.findById(userId, "username").lean();
   return user?.username ?? "somebody";
 }

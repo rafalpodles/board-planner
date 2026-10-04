@@ -2,9 +2,8 @@ import { Types } from "mongoose";
 import { connectDB } from "./db";
 import { authorityAtAcceptance } from "./invitation-authority";
 import { randomToken, sha256 } from "./oauth";
-import { Invitation } from "@/models/invitation";
-import { User } from "@/models/user";
 import { GrantRelation, IInvitation, IInvitationBoard } from "@/types";
+import type { ScopedDb } from "@/lib/db-scope";
 
 export const INVITATION_TOKEN_PREFIX = "cpi_";
 export const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -33,6 +32,7 @@ function freshSecret() {
  * invitation with what the latest inviter chose, and the link mailed before stops working.
  */
 export async function issueInvitation(
+  db: ScopedDb,
   input: IssueInvitation
 ): Promise<{ invitation: IInvitation; token: string }> {
   await connectDB();
@@ -43,7 +43,7 @@ export async function issueInvitation(
     addedBy: input.invitedBy,
   }));
   const write = () =>
-    Invitation.findOneAndUpdate(
+    db.Invitation.findOneAndUpdate(
       { email: input.email, status: "pending" },
       {
         $set: {
@@ -75,32 +75,33 @@ export async function issueInvitation(
  * acceptance refuses whenever that inviter has since been demoted or deleted.
  */
 export async function reissueInvitation(
+  db: ScopedDb,
   id: Types.ObjectId | string,
   sentBy: Types.ObjectId | string
 ): Promise<{ invitation: IInvitation; token: string; dropped: IInvitationBoard[] } | null> {
   await connectDB();
   // The resender re-endorses every board left, so a board its adder can no longer grant goes
   // first: otherwise the resend would grant it again without anybody choosing to (BP-843)
-  const current = await Invitation.findOne({ _id: id, status: "pending" }).select("role boards").lean();
+  const current = await db.Invitation.findOne({ _id: id, status: "pending" }).select("role boards").lean();
   if (!current) return null;
-  const authority = await authorityAtAcceptance({ role: current.role, boards: current.boards, invitedBy: sentBy as Types.ObjectId });
+  const authority = await authorityAtAcceptance(db, { role: current.role, boards: current.boards, invitedBy: sentBy as Types.ObjectId });
   const backed = new Set((authority?.boards ?? []).map((b) => `${b.project}:${b.addedBy}`));
   // Only an adder who still exists and has lost the standing to grant it: one whose account was
   // deleted decided nothing about the board, and the resender takes it over as BP-826 did
   const lapsed = current.boards.filter((b) => !backed.has(`${b.project}:${b.addedBy}`));
   const stillThere = new Set(
-    (await User.find({ _id: { $in: lapsed.map((b) => b.addedBy) } }).select("_id").lean()).map((u) => String(u._id))
+    (await db.User.find({ _id: { $in: lapsed.map((b) => b.addedBy) } }).select("_id").lean()).map((u) => String(u._id))
   );
   const unbacked = lapsed.filter((b) => stillThere.has(String(b.addedBy)));
   if (unbacked.length > 0) {
-    await Invitation.updateOne(
+    await db.Invitation.updateOne(
       { _id: id, status: "pending" },
       { $pull: { boards: { $or: unbacked.map((b) => ({ project: b.project, addedBy: b.addedBy })) } } }
     );
   }
 
   const { token, tokenHash, expiresAt } = freshSecret();
-  const invitation = await Invitation.findOneAndUpdate(
+  const invitation = await db.Invitation.findOneAndUpdate(
     { _id: id, status: "pending" },
     {
       $set: {
@@ -119,9 +120,9 @@ export async function reissueInvitation(
 }
 
 /** Also stops an acceptance in flight: its claim is not yet tied to an account, so it is revocable. */
-export async function revokeInvitation(id: Types.ObjectId | string): Promise<IInvitation | null> {
+export async function revokeInvitation(db: ScopedDb, id: Types.ObjectId | string): Promise<IInvitation | null> {
   await connectDB();
-  return Invitation.findOneAndUpdate(
+  return db.Invitation.findOneAndUpdate(
     { _id: id, $or: [{ status: "pending" }, { status: "accepted", acceptedBy: null }] },
     { $set: { status: "revoked" } },
     { returnDocument: "after" }
@@ -140,9 +141,9 @@ function explain(existing: Pick<IInvitation, "status" | "expiresAt"> | null): In
   return "expired";
 }
 
-export async function findInvitationByToken(token: string): Promise<InvitationOutcome> {
+export async function findInvitationByToken(db: ScopedDb, token: string): Promise<InvitationOutcome> {
   await connectDB();
-  const invitation = await Invitation.findOne({ tokenHash: sha256(token) }).lean<IInvitation>();
+  const invitation = await db.Invitation.findOne({ tokenHash: sha256(token) }).lean<IInvitation>();
   if (invitation && invitation.status === "pending" && invitation.expiresAt > new Date()) {
     return { ok: true, invitation };
   }
@@ -153,28 +154,28 @@ export async function findInvitationByToken(token: string): Promise<InvitationOu
  * Spends the link. The claim is one update matching on `pending`, so two submissions arriving
  * together cannot both be told they won.
  */
-export async function claimInvitation(token: string): Promise<InvitationOutcome> {
-  return claimInvitationByHash(sha256(token));
+export async function claimInvitation(db: ScopedDb, token: string): Promise<InvitationOutcome> {
+  return claimInvitationByHash(db, sha256(token));
 }
 
-export async function claimInvitationByHash(tokenHash: string): Promise<InvitationOutcome> {
+export async function claimInvitationByHash(db: ScopedDb, tokenHash: string): Promise<InvitationOutcome> {
   await connectDB();
   const now = new Date();
-  const claimed = await Invitation.findOneAndUpdate(
+  const claimed = await db.Invitation.findOneAndUpdate(
     { tokenHash, status: "pending", expiresAt: { $gt: now } },
     { $set: { status: "accepted", acceptedAt: now } },
     { returnDocument: "after" }
   );
   if (claimed) return { ok: true, invitation: claimed };
-  const existing = await Invitation.findOne({ tokenHash }).lean<IInvitation>();
+  const existing = await db.Invitation.findOne({ tokenHash }).lean<IInvitation>();
   return { ok: false, reason: explain(existing) };
 }
 
 /** Puts a claimed link back, for an acceptance that could not finish — a username taken, say. */
-export async function releaseInvitation(id: Types.ObjectId | string): Promise<void> {
+export async function releaseInvitation(db: ScopedDb, id: Types.ObjectId | string): Promise<void> {
   await connectDB();
   try {
-    await Invitation.updateOne(
+    await db.Invitation.updateOne(
       { _id: id, status: "accepted", acceptedBy: null },
       { $set: { status: "pending", acceptedAt: null } }
     );
@@ -186,13 +187,14 @@ export async function releaseInvitation(id: Types.ObjectId | string): Promise<vo
 
 /** False when the invitation was revoked while the account was being made. */
 export async function recordAcceptance(
+  db: ScopedDb,
   id: Types.ObjectId | string,
   userId: Types.ObjectId | string
 ): Promise<boolean> {
   await connectDB();
   // Already this account's counts too, so a retry after a write that landed but answered with an
   // error does not read as the claim lost and take the account back (BP-843)
-  const result = await Invitation.updateOne(
+  const result = await db.Invitation.updateOne(
     { _id: id, status: "accepted", acceptedBy: { $in: [null, userId] } },
     { $set: { acceptedBy: userId } }
   );
@@ -200,9 +202,9 @@ export async function recordAcceptance(
 }
 
 /** For an acceptance that found nothing still backing it: revokes its own claim, nothing else. */
-export async function revokeClaimedInvitation(id: Types.ObjectId | string): Promise<void> {
+export async function revokeClaimedInvitation(db: ScopedDb, id: Types.ObjectId | string): Promise<void> {
   await connectDB();
-  await Invitation.updateOne(
+  await db.Invitation.updateOne(
     { _id: id, status: "accepted", acceptedBy: null },
     { $set: { status: "revoked" } }
   );
@@ -213,11 +215,11 @@ export async function revokeClaimedInvitation(id: Types.ObjectId | string): Prom
  * life the day that account is deleted or moves away, granting what it said a week earlier.
  * Never throws: the callers are mid-way through security steps a failure here must not skip.
  */
-export async function revokePendingInvitationsFor(email: string): Promise<void> {
+export async function revokePendingInvitationsFor(db: ScopedDb, email: string): Promise<void> {
   if (!email) return;
   try {
     await connectDB();
-    await Invitation.updateMany({ email, status: "pending" }, { $set: { status: "revoked" } });
+    await db.Invitation.updateMany({ email, status: "pending" }, { $set: { status: "revoked" } });
   } catch (err) {
     console.error("Failed to withdraw pending invitations for an address:", err);
   }
@@ -228,13 +230,14 @@ export async function revokePendingInvitationsFor(email: string): Promise<void> 
  * throws: the invitation has already gone out, and a row left unrecorded is merely unjoinable.
  */
 export async function recordDelivery(
+  db: ScopedDb,
   id: Types.ObjectId | string,
   token: string,
   deliveredAs: "email" | "link"
 ): Promise<void> {
   try {
     await connectDB();
-    await Invitation.updateOne({ _id: id, tokenHash: sha256(token) }, { $set: { deliveredAs } });
+    await db.Invitation.updateOne({ _id: id, tokenHash: sha256(token) }, { $set: { deliveredAs } });
   } catch (err) {
     console.error("Failed to record how an invitation was delivered:", err);
   }
@@ -253,7 +256,7 @@ export type BoardInvitation =
  * It joins only an invitation whose link went to the invited mailbox, or one this owner sent: a
  * link somebody was shown could be in anybody's hands, and this board would go wherever it does.
  */
-export async function inviteToBoard(input: {
+export async function inviteToBoard(db: ScopedDb, input: {
   email: string;
   project: Types.ObjectId | string;
   relation: GrantRelation;
@@ -266,34 +269,34 @@ export async function inviteToBoard(input: {
     const now = new Date();
     // Only this owner's own: another inviter's lapsed invitation, perhaps an administrator's with a
     // role and boards of its own, is theirs to resend or revoke, and holds the address meanwhile
-    await Invitation.updateMany(
+    await db.Invitation.updateMany(
       { email, status: "pending", expiresAt: { $lte: now }, invitedBy },
       { $set: { status: "revoked" } }
     );
     const live: Record<string, unknown> = { email, status: "pending", expiresAt: { $gt: now } };
     const joinable: Record<string, unknown> = { ...live, $or: [{ deliveredAs: "email" }, { invitedBy }] };
 
-    const updated = await Invitation.findOneAndUpdate(
+    const updated = await db.Invitation.findOneAndUpdate(
       { ...joinable, "boards.project": project },
       { $set: { "boards.$.relation": relation, "boards.$.addedBy": invitedBy } },
       { returnDocument: "after" }
     );
     if (updated) return { kind: "updated", invitation: updated };
-    const added = await Invitation.findOneAndUpdate(
+    const added = await db.Invitation.findOneAndUpdate(
       { ...joinable, "boards.project": { $ne: project } },
       { $push: { boards: { project, relation, addedBy: invitedBy } } },
       { returnDocument: "after" }
     );
     if (added) return { kind: "added", invitation: added };
 
-    const held = await Invitation.findOne({ email, status: "pending" })
+    const held = await db.Invitation.findOne({ email, status: "pending" })
       .select("invitedBy expiresAt")
       .lean<{ invitedBy: Types.ObjectId; expiresAt: Date }>();
     if (held) return { kind: "held", invitedBy: held.invitedBy, expired: held.expiresAt <= now };
 
     const { token, tokenHash, expiresAt } = freshSecret();
     try {
-      const invitation = await Invitation.create({
+      const invitation = await db.Invitation.create({
         email,
         role: "member",
         boards: [{ project, relation, addedBy: invitedBy }],
@@ -313,11 +316,12 @@ export async function inviteToBoard(input: {
 
 /** Removes one board from a pending invitation. Null when it was not on one. */
 export async function removeBoardFromInvitation(
+  db: ScopedDb,
   id: Types.ObjectId | string,
   project: Types.ObjectId | string
 ): Promise<IInvitation | null> {
   await connectDB();
-  return Invitation.findOneAndUpdate(
+  return db.Invitation.findOneAndUpdate(
     { _id: id, status: "pending", "boards.project": project },
     { $pull: { boards: { project } } },
     { returnDocument: "after" }
@@ -329,10 +333,11 @@ export async function removeBoardFromInvitation(
  * too keeps an administrator's re-invite, landing in between on the same row, from being revoked.
  */
 export async function revokeIfEmpty(
+  db: ScopedDb,
   invitation: Pick<IInvitation, "_id" | "invitedBy" | "tokenHash">
 ): Promise<boolean> {
   await connectDB();
-  const result = await Invitation.updateOne(
+  const result = await db.Invitation.updateOne(
     {
       _id: invitation._id,
       status: "pending",

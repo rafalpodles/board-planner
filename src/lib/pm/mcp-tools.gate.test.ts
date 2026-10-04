@@ -22,6 +22,9 @@ class McpHttpError extends Error {
 vi.mock("./mcp-client", () => ({ McpClient: McpClientMock, McpHttpError }));
 
 const { discoverMcpTools, callMcpTool } = await import("./mcp-tools");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
+const db = scopedToDefaultTenant();
 
 type Tool = { name: string; description?: string; annotations?: { readOnlyHint?: boolean } };
 
@@ -70,7 +73,7 @@ afterEach(() => warn.mockRestore());
 // BP-476: which third-party tools reach the PM agent, and on whose credentials
 describe("discoverMcpTools — the gate", () => {
   it("asks nothing of a server that is switched off", async () => {
-    const runtime = await discoverMcpTools("p1", [server({ enabled: false })]);
+    const runtime = await discoverMcpTools(db, "p1", [server({ enabled: false })]);
 
     expect(McpClientMock).not.toHaveBeenCalled();
     expect(runtime.tools.size).toBe(0);
@@ -78,7 +81,7 @@ describe("discoverMcpTools — the gate", () => {
   });
 
   it("withholds a write tool while writes are off, even when the allowlist names it", async () => {
-    const runtime = await discoverMcpTools("p1", [server({ toolAllowlist: ["list_tickets", "create_ticket"] })]);
+    const runtime = await discoverMcpTools(db, "p1", [server({ toolAllowlist: ["list_tickets", "create_ticket"] })]);
 
     expect([...runtime.tools.keys()]).toEqual(["mcp_acme_list_tickets"]);
     expect(runtime.tools.get("mcp_acme_list_tickets")!.write).toBe(false);
@@ -88,13 +91,13 @@ describe("discoverMcpTools — the gate", () => {
   it("judges a tool named after its server by what follows the name", async () => {
     serving([{ name: "acme-search" }]);
 
-    const runtime = await discoverMcpTools("p1", [server()]);
+    const runtime = await discoverMcpTools(db, "p1", [server()]);
 
     expect(runtime.tools.get("mcp_acme_acme-search")?.write).toBe(false);
   });
 
   it("exposes the write tool once writes are on, marked as a write", async () => {
-    const runtime = await discoverMcpTools("p1", [server({ allowWrites: true })]);
+    const runtime = await discoverMcpTools(db, "p1", [server({ allowWrites: true })]);
 
     expect(runtime.tools.get("mcp_acme_create_ticket")!.write).toBe(true);
     expect(runtime.tools.get("mcp_acme_list_tickets")!.write).toBe(false);
@@ -103,8 +106,8 @@ describe("discoverMcpTools — the gate", () => {
   it("treats a read-named tool its server marks readOnlyHint: false as a write", async () => {
     serving([{ name: "list_tickets", annotations: { readOnlyHint: false } }]);
 
-    expect((await discoverMcpTools("p1", [server()])).tools.size).toBe(0);
-    const writable = await discoverMcpTools("p1", [server({ allowWrites: true })]);
+    expect((await discoverMcpTools(db, "p1", [server()])).tools.size).toBe(0);
+    const writable = await discoverMcpTools(db, "p1", [server({ allowWrites: true })]);
     expect(writable.tools.get("mcp_acme_list_tickets")!.write).toBe(true);
   });
 
@@ -112,7 +115,7 @@ describe("discoverMcpTools — the gate", () => {
     const long = `list_${"x".repeat(80)}`;
     serving([{ name: `${long}_a` }, { name: `${long}_b` }]);
 
-    const names = [...(await discoverMcpTools("p1", [server()])).tools.keys()];
+    const names = [...(await discoverMcpTools(db, "p1", [server()])).tools.keys()];
 
     expect(names).toHaveLength(2);
     for (const name of names) expect(name.length).toBeLessThanOrEqual(64);
@@ -122,7 +125,7 @@ describe("discoverMcpTools — the gate", () => {
 
 describe("discoverMcpTools — an OAuth server's token", () => {
   it("skips a server that needs re-authorisation without calling it", async () => {
-    const runtime = await discoverMcpTools("p1", [oauthServer({ status: "needs_reauth" })]);
+    const runtime = await discoverMcpTools(db, "p1", [oauthServer({ status: "needs_reauth" })]);
 
     expect(McpClientMock).not.toHaveBeenCalled();
     expect(refreshTokens).not.toHaveBeenCalled();
@@ -130,7 +133,7 @@ describe("discoverMcpTools — an OAuth server's token", () => {
   });
 
   it("uses a token that has not expired as it is", async () => {
-    await discoverMcpTools("p1", [oauthServer({ expiresAt: new Date(Date.now() + hour) })]);
+    await discoverMcpTools(db, "p1", [oauthServer({ expiresAt: new Date(Date.now() + hour) })]);
 
     expect(McpClientMock).toHaveBeenCalledWith("https://acme.example/mcp", "old-access");
     expect(refreshTokens).not.toHaveBeenCalled();
@@ -140,11 +143,11 @@ describe("discoverMcpTools — an OAuth server's token", () => {
     const expiresAt = new Date(Date.now() + hour);
     refreshTokens.mockResolvedValue({ accessToken: "new-access", refreshToken: "new-refresh", expiresAt });
 
-    await discoverMcpTools("p1", [oauthServer({})]);
+    await discoverMcpTools(db, "p1", [oauthServer({})]);
 
     expect(refreshTokens).toHaveBeenCalledWith(expect.objectContaining({ refreshToken: "the-refresh", resource: "https://acme.example/mcp" }));
     const [filter, update] = updateOne.mock.calls[0];
-    expect(filter).toEqual({ _id: "p1", "pm.mcpServers": { $elemMatch: { name: "acme", url: "https://acme.example/mcp", "oauth.clientId": "client-1" } } });
+    expect(filter).toEqual({ _id: "p1", tenant: DEFAULT_TENANT_ID, "pm.mcpServers": { $elemMatch: { name: "acme", url: "https://acme.example/mcp", "oauth.clientId": "client-1" } } });
     // The expiry too: without it every later turn would refresh again
     expect(update.$set).toEqual({
       "pm.mcpServers.$.oauth.accessToken": "enc:new-access",
@@ -159,11 +162,12 @@ describe("discoverMcpTools — an OAuth server's token", () => {
   it("writes nothing over a server whose client id changed while the refresh was in flight", async () => {
     refreshTokens.mockResolvedValue({ accessToken: "new-access", expiresAt: new Date(Date.now() + hour) });
 
-    await discoverMcpTools("p1", [oauthServer({})]);
+    await discoverMcpTools(db, "p1", [oauthServer({})]);
 
     const [filter] = updateOne.mock.calls[0];
     const storedWith = (clientId: string, url = "https://acme.example/mcp") => ({
       _id: "p1",
+      tenant: DEFAULT_TENANT_ID,
       pm: {
         mcpServers: [
           { name: "other" },
@@ -179,11 +183,12 @@ describe("discoverMcpTools — an OAuth server's token", () => {
   it("writes nothing over a server moved to another address while the refresh was in flight", async () => {
     refreshTokens.mockResolvedValue({ accessToken: "new-access", expiresAt: new Date(Date.now() + hour) });
 
-    await discoverMcpTools("p1", [oauthServer({})]);
+    await discoverMcpTools(db, "p1", [oauthServer({})]);
 
     const [filter] = updateOne.mock.calls[0];
     const storedAt = (url: string) => ({
       _id: "p1",
+      tenant: DEFAULT_TENANT_ID,
       pm: { mcpServers: [{ name: "acme", url, oauth: { clientId: "client-1", status: "connected" } }] },
     });
     expect(sift(filter)(storedAt("https://acme.example/mcp"))).toBe(true);
@@ -193,7 +198,7 @@ describe("discoverMcpTools — an OAuth server's token", () => {
   it("keeps the stored refresh token when the provider does not issue a new one", async () => {
     refreshTokens.mockResolvedValue({ accessToken: "new-access", expiresAt: new Date(Date.now() + hour) });
 
-    await discoverMcpTools("p1", [oauthServer({})]);
+    await discoverMcpTools(db, "p1", [oauthServer({})]);
 
     expect(updateOne.mock.calls[0][1].$set["pm.mcpServers.$.oauth.refreshToken"]).toBe("enc:the-refresh");
   });
@@ -201,7 +206,7 @@ describe("discoverMcpTools — an OAuth server's token", () => {
   it("refreshes a token that is about to expire, not only one that has", async () => {
     refreshTokens.mockResolvedValue({ accessToken: "new-access", expiresAt: new Date(Date.now() + hour) });
 
-    await discoverMcpTools("p1", [oauthServer({ expiresAt: new Date(Date.now() + 30_000) })]);
+    await discoverMcpTools(db, "p1", [oauthServer({ expiresAt: new Date(Date.now() + 30_000) })]);
 
     expect(refreshTokens).toHaveBeenCalledTimes(1);
   });
@@ -209,10 +214,10 @@ describe("discoverMcpTools — an OAuth server's token", () => {
   it("marks the server as needing re-authorisation when the refresh fails, and skips it", async () => {
     refreshTokens.mockRejectedValue(new Error("invalid_grant"));
 
-    const runtime = await discoverMcpTools("p1", [oauthServer({})]);
+    const runtime = await discoverMcpTools(db, "p1", [oauthServer({})]);
 
     expect(updateOne).toHaveBeenCalledWith(
-      { _id: "p1", "pm.mcpServers": { $elemMatch: { name: "acme", url: "https://acme.example/mcp", "oauth.clientId": "client-1" } } },
+      { _id: "p1", tenant: DEFAULT_TENANT_ID, "pm.mcpServers": { $elemMatch: { name: "acme", url: "https://acme.example/mcp", "oauth.clientId": "client-1" } } },
       { $set: { "pm.mcpServers.$.oauth.status": "needs_reauth" } }
     );
     expect(McpClientMock).not.toHaveBeenCalled();
@@ -220,11 +225,11 @@ describe("discoverMcpTools — an OAuth server's token", () => {
   });
 
   it("marks an expired token with nothing to refresh it as needing re-authorisation", async () => {
-    await discoverMcpTools("p1", [oauthServer({ refreshToken: undefined })]);
+    await discoverMcpTools(db, "p1", [oauthServer({ refreshToken: undefined })]);
 
     expect(refreshTokens).not.toHaveBeenCalled();
     expect(updateOne).toHaveBeenCalledWith(
-      { _id: "p1", "pm.mcpServers": { $elemMatch: { name: "acme", url: "https://acme.example/mcp", "oauth.clientId": "client-1" } } },
+      { _id: "p1", tenant: DEFAULT_TENANT_ID, "pm.mcpServers": { $elemMatch: { name: "acme", url: "https://acme.example/mcp", "oauth.clientId": "client-1" } } },
       { $set: { "pm.mcpServers.$.oauth.status": "needs_reauth" } }
     );
   });
@@ -234,7 +239,7 @@ describe("discoverMcpTools — an OAuth server's token", () => {
     let finish!: (v: unknown) => void;
     refreshTokens.mockReturnValue(new Promise((resolve) => (finish = resolve)));
 
-    const both = Promise.all([discoverMcpTools("p1", [oauthServer({})]), discoverMcpTools("p1", [oauthServer({})])]);
+    const both = Promise.all([discoverMcpTools(db, "p1", [oauthServer({})]), discoverMcpTools(db, "p1", [oauthServer({})])]);
     await vi.waitFor(() => expect(refreshTokens).toHaveBeenCalled());
     finish({ accessToken: "new-access", expiresAt: new Date(Date.now() + hour) });
     await both;
@@ -264,7 +269,7 @@ describe("discoverMcpTools — a 401 despite a stored expiry that still looked f
       expiresAt: new Date(Date.now() + hour),
     });
 
-    const runtime = await discoverMcpTools("p1", [oauthServer({ expiresAt: new Date(Date.now() + hour) })]);
+    const runtime = await discoverMcpTools(db, "p1", [oauthServer({ expiresAt: new Date(Date.now() + hour) })]);
 
     expect(refreshTokens).toHaveBeenCalledTimes(1);
     expect(McpClientMock).toHaveBeenNthCalledWith(1, "https://acme.example/mcp", "old-access");
@@ -276,14 +281,14 @@ describe("discoverMcpTools — a 401 despite a stored expiry that still looked f
   it("marks needs_reauth, not connected, when there is nothing to refresh with", async () => {
     McpClientMock.mockImplementation(rejecting401);
 
-    const runtime = await discoverMcpTools("p1", [
+    const runtime = await discoverMcpTools(db, "p1", [
       oauthServer({ expiresAt: new Date(Date.now() + hour), refreshToken: undefined }),
     ]);
 
     expect(refreshTokens).not.toHaveBeenCalled();
     expect(updateOne).toHaveBeenCalledTimes(1);
     expect(updateOne).toHaveBeenCalledWith(
-      { _id: "p1", "pm.mcpServers": { $elemMatch: { name: "acme", url: "https://acme.example/mcp", "oauth.clientId": "client-1" } } },
+      { _id: "p1", tenant: DEFAULT_TENANT_ID, "pm.mcpServers": { $elemMatch: { name: "acme", url: "https://acme.example/mcp", "oauth.clientId": "client-1" } } },
       { $set: { "pm.mcpServers.$.oauth.status": "needs_reauth" } }
     );
     expect(runtime.serverNames).toEqual([]);
@@ -293,7 +298,7 @@ describe("discoverMcpTools — a 401 despite a stored expiry that still looked f
     McpClientMock.mockImplementation(rejecting401);
     refreshTokens.mockResolvedValue({ accessToken: "new-access", expiresAt: new Date(Date.now() + hour) });
 
-    const runtime = await discoverMcpTools("p1", [oauthServer({ expiresAt: new Date(Date.now() + hour) })]);
+    const runtime = await discoverMcpTools(db, "p1", [oauthServer({ expiresAt: new Date(Date.now() + hour) })]);
 
     // The refresh's own write says connected; the retry's own failure has the last word.
     const statuses = updateOne.mock.calls.map(([, update]) => update.$set["pm.mcpServers.$.oauth.status"]);
@@ -307,7 +312,7 @@ describe("discoverMcpTools — a 401 despite a stored expiry that still looked f
       listTools: vi.fn(),
     }));
 
-    const runtime = await discoverMcpTools("p1", [oauthServer({ expiresAt: new Date(Date.now() + hour) })]);
+    const runtime = await discoverMcpTools(db, "p1", [oauthServer({ expiresAt: new Date(Date.now() + hour) })]);
 
     expect(refreshTokens).not.toHaveBeenCalled();
     expect(updateOne).not.toHaveBeenCalled();
@@ -317,7 +322,7 @@ describe("discoverMcpTools — a 401 despite a stored expiry that still looked f
   it("does not force-refresh a bearer server's 401 — there is no OAuth token to refresh", async () => {
     McpClientMock.mockImplementation(rejecting401);
 
-    const runtime = await discoverMcpTools("p1", [server()]);
+    const runtime = await discoverMcpTools(db, "p1", [server()]);
 
     expect(refreshTokens).not.toHaveBeenCalled();
     expect(updateOne).not.toHaveBeenCalled();
@@ -334,7 +339,7 @@ describe("discoverMcpTools — a 401 despite a stored expiry that still looked f
       listTools: vi.fn(),
     }));
 
-    const runtime = await discoverMcpTools("p1", [oauthServer({ expiresAt: new Date(Date.now() + hour) })]);
+    const runtime = await discoverMcpTools(db, "p1", [oauthServer({ expiresAt: new Date(Date.now() + hour) })]);
 
     expect(refreshTokens).not.toHaveBeenCalled();
     expect(updateOne).not.toHaveBeenCalled();
@@ -354,7 +359,7 @@ describe("discoverMcpTools — a 401 despite a stored expiry that still looked f
     );
     refreshTokens.mockResolvedValue({ accessToken: "new-access", expiresAt: new Date(Date.now() + hour) });
 
-    const runtime = await discoverMcpTools("p1", [oauthServer({ expiresAt: new Date(Date.now() + hour) })]);
+    const runtime = await discoverMcpTools(db, "p1", [oauthServer({ expiresAt: new Date(Date.now() + hour) })]);
 
     // The refresh's own write says connected; nothing overwrites it for a transient retry failure.
     const statuses = updateOne.mock.calls.map(([, update]) => update.$set["pm.mcpServers.$.oauth.status"]);
@@ -385,7 +390,7 @@ describe("discoverMcpTools — a 401 despite a stored expiry that still looked f
 
     // Already expired: resolveServerToken's own "is it fresh" check triggers refresh #1 before
     // discoverMcpTools makes its first connection attempt at all.
-    await discoverMcpTools("p1", [oauthServer({ expiresAt: new Date(Date.now() - 1000) })]);
+    await discoverMcpTools(db, "p1", [oauthServer({ expiresAt: new Date(Date.now() - 1000) })]);
 
     expect(refreshTokens.mock.calls.map(([args]) => args.refreshToken)).toEqual([
       "the-refresh",

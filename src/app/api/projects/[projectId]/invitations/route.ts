@@ -106,7 +106,7 @@ export const POST = withProjectOwner(async (request, { params, user, db }) => {
     );
   }
 
-  const outcome = await inviteToBoard({
+  const outcome = await inviteToBoard(db, {
     email,
     project: projectId,
     relation: relation as GrantRelation,
@@ -127,6 +127,7 @@ export const POST = withProjectOwner(async (request, { params, user, db }) => {
 
   if (outcome.kind !== "created") {
     void logProjectAudit(
+      db,
       projectId,
       String(user._id),
       "member_invited",
@@ -147,10 +148,10 @@ export const POST = withProjectOwner(async (request, { params, user, db }) => {
     [{ project: projectId, relation: relation as GrantRelation }],
     [project]
   );
-  await recordDelivery(outcome.invitation._id, outcome.token, delivery.delivery);
+  await recordDelivery(db, outcome.invitation._id, outcome.token, delivery.delivery);
 
-  void logProjectAudit(projectId, String(user._id), "member_invited", `${email}: invited as ${relation}`);
-  void logInstanceAudit({
+  void logProjectAudit(db, projectId, String(user._id), "member_invited", `${email}: invited as ${relation}`);
+  void logInstanceAudit(db, {
     action: "invitation_sent",
     user: user._id,
     actorUsername: user.username,

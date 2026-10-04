@@ -15,6 +15,8 @@ class McpHttpError extends Error {
 vi.mock("./mcp-client", () => ({ McpClient: McpClientMock, McpHttpError }));
 
 const { discoverMcpTools } = await import("./mcp-tools");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const db = scopedToDefaultTenant();
 
 const readTools = (prefix: string, n: number) =>
   Array.from({ length: n }, (_, i) => ({ name: `list_${prefix}_thing_${i}`, description: "d" }));
@@ -51,7 +53,7 @@ describe("discoverMcpTools warns when the servers flood the turn", () => {
   it("warns once, naming the count, the budget and the servers", async () => {
     serveCounts({ notion: 42, github: 44 });
 
-    const runtime = await discoverMcpTools("p1", [server("notion"), server("github")]);
+    const runtime = await discoverMcpTools(db, "p1", [server("notion"), server("github")]);
 
     expect(runtime.tools.size).toBe(86);
     const warnings = warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes("MCP tools"));
@@ -67,7 +69,7 @@ describe("discoverMcpTools warns when the servers flood the turn", () => {
   it("says nothing for a project within budget", async () => {
     serveCounts({ notion: 5, github: 8 });
 
-    const runtime = await discoverMcpTools("p1", [server("notion"), server("github")]);
+    const runtime = await discoverMcpTools(db, "p1", [server("notion"), server("github")]);
 
     expect(runtime.tools.size).toBe(13);
     expect(warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes("MCP tools"))).toEqual([]);
@@ -77,7 +79,7 @@ describe("discoverMcpTools warns when the servers flood the turn", () => {
     serveCounts({ notion: 60 });
     const narrowed = { ...(server("notion") as object), toolAllowlist: ["list_notion_thing_1"] } as never;
 
-    const runtime = await discoverMcpTools("p1", [narrowed]);
+    const runtime = await discoverMcpTools(db, "p1", [narrowed]);
 
     expect(runtime.tools.size).toBe(1);
     expect(warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes("MCP tools"))).toEqual([]);
@@ -98,7 +100,7 @@ describe("tools a server may not use", () => {
   });
 
   it("are not counted against the budget when writes are off", async () => {
-    const runtime = await discoverMcpTools("p1", [server("notion")]);
+    const runtime = await discoverMcpTools(db, "p1", [server("notion")]);
 
     expect(runtime.tools.size).toBe(30);
     expect(warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes("MCP tools"))).toEqual([]);
@@ -108,7 +110,7 @@ describe("tools a server may not use", () => {
   it("are counted when writes are allowed", async () => {
     const writable = { ...(server("notion") as object), allowWrites: true } as never;
 
-    const runtime = await discoverMcpTools("p1", [writable]);
+    const runtime = await discoverMcpTools(db, "p1", [writable]);
 
     expect(runtime.tools.size).toBe(60);
     expect(warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes("MCP tools"))).toHaveLength(1);
@@ -132,7 +134,7 @@ describe("a server offering one name twice", () => {
   });
 
   it("carries both, under distinct exposed names", async () => {
-    const runtime = await discoverMcpTools("p1", [server("notion")]);
+    const runtime = await discoverMcpTools(db, "p1", [server("notion")]);
 
     expect(runtime.tools.size).toBe(2);
     expect([...runtime.tools.keys()].sort()).toEqual([
@@ -144,7 +146,7 @@ describe("a server offering one name twice", () => {
   it("carries both when the allowlist names it once, which is how the picker can tick it once", async () => {
     const narrowed = { ...(server("notion") as object), toolAllowlist: ["list_thing"] } as never;
 
-    const runtime = await discoverMcpTools("p1", [narrowed]);
+    const runtime = await discoverMcpTools(db, "p1", [narrowed]);
 
     expect(runtime.tools.size).toBe(2);
   });

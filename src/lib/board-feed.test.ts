@@ -89,7 +89,9 @@ vi.mock("@/models/user", () => ({
     find: (...a: unknown[]) => {
       userFind(...a);
       const filter = a[0] as Record<string, unknown>;
-      const hits = stored.filter((doc) => matches(doc, filter));
+      const hits = stored
+        .map((doc): Record<string, unknown> => ({ tenant: DEFAULT_TENANT_ID, ...doc }))
+        .filter((doc) => matches(doc, filter));
       // Sorted by _id the way the query asks, so the cap below takes a defined set
       hits.sort((x, y) => String(x._id).localeCompare(String(y._id)));
       let limit = hits.length;
@@ -115,6 +117,9 @@ const { boardFeedSubscribers, notifyBoardFeed, BOARD_FEED_FANOUT_LIMIT } = await
   "@/lib/board-feed"
 );
 const { encryptSecret } = await import("@/lib/encryption");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
+const db = scopedToDefaultTenant();
 
 const id = (n: number) => `507f1f77bcf86cd7994${String(n).padStart(5, "0")}`;
 
@@ -160,7 +165,7 @@ describe("who hears that a task was created", () => {
     stored = [member(1, { defaults: { task_created: row({ inApp: true }) } })];
     granted = [id(1)];
 
-    expect(await boardFeedSubscribers(PROJECT)).toEqual([id(1)]);
+    expect(await boardFeedSubscribers(db, PROJECT)).toEqual([id(1)]);
   });
 
   // The control the checklist asks for, and the whole point of the row: everybody else on the
@@ -172,7 +177,7 @@ describe("who hears that a task was created", () => {
     ];
     granted = [id(1), id(2)];
 
-    expect(await boardFeedSubscribers(PROJECT)).toEqual([id(1)]);
+    expect(await boardFeedSubscribers(db, PROJECT)).toEqual([id(1)]);
   });
 
   // An account that has never opened the settings screen has no stored grid at all, and the
@@ -182,7 +187,7 @@ describe("who hears that a task was created", () => {
     stored = [{ _id: id(3), role: "member", emailNotifications: true }];
     granted = [id(3)];
 
-    expect(await boardFeedSubscribers(PROJECT)).toEqual([]);
+    expect(await boardFeedSubscribers(db, PROJECT)).toEqual([]);
   });
 
   it("picks somebody who ticked it for this board only", async () => {
@@ -196,7 +201,7 @@ describe("who hears that a task was created", () => {
     ];
     granted = [id(1)];
 
-    expect(await boardFeedSubscribers(PROJECT)).toEqual([id(1)]);
+    expect(await boardFeedSubscribers(db, PROJECT)).toEqual([id(1)]);
   });
 
   it("does not pick somebody who ticked it for a different board", async () => {
@@ -207,7 +212,7 @@ describe("who hears that a task was created", () => {
     ];
     granted = [id(1)];
 
-    expect(await boardFeedSubscribers(PROJECT)).toEqual([]);
+    expect(await boardFeedSubscribers(db, PROJECT)).toEqual([]);
   });
 
   // The candidate's global grid has the row on, and the project's own grid — which is the one in
@@ -221,7 +226,7 @@ describe("who hears that a task was created", () => {
     ];
     granted = [id(1)];
 
-    expect(await boardFeedSubscribers(PROJECT)).toEqual([]);
+    expect(await boardFeedSubscribers(db, PROJECT)).toEqual([]);
   });
 
   // Chat is not stored as deliverable, it is derived from the connection. A tick with no webhook
@@ -230,7 +235,7 @@ describe("who hears that a task was created", () => {
     stored = [member(1, { defaults: { task_created: row({ chat: true }) } })];
     granted = [id(1)];
 
-    expect(await boardFeedSubscribers(PROJECT)).toEqual([]);
+    expect(await boardFeedSubscribers(db, PROJECT)).toEqual([]);
 
     stored = [
       member(1, {
@@ -238,7 +243,7 @@ describe("who hears that a task was created", () => {
         chat: { kind: "slack", webhookUrl: "https://hooks.example.com/x" },
       }),
     ];
-    expect(await boardFeedSubscribers(PROJECT)).toEqual([id(1)]);
+    expect(await boardFeedSubscribers(db, PROJECT)).toEqual([id(1)]);
   });
 });
 
@@ -250,7 +255,7 @@ describe("who is in the audience at all", () => {
     stored = [member(1, { defaults: { task_created: row({ inApp: true }) } })];
     granted = [];
 
-    expect(await boardFeedSubscribers(PROJECT)).toEqual([]);
+    expect(await boardFeedSubscribers(db, PROJECT)).toEqual([]);
   });
 
   // BP-832. A deactivated account is told nothing, however it ticked the row
@@ -258,7 +263,7 @@ describe("who is in the audience at all", () => {
     stored = [{ ...member(1, { defaults: { task_created: row({ inApp: true }) } }), deactivatedAt: new Date() }];
     granted = [id(1)];
 
-    expect(await boardFeedSubscribers(PROJECT)).toEqual([]);
+    expect(await boardFeedSubscribers(db, PROJECT)).toEqual([]);
   });
 
   it("selects an instance admin, who reaches the board without a grant row", async () => {
@@ -267,14 +272,14 @@ describe("who is in the audience at all", () => {
     ];
     granted = [];
 
-    expect(await boardFeedSubscribers(PROJECT)).toEqual([id(1)]);
+    expect(await boardFeedSubscribers(db, PROJECT)).toEqual([id(1)]);
   });
 
   it("asks about the board the task was created on", async () => {
     stored = [member(1, { defaults: { task_created: row({ inApp: true }) } })];
     granted = [id(1)];
 
-    await boardFeedSubscribers(PROJECT);
+    await boardFeedSubscribers(db, PROJECT);
 
     expect(grantFind).toHaveBeenCalledWith(
       expect.objectContaining({ objectType: "project", object: PROJECT })
@@ -285,7 +290,7 @@ describe("who is in the audience at all", () => {
     stored = [member(1, { defaults: { task_created: row({ inApp: true }) } })];
     granted = [id(1)];
 
-    expect(await boardFeedSubscribers("BP")).toEqual([]);
+    expect(await boardFeedSubscribers(db, "BP")).toEqual([]);
     expect(userFind).not.toHaveBeenCalled();
   });
 });
@@ -301,7 +306,7 @@ describe("a board with more subscribers than the cap", () => {
     stored = crowd(BOARD_FEED_FANOUT_LIMIT + 25);
     granted = stored.map((u) => String(u._id));
 
-    const told = await boardFeedSubscribers(PROJECT);
+    const told = await boardFeedSubscribers(db, PROJECT);
 
     expect(told).toHaveLength(BOARD_FEED_FANOUT_LIMIT);
     expect(told[0]).toBe(id(1));
@@ -313,7 +318,7 @@ describe("a board with more subscribers than the cap", () => {
     stored = crowd(BOARD_FEED_FANOUT_LIMIT + 1);
     granted = stored.map((u) => String(u._id));
 
-    await boardFeedSubscribers(PROJECT);
+    await boardFeedSubscribers(db, PROJECT);
 
     expect(reported).toHaveBeenCalledWith(expect.stringContaining(String(BOARD_FEED_FANOUT_LIMIT)));
     reported.mockRestore();
@@ -330,7 +335,7 @@ describe("a board with more subscribers than the cap", () => {
     stored = [...bystanders, subscriber];
     granted = stored.map((u) => String(u._id));
 
-    expect(await boardFeedSubscribers(PROJECT)).toEqual([String(subscriber._id)]);
+    expect(await boardFeedSubscribers(db, PROJECT)).toEqual([String(subscriber._id)]);
   });
 
   // BP-705. Each of these matched the query before it carried resolveChannels' whole verdict, was
@@ -349,7 +354,7 @@ describe("a board with more subscribers than the cap", () => {
       stored = [...unsubscribedHere, subscriber()];
       granted = stored.map((u) => String(u._id));
 
-      expect(await boardFeedSubscribers(PROJECT)).toEqual([id(BOARD_FEED_FANOUT_LIMIT + 1)]);
+      expect(await boardFeedSubscribers(db, PROJECT)).toEqual([id(BOARD_FEED_FANOUT_LIMIT + 1)]);
     });
 
     it("an override that leaves the row unanswered, which for this row is off", async () => {
@@ -362,7 +367,7 @@ describe("a board with more subscribers than the cap", () => {
       stored = [...unsubscribedHere, subscriber()];
       granted = stored.map((u) => String(u._id));
 
-      expect(await boardFeedSubscribers(PROJECT)).toEqual([id(BOARD_FEED_FANOUT_LIMIT + 1)]);
+      expect(await boardFeedSubscribers(db, PROJECT)).toEqual([id(BOARD_FEED_FANOUT_LIMIT + 1)]);
     });
 
     it("a chat tick with nothing connected, globally or on this board", async () => {
@@ -377,7 +382,7 @@ describe("a board with more subscribers than the cap", () => {
       stored = [...unconnected, subscriber()];
       granted = stored.map((u) => String(u._id));
 
-      expect(await boardFeedSubscribers(PROJECT)).toEqual([id(BOARD_FEED_FANOUT_LIMIT + 1)]);
+      expect(await boardFeedSubscribers(db, PROJECT)).toEqual([id(BOARD_FEED_FANOUT_LIMIT + 1)]);
     });
 
     it("a mail tick with no address to send it to", async () => {
@@ -387,7 +392,7 @@ describe("a board with more subscribers than the cap", () => {
       stored = [...unreachable, subscriber()];
       granted = stored.map((u) => String(u._id));
 
-      expect(await boardFeedSubscribers(PROJECT)).toEqual([id(BOARD_FEED_FANOUT_LIMIT + 1)]);
+      expect(await boardFeedSubscribers(db, PROJECT)).toEqual([id(BOARD_FEED_FANOUT_LIMIT + 1)]);
     });
 
     // BP-735. createNotifications sends no mail at all on an instance without a mail server, so a
@@ -410,7 +415,7 @@ describe("a board with more subscribers than the cap", () => {
       stored = [...unmailable, subscriber()];
       granted = stored.map((u) => String(u._id));
 
-      expect(await boardFeedSubscribers(PROJECT)).toEqual([id(BOARD_FEED_FANOUT_LIMIT + 1)]);
+      expect(await boardFeedSubscribers(db, PROJECT)).toEqual([id(BOARD_FEED_FANOUT_LIMIT + 1)]);
     });
 
     it("still counts a mail tick once a mail server is configured", async () => {
@@ -422,9 +427,9 @@ describe("a board with more subscribers than the cap", () => {
       granted = [id(1)];
 
       mailConfigured = false;
-      expect(await boardFeedSubscribers(PROJECT)).toEqual([]);
+      expect(await boardFeedSubscribers(db, PROJECT)).toEqual([]);
       mailConfigured = true;
-      expect(await boardFeedSubscribers(PROJECT)).toEqual([id(1)]);
+      expect(await boardFeedSubscribers(db, PROJECT)).toEqual([id(1)]);
     });
 
     describe("a chat tick whose webhook no configured key can open", () => {
@@ -463,7 +468,7 @@ describe("a board with more subscribers than the cap", () => {
         ];
         granted = stored.map((u) => String(u._id));
 
-        expect(await boardFeedSubscribers(PROJECT)).toEqual([id(BOARD_FEED_FANOUT_LIMIT + 1)]);
+        expect(await boardFeedSubscribers(db, PROJECT)).toEqual([id(BOARD_FEED_FANOUT_LIMIT + 1)]);
       });
 
       it("nor with no key configured at all", async () => {
@@ -473,7 +478,7 @@ describe("a board with more subscribers than the cap", () => {
         stored = [chatOnly(1, sealed)];
         granted = [id(1)];
 
-        expect(await boardFeedSubscribers(PROJECT)).toEqual([]);
+        expect(await boardFeedSubscribers(db, PROJECT)).toEqual([]);
       });
 
       it("counts one sealed with the current key, or with a retired one still configured", async () => {
@@ -484,7 +489,7 @@ describe("a board with more subscribers than the cap", () => {
         stored = [chatOnly(1, current), chatOnly(2, retired)];
         granted = [id(1), id(2)];
 
-        expect(await boardFeedSubscribers(PROJECT)).toEqual([id(1), id(2)]);
+        expect(await boardFeedSubscribers(db, PROJECT)).toEqual([id(1), id(2)]);
       });
     });
 
@@ -497,7 +502,7 @@ describe("a board with more subscribers than the cap", () => {
       ];
       granted = [id(1)];
 
-      expect(await boardFeedSubscribers(PROJECT)).toEqual([id(1)]);
+      expect(await boardFeedSubscribers(db, PROJECT)).toEqual([id(1)]);
     });
 
     // overrideFor reads an entry without a matrix as no override, so the global grid is in force
@@ -510,14 +515,14 @@ describe("a board with more subscribers than the cap", () => {
       ];
       granted = [id(1)];
 
-      expect(await boardFeedSubscribers(PROJECT)).toEqual([id(1)]);
+      expect(await boardFeedSubscribers(db, PROJECT)).toEqual([id(1)]);
     });
 
     it("the person who created the task", async () => {
       stored = crowd(BOARD_FEED_FANOUT_LIMIT + 1);
       granted = stored.map((u) => String(u._id));
 
-      const told = await boardFeedSubscribers(PROJECT, id(1));
+      const told = await boardFeedSubscribers(db, PROJECT, id(1));
 
       expect(told).toHaveLength(BOARD_FEED_FANOUT_LIMIT);
       expect(told).not.toContain(id(1));
@@ -533,7 +538,7 @@ describe("a board with more subscribers than the cap", () => {
       ];
       granted = [id(1)];
 
-      expect(await boardFeedSubscribers(PROJECT)).toEqual([id(1)]);
+      expect(await boardFeedSubscribers(db, PROJECT)).toEqual([id(1)]);
     });
   });
 
@@ -544,7 +549,7 @@ describe("a board with more subscribers than the cap", () => {
     stored = crowd(BOARD_FEED_FANOUT_LIMIT);
     granted = stored.map((u) => String(u._id));
 
-    expect(await boardFeedSubscribers(PROJECT)).toHaveLength(BOARD_FEED_FANOUT_LIMIT);
+    expect(await boardFeedSubscribers(db, PROJECT)).toHaveLength(BOARD_FEED_FANOUT_LIMIT);
     expect(reported).not.toHaveBeenCalled();
     reported.mockRestore();
   });
@@ -554,7 +559,7 @@ describe("a board with more subscribers than the cap", () => {
     stored = crowd(3);
     granted = stored.map((u) => String(u._id));
 
-    await boardFeedSubscribers(PROJECT);
+    await boardFeedSubscribers(db, PROJECT);
 
     expect(reported).not.toHaveBeenCalled();
     reported.mockRestore();
@@ -574,9 +579,10 @@ describe("dispatching it", () => {
     stored = [member(1, { defaults: { task_created: row({ inApp: true }) } })];
     granted = [id(1)];
 
-    await notifyBoardFeed(params);
+    await notifyBoardFeed(db, params);
 
     expect(createNotifications).toHaveBeenCalledWith(
+      db,
       expect.objectContaining({ type: "task_created", recipientIds: [id(1)] })
     );
   });
@@ -585,9 +591,10 @@ describe("dispatching it", () => {
     stored = [member(1, { defaults: { task_created: row({ inApp: true }) } })];
     granted = [id(1)];
 
-    await notifyBoardFeed({ ...params, digestTitle: "New task in Board Planner" });
+    await notifyBoardFeed(db, { ...params, digestTitle: "New task in Board Planner" });
 
     expect(createNotifications).toHaveBeenCalledWith(
+      db,
       expect.objectContaining({
         title: "New task BP-7 in Board Planner",
         digestTitle: "New task in Board Planner",
@@ -599,7 +606,7 @@ describe("dispatching it", () => {
     stored = [member(1)];
     granted = [id(1)];
 
-    await notifyBoardFeed(params);
+    await notifyBoardFeed(db, params);
 
     expect(createNotifications).not.toHaveBeenCalled();
   });
@@ -612,7 +619,7 @@ describe("dispatching it", () => {
     stored = [member(1)];
     granted = [id(1)];
 
-    await notifyBoardFeed({ ...params, email });
+    await notifyBoardFeed(db, { ...params, email });
 
     expect(email).not.toHaveBeenCalled();
   });
@@ -622,7 +629,7 @@ describe("dispatching it", () => {
     stored = [member(1, { defaults: { task_created: row({ inApp: true }) } })];
     granted = [id(1)];
 
-    await notifyBoardFeed({ ...params, actorId: id(1), email });
+    await notifyBoardFeed(db, { ...params, actorId: id(1), email });
 
     expect(createNotifications).not.toHaveBeenCalled();
     expect(email).not.toHaveBeenCalled();
@@ -639,10 +646,10 @@ describe("dispatching it", () => {
     ];
     granted = [id(1)];
 
-    await notifyBoardFeed({ ...params, email });
+    await notifyBoardFeed(db, { ...params, email });
 
     expect(email).toHaveBeenCalledTimes(1);
-    expect(createNotifications).toHaveBeenCalledWith(expect.objectContaining({ email: built }));
+    expect(createNotifications).toHaveBeenCalledWith(db, expect.objectContaining({ email: built }));
   });
 
   // Nothing awaits this: task creation has already answered the request. A rejection escaping
@@ -653,7 +660,7 @@ describe("dispatching it", () => {
       throw new Error("mongo is having a bad afternoon");
     });
 
-    await expect(notifyBoardFeed(params)).resolves.toBeUndefined();
+    await expect(notifyBoardFeed(db, params)).resolves.toBeUndefined();
     reported.mockRestore();
   });
 });

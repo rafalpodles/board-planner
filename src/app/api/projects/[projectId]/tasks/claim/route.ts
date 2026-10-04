@@ -20,12 +20,12 @@ export const POST = withWorker(async (request, { params, worker, db }) => {
   const { projectId: identifier } = await params;
   await connectDB();
 
-  const projectId = await resolveProjectId(identifier);
+  const projectId = await resolveProjectId(db, identifier);
   if (!projectId) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
   // Before the verdict on purpose: locking the only worker of a project must not also stop the
   // queue from healing tasks its previous run abandoned
-  await releaseExpiredTasks(projectId).catch(() => 0);
+  await releaseExpiredTasks(db, projectId).catch(() => 0);
 
   const [project, others, reachable] = await Promise.all([
     db.Project.findById(projectId).select("_id repositoryUrl githubRepo gitlabRepo gitlabHost worker").lean(),
@@ -33,7 +33,7 @@ export const POST = withWorker(async (request, { params, worker, db }) => {
     db.Worker.find({ _id: { $ne: worker._id } }).select(
       "_id name host repos enabled lastSeenAt createdAt"
     ),
-    ownerReachableProjectIds(worker),
+    ownerReachableProjectIds(db, worker),
   ]);
   const verdict = verdictFor(
     worker,
@@ -62,7 +62,7 @@ export const POST = withWorker(async (request, { params, worker, db }) => {
 
   let task: Awaited<ReturnType<typeof claimNextTask>>;
   try {
-    task = await claimNextTask(projectId, String(worker._id), runId, machineOwnerId);
+    task = await claimNextTask(db, projectId, String(worker._id), runId, machineOwnerId);
   } catch (error) {
     // 409 with the reason, never 204: 204 is what an empty queue answers, and a board with no
     // column to claim into read as an idle machine for as long as nobody happened to look at the
@@ -81,7 +81,7 @@ export const POST = withWorker(async (request, { params, worker, db }) => {
   // point before it runs at which anyone can ask whether the machine about to run it is that
   // person's own.
   const [agent, lastRun] = await Promise.all([
-    snapshotFor(projectId, task.agent, machineOwnerId),
+    snapshotFor(db, projectId, task.agent, machineOwnerId),
     // The one thing that happened to this task most recently, so a retry knows whether it is one
     // at all. Not scoped to this worker or this attempt: whichever machine ran last, and whatever
     // it was rejected for, is what this attempt starts from (BP-289).
@@ -102,7 +102,7 @@ export const POST = withWorker(async (request, { params, worker, db }) => {
     // The everyday way in was an agent nobody had composed yet; task-service now refuses to write
     // one of those onto a task at all. This is what happens to the ones that are left: an agent
     // emptied or deleted after it was chosen, or one naming a block this instance does not have.
-    await releaseTask(projectId, String(task._id), {
+    await releaseTask(db, projectId, String(task._id), {
       refund: false,
       workerId: String(worker._id),
     }).catch(() => {});

@@ -55,7 +55,7 @@ export const DELETE = withAuth(async (_request, { params, user, db }) => {
     return NextResponse.json({ error: lastWayIn }, { status: 409 });
   }
 
-  void logInstanceAudit({
+  void logInstanceAudit(db, {
     action: "identity_unlinked",
     user: user._id,
     actorUsername: user.username,

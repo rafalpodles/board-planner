@@ -34,6 +34,7 @@ vi.mock("@/models/deviceEnrolment", () => ({
   DeviceEnrolment: { updateOne: deviceEnrolmentUpdateOne },
 }));
 
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 const { POST } = await import("./route");
 
 const PROJECT_ID = "69a52e3b399b27d3cbb2c5a5";
@@ -78,7 +79,7 @@ function ctx(userCode = "ABCD-1234") {
 // Reach is the member grant; committing the project to machines is the project-admin one — its
 // owner, or an instance admin — exactly as PUT /api/projects/:id has it (BP-736).
 function grants(access: boolean, owns = false) {
-  check.mockImplementation(async (user: { role?: string }, _id: string, need: string) =>
+  check.mockImplementation(async (_db: unknown, user: { role?: string }, _id: string, need: string) =>
     user.role === "admin" ? true : need === "admin" ? owns : access
   );
 }
@@ -106,6 +107,7 @@ describe("POST /api/workers/enrolment/device/:userCode/approve", () => {
     await POST(request({ projectId: PROJECT_ID }), ctx());
 
     expect(registerWorker).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       expect.objectContaining({
         name: "rig-laptop",
         host: "mac.home",
@@ -121,6 +123,7 @@ describe("POST /api/workers/enrolment/device/:userCode/approve", () => {
     await POST(request({ projectId: PROJECT_ID }), ctx());
 
     expect(registerWorker).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       expect.objectContaining({ owner: "owner2", ownerId: "member-2" })
     );
   });
@@ -153,6 +156,7 @@ describe("POST /api/workers/enrolment/device/:userCode/approve", () => {
       expect(projectUpdateOne).not.toHaveBeenCalled();
       expect((await response.json()).workersEnabled).toBe(false);
       expect(logInstanceAudit).not.toHaveBeenCalledWith(
+        scopedToDefaultTenant(),
         expect.objectContaining({ action: "project_workers_enabled" })
       );
     });
@@ -168,6 +172,7 @@ describe("POST /api/workers/enrolment/device/:userCode/approve", () => {
       );
       expect((await response.json()).workersEnabled).toBe(true);
       expect(logInstanceAudit).toHaveBeenCalledWith(
+        scopedToDefaultTenant(),
         expect.objectContaining({ action: "project_workers_enabled", target: "BP" })
       );
     });
@@ -199,6 +204,7 @@ describe("POST /api/workers/enrolment/device/:userCode/approve", () => {
       );
       expect((await response.json()).workersEnabled).toBe(true);
       expect(logInstanceAudit).toHaveBeenCalledWith(
+        scopedToDefaultTenant(),
         expect.objectContaining({ action: "project_workers_enabled", target: "BP" })
       );
     });
@@ -211,6 +217,7 @@ describe("POST /api/workers/enrolment/device/:userCode/approve", () => {
 
       expect(projectUpdateOne).not.toHaveBeenCalled();
       expect(logInstanceAudit).not.toHaveBeenCalledWith(
+        scopedToDefaultTenant(),
         expect.objectContaining({ action: "project_workers_enabled" })
       );
     });

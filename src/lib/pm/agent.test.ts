@@ -24,11 +24,11 @@ function pmMessage() {
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/project", () => ({
-  Project: { findById: vi.fn().mockResolvedValue(PROJECT) },
+  Project: { findOne: vi.fn().mockResolvedValue(PROJECT) },
 }));
 vi.mock("@/models/user", () => ({
   User: {
-    findById: () => ({
+    findOne: () => ({
       select: () => ({ lean: () => Promise.resolve({ username: "pm", fullName: "PM" }) }),
     }),
   },
@@ -108,6 +108,8 @@ vi.mock("./tools", () => ({
 }));
 
 const { runPmTurn } = await import("./agent");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const db = scopedToDefaultTenant();
 // Not mocked: what the sticky key is computed FROM is the claim under test, and the function that
 // computes it is pinned separately in prompt-cache.test.ts
 const { pmSessionId } = await import("./prompt-cache");
@@ -122,7 +124,7 @@ function toolCall(name: string, args: Record<string, unknown>) {
 }
 
 function turn(disallowedTools: string[], autonomous = false) {
-  return runPmTurn({
+  return runPmTurn(db, {
     projectId: PROJECT._id,
     userMessage: "trigger",
     triggeredByUserId: "pm-user-id",
@@ -178,6 +180,7 @@ describe("runPmTurn withholding", () => {
     await turn(NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS);
 
     expect(addCommentExecute).toHaveBeenCalled();
+    expect(addCommentExecute.mock.calls[0][0]).toBe(db);
   });
 });
 
@@ -576,7 +579,7 @@ describe("the prefix a turn asks to be cached", () => {
     ]);
     answering({ type: "text", content: "a screenshot of a board" });
 
-    await runPmTurn({
+    await runPmTurn(db, {
       projectId: PROJECT._id,
       userMessage: "",
       triggeredByUserId: "pm-user-id",

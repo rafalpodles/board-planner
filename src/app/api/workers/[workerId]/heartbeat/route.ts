@@ -126,7 +126,7 @@ export const POST = withWorker(async (request, { worker, db }) => {
   const preflight = reportedPreflight(body.preflight);
   const halt = reportedHalt(body.halt);
 
-  await touchWorker(String(worker._id), {
+  await touchWorker(db, String(worker._id), {
     // A missing/unparseable protocol header must not overwrite a valid stored version with NaN
     ...(Number.isFinite(protocolVersion) ? { protocolVersion } : {}),
     version: typeof body.version === "string" ? body.version.slice(0, MAX_VERSION_LENGTH) : worker.version,
@@ -169,7 +169,7 @@ export const POST = withWorker(async (request, { worker, db }) => {
     db.Project.find(PROJECT_RUNS_WORKERS_QUERY)
       .select("_id key name repositoryUrl githubRepo gitlabRepo gitlabHost worker")
       .lean(),
-    ownerReachableProjectIds(worker),
+    ownerReachableProjectIds(db, worker),
   ]);
 
   return NextResponse.json({

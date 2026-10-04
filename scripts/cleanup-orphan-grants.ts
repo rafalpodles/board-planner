@@ -15,6 +15,7 @@
 import mongoose from "mongoose";
 import { resolveUri, dbName } from "./mongo-uri";
 import { findOrphanGrants, deleteOrphanGrants, type OrphanGrant } from "../src/lib/grants";
+import { scopedToDefaultTenant } from "../src/lib/db-scope";
 
 const APPLY = process.argv.includes("--apply");
 
@@ -24,11 +25,12 @@ function list(label: string, rows: OrphanGrant[]) {
 }
 
 async function main() {
+  const db = scopedToDefaultTenant();
   const { uri, source } = resolveUri();
   await mongoose.connect(uri, { autoIndex: false, ...(dbName() ? { dbName: dbName() } : {}) });
   console.log(`Connected via ${source} to database "${mongoose.connection.name}"${APPLY ? "" : " (dry run)"}`);
 
-  const orphans = await findOrphanGrants();
+  const orphans = await findOrphanGrants(db);
   list("Grants on a deleted project", orphans.deletedProject);
   list("Grants held by a deleted user", orphans.deletedUser);
   list("Grants stored with a non-ObjectId subject or project (never deleted here)", orphans.notObjectIds);
@@ -37,7 +39,7 @@ async function main() {
   if (!APPLY) {
     console.log("\nNothing deleted. Re-run with --apply to delete them.");
   } else {
-    const deleted = await deleteOrphanGrants(orphans);
+    const deleted = await deleteOrphanGrants(db, orphans);
     console.log(`\nDeleted ${deleted} grant(s).`);
   }
   await mongoose.disconnect();

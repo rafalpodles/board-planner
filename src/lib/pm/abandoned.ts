@@ -1,6 +1,6 @@
-import { PmMessage } from "@/models/pmMessage";
 import { pmThreadFilter } from "./thread";
 import { isTurnRunning } from "./turn-lock";
+import type { ScopedDb } from "@/lib/db-scope";
 
 export const ABANDONED_TURN_NOTICE =
   "⚠️ The connection dropped before this answer finished.";
@@ -14,9 +14,9 @@ export const ABANDONED_TURN_NOTICE =
  * `finally`. The turn lock is in-process, so an empty assistant message with no turn in flight is
  * abandoned by definition; while one *is* in flight the ellipsis is correct and nothing is touched.
  */
-export async function finalizeAbandonedTurns(projectId: string, userId: string): Promise<void> {
+export async function finalizeAbandonedTurns(db: ScopedDb, projectId: string, userId: string): Promise<void> {
   if (isTurnRunning(projectId)) return;
-  await PmMessage.updateMany(
+  await db.PmMessage.updateMany(
     { ...pmThreadFilter(projectId, userId), role: "assistant", content: "" },
     { $set: { content: ABANDONED_TURN_NOTICE } }
   );

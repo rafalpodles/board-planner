@@ -6,6 +6,9 @@ const resolveDailyTokenCap = vi.fn();
 vi.mock("./availability", () => ({ resolveDailyTokenCap, resolveDailyTurnCap: vi.fn() }));
 
 const { dailyPmSpend } = await import("./turn-cap");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
+const db = scopedToDefaultTenant();
 
 const PROJECT = "507f1f77bcf86cd799439011";
 
@@ -33,7 +36,7 @@ beforeEach(() => {
  */
 describe("dailyPmSpend", () => {
   it("reports what the day cost, calls beside tokens", async () => {
-    const spend = await dailyPmSpend(PROJECT, {});
+    const spend = await dailyPmSpend(db, PROJECT, {});
 
     expect(spend.tokens).toBe(120_000);
     // The number the turn cap was mistaken for — reported so the two can be compared
@@ -49,26 +52,26 @@ describe("dailyPmSpend", () => {
   it("is never over when no ceiling is configured, however much was spent", async () => {
     aggregate.mockResolvedValue([{ tokens: 99_000_000, calls: 9_000, stepLimitHits: 500 }]);
 
-    expect((await dailyPmSpend(PROJECT, {})).over).toBe(false);
+    expect((await dailyPmSpend(db, PROJECT, {})).over).toBe(false);
   });
 
   it("is over once a configured ceiling is reached", async () => {
     resolveDailyTokenCap.mockResolvedValue(100_000);
 
-    expect((await dailyPmSpend(PROJECT, { dailyTokenCap: 100_000 })).over).toBe(true);
+    expect((await dailyPmSpend(db, PROJECT, { dailyTokenCap: 100_000 })).over).toBe(true);
   });
 
   it("is not over below it", async () => {
     resolveDailyTokenCap.mockResolvedValue(200_000);
 
-    expect((await dailyPmSpend(PROJECT, { dailyTokenCap: 200_000 })).over).toBe(false);
+    expect((await dailyPmSpend(db, PROJECT, { dailyTokenCap: 200_000 })).over).toBe(false);
   });
 
   // A day with no turns aggregates to nothing at all, which must read as zero rather than as NaN
   it("reads an empty day as zero", async () => {
     aggregate.mockResolvedValue([]);
 
-    const spend = await dailyPmSpend(PROJECT, {});
+    const spend = await dailyPmSpend(db, PROJECT, {});
 
     expect(spend).toMatchObject({
       tokens: 0,
@@ -88,7 +91,7 @@ describe("dailyPmSpend", () => {
    * which is also the only place the schema's field name and the pipeline's path are compared.
    */
   it("carries the cache figures out beside the tokens they are part of", async () => {
-    const spend = await dailyPmSpend(PROJECT, {});
+    const spend = await dailyPmSpend(db, PROJECT, {});
 
     expect(spend.cachedTokens).toBe(90_000);
     expect(spend.cacheWriteTokens).toBe(4_000);
@@ -109,7 +112,7 @@ describe("dailyPmSpend", () => {
       { tokens: 1_000, promptTokens: 800, cachedTokens: 4_000, cacheWriteTokens: 0, calls: 1, stepLimitHits: 0 },
     ]);
 
-    await dailyPmSpend(PROJECT, {});
+    await dailyPmSpend(db, PROJECT, {});
 
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("understated"));
     warn.mockRestore();
@@ -126,7 +129,7 @@ describe("dailyPmSpend", () => {
       { tokens: 700_000, promptTokens: 400_000, cachedTokens: 600_000, cacheWriteTokens: 0, calls: 9, stepLimitHits: 0 },
     ]);
 
-    await dailyPmSpend(PROJECT, {});
+    await dailyPmSpend(db, PROJECT, {});
 
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("400000 prompt"));
     warn.mockRestore();
@@ -136,7 +139,7 @@ describe("dailyPmSpend", () => {
   it("says nothing when the cached share is a share", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    await dailyPmSpend(PROJECT, {});
+    await dailyPmSpend(db, PROJECT, {});
 
     expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
@@ -146,15 +149,16 @@ describe("dailyPmSpend", () => {
   it("judges the ceiling on the total, not on the total plus its cached share", async () => {
     resolveDailyTokenCap.mockResolvedValue(150_000);
 
-    expect((await dailyPmSpend(PROJECT, { dailyTokenCap: 150_000 })).over).toBe(false);
+    expect((await dailyPmSpend(db, PROJECT, { dailyTokenCap: 150_000 })).over).toBe(false);
   });
 
   // The project's day, the same one the turn cap already uses — a UTC server would otherwise turn
   // a Warsaw board's allowance over at 02:00 local
   it("asks only for today, in the project's own timezone", async () => {
-    await dailyPmSpend(PROJECT, { autonomy: { timezone: "Europe/Warsaw" } });
+    await dailyPmSpend(db, PROJECT, { autonomy: { timezone: "Europe/Warsaw" } });
 
-    const match = aggregate.mock.calls[0][0][0].$match;
+    expect(aggregate.mock.calls[0][0][0]).toEqual({ $match: { tenant: DEFAULT_TENANT_ID } });
+    const match = aggregate.mock.calls[0][0][1].$match;
     expect(match.createdAt.$gte).toBeInstanceOf(Date);
     expect(String(match.project)).toBe(PROJECT);
   });

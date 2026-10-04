@@ -6,13 +6,13 @@ import { withAuth } from "@/lib/middleware";
 const interactiveOnly = () =>
   NextResponse.json({ error: "This action requires an interactive session" }, { status: 403 });
 
-export const GET = withAuth(async (_request, { user }) => {
+export const GET = withAuth(async (_request, { user, db }) => {
   if (user.viaMachineCredential) return interactiveOnly();
-  return NextResponse.json({ pending: await pendingEmailChange(user._id) });
+  return NextResponse.json({ pending: await pendingEmailChange(db, user._id) });
 });
 
-export const DELETE = withAuth(async (_request, { user }) => {
+export const DELETE = withAuth(async (_request, { user, db }) => {
   if (user.viaMachineCredential) return interactiveOnly();
-  await cancelEmailChange(user._id);
+  await cancelEmailChange(db, user._id);
   return NextResponse.json({ pending: null });
 });

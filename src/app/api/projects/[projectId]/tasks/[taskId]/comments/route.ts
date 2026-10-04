@@ -27,7 +27,7 @@ export const POST = withProjectAccessOrWorker(async (request, { params, user, db
 
   const { body } = await request.json();
 
-  const result = await addComment(projectId, taskId, body, {
+  const result = await addComment(db, projectId, taskId, body, {
     id: String(user._id),
     username: user.username,
   });

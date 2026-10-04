@@ -2,9 +2,8 @@ import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { connectDB } from "@/lib/db";
 import { FULL_NAME_MAX_LENGTH, stripControlCharacters } from "@/lib/identifiers";
-import { User } from "@/models/user";
-import { Worker } from "@/models/worker";
 import { IUser } from "@/types";
+import type { ScopedDb } from "@/lib/db-scope";
 
 // `Comment.author` is a required reference to a User, so without this a worker comments in the
 // voice of whoever owns its credential — a falsified audit trail, and worse the moment a second
@@ -35,7 +34,7 @@ export function workerDisplayName(machine: string, owner: string): string {
   return capLength(composed, FULL_NAME_MAX_LENGTH);
 }
 
-export async function ensureWorkerUser(input: {
+export async function ensureWorkerUser(db: ScopedDb, input: {
   workerId: string;
   machine: string;
   owner: string;
@@ -49,7 +48,7 @@ export async function ensureWorkerUser(input: {
   // fullName is refreshed on every registration so renaming a machine is not a second identity.
   const password = bcrypt.hashSync(crypto.randomBytes(32).toString("hex"), 10);
 
-  return User.findOneAndUpdate(
+  return db.User.findOneAndUpdate(
     { username },
     {
       $set: { fullName, kind: "machine" },
@@ -69,15 +68,15 @@ const MACHINE_USERNAME = /^worker-[a-f0-9]{24}$/;
 // A name written before registration sanitised it (BP-413) would otherwise stay until that machine
 // registered again, and a dead machine never does (BP-425). Only a name the sanitiser would change
 // is rewritten, and only while it still reads as it did, so a registration landing meanwhile wins.
-export async function repairMachineNames(): Promise<number> {
+export async function repairMachineNames(db: ScopedDb): Promise<number> {
   await connectDB();
-  const machines = await User.find({ kind: "machine", username: { $regex: MACHINE_USERNAME } })
+  const machines = await db.User.find({ kind: "machine", username: { $regex: MACHINE_USERNAME } })
     .select("_id username fullName")
     .lean();
   const poisoned = machines.filter((m) => workerDisplayName(m.fullName ?? "", "") !== m.fullName);
   if (poisoned.length === 0) return 0;
 
-  const workers = await Worker.find({
+  const workers = await db.Worker.find({
     _id: { $in: poisoned.map((m) => m.username.slice("worker-".length)) },
   })
     .select("_id name owner")
@@ -95,7 +94,7 @@ export async function repairMachineNames(): Promise<number> {
         ? workerDisplayName(worker.name, ownerName)
         : workerDisplayName(user.fullName ?? "", "");
     if (fullName === user.fullName) continue;
-    const written = await User.updateOne(
+    const written = await db.User.updateOne(
       { _id: user._id, fullName: user.fullName },
       { $set: { fullName } }
     );

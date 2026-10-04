@@ -4,6 +4,8 @@ const create = vi.fn();
 vi.mock("@/models/instanceAuditLog", () => ({ InstanceAuditLog: { create } }));
 
 const { logInstanceAudit } = await import("./instanceAudit");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
 
 describe("logInstanceAudit", () => {
   beforeEach(() => {
@@ -13,7 +15,7 @@ describe("logInstanceAudit", () => {
   });
 
   it("records the actor, the action and what was acted on", async () => {
-    await logInstanceAudit({
+    await logInstanceAudit(scopedToDefaultTenant(), {
       action: "worker_disabled",
       target: "rig-laptop",
       user: "admin-1",
@@ -26,13 +28,14 @@ describe("logInstanceAudit", () => {
       action: "worker_disabled",
       target: "rig-laptop",
       detail: "Kill switch on",
+      tenant: DEFAULT_TENANT_ID,
     });
   });
 
   // A worker spends its enrolment token during registration, where the caller is a machine with no
   // session. An entry nobody can attribute is still worth more than no entry.
   it("stores a null actor rather than refusing an entry no user made", async () => {
-    await logInstanceAudit({ action: "enrolment_token_spent", target: "rig-laptop" });
+    await logInstanceAudit(scopedToDefaultTenant(), { action: "enrolment_token_spent", target: "rig-laptop" });
 
     expect(create).toHaveBeenCalledWith({
       user: null,
@@ -40,6 +43,7 @@ describe("logInstanceAudit", () => {
       action: "enrolment_token_spent",
       target: "rig-laptop",
       detail: "",
+      tenant: DEFAULT_TENANT_ID,
     });
   });
 
@@ -47,7 +51,7 @@ describe("logInstanceAudit", () => {
   // rewrite every row they wrote as "system" — the word this log reserves for a machine. Stored
   // beside it, so the row outlives its actor the way it already outlives its subject.
   it("stores the actor's username beside the reference", async () => {
-    await logInstanceAudit({
+    await logInstanceAudit(scopedToDefaultTenant(), {
       action: "user_deleted",
       target: "someone",
       user: "admin-1",
@@ -55,7 +59,7 @@ describe("logInstanceAudit", () => {
     });
 
     expect(create).toHaveBeenCalledWith(
-      expect.objectContaining({ user: "admin-1", actorUsername: "owner" })
+      expect.objectContaining({ user: "admin-1", actorUsername: "owner", tenant: DEFAULT_TENANT_ID })
     );
   });
 
@@ -66,7 +70,7 @@ describe("logInstanceAudit", () => {
     create.mockRejectedValue(new Error("mongo is down"));
 
     await expect(
-      logInstanceAudit({ action: "worker_disabled", target: "rig-laptop" })
+      logInstanceAudit(scopedToDefaultTenant(), { action: "worker_disabled", target: "rig-laptop" })
     ).resolves.toBeUndefined();
   });
 });

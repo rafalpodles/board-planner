@@ -1,10 +1,9 @@
 import { Types } from "mongoose";
 import { connectDB } from "@/lib/db";
-import { Task } from "@/models/task";
-import { Worker } from "@/models/worker";
 import { ApiTaskDecision, ITaskDecision, IUser, TaskDecisionState } from "@/types";
 import { prUrlNamesProjectRepo as namesProjectRepo } from "@/lib/repo-match";
 import type { RepositoryFields } from "@/lib/repository";
+import type { ScopedDb } from "@/lib/db-scope";
 
 /** Nothing is owed on these any more, and a new claim leaves them alone. */
 const SETTLED: TaskDecisionState[] = ["delivered", "discarded", "abandoned", "superseded"];
@@ -86,6 +85,7 @@ export type DecisionResult =
  * verdict must not put the question back.
  */
 export async function createDecision(
+  db: ScopedDb,
   taskId: string,
   workerId: string,
   runId: string,
@@ -93,7 +93,7 @@ export async function createDecision(
 ): Promise<DecisionResult> {
   await connectDB();
 
-  const updated = await Task.findOneAndUpdate(
+  const updated = await db.Task.findOneAndUpdate(
     {
       _id: taskId,
       "execution.workerId": workerId,
@@ -141,6 +141,7 @@ export async function createDecision(
  * as it was written, which is what makes "you accepted this commit" mean anything afterwards.
  */
 export async function settleDecision(
+  db: ScopedDb,
   taskId: string,
   workerId: string,
   state: TaskDecisionState,
@@ -153,7 +154,7 @@ export async function settleDecision(
 
   await connectDB();
 
-  const updated = await Task.findOneAndUpdate(
+  const updated = await db.Task.findOneAndUpdate(
     { _id: taskId, "decision.workerId": workerId, "decision.state": { $in: from } },
     {
       $set: {
@@ -199,6 +200,7 @@ export interface DecisionPin {
  * then race each other on the machine.
  */
 export async function recordVerdict(
+  db: ScopedDb,
   taskId: string,
   verdict: Verdict,
   userId: string,
@@ -206,7 +208,7 @@ export async function recordVerdict(
 ): Promise<DecisionResult> {
   await connectDB();
 
-  const updated = await Task.findOneAndUpdate(
+  const updated = await db.Task.findOneAndUpdate(
     {
       _id: taskId,
       "decision.state": { $in: VERDICT_FROM[verdict] },
@@ -253,6 +255,7 @@ export async function recordVerdict(
  * agent's change under the owner's pinned GitHub identity and against that repository's CI.
  */
 export async function mayDecide(
+  db: ScopedDb,
   workerId: string,
   user: { _id: unknown; role?: string },
   // The machine, where the caller already has it. Both readers resolve it for the panel anyway,
@@ -265,7 +268,7 @@ export async function mayDecide(
   let worker = known;
   if (worker === undefined) {
     await connectDB();
-    worker = await Worker.findById(workerId).select("owner").lean<{ owner?: unknown } | null>();
+    worker = await db.Worker.findById(workerId).select("owner").lean<{ owner?: unknown } | null>();
   }
   // typeof null is "object", and a worker whose owner has been released carries null here — so a
   // missing owner must never compare equal to a missing user id.
@@ -371,12 +374,12 @@ export function toApiDecision(
  * bigger reasons by then.
  */
 export async function prUrlNamesProjectRepo(
+  db: ScopedDb,
   prUrl: string | undefined,
   projectId: unknown
 ): Promise<boolean> {
   if (!prUrl) return true;
-  const { Project } = await import("@/models/project");
-  const project = await Project.findById(projectId)
+  const project = await db.Project.findById(projectId)
     .select("repositoryUrl githubRepo gitlabRepo gitlabHost")
     .lean<{ _id: unknown } & RepositoryFields | null>();
   return project ? namesProjectRepo(prUrl, project) : true;
@@ -412,10 +415,10 @@ export interface WorkerDecision {
  * holding the very commit that was accepted. Held, it keeps the work and pushes nothing until the
  * lock is lifted. A decline spends nothing, so it travels as it is.
  */
-export async function decisionsForWorker(workerId: string): Promise<WorkerDecision[]> {
+export async function decisionsForWorker(db: ScopedDb, workerId: string): Promise<WorkerDecision[]> {
   await connectDB();
 
-  const tasks = await Task.find({
+  const tasks = await db.Task.find({
     "decision.workerId": workerId,
     "decision.state": { $nin: SETTLED },
   })
@@ -438,7 +441,7 @@ export async function decisionsForWorker(workerId: string): Promise<WorkerDecisi
       }[]
     >();
 
-  const locked = await lockedProjectIds(tasks.map((task) => String(task.project)));
+  const locked = await lockedProjectIds(db, tasks.map((task) => String(task.project)));
 
   return tasks.flatMap((task) =>
     task.decision?.state
@@ -464,11 +467,10 @@ export async function decisionsForWorker(workerId: string): Promise<WorkerDecisi
   );
 }
 
-async function lockedProjectIds(projectIds: string[]): Promise<Set<string>> {
+async function lockedProjectIds(db: ScopedDb, projectIds: string[]): Promise<Set<string>> {
   const unique = [...new Set(projectIds)];
   if (unique.length === 0) return new Set();
-  const { Project } = await import("@/models/project");
-  const locked = await Project.find({ _id: { $in: unique }, "worker.lockedByInstance": true })
+  const locked = await db.Project.find({ _id: { $in: unique }, "worker.lockedByInstance": true })
     .select("_id")
     .lean<{ _id: unknown }[]>();
   return new Set(locked.map((project) => String(project._id)));

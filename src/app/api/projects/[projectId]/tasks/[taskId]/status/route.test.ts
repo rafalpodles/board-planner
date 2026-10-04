@@ -25,11 +25,13 @@ vi.mock("@/lib/middleware", () => ({
       return handler(req, {
         ...(ctx as object),
         user: { _id: "u1", viaMachineCredential: bearer },
+        db: scopedToDefaultTenant(),
         ...(asWorker ? { workerId: header } : {}),
       });
     },
 }));
 
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 const { PATCH } = await import("./route");
 
 type Principal = "person" | "machineToken" | "worker";
@@ -71,7 +73,7 @@ describe("PATCH .../tasks/:taskId/status", () => {
     const res = await PATCH(request({ status: "in_review" }, "worker"), ctx());
 
     expect(res.status).toBe(200);
-    expect(changeStatus).toHaveBeenCalledWith("p1", "t1", "in_review", "u1", {
+    expect(changeStatus).toHaveBeenCalledWith(scopedToDefaultTenant(), "p1", "t1", "in_review", "u1", {
       force: false,
       workerId: "w1",
     });
@@ -81,7 +83,7 @@ describe("PATCH .../tasks/:taskId/status", () => {
     const res = await PATCH(request({ status: "todo", force: true }), ctx());
 
     expect(res.status).toBe(200);
-    expect(changeStatus).toHaveBeenCalledWith("p1", "t1", "todo", "u1", {
+    expect(changeStatus).toHaveBeenCalledWith(scopedToDefaultTenant(), "p1", "t1", "todo", "u1", {
       force: true,
       workerId: undefined,
     });
@@ -101,7 +103,7 @@ describe("PATCH .../tasks/:taskId/status", () => {
     const res = await PATCH(forged, ctx());
 
     expect(res.status).toBe(200);
-    expect(changeStatus).toHaveBeenCalledWith("p1", "t1", "in_review", "u1", {
+    expect(changeStatus).toHaveBeenCalledWith(scopedToDefaultTenant(), "p1", "t1", "in_review", "u1", {
       force: false,
       workerId: undefined,
     });
@@ -111,7 +113,7 @@ describe("PATCH .../tasks/:taskId/status", () => {
   it("gives an API token no worker id", async () => {
     await PATCH(request({ status: "in_review" }, "machineToken"), ctx());
 
-    expect(changeStatus).toHaveBeenCalledWith("p1", "t1", "in_review", "u1", {
+    expect(changeStatus).toHaveBeenCalledWith(scopedToDefaultTenant(), "p1", "t1", "in_review", "u1", {
       force: false,
       workerId: undefined,
     });

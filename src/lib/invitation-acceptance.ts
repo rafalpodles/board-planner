@@ -12,10 +12,8 @@ import { INVITATION_REFUSALS } from "@/lib/invitation-refusals";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { applyAdminGroup } from "@/lib/oidc/admin-group";
 import { logProjectAudit } from "@/lib/projectAudit";
-import { Grant } from "@/models/grant";
-import { Identity } from "@/models/identity";
-import { User } from "@/models/user";
 import { IInvitation } from "@/types";
+import type { ScopedDb } from "@/lib/db-scope";
 
 export interface NewAccount {
   username: string;
@@ -35,24 +33,25 @@ export interface NewAccount {
  * the two cannot drift apart on what an invitation grants.
  */
 export async function completeAcceptance(
+  db: ScopedDb,
   invitation: IInvitation,
   account: NewAccount,
   request: Request,
   clientIp: string | null
 ): Promise<NextResponse> {
   // Nothing exists yet that the claim is tied to, so a failure here gives the link back
-  const authority = await authorityAtAcceptance(invitation).catch(async (err) => {
-    await releaseInvitation(invitation._id).catch(() => {});
+  const authority = await authorityAtAcceptance(db, invitation).catch(async (err) => {
+    await releaseInvitation(db, invitation._id).catch(() => {});
     throw err;
   });
   if (!authority) {
-    await revokeClaimedInvitation(invitation._id);
+    await revokeClaimedInvitation(db, invitation._id);
     return NextResponse.json({ error: INVITATION_REFUSALS.revoked }, { status: 400 });
   }
 
   let user;
   try {
-    user = await User.create({
+    user = await db.User.create({
       username: account.username,
       ...(account.passwordHash ? { password: account.passwordHash } : {}),
       fullName: account.fullName,
@@ -63,7 +62,7 @@ export async function completeAcceptance(
       role: authority.role,
     });
   } catch (err) {
-    await releaseInvitation(invitation._id).catch(() => {});
+    await releaseInvitation(db, invitation._id).catch(() => {});
     const conflict = duplicateKeyField(err);
     if (conflict === "email") {
       return NextResponse.json(
@@ -79,12 +78,12 @@ export async function completeAcceptance(
 
   if (account.identity) {
     try {
-      await Identity.create({ user: user._id, ...account.identity, lastUsedAt: new Date() });
+      await db.Identity.create({ user: user._id, ...account.identity, lastUsedAt: new Date() });
     } catch (err) {
       // Linked to another account in the meantime, before the claim was tied to anything: both the
       // account and the claim can still be undone
-      await User.deleteOne({ _id: user._id }).catch(() => {});
-      await releaseInvitation(invitation._id).catch(() => {});
+      await db.User.deleteOne({ _id: user._id }).catch(() => {});
+      await releaseInvitation(db, invitation._id).catch(() => {});
       if (duplicateKeyField(err)) {
         return NextResponse.json(
           { error: "That sign-in is already linked to another account." },
@@ -97,30 +96,31 @@ export async function completeAcceptance(
 
   let stillHeld = true;
   try {
-    stillHeld = await recordAcceptance(invitation._id, user._id);
+    stillHeld = await recordAcceptance(db, invitation._id, user._id);
   } catch (err) {
     // The account exists either way, so its boards are still granted below. Tried again, since a
     // claim left unrecorded stays revocable, and revoking it would mark a used invitation withdrawn
     console.error("Failed to record an invitation's acceptance:", err);
-    stillHeld = await recordAcceptance(invitation._id, user._id).catch(() => true);
+    stillHeld = await recordAcceptance(db, invitation._id, user._id).catch(() => true);
   }
   if (!stillHeld) {
-    await Identity.deleteMany({ user: user._id }).catch(() => {});
-    await User.deleteOne({ _id: user._id }).catch(() => {});
+    await db.Identity.deleteMany({ user: user._id }).catch(() => {});
+    await db.User.deleteOne({ _id: user._id }).catch(() => {});
     return NextResponse.json({ error: INVITATION_REFUSALS.revoked }, { status: 400 });
   }
   // A re-invite sent while this acceptance held its claim is a second pending row for the address
-  await revokePendingInvitationsFor(invitation.email);
+  await revokePendingInvitationsFor(db, invitation.email);
 
   const granted: string[] = [];
   for (const board of authority.boards) {
     try {
-      await Grant.findOneAndUpdate(
+      await db.Grant.findOneAndUpdate(
         { subject: user._id, objectType: "project", object: board.project },
         { $set: { relation: board.relation }, $setOnInsert: { createdBy: board.addedBy } },
         { upsert: true }
       );
       void logProjectAudit(
+        db,
         String(board.project),
         String(board.addedBy),
         "member_added",
@@ -132,7 +132,7 @@ export async function completeAcceptance(
     }
   }
 
-  void logInstanceAudit({
+  void logInstanceAudit(db, {
     action: "invitation_accepted",
     user: user._id,
     actorUsername: user.username,
@@ -140,7 +140,7 @@ export async function completeAcceptance(
     detail: `as ${authority.role === "admin" ? "an administrator" : "a member"}, account ${user.username}${account.identity ? `, signing in with ${account.identity.provider}` : ""}`,
   });
 
-  if (account.identity) await applyAdminGroup(user, account.identity.provider, account.groups ?? []);
+  if (account.identity) await applyAdminGroup(db, user, account.identity.provider, account.groups ?? []);
 
   const { token: sessionToken, absoluteExpiresAt } = await createSession({
     userId: user._id,

@@ -15,7 +15,7 @@ export const PUT = withProjectAccess(async (request, { params, user, db }) => {
   const { projectId } = await params;
   await connectDB();
 
-  if (!(await check(user, projectId, "admin"))) {
+  if (!(await check(db, user, projectId, "admin"))) {
     return NextResponse.json({ error: "Only a project admin can change this" }, { status: 403 });
   }
 
@@ -82,6 +82,7 @@ async function setDefaultAgent(
     : null;
   const was = previousId ? (previous?.name ?? "a deleted agent") : "";
   logProjectAudit(
+    db,
     projectId,
     userId,
     "settings_updated",

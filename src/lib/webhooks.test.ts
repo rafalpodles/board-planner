@@ -4,7 +4,7 @@ const findByIdLean = vi.fn();
 const updateOne = vi.fn().mockResolvedValue({});
 vi.mock("@/models/project", () => ({
   Project: {
-    findById: () => ({ lean: findByIdLean }),
+    findOne: () => ({ lean: findByIdLean }),
     updateOne: (...a: unknown[]) => updateOne(...a),
   },
 }));
@@ -19,6 +19,7 @@ const DESTINATION = { allowLoopback: "the webhook destination" };
 vi.mock("@/lib/url-validation", () => ({ WEBHOOK_DESTINATION: DESTINATION, WEBHOOK_DESTINATION_REFUSED: "refused", isAllowedWebhookUrl: (u: string, o: unknown) => allowUrl(u, o) }));
 
 const { dispatchWebhooks } = await import("./webhooks");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 const { BlockedDestinationError } = await import("@/lib/safe-fetch");
 
 function project(webhooks: Record<string, unknown>[]) {
@@ -52,7 +53,7 @@ describe("what a successful delivery records", () => {
     );
     safeFetch.mockResolvedValue({ ok: true, status: 200 });
 
-    await dispatchWebhooks("p1", "task_created", PAYLOAD);
+    await dispatchWebhooks(scopedToDefaultTenant(), "p1", "task_created", PAYLOAD);
     await vi.waitFor(() => expect(callsFor("w1")).toHaveLength(1));
 
     expect(allowUrl).toHaveBeenCalledWith("https://a.example/hook", DESTINATION);
@@ -75,7 +76,7 @@ describe("what a failed delivery records", () => {
     );
     safeFetch.mockRejectedValue(new Error("connect ECONNREFUSED"));
 
-    await dispatchWebhooks("p1", "task_created", PAYLOAD);
+    await dispatchWebhooks(scopedToDefaultTenant(), "p1", "task_created", PAYLOAD);
     await vi.waitFor(() => expect(callsFor("w1")).toHaveLength(1));
 
     expect(callsFor("w1")[0][1].$set).toEqual({
@@ -93,7 +94,7 @@ describe("what a failed delivery records", () => {
     );
     safeFetch.mockResolvedValue({ ok: false, status: 500 });
 
-    await dispatchWebhooks("p1", "task_created", PAYLOAD);
+    await dispatchWebhooks(scopedToDefaultTenant(), "p1", "task_created", PAYLOAD);
     await vi.waitFor(() => expect(callsFor("w1")).toHaveLength(1));
 
     expect(callsFor("w1")[0][1].$set["webhooks.$.lastError"]).toBe("HTTP 500");
@@ -108,7 +109,7 @@ describe("what a failed delivery records", () => {
     );
     safeFetch.mockRejectedValue(new BlockedDestinationError("10.0.0.5 resolves to the private address 10.0.0.5"));
 
-    await dispatchWebhooks("p1", "task_created", PAYLOAD);
+    await dispatchWebhooks(scopedToDefaultTenant(), "p1", "task_created", PAYLOAD);
     await vi.waitFor(() => expect(callsFor("w1")).toHaveLength(1));
 
     const written = callsFor("w1")[0][1].$set["webhooks.$.lastError"] as string;
@@ -125,7 +126,7 @@ describe("what a failed delivery records", () => {
     );
     allowUrl.mockReturnValue(false);
 
-    await dispatchWebhooks("p1", "task_created", PAYLOAD);
+    await dispatchWebhooks(scopedToDefaultTenant(), "p1", "task_created", PAYLOAD);
     await vi.waitFor(() => expect(callsFor("w1")).toHaveLength(1));
 
     expect(safeFetch).not.toHaveBeenCalled();
@@ -147,7 +148,7 @@ describe("multiple webhooks on the same event", () => {
         : Promise.reject(new Error("timeout"))
     );
 
-    await dispatchWebhooks("p1", "task_created", PAYLOAD);
+    await dispatchWebhooks(scopedToDefaultTenant(), "p1", "task_created", PAYLOAD);
     await vi.waitFor(() => {
       expect(callsFor("w-ok")).toHaveLength(1);
       expect(callsFor("w-fail")).toHaveLength(1);
@@ -170,7 +171,7 @@ describe("ordering against a concurrent attempt on the same webhook", () => {
     );
     safeFetch.mockResolvedValue({ ok: true, status: 200 });
 
-    await dispatchWebhooks("p1", "task_created", PAYLOAD);
+    await dispatchWebhooks(scopedToDefaultTenant(), "p1", "task_created", PAYLOAD);
     await vi.waitFor(() => expect(callsFor("w1")).toHaveLength(1));
 
     const [filter] = callsFor("w1")[0];
@@ -189,7 +190,7 @@ describe("recording the outcome is itself fire-and-forget", () => {
     safeFetch.mockResolvedValue({ ok: true, status: 200 });
     updateOne.mockRejectedValueOnce(new Error("database is unreachable"));
 
-    await expect(dispatchWebhooks("p1", "task_created", PAYLOAD)).resolves.toBeUndefined();
+    await expect(dispatchWebhooks(scopedToDefaultTenant(), "p1", "task_created", PAYLOAD)).resolves.toBeUndefined();
     await vi.waitFor(() => expect(callsFor("w1")).toHaveLength(1));
   });
 
@@ -203,7 +204,7 @@ describe("recording the outcome is itself fire-and-forget", () => {
     let releaseDelivery!: (v: { ok: boolean; status: number }) => void;
     safeFetch.mockReturnValue(new Promise((resolve) => (releaseDelivery = resolve)));
 
-    await dispatchWebhooks("p1", "task_created", PAYLOAD);
+    await dispatchWebhooks(scopedToDefaultTenant(), "p1", "task_created", PAYLOAD);
 
     expect(updateOne).not.toHaveBeenCalled();
     releaseDelivery({ ok: true, status: 200 });

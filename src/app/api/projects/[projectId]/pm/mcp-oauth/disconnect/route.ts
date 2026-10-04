@@ -41,7 +41,7 @@ export const POST = withProjectOwner(async (request, { params, user, db }) => {
   const line =
     auditChange(label, oauth?.status ?? "unconfigured", "unconfigured") ??
     (oauth?.accessToken || oauth?.refreshToken ? `${label} tokens cleared` : null);
-  if (line) logProjectAudit(projectId, user._id, "settings_updated", line);
+  if (line) logProjectAudit(db, projectId, user._id, "settings_updated", line);
 
   return NextResponse.json({ ok: true });
 });

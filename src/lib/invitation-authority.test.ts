@@ -11,6 +11,7 @@ vi.mock("@/models/project", () => ({ Project: { find: projectFind } }));
 vi.mock("@/models/grant", () => ({ Grant: { find: grantFind } }));
 
 const { authorityAtAcceptance } = await import("./invitation-authority");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 
 const oid = () => new Types.ObjectId();
 const same = (a: unknown, b: unknown) => String(a) === String(b);
@@ -86,7 +87,7 @@ describe("what an invitation may still grant when it is accepted", () => {
   it("keeps everything an administrator sent while they are still one", async () => {
     world({ people: [{ _id: admin, role: "admin" }], projects: [p1] });
 
-    const authority = await authorityAtAcceptance({
+    const authority = await authorityAtAcceptance(scopedToDefaultTenant(), {
       role: "admin",
       invitedBy: admin,
       boards: [board(p1, admin, "owner")],
@@ -105,7 +106,7 @@ describe("what an invitation may still grant when it is accepted", () => {
     });
 
     expect(
-      await authorityAtAcceptance({
+      await authorityAtAcceptance(scopedToDefaultTenant(), {
         role: "admin",
         invitedBy: admin,
         boards: [board(p1, admin)],
@@ -118,7 +119,7 @@ describe("what an invitation may still grant when it is accepted", () => {
     world({ people: [{ _id: admin, role: "admin", deactivatedAt: new Date() }], projects: [p1] });
 
     expect(
-      await authorityAtAcceptance({ role: "admin", invitedBy: admin, boards: [board(p1, admin, "owner")] } as never)
+      await authorityAtAcceptance(scopedToDefaultTenant(), { role: "admin", invitedBy: admin, boards: [board(p1, admin, "owner")] } as never)
     ).toBeNull();
   });
 
@@ -130,7 +131,7 @@ describe("what an invitation may still grant when it is accepted", () => {
     });
 
     expect(
-      await authorityAtAcceptance({
+      await authorityAtAcceptance(scopedToDefaultTenant(), {
         role: "member",
         invitedBy: admin,
         boards: [board(p1, admin), board(p2, owner)],
@@ -142,14 +143,14 @@ describe("what an invitation may still grant when it is accepted", () => {
     world({ people: [{ _id: admin, role: "admin", kind: "machine" }], projects: [p1] });
 
     expect(
-      await authorityAtAcceptance({ role: "admin", invitedBy: admin, boards: [] } as never)
+      await authorityAtAcceptance(scopedToDefaultTenant(), { role: "admin", invitedBy: admin, boards: [] } as never)
     ).toBeNull();
   });
 
   it("drops a board that was deleted in the meantime", async () => {
     world({ people: [{ _id: admin, role: "admin" }], projects: [p1] });
 
-    const authority = await authorityAtAcceptance({
+    const authority = await authorityAtAcceptance(scopedToDefaultTenant(), {
       role: "member",
       invitedBy: admin,
       boards: [board(p1, admin), board(p2, admin)],
@@ -165,7 +166,7 @@ describe("what an invitation may still grant when it is accepted", () => {
       grants: [{ subject: owner, object: p1, relation: "owner" }],
     });
 
-    const authority = await authorityAtAcceptance({
+    const authority = await authorityAtAcceptance(scopedToDefaultTenant(), {
       role: "member",
       invitedBy: owner,
       boards: [board(p1, owner), board(p2, owner)],
@@ -183,7 +184,7 @@ describe("what an invitation may still grant when it is accepted", () => {
     });
 
     expect(
-      await authorityAtAcceptance({
+      await authorityAtAcceptance(scopedToDefaultTenant(), {
         role: "member",
         invitedBy: owner,
         boards: [board(p1, owner)],
@@ -196,7 +197,7 @@ describe("what an invitation may still grant when it is accepted", () => {
     world({ people: [], projects: [p1], grants: [{ subject: owner, object: p1, relation: "owner" }] });
 
     expect(
-      await authorityAtAcceptance({
+      await authorityAtAcceptance(scopedToDefaultTenant(), {
         role: "member",
         invitedBy: owner,
         boards: [board(p1, owner)],

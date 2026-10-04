@@ -1,6 +1,4 @@
 import { isValidObjectId, Types } from "mongoose";
-import { Task } from "@/models/task";
-import { Project } from "@/models/project";
 import { logActivities } from "@/lib/activity";
 import { dispatchWebhooks } from "@/lib/webhooks";
 import { dispatchNotifications } from "@/lib/notifications";
@@ -9,6 +7,7 @@ import { describeLinkChange } from "@/lib/link-phrasing";
 import { taskKeyOf } from "@/lib/task-key";
 import { usernameOf } from "@/lib/usernames";
 import { DependencyType, LinkDirection, RelationType } from "@/types";
+import type { ScopedDb } from "@/lib/db-scope";
 
 export type LinkResult = { ok: true } | { ok: false; error: string; status: number };
 
@@ -88,6 +87,7 @@ function blocks(task: { blockedBy?: unknown[] }, otherId: string): boolean {
 }
 
 export async function addTaskLink(
+  db: ScopedDb,
   projectId: string,
   rawTaskId: string,
   rawTargetTaskId: string,
@@ -102,8 +102,8 @@ export async function addTaskLink(
   }
 
   const [task, other] = await Promise.all([
-    Task.findOne({ _id: taskId, project: projectId }, END_FIELDS).lean<LinkEnd>(),
-    Task.findOne({ _id: targetTaskId, project: projectId }, END_FIELDS).lean<LinkEnd>(),
+    db.Task.findOne({ _id: taskId, project: projectId }, END_FIELDS).lean<LinkEnd>(),
+    db.Task.findOne({ _id: targetTaskId, project: projectId }, END_FIELDS).lean<LinkEnd>(),
   ]);
 
   if (!task || !other) {
@@ -111,7 +111,7 @@ export async function addTaskLink(
   }
 
   if (type === "blocked_by") {
-    const cycle = await wouldCycle(projectId, taskId, targetTaskId);
+    const cycle = await wouldCycle(db, projectId, taskId, targetTaskId);
     if (cycle) return cycle;
 
     if (blocks(task, targetTaskId)) return { ok: true };
@@ -127,7 +127,7 @@ export async function addTaskLink(
     //
     // The filter carries the project for the same reason every other write in this module does; a
     // write scoped by id alone cannot stand as proof of anything about this board.
-    const blocked = await Task.findOneAndUpdate(
+    const blocked = await db.Task.findOneAndUpdate(
       { _id: taskId, project: projectId },
       { $addToSet: { blockedBy: targetTaskId } },
       { returnDocument: "before", projection: "blockedBy" }
@@ -143,7 +143,7 @@ export async function addTaskLink(
     // Already there before this write, so another request added it and owns the announcement
     if (blocks(blocked, targetTaskId)) return { ok: true };
 
-    await announce(projectId, actorId, [
+    await announce(db, projectId, actorId, [
       { action: "added", type, holder: task, target: other },
     ]);
     return { ok: true };
@@ -157,10 +157,10 @@ export async function addTaskLink(
   // single parent so the hierarchy stays a tree.
   let losing: LinkSubject[] = [];
   if (type === "parent_of") {
-    const cycle = await wouldDescend(projectId, taskId, targetTaskId);
+    const cycle = await wouldDescend(db, projectId, taskId, targetTaskId);
     if (cycle) return cycle;
 
-    losing = await takeTheChildOffItsOtherParents(projectId, taskId, targetTaskId);
+    losing = await takeTheChildOffItsOtherParents(db, projectId, taskId, targetTaskId);
     // Already the parent and nothing else claimed the child: a refresh re-sending the same link.
     // The call above removed nothing in that case, so there is still nothing to undo.
     if (replaced === type && losing.length === 0) return { ok: true };
@@ -184,7 +184,7 @@ export async function addTaskLink(
   // at the top. A concurrent request can change what this pair holds in between, and `$pull` takes
   // whatever is there — so the earlier read is the right thing to short-circuit a no-op on, and
   // the wrong thing to name a removal by.
-  const dropped = await Task.findOneAndUpdate(
+  const dropped = await db.Task.findOneAndUpdate(
     { _id: taskId, project: projectId },
     { $pull: { relations: { task: targetTaskId } } },
     { returnDocument: "before", projection: "relations" }
@@ -194,7 +194,7 @@ export async function addTaskLink(
   if (droppedType && droppedType !== type) {
     lost.push({ action: "removed", type: droppedType, holder: task, target: other });
   }
-  const attached = await Task.updateOne(
+  const attached = await db.Task.updateOne(
     { _id: taskId, project: projectId },
     { $push: { relations: { task: targetTaskId, type: type as RelationType } } }
   );
@@ -204,7 +204,7 @@ export async function addTaskLink(
   // narrow, but it is the half of the operation the sentence is about.
   if (!attached.matchedCount) {
     // What was detached really was detached, so those tasks are still owed their row.
-    await announce(projectId, actorId, lost);
+    await announce(db, projectId, actorId, lost);
     // Deliberately not the bare "Task not found" of the guard above, which means nothing happened.
     // Here the child really has been detached, and a caller that retries on a 404 would otherwise
     // keep retrying a link that can never be made. The wording says only what a zero matchedCount
@@ -216,7 +216,7 @@ export async function addTaskLink(
     };
   }
 
-  await announce(projectId, actorId, [
+  await announce(db, projectId, actorId, [
     ...lost,
     { action: "added", type, holder: task, target: other },
   ]);
@@ -224,6 +224,7 @@ export async function addTaskLink(
 }
 
 export async function removeTaskLink(
+  db: ScopedDb,
   projectId: string,
   rawTaskId: string,
   rawTargetTaskId: string,
@@ -241,7 +242,7 @@ export async function removeTaskLink(
   // "before", so what is announced is what THIS write removed. Deciding from a separate read
   // taken first would let a link added in between be pulled here and recorded nowhere — the
   // same read-then-write gap the parent removal above closes.
-  const task = await Task.findOneAndUpdate({ _id: taskId, project: projectId }, update, {
+  const task = await db.Task.findOneAndUpdate({ _id: taskId, project: projectId }, update, {
     returnDocument: "before",
     projection: END_FIELDS,
   }).lean<LinkEnd>();
@@ -256,13 +257,13 @@ export async function removeTaskLink(
   // silence this ticket is about.
   if (!held) return { ok: true };
 
-  const other = await Task.findOne(
+  const other = await db.Task.findOne(
     { _id: targetTaskId, project: projectId },
     END_FIELDS
   ).lean<LinkEnd>();
   if (!other) return { ok: true };
 
-  await announce(projectId, actorId, [{ action: "removed", type, holder: task, target: other }]);
+  await announce(db, projectId, actorId, [{ action: "removed", type, holder: task, target: other }]);
   return { ok: true };
 }
 
@@ -301,6 +302,7 @@ export async function removeTaskLink(
  * leaving the child with some parents detached and a new one attached behind a 200.
  */
 async function takeTheChildOffItsOtherParents(
+  db: ScopedDb,
   projectId: string,
   taskId: string,
   targetTaskId: string
@@ -309,7 +311,7 @@ async function takeTheChildOffItsOtherParents(
   const done = [taskId];
 
   for (;;) {
-    const parent = await Task.findOneAndUpdate(
+    const parent = await db.Task.findOneAndUpdate(
       {
         project: projectId,
         _id: { $nin: done },
@@ -327,11 +329,12 @@ async function takeTheChildOffItsOtherParents(
 }
 
 async function wouldCycle(
+  db: ScopedDb,
   projectId: string,
   taskId: string,
   targetTaskId: string
 ): Promise<LinkResult | null> {
-  const all = await Task.find(
+  const all = await db.Task.find(
     { project: projectId, blockedBy: { $exists: true, $ne: [] } },
     "_id blockedBy"
   ).lean<{ _id: unknown; blockedBy: unknown[] }[]>();
@@ -366,11 +369,12 @@ async function wouldCycle(
 }
 
 async function wouldDescend(
+  db: ScopedDb,
   projectId: string,
   taskId: string,
   targetTaskId: string
 ): Promise<LinkResult | null> {
-  const parented = await Task.find(
+  const parented = await db.Task.find(
     { project: projectId, "relations.type": "parent_of" },
     "_id relations"
   ).lean<{ _id: unknown; relations?: { task: unknown; type: RelationType }[] }[]>();
@@ -408,6 +412,7 @@ async function wouldDescend(
  * rather than ring twice. The timeline keeps both halves.
  */
 async function announce(
+  db: ScopedDb,
   projectId: string,
   actorId: string,
   facts: LinkFact[],
@@ -416,8 +421,8 @@ async function announce(
   if (facts.length === 0) return;
 
   const [project, actor] = await Promise.all([
-    Project.findById(projectId, "key name").lean(),
-    usernameOf(actorId),
+    db.Project.findById(projectId, "key name").lean(),
+    usernameOf(db, actorId),
   ]);
   const keyOf = (end: LinkSubject) => taskKeyOf(project?.key, end.taskNumber);
 
@@ -449,6 +454,7 @@ async function announce(
   // both of its rows inside the same millisecond, and the timeline breaks that tie on `_id`, so
   // the order these are inserted in is the order they are read in.
   await logActivities(
+    db,
     rows.map((row) => ({
       taskId: idOf(row.subject),
       userId: actorId,
@@ -470,7 +476,7 @@ async function announce(
 
   for (const [id, row] of perTask) {
     const summary = sentence(row, keyOf(row.subject));
-    createNotifications({
+    createNotifications(db, {
       type: "task_linked",
       taskId: id,
       projectId,
@@ -509,8 +515,8 @@ async function announce(
         }),
       },
     };
-    dispatchWebhooks(projectId, event, payload);
-    dispatchNotifications(projectId, event, payload);
+    dispatchWebhooks(db, projectId, event, payload);
+    dispatchNotifications(db, projectId, event, payload);
   }
 }
 
@@ -526,6 +532,7 @@ const DELETE_LINK_FANOUT_LIMIT = 200;
  * since `deleted`'s document is gone before this function is ever asked to write to it.
  */
 export async function severLinksToDeletedTask(
+  db: ScopedDb,
   projectId: string,
   rawDeletedTaskId: string,
   deleted: { taskNumber: number; title: string; status: string },
@@ -534,13 +541,13 @@ export async function severLinksToDeletedTask(
   const deletedTaskId = canonicalId(rawDeletedTaskId);
 
   const [blockedCandidates, relatedCandidates] = await Promise.all([
-    Task.find({ project: projectId, blockedBy: deletedTaskId }, SUBJECT_FIELDS)
+    db.Task.find({ project: projectId, blockedBy: deletedTaskId }, SUBJECT_FIELDS)
       // Ordered, so the cap takes the same tasks every time rather than whichever the storage
       // engine happened to reach first.
       .sort({ _id: 1 })
       .limit(DELETE_LINK_FANOUT_LIMIT)
       .lean<LinkSubject[]>(),
-    Task.find({ project: projectId, "relations.task": deletedTaskId }, `${SUBJECT_FIELDS} relations`)
+    db.Task.find({ project: projectId, "relations.task": deletedTaskId }, `${SUBJECT_FIELDS} relations`)
       .sort({ _id: 1 })
       .limit(DELETE_LINK_FANOUT_LIMIT)
       .lean<(LinkSubject & { relations: { task: unknown; type: RelationType }[] })[]>(),
@@ -570,7 +577,7 @@ export async function severLinksToDeletedTask(
   // list that no longer matches by the time it acts on it.
   const blockedFacts = await Promise.all(
     blockedCandidates.map(async (candidate): Promise<LinkFact | null> => {
-      const before = await Task.findOneAndUpdate(
+      const before = await db.Task.findOneAndUpdate(
         { _id: idOf(candidate), project: projectId, blockedBy: deletedTaskId },
         { $pull: { blockedBy: deletedTaskId } },
         { returnDocument: "before", projection: SUBJECT_FIELDS }
@@ -586,7 +593,7 @@ export async function severLinksToDeletedTask(
       // The query matched on this, so absent means the array changed between the read above and
       // here — the same narrow window the atomic pull below closes for the write itself.
       if (!type) return null;
-      const before = await Task.findOneAndUpdate(
+      const before = await db.Task.findOneAndUpdate(
         { _id: idOf(candidate), project: projectId, relations: { $elemMatch: { task: deletedTaskId, type } } },
         { $pull: { relations: { task: deletedTaskId, type } } },
         { returnDocument: "before", projection: SUBJECT_FIELDS }
@@ -602,12 +609,12 @@ export async function severLinksToDeletedTask(
   // fan-out cap is worse than a missed notification (BP-690). The two pulls just performed above
   // make this a no-op for every candidate that already got one.
   await Promise.all([
-    Task.updateMany({ project: projectId, blockedBy: deletedTaskId }, { $pull: { blockedBy: deletedTaskId } }),
-    Task.updateMany(
+    db.Task.updateMany({ project: projectId, blockedBy: deletedTaskId }, { $pull: { blockedBy: deletedTaskId } }),
+    db.Task.updateMany(
       { project: projectId, "relations.task": deletedTaskId },
       { $pull: { relations: { task: deletedTaskId } } }
     ),
   ]);
 
-  await announce(projectId, actorId, facts, { skipTargetRow: true });
+  await announce(db, projectId, actorId, facts, { skipTargetRow: true });
 }

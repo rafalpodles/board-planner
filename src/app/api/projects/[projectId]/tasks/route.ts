@@ -151,11 +151,11 @@ export const GET = withProjectAccess(async (request, { params, db }) => {
   // the far end, once for the list. Not part of taskPopulateFields, which can only follow refs a
   // task holds itself, and not left to the browser's own reverse derivation, which only sees the
   // tasks this response carried: under ?sprint= the parent usually is not one of them.
-  const parents = await parentsOf(projectId, tasks.map((task) => String(task._id)));
+  const parents = await parentsOf(db, projectId, tasks.map((task) => String(task._id)));
 
   // The board loads every task, so a raw document here would publish each one's whole execution
   // subdocument — run identity included — to every project member on every page load
-  const published = await withApiExecutions(tasks);
+  const published = await withApiExecutions(db, tasks);
   return NextResponse.json(
     published.map((task) => ({ ...task, parent: parents.get(String(task._id)) ?? null }))
   );
@@ -168,10 +168,10 @@ export const POST = withProjectAccess(async (request, { params, user, db }) => {
 
   const body = await request.json();
 
-  const result = await createTask(projectId, String(user._id), body);
+  const result = await createTask(db, projectId, String(user._id), body);
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: result.status });
   }
 
-  return NextResponse.json((await withApiExecutions([result.data]))[0], { status: 201 });
+  return NextResponse.json((await withApiExecutions(db, [result.data]))[0], { status: 201 });
 });

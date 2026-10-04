@@ -80,7 +80,7 @@ export const PATCH = withProjectAccess(async (request, { params, user, db }) => 
     body.options !== undefined &&
     isOptionField(field) &&
     optionIdsDropped(normalizeOptions(field.options), body.options) &&
-    !(await check(user, projectId, "admin"))
+    !(await check(db, user, projectId, "admin"))
   ) {
     return NextResponse.json(
       { error: "Only a project owner can remove an option a field already has" },
@@ -144,7 +144,7 @@ export const PATCH = withProjectAccess(async (request, { params, user, db }) => 
 
   const lines = customFieldChanges(was, { ...was, ...changes });
   if (estimateCleared) lines.push(`Estimate field: ${was.name} → none`);
-  if (lines.length > 0) logProjectAudit(projectId, user._id, "settings_updated", lines);
+  if (lines.length > 0) logProjectAudit(db, projectId, user._id, "settings_updated", lines);
 
   const { after } = projectWriteImages(
     before,
@@ -187,7 +187,7 @@ export const DELETE = withProjectOwner(async (_request, { params, user, db }) =>
   );
 
   if (removed) {
-    logProjectAudit(projectId, user._id, "settings_updated", [
+    logProjectAudit(db, projectId, user._id, "settings_updated", [
       `Custom field removed: ${removed.name}`,
       ...(estimateCleared ? [`Estimate field: ${removed.name} → none`] : []),
     ]);

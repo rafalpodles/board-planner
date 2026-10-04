@@ -118,7 +118,7 @@ export const POST = withProjectAccess(async (request, { params, user, db }) => {
     return NextResponse.json({ error: "Field with this name already exists" }, { status: 409 });
   }
 
-  logProjectAudit(projectId, user._id, "settings_updated", `Custom field added: ${name.trim()} (${fieldType})`);
+  logProjectAudit(db, projectId, user._id, "settings_updated", `Custom field added: ${name.trim()} (${fieldType})`);
 
   return NextResponse.json(updated.customFields, { status: 201 });
 });

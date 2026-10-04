@@ -19,6 +19,7 @@ vi.mock("@/models/project", () => ({
 }));
 
 const { seedAgents, MERGING_AGENT_NAME } = await import("./agent-seed");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -30,7 +31,7 @@ beforeEach(() => {
 
 describe("seedAgents", () => {
   it("creates without overwriting, so an edited description survives a restart", async () => {
-    await seedAgents();
+    await seedAgents(scopedToDefaultTenant());
 
     for (const call of [...agentUpdateOne.mock.calls, ...blockUpdateOne.mock.calls]) {
       expect(Object.keys(call[1])).toEqual(["$setOnInsert"]);
@@ -39,7 +40,7 @@ describe("seedAgents", () => {
   });
 
   it("seeds all three shipped agents", async () => {
-    await seedAgents();
+    await seedAgents(scopedToDefaultTenant());
 
     const names = agentUpdateOne.mock.calls.map((call) => call[0].name);
     expect(names).toEqual(["Default", MERGING_AGENT_NAME, "With security review"]);
@@ -66,7 +67,7 @@ describe("seedAgents", () => {
  */
 describe("seeding and the project's default agent", () => {
   it("no longer writes worker.agent at all", async () => {
-    await seedAgents();
+    await seedAgents(scopedToDefaultTenant());
 
     expect(projectUpdateMany).not.toHaveBeenCalled();
   });

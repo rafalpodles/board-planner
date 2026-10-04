@@ -105,7 +105,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
     if (typeof read.value.invitationToken !== "string" || !read.value.invitationToken) {
       return NextResponse.json({ error: INVITATION_REFUSALS.unknown }, { status: 400 });
     }
-    const found = await findInvitationByToken(read.value.invitationToken);
+    const found = await findInvitationByToken(db, read.value.invitationToken);
     if (!found.ok) return NextResponse.json({ error: INVITATION_REFUSALS[found.reason] }, { status: 400 });
     invitationToken = read.value.invitationToken;
   }
@@ -128,7 +128,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
 
   let started;
   try {
-    started = await beginFlow({ provider, origin, intent, invitationToken, userId, next, bootstrap });
+    started = await beginFlow(db, { provider, origin, intent, invitationToken, userId, next, bootstrap });
   } catch (err) {
     console.error(`OIDC discovery for ${provider.id} failed:`, err);
     return NextResponse.json(

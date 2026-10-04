@@ -1,9 +1,9 @@
-import { Project } from "@/models/project";
 import { WebhookEvent } from "@/types";
 import { isAllowedWebhookUrl, WEBHOOK_DESTINATION } from "./url-validation";
 import { safeFetch, BlockedDestinationError } from "./safe-fetch";
 import { OUTBOUND_CONCURRENCY, runBounded } from "./bounded";
 import { signatureHeaders } from "./webhook-signature";
+import type { ScopedDb } from "@/lib/db-scope";
 
 interface WebhookPayload {
   event: WebhookEvent;
@@ -30,6 +30,7 @@ interface WebhookPayload {
  * the newer one's. The query only applies when nothing newer has already been recorded.
  */
 async function recordDelivery(
+  db: ScopedDb,
   projectId: string,
   webhookId: string,
   attemptStartedAt: Date,
@@ -37,7 +38,7 @@ async function recordDelivery(
   error: string
 ): Promise<void> {
   try {
-    await Project.updateOne(
+    await db.Project.updateOne(
       {
         _id: projectId,
         webhooks: {
@@ -77,12 +78,13 @@ function messageFor(err: unknown): string {
 }
 
 export async function dispatchWebhooks(
+  db: ScopedDb,
   projectId: string,
   event: WebhookEvent,
   payload: Omit<WebhookPayload, "event" | "timestamp">
 ): Promise<void> {
   try {
-    const project = await Project.findById(projectId, "webhooks").lean();
+    const project = await db.Project.findById(projectId, "webhooks").lean();
     if (!project?.webhooks?.length) return;
 
     const activeWebhooks = project.webhooks.filter(
@@ -104,7 +106,7 @@ export async function dispatchWebhooks(
       // Refused before ever reaching the network — still an attempt whose outcome must be
       // recorded, or a URL that stops passing this check reads as "still delivering" forever.
       if (!isAllowedWebhookUrl(webhook.url, WEBHOOK_DESTINATION)) {
-        recordDelivery(projectId, webhookId, attemptStartedAt, "failed", "Blocked destination");
+        recordDelivery(db, projectId, webhookId, attemptStartedAt, "failed", "Blocked destination");
         return;
       }
 
@@ -119,13 +121,14 @@ export async function dispatchWebhooks(
         // ever saw the first kind, so a webhook receiver answering 500 read as delivered.
         (response) =>
           recordDelivery(
+            db,
             projectId,
             webhookId,
             attemptStartedAt,
             response.ok ? "ok" : "failed",
             response.ok ? "" : `HTTP ${response.status}`
           ),
-        (err) => recordDelivery(projectId, webhookId, attemptStartedAt, "failed", messageFor(err))
+        (err) => recordDelivery(db, projectId, webhookId, attemptStartedAt, "failed", messageFor(err))
       );
     });
   } catch {

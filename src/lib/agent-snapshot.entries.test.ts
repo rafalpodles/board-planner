@@ -1,14 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const agentFindById = vi.fn();
+const agentFindOne = vi.fn();
 const blockFind = vi.fn();
-const projectFindById = vi.fn();
+const projectFindOne = vi.fn();
 
-vi.mock("@/models/agent", () => ({ Agent: { findById: (...a: unknown[]) => agentFindById(...a) } }));
+vi.mock("@/models/agent", () => ({ Agent: { findOne: (...a: unknown[]) => agentFindOne(...a) } }));
 vi.mock("@/models/agentBlock", () => ({ AgentBlock: { find: (...a: unknown[]) => blockFind(...a) } }));
-vi.mock("@/models/project", () => ({ Project: { findById: (...a: unknown[]) => projectFindById(...a) } }));
+vi.mock("@/models/project", () => ({ Project: { findOne: (...a: unknown[]) => projectFindOne(...a) } }));
 
 const { snapshotFor } = await import("./agent-snapshot");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 
 // Every agent here is global, so whose machine is asking cannot be what these tests are about
 const MACHINE_OWNER = "69a52e3b399b27d3cbb2c5f1";
@@ -21,15 +22,15 @@ const BLOCKS = [
 ];
 
 beforeEach(() => {
-  agentFindById.mockReset();
+  agentFindOne.mockReset();
   blockFind.mockReset();
-  projectFindById.mockReset();
+  projectFindOne.mockReset();
   blockFind.mockReturnValue(lean(BLOCKS));
 });
 
 describe("snapshotFor with composition entries", () => {
   it("lets a position override the block's parameters, keeping the rest", async () => {
-    agentFindById.mockReturnValue(
+    agentFindOne.mockReturnValue(
       lean({
         _id: "a1",
         name: "Strict",
@@ -40,13 +41,13 @@ describe("snapshotFor with composition entries", () => {
         },
       })
     );
-    const snapshot = await snapshotFor("p1", "a1", MACHINE_OWNER);
+    const snapshot = await snapshotFor(scopedToDefaultTenant(), "p1", "a1", MACHINE_OWNER);
     // maxLines overridden here, maxFiles still the block's
     expect(snapshot?.sequence[1].params).toEqual({ maxLines: "50", maxFiles: "10" });
   });
 
   it("carries the same block twice with different parameters", async () => {
-    agentFindById.mockReturnValue(
+    agentFindOne.mockReturnValue(
       lean({
         _id: "a1",
         name: "Two limits",
@@ -59,16 +60,16 @@ describe("snapshotFor with composition entries", () => {
         },
       })
     );
-    const snapshot = await snapshotFor("p1", "a1", MACHINE_OWNER);
+    const snapshot = await snapshotFor(scopedToDefaultTenant(), "p1", "a1", MACHINE_OWNER);
     expect(snapshot?.sequence.map((e) => e.params?.maxLines)).toEqual(["50", "5000"]);
   });
 
   // Nothing needs migrating: a composition written as bare keys still resolves
   it("resolves a composition stored before entries existed", async () => {
-    agentFindById.mockReturnValue(
+    agentFindOne.mockReturnValue(
       lean({ _id: "a1", name: "Old", scope: "global", composition: { implementation: ["implement"] } })
     );
-    const snapshot = await snapshotFor("p1", "a1", MACHINE_OWNER);
+    const snapshot = await snapshotFor(scopedToDefaultTenant(), "p1", "a1", MACHINE_OWNER);
     expect(snapshot?.sequence.map((e) => e.key)).toEqual(["implement"]);
   });
 });

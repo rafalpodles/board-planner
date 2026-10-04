@@ -105,7 +105,7 @@ describe("the row an account's creation leaves", () => {
   it("names the account and the administrator who made it", async () => {
     await post({ ...VALID, username: "newcomer" });
 
-    expect(logInstanceAudit).toHaveBeenCalledWith({
+    expect(logInstanceAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), {
       action: "user_created",
       user: "a1",
       actorUsername: "owner",
@@ -122,7 +122,7 @@ describe("the row an account's creation leaves", () => {
 
     await post({ ...VALID, username: "firstadmin", setupCode: "operator-held-setup-code" });
 
-    expect(logInstanceAudit).toHaveBeenCalledWith({
+    expect(logInstanceAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), {
       action: "user_created",
       user: null,
       actorUsername: "",
@@ -307,6 +307,7 @@ describe("claiming an instance nobody has claimed", () => {
 
     expect(res.status).toBe(201);
     expect(create.mock.calls[0][0].tenant).toEqual(tenant);
+    expect(revokePendingInvitationsFor.mock.calls[0][0].tenant).toEqual(tenant);
   });
 
   it("creates the administrator when the operator's code is given", async () => {
@@ -478,7 +479,7 @@ describe("an account taking an address", () => {
     const res = await post({ ...VALID, username: "newcomer", email: " Ada@Example.com " });
 
     expect(res.status).toBe(201);
-    expect(revokePendingInvitationsFor).toHaveBeenCalledWith("ada@example.com");
+    expect(revokePendingInvitationsFor).toHaveBeenCalledWith(scopedToDefaultTenant(), "ada@example.com");
   });
 });
 

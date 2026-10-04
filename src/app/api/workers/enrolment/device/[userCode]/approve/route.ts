@@ -31,13 +31,13 @@ export const POST = withAuth(async (request, { params, user, db }) => {
   const body = await request.json().catch(() => ({}));
 
   if (body.deny === true) {
-    const denied = await denyDeviceEnrolment(userCode);
+    const denied = await denyDeviceEnrolment(db, userCode);
     return denied
       ? NextResponse.json({ state: "denied" })
       : NextResponse.json({ error: "This code is not valid any more" }, { status: 404 });
   }
 
-  const enrolment = await findPendingByUserCode(userCode);
+  const enrolment = await findPendingByUserCode(db, userCode);
   if (!enrolment || enrolment.status !== "pending") {
     return NextResponse.json({ error: "This code is not valid any more" }, { status: 404 });
   }
@@ -51,7 +51,7 @@ export const POST = withAuth(async (request, { params, user, db }) => {
   // reach would hand a repository address to somebody with no claim on it. The machine's own reach
   // is resolved from its owner on every call and would refuse the project anyway; refusing here is
   // what stops the address travelling in the first place.
-  if (!(await check(user, projectId, "access"))) {
+  if (!(await check(db, user, projectId, "access"))) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
@@ -74,10 +74,10 @@ export const POST = withAuth(async (request, { params, user, db }) => {
   // does not have.
   const key = project.key || String(project._id);
   const mayEnable =
-    !isWorkerLockedByInstance(project.worker) && (await check(user, projectId, "admin"));
+    !isWorkerLockedByInstance(project.worker) && (await check(db, user, projectId, "admin"));
   if (mayEnable && !project.worker?.enabled) {
     await db.Project.updateOne({ _id: project._id }, { $set: { "worker.enabled": true } });
-    void logInstanceAudit({
+    void logInstanceAudit(db, {
       action: "project_workers_enabled",
       target: key,
       user: String(user._id),
@@ -94,7 +94,7 @@ export const POST = withAuth(async (request, { params, user, db }) => {
   // inherit its reported checkouts.
   let registered;
   try {
-    registered = await registerWorker({
+    registered = await registerWorker(db, {
       name: enrolment.machineName,
       host: enrolment.machineHost,
       platform: typeof body.platform === "string" ? body.platform : "",
@@ -113,7 +113,7 @@ export const POST = withAuth(async (request, { params, user, db }) => {
   // The device flow's equivalent of spending an enrolment token: a machine gains a credential.
   // The token path records that, and an operator reading the log should not have to know which
   // of two enrolment routes was used to find out a machine joined.
-  void logInstanceAudit({
+  void logInstanceAudit(db, {
     action: "enrolment_token_spent",
     target: worker.name,
     user: String(user._id),

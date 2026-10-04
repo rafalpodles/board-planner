@@ -35,6 +35,7 @@ vi.mock("@/lib/pm/mcp-oauth", () => ({
 }));
 
 const { POST } = await import("./route");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 
 const OWNER = { _id: "u1", role: "member" };
 const MEMBER = { _id: "u2", role: "member" };
@@ -117,7 +118,7 @@ describe("POST /api/projects/[projectId]/pm/mcp-oauth/start", () => {
 
     expect(response.status).toBe(404);
     expect(projectFindOne).toHaveBeenCalledWith({ _id: PROJECT_ID, tenant: DEFAULT_TENANT_ID });
-    expect(check).toHaveBeenCalledWith(expect.anything(), PROJECT_ID, "admin");
+    expect(check).toHaveBeenCalledWith(scopedToDefaultTenant(), expect.anything(), PROJECT_ID, "admin");
   });
 
   it("denies a plain member", async () => {
@@ -382,7 +383,7 @@ describe("POST /api/projects/[projectId]/pm/mcp-oauth/start — what it writes a
 
     await POST(request(), ctx());
 
-    expect(logProjectAudit).toHaveBeenCalledWith(PROJECT_ID, "u1", "settings_updated", [
+    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), PROJECT_ID, "u1", "settings_updated", [
       "PM MCP server srv · OAuth: connected → unconfigured",
       "PM MCP server srv · OAuth client registered",
     ]);

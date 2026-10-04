@@ -43,7 +43,7 @@ export const GET = withProjectAccessOrWorker(async (_request, { params, user, db
   delete obj.gitlabRepo;
   if (obj.pm) obj.pm.mcpServers = sanitizeMcpServers(obj.pm.mcpServers);
   obj.pmAvailable = isPmAvailable();
-  obj.canAdmin = await check(user, String(project._id), "admin");
+  obj.canAdmin = await check(db, user, String(project._id), "admin");
   return NextResponse.json(obj);
 }, { reach: "board" });
 
@@ -344,7 +344,7 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
     String(beforeImage.key || projectId)
   );
   for (const entry of workerAudit) {
-    void logInstanceAudit({ ...entry, user: String(user._id), actorUsername: user.username });
+    void logInstanceAudit(db, { ...entry, user: String(user._id), actorUsername: user.username });
   }
 
   let images: ReturnType<typeof projectWriteImages> | null = null;
@@ -356,13 +356,14 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
     changes = [`Changed: ${Object.keys(updates).join(", ")}`];
   }
   if (changes.length > 0) {
-    logProjectAudit(projectId, user._id, "settings_updated", changes);
+    logProjectAudit(db, projectId, user._id, "settings_updated", changes);
   }
 
   // Its own entry as well: somebody reading the trail after a suspected leak needs to see that a
   // credential's destination moved, and why the token went with it
   if (clearedByHostChange.length > 0) {
     logProjectAudit(
+      db,
       projectId,
       user._id,
       "settings_updated",
@@ -385,7 +386,7 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
   delete obj.gitlabRepo;
   if (obj.pm) obj.pm.mcpServers = sanitizeMcpServers(obj.pm.mcpServers);
   obj.pmAvailable = isPmAvailable();
-  obj.canAdmin = await check(user, String(project._id), "admin");
+  obj.canAdmin = await check(db, user, String(project._id), "admin");
   return NextResponse.json(obj);
 });
 
@@ -415,7 +416,7 @@ export const DELETE = withProjectOwner(async (_request, { params, db }) => {
   await db.ProjectAuditLog.deleteMany({ project: projectId });
   await db.Project.findByIdAndDelete(projectId);
   await db.Grant.deleteMany({ objectType: "project", object: projectId });
-  await dropProjectReferences(project._id);
+  await dropProjectReferences(db, project._id);
 
   return NextResponse.json({ message: "Project deleted" });
 });

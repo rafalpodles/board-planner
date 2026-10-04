@@ -1,19 +1,18 @@
-import { Project } from "@/models/project";
-import { User } from "@/models/user";
 import { InvitationBoardInput } from "@/lib/invitations";
 import { ApiInvitation, IInvitation } from "@/types";
+import type { ScopedDb } from "@/lib/db-scope";
 
 type Viewable = Pick<
   IInvitation,
   "_id" | "email" | "role" | "boards" | "invitedBy" | "expiresAt" | "createdAt"
 >;
 
-export async function toApiInvitations(invitations: Viewable[]): Promise<ApiInvitation[]> {
+export async function toApiInvitations(db: ScopedDb, invitations: Viewable[]): Promise<ApiInvitation[]> {
   const projectIds = invitations.flatMap((i) => i.boards.map((b) => b.project));
   const inviterIds = invitations.map((i) => i.invitedBy);
   const [projects, inviters] = await Promise.all([
-    Project.find({ _id: { $in: projectIds } }).select("key name").lean(),
-    User.find({ _id: { $in: inviterIds } }).select("username fullName").lean(),
+    db.Project.find({ _id: { $in: projectIds } }).select("key name").lean(),
+    db.User.find({ _id: { $in: inviterIds } }).select("username fullName").lean(),
   ]);
   const projectById = new Map(projects.map((p) => [String(p._id), p]));
   const inviterById = new Map(inviters.map((u) => [String(u._id), u]));

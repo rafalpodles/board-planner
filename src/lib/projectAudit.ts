@@ -1,7 +1,7 @@
 import { Types } from "mongoose";
-import { ProjectAuditLog } from "@/models/projectAuditLog";
 import { ProjectAuditAction } from "@/types";
 import { isControlCodePoint } from "@/lib/identifiers";
+import type { ScopedDb } from "@/lib/db-scope";
 
 // A name somebody typed is one line of text, whatever it carries: a newline would print as a
 // settings line of its own, and a bidi override reorders the rest of the row
@@ -15,6 +15,7 @@ function oneLine(text: string): string {
 
 // Only the lines passed as lines are stored as lines; the view renders nothing else on more than one
 export async function logProjectAudit(
+  db: ScopedDb,
   projectId: Types.ObjectId | string,
   userId: Types.ObjectId | string,
   action: ProjectAuditAction,
@@ -22,7 +23,7 @@ export async function logProjectAudit(
 ): Promise<void> {
   try {
     const lines = (Array.isArray(detail) ? detail : [detail ?? ""]).map(oneLine).filter(Boolean);
-    await ProjectAuditLog.create({
+    await db.ProjectAuditLog.create({
       project: projectId,
       user: userId,
       action,

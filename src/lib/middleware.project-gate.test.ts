@@ -13,6 +13,7 @@ vi.mock("@/models/task", () => ({ Task: { findOne: vi.fn() } }));
 vi.mock("./worker-service", () => ({ verifyWorkerCredential: vi.fn() }));
 
 const { withProjectAccess, withProjectOwner } = await import("./middleware");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 
 const PROJECT_ID = "69a52e3b399b27d3cbb2c5a5";
 const MEMBER = { _id: "u1", role: "member" };
@@ -36,7 +37,7 @@ describe("withProjectAccess", () => {
 
     await withProjectAccess(handler)(request(), context());
 
-    expect(check).toHaveBeenCalledWith(MEMBER, PROJECT_ID, "access");
+    expect(check).toHaveBeenCalledWith(scopedToDefaultTenant(), MEMBER, PROJECT_ID, "access");
   });
 
   it("calls the handler when the grant layer allows it", async () => {
@@ -66,7 +67,7 @@ describe("withProjectAccess", () => {
 
     await withProjectAccess(handler)(request(), context("CP"));
 
-    expect(check).toHaveBeenCalledWith(MEMBER, PROJECT_ID, "access");
+    expect(check).toHaveBeenCalledWith(scopedToDefaultTenant(), MEMBER, PROJECT_ID, "access");
     expect(await handler.mock.calls[0][1].params).toEqual({ projectId: PROJECT_ID });
   });
 
@@ -89,7 +90,7 @@ describe("withProjectOwner", () => {
 
     await withProjectOwner(handler)(request(), context());
 
-    expect(check).toHaveBeenCalledWith(MEMBER, PROJECT_ID, "admin");
+    expect(check).toHaveBeenCalledWith(scopedToDefaultTenant(), MEMBER, PROJECT_ID, "admin");
   });
 
   it("calls the handler when the grant layer allows it", async () => {

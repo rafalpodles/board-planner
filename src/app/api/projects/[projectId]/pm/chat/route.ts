@@ -41,11 +41,11 @@ export async function POST(
   // This route authenticates by hand (it streams SSE) and so never passes through
   // withProjectAccess, which is where key -> id resolution normally happens
   const { projectId: projectRef } = await params;
-  const projectId = projectRef ? await resolveProjectId(projectRef) : null;
+  const projectId = projectRef ? await resolveProjectId(db, projectRef) : null;
   if (!projectId) {
     return NextResponse.json({ error: "Invalid project id" }, { status: 400 });
   }
-  if (!(await check(user, projectId, "access"))) {
+  if (!(await check(db, user, projectId, "access"))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -136,7 +136,7 @@ export async function POST(
     }
   }
 
-  const { over, cap } = await isOverDailyTurnCap(projectId, project.pm);
+  const { over, cap } = await isOverDailyTurnCap(db, projectId, project.pm);
   if (over) {
     return NextResponse.json(
       { error: `Daily PM turn cap (${cap}) reached for this project` },
@@ -146,7 +146,7 @@ export async function POST(
 
   // The second ceiling, in the units the operator pays in. Off unless configured, so this refuses
   // nothing that works today (BP-284).
-  const spend = await dailyPmSpend(projectId, project.pm);
+  const spend = await dailyPmSpend(db, projectId, project.pm);
   if (spend.over) {
     return NextResponse.json(
       {
@@ -204,7 +204,7 @@ export async function POST(
 
       (async () => {
         try {
-          const result = await runPmTurn({
+          const result = await runPmTurn(db, {
             projectId,
             userMessage,
             attachments: parsedAttachments,

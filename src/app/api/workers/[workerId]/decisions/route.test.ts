@@ -11,6 +11,7 @@ vi.mock("@/lib/worker-service", async (importOriginal) => {
   return { ...actual, verifyWorkerCredential };
 });
 
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 const { POST, PATCH } = await import("./route");
 
 const WORKER_ID = "69a52e3b399b27d3cbb2c5a5";
@@ -94,6 +95,7 @@ describe("POST /api/workers/:workerId/decisions", () => {
 
     expect((await POST(req, ctx)).status).toBe(201);
     expect(createDecision).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       TASK_ID,
       WORKER_ID,
       "run-1",
@@ -148,7 +150,7 @@ describe("POST /api/workers/:workerId/decisions", () => {
     );
 
     await POST(req, ctx);
-    const files = createDecision.mock.calls[0][3].files as string[];
+    const files = createDecision.mock.calls[0][4].files as string[];
     expect(files).toHaveLength(500);
     expect(Math.max(...files.map((file) => file.length))).toBeLessThanOrEqual(256);
   });
@@ -168,7 +170,7 @@ describe("POST /api/workers/:workerId/decisions", () => {
     );
 
     expect((await POST(req, ctx)).status).toBe(201);
-    const body = JSON.stringify(createDecision.mock.calls[0][3]);
+    const body = JSON.stringify(createDecision.mock.calls[0][4]);
     expect(Buffer.byteLength(body) * 6).toBeLessThan(4 * 1024 * 1024);
   });
 
@@ -184,7 +186,7 @@ describe("POST /api/workers/:workerId/decisions", () => {
     );
 
     await POST(req, ctx);
-    const stored = createDecision.mock.calls[0][3];
+    const stored = createDecision.mock.calls[0][4];
     expect(stored.files).toHaveLength(500);
     expect(stored.fileCount).toBe(700);
   });
@@ -206,7 +208,7 @@ describe("POST /api/workers/:workerId/decisions", () => {
     );
 
     await POST(req, ctx);
-    const stored = createDecision.mock.calls[0][3];
+    const stored = createDecision.mock.calls[0][4];
     expect(stored.files).toHaveLength(500);
     expect(stored.fileCount).toBe(700);
     expect(stored.protectedFiles).toHaveLength(500);
@@ -222,7 +224,7 @@ describe("POST /api/workers/:workerId/decisions", () => {
     const { req, ctx } = call("POST", record({ files: [long] }));
 
     await POST(req, ctx);
-    const [stored] = createDecision.mock.calls[0][3].files as string[];
+    const [stored] = createDecision.mock.calls[0][4].files as string[];
     expect(stored).toHaveLength(256);
     expect(stored.endsWith("…")).toBe(true);
   });
@@ -236,14 +238,14 @@ describe("POST /api/workers/:workerId/decisions", () => {
     );
 
     await POST(req, ctx);
-    expect(createDecision.mock.calls[0][3].files).toEqual(["src/a.ts"]);
+    expect(createDecision.mock.calls[0][4].files).toEqual(["src/a.ts"]);
   });
 
   it("trims a padded path rather than storing the padding", async () => {
     const { req, ctx } = call("POST", record({ files: ["  src/padded.ts  "] }));
 
     await POST(req, ctx);
-    expect(createDecision.mock.calls[0][3].files).toEqual(["src/padded.ts"]);
+    expect(createDecision.mock.calls[0][4].files).toEqual(["src/padded.ts"]);
   });
 
   /**
@@ -257,7 +259,7 @@ describe("POST /api/workers/:workerId/decisions", () => {
     const { req, ctx } = call("POST", record({ patch: "x".repeat(300_000) }));
 
     expect((await POST(req, ctx)).status).toBe(201);
-    const stored = createDecision.mock.calls[0][3];
+    const stored = createDecision.mock.calls[0][4];
     expect(stored.patch).toHaveLength(220_000);
     expect(stored.patchTruncated).toBe(true);
     expect(stored.acceptable).toBe(false);
@@ -269,7 +271,7 @@ describe("POST /api/workers/:workerId/decisions", () => {
     const { req, ctx } = call("POST", record({ patch: "x".repeat(1000) }));
 
     await POST(req, ctx);
-    const stored = createDecision.mock.calls[0][3];
+    const stored = createDecision.mock.calls[0][4];
     expect(stored.patch).toHaveLength(1000);
     expect(stored.patchTruncated).toBe(false);
     expect(stored.acceptable).toBe(true);
@@ -283,7 +285,7 @@ describe("POST /api/workers/:workerId/decisions", () => {
     );
 
     await POST(req, ctx);
-    expect(createDecision.mock.calls[0][3]).toMatchObject({
+    expect(createDecision.mock.calls[0][4]).toMatchObject({
       patchTruncated: true,
       acceptable: false,
       unacceptableReason: "too big",
@@ -307,7 +309,7 @@ describe("PATCH /api/workers/:workerId/decisions", () => {
     });
 
     expect((await PATCH(req, ctx)).status).toBe(200);
-    expect(settleDecision).toHaveBeenCalledWith(TASK_ID, WORKER_ID, "delivered", {
+    expect(settleDecision).toHaveBeenCalledWith(scopedToDefaultTenant(), TASK_ID, WORKER_ID, "delivered", {
       prUrl: "https://github.com/o/r/pull/7",
       error: "",
       attempts: 0,
@@ -338,7 +340,7 @@ describe("PATCH /api/workers/:workerId/decisions", () => {
     const { req, ctx } = call("PATCH", { taskId: TASK_ID, state: "failed", attempts: 3 });
 
     await PATCH(req, ctx);
-    expect(settleDecision.mock.calls[0][3]).toMatchObject({ attempts: 3 });
+    expect(settleDecision.mock.calls[0][4]).toMatchObject({ attempts: 3 });
   });
 
   // The panel renders this; a negative or fractional count is not one
@@ -346,7 +348,7 @@ describe("PATCH /api/workers/:workerId/decisions", () => {
     const { req, ctx } = call("PATCH", { taskId: TASK_ID, state: "failed", attempts });
 
     await PATCH(req, ctx);
-    expect(settleDecision.mock.calls[0][3]).toMatchObject({ attempts: 0 });
+    expect(settleDecision.mock.calls[0][4]).toMatchObject({ attempts: 0 });
   });
 
   /**
@@ -386,7 +388,7 @@ describe("PATCH /api/workers/:workerId/decisions", () => {
     const { req, ctx } = call("PATCH", { taskId: TASK_ID, state: "delivered", prUrl });
 
     expect((await PATCH(req, ctx)).status).toBe(200);
-    expect(settleDecision.mock.calls[0][3]).toMatchObject({ prUrl });
+    expect(settleDecision.mock.calls[0][4]).toMatchObject({ prUrl });
   });
 
   /**
@@ -400,7 +402,7 @@ describe("PATCH /api/workers/:workerId/decisions", () => {
     const { req, ctx } = call("PATCH", { taskId: TASK_ID, state: "delivered", prUrl });
 
     expect((await PATCH(req, ctx)).status).toBe(200);
-    expect(settleDecision.mock.calls[0][3]).toMatchObject({ prUrl });
+    expect(settleDecision.mock.calls[0][4]).toMatchObject({ prUrl });
   });
 
   // Every settlement but `delivered` carries none, and an empty one is not a wrong one

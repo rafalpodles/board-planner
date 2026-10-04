@@ -32,7 +32,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: INVITATION_REFUSALS.unknown }, { status: 400 });
   }
 
-  const found = await findInvitationByToken(read.value.token);
+  const found = await findInvitationByToken(db, read.value.token);
   if (!found.ok) {
     return NextResponse.json(
       { error: INVITATION_REFUSALS[found.reason], reason: found.reason },
@@ -47,7 +47,7 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
-  const [view] = await toApiInvitations([found.invitation]);
+  const [view] = await toApiInvitations(db, [found.invitation]);
   return NextResponse.json({
     email: view.email,
     role: view.role,

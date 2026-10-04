@@ -1,17 +1,18 @@
-import { Worker } from "@/models/worker";
 import { ITaskExecution } from "@/types";
 import { toApiExecution } from "@/lib/task-service";
+import type { ScopedDb } from "@/lib/db-scope";
 
 /**
  * Only runs still holding a task carry a workerId, so this reads a handful of documents at most —
  * and skips the query entirely when nothing is running.
  */
 export async function workerNamesFor(
+  db: ScopedDb,
   executions: (ITaskExecution | undefined)[]
 ): Promise<Map<string, string>> {
   const ids = [...new Set(executions.filter((e) => e?.runId && e.workerId).map((e) => e!.workerId))];
   if (ids.length === 0) return new Map();
-  const workers = await Worker.find({ _id: { $in: ids } }).select("name").lean();
+  const workers = await db.Worker.find({ _id: { $in: ids } }).select("name").lean();
   return new Map(workers.map((w: { _id: unknown; name?: unknown }) => [String(w._id), w.name as string]));
 }
 
@@ -26,15 +27,17 @@ export async function workerNamesFor(
  * goes through here.
  */
 export async function withApiExecution<T extends { execution?: ITaskExecution }>(
+  db: ScopedDb,
   task: T
 ): Promise<Record<string, unknown>> {
-  return (await withApiExecutions([task]))[0];
+  return (await withApiExecutions(db, [task]))[0];
 }
 
 export async function withApiExecutions<T extends { execution?: ITaskExecution }>(
+  db: ScopedDb,
   tasks: T[]
 ): Promise<Record<string, unknown>[]> {
-  const names = await workerNamesFor(tasks.map((task) => task.execution));
+  const names = await workerNamesFor(db, tasks.map((task) => task.execution));
   return tasks.map((task) => {
     // Callers hand this either a hydrated document or a plain object, and spreading a document
     // copies its internals rather than its fields

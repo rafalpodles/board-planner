@@ -87,11 +87,13 @@ async function bootWhenDatabaseIsReady(): Promise<void> {
 
   try {
     console.log("MongoDB connected successfully");
+    const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+    const db = scopedToDefaultTenant();
 
     // Said, not refused: the state can arise at runtime (a demotion, a deactivation, an unlink), and
     // exiting would turn a restart into an outage for every member, not only the administrators
     const { adminsLockedOut } = await import("@/lib/password-sign-in");
-    const lockedOut = await adminsLockedOut();
+    const lockedOut = await adminsLockedOut(db);
     if (lockedOut) console.error(`WARNING: ${lockedOut}`);
 
     const { Project } = await import("@/models/project");
@@ -116,7 +118,7 @@ async function bootWhenDatabaseIsReady(): Promise<void> {
     // connection problem, which it is not. An instance without the catalog cannot run a worker
     // but is otherwise usable.
     const { seedAgents } = await import("@/lib/agent-seed");
-    await seedAgents().catch((error) => {
+    await seedAgents(db).catch((error) => {
       console.error("Failed to seed the agent catalog:", error);
     });
 
@@ -136,11 +138,11 @@ async function bootWhenDatabaseIsReady(): Promise<void> {
     if ((await User.countDocuments()) === 0) setupCode();
 
     const { markPmAsMachine } = await import("@/lib/pm/pm-user");
-    await markPmAsMachine();
+    await markPmAsMachine(db);
 
     // Caught like the catalog seed: a name it could not repair must not keep the schedulers down
     const { repairMachineNames } = await import("@/lib/worker-user");
-    const repaired = await repairMachineNames().catch((error) => {
+    const repaired = await repairMachineNames(db).catch((error) => {
       console.error("Failed to repair machine names:", error);
       return 0;
     });

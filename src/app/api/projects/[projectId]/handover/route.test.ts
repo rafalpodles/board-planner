@@ -57,7 +57,7 @@ const OWNER = "507f1f77bcf86cd799439012";
 beforeEach(() => {
   vi.clearAllMocks();
   getAuthUser.mockResolvedValue({ _id: READER, role: "member" });
-  check.mockImplementation(async (_user: unknown, _project: string, need: string) => need === "access");
+  check.mockImplementation(async (_db: unknown, _user: unknown, _project: string, need: string) => need === "access");
   projectLean.mockResolvedValue({ _id: PROJECT, repositoryUrl: "https://github.com/acme/orbit" });
   workerLean.mockResolvedValue([]);
 });
@@ -121,7 +121,7 @@ describe("GET handover readiness", () => {
     [true, true],
     [false, false],
   ])("says whether the reader may change the board (admin need: %s)", async (admin, expected) => {
-    check.mockImplementation(async (_u: unknown, _p: string, need: string) => need === "access" || admin);
+    check.mockImplementation(async (_db: unknown, _u: unknown, _p: string, need: string) => need === "access" || admin);
 
     expect((await read()).body.canAdmin).toBe(expected);
   });

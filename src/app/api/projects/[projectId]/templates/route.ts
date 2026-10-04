@@ -115,7 +115,7 @@ export const POST = withProjectAccess(async (request, { params, user, db }) => {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  logProjectAudit(projectId, user._id, "template_added", name.trim());
+  logProjectAudit(db, projectId, user._id, "template_added", name.trim());
 
   return NextResponse.json(added.taskTemplates, { status: 201 });
 });
@@ -161,7 +161,7 @@ export const PUT = withProjectAccess(async (request, { params, user, db }) => {
 
   await project.save();
 
-  logProjectAudit(projectId, user._id, "template_updated", template.name);
+  logProjectAudit(db, projectId, user._id, "template_updated", template.name);
 
   return NextResponse.json(project.taskTemplates);
 });
@@ -186,7 +186,7 @@ export const DELETE = withProjectOwner(async (request, { params, user, db }) => 
   );
   await project.save();
 
-  if (removed) logProjectAudit(projectId, user._id, "template_removed", removed.name);
+  if (removed) logProjectAudit(db, projectId, user._id, "template_removed", removed.name);
 
   return NextResponse.json(project.taskTemplates);
 });

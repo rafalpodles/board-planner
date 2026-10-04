@@ -153,7 +153,7 @@ export const PUT = withAuth(async (request, { user, db }) => {
         // has no confirmation to offer
         updates.email = email;
         updates.emailVerifiedAt = null;
-        await cancelEmailChange(user._id);
+        await cancelEmailChange(db, user._id);
       }
     }
   }
@@ -202,7 +202,7 @@ export const PUT = withAuth(async (request, { user, db }) => {
         { status: 429 }
       );
     }
-    const token = await issueEmailChange(user._id, pendingEmail);
+    const token = await issueEmailChange(db, user._id, pendingEmail);
     void sendAddressConfirmation({
       email: pendingEmail,
       username: user.username,
@@ -223,7 +223,7 @@ export const PUT = withAuth(async (request, { user, db }) => {
   // rest of its hour, which is the wrong answer if you are moving it because that inbox is not
   // yours any more
   if (typeof updates.email === "string") {
-    await invalidateResetTokens(user._id);
+    await invalidateResetTokens(db, user._id);
   }
 
   let updated;
@@ -253,7 +253,7 @@ export const PUT = withAuth(async (request, { user, db }) => {
     // Not a takeover the way the address is, so no mail and no session revoke — but a name is what
     // a comment and a task card are signed with, and there is nowhere else it is recorded that the
     // name on yesterday's comment and the name on the account are no longer the same string.
-    void logInstanceAudit({
+    void logInstanceAudit(db, {
       action: "user_full_name_changed_self",
       user: user._id,
       actorUsername: user.username,
@@ -267,7 +267,7 @@ export const PUT = withAuth(async (request, { user, db }) => {
     // account over at the next reset and signs nobody out, so the row is the only trace there is.
     // It was audited when somebody else did it and silent when the account itself did — which is
     // the case a borrowed session produces.
-    void logInstanceAudit({
+    void logInstanceAudit(db, {
       action: "user_email_changed_self",
       user: user._id,
       actorUsername: user.username,

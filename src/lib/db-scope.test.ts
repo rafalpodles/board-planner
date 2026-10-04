@@ -207,6 +207,14 @@ describe("the tenant a caller works in", () => {
     expect(scopedFor({ tenant: A })).toBe(scoped(A));
   });
 
+  it("says which tenant it is, so two tenants' accessors are never equal", () => {
+    const B = new Types.ObjectId("0000000000000000000000b2");
+    expect(scoped(A).tenant.equals(A)).toBe(true);
+    expect(scoped(A)).not.toEqual(scoped(B));
+    expect(scoped(A)).not.toEqual({});
+    expect(scoped(A)).toEqual(scoped(A.toHexString()));
+  });
+
   it("is not an accessor for a model that is not tenant-scoped", () => {
     expect((scoped(A) as unknown as Record<string, unknown>).Tenant).toBeUndefined();
     expect((scoped(A) as unknown as Record<string, unknown>).RateLimit).toBeUndefined();

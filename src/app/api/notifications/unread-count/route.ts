@@ -8,7 +8,7 @@ export const GET = withAuth(async (_request, { user, db }) => {
 
   // The badge is a read as well: a count that keeps moving tells a removed member the board is
   // busy, and each row behind it opens in the feed (BP-328). null means every project.
-  const projectIds = await accessibleProjectIds(user);
+  const projectIds = await accessibleProjectIds(db, user);
   if (projectIds !== null && projectIds.length === 0) return NextResponse.json({ count: 0 });
 
   // Counting rows the list will not show would also put a number on an empty bell

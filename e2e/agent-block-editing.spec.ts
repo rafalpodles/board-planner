@@ -34,7 +34,8 @@ async function withDb<T>(fn: (db: mongoose.mongo.Db) => Promise<T>): Promise<T> 
 async function seedCatalog() {
   await mongoose.connect(E2E_MONGODB_URI);
   const { seedAgents } = await import("@/lib/agent-seed");
-  await seedAgents();
+  const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+  await seedAgents(scopedToDefaultTenant());
   await mongoose.disconnect();
 }
 

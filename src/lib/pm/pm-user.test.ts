@@ -12,6 +12,9 @@ const revokeUserCredentials = vi.fn();
 vi.mock("@/lib/session", () => ({ revokeUserCredentials }));
 
 const { getPmUser, markPmAsMachine } = await import("./pm-user");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
+const db = scopedToDefaultTenant();
 
 beforeEach(() => {
   updateOne.mockReset();
@@ -26,7 +29,7 @@ describe("getPmUser", () => {
     findOne.mockResolvedValue(null);
     findOneAndUpdate.mockImplementation(async (_filter, update) => update.$setOnInsert);
 
-    const pm = await getPmUser();
+    const pm = await getPmUser(db);
 
     expect(findOneAndUpdate.mock.calls[0][1].$setOnInsert.kind).toBe("machine");
     expect(pm.kind).toBe("machine");
@@ -37,7 +40,7 @@ describe("getPmUser", () => {
     stored.save.mockImplementation(async () => stored);
     findOne.mockResolvedValue(stored);
 
-    const pm = await getPmUser();
+    const pm = await getPmUser(db);
 
     expect(stored.save).toHaveBeenCalledTimes(1);
     expect(pm.kind).toBe("machine");
@@ -50,7 +53,7 @@ describe("getPmUser", () => {
     const stored = { username: "pm", kind: "machine", save: vi.fn() };
     findOne.mockResolvedValue(stored);
 
-    expect(await getPmUser()).toBe(stored);
+    expect(await getPmUser(db)).toBe(stored);
     expect(stored.save).not.toHaveBeenCalled();
   });
 });
@@ -61,10 +64,10 @@ describe("markPmAsMachine", () => {
     findOne.mockResolvedValue({ _id: "pm-1", username: "pm", kind: "human", role: "admin", email: "a@b.c" });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      await markPmAsMachine();
+      await markPmAsMachine(db);
 
-      expect(findOne).toHaveBeenCalledWith({ username: "pm", kind: { $ne: "machine" } });
-      expect(updateOne).toHaveBeenCalledWith({ _id: "pm-1" }, { $set: { kind: "machine" } });
+      expect(findOne).toHaveBeenCalledWith({ username: "pm", kind: { $ne: "machine" }, tenant: DEFAULT_TENANT_ID });
+      expect(updateOne).toHaveBeenCalledWith({ _id: "pm-1", tenant: DEFAULT_TENANT_ID }, { $set: { kind: "machine" } });
       expect(revokeUserCredentials).toHaveBeenCalledWith("pm-1");
       expect(warn.mock.calls[0][0]).toContain("role admin");
       // An address is a person's data, and the role is all an operator needs to act
@@ -77,7 +80,7 @@ describe("markPmAsMachine", () => {
   it("does nothing on an instance where pm is already a machine or absent", async () => {
     findOne.mockResolvedValue(null);
 
-    await markPmAsMachine();
+    await markPmAsMachine(db);
 
     expect(updateOne).not.toHaveBeenCalled();
     expect(revokeUserCredentials).not.toHaveBeenCalled();

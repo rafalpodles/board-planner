@@ -156,6 +156,8 @@ const {
   findOrphanGrants,
   deleteOrphanGrants,
 } = await import("./grants");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
 
 function lean(value: unknown) {
   return { select: () => ({ lean: () => Promise.resolve(value) }) };
@@ -170,25 +172,25 @@ describe("check", () => {
   it("reads the grant for an ordinary user", async () => {
     findOne.mockReturnValue(lean({ relation: "owner" }));
     const user = { _id: "u1", role: "member" } as never;
-    expect(await check(user, P, "admin")).toBe(true);
-    expect(findOne).toHaveBeenCalledWith({ subject: "u1", objectType: "project", object: P });
+    expect(await check(scopedToDefaultTenant(), user, P, "admin")).toBe(true);
+    expect(findOne).toHaveBeenCalledWith({ subject: "u1", objectType: "project", object: P, tenant: DEFAULT_TENANT_ID });
   });
 
   it("denies when the user has no grant on this project", async () => {
     findOne.mockReturnValue(lean(null));
     const user = { _id: "u1", role: "member" } as never;
-    expect(await check(user, P, "access")).toBe(false);
+    expect(await check(scopedToDefaultTenant(), user, P, "access")).toBe(false);
   });
 
   it("answers for an instance admin without querying at all", async () => {
     const user = { _id: "a1", role: "admin" } as never;
-    expect(await check(user, P, "admin")).toBe(true);
+    expect(await check(scopedToDefaultTenant(), user, P, "admin")).toBe(true);
     expect(findOne).not.toHaveBeenCalled();
   });
 
   it("answers out-of-scope tokens without querying at all", async () => {
     const user = { _id: "u1", role: "member", tokenScoped: true, tokenScope: [OTHER] } as never;
-    expect(await check(user, P, "access")).toBe(false);
+    expect(await check(scopedToDefaultTenant(), user, P, "access")).toBe(false);
     expect(findOne).not.toHaveBeenCalled();
   });
 });
@@ -201,7 +203,7 @@ describe("accessibleProjectIds", () => {
 
   it("returns null for an unscoped instance admin", async () => {
     const user = { _id: "a1", role: "admin" } as never;
-    expect(await accessibleProjectIds(user)).toBe(null);
+    expect(await accessibleProjectIds(scopedToDefaultTenant(), user)).toBe(null);
   });
 
   it("returns the scope for an instance admin's scoped token", async () => {
@@ -212,20 +214,20 @@ describe("accessibleProjectIds", () => {
       tokenScope: [P],
       instanceAdminBeforeScope: true,
     } as never;
-    expect(await accessibleProjectIds(user)).toEqual([P]);
+    expect(await accessibleProjectIds(scopedToDefaultTenant(), user)).toEqual([P]);
   });
 
   it("returns the granted projects for an ordinary user", async () => {
     find.mockReturnValue(lean([{ object: P }, { object: OTHER }]));
     const user = { _id: "u1", role: "member" } as never;
-    expect(await accessibleProjectIds(user)).toEqual([P, OTHER]);
-    expect(find).toHaveBeenCalledWith({ subject: "u1", objectType: "project" });
+    expect(await accessibleProjectIds(scopedToDefaultTenant(), user)).toEqual([P, OTHER]);
+    expect(find).toHaveBeenCalledWith({ subject: "u1", objectType: "project", tenant: DEFAULT_TENANT_ID });
   });
 
   it("intersects grants with a token scope", async () => {
     find.mockReturnValue(lean([{ object: P }, { object: OTHER }]));
     const user = { _id: "u1", role: "member", tokenScoped: true, tokenScope: [OTHER] } as never;
-    expect(await accessibleProjectIds(user)).toEqual([OTHER]);
+    expect(await accessibleProjectIds(scopedToDefaultTenant(), user)).toEqual([OTHER]);
   });
 });
 
@@ -253,33 +255,33 @@ describe("administeredProjectIds", () => {
   it("includes a project the person owns and leaves out one they are only a member of", async () => {
     const user = { _id: "u1", role: "member" } as never;
 
-    expect([...(await administeredProjectIds(user, [P, OTHER, THIRD]))]).toEqual([P]);
+    expect([...(await administeredProjectIds(scopedToDefaultTenant(), user, [P, OTHER, THIRD]))]).toEqual([P]);
   });
 
   it("matches a grant whose object is stored as an ObjectId", async () => {
     const user = { _id: "u1", role: "member" } as never;
 
-    expect((await administeredProjectIds(user, [P])).has(P)).toBe(true);
+    expect((await administeredProjectIds(scopedToDefaultTenant(), user, [P])).has(P)).toBe(true);
   });
 
   it("gives an instance admin every project without querying", async () => {
     const user = { _id: "a1", role: "admin" } as never;
 
-    expect([...(await administeredProjectIds(user, [P, OTHER]))]).toEqual([P, OTHER]);
+    expect([...(await administeredProjectIds(scopedToDefaultTenant(), user, [P, OTHER]))]).toEqual([P, OTHER]);
     expect(find).not.toHaveBeenCalled();
   });
 
   it("gives a scoped token nothing, since admin needs an unscoped session", async () => {
     const user = { _id: "u1", role: "member", tokenScoped: true, tokenScope: [P] } as never;
 
-    expect(await administeredProjectIds(user, [P, OTHER])).toEqual(new Set());
+    expect(await administeredProjectIds(scopedToDefaultTenant(), user, [P, OTHER])).toEqual(new Set());
   });
 
   it("leaves out a project outside the token's scope even where the person owns it", async () => {
     rows.push({ subject: "u1", objectType: "project", object: new Types.ObjectId(THIRD), relation: "owner" });
     const user = { _id: "u1", role: "member", tokenScope: [THIRD] } as never;
 
-    expect([...(await administeredProjectIds(user, [P, THIRD]))]).toEqual([THIRD]);
+    expect([...(await administeredProjectIds(scopedToDefaultTenant(), user, [P, THIRD]))]).toEqual([THIRD]);
     rows.pop();
   });
 });
@@ -335,7 +337,7 @@ describe("recipientsWithAccess", () => {
 
   it("keeps a recipient who holds a grant on the project", async () => {
     grant(MEMBER);
-    expect(await recipientsWithAccess([MEMBER], P)).toEqual([MEMBER]);
+    expect(await recipientsWithAccess(scopedToDefaultTenant(), [MEMBER], P)).toEqual([MEMBER]);
   });
 
   // BP-832. Sees nothing, so is told nothing and can be handed nothing — admin or not
@@ -343,30 +345,30 @@ describe("recipientsWithAccess", () => {
     grant(MEMBER);
     deactivated = new Set([MEMBER, ADMIN]);
 
-    expect(await recipientsWithAccess([MEMBER, ADMIN], P)).toEqual([]);
-    expect(await canBeAssigned(MEMBER, P)).toBe(false);
+    expect(await recipientsWithAccess(scopedToDefaultTenant(), [MEMBER, ADMIN], P)).toEqual([]);
+    expect(await canBeAssigned(scopedToDefaultTenant(), MEMBER, P)).toBe(false);
   });
 
   it("keeps an owner as readily as a member", async () => {
     grant(MEMBER, "owner");
-    expect(await recipientsWithAccess([MEMBER], P)).toEqual([MEMBER]);
+    expect(await recipientsWithAccess(scopedToDefaultTenant(), [MEMBER], P)).toEqual([MEMBER]);
   });
 
   it("drops a recipient whose grant on the project is gone", async () => {
     grant(MEMBER);
-    expect(await recipientsWithAccess([MEMBER, REMOVED], P)).toEqual([MEMBER]);
+    expect(await recipientsWithAccess(scopedToDefaultTenant(), [MEMBER, REMOVED], P)).toEqual([MEMBER]);
   });
 
   // An instance admin reaches every board without a Grant row ever being written, so a filter
   // written as "has a grant" would silently stop notifying them — a regression wearing the
   // costume of a security fix.
   it("keeps an instance admin who holds no grant at all", async () => {
-    expect(await recipientsWithAccess([ADMIN], P)).toEqual([ADMIN]);
+    expect(await recipientsWithAccess(scopedToDefaultTenant(), [ADMIN], P)).toEqual([ADMIN]);
   });
 
   it("does not mistake an ordinary member for an instance admin", async () => {
     roles = { [MEMBER]: "member" };
-    expect(await recipientsWithAccess([MEMBER], P)).toEqual([]);
+    expect(await recipientsWithAccess(scopedToDefaultTenant(), [MEMBER], P)).toEqual([]);
   });
 
   /**
@@ -376,16 +378,16 @@ describe("recipientsWithAccess", () => {
   describe("canBeAssigned", () => {
     it("accepts somebody who holds a grant on this board", async () => {
       grant(MEMBER);
-      expect(await canBeAssigned(MEMBER, P)).toBe(true);
+      expect(await canBeAssigned(scopedToDefaultTenant(), MEMBER, P)).toBe(true);
     });
 
     it("refuses somebody with no grant on it", async () => {
-      expect(await canBeAssigned(REMOVED, P)).toBe(false);
+      expect(await canBeAssigned(scopedToDefaultTenant(), REMOVED, P)).toBe(false);
     });
 
     it("refuses a grant held on some other board", async () => {
       grant(MEMBER, "member", OTHER);
-      expect(await canBeAssigned(MEMBER, P)).toBe(false);
+      expect(await canBeAssigned(scopedToDefaultTenant(), MEMBER, P)).toBe(false);
     });
 
     /**
@@ -394,7 +396,7 @@ describe("recipientsWithAccess", () => {
      * one admin, refusing this takes the only person who can see everything out of every picker.
      */
     it("accepts an instance admin who holds no grant at all", async () => {
-      expect(await canBeAssigned(ADMIN, P)).toBe(true);
+      expect(await canBeAssigned(scopedToDefaultTenant(), ADMIN, P)).toBe(true);
     });
 
     /**
@@ -406,32 +408,32 @@ describe("recipientsWithAccess", () => {
     it("refuses the pm service account like any other member without a grant", async () => {
       const PM = "507f1f77bcf86cd799439014";
       roles[PM] = "member";
-      expect(await canBeAssigned(PM, P)).toBe(false);
+      expect(await canBeAssigned(scopedToDefaultTenant(), PM, P)).toBe(false);
     });
 
     it("refuses an id that matches no account", async () => {
-      expect(await canBeAssigned("507f1f77bcf86cd799439099", P)).toBe(false);
+      expect(await canBeAssigned(scopedToDefaultTenant(), "507f1f77bcf86cd799439099", P)).toBe(false);
     });
   });
 
   it("ignores a grant the recipient holds on some other project", async () => {
     grant(MEMBER, "member", OTHER);
-    expect(await recipientsWithAccess([MEMBER], P)).toEqual([]);
+    expect(await recipientsWithAccess(scopedToDefaultTenant(), [MEMBER], P)).toEqual([]);
   });
 
   it("ignores a grant that is not a grant on a project", async () => {
     grant(MEMBER, "member", P, "sprint");
-    expect(await recipientsWithAccess([MEMBER], P)).toEqual([]);
+    expect(await recipientsWithAccess(scopedToDefaultTenant(), [MEMBER], P)).toEqual([]);
   });
 
   it("drops a recipient who no longer exists at all", async () => {
     roles = {};
     grant(MEMBER);
-    expect(await recipientsWithAccess([MEMBER], P)).toEqual([]);
+    expect(await recipientsWithAccess(scopedToDefaultTenant(), [MEMBER], P)).toEqual([]);
   });
 
   it("asks the database nothing when there is nobody to ask about", async () => {
-    expect(await recipientsWithAccess([], P)).toEqual([]);
+    expect(await recipientsWithAccess(scopedToDefaultTenant(), [], P)).toEqual([]);
     expect(find).not.toHaveBeenCalled();
     expect(userFind).not.toHaveBeenCalled();
   });
@@ -439,7 +441,7 @@ describe("recipientsWithAccess", () => {
   it("preserves the order it was given", async () => {
     grant(MEMBER);
     grant(REMOVED);
-    expect(await recipientsWithAccess([REMOVED, MEMBER], P)).toEqual([REMOVED, MEMBER]);
+    expect(await recipientsWithAccess(scopedToDefaultTenant(), [REMOVED, MEMBER], P)).toEqual([REMOVED, MEMBER]);
   });
 });
 
@@ -488,7 +490,7 @@ describe("owner counting", () => {
       { subject: ALICE, object: P },
       { subject: BOB, object: P },
     ];
-    const counts = await ownerCounts([P, OTHER]);
+    const counts = await ownerCounts(scopedToDefaultTenant(), [P, OTHER]);
     expect(counts.get(P)).toBe(2);
     expect(counts.get(OTHER)).toBe(0);
     expect(find).toHaveBeenCalledWith(expect.objectContaining({ relation: "owner", objectType: "project" }));
@@ -499,7 +501,7 @@ describe("owner counting", () => {
       { subject: ALICE, object: P },
       { subject: GONE, object: P },
     ];
-    expect((await ownerCounts([P])).get(P)).toBe(1);
+    expect((await ownerCounts(scopedToDefaultTenant(), [P])).get(P)).toBe(1);
   });
 
   // BP-832. Never counted as an owner, so deleting them leaves every board the owners it has
@@ -507,8 +509,8 @@ describe("owner counting", () => {
     ownerRows = [{ subject: ALICE, object: P }];
     userExists.mockResolvedValueOnce({ _id: ALICE });
 
-    expect(await boardsOnlyOwnedBy(ALICE)).toEqual([]);
-    expect(userExists).toHaveBeenCalledWith({ _id: ALICE, deactivatedAt: { $ne: null } });
+    expect(await boardsOnlyOwnedBy(scopedToDefaultTenant(), ALICE)).toEqual([]);
+    expect(userExists).toHaveBeenCalledWith({ _id: ALICE, deactivatedAt: { $ne: null }, tenant: DEFAULT_TENANT_ID });
   });
 
   it("names the boards a deactivation left with no active owner", async () => {
@@ -519,7 +521,7 @@ describe("owner counting", () => {
     ];
     deactivatedAccounts = [ALICE];
 
-    expect(await boardsLeftWithoutOwner(ALICE)).toEqual([P]);
+    expect(await boardsLeftWithoutOwner(scopedToDefaultTenant(), ALICE)).toEqual([P]);
   });
 
   // BP-832. A deactivated owner can manage nothing, so they keep no board run
@@ -530,7 +532,7 @@ describe("owner counting", () => {
     ];
     deactivatedAccounts = [BOB];
 
-    expect((await ownerCounts([P])).get(P)).toBe(1);
+    expect((await ownerCounts(scopedToDefaultTenant(), [P])).get(P)).toBe(1);
   });
 
   it("names the boards the person owns alone, and not the ones they share", async () => {
@@ -539,7 +541,7 @@ describe("owner counting", () => {
       { subject: ALICE, object: OTHER },
       { subject: BOB, object: OTHER },
     ];
-    expect(await boardsOnlyOwnedBy(ALICE)).toEqual([{ _id: P, name: `Board ${P}`, key: "K" }]);
+    expect(await boardsOnlyOwnedBy(scopedToDefaultTenant(), ALICE)).toEqual([{ _id: P, name: `Board ${P}`, key: "K" }]);
   });
 
   it("treats a co-owner who was deleted as no co-owner at all", async () => {
@@ -547,7 +549,7 @@ describe("owner counting", () => {
       { subject: ALICE, object: P },
       { subject: GONE, object: P },
     ];
-    expect((await boardsOnlyOwnedBy(ALICE)).map((b) => b._id)).toEqual([P]);
+    expect((await boardsOnlyOwnedBy(scopedToDefaultTenant(), ALICE)).map((b) => b._id)).toEqual([P]);
   });
 
   it("names nothing, and loads no board, for somebody who shares every board they own", async () => {
@@ -555,7 +557,7 @@ describe("owner counting", () => {
       { subject: ALICE, object: P },
       { subject: BOB, object: P },
     ];
-    expect(await boardsOnlyOwnedBy(ALICE)).toEqual([]);
+    expect(await boardsOnlyOwnedBy(scopedToDefaultTenant(), ALICE)).toEqual([]);
     expect(projectFind).not.toHaveBeenCalled();
   });
 });
@@ -565,7 +567,7 @@ describe("orphan grants", () => {
   const [LIVE_BOARD, OTHER_BOARD, GONE_BOARD] = [oid(), oid(), oid()];
   const [LIVING, ALSO_LIVING, GONE_USER] = [oid(), oid(), oid()];
 
-  type Row = { _id: Types.ObjectId; subject: unknown; object: unknown; relation: string; objectType: string };
+  type Row = { _id: Types.ObjectId; subject: unknown; object: unknown; relation: string; objectType: string; tenant: Types.ObjectId };
   let store: Row[];
   let projects: Types.ObjectId[];
   let users: Types.ObjectId[];
@@ -577,6 +579,7 @@ describe("orphan grants", () => {
     object,
     relation,
     objectType: "project",
+    tenant: DEFAULT_TENANT_ID,
   });
 
   const same = (a: unknown, b: unknown) => String(a) === String(b);
@@ -592,7 +595,7 @@ describe("orphan grants", () => {
 
   const distinctOf = (ids: () => Types.ObjectId[], after: () => (() => void) | undefined) =>
     async (_field: string, filter?: Record<string, unknown>) => {
-      const read = ids().filter((id) => matches({ _id: id }, filter));
+      const read = ids().filter((id) => matches({ _id: id, tenant: DEFAULT_TENANT_ID }, filter));
       after()?.();
       return read;
     };
@@ -626,7 +629,7 @@ describe("orphan grants", () => {
     rows.map((g) => `${g.subject}@${g.object}`).sort();
 
   it("finds the rows of a deleted board and of a deleted account, and nothing else", async () => {
-    const orphans = await findOrphanGrants();
+    const orphans = await findOrphanGrants(scopedToDefaultTenant());
 
     expect(pairs(orphans.deletedProject)).toEqual(
       pairs([
@@ -640,7 +643,7 @@ describe("orphan grants", () => {
   });
 
   it("counts a row whose board and account are both gone once, under the board", async () => {
-    const orphans = await findOrphanGrants();
+    const orphans = await findOrphanGrants(scopedToDefaultTenant());
     const all = [...orphans.deletedProject, ...orphans.deletedUser].map((g) => g._id);
     expect(new Set(all).size).toBe(all.length);
     expect(pairs(orphans.deletedUser)).not.toContain(`${GONE_USER}@${GONE_BOARD}`);
@@ -649,7 +652,7 @@ describe("orphan grants", () => {
   it("finds nothing when every row has its board and its account", async () => {
     projects = [LIVE_BOARD, OTHER_BOARD, GONE_BOARD];
     users = [LIVING, ALSO_LIVING, GONE_USER];
-    const orphans = await findOrphanGrants();
+    const orphans = await findOrphanGrants(scopedToDefaultTenant());
     expect(orphans.deletedProject).toEqual([]);
     expect(orphans.deletedUser).toEqual([]);
   });
@@ -657,17 +660,17 @@ describe("orphan grants", () => {
   it("reports a row stored with string ids apart from the orphans, and never deletes it", async () => {
     store = [row(LIVING, LIVE_BOARD, "owner"), row(String(LIVING), String(LIVE_BOARD)), row(LIVING, String(GONE_BOARD))];
 
-    const orphans = await findOrphanGrants();
+    const orphans = await findOrphanGrants(scopedToDefaultTenant());
 
     expect(orphans.deletedProject).toEqual([]);
     expect(orphans.deletedUser).toEqual([]);
     expect(orphans.notObjectIds).toHaveLength(2);
-    expect(await deleteOrphanGrants(orphans)).toBe(0);
+    expect(await deleteOrphanGrants(scopedToDefaultTenant(), orphans)).toBe(0);
     expect(store).toHaveLength(3);
   });
 
   it("deletes exactly the orphans, and a second pass finds and deletes nothing", async () => {
-    expect(await deleteOrphanGrants(await findOrphanGrants())).toBe(4);
+    expect(await deleteOrphanGrants(scopedToDefaultTenant(), await findOrphanGrants(scopedToDefaultTenant()))).toBe(4);
     expect(pairs(store)).toEqual(
       pairs([
         { subject: LIVING, object: LIVE_BOARD },
@@ -677,9 +680,9 @@ describe("orphan grants", () => {
     );
 
     grantDeleteMany.mockClear();
-    const again = await findOrphanGrants();
+    const again = await findOrphanGrants(scopedToDefaultTenant());
     expect([...again.deletedProject, ...again.deletedUser]).toEqual([]);
-    expect(await deleteOrphanGrants(again)).toBe(0);
+    expect(await deleteOrphanGrants(scopedToDefaultTenant(), again)).toBe(0);
     expect(grantDeleteMany).not.toHaveBeenCalled();
     expect(store).toHaveLength(3);
   });
@@ -693,11 +696,11 @@ describe("orphan grants", () => {
       store.push(freshOwner);
     };
 
-    const orphans = await findOrphanGrants();
+    const orphans = await findOrphanGrants(scopedToDefaultTenant());
     const found = [...orphans.deletedProject, ...orphans.deletedUser].map((g) => g._id);
     expect(found).not.toContain(String(freshOwner._id));
 
-    await deleteOrphanGrants(orphans);
+    await deleteOrphanGrants(scopedToDefaultTenant(), orphans);
     expect(store).toContainEqual(freshOwner);
   });
 
@@ -710,19 +713,19 @@ describe("orphan grants", () => {
       store.push(theirGrant);
     };
 
-    const orphans = await findOrphanGrants();
+    const orphans = await findOrphanGrants(scopedToDefaultTenant());
     const found = [...orphans.deletedProject, ...orphans.deletedUser].map((g) => g._id);
     expect(found).not.toContain(String(theirGrant._id));
 
-    await deleteOrphanGrants(orphans);
+    await deleteOrphanGrants(scopedToDefaultTenant(), orphans);
     expect(store).toContainEqual(theirGrant);
   });
 
   it("keeps a found row whose board is back by the time it would be deleted", async () => {
-    const orphans = await findOrphanGrants();
+    const orphans = await findOrphanGrants(scopedToDefaultTenant());
     projects.push(GONE_BOARD);
 
-    expect(await deleteOrphanGrants(orphans)).toBe(2);
+    expect(await deleteOrphanGrants(scopedToDefaultTenant(), orphans)).toBe(2);
     expect(pairs(store)).toContain(`${LIVING}@${GONE_BOARD}`);
     expect(pairs(store)).toContain(`${ALSO_LIVING}@${GONE_BOARD}`);
     expect(pairs(store)).not.toContain(`${GONE_USER}@${GONE_BOARD}`);
@@ -734,9 +737,9 @@ describe("orphan grants", () => {
     ["no users", () => (users = [])],
   ])("refuses to delete anything in a database with %s", async (_label, empty) => {
     empty();
-    const orphans = await findOrphanGrants();
+    const orphans = await findOrphanGrants(scopedToDefaultTenant());
 
-    await expect(deleteOrphanGrants(orphans)).rejects.toThrow(/wrong database/);
+    await expect(deleteOrphanGrants(scopedToDefaultTenant(), orphans)).rejects.toThrow(/wrong database/);
     expect(grantDeleteMany).not.toHaveBeenCalled();
     expect(store).toHaveLength(7);
   });

@@ -9,8 +9,8 @@ import { taskKeyOf } from "@/lib/task-key";
 import { isRunnable, normaliseComposition } from "@/lib/agent-rules";
 import { AgentComposition, IUser } from "@/types";
 // The editor shows these before you save, but the editor is not the only way in.
-async function refusalFor(composition: AgentComposition) {
-  const refusal = await compositionRefusal(composition);
+async function refusalFor(db: ScopedDb, composition: AgentComposition) {
+  const refusal = await compositionRefusal(db, composition);
   return refusal ? NextResponse.json(refusal, { status: 400 }) : null;
 }
 
@@ -55,7 +55,7 @@ async function referencesTo(db: ScopedDb, agentId: Types.ObjectId, user: IUser):
   const readable = new Map<string, boolean>();
   const mayRead = async (projectId: string) => {
     if (!projectId) return false;
-    if (!readable.has(projectId)) readable.set(projectId, await check(user, projectId, "access"));
+    if (!readable.has(projectId)) readable.set(projectId, await check(db, user, projectId, "access"));
     return readable.get(projectId)!;
   };
 
@@ -107,9 +107,9 @@ function stillInUse({ projects, named, beyond, restIsHidden }: AgentUses) {
   );
 }
 
-async function mayEdit(user: IUser, agent: { scope: string; owner: unknown; project: unknown }) {
+async function mayEdit(db: ScopedDb, user: IUser, agent: { scope: string; owner: unknown; project: unknown }) {
   if (agent.scope === "user") return String(agent.owner) === String(user._id);
-  if (agent.scope === "project") return check(user, String(agent.project), "admin");
+  if (agent.scope === "project") return check(db, user, String(agent.project), "admin");
   return user.role === "admin";
 }
 
@@ -121,7 +121,7 @@ export const PUT = withAuth(async (request, { params, user, db }) => {
 
   const agent = await db.Agent.findById(agentId);
   if (!agent) return NextResponse.json({ error: "No such agent" }, { status: 404 });
-  if (!(await mayEdit(user, agent))) {
+  if (!(await mayEdit(db, user, agent))) {
     return NextResponse.json({ error: "Not yours to change" }, { status: 403 });
   }
 
@@ -130,7 +130,7 @@ export const PUT = withAuth(async (request, { params, user, db }) => {
   if (typeof body.description === "string") agent.description = body.description.trim();
   if (body.composition) {
     const composition = normaliseComposition(body.composition);
-    const refusal = await refusalFor(composition);
+    const refusal = await refusalFor(db, composition);
     if (refusal) return refusal;
     // Same act as deleting it, which DELETE refuses. An agent nothing points at stays a draft.
     if (!isRunnable(composition)) {
@@ -157,7 +157,7 @@ export const DELETE = withAuth(async (_request, { params, user, db }) => {
   if (agent.builtIn) {
     return NextResponse.json({ error: "A built-in agent cannot be deleted" }, { status: 400 });
   }
-  if (!(await mayEdit(user, agent))) {
+  if (!(await mayEdit(db, user, agent))) {
     return NextResponse.json({ error: "Not yours to delete" }, { status: 403 });
   }
 

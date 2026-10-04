@@ -2,6 +2,7 @@ import { test, expect } from "@playwright/test";
 import mongoose from "mongoose";
 import { ADMIN_AUTH } from "./api";
 import { claimNextTask } from "@/lib/task-service";
+import { scopedToDefaultTenant } from "@/lib/db-scope";
 import { ADMIN_ID, E2E_MONGODB_URI, PROJECT_ID, PROJECT_KEY, seed } from "./seed";
 
 /**
@@ -238,13 +239,13 @@ test.describe("a worker claiming on a board with no column called done", () => {
     });
 
     expect(
-      await claimNextTask(String(PROJECT_ID), WORKER, "run-1", String(ADMIN_ID))
+      await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, "run-1", String(ADMIN_ID))
     ).toBeNull();
 
     const handle = await db();
     await handle.collection("tasks").updateOne({ _id: blocker }, { $set: { status: "shipped" } });
 
-    const claimed = await claimNextTask(String(PROJECT_ID), WORKER, "run-2", String(ADMIN_ID));
+    const claimed = await claimNextTask(scopedToDefaultTenant(), String(PROJECT_ID), WORKER, "run-2", String(ADMIN_ID));
     expect(String(claimed?._id)).toBe(String(blocked));
   });
 });

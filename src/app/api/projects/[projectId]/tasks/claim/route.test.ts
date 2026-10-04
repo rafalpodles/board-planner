@@ -67,6 +67,7 @@ vi.mock("@/lib/middleware", async () => {
   };
 });
 
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 const { POST } = await import("./route");
 
 const OID = "69a52e3b399b27d3cbb2c5a5";
@@ -143,7 +144,7 @@ describe("POST /tasks/claim", () => {
       params: Promise.resolve({ projectId: "CP" }),
     });
 
-    expect(claimNextTask).toHaveBeenCalledWith(OID, OID, "run-1", null);
+    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultTenant(), OID, OID, "run-1", null);
   });
 
   /**
@@ -157,8 +158,8 @@ describe("POST /tasks/claim", () => {
 
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
-    expect(claimNextTask).toHaveBeenCalledWith(OID, OID, "run-1", OWNER);
-    expect(snapshotFor).toHaveBeenCalledWith(OID, undefined, OWNER);
+    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultTenant(), OID, OID, "run-1", OWNER);
+    expect(snapshotFor).toHaveBeenCalledWith(scopedToDefaultTenant(), OID, undefined, OWNER);
   });
 
   // The fleet route populates `owner`, and String() on a populated document is its inspect output —
@@ -172,14 +173,14 @@ describe("POST /tasks/claim", () => {
 
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
-    expect(claimNextTask).toHaveBeenCalledWith(OID, OID, "run-1", OWNER);
-    expect(snapshotFor).toHaveBeenCalledWith(OID, undefined, OWNER);
+    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultTenant(), OID, OID, "run-1", OWNER);
+    expect(snapshotFor).toHaveBeenCalledWith(scopedToDefaultTenant(), OID, undefined, OWNER);
   });
 
   it("resolves a project key before asking the verdict or the claim", async () => {
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
-    expect(resolveProjectId).toHaveBeenCalledWith("CP");
+    expect(resolveProjectId).toHaveBeenCalledWith(scopedToDefaultTenant(), "CP");
     // The verdict now decides against the project itself, since assignment is the project being
     // enabled and this machine reporting a checkout of its repository
     expect(verdictFor.mock.calls[0][1]).toMatchObject({ worker: { enabled: true } });
@@ -191,7 +192,7 @@ describe("POST /tasks/claim", () => {
 
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
-    expect(releaseExpiredTasks).toHaveBeenCalledWith(OID);
+    expect(releaseExpiredTasks).toHaveBeenCalledWith(scopedToDefaultTenant(), OID);
   });
 
   // The worker reads taskNumber, _id and checklist off the top level of this body. Nothing asserted
@@ -279,7 +280,7 @@ describe("POST /tasks/claim", () => {
     it("spends the attempt rather than refunding it", async () => {
       await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
-      expect(releaseTask).toHaveBeenCalledWith(OID, "t1", {
+      expect(releaseTask).toHaveBeenCalledWith(scopedToDefaultTenant(), OID, "t1", {
         refund: false,
         workerId: OID,
       });
@@ -289,7 +290,7 @@ describe("POST /tasks/claim", () => {
     it("names itself as the holder it is releasing on behalf of", async () => {
       await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
-      expect(releaseTask.mock.calls[0][2].workerId).toBe(OID);
+      expect(releaseTask.mock.calls[0][3].workerId).toBe(OID);
     });
 
     // The task moves back a column with no comment, no activity row and no run left to attach an
@@ -404,7 +405,7 @@ describe("POST /tasks/claim", () => {
     expect(response.status).toBe(204);
     // The runId's position, not the whole call: what the other arguments carry is every other test
     // in this file's subject
-    expect(claimNextTask.mock.calls[0][2]).toBe(runId);
+    expect(claimNextTask.mock.calls[0][3]).toBe(runId);
   });
 
   it("returns 400 when the body is not valid JSON, without claiming", async () => {
@@ -445,7 +446,7 @@ describe("the worker's identity does not travel with the claim", () => {
 
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
-    expect(claimNextTask).toHaveBeenCalledWith(OID, OID, "run-1", "u-owner");
+    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultTenant(), OID, OID, "run-1", "u-owner");
   });
 });
 
@@ -462,6 +463,7 @@ describe("the worker's owner travels with the claim", () => {
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
     expect(ownerReachableProjectIds).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       expect.objectContaining({ owner: "u-owner" })
     );
     expect(verdictFor.mock.calls[0][5]).toEqual(["p1", "p2"]);
@@ -479,7 +481,7 @@ describe("the worker's owner travels with the claim", () => {
 
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
-    expect(claimNextTask).toHaveBeenCalledWith(OID, OID, "run-1", "u-owner");
+    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultTenant(), OID, OID, "run-1", "u-owner");
   });
 
   it("passes the owner set at enrolment", async () => {
@@ -488,6 +490,6 @@ describe("the worker's owner travels with the claim", () => {
 
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
-    expect(claimNextTask).toHaveBeenCalledWith(OID, OID, "run-1", "u-owner");
+    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultTenant(), OID, OID, "run-1", "u-owner");
   });
 });

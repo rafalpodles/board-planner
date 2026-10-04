@@ -88,7 +88,7 @@ const updateOne = vi.fn();
 const findOne = vi.fn();
 const find = vi.fn();
 const findByIdAndUpdate = vi.fn();
-const findById = vi.fn();
+const projectFindOne = vi.fn();
 const userFindOne = vi.fn();
 // The notification mails name the person who moved the task, so every announcing path resolves
 // the actor's username now
@@ -97,27 +97,37 @@ const commentCreate = vi.fn(async () => ({ _id: "c1" }));
 const createNotificationsMock = vi.fn();
 const notifyBoardFeedMock = vi.fn();
 const collectRecipientsMock = vi.fn((_task?: unknown): string[] => []);
-const resolveMentionsMock = vi.fn(async (_body?: string): Promise<string[]> => []);
-const workerFindById = vi.fn();
+const resolveMentionsMock = vi.fn(async (_db?: unknown, _body?: string): Promise<string[]> => []);
+const workerFindOne = vi.fn();
 const taskFindById = vi.fn();
 // Whether this occurrence has already minted its successor. Null is "not yet", which is what
 // every closing task that is not being asked about recurrence twice answers.
 const taskExists = vi.fn(async (_filter?: unknown): Promise<unknown> => null);
 
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
-vi.mock("@/models/worker", () => ({ Worker: { findById: workerFindById } }));
+vi.mock("@/models/worker", () => ({ Worker: { findOne: workerFindOne } }));
 // The real schema, because `order` and `description` are guarded by asking the schema's own
 // caster rather than restating it. A mock without one cannot answer, the guard cannot tell "I
 // could not ask" from "the value is wrong", and every assertion below would be measuring a stub.
 vi.mock("@/models/task", async () => ({
   Task: {
     schema: (await vi.importActual<typeof import("@/models/task")>("@/models/task")).Task.schema,
-    findOneAndUpdate, updateMany, updateOne, findOne, find, findByIdAndUpdate, findById: taskFindById, create: taskCreate, exists: taskExists,
+    updateMany, updateOne, find, create: taskCreate, exists: taskExists,
+    findOne: (filter: Record<string, unknown>, ...rest: unknown[]) =>
+      ("project" in filter ? findOne : taskFindById)(filter, ...rest),
+    findOneAndUpdate: (filter: Record<string, unknown>, ...rest: unknown[]) =>
+      ("project" in filter ? findOneAndUpdate : findByIdAndUpdate)(filter, ...rest),
   },
 }));
-vi.mock("@/models/project", () => ({ Project: { findById, findOneAndUpdate: projectFindOneAndUpdate } }));
+vi.mock("@/models/project", () => ({ Project: { findOne: projectFindOne, findOneAndUpdate: projectFindOneAndUpdate } }));
 const userExists = vi.fn(async (_filter?: unknown) => ({ _id: "active" }) as unknown);
-vi.mock("@/models/user", () => ({ User: { findOne: userFindOne, findById: userFindById, exists: userExists } }));
+vi.mock("@/models/user", () => ({
+  User: {
+    findOne: (filter: Record<string, unknown>, ...rest: unknown[]) =>
+      ("username" in filter ? userFindOne : userFindById)(filter, ...rest),
+    exists: userExists,
+  },
+}));
 /**
  * Mocked as its own module, not through the User mock (BP-419). `User.findOne` here is a blanket
  * stub that answers every lookup the same way, and the PM's is one of several — so a test setting
@@ -131,8 +141,8 @@ vi.mock("@/lib/pm/pm-user", () => ({
   PM_USERNAME: "pm",
   getPmUser: vi.fn(),
 }));
-const agentFindById = vi.fn();
-vi.mock("@/models/agent", () => ({ Agent: { findById: agentFindById } }));
+const agentFindOne = vi.fn();
+vi.mock("@/models/agent", () => ({ Agent: { findOne: agentFindOne } }));
 
 /**
  * Answers with only the fields the caller's PROJECTION named, the way MongoDB does.
@@ -144,7 +154,7 @@ vi.mock("@/models/agent", () => ({ Agent: { findById: agentFindById } }));
  * branch exists to add, off, with the suite green.
  */
 function agentInTheCatalog(doc: Record<string, unknown> | null) {
-  agentFindById.mockImplementation((_id: unknown, projection?: unknown) => {
+  agentFindOne.mockImplementation((_filter: unknown, projection?: unknown) => {
     if (!doc) return { lean: () => Promise.resolve(null) };
     const named = String(projection ?? "").split(/\s+/).filter(Boolean);
     const visible = named.length
@@ -156,7 +166,7 @@ function agentInTheCatalog(doc: Record<string, unknown> | null) {
 vi.mock("@/models/comment", () => ({
   Comment: {
     create: commentCreate,
-    findById: () => ({ populate: async () => ({ _id: "c1" }) }),
+    findOne: () => ({ populate: async () => ({ _id: "c1" }) }),
   },
 }));
 const sprintExists = vi.fn();
@@ -167,10 +177,10 @@ vi.mock("@/lib/notifications", () => ({ dispatchNotifications: vi.fn() }));
 vi.mock("@/lib/in-app-notifications", () => ({
   createNotifications: createNotificationsMock,
   collectRecipients: (task: { watchers?: string[] }) => collectRecipientsMock(task),
-  resolveMentions: (body: string) => resolveMentionsMock(body),
+  resolveMentions: (db: unknown, body: string) => resolveMentionsMock(db, body),
   assigneeIdOf: () => undefined,
 }));
-vi.mock("@/lib/board-feed", () => ({ notifyBoardFeed: (p: unknown) => notifyBoardFeedMock(p) }));
+vi.mock("@/lib/board-feed", () => ({ notifyBoardFeed: (db: unknown, p: unknown) => notifyBoardFeedMock(db, p) }));
 vi.mock("@/lib/pm/triggers", () => ({ onTaskStatusChanged: vi.fn().mockResolvedValue(undefined) }));
 
 /**
@@ -179,10 +189,10 @@ vi.mock("@/lib/pm/triggers", () => ({ onTaskStatusChanged: vi.fn().mockResolvedV
  * here — the tests below that care set it explicitly, and everything else assigns freely, the way
  * it did before BP-400.
  */
-const canBeAssignedMock = vi.fn(async (_userId?: string, _projectId?: string) => true);
+const canBeAssignedMock = vi.fn(async (_db?: unknown, _userId?: string, _projectId?: string) => true);
 vi.mock("@/lib/grants", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/grants")>()),
-  canBeAssigned: (userId: string, projectId: string) => canBeAssignedMock(userId, projectId),
+  canBeAssigned: (db: unknown, userId: string, projectId: string) => canBeAssignedMock(db, userId, projectId),
 }));
 
 beforeEach(() => {
@@ -217,6 +227,9 @@ const {
   heldRunRefusal,
   CRITERION_ROWS_PER_WRITE,
 } = await import("./task-service");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
+const db = scopedToDefaultTenant();
 
 const { logActivity, logActivities } = await import("@/lib/activity");
 const { dispatchWebhooks } = await import("@/lib/webhooks");
@@ -266,6 +279,7 @@ const OWNER = "6a70afff45d39cd9bc8bb5fe";
 // A document satisfying every clause of the claim filter, so a sift verdict on one built from it
 // is about the clause the test varies and nothing else
 const task = (over: Record<string, unknown> = {}) => ({
+  tenant: DEFAULT_TENANT_ID,
   project: "p1",
   status: "ready",
   assignee: OWNER,
@@ -279,8 +293,8 @@ const task = (over: Record<string, unknown> = {}) => ({
 describe("claimNextTask", () => {
   beforeEach(() => {
     findOneAndUpdate.mockReset();
-    findById.mockReset();
-    findById.mockReturnValue({ lean: () => Promise.resolve(claimableBoard) });
+    projectFindOne.mockReset();
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(claimableBoard) });
     find.mockReset();
     find.mockReturnValue({ lean: () => Promise.resolve([]) });
   });
@@ -312,12 +326,12 @@ describe("claimNextTask", () => {
 
     async function claimFilter(): Promise<Record<string, unknown>> {
       findOneAndUpdate.mockResolvedValue(null);
-      await claimNextTask("p1", "worker-a", "run-1", OWNER);
+      await claimNextTask(db, "p1", "worker-a", "run-1", OWNER);
       return findOneAndUpdate.mock.calls[0][0];
     }
 
     beforeEach(() => {
-      findById.mockReturnValue({ lean: () => Promise.resolve(shipping) });
+      projectFindOne.mockReturnValue({ lean: () => Promise.resolve(shipping) });
     });
 
     it("passes over a task whose blocker is still unfinished", async () => {
@@ -373,6 +387,7 @@ describe("claimNextTask", () => {
         project: "p1",
         _id: { $in: [OPEN] },
         status: { $nin: ["shipped"] },
+        tenant: DEFAULT_TENANT_ID,
       });
     });
 
@@ -401,13 +416,13 @@ describe("claimNextTask", () => {
     // a run on such a board had nowhere to deliver, and the worker handed the task back and
     // claimed it again on the next pass, for ever.
     it("never consults the gate on a board with no done column, which is refused outright", async () => {
-      findById.mockReturnValue({
+      projectFindOne.mockReturnValue({
         lean: () =>
           Promise.resolve({ columns: claimableBoard.columns.filter((c) => c.role !== "done") }),
       });
       find.mockReset();
 
-      await expect(claimNextTask("p1", "worker-a", "run-1", OWNER)).rejects.toThrow(/Done/);
+      await expect(claimNextTask(db, "p1", "worker-a", "run-1", OWNER)).rejects.toThrow(/Done/);
 
       expect(find).not.toHaveBeenCalled();
       expect(findOneAndUpdate).not.toHaveBeenCalled();
@@ -417,7 +432,7 @@ describe("claimNextTask", () => {
   it("derives the source column from the approved role, not a fixed id", async () => {
     findOneAndUpdate.mockResolvedValue({ _id: "t1", taskNumber: 1 });
 
-    await claimNextTask("p1", "worker-a", "run-1", OWNER);
+    await claimNextTask(db, "p1", "worker-a", "run-1", OWNER);
 
     const filter = findOneAndUpdate.mock.calls[0][0];
     expect(filter.status).toEqual({ $in: ["ready"] });
@@ -437,7 +452,7 @@ describe("claimNextTask", () => {
   describe("a change still waiting on somebody", () => {
     async function claimedDecision(before: unknown): Promise<unknown> {
       findOneAndUpdate.mockResolvedValue({ _id: "t1", taskNumber: 1 });
-      await claimNextTask("p1", "worker-a", "run-1", OWNER);
+      await claimNextTask(db, "p1", "worker-a", "run-1", OWNER);
       const expr = claimSet(findOneAndUpdate.mock.calls[0]).decision;
       return evaluateExpr(expr, { decision: before } as Record<string, unknown>);
     }
@@ -470,7 +485,7 @@ describe("claimNextTask", () => {
   it("derives the claimed status from the active role, not a fixed id", async () => {
     findOneAndUpdate.mockResolvedValue({ _id: "t1", taskNumber: 1 });
 
-    await claimNextTask("p1", "worker-a", "run-1", OWNER);
+    await claimNextTask(db, "p1", "worker-a", "run-1", OWNER);
 
     expect(claimSet(findOneAndUpdate.mock.calls[0]).status).toBe("doing");
   });
@@ -480,22 +495,22 @@ describe("claimNextTask", () => {
   // (BP-512). Asserted through the class AND the words, because the route hands the words to the
   // worker and a message naming the wrong role would pass the class alone.
   it("refuses, naming the role, when the board has no active column to claim into", async () => {
-    findById.mockReturnValue({
+    projectFindOne.mockReturnValue({
       lean: () => Promise.resolve({ columns: [{ id: "ready", role: "approved", order: 1 }] }),
     });
 
-    const claim = claimNextTask("p1", "worker-a", "run-1", OWNER);
+    const claim = claimNextTask(db, "p1", "worker-a", "run-1", OWNER);
     await expect(claim).rejects.toBeInstanceOf(BoardCannotClaim);
     await expect(claim).rejects.toThrow(/no column meaning In progress/);
     expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it("refuses, naming the role, when the board has no approved column to claim from", async () => {
-    findById.mockReturnValue({
+    projectFindOne.mockReturnValue({
       lean: () => Promise.resolve({ columns: [{ id: "doing", role: "active", order: 1 }] }),
     });
 
-    const claim = claimNextTask("p1", "worker-a", "run-1", OWNER);
+    const claim = claimNextTask(db, "p1", "worker-a", "run-1", OWNER);
     await expect(claim).rejects.toBeInstanceOf(BoardCannotClaim);
     await expect(claim).rejects.toThrow(/no column meaning Ready to pick up/);
     expect(findOneAndUpdate).not.toHaveBeenCalled();
@@ -505,26 +520,26 @@ describe("claimNextTask", () => {
   // board without them was handed back at run start with the attempt refunded, and claimed again
   // on the next pass without a poll interval — a comment on the task every iteration, for ever.
   it("refuses a board with no review column, where a run could not put its result", async () => {
-    findById.mockReturnValue({
+    projectFindOne.mockReturnValue({
       lean: () =>
         Promise.resolve({
           columns: claimableBoard.columns.filter((c) => c.role !== "review"),
         }),
     });
 
-    const claim = claimNextTask("p1", "worker-a", "run-1", OWNER);
+    const claim = claimNextTask(db, "p1", "worker-a", "run-1", OWNER);
     await expect(claim).rejects.toBeInstanceOf(BoardCannotClaim);
     await expect(claim).rejects.toThrow(/no column meaning Awaiting review/);
     expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it("refuses a board with no done column, where a run could not deliver", async () => {
-    findById.mockReturnValue({
+    projectFindOne.mockReturnValue({
       lean: () =>
         Promise.resolve({ columns: claimableBoard.columns.filter((c) => c.role !== "done") }),
     });
 
-    const claim = claimNextTask("p1", "worker-a", "run-1", OWNER);
+    const claim = claimNextTask(db, "p1", "worker-a", "run-1", OWNER);
     await expect(claim).rejects.toBeInstanceOf(BoardCannotClaim);
     await expect(claim).rejects.toThrow(/no column meaning Done/);
     expect(findOneAndUpdate).not.toHaveBeenCalled();
@@ -534,7 +549,7 @@ describe("claimNextTask", () => {
   it("orders by board position, never lexicographically by priority", async () => {
     findOneAndUpdate.mockResolvedValue({ _id: "t1", taskNumber: 1 });
 
-    await claimNextTask("p1", "worker-a", "run-1", OWNER);
+    await claimNextTask(db, "p1", "worker-a", "run-1", OWNER);
 
     const options = findOneAndUpdate.mock.calls[0][2];
     expect(options.sort).toEqual({ order: 1, createdAt: 1 });
@@ -544,7 +559,7 @@ describe("claimNextTask", () => {
   it("claims tasks that predate the execution subdocument", async () => {
     findOneAndUpdate.mockResolvedValue({ _id: "t1", taskNumber: 1 });
 
-    await claimNextTask("p1", "worker-a", "run-1", OWNER);
+    await claimNextTask(db, "p1", "worker-a", "run-1", OWNER);
 
     const filter = findOneAndUpdate.mock.calls[0][0];
     expect(filter.$or).toEqual([
@@ -556,7 +571,7 @@ describe("claimNextTask", () => {
   it("stamps worker identity and increments attempts", async () => {
     findOneAndUpdate.mockResolvedValue({ _id: "t1", taskNumber: 1 });
 
-    await claimNextTask("p1", "worker-a", "run-1", OWNER);
+    await claimNextTask(db, "p1", "worker-a", "run-1", OWNER);
 
     const set = claimSet(findOneAndUpdate.mock.calls[0]);
     // Wrapped, because this is a pipeline `$set` and a bare string starting with `$` would be read
@@ -576,7 +591,7 @@ describe("claimNextTask", () => {
   it("keeps the run's id where the end of the run does not clear it", async () => {
     findOneAndUpdate.mockResolvedValue({ _id: "t1", taskNumber: 1 });
 
-    await claimNextTask("p1", "worker-a", "run-1", OWNER);
+    await claimNextTask(db, "p1", "worker-a", "run-1", OWNER);
 
     expect(claimSet(findOneAndUpdate.mock.calls[0])["execution.lastRunId"]).toEqual({
       $literal: "run-1",
@@ -588,28 +603,28 @@ describe("claimNextTask", () => {
   it("drops any phase an earlier run left on the task", async () => {
     findOneAndUpdate.mockResolvedValue({ _id: "t1", taskNumber: 1 });
 
-    await claimNextTask("p1", "worker-a", "run-1", OWNER);
+    await claimNextTask(db, "p1", "worker-a", "run-1", OWNER);
 
     expect(claimStages(findOneAndUpdate.mock.calls[0])[1].$unset).toEqual(PHASE_KEYS);
   });
 
   it("returns null when nothing is claimable", async () => {
     findOneAndUpdate.mockResolvedValue(null);
-    expect(await claimNextTask("p1", "worker-a", "run-1", OWNER)).toBeNull();
+    expect(await claimNextTask(db, "p1", "worker-a", "run-1", OWNER)).toBeNull();
   });
 });
 
 describe("releaseTask", () => {
   beforeEach(() => {
     findOneAndUpdate.mockReset();
-    findById.mockReset();
-    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    projectFindOne.mockReset();
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
   });
 
   it("returns the task to the approved column and gives back the attempt", async () => {
     findOneAndUpdate.mockResolvedValue({ _id: "t1", taskNumber: 1 });
 
-    await releaseTask("p1", "t1");
+    await releaseTask(db, "p1", "t1");
 
     const [filter, update] = findOneAndUpdate.mock.calls[0];
     expect(filter._id).toBe("t1");
@@ -621,7 +636,7 @@ describe("releaseTask", () => {
   it("never drives attempts below zero", async () => {
     findOneAndUpdate.mockResolvedValue(null);
 
-    await releaseTask("p1", "t1");
+    await releaseTask(db, "p1", "t1");
 
     expect(findOneAndUpdate.mock.calls[0][0]["execution.attempts"]).toEqual({ $gt: 0 });
   });
@@ -631,32 +646,32 @@ describe("releaseTask", () => {
   it("only refunds a task the worker is still holding", async () => {
     findOneAndUpdate.mockResolvedValue(null);
 
-    await releaseTask("p1", "t1");
+    await releaseTask(db, "p1", "t1");
 
     expect(findOneAndUpdate.mock.calls[0][0].status).toEqual({ $in: ["doing"] });
   });
 
   it("returns null without touching the task when the board has no active column", async () => {
-    findById.mockReturnValue({
+    projectFindOne.mockReturnValue({
       lean: () => Promise.resolve({ columns: [{ id: "ready", role: "approved", order: 1 }] }),
     });
 
-    expect(await releaseTask("p1", "t1")).toBeNull();
+    expect(await releaseTask(db, "p1", "t1")).toBeNull();
     expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it("returns null without touching the task when the board has no approved column", async () => {
-    findById.mockReturnValue({
+    projectFindOne.mockReturnValue({
       lean: () => Promise.resolve({ columns: [{ id: "doing", role: "active", order: 1 }] }),
     });
 
-    expect(await releaseTask("p1", "t1")).toBeNull();
+    expect(await releaseTask(db, "p1", "t1")).toBeNull();
     expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it("returns null when the release matched nothing", async () => {
     findOneAndUpdate.mockResolvedValue(null);
-    expect(await releaseTask("p1", "t1")).toBeNull();
+    expect(await releaseTask(db, "p1", "t1")).toBeNull();
   });
 });
 
@@ -664,16 +679,16 @@ describe("claim and release ask for the updated document, not the operation's me
   beforeEach(() => {
     findOneAndUpdate.mockReset();
     findOneAndUpdate.mockResolvedValue(null);
-    findById.mockReset();
-    findById.mockReturnValue({ lean: () => Promise.resolve(claimableBoard) });
+    projectFindOne.mockReset();
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(claimableBoard) });
     find.mockReset();
     find.mockReturnValue({ lean: () => Promise.resolve([]) });
   });
 
   const writes: [string, () => Promise<unknown>][] = [
-    ["claimNextTask", () => claimNextTask("p1", "worker-a", "run-1", OWNER)],
-    ["releaseTask with a refund", () => releaseTask("p1", "t1")],
-    ["releaseTask without a refund", () => releaseTask("p1", "t1", { refund: false })],
+    ["claimNextTask", () => claimNextTask(db, "p1", "worker-a", "run-1", OWNER)],
+    ["releaseTask with a refund", () => releaseTask(db, "p1", "t1")],
+    ["releaseTask without a refund", () => releaseTask(db, "p1", "t1", { refund: false })],
   ];
 
   for (const [name, write] of writes) {
@@ -702,20 +717,20 @@ describe("releaseTask charging the attempt", () => {
 
   beforeEach(() => {
     findOneAndUpdate.mockReset();
-    findById.mockReset();
-    findById.mockReturnValue({ lean: () => Promise.resolve(boardWithReview) });
+    projectFindOne.mockReset();
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(boardWithReview) });
     findOneAndUpdate.mockResolvedValue({ _id: "t1", taskNumber: 1 });
   });
 
   it("keeps the attempt the run spent, so a repeating failure cannot retry forever", async () => {
-    await releaseTask("p1", "t1", { refund: false });
+    await releaseTask(db, "p1", "t1", { refund: false });
 
     const update = findOneAndUpdate.mock.calls[0][1];
     expect(JSON.stringify(update)).not.toContain("$inc");
   });
 
   it("sends a task back to the approved column while attempts remain", async () => {
-    await releaseTask("p1", "t1", { refund: false });
+    await releaseTask(db, "p1", "t1", { refund: false });
 
     const [, update] = findOneAndUpdate.mock.calls[0];
     expect(update[0].$set.status.$cond[1]).toBe("escalated");
@@ -726,13 +741,13 @@ describe("releaseTask charging the attempt", () => {
   });
 
   it("routes an exhausted task to the column the humans watch, not back to the queue", async () => {
-    await releaseTask("p1", "t1", { refund: false });
+    await releaseTask(db, "p1", "t1", { refund: false });
 
     expect(findOneAndUpdate.mock.calls[0][1][0].$set.status.$cond[1]).toBe("escalated");
   });
 
   it("holds an exhausted task in the queue when the board has no review column", async () => {
-    findById.mockReturnValue({
+    projectFindOne.mockReturnValue({
       lean: () =>
         Promise.resolve({
           columns: [
@@ -742,7 +757,7 @@ describe("releaseTask charging the attempt", () => {
         }),
     });
 
-    await releaseTask("p1", "t1", { refund: false });
+    await releaseTask(db, "p1", "t1", { refund: false });
 
     const cond = findOneAndUpdate.mock.calls[0][1][0].$set.status.$cond;
     expect(cond[1]).toBe("ready");
@@ -752,13 +767,13 @@ describe("releaseTask charging the attempt", () => {
   // Mongoose rejects an array update outright unless this option says it is a pipeline, and a
   // mocked findOneAndUpdate never runs that check — so assert the option, not just the stages
   it("marks the update as a pipeline, which mongoose demands for an array update", async () => {
-    await releaseTask("p1", "t1", { refund: false });
+    await releaseTask(db, "p1", "t1", { refund: false });
 
     expect(findOneAndUpdate.mock.calls[0][2]).toMatchObject({ updatePipeline: true });
   });
 
   it("still only releases a task the worker is holding", async () => {
-    await releaseTask("p1", "t1", { refund: false });
+    await releaseTask(db, "p1", "t1", { refund: false });
 
     const filter = findOneAndUpdate.mock.calls[0][0];
     expect(filter.status).toEqual({ $in: ["doing"] });
@@ -780,17 +795,17 @@ describe("releaseExpiredTasks", () => {
 
   beforeEach(() => {
     updateMany.mockReset();
-    findById.mockReset();
+    projectFindOne.mockReset();
     find.mockReset();
     createNotificationsMock.mockClear();
     collectRecipientsMock.mockReturnValue([]);
-    findById.mockReturnValue({ lean: () => Promise.resolve(board) });
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(board) });
     find.mockReturnValue({ lean: () => Promise.resolve([]) });
     updateMany.mockResolvedValue({ modifiedCount: 0 });
   });
 
   it("only touches tasks whose lease has actually run out", async () => {
-    await releaseExpiredTasks("p1", now);
+    await releaseExpiredTasks(db, "p1", now);
 
     const filter = updateMany.mock.calls[0][0];
     expect(filter.status).toEqual({ $in: ["doing"] });
@@ -801,7 +816,7 @@ describe("releaseExpiredTasks", () => {
   });
 
   it("returns a task with attempts left to the queue", async () => {
-    await releaseExpiredTasks("p1", now);
+    await releaseExpiredTasks(db, "p1", now);
 
     const retryable = updateMany.mock.calls.find(
       ([f]) => f["execution.attempts"]?.$lt === MAX_EXECUTION_ATTEMPTS
@@ -810,7 +825,7 @@ describe("releaseExpiredTasks", () => {
   });
 
   it("sends an exhausted task to the column humans watch, not back into the loop", async () => {
-    await releaseExpiredTasks("p1", now);
+    await releaseExpiredTasks(db, "p1", now);
 
     const spent = updateMany.mock.calls.find(
       ([f]) => f["execution.attempts"]?.$gte === MAX_EXECUTION_ATTEMPTS
@@ -820,7 +835,7 @@ describe("releaseExpiredTasks", () => {
 
   // Refunding would let a task that repeatedly outlives its worker cycle forever
   it("never gives the attempt back", async () => {
-    await releaseExpiredTasks("p1", now);
+    await releaseExpiredTasks(db, "p1", now);
 
     for (const [, update] of updateMany.mock.calls) {
       expect(JSON.stringify(update)).not.toContain("$inc");
@@ -830,11 +845,11 @@ describe("releaseExpiredTasks", () => {
   it("counts everything it freed", async () => {
     updateMany.mockResolvedValueOnce({ modifiedCount: 1 }).mockResolvedValueOnce({ modifiedCount: 2 });
 
-    expect(await releaseExpiredTasks("p1", now)).toBe(3);
+    expect(await releaseExpiredTasks(db, "p1", now)).toBe(3);
   });
 
   it("holds an exhausted task in the queue when the board has no review column", async () => {
-    findById.mockReturnValue({
+    projectFindOne.mockReturnValue({
       lean: () =>
         Promise.resolve({
           columns: [
@@ -844,7 +859,7 @@ describe("releaseExpiredTasks", () => {
         }),
     });
 
-    await releaseExpiredTasks("p1", now);
+    await releaseExpiredTasks(db, "p1", now);
 
     const spent = updateMany.mock.calls.find(
       ([f]) => f["execution.attempts"]?.$gte === MAX_EXECUTION_ATTEMPTS
@@ -853,11 +868,11 @@ describe("releaseExpiredTasks", () => {
   });
 
   it("does nothing on a board with no active column", async () => {
-    findById.mockReturnValue({
+    projectFindOne.mockReturnValue({
       lean: () => Promise.resolve({ columns: [{ id: "ready", role: "approved", order: 1 }] }),
     });
 
-    expect(await releaseExpiredTasks("p1", now)).toBe(0);
+    expect(await releaseExpiredTasks(db, "p1", now)).toBe(0);
     expect(updateMany).not.toHaveBeenCalled();
   });
 
@@ -891,16 +906,16 @@ describe("releaseExpiredTasks", () => {
     it("names the task, the column it landed in and who it is for", async () => {
       abandoned();
 
-      await releaseExpiredTasks("p1", now);
+      await releaseExpiredTasks(db, "p1", now);
 
-      const [notification] = createNotificationsMock.mock.calls.at(-1) ?? [];
+      const [, notification] = createNotificationsMock.mock.calls.at(-1) ?? [];
       expect(notification.title).toBe("TP-9 needs a human — the run was abandoned");
       expect(notification.digestTitle).toBe("needs a human — the run was abandoned");
       expect(notification.recipientIds).toEqual([WATCHER]);
       expect(notification.email.kicker).toBe("Run abandoned");
       expect(notification.email.taskPills).toEqual([{ label: "Escalated", tone: "review" }]);
       expect(notification.email.projectRef).toBe("TP");
-      expect(userFindOne).toHaveBeenCalledWith({ username: "worker-w1" }, "_id");
+      expect(userFindOne).toHaveBeenCalledWith({ username: "worker-w1", tenant: DEFAULT_TENANT_ID }, "_id");
       expect(notification.actorId).toBe("worker-user-1");
     });
 
@@ -910,7 +925,7 @@ describe("releaseExpiredTasks", () => {
       abandoned();
       userFindOne.mockReturnValue({ lean: async () => null });
 
-      await releaseExpiredTasks("p1", now);
+      await releaseExpiredTasks(db, "p1", now);
 
       expect(createNotificationsMock).not.toHaveBeenCalled();
     });
@@ -921,7 +936,7 @@ describe("releaseExpiredTasks", () => {
       abandoned();
       updateMany.mockResolvedValue({ modifiedCount: 0 });
 
-      await releaseExpiredTasks("p1", now);
+      await releaseExpiredTasks(db, "p1", now);
 
       expect(createNotificationsMock).not.toHaveBeenCalled();
     });
@@ -930,7 +945,7 @@ describe("releaseExpiredTasks", () => {
       abandoned();
       collectRecipientsMock.mockReturnValue([]);
 
-      await releaseExpiredTasks("p1", now);
+      await releaseExpiredTasks(db, "p1", now);
 
       expect(createNotificationsMock).not.toHaveBeenCalled();
     });
@@ -948,7 +963,7 @@ describe("releaseExpiredTasks", () => {
         throw new Error("mongo is having a bad afternoon");
       });
 
-      await expect(releaseExpiredTasks("p1", now)).resolves.toBe(1);
+      await expect(releaseExpiredTasks(db, "p1", now)).resolves.toBe(1);
 
       await vi.waitFor(() =>
         expect(reported).toHaveBeenCalledWith(
@@ -965,6 +980,7 @@ describe("recordTaskPhase", () => {
   const TASK_ID = "69a52e3b399b27d3cbb2c5b7";
   const holder = {
     _id: TASK_ID,
+    tenant: DEFAULT_TENANT_ID,
     execution: { workerId: "w1", runId: "run-1", attempts: 1 },
   };
 
@@ -975,7 +991,7 @@ describe("recordTaskPhase", () => {
 
   async function filterFor(seq: number) {
     updateOne.mockClear();
-    await recordTaskPhase({ taskId: TASK_ID, workerId: "w1", runId: "run-1", seq, phase: "agent" });
+    await recordTaskPhase(db, { taskId: TASK_ID, workerId: "w1", runId: "run-1", seq, phase: "agent" });
     return updateOne.mock.calls[0][0];
   }
 
@@ -999,7 +1015,7 @@ describe("recordTaskPhase", () => {
   // run identity precisely so that replaying it reaches nothing — and note the release also unsets
   // phaseSeq, so the $exists branch would otherwise accept any seq, however stale
   it("drops a replay of the run the task was released from", async () => {
-    const released = { _id: TASK_ID, execution: { workerId: "w1", attempts: 1 } };
+    const released = { _id: TASK_ID, tenant: DEFAULT_TENANT_ID, execution: { workerId: "w1", attempts: 1 } };
     expect(matches(await filterFor(1), released)).toBe(false);
   });
 
@@ -1026,7 +1042,7 @@ describe("recordTaskPhase", () => {
   });
 
   it("stamps the phase, its seq and when it arrived", async () => {
-    await recordTaskPhase({
+    await recordTaskPhase(db, {
       taskId: TASK_ID,
       workerId: "w1",
       runId: "run-1",
@@ -1043,10 +1059,10 @@ describe("recordTaskPhase", () => {
   it("reports whether the write landed", async () => {
     const event = { taskId: TASK_ID, workerId: "w1", runId: "run-1", seq: 1, phase: "agent" };
 
-    expect(await recordTaskPhase(event)).toBe(true);
+    expect(await recordTaskPhase(db, event)).toBe(true);
 
     updateOne.mockResolvedValue({ matchedCount: 0, modifiedCount: 0 });
-    expect(await recordTaskPhase(event)).toBe(false);
+    expect(await recordTaskPhase(db, event)).toBe(false);
   });
 });
 
@@ -1081,7 +1097,7 @@ describe("clearing the phase on every exit from the active column", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    findById.mockReturnValue({ lean: () => Promise.resolve(board) });
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(board) });
     findOne.mockReturnValue({
       lean: () => Promise.resolve({ _id: "t1", taskNumber: 1, status: "doing", title: "x" }),
       populate: () => ({
@@ -1095,7 +1111,7 @@ describe("clearing the phase on every exit from the active column", () => {
   });
 
   it("clears it when a gate rejection moves the task to a review column", async () => {
-    await changeStatus("p1", "t1", "checking", "actor");
+    await changeStatus(db, "p1", "t1", "checking", "actor");
 
     expect(unsetKeys(findOneAndUpdate.mock.calls[0][1])).toEqual(RUN_KEYS);
   });
@@ -1103,13 +1119,13 @@ describe("clearing the phase on every exit from the active column", () => {
   // BP-758: this is the write the worker's outcome record is sent after, and lastRunId is what the
   // record is then matched by
   it("keeps the id the run's record is matched by", async () => {
-    await changeStatus("p1", "t1", "checking", "actor");
+    await changeStatus(db, "p1", "t1", "checking", "actor");
 
     expect(unsetKeys(findOneAndUpdate.mock.calls[0][1])).not.toContain("execution.lastRunId");
   });
 
   it("clears it when the edit form PUTs a new status", async () => {
-    await updateTask("p1", "t1", { status: "checking" }, "actor");
+    await updateTask(db, "p1", "t1", { status: "checking" }, "actor");
 
     expect(unsetKeys(findOneAndUpdate.mock.calls[0][1])).toEqual(RUN_KEYS);
   });
@@ -1117,7 +1133,7 @@ describe("clearing the phase on every exit from the active column", () => {
   // The phase belongs to the run, not to the card: renaming a task the worker is running must not
   // blank the badge
   it("leaves it alone when the edit touches no status", async () => {
-    await updateTask("p1", "t1", { title: "renamed" }, "actor");
+    await updateTask(db, "p1", "t1", { title: "renamed" }, "actor");
 
     expect(unsetKeys(findOneAndUpdate.mock.calls[0][1])).toEqual([]);
   });
@@ -1128,13 +1144,13 @@ describe("clearing the phase on every exit from the active column", () => {
   // refusal on the route never fired either. CLAUDE.md states the opposite as a guarantee:
   // "staying in the column — a reorder, or resending the status already held — never touches the run".
   it("leaves the run alone when the status a task already holds is resent", async () => {
-    await changeStatus("p1", "t1", "doing", "actor");
+    await changeStatus(db, "p1", "t1", "doing", "actor");
 
     expect(unsetKeys(findOneAndUpdate.mock.calls[0][1])).toEqual([]);
   });
 
   it("does not clear the assignee when the status is resent unchanged", async () => {
-    await changeStatus("p1", "t1", "doing", "actor");
+    await changeStatus(db, "p1", "t1", "doing", "actor");
 
     const stages = findOneAndUpdate.mock.calls[0][1] as Record<string, never>[];
     const setStage = stages.find((stage) => "$set" in stage) as
@@ -1146,7 +1162,7 @@ describe("clearing the phase on every exit from the active column", () => {
   it("clears it when the task is released with the attempt refunded", async () => {
     findOneAndUpdate.mockResolvedValue({ _id: "t1" });
 
-    await releaseTask("p1", "t1");
+    await releaseTask(db, "p1", "t1");
 
     expect(unsetKeys(findOneAndUpdate.mock.calls[0][1])).toEqual(RUN_KEYS);
   });
@@ -1154,14 +1170,14 @@ describe("clearing the phase on every exit from the active column", () => {
   it("clears it when the release charges the attempt", async () => {
     findOneAndUpdate.mockResolvedValue({ _id: "t1" });
 
-    await releaseTask("p1", "t1", { refund: false });
+    await releaseTask(db, "p1", "t1", { refund: false });
 
     const stages = findOneAndUpdate.mock.calls[0][1];
     expect(stages[stages.length - 1]).toEqual({ $unset: RUN_KEYS });
   });
 
   it("clears it when a lease expires, whether or not attempts remain", async () => {
-    await releaseExpiredTasks("p1", new Date("2026-07-31T12:00:00.000Z"));
+    await releaseExpiredTasks(db, "p1", new Date("2026-07-31T12:00:00.000Z"));
 
     expect(updateMany.mock.calls).toHaveLength(2);
     for (const [, update] of updateMany.mock.calls) {
@@ -1255,7 +1271,7 @@ describe("claiming by assignment", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    findById.mockReturnValue({ lean: () => Promise.resolve(board) });
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(board) });
     findOneAndUpdate.mockResolvedValue({ _id: "t1" });
     updateMany.mockResolvedValue({ modifiedCount: 0 });
   });
@@ -1263,7 +1279,7 @@ describe("claiming by assignment", () => {
   // The filter matched on both fields, so writing either could only overwrite the hand-over with
   // itself — or, if the expression were ever wrong, quietly rewrite whose task it is
   it("touches neither the assignee nor the assigner", async () => {
-    await claimNextTask("p1", "w1", "run-1", OWNER);
+    await claimNextTask(db, "p1", "w1", "run-1", OWNER);
 
     expect(claimSet(findOneAndUpdate.mock.calls[0])).not.toHaveProperty("assignee");
     expect(claimSet(findOneAndUpdate.mock.calls[0])).not.toHaveProperty("assignedBy");
@@ -1274,13 +1290,13 @@ describe("claiming by assignment", () => {
   // it", so leaving it out blanks the person's own assignment on the first release — and a blanked
   // task drops out of what any machine may claim and is never retried.
   it("records that the claim is not what assigned the task", async () => {
-    await claimNextTask("p1", "w1", "run-1", OWNER);
+    await claimNextTask(db, "p1", "w1", "run-1", OWNER);
 
     expect(claimSet(findOneAndUpdate.mock.calls[0])["execution.assignedByRun"]).toBe(false);
   });
 
   it("claims nothing rather than throwing on an owner that is not an id", async () => {
-    expect(await claimNextTask("p1", "w1", "run-1", "u-owner")).toBeNull();
+    expect(await claimNextTask(db, "p1", "w1", "run-1", "u-owner")).toBeNull();
     expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 });
@@ -1308,7 +1324,7 @@ describe("every way back to the board clears the assignment", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    findById.mockReturnValue({ lean: () => Promise.resolve(board) });
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(board) });
     findOne.mockReturnValue({
       lean: () => Promise.resolve({ _id: "t1", taskNumber: 1, status: "doing", title: "x" }),
       populate: () => ({
@@ -1322,7 +1338,7 @@ describe("every way back to the board clears the assignment", () => {
   });
 
   it("clears it on a gate rejection into a review column", async () => {
-    await changeStatus("p1", "t1", "checking", "actor");
+    await changeStatus(db, "p1", "t1", "checking", "actor");
 
     expect(setStage(findOneAndUpdate.mock.calls[0][1]).assignee).toEqual(CLEARED);
     expect(setStage(findOneAndUpdate.mock.calls[0][1]).assignedBy).toEqual(CLEARED_BY);
@@ -1331,7 +1347,7 @@ describe("every way back to the board clears the assignment", () => {
   it("clears it when the run is released with the attempt refunded", async () => {
     findOneAndUpdate.mockResolvedValue({ _id: "t1" });
 
-    await releaseTask("p1", "t1");
+    await releaseTask(db, "p1", "t1");
 
     expect(setStage(findOneAndUpdate.mock.calls[0][1]).assignee).toEqual(CLEARED);
     expect(setStage(findOneAndUpdate.mock.calls[0][1]).assignedBy).toEqual(CLEARED_BY);
@@ -1340,14 +1356,14 @@ describe("every way back to the board clears the assignment", () => {
   it("clears it when the release charges the attempt", async () => {
     findOneAndUpdate.mockResolvedValue({ _id: "t1" });
 
-    await releaseTask("p1", "t1", { refund: false });
+    await releaseTask(db, "p1", "t1", { refund: false });
 
     expect(setStage(findOneAndUpdate.mock.calls[0][1]).assignee).toEqual(CLEARED);
     expect(setStage(findOneAndUpdate.mock.calls[0][1]).assignedBy).toEqual(CLEARED_BY);
   });
 
   it("clears it on both lease-expiry branches, crashed and exhausted alike", async () => {
-    await releaseExpiredTasks("p1", new Date("2026-07-31T12:00:00.000Z"));
+    await releaseExpiredTasks(db, "p1", new Date("2026-07-31T12:00:00.000Z"));
 
     expect(updateMany.mock.calls).toHaveLength(2);
     for (const [, update] of updateMany.mock.calls) {
@@ -1360,9 +1376,9 @@ describe("every way back to the board clears the assignment", () => {
   // so a missing flag would ship silently and every one of these updates would be rejected live
   it("marks every one of them as a pipeline update", async () => {
     findOneAndUpdate.mockResolvedValue({ _id: "t1" });
-    await releaseTask("p1", "t1");
-    await releaseTask("p1", "t1", { refund: false });
-    await releaseExpiredTasks("p1", new Date("2026-07-31T12:00:00.000Z"));
+    await releaseTask(db, "p1", "t1");
+    await releaseTask(db, "p1", "t1", { refund: false });
+    await releaseExpiredTasks(db, "p1", new Date("2026-07-31T12:00:00.000Z"));
 
     for (const call of findOneAndUpdate.mock.calls) {
       if (Array.isArray(call[1])) expect(call[2]?.updatePipeline).toBe(true);
@@ -1380,7 +1396,7 @@ describe("every way back to the board clears the assignment", () => {
       }),
     });
 
-    await updateTask("p1", "t1", { status: "checking" }, "actor");
+    await updateTask(db, "p1", "t1", { status: "checking" }, "actor");
 
     expect(findOneAndUpdate.mock.calls[0][1].$set).not.toHaveProperty("assignee");
     expect(findOneAndUpdate.mock.calls[0][1].$set).not.toHaveProperty("assignedBy");
@@ -1408,7 +1424,7 @@ describe("every way back to the board clears the assignment", () => {
       }),
     });
 
-    await updateTask("p1", "t1", { status: "checking" }, "actor", true);
+    await updateTask(db, "p1", "t1", { status: "checking" }, "actor", true);
 
     expect(findOneAndUpdate.mock.calls[0][1].$set.assignee).toBeNull();
     expect(findOneAndUpdate.mock.calls[0][1].$set.assignedBy).toBeNull();
@@ -1517,7 +1533,7 @@ describe("refusing to detach a live run", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    findById.mockReturnValue({ lean: () => Promise.resolve(board) });
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(board) });
     findOne.mockReturnValue({
       lean: () => Promise.resolve(held),
       populate: () => ({ lean: () => Promise.resolve(held) }),
@@ -1526,11 +1542,11 @@ describe("refusing to detach a live run", () => {
       populate: () => Promise.resolve({ _id: "t1", taskNumber: 7, status: "checking", title: "x" }),
     });
     updateMany.mockResolvedValue({ modifiedCount: 0 });
-    workerFindById.mockReturnValue({ lean: () => Promise.resolve({ name: "mac-mini" }) });
+    workerFindOne.mockReturnValue({ lean: () => Promise.resolve({ name: "mac-mini" }) });
   });
 
   it("refuses a status change that would take the task from its worker", async () => {
-    const result = await changeStatus("p1", "t1", "checking", "actor");
+    const result = await changeStatus(db, "p1", "t1", "checking", "actor");
 
     expect(result.ok).toBe(false);
     expect(result.ok === false && result.status).toBe(409);
@@ -1539,7 +1555,7 @@ describe("refusing to detach a live run", () => {
   });
 
   it("names the worker and the phase, so the caller can say who holds it", async () => {
-    const result = await changeStatus("p1", "t1", "checking", "actor");
+    const result = await changeStatus(db, "p1", "t1", "checking", "actor");
 
     expect(result.ok === false && result.error).toContain("TP-7");
     expect(result.ok === false && result.error).toContain("mac-mini");
@@ -1552,15 +1568,15 @@ describe("refusing to detach a live run", () => {
   });
 
   it("falls back to the worker id when the fleet no longer knows the name", async () => {
-    workerFindById.mockReturnValue({ lean: () => Promise.resolve(null) });
+    workerFindOne.mockReturnValue({ lean: () => Promise.resolve(null) });
 
-    const result = await changeStatus("p1", "t1", "checking", "actor");
+    const result = await changeStatus(db, "p1", "t1", "checking", "actor");
 
     expect(result.ok === false && result.error).toContain("w1");
   });
 
   it("goes through when the move is forced", async () => {
-    const result = await changeStatus("p1", "t1", "checking", "actor", true);
+    const result = await changeStatus(db, "p1", "t1", "checking", "actor", true);
 
     expect(result.ok).toBe(true);
     expect(unsetKeys(findOneAndUpdate.mock.calls[0][1])).toEqual(RUN_KEYS);
@@ -1571,14 +1587,14 @@ describe("refusing to detach a live run", () => {
   // path answered 409 — the outbox retried forever and the task sat in the active column until the
   // two-hour lease expired, with its work already merged.
   it("lets the run's own holder report its outcome", async () => {
-    const result = await changeStatus("p1", "t1", "checking", "actor", { workerId: "w1" });
+    const result = await changeStatus(db, "p1", "t1", "checking", "actor", { workerId: "w1" });
 
     expect(result.ok).toBe(true);
     expect(unsetKeys(findOneAndUpdate.mock.calls[0][1])).toEqual(RUN_KEYS);
   });
 
   it("still refuses a different worker", async () => {
-    const result = await changeStatus("p1", "t1", "checking", "actor", { workerId: "w2" });
+    const result = await changeStatus(db, "p1", "t1", "checking", "actor", { workerId: "w2" });
 
     expect(result.ok).toBe(false);
     expect(result.ok === false && result.status).toBe(409);
@@ -1586,7 +1602,7 @@ describe("refusing to detach a live run", () => {
 
   // A person has no verified worker id, so an absent one must never read as "I am the holder"
   it("does not treat an absent worker id as the holder", async () => {
-    const result = await changeStatus("p1", "t1", "checking", "actor", { workerId: undefined });
+    const result = await changeStatus(db, "p1", "t1", "checking", "actor", { workerId: undefined });
 
     expect(result.ok).toBe(false);
     expect(result.ok === false && result.status).toBe(409);
@@ -1605,7 +1621,7 @@ describe("refusing to detach a live run", () => {
         }),
     });
 
-    const result = await changeStatus("p1", "t1", "checking", "actor", { workerId: "" });
+    const result = await changeStatus(db, "p1", "t1", "checking", "actor", { workerId: "" });
 
     expect(result.ok).toBe(false);
   });
@@ -1613,27 +1629,27 @@ describe("refusing to detach a live run", () => {
   // A reorder inside the column resends the status the task already has — that never released
   // the run, and must not start refusing either
   it("does not refuse a status that is not actually changing", async () => {
-    const result = await changeStatus("p1", "t1", "doing", "actor");
+    const result = await changeStatus(db, "p1", "t1", "doing", "actor");
 
     expect(result.ok).toBe(true);
     expect(findOneAndUpdate).toHaveBeenCalled();
   });
 
   it("refuses the same move made through the edit form", async () => {
-    const result = await updateTask("p1", "t1", { status: "checking" }, "actor");
+    const result = await updateTask(db, "p1", "t1", { status: "checking" }, "actor");
 
     expect(result.ok === false && result.status).toBe(409);
     expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it("forces through the edit form too", async () => {
-    const result = await updateTask("p1", "t1", { status: "checking" }, "actor", true);
+    const result = await updateTask(db, "p1", "t1", { status: "checking" }, "actor", true);
 
     expect(result.ok).toBe(true);
   });
 
   it("lets an edit that leaves the column alone through untouched", async () => {
-    const result = await updateTask("p1", "t1", { title: "renamed" }, "actor");
+    const result = await updateTask(db, "p1", "t1", { title: "renamed" }, "actor");
 
     expect(result.ok).toBe(true);
     expect(findOneAndUpdate).toHaveBeenCalled();
@@ -1645,7 +1661,7 @@ describe("refusing to detach a live run", () => {
       populate: () => ({ lean: () => Promise.resolve({ _id: "t1", taskNumber: 7, status: "doing" }) }),
     });
 
-    const result = await changeStatus("p1", "t1", "checking", "actor");
+    const result = await changeStatus(db, "p1", "t1", "checking", "actor");
 
     expect(result.ok).toBe(true);
   });
@@ -1663,29 +1679,29 @@ describe("releaseTask only applies to a task the run still holds", () => {
     ],
   };
 
-  const held = { _id: "t1", project: "p1", status: "reviewing", execution: { runId: "r1", attempts: 1 } };
-  const released = { _id: "t1", project: "p1", status: "reviewing", execution: { runId: "", attempts: 1 } };
+  const held = { _id: "t1", tenant: DEFAULT_TENANT_ID, project: "p1", status: "reviewing", execution: { runId: "r1", attempts: 1 } };
+  const released = { _id: "t1", tenant: DEFAULT_TENANT_ID, project: "p1", status: "reviewing", execution: { runId: "", attempts: 1 } };
 
   beforeEach(() => {
     vi.clearAllMocks();
-    findById.mockReturnValue({ lean: () => Promise.resolve(twoActive) });
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(twoActive) });
     findOneAndUpdate.mockResolvedValue({ _id: "t1" });
   });
 
   it("matches a task whose run is still on it", async () => {
-    await releaseTask("p1", "t1");
+    await releaseTask(db, "p1", "t1");
 
     expect(matches(findOneAndUpdate.mock.calls[0][0], held)).toBe(true);
   });
 
   it("does not match one whose run was already taken away", async () => {
-    await releaseTask("p1", "t1");
+    await releaseTask(db, "p1", "t1");
 
     expect(matches(findOneAndUpdate.mock.calls[0][0], released)).toBe(false);
   });
 
   it("holds for the no-refund path too", async () => {
-    await releaseTask("p1", "t1", { refund: false });
+    await releaseTask(db, "p1", "t1", { refund: false });
 
     const filter = findOneAndUpdate.mock.calls[0][0];
     expect(matches(filter, held)).toBe(true);
@@ -1703,7 +1719,7 @@ describe("releaseTask only applies to a task the run still holds", () => {
 describe("updateTask and the writes that are not edits", () => {
   function setup() {
     vi.clearAllMocks();
-    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
     findOne.mockReturnValue({
       lean: () => Promise.resolve({ _id: "t1", taskNumber: 7, status: "doing", title: "x" }),
       populate: () => ({
@@ -1724,7 +1740,7 @@ describe("updateTask and the writes that are not edits", () => {
   it("stamps an ordinary edit", async () => {
     setup();
 
-    await updateTask("p1", "t1", { title: "renamed" }, "actor");
+    await updateTask(db, "p1", "t1", { title: "renamed" }, "actor");
 
     expect(timestampsOf()).toBe(true);
   });
@@ -1732,7 +1748,7 @@ describe("updateTask and the writes that are not edits", () => {
   it("does not stamp a card dragged inside its column", async () => {
     setup();
 
-    await updateTask("p1", "t1", { order: 3 }, "actor");
+    await updateTask(db, "p1", "t1", { order: 3 }, "actor");
 
     expect(timestampsOf()).toBe(false);
   });
@@ -1740,7 +1756,7 @@ describe("updateTask and the writes that are not edits", () => {
   it("does not stamp a body that sets nothing at all", async () => {
     setup();
 
-    await updateTask("p1", "t1", {}, "actor");
+    await updateTask(db, "p1", "t1", {}, "actor");
 
     expect(timestampsOf()).toBe(false);
   });
@@ -1764,7 +1780,7 @@ describe("updateTask writing project fields to the history", () => {
 
   function fieldEntries() {
     return (logActivities as ReturnType<typeof vi.fn>).mock.calls
-      .flatMap((call) => call[0] as { field: string }[])
+      .flatMap((call) => call[1] as { field: string }[])
       .filter((row) => row.field === "Difficulty");
   }
 
@@ -1773,7 +1789,7 @@ describe("updateTask writing project fields to the history", () => {
   // both sides the same shape here would hide exactly that.
   function setup(before: Record<string, unknown>, after: Record<string, unknown>) {
     vi.clearAllMocks();
-    findById.mockReturnValue({ lean: () => Promise.resolve(board) });
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(board) });
     findOne.mockReturnValue({
       lean: () => Promise.resolve(stored(before)),
       populate: () => ({ lean: () => Promise.resolve(stored(before)) }),
@@ -1786,7 +1802,7 @@ describe("updateTask writing project fields to the history", () => {
   it("logs the change under the field's name, in the values a reader recognises", async () => {
     setup({ "f-diff": "opt-m" }, { "f-diff": "opt-l" });
 
-    const result = await updateTask("p1", "t1", { customFieldValues: { "f-diff": "opt-l" } }, "actor");
+    const result = await updateTask(db, "p1", "t1", { customFieldValues: { "f-diff": "opt-l" } }, "actor");
 
     expect(result.ok).toBe(true);
     expect(fieldEntries()).toEqual([
@@ -1797,7 +1813,7 @@ describe("updateTask writing project fields to the history", () => {
   it("logs a cleared field rather than passing over it", async () => {
     setup({ "f-diff": "opt-m" }, {});
 
-    await updateTask("p1", "t1", { customFieldValues: {} }, "actor");
+    await updateTask(db, "p1", "t1", { customFieldValues: {} }, "actor");
 
     expect(fieldEntries()).toEqual([expect.objectContaining({ oldValue: "M", newValue: "" })]);
   });
@@ -1805,7 +1821,7 @@ describe("updateTask writing project fields to the history", () => {
   it("writes one entry per field, never two", async () => {
     setup({ "f-diff": "opt-m" }, { "f-diff": "opt-l" });
 
-    await updateTask("p1", "t1", { customFieldValues: { "f-diff": "opt-l" } }, "actor");
+    await updateTask(db, "p1", "t1", { customFieldValues: { "f-diff": "opt-l" } }, "actor");
 
     expect(fieldEntries()).toHaveLength(1);
   });
@@ -1813,7 +1829,7 @@ describe("updateTask writing project fields to the history", () => {
   it("loads no definitions for an edit that carries no fields at all", async () => {
     setup({ "f-diff": "opt-m" }, { "f-diff": "opt-m" });
 
-    await updateTask("p1", "t1", { title: "renamed" }, "actor");
+    await updateTask(db, "p1", "t1", { title: "renamed" }, "actor");
 
     expect(fieldEntries()).toHaveLength(0);
   });
@@ -1824,7 +1840,7 @@ describe("updateTask writing project fields to the history", () => {
   it("says nothing about the untouched fields a full map carries along", async () => {
     setup({ "f-diff": "opt-m" }, { "f-diff": "opt-m" });
 
-    await updateTask("p1", "t1", { customFieldValues: { "f-diff": "opt-m" } }, "actor");
+    await updateTask(db, "p1", "t1", { customFieldValues: { "f-diff": "opt-m" } }, "actor");
 
     expect(fieldEntries()).toHaveLength(0);
   });
@@ -1849,7 +1865,7 @@ describe("a status change announces the same things whichever path made it", () 
   function setup(over: Record<string, unknown> = {}) {
     vi.clearAllMocks();
     const before = { _id: "t1", taskNumber: 7, status: "doing", title: "x", ...over };
-    findById.mockReturnValue({ lean: () => Promise.resolve(board) });
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(board) });
     findOne.mockReturnValue({
       lean: () => Promise.resolve(before),
       populate: () => ({ lean: () => Promise.resolve(before) }),
@@ -1863,7 +1879,7 @@ describe("a status change announces the same things whichever path made it", () 
   }
 
   const webhookPayloads = () =>
-    (dispatchWebhooks as ReturnType<typeof vi.fn>).mock.calls.map((c) => [c[1], c[2]]);
+    (dispatchWebhooks as ReturnType<typeof vi.fn>).mock.calls.map((c) => [c[2], c[3]]);
 
   // Minting the next occurrence is deliberately fire-and-forget, so an assertion about it has to
   // let the chain settle rather than lean on how many awaits happen to be in front of it
@@ -1879,7 +1895,7 @@ describe("a status change announces the same things whichever path made it", () 
     taskCreate.mockImplementation(async (doc: Record<string, unknown>) => ({ ...doc, _id: "new", taskNumber: 8 }));
     taskFindById.mockReturnValue({ populate: () => ({ lean: async () => ({ _id: "new" }) }) });
 
-    await createTask("p1", "actor", { title: "Announced to the room", status: "doing" });
+    await createTask(db, "p1", "actor", { title: "Announced to the room", status: "doing" });
 
     expect(webhookPayloads()).toHaveLength(1);
     const [event, payload] = webhookPayloads()[0];
@@ -1894,32 +1910,32 @@ describe("a status change announces the same things whichever path made it", () 
 
   it("dispatches a webhook from the board path", async () => {
     setup();
-    await changeStatus("p1", "t1", "shipped", "actor");
+    await changeStatus(db, "p1", "t1", "shipped", "actor");
     expect(webhookPayloads()).toHaveLength(1);
     expect(webhookPayloads()[0][0]).toBe("status_changed");
   });
 
   it("dispatches the identical webhook from the edit form", async () => {
     setup();
-    await changeStatus("p1", "t1", "shipped", "actor");
+    await changeStatus(db, "p1", "t1", "shipped", "actor");
     const fromBoard = webhookPayloads();
 
     setup();
-    await updateTask("p1", "t1", { status: "shipped" }, "actor");
+    await updateTask(db, "p1", "t1", { status: "shipped" }, "actor");
 
     expect(webhookPayloads()).toEqual(fromBoard);
   });
 
   it("sends the outbound notification from the edit form too", async () => {
     setup();
-    await updateTask("p1", "t1", { status: "shipped" }, "actor");
+    await updateTask(db, "p1", "t1", { status: "shipped" }, "actor");
     expect(dispatchNotifications).toHaveBeenCalledTimes(1);
   });
 
   // The reported bug: a weekly task closed from the detail view simply stopped recurring
   it("creates the next occurrence when the edit form closes a recurring task", async () => {
     setup({ recurrence: { frequency: "weekly", interval: 1 } });
-    await updateTask("p1", "t1", { status: "shipped" }, "actor");
+    await updateTask(db, "p1", "t1", { status: "shipped" }, "actor");
     await flush();
 
     expect(taskCreate, "no next occurrence was created").toHaveBeenCalled();
@@ -1930,7 +1946,7 @@ describe("a status change announces the same things whichever path made it", () 
   // must keep the series' own assigner, not read as though the machine assigned it to itself.
   it("carries the original assigner into the next occurrence, not whoever closed this one", async () => {
     setup({ recurrence: { frequency: "weekly", interval: 1 }, assignee: "u9", assignedBy: "u9" });
-    await updateTask("p1", "t1", { status: "shipped" }, "actor");
+    await updateTask(db, "p1", "t1", { status: "shipped" }, "actor");
     await flush();
 
     expect(taskCreate.mock.calls[0]?.[0].assignedBy).toBe("u9");
@@ -1940,16 +1956,16 @@ describe("a status change announces the same things whichever path made it", () 
   it("leaves the next occurrence unassigned when its assignee is deactivated", async () => {
     setup({ recurrence: { frequency: "weekly", interval: 1 }, assignee: "u9", assignedBy: "u9" });
     userExists.mockResolvedValueOnce(null);
-    await updateTask("p1", "t1", { status: "shipped" }, "actor");
+    await updateTask(db, "p1", "t1", { status: "shipped" }, "actor");
     await flush();
 
     expect(taskCreate.mock.calls[0]?.[0].assignee).toBeNull();
-    expect(userExists).toHaveBeenCalledWith({ _id: "u9", deactivatedAt: null });
+    expect(userExists).toHaveBeenCalledWith({ _id: "u9", deactivatedAt: null, tenant: DEFAULT_TENANT_ID });
   });
 
   it("keeps an active assignee on the next occurrence", async () => {
     setup({ recurrence: { frequency: "weekly", interval: 1 }, assignee: "u9", assignedBy: "u9" });
-    await updateTask("p1", "t1", { status: "shipped" }, "actor");
+    await updateTask(db, "p1", "t1", { status: "shipped" }, "actor");
     await flush();
 
     expect(String(taskCreate.mock.calls[0]?.[0].assignee)).toBe("u9");
@@ -1965,7 +1981,7 @@ describe("a status change announces the same things whichever path made it", () 
       assignedBy: "u9",
       agent: "a1",
     });
-    await updateTask("p1", "t1", { status: "shipped" }, "actor");
+    await updateTask(db, "p1", "t1", { status: "shipped" }, "actor");
     await flush();
 
     expect(taskCreate.mock.calls[0]?.[0].agent).toBe("a1");
@@ -1976,7 +1992,7 @@ describe("a status change announces the same things whichever path made it", () 
   // require knowing which fields the schema defaults
   it("leaves the next occurrence of a hand-written task with no agent", async () => {
     setup({ recurrence: { frequency: "weekly", interval: 1 }, assignee: "u9", assignedBy: "u9" });
-    await updateTask("p1", "t1", { status: "shipped" }, "actor");
+    await updateTask(db, "p1", "t1", { status: "shipped" }, "actor");
     await flush();
 
     expect(taskCreate.mock.calls[0]?.[0].agent).toBeNull();
@@ -1988,7 +2004,7 @@ describe("a status change announces the same things whichever path made it", () 
   // so that is what proves the guard is doing its job.
   it("creates none, and burns no task number, when the task does not recur", async () => {
     setup();
-    await updateTask("p1", "t1", { status: "shipped" }, "actor");
+    await updateTask(db, "p1", "t1", { status: "shipped" }, "actor");
     await flush();
 
     expect(taskCreate).not.toHaveBeenCalled();
@@ -1998,7 +2014,7 @@ describe("a status change announces the same things whichever path made it", () 
   // A reorder inside the same column is not a status change and must announce nothing
   it("announces nothing when the status does not actually move", async () => {
     setup();
-    await updateTask("p1", "t1", { title: "renamed" }, "actor");
+    await updateTask(db, "p1", "t1", { title: "renamed" }, "actor");
     expect(dispatchWebhooks).not.toHaveBeenCalled();
     expect(taskCreate).not.toHaveBeenCalled();
   });
@@ -2021,7 +2037,7 @@ describe("two overlapping closes of the same recurring task (BP-489)", () => {
     const before = { _id: "t1", taskNumber: 7, status: "doing", title: "x", ...over };
     // Distinct from `before` only in status: whoever wins the race is what a refetch reads back.
     const current = { ...before, status: "shipped" };
-    findById.mockReturnValue({ lean: () => Promise.resolve(board) });
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(board) });
     findOne.mockReturnValue({
       lean: () => Promise.resolve(before),
       // The shape a real Mongoose query has: `.populate(...).lean()` is updateTask's own oldTask
@@ -2039,14 +2055,14 @@ describe("two overlapping closes of the same recurring task (BP-489)", () => {
 
   it("changeStatus guards its write with the status it just read", async () => {
     const before = setup();
-    await changeStatus("p1", "t1", "shipped", "actor");
+    await changeStatus(db, "p1", "t1", "shipped", "actor");
 
     expect(findOneAndUpdate.mock.calls[0][0]).toMatchObject({ status: before.status });
   });
 
   it("updateTask guards its write the same way when the edit form carries a status", async () => {
     const before = setup();
-    await updateTask("p1", "t1", { status: "shipped" }, "actor");
+    await updateTask(db, "p1", "t1", { status: "shipped" }, "actor");
 
     expect(findOneAndUpdate.mock.calls[0][0]).toMatchObject({ status: before.status });
   });
@@ -2055,7 +2071,7 @@ describe("two overlapping closes of the same recurring task (BP-489)", () => {
   // the status it already had must not start refusing on account of somebody else's transition.
   it("does not guard a write that stays in its column", async () => {
     setup();
-    await updateTask("p1", "t1", { title: "renamed" }, "actor");
+    await updateTask(db, "p1", "t1", { title: "renamed" }, "actor");
 
     expect(findOneAndUpdate.mock.calls[0][0]).not.toHaveProperty("status");
   });
@@ -2066,7 +2082,7 @@ describe("two overlapping closes of the same recurring task (BP-489)", () => {
     // thinks is current, so the precondition no longer matches anything.
     findOneAndUpdate.mockReturnValue({ populate: () => Promise.resolve(null) });
 
-    const result = await changeStatus("p1", "t1", "shipped", "actor");
+    const result = await changeStatus(db, "p1", "t1", "shipped", "actor");
 
     expect(result.ok).toBe(true);
     expect(result.ok === true && result.data.status).toBe("shipped");
@@ -2076,7 +2092,7 @@ describe("two overlapping closes of the same recurring task (BP-489)", () => {
     setup({ recurrence: { frequency: "weekly", interval: 1 } });
     findOneAndUpdate.mockReturnValue({ populate: () => Promise.resolve(null) });
 
-    const result = await changeStatus("p1", "t1", "shipped", "actor");
+    const result = await changeStatus(db, "p1", "t1", "shipped", "actor");
 
     // Without this, reverting the null-handling branch back to a bare 404 leaves this test
     // green: a 404 never calls the webhook or Task.create either, for the wrong reason.
@@ -2089,7 +2105,7 @@ describe("two overlapping closes of the same recurring task (BP-489)", () => {
     setup({ recurrence: { frequency: "weekly", interval: 1 } });
     findOneAndUpdate.mockReturnValue({ populate: () => Promise.resolve(null) });
 
-    const result = await updateTask("p1", "t1", { status: "shipped" }, "actor");
+    const result = await updateTask(db, "p1", "t1", { status: "shipped" }, "actor");
 
     expect(result.ok).toBe(true);
     expect(dispatchWebhooks).not.toHaveBeenCalled();
@@ -2133,7 +2149,7 @@ describe("what the next occurrence of a recurring task is", () => {
       ...over,
     };
     const project = { ...board, columns };
-    findById.mockReturnValue({ lean: () => Promise.resolve(project) });
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(project) });
     findOne.mockReturnValue({
       lean: () => Promise.resolve(before),
       populate: () => ({ lean: () => Promise.resolve(before) }),
@@ -2160,7 +2176,7 @@ describe("what the next occurrence of a recurring task is", () => {
       dueDate: new Date("2026-01-31"),
       recurrence: { frequency: "monthly", interval: 1 },
     });
-    await changeStatus("p1", "t1", "shipped", "actor");
+    await changeStatus(db, "p1", "t1", "shipped", "actor");
     await flush();
 
     // Clamped this time round, and the 31st recorded so the next one is not
@@ -2174,7 +2190,7 @@ describe("what the next occurrence of a recurring task is", () => {
       dueDate: new Date("2026-02-28"),
       recurrence: { frequency: "monthly", interval: 1, anchorDay: 31 },
     });
-    await changeStatus("p1", "t1", "shipped", "actor");
+    await changeStatus(db, "p1", "t1", "shipped", "actor");
     await flush();
 
     expect(minted()?.dueDate?.toISOString()).toBe("2026-03-31T00:00:00.000Z");
@@ -2182,7 +2198,7 @@ describe("what the next occurrence of a recurring task is", () => {
 
   it("is born in the backlog column even when that is not the first one", async () => {
     setup();
-    await changeStatus("p1", "t1", "shipped", "actor");
+    await changeStatus(db, "p1", "t1", "shipped", "actor");
     await flush();
 
     expect(minted()?.status).toBe("later");
@@ -2195,7 +2211,7 @@ describe("what the next occurrence of a recurring task is", () => {
       { id: "shipped", label: "Shipped", role: "done", order: 1 },
       { id: "doing", label: "Doing", role: "active", order: 2 },
     ]);
-    await changeStatus("p1", "t1", "shipped", "actor");
+    await changeStatus(db, "p1", "t1", "shipped", "actor");
     await flush();
 
     expect(minted()?.status).toBe("doing");
@@ -2205,7 +2221,7 @@ describe("what the next occurrence of a recurring task is", () => {
   // on the machine's timezone
   it("counts from the occurrence's own due date", async () => {
     setup({ dueDate: "2026-06-03T12:00:00.000Z" });
-    await changeStatus("p1", "t1", "shipped", "actor");
+    await changeStatus(db, "p1", "t1", "shipped", "actor");
     await flush();
 
     expect(minted()?.dueDate?.toISOString()).toBe("2026-06-10T12:00:00.000Z");
@@ -2216,7 +2232,7 @@ describe("what the next occurrence of a recurring task is", () => {
   // Tuesday and then a Friday landed eleven days later, and kept sliding
   it("stays undated when the occurrence it follows was undated", async () => {
     setup();
-    await changeStatus("p1", "t1", "shipped", "actor");
+    await changeStatus(db, "p1", "t1", "shipped", "actor");
     await flush();
 
     expect(minted()?.dueDate).toBeNull();
@@ -2227,7 +2243,7 @@ describe("what the next occurrence of a recurring task is", () => {
       dueDate: "2026-06-03T12:00:00.000Z",
       recurrence: { frequency: "weekly", interval: 1, endDate: "2026-06-08T00:00:00.000Z" },
     });
-    await changeStatus("p1", "t1", "shipped", "actor");
+    await changeStatus(db, "p1", "t1", "shipped", "actor");
     await flush();
 
     expect(taskCreate).not.toHaveBeenCalled();
@@ -2239,7 +2255,7 @@ describe("what the next occurrence of a recurring task is", () => {
       dueDate: "2026-06-03T12:00:00.000Z",
       recurrence: { frequency: "weekly", interval: 1, endDate: "2026-12-31T00:00:00.000Z" },
     });
-    await changeStatus("p1", "t1", "shipped", "actor");
+    await changeStatus(db, "p1", "t1", "shipped", "actor");
     await flush();
 
     expect(taskCreate).toHaveBeenCalled();
@@ -2249,7 +2265,7 @@ describe("what the next occurrence of a recurring task is", () => {
   // it reaches — otherwise an end date on an undated series would mean nothing at all
   it("ends an undated series once its end date has passed", async () => {
     setup({ recurrence: { frequency: "weekly", interval: 1, endDate: "2020-01-01T00:00:00.000Z" } });
-    await changeStatus("p1", "t1", "shipped", "actor");
+    await changeStatus(db, "p1", "t1", "shipped", "actor");
     await flush();
 
     expect(taskCreate).not.toHaveBeenCalled();
@@ -2257,7 +2273,7 @@ describe("what the next occurrence of a recurring task is", () => {
 
   it("mints nothing on a hop between two done columns", async () => {
     setup({ status: "shipped" });
-    await changeStatus("p1", "t1", "released", "actor");
+    await changeStatus(db, "p1", "t1", "released", "actor");
     await flush();
 
     expect(taskCreate).not.toHaveBeenCalled();
@@ -2269,10 +2285,10 @@ describe("what the next occurrence of a recurring task is", () => {
   it("mints nothing for an occurrence that already has a successor", async () => {
     setup();
     taskExists.mockResolvedValueOnce({ _id: "t2" });
-    await changeStatus("p1", "t1", "shipped", "actor");
+    await changeStatus(db, "p1", "t1", "shipped", "actor");
     await flush();
 
-    expect(taskExists).toHaveBeenCalledWith({ recurringParentId: "t1" });
+    expect(taskExists).toHaveBeenCalledWith({ recurringParentId: "t1", tenant: DEFAULT_TENANT_ID });
     expect(taskCreate).not.toHaveBeenCalled();
     expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
   });
@@ -2280,7 +2296,7 @@ describe("what the next occurrence of a recurring task is", () => {
   it("carries the series' end into the occurrence it mints", async () => {
     const recurrence = { frequency: "weekly", interval: 1, endDate: "2026-12-31T00:00:00.000Z" };
     setup({ recurrence });
-    await changeStatus("p1", "t1", "shipped", "actor");
+    await changeStatus(db, "p1", "t1", "shipped", "actor");
     await flush();
 
     expect(minted()?.recurrence).toEqual({ ...recurrence, anchorDay: null });
@@ -2305,7 +2321,7 @@ describe("what a client may say about a repeating task", () => {
     taskCreate.mockImplementation(async (doc: Record<string, unknown>) => ({ ...doc, _id: "new" }));
     taskFindById.mockReturnValue({ populate: () => ({ lean: async () => ({ _id: "new" }) }) });
     const stored = { _id: "t1", taskNumber: 7, status: "ready", title: "x" };
-    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
     findOne.mockReturnValue({
       lean: () => Promise.resolve(stored),
       populate: () => ({ lean: () => Promise.resolve(stored) }),
@@ -2318,7 +2334,7 @@ describe("what a client may say about a repeating task", () => {
     (findOneAndUpdate.mock.calls.at(-1)?.[1] as { $set?: Record<string, unknown> })?.$set;
 
   it("refuses an interval above the stated maximum rather than storing it", async () => {
-    const result = await createTask("p1", "actor", {
+    const result = await createTask(db, "p1", "actor", {
       title: "x",
       recurrence: { frequency: "weekly", interval: 400 },
     });
@@ -2330,7 +2346,7 @@ describe("what a client may say about a repeating task", () => {
   });
 
   it("refuses an interval below one", async () => {
-    const result = await createTask("p1", "actor", {
+    const result = await createTask(db, "p1", "actor", {
       title: "x",
       recurrence: { frequency: "weekly", interval: 0 },
     });
@@ -2339,7 +2355,7 @@ describe("what a client may say about a repeating task", () => {
   });
 
   it("refuses a frequency the schema does not have", async () => {
-    const result = await createTask("p1", "actor", {
+    const result = await createTask(db, "p1", "actor", {
       title: "x",
       recurrence: { frequency: "fortnightly", interval: 1 },
     });
@@ -2349,7 +2365,7 @@ describe("what a client may say about a repeating task", () => {
 
   // The worst of the three possible answers was the one it gave: 200 and a silent discard
   it("refuses an end date it cannot read rather than dropping it", async () => {
-    const result = await createTask("p1", "actor", {
+    const result = await createTask(db, "p1", "actor", {
       title: "x",
       recurrence: { frequency: "weekly", interval: 1, endDate: "whenever" },
     });
@@ -2359,7 +2375,7 @@ describe("what a client may say about a repeating task", () => {
   });
 
   it("stores the end a client does give", async () => {
-    const result = await createTask("p1", "actor", {
+    const result = await createTask(db, "p1", "actor", {
       title: "x",
       recurrence: { frequency: "weekly", interval: 1, endDate: "2026-12-31" },
     });
@@ -2370,7 +2386,7 @@ describe("what a client may say about a repeating task", () => {
 
   // No end is still the ordinary case, and saying so explicitly is what the editors send
   it("takes a null end as a series with no end", async () => {
-    const result = await createTask("p1", "actor", {
+    const result = await createTask(db, "p1", "actor", {
       title: "x",
       recurrence: { frequency: "weekly", interval: 1, endDate: null },
     });
@@ -2381,6 +2397,7 @@ describe("what a client may say about a repeating task", () => {
 
   it("refuses the same interval on an edit", async () => {
     const result = await updateTask(
+      db,
       "p1",
       "t1",
       { recurrence: { frequency: "daily", interval: 100000 } },
@@ -2408,7 +2425,7 @@ describe("what a client may say about a repeating task", () => {
     // stored one across, changing the interval would quietly cost a person the 31st they chose.
     it("keeps it when only the rhythm changes", async () => {
       storedWith({ recurrence: anchored });
-      await updateTask("p1", "t1", { recurrence: { frequency: "monthly", interval: 2 } }, "actor");
+      await updateTask(db, "p1", "t1", { recurrence: { frequency: "monthly", interval: 2 } }, "actor");
 
       expect((written()?.recurrence as { anchorDay?: number })?.anchorDay).toBe(31);
     });
@@ -2416,7 +2433,7 @@ describe("what a client may say about a repeating task", () => {
     // A different rhythm is not the same series' day: the next mint takes it from the due date.
     it("drops it when the frequency changes", async () => {
       storedWith({ recurrence: anchored });
-      await updateTask("p1", "t1", { recurrence: { frequency: "weekly", interval: 1 } }, "actor");
+      await updateTask(db, "p1", "t1", { recurrence: { frequency: "weekly", interval: 1 } }, "actor");
 
       expect((written()?.recurrence as { anchorDay?: number | null })?.anchorDay).toBeNull();
     });
@@ -2425,7 +2442,7 @@ describe("what a client may say about a repeating task", () => {
     // editing it — the reason the anchor cannot just live at the series' root.
     it("clears it when the due date is chosen again", async () => {
       storedWith({ recurrence: anchored });
-      await updateTask("p1", "t1", { dueDate: "2026-03-05" }, "actor");
+      await updateTask(db, "p1", "t1", { dueDate: "2026-03-05" }, "actor");
 
       expect(written()).toMatchObject({ "recurrence.anchorDay": null });
     });
@@ -2434,7 +2451,7 @@ describe("what a client may say about a repeating task", () => {
     // and `frequency` is required — so the write would fail validation as a 500.
     it("writes nothing about it when the task does not repeat", async () => {
       storedWith({ recurrence: null });
-      await updateTask("p1", "t1", { dueDate: "2026-03-05" }, "actor");
+      await updateTask(db, "p1", "t1", { dueDate: "2026-03-05" }, "actor");
 
       expect(Object.keys(written() ?? {})).not.toContain("recurrence.anchorDay");
     });
@@ -2444,6 +2461,7 @@ describe("what a client may say about a repeating task", () => {
     it("lets the new due date decide when both are written together", async () => {
       storedWith({ recurrence: anchored });
       await updateTask(
+        db,
         "p1",
         "t1",
         { dueDate: "2026-03-05", recurrence: { frequency: "monthly", interval: 1 } },
@@ -2458,6 +2476,7 @@ describe("what a client may say about a repeating task", () => {
 
   it("stores an end set on an edit", async () => {
     const result = await updateTask(
+      db,
       "p1",
       "t1",
       { recurrence: { frequency: "daily", interval: 2, endDate: "2026-12-31" } },
@@ -2474,7 +2493,7 @@ describe("what a client may say about a repeating task", () => {
   });
 
   it("still clears the recurrence when an edit sends none", async () => {
-    const result = await updateTask("p1", "t1", { recurrence: null }, "actor");
+    const result = await updateTask(db, "p1", "t1", { recurrence: null }, "actor");
 
     expect(result.ok).toBe(true);
     expect(written()?.recurrence).toBeNull();
@@ -2501,25 +2520,25 @@ describe("a task's sprint has to belong to the task's project", () => {
       populate: () => ({ lean: () => Promise.resolve(task) }),
     });
     findOneAndUpdate.mockReturnValue({ populate: () => Promise.resolve(task) });
-    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
   });
 
   it("refuses a sprint this project does not have", async () => {
-    const result = await updateTask("p1", "t1", { sprint: OTHER }, "actor");
+    const result = await updateTask(db, "p1", "t1", { sprint: OTHER }, "actor");
 
     expect(result.ok).toBe(false);
-    expect(sprintExists).toHaveBeenCalledWith({ _id: OTHER, project: "p1" });
+    expect(sprintExists).toHaveBeenCalledWith({ _id: OTHER, project: "p1", tenant: DEFAULT_TENANT_ID });
   });
 
   it("refuses a sprint id that is not an object id at all", async () => {
-    const result = await updateTask("p1", "t1", { sprint: "nope" }, "actor");
+    const result = await updateTask(db, "p1", "t1", { sprint: "nope" }, "actor");
 
     expect(result.ok).toBe(false);
     expect(sprintExists).not.toHaveBeenCalled();
   });
 
   it("lets a task be taken out of its sprint", async () => {
-    const result = await updateTask("p1", "t1", { sprint: null }, "actor");
+    const result = await updateTask(db, "p1", "t1", { sprint: null }, "actor");
 
     expect(sprintExists).not.toHaveBeenCalled();
     expect(result.ok).toBe(true);
@@ -2528,7 +2547,7 @@ describe("a task's sprint has to belong to the task's project", () => {
   // "" is what a cleared <select> sends. sprint is an ObjectId, so it used to reach the update and
   // surface as a CastError 500 rather than clearing the field.
   it("treats an empty string as clearing the sprint, not as a value to cast", async () => {
-    const result = await updateTask("p1", "t1", { sprint: "" }, "actor");
+    const result = await updateTask(db, "p1", "t1", { sprint: "" }, "actor");
 
     expect(sprintExists).not.toHaveBeenCalled();
     expect(result.ok).toBe(true);
@@ -2539,10 +2558,10 @@ describe("a task's sprint has to belong to the task's project", () => {
   it("keeps a sprint this project does have", async () => {
     sprintExists.mockResolvedValue({ _id: OURS });
 
-    const result = await updateTask("p1", "t1", { sprint: OURS }, "actor");
+    const result = await updateTask(db, "p1", "t1", { sprint: OURS }, "actor");
 
     expect(result.ok).toBe(true);
-    expect(sprintExists).toHaveBeenCalledWith({ _id: OURS, project: "p1" });
+    expect(sprintExists).toHaveBeenCalledWith({ _id: OURS, project: "p1", tenant: DEFAULT_TENANT_ID });
   });
 });
 
@@ -2554,7 +2573,7 @@ describe("createTask and a foreign sprint", () => {
     sprintExists.mockClear();
     sprintExists.mockResolvedValue(null);
     // The board createTask validates against, read before the counter moves (BP-438)
-    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
     projectFindOneAndUpdate.mockResolvedValue({
       _id: "p1",
       taskCounter: 1,
@@ -2566,14 +2585,14 @@ describe("createTask and a foreign sprint", () => {
   });
 
   it("does not store a sprint belonging to another project", async () => {
-    await createTask("p1", "actor", { title: "x", sprint: OTHER });
+    await createTask(db, "p1", "actor", { title: "x", sprint: OTHER });
 
-    expect(sprintExists).toHaveBeenCalledWith({ _id: OTHER, project: "p1" });
+    expect(sprintExists).toHaveBeenCalledWith({ _id: OTHER, project: "p1", tenant: DEFAULT_TENANT_ID });
     expect(taskCreate.mock.calls.at(-1)?.[0].sprint).toBeNull();
   });
 
   it("does not query for a sprint id that is not an object id", async () => {
-    await createTask("p1", "actor", { title: "x", sprint: "nope" });
+    await createTask(db, "p1", "actor", { title: "x", sprint: "nope" });
 
     expect(sprintExists).not.toHaveBeenCalled();
     expect(taskCreate.mock.calls.at(-1)?.[0].sprint).toBeNull();
@@ -2582,7 +2601,7 @@ describe("createTask and a foreign sprint", () => {
   it("keeps a sprint this project does have", async () => {
     sprintExists.mockResolvedValue({ _id: OURS });
 
-    await createTask("p1", "actor", { title: "x", sprint: OURS });
+    await createTask(db, "p1", "actor", { title: "x", sprint: OURS });
 
     expect(taskCreate.mock.calls.at(-1)?.[0].sprint).toBe(OURS);
   });
@@ -2611,18 +2630,18 @@ describe("createTask and updateTask do not echo an unbounded value into their re
   const NOT_SLICED = "y".repeat(65);
 
   beforeEach(() => {
-    findById.mockReturnValue({ lean: () => Promise.resolve(board) });
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(board) });
   });
 
   describe.each([
-    ["category", "createTask", (v: unknown) => createTask("p1", "actor", { title: "x", category: v })],
-    ["status", "createTask", (v: unknown) => createTask("p1", "actor", { title: "x", status: v })],
-    ["category", "updateTask", (v: unknown) => updateTask("p1", "t1", { category: v }, "actor")],
-    ["status", "updateTask", (v: unknown) => updateTask("p1", "t1", { status: v }, "actor")],
-    ["priority", "createTask", (v: unknown) => createTask("p1", "actor", { title: "x", priority: v })],
-    ["priority", "updateTask", (v: unknown) => updateTask("p1", "t1", { priority: v }, "actor")],
-    ["dueDate", "createTask", (v: unknown) => createTask("p1", "actor", { title: "x", dueDate: v })],
-    ["dueDate", "updateTask", (v: unknown) => updateTask("p1", "t1", { dueDate: v }, "actor")],
+    ["category", "createTask", (v: unknown) => createTask(db, "p1", "actor", { title: "x", category: v })],
+    ["status", "createTask", (v: unknown) => createTask(db, "p1", "actor", { title: "x", status: v })],
+    ["category", "updateTask", (v: unknown) => updateTask(db, "p1", "t1", { category: v }, "actor")],
+    ["status", "updateTask", (v: unknown) => updateTask(db, "p1", "t1", { status: v }, "actor")],
+    ["priority", "createTask", (v: unknown) => createTask(db, "p1", "actor", { title: "x", priority: v })],
+    ["priority", "updateTask", (v: unknown) => updateTask(db, "p1", "t1", { priority: v }, "actor")],
+    ["dueDate", "createTask", (v: unknown) => createTask(db, "p1", "actor", { title: "x", dueDate: v })],
+    ["dueDate", "updateTask", (v: unknown) => updateTask(db, "p1", "t1", { dueDate: v }, "actor")],
   ] as const)("%s, via %s", (_field, _writer, call) => {
     it("bounds an unbounded value in its refusal", async () => {
       const result = await call(UNBOUNDED);
@@ -2696,8 +2715,8 @@ describe("choosing a task's agent", () => {
     findOneAndUpdate.mockReturnValue({
       populate: () => Promise.resolve({ _id: "t1", taskNumber: 1, title: "x", execution: {} }),
     });
-    findById.mockReset();
-    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    projectFindOne.mockReset();
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
     // Its own describe sets this, rather than inheriting a mock from the block above — under
     // --sequence.shuffle that inheritance made two of these pass by accident.
     findOne.mockReset();
@@ -2712,7 +2731,7 @@ describe("choosing a task's agent", () => {
    * write goes through.
    */
   it("lets an ordinary caller choose one, with no capability to pass", async () => {
-    const result = await updateTask("p1", "t1", { agent: AGENT }, "member");
+    const result = await updateTask(db, "p1", "t1", { agent: AGENT }, "member");
 
     expect(result.ok).toBe(true);
     expect(setStage(findOneAndUpdate.mock.calls[0][1]).agent).toBe(AGENT);
@@ -2724,7 +2743,7 @@ describe("choosing a task's agent", () => {
   it("lets the same caller clear it again, storing null rather than an empty string", async () => {
     storedAgent(AGENT);
 
-    const result = await updateTask("p1", "t1", { agent: "" }, "member");
+    const result = await updateTask(db, "p1", "t1", { agent: "" }, "member");
 
     expect(result.ok).toBe(true);
     expect(setStage(findOneAndUpdate.mock.calls[0][1]).agent).toBeNull();
@@ -2733,20 +2752,20 @@ describe("choosing a task's agent", () => {
   // The catalog is consulted for the field, not for the request: an ordinary edit must not start
   // paying for a lookup, nor fail on an agent it never named
   it("leaves an edit that names no agent alone", async () => {
-    agentFindById.mockClear();
+    agentFindOne.mockClear();
 
-    const result = await updateTask("p1", "t1", { title: "renamed" }, "member");
+    const result = await updateTask(db, "p1", "t1", { title: "renamed" }, "member");
 
     expect(result.ok).toBe(true);
     expect(setStage(findOneAndUpdate.mock.calls[0][1])).not.toHaveProperty("agent");
-    expect(agentFindById).not.toHaveBeenCalled();
+    expect(agentFindOne).not.toHaveBeenCalled();
   });
 
   describe("and which agents may run here at all", () => {
     it("refuses a project agent belonging to another project", async () => {
       agentInTheCatalog({ _id: AGENT, scope: "project", project: "p2", composition: COMPOSED });
 
-      const result = await updateTask("p1", "t1", { agent: AGENT }, ACTOR);
+      const result = await updateTask(db, "p1", "t1", { agent: AGENT }, ACTOR);
 
       expect(result).toMatchObject({ ok: false, status: 400 });
       expect(findOneAndUpdate).not.toHaveBeenCalled();
@@ -2759,7 +2778,7 @@ describe("choosing a task's agent", () => {
       storedAgent(null, MATE);
       agentInTheCatalog({ _id: AGENT, scope: "project", project: "p1", composition: COMPOSED });
 
-      expect((await updateTask("p1", "t1", { agent: AGENT }, ACTOR)).ok).toBe(true);
+      expect((await updateTask(db, "p1", "t1", { agent: AGENT }, ACTOR)).ok).toBe(true);
     });
 
     // Pointing a task at somebody else's personal agent would run their prompts, with write
@@ -2767,7 +2786,7 @@ describe("choosing a task's agent", () => {
     it("refuses another person's personal agent", async () => {
       agentInTheCatalog({ _id: AGENT, scope: "user", owner: OTHER, composition: COMPOSED });
 
-      const result = await updateTask("p1", "t1", { agent: AGENT }, ACTOR);
+      const result = await updateTask(db, "p1", "t1", { agent: AGENT }, ACTOR);
 
       expect(result).toMatchObject({ ok: false, status: 400 });
     });
@@ -2775,7 +2794,7 @@ describe("choosing a task's agent", () => {
     it("accepts the caller's own personal agent, on the caller's own task", async () => {
       agentInTheCatalog({ _id: AGENT, scope: "user", owner: ACTOR, composition: COMPOSED });
 
-      expect((await updateTask("p1", "t1", { agent: AGENT }, ACTOR)).ok).toBe(true);
+      expect((await updateTask(db, "p1", "t1", { agent: AGENT }, ACTOR)).ok).toBe(true);
     });
 
     /**
@@ -2792,7 +2811,7 @@ describe("choosing a task's agent", () => {
       storedAgent(null, MATE);
       agentInTheCatalog({ _id: AGENT, scope: "user", owner: ACTOR, composition: COMPOSED });
 
-      const result = await updateTask("p1", "t1", { agent: AGENT }, ACTOR);
+      const result = await updateTask(db, "p1", "t1", { agent: AGENT }, ACTOR);
 
       expect(result).toMatchObject({ ok: false, status: 400 });
       expect(findOneAndUpdate).not.toHaveBeenCalled();
@@ -2805,7 +2824,7 @@ describe("choosing a task's agent", () => {
       storedAgent(null, MATE);
       agentInTheCatalog({ _id: AGENT, scope: "user", owner: ACTOR, composition: COMPOSED });
 
-      const { error } = (await updateTask("p1", "t1", { agent: AGENT }, ACTOR)) as {
+      const { error } = (await updateTask(db, "p1", "t1", { agent: AGENT }, ACTOR)) as {
         error: string;
       };
 
@@ -2821,7 +2840,7 @@ describe("choosing a task's agent", () => {
       storedAgent(null, null);
       agentInTheCatalog({ _id: AGENT, scope: "user", owner: ACTOR, composition: COMPOSED });
 
-      expect((await updateTask("p1", "t1", { agent: AGENT }, ACTOR)).ok).toBe(false);
+      expect((await updateTask(db, "p1", "t1", { agent: AGENT }, ACTOR)).ok).toBe(false);
     });
 
     // A global agent is what the instance ships. It answers to neither rule, and asking it to would
@@ -2829,7 +2848,7 @@ describe("choosing a task's agent", () => {
     it("accepts a global agent whoever is holding the task", async () => {
       storedAgent(null, MATE);
 
-      expect((await updateTask("p1", "t1", { agent: AGENT }, ACTOR)).ok).toBe(true);
+      expect((await updateTask(db, "p1", "t1", { agent: AGENT }, ACTOR)).ok).toBe(true);
     });
 
     /**
@@ -2848,6 +2867,7 @@ describe("choosing a task's agent", () => {
         userFindOne.mockResolvedValue({ _id: MATE, username: "colleague" });
 
         const result = await updateTask(
+          db,
           "p1",
           "t1",
           { assignee: "colleague", agent: AGENT },
@@ -2864,7 +2884,7 @@ describe("choosing a task's agent", () => {
         userFindOne.mockResolvedValue({ _id: ACTOR, username: "me" });
 
         expect(
-          (await updateTask("p1", "t1", { assignee: "me", agent: AGENT }, ACTOR)).ok
+          (await updateTask(db, "p1", "t1", { assignee: "me", agent: AGENT }, ACTOR)).ok
         ).toBe(true);
       });
 
@@ -2891,6 +2911,7 @@ describe("choosing a task's agent", () => {
         });
 
         const result = await updateTask(
+          db,
           "p1",
           "t1",
           { status: "ready", agent: AGENT },
@@ -2904,18 +2925,18 @@ describe("choosing a task's agent", () => {
     });
 
     it("refuses an id that is not an object id, without querying for it", async () => {
-      agentFindById.mockClear();
+      agentFindOne.mockClear();
 
-      const result = await updateTask("p1", "t1", { agent: "nonsense" }, ACTOR);
+      const result = await updateTask(db, "p1", "t1", { agent: "nonsense" }, ACTOR);
 
       expect(result).toMatchObject({ ok: false, status: 400 });
-      expect(agentFindById).not.toHaveBeenCalled();
+      expect(agentFindOne).not.toHaveBeenCalled();
     });
 
     it("refuses an agent that does not exist", async () => {
       agentInTheCatalog(null);
 
-      expect((await updateTask("p1", "t1", { agent: AGENT }, ACTOR)).ok).toBe(false);
+      expect((await updateTask(db, "p1", "t1", { agent: AGENT }, ACTOR)).ok).toBe(false);
     });
 
     /**
@@ -2934,7 +2955,7 @@ describe("choosing a task's agent", () => {
       it("is refused, naming it and saying what is missing", async () => {
         draft();
 
-        const result = await updateTask("p1", "t1", { agent: AGENT }, ACTOR);
+        const result = await updateTask(db, "p1", "t1", { agent: AGENT }, ACTOR);
 
         expect(result).toMatchObject({ ok: false, status: 400 });
         expect((result as { error: string }).error).toContain("Untitled agent");
@@ -2947,7 +2968,7 @@ describe("choosing a task's agent", () => {
       it("is refused for its emptiness, not for its scope", async () => {
         draft({ scope: "user", owner: ACTOR });
 
-        const result = await updateTask("p1", "t1", { agent: AGENT }, ACTOR);
+        const result = await updateTask(db, "p1", "t1", { agent: AGENT }, ACTOR);
 
         expect((result as { error: string }).error).not.toMatch(/cannot run on this project/i);
         expect((result as { error: string }).error).toMatch(/no steps/i);
@@ -2957,7 +2978,7 @@ describe("choosing a task's agent", () => {
       it("is refused when every bucket it has is empty", async () => {
         draft({ composition: { analysis: [], implementation: [], delivery: [] } });
 
-        expect((await updateTask("p1", "t1", { agent: AGENT }, ACTOR)).ok).toBe(false);
+        expect((await updateTask(db, "p1", "t1", { agent: AGENT }, ACTOR)).ok).toBe(false);
       });
 
       // A bucket written before entries existed holds bare key strings, and normaliseComposition
@@ -2965,7 +2986,7 @@ describe("choosing a task's agent", () => {
       it("accepts an agent whose composition still holds bare keys", async () => {
         draft({ composition: { implementation: ["write-the-change"] } });
 
-        expect((await updateTask("p1", "t1", { agent: AGENT }, ACTOR)).ok).toBe(true);
+        expect((await updateTask(db, "p1", "t1", { agent: AGENT }, ACTOR)).ok).toBe(true);
       });
     });
   });
@@ -2982,8 +3003,8 @@ describe("a task records who assigned it", () => {
     findOneAndUpdate.mockReturnValue({
       populate: () => Promise.resolve({ _id: "t1", taskNumber: 1, title: "x", execution: {} }),
     });
-    findById.mockReset();
-    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    projectFindOne.mockReset();
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
     // Assigned to somebody already, and POPULATED, which is the shape updateTask reads it in —
     // an unassigned fixture could not tell "the assignee moved" from "the body named the same one"
     const task = {
@@ -3009,20 +3030,20 @@ describe("a task records who assigned it", () => {
   it("refuses a deactivated assignee, naming why", async () => {
     userFindOne.mockResolvedValue({ _id: "u2", username: "kuba", deactivatedAt: new Date() });
 
-    const result = await updateTask("p1", "t1", { assignee: "kuba" }, "actor");
+    const result = await updateTask(db, "p1", "t1", { assignee: "kuba" }, "actor");
 
     expect(result).toMatchObject({ ok: false, status: 400, error: "kuba is deactivated" });
     expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it("stamps the actor when the assignee changes", async () => {
-    await updateTask("p1", "t1", { assignee: "kuba" }, "actor");
+    await updateTask(db, "p1", "t1", { assignee: "kuba" }, "actor");
 
     expect(setStage(findOneAndUpdate.mock.calls[0][1]).assignedBy).toBe("actor");
   });
 
   it("stamps it when a task is unassigned, so the field never describes an older assignee", async () => {
-    await updateTask("p1", "t1", { assignee: null }, "actor");
+    await updateTask(db, "p1", "t1", { assignee: null }, "actor");
 
     expect(setStage(findOneAndUpdate.mock.calls[0][1]).assignedBy).toBe("actor");
   });
@@ -3036,7 +3057,7 @@ describe("a task records who assigned it", () => {
   it("leaves the assigner alone when the body re-sends the assignee it already has", async () => {
     userFindOne.mockResolvedValue({ _id: "u1", username: "owner" });
 
-    await updateTask("p1", "t1", { assignee: "owner", title: "renamed" }, "somebody-else");
+    await updateTask(db, "p1", "t1", { assignee: "owner", title: "renamed" }, "somebody-else");
 
     expect(setStage(findOneAndUpdate.mock.calls[0][1])).not.toHaveProperty("assignedBy");
   });
@@ -3046,7 +3067,7 @@ describe("a task records who assigned it", () => {
   it("compares the resolved id, not the username the body carried", async () => {
     userFindOne.mockResolvedValue({ _id: "u1", username: "owner" });
 
-    await updateTask("p1", "t1", { assignee: "OWNER" }, "somebody-else");
+    await updateTask(db, "p1", "t1", { assignee: "OWNER" }, "somebody-else");
 
     expect(setStage(findOneAndUpdate.mock.calls[0][1])).not.toHaveProperty("assignedBy");
   });
@@ -3070,7 +3091,7 @@ describe("a task records who assigned it", () => {
   it("stamps a task that has no assigner yet, when its assignee takes it on themselves", async () => {
     legacyTaskAssignedTo("u1");
 
-    await updateTask("p1", "t1", { assignee: "owner" }, "u1");
+    await updateTask(db, "p1", "t1", { assignee: "owner" }, "u1");
 
     expect(setStage(findOneAndUpdate.mock.calls[0][1]).assignedBy).toBe("u1");
   });
@@ -3086,7 +3107,7 @@ describe("a task records who assigned it", () => {
   it("leaves a legacy task blank when a third writer merely echoes its assignee", async () => {
     legacyTaskAssignedTo("u1");
 
-    await updateTask("p1", "t1", { assignee: "owner", title: "renamed" }, "the-pm-agent");
+    await updateTask(db, "p1", "t1", { assignee: "owner", title: "renamed" }, "the-pm-agent");
 
     expect(setStage(findOneAndUpdate.mock.calls[0][1])).not.toHaveProperty("assignedBy");
   });
@@ -3097,13 +3118,13 @@ describe("a task records who assigned it", () => {
     legacyTaskAssignedTo("u1");
     userFindOne.mockResolvedValue({ _id: "u2", username: "kuba" });
 
-    await updateTask("p1", "t1", { assignee: "kuba" }, "the-pm-agent");
+    await updateTask(db, "p1", "t1", { assignee: "kuba" }, "the-pm-agent");
 
     expect(setStage(findOneAndUpdate.mock.calls[0][1]).assignedBy).toBe("the-pm-agent");
   });
 
   it("leaves it alone when the edit touches no assignee", async () => {
-    await updateTask("p1", "t1", { title: "renamed" }, "actor");
+    await updateTask(db, "p1", "t1", { title: "renamed" }, "actor");
 
     expect(setStage(findOneAndUpdate.mock.calls[0][1])).not.toHaveProperty("assignedBy");
   });
@@ -3115,7 +3136,7 @@ describe("a task records who assigned it", () => {
    * handing every client the ability to forge its own consent.
    */
   it("ignores an assignedBy the caller supplied, rather than storing it", async () => {
-    await updateTask("p1", "t1", { title: "renamed", assignedBy: "somebody-else" }, "actor");
+    await updateTask(db, "p1", "t1", { title: "renamed", assignedBy: "somebody-else" }, "actor");
 
     expect(setStage(findOneAndUpdate.mock.calls[0][1])).not.toHaveProperty("assignedBy");
   });
@@ -3129,6 +3150,7 @@ describe("a task records who assigned it", () => {
    */
   it("ignores a decision the caller supplied, rather than storing it", async () => {
     await updateTask(
+      db,
       "p1",
       "t1",
       { title: "renamed", decision: { state: "accepted", acceptable: true } },
@@ -3155,8 +3177,8 @@ describe("assigning somebody who cannot reach the board", () => {
     findOneAndUpdate.mockReturnValue({
       populate: () => Promise.resolve({ _id: "t1", taskNumber: 1, title: "x", execution: {} }),
     });
-    findById.mockReset();
-    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    projectFindOne.mockReset();
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
     const task = {
       _id: "t1",
       taskNumber: 1,
@@ -3183,7 +3205,7 @@ describe("assigning somebody who cannot reach the board", () => {
   it("refuses the move, with a 400 rather than a silent success", async () => {
     canBeAssignedMock.mockResolvedValue(false);
 
-    const result = await updateTask("p1", "t1", { assignee: "kuba" }, "actor");
+    const result = await updateTask(db, "p1", "t1", { assignee: "kuba" }, "actor");
 
     expect(result.ok).toBe(false);
     expect(result).toMatchObject({ status: 400 });
@@ -3194,7 +3216,7 @@ describe("assigning somebody who cannot reach the board", () => {
   it("names the person it refused", async () => {
     canBeAssignedMock.mockResolvedValue(false);
 
-    const result = await updateTask("p1", "t1", { assignee: "kuba" }, "actor");
+    const result = await updateTask(db, "p1", "t1", { assignee: "kuba" }, "actor");
 
     expect(result).toMatchObject({ error: expect.stringContaining("kuba") });
     expect(result).toMatchObject({ error: expect.stringMatching(/no access to this board/i) });
@@ -3203,7 +3225,7 @@ describe("assigning somebody who cannot reach the board", () => {
   it("writes nothing at all when it refuses", async () => {
     canBeAssignedMock.mockResolvedValue(false);
 
-    await updateTask("p1", "t1", { assignee: "kuba" }, "actor");
+    await updateTask(db, "p1", "t1", { assignee: "kuba" }, "actor");
 
     expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
@@ -3213,16 +3235,16 @@ describe("assigning somebody who cannot reach the board", () => {
   it("still assigns somebody the rule accepts", async () => {
     canBeAssignedMock.mockResolvedValue(true);
 
-    const result = await updateTask("p1", "t1", { assignee: "kuba" }, "actor");
+    const result = await updateTask(db, "p1", "t1", { assignee: "kuba" }, "actor");
 
     expect(result.ok).toBe(true);
     expect(findOneAndUpdate).toHaveBeenCalled();
   });
 
   it("asks about the board the task is on", async () => {
-    await updateTask("p1", "t1", { assignee: "kuba" }, "actor");
+    await updateTask(db, "p1", "t1", { assignee: "kuba" }, "actor");
 
-    expect(canBeAssignedMock).toHaveBeenCalledWith("u2", "p1");
+    expect(canBeAssignedMock).toHaveBeenCalledWith(db, "u2", "p1");
   });
 
   /**
@@ -3232,7 +3254,7 @@ describe("assigning somebody who cannot reach the board", () => {
   it("never refuses an unassignment", async () => {
     canBeAssignedMock.mockResolvedValue(false);
 
-    const result = await updateTask("p1", "t1", { assignee: null }, "actor");
+    const result = await updateTask(db, "p1", "t1", { assignee: null }, "actor");
 
     expect(result.ok).toBe(true);
   });
@@ -3246,7 +3268,7 @@ describe("assigning somebody who cannot reach the board", () => {
     canBeAssignedMock.mockResolvedValue(false);
     userFindOne.mockResolvedValue({ _id: "u1", username: "owner" });
 
-    const result = await updateTask("p1", "t1", { assignee: "owner", title: "renamed" }, "actor");
+    const result = await updateTask(db, "p1", "t1", { assignee: "owner", title: "renamed" }, "actor");
 
     expect(result.ok).toBe(true);
     expect(canBeAssignedMock).not.toHaveBeenCalled();
@@ -3255,7 +3277,7 @@ describe("assigning somebody who cannot reach the board", () => {
   describe("and the same answer on the way in", () => {
     beforeEach(() => {
       taskCreate.mockClear();
-      findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+      projectFindOne.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
       projectFindOneAndUpdate.mockResolvedValue({
         _id: "p1",
         taskCounter: 1,
@@ -3270,7 +3292,7 @@ describe("assigning somebody who cannot reach the board", () => {
     it("refuses to create a task already assigned to somebody without access", async () => {
       canBeAssignedMock.mockResolvedValue(false);
 
-      const result = await createTask("p1", "actor", { title: "x", assignee: "kuba" });
+      const result = await createTask(db, "p1", "actor", { title: "x", assignee: "kuba" });
 
       expect(result.ok).toBe(false);
       expect(result).toMatchObject({ status: 400 });
@@ -3280,14 +3302,14 @@ describe("assigning somebody who cannot reach the board", () => {
     it("creates it for somebody the rule accepts", async () => {
       canBeAssignedMock.mockResolvedValue(true);
 
-      const result = await createTask("p1", "actor", { title: "x", assignee: "kuba" });
+      const result = await createTask(db, "p1", "actor", { title: "x", assignee: "kuba" });
 
       expect(result.ok).toBe(true);
       expect(taskCreate.mock.calls[0][0].assignee).toBe("u2");
     });
 
     it("asks nothing when the new task starts unassigned", async () => {
-      await createTask("p1", "actor", { title: "x" });
+      await createTask(db, "p1", "actor", { title: "x" });
 
       expect(canBeAssignedMock).not.toHaveBeenCalled();
     });
@@ -3309,7 +3331,7 @@ describe("an assignee username nobody holds", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     canBeAssignedMock.mockResolvedValue(true);
-    findById.mockReturnValue({ lean: () => Promise.resolve(board) });
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(board) });
     const task = {
       _id: "t1",
       taskNumber: 1,
@@ -3335,7 +3357,7 @@ describe("an assignee username nobody holds", () => {
   const held = (username: string) => userFindOne.mockResolvedValue({ _id: "u2", username });
 
   it("is refused by updateTask, naming the name that resolved to nobody", async () => {
-    const result = await updateTask("p1", "t1", { assignee: "rafa" }, "actor");
+    const result = await updateTask(db, "p1", "t1", { assignee: "rafa" }, "actor");
 
     expect(result).toMatchObject({ ok: false, status: 400 });
     expect(result).toMatchObject({ error: expect.stringContaining("rafa") });
@@ -3344,7 +3366,7 @@ describe("an assignee username nobody holds", () => {
   // The data destruction, which is the whole ticket: the refusal is worth nothing if the write
   // still goes out with `assignee: null` in it.
   it("leaves the assignee the task already had, rather than clearing it", async () => {
-    await updateTask("p1", "t1", { assignee: "rafa" }, "actor");
+    await updateTask(db, "p1", "t1", { assignee: "rafa" }, "actor");
 
     expect(findOneAndUpdate, "an unknown username still reached the write").not.toHaveBeenCalled();
   });
@@ -3355,11 +3377,11 @@ describe("an assignee username nobody holds", () => {
    * to find, and it has no other way to know that.
    */
   it("does not borrow the no-access wording, which names a different repair", async () => {
-    const missing = await updateTask("p1", "t1", { assignee: "rafa" }, "actor");
+    const missing = await updateTask(db, "p1", "t1", { assignee: "rafa" }, "actor");
 
     held("kuba");
     canBeAssignedMock.mockResolvedValue(false);
-    const barred = await updateTask("p1", "t1", { assignee: "kuba" }, "actor");
+    const barred = await updateTask(db, "p1", "t1", { assignee: "kuba" }, "actor");
 
     expect(missing).toMatchObject({ error: expect.not.stringMatching(/no access to this board/i) });
     expect(barred).toMatchObject({ error: expect.stringMatching(/no access to this board/i) });
@@ -3369,7 +3391,7 @@ describe("an assignee username nobody holds", () => {
   it("still assigns a username somebody holds", async () => {
     held("kuba");
 
-    const result = await updateTask("p1", "t1", { assignee: "kuba" }, "actor");
+    const result = await updateTask(db, "p1", "t1", { assignee: "kuba" }, "actor");
 
     expect(result.ok).toBe(true);
     expect(setStage(findOneAndUpdate.mock.calls[0][1]).assignee).toBe("u2");
@@ -3378,7 +3400,7 @@ describe("an assignee username nobody holds", () => {
   // Unassigning is not an assignment to nobody-in-particular: null names no account, so there is
   // nothing to resolve and nothing to refuse.
   it("still unassigns on an explicit null", async () => {
-    const result = await updateTask("p1", "t1", { assignee: null }, "actor");
+    const result = await updateTask(db, "p1", "t1", { assignee: null }, "actor");
 
     expect(result.ok).toBe(true);
     expect(setStage(findOneAndUpdate.mock.calls[0][1]).assignee).toBeNull();
@@ -3390,7 +3412,7 @@ describe("an assignee username nobody holds", () => {
    * `agent` already are, so "unassign" has one meaning rather than three.
    */
   it("reads an empty string as unassigning, not as a username to look up", async () => {
-    const result = await updateTask("p1", "t1", { assignee: "" }, "actor");
+    const result = await updateTask(db, "p1", "t1", { assignee: "" }, "actor");
 
     expect(result.ok).toBe(true);
     expect(setStage(findOneAndUpdate.mock.calls[0][1]).assignee).toBeNull();
@@ -3398,7 +3420,7 @@ describe("an assignee username nobody holds", () => {
   });
 
   it("is refused by createTask too, before a task number is spent on it", async () => {
-    const result = await createTask("p1", "actor", { title: "Ordinary title", assignee: "rafa" });
+    const result = await createTask(db, "p1", "actor", { title: "Ordinary title", assignee: "rafa" });
 
     expect(result).toMatchObject({ ok: false, status: 400 });
     expect(result).toMatchObject({ error: expect.stringContaining("rafa") });
@@ -3409,7 +3431,7 @@ describe("an assignee username nobody holds", () => {
   it("still creates one for a username somebody holds", async () => {
     held("kuba");
 
-    const result = await createTask("p1", "actor", { title: "Ordinary title", assignee: "kuba" });
+    const result = await createTask(db, "p1", "actor", { title: "Ordinary title", assignee: "kuba" });
 
     expect(result.ok).toBe(true);
     expect(taskCreate.mock.calls[0][0].assignee).toBe("u2");
@@ -3424,16 +3446,16 @@ describe("an assignee username nobody holds", () => {
   it("looks the name up normalised, so case and stray spaces are not a refusal", async () => {
     held("kuba");
 
-    const result = await updateTask("p1", "t1", { assignee: "  KUBA " }, "actor");
+    const result = await updateTask(db, "p1", "t1", { assignee: "  KUBA " }, "actor");
 
     expect(result.ok).toBe(true);
-    expect(userFindOne).toHaveBeenCalledWith({ username: "kuba" });
+    expect(userFindOne).toHaveBeenCalledWith({ username: "kuba", tenant: DEFAULT_TENANT_ID });
   });
 
   // The message reaches a model as a tool result, so it is not a place to echo an unbounded
   // parameter back — the comment on `noSuchAccount` says so, and nothing held it to that
   it("does not echo an unbounded username back into the refusal", async () => {
-    const result = await updateTask("p1", "t1", { assignee: "x".repeat(5000) }, "actor");
+    const result = await updateTask(db, "p1", "t1", { assignee: "x".repeat(5000) }, "actor");
 
     expect(result.ok).toBe(false);
     expect((result as { error: string }).error.length).toBeLessThan(500);
@@ -3457,7 +3479,7 @@ describe("an assignee username nobody holds", () => {
     it("is refused by updateTask, rather than reaching the cast", async () => {
       held("kuba");
 
-      const result = await updateTask("p1", "t1", { assignee: value }, "actor");
+      const result = await updateTask(db, "p1", "t1", { assignee: value }, "actor");
 
       expect(result).toMatchObject({ ok: false, status: 400 });
       expect(findOneAndUpdate).not.toHaveBeenCalled();
@@ -3466,7 +3488,7 @@ describe("an assignee username nobody holds", () => {
     it("is refused by createTask in the same words, before a task number is spent", async () => {
       held("kuba");
 
-      const result = await createTask("p1", "actor", { title: "Ordinary title", assignee: value });
+      const result = await createTask(db, "p1", "actor", { title: "Ordinary title", assignee: value });
 
       expect(result).toMatchObject({ ok: false, status: 400 });
       expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
@@ -3477,7 +3499,7 @@ describe("an assignee username nobody holds", () => {
 describe("createTask stamps who assigned it", () => {
   beforeEach(() => {
     taskCreate.mockClear();
-    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
     projectFindOneAndUpdate.mockResolvedValue({
       _id: "p1",
       taskCounter: 1,
@@ -3490,13 +3512,13 @@ describe("createTask stamps who assigned it", () => {
   });
 
   it("stamps the actor when a new task is created already assigned", async () => {
-    await createTask("p1", "actor", { title: "x", assignee: "kuba" });
+    await createTask(db, "p1", "actor", { title: "x", assignee: "kuba" });
 
     expect(taskCreate.mock.calls[0][0].assignedBy).toBe("actor");
   });
 
   it("leaves it null when a new task starts unassigned", async () => {
-    await createTask("p1", "actor", { title: "x" });
+    await createTask(db, "p1", "actor", { title: "x" });
 
     expect(taskCreate.mock.calls[0][0].assignedBy).toBeNull();
   });
@@ -3518,13 +3540,13 @@ describe("a machine claims its owner's work", () => {
   // thing regardless of which test happened to run immediately before it.
   beforeEach(() => {
     findOneAndUpdate.mockReset();
-    findById.mockReset();
-    findById.mockReturnValue({ lean: () => Promise.resolve(claimableBoard) });
+    projectFindOne.mockReset();
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(claimableBoard) });
   });
 
   async function claimFilterFor(ownerId: string | null) {
     findOneAndUpdate.mockClear();
-    await claimNextTask("p1", "w1", "r1", ownerId);
+    await claimNextTask(db, "p1", "w1", "r1", ownerId);
     return findOneAndUpdate.mock.calls[0]?.[0];
   }
 
@@ -3636,7 +3658,7 @@ describe("a machine claims its owner's work", () => {
   });
 
   it("claims nothing at all for a machine with no owner", async () => {
-    expect(await claimNextTask("p1", "w1", "r1", null)).toBeNull();
+    expect(await claimNextTask(db, "p1", "w1", "r1", null)).toBeNull();
     expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 });
@@ -3658,14 +3680,14 @@ describe("what a member can and cannot arm by choosing an agent", () => {
 
   beforeEach(() => {
     findOneAndUpdate.mockReset();
-    findById.mockReset();
-    findById.mockReturnValue({ lean: () => Promise.resolve(claimableBoard) });
+    projectFindOne.mockReset();
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(claimableBoard) });
     find.mockReset();
     find.mockReturnValue({ lean: () => Promise.resolve([]) });
   });
 
   async function whatMyMachineAsksFor() {
-    await claimNextTask("p1", "w1", "r1", ME);
+    await claimNextTask(db, "p1", "w1", "r1", ME);
     return findOneAndUpdate.mock.calls[0][0];
   }
 
@@ -3703,7 +3725,7 @@ describe("what a member can and cannot arm by choosing an agent", () => {
       populate: () => ({ lean: () => Promise.resolve(stored) }),
     });
 
-    await updateTask("p1", "t1", { title: "x", assignedBy: ME }, SOMEBODY_ELSE);
+    await updateTask(db, "p1", "t1", { title: "x", assignedBy: ME }, SOMEBODY_ELSE);
 
     expect(setStage(findOneAndUpdate.mock.calls[0][1])).not.toHaveProperty("assignedBy");
   });
@@ -3727,8 +3749,8 @@ describe("whose machine choosing an agent can reach", () => {
   const COMPOSED = { implementation: [{ key: "write-the-change" }] };
 
   beforeEach(() => {
-    findById.mockReset();
-    findById.mockReturnValue({ lean: () => Promise.resolve(claimableBoard) });
+    projectFindOne.mockReset();
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(claimableBoard) });
     find.mockReset();
     find.mockReturnValue({ lean: () => Promise.resolve([]) });
     findOne.mockReset();
@@ -3738,7 +3760,7 @@ describe("whose machine choosing an agent can reach", () => {
   /** What a machine belonging to this person actually asks the database for */
   async function machineOf(owner: string) {
     findOneAndUpdate.mockReset();
-    await claimNextTask("p1", "w1", "r1", owner);
+    await claimNextTask(db, "p1", "w1", "r1", owner);
     return findOneAndUpdate.mock.calls[0][0];
   }
 
@@ -3770,12 +3792,13 @@ describe("whose machine choosing an agent can reach", () => {
       populate: () => Promise.resolve({ _id: "t1", taskNumber: 1, title: "x", execution: {} }),
     });
 
-    const result = await updateTask("p1", "t1", { agent: AGENT_ID }, actor);
+    const result = await updateTask(db, "p1", "t1", { agent: AGENT_ID }, actor);
 
     const written = findOneAndUpdate.mock.calls.length
       ? setStage(findOneAndUpdate.mock.calls[0][1])
       : {};
     const document = {
+      tenant: DEFAULT_TENANT_ID,
       project: "p1",
       status: "ready",
       assignee,
@@ -3887,8 +3910,8 @@ describe("what a change of hands does to the agent already on the task", () => {
   const COMPOSED = { implementation: [{ key: "write-the-change" }] };
 
   beforeEach(() => {
-    findById.mockReset();
-    findById.mockReturnValue({ lean: () => Promise.resolve(claimableBoard) });
+    projectFindOne.mockReset();
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(claimableBoard) });
     find.mockReset();
     find.mockReturnValue({ lean: () => Promise.resolve([]) });
     findOne.mockReset();
@@ -3897,7 +3920,7 @@ describe("what a change of hands does to the agent already on the task", () => {
       populate: () =>
         Promise.resolve({ _id: "t1", taskNumber: 1, title: "x", agent: null, execution: {} }),
     });
-    agentFindById.mockReset();
+    agentFindOne.mockReset();
   });
 
   /**
@@ -3906,7 +3929,7 @@ describe("what a change of hands does to the agent already on the task", () => {
    * task already carries — and that is the only difference the clause below turns on.
    */
   function catalogOf(docs: Record<string, Record<string, unknown>>) {
-    agentFindById.mockImplementation((id: unknown, projection?: unknown) => {
+    agentFindOne.mockImplementation(({ _id: id }: { _id: unknown }, projection?: unknown) => {
       const doc = docs[String(id)];
       if (!doc) return { lean: () => Promise.resolve(null) };
       const named = String(projection ?? "").split(/\s+/).filter(Boolean);
@@ -3920,7 +3943,7 @@ describe("what a change of hands does to the agent already on the task", () => {
   /** What a machine belonging to this person actually asks the database for */
   async function machineOf(owner: string) {
     findOneAndUpdate.mockReset();
-    await claimNextTask("p1", "w1", "r1", owner);
+    await claimNextTask(db, "p1", "w1", "r1", owner);
     return findOneAndUpdate.mock.calls[0][0];
   }
 
@@ -3975,7 +3998,7 @@ describe("what a change of hands does to the agent already on the task", () => {
       userFindOne.mockResolvedValue(resolves ? { _id: resolves, username: "whoever" } : null);
     }
     findOneAndUpdate.mockClear();
-    const result = await updateTask("p1", "t1", body, actor, force);
+    const result = await updateTask(db, "p1", "t1", body, actor, force);
     const written = findOneAndUpdate.mock.calls.length
       ? setStage(findOneAndUpdate.mock.calls[0][1])
       : {};
@@ -3983,6 +4006,7 @@ describe("what a change of hands does to the agent already on the task", () => {
       result,
       written,
       document: {
+        tenant: DEFAULT_TENANT_ID,
         project: "p1",
         status: "ready",
         assignee: HOLDER,
@@ -4116,7 +4140,7 @@ describe("what a change of hands does to the agent already on the task", () => {
     const { written } = await write({ title: "renamed" }, HOLDER);
 
     expect(written).not.toHaveProperty("agent");
-    expect(agentFindById).not.toHaveBeenCalled();
+    expect(agentFindOne).not.toHaveBeenCalled();
   });
 
   // The documented repair for a legacy task — assign it to yourself again — must not cost the
@@ -4128,7 +4152,7 @@ describe("what a change of hands does to the agent already on the task", () => {
     const { written } = await write({ assignee: "whoever" }, HOLDER, HOLDER);
 
     expect(written).not.toHaveProperty("agent");
-    expect(agentFindById).not.toHaveBeenCalled();
+    expect(agentFindOne).not.toHaveBeenCalled();
   });
 
   /**
@@ -4191,6 +4215,7 @@ describe("what a change of hands does to the agent already on the task", () => {
     await write({ assignee: "incoming" }, HOLDER, INCOMING);
 
     expect(vi.mocked(logActivity).mock.calls).toContainEqual([
+      db,
       "t1",
       HOLDER,
       "updated",
@@ -4219,14 +4244,14 @@ describe("what a change of hands does to the agent already on the task", () => {
 
     await write({ title: "renamed" }, HOLDER);
 
-    expect(vi.mocked(logActivity).mock.calls.map((c) => c[3])).not.toContain("agent");
+    expect(vi.mocked(logActivity).mock.calls.map((c) => c[4])).not.toContain("agent");
   });
 });
 
 // BP-369. Exported so scripts/repair-recurring-agent-pairing.ts asks the same question updateTask
 // already asks live, rather than a second copy of the rule.
 describe("personalAgentAlienTo", () => {
-  beforeEach(() => agentFindById.mockReset());
+  beforeEach(() => agentFindOne.mockReset());
 
   // The mock resolves by projection alone and ignores which id it was asked for, so nothing above
   // this line would notice the two arguments swapped — `agent` looked up instead of `assigneeAfter`
@@ -4234,37 +4259,37 @@ describe("personalAgentAlienTo", () => {
   // check that would pass either way.
   it("looks up the agent argument, not the assignee", async () => {
     agentInTheCatalog({ scope: "user", owner: "u1" });
-    await personalAgentAlienTo("the-agent-id", "u1");
-    expect(agentFindById).toHaveBeenCalledWith("the-agent-id", "scope owner");
+    await personalAgentAlienTo(db, "the-agent-id", "u1");
+    expect(agentFindOne).toHaveBeenCalledWith({ _id: "the-agent-id", tenant: DEFAULT_TENANT_ID }, "scope owner");
   });
 
   it("is not alien when the personal agent's owner is the assignee", async () => {
     agentInTheCatalog({ scope: "user", owner: "u1" });
-    expect(await personalAgentAlienTo("a1", "u1")).toBe(false);
+    expect(await personalAgentAlienTo(db, "a1", "u1")).toBe(false);
   });
 
   it("is alien when the personal agent belongs to somebody else", async () => {
     agentInTheCatalog({ scope: "user", owner: "u1" });
-    expect(await personalAgentAlienTo("a1", "u2")).toBe(true);
+    expect(await personalAgentAlienTo(db, "a1", "u2")).toBe(true);
   });
 
   // Nobody chose it: an unassigned task cannot be the reason a personal agent is still there
   it("is alien on an unassigned task", async () => {
     agentInTheCatalog({ scope: "user", owner: "u1" });
-    expect(await personalAgentAlienTo("a1", null)).toBe(true);
+    expect(await personalAgentAlienTo(db, "a1", null)).toBe(true);
   });
 
   // A project or global agent is nobody's personal choice to begin with
   it("is never alien for a project-scoped agent", async () => {
     agentInTheCatalog({ scope: "project", owner: null });
-    expect(await personalAgentAlienTo("a1", "somebody-else")).toBe(false);
+    expect(await personalAgentAlienTo(db, "a1", "somebody-else")).toBe(false);
   });
 
   // Covers a dangling reference and a missing agent alike — neither branches before the lookup
   it("is not alien when the agent cannot be found — missing id or dangling reference alike", async () => {
     agentInTheCatalog(null);
-    expect(await personalAgentAlienTo("gone", "u1")).toBe(false);
-    expect(await personalAgentAlienTo(null, "u1")).toBe(false);
+    expect(await personalAgentAlienTo(db, "gone", "u1")).toBe(false);
+    expect(await personalAgentAlienTo(db, null, "u1")).toBe(false);
   });
 });
 
@@ -4322,7 +4347,7 @@ describe("createTask handing the task to somebody", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     sprintExists.mockResolvedValue(null);
-    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
     projectFindOneAndUpdate.mockResolvedValue({
       _id: "p1",
       taskCounter: 7,
@@ -4336,9 +4361,9 @@ describe("createTask handing the task to somebody", () => {
   });
 
   it("tells the assignee, with the column's label and a link", async () => {
-    await createTask("p1", "actor", { title: "Session cookie survives a change", assignee: "owner" });
+    await createTask(db, "p1", "actor", { title: "Session cookie survives a change", assignee: "owner" });
 
-    const [notification] = createNotificationsMock.mock.calls.at(-1) ?? [];
+    const [, notification] = createNotificationsMock.mock.calls.at(-1) ?? [];
     expect(notification.type).toBe("task_assigned");
     expect(notification.recipientIds).toEqual([ASSIGNEE]);
     expect(notification.title).toBe("BP-7 assigned to you");
@@ -4349,7 +4374,7 @@ describe("createTask handing the task to somebody", () => {
   });
 
   it("stays quiet when the task is created for nobody", async () => {
-    await createTask("p1", "actor", { title: "x" });
+    await createTask(db, "p1", "actor", { title: "x" });
 
     expect(createNotificationsMock).not.toHaveBeenCalled();
   });
@@ -4358,9 +4383,9 @@ describe("createTask handing the task to somebody", () => {
   // on this board" hear about it here and nowhere else. board-feed.test.ts proves the fan-out;
   // that createTask reaches it, and what mail it hands over, was pinned by nothing.
   it("announces it to the board's own subscribers, with the mail it would send", async () => {
-    await createTask("p1", "actor", { title: "Session cookie survives a change" });
+    await createTask(db, "p1", "actor", { title: "Session cookie survives a change" });
 
-    const [feed] = notifyBoardFeedMock.mock.calls.at(-1) ?? [];
+    const [, feed] = notifyBoardFeedMock.mock.calls.at(-1) ?? [];
     expect(feed.projectId).toBe("p1");
     expect(feed.title).toBe("New task BP-7 in Board Planner");
     expect(feed.body).toBe("Session cookie survives a change");
@@ -4382,18 +4407,18 @@ describe("createTask handing the task to somebody", () => {
   // BP-725. The digest labels the row with its key already; the title it reads beside that key
   // must not name the task a second time.
   it("gives the digest a phrasing that does not repeat the task's own key", async () => {
-    await createTask("p1", "actor", { title: "Session cookie survives a change" });
+    await createTask(db, "p1", "actor", { title: "Session cookie survives a change" });
 
-    const [feed] = notifyBoardFeedMock.mock.calls.at(-1) ?? [];
+    const [, feed] = notifyBoardFeedMock.mock.calls.at(-1) ?? [];
     expect(feed.digestTitle).toBe("New task in Board Planner");
   });
 
   // A different audience and a different switch from the one above: a room nobody subscribed to
   // individually. The webhook beside it is asserted; this dispatch was not.
   it("tells the project's shared chat channel", async () => {
-    await createTask("p1", "actor", { title: "Session cookie survives a change" });
+    await createTask(db, "p1", "actor", { title: "Session cookie survives a change" });
 
-    expect(dispatchNotifications).toHaveBeenCalledWith("p1", "task_created", {
+    expect(dispatchNotifications).toHaveBeenCalledWith(db, "p1", "task_created", {
       project: { key: "BP", name: "Board Planner" },
       task: { taskKey: "BP-7", title: "Session cookie survives a change", status: "ready" },
     });
@@ -4414,17 +4439,17 @@ describe("a comment mentioning a watcher", () => {
   function setup(mentions: string[], watchers: string[]) {
     vi.clearAllMocks();
     findOne.mockReturnValue({ _id: "t1", taskNumber: 7, title: "x", status: "doing" });
-    findById.mockReturnValue({ lean: () => Promise.resolve(board) });
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(board) });
     collectRecipientsMock.mockReturnValue(watchers);
     resolveMentionsMock.mockResolvedValue(mentions);
   }
 
   const notificationsByType = (): Record<string, Record<string, unknown>> =>
-    Object.fromEntries(createNotificationsMock.mock.calls.map(([n]) => [n.type, n]));
+    Object.fromEntries(createNotificationsMock.mock.calls.map(([, n]) => [n.type, n]));
 
   it("writes to a mentioned watcher once, as a mention", async () => {
     setup([MENTIONED_WATCHER], [MENTIONED_WATCHER]);
-    await addComment("p1", "t1", "@bob look at this", { id: "actor", username: "owner" });
+    await addComment(db, "p1", "t1", "@bob look at this", { id: "actor", username: "owner" });
 
     const byType = notificationsByType();
     expect(byType.comment_added, "the same person got both mails").toBeUndefined();
@@ -4433,7 +4458,7 @@ describe("a comment mentioning a watcher", () => {
 
   it("still tells the watchers who were not mentioned", async () => {
     setup([MENTIONED_WATCHER], [WATCHER, MENTIONED_WATCHER]);
-    await addComment("p1", "t1", "@bob look at this", { id: "actor", username: "owner" });
+    await addComment(db, "p1", "t1", "@bob look at this", { id: "actor", username: "owner" });
 
     const byType = notificationsByType();
     expect(byType.comment_added.recipientIds).toEqual([WATCHER]);
@@ -4444,7 +4469,7 @@ describe("a comment mentioning a watcher", () => {
   // it twice, and one cut before it ends mid-sentence
   it("gives the digest whole sentences that do not name the task", async () => {
     setup([MENTIONED_WATCHER], [WATCHER, MENTIONED_WATCHER]);
-    await addComment("p1", "t1", "@bob look at this", { id: "actor", username: "owner" });
+    await addComment(db, "p1", "t1", "@bob look at this", { id: "actor", username: "owner" });
 
     const byType = notificationsByType();
     expect(byType.comment_added).toMatchObject({
@@ -4461,7 +4486,7 @@ describe("a comment mentioning a watcher", () => {
   it("refuses a comment past the length cap and stores nothing", async () => {
     setup([], [WATCHER]);
 
-    const result = await addComment("p1", "t1", "c".repeat(COMMENT_BODY_MAX_LENGTH + 1), { id: "actor", username: "owner" });
+    const result = await addComment(db, "p1", "t1", "c".repeat(COMMENT_BODY_MAX_LENGTH + 1), { id: "actor", username: "owner" });
 
     expect(result).toMatchObject({ ok: false, status: 400 });
     expect(commentCreate).not.toHaveBeenCalled();
@@ -4469,7 +4494,7 @@ describe("a comment mentioning a watcher", () => {
 
   it("gives the mail the column's label and a link, not the raw status id", async () => {
     setup([], [WATCHER]);
-    await addComment("p1", "t1", "no mentions here", { id: "actor", username: "owner" });
+    await addComment(db, "p1", "t1", "no mentions here", { id: "actor", username: "owner" });
 
     const email = notificationsByType().comment_added.email as Record<string, unknown>;
     expect(email.taskPills).toEqual([{ label: "Doing", tone: "progress" }]);
@@ -4500,7 +4525,7 @@ describe("what a rewritten updateTask still tells the assignee", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    findById.mockReturnValue({ lean: () => Promise.resolve(board) });
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(board) });
     const stored = {
       _id: "t1",
       taskNumber: 4,
@@ -4533,9 +4558,9 @@ describe("what a rewritten updateTask still tells the assignee", () => {
   // Main's notification sits after the write. The branch moved the assignee resolution above it
   // and added two early returns, so "still reached" is the whole question.
   it("tells the new assignee, with the column's label and the assigner's name", async () => {
-    await updateTask("p1", "t1", { assignee: "kuba" }, "actor");
+    await updateTask(db, "p1", "t1", { assignee: "kuba" }, "actor");
 
-    const [notification] = createNotificationsMock.mock.calls.at(-1) ?? [];
+    const [, notification] = createNotificationsMock.mock.calls.at(-1) ?? [];
     expect(notification.type).toBe("task_assigned");
     expect(notification.recipientIds).toEqual(["u2"]);
     expect(notification.title).toBe("TP-4 assigned to you");
@@ -4563,6 +4588,7 @@ describe("what a rewritten updateTask still tells the assignee", () => {
     });
 
     const result = await updateTask(
+      db,
       "p1",
       "t1",
       { assignee: "kuba", agent: "507f1f77bcf86cd799439011" },
@@ -4590,7 +4616,7 @@ describe("what a status change tells a watcher", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    findById.mockReturnValue({ lean: () => Promise.resolve(board) });
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(board) });
     const stored = { _id: "t1", taskNumber: 9, status: "doing", title: "x" };
     findOne.mockReturnValue({
       lean: () => Promise.resolve(stored),
@@ -4604,9 +4630,9 @@ describe("what a status change tells a watcher", () => {
   });
 
   it("names the column the board calls it, in the title and in both pills", async () => {
-    await changeStatus("p1", "t1", "checking", "actor");
+    await changeStatus(db, "p1", "t1", "checking", "actor");
 
-    const [notification] = createNotificationsMock.mock.calls.at(-1) ?? [];
+    const [, notification] = createNotificationsMock.mock.calls.at(-1) ?? [];
     expect(notification.type).toBe("status_changed");
     expect(notification.title).toBe("TP-9 moved to Under review");
     expect(notification.digestTitle).toBe("moved to Under review");
@@ -4652,7 +4678,7 @@ describe("a title neither writer will store", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     const stored = { _id: "t1", taskNumber: 9, status: "doing", title: "Before the edit" };
-    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
     findOne.mockReturnValue({
       lean: () => Promise.resolve(stored),
       populate: () => ({ lean: () => Promise.resolve(stored) }),
@@ -4683,14 +4709,14 @@ describe("a title neither writer will store", () => {
     ["one character past the length cap", "a".repeat(TASK_TITLE_MAX_LENGTH + 1)],
   ])("%s", (_label, title) => {
     it("is refused by updateTask with a 400, and nothing is written", async () => {
-      const result = await updateTask("p1", "t1", { title } as never, WHO);
+      const result = await updateTask(db, "p1", "t1", { title } as never, WHO);
 
       expect(result).toMatchObject({ ok: false, status: 400 });
       expect(findOneAndUpdate, "the update reached the model anyway").not.toHaveBeenCalled();
     });
 
     it("is refused by createTask before the task number is spent", async () => {
-      const result = await createTask("p1", WHO, { title } as never);
+      const result = await createTask(db, "p1", WHO, { title } as never);
 
       expect(result).toMatchObject({ ok: false, status: 400 });
       expect(taskCreate).not.toHaveBeenCalled();
@@ -4703,11 +4729,11 @@ describe("a title neither writer will store", () => {
   // that refuses every title, and the surrounding padding proves the value is normalised rather
   // than merely accepted — the schema trims, so an untrimmed write would disagree with it.
   it("stores an ordinary title, trimmed the way the schema would", async () => {
-    const updated = await updateTask("p1", "t1", { title: "  Renamed by hand  " }, WHO);
+    const updated = await updateTask(db, "p1", "t1", { title: "  Renamed by hand  " }, WHO);
     expect(updated.ok).toBe(true);
     expect(setStage(findOneAndUpdate.mock.calls[0][1])).toMatchObject({ title: "Renamed by hand" });
 
-    const created = await createTask("p1", WHO, { title: "  Brand new  " });
+    const created = await createTask(db, "p1", WHO, { title: "  Brand new  " });
     expect(created.ok).toBe(true);
     expect(taskCreate.mock.calls[0][0]).toMatchObject({ title: "Brand new" });
   });
@@ -4716,7 +4742,7 @@ describe("a title neither writer will store", () => {
   // looks from the refusals above exactly like a guard that works.
   it("stores a title of exactly the length cap", async () => {
     const atTheCap = "a".repeat(TASK_TITLE_MAX_LENGTH);
-    const updated = await updateTask("p1", "t1", { title: atTheCap }, WHO);
+    const updated = await updateTask(db, "p1", "t1", { title: atTheCap }, WHO);
 
     expect(updated.ok).toBe(true);
     expect(setStage(findOneAndUpdate.mock.calls[0][1])).toMatchObject({ title: atTheCap });
@@ -4740,7 +4766,7 @@ describe("an acceptance criterion neither writer will store", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     const stored = { _id: "t1", taskNumber: 9, status: "doing", title: "Before the edit" };
-    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
     findOne.mockReturnValue({
       lean: () => Promise.resolve(stored),
       populate: () => ({ lean: () => Promise.resolve(stored) }),
@@ -4764,14 +4790,14 @@ describe("an acceptance criterion neither writer will store", () => {
     ["one criterion past the count cap", Array.from({ length: MAX_CHECKLIST_ITEMS + 1 }, (_, i) => ({ text: `c${i}` }))],
   ])("%s", (_label, checklist) => {
     it("is refused by updateTask, and nothing is written", async () => {
-      const result = await updateTask("p1", "t1", { checklist } as never, WHO);
+      const result = await updateTask(db, "p1", "t1", { checklist } as never, WHO);
 
       expect(result).toMatchObject({ ok: false, status: 400 });
       expect(findOneAndUpdate, "the update reached the model anyway").not.toHaveBeenCalled();
     });
 
     it("is refused by createTask before the task number is spent", async () => {
-      const result = await createTask("p1", WHO, { title: "New", checklist } as never);
+      const result = await createTask(db, "p1", WHO, { title: "New", checklist } as never);
 
       expect(result).toMatchObject({ ok: false, status: 400 });
       expect(taskCreate).not.toHaveBeenCalled();
@@ -4791,7 +4817,7 @@ describe("an acceptance criterion neither writer will store", () => {
   it("accepts exactly as many criteria as the cap allows", async () => {
     const checklist = Array.from({ length: MAX_CHECKLIST_ITEMS }, (_, i) => ({ text: `c${i}` }));
 
-    const result = await updateTask("p1", "t1", { checklist } as never, WHO);
+    const result = await updateTask(db, "p1", "t1", { checklist } as never, WHO);
 
     expect(result.ok).toBe(true);
   });
@@ -4800,17 +4826,18 @@ describe("an acceptance criterion neither writer will store", () => {
   it("refuses a description past the cap, on update and before create spends a number", async () => {
     const description = "d".repeat(TASK_DESCRIPTION_MAX_LENGTH + 1);
 
-    expect(await updateTask("p1", "t1", { description } as never, WHO)).toMatchObject({ ok: false, status: 400 });
+    expect(await updateTask(db, "p1", "t1", { description } as never, WHO)).toMatchObject({ ok: false, status: 400 });
     expect(findOneAndUpdate).not.toHaveBeenCalled();
-    expect(await createTask("p1", WHO, { title: "New", description } as never)).toMatchObject({ ok: false, status: 400 });
+    expect(await createTask(db, "p1", WHO, { title: "New", description } as never)).toMatchObject({ ok: false, status: 400 });
     expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
 
-    const atCap = await updateTask("p1", "t1", { description: "d".repeat(TASK_DESCRIPTION_MAX_LENGTH) } as never, WHO);
+    const atCap = await updateTask(db, "p1", "t1", { description: "d".repeat(TASK_DESCRIPTION_MAX_LENGTH) } as never, WHO);
     expect(atCap.ok).toBe(true);
   });
 
   it("stores ordinary criteria, trimmed, keeping the row's own id and done flag", async () => {
     const result = await updateTask(
+      db,
       "p1",
       "t1",
       { checklist: [{ _id: A_ROW_ID, text: "  Ships with a test  ", done: true }] } as never,
@@ -4838,7 +4865,7 @@ describe("an acceptance criterion neither writer will store", () => {
 
   describe.each(REFUSED_ROWS)("%s", (_label, row) => {
     it("is refused with a 400, and nothing is written", async () => {
-      const result = await updateTask("p1", "t1", { checklist: [row] } as never, WHO);
+      const result = await updateTask(db, "p1", "t1", { checklist: [row] } as never, WHO);
 
       expect(result).toMatchObject({ ok: false, status: 400 });
       expect(findOneAndUpdate, "the update reached the model anyway").not.toHaveBeenCalled();
@@ -4847,6 +4874,7 @@ describe("an acceptance criterion neither writer will store", () => {
 
   it("takes the flags the cast takes, and drops the keys the row invented", async () => {
     const result = await updateTask(
+      db,
       "p1",
       "t1",
       {
@@ -4878,6 +4906,7 @@ describe("an acceptance criterion neither writer will store", () => {
   // keeps a line of zero-width spaces because it is not a blank line.
   it("refuses an invisible criterion arriving as an acceptanceCriteria string", async () => {
     const result = await updateTask(
+      db,
       "p1",
       "t1",
       { acceptanceCriteria: `- [ ] ${codePoints(0x200b)}` },
@@ -4889,7 +4918,7 @@ describe("an acceptance criterion neither writer will store", () => {
   });
 
   it("refuses it on create too, before the task number is spent", async () => {
-    const result = await createTask("p1", WHO, {
+    const result = await createTask(db, "p1", WHO, {
       title: "New",
       acceptanceCriteria: `- [ ] ${codePoints(0x3164)}`,
     });
@@ -4903,6 +4932,7 @@ describe("an acceptance criterion neither writer will store", () => {
   // criteria still parse, and blank lines are still dropped rather than refused.
   it("still stores an ordinary acceptanceCriteria string", async () => {
     const result = await updateTask(
+      db,
       "p1",
       "t1",
       { acceptanceCriteria: "- [ ] one\n\n- [x] two\n   \n" },
@@ -4939,7 +4969,7 @@ describe("nothing a create is refused for costs a task number", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    findById.mockReturnValue({ lean: () => Promise.resolve(board) });
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(board) });
     projectFindOneAndUpdate.mockResolvedValue({
       _id: "p1",
       taskCounter: 12,
@@ -4977,7 +5007,7 @@ describe("nothing a create is refused for costs a task number", () => {
 
   describe.each(REFUSED)("%s", (_label, over) => {
     it("is refused with a 400, before the counter moves", async () => {
-      const result = await createTask("p1", "actor", { title: "Ordinary title", ...over });
+      const result = await createTask(db, "p1", "actor", { title: "Ordinary title", ...over });
 
       expect(result).toMatchObject({ ok: false, status: 400 });
       expect(taskCreate).not.toHaveBeenCalled();
@@ -4990,7 +5020,7 @@ describe("nothing a create is refused for costs a task number", () => {
   it("refuses an assignee with no access to the board before the counter moves", async () => {
     canBeAssignedMock.mockResolvedValue(false);
 
-    const result = await createTask("p1", "actor", { title: "Ordinary title", assignee: "kuba" });
+    const result = await createTask(db, "p1", "actor", { title: "Ordinary title", assignee: "kuba" });
 
     expect(result).toMatchObject({ ok: false, status: 400 });
     expect(taskCreate).not.toHaveBeenCalled();
@@ -5003,21 +5033,21 @@ describe("nothing a create is refused for costs a task number", () => {
    * last category), so this closes the case and removes the need to know that.
    */
   it("refuses a category that is not text even when the board has no categories", async () => {
-    findById.mockReturnValue({ lean: () => Promise.resolve({ ...board, categories: [] }) });
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve({ ...board, categories: [] }) });
 
-    const refused = await createTask("p1", "actor", { title: "Ordinary title", category: {} });
+    const refused = await createTask(db, "p1", "actor", { title: "Ordinary title", category: {} });
     expect(refused).toMatchObject({ ok: false, status: 400 });
     expect(projectFindOneAndUpdate, "a refused create still spent a task number").not.toHaveBeenCalled();
 
     // The control: with no categories to check against, any ordinary string is still accepted
-    const created = await createTask("p1", "actor", { title: "Ordinary title", category: "chore" });
+    const created = await createTask(db, "p1", "actor", { title: "Ordinary title", category: "chore" });
     expect(created.ok).toBe(true);
   });
 
   // The control the whole block rests on: "the counter did not move" is equally true of a create
   // that refuses everything, and a task number nobody mints is a bug of its own.
   it("mints the number and writes the task when the body is answerable", async () => {
-    const result = await createTask("p1", "actor", {
+    const result = await createTask(db, "p1", "actor", {
       title: "Ordinary title",
       category: "bug",
       status: "doing",
@@ -5044,7 +5074,7 @@ describe("nothing a create is refused for costs a task number", () => {
    * value has to reach the write cast, not raw.
    */
   it("takes what the cast takes, and writes what the cast would write", async () => {
-    const result = await createTask("p1", "actor", {
+    const result = await createTask(db, "p1", "actor", {
       title: "Ordinary title",
       order: "2",
       description: "plain text",
@@ -5057,7 +5087,7 @@ describe("nothing a create is refused for costs a task number", () => {
   // The default arms of the same values: a body naming none of them still writes, so the guard
   // cannot be refusing absence.
   it("still creates a task that names none of them", async () => {
-    const result = await createTask("p1", "actor", { title: "Ordinary title" });
+    const result = await createTask(db, "p1", "actor", { title: "Ordinary title" });
 
     expect(result.ok).toBe(true);
     expect(taskCreate.mock.calls[0][0]).toMatchObject({
@@ -5079,7 +5109,7 @@ describe("a value the schema will not store is refused by updateTask too", () =>
   beforeEach(() => {
     vi.clearAllMocks();
     const stored = { _id: "t1", taskNumber: 9, status: "doing", title: "Before the edit" };
-    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
     findOne.mockReturnValue({
       lean: () => Promise.resolve(stored),
       populate: () => ({ lean: () => Promise.resolve(stored) }),
@@ -5106,7 +5136,7 @@ describe("a value the schema will not store is refused by updateTask too", () =>
 
   describe.each(REFUSED)("%s", (_label, body) => {
     it("is refused with a 400, and nothing is written", async () => {
-      const result = await updateTask("p1", "t1", body, WHO);
+      const result = await updateTask(db, "p1", "t1", body, WHO);
 
       expect(result).toMatchObject({ ok: false, status: 400 });
       expect(findOneAndUpdate, "the update reached the model anyway").not.toHaveBeenCalled();
@@ -5117,6 +5147,7 @@ describe("a value the schema will not store is refused by updateTask too", () =>
   // and an explicit null both mean "no due date", and Mongoose's own cast stores null for each.
   it("stores the values the schema accepts, clearings included", async () => {
     const result = await updateTask(
+      db,
       "p1",
       "t1",
       { priority: "high", dueDate: "2026-08-25", recurrence: { frequency: "monthly", interval: 3 } },
@@ -5130,12 +5161,12 @@ describe("a value the schema will not store is refused by updateTask too", () =>
       recurrence: { frequency: "monthly", interval: 3 },
     });
 
-    expect((await updateTask("p1", "t1", { dueDate: "" }, WHO)).ok).toBe(true);
-    expect((await updateTask("p1", "t1", { dueDate: null, recurrence: null }, WHO)).ok).toBe(true);
+    expect((await updateTask(db, "p1", "t1", { dueDate: "" }, WHO)).ok).toBe(true);
+    expect((await updateTask(db, "p1", "t1", { dueDate: null, recurrence: null }, WHO)).ok).toBe(true);
 
     // BP-445's lenient arm on this path. A board reorder is the only gesture that ever sends
     // `order`, so a guard stricter than the cast would refuse every drag.
-    const reordered = await updateTask("p1", "t1", { order: "7", description: "text" }, WHO);
+    const reordered = await updateTask(db, "p1", "t1", { order: "7", description: "text" }, WHO);
     expect(reordered.ok).toBe(true);
     expect(setStage(findOneAndUpdate.mock.calls.at(-1)![1])).toMatchObject({
       order: "7",
@@ -5158,13 +5189,13 @@ describe("heldRunRefusal", () => {
   const held = { execution: { runId: "r1", workerId: "w1", phase: "agent" }, taskNumber: 42 };
 
   it("says nothing about a task no run holds", async () => {
-    expect(await heldRunRefusal({ execution: {}, taskNumber: 42 }, "TP")).toBeNull();
+    expect(await heldRunRefusal(db, { execution: {}, taskNumber: 42 }, "TP")).toBeNull();
   });
 
   it("names the task, the worker and the phase", async () => {
-    workerFindById.mockReturnValue({ lean: () => Promise.resolve({ name: "mac-mini" }) });
+    workerFindOne.mockReturnValue({ lean: () => Promise.resolve({ name: "mac-mini" }) });
 
-    const refusal = await heldRunRefusal(held, "TP");
+    const refusal = await heldRunRefusal(db, held, "TP");
 
     expect(refusal?.status).toBe(409);
     expect(refusal?.error).toContain("TP-42");
@@ -5175,23 +5206,23 @@ describe("heldRunRefusal", () => {
 
   // The refusal is advice, and advice about the wrong act is worse than none
   it("names the act the caller was attempting, not always a move", async () => {
-    workerFindById.mockReturnValue({ lean: () => Promise.resolve({ name: "mac-mini" }) });
+    workerFindOne.mockReturnValue({ lean: () => Promise.resolve({ name: "mac-mini" }) });
 
-    expect((await heldRunRefusal(held, "TP", "delete"))?.error).toContain("delete it anyway");
-    expect((await heldRunRefusal(held, "TP"))?.error).toContain("move it anyway");
+    expect((await heldRunRefusal(db, held, "TP", "delete"))?.error).toContain("delete it anyway");
+    expect((await heldRunRefusal(db, held, "TP"))?.error).toContain("move it anyway");
   });
 
   // A project whose key could not be read still has to produce a name a person recognises
   it("falls back to a bare number when the project key is missing", async () => {
-    workerFindById.mockReturnValue({ lean: () => Promise.resolve({ name: "mac-mini" }) });
+    workerFindOne.mockReturnValue({ lean: () => Promise.resolve({ name: "mac-mini" }) });
 
-    expect((await heldRunRefusal(held, undefined))?.error).toContain("42");
+    expect((await heldRunRefusal(db, held, undefined))?.error).toContain("42");
   });
 
   it("still refuses when the worker has no name to give", async () => {
-    workerFindById.mockReturnValue({ lean: () => Promise.resolve(null) });
+    workerFindOne.mockReturnValue({ lean: () => Promise.resolve(null) });
 
-    const refusal = await heldRunRefusal(held, "TP");
+    const refusal = await heldRunRefusal(db, held, "TP");
 
     expect(refusal?.status).toBe(409);
     expect(refusal?.error).toContain("w1");
@@ -5205,7 +5236,7 @@ describe("updateTask writing a description change to the history", () => {
 
   function setup(before: string, after: string) {
     vi.clearAllMocks();
-    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
     findOne.mockReturnValue({
       lean: () => Promise.resolve(stored(before)),
       populate: () => ({ lean: () => Promise.resolve(stored(before)) }),
@@ -5214,20 +5245,20 @@ describe("updateTask writing a description change to the history", () => {
   }
 
   const descriptionRows = () =>
-    (logActivity as ReturnType<typeof vi.fn>).mock.calls.filter((call) => call[3] === "description");
+    (logActivity as ReturnType<typeof vi.fn>).mock.calls.filter((call) => call[4] === "description");
 
   it("records what the description said before and what it says now", async () => {
     setup("the old words", "the new words");
 
-    await updateTask("p1", "t1", { description: "the new words" }, "actor");
+    await updateTask(db, "p1", "t1", { description: "the new words" }, "actor");
 
-    expect(descriptionRows()).toEqual([["t1", "actor", "updated", "description", "the old words", "the new words"]]);
+    expect(descriptionRows()).toEqual([[db, "t1", "actor", "updated", "description", "the old words", "the new words"]]);
   });
 
   it("records nothing about a description the update left alone", async () => {
     setup("unchanged", "unchanged");
 
-    await updateTask("p1", "t1", { title: "y" }, "actor");
+    await updateTask(db, "p1", "t1", { title: "y" }, "actor");
 
     expect(descriptionRows()).toHaveLength(0);
   });
@@ -5243,8 +5274,8 @@ describe("updateTask writing an agent change to the history", () => {
 
   function setup(before: string | null, after: { _id: string; name: string } | null) {
     vi.clearAllMocks();
-    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
-    agentFindById.mockImplementation((id: string) => ({
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    agentFindOne.mockImplementation(({ _id: id }: { _id: string }) => ({
       lean: () =>
         Promise.resolve(
           catalog[id]
@@ -5260,31 +5291,31 @@ describe("updateTask writing an agent change to the history", () => {
     findOneAndUpdate.mockReturnValue({ populate: () => Promise.resolve({ ...stored, agent: after }) });
   }
 
-  const agentRows = () => vi.mocked(logActivity).mock.calls.filter((call) => call[3] === "agent");
+  const agentRows = () => vi.mocked(logActivity).mock.calls.filter((call) => call[4] === "agent");
 
   it("names both agents rather than their ids", async () => {
     setup(DEFAULT, { _id: MERGES, name: "Merges its own work" });
 
-    await updateTask("p1", "t1", { agent: MERGES }, "actor");
+    await updateTask(db, "p1", "t1", { agent: MERGES }, "actor");
 
-    expect(agentRows()).toEqual([["t1", "actor", "updated", "agent", "Default", "Merges its own work"]]);
+    expect(agentRows()).toEqual([[db, "t1", "actor", "updated", "agent", "Default", "Merges its own work"]]);
   });
 
   it("leaves the side with no agent empty", async () => {
     setup(null, { _id: MERGES, name: "Merges its own work" });
 
-    await updateTask("p1", "t1", { agent: MERGES }, "actor");
+    await updateTask(db, "p1", "t1", { agent: MERGES }, "actor");
 
-    expect(agentRows()).toEqual([["t1", "actor", "updated", "agent", "", "Merges its own work"]]);
+    expect(agentRows()).toEqual([[db, "t1", "actor", "updated", "agent", "", "Merges its own work"]]);
   });
 
   it("keeps the id of an agent it cannot find, for the read side to resolve", async () => {
     const GONE = "6ab0f94eadb2609f98d84da9";
     setup(GONE, null);
 
-    await updateTask("p1", "t1", { agent: "" }, "actor");
+    await updateTask(db, "p1", "t1", { agent: "" }, "actor");
 
-    expect(agentRows()).toEqual([["t1", "actor", "updated", "agent", GONE, ""]]);
+    expect(agentRows()).toEqual([[db, "t1", "actor", "updated", "agent", GONE, ""]]);
   });
 });
 
@@ -5293,7 +5324,7 @@ describe("updateTask writing acceptance criteria changes to the history", () => 
 
   function setup(before: ReturnType<typeof item>[], after: ReturnType<typeof item>[]) {
     vi.clearAllMocks();
-    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
     const stored = (checklist: ReturnType<typeof item>[]) => ({ _id: "t1", taskNumber: 7, status: "doing", title: "x", checklist });
     findOne.mockReturnValue({
       lean: () => Promise.resolve(stored(before)),
@@ -5303,7 +5334,7 @@ describe("updateTask writing acceptance criteria changes to the history", () => 
   }
 
   const criterionRows = () =>
-    vi.mocked(logActivities).mock.calls.flatMap(([rows]) => rows).filter((row) => row.action.startsWith("criterion_"));
+    vi.mocked(logActivities).mock.calls.flatMap(([, rows]) => rows).filter((row) => row.action.startsWith("criterion_"));
 
   it("writes one row per criterion that changed, by the criterion's id", async () => {
     setup(
@@ -5311,7 +5342,7 @@ describe("updateTask writing acceptance criteria changes to the history", () => 
       [item("a", "Loads", true), item("b", "Saves quickly"), item("n", "New")]
     );
 
-    await updateTask("p1", "t1", { checklist: [] }, "actor");
+    await updateTask(db, "p1", "t1", { checklist: [] }, "actor");
 
     const row = (action: string, field: string, oldValue: string, newValue: string) =>
       ({ taskId: "t1", userId: "actor", action, field, oldValue, newValue });
@@ -5326,7 +5357,7 @@ describe("updateTask writing acceptance criteria changes to the history", () => 
   it("covers the acceptanceCriteria text that MCP and the AI send", async () => {
     setup([item("a", "Loads")], [item("x", "Loads", true)]);
 
-    await updateTask("p1", "t1", { acceptanceCriteria: "- [x] Loads" }, "actor");
+    await updateTask(db, "p1", "t1", { acceptanceCriteria: "- [x] Loads" }, "actor");
 
     expect(criterionRows()).toEqual([
       expect.objectContaining({ action: "criterion_checked", field: "x", newValue: "Loads" }),
@@ -5337,7 +5368,7 @@ describe("updateTask writing acceptance criteria changes to the history", () => 
   it("writes nothing about criteria an update left alone", async () => {
     setup([item("a", "Loads")], [item("a", "Loads", true)]);
 
-    await updateTask("p1", "t1", { title: "y" }, "actor");
+    await updateTask(db, "p1", "t1", { title: "y" }, "actor");
 
     expect(criterionRows()).toEqual([]);
   });
@@ -5346,7 +5377,7 @@ describe("updateTask writing acceptance criteria changes to the history", () => 
 describe("updateTask rewriting many criteria at once", () => {
   it("writes one row that counts them rather than a row each", async () => {
     vi.clearAllMocks();
-    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
     const stored = (checklist: unknown[]) => ({ _id: "t1", taskNumber: 7, status: "doing", title: "x", checklist });
     const many = (prefix: string) =>
       Array.from({ length: CRITERION_ROWS_PER_WRITE }, (_, i) => ({ _id: `${prefix}${i}`, text: `${prefix} ${i}`, done: false }));
@@ -5356,15 +5387,15 @@ describe("updateTask rewriting many criteria at once", () => {
     });
     findOneAndUpdate.mockReturnValue({ populate: () => Promise.resolve(stored(many("new"))) });
 
-    await updateTask("p1", "t1", { acceptanceCriteria: "- rewritten" }, "actor");
+    await updateTask(db, "p1", "t1", { acceptanceCriteria: "- rewritten" }, "actor");
 
-    expect(logActivity).toHaveBeenCalledWith("t1", "actor", "updated", "checklist", "", String(CRITERION_ROWS_PER_WRITE * 2));
-    expect(vi.mocked(logActivities).mock.calls.flatMap(([rows]) => rows).filter((row) => row.action.startsWith("criterion_"))).toEqual([]);
+    expect(logActivity).toHaveBeenCalledWith(db, "t1", "actor", "updated", "checklist", "", String(CRITERION_ROWS_PER_WRITE * 2));
+    expect(vi.mocked(logActivities).mock.calls.flatMap(([, rows]) => rows).filter((row) => row.action.startsWith("criterion_"))).toEqual([]);
   });
 
   it("still writes a row each at the limit", async () => {
     vi.clearAllMocks();
-    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
     const stored = (checklist: unknown[]) => ({ _id: "t1", taskNumber: 7, status: "doing", title: "x", checklist });
     const added = Array.from({ length: CRITERION_ROWS_PER_WRITE }, (_, i) => ({ _id: `n${i}`, text: `new ${i}`, done: false }));
     findOne.mockReturnValue({
@@ -5373,31 +5404,31 @@ describe("updateTask rewriting many criteria at once", () => {
     });
     findOneAndUpdate.mockReturnValue({ populate: () => Promise.resolve(stored(added)) });
 
-    await updateTask("p1", "t1", { checklist: [] }, "actor");
+    await updateTask(db, "p1", "t1", { checklist: [] }, "actor");
 
-    expect(vi.mocked(logActivities).mock.calls.flatMap(([rows]) => rows)).toHaveLength(CRITERION_ROWS_PER_WRITE);
+    expect(vi.mocked(logActivities).mock.calls.flatMap(([, rows]) => rows)).toHaveLength(CRITERION_ROWS_PER_WRITE);
   });
 });
 
 describe("updateTask when the agent's name cannot be read", () => {
-  afterEach(() => agentFindById.mockReset());
+  afterEach(() => agentFindOne.mockReset());
 
   it("still answers the write it already made, and keeps the id", async () => {
     vi.clearAllMocks();
-    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
     const stored = { _id: "t1", taskNumber: 7, status: "doing", title: "x", agent: "6ab0f94eadb2609f98d84da1" };
     findOne.mockReturnValue({
       lean: () => Promise.resolve(stored),
       populate: () => ({ lean: () => Promise.resolve(stored) }),
     });
     findOneAndUpdate.mockReturnValue({ populate: () => Promise.resolve({ ...stored, agent: null }) });
-    agentFindById.mockImplementation(() => ({ lean: () => Promise.reject(new Error("db down")) }));
+    agentFindOne.mockImplementation(() => ({ lean: () => Promise.reject(new Error("db down")) }));
 
-    const result = await updateTask("p1", "t1", { agent: "" }, "actor");
+    const result = await updateTask(db, "p1", "t1", { agent: "" }, "actor");
 
     expect(result.ok).toBe(true);
-    expect(vi.mocked(logActivity).mock.calls.filter((c) => c[3] === "agent")).toEqual([
-      ["t1", "actor", "updated", "agent", "6ab0f94eadb2609f98d84da1", ""],
+    expect(vi.mocked(logActivity).mock.calls.filter((c) => c[4] === "agent")).toEqual([
+      [db, "t1", "actor", "updated", "agent", "6ab0f94eadb2609f98d84da1", ""],
     ]);
   });
 });
@@ -5406,7 +5437,7 @@ describe("updateTask writing a project field's change", () => {
   it("marks it as the project's own field, so it is never read as the task's description", async () => {
     vi.clearAllMocks();
     const board = { ...customBoard, customFields: [{ _id: "f1", name: "description", fieldType: "text" }] };
-    findById.mockReturnValue({ lean: () => Promise.resolve(board) });
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(board) });
     const task = (value: string) => ({ _id: "t1", taskNumber: 7, status: "doing", title: "x", customFieldValues: { f1: value } });
     findOne.mockReturnValue({
       lean: () => Promise.resolve(task("a")),
@@ -5414,11 +5445,11 @@ describe("updateTask writing a project field's change", () => {
     });
     findOneAndUpdate.mockReturnValue({ populate: () => Promise.resolve(task("b")) });
 
-    await updateTask("p1", "t1", { customFieldValues: { f1: "b" } }, "actor");
+    await updateTask(db, "p1", "t1", { customFieldValues: { f1: "b" } }, "actor");
 
-    expect(logActivities).toHaveBeenCalledWith([
+    expect(logActivities).toHaveBeenCalledWith(db, [
       expect.objectContaining({ field: "description", oldValue: "a", newValue: "b", customField: true }),
     ]);
-    expect(logActivity).not.toHaveBeenCalledWith("t1", "actor", "updated", "description", "a", "b");
+    expect(logActivity).not.toHaveBeenCalledWith(db, "t1", "actor", "updated", "description", "a", "b");
   });
 });

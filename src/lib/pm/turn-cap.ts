@@ -1,8 +1,8 @@
 import { Types } from "mongoose";
-import { PmMessage } from "@/models/pmMessage";
 import { DEFAULT_PM_AUTONOMY } from "@/types";
 import { isValidTimezone, startOfDayInTimezone } from "@/lib/time";
 import { resolveDailyTokenCap, resolveDailyTurnCap } from "./availability";
+import type { ScopedDb } from "@/lib/db-scope";
 
 /**
  * A turn is counted when it is *started*, and a turn the provider then refused is still one — the
@@ -12,6 +12,7 @@ import { resolveDailyTokenCap, resolveDailyTurnCap } from "./availability";
  * so, so the number on screen means what it says (BP-453).
  */
 export async function isOverDailyTurnCap(
+  db: ScopedDb,
   projectId: string,
   pm: { dailyTurnCap?: number; autonomy?: { timezone?: string } }
 ): Promise<{ over: boolean; cap: number; used: number }> {
@@ -24,7 +25,7 @@ export async function isOverDailyTurnCap(
     new Date(),
     zone && isValidTimezone(zone) ? zone : DEFAULT_PM_AUTONOMY.timezone
   );
-  const used = await PmMessage.countDocuments({
+  const used = await db.PmMessage.countDocuments({
     project: projectId,
     role: "user",
     createdAt: { $gte: startOfDay },
@@ -43,6 +44,7 @@ export async function isOverDailyTurnCap(
  * seeing "40 turns, 380 calls" is what makes the difference legible (BP-284).
  */
 export async function dailyPmSpend(
+  db: ScopedDb,
   projectId: string,
   pm: { dailyTokenCap?: number; autonomy?: { timezone?: string } }
 ): Promise<{
@@ -61,7 +63,7 @@ export async function dailyPmSpend(
     new Date(),
     zone && isValidTimezone(zone) ? zone : DEFAULT_PM_AUTONOMY.timezone
   );
-  const [totals] = await PmMessage.aggregate<{
+  const [totals] = await db.PmMessage.aggregate<{
     tokens: number;
     promptTokens: number;
     cachedTokens: number;

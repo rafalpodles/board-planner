@@ -27,7 +27,7 @@ vi.mock("@/lib/invitation-mail", async () => {
   return { ...actual, deliverTo };
 });
 vi.mock("@/lib/invitation-view", () => ({
-  toApiInvitations: async (rows: { email: string }[]) => rows.map((r) => ({ email: r.email })),
+  toApiInvitations: async (_db: unknown, rows: { email: string }[]) => rows.map((r) => ({ email: r.email })),
   describeInvitation: () => "described",
 }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
@@ -36,6 +36,7 @@ vi.mock("@/models/user", () => ({ User: { exists: userExists } }));
 vi.mock("@/models/project", () => ({ Project: { find: projectFind } }));
 
 const { POST } = await import("./route");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 
 const ID = "64b0000000000000000000aa";
 const resend = () =>
@@ -65,8 +66,8 @@ describe("POST /api/invitations/:id/resend", () => {
     const res = await resend();
 
     expect(res.status).toBe(200);
-    expect(reissueInvitation).toHaveBeenCalledWith(ID, "admin-2");
-    expect(recordDelivery).toHaveBeenCalledWith(ID, "cpi_new", "email");
+    expect(reissueInvitation).toHaveBeenCalledWith(scopedToDefaultTenant(), ID, "admin-2");
+    expect(recordDelivery).toHaveBeenCalledWith(scopedToDefaultTenant(), ID, "cpi_new", "email");
     expect(deliverTo.mock.calls[0][1]).toBe("cpi_new");
     expect(deliverTo.mock.calls[0][3]).toBe(caller);
     expect(JSON.stringify(await res.json())).not.toContain("cpi_new");

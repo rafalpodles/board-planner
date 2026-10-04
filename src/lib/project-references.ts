@@ -1,12 +1,5 @@
 import { Types } from "mongoose";
-import { Agent } from "@/models/agent";
-import { ApiToken } from "@/models/apiToken";
-import { OAuthCode } from "@/models/oauthCode";
-import { OAuthToken } from "@/models/oauthToken";
-import { PmOauthState } from "@/models/pmOauthState";
-import { PmTrigger } from "@/models/pmTrigger";
-import { User } from "@/models/user";
-import { Worker } from "@/models/worker";
+import type { ScopedDb } from "@/lib/db-scope";
 
 // An empty allowedProjects reads as unscoped (auth.ts), so a credential scoped to nothing but this
 // project is revoked, and the id is pulled only from one that keeps another project afterwards.
@@ -25,21 +18,21 @@ export function scopedToItAndAnother(projectId: Types.ObjectId) {
   };
 }
 
-export async function dropProjectReferences(projectId: Types.ObjectId): Promise<void> {
+export async function dropProjectReferences(db: ScopedDb, projectId: Types.ObjectId): Promise<void> {
   const pull = { $pull: { allowedProjects: projectId } };
-  await ApiToken.deleteMany(scopedOnlyTo(projectId));
-  await ApiToken.updateMany(scopedToItAndAnother(projectId), pull);
-  await OAuthToken.deleteMany(scopedOnlyTo(projectId));
-  await OAuthToken.updateMany(scopedToItAndAnother(projectId), pull);
-  await OAuthCode.deleteMany(scopedOnlyTo(projectId));
-  await OAuthCode.updateMany(scopedToItAndAnother(projectId), pull);
+  await db.ApiToken.deleteMany(scopedOnlyTo(projectId));
+  await db.ApiToken.updateMany(scopedToItAndAnother(projectId), pull);
+  await db.OAuthToken.deleteMany(scopedOnlyTo(projectId));
+  await db.OAuthToken.updateMany(scopedToItAndAnother(projectId), pull);
+  await db.OAuthCode.deleteMany(scopedOnlyTo(projectId));
+  await db.OAuthCode.updateMany(scopedToItAndAnother(projectId), pull);
 
-  await Worker.updateMany({ desiredProjects: projectId }, { $pull: { desiredProjects: projectId } });
-  await User.updateMany(
+  await db.Worker.updateMany({ desiredProjects: projectId }, { $pull: { desiredProjects: projectId } });
+  await db.User.updateMany(
     { "notifications.projects.project": projectId },
     { $pull: { "notifications.projects": { project: projectId } } }
   );
-  await PmTrigger.deleteMany({ project: projectId });
-  await PmOauthState.deleteMany({ project: projectId });
-  await Agent.deleteMany({ scope: "project", project: projectId });
+  await db.PmTrigger.deleteMany({ project: projectId });
+  await db.PmOauthState.deleteMany({ project: projectId });
+  await db.Agent.deleteMany({ scope: "project", project: projectId });
 }

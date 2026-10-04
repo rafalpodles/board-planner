@@ -1,10 +1,10 @@
 import { Types } from "mongoose";
-import { User } from "@/models/user";
 import { projectAudienceFilter } from "@/lib/grants";
 import { resolveChannels } from "@/lib/notification-prefs";
 import { createNotifications, NotificationEmail } from "@/lib/in-app-notifications";
 import { isEmailConfigured } from "@/lib/email";
 import { readableSecretPatterns } from "@/lib/encryption";
+import type { ScopedDb } from "@/lib/db-scope";
 
 /**
  * `task_created` is the one row of the grid whose recipients cannot be filtered out of a list the
@@ -66,6 +66,7 @@ function deliverable(row: string, within: (clause: Clause) => Clause): Clause[] 
  * it refuses is logged.
  */
 export async function boardFeedSubscribers(
+  db: ScopedDb,
   projectId: string,
   exceptUserId?: string
 ): Promise<string[]> {
@@ -80,10 +81,10 @@ export async function boardFeedSubscribers(
   };
   const global = (clause: Clause) => prefixed("notifications.defaults", clause);
 
-  const candidates = await User.find(
+  const candidates = await db.User.find(
     {
       $and: [
-        await projectAudienceFilter(projectId),
+        await projectAudienceFilter(db, projectId),
         { deactivatedAt: null },
         ...(exceptUserId && OBJECT_ID.test(exceptUserId)
           ? [{ _id: { $ne: new Types.ObjectId(exceptUserId) } }]
@@ -135,7 +136,7 @@ export async function boardFeedSubscribers(
  * actor's name — and most boards have no subscribers at all. Passing the finished object would
  * put that query on every task creation on the instance, including the ones nobody hears about.
  */
-export async function notifyBoardFeed(params: {
+export async function notifyBoardFeed(db: ScopedDb, params: {
   taskId: string;
   projectId: string;
   actorId: string;
@@ -148,9 +149,9 @@ export async function notifyBoardFeed(params: {
     // Nobody hears about a task they created themselves. createNotifications refuses the actor
     // anyway and stays the authority on it; leaving them out of the query is so they neither take
     // a place under the cap nor get a mail assembled for an audience of one.
-    const recipientIds = await boardFeedSubscribers(params.projectId, params.actorId);
+    const recipientIds = await boardFeedSubscribers(db, params.projectId, params.actorId);
     if (recipientIds.length === 0) return;
-    await createNotifications({
+    await createNotifications(db, {
       ...params,
       type: "task_created",
       recipientIds,

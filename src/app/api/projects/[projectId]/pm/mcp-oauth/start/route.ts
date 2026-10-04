@@ -80,7 +80,7 @@ export const POST = withProjectOwner(async (request, { params, user, db }) => {
       // an action that does not exist (BP-751 review). Recording it makes the retry this message
       // asks for actually work: Connect again once the provider knows the new address, and this
       // guard no longer has anything to compare against.
-      await writeServerOauth(projectId, server, { redirectUri });
+      await writeServerOauth(db, projectId, server, { redirectUri });
       return NextResponse.json(
         {
           error: `This connection's callback address changed to ${redirectUri}. Make sure this client is registered with that address on the provider, then Connect again — a client id this app did not register itself is never replaced automatically.`,
@@ -128,7 +128,7 @@ export const POST = withProjectOwner(async (request, { params, user, db }) => {
   const changed = Object.fromEntries(
     Object.entries(oauth).filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(read[key]))
   );
-  if (Object.keys(changed).length > 0 && !(await writeServerOauth(projectId, server, changed))) {
+  if (Object.keys(changed).length > 0 && !(await writeServerOauth(db, projectId, server, changed))) {
     return NextResponse.json(
       { error: `The connection "${server.name}" changed while it was being set up. Connect again.` },
       { status: 409 }
@@ -139,7 +139,7 @@ export const POST = withProjectOwner(async (request, { params, user, db }) => {
     auditChange(`${label} · OAuth`, read.status ?? "unconfigured", oauth.status),
     clientRegistered ? `${label} · OAuth client registered` : null,
   ].filter((line): line is string => line !== null);
-  if (audited.length > 0) logProjectAudit(projectId, user._id, "settings_updated", audited);
+  if (audited.length > 0) logProjectAudit(db, projectId, user._id, "settings_updated", audited);
 
   const { verifier, challenge } = createPkce();
   const state = crypto.randomBytes(32).toString("base64url");

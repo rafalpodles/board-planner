@@ -24,6 +24,7 @@ vi.mock("@/models/grant", () => ({ Grant: { create: grantCreate } }));
 vi.mock("@/models/task", () => ({ Task: { aggregate: taskAggregate, findOne: vi.fn() } }));
 vi.mock("@/models/sprint", () => ({ Sprint: { find: sprintFind } }));
 
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 const { GET, POST } = await import("./route");
 
 const MEMBER = { _id: "u1", role: "member" };
@@ -96,7 +97,7 @@ describe("GET /api/projects", () => {
 
     const body = await (await GET(request(), ctx())).json();
 
-    expect(check).toHaveBeenCalledWith(MEMBER, "p1", "admin");
+    expect(check).toHaveBeenCalledWith(scopedToDefaultTenant(), MEMBER, "p1", "admin");
     expect(body[0].canAdmin).toBe(true);
   });
 });

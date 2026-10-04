@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const runPmTurn = vi.fn();
-const findByIdAndUpdate = vi.fn();
+const findOneAndUpdate = vi.fn();
 const createNotifications = vi.fn();
 
 const WATCHER = "507f1f77bcf86cd799439051";
@@ -14,7 +14,7 @@ let reviewed: Record<string, unknown> | null = null;
 // board's identity. One answer for both leaves the mail's project name and key untestable.
 vi.mock("@/models/project", () => ({
   Project: {
-    findById: (_id: unknown, projection?: string) => ({
+    findOne: (_filter: unknown, projection?: string) => ({
       lean: async () =>
         projection === "pm"
           ? { pm: { enabled: true, autonomy: { handleNeedsHumanReview: true } } }
@@ -22,9 +22,9 @@ vi.mock("@/models/project", () => ({
     }),
   },
 }));
-vi.mock("@/models/task", () => ({ Task: { findById: () => ({ lean: async () => reviewed }) } }));
+vi.mock("@/models/task", () => ({ Task: { findOne: () => ({ lean: async () => reviewed }) } }));
 vi.mock("@/models/pmTrigger", () => ({
-  PmTrigger: { findByIdAndUpdate, create: vi.fn(), findOneAndUpdate: vi.fn() },
+  PmTrigger: { create: vi.fn(), findOneAndUpdate },
 }));
 vi.mock("@/lib/in-app-notifications", () => ({
   createNotifications,
@@ -60,6 +60,9 @@ vi.mock("./config", () => ({ isPmAvailable: () => isPmAvailable() }));
 
 const { runPmTrigger } = await import("./triggers");
 const { NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS } = await import("./autonomy");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
+const db = scopedToDefaultTenant();
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const trigger = { _id: "t1", project: "p1", task: "task1", taskKey: "BP-1", attempts: 1 } as any;
@@ -83,18 +86,19 @@ describe("runPmTrigger", () => {
   it("settles the trigger as failed without a turn when no model is configured", async () => {
     isPmAvailable.mockReturnValueOnce(false);
 
-    await runPmTrigger(trigger);
+    await runPmTrigger(db, trigger);
 
     expect(runPmTurn).not.toHaveBeenCalled();
-    expect(findByIdAndUpdate).toHaveBeenCalledWith("t1", {
+    expect(findOneAndUpdate).toHaveBeenCalledWith({ _id: "t1", tenant: DEFAULT_TENANT_ID }, {
       $set: { state: "failed", lastError: "The PM agent is not configured on this instance", active: false },
     });
   });
 
   it("withholds assign_task and change_status from the turn", async () => {
-    await runPmTrigger(trigger);
+    await runPmTrigger(db, trigger);
 
     expect(runPmTurn).toHaveBeenCalledWith(
+      db,
       // `autonomous` as well as the name list, and they are not the same guarantee: the list is
       // matched by exact name and MCP tools are `mcp_<server>_<tool>`, so nothing in it could ever
       // withhold one. Dropping this flag leaves every other assertion in this file green (BP-321).
@@ -103,16 +107,16 @@ describe("runPmTrigger", () => {
         autonomous: true,
       })
     );
-    expect(findByIdAndUpdate).toHaveBeenCalledWith(
-      "t1",
+    expect(findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: "t1", tenant: DEFAULT_TENANT_ID },
       expect.objectContaining({ $set: expect.objectContaining({ state: "done" }) })
     );
   });
 
   it("does not ask the turn to move the task", async () => {
-    await runPmTrigger(trigger);
+    await runPmTrigger(db, trigger);
 
-    const { userMessage } = runPmTurn.mock.calls[0][0];
+    const { userMessage } = runPmTurn.mock.calls[0][1];
     expect(userMessage).toContain("cannot change statuses or assignees");
     expect(userMessage).not.toContain("move the task to the status you judge correct");
   });
@@ -128,10 +132,11 @@ describe("what an autonomous PM review tells the watchers", () => {
   it("names the task, the column it is sitting in and what the PM concluded", async () => {
     runPmTurn.mockResolvedValue({ ok: true, message: { content: "Blocked on the OIDC redirect" } });
 
-    await runPmTrigger(trigger);
+    await runPmTrigger(db, trigger);
 
     expect(createNotifications).toHaveBeenCalledTimes(1);
-    const [notification] = createNotifications.mock.calls[0];
+    const [notifiedDb, notification] = createNotifications.mock.calls[0];
+    expect(notifiedDb).toBe(db);
     expect(notification).toMatchObject({
       type: "comment_added",
       taskId: "task1",
@@ -159,7 +164,7 @@ describe("what an autonomous PM review tells the watchers", () => {
   it("says nothing when the turn itself failed", async () => {
     runPmTurn.mockResolvedValue({ ok: false, error: "the model refused" });
 
-    await runPmTrigger(trigger);
+    await runPmTrigger(db, trigger);
 
     expect(createNotifications).not.toHaveBeenCalled();
   });
@@ -167,7 +172,7 @@ describe("what an autonomous PM review tells the watchers", () => {
   it("says nothing about a task that is gone by the time the turn ends", async () => {
     reviewed = null;
 
-    await runPmTrigger(trigger);
+    await runPmTrigger(db, trigger);
 
     expect(createNotifications).not.toHaveBeenCalled();
   });

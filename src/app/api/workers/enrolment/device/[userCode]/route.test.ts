@@ -9,7 +9,7 @@ const projectFind = vi.fn();
 const projectLean = vi.fn();
 const workerFindOne = vi.fn();
 let ownedByCaller: string[] = [];
-const administeredProjectIds = vi.fn(async (user: { role: string }, ids: string[]) =>
+const administeredProjectIds = vi.fn(async (_db: unknown, user: { role: string }, ids: string[]) =>
   new Set(user.role === "admin" ? ids : ids.filter((id) => ownedByCaller.includes(id)))
 );
 
@@ -39,6 +39,7 @@ vi.mock("@/lib/repository", () => ({
     p.repositoryUrl || (p.githubRepo ? `git@github.com:${p.githubRepo}.git` : ""),
 }));
 
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 const { GET } = await import("./route");
 
 const MEMBER = { _id: "member-1", role: "member", fullName: "Owner", username: "owner" };
@@ -86,7 +87,7 @@ describe("GET /api/workers/enrolment/device/:userCode", () => {
   it("asks only for the projects this person can reach", async () => {
     const response = await GET(request(), ctx());
 
-    expect(accessibleProjectIds).toHaveBeenCalledWith(expect.objectContaining({ _id: "member-1" }));
+    expect(accessibleProjectIds).toHaveBeenCalledWith(scopedToDefaultTenant(), expect.objectContaining({ _id: "member-1" }));
     expect(projectFind).toHaveBeenCalledWith({ _id: { $in: [MINE] }, tenant: DEFAULT_TENANT_ID });
     expect((await response.json()).projects.map((p: { _id: string }) => p._id)).toEqual([MINE]);
     expect(JSON.stringify(await GET(request(), ctx()).then((r) => r.json()))).not.toContain(THEIRS);

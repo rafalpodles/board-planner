@@ -34,8 +34,8 @@ export const POST = withProjectOwner(async (_request, { params, user, db }) => {
     return NextResponse.json({ error: pmDisabledReason(project.pm) }, { status: 409 });
   }
 
-  const pmUser = await getPmUser();
-  const review = await startBoardReview(String(project._id), project.key, project.pm, String(pmUser._id));
+  const pmUser = await getPmUser(db);
+  const review = await startBoardReview(db, String(project._id), project.key, project.pm, String(pmUser._id));
   if (review.status === "skipped") {
     return NextResponse.json({ error: `The review cannot run: ${review.reason}.` }, { status: 409 });
   }

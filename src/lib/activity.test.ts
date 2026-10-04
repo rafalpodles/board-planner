@@ -8,6 +8,9 @@ vi.mock("@/models/activityLog", () => ({ ActivityLog: { create, insertMany } }))
 const { logActivity, logActivities, editSessions, presentSessions, EDIT_SESSION_MS } = await import(
   "./activity"
 );
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
+const db = scopedToDefaultTenant();
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -29,7 +32,7 @@ describe("logActivities", () => {
   });
 
   it("writes the rows in the order it was given them", async () => {
-    await logActivities([row("a", "BP-2"), row("b", "BP-1")]);
+    await logActivities(db, [row("a", "BP-2"), row("b", "BP-1")]);
 
     expect(insertMany).toHaveBeenCalledTimes(1);
     expect(insertMany.mock.calls[0][0].map((d: { task: string }) => d.task)).toEqual(["a", "b"]);
@@ -41,17 +44,17 @@ describe("logActivities", () => {
   // The order is the whole reason this is one call: a reader breaks a createdAt tie on _id, and
   // Mongoose mints those while casting, in array order.
   it("maps each row the way logActivity maps its arguments", async () => {
-    await logActivities([
+    await logActivities(db, [
       { taskId: "a", userId: "u1", action: "link_removed", field: "parent_of", oldValue: "BP-9" },
     ]);
 
     expect(insertMany.mock.calls[0][0]).toEqual([
-      { task: "a", user: "u1", action: "link_removed", field: "parent_of", oldValue: "BP-9", newValue: "" },
+      { task: "a", user: "u1", action: "link_removed", field: "parent_of", oldValue: "BP-9", newValue: "", tenant: DEFAULT_TENANT_ID },
     ]);
   });
 
   it("marks a project's field and its type, and only that", async () => {
-    await logActivities([
+    await logActivities(db, [
       { taskId: "a", userId: "u1", action: "updated", field: "Notes", oldValue: "x", newValue: "y", customField: true, fieldType: "text" },
       { taskId: "a", userId: "u1", action: "updated", field: "title", oldValue: "x", newValue: "y" },
     ]);
@@ -63,7 +66,7 @@ describe("logActivities", () => {
   });
 
   it("writes nothing rather than an empty batch", async () => {
-    await logActivities([]);
+    await logActivities(db, []);
 
     expect(insertMany).not.toHaveBeenCalled();
   });
@@ -72,7 +75,7 @@ describe("logActivities", () => {
   it("does not propagate a failed write", async () => {
     insertMany.mockRejectedValue(new Error("no"));
 
-    await expect(logActivities([row("a", "BP-2")])).resolves.toBeUndefined();
+    await expect(logActivities(db, [row("a", "BP-2")])).resolves.toBeUndefined();
   });
 
   // An ordered bulk keeps what went in before the failure, and `rows` is built losses-first — so
@@ -83,7 +86,7 @@ describe("logActivities", () => {
     insertMany.mockRejectedValue(partial);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    await logActivities([row("a", "1"), row("b", "2"), row("c", "3")]);
+    await logActivities(db, [row("a", "1"), row("b", "2"), row("c", "3")]);
 
     expect(warn).toHaveBeenCalledWith("Failed to log activity: wrote 2 of 3 rows");
     warn.mockRestore();
@@ -93,7 +96,7 @@ describe("logActivities", () => {
     insertMany.mockRejectedValue(new Error("validation"));
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    await logActivities([row("a", "1")]);
+    await logActivities(db, [row("a", "1")]);
 
     expect(warn).toHaveBeenCalledWith("Failed to log activity: wrote 0 of 1 rows");
     warn.mockRestore();
@@ -102,7 +105,7 @@ describe("logActivities", () => {
 
 describe("logActivity", () => {
   it("normalises the three optional fields to empty strings", async () => {
-    await logActivity("a", "u1", "created");
+    await logActivity(db, "a", "u1", "created");
 
     expect(create).toHaveBeenCalledWith({
       task: "a",
@@ -111,12 +114,13 @@ describe("logActivity", () => {
       field: "",
       oldValue: "",
       newValue: "",
+      tenant: DEFAULT_TENANT_ID,
     });
   });
 
   // Null is a sync writing about what GitHub said, which no person authored (BP-628)
   it("keeps a null author rather than dropping the row", async () => {
-    await logActivity("a", null, "pr_linked", "linkedPRs", "", "https://example/pull/1");
+    await logActivity(db, "a", null, "pr_linked", "linkedPRs", "", "https://example/pull/1");
 
     expect(create.mock.calls[0][0]).toMatchObject({ user: null, newValue: "https://example/pull/1" });
   });
@@ -124,7 +128,7 @@ describe("logActivity", () => {
   it("does not propagate a failed write", async () => {
     create.mockRejectedValue(new Error("no"));
 
-    await expect(logActivity("a", "u1", "created")).resolves.toBeUndefined();
+    await expect(logActivity(db, "a", "u1", "created")).resolves.toBeUndefined();
   });
 });
 

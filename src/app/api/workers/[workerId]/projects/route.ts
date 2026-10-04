@@ -46,7 +46,7 @@ export const GET = withAuth(async (_request, { params, user, db }) => {
   const [projects, others, reachable] = await Promise.all([
     db.Project.find({}).select("_id key name repositoryUrl githubRepo gitlabRepo gitlabHost worker").lean(),
     db.Worker.find({ _id: { $ne: worker._id } }).select("_id name host repos enabled lastSeenAt createdAt"),
-    ownerReachableProjectIds(worker),
+    ownerReachableProjectIds(db, worker),
   ]);
 
   const catalogue = catalogueFor(
@@ -56,6 +56,7 @@ export const GET = withAuth(async (_request, { params, user, db }) => {
     worker.desiredProjects?.map(String)
   );
   const administered = await administeredProjectIds(
+    db,
     user,
     catalogue.map((entry) => entry.project)
   );
@@ -99,8 +100,8 @@ export const PUT = withAuth(async (request, { params, user, db }) => {
   // owner's, because a project outside it would be recorded as wanted and then refused on every
   // claim, which reads as a broken machine rather than a permission it never had.
   const [callerReach, ownerReach] = await Promise.all([
-    accessibleProjectIds(user),
-    ownerReachableProjectIds(worker),
+    accessibleProjectIds(db, user),
+    ownerReachableProjectIds(db, worker),
   ]);
   const within = (reach: string[] | null, id: string) => reach === null || reach.includes(id);
 
@@ -115,6 +116,7 @@ export const PUT = withAuth(async (request, { params, user, db }) => {
   // own settings page. A member who ticks one records the wish; the switch stays off and the reply
   // says which ones, so the screen can say it rather than leaving a machine idle with no reason.
   const administered = await administeredProjectIds(
+    db,
     user,
     chosen.map((project) => String(project._id))
   );
@@ -126,7 +128,7 @@ export const PUT = withAuth(async (request, { params, user, db }) => {
       continue;
     }
     await db.Project.updateOne({ _id: project._id }, { $set: { "worker.enabled": true } });
-    void logInstanceAudit({
+    void logInstanceAudit(db, {
       action: "project_workers_enabled",
       target: project.key || String(project._id),
       user: String(user._id),

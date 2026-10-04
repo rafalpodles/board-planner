@@ -4,7 +4,7 @@ const KEY = "b".repeat(64);
 const OTHER_KEY = "c".repeat(64);
 process.env.ENCRYPTION_KEY = KEY;
 
-const findById = vi.fn();
+const findOne = vi.fn();
 const safeFetch = vi.fn((url: string, init?: RequestInit, options?: unknown) => {
   void url;
   void init;
@@ -12,10 +12,11 @@ const safeFetch = vi.fn((url: string, init?: RequestInit, options?: unknown) => 
   return Promise.resolve(new Response("ok"));
 });
 
-vi.mock("@/models/project", () => ({ Project: { findById } }));
+vi.mock("@/models/project", () => ({ Project: { findOne } }));
 vi.mock("./safe-fetch", () => ({ safeFetch }));
 
 const { dispatchNotifications } = await import("./notifications");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 const { encryptSecret } = await import("./encryption");
 const { WEBHOOK_DESTINATION } = await import("./url-validation");
 
@@ -26,7 +27,7 @@ function projectWith(...urls: string[]) {
 }
 
 function channelsOf(type: "slack" | "discord", events: string[], ...urls: string[]) {
-  findById.mockReturnValue({
+  findOne.mockReturnValue({
     lean: () =>
       Promise.resolve({
         notificationChannels: urls.map((webhookUrl, i) => ({
@@ -63,7 +64,7 @@ describe("dispatchNotifications", () => {
   it("posts to the URL a stored ciphertext decrypts to, not to the ciphertext", async () => {
     projectWith(encryptSecret("https://hooks.slack.com/services/T/B/secret"));
 
-    await dispatchNotifications("p1", "task_created", PAYLOAD);
+    await dispatchNotifications(scopedToDefaultTenant(), "p1", "task_created", PAYLOAD);
 
     expect(safeFetch).toHaveBeenCalledTimes(1);
     expect(safeFetch.mock.calls[0][0]).toBe("https://hooks.slack.com/services/T/B/secret");
@@ -73,7 +74,7 @@ describe("dispatchNotifications", () => {
   it("posts to a legacy plaintext URL unchanged", async () => {
     projectWith("https://hooks.slack.com/services/T/B/legacy");
 
-    await dispatchNotifications("p1", "task_created", PAYLOAD);
+    await dispatchNotifications(scopedToDefaultTenant(), "p1", "task_created", PAYLOAD);
 
     expect(safeFetch).toHaveBeenCalledTimes(1);
     expect(safeFetch.mock.calls[0][0]).toBe("https://hooks.slack.com/services/T/B/legacy");
@@ -85,7 +86,7 @@ describe("dispatchNotifications", () => {
     process.env.ENCRYPTION_KEY = OTHER_KEY;
     projectWith(written);
 
-    await dispatchNotifications("p1", "task_created", PAYLOAD);
+    await dispatchNotifications(scopedToDefaultTenant(), "p1", "task_created", PAYLOAD);
 
     expect(safeFetch.mock.calls[0][0]).toBe("https://hooks.slack.com/services/T/B/rotated");
   });
@@ -99,7 +100,7 @@ describe("dispatchNotifications", () => {
     process.env.ENCRYPTION_KEY = OTHER_KEY;
     projectWith(lost, encryptSecret("https://hooks.slack.com/services/T/B/readable"));
 
-    await dispatchNotifications("p1", "task_created", PAYLOAD);
+    await dispatchNotifications(scopedToDefaultTenant(), "p1", "task_created", PAYLOAD);
 
     expect(safeFetch).toHaveBeenCalledTimes(1);
     expect(safeFetch.mock.calls[0][0]).toBe("https://hooks.slack.com/services/T/B/readable");
@@ -115,7 +116,7 @@ describe("dispatchNotifications", () => {
   it("still refuses a decrypted URL the allowlist rejects", async () => {
     projectWith(encryptSecret("http://127.0.0.1/internal"));
 
-    await dispatchNotifications("p1", "task_created", PAYLOAD);
+    await dispatchNotifications(scopedToDefaultTenant(), "p1", "task_created", PAYLOAD);
 
     expect(safeFetch).not.toHaveBeenCalled();
   });
@@ -129,7 +130,7 @@ describe("dispatchNotifications — markup in what members write", () => {
   it("sends a Slack link in a task title as text, not as a link", async () => {
     channelsOf("slack", ["task_created"], "https://hooks.slack.com/services/T/B/x");
 
-    await dispatchNotifications("p1", "task_created", {
+    await dispatchNotifications(scopedToDefaultTenant(), "p1", "task_created", {
       project: { key: "BP", name: "Board" },
       task: { taskKey: "BP-1", title: `Fix login ${PHISH}`, status: "todo" },
     });
@@ -144,7 +145,7 @@ describe("dispatchNotifications — markup in what members write", () => {
   it("sends a Slack link in a comment body as text", async () => {
     channelsOf("slack", ["comment_added"], "https://hooks.slack.com/services/T/B/x");
 
-    await dispatchNotifications("p1", "comment_added", {
+    await dispatchNotifications(scopedToDefaultTenant(), "p1", "comment_added", {
       ...PAYLOAD,
       data: { commentBody: `see ${PHISH}`, author: "anna" },
     });
@@ -157,7 +158,7 @@ describe("dispatchNotifications — markup in what members write", () => {
   it("does not let a Discord comment ping the room or forge markdown", async () => {
     channelsOf("discord", ["comment_added"], "https://discord.com/api/webhooks/1/x");
 
-    await dispatchNotifications("p1", "comment_added", {
+    await dispatchNotifications(scopedToDefaultTenant(), "p1", "comment_added", {
       ...PAYLOAD,
       data: { commentBody: "@everyone **URGENT** [reset](https://phish.example)", author: "anna" },
     });
@@ -172,7 +173,7 @@ describe("dispatchNotifications — markup in what members write", () => {
   it("escapes a Discord task title and cuts a long comment before escaping it", async () => {
     channelsOf("discord", ["task_created", "comment_added"], "https://discord.com/api/webhooks/1/x");
 
-    await dispatchNotifications("p1", "task_created", {
+    await dispatchNotifications(scopedToDefaultTenant(), "p1", "task_created", {
       project: { key: "BP", name: "Board" },
       task: { taskKey: "BP-1", title: "# Headline **bold**", status: "todo" },
     });
@@ -180,7 +181,7 @@ describe("dispatchNotifications — markup in what members write", () => {
     expect(sentBody().allowed_mentions).toEqual({ parse: [] });
 
     safeFetch.mockClear();
-    await dispatchNotifications("p1", "comment_added", {
+    await dispatchNotifications(scopedToDefaultTenant(), "p1", "comment_added", {
       ...PAYLOAD,
       data: { commentBody: `${"a".repeat(199)}*tail`, author: "anna" },
     });
@@ -195,12 +196,12 @@ describe("dispatchNotifications — every value and every event", () => {
   it("escapes the project, the old column, the author and the key on Slack", async () => {
     channelsOf("slack", ["status_changed", "comment_added"], "https://hooks.slack.com/services/T/B/x");
 
-    await dispatchNotifications("p1", "status_changed", {
+    await dispatchNotifications(scopedToDefaultTenant(), "p1", "status_changed", {
       project: { key: "B|P", name: "<!channel> Board" },
       task: { taskKey: "BP-1", title: "T", status: "todo" },
       data: { oldStatus: "<@U123> column" },
     });
-    await dispatchNotifications("p1", "comment_added", {
+    await dispatchNotifications(scopedToDefaultTenant(), "p1", "comment_added", {
       project: { key: "BP", name: "Board" },
       task: { taskKey: "BP-1", title: "T", status: "todo" },
       data: { commentBody: "x", author: "<https://phish.example|admin>" },
@@ -219,11 +220,11 @@ describe("dispatchNotifications — every value and every event", () => {
   it("posts the link sentence to Slack for both directions", async () => {
     channelsOf("slack", ["task_linked", "task_unlinked"], "https://hooks.slack.com/services/T/B/x");
 
-    await dispatchNotifications("p1", "task_linked", {
+    await dispatchNotifications(scopedToDefaultTenant(), "p1", "task_linked", {
       ...PAYLOAD,
       data: { summary: "rafal made BP-1 the parent of BP-2", relatedTaskKey: "BP-2" },
     });
-    await dispatchNotifications("p1", "task_unlinked", {
+    await dispatchNotifications(scopedToDefaultTenant(), "p1", "task_unlinked", {
       ...PAYLOAD,
       data: { summary: "rafal removed BP-2 from BP-1's children", relatedTaskKey: "BP-2" },
     });
@@ -239,7 +240,7 @@ describe("dispatchNotifications — every value and every event", () => {
   it("posts the link sentence to Discord, with the other end as a field", async () => {
     channelsOf("discord", ["task_linked"], "https://discord.com/api/webhooks/1/x");
 
-    await dispatchNotifications("p1", "task_linked", {
+    await dispatchNotifications(scopedToDefaultTenant(), "p1", "task_linked", {
       ...PAYLOAD,
       data: { summary: "rafal linked BP-1 to BP-2", relatedTaskKey: "BP-2" },
     });
@@ -254,7 +255,7 @@ describe("dispatchNotifications — every value and every event", () => {
   it("escapes the summary rather than posting it as markup", async () => {
     channelsOf("slack", ["task_linked"], "https://hooks.slack.com/services/T/B/x");
 
-    await dispatchNotifications("p1", "task_linked", {
+    await dispatchNotifications(scopedToDefaultTenant(), "p1", "task_linked", {
       ...PAYLOAD,
       data: { summary: "<!channel> linked BP-1 to BP-2", relatedTaskKey: "BP-2" },
     });
@@ -265,7 +266,7 @@ describe("dispatchNotifications — every value and every event", () => {
   it("escapes the author on Discord", async () => {
     channelsOf("discord", ["comment_added"], "https://discord.com/api/webhooks/1/x");
 
-    await dispatchNotifications("p1", "comment_added", {
+    await dispatchNotifications(scopedToDefaultTenant(), "p1", "comment_added", {
       ...PAYLOAD,
       data: { commentBody: "x", author: "**admin**" },
     });
@@ -278,7 +279,7 @@ describe("dispatchNotifications — every value and every event", () => {
     async (event) => {
       channelsOf("discord", [event], "https://discord.com/api/webhooks/1/x");
 
-      await dispatchNotifications("p1", event as never, { ...PAYLOAD, data: { oldStatus: "todo", commentBody: "x" } });
+      await dispatchNotifications(scopedToDefaultTenant(), "p1", event as never, { ...PAYLOAD, data: { oldStatus: "todo", commentBody: "x" } });
 
       expect(sentBody().allowed_mentions).toEqual({ parse: [] });
     }
@@ -290,7 +291,7 @@ describe("dispatchNotifications — every value and every event", () => {
     safeFetch.mockImplementation(() => new Promise<Response>((resolve) => landers.push(resolve)));
     channelsOf("slack", ["task_created"], ...Array.from({ length: 9 }, (_, i) => `https://hooks.slack.com/services/T/B/${i}`));
 
-    await dispatchNotifications("p1", "task_created", PAYLOAD);
+    await dispatchNotifications(scopedToDefaultTenant(), "p1", "task_created", PAYLOAD);
     await vi.waitFor(() => expect(safeFetch).toHaveBeenCalledTimes(4));
     await new Promise((resolve) => setTimeout(resolve, 5));
     expect(safeFetch).toHaveBeenCalledTimes(4);
@@ -305,7 +306,7 @@ describe("dispatchNotifications — every value and every event", () => {
 // filter needs its own case, or a mutation that drops either side of the `&&` still passes.
 describe("dispatchNotifications — which channels are eligible", () => {
   function channels(...rows: { enabled: boolean; events: string[]; name: string }[]) {
-    findById.mockReturnValue({
+    findOne.mockReturnValue({
       lean: () =>
         Promise.resolve({
           notificationChannels: rows.map((row, i) => ({
@@ -322,7 +323,7 @@ describe("dispatchNotifications — which channels are eligible", () => {
   it("skips a disabled channel even when it is subscribed to the event", async () => {
     channels({ enabled: false, events: ["task_created"], name: "Disabled" });
 
-    await dispatchNotifications("p1", "task_created", PAYLOAD);
+    await dispatchNotifications(scopedToDefaultTenant(), "p1", "task_created", PAYLOAD);
 
     expect(safeFetch).not.toHaveBeenCalled();
   });
@@ -330,7 +331,7 @@ describe("dispatchNotifications — which channels are eligible", () => {
   it("skips a channel not subscribed to the event even when it is enabled", async () => {
     channels({ enabled: true, events: ["task_moved"], name: "Wrong event" });
 
-    await dispatchNotifications("p1", "task_created", PAYLOAD);
+    await dispatchNotifications(scopedToDefaultTenant(), "p1", "task_created", PAYLOAD);
 
     expect(safeFetch).not.toHaveBeenCalled();
   });
@@ -342,7 +343,7 @@ describe("dispatchNotifications — which channels are eligible", () => {
       { enabled: true, events: ["task_created"], name: "Eligible" }
     );
 
-    await dispatchNotifications("p1", "task_created", PAYLOAD);
+    await dispatchNotifications(scopedToDefaultTenant(), "p1", "task_created", PAYLOAD);
 
     expect(safeFetch).toHaveBeenCalledTimes(1);
     expect(safeFetch.mock.calls[0][0]).toBe("https://hooks.slack.com/services/T/B/2");
@@ -353,7 +354,7 @@ describe("where a project channel message may go", () => {
   it("fetches with the webhook destination rule", async () => {
     projectWith(encryptSecret("https://hooks.slack.com/services/T/B/secret"));
 
-    await dispatchNotifications("p1", "task_created", PAYLOAD);
+    await dispatchNotifications(scopedToDefaultTenant(), "p1", "task_created", PAYLOAD);
 
     await vi.waitFor(() => expect(safeFetch).toHaveBeenCalledTimes(1));
     expect(safeFetch.mock.calls[0][2]).toBe(WEBHOOK_DESTINATION);
@@ -369,7 +370,7 @@ describe("where a project channel message links to", () => {
     process.env.NEXT_PUBLIC_APP_URL = "http://localhost:3000";
     channelsOf("slack", ["task_created"], "https://hooks.slack.com/services/T/B/x");
 
-    await dispatchNotifications("p1", "task_created", PAYLOAD);
+    await dispatchNotifications(scopedToDefaultTenant(), "p1", "task_created", PAYLOAD);
 
     expect(sentBody().blocks[0].text.text).toBe(
       "*New task created in Board*\n<https://board.example.org/projects/BP/tasks/BP-1|BP-1> T"
@@ -379,7 +380,7 @@ describe("where a project channel message links to", () => {
   it("links Discord to PUBLIC_ORIGIN", async () => {
     channelsOf("discord", ["task_created"], "https://discord.com/api/webhooks/1/x");
 
-    await dispatchNotifications("p1", "task_created", PAYLOAD);
+    await dispatchNotifications(scopedToDefaultTenant(), "p1", "task_created", PAYLOAD);
 
     expect(sentBody().embeds[0].url).toBe("https://board.example.org/projects/BP/tasks/BP-1");
   });
@@ -390,7 +391,7 @@ describe("where a project channel message links to", () => {
     process.env.RAILWAY_PUBLIC_DOMAIN = "stale.up.railway.app";
     channelsOf("slack", ["task_created"], "https://hooks.slack.com/services/T/B/x");
 
-    await dispatchNotifications("p1", "task_created", PAYLOAD);
+    await dispatchNotifications(scopedToDefaultTenant(), "p1", "task_created", PAYLOAD);
 
     expect(sentBody().blocks[0].text.text).toBe("*New task created in Board*\nBP-1 T");
   });
@@ -399,7 +400,7 @@ describe("where a project channel message links to", () => {
     delete process.env.PUBLIC_ORIGIN;
     channelsOf("discord", ["task_created"], "https://discord.com/api/webhooks/1/x");
 
-    await dispatchNotifications("p1", "task_created", PAYLOAD);
+    await dispatchNotifications(scopedToDefaultTenant(), "p1", "task_created", PAYLOAD);
 
     expect(sentBody().embeds[0]).not.toHaveProperty("url");
     expect(sentBody().embeds[0].title).toBe("New task: BP-1");

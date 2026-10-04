@@ -6,7 +6,7 @@ import { phaseFrom, recordTaskPhase } from "@/lib/task-service";
 // withWorker owns the credential and 403s a path segment that names someone else's worker; the
 // update filter owns the rest — a phase only lands on a task this worker still holds under this
 // run, since every exit from the active state clears the run identity along with the phase.
-export const POST = withWorker(async (request, { worker }) => {
+export const POST = withWorker(async (request, { worker, db }) => {
   // Every other withWorker route refuses a killed worker, and this one is not the exception: an
   // abort is asynchronous, so without this the board would keep advancing a run the admin just
   // stopped — at exactly the moment the operator needs the badge to be true
@@ -33,7 +33,7 @@ export const POST = withWorker(async (request, { worker }) => {
     return NextResponse.json({ error: "phase is required" }, { status: 400 });
   }
 
-  const applied = await recordTaskPhase({
+  const applied = await recordTaskPhase(db, {
     taskId,
     workerId: String(worker._id),
     runId,

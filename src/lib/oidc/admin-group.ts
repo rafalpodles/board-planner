@@ -1,6 +1,6 @@
 import { logInstanceAudit } from "@/lib/instanceAudit";
-import { User } from "@/models/user";
 import { IUser } from "@/types";
+import type { ScopedDb } from "@/lib/db-scope";
 
 const ACTIVE_ADMINS = { role: "admin", deactivatedAt: null } as const;
 
@@ -26,35 +26,35 @@ export function groupsIn(claims: Record<string, unknown>): string[] {
  * At each sign-in through the generic OIDC provider, `OIDC_ADMIN_GROUP` decides whether the account
  * is an admin — never leaving no active admin. Nothing re-reads the group between sign-ins.
  */
-export async function applyAdminGroup(user: IUser, providerId: string, groups: string[]): Promise<void> {
+export async function applyAdminGroup(db: ScopedDb, user: IUser, providerId: string, groups: string[]): Promise<void> {
   const group = adminGroup();
   if (!group || providerId !== "oidc" || user.kind === "machine" || user.deactivatedAt) return;
   const member = groups.includes(group);
 
   if (member && user.role !== "admin") {
-    const promoted = await User.updateOne({ _id: user._id, role: "member" }, { $set: { role: "admin" } });
+    const promoted = await db.User.updateOne({ _id: user._id, role: "member" }, { $set: { role: "admin" } });
     if (promoted.modifiedCount === 0) return;
     user.role = "admin";
-    record(user, "member → admin", `in the identity provider's group ${group}`);
+    record(db, user, "member → admin", `in the identity provider's group ${group}`);
     return;
   }
 
   if (!member && user.role === "admin") {
-    if ((await User.countDocuments(ACTIVE_ADMINS)) <= 1) return;
-    const demoted = await User.updateOne({ _id: user._id, role: "admin" }, { $set: { role: "member" } });
+    if ((await db.User.countDocuments(ACTIVE_ADMINS)) <= 1) return;
+    const demoted = await db.User.updateOne({ _id: user._id, role: "admin" }, { $set: { role: "member" } });
     if (demoted.modifiedCount === 0) return;
     // Two last admins signing in at once each counted the other; one of them stays
-    if ((await User.countDocuments(ACTIVE_ADMINS)) === 0) {
-      await User.updateOne({ _id: user._id }, { $set: { role: "admin" } });
+    if ((await db.User.countDocuments(ACTIVE_ADMINS)) === 0) {
+      await db.User.updateOne({ _id: user._id }, { $set: { role: "admin" } });
       return;
     }
     user.role = "member";
-    record(user, "admin → member", `no longer in the identity provider's group ${group}`);
+    record(db, user, "admin → member", `no longer in the identity provider's group ${group}`);
   }
 }
 
-function record(user: IUser, change: string, why: string) {
-  void logInstanceAudit({
+function record(db: ScopedDb, user: IUser, change: string, why: string) {
+  void logInstanceAudit(db, {
     action: "user_role_changed",
     user: null,
     actorUsername: "",

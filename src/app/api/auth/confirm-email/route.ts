@@ -42,7 +42,7 @@ export async function POST(request: Request) {
   }
 
   await connectDB();
-  const outcome = await consumeEmailChange(token);
+  const outcome = await consumeEmailChange(db, token);
   if (!outcome.ok) {
     return NextResponse.json({ error: REFUSALS[outcome.reason] }, { status: 400 });
   }
@@ -57,24 +57,24 @@ export async function POST(request: Request) {
     const taken = await db.User.exists({ email: outcome.email, _id: { $ne: user._id } });
     if (taken) {
       // Nothing changed, so the link stays good for when the address is free again
-      await releaseEmailChange(token, outcome.claimedAt).catch(() => {});
+      await releaseEmailChange(db, token, outcome.claimedAt).catch(() => {});
       return NextResponse.json({ error: "That email is already on another account" }, { status: 409 });
     }
     try {
       await db.User.updateOne({ _id: user._id }, { $set: { email: outcome.email, emailVerifiedAt: new Date() } });
     } catch (err) {
-      await releaseEmailChange(token, outcome.claimedAt).catch(() => {});
+      await releaseEmailChange(db, token, outcome.claimedAt).catch(() => {});
       if (duplicateKeyField(err) === "email") {
         return NextResponse.json({ error: "That email is already on another account" }, { status: 409 });
       }
       throw err;
     }
-    await revokePendingInvitationsFor(outcome.email);
+    await revokePendingInvitationsFor(db, outcome.email);
 
     // A link already sent to the old inbox must not outlive the move away from it
-    await invalidateResetTokens(user._id);
+    await invalidateResetTokens(db, user._id);
 
-    void logInstanceAudit({
+    void logInstanceAudit(db, {
       action: "user_email_changed_self",
       user: user._id,
       actorUsername: user.username,

@@ -18,7 +18,7 @@ const EXPIRED = "That sign-in has expired. Sign in again, or open the invitation
 /** The invitation a verified sign-in is waiting to accept, read without spending anything. */
 export async function GET(request: Request) {
   const db = scopedToDefaultTenant();
-  const held = await heldAcceptance(readFlowCookie(request, ACCEPT_COOKIE));
+  const held = await heldAcceptance(db, readFlowCookie(request, ACCEPT_COOKIE));
   if (!held?.claims) return NextResponse.json({ error: EXPIRED }, { status: 400 });
   const invitation = await db.Invitation.findOne({
     tokenHash: held.invitationTokenHash,
@@ -26,7 +26,7 @@ export async function GET(request: Request) {
     expiresAt: { $gt: new Date() },
   }).lean();
   if (!invitation) return NextResponse.json({ error: INVITATION_REFUSALS.revoked }, { status: 400 });
-  const [view] = await toApiInvitations([invitation]);
+  const [view] = await toApiInvitations(db, [invitation]);
   return NextResponse.json({
     email: view.email,
     role: view.role,
@@ -37,6 +37,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const db = scopedToDefaultTenant();
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
 
@@ -52,7 +53,7 @@ export async function POST(request: Request) {
   }
 
   const binder = readFlowCookie(request, ACCEPT_COOKIE);
-  const held = await heldAcceptance(binder);
+  const held = await heldAcceptance(db, binder);
   if (!binder || !held?.claims || !held.invitationTokenHash) {
     return NextResponse.json({ error: EXPIRED }, { status: 400 });
   }
@@ -62,17 +63,18 @@ export async function POST(request: Request) {
   const checked = checkProfile(read.value);
   if (!checked.ok) return NextResponse.json({ error: checked.error }, { status: 400 });
 
-  const claimed = await claimInvitationByHash(held.invitationTokenHash);
+  const claimed = await claimInvitationByHash(db, held.invitationTokenHash);
   if (!claimed.ok) {
     return NextResponse.json({ error: INVITATION_REFUSALS[claimed.reason] }, { status: 400 });
   }
   // The account takes the invitation's address; the identity has to have proven that same one
   if (claimed.invitation.email !== held.claims.email) {
-    await releaseInvitation(claimed.invitation._id).catch(() => {});
+    await releaseInvitation(db, claimed.invitation._id).catch(() => {});
     return NextResponse.json({ error: INVITATION_REFUSALS.revoked }, { status: 400 });
   }
 
   const response = await completeAcceptance(
+    db,
     claimed.invitation,
     {
       ...checked.value,
@@ -90,7 +92,7 @@ export async function POST(request: Request) {
     clientIp
   );
   if (response.status === 201) {
-    await spendAcceptance(binder);
+    await spendAcceptance(db, binder);
     response.headers.append("Set-Cookie", buildFlowCookie(ACCEPT_COOKIE, "", 0));
   }
   return response;

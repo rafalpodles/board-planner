@@ -33,6 +33,7 @@ vi.mock("@/lib/setup-code", () => ({ refuseSetupCode }));
 vi.mock("bcryptjs", () => ({ default: { compare } }));
 
 const { POST } = await import("./route");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 const { isRateLimited, lockoutKey, resetRateLimits } = await import("@/lib/rate-limit");
 
 const start = (body: unknown, provider = "oidc") =>
@@ -62,7 +63,7 @@ describe("POST /api/auth/oidc/:provider/start", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ url: "https://id.example.com/authorize?x" });
     expect(res.headers.get("set-cookie")).toBe("bp_oidc=cpo_b");
-    expect(beginFlow).toHaveBeenCalledWith(expect.objectContaining({ intent: "signin" }));
+    expect(beginFlow).toHaveBeenCalledWith(scopedToDefaultTenant(), expect.objectContaining({ intent: "signin" }));
   });
 
   // BP-840
@@ -113,7 +114,7 @@ describe("POST /api/auth/oidc/:provider/start", () => {
 
       expect(res.status).toBe(200);
       expect(compare).toHaveBeenCalledWith("right", "$2a$10$hash");
-      expect(beginFlow).toHaveBeenCalledWith(expect.objectContaining({ intent: "link", userId: "u1" }));
+      expect(beginFlow).toHaveBeenCalledWith(scopedToDefaultTenant(), expect.objectContaining({ intent: "link", userId: "u1" }));
     });
 
     describe("guessing the password", () => {
@@ -176,13 +177,13 @@ describe("returning to where sign-in was asked for", () => {
   it("keeps a same-origin path for after the sign-in", async () => {
     await start({ next: "/oauth/authorize?client_id=c1" });
 
-    expect(beginFlow).toHaveBeenCalledWith(expect.objectContaining({ next: "/oauth/authorize?client_id=c1" }));
+    expect(beginFlow).toHaveBeenCalledWith(scopedToDefaultTenant(), expect.objectContaining({ next: "/oauth/authorize?client_id=c1" }));
   });
 
   it("turns an address elsewhere into the default", async () => {
     await start({ next: "https://evil.example/x" });
 
-    expect(beginFlow).toHaveBeenCalledWith(expect.objectContaining({ next: "/projects" }));
+    expect(beginFlow).toHaveBeenCalledWith(scopedToDefaultTenant(), expect.objectContaining({ next: "/projects" }));
   });
 });
 
@@ -208,6 +209,7 @@ describe("setting up an empty instance (BP-830)", () => {
     expect(res.status).toBe(200);
     expect(refuseSetupCode).toHaveBeenCalledWith("203.0.113.9", "code");
     expect(beginFlow).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       expect.objectContaining({ intent: "bootstrap", bootstrap: { username: "ada", fullName: "Ada Lovelace" } })
     );
   });

@@ -75,7 +75,7 @@ export async function POST(request: Request) {
   // throwing after the claim would leave the person with a dead link and their old password
   const hashed = await bcrypt.hash(newPassword, PASSWORD_COST_FACTOR);
 
-  const outcome = await consumeResetToken(token);
+  const outcome = await consumeResetToken(db, token);
   if (!outcome.ok) {
     return NextResponse.json({ error: REFUSALS[outcome.reason] }, { status: 400 });
   }
@@ -110,7 +110,7 @@ export async function POST(request: Request) {
   } catch (err) {
     // The claim is one-shot, so a write that fails here would otherwise leave somebody signed out
     // of everything, holding a dead link, with their old password still in force and no way back
-    await releaseResetToken(token).catch(() => {});
+    await releaseResetToken(db, token).catch(() => {});
     throw err;
   }
   // The link reached the address it was mailed to, which is the proof a provider links by — and
@@ -136,9 +136,9 @@ export async function POST(request: Request) {
   // followed by a create, so two requests racing leave two live links; without this, resetting
   // with the second leaves the first able to set the password again, in an inbox the person may
   // not control.
-  await invalidateResetTokens(user._id);
+  await invalidateResetTokens(db, user._id);
 
-  void logInstanceAudit({
+  void logInstanceAudit(db, {
     action: "user_password_reset_by_email",
     user: user._id,
     actorUsername: user.username,
@@ -151,7 +151,7 @@ export async function POST(request: Request) {
   // The other half of "was that me?": the audit row answers it for an administrator reading the
   // log, and this answers it for the person whose account it is.
   if (revoked?.identitiesUnlinked) {
-    void logInstanceAudit({
+    void logInstanceAudit(db, {
       action: "identity_unlinked",
       user: user._id,
       actorUsername: user.username,

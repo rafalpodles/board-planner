@@ -30,7 +30,7 @@ async function parse(request: Request): Promise<ParsedBody | NextResponse> {
 
 // Add a dependency. "blocked_by" lands in blockedBy (the relation that drives
 // cycle detection); the rest go into the typed relations array.
-export const POST = withProjectAccess(async (request, { params, user }) => {
+export const POST = withProjectAccess(async (request, { params, user, db }) => {
   const { projectId, taskId } = await params;
   await connectDB();
 
@@ -38,6 +38,7 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
   if (parsed instanceof NextResponse) return parsed;
 
   const result = await addTaskLink(
+    db,
     projectId,
     taskId,
     parsed.targetTaskId,
@@ -50,7 +51,7 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
 });
 
 // Remove a dependency of any kind
-export const DELETE = withProjectAccess(async (request, { params, user }) => {
+export const DELETE = withProjectAccess(async (request, { params, user, db }) => {
   const { projectId, taskId } = await params;
   await connectDB();
 
@@ -58,6 +59,7 @@ export const DELETE = withProjectAccess(async (request, { params, user }) => {
   if (parsed instanceof NextResponse) return parsed;
 
   const result = await removeTaskLink(
+    db,
     projectId,
     taskId,
     parsed.targetTaskId,

@@ -26,7 +26,8 @@ const CLOSED = "Sign-up is no longer open to that address. Ask an administrator 
 
 /** Who a verified sign-in in an allowed domain is about to become, read without spending anything. */
 export async function GET(request: Request) {
-  const held = await heldSignUp(readFlowCookie(request, JOIN_COOKIE));
+  const db = scopedToDefaultTenant();
+  const held = await heldSignUp(db, readFlowCookie(request, JOIN_COOKIE));
   if (!held?.claims) return NextResponse.json({ error: EXPIRED }, { status: 400 });
   return NextResponse.json({
     email: held.claims.email,
@@ -52,7 +53,7 @@ export async function POST(request: Request) {
   }
 
   const binder = readFlowCookie(request, JOIN_COOKIE);
-  const held = await heldSignUp(binder);
+  const held = await heldSignUp(db, binder);
   if (!binder || !held?.claims) return NextResponse.json({ error: EXPIRED }, { status: 400 });
 
   const read = await readJsonBody<{ username?: unknown; fullName?: unknown }>(request);
@@ -100,17 +101,17 @@ export async function POST(request: Request) {
     throw err;
   }
 
-  await spendAcceptance(binder);
+  await spendAcceptance(db, binder);
   // An invitation to this address would now only fail, naming an account that already exists
-  await revokePendingInvitationsFor(user.email);
-  void logInstanceAudit({
+  await revokePendingInvitationsFor(db, user.email);
+  void logInstanceAudit(db, {
     action: "user_created",
     user: user._id,
     actorUsername: user.username,
     target: user.username,
     detail: `signed up with ${provider.label}, ${user.email} being in an allowed domain`,
   });
-  await applyAdminGroup(user, provider.id, held.claims.groups ?? []);
+  await applyAdminGroup(db, user, provider.id, held.claims.groups ?? []);
 
   const { token, absoluteExpiresAt } = await createSession({
     userId: user._id,

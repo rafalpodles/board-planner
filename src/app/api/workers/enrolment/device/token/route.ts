@@ -3,17 +3,19 @@ import { readJsonBody } from "@/lib/request-body";
 import { connectDB } from "@/lib/db";
 import { pollDeviceEnrolment } from "@/lib/device-enrolment";
 import { WORKER_HEARTBEAT_MS } from "@/lib/worker-service";
+import { scopedToDefaultTenant } from "@/lib/db-scope";
 
 // The app's half of the exchange, authenticated by holding the device code and nothing else.
 // Answers the same shape whether a code was never issued, has expired, or has already been
 // collected — three states an attacker would otherwise learn to tell apart.
 export async function POST(request: Request) {
+  const db = scopedToDefaultTenant();
   await connectDB();
 
   const read = await readJsonBody(request);
   if (!read.ok) return read.response;
   const body = read.value;
-  const result = await pollDeviceEnrolment(String(body.deviceCode ?? ""));
+  const result = await pollDeviceEnrolment(db, String(body.deviceCode ?? ""));
 
   if (result.state === "approved") {
     return NextResponse.json({

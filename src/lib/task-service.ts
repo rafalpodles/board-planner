@@ -1,11 +1,6 @@
 import { HydratedDocument, Types } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { Task } from "@/models/task";
-import { Project } from "@/models/project";
-import { User } from "@/models/user";
-import { Comment } from "@/models/comment";
-import { Worker } from "@/models/worker";
-import { Sprint } from "@/models/sprint";
 import {
   ApiTaskExecution,
   ICustomField,
@@ -58,6 +53,7 @@ import { workerUsername } from "@/lib/worker-user";
 import { EXECUTION_LEASE_MS } from "@/lib/execution-lease";
 import { pmUserId } from "@/lib/pm/pm-user";
 import { supersedableStates } from "@/lib/task-decisions";
+import type { ScopedDb } from "@/lib/db-scope";
 
 export const MAX_EXECUTION_ATTEMPTS = 3;
 
@@ -156,19 +152,19 @@ function noSuchAccount(username: unknown): string {
  * answers with — became `@[object Object]`; `updateTask` let the same value past a `typeof` check
  * and into the cast, where it left the route a 500.
  */
-async function assigneeStillActive(assignee: unknown): Promise<boolean> {
+async function assigneeStillActive(db: ScopedDb, assignee: unknown): Promise<boolean> {
   const id = (assignee as { _id?: unknown } | null)?._id ?? assignee;
   if (!id) return false;
-  return !!(await User.exists({ _id: String(id), deactivatedAt: null }));
+  return !!(await db.User.exists({ _id: String(id), deactivatedAt: null }));
 }
 
 type ResolvedAssignee = { user: { _id: Types.ObjectId; username: string } };
 
-async function resolveAssignee(value: unknown): Promise<ResolvedAssignee | TaskServiceResult> {
+async function resolveAssignee(db: ScopedDb, value: unknown): Promise<ResolvedAssignee | TaskServiceResult> {
   if (typeof value !== "string") {
     return { ok: false, error: "The assignee must be a username", status: 400 };
   }
-  const user = await User.findOne({ username: value.trim().toLowerCase() });
+  const user = await db.User.findOne({ username: value.trim().toLowerCase() });
   if (!user) return { ok: false, error: noSuchAccount(value), status: 400 };
   if (user.deactivatedAt) return { ok: false, error: `${user.username} is deactivated`, status: 400 };
   return { user: user as unknown as ResolvedAssignee["user"] };
@@ -202,12 +198,11 @@ function refId(ref: unknown): string {
 export const CRITERION_ROWS_PER_WRITE = 20;
 
 // History stores the agent's name. An id is the fallback, which the activity route resolves again.
-async function storedAgentName(ref: unknown): Promise<string> {
+async function storedAgentName(db: ScopedDb, ref: unknown): Promise<string> {
   const id = refId(ref);
   if (!id) return "";
   try {
-    const { Agent } = await import("@/models/agent");
-    const found = await Agent.findById(id, "name").lean<{ name?: string }>();
+    const found = await db.Agent.findById(id, "name").lean<{ name?: string }>();
     return found?.name || id;
   } catch {
     return id;
@@ -252,6 +247,7 @@ export function runHolding(task: {
  * `null` when no run holds the task, which is the ordinary case and reads as "carry on".
  */
 export async function heldRunRefusal(
+  db: ScopedDb,
   // The shape runHolding actually reads, not ITaskExecution: demanding the whole subdocument makes
   // every caller build fields this never looks at
   task: { execution?: Parameters<typeof runHolding>[0]["execution"]; taskNumber: number },
@@ -262,10 +258,11 @@ export async function heldRunRefusal(
 ): Promise<Extract<TaskServiceResult, { ok: false }> | null> {
   const conflict = runHolding(task);
   if (!conflict) return null;
-  return refuseHeldRun(conflict, taskKeyOf(projectKey, task.taskNumber), action);
+  return refuseHeldRun(db, conflict, taskKeyOf(projectKey, task.taskNumber), action);
 }
 
 async function refuseHeldRun(
+  db: ScopedDb,
   conflict: RunConflict,
   taskKey: string,
   // The three writers that move a task say "move it anyway"; delete reaches the same refusal and
@@ -273,7 +270,7 @@ async function refuseHeldRun(
   action = "move"
 ): Promise<Extract<TaskServiceResult, { ok: false }>> {
   const worker = conflict.workerId
-    ? await Worker.findById(conflict.workerId, "name").lean()
+    ? await db.Worker.findById(conflict.workerId, "name").lean()
     : null;
   const name = (worker?.name as string) || conflict.workerId || "a worker";
   return {
@@ -316,6 +313,7 @@ type Body = Record<string, any>;
  * argue with.
  */
 async function agentUsableOnProject(
+  db: ScopedDb,
   projectId: string,
   agent: unknown,
   actingUserId: unknown,
@@ -323,8 +321,7 @@ async function agentUsableOnProject(
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const unusable = { ok: false as const, error: "That agent cannot run on this project" };
   if (typeof agent !== "string" || !Types.ObjectId.isValid(agent)) return unusable;
-  const { Agent } = await import("@/models/agent");
-  const found = await Agent.findById(agent, "scope project owner name composition").lean();
+  const found = await db.Agent.findById(agent, "scope project owner name composition").lean();
   if (!found) return unusable;
   if (found.scope === "project" && String(found.project) !== String(projectId)) return unusable;
   // A personal agent is somebody's own; pointing a task at another person's would run their
@@ -355,17 +352,16 @@ async function agentUsableOnProject(
  * composition, and `DELETE /api/agents/:id` refuses while any task points at one, so this is a
  * hand-edited database rather than a state the product produces.
  */
-export async function personalAgentAlienTo(agent: unknown, assigneeAfter: unknown): Promise<boolean> {
-  const { Agent } = await import("@/models/agent");
-  const found = await Agent.findById(agent, "scope owner").lean();
+export async function personalAgentAlienTo(db: ScopedDb, agent: unknown, assigneeAfter: unknown): Promise<boolean> {
+  const found = await db.Agent.findById(agent, "scope owner").lean();
   if (!found || found.scope !== "user") return false;
   // "" for an unassigned task, which never equals an owner: nobody holds it, so nobody chose it
   return String(found.owner) !== refId(assigneeAfter);
 }
 
-async function sprintBelongsToProject(projectId: string, sprint: unknown): Promise<boolean> {
+async function sprintBelongsToProject(db: ScopedDb, projectId: string, sprint: unknown): Promise<boolean> {
   if (typeof sprint !== "string" || !Types.ObjectId.isValid(sprint)) return false;
-  return (await Sprint.exists({ _id: sprint, project: projectId })) !== null;
+  return (await db.Sprint.exists({ _id: sprint, project: projectId })) !== null;
 }
 
 /** A title both writers must agree on: the schema marks it `required` and trims it, so anything
@@ -566,6 +562,7 @@ function schemaValuesOrRefusal(values: Body): TaskServiceResult | null {
 }
 
 export async function createTask(
+  db: ScopedDb,
   projectId: string,
   actorId: string,
   body: Body,
@@ -595,7 +592,7 @@ export async function createTask(
   // to happen in front of, so the project lookup the category and column lists need is split from
   // the `$inc` that spends a number (BP-438). Every refusal past that point leaves a permanent hole
   // in the board's numbering, for a task that never existed.
-  const board = await Project.findById(projectId, "categories columns customFields").lean();
+  const board = await db.Project.findById(projectId, "categories columns customFields").lean();
 
   if (!board) {
     return { ok: false, error: "Project not found", status: 404 };
@@ -628,9 +625,9 @@ export async function createTask(
   // Refused rather than dropped. An unresolved name used to leave `assigneeId` null and answer 201
   // with the task unassigned, so a caller that misspelt one was told the assignment happened.
   if (body.assignee !== undefined && body.assignee !== null && body.assignee !== "") {
-    const resolved = await resolveAssignee(body.assignee);
+    const resolved = await resolveAssignee(db, body.assignee);
     if (!("user" in resolved)) return resolved;
-    if (!(await canBeAssigned(String(resolved.user._id), projectId))) {
+    if (!(await canBeAssigned(db, String(resolved.user._id), projectId))) {
       return { ok: false, error: noAccessToAssign(resolved.user.username), status: 400 };
     }
     assigneeId = resolved.user._id;
@@ -653,7 +650,7 @@ export async function createTask(
   });
   if (schemaRefusal) return schemaRefusal;
 
-  const sprint = (await sprintBelongsToProject(projectId, body.sprint)) ? body.sprint : null;
+  const sprint = (await sprintBelongsToProject(db, projectId, body.sprint)) ? body.sprint : null;
   const customFieldValues = (() => {
     const raw = body.customFieldValues || {};
     if (typeof raw !== "object" || Array.isArray(raw)) return {};
@@ -665,7 +662,7 @@ export async function createTask(
 
   // Nothing above this line spent a number and nothing below it may refuse: the request is known
   // to be answerable before the counter moves.
-  const project = await Project.findOneAndUpdate(
+  const project = await db.Project.findOneAndUpdate(
     { _id: projectId },
     { $inc: { taskCounter: 1 } },
     { returnDocument: "after" }
@@ -675,7 +672,7 @@ export async function createTask(
     return { ok: false, error: "Project not found", status: 404 };
   }
 
-  const task = await Task.create({
+  const task = await db.Task.create({
     project: projectId,
     taskNumber: project.taskCounter,
     title,
@@ -697,9 +694,9 @@ export async function createTask(
     createdBy: actorId,
   });
 
-  const populated = await Task.findById(task._id).populate(taskPopulateFields);
+  const populated = await db.Task.findById(task._id).populate(taskPopulateFields);
 
-  await logActivity(String(task._id), actorId, "created");
+  await logActivity(db, String(task._id), actorId, "created");
 
   const eventPayload = {
     project: { key: project.key, name: project.name },
@@ -709,14 +706,14 @@ export async function createTask(
       status: task.status,
     },
   };
-  dispatchWebhooks(projectId, "task_created", eventPayload);
-  dispatchNotifications(projectId, "task_created", eventPayload);
+  dispatchWebhooks(db, projectId, "task_created", eventPayload);
+  dispatchNotifications(db, projectId, "task_created", eventPayload);
 
   const createdKey = taskKeyOf(project.key, task.taskNumber);
   // The personal counterpart of the shared team channel two lines up. Same event, different
   // audience: that one announces the board to a room nobody subscribed to individually, this one
   // reaches the people who ticked the row for themselves.
-  notifyBoardFeed({
+  notifyBoardFeed(db, {
     taskId: String(task._id),
     projectId,
     actorId,
@@ -733,7 +730,7 @@ export async function createTask(
           { label: column?.label ?? status, tone: pillToneForRole(column?.role) },
           { label: capitalise(String(task.priority ?? DEFAULT_PRIORITY)), tone: "neutral" },
         ],
-        taskMeta: [project.name, `created by ${await usernameOf(actorId)}`].filter(Boolean).join(" · "),
+        taskMeta: [project.name, `created by ${await usernameOf(db, actorId)}`].filter(Boolean).join(" · "),
         projectRef: project.key,
         taskNumber: task.taskNumber,
       };
@@ -745,7 +742,7 @@ export async function createTask(
   if (assigneeId) {
     const taskKey = taskKeyOf(project.key, task.taskNumber);
     const column = getProjectColumns(project).find((c) => c.id === status);
-    createNotifications({
+    createNotifications(db, {
       type: "task_assigned",
       taskId: String(task._id),
       projectId,
@@ -762,7 +759,7 @@ export async function createTask(
           { label: column?.label ?? status, tone: pillToneForRole(column?.role) },
           { label: capitalise(String(task.priority ?? DEFAULT_PRIORITY)), tone: "neutral" },
         ],
-        taskMeta: [project.name, `created by ${await usernameOf(actorId)}`]
+        taskMeta: [project.name, `created by ${await usernameOf(db, actorId)}`]
           .filter(Boolean)
           .join(" · "),
         projectRef: project.key,
@@ -790,6 +787,7 @@ export interface StatusChangeOptions {
 }
 
 export async function changeStatus(
+  db: ScopedDb,
   projectId: string,
   taskId: string,
   status: string,
@@ -802,7 +800,7 @@ export async function changeStatus(
 
   await connectDB();
 
-  const projectColumns = await Project.findById(projectId, "columns key").lean();
+  const projectColumns = await db.Project.findById(projectId, "columns key").lean();
   const columnIds = getColumnIds(projectColumns);
   if (!columnIds.includes(status)) {
     return {
@@ -812,7 +810,7 @@ export async function changeStatus(
     };
   }
 
-  const oldTask = await Task.findOne({ _id: taskId, project: projectId }).lean();
+  const oldTask = await db.Task.findOne({ _id: taskId, project: projectId }).lean();
   if (!oldTask) {
     return { ok: false, error: "Task not found", status: 404 };
   }
@@ -835,7 +833,7 @@ export async function changeStatus(
     const byItsHolder = !!conflict && !!callerWorkerId && conflict.workerId === callerWorkerId;
     if (conflict && !byItsHolder) {
       const key = taskKeyOf(projectColumns?.key, oldTask.taskNumber);
-      return refuseHeldRun(conflict, key);
+      return refuseHeldRun(db, conflict, key);
     }
   }
 
@@ -846,7 +844,7 @@ export async function changeStatus(
     // workers) can then not both land. The loser's precondition stops matching the instant the
     // winner's write commits, so only one of them ever reaches announceStatusChange below and
     // mints a recurring task's next occurrence (BP-489).
-    { _id: taskId, project: projectId, ...(leavesColumn ? { status: oldTask.status } : {}) },
+    { _id: taskId, tenant: db.tenant, project: projectId, ...(leavesColumn ? { status: oldTask.status } : {}) },
     leavesColumn
       ? [{ $set: { status, ...CLEAR_WORKER_ASSIGNEE } }, { $unset: RUN_FIELDS }]
       : [{ $set: { status } }],
@@ -860,7 +858,7 @@ export async function changeStatus(
     if (leavesColumn) {
       // Lost the race rather than deleted: report the state another request already put this
       // task into, instead of a 404 for a task that plainly still exists.
-      const current = await Task.findOne({ _id: taskId, project: projectId }).populate(
+      const current = await db.Task.findOne({ _id: taskId, project: projectId }).populate(
         taskPopulateFields
       );
       if (current) return { ok: true, data: current as ITask };
@@ -869,8 +867,8 @@ export async function changeStatus(
   }
 
   if (oldTask.status !== status) {
-    await logActivity(taskId, actorId, "status_changed", "status", oldTask.status, status);
-    await announceStatusChange({
+    await logActivity(db, taskId, actorId, "status_changed", "status", oldTask.status, status);
+    await announceStatusChange(db, {
       projectId,
       taskId,
       oldTask,
@@ -910,19 +908,19 @@ function capitalise(value: string): string {
   return value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
 }
 
-async function announceStatusChange(a: StatusChangeAnnouncement): Promise<void> {
+async function announceStatusChange(db: ScopedDb, a: StatusChangeAnnouncement): Promise<void> {
   const status = String(a.task.status);
   const eventPayload = {
     project: { key: "", name: "" },
     task: { taskKey: `${a.oldTask.taskNumber}`, title: a.task.title, status },
     data: { oldStatus: a.oldTask.status, newStatus: status },
   };
-  dispatchWebhooks(a.projectId, "status_changed", eventPayload);
-  dispatchNotifications(a.projectId, "status_changed", eventPayload);
+  dispatchWebhooks(db, a.projectId, "status_changed", eventPayload);
+  dispatchNotifications(db, a.projectId, "status_changed", eventPayload);
 
   const [project, actor] = await Promise.all([
-    Project.findById(a.projectId, "key name").lean(),
-    usernameOf(a.actorId),
+    db.Project.findById(a.projectId, "key name").lean(),
+    usernameOf(db, a.actorId),
   ]);
   const taskKey = taskKeyOf(project?.key, a.task.taskNumber);
   // The column's own label, not its id: since CP-128 a project names its columns, and
@@ -931,7 +929,7 @@ async function announceStatusChange(a: StatusChangeAnnouncement): Promise<void> 
   const from = columns.find((c) => c.id === String(a.oldTask.status));
   const to = columns.find((c) => c.id === status);
   const toLabel = to?.label ?? status;
-  createNotifications({
+  createNotifications(db, {
     type: "status_changed",
     taskId: a.taskId,
     projectId: a.projectId,
@@ -961,12 +959,12 @@ async function announceStatusChange(a: StatusChangeAnnouncement): Promise<void> 
   const closes =
     roleOf(a.project, status) === "done" && roleOf(a.project, a.oldTask.status) !== "done";
   if (closes && a.oldTask.recurrence) {
-    createNextRecurrence(a.oldTask, a.projectId, a.actorId).catch((err) =>
+    createNextRecurrence(db, a.oldTask, a.projectId, a.actorId).catch((err) =>
       console.error("Failed to create recurring task:", err)
     );
   }
 
-  onTaskStatusChanged({
+  onTaskStatusChanged(db, {
     projectId: a.projectId,
     taskId: a.taskId,
     oldStatus: a.oldTask.status,
@@ -976,6 +974,7 @@ async function announceStatusChange(a: StatusChangeAnnouncement): Promise<void> 
 }
 
 export async function updateTask(
+  db: ScopedDb,
   projectId: string,
   taskId: string,
   body: Body,
@@ -1036,7 +1035,7 @@ export async function updateTask(
   // there is exactly one way to say "no sprint" and one check for everything else.
   if (updates.sprint === "") updates.sprint = null;
   if (updates.sprint !== undefined && updates.sprint !== null) {
-    if (!(await sprintBelongsToProject(projectId, updates.sprint))) {
+    if (!(await sprintBelongsToProject(db, projectId, updates.sprint))) {
       return { ok: false, error: "Sprint not found in this project", status: 400 };
     }
   }
@@ -1048,7 +1047,7 @@ export async function updateTask(
 
   // Both refusals below are sliced: they reach a model as a tool result, same as noSuchAccount.
   if (updates.category !== undefined || updates.status !== undefined) {
-    const proj = await Project.findById(projectId, "categories columns").lean();
+    const proj = await db.Project.findById(projectId, "categories columns").lean();
     if (updates.category !== undefined) {
       const names = (proj?.categories || []).map((c) => c.name);
       if (names.length > 0 && !names.includes(String(updates.category))) {
@@ -1085,7 +1084,7 @@ export async function updateTask(
   let fieldDefs: ICustomField[] = [];
   if (updates.customFieldValues !== undefined) {
     const raw = updates.customFieldValues;
-    const project = await Project.findById(projectId, "customFields").lean();
+    const project = await db.Project.findById(projectId, "customFields").lean();
     fieldDefs = project?.customFields || [];
     if (typeof raw !== "object" || Array.isArray(raw) || raw === null) {
       updates.customFieldValues = {};
@@ -1099,7 +1098,7 @@ export async function updateTask(
     }
   }
 
-  const oldTask = await Task.findOne({ _id: taskId, project: projectId })
+  const oldTask = await db.Task.findOne({ _id: taskId, project: projectId })
     .populate("assignee", "username fullName")
     .lean();
   if (!oldTask) {
@@ -1134,7 +1133,7 @@ export async function updateTask(
   // whoever held the task and answered 200, so `update_task(assignee: "rafa")` unassigned them and
   // said nothing (BP-511).
   if (updates.assignee !== undefined && updates.assignee !== null) {
-    const resolved = await resolveAssignee(updates.assignee);
+    const resolved = await resolveAssignee(db, updates.assignee);
     if (!("user" in resolved)) return resolved;
     updates.assignee = resolved.user._id;
   }
@@ -1156,9 +1155,9 @@ export async function updateTask(
   if (
     updates.assignee != null &&
     String(updates.assignee) !== storedAssignee &&
-    !(await canBeAssigned(String(updates.assignee), projectId))
+    !(await canBeAssigned(db, String(updates.assignee), projectId))
   ) {
-    const who = await User.findById(updates.assignee, "username deactivatedAt").lean();
+    const who = await db.User.findById(updates.assignee, "username deactivatedAt").lean();
     return {
       ok: false,
       error: who?.deactivatedAt ? `${who.username} is deactivated` : noAccessToAssign(who?.username),
@@ -1199,9 +1198,9 @@ export async function updateTask(
   if (!force && leavesColumn) {
     const conflict = runHolding(oldTask);
     if (conflict) {
-      const keyed = await Project.findById(projectId, "key").lean();
+      const keyed = await db.Project.findById(projectId, "key").lean();
       const key = taskKeyOf(keyed?.key, oldTask.taskNumber);
-      return refuseHeldRun(conflict, key);
+      return refuseHeldRun(db, conflict, key);
     }
   }
 
@@ -1251,7 +1250,7 @@ export async function updateTask(
   // in the same PUT, so reading the stored one would let `{ assignee: colleague, agent: mine }`
   // through on the strength of a pairing the write is about to end.
   if (updates.agent !== undefined && updates.agent !== null) {
-    const usable = await agentUsableOnProject(projectId, updates.agent, actorId, assigneeAfter);
+    const usable = await agentUsableOnProject(db, projectId, updates.agent, actorId, assigneeAfter);
     if (!usable.ok) return { ok: false, error: usable.error, status: 400 };
   }
 
@@ -1263,10 +1262,10 @@ export async function updateTask(
   // Only the agent already STORED. One named in this same request was judged against the assignee
   // this write leaves, immediately above, and re-clearing it would undo a valid choice.
   if (handsItOver && updates.agent === undefined && oldTask.agent) {
-    if (await personalAgentAlienTo(oldTask.agent, assigneeAfter)) setFields.agent = null;
+    if (await personalAgentAlienTo(db, oldTask.agent, assigneeAfter)) setFields.agent = null;
   }
 
-  const task = await Task.findOneAndUpdate(
+  const task = await db.Task.findOneAndUpdate(
     // Same guard as changeStatus, and for the same reason: the edit form reaches this path too,
     // so a status leaving its column has to be guarded here as well or the race just moves to
     // the writer nobody was watching (BP-489).
@@ -1279,7 +1278,7 @@ export async function updateTask(
   if (!task) {
     if (leavesColumn) {
       // Lost the race rather than deleted: see the identical branch in changeStatus.
-      const current = await Task.findOne({ _id: taskId, project: projectId }).populate(
+      const current = await db.Task.findOne({ _id: taskId, project: projectId }).populate(
         taskPopulateFields
       );
       if (current) return { ok: true, data: current as ITask };
@@ -1295,7 +1294,7 @@ export async function updateTask(
     const newVal = refId(task[field as keyof typeof task]);
     if (oldVal !== newVal) {
       const action = field === "status" ? "status_changed" as const : "updated" as const;
-      activities.push(logActivity(taskId, actorId, action, field, oldVal, newVal));
+      activities.push(logActivity(db, taskId, actorId, action, field, oldVal, newVal));
     }
   }
 
@@ -1303,8 +1302,8 @@ export async function updateTask(
   // Through refId: `oldTask` is lean and holds a raw ObjectId while `task` comes back populated.
   if (refId(oldTask.agent) !== refId(task.agent)) {
     activities.push(
-      storedAgentName(oldTask.agent).then((before) =>
-        logActivity(taskId, actorId, "updated", "agent", before, populatedAgentName(task.agent))
+      storedAgentName(db, oldTask.agent).then((before) =>
+        logActivity(db, taskId, actorId, "updated", "agent", before, populatedAgentName(task.agent))
       )
     );
   }
@@ -1314,8 +1313,9 @@ export async function updateTask(
     // A whole list rewritten over MCP would otherwise push the rest of the task's history out of view
     activities.push(
       changes.length > CRITERION_ROWS_PER_WRITE
-        ? logActivity(taskId, actorId, "updated", "checklist", "", String(changes.length))
+        ? logActivity(db, taskId, actorId, "updated", "checklist", "", String(changes.length))
         : logActivities(
+            db,
             changes.map((change) => ({
               taskId,
               userId: actorId,
@@ -1332,6 +1332,7 @@ export async function updateTask(
   // fixed trackFields list leaves the bulk of every change unrecorded.
   activities.push(
     logActivities(
+      db,
       customFieldActivityChanges(oldTask.customFieldValues, task.customFieldValues, fieldDefs).map(
         (change) => ({
           taskId,
@@ -1355,7 +1356,7 @@ export async function updateTask(
       ? (task.assignee as { username: string }).username
       : "";
     if (oldAssignee !== newAssignee) {
-      activities.push(logActivity(taskId, actorId, "updated", "assignee", oldAssignee, newAssignee));
+      activities.push(logActivity(db, taskId, actorId, "updated", "assignee", oldAssignee, newAssignee));
     }
   }
 
@@ -1366,7 +1367,7 @@ export async function updateTask(
       : task.assignee;
     if (assigneeId) {
       activities.push(
-        Task.findByIdAndUpdate(taskId, { $addToSet: { watchers: assigneeId } }).then(() => {})
+        db.Task.findByIdAndUpdate(taskId, { $addToSet: { watchers: assigneeId } }).then(() => {})
       );
     }
   }
@@ -1376,13 +1377,13 @@ export async function updateTask(
   // The edit form sends status inside the PUT body, so this path sets off the same things a
   // board move does. It used to fire the PM trigger alone, which is the whole of BP-253.
   if (updates.status !== undefined && oldTask.status !== task.status) {
-    await announceStatusChange({
+    await announceStatusChange(db, {
       projectId,
       taskId,
       oldTask,
       task,
       actorId,
-      project: await Project.findById(projectId, "columns").lean(),
+      project: await db.Project.findById(projectId, "columns").lean(),
     });
   }
 
@@ -1392,12 +1393,12 @@ export async function updateTask(
       ? String(task.assignee._id)
       : String(task.assignee);
     const [project, actor] = await Promise.all([
-      Project.findById(projectId, "key name columns").lean(),
-      usernameOf(actorId),
+      db.Project.findById(projectId, "key name columns").lean(),
+      usernameOf(db, actorId),
     ]);
     const taskKey = taskKeyOf(project?.key, task.taskNumber);
     const column = getProjectColumns(project).find((c) => c.id === String(task.status));
-    createNotifications({
+    createNotifications(db, {
       type: "task_assigned",
       taskId,
       projectId,
@@ -1427,6 +1428,7 @@ export async function updateTask(
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function addComment(
+  db: ScopedDb,
   projectId: string,
   taskId: string,
   bodyText: string,
@@ -1435,7 +1437,7 @@ export async function addComment(
 ): Promise<TaskServiceResult<any>> {
   await connectDB();
 
-  const task = await Task.findOne({ _id: taskId, project: projectId });
+  const task = await db.Task.findOne({ _id: taskId, project: projectId });
   if (!task) {
     return { ok: false, error: "Task not found", status: 404 };
   }
@@ -1447,21 +1449,21 @@ export async function addComment(
     return { ok: false, error: COMMENT_BODY_RULE, status: 400 };
   }
 
-  const comment = await Comment.create({
+  const comment = await db.Comment.create({
     task: taskId,
     author: actor.id,
     body: bodyText.trim(),
   });
 
-  const populated = await Comment.findById(comment._id).populate({
+  const populated = await db.Comment.findById(comment._id).populate({
     path: "author",
     select: "username fullName",
   });
 
   await Promise.all([
-    logActivity(taskId, actor.id, "comment_added"),
+    logActivity(db, taskId, actor.id, "comment_added"),
     // Auto-watch task on comment
-    Task.findByIdAndUpdate(taskId, { $addToSet: { watchers: actor.id } }),
+    db.Task.findByIdAndUpdate(taskId, { $addToSet: { watchers: actor.id } }),
   ]);
 
   const eventPayload = {
@@ -1473,12 +1475,12 @@ export async function addComment(
     },
     data: { commentBody: bodyText.trim().substring(0, 200), author: actor.username },
   };
-  dispatchWebhooks(projectId, "comment_added", eventPayload);
-  dispatchNotifications(projectId, "comment_added", eventPayload);
+  dispatchWebhooks(db, projectId, "comment_added", eventPayload);
+  dispatchNotifications(db, projectId, "comment_added", eventPayload);
 
   const [project, mentionedIds] = await Promise.all([
-    Project.findById(projectId, "key name columns").lean(),
-    resolveMentions(bodyText),
+    db.Project.findById(projectId, "key name columns").lean(),
+    resolveMentions(db, bodyText),
   ]);
   const taskKey = taskKeyOf(project?.key, task.taskNumber);
   const column = getProjectColumns(project).find((c) => c.id === String(task.status));
@@ -1501,7 +1503,7 @@ export async function addComment(
   const mentioned = new Set(mentionedIds);
   const commentRecipients = collectRecipients(task).filter((id) => !mentioned.has(id));
   if (commentRecipients.length > 0) {
-    createNotifications({
+    createNotifications(db, {
       type: "comment_added",
       taskId,
       projectId,
@@ -1515,7 +1517,7 @@ export async function addComment(
   }
 
   if (mentionedIds.length > 0) {
-    createNotifications({
+    createNotifications(db, {
       type: "mentioned",
       taskId,
       projectId,
@@ -1532,16 +1534,18 @@ export async function addComment(
 }
 
 export async function assignTask(
+  db: ScopedDb,
   projectId: string,
   taskId: string,
   username: string | null,
   actorId: string,
   onWhoseInstruction: string | null = null
 ): Promise<TaskServiceResult> {
-  return updateTask(projectId, taskId, { assignee: username }, actorId, false, onWhoseInstruction);
+  return updateTask(db, projectId, taskId, { assignee: username }, actorId, false, onWhoseInstruction);
 }
 
 async function createNextRecurrence(
+  db: ScopedDb,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   oldTask: any,
   projectId: string,
@@ -1553,9 +1557,9 @@ async function createNextRecurrence(
   // One successor per closed occurrence, whichever way the task got back into a done column —
   // dragged out of Done and back, or moved between two done-role columns. Before the counter is
   // incremented, so a refused mint burns no task number.
-  if (await Task.exists({ recurringParentId: oldTask._id })) return;
+  if (await db.Task.exists({ recurringParentId: oldTask._id })) return;
 
-  const project = await Project.findOneAndUpdate(
+  const project = await db.Project.findOneAndUpdate(
     { _id: projectId },
     { $inc: { taskCounter: 1 } },
     { returnDocument: "after" }
@@ -1564,7 +1568,7 @@ async function createNextRecurrence(
 
   const checklist = undoneChecklist(oldTask.checklist);
 
-  await Task.create({
+  await db.Task.create({
     project: projectId,
     taskNumber: project.taskCounter,
     title: oldTask.title,
@@ -1573,7 +1577,7 @@ async function createNextRecurrence(
     category: oldTask.category || "user-story",
     status: defaultStatusFor(project),
     // Nobody can be handed work they cannot see, and nobody would be told it went to them (BP-832)
-    assignee: (await assigneeStillActive(oldTask.assignee)) ? oldTask.assignee : null,
+    assignee: (await assigneeStillActive(db, oldTask.assignee)) ? oldTask.assignee : null,
     // Inherited, not stamped with userId: userId is whoever/whatever closed this occurrence, which
     // may be the worker's own identity finishing its run, not the person who owns the series. The
     // next occurrence continues the same standing assignment, so it carries the same assigner.
@@ -1611,6 +1615,7 @@ async function createNextRecurrence(
   });
 
   await logActivity(
+    db,
     String(oldTask._id),
     userId,
     "updated",
@@ -1620,10 +1625,10 @@ async function createNextRecurrence(
   );
 }
 
-export async function releaseExpiredTasks(projectId: string, now = new Date()): Promise<number> {
+export async function releaseExpiredTasks(db: ScopedDb, projectId: string, now = new Date()): Promise<number> {
   await connectDB();
 
-  const project = await Project.findById(projectId, "columns key name").lean();
+  const project = await db.Project.findById(projectId, "columns key name").lean();
   const columns = getProjectColumns(project);
   const approved = columns.find((c) => c.role === "approved")?.id;
   const active = columns.filter((c) => c.role === "active").map((c) => c.id);
@@ -1640,7 +1645,7 @@ export async function releaseExpiredTasks(projectId: string, now = new Date()): 
   // Read before the update, not after: the move clears an assignee the run put there, so afterwards
   // there is nobody left on the task to tell. A task out of attempts is rare, so this normally
   // costs one query that matches nothing.
-  const abandoned = await Task.find(
+  const abandoned = await db.Task.find(
     outOfAttempts,
     "taskNumber title assignee watchers execution.workerId"
   ).lean();
@@ -1649,12 +1654,12 @@ export async function releaseExpiredTasks(projectId: string, now = new Date()): 
   // attempts and reach a human, rather than cycling through the queue forever
   const [spent, retryable] = await Promise.all([
     Task.updateMany(
-      outOfAttempts,
+      { ...outOfAttempts, tenant: db.tenant },
       [{ $set: { status: exhausted, ...CLEAR_WORKER_ASSIGNEE } }, { $unset: RUN_FIELDS }],
       { updatePipeline: true }
     ),
     Task.updateMany(
-      { ...expired, "execution.attempts": { $lt: MAX_EXECUTION_ATTEMPTS } },
+      { ...expired, tenant: db.tenant, "execution.attempts": { $lt: MAX_EXECUTION_ATTEMPTS } },
       [{ $set: { status: approved, ...CLEAR_WORKER_ASSIGNEE } }, { $unset: RUN_FIELDS }],
       { updatePipeline: true }
     ),
@@ -1663,7 +1668,7 @@ export async function releaseExpiredTasks(projectId: string, now = new Date()): 
   // Only what this call actually moved: two workers polling at once both read the list, and the
   // one whose update matched nothing must not announce the other's work a second time.
   if (spent.modifiedCount > 0) {
-    announceAbandonedRuns(projectId, project, abandoned, exhausted, columns).catch((err) =>
+    announceAbandonedRuns(db, projectId, project, abandoned, exhausted, columns).catch((err) =>
       console.error("Failed to announce an abandoned run:", err)
     );
   }
@@ -1677,6 +1682,7 @@ export async function releaseExpiredTasks(projectId: string, now = new Date()): 
  * updateMany, which fires no webhook and no notification.
  */
 async function announceAbandonedRuns(
+  db: ScopedDb,
   projectId: string,
   project: { key?: string; name?: string } | null,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1693,10 +1699,10 @@ async function announceAbandonedRuns(
     // notification row needs one. Without its identity there is nothing truthful to put there.
     const workerId = task.execution?.workerId;
     const actor = workerId
-      ? await User.findOne({ username: workerUsername(String(workerId)) }, "_id").lean()
+      ? await db.User.findOne({ username: workerUsername(String(workerId)) }, "_id").lean()
       : null;
     if (!actor) continue;
-    createNotifications({
+    createNotifications(db, {
       type: "status_changed",
       taskId: String(task._id),
       projectId,
@@ -1731,11 +1737,12 @@ async function announceAbandonedRuns(
 // A blocker always sits in the same project — the links endpoint refuses one that does not — so
 // nothing outside this project has to be consulted.
 async function openBlockersFor(
+  db: ScopedDb,
   projectId: string,
   approved: string[],
   done: string[]
 ): Promise<Types.ObjectId[]> {
-  const waiting = await Task.find(
+  const waiting = await db.Task.find(
     { project: projectId, status: { $in: approved }, blockedBy: { $exists: true, $ne: [] } },
     "blockedBy"
   ).lean();
@@ -1751,7 +1758,7 @@ async function openBlockersFor(
   // project, though blockers are same-project today: a foreign blocker would otherwise have its
   // status judged against this board's done ids, and a board that calls finished anything else
   // would freeze the dependent for good. Scoped, it drops out and the dependent goes through.
-  const open = await Task.find(
+  const open = await db.Task.find(
     { project: projectId, _id: { $in: named }, status: { $nin: done } },
     "_id"
   ).lean();
@@ -1759,6 +1766,7 @@ async function openBlockersFor(
 }
 
 export async function claimNextTask(
+  db: ScopedDb,
   projectId: string,
   workerId: string,
   runId: string,
@@ -1769,7 +1777,7 @@ export async function claimNextTask(
 ): Promise<HydratedDocument<ITask> | null> {
   await connectDB();
 
-  const project = await Project.findById(projectId, "columns").lean();
+  const project = await db.Project.findById(projectId, "columns").lean();
   const columns = getProjectColumns(project);
   // Thrown, not null: null is the empty queue, and a board that cannot claim at all looked exactly
   // like one with nothing to claim (BP-512). Every role the run will need, in the order it needs
@@ -1806,11 +1814,11 @@ export async function claimNextTask(
   // Closing the last two means keeping an open-blocker count on the task itself, maintained by
   // every link and status writer, so the gate can live inside the atomic filter. That is a much
   // larger change than this one.
-  const openBlockers = await openBlockersFor(projectId, approved, columnIdsWithRole(project, "done"));
+  const openBlockers = await openBlockersFor(db, projectId, approved, columnIdsWithRole(project, "done"));
 
   // Looked up rather than upserted: a poll must not be what creates the PM account on an instance
   // that has never run one, and an instance without it simply has no PM assignments to honour.
-  const pm = await pmUserId();
+  const pm = await pmUserId(db);
 
   // The runId is the only caller-controlled string any `updatePipeline: true` write in this file
   // interpolates. The rest — including this one's own `activeStatus` — are column ids resolved from
@@ -1818,6 +1826,7 @@ export async function claimNextTask(
   // a validator elsewhere, so if that rule ever loosens they want `$literal` too (BP-329).
   return Task.findOneAndUpdate(
     {
+      tenant: db.tenant,
       project: projectId,
       status: { $in: approved },
       // Assigned to the owner, by the owner or by the PM. A *person* assigning you work is still a
@@ -1916,6 +1925,7 @@ export async function claimNextTask(
 }
 
 export async function releaseTask(
+  db: ScopedDb,
   projectId: string,
   taskId: string,
   options: { refund?: boolean; workerId?: string } = {}
@@ -1929,7 +1939,7 @@ export async function releaseTask(
     ? { ...STILL_HELD, "execution.workerId": options.workerId }
     : STILL_HELD;
 
-  const project = await Project.findById(projectId, "columns").lean();
+  const project = await db.Project.findById(projectId, "columns").lean();
   const columns = getProjectColumns(project);
   const approved = columns.find((c) => c.role === "approved")?.id;
   const active = columns.filter((c) => c.role === "active").map((c) => c.id);
@@ -1939,7 +1949,7 @@ export async function releaseTask(
     const exhausted = escalationColumnId(columns) ?? approved;
 
     return Task.findOneAndUpdate(
-      { _id: taskId, project: projectId, status: { $in: active }, ...held },
+      { _id: taskId, tenant: db.tenant, project: projectId, status: { $in: active }, ...held },
       [
         {
           $set: {
@@ -1962,6 +1972,7 @@ export async function releaseTask(
   return Task.findOneAndUpdate(
     {
       _id: taskId,
+      tenant: db.tenant,
       project: projectId,
       status: { $in: active },
       "execution.attempts": { $gt: 0 },
@@ -2002,10 +2013,10 @@ export function phaseFrom(value: unknown): string | null {
 
 // The run is the authorization: a worker that has been released from this task, or whose run was
 // superseded by a newer claim, matches nothing however valid its credential is.
-export async function recordTaskPhase(event: TaskPhaseUpdate): Promise<boolean> {
+export async function recordTaskPhase(db: ScopedDb, event: TaskPhaseUpdate): Promise<boolean> {
   await connectDB();
 
-  const result = await Task.updateOne(
+  const result = await db.Task.updateOne(
     {
       _id: event.taskId,
       "execution.workerId": event.workerId,

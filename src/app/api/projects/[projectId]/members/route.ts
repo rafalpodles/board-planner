@@ -9,6 +9,7 @@ import { logProjectAudit } from "@/lib/projectAudit";
 import { GRANT_RELATIONS, GrantRelation } from "@/types";
 
 function auditAccess(
+  db: ScopedDb,
   projectId: string,
   actorId: unknown,
   username: string,
@@ -17,6 +18,7 @@ function auditAccess(
 ): void {
   const action = !from ? "member_added" : !to ? "member_removed" : "member_role_changed";
   void logProjectAudit(
+    db,
     projectId,
     String(actorId),
     action,
@@ -86,7 +88,7 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
     .select("relation")
     .lean();
   if (relation !== "owner") {
-    if (current?.relation === "owner" && (await ownerCount(projectId)) <= 1) {
+    if (current?.relation === "owner" && (await ownerCount(db, projectId)) <= 1) {
       return NextResponse.json(
         { error: "A board must keep at least one owner" },
         { status: 409 }
@@ -112,7 +114,7 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
 
   // Counted again after the write: another owner stepping down, removed or deactivated at the same
   // moment counted this one as still an owner, as this one counted them (BP-841)
-  if (before?.relation === "owner" && relation !== "owner" && (await ownerCount(projectId)) === 0) {
+  if (before?.relation === "owner" && relation !== "owner" && (await ownerCount(db, projectId)) === 0) {
     // An upsert, since a concurrent removal may have taken the row this would put back
     const restored = await db.Grant.updateOne(
       { subject: userId, objectType: "project", object: projectId },
@@ -120,12 +122,12 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
       { upsert: true }
     );
     // Re-created after somebody else removed it: an owner's access granted, so it is recorded
-    if (restored.upsertedCount > 0) auditAccess(projectId, user._id, target.username, undefined, "owner");
+    if (restored.upsertedCount > 0) auditAccess(db, projectId, user._id, target.username, undefined, "owner");
     return NextResponse.json({ error: "A board must keep at least one owner" }, { status: 409 });
   }
 
   if (before?.relation !== relation) {
-    auditAccess(projectId, user._id, target.username, before?.relation, relation);
+    auditAccess(db, projectId, user._id, target.username, before?.relation, relation);
     void announceAccess(db, {
       projectId,
       recipientId: userId,
@@ -151,7 +153,7 @@ async function announceAccess(db: ScopedDb, change: {
     const project = await db.Project.findById(change.projectId).select("name key").lean();
     const board = project?.name ?? "a board";
     const role = change.relation === "owner" ? "an owner" : "a member";
-    await createNotifications({
+    await createNotifications(db, {
       type: "board_access",
       projectId: change.projectId,
       actorId: change.actorId,
@@ -195,7 +197,7 @@ export const DELETE = withProjectOwner(async (request, { params, user, db }) => 
   // A deactivated owner is not one of those counted as keeping the board run, so taking them off
   // can never leave it with fewer (BP-832)
   const subjectActive = !!(await db.User.exists({ _id: subject, deactivatedAt: null }));
-  if (subjectActive && (await ownerCount(projectId)) <= 1) {
+  if (subjectActive && (await ownerCount(db, projectId)) <= 1) {
     const remaining = await db.Grant.find({ objectType: "project", object: projectId })
       .select("subject relation")
       .lean();
@@ -216,7 +218,7 @@ export const DELETE = withProjectOwner(async (request, { params, user, db }) => 
     .select("relation createdBy")
     .lean();
   // Put back if a concurrent removal or deactivation left the board with no active owner (BP-841)
-  if (removed?.relation === "owner" && subjectActive && (await ownerCount(projectId)) === 0) {
+  if (removed?.relation === "owner" && subjectActive && (await ownerCount(db, projectId)) === 0) {
     await db.Grant.updateOne(
       { subject, objectType: "project", object: projectId },
       { $setOnInsert: { relation: "owner", createdBy: removed.createdBy } },
@@ -224,15 +226,15 @@ export const DELETE = withProjectOwner(async (request, { params, user, db }) => 
     );
     // Somebody re-added them as a member meanwhile, so the insert did nothing: they are made owner
     // again rather than leave the board with none
-    if ((await ownerCount(projectId)) === 0) {
+    if ((await ownerCount(db, projectId)) === 0) {
       await db.Grant.updateOne({ subject, objectType: "project", object: projectId }, { $set: { relation: "owner" } });
       const who = await db.User.findById(subject).select("username");
-      auditAccess(projectId, user._id, who?.username ?? "a deleted user", "member", "owner");
+      auditAccess(db, projectId, user._id, who?.username ?? "a deleted user", "member", "owner");
     }
     return NextResponse.json({ error: "A board must keep at least one owner" }, { status: 409 });
   }
   if (removed) {
-    auditAccess(projectId, user._id, person?.username ?? "a deleted user", removed.relation, undefined);
+    auditAccess(db, projectId, user._id, person?.username ?? "a deleted user", removed.relation, undefined);
   }
 
   // Hygiene, NOT containment: what makes a lost board unreadable is the filter on the read
@@ -249,7 +251,7 @@ export const DELETE = withProjectOwner(async (request, { params, user, db }) => 
   // keeping it costs nothing, while deleting it on a guess cannot be undone.
   let stillReaches = true;
   try {
-    stillReaches = (await recipientsWithAccess([subject], projectId)).length > 0;
+    stillReaches = (await recipientsWithAccess(db, [subject], projectId)).length > 0;
   } catch (err) {
     console.error("Could not tell whether the removed member still reaches the board:", err);
   }

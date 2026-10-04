@@ -1,6 +1,6 @@
 import { Types } from "mongoose";
-import { ActivityLog } from "@/models/activityLog";
 import { ActivityAction } from "@/types";
+import type { ScopedDb } from "@/lib/db-scope";
 
 /**
  * Several rows from one act, in one write.
@@ -17,6 +17,7 @@ import { ActivityAction } from "@/types";
  * different shape — and the catch below says which happened rather than leaving it to be guessed.
  */
 export async function logActivities(
+  db: ScopedDb,
   rows: {
     taskId: Types.ObjectId | string;
     userId: Types.ObjectId | string | null;
@@ -30,7 +31,7 @@ export async function logActivities(
 ): Promise<void> {
   if (rows.length === 0) return;
   try {
-    await ActivityLog.insertMany(
+    await db.ActivityLog.insertMany(
       rows.map((row) => ({
         task: row.taskId,
         user: row.userId,
@@ -54,6 +55,7 @@ export async function logActivities(
 }
 
 export async function logActivity(
+  db: ScopedDb,
   taskId: Types.ObjectId | string,
   // Null is a sync writing about what GitHub said, which no person authored (BP-628)
   userId: Types.ObjectId | string | null,
@@ -63,7 +65,7 @@ export async function logActivity(
   newValue?: string
 ): Promise<void> {
   try {
-    await ActivityLog.create({
+    await db.ActivityLog.create({
       task: taskId,
       user: userId,
       action,

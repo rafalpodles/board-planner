@@ -29,6 +29,7 @@ vi.mock("@/models/invitation", () => ({ Invitation: { findOne: vi.fn() } }));
 
 const { POST } = await import("./route");
 const { resetRateLimits } = await import("@/lib/rate-limit");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 
 const HELD = {
   provider: "oidc",
@@ -55,8 +56,9 @@ describe("POST /api/invitations/sso", () => {
     const res = await post();
 
     expect(res.status).toBe(201);
-    expect(claimInvitationByHash).toHaveBeenCalledWith("h1");
-    expect(completeAcceptance.mock.calls[0][1]).toEqual({
+    expect(claimInvitationByHash).toHaveBeenCalledWith(scopedToDefaultTenant(), "h1");
+    expect(completeAcceptance.mock.calls[0][0]).toBe(scopedToDefaultTenant());
+    expect(completeAcceptance.mock.calls[0][2]).toEqual({
       username: "ada",
       fullName: "Ada Lovelace",
       passwordHash: null,
@@ -64,7 +66,7 @@ describe("POST /api/invitations/sso", () => {
       providerProvesAddress: true,
       groups: [],
     });
-    expect(spendAcceptance).toHaveBeenCalledWith("cpo_held");
+    expect(spendAcceptance).toHaveBeenCalledWith(scopedToDefaultTenant(), "cpo_held");
     expect(res.headers.get("set-cookie")).toContain("bp_oidc_accept=");
   });
 
@@ -76,13 +78,13 @@ describe("POST /api/invitations/sso", () => {
 
     await post();
 
-    expect(completeAcceptance.mock.calls[0][1].providerProvesAddress).toBe(false);
+    expect(completeAcceptance.mock.calls[0][2].providerProvesAddress).toBe(false);
   });
 
   it("reads the held sign-in from its own cookie", async () => {
     await post();
 
-    expect(heldAcceptance).toHaveBeenCalledWith("cpo_held");
+    expect(heldAcceptance).toHaveBeenCalledWith(scopedToDefaultTenant(), "cpo_held");
   });
 
   it("refuses a request from another site", async () => {
@@ -110,7 +112,7 @@ describe("POST /api/invitations/sso", () => {
     const res = await post();
 
     expect(res.status).toBe(400);
-    expect(releaseInvitation).toHaveBeenCalledWith("inv-1");
+    expect(releaseInvitation).toHaveBeenCalledWith(scopedToDefaultTenant(), "inv-1");
     expect(completeAcceptance).not.toHaveBeenCalled();
   });
 

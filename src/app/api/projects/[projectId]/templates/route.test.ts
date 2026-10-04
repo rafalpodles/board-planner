@@ -23,6 +23,7 @@ vi.mock("@/models/project", () => ({
 }));
 vi.mock("@/lib/projectAudit", () => ({ logProjectAudit }));
 
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 const { POST, PUT, DELETE } = await import("./route");
 
 const PROJECT_ID = "507f1f77bcf86cd799439011";
@@ -147,7 +148,7 @@ describe("POST /api/projects/:projectId/templates", () => {
   it("records the addition on the project's audit log, under the trimmed name", async () => {
     await call(POST, { name: "  Bug  " });
 
-    expect(logProjectAudit).toHaveBeenCalledWith(PROJECT_ID, "u1", "template_added", "Bug");
+    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), PROJECT_ID, "u1", "template_added", "Bug");
   });
 
   /**
@@ -336,6 +337,7 @@ describe("DELETE /api/projects/:projectId/templates", () => {
     await call(DELETE, { templateId: "t1" });
 
     expect(logProjectAudit).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       PROJECT_ID,
       "u1",
       "template_removed",
@@ -369,7 +371,7 @@ describe("DELETE /api/projects/:projectId/templates", () => {
   // Deleting is project-owner; adding and editing are project-access. A member may compose a
   // template for the board, but removing one takes it away from everybody.
   it("403s a member who may add and edit but not remove", async () => {
-    check.mockImplementation(async (_user: unknown, _project: unknown, level: string) =>
+    check.mockImplementation(async (_db: unknown, _user: unknown, _project: unknown, level: string) =>
       level === "access"
     );
 

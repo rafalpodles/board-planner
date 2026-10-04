@@ -1,7 +1,4 @@
 import { Types } from "mongoose";
-import { Task } from "@/models/task";
-import { Project } from "@/models/project";
-import { Comment } from "@/models/comment";
 import { PRIORITIES } from "@/types";
 import { resolveFieldsByName } from "@/lib/custom-fields";
 import {
@@ -22,6 +19,7 @@ import type { AnyColumn } from "@/lib/columns";
 import { getProjectColumns } from "@/lib/columns";
 import { echo } from "@/lib/echo";
 import { isWorkerLockedByInstance } from "@/lib/worker-gate";
+import type { ScopedDb } from "@/lib/db-scope";
 
 export interface PmToolContext {
   projectId: string;
@@ -37,7 +35,7 @@ export interface PmToolContext {
  * BP-419 made a PM assignment claimable, and the claim's own filter pairs this with
  * `assignee: <machine owner>` — so a machine runs a PM hand-over only when the person who asked
  * for it is the person receiving it. Without this, the PM chat is reachable by any project member
- * (`check(user, projectId, "access")`), and asking it to assign a task to a colleague would start
+ * (`check(db, user, projectId, "access")`), and asking it to assign a task to a colleague would start
  * a run on that colleague's machine, carrying text the member wrote. The old filter refused every
  * PM assignment, so that path did not exist before this change and must not be opened by it.
  */
@@ -49,8 +47,8 @@ function onWhoseInstruction(ctx: PmToolContext): string | null {
 
 /** createTask, carrying whose instruction the PM is acting on — see onWhoseInstruction */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function createTaskOnInstruction(ctx: PmToolContext, body: any) {
-  return createTask(ctx.projectId, ctx.pmUserId, body, onWhoseInstruction(ctx));
+function createTaskOnInstruction(db: ScopedDb, ctx: PmToolContext, body: any) {
+  return createTask(db, ctx.projectId, ctx.pmUserId, body, onWhoseInstruction(ctx));
 }
 
 export interface PmToolOutcome {
@@ -61,13 +59,13 @@ export interface PmToolOutcome {
 interface PmTool {
   definition: OrToolDefinition;
   write: boolean;
-  execute(args: Record<string, unknown>, ctx: PmToolContext): Promise<PmToolOutcome>;
+  execute(db: ScopedDb, args: Record<string, unknown>, ctx: PmToolContext): Promise<PmToolOutcome>;
 }
 
 const MAX_TEXT_RESULT = 4000;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function resolveTask(ctx: PmToolContext, taskKey: unknown): Promise<{ task: any } | { error: string }> {
+async function resolveTask(db: ScopedDb, ctx: PmToolContext, taskKey: unknown): Promise<{ task: any } | { error: string }> {
   if (typeof taskKey !== "string" || !taskKey.trim()) {
     return { error: "taskKey is required, e.g. " + ctx.projectKey + "-12" };
   }
@@ -75,7 +73,7 @@ async function resolveTask(ctx: PmToolContext, taskKey: unknown): Promise<{ task
   if (!match) {
     return { error: `Invalid taskKey format: ${echo(taskKey)}` };
   }
-  const task = await Task.findOne({ project: ctx.projectId, taskNumber: Number(match[1]) });
+  const task = await db.Task.findOne({ project: ctx.projectId, taskNumber: Number(match[1]) });
   if (!task) {
     return { error: `Task ${echo(taskKey)} not found in this project` };
   }
@@ -88,13 +86,14 @@ async function resolveTask(ctx: PmToolContext, taskKey: unknown): Promise<{ task
  * way the PM can set them.
  */
 async function fieldValuesFor(
+  db: ScopedDb,
   projectId: string,
   fields: unknown
 ): Promise<Record<string, unknown> | { error: string }> {
   if (!fields || typeof fields !== "object" || Array.isArray(fields)) return {};
   const entries = fields as Record<string, unknown>;
   if (!Object.keys(entries).length) return {};
-  const project = await Project.findById(projectId, "customFields").lean();
+  const project = await db.Project.findById(projectId, "customFields").lean();
   try {
     return resolveFieldsByName(entries, (project?.customFields || []) as never);
   } catch (err) {
@@ -154,6 +153,7 @@ export function refuseUndeclaredArgs(tool: PmTool, args: Record<string, unknown>
  * never "it will run".
  */
 async function whyItWillNotRun(
+  db: ScopedDb,
   projectId: string,
   task: {
     agent?: unknown;
@@ -165,7 +165,7 @@ async function whyItWillNotRun(
     execution?: { attempts?: number } | null;
   }
 ): Promise<string> {
-  const project = await Project.findById(
+  const project = await db.Project.findById(
     projectId,
     "key columns worker repositoryUrl githubRepo gitlabRepo"
   ).lean();
@@ -258,13 +258,13 @@ export const PM_TOOLS: Record<string, PmTool> = {
         additionalProperties: false,
       },
     },
-    async execute(args, ctx) {
+    async execute(db, args, ctx) {
       const filter: Record<string, unknown> = { project: ctx.projectId };
       if (args.status !== undefined) {
         // This tool queries Mongo directly, so the route's refusal does not cover it. Columns are
         // project-defined, and an id the board has not got answered `[]` — which a model reports
         // as "there is nothing to do" (BP-511).
-        const project = await Project.findById(ctx.projectId, "columns").lean();
+        const project = await db.Project.findById(ctx.projectId, "columns").lean();
         const columnIds = getProjectColumns(project).map((c) => c.id);
         if (!columnIds.includes(String(args.status))) {
           return {
@@ -278,8 +278,8 @@ export const PM_TOOLS: Record<string, PmTool> = {
       const limit = Math.min(Math.max(Number(args.limit) || 50, 1), 100);
       const offset = Math.max(Number(args.offset) || 0, 0);
       const [total, tasks] = await Promise.all([
-        Task.countDocuments(filter),
-        Task.find(filter)
+        db.Task.countDocuments(filter),
+        db.Task.find(filter)
           .sort({ taskNumber: -1 })
           .skip(offset)
           .limit(limit)
@@ -301,10 +301,10 @@ export const PM_TOOLS: Record<string, PmTool> = {
         additionalProperties: false,
       },
     },
-    async execute(args, ctx) {
-      const resolved = await resolveTask(ctx, args.taskKey);
+    async execute(db, args, ctx) {
+      const resolved = await resolveTask(db, ctx, args.taskKey);
       if ("error" in resolved) return { result: { error: resolved.error } };
-      const t = await Task.findById(resolved.task._id)
+      const t = await db.Task.findById(resolved.task._id)
         .populate("assignee", "username fullName")
         .populate("blockedBy", "taskNumber title status");
       if (!t) return { result: { error: "Task not found" } };
@@ -334,8 +334,8 @@ export const PM_TOOLS: Record<string, PmTool> = {
       description: "Task counts by status for the project.",
       parameters: { type: "object", properties: {}, additionalProperties: false },
     },
-    async execute(_args, ctx) {
-      const rows = await Task.aggregate([
+    async execute(db, _args, ctx) {
+      const rows = await db.Task.aggregate([
         { $match: { project: resolveObjectId(ctx.projectId) } },
         { $group: { _id: "$status", count: { $sum: 1 } } },
       ]);
@@ -354,8 +354,8 @@ export const PM_TOOLS: Record<string, PmTool> = {
         "Scan the open board for tasks missing acceptance criteria or a description, tasks sitting in the same column for a long time, and likely duplicates by title. Heuristic — confirm with get_task before acting.",
       parameters: { type: "object", properties: {}, additionalProperties: false },
     },
-    async execute(_args, ctx) {
-      const digest = await buildBoardDigest(ctx.projectId);
+    async execute(db, _args, ctx) {
+      const digest = await buildBoardDigest(db, ctx.projectId);
       return { result: digest ?? { error: "Project not found" } };
     },
   },
@@ -375,11 +375,11 @@ export const PM_TOOLS: Record<string, PmTool> = {
         additionalProperties: false,
       },
     },
-    async execute(args, ctx) {
-      const resolved = await resolveTask(ctx, args.taskKey);
+    async execute(db, args, ctx) {
+      const resolved = await resolveTask(db, ctx, args.taskKey);
       if ("error" in resolved) return { result: { error: resolved.error } };
       const limit = Math.min(Math.max(Number(args.limit) || 20, 1), 50);
-      const comments = await Comment.find({ task: resolved.task._id })
+      const comments = await db.Comment.find({ task: resolved.task._id })
         .sort({ createdAt: -1 })
         .limit(limit)
         .populate("author", "username");
@@ -415,15 +415,15 @@ export const PM_TOOLS: Record<string, PmTool> = {
         additionalProperties: false,
       },
     },
-    async execute(args, ctx) {
+    async execute(db, args, ctx) {
       const title = str(args.title).trim();
       if (!title) return { result: { error: "title is required" } };
-      const resolvedFields = await fieldValuesFor(ctx.projectId, args.fields);
+      const resolvedFields = await fieldValuesFor(db, ctx.projectId, args.fields);
       if ("error" in resolvedFields) return { result: { error: resolvedFields.error as string } };
       const createFields = Object.keys(resolvedFields).length
         ? { customFieldValues: resolvedFields }
         : {};
-      const result = await createTaskOnInstruction(ctx, {
+      const result = await createTaskOnInstruction(db, ctx, {
         title,
         description: str(args.description),
         priority: args.priority,
@@ -465,15 +465,15 @@ export const PM_TOOLS: Record<string, PmTool> = {
         additionalProperties: false,
       },
     },
-    async execute(args, ctx) {
-      const resolved = await resolveTask(ctx, args.taskKey);
+    async execute(db, args, ctx) {
+      const resolved = await resolveTask(db, ctx, args.taskKey);
       if ("error" in resolved) return { result: { error: resolved.error } };
       const allowed = ["title", "description", "priority", "category", "acceptanceCriteria", "dueDate"];
       const body: Record<string, unknown> = {};
       for (const field of allowed) {
         if (args[field] !== undefined) body[field] = args[field];
       }
-      const updates = await fieldValuesFor(ctx.projectId, args.fields);
+      const updates = await fieldValuesFor(db, ctx.projectId, args.fields);
       if ("error" in updates) return { result: { error: updates.error as string } };
       if (Object.keys(updates).length) {
         // customFieldValues is replaced wholesale, so the task's other values are
@@ -485,7 +485,7 @@ export const PM_TOOLS: Record<string, PmTool> = {
       if (Object.keys(body).length === 0) {
         return { result: { error: `update_task ${NOTHING_TO_CHANGE}` } };
       }
-      const result = await updateTask(ctx.projectId, String(resolved.task._id), body, ctx.pmUserId);
+      const result = await updateTask(db, ctx.projectId, String(resolved.task._id), body, ctx.pmUserId);
       if (!result.ok) return { result: { error: result.error } };
       const key = `${ctx.projectKey}-${result.data.taskNumber}`;
       return {
@@ -510,10 +510,11 @@ export const PM_TOOLS: Record<string, PmTool> = {
         additionalProperties: false,
       },
     },
-    async execute(args, ctx) {
-      const resolved = await resolveTask(ctx, args.taskKey);
+    async execute(db, args, ctx) {
+      const resolved = await resolveTask(db, ctx, args.taskKey);
       if ("error" in resolved) return { result: { error: resolved.error } };
       const result = await changeStatus(
+        db,
         ctx.projectId,
         String(resolved.task._id),
         str(args.status),
@@ -543,11 +544,12 @@ export const PM_TOOLS: Record<string, PmTool> = {
         additionalProperties: false,
       },
     },
-    async execute(args, ctx) {
-      const resolved = await resolveTask(ctx, args.taskKey);
+    async execute(db, args, ctx) {
+      const resolved = await resolveTask(db, ctx, args.taskKey);
       if ("error" in resolved) return { result: { error: resolved.error } };
       const username = args.username === null ? null : str(args.username).trim() || null;
       const result = await assignTask(
+        db,
         ctx.projectId,
         String(resolved.task._id),
         username,
@@ -569,7 +571,7 @@ export const PM_TOOLS: Record<string, PmTool> = {
       }
 
       // Said in the same breath as the assignment, rather than left to a view nobody reopens
-      const blocked = await whyItWillNotRun(ctx.projectId, result.data);
+      const blocked = await whyItWillNotRun(db, ctx.projectId, result.data);
       return {
         result: blocked
           ? { task: key, assignee, willRun: false, note: `Assigned, but ${blocked}.` }
@@ -598,10 +600,10 @@ export const PM_TOOLS: Record<string, PmTool> = {
         additionalProperties: false,
       },
     },
-    async execute(args, ctx) {
-      const resolved = await resolveTask(ctx, args.taskKey);
+    async execute(db, args, ctx) {
+      const resolved = await resolveTask(db, ctx, args.taskKey);
       if ("error" in resolved) return { result: { error: resolved.error } };
-      const result = await addComment(ctx.projectId, String(resolved.task._id), str(args.body), {
+      const result = await addComment(db, ctx.projectId, String(resolved.task._id), str(args.body), {
         id: ctx.pmUserId,
         username: "pm",
       });
