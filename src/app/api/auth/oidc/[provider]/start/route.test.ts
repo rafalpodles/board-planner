@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const beginFlow = vi.fn();
 const getAuthUser = vi.fn();
-const userFindById = vi.fn();
+const userFindOne = vi.fn();
 const findInvitationByToken = vi.fn();
 const compare = vi.fn();
 const userCount = vi.fn();
@@ -28,7 +28,7 @@ vi.mock("@/lib/oidc/providers", () => ({
 }));
 vi.mock("@/lib/oidc/flow", () => ({ beginFlow, FLOW_COOKIE: "bp_oidc", FLOW_TTL_MS: 600_000 }));
 vi.mock("@/lib/invitations", () => ({ findInvitationByToken }));
-vi.mock("@/models/user", () => ({ User: { findById: userFindById, countDocuments: userCount } }));
+vi.mock("@/models/user", () => ({ User: { findOne: userFindOne, countDocuments: userCount } }));
 vi.mock("@/lib/setup-code", () => ({ refuseSetupCode }));
 vi.mock("bcryptjs", () => ({ default: { compare } }));
 
@@ -40,7 +40,7 @@ const start = (body: unknown, provider = "oidc") =>
     params: Promise.resolve({ provider }),
   });
 const withPassword = (password?: string) =>
-  userFindById.mockReturnValue({ select: () => Promise.resolve(password ? { password } : {}) });
+  userFindOne.mockReturnValue({ select: () => Promise.resolve(password ? { password } : {}) });
 
 beforeEach(async () => {
   vi.clearAllMocks();

@@ -1,12 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const inviteToBoard = vi.fn();
 const recordDelivery = vi.fn();
-const userFindById = vi.fn();
+const userFindOne = vi.fn();
 const deliverTo = vi.fn();
 const userExists = vi.fn();
 const userFind = vi.fn();
-const projectFindById = vi.fn();
+const projectFindOne = vi.fn();
 const invitationFind = vi.fn();
 const logInstanceAudit = vi.fn();
 const logProjectAudit = vi.fn();
@@ -18,12 +19,15 @@ vi.mock("@/models/rateLimit", async () => {
   const { inMemoryRateLimitModel } = await import("@/lib/rate-limit-test-store");
   return { RateLimit: inMemoryRateLimitModel() };
 });
-vi.mock("@/lib/middleware", () => ({
-  withProjectOwner:
-    (handler: (r: Request, c: unknown) => unknown) =>
-    (request: Request) =>
-      handler(request, { params: Promise.resolve({ projectId: "p1" }), user: caller }),
-}));
+vi.mock("@/lib/middleware", async () => {
+  const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+  return {
+    withProjectOwner:
+      (handler: (r: Request, c: unknown) => unknown) =>
+      (request: Request) =>
+        handler(request, { params: Promise.resolve({ projectId: "p1" }), user: caller, db: scopedToDefaultTenant() }),
+  };
+});
 vi.mock("@/lib/session", () => ({ selfOrigin }));
 vi.mock("@/lib/invitations", () => ({ inviteToBoard, recordDelivery }));
 vi.mock("@/lib/invitation-mail", async () => {
@@ -32,8 +36,8 @@ vi.mock("@/lib/invitation-mail", async () => {
 });
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/lib/projectAudit", () => ({ logProjectAudit }));
-vi.mock("@/models/user", () => ({ User: { exists: userExists, find: userFind, findById: userFindById } }));
-vi.mock("@/models/project", () => ({ Project: { findById: projectFindById } }));
+vi.mock("@/models/user", () => ({ User: { exists: userExists, find: userFind, findOne: userFindOne } }));
+vi.mock("@/models/project", () => ({ Project: { findOne: projectFindOne } }));
 vi.mock("@/models/invitation", () => ({ Invitation: { find: invitationFind } }));
 
 const { GET, POST } = await import("./route");
@@ -49,7 +53,7 @@ beforeEach(async () => {
   caller = { _id: "o1", username: "owner", fullName: "Board Owner", role: "member" };
   selfOrigin.mockReturnValue("https://planner.example");
   userExists.mockResolvedValue(null);
-  projectFindById.mockReturnValue({
+  projectFindOne.mockReturnValue({
     select: () => ({ lean: () => Promise.resolve({ _id: "p1", key: "TP", name: "Test" }) }),
   });
   inviteToBoard.mockResolvedValue({ kind: "created", invitation: { _id: "inv-1" }, token: "cpi_secret" });
@@ -111,7 +115,7 @@ describe("POST /api/projects/:id/invitations", () => {
 
   it("refuses to add the board to an invitation whose link somebody holds", async () => {
     inviteToBoard.mockResolvedValue({ kind: "held", invitedBy: "a1", expired: false });
-    userFindById.mockReturnValue({ select: () => ({ lean: () => Promise.resolve({ username: "admin" }) }) });
+    userFindOne.mockReturnValue({ select: () => ({ lean: () => Promise.resolve({ username: "admin" }) }) });
 
     const res = await post({ email: "ada@example.com" });
 
@@ -125,7 +129,7 @@ describe("POST /api/projects/:id/invitations", () => {
   // BP-843. Nobody joins through a lapsed invitation, so waiting for them to would be waiting for ever
   it("says when the invitation holding the address has expired, and who can clear it", async () => {
     inviteToBoard.mockResolvedValue({ kind: "held", invitedBy: "a1", expired: true });
-    userFindById.mockReturnValue({ select: () => ({ lean: () => Promise.resolve({ username: "admin" }) }) });
+    userFindOne.mockReturnValue({ select: () => ({ lean: () => Promise.resolve({ username: "admin" }) }) });
 
     const res = await post({ email: "ada@example.com" });
 
@@ -137,7 +141,7 @@ describe("POST /api/projects/:id/invitations", () => {
 
   it("does not send the owner to a sender who is deactivated", async () => {
     inviteToBoard.mockResolvedValue({ kind: "held", invitedBy: "a1", expired: true });
-    userFindById.mockReturnValue({ select: () => ({ lean: () => Promise.resolve({ username: "olga", deactivatedAt: new Date() }) }) });
+    userFindOne.mockReturnValue({ select: () => ({ lean: () => Promise.resolve({ username: "olga", deactivatedAt: new Date() }) }) });
 
     expect((await (await post({ email: "ada@example.com" })).json()).error).toBe(
       "ada@example.com's invitation from olga has expired. Ask an administrator to send it again or revoke it, then invite them here."
@@ -146,7 +150,7 @@ describe("POST /api/projects/:id/invitations", () => {
 
   it("names nobody when the expired invitation's sender is gone", async () => {
     inviteToBoard.mockResolvedValue({ kind: "held", invitedBy: "a1", expired: true });
-    userFindById.mockReturnValue({ select: () => ({ lean: () => Promise.resolve(null) }) });
+    userFindOne.mockReturnValue({ select: () => ({ lean: () => Promise.resolve(null) }) });
 
     expect((await (await post({ email: "ada@example.com" })).json()).error).toBe(
       "ada@example.com's invitation has expired. Ask an administrator to send it again or revoke it, then invite them here."
@@ -184,7 +188,7 @@ describe("POST /api/projects/:id/invitations", () => {
   });
 
   it("answers 404 for a board that has gone", async () => {
-    projectFindById.mockReturnValue({ select: () => ({ lean: () => Promise.resolve(null) }) });
+    projectFindOne.mockReturnValue({ select: () => ({ lean: () => Promise.resolve(null) }) });
 
     expect((await post({ email: "ada@example.com" })).status).toBe(404);
     expect(inviteToBoard).not.toHaveBeenCalled();
@@ -264,7 +268,7 @@ describe("GET /api/projects/:id/invitations", () => {
 
     const res = await GET(new Request("http://x/api/projects/p1/invitations"), CTX);
 
-    expect(invitationFind).toHaveBeenCalledWith({ status: "pending", "boards.project": "p1" });
+    expect(invitationFind).toHaveBeenCalledWith({ status: "pending", "boards.project": "p1", tenant: DEFAULT_TENANT_ID });
     expect(await res.json()).toEqual([
       expect.objectContaining({ _id: "inv-1", email: "ada@example.com", relation: "member", addedBy: "owner", expired: false }),
       expect.objectContaining({ _id: "inv-3", relation: "owner", expired: true }),

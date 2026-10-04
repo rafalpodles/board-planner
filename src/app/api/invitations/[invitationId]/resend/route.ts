@@ -6,11 +6,8 @@ import { recordDelivery, reissueInvitation } from "@/lib/invitations";
 import { deliverTo, INTERACTIVE_ONLY, NO_ORIGIN_ERROR } from "@/lib/invitation-mail";
 import { describeInvitation, toApiInvitations } from "@/lib/invitation-view";
 import { logInstanceAudit } from "@/lib/instanceAudit";
-import { Invitation } from "@/models/invitation";
-import { Project } from "@/models/project";
-import { User } from "@/models/user";
 
-export const POST = withAdmin(async (_request, { params, user }) => {
+export const POST = withAdmin(async (_request, { params, user, db }) => {
   if (user.viaMachineCredential) {
     return NextResponse.json({ error: INTERACTIVE_ONLY }, { status: 403 });
   }
@@ -21,8 +18,8 @@ export const POST = withAdmin(async (_request, { params, user }) => {
   const origin = selfOrigin();
   if (!origin) return NextResponse.json({ error: NO_ORIGIN_ERROR }, { status: 500 });
 
-  const current = await Invitation.findById(invitationId).select("email").lean();
-  if (current && (await User.exists({ email: current.email }))) {
+  const current = await db.Invitation.findById(invitationId).select("email").lean();
+  if (current && (await db.User.exists({ email: current.email }))) {
     return NextResponse.json(
       { error: "That address already has an account. Add them to a board instead." },
       { status: 409 }
@@ -32,7 +29,7 @@ export const POST = withAdmin(async (_request, { params, user }) => {
   if (!reissued) return NextResponse.json({ error: "Invitation not found" }, { status: 404 });
   const { invitation, token, dropped } = reissued;
 
-  const projects = await Project.find({ _id: { $in: invitation.boards.map((b) => b.project) } })
+  const projects = await db.Project.find({ _id: { $in: invitation.boards.map((b) => b.project) } })
     .select("key name")
     .lean();
   const delivery = await deliverTo(
@@ -57,7 +54,7 @@ export const POST = withAdmin(async (_request, { params, user }) => {
   const [view] = await toApiInvitations([invitation]);
   // Named, since nobody chose to drop them: their adders can no longer grant them (BP-843)
   const droppedBoards = dropped.length
-    ? (await Project.find({ _id: { $in: dropped.map((b) => b.project) } }).select("key name").lean()).map((p) => p.name)
+    ? (await db.Project.find({ _id: { $in: dropped.map((b) => b.project) } }).select("key name").lean()).map((p) => p.name)
     : [];
   return NextResponse.json({ invitation: view, ...delivery, dropped: droppedBoards });
 });

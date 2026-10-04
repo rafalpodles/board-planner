@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
+import { scopedFor } from "@/lib/db-scope";
 import { isDatabaseUnreachable } from "@/lib/db-errors";
 import { getAuthUser } from "@/lib/auth";
 import { ProvenanceError } from "@/lib/session";
-import { Project } from "@/models/project";
 import { runPmTurn } from "@/lib/pm/agent";
 import { isPmAvailable } from "@/lib/pm/config";
 import { acquireTurnLock, releaseTurnLock } from "@/lib/pm/turn-lock";
@@ -36,6 +36,7 @@ export async function POST(
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const db = scopedFor(user);
 
   // This route authenticates by hand (it streams SSE) and so never passes through
   // withProjectAccess, which is where key -> id resolution normally happens
@@ -57,7 +58,7 @@ export async function POST(
 
   await connectDB();
 
-  const project = await Project.findById(projectId, "pm").lean();
+  const project = await db.Project.findById(projectId, "pm").lean();
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }

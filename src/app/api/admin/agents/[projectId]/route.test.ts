@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const getAuthUser = vi.fn();
-const projectFindByIdAndUpdate = vi.fn();
+const projectFindOneAndUpdate = vi.fn();
 const logProjectAudit = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ getAuthUser, RateLimitError: class extends Error {} }));
-vi.mock("@/models/project", () => ({ Project: { findByIdAndUpdate: projectFindByIdAndUpdate } }));
+vi.mock("@/models/project", () => ({ Project: { findOneAndUpdate: projectFindOneAndUpdate } }));
 vi.mock("@/lib/projectAudit", () => ({ logProjectAudit }));
 // The schema's own casting is exercised by settings-audit.test.ts and the e2e; here the update is
 // laid over the before-image as written
@@ -40,12 +40,12 @@ function patch(body: unknown, projectId = PROJECT_ID) {
 
 /** The project as the update found it. */
 function stored(pm: Record<string, unknown> = {}) {
-  projectFindByIdAndUpdate.mockReturnValue({
+  projectFindOneAndUpdate.mockReturnValue({
     lean: async () => ({ _id: PROJECT_ID, key: "TP", pm }),
   });
 }
 
-const written = () => projectFindByIdAndUpdate.mock.calls[0]?.[1];
+const written = () => projectFindOneAndUpdate.mock.calls[0]?.[1];
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -139,14 +139,14 @@ describe("PATCH /api/admin/agents/:projectId", () => {
 
       expect(res.status).toBe(403);
       expect(await res.json()).toEqual({ error: "Interactive admin session required" });
-      expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
+      expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
     });
 
     it("403s a member", async () => {
       getAuthUser.mockResolvedValue({ _id: "u2", role: "member", viaMachineCredential: false });
 
       expect((await patch({ enabled: false })).status).toBe(403);
-      expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
+      expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
     });
 
     it("401s with no credential", async () => {
@@ -160,7 +160,7 @@ describe("PATCH /api/admin/agents/:projectId", () => {
 
       expect(res.status).toBe(400);
       expect(await res.json()).toEqual({ error: "Invalid project id" });
-      expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
+      expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
     });
 
     /**
@@ -176,7 +176,7 @@ describe("PATCH /api/admin/agents/:projectId", () => {
 
       expect(res.status).toBe(400);
       expect(await res.json()).toEqual({ error: "Nothing to update" });
-      expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
+      expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -189,7 +189,7 @@ describe("PATCH /api/admin/agents/:projectId", () => {
       ["a turn cap past a thousand", { dailyTurnCap: 1001 }],
     ])("400s %s", async (_name, body) => {
       expect((await patch(body)).status).toBe(400);
-      expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
+      expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
     });
 
     it("accepts the ends of the turn-cap range", async () => {
@@ -198,7 +198,7 @@ describe("PATCH /api/admin/agents/:projectId", () => {
     });
 
     it("404s a project that does not exist", async () => {
-      projectFindByIdAndUpdate.mockReturnValue({ lean: async () => null });
+      projectFindOneAndUpdate.mockReturnValue({ lean: async () => null });
 
       const res = await patch({ enabled: false });
 

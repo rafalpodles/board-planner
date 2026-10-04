@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
@@ -58,6 +59,7 @@ function expectedFilter(over: { nin?: string[]; pattern?: RegExp } = {}) {
     deactivatedAt: null,
     _id: { $nin: over.nin ?? [] },
     $or: [{ username: pattern }, { fullName: pattern }],
+    tenant: DEFAULT_TENANT_ID,
   };
 }
 
@@ -102,7 +104,7 @@ describe("GET member candidates", () => {
 
   it("scopes the grant lookup used for exclusion to this project", async () => {
     await GET(req("ann"), { params });
-    expect(grantFind).toHaveBeenCalledWith({ objectType: "project", object: PROJECT });
+    expect(grantFind).toHaveBeenCalledWith({ objectType: "project", object: PROJECT, tenant: DEFAULT_TENANT_ID });
   });
 
   it("caps results at 10", async () => {

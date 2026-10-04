@@ -253,3 +253,6 @@ export function tenantOf(user: { tenant?: Types.ObjectId | string | null }): Typ
 }
 
 export const scopedFor = (user: { tenant?: Types.ObjectId | string | null }): ScopedDb => scoped(tenantOf(user));
+
+// TODO(BP-664): a request with no caller yet takes its tenant from the host; until then there is one
+export const scopedToDefaultTenant = (): ScopedDb => scoped(DEFAULT_TENANT_ID);

@@ -3,12 +3,9 @@ import { connectDB } from "@/lib/db";
 import { protocolOf, resolveProjectId, withWorker } from "@/lib/middleware";
 import { claimNextTask, releaseExpiredTasks } from "@/lib/task-service";
 import { BoardCannotClaim } from "@/lib/claim-refusal";
-import { Project } from "@/models/project";
-import { Worker } from "@/models/worker";
 import { ownerReachableProjectIds, verdictFor } from "@/lib/worker-service";
 import { snapshotFor } from "@/lib/agent-snapshot";
 import { releaseTask } from "@/lib/task-service";
-import { AgentRun } from "@/models/agentRun";
 
 // The ref, never a populated document: `IWorker["owner"]` admits both since the fleet route
 // populates it, and `String(<document>)` yields something that is not an id — which claimNextTask
@@ -19,7 +16,7 @@ function ownerIdOf(owner: unknown): string | null {
   return String(ref._id ?? owner);
 }
 
-export const POST = withWorker(async (request, { params, worker }) => {
+export const POST = withWorker(async (request, { params, worker, db }) => {
   const { projectId: identifier } = await params;
   await connectDB();
 
@@ -31,9 +28,9 @@ export const POST = withWorker(async (request, { params, worker }) => {
   await releaseExpiredTasks(projectId).catch(() => 0);
 
   const [project, others, reachable] = await Promise.all([
-    Project.findById(projectId).select("_id repositoryUrl githubRepo gitlabRepo gitlabHost worker").lean(),
+    db.Project.findById(projectId).select("_id repositoryUrl githubRepo gitlabRepo gitlabHost worker").lean(),
     // A worker that lost a contested checkout must be refused here too, not merely left unassigned
-    Worker.find({ _id: { $ne: worker._id } }).select(
+    db.Worker.find({ _id: { $ne: worker._id } }).select(
       "_id name host repos enabled lastSeenAt createdAt"
     ),
     ownerReachableProjectIds(worker),
@@ -88,7 +85,7 @@ export const POST = withWorker(async (request, { params, worker }) => {
     // The one thing that happened to this task most recently, so a retry knows whether it is one
     // at all. Not scoped to this worker or this attempt: whichever machine ran last, and whatever
     // it was rejected for, is what this attempt starts from (BP-289).
-    AgentRun.findOne({ task: task._id }, "outcome detail").sort({ finishedAt: -1 }).lean(),
+    db.AgentRun.findOne({ task: task._id }, "outcome detail").sort({ finishedAt: -1 }).lean(),
   ]);
   const previousRejectionReason = lastRun?.outcome === "refused" ? lastRun.detail : "";
   if (!agent) {

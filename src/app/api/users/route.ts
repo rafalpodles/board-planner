@@ -4,6 +4,7 @@ import { readJsonBody } from "@/lib/request-body";
 import { checkOrganisationName, nameOrganisation } from "@/lib/tenant";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
+import { scopedToDefaultTenant, type ScopedDb } from "@/lib/db-scope";
 import { getAuthUser, getClientIp, PASSWORD_COST_FACTOR } from "@/lib/auth";
 import { refuseSetupCode } from "@/lib/setup-code";
 import { checkNewAccount } from "@/lib/new-account";
@@ -12,9 +13,6 @@ import { ProvenanceError, provenanceRefusal } from "@/lib/session";
 import { withAdmin } from "@/lib/middleware";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { revokePendingInvitationsFor } from "@/lib/invitations";
-import { User } from "@/models/user";
-import { Identity } from "@/models/identity";
-import { Session } from "@/models/session";
 import { liveIdentityFilter, providerById } from "@/lib/oidc/providers";
 import { HydratedDocument } from "mongoose";
 import { IUser } from "@/types";
@@ -22,13 +20,13 @@ import { IUser } from "@/types";
 // Machines are excluded: worker identities are accounts, but not people to invite, permission or
 // delete from here, and a team that connects five machines would otherwise have a user list that is
 // half machines. `?include=machines` opts them in (BP-718).
-export const GET = withAdmin(async (request) => {
+export const GET = withAdmin(async (request, { db }) => {
   await connectDB();
   const includeMachines = new URL(request.url).searchParams.get("include") === "machines";
-  const users = await User.find(includeMachines ? {} : { kind: { $ne: "machine" } }).sort({
+  const users = await db.User.find(includeMachines ? {} : { kind: { $ne: "machine" } }).sort({
     createdAt: 1,
   });
-  return NextResponse.json(await withSignInMethods(users));
+  return NextResponse.json(await withSignInMethods(db, users));
 });
 
 /**
@@ -37,14 +35,14 @@ export const GET = withAdmin(async (request) => {
  * sign-in, or a live session used since — sessions slide for weeks, so a sign-in alone can be
  * that old for somebody here every day. Three reads for the whole list, never one per person.
  */
-async function withSignInMethods(users: HydratedDocument<IUser>[]) {
+async function withSignInMethods(db: ScopedDb, users: HydratedDocument<IUser>[]) {
   const ids = users.map((u) => u._id);
   const [withPassword, identities, sessionUse] = await Promise.all([
     passwordSignInEnabled()
-      ? User.find({ _id: { $in: ids }, password: { $nin: [null, ""] } }).select("_id").lean()
+      ? db.User.find({ _id: { $in: ids }, password: { $nin: [null, ""] } }).select("_id").lean()
       : Promise.resolve([] as { _id: unknown }[]),
-    Identity.find({ user: { $in: ids }, ...liveIdentityFilter() }).select("user provider").sort({ linkedAt: 1 }).lean(),
-    Session.aggregate<{ _id: unknown; lastUsedAt: Date }>([
+    db.Identity.find({ user: { $in: ids }, ...liveIdentityFilter() }).select("user provider").sort({ linkedAt: 1 }).lean(),
+    db.Session.aggregate<{ _id: unknown; lastUsedAt: Date }>([
       { $match: { user: { $in: ids } } },
       { $group: { _id: "$user", lastUsedAt: { $max: "$lastUsedAt" } } },
     ]),
@@ -76,6 +74,7 @@ function latest(...times: (number | undefined)[]): string | null {
 }
 
 export async function POST(request: Request) {
+  const db = scopedToDefaultTenant();
   if (!passwordSignInEnabled()) {
     return NextResponse.json(
       {
@@ -103,7 +102,7 @@ export async function POST(request: Request) {
   const organisation = checkOrganisationName(body.organisation);
   if (!organisation.ok) return NextResponse.json({ error: organisation.error }, { status: 400 });
 
-  const userCount = await User.countDocuments();
+  const userCount = await db.User.countDocuments();
   const isBootstrap = userCount === 0;
 
   // Declared out here because the audit row below names who did this, and on the bootstrap path
@@ -141,7 +140,7 @@ export async function POST(request: Request) {
   const hashedPassword = await bcrypt.hash(password, PASSWORD_COST_FACTOR);
 
   try {
-    const user = await User.create({
+    const user = await db.User.create({
       username: storedUsername,
       password: hashedPassword,
       fullName: storedFullName,

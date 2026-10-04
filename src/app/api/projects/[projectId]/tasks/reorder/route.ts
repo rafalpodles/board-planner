@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
-import { Task } from "@/models/task";
 import { MAX_REORDER_IDS, manualOrder, placeInto } from "@/lib/reorder";
 
 /**
@@ -14,7 +13,7 @@ import { MAX_REORDER_IDS, manualOrder, placeInto } from "@/lib/reorder";
  * relative to the rest, and renumbering everything clears the ties left by the
  * schema default of 0, which is what made a drag look like it did nothing.
  */
-export const PUT = withProjectAccess(async (request, { params }) => {
+export const PUT = withProjectAccess(async (request, { params, db }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -41,7 +40,7 @@ export const PUT = withProjectAccess(async (request, { params }) => {
     return NextResponse.json({ error: "order contains duplicate ids" }, { status: 400 });
   }
 
-  const all = await Task.find({ project: projectId })
+  const all = await db.Task.find({ project: projectId })
     .select("_id order createdAt taskNumber")
     .lean();
 
@@ -73,7 +72,7 @@ export const PUT = withProjectAccess(async (request, { params }) => {
 
   // timestamps off: a reorder touches many tasks, and letting the schema stamp
   // updatedAt would reset the whole list to "just now" on each drag
-  if (writes.length) await Task.bulkWrite(writes, { timestamps: false });
+  if (writes.length) await db.Task.bulkWrite(writes, { timestamps: false });
 
   return NextResponse.json({ updated: writes.length });
 });

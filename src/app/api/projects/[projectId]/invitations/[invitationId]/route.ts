@@ -5,9 +5,8 @@ import { removeBoardFromInvitation, revokeIfEmpty } from "@/lib/invitations";
 import { INTERACTIVE_ONLY } from "@/lib/invitation-mail";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { logProjectAudit } from "@/lib/projectAudit";
-import { User } from "@/models/user";
 
-export const DELETE = withProjectOwner(async (_request, { params, user }) => {
+export const DELETE = withProjectOwner(async (_request, { params, user, db }) => {
   if (user.viaMachineCredential) {
     return NextResponse.json({ error: INTERACTIVE_ONLY }, { status: 403 });
   }
@@ -28,7 +27,7 @@ export const DELETE = withProjectOwner(async (_request, { params, user }) => {
   // An administrator's invitation keeps its role with no boards left; anybody else's had only
   // boards to give, so it goes
   if (updated.boards.length === 0) {
-    const inviter = await User.findById(updated.invitedBy).select("role kind").lean();
+    const inviter = await db.User.findById(updated.invitedBy).select("role kind").lean();
     const keepsARole = inviter?.role === "admin" && inviter.kind !== "machine";
     if (!keepsARole && (await revokeIfEmpty(updated))) {
       void logInstanceAudit({

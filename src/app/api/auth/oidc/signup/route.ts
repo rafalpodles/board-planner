@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { scopedToDefaultTenant } from "@/lib/db-scope";
 import { readJsonBody } from "@/lib/request-body";
 import { getClientIp } from "@/lib/auth";
 import { isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
@@ -18,8 +19,6 @@ import { JOIN_COOKIE, heldSignUp, spendAcceptance } from "@/lib/oidc/flow";
 import { applyAdminGroup } from "@/lib/oidc/admin-group";
 import { providerById } from "@/lib/oidc/providers";
 import { signUpOpenTo } from "@/lib/sign-up-domains";
-import { Identity } from "@/models/identity";
-import { User } from "@/models/user";
 
 const ATTEMPTS_PER_SOURCE = 20;
 const EXPIRED = "That sign-in has expired. Sign in again.";
@@ -37,6 +36,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const db = scopedToDefaultTenant();
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
 
@@ -68,7 +68,7 @@ export async function POST(request: Request) {
 
   let user;
   try {
-    user = await User.create({
+    user = await db.User.create({
       ...checked.value,
       email: held.claims.email,
       emailVerifiedAt: new Date(),
@@ -84,7 +84,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    await Identity.create({
+    await db.Identity.create({
       user: user._id,
       provider: provider.id,
       issuer: held.claims.issuer,
@@ -93,7 +93,7 @@ export async function POST(request: Request) {
       lastUsedAt: new Date(),
     });
   } catch (err) {
-    await User.deleteOne({ _id: user._id }).catch(() => {});
+    await db.User.deleteOne({ _id: user._id }).catch(() => {});
     if (duplicateKeyField(err)) {
       return NextResponse.json({ error: "That sign-in already belongs to an account here. Sign in with it instead." }, { status: 409 });
     }

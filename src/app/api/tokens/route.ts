@@ -3,18 +3,18 @@ import crypto from "crypto";
 import { isValidObjectId } from "mongoose";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
+import type { ScopedDb } from "@/lib/db-scope";
 import { withAuth } from "@/lib/middleware";
 import { accessibleProjectIds } from "@/lib/grants";
 import { isEmailConfigured } from "@/lib/email";
 import { notifyCredentialCreated } from "@/lib/security-mail";
-import { ApiToken } from "@/models/apiToken";
-import { Project } from "@/models/project";
 
 /**
  * Not awaited by the handler, and it asks whether mail is configured before it asks the database
  * anything: the scope is only ever read to fill a line in a message nobody may be sending.
  */
 async function announceToken(
+  db: ScopedDb,
   owner: { email: string; username: string },
   name: string,
   projectIds: string[]
@@ -23,7 +23,7 @@ async function announceToken(
     if (!owner.email || !isEmailConfigured()) return;
     let scope = "every board this account can reach";
     if (projectIds.length > 0) {
-      const projects = await Project.find({ _id: { $in: projectIds } }).select("key").lean();
+      const projects = await db.Project.find({ _id: { $in: projectIds } }).select("key").lean();
       const keys = projects.map((p) => p.key as string).sort();
       scope = keys.join(", ") || "no board";
     }
@@ -39,17 +39,17 @@ async function announceToken(
   }
 }
 
-export const GET = withAuth(async (_request, { user }) => {
+export const GET = withAuth(async (_request, { user, db }) => {
   await connectDB();
 
-  const tokens = await ApiToken.find({ user: user._id })
+  const tokens = await db.ApiToken.find({ user: user._id })
     .select("name prefix allowedProjects lastUsedAt createdAt")
     .sort({ createdAt: -1 });
 
   return NextResponse.json(tokens);
 });
 
-export const POST = withAuth(async (request, { user }) => {
+export const POST = withAuth(async (request, { user, db }) => {
   await connectDB();
 
   const { name, allowedProjects } = await request.json();
@@ -80,7 +80,7 @@ export const POST = withAuth(async (request, { user }) => {
   // mint one that reaches past its own scope, which accessibleProjectIds already intersects.
   if (scope.length > 0) {
     const ids = await accessibleProjectIds(user);
-    const accessible = await Project.find(ids === null ? {} : { _id: { $in: ids } })
+    const accessible = await db.Project.find(ids === null ? {} : { _id: { $in: ids } })
       .select("_id")
       .lean();
     const accessibleIds = new Set(accessible.map((p) => p._id.toString()));
@@ -98,7 +98,7 @@ export const POST = withAuth(async (request, { user }) => {
   const prefix = rawToken.substring(0, 11); // "cp_" + 8 hex
   const tokenHash = await bcrypt.hash(rawToken, 10);
 
-  const token = await ApiToken.create({
+  const token = await db.ApiToken.create({
     user: user._id,
     name: name.trim(),
     tokenHash,
@@ -106,7 +106,7 @@ export const POST = withAuth(async (request, { user }) => {
     allowedProjects: scope,
   });
 
-  void announceToken(user, token.name, scope);
+  void announceToken(db, user, token.name, scope);
 
   // Return the raw token ONCE — it's never stored or retrievable again
   return NextResponse.json({
@@ -119,7 +119,7 @@ export const POST = withAuth(async (request, { user }) => {
   }, { status: 201 });
 });
 
-export const DELETE = withAuth(async (request, { user }) => {
+export const DELETE = withAuth(async (request, { user, db }) => {
   await connectDB();
 
   const { id } = await request.json();
@@ -129,7 +129,7 @@ export const DELETE = withAuth(async (request, { user }) => {
     return NextResponse.json({ error: "Token id is required" }, { status: 400 });
   }
 
-  const result = await ApiToken.findOneAndDelete({ _id: id, user: user._id });
+  const result = await db.ApiToken.findOneAndDelete({ _id: id, user: user._id });
   if (!result) {
     return NextResponse.json({ error: "Token not found" }, { status: 404 });
   }

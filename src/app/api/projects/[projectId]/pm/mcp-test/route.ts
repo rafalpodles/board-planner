@@ -1,13 +1,12 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectOwner } from "@/lib/middleware";
-import { Project } from "@/models/project";
 import { isAllowedMcpServerUrl } from "@/lib/url-validation";
 import { McpClient } from "@/lib/pm/mcp-client";
 import { resolveServerToken } from "@/lib/pm/mcp-tools";
 import { isReadSafe } from "@/lib/pm/read-safe";
 
-export const POST = withProjectOwner(async (request, { params }) => {
+export const POST = withProjectOwner(async (request, { params, db }) => {
   await connectDB();
   const { projectId } = await params;
   const body = await request.json();
@@ -19,7 +18,7 @@ export const POST = withProjectOwner(async (request, { params }) => {
     token = body.authToken;
   } else if ((body.authType === "bearer" || body.authType === "oauth") && typeof body.name === "string" && body.name) {
     // Fallback to stored credentials so a saved server can be tested without retyping
-    const project = await Project.findById(projectId).select("pm.mcpServers");
+    const project = await db.Project.findById(projectId).select("pm.mcpServers");
     if (!project) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }

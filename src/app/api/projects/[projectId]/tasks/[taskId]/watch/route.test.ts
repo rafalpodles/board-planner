@@ -1,16 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Types } from "mongoose";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
 const taskFindOne = vi.fn();
-const taskFindByIdAndUpdate = vi.fn();
+const taskFindOneAndUpdate = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ getAuthUser, RateLimitError: class extends Error {} }));
 vi.mock("@/lib/grants", () => ({ check }));
 vi.mock("@/models/task", () => ({
-  Task: { findOne: taskFindOne, findByIdAndUpdate: taskFindByIdAndUpdate },
+  Task: { findOne: taskFindOne, findOneAndUpdate: taskFindOneAndUpdate },
 }));
 
 const { POST } = await import("./route");
@@ -34,13 +35,13 @@ function watchedBy(...watchers: Types.ObjectId[]) {
   taskFindOne.mockResolvedValue({ _id: TASK_ID, project: PROJECT_ID, watchers });
 }
 
-const update = () => taskFindByIdAndUpdate.mock.calls[0]?.[1];
+const update = () => taskFindOneAndUpdate.mock.calls[0]?.[1];
 
 beforeEach(() => {
   vi.clearAllMocks();
   getAuthUser.mockResolvedValue({ _id: ME, role: "member" });
   check.mockResolvedValue(true);
-  taskFindByIdAndUpdate.mockResolvedValue({});
+  taskFindOneAndUpdate.mockResolvedValue({});
   watchedBy();
 });
 
@@ -91,7 +92,7 @@ describe("POST /api/projects/:projectId/tasks/:taskId/watch", () => {
       getAuthUser.mockResolvedValue(null);
 
       expect((await post()).status).toBe(401);
-      expect(taskFindByIdAndUpdate).not.toHaveBeenCalled();
+      expect(taskFindOneAndUpdate).not.toHaveBeenCalled();
     });
 
     it("403s for somebody with no access to the project", async () => {
@@ -110,8 +111,8 @@ describe("POST /api/projects/:projectId/tasks/:taskId/watch", () => {
       taskFindOne.mockResolvedValue(null);
 
       expect((await post()).status).toBe(404);
-      expect(taskFindByIdAndUpdate).not.toHaveBeenCalled();
-      expect(taskFindOne).toHaveBeenCalledWith({ _id: TASK_ID, project: PROJECT_ID });
+      expect(taskFindOneAndUpdate).not.toHaveBeenCalled();
+      expect(taskFindOne).toHaveBeenCalledWith({ _id: TASK_ID, project: PROJECT_ID, tenant: DEFAULT_TENANT_ID });
     });
   });
 });

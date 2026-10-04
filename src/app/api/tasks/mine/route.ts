@@ -2,12 +2,11 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withAuth } from "@/lib/middleware";
 import { accessibleProjectIds } from "@/lib/grants";
-import { Task } from "@/models/task";
 import { columnFor } from "@/lib/columns";
 import { withApiExecutions } from "@/lib/task-execution-view";
 import "@/models/project";
 
-export const GET = withAuth(async (_request, { user }) => {
+export const GET = withAuth(async (_request, { user, db }) => {
   await connectDB();
 
   const filter: Record<string, unknown> = { assignee: user._id };
@@ -18,7 +17,7 @@ export const GET = withAuth(async (_request, { user }) => {
     filter.project = { $in: allowed };
   }
 
-  const tasks = await Task.find(filter)
+  const tasks = await db.Task.find(filter)
     .populate("project", "name key icon columns")
     .populate("assignee", "username fullName")
     .sort({ updatedAt: -1 })

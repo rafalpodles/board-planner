@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { scopedToDefaultTenant } from "@/lib/db-scope";
 import { readJsonBody } from "@/lib/request-body";
 import { getClientIp } from "@/lib/auth";
 import { isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
@@ -10,16 +11,16 @@ import { toApiInvitations } from "@/lib/invitation-view";
 import { completeAcceptance } from "@/lib/invitation-acceptance";
 import { ACCEPT_COOKIE, heldAcceptance, spendAcceptance } from "@/lib/oidc/flow";
 import { providerById } from "@/lib/oidc/providers";
-import { Invitation } from "@/models/invitation";
 
 const ATTEMPTS_PER_SOURCE = 20;
 const EXPIRED = "That sign-in has expired. Sign in again, or open the invitation link.";
 
 /** The invitation a verified sign-in is waiting to accept, read without spending anything. */
 export async function GET(request: Request) {
+  const db = scopedToDefaultTenant();
   const held = await heldAcceptance(readFlowCookie(request, ACCEPT_COOKIE));
   if (!held?.claims) return NextResponse.json({ error: EXPIRED }, { status: 400 });
-  const invitation = await Invitation.findOne({
+  const invitation = await db.Invitation.findOne({
     tokenHash: held.invitationTokenHash,
     status: "pending",
     expiresAt: { $gt: new Date() },

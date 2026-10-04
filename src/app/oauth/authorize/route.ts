@@ -1,4 +1,5 @@
 import { connectDB } from "@/lib/db";
+import { scopedToDefaultTenant, type ScopedDb } from "@/lib/db-scope";
 import { passwordSignInEnabled } from "@/lib/password-sign-in";
 import { configuredProviders } from "@/lib/oidc/providers";
 import { getClientIp, verifyCredentials } from "@/lib/auth";
@@ -19,11 +20,6 @@ import {
 } from "@/lib/rate-limit";
 import { accessibleProjectIds } from "@/lib/grants";
 import { notifyCredentialCreated } from "@/lib/security-mail";
-import { User } from "@/models/user";
-import { OAuthClient } from "@/models/oauthClient";
-import { OAuthCode } from "@/models/oauthCode";
-import { OAuthConsent } from "@/models/oauthConsent";
-import { Project } from "@/models/project";
 import {
   randomToken,
   readFormBody,
@@ -333,23 +329,23 @@ function returnToClient(
   );
 }
 
-async function validateClientAndRedirect(p: AuthParams): Promise<IOAuthClient | null> {
+async function validateClientAndRedirect(db: ScopedDb, p: AuthParams): Promise<IOAuthClient | null> {
   if (!p.clientId || !p.redirectUri) return null;
   // Registration's rule, applied again to what registration stored. Rows written before BP-302
   // accepted http on any host and nothing purged them — and the consent page now hands the code to
   // the client by navigating there itself, where a `javascript:` URI would run in THIS origin
   // rather than being ignored the way a Location header is (BP-383 review).
   if (!isValidRedirectUri(p.redirectUri)) return null;
-  const client = await OAuthClient.findOne({ clientId: p.clientId });
+  const client = await db.OAuthClient.findOne({ clientId: p.clientId });
   if (!client) return null;
   if (!client.redirectUris.includes(p.redirectUri)) return null;
   return client;
 }
 
-async function accessibleProjects(user: IUser): Promise<{ _id: string; name: string; key: string }[]> {
+async function accessibleProjects(db: ScopedDb, user: IUser): Promise<{ _id: string; name: string; key: string }[]> {
   const accessible = await accessibleProjectIds(user);
   const filter = accessible === null ? {} : { _id: { $in: accessible } };
-  const projects = await Project.find(filter).select("_id name key").sort({ key: 1 }).lean();
+  const projects = await db.Project.find(filter).select("_id name key").sort({ key: 1 }).lean();
   return projects.map((p) => ({ _id: String(p._id), name: p.name as string, key: p.key as string }));
 }
 
@@ -371,9 +367,9 @@ function consentKey(userId: string): string {
   return sourceKey(`user:${userId}`, "oauth_consent");
 }
 
-async function issueTicket(p: AuthParams, user: IUser, sessionId: string): Promise<string> {
+async function issueTicket(db: ScopedDb, p: AuthParams, user: IUser, sessionId: string): Promise<string> {
   const ticket = randomToken("cpct_");
-  await OAuthConsent.create({
+  await db.OAuthConsent.create({
     ticketHash: sha256(ticket),
     clientId: p.clientId,
     user: user._id,
@@ -422,11 +418,12 @@ function switchAccountHref(p: AuthParams): string {
 }
 
 export async function GET(req: Request) {
+  const db = scopedToDefaultTenant();
   await connectDB();
   const query = new URL(req.url).searchParams;
   const p = readParamsFromQuery(query);
 
-  const client = await validateClientAndRedirect(p);
+  const client = await validateClientAndRedirect(db, p);
   if (!client) return errorPage("Unknown client or unregistered redirect_uri.");
   if (p.responseType !== "code") return errorPage("Unsupported response_type (only 'code').");
   if (!p.codeChallenge || p.codeChallengeMethod !== "S256") {
@@ -438,7 +435,7 @@ export async function GET(req: Request) {
   // what is being asked for is the grant, not the identity.
   if (query.get("prompt") !== "login") {
     const session = await browserSession(req);
-    const found = session ? await User.findById(session.userId) : null;
+    const found = session ? await db.User.findById(session.userId) : null;
     const user = found && !found.deactivatedAt ? found : null;
     if (session && user) {
       // A GET that writes a row is a GET that can be looped. It is keyed on the account rather
@@ -451,10 +448,10 @@ export async function GET(req: Request) {
       await recordFailedAttempt(consentKey(session.userId));
 
       return consentForm(
-        await issueTicket(p, user, session.sessionId),
+        await issueTicket(db, p, user, session.sessionId),
         client.clientName,
         p.redirectUri,
-        await accessibleProjects(user),
+        await accessibleProjects(db, user),
         req.headers.get(NONCE_HEADER),
         { signedInAs: user.username, switchAccountHref: switchAccountHref(p) }
       );
@@ -465,6 +462,7 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const db = scopedToDefaultTenant();
   // What this closes is CSRF from somebody's browser: a page on another origin auto-submitting this
   // form, where the victim's cookies ride along and `Sec-Fetch-Site` is a forbidden header the page
   // cannot forge. The login route has refused that for a while; this endpoint verifies a credential
@@ -495,12 +493,12 @@ export async function POST(req: Request) {
   const phase = String(form.get("phase") || "login");
 
   if (phase === "consent") {
-    return handleConsent(req, form);
+    return handleConsent(db, req, form);
   }
 
   // --- Login phase ---
   const p = readParamsFromForm(form);
-  const client = await validateClientAndRedirect(p);
+  const client = await validateClientAndRedirect(db, p);
   if (!client) return errorPage("Unknown client or unregistered redirect_uri.");
   if (p.responseType !== "code") return errorPage("Unsupported response_type (only 'code').");
   if (!p.codeChallenge || p.codeChallengeMethod !== "S256") {
@@ -543,7 +541,7 @@ export async function POST(req: Request) {
   return new Response(null, { status: 303, headers });
 }
 
-async function handleConsent(req: Request, form: FormData): Promise<Response> {
+async function handleConsent(db: ScopedDb, req: Request, form: FormData): Promise<Response> {
   const nonce = req.headers.get(NONCE_HEADER);
   const ticket = String(form.get("ticket") || "");
   // Only "all" is the wide grant. Absent, misspelt, or anything a hand-built form put there is the
@@ -551,7 +549,7 @@ async function handleConsent(req: Request, form: FormData): Promise<Response> {
   const wide = String(form.get("access") || "") === "all";
   const selected = form.getAll("projects").map((v) => String(v));
 
-  const consent = await OAuthConsent.findOne({ ticketHash: sha256(ticket) });
+  const consent = await db.OAuthConsent.findOne({ ticketHash: sha256(ticket) });
   if (!consent || consent.expiresAt.getTime() < Date.now()) {
     return errorPage("Your session expired. Please start the authorization again.");
   }
@@ -562,26 +560,26 @@ async function handleConsent(req: Request, form: FormData): Promise<Response> {
   // rather than waved through.
   const holder = await browserSession(req);
   if (!consent.session || !holder || holder.sessionId !== String(consent.session)) {
-    await OAuthConsent.deleteOne({ _id: consent._id });
+    await db.OAuthConsent.deleteOne({ _id: consent._id });
     return errorPage("This authorization belongs to a different sign-in. Start it again.", 403);
   }
 
-  const client = await OAuthClient.findOne({ clientId: consent.clientId });
+  const client = await db.OAuthClient.findOne({ clientId: consent.clientId });
   if (!client || !client.redirectUris.includes(consent.redirectUri)) {
-    await OAuthConsent.deleteOne({ _id: consent._id });
+    await db.OAuthConsent.deleteOne({ _id: consent._id });
     return errorPage("Client is no longer valid.");
   }
 
-  const user = await User.findById(consent.user);
+  const user = await db.User.findById(consent.user);
   if (!user) {
-    await OAuthConsent.deleteOne({ _id: consent._id });
+    await db.OAuthConsent.deleteOne({ _id: consent._id });
     return errorPage("Account no longer exists.");
   }
 
   // RFC 6749 §4.1.2.1: refusing is an answer the client is owed, not a dead end in the browser.
   // Only an explicit allow grants, for the same reason only an explicit "all" widens.
   if (String(form.get("decision") || "") !== "allow") {
-    const refused = await OAuthConsent.deleteOne({ _id: consent._id });
+    const refused = await db.OAuthConsent.deleteOne({ _id: consent._id });
     if (refused?.deletedCount !== 1) {
       return errorPage("This authorization was already completed. Start it again.");
     }
@@ -594,7 +592,7 @@ async function handleConsent(req: Request, form: FormData): Promise<Response> {
   let allowedProjects: string[] = [];
   let scopeLabel = "every board this account can reach";
   if (!wide) {
-    const accessible = await accessibleProjects(user);
+    const accessible = await accessibleProjects(db, user);
     const accessibleIds = new Set(accessible.map((p) => p._id));
     allowedProjects = [...new Set(selected)].filter((id) => accessibleIds.has(id));
     scopeLabel = accessible
@@ -617,13 +615,13 @@ async function handleConsent(req: Request, form: FormData): Promise<Response> {
 
   // The delete is the claim, not a tidy-up: two submissions of one ticket that interleave between
   // the read above and here would otherwise mint two independently redeemable codes.
-  const claimed = await OAuthConsent.deleteOne({ _id: consent._id });
+  const claimed = await db.OAuthConsent.deleteOne({ _id: consent._id });
   if (claimed?.deletedCount !== 1) {
     return errorPage("This authorization was already completed. Start it again.");
   }
 
   const code = randomToken("cpac_");
-  await OAuthCode.create({
+  await db.OAuthCode.create({
     codeHash: sha256(code),
     clientId: consent.clientId,
     user: user._id,

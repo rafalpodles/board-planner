@@ -5,7 +5,7 @@ const oauthClientFindOne = vi.fn();
 const oauthConsentCreate = vi.fn();
 const oauthConsentFindOne = vi.fn();
 const oauthCodeCreate = vi.fn();
-const userFindById = vi.fn();
+const userFindOne = vi.fn();
 const resolveSession = vi.fn();
 const createSession = vi.fn();
 const oauthConsentDeleteOne = vi.fn();
@@ -30,7 +30,7 @@ vi.mock("@/models/oauthConsent", () => ({
     deleteOne: oauthConsentDeleteOne,
   },
 }));
-vi.mock("@/models/user", () => ({ User: { findById: userFindById } }));
+vi.mock("@/models/user", () => ({ User: { findOne: userFindOne } }));
 vi.mock("@/lib/security-mail", () => ({ notifyCredentialCreated: vi.fn() }));
 // Partial: the route's own provenance gate is the real checkProvenance, and the cookie is read by
 // the real reader — only the session lookup is stubbed.
@@ -270,7 +270,7 @@ function sessionCookie(): Record<string, string> {
 describe("GET /oauth/authorize", () => {
   beforeEach(() => {
     resolveSession.mockResolvedValue(null);
-    userFindById.mockResolvedValue(USER);
+    userFindOne.mockResolvedValue(USER);
   });
 
   it("asks for a password when nothing says who this is", async () => {
@@ -316,7 +316,7 @@ describe("GET /oauth/authorize", () => {
   // BP-832. Its sessions are revoked, so this is a session minted in between: it grants nothing
   it("takes no session of a deactivated account, and asks for a sign-in instead", async () => {
     resolveSession.mockResolvedValue({ userId: "u1", sessionId: "s1" });
-    userFindById.mockResolvedValue({ ...USER, deactivatedAt: new Date() });
+    userFindOne.mockResolvedValue({ ...USER, deactivatedAt: new Date() });
 
     const body = await (await GET(authorizeGet({}, sessionCookie()))).text();
 
@@ -417,7 +417,7 @@ describe("POST /oauth/authorize consent phase", () => {
       expiresAt: new Date(Date.now() + 60_000),
     });
     resolveSession.mockResolvedValue({ userId: "u1", sessionId: "s1" });
-    userFindById.mockResolvedValue(USER);
+    userFindOne.mockResolvedValue(USER);
     oauthCodeCreate.mockResolvedValue({});
   });
 
@@ -707,7 +707,7 @@ describe("POST /oauth/authorize consent phase", () => {
   });
 
   it("refuses when the account was deleted between the screens", async () => {
-    userFindById.mockResolvedValue(null);
+    userFindOne.mockResolvedValue(null);
 
     const body = await (await POST(consent({ access: "all" }))).text();
 

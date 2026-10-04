@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
+import type { ScopedDb } from "@/lib/db-scope";
 import { withAuth } from "@/lib/middleware";
 import { accessibleProjectIds, administeredProjectIds } from "@/lib/grants";
 import { isWorkerLockedByInstance } from "@/lib/worker-gate";
-import { Project } from "@/models/project";
-import { Worker } from "@/models/worker";
 import { catalogueFor, ownerReachableProjectIds, usableRepos } from "@/lib/worker-service";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 
@@ -19,9 +18,9 @@ import { logInstanceAudit } from "@/lib/instanceAudit";
 // somebody WANTS it to have is a different question, and the gap between the two is the work the
 // app then does. Nothing here touches a disk: this route records intent.
 
-async function loadOwnedWorker(workerId: string, userId: string, isAdmin: boolean) {
+async function loadOwnedWorker(db: ScopedDb, workerId: string, userId: string, isAdmin: boolean) {
   if (!isValidObjectId(workerId)) return null;
-  const worker = await Worker.findById(workerId).select(
+  const worker = await db.Worker.findById(workerId).select(
     "_id name host owner repos desiredProjects"
   );
   if (!worker) return null;
@@ -31,7 +30,7 @@ async function loadOwnedWorker(workerId: string, userId: string, isAdmin: boolea
   return mine || isAdmin ? worker : null;
 }
 
-export const GET = withAuth(async (_request, { params, user }) => {
+export const GET = withAuth(async (_request, { params, user, db }) => {
   await connectDB();
   const { workerId } = await params;
 
@@ -39,14 +38,14 @@ export const GET = withAuth(async (_request, { params, user }) => {
     return NextResponse.json({ error: "Interactive session required" }, { status: 403 });
   }
 
-  const worker = await loadOwnedWorker(workerId, String(user._id), user.role === "admin");
+  const worker = await loadOwnedWorker(db, workerId, String(user._id), user.role === "admin");
   if (!worker) return NextResponse.json({ error: "Worker not found" }, { status: 404 });
 
   // The machine's reach, not the caller's: an instance admin looking at somebody else's laptop
   // must see what that laptop can be given, not what they themselves can reach.
   const [projects, others, reachable] = await Promise.all([
-    Project.find({}).select("_id key name repositoryUrl githubRepo gitlabRepo gitlabHost worker").lean(),
-    Worker.find({ _id: { $ne: worker._id } }).select("_id name host repos enabled lastSeenAt createdAt"),
+    db.Project.find({}).select("_id key name repositoryUrl githubRepo gitlabRepo gitlabHost worker").lean(),
+    db.Worker.find({ _id: { $ne: worker._id } }).select("_id name host repos enabled lastSeenAt createdAt"),
     ownerReachableProjectIds(worker),
   ]);
 
@@ -76,7 +75,7 @@ export const GET = withAuth(async (_request, { params, user }) => {
   });
 });
 
-export const PUT = withAuth(async (request, { params, user }) => {
+export const PUT = withAuth(async (request, { params, user, db }) => {
   await connectDB();
   const { workerId } = await params;
 
@@ -84,7 +83,7 @@ export const PUT = withAuth(async (request, { params, user }) => {
     return NextResponse.json({ error: "Interactive session required" }, { status: 403 });
   }
 
-  const worker = await loadOwnedWorker(workerId, String(user._id), user.role === "admin");
+  const worker = await loadOwnedWorker(db, workerId, String(user._id), user.role === "admin");
   if (!worker) return NextResponse.json({ error: "Worker not found" }, { status: 404 });
 
   const body: unknown = await request.json().catch(() => ({}));
@@ -109,7 +108,7 @@ export const PUT = withAuth(async (request, { params, user }) => {
     (id) => isValidObjectId(id) && within(callerReach, id) && within(ownerReach, id)
   );
 
-  const chosen = await Project.find({ _id: { $in: wanted } }).select("_id key worker").lean();
+  const chosen = await db.Project.find({ _id: { $in: wanted } }).select("_id key worker").lean();
 
   // Ticking a project that nobody has committed to machines is the point of this screen — but the
   // commitment itself is the project owner's, and still audited, exactly as it is on the project's
@@ -126,7 +125,7 @@ export const PUT = withAuth(async (request, { params, user }) => {
       leftDisabled.push(project.key || String(project._id));
       continue;
     }
-    await Project.updateOne({ _id: project._id }, { $set: { "worker.enabled": true } });
+    await db.Project.updateOne({ _id: project._id }, { $set: { "worker.enabled": true } });
     void logInstanceAudit({
       action: "project_workers_enabled",
       target: project.key || String(project._id),
@@ -136,7 +135,7 @@ export const PUT = withAuth(async (request, { params, user }) => {
     });
   }
 
-  await Worker.updateOne({ _id: worker._id }, { $set: { desiredProjects: wanted } });
+  await db.Worker.updateOne({ _id: worker._id }, { $set: { desiredProjects: wanted } });
 
   return NextResponse.json({
     ok: true,

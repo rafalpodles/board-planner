@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { Project } from "@/models/project";
+import { scopedToDefaultTenant } from "@/lib/db-scope";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { auditChange } from "@/lib/settings-audit";
 import { serverNamed, writeServerOauth } from "@/lib/pm/oauth-writes";
-import { PmOauthState } from "@/models/pmOauthState";
 import { getAuthUser } from "@/lib/auth";
 import { ProvenanceError } from "@/lib/session";
 import { check } from "@/lib/grants";
@@ -29,6 +28,7 @@ function settingsRedirect(projectId: string | null, result: string): NextRespons
 // Unauthenticated by necessity (browser redirect carries no Authorization header);
 // authenticated by the single-use, TTL-bound state instead.
 export async function GET(request: Request) {
+  const db = scopedToDefaultTenant();
   await connectDB();
   const url = new URL(request.url);
   const state = url.searchParams.get("state") || "";
@@ -37,7 +37,7 @@ export async function GET(request: Request) {
 
   // Not consumed yet: read-only, so a wrong user below leaves the state alive for its actual
   // owner to still complete.
-  const pending = state ? await PmOauthState.findOne({ state }) : null;
+  const pending = state ? await db.PmOauthState.findOne({ state }) : null;
   if (!pending) {
     return settingsRedirect(null, "error:invalid_state");
   }
@@ -49,7 +49,7 @@ export async function GET(request: Request) {
   // — to this project (BP-749 review). Costs the owner only a re-click of Connect; a state-only
   // probe (no code at all) is what "do not consume" above is actually for.
   const refuseWrongUser = async () => {
-    if (code) await PmOauthState.findOneAndDelete({ state });
+    if (code) await db.PmOauthState.findOneAndDelete({ state });
     return settingsRedirect(projectId, "error:wrong_user");
   };
 
@@ -76,7 +76,7 @@ export async function GET(request: Request) {
     return refuseWrongUser();
   }
 
-  const consumed = await PmOauthState.findOneAndDelete({ state });
+  const consumed = await db.PmOauthState.findOneAndDelete({ state });
   if (!consumed) {
     return settingsRedirect(projectId, "error:invalid_state");
   }
@@ -88,7 +88,7 @@ export async function GET(request: Request) {
     return settingsRedirect(projectId, "error:missing_code");
   }
 
-  const project = await Project.findById(pending.project).select("pm.mcpServers").lean();
+  const project = await db.Project.findById(pending.project).select("pm.mcpServers").lean();
   const server = serverNamed(project?.pm?.mcpServers, pending.serverName);
   if (!project || !server || server.authType !== "oauth" || !server.oauth?.tokenEndpoint) {
     return settingsRedirect(projectId, "error:connection_gone");

@@ -2,21 +2,17 @@ import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withAdmin } from "@/lib/middleware";
-import { OAuthClient } from "@/models/oauthClient";
-import { OAuthToken } from "@/models/oauthToken";
-import { OAuthCode } from "@/models/oauthCode";
-import { OAuthConsent } from "@/models/oauthConsent";
 
 // Registered OAuth clients (via Dynamic Client Registration). Admin only.
-export const GET = withAdmin(async () => {
+export const GET = withAdmin(async (_request, { db }) => {
   await connectDB();
 
-  const clients = await OAuthClient.find()
+  const clients = await db.OAuthClient.find()
     .select("clientId clientName redirectUris createdAt")
     .sort({ createdAt: -1 })
     .lean();
 
-  const counts = await OAuthToken.aggregate<{ _id: string; n: number }>([
+  const counts = await db.OAuthToken.aggregate<{ _id: string; n: number }>([
     { $group: { _id: "$clientId", n: { $sum: 1 } } },
   ]);
   const countMap = new Map(counts.map((c) => [c._id, c.n]));
@@ -33,7 +29,7 @@ export const GET = withAdmin(async () => {
   );
 });
 
-export const DELETE = withAdmin(async (request) => {
+export const DELETE = withAdmin(async (request, { db }) => {
   await connectDB();
 
   const body = await request.json().catch(() => null);
@@ -42,7 +38,7 @@ export const DELETE = withAdmin(async (request) => {
     return NextResponse.json({ error: "Client id is required" }, { status: 400 });
   }
 
-  const client = await OAuthClient.findById(id);
+  const client = await db.OAuthClient.findById(id);
   if (!client) {
     return NextResponse.json({ error: "Client not found" }, { status: 404 });
   }
@@ -53,10 +49,10 @@ export const DELETE = withAdmin(async (request) => {
   // delete has committed. Deleting the client last (the old order) left a window between the token
   // cleanup below and this line where a concurrent grant's existence check still saw the client and
   // handed out a credential nothing here would ever revoke (BP-747).
-  await OAuthClient.deleteOne({ _id: client._id });
-  await OAuthToken.deleteMany({ clientId: client.clientId });
-  await OAuthCode.deleteMany({ clientId: client.clientId });
-  await OAuthConsent.deleteMany({ clientId: client.clientId });
+  await db.OAuthClient.deleteOne({ _id: client._id });
+  await db.OAuthToken.deleteMany({ clientId: client.clientId });
+  await db.OAuthCode.deleteMany({ clientId: client.clientId });
+  await db.OAuthConsent.deleteMany({ clientId: client.clientId });
 
   return NextResponse.json({ ok: true });
 });

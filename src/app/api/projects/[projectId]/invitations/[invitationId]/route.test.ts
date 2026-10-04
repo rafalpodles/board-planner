@@ -2,21 +2,24 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const removeBoardFromInvitation = vi.fn();
 const revokeIfEmpty = vi.fn();
-const userFindById = vi.fn();
+const userFindOne = vi.fn();
 const logProjectAudit = vi.fn();
 const logInstanceAudit = vi.fn();
 let caller: Record<string, unknown> = {};
 
-vi.mock("@/lib/middleware", () => ({
-  withProjectOwner:
-    (handler: (r: Request, c: unknown) => unknown) =>
-    (request: Request, ctx: { params: Promise<Record<string, string>> }) =>
-      handler(request, { params: ctx.params, user: caller }),
-}));
+vi.mock("@/lib/middleware", async () => {
+  const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+  return {
+    withProjectOwner:
+      (handler: (r: Request, c: unknown) => unknown) =>
+      (request: Request, ctx: { params: Promise<Record<string, string>> }) =>
+        handler(request, { params: ctx.params, user: caller, db: scopedToDefaultTenant() }),
+  };
+});
 vi.mock("@/lib/invitations", () => ({ removeBoardFromInvitation, revokeIfEmpty }));
 vi.mock("@/lib/projectAudit", () => ({ logProjectAudit }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
-vi.mock("@/models/user", () => ({ User: { findById: userFindById } }));
+vi.mock("@/models/user", () => ({ User: { findOne: userFindOne } }));
 
 const { DELETE } = await import("./route");
 
@@ -27,7 +30,7 @@ const del = (invitationId = ID) =>
   });
 
 function inviter(user: unknown) {
-  userFindById.mockReturnValue({ select: () => ({ lean: () => Promise.resolve(user) }) });
+  userFindOne.mockReturnValue({ select: () => ({ lean: () => Promise.resolve(user) }) });
 }
 
 beforeEach(() => {

@@ -1,14 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
-const projectFindById = vi.fn();
+const projectFindOne = vi.fn();
 const projectFindOneAndUpdate = vi.fn();
 const taskFind = vi.fn();
 const taskDeleteMany = vi.fn();
 const commentDeleteMany = vi.fn();
 const activityLogDeleteMany = vi.fn();
-const projectFindByIdAndDelete = vi.fn();
+const projectFindOneAndDelete = vi.fn();
 const sprintDeleteMany = vi.fn();
 const notificationDeleteMany = vi.fn();
 const pmMessageDeleteMany = vi.fn();
@@ -48,8 +49,8 @@ vi.mock("@/lib/encryption", () => ({
 vi.mock("@/lib/url-validation", () => ({ isAllowedMcpServerUrl: () => true }));
 vi.mock("@/models/project", () => ({
   Project: {
-    findById: projectFindById,
-    findByIdAndDelete: projectFindByIdAndDelete,
+    findOne: projectFindOne,
+    findOneAndDelete: projectFindOneAndDelete,
     findOneAndUpdate: projectFindOneAndUpdate,
   },
 }));
@@ -127,7 +128,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   plan.value = "pro";
   getAuthUser.mockResolvedValue(OWNER);
-  projectFindById.mockReturnValue({
+  projectFindOne.mockReturnValue({
     toObject: () => ({ _id: PROJECT_ID, name: "Test Project" }),
     select: () => Promise.resolve({ customFields: PROJECT_CUSTOM_FIELDS }),
     populate: saved,
@@ -138,7 +139,7 @@ beforeEach(() => {
   taskFind.mockReturnValue({
     distinct: () => Promise.resolve([]),
   });
-  projectFindByIdAndDelete.mockResolvedValue({ _id: PROJECT_ID });
+  projectFindOneAndDelete.mockResolvedValue({ _id: PROJECT_ID });
   commentDeleteMany.mockResolvedValue({ deletedCount: 0 });
   activityLogDeleteMany.mockResolvedValue({ deletedCount: 0 });
   taskDeleteMany.mockResolvedValue({ deletedCount: 0 });
@@ -156,7 +157,7 @@ describe("DELETE /api/projects/[projectId]", () => {
     const response = await DELETE(request(), ctx());
 
     expect(response.status).toBe(200);
-    expect(projectFindByIdAndDelete).toHaveBeenCalledWith(PROJECT_ID);
+    expect(projectFindOneAndDelete).toHaveBeenCalledWith({ _id: PROJECT_ID, tenant: DEFAULT_TENANT_ID });
   });
 
   it("denies a plain member from deleting", async () => {
@@ -166,7 +167,7 @@ describe("DELETE /api/projects/[projectId]", () => {
     const response = await DELETE(request(), ctx());
 
     expect(response.status).toBe(403);
-    expect(projectFindByIdAndDelete).not.toHaveBeenCalled();
+    expect(projectFindOneAndDelete).not.toHaveBeenCalled();
     expect(grantDeleteMany).not.toHaveBeenCalled();
   });
 
@@ -177,7 +178,7 @@ describe("DELETE /api/projects/[projectId]", () => {
 
     expect(response.status).toBe(200);
     expect(grantDeleteMany).toHaveBeenCalledTimes(1);
-    expect(grantDeleteMany).toHaveBeenCalledWith({ objectType: "project", object: PROJECT_ID });
+    expect(grantDeleteMany).toHaveBeenCalledWith({ objectType: "project", object: PROJECT_ID, tenant: DEFAULT_TENANT_ID });
   });
 
   it("drops the grants only once the project itself is gone", async () => {
@@ -186,13 +187,13 @@ describe("DELETE /api/projects/[projectId]", () => {
     await DELETE(request(), ctx());
 
     expect(grantDeleteMany.mock.invocationCallOrder[0]).toBeGreaterThan(
-      projectFindByIdAndDelete.mock.invocationCallOrder[0]
+      projectFindOneAndDelete.mock.invocationCallOrder[0]
     );
   });
 
   it("keeps every grant and reference when the project does not exist", async () => {
     check.mockResolvedValue(true);
-    projectFindById.mockResolvedValueOnce(null);
+    projectFindOne.mockResolvedValueOnce(null);
 
     const response = await DELETE(request(), ctx());
 
@@ -204,7 +205,7 @@ describe("DELETE /api/projects/[projectId]", () => {
   it("drops what other collections hold about the project, by the project's own id", async () => {
     check.mockResolvedValue(true);
     const _id = { toString: () => PROJECT_ID };
-    projectFindById.mockResolvedValueOnce({ _id });
+    projectFindOne.mockResolvedValueOnce({ _id });
 
     const response = await DELETE(request(), ctx());
 
@@ -219,7 +220,7 @@ describe("DELETE /api/projects/[projectId]", () => {
     await DELETE(request(), ctx());
 
     expect(dropProjectReferences.mock.invocationCallOrder[0]).toBeGreaterThan(
-      projectFindByIdAndDelete.mock.invocationCallOrder[0]
+      projectFindOneAndDelete.mock.invocationCallOrder[0]
     );
   });
 
@@ -255,7 +256,7 @@ describe("PUT /api/projects/[projectId] key immutability", () => {
 
     expect(res.status).toBe(200);
     expect(projectFindOneAndUpdate).toHaveBeenCalledWith(
-      { _id: PROJECT_ID },
+      { _id: PROJECT_ID, tenant: DEFAULT_TENANT_ID },
       expect.objectContaining({ name: "Renamed" }),
       expect.anything()
     );
@@ -309,7 +310,7 @@ describe("PUT /api/projects/[projectId] estimateFieldId", () => {
 
     expect(res.status).toBe(200);
     expect(projectFindOneAndUpdate).toHaveBeenCalledWith(
-      { _id: PROJECT_ID },
+      { _id: PROJECT_ID, tenant: DEFAULT_TENANT_ID },
       expect.objectContaining({ estimateFieldId: "" }),
       expect.anything()
     );
@@ -320,7 +321,7 @@ describe("PUT /api/projects/[projectId] estimateFieldId", () => {
 
     expect(res.status).toBe(200);
     expect(projectFindOneAndUpdate).toHaveBeenCalledWith(
-      { _id: PROJECT_ID },
+      { _id: PROJECT_ID, tenant: DEFAULT_TENANT_ID },
       expect.objectContaining({ estimateFieldId: numberFieldId }),
       expect.anything()
     );
@@ -341,7 +342,7 @@ describe("PUT /api/projects/[projectId] and a repointed integration host", () =>
   }
 
   function storedAs(project: Record<string, unknown>) {
-    projectFindById.mockReturnValue({
+    projectFindOne.mockReturnValue({
       lean: () => Promise.resolve(project),
       select: () => Promise.resolve({ customFields: PROJECT_CUSTOM_FIELDS }),
       toObject: () => ({ _id: PROJECT_ID, name: "Test Project" }),
@@ -409,7 +410,7 @@ describe("PUT /api/projects/[projectId] and Coda on a free instance", () => {
     check.mockResolvedValue(true);
     plan.value = "free";
     // A host in the body makes the route read the stored one, to clear a token it no longer fits
-    projectFindById.mockReturnValue({
+    projectFindOne.mockReturnValue({
       lean: () => Promise.resolve({ codaHost: "https://coda.io", codaToken: "enc:v2:k:coda" }),
       select: () => Promise.resolve({ customFields: PROJECT_CUSTOM_FIELDS }),
       toObject: () => ({ _id: PROJECT_ID, name: "Test Project" }),
@@ -476,7 +477,7 @@ describe("PUT /api/projects/[projectId] and Coda on a free instance", () => {
 describe("the key a project may be renamed to", () => {
   beforeEach(() => {
     check.mockResolvedValue(true);
-    projectFindById.mockReturnValue({
+    projectFindOne.mockReturnValue({
       toObject: () => ({ _id: PROJECT_ID }),
       select: () => Promise.resolve({ customFields: PROJECT_CUSTOM_FIELDS }),
       lean: () => Promise.resolve({ key: "TP", formerKeys: [] }),
@@ -515,7 +516,7 @@ describe("PUT /api/projects/[projectId] worker settings", () => {
   // which is what the instance audit is decided from
   function stored(worker: Record<string, unknown>) {
     const project = { key: "TP", worker: { policyOverrides: [], ...worker } };
-    projectFindById.mockReturnValue({ select: () => Promise.resolve(project), populate: saved });
+    projectFindOne.mockReturnValue({ select: () => Promise.resolve(project), populate: saved });
     projectFindOneAndUpdate.mockReturnValue({
       lean: () => Promise.resolve({ _id: PROJECT_ID, ...project }),
     });
@@ -747,7 +748,7 @@ describe("PUT /api/projects/[projectId] audit trail", () => {
 
   it("takes the value before from the write, not from the read that preceded it", async () => {
     getAuthUser.mockResolvedValue({ ...OWNER });
-    projectFindById.mockReturnValue({
+    projectFindOne.mockReturnValue({
       select: () => Promise.resolve({ key: "TP", worker: { enabled: false, policyOverrides: [] } }),
       populate: saved,
     });
@@ -882,7 +883,7 @@ describe("PUT /api/projects/[projectId] PM settings", () => {
   // Each read of the project in turn: the route's own, then one per retry
   function reads(...pms: (Record<string, unknown> | null)[]) {
     for (const pm of pms) {
-      projectFindById.mockReturnValueOnce({
+      projectFindOne.mockReturnValueOnce({
         select: () => ({ lean: () => Promise.resolve(pm && { _id: PROJECT_ID, pm }) }),
       });
     }
@@ -911,7 +912,7 @@ describe("PUT /api/projects/[projectId] PM settings", () => {
 
     expect(res.status).toBe(200);
     const [filter, update] = projectFindOneAndUpdate.mock.calls[0];
-    expect(filter).toEqual({ _id: PROJECT_ID });
+    expect(filter).toEqual({ _id: PROJECT_ID, tenant: DEFAULT_TENANT_ID });
     expect(Object.keys(update).sort()).toEqual([
       "pm.autonomy.dailyReview",
       "pm.autonomy.handleNeedsHumanReview",
@@ -935,6 +936,7 @@ describe("PUT /api/projects/[projectId] PM settings", () => {
     expect(filter).toEqual({
       _id: PROJECT_ID,
       $expr: { $eq: [{ $ifNull: ["$pm.mcpServers", []] }, { $literal: [oauthServer("old")] }] },
+      tenant: DEFAULT_TENANT_ID,
     });
     expect(update).not.toHaveProperty("pm.lockedByInstance");
     expect(update).not.toHaveProperty("pm");

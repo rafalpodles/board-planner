@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectOwner } from "@/lib/middleware";
-import { Project } from "@/models/project";
 import { dailyPmSpend, isOverDailyTurnCap } from "@/lib/pm/turn-cap";
 import { MAX_STEPS } from "@/lib/pm/agent";
 
@@ -13,11 +12,11 @@ import { MAX_STEPS } from "@/lib/pm/agent";
  * turns is anywhere between a hundred and fifteen hundred model calls. This is what makes the
  * difference legible — turns beside calls beside tokens, in the operator's own units.
  */
-export const GET = withProjectOwner(async (_request, { params }) => {
+export const GET = withProjectOwner(async (_request, { params, db }) => {
   const { projectId } = await params;
   await connectDB();
 
-  const project = await Project.findById(projectId, "pm").lean();
+  const project = await db.Project.findById(projectId, "pm").lean();
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }

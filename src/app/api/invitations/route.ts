@@ -9,22 +9,19 @@ import { issueInvitation, InvitationBoardInput, recordDelivery } from "@/lib/inv
 import { deliverTo, INTERACTIVE_ONLY, NO_ORIGIN_ERROR } from "@/lib/invitation-mail";
 import { describeInvitation, toApiInvitations } from "@/lib/invitation-view";
 import { logInstanceAudit } from "@/lib/instanceAudit";
-import { Invitation } from "@/models/invitation";
-import { Project } from "@/models/project";
-import { User } from "@/models/user";
 import { GRANT_RELATIONS, GrantRelation } from "@/types";
 
 const MAX_BOARDS = 100;
 
 
-export const GET = withAdmin(async (_request, { user }) => {
+export const GET = withAdmin(async (_request, { user, db }) => {
   if (user.viaMachineCredential) {
     return NextResponse.json({ error: INTERACTIVE_ONLY }, { status: 403 });
   }
   await connectDB();
-  const pending = await Invitation.find({ status: "pending" }).sort({ createdAt: -1 }).lean();
+  const pending = await db.Invitation.find({ status: "pending" }).sort({ createdAt: -1 }).lean();
   const taken = new Set(
-    (await User.find({ email: { $in: pending.map((i) => i.email) } }).select("email").lean()).map(
+    (await db.User.find({ email: { $in: pending.map((i) => i.email) } }).select("email").lean()).map(
       (u) => u.email
     )
   );
@@ -55,7 +52,7 @@ function parseBoards(raw: unknown): Parsed<InvitationBoardInput[]> {
   };
 }
 
-export const POST = withAdmin(async (request, { user }) => {
+export const POST = withAdmin(async (request, { user, db }) => {
   if (user.viaMachineCredential) {
     return NextResponse.json({ error: INTERACTIVE_ONLY }, { status: 403 });
   }
@@ -81,13 +78,13 @@ export const POST = withAdmin(async (request, { user }) => {
   if (!origin) return NextResponse.json({ error: NO_ORIGIN_ERROR }, { status: 500 });
 
   await connectDB();
-  if (await User.exists({ email })) {
+  if (await db.User.exists({ email })) {
     return NextResponse.json(
       { error: "That address already has an account. Add them to a board instead." },
       { status: 409 }
     );
   }
-  const projects = await Project.find({ _id: { $in: boards.value.map((b) => b.project) } })
+  const projects = await db.Project.find({ _id: { $in: boards.value.map((b) => b.project) } })
     .select("key name")
     .lean();
   if (projects.length !== boards.value.length) {

@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectOwner } from "@/lib/middleware";
-import { Project } from "@/models/project";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { auditChange } from "@/lib/settings-audit";
 import { serverNamed } from "@/lib/pm/oauth-writes";
 
-export const POST = withProjectOwner(async (request, { params, user }) => {
+export const POST = withProjectOwner(async (request, { params, user, db }) => {
   await connectDB();
   const { projectId } = await params;
   const { name } = await request.json();
@@ -14,7 +13,7 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
   // Keep the client registration and endpoints; drop only the tokens
   const before =
     typeof name === "string"
-      ? await Project.findOneAndUpdate(
+      ? await db.Project.findOneAndUpdate(
           {
             _id: projectId,
             "pm.mcpServers": { $elemMatch: { name, oauth: { $exists: true, $ne: null } } },
@@ -31,7 +30,7 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
         ).lean()
       : null;
   if (!before) {
-    if (!(await Project.exists({ _id: projectId }))) {
+    if (!(await db.Project.exists({ _id: projectId }))) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
     return NextResponse.json({ error: `No OAuth connection named "${name}"` }, { status: 404 });

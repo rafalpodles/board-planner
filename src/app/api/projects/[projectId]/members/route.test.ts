@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const getAuthUser = vi.fn();
 const grantFind = vi.fn();
@@ -14,13 +15,13 @@ const logProjectAudit = vi.fn();
 const ownerCount = vi.fn();
 const userFind = vi.fn();
 const userFindLean = vi.fn();
-const userFindById = vi.fn();
-const userFindByIdSelect = vi.fn();
+const userFindOne = vi.fn();
+const userFindOneSelect = vi.fn();
 const check = vi.fn();
 const recipientsWithAccess = vi.fn(async (_ids?: unknown, _project?: unknown): Promise<string[]> => []);
 const notificationDeleteMany = vi.fn(async (_filter?: unknown) => ({ deletedCount: 0 }));
 const createNotifications = vi.fn(async (_params: unknown) => {});
-const projectFindByIdLean = vi.fn();
+const projectFindOneLean = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({
@@ -49,11 +50,11 @@ vi.mock("@/models/user", () => ({
   User: {
     exists: (filter: unknown) => userExists(filter),
     find: (...a: unknown[]) => (userFind(...a), { select: () => ({ sort: () => ({ lean: userFindLean }) }) }),
-    findById: (...a: unknown[]) => (userFindById(...a), { select: userFindByIdSelect }),
+    findOne: (...a: unknown[]) => (userFindOne(...a), { select: userFindOneSelect }),
   },
 }));
 vi.mock("@/models/project", () => ({
-  Project: { findOne: vi.fn(), findById: () => ({ select: () => ({ lean: projectFindByIdLean }) }) },
+  Project: { findOne: () => ({ select: () => ({ lean: projectFindOneLean }) }) },
 }));
 vi.mock("@/lib/in-app-notifications", () => ({
   createNotifications: (params: unknown) => createNotifications(params),
@@ -85,12 +86,12 @@ function put(body: unknown) {
 beforeEach(() => {
   vi.clearAllMocks();
   getAuthUser.mockResolvedValue({ _id: "o1", role: "member", username: "olga", fullName: "Olga Owner" });
-  projectFindByIdLean.mockResolvedValue({ name: "Orbit", key: "ORB" });
+  projectFindOneLean.mockResolvedValue({ name: "Orbit", key: "ORB" });
   check.mockResolvedValue(true);
   grantFindLean.mockResolvedValue([]);
   grantFindOneLean.mockResolvedValue(null);
   userFindLean.mockResolvedValue([]);
-  userFindByIdSelect.mockResolvedValue({ _id: "u1", role: "member", kind: "human", username: "uma" });
+  userFindOneSelect.mockResolvedValue({ _id: "u1", role: "member", kind: "human", username: "uma" });
   ownerCount.mockResolvedValue(2);
   recipientsWithAccess.mockResolvedValue([]);
   grantUpsertLean.mockResolvedValue(null);
@@ -115,7 +116,7 @@ describe("GET members", () => {
 
   it("scopes the grant query to this project", async () => {
     await GET(new Request("http://x"), { params });
-    expect(grantFind).toHaveBeenCalledWith({ objectType: "project", object: PROJECT });
+    expect(grantFind).toHaveBeenCalledWith({ objectType: "project", object: PROJECT, tenant: DEFAULT_TENANT_ID });
   });
 
   it("never offers worker machine identities as grantable members", async () => {
@@ -123,6 +124,7 @@ describe("GET members", () => {
     expect(userFind).toHaveBeenCalledWith({
       kind: { $ne: "machine" },
       $or: [{ role: "admin" }, { _id: { $in: [] } }],
+      tenant: DEFAULT_TENANT_ID,
     });
   });
 
@@ -138,6 +140,7 @@ describe("GET members", () => {
     expect(userFind).toHaveBeenCalledWith({
       kind: { $ne: "machine" },
       $or: [{ role: "admin" }, { _id: { $in: ["u1"] } }],
+      tenant: DEFAULT_TENANT_ID,
     });
   });
 });
@@ -147,7 +150,7 @@ describe("PUT members", () => {
     const res = await PUT(put({ userId: U1, relation: "owner" }), { params });
     expect(res.status).toBe(200);
     expect(grantUpsert).toHaveBeenCalledWith(
-      { subject: U1, objectType: "project", object: PROJECT },
+      { subject: U1, objectType: "project", object: PROJECT, tenant: DEFAULT_TENANT_ID },
       { $set: { relation: "owner" }, $setOnInsert: { createdBy: "o1" } },
       { upsert: true, returnDocument: "before" }
     );
@@ -155,7 +158,7 @@ describe("PUT members", () => {
 
   // BP-832. Hidden from the pickers is not enough: a client can still send the id
   it("gives a deactivated account no grant", async () => {
-    userFindByIdSelect.mockResolvedValue({ _id: "u1", role: "member", kind: "human", username: "uma", deactivatedAt: new Date() });
+    userFindOneSelect.mockResolvedValue({ _id: "u1", role: "member", kind: "human", username: "uma", deactivatedAt: new Date() });
 
     const res = await PUT(put({ userId: U1, relation: "member" }), { params });
 
@@ -177,14 +180,14 @@ describe("PUT members", () => {
   });
 
   it("404s when the target user does not exist", async () => {
-    userFindByIdSelect.mockResolvedValue(null);
+    userFindOneSelect.mockResolvedValue(null);
     const res = await PUT(put({ userId: GHOST, relation: "member" }), { params });
     expect(res.status).toBe(404);
     expect(grantUpsert).not.toHaveBeenCalled();
   });
 
   it("404s when the target is a machine identity", async () => {
-    userFindByIdSelect.mockResolvedValue({ _id: W1, role: "member", kind: "machine" });
+    userFindOneSelect.mockResolvedValue({ _id: W1, role: "member", kind: "machine" });
     const res = await PUT(put({ userId: W1, relation: "member" }), { params });
     expect(res.status).toBe(404);
     expect(grantUpsert).not.toHaveBeenCalled();
@@ -196,7 +199,7 @@ describe("PUT members", () => {
     const res = await PUT(put({ userId: U2, relation: "member" }), { params });
     expect(res.status).toBe(200);
     expect(grantUpsert).toHaveBeenCalledWith(
-      { subject: U2, objectType: "project", object: PROJECT },
+      { subject: U2, objectType: "project", object: PROJECT, tenant: DEFAULT_TENANT_ID },
       { $set: { relation: "member" }, $setOnInsert: { createdBy: "o1" } },
       { upsert: true, returnDocument: "before" }
     );
@@ -207,7 +210,7 @@ describe("PUT members", () => {
     ownerCount.mockResolvedValue(1);
     const res = await PUT(put({ userId: U1, relation: "member" }), { params });
     expect(res.status).toBe(409);
-    expect(grantFindOne).toHaveBeenCalledWith({ subject: U1, objectType: "project", object: PROJECT });
+    expect(grantFindOne).toHaveBeenCalledWith({ subject: U1, objectType: "project", object: PROJECT, tenant: DEFAULT_TENANT_ID });
     expect(grantUpsert).not.toHaveBeenCalled();
   });
 
@@ -217,7 +220,7 @@ describe("PUT members", () => {
     const res = await PUT(put({ userId: U2, relation: "member" }), { params });
     expect(res.status).toBe(200);
     expect(grantUpsert).toHaveBeenCalledWith(
-      { subject: U2, objectType: "project", object: PROJECT },
+      { subject: U2, objectType: "project", object: PROJECT, tenant: DEFAULT_TENANT_ID },
       { $set: { relation: "member" }, $setOnInsert: { createdBy: "o1" } },
       { upsert: true, returnDocument: "before" }
     );
@@ -234,7 +237,7 @@ describe("PUT members", () => {
     expect(res.status).toBe(409);
     // An upsert: a concurrent removal may have taken the row this puts back
     expect(grantUpdateOne).toHaveBeenCalledWith(
-      { subject: U2, objectType: "project", object: PROJECT },
+      { subject: U2, objectType: "project", object: PROJECT, tenant: DEFAULT_TENANT_ID },
       { $set: { relation: "owner" }, $setOnInsert: { createdBy: "o1" } },
       { upsert: true }
     );
@@ -247,7 +250,7 @@ describe("PUT members", () => {
     grantUpsertLean.mockResolvedValue({ relation: "owner" });
     ownerCount.mockResolvedValueOnce(2).mockResolvedValueOnce(0);
     grantUpdateOne.mockResolvedValueOnce({ upsertedCount: 1 } as never);
-    userFindByIdSelect.mockResolvedValue({ _id: U2, role: "member", kind: "human", username: "uma" });
+    userFindOneSelect.mockResolvedValue({ _id: U2, role: "member", kind: "human", username: "uma" });
 
     expect((await PUT(put({ userId: U2, relation: "member" }), { params })).status).toBe(409);
     expect(logProjectAudit).toHaveBeenCalledWith(PROJECT, "o1", "member_added", "uma: no access → owner");
@@ -275,7 +278,7 @@ describe("PUT members", () => {
   it("refuses a Mongo operator in place of a userId", async () => {
     const res = await PUT(put({ userId: { $ne: null }, relation: "member" }), { params });
     expect(res.status).toBe(400);
-    expect(userFindById).not.toHaveBeenCalled();
+    expect(userFindOne).not.toHaveBeenCalled();
     expect(grantUpsert).not.toHaveBeenCalled();
   });
 
@@ -297,7 +300,7 @@ describe("DELETE members", () => {
 
     expect(res.status).toBe(409);
     expect(grantUpdateOne).toHaveBeenCalledWith(
-      { subject: U2, objectType: "project", object: PROJECT },
+      { subject: U2, objectType: "project", object: PROJECT, tenant: DEFAULT_TENANT_ID },
       { $setOnInsert: { relation: "owner", createdBy: "o0" } },
       { upsert: true }
     );
@@ -311,7 +314,7 @@ describe("DELETE members", () => {
 
     expect((await DELETE(new Request(url, { method: "DELETE" }), { params })).status).toBe(409);
     expect(grantUpdateOne).toHaveBeenLastCalledWith(
-      { subject: U2, objectType: "project", object: PROJECT },
+      { subject: U2, objectType: "project", object: PROJECT, tenant: DEFAULT_TENANT_ID },
       { $set: { relation: "owner" } }
     );
     // Another request's member grant made owner again: an owner's access granted, so recorded
@@ -336,6 +339,7 @@ describe("DELETE members", () => {
       subject: U2,
       objectType: "project",
       object: PROJECT,
+      tenant: DEFAULT_TENANT_ID,
     });
   });
 
@@ -372,7 +376,7 @@ describe("DELETE members", () => {
     const res = await DELETE(new Request(url, { method: "DELETE" }), { params });
 
     expect(res.status).toBe(200);
-    expect(userExists).toHaveBeenCalledWith({ _id: U2.toLowerCase(), deactivatedAt: null });
+    expect(userExists).toHaveBeenCalledWith({ _id: U2.toLowerCase(), deactivatedAt: null, tenant: DEFAULT_TENANT_ID });
     expect(grantDelete).toHaveBeenCalled();
   });
 
@@ -386,6 +390,7 @@ describe("DELETE members", () => {
     expect(notificationDeleteMany).toHaveBeenCalledWith({
       recipient: U2,
       project: PROJECT,
+      tenant: DEFAULT_TENANT_ID,
     });
   });
 
@@ -534,7 +539,7 @@ describe("PUT members tells the person", () => {
   });
 
   it("without naming a board it cannot read, and without a link", async () => {
-    projectFindByIdLean.mockResolvedValue(null);
+    projectFindOneLean.mockResolvedValue(null);
 
     await PUT(put({ userId: U1, relation: "member" }), { params });
 
@@ -547,7 +552,7 @@ describe("PUT members tells the person", () => {
     const unhandled = vi.fn();
     process.on("unhandledRejection", unhandled);
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
-    projectFindByIdLean.mockRejectedValue(new Error("mongo is having a bad afternoon"));
+    projectFindOneLean.mockRejectedValue(new Error("mongo is having a bad afternoon"));
     try {
       const res = await PUT(put({ userId: U1, relation: "member" }), { params });
       await vi.waitFor(() =>
@@ -639,7 +644,7 @@ describe("the audit trail of board access", () => {
   // Read before the delete: after it, a failure would answer 500 for a removal that happened, and
   // the retry would find no grant left to record
   it("removes nothing when the name cannot be read", async () => {
-    userFindByIdSelect.mockRejectedValue(new Error("the read gave up"));
+    userFindOneSelect.mockRejectedValue(new Error("the read gave up"));
 
     await DELETE(new Request(url, { method: "DELETE" }), { params }).catch(() => undefined);
 
@@ -648,7 +653,7 @@ describe("the audit trail of board access", () => {
   });
 
   it("still names a removal whose account has since been deleted", async () => {
-    userFindByIdSelect.mockResolvedValue(null);
+    userFindOneSelect.mockResolvedValue(null);
 
     await DELETE(new Request(url, { method: "DELETE" }), { params });
 

@@ -5,8 +5,6 @@ import { check } from "@/lib/grants";
 import { getProjectColumns } from "@/lib/columns";
 import { projectRepositoryUrl } from "@/lib/repository";
 import { isWorkerLockedByInstance } from "@/lib/worker-gate";
-import { Project } from "@/models/project";
-import { Worker } from "@/models/worker";
 import { machineReadinessFor } from "@/lib/worker-service";
 import type { ApiHandoverReadiness } from "@/types";
 
@@ -15,13 +13,13 @@ import type { ApiHandoverReadiness } from "@/types";
  * board's own readiness and whether the READER's own machines serve this board's repository. Never
  * anyone else's machine, and never who holds a role on the board (BP-763).
  */
-export const GET = withProjectAccess(async (_request, { params, user }) => {
+export const GET = withProjectAccess(async (_request, { params, user, db }) => {
   const { projectId } = await params;
   await connectDB();
 
   const [project, workers, canAdmin] = await Promise.all([
-    Project.findById(projectId, "repositoryUrl githubRepo gitlabRepo worker columns").lean(),
-    Worker.find(
+    db.Project.findById(projectId, "repositoryUrl githubRepo gitlabRepo worker columns").lean(),
+    db.Worker.find(
       { owner: user._id },
       "enabled lastSeenAt repos preflight command commandIssuedAt commandAckedAt bindingError halt"
     ).lean(),

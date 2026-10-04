@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { readJsonBody } from "@/lib/request-body";
 import { connectDB } from "@/lib/db";
-import { OAuthClient } from "@/models/oauthClient";
+import { scopedToDefaultTenant } from "@/lib/db-scope";
 import { isValidRedirectUri, newClientId } from "@/lib/oauth";
 import { getClientIp } from "@/lib/auth";
 import {
@@ -29,6 +29,7 @@ const REGISTRATIONS_PER_WINDOW = 10;
 // onboarding, and the guard buys nothing — the endpoint is unauthenticated, takes no cookie, and
 // answers Access-Control-Allow-Origin: *, so a forged call gains what curl already would.
 export async function POST(req: Request) {
+  const db = scopedToDefaultTenant();
   await connectDB();
 
   // Unauthenticated and public by design, so the only bound on how far the client
@@ -71,7 +72,7 @@ export async function POST(req: Request) {
   const clientName =
     typeof body?.client_name === "string" ? body.client_name.slice(0, MAX_CLIENT_NAME) : "";
 
-  await OAuthClient.create({ clientId, clientName, redirectUris });
+  await db.OAuthClient.create({ clientId, clientName, redirectUris });
 
   return NextResponse.json(
     {

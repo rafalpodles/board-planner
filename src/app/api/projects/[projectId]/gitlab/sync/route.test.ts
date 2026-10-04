@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { replaceProviderLinks } from "@/lib/pr-links";
+import { scopedToDefaultTenant } from "@/lib/db-scope";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 /**
  * BP-429. The post-fetch half of sync had no test at any level, which is how three separate things
@@ -11,10 +13,10 @@ import { replaceProviderLinks } from "@/lib/pr-links";
 
 // Hoisted: `@/lib/pr-links` above reaches `@/models/task`, so the factory below runs before a
 // plain `const` in this scope is initialised (BP-559).
-const { fetchMergeRequests, projectFindById, taskFindOne, taskUpdateOne, taskFind, logActivity } =
+const { fetchMergeRequests, projectFindOne, taskFindOne, taskUpdateOne, taskFind, logActivity } =
   vi.hoisted(() => ({
     fetchMergeRequests: vi.fn(),
-    projectFindById: vi.fn(),
+    projectFindOne: vi.fn(),
     taskFindOne: vi.fn(),
     taskUpdateOne: vi.fn(),
     taskFind: vi.fn(),
@@ -24,7 +26,7 @@ const { fetchMergeRequests, projectFindById, taskFindOne, taskUpdateOne, taskFin
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/encryption", () => ({ decryptSecret: (v: string) => `plain:${v}` }));
 vi.mock("@/lib/activity", () => ({ logActivity }));
-vi.mock("@/models/project", () => ({ Project: { findById: projectFindById } }));
+vi.mock("@/models/project", () => ({ Project: { findOne: projectFindOne } }));
 // `find` is the second pass BP-610 added: the tasks this round contradicts without visiting.
 // Every test here drives a round whose matches are its whole story, so it answers with nothing.
 vi.mock("@/models/task", () => ({
@@ -39,7 +41,7 @@ vi.mock("@/lib/gitlab", async (importOriginal) => ({
 vi.mock("@/lib/middleware", () => ({
   withProjectAccess:
     (handler: (req: Request, ctx: unknown) => Promise<Response>) => (req: Request, ctx: unknown) =>
-      handler(req, { ...(ctx as object), user: { _id: "u1" } }),
+      handler(req, { ...(ctx as object), user: { _id: "u1" }, db: scopedToDefaultTenant() }),
 }));
 
 const { POST } = await import("./route");
@@ -88,7 +90,7 @@ const ctx = () => ({ params: Promise.resolve({ projectId: "p1" }) });
 beforeEach(() => {
   taskUpdateOne.mockResolvedValue({ modifiedCount: 1 });
   vi.clearAllMocks();
-  projectFindById.mockReturnValue({ lean: () => project() });
+  projectFindOne.mockReturnValue({ lean: () => project() });
   taskFindOne.mockResolvedValue(task());
   taskFind.mockResolvedValue([]);
   fetchMergeRequests.mockResolvedValue([]);
@@ -105,7 +107,7 @@ const actionsLogged = () => logActivity.mock.calls.map((call: unknown[]) => call
 
 describe("POST .../gitlab/sync — matching", () => {
   it("still finds merge requests opened under a key the project has since left", async () => {
-    projectFindById.mockReturnValue({ lean: () => project({ key: "BP", formerKeys: ["CP"] }) });
+    projectFindOne.mockReturnValue({ lean: () => project({ key: "BP", formerKeys: ["CP"] }) });
     fetchMergeRequests.mockResolvedValue([mr({ branch: "cp-5/old-prefix" })]);
 
     const body = await (await POST(request(), ctx())).json();
@@ -160,7 +162,7 @@ describe("POST .../gitlab/sync — linking", () => {
     const body = await (await POST(request(), ctx())).json();
 
     expect(taskUpdateOne).toHaveBeenCalledWith(
-      { _id: doc._id, status: doc.status },
+      { _id: doc._id, status: doc.status, tenant: DEFAULT_TENANT_ID },
       { $set: { status: "ready_to_test" } }
     );
     expect(body.autoTransitioned).toBe(1);
@@ -241,7 +243,7 @@ describe("POST .../gitlab/sync — linking", () => {
       { id: "ready_to_test", label: "Ready to Test", color: "#000", role: "review", order: 2 },
       { id: "done", label: "Done", color: "#000", role: "done", order: 3 },
     ];
-    projectFindById.mockReturnValue({ lean: () => project({ columns: reordered }) });
+    projectFindOne.mockReturnValue({ lean: () => project({ columns: reordered }) });
     const doc = task({ status: "needs_human_review" });
     taskFindOne.mockResolvedValue(doc);
     fetchMergeRequests.mockResolvedValue([mr({ state: "merged", merged_at: "2026-08-02T00:00:00Z" })]);
@@ -256,7 +258,7 @@ describe("POST .../gitlab/sync — linking", () => {
   });
 
   it("transitions nothing on a board whose one review column is both first and last", async () => {
-    projectFindById.mockReturnValue({ lean: () => project({ columns: RENAMED_COLUMNS }) });
+    projectFindOne.mockReturnValue({ lean: () => project({ columns: RENAMED_COLUMNS }) });
     const doc = task({ status: "checking" });
     taskFindOne.mockResolvedValue(doc);
     fetchMergeRequests.mockResolvedValue([mr({ state: "merged", merged_at: "2026-08-02T00:00:00Z" })]);
@@ -276,7 +278,7 @@ describe("POST .../gitlab/sync — linking", () => {
       { id: "verifying", label: "Verifying", color: "#000", role: "review", order: 3 },
       { id: "shipped", label: "Shipped", color: "#000", role: "done", order: 4 },
     ];
-    projectFindById.mockReturnValue({ lean: () => project({ columns }) });
+    projectFindOne.mockReturnValue({ lean: () => project({ columns }) });
     const doc = task({ status: "checking" });
     taskFindOne.mockResolvedValue(doc);
     fetchMergeRequests.mockResolvedValue([mr({ state: "merged", merged_at: "2026-08-02T00:00:00Z" })]);
@@ -284,7 +286,7 @@ describe("POST .../gitlab/sync — linking", () => {
     await POST(request(), ctx());
 
     expect(taskUpdateOne).toHaveBeenCalledWith(
-      { _id: doc._id, status: doc.status },
+      { _id: doc._id, status: doc.status, tenant: DEFAULT_TENANT_ID },
       { $set: { status: "verifying" } }
     );
     // On the default board the destination happens to BE "ready_to_test", so the hardcoded string
@@ -330,6 +332,7 @@ describe("POST .../gitlab/sync — the tasks a round contradicts without visitin
     expect(taskFind).toHaveBeenCalledWith({
       project: "p1",
       linkedPRs: { $elemMatch: { url: { $in: [mrUrl(1)] }, provider: "gitlab" } },
+      tenant: DEFAULT_TENANT_ID,
     });
     const pruned = taskUpdateOne.mock.calls.find(([filter]) => filter._id === "t8");
     expect(pruned?.[1]).toEqual(replaceProviderLinks("gitlab", [], [mrUrl(1)]));
@@ -369,6 +372,7 @@ describe("POST .../gitlab/sync — the tasks a round contradicts without visitin
     expect(taskFind).toHaveBeenCalledWith({
       project: "p1",
       linkedPRs: { $elemMatch: { url: { $in: [mrUrl(1)] }, provider: "gitlab" } },
+      tenant: DEFAULT_TENANT_ID,
     });
     expect(body.prsUnlinked).toBe(1);
   });
@@ -433,7 +437,7 @@ describe("POST .../gitlab/sync — what a round may contradict, and what it reco
    * a merge request's iid across a rename and answers under the new path, exactly as GitHub does.
    */
   it("still prunes the old name's links after a rename", async () => {
-    projectFindById.mockReturnValue({
+    projectFindOne.mockReturnValue({
       lean: () => project({ repositoryUrl: "https://gitlab.com/g/before-the-rename" }),
     });
     taskFind.mockResolvedValue([

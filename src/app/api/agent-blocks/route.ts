@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withAdmin, withAuth } from "@/lib/middleware";
-import { AgentBlock } from "@/models/agentBlock";
 import { allBlocks, freeBlockKey, toApiBlock } from "@/lib/agent-service";
 import {
   capabilityRefusal,
@@ -11,7 +10,7 @@ import {
 } from "@/lib/agent-block-input";
 import { BLOCK_KINDS, STEP_CAPABILITIES, StepCapability } from "@/types";
 
-export const GET = withAuth(async () => {
+export const GET = withAuth(async (_request, { db }) => {
   await connectDB();
   const blocks = await allBlocks();
   return NextResponse.json(blocks.map(toApiBlock));
@@ -22,7 +21,7 @@ export const GET = withAuth(async () => {
 // an agent out of existing blocks stays open (POST /api/agents), and choosing which agent a task
 // runs under is a project-admin act (updateTask) — those three together are what stop an ordinary
 // member reaching the machine. BP-345.
-export const POST = withAdmin(async (request, { user }) => {
+export const POST = withAdmin(async (request, { user, db }) => {
   await connectDB();
   const body = await request.json();
 
@@ -46,7 +45,7 @@ export const POST = withAdmin(async (request, { user }) => {
   const capability: StepCapability =
     STEP_CAPABILITIES.find((c) => c === body.capability) ?? "read-only";
 
-  const block = await AgentBlock.create({
+  const block = await db.AgentBlock.create({
     key,
     kind,
     name,

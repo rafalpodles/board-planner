@@ -1,12 +1,9 @@
 import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
+import type { ScopedDb } from "@/lib/db-scope";
 import { withProjectAccess } from "@/lib/middleware";
 import { machineMayNotForce, MACHINE_FORCE_REFUSAL } from "@/lib/force-guard";
-import { Task } from "@/models/task";
-import { Comment } from "@/models/comment";
-import { ActivityLog } from "@/models/activityLog";
-import { Notification } from "@/models/notification";
 import {
   toApiExecution,
   updateTask,
@@ -15,8 +12,6 @@ import {
   MAX_EXECUTION_ATTEMPTS,
 } from "@/lib/task-service";
 import { severLinksToDeletedTask } from "@/lib/task-links";
-import { Project } from "@/models/project";
-import { Worker } from "@/models/worker";
 import { ITaskExecution } from "@/types";
 import { withApiExecution } from "@/lib/task-execution-view";
 import {
@@ -27,14 +22,14 @@ import {
 } from "@/lib/task-decisions";
 
 
-export const GET = withProjectAccess(async (_request, { params, user }) => {
+export const GET = withProjectAccess(async (_request, { params, user, db }) => {
   const { projectId, taskId } = await params;
   if (!isValidObjectId(taskId)) {
     return NextResponse.json({ error: "Invalid task id" }, { status: 400 });
   }
   await connectDB();
 
-  const task = await Task.findOne({ _id: taskId, project: projectId })
+  const task = await db.Task.findOne({ _id: taskId, project: projectId })
     // What the panel reads and the schema withholds. Named once, in `task-decisions.ts`, because
     // this route and `recordVerdict` were the two that had to be kept in step and were not.
     .select(DECISION_FIELDS_A_READER_NEEDS)
@@ -49,8 +44,8 @@ export const GET = withProjectAccess(async (_request, { params, user }) => {
 
   // Reverse lookups: who points at this task
   const [blocking, incoming] = await Promise.all([
-    Task.find({ blockedBy: taskId, project: projectId }, "taskNumber title status"),
-    Task.find(
+    db.Task.find({ blockedBy: taskId, project: projectId }, "taskNumber title status"),
+    db.Task.find(
       { "relations.task": taskId, project: projectId },
       "taskNumber title status relations"
     ),
@@ -69,11 +64,11 @@ export const GET = withProjectAccess(async (_request, { params, user }) => {
   );
 
   taskObj.attemptsExhausted = (task.execution?.attempts ?? 0) >= MAX_EXECUTION_ATTEMPTS;
-  taskObj.execution = toApiExecution(task.execution, await workerNamesFor([task.execution]));
+  taskObj.execution = toApiExecution(task.execution, await workerNamesFor(db, [task.execution]));
   // Serialised rather than published raw: the stored record carries `patchSha256` and the
   // settlement attempt count, and the panel renders the liveness of the machine that holds the
   // work — which is a second document.
-  const decider = await deciderOf(task.decision?.workerId);
+  const decider = await deciderOf(db, task.decision?.workerId);
   taskObj.decision = toApiDecision(
     task.decision,
     decider,
@@ -86,26 +81,26 @@ export const GET = withProjectAccess(async (_request, { params, user }) => {
 
 
 /** The machine a refused change is waiting on, for its name and for whether it is still there. */
-async function deciderOf(workerId: string | undefined) {
+async function deciderOf(db: ScopedDb, workerId: string | undefined) {
   if (!workerId || !isValidObjectId(workerId)) return null;
   // `owner` with the two the panel renders, so `mayDecide` can be handed the document rather than
   // reading it again. Passing one WITHOUT `owner` would silently deny the real owner, which is why
   // the field and the call have to move together.
-  return Worker.findById(workerId)
+  return db.Worker.findById(workerId)
     .select("name lastSeenAt owner")
     .lean<{ name?: string; lastSeenAt?: Date | null; owner?: unknown } | null>();
 }
 
 // Only runs still holding a task carry a workerId, so this reads a handful of documents at most —
 // and skips the query entirely when nothing is running.
-async function workerNamesFor(executions: (ITaskExecution | undefined)[]): Promise<Map<string, string>> {
+async function workerNamesFor(db: ScopedDb, executions: (ITaskExecution | undefined)[]): Promise<Map<string, string>> {
   const ids = [...new Set(executions.filter((e) => e?.runId && e.workerId).map((e) => e!.workerId))];
   if (ids.length === 0) return new Map();
-  const workers = await Worker.find({ _id: { $in: ids } }).select("name").lean();
+  const workers = await db.Worker.find({ _id: { $in: ids } }).select("name").lean();
   return new Map(workers.map((w) => [String(w._id), w.name as string]));
 }
 
-export const PUT = withProjectAccess(async (request, { params, user }) => {
+export const PUT = withProjectAccess(async (request, { params, user, db }) => {
   const { projectId, taskId } = await params;
   if (!isValidObjectId(taskId)) {
     return NextResponse.json({ error: "Invalid task id" }, { status: 400 });
@@ -137,7 +132,7 @@ export const PUT = withProjectAccess(async (request, { params, user }) => {
   return NextResponse.json(await withApiExecution(result.data));
 });
 
-export const DELETE = withProjectAccess(async (request, { params, user }) => {
+export const DELETE = withProjectAccess(async (request, { params, user, db }) => {
   const { projectId, taskId } = await params;
   if (!isValidObjectId(taskId)) {
     return NextResponse.json({ error: "Invalid task id" }, { status: 400 });
@@ -160,7 +155,7 @@ export const DELETE = withProjectAccess(async (request, { params, user }) => {
   // fourth writer that takes a task out of a worker's hands and the only one that asked nothing —
   // and it reaches a strictly stronger outcome than the three that do, since the task is not moved
   // but gone, with the comments the run was writing into it (BP-337).
-  const task = await Task.findOne({ _id: taskId, project: projectId })
+  const task = await db.Task.findOne({ _id: taskId, project: projectId })
     .select("execution taskNumber title status")
     .lean();
 
@@ -169,7 +164,7 @@ export const DELETE = withProjectAccess(async (request, { params, user }) => {
   }
 
   if (force !== true) {
-    const project = await Project.findById(projectId, "key").lean();
+    const project = await db.Project.findById(projectId, "key").lean();
     const refusal = await heldRunRefusal(task, project?.key as string | undefined, "delete");
     if (refusal) {
       return NextResponse.json(
@@ -179,12 +174,12 @@ export const DELETE = withProjectAccess(async (request, { params, user }) => {
     }
   }
 
-  await Task.deleteOne({ _id: taskId, project: projectId });
+  await db.Task.deleteOne({ _id: taskId, project: projectId });
 
   await Promise.all([
-    Comment.deleteMany({ task: taskId }),
-    ActivityLog.deleteMany({ task: taskId }),
-    Notification.deleteMany({ task: taskId }),
+    db.Comment.deleteMany({ task: taskId }),
+    db.ActivityLog.deleteMany({ task: taskId }),
+    db.Notification.deleteMany({ task: taskId }),
     severLinksToDeletedTask(
       projectId,
       taskId,

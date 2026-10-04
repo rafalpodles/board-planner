@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
@@ -215,9 +216,9 @@ describe("PUT /api/projects/:projectId/tasks/reorder", () => {
         (w: { updateOne: { filter: unknown } }) => w.updateOne.filter
       );
       expect(filters).toEqual([
-        { _id: id(3), project: PROJECT_ID },
-        { _id: id(1), project: PROJECT_ID },
-        { _id: id(2), project: PROJECT_ID },
+        { _id: id(3), project: PROJECT_ID, tenant: DEFAULT_TENANT_ID },
+        { _id: id(1), project: PROJECT_ID, tenant: DEFAULT_TENANT_ID },
+        { _id: id(2), project: PROJECT_ID, tenant: DEFAULT_TENANT_ID },
       ]);
     });
 

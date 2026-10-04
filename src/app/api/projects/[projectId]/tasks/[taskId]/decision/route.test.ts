@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const mayDecide = vi.fn();
 const recordVerdict = vi.fn();
 const logInstanceAudit = vi.fn();
 const taskFindOne = vi.fn();
-const workerFindById = vi.fn();
+const workerFindOne = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
@@ -25,23 +26,27 @@ vi.mock("@/lib/task-decisions", async (importOriginal) => ({
   toApiDecision,
 }));
 vi.mock("@/models/task", () => ({ Task: { findOne: taskFindOne } }));
-vi.mock("@/models/worker", () => ({ Worker: { findById: workerFindById } }));
+vi.mock("@/models/worker", () => ({ Worker: { findOne: workerFindOne } }));
 // The same shape the status route's mock models: a Bearer is a machine credential, a cookie
 // session is a person. Deriving one from the other is what made the hole in BP-336 inexpressible.
-vi.mock("@/lib/middleware", () => ({
-  withProjectAccess:
-    (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
-    (req: Request, ctx: unknown) =>
-      handler(req, {
-        ...(ctx as object),
-        user: {
-          _id: "u1",
-          username: "owner",
-          role: "member",
-          viaMachineCredential: (req.headers.get("authorization") ?? "").startsWith("Bearer "),
-        },
-      }),
-}));
+vi.mock("@/lib/middleware", async () => {
+  const { scopedToDefaultTenant } = await vi.importActual<typeof import("@/lib/db-scope")>("@/lib/db-scope");
+  return {
+    withProjectAccess:
+      (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
+      (req: Request, ctx: unknown) =>
+        handler(req, {
+          ...(ctx as object),
+          user: {
+            _id: "u1",
+            username: "owner",
+            role: "member",
+            viaMachineCredential: (req.headers.get("authorization") ?? "").startsWith("Bearer "),
+          },
+          db: scopedToDefaultTenant(),
+        }),
+  };
+});
 
 const { GET, POST } = await import("./route");
 
@@ -98,7 +103,7 @@ beforeEach(() => {
   taskWith(decision());
   mayDecide.mockResolvedValue(true);
   recordVerdict.mockResolvedValue({ ok: true, decision: decision({ state: "accepted" }) });
-  workerFindById.mockReturnValue({
+  workerFindOne.mockReturnValue({
     select: () => ({ lean: async () => ({ name: "e2e-macbook-pro", lastSeenAt: new Date() }) }),
   });
 });
@@ -209,7 +214,7 @@ describe("answering a refused change", () => {
     const { req, ctx } = call({ verdict: "accept" });
     await POST(req, ctx);
 
-    expect(taskFindOne).toHaveBeenCalledWith({ _id: TASK_ID, project: "p1" });
+    expect(taskFindOne).toHaveBeenCalledWith({ _id: TASK_ID, project: "p1", tenant: DEFAULT_TENANT_ID });
   });
 
   /**
@@ -413,6 +418,6 @@ describe("reading what is waiting", () => {
     const { req, ctx } = call({});
     await GET(req, ctx);
 
-    expect(taskFindOne).toHaveBeenCalledWith({ _id: TASK_ID, project: "p1" });
+    expect(taskFindOne).toHaveBeenCalledWith({ _id: TASK_ID, project: "p1", tenant: DEFAULT_TENANT_ID });
   });
 });

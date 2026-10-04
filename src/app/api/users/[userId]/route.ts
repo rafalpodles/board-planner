@@ -3,6 +3,7 @@ import { passwordSignInEnabled, passwordSignInOff } from "@/lib/password-sign-in
 import { HydratedDocument, isValidObjectId } from "mongoose";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
+import type { ScopedDb } from "@/lib/db-scope";
 import { MIN_PASSWORD_LENGTH, PASSWORD_COST_FACTOR } from "@/lib/auth";
 import { isValidEmail, normaliseEmail } from "@/lib/email";
 import { logInstanceAudit } from "@/lib/instanceAudit";
@@ -14,23 +15,20 @@ import { clearAccountAttempts } from "@/lib/rate-limit";
 import { duplicateKeyField } from "@/lib/mongo-errors";
 import { withAdmin } from "@/lib/middleware";
 import { boardsLeftWithoutOwner, boardsOnlyOwnedBy } from "@/lib/grants";
-import { Grant } from "@/models/grant";
-import { Identity } from "@/models/identity";
 import { revokeUserCredentials, revokeUserSessions } from "@/lib/session";
-import { User } from "@/models/user";
 import { IUser } from "@/types";
 
 // What "the last admin" counts: an administrator who can still sign in and act (BP-832)
 const ACTIVE_ADMINS = { role: "admin", deactivatedAt: null } as const;
 
-export const PUT = withAdmin(async (request, { params, user: admin }) => {
+export const PUT = withAdmin(async (request, { params, user: admin, db }) => {
   const { userId } = await params;
   await connectDB();
 
   // Deliberately without +password: save() writes a modified path whether or not it was selected,
   // and selecting it makes `required` validate on a legacy row that has no hash — turning a
   // role-only edit into a 500 about a password nobody touched.
-  const target = await User.findById(userId);
+  const target = await db.User.findById(userId);
   if (!target) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
@@ -73,7 +71,7 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
     return NextResponse.json({ error: "One account action at a time, with nothing else" }, { status: 400 });
   }
   if (action) {
-    return accountAction(target, admin, chosen[0][0]);
+    return accountAction(db, target, admin, chosen[0][0]);
   }
 
   const previousRole = target.role;
@@ -103,7 +101,7 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
     // Prevent demoting the last admin
     // A deactivated administrator is no longer one of those keeping the instance administered
     if (body.role === "member" && target.role === "admin" && !target.deactivatedAt) {
-      const adminCount = await User.countDocuments(ACTIVE_ADMINS);
+      const adminCount = await db.User.countDocuments(ACTIVE_ADMINS);
       if (adminCount <= 1) {
         return NextResponse.json(
           { error: "Cannot demote the last admin" },
@@ -151,7 +149,7 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
     // learning about the collision from the index would leave the target signed out of everything
     // over an address that was never stored. The index stays the final arbiter for the race.
     if (email && email !== previousEmail) {
-      const taken = await User.exists({ email, _id: { $ne: target._id } });
+      const taken = await db.User.exists({ email, _id: { $ne: target._id } });
       if (taken) {
         return NextResponse.json(
           { error: "That email is already on another account" },
@@ -195,12 +193,12 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
   // a request racing this one counted this one as still there, as this one counted them (BP-841)
   let demotedHere = false;
   if (demotingAnActiveAdmin) {
-    const demoted = await User.updateOne({ _id: target._id, role: "admin" }, { $set: { role: "member" } });
+    const demoted = await db.User.updateOne({ _id: target._id, role: "admin" }, { $set: { role: "member" } });
     demotedHere = demoted.modifiedCount > 0;
     // Written above, so the save must not write it again over a promotion landing in between
     target.unmarkModified("role");
-    if (demotedHere && (await User.countDocuments(ACTIVE_ADMINS)) === 0) {
-      await User.updateOne({ _id: target._id }, { $set: { role: "admin" } });
+    if (demotedHere && (await db.User.countDocuments(ACTIVE_ADMINS)) === 0) {
+      await db.User.updateOne({ _id: target._id }, { $set: { role: "admin" } });
       return NextResponse.json({ error: "Cannot demote the last admin" }, { status: 409 });
     }
     // A racing request demoted them first and has recorded it; this one changed nothing
@@ -209,7 +207,7 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
   // The demotion is already written, so a request refused or failing after it must take it back:
   // otherwise it stands unrecorded behind an answer saying nothing was done
   const undoDemotion = async () => {
-    if (demotedHere) await User.updateOne({ _id: target._id, role: "member" }, { $set: { role: "admin" } });
+    if (demotedHere) await db.User.updateOne({ _id: target._id, role: "member" }, { $set: { role: "admin" } });
   };
 
   try {
@@ -317,7 +315,7 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
   return NextResponse.json(target);
 });
 
-export const DELETE = withAdmin(async (_request, { params, user: admin }) => {
+export const DELETE = withAdmin(async (_request, { params, user: admin, db }) => {
   const { userId } = await params;
   await connectDB();
 
@@ -338,7 +336,7 @@ export const DELETE = withAdmin(async (_request, { params, user: admin }) => {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
-  const user = await User.findById(userId);
+  const user = await db.User.findById(userId);
   if (!user) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
@@ -370,7 +368,7 @@ export const DELETE = withAdmin(async (_request, { params, user: admin }) => {
   // exactly why it is here: that guard failed once, and an instance with no administrator cannot be
   // repaired from the product.
   if (user.role === "admin" && !user.deactivatedAt) {
-    const adminCount = await User.countDocuments(ACTIVE_ADMINS);
+    const adminCount = await db.User.countDocuments(ACTIVE_ADMINS);
     if (adminCount <= 1) {
       return NextResponse.json(
         { error: "Cannot delete the last admin" },
@@ -396,13 +394,13 @@ export const DELETE = withAdmin(async (_request, { params, user: admin }) => {
   // this one counted this account as still there (BP-841)
   if (!user.deactivatedAt) {
     const markedAt = new Date();
-    const marked = await User.updateOne({ _id: user._id, deactivatedAt: null }, { $set: { deactivatedAt: markedAt } });
+    const marked = await db.User.updateOne({ _id: user._id, deactivatedAt: null }, { $set: { deactivatedAt: markedAt } });
     if (marked.modifiedCount > 0) {
-      const lastAdminGone = user.role === "admin" && (await User.countDocuments(ACTIVE_ADMINS)) === 0;
+      const lastAdminGone = user.role === "admin" && (await db.User.countDocuments(ACTIVE_ADMINS)) === 0;
       const ownerless = lastAdminGone ? [] : await boardsLeftWithoutOwner(String(user._id));
       if (lastAdminGone || ownerless.length > 0) {
         // Only this request's own mark: a deactivation landing meanwhile stays
-        await User.updateOne({ _id: user._id, deactivatedAt: markedAt }, { $set: { deactivatedAt: null } });
+        await db.User.updateOne({ _id: user._id, deactivatedAt: markedAt }, { $set: { deactivatedAt: null } });
         return NextResponse.json(
           {
             error: lastAdminGone
@@ -417,7 +415,7 @@ export const DELETE = withAdmin(async (_request, { params, user: admin }) => {
 
   // The delete's own answer, not a discarded one: two administrators deleting the same account
   // otherwise both hear that they did it, and the checks above are read-then-write.
-  const deleted = await User.findByIdAndDelete(user._id);
+  const deleted = await db.User.findByIdAndDelete(user._id);
   if (!deleted) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
@@ -434,9 +432,9 @@ export const DELETE = withAdmin(async (_request, { params, user: admin }) => {
     detail: user.role === "admin" ? "an administrator" : "a member",
   });
 
-  await Grant.deleteMany({ subject: user._id });
+  await db.Grant.deleteMany({ subject: user._id });
   // A link left behind would refuse the same person's provider as "already linked" for good
-  await Identity.deleteMany({ user: user._id });
+  await db.Identity.deleteMany({ user: user._id });
   await revokeUserSessions(user._id);
 
   return NextResponse.json({ message: "User deleted" });
@@ -448,6 +446,7 @@ export const DELETE = withAdmin(async (_request, { params, user: admin }) => {
  * it, and end every session and link the account has (BP-830). Each alone in its request.
  */
 async function accountAction(
+  db: ScopedDb,
   target: HydratedDocument<IUser>,
   admin: IUser,
   action: "confirm" | "signOut" | "deactivate" | "reactivate"
@@ -477,7 +476,7 @@ async function accountAction(
   if (action === "deactivate") {
     if (target.deactivatedAt) return NextResponse.json({ ok: true });
     // A deactivated administrator administers nothing, so they no longer count towards keeping one
-    if (target.role === "admin" && (await User.countDocuments(ACTIVE_ADMINS)) <= 1) {
+    if (target.role === "admin" && (await db.User.countDocuments(ACTIVE_ADMINS)) <= 1) {
       return NextResponse.json({ error: "Cannot deactivate the last admin" }, { status: 400 });
     }
     // The rule deleting an account keeps: a board owned only by somebody who can do nothing is a
@@ -497,7 +496,7 @@ async function accountAction(
     await target.save();
     // Two administrators, or two co-owners, deactivating each other at once each counted the other
     // as still active; one of them yields rather than leave nobody to run the instance or a board
-    const lastAdminGone = target.role === "admin" && (await User.countDocuments(ACTIVE_ADMINS)) === 0;
+    const lastAdminGone = target.role === "admin" && (await db.User.countDocuments(ACTIVE_ADMINS)) === 0;
     const ownerless = lastAdminGone ? [] : await boardsLeftWithoutOwner(String(target._id));
     if (lastAdminGone || ownerless.length > 0) {
       target.deactivatedAt = null;

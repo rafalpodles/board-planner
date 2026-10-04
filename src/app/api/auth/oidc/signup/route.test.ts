@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const heldSignUp = vi.fn();
 const spendAcceptance = vi.fn();
@@ -88,6 +89,7 @@ describe("POST /api/auth/oidc/signup", () => {
       email: "grace@corp.example",
       emailVerifiedAt: expect.any(Date),
       role: "member",
+      tenant: DEFAULT_TENANT_ID,
     });
     expect(identityCreate).toHaveBeenCalledWith(
       expect.objectContaining({ user: "u9", provider: "oidc", issuer: "https://id.example.com", subject: "s9" })
@@ -168,7 +170,7 @@ describe("POST /api/auth/oidc/signup", () => {
     const res = await post();
 
     expect(res.status).toBe(409);
-    expect(userDeleteOne).toHaveBeenCalledWith({ _id: "u9" });
+    expect(userDeleteOne).toHaveBeenCalledWith({ _id: "u9", tenant: DEFAULT_TENANT_ID });
     expect(createSession).not.toHaveBeenCalled();
   });
 

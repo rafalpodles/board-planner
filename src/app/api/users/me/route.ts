@@ -21,12 +21,11 @@ import {
   sourceKey,
   withLockout,
 } from "@/lib/rate-limit";
-import { User } from "@/models/user";
 
 // Confirmation mails one account may send in the rate limiter's window
 const CONFIRMATIONS_PER_WINDOW = 3;
 
-export const PUT = withAuth(async (request, { user }) => {
+export const PUT = withAuth(async (request, { user, db }) => {
   await connectDB();
 
   // Both siblings answer 400 here rather than throwing a 500 at whoever sent it, and this route
@@ -97,7 +96,7 @@ export const PUT = withAuth(async (request, { user }) => {
           { status: 400 }
         );
       }
-      const record = await User.findById(user._id).select("+password");
+      const record = await db.User.findById(user._id).select("+password");
       if (!record) {
         return NextResponse.json({ error: "User not found" }, { status: 404 });
       }
@@ -137,7 +136,7 @@ export const PUT = withAuth(async (request, { user }) => {
       // audit row saying anything happened. The index stays the final arbiter for a concurrent
       // write; this only stops the common case from being destructive (BP-354 review).
       if (email) {
-        const taken = await User.exists({ email, _id: { $ne: user._id } });
+        const taken = await db.User.exists({ email, _id: { $ne: user._id } });
         if (taken) {
           return NextResponse.json(
             { error: "That email is already on another account" },
@@ -215,7 +214,7 @@ export const PUT = withAuth(async (request, { user }) => {
     // Submitting the address or the name already on the account is a no-op, not a malformed
     // request: it is what a client sending the whole profile back does when neither was touched.
     if (body.email !== undefined || body.fullName !== undefined) {
-      return NextResponse.json(withPending(await User.findById(user._id), pendingEmail));
+      return NextResponse.json(withPending(await db.User.findById(user._id), pendingEmail));
     }
     return NextResponse.json({ error: "No valid fields to update" }, { status: 400 });
   }
@@ -229,7 +228,7 @@ export const PUT = withAuth(async (request, { user }) => {
 
   let updated;
   try {
-    updated = await User.findByIdAndUpdate(
+    updated = await db.User.findByIdAndUpdate(
       user._id,
       { $set: updates },
       { returnDocument: "after" }

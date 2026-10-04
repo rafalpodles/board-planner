@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectAccessOrWorker } from "@/lib/middleware";
-import { AgentRun } from "@/models/agentRun";
 import { toApiRun } from "@/lib/agent-service";
 import { Types } from "mongoose";
 import { AGENT_RUN_OUTCOMES, AgentRunOutcome, IAgentRun } from "@/types";
@@ -11,7 +10,7 @@ const MAX_DETAIL = 2000;
 // worker sends, and short enough that a record cannot be made a sink.
 const MAX_NAME = 200;
 
-export const GET = withProjectAccessOrWorker(async (request, { params }) => {
+export const GET = withProjectAccessOrWorker(async (request, { params, db }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -21,7 +20,7 @@ export const GET = withProjectAccessOrWorker(async (request, { params }) => {
   const asked = Number(url.searchParams.get("limit"));
   const limit = Number.isInteger(asked) && asked > 0 ? Math.min(asked, 100) : 20;
 
-  const runs = await AgentRun.find({ project: projectId })
+  const runs = await db.AgentRun.find({ project: projectId })
     .sort({ finishedAt: -1 })
     .limit(limit)
     .lean();
@@ -29,7 +28,7 @@ export const GET = withProjectAccessOrWorker(async (request, { params }) => {
   return NextResponse.json(runs.map(toApiRun));
 });
 
-export const POST = withProjectAccessOrWorker(async (request, { params, workerId: caller }) => {
+export const POST = withProjectAccessOrWorker(async (request, { params, workerId: caller, db }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -42,18 +41,16 @@ export const POST = withProjectAccessOrWorker(async (request, { params, workerId
 
   // The same cross-project reference BP-314 closed for sprints: a member of one board could
   // otherwise write history naming another board's task or agent.
-  const { Task } = await import("@/models/task");
   if (!Types.ObjectId.isValid(body.taskId)) {
     return NextResponse.json({ error: "taskId is not an id" }, { status: 400 });
   }
-  if (!(await Task.exists({ _id: body.taskId, project: projectId }))) {
+  if (!(await db.Task.exists({ _id: body.taskId, project: projectId }))) {
     return NextResponse.json({ error: "That task is not on this project" }, { status: 400 });
   }
 
   let agentId: string | null = null;
   if (typeof body.agentId === "string" && Types.ObjectId.isValid(body.agentId)) {
-    const { Agent } = await import("@/models/agent");
-    const agent = await Agent.findById(body.agentId, "scope project").lean();
+    const agent = await db.Agent.findById(body.agentId, "scope project").lean();
     const usable = agent && (agent.scope !== "project" || String(agent.project) === String(projectId));
     if (usable) agentId = body.agentId;
   }
@@ -81,7 +78,7 @@ export const POST = withProjectAccessOrWorker(async (request, { params, workerId
   // naming another's run cannot take the place of that machine's own record.
   const runId = workerId && typeof body.runId === "string" ? body.runId : undefined;
   const recorded = () =>
-    AgentRun.findOne({ task: body.taskId, runId, worker: workerId }).lean<IAgentRun>();
+    db.AgentRun.findOne({ task: body.taskId, runId, worker: workerId }).lean<IAgentRun>();
 
   if (runId) {
     const existing = await recorded();
@@ -105,7 +102,7 @@ export const POST = withProjectAccessOrWorker(async (request, { params, workerId
   };
 
   try {
-    const run = await AgentRun.create(record);
+    const run = await db.AgentRun.create(record);
     return NextResponse.json(toApiRun(run.toObject()), { status: 201 });
   } catch (error) {
     const duplicate = (error as { code?: number }).code === 11000;

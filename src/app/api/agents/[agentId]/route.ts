@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { isValidObjectId, Types } from "mongoose";
 import { connectDB } from "@/lib/db";
+import type { ScopedDb } from "@/lib/db-scope";
 import { withAuth } from "@/lib/middleware";
 import { check } from "@/lib/grants";
-import { Agent } from "@/models/agent";
 import { compositionRefusal, toApiAgent } from "@/lib/agent-service";
 import { taskKeyOf } from "@/lib/task-key";
 import { isRunnable, normaliseComposition } from "@/lib/agent-rules";
@@ -38,14 +38,12 @@ interface AgentUses {
  * What still points at this agent. Shared by DELETE and PUT so the two answers cannot drift:
  * emptying an in-use agent is the same act as deleting it.
  */
-async function referencesTo(agentId: Types.ObjectId, user: IUser): Promise<AgentUses> {
-  const { Project } = await import("@/models/project");
-  const { Task } = await import("@/models/task");
-  const projects = await Project.find({ "worker.agent": agentId }, "name key").lean();
-  const total = await Task.countDocuments({ agent: agentId });
+async function referencesTo(db: ScopedDb, agentId: Types.ObjectId, user: IUser): Promise<AgentUses> {
+  const projects = await db.Project.find({ "worker.agent": agentId }, "name key").lean();
+  const total = await db.Task.countDocuments({ agent: agentId });
   // By project first: sorting on the number alone lets one board's low numbers starve another's
   // out of the cap for ever, and leaves ties to whatever order the collection happens to be in.
-  const candidates = await Task.find({ agent: agentId }, "taskNumber project")
+  const candidates = await db.Task.find({ agent: agentId }, "taskNumber project")
     .sort({ project: 1, taskNumber: 1 })
     .limit(TASK_CANDIDATES)
     .populate("project", "key")
@@ -115,13 +113,13 @@ async function mayEdit(user: IUser, agent: { scope: string; owner: unknown; proj
   return user.role === "admin";
 }
 
-export const PUT = withAuth(async (request, { params, user }) => {
+export const PUT = withAuth(async (request, { params, user, db }) => {
   const { agentId } = await params;
   // An id that is not one reaches Mongoose as a CastError and answers 500; this is a 404.
   if (!isValidObjectId(agentId)) return NextResponse.json({ error: "No such record" }, { status: 404 });
   await connectDB();
 
-  const agent = await Agent.findById(agentId);
+  const agent = await db.Agent.findById(agentId);
   if (!agent) return NextResponse.json({ error: "No such agent" }, { status: 404 });
   if (!(await mayEdit(user, agent))) {
     return NextResponse.json({ error: "Not yours to change" }, { status: 403 });
@@ -136,7 +134,7 @@ export const PUT = withAuth(async (request, { params, user }) => {
     if (refusal) return refusal;
     // Same act as deleting it, which DELETE refuses. An agent nothing points at stays a draft.
     if (!isRunnable(composition)) {
-      const uses = await referencesTo(agent._id, user);
+      const uses = await referencesTo(db, agent._id, user);
       if (uses.total > 0) return stillInUse(uses);
     }
     agent.composition = composition;
@@ -144,17 +142,17 @@ export const PUT = withAuth(async (request, { params, user }) => {
 
   await agent.save();
 
-  const saved = await Agent.findById(agent._id).populate("project", "name key").lean();
+  const saved = await db.Agent.findById(agent._id).populate("project", "name key").lean();
   return NextResponse.json(toApiAgent(saved as never));
 });
 
-export const DELETE = withAuth(async (_request, { params, user }) => {
+export const DELETE = withAuth(async (_request, { params, user, db }) => {
   const { agentId } = await params;
   // An id that is not one reaches Mongoose as a CastError and answers 500; this is a 404.
   if (!isValidObjectId(agentId)) return NextResponse.json({ error: "No such record" }, { status: 404 });
   await connectDB();
 
-  const agent = await Agent.findById(agentId);
+  const agent = await db.Agent.findById(agentId);
   if (!agent) return NextResponse.json({ error: "No such agent" }, { status: 404 });
   if (agent.builtIn) {
     return NextResponse.json({ error: "A built-in agent cannot be deleted" }, { status: 400 });
@@ -166,7 +164,7 @@ export const DELETE = withAuth(async (_request, { params, user }) => {
   // A task pointing at a deleted agent is claimed and then handed straight back, three times,
   // before it escalates; a project pointing at one offers a first choice that does not exist.
   // Both are better refused here.
-  const uses = await referencesTo(agent._id, user);
+  const uses = await referencesTo(db, agent._id, user);
   if (uses.total > 0) return stillInUse(uses);
 
   await agent.deleteOne();

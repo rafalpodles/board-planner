@@ -5,7 +5,6 @@ import { renderEmail } from "@/lib/email-template";
 import { withAdmin } from "@/lib/middleware";
 import { selfOrigin } from "@/lib/session";
 import { APP_NAME } from "@/lib/brand";
-import { User } from "@/models/user";
 
 // A mail server refusing AUTH sometimes quotes the offending command back, and that command
 // carries SMTP_PASS. One line, capped, keeps the diagnosis without the credential.
@@ -14,7 +13,7 @@ function firstLine(err: unknown): string {
   return message.split("\n")[0].slice(0, 200);
 }
 
-export const GET = withAdmin(async (_request, { user }) => {
+export const GET = withAdmin(async (_request, { user, db }) => {
   if (user.viaMachineCredential) {
     return NextResponse.json({ error: "Interactive admin session required" }, { status: 403 });
   }
@@ -27,13 +26,13 @@ export const GET = withAdmin(async (_request, { user }) => {
  * turn an authenticated instance into a mailer for arbitrary addresses, and the question this
  * answers — does mail leave this deployment — needs no such field.
  */
-export const POST = withAdmin(async (_request, { user }) => {
+export const POST = withAdmin(async (_request, { user, db }) => {
   if (user.viaMachineCredential) {
     return NextResponse.json({ error: "Interactive admin session required" }, { status: 403 });
   }
 
   await connectDB();
-  const admin = await User.findById(user._id).select("email username");
+  const admin = await db.User.findById(user._id).select("email username");
   const to = admin?.email;
   if (!to) {
     return NextResponse.json(

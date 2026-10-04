@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
+import { scopedToDefaultTenant } from "@/lib/db-scope";
 import { selfOrigin } from "@/lib/session";
 import { providerById } from "@/lib/oidc/providers";
 import { redirectUri } from "@/lib/oidc/flow";
 import { relayOrigin } from "@/lib/oidc/relay";
-import { OidcFlow } from "@/models/oidcFlow";
 
 const EXPIRED_PAGE = `<!doctype html>
 <html lang="en">
@@ -34,6 +34,7 @@ function expired() {
 }
 
 export async function GET(request: Request, { params }: { params: Promise<{ provider: string }> }) {
+  const db = scopedToDefaultTenant();
   if (!relayOrigin()) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const provider = providerById((await params).provider);
   const { search, searchParams } = new URL(request.url);
@@ -44,7 +45,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
   if (!home) return NextResponse.json({ error: "PUBLIC_ORIGIN is not set" }, { status: 500 });
 
   await connectDB();
-  const live = await OidcFlow.exists({ state, provider: provider.id, claims: null, expiresAt: { $gt: new Date() } });
+  const live = await db.OidcFlow.exists({ state, provider: provider.id, claims: null, expiresAt: { $gt: new Date() } });
   if (!live) return expired();
   return NextResponse.redirect(`${redirectUri(provider, home)}${search}`, 303);
 }

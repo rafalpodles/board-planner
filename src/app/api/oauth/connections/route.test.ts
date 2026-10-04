@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const findOneAndDelete = vi.fn();
 const getAuthUser = vi.fn();
@@ -33,6 +34,7 @@ describe("DELETE /api/oauth/connections", () => {
     expect(findOneAndDelete).toHaveBeenCalledWith({
       _id: "507f1f77bcf86cd799439011",
       user: "u1",
+      tenant: DEFAULT_TENANT_ID,
     });
   });
 

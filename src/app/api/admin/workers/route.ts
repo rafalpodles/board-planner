@@ -1,18 +1,17 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withAdmin } from "@/lib/middleware";
-import { Worker } from "@/models/worker";
-import { Task } from "@/models/task";
+import type { ScopedDb } from "@/lib/db-scope";
 import { toApiWorker } from "@/lib/worker-service";
 import { ApiWorkerTask } from "@/types";
 
 // Phase lives on the task, not the worker, so the fleet view has to join the two. A task is only
 // reported while its run still holds it: every exit from the active column clears the run identity,
 // so a stale workerId cannot resurface here as a task the worker is no longer running.
-async function currentTasks(workerIds: string[]): Promise<Map<string, ApiWorkerTask>> {
+async function currentTasks(db: ScopedDb, workerIds: string[]): Promise<Map<string, ApiWorkerTask>> {
   if (workerIds.length === 0) return new Map();
 
-  const tasks = await Task.find({
+  const tasks = await db.Task.find({
     "execution.workerId": { $in: workerIds },
     "execution.runId": { $nin: [null, ""] },
   })
@@ -42,16 +41,16 @@ async function currentTasks(workerIds: string[]): Promise<Map<string, ApiWorkerT
   return byWorker;
 }
 
-export const GET = withAdmin(async () => {
+export const GET = withAdmin(async (_request, { db }) => {
   await connectDB();
 
   // Populated, not left as an id: the fleet console's Owner column exists to answer "whose machine
   // is this", and toApiWorker reads a name off the ref rather than inventing one from the id.
-  const workers = await Worker.find()
+  const workers = await db.Worker.find()
     .populate("owner", "username fullName")
     .sort({ name: 1, host: 1 });
   const now = new Date();
-  const running = await currentTasks(workers.map((worker) => String(worker._id)));
+  const running = await currentTasks(db, workers.map((worker) => String(worker._id)));
 
   return NextResponse.json(
     workers.map((worker) => toApiWorker(worker, now, running.get(String(worker._id))))

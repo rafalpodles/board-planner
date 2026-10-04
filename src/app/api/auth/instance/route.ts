@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
+import { scopedToDefaultTenant } from "@/lib/db-scope";
 import { isDatabaseUnreachable } from "@/lib/db-errors";
 import { databaseUnavailable } from "@/lib/middleware";
-import { User } from "@/models/user";
 import { passwordSignInEnabled } from "@/lib/password-sign-in";
 
 /**
@@ -27,12 +27,13 @@ import { passwordSignInEnabled } from "@/lib/password-sign-in";
  * one to describe as none.
  */
 export async function GET() {
+  const db = scopedToDefaultTenant();
   // Read from the environment, so it is answered even when the database is not: a page that waited
   // on it rendered nothing, and one that guessed showed a password form an off instance refuses
   const passwordSignIn = passwordSignInEnabled();
   try {
     await connectDB();
-    const users = await User.countDocuments();
+    const users = await db.User.countDocuments();
     return NextResponse.json({ unclaimed: users === 0, passwordSignIn });
   } catch (e) {
     // Unreachable is not "unclaimed": answering true here would offer to create the first

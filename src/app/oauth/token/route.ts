@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
 import { Types } from "mongoose";
 import { connectDB } from "@/lib/db";
-import { OAuthClient } from "@/models/oauthClient";
-import { OAuthCode } from "@/models/oauthCode";
-import { OAuthToken } from "@/models/oauthToken";
+import { scopedToDefaultTenant, type ScopedDb } from "@/lib/db-scope";
 import {
   randomToken,
   readFormBody,
@@ -27,6 +25,7 @@ function tokenError(error: string, description: string, status = 400) {
 }
 
 async function issueTokens(
+  db: ScopedDb,
   clientId: string,
   userId: Types.ObjectId,
   scope: string,
@@ -36,7 +35,7 @@ async function issueTokens(
   const refreshToken = randomToken("cprt_");
   const now = Date.now();
 
-  const created = await OAuthToken.create({
+  const created = await db.OAuthToken.create({
     accessTokenHash: sha256(accessToken),
     refreshTokenHash: sha256(refreshToken),
     clientId,
@@ -52,9 +51,9 @@ async function issueTokens(
   // nothing downstream of token issuance ever looks at OAuthClient again. The cascade now deletes
   // the client first specifically so this read is reliable — by the time it can return false, the
   // client is not coming back (BP-747).
-  const clientStillExists = await OAuthClient.exists({ clientId });
+  const clientStillExists = await db.OAuthClient.exists({ clientId });
   if (!clientStillExists) {
-    await OAuthToken.deleteOne({ _id: created._id });
+    await db.OAuthToken.deleteOne({ _id: created._id });
     return tokenError("invalid_grant", "client no longer exists");
   }
 
@@ -71,6 +70,7 @@ async function issueTokens(
 }
 
 export async function POST(req: Request) {
+  const db = scopedToDefaultTenant();
   await connectDB();
   const form = await readFormBody(req);
   if (!form) {
@@ -94,7 +94,7 @@ export async function POST(req: Request) {
     // Claimed in one conditional update, matching the refresh path beside it. Read-then-write
     // let two requests racing the same code both pass the `used` check and both get tokens —
     // and the checks below are what would have rejected the second one (BP-306).
-    const rec = await OAuthCode.findOneAndUpdate(
+    const rec = await db.OAuthCode.findOneAndUpdate(
       { codeHash: sha256(code), used: { $ne: true } },
       { $set: { used: true } },
       { returnDocument: "before" }
@@ -112,7 +112,7 @@ export async function POST(req: Request) {
       return tokenError("invalid_grant", "PKCE verification failed");
     }
 
-    return issueTokens(rec.clientId, rec.user as Types.ObjectId, rec.scope, rec.allowedProjects);
+    return issueTokens(db, rec.clientId, rec.user as Types.ObjectId, rec.scope, rec.allowedProjects);
   }
 
   if (grantType === "refresh_token") {
@@ -126,7 +126,7 @@ export async function POST(req: Request) {
     // Consumed atomically. find-then-delete let two concurrent requests both pass validation and
     // both be issued a pair, so rotation did not rotate and a replayed token was indistinguishable
     // from ordinary concurrency. findOneAndDelete has exactly one winner.
-    const rec = await OAuthToken.findOneAndDelete({
+    const rec = await db.OAuthToken.findOneAndDelete({
       refreshTokenHash: sha256(refreshToken),
       refreshExpiresAt: { $gt: new Date() },
       ...(clientId ? { clientId } : {}),
@@ -138,7 +138,7 @@ export async function POST(req: Request) {
     // Issued only after the old row is gone, so a failure here cannot leave two live pairs. The
     // cost is that a lost response strands this client, which is the safe direction: re-authorising
     // is recoverable, a silently duplicated grant is not.
-    return issueTokens(rec.clientId, rec.user as Types.ObjectId, rec.scope, rec.allowedProjects);
+    return issueTokens(db, rec.clientId, rec.user as Types.ObjectId, rec.scope, rec.allowedProjects);
   }
 
   return tokenError("unsupported_grant_type", `grant_type '${grantType}' is not supported`);

@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
-import { Project } from "@/models/project";
-import { Task } from "@/models/task";
 import { fetchMergeRequests, matchMRsToTasks, parseGitlabRepo } from "@/lib/gitlab";
 import { logActivity } from "@/lib/activity";
 import { decryptSecret } from "@/lib/encryption";
@@ -16,11 +14,11 @@ import {
   writeProviderLinks,
 } from "@/lib/pr-links";
 
-export const POST = withProjectAccess(async (_request, { params, user }) => {
+export const POST = withProjectAccess(async (_request, { params, user, db }) => {
   const { projectId } = await params;
   await connectDB();
 
-  const project = await Project.findById(projectId).lean();
+  const project = await db.Project.findById(projectId).lean();
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
@@ -83,7 +81,7 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
   let autoTransitioned = 0;
 
   for (const [taskNumber, mrs] of mrsByTask) {
-    const task = await Task.findOne({ project: projectId, taskNumber });
+    const task = await db.Task.findOne({ project: projectId, taskNumber });
     if (!task) continue;
 
     const mrDocs = mrs.map((mr) => ({
@@ -118,7 +116,7 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
       // Guarded on the status just read (BP-489's rule): two overlapping syncs both saw the same
       // review column and both logged the move, so one transition wrote two history rows.
       const oldStatus = task.status;
-      const moved = await Task.updateOne(
+      const moved = await db.Task.updateOne(
         { _id: task._id, status: oldStatus },
         { $set: { status: destination } }
       );
@@ -134,7 +132,7 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
   // survived every later sync (BP-610). `provider: null` is not in the query here — an unmarked
   // link is GitHub's, and a GitLab sync must not adopt it.
   if (seenList.length > 0) {
-    const contradicted = await Task.find({
+    const contradicted = await db.Task.find({
       project: projectId,
       linkedPRs: { $elemMatch: { url: { $in: seenList }, provider: "gitlab" } },
     });

@@ -4,15 +4,11 @@ import { isValidProjectKey, PROJECT_KEY_RULE } from "@/lib/identifiers";
 import { connectDB } from "@/lib/db";
 import { withAuth, withAdmin } from "@/lib/middleware";
 import { check, accessibleProjectIds } from "@/lib/grants";
-import { Project } from "@/models/project";
-import { Grant } from "@/models/grant";
 import { legacyFieldSeeds } from "@/lib/legacy-fields";
-import { Task } from "@/models/task";
-import { Sprint } from "@/models/sprint";
 import { sanitizeMcpServers } from "@/lib/pm/config";
 import { sanitizeProjectSecrets } from "@/lib/project-secrets";
 
-export const GET = withAuth(async (_request, { user }) => {
+export const GET = withAuth(async (_request, { user, db }) => {
   await connectDB();
 
   const accessibleIds = await accessibleProjectIds(user);
@@ -20,7 +16,7 @@ export const GET = withAuth(async (_request, { user }) => {
 
   // Manual order first; anything never dragged keeps its default 0 and falls
   // back to newest-first, which is the order this list had before CP-180
-  const projects = await Project.find(filter)
+  const projects = await db.Project.find(filter)
     .populate("createdBy", "username fullName")
     .sort({ sortOrder: 1, createdAt: -1 });
 
@@ -29,7 +25,7 @@ export const GET = withAuth(async (_request, { user }) => {
   // $lookup with an inline pipeline, which needs MongoDB 5.0.
   const ids = projects.map((p) => p._id);
   const [taskStats, activeSprints] = await Promise.all([
-    Task.aggregate([
+    db.Task.aggregate([
       { $match: { project: { $in: ids } } },
       {
         $group: {
@@ -38,7 +34,7 @@ export const GET = withAuth(async (_request, { user }) => {
         },
       },
     ]),
-    Sprint.find({ project: { $in: ids }, status: "active" }).select("project").lean(),
+    db.Sprint.find({ project: { $in: ids }, status: "active" }).select("project").lean(),
   ]);
 
   const statsByProject = new Map(taskStats.map((s) => [String(s._id), s]));
@@ -58,7 +54,7 @@ export const GET = withAuth(async (_request, { user }) => {
   return NextResponse.json(sanitized);
 });
 
-export const POST = withAdmin(async (request, { user }) => {
+export const POST = withAdmin(async (request, { user, db }) => {
   await connectDB();
   const body = await request.json();
   const { name, key, description } = body;
@@ -78,7 +74,7 @@ export const POST = withAdmin(async (request, { user }) => {
 
   let project;
   try {
-    project = await Project.create({
+    project = await db.Project.create({
       name,
       key: storedKey,
       description: description || "",
@@ -98,7 +94,7 @@ export const POST = withAdmin(async (request, { user }) => {
   }
 
   try {
-    await Grant.create({
+    await db.Grant.create({
       subject: user._id,
       relation: "owner",
       objectType: "project",
@@ -106,7 +102,7 @@ export const POST = withAdmin(async (request, { user }) => {
       createdBy: user._id,
     });
   } catch (e) {
-    await Project.deleteOne({ _id: project._id });
+    await db.Project.deleteOne({ _id: project._id });
     throw e;
   }
 

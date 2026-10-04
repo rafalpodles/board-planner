@@ -1,20 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const findById = vi.fn();
-const findByIdAndUpdate = vi.fn();
+const findOne = vi.fn();
+const findOneAndUpdate = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/user", () => ({
   User: {
-    findById: (...a: unknown[]) => findById(...a),
-    findByIdAndUpdate: (...a: unknown[]) => findByIdAndUpdate(...a),
+    findOne: (...a: unknown[]) => findOne(...a),
+    findOneAndUpdate: (...a: unknown[]) => findOneAndUpdate(...a),
   },
 }));
 let caller: { _id: string; viaMachineCredential?: boolean } = { _id: "u1" };
 vi.mock("@/lib/middleware", () => ({
   withAuth:
-    (handler: (req: Request, ctx: { user: typeof caller }) => unknown) => (req: Request) =>
-      handler(req, { user: caller }),
+    (handler: (req: Request, ctx: { user: typeof caller; db: unknown }) => unknown) => (req: Request) =>
+      handler(req, { user: caller, db: scopedToDefaultTenant() }),
 }));
 vi.mock("@/lib/encryption", () => ({
   encryptSecret: (v: string) => `enc:${v}`,
@@ -32,12 +32,13 @@ vi.mock("@/lib/url-validation", () => ({
 
 const { GET, PUT } = await import("@/app/api/users/me/notifications/route");
 const { NOTIFICATION_TYPES } = await import("@/types");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 
 const grid = (chat: boolean) =>
   Object.fromEntries(NOTIFICATION_TYPES.map((t) => [t, { inApp: true, email: true, chat }]));
 
 function stored(notifications: unknown) {
-  findById.mockReturnValue({ lean: async () => ({ _id: "u1", notifications }) });
+  findOne.mockReturnValue({ lean: async () => ({ _id: "u1", notifications }) });
 }
 
 // withAuth is mocked to a one-argument handler; the real signature takes the context too
@@ -46,14 +47,14 @@ const put = (body: unknown) =>
     new Request("http://x/api/users/me/notifications", { method: "PUT", body: JSON.stringify(body) })
   );
 
-const written = () => findByIdAndUpdate.mock.calls.at(-1)?.[1].$set as Record<string, unknown>;
+const written = () => findOneAndUpdate.mock.calls.at(-1)?.[1].$set as Record<string, unknown>;
 
 const CONNECTED = { chat: { kind: "slack", webhookUrl: "enc:x" }, projects: [] };
 
 beforeEach(() => {
-  findById.mockReset();
-  findByIdAndUpdate.mockReset();
-  findByIdAndUpdate.mockResolvedValue({});
+  findOne.mockReset();
+  findOneAndUpdate.mockReset();
+  findOneAndUpdate.mockResolvedValue({});
   caller = { _id: "u1" };
   stored(CONNECTED);
   mailServer = true;
@@ -67,7 +68,7 @@ describe("what the screen is told about mail", () => {
       new Request("http://x/api/users/me/notifications")
     )).json();
   const account = (email: string) =>
-    findById.mockReturnValue({ lean: async () => ({ _id: "u1", email, notifications: CONNECTED }) });
+    findOne.mockReturnValue({ lean: async () => ({ _id: "u1", email, notifications: CONNECTED }) });
 
   it("says whether the instance has a mail server and the account an address", async () => {
     account("someone@example.com");
@@ -81,7 +82,7 @@ describe("what the screen is told about mail", () => {
   it("reads the address it reports on", async () => {
     account("someone@example.com");
     await get();
-    expect(findById.mock.calls.at(-1)?.[1]).toMatch(/\bemail\b/);
+    expect(findOne.mock.calls.at(-1)?.[1]).toMatch(/\bemail\b/);
   });
 });
 
@@ -131,14 +132,14 @@ describe("the truth table for the chat connection", () => {
     const res = await put({ chat: { kind: "discord" } });
 
     expect(res.status).toBe(400);
-    expect(findByIdAndUpdate).not.toHaveBeenCalled();
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it("refuses an address with no service rather than storing one nothing reads", async () => {
     const res = await put({ chat: { webhookUrl: "https://hooks.example/x" } });
 
     expect(res.status).toBe(400);
-    expect(findByIdAndUpdate).not.toHaveBeenCalled();
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -149,7 +150,7 @@ describe("the truth table for the chat connection", () => {
     const res = await put({ chat: value });
 
     expect(res.status).toBe(400);
-    expect(findByIdAndUpdate).not.toHaveBeenCalled();
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   // The trap one shape over from the one above: an object that names nothing is a partial update,
@@ -216,7 +217,7 @@ describe("who may change notification preferences", () => {
     const res = await put(body);
 
     expect(res.status).toBe(403);
-    expect(findByIdAndUpdate).not.toHaveBeenCalled();
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   // Refusing before anything is read also means a machine credential cannot use the validation
@@ -227,7 +228,7 @@ describe("who may change notification preferences", () => {
     const res = await put({ chat: { kind: "slack", webhookUrl: "http://169.254.169.254/x" } });
 
     expect(res.status).toBe(403);
-    expect(findById).not.toHaveBeenCalled();
+    expect(findOne).not.toHaveBeenCalled();
   });
 });
 
@@ -238,6 +239,6 @@ describe("where a personal chat connection may point", () => {
     expect(isAllowed).toHaveBeenCalledWith("http://10.0.0.5/hook", DESTINATION);
     expect(res.status).toBe(400);
     expect((await res.json()).error).toBe("refused");
-    expect(findByIdAndUpdate).not.toHaveBeenCalled();
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 });

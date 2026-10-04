@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
-const findById = vi.fn();
 const findOne = vi.fn();
 const findOneAndUpdate = vi.fn();
 const exists = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
-vi.mock("@/models/project", () => ({ Project: { findById, findOne, findOneAndUpdate, exists } }));
+vi.mock("@/models/project", () => ({ Project: { findOne, findOneAndUpdate, exists } }));
 const logProjectAudit = vi.fn();
 vi.mock("@/lib/projectAudit", () => ({ logProjectAudit }));
 vi.mock("@/lib/project-secrets", () => ({
@@ -21,9 +21,10 @@ vi.mock("@/lib/middleware", () => ({
   withProjectOwner:
     (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
     (req: Request, ctx: unknown) =>
-      handler(req, { ...(ctx as object), user: { _id: "owner1" } }),
+      handler(req, { ...(ctx as object), user: { _id: "owner1" }, db: scopedToDefaultTenant() }),
 }));
 
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 const { POST, PUT, DELETE } = await import("./route");
 
 function request(method: string, body?: unknown) {
@@ -58,9 +59,12 @@ beforeEach(() => {
   vi.clearAllMocks();
   // Answers, rather than being left undefined, so the three assertions below fail on the
   // assertion itself if a writer starts loading the project — not on a crash inside the route.
-  findById.mockResolvedValue(projectDoc([webhook]));
   findOneAndUpdate.mockImplementation(() => query(projectDoc([webhook])));
-  findOne.mockReturnValue({ lean: () => Promise.resolve({ webhooks: [webhook] }) });
+  findOne.mockImplementation((filter: Record<string, unknown>) =>
+    Object.keys(filter).sort().join() === "_id,tenant"
+      ? Promise.resolve(projectDoc([webhook]))
+      : { lean: () => Promise.resolve({ webhooks: [webhook] }) }
+  );
 });
 
 describe("POST /api/projects/:projectId/webhooks", () => {
@@ -69,7 +73,7 @@ describe("POST /api/projects/:projectId/webhooks", () => {
 
     expect(res.status).toBe(201);
     expect(findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: "p1", "webhooks.19": { $exists: false } },
+      { _id: "p1", "webhooks.19": { $exists: false }, tenant: DEFAULT_TENANT_ID },
       {
         $push: {
           webhooks: { url: "https://hooks.example.com/b", events: expect.any(Array), enabled: true },
@@ -95,7 +99,7 @@ describe("POST /api/projects/:projectId/webhooks", () => {
   it("never calls Project.findById, the load half of load-mutate-save", async () => {
     await POST(request("POST", { url: "https://hooks.example.com/b" }), ctx());
 
-    expect(findById).not.toHaveBeenCalled();
+    expect(findOne).not.toHaveBeenCalled();
   });
 
   it("404s when the project does not exist", async () => {
@@ -159,7 +163,7 @@ describe("PUT /api/projects/:projectId/webhooks", () => {
 
     expect(res.status).toBe(200);
     expect(findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: "p1", "webhooks._id": W1 },
+      { _id: "p1", "webhooks._id": W1, tenant: DEFAULT_TENANT_ID },
       {
         $set: {
           "webhooks.$.url": "https://hooks.example.com/c",
@@ -173,7 +177,7 @@ describe("PUT /api/projects/:projectId/webhooks", () => {
   it("never calls Project.findById, the load half of load-mutate-save", async () => {
     await PUT(request("PUT", { webhookId: W1, enabled: false }), ctx());
 
-    expect(findById).not.toHaveBeenCalled();
+    expect(findOne).not.toHaveBeenCalled();
   });
 
   it("404s when the id matches no webhook on this project", async () => {
@@ -191,7 +195,7 @@ describe("DELETE /api/projects/:projectId/webhooks", () => {
 
     expect(res.status).toBe(200);
     expect(findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: "p1" },
+      { _id: "p1", tenant: DEFAULT_TENANT_ID },
       { $pull: { webhooks: { _id: W1 } } },
       { returnDocument: "before" }
     );
@@ -200,7 +204,7 @@ describe("DELETE /api/projects/:projectId/webhooks", () => {
   it("never calls Project.findById, the load half of load-mutate-save", async () => {
     await DELETE(request("DELETE", { webhookId: W1 }), ctx());
 
-    expect(findById).not.toHaveBeenCalled();
+    expect(findOne).not.toHaveBeenCalled();
   });
 
   it("404s when the project does not exist", async () => {
@@ -313,7 +317,7 @@ describe("an id sent in upper case", () => {
 
     expect(res.status).toBe(200);
     expect(findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: "p1", "webhooks._id": W1 },
+      { _id: "p1", "webhooks._id": W1, tenant: DEFAULT_TENANT_ID },
       { $set: { "webhooks.$.enabled": false } },
       { returnDocument: "before" }
     );
@@ -326,7 +330,7 @@ describe("an id sent in upper case", () => {
     await DELETE(request("DELETE", { webhookId: W1.toUpperCase() }), ctx());
 
     expect(findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: "p1" },
+      { _id: "p1", tenant: DEFAULT_TENANT_ID },
       { $pull: { webhooks: { _id: W1 } } },
       { returnDocument: "before" }
     );

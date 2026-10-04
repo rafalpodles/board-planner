@@ -1,18 +1,15 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
-import { Task } from "@/models/task";
 import { columnIdsWithRole } from "@/lib/columns";
 import { normalizeOptions } from "@/lib/custom-fields";
-import { Project } from "@/models/project";
-import { User } from "@/models/user";
 import { TASK_STATUSES } from "@/types";
 import mongoose from "mongoose";
 
 const WEEK_MS = 7 * 86400000;
 const WEEKS = 8;
 
-export const GET = withProjectAccess(async (_request, { params }) => {
+export const GET = withProjectAccess(async (_request, { params, db }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -25,7 +22,7 @@ export const GET = withProjectAccess(async (_request, { params }) => {
 
   // Difficulty is an ordinary project field since CP-213. Reading the old column
   // here would report values frozen at the moment CP-214 removed the dual-write.
-  const project = await Project.findById(projectId, "customFields columns").lean();
+  const project = await db.Project.findById(projectId, "customFields columns").lean();
   const difficultyField = (project?.customFields || []).find(
     (f) => f.name.toLowerCase() === "difficulty"
   );
@@ -48,7 +45,7 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   const difficultyPath = difficultyField ? `$customFieldValues.${difficultyField._id}` : null;
 
   const [breakdowns, recentTasks, fieldUsage] = await Promise.all([
-    Task.aggregate([
+    db.Task.aggregate([
       { $match: { project: projectOid } },
       {
         $group: {
@@ -62,7 +59,7 @@ export const GET = withProjectAccess(async (_request, { params }) => {
         },
       },
     ]),
-    Task.find(
+    db.Task.find(
       {
         project: projectOid,
         $or: [
@@ -74,7 +71,7 @@ export const GET = withProjectAccess(async (_request, { params }) => {
     ).lean(),
     // What "used by N tasks" costs before a field is deleted. $objectToArray keeps this
     // to operators MongoDB 4.4 has.
-    Task.aggregate([
+    db.Task.aggregate([
       { $match: { project: projectOid } },
       { $project: { pairs: { $objectToArray: { $ifNull: ["$customFieldValues", {}] } } } },
       { $unwind: "$pairs" },
@@ -117,7 +114,7 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   }
   const assigneeIds = [...assigneeCounts.keys()].filter(Boolean);
   const users = assigneeIds.length
-    ? await User.find({ _id: { $in: assigneeIds } }, "fullName username").lean()
+    ? await db.User.find({ _id: { $in: assigneeIds } }, "fullName username").lean()
     : [];
   const nameById = new Map(
     users.map((u) => [u._id.toString(), u.fullName || u.username])

@@ -1,7 +1,6 @@
 import { after, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectOwner } from "@/lib/middleware";
-import { Project } from "@/models/project";
 import { isPmRunnable, pmDisabledReason } from "@/lib/pm/gate";
 import { isPmAvailable } from "@/lib/pm/config";
 import { getPmUser } from "@/lib/pm/pm-user";
@@ -16,7 +15,7 @@ export const maxDuration = 300;
  * review still happens. An owner switching the review on otherwise waited for the clock to learn
  * what it would say (BP-471).
  */
-export const POST = withProjectOwner(async (_request, { params, user }) => {
+export const POST = withProjectOwner(async (_request, { params, user, db }) => {
   // It spends the project's turn and token budget, which a person should decide to do
   if (user.viaMachineCredential) {
     return NextResponse.json({ error: "This action requires an interactive session" }, { status: 403 });
@@ -29,7 +28,7 @@ export const POST = withProjectOwner(async (_request, { params, user }) => {
   const { projectId } = await params;
   await connectDB();
 
-  const project = await Project.findById(projectId, "key pm").lean();
+  const project = await db.Project.findById(projectId, "key pm").lean();
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
   if (!isPmRunnable(project.pm)) {
     return NextResponse.json({ error: pmDisabledReason(project.pm) }, { status: 409 });

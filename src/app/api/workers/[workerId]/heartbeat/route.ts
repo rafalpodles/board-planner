@@ -2,8 +2,6 @@ import { NextResponse } from "next/server";
 import { readJsonBody } from "@/lib/request-body";
 import { connectDB } from "@/lib/db";
 import { withWorker, protocolOf } from "@/lib/middleware";
-import { Project } from "@/models/project";
-import { Worker } from "@/models/worker";
 import { RepoReport } from "@/lib/repo-match";
 import { WorkerHalt, WorkerPreflight, WorkerPreflightCheck } from "@/types";
 import { assignmentsFor, ownerReachableProjectIds, overriddenWorkerPolicy, touchWorker, usableRepos } from "@/lib/worker-service";
@@ -113,7 +111,7 @@ function reportedHalt(value: unknown): WorkerHalt | null {
 
 // The only path guaranteed to survive SSE loss, so it carries both the abort
 // verdict and the command acknowledgement
-export const POST = withWorker(async (request, { worker }) => {
+export const POST = withWorker(async (request, { worker, db }) => {
   const read = await readJsonBody<Record<string, unknown>>(request, MAX_HEARTBEAT_BYTES);
   // Oversized is refused; unreadable stays what it always was, a heartbeat with nothing to report
   if (!read.ok && read.reason === "too-large") return read.response;
@@ -146,12 +144,12 @@ export const POST = withWorker(async (request, { worker }) => {
   // has nothing — overwriting the stored inventory with [] would silently unassign it.
   await connectDB();
   if (repos) {
-    await Worker.updateOne({ _id: worker._id }, { $set: { repos } });
+    await db.Worker.updateOne({ _id: worker._id }, { $set: { repos } });
   }
 
   // Two worker processes on one machine must not share a working tree, and the same decision has to
   // hold at claim time — so it is made in worker-service and used by both this route and verdictFor.
-  const others = await Worker.find({ _id: { $ne: worker._id } }).select(
+  const others = await db.Worker.find({ _id: { $ne: worker._id } }).select(
     "_id name host repos enabled lastSeenAt createdAt"
   );
   const inventory = usableRepos(
@@ -168,7 +166,7 @@ export const POST = withWorker(async (request, { worker }) => {
   );
 
   const [projects, reachable] = await Promise.all([
-    Project.find(PROJECT_RUNS_WORKERS_QUERY)
+    db.Project.find(PROJECT_RUNS_WORKERS_QUERY)
       .select("_id key name repositoryUrl githubRepo gitlabRepo gitlabHost worker")
       .lean(),
     ownerReachableProjectIds(worker),

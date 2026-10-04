@@ -9,9 +9,6 @@ import { inviteToBoard, recordDelivery } from "@/lib/invitations";
 import { deliverTo, INTERACTIVE_ONLY, NO_ORIGIN_ERROR } from "@/lib/invitation-mail";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { logProjectAudit } from "@/lib/projectAudit";
-import { Invitation } from "@/models/invitation";
-import { Project } from "@/models/project";
-import { User } from "@/models/user";
 import { ApiBoardInvitation, GRANT_RELATIONS, GrantRelation } from "@/types";
 
 // Each one may send mail to an address the sender chooses, so an owner gets a budget, not a hose;
@@ -19,18 +16,18 @@ import { ApiBoardInvitation, GRANT_RELATIONS, GrantRelation } from "@/types";
 const INVITES_PER_OWNER = 30;
 const INVITES_PER_ADDRESS = 5;
 
-export const GET = withProjectOwner(async (_request, { params, user }) => {
+export const GET = withProjectOwner(async (_request, { params, user, db }) => {
   if (user.viaMachineCredential) {
     return NextResponse.json({ error: INTERACTIVE_ONLY }, { status: 403 });
   }
   const { projectId } = await params;
   await connectDB();
-  const pending = await Invitation.find({ status: "pending", "boards.project": projectId })
+  const pending = await db.Invitation.find({ status: "pending", "boards.project": projectId })
     .sort({ createdAt: -1 })
     .lean();
   const [held, adders] = await Promise.all([
-    User.find({ email: { $in: pending.map((i) => i.email) } }).select("email").lean(),
-    User.find({
+    db.User.find({ email: { $in: pending.map((i) => i.email) } }).select("email").lean(),
+    db.User.find({
       _id: { $in: pending.flatMap((i) => i.boards.map((b) => b.addedBy)) },
     })
       .select("username")
@@ -59,7 +56,7 @@ export const GET = withProjectOwner(async (_request, { params, user }) => {
   return NextResponse.json(rows);
 });
 
-export const POST = withProjectOwner(async (request, { params, user }) => {
+export const POST = withProjectOwner(async (request, { params, user, db }) => {
   if (user.viaMachineCredential) {
     return NextResponse.json({ error: INTERACTIVE_ONLY }, { status: 403 });
   }
@@ -88,13 +85,13 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
   if (!origin) return NextResponse.json({ error: NO_ORIGIN_ERROR }, { status: 500 });
 
   await connectDB();
-  const project = await Project.findById(projectId).select("key name").lean();
+  const project = await db.Project.findById(projectId).select("key name").lean();
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
   // Spent before the account check, so the answer to "does this address have an account" is
   // budgeted like everything else this route answers
   await recordFailedAttempt(ownerKey);
-  if (await User.exists({ email })) {
+  if (await db.User.exists({ email })) {
     return NextResponse.json(
       { error: "That address already has an account. Add them by username above." },
       { status: 409 }
@@ -117,7 +114,7 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
   });
 
   if (outcome.kind === "held") {
-    const inviter = await User.findById(outcome.invitedBy).select("username deactivatedAt").lean();
+    const inviter = await db.User.findById(outcome.invitedBy).select("username deactivatedAt").lean();
     // Nobody joins through a lapsed invitation, so waiting for them to join would be waiting for ever.
     // Only an administrator resends; its sender, while active, can withdraw their own board
     const from = inviter ? ` from ${inviter.username}` : "";

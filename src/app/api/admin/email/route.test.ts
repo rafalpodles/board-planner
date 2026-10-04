@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const getAuthUser = vi.fn();
-const userFindById = vi.fn();
+const userFindOne = vi.fn();
 const sendEmailOrThrow = vi.fn();
 const emailSettingsSummary = vi.fn();
 
@@ -20,7 +20,7 @@ vi.mock("@/lib/email", () => ({
     }
   },
 }));
-vi.mock("@/models/user", () => ({ User: { findById: userFindById } }));
+vi.mock("@/models/user", () => ({ User: { findOne: userFindOne } }));
 
 const { GET, POST } = await import("./route");
 
@@ -29,7 +29,7 @@ const ctx = () => ({ params: Promise.resolve({}) });
 const req = () => new Request("http://x/api/admin/email", { method: "POST" });
 
 function adminRecord(email: string | undefined) {
-  userFindById.mockReturnValue({ select: () => Promise.resolve(email ? { email } : {}) });
+  userFindOne.mockReturnValue({ select: () => Promise.resolve(email ? { email } : {}) });
 }
 
 beforeEach(() => {

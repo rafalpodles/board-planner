@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const getAuthUser = vi.fn();
 const accessibleProjectIds = vi.fn();
 const ownerReachableProjectIds = vi.fn();
-const workerFindById = vi.fn();
+const workerFindOne = vi.fn();
 const workerFindOthers = vi.fn();
 const workerUpdateOne = vi.fn();
 const projectFind = vi.fn();
@@ -42,7 +43,7 @@ vi.mock("@/models/project", () => ({
 }));
 vi.mock("@/models/worker", () => ({
   Worker: {
-    findById: () => ({ select: workerFindById }),
+    findOne: () => ({ select: workerFindOne }),
     find: () => ({ select: workerFindOthers }),
     updateOne: workerUpdateOne,
   },
@@ -83,7 +84,7 @@ beforeEach(() => {
   getAuthUser.mockResolvedValue(OWNER);
   accessibleProjectIds.mockResolvedValue(null);
   ownerReachableProjectIds.mockResolvedValue(null);
-  workerFindById.mockResolvedValue({
+  workerFindOne.mockResolvedValue({
     _id: WORKER_ID,
     name: "rig-mac",
     host: "mac.home",
@@ -151,7 +152,7 @@ describe("PUT the selection", () => {
 
     expect(response.status).toBe(200);
     expect(workerUpdateOne).toHaveBeenCalledWith(
-      { _id: WORKER_ID },
+      { _id: WORKER_ID, tenant: DEFAULT_TENANT_ID },
       { $set: { desiredProjects: [SERVED] } }
     );
   });
@@ -163,7 +164,7 @@ describe("PUT the selection", () => {
     const json = await (await PUT(putRequest({ projects: [SERVED, OFF] }), ctx())).json();
 
     expect(projectUpdateOne).toHaveBeenCalledWith(
-      { _id: OFF },
+      { _id: OFF, tenant: DEFAULT_TENANT_ID },
       { $set: { "worker.enabled": true } }
     );
     expect(logInstanceAudit).toHaveBeenCalledWith(
@@ -203,7 +204,7 @@ describe("PUT the selection", () => {
     const json = await (await PUT(putRequest({ projects: [SERVED, OFF] }), ctx())).json();
 
     expect(projectUpdateOne).toHaveBeenCalledWith(
-      { _id: OFF },
+      { _id: OFF, tenant: DEFAULT_TENANT_ID },
       { $set: { "worker.enabled": true } }
     );
     expect(logInstanceAudit).toHaveBeenCalledWith(
@@ -246,7 +247,7 @@ describe("PUT the selection", () => {
     await PUT(putRequest({ projects: [] }), ctx());
 
     expect(workerUpdateOne).toHaveBeenCalledWith(
-      { _id: WORKER_ID },
+      { _id: WORKER_ID, tenant: DEFAULT_TENANT_ID },
       { $set: { desiredProjects: [] } }
     );
   });

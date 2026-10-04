@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
@@ -75,7 +76,11 @@ describe("POST /api/projects/[projectId]/pm/mcp-oauth/disconnect — what it wri
 
     expect(res.status).toBe(200);
     expect(projectFindOneAndUpdate).toHaveBeenCalledWith(
-      { _id: PROJECT_ID, "pm.mcpServers": { $elemMatch: { name: "srv", oauth: { $exists: true, $ne: null } } } },
+      {
+        _id: PROJECT_ID,
+        "pm.mcpServers": { $elemMatch: { name: "srv", oauth: { $exists: true, $ne: null } } },
+        tenant: DEFAULT_TENANT_ID,
+      },
       {
         $set: {
           "pm.mcpServers.$.oauth.accessToken": "",

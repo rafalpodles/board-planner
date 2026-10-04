@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import sift from "sift";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const getAuthUser = vi.fn();
 const workerRows: Record<string, unknown>[] = [];
@@ -39,6 +40,7 @@ function machine(over: Record<string, unknown> = {}) {
     host: "ada.local",
     version: "1.1.3",
     owner: READER,
+    tenant: DEFAULT_TENANT_ID,
     enabled: true,
     lastSeenAt: recently(),
     repos: [{ remote: "git@github.com:acme/orbit.git", path: "/Users/ada/orbit" }],

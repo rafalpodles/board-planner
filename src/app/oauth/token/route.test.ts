@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const findOneAndDelete = vi.fn();
 const create = vi.fn();
@@ -115,9 +116,9 @@ describe("POST /oauth/token — the client is deleted mid-refresh", () => {
 
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ error: "invalid_grant" });
-    expect(clientExists).toHaveBeenCalledWith({ clientId: "client-x" });
+    expect(clientExists).toHaveBeenCalledWith({ clientId: "client-x", tenant: DEFAULT_TENANT_ID });
     // The row created moments before must not survive as a live, unrevocable credential.
-    expect(deleteOne).toHaveBeenCalledWith({ _id: "orphan-candidate" });
+    expect(deleteOne).toHaveBeenCalledWith({ _id: "orphan-candidate", tenant: DEFAULT_TENANT_ID });
   });
 
   it("still issues the pair when the client exists at the check", async () => {

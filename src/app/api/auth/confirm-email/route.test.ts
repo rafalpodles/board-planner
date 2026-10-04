@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const consumeEmailChange = vi.fn();
 const releaseEmailChange = vi.fn();
 const invalidateResetTokens = vi.fn();
 const logInstanceAudit = vi.fn();
 const notifyAddressChanged = vi.fn();
-const userFindById = vi.fn();
+const userFindOne = vi.fn();
 const userUpdateOne = vi.fn();
 const userExists = vi.fn();
 
@@ -24,7 +25,7 @@ vi.mock("@/lib/security-mail", () => ({ notifyAddressChanged }));
 const provenanceRefusal = vi.fn();
 vi.mock("@/lib/session", () => ({ provenanceRefusal }));
 vi.mock("@/models/user", () => ({
-  User: { findById: userFindById, updateOne: userUpdateOne, exists: userExists },
+  User: { findOne: userFindOne, updateOne: userUpdateOne, exists: userExists },
 }));
 
 const { POST } = await import("./route");
@@ -44,7 +45,7 @@ beforeEach(async () => {
   vi.clearAllMocks();
   await resetRateLimits();
   consumeEmailChange.mockResolvedValue({ ok: true, userId: "u1", email: "new@example.com", claimedAt: CLAIMED });
-  userFindById.mockReturnValue({
+  userFindOne.mockReturnValue({
     select: () => Promise.resolve({ _id: "u1", username: "owner", kind: "human", email: "old@example.com" }),
   });
   userExists.mockResolvedValue(null);
@@ -62,7 +63,7 @@ describe("POST /api/auth/confirm-email", () => {
     expect(await response.json()).toEqual({ ok: true, email: "new@example.com" });
     // Confirming is what proves the address, which is what a sign-in provider links by (BP-828)
     expect(userUpdateOne).toHaveBeenCalledWith(
-      { _id: "u1" },
+      { _id: "u1", tenant: DEFAULT_TENANT_ID },
       { $set: { email: "new@example.com", emailVerifiedAt: expect.any(Date) } }
     );
     expect(invalidateResetTokens).toHaveBeenCalledWith("u1");
@@ -117,7 +118,7 @@ describe("POST /api/auth/confirm-email", () => {
   });
 
   it("refuses a machine account", async () => {
-    userFindById.mockReturnValue({
+    userFindOne.mockReturnValue({
       select: () => Promise.resolve({ _id: "u1", username: "worker-x", kind: "machine", email: "" }),
     });
 

@@ -2,9 +2,8 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withAuth } from "@/lib/middleware";
 import { accessibleProjectIds } from "@/lib/grants";
-import { Notification } from "@/models/notification";
 
-export const GET = withAuth(async (request, { user }) => {
+export const GET = withAuth(async (request, { user, db }) => {
   await connectDB();
 
   const url = new URL(request.url);
@@ -24,7 +23,7 @@ export const GET = withAuth(async (request, { user }) => {
     filter.createdAt = { $lt: new Date(before) };
   }
 
-  const notifications = await Notification.find(filter)
+  const notifications = await db.Notification.find(filter)
     .sort({ createdAt: -1 })
     .limit(limit)
     .populate("actor", "username fullName")

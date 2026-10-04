@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess, withProjectOwner } from "@/lib/middleware";
-import { Project } from "@/models/project";
 import { logProjectAudit } from "@/lib/projectAudit";
 import {
   CATEGORY_NAME_MAX_LENGTH,
@@ -63,7 +62,7 @@ function templateProblem(
   return null;
 }
 
-export const POST = withProjectAccess(async (request, { params, user }) => {
+export const POST = withProjectAccess(async (request, { params, user, db }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -74,7 +73,7 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
     return NextResponse.json({ error: "Template name is required" }, { status: 400 });
   }
 
-  const project = await Project.findById(projectId);
+  const project = await db.Project.findById(projectId);
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
@@ -89,7 +88,7 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
 
   // The ceiling in the write's own filter rather than a count read above it, for the reason the
   // categories route gives: every racer sees the same pre-write length (BP-716).
-  const added = await Project.findOneAndUpdate(
+  const added = await db.Project.findOneAndUpdate(
     { _id: projectId, [`taskTemplates.${MAX_TASK_TEMPLATES - 1}`]: { $exists: false } },
     {
       $push: {
@@ -107,7 +106,7 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
   if (!added) {
     // The project was read a moment ago, so ordinarily a miss here is the ceiling — but it can
     // also mean the project was deleted in between, and the two answer differently (BP-719).
-    if (await Project.exists({ _id: projectId })) {
+    if (await db.Project.exists({ _id: projectId })) {
       return NextResponse.json(
         { error: `A project may have at most ${MAX_TASK_TEMPLATES} templates` },
         { status: 400 }
@@ -121,7 +120,7 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
   return NextResponse.json(added.taskTemplates, { status: 201 });
 });
 
-export const PUT = withProjectAccess(async (request, { params, user }) => {
+export const PUT = withProjectAccess(async (request, { params, user, db }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -130,7 +129,7 @@ export const PUT = withProjectAccess(async (request, { params, user }) => {
     return NextResponse.json({ error: "templateId is required" }, { status: 400 });
   }
 
-  const project = await Project.findById(projectId);
+  const project = await db.Project.findById(projectId);
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
@@ -167,7 +166,7 @@ export const PUT = withProjectAccess(async (request, { params, user }) => {
   return NextResponse.json(project.taskTemplates);
 });
 
-export const DELETE = withProjectOwner(async (request, { params, user }) => {
+export const DELETE = withProjectOwner(async (request, { params, user, db }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -176,7 +175,7 @@ export const DELETE = withProjectOwner(async (request, { params, user }) => {
     return NextResponse.json({ error: "templateId is required" }, { status: 400 });
   }
 
-  const project = await Project.findById(projectId);
+  const project = await db.Project.findById(projectId);
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }

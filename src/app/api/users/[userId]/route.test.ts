@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
-const userFindById = vi.fn();
+const userFindOne = vi.fn();
 const userCountDocuments = vi.fn();
 const userExists = vi.fn();
 const revokeUserSessions = vi.fn();
@@ -41,15 +42,15 @@ vi.mock("@/lib/email-change", () => ({ cancelEmailChange }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/lib/security-mail", () => ({ notifyPasswordChanged, notifyAddressChanged }));
 vi.mock("bcryptjs", () => ({ default: { hash } }));
-const userFindByIdAndDelete = vi.fn();
+const userFindOneAndDelete = vi.fn();
 const userUpdateOne = vi.fn();
 vi.mock("@/models/user", () => ({
   User: {
     updateOne: userUpdateOne,
-    findById: userFindById,
+    findOne: userFindOne,
     countDocuments: userCountDocuments,
     exists: userExists,
-    findByIdAndDelete: userFindByIdAndDelete,
+    findOneAndDelete: userFindOneAndDelete,
   },
 }));
 
@@ -85,7 +86,7 @@ function targetDoc(overrides: Record<string, unknown> = {}) {
 }
 
 function found(target: unknown) {
-  userFindById.mockResolvedValue(target);
+  userFindOne.mockResolvedValue(target);
 }
 
 beforeEach(async () => {
@@ -362,7 +363,7 @@ describe("PUT /api/users/:id — an admin sets a password", () => {
 
     await PUT(put({ password: "a-fresh-password" }), ctx());
 
-    expect(userFindById).toHaveBeenCalledWith("target-1");
+    expect(userFindOne).toHaveBeenCalledWith({ _id: "target-1", tenant: DEFAULT_TENANT_ID });
   });
 
   it("refuses a password from an admin API token", async () => {
@@ -540,7 +541,7 @@ describe("DELETE /api/users/:id", () => {
   beforeEach(() => {
     getAuthUser.mockResolvedValue({ ...ADMIN_DOC, viaMachineCredential: false });
     userCountDocuments.mockResolvedValue(2);
-    userFindByIdAndDelete.mockResolvedValue(person());
+    userFindOneAndDelete.mockResolvedValue(person());
     boardsOnlyOwnedBy.mockResolvedValue([]);
   });
 
@@ -552,10 +553,10 @@ describe("DELETE /api/users/:id", () => {
 
       expect((await DELETE(...del(TARGET_HEX))).status).toBe(200);
       expect(userUpdateOne).toHaveBeenCalledWith(
-        { _id: TARGET_HEX, deactivatedAt: null },
+        { _id: TARGET_HEX, deactivatedAt: null, tenant: DEFAULT_TENANT_ID },
         { $set: { deactivatedAt: expect.any(Date) } }
       );
-      expect(userUpdateOne.mock.invocationCallOrder[0]).toBeLessThan(userFindByIdAndDelete.mock.invocationCallOrder[0]);
+      expect(userUpdateOne.mock.invocationCallOrder[0]).toBeLessThan(userFindOneAndDelete.mock.invocationCallOrder[0]);
     });
 
     it("refuses, deleting nothing, when no active admin would be left", async () => {
@@ -566,13 +567,21 @@ describe("DELETE /api/users/:id", () => {
 
       expect(res.status).toBe(409);
       expect(await res.json()).toEqual({ error: "Cannot delete the last admin" });
-      expect(userCountDocuments).toHaveBeenLastCalledWith({ role: "admin", deactivatedAt: null });
+      expect(userCountDocuments).toHaveBeenLastCalledWith({
+        role: "admin",
+        deactivatedAt: null,
+        tenant: DEFAULT_TENANT_ID,
+      });
       // Only its own mark: a deactivation that landed meanwhile stays
       expect(userUpdateOne).toHaveBeenLastCalledWith(
-        { _id: TARGET_HEX, deactivatedAt: userUpdateOne.mock.calls[0][1].$set.deactivatedAt },
+        {
+          _id: TARGET_HEX,
+          deactivatedAt: userUpdateOne.mock.calls[0][1].$set.deactivatedAt,
+          tenant: DEFAULT_TENANT_ID,
+        },
         { $set: { deactivatedAt: null } }
       );
-      expect(userFindByIdAndDelete).not.toHaveBeenCalled();
+      expect(userFindOneAndDelete).not.toHaveBeenCalled();
     });
 
     it("refuses, deleting nothing, when a board it owns would have no active owner", async () => {
@@ -584,15 +593,19 @@ describe("DELETE /api/users/:id", () => {
       expect(res.status).toBe(409);
       expect(boardsLeftWithoutOwner).toHaveBeenCalledWith(TARGET_HEX);
       expect(userUpdateOne).toHaveBeenLastCalledWith(
-        { _id: TARGET_HEX, deactivatedAt: userUpdateOne.mock.calls[0][1].$set.deactivatedAt },
+        {
+          _id: TARGET_HEX,
+          deactivatedAt: userUpdateOne.mock.calls[0][1].$set.deactivatedAt,
+          tenant: DEFAULT_TENANT_ID,
+        },
         { $set: { deactivatedAt: null } }
       );
-      expect(userFindByIdAndDelete).not.toHaveBeenCalled();
+      expect(userFindOneAndDelete).not.toHaveBeenCalled();
     });
 
     it("counts nothing again for an account already deactivated, which counted for nothing", async () => {
       found(person({ role: "admin", deactivatedAt: new Date() }));
-      userFindByIdAndDelete.mockResolvedValue(person({ role: "admin", deactivatedAt: new Date() }));
+      userFindOneAndDelete.mockResolvedValue(person({ role: "admin", deactivatedAt: new Date() }));
 
       expect((await DELETE(...del(TARGET_HEX))).status).toBe(200);
       expect(userUpdateOne).not.toHaveBeenCalled();
@@ -603,7 +616,7 @@ describe("DELETE /api/users/:id", () => {
   // BP-832. A deactivated administrator no longer counts towards keeping one
   it("deletes a deactivated administrator while one active one remains", async () => {
     found(person({ role: "admin", deactivatedAt: new Date() }));
-    userFindByIdAndDelete.mockResolvedValue(person({ role: "admin", deactivatedAt: new Date() }));
+    userFindOneAndDelete.mockResolvedValue(person({ role: "admin", deactivatedAt: new Date() }));
     userCountDocuments.mockResolvedValue(1);
 
     expect((await DELETE(...del(TARGET_HEX))).status).toBe(200);
@@ -625,7 +638,7 @@ describe("DELETE /api/users/:id", () => {
     );
     expect(body.boards).toHaveLength(2);
     expect(boardsOnlyOwnedBy).toHaveBeenCalledWith(TARGET_HEX);
-    expect(userFindByIdAndDelete).not.toHaveBeenCalled();
+    expect(userFindOneAndDelete).not.toHaveBeenCalled();
     expect(grantDeleteMany).not.toHaveBeenCalled();
     expect(revokeUserSessions).not.toHaveBeenCalled();
     expect(logInstanceAudit).not.toHaveBeenCalled();
@@ -637,7 +650,7 @@ describe("DELETE /api/users/:id", () => {
     const res = await DELETE(...del(TARGET_HEX));
 
     expect(res.status).toBe(200);
-    expect(grantDeleteMany).toHaveBeenCalledWith({ subject: TARGET_HEX });
+    expect(grantDeleteMany).toHaveBeenCalledWith({ subject: TARGET_HEX, tenant: DEFAULT_TENANT_ID });
   });
 
   // A link left behind would refuse the same person's provider as "already linked" for good (BP-828)
@@ -646,12 +659,12 @@ describe("DELETE /api/users/:id", () => {
 
     await DELETE(...del(TARGET_HEX));
 
-    expect(identityDeleteMany).toHaveBeenCalledWith({ user: TARGET_HEX });
+    expect(identityDeleteMany).toHaveBeenCalledWith({ user: TARGET_HEX, tenant: DEFAULT_TENANT_ID });
   });
 
   it("leaves the grants alone when the account was not deleted", async () => {
     found(person());
-    userFindByIdAndDelete.mockResolvedValue(null);
+    userFindOneAndDelete.mockResolvedValue(null);
 
     await DELETE(...del(TARGET_HEX));
 
@@ -666,7 +679,7 @@ describe("DELETE /api/users/:id", () => {
     expect(res.status).toBe(200);
     // Which account, not merely that one was deleted: both of these read an id out of scope, and
     // the caller's own is in the same scope
-    expect(userFindByIdAndDelete).toHaveBeenCalledWith(TARGET_HEX);
+    expect(userFindOneAndDelete).toHaveBeenCalledWith({ _id: TARGET_HEX, tenant: DEFAULT_TENANT_ID });
     expect(revokeUserSessions).toHaveBeenCalledWith(TARGET_HEX);
   });
 
@@ -679,7 +692,7 @@ describe("DELETE /api/users/:id", () => {
     const res = await DELETE(...del(TARGET_HEX.toUpperCase()));
 
     expect(res.status).toBe(200);
-    expect(userFindByIdAndDelete).toHaveBeenCalledWith(TARGET_HEX);
+    expect(userFindOneAndDelete).toHaveBeenCalledWith({ _id: TARGET_HEX, tenant: DEFAULT_TENANT_ID });
     expect(revokeUserSessions).toHaveBeenCalledWith(TARGET_HEX);
   });
 
@@ -692,7 +705,7 @@ describe("DELETE /api/users/:id", () => {
     const res = await DELETE(...del(TARGET_HEX));
 
     expect(res.status).toBe(403);
-    expect(userFindByIdAndDelete).not.toHaveBeenCalled();
+    expect(userFindOneAndDelete).not.toHaveBeenCalled();
     expect(revokeUserSessions).not.toHaveBeenCalled();
   });
 
@@ -703,7 +716,7 @@ describe("DELETE /api/users/:id", () => {
 
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ error: "Cannot delete yourself" });
-    expect(userFindByIdAndDelete).not.toHaveBeenCalled();
+    expect(userFindOneAndDelete).not.toHaveBeenCalled();
   });
 
   // BP-546. The same account, spelled the way BSON also accepts. Comparing the path segment let
@@ -716,7 +729,7 @@ describe("DELETE /api/users/:id", () => {
 
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ error: "Cannot delete yourself" });
-    expect(userFindByIdAndDelete).not.toHaveBeenCalled();
+    expect(userFindOneAndDelete).not.toHaveBeenCalled();
   });
 
   // The second lock on that door, and unreachable while the first one holds: an admin cannot be
@@ -731,8 +744,8 @@ describe("DELETE /api/users/:id", () => {
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ error: "Cannot delete the last admin" });
     // The filter, because a count of everybody never reaches 1 on an instance that has anybody
-    expect(userCountDocuments).toHaveBeenCalledWith({ role: "admin", deactivatedAt: null });
-    expect(userFindByIdAndDelete).not.toHaveBeenCalled();
+    expect(userCountDocuments).toHaveBeenCalledWith({ role: "admin", deactivatedAt: null, tenant: DEFAULT_TENANT_ID });
+    expect(userFindOneAndDelete).not.toHaveBeenCalled();
   });
 
   // The other half of that guard. Without this, `if (user.role === "admin")` could be dropped and
@@ -745,7 +758,7 @@ describe("DELETE /api/users/:id", () => {
     const res = await DELETE(...del(TARGET_HEX));
 
     expect(res.status).toBe(200);
-    expect(userFindByIdAndDelete).toHaveBeenCalledWith(TARGET_HEX);
+    expect(userFindOneAndDelete).toHaveBeenCalledWith({ _id: TARGET_HEX, tenant: DEFAULT_TENANT_ID });
   });
 
   it("still deletes an admin while another one remains, and says so in the row", async () => {
@@ -755,7 +768,7 @@ describe("DELETE /api/users/:id", () => {
     const res = await DELETE(...del(TARGET_HEX));
 
     expect(res.status).toBe(200);
-    expect(userFindByIdAndDelete).toHaveBeenCalled();
+    expect(userFindOneAndDelete).toHaveBeenCalled();
     // Which kind of account it was, because that is the half of "who was deleted" the username
     // does not answer
     expect(logInstanceAudit).toHaveBeenCalledWith(
@@ -776,7 +789,7 @@ describe("DELETE /api/users/:id", () => {
     expect(await res.json()).toMatchObject({
       error: "A machine account is released under Settings → Workers, not deleted here",
     });
-    expect(userFindByIdAndDelete).not.toHaveBeenCalled();
+    expect(userFindOneAndDelete).not.toHaveBeenCalled();
   });
 
   // Load first, refuse second: it is what makes a 404 mean the account is not there rather than
@@ -787,7 +800,7 @@ describe("DELETE /api/users/:id", () => {
     const res = await DELETE(...del(TARGET_HEX));
 
     expect(res.status).toBe(404);
-    expect(userFindByIdAndDelete).not.toHaveBeenCalled();
+    expect(userFindOneAndDelete).not.toHaveBeenCalled();
     expect(revokeUserSessions).not.toHaveBeenCalled();
   });
 
@@ -833,7 +846,7 @@ describe("DELETE /api/users/:id", () => {
 
   it("answers 404 when the account goes between the checks and the delete", async () => {
     found(person());
-    userFindByIdAndDelete.mockResolvedValue(null);
+    userFindOneAndDelete.mockResolvedValue(null);
 
     const res = await DELETE(...del(TARGET_HEX));
 
@@ -849,7 +862,7 @@ describe("DELETE /api/users/:id", () => {
     const res = await DELETE(...del("not-an-object-id"));
 
     expect(res.status).toBe(404);
-    expect(userFindById).not.toHaveBeenCalled();
+    expect(userFindOne).not.toHaveBeenCalled();
   });
 
   // The order of the first two, which is the difference between "you may not ask" and an answer
@@ -861,7 +874,7 @@ describe("DELETE /api/users/:id", () => {
     const res = await DELETE(...del(TARGET_HEX));
 
     expect(res.status).toBe(403);
-    expect(userFindById).not.toHaveBeenCalled();
+    expect(userFindOne).not.toHaveBeenCalled();
   });
 });
 
@@ -890,7 +903,10 @@ describe("PUT /api/users/:id — the guards that keep an administrator standing"
 
     expect(res.status).toBe(200);
     expect(target.role).toBe("member");
-    expect(userUpdateOne).toHaveBeenCalledWith({ _id: "target-1", role: "admin" }, { $set: { role: "member" } });
+    expect(userUpdateOne).toHaveBeenCalledWith(
+      { _id: "target-1", role: "admin", tenant: DEFAULT_TENANT_ID },
+      { $set: { role: "member" } }
+    );
     // Already written: the save must not write it again over a promotion landing in between
     expect(target.unmarkModified).toHaveBeenCalledWith("role");
     expect(target.unmarkModified.mock.invocationCallOrder[0]).toBeLessThan(target.save.mock.invocationCallOrder[0]);
@@ -906,8 +922,15 @@ describe("PUT /api/users/:id — the guards that keep an administrator standing"
 
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ error: "Cannot demote the last admin" });
-    expect(userCountDocuments).toHaveBeenLastCalledWith({ role: "admin", deactivatedAt: null });
-    expect(userUpdateOne).toHaveBeenLastCalledWith({ _id: "target-1" }, { $set: { role: "admin" } });
+    expect(userCountDocuments).toHaveBeenLastCalledWith({
+      role: "admin",
+      deactivatedAt: null,
+      tenant: DEFAULT_TENANT_ID,
+    });
+    expect(userUpdateOne).toHaveBeenLastCalledWith(
+      { _id: "target-1", tenant: DEFAULT_TENANT_ID },
+      { $set: { role: "admin" } }
+    );
     expect(target.save).not.toHaveBeenCalled();
     expect(logInstanceAudit).not.toHaveBeenCalled();
   });
@@ -920,7 +943,10 @@ describe("PUT /api/users/:id — the guards that keep an administrator standing"
     const res = await PUT(put({ role: "member", email: "taken@example.com" }), ctx());
 
     expect(res.status).toBe(409);
-    expect(userUpdateOne).toHaveBeenLastCalledWith({ _id: "target-1", role: "member" }, { $set: { role: "admin" } });
+    expect(userUpdateOne).toHaveBeenLastCalledWith(
+      { _id: "target-1", role: "member", tenant: DEFAULT_TENANT_ID },
+      { $set: { role: "admin" } }
+    );
     expect(logInstanceAudit).not.toHaveBeenCalledWith(expect.objectContaining({ action: "user_role_changed" }));
   });
 
@@ -930,7 +956,10 @@ describe("PUT /api/users/:id — the guards that keep an administrator standing"
     found(target);
 
     await expect(PUT(put({ role: "member" }), ctx())).rejects.toThrow("db down");
-    expect(userUpdateOne).toHaveBeenLastCalledWith({ _id: "target-1", role: "member" }, { $set: { role: "admin" } });
+    expect(userUpdateOne).toHaveBeenLastCalledWith(
+      { _id: "target-1", role: "member", tenant: DEFAULT_TENANT_ID },
+      { $set: { role: "admin" } }
+    );
   });
 
   it("records no second change of role when a racing request demoted them first", async () => {
@@ -1108,7 +1137,7 @@ describe("PUT /api/users/:id — deactivating and reactivating", () => {
     userCountDocuments.mockResolvedValue(1);
 
     expect((await PUT(put({ deactivate: true }), ctx())).status).toBe(400);
-    expect(userCountDocuments).toHaveBeenCalledWith({ role: "admin", deactivatedAt: null });
+    expect(userCountDocuments).toHaveBeenCalledWith({ role: "admin", deactivatedAt: null, tenant: DEFAULT_TENANT_ID });
     expect(target.save).not.toHaveBeenCalled();
     expect(revokeUserCredentials).not.toHaveBeenCalled();
   });
@@ -1156,7 +1185,7 @@ describe("PUT /api/users/:id — deactivating and reactivating", () => {
     userCountDocuments.mockResolvedValue(1);
 
     expect((await PUT(put({ role: "member" }), ctx())).status).toBe(400);
-    expect(userCountDocuments).toHaveBeenCalledWith({ role: "admin", deactivatedAt: null });
+    expect(userCountDocuments).toHaveBeenCalledWith({ role: "admin", deactivatedAt: null, tenant: DEFAULT_TENANT_ID });
   });
 });
 

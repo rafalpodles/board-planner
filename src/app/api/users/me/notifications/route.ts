@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withAuth } from "@/lib/middleware";
-import { User } from "@/models/user";
 import { defaultMatrix, matrixInForce, normaliseMatrix } from "@/lib/notification-prefs";
 import { PERSONAL_CHAT_KINDS, PersonalChatKind } from "@/types";
 import { encryptSecret, isEncryptionConfigured } from "@/lib/encryption";
@@ -10,10 +9,10 @@ import { isAllowedWebhookUrl, WEBHOOK_DESTINATION, WEBHOOK_DESTINATION_REFUSED }
 
 const WEBHOOK_KEPT = "__kept__";
 
-export const GET = withAuth(async (_request, { user }) => {
+export const GET = withAuth(async (_request, { user, db }) => {
   await connectDB();
 
-  const stored = await User.findById(user._id, "email emailNotifications notifications").lean();
+  const stored = await db.User.findById(user._id, "email emailNotifications notifications").lean();
 
   return NextResponse.json({
     defaults: defaultMatrix(stored),
@@ -115,7 +114,7 @@ function isRefusal(outcome: ChatOutcome | Refusal): outcome is Refusal {
   return "error" in outcome;
 }
 
-export const PUT = withAuth(async (request, { user }) => {
+export const PUT = withAuth(async (request, { user, db }) => {
   // One rule, before anything is read or validated: a machine credential does not touch these.
   // Stated as "may not install an address" it kept slipping — a token could switch the column on
   // against an address the owner had already stored, or widen it row by row, or drop an override
@@ -141,7 +140,7 @@ export const PUT = withAuth(async (request, { user }) => {
     updates["notifications.defaults"] = normaliseMatrix(body.defaults);
   }
 
-  const stored = await User.findById(user._id, "notifications.chat").lean();
+  const stored = await db.User.findById(user._id, "notifications.chat").lean();
   const chat = resolveChat(body, stored?.notifications?.chat);
   if (isRefusal(chat)) {
     return NextResponse.json({ error: chat.error }, { status: chat.status });
@@ -154,7 +153,7 @@ export const PUT = withAuth(async (request, { user }) => {
     return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
   }
 
-  await User.findByIdAndUpdate(user._id, { $set: updates });
+  await db.User.findByIdAndUpdate(user._id, { $set: updates });
 
   return NextResponse.json({ ok: true });
 });

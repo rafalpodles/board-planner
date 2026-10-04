@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const finishFlow = vi.fn();
 const holdForAcceptance = vi.fn();
@@ -9,7 +10,7 @@ const identityFindOne = vi.fn();
 const identityCreate = vi.fn();
 const identityUpdateOne = vi.fn();
 const identityDeleteOne = vi.fn();
-const userFindById = vi.fn();
+const userFindOneById = vi.fn();
 const userFindOne = vi.fn();
 const userCount = vi.fn();
 const userCreate = vi.fn();
@@ -67,7 +68,13 @@ vi.mock("@/models/identity", () => ({
 const sessionExists = vi.fn();
 vi.mock("@/models/session", () => ({ Session: { exists: sessionExists } }));
 vi.mock("@/models/user", () => ({
-  User: { findById: userFindById, findOne: userFindOne, countDocuments: userCount, create: userCreate, deleteOne: userDeleteOne },
+  User: {
+    findOne: (filter: { _id?: unknown }, ...rest: unknown[]) =>
+      ("_id" in filter ? userFindOneById : userFindOne)(filter, ...rest),
+    countDocuments: userCount,
+    create: userCreate,
+    deleteOne: userDeleteOne,
+  },
 }));
 vi.mock("@/models/invitation", () => ({ Invitation: { findOne: invitationFindOne } }));
 
@@ -104,7 +111,7 @@ beforeEach(async () => {
   clientIp = "203.0.113.9";
   identityFindOne.mockReturnValue(lean(null));
   userFindOne.mockResolvedValue(ADA);
-  userFindById.mockResolvedValue(ADA);
+  userFindOneById.mockResolvedValue(ADA);
   identityCreate.mockResolvedValue({});
   createSession.mockResolvedValue({ token: "cps_new", absoluteExpiresAt: new Date() });
   signUpOpenTo.mockResolvedValue(false);
@@ -119,7 +126,7 @@ describe("GET /api/auth/oidc/:provider/callback, signing in", () => {
 
     const res = await callback();
 
-    expect(identityFindOne).toHaveBeenCalledWith({ issuer: ISSUER, subject: "s1" });
+    expect(identityFindOne).toHaveBeenCalledWith({ issuer: ISSUER, subject: "s1", tenant: DEFAULT_TENANT_ID });
     expect(location(res)).toBe("/projects");
     expect(createSession).toHaveBeenCalledWith(expect.objectContaining({ userId: "u1" }));
     expect(res.headers.get("set-cookie")).toContain("session=cps_new");
@@ -132,7 +139,11 @@ describe("GET /api/auth/oidc/:provider/callback, signing in", () => {
     const res = await callback();
 
     expect(location(res)).toBe("/projects");
-    expect(userFindOne).toHaveBeenCalledWith({ email: "ada@example.com", kind: { $ne: "machine" } });
+    expect(userFindOne).toHaveBeenCalledWith({
+      email: "ada@example.com",
+      kind: { $ne: "machine" },
+      tenant: DEFAULT_TENANT_ID,
+    });
     expect(identityCreate).toHaveBeenCalledWith(
       expect.objectContaining({ user: "u1", provider: "oidc", issuer: ISSUER, subject: "s1" })
     );
@@ -145,7 +156,7 @@ describe("GET /api/auth/oidc/:provider/callback, signing in", () => {
     const winner = { ...ADA, _id: "u2", username: "grace" };
     identityCreate.mockRejectedValue(Object.assign(new Error("E11000"), { code: 11000 }));
     identityFindOne.mockReturnValueOnce(lean(null)).mockReturnValue(lean({ _id: "i9", user: "u2" }));
-    userFindById.mockImplementation(async (id: string) => (id === "u2" ? winner : null));
+    userFindOneById.mockImplementation(async (filter: { _id: unknown }) => (filter._id === "u2" ? winner : null));
 
     const res = await callback();
 
@@ -159,8 +170,8 @@ describe("GET /api/auth/oidc/:provider/callback, signing in", () => {
     finishes("signin");
     identityCreate.mockRejectedValue(Object.assign(new Error("E11000"), { code: 11000 }));
     identityFindOne.mockReturnValueOnce(lean(null)).mockReturnValue(lean({ _id: "i9", user: "u2" }));
-    userFindById.mockImplementation(async (id: string) =>
-      id === "u2" ? { ...ADA, _id: "u2", username: "grace", deactivatedAt: new Date() } : null
+    userFindOneById.mockImplementation(async (filter: { _id: unknown }) =>
+      filter._id === "u2" ? { ...ADA, _id: "u2", username: "grace", deactivatedAt: new Date() } : null
     );
 
     expect(location(await callback())).toBe("/login?sso=deactivated");
@@ -171,7 +182,7 @@ describe("GET /api/auth/oidc/:provider/callback, signing in", () => {
     finishes("signin");
     identityCreate.mockRejectedValue(Object.assign(new Error("E11000"), { code: 11000 }));
     identityFindOne.mockReturnValueOnce(lean(null)).mockReturnValue(lean({ _id: "i9", user: "u2" }));
-    userFindById.mockResolvedValue(null);
+    userFindOneById.mockResolvedValue(null);
 
     expect(location(await callback())).toBe("/login?sso=no_account");
     expect(createSession).not.toHaveBeenCalled();
@@ -193,12 +204,12 @@ describe("GET /api/auth/oidc/:provider/callback, signing in", () => {
   it("forgets a link whose account is gone, and does not sign in through it", async () => {
     finishes("signin");
     identityFindOne.mockReturnValue(lean({ _id: "i-dead", user: "u-gone" }));
-    userFindById.mockResolvedValue(null);
+    userFindOneById.mockResolvedValue(null);
     userFindOne.mockResolvedValue(null);
 
     const res = await callback();
 
-    expect(identityDeleteOne).toHaveBeenCalledWith({ _id: "i-dead" });
+    expect(identityDeleteOne).toHaveBeenCalledWith({ _id: "i-dead", tenant: DEFAULT_TENANT_ID });
     expect(location(res)).toBe("/login?sso=no_account");
   });
 
@@ -226,7 +237,7 @@ describe("GET /api/auth/oidc/:provider/callback, signing in", () => {
   it("never signs a machine account in, even one linked already", async () => {
     finishes("signin");
     identityFindOne.mockReturnValue(lean({ _id: "i1", user: "m1" }));
-    userFindById.mockResolvedValue({ _id: "m1", username: "pm", kind: "machine" });
+    userFindOneById.mockResolvedValue({ _id: "m1", username: "pm", kind: "machine" });
 
     const res = await callback();
 
@@ -442,8 +453,13 @@ describe("GET /api/auth/oidc/:provider/callback, linking from settings", () => {
     const res = await callback();
 
     expect(identityCreate).toHaveBeenCalled();
-    expect(sessionExists).toHaveBeenCalledWith({ _id: "s-1" });
-    expect(identityDeleteOne).toHaveBeenCalledWith({ issuer: ISSUER, subject: "s1", user: "u1" });
+    expect(sessionExists).toHaveBeenCalledWith({ _id: "s-1", tenant: DEFAULT_TENANT_ID });
+    expect(identityDeleteOne).toHaveBeenCalledWith({
+      issuer: ISSUER,
+      subject: "s1",
+      user: "u1",
+      tenant: DEFAULT_TENANT_ID,
+    });
     expect(location(res)).toBe("/settings/security?link=failed");
     expect(logInstanceAudit).toHaveBeenLastCalledWith(expect.objectContaining({ action: "identity_unlinked" }));
   });
@@ -503,7 +519,7 @@ describe("GET /api/auth/oidc/:provider/callback, linking from settings", () => {
   it("refuses an identity that already belongs to another account", async () => {
     finishes("link");
     identityFindOne.mockReturnValue(lean({ _id: "i1", user: "u9" }));
-    userFindById.mockResolvedValue({ _id: "u9", username: "someone" });
+    userFindOneById.mockResolvedValue({ _id: "u9", username: "someone" });
 
     expect(location(await callback())).toBe("/settings/security?link=taken");
     expect(identityCreate).not.toHaveBeenCalled();
@@ -529,6 +545,7 @@ describe("GET /api/auth/oidc/:provider/callback, accepting an invitation", () =>
       tokenHash: "h1",
       status: "pending",
       expiresAt: { $gt: expect.any(Date) },
+      tenant: DEFAULT_TENANT_ID,
     });
     expect(createSession).not.toHaveBeenCalled();
   });
@@ -571,7 +588,7 @@ describe("GET /api/auth/oidc/:provider/callback, accepting an invitation", () =>
     identityFindOne.mockReturnValue(lean({ _id: "i1", user: "u1" }));
 
     expect(location(await callback())).toBe("/invite/sso?error=linked");
-    expect(identityFindOne).toHaveBeenCalledWith({ issuer: ISSUER, subject: "s1" });
+    expect(identityFindOne).toHaveBeenCalledWith({ issuer: ISSUER, subject: "s1", tenant: DEFAULT_TENANT_ID });
     expect(holdForAcceptance).not.toHaveBeenCalled();
   });
 });
@@ -651,7 +668,7 @@ describe("GET /api/auth/oidc/:provider/callback, setting up an empty instance (B
     identityCreate.mockRejectedValue(Object.assign(new Error("E11000"), { code: 11000 }));
 
     expect(location(await callback())).toBe("/login?sso=linked");
-    expect(userDeleteOne).toHaveBeenCalledWith({ _id: "u-first" });
+    expect(userDeleteOne).toHaveBeenCalledWith({ _id: "u-first", tenant: DEFAULT_TENANT_ID });
     expect(createSession).not.toHaveBeenCalled();
   });
 
@@ -661,7 +678,7 @@ describe("GET /api/auth/oidc/:provider/callback, setting up an empty instance (B
     identityCreate.mockRejectedValue(new Error("mongo is having a moment"));
 
     await expect(callback()).rejects.toThrow("mongo is having a moment");
-    expect(userDeleteOne).toHaveBeenCalledWith({ _id: "u-first" });
+    expect(userDeleteOne).toHaveBeenCalledWith({ _id: "u-first", tenant: DEFAULT_TENANT_ID });
   });
 });
 
@@ -669,7 +686,7 @@ describe("GET /api/auth/oidc/:provider/callback, a deactivated account (BP-832)"
   it("signs nobody in through a linked identity", async () => {
     finishes("signin");
     identityFindOne.mockReturnValue(lean({ _id: "i1", user: "u1" }));
-    userFindById.mockResolvedValue({ ...ADA, deactivatedAt: new Date() });
+    userFindOneById.mockResolvedValue({ ...ADA, deactivatedAt: new Date() });
 
     expect(location(await callback())).toBe("/login?sso=deactivated");
     expect(createSession).not.toHaveBeenCalled();
