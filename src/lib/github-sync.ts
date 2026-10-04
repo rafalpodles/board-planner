@@ -1,3 +1,4 @@
+import { forEachServedTenant } from "@/lib/tenant-jobs";
 import type { Types } from "mongoose";
 import { connectDB } from "@/lib/db";
 import type { SchedulerStart } from "@/lib/scheduler";
@@ -16,7 +17,7 @@ import {
 import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
 import type { RepositoryFields } from "@/lib/repository";
 import type { CiState, ILinkedPR, IProjectColumn } from "@/types";
-import { scopedToDefaultTenant, type ScopedDb } from "@/lib/db-scope";
+import { type ScopedDb } from "@/lib/db-scope";
 
 /**
  * What a sync needs to know about a project — no more, so a `.lean()` projection satisfies it and
@@ -445,8 +446,11 @@ export async function syncGithubPullRequests(
  * ticks. The second is guarded below; the first is not, so N replicas cost N times this.
  */
 export async function githubSyncTick(): Promise<void> {
-  const db = scopedToDefaultTenant();
   await connectDB();
+  await forEachServedTenant("GitHub sync", (db) => githubSyncTickFor(db));
+}
+
+async function githubSyncTickFor(db: ScopedDb): Promise<void> {
   const projects = await db.Project.find(
     { githubToken: { $nin: [null, ""] } },
     // `gitlabHost` because `repositoryProvider` reads it for a self-hosted GitLab; a projection

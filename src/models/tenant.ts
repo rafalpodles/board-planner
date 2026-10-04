@@ -16,6 +16,8 @@ export interface ITenant {
   _id: mongoose.Types.ObjectId;
   name: string;
   slug?: string;
+  digestHour?: number;
+  timezone?: string;
   entitlements: ITenantEntitlements;
 }
 
@@ -34,6 +36,8 @@ const entitlementsSchema = new Schema<ITenantEntitlements>(
 const tenantSchema = new Schema<ITenant>({
   name: { type: String, default: "default", trim: true },
   slug: { type: String, trim: true, lowercase: true },
+  digestHour: { type: Number, min: 0, max: 23 },
+  timezone: { type: String, trim: true },
   entitlements: {
     type: entitlementsSchema,
     default: () => ({ plan: "free", features: [], source: "none" }),

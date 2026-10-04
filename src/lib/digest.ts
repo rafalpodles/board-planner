@@ -1,3 +1,4 @@
+import { forEachServedTenant } from "@/lib/tenant-jobs";
 import type { Types } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { APP_NAME } from "@/lib/brand";
@@ -9,7 +10,7 @@ import { projectPath, taskPath } from "@/lib/urls";
 import { resolveChannels, wantsMailSomewhere, PrefsSource } from "@/lib/notification-prefs";
 import { accessibleProjectIds } from "@/lib/grants";
 import type { SchedulerStart } from "@/lib/scheduler";
-import { scopedToDefaultTenant, type ScopedDb } from "@/lib/db-scope";
+import { type ScopedDb } from "@/lib/db-scope";
 
 const TICK_MS = Number(process.env.DIGEST_TICK_MS) || 5 * 60 * 1000;
 const DEFAULT_TIMEZONE = "Europe/Warsaw";
@@ -32,8 +33,14 @@ export function digestTimezone(): string {
 }
 
 /** The day whose digest is due now, or null before the hour it goes out. */
-export function dueDigestDay(now: Date, timezone = digestTimezone()): string | null {
-  return hourInTimezone(now, timezone) >= digestHour() ? dayKeyInTimezone(now, timezone) : null;
+export function dueDigestDay(now: Date, timezone = digestTimezone(), hour = digestHour()): string | null {
+  return hourInTimezone(now, timezone) >= hour ? dayKeyInTimezone(now, timezone) : null;
+}
+
+export function tenantDigestClock(tenant: { digestHour?: number; timezone?: string }): { hour: number; timezone: string } {
+  const hour = Number.isInteger(tenant.digestHour) && tenant.digestHour! >= 0 && tenant.digestHour! <= 23 ? tenant.digestHour! : digestHour();
+  const timezone = tenant.timezone && isValidTimezone(tenant.timezone) ? tenant.timezone : digestTimezone();
+  return { hour, timezone };
 }
 
 interface DigestLine {
@@ -301,10 +308,17 @@ async function digestFailed(
  * server had taken, and the reader lost the day with it (BP-659).
  */
 export async function digestTick(now = new Date()): Promise<number> {
-  const db = scopedToDefaultTenant();
   if (!isEmailConfigured()) return 0;
-  const day = dueDigestDay(now);
-  if (!day) return 0;
+  let sent = 0;
+  await forEachServedTenant("Digest", async (db, tenant) => {
+    const { hour, timezone } = tenantDigestClock(tenant);
+    const day = dueDigestDay(now, timezone, hour);
+    if (day) sent += await digestTickFor(db, now, day);
+  });
+  return sent;
+}
+
+async function digestTickFor(db: ScopedDb, now: Date, day: string): Promise<number> {
 
   await connectDB();
   // "Mail is on somewhere" now reads over a grid keyed by event, which Mongo 4.4 expresses badly,

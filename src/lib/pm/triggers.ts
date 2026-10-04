@@ -10,7 +10,7 @@ import { NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS, buildNeedsHumanReviewPrompt } from
 import { getProjectColumns } from "@/lib/columns";
 import { isPmRunnable } from "./availability";
 import { isPmAvailable } from "./config";
-import { scopedToDefaultTenant, type ScopedDb } from "@/lib/db-scope";
+import type { ScopedDb } from "@/lib/db-scope";
 
 const MAX_TRIGGER_ATTEMPTS = 3;
 
@@ -55,7 +55,7 @@ export async function onTaskStatusChanged(db: ScopedDb, args: {
 
   await enqueuePmTrigger(db, args.projectId, args.taskId, `${project.key}-${task.taskNumber}`);
 
-  drainPmTriggers().catch((err) => console.error("PM trigger drain failed:", err));
+  drainPmTriggers(db).catch((err) => console.error("PM trigger drain failed:", err));
 }
 
 async function settleTrigger(
@@ -180,8 +180,7 @@ export async function runPmTrigger(db: ScopedDb, trigger: IPmTrigger): Promise<P
   return "ran";
 }
 
-export async function drainPmTriggers(): Promise<void> {
-  const db = scopedToDefaultTenant();
+export async function drainPmTriggers(db: ScopedDb): Promise<void> {
   for (;;) {
     const claimed = await db.PmTrigger.findOneAndUpdate(
       { state: "pending" },

@@ -16,6 +16,17 @@ const { fetchPullRequests, projectFind, taskFindOne, taskUpdateOne, taskFind, lo
     logActivity: vi.fn(),
   }));
 
+const servedTenants = vi.hoisted(() => ({ list: null as null | { _id: unknown; digestHour?: number; timezone?: string }[] }));
+vi.mock("@/lib/tenant-jobs", async () => {
+  const { scoped } = await import("@/lib/db-scope");
+  const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
+  return {
+    forEachServedTenant: async (_job: string, work: (db: unknown, tenant: unknown) => Promise<void>) => {
+      for (const tenant of servedTenants.list ?? [{ _id: DEFAULT_TENANT_ID }]) await work(scoped(tenant._id as never), tenant);
+    },
+  };
+});
+
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/encryption", () => ({ decryptSecret: (v: string) => `plain:${v}` }));
 vi.mock("@/lib/activity", () => ({ logActivity }));

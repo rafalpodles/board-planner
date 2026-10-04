@@ -1,3 +1,4 @@
+import { Types } from "mongoose";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const sendEmail = vi.fn().mockResolvedValue(true);
@@ -11,6 +12,17 @@ const notificationCount = vi.fn();
 const grantFind = vi.fn();
 
 let grantedProjects: string[] = [];
+
+const servedTenants = vi.hoisted(() => ({ list: null as null | { _id: unknown; digestHour?: number; timezone?: string }[] }));
+vi.mock("@/lib/tenant-jobs", async () => {
+  const { scoped } = await import("@/lib/db-scope");
+  const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
+  return {
+    forEachServedTenant: async (_job: string, work: (db: unknown, tenant: unknown) => Promise<void>) => {
+      for (const tenant of servedTenants.list ?? [{ _id: DEFAULT_TENANT_ID }]) await work(scoped(tenant._id as never), tenant);
+    },
+  };
+});
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/email", () => ({
@@ -42,6 +54,7 @@ vi.mock("@/models/notification", () => ({
 
 const {
   digestTick,
+  tenantDigestClock,
   dueDigestDay,
   digestHour,
   digestTimezone,
@@ -408,6 +421,40 @@ describe("lineFor", () => {
   it("leaves the title untouched when the project cannot be resolved", () => {
     const line = lineFor({ title: "New comment on #42", task: { taskNumber: 42 }, project: null }, origin);
     expect(line).toEqual({ key: "—", title: "New comment on #42", url: undefined });
+  });
+});
+
+describe("digestTick across tenants in their own timezones (BP-667)", () => {
+  afterEach(() => {
+    servedTenants.list = null;
+  });
+
+  it("sends to a tenant whose own morning has come and not to one whose has not, at the same instant", async () => {
+    const warsaw = new Types.ObjectId("0000000000000000000000a1");
+    const tokyo = new Types.ObjectId("0000000000000000000000b2");
+    servedTenants.list = [
+      { _id: warsaw, timezone: "Europe/Warsaw", digestHour: 7 },
+      { _id: tokyo, timezone: "Asia/Tokyo", digestHour: 15 },
+    ];
+
+    await digestTick(new Date("2026-10-05T05:30:00Z"));
+
+    const asked = userFind.mock.calls.map(([filter]) => String((filter as { tenant: unknown }).tenant));
+    expect(asked).toEqual([warsaw.toHexString()]);
+  });
+
+  it("falls back to the instance's hour and zone for a tenant that set neither", async () => {
+    servedTenants.list = [{ _id: new Types.ObjectId("0000000000000000000000a1") }];
+
+    expect(await digestTick(new Date("2026-08-17T09:00:00Z"))).toBe(1);
+  });
+});
+
+describe("tenantDigestClock", () => {
+  it("takes the tenant's hour and zone, and the instance's for anything unusable", () => {
+    expect(tenantDigestClock({ digestHour: 9, timezone: "Asia/Tokyo" })).toEqual({ hour: 9, timezone: "Asia/Tokyo" });
+    expect(tenantDigestClock({ digestHour: 24, timezone: "Not/AZone" })).toEqual({ hour: digestHour(), timezone: digestTimezone() });
+    expect(tenantDigestClock({})).toEqual({ hour: digestHour(), timezone: digestTimezone() });
   });
 });
 

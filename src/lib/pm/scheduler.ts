@@ -1,3 +1,4 @@
+import { forEachServedTenant } from "@/lib/tenant-jobs";
 import { connectDB } from "@/lib/db";
 import { runPmTurn } from "./agent";
 import { dailyPmSpend, isOverDailyTurnCap } from "./turn-cap";
@@ -8,7 +9,7 @@ import { BOARD_REVIEW_DISALLOWED_TOOLS, buildBoardReviewPrompt, dueReviewSlot } 
 import { buildBoardDigest, digestHeadline, renderBoardDigest } from "./board-review";
 import { PM_RUNNABLE_QUERY } from "./availability";
 import { isPmAvailable } from "./config";
-import { scopedToDefaultTenant, type ScopedDb } from "@/lib/db-scope";
+import { type ScopedDb } from "@/lib/db-scope";
 
 const TICK_MS = Number(process.env.PM_SCHEDULER_TICK_MS) || 5 * 60 * 1000;
 
@@ -23,9 +24,12 @@ export function startPmScheduler(): void {
 }
 
 export async function pmSchedulerTick(): Promise<void> {
-  const db = scopedToDefaultTenant();
   await connectDB();
-  await drainPmTriggers();
+  await forEachServedTenant("PM scheduler", (db) => pmSchedulerTickFor(db));
+}
+
+async function pmSchedulerTickFor(db: ScopedDb): Promise<void> {
+  await drainPmTriggers(db);
 
   const now = new Date();
   const projects = await db.Project.find(
