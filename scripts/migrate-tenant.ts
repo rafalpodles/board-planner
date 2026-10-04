@@ -26,10 +26,9 @@ async function main() {
     throw new Error(`No collections in "${db.databaseName}" — wrong database? Set MONGODB_DB.`);
   }
 
-  const report = await backfillTenants(mongoose.connection, { apply });
-  console.log(JSON.stringify(report, null, 2));
-  const pending = Object.values(report.withoutTenant).reduce((a, b) => a + b, 0);
-  console.log(apply ? `Done: ${pending} documents given a tenant.` : `Dry run: ${pending} documents would be given a tenant.`);
+  const { total, byCollection } = await backfillTenants(mongoose.connection, { apply });
+  console.log(JSON.stringify(byCollection, null, 2));
+  console.log(apply ? `Done: ${total} documents given a tenant.` : `Dry run: ${total} documents would be given a tenant.`);
   await mongoose.disconnect();
 }
 

@@ -120,14 +120,11 @@ async function bootWhenDatabaseIsReady(): Promise<void> {
       console.error("Failed to seed the agent catalog:", error);
     });
 
-    const { backfillTenantsOnce } = await import("@/lib/tenant-migration");
-    await backfillTenantsOnce()
-      .then((report) => {
-        const given = Object.values(report?.withoutTenant ?? {}).reduce((a, b) => a + b, 0);
-        if (given > 0) console.log(`Gave ${given} document(s) the default tenant`);
-      })
+    // TODO(BP-663): remove once a missing tenant can no longer be written
+    await import("@/lib/tenant-migration")
+      .then(({ startTenantBackfill }) => startTenantBackfill())
       .catch((error) => {
-        console.error("Failed to give every document a tenant:", error);
+        console.error("Failed to start the tenant backfill:", error);
       });
 
     // The backfill that stood here set `worker.agent` to the shipped Default on every project

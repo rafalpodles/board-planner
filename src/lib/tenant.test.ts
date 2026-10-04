@@ -28,7 +28,7 @@ describe("getTenant", () => {
 
     expect(connectDB).toHaveBeenCalled();
     expect(findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: SINGLETON_ID },
+      {},
       {
         $setOnInsert: {
           entitlements: { plan: "free", features: [], source: "none" },

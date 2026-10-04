@@ -162,13 +162,13 @@ export async function wipe() {
   await mongoose.disconnect();
 }
 
-// Raw-driver rows carry no tenant, and a missing tenant is not the default one to a per-tenant unique
+// Seeded rows are stamped so tenant-on-product-writes can tell the app's own writes from fixtures
 async function stampTenantAndDisconnect() {
   try {
     const db = mongoose.connection.db!;
     const names = (await db.listCollections().toArray())
       .map((c) => c.name)
-      .filter((name) => name !== "tenants" && name !== "ratelimits" && !name.startsWith("system.") && !name.includes("."));
+      .filter((name) => name !== "tenants" && name !== "ratelimits" && !name.includes("."));
     await Promise.all(
       names.map((name) => db.collection(name).updateMany({ tenant: null }, { $set: { tenant: DEFAULT_TENANT_ID } }))
     );

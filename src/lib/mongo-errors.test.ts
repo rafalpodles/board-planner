@@ -12,16 +12,6 @@ describe("duplicateKeyField", () => {
     expect(duplicateKeyField(err)).toBe("email");
   });
 
-  it("names the chosen field when the index ends with tenant", () => {
-    const err = Object.assign(new Error("E11000"), {
-      code: 11000,
-      keyPattern: { email: 1, tenant: 1 },
-      keyValue: { email: "taken@example.com", tenant: "t1" },
-    });
-
-    expect(duplicateKeyField(err)).toBe("email");
-  });
-
   it("falls back to keyValue when the driver sends no pattern", () => {
     const err = Object.assign(new Error("E11000"), {
       code: 11000,

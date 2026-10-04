@@ -4,7 +4,7 @@ import path from "node:path";
 import mongoose from "mongoose";
 import "./all";
 import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
-import { scopedModelNames, unscopedModelNames } from "@/lib/tenant-migration";
+import { scopedModelNames, UNSCOPED_MODELS } from "@/lib/tenant-migration";
 
 const modelFiles = readdirSync(__dirname)
   .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts") && f !== "all.ts")
@@ -60,10 +60,10 @@ describe("every model carries a tenant", () => {
     const tenant = mongoose.model(name).schema.path("tenant");
     expect(tenant, `${name} is missing withTenant()`).toBeDefined();
     expect(tenant.isRequired).toBe(true);
-    expect(String((tenant as unknown as { getDefault: () => unknown }).getDefault())).toBe(String(DEFAULT_TENANT_ID));
+    expect(String(new (mongoose.model(name))().get("tenant"))).toBe(String(DEFAULT_TENANT_ID));
   });
 
-  it.each(unscopedModelNames())("%s is the exception and has no tenant", (name) => {
+  it.each(UNSCOPED_MODELS)("%s is the exception and has no tenant", (name) => {
     expect(mongoose.model(name).schema.path("tenant")).toBeUndefined();
   });
 
@@ -85,13 +85,7 @@ describe("every model carries a tenant", () => {
     const waiting = all.filter((index) => GLOBAL_UNIQUE[idOf(index)]?.startsWith("TODO(BP-665)"));
     const twinless = waiting.filter(
       ({ model, keys }) =>
-        !all.some(
-          (other) =>
-            other.model === model &&
-            other.keys.includes("tenant") &&
-            other.keys.filter((key) => key !== "tenant").join() === keys.join() &&
-            other.keys[0] !== "tenant"
-        )
+        !all.some((other) => other.model === model && other.keys.join() === [...keys, "tenant"].join())
     );
     expect(twinless.map(idOf)).toEqual([]);
   });

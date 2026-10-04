@@ -4,18 +4,14 @@ import { DEFAULT_TENANT_ID } from "./tenant-field";
 
 export const SINGLETON_ID = DEFAULT_TENANT_ID;
 
-export async function upsertSingleton<T>(
-  model: Model<T>,
-  update: UpdateQuery<T>,
-  filter: Record<string, unknown> = {}
-): Promise<T> {
+export async function upsertSingleton<T>(model: Model<T>, update: UpdateQuery<T>): Promise<T> {
   const withFixedId = {
     ...update,
     $setOnInsert: { ...(update.$setOnInsert ?? {}), _id: SINGLETON_ID },
   } as UpdateQuery<T>;
   // `{}`, not the fixed id: an instance's existing document was inserted under a random one
   const write = () =>
-    model.findOneAndUpdate(filter, withFixedId, { upsert: true, returnDocument: "after" }) as Promise<T>;
+    model.findOneAndUpdate({}, withFixedId, { upsert: true, returnDocument: "after" }) as Promise<T>;
 
   try {
     return await write();

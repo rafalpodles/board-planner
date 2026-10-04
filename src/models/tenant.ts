@@ -15,7 +15,6 @@ export interface ITenantEntitlements {
 export interface ITenant {
   _id: mongoose.Types.ObjectId;
   entitlements: ITenantEntitlements;
-  backfilledAt?: Date;
 }
 
 const entitlementsSchema = new Schema<ITenantEntitlements>(
@@ -31,7 +30,6 @@ const entitlementsSchema = new Schema<ITenantEntitlements>(
 );
 
 const tenantSchema = new Schema<ITenant>({
-  backfilledAt: { type: Date },
   entitlements: {
     type: entitlementsSchema,
     default: () => ({ plan: "free", features: [], source: "none" }),

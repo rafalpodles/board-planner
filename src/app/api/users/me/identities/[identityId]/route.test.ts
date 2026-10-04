@@ -37,7 +37,7 @@ vi.mock("@/models/user", () => ({ User: { findById: userFindById } }));
 const { DELETE } = await import("./route");
 
 const ID = "64b0000000000000000000aa";
-const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
+const { currentTenantId } = await import("@/lib/tenant-field");
 const unlink = () =>
   DELETE(new Request(`http://x/api/users/me/identities/${ID}`, { method: "DELETE" }), {
     params: Promise.resolve({ identityId: ID }),
@@ -134,7 +134,7 @@ describe("DELETE /api/users/me/identities/:id", () => {
     identityCount.mockResolvedValueOnce(1).mockResolvedValueOnce(0);
     await unlink();
     expect(identityInsert).toHaveBeenLastCalledWith(
-      expect.objectContaining({ tenant: DEFAULT_TENANT_ID })
+      expect.objectContaining({ tenant: currentTenantId() })
     );
 
     const own = { _id: ID, provider: "oidc", tenant: "someone-elses" };

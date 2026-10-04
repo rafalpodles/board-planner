@@ -1,25 +1,22 @@
 import { test, expect } from "@playwright/test";
 import mongoose from "mongoose";
-import { seed, E2E_MONGODB_URI, PROJECT_KEY, PROJECT_ID, SIBLING_TASK_ID, ADMIN_USERNAME, ADMIN_PASSWORD } from "./seed";
+import { seed, E2E_MONGODB_URI, e2eDatabaseName, PROJECT_KEY, PROJECT_ID, SIBLING_TASK_ID, ADMIN_USERNAME, ADMIN_PASSWORD } from "./seed";
 import { ADMIN_AUTH, SAME_ORIGIN, signInApi } from "./api";
+import { backfillTenants } from "../src/lib/tenant-migration";
+import { DEFAULT_TENANT_ID } from "../src/lib/tenant-field";
 
 mongoose.set("autoIndex", false);
 mongoose.set("autoCreate", false);
 
 test.beforeEach(seed);
 
-async function collectionsWithoutATenant() {
-  const conn = mongoose.createConnection(E2E_MONGODB_URI, { autoIndex: false, autoCreate: false });
+async function tenantCounts() {
+  const conn = mongoose.createConnection(E2E_MONGODB_URI, { dbName: e2eDatabaseName(), autoIndex: false, autoCreate: false });
   await conn.asPromise();
   try {
-    const db = conn.db!;
-    const found: Record<string, number> = {};
-    for (const { name } of await db.listCollections().toArray()) {
-      if (name === "tenants" || name === "ratelimits" || name.startsWith("system.") || name.includes(".")) continue;
-      const missing = await db.collection(name).countDocuments({ tenant: null });
-      if (missing) found[name] = missing;
-    }
-    return found;
+    const { total } = await backfillTenants(conn, { apply: false });
+    const probe = await conn.db!.collection("projects").findOne({ key: "TNT" });
+    return { withoutATenant: total, probeTenant: String(probe?.tenant) };
   } finally {
     await conn.close();
   }
@@ -68,5 +65,5 @@ test("what the app itself writes carries a tenant, whatever path wrote it", asyn
   });
   expect(invitation.status(), await invitation.text()).toBe(201);
 
-  expect(await collectionsWithoutATenant()).toEqual({});
+  expect(await tenantCounts()).toEqual({ withoutATenant: 0, probeTenant: String(DEFAULT_TENANT_ID) });
 });
