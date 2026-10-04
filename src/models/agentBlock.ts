@@ -7,7 +7,7 @@ import { withTenant } from "@/lib/tenant-field";
 // would be meaningless there and reseeding a database would invalidate every agent ever composed.
 const agentBlockSchema = new Schema<IAgentBlock>(
   {
-    key: { type: String, required: true, unique: true, trim: true },
+    key: { type: String, required: true, trim: true },
     kind: { type: String, enum: BLOCK_KINDS, required: true },
     name: { type: String, required: true, trim: true },
     description: { type: String, default: "" },

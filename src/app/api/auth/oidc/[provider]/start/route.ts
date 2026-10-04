@@ -90,7 +90,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
         return NextResponse.json({ error: "Enter your current password to link a provider" }, { status: 400 });
       }
       const { lockedOut, result: matches } = await withLockout(
-        lockoutKey(clientIp ?? "-", current.username, "link-provider"),
+        lockoutKey(db.tenant, clientIp ?? "-", current.username, "link-provider"),
         async () => ((await bcrypt.compare(typed, record.password)) ? true : null),
         sourceKey(String(current._id), "link-provider"),
         EXCLUSIVE_SOURCE_ATTEMPTS

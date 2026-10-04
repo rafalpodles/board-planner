@@ -69,6 +69,9 @@ function applyTokenScope(user: IUser, scope: Types.ObjectId[]): IUser {
   return user;
 }
 
+const sameTenant = (user: IUser, credentialTenant: Types.ObjectId | null | undefined): boolean =>
+  !!user.tenant && !!credentialTenant && user.tenant.equals(credentialTenant);
+
 async function verifyBearerToken(token: string): Promise<IUser | null> {
   await connectDB();
 
@@ -85,7 +88,7 @@ async function verifyBearerToken(token: string): Promise<IUser | null> {
       ApiToken.findByIdAndUpdate(candidate._id, { lastUsedAt: new Date() }).catch(() => {});
 
       const user = await User.findById(candidate.user);
-      if (!user || user.deactivatedAt) return null;
+      if (!user || user.deactivatedAt || !sameTenant(user, candidate.tenant)) return null;
 
       // Every API token is a machine credential, scoped or not. tokenScoped answers a narrower
       // question — whether project access was narrowed — and an unscoped admin token leaves it
@@ -123,7 +126,7 @@ async function verifyOAuthAccessToken(token: string): Promise<IUser | null> {
   if (!clientStillExists) return null;
 
   const user = await User.findById(record.user);
-  if (!user || user.deactivatedAt) return null;
+  if (!user || user.deactivatedAt || !sameTenant(user, record.tenant)) return null;
 
   // An OAuth access token is held by an application, not typed by a person at a keyboard
   user.viaMachineCredential = true;
@@ -147,7 +150,7 @@ async function verifySessionCookie(request: Request): Promise<IUser | null> {
   const user = await User.findById(session.userId);
   // Deactivation revokes every session, so this is the second line: one minted in the moment
   // between the check and the revoke must not resolve either
-  if (!user || user.deactivatedAt) return null;
+  if (!user || user.deactivatedAt || !sameTenant(user, session.tenant)) return null;
 
   user.viaMachineCredential = false;
   user.sessionId = session.sessionId;

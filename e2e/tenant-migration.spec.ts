@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import mongoose from "mongoose";
 import { E2E_MONGODB_URI, e2eDatabaseName } from "./seed";
-import { backfillTenants, ensureOrganisation, scopedModelNames } from "../src/lib/tenant-migration";
+import { backfillTenants, dropGlobalUniques, ensureOrganisation, RETIRED_GLOBAL_UNIQUES, scopedModelNames } from "../src/lib/tenant-migration";
 import { DEFAULT_TENANT_ID } from "../src/lib/tenant-field";
 import { duplicateKeyField } from "../src/lib/mongo-errors";
 
@@ -178,6 +178,69 @@ test("the per-tenant uniques build beside the old ones on data that has blank e-
     expect(names, model).toContain(Object.entries(fields).map(([k, v]) => `${k}_${v}`).join("_"));
     expect(names.length, `${model} keeps its global twin`).toBeGreaterThan(2);
   }
+});
+
+async function buildPerTenantTwins() {
+  await backfillTenants(conn, { apply: true });
+  for (const model of new Set(declaredPerTenantUniques.map((u) => u.model))) {
+    await (conn.model(model, mongoose.model(model).schema) as mongoose.Model<mongoose.AnyObject>).createIndexes();
+  }
+}
+
+const indexNames = async (collection: string) => (await col(collection).indexes()).map((i) => i.name);
+
+test("BP-665: the global uniques are dropped only where the per-tenant twin already exists", async () => {
+  await expect(dropGlobalUniques(conn, { apply: true })).rejects.toThrow(/twin .* is not built yet/);
+  for (const { collection, name } of RETIRED_GLOBAL_UNIQUES) expect(await indexNames(collection), collection).toContain(name);
+});
+
+test("BP-665: one missing twin, the last one checked, drops nothing at all", async () => {
+  await buildPerTenantTwins();
+  await col("agentblocks").dropIndex("key_1_tenant_1");
+
+  await expect(dropGlobalUniques(conn, { apply: true })).rejects.toThrow(/agentblocks\.key_1/);
+
+  for (const { collection, name } of RETIRED_GLOBAL_UNIQUES) expect(await indexNames(collection), collection).toContain(name);
+});
+
+test("BP-665: a twin with another partial filter is no twin", async () => {
+  await buildPerTenantTwins();
+  await col("invitations").dropIndex("email_1_tenant_1");
+  await col("invitations").createIndex({ email: 1, tenant: 1 }, { unique: true, partialFilterExpression: { status: "expired" } });
+
+  await expect(dropGlobalUniques(conn, { apply: true })).rejects.toThrow(/invitations\.email_1/);
+  expect(await indexNames("invitations")).toContain("email_1");
+});
+
+test("BP-665: a dry run names the seven it would drop and drops none; apply drops them and keeps the twins", async () => {
+  await buildPerTenantTwins();
+
+  const dry = await dropGlobalUniques(conn, { apply: false });
+  expect(dry.map((o) => o.state)).toEqual(Array(7).fill("would drop"));
+  for (const { collection, name } of RETIRED_GLOBAL_UNIQUES) expect(await indexNames(collection), collection).toContain(name);
+
+  const applied = await dropGlobalUniques(conn, { apply: true });
+  expect(applied.map((o) => o.state)).toEqual(Array(7).fill("dropped"));
+  for (const { collection, name, twin } of RETIRED_GLOBAL_UNIQUES) {
+    const names = await indexNames(collection);
+    expect(names, collection).not.toContain(name);
+    expect(names, collection).toContain(Object.entries(twin).map(([k, v]) => `${k}_${v}`).join("_"));
+  }
+
+  expect((await dropGlobalUniques(conn, { apply: true })).map((o) => o.state)).toEqual(Array(7).fill("absent"));
+});
+
+test("BP-665: once dropped, the same username, e-mail and project key live in two tenants", async () => {
+  await buildPerTenantTwins();
+  await dropGlobalUniques(conn, { apply: true });
+
+  await col("users").insertOne({ username: "alice", email: "alice@x.test", tenant: OTHER_TENANT });
+  await col("users").insertOne({ username: "alice", email: "alice@x.test", tenant: THIRD_TENANT });
+  await col("projects").insertOne({ key: "SAME", tenant: OTHER_TENANT });
+  await col("projects").insertOne({ key: "SAME", tenant: THIRD_TENANT });
+  await expect(col("users").insertOne({ username: "alice", tenant: OTHER_TENANT })).rejects.toThrow(/E11000/);
+
+  expect(await col("users").countDocuments({ username: "alice" })).toBe(2);
 });
 
 const insertOutcome = (promise: Promise<unknown>) =>

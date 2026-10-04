@@ -50,3 +50,56 @@ export async function ensureOrganisation(
   }
   return legacy ? "re-keyed" : "created";
 }
+
+type IndexKey = Record<string, 1>;
+
+export const RETIRED_GLOBAL_UNIQUES: {
+  collection: string;
+  name: string;
+  twin: IndexKey;
+  partial?: Record<string, unknown>;
+}[] = [
+  { collection: "users", name: "username_1", twin: { username: 1, tenant: 1 } },
+  { collection: "users", name: "email_1", twin: { email: 1, tenant: 1 }, partial: { email: { $gt: "" } } },
+  { collection: "projects", name: "key_1", twin: { key: 1, tenant: 1 } },
+  { collection: "workers", name: "name_1_host_1", twin: { name: 1, host: 1, tenant: 1 } },
+  { collection: "identities", name: "issuer_1_subject_1", twin: { issuer: 1, subject: 1, tenant: 1 } },
+  { collection: "invitations", name: "email_1", twin: { email: 1, tenant: 1 }, partial: { status: "pending" } },
+  { collection: "agentblocks", name: "key_1", twin: { key: 1, tenant: 1 } },
+];
+
+export type RetiredIndexOutcome = { collection: string; name: string; state: "absent" | "would drop" | "dropped" };
+
+export async function dropGlobalUniques(
+  connection: mongoose.Connection,
+  { apply }: { apply: boolean }
+): Promise<RetiredIndexOutcome[]> {
+  const db = connection.db;
+  if (!db) throw new Error("No database handle");
+  const existing = new Set((await db.listCollections().toArray()).map((c) => c.name));
+  const present: { collection: string; name: string }[] = [];
+  const outcomes: RetiredIndexOutcome[] = [];
+  for (const { collection, name, twin, partial } of RETIRED_GLOBAL_UNIQUES) {
+    const indexes = existing.has(collection) ? await db.collection(collection).indexes() : [];
+    if (!indexes.some((index) => index.name === name)) {
+      outcomes.push({ collection, name, state: "absent" });
+      continue;
+    }
+    const hasTwin = indexes.some(
+      (index) =>
+        index.unique &&
+        JSON.stringify(index.key) === JSON.stringify(twin) &&
+        JSON.stringify(index.partialFilterExpression ?? null) === JSON.stringify(partial ?? null)
+    );
+    if (!hasTwin) {
+      throw new Error(`${collection}.${name}: its per-tenant twin ${JSON.stringify(twin)} is not built yet — start the app once so it builds it, then run this again. Nothing was dropped.`);
+    }
+    present.push({ collection, name });
+  }
+  for (const { collection, name } of present) {
+    if (apply) await db.collection(collection).dropIndex(name);
+    outcomes.push({ collection, name, state: apply ? "dropped" : "would drop" });
+  }
+  return outcomes;
+}
+

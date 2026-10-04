@@ -132,7 +132,7 @@ export async function POST(request: Request) {
   // Immediately after the write and before anything else, because everything below can reject: a
   // throw between the two would leave the password changed, the link spent, and the lockout
   // standing — the exact state this call exists to prevent (BP-353 review).
-  await clearAccountAttempts(user.username).catch(() => {});
+  await clearAccountAttempts(db.tenant, user.username).catch(() => {});
 
   // Every other link too, and only once the password is safely written. Issuing is a delete
   // followed by a create, so two requests racing leave two live links; without this, resetting

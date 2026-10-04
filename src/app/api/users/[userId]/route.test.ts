@@ -249,8 +249,8 @@ describe("PUT /api/users/:id — an admin sets a password", () => {
   // has to lift a login lockout as well — including one an attacker aimed at them, which on a
   // deployment with no client address anybody can fill. The mock alone proved nothing.
   it("lifts the target's login lockout, from every address it was filled from", async () => {
-    const shared = lockoutKey("-", "target");
-    const fromElsewhere = lockoutKey("203.0.113.9", "target");
+    const shared = lockoutKey(DEFAULT_TENANT_ID, "-", "target");
+    const fromElsewhere = lockoutKey(DEFAULT_TENANT_ID, "203.0.113.9", "target");
     for (let i = 0; i < ANONYMOUS_ACCOUNT_ATTEMPTS; i++) {
       await recordFailedAttempt(shared);
       await recordFailedAttempt(fromElsewhere);
@@ -266,7 +266,7 @@ describe("PUT /api/users/:id — an admin sets a password", () => {
   });
 
   it("leaves the lockout alone when no password was set", async () => {
-    const shared = lockoutKey("-", "target");
+    const shared = lockoutKey(DEFAULT_TENANT_ID, "-", "target");
     for (let i = 0; i < ANONYMOUS_ACCOUNT_ATTEMPTS; i++) await recordFailedAttempt(shared);
     const target = targetDoc({ role: "member" });
     found(target);

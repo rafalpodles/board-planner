@@ -108,7 +108,7 @@ export const PUT = withAuth(async (request, { user, db }) => {
       }
       const currentPassword = body.currentPassword;
       const { lockedOut, result: passwordMatches } = await withLockout(
-        lockoutKey(getClientIp(request) ?? "-", user.username, "email-change"),
+        lockoutKey(db.tenant, getClientIp(request) ?? "-", user.username, "email-change"),
         async () => (record.password && (await bcrypt.compare(currentPassword, record.password)) ? true : null),
         sourceKey(String(user._id), "email-change"),
         EXCLUSIVE_SOURCE_ATTEMPTS

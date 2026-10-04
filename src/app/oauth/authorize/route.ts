@@ -513,7 +513,7 @@ export async function POST(req: Request) {
   const password = String(form.get("password") || "");
   const clientIp = getClientIp(req);
   const { lockedOut, result: user } = await withLockout(
-    lockoutKey(clientIp ?? "-", username),
+    lockoutKey(db.tenant, clientIp ?? "-", username),
     () => verifyCredentials(db, username, password),
     clientIp ? sourceKey(clientIp) : undefined
   );

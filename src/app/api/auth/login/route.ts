@@ -43,7 +43,7 @@ export async function POST(request: Request) {
   let user: Awaited<ReturnType<typeof verifyCredentials>>;
   try {
     ({ lockedOut, result: user } = await withLockout(
-      lockoutKey(clientIp ?? "-", username),
+      lockoutKey(db.tenant, clientIp ?? "-", username),
       () => verifyCredentials(db, username, password),
       clientIp ? sourceKey(clientIp) : undefined
     ));
