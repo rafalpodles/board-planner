@@ -24,7 +24,6 @@ vi.mock("@/lib/db", async () => {
 // a variable that lives inside a describe() block, only one declared here.
 const updateMany = vi.fn(() => Promise.resolve({ modifiedCount: 0 }));
 const seedAgents = vi.fn(() => Promise.resolve());
-const startTenantBackfill = vi.fn();
 const countDocuments = vi.fn(() => Promise.resolve(1));
 const admins = vi.fn((): unknown[] => []);
 const userFind = vi.fn(() => ({ select: () => ({ lean: () => Promise.resolve(admins()) }) }));
@@ -37,7 +36,6 @@ const startDigestScheduler = vi.fn(() => ({ started: true as const, tickMs: 300_
 
 vi.mock("@/models/project", () => ({ Project: { updateMany } }));
 vi.mock("@/lib/agent-seed", () => ({ seedAgents }));
-vi.mock("@/lib/tenant-migration", () => ({ startTenantBackfill }));
 vi.mock("@/models/user", () => ({ User: { countDocuments, find: userFind } }));
 vi.mock("@/models/identity", () => ({ Identity: { exists: () => Promise.resolve(null) } }));
 vi.mock("@/lib/setup-code", () => ({ setupCode }));
@@ -261,7 +259,6 @@ describe("register — a database that is down at boot", () => {
     expect(connectDB).toHaveBeenCalledTimes(2);
     expect(markPmAsMachine).toHaveBeenCalledTimes(1);
     expect(seedAgents).toHaveBeenCalledTimes(1);
-    expect(startTenantBackfill).toHaveBeenCalledTimes(1);
     expect(repairMachineNames).toHaveBeenCalledTimes(1);
   });
 
@@ -306,24 +303,6 @@ describe("register — a database that is down at boot", () => {
 
     expect(repairMachineNames).toHaveBeenCalledTimes(1);
     expect(error).toHaveBeenCalledWith("Failed to repair machine names:", expect.any(Error));
-    expect(startPmScheduler).toHaveBeenCalledTimes(1);
-  });
-
-  it("starts the tenant backfill at boot, and still starts the schedulers when starting it throws", async () => {
-    process.env.NEXT_RUNTIME = "nodejs";
-    delete process.env.ENCRYPTION_KEY;
-    vi.spyOn(console, "log").mockImplementation(() => {});
-    const error = vi.spyOn(console, "error").mockImplementation(() => {});
-    connectDB.mockImplementation(() => Promise.resolve());
-    startTenantBackfill.mockImplementationOnce(() => {
-      throw new Error("models would not load");
-    });
-    const { register } = await import("./instrumentation");
-
-    await register();
-
-    expect(startTenantBackfill).toHaveBeenCalledTimes(1);
-    expect(error).toHaveBeenCalledWith("Failed to start the tenant backfill:", expect.any(Error));
     expect(startPmScheduler).toHaveBeenCalledTimes(1);
   });
 

@@ -120,13 +120,6 @@ async function bootWhenDatabaseIsReady(): Promise<void> {
       console.error("Failed to seed the agent catalog:", error);
     });
 
-    // TODO(BP-663): remove once a missing tenant can no longer be written
-    await import("@/lib/tenant-migration")
-      .then(({ startTenantBackfill }) => startTenantBackfill())
-      .catch((error) => {
-        console.error("Failed to start the tenant backfill:", error);
-      });
-
     // The backfill that stood here set `worker.agent` to the shipped Default on every project
     // where it was null — on **every start**, not once. It existed so the task picker's first
     // suggestion always pointed at a real agent, and BP-458 makes that unnecessary: no default

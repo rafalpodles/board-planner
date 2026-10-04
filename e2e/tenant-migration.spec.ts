@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import mongoose from "mongoose";
 import { E2E_MONGODB_URI, e2eDatabaseName } from "./seed";
-import { backfillTenants, scopedModelNames } from "../src/lib/tenant-migration";
+import { backfillTenants, ensureOrganisation, scopedModelNames } from "../src/lib/tenant-migration";
 import { DEFAULT_TENANT_ID } from "../src/lib/tenant-field";
 import { duplicateKeyField } from "../src/lib/mongo-errors";
 
@@ -118,6 +118,42 @@ test("a late row, with the field missing or null, is given the default tenant an
   expect(await col("projects").findOne({ key: "OTHER" })).toMatchObject({ tenant: OTHER_TENANT });
   expect(await col("projects").findOne({ key: "MISSING" })).toMatchObject({ tenant: DEFAULT_TENANT_ID });
   expect(await col("projects").findOne({ key: "NULLED" })).toMatchObject({ tenant: DEFAULT_TENANT_ID });
+});
+
+const tenantRows = () => col(collectionOf("Tenant")).find({}).toArray();
+
+test("a legacy tenant row becomes the named organisation, keeping its entitlements, and nothing is written in a dry run", async () => {
+  const before = await wholeDatabase();
+
+  expect(await ensureOrganisation(conn, { apply: false, name: "Rafał-org" })).toBe("re-keyed");
+  expect(await wholeDatabase()).toBe(before);
+
+  expect(await ensureOrganisation(conn, { apply: true, name: "Rafał-org" })).toBe("re-keyed");
+  const rows = await tenantRows();
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({ _id: DEFAULT_TENANT_ID, name: "Rafał-org", entitlements: LEGACY_TENANT_ROW.entitlements });
+});
+
+test("an instance with no tenant row gets one, named", async () => {
+  await col(collectionOf("Tenant")).deleteMany({});
+
+  expect(await ensureOrganisation(conn, { apply: true, name: "Acme" })).toBe("created");
+
+  expect(await tenantRows()).toMatchObject([{ _id: DEFAULT_TENANT_ID, name: "Acme", entitlements: { plan: "free", source: "none" } }]);
+});
+
+test("naming an organisation again renames it and a second run changes nothing else", async () => {
+  await ensureOrganisation(conn, { apply: true, name: "First" });
+
+  expect(await ensureOrganisation(conn, { apply: true, name: "Second" })).toBe("present");
+
+  expect(await tenantRows()).toMatchObject([{ _id: DEFAULT_TENANT_ID, name: "Second", entitlements: LEGACY_TENANT_ROW.entitlements }]);
+});
+
+test("two tenant rows and none on the default id are refused rather than guessed at", async () => {
+  await col(collectionOf("Tenant")).insertOne({ _id: new mongoose.Types.ObjectId(), entitlements: {} });
+
+  await expect(ensureOrganisation(conn, { apply: true, name: "X" })).rejects.toThrow(/cannot tell which is the organisation/);
 });
 
 type Spec = { model: string; fields: Record<string, number>; options: { partialFilterExpression?: Record<string, unknown> } };

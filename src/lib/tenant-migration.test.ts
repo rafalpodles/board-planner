@@ -1,45 +1,50 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import type mongoose from "mongoose";
 import { DEFAULT_TENANT_ID } from "./tenant-field";
-import { backfillTenants, scopedModelNames, startTenantBackfill, UNSCOPED_MODELS } from "./tenant-migration";
+import { backfillTenants, ensureOrganisation, scopedModelNames, UNSCOPED_MODELS } from "./tenant-migration";
 
-function fakeConnection(missing: number) {
-  const updateMany = vi.fn(() => Promise.resolve({ matchedCount: missing }));
-  const countDocuments = vi.fn(() => Promise.resolve(missing));
-  const collection = vi.fn((name: string) => ({ collectionName: name, updateMany, countDocuments }));
-  return { connection: { db: { collection } } as unknown as mongoose.Connection, collection, updateMany, countDocuments };
+function fakeDb(missing: number, tenantRows: Record<string, unknown>[] = []) {
+  const calls = { updateMany: vi.fn(() => Promise.resolve({ matchedCount: missing })), insertOne: vi.fn(), deleteOne: vi.fn(), updateOne: vi.fn() };
+  const touched: string[] = [];
+  const collection = (name: string) => {
+    touched.push(name);
+    return {
+      collectionName: name,
+      countDocuments: () => Promise.resolve(missing),
+      find: () => ({ toArray: () => Promise.resolve(tenantRows) }),
+      ...calls,
+    };
+  };
+  return { connection: { db: { collection } } as unknown as mongoose.Connection, calls, touched };
 }
 
 describe("backfillTenants", () => {
   it("gives every scoped collection the default tenant where it has none, and counts what it gave", async () => {
-    const { connection, updateMany } = fakeConnection(2);
+    const { connection, calls } = fakeDb(2);
 
-    const { total, byCollection } = await backfillTenants(connection, { apply: true });
+    const { total } = await backfillTenants(connection, { apply: true });
 
-    expect(updateMany).toHaveBeenCalledTimes(scopedModelNames().length);
-    expect(updateMany).toHaveBeenCalledWith({ tenant: null }, { $set: { tenant: DEFAULT_TENANT_ID } });
+    expect(calls.updateMany).toHaveBeenCalledTimes(scopedModelNames().length);
+    expect(calls.updateMany).toHaveBeenCalledWith({ tenant: null }, { $set: { tenant: DEFAULT_TENANT_ID } });
     expect(total).toBe(2 * scopedModelNames().length);
-    expect(Object.keys(byCollection)).toHaveLength(scopedModelNames().length);
   });
 
   it("touches neither the tenant table nor the throttle", async () => {
-    const { connection, collection } = fakeConnection(1);
+    const { connection, touched } = fakeDb(1);
 
     await backfillTenants(connection, { apply: true });
 
-    const touched = collection.mock.calls.map(([name]) => name);
     expect(touched).not.toContain("tenants");
     expect(touched).not.toContain("ratelimits");
     expect(UNSCOPED_MODELS).toEqual(["Tenant", "RateLimit"]);
   });
 
   it("only counts in a dry run", async () => {
-    const { connection, updateMany, countDocuments } = fakeConnection(3);
+    const { connection, calls } = fakeDb(3);
 
     const { total } = await backfillTenants(connection, { apply: false });
 
-    expect(updateMany).not.toHaveBeenCalled();
-    expect(countDocuments).toHaveBeenCalledWith({ tenant: null });
+    expect(calls.updateMany).not.toHaveBeenCalled();
     expect(total).toBe(3 * scopedModelNames().length);
   });
 
@@ -48,42 +53,51 @@ describe("backfillTenants", () => {
   });
 });
 
-describe("startTenantBackfill", () => {
-  beforeEach(() => vi.useFakeTimers());
-  afterEach(() => {
-    vi.useRealTimers();
-    vi.restoreAllMocks();
+describe("ensureOrganisation", () => {
+  const legacy = { _id: "legacy-id", entitlements: { plan: "pro", features: [], source: "service" } };
+
+  it("re-keys the legacy row to the default id, names it and keeps its entitlements", async () => {
+    const { connection, calls } = fakeDb(0, [legacy]);
+
+    expect(await ensureOrganisation(connection, { apply: true, name: "Rafał-org" })).toBe("re-keyed");
+
+    expect(calls.insertOne).toHaveBeenCalledWith(
+      expect.objectContaining({ _id: DEFAULT_TENANT_ID, name: "Rafał-org", entitlements: legacy.entitlements })
+    );
+    expect(calls.deleteOne).toHaveBeenCalledWith({ _id: "legacy-id" });
   });
 
-  it("runs at once, says how many documents it gave, and runs again five minutes later", async () => {
-    const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    const { connection, updateMany } = fakeConnection(1);
+  it("creates the organisation when the instance has no tenant row", async () => {
+    const { connection, calls } = fakeDb(0, []);
 
-    startTenantBackfill(connection);
-    await vi.advanceTimersByTimeAsync(0);
-    const first = updateMany.mock.calls.length;
-    expect(first).toBe(scopedModelNames().length);
-    expect(log).toHaveBeenCalledWith(`Gave ${scopedModelNames().length} document(s) the default tenant`);
+    expect(await ensureOrganisation(connection, { apply: true, name: "Acme" })).toBe("created");
 
-    await vi.advanceTimersByTimeAsync(5 * 60_000);
-    expect(updateMany.mock.calls.length).toBe(2 * first);
+    expect(calls.insertOne).toHaveBeenCalledWith(expect.objectContaining({ _id: DEFAULT_TENANT_ID, name: "Acme" }));
+    expect(calls.deleteOne).not.toHaveBeenCalled();
   });
 
-  it("logs a failure and does not throw, so the app goes on starting", async () => {
-    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  it("only renames an organisation that already has the default id", async () => {
+    const { connection, calls } = fakeDb(0, [{ _id: DEFAULT_TENANT_ID }]);
 
-    startTenantBackfill({ db: undefined } as unknown as mongoose.Connection);
-    await vi.advanceTimersByTimeAsync(0);
+    expect(await ensureOrganisation(connection, { apply: true, name: "New name" })).toBe("present");
 
-    expect(error).toHaveBeenCalledWith("Failed to give every document a tenant:", expect.any(Error));
+    expect(calls.updateOne).toHaveBeenCalledWith({ _id: DEFAULT_TENANT_ID }, { $set: { name: "New name" } });
+    expect(calls.insertOne).not.toHaveBeenCalled();
   });
 
-  it("says nothing when there was nothing to give", async () => {
-    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+  it("writes nothing in a dry run", async () => {
+    const { connection, calls } = fakeDb(0, [legacy]);
 
-    startTenantBackfill(fakeConnection(0).connection);
-    await vi.advanceTimersByTimeAsync(0);
+    expect(await ensureOrganisation(connection, { apply: false, name: "X" })).toBe("re-keyed");
 
-    expect(log).not.toHaveBeenCalled();
+    expect(calls.insertOne).not.toHaveBeenCalled();
+    expect(calls.deleteOne).not.toHaveBeenCalled();
+    expect(calls.updateOne).not.toHaveBeenCalled();
+  });
+
+  it("refuses to guess between several tenant rows", async () => {
+    const { connection } = fakeDb(0, [legacy, { _id: "other" }]);
+
+    await expect(ensureOrganisation(connection, { apply: true, name: "X" })).rejects.toThrow(/cannot tell which is the organisation/);
   });
 });

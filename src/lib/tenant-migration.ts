@@ -7,8 +7,6 @@ export const UNSCOPED_MODELS = ["Tenant", "RateLimit"];
 export const scopedModelNames = () =>
   mongoose.modelNames().filter((name) => !UNSCOPED_MODELS.includes(name));
 
-const SECOND_PASS_MS = 5 * 60_000;
-
 export async function backfillTenants(
   connection: mongoose.Connection,
   { apply }: { apply: boolean }
@@ -29,16 +27,26 @@ export async function backfillTenants(
   return { total, byCollection };
 }
 
-export function startTenantBackfill(connection: mongoose.Connection = mongoose.connection): void {
-  const pass = () =>
-    backfillTenants(connection, { apply: true })
-      .then(({ total }) => {
-        if (total > 0) console.log(`Gave ${total} document(s) the default tenant`);
-      })
-      .catch((error) => {
-        console.error("Failed to give every document a tenant:", error);
-      });
+export async function ensureOrganisation(
+  connection: mongoose.Connection,
+  { apply, name }: { apply: boolean; name: string }
+): Promise<"present" | "created" | "re-keyed"> {
+  const db = connection.db;
+  if (!db) throw new Error("No database handle");
+  const tenants = db.collection(mongoose.model("Tenant").collection.name);
 
-  void pass();
-  setTimeout(() => void pass(), SECOND_PASS_MS).unref();
+  const rows = await tenants.find({}).toArray();
+  if (rows.some((row) => DEFAULT_TENANT_ID.equals(row._id))) {
+    if (apply) await tenants.updateOne({ _id: DEFAULT_TENANT_ID }, { $set: { name } });
+    return "present";
+  }
+  if (rows.length > 1) throw new Error(`${rows.length} tenant rows and none with the default id: cannot tell which is the organisation`);
+
+  const [legacy] = rows;
+  if (apply) {
+    const { _id, ...seed } = new (mongoose.model("Tenant"))({ _id: DEFAULT_TENANT_ID }).toObject();
+    await tenants.insertOne({ ...seed, ...(legacy ?? {}), _id, name });
+    if (legacy) await tenants.deleteOne({ _id: legacy._id });
+  }
+  return legacy ? "re-keyed" : "created";
 }
