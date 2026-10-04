@@ -20,6 +20,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
   const [setupCode, setSetupCode] = useState("");
+  const [organisation, setOrganisation] = useState("");
   const [isRegister, setIsRegister] = useState(false);
   // null until the server answers. Hidden while unknown and hidden on a failure: offering to
   // create the first administrator on an instance that already has one is the bug (BP-268), and
@@ -82,7 +83,7 @@ export default function LoginPage() {
         const res = await fetch("/api/users", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username, password, fullName, setupCode }),
+          body: JSON.stringify({ username, password, fullName, setupCode, organisation }),
         });
         if (!res.ok) {
           const data = await res.json();
@@ -156,6 +157,15 @@ export default function LoginPage() {
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
                 required
+              />
+            )}
+            {isRegister && (
+              <Input
+                label="Organisation name (optional)"
+                value={organisation}
+                onChange={(e) => setOrganisation(e.target.value)}
+                placeholder="default"
+                maxLength={80}
               />
             )}
             {isRegister && setupCodeField}

@@ -62,6 +62,51 @@ test.describe("an instance nobody has claimed", () => {
     expect(await (await request.get("/api/auth/instance")).json()).toEqual({ unclaimed: false, passwordSignIn: true });
   });
 
+  test("names the organisation when the first account does, and Settings shows it", async ({ page }) => {
+    await page.goto("/login");
+    await page.getByRole("button", { name: TOGGLE }).click();
+    await page.getByLabel("Username").fill("firstadmin");
+    await page.getByLabel("Password").fill("test1234");
+    await page.getByLabel("Full Name").fill("First Admin");
+    await page.getByLabel("Organisation name (optional)").fill("  Rafał-org ");
+    await page.getByLabel("Setup code").fill(BOOTSTRAP_TOKEN);
+
+    const created = page.waitForResponse((res) => res.url().endsWith("/api/users") && res.request().method() === "POST");
+    await page.getByRole("button", { name: "Create Account" }).click();
+    expect((await created).status()).toBe(201);
+    await expect(page).not.toHaveURL(/\/login/);
+
+    expect(await (await page.request.get("/api/entitlements")).json()).toMatchObject({ organisation: "Rafał-org" });
+    await page.goto("/settings/licence");
+    await expect(page.getByTestId("organisation-name")).toHaveText("Organisation: Rafał-org");
+  });
+
+  test("an instance whose first account gives no name is the default organisation", async ({ page, request }) => {
+    const created = await request.post("/api/users", {
+      headers: { "sec-fetch-site": "none" },
+      data: { username: "firstadmin", password: "test1234", fullName: "First Admin", setupCode: BOOTSTRAP_TOKEN },
+    });
+    expect(created.status(), await created.text()).toBe(201);
+
+    await page.goto("/login");
+    await page.getByLabel("Username").fill("firstadmin");
+    await page.getByLabel("Password").fill("test1234");
+    await page.getByRole("button", { name: "Sign In" }).click();
+    await expect(page).not.toHaveURL(/\/login/);
+
+    expect(await (await page.request.get("/api/entitlements")).json()).toMatchObject({ organisation: "default" });
+  });
+
+  test("refuses an organisation name that is too long, before making the account", async ({ request }) => {
+    const refused = await request.post("/api/users", {
+      headers: { "sec-fetch-site": "none" },
+      data: { username: "firstadmin", password: "test1234", fullName: "First Admin", setupCode: BOOTSTRAP_TOKEN, organisation: "x".repeat(81) },
+    });
+
+    expect(refused.status()).toBe(400);
+    expect(await (await request.get("/api/auth/instance")).json()).toMatchObject({ unclaimed: true });
+  });
+
   // BP-325: the instance is public before its operator registers, and the first account is an admin
   test("refuses the first account to whoever reaches the form without the setup code", async ({
     page,

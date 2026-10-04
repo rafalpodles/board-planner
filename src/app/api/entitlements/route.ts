@@ -7,6 +7,7 @@ import { getTenant } from "@/lib/tenant";
 export const GET = withAuth(async () => {
   const tenant = await getTenant();
   return NextResponse.json({
+    organisation: tenant.name ?? "default",
     plan: tenant.entitlements.plan,
     features: tenant.entitlements.features,
     expiresAt: tenant.entitlements.expiresAt ?? null,
