@@ -7,20 +7,25 @@ const SRC = join(__dirname, "..");
 const ROOT = join(SRC, "..");
 
 const UNSCOPED = ["tenant", "rateLimit"];
-const MODEL_IMPORT = /^\s*import\s+(?!type\b)[^;]*?from\s+["'](?:@\/models\/|(?:\.\.?\/)+models\/)([A-Za-z]+)["']/gm;
-const RAW_ACCESS = /mongoose\.models?\b|mongoose\.connection\.db|\bconnection\.db\b/;
+const MODELS_PATH = String.raw`["'](?:@\/models\/|(?:\.\.?\/)+models\/)([A-Za-z]+)["']`;
+const MODEL_IMPORT = new RegExp(
+  String.raw`^\s*(?:import|export)\s+(?!type\b)[^;]*?from\s+${MODELS_PATH}|import\s*\(\s*${MODELS_PATH}|^\s*import\s+${MODELS_PATH}`,
+  "gm"
+);
+const RAW_ACCESS =
+  /\bmongoose\.(?:models?|connections?)\b|\bconnection\.(?:db|collection|getClient)\b|\bgetClient\(|import\s*\{[^}]*\b(?:model|models|connection)\b[^}]*\}\s*from\s*["']mongoose["']/;
 
 function sources(dir: string): string[] {
   return readdirSync(dir).flatMap((entry) => {
     const path = join(dir, entry);
-    if (statSync(path).isDirectory()) return entry === "models" ? [] : sources(path);
+    if (statSync(path).isDirectory()) return path === join(SRC, "models") ? [] : sources(path);
     return /\.(ts|tsx)$/.test(entry) && !/\.test\.(ts|tsx)$/.test(entry) ? [path] : [];
   });
 }
 
 function reachesTheDatabaseRaw(path: string): boolean {
   const text = readFileSync(path, "utf8");
-  const imports = [...text.matchAll(MODEL_IMPORT)].map((match) => match[1]);
+  const imports = [...text.matchAll(MODEL_IMPORT)].map((match) => match[1] ?? match[2] ?? match[3]);
   return imports.some((name) => !UNSCOPED.includes(name)) || RAW_ACCESS.test(text);
 }
 

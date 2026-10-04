@@ -32,11 +32,7 @@ import { User } from "@/models/user";
 import { Worker } from "@/models/worker";
 import { DEFAULT_TENANT_ID } from "./tenant-field";
 
-/**
- * Thunks, not the models: a module that mocks one model for its own test imports this through the
- * middleware, and touching an export its mock does not define would fail every test that never
- * uses it.
- */
+// Thunks: a test that mocks one model must not fail on the exports of the others
 export const SCOPED_MODELS = {
   ActivityLog: () => ActivityLog,
   Agent: () => Agent,
@@ -92,15 +88,7 @@ const SAFE_METHODS = [
   "bulkWrite",
 ] as const;
 
-/**
- * A model with the same call signatures as Mongoose's, minus everything that could read or write
- * across tenants. A handler holding one of these cannot ask for another tenant's rows: the filter
- * it passes is always ANDed with its own tenant, and a `tenant` key in a filter, an update or a
- * document is refused rather than honoured.
- *
- * `populate` follows a stored reference without the filter, which is safe only because a scoped
- * write never stores a reference to another tenant's document.
- */
+/** The Mongoose call signatures a handler may use: every one is confined to the caller's tenant. */
 export type ScopedModel<M> = M extends Model<infer T>
   ? Pick<M, (typeof SAFE_METHODS)[number]> & {
       /** `new Model(doc)` with the tenant set, for the code that builds a document and saves it. */
@@ -155,17 +143,29 @@ function stamp(doc: unknown, tenant: Types.ObjectId): Doc {
   return { ...doc, tenant };
 }
 
+function stampCreate(args: unknown[], tenant: Types.ObjectId): unknown[] {
+  const [first, ...rest] = args;
+  if (Array.isArray(first)) return [first.map((doc) => stamp(doc, tenant)), ...rest];
+  return args.map((doc) => stamp(doc, tenant));
+}
+
 const stampAll = (docs: unknown, tenant: Types.ObjectId) =>
   Array.isArray(docs) ? docs.map((doc) => stamp(doc, tenant)) : stamp(docs, tenant);
 
 const FOREIGN_STAGES = ["$lookup", "$graphLookup", "$unionWith", "$merge", "$out"];
 
+function refuseForeignStages(node: unknown): void {
+  if (Array.isArray(node)) return node.forEach(refuseForeignStages);
+  if (!isDoc(node)) return;
+  for (const [key, value] of Object.entries(node)) {
+    if (FOREIGN_STAGES.includes(key)) throw new UnscopableError(`The ${key} stage`);
+    refuseForeignStages(value);
+  }
+}
+
 function scopePipeline(pipeline: unknown, tenant: Types.ObjectId): Doc[] {
   if (!Array.isArray(pipeline)) throw new UnscopableError("A pipeline that is not an array");
-  for (const stage of pipeline) {
-    const name = isDoc(stage) ? Object.keys(stage)[0] : undefined;
-    if (name && FOREIGN_STAGES.includes(name)) throw new UnscopableError(`The ${name} stage`);
-  }
+  refuseForeignStages(pipeline);
   return [{ $match: { tenant } }, ...pipeline];
 }
 
@@ -214,7 +214,7 @@ function scopeModel(model: Model<never>, tenant: Types.ObjectId): unknown {
     countDocuments: (filter, ...rest) => call("countDocuments", scopeFilter(filter, tenant), ...rest),
     exists: (filter) => call("exists", scopeFilter(filter, tenant)),
     distinct: (field, filter, ...rest) => call("distinct", field, scopeFilter(filter, tenant), ...rest),
-    create: (docs, ...rest) => call("create", stampAll(docs, tenant), ...rest),
+    create: (...args) => call("create", ...stampCreate(args, tenant)),
     insertMany: (docs, ...rest) => call("insertMany", stampAll(docs, tenant), ...rest),
     aggregate: (pipeline, ...rest) => call("aggregate", scopePipeline(pipeline, tenant), ...rest),
     bulkWrite: (operations, ...rest) => call("bulkWrite", scopeBulk(operations, tenant), ...rest),
@@ -234,7 +234,7 @@ export function scoped(tenant: Types.ObjectId | string): ScopedDb {
   const built = new Map<string, unknown>();
   const db = new Proxy({} as ScopedDb, {
     get(_target, name) {
-      if (typeof name !== "string" || !(name in SCOPED_MODELS)) return undefined;
+      if (typeof name !== "string" || !Object.hasOwn(SCOPED_MODELS, name)) return undefined;
       if (!built.has(name)) {
         built.set(name, scopeModel(SCOPED_MODELS[name as keyof typeof SCOPED_MODELS]() as unknown as Model<never>, id));
       }
@@ -245,11 +245,7 @@ export function scoped(tenant: Types.ObjectId | string): ScopedDb {
   return db;
 }
 
-/**
- * The tenant a signed-in caller works in. Users carry one since BP-662; a document read before that
- * field existed carries none and is the default tenant's, which is the only tenant there is until
- * BP-664 resolves it from the host.
- */
+// TODO(BP-664): a caller with no tenant must be refused, not placed in the default one
 export function tenantOf(user: { tenant?: Types.ObjectId | string | null }): Types.ObjectId {
   return user.tenant ? new Types.ObjectId(String(user.tenant)) : DEFAULT_TENANT_ID;
 }

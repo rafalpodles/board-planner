@@ -93,6 +93,17 @@ describe("writes", () => {
     expect(model.insertMany).toHaveBeenCalledWith([{ name: "w", tenant: A }]);
   });
 
+  it("create stamps every document it is given, however it is called", () => {
+    db().create({ name: "x" } as never, { name: "y" } as never);
+    expect(model.create).toHaveBeenCalledWith({ name: "x", tenant: A }, { name: "y", tenant: A });
+    expect(() => db().create({ name: "x" } as never, { tenant: Types.ObjectId.createFromHexString("0000000000000000000000b2") } as never)).toThrow(TenantKeyError);
+  });
+
+  it("create keeps the options of the array form", () => {
+    db().create([{ name: "x" }] as never, { ordered: true } as never);
+    expect(model.create).toHaveBeenCalledWith([{ name: "x", tenant: A }], { ordered: true });
+  });
+
   it("build constructs the model with the tenant set", () => {
     db().build({ name: "x" } as never);
     expect(Constructed).toHaveBeenCalledWith({ name: "x", tenant: A });
@@ -100,6 +111,14 @@ describe("writes", () => {
 });
 
 describe("a tenant the caller names", () => {
+  it("is refused by every update form, not only updateOne", () => {
+    expect(() => db().updateMany({}, { $set: { tenant: A } } as never)).toThrow(TenantKeyError);
+    expect(() => db().findOneAndUpdate({}, { $set: { tenant: A } } as never)).toThrow(TenantKeyError);
+    expect(() => db().findByIdAndUpdate(new Types.ObjectId(), { $set: { tenant: A } } as never)).toThrow(TenantKeyError);
+    expect(() => db().findOneAndUpdate({}, [{ $set: { goal: "x" } }] as never)).toThrow(UnscopableError);
+    expect(() => db().updateMany({}, [{ $set: { goal: "x" } }] as never)).toThrow(UnscopableError);
+  });
+
   it("is refused in a filter, a document and every kind of update", () => {
     expect(() => db().find({ tenant: A } as never)).toThrow(TenantKeyError);
     expect(() => db().updateOne({}, { $set: { tenant: A } } as never)).toThrow(TenantKeyError);
@@ -115,6 +134,11 @@ describe("a tenant the caller names", () => {
 });
 
 describe("what cannot be scoped is refused rather than passed through", () => {
+  it("a foreign stage nested in $facet or a sub-pipeline", () => {
+    expect(() => db().aggregate([{ $facet: { x: [{ $lookup: { from: "sprints", pipeline: [], as: "all" } }] } }] as never)).toThrow(UnscopableError);
+    expect(() => db().aggregate([{ $group: { _id: null } }, { $facet: { x: [{ $unionWith: "sprints" }] } }] as never)).toThrow(UnscopableError);
+  });
+
   it("an update pipeline, a filter that is not an object, a foreign aggregation stage", () => {
     expect(() => db().updateOne({}, [{ $set: { goal: "x" } }] as never)).toThrow(UnscopableError);
     expect(() => db().find("name" as never)).toThrow(UnscopableError);
@@ -179,5 +203,8 @@ describe("the tenant a caller works in", () => {
   it("is not an accessor for a model that is not tenant-scoped", () => {
     expect((scoped(A) as unknown as Record<string, unknown>).Tenant).toBeUndefined();
     expect((scoped(A) as unknown as Record<string, unknown>).RateLimit).toBeUndefined();
+    for (const inherited of ["constructor", "toString", "valueOf", "hasOwnProperty"]) {
+      expect((scoped(A) as unknown as Record<string, unknown>)[inherited]).toBeUndefined();
+    }
   });
 });

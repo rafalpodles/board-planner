@@ -23,10 +23,6 @@ type AuthenticatedHandler = (
   context: {
     params: Promise<Record<string, string>>;
     user: IUser;
-    /**
-     * The caller's own tenant's data: every query through it is confined to that tenant (BP-663).
-     * Handlers use this and not the model imports, which a repo test is retiring.
-     */
     db: ScopedDb;
     /**
      * Set only when this request authenticated as a worker and the credential was verified
@@ -134,7 +130,7 @@ function machineOwnerDeactivated() {
 export function withWorker(
   handler: (
     request: Request,
-    context: { params: Promise<Record<string, string>>; worker: IWorker }
+    context: { params: Promise<Record<string, string>>; worker: IWorker; db: ScopedDb }
   ) => Promise<Response>
 ) {
   return async (request: Request, context: { params: Promise<Record<string, string>> }) => {
@@ -161,7 +157,7 @@ export function withWorker(
       return NextResponse.json({ error: "Not your worker" }, { status: 403 });
     }
 
-    return handler(request, { ...context, worker });
+    return handler(request, { ...context, worker, db: scopedFor(worker) });
   };
 }
 

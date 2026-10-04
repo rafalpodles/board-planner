@@ -24,7 +24,9 @@ const rawRows = () => mongoose.connection.db!.collection("sprints").find({}).sor
 const names = (rows: object[]) => rows.map((row) => String((row as { name: unknown }).name)).sort();
 
 test.beforeAll(async () => {
+  await mongoose.disconnect();
   await mongoose.connect(E2E_MONGODB_URI, { dbName: DB, autoIndex: false, autoCreate: false });
+  expect(mongoose.connection.db!.databaseName).toBe(DB);
 });
 
 test.afterAll(async () => {
@@ -52,6 +54,14 @@ test("create and insertMany stamp the caller's tenant, never the schema default"
   const second = (await rawRows()).filter((row) => String(row.name).startsWith("b-"));
   expect(second).toHaveLength(3);
   expect(second.every((row) => B.equals(row.tenant))).toBe(true);
+});
+
+test("create with several documents stamps every one, none falls back to the schema default", async () => {
+  await scoped(B).Sprint.create(sprint("b-x") as never, sprint("b-y") as never, sprint("b-z") as never);
+
+  const rows = (await rawRows()).filter((row) => /^b-[xyz]$/.test(String(row.name)));
+  expect(rows).toHaveLength(3);
+  expect(rows.every((row) => B.equals(row.tenant))).toBe(true);
 });
 
 test("reads see only the caller's tenant", async () => {

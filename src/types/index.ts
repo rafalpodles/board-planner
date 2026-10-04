@@ -718,6 +718,7 @@ export interface IEnrolmentToken {
 }
 
 export interface IWorker {
+  tenant?: Types.ObjectId;
   _id: Types.ObjectId;
   name: string;
   host: string;
