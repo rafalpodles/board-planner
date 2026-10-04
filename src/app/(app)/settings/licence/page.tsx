@@ -14,11 +14,17 @@ export default function LicenceSettingsPage() {
 
   const [licence, setLicence] = useState<LicenceSummary | null>(null);
   const [failed, setFailed] = useState(false);
+  const [organisation, setOrganisation] = useState("");
 
   const load = useCallback(async () => {
     setFailed(false);
     try {
-      setLicence(await api.get("/api/admin/licence"));
+      const [summary, entitlements] = await Promise.all([
+        api.get("/api/admin/licence"),
+        api.get("/api/entitlements"),
+      ]);
+      setLicence(summary);
+      setOrganisation(entitlements.organisation ?? "");
     } catch {
       setFailed(true);
     }
@@ -45,6 +51,11 @@ export default function LicenceSettingsPage() {
 
   return (
     <div className="max-w-2xl" data-testid="licence-page">
+      {organisation && (
+        <p className="text-sm text-text-muted mb-4" data-testid="organisation-name">
+          Organisation: <strong className="text-text">{organisation}</strong>
+        </p>
+      )}
       <h2 className="text-lg font-semibold mb-1">Licence</h2>
       <p className="text-sm text-text-muted mb-6">
         Read from <code>LICENCE_KEY</code> in the environment. To change it, set the variable and restart.

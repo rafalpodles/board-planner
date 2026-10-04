@@ -9,7 +9,7 @@ const { connectDB, findOneAndUpdate } = vi.hoisted(() => ({
 vi.mock("./db", () => ({ connectDB }));
 vi.mock("@/models/tenant", () => ({ Tenant: { findOneAndUpdate } }));
 
-const { getTenant } = await import("./tenant");
+const { getTenant, checkOrganisationName, nameOrganisation, ORGANISATION_NAME_MAX } = await import("./tenant");
 const { SINGLETON_ID } = await import("./singleton");
 const { signLicence } = await import("./licence");
 
@@ -107,3 +107,36 @@ describe("getTenant with LICENCE_KEY", () => {
     expect(await getTenant()).toBe(stored);
   });
 });
+
+describe("checkOrganisationName", () => {
+  it("takes no name, and a blank one, as no name", () => {
+    expect(checkOrganisationName(undefined)).toEqual({ ok: true, value: null });
+    expect(checkOrganisationName(null)).toEqual({ ok: true, value: null });
+    expect(checkOrganisationName("   ")).toEqual({ ok: true, value: null });
+  });
+
+  it("trims a name", () => {
+    expect(checkOrganisationName("  Rafał-org ")).toEqual({ ok: true, value: "Rafał-org" });
+  });
+
+  it("refuses anything but a string, and a name over the limit", () => {
+    expect(checkOrganisationName(42)).toMatchObject({ ok: false });
+    expect(checkOrganisationName("x".repeat(ORGANISATION_NAME_MAX))).toMatchObject({ ok: true });
+    expect(checkOrganisationName("x".repeat(ORGANISATION_NAME_MAX + 1))).toMatchObject({ ok: false });
+  });
+});
+
+describe("nameOrganisation", () => {
+  it("sets the name on the instance's one tenant row", async () => {
+    findOneAndUpdate.mockResolvedValue({ _id: "tenant-1" });
+
+    await nameOrganisation("Rafał-org");
+
+    expect(findOneAndUpdate).toHaveBeenCalledWith(
+      {},
+      { $set: { name: "Rafał-org" }, $setOnInsert: { _id: SINGLETON_ID } },
+      { upsert: true, returnDocument: "after" }
+    );
+  });
+});
+

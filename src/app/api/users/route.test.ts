@@ -66,6 +66,12 @@ vi.mock("@/lib/middleware", () => ({
   withAdmin: (h: (r: Request, c: unknown) => unknown) => (r: Request) => h(r, { user: { _id: "a1" } }),
 }));
 
+const nameOrganisation = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/tenant", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/tenant")>()),
+  nameOrganisation,
+}));
+
 const { GET, POST } = await import("@/app/api/users/route");
 
 const post = (body: unknown) =>
@@ -75,6 +81,7 @@ const VALID = { password: "password123", fullName: "Somebody" };
 
 beforeEach(() => {
   create.mockReset();
+  nameOrganisation.mockReset();
   revokePendingInvitationsFor.mockReset();
   logInstanceAudit.mockReset();
   create.mockResolvedValue({ _id: "u1", username: "newcomer" });
@@ -232,6 +239,42 @@ describe("claiming an instance nobody has claimed", () => {
     expect(res.status).toBe(403);
     expect(create).not.toHaveBeenCalled();
     expect(recordFailedAttempt).toHaveBeenCalledWith("bootstrap:203.0.113.9");
+  });
+
+  it("names the organisation after the first account, trimmed, when the operator gives a name", async () => {
+    countDocuments.mockResolvedValue(0);
+    getAuthUser.mockResolvedValue(null);
+
+    const res = await post({ ...VALID, username: "firstadmin", setupCode: "operator-held-setup-code", organisation: "  Rafał-org  " });
+
+    expect(res.status).toBe(201);
+    expect(nameOrganisation).toHaveBeenCalledWith("Rafał-org");
+  });
+
+  it("leaves the organisation as it is when the first account gives no name, or a blank one", async () => {
+    countDocuments.mockResolvedValue(0);
+    getAuthUser.mockResolvedValue(null);
+
+    await post({ ...VALID, username: "firstadmin", setupCode: "operator-held-setup-code" });
+    await post({ ...VALID, username: "secondtry", setupCode: "operator-held-setup-code", organisation: "   " });
+
+    expect(nameOrganisation).not.toHaveBeenCalled();
+  });
+
+  it("refuses an organisation name over the limit before making any account", async () => {
+    countDocuments.mockResolvedValue(0);
+    getAuthUser.mockResolvedValue(null);
+
+    const res = await post({ ...VALID, username: "firstadmin", setupCode: "operator-held-setup-code", organisation: "x".repeat(81) });
+
+    expect(res.status).toBe(400);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("ignores an organisation name once the instance is claimed: an administrator adding a member cannot rename it", async () => {
+    await post({ ...VALID, username: "someone", organisation: "Hijacked" });
+
+    expect(nameOrganisation).not.toHaveBeenCalled();
   });
 
   it("creates the administrator when the operator's code is given", async () => {

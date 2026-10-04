@@ -1,3 +1,4 @@
+import { checkOrganisationName, nameOrganisation } from "@/lib/tenant";
 import { NextResponse } from "next/server";
 import { passwordSignInEnabled } from "@/lib/password-sign-in";
 import { readJsonBody } from "@/lib/request-body";
@@ -92,12 +93,15 @@ export async function POST(request: Request) {
     fullName?: string;
     email?: string;
     setupCode?: string;
+    organisation?: string;
   }>(request);
   if (!read.ok) return read.response;
   const body = read.value;
   const checked = checkNewAccount(body);
   if (!checked.ok) return NextResponse.json({ error: checked.error }, { status: 400 });
   const { username: storedUsername, fullName: storedFullName, email, password } = checked.value;
+  const organisation = checkOrganisationName(body.organisation);
+  if (!organisation.ok) return NextResponse.json({ error: organisation.error }, { status: 400 });
 
   const userCount = await User.countDocuments();
   const isBootstrap = userCount === 0;
@@ -145,6 +149,7 @@ export async function POST(request: Request) {
       role: isBootstrap ? "admin" : "member",
     });
     await revokePendingInvitationsFor(email);
+    if (isBootstrap && organisation.value) await nameOrganisation(organisation.value);
     // The account's own beginning, which nothing recorded: the log knew that somebody's display
     // name changed and not that the account existed. `target` is the username because this row has
     // to still name them after the account is gone.
