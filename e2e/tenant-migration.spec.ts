@@ -194,6 +194,24 @@ test("BP-665: the global uniques are dropped only where the per-tenant twin alre
   for (const { collection, name } of RETIRED_GLOBAL_UNIQUES) expect(await indexNames(collection), collection).toContain(name);
 });
 
+test("BP-665: one missing twin, the last one checked, drops nothing at all", async () => {
+  await buildPerTenantTwins();
+  await col("agentblocks").dropIndex("key_1_tenant_1");
+
+  await expect(dropGlobalUniques(conn, { apply: true })).rejects.toThrow(/agentblocks\.key_1/);
+
+  for (const { collection, name } of RETIRED_GLOBAL_UNIQUES) expect(await indexNames(collection), collection).toContain(name);
+});
+
+test("BP-665: a twin with another partial filter is no twin", async () => {
+  await buildPerTenantTwins();
+  await col("invitations").dropIndex("email_1_tenant_1");
+  await col("invitations").createIndex({ email: 1, tenant: 1 }, { unique: true, partialFilterExpression: { status: "expired" } });
+
+  await expect(dropGlobalUniques(conn, { apply: true })).rejects.toThrow(/invitations\.email_1/);
+  expect(await indexNames("invitations")).toContain("email_1");
+});
+
 test("BP-665: a dry run names the seven it would drop and drops none; apply drops them and keeps the twins", async () => {
   await buildPerTenantTwins();
 

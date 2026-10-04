@@ -607,6 +607,11 @@ describe("getAuthUser — a credential bound to its own tenant (BP-665)", () => 
     expect(await getAuthUser(cookie())).not.toBeNull();
   });
 
+  it("refuses a session row that carries no tenant", async () => {
+    sessionFound(sessionRow({ tenant: null }));
+    expect(await getAuthUser(cookie())).toBeNull();
+  });
+
   it("refuses a person with no tenant at all, rather than placing them in the default one", async () => {
     sessionFound(sessionRow());
     userFindById.mockResolvedValue(user({ tenant: undefined }));
