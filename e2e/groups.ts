@@ -132,6 +132,7 @@ export const GROUPS = {
     "tenants-isolation.spec.ts",
     "tenants-route-families.spec.ts",
     "tenants-addresses.spec.ts",
+    "tenants-boards.spec.ts",
     "sessions-and-auth.spec.ts",
     "proxied-login-throttle.spec.ts",
     "compose-cookie.spec.ts",
