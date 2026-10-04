@@ -1,3 +1,4 @@
+import { hostNotFound } from "@/lib/middleware";
 import { NextResponse } from "next/server";
 import { passwordSignInEnabled, passwordSignInOff } from "@/lib/password-sign-in";
 import bcrypt from "bcryptjs";
@@ -10,12 +11,13 @@ import { checkNewAccount } from "@/lib/new-account";
 import { claimInvitation, findInvitationByToken } from "@/lib/invitations";
 import { INVITATION_REFUSALS } from "@/lib/invitation-refusals";
 import { completeAcceptance } from "@/lib/invitation-acceptance";
-import { scopedToDefaultTenant } from "@/lib/db-scope";
+import { scopedForRequest } from "@/lib/db-scope";
 
 const ATTEMPTS_PER_SOURCE = 20;
 
 export async function POST(request: Request) {
-  const db = scopedToDefaultTenant();
+  const db = await scopedForRequest(request);
+  if (!db) return hostNotFound();
   if (!passwordSignInEnabled()) return passwordSignInOff();
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;

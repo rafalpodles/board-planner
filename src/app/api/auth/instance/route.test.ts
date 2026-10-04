@@ -4,6 +4,13 @@ const countDocuments = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/user", () => ({ User: { countDocuments } }));
+vi.mock("@/lib/tenant-host", async (importOriginal) => {
+  const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
+  return {
+    ...(await importOriginal<typeof import("@/lib/tenant-host")>()),
+    tenantOfRequest: async () => ({ kind: "tenant", tenant: DEFAULT_TENANT_ID }),
+  };
+});
 
 const { GET } = await import("./route");
 
@@ -15,10 +22,22 @@ beforeEach(() => vi.clearAllMocks());
  * itself and refuses a second bootstrap whatever any client believes.
  */
 describe("GET /api/auth/instance", () => {
+  it("offers no first account when organisations live on subdomains (BP-666)", async () => {
+    process.env.TENANT_DOMAIN = "board-planner.com";
+    try {
+      countDocuments.mockResolvedValue(0);
+      const res = await GET(new Request("http://localhost/api/auth/instance"));
+      expect(res.status).toBe(200);
+      expect((await res.json()).unclaimed).toBe(false);
+    } finally {
+      delete process.env.TENANT_DOMAIN;
+    }
+  });
+
   it("says an empty instance is unclaimed", async () => {
     countDocuments.mockResolvedValue(0);
 
-    expect(await (await GET()).json()).toEqual({ unclaimed: true, passwordSignIn: true });
+    expect(await (await GET(new Request("http://localhost/api/auth/instance"))).json()).toEqual({ unclaimed: true, passwordSignIn: true });
   });
 
   // The control, and the half the bug was on: without it "answers unclaimed" and "answers the
@@ -26,7 +45,7 @@ describe("GET /api/auth/instance", () => {
   it("says an instance with one user is not", async () => {
     countDocuments.mockResolvedValue(1);
 
-    expect(await (await GET()).json()).toEqual({ unclaimed: false, passwordSignIn: true });
+    expect(await (await GET(new Request("http://localhost/api/auth/instance"))).json()).toEqual({ unclaimed: false, passwordSignIn: true });
   });
 
   it("says when the operator turned password sign-in off", async () => {
@@ -34,7 +53,7 @@ describe("GET /api/auth/instance", () => {
     process.env.PASSWORD_SIGN_IN = "off";
 
     try {
-      expect((await (await GET()).json()).passwordSignIn).toBe(false);
+      expect((await (await GET(new Request("http://localhost/api/auth/instance"))).json()).passwordSignIn).toBe(false);
     } finally {
       delete process.env.PASSWORD_SIGN_IN;
     }
@@ -48,7 +67,7 @@ describe("GET /api/auth/instance", () => {
     );
 
     process.env.PASSWORD_SIGN_IN = "off";
-    const res = await GET();
+    const res = await GET(new Request("http://localhost/api/auth/instance"));
     delete process.env.PASSWORD_SIGN_IN;
 
     expect(res.status).toBe(503);

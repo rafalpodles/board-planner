@@ -1,6 +1,7 @@
+import { hostNotFound } from "@/lib/middleware";
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { scopedFor, scopedToDefaultTenant, type ScopedDb, tenantOf } from "@/lib/db-scope";
+import { scopedFor, type ScopedDb, tenantOf, scopedForRequest } from "@/lib/db-scope";
 import { getAuthUser, getClientIp } from "@/lib/auth";
 import { isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
 import {
@@ -9,8 +10,8 @@ import {
   createSession,
   legacySessionCookies,
   readFlowCookie,
-  selfOrigin,
 } from "@/lib/session";
+import { originFor, tenantDomain } from "@/lib/tenant-host";
 import { providerById, OidcProvider } from "@/lib/oidc/providers";
 import {
   ACCEPT_COOKIE,
@@ -75,6 +76,7 @@ async function link(db: ScopedDb, provider: OidcProvider, claims: VerifiedClaims
     detail: `${provider.label}, ${how}`,
   });
   void notifyIdentityLinked({
+    tenant: db.tenant,
     email: user.email,
     username: user.username,
     provider: provider.label,
@@ -110,8 +112,9 @@ async function accountFor(db: ScopedDb, provider: OidcProvider, claims: Verified
 }
 
 export async function GET(request: Request, { params }: { params: Promise<{ provider: string }> }) {
-  const db = scopedToDefaultTenant();
-  const origin = selfOrigin();
+  const db = await scopedForRequest(request);
+  if (!db) return hostNotFound();
+  const origin = await originFor(db);
   if (!origin) return NextResponse.json({ error: "PUBLIC_ORIGIN is not set" }, { status: 500 });
   const provider = providerById((await params).provider);
   if (!provider) return redirectTo(origin, "/login?sso=failed");
@@ -141,7 +144,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
     const back = (result: string) => redirectTo(origin, `/settings/security?link=${result}`);
     // The session that started the link has to be the one finishing it
     const current = await getAuthUser(request).catch(() => null);
-    if (!current || current.viaMachineCredential || String(current._id) !== outcome.userId) return back("failed");
+    if (!current || current.viaMachineCredential || String(current._id) !== outcome.userId || !tenantOf(current).equals(db.tenant)) {
+      return back("failed");
+    }
     const own = scopedFor(current);
     const holder = await linkedAccount(own, claims);
     if (holder) return back(String(holder._id) === String(current._id) ? "linked" : "taken");
@@ -258,7 +263,7 @@ async function setUpFirstAccount(
   profile: { username: string; fullName: string } | null
 ) {
   if (!profile) return { refused: "failed" as const };
-  if ((await db.User.countDocuments()) > 0) return { refused: "claimed" as const };
+  if (tenantDomain() || (await db.User.countDocuments()) > 0) return { refused: "claimed" as const };
   if (!claims.email) return { refused: "no_email" as const };
   let user;
   try {

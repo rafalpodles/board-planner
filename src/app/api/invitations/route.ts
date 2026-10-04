@@ -4,7 +4,7 @@ import { connectDB } from "@/lib/db";
 import { readJsonBody } from "@/lib/request-body";
 import { withAdmin } from "@/lib/middleware";
 import { isValidEmail, normaliseEmail } from "@/lib/email";
-import { selfOrigin } from "@/lib/session";
+import { originFor } from "@/lib/tenant-host";
 import { issueInvitation, InvitationBoardInput, recordDelivery } from "@/lib/invitations";
 import { deliverTo, INTERACTIVE_ONLY, NO_ORIGIN_ERROR } from "@/lib/invitation-mail";
 import { describeInvitation, toApiInvitations } from "@/lib/invitation-view";
@@ -74,7 +74,7 @@ export const POST = withAdmin(async (request, { user, db }) => {
   const boards = parseBoards(body.boards);
   if (!boards.ok) return NextResponse.json({ error: boards.error }, { status: 400 });
 
-  const origin = selfOrigin();
+  const origin = await originFor(db);
   if (!origin) return NextResponse.json({ error: NO_ORIGIN_ERROR }, { status: 500 });
 
   await connectDB();

@@ -1,6 +1,7 @@
+import { hostNotFound } from "@/lib/middleware";
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { scopedToDefaultTenant } from "@/lib/db-scope";
+import { scopedForRequest } from "@/lib/db-scope";
 import { getClientIp } from "@/lib/auth";
 import { consumeEmailChange, releaseEmailChange } from "@/lib/email-change";
 import { revokePendingInvitationsFor } from "@/lib/invitations";
@@ -23,7 +24,8 @@ const REFUSALS: Record<string, string> = {
 // A POST from the page rather than the link itself: a mail scanner following every link in an
 // inbox would otherwise confirm an address nobody there asked for (BP-359)
 export async function POST(request: Request) {
-  const db = scopedToDefaultTenant();
+  const db = await scopedForRequest(request);
+  if (!db) return hostNotFound();
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
 

@@ -1,3 +1,4 @@
+import type { ScopedDb } from "@/lib/db-scope";
 import bcrypt from "bcryptjs";
 import { Types } from "mongoose";
 import { connectDB } from "./db";
@@ -35,11 +36,12 @@ export const MIN_PASSWORD_LENGTH = 8;
 const ABSENT_USER_HASH = bcrypt.hashSync("::no such user::", PASSWORD_COST_FACTOR);
 
 export async function verifyCredentials(
+  db: ScopedDb,
   username: string,
   password: string
 ): Promise<IUser | null> {
   await connectDB();
-  const user = await User.findOne({ username: username.toLowerCase() }).select(
+  const user = await db.User.findOne({ username: username.toLowerCase() }).select(
     "+password"
   );
 

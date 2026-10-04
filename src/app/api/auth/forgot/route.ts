@@ -1,8 +1,9 @@
+import { hostNotFound } from "@/lib/middleware";
 import { NextResponse } from "next/server";
 import { passwordSignInEnabled, passwordSignInOff } from "@/lib/password-sign-in";
 import { readJsonBody } from "@/lib/request-body";
 import { connectDB } from "@/lib/db";
-import { scopedToDefaultTenant } from "@/lib/db-scope";
+import { scopedForRequest } from "@/lib/db-scope";
 import { getClientIp } from "@/lib/auth";
 import { APP_NAME } from "@/lib/brand";
 import { isEmailConfigured, normaliseEmail, sendEmail } from "@/lib/email";
@@ -15,7 +16,8 @@ import {
   recordFailedAttempt,
   sourceKey,
 } from "@/lib/rate-limit";
-import { provenanceRefusal, selfOrigin } from "@/lib/session";
+import { provenanceRefusal } from "@/lib/session";
+import { originFor } from "@/lib/tenant-host";
 import type { ScopedDb } from "@/lib/db-scope";
 
 // One answer for every outcome: account found, no such account, account with no address, machine
@@ -31,7 +33,8 @@ const UNIFORM_ANSWER = {
 const REQUESTS_PER_SOURCE = 10;
 
 export async function POST(request: Request) {
-  const db = scopedToDefaultTenant();
+  const db = await scopedForRequest(request);
+  if (!db) return hostNotFound();
   if (!passwordSignInEnabled()) return passwordSignInOff();
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
@@ -75,7 +78,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const origin = selfOrigin();
+  const origin = await originFor(db);
   if (!origin) {
     console.error("Password reset requested with no PUBLIC_ORIGIN configured");
     return NextResponse.json(

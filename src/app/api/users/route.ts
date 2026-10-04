@@ -1,16 +1,17 @@
+import { tenantDomain } from "@/lib/tenant-host";
 import { NextResponse } from "next/server";
 import { passwordSignInEnabled } from "@/lib/password-sign-in";
 import { readJsonBody } from "@/lib/request-body";
 import { checkOrganisationName, nameOrganisation } from "@/lib/tenant";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
-import { scopedFor, scopedToDefaultTenant, type ScopedDb } from "@/lib/db-scope";
+import { scopedFor, type ScopedDb, scopedForRequest } from "@/lib/db-scope";
 import { getAuthUser, getClientIp, PASSWORD_COST_FACTOR } from "@/lib/auth";
 import { refuseSetupCode } from "@/lib/setup-code";
 import { checkNewAccount } from "@/lib/new-account";
 import { duplicateKeyField } from "@/lib/mongo-errors";
 import { ProvenanceError, provenanceRefusal } from "@/lib/session";
-import { withAdmin } from "@/lib/middleware";
+import { withAdmin, hostNotFound, refusedOnThisHost } from "@/lib/middleware";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { revokePendingInvitationsFor } from "@/lib/invitations";
 import { liveIdentityFilter, providerById } from "@/lib/oidc/providers";
@@ -74,7 +75,8 @@ function latest(...times: (number | undefined)[]): string | null {
 }
 
 export async function POST(request: Request) {
-  const db = scopedToDefaultTenant();
+  const db = await scopedForRequest(request);
+  if (!db) return hostNotFound();
   if (!passwordSignInEnabled()) {
     return NextResponse.json(
       {
@@ -103,7 +105,7 @@ export async function POST(request: Request) {
   if (!organisation.ok) return NextResponse.json({ error: organisation.error }, { status: 400 });
 
   const userCount = await db.User.countDocuments();
-  const isBootstrap = userCount === 0;
+  const isBootstrap = userCount === 0 && !tenantDomain();
 
   // Declared out here because the audit row below names who did this, and on the bootstrap path
   // that is nobody: the first account on an instance is made by whoever reaches the login screen.
@@ -135,6 +137,8 @@ export async function POST(request: Request) {
         { status: 403 }
       );
     }
+    const refusedHere = await refusedOnThisHost(request, authUser);
+    if (refusedHere) return refusedHere;
   }
 
   const hashedPassword = await bcrypt.hash(password, PASSWORD_COST_FACTOR);

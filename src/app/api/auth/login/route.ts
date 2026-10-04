@@ -3,9 +3,9 @@ import { passwordSignInEnabled, passwordSignInOff } from "@/lib/password-sign-in
 import { readJsonBody } from "@/lib/request-body";
 import { getClientIp, verifyCredentials } from "@/lib/auth";
 import { isDatabaseUnreachable } from "@/lib/db-errors";
-import { databaseUnavailable } from "@/lib/middleware";
+import { databaseUnavailable, hostNotFound } from "@/lib/middleware";
 import { lockoutKey, sourceKey, withLockout } from "@/lib/rate-limit";
-import { tenantOf } from "@/lib/db-scope";
+import { scopedForRequest, tenantOf } from "@/lib/db-scope";
 import {
   buildSessionCookie,
   createSession,
@@ -17,6 +17,14 @@ export async function POST(request: Request) {
   if (!passwordSignInEnabled()) return passwordSignInOff();
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
+  let db;
+  try {
+    db = await scopedForRequest(request);
+  } catch (e) {
+    if (isDatabaseUnreachable(e)) return databaseUnavailable();
+    throw e;
+  }
+  if (!db) return hostNotFound();
 
   const read = await readJsonBody<{ username?: unknown; password?: unknown }>(request);
   if (!read.ok) return read.response;
@@ -36,7 +44,7 @@ export async function POST(request: Request) {
   try {
     ({ lockedOut, result: user } = await withLockout(
       lockoutKey(clientIp ?? "-", username),
-      () => verifyCredentials(username, password),
+      () => verifyCredentials(db, username, password),
       clientIp ? sourceKey(clientIp) : undefined
     ));
   } catch (e) {

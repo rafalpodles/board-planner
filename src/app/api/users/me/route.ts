@@ -7,7 +7,7 @@ import { isValidEmail, normaliseEmail } from "@/lib/email";
 import { notifyAddressChanged, sendAddressConfirmation } from "@/lib/security-mail";
 import { cancelEmailChange, issueEmailChange } from "@/lib/email-change";
 import { isEmailConfigured } from "@/lib/email";
-import { selfOrigin } from "@/lib/session";
+import { originFor } from "@/lib/tenant-host";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { withAuth } from "@/lib/middleware";
 import { FULL_NAME_RULE, isValidFullName, normaliseFullName } from "@/lib/identifiers";
@@ -187,7 +187,7 @@ export const PUT = withAuth(async (request, { user, db }) => {
   }
 
   if (pendingEmail) {
-    const origin = selfOrigin();
+    const origin = await originFor(db);
     if (!origin) {
       return NextResponse.json(
         { error: "This instance does not know its own address, so it cannot send a confirmation link" },

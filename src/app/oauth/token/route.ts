@@ -1,7 +1,8 @@
+import { hostNotFound } from "@/lib/middleware";
 import { NextResponse } from "next/server";
 import { Types } from "mongoose";
 import { connectDB } from "@/lib/db";
-import { scopedToDefaultTenant, type ScopedDb } from "@/lib/db-scope";
+import { type ScopedDb, scopedForRequest } from "@/lib/db-scope";
 import {
   randomToken,
   readFormBody,
@@ -70,7 +71,8 @@ async function issueTokens(
 }
 
 export async function POST(req: Request) {
-  const db = scopedToDefaultTenant();
+  const db = await scopedForRequest(req);
+  if (!db) return hostNotFound();
   await connectDB();
   const form = await readFormBody(req);
   if (!form) {

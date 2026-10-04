@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { readJsonBody } from "@/lib/request-body";
 import { connectDB } from "@/lib/db";
-import { protocolOf } from "@/lib/middleware";
+import { protocolOf, hostNotFound } from "@/lib/middleware";
 import { stripControlCharacters } from "@/lib/identifiers";
 import {
   PROTOCOL_VERSION,
@@ -17,7 +17,7 @@ import {
   enrolmentTokenOwnerId,
 } from "@/lib/enrolment";
 import { logInstanceAudit } from "@/lib/instanceAudit";
-import { scopedToDefaultTenant } from "@/lib/db-scope";
+import { scopedForRequest } from "@/lib/db-scope";
 
 // Authenticated by a single-use enrolment token, NOT by an admin session or an admin API token.
 //
@@ -32,7 +32,8 @@ function bearerOf(request: Request): string {
 }
 
 export async function POST(request: Request) {
-  const db = scopedToDefaultTenant();
+  const db = await scopedForRequest(request);
+  if (!db) return hostNotFound();
   await connectDB();
 
   // Shape is checked before the token is spent: an operator gets one enrolment token, and burning

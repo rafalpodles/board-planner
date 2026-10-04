@@ -3,7 +3,7 @@ import { passwordSignInEnabled, passwordSignInOff } from "@/lib/password-sign-in
 import { readJsonBody } from "@/lib/request-body";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
-import { scopedToDefaultTenant } from "@/lib/db-scope";
+import { scopedForRequest } from "@/lib/db-scope";
 import { getClientIp, MIN_PASSWORD_LENGTH, PASSWORD_COST_FACTOR } from "@/lib/auth";
 import {
   anonymousMultiplier,
@@ -20,6 +20,7 @@ import {
   releaseResetToken,
 } from "@/lib/password-reset";
 import { provenanceRefusal, revokeUserCredentials } from "@/lib/session";
+import { hostNotFound } from "@/lib/middleware";
 
 const ATTEMPTS_PER_SOURCE = 20;
 
@@ -30,7 +31,8 @@ const REFUSALS: Record<string, string> = {
 };
 
 export async function POST(request: Request) {
-  const db = scopedToDefaultTenant();
+  const db = await scopedForRequest(request);
+  if (!db) return hostNotFound();
   if (!passwordSignInEnabled()) return passwordSignInOff();
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
@@ -161,6 +163,7 @@ export async function POST(request: Request) {
   }
 
   void notifyPasswordChanged({
+    tenant: db.tenant,
     email: user.email,
     username: user.username,
     how: "reset_link",

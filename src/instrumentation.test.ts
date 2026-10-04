@@ -184,6 +184,21 @@ describe("register", () => {
     expect(logged).toHaveBeenCalledWith(expect.stringContaining("PASSWORD_SIGN_IN=off needs a sign-in provider"));
   });
 
+  it("exits on a TENANT_DOMAIN that is not a bare domain (BP-666)", async () => {
+    process.env.NEXT_RUNTIME = "nodejs";
+    delete process.env.ENCRYPTION_KEY;
+    process.env.TENANT_DOMAIN = "https://board-planner.com";
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`exit:${code}`);
+    }) as never);
+    const { register } = await import("./instrumentation");
+
+    await expect(register()).rejects.toThrow("exit:1");
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining("TENANT_DOMAIN must be a bare domain"));
+  });
+
   it("starts normally when no key is configured at all", async () => {
     process.env.NEXT_RUNTIME = "nodejs";
     delete process.env.ENCRYPTION_KEY;

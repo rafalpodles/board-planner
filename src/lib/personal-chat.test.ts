@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import { Types } from "mongoose";
 
 const safeFetch = vi.fn().mockResolvedValue({ ok: true });
 vi.mock("@/lib/safe-fetch", () => ({ safeFetch: (...a: unknown[]) => safeFetch(...a) }));
@@ -12,6 +13,8 @@ vi.mock("@/lib/encryption", () => ({ decryptSecret: (v: string) => v }));
 vi.mock("@/lib/session", () => ({ selfOrigin: () => "https://app.example.com" }));
 
 const { sendPersonalChat } = await import("@/lib/personal-chat");
+
+const TENANT = new Types.ObjectId();
 
 const slackUser = {
   _id: "u1",
@@ -29,6 +32,7 @@ describe("a personal chat message", () => {
     safeFetch.mockClear();
 
     await sendPersonalChat({
+      tenant: TENANT,
       users: [slackUser],
       type: "mentioned",
       title: '> <https://phish.example|Click here',
@@ -44,6 +48,7 @@ describe("a personal chat message", () => {
     safeFetch.mockClear();
 
     await sendPersonalChat({
+      tenant: TENANT,
       users: [slackUser],
       type: "task_assigned",
       title: "Ordinary title",
@@ -60,6 +65,7 @@ describe("a message about a board", () => {
     safeFetch.mockClear();
 
     await sendPersonalChat({
+      tenant: TENANT,
       users: [slackUser],
       type: "board_access",
       title: "Olga added you to Orbit as a member",
@@ -79,6 +85,7 @@ describe("what the message may not do", () => {
     safeFetch.mockClear();
 
     await sendPersonalChat({
+      tenant: TENANT,
       users: [slackUser],
       type: "mentioned",
       title: "Ordinary title",
@@ -103,6 +110,7 @@ describe("what the message may not do", () => {
     };
 
     await sendPersonalChat({
+      tenant: TENANT,
       users: [discordUser],
       type: "task_assigned",
       title: "@everyone **Assigned to you** look here",
@@ -123,6 +131,7 @@ describe("personal chat fan-out", () => {
     safeFetch.mockImplementation(() => new Promise((resolve) => landers.push(resolve)));
 
     await sendPersonalChat({
+      tenant: TENANT,
       users: Array.from({ length: 9 }, (_, i) => ({ ...slackUser, _id: `u${i}` })),
       type: "mentioned",
       title: "T",
@@ -142,7 +151,7 @@ describe("where a personal chat message may go", () => {
     safeFetch.mockClear();
     isAllowed.mockClear();
 
-    await sendPersonalChat({ users: [slackUser], type: "mentioned", title: "T" });
+    await sendPersonalChat({ tenant: TENANT, users: [slackUser], type: "mentioned", title: "T" });
 
     await vi.waitFor(() => expect(safeFetch).toHaveBeenCalledTimes(1));
     expect(isAllowed).toHaveBeenCalledWith("https://hooks.example/x", DESTINATION);

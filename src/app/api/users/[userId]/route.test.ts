@@ -337,6 +337,7 @@ describe("PUT /api/users/:id — an admin sets a password", () => {
     await PUT(put({ password: "a-fresh-password" }), ctx());
 
     expect(notifyPasswordChanged).toHaveBeenCalledWith({
+      tenant: DEFAULT_TENANT_ID,
       email: "target@example.com",
       username: "target",
       how: "admin",

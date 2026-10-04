@@ -36,6 +36,7 @@ const GLOBAL_UNIQUE: Record<string, string> = {
   "PmTrigger.project+task": "project is a tenant-owned id",
   "AgentRun.task+runId+worker": "task is a tenant-owned id",
   "Session.tokenHash": "random token",
+  "Tenant.slug": "the subdomain naming the tenant: unique across the platform by definition (BP-666)",
   "Task.project+taskNumber": "project is a tenant-owned id",
   "User.username": "TODO(BP-665): global until a second tenant can exist",
   "User.email": "TODO(BP-665): global until a second tenant can exist",

@@ -3,7 +3,7 @@ import { connectDB } from "@/lib/db";
 import { EmailNotConfiguredError, emailSettingsSummary, sendEmailOrThrow } from "@/lib/email";
 import { renderEmail } from "@/lib/email-template";
 import { withAdmin } from "@/lib/middleware";
-import { selfOrigin } from "@/lib/session";
+import { originFor } from "@/lib/tenant-host";
 import { APP_NAME } from "@/lib/brand";
 
 // A mail server refusing AUTH sometimes quotes the offending command back, and that command
@@ -56,7 +56,7 @@ export const POST = withAdmin(async (_request, { user, db }) => {
       { label: "Host", value: `${settings.host}:${settings.port}` },
       { label: "From", value: settings.from },
       { label: "Requested by", value: `${admin?.username ?? ""} · ${new Date().toUTCString()}` },
-      { label: "Instance", value: selfOrigin() ?? "not configured" },
+      { label: "Instance", value: (await originFor(db)) ?? "not configured" },
     ],
     footer: [
       "Sent because an administrator ran the delivery test. It goes to the requester's own address and nowhere else.",

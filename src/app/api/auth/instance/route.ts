@@ -1,8 +1,9 @@
+import { tenantDomain } from "@/lib/tenant-host";
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { scopedToDefaultTenant } from "@/lib/db-scope";
+import { scopedForRequest } from "@/lib/db-scope";
 import { isDatabaseUnreachable } from "@/lib/db-errors";
-import { databaseUnavailable } from "@/lib/middleware";
+import { databaseUnavailable, hostNotFound } from "@/lib/middleware";
 import { passwordSignInEnabled } from "@/lib/password-sign-in";
 
 /**
@@ -26,15 +27,16 @@ import { passwordSignInEnabled } from "@/lib/password-sign-in";
  * this discloses is named in the README rather than hidden — but it is a real difference and not
  * one to describe as none.
  */
-export async function GET() {
-  const db = scopedToDefaultTenant();
+export async function GET(request: Request) {
+  const db = await scopedForRequest(request);
+  if (!db) return hostNotFound();
   // Read from the environment, so it is answered even when the database is not: a page that waited
   // on it rendered nothing, and one that guessed showed a password form an off instance refuses
   const passwordSignIn = passwordSignInEnabled();
   try {
     await connectDB();
     const users = await db.User.countDocuments();
-    return NextResponse.json({ unclaimed: users === 0, passwordSignIn });
+    return NextResponse.json({ unclaimed: users === 0 && !tenantDomain(), passwordSignIn });
   } catch (e) {
     // Unreachable is not "unclaimed": answering true here would offer to create the first
     // administrator on an instance that may already have one

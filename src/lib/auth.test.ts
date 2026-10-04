@@ -31,6 +31,7 @@ vi.mock("@/models/session", () => ({
 }));
 
 const { getAuthUser, verifyCredentials, PASSWORD_COST_FACTOR } = await import("./auth");
+const { scopedToDefaultTenant } = await import("./db-scope");
 const { ProvenanceError, SESSION_IDLE_TTL_MS } = await import("./session");
 const { sha256 } = await import("./oauth");
 
@@ -473,14 +474,14 @@ describe("verifyCredentials and the username oracle", () => {
     lookupReturns({ username: "pm", kind: "machine", password: "$2a$10$stored" });
     bcryptCompare.mockResolvedValue(true);
 
-    expect(await verifyCredentials("pm", "the-password-it-was-given")).toBeNull();
+    expect(await verifyCredentials(scopedToDefaultTenant(), "pm", "the-password-it-was-given")).toBeNull();
   });
 
   it("still signs in a person whose password matches", async () => {
     lookupReturns({ username: "owner", kind: "human", password: "$2a$10$stored" });
     bcryptCompare.mockResolvedValue(true);
 
-    expect(await verifyCredentials("owner", "hunter2")).toMatchObject({ username: "owner" });
+    expect(await verifyCredentials(scopedToDefaultTenant(), "owner", "hunter2")).toMatchObject({ username: "owner" });
   });
 
   // BP-828: an account made through an identity provider has no password at all; it must refuse,
@@ -489,7 +490,7 @@ describe("verifyCredentials and the username oracle", () => {
     lookupReturns({ username: "sso-only", kind: "human" });
     bcryptCompare.mockResolvedValue(true);
 
-    expect(await verifyCredentials("sso-only", "anything")).toBeNull();
+    expect(await verifyCredentials(scopedToDefaultTenant(), "sso-only", "anything")).toBeNull();
     expect(bcryptCompare).toHaveBeenCalledTimes(1);
     expect(bcryptCompare.mock.calls[0][1]).toBe("$2a$10$absent");
   });
@@ -497,7 +498,7 @@ describe("verifyCredentials and the username oracle", () => {
   it("compares against a hash even when no such user exists", async () => {
     lookupReturns(null);
 
-    const result = await verifyCredentials("nobody", "hunter2");
+    const result = await verifyCredentials(scopedToDefaultTenant(), "nobody", "hunter2");
 
     expect(result).toBeNull();
     expect(bcryptCompare).toHaveBeenCalledTimes(1);
@@ -506,13 +507,13 @@ describe("verifyCredentials and the username oracle", () => {
 
   it("does the same amount of comparing for a hit and a miss", async () => {
     lookupReturns(null);
-    await verifyCredentials("nobody", "hunter2");
+    await verifyCredentials(scopedToDefaultTenant(), "nobody", "hunter2");
     const onMiss = bcryptCompare.mock.calls.length;
 
     bcryptCompare.mockClear();
     lookupReturns({ username: "owner", password: "$2a$10$stored" });
     bcryptCompare.mockResolvedValue(true);
-    await verifyCredentials("owner", "hunter2");
+    await verifyCredentials(scopedToDefaultTenant(), "owner", "hunter2");
 
     expect(bcryptCompare.mock.calls.length).toBe(onMiss);
   });
@@ -523,7 +524,7 @@ describe("verifyCredentials and the username oracle", () => {
   it("compares against the module's own hash, not against something cheap", async () => {
     lookupReturns(null);
 
-    await verifyCredentials("nobody", "hunter2");
+    await verifyCredentials(scopedToDefaultTenant(), "nobody", "hunter2");
 
     // The mocked hashSync returns this; the assertion is that the compare uses what the module
     // hashed at load, not a literal that bcrypt would reject in microseconds
@@ -539,7 +540,7 @@ describe("verifyCredentials and the username oracle", () => {
     lookupReturns({ username: "owner", password: "$2a$10$stored" });
     bcryptCompare.mockResolvedValue(false);
 
-    expect(await verifyCredentials("owner", "wrong")).toBeNull();
+    expect(await verifyCredentials(scopedToDefaultTenant(), "owner", "wrong")).toBeNull();
   });
 });
 
@@ -578,7 +579,7 @@ describe("a deactivated account", () => {
     });
     bcryptCompare.mockResolvedValue(true);
 
-    expect(await verifyCredentials("owner", "hunter2")).toBeNull();
+    expect(await verifyCredentials(scopedToDefaultTenant(), "owner", "hunter2")).toBeNull();
     expect(bcryptCompare).toHaveBeenCalledTimes(1);
   });
 });

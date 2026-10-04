@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { Types } from "mongoose";
 
 const beginFlow = vi.fn();
 const getAuthUser = vi.fn();
@@ -31,6 +32,17 @@ vi.mock("@/lib/invitations", () => ({ findInvitationByToken }));
 vi.mock("@/models/user", () => ({ User: { findOne: userFindOne, countDocuments: userCount } }));
 vi.mock("@/lib/setup-code", () => ({ refuseSetupCode }));
 vi.mock("bcryptjs", () => ({ default: { compare } }));
+const ACME = new Types.ObjectId();
+vi.mock("@/models/tenant", () => ({
+  Tenant: {
+    findOne: (filter: { slug: string }) => ({
+      select: () => ({ lean: async () => (filter.slug === "acme" ? { _id: ACME } : null) }),
+    }),
+    findById: (id: Types.ObjectId) => ({
+      select: () => ({ lean: async () => (id.equals(ACME) ? { _id: ACME, slug: "acme" } : null) }),
+    }),
+  },
+}));
 
 const { POST } = await import("./route");
 const { scopedToDefaultTenant } = await import("@/lib/db-scope");
@@ -249,5 +261,30 @@ describe("linking with password sign-in off (BP-830)", () => {
 
     signedInRecently.mockResolvedValue(false);
     expect((await start({ intent: "link" })).status).toBe(403);
+  });
+});
+
+describe("POST /api/auth/oidc/:provider/start with TENANT_DOMAIN set (BP-666)", () => {
+  afterEach(() => {
+    delete process.env.TENANT_DOMAIN;
+  });
+
+  it("registers the tenant's own callback address with the provider, not the configured origin", async () => {
+    process.env.TENANT_DOMAIN = "board-planner.com";
+
+    const res = await POST(
+      new Request("https://acme.board-planner.com/api/auth/oidc/oidc/start", {
+        method: "POST",
+        headers: { host: "acme.board-planner.com" },
+        body: JSON.stringify({}),
+      }),
+      { params: Promise.resolve({ provider: "oidc" }) }
+    );
+
+    expect(res.status).toBe(200);
+    expect(beginFlow).toHaveBeenCalledWith(
+      expect.objectContaining({ tenant: ACME }),
+      expect.objectContaining({ origin: "https://acme.board-planner.com" })
+    );
   });
 });

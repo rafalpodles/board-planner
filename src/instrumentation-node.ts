@@ -36,6 +36,8 @@ export async function bootNode(): Promise<void> {
     // Passwords off with no provider is an instance nobody can sign in to (BP-830)
     const { assertSignInConfig } = await import("@/lib/password-sign-in");
     assertSignInConfig();
+    const { assertTenantDomainConfig } = await import("@/lib/tenant-host");
+    assertTenantDomainConfig();
   } catch (err) {
     // Exiting rather than throwing, and this is not belt-and-braces. `NextServer.prepare()`
     // awaits the real prepare only when `dev` (next/dist/server/next.js), so under `next start`

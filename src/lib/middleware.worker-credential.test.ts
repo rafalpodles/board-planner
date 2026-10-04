@@ -1,3 +1,4 @@
+import { Types } from "mongoose";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import sift from "sift";
 
@@ -10,6 +11,8 @@ const check = vi.fn();
 const accessibleProjectIds = vi.fn();
 
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
+const tenantOfRequest = vi.hoisted(() => vi.fn());
+vi.mock("./tenant-host", () => ({ tenantOfRequest }));
 vi.mock("./worker-service", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./worker-service")>();
   return { ...actual, verifyWorkerCredential };
@@ -82,6 +85,7 @@ const context = () => ({ params: Promise.resolve({ projectId: PROJECT_ID }) });
 
 beforeEach(() => {
   vi.clearAllMocks();
+  tenantOfRequest.mockResolvedValue({ kind: "tenant", tenant: DEFAULT_TENANT_ID });
   verifyWorkerCredential.mockResolvedValue(workerDoc());
   projectFindOne.mockReturnValue({ select: () => ({ lean: () => Promise.resolve(projectDoc()) }) });
   userFindOne.mockImplementation((filter: { _id: string }) =>
@@ -91,6 +95,19 @@ beforeEach(() => {
   // Nothing in flight unless a test says so
   taskExists.mockResolvedValue(null);
   userExists.mockResolvedValue(null);
+});
+
+describe("a worker credential on another tenant's host (BP-666)", () => {
+  it("is refused before the project is even looked up, and the handler never runs", async () => {
+    tenantOfRequest.mockResolvedValue({ kind: "tenant", tenant: Types.ObjectId.createFromHexString("0000000000000000000000b2") });
+    const handler = vi.fn();
+
+    const res = await withProjectAccessOrWorker(handler)(workerRequest(), context());
+
+    expect(res.status).toBe(401);
+    expect(handler).not.toHaveBeenCalled();
+    expect(projectFindOne).not.toHaveBeenCalled();
+  });
 });
 
 describe("a worker reporting with its own credential", () => {

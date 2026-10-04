@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { isValidObjectId } from "mongoose";
+import { isValidObjectId, type Types } from "mongoose";
 import { getAuthUser } from "./auth";
 import { ProvenanceError } from "./session";
 import { connectDB } from "./db";
@@ -10,7 +10,8 @@ import { IUser, IWorker } from "@/types";
 import { PROJECT_KEY_PATTERN } from "./urls";
 import { matchRepo } from "./repo-match";
 import { getTenant } from "./tenant";
-import { scopedFor, type ScopedDb } from "./db-scope";
+import { scopedFor, tenantOf, type ScopedDb } from "./db-scope";
+import { tenantOfRequest } from "./tenant-host";
 import { can, FeatureKey } from "./entitlements";
 import { projectRunsWorkers } from "@/lib/worker-gate";
 import { EXECUTION_LEASE_MS } from "./execution-lease";
@@ -46,6 +47,28 @@ export function databaseUnavailable(): NextResponse {
   );
 }
 
+export function hostNotFound(): NextResponse {
+  return NextResponse.json({ error: "Not found" }, { status: 404 });
+}
+
+export async function refusedOnThisHost(
+  request: Request,
+  principal: { tenant?: Types.ObjectId | null }
+): Promise<NextResponse | null> {
+  let host;
+  try {
+    host = await tenantOfRequest(request);
+  } catch (e) {
+    if (isDatabaseUnreachable(e)) return databaseUnavailable();
+    throw e;
+  }
+  if (host.kind !== "tenant") return hostNotFound();
+  if (!tenantOf(principal).equals(host.tenant)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  return null;
+}
+
 export function withAuth(handler: AuthenticatedHandler) {
   return async (
     request: Request,
@@ -73,6 +96,8 @@ export function withAuth(handler: AuthenticatedHandler) {
     // body reach the database after this point, and a 500 there withholds the Retry-After a machine
     // client needs — while the middleware's own comment promised a 503 (BP-362 review)
     try {
+      const refused = await refusedOnThisHost(request, user);
+      if (refused) return refused;
       return await handler(request, { ...context, user, db: scopedFor(user) });
     } catch (e) {
       if (isDatabaseUnreachable(e)) return databaseUnavailable();
@@ -145,6 +170,8 @@ export function withWorker(
     // downstream handler can spread it into a response
     worker.credentialHash = "";
 
+    const refusedHere = await refusedOnThisHost(request, worker);
+    if (refusedHere) return refusedHere;
     if (await ownerIsDeactivated(scopedFor(worker), worker)) return machineOwnerDeactivated();
 
     // The path segment is authoritative on /api/workers/:id, so a credential must not act on
@@ -355,6 +382,8 @@ export function withProjectAccessOrWorker(
     if (!worker.enabled) {
       return NextResponse.json({ error: "this worker may not run" }, { status: 403 });
     }
+    const refusedHere = await refusedOnThisHost(request, worker);
+    if (refusedHere) return refusedHere;
     const db = scopedFor(worker);
     if (await ownerIsDeactivated(db, worker)) return machineOwnerDeactivated();
 

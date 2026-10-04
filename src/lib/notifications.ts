@@ -4,7 +4,7 @@ import { safeFetch } from "./safe-fetch";
 import { OUTBOUND_CONCURRENCY, runBounded } from "./bounded";
 import { decryptSecret } from "./encryption";
 import { DISCORD_NO_MENTIONS, escapeDiscord, escapeSlack, excerpt } from "./chat-markup";
-import { selfOrigin } from "./session";
+import { originFor } from "./tenant-host";
 import type { ScopedDb } from "@/lib/db-scope";
 
 interface NotificationPayload {
@@ -272,7 +272,7 @@ export async function dispatchNotifications(
     );
     if (active.length === 0) return;
 
-    const appUrl = selfOrigin();
+    const appUrl = await originFor(db);
 
     void runBounded(active, OUTBOUND_CONCURRENCY, async (channel) => {
       let webhookUrl: string;

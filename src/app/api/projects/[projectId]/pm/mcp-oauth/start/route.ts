@@ -6,7 +6,8 @@ import { logProjectAudit } from "@/lib/projectAudit";
 import { auditChange } from "@/lib/settings-audit";
 import { serverNamed, writeServerOauth } from "@/lib/pm/oauth-writes";
 import { encryptSecret } from "@/lib/encryption";
-import { selfOrigin, ORIGIN_REQUIRED } from "@/lib/session";
+import { ORIGIN_REQUIRED } from "@/lib/session";
+import { originFor } from "@/lib/tenant-host";
 import {
   discoverOauthConfig,
   registerClient,
@@ -37,11 +38,11 @@ export const POST = withProjectOwner(async (request, { params, user, db }) => {
   // Outside the try below, and no middleware has a catch-all — so an unconfigured instance answered
   // Next's bodiless 500 here while the three other origin-dependent routes return the message that
   // names the variable (BP-316 review).
-  const origin = selfOrigin();
+  const origin = await originFor(db);
   if (!origin) {
     return NextResponse.json({ error: ORIGIN_REQUIRED }, { status: 500 });
   }
-  const redirectUri = getPmOauthRedirectUri();
+  const redirectUri = await getPmOauthRedirectUri(db.tenant);
   const read = { ...(server.oauth ?? {}) } as Record<string, unknown>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const oauth: any = { ...read };
