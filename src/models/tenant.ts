@@ -14,6 +14,7 @@ export interface ITenantEntitlements {
 
 export interface ITenant {
   _id: mongoose.Types.ObjectId;
+  name: string;
   entitlements: ITenantEntitlements;
 }
 
@@ -30,6 +31,7 @@ const entitlementsSchema = new Schema<ITenantEntitlements>(
 );
 
 const tenantSchema = new Schema<ITenant>({
+  name: { type: String, default: "default", trim: true },
   entitlements: {
     type: entitlementsSchema,
     default: () => ({ plan: "free", features: [], source: "none" }),

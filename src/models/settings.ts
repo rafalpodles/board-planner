@@ -1,5 +1,6 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { upsertSingleton } from "@/lib/singleton";
+import { withTenant } from "@/lib/tenant-field";
 
 export interface ISettings {
   _id: mongoose.Types.ObjectId;
@@ -27,6 +28,8 @@ const settingsSchema = new Schema<ISettings>({
     default: [],
   },
 });
+
+withTenant(settingsSchema);
 
 export const Settings: Model<ISettings> =
   mongoose.models.Settings || mongoose.model<ISettings>("Settings", settingsSchema);

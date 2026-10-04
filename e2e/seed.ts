@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import { PM_USERNAME } from "@/lib/pm/username";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 // Never the development database. The URI is passed to the dev server too, so a mistake here
 // would have the browser writing into whatever the developer is using at the time.
@@ -133,13 +134,18 @@ const CATEGORIES = [
   { name: "idea", color: "#8b5cf6" },
 ].map((c) => ({ _id: new mongoose.Types.ObjectId(), ...c }));
 
-async function connect() {
+export function e2eDatabaseName() {
   const dbName = new URL(E2E_MONGODB_URI.replace(/^mongodb/, "http")).pathname.slice(1);
   if (!dbName.endsWith("_e2e")) {
     throw new Error(
       `Refusing to touch database "${dbName}": the e2e fixture only runs against a *_e2e database`
     );
   }
+  return dbName;
+}
+
+async function connect() {
+  e2eDatabaseName();
   await mongoose.connect(E2E_MONGODB_URI);
   return mongoose.connection;
 }
@@ -154,6 +160,21 @@ async function empty(db: mongoose.mongo.Db) {
 export async function wipe() {
   await empty((await connect()).db!);
   await mongoose.disconnect();
+}
+
+// Seeded rows are stamped so tenant-on-product-writes can tell the app's own writes from fixtures
+async function stampTenantAndDisconnect() {
+  try {
+    const db = mongoose.connection.db!;
+    const names = (await db.listCollections().toArray())
+      .map((c) => c.name)
+      .filter((name) => name !== "tenants" && name !== "ratelimits" && !name.includes("."));
+    await Promise.all(
+      names.map((name) => db.collection(name).updateMany({ tenant: null }, { $set: { tenant: DEFAULT_TENANT_ID } }))
+    );
+  } finally {
+    await mongoose.disconnect();
+  }
 }
 
 /**
@@ -208,7 +229,7 @@ async function addTask(over: Record<string, unknown>, taskNumber: number) {
   await db
     .collection("projects")
     .updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: taskNumber } });
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 /**
@@ -291,7 +312,7 @@ export async function seedTaskInCompletedSprint() {
   await db
     .collection("projects")
     .updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: STRANDED_TASK_NUMBER } });
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 /**
@@ -493,7 +514,7 @@ export async function seedSecondPlanningSprint() {
     createdAt: now,
     updatedAt: now,
   });
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 export async function seedSprintPlanning() {
@@ -543,7 +564,7 @@ export async function seedSprintPlanning() {
     .collection("projects")
     .updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: PLANNING_BACKLOG_TASK_NUMBER } });
 
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 // BP-208 Task 11: a sprint whose tasks span every shape a numeric field's stored value takes in
@@ -630,7 +651,7 @@ export async function seedSprintEstimates() {
   ]);
   await db.collection("projects").updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: 104 } });
 
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 // BP-389. A board with a sprint history: two sprints already closed, one running with a finished
@@ -792,7 +813,7 @@ export async function seedSprintLifecycle() {
   ]);
   await db.collection("projects").updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: 125 } });
 
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 /**
@@ -866,7 +887,7 @@ export async function seedOlderCompletedSprints() {
       closed("05", LIFECYCLE_OLDEST_CLOSED_NAME, -104),
       closed("06", "Sprint 2", -88),
     ]);
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 /** A sprint as the database holds it, for assertions the API's derived counts would blur. */
@@ -922,7 +943,7 @@ export async function seedBoardFeedBystander() {
     updatedAt: now,
   });
 
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 export async function seedQuietTask(quietForMs: number) {
@@ -1209,7 +1230,7 @@ async function seedBoard(withSessions: boolean) {
     }),
   ]);
 
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 export const seed = () => seedBoard(true);
@@ -1466,7 +1487,7 @@ export async function seedSearchCorpus() {
 
   await db.collection("projects").updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: META_HIT_NUMBER } });
 
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 /**
@@ -1509,7 +1530,7 @@ export async function seedAssignmentOutsider() {
     createdAt: now,
   });
 
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 
   await addTask(
     {
@@ -1632,7 +1653,7 @@ export async function seedSecondProject() {
     updatedAt: now,
   });
 
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 /**
@@ -1703,7 +1724,7 @@ export async function seedDemotableAdmin() {
     .collection("projects")
     .updateOne({ _id: SECOND_PROJECT_ID }, { $max: { taskCounter: KEPT_TASK_NUMBER } });
 
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 /** A webhook on the seeded project, written straight in: adding one through the settings screen is
@@ -1892,7 +1913,7 @@ export async function seedAgents() {
     agent({ _id: PROJECT_AGENT_ID, name: PROJECT_AGENT_NAME, scope: "project", project: PROJECT_ID }),
     agent({ _id: PERSONAL_AGENT_ID, name: PERSONAL_AGENT_NAME, scope: "user", owner: ADMIN_ID }),
   ]);
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 /**
@@ -1918,7 +1939,7 @@ export async function seedForeignAgent() {
     createdAt: now,
     updatedAt: now,
   });
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 /**
@@ -1942,7 +1963,7 @@ export async function seedForeignSprint() {
     createdAt: now,
     updatedAt: now,
   });
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 export const PM_USER_ID = id("e2e00000000000000000a009");
@@ -2026,7 +2047,7 @@ export async function seedHandoverStates() {
   await db
     .collection("projects")
     .updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: ASSIGNED_BY_SOMEONE_ELSE_TASK_NUMBER } });
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 /** A task on the seeded board as the database holds it, for the fields the API populates or renames. */
@@ -2208,7 +2229,7 @@ export async function seedMyTasks() {
     .collection("projects")
     .updateOne({ _id: SECOND_PROJECT_ID }, { $max: { taskCounter: MINE_OTHER_BOARD_NUMBER } });
 
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 /**
@@ -2292,7 +2313,7 @@ export async function seedNewestProject() {
     updatedAt: now,
   });
 
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 /**
@@ -2313,7 +2334,7 @@ export async function grantMemberOn(projectId: mongoose.Types.ObjectId) {
     createdAt: now,
     updatedAt: now,
   });
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 export const MENTION_CAP_USERNAME_PREFIX = "mention-cap-";
@@ -2341,7 +2362,7 @@ export async function seedManyMentionCandidates() {
       createdAt: now,
     }))
   );
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 /**
@@ -2412,7 +2433,7 @@ export async function seedGitlabProject(host: string) {
     })
   );
 
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 // BP-727, BP-728, BP-731. A task the member handed to themselves, with an agent, in the approved
@@ -2475,7 +2496,7 @@ export async function seedMemberHandover() {
   await db
     .collection("projects")
     .updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: MEMBER_BACKLOG_TASK_NUMBER } });
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 export async function setBoardReadiness(fields: {
@@ -2546,7 +2567,7 @@ export async function seedMachine(
     createdAt: now,
     updatedAt: now,
   });
-  await mongoose.disconnect();
+  await stampTenantAndDisconnect();
 }
 
 export async function spendAttempts(taskId: mongoose.Types.ObjectId, attempts: number) {

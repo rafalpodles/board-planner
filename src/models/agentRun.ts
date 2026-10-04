@@ -1,5 +1,6 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { AGENT_RUN_OUTCOMES, IAgentRun } from "@/types";
+import { withTenant } from "@/lib/tenant-field";
 
 // A finished run used to leave nothing behind: execution.runId lives on the task and every exit
 // clears it, so the only trace was prose in a comment. This is the durable half.
@@ -39,6 +40,8 @@ agentRunSchema.index(
 );
 // The fleet console reads across projects, which the compound index above cannot serve
 agentRunSchema.index({ finishedAt: -1 });
+
+withTenant(agentRunSchema);
 
 export const AgentRun: Model<IAgentRun> =
   mongoose.models.AgentRun || mongoose.model<IAgentRun>("AgentRun", agentRunSchema);

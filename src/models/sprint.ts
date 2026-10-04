@@ -1,5 +1,6 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { ISprint, SPRINT_STATUSES } from "@/types";
+import { withTenant } from "@/lib/tenant-field";
 
 const sprintSchema = new Schema<ISprint>(
   {
@@ -35,6 +36,8 @@ const sprintSchema = new Schema<ISprint>(
 );
 
 sprintSchema.index({ project: 1, status: 1 });
+
+withTenant(sprintSchema);
 
 export const Sprint: Model<ISprint> =
   mongoose.models.Sprint || mongoose.model<ISprint>("Sprint", sprintSchema);

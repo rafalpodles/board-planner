@@ -68,6 +68,7 @@ export const GROUPS = {
     "board-scope-and-filters.spec.ts",
   ],
   project: [
+    "tenant-on-product-writes.spec.ts",
     "project-lifecycle.spec.ts",
     "project-delete-grants.spec.ts",
     "project-delete-leftovers.spec.ts",
@@ -124,6 +125,7 @@ export const GROUPS = {
     "keep-alive-timeout.spec.ts",
     "entitlements.spec.ts",
     "licence.spec.ts",
+    "tenant-migration.spec.ts",
     "sessions-and-auth.spec.ts",
     "proxied-login-throttle.spec.ts",
     "compose-cookie.spec.ts",

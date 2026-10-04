@@ -1,5 +1,6 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { IEmailChangeToken } from "@/types";
+import { withTenant } from "@/lib/tenant-field";
 
 // An address waiting to be confirmed. The account keeps the address it has until the link sent to
 // the new one is followed, so a typo or a stranger's inbox never becomes the recovery address.
@@ -15,6 +16,8 @@ const emailChangeTokenSchema = new Schema<IEmailChangeToken>(
 );
 
 emailChangeTokenSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 60 * 60 * 24 });
+
+withTenant(emailChangeTokenSchema);
 
 export const EmailChangeToken: Model<IEmailChangeToken> =
   mongoose.models.EmailChangeToken ||

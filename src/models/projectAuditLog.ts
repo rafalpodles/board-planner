@@ -1,5 +1,6 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { IProjectAuditLog } from "@/types";
+import { withTenant } from "@/lib/tenant-field";
 
 const ACTIONS = [
   "settings_updated",
@@ -52,6 +53,8 @@ const projectAuditLogSchema = new Schema<IProjectAuditLog>(
 );
 
 projectAuditLogSchema.index({ project: 1, createdAt: -1 });
+
+withTenant(projectAuditLogSchema);
 
 export const ProjectAuditLog: Model<IProjectAuditLog> =
   mongoose.models.ProjectAuditLog ||

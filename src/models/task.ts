@@ -1,5 +1,6 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { ITask, PRIORITIES, DEFAULT_PRIORITY, RECURRENCE_FREQUENCIES, TASK_DECISION_STATES } from "@/types";
+import { withTenant } from "@/lib/tenant-field";
 
 const taskSchema = new Schema<ITask>(
   {
@@ -254,6 +255,8 @@ taskSchema.index({ recurringParentId: 1 });
 // than on the child, because a type predicate on an array cannot be covered alongside one on its
 // `task`. Holds while `parent_of` stays the epic relation.
 taskSchema.index({ project: 1, "relations.type": 1 });
+
+withTenant(taskSchema);
 
 export const Task: Model<ITask> =
   mongoose.models.Task || mongoose.model<ITask>("Task", taskSchema);

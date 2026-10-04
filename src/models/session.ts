@@ -1,5 +1,6 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { ISession } from "@/types";
+import { withTenant } from "@/lib/tenant-field";
 
 const sessionSchema = new Schema<ISession>(
   {
@@ -15,6 +16,8 @@ const sessionSchema = new Schema<ISession>(
 );
 
 sessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+
+withTenant(sessionSchema);
 
 export const Session: Model<ISession> =
   mongoose.models.Session || mongoose.model<ISession>("Session", sessionSchema);

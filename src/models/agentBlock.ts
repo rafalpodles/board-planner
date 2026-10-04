@@ -1,5 +1,6 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { BLOCK_KINDS, IAgentBlock, STEP_CAPABILITIES } from "@/types";
+import { withTenant } from "@/lib/tenant-field";
 
 // A block is a named configuration of something the worker implements, never new executable code.
 // `key` is the contract with the worker: it resolves the key against its own source, so an ObjectId
@@ -29,6 +30,10 @@ const agentBlockSchema = new Schema<IAgentBlock>(
 );
 
 agentBlockSchema.index({ kind: 1 });
+
+agentBlockSchema.index({ key: 1, tenant: 1 }, { unique: true });
+
+withTenant(agentBlockSchema);
 
 export const AgentBlock: Model<IAgentBlock> =
   mongoose.models.AgentBlock || mongoose.model<IAgentBlock>("AgentBlock", agentBlockSchema);

@@ -1,5 +1,6 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { IOAuthToken } from "@/types";
+import { withTenant } from "@/lib/tenant-field";
 
 const oauthTokenSchema = new Schema<IOAuthToken>(
   {
@@ -19,6 +20,8 @@ const oauthTokenSchema = new Schema<IOAuthToken>(
 );
 
 oauthTokenSchema.index({ refreshExpiresAt: 1 }, { expireAfterSeconds: 0 });
+
+withTenant(oauthTokenSchema);
 
 export const OAuthToken: Model<IOAuthToken> =
   mongoose.models.OAuthToken || mongoose.model<IOAuthToken>("OAuthToken", oauthTokenSchema);

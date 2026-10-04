@@ -16,5 +16,5 @@ export const getTenant = cache(async (): Promise<ITenant> => {
   });
   // Derived on every read and never written back, so removing the key is all it takes to undo it
   const fromLicence = entitlementsFromLicence(currentLicence());
-  return fromLicence ? { _id: stored._id, entitlements: fromLicence } : stored;
+  return fromLicence ? { _id: stored._id, name: stored.name, entitlements: fromLicence } : stored;
 });
