@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
-import { columnIdsWithRole } from "@/lib/columns";
+import { columnIdsWithRole, countByColumn } from "@/lib/columns";
 import { normalizeOptions } from "@/lib/custom-fields";
-import { TASK_STATUSES } from "@/types";
 import mongoose from "mongoose";
 
 const WEEK_MS = 7 * 86400000;
@@ -88,9 +87,7 @@ export const GET = withProjectAccess(async (_request, { params, db }) => {
   const data = breakdowns[0] || { total: 0, done: 0, statusPairs: [], categoryPairs: [], difficultyPairs: [], assigneePairs: [] };
 
   // Count breakdowns from arrays
-  const statusBreakdown: Record<string, number> = {};
-  for (const s of TASK_STATUSES) statusBreakdown[s] = 0;
-  for (const s of data.statusPairs) statusBreakdown[s] = (statusBreakdown[s] || 0) + 1;
+  const statusBreakdown = countByColumn(project, data.statusPairs);
 
   const categoryBreakdown: Record<string, number> = {};
   for (const c of data.categoryPairs) categoryBreakdown[c] = (categoryBreakdown[c] || 0) + 1;

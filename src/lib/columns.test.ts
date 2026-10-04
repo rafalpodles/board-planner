@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   columnFor,
   columnIdsWithRole,
+  countByColumn,
   mergedReviewDestination,
   defaultStatusFor,
   getColumnIds,
@@ -181,5 +182,18 @@ describe("mergedReviewDestination", () => {
       col("ready_to_test", "review", 2),
     ]);
     expect(mergedReviewDestination(interleaved, "in_review")).toBe("ready_to_test");
+  });
+});
+
+describe("countByColumn", () => {
+  it("counts tasks per column and keeps empty columns at zero", () => {
+    const counts = countByColumn({ columns }, ["todo", "todo", "in_progress"]);
+    expect(counts.todo).toBe(2);
+    expect(counts.in_progress).toBe(1);
+    expect(counts.planned).toBe(0);
+  });
+
+  it("ignores statuses no column carries", () => {
+    expect(countByColumn({ columns }, ["gone"]).gone).toBeUndefined();
   });
 });

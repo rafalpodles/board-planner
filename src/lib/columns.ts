@@ -66,6 +66,19 @@ export function columnIdsWithRole(
     .map((c) => c.id);
 }
 
+export function countByColumn(
+  project: HasAnyColumns | null | undefined,
+  statuses: string[]
+): Record<string, number> {
+  const columns = effectiveColumns(project?.columns);
+  const counts: Record<string, number> = {};
+  for (let i = 0; i < columns.length - 1; i++) counts[columns[i].id] = 0;
+  for (const status of statuses) {
+    if (status in counts) counts[status]++;
+  }
+  return counts;
+}
+
 // Where a merged merge request sends a task, or undefined if it sends it nowhere.
 //
 // One review column forward, never into or out of a column somebody flagged for a human. The flag
