@@ -107,6 +107,7 @@ describe("principalOf", () => {
   it("maps a plain user to the right principal", () => {
     const user = fakeUser({ role: "member" });
     expect(principalOf(user)).toEqual({
+      tenant: HOME,
       instanceAdmin: false,
       tokenScoped: false,
       tokenScope: null,
@@ -184,6 +185,15 @@ function lean(value: unknown) {
   return { select: () => ({ lean: () => Promise.resolve(value) }) };
 }
 
+let projectsElsewhere = new Set<string>();
+beforeEach(() => {
+  projectsElsewhere = new Set();
+  projectFind.mockReset();
+  projectFind.mockImplementation((filter: { _id?: { $in?: string[] } }) =>
+    lean((filter?._id?.$in ?? []).filter((id) => !projectsElsewhere.has(String(id))).map((id) => ({ _id: id })))
+  );
+});
+
 describe("check", () => {
   beforeEach(() => {
     findOne.mockReset();
@@ -203,10 +213,31 @@ describe("check", () => {
     expect(await check(scopedToDefaultTenant(), user, P, "access")).toBe(false);
   });
 
-  it("answers for an instance admin without querying at all", async () => {
+  it("answers for an instance admin without reading a grant", async () => {
     const user = { _id: "a1", role: "admin" } as never;
     expect(await check(scopedToDefaultTenant(), user, P, "admin")).toBe(true);
     expect(findOne).not.toHaveBeenCalled();
+  });
+
+  it("refuses a project of another tenant even to an instance admin, without reading a grant (BP-664)", async () => {
+    projectsElsewhere.add(P);
+    const admin = { _id: "a1", role: "admin" } as never;
+    expect(await check(scopedToDefaultTenant(), admin, P, "access")).toBe(false);
+    findOne.mockReturnValue(lean({ relation: "owner" }));
+    expect(await check(scopedToDefaultTenant(), { _id: "u1", role: "member" } as never, P, "access")).toBe(false);
+    expect(findOne).not.toHaveBeenCalled();
+    expect(projectFind).toHaveBeenCalledWith({ _id: { $in: [P] }, tenant: DEFAULT_TENANT_ID });
+  });
+
+  it("refuses when the db it was handed is not the caller's own tenant", async () => {
+    const admin = { _id: "a1", role: "admin", tenant: ELSEWHERE } as never;
+    expect(await check(scopedToDefaultTenant(), admin, P, "access")).toBe(false);
+  });
+
+  it("refuses an id that is not a project id at all, without querying", async () => {
+    const admin = { _id: "a1", role: "admin" } as never;
+    expect(await check(scopedToDefaultTenant(), admin, "BP", "access")).toBe(false);
+    expect(projectFind).not.toHaveBeenCalled();
   });
 
   it("answers out-of-scope tokens without querying at all", async () => {
@@ -311,6 +342,14 @@ describe("administeredProjectIds", () => {
 // ignored the query, which meant the tests passed with `object`, `objectType` or `role` deleted
 // from it — including the mutation that treats every recipient as an instance admin and turns the
 // whole access filter into a no-op. Found by an independent review of this branch.
+describe("administeredProjectIds across tenants (BP-664)", () => {
+  it("leaves out a project of another tenant, even for an instance admin", async () => {
+    projectsElsewhere.add(OTHER);
+    const admin = { _id: "a1", role: "admin" } as never;
+    expect([...(await administeredProjectIds(scopedToDefaultTenant(), admin, [P, OTHER]))]).toEqual([P]);
+  });
+});
+
 describe("recipientsWithAccess", () => {
   const MEMBER = "507f1f77bcf86cd799439011";
   const REMOVED = "507f1f77bcf86cd799439012";
@@ -396,6 +435,12 @@ describe("recipientsWithAccess", () => {
    * BP-400. Assignment asks the same question delivery has asked since BP-328, so that a task
    * cannot be handed to somebody who will never be told about it and cannot open it.
    */
+  it("keeps nobody when the project is not in this tenant, an instance admin included (BP-664)", async () => {
+    grant(MEMBER);
+    projectsElsewhere.add(P);
+    expect(await recipientsWithAccess(scopedToDefaultTenant(), [MEMBER, ADMIN], P)).toEqual([]);
+  });
+
   describe("canBeAssigned", () => {
     it("accepts somebody who holds a grant on this board", async () => {
       grant(MEMBER);
