@@ -53,7 +53,7 @@ export const PUT = withAuth(async (request, { user, db }) => {
   }
 
   const { lockedOut, result: passwordMatches } = await withLockout(
-    lockoutKey(getClientIp(request) ?? "-", user.username, "password-change"),
+    lockoutKey(db.tenant, getClientIp(request) ?? "-", user.username, "password-change"),
     async () => (record.password && (await bcrypt.compare(currentPassword, record.password)) ? true : null),
     sourceKey(String(user._id), "password-change"),
     EXCLUSIVE_SOURCE_ATTEMPTS
@@ -85,7 +85,7 @@ export const PUT = withAuth(async (request, { user, db }) => {
   // Immediately after the write, for the same reason the reset route does it there: the two calls
   // below can reject, and a throw between them would leave the password changed and the lockout
   // standing (BP-353)
-  await clearAccountAttempts(user.username).catch(() => {});
+  await clearAccountAttempts(db.tenant, user.username).catch(() => {});
 
   // Somebody who changes their password after asking for a reset link has answered the question
   // themselves; the link in their inbox must not still be able to overwrite this

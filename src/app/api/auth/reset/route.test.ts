@@ -64,8 +64,8 @@ describe("POST /api/auth/reset", () => {
   // I reset it" ends in the correct new password being refused, and a link that was just spent
   // looking broken. A reset is the answer to being locked out, so it has to lift the lockout.
   it("lifts a login lockout, including one filled from an address the resetter never used", async () => {
-    const fromSomebodyElse = lockoutKey("203.0.113.9", "owner");
-    const shared = lockoutKey("-", "owner");
+    const fromSomebodyElse = lockoutKey(DEFAULT_TENANT_ID, "203.0.113.9", "owner");
+    const shared = lockoutKey(DEFAULT_TENANT_ID, "-", "owner");
     for (let i = 0; i < ANONYMOUS_ACCOUNT_ATTEMPTS; i++) {
       await recordFailedAttempt(fromSomebodyElse);
       await recordFailedAttempt(shared);
@@ -79,7 +79,7 @@ describe("POST /api/auth/reset", () => {
   });
 
   it("leaves another account's lockout in place", async () => {
-    const somebodyElse = lockoutKey("-", "different-person");
+    const somebodyElse = lockoutKey(DEFAULT_TENANT_ID, "-", "different-person");
     for (let i = 0; i < ANONYMOUS_ACCOUNT_ATTEMPTS; i++) await recordFailedAttempt(somebodyElse);
 
     await POST(post());
@@ -89,7 +89,7 @@ describe("POST /api/auth/reset", () => {
 
   it("does not lift a lockout when the token was refused", async () => {
     consumeResetToken.mockResolvedValue({ ok: false, reason: "expired" });
-    const shared = lockoutKey("-", "owner");
+    const shared = lockoutKey(DEFAULT_TENANT_ID, "-", "owner");
     for (let i = 0; i < ANONYMOUS_ACCOUNT_ATTEMPTS; i++) await recordFailedAttempt(shared);
 
     const res = await POST(post());

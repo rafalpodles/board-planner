@@ -1,3 +1,4 @@
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Types } from "mongoose";
 
@@ -144,8 +145,8 @@ describe("POST /api/auth/oidc/:provider/start", () => {
       it("counts in its own family, not the e-mail change's", async () => {
         for (let i = 0; i < 10; i++) await guess("wrong");
 
-        expect(await isRateLimited(lockoutKey("203.0.113.9", "ada", "link-provider"))).toBe(true);
-        expect(await isRateLimited(lockoutKey("203.0.113.9", "ada", "email-change"))).toBe(false);
+        expect(await isRateLimited(lockoutKey(DEFAULT_TENANT_ID, "203.0.113.9", "ada", "link-provider"))).toBe(true);
+        expect(await isRateLimited(lockoutKey(DEFAULT_TENANT_ID, "203.0.113.9", "ada", "email-change"))).toBe(false);
       });
 
       it("forgets the session's failures once the password matches", async () => {

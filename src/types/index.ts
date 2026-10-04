@@ -212,6 +212,7 @@ export interface IPasswordResetToken {
 }
 
 export interface IApiToken {
+  tenant?: Types.ObjectId;
   _id: Types.ObjectId;
   user: Types.ObjectId | IUser;
   name: string;
@@ -364,6 +365,7 @@ export interface IOAuthCode {
 }
 
 export interface IOAuthToken {
+  tenant?: Types.ObjectId;
   _id: Types.ObjectId;
   accessTokenHash: string;
   refreshTokenHash: string;

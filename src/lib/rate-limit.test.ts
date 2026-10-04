@@ -1,3 +1,5 @@
+import { Types } from "mongoose";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { inMemoryRateLimitModel } from "./rate-limit-test-store";
 
@@ -87,38 +89,38 @@ describe("the account key names the account the lookup will find", () => {
   it.each([" admin", "admin ", "\tadmin", "admin\n", "  admin  ", "ADMIN", "Admin"])(
     "gives %o the same bucket as admin",
     (typed) => {
-      expect(lockoutKey("-", typed)).toBe(lockoutKey("-", "admin"));
+      expect(lockoutKey(DEFAULT_TENANT_ID, "-", typed)).toBe(lockoutKey(DEFAULT_TENANT_ID, "-", "admin"));
     }
   );
 
   it("still separates two genuinely different accounts", () => {
-    expect(lockoutKey("-", "admin")).not.toBe(lockoutKey("-", "administrator"));
+    expect(lockoutKey(DEFAULT_TENANT_ID, "-", "admin")).not.toBe(lockoutKey(DEFAULT_TENANT_ID, "-", "administrator"));
   });
 
   // The key becomes an _id, and nothing bounds the length of a posted username
   it("is a bounded length whatever the caller sends", () => {
-    const huge = lockoutKey("-", "a".repeat(1_000_000));
+    const huge = lockoutKey(DEFAULT_TENANT_ID, "-", "a".repeat(1_000_000));
 
     expect(huge.length).toBeLessThan(80);
   });
 
   it("spends one budget however the caller spells the account", async () => {
     for (const spelling of ["admin", " admin", "ADMIN", "admin\t", "  Admin "]) {
-      for (let i = 0; i < 10; i++) await recordFailedAttempt(lockoutKey("-", spelling));
+      for (let i = 0; i < 10; i++) await recordFailedAttempt(lockoutKey(DEFAULT_TENANT_ID, "-", spelling));
     }
 
-    expect(await isRateLimited(lockoutKey("-", "admin"), ANONYMOUS_ACCOUNT_ATTEMPTS)).toBe(true);
+    expect(await isRateLimited(lockoutKey(DEFAULT_TENANT_ID, "-", "admin"), ANONYMOUS_ACCOUNT_ATTEMPTS)).toBe(true);
   });
 });
 
 describe("a caller with no identity still meets a ceiling across accounts", () => {
   it("counts failures from the anonymous path against one shared budget", async () => {
     for (let i = 0; i < ANONYMOUS_GLOBAL_ATTEMPTS; i++) {
-      await withLockout(lockoutKey("-", `user${i}`), async () => null);
+      await withLockout(lockoutKey(DEFAULT_TENANT_ID, "-", `user${i}`), async () => null);
     }
     const verify = vi.fn();
 
-    const { lockedOut } = await withLockout(lockoutKey("-", "someone-new"), verify);
+    const { lockedOut } = await withLockout(lockoutKey(DEFAULT_TENANT_ID, "-", "someone-new"), verify);
 
     expect(lockedOut).toBe(true);
     // Refused before the credential check, so it bounds the bcrypt as well as the guessing
@@ -127,7 +129,7 @@ describe("a caller with no identity still meets a ceiling across accounts", () =
 
   it("leaves that budget alone when the caller has a real address", async () => {
     for (let i = 0; i < 60; i++) {
-      await withLockout(lockoutKey("203.0.113.1", `user${i}`), async () => null, sourceKey("203.0.113.1"));
+      await withLockout(lockoutKey(DEFAULT_TENANT_ID, "203.0.113.1", `user${i}`), async () => null, sourceKey("203.0.113.1"));
     }
 
     expect(await isRateLimited(ANONYMOUS_GLOBAL_KEY, ANONYMOUS_GLOBAL_ATTEMPTS)).toBe(false);
@@ -153,7 +155,7 @@ describe("counting under concurrency", () => {
 });
 
 describe("withLockout", () => {
-  const key = lockoutKey("203.0.113.1", "admin");
+  const key = lockoutKey(DEFAULT_TENANT_ID, "203.0.113.1", "admin");
   const source = sourceKey("203.0.113.1");
 
   it("returns the result and clears the account key on success", async () => {
@@ -190,14 +192,14 @@ describe("withLockout", () => {
     for (let i = 0; i < SHARED_SOURCE_ATTEMPTS; i++) await recordFailedAttempt(source);
     const verify = vi.fn();
 
-    const { lockedOut } = await withLockout(lockoutKey("203.0.113.1", "someone-else"), verify, source);
+    const { lockedOut } = await withLockout(lockoutKey(DEFAULT_TENANT_ID, "203.0.113.1", "someone-else"), verify, source);
 
     expect(lockedOut).toBe(true);
     expect(verify).not.toHaveBeenCalled();
   });
 
   it("uses the raised threshold when there is no caller identity to key on", async () => {
-    const anon = lockoutKey("-", "admin");
+    const anon = lockoutKey(DEFAULT_TENANT_ID, "-", "admin");
     for (let i = 0; i < 10; i++) await recordFailedAttempt(anon);
 
     const { lockedOut } = await withLockout(anon, async () => null);
@@ -211,14 +213,14 @@ describe("clearing an account's counters", () => {
   // client address the key they filled is the shared one. So a password change cannot delete "its"
   // key — it has to clear the account across every address (BP-353).
   it("forgets failures recorded from every address, not just one", async () => {
-    const fromAttacker = lockoutKey("203.0.113.9", "owner");
-    const fromAnonymous = lockoutKey("-", "owner");
-    const fromElsewhere = lockoutKey("198.51.100.4", "owner");
+    const fromAttacker = lockoutKey(DEFAULT_TENANT_ID, "203.0.113.9", "owner");
+    const fromAnonymous = lockoutKey(DEFAULT_TENANT_ID, "-", "owner");
+    const fromElsewhere = lockoutKey(DEFAULT_TENANT_ID, "198.51.100.4", "owner");
     for (const k of [fromAttacker, fromAnonymous, fromElsewhere]) {
       for (let i = 0; i < 10; i++) await recordFailedAttempt(k);
     }
 
-    await clearAccountAttempts("owner");
+    await clearAccountAttempts(DEFAULT_TENANT_ID, "owner");
 
     expect(await isRateLimited(fromAttacker, 10)).toBe(false);
     expect(await isRateLimited(fromAnonymous, 10)).toBe(false);
@@ -226,21 +228,21 @@ describe("clearing an account's counters", () => {
   });
 
   it("leaves another account's counters alone", async () => {
-    const mine = lockoutKey("-", "owner");
-    const theirs = lockoutKey("-", "somebody-else");
+    const mine = lockoutKey(DEFAULT_TENANT_ID, "-", "owner");
+    const theirs = lockoutKey(DEFAULT_TENANT_ID, "-", "somebody-else");
     for (let i = 0; i < 10; i++) await recordFailedAttempt(theirs);
     for (let i = 0; i < 10; i++) await recordFailedAttempt(mine);
 
-    await clearAccountAttempts("owner");
+    await clearAccountAttempts(DEFAULT_TENANT_ID, "owner");
 
     expect(await isRateLimited(theirs, 10)).toBe(true);
   });
 
   it("normalises the username the same way the key does", async () => {
-    const key = lockoutKey("-", "owner");
+    const key = lockoutKey(DEFAULT_TENANT_ID, "-", "owner");
     for (let i = 0; i < 10; i++) await recordFailedAttempt(key);
 
-    await clearAccountAttempts("  OWNER  ");
+    await clearAccountAttempts(DEFAULT_TENANT_ID, "  OWNER  ");
 
     expect(await isRateLimited(key, 10)).toBe(false);
   });
@@ -249,18 +251,18 @@ describe("clearing an account's counters", () => {
     const shared = sourceKey("203.0.113.9");
     for (let i = 0; i < SHARED_SOURCE_ATTEMPTS; i++) await recordFailedAttempt(shared);
 
-    await clearAccountAttempts("owner");
+    await clearAccountAttempts(DEFAULT_TENANT_ID, "owner");
 
     expect(await isRateLimited(shared, SHARED_SOURCE_ATTEMPTS)).toBe(true);
   });
 
   it("stays within its own scope, so clearing a login lockout leaves the profile form's counter", async () => {
-    const login = lockoutKey("-", "owner");
-    const profile = lockoutKey("-", "owner", "password-change");
+    const login = lockoutKey(DEFAULT_TENANT_ID, "-", "owner");
+    const profile = lockoutKey(DEFAULT_TENANT_ID, "-", "owner", "password-change");
     for (let i = 0; i < 10; i++) await recordFailedAttempt(login);
     for (let i = 0; i < 10; i++) await recordFailedAttempt(profile);
 
-    await clearAccountAttempts("owner");
+    await clearAccountAttempts(DEFAULT_TENANT_ID, "owner");
 
     expect(await isRateLimited(login, 10)).toBe(false);
     expect(await isRateLimited(profile, 10)).toBe(true);
@@ -304,3 +306,12 @@ describe("countAttempt", () => {
     }
   });
 });
+
+describe("an account's counters belong to its tenant (BP-665)", () => {
+  it("keys the same username in two tenants apart, so a lockout in one is not a lockout in the other", () => {
+    const elsewhere = new Types.ObjectId("0000000000000000000000b2");
+    expect(lockoutKey(DEFAULT_TENANT_ID, "203.0.113.9", "alice")).not.toBe(lockoutKey(elsewhere, "203.0.113.9", "alice"));
+    expect(lockoutKey(DEFAULT_TENANT_ID, "203.0.113.9", "alice")).toBe(lockoutKey(DEFAULT_TENANT_ID, "203.0.113.9", " Alice "));
+  });
+});
+

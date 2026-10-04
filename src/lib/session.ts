@@ -368,7 +368,7 @@ export async function createSession(params: {
 
 export async function resolveSession(
   token: string
-): Promise<{ sessionId: Types.ObjectId; userId: Types.ObjectId; expiresAt: Date } | null> {
+): Promise<{ sessionId: Types.ObjectId; userId: Types.ObjectId; tenant: Types.ObjectId | null; expiresAt: Date } | null> {
   if (!token) return null;
   await connectDB();
 
@@ -382,6 +382,7 @@ export async function resolveSession(
 
   const sessionId = row._id;
   const userId = row.user as Types.ObjectId;
+  const tenant = (row.tenant as Types.ObjectId | undefined) ?? null;
   const extended = new Date(Math.min(now + SESSION_IDLE_TTL_MS, absoluteExpiresAt));
 
   if (extended.getTime() - expiresAt > SESSION_SLIDE_THROTTLE_MS) {
@@ -389,10 +390,10 @@ export async function resolveSession(
       { _id: sessionId },
       { $set: { expiresAt: extended, lastUsedAt: new Date(now) } }
     );
-    return { sessionId, userId, expiresAt: extended };
+    return { sessionId, userId, tenant, expiresAt: extended };
   }
 
-  return { sessionId, userId, expiresAt: new Date(expiresAt) };
+  return { sessionId, userId, tenant, expiresAt: new Date(expiresAt) };
 }
 
 export const RECENT_SIGN_IN_MS = 10 * 60 * 1000;
