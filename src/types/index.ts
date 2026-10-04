@@ -140,6 +140,7 @@ export type UserRole = "admin" | "member";
 // Document interfaces (what Mongoose returns)
 export interface IUser {
   _id: Types.ObjectId;
+  tenant?: Types.ObjectId;
   username: string;
   password: string;
   fullName: string;

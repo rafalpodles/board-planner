@@ -13,6 +13,7 @@ import { IUser, IWorker } from "@/types";
 import { PROJECT_KEY_PATTERN } from "./urls";
 import { matchRepo } from "./repo-match";
 import { getTenant } from "./tenant";
+import { scopedFor, type ScopedDb } from "./db-scope";
 import { can, FeatureKey } from "./entitlements";
 import { projectRunsWorkers } from "@/lib/worker-gate";
 import { EXECUTION_LEASE_MS } from "./execution-lease";
@@ -22,6 +23,11 @@ type AuthenticatedHandler = (
   context: {
     params: Promise<Record<string, string>>;
     user: IUser;
+    /**
+     * The caller's own tenant's data: every query through it is confined to that tenant (BP-663).
+     * Handlers use this and not the model imports, which a repo test is retiring.
+     */
+    db: ScopedDb;
     /**
      * Set only when this request authenticated as a worker and the credential was verified
      * against exactly this id. Handlers must use THIS and never read `x-worker-id` themselves:
@@ -74,7 +80,7 @@ export function withAuth(handler: AuthenticatedHandler) {
     // body reach the database after this point, and a 500 there withholds the Retry-After a machine
     // client needs — while the middleware's own comment promised a 503 (BP-362 review)
     try {
-      return await handler(request, { ...context, user });
+      return await handler(request, { ...context, user, db: scopedFor(user) });
     } catch (e) {
       if (isDatabaseUnreachable(e)) return databaseUnavailable();
       throw e;
@@ -188,11 +194,11 @@ export async function resolveTaskId(
 
 // Handlers query Mongo with params.projectId/taskId, so they must always see ObjectIds
 async function withResolvedIds(
-  context: { params: Promise<Record<string, string>>; user: IUser },
+  context: { params: Promise<Record<string, string>>; user: IUser; db: ScopedDb },
   params: Record<string, string>,
   projectId: string
 ): Promise<
-  | { ok: true; context: { params: Promise<Record<string, string>>; user: IUser } }
+  | { ok: true; context: { params: Promise<Record<string, string>>; user: IUser; db: ScopedDb } }
   | { ok: false; response: NextResponse }
 > {
   const resolved: Record<string, string> = { ...params, projectId };
@@ -421,7 +427,7 @@ export function withProjectAccessOrWorker(
     }
     identity.viaMachineCredential = true;
 
-    const resolved = await withResolvedIds({ ...context, user: identity }, params, projectId);
+    const resolved = await withResolvedIds({ ...context, user: identity, db: scopedFor(identity) }, params, projectId);
     if (!resolved.ok) return resolved.response;
     return handler(request, { ...resolved.context, workerId: machine });
   };
