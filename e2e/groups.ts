@@ -131,6 +131,7 @@ export const GROUPS = {
     "credential-tenant-binding.spec.ts",
     "tenants-isolation.spec.ts",
     "tenants-route-families.spec.ts",
+    "tenants-addresses.spec.ts",
     "sessions-and-auth.spec.ts",
     "proxied-login-throttle.spec.ts",
     "compose-cookie.spec.ts",
