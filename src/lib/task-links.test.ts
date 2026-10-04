@@ -9,6 +9,7 @@ import sift from "sift";
 
 interface Doc {
   _id: string;
+  tenant?: unknown;
   project: string;
   taskNumber: number;
   title: string;
@@ -149,24 +150,27 @@ vi.mock("@/models/task", () => ({
   },
 }));
 vi.mock("@/models/project", () => ({
-  Project: { findById: () => lean({ key: "BP", name: "Board Planner" }) },
+  Project: { findOne: () => lean({ key: "BP", name: "Board Planner" }) },
 }));
 vi.mock("@/lib/usernames", () => ({ usernameOf: async () => "rafal" }));
 vi.mock("@/lib/activity", () => ({
-  logActivities: (rows: unknown[]) => logActivities(rows),
+  logActivities: (scope: unknown, rows: unknown[]) => logActivities(scope, rows),
 }));
 vi.mock("@/lib/webhooks", () => ({ dispatchWebhooks: (...a: unknown[]) => dispatchWebhooks(...a) }));
 vi.mock("@/lib/notifications", () => ({
   dispatchNotifications: (...a: unknown[]) => dispatchNotifications(...a),
 }));
 vi.mock("@/lib/in-app-notifications", () => ({
-  createNotifications: (p: unknown) => createNotifications(p),
+  createNotifications: (scope: unknown, p: unknown) => createNotifications(scope, p),
   collectRecipients: (t: { assignee?: string; watchers?: string[] }) =>
     [t.assignee, ...(t.watchers ?? [])].filter(Boolean),
   assigneeIdOf: (t: { assignee?: string }) => t.assignee,
 }));
 
 const { addTaskLink, removeTaskLink, severLinksToDeletedTask } = await import("./task-links");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
+const db = scopedToDefaultTenant();
 
 const P = "p1";
 const ACTOR = "u-actor";
@@ -174,6 +178,7 @@ const ACTOR = "u-actor";
 function task(id: string, taskNumber: number, extra: Partial<Doc> = {}): Doc {
   return {
     _id: id,
+    tenant: DEFAULT_TENANT_ID,
     project: P,
     taskNumber,
     title: `Task ${taskNumber}`,
@@ -202,7 +207,7 @@ type LoggedRow = {
 
 function rows(): [string, string, string, string, string][] {
   return logActivities.mock.calls.flatMap((c) =>
-    (c[0] as LoggedRow[]).map(
+    (c[1] as LoggedRow[]).map(
       (r) =>
         [r.taskId, r.action, r.field, r.oldValue, r.newValue] as [
           string,
@@ -217,8 +222,8 @@ function rows(): [string, string, string, string, string][] {
 
 function notifiedTasks(): { taskId: string; title: string }[] {
   return createNotifications.mock.calls.map((c) => ({
-    taskId: (c[0] as { taskId: string }).taskId,
-    title: (c[0] as { title: string }).title,
+    taskId: (c[1] as { taskId: string }).taskId,
+    title: (c[1] as { title: string }).title,
   }));
 }
 
@@ -236,7 +241,7 @@ describe("addTaskLink", () => {
   it("writes a row at both ends of a new relation, naming the other end from each side", async () => {
     store = [task("a", 1), task("b", 2)];
 
-    const result = await addTaskLink(P, "a", "b", "relates", ACTOR);
+    const result = await addTaskLink(db, P, "a", "b", "relates", ACTOR);
 
     expect(result).toEqual({ ok: true });
     expect(rows()).toEqual([
@@ -244,13 +249,13 @@ describe("addTaskLink", () => {
       ["b", "link_added", "relates", "", "BP-1"],
     ]);
     expect(dispatchWebhooks).toHaveBeenCalledTimes(1);
-    expect(dispatchWebhooks.mock.calls[0][1]).toBe("task_linked");
+    expect(dispatchWebhooks.mock.calls[0][2]).toBe("task_linked");
   });
 
   it("reads the blocking direction from each end", async () => {
     store = [task("a", 1), task("b", 2)];
 
-    await addTaskLink(P, "a", "b", "blocked_by", ACTOR);
+    await addTaskLink(db, P, "a", "b", "blocked_by", ACTOR);
 
     expect(rows()).toEqual([
       ["a", "link_added", "blocked_by", "", "BP-2"],
@@ -259,7 +264,7 @@ describe("addTaskLink", () => {
     // Scoped by project like every other write here, not by id alone — and asking for the image
     // from before its own write, which is the only thing that can say whether it added anything
     expect(findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: "a", project: P },
+      { _id: "a", project: P, tenant: DEFAULT_TENANT_ID },
       { $addToSet: { blockedBy: "b" } },
       { returnDocument: "before", projection: "blockedBy" }
     );
@@ -273,7 +278,7 @@ describe("addTaskLink", () => {
       task("child", 11),
     ];
 
-    await addTaskLink(P, "new", "child", "parent_of", ACTOR);
+    await addTaskLink(db, P, "new", "child", "parent_of", ACTOR);
 
     expect(rows()).toEqual([
       ["old", "link_removed", "parent_of", "BP-11", ""],
@@ -289,8 +294,8 @@ describe("addTaskLink", () => {
     );
     expect(
       createNotifications.mock.calls.find(
-        (c) => (c[0] as { taskId: string }).taskId === "old"
-      )?.[0]
+        (c) => (c[1] as { taskId: string }).taskId === "old"
+      )?.[1]
     ).toMatchObject({ type: "task_linked", recipientIds: ["u-owner"] });
 
     // And the move itself happened: the rows above describe a real re-parent, not a narration
@@ -308,7 +313,7 @@ describe("addTaskLink", () => {
       task("child", 11),
     ];
 
-    await addTaskLink(P, "new", "child", "parent_of", ACTOR);
+    await addTaskLink(db, P, "new", "child", "parent_of", ACTOR);
 
     const forChild = notifiedTasks().filter((n) => n.taskId === "child");
     expect(forChild).toHaveLength(1);
@@ -318,7 +323,7 @@ describe("addTaskLink", () => {
   it("says nothing when the same link is sent again", async () => {
     store = [task("a", 1, { relations: [{ task: "b", type: "relates" }] }), task("b", 2)];
 
-    const result = await addTaskLink(P, "a", "b", "relates", ACTOR);
+    const result = await addTaskLink(db, P, "a", "b", "relates", ACTOR);
 
     expect(result).toEqual({ ok: true });
     expect(rows()).toEqual([]);
@@ -329,7 +334,7 @@ describe("addTaskLink", () => {
   it("says nothing when an existing blocker is sent again", async () => {
     store = [task("a", 1, { blockedBy: ["b"] }), task("b", 2)];
 
-    expect(await addTaskLink(P, "a", "b", "blocked_by", ACTOR)).toEqual({ ok: true });
+    expect(await addTaskLink(db, P, "a", "b", "blocked_by", ACTOR)).toEqual({ ok: true });
     expect(rows()).toEqual([]);
   });
 
@@ -337,7 +342,7 @@ describe("addTaskLink", () => {
   it("records the relation a different type replaced", async () => {
     store = [task("a", 1, { relations: [{ task: "b", type: "relates" }] }), task("b", 2)];
 
-    await addTaskLink(P, "a", "b", "duplicates", ACTOR);
+    await addTaskLink(db, P, "a", "b", "duplicates", ACTOR);
 
     expect(rows()).toEqual([
       ["a", "link_removed", "relates", "BP-2", ""],
@@ -345,7 +350,7 @@ describe("addTaskLink", () => {
       ["a", "link_added", "duplicates", "", "BP-2"],
       ["b", "link_added", "duplicated_by", "", "BP-1"],
     ]);
-    expect(dispatchWebhooks.mock.calls.map((c) => c[1])).toEqual(["task_unlinked", "task_linked"]);
+    expect(dispatchWebhooks.mock.calls.map((c) => c[2])).toEqual(["task_unlinked", "task_linked"]);
     // "one pair holds one relation" is a claim about the stored document, not about the rows
     expect(store.find((d) => d._id === "a")!.relations).toEqual([
       { task: "b", type: "duplicates" },
@@ -353,7 +358,7 @@ describe("addTaskLink", () => {
   });
 
   it("refuses a task linked to itself", async () => {
-    expect(await addTaskLink(P, "a", "a", "relates", ACTOR)).toEqual({
+    expect(await addTaskLink(db, P, "a", "a", "relates", ACTOR)).toEqual({
       ok: false,
       error: "A task cannot depend on itself",
       status: 400,
@@ -363,7 +368,7 @@ describe("addTaskLink", () => {
   it("refuses a task that is not on this project", async () => {
     store = [task("a", 1)];
 
-    expect(await addTaskLink(P, "a", "b", "relates", ACTOR)).toMatchObject({
+    expect(await addTaskLink(db, P, "a", "b", "relates", ACTOR)).toMatchObject({
       ok: false,
       status: 404,
     });
@@ -379,7 +384,7 @@ describe("addTaskLink", () => {
       task("elsewhere", 3, { relations: [{ task: "b", type: "parent_of" }] }),
     ];
 
-    expect(await addTaskLink(P, "a", "b", "parent_of", ACTOR)).toMatchObject({
+    expect(await addTaskLink(db, P, "a", "b", "parent_of", ACTOR)).toMatchObject({
       ok: false,
       status: 400,
     });
@@ -401,7 +406,7 @@ describe("addTaskLink", () => {
       if (update.$addToSet) store.find((d) => d._id === "a")!.blockedBy = ["b"];
     });
 
-    expect(await addTaskLink(P, "a", "b", "blocked_by", ACTOR)).toEqual({ ok: true });
+    expect(await addTaskLink(db, P, "a", "b", "blocked_by", ACTOR)).toEqual({ ok: true });
 
     expect(rows()).toEqual([]);
     expect(dispatchWebhooks).not.toHaveBeenCalled();
@@ -414,7 +419,7 @@ describe("addTaskLink", () => {
       if (update.$addToSet) store = store.filter((d) => d._id !== "a");
     });
 
-    expect(await addTaskLink(P, "a", "b", "blocked_by", ACTOR)).toEqual({
+    expect(await addTaskLink(db, P, "a", "b", "blocked_by", ACTOR)).toEqual({
       ok: false,
       error: "Task not found — it is no longer on this board",
       status: 404,
@@ -425,7 +430,7 @@ describe("addTaskLink", () => {
   it("refuses a blocker that would close a cycle", async () => {
     store = [task("a", 1), task("b", 2, { blockedBy: ["a"] })];
 
-    expect(await addTaskLink(P, "a", "b", "blocked_by", ACTOR)).toMatchObject({
+    expect(await addTaskLink(db, P, "a", "b", "blocked_by", ACTOR)).toMatchObject({
       ok: false,
       status: 400,
     });
@@ -437,12 +442,12 @@ describe("removeTaskLink", () => {
   it("writes a row at both ends of a link it actually held", async () => {
     store = [task("a", 1, { relations: [{ task: "b", type: "duplicates" }] }), task("b", 2)];
 
-    expect(await removeTaskLink(P, "a", "b", "duplicates", ACTOR)).toEqual({ ok: true });
+    expect(await removeTaskLink(db, P, "a", "b", "duplicates", ACTOR)).toEqual({ ok: true });
     expect(rows()).toEqual([
       ["a", "link_removed", "duplicates", "BP-2", ""],
       ["b", "link_removed", "duplicated_by", "BP-1", ""],
     ]);
-    expect(dispatchWebhooks.mock.calls[0][1]).toBe("task_unlinked");
+    expect(dispatchWebhooks.mock.calls[0][2]).toBe("task_unlinked");
   });
 
   // BP-657: the same call from the other end removes nothing. Until that is settled, it must at
@@ -450,7 +455,7 @@ describe("removeTaskLink", () => {
   it("says nothing when this end held no such link", async () => {
     store = [task("a", 1), task("b", 2, { relations: [{ task: "a", type: "duplicates" }] })];
 
-    expect(await removeTaskLink(P, "a", "b", "duplicates", ACTOR)).toEqual({ ok: true });
+    expect(await removeTaskLink(db, P, "a", "b", "duplicates", ACTOR)).toEqual({ ok: true });
     expect(rows()).toEqual([]);
     expect(createNotifications).not.toHaveBeenCalled();
     expect(dispatchWebhooks).not.toHaveBeenCalled();
@@ -459,7 +464,7 @@ describe("removeTaskLink", () => {
   it("says nothing when the named type is not the type that is stored", async () => {
     store = [task("a", 1, { relations: [{ task: "b", type: "relates" }] }), task("b", 2)];
 
-    expect(await removeTaskLink(P, "a", "b", "duplicates", ACTOR)).toMatchObject({ ok: true });
+    expect(await removeTaskLink(db, P, "a", "b", "duplicates", ACTOR)).toMatchObject({ ok: true });
     expect(rows()).toEqual([]);
     // And nothing was taken: the `$pull` runs before the guard, so a criteria that forgot the type
     // would delete the relation that IS there and still report having done nothing.
@@ -469,7 +474,7 @@ describe("removeTaskLink", () => {
   it("records a blocker being taken off", async () => {
     store = [task("a", 1, { blockedBy: ["b"] }), task("b", 2)];
 
-    await removeTaskLink(P, "a", "b", "blocked_by", ACTOR);
+    await removeTaskLink(db, P, "a", "b", "blocked_by", ACTOR);
 
     expect(rows()).toEqual([
       ["a", "link_removed", "blocked_by", "BP-2", ""],
@@ -478,7 +483,7 @@ describe("removeTaskLink", () => {
   });
 
   it("refuses a task that is not on this project", async () => {
-    expect(await removeTaskLink(P, "a", "b", "relates", ACTOR)).toMatchObject({
+    expect(await removeTaskLink(db, P, "a", "b", "relates", ACTOR)).toMatchObject({
       ok: false,
       status: 404,
     });
@@ -497,7 +502,7 @@ describe("a child with more than one parent", () => {
       task("child", 11),
     ];
 
-    await addTaskLink(P, "new", "child", "parent_of", ACTOR);
+    await addTaskLink(db, P, "new", "child", "parent_of", ACTOR);
 
     expect(store.find((d) => d._id === "old-a")!.relations).toEqual([]);
     expect(store.find((d) => d._id === "old-b")!.relations).toEqual([]);
@@ -515,7 +520,7 @@ describe("a child with more than one parent", () => {
       ["child", "link_added", "child_of", "", "BP-10"],
     ]);
 
-    const notified = createNotifications.mock.calls.map((c) => c[0] as { taskId: string });
+    const notified = createNotifications.mock.calls.map((c) => c[1] as { taskId: string });
     expect(notified.map((n) => n.taskId).sort()).toEqual(["child", "new", "old-a", "old-b"]);
   });
 
@@ -528,10 +533,10 @@ describe("a child with more than one parent", () => {
       task("child", 11),
     ];
 
-    await addTaskLink(P, "new", "child", "parent_of", ACTOR);
+    await addTaskLink(db, P, "new", "child", "parent_of", ACTOR);
 
     expect(logActivities).toHaveBeenCalledTimes(1);
-    expect((logActivities.mock.calls[0][0] as unknown[]).length).toBe(4);
+    expect((logActivities.mock.calls[0][1] as unknown[]).length).toBe(4);
   });
 });
 
@@ -550,7 +555,7 @@ describe("the task goes away mid-request", () => {
       if (update.$push) store = store.filter((d) => d._id !== "new");
     });
 
-    expect(await addTaskLink(P, "new", "child", "parent_of", ACTOR)).toEqual({
+    expect(await addTaskLink(db, P, "new", "child", "parent_of", ACTOR)).toEqual({
       ok: false,
       error: "Task not found — it is no longer on this board",
       status: 404,
@@ -596,7 +601,7 @@ describe("somebody else is re-parenting the same child", () => {
     });
 
     // Returning at all is half of what this test is about
-    await addTaskLink(P, "new", "child", "parent_of", ACTOR);
+    await addTaskLink(db, P, "new", "child", "parent_of", ACTOR);
     expect(call).toBeLessThan(10);
 
     const removals = rows().filter((r) => r[1] === "link_removed" && r[0] === "old");
@@ -629,7 +634,7 @@ describe("somebody else is re-parenting the same child", () => {
       }
     });
 
-    await addTaskLink(P, "new", "child", "parent_of", ACTOR);
+    await addTaskLink(db, P, "new", "child", "parent_of", ACTOR);
 
     const lost = rows().filter((r) => r[1] === "link_removed").map((r) => r[0]);
     expect(lost.filter((id) => id === "p1")).toHaveLength(1);
@@ -650,7 +655,7 @@ describe("a relation replaced by another", () => {
       if (update.$pull) store = store.filter((d) => d._id !== "a");
     });
 
-    expect(await addTaskLink(P, "a", "b", "duplicates", ACTOR)).toEqual({
+    expect(await addTaskLink(db, P, "a", "b", "duplicates", ACTOR)).toEqual({
       ok: false,
       error: "Task not found — it is no longer on this board",
       status: 404,
@@ -669,7 +674,7 @@ describe("a relation replaced by another", () => {
       if (update.$pull) store.find((d) => d._id === "a")!.relations = [];
     });
 
-    expect(await addTaskLink(P, "a", "b", "duplicates", ACTOR)).toEqual({ ok: true });
+    expect(await addTaskLink(db, P, "a", "b", "duplicates", ACTOR)).toEqual({ ok: true });
 
     expect(rows().filter((r) => r[1] === "link_removed")).toEqual([]);
     expect(rows().map((r) => [r[0], r[1], r[2]])).toEqual([
@@ -688,7 +693,7 @@ describe("a board is not the only board", () => {
   it("refuses to link a task on another board", async () => {
     store = [task("a", 1), { ...task("b", 2), project: OTHER }];
 
-    expect(await addTaskLink(P, "a", "b", "relates", ACTOR)).toMatchObject({
+    expect(await addTaskLink(db, P, "a", "b", "relates", ACTOR)).toMatchObject({
       ok: false,
       status: 404,
     });
@@ -707,7 +712,7 @@ describe("a board is not the only board", () => {
       { ...task("z", 80, { relations: [{ task: "a", type: "parent_of" }] }), project: OTHER },
     ];
 
-    expect(await addTaskLink(P, "a", "b", "parent_of", ACTOR)).toEqual({ ok: true });
+    expect(await addTaskLink(db, P, "a", "b", "parent_of", ACTOR)).toEqual({ ok: true });
     expect(store.find((d) => d._id === "a")!.relations).toEqual([{ task: "b", type: "parent_of" }]);
   });
 
@@ -718,7 +723,7 @@ describe("a board is not the only board", () => {
       task("child", 11),
     ];
 
-    await addTaskLink(P, "mine", "child", "parent_of", ACTOR);
+    await addTaskLink(db, P, "mine", "child", "parent_of", ACTOR);
 
     expect(store.find((d) => d._id === "elsewhere")!.relations).toEqual([
       { task: "child", type: "parent_of" },
@@ -735,14 +740,14 @@ describe("a board is not the only board", () => {
       { ...task("z", 80, { blockedBy: ["a"] }), project: OTHER },
     ];
 
-    expect(await addTaskLink(P, "a", "b", "blocked_by", ACTOR)).toEqual({ ok: true });
+    expect(await addTaskLink(db, P, "a", "b", "blocked_by", ACTOR)).toEqual({ ok: true });
     expect(store.find((d) => d._id === "a")!.blockedBy).toEqual(["b"]);
   });
 
   it("will not remove a link from a task on another board", async () => {
     store = [{ ...task("a", 1, { relations: [{ task: "b", type: "relates" }] }), project: OTHER }];
 
-    expect(await removeTaskLink(P, "a", "b", "relates", ACTOR)).toMatchObject({
+    expect(await removeTaskLink(db, P, "a", "b", "relates", ACTOR)).toMatchObject({
       ok: false,
       status: 404,
     });
@@ -763,7 +768,7 @@ describe("the same id, spelled differently", () => {
   it("records the removal when the request spells the id in upper case", async () => {
     store = [task(LOWER_A, 1, { blockedBy: [LOWER_B] }), task(LOWER_B, 2)];
 
-    expect(await removeTaskLink(P, UPPER_A, UPPER_B, "blocked_by", ACTOR)).toEqual({ ok: true });
+    expect(await removeTaskLink(db, P, UPPER_A, UPPER_B, "blocked_by", ACTOR)).toEqual({ ok: true });
     expect(store.find((d) => d._id === LOWER_A)!.blockedBy).toEqual([]);
     expect(rows()).toEqual([
       [LOWER_A, "link_removed", "blocked_by", "BP-2", ""],
@@ -774,7 +779,7 @@ describe("the same id, spelled differently", () => {
   it("still says nothing when an upper-case request re-sends a link that exists", async () => {
     store = [task(LOWER_A, 1, { relations: [{ task: LOWER_B, type: "relates" }] }), task(LOWER_B, 2)];
 
-    expect(await addTaskLink(P, UPPER_A, UPPER_B, "relates", ACTOR)).toEqual({ ok: true });
+    expect(await addTaskLink(db, P, UPPER_A, UPPER_B, "relates", ACTOR)).toEqual({ ok: true });
     expect(rows()).toEqual([]);
     expect(dispatchWebhooks).not.toHaveBeenCalled();
   });
@@ -783,7 +788,7 @@ describe("the same id, spelled differently", () => {
   it("refuses a task linked to itself under a different spelling", async () => {
     store = [task(LOWER_A, 1)];
 
-    expect(await addTaskLink(P, UPPER_A, LOWER_A, "relates", ACTOR)).toMatchObject({
+    expect(await addTaskLink(db, P, UPPER_A, LOWER_A, "relates", ACTOR)).toMatchObject({
       ok: false,
       status: 400,
     });
@@ -798,7 +803,7 @@ describe("the same id, spelled differently", () => {
       task(LOWER_B, 2),
     ];
 
-    expect(await addTaskLink(P, UPPER_A, UPPER_B, "parent_of", ACTOR)).toEqual({ ok: true });
+    expect(await addTaskLink(db, P, UPPER_A, UPPER_B, "parent_of", ACTOR)).toEqual({ ok: true });
     expect(rows()).toEqual([]);
     expect(dispatchWebhooks).not.toHaveBeenCalled();
   });
@@ -810,10 +815,11 @@ describe("what leaves the building", () => {
   it("hands the webhook both ends, the type, and the sentence", async () => {
     store = [task("a", 1), task("b", 2)];
 
-    await addTaskLink(P, "a", "b", "parent_of", ACTOR);
+    await addTaskLink(db, P, "a", "b", "parent_of", ACTOR);
 
     expect(dispatchWebhooks).toHaveBeenCalledTimes(1);
-    const [projectId, event, payload] = dispatchWebhooks.mock.calls[0];
+    const [scope, projectId, event, payload] = dispatchWebhooks.mock.calls[0];
+    expect(scope).toBe(db);
     expect(projectId).toBe(P);
     expect(event).toBe("task_linked");
     expect(payload).toEqual({
@@ -832,10 +838,11 @@ describe("what leaves the building", () => {
   it("tells the project's own channel the same thing", async () => {
     store = [task("a", 1), task("b", 2)];
 
-    await addTaskLink(P, "a", "b", "relates", ACTOR);
+    await addTaskLink(db, P, "a", "b", "relates", ACTOR);
 
     expect(dispatchNotifications).toHaveBeenCalledTimes(1);
-    const [projectId, event, payload] = dispatchNotifications.mock.calls[0];
+    const [scope, projectId, event, payload] = dispatchNotifications.mock.calls[0];
+    expect(scope).toBe(db);
     expect([projectId, event]).toEqual([P, "task_linked"]);
     // The formatters read `data.summary` and `data.relatedTaskKey`; an absent one renders blank
     expect(payload).toMatchObject({
@@ -855,12 +862,12 @@ describe("what leaves the building", () => {
       task("b", 2),
     ];
 
-    await addTaskLink(P, "a", "b", "blocked_by", ACTOR);
-    await addTaskLink(P, "new", "child", "parent_of", ACTOR);
+    await addTaskLink(db, P, "a", "b", "blocked_by", ACTOR);
+    await addTaskLink(db, P, "new", "child", "parent_of", ACTOR);
 
     const digestTitles = Object.fromEntries(
       createNotifications.mock.calls.map((c) => {
-        const n = c[0] as { taskId: string; digestTitle?: string };
+        const n = c[1] as { taskId: string; digestTitle?: string };
         return [n.taskId, n.digestTitle];
       })
     );
@@ -876,10 +883,10 @@ describe("what leaves the building", () => {
   it("gives the e-mail everything it needs to render a row", async () => {
     store = [task("a", 1, { assignee: "u-assignee" }), task("b", 2)];
 
-    await addTaskLink(P, "a", "b", "duplicates", ACTOR);
+    await addTaskLink(db, P, "a", "b", "duplicates", ACTOR);
 
     const forA = createNotifications.mock.calls
-      .map((c) => c[0] as { taskId: string; email?: Record<string, unknown> })
+      .map((c) => c[1] as { taskId: string; email?: Record<string, unknown> })
       .find((n) => n.taskId === "a")!;
     expect(forA.email).toEqual({
       kicker: "Tasks linked",
@@ -895,10 +902,10 @@ describe("what leaves the building", () => {
   it("calls the removal a removal in the mail", async () => {
     store = [task("a", 1, { relations: [{ task: "b", type: "relates" }] }), task("b", 2)];
 
-    await removeTaskLink(P, "a", "b", "relates", ACTOR);
+    await removeTaskLink(db, P, "a", "b", "relates", ACTOR);
 
     const forA = createNotifications.mock.calls
-      .map((c) => c[0] as { taskId: string; email?: { kicker?: string } })
+      .map((c) => c[1] as { taskId: string; email?: { kicker?: string } })
       .find((n) => n.taskId === "a")!;
     expect(forA.email?.kicker).toBe("Link removed");
   });
@@ -914,7 +921,7 @@ describe("severLinksToDeletedTask", () => {
   it("announces a severed blocker on the surviving task, and pulls the reference", async () => {
     store = [task("s", 1, { blockedBy: ["d"] })];
 
-    await severLinksToDeletedTask(P, "d", DELETED, ACTOR);
+    await severLinksToDeletedTask(db, P, "d", DELETED, ACTOR);
 
     expect(rows()).toEqual([["s", "link_removed", "blocked_by", "BP-5", ""]]);
     expect(store.find((d) => d._id === "s")!.blockedBy).toEqual([]);
@@ -923,7 +930,7 @@ describe("severLinksToDeletedTask", () => {
   it("announces a severed relation on the surviving end that stored it", async () => {
     store = [task("s", 1, { relations: [{ task: "d", type: "parent_of" }] })];
 
-    await severLinksToDeletedTask(P, "d", DELETED, ACTOR);
+    await severLinksToDeletedTask(db, P, "d", DELETED, ACTOR);
 
     expect(rows()).toEqual([["s", "link_removed", "parent_of", "BP-5", ""]]);
     expect(store.find((d) => d._id === "s")!.relations).toEqual([]);
@@ -932,7 +939,7 @@ describe("severLinksToDeletedTask", () => {
   it("writes only the surviving end's row — nothing is ever addressed to the deleted task", async () => {
     store = [task("s", 1, { blockedBy: ["d"] })];
 
-    await severLinksToDeletedTask(P, "d", DELETED, ACTOR);
+    await severLinksToDeletedTask(db, P, "d", DELETED, ACTOR);
 
     expect(rows().some((r) => r[0] === "d")).toBe(false);
   });
@@ -940,10 +947,11 @@ describe("severLinksToDeletedTask", () => {
   it("fires one task_unlinked webhook naming the deleted task by key and title", async () => {
     store = [task("s", 1, { blockedBy: ["d"] })];
 
-    await severLinksToDeletedTask(P, "d", DELETED, ACTOR);
+    await severLinksToDeletedTask(db, P, "d", DELETED, ACTOR);
 
     expect(dispatchWebhooks).toHaveBeenCalledTimes(1);
-    const [projectId, event, payload] = dispatchWebhooks.mock.calls[0];
+    const [scope, projectId, event, payload] = dispatchWebhooks.mock.calls[0];
+    expect(scope).toBe(db);
     expect([projectId, event]).toEqual([P, "task_unlinked"]);
     expect(payload).toMatchObject({
       task: { taskKey: "BP-1" },
@@ -960,13 +968,13 @@ describe("severLinksToDeletedTask", () => {
       }),
     ];
 
-    await severLinksToDeletedTask(P, "d", DELETED, ACTOR);
+    await severLinksToDeletedTask(db, P, "d", DELETED, ACTOR);
 
     // Both facts still reach the timeline...
     expect(rows().map((r) => r[2]).sort()).toEqual(["blocked_by", "relates"]);
     // ...but the bell rings once, not twice, for the one task whose board changed
     expect(createNotifications).toHaveBeenCalledTimes(1);
-    expect(createNotifications.mock.calls[0][0]).toMatchObject({ recipientIds: ["u-owner"] });
+    expect(createNotifications.mock.calls[0][1]).toMatchObject({ recipientIds: ["u-owner"] });
   });
 
   it("leaves an unrelated task and another board's task alone", async () => {
@@ -976,7 +984,7 @@ describe("severLinksToDeletedTask", () => {
       { ...task("elsewhere", 3, { blockedBy: ["d"] }), project: "p2" },
     ];
 
-    await severLinksToDeletedTask(P, "d", DELETED, ACTOR);
+    await severLinksToDeletedTask(db, P, "d", DELETED, ACTOR);
 
     expect(rows().map((r) => r[0])).toEqual(["s"]);
     expect(store.find((d) => d._id === "elsewhere")!.blockedBy).toEqual(["d"]);
@@ -985,7 +993,7 @@ describe("severLinksToDeletedTask", () => {
   it("does nothing when nobody held a link to the deleted task", async () => {
     store = [task("s", 1)];
 
-    await severLinksToDeletedTask(P, "d", DELETED, ACTOR);
+    await severLinksToDeletedTask(db, P, "d", DELETED, ACTOR);
 
     expect(rows()).toEqual([]);
     expect(dispatchWebhooks).not.toHaveBeenCalled();
@@ -1005,7 +1013,7 @@ describe("severLinksToDeletedTask", () => {
       if ("blockedBy" in filter) store.find((d) => d._id === "s")!.blockedBy = [];
     });
 
-    await severLinksToDeletedTask(P, "d", DELETED, ACTOR);
+    await severLinksToDeletedTask(db, P, "d", DELETED, ACTOR);
 
     expect(rows()).toEqual([]);
     expect(dispatchWebhooks).not.toHaveBeenCalled();
@@ -1018,7 +1026,7 @@ describe("severLinksToDeletedTask", () => {
       if ("relations" in filter) store.find((d) => d._id === "s")!.relations = [];
     });
 
-    await severLinksToDeletedTask(P, "d", DELETED, ACTOR);
+    await severLinksToDeletedTask(db, P, "d", DELETED, ACTOR);
 
     expect(rows()).toEqual([]);
     expect(dispatchWebhooks).not.toHaveBeenCalled();
@@ -1031,7 +1039,7 @@ describe("severLinksToDeletedTask", () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     store = Array.from({ length: 201 }, (_, i) => task(`s${i}`, i + 1, { blockedBy: ["d"] }));
 
-    await severLinksToDeletedTask(P, "d", DELETED, ACTOR);
+    await severLinksToDeletedTask(db, P, "d", DELETED, ACTOR);
 
     expect(rows()).toHaveLength(200);
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("200-task"));

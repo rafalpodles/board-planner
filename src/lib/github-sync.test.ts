@@ -31,15 +31,18 @@ vi.mock("@/lib/github", async (importOriginal) => ({
 }));
 
 const { syncGithubPullRequests, githubSyncTick, syncTickMs } = await import("./github-sync");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
+const db = scopedToDefaultTenant();
 
 /** The history rows of one action. A link change writes rows too now, so "nothing was logged" has
  *  to name which nothing it means (BP-628). */
 const rowsOf = (action: string) =>
-  logActivity.mock.calls.filter((call: unknown[]) => call[2] === action);
+  logActivity.mock.calls.filter((call: unknown[]) => call[3] === action);
 
 /** Every action a round wrote a row for. Asserting this rather than one action keeps the old
  *  guarantee that nothing ELSE was logged either. */
-const actionsLogged = () => logActivity.mock.calls.map((call: unknown[]) => call[2]).sort();
+const actionsLogged = () => logActivity.mock.calls.map((call: unknown[]) => call[3]).sort();
 
 const project = (over: Record<string, unknown> = {}) => ({
   _id: "p1",
@@ -114,10 +117,11 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("who asked, and what that earns", () => {
   it("moves a merged task out of review when a person asked", async () => {
-    const result = await syncGithubPullRequests(project(), "u1");
+    const result = await syncGithubPullRequests(db, project(), "u1");
 
     expect(result).toMatchObject({ ok: true, autoTransitioned: 1 });
     expect(logActivity).toHaveBeenCalledWith(
+      db,
       "t1",
       "u1",
       "status_changed",
@@ -133,14 +137,14 @@ describe("who asked, and what that earns", () => {
    * the pipeline to somebody who can be asked about it.
    */
   it("moves nothing, and records nothing, when nobody asked", async () => {
-    const result = await syncGithubPullRequests(project(), null);
+    const result = await syncGithubPullRequests(db, project(), null);
 
     expect(result).toMatchObject({ ok: true, autoTransitioned: 0 });
     expect(actionsLogged()).toEqual(["pr_linked"]);
     // The link row is written all the same, with no actor: the absence that stops a column change
     // being attributed is not a reason to leave the link change untraceable (BP-628, BP-632)
     expect(rowsOf("pr_linked")).toEqual([
-      ["t1", null, "pr_linked", "linkedPRs", "", "https://github.com/o/r/pull/1"],
+      [db, "t1", null, "pr_linked", "linkedPRs", "", "https://github.com/o/r/pull/1"],
     ]);
     // The status write is the one that must not happen; the link write still must
     expect(taskUpdateOne).toHaveBeenCalledTimes(1);
@@ -152,7 +156,7 @@ describe("who asked, and what that earns", () => {
 
 describe("what the sync refuses before it reaches the network", () => {
   it("refuses a project with no token", async () => {
-    expect(await syncGithubPullRequests(project({ githubToken: "" }), "u1")).toMatchObject({
+    expect(await syncGithubPullRequests(db, project({ githubToken: "" }), "u1")).toMatchObject({
       ok: false,
       status: 400,
     });
@@ -161,6 +165,7 @@ describe("what the sync refuses before it reaches the network", () => {
 
   it("refuses a repository that is not GitHub's", async () => {
     const result = await syncGithubPullRequests(
+      db,
       project({ repositoryUrl: "https://gitlab.com/o/r" }),
       "u1"
     );
@@ -174,7 +179,7 @@ describe("the background tick", () => {
   it("asks only about projects that have a token to ask with", async () => {
     await githubSyncTick();
 
-    expect(projectFind.mock.calls[0][0]).toEqual({ githubToken: { $nin: [null, ""] } });
+    expect(projectFind.mock.calls[0][0]).toEqual({ githubToken: { $nin: [null, ""] }, tenant: DEFAULT_TENANT_ID });
   });
 
   // One unreachable repository must not cost every other board its refresh
@@ -234,7 +239,7 @@ describe("an answer this sync could not get", () => {
       linkedPRs: [{ provider: "github", number: 1, url: prUrl(1), ci: "success", ciLabel: "e2e", headSha: "abc123" }],
     });
 
-    await syncGithubPullRequests(project(), "u1");
+    await syncGithubPullRequests(db, project(), "u1");
 
     expect(linkWritten()[0]).toMatchObject({ ci: "success", ciLabel: "e2e", headSha: "abc123" });
   });
@@ -248,7 +253,7 @@ describe("an answer this sync could not get", () => {
       linkedPRs: [{ provider: "github", number: 1, url: prUrl(1), ci: "success", ciLabel: "e2e", headSha: "older" }],
     });
 
-    await syncGithubPullRequests(project(), "u1");
+    await syncGithubPullRequests(db, project(), "u1");
 
     expect(linkWritten()[0]).toMatchObject({ ci: "unknown", ciLabel: null });
   });
@@ -267,7 +272,7 @@ describe("an answer this sync could not get", () => {
       linkedPRs: [{ provider: "github", number: 1, url: prUrl(1), ci: "running", ciLabel: "e2e", headSha: "abc123" }],
     });
 
-    await syncGithubPullRequests(project(), "u1");
+    await syncGithubPullRequests(db, project(), "u1");
 
     expect(linkWritten()[0]).toMatchObject({ ci: "unknown", ciLabel: null });
   });
@@ -285,7 +290,7 @@ describe("an answer this sync could not get", () => {
         linkedPRs: [{ provider: "github", number: 1, url: prUrl(1), ci, ciLabel: "e2e", headSha: "abc123" }],
       });
 
-      await syncGithubPullRequests(project(), "u1");
+      await syncGithubPullRequests(db, project(), "u1");
 
       expect(linkWritten()[0], ci).toMatchObject({ ci });
     }
@@ -306,7 +311,7 @@ describe("an answer this sync could not get", () => {
       linkedPRs: [{ provider: "github", number: 1, url: prUrl(1), ci: "none", ciLabel: null, headSha: "abc123" }],
     });
 
-    await syncGithubPullRequests(project(), "u1");
+    await syncGithubPullRequests(db, project(), "u1");
 
     expect(linkWritten()[0]).toMatchObject({ ci: "unknown" });
   });
@@ -334,7 +339,7 @@ describe("an answer this sync could not get", () => {
       ],
     });
 
-    await syncGithubPullRequests(project(), "u1");
+    await syncGithubPullRequests(db, project(), "u1");
 
     expect(linkWritten()[0]).toMatchObject({ ci: "unknown", ciLabel: null });
   });
@@ -342,7 +347,7 @@ describe("an answer this sync could not get", () => {
   it("says unknown when there was never an answer to keep", async () => {
     taskFindOne.mockResolvedValue({ _id: "t1", taskNumber: 5, status: "todo", linkedPRs: [] });
 
-    await syncGithubPullRequests(project(), "u1");
+    await syncGithubPullRequests(db, project(), "u1");
 
     expect(linkWritten()[0]).toMatchObject({ ci: "unknown" });
   });
@@ -369,7 +374,7 @@ describe("an answer this sync could not get", () => {
       linkedPRs: [{ provider: "github", number: 1, url: prUrl(1), ci: "success", ciLabel: "e2e", headSha: "abc123" }],
     });
 
-    await syncGithubPullRequests(project(), "u1");
+    await syncGithubPullRequests(db, project(), "u1");
 
     expect(linkWritten()[0]).toMatchObject({ ci: "failure", ciLabel: "unit" });
   });
@@ -382,12 +387,12 @@ describe("which task a refresh may move", () => {
   });
 
   it("moves the task the person is looking at", async () => {
-    expect(await syncGithubPullRequests(project(), "u1", 5)).toMatchObject({ autoTransitioned: 1 });
+    expect(await syncGithubPullRequests(db, project(), "u1", 5)).toMatchObject({ autoTransitioned: 1 });
   });
 
   // The button says "Refresh PR status"; moving somebody else's task under your name is not that
   it("leaves every other task where it is", async () => {
-    const result = await syncGithubPullRequests(project(), "u1", 999);
+    const result = await syncGithubPullRequests(db, project(), "u1", 999);
 
     expect(result).toMatchObject({ autoTransitioned: 0, prsLinked: 1 });
     expect(actionsLogged()).toEqual(["pr_linked"]);
@@ -395,7 +400,7 @@ describe("which task a refresh may move", () => {
 
   // Project settings' own Sync sends no task number and keeps the behaviour it always had
   it("moves every eligible task when no task is named", async () => {
-    expect(await syncGithubPullRequests(project(), "u1")).toMatchObject({ autoTransitioned: 1 });
+    expect(await syncGithubPullRequests(db, project(), "u1")).toMatchObject({ autoTransitioned: 1 });
   });
 });
 
@@ -419,7 +424,7 @@ describe("a board with nowhere to move the task to", () => {
       ],
     });
 
-    const result = await syncGithubPullRequests(withoutTheColumn, "u1");
+    const result = await syncGithubPullRequests(db, withoutTheColumn, "u1");
 
     expect(result).toMatchObject({ autoTransitioned: 0, prsLinked: 1 });
     expect(actionsLogged()).toEqual(["pr_linked"]);
@@ -479,7 +484,7 @@ describe("a date that is not a date", () => {
       ],
     });
 
-    expect(await syncGithubPullRequests(project(), "u1")).toMatchObject({ tasksWritten: 1 });
+    expect(await syncGithubPullRequests(db, project(), "u1")).toMatchObject({ tasksWritten: 1 });
   });
 });
 
@@ -568,7 +573,7 @@ describe("a sync that learned nothing", () => {
       linkedPRs: [storedFrom()],
     });
 
-    const result = await syncGithubPullRequests(project(), "u1");
+    const result = await syncGithubPullRequests(db, project(), "u1");
 
     expect(result).toMatchObject({ tasksWritten: 0 });
     expect(taskUpdateOne).not.toHaveBeenCalled();
@@ -599,7 +604,7 @@ describe("a sync that learned nothing", () => {
         linkedPRs: [storedFrom(change)],
       });
 
-      const result = await syncGithubPullRequests(project(), "u1");
+      const result = await syncGithubPullRequests(db, project(), "u1");
 
       expect(result, JSON.stringify(change)).toMatchObject({ tasksWritten: 1 });
     }
@@ -608,7 +613,7 @@ describe("a sync that learned nothing", () => {
   it("writes when a pull request appears or disappears", async () => {
     taskFindOne.mockResolvedValue({ _id: "t1", taskNumber: 5, status: "done", linkedPRs: [] });
 
-    expect(await syncGithubPullRequests(project(), "u1")).toMatchObject({ tasksWritten: 1 });
+    expect(await syncGithubPullRequests(db, project(), "u1")).toMatchObject({ tasksWritten: 1 });
   });
 
   /**
@@ -636,7 +641,7 @@ describe("a sync that learned nothing", () => {
       ],
     });
 
-    expect(await syncGithubPullRequests(project(), "u1")).toMatchObject({ tasksWritten: 0 });
+    expect(await syncGithubPullRequests(db, project(), "u1")).toMatchObject({ tasksWritten: 0 });
   });
 
   // A GitLab link beside it is not this sync's business and must not make it look changed
@@ -648,7 +653,7 @@ describe("a sync that learned nothing", () => {
       linkedPRs: [storedFrom(), { provider: "gitlab", number: 9, title: "MR", state: "open", url: "u" }],
     });
 
-    expect(await syncGithubPullRequests(project(), "u1")).toMatchObject({ tasksWritten: 0 });
+    expect(await syncGithubPullRequests(db, project(), "u1")).toMatchObject({ tasksWritten: 0 });
   });
 });
 
@@ -676,7 +681,7 @@ describe("what a round of the window may say about a link", () => {
     taskFindOne.mockResolvedValue({ _id: "t1", taskNumber: 5, status: "todo", linkedPRs: [] });
     taskFind.mockResolvedValue([]);
 
-    await syncGithubPullRequests(project(), "u1");
+    await syncGithubPullRequests(db, project(), "u1");
 
     expect(linkArgs()[0].seen?.slice().sort() ?? null).toEqual([prUrl(1), prUrl(77)].sort());
   });
@@ -716,7 +721,7 @@ describe("what a round of the window may say about a link", () => {
     });
     taskFind.mockResolvedValue([]);
 
-    const result = await syncGithubPullRequests(project(), "u1");
+    const result = await syncGithubPullRequests(db, project(), "u1");
 
     // The out-of-window link is not in this round's docs, so a comparison against the docs alone
     // would call this changed and write every five minutes — moving `updatedAt` on a done task,
@@ -739,7 +744,7 @@ describe("what a round of the window may say about a link", () => {
       },
     ]);
 
-    const result = await syncGithubPullRequests(project(), "u1");
+    const result = await syncGithubPullRequests(db, project(), "u1");
 
     const pruned = linkArgs().find((call) => call.id === "t8");
     expect(pruned?.written).toEqual([]);
@@ -752,7 +757,7 @@ describe("what a round of the window may say about a link", () => {
       { _id: "t8", taskNumber: 8, linkedPRs: [{ provider: "github", number: 9, title: "Older", state: "merged", url: prUrl(9) }] },
     ]);
 
-    const result = await syncGithubPullRequests(project(), "u1");
+    const result = await syncGithubPullRequests(db, project(), "u1");
 
     expect(linkArgs().find((call) => call.id === "t8")).toBeUndefined();
     expect(result).toMatchObject({ prsUnlinked: 0 });
@@ -765,7 +770,7 @@ describe("what a round of the window may say about a link", () => {
       { _id: "t1", taskNumber: 5, linkedPRs: [{ provider: "github", number: 1, title: "x", state: "open", url: prUrl(1) }] },
     ]);
 
-    await syncGithubPullRequests(project(), "u1");
+    await syncGithubPullRequests(db, project(), "u1");
 
     expect(linkArgs().filter((call) => call.id === "t1")).toHaveLength(1);
   });
@@ -790,13 +795,14 @@ describe("a project whose repository has moved", () => {
   it("asks the database for the addresses it saw, not the numbers", async () => {
     taskFind.mockResolvedValue([]);
 
-    await syncGithubPullRequests(project(), "u1");
+    await syncGithubPullRequests(db, project(), "u1");
 
     expect(taskFind.mock.calls[0][0]).toEqual({
       project: "p1",
       linkedPRs: {
         $elemMatch: { url: { $in: [prUrl(1)] }, provider: { $in: ["github", null] } },
       },
+      tenant: DEFAULT_TENANT_ID,
     });
   });
 
@@ -820,7 +826,7 @@ describe("a project whose repository has moved", () => {
       },
     ]);
 
-    const result = await syncGithubPullRequests(project(), "u1");
+    const result = await syncGithubPullRequests(db, project(), "u1");
 
     expect(taskUpdateOne.mock.calls.find(([filter]) => filter._id === "t8")).toBeUndefined();
     expect(result).toMatchObject({ prsUnlinked: 0 });
@@ -853,7 +859,7 @@ describe("a project whose repository has moved", () => {
       },
     ]);
 
-    const result = await syncGithubPullRequests(renamed, "u1");
+    const result = await syncGithubPullRequests(db, renamed, "u1");
 
     expect(taskUpdateOne.mock.calls.find(([filter]) => filter._id === "t8")).toBeDefined();
     expect(result).toMatchObject({ prsUnlinked: 1 });
@@ -890,7 +896,7 @@ describe("what a link change leaves behind", () => {
     await githubSyncTick();
 
     expect(rowsOf("pr_unlinked")).toEqual([
-      ["t8", null, "pr_unlinked", "linkedPRs", prUrl(1), ""],
+      [db, "t8", null, "pr_unlinked", "linkedPRs", prUrl(1), ""],
     ]);
   });
 
@@ -920,7 +926,7 @@ describe("what a link change leaves behind", () => {
     });
     taskFind.mockResolvedValue([]);
 
-    const result = await syncGithubPullRequests(project(), "u1");
+    const result = await syncGithubPullRequests(db, project(), "u1");
 
     expect(result).toMatchObject({ tasksWritten: 1 });
     expect(rowsOf("pr_linked")).toEqual([]);
@@ -996,7 +1002,7 @@ describe("a rename the project's own url has caught up with", () => {
       ],
     });
 
-    const result = await syncGithubPullRequests(project(), "u1");
+    const result = await syncGithubPullRequests(db, project(), "u1");
 
     // The write keeps what it did not see. Both halves, because "written" alone would pass on a
     // round that had also contradicted the old link: the round's field of view does not contain

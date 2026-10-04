@@ -4,14 +4,14 @@ import { ITaskDecision, TASK_DECISION_STATES, TaskDecisionState } from "@/types"
 
 const findOneAndUpdate = vi.fn();
 const find = vi.fn();
-const workerFindById = vi.fn();
+const workerFindOne = vi.fn();
 const projectFind = vi.fn();
 
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/task", () => ({ Task: { findOneAndUpdate, find } }));
-vi.mock("@/models/worker", () => ({ Worker: { findById: workerFindById } }));
+vi.mock("@/models/worker", () => ({ Worker: { findOne: workerFindOne } }));
 // Honours the filter, so a query that stopped asking for the lock would match every project
-let storedProjects: { _id: string; worker?: { lockedByInstance?: boolean } }[] = [];
+let storedProjects: { _id: string; tenant?: unknown; worker?: { lockedByInstance?: boolean } }[] = [];
 vi.mock("@/models/project", () => ({
   Project: {
     find: (query: Record<string, unknown>) => {
@@ -33,6 +33,9 @@ const {
   supersedableStates,
   toApiDecision,
 } = await import("./task-decisions");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
+const db = scopedToDefaultTenant();
 
 const WORKER = "6a7c686f70ed274cf658b1b3";
 const OWNER = "69a52b0b903d41d473ae02f6";
@@ -114,7 +117,7 @@ beforeEach(() => {
   chainedCalls.populate.length = 0;
   findOneAndUpdate.mockReset();
   find.mockReset();
-  workerFindById.mockReset();
+  workerFindOne.mockReset();
   findOneAndUpdate.mockReturnValue(chained({ decision: decision() }));
 });
 
@@ -124,7 +127,7 @@ describe("the machine writing a refusal", () => {
    * still holds the task can truthfully say it. Filtered on the run, not merely on the task.
    */
   it("writes only against a live run of this worker on that task", async () => {
-    await createDecision("t1", WORKER, "run-1", record());
+    await createDecision(db, "t1", WORKER, "run-1", record());
 
     const filter = lastFilter() as Record<string, unknown>;
     expect(filter["execution.workerId"]).toBe(WORKER);
@@ -132,7 +135,7 @@ describe("the machine writing a refusal", () => {
   });
 
   it("opens the record pending, with nobody having answered", async () => {
-    await createDecision("t1", WORKER, "run-1", record());
+    await createDecision(db, "t1", WORKER, "run-1", record());
 
     expect(lastUpdate().decision).toMatchObject({
       state: "pending",
@@ -146,14 +149,14 @@ describe("the machine writing a refusal", () => {
   // The worker owns the record, never the request: a machine posting someone else's id would
   // otherwise open a decision only that other machine could settle
   it("stamps the worker from the credential, not from the record it was handed", async () => {
-    await createDecision("t1", WORKER, "run-1", { ...record(), workerId: OTHER } as never);
+    await createDecision(db, "t1", WORKER, "run-1", { ...record(), workerId: OTHER } as never);
 
     expect((lastUpdate().decision as { workerId: string }).workerId).toBe(WORKER);
   });
 
   // A retried post after a verdict must not put the question back in front of the person
   it("does not replace a record somebody is already being asked about", async () => {
-    await createDecision("t1", WORKER, "run-1", record());
+    await createDecision(db, "t1", WORKER, "run-1", record());
     const filter = lastFilter();
 
     expect(matches(filter, live({ decision: decision({ state: "pending" }) }))).toBe(false);
@@ -161,7 +164,7 @@ describe("the machine writing a refusal", () => {
   });
 
   it("leaves room for the next refusal once the last one is settled", async () => {
-    await createDecision("t1", WORKER, "run-1", record());
+    await createDecision(db, "t1", WORKER, "run-1", record());
     const filter = lastFilter();
 
     expect(matches(filter, live({ decision: decision({ state: "delivered" }) }))).toBe(true);
@@ -172,7 +175,7 @@ describe("the machine writing a refusal", () => {
   it("says so when no live run of this worker holds the task", async () => {
     findOneAndUpdate.mockResolvedValue(null);
 
-    expect(await createDecision("t1", WORKER, "run-1", record())).toMatchObject({
+    expect(await createDecision(db, "t1", WORKER, "run-1", record())).toMatchObject({
       ok: false,
       status: 409,
     });
@@ -200,6 +203,7 @@ function record() {
 function live(over: Record<string, unknown>): Record<string, unknown> {
   return {
     _id: "t1",
+    tenant: DEFAULT_TENANT_ID,
     execution: { workerId: WORKER, runId: "run-1" },
     ...over,
   };
@@ -211,7 +215,7 @@ describe("a person's verdict", () => {
    * Accept and Decline both through, and the two then race each other on the machine.
    */
   it("is one conditional update filtered on the state it may come from", async () => {
-    await recordVerdict("t1", "accept", OWNER, PIN);
+    await recordVerdict(db, "t1", "accept", OWNER, PIN);
 
     const filter = lastFilter() as Record<string, unknown>;
     expect(filter["decision.state"]).toEqual({ $in: ["pending", "refused", "failed"] });
@@ -220,7 +224,7 @@ describe("a person's verdict", () => {
 
   // Declining is a reply to the question, and the question is only asked once
   it("declines only from pending", async () => {
-    await recordVerdict("t1", "decline", OWNER, PIN);
+    await recordVerdict(db, "t1", "decline", OWNER, PIN);
 
     expect((lastFilter() as Record<string, unknown>)["decision.state"]).toEqual({
       $in: ["pending"],
@@ -232,7 +236,7 @@ describe("a person's verdict", () => {
    * what makes every stranded case recoverable — including the ones nobody anticipated.
    */
   it("gives up on anything still waiting, including one the machine already answered", async () => {
-    await recordVerdict("t1", "abandon", OWNER, PIN);
+    await recordVerdict(db, "t1", "abandon", OWNER, PIN);
 
     expect((lastFilter() as Record<string, unknown>)["decision.state"]).toEqual({
       $in: ["pending", "accepted", "declined", "refused", "failed"],
@@ -249,7 +253,7 @@ describe("a person's verdict", () => {
   it.each(["accept", "decline", "abandon"] as const)(
     "pins a %s to the record the caller was shown",
     async (verdict) => {
-      await recordVerdict("t1", verdict, OWNER, PIN);
+      await recordVerdict(db, "t1", verdict, OWNER, PIN);
 
       const filter = lastFilter() as Record<string, unknown>;
       expect(filter["decision.workerId"]).toBe(WORKER);
@@ -259,7 +263,7 @@ describe("a person's verdict", () => {
 
   // Restated here because the route's own read of it is a separate round trip
   it("refuses to accept anything the record does not itself mark acceptable", async () => {
-    await recordVerdict("t1", "accept", OWNER, PIN);
+    await recordVerdict(db, "t1", "accept", OWNER, PIN);
 
     expect((lastFilter() as Record<string, unknown>)["decision.acceptable"]).toBe(true);
   });
@@ -267,13 +271,13 @@ describe("a person's verdict", () => {
   // Declining or giving up on a change nobody may accept is exactly what a person should be able
   // to do, so that clause belongs to accept alone
   it.each(["decline", "abandon"] as const)("does not require acceptable to %s", async (verdict) => {
-    await recordVerdict("t1", verdict, OWNER, PIN);
+    await recordVerdict(db, "t1", verdict, OWNER, PIN);
 
     expect(lastFilter()).not.toHaveProperty("decision.acceptable");
   });
 
   it("records who answered and when", async () => {
-    await recordVerdict("t1", "accept", OWNER, PIN);
+    await recordVerdict(db, "t1", "accept", OWNER, PIN);
 
     expect(String(lastUpdate()["decision.decidedBy"])).toBe(OWNER);
     expect(lastUpdate()["decision.decidedAt"]).toBeInstanceOf(Date);
@@ -282,7 +286,7 @@ describe("a person's verdict", () => {
   // The last attempt's message describes a settlement this verdict has not reached yet; leaving it
   // would have the panel explain a failure that is no longer what is happening
   it("clears the previous settlement's message when it is accepted again", async () => {
-    await recordVerdict("t1", "accept", OWNER, PIN);
+    await recordVerdict(db, "t1", "accept", OWNER, PIN);
 
     expect(lastUpdate()["decision.error"]).toBe("");
     expect(lastUpdate()["decision.attempts"]).toBe(0);
@@ -305,7 +309,7 @@ describe("a person's verdict", () => {
    * to `+decision.patch`: this test reddens, that one stayed green.
    */
   it("asks for the patch and the person, so the answer it returns is whole", async () => {
-    await recordVerdict("t1", "accept", OWNER, PIN);
+    await recordVerdict(db, "t1", "accept", OWNER, PIN);
 
     expect(chainedCalls.select).toEqual([DECISION_FIELDS_A_READER_NEEDS]);
     expect(chainedCalls.populate).toEqual(["decision.decidedBy"]);
@@ -315,13 +319,13 @@ describe("a person's verdict", () => {
   it("says so when the record has already been answered", async () => {
     findOneAndUpdate.mockReturnValue(chained(null));
 
-    expect(await recordVerdict("t1", "accept", OWNER, PIN)).toMatchObject({ ok: false, status: 409 });
+    expect(await recordVerdict(db, "t1", "accept", OWNER, PIN)).toMatchObject({ ok: false, status: 409 });
   });
 });
 
 describe("the machine settling what came of the verdict", () => {
   it("moves an accepted record only to what the machine may report", async () => {
-    await settleDecision("t1", WORKER, "delivered", { prUrl: "https://x/pull/7" });
+    await settleDecision(db, "t1", WORKER, "delivered", { prUrl: "https://x/pull/7" });
 
     const filter = lastFilter() as Record<string, unknown>;
     expect(filter["decision.workerId"]).toBe(WORKER);
@@ -330,7 +334,7 @@ describe("the machine settling what came of the verdict", () => {
   });
 
   it("discards only what was declined", async () => {
-    await settleDecision("t1", WORKER, "discarded");
+    await settleDecision(db, "t1", WORKER, "discarded");
 
     expect((lastFilter() as Record<string, unknown>)["decision.state"]).toEqual({
       $in: ["declined"],
@@ -342,7 +346,7 @@ describe("the machine settling what came of the verdict", () => {
    * this commit" mean anything afterwards.
    */
   it("touches only the four fields a settlement owns", async () => {
-    await settleDecision("t1", WORKER, "failed", { error: "remote hung up", attempts: 2 });
+    await settleDecision(db, "t1", WORKER, "failed", { error: "remote hung up", attempts: 2 });
 
     expect(Object.keys(lastUpdate()).sort()).toEqual([
       "decision.attempts",
@@ -353,8 +357,8 @@ describe("the machine settling what came of the verdict", () => {
   });
 
   it("refuses a state no machine may put a record into", async () => {
-    expect(await settleDecision("t1", WORKER, "accepted")).toMatchObject({ ok: false, status: 400 });
-    expect(await settleDecision("t1", WORKER, "abandoned")).toMatchObject({
+    expect(await settleDecision(db, "t1", WORKER, "accepted")).toMatchObject({ ok: false, status: 400 });
+    expect(await settleDecision(db, "t1", WORKER, "abandoned")).toMatchObject({
       ok: false,
       status: 400,
     });
@@ -369,24 +373,24 @@ describe("the machine settling what came of the verdict", () => {
  */
 describe("who may answer", () => {
   function ownedBy(owner: unknown) {
-    workerFindById.mockReturnValue({ select: () => ({ lean: async () => ({ owner }) }) });
+    workerFindOne.mockReturnValue({ select: () => ({ lean: async () => ({ owner }) }) });
   }
 
   it("lets the machine's owner", async () => {
     ownedBy(OWNER);
 
-    expect(await mayDecide(WORKER, { _id: OWNER, role: "member" })).toBe(true);
+    expect(await mayDecide(db, WORKER, { _id: OWNER, role: "member" })).toBe(true);
   });
 
   it("lets an instance admin, without reading the machine at all", async () => {
-    expect(await mayDecide(WORKER, { _id: OTHER, role: "admin" })).toBe(true);
-    expect(workerFindById).not.toHaveBeenCalled();
+    expect(await mayDecide(db, WORKER, { _id: OTHER, role: "admin" })).toBe(true);
+    expect(workerFindOne).not.toHaveBeenCalled();
   });
 
   it("refuses another member of the same project", async () => {
     ownedBy(OWNER);
 
-    expect(await mayDecide(WORKER, { _id: OTHER, role: "member" })).toBe(false);
+    expect(await mayDecide(db, WORKER, { _id: OTHER, role: "member" })).toBe(false);
   });
 
   // typeof null is "object", and a machine released from its owner carries null here — a missing
@@ -394,12 +398,12 @@ describe("who may answer", () => {
   it("refuses everybody on a machine with no owner", async () => {
     ownedBy(null);
 
-    expect(await mayDecide(WORKER, { _id: OTHER, role: "member" })).toBe(false);
-    expect(await mayDecide(WORKER, { _id: undefined, role: "member" })).toBe(false);
+    expect(await mayDecide(db, WORKER, { _id: OTHER, role: "member" })).toBe(false);
+    expect(await mayDecide(db, WORKER, { _id: undefined, role: "member" })).toBe(false);
   });
 
   it("refuses a worker id that is not one", async () => {
-    expect(await mayDecide("not-an-id", { _id: OWNER, role: "member" })).toBe(false);
+    expect(await mayDecide(db, "not-an-id", { _id: OWNER, role: "member" })).toBe(false);
   });
 });
 
@@ -523,18 +527,19 @@ describe("what the machine is told is waiting on it", () => {
    */
   it("asks for everything not settled, including the ones waiting on a person", async () => {
     waiting([]);
-    await decisionsForWorker(WORKER);
+    await decisionsForWorker(db, WORKER);
 
     expect(find.mock.calls[0][0]).toEqual({
       "decision.workerId": WORKER,
       "decision.state": { $nin: ["delivered", "discarded", "abandoned", "superseded"] },
+      tenant: DEFAULT_TENANT_ID,
     });
   });
 
   it("carries what a settlement needs and nothing else", async () => {
     waiting([{ _id: "t1", project: "p1", decision: decision({ state: "accepted" }) }]);
 
-    expect(await decisionsForWorker(WORKER)).toEqual([
+    expect(await decisionsForWorker(db, WORKER)).toEqual([
       {
         taskId: "t1",
         projectId: "p1",
@@ -553,22 +558,22 @@ describe("what the machine is told is waiting on it", () => {
   it("drops a row with no decision on it at all", async () => {
     waiting([{ _id: "t1", project: "p1" }]);
 
-    expect(await decisionsForWorker(WORKER)).toEqual([]);
+    expect(await decisionsForWorker(db, WORKER)).toEqual([]);
   });
 
   // BP-736: the lock stops a machine acting on an acceptance, without making it drop the worktree
   describe("on a project an instance admin has locked workers off", () => {
     beforeEach(() => {
       storedProjects = [
-        { _id: "p1", worker: { lockedByInstance: true } },
-        { _id: "p2", worker: { lockedByInstance: false } },
+        { _id: "p1", tenant: DEFAULT_TENANT_ID, worker: { lockedByInstance: true } },
+        { _id: "p2", tenant: DEFAULT_TENANT_ID, worker: { lockedByInstance: false } },
       ];
     });
 
     it("holds an acceptance back as pending, so nothing is pushed and the worktree is kept", async () => {
       waiting([{ _id: "t1", project: "p1", decision: decision({ state: "accepted" }) }]);
 
-      const [row] = await decisionsForWorker(WORKER);
+      const [row] = await decisionsForWorker(db, WORKER);
 
       expect(row).toMatchObject({ taskId: "t1", state: "pending" });
     });
@@ -576,13 +581,13 @@ describe("what the machine is told is waiting on it", () => {
     it("still passes a decline through, which spends nothing", async () => {
       waiting([{ _id: "t1", project: "p1", decision: decision({ state: "declined" }) }]);
 
-      expect((await decisionsForWorker(WORKER))[0].state).toBe("declined");
+      expect((await decisionsForWorker(db, WORKER))[0].state).toBe("declined");
     });
 
     it("leaves an acceptance on an unlocked project alone, as the control", async () => {
       waiting([{ _id: "t2", project: "p2", decision: decision({ state: "accepted" }) }]);
 
-      expect((await decisionsForWorker(WORKER))[0].state).toBe("accepted");
+      expect((await decisionsForWorker(db, WORKER))[0].state).toBe("accepted");
     });
   });
 });
@@ -623,6 +628,6 @@ describe("what a second claim sweeps away", () => {
 /** The `$nin` the worker's own list is built from — the only place the settled states are named. */
 async function decisionsForWorkerFilter(): Promise<Record<string, unknown>> {
   find.mockReturnValue({ select: () => ({ lean: async () => [] }) });
-  await decisionsForWorker(WORKER);
+  await decisionsForWorker(db, WORKER);
   return find.mock.calls[find.mock.calls.length - 1][0] as Record<string, unknown>;
 }

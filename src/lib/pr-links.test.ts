@@ -11,6 +11,8 @@ vi.mock("@/models/task", () => ({ Task: { updateOne: taskUpdateOne } }));
 
 const { addedLinks, recordLinkChanges, removedLinks, seenUrls, unseenLinks } =
   await import("./pr-links");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const db = scopedToDefaultTenant();
 
 const REPO = "https://github.com/example/board";
 // The address follows the number unless the caller names one: a fixture where it does not is a
@@ -137,6 +139,7 @@ describe("addedLinks", () => {
 describe("recordLinkChanges", () => {
   it("writes a row for each side, naming the address", async () => {
     await recordLinkChanges(
+      db,
       "t1",
       "u1",
       [{ url: `${REPO}/pull/2` }],
@@ -144,17 +147,18 @@ describe("recordLinkChanges", () => {
     );
 
     expect(logActivity.mock.calls).toEqual([
-      ["t1", "u1", "pr_unlinked", "linkedPRs", `${REPO}/pull/1`, ""],
-      ["t1", "u1", "pr_linked", "linkedPRs", "", `${REPO}/pull/2`],
+      [db, "t1", "u1", "pr_unlinked", "linkedPRs", `${REPO}/pull/1`, ""],
+      [db, "t1", "u1", "pr_linked", "linkedPRs", "", `${REPO}/pull/2`],
     ]);
   });
 
   // The absence that stops the auto-transition writing a row is not a reason to leave the link
   // change untraceable: nobody authored what GitHub says
   it("keeps a scheduled round's row authorless rather than borrowing a name", async () => {
-    await recordLinkChanges("t1", null, [], [{ url: `${REPO}/pull/1` }]);
+    await recordLinkChanges(db, "t1", null, [], [{ url: `${REPO}/pull/1` }]);
 
     expect(logActivity).toHaveBeenCalledWith(
+      db,
       "t1",
       null,
       "pr_unlinked",
@@ -165,14 +169,14 @@ describe("recordLinkChanges", () => {
   });
 
   it("writes nothing when nothing changed", async () => {
-    await recordLinkChanges("t1", "u1", [], []);
+    await recordLinkChanges(db, "t1", "u1", [], []);
     expect(logActivity).not.toHaveBeenCalled();
   });
 
   // It is a row in a different collection, which is the whole reason it is affordable: a task
   // write is what BP-443 and BP-627 removed
   it("does not touch the task", async () => {
-    await recordLinkChanges("t1", "u1", [{ url: `${REPO}/pull/2` }], []);
+    await recordLinkChanges(db, "t1", "u1", [{ url: `${REPO}/pull/2` }], []);
     expect(taskUpdateOne).not.toHaveBeenCalled();
   });
 });

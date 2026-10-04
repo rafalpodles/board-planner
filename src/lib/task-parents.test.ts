@@ -4,6 +4,9 @@ const { find } = vi.hoisted(() => ({ find: vi.fn() }));
 vi.mock("@/models/task", () => ({ Task: { find } }));
 
 const { parentsOf } = await import("./task-parents");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
+const db = scopedToDefaultTenant();
 
 /** What `Task.find(...).lean()` hands back. */
 function found(docs: unknown[]) {
@@ -34,7 +37,7 @@ describe("parentsOf", () => {
   it("maps each child to the parent that names it", async () => {
     found([EPIC]);
 
-    const parents = await parentsOf("p1", ["child-a", "child-b"]);
+    const parents = await parentsOf(db, "p1", ["child-a", "child-b"]);
 
     expect(parents.get("child-a")).toEqual({
       _id: "epic",
@@ -48,7 +51,7 @@ describe("parentsOf", () => {
   it("ignores a sibling of the asked-for children carried by the same parent", async () => {
     found([EPIC]);
 
-    const parents = await parentsOf("p1", ["child-a"]);
+    const parents = await parentsOf(db, "p1", ["child-a"]);
 
     expect([...parents.keys()]).toEqual(["child-a"]);
   });
@@ -65,7 +68,7 @@ describe("parentsOf", () => {
       },
     ]);
 
-    const parents = await parentsOf("p1", ["child-a", "child-c"]);
+    const parents = await parentsOf(db, "p1", ["child-a", "child-c"]);
 
     expect(parents.get("child-a")?.taskNumber).toBe(644);
     expect(parents.has("child-c")).toBe(false);
@@ -77,10 +80,10 @@ describe("parentsOf", () => {
   it("asks for this project's parents by type, not for the listed ids", async () => {
     found([]);
 
-    await parentsOf("p1", ["child-a"]);
+    await parentsOf(db, "p1", ["child-a"]);
 
     expect(find).toHaveBeenCalledWith(
-      { project: "p1", "relations.type": "parent_of" },
+      { project: "p1", "relations.type": "parent_of", tenant: DEFAULT_TENANT_ID },
       "taskNumber title status relations"
     );
   });
@@ -97,7 +100,7 @@ describe("parentsOf", () => {
       EPIC,
     ]);
 
-    const parents = await parentsOf("p1", ["child-a"]);
+    const parents = await parentsOf(db, "p1", ["child-a"]);
 
     expect([...parents.keys()]).toEqual(["child-a"]);
   });
@@ -114,17 +117,17 @@ describe("parentsOf", () => {
     });
     found([claim(900, "late"), claim(644, "early")]);
 
-    const first = await parentsOf("p1", ["child-a"]);
+    const first = await parentsOf(db, "p1", ["child-a"]);
 
     found([claim(644, "early"), claim(900, "late")]);
-    const second = await parentsOf("p1", ["child-a"]);
+    const second = await parentsOf(db, "p1", ["child-a"]);
 
     expect(first.get("child-a")?.taskNumber).toBe(644);
     expect(second.get("child-a")).toEqual(first.get("child-a"));
   });
 
   it("asks the database nothing for an empty board", async () => {
-    const parents = await parentsOf("p1", []);
+    const parents = await parentsOf(db, "p1", []);
 
     expect(parents.size).toBe(0);
     expect(find).not.toHaveBeenCalled();
@@ -133,6 +136,6 @@ describe("parentsOf", () => {
   it("survives a parent whose relations array is absent", async () => {
     found([{ _id: "epic", taskNumber: 1, title: "x", status: "todo" }]);
 
-    await expect(parentsOf("p1", ["child-a"])).resolves.toEqual(new Map());
+    await expect(parentsOf(db, "p1", ["child-a"])).resolves.toEqual(new Map());
   });
 });
