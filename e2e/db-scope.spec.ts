@@ -217,3 +217,13 @@ test("the instance's settings row is created in the default tenant, by a read or
   expect(await settings()).toMatchObject([{ tenant: DEFAULT_TENANT_ID }]);
 });
 
+test("BP-667: each tenant has its own settings row, and a change in one leaves the other alone", async () => {
+  await updateSettings(scoped(A), { $set: { aiModel: "a-model", signUpDomains: ["a.example"] } });
+  await updateSettings(scoped(B), { $set: { aiModel: "b-model" } });
+  await updateSettings(scoped(A), { $set: { aiModel: "a-model-2" } });
+
+  expect(await getSettings(scoped(A))).toMatchObject({ aiModel: "a-model-2", signUpDomains: ["a.example"] });
+  expect(await getSettings(scoped(B))).toMatchObject({ aiModel: "b-model", signUpDomains: [] });
+  expect(await mongoose.connection.db!.collection("settings").countDocuments({})).toBe(2);
+});
+
