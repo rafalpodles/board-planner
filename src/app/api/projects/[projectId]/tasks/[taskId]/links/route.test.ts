@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const findOneAndUpdate = vi.fn();
 const findOne = vi.fn();
@@ -17,9 +18,10 @@ vi.mock("@/lib/middleware", () => ({
   withProjectAccess:
     (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
     (req: Request, ctx: unknown) =>
-      handler(req, { ...(ctx as object), user: { _id: "u1" } }),
+      handler(req, { ...(ctx as object), user: { _id: "u1" }, db: scopedToDefaultTenant() }),
 }));
 
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 const { DELETE, POST } = await import("./route");
 
 const OTHER_TASK = "507f1f77bcf86cd799439011";
@@ -57,7 +59,7 @@ describe("DELETE /api/projects/:projectId/tasks/:taskId/links", () => {
 
     expect(res.status).toBe(200);
     expect(findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: "t1", project: "p1" },
+      { _id: "t1", project: "p1", tenant: DEFAULT_TENANT_ID },
       { $pull: { blockedBy: OTHER_TASK } },
       expect.objectContaining({ returnDocument: "before" })
     );
@@ -86,7 +88,7 @@ describe("DELETE /api/projects/:projectId/tasks/:taskId/links", () => {
 
     expect(res.status).toBe(200);
     expect(findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: "t1", project: "p1" },
+      { _id: "t1", project: "p1", tenant: DEFAULT_TENANT_ID },
       { $pull: { relations: { task: OTHER_TASK, type: "relates" } } },
       expect.objectContaining({ returnDocument: "before" })
     );

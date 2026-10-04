@@ -41,6 +41,7 @@ vi.mock("@/models/user", () => ({
 vi.mock("@/models/project", () => ({ Project: { findOne: vi.fn() } }));
 vi.mock("@/models/task", () => ({ Task: {} }));
 
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 const { GET } = await import("./route");
 
 const PROJECT = "69a52e3b399b27d3cbb2c5a5";
@@ -120,7 +121,7 @@ describe("GET member candidates", () => {
 
   it("checks owner-level access, not merely project membership", async () => {
     await GET(req("ann"), { params });
-    expect(check).toHaveBeenCalledWith({ _id: "o1", role: "member" }, PROJECT, "admin");
+    expect(check).toHaveBeenCalledWith(scopedToDefaultTenant(), { _id: "o1", role: "member" }, PROJECT, "admin");
   });
 
   it("refuses anyone who is not an owner of this project", async () => {

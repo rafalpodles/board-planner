@@ -30,6 +30,7 @@ vi.mock("bcryptjs", () => ({ default: { compare, hash: vi.fn().mockResolvedValue
 vi.mock("@/models/user", () => ({ User: { findOne: userFindOne } }));
 
 const { PUT } = await import("./route");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 const { resetRateLimits, lockoutKey, recordFailedAttempt, isRateLimited, ANONYMOUS_ACCOUNT_ATTEMPTS } =
   await import("@/lib/rate-limit");
 
@@ -81,6 +82,7 @@ describe("PUT /api/users/me/password", () => {
 
     expect((await PUT(put(), ctx())).status).toBe(200);
     expect(logInstanceAudit).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       expect.objectContaining({ action: "identity_unlinked", user: "u1-changer", target: "changer" })
     );
   });

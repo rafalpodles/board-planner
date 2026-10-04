@@ -24,6 +24,7 @@ vi.mock("@/models/projectAuditLog", () => ({
 }));
 
 const { GET } = await import("./route");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 
 const PROJECT = "69a52e3b399b27d3cbb2c5a5";
 const params = Promise.resolve({ projectId: PROJECT });
@@ -47,7 +48,7 @@ describe("GET audit", () => {
   it("checks admin-level access, not mere board access", async () => {
     await GET(new Request("http://x"), { params });
 
-    expect(check).toHaveBeenCalledWith(expect.anything(), PROJECT, "admin");
+    expect(check).toHaveBeenCalledWith(scopedToDefaultTenant(), expect.anything(), PROJECT, "admin");
   });
 
   it("refuses a member who is not the project's owner", async () => {

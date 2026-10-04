@@ -22,6 +22,7 @@ vi.mock("@/lib/pm/mcp-tools", () => ({ resolveServerToken }));
 vi.mock("@/lib/pm/mcp-client", () => ({ McpClient: McpClientMock }));
 
 const { POST } = await import("./route");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 
 const OWNER = { _id: "u1", role: "member" };
 const MEMBER = { _id: "u2", role: "member" };
@@ -62,7 +63,7 @@ describe("POST /api/projects/[projectId]/pm/mcp-test", () => {
     const response = await POST(request(), ctx());
 
     expect(response.status).toBe(400);
-    expect(check).toHaveBeenCalledWith(expect.anything(), PROJECT_ID, "admin");
+    expect(check).toHaveBeenCalledWith(scopedToDefaultTenant(), expect.anything(), PROJECT_ID, "admin");
   });
 
   it("denies a plain member", async () => {

@@ -17,6 +17,7 @@ let providers = [OIDC, GITHUB];
 vi.mock("@/lib/oidc/providers", () => ({ configuredProviders: () => providers }));
 
 const { GET, PUT } = await import("./route");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 
 const ADMIN = { _id: "a1", username: "root", role: "admin", viaMachineCredential: false };
 const ctx = () => ({ params: Promise.resolve({}) });
@@ -76,6 +77,7 @@ describe("PUT /api/admin/sign-up", () => {
     expect(upsertSingleton).toHaveBeenCalledWith({}, { $set: { signUpDomains: ["corp.example", "lab.example"] } });
     expect((await res.json()).domains).toEqual(["corp.example", "lab.example"]);
     expect(logInstanceAudit).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       expect.objectContaining({
         action: "instance_settings_changed",
         detail: "sign-up domains: old.example → corp.example, lab.example",
@@ -87,7 +89,7 @@ describe("PUT /api/admin/sign-up", () => {
     await put({ domains: [] });
 
     expect(upsertSingleton).toHaveBeenCalledWith({}, { $set: { signUpDomains: [] } });
-    expect(logInstanceAudit.mock.calls[0][0].detail).toBe("sign-up domains: old.example → none");
+    expect(logInstanceAudit.mock.calls[0][1].detail).toBe("sign-up domains: old.example → none");
   });
 
   it("refuses something that is not a domain, storing nothing", async () => {

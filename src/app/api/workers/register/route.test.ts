@@ -25,6 +25,7 @@ vi.mock("@/lib/worker-service", async (importOriginal) => {
   return { ...actual, registerWorker };
 });
 
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 const { POST } = await import("./route");
 
 const WORKER = {
@@ -65,13 +66,13 @@ describe("POST /api/workers/register", () => {
     const json = await response.json();
     expect(json.workerId).toBe("w1");
     expect(json.credential).toBe("cpw_secret");
-    expect(consumeEnrolmentToken).toHaveBeenCalledWith("cpe_good");
+    expect(consumeEnrolmentToken).toHaveBeenCalledWith(scopedToDefaultTenant(), "cpe_good");
   });
 
   it("records which worker spent the token", async () => {
     await POST(request(VALID, "cpe_good"));
 
-    expect(attachWorkerToEnrolment).toHaveBeenCalledWith("e1", "w1");
+    expect(attachWorkerToEnrolment).toHaveBeenCalledWith(scopedToDefaultTenant(), "e1", "w1");
   });
 
   // BP-358: enrolment is enrolment whichever door it comes through. This path has no admin session
@@ -79,7 +80,7 @@ describe("POST /api/workers/register", () => {
   it("passes the token's creator as the machine's owner", async () => {
     await POST(request(VALID, "cpe_good"));
 
-    expect(registerWorker.mock.calls[0][0].ownerId).toBe("u1");
+    expect(registerWorker.mock.calls[0][1].ownerId).toBe("u1");
   });
 
   // BP-233. No user on this one: the caller is a machine holding a token and no session, which is
@@ -88,7 +89,7 @@ describe("POST /api/workers/register", () => {
   it("records the spend against the machine, with no user to attribute it to", async () => {
     await POST(request(VALID, "cpe_good"));
 
-    const entry = logInstanceAudit.mock.calls[0][0];
+    const entry = logInstanceAudit.mock.calls[0][1];
     expect(entry).toMatchObject({
       action: "enrolment_token_spent",
       target: "rig-laptop",
@@ -103,7 +104,7 @@ describe("POST /api/workers/register", () => {
   it("caps the name and host a registering machine chooses for itself", async () => {
     await POST(request({ ...VALID, name: "n".repeat(500), host: "h".repeat(900) }, "cpe_good"));
 
-    const registered = registerWorker.mock.calls[0][0];
+    const registered = registerWorker.mock.calls[0][1];
     expect(registered.name).toHaveLength(120);
     expect(registered.host).toHaveLength(200);
   });
@@ -188,6 +189,6 @@ describe("POST /api/workers/register", () => {
   it("stores at most 100 characters of the version it is sent", async () => {
     await POST(request({ ...VALID, version: "v".repeat(5000) }, "cpe_good"));
 
-    expect(registerWorker.mock.calls[0][0].version).toHaveLength(100);
+    expect(registerWorker.mock.calls[0][1].version).toHaveLength(100);
   });
 });

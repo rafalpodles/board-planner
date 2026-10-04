@@ -29,7 +29,7 @@ vi.mock("@/lib/invitation-mail", async () => {
   return { ...actual, deliverTo };
 });
 vi.mock("@/lib/invitation-view", () => ({
-  toApiInvitations: async (rows: { email: string }[]) => rows.map((r) => ({ email: r.email })),
+  toApiInvitations: async (_db: unknown, rows: { email: string }[]) => rows.map((r) => ({ email: r.email })),
   describeInvitation: () => "described",
 }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
@@ -38,6 +38,7 @@ vi.mock("@/models/project", () => ({ Project: { find: projectFind } }));
 vi.mock("@/models/invitation", () => ({ Invitation: { find: invitationFind } }));
 
 const { GET, POST } = await import("./route");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 
 const P1 = "64b000000000000000000001";
 const CTX = { params: Promise.resolve({}) };
@@ -75,7 +76,7 @@ describe("POST /api/invitations", () => {
     const res = await POST(post({ email: " Ada@Example.com ", boards: [{ project: P1, relation: "owner" }] }), CTX);
 
     expect(res.status).toBe(201);
-    expect(issueInvitation).toHaveBeenCalledWith({
+    expect(issueInvitation).toHaveBeenCalledWith(scopedToDefaultTenant(), {
       email: "ada@example.com",
       role: "member",
       boards: [{ project: P1, relation: "owner" }],
@@ -83,9 +84,10 @@ describe("POST /api/invitations", () => {
     });
     const body = await res.json();
     expect(body.delivery).toBe("email");
-    expect(recordDelivery).toHaveBeenCalledWith("inv-1", "cpi_secret", "email");
+    expect(recordDelivery).toHaveBeenCalledWith(scopedToDefaultTenant(), "inv-1", "cpi_secret", "email");
     expect(JSON.stringify(body)).not.toContain("cpi_secret");
     expect(logInstanceAudit).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       expect.objectContaining({ action: "invitation_sent", target: "ada@example.com" })
     );
   });

@@ -89,7 +89,7 @@ describe("DELETE /api/users/me/identities/:id", () => {
     expect(res.status).toBe(200);
     expect(identityFindOne).toHaveBeenCalledWith({ _id: ID, user: "u1", tenant: DEFAULT_TENANT_ID });
     expect(identityDelete).toHaveBeenCalledWith({ _id: ID, user: "u1", tenant: DEFAULT_TENANT_ID });
-    expect(logInstanceAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "identity_unlinked" }));
+    expect(logInstanceAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), expect.objectContaining({ action: "identity_unlinked" }));
   });
 
   it("refuses to unlink the only way in, and says how to make another", async () => {

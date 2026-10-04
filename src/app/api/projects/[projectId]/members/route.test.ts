@@ -18,9 +18,9 @@ const userFindLean = vi.fn();
 const userFindOne = vi.fn();
 const userFindOneSelect = vi.fn();
 const check = vi.fn();
-const recipientsWithAccess = vi.fn(async (_ids?: unknown, _project?: unknown): Promise<string[]> => []);
+const recipientsWithAccess = vi.fn(async (_db?: unknown, _ids?: unknown, _project?: unknown): Promise<string[]> => []);
 const notificationDeleteMany = vi.fn(async (_filter?: unknown) => ({ deletedCount: 0 }));
-const createNotifications = vi.fn(async (_params: unknown) => {});
+const createNotifications = vi.fn(async (_db: unknown, _params: unknown) => {});
 const projectFindOneLean = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
@@ -57,7 +57,7 @@ vi.mock("@/models/project", () => ({
   Project: { findOne: () => ({ select: () => ({ lean: projectFindOneLean }) }) },
 }));
 vi.mock("@/lib/in-app-notifications", () => ({
-  createNotifications: (params: unknown) => createNotifications(params),
+  createNotifications: (db: unknown, params: unknown) => createNotifications(db, params),
 }));
 vi.mock("@/models/task", () => ({ Task: {} }));
 vi.mock("@/lib/projectAudit", () => ({ logProjectAudit }));
@@ -65,6 +65,7 @@ vi.mock("@/models/notification", () => ({
   Notification: { deleteMany: (filter: unknown) => notificationDeleteMany(filter) },
 }));
 
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 const { GET, PUT, DELETE } = await import("./route");
 
 const PROJECT = "69a52e3b399b27d3cbb2c5a5";
@@ -253,7 +254,7 @@ describe("PUT members", () => {
     userFindOneSelect.mockResolvedValue({ _id: U2, role: "member", kind: "human", username: "uma" });
 
     expect((await PUT(put({ userId: U2, relation: "member" }), { params })).status).toBe(409);
-    expect(logProjectAudit).toHaveBeenCalledWith(PROJECT, "o1", "member_added", "uma: no access → owner");
+    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), PROJECT, "o1", "member_added", "uma: no access → owner");
   });
 
   it("keeps an owner's demotion while another active owner remains after the write", async () => {
@@ -318,7 +319,7 @@ describe("DELETE members", () => {
       { $set: { relation: "owner" } }
     );
     // Another request's member grant made owner again: an owner's access granted, so recorded
-    expect(logProjectAudit).toHaveBeenCalledWith(PROJECT, "o1", "member_role_changed", "uma: member → owner");
+    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), PROJECT, "o1", "member_role_changed", "uma: member → owner");
   });
 
   it("keeps an owner's removal while another active owner remains after it", async () => {
@@ -412,7 +413,7 @@ describe("DELETE members", () => {
     const url = `http://x/api/projects/${PROJECT}/members?userId=${U2}`;
     await DELETE(new Request(url, { method: "DELETE" }), { params });
 
-    expect(recipientsWithAccess).toHaveBeenCalledWith([U2], PROJECT);
+    expect(recipientsWithAccess).toHaveBeenCalledWith(scopedToDefaultTenant(), [U2], PROJECT);
   });
 
   it("refuses a userId that is not an object id, rather than throwing a 500", async () => {
@@ -451,7 +452,7 @@ describe("DELETE members", () => {
 describe("PUT members tells the person", () => {
   const announced = async () => {
     await vi.waitFor(() => expect(createNotifications).toHaveBeenCalled());
-    return createNotifications.mock.calls[0][0] as Record<string, unknown>;
+    return createNotifications.mock.calls[0][1] as Record<string, unknown>;
   };
   const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
 
@@ -585,7 +586,7 @@ describe("the audit trail of board access", () => {
   it("records a grant to somebody who had none", async () => {
     await PUT(put({ userId: U2, relation: "member" }), { params });
 
-    expect(logProjectAudit).toHaveBeenCalledWith(PROJECT, "o1", "member_added", "uma: no access → member");
+    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), PROJECT, "o1", "member_added", "uma: no access → member");
   });
 
   it("records a promotion with where it came from", async () => {
@@ -594,6 +595,7 @@ describe("the audit trail of board access", () => {
     await PUT(put({ userId: U2, relation: "owner" }), { params });
 
     expect(logProjectAudit).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       PROJECT,
       "o1",
       "member_role_changed",
@@ -625,6 +627,7 @@ describe("the audit trail of board access", () => {
     await DELETE(new Request(url, { method: "DELETE" }), { params });
 
     expect(logProjectAudit).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       PROJECT,
       "o1",
       "member_removed",
@@ -657,6 +660,6 @@ describe("the audit trail of board access", () => {
 
     await DELETE(new Request(url, { method: "DELETE" }), { params });
 
-    expect(logProjectAudit.mock.calls[0][3]).toBe("a deleted user: member → no access");
+    expect(logProjectAudit.mock.calls[0][4]).toBe("a deleted user: member → no access");
   });
 });

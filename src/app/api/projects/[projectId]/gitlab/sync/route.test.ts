@@ -99,11 +99,11 @@ beforeEach(() => {
 /** The history rows of one action: a link change writes rows of its own now, so "nothing was
  *  logged" has to say which nothing it means (BP-628). */
 const rowsOf = (action: string) =>
-  logActivity.mock.calls.filter((call: unknown[]) => call[2] === action);
+  logActivity.mock.calls.filter((call: unknown[]) => call[3] === action);
 
 /** Every action a round wrote a row for. Asserting this rather than one action keeps the old
  *  guarantee that nothing ELSE was logged either. */
-const actionsLogged = () => logActivity.mock.calls.map((call: unknown[]) => call[2]).sort();
+const actionsLogged = () => logActivity.mock.calls.map((call: unknown[]) => call[3]).sort();
 
 describe("POST .../gitlab/sync — matching", () => {
   it("still finds merge requests opened under a key the project has since left", async () => {
@@ -176,6 +176,7 @@ describe("POST .../gitlab/sync — linking", () => {
     await POST(request(), ctx());
 
     expect(logActivity).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       "t1",
       "u1",
       "status_changed",
@@ -292,6 +293,7 @@ describe("POST .../gitlab/sync — linking", () => {
     // On the default board the destination happens to BE "ready_to_test", so the hardcoded string
     // this route used to log was indistinguishable from the real one. Here it is not.
     expect(logActivity).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       "t1",
       "u1",
       "status_changed",
@@ -426,7 +428,7 @@ describe("POST .../gitlab/sync — what a round may contradict, and what it reco
     await POST(request(), ctx());
 
     expect(rowsOf("pr_linked")).toEqual([
-      ["t1", "u1", "pr_linked", "linkedPRs", "", mrUrl(7)],
+      [scopedToDefaultTenant(), "t1", "u1", "pr_linked", "linkedPRs", "", mrUrl(7)],
     ]);
   });
 
@@ -478,7 +480,7 @@ describe("POST .../gitlab/sync — what a round may contradict, and what it reco
     await POST(request(), ctx());
 
     expect(rowsOf("pr_unlinked")).toEqual([
-      ["t8", "u1", "pr_unlinked", "linkedPRs", mrUrl(1), ""],
+      [scopedToDefaultTenant(), "t8", "u1", "pr_unlinked", "linkedPRs", mrUrl(1), ""],
     ]);
   });
 });

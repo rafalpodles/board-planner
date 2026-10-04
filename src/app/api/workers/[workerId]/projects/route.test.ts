@@ -11,7 +11,7 @@ const projectFind = vi.fn();
 const projectUpdateOne = vi.fn();
 const logInstanceAudit = vi.fn();
 let ownedByCaller: string[] = [];
-const administeredProjectIds = vi.fn(async (user: { role: string }, ids: string[]) =>
+const administeredProjectIds = vi.fn(async (_db: unknown, user: { role: string }, ids: string[]) =>
   new Set(user.role === "admin" ? ids : ids.filter((id) => ownedByCaller.includes(id)))
 );
 
@@ -53,6 +53,7 @@ vi.mock("@/lib/worker-service", async (importOriginal) => {
   return { ...actual, ownerReachableProjectIds };
 });
 
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 const { GET, PUT } = await import("./route");
 
 const WORKER_ID = "69a52e3b399b27d3cbb2c5a5";
@@ -168,6 +169,7 @@ describe("PUT the selection", () => {
       { $set: { "worker.enabled": true } }
     );
     expect(logInstanceAudit).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       expect.objectContaining({ action: "project_workers_enabled", target: "SB" })
     );
     expect(json.leftDisabled).toEqual([]);
@@ -208,6 +210,7 @@ describe("PUT the selection", () => {
       { $set: { "worker.enabled": true } }
     );
     expect(logInstanceAudit).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       expect.objectContaining({ action: "project_workers_enabled", target: "SB" })
     );
     expect(json.leftDisabled).toEqual([]);

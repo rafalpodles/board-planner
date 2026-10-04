@@ -8,7 +8,7 @@ const workerFindOne = vi.fn();
 const projectFind = vi.fn();
 const countDocuments = vi.fn();
 const accessibleProjectIds = vi.fn();
-const userFindById = vi.fn();
+const userFindOne = vi.fn();
 const workerFindOthers = vi.fn();
 const workerFindOneAndUpdate = vi.fn();
 const logInstanceAudit = vi.fn();
@@ -20,7 +20,7 @@ vi.mock("@/lib/auth", () => ({
   RateLimitError: class RateLimitError extends Error {},
 }));
 vi.mock("@/lib/grants", () => ({ check, accessibleProjectIds }));
-vi.mock("@/models/user", () => ({ User: { findById: userFindById, exists: async () => null } }));
+vi.mock("@/models/user", () => ({ User: { findOne: userFindOne, exists: async () => null } }));
 // The GET now also asks what refused changes are waiting on this machine. Answering "none" keeps
 // every assertion below about the assignments and the catalogue, which is what they are testing.
 const taskFind = vi.fn(() => ({ select: () => ({ lean: async () => [] }) }));
@@ -40,6 +40,7 @@ vi.mock("@/lib/worker-service", async (importOriginal) => {
   return { ...actual, verifyWorkerCredential };
 });
 
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 const { GET, PATCH } = await import("./route");
 
 const WORKER_ID = "69a52e3b399b27d3cbb2c5a5";
@@ -98,7 +99,7 @@ beforeEach(() => {
   });
   verifyWorkerCredential.mockResolvedValue(WORKER);
   workerFindOthers.mockResolvedValue([]);
-  userFindById.mockResolvedValue({ _id: OWNER_ID, role: "member" });
+  userFindOne.mockResolvedValue({ _id: OWNER_ID, role: "member" });
   accessibleProjectIds.mockResolvedValue(["p1"]);
   projectFind.mockResolvedValue([
     {
@@ -177,6 +178,7 @@ describe("PATCH releases a machine from its owner", () => {
     await PATCH(patchRequest({ owner: null }), ctx());
 
     expect(logInstanceAudit).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       expect.objectContaining({ action: "worker_released", target: "rig-laptop" })
     );
   });
@@ -525,7 +527,7 @@ describe("GET and a contested checkout", () => {
 // BP-233. BP-232 removed stored worker assignments and the audit call that hung off them went with
 // it, so stopping a machine became a thing nobody could prove had happened.
 describe("what the fleet audit log records", () => {
-  const entries = () => logInstanceAudit.mock.calls.map((c) => c[0]);
+  const entries = () => logInstanceAudit.mock.calls.map((c) => c[1]);
 
   beforeEach(() => {
     getAuthUser.mockResolvedValue(INSTANCE_ADMIN);

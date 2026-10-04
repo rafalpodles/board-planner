@@ -43,7 +43,7 @@ describe("POST /api/projects/:projectId/pm/review", () => {
     const res = await run();
 
     expect(res.status).toBe(202);
-    expect(startBoardReview).toHaveBeenCalledWith("p1", "BP", { enabled: true }, "pm-user");
+    expect(startBoardReview).toHaveBeenCalledWith(scopedToDefaultTenant(), "p1", "BP", { enabled: true }, "pm-user");
     expect(after).toHaveBeenCalledTimes(1);
     // What after() keeps alive is the review, not some other promise
     expect(after.mock.calls[0][0]()).toBe(done);

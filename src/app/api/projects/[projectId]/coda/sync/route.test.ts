@@ -14,6 +14,7 @@ vi.mock("@/lib/tenant", () => ({
 vi.mock("@/ee/connectors/coda/sync", () => ({ syncProjectToCoda }));
 
 const { POST } = await import("./route");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 
 const PROJECT_ID = "507f1f77bcf86cd799439011";
 const sync = () =>
@@ -34,7 +35,7 @@ describe("POST /api/projects/[projectId]/coda/sync", () => {
     const res = await sync();
 
     expect(res.status).toBe(200);
-    expect(syncProjectToCoda).toHaveBeenCalledWith(PROJECT_ID);
+    expect(syncProjectToCoda).toHaveBeenCalledWith(scopedToDefaultTenant(), PROJECT_ID);
   });
 
   it("answers 402 on a free instance, without syncing", async () => {

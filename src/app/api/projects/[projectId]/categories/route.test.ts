@@ -390,7 +390,7 @@ describe("DELETE /api/projects/:projectId/categories", () => {
   // Removing a category is the one verb here that is project-owner rather than project-access:
   // it can make every task holding that name unsaveable.
   it("403s a member who may add and rename but not remove", async () => {
-    check.mockImplementation(async (_user: unknown, _project: unknown, level: string) =>
+    check.mockImplementation(async (_db: unknown, _user: unknown, _project: unknown, level: string) =>
       level === "access"
     );
 

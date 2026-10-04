@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const claimInvitation = vi.fn();
 const findInvitationByToken = vi.fn();
@@ -51,6 +52,7 @@ vi.mock("bcryptjs", () => ({ default: { hash } }));
 const { POST } = await import("./route");
 const { resetRateLimits } = await import("@/lib/rate-limit");
 const { INVITATION_REFUSALS } = await import("@/lib/invitation-refusals");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 
 const INVITATION = {
   _id: "inv-1",
@@ -94,15 +96,16 @@ describe("POST /api/invitations/accept", () => {
       email: "ada@example.com",
       emailVerifiedAt: null,
       role: "member",
+      tenant: DEFAULT_TENANT_ID,
     });
     expect(grantUpsert).toHaveBeenCalledWith(
-      { subject: "u-new", objectType: "project", object: "p1" },
+      { subject: "u-new", objectType: "project", object: "p1", tenant: DEFAULT_TENANT_ID },
       { $set: { relation: "owner" }, $setOnInsert: { createdBy: "admin-1" } },
       { upsert: true }
     );
-    expect(recordAcceptance).toHaveBeenCalledWith("inv-1", "u-new");
+    expect(recordAcceptance).toHaveBeenCalledWith(scopedToDefaultTenant(), "inv-1", "u-new");
     // A re-invite sent while the claim was held would otherwise outlive this account
-    expect(revokePendingInvitationsFor).toHaveBeenCalledWith("ada@example.com");
+    expect(revokePendingInvitationsFor).toHaveBeenCalledWith(scopedToDefaultTenant(), "ada@example.com");
     expect(res.headers.get("set-cookie")).toContain("cps_new");
     expect(await res.json()).toEqual({ username: "ada", landing: "p1" });
   });
@@ -173,7 +176,7 @@ describe("POST /api/invitations/accept", () => {
 
     expect(res.status).toBe(400);
     expect((await res.json()).error).toBe(INVITATION_REFUSALS.revoked);
-    expect(userDeleteOne).toHaveBeenCalledWith({ _id: "u-new" });
+    expect(userDeleteOne).toHaveBeenCalledWith({ _id: "u-new", tenant: DEFAULT_TENANT_ID });
     expect(revokePendingInvitationsFor).not.toHaveBeenCalled();
     expect(grantUpsert).not.toHaveBeenCalled();
     expect(createSession).not.toHaveBeenCalled();
@@ -212,7 +215,7 @@ describe("POST /api/invitations/accept", () => {
     const res = await POST(post());
 
     expect(res.status).toBe(400);
-    expect(revokeClaimedInvitation).toHaveBeenCalledWith("inv-1");
+    expect(revokeClaimedInvitation).toHaveBeenCalledWith(scopedToDefaultTenant(), "inv-1");
     expect(userCreate).not.toHaveBeenCalled();
   });
 
@@ -225,7 +228,7 @@ describe("POST /api/invitations/accept", () => {
 
     expect(res.status).toBe(409);
     expect((await res.json()).error).toBe("Username already exists");
-    expect(releaseInvitation).toHaveBeenCalledWith("inv-1");
+    expect(releaseInvitation).toHaveBeenCalledWith(scopedToDefaultTenant(), "inv-1");
     expect(createSession).not.toHaveBeenCalled();
   });
 

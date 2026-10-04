@@ -4,16 +4,20 @@ const revokeInvitation = vi.fn();
 const logInstanceAudit = vi.fn();
 let caller: Record<string, unknown>;
 
-vi.mock("@/lib/middleware", () => ({
-  withAdmin:
-    (handler: (r: Request, c: unknown) => unknown) =>
-    (request: Request, ctx: { params: Promise<Record<string, string>> }) =>
-      handler(request, { params: ctx.params, user: caller }),
-}));
+vi.mock("@/lib/middleware", async () => {
+  const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+  return {
+    withAdmin:
+      (handler: (r: Request, c: unknown) => unknown) =>
+      (request: Request, ctx: { params: Promise<Record<string, string>> }) =>
+        handler(request, { params: ctx.params, user: caller, db: scopedToDefaultTenant() }),
+  };
+});
 vi.mock("@/lib/invitations", () => ({ revokeInvitation }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 
 const { DELETE } = await import("./route");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 
 const ID = "64b0000000000000000000aa";
 const del = (id = ID) =>
@@ -32,8 +36,9 @@ describe("DELETE /api/invitations/:id", () => {
     const res = await del();
 
     expect(res.status).toBe(200);
-    expect(revokeInvitation).toHaveBeenCalledWith(ID);
+    expect(revokeInvitation).toHaveBeenCalledWith(scopedToDefaultTenant(), ID);
     expect(logInstanceAudit).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       expect.objectContaining({ action: "invitation_revoked", target: "ada@example.com" })
     );
   });

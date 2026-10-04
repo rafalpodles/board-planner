@@ -48,6 +48,7 @@ vi.mock("@/lib/middleware", async () => {
   };
 });
 
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 const { GET, POST } = await import("./route");
 
 const TASK_ID = "69a52e3b399b27d3cbb2c5b7";
@@ -113,7 +114,7 @@ describe("answering a refused change", () => {
     const { req, ctx } = call({ verdict });
 
     expect((await POST(req, ctx)).status).toBe(200);
-    expect(recordVerdict).toHaveBeenCalledWith(TASK_ID, verdict, "u1", {
+    expect(recordVerdict).toHaveBeenCalledWith(scopedToDefaultTenant(), TASK_ID, verdict, "u1", {
       workerId: WORKER_ID,
       commit: "a".repeat(40),
     });
@@ -174,7 +175,7 @@ describe("answering a refused change", () => {
 
     await POST(req, ctx);
 
-    expect(recordVerdict).toHaveBeenCalledWith(TASK_ID, "accept", "u1", {
+    expect(recordVerdict).toHaveBeenCalledWith(scopedToDefaultTenant(), TASK_ID, "accept", "u1", {
       workerId: "another-machine",
       commit: "f".repeat(40),
     });
@@ -204,6 +205,7 @@ describe("answering a refused change", () => {
     await POST(req, ctx);
 
     expect(mayDecide).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       "6a70afff45d39cd9bc8bb601",
       expect.objectContaining({ _id: "u1" })
     );
@@ -290,7 +292,7 @@ describe("the audit row", () => {
     const { req, ctx } = call({ verdict });
     await POST(req, ctx);
 
-    expect(logInstanceAudit).toHaveBeenCalledWith(expect.objectContaining({ action }));
+    expect(logInstanceAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), expect.objectContaining({ action }));
   });
 
   /**
@@ -305,6 +307,7 @@ describe("the audit row", () => {
     await POST(req, ctx);
 
     expect(logInstanceAudit).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       expect.objectContaining({ detail: expect.stringContaining("700 file(s)") })
     );
   });
@@ -318,6 +321,7 @@ describe("the audit row", () => {
     await POST(req, ctx);
 
     expect(logInstanceAudit).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       expect.objectContaining({ detail: expect.stringContaining("2 file(s)") })
     );
   });
@@ -327,6 +331,7 @@ describe("the audit row", () => {
     await POST(req, ctx);
 
     expect(logInstanceAudit).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       expect.objectContaining({
         target: "e2e-macbook-pro",
         actorUsername: "owner",

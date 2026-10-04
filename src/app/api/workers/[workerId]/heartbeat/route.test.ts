@@ -10,11 +10,11 @@ const projectFindQuery = vi.fn();
 const workerUpdateOne = vi.fn();
 const workerFind = vi.fn();
 const accessibleProjectIds = vi.fn();
-const userFindById = vi.fn();
+const userFindOne = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/grants", () => ({ accessibleProjectIds, check: vi.fn() }));
-vi.mock("@/models/user", () => ({ User: { findById: userFindById, exists: async () => null } }));
+vi.mock("@/models/user", () => ({ User: { findOne: userFindOne, exists: async () => null } }));
 vi.mock("@/models/project", () => ({
   Project: {
     find: (query: unknown) => {
@@ -90,7 +90,7 @@ beforeEach(() => {
   workerFind.mockResolvedValue([]);
   verifyWorkerCredential.mockResolvedValue(workerDoc());
   touchWorker.mockResolvedValue(undefined);
-  userFindById.mockResolvedValue({ _id: OWNER_ID, role: "member" });
+  userFindOne.mockResolvedValue({ _id: OWNER_ID, role: "member" });
   accessibleProjectIds.mockResolvedValue([PROJECT_ID]);
 });
 
@@ -276,7 +276,7 @@ describe("one working tree, one worker", () => {
 // looking live, enabled and error-free.
 describe("the preflight report a worker sends", () => {
   function preflightPatch() {
-    return touchWorker.mock.calls[0]?.[1]?.preflight;
+    return touchWorker.mock.calls[0]?.[2]?.preflight;
   }
 
   it("stores the verdict, the account and every check", async () => {
@@ -309,7 +309,7 @@ describe("the preflight report a worker sends", () => {
 
     await POST(req, ctx);
 
-    expect(touchWorker.mock.calls[0]?.[1]).not.toHaveProperty("preflight");
+    expect(touchWorker.mock.calls[0]?.[2]).not.toHaveProperty("preflight");
   });
 
   it("drops a report whose verdict is not a boolean rather than storing half of one", async () => {
@@ -317,7 +317,7 @@ describe("the preflight report a worker sends", () => {
 
     await POST(req, ctx);
 
-    expect(touchWorker.mock.calls[0]?.[1]).not.toHaveProperty("preflight");
+    expect(touchWorker.mock.calls[0]?.[2]).not.toHaveProperty("preflight");
   });
 
   it("drops malformed checks but keeps the rest of the report", async () => {
@@ -461,7 +461,7 @@ describe("the preflight report a worker sends", () => {
 // BP-762. The only way a pause or resume made at the machine reaches the board
 describe("the halt a worker reports", () => {
   function haltPatch() {
-    return touchWorker.mock.calls[0]?.[1]?.halt;
+    return touchWorker.mock.calls[0]?.[2]?.halt;
   }
 
   it("stores a pause made at the machine, as the machine's", async () => {
@@ -494,7 +494,7 @@ describe("the halt a worker reports", () => {
 
     await POST(req, ctx);
 
-    expect(touchWorker.mock.calls[0]?.[1]).not.toHaveProperty("halt");
+    expect(touchWorker.mock.calls[0]?.[2]).not.toHaveProperty("halt");
   });
 
   it("drops a halt whose paused is not a boolean", async () => {
@@ -502,7 +502,7 @@ describe("the halt a worker reports", () => {
 
     await POST(req, ctx);
 
-    expect(touchWorker.mock.calls[0]?.[1]).not.toHaveProperty("halt");
+    expect(touchWorker.mock.calls[0]?.[2]).not.toHaveProperty("halt");
   });
 
   it("stores nothing for a switched-off machine, which is refused before anything is written", async () => {
@@ -519,7 +519,7 @@ describe("the halt a worker reports", () => {
 // BP-323: every other worker's claim and heartbeat read this inventory back
 describe("POST heartbeat — what one worker may store about itself", () => {
   const storedRepos = () => workerUpdateOne.mock.calls[0][1].$set.repos as { remote: string }[];
-  const touched = () => touchWorker.mock.calls[0][1] as Record<string, unknown>;
+  const touched = () => touchWorker.mock.calls[0][2] as Record<string, unknown>;
 
   it("keeps at most 200 reported checkouts", async () => {
     const repos = Array.from({ length: 250 }, (_, i) => ({ remote: `git@github.com:o/r${i}.git`, path: `/r${i}` }));

@@ -14,7 +14,7 @@ vi.mock("@/models/rateLimit", async () => {
 vi.mock("@/lib/session", () => ({ provenanceRefusal: () => null }));
 vi.mock("@/lib/invitations", () => ({ findInvitationByToken }));
 vi.mock("@/lib/invitation-view", () => ({
-  toApiInvitations: async (rows: { email: string }[]) =>
+  toApiInvitations: async (_db: unknown, rows: { email: string }[]) =>
     rows.map((r) => ({
       email: r.email,
       role: "member",

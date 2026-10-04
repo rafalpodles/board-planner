@@ -22,6 +22,7 @@ vi.mock("@/models/project", () => ({
 }));
 
 const { GET, POST } = await import("./route");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 
 const OWNER = { _id: "u1", role: "member" };
 const PROJECT_ID = "507f1f77bcf86cd799439011";
@@ -238,6 +239,7 @@ describe("what adding a field records", () => {
 
     expect(res.status).toBe(201);
     expect(logProjectAudit).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       PROJECT_ID,
       "u1",
       "settings_updated",

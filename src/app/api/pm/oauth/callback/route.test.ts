@@ -21,6 +21,7 @@ vi.mock("@/lib/pm/mcp-oauth", () => ({
 }));
 
 const { GET } = await import("./route");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 
 const OWNER = { _id: "owner1", viaMachineCredential: false };
 
@@ -139,7 +140,7 @@ describe("GET /api/pm/oauth/callback — binding the flow to whoever started it"
 
     const res = await GET(approveRequest());
 
-    expect(check).toHaveBeenCalledWith({ _id: "owner1", viaMachineCredential: false }, "p1", "admin");
+    expect(check).toHaveBeenCalledWith(scopedToDefaultTenant(), { _id: "owner1", viaMachineCredential: false }, "p1", "admin");
     expect(res.headers.get("location")).toBe("/projects/p1/settings?mcp_oauth=error%3Awrong_user");
     expect(findOneAndDelete).toHaveBeenCalledWith({ state: "s", tenant: DEFAULT_TENANT_ID });
   });
@@ -233,6 +234,7 @@ describe("GET /api/pm/oauth/callback — storing the connection", () => {
         "pm.mcpServers": {
           $elemMatch: { name: "notion", url: "https://mcp.notion.com/mcp", "oauth.clientId": "c1" },
         },
+        tenant: DEFAULT_TENANT_ID,
       },
       {
         $set: {
@@ -252,6 +254,7 @@ describe("GET /api/pm/oauth/callback — storing the connection", () => {
     await approve();
 
     expect(logProjectAudit).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       "p1",
       "owner1",
       "settings_updated",
@@ -265,6 +268,7 @@ describe("GET /api/pm/oauth/callback — storing the connection", () => {
     await approve();
 
     expect(logProjectAudit).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       "p1",
       "owner1",
       "settings_updated",

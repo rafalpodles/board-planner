@@ -19,6 +19,7 @@ vi.mock("@/models/settings", () => ({
 
 const { PUT } = await import("./route");
 const { SINGLETON_ID } = await import("@/lib/singleton");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 
 const ADMIN = { _id: "admin-1", username: "root", role: "admin", viaMachineCredential: false };
 
@@ -73,7 +74,7 @@ describe("PUT /api/settings", () => {
       },
       { upsert: true, returnDocument: "after" }
     );
-    expect(logInstanceAudit).toHaveBeenCalledWith({
+    expect(logInstanceAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), {
       action: "instance_settings_changed",
       user: "admin-1",
       actorUsername: "root",

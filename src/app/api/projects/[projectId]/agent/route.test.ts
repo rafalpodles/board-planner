@@ -15,6 +15,7 @@ vi.mock("@/models/project", () => ({ Project: { findOneAndUpdate: projectFindOne
 vi.mock("@/lib/projectAudit", () => ({ logProjectAudit }));
 
 const { PUT } = await import("./route");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 
 const PROJECT_ID = "507f1f77bcf86cd799439011";
 const OTHER_PROJECT = "507f1f77bcf86cd799439012";
@@ -124,6 +125,7 @@ describe("PUT /api/projects/:projectId/agent", () => {
       await put({ agentId: AGENT_ID });
 
       expect(logProjectAudit).toHaveBeenCalledWith(
+        scopedToDefaultTenant(),
         PROJECT_ID,
         "u1",
         "settings_updated",
@@ -138,6 +140,7 @@ describe("PUT /api/projects/:projectId/agent", () => {
       await put({ agentId: "" });
 
       expect(logProjectAudit).toHaveBeenCalledWith(
+        scopedToDefaultTenant(),
         PROJECT_ID,
         "u1",
         "settings_updated",
@@ -151,7 +154,7 @@ describe("PUT /api/projects/:projectId/agent", () => {
 
       await put({ agentId: AGENT_ID });
 
-      expect(logProjectAudit.mock.calls[0][3]).toBe("Default agent: a deleted agent → Ship it");
+      expect(logProjectAudit.mock.calls[0][4]).toBe("Default agent: a deleted agent → Ship it");
     });
 
     it("still records the change, and answers, when the old agent's name cannot be read", async () => {
@@ -166,7 +169,7 @@ describe("PUT /api/projects/:projectId/agent", () => {
       const res = await put({ agentId: AGENT_ID });
 
       expect(res.status).toBe(200);
-      expect(logProjectAudit.mock.calls[0][3]).toBe(`Default agent: agent ${OLD_ID} → Ship it`);
+      expect(logProjectAudit.mock.calls[0][4]).toBe(`Default agent: agent ${OLD_ID} → Ship it`);
     });
 
     it("records nothing when the default already was that agent", async () => {
@@ -185,7 +188,7 @@ describe("PUT /api/projects/:projectId/agent", () => {
 
       await put({ agentId: AGENT_ID });
 
-      expect(logProjectAudit.mock.calls[0][3]).toBe("Default agent: Default → Default");
+      expect(logProjectAudit.mock.calls[0][4]).toBe("Default agent: Default → Default");
     });
   });
 
@@ -271,7 +274,7 @@ describe("PUT /api/projects/:projectId/agent", () => {
      * it gets 403 and nothing is written.
      */
     it("403s a member who can see the project but does not administer it", async () => {
-      check.mockImplementation(async (_user, _project, level: string) => level === "access");
+      check.mockImplementation(async (_db, _user, _project, level: string) => level === "access");
 
       const res = await put({ agentId: AGENT_ID });
 
