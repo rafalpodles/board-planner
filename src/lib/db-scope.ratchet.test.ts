@@ -9,11 +9,11 @@ const ROOT = join(SRC, "..");
 const UNSCOPED = ["tenant", "rateLimit"];
 const MODELS_PATH = String.raw`["'](?:@\/models\/|(?:\.\.?\/)+models\/)([A-Za-z]+)["']`;
 const MODEL_IMPORT = new RegExp(
-  String.raw`^\s*(?:import|export)\s+(?!type\b)[^;]*?from\s+${MODELS_PATH}|import\s*\(\s*${MODELS_PATH}|^\s*import\s+${MODELS_PATH}`,
+  String.raw`^\s*(?:import|export)\s+(?!type\b)[^;]*?from\s+${MODELS_PATH}|(?:import|require)\s*\(\s*${MODELS_PATH}|^\s*import\s+${MODELS_PATH}`,
   "gm"
 );
 const RAW_ACCESS =
-  /\bmongoose\.(?:models?|connections?)\b|\bconnection\.(?:db|collection|getClient)\b|\bgetClient\(|import\s*\{[^}]*\b(?:model|models|connection)\b[^}]*\}\s*from\s*["']mongoose["']/;
+  /\bmongoose\.(?:models?|connections?)\b|\bconnection\.(?:db|collection|getClient)\b|import\s+(?:\w+\s*,\s*)?\{[^}]*\b(?:model|models|connection)\b[^}]*\}\s*from\s*["']mongoose["']|import\s*\*\s*as\s+\w+\s+from\s*["']mongoose["']/;
 
 function sources(dir: string): string[] {
   return readdirSync(dir).flatMap((entry) => {

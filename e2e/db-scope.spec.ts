@@ -23,19 +23,23 @@ const sprint = (name: string) => ({
 const rawRows = () => mongoose.connection.db!.collection("sprints").find({}).sort({ name: 1 }).toArray();
 const names = (rows: object[]) => rows.map((row) => String((row as { name: unknown }).name)).sort();
 
+async function dropOwnDatabase() {
+  expect(mongoose.connection.db?.databaseName).toBe(DB);
+  await mongoose.connection.dropDatabase();
+}
+
 test.beforeAll(async () => {
   await mongoose.disconnect();
   await mongoose.connect(E2E_MONGODB_URI, { dbName: DB, autoIndex: false, autoCreate: false });
-  expect(mongoose.connection.db!.databaseName).toBe(DB);
 });
 
 test.afterAll(async () => {
-  await mongoose.connection.dropDatabase();
+  await dropOwnDatabase();
   await mongoose.disconnect();
 });
 
 test.beforeEach(async () => {
-  await mongoose.connection.dropDatabase();
+  await dropOwnDatabase();
   await scoped(A).Sprint.create(sprint("a-one"));
   await scoped(A).Sprint.create(sprint("a-two"));
   await scoped(B).Sprint.create(sprint("b-one"));
