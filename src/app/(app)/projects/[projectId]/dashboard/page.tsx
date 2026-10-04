@@ -405,6 +405,9 @@ export default function DashboardPage() {
         <div className="bg-bg-card border border-border rounded-lg p-4">
           <p className="text-sm text-text-muted">Completion</p>
           <p className="text-2xl font-bold">{completionPct}%</p>
+          <p data-testid="dashboard-completion-detail" className="text-xs text-text-muted">
+            {stats.done} of {stats.total} {stats.total === 1 ? "task" : "tasks"} done
+          </p>
         </div>
       </div>
 

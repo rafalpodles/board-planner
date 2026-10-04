@@ -76,6 +76,18 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+describe("Dashboard completion card", () => {
+  it("spells out how many tasks are done of the total", async () => {
+    await renderDashboard({ total: 4, done: 1 });
+    expect(screen.getByTestId("dashboard-completion-detail").textContent).toBe("1 of 4 tasks done");
+  });
+
+  it("uses the singular for a board with one task", async () => {
+    await renderDashboard({ total: 1, done: 0 });
+    expect(screen.getByTestId("dashboard-completion-detail").textContent).toBe("0 of 1 task done");
+  });
+});
+
 describe("Dashboard charts with no data", () => {
   it("explains what would fill the velocity chart instead of drawing bare axes", async () => {
     await renderDashboard();
