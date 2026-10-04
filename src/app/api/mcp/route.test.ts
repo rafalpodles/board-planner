@@ -208,6 +208,7 @@ describe("POST /api/mcp with TENANT_DOMAIN set (BP-666)", () => {
   });
 
   it("gives the tools, and the discovery hint, the tenant's own address", async () => {
+    getAuthUser.mockResolvedValue({ username: "owner", tenant: ACME });
     const body = await (await POST(on("acme.board-planner.com", { authorization: "Bearer cpat_x" }))).json();
     expect(body.auth.extra.baseUrl).toBe("https://acme.board-planner.com");
 
@@ -215,5 +216,13 @@ describe("POST /api/mcp with TENANT_DOMAIN set (BP-666)", () => {
     expect(refused.headers.get("www-authenticate")).toContain(
       'resource_metadata="https://acme.board-planner.com/.well-known/oauth-protected-resource"'
     );
+  });
+
+  it("refuses a token of another tenant at the door, as if it were no token", async () => {
+    getAuthUser.mockResolvedValue({ username: "owner", tenant: new Types.ObjectId() });
+
+    const refused = await POST(on("acme.board-planner.com", { authorization: "Bearer cpat_x" }));
+
+    expect(refused.status).toBe(401);
   });
 });
