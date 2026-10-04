@@ -1,5 +1,3 @@
-import { Notification } from "@/models/notification";
-import { User } from "@/models/user";
 import { NotificationType } from "@/types";
 import { resolveChannels } from "@/lib/notification-prefs";
 import { sendPersonalChat, PersonalChatRecipient } from "@/lib/personal-chat";
@@ -10,6 +8,7 @@ import { Pill, renderEmail } from "@/lib/email-template";
 import { selfOrigin } from "@/lib/session";
 import { notificationPath } from "@/lib/urls";
 import { recipientsWithAccess } from "@/lib/grants";
+import type { ScopedDb } from "@/lib/db-scope";
 
 /**
  * What the mail version of a notification shows beyond the one-line title the in-app list uses.
@@ -51,18 +50,18 @@ const OBJECT_ID = /^[0-9a-fA-F]{24}$/;
  * Create in-app notifications for a list of recipients,
  * excluding the actor (you don't notify yourself).
  */
-export async function createNotifications(params: NotifyParams): Promise<void> {
+export async function createNotifications(db: ScopedDb, params: NotifyParams): Promise<void> {
   // Callers fire this and walk away — none of them awaits it. An exception escaping here is an
   // unhandled rejection, which ends the process, so the whole body is guarded rather than the one
   // write that used to be.
   try {
-    await notify(params);
+    await notify(db, params);
   } catch (err) {
     console.error("Failed to notify:", err);
   }
 }
 
-async function notify({
+async function notify(db: ScopedDb, {
   type,
   taskId,
   projectId,
@@ -92,7 +91,7 @@ async function notify({
   // dropped notification is recoverable, a leaked task title is not.
   let allowed: string[];
   try {
-    allowed = await recipientsWithAccess(unique, projectId);
+    allowed = await recipientsWithAccess(db, unique, projectId);
   } catch (err) {
     console.error("Failed to resolve notification recipients:", err);
     return;
@@ -102,7 +101,7 @@ async function notify({
   // And: did they ask to hear about it? One read of the preferences of the people who passed the
   // first question, then one decision each. This used to be a clause inside the recipient query,
   // which is why nothing could depend on the project or the event; resolveChannels can.
-  const recipients = await User.find(
+  const recipients = await db.User.find(
     { _id: { $in: allowed.map((id) => new Types.ObjectId(id)) } },
     "email fullName emailNotifications emailDigest notifications"
   ).lean();
@@ -116,7 +115,7 @@ async function notify({
   const shown = (recipientId: string) => wants.get(recipientId.toLowerCase())?.inApp ?? true;
 
   try {
-    await Notification.insertMany(
+    await db.Notification.insertMany(
       allowed.map((recipientId) => ({
         recipient: new Types.ObjectId(recipientId),
         type,
@@ -286,7 +285,7 @@ export function collectRecipients(task: {
 /**
  * Parse @mentions from comment body and resolve to user IDs.
  */
-export async function resolveMentions(body: string): Promise<string[]> {
+export async function resolveMentions(db: ScopedDb, body: string): Promise<string[]> {
   const mentionRegex = /@([a-zA-Z0-9_-]+)/g;
   const usernames: string[] = [];
   let match;
@@ -295,7 +294,7 @@ export async function resolveMentions(body: string): Promise<string[]> {
   }
   if (usernames.length === 0) return [];
 
-  const users = await User.find(
+  const users = await db.User.find(
     { username: { $in: usernames } },
     "_id"
   ).lean();

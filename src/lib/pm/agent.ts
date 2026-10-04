@@ -1,7 +1,4 @@
 import { connectDB } from "@/lib/db";
-import { Project } from "@/models/project";
-import { PmMessage } from "@/models/pmMessage";
-import { User } from "@/models/user";
 import { IPmMessage, PmAttachment, PmMessageTrigger } from "@/types";
 import { buildUserContent } from "./attachments";
 import { getPmUser, PM_USERNAME } from "./pm-user";
@@ -15,6 +12,7 @@ import { replayHistory, stripSpoofedLabels, HISTORY_AUTHOR_PREFIX } from "./hist
 import { pmThreadFilter } from "./thread";
 import { getProjectColumns, defaultStatusFor } from "@/lib/columns";
 import { APP_NAME } from "@/lib/brand";
+import type { ScopedDb } from "@/lib/db-scope";
 
 /** Round-trips one turn may make. Exported because the cap the operator sees is in turns, and the
  * screens that show it have to be able to say what a turn can cost (BP-284). */
@@ -43,8 +41,8 @@ export interface PmActor {
   isAgent: boolean;
 }
 
-async function resolveActor(userId: string): Promise<PmActor | null> {
-  const user = await User.findById(userId).select("username fullName").lean();
+async function resolveActor(db: ScopedDb, userId: string): Promise<PmActor | null> {
+  const user = await db.User.findById(userId).select("username fullName").lean();
   if (!user) return null;
   return {
     username: user.username,
@@ -161,7 +159,7 @@ function truncateResult(value: unknown): string {
     : json;
 }
 
-export async function runPmTurn(opts: {
+export async function runPmTurn(db: ScopedDb, opts: {
   projectId: string;
   userMessage: string;
   // What the thread keeps when the prompt itself is machine-generated bulk; defaults to userMessage
@@ -183,18 +181,18 @@ export async function runPmTurn(opts: {
 }): Promise<PmTurnResult> {
   await connectDB();
 
-  const project = await Project.findById(opts.projectId);
+  const project = await db.Project.findById(opts.projectId);
   if (!project) return { ok: false, message: null, error: "Project not found" };
   if (!isPmRunnable(project.pm)) return { ok: false, message: null, error: pmDisabledReason(project.pm) };
 
-  const pmUser = await getPmUser();
+  const pmUser = await getPmUser(db);
   const model = await resolvePmModel(project.pm.model);
   const trigger = opts.trigger ?? { type: "chat" as const };
 
-  const actor = await resolveActor(opts.triggeredByUserId);
+  const actor = await resolveActor(db, opts.triggeredByUserId);
 
   // One more than is replayed, so the replay knows whether the thread goes back further than it shows
-  const fetched = await PmMessage.find(pmThreadFilter(opts.projectId, opts.triggeredByUserId))
+  const fetched = await db.PmMessage.find(pmThreadFilter(opts.projectId, opts.triggeredByUserId))
     .sort({ createdAt: -1 })
     .limit(HISTORY_LIMIT + 1)
     .populate("triggeredBy", "username fullName")
@@ -202,7 +200,7 @@ export async function runPmTurn(opts: {
   const olderExist = fetched.length > HISTORY_LIMIT;
   const history = fetched.slice(0, HISTORY_LIMIT).reverse();
 
-  await PmMessage.create({
+  await db.PmMessage.create({
     project: opts.projectId,
     role: "user",
     content: opts.storedMessage ?? opts.userMessage,
@@ -213,7 +211,7 @@ export async function runPmTurn(opts: {
   });
 
   // Stub persisted up-front: a crashed turn still leaves a faithful record of executed actions
-  const assistantMessage = await PmMessage.create({
+  const assistantMessage = await db.PmMessage.create({
     project: opts.projectId,
     role: "assistant",
     content: "",
@@ -234,7 +232,7 @@ export async function runPmTurn(opts: {
 
   const disallowedTools = opts.disallowedTools ?? [];
   const blocked = new Set(disallowedTools);
-  const mcp = await discoverMcpTools(String(project._id), project.pm.mcpServers ?? []);
+  const mcp = await discoverMcpTools(db, String(project._id), project.pm.mcpServers ?? []);
   // Added to the same set the built-in withholding uses, so an unattended turn refuses these at
   // dispatch as well as hiding them — a model that guesses the name gets the same answer.
   if (opts.autonomous) {
@@ -443,7 +441,7 @@ export async function runPmTurn(opts: {
           result = { error: undeclared };
         } else {
           try {
-            const outcome = await tool.execute(call.args || {}, ctx);
+            const outcome = await tool.execute(db, call.args || {}, ctx);
             result = outcome.result;
             if (tool.write && !(outcome.result as { error?: string })?.error) {
               writeActions++;

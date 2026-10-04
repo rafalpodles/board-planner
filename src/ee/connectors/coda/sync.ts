@@ -2,9 +2,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { selfOrigin } from "@/lib/session";
-import { Project } from "@/models/project";
-import { Task } from "@/models/task";
-import { User } from "@/models/user";
 import { decryptSecret } from "@/lib/encryption";
 import { getProjectColumns } from "@/lib/columns";
 import {
@@ -14,11 +11,12 @@ import {
   normaliseCodaHost,
   upsertTaskRows,
 } from "./client";
+import type { ScopedDb } from "@/lib/db-scope";
 
-export async function syncProjectToCoda(projectId: string): Promise<NextResponse> {
+export async function syncProjectToCoda(db: ScopedDb, projectId: string): Promise<NextResponse> {
   await connectDB();
 
-  const project = await Project.findById(projectId).lean();
+  const project = await db.Project.findById(projectId).lean();
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
@@ -48,7 +46,7 @@ export async function syncProjectToCoda(projectId: string): Promise<NextResponse
     );
   }
 
-  const tasks = await Task.find(
+  const tasks = await db.Task.find(
     { project: projectId },
     "taskNumber title status assignee priority category dueDate customFieldValues"
   )

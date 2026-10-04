@@ -1,5 +1,3 @@
-import { Agent } from "@/models/agent";
-import { AgentBlock } from "@/models/agentBlock";
 import {
   AgentComposition,
   ApiAgent,
@@ -13,6 +11,7 @@ import {
   IUser,
 } from "@/types";
 import { brokenProblems, keysOf, normaliseComposition } from "./agent-rules";
+import type { ScopedDb } from "@/lib/db-scope";
 
 /**
  * Why a composition must not be stored, or null. Shared because the create and edit routes had a
@@ -23,9 +22,10 @@ import { brokenProblems, keysOf, normaliseComposition } from "./agent-rules";
  * pointing at it exactly the way an empty one does.
  */
 export async function compositionRefusal(
+  db: ScopedDb,
   composition: AgentComposition
 ): Promise<{ error: string; problems: string[] } | null> {
-  const blocks = (await allBlocks()).map(toApiBlock);
+  const blocks = (await allBlocks(db)).map(toApiBlock);
   const lookup = (key: string) => blocks.find((b) => b.key === key);
 
   const unresolved = [...new Set(keysOf(composition).filter((key) => !key?.trim() || !lookup(key)))];
@@ -82,8 +82,8 @@ export function toApiBlock(block: IAgentBlock): ApiAgentBlock {
  * Every agent this user may pick: the shipped ones, their own, and those belonging to a project
  * they can reach. A project agent is never offered on another project.
  */
-export async function visibleAgents(user: IUser, projectIds: string[]) {
-  return Agent.find({
+export async function visibleAgents(db: ScopedDb, user: IUser, projectIds: string[]) {
+  return db.Agent.find({
     $or: [
       { scope: "global" },
       { scope: "user", owner: user._id },
@@ -95,8 +95,8 @@ export async function visibleAgents(user: IUser, projectIds: string[]) {
     .lean();
 }
 
-export async function allBlocks() {
-  return AgentBlock.find({}).sort({ kind: -1, builtIn: -1, name: 1 }).lean();
+export async function allBlocks(db: ScopedDb) {
+  return db.AgentBlock.find({}).sort({ kind: -1, builtIn: -1, name: 1 }).lean();
 }
 
 export function toApiRun(run: IAgentRun): ApiAgentRun {
@@ -150,12 +150,12 @@ function slugify(name: string): string {
  * the same key and come back as a bare 409. Only the server knows what is taken, so only the server
  * can settle it.
  */
-export async function freeBlockKey(name: string): Promise<string> {
+export async function freeBlockKey(db: ScopedDb, name: string): Promise<string> {
   const base = slugify(name);
-  if (!(await AgentBlock.exists({ key: base }))) return base;
+  if (!(await db.AgentBlock.exists({ key: base }))) return base;
   for (let n = 2; n < 100; n++) {
     const candidate = `${base.slice(0, SLUG_MAX - 3)}-${n}`;
-    if (!(await AgentBlock.exists({ key: candidate }))) return candidate;
+    if (!(await db.AgentBlock.exists({ key: candidate }))) return candidate;
   }
   throw new Error(`no free key for ${JSON.stringify(name)}`);
 }

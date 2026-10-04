@@ -1,8 +1,6 @@
-import { Agent } from "@/models/agent";
-import { Project } from "@/models/project";
-import { AgentBlock } from "@/models/agentBlock";
 import { AgentComposition, IAgentBlock } from "@/types";
 import { GATE_KINDS } from "./agent-kinds";
+import type { ScopedDb } from "@/lib/db-scope";
 
 // The blocks the worker implements today. Seeding them is what makes the catalog describe the
 // machine rather than an intention: a key here has a counterpart in worker/src, and a key without
@@ -121,16 +119,16 @@ export const SECURITY_REVIEW_BLOCK: SeedBlock = {
 };
 
 /** Idempotent: safe to run on every boot, and it never overwrites a description someone edited. */
-export async function seedAgents() {
+export async function seedAgents(db: ScopedDb) {
   for (const block of [...BUILT_IN_BLOCKS, SECURITY_REVIEW_BLOCK]) {
-    await AgentBlock.updateOne(
+    await db.AgentBlock.updateOne(
       { key: block.key },
       { $setOnInsert: { ...block, builtIn: true } },
       { upsert: true }
     );
   }
 
-  await Agent.updateOne(
+  await db.Agent.updateOne(
     { scope: "global", name: SEEDED_DEFAULT_NAME },
     {
       $setOnInsert: {
@@ -144,7 +142,7 @@ export async function seedAgents() {
     { upsert: true }
   );
 
-  await Agent.updateOne(
+  await db.Agent.updateOne(
     { scope: "global", name: MERGING_AGENT_NAME },
     {
       $setOnInsert: {
@@ -159,7 +157,7 @@ export async function seedAgents() {
     { upsert: true }
   );
 
-  await Agent.updateOne(
+  await db.Agent.updateOne(
     { scope: "global", name: "With security review" },
     {
       $setOnInsert: {

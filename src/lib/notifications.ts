@@ -1,4 +1,3 @@
-import { Project } from "@/models/project";
 import { WebhookEvent, NotificationChannelType, STATUS_LABELS } from "@/types";
 import { isAllowedWebhookUrl, WEBHOOK_DESTINATION } from "./url-validation";
 import { safeFetch } from "./safe-fetch";
@@ -6,6 +5,7 @@ import { OUTBOUND_CONCURRENCY, runBounded } from "./bounded";
 import { decryptSecret } from "./encryption";
 import { DISCORD_NO_MENTIONS, escapeDiscord, escapeSlack, excerpt } from "./chat-markup";
 import { selfOrigin } from "./session";
+import type { ScopedDb } from "@/lib/db-scope";
 
 interface NotificationPayload {
   project: { key: string; name: string };
@@ -258,12 +258,13 @@ function formatPayload(
 }
 
 export async function dispatchNotifications(
+  db: ScopedDb,
   projectId: string,
   event: WebhookEvent,
   payload: NotificationPayload
 ): Promise<void> {
   try {
-    const project = await Project.findById(projectId, "notificationChannels").lean();
+    const project = await db.Project.findById(projectId, "notificationChannels").lean();
     if (!project?.notificationChannels?.length) return;
 
     const active = project.notificationChannels.filter(

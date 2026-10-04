@@ -1,5 +1,4 @@
 import { connectDB } from "@/lib/db";
-import { Project } from "@/models/project";
 import { runPmTurn } from "./agent";
 import { dailyPmSpend, isOverDailyTurnCap } from "./turn-cap";
 import { acquireTurnLock, isTurnRunning, releaseTurnLock } from "./turn-lock";
@@ -9,6 +8,7 @@ import { BOARD_REVIEW_DISALLOWED_TOOLS, buildBoardReviewPrompt, dueReviewSlot } 
 import { buildBoardDigest, digestHeadline, renderBoardDigest } from "./board-review";
 import { PM_RUNNABLE_QUERY } from "./availability";
 import { isPmAvailable } from "./config";
+import { scopedToDefaultTenant, type ScopedDb } from "@/lib/db-scope";
 
 const TICK_MS = Number(process.env.PM_SCHEDULER_TICK_MS) || 5 * 60 * 1000;
 
@@ -23,17 +23,18 @@ export function startPmScheduler(): void {
 }
 
 export async function pmSchedulerTick(): Promise<void> {
+  const db = scopedToDefaultTenant();
   await connectDB();
   await drainPmTriggers();
 
   const now = new Date();
-  const projects = await Project.find(
+  const projects = await db.Project.find(
     { ...PM_RUNNABLE_QUERY, "pm.autonomy.dailyReview": true },
     "key pm"
   ).lean();
   if (projects.length === 0) return;
 
-  const pmUser = await getPmUser();
+  const pmUser = await getPmUser(db);
 
   for (const project of projects) {
     const slot = dueReviewSlot(now, project.pm?.autonomy);
@@ -42,13 +43,13 @@ export async function pmSchedulerTick(): Promise<void> {
     if (isTurnRunning(String(project._id))) continue;
 
     // Claim the slot before running: a crash costs one review instead of a spend loop
-    const claimed = await Project.findOneAndUpdate(
+    const claimed = await db.Project.findOneAndUpdate(
       { _id: project._id, "pm.autonomy.lastReviewSlot": { $ne: slot } },
       { $set: { "pm.autonomy.lastReviewSlot": slot } }
     );
     if (!claimed) continue;
 
-    const review = await startBoardReview(String(project._id), project.key, project.pm!, String(pmUser._id));
+    const review = await startBoardReview(db, String(project._id), project.key, project.pm!, String(pmUser._id));
     if (review.status === "skipped") {
       console.warn(`PM board review skipped for ${project.key}: ${review.reason}`);
       continue;
@@ -67,6 +68,7 @@ export type BoardReviewStart =
  * cannot run, while the scheduler still awaits one review at a time (BP-471).
  */
 export async function startBoardReview(
+  db: ScopedDb,
   projectId: string,
   projectKey: string,
   pm: { dailyTurnCap?: number; autonomy?: { timezone?: string } },
@@ -75,10 +77,10 @@ export async function startBoardReview(
   // The scheduler starts whether or not a model is configured, and a review without one spent a
   // turn to post a warning into every thread on the board
   if (!isPmAvailable()) return { status: "skipped", reason: "the PM agent is not configured on this instance" };
-  const { over, cap } = await isOverDailyTurnCap(projectId, pm);
+  const { over, cap } = await isOverDailyTurnCap(db, projectId, pm);
   if (over) return { status: "skipped", reason: `the daily turn cap (${cap}) is reached` };
 
-  const spend = await dailyPmSpend(projectId, pm);
+  const spend = await dailyPmSpend(db, projectId, pm);
   if (spend.over) {
     return {
       status: "skipped",
@@ -90,9 +92,9 @@ export async function startBoardReview(
 
   const done = (async () => {
     try {
-      const digest = await buildBoardDigest(projectId);
+      const digest = await buildBoardDigest(db, projectId);
       if (!digest) return;
-      const result = await runPmTurn({
+      const result = await runPmTurn(db, {
         // Nobody is driving this one — see runPmTurn's `autonomous` (BP-321)
         autonomous: true,
         projectId,

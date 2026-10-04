@@ -1,5 +1,4 @@
 import { IPmMcpServer } from "@/types";
-import { Project } from "@/models/project";
 import { decryptSecret, encryptSecret } from "@/lib/encryption";
 import { resolveMcpAuthToken } from "./config";
 import { refreshTokens } from "./mcp-oauth";
@@ -24,6 +23,7 @@ export interface McpRuntime {
 }
 
 import { assessToolBudget, describeToolBudget } from "./tool-budget";
+import type { ScopedDb } from "@/lib/db-scope";
 
 export const MAX_MCP_CALLS_PER_TURN = 20;
 const MCP_RESULT_MAX_CHARS = 8000;
@@ -37,6 +37,7 @@ const refreshInFlight = new Map<string, Promise<string | undefined>>();
 // Scoped to the server and client whose tokens these are: a URL or client id changed meanwhile has
 // reset them, and a token issued for one address must not land on another (BP-315)
 async function persistOauthFields(
+  db: ScopedDb,
   projectId: string,
   server: IPmMcpServer,
   fields: Record<string, unknown>
@@ -45,7 +46,7 @@ async function persistOauthFields(
   for (const [key, value] of Object.entries(fields)) {
     $set[`pm.mcpServers.$.oauth.${key}`] = value;
   }
-  await Project.updateOne(
+  await db.Project.updateOne(
     {
       _id: projectId,
       "pm.mcpServers": {
@@ -57,6 +58,7 @@ async function persistOauthFields(
 }
 
 async function resolveOauthAccessToken(
+  db: ScopedDb,
   projectId: string,
   server: IPmMcpServer,
   opts: { force?: boolean } = {}
@@ -72,7 +74,7 @@ async function resolveOauthAccessToken(
   if (fresh) return decryptSecret(oauth.accessToken);
 
   if (!oauth.refreshToken) {
-    await persistOauthFields(projectId, server, { status: "needs_reauth" });
+    await persistOauthFields(db, projectId, server, { status: "needs_reauth" });
     return undefined;
   }
 
@@ -96,7 +98,7 @@ async function resolveOauthAccessToken(
         expiresAt: tokens.expiresAt,
         status: "connected" as const,
       };
-      await persistOauthFields(projectId, server, fields);
+      await persistOauthFields(db, projectId, server, fields);
       // Mongo has the rotated pair now, but nothing makes a second reader of this same `server`
       // object notice — and there is one: a forced refresh (`force: true`, below) called moments
       // later in the same discoverMcpTools run, after this promise has already left
@@ -107,7 +109,7 @@ async function resolveOauthAccessToken(
       return tokens.accessToken;
     } catch (err) {
       console.warn(`[pm/mcp] token refresh failed for "${server.name}": ${err instanceof Error ? err.message : err}`);
-      await persistOauthFields(projectId, server, { status: "needs_reauth" }).catch(() => {});
+      await persistOauthFields(db, projectId, server, { status: "needs_reauth" }).catch(() => {});
       return undefined;
     } finally {
       refreshInFlight.delete(key);
@@ -118,11 +120,12 @@ async function resolveOauthAccessToken(
 }
 
 export async function resolveServerToken(
+  db: ScopedDb,
   projectId: string,
   server: IPmMcpServer
 ): Promise<string | undefined> {
   if (server.authType === "oauth") {
-    return resolveOauthAccessToken(projectId, server);
+    return resolveOauthAccessToken(db, projectId, server);
   }
   return resolveMcpAuthToken(server);
 }
@@ -143,14 +146,14 @@ async function connectAndList(url: string, token: string | undefined) {
   return { client, tools };
 }
 
-export async function discoverMcpTools(projectId: string, servers: IPmMcpServer[]): Promise<McpRuntime> {
+export async function discoverMcpTools(db: ScopedDb, projectId: string, servers: IPmMcpServer[]): Promise<McpRuntime> {
   const runtime: McpRuntime = { tools: new Map(), serverNames: [] };
   const enabled = servers.filter((s) => s.enabled);
   if (enabled.length === 0) return runtime;
 
   const results = await Promise.allSettled(
     enabled.map(async (server) => {
-      const token = await resolveServerToken(projectId, server);
+      const token = await resolveServerToken(db, projectId, server);
       if (server.authType === "oauth" && !token) {
         throw new Error("OAuth connection not established or needs re-authorization");
       }
@@ -165,7 +168,7 @@ export async function discoverMcpTools(projectId: string, servers: IPmMcpServer[
         // silently lost this server's tools (BP-750). One forced refresh, bypassing the expiry
         // check that just proved unreliable; resolveOauthAccessToken itself marks needs_reauth
         // when there is no refresh token or the refresh fails.
-        const refreshed = await resolveOauthAccessToken(projectId, server, { force: true });
+        const refreshed = await resolveOauthAccessToken(db, projectId, server, { force: true });
         if (!refreshed) throw err;
         try {
           const { client, tools } = await connectAndList(server.url, refreshed);
@@ -175,7 +178,7 @@ export async function discoverMcpTools(projectId: string, servers: IPmMcpServer[
           // anything else (a timeout, a 5xx, a network blip) is the server having a bad moment,
           // not a reason to disable the connection until a human reconnects it (BP-750 review).
           if (isUnauthorized(retryErr)) {
-            await persistOauthFields(projectId, server, { status: "needs_reauth" }).catch(() => {});
+            await persistOauthFields(db, projectId, server, { status: "needs_reauth" }).catch(() => {});
           }
           throw retryErr;
         }

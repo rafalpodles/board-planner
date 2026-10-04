@@ -1,7 +1,6 @@
-import { Agent } from "@/models/agent";
-import { AgentBlock } from "@/models/agentBlock";
 import { normaliseComposition, sequenceOf } from "./agent-rules";
 import { StepCapability } from "@/types";
+import type { ScopedDb } from "@/lib/db-scope";
 
 /**
  * What the worker is handed on a claim: the agent resolved into an ordered list of blocks, whole.
@@ -43,6 +42,7 @@ export interface AgentSnapshot {
  * machine it is asking for would silently opt out of it.
  */
 export async function snapshotFor(
+  db: ScopedDb,
   projectId: string,
   taskAgentId: unknown,
   machineOwnerId: string | null
@@ -50,7 +50,7 @@ export async function snapshotFor(
   const agentId = taskAgentId ? String(taskAgentId) : "";
   if (!agentId) return null;
 
-  const agent = await Agent.findById(agentId).lean();
+  const agent = await db.Agent.findById(agentId).lean();
   if (!agent) return null;
 
   // A project agent must not run on another project's task, whichever way it was chosen
@@ -81,7 +81,7 @@ export async function snapshotFor(
   const entries = sequenceOf(composition);
   if (entries.length === 0) return null;
 
-  const blocks = await AgentBlock.find({ key: { $in: entries.map((e) => e.key) } }).lean();
+  const blocks = await db.AgentBlock.find({ key: { $in: entries.map((e) => e.key) } }).lean();
   const byKey = new Map(blocks.map((b) => [b.key, b]));
 
   const sequence: SnapshotEntry[] = [];

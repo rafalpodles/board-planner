@@ -9,10 +9,10 @@ import { MatchableProject, RepoReport, matchRepo } from "@/lib/repo-match";
 import { projectRepositoryUrl } from "@/lib/repository";
 import { ensureWorkerUser } from "@/lib/worker-user";
 import { accessibleProjectIds } from "@/lib/grants";
-import { User } from "@/models/user";
 import { isWorkerLockedByInstance, projectRunsWorkers } from "@/lib/worker-gate";
 import type { ApiMachineCondition, MachineState, WorkerHalt, WorkerHaltSource } from "@/types";
 import { bindingErrorFor } from "@/lib/binding-error";
+import type { ScopedDb } from "@/lib/db-scope";
 
 export const PROTOCOL_VERSION = 1;
 export const WORKER_STALE_MS = 5 * 60 * 1000;
@@ -35,17 +35,18 @@ export type Verdict = { ok: true } | { ok: false; reason: string };
  * has been deleted.
  */
 export async function ownerReachableProjectIds(
+  db: ScopedDb,
   worker: Pick<IWorker, "owner">
 ): Promise<string[] | null> {
   if (!worker.owner) return [];
   await connectDB();
-  const owner = await User.findById(worker.owner);
+  const owner = await db.User.findById(worker.owner);
   if (!owner) return [];
   // The stored account, with none of getAuthUser's runtime narrowing on it — so this is that
   // person's whole reach rather than the reach of whatever credential they happened to hold at
   // enrolment. That is the right answer: enrolling always goes through an interactive session, and
   // a machine credential is refused there, so there is no narrowed principal to inherit.
-  return accessibleProjectIds(owner);
+  return accessibleProjectIds(db, owner);
 }
 
 export function canServe(reachable: string[] | null, projectId: string): boolean {
@@ -492,7 +493,7 @@ export class WorkerAlreadyOwned extends Error {
   }
 }
 
-export async function registerWorker(input: {
+export async function registerWorker(db: ScopedDb, input: {
   name: string;
   host: string;
   platform: string;
@@ -509,7 +510,7 @@ export async function registerWorker(input: {
   // Read only to decide whether this record is changing hands — the authorization itself is the
   // filter below, atomically, because a read-then-write here would let two registrations racing on
   // the same name+host both see it unowned and the second silently overwrite the first's owner.
-  const existing = await Worker.findOne({ name: fields.name, host: fields.host })
+  const existing = await db.Worker.findOne({ name: fields.name, host: fields.host })
     .select("owner")
     .lean();
   // A record changing hands is a different machine as far as the server can tell, so it must not
@@ -527,7 +528,7 @@ export async function registerWorker(input: {
 
   let worker;
   try {
-    worker = await Worker.findOneAndUpdate(
+    worker = await db.Worker.findOneAndUpdate(
       { name: fields.name, host: fields.host, $or: mine },
       {
         $set: {
@@ -549,13 +550,13 @@ export async function registerWorker(input: {
 
   // The user this machine will act as. Created after the worker so it can be keyed on the worker's
   // id, which is what makes two machines two identities rather than one shared "worker" account.
-  const identity = await ensureWorkerUser({
+  const identity = await ensureWorkerUser(db, {
     workerId: String(worker._id),
     machine: fields.name,
     owner: owner ?? "",
   });
   worker.identity = identity._id;
-  await Worker.updateOne({ _id: worker._id }, { $set: { identity: identity._id } });
+  await db.Worker.updateOne({ _id: worker._id }, { $set: { identity: identity._id } });
 
   return { worker: worker as IWorker, credential };
 }
@@ -573,6 +574,7 @@ export async function verifyWorkerCredential(
 }
 
 export async function touchWorker(
+  db: ScopedDb,
   workerId: string,
   patch: Partial<
     Pick<
@@ -582,7 +584,7 @@ export async function touchWorker(
   > = {}
 ): Promise<void> {
   await connectDB();
-  await Worker.updateOne({ _id: workerId }, { $set: { lastSeenAt: new Date(), ...patch } });
+  await db.Worker.updateOne({ _id: workerId }, { $set: { lastSeenAt: new Date(), ...patch } });
 }
 
 // Whose machine this is, rendered only when the caller populated it. An unpopulated ref is an id

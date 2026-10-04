@@ -14,10 +14,9 @@ import {
   writeProviderLinks,
 } from "@/lib/pr-links";
 import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
-import { Project } from "@/models/project";
-import { Task } from "@/models/task";
 import type { RepositoryFields } from "@/lib/repository";
 import type { CiState, ILinkedPR, IProjectColumn } from "@/types";
+import { scopedToDefaultTenant, type ScopedDb } from "@/lib/db-scope";
 
 /**
  * What a sync needs to know about a project — no more, so a `.lean()` projection satisfies it and
@@ -235,6 +234,7 @@ export type SyncResult =
  * leaves the pipeline alone; a person clicking Sync gets both, as before.
  */
 export async function syncGithubPullRequests(
+  db: ScopedDb,
   project: SyncableProject,
   actor: string | null,
   /**
@@ -307,7 +307,7 @@ export async function syncGithubPullRequests(
   const columnIds = new Set(getProjectColumns(project).map((c) => c.id));
 
   for (const [taskNumber, prs] of prsByTask) {
-    const task = await Task.findOne({ project: project._id, taskNumber });
+    const task = await db.Task.findOne({ project: project._id, taskNumber });
     if (!task) continue;
 
     const prDocs: (Signable & { provider: "github" })[] = prs.map((pr) => ({
@@ -341,7 +341,7 @@ export async function syncGithubPullRequests(
       );
       await writeProviderLinks(task._id, "github", prDocs, seenList);
       // After the write, so a row never claims a change the write then failed to make
-      await recordLinkChanges(task._id, actor, added, removed);
+      await recordLinkChanges(db, task._id, actor, added, removed);
       unlinked += removed.length;
       if (removed.length > 0) unlinkedTasks++;
       written++;
@@ -362,13 +362,14 @@ export async function syncGithubPullRequests(
       // Guarded on the status just read, the way BP-489 guards every other status write: without
       // it two overlapping syncs both saw `in_review`, both wrote `ready_to_test`, and both logged
       // the transition — one move, two rows in the task's history.
-      const moved = await Task.updateOne(
+      const moved = await db.Task.updateOne(
         { _id: task._id, status: "in_review" },
         { $set: { status: "ready_to_test" } }
       );
       if (moved.modifiedCount === 1) {
         autoTransitioned++;
         await logActivity(
+          db,
           String(task._id),
           actor,
           "status_changed",
@@ -388,7 +389,7 @@ export async function syncGithubPullRequests(
   // hydration rather than stored: a link written before the field existed has no `provider` at
   // all, and those are exactly the links `$ifNull` goes out of its way to catch on the way out.
   if (seenList.length > 0) {
-    const contradicted = await Task.find(
+    const contradicted = await db.Task.find(
       {
         project: project._id,
         linkedPRs: {
@@ -404,7 +405,7 @@ export async function syncGithubPullRequests(
       const removed = removedLinks(task.linkedPRs, "github", seen, new Set());
       if (removed.length === 0) continue;
       await writeProviderLinks(task._id, "github", [], seenList);
-      await recordLinkChanges(task._id, actor, [], removed);
+      await recordLinkChanges(db, task._id, actor, [], removed);
       unlinked += removed.length;
       unlinkedTasks++;
       written++;
@@ -444,8 +445,9 @@ export async function syncGithubPullRequests(
  * ticks. The second is guarded below; the first is not, so N replicas cost N times this.
  */
 export async function githubSyncTick(): Promise<void> {
+  const db = scopedToDefaultTenant();
   await connectDB();
-  const projects = await Project.find(
+  const projects = await db.Project.find(
     { githubToken: { $nin: [null, ""] } },
     // `gitlabHost` because `repositoryProvider` reads it for a self-hosted GitLab; a projection
     // that omits a field the shared helper consults is a bug waiting for that helper to change
@@ -454,7 +456,7 @@ export async function githubSyncTick(): Promise<void> {
 
   for (const project of projects) {
     try {
-      const result = await syncGithubPullRequests(project, null);
+      const result = await syncGithubPullRequests(db, project, null);
       if (!result.ok) continue;
       // The scheduled path is how most rounds happen, and it used to report nothing at all — so
       // the ordinary way a link disappears was invisible (BP-632). The activity rows on the tasks

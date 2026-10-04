@@ -6,9 +6,6 @@ import { connectDB } from "./db";
 import { isDatabaseUnreachable } from "./db-errors";
 import { check } from "./grants";
 import { canServe, ownerReachableProjectIds, verifyWorkerCredential } from "./worker-service";
-import { Project } from "@/models/project";
-import { User } from "@/models/user";
-import { Task } from "@/models/task";
 import { IUser, IWorker } from "@/types";
 import { PROJECT_KEY_PATTERN } from "./urls";
 import { matchRepo } from "./repo-match";
@@ -118,9 +115,9 @@ export function protocolOf(request: Request): number {
 
 // A machine reaches what its owner reaches, and a deactivated owner reaches nothing (BP-832).
 // Deactivating also scrambles the machine's credential; this is the second line.
-async function ownerIsDeactivated(worker: IWorker): Promise<boolean> {
+async function ownerIsDeactivated(db: ScopedDb, worker: IWorker): Promise<boolean> {
   const ownerId = (worker.owner as { _id?: unknown } | null)?._id ?? worker.owner;
-  return !!ownerId && !!(await User.exists({ _id: String(ownerId), deactivatedAt: { $ne: null } }));
+  return !!ownerId && !!(await db.User.exists({ _id: String(ownerId), deactivatedAt: { $ne: null } }));
 }
 
 function machineOwnerDeactivated() {
@@ -148,7 +145,7 @@ export function withWorker(
     // downstream handler can spread it into a response
     worker.credentialHash = "";
 
-    if (await ownerIsDeactivated(worker)) return machineOwnerDeactivated();
+    if (await ownerIsDeactivated(scopedFor(worker), worker)) return machineOwnerDeactivated();
 
     // The path segment is authoritative on /api/workers/:id, so a credential must not act on
     // someone else's record just because the route happens to carry an id
@@ -165,15 +162,16 @@ export function withWorker(
 // so only the number is used and any key prefix is decoration
 const TASK_NUMBER_PATTERN = /^(?:[A-Za-z][A-Za-z0-9_-]*-)?(\d{1,9})$/;
 
-export async function resolveProjectId(identifier: string): Promise<string | null> {
+export async function resolveProjectId(db: ScopedDb, identifier: string): Promise<string | null> {
   if (isValidObjectId(identifier)) return identifier;
   if (!PROJECT_KEY_PATTERN.test(identifier)) return null;
   await connectDB();
-  const project = await Project.findOne({ key: identifier.toUpperCase() }).select("_id");
+  const project = await db.Project.findOne({ key: identifier.toUpperCase() }).select("_id");
   return project ? project._id.toString() : null;
 }
 
 export async function resolveTaskId(
+  db: ScopedDb,
   projectId: string,
   identifier: string
 ): Promise<string | null> {
@@ -181,7 +179,7 @@ export async function resolveTaskId(
   const match = TASK_NUMBER_PATTERN.exec(identifier);
   if (!match) return null;
   await connectDB();
-  const task = await Task.findOne({
+  const task = await db.Task.findOne({
     project: projectId,
     taskNumber: Number(match[1]),
   }).select("_id");
@@ -206,7 +204,7 @@ async function withResolvedIds(
         response: NextResponse.json({ error: "Invalid task id" }, { status: 400 }),
       };
     }
-    const taskId = await resolveTaskId(projectId, params.taskId);
+    const taskId = await resolveTaskId(context.db, projectId, params.taskId);
     // A well-formed number that matches nothing is a miss, not a malformed request.
     // ObjectIds resolve without a lookup, so those still 404 from the handler.
     if (!taskId) {
@@ -234,12 +232,12 @@ export function withProjectOwner(handler: AuthenticatedHandler) {
     const { user } = context;
 
     const params = await context.params;
-    const projectId = params.projectId ? await resolveProjectId(params.projectId) : null;
+    const projectId = params.projectId ? await resolveProjectId(context.db, params.projectId) : null;
     if (!projectId) {
       return unresolvedProject(user);
     }
 
-    if (!(await check(user, projectId, "admin"))) {
+    if (!(await check(context.db, user, projectId, "admin"))) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
@@ -262,9 +260,9 @@ export function withProjectOwner(handler: AuthenticatedHandler) {
 // would strand that task — the failure this whole design keeps working to avoid.
 // Keyed on runId, not workerId: workerId is left behind as history when a run ends, so a finished
 // task would otherwise go on granting its worker access to the project for good.
-async function holdsARunIn(projectId: string, workerId: string, taskId?: string): Promise<boolean> {
+async function holdsARunIn(db: ScopedDb, projectId: string, workerId: string, taskId?: string): Promise<boolean> {
   return (
-    (await Task.exists({
+    (await db.Task.exists({
       ...(taskId ? { _id: taskId } : {}),
       project: projectId,
       "execution.workerId": workerId,
@@ -287,13 +285,14 @@ const RUN_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
  * anyway, and a machine its project no longer serves has no standing to write history there.
  */
 async function ranThisRun(
+  db: ScopedDb,
   projectId: string,
   workerId: string,
   taskId: string,
   runId: string
 ): Promise<boolean> {
   return (
-    (await Task.exists({
+    (await db.Task.exists({
       _id: taskId,
       project: projectId,
       "execution.workerId": workerId,
@@ -356,18 +355,19 @@ export function withProjectAccessOrWorker(
     if (!worker.enabled) {
       return NextResponse.json({ error: "this worker may not run" }, { status: 403 });
     }
-    if (await ownerIsDeactivated(worker)) return machineOwnerDeactivated();
+    const db = scopedFor(worker);
+    if (await ownerIsDeactivated(db, worker)) return machineOwnerDeactivated();
 
     const params = await context.params;
-    const projectId = params.projectId ? await resolveProjectId(params.projectId) : null;
+    const projectId = params.projectId ? await resolveProjectId(db, params.projectId) : null;
     if (!projectId) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
     await connectDB();
     const [project, reachable] = await Promise.all([
-      Project.findById(projectId)
+      db.Project.findById(projectId)
         .select("_id repositoryUrl githubRepo gitlabRepo gitlabHost worker")
         .lean(),
-      ownerReachableProjectIds(worker),
+      ownerReachableProjectIds(db, worker),
     ]);
     const assigned =
       projectRunsWorkers(project?.worker) &&
@@ -391,10 +391,10 @@ export function withProjectAccessOrWorker(
       // Assigned, it is not narrowed by the run: the task is requeued by a released outcome and
       // can be claimed again before the outbox flushes, which moves lastRunId on
       if (!assigned && record.runId !== undefined) {
-        if (!(await ranThisRun(projectId, machine, record.taskId, record.runId))) {
+        if (!(await ranThisRun(db, projectId, machine, record.taskId, record.runId))) {
           return notItsRun(machine, record);
         }
-      } else if (!assigned && !(await holdsARunIn(projectId, machine, record.taskId))) {
+      } else if (!assigned && !(await holdsARunIn(db, projectId, machine, record.taskId))) {
         // A worker from before BP-758 names no run: only the task it still holds
         return NextResponse.json(
           { error: "this worker is not assigned to this project" },
@@ -402,11 +402,11 @@ export function withProjectAccessOrWorker(
         );
       }
     } else if (!assigned) {
-      const heldTaskId = params.taskId ? await resolveTaskId(projectId, params.taskId) : null;
+      const heldTaskId = params.taskId ? await resolveTaskId(db, projectId, params.taskId) : null;
       const exempt =
         reach === "board"
-          ? await holdsARunIn(projectId, machine)
-          : !!heldTaskId && (await holdsARunIn(projectId, machine, heldTaskId));
+          ? await holdsARunIn(db, projectId, machine)
+          : !!heldTaskId && (await holdsARunIn(db, projectId, machine, heldTaskId));
       if (!exempt) {
         return NextResponse.json(
           { error: "this worker is not assigned to this project" },
@@ -417,7 +417,7 @@ export function withProjectAccessOrWorker(
 
     // It acts as its own identity, so a comment it leaves is authored by the machine rather than by
     // whoever's credential it was holding — the audit trail CP-241 exists to keep honest.
-    const identity = worker.identity ? await User.findById(worker.identity) : null;
+    const identity = worker.identity ? await db.User.findById(worker.identity) : null;
     if (!identity) {
       return NextResponse.json({ error: "this worker has no identity yet" }, { status: 403 });
     }
@@ -434,12 +434,12 @@ export function withProjectAccess(handler: AuthenticatedHandler) {
     const { user } = context;
 
     const params = await context.params;
-    const projectId = params.projectId ? await resolveProjectId(params.projectId) : null;
+    const projectId = params.projectId ? await resolveProjectId(context.db, params.projectId) : null;
     if (!projectId) {
       return unresolvedProject(user);
     }
 
-    if (!(await check(user, projectId, "access"))) {
+    if (!(await check(context.db, user, projectId, "access"))) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 

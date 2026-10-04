@@ -6,11 +6,10 @@ import { renderEmail } from "@/lib/email-template";
 import { selfOrigin } from "@/lib/session";
 import { dayKeyInTimezone, hourInTimezone, isValidTimezone } from "@/lib/time";
 import { projectPath, taskPath } from "@/lib/urls";
-import { Notification } from "@/models/notification";
-import { User } from "@/models/user";
 import { resolveChannels, wantsMailSomewhere, PrefsSource } from "@/lib/notification-prefs";
 import { accessibleProjectIds } from "@/lib/grants";
 import type { SchedulerStart } from "@/lib/scheduler";
+import { scopedToDefaultTenant, type ScopedDb } from "@/lib/db-scope";
 
 const TICK_MS = Number(process.env.DIGEST_TICK_MS) || 5 * 60 * 1000;
 const DEFAULT_TIMEZONE = "Europe/Warsaw";
@@ -82,6 +81,7 @@ export function lineFor(notification: any, origin: string | null): DigestLine {
  * digest that repeats it teaches people to skip the digest.
  */
 export async function buildDigestFor(
+  db: ScopedDb,
   userId: string,
   since: Date,
   projectIds: string[] | null,
@@ -106,7 +106,7 @@ export async function buildDigestFor(
   // Newest first, so the ceiling below drops the oldest rather than everything recent. Ascending
   // meant that past the ceiling a reader saw only the start of their day and never what just
   // happened — the opposite of what a morning summary is for.
-  const notifications = await Notification.find(filter)
+  const notifications = await db.Notification.find(filter)
     .sort({ createdAt: -1 })
     .limit(DIGEST_SCAN_LIMIT + 1)
     .populate("task", "taskNumber")
@@ -254,6 +254,7 @@ export function digestAttemptLimit(tickMs = TICK_MS): number {
  * write to tidy up a value nothing will read again.
  */
 async function digestFailed(
+  db: ScopedDb,
   user: { _id: Types.ObjectId; username: string },
   day: string,
   attemptsBefore: number,
@@ -273,7 +274,7 @@ async function digestFailed(
   else console.error(line, cause);
   const retry = { day, attempts };
   try {
-    const written = await User.updateOne(
+    const written = await db.User.updateOne(
       { _id: user._id, lastDigestDay: day },
       again ? { $set: { lastDigestDay: "", digestRetry: retry } } : { $set: { digestRetry: retry } }
     );
@@ -299,6 +300,7 @@ async function digestFailed(
  * server had taken, and the reader lost the day with it (BP-659).
  */
 export async function digestTick(now = new Date()): Promise<number> {
+  const db = scopedToDefaultTenant();
   if (!isEmailConfigured()) return 0;
   const day = dueDigestDay(now);
   if (!day) return 0;
@@ -307,7 +309,7 @@ export async function digestTick(now = new Date()): Promise<number> {
   // "Mail is on somewhere" now reads over a grid keyed by event, which Mongo 4.4 expresses badly,
   // so the query narrows to the digest switch and resolveChannels does the rest in code. One
   // source of truth beats a denormalised flag that would drift from the grid it summarises.
-  const candidates = await User.find(
+  const candidates = await db.User.find(
     {
       emailDigest: true,
       email: { $ne: "" },
@@ -338,7 +340,7 @@ export async function digestTick(now = new Date()): Promise<number> {
     // handed back below on both paths, and the cost of that is named rather than hidden — a send
     // the transport failed to report is delivered twice. At-least-once is the right way round for
     // a summary somebody asked for; at-most-once is what silently lost it.
-    const claimed = await User.findOneAndUpdate(
+    const claimed = await db.User.findOneAndUpdate(
       { _id: user._id, lastDigestDay: { $ne: day } },
       { $set: { lastDigestDay: day } }
     );
@@ -349,8 +351,9 @@ export async function digestTick(now = new Date()): Promise<number> {
     const attemptsToday = user.digestRetry?.day === day ? (user.digestRetry.attempts ?? 0) : 0;
 
     try {
-      const projectIds = await accessibleProjectIds(user);
+      const projectIds = await accessibleProjectIds(db, user);
       const { lines, total, atLeast } = await buildDigestFor(
+        db,
         String(user._id),
         since,
         projectIds,
@@ -363,9 +366,9 @@ export async function digestTick(now = new Date()): Promise<number> {
         sent++;
         continue;
       }
-      await digestFailed(user, day, attemptsToday, "was not delivered");
+      await digestFailed(db, user, day, attemptsToday, "was not delivered");
     } catch (err) {
-      await digestFailed(user, day, attemptsToday, "could not be built", err);
+      await digestFailed(db, user, day, attemptsToday, "could not be built", err);
     }
   }
 

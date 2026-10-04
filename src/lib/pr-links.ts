@@ -2,6 +2,7 @@ import mongoose, { type PipelineStage } from "mongoose";
 import { logActivity } from "@/lib/activity";
 import { Task } from "@/models/task";
 import type { ILinkedPR } from "@/types";
+import type { ScopedDb } from "@/lib/db-scope";
 
 /** A stored link's provider. Written since the field existed; absent means GitHub. */
 export function providerOf(link: { provider?: string | null }): string {
@@ -134,16 +135,17 @@ export function addedLinks<T extends { url: string }>(
  * there is no guard here of the kind BP-489 gives a status change.
  */
 export async function recordLinkChanges(
+  db: ScopedDb,
   taskId: mongoose.Types.ObjectId | string,
   actor: string | null,
   added: { url: string }[],
   removed: { url: string }[]
 ): Promise<void> {
   for (const link of removed) {
-    await logActivity(taskId, actor, "pr_unlinked", "linkedPRs", link.url, "");
+    await logActivity(db, taskId, actor, "pr_unlinked", "linkedPRs", link.url, "");
   }
   for (const link of added) {
-    await logActivity(taskId, actor, "pr_linked", "linkedPRs", "", link.url);
+    await logActivity(db, taskId, actor, "pr_linked", "linkedPRs", "", link.url);
   }
 }
 

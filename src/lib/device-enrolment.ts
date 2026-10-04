@@ -1,10 +1,9 @@
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { connectDB } from "./db";
-import { DeviceEnrolment } from "@/models/deviceEnrolment";
-import { Project } from "@/models/project";
 import { projectRepositoryUrl } from "./repository";
 import { IDeviceEnrolment } from "@/types";
+import type { ScopedDb } from "@/lib/db-scope";
 
 // Long enough that guessing the app's half is hopeless
 const DEVICE_PREFIX = "cpd_";
@@ -72,15 +71,16 @@ export interface StartedEnrolment {
 export const MAX_PENDING_ENROLMENTS = 100;
 
 export async function startDeviceEnrolment(
+  db: ScopedDb,
   input: { machineName: string; machineHost: string },
   now = new Date()
 ): Promise<StartedEnrolment> {
   await connectDB();
 
   const live = { status: "pending", expiresAt: { $gt: now } } as const;
-  const pending = await DeviceEnrolment.countDocuments(live);
+  const pending = await db.DeviceEnrolment.countDocuments(live);
   if (pending >= MAX_PENDING_ENROLMENTS) {
-    const surplus = await DeviceEnrolment.find(live)
+    const surplus = await db.DeviceEnrolment.find(live)
       .sort({ createdAt: 1 })
       .limit(pending - MAX_PENDING_ENROLMENTS + 1)
       .select("_id")
@@ -88,7 +88,7 @@ export async function startDeviceEnrolment(
     // ...live, not the ids alone: a row approved between the find and the delete would otherwise be
     // removed with its credential, leaving the browser told "approved" and the machine polling 410
     // for a row nobody can produce.
-    await DeviceEnrolment.deleteMany({ ...live, _id: { $in: surplus.map((row) => row._id) } });
+    await db.DeviceEnrolment.deleteMany({ ...live, _id: { $in: surplus.map((row) => row._id) } });
   }
 
   const deviceCode = `${DEVICE_PREFIX}${crypto.randomBytes(32).toString("hex")}`;
@@ -99,7 +99,7 @@ export async function startDeviceEnrolment(
   for (let attempt = 0; attempt < 5; attempt++) {
     const userCode = randomUserCode();
     try {
-      await DeviceEnrolment.create({
+      await db.DeviceEnrolment.create({
         deviceCodeHash: await bcrypt.hash(deviceCode, 10),
         deviceCodePrefix: devicePrefixOf(deviceCode),
         userCode,
@@ -118,11 +118,12 @@ export async function startDeviceEnrolment(
 }
 
 export async function findPendingByUserCode(
+  db: ScopedDb,
   userCode: string,
   now = new Date()
 ): Promise<IDeviceEnrolment | null> {
   await connectDB();
-  const enrolment = await DeviceEnrolment.findOne({ userCode: normaliseUserCode(userCode) });
+  const enrolment = await db.DeviceEnrolment.findOne({ userCode: normaliseUserCode(userCode) });
   if (!enrolment) return null;
   if (enrolment.expiresAt.getTime() <= now.getTime()) return null;
   return enrolment;
@@ -147,6 +148,7 @@ export type PollResult =
 // device code that was never issued cannot be told from one that was — and an approved row hands
 // its credential over exactly once, then forgets it.
 export async function pollDeviceEnrolment(
+  db: ScopedDb,
   deviceCode: string,
   now = new Date()
 ): Promise<PollResult> {
@@ -158,7 +160,7 @@ export async function pollDeviceEnrolment(
   // Narrowed by the indexed prefix rather than a 200-row window: the old shape ran up to 200
   // bcrypt compares per unauthenticated request, and sustained flooding pushed an approved
   // enrolment out of the window so its poll answered "expired" forever (BP-305)
-  const candidates = await DeviceEnrolment.find({
+  const candidates = await db.DeviceEnrolment.find({
     deviceCodePrefix: devicePrefixOf(deviceCode),
     status: { $in: ["pending", "approved"] },
   }).limit(20);
@@ -170,7 +172,7 @@ export async function pollDeviceEnrolment(
 
     // Single-use: the credential is cleared in the same conditional update that hands it back, so
     // two polls racing cannot both come away holding it.
-    const claimed = await DeviceEnrolment.findOneAndUpdate(
+    const claimed = await db.DeviceEnrolment.findOneAndUpdate(
       { _id: candidate._id, credential: { $ne: "" } },
       { $set: { credential: "", deliveredAt: now } },
       { returnDocument: "before" }
@@ -178,7 +180,7 @@ export async function pollDeviceEnrolment(
     if (!claimed?.credential) return { state: "expired" };
 
     const project = claimed.project
-      ? await Project.findById(claimed.project).select("key repositoryUrl githubRepo gitlabRepo gitlabHost").lean()
+      ? await db.Project.findById(claimed.project).select("key repositoryUrl githubRepo gitlabRepo gitlabHost").lean()
       : null;
 
     return {
@@ -193,9 +195,9 @@ export async function pollDeviceEnrolment(
   return { state: "expired" };
 }
 
-export async function denyDeviceEnrolment(userCode: string): Promise<boolean> {
+export async function denyDeviceEnrolment(db: ScopedDb, userCode: string): Promise<boolean> {
   await connectDB();
-  const result = await DeviceEnrolment.updateOne(
+  const result = await db.DeviceEnrolment.updateOne(
     { userCode: normaliseUserCode(userCode), status: "pending" },
     { $set: { status: "denied", credential: "" } }
   );

@@ -1,9 +1,7 @@
 import { Types } from "mongoose";
-import { Project } from "@/models/project";
-import { Task } from "@/models/task";
-import { ActivityLog } from "@/models/activityLog";
 import { ColumnRole } from "@/types";
 import { getProjectColumns } from "@/lib/columns";
+import type { ScopedDb } from "@/lib/db-scope";
 
 const STALE_DAYS_BY_ROLE: Partial<Record<ColumnRole, number>> = {
   approved: 7,
@@ -69,8 +67,8 @@ function jaccard(a: Set<string>, b: Set<string>): number {
   return shared / (a.size + b.size - shared);
 }
 
-async function lastStatusChangeByTask(taskIds: Types.ObjectId[]): Promise<Map<string, Date>> {
-  const logs = await ActivityLog.find(
+async function lastStatusChangeByTask(db: ScopedDb, taskIds: Types.ObjectId[]): Promise<Map<string, Date>> {
+  const logs = await db.ActivityLog.find(
     { task: { $in: taskIds }, action: "status_changed" },
     "task createdAt"
   )
@@ -84,8 +82,8 @@ async function lastStatusChangeByTask(taskIds: Types.ObjectId[]): Promise<Map<st
   return latest;
 }
 
-export async function buildBoardDigest(projectId: string): Promise<BoardDigest | null> {
-  const project = await Project.findById(projectId, "key columns").lean();
+export async function buildBoardDigest(db: ScopedDb, projectId: string): Promise<BoardDigest | null> {
+  const project = await db.Project.findById(projectId, "key columns").lean();
   if (!project) return null;
 
   const columns = getProjectColumns(project);
@@ -95,8 +93,8 @@ export async function buildBoardDigest(projectId: string): Promise<BoardDigest |
 
   const filter = { project: project._id, status: { $nin: doneStatuses } };
   const [openTotal, tasks] = await Promise.all([
-    Task.countDocuments(filter),
-    Task.find(filter, "taskNumber title status description checklist createdAt")
+    db.Task.countDocuments(filter),
+    db.Task.find(filter, "taskNumber title status description checklist createdAt")
       .sort({ taskNumber: -1 })
       .limit(MAX_TASKS_SCANNED)
       .lean(),
@@ -127,7 +125,7 @@ export async function buildBoardDigest(projectId: string): Promise<BoardDigest |
     });
   }
 
-  const lastChange = await lastStatusChangeByTask(tasks.map((t) => t._id));
+  const lastChange = await lastStatusChangeByTask(db, tasks.map((t) => t._id));
   const now = Date.now();
   const stale: BoardStale[] = [];
   for (const task of tasks) {

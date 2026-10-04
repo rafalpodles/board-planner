@@ -1,10 +1,10 @@
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { connectDB } from "@/lib/db";
-import { User } from "@/models/user";
 import { IUser } from "@/types";
 import { PM_USERNAME } from "@/lib/pm/username";
 import { revokeUserCredentials } from "@/lib/session";
+import type { ScopedDb } from "@/lib/db-scope";
 
 export { PM_USERNAME };
 
@@ -13,28 +13,28 @@ export { PM_USERNAME };
  * upserts: this is called by the claim on every worker poll, and a poll must not be what brings
  * the PM account into being on an instance that has never run one.
  */
-export async function pmUserId(): Promise<string | null> {
+export async function pmUserId(db: ScopedDb): Promise<string | null> {
   await connectDB();
-  const pm = await User.findOne({ username: PM_USERNAME }, "_id").lean();
+  const pm = await db.User.findOne({ username: PM_USERNAME }, "_id").lean();
   return pm ? String(pm._id) : null;
 }
 
 // BP-348: older releases stored pm as a person; run at boot, before anyone can act on it
-export async function markPmAsMachine(): Promise<void> {
+export async function markPmAsMachine(db: ScopedDb): Promise<void> {
   await connectDB();
-  const stored = await User.findOne({ username: PM_USERNAME, kind: { $ne: "machine" } });
+  const stored = await db.User.findOne({ username: PM_USERNAME, kind: { $ne: "machine" } });
   if (!stored) return;
-  await User.updateOne({ _id: stored._id }, { $set: { kind: "machine" } });
+  await db.User.updateOne({ _id: stored._id }, { $set: { kind: "machine" } });
   await revokeUserCredentials(stored._id);
   console.warn(
     `The "${PM_USERNAME}" account was stored as a person (role ${stored.role}). It is now the PM's machine identity: it can no longer sign in, and its sessions, tokens and machines were revoked.`
   );
 }
 
-export async function getPmUser(): Promise<IUser> {
+export async function getPmUser(db: ScopedDb): Promise<IUser> {
   await connectDB();
 
-  const existing = await User.findOne({ username: PM_USERNAME });
+  const existing = await db.User.findOne({ username: PM_USERNAME });
   if (existing?.kind === "machine") return existing;
   if (existing) {
     existing.kind = "machine";
@@ -45,7 +45,7 @@ export async function getPmUser(): Promise<IUser> {
 
   // Random hash makes the account not loginable; unique username index makes the upsert race-safe
   const password = bcrypt.hashSync(crypto.randomBytes(32).toString("hex"), 10);
-  const user = await User.findOneAndUpdate(
+  const user = await db.User.findOneAndUpdate(
     { username: PM_USERNAME },
     {
       $setOnInsert: {

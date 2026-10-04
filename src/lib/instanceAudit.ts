@@ -1,6 +1,6 @@
 import { Types } from "mongoose";
-import { InstanceAuditLog } from "@/models/instanceAuditLog";
 import { InstanceAuditAction } from "@/types";
+import type { ScopedDb } from "@/lib/db-scope";
 
 interface InstanceAuditEntry {
   action: InstanceAuditAction;
@@ -19,9 +19,9 @@ interface InstanceAuditEntry {
 
 // Fire and forget, like logProjectAudit: an audit write that could fail the action it records would
 // be worse than the gap it closes.
-export async function logInstanceAudit(entry: InstanceAuditEntry): Promise<void> {
+export async function logInstanceAudit(db: ScopedDb, entry: InstanceAuditEntry): Promise<void> {
   try {
-    await InstanceAuditLog.create({
+    await db.InstanceAuditLog.create({
       user: entry.user ?? null,
       actorUsername: entry.actorUsername || "",
       action: entry.action,

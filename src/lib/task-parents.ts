@@ -1,5 +1,5 @@
-import { Task } from "@/models/task";
 import { ApiTaskLink, TaskStatus } from "@/types";
+import type { ScopedDb } from "@/lib/db-scope";
 
 /**
  * A `parent_of` link is stored on the **parent's** document, so a child cannot name its own parent
@@ -15,6 +15,7 @@ import { ApiTaskLink, TaskStatus } from "@/types";
  * Scoped by project as well as by id, which is also the index: `{ project: 1, "relations.task": 1 }`.
  */
 export async function parentsOf(
+  db: ScopedDb,
   projectId: string,
   taskIds: string[]
 ): Promise<Map<string, ApiTaskLink>> {
@@ -25,7 +26,7 @@ export async function parentsOf(
   // Keyed on the type, not on the child: this is a handful of documents while parent_of stays the
   // epic relation, and one fetch per parent in the project if it ever does not. Measurements and
   // the crossover are in the PR.
-  const parents = await Task.find(
+  const parents = await db.Task.find(
     { project: projectId, "relations.type": "parent_of" },
     "taskNumber title status relations"
   ).lean();

@@ -3,11 +3,11 @@ import { connectDB } from "@/lib/db";
 import { normaliseEmail } from "@/lib/email";
 import { randomToken, sha256 } from "@/lib/oauth";
 import { githubApiBase, githubWebBase } from "@/lib/github-host";
-import { OidcFlow } from "@/models/oidcFlow";
 import { OidcIntent } from "@/types";
 import { groupsIn } from "@/lib/oidc/admin-group";
 import { OidcProvider } from "./providers";
 import { relayOrigin } from "./relay";
+import type { ScopedDb } from "@/lib/db-scope";
 
 export const FLOW_COOKIE = "bp_oidc";
 export const ACCEPT_COOKIE = "bp_oidc_accept";
@@ -67,7 +67,7 @@ function returnAddress(provider: OidcProvider, origin: string): string {
   return relay ? `${relay}/api/auth/oidc/${provider.id}/relay` : redirectUri(provider, origin);
 }
 
-export async function beginFlow(input: {
+export async function beginFlow(db: ScopedDb, input: {
   provider: OidcProvider;
   origin: string;
   intent: OidcIntent;
@@ -85,7 +85,7 @@ export async function beginFlow(input: {
   const returnTo = returnAddress(input.provider, input.origin);
 
   await connectDB();
-  await OidcFlow.create({
+  await db.OidcFlow.create({
     binderHash: sha256(binder),
     provider: input.provider.id,
     state,
@@ -141,7 +141,7 @@ export type FlowOutcome =
  * Spends the flow the browser's cookie names — once, whatever happens next — and has the library
  * check the code, the state, the nonce and the PKCE verifier against what this server issued.
  */
-export async function finishFlow(input: {
+export async function finishFlow(db: ScopedDb, input: {
   provider: OidcProvider;
   binder: string | null;
   origin: string;
@@ -149,7 +149,7 @@ export async function finishFlow(input: {
 }): Promise<FlowOutcome> {
   if (!input.binder) return { ok: false, reason: "no_flow" };
   await connectDB();
-  const flow = await OidcFlow.findOneAndDelete({
+  const flow = await db.OidcFlow.findOneAndDelete({
     binderHash: sha256(input.binder),
     provider: input.provider.id,
     expiresAt: { $gt: new Date() },
@@ -294,14 +294,14 @@ function ownsTheAddress(provider: OidcProvider, email: string, claims: Record<st
 }
 
 /** A verified identity waiting for its owner to choose a username, held for one invitation. */
-export async function holdForAcceptance(input: {
+export async function holdForAcceptance(db: ScopedDb, input: {
   provider: OidcProvider;
   invitationTokenHash: string;
   claims: VerifiedClaims;
 }): Promise<string> {
   const binder = randomToken("cpo_");
   await connectDB();
-  await OidcFlow.create({
+  await db.OidcFlow.create({
     binderHash: sha256(binder),
     provider: input.provider.id,
     state: "-",
@@ -319,10 +319,10 @@ function heldClaims(claims: VerifiedClaims) {
   return { issuer: claims.issuer, subject: claims.subject, email: claims.email, name: claims.name, groups: claims.groups };
 }
 
-export async function heldAcceptance(binder: string | null) {
+export async function heldAcceptance(db: ScopedDb, binder: string | null) {
   if (!binder) return null;
   await connectDB();
-  return OidcFlow.findOne({
+  return db.OidcFlow.findOne({
     binderHash: sha256(binder),
     intent: "invite",
     claims: { $ne: null },
@@ -330,16 +330,16 @@ export async function heldAcceptance(binder: string | null) {
   }).lean();
 }
 
-export async function spendAcceptance(binder: string): Promise<void> {
+export async function spendAcceptance(db: ScopedDb, binder: string): Promise<void> {
   await connectDB();
-  await OidcFlow.deleteOne({ binderHash: sha256(binder), claims: { $ne: null } });
+  await db.OidcFlow.deleteOne({ binderHash: sha256(binder), claims: { $ne: null } });
 }
 
 /** A verified identity in an allowed domain, with no account yet, waiting to choose a username. */
-export async function holdForSignUp(input: { provider: OidcProvider; claims: VerifiedClaims }): Promise<string> {
+export async function holdForSignUp(db: ScopedDb, input: { provider: OidcProvider; claims: VerifiedClaims }): Promise<string> {
   const binder = randomToken("cpo_");
   await connectDB();
-  await OidcFlow.create({
+  await db.OidcFlow.create({
     binderHash: sha256(binder),
     provider: input.provider.id,
     state: "-",
@@ -352,10 +352,10 @@ export async function holdForSignUp(input: { provider: OidcProvider; claims: Ver
   return binder;
 }
 
-export async function heldSignUp(binder: string | null) {
+export async function heldSignUp(db: ScopedDb, binder: string | null) {
   if (!binder) return null;
   await connectDB();
-  return OidcFlow.findOne({
+  return db.OidcFlow.findOne({
     binderHash: sha256(binder),
     intent: "signup",
     claims: { $ne: null },

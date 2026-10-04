@@ -1,9 +1,7 @@
 import { Types } from "mongoose";
 import { connectDB } from "./db";
-import { Grant } from "@/models/grant";
-import { Project } from "@/models/project";
-import { User } from "@/models/user";
 import { IInvitation, IInvitationBoard } from "@/types";
+import type { ScopedDb } from "@/lib/db-scope";
 
 export interface AuthorityAtAcceptance {
   role: "admin" | "member";
@@ -16,6 +14,7 @@ export interface AuthorityAtAcceptance {
  * outlived their standing. Null means nothing it carries is still backed by anybody.
  */
 export async function authorityAtAcceptance(
+  db: ScopedDb,
   invitation: Pick<IInvitation, "role" | "boards" | "invitedBy">
 ): Promise<AuthorityAtAcceptance | null> {
   await connectDB();
@@ -25,9 +24,9 @@ export async function authorityAtAcceptance(
 
   const [people, projects, ownerships] = await Promise.all([
     // Deactivated is the plainest loss of standing there is (BP-832)
-    User.find({ _id: { $in: peopleIds }, deactivatedAt: null }).select("role kind").lean(),
-    Project.find({ _id: { $in: projectIds } }).select("_id").lean(),
-    Grant.find({
+    db.User.find({ _id: { $in: peopleIds }, deactivatedAt: null }).select("role kind").lean(),
+    db.Project.find({ _id: { $in: projectIds } }).select("_id").lean(),
+    db.Grant.find({
       objectType: "project",
       relation: "owner",
       subject: { $in: peopleIds },

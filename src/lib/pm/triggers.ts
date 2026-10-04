@@ -1,6 +1,3 @@
-import { Project } from "@/models/project";
-import { Task } from "@/models/task";
-import { PmTrigger } from "@/models/pmTrigger";
 import { IPmTrigger } from "@/types";
 import { createNotifications, collectRecipients, assigneeIdOf } from "@/lib/in-app-notifications";
 import { pillToneForRole } from "@/lib/email-template";
@@ -13,16 +10,18 @@ import { NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS, buildNeedsHumanReviewPrompt } from
 import { getProjectColumns } from "@/lib/columns";
 import { isPmRunnable } from "./availability";
 import { isPmAvailable } from "./config";
+import { scopedToDefaultTenant, type ScopedDb } from "@/lib/db-scope";
 
 const MAX_TRIGGER_ATTEMPTS = 3;
 
 export async function enqueuePmTrigger(
+  db: ScopedDb,
   projectId: string,
   taskId: string,
   taskKey: string
 ): Promise<void> {
   try {
-    await PmTrigger.create({
+    await db.PmTrigger.create({
       project: projectId,
       type: "needs_human_review",
       taskKey,
@@ -35,58 +34,60 @@ export async function enqueuePmTrigger(
   }
 }
 
-export async function onTaskStatusChanged(args: {
+export async function onTaskStatusChanged(db: ScopedDb, args: {
   projectId: string;
   taskId: string;
   oldStatus: string;
   newStatus: string;
   actorId: string;
 }): Promise<void> {
-  const project = await Project.findById(args.projectId, "key pm columns").lean();
+  const project = await db.Project.findById(args.projectId, "key pm columns").lean();
   if (!isPmRunnable(project?.pm) || !project?.pm?.autonomy?.handleNeedsHumanReview) return;
 
   const escalation = explicitEscalationColumnId(getProjectColumns(project));
   if (!escalation || args.newStatus !== escalation || args.oldStatus === escalation) return;
 
-  const pmUser = await getPmUser();
+  const pmUser = await getPmUser(db);
   if (String(pmUser._id) === args.actorId) return;
 
-  const task = await Task.findById(args.taskId, "taskNumber").lean();
+  const task = await db.Task.findById(args.taskId, "taskNumber").lean();
   if (!task) return;
 
-  await enqueuePmTrigger(args.projectId, args.taskId, `${project.key}-${task.taskNumber}`);
+  await enqueuePmTrigger(db, args.projectId, args.taskId, `${project.key}-${task.taskNumber}`);
 
   drainPmTriggers().catch((err) => console.error("PM trigger drain failed:", err));
 }
 
 async function settleTrigger(
+  db: ScopedDb,
   trigger: IPmTrigger,
   state: "done" | "failed" | "pending",
   lastError = ""
 ): Promise<void> {
-  await PmTrigger.findByIdAndUpdate(trigger._id, {
+  await db.PmTrigger.findByIdAndUpdate(trigger._id, {
     $set: { state, lastError, active: state === "pending" },
   });
 }
 
-async function failTrigger(trigger: IPmTrigger, error: string): Promise<void> {
+async function failTrigger(db: ScopedDb, trigger: IPmTrigger, error: string): Promise<void> {
   const exhausted = trigger.attempts >= MAX_TRIGGER_ATTEMPTS;
-  await settleTrigger(trigger, exhausted ? "failed" : "pending", error);
+  await settleTrigger(db, trigger, exhausted ? "failed" : "pending", error);
 }
 
 // Reusing comment_added avoids touching the NotificationType enum, model and notifications UI
 async function notifyWatchers(
+  db: ScopedDb,
   trigger: IPmTrigger,
   pmUserId: string,
   summary: string
 ): Promise<void> {
   const [task, project] = await Promise.all([
-    Task.findById(trigger.task, "title watchers assignee createdBy status taskNumber").lean(),
-    Project.findById(trigger.project, "key name columns").lean(),
+    db.Task.findById(trigger.task, "title watchers assignee createdBy status taskNumber").lean(),
+    db.Project.findById(trigger.project, "key name columns").lean(),
   ]);
   if (!task) return;
   const column = getProjectColumns(project).find((c) => c.id === String(task.status));
-  createNotifications({
+  createNotifications(db, {
     type: "comment_added",
     taskId: String(trigger.task),
     projectId: String(trigger.project),
@@ -113,29 +114,30 @@ async function notifyWatchers(
 
 export type PmTriggerOutcome = "ran" | "deferred";
 
-export async function runPmTrigger(trigger: IPmTrigger): Promise<PmTriggerOutcome> {
+export async function runPmTrigger(db: ScopedDb, trigger: IPmTrigger): Promise<PmTriggerOutcome> {
   const projectId = String(trigger.project);
-  const project = await Project.findById(projectId, "pm").lean();
+  const project = await db.Project.findById(projectId, "pm").lean();
   if (!isPmRunnable(project?.pm) || !project?.pm?.autonomy?.handleNeedsHumanReview) {
-    await settleTrigger(trigger, "done");
+    await settleTrigger(db, trigger, "done");
     return "ran";
   }
   // Settled, not retried: without a model every attempt is a turn from the cap spent posting the
   // same warning into every thread
   if (!isPmAvailable()) {
-    await settleTrigger(trigger, "failed", "The PM agent is not configured on this instance");
+    await settleTrigger(db, trigger, "failed", "The PM agent is not configured on this instance");
     return "ran";
   }
 
-  const { over, cap } = await isOverDailyTurnCap(projectId, project.pm);
+  const { over, cap } = await isOverDailyTurnCap(db, projectId, project.pm);
   if (over) {
-    await settleTrigger(trigger, "failed", `Daily turn cap (${cap}) reached`);
+    await settleTrigger(db, trigger, "failed", `Daily turn cap (${cap}) reached`);
     return "ran";
   }
 
-  const spend = await dailyPmSpend(projectId, project.pm);
+  const spend = await dailyPmSpend(db, projectId, project.pm);
   if (spend.over) {
     await settleTrigger(
+      db,
       trigger,
       "failed",
       `Daily token cap reached: ${spend.tokens.toLocaleString()} of ${spend.cap.toLocaleString()}`
@@ -145,16 +147,16 @@ export async function runPmTrigger(trigger: IPmTrigger): Promise<PmTriggerOutcom
 
   // A turn is already running for this project — hand the trigger back untouched
   // so a busy lock never burns a retry, and let the next scheduler tick pick it up
-  const pmUser = await getPmUser();
+  const pmUser = await getPmUser(db);
   const abort = acquireTurnLock(projectId, String(pmUser._id));
   if (!abort) {
-    await settleTrigger(trigger, "pending");
-    await PmTrigger.findByIdAndUpdate(trigger._id, { $inc: { attempts: -1 } });
+    await settleTrigger(db, trigger, "pending");
+    await db.PmTrigger.findByIdAndUpdate(trigger._id, { $inc: { attempts: -1 } });
     return "deferred";
   }
 
   try {
-    const result = await runPmTurn({
+    const result = await runPmTurn(db, {
       // Nobody is driving this one — see runPmTurn's `autonomous` (BP-321)
       autonomous: true,
       projectId,
@@ -165,13 +167,13 @@ export async function runPmTrigger(trigger: IPmTrigger): Promise<PmTriggerOutcom
       signal: abort.signal,
     });
     if (result.ok) {
-      await notifyWatchers(trigger, String(pmUser._id), result.message?.content ?? "");
-      await settleTrigger(trigger, "done");
+      await notifyWatchers(db, trigger, String(pmUser._id), result.message?.content ?? "");
+      await settleTrigger(db, trigger, "done");
     } else {
-      await failTrigger(trigger, result.error ?? "PM turn failed");
+      await failTrigger(db, trigger, result.error ?? "PM turn failed");
     }
   } catch (err) {
-    await failTrigger(trigger, err instanceof Error ? err.message : String(err));
+    await failTrigger(db, trigger, err instanceof Error ? err.message : String(err));
   } finally {
     releaseTurnLock(projectId);
   }
@@ -179,17 +181,18 @@ export async function runPmTrigger(trigger: IPmTrigger): Promise<PmTriggerOutcom
 }
 
 export async function drainPmTriggers(): Promise<void> {
+  const db = scopedToDefaultTenant();
   for (;;) {
-    const claimed = await PmTrigger.findOneAndUpdate(
+    const claimed = await db.PmTrigger.findOneAndUpdate(
       { state: "pending" },
       { $set: { state: "running", active: true }, $inc: { attempts: 1 } },
       { sort: { createdAt: 1 }, returnDocument: "after" }
     );
     if (!claimed) return;
     if (claimed.attempts > MAX_TRIGGER_ATTEMPTS) {
-      await settleTrigger(claimed, "failed", claimed.lastError || "Retry limit reached");
+      await settleTrigger(db, claimed, "failed", claimed.lastError || "Retry limit reached");
       continue;
     }
-    if ((await runPmTrigger(claimed)) === "deferred") return;
+    if ((await runPmTrigger(db, claimed)) === "deferred") return;
   }
 }
