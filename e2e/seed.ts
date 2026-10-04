@@ -144,6 +144,56 @@ export function e2eDatabaseName() {
   return dbName;
 }
 
+const UNSCOPED_COLLECTIONS = ["tenants", "ratelimits"];
+
+function stampsFixtures(collection: mongoose.mongo.Collection): boolean {
+  const name = collection.collectionName;
+  return collection.dbName === e2eDatabaseName() && !UNSCOPED_COLLECTIONS.includes(name) && !name.includes(".");
+}
+
+type Row = Record<string, unknown>;
+const withTenant = (doc: Row): Row => ("tenant" in doc ? doc : { ...doc, tenant: DEFAULT_TENANT_ID });
+
+function upsertingWithTenant(update: unknown, options: { upsert?: boolean } | undefined): unknown {
+  if (!options?.upsert || Array.isArray(update) || !update || typeof update !== "object") return update;
+  const ops = update as Record<string, Row | undefined>;
+  if (!Object.keys(ops).some((key) => key.startsWith("$"))) return withTenant(ops as Row);
+  if (ops.$set && "tenant" in ops.$set) return update;
+  return { ...ops, $setOnInsert: withTenant(ops.$setOnInsert ?? {}) };
+}
+
+// Fixture rows inserted straight into the e2e database belong to the one organisation, as the app's own writes do (BP-663)
+function stampFixtureRowsWithTheTenant() {
+  const proto = mongoose.mongo.Collection.prototype as unknown as Record<string, (...args: unknown[]) => unknown>;
+  if ((proto as { tenantStamped?: boolean }).tenantStamped) return;
+  (proto as { tenantStamped?: boolean }).tenantStamped = true;
+  const wrap = (method: string, rewrite: (args: unknown[]) => unknown[]) => {
+    const original = proto[method];
+    proto[method] = function (this: mongoose.mongo.Collection, ...args: unknown[]) {
+      return original.apply(this, stampsFixtures(this) ? rewrite(args) : args);
+    };
+  };
+  wrap("insertOne", ([doc, ...rest]) => [withTenant(doc as Row), ...rest]);
+  wrap("insertMany", ([docs, ...rest]) => [(docs as Row[]).map(withTenant), ...rest]);
+  for (const method of ["updateOne", "updateMany", "findOneAndUpdate", "replaceOne", "findOneAndReplace"]) {
+    wrap(method, ([filter, update, options, ...rest]) => [
+      filter,
+      upsertingWithTenant(update, options as { upsert?: boolean }),
+      options,
+      ...rest,
+    ]);
+  }
+  wrap("bulkWrite", ([operations, ...rest]) => [
+    (operations as Row[]).map((operation) => {
+      const insert = operation.insertOne as { document: Row } | undefined;
+      return insert ? { insertOne: { ...insert, document: withTenant(insert.document) } } : operation;
+    }),
+    ...rest,
+  ]);
+}
+
+stampFixtureRowsWithTheTenant();
+
 async function connect() {
   e2eDatabaseName();
   await mongoose.connect(E2E_MONGODB_URI);
