@@ -5,7 +5,8 @@
  *   2. after the deploy:   the same command again, for anything the old release wrote in between
  *   3. then:               MONGODB_URI=... npx tsx scripts/adopt-organisation-field.ts --finalise --apply
  *
- * Without --apply each step only reports. Step 3 refuses while anything is left uncopied.
+ * Without --apply each step only reports. Step 3 refuses while anything is left uncopied, or while an
+ * organisation differs from its old row; --legacy-wins on a copy writes the old row's values over it.
  * Snapshot first: `dump-collections.ts dump ./backups all`.
  */
 
@@ -15,6 +16,7 @@ import { copyLegacyField, finaliseLegacyField } from "../src/lib/organisation-fi
 
 const apply = process.argv.includes("--apply");
 const finalise = process.argv.includes("--finalise");
+const legacyWins = process.argv.includes("--legacy-wins");
 
 async function main() {
   const { uri, source } = resolveUri();
@@ -26,7 +28,7 @@ async function main() {
     throw new Error(`No collections in "${db.databaseName}" — wrong database? Set MONGODB_DB.`);
   }
 
-  const report = finalise ? await finaliseLegacyField(mongoose.connection, { apply }) : await copyLegacyField(mongoose.connection, { apply });
+  const report = finalise ? await finaliseLegacyField(mongoose.connection, { apply }) : await copyLegacyField(mongoose.connection, { apply, legacyWins });
   console.log(JSON.stringify(report, null, 2));
   await mongoose.disconnect();
 }

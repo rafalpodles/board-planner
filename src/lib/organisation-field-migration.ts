@@ -17,10 +17,26 @@ function handle(connection: mongoose.Connection) {
 const scopedCollections = () => scopedModelNames().map((name) => mongoose.model(name).collection.name);
 const uncopied = { [LEGACY_FIELD]: { $exists: true }, organisation: { $exists: false } };
 
+type Row = Record<string, unknown>;
+type Differing = { _id: string; fields: string[] };
+
+function canonical(value: unknown): string {
+  return JSON.stringify(value, (_key, inner) =>
+    inner && typeof inner === "object" && !Array.isArray(inner) && inner.constructor === Object
+      ? Object.fromEntries(Object.entries(inner).sort(([a], [b]) => a.localeCompare(b)))
+      : inner
+  );
+}
+
+const differingFields = (legacy: Row, current: Row) =>
+  Object.keys(legacy).filter((key) => key !== "_id" && key !== "__v" && canonical(legacy[key]) !== canonical(current[key]));
+
+const isMissingCollection = (error: { code?: number; codeName?: string }) => error?.code === 26 || error?.codeName === "NamespaceNotFound";
+
 export async function copyLegacyField(
   connection: mongoose.Connection,
-  { apply }: { apply: boolean }
-): Promise<Report & { organisationRows: number }> {
+  { apply, legacyWins = false }: { apply: boolean; legacyWins?: boolean }
+): Promise<Report & { organisationRows: number; differing: Differing[] }> {
   const db = handle(connection);
   const byCollection: Record<string, number> = {};
   let total = 0;
@@ -34,13 +50,21 @@ export async function copyLegacyField(
   }
 
   let organisationRows = 0;
+  const differing: Differing[] = [];
   const organisations = db.collection(ORGANISATIONS);
   for (const { _id, ...row } of await db.collection(LEGACY_COLLECTION).find({}).toArray()) {
-    if (await organisations.countDocuments({ _id }, { limit: 1 })) continue;
-    if (apply) await organisations.updateOne({ _id }, { $setOnInsert: row }, { upsert: true });
-    organisationRows += 1;
+    const current = await organisations.findOne({ _id });
+    if (!current) {
+      if (apply) await organisations.updateOne({ _id }, { $setOnInsert: row }, { upsert: true });
+      organisationRows += 1;
+      continue;
+    }
+    const fields = differingFields(row, current);
+    if (!fields.length) continue;
+    if (apply && legacyWins) await organisations.updateOne({ _id }, { $set: Object.fromEntries(fields.map((field) => [field, row[field]])) });
+    differing.push({ _id: String(_id), fields });
   }
-  return { total, byCollection, organisationRows };
+  return { total, byCollection, organisationRows, differing };
 }
 
 export async function finaliseLegacyField(
@@ -53,16 +77,28 @@ export async function finaliseLegacyField(
   let left = 0;
   for (const name of collections) left += await db.collection(name).countDocuments(uncopied);
   if (left) throw new Error(`${left} document(s) still carry only the old field: run the copy again first. Nothing was changed.`);
-  const legacyRows = await db.collection(LEGACY_COLLECTION).find({}, { projection: { _id: 1 } }).toArray();
-  for (const { _id } of legacyRows) {
-    if (!(await db.collection(ORGANISATIONS).countDocuments({ _id }, { limit: 1 }))) {
-      throw new Error(`Organisation ${String(_id)} has not been copied yet: run the copy again first. Nothing was changed.`);
+  for (const legacy of await db.collection(LEGACY_COLLECTION).find({}).toArray()) {
+    const current = await db.collection(ORGANISATIONS).findOne({ _id: legacy._id });
+    if (!current) {
+      throw new Error(`Organisation ${String(legacy._id)} has not been copied yet: run the copy again first. Nothing was changed.`);
+    }
+    const fields = differingFields(legacy, current);
+    if (fields.length) {
+      throw new Error(
+        `Organisation ${String(legacy._id)} differs from its old row in ${fields.join(", ")}: reconcile it, or copy again with --legacy-wins. Nothing was changed.`
+      );
     }
   }
 
   const droppedIndexes: string[] = [];
   for (const name of collections) {
-    const indexes = await db.collection(name).indexes().catch(() => []);
+    const indexes = await db
+      .collection(name)
+      .indexes()
+      .catch((error) => {
+        if (isMissingCollection(error)) return [];
+        throw error;
+      });
     for (const index of indexes) {
       if (!(LEGACY_FIELD in index.key) || !index.name) continue;
       if (apply) await db.collection(name).dropIndex(index.name);

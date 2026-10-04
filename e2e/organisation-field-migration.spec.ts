@@ -59,14 +59,46 @@ test("the copy gives every document its organisation and every organisation its 
   expect([again.total, again.organisationRows]).toEqual([0, 0]);
 });
 
-test("the copy never overwrites an organisation already there", async () => {
+test("the copy never overwrites a document's organisation already there", async () => {
   await col("tasks").insertOne({ [LEGACY_FIELD]: ORG, organisation: OTHER, title: "already moved" });
-  await col("organisations").insertOne({ _id: ORG, name: "Renamed since" });
 
   await copyLegacyField(mongoose.connection, { apply: true });
 
   expect(String((await col("tasks").findOne({ title: "already moved" }))!.organisation)).toBe(String(OTHER));
-  expect((await col("organisations").findOne({ _id: ORG }))!.name).toBe("Renamed since");
+});
+
+test("an organisation row the new release made first is reported, kept, and blocks finalising until the old row wins", async () => {
+  await col("organisations").insertOne({ _id: ORG, entitlements: { plan: "free", features: [] } });
+
+  const report = await copyLegacyField(mongoose.connection, { apply: true });
+
+  expect(report.differing).toEqual([{ _id: String(ORG), fields: ["name", "slug", "entitlements"] }]);
+  expect((await col("organisations").findOne({ _id: ORG }))!.entitlements.plan).toBe("free");
+  await expect(finaliseLegacyField(mongoose.connection, { apply: true })).rejects.toThrow(/differs from its old row in name, slug, entitlements/);
+  expect((await mongoose.connection.db!.listCollections({ name: LEGACY_COLLECTION }).toArray()).length).toBe(1);
+
+  const won = await copyLegacyField(mongoose.connection, { apply: true, legacyWins: true });
+  expect(won.differing.map((row) => row._id)).toEqual([String(ORG)]);
+  expect(await col("organisations").findOne({ _id: ORG })).toEqual(ORG_ROW);
+  expect((await copyLegacyField(mongoose.connection, { apply: true })).differing).toEqual([]);
+  await finaliseLegacyField(mongoose.connection, { apply: true });
+  expect(await col("organisations").findOne({ _id: ORG })).toEqual(ORG_ROW);
+});
+
+test("a rename made on the old row after the copy blocks finalising rather than vanishing with it", async () => {
+  await copyLegacyField(mongoose.connection, { apply: true });
+  await col(LEGACY_COLLECTION).updateOne({ _id: ORG }, { $set: { name: "Renamed in the window" } });
+
+  await expect(finaliseLegacyField(mongoose.connection, { apply: true })).rejects.toThrow(/differs from its old row in name/);
+});
+
+test("a dry run with the old row winning writes nothing", async () => {
+  await col("organisations").insertOne({ _id: ORG, name: "Other name" });
+
+  const report = await copyLegacyField(mongoose.connection, { apply: false, legacyWins: true });
+
+  expect(report.differing[0].fields).toContain("name");
+  expect((await col("organisations").findOne({ _id: ORG }))!.name).toBe("Other name");
 });
 
 test("the app reads what the copy moved, scoped to each organisation", async () => {
