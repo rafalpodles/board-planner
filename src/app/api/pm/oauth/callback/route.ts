@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { scopedToDefaultTenant } from "@/lib/db-scope";
+import { scopedFor, scopedToDefaultTenant } from "@/lib/db-scope";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { auditChange } from "@/lib/settings-audit";
 import { serverNamed, writeServerOauth } from "@/lib/pm/oauth-writes";
@@ -88,7 +88,7 @@ export async function GET(request: Request) {
     return settingsRedirect(projectId, "error:missing_code");
   }
 
-  const project = await db.Project.findById(pending.project).select("pm.mcpServers").lean();
+  const project = await scopedFor(user).Project.findById(pending.project).select("pm.mcpServers").lean();
   const server = serverNamed(project?.pm?.mcpServers, pending.serverName);
   if (!project || !server || server.authType !== "oauth" || !server.oauth?.tokenEndpoint) {
     return settingsRedirect(projectId, "error:connection_gone");

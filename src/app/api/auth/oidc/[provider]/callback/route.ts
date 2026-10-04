@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { scopedToDefaultTenant, type ScopedDb } from "@/lib/db-scope";
+import { scopedFor, scopedToDefaultTenant, type ScopedDb } from "@/lib/db-scope";
 import { getAuthUser, getClientIp } from "@/lib/auth";
 import { isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
 import {
@@ -142,15 +142,16 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
     // The session that started the link has to be the one finishing it
     const current = await getAuthUser(request).catch(() => null);
     if (!current || current.viaMachineCredential || String(current._id) !== outcome.userId) return back("failed");
-    const holder = await linkedAccount(db, claims);
+    const own = scopedFor(current);
+    const holder = await linkedAccount(own, claims);
     if (holder) return back(String(holder._id) === String(current._id) ? "linked" : "taken");
-    const user = await db.User.findById(current._id);
+    const user = await own.User.findById(current._id);
     if (!user) return back("failed");
-    if (!(await link(db, provider, claims, user, "from the account's own settings"))) return back("taken");
+    if (!(await link(own, provider, claims, user, "from the account's own settings"))) return back("taken");
     // A password change or Sign out everywhere landing after the check above unlinked before this
     // link existed; it must not outlive the session that made it (BP-842)
-    if (current.sessionId && !(await db.Session.exists({ _id: current.sessionId }))) {
-      await db.Identity.deleteOne({ issuer: claims.issuer, subject: claims.subject, user: user._id });
+    if (current.sessionId && !(await own.Session.exists({ _id: current.sessionId }))) {
+      await own.Identity.deleteOne({ issuer: claims.issuer, subject: claims.subject, user: user._id });
       void logInstanceAudit({
         action: "identity_unlinked",
         user: user._id,

@@ -4,7 +4,7 @@ import { readJsonBody } from "@/lib/request-body";
 import { checkOrganisationName, nameOrganisation } from "@/lib/tenant";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
-import { scopedToDefaultTenant, type ScopedDb } from "@/lib/db-scope";
+import { scopedFor, scopedToDefaultTenant, type ScopedDb } from "@/lib/db-scope";
 import { getAuthUser, getClientIp, PASSWORD_COST_FACTOR } from "@/lib/auth";
 import { refuseSetupCode } from "@/lib/setup-code";
 import { checkNewAccount } from "@/lib/new-account";
@@ -140,7 +140,7 @@ export async function POST(request: Request) {
   const hashedPassword = await bcrypt.hash(password, PASSWORD_COST_FACTOR);
 
   try {
-    const user = await db.User.create({
+    const user = await (authUser ? scopedFor(authUser) : db).User.create({
       username: storedUsername,
       password: hashedPassword,
       fullName: storedFullName,

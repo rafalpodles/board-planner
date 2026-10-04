@@ -1,3 +1,4 @@
+import { Types } from "mongoose";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { isValidUsername } from "@/lib/identifiers";
 import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
@@ -295,6 +296,17 @@ describe("claiming an instance nobody has claimed", () => {
 
     expect(res.status).toBe(201);
     expect(nameOrganisation).not.toHaveBeenCalled();
+  });
+
+  it("creates a member in the administrator's own tenant, not the default one (BP-663)", async () => {
+    const tenant = Types.ObjectId.createFromHexString("0000000000000000000000b2");
+    countDocuments.mockResolvedValue(3);
+    getAuthUser.mockResolvedValue({ _id: "a1", role: "admin", username: "owner", tenant });
+
+    const res = await post({ ...VALID, username: "someone" });
+
+    expect(res.status).toBe(201);
+    expect(create.mock.calls[0][0].tenant).toEqual(tenant);
   });
 
   it("creates the administrator when the operator's code is given", async () => {

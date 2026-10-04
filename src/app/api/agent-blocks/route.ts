@@ -10,7 +10,7 @@ import {
 } from "@/lib/agent-block-input";
 import { BLOCK_KINDS, STEP_CAPABILITIES, StepCapability } from "@/types";
 
-export const GET = withAuth(async (_request, { db }) => {
+export const GET = withAuth(async () => {
   await connectDB();
   const blocks = await allBlocks();
   return NextResponse.json(blocks.map(toApiBlock));
