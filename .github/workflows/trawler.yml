@@ -1,0 +1,99 @@
+name: Trawler
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      trawler_ref:
+        description: Branch, tag or SHA of usetrawler/trawler to run (default vars.TRAWLER_REF, then main)
+        required: false
+        type: string
+
+concurrency:
+  group: trawler-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: Trawler — is it configured and allowed here
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - id: decide
+        env:
+          FROM_FORK: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+          HAS_TOKEN: ${{ secrets.TRAWLER_API_TOKEN != '' }}
+          HAS_API: ${{ vars.TRAWLER_API != '' }}
+          HAS_PROJECT: ${{ vars.TRAWLER_PROJECT != '' }}
+        run: |
+          if [ "$FROM_FORK" = true ]; then
+            echo "::notice::Trawler is skipped for pull requests from forks: they get no secrets"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          elif [ "$HAS_TOKEN" != true ] || [ "$HAS_API" != true ] || [ "$HAS_PROJECT" != true ]; then
+            echo "::notice::Trawler is skipped: set the secret TRAWLER_API_TOKEN and the variables TRAWLER_API and TRAWLER_PROJECT"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  trawler:
+    name: Trawler — test the app on localhost
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build and start Board Planner and an empty MongoDB on localhost:3000
+        run: .github/trawler/start-app.sh
+        env:
+          DEMO_USERNAME: ${{ vars.TRAWLER_APP_USERNAME }}
+          DEMO_PASSWORD: ${{ vars.TRAWLER_APP_PASSWORD }}
+
+      - uses: actions/checkout@v7
+        with:
+          repository: usetrawler/trawler
+          ref: ${{ inputs.trawler_ref || vars.TRAWLER_REF || 'main' }}
+          path: .trawler
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Install Trawler
+        working-directory: .trawler
+        run: npm ci
+      - name: Install Trawler's browser
+        working-directory: .trawler
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Trawler against the app
+        run: |
+          set -o pipefail
+          node .trawler/apps/ci/src/main.ts run --api "$TRAWLER_API" --project "$TRAWLER_PROJECT" --url http://localhost:3000 --runner own --fail-on never --cap 1 2>&1 | tee trawler-run.log
+        env:
+          TRAWLER_API: ${{ vars.TRAWLER_API }}
+          TRAWLER_PROJECT: ${{ vars.TRAWLER_PROJECT }}
+          TRAWLER_API_TOKEN: ${{ secrets.TRAWLER_API_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Collect the app log
+        if: ${{ failure() || cancelled() }}
+        run: docker compose -p trawler-demo logs --no-color > app.log 2>&1 || true
+      - name: Upload the app log and the Trawler run output
+        if: ${{ failure() || cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: trawler-logs
+          path: |
+            app.log
+            trawler-run.log
+          if-no-files-found: ignore
+
+      - name: Stop the app
+        if: ${{ always() }}
+        run: docker compose -p trawler-demo down -v || true
