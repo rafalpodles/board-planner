@@ -639,6 +639,7 @@ async function handleConsent(db: ScopedDb, req: Request, form: FormData): Promis
   // The grant outlives this browser window, so it is worth a line in an inbox the account holder
   // reads even when the authorization happened somewhere they were not looking.
   void notifyCredentialCreated({
+    tenant: db.tenant,
     email: user.email,
     username: user.username,
     kind: "oauth",

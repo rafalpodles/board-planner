@@ -28,6 +28,7 @@ async function announceToken(
       scope = keys.join(", ") || "no board";
     }
     await notifyCredentialCreated({
+      tenant: db.tenant,
       email: owner.email,
       username: owner.username,
       kind: "token",

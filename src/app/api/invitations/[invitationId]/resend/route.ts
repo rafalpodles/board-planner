@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { withAdmin } from "@/lib/middleware";
-import { selfOrigin } from "@/lib/session";
+import { originFor } from "@/lib/tenant-host";
 import { recordDelivery, reissueInvitation } from "@/lib/invitations";
 import { deliverTo, INTERACTIVE_ONLY, NO_ORIGIN_ERROR } from "@/lib/invitation-mail";
 import { describeInvitation, toApiInvitations } from "@/lib/invitation-view";
@@ -15,7 +15,7 @@ export const POST = withAdmin(async (_request, { params, user, db }) => {
   if (!isValidObjectId(invitationId)) {
     return NextResponse.json({ error: "Invitation not found" }, { status: 404 });
   }
-  const origin = selfOrigin();
+  const origin = await originFor(db);
   if (!origin) return NextResponse.json({ error: NO_ORIGIN_ERROR }, { status: 500 });
 
   const current = await db.Invitation.findById(invitationId).select("email").lean();

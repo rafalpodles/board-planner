@@ -3,7 +3,7 @@ import { connectDB } from "@/lib/db";
 import { APP_NAME } from "@/lib/brand";
 import { isEmailConfigured, sendEmail } from "@/lib/email";
 import { renderEmail } from "@/lib/email-template";
-import { selfOrigin } from "@/lib/session";
+import { originFor } from "@/lib/tenant-host";
 import { dayKeyInTimezone, hourInTimezone, isValidTimezone } from "@/lib/time";
 import { projectPath, taskPath } from "@/lib/urls";
 import { resolveChannels, wantsMailSomewhere, PrefsSource } from "@/lib/notification-prefs";
@@ -122,7 +122,7 @@ export async function buildDigestFor(
     return resolveChannels(prefs, String(projectId), n.type).email;
   });
 
-  const origin = selfOrigin();
+  const origin = await originFor(db);
   if (truncated) {
     console.warn(`Digest for ${userId} scanned the first ${DIGEST_SCAN_LIMIT} unread rows only`);
   }
@@ -138,12 +138,13 @@ export async function buildDigestFor(
 }
 
 async function sendDigest(
+  db: ScopedDb,
   user: { _id: unknown; email: string; username: string },
   lines: DigestLine[],
   total: number,
   atLeast = false
 ): Promise<boolean> {
-  const origin = selfOrigin();
+  const origin = await originFor(db);
   const settingsUrl = origin ? `${origin}/settings/notifications` : undefined;
   const hidden = total - lines.length;
   // Past the scan ceiling nobody counted the rest, so the headline says so too — putting "at least"
@@ -362,7 +363,7 @@ export async function digestTick(now = new Date()): Promise<number> {
       // A quiet day is not worth a mail saying so — and the claim stays, because there was nothing
       // to deliver rather than something that failed to arrive
       if (lines.length === 0) continue;
-      if (await sendDigest(user, lines, total, atLeast)) {
+      if (await sendDigest(db, user, lines, total, atLeast)) {
         sent++;
         continue;
       }

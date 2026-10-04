@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { Types } from "mongoose";
 
 const sendEmail = vi.fn().mockResolvedValue(true);
 const isEmailConfigured = vi.fn(() => true);
@@ -9,9 +10,17 @@ vi.mock("@/lib/email", () => ({
   isEmailConfigured: () => isEmailConfigured(),
 }));
 vi.mock("@/lib/session", () => ({ selfOrigin: () => selfOrigin() }));
+const tenantSlug = vi.fn<() => string | undefined>(() => undefined);
+vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+vi.mock("@/models/tenant", () => ({
+  Tenant: { findById: () => ({ select: () => ({ lean: async () => ({ slug: tenantSlug() }) }) }) },
+}));
 
 const { notifyPasswordChanged, notifyAddressChanged, notifyCredentialCreated, notifyIdentityLinked, maskAddress } =
   await import("@/lib/security-mail");
+const { forgetTenantSlugs } = await import("@/lib/tenant-host");
+
+const TENANT = new Types.ObjectId();
 
 const sent = () => sendEmail.mock.calls.at(-1)?.[0] as { to: string; subject: string; html: string; text: string };
 
@@ -24,6 +33,7 @@ beforeEach(() => {
 describe("notifyPasswordChanged", () => {
   it("warns hard when a reset link did it, because that is the takeover case", async () => {
     await notifyPasswordChanged({
+      tenant: TENANT,
       email: "owner@example.com",
       username: "owner",
       how: "reset_link",
@@ -37,6 +47,7 @@ describe("notifyPasswordChanged", () => {
 
   it("names the administrator and says the password was not sent", async () => {
     await notifyPasswordChanged({
+      tenant: TENANT,
       email: "owner@example.com",
       username: "owner",
       how: "admin",
@@ -50,7 +61,7 @@ describe("notifyPasswordChanged", () => {
   });
 
   it("says nothing to an account with no address", async () => {
-    await notifyPasswordChanged({ email: "", username: "owner", how: "admin" });
+    await notifyPasswordChanged({ tenant: TENANT, email: "", username: "owner", how: "admin" });
 
     expect(sendEmail).not.toHaveBeenCalled();
   });
@@ -59,7 +70,7 @@ describe("notifyPasswordChanged", () => {
     sendEmail.mockRejectedValueOnce(new Error("smtp is down"));
 
     await expect(
-      notifyPasswordChanged({ email: "owner@example.com", username: "owner", how: "admin" })
+      notifyPasswordChanged({ tenant: TENANT, email: "owner@example.com", username: "owner", how: "admin" })
     ).resolves.toBeUndefined();
   });
 });
@@ -101,6 +112,7 @@ describe("maskAddress", () => {
 describe("notifyCredentialCreated", () => {
   it("names what was created and what it can reach", async () => {
     await notifyCredentialCreated({
+      tenant: TENANT,
       email: "owner@example.com",
       username: "owner",
       kind: "token",
@@ -118,6 +130,7 @@ describe("notifyCredentialCreated", () => {
     selfOrigin.mockReturnValue(null);
 
     await notifyCredentialCreated({
+      tenant: TENANT,
       email: "owner@example.com",
       username: "owner",
       kind: "oauth",
@@ -131,7 +144,7 @@ describe("notifyCredentialCreated", () => {
 });
 
 describe("notifyIdentityLinked", () => {
-  const LINKED = { email: "owner@example.com", username: "owner", provider: "Acme", providerEmail: "o@acme.example" };
+  const LINKED = { tenant: TENANT, email: "owner@example.com", username: "owner", provider: "Acme", providerEmail: "o@acme.example" };
 
   it("tells the owner to change the password, which unlinks it", async () => {
     await notifyIdentityLinked(LINKED);
@@ -150,5 +163,37 @@ describe("notifyIdentityLinked", () => {
 
     expect(sent().text).not.toContain("change your password");
     expect(sent().text).toContain("ask an administrator to sign you out everywhere");
+  });
+});
+
+describe("with TENANT_DOMAIN set, every button leads to the account's own tenant (BP-666)", () => {
+  beforeEach(() => {
+    process.env.TENANT_DOMAIN = "board-planner.com";
+    tenantSlug.mockReturnValue("acme");
+    forgetTenantSlugs();
+  });
+
+  afterEach(() => {
+    delete process.env.TENANT_DOMAIN;
+  });
+
+  it("signs in, reviews tokens and reviews providers on the tenant's subdomain", async () => {
+    await notifyPasswordChanged({ tenant: TENANT, email: "owner@example.com", username: "owner", how: "admin" });
+    expect(sent().html).toContain("https://acme.board-planner.com/login");
+
+    await notifyCredentialCreated({ tenant: TENANT, email: "owner@example.com", username: "owner", kind: "token", name: "ci", scope: "BP" });
+    expect(sent().html).toContain("https://acme.board-planner.com/settings/tokens");
+
+    await notifyIdentityLinked({ tenant: TENANT, email: "owner@example.com", username: "owner", provider: "Acme", providerEmail: "o@acme.example" });
+    expect(sent().html).toContain("https://acme.board-planner.com/settings/security");
+    expect(JSON.stringify(sendEmail.mock.calls)).not.toContain("app.example.com");
+  });
+
+  it("leaves the button out for a tenant with no address, rather than linking to another", async () => {
+    tenantSlug.mockReturnValue(undefined);
+
+    await notifyPasswordChanged({ tenant: TENANT, email: "owner@example.com", username: "owner", how: "admin" });
+
+    expect(sent().html).not.toContain("href=\"http");
   });
 });

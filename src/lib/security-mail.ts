@@ -2,7 +2,8 @@ import { APP_NAME } from "@/lib/brand";
 import { passwordSignInEnabled } from "@/lib/password-sign-in";
 import { isEmailConfigured, sendEmail } from "@/lib/email";
 import { EmailContent, renderEmail } from "@/lib/email-template";
-import { selfOrigin } from "@/lib/session";
+import type { Types } from "mongoose";
+import { tenantOrigin } from "@/lib/tenant-host";
 
 /**
  * The mails that say somebody may be taking the account over.
@@ -15,25 +16,30 @@ import { selfOrigin } from "@/lib/session";
 async function deliver(
   to: string,
   subject: string,
-  build: () => EmailContent
+  build: () => EmailContent | Promise<EmailContent>
 ): Promise<void> {
   if (!to || !isEmailConfigured()) return;
   // The content is built in here rather than by the caller: every caller starts this with `void`,
   // so anything thrown while assembling it would be an unhandled rejection rather than a log line.
   try {
-    const { html, text } = renderEmail(build());
+    const { html, text } = renderEmail(await build());
     await sendEmail({ to, subject, text, html });
   } catch (err) {
     console.error(`Could not send the "${subject}" notice:`, err);
   }
 }
 
-function signInButton(): { label: string; url: string } | undefined {
-  const origin = selfOrigin();
-  return origin ? { label: `Sign in to ${APP_NAME}`, url: `${origin}/login` } : undefined;
+async function buttonTo(
+  tenant: Types.ObjectId,
+  label: string,
+  path: string
+): Promise<{ label: string; url: string } | undefined> {
+  const origin = await tenantOrigin(tenant);
+  return origin ? { label, url: `${origin}${path}` } : undefined;
 }
 
 export interface PasswordChangedNotice {
+  tenant: Types.ObjectId;
   email: string;
   username: string;
   /** A reset link the account holder followed, or an administrator setting one for them. */
@@ -46,7 +52,7 @@ export interface PasswordChangedNotice {
 
 export async function notifyPasswordChanged(n: PasswordChangedNotice): Promise<void> {
   const byAdmin = n.how === "admin";
-  await deliver(n.email, `The password on your ${APP_NAME} account was changed`, () => ({
+  await deliver(n.email, `The password on your ${APP_NAME} account was changed`, async () => ({
     preheader: byAdmin
       ? `An administrator set a new password for ${n.username}.`
       : `The password for ${n.username} was changed with a reset link.`,
@@ -75,7 +81,7 @@ export async function notifyPasswordChanged(n: PasswordChangedNotice): Promise<v
       ...(n.from ? [{ label: "Request", value: n.from }] : []),
       ...(byAdmin && n.actor ? [{ label: "Changed by", value: n.actor }] : []),
     ],
-    button: signInButton(),
+    button: await buttonTo(n.tenant, `Sign in to ${APP_NAME}`, "/login"),
     footer: [
       "Sent because the password on this account changed. This notice cannot be turned off.",
     ],
@@ -123,6 +129,7 @@ export async function notifyAddressChanged(n: AddressChangedNotice): Promise<voi
 }
 
 export interface CredentialCreatedNotice {
+  tenant: Types.ObjectId;
   email: string;
   username: string;
   kind: "token" | "oauth";
@@ -137,7 +144,7 @@ export async function notifyCredentialCreated(n: CredentialCreatedNotice): Promi
   const heading = isToken
     ? `A new API token was created on your account`
     : `${n.name} was connected to your account`;
-  await deliver(n.email, heading, () => ({
+  await deliver(n.email, heading, async () => ({
     preheader: `${n.name} can now act as ${n.username}.`,
     kicker: "Account security",
     heading,
@@ -153,7 +160,7 @@ export async function notifyCredentialCreated(n: CredentialCreatedNotice): Promi
       { label: "Account", value: n.username },
     ],
     outro: ["If you didn't do this, delete it — it works as you until you do."],
-    button: tokensButton(),
+    button: await buttonTo(n.tenant, "Review your tokens", "/settings/tokens"),
     footer: [
       "Sent because a credential was created on this account. This notice cannot be turned off.",
     ],
@@ -161,6 +168,7 @@ export async function notifyCredentialCreated(n: CredentialCreatedNotice): Promi
 }
 
 export interface IdentityLinkedNotice {
+  tenant: Types.ObjectId;
   email: string;
   username: string;
   provider: string;
@@ -169,8 +177,7 @@ export interface IdentityLinkedNotice {
 
 export async function notifyIdentityLinked(n: IdentityLinkedNotice): Promise<void> {
   const heading = `${n.provider} can now sign in to your account`;
-  const origin = selfOrigin();
-  await deliver(n.email, heading, () => ({
+  await deliver(n.email, heading, async () => ({
     preheader: `Signing in with ${n.provider} now opens ${n.username}.`,
     kicker: "Account security",
     heading,
@@ -185,14 +192,9 @@ export async function notifyIdentityLinked(n: IdentityLinkedNotice): Promise<voi
         ? "If you didn't do this, change your password: that unlinks every provider, this one included."
         : "If you didn't do this, unlink it under Settings → Security, and ask an administrator to sign you out everywhere.",
     ],
-    button: origin ? { label: "Review sign-in providers", url: `${origin}/settings/security` } : undefined,
+    button: await buttonTo(n.tenant, "Review sign-in providers", "/settings/security"),
     footer: ["Sent because a sign-in provider was linked to this account. This notice cannot be turned off."],
   }));
-}
-
-function tokensButton(): { label: string; url: string } | undefined {
-  const origin = selfOrigin();
-  return origin ? { label: "Review your tokens", url: `${origin}/settings/tokens` } : undefined;
 }
 
 export interface AddressConfirmationNotice {

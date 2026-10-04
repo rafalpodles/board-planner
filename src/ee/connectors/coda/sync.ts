@@ -1,7 +1,6 @@
 // Copyright (c) 2026 Rafał Podleś. Licensed under the Board Planner Enterprise Edition Licence, see src/ee/LICENSE.
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { selfOrigin } from "@/lib/session";
 import { decryptSecret } from "@/lib/encryption";
 import { getProjectColumns } from "@/lib/columns";
 import {
@@ -12,6 +11,7 @@ import {
   upsertTaskRows,
 } from "./client";
 import type { ScopedDb } from "@/lib/db-scope";
+import { originFor } from "@/lib/tenant-host";
 
 export async function syncProjectToCoda(db: ScopedDb, projectId: string): Promise<NextResponse> {
   await connectDB();
@@ -70,7 +70,7 @@ export async function syncProjectToCoda(db: ScopedDb, projectId: string): Promis
     const record = values as Record<string, unknown> | undefined;
     return String(record?.[id] ?? "");
   };
-  const appUrl = selfOrigin();
+  const appUrl = await originFor(db);
 
   const rows: CodaTaskRow[] = tasks.map((task) => ({
     key: `${project.key}-${task.taskNumber}`,

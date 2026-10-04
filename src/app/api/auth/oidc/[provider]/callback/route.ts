@@ -10,8 +10,8 @@ import {
   createSession,
   legacySessionCookies,
   readFlowCookie,
-  selfOrigin,
 } from "@/lib/session";
+import { originFor } from "@/lib/tenant-host";
 import { providerById, OidcProvider } from "@/lib/oidc/providers";
 import {
   ACCEPT_COOKIE,
@@ -76,6 +76,7 @@ async function link(db: ScopedDb, provider: OidcProvider, claims: VerifiedClaims
     detail: `${provider.label}, ${how}`,
   });
   void notifyIdentityLinked({
+    tenant: db.tenant,
     email: user.email,
     username: user.username,
     provider: provider.label,
@@ -113,7 +114,7 @@ async function accountFor(db: ScopedDb, provider: OidcProvider, claims: Verified
 export async function GET(request: Request, { params }: { params: Promise<{ provider: string }> }) {
   const db = await scopedForRequest(request);
   if (!db) return hostNotFound();
-  const origin = selfOrigin();
+  const origin = await originFor(db);
   if (!origin) return NextResponse.json({ error: "PUBLIC_ORIGIN is not set" }, { status: 500 });
   const provider = providerById((await params).provider);
   if (!provider) return redirectTo(origin, "/login?sso=failed");

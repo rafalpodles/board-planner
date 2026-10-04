@@ -16,7 +16,8 @@ import {
   recordFailedAttempt,
   sourceKey,
 } from "@/lib/rate-limit";
-import { provenanceRefusal, selfOrigin } from "@/lib/session";
+import { provenanceRefusal } from "@/lib/session";
+import { originFor } from "@/lib/tenant-host";
 import type { ScopedDb } from "@/lib/db-scope";
 
 // One answer for every outcome: account found, no such account, account with no address, machine
@@ -77,7 +78,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const origin = selfOrigin();
+  const origin = await originFor(db);
   if (!origin) {
     console.error("Password reset requested with no PUBLIC_ORIGIN configured");
     return NextResponse.json(

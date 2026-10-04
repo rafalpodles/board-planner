@@ -10,7 +10,7 @@ import {
   startDeviceEnrolment,
 } from "@/lib/device-enrolment";
 import { getClientIp } from "@/lib/auth";
-import { selfOrigin } from "@/lib/session";
+import { originFor } from "@/lib/tenant-host";
 import {
   anonymousMultiplier,
   isRateLimited,
@@ -36,7 +36,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const origin = selfOrigin();
+  const origin = await originFor(db);
   if (!origin) {
     console.error("Worker enrolment requested with no PUBLIC_ORIGIN configured");
     return NextResponse.json(

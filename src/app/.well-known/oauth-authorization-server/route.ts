@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { metadataCorsOptionsRequestHandler } from "mcp-handler";
-import { selfOrigin, ORIGIN_REQUIRED } from "@/lib/session";
+import { ORIGIN_REQUIRED } from "@/lib/session";
+import { scopedForRequest } from "@/lib/db-scope";
+import { hostNotFound } from "@/lib/middleware";
+import { originFor } from "@/lib/tenant-host";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,8 +12,10 @@ export const dynamic = "force-dynamic";
 // code, so the origin in it must not come from a request header. It carries no Cache-Control, so
 // a forged x-forwarded-host stored by any shared cache would hand other clients an attacker's
 // authorization and token endpoints (BP-316).
-export async function GET() {
-  const origin = selfOrigin();
+export async function GET(req: Request) {
+  const db = await scopedForRequest(req);
+  if (!db) return hostNotFound();
+  const origin = await originFor(db);
   if (!origin) {
     return NextResponse.json(
       { error: "server_error", error_description: ORIGIN_REQUIRED },

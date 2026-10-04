@@ -163,6 +163,7 @@ export async function POST(request: Request) {
   }
 
   void notifyPasswordChanged({
+    tenant: db.tenant,
     email: user.email,
     username: user.username,
     how: "reset_link",

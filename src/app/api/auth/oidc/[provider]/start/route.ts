@@ -16,7 +16,6 @@ import {
   buildFlowCookie,
   provenanceRefusal,
   RECENT_SIGN_IN_REQUIRED,
-  selfOrigin,
   signedInRecently,
 } from "@/lib/session";
 import { providerById } from "@/lib/oidc/providers";
@@ -30,6 +29,7 @@ import { refuseSetupCode } from "@/lib/setup-code";
 import { checkProfile } from "@/lib/new-account";
 import { connectDB } from "@/lib/db";
 import { scopedFor, scopedForRequest } from "@/lib/db-scope";
+import { originFor } from "@/lib/tenant-host";
 
 const STARTS_PER_SOURCE = 30;
 
@@ -54,7 +54,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
     await recordFailedAttempt(throttleKey);
   }
 
-  const origin = selfOrigin();
+  const origin = await originFor(db);
   if (!origin) return NextResponse.json({ error: NO_ORIGIN_ERROR }, { status: 500 });
 
   const read = await readJsonBody<{

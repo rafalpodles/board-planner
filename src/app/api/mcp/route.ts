@@ -3,7 +3,10 @@ import { createMcpHandler, withMcpAuth } from "mcp-handler";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { getAuthUser } from "@/lib/auth";
 import { isDatabaseUnreachable } from "@/lib/db-errors";
-import { ProvenanceError, selfOrigin, ORIGIN_REQUIRED } from "@/lib/session";
+import { ProvenanceError, ORIGIN_REQUIRED } from "@/lib/session";
+import { scopedForRequest } from "@/lib/db-scope";
+import { hostNotFound } from "@/lib/middleware";
+import { originFor } from "@/lib/tenant-host";
 import { registerPlannerTools } from "@/lib/mcp/tools";
 
 /**
@@ -16,8 +19,7 @@ import { registerPlannerTools } from "@/lib/mcp/tools";
  * had the server fetch that address and hand back the body. Fails closed now: an unconfigured
  * deployment gets no MCP rather than a header-driven one.
  */
-function plannerBaseUrl(): string {
-  const base = selfOrigin();
+function plannerBaseUrl(base: string | null): string {
   if (!base) throw new Error(ORIGIN_REQUIRED);
   return base;
 }
@@ -44,7 +46,7 @@ const baseHandler = createMcpHandler(
  * and the failure arrives here, from the query. So the honest place to notice is where it happens —
  * hence the flag rather than a guard (BP-362 review).
  */
-function makeVerifyToken(onUnreachable: () => void) {
+function makeVerifyToken(origin: string, onUnreachable: () => void) {
   return async function verifyToken(
     req: Request,
     bearerToken?: string,
@@ -69,7 +71,7 @@ function makeVerifyToken(onUnreachable: () => void) {
       clientId: user.username,
       scopes: [],
       extra: {
-        baseUrl: plannerBaseUrl(),
+        baseUrl: plannerBaseUrl(origin),
         username: user.username,
       },
     };
@@ -87,7 +89,9 @@ function makeVerifyToken(onUnreachable: () => void) {
  * the one message that would have told the operator what to set never leaves the server log.
  */
 const handler = async (req: Request) => {
-  const origin = selfOrigin();
+  const db = await scopedForRequest(req);
+  if (!db) return hostNotFound();
+  const origin = await originFor(db);
   if (!origin) {
     return NextResponse.json(
       { error: "server_error", error_description: ORIGIN_REQUIRED },
@@ -97,7 +101,7 @@ const handler = async (req: Request) => {
   let unreachable = false;
   const response = await withMcpAuth(
     baseHandler,
-    makeVerifyToken(() => {
+    makeVerifyToken(origin, () => {
       unreachable = true;
     }),
     { required: true, resourceUrl: origin },

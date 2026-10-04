@@ -2,6 +2,8 @@ import { Types } from "mongoose";
 import { connectDB } from "./db";
 import { DEFAULT_TENANT_ID } from "./tenant-field";
 import { Tenant } from "@/models/tenant";
+import { selfOrigin } from "./session";
+import type { ScopedDb } from "./db-scope";
 
 export const RESERVED_SLUGS = [
   "admin",
@@ -64,9 +66,35 @@ async function tenantWithSlug(slug: string): Promise<Types.ObjectId | null> {
   return tenant;
 }
 
+const slugOfTenantCache = new Map<string, { slug: string | null; at: number }>();
+
+async function slugOfTenant(tenant: Types.ObjectId): Promise<string | null> {
+  const key = tenant.toHexString();
+  const cached = slugOfTenantCache.get(key);
+  if (cached && Date.now() - cached.at < SLUG_CACHE_MS) return cached.slug;
+  await connectDB();
+  const found = await Tenant.findById(tenant).select("slug").lean();
+  const slug = found?.slug ?? null;
+  slugOfTenantCache.set(key, { slug, at: Date.now() });
+  return slug;
+}
+
 export function forgetTenantSlugs(): void {
   slugCache.clear();
+  slugOfTenantCache.clear();
 }
+
+export async function tenantOrigin(tenant: Types.ObjectId): Promise<string | null> {
+  const domain = tenantDomain();
+  if (!domain) return selfOrigin();
+  const slug = await slugOfTenant(tenant);
+  if (!slug) return null;
+  const host = `${slug}.${domain}`;
+  const routesBack = classifyHost(host, domain);
+  return routesBack.kind === "tenant" && routesBack.slug === slug ? `https://${host}` : null;
+}
+
+export const originFor = (db: ScopedDb): Promise<string | null> => tenantOrigin(db.tenant);
 
 export type RequestTenant = { kind: "tenant"; tenant: Types.ObjectId } | { kind: "platform" } | { kind: "none" };
 

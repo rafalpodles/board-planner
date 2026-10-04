@@ -2,14 +2,18 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Types } from "mongoose";
 
 const findOne = vi.hoisted(() => vi.fn());
+const findById = vi.hoisted(() => vi.fn());
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
-vi.mock("@/models/tenant", () => ({ Tenant: { findOne } }));
+vi.mock("@/models/tenant", () => ({ Tenant: { findOne, findById } }));
 
-const { assertTenantDomainConfig, classifyHost, tenantOfRequest, forgetTenantSlugs } = await import("./tenant-host");
+const { assertTenantDomainConfig, classifyHost, tenantOfRequest, forgetTenantSlugs, tenantOrigin } = await import("./tenant-host");
 const { scopedForRequest } = await import("./db-scope");
 const { DEFAULT_TENANT_ID } = await import("./tenant-field");
 
 const ACME = new Types.ObjectId("0000000000000000000000a1");
+const UNNAMED = new Types.ObjectId("0000000000000000000000a2");
+const RESERVED = new Types.ObjectId("0000000000000000000000a3");
+const SLUGS: Record<string, string | undefined> = { [ACME.toHexString()]: "acme", [RESERVED.toHexString()]: "www" };
 const on = (host: string) => new Request("https://whatever/api/x", { headers: { host } });
 
 beforeEach(() => {
@@ -17,10 +21,15 @@ beforeEach(() => {
   findOne.mockReset().mockImplementation((filter: { slug: string }) => ({
     select: () => ({ lean: async () => (filter.slug === "acme" ? { _id: ACME } : null) }),
   }));
+  findById.mockReset().mockImplementation((id: Types.ObjectId) => ({
+    select: () => ({ lean: async () => ({ _id: id, slug: SLUGS[id.toHexString()] }) }),
+  }));
 });
 
 afterEach(() => {
   delete process.env.TENANT_DOMAIN;
+  delete process.env.PUBLIC_ORIGIN;
+  delete process.env.APP_ORIGIN;
 });
 
 describe("TENANT_DOMAIN unset: one tenant, as before (BP-666)", () => {
@@ -88,5 +97,50 @@ describe("assertTenantDomainConfig", () => {
       process.env.TENANT_DOMAIN = value;
       expect(() => assertTenantDomainConfig(), value).toThrow(/TENANT_DOMAIN/);
     }
+  });
+});
+
+describe("tenantOrigin: the address a link to a tenant is built on", () => {
+  it("is this instance's configured origin while TENANT_DOMAIN is unset, read from no tenant", async () => {
+    process.env.PUBLIC_ORIGIN = "https://board.example.com";
+
+    expect(await tenantOrigin(ACME)).toBe("https://board.example.com");
+    expect(await tenantOrigin(DEFAULT_TENANT_ID)).toBe("https://board.example.com");
+    expect(findById).not.toHaveBeenCalled();
+  });
+
+  it("is null while TENANT_DOMAIN is unset and no origin is configured", async () => {
+    expect(await tenantOrigin(DEFAULT_TENANT_ID)).toBeNull();
+  });
+
+  describe("with TENANT_DOMAIN set", () => {
+    beforeEach(() => {
+      process.env.TENANT_DOMAIN = "Board-Planner.com";
+      process.env.PUBLIC_ORIGIN = "https://app.board-planner.com";
+    });
+
+    it("is the tenant's own subdomain, from its record, never the configured origin", async () => {
+      expect(await tenantOrigin(ACME)).toBe("https://acme.board-planner.com");
+      expect(findById).toHaveBeenCalledWith(ACME);
+    });
+
+    it("takes the tenant alone, so no request can name the address", () => {
+      expect(tenantOrigin.length).toBe(1);
+    });
+
+    it("remembers the slug briefly, and forgets it with the other slugs", async () => {
+      await tenantOrigin(ACME);
+      await tenantOrigin(ACME);
+      expect(findById).toHaveBeenCalledTimes(1);
+
+      forgetTenantSlugs();
+      await tenantOrigin(ACME);
+      expect(findById).toHaveBeenCalledTimes(2);
+    });
+
+    it("is null for a tenant with no slug, or one whose slug would not route back to it", async () => {
+      expect(await tenantOrigin(UNNAMED)).toBeNull();
+      expect(await tenantOrigin(RESERVED)).toBeNull();
+    });
   });
 });

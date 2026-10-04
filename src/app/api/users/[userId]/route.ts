@@ -277,6 +277,7 @@ export const PUT = withAdmin(async (request, { params, user: admin, db }) => {
     // in the case that matters, one PUT setting a password AND repointing the address, it is the
     // victim's inbox rather than the inbox the change just handed the account to.
     void notifyPasswordChanged({
+      tenant: db.tenant,
       email: previousEmail || target.email,
       username: target.username,
       how: "admin",

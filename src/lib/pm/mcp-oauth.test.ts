@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { Types } from "mongoose";
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/session", () => ({ Session: {} }));
@@ -8,6 +9,7 @@ vi.mock("@/lib/url-validation", () => ({ isAllowedMcpServerUrl: () => true }));
 const { getPmOauthRedirectUri } = await import("./mcp-oauth");
 
 const ORIGINAL = { ...process.env };
+const TENANT = new Types.ObjectId();
 
 beforeEach(() => {
   delete process.env.APP_ORIGIN;
@@ -24,29 +26,29 @@ afterEach(() => {
 // test that touched it mocked this function away, so restoring the old request-derived body left
 // the suite green (BP-316 review).
 describe("getPmOauthRedirectUri", () => {
-  it("builds the callback from the configured origin", () => {
+  it("builds the callback from the configured origin", async () => {
     process.env.PUBLIC_ORIGIN = "https://board.example.com";
 
-    expect(getPmOauthRedirectUri()).toBe("https://board.example.com/api/pm/oauth/callback");
+    expect(await getPmOauthRedirectUri(TENANT)).toBe("https://board.example.com/api/pm/oauth/callback");
   });
 
-  it("takes no argument, so no request can reach it", () => {
+  it("takes a tenant and nothing else, so no request can reach it", async () => {
     process.env.PUBLIC_ORIGIN = "https://board.example.com";
 
     // A request-derived implementation needs the request; this pins that it is not threaded in
-    expect(getPmOauthRedirectUri.length).toBe(0);
-    expect(getPmOauthRedirectUri()).toBe("https://board.example.com/api/pm/oauth/callback");
+    expect(getPmOauthRedirectUri.length).toBe(1);
+    expect(await getPmOauthRedirectUri(TENANT)).toBe("https://board.example.com/api/pm/oauth/callback");
   });
 
-  it("refuses rather than registering a guessed address", () => {
-    expect(() => getPmOauthRedirectUri()).toThrow(/PUBLIC_ORIGIN/);
+  it("refuses rather than registering a guessed address", async () => {
+    await expect(getPmOauthRedirectUri(TENANT)).rejects.toThrow(/PUBLIC_ORIGIN/);
   });
 
   // "board.example.com:8443" parses as an opaque URL whose origin is the string "null", which is
   // truthy — the redirect_uri would have been registered as "null/api/pm/oauth/callback"
-  it("refuses an origin that new URL() accepts but cannot address", () => {
+  it("refuses an origin that new URL() accepts but cannot address", async () => {
     process.env.PUBLIC_ORIGIN = "board.example.com:8443";
 
-    expect(() => getPmOauthRedirectUri()).toThrow(/PUBLIC_ORIGIN/);
+    await expect(getPmOauthRedirectUri(TENANT)).rejects.toThrow(/PUBLIC_ORIGIN/);
   });
 });

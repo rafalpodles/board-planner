@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { protectedResourceHandler, metadataCorsOptionsRequestHandler } from "mcp-handler";
-import { selfOrigin, ORIGIN_REQUIRED } from "@/lib/session";
+import { ORIGIN_REQUIRED } from "@/lib/session";
+import { scopedForRequest } from "@/lib/db-scope";
+import { hostNotFound } from "@/lib/middleware";
+import { originFor } from "@/lib/tenant-host";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,7 +16,9 @@ export const dynamic = "force-dynamic";
 // asks to be cached, and one forged request through a shared cache hands every client for the next
 // hour a resource identifier of the attacker's choosing (BP-316 review).
 export async function GET(req: Request) {
-  const origin = selfOrigin();
+  const db = await scopedForRequest(req);
+  if (!db) return hostNotFound();
+  const origin = await originFor(db);
   if (!origin) {
     // The header its success path carries: these documents exist to be fetched cross-origin, and
     // without it a browser MCP client gets an opaque CORS error instead of the message

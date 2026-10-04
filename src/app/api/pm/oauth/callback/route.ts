@@ -105,7 +105,7 @@ export async function GET(request: Request) {
       tokenAuthMethod: server.oauth.tokenAuthMethod || "none",
       code,
       codeVerifier: pending.codeVerifier,
-      redirectUri: server.oauth.redirectUri || getPmOauthRedirectUri(),
+      redirectUri: server.oauth.redirectUri || (await getPmOauthRedirectUri(own.tenant)),
       resource: server.url,
     });
     // The tokens belong to the client they were exchanged for: if that changed during the
