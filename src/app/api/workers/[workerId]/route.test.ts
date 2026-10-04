@@ -1,15 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
 const verifyWorkerCredential = vi.fn();
-const workerFindById = vi.fn();
+const workerFindOne = vi.fn();
 const projectFind = vi.fn();
 const countDocuments = vi.fn();
 const accessibleProjectIds = vi.fn();
 const userFindById = vi.fn();
 const workerFindOthers = vi.fn();
-const workerFindByIdAndUpdate = vi.fn();
+const workerFindOneAndUpdate = vi.fn();
 const logInstanceAudit = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
@@ -29,8 +30,8 @@ vi.mock("@/models/project", () => ({
 }));
 vi.mock("@/models/worker", () => ({
   Worker: {
-    findById: workerFindById,
-    findByIdAndUpdate: workerFindByIdAndUpdate,
+    findOne: workerFindOne,
+    findOneAndUpdate: workerFindOneAndUpdate,
     find: () => ({ select: workerFindOthers }),
   },
 }));
@@ -87,9 +88,9 @@ const patchPopulates: unknown[] = [];
 beforeEach(() => {
   vi.clearAllMocks();
   check.mockResolvedValue(false);
-  workerFindById.mockResolvedValue(WORKER);
+  workerFindOne.mockResolvedValue(WORKER);
   patchPopulates.length = 0;
-  workerFindByIdAndUpdate.mockReturnValue({
+  workerFindOneAndUpdate.mockReturnValue({
     populate: (...args: unknown[]) => {
       patchPopulates.push(args);
       return Promise.resolve({ ...WORKER, name: "renamed" });
@@ -125,7 +126,7 @@ describe("PATCH no longer writes a per-worker project list", () => {
     const res = await PATCH(patchRequest({ approvedProjects: [PROJECT] }), ctx());
 
     expect(res.status).toBe(400);
-    expect(workerFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(workerFindOneAndUpdate).not.toHaveBeenCalled();
   });
 
   // Sent alongside a field this route does accept: the request goes through, and the list is
@@ -134,7 +135,7 @@ describe("PATCH no longer writes a per-worker project list", () => {
     const res = await PATCH(patchRequest({ enabled: false, approvedProjects: [PROJECT] }), ctx());
 
     expect(res.status).toBe(200);
-    expect(workerFindByIdAndUpdate.mock.calls[0][1].$set).toEqual({ enabled: false });
+    expect(workerFindOneAndUpdate.mock.calls[0][1].$set).toEqual({ enabled: false });
   });
 });
 
@@ -160,7 +161,7 @@ describe("PATCH releases a machine from its owner", () => {
     const res = await PATCH(patchRequest({ owner: null }), ctx());
 
     expect(res.status).toBe(200);
-    expect(workerFindByIdAndUpdate.mock.calls[0][1].$set).toEqual({ owner: null });
+    expect(workerFindOneAndUpdate.mock.calls[0][1].$set).toEqual({ owner: null });
   });
 
   // Clearing is the recovery; assigning from here would hand the decision to somebody who is not at
@@ -169,7 +170,7 @@ describe("PATCH releases a machine from its owner", () => {
     const res = await PATCH(patchRequest({ owner: "6a732075133f935b19154cd3" }), ctx());
 
     expect(res.status).toBe(400);
-    expect(workerFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(workerFindOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it("records the release, naming what it means", async () => {
@@ -181,7 +182,7 @@ describe("PATCH releases a machine from its owner", () => {
   });
 
   it("records nothing when the machine had no owner to release", async () => {
-    workerFindById.mockResolvedValue({ ...WORKER, owner: null });
+    workerFindOne.mockResolvedValue({ ...WORKER, owner: null });
 
     await PATCH(patchRequest({ owner: null }), ctx());
 
@@ -192,7 +193,7 @@ describe("PATCH releases a machine from its owner", () => {
     getAuthUser.mockResolvedValue(PLAIN_MEMBER);
 
     expect((await PATCH(patchRequest({ owner: null }), ctx())).status).toBe(403);
-    expect(workerFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(workerFindOneAndUpdate).not.toHaveBeenCalled();
   });
 });
 
@@ -203,8 +204,8 @@ describe("PATCH /api/workers/:workerId", () => {
     const response = await PATCH(patchRequest({ name: "rig", enabled: false }), ctx());
 
     expect(response.status).toBe(200);
-    expect(workerFindByIdAndUpdate).toHaveBeenCalledWith(
-      WORKER_ID,
+    expect(workerFindOneAndUpdate).toHaveBeenCalledWith(
+      { _id: WORKER_ID, tenant: DEFAULT_TENANT_ID },
       { $set: { name: "rig", enabled: false } },
       { returnDocument: "after" }
     );
@@ -215,7 +216,7 @@ describe("PATCH /api/workers/:workerId", () => {
 
     await PATCH(patchRequest({ pollIntervalMs: 5000 }), ctx());
 
-    expect(workerFindByIdAndUpdate.mock.calls[0][1].$set).toEqual({
+    expect(workerFindOneAndUpdate.mock.calls[0][1].$set).toEqual({
       "policy.pollIntervalMs": 5000,
       policyOverrides: ["pollIntervalMs"],
     });
@@ -229,14 +230,14 @@ describe("PATCH /api/workers/:workerId", () => {
     const response = await PATCH(patchRequest({ enabled: true }), ctx());
 
     expect(response.status).toBe(403);
-    expect(workerFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(workerFindOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it("refuses a plain member", async () => {
     getAuthUser.mockResolvedValue(PLAIN_MEMBER);
 
     expect((await PATCH(patchRequest({ name: "x" }), ctx())).status).toBe(403);
-    expect(workerFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(workerFindOneAndUpdate).not.toHaveBeenCalled();
   });
 
   // Owning a project no longer buys anything here: what the work looks like is set on the
@@ -246,7 +247,7 @@ describe("PATCH /api/workers/:workerId", () => {
     check.mockResolvedValue(true);
 
     expect((await PATCH(patchRequest({ pollIntervalMs: 5000 }), ctx())).status).toBe(403);
-    expect(workerFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(workerFindOneAndUpdate).not.toHaveBeenCalled();
   });
 
   describe("validation", () => {
@@ -266,8 +267,8 @@ describe("PATCH /api/workers/:workerId", () => {
       const response = await PATCH(patchRequest({ name: "evil\nrig" }), ctx());
 
       expect(response.status).toBe(200);
-      expect(workerFindByIdAndUpdate).toHaveBeenCalledWith(
-        WORKER_ID,
+      expect(workerFindOneAndUpdate).toHaveBeenCalledWith(
+        { _id: WORKER_ID, tenant: DEFAULT_TENANT_ID },
         { $set: { name: "evilrig" } },
         { returnDocument: "after" }
       );
@@ -280,14 +281,14 @@ describe("PATCH /api/workers/:workerId", () => {
       const response = await PATCH(patchRequest({ name: "\u0000\u0000" }), ctx());
 
       expect(response.status).toBe(400);
-      expect(workerFindByIdAndUpdate).not.toHaveBeenCalled();
+      expect(workerFindOneAndUpdate).not.toHaveBeenCalled();
     });
 
     it("refuses a poll interval that is not a positive integer", async () => {
       for (const bad of [0, -1, 1.5, "5000"]) {
         expect((await PATCH(patchRequest({ pollIntervalMs: bad }), ctx())).status).toBe(400);
       }
-      expect(workerFindByIdAndUpdate).not.toHaveBeenCalled();
+      expect(workerFindOneAndUpdate).not.toHaveBeenCalled();
     });
 
     // Work policy belongs to the project; accepting it here would leave two places to set it
@@ -295,11 +296,11 @@ describe("PATCH /api/workers/:workerId", () => {
       const response = await PATCH(patchRequest({ baseBranch: "develop" }), ctx());
 
       expect(response.status).toBe(400);
-      expect(workerFindByIdAndUpdate).not.toHaveBeenCalled();
+      expect(workerFindOneAndUpdate).not.toHaveBeenCalled();
     });
 
     it("404s on an unknown worker", async () => {
-      workerFindById.mockResolvedValue(null);
+      workerFindOne.mockResolvedValue(null);
 
       expect((await PATCH(patchRequest({ name: "x" }), ctx())).status).toBe(404);
     });
@@ -528,8 +529,8 @@ describe("what the fleet audit log records", () => {
 
   beforeEach(() => {
     getAuthUser.mockResolvedValue(INSTANCE_ADMIN);
-    workerFindById.mockResolvedValue({ ...WORKER });
-    workerFindByIdAndUpdate.mockReturnValue({ populate: () => Promise.resolve({ ...WORKER }) });
+    workerFindOne.mockResolvedValue({ ...WORKER });
+    workerFindOneAndUpdate.mockReturnValue({ populate: () => Promise.resolve({ ...WORKER }) });
   });
 
   it("records the kill switch as its own action, not as an update", async () => {
@@ -548,7 +549,7 @@ describe("what the fleet audit log records", () => {
   });
 
   it("distinguishes clearing the kill switch from setting it", async () => {
-    workerFindById.mockResolvedValue({ ...WORKER, enabled: false });
+    workerFindOne.mockResolvedValue({ ...WORKER, enabled: false });
 
     await PATCH(patchRequest({ enabled: true }), ctx());
 
@@ -572,7 +573,7 @@ describe("what the fleet audit log records", () => {
   it("records the poll interval it moved from", async () => {
     // Pinned in the fixture: the stored 30000 on an unpinned worker is inert, so the interval it
     // moved from is the default, not that number
-    workerFindById.mockResolvedValue({ ...WORKER, policyOverrides: ["pollIntervalMs"] });
+    workerFindOne.mockResolvedValue({ ...WORKER, policyOverrides: ["pollIntervalMs"] });
 
     await PATCH(patchRequest({ pollIntervalMs: 60_000 }), ctx());
 
@@ -601,7 +602,7 @@ describe("what the fleet audit log records", () => {
   // policyOverrides. So resending the default is a real change — it pins it — and comparing
   // against the stored value read that as no change at all.
   it("records pinning the default, which is a change the stored value cannot show", async () => {
-    workerFindById.mockResolvedValue({ ...WORKER, policyOverrides: [] });
+    workerFindOne.mockResolvedValue({ ...WORKER, policyOverrides: [] });
 
     await PATCH(patchRequest({ pollIntervalMs: 30_000 }), ctx());
 
@@ -612,7 +613,7 @@ describe("what the fleet audit log records", () => {
   });
 
   it("records nothing when a pinned interval is resent unchanged", async () => {
-    workerFindById.mockResolvedValue({ ...WORKER, policyOverrides: ["pollIntervalMs"] });
+    workerFindOne.mockResolvedValue({ ...WORKER, policyOverrides: ["pollIntervalMs"] });
 
     await PATCH(patchRequest({ pollIntervalMs: 30_000 }), ctx());
 
@@ -621,7 +622,7 @@ describe("what the fleet audit log records", () => {
 
   // Otherwise the log asserts a kill switch that never landed, right before the handler throws
   it("records nothing when the document is gone by the time it is written", async () => {
-    workerFindByIdAndUpdate.mockReturnValue({ populate: () => Promise.resolve(null) });
+    workerFindOneAndUpdate.mockReturnValue({ populate: () => Promise.resolve(null) });
 
     const response = await PATCH(patchRequest({ enabled: false }), ctx());
 

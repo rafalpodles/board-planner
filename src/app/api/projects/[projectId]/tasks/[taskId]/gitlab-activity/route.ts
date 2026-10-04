@@ -1,22 +1,20 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
-import { Project } from "@/models/project";
-import { Task } from "@/models/task";
 import { fetchTaskBranches, fetchTaskCommits, parseGitlabRepo } from "@/lib/gitlab";
 import { decryptSecret } from "@/lib/encryption";
 import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
 
-export const GET = withProjectAccess(async (_request, { params }) => {
+export const GET = withProjectAccess(async (_request, { params, db }) => {
   const { projectId, taskId } = await params;
   await connectDB();
 
-  const project = await Project.findById(projectId, "key repositoryUrl githubRepo gitlabRepo gitlabHost gitlabToken").lean();
+  const project = await db.Project.findById(projectId, "key repositoryUrl githubRepo gitlabRepo gitlabHost gitlabToken").lean();
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  const task = await Task.findOne({ _id: taskId, project: projectId }, "taskNumber").lean();
+  const task = await db.Task.findOne({ _id: taskId, project: projectId }, "taskNumber").lean();
   if (!task) {
     return NextResponse.json({ error: "Task not found" }, { status: 404 });
   }

@@ -2,17 +2,14 @@ import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
-import { Task } from "@/models/task";
 import { DEFAULT_PRIORITY, PRIORITIES } from "@/types";
 import { createTask, taskPopulateFields } from "@/lib/task-service";
 import { withApiExecutions } from "@/lib/task-execution-view";
 import { parentsOf } from "@/lib/task-parents";
 import { getColumnIds } from "@/lib/columns";
-import { User } from "@/models/user";
-import { Project } from "@/models/project";
 
 
-export const GET = withProjectAccess(async (request, { params }) => {
+export const GET = withProjectAccess(async (request, { params, db }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -26,7 +23,7 @@ export const GET = withProjectAccess(async (request, { params }) => {
   // One read, shared by the two project-defined filters below and skipped when neither is asked for
   const board =
     statusParam || category
-      ? await Project.findById(projectId, "categories columns").lean()
+      ? await db.Project.findById(projectId, "categories columns").lean()
       : null;
 
   if (statusParam) {
@@ -45,7 +42,7 @@ export const GET = withProjectAccess(async (request, { params }) => {
       // unseeable rather than merely broken (BP-514). The rule BP-311 set is to refuse the act that
       // creates the problem, never the board that already has it.
       if (!statuses.some((id) => columnIds.includes(id))) {
-        const orphaned = await Task.exists({ project: projectId, status: { $in: statuses } });
+        const orphaned = await db.Task.exists({ project: projectId, status: { $in: statuses } });
         if (!orphaned) {
           return NextResponse.json(
             {
@@ -79,7 +76,7 @@ export const GET = withProjectAccess(async (request, { params }) => {
      * is that this now distinguishes "no such account" from "no tasks" for any authenticated
      * caller — see the ticket raised alongside this change.
      */
-    const user = await User.findOne({ username: assignee.toLowerCase() }, "_id").lean();
+    const user = await db.User.findOne({ username: assignee.toLowerCase() }, "_id").lean();
     if (user) {
       filter.assignee = user._id;
     } else if (isValidObjectId(assignee)) {
@@ -146,7 +143,7 @@ export const GET = withProjectAccess(async (request, { params }) => {
     ];
   }
 
-  const tasks = await Task.find(filter)
+  const tasks = await db.Task.find(filter)
     .sort({ order: 1, createdAt: -1 })
     .populate(taskPopulateFields);
 
@@ -165,7 +162,7 @@ export const GET = withProjectAccess(async (request, { params }) => {
 });
 
 
-export const POST = withProjectAccess(async (request, { params, user }) => {
+export const POST = withProjectAccess(async (request, { params, user, db }) => {
   const { projectId } = await params;
   await connectDB();
 

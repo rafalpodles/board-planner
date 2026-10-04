@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { scopedToDefaultTenant } from "@/lib/db-scope";
 import { readJsonBody } from "@/lib/request-body";
 import { getClientIp } from "@/lib/auth";
 import { isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
@@ -6,11 +7,11 @@ import { provenanceRefusal } from "@/lib/session";
 import { findInvitationByToken } from "@/lib/invitations";
 import { INVITATION_REFUSALS } from "@/lib/invitation-refusals";
 import { toApiInvitations } from "@/lib/invitation-view";
-import { User } from "@/models/user";
 
 const LOOKUPS_PER_SOURCE = 60;
 
 export async function POST(request: Request) {
+  const db = scopedToDefaultTenant();
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
 
@@ -40,7 +41,7 @@ export async function POST(request: Request) {
   }
   // Refused without being withdrawn: an address held without confirmation proves nothing, and the
   // invitation is valid again once it is released
-  if (await User.exists({ email: found.invitation.email })) {
+  if (await db.User.exists({ email: found.invitation.email })) {
     return NextResponse.json(
       { error: INVITATION_REFUSALS.used, reason: "used" },
       { status: 400 }

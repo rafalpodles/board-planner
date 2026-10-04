@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
-const projectFindById = vi.fn();
+const projectFindOne = vi.fn();
 const projectFindOneAndUpdate = vi.fn();
 const projectUpdateOne = vi.fn();
 const taskUpdateMany = vi.fn();
@@ -17,7 +18,7 @@ vi.mock("@/lib/grants", () => ({ check }));
 vi.mock("@/lib/projectAudit", () => ({ logProjectAudit }));
 vi.mock("@/models/project", () => ({
   Project: {
-    findById: projectFindById,
+    findOne: projectFindOne,
     findOneAndUpdate: projectFindOneAndUpdate,
     updateOne: projectUpdateOne,
   },
@@ -90,7 +91,7 @@ beforeEach(() => {
       { _id: otherFieldId, name: "Other", fieldType: "number", archived: false },
     ],
   };
-  projectFindById.mockImplementation(() => ({ select: () => query(image()) }));
+  projectFindOne.mockImplementation(() => ({ select: () => query(image()) }));
   // Each writer is one atomic operation, so the stub applies it the way the database would and
   // answers the document as it stood before
   projectFindOneAndUpdate.mockImplementation(
@@ -157,11 +158,11 @@ describe("DELETE /api/projects/:projectId/custom-fields/:fieldId", () => {
     const res = await DELETE(deleteRequest(), fieldCtx(otherFieldId));
 
     expect(projectFindOneAndUpdate).toHaveBeenCalledWith(
-      { _id: PROJECT_ID },
+      { _id: PROJECT_ID, tenant: DEFAULT_TENANT_ID },
       { $pull: { customFields: { _id: otherFieldId } } },
       { returnDocument: "before" }
     );
-    expect(projectFindById).not.toHaveBeenCalled();
+    expect(projectFindOne).not.toHaveBeenCalled();
     expect((await res.json()).map((f: Field) => f._id)).toEqual([numberFieldId]);
   });
 
@@ -235,6 +236,7 @@ describe("PATCH /api/projects/:projectId/custom-fields/:fieldId", () => {
         customFields: {
           $not: { $elemMatch: { _id: { $ne: numberFieldId }, name: { $regex: "^Story Points$", $options: "i" } } },
         },
+        tenant: DEFAULT_TENANT_ID,
       },
       { $set: { "customFields.$.name": "Story Points", "customFields.$.required": true } },
       { returnDocument: "before" }
@@ -283,7 +285,7 @@ describe("PATCH /api/projects/:projectId/custom-fields/:fieldId", () => {
     const res = await PATCH(patchRequest({ name: "x" }), fieldCtx("not-an-id"));
 
     expect(res.status).toBe(404);
-    expect(projectFindById).not.toHaveBeenCalled();
+    expect(projectFindOne).not.toHaveBeenCalled();
     expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
   });
 });
@@ -354,7 +356,7 @@ describe("a field id sent in upper case", () => {
     expect(project.customFields.map((f) => f._id)).toEqual([otherFieldId]);
     expect(project.estimateFieldId).toBe("");
     expect(taskUpdateMany).toHaveBeenCalledWith(
-      { project: PROJECT_ID },
+      { project: PROJECT_ID, tenant: DEFAULT_TENANT_ID },
       { $unset: { [`customFieldValues.${numberFieldId}`]: "" } }
     );
     expect(logProjectAudit).toHaveBeenCalledWith(PROJECT_ID, "u1", "settings_updated", [
@@ -377,7 +379,7 @@ describe("a field id sent in upper case", () => {
 // two renames to one name both landed, where the whole-list save used to refuse one of them
 describe("a rename racing another", () => {
   it("is refused when the name was taken between its read and its write", async () => {
-    projectFindById.mockImplementationOnce(() => ({
+    projectFindOne.mockImplementationOnce(() => ({
       select: () => {
         const read = query(image());
         project.customFields[1].name = "Story points";
@@ -409,7 +411,7 @@ describe("a rename racing another", () => {
   // Review: a form sends the name it was opened with on every save, and writing that back undid a
   // rename that landed in between — or recreated a name another field had taken since
   it("does not write back the name a form re-sends", async () => {
-    projectFindById.mockImplementationOnce(() => ({
+    projectFindOne.mockImplementationOnce(() => ({
       select: () => {
         const read = query(image());
         project.customFields[0].name = "Score";

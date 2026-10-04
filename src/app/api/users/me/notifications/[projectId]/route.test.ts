@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NOTIFICATION_TYPES } from "@/types";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
 const userFindOneAndUpdate = vi.fn();
-const userFindByIdAndUpdate = vi.fn();
-const userFindById = vi.fn();
+const userFindOne = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ getAuthUser, RateLimitError: class extends Error {} }));
@@ -13,8 +13,7 @@ vi.mock("@/lib/grants", () => ({ check }));
 vi.mock("@/models/user", () => ({
   User: {
     findOneAndUpdate: userFindOneAndUpdate,
-    findByIdAndUpdate: userFindByIdAndUpdate,
-    findById: userFindById,
+    findOne: userFindOne,
   },
 }));
 
@@ -50,7 +49,7 @@ function writes(inPlace: unknown, inserted: unknown) {
 
 /** How many overrides the follow-up read finds, once neither write landed. */
 function alreadyHolds(count: number) {
-  userFindById.mockReturnValue({
+  userFindOne.mockReturnValue({
     lean: async () => ({
       notifications: { projects: Array.from({ length: count }, () => ({ project: "x" })) },
     }),
@@ -64,7 +63,6 @@ beforeEach(() => {
   vi.clearAllMocks();
   getAuthUser.mockResolvedValue({ _id: ME, role: "member", viaMachineCredential: false });
   check.mockResolvedValue(true);
-  userFindByIdAndUpdate.mockResolvedValue({});
   writes({ _id: ME }, null);
   alreadyHolds(0);
 });
@@ -74,7 +72,7 @@ describe("PUT /api/users/me/notifications/:projectId", () => {
     const res = await call(PUT, { matrix: oneRowTicked });
 
     expect(res.status).toBe(200);
-    expect(filter(0)).toEqual({ _id: ME, "notifications.projects.project": PROJECT_ID });
+    expect(filter(0)).toEqual({ _id: ME, "notifications.projects.project": PROJECT_ID, tenant: DEFAULT_TENANT_ID });
     expect(update(0)).toEqual({
       $set: { "notifications.projects.$.matrix": expect.objectContaining(oneRowTicked) },
     });
@@ -114,8 +112,9 @@ describe("PUT /api/users/me/notifications/:projectId", () => {
       $expr: {
         $lt: [{ $size: { $ifNull: ["$notifications.projects", []] } }, MAX_OVERRIDES],
       },
+      tenant: DEFAULT_TENANT_ID,
     });
-    expect(userFindById).not.toHaveBeenCalled();
+    expect(userFindOne).not.toHaveBeenCalled();
   });
 
   /**
@@ -185,7 +184,7 @@ describe("DELETE /api/users/me/notifications/:projectId", () => {
     const res = await call(DELETE);
 
     expect(res.status).toBe(200);
-    expect(userFindByIdAndUpdate).toHaveBeenCalledWith(ME, {
+    expect(userFindOneAndUpdate).toHaveBeenCalledWith({ _id: ME, tenant: DEFAULT_TENANT_ID }, {
       $pull: { "notifications.projects": { project: PROJECT_ID } },
     });
   });
@@ -206,7 +205,6 @@ describe("the gates on both verbs", () => {
     expect(del.status).toBe(403);
     expect(await put.json()).toEqual({ error: "This action requires an interactive session" });
     expect(userFindOneAndUpdate).not.toHaveBeenCalled();
-    expect(userFindByIdAndUpdate).not.toHaveBeenCalled();
   });
 
   it("401s with no credential", async () => {
@@ -226,6 +224,5 @@ describe("the gates on both verbs", () => {
     expect((await call(PUT, { matrix: oneRowTicked })).status).toBe(403);
     expect((await call(DELETE)).status).toBe(403);
     expect(userFindOneAndUpdate).not.toHaveBeenCalled();
-    expect(userFindByIdAndUpdate).not.toHaveBeenCalled();
   });
 });

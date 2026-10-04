@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectOwner } from "@/lib/middleware";
-import { Project } from "@/models/project";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { channelChanges } from "@/lib/settings-audit";
 import { canonicalObjectId } from "@/lib/object-id";
@@ -35,11 +34,11 @@ function storedUrl(value: string | undefined): string | null {
   }
 }
 
-export const GET = withProjectOwner(async (_request, { params }) => {
+export const GET = withProjectOwner(async (_request, { params, db }) => {
   const { projectId } = await params;
   await connectDB();
 
-  const project = await Project.findById(projectId, "key notificationChannels");
+  const project = await db.Project.findById(projectId, "key notificationChannels");
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
@@ -47,7 +46,7 @@ export const GET = withProjectOwner(async (_request, { params }) => {
   return NextResponse.json(masked(project));
 });
 
-export const POST = withProjectOwner(async (request, { params, user }) => {
+export const POST = withProjectOwner(async (request, { params, user, db }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -85,7 +84,7 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
 
   if (!isEncryptionConfigured()) return noKey();
 
-  const project = await Project.findById(projectId);
+  const project = await db.Project.findById(projectId);
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
@@ -93,7 +92,7 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
   // The ceiling goes in the write's own filter, not in a count read against the document
   // above: every concurrent racer sees the same pre-write length, so a check up there
   // bounds nothing — the same fix already applied to the webhook writers (BP-719).
-  const updated = await Project.findOneAndUpdate(
+  const updated = await db.Project.findOneAndUpdate(
     { _id: projectId, [`notificationChannels.${MAX_NOTIFICATION_CHANNELS - 1}`]: { $exists: false } },
     {
       $push: {
@@ -111,7 +110,7 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
   if (!updated) {
     // The project was read a moment ago, so ordinarily a miss here is the ceiling — but it can
     // also mean the project was deleted in between, and the two answer differently (review).
-    if (await Project.exists({ _id: projectId })) {
+    if (await db.Project.exists({ _id: projectId })) {
       return NextResponse.json(
         { error: `A project can have at most ${MAX_NOTIFICATION_CHANNELS} chat channels` },
         { status: 400 }
@@ -125,7 +124,7 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
   return NextResponse.json(masked(updated), { status: 201 });
 });
 
-export const PUT = withProjectOwner(async (request, { params, user }) => {
+export const PUT = withProjectOwner(async (request, { params, user, db }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -172,7 +171,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
 
   // One positional write rather than load, mutate, save(): save() sent the whole list back, so a
   // channel added or edited meanwhile was put back the way this request had read it
-  const before = await Project.findOneAndUpdate(
+  const before = await db.Project.findOneAndUpdate(
     { _id: projectId, "notificationChannels._id": channelId },
     {
       $set: Object.fromEntries(
@@ -182,7 +181,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     { returnDocument: "before" }
   ).lean();
   if (!before) {
-    if (await Project.exists({ _id: projectId })) {
+    if (await db.Project.exists({ _id: projectId })) {
       return NextResponse.json({ error: "Channel not found" }, { status: 404 });
     }
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
@@ -196,7 +195,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
   // over, so renaming one is enough to migrate it — but only the value this save read
   if (!changes.webhookUrl && was.webhookUrl && !isEncryptedSecret(was.webhookUrl) && isEncryptionConfigured()) {
     const sealed = encryptSecret(was.webhookUrl);
-    const migrated = await Project.updateOne(
+    const migrated = await db.Project.updateOne(
       {
         _id: projectId,
         notificationChannels: { $elemMatch: { _id: channelId, webhookUrl: was.webhookUrl } },
@@ -213,7 +212,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
   return NextResponse.json(masked({ _id: before._id, key: before.key, notificationChannels }));
 });
 
-export const DELETE = withProjectOwner(async (request, { params, user }) => {
+export const DELETE = withProjectOwner(async (request, { params, user, db }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -222,7 +221,7 @@ export const DELETE = withProjectOwner(async (request, { params, user }) => {
     return NextResponse.json({ error: "channelId is required" }, { status: 400 });
   }
 
-  const before = await Project.findOneAndUpdate(
+  const before = await db.Project.findOneAndUpdate(
     { _id: projectId },
     { $pull: { notificationChannels: { _id: channelId } } },
     { returnDocument: "before" }

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
@@ -23,10 +24,9 @@ function projected(doc: Record<string, unknown> | null, projection: string) {
 }
 vi.mock("@/models/project", () => ({
   Project: {
-    findById: (_id: string, projection: string) => ({
+    findOne: (_filter: { _id: string }, projection: string) => ({
       lean: async () => projected(await projectLean(), projection),
     }),
-    findOne: vi.fn(),
   },
 }));
 const grantFind = vi.fn();
@@ -75,7 +75,7 @@ describe("GET handover readiness", () => {
   it("asks only about the reader's own machines", async () => {
     await read();
 
-    expect(workerFind.mock.calls[0][0]).toEqual({ owner: READER });
+    expect(workerFind.mock.calls[0][0]).toEqual({ owner: READER, tenant: DEFAULT_TENANT_ID });
   });
 
   // BP-763: who holds a role on the board is not a member's business, so nobody is named at all

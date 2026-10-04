@@ -1,11 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { scopedToDefaultTenant } from "@/lib/db-scope";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const identityFind = vi.fn();
 let caller: Record<string, unknown>;
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/middleware", () => ({
-  withAuth: (handler: (r: Request, c: unknown) => unknown) => (request: Request) => handler(request, { user: caller }),
+  withAuth: (handler: (r: Request, c: unknown) => unknown) => (request: Request) =>
+    handler(request, { user: caller, db: scopedToDefaultTenant() }),
 }));
 vi.mock("@/lib/oidc/providers", () => ({
   providerById: () => ({ label: "Acme" }),
@@ -20,7 +23,7 @@ vi.mock("@/models/identity", () => ({
     },
   },
 }));
-vi.mock("@/models/user", () => ({ User: { findById: () => ({ select: () => ({ lean: async () => ({}) }) }) } }));
+vi.mock("@/models/user", () => ({ User: { findOne: () => ({ select: () => ({ lean: async () => ({}) }) }) } }));
 
 const { GET } = await import("./route");
 
@@ -35,6 +38,6 @@ describe("GET /api/users/me/identities", () => {
     const res = await GET(new Request("http://x/api/users/me/identities"), { params: Promise.resolve({}) });
 
     expect(res.status).toBe(200);
-    expect(identityFind).toHaveBeenCalledWith({ user: "u1", live: "only" });
+    expect(identityFind).toHaveBeenCalledWith({ user: "u1", live: "only", tenant: DEFAULT_TENANT_ID });
   });
 });

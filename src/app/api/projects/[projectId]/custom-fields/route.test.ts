@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const MAX_FIELDS = 50;
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
-const projectFindById = vi.fn();
+const projectFindOne = vi.fn();
 const projectFindOneAndUpdate = vi.fn();
 const projectExists = vi.fn();
 const logProjectAudit = vi.fn();
@@ -17,7 +18,7 @@ vi.mock("@/lib/auth", () => ({
 }));
 vi.mock("@/lib/grants", () => ({ check }));
 vi.mock("@/models/project", () => ({
-  Project: { findById: projectFindById, findOneAndUpdate: projectFindOneAndUpdate, exists: projectExists },
+  Project: { findOne: projectFindOne, findOneAndUpdate: projectFindOneAndUpdate, exists: projectExists },
 }));
 
 const { GET, POST } = await import("./route");
@@ -53,7 +54,7 @@ let doc: { customFields: Field[] };
 function project(names: string[] = []) {
   doc = { customFields: names.map((name, i) => ({ name, fieldType: "text", order: i })) };
   // Awaited whole by the route's own check, and through select().lean() by the re-read after a miss
-  projectFindById.mockImplementation(() =>
+  projectFindOne.mockImplementation(() =>
     Object.assign(Promise.resolve(doc), { select: () => ({ lean: () => Promise.resolve(doc) }) })
   );
   // The add is an atomic $push with the ceiling in its filter, so the stub applies the write the
@@ -93,7 +94,7 @@ beforeEach(() => {
 
 describe("GET /api/projects/:projectId/custom-fields", () => {
   it("404s when the project is gone", async () => {
-    projectFindById.mockResolvedValue(null);
+    projectFindOne.mockResolvedValue(null);
 
     const res = await GET(request("GET"), ctx());
 
@@ -134,7 +135,7 @@ describe("POST /api/projects/:projectId/custom-fields", () => {
   });
 
   it("404s when the project is gone", async () => {
-    projectFindById.mockResolvedValue(null);
+    projectFindOne.mockResolvedValue(null);
 
     const res = await POST(request("POST", body), ctx());
 
@@ -172,8 +173,8 @@ describe("POST /api/projects/:projectId/custom-fields", () => {
   // and this write — the two must not both read as "full" (review).
   it("404s, not 400, when the project vanished between the read and the write", async () => {
     projectAtTheCeiling();
-    const read = projectFindById.getMockImplementation()!;
-    projectFindById
+    const read = projectFindOne.getMockImplementation()!;
+    projectFindOne
       .mockImplementationOnce(read)
       .mockImplementationOnce(() => ({ select: () => ({ lean: () => Promise.resolve(null) }) }));
 
@@ -202,6 +203,7 @@ describe("POST /api/projects/:projectId/custom-fields", () => {
         _id: PROJECT_ID,
         [`customFields.${MAX_FIELDS - 1}`]: { $exists: false },
         customFields: { $not: { $elemMatch: { name: { $regex: "^Points$", $options: "i" } } } },
+        tenant: DEFAULT_TENANT_ID,
       },
       {
         $push: {
@@ -263,7 +265,7 @@ describe("an add racing another", () => {
   });
 
   it("is refused when the name was taken between its read and its write", async () => {
-    projectFindById.mockImplementationOnce(() => {
+    projectFindOne.mockImplementationOnce(() => {
       const read = Promise.resolve({ customFields: [...doc.customFields] });
       doc.customFields = [...doc.customFields, { name: "story points", fieldType: "number" }];
       return read;

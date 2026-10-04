@@ -1,17 +1,15 @@
 import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
+import type { ScopedDb } from "@/lib/db-scope";
 import { withProjectAccess } from "@/lib/middleware";
-import { Sprint } from "@/models/sprint";
-import { Task } from "@/models/task";
 import { SprintStatus, SPRINT_STATUSES } from "@/types";
-import { Project } from "@/models/project";
 import { columnIdsWithRole } from "@/lib/columns";
 
 // A board may define more than one done column, and a project that renamed its board has none
 // called "done" at all. Resolved per request from the project's own columns.
-async function doneColumnIds(projectId: string): Promise<string[]> {
-  const project = await Project.findById(projectId, "columns").lean();
+async function doneColumnIds(db: ScopedDb, projectId: string): Promise<string[]> {
+  const project = await db.Project.findById(projectId, "columns").lean();
   return columnIdsWithRole(project, "done");
 }
 
@@ -21,15 +19,16 @@ async function doneColumnIds(projectId: string): Promise<string[]> {
 // `project` as well as `sprint`. Without that a member of any board could act on a sprint id
 // belonging to a board they cannot read (BP-314).
 async function ownedSprintId(
+  db: ScopedDb,
   projectId: string,
   sprintId: string
 ): Promise<string | null> {
   if (!isValidObjectId(sprintId)) return null;
-  const sprint = await Sprint.findOne({ _id: sprintId, project: projectId }).select("_id").lean();
+  const sprint = await db.Sprint.findOne({ _id: sprintId, project: projectId }).select("_id").lean();
   return sprint ? sprintId : null;
 }
 
-export const GET = withProjectAccess(async (_request, { params }) => {
+export const GET = withProjectAccess(async (_request, { params, db }) => {
   const { projectId, sprintId } = await params;
   await connectDB();
 
@@ -37,22 +36,22 @@ export const GET = withProjectAccess(async (_request, { params }) => {
     return NextResponse.json({ error: "Invalid sprint id" }, { status: 400 });
   }
 
-  const sprint = await Sprint.findOne({ _id: sprintId, project: projectId }).lean();
+  const sprint = await db.Sprint.findOne({ _id: sprintId, project: projectId }).lean();
   if (!sprint) {
     return NextResponse.json({ error: "Sprint not found" }, { status: 404 });
   }
 
-  const taskCount = await Task.countDocuments({ project: projectId, sprint: sprintId });
-  const doneCount = await Task.countDocuments({
+  const taskCount = await db.Task.countDocuments({ project: projectId, sprint: sprintId });
+  const doneCount = await db.Task.countDocuments({
     project: projectId,
     sprint: sprintId,
-    status: { $in: await doneColumnIds(projectId) },
+    status: { $in: await doneColumnIds(db, projectId) },
   });
 
   return NextResponse.json({ ...sprint, taskCount, doneCount });
 });
 
-export const PUT = withProjectAccess(async (request, { params }) => {
+export const PUT = withProjectAccess(async (request, { params, db }) => {
   const { projectId, sprintId } = await params;
   await connectDB();
 
@@ -61,7 +60,7 @@ export const PUT = withProjectAccess(async (request, { params }) => {
   if (!isValidObjectId(sprintId)) {
     return NextResponse.json({ error: "Invalid sprint id" }, { status: 400 });
   }
-  if (!(await ownedSprintId(projectId, sprintId))) {
+  if (!(await ownedSprintId(db, projectId, sprintId))) {
     return NextResponse.json({ error: "Sprint not found" }, { status: 404 });
   }
 
@@ -83,7 +82,7 @@ export const PUT = withProjectAccess(async (request, { params }) => {
 
   // If activating, deactivate other active sprints in this project
   if (updates.status === "active") {
-    await Sprint.updateMany(
+    await db.Sprint.updateMany(
       { project: projectId, status: "active", _id: { $ne: sprintId } },
       { $set: { status: "completed" } }
     );
@@ -99,7 +98,7 @@ export const PUT = withProjectAccess(async (request, { params }) => {
     // write-then-refuse shape this whole change exists to remove.
     let destination: string | null = null;
     if (body.moveIncompleteToSprint) {
-      destination = await ownedSprintId(projectId, String(body.moveIncompleteToSprint));
+      destination = await ownedSprintId(db, projectId, String(body.moveIncompleteToSprint));
       if (!destination) {
         return NextResponse.json({ error: "Destination sprint not found" }, { status: 400 });
       }
@@ -110,18 +109,18 @@ export const PUT = withProjectAccess(async (request, { params }) => {
     const unfinished = {
       project: projectId,
       sprint: sprintId,
-      status: { $nin: await doneColumnIds(projectId) },
+      status: { $nin: await doneColumnIds(db, projectId) },
     };
 
     // Exclusive: a body carrying both used to run the sweep and then the move over the top of it
     if (destination) {
-      await Task.updateMany(unfinished, { $set: { sprint: destination } });
+      await db.Task.updateMany(unfinished, { $set: { sprint: destination } });
     } else if (body.moveIncompleteToBacklog) {
-      await Task.updateMany(unfinished, { $set: { sprint: null } });
+      await db.Task.updateMany(unfinished, { $set: { sprint: null } });
     }
   }
 
-  const sprint = await Sprint.findOneAndUpdate(
+  const sprint = await db.Sprint.findOneAndUpdate(
     { _id: sprintId, project: projectId },
     { $set: updates },
     { returnDocument: "after", runValidators: true }
@@ -134,7 +133,7 @@ export const PUT = withProjectAccess(async (request, { params }) => {
   return NextResponse.json(sprint);
 });
 
-export const DELETE = withProjectAccess(async (_request, { params }) => {
+export const DELETE = withProjectAccess(async (_request, { params, db }) => {
   const { projectId, sprintId } = await params;
   await connectDB();
 
@@ -142,7 +141,7 @@ export const DELETE = withProjectAccess(async (_request, { params }) => {
     return NextResponse.json({ error: "Invalid sprint id" }, { status: 400 });
   }
 
-  const sprint = await Sprint.findOneAndDelete({
+  const sprint = await db.Sprint.findOneAndDelete({
     _id: sprintId,
     project: projectId,
   });
@@ -152,7 +151,7 @@ export const DELETE = withProjectAccess(async (_request, { params }) => {
   }
 
   // Move all tasks in this sprint back to backlog
-  await Task.updateMany(
+  await db.Task.updateMany(
     { project: projectId, sprint: sprintId },
     { $set: { sprint: null } }
   );

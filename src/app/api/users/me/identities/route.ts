@@ -2,19 +2,17 @@ import { NextResponse } from "next/server";
 import { withAuth } from "@/lib/middleware";
 import { connectDB } from "@/lib/db";
 import { liveIdentityFilter, providerById } from "@/lib/oidc/providers";
-import { Identity } from "@/models/identity";
-import { User } from "@/models/user";
 import { passwordSignInEnabled } from "@/lib/password-sign-in";
 import { isEmailConfigured } from "@/lib/email";
 
-export const GET = withAuth(async (_request, { user }) => {
+export const GET = withAuth(async (_request, { user, db }) => {
   if (user.viaMachineCredential) {
     return NextResponse.json({ error: "This action requires an interactive session" }, { status: 403 });
   }
   await connectDB();
   const [identities, record] = await Promise.all([
-    Identity.find({ user: user._id, ...liveIdentityFilter() }).sort({ linkedAt: 1 }).lean(),
-    User.findById(user._id).select("+password").lean(),
+    db.Identity.find({ user: user._id, ...liveIdentityFilter() }).sort({ linkedAt: 1 }).lean(),
+    db.User.findById(user._id).select("+password").lean(),
   ]);
   return NextResponse.json({
     hasPassword: !!record?.password,

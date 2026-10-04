@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
-const projectFindById = vi.fn();
+const projectFindOne = vi.fn();
 const resolveServerToken = vi.fn();
 const McpClientMock = vi.fn();
 
@@ -13,7 +13,7 @@ vi.mock("@/lib/auth", () => ({
 }));
 vi.mock("@/lib/grants", () => ({ check }));
 vi.mock("@/models/project", () => ({
-  Project: { findById: projectFindById },
+  Project: { findOne: projectFindOne },
 }));
 // Only the credential resolver is mocked. `isReadSafe` is deliberately the real one: mocking it
 // to `true` made every readSafe assertion below unfailable, and hid that a name like
@@ -38,7 +38,7 @@ function request(body: unknown = {}) {
 const ctx = () => ({ params: Promise.resolve({ projectId: PROJECT_ID }) });
 
 function projectWithServer(server: Record<string, unknown>) {
-  projectFindById.mockReturnValue({
+  projectFindOne.mockReturnValue({
     select: vi.fn().mockResolvedValue({ pm: { mcpServers: [server] } }),
   });
 }
@@ -115,7 +115,7 @@ describe("stored credentials never leave their saved url", () => {
 
     expect(response.status).toBe(200);
     expect(McpClientMock).toHaveBeenCalledWith("https://caller-chosen.example/mcp", "user-typed-token");
-    expect(projectFindById).not.toHaveBeenCalled();
+    expect(projectFindOne).not.toHaveBeenCalled();
   });
 
   it("still validates the stored server's own url before using it", async () => {

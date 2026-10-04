@@ -11,7 +11,6 @@ import {
   sourceKey,
   withLockout,
 } from "@/lib/rate-limit";
-import { User } from "@/models/user";
 import {
   buildFlowCookie,
   provenanceRefusal,
@@ -29,10 +28,12 @@ import { safeNextPath } from "@/lib/next-path";
 import { refuseSetupCode } from "@/lib/setup-code";
 import { checkProfile } from "@/lib/new-account";
 import { connectDB } from "@/lib/db";
+import { scopedFor, scopedToDefaultTenant } from "@/lib/db-scope";
 
 const STARTS_PER_SOURCE = 30;
 
 export async function POST(request: Request, { params }: { params: Promise<{ provider: string }> }) {
+  const db = scopedToDefaultTenant();
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
 
@@ -76,7 +77,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
     }
     // A linked provider is a standing way in, so a borrowed session must not be enough to add one:
     // the password where there is one that signs in, otherwise a sign-in made minutes ago
-    const record = await User.findById(current._id).select("+password");
+    const record = await scopedFor(current).User.findById(current._id).select("+password");
     if (!(record?.password && passwordSignInEnabled())) {
       if (!(await signedInRecently(current.sessionId))) {
         return NextResponse.json({ error: RECENT_SIGN_IN_REQUIRED }, { status: 403 });
@@ -115,7 +116,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
       return NextResponse.json({ error: "Set up the first account with a password here." }, { status: 400 });
     }
     await connectDB();
-    if ((await User.countDocuments()) > 0) {
+    if ((await db.User.countDocuments()) > 0) {
       return NextResponse.json({ error: "This instance is already set up. Sign in instead." }, { status: 409 });
     }
     const refused = await refuseSetupCode(clientIp, read.value.setupCode);

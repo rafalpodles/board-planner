@@ -1,13 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const updateTask = vi.fn();
 const heldRunRefusal = vi.fn();
 const taskFindOne = vi.fn();
 const taskFind = vi.fn(() => Promise.resolve([]));
-const workerFindById = vi.fn();
+const workerFindOne = vi.fn();
 const mayDecide = vi.fn(async () => true);
 const taskDeleteOne = vi.fn();
-const projectFindById = vi.fn();
+const projectFindOne = vi.fn();
 const commentDeleteMany = vi.fn();
 const activityDeleteMany = vi.fn();
 const notificationDeleteMany = vi.fn();
@@ -28,11 +29,11 @@ vi.mock("@/lib/task-links", () => ({ severLinksToDeletedTask }));
 vi.mock("@/models/task", () => ({
   Task: { findOne: taskFindOne, find: taskFind, updateMany: taskUpdateMany, deleteOne: taskDeleteOne, findOneAndDelete: vi.fn() },
 }));
-vi.mock("@/models/project", () => ({ Project: { findById: projectFindById } }));
+vi.mock("@/models/project", () => ({ Project: { findOne: projectFindOne } }));
 vi.mock("@/models/comment", () => ({ Comment: { deleteMany: commentDeleteMany } }));
 vi.mock("@/models/activityLog", () => ({ ActivityLog: { deleteMany: activityDeleteMany } }));
 vi.mock("@/models/notification", () => ({ Notification: { deleteMany: notificationDeleteMany } }));
-vi.mock("@/models/worker", () => ({ Worker: { find: vi.fn(), findById: workerFindById } }));
+vi.mock("@/models/worker", () => ({ Worker: { find: vi.fn(), findOne: workerFindOne } }));
 // `importOriginal`, so the projection constant the route selects with is the real string and this
 // file cannot pass by agreeing with its own copy of it.
 vi.mock("@/lib/task-decisions", async (importOriginal) => ({
@@ -40,21 +41,25 @@ vi.mock("@/lib/task-decisions", async (importOriginal) => ({
   mayDecide,
   toApiDecision: (decision: unknown) => decision,
 }));
-vi.mock("@/lib/middleware", () => ({
-  withProjectAccess:
-    (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
-    (req: Request, ctx: unknown) =>
-      handler(req, {
-        ...(ctx as object),
-        user: {
-          _id: "u1",
-          // The role the *request's* principal carries. getAuthUser degrades a scoped token's role
-          // to member in memory, so this is where that degradation has to be visible.
-          role: req.headers.get("x-role") ?? "member",
-          viaMachineCredential: req.headers.get("x-machine") !== null,
-        },
-      }),
-}));
+vi.mock("@/lib/middleware", async () => {
+  const { scopedToDefaultTenant } = await vi.importActual<typeof import("@/lib/db-scope")>("@/lib/db-scope");
+  return {
+    withProjectAccess:
+      (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
+      (req: Request, ctx: unknown) =>
+        handler(req, {
+          ...(ctx as object),
+          user: {
+            _id: "u1",
+            // The role the *request's* principal carries. getAuthUser degrades a scoped token's role
+            // to member in memory, so this is where that degradation has to be visible.
+            role: req.headers.get("x-role") ?? "member",
+            viaMachineCredential: req.headers.get("x-machine") !== null,
+          },
+          db: scopedToDefaultTenant(),
+        }),
+  };
+});
 
 const { GET, PUT, DELETE } = await import("./route");
 
@@ -103,7 +108,7 @@ beforeEach(() => {
     }),
   });
   taskDeleteOne.mockResolvedValue({ deletedCount: 1 });
-  projectFindById.mockReturnValue({ lean: () => Promise.resolve({ key: "TP" }) });
+  projectFindOne.mockReturnValue({ lean: () => Promise.resolve({ key: "TP" }) });
   heldRunRefusal.mockResolvedValue(null);
 });
 
@@ -259,7 +264,7 @@ describe("DELETE .../tasks/:taskId and the run hold", () => {
     const res = await DELETE(deleteRequest(), ctx());
 
     expect(res.status).toBe(200);
-    expect(taskDeleteOne).toHaveBeenCalledWith({ _id: TASK, project: "p1" });
+    expect(taskDeleteOne).toHaveBeenCalledWith({ _id: TASK, project: "p1", tenant: DEFAULT_TENANT_ID });
   });
 
   /**
@@ -280,9 +285,9 @@ describe("DELETE .../tasks/:taskId and the run hold", () => {
   it("takes the comments, activity, notifications and inbound links with it", async () => {
     await DELETE(deleteRequest(), ctx());
 
-    expect(commentDeleteMany).toHaveBeenCalledWith({ task: TASK });
-    expect(activityDeleteMany).toHaveBeenCalledWith({ task: TASK });
-    expect(notificationDeleteMany).toHaveBeenCalledWith({ task: TASK });
+    expect(commentDeleteMany).toHaveBeenCalledWith({ task: TASK, tenant: DEFAULT_TENANT_ID });
+    expect(activityDeleteMany).toHaveBeenCalledWith({ task: TASK, tenant: DEFAULT_TENANT_ID });
+    expect(notificationDeleteMany).toHaveBeenCalledWith({ task: TASK, tenant: DEFAULT_TENANT_ID });
     // BP-690: severing what the rest of the board held onto this task used to be two bare
     // `updateMany` pulls here, with nothing to say why a blocker or a child had vanished.
     expect(severLinksToDeletedTask).toHaveBeenCalledWith(
@@ -323,7 +328,7 @@ describe("GET: what the decision panel is served", () => {
       populate: vi.fn(() => ({ populate: () => Promise.resolve(task) })),
     }));
     taskFindOne.mockReturnValue({ select });
-    workerFindById.mockReturnValue({ select: () => ({ lean: async () => null }) });
+    workerFindOne.mockReturnValue({ select: () => ({ lean: async () => null }) });
     return select;
   }
 
@@ -360,7 +365,7 @@ describe("GET: whether machines have given up on the task", () => {
     taskFindOne.mockReturnValue({
       select: () => ({ populate: () => ({ populate: () => Promise.resolve(task) }) }),
     });
-    workerFindById.mockReturnValue({ select: () => ({ lean: async () => null }) });
+    workerFindOne.mockReturnValue({ select: () => ({ lean: async () => null }) });
     const res = await GET(new Request(`https://app.example.com/api/projects/p1/tasks/${TASK}`), ctx());
     return (await res.json()).attemptsExhausted;
   }

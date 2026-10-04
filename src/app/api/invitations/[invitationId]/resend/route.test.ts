@@ -1,21 +1,25 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const reissueInvitation = vi.fn();
 const recordDelivery = vi.fn();
 const deliverTo = vi.fn();
-const invitationFindById = vi.fn();
+const invitationFindOne = vi.fn();
 const userExists = vi.fn();
 const projectFind = vi.fn();
 const logInstanceAudit = vi.fn();
 const selfOrigin = vi.fn();
 let caller: Record<string, unknown>;
 
-vi.mock("@/lib/middleware", () => ({
-  withAdmin:
-    (handler: (r: Request, c: unknown) => unknown) =>
-    (request: Request, ctx: { params: Promise<Record<string, string>> }) =>
-      handler(request, { params: ctx.params, user: caller }),
-}));
+vi.mock("@/lib/middleware", async () => {
+  const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+  return {
+    withAdmin:
+      (handler: (r: Request, c: unknown) => unknown) =>
+      (request: Request, ctx: { params: Promise<Record<string, string>> }) =>
+        handler(request, { params: ctx.params, user: caller, db: scopedToDefaultTenant() }),
+  };
+});
 vi.mock("@/lib/session", () => ({ selfOrigin }));
 vi.mock("@/lib/invitations", () => ({ reissueInvitation, recordDelivery }));
 vi.mock("@/lib/invitation-mail", async () => {
@@ -27,7 +31,7 @@ vi.mock("@/lib/invitation-view", () => ({
   describeInvitation: () => "described",
 }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
-vi.mock("@/models/invitation", () => ({ Invitation: { findById: invitationFindById } }));
+vi.mock("@/models/invitation", () => ({ Invitation: { findOne: invitationFindOne } }));
 vi.mock("@/models/user", () => ({ User: { exists: userExists } }));
 vi.mock("@/models/project", () => ({ Project: { find: projectFind } }));
 
@@ -43,7 +47,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   caller = { _id: "admin-2", username: "second", fullName: "Second Admin", role: "admin" };
   selfOrigin.mockReturnValue("https://planner.example");
-  invitationFindById.mockReturnValue({
+  invitationFindOne.mockReturnValue({
     select: () => ({ lean: () => Promise.resolve({ email: "ada@example.com" }) }),
   });
   userExists.mockResolvedValue(null);
@@ -102,7 +106,7 @@ describe("POST /api/invitations/:id/resend", () => {
     userExists.mockResolvedValue({ _id: "u2" });
 
     expect((await resend()).status).toBe(409);
-    expect(userExists).toHaveBeenCalledWith({ email: "ada@example.com" });
+    expect(userExists).toHaveBeenCalledWith({ email: "ada@example.com", tenant: DEFAULT_TENANT_ID });
     expect(reissueInvitation).not.toHaveBeenCalled();
   });
 

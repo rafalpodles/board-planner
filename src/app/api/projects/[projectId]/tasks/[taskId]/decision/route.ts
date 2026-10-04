@@ -12,8 +12,6 @@ import {
   Verdict,
   DECISION_FIELDS_FOR_THE_POLL,
 } from "@/lib/task-decisions";
-import { Task } from "@/models/task";
-import { Worker } from "@/models/worker";
 import { InstanceAuditAction } from "@/types";
 
 const VERDICTS: Verdict[] = ["accept", "decline", "abandon"];
@@ -32,7 +30,7 @@ const AUDIT: Record<Verdict, InstanceAuditAction> = {
  * exactly as long as the machine never settles. Nothing the poll is watching for lives in the
  * patch: `state`, `prUrl` and `error` are the whole of what changes.
  */
-export const GET = withProjectAccess(async (_request, { params, user }) => {
+export const GET = withProjectAccess(async (_request, { params, user, db }) => {
   const { projectId, taskId } = await params;
   if (!isValidObjectId(taskId)) {
     return NextResponse.json({ error: "Invalid task id" }, { status: 400 });
@@ -42,7 +40,7 @@ export const GET = withProjectAccess(async (_request, { params, user }) => {
   // Its own projection, and NOT `DECISION_FIELDS_A_READER_NEEDS`: withholding the patch is the
   // whole reason this route exists, and that constant re-includes it. Both are named beside
   // `toApiDecision`, and one derived test says what each of them must contain.
-  const task = await Task.findOne({ _id: taskId, project: projectId })
+  const task = await db.Task.findOne({ _id: taskId, project: projectId })
     .select(DECISION_FIELDS_FOR_THE_POLL)
     .populate("decision.decidedBy", "username fullName");
   if (!task?.decision?.gate) {
@@ -51,7 +49,7 @@ export const GET = withProjectAccess(async (_request, { params, user }) => {
 
   // `owner` alongside the two the panel renders, so `mayDecide` does not read the same document a
   // second time on a poll that runs every ten seconds.
-  const worker = await Worker.findById(task.decision.workerId)
+  const worker = await db.Worker.findById(task.decision.workerId)
     .select("name lastSeenAt owner")
     .lean<{ name?: string; lastSeenAt?: Date | null; owner?: unknown } | null>();
 
@@ -65,7 +63,7 @@ export const GET = withProjectAccess(async (_request, { params, user }) => {
   });
 });
 
-export const POST = withProjectAccess(async (request, { params, user }) => {
+export const POST = withProjectAccess(async (request, { params, user, db }) => {
   const { projectId, taskId } = await params;
   if (!isValidObjectId(taskId)) {
     return NextResponse.json({ error: "Invalid task id" }, { status: 400 });
@@ -97,7 +95,7 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
   // `{decision: 1}` and the `select: false` on the subfields is overridden, so this would read up
   // to 220 KB of patch on every verdict — and quietly contradict the schema's own comment that the
   // two readers which need it say so.
-  const task = await Task.findOne({ _id: taskId, project: projectId }).select(
+  const task = await db.Task.findOne({ _id: taskId, project: projectId }).select(
     "taskNumber decision.gate decision.workerId decision.commit decision.taskKey " +
       "decision.files decision.fileCount decision.acceptable decision.unacceptableReason decision.state"
   );
@@ -138,7 +136,7 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
     return NextResponse.json({ error: result.error }, { status: result.status });
   }
 
-  const worker = await Worker.findById(decision.workerId)
+  const worker = await db.Worker.findById(decision.workerId)
     .select("name lastSeenAt")
     .lean<{ name?: string; lastSeenAt?: Date | null } | null>();
 

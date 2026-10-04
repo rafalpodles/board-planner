@@ -2,13 +2,11 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectOwner } from "@/lib/middleware";
 import { escapeRegex } from "@/lib/github";
-import { User } from "@/models/user";
-import { Grant } from "@/models/grant";
 
 const MIN_QUERY = 2;
 const MAX_RESULTS = 10;
 
-export const GET = withProjectOwner(async (request, { params }) => {
+export const GET = withProjectOwner(async (request, { params, db }) => {
   const q = new URL(request.url).searchParams.get("q")?.trim() ?? "";
   if (q.length < MIN_QUERY) {
     return NextResponse.json([]);
@@ -17,13 +15,13 @@ export const GET = withProjectOwner(async (request, { params }) => {
   const { projectId } = await params;
   await connectDB();
 
-  const grants = await Grant.find({ objectType: "project", object: projectId })
+  const grants = await db.Grant.find({ objectType: "project", object: projectId })
     .select("subject")
     .lean();
   const grantedIds = grants.map((g) => g.subject);
 
   const pattern = new RegExp(escapeRegex(q), "i");
-  const users = await User.find({
+  const users = await db.User.find({
     kind: { $ne: "machine" },
     deactivatedAt: null,
     _id: { $nin: grantedIds },

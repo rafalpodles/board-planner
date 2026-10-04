@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
-import { User } from "@/models/user";
 import { normaliseMatrix } from "@/lib/notification-prefs";
 
 // Personal settings behind withProjectAccess rather than withProjectOwner: this is the reader's
@@ -22,7 +21,7 @@ function interactiveOnly(user: { viaMachineCredential?: boolean }) {
     : null;
 }
 
-export const PUT = withProjectAccess(async (request, { user, params }) => {
+export const PUT = withProjectAccess(async (request, { user, params, db }) => {
   const refusal = interactiveOnly(user);
   if (refusal) return refusal;
 
@@ -40,13 +39,13 @@ export const PUT = withProjectAccess(async (request, { user, params }) => {
   // insert (so two tabs cannot leave two rows for one project) and against the array's ceiling,
   // in the filter rather than from a count read beforehand, which bounded nothing under
   // concurrency because every racer saw the same pre-write length.
-  const updated = await User.findOneAndUpdate(
+  const updated = await db.User.findOneAndUpdate(
     { _id: user._id, "notifications.projects.project": projectId },
     { $set: { "notifications.projects.$.matrix": matrix } }
   );
   if (updated) return NextResponse.json({ ok: true });
 
-  const inserted = await User.findOneAndUpdate(
+  const inserted = await db.User.findOneAndUpdate(
     {
       _id: user._id,
       "notifications.projects.project": { $ne: projectId },
@@ -59,7 +58,7 @@ export const PUT = withProjectAccess(async (request, { user, params }) => {
   // Nothing was written. Either a racing request inserted the row between the two statements — in
   // which case answering {ok:true} would report a save that did not happen — or the ceiling is
   // reached. Distinguishing them costs one read and is worth it: the two need different words.
-  const after = await User.findById(user._id, "notifications.projects.project").lean();
+  const after = await db.User.findById(user._id, "notifications.projects.project").lean();
   const count = after?.notifications?.projects?.length ?? 0;
   if (count >= MAX_OVERRIDES) {
     return NextResponse.json(
@@ -73,7 +72,7 @@ export const PUT = withProjectAccess(async (request, { user, params }) => {
   );
 });
 
-export const DELETE = withProjectAccess(async (_request, { user, params }) => {
+export const DELETE = withProjectAccess(async (_request, { user, params, db }) => {
   const refusal = interactiveOnly(user);
   if (refusal) return refusal;
 
@@ -81,7 +80,7 @@ export const DELETE = withProjectAccess(async (_request, { user, params }) => {
   await connectDB();
 
   // Removing the row IS switching the override off — there is no separate flag to clear
-  await User.findByIdAndUpdate(user._id, {
+  await db.User.findByIdAndUpdate(user._id, {
     $pull: { "notifications.projects": { project: projectId } },
   });
 

@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { MAX_CATEGORIES } from "@/lib/identifiers";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
-const projectFindById = vi.fn();
+const projectFindOne = vi.fn();
 const projectFindOneAndUpdate = vi.fn();
 const projectExists = vi.fn();
 const taskFind = vi.fn();
@@ -14,7 +15,7 @@ vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ getAuthUser, RateLimitError: class extends Error {} }));
 vi.mock("@/lib/grants", () => ({ check }));
 vi.mock("@/models/project", () => ({
-  Project: { findById: projectFindById, findOneAndUpdate: projectFindOneAndUpdate, exists: projectExists },
+  Project: { findOne: projectFindOne, findOneAndUpdate: projectFindOneAndUpdate, exists: projectExists },
 }));
 vi.mock("@/models/task", () => ({ Task: { find: taskFind, updateMany: taskUpdateMany } }));
 vi.mock("@/lib/projectAudit", () => ({ logProjectAudit }));
@@ -40,7 +41,7 @@ function project(names: string[], templates: Array<{ name: string; category: str
     taskTemplates: templates,
     save: vi.fn(async () => {}),
   };
-  projectFindById.mockResolvedValue(doc);
+  projectFindOne.mockResolvedValue(doc);
   /**
    * The add is an atomic `$push` with the ceiling in its filter, so the stub applies the write the
    * way the database would — including refusing it once the array is full.
@@ -167,7 +168,7 @@ describe("POST /api/projects/:projectId/categories", () => {
   });
 
   it("404s when the project does not exist", async () => {
-    projectFindById.mockResolvedValue(null);
+    projectFindOne.mockResolvedValue(null);
 
     expect((await call(POST, { name: "feature" })).status).toBe(404);
   });
@@ -214,7 +215,7 @@ describe("POST /api/projects/:projectId/categories", () => {
     await call(POST, { name: "feature" });
 
     expect(projectFindOneAndUpdate).toHaveBeenCalledWith(
-      { _id: PROJECT_ID, [`categories.${MAX_CATEGORIES - 1}`]: { $exists: false } },
+      { _id: PROJECT_ID, [`categories.${MAX_CATEGORIES - 1}`]: { $exists: false }, tenant: DEFAULT_TENANT_ID },
       { $push: { categories: { name: "feature", color: "#3b82f6" } } },
       { returnDocument: "after" }
     );
@@ -249,7 +250,7 @@ describe("PATCH /api/projects/:projectId/categories", () => {
 
     expect(names(await res.json())).toEqual(["doc", "defect"]);
     expect(taskUpdateMany).toHaveBeenCalledWith(
-      { project: PROJECT_ID, category: "bug" },
+      { project: PROJECT_ID, category: "bug", tenant: DEFAULT_TENANT_ID },
       { $set: { category: "defect" } }
     );
     expect(doc.categories.map((c) => c.name)).toEqual(["doc", "defect"]);
@@ -405,7 +406,7 @@ describe("the gates every verb sits behind", () => {
     expect((await call(POST, { name: "feature" })).status).toBe(401);
     expect((await call(PATCH, { name: "bug", newName: "defect" })).status).toBe(401);
     expect((await call(DELETE, { name: "doc" })).status).toBe(401);
-    expect(projectFindById).not.toHaveBeenCalled();
+    expect(projectFindOne).not.toHaveBeenCalled();
   });
 
   it("403s somebody with no access to the project", async () => {
@@ -414,6 +415,6 @@ describe("the gates every verb sits behind", () => {
     expect((await call(POST, { name: "feature" })).status).toBe(403);
     expect((await call(PATCH, { name: "bug", newName: "defect" })).status).toBe(403);
     expect((await call(DELETE, { name: "doc" })).status).toBe(403);
-    expect(projectFindById).not.toHaveBeenCalled();
+    expect(projectFindOne).not.toHaveBeenCalled();
   });
 });

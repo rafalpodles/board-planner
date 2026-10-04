@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectOwner } from "@/lib/middleware";
-import { Project } from "@/models/project";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { webhookChanges } from "@/lib/settings-audit";
 import { canonicalObjectId } from "@/lib/object-id";
@@ -19,7 +18,7 @@ function masked(project: any) {
 // in memory, save() — that pattern re-sent the WHOLE webhooks array on every save, and
 // dispatchWebhooks records a delivery outcome onto one row from its own background write
 // (BP-407). A save() landing after that write clobbered it with the stale in-memory snapshot.
-export const POST = withProjectOwner(async (request, { params, user }) => {
+export const POST = withProjectOwner(async (request, { params, user, db }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -45,13 +44,13 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
 
   // The count is part of the match, so two requests racing cannot both slip past the cap: one card
   // move fires every webhook, and a few thousand at one host is a flood sent from this instance
-  const project = await Project.findOneAndUpdate(
+  const project = await db.Project.findOneAndUpdate(
     { _id: projectId, [`webhooks.${MAX_WEBHOOKS - 1}`]: { $exists: false } },
     { $push: { webhooks: { url: parsedUrl, events: parsedEvents, enabled: true } } },
     { returnDocument: "after" }
   );
   if (!project) {
-    if (await Project.exists({ _id: projectId })) {
+    if (await db.Project.exists({ _id: projectId })) {
       return NextResponse.json({ error: `A project can have at most ${MAX_WEBHOOKS} webhooks` }, { status: 400 });
     }
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
@@ -62,7 +61,7 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
   return NextResponse.json(masked(project), { status: 201 });
 });
 
-export const PUT = withProjectOwner(async (request, { params, user }) => {
+export const PUT = withProjectOwner(async (request, { params, user, db }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -95,7 +94,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
   }
   if (updates.enabled !== undefined) changes.enabled = !!updates.enabled;
 
-  const before = await Project.findOneAndUpdate(
+  const before = await db.Project.findOneAndUpdate(
     { _id: projectId, "webhooks._id": webhookId },
     {
       $set: Object.fromEntries(
@@ -120,7 +119,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
   return NextResponse.json(sanitizeProjectSecrets({ webhooks }).webhooks);
 });
 
-export const DELETE = withProjectOwner(async (request, { params, user }) => {
+export const DELETE = withProjectOwner(async (request, { params, user, db }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -129,7 +128,7 @@ export const DELETE = withProjectOwner(async (request, { params, user }) => {
     return NextResponse.json({ error: "webhookId is required" }, { status: 400 });
   }
 
-  const before = await Project.findOneAndUpdate(
+  const before = await db.Project.findOneAndUpdate(
     { _id: projectId },
     { $pull: { webhooks: { _id: webhookId } } },
     { returnDocument: "before" }

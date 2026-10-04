@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
-const findById = vi.fn();
+const findOne = vi.fn();
 const lean = vi.fn();
 const isOverDailyTurnCap = vi.fn();
 const dailyPmSpend = vi.fn();
@@ -19,7 +19,7 @@ vi.mock("@/lib/grants", async (importOriginal) => {
   return { ...actual, check };
 });
 vi.mock("@/models/project", () => ({
-  Project: { findById: (...a: unknown[]) => (findById(...a), { lean }) },
+  Project: { findOne: (...a: unknown[]) => (findOne(...a), { lean }) },
 }));
 vi.mock("@/lib/pm/turn-cap", () => ({ isOverDailyTurnCap, dailyPmSpend }));
 vi.mock("@/lib/pm/agent", () => ({ MAX_STEPS: 15 }));
@@ -64,7 +64,7 @@ describe("GET pm/usage", () => {
     const response = await GET(new Request("http://x"), { params });
 
     expect(response.status).toBe(403);
-    expect(findById).not.toHaveBeenCalled();
+    expect(findOne).not.toHaveBeenCalled();
   });
 
   it("serves usage to the project owner", async () => {

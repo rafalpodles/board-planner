@@ -3,8 +3,6 @@ import { connectDB } from "@/lib/db";
 import { withAuth } from "@/lib/middleware";
 import { accessibleProjectIds, administeredProjectIds } from "@/lib/grants";
 import { isWorkerLockedByInstance, projectRunsWorkers } from "@/lib/worker-gate";
-import { Project } from "@/models/project";
-import { Worker } from "@/models/worker";
 import { findPendingByUserCode, formatUserCode } from "@/lib/device-enrolment";
 import { projectRepositoryUrl } from "@/lib/repository";
 
@@ -15,7 +13,7 @@ import { projectRepositoryUrl } from "@/lib/repository";
 // that person already holds, so admitting one is no longer an instance-level decision. The list is
 // narrowed to what the person confirming can reach, which is also exactly what the machine will be
 // able to reach afterwards.
-export const GET = withAuth(async (_request, { params, user }) => {
+export const GET = withAuth(async (_request, { params, user, db }) => {
   await connectDB();
   const { userCode } = await params;
 
@@ -29,7 +27,7 @@ export const GET = withAuth(async (_request, { params, user }) => {
   }
 
   const reachable = await accessibleProjectIds(user);
-  const projects = await Project.find(reachable === null ? {} : { _id: { $in: reachable } })
+  const projects = await db.Project.find(reachable === null ? {} : { _id: { $in: reachable } })
     .select("_id name key repositoryUrl githubRepo gitlabRepo gitlabHost worker")
     .lean();
   // The same rule PUT /api/projects/:id applies to `worker`: the project's owner (or an instance
@@ -43,7 +41,7 @@ export const GET = withAuth(async (_request, { params, user }) => {
   // into a probe for whose machines exist and when they last ran — reconnaissance that was behind
   // withAdmin until BP-358. What the page needs is only whether connecting replaces something, and
   // whether it will be refused for belonging to somebody else.
-  const existing = await Worker.findOne({
+  const existing = await db.Worker.findOne({
     name: enrolment.machineName,
     host: enrolment.machineHost,
   }).select("_id owner");

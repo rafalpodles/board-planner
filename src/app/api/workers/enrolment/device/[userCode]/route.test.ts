@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
@@ -86,7 +87,7 @@ describe("GET /api/workers/enrolment/device/:userCode", () => {
     const response = await GET(request(), ctx());
 
     expect(accessibleProjectIds).toHaveBeenCalledWith(expect.objectContaining({ _id: "member-1" }));
-    expect(projectFind).toHaveBeenCalledWith({ _id: { $in: [MINE] } });
+    expect(projectFind).toHaveBeenCalledWith({ _id: { $in: [MINE] }, tenant: DEFAULT_TENANT_ID });
     expect((await response.json()).projects.map((p: { _id: string }) => p._id)).toEqual([MINE]);
     expect(JSON.stringify(await GET(request(), ctx()).then((r) => r.json()))).not.toContain(THEIRS);
   });
@@ -98,7 +99,7 @@ describe("GET /api/workers/enrolment/device/:userCode", () => {
 
     await GET(request(), ctx());
 
-    expect(projectFind).toHaveBeenCalledWith({});
+    expect(projectFind).toHaveBeenCalledWith({ tenant: DEFAULT_TENANT_ID });
   });
 
   // Rendered so the page can say the machine will connect and then sit idle, which is the one

@@ -2,20 +2,18 @@ import { NextResponse } from "next/server";
 import { COMMENT_BODY_MAX_LENGTH, COMMENT_BODY_RULE } from "@/lib/identifiers";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
-import { Comment } from "@/models/comment";
-import { Task } from "@/models/task";
 import { logActivity } from "@/lib/activity";
 
-export const PUT = withProjectAccess(async (request, { params, user }) => {
+export const PUT = withProjectAccess(async (request, { params, user, db }) => {
   const { projectId, taskId, commentId } = await params;
   await connectDB();
 
-  const task = await Task.findOne({ _id: taskId, project: projectId });
+  const task = await db.Task.findOne({ _id: taskId, project: projectId });
   if (!task) {
     return NextResponse.json({ error: "Task not found" }, { status: 404 });
   }
 
-  const comment = await Comment.findOne({ _id: commentId, task: taskId });
+  const comment = await db.Comment.findOne({ _id: commentId, task: taskId });
   if (!comment) {
     return NextResponse.json({ error: "Comment not found" }, { status: 404 });
   }
@@ -39,7 +37,7 @@ export const PUT = withProjectAccess(async (request, { params, user }) => {
   comment.body = body.trim();
   await comment.save();
 
-  const populated = await Comment.findById(comment._id).populate({
+  const populated = await db.Comment.findById(comment._id).populate({
     path: "author",
     select: "username fullName",
   });
@@ -51,16 +49,16 @@ export const PUT = withProjectAccess(async (request, { params, user }) => {
 
 const ALLOWED_EMOJIS = ["👍", "👎", "❤️", "👀", "🎉", "😄"];
 
-export const PATCH = withProjectAccess(async (request, { params, user }) => {
+export const PATCH = withProjectAccess(async (request, { params, user, db }) => {
   const { projectId, taskId, commentId } = await params;
   await connectDB();
 
-  const task = await Task.findOne({ _id: taskId, project: projectId });
+  const task = await db.Task.findOne({ _id: taskId, project: projectId });
   if (!task) {
     return NextResponse.json({ error: "Task not found" }, { status: 404 });
   }
 
-  const comment = await Comment.findOne({ _id: commentId, task: taskId });
+  const comment = await db.Comment.findOne({ _id: commentId, task: taskId });
   if (!comment) {
     return NextResponse.json({ error: "Comment not found" }, { status: 404 });
   }
@@ -83,23 +81,23 @@ export const PATCH = withProjectAccess(async (request, { params, user }) => {
 
   await comment.save();
 
-  const populated = await Comment.findById(comment._id)
+  const populated = await db.Comment.findById(comment._id)
     .populate("author", "username fullName")
     .populate("reactions.user", "username fullName");
 
   return NextResponse.json(populated);
 });
 
-export const DELETE = withProjectAccess(async (_request, { params, user }) => {
+export const DELETE = withProjectAccess(async (_request, { params, user, db }) => {
   const { projectId, taskId, commentId } = await params;
   await connectDB();
 
-  const task = await Task.findOne({ _id: taskId, project: projectId });
+  const task = await db.Task.findOne({ _id: taskId, project: projectId });
   if (!task) {
     return NextResponse.json({ error: "Task not found" }, { status: 404 });
   }
 
-  const comment = await Comment.findOne({ _id: commentId, task: taskId });
+  const comment = await db.Comment.findOne({ _id: commentId, task: taskId });
   if (!comment) {
     return NextResponse.json({ error: "Comment not found" }, { status: 404 });
   }

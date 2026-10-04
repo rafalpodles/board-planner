@@ -1,12 +1,9 @@
 import { NextResponse } from "next/server";
 import { Types, isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
+import type { ScopedDb } from "@/lib/db-scope";
 import { withProjectOwner } from "@/lib/middleware";
 import { audienceFilterFrom, ownerCount, recipientsWithAccess } from "@/lib/grants";
-import { User } from "@/models/user";
-import { Grant } from "@/models/grant";
-import { Notification } from "@/models/notification";
-import { Project } from "@/models/project";
 import { createNotifications } from "@/lib/in-app-notifications";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { GRANT_RELATIONS, GrantRelation } from "@/types";
@@ -27,18 +24,18 @@ function auditAccess(
   );
 }
 
-export const GET = withProjectOwner(async (_request, { params }) => {
+export const GET = withProjectOwner(async (_request, { params, db }) => {
   await connectDB();
   const { projectId } = await params;
 
-  const grants = await Grant.find({ objectType: "project", object: projectId })
+  const grants = await db.Grant.find({ objectType: "project", object: projectId })
     .select("subject relation")
     .lean();
 
   // The same filter the assignable-users endpoint builds on, rather than a second copy of the
   // same $or: this list and that one are answers to the same question and must not drift. Built
   // from the rows already in hand, so the grants are read once per request rather than twice.
-  const users = await User.find({
+  const users = await db.User.find({
     ...audienceFilterFrom(grants.map((g) => g.subject)),
     kind: { $ne: "machine" },
   })
@@ -60,7 +57,7 @@ export const GET = withProjectOwner(async (_request, { params }) => {
   );
 });
 
-export const PUT = withProjectOwner(async (request, { params, user }) => {
+export const PUT = withProjectOwner(async (request, { params, user, db }) => {
   const { projectId } = await params;
   const body = (await request.json().catch(() => null)) ?? {};
   const { userId: rawUserId, relation } = body as { userId?: string; relation?: GrantRelation };
@@ -76,7 +73,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
   const userId = new Types.ObjectId(rawUserId).toString();
 
   await connectDB();
-  const target = await User.findById(userId).select("_id role kind username deactivatedAt");
+  const target = await db.User.findById(userId).select("_id role kind username deactivatedAt");
   if (!target || target.kind === "machine") {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
@@ -85,7 +82,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     return NextResponse.json({ error: `${target.username} is deactivated` }, { status: 400 });
   }
 
-  const current = await Grant.findOne({ subject: userId, objectType: "project", object: projectId })
+  const current = await db.Grant.findOne({ subject: userId, objectType: "project", object: projectId })
     .select("relation")
     .lean();
   if (relation !== "owner") {
@@ -99,7 +96,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
 
   let before: { relation: GrantRelation } | null;
   try {
-    before = await Grant.findOneAndUpdate(
+    before = await db.Grant.findOneAndUpdate(
       { subject: userId, objectType: "project", object: projectId },
       { $set: { relation }, $setOnInsert: { createdBy: user._id } },
       { upsert: true, returnDocument: "before" }
@@ -117,7 +114,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
   // moment counted this one as still an owner, as this one counted them (BP-841)
   if (before?.relation === "owner" && relation !== "owner" && (await ownerCount(projectId)) === 0) {
     // An upsert, since a concurrent removal may have taken the row this would put back
-    const restored = await Grant.updateOne(
+    const restored = await db.Grant.updateOne(
       { subject: userId, objectType: "project", object: projectId },
       { $set: { relation: "owner" }, $setOnInsert: { createdBy: user._id } },
       { upsert: true }
@@ -129,7 +126,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
 
   if (before?.relation !== relation) {
     auditAccess(projectId, user._id, target.username, before?.relation, relation);
-    void announceAccess({
+    void announceAccess(db, {
       projectId,
       recipientId: userId,
       actorId: String(user._id),
@@ -142,7 +139,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
   return NextResponse.json({ ok: true });
 });
 
-async function announceAccess(change: {
+async function announceAccess(db: ScopedDb, change: {
   projectId: string;
   recipientId: string;
   actorId: string;
@@ -151,7 +148,7 @@ async function announceAccess(change: {
   added: boolean;
 }): Promise<void> {
   try {
-    const project = await Project.findById(change.projectId).select("name key").lean();
+    const project = await db.Project.findById(change.projectId).select("name key").lean();
     const board = project?.name ?? "a board";
     const role = change.relation === "owner" ? "an owner" : "a member";
     await createNotifications({
@@ -177,7 +174,7 @@ async function announceAccess(change: {
   }
 }
 
-export const DELETE = withProjectOwner(async (request, { params, user }) => {
+export const DELETE = withProjectOwner(async (request, { params, user, db }) => {
   const { projectId } = await params;
   const userId = new URL(request.url).searchParams.get("userId");
   if (!userId) {
@@ -197,9 +194,9 @@ export const DELETE = withProjectOwner(async (request, { params, user }) => {
   await connectDB();
   // A deactivated owner is not one of those counted as keeping the board run, so taking them off
   // can never leave it with fewer (BP-832)
-  const subjectActive = !!(await User.exists({ _id: subject, deactivatedAt: null }));
+  const subjectActive = !!(await db.User.exists({ _id: subject, deactivatedAt: null }));
   if (subjectActive && (await ownerCount(projectId)) <= 1) {
-    const remaining = await Grant.find({ objectType: "project", object: projectId })
+    const remaining = await db.Grant.find({ objectType: "project", object: projectId })
       .select("subject relation")
       .lean();
     const isLastOwner = remaining.some(
@@ -214,13 +211,13 @@ export const DELETE = withProjectOwner(async (request, { params, user }) => {
   }
 
   // Read before the delete: nothing after it may turn into a failed response
-  const person = await User.findById(subject).select("username");
-  const removed = await Grant.findOneAndDelete({ subject, objectType: "project", object: projectId })
+  const person = await db.User.findById(subject).select("username");
+  const removed = await db.Grant.findOneAndDelete({ subject, objectType: "project", object: projectId })
     .select("relation createdBy")
     .lean();
   // Put back if a concurrent removal or deactivation left the board with no active owner (BP-841)
   if (removed?.relation === "owner" && subjectActive && (await ownerCount(projectId)) === 0) {
-    await Grant.updateOne(
+    await db.Grant.updateOne(
       { subject, objectType: "project", object: projectId },
       { $setOnInsert: { relation: "owner", createdBy: removed.createdBy } },
       { upsert: true }
@@ -228,8 +225,8 @@ export const DELETE = withProjectOwner(async (request, { params, user }) => {
     // Somebody re-added them as a member meanwhile, so the insert did nothing: they are made owner
     // again rather than leave the board with none
     if ((await ownerCount(projectId)) === 0) {
-      await Grant.updateOne({ subject, objectType: "project", object: projectId }, { $set: { relation: "owner" } });
-      const who = await User.findById(subject).select("username");
+      await db.Grant.updateOne({ subject, objectType: "project", object: projectId }, { $set: { relation: "owner" } });
+      const who = await db.User.findById(subject).select("username");
       auditAccess(projectId, user._id, who?.username ?? "a deleted user", "member", "owner");
     }
     return NextResponse.json({ error: "A board must keep at least one owner" }, { status: 409 });
@@ -259,7 +256,7 @@ export const DELETE = withProjectOwner(async (request, { params, user }) => {
 
   if (!stillReaches) {
     try {
-      await Notification.deleteMany({ recipient: subject, project: projectId });
+      await db.Notification.deleteMany({ recipient: subject, project: projectId });
     } catch (err) {
       console.error("Failed to clear notifications for a removed member:", err);
     }

@@ -3,6 +3,7 @@ import { passwordSignInEnabled, passwordSignInOff } from "@/lib/password-sign-in
 import { readJsonBody } from "@/lib/request-body";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
+import { scopedToDefaultTenant } from "@/lib/db-scope";
 import { getClientIp, MIN_PASSWORD_LENGTH, PASSWORD_COST_FACTOR } from "@/lib/auth";
 import {
   anonymousMultiplier,
@@ -19,7 +20,6 @@ import {
   releaseResetToken,
 } from "@/lib/password-reset";
 import { provenanceRefusal, revokeUserCredentials } from "@/lib/session";
-import { User } from "@/models/user";
 
 const ATTEMPTS_PER_SOURCE = 20;
 
@@ -30,6 +30,7 @@ const REFUSALS: Record<string, string> = {
 };
 
 export async function POST(request: Request) {
+  const db = scopedToDefaultTenant();
   if (!passwordSignInEnabled()) return passwordSignInOff();
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
@@ -79,7 +80,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: REFUSALS[outcome.reason] }, { status: 400 });
   }
 
-  const user = await User.findById(outcome.userId).select("username kind email deactivatedAt");
+  const user = await db.User.findById(outcome.userId).select("username kind email deactivatedAt");
   if (!user) {
     // The account was deleted between the link being sent and used. The token is spent either way.
     return NextResponse.json({ error: REFUSALS.unknown }, { status: 400 });
@@ -105,7 +106,7 @@ export async function POST(request: Request) {
   const revoked = await revokeUserCredentials(user._id);
 
   try {
-    await User.updateOne({ _id: user._id }, { $set: { password: hashed } });
+    await db.User.updateOne({ _id: user._id }, { $set: { password: hashed } });
   } catch (err) {
     // The claim is one-shot, so a write that fails here would otherwise leave somebody signed out
     // of everything, holding a dead link, with their old password still in force and no way back
@@ -116,7 +117,7 @@ export async function POST(request: Request) {
   // only while that is still the account's address (BP-842). After the password, and on its own:
   // failing here must not give back a link whose password is already set
   if (outcome.sentTo) {
-    await User.updateOne({ _id: user._id, email: outcome.sentTo }, { $set: { emailVerifiedAt: new Date() } }).catch(
+    await db.User.updateOne({ _id: user._id, email: outcome.sentTo }, { $set: { emailVerifiedAt: new Date() } }).catch(
       (err) => console.error("Failed to record a reset's proof of address:", err)
     );
   }

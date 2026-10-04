@@ -7,11 +7,9 @@ import {
   MAX_CATEGORIES,
 } from "@/lib/identifiers";
 import { withProjectAccess, withProjectOwner } from "@/lib/middleware";
-import { Project } from "@/models/project";
-import { Task } from "@/models/task";
 import { logProjectAudit } from "@/lib/projectAudit";
 
-export const POST = withProjectAccess(async (request, { params, user }) => {
+export const POST = withProjectAccess(async (request, { params, user, db }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -34,7 +32,7 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
     );
   }
 
-  const project = await Project.findById(projectId);
+  const project = await db.Project.findById(projectId);
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
@@ -49,7 +47,7 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
   // This is the only operation that grows the array, so bounding it bounds the array (BP-716).
   // The push is atomic for the same reason the webhook writers are (BP-407) — it no longer
   // re-sends the whole array, which would clobber a rename landing at the same moment.
-  const added = await Project.findOneAndUpdate(
+  const added = await db.Project.findOneAndUpdate(
     { _id: projectId, [`categories.${MAX_CATEGORIES - 1}`]: { $exists: false } },
     { $push: { categories: { name: name.trim(), color: color || "#3b82f6" } } },
     { returnDocument: "after" }
@@ -57,7 +55,7 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
   if (!added) {
     // The project was read a moment ago, so ordinarily a miss here is the ceiling — but it can
     // also mean the project was deleted in between, and the two answer differently (BP-719).
-    if (await Project.exists({ _id: projectId })) {
+    if (await db.Project.exists({ _id: projectId })) {
       return NextResponse.json(
         { error: `A project may have at most ${MAX_CATEGORIES} categories` },
         { status: 400 }
@@ -71,7 +69,7 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
   return NextResponse.json(added.categories, { status: 201 });
 });
 
-export const PATCH = withProjectAccess(async (request, { params, user }) => {
+export const PATCH = withProjectAccess(async (request, { params, user, db }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -95,7 +93,7 @@ export const PATCH = withProjectAccess(async (request, { params, user }) => {
     );
   }
 
-  const project = await Project.findById(projectId);
+  const project = await db.Project.findById(projectId);
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
@@ -134,7 +132,7 @@ export const PATCH = withProjectAccess(async (request, { params, user }) => {
   project.categories = categories;
   await project.save();
 
-  await Task.updateMany({ project: projectId, category: name }, { $set: { category: target } });
+  await db.Task.updateMany({ project: projectId, category: name }, { $set: { category: target } });
 
   project.categories = (project.categories || []).filter((c) => c.name !== name);
   for (const template of project.taskTemplates || []) {
@@ -147,7 +145,7 @@ export const PATCH = withProjectAccess(async (request, { params, user }) => {
   return NextResponse.json(project.categories);
 });
 
-export const DELETE = withProjectOwner(async (request, { params, user }) => {
+export const DELETE = withProjectOwner(async (request, { params, user, db }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -156,7 +154,7 @@ export const DELETE = withProjectOwner(async (request, { params, user }) => {
     return NextResponse.json({ error: "name is required" }, { status: 400 });
   }
 
-  const project = await Project.findById(projectId);
+  const project = await db.Project.findById(projectId);
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
@@ -173,7 +171,7 @@ export const DELETE = withProjectOwner(async (request, { params, user }) => {
     );
   }
 
-  const inUse = await Task.find({ project: projectId, category: name })
+  const inUse = await db.Task.find({ project: projectId, category: name })
     .select("taskNumber")
     .sort({ taskNumber: 1 })
     .limit(11);

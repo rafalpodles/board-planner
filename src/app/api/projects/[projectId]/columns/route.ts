@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectOwner } from "@/lib/middleware";
-import { Project } from "@/models/project";
-import { Task } from "@/models/task";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { COLUMN_ROLES, ColumnRole, ROLE_LABELS } from "@/types";
 import { columnIdsWithRole, effectiveColumns } from "@/lib/columns";
@@ -25,18 +23,18 @@ function slugify(label: string): string {
     .slice(0, 32);
 }
 
-export const GET = withProjectOwner(async (_request, { params }) => {
+export const GET = withProjectOwner(async (_request, { params, db }) => {
   const { projectId } = await params;
   await connectDB();
 
-  const project = await Project.findById(projectId, "columns");
+  const project = await db.Project.findById(projectId, "columns");
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
   return NextResponse.json(project.columns || []);
 });
 
-export const PUT = withProjectOwner(async (request, { params, user }) => {
+export const PUT = withProjectOwner(async (request, { params, user, db }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -48,7 +46,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     );
   }
 
-  const project = await Project.findById(projectId);
+  const project = await db.Project.findById(projectId);
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
@@ -126,7 +124,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
   // departing column's id used to hide the departure from the check below
   const removed = existing.filter((c) => !claimed.has(c.id));
   for (const col of removed) {
-    const inUse = await Task.find({ project: projectId, status: col.id })
+    const inUse = await db.Task.find({ project: projectId, status: col.id })
       .select("taskNumber")
       .sort({ taskNumber: 1 })
       .limit(11);

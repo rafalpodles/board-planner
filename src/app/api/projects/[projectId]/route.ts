@@ -1,22 +1,14 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
+import type { ScopedDb } from "@/lib/db-scope";
 import { entitlementRefusal, withProjectAccess, withProjectOwner, withProjectAccessOrWorker } from "@/lib/middleware";
 import { CODA_SETTINGS_FIELDS, onlyClearsCoda } from "@/ee/connectors/coda/client";
 import { check } from "@/lib/grants";
-import { Project } from "@/models/project";
 import { parseProjectWorkerConfig } from "@/lib/project-worker-config";
 import { isWorkerLockedByInstance, WORKERS_LOCKED_MESSAGE } from "@/lib/worker-gate";
 import { PROJECT_POLICY_FIELDS_MOVED_TO_BLOCKS } from "@/lib/worker-policy";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { InstanceAuditAction } from "@/types";
-import { Task } from "@/models/task";
-import { Comment } from "@/models/comment";
-import { ActivityLog } from "@/models/activityLog";
-import { ProjectAuditLog } from "@/models/projectAuditLog";
-import { Sprint } from "@/models/sprint";
-import { Notification } from "@/models/notification";
-import { PmMessage } from "@/models/pmMessage";
-import { Grant } from "@/models/grant";
 import { dropProjectReferences } from "@/lib/project-references";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { describeSettingsChanges } from "@/lib/settings-audit";
@@ -30,11 +22,11 @@ import { PROJECT_ICONS, type IPmMcpServer } from "@/types";
 import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
 import { githubWebBase } from "@/lib/github-host";
 
-export const GET = withProjectAccessOrWorker(async (_request, { params, user }) => {
+export const GET = withProjectAccessOrWorker(async (_request, { params, user, db }) => {
   await connectDB();
   const { projectId } = await params;
 
-  const project = await Project.findById(projectId)
+  const project = await db.Project.findById(projectId)
     .populate("createdBy", "username fullName");
 
   if (!project) {
@@ -76,12 +68,13 @@ const MCP_SERVERS_WRITE_ATTEMPTS = 3;
 
 // The MCP list is written only over the one its tokens were merged from: a refresh rotates them on its own
 async function writeProjectSettings(
+  db: ScopedDb,
   projectId: string,
   updates: Record<string, unknown>,
   pmServers: { incoming: IPmMcpServer[]; stored: unknown } | null
 ) {
   for (let attempt = 1; ; attempt++) {
-    const before = await Project.findOneAndUpdate(
+    const before = await db.Project.findOneAndUpdate(
       pmServers
         ? {
             _id: projectId,
@@ -96,7 +89,7 @@ async function writeProjectSettings(
     if (before) return { before };
     if (!pmServers) return { error: "Project not found", status: 404 as const };
 
-    const fresh = await Project.findById(projectId).select("pm.mcpServers").lean();
+    const fresh = await db.Project.findById(projectId).select("pm.mcpServers").lean();
     if (!fresh) return { error: "Project not found", status: 404 as const };
     if (attempt === MCP_SERVERS_WRITE_ATTEMPTS) {
       return {
@@ -111,7 +104,7 @@ async function writeProjectSettings(
   }
 }
 
-export const PUT = withProjectOwner(async (request, { params, user }) => {
+export const PUT = withProjectOwner(async (request, { params, user, db }) => {
   await connectDB();
   const { projectId } = await params;
   const body = await request.json();
@@ -154,7 +147,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
       );
     }
     if (id !== "") {
-      const existing = await Project.findById(projectId).select("customFields");
+      const existing = await db.Project.findById(projectId).select("customFields");
       if (!existing) {
         return NextResponse.json({ error: "Project not found" }, { status: 404 });
       }
@@ -188,7 +181,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
         { status: 403 }
       );
     }
-    const existing = await Project.findById(projectId).select("worker key");
+    const existing = await db.Project.findById(projectId).select("worker key");
     if (!existing) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
@@ -236,7 +229,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
       return NextResponse.json({ error: "pm must be an object" }, { status: 400 });
     }
     const sent = new Set(Object.keys(body.pm));
-    const existing = await Project.findById(projectId).select("pm").lean();
+    const existing = await db.Project.findById(projectId).select("pm").lean();
     if (!existing) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
@@ -308,7 +301,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
   // says why: the credential "was issued for a different resource" (BP-315).
   const clearedByHostChange: string[] = [];
   if (updates.gitlabHost !== undefined || updates.codaHost !== undefined) {
-    const before = await Project.findById(
+    const before = await db.Project.findById(
       projectId,
       "gitlabHost gitlabToken codaHost codaToken"
     ).lean();
@@ -338,7 +331,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     }
   }
 
-  const written = await writeProjectSettings(projectId, updates, pmServers);
+  const written = await writeProjectSettings(db, projectId, updates, pmServers);
   if ("error" in written) {
     return NextResponse.json({ error: written.error }, { status: written.status });
   }
@@ -377,7 +370,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     );
   }
 
-  const project = images?.after ?? (await Project.findById(projectId));
+  const project = images?.after ?? (await db.Project.findById(projectId));
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
@@ -396,32 +389,32 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
   return NextResponse.json(obj);
 });
 
-export const DELETE = withProjectOwner(async (_request, { params }) => {
+export const DELETE = withProjectOwner(async (_request, { params, db }) => {
   await connectDB();
   const { projectId } = await params;
 
-  const project = await Project.findById(projectId);
+  const project = await db.Project.findById(projectId);
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
   // Delete all comments and activity logs on tasks in this project
-  const taskIds = await Task.find({ project: projectId }).distinct("_id");
+  const taskIds = await db.Task.find({ project: projectId }).distinct("_id");
   await Promise.all([
-    Comment.deleteMany({ task: { $in: taskIds } }),
-    ActivityLog.deleteMany({ task: { $in: taskIds } }),
+    db.Comment.deleteMany({ task: { $in: taskIds } }),
+    db.ActivityLog.deleteMany({ task: { $in: taskIds } }),
   ]);
 
   // Delete all tasks, sprints, notifications in this project
-  await Task.deleteMany({ project: projectId });
-  await Sprint.deleteMany({ project: projectId });
-  await Notification.deleteMany({ project: projectId });
-  await PmMessage.deleteMany({ project: projectId });
+  await db.Task.deleteMany({ project: projectId });
+  await db.Sprint.deleteMany({ project: projectId });
+  await db.Notification.deleteMany({ project: projectId });
+  await db.PmMessage.deleteMany({ project: projectId });
 
   // Delete project audit logs and the project itself
-  await ProjectAuditLog.deleteMany({ project: projectId });
-  await Project.findByIdAndDelete(projectId);
-  await Grant.deleteMany({ objectType: "project", object: projectId });
+  await db.ProjectAuditLog.deleteMany({ project: projectId });
+  await db.Project.findByIdAndDelete(projectId);
+  await db.Grant.deleteMany({ objectType: "project", object: projectId });
   await dropProjectReferences(project._id);
 
   return NextResponse.json({ message: "Project deleted" });

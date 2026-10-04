@@ -3,8 +3,6 @@ import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withAuth, withWorker } from "@/lib/middleware";
 import { stripControlCharacters } from "@/lib/identifiers";
-import { Worker } from "@/models/worker";
-import { Project } from "@/models/project";
 import { assignmentsFor, catalogueFor, offersFor, overriddenWorkerPolicy, ownerReachableProjectIds, toApiWorker, usableRepos } from "@/lib/worker-service";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { decisionsForWorker } from "@/lib/task-decisions";
@@ -19,7 +17,7 @@ const POLICY_FIELDS = ["pollIntervalMs"] as const;
 // The worker's own source of current policy and assignments between heartbeats, so it has to
 // answer the same question the heartbeat does — otherwise a worker that reported its checkouts
 // would never learn which projects they match.
-export const GET = withWorker(async (_request, { worker }) => {
+export const GET = withWorker(async (_request, { worker, db }) => {
   // The one withWorker route that used to answer a killed worker, handing it its policy, its
   // assignments and the whole fleet inventory — an incomplete kill switch (BP-305)
   if (!worker.enabled) {
@@ -31,8 +29,8 @@ export const GET = withWorker(async (_request, { worker }) => {
     // Not narrowed to `worker.enabled` any more: the catalogue below has to carry the switched-off
     // projects too, because the screen that renders it is where somebody switches one on. The
     // enabled test still happens, inside assignmentsFor and offersFor, where it decides work.
-    Project.find({}).select("_id key name repositoryUrl githubRepo gitlabRepo gitlabHost worker").lean(),
-    Worker.find({ _id: { $ne: worker._id } }).select(
+    db.Project.find({}).select("_id key name repositoryUrl githubRepo gitlabRepo gitlabHost worker").lean(),
+    db.Worker.find({ _id: { $ne: worker._id } }).select(
       "_id name host repos enabled lastSeenAt createdAt"
     ),
     ownerReachableProjectIds(worker),
@@ -78,7 +76,7 @@ function isPositiveInt(value: unknown): value is number {
 
 // The project middlewares cannot be used here — they resolve params.projectId, and this
 // route carries params.workerId.
-export const PATCH = withAuth(async (request, { params, user }) => {
+export const PATCH = withAuth(async (request, { params, user, db }) => {
   await connectDB();
 
   // A machine credential must not be able to rename a laptop or switch itself back on; that
@@ -92,7 +90,7 @@ export const PATCH = withAuth(async (request, { params, user }) => {
   if (!isValidObjectId(workerId)) {
     return NextResponse.json({ error: "Worker not found" }, { status: 404 });
   }
-  const worker = await Worker.findById(workerId);
+  const worker = await db.Worker.findById(workerId);
   if (!worker) {
     return NextResponse.json({ error: "Worker not found" }, { status: 404 });
   }
@@ -173,7 +171,7 @@ export const PATCH = withAuth(async (request, { params, user }) => {
   // that has one, the console merges that into the row, and its Owner column flashes the red
   // "claims nothing" flag until the next poll corrects it — a false alarm on the very indicator
   // this branch added, raised by the page's most-used control.
-  const updated = await Worker.findByIdAndUpdate(workerId, { $set: update }, { returnDocument: "after" }).populate(
+  const updated = await db.Worker.findByIdAndUpdate(workerId, { $set: update }, { returnDocument: "after" }).populate(
     "owner",
     "username fullName"
   );

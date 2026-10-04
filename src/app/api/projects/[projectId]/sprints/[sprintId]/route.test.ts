@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const PROJECT = "69a52e3b399b27d3cbb2c5a5";
 const OUR_SPRINT = "507f1f77bcf86cd799439011";
@@ -43,15 +44,18 @@ vi.mock("@/models/task", () => ({
   Task: { updateMany: taskUpdateMany, countDocuments: taskCountDocuments },
 }));
 vi.mock("@/models/project", () => ({
-  Project: { findById: () => ({ lean: async () => ({ columns: [{ id: "done", role: "done" }] }) }) },
+  Project: { findOne: () => ({ lean: async () => ({ columns: [{ id: "done", role: "done" }] }) }) },
 }));
 vi.mock("@/lib/columns", () => ({ columnIdsWithRole: () => ["done"] }));
-vi.mock("@/lib/middleware", () => ({
-  withProjectAccess:
-    (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
-    (req: Request, ctx: unknown) =>
-      handler(req, { ...(ctx as object), user: { _id: "u1" } }),
-}));
+vi.mock("@/lib/middleware", async () => {
+  const { scopedToDefaultTenant } = await vi.importActual<typeof import("@/lib/db-scope")>("@/lib/db-scope");
+  return {
+    withProjectAccess:
+      (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
+      (req: Request, ctx: unknown) =>
+        handler(req, { ...(ctx as object), user: { _id: "u1" }, db: scopedToDefaultTenant() }),
+  };
+});
 
 const { PUT, DELETE, GET } = await import("./route");
 
@@ -92,7 +96,7 @@ describe("PUT .../sprints/[sprintId] — a sprint of another project", () => {
   it("asks for the sprint by project as well as by id", async () => {
     await PUT(request({ status: "completed" }), ctx(THEIR_SPRINT));
 
-    expect(sprintFindOne).toHaveBeenCalledWith({ _id: THEIR_SPRINT, project: PROJECT });
+    expect(sprintFindOne).toHaveBeenCalledWith({ _id: THEIR_SPRINT, project: PROJECT, tenant: DEFAULT_TENANT_ID });
   });
 
   it("refuses before the sprint-deactivation sweep as well", async () => {
@@ -118,7 +122,7 @@ describe("PUT .../sprints/[sprintId] — our own sprint", () => {
       ctx(OUR_SPRINT)
     );
 
-    expect(sprintFindOne).toHaveBeenCalledWith({ _id: OUR_OTHER_SPRINT, project: PROJECT });
+    expect(sprintFindOne).toHaveBeenCalledWith({ _id: OUR_OTHER_SPRINT, project: PROJECT, tenant: DEFAULT_TENANT_ID });
     expect(taskUpdateMany).toHaveBeenCalledWith(expect.anything(), {
       $set: { sprint: OUR_OTHER_SPRINT },
     });
@@ -179,9 +183,9 @@ describe("the other two handlers", () => {
   it("DELETE returns tasks to the backlog scoped to this project", async () => {
     await DELETE(new Request("https://app.example.com/x", { method: "DELETE" }), ctx(OUR_SPRINT));
 
-    expect(sprintFindOneAndDelete).toHaveBeenCalledWith({ _id: OUR_SPRINT, project: PROJECT });
+    expect(sprintFindOneAndDelete).toHaveBeenCalledWith({ _id: OUR_SPRINT, project: PROJECT, tenant: DEFAULT_TENANT_ID });
     expect(taskUpdateMany).toHaveBeenCalledWith(
-      { project: PROJECT, sprint: OUR_SPRINT },
+      { project: PROJECT, sprint: OUR_SPRINT, tenant: DEFAULT_TENANT_ID },
       { $set: { sprint: null } }
     );
   });
@@ -189,7 +193,7 @@ describe("the other two handlers", () => {
   it("GET asks by project and counts only this project's tasks", async () => {
     await GET(new Request("https://app.example.com/x"), ctx(OUR_SPRINT));
 
-    expect(sprintFindOne).toHaveBeenCalledWith({ _id: OUR_SPRINT, project: PROJECT });
+    expect(sprintFindOne).toHaveBeenCalledWith({ _id: OUR_SPRINT, project: PROJECT, tenant: DEFAULT_TENANT_ID });
     expect(taskCountDocuments).toHaveBeenCalledWith(
       expect.objectContaining({ project: PROJECT, sprint: OUR_SPRINT })
     );

@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
-import { Project } from "@/models/project";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { hasControlCharacters } from "@/lib/identifiers";
 import { CUSTOM_FIELD_TYPES, CustomFieldType } from "@/types";
@@ -14,11 +13,11 @@ import {
 
 const MAX_FIELDS = 50;
 
-export const GET = withProjectAccess(async (_request, { params }) => {
+export const GET = withProjectAccess(async (_request, { params, db }) => {
   const { projectId } = await params;
   await connectDB();
 
-  const project = await Project.findById(projectId);
+  const project = await db.Project.findById(projectId);
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
@@ -26,7 +25,7 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   return NextResponse.json(project.customFields || []);
 });
 
-export const POST = withProjectAccess(async (request, { params, user }) => {
+export const POST = withProjectAccess(async (request, { params, user, db }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -67,7 +66,7 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
     parsedOptions = parsed.options;
   }
 
-  const project = await Project.findById(projectId);
+  const project = await db.Project.findById(projectId);
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
@@ -81,7 +80,7 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
   // above: every concurrent racer sees the same pre-write length, so a check up there
   // bounds nothing — the same fix already applied to the webhook writers (BP-719).
   // The name as well: the check above read the list, and another add may have taken it since
-  const updated = await Project.findOneAndUpdate(
+  const updated = await db.Project.findOneAndUpdate(
     {
       _id: projectId,
       [`customFields.${MAX_FIELDS - 1}`]: { $exists: false },
@@ -109,7 +108,7 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
   if (!updated) {
     // A miss is the ceiling, the name taken since the read, or the project deleted in between,
     // and the three answer differently
-    const current = await Project.findById(projectId).select("customFields").lean();
+    const current = await db.Project.findById(projectId).select("customFields").lean();
     if (!current) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }

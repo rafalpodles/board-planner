@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const generateTask = vi.fn();
-const projectFindById = vi.fn();
+const projectFindOne = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/rateLimit", async () => {
@@ -11,16 +11,19 @@ vi.mock("@/models/rateLimit", async () => {
 vi.mock("@/lib/ai", () => ({ isAIEnabled: () => true, generateTask }));
 vi.mock("@/lib/ai-fields", () => ({ choiceFieldsForPrompt: () => [], resolveGeneratedFields: () => ({}) }));
 vi.mock("@/models/settings", () => ({ getSettings: async () => ({ aiModel: "m" }) }));
-vi.mock("@/models/project", () => ({ Project: { findById: projectFindById } }));
+vi.mock("@/models/project", () => ({ Project: { findOne: projectFindOne } }));
 vi.mock("@/models/task", () => ({
   Task: { find: () => ({ sort: () => ({ limit: () => ({ lean: async () => [] }) }) }) },
 }));
-vi.mock("@/lib/middleware", () => ({
-  withProjectAccess:
-    (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
-    (req: Request, ctx: { user?: unknown }) =>
-      handler(req, { ...ctx, user: ctx.user ?? { _id: "u1" } }),
-}));
+vi.mock("@/lib/middleware", async () => {
+  const { scopedToDefaultTenant } = await vi.importActual<typeof import("@/lib/db-scope")>("@/lib/db-scope");
+  return {
+    withProjectAccess:
+      (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
+      (req: Request, ctx: { user?: unknown }) =>
+        handler(req, { ...ctx, user: ctx.user ?? { _id: "u1" }, db: scopedToDefaultTenant() }),
+  };
+});
 
 const { POST, MAX_PROMPT_LENGTH, GENERATIONS_PER_USER_WINDOW } = await import("./route");
 const { resetRateLimits } = await import("@/lib/rate-limit");
@@ -39,7 +42,7 @@ function generate(prompt: unknown, userId = "u1", projectId = "p1") {
 beforeEach(async () => {
   vi.clearAllMocks();
   await resetRateLimits();
-  projectFindById.mockResolvedValue({ name: "Board", description: "", customFields: [], categories: [] });
+  projectFindOne.mockResolvedValue({ name: "Board", description: "", customFields: [], categories: [] });
   generateTask.mockResolvedValue({ title: "T", fields: {} });
 });
 

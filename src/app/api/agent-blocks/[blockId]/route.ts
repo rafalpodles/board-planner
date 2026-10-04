@@ -2,8 +2,7 @@ import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withAuth } from "@/lib/middleware";
-import { Agent } from "@/models/agent";
-import { AgentBlock } from "@/models/agentBlock";
+import type { ScopedDb } from "@/lib/db-scope";
 import { allBlocks, toApiBlock } from "@/lib/agent-service";
 import {
   capabilityRefusal,
@@ -32,8 +31,8 @@ interface AgentNamingBlock {
   owner: { _id: unknown; username: string } | null;
 }
 
-function agentsUsing(key: string, fields: string): Promise<AgentNamingBlock[]> {
-  return Agent.find(agentsNaming(key), `${fields} scope owner`)
+function agentsUsing(db: ScopedDb, key: string, fields: string): Promise<AgentNamingBlock[]> {
+  return db.Agent.find(agentsNaming(key), `${fields} scope owner`)
     .sort({ name: 1 })
     .populate<{ owner: AgentNamingBlock["owner"] }>("owner", "username")
     .lean() as Promise<AgentNamingBlock[]>;
@@ -74,11 +73,12 @@ const MOST_NAMED = 3;
 
 /** Each agent already naming the block that its new capability would leave broken, and why. */
 async function agentsBrokenBy(
+  db: ScopedDb,
   changed: ApiAgentBlock,
   previousCapability: ApiAgentBlock["capability"],
   viewerId: string
 ): Promise<string | null> {
-  const agents = await agentsUsing(changed.key, "name composition");
+  const agents = await agentsUsing(db, changed.key, "name composition");
   if (agents.length === 0) return null;
 
   const blocks = (await allBlocks()).map(toApiBlock);
@@ -102,13 +102,13 @@ async function agentsBrokenBy(
 
 // The key is the contract with the worker and with every agent that already names it, so a rename
 // changes the label and never the key.
-export const PUT = withAuth(async (request, { params, user }) => {
+export const PUT = withAuth(async (request, { params, user, db }) => {
   const { blockId } = await params;
   // An id that is not one reaches Mongoose as a CastError and answers 500; this is a 404.
   if (!isValidObjectId(blockId)) return NextResponse.json({ error: "No such record" }, { status: 404 });
   await connectDB();
 
-  const block = await AgentBlock.findById(blockId);
+  const block = await db.AgentBlock.findById(blockId);
   if (!block) return NextResponse.json({ error: "No such block" }, { status: 404 });
   if (block.builtIn && user.role !== "admin") {
     return NextResponse.json(
@@ -144,6 +144,7 @@ export const PUT = withAuth(async (request, { params, user }) => {
 
   if (capabilityChanged) {
     const breaks = await agentsBrokenBy(
+      db,
       toApiBlock(block.toObject()),
       previousCapability,
       String(user._id)
@@ -155,13 +156,13 @@ export const PUT = withAuth(async (request, { params, user }) => {
   return NextResponse.json(toApiBlock(block.toObject()));
 });
 
-export const DELETE = withAuth(async (_request, { params, user }) => {
+export const DELETE = withAuth(async (_request, { params, user, db }) => {
   const { blockId } = await params;
   // An id that is not one reaches Mongoose as a CastError and answers 500; this is a 404.
   if (!isValidObjectId(blockId)) return NextResponse.json({ error: "No such record" }, { status: 404 });
   await connectDB();
 
-  const block = await AgentBlock.findById(blockId);
+  const block = await db.AgentBlock.findById(blockId);
   if (!block) return NextResponse.json({ error: "No such block" }, { status: 404 });
   if (block.builtIn) {
     return NextResponse.json(
@@ -180,7 +181,7 @@ export const DELETE = withAuth(async (_request, { params, user }) => {
 
   // Deleting a block an agent still names would leave that agent referring to nothing, and the
   // worker refuses an unknown key mid-run rather than at the moment somebody caused it.
-  const users = await agentsUsing(block.key, "name");
+  const users = await agentsUsing(db, block.key, "name");
 
   if (users.length > 0) {
     const named = users.map((agent) => agentLabel(agent, String(user._id))).join(", ");

@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { MAX_NOTIFICATION_CHANNELS } from "@/lib/webhook-input";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const KEY = "a".repeat(64);
 process.env.ENCRYPTION_KEY = KEY;
 
-const findById = vi.fn();
+const findOne = vi.fn();
 const findOneAndUpdate = vi.fn();
 const updateOne = vi.fn();
 const exists = vi.fn();
@@ -12,16 +13,17 @@ const save = vi.fn();
 const logProjectAudit = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
-vi.mock("@/models/project", () => ({ Project: { findById, findOneAndUpdate, updateOne, exists } }));
+vi.mock("@/models/project", () => ({ Project: { findOne, findOneAndUpdate, updateOne, exists } }));
 vi.mock("@/lib/projectAudit", () => ({ logProjectAudit }));
 vi.mock("@/lib/project-secrets", () => ({ sanitizeProjectSecrets: (p: unknown) => p }));
 vi.mock("@/lib/middleware", () => ({
   withProjectOwner:
     (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
     (req: Request, ctx: unknown) =>
-      handler(req, { ...(ctx as object), user: { _id: "owner1" } }),
+      handler(req, { ...(ctx as object), user: { _id: "owner1" }, db: scopedToDefaultTenant() }),
 }));
 
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 const { PUT, POST, DELETE } = await import("./route");
 const { decryptSecret } = await import("@/lib/encryption");
 
@@ -63,7 +65,7 @@ beforeEach(() => {
     save,
     toObject: () => ({ notificationChannels: project.notificationChannels }),
   };
-  findById.mockResolvedValue(project);
+  findOne.mockResolvedValue(project);
   // The ceiling-miss path re-checks this to tell "full" from "deleted out from under the
   // request" apart (review) — true by default, since every existing scenario's project is there.
   exists.mockResolvedValue(true);
@@ -157,12 +159,12 @@ describe("PUT /api/projects/:projectId/notifications", () => {
     expect(channel.name).toBe("Ops");
     expect(channel.events).toEqual(["status_changed"]);
     expect(findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: "p1", "notificationChannels._id": C1 },
+      { _id: "p1", "notificationChannels._id": C1, tenant: DEFAULT_TENANT_ID },
       { $set: expect.objectContaining({ "notificationChannels.$.name": "Ops" }) },
       { returnDocument: "before" }
     );
     expect(save).not.toHaveBeenCalled();
-    expect(findById).not.toHaveBeenCalled();
+    expect(findOne).not.toHaveBeenCalled();
   });
 
   // BP-372
@@ -310,7 +312,11 @@ describe("POST /api/projects/:projectId/notifications", () => {
     );
 
     expect(findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: "p1", [`notificationChannels.${MAX_NOTIFICATION_CHANNELS - 1}`]: { $exists: false } },
+      {
+        _id: "p1",
+        [`notificationChannels.${MAX_NOTIFICATION_CHANNELS - 1}`]: { $exists: false },
+        tenant: DEFAULT_TENANT_ID,
+      },
       { $push: { notificationChannels: expect.objectContaining({ name: "Releases", type: "slack" }) } },
       { returnDocument: "after" }
     );
@@ -438,11 +444,11 @@ describe("DELETE /api/projects/:projectId/notifications", () => {
 
     expect(res.status).toBe(200);
     expect(findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: "p1" },
+      { _id: "p1", tenant: DEFAULT_TENANT_ID },
       { $pull: { notificationChannels: { _id: C1 } } },
       { returnDocument: "before" }
     );
-    expect(findById).not.toHaveBeenCalled();
+    expect(findOne).not.toHaveBeenCalled();
     expect(save).not.toHaveBeenCalled();
     expect(logProjectAudit).toHaveBeenCalledWith(
       "p1",

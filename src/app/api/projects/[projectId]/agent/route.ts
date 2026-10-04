@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
+import type { ScopedDb } from "@/lib/db-scope";
 import { withProjectAccess } from "@/lib/middleware";
 import { check } from "@/lib/grants";
-import { Agent } from "@/models/agent";
-import { Project } from "@/models/project";
 import { isRunnable, normaliseComposition } from "@/lib/agent-rules";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { auditValue } from "@/lib/settings-audit";
@@ -12,7 +11,7 @@ import { auditValue } from "@/lib/settings-audit";
 // and this does not. Since BP-358 it does
 // not ride the claim either: the task's own agent is the only thing a claim resolves, and this is
 // the agent the task picker offers first.
-export const PUT = withProjectAccess(async (request, { params, user }) => {
+export const PUT = withProjectAccess(async (request, { params, user, db }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -33,11 +32,11 @@ export const PUT = withProjectAccess(async (request, { params, user }) => {
   // The empty string, and only that, clears it. A default that could be set and never unset left
   // a project stuck with a suggestion it had outgrown, and the picker with no way back (BP-458).
   if (!agentId) {
-    await setDefaultAgent(projectId, null, String(user._id));
+    await setDefaultAgent(db, projectId, null, String(user._id));
     return NextResponse.json({ ok: true });
   }
 
-  const agent = await Agent.findById(agentId, "name scope project composition").lean();
+  const agent = await db.Agent.findById(agentId, "name scope project composition").lean();
   if (!agent) return NextResponse.json({ error: "No such agent" }, { status: 404 });
   if (agent.scope === "project" && String(agent.project) !== String(projectId)) {
     return NextResponse.json({ error: "That agent belongs to another project" }, { status: 400 });
@@ -56,16 +55,17 @@ export const PUT = withProjectAccess(async (request, { params, user }) => {
     );
   }
 
-  await setDefaultAgent(projectId, { id: agentId, name: agent.name }, String(user._id));
+  await setDefaultAgent(db, projectId, { id: agentId, name: agent.name }, String(user._id));
   return NextResponse.json({ ok: true });
 });
 
 async function setDefaultAgent(
+  db: ScopedDb,
   projectId: string,
   next: { id: string; name: string } | null,
   userId: string
 ): Promise<void> {
-  const before = await Project.findOneAndUpdate(
+  const before = await db.Project.findOneAndUpdate(
     { _id: projectId },
     { $set: { "worker.agent": next ? next.id : null } },
     { returnDocument: "before", projection: { "worker.agent": 1 } }
@@ -76,7 +76,7 @@ async function setDefaultAgent(
 
   // After the write, so a failed read costs the name and never the entry or the response
   const previous = previousId
-    ? await Agent.findById(previousId, "name")
+    ? await db.Agent.findById(previousId, "name")
         .lean()
         .catch(() => ({ name: `agent ${previousId}` }))
     : null;

@@ -14,9 +14,8 @@ import {
 import { invalidateResetTokens } from "@/lib/password-reset";
 import { revokeUserCredentials } from "@/lib/session";
 import { logInstanceAudit } from "@/lib/instanceAudit";
-import { User } from "@/models/user";
 
-export const PUT = withAuth(async (request, { user }) => {
+export const PUT = withAuth(async (request, { user, db }) => {
   if (!passwordSignInEnabled()) return passwordSignInOff();
   await connectDB();
 
@@ -48,7 +47,7 @@ export const PUT = withAuth(async (request, { user }) => {
   }
 
   // password is select:false, so the authenticated user object never carries the hash
-  const record = await User.findById(user._id).select("+password");
+  const record = await db.User.findById(user._id).select("+password");
   if (!record) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }

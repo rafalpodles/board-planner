@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
-import { Task } from "@/models/task";
 
 const LIMIT = 10;
 
@@ -10,7 +9,7 @@ const LIMIT = 10;
  * resolves an exact key or searches text across every accessible project — here the project is
  * already known and a partial number has to match by prefix: `1` means BP-1 as well as BP-10..19.
  */
-export const GET = withProjectAccess(async (request, { params }) => {
+export const GET = withProjectAccess(async (request, { params, db }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -27,7 +26,7 @@ export const GET = withProjectAccess(async (request, { params }) => {
     filter.title = { $regex: q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), $options: "i" };
   }
 
-  const tasks = await Task.find(filter, "taskNumber title status")
+  const tasks = await db.Task.find(filter, "taskNumber title status")
     // Digits sort by number so BP-1 precedes BP-10; anything else is a text search, where the most
     // recently touched task is the likelier one to be referring to
     .sort(/^\d+$/.test(q) ? { taskNumber: 1 } : { updatedAt: -1 })

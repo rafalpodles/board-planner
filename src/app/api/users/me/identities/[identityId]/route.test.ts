@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const identityFindOne = vi.fn();
 const identityCount = vi.fn();
 const identityDelete = vi.fn();
 const identityInsert = vi.fn();
 const isEmailConfigured = vi.fn();
-const userFindById = vi.fn();
+const userFindOne = vi.fn();
 const logInstanceAudit = vi.fn();
 const signedInRecently = vi.fn();
 let caller: Record<string, unknown>;
@@ -15,7 +16,7 @@ vi.mock("@/lib/middleware", () => ({
   withAuth:
     (handler: (r: Request, c: unknown) => unknown) =>
     (request: Request, ctx: { params: Promise<Record<string, string>> }) =>
-      handler(request, { params: ctx.params, user: caller }),
+      handler(request, { params: ctx.params, user: caller, db: scopedToDefaultTenant() }),
 }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 const LIVE = { $or: [{ provider: "oidc", issuer: { $in: ["https://id.example.com", "https://id.example.com/"] } }] };
@@ -32,9 +33,10 @@ vi.mock("@/models/identity", () => ({
     collection: { insertOne: identityInsert },
   },
 }));
-vi.mock("@/models/user", () => ({ User: { findById: userFindById } }));
+vi.mock("@/models/user", () => ({ User: { findOne: userFindOne } }));
 
 const { DELETE } = await import("./route");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 
 const ID = "64b0000000000000000000aa";
 const { currentTenantId } = await import("@/lib/tenant-field");
@@ -44,7 +46,7 @@ const unlink = () =>
   });
 const lean = (value: unknown) => ({ lean: () => Promise.resolve(value) });
 const passwordIs = (password?: string) =>
-  userFindById.mockReturnValue({ select: () => lean(password ? { password } : {}) });
+  userFindOne.mockReturnValue({ select: () => lean(password ? { password } : {}) });
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -76,7 +78,7 @@ describe("DELETE /api/users/me/identities/:id", () => {
     const res = await unlink();
 
     expect(res.status).toBe(200);
-    expect(identityExists).toHaveBeenCalledWith({ _id: ID, ...LIVE });
+    expect(identityExists).toHaveBeenCalledWith({ _id: ID, ...LIVE, tenant: DEFAULT_TENANT_ID });
     expect(identityDelete).toHaveBeenCalled();
     expect(identityInsert).not.toHaveBeenCalled();
   });
@@ -85,8 +87,8 @@ describe("DELETE /api/users/me/identities/:id", () => {
     const res = await unlink();
 
     expect(res.status).toBe(200);
-    expect(identityFindOne).toHaveBeenCalledWith({ _id: ID, user: "u1" });
-    expect(identityDelete).toHaveBeenCalledWith({ _id: ID, user: "u1" });
+    expect(identityFindOne).toHaveBeenCalledWith({ _id: ID, user: "u1", tenant: DEFAULT_TENANT_ID });
+    expect(identityDelete).toHaveBeenCalledWith({ _id: ID, user: "u1", tenant: DEFAULT_TENANT_ID });
     expect(logInstanceAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "identity_unlinked" }));
   });
 
@@ -97,7 +99,7 @@ describe("DELETE /api/users/me/identities/:id", () => {
 
     expect(res.status).toBe(409);
     expect((await res.json()).error).toContain("Forgot your password");
-    expect(identityCount).toHaveBeenCalledWith({ user: "u1", _id: { $ne: ID }, ...LIVE });
+    expect(identityCount).toHaveBeenCalledWith({ user: "u1", _id: { $ne: ID }, ...LIVE, tenant: DEFAULT_TENANT_ID });
     expect(identityDelete).not.toHaveBeenCalled();
   });
 
@@ -124,7 +126,7 @@ describe("DELETE /api/users/me/identities/:id", () => {
     const res = await unlink();
 
     expect(res.status).toBe(409);
-    expect(identityCount).toHaveBeenLastCalledWith({ user: "u1", ...LIVE });
+    expect(identityCount).toHaveBeenLastCalledWith({ user: "u1", ...LIVE, tenant: DEFAULT_TENANT_ID });
     expect(identityInsert).toHaveBeenCalledWith(expect.objectContaining({ _id: ID, provider: "oidc" }));
   });
 

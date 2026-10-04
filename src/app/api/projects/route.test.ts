@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const getAuthUser = vi.fn();
 const accessibleProjectIds = vi.fn();
@@ -76,7 +77,7 @@ describe("GET /api/projects", () => {
 
     await GET(request(), ctx());
 
-    expect(projectFind).toHaveBeenCalledWith({});
+    expect(projectFind).toHaveBeenCalledWith({ tenant: DEFAULT_TENANT_ID });
   });
 
   it("confines the query to the granted projects", async () => {
@@ -84,7 +85,7 @@ describe("GET /api/projects", () => {
 
     await GET(request(), ctx());
 
-    expect(projectFind).toHaveBeenCalledWith({ _id: { $in: ["p1"] } });
+    expect(projectFind).toHaveBeenCalledWith({ _id: { $in: ["p1"] }, tenant: DEFAULT_TENANT_ID });
   });
 
   // canAdmin gates every project-admin section of the settings page, so it has to be the grant
@@ -137,6 +138,7 @@ describe("POST /api/projects", () => {
       objectType: "project",
       object: NEW_PROJECT_ID,
       createdBy: ADMIN._id,
+      tenant: DEFAULT_TENANT_ID,
     });
   });
 
@@ -155,7 +157,7 @@ describe("POST /api/projects", () => {
 
     await expect(POST(post({ name: "New", key: "NEW" }), ctx())).rejects.toThrow("duplicate key");
 
-    expect(projectDeleteOne).toHaveBeenCalledWith({ _id: NEW_PROJECT_ID });
+    expect(projectDeleteOne).toHaveBeenCalledWith({ _id: NEW_PROJECT_ID, tenant: DEFAULT_TENANT_ID });
   });
 });
 

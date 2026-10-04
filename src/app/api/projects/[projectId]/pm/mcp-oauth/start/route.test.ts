@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
-const projectFindById = vi.fn();
+const projectFindOne = vi.fn();
 const projectFindOneAndUpdate = vi.fn();
 const pmOauthStateCreate = vi.fn();
 const discoverOauthConfig = vi.fn();
@@ -17,7 +18,7 @@ vi.mock("@/lib/auth", () => ({
 vi.mock("@/lib/grants", () => ({ check }));
 vi.mock("@/lib/projectAudit", () => ({ logProjectAudit }));
 vi.mock("@/models/project", () => ({
-  Project: { findById: projectFindById, findOneAndUpdate: projectFindOneAndUpdate },
+  Project: { findOne: projectFindOne, findOneAndUpdate: projectFindOneAndUpdate },
 }));
 vi.mock("@/models/pmOauthState", () => ({ PmOauthState: { create: pmOauthStateCreate } }));
 vi.mock("@/lib/encryption", () => ({ encryptSecret: (v: string) => `enc:${v}` }));
@@ -66,7 +67,7 @@ beforeEach(() => {
   stored = null;
   getAuthUser.mockResolvedValue(OWNER);
   check.mockResolvedValue(true);
-  projectFindById.mockImplementation(() => ({
+  projectFindOne.mockImplementation(() => ({
     select: () => ({ lean: () => Promise.resolve(stored && copy(stored)) }),
   }));
   // The positional write the route makes, applied the way the database would: only to the server
@@ -115,7 +116,7 @@ describe("POST /api/projects/[projectId]/pm/mcp-oauth/start", () => {
     const response = await POST(request(), ctx());
 
     expect(response.status).toBe(404);
-    expect(projectFindById).toHaveBeenCalledWith(PROJECT_ID);
+    expect(projectFindOne).toHaveBeenCalledWith({ _id: PROJECT_ID, tenant: DEFAULT_TENANT_ID });
     expect(check).toHaveBeenCalledWith(expect.anything(), PROJECT_ID, "admin");
   });
 
@@ -126,7 +127,7 @@ describe("POST /api/projects/[projectId]/pm/mcp-oauth/start", () => {
     const response = await POST(request(), ctx());
 
     expect(response.status).toBe(403);
-    expect(projectFindById).not.toHaveBeenCalled();
+    expect(projectFindOne).not.toHaveBeenCalled();
   });
 });
 

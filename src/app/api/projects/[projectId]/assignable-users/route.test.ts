@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const getAuthUser = vi.fn();
 const grantFindLean = vi.fn();
@@ -58,6 +59,7 @@ describe("GET assignable-users", () => {
         kind: { $ne: "machine" },
         deactivatedAt: null,
         $or: [{ role: "admin" }, { _id: { $in: [U1] } }],
+        tenant: DEFAULT_TENANT_ID,
       },
       "username fullName"
     );

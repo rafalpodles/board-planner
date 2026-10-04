@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { syncGithubPullRequests } from "@/lib/github-sync";
 import { withProjectAccess } from "@/lib/middleware";
-import { Project } from "@/models/project";
 
 // The library already keeps GitHub's own body out of the message (see `refusal`); this is the
 // last cap before it reaches a toast.
@@ -11,7 +10,7 @@ function firstLine(err: unknown): string {
   return message.split("\n")[0].slice(0, 200);
 }
 
-export const POST = withProjectAccess(async (request, { params, user }) => {
+export const POST = withProjectAccess(async (request, { params, user, db }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -23,7 +22,7 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
       ? body.taskNumber
       : undefined;
 
-  const project = await Project.findById(projectId).lean();
+  const project = await db.Project.findById(projectId).lean();
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
+import { scopedToDefaultTenant } from "@/lib/db-scope";
 import { getClientIp } from "@/lib/auth";
 import { consumeEmailChange, releaseEmailChange } from "@/lib/email-change";
 import { revokePendingInvitationsFor } from "@/lib/invitations";
@@ -10,7 +11,6 @@ import { anonymousMultiplier, isRateLimited, recordFailedAttempt, sourceKey } fr
 import { readJsonBody } from "@/lib/request-body";
 import { notifyAddressChanged } from "@/lib/security-mail";
 import { provenanceRefusal } from "@/lib/session";
-import { User } from "@/models/user";
 
 const ATTEMPTS_PER_SOURCE = 20;
 
@@ -23,6 +23,7 @@ const REFUSALS: Record<string, string> = {
 // A POST from the page rather than the link itself: a mail scanner following every link in an
 // inbox would otherwise confirm an address nobody there asked for (BP-359)
 export async function POST(request: Request) {
+  const db = scopedToDefaultTenant();
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
 
@@ -46,21 +47,21 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: REFUSALS[outcome.reason] }, { status: 400 });
   }
 
-  const user = await User.findById(outcome.userId).select("username kind email");
+  const user = await db.User.findById(outcome.userId).select("username kind email");
   if (!user || user.kind === "machine") {
     return NextResponse.json({ error: REFUSALS.unknown }, { status: 400 });
   }
   const previousEmail = user.email ?? "";
 
   if (previousEmail !== outcome.email) {
-    const taken = await User.exists({ email: outcome.email, _id: { $ne: user._id } });
+    const taken = await db.User.exists({ email: outcome.email, _id: { $ne: user._id } });
     if (taken) {
       // Nothing changed, so the link stays good for when the address is free again
       await releaseEmailChange(token, outcome.claimedAt).catch(() => {});
       return NextResponse.json({ error: "That email is already on another account" }, { status: 409 });
     }
     try {
-      await User.updateOne({ _id: user._id }, { $set: { email: outcome.email, emailVerifiedAt: new Date() } });
+      await db.User.updateOne({ _id: user._id }, { $set: { email: outcome.email, emailVerifiedAt: new Date() } });
     } catch (err) {
       await releaseEmailChange(token, outcome.claimedAt).catch(() => {});
       if (duplicateKeyField(err) === "email") {

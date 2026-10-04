@@ -8,17 +8,17 @@ vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/activity", () => ({ logActivity: vi.fn() }));
 vi.mock("@/models/task", () => ({ Task: { findOne: taskFindOne } }));
 vi.mock("@/models/comment", () => ({
-  Comment: {
-    findOne: commentFindOne,
-    findById: () => ({ populate: () => Promise.resolve({ _id: "c1" }) }),
-  },
+  Comment: { findOne: commentFindOne },
 }));
-vi.mock("@/lib/middleware", () => ({
-  withProjectAccess:
-    (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
-    (req: Request, ctx: unknown) =>
-      handler(req, { ...(ctx as object), user: { _id: "author1" } }),
-}));
+vi.mock("@/lib/middleware", async () => {
+  const { scopedToDefaultTenant } = await vi.importActual<typeof import("@/lib/db-scope")>("@/lib/db-scope");
+  return {
+    withProjectAccess:
+      (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
+      (req: Request, ctx: unknown) =>
+        handler(req, { ...(ctx as object), user: { _id: "author1" }, db: scopedToDefaultTenant() }),
+  };
+});
 
 const { PUT } = await import("./route");
 
@@ -39,7 +39,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   taskFindOne.mockResolvedValue({ _id: "t1" });
   comment = { author: { toString: () => "author1" }, body: "before", save };
-  commentFindOne.mockResolvedValue(comment);
+  commentFindOne.mockImplementation((filter: { task?: unknown }) =>
+    "task" in filter ? Promise.resolve(comment) : { populate: () => Promise.resolve({ _id: "c1" }) }
+  );
 });
 
 // BP-323: the create path caps a comment, and an edit is the other way to grow one

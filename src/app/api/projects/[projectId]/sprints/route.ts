@@ -2,17 +2,14 @@ import { NextResponse } from "next/server";
 import mongoose from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
-import { Sprint } from "@/models/sprint";
-import { Task } from "@/models/task";
-import { Project } from "@/models/project";
 import { columnIdsWithRole } from "@/lib/columns";
 import { isObjectIdSegment } from "@/lib/urls";
 
-export const GET = withProjectAccess(async (_request, { params }) => {
+export const GET = withProjectAccess(async (_request, { params, db }) => {
   const { projectId } = await params;
   await connectDB();
 
-  const sprints = await Sprint.find({ project: projectId })
+  const sprints = await db.Sprint.find({ project: projectId })
     .sort({ startDate: -1 })
     .lean();
 
@@ -22,7 +19,7 @@ export const GET = withProjectAccess(async (_request, { params }) => {
 
   // Resolved once for the whole list rather than per sprint: every sprint here belongs to the same
   // project, so they share a board
-  const project = await Project.findById(projectId, "columns estimateFieldId").lean();
+  const project = await db.Project.findById(projectId, "columns estimateFieldId").lean();
   const doneIds = columnIdsWithRole(project, "done");
   const estimateFieldId = project?.estimateFieldId || "";
   // This pipeline runs on the board's poll, so one legacy value must not be able to throw and
@@ -42,7 +39,7 @@ export const GET = withProjectAccess(async (_request, { params }) => {
       }
     : null;
 
-  const counts = await Task.aggregate([
+  const counts = await db.Task.aggregate([
     { $match: { project: new mongoose.Types.ObjectId(projectId), sprint: { $in: sprintIds } } },
     {
       $group: {
@@ -76,7 +73,7 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   return NextResponse.json(result);
 });
 
-export const POST = withProjectAccess(async (request, { params }) => {
+export const POST = withProjectAccess(async (request, { params, db }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -89,7 +86,7 @@ export const POST = withProjectAccess(async (request, { params }) => {
     );
   }
 
-  const sprint = await Sprint.create({
+  const sprint = await db.Sprint.create({
     project: projectId,
     name: body.name,
     startDate: new Date(body.startDate),

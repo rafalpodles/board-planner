@@ -2,11 +2,10 @@ import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
-import { PmMessage } from "@/models/pmMessage";
 import { pmThreadFilter } from "@/lib/pm/thread";
 import { finalizeAbandonedTurns } from "@/lib/pm/abandoned";
 
-export const GET = withProjectAccess(async (request, { params, user }) => {
+export const GET = withProjectAccess(async (request, { params, user, db }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -37,7 +36,7 @@ export const GET = withProjectAccess(async (request, { params, user }) => {
     filter._id = { $lt: before };
   }
 
-  const newestFirst = await PmMessage.find(filter)
+  const newestFirst = await db.PmMessage.find(filter)
     .sort({ _id: -1 })
     .limit(limit + 1)
     .populate("triggeredBy", "username fullName");

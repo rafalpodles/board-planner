@@ -2,11 +2,9 @@ import crypto from "crypto";
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectOwner } from "@/lib/middleware";
-import { Project } from "@/models/project";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { auditChange } from "@/lib/settings-audit";
 import { serverNamed, writeServerOauth } from "@/lib/pm/oauth-writes";
-import { PmOauthState } from "@/models/pmOauthState";
 import { encryptSecret } from "@/lib/encryption";
 import { selfOrigin, ORIGIN_REQUIRED } from "@/lib/session";
 import {
@@ -19,12 +17,12 @@ import {
 
 export const maxDuration = 60;
 
-export const POST = withProjectOwner(async (request, { params, user }) => {
+export const POST = withProjectOwner(async (request, { params, user, db }) => {
   await connectDB();
   const { projectId } = await params;
   const { name } = await request.json();
 
-  const project = await Project.findById(projectId).select("pm.mcpServers").lean();
+  const project = await db.Project.findById(projectId).select("pm.mcpServers").lean();
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
@@ -145,7 +143,7 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
 
   const { verifier, challenge } = createPkce();
   const state = crypto.randomBytes(32).toString("base64url");
-  await PmOauthState.create({
+  await db.PmOauthState.create({
     state,
     project: projectId,
     serverName: server.name,

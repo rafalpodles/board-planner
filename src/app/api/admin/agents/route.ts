@@ -1,16 +1,15 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withAdmin } from "@/lib/middleware";
-import { Project } from "@/models/project";
 import { getSettings } from "@/models/settings";
 import { isPmAvailable } from "@/lib/pm/config";
 import { DEFAULT_PM_MODEL } from "@/lib/pm/openrouter";
 
-export const GET = withAdmin(async () => {
+export const GET = withAdmin(async (_request, { db }) => {
   await connectDB();
 
   const [projects, settings] = await Promise.all([
-    Project.find({}, "key name icon pm").sort({ key: 1 }).lean(),
+    db.Project.find({}, "key name icon pm").sort({ key: 1 }).lean(),
     getSettings(),
   ]);
 

@@ -6,10 +6,11 @@ import {
   TASK_TITLE_MAX_LENGTH,
   TEMPLATE_NAME_MAX_LENGTH,
 } from "@/lib/identifiers";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
-const projectFindById = vi.fn();
+const projectFindOne = vi.fn();
 const projectFindOneAndUpdate = vi.fn();
 const projectExists = vi.fn();
 const logProjectAudit = vi.fn();
@@ -18,7 +19,7 @@ vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ getAuthUser, RateLimitError: class extends Error {} }));
 vi.mock("@/lib/grants", () => ({ check }));
 vi.mock("@/models/project", () => ({
-  Project: { findById: projectFindById, findOneAndUpdate: projectFindOneAndUpdate, exists: projectExists },
+  Project: { findOne: projectFindOne, findOneAndUpdate: projectFindOneAndUpdate, exists: projectExists },
 }));
 vi.mock("@/lib/projectAudit", () => ({ logProjectAudit }));
 
@@ -48,7 +49,7 @@ const template = (id: string, name: string): Template => ({
 /** The project as stored, with the templates it already holds. */
 function project(...templates: Template[]) {
   const doc = { taskTemplates: templates, save: vi.fn(async () => {}) };
-  projectFindById.mockResolvedValue(doc);
+  projectFindOne.mockResolvedValue(doc);
   /**
    * The add is an atomic `$push` whose filter carries the ceiling; the stub applies it the way the
    * database would, refusal included — and answers a **different document** from the one
@@ -138,7 +139,7 @@ describe("POST /api/projects/:projectId/templates", () => {
   });
 
   it("404s when the project does not exist", async () => {
-    projectFindById.mockResolvedValue(null);
+    projectFindOne.mockResolvedValue(null);
 
     expect((await call(POST, { name: "Bug" })).status).toBe(404);
   });
@@ -183,7 +184,7 @@ describe("POST /api/projects/:projectId/templates", () => {
     await call(POST, { name: "Bug" });
 
     expect(projectFindOneAndUpdate).toHaveBeenCalledWith(
-      { _id: PROJECT_ID, [`taskTemplates.${MAX_TASK_TEMPLATES - 1}`]: { $exists: false } },
+      { _id: PROJECT_ID, [`taskTemplates.${MAX_TASK_TEMPLATES - 1}`]: { $exists: false }, tenant: DEFAULT_TENANT_ID },
       { $push: { taskTemplates: expect.objectContaining({ name: "Bug" }) } },
       { returnDocument: "after" }
     );
@@ -249,7 +250,7 @@ describe("PUT /api/projects/:projectId/templates", () => {
   });
 
   it("404s when the project does not exist", async () => {
-    projectFindById.mockResolvedValue(null);
+    projectFindOne.mockResolvedValue(null);
 
     expect((await call(PUT, { templateId: "t1", title: "x" })).status).toBe(404);
   });
@@ -384,7 +385,7 @@ describe("the gates every verb sits behind", () => {
     expect((await call(POST, { name: "Bug" })).status).toBe(401);
     expect((await call(PUT, { templateId: "t1", title: "x" })).status).toBe(401);
     expect((await call(DELETE, { templateId: "t1" })).status).toBe(401);
-    expect(projectFindById).not.toHaveBeenCalled();
+    expect(projectFindOne).not.toHaveBeenCalled();
   });
 
   it("403s somebody with no access to the project", async () => {
@@ -393,6 +394,6 @@ describe("the gates every verb sits behind", () => {
     expect((await call(POST, { name: "Bug" })).status).toBe(403);
     expect((await call(PUT, { templateId: "t1", title: "x" })).status).toBe(403);
     expect((await call(DELETE, { templateId: "t1" })).status).toBe(403);
-    expect(projectFindById).not.toHaveBeenCalled();
+    expect(projectFindOne).not.toHaveBeenCalled();
   });
 });

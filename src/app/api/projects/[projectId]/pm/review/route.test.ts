@@ -1,13 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const findById = vi.fn();
+const findOne = vi.fn();
 const startBoardReview = vi.fn();
 const after = vi.fn();
 let user: Record<string, unknown> = {};
 
 vi.mock("next/server", async (importOriginal) => ({ ...(await importOriginal<typeof import("next/server")>()), after }));
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
-vi.mock("@/models/project", () => ({ Project: { findById } }));
+vi.mock("@/models/project", () => ({ Project: { findOne } }));
 vi.mock("@/lib/pm/pm-user", () => ({ getPmUser: async () => ({ _id: "pm-user" }) }));
 vi.mock("@/lib/pm/scheduler", () => ({ startBoardReview }));
 const isPmAvailable = vi.fn();
@@ -16,9 +16,10 @@ vi.mock("@/lib/middleware", () => ({
   withProjectOwner:
     (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
     (req: Request, ctx: object) =>
-      handler(req, { ...ctx, user }),
+      handler(req, { ...ctx, user, db: scopedToDefaultTenant() }),
 }));
 
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 const { POST } = await import("./route");
 
 const run = () =>
@@ -27,7 +28,7 @@ const run = () =>
 beforeEach(() => {
   vi.clearAllMocks();
   user = { _id: "owner", viaMachineCredential: false };
-  findById.mockReturnValue({ lean: async () => ({ _id: "p1", key: "BP", pm: { enabled: true } }) });
+  findOne.mockReturnValue({ lean: async () => ({ _id: "p1", key: "BP", pm: { enabled: true } }) });
   startBoardReview.mockResolvedValue({ status: "started", done: Promise.resolve() });
   isPmAvailable.mockReturnValue(true);
 });
@@ -49,7 +50,7 @@ describe("POST /api/projects/:projectId/pm/review", () => {
   });
 
   it("answers 404 for a project that does not exist", async () => {
-    findById.mockReturnValue({ lean: async () => null });
+    findOne.mockReturnValue({ lean: async () => null });
 
     expect((await run()).status).toBe(404);
     expect(startBoardReview).not.toHaveBeenCalled();
@@ -72,7 +73,7 @@ describe("POST /api/projects/:projectId/pm/review", () => {
   });
 
   it("says why when the PM is off or locked for the project", async () => {
-    findById.mockReturnValue({ lean: async () => ({ _id: "p1", key: "BP", pm: { enabled: true, lockedByInstance: true } }) });
+    findOne.mockReturnValue({ lean: async () => ({ _id: "p1", key: "BP", pm: { enabled: true, lockedByInstance: true } }) });
 
     const res = await run();
 

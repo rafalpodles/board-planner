@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
+import type { ScopedDb } from "@/lib/db-scope";
 import { withProjectAccess, withProjectOwner } from "@/lib/middleware";
-import { Project } from "@/models/project";
-import { Task } from "@/models/task";
 import { check } from "@/lib/grants";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { hasControlCharacters } from "@/lib/identifiers";
@@ -21,15 +20,15 @@ import {
 const FLAGS = ["required", "showOnCard", "showInList", "filterable", "archived"] as const;
 
 // Only while it still points at this field when the write runs
-async function clearEstimateField(projectId: string, fieldId: string): Promise<boolean> {
-  const cleared = await Project.updateOne(
+async function clearEstimateField(db: ScopedDb, projectId: string, fieldId: string): Promise<boolean> {
+  const cleared = await db.Project.updateOne(
     { _id: projectId, estimateFieldId: fieldId },
     { $set: { estimateFieldId: "" } }
   );
   return cleared.modifiedCount > 0;
 }
 
-export const PATCH = withProjectAccess(async (request, { params, user }) => {
+export const PATCH = withProjectAccess(async (request, { params, user, db }) => {
   const { projectId, fieldId: rawFieldId } = await params;
   await connectDB();
 
@@ -38,7 +37,7 @@ export const PATCH = withProjectAccess(async (request, { params, user }) => {
     return NextResponse.json({ error: "Field not found" }, { status: 404 });
   }
   const body = await request.json();
-  const project = await Project.findById(projectId).select("customFields").lean();
+  const project = await db.Project.findById(projectId).select("customFields").lean();
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
@@ -107,7 +106,7 @@ export const PATCH = withProjectAccess(async (request, { params, user }) => {
   // This field's own paths only: saving the whole list put back a field added or edited meanwhile.
   // A new name is checked in the write too, since another rename may have taken it since the read.
   const renamed = changes.name !== undefined;
-  const before = await Project.findOneAndUpdate(
+  const before = await db.Project.findOneAndUpdate(
     {
       _id: projectId,
       "customFields._id": fieldId,
@@ -128,7 +127,7 @@ export const PATCH = withProjectAccess(async (request, { params, user }) => {
   ).lean();
   if (!before) {
     if (renamed) {
-      const current = await Project.findById(projectId).select("customFields").lean();
+      const current = await db.Project.findById(projectId).select("customFields").lean();
       if ((current?.customFields || []).some((f) => String(f._id) === fieldId)) {
         return NextResponse.json({ error: "Field with this name already exists" }, { status: 409 });
       }
@@ -141,7 +140,7 @@ export const PATCH = withProjectAccess(async (request, { params, user }) => {
   // An archived field vanishes from every picker while the designation would survive,
   // so archiving strands the pointer exactly like deleting the field does.
   const estimateCleared =
-    (changes.archived ?? was.archived) === true && (await clearEstimateField(projectId, fieldId));
+    (changes.archived ?? was.archived) === true && (await clearEstimateField(db, projectId, fieldId));
 
   const lines = customFieldChanges(was, { ...was, ...changes });
   if (estimateCleared) lines.push(`Estimate field: ${was.name} → none`);
@@ -156,20 +155,20 @@ export const PATCH = withProjectAccess(async (request, { params, user }) => {
   return NextResponse.json(after.toObject().customFields);
 });
 
-export const DELETE = withProjectOwner(async (_request, { params, user }) => {
+export const DELETE = withProjectOwner(async (_request, { params, user, db }) => {
   const { projectId, fieldId: rawFieldId } = await params;
   await connectDB();
 
   const fieldId = canonicalObjectId(rawFieldId);
   if (!fieldId) {
-    const project = await Project.findById(projectId).select("customFields");
+    const project = await db.Project.findById(projectId).select("customFields");
     if (!project) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
     return NextResponse.json(project.customFields);
   }
 
-  const before = await Project.findOneAndUpdate(
+  const before = await db.Project.findOneAndUpdate(
     { _id: projectId },
     { $pull: { customFields: { _id: fieldId } } },
     { returnDocument: "before" }
@@ -179,10 +178,10 @@ export const DELETE = withProjectOwner(async (_request, { params, user }) => {
   }
 
   const removed = (before.customFields || []).find((f) => String(f._id) === fieldId);
-  const estimateCleared = await clearEstimateField(projectId, fieldId);
+  const estimateCleared = await clearEstimateField(db, projectId, fieldId);
 
   // Clean up orphaned values from all tasks in this project
-  await Task.updateMany(
+  await db.Task.updateMany(
     { project: projectId },
     { $unset: { [`customFieldValues.${fieldId}`]: "" } }
   );

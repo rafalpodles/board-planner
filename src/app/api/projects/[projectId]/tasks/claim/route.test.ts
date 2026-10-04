@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { BoardCannotClaim } from "@/lib/claim-refusal";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const verifyWorkerCredential = vi.fn();
 const verdictFor = vi.fn();
@@ -7,12 +8,12 @@ const claimNextTask = vi.fn();
 const releaseExpiredTasks = vi.fn();
 const resolveProjectId = vi.fn();
 
-const projectFindById = vi.fn();
+const projectFindOne = vi.fn();
 const workerFindOthers = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/project", () => ({
-  Project: { findById: () => ({ select: () => ({ lean: projectFindById }) }) },
+  Project: { findOne: () => ({ select: () => ({ lean: projectFindOne }) }) },
 }));
 vi.mock("@/models/worker", () => ({
   Worker: { find: () => ({ select: workerFindOthers }) },
@@ -46,22 +47,25 @@ vi.mock("@/models/agentRun", () => ({
 // branch where it resolves to none, which no test reached while this always succeeded.
 const snapshotFor = vi.fn(async () => ({ agentId: "a1", name: "Default", sequence: [] }));
 vi.mock("@/lib/agent-snapshot", () => ({ snapshotFor }));
-vi.mock("@/lib/middleware", () => ({
-  resolveProjectId,
-  protocolOf: (r: Request) => Number(r.headers.get("x-cp-protocol") ?? NaN),
-  withWorker:
-    (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
-    async (req: Request, ctx: { params: Promise<Record<string, string>> }) => {
-      const auth = req.headers.get("authorization") ?? "";
-      const id = req.headers.get("x-worker-id") ?? "";
-      if (!auth.startsWith("Bearer ") || !id) {
-        return new Response(JSON.stringify({ error: "Worker credential required" }), { status: 401 });
-      }
-      const worker = await verifyWorkerCredential(id, auth.slice(7));
-      if (!worker) return new Response("{}", { status: 401 });
-      return handler(req, { ...ctx, worker });
-    },
-}));
+vi.mock("@/lib/middleware", async () => {
+  const { scopedToDefaultTenant } = await vi.importActual<typeof import("@/lib/db-scope")>("@/lib/db-scope");
+  return {
+    resolveProjectId,
+    protocolOf: (r: Request) => Number(r.headers.get("x-cp-protocol") ?? NaN),
+    withWorker:
+      (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
+      async (req: Request, ctx: { params: Promise<Record<string, string>> }) => {
+        const auth = req.headers.get("authorization") ?? "";
+        const id = req.headers.get("x-worker-id") ?? "";
+        if (!auth.startsWith("Bearer ") || !id) {
+          return new Response(JSON.stringify({ error: "Worker credential required" }), { status: 401 });
+        }
+        const worker = await verifyWorkerCredential(id, auth.slice(7));
+        if (!worker) return new Response("{}", { status: 401 });
+        return handler(req, { ...ctx, worker, db: scopedToDefaultTenant() });
+      },
+  };
+});
 
 const { POST } = await import("./route");
 
@@ -103,7 +107,7 @@ function hydrated(fields: Record<string, unknown>) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  projectFindById.mockResolvedValue({ _id: "p1", githubRepo: "owner/repo", worker: { enabled: true } });
+  projectFindOne.mockResolvedValue({ _id: "p1", githubRepo: "owner/repo", worker: { enabled: true } });
   workerFindOthers.mockResolvedValue([]);
   resolveProjectId.mockResolvedValue(OID);
   verifyWorkerCredential.mockResolvedValue({ _id: OID, assignments: [] });
@@ -240,7 +244,10 @@ describe("POST /tasks/claim", () => {
 
       await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
-      expect(agentRunFindOneArgs).toHaveBeenCalledWith({ task: "t-specific" }, "outcome detail");
+      expect(agentRunFindOneArgs).toHaveBeenCalledWith(
+        { task: "t-specific", tenant: DEFAULT_TENANT_ID },
+        "outcome detail"
+      );
       expect(agentRunSort).toHaveBeenCalledWith({ finishedAt: -1 });
     });
   });

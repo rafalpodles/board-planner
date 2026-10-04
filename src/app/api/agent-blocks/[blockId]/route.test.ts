@@ -3,7 +3,7 @@ import mongoose from "mongoose";
 import { AGENT_BUCKETS } from "@/types";
 
 const getAuthUser = vi.fn();
-const blockFindById = vi.fn();
+const blockFindOne = vi.fn();
 const agentFind = vi.fn();
 const allBlocks = vi.fn();
 
@@ -12,7 +12,7 @@ vi.mock("@/lib/auth", () => ({
   getAuthUser,
   RateLimitError: class RateLimitError extends Error {},
 }));
-vi.mock("@/models/agentBlock", () => ({ AgentBlock: { findById: blockFindById } }));
+vi.mock("@/models/agentBlock", () => ({ AgentBlock: { findOne: blockFindOne } }));
 vi.mock("@/models/agent", () => ({ Agent: { find: agentFind } }));
 vi.mock("@/lib/agent-service", () => ({ toApiBlock: (b: unknown) => b, allBlocks }));
 
@@ -77,7 +77,7 @@ describe("changing a block", () => {
   it("refuses the member who created it", async () => {
     getAuthUser.mockResolvedValue(MEMBER);
     const doc = block();
-    blockFindById.mockResolvedValue(doc);
+    blockFindOne.mockResolvedValue(doc);
 
     const response = await put({ prompt: "rm -rf ~" });
 
@@ -89,7 +89,7 @@ describe("changing a block", () => {
   it("refuses a member on a block with no author recorded", async () => {
     getAuthUser.mockResolvedValue(MEMBER);
     const doc = block({ createdBy: null });
-    blockFindById.mockResolvedValue(doc);
+    blockFindOne.mockResolvedValue(doc);
 
     expect((await put({ prompt: "rm -rf ~" })).status).toBe(403);
     expect(doc.save).not.toHaveBeenCalled();
@@ -98,7 +98,7 @@ describe("changing a block", () => {
   it("lets an instance admin change the prompt", async () => {
     getAuthUser.mockResolvedValue(ADMIN);
     const doc = block();
-    blockFindById.mockResolvedValue(doc);
+    blockFindOne.mockResolvedValue(doc);
 
     const response = await put({ prompt: "a considered instruction" });
 
@@ -122,7 +122,7 @@ describe("changing what a block runs as (BP-743, BP-755)", () => {
 
   it("sets a step's model and what it may touch", async () => {
     const doc = step();
-    blockFindById.mockResolvedValue(doc);
+    blockFindOne.mockResolvedValue(doc);
 
     const response = await put({ model: "sonnet", capability: "edit" });
 
@@ -133,7 +133,7 @@ describe("changing what a block runs as (BP-743, BP-755)", () => {
 
   it("takes a model id beyond the two the form offers", async () => {
     const doc = step();
-    blockFindById.mockResolvedValue(doc);
+    blockFindOne.mockResolvedValue(doc);
 
     expect((await put({ model: "claude-haiku-4-5" })).status).toBe(200);
     expect(doc).toMatchObject({ model: "claude-haiku-4-5" });
@@ -141,7 +141,7 @@ describe("changing what a block runs as (BP-743, BP-755)", () => {
 
   it("leaves both alone when the edit does not name them", async () => {
     const doc = step();
-    blockFindById.mockResolvedValue(doc);
+    blockFindOne.mockResolvedValue(doc);
 
     expect((await put({ name: "Renamed" })).status).toBe(200);
     expect(doc).toMatchObject({ name: "Renamed", model: "opus", capability: "read-only" });
@@ -152,7 +152,7 @@ describe("changing what a block runs as (BP-743, BP-755)", () => {
     ["model", { model: "opus --dangerously-skip" }],
   ])("refuses an unknown %s and writes nothing else either", async (_f, extra) => {
     const doc = step();
-    blockFindById.mockResolvedValue(doc);
+    blockFindOne.mockResolvedValue(doc);
 
     const response = await put({ name: "Renamed", ...extra });
 
@@ -180,7 +180,7 @@ describe("changing what a block runs as (BP-743, BP-755)", () => {
     ["a gate kind on a step", step(), { gateKind: "build" }],
     ["parameters on a step", step(), { params: { maxLines: "1" } }],
   ])("refuses %s rather than ignoring it", async (_name, doc, body) => {
-    blockFindById.mockResolvedValue(doc);
+    blockFindOne.mockResolvedValue(doc);
 
     expect((await put(body)).status).toBe(400);
     expect(doc.save).not.toHaveBeenCalled();
@@ -188,7 +188,7 @@ describe("changing what a block runs as (BP-743, BP-755)", () => {
 
   it("still takes a name and description on a step the worker performs itself", async () => {
     const doc = block({ deterministic: true, prompt: "" });
-    blockFindById.mockResolvedValue(doc);
+    blockFindOne.mockResolvedValue(doc);
 
     expect((await put({ name: "Push it", description: "d", prompt: "" })).status).toBe(200);
     expect(doc).toMatchObject({ name: "Push it", description: "d" });
@@ -202,7 +202,7 @@ describe("changing what a block runs as (BP-743, BP-755)", () => {
     ["another kind the worker does implement", "test-run", /^A gate's kind is fixed/],
   ])("refuses a gate changed to %s", async (_name, gateKind, error) => {
     const doc = gate();
-    blockFindById.mockResolvedValue(doc);
+    blockFindOne.mockResolvedValue(doc);
 
     const response = await put({ gateKind });
 
@@ -214,7 +214,7 @@ describe("changing what a block runs as (BP-743, BP-755)", () => {
 
   it("takes the kind it already has, as a no-op", async () => {
     const doc = gate();
-    blockFindById.mockResolvedValue(doc);
+    blockFindOne.mockResolvedValue(doc);
 
     expect((await put({ gateKind: "diff-size", name: "Small" })).status).toBe(200);
     expect(doc).toMatchObject({ gateKind: "diff-size", name: "Small" });
@@ -222,7 +222,7 @@ describe("changing what a block runs as (BP-743, BP-755)", () => {
 
   it("keeps a gate's kind when the edit does not name one, and only the parameters it declares", async () => {
     const doc = gate();
-    blockFindById.mockResolvedValue(doc);
+    blockFindOne.mockResolvedValue(doc);
 
     expect((await put({ params: { maxLines: "150", command: "rm -rf ~" } })).status).toBe(200);
     expect(doc).toMatchObject({ gateKind: "diff-size" });
@@ -231,7 +231,7 @@ describe("changing what a block runs as (BP-743, BP-755)", () => {
 
   it("refuses a review gate's model that is not a model name", async () => {
     const doc = gate({ gateKind: "review", params: { focus: "general", model: "opus" } });
-    blockFindById.mockResolvedValue(doc);
+    blockFindOne.mockResolvedValue(doc);
 
     expect((await put({ params: { focus: "general", model: "opus && curl" } })).status).toBe(400);
     expect(doc.save).not.toHaveBeenCalled();
@@ -259,7 +259,7 @@ describe("changing what a step may touch, under agents that already use it (BP-7
   const breaksOnWrite = { analysis: [{ key: "a-key" }], verification: [{ key: "build" }] };
 
   async function refusal() {
-    blockFindById.mockResolvedValue(block({ ...investigate }));
+    blockFindOne.mockResolvedValue(block({ ...investigate }));
     const response = await put({ capability: "edit" });
     expect(response.status).toBe(409);
     return ((await response.json()) as { error: string }).error;
@@ -277,7 +277,7 @@ describe("changing what a step may touch, under agents that already use it (BP-7
       composition: { analysis: [{ key: "a-key" }], verification: [{ key: "build" }] },
     });
     const doc = block({ ...investigate });
-    blockFindById.mockResolvedValue(doc);
+    blockFindOne.mockResolvedValue(doc);
 
     const response = await put({ capability: "edit" });
 
@@ -296,7 +296,7 @@ describe("changing what a step may touch, under agents that already use it (BP-7
       },
     });
     const doc = block({ ...investigate });
-    blockFindById.mockResolvedValue(doc);
+    blockFindOne.mockResolvedValue(doc);
 
     expect((await put({ capability: "edit" })).status).toBe(200);
     expect(doc.save).toHaveBeenCalledOnce();
@@ -309,7 +309,7 @@ describe("changing what a step may touch, under agents that already use it (BP-7
       composition: { analysis: [{ key: "a-key" }], implementation: [{ key: "implement" }] },
     });
     const doc = block({ ...investigate });
-    blockFindById.mockResolvedValue(doc);
+    blockFindOne.mockResolvedValue(doc);
 
     expect((await put({ capability: "edit" })).status).toBe(200);
   });
@@ -389,14 +389,14 @@ describe("changing what a step may touch, under agents that already use it (BP-7
       },
     });
     const doc = block({ ...investigate });
-    blockFindById.mockResolvedValue(doc);
+    blockFindOne.mockResolvedValue(doc);
 
     expect((await put({ name: "Look around", capability: "edit" })).status).toBe(200);
   });
 
   it("does not look at agents when what it may touch is resent unchanged", async () => {
     const doc = block({ ...investigate });
-    blockFindById.mockResolvedValue(doc);
+    blockFindOne.mockResolvedValue(doc);
 
     expect((await put({ capability: "read-only", name: "Look" })).status).toBe(200);
     expect(agentFind).not.toHaveBeenCalled();
@@ -423,7 +423,7 @@ describe("deleting a block", () => {
 
   it("builds an in-use query Mongoose can cast", async () => {
     getAuthUser.mockResolvedValue(ADMIN);
-    blockFindById.mockResolvedValue(block());
+    blockFindOne.mockResolvedValue(block());
 
     await del();
 
@@ -436,7 +436,7 @@ describe("deleting a block", () => {
   // Not decoration: nothing migrates the pre-object shape, so agents stored that way are live.
   it("searches every bucket for the pre-object shape as well", async () => {
     getAuthUser.mockResolvedValue(ADMIN);
-    blockFindById.mockResolvedValue(block());
+    blockFindOne.mockResolvedValue(block());
 
     await del();
 
@@ -462,7 +462,7 @@ describe("deleting a block", () => {
   it("refuses the member who created it", async () => {
     getAuthUser.mockResolvedValue(MEMBER);
     const doc = block();
-    blockFindById.mockResolvedValue(doc);
+    blockFindOne.mockResolvedValue(doc);
 
     expect((await del()).status).toBe(403);
     expect(doc.deleteOne).not.toHaveBeenCalled();
@@ -472,7 +472,7 @@ describe("deleting a block", () => {
   // referring to nothing — refused for everyone, admin included
   it("refuses a built-in even for an admin", async () => {
     getAuthUser.mockResolvedValue(ADMIN);
-    blockFindById.mockResolvedValue(block({ builtIn: true }));
+    blockFindOne.mockResolvedValue(block({ builtIn: true }));
 
     expect((await del()).status).toBe(400);
   });
@@ -480,7 +480,7 @@ describe("deleting a block", () => {
   it("lets an instance admin delete one nothing uses", async () => {
     getAuthUser.mockResolvedValue(ADMIN);
     const doc = block();
-    blockFindById.mockResolvedValue(doc);
+    blockFindOne.mockResolvedValue(doc);
 
     expect((await del()).status).toBe(200);
     expect(doc.deleteOne).toHaveBeenCalledOnce();
@@ -489,7 +489,7 @@ describe("deleting a block", () => {
   it("refuses one in use, naming what the admin may see and saying whose the rest are", async () => {
     getAuthUser.mockResolvedValue(ADMIN);
     const doc = block();
-    blockFindById.mockResolvedValue(doc);
+    blockFindOne.mockResolvedValue(doc);
     agentFind.mockReturnValue(
       found([
         { name: "Bob's scratch", scope: "user", owner: { _id: "bob-1", username: "bob" } },

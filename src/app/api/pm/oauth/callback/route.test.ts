@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const findOne = vi.fn();
 const findOneAndDelete = vi.fn();
@@ -7,7 +8,7 @@ const check = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/pmOauthState", () => ({ PmOauthState: { findOne, findOneAndDelete } }));
-vi.mock("@/models/project", () => ({ Project: { findById: vi.fn(), findOneAndUpdate: vi.fn() } }));
+vi.mock("@/models/project", () => ({ Project: { findOne: vi.fn(), findOneAndUpdate: vi.fn() } }));
 const logProjectAudit = vi.fn();
 vi.mock("@/lib/projectAudit", () => ({ logProjectAudit }));
 vi.mock("@/lib/auth", () => ({ getAuthUser }));
@@ -95,7 +96,7 @@ describe("GET /api/pm/oauth/callback — binding the flow to whoever started it"
     const res = await GET(approveRequest());
 
     expect(res.headers.get("location")).toBe("/projects/p1/settings?mcp_oauth=error%3Awrong_user");
-    expect(findOneAndDelete).toHaveBeenCalledWith({ state: "s" });
+    expect(findOneAndDelete).toHaveBeenCalledWith({ state: "s", tenant: DEFAULT_TENANT_ID });
   });
 
   it("refuses when nobody is signed in, and consumes the state since a real code was presented", async () => {
@@ -105,7 +106,7 @@ describe("GET /api/pm/oauth/callback — binding the flow to whoever started it"
     const res = await GET(approveRequest());
 
     expect(res.headers.get("location")).toBe("/projects/p1/settings?mcp_oauth=error%3Awrong_user");
-    expect(findOneAndDelete).toHaveBeenCalledWith({ state: "s" });
+    expect(findOneAndDelete).toHaveBeenCalledWith({ state: "s", tenant: DEFAULT_TENANT_ID });
   });
 
   it("refuses a machine credential even when its user id matches", async () => {
@@ -140,7 +141,7 @@ describe("GET /api/pm/oauth/callback — binding the flow to whoever started it"
 
     expect(check).toHaveBeenCalledWith({ _id: "owner1", viaMachineCredential: false }, "p1", "admin");
     expect(res.headers.get("location")).toBe("/projects/p1/settings?mcp_oauth=error%3Awrong_user");
-    expect(findOneAndDelete).toHaveBeenCalledWith({ state: "s" });
+    expect(findOneAndDelete).toHaveBeenCalledWith({ state: "s", tenant: DEFAULT_TENANT_ID });
   });
 
   it("admits the user who started the flow, and consumes the state", async () => {
@@ -148,13 +149,13 @@ describe("GET /api/pm/oauth/callback — binding the flow to whoever started it"
     findOneAndDelete.mockResolvedValue(PENDING);
     getAuthUser.mockResolvedValue({ _id: "owner1", viaMachineCredential: false });
     const { Project } = await import("@/models/project");
-    vi.mocked(Project.findById).mockReturnValue({
+    vi.mocked(Project.findOne).mockReturnValue({
       select: () => ({ lean: () => Promise.resolve(null) }),
     } as never);
 
     const res = await GET(approveRequest());
 
-    expect(findOneAndDelete).toHaveBeenCalledWith({ state: "s" });
+    expect(findOneAndDelete).toHaveBeenCalledWith({ state: "s", tenant: DEFAULT_TENANT_ID });
     expect(res.headers.get("location")).toBe("/projects/p1/settings?mcp_oauth=error%3Aconnection_gone");
   });
 
@@ -169,7 +170,7 @@ describe("GET /api/pm/oauth/callback — binding the flow to whoever started it"
 
     expect(res.headers.get("location")).toBe("/projects/p1/settings?mcp_oauth=error%3Awrong_user");
     // A real code was presented, same as any other refusal here — consumed for the same reason.
-    expect(findOneAndDelete).toHaveBeenCalledWith({ state: "s" });
+    expect(findOneAndDelete).toHaveBeenCalledWith({ state: "s", tenant: DEFAULT_TENANT_ID });
   });
 
   it("does not consume the state on a provenance failure when there is no code", async () => {
@@ -198,7 +199,7 @@ describe("GET /api/pm/oauth/callback — storing the connection", () => {
   async function stored(oauth: Record<string, unknown>, written: unknown = "same") {
     const { Project } = await import("@/models/project");
     const project = { _id: "p1", pm: { mcpServers: [server(oauth)] } };
-    vi.mocked(Project.findById).mockReturnValue({
+    vi.mocked(Project.findOne).mockReturnValue({
       select: () => ({ lean: () => Promise.resolve(project) }),
     } as never);
     vi.mocked(Project.findOneAndUpdate).mockReturnValue({

@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const getAuthUser = vi.fn();
 const compare = vi.fn();
-const userFindById = vi.fn();
-const userFindByIdAndUpdate = vi.fn();
+const userFindOne = vi.fn();
+const userFindOneAndUpdate = vi.fn();
 const userExists = vi.fn();
 const invalidateResetTokens = vi.fn();
 const logInstanceAudit = vi.fn();
@@ -41,7 +42,7 @@ vi.mock("@/lib/email", async () => {
 vi.mock("@/lib/grants", () => ({ check: vi.fn(), accessibleProjectIds: vi.fn() }));
 vi.mock("bcryptjs", () => ({ default: { compare } }));
 vi.mock("@/models/user", () => ({
-  User: { findById: userFindById, findByIdAndUpdate: userFindByIdAndUpdate, exists: userExists },
+  User: { findOne: userFindOne, findOneAndUpdate: userFindOneAndUpdate, exists: userExists },
 }));
 
 const { PUT } = await import("./route");
@@ -74,11 +75,11 @@ beforeEach(async () => {
   await resetRateLimits();
   getAuthUser.mockResolvedValue(signedIn());
   const record = { _id: "u1", username: "owner", email: "old@example.com", password: "stored-hash" };
-  userFindById.mockReturnValue(
+  userFindOne.mockReturnValue(
     Object.assign(Promise.resolve(record), { select: () => Promise.resolve(record) })
   );
   userExists.mockResolvedValue(null);
-  userFindByIdAndUpdate.mockResolvedValue({ _id: "u1", email: "new@example.com" });
+  userFindOneAndUpdate.mockResolvedValue({ _id: "u1", email: "new@example.com" });
   compare.mockResolvedValue(true);
   isEmailConfigured.mockReturnValue(true);
   issueEmailChange.mockResolvedValue("cpe_the-token");
@@ -96,19 +97,19 @@ describe("PUT /api/users/me — changing the address that can reset the password
     expect(await response.json()).toEqual({
       error: "Your current password is required to change your email address",
     });
-    expect(userFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(userFindOneAndUpdate).not.toHaveBeenCalled();
   });
 
   // BP-828: an account made through a provider has no password to prove the change with
   it("refuses an account with no password, without counting it as a wrong guess", async () => {
     const record = { _id: "u1", username: "owner", email: "old@example.com" };
-    userFindById.mockReturnValue(Object.assign(Promise.resolve(record), { select: () => Promise.resolve(record) }));
+    userFindOne.mockReturnValue(Object.assign(Promise.resolve(record), { select: () => Promise.resolve(record) }));
 
     const response = await PUT(put({ email: "new@example.com", currentPassword: "anything" }), context);
 
     expect(response.status).toBe(409);
     expect(compare).not.toHaveBeenCalled();
-    expect(userFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(userFindOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it("refuses a wrong current password", async () => {
@@ -120,7 +121,7 @@ describe("PUT /api/users/me — changing the address that can reset the password
     );
 
     expect(response.status).toBe(400);
-    expect(userFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(userFindOneAndUpdate).not.toHaveBeenCalled();
   });
 
   // BP-359: stored straight away, an address let anybody make this instance mail a stranger
@@ -133,7 +134,7 @@ describe("PUT /api/users/me — changing the address that can reset the password
 
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ email: "old@example.com", pendingEmail: "new@example.com" });
-    expect(userFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(userFindOneAndUpdate).not.toHaveBeenCalled();
     expect(issueEmailChange).toHaveBeenCalledWith("u1", "new@example.com");
     expect(invalidateResetTokens).not.toHaveBeenCalled();
     expect(logInstanceAudit).not.toHaveBeenCalled();
@@ -191,8 +192,8 @@ describe("PUT /api/users/me — changing the address that can reset the password
     const response = await PUT(put({ email: "new@example.com", currentPassword: "right" }), context);
 
     expect(response.status).toBe(200);
-    expect(userFindByIdAndUpdate).toHaveBeenCalledWith(
-      "u1",
+    expect(userFindOneAndUpdate).toHaveBeenCalledWith(
+      { _id: "u1", tenant: DEFAULT_TENANT_ID },
       { $set: { email: "new@example.com", emailVerifiedAt: null } },
       expect.anything()
     );
@@ -210,8 +211,8 @@ describe("PUT /api/users/me — changing the address that can reset the password
     await settled();
 
     expect(response.status).toBe(200);
-    expect(userFindByIdAndUpdate).toHaveBeenCalledWith(
-      "u1",
+    expect(userFindOneAndUpdate).toHaveBeenCalledWith(
+      { _id: "u1", tenant: DEFAULT_TENANT_ID },
       { $set: { email: "", emailVerifiedAt: null } },
       expect.anything()
     );
@@ -230,8 +231,8 @@ describe("PUT /api/users/me — changing the address that can reset the password
 
     expect(response.status).toBe(200);
     expect(compare).not.toHaveBeenCalled();
-    expect(userFindByIdAndUpdate).toHaveBeenCalledWith(
-      "u1",
+    expect(userFindOneAndUpdate).toHaveBeenCalledWith(
+      { _id: "u1", tenant: DEFAULT_TENANT_ID },
       { $set: { emailNotifications: true } },
       expect.anything()
     );
@@ -253,9 +254,9 @@ describe("PUT /api/users/me — changing the address that can reset the password
     const response = await PUT(put({ email: "old@example.com" }), context);
 
     expect(response.status).toBe(200);
-    expect(userFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(userFindOneAndUpdate).not.toHaveBeenCalled();
     // The body is the account, not an empty object: the shipped version of this test could not see
-    // the difference, because the findById mock was not a thenable
+    // the difference, because the findOne mock was not a thenable
     expect(await response.json()).toMatchObject({ _id: "u1", email: "old@example.com" });
     // And nothing was destroyed on the way to doing nothing
     expect(invalidateResetTokens).not.toHaveBeenCalled();
@@ -289,7 +290,7 @@ describe("PUT /api/users/me — changing the address that can reset the password
     const response = await PUT(put({ email: "new@example.com", currentPassword: "right" }), context);
 
     expect(response.status).toBe(429);
-    expect(userFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(userFindOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it("answers 400 for a body that is not JSON, rather than throwing a 500", async () => {
@@ -316,7 +317,7 @@ describe("PUT /api/users/me — changing the address that can reset the password
     );
 
     expect(response.status).toBe(400);
-    expect(userFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(userFindOneAndUpdate).not.toHaveBeenCalled();
   });
 
   // The purge of outstanding reset links runs before the write, so a collision learned from the
@@ -331,11 +332,11 @@ describe("PUT /api/users/me — changing the address that can reset the password
 
     expect(response.status).toBe(409);
     expect(invalidateResetTokens).not.toHaveBeenCalled();
-    expect(userFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(userFindOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it("answers 404 when the account was deleted mid-request, and audits nothing", async () => {
-    userFindByIdAndUpdate.mockResolvedValue(null);
+    userFindOneAndUpdate.mockResolvedValue(null);
     isEmailConfigured.mockReturnValue(false);
 
     const response = await PUT(
@@ -354,15 +355,15 @@ describe("PUT /api/users/me — changing your own display name", () => {
 
   beforeEach(() => {
     getAuthUser.mockResolvedValue(named());
-    userFindByIdAndUpdate.mockResolvedValue({ _id: "u1", fullName: "Ówner Nàme" });
+    userFindOneAndUpdate.mockResolvedValue({ _id: "u1", fullName: "Ówner Nàme" });
   });
 
   it("stores the new name", async () => {
     const response = await PUT(put({ fullName: "Ówner Nàme" }), context);
 
     expect(response.status).toBe(200);
-    expect(userFindByIdAndUpdate).toHaveBeenCalledWith(
-      "u1",
+    expect(userFindOneAndUpdate).toHaveBeenCalledWith(
+      { _id: "u1", tenant: DEFAULT_TENANT_ID },
       { $set: { fullName: "Ówner Nàme" } },
       expect.anything()
     );
@@ -381,8 +382,8 @@ describe("PUT /api/users/me — changing your own display name", () => {
   it("stores it trimmed, the way the schema would", async () => {
     await PUT(put({ fullName: "  Ówner Nàme  " }), context);
 
-    expect(userFindByIdAndUpdate).toHaveBeenCalledWith(
-      "u1",
+    expect(userFindOneAndUpdate).toHaveBeenCalledWith(
+      { _id: "u1", tenant: DEFAULT_TENANT_ID },
       { $set: { fullName: "Ówner Nàme" } },
       expect.anything()
     );
@@ -396,7 +397,7 @@ describe("PUT /api/users/me — changing your own display name", () => {
       const response = await PUT(put({ fullName }), context);
 
       expect(response.status, JSON.stringify(fullName)).toBe(400);
-      expect(userFindByIdAndUpdate).not.toHaveBeenCalled();
+      expect(userFindOneAndUpdate).not.toHaveBeenCalled();
     }
   });
 
@@ -407,7 +408,7 @@ describe("PUT /api/users/me — changing your own display name", () => {
     );
 
     expect(response.status).toBe(400);
-    expect(userFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(userFindOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it("refuses a name past the cap, and a name that is not a string at all", async () => {
@@ -418,7 +419,7 @@ describe("PUT /api/users/me — changing your own display name", () => {
       const response = await PUT(put({ fullName }), context);
 
       expect(response.status, JSON.stringify(fullName)).toBe(400);
-      expect(userFindByIdAndUpdate).not.toHaveBeenCalled();
+      expect(userFindOneAndUpdate).not.toHaveBeenCalled();
     }
   });
 
@@ -440,13 +441,13 @@ describe("PUT /api/users/me — changing your own display name", () => {
     const response = await PUT(put({ fullName: "Owner Name" }), context);
 
     expect(response.status).toBe(200);
-    expect(userFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(userFindOneAndUpdate).not.toHaveBeenCalled();
     expect(logInstanceAudit).not.toHaveBeenCalled();
   });
 
   // The form submits the whole profile, so the name arrives alongside the address on every save
   it("changes the name and the address in one request, each on its own terms", async () => {
-    userFindByIdAndUpdate.mockResolvedValue({ _id: "u1", email: "old@example.com", fullName: "Ówner Nàme" });
+    userFindOneAndUpdate.mockResolvedValue({ _id: "u1", email: "old@example.com", fullName: "Ówner Nàme" });
 
     const response = await PUT(
       put({ fullName: "Ówner Nàme", email: "new@example.com", currentPassword: "right" }),
@@ -455,8 +456,8 @@ describe("PUT /api/users/me — changing your own display name", () => {
 
     expect(response.status).toBe(200);
     // The name at once; the address only once its inbox confirms it
-    expect(userFindByIdAndUpdate).toHaveBeenCalledWith(
-      "u1",
+    expect(userFindOneAndUpdate).toHaveBeenCalledWith(
+      { _id: "u1", tenant: DEFAULT_TENANT_ID },
       { $set: { fullName: "Ówner Nàme" } },
       expect.anything()
     );
@@ -476,7 +477,7 @@ describe("PUT /api/users/me — changing your own display name", () => {
   });
 
   it("answers 404 when the account was deleted mid-request, and audits nothing", async () => {
-    userFindByIdAndUpdate.mockResolvedValue(null);
+    userFindOneAndUpdate.mockResolvedValue(null);
 
     const response = await PUT(put({ fullName: "Ówner Nàme" }), context);
 

@@ -34,7 +34,7 @@ vi.mock("@/models/oauthConsent", () => ({
   OAuthConsent: { create: vi.fn(), findOne: vi.fn(), deleteOne: vi.fn() },
 }));
 vi.mock("@/models/user", () => ({
-  User: { findById: vi.fn().mockResolvedValue({ _id: "u1", username: "victim", role: "member" }) },
+  User: { findOne: vi.fn().mockResolvedValue({ _id: "u1", username: "victim", role: "member" }) },
 }));
 vi.mock("@/models/project", () => ({
   Project: { find: () => ({ select: () => ({ sort: () => ({ lean: async () => projects }) }) }) },

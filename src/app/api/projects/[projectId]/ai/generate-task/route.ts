@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
+import type { ScopedDb } from "@/lib/db-scope";
 import { withProjectAccess } from "@/lib/middleware";
 import type { HydratedDocument } from "mongoose";
 import type { IProject } from "@/types";
-import { Project } from "@/models/project";
-import { Task } from "@/models/task";
 import { isAIEnabled, generateTask, ExistingTaskSummary } from "@/lib/ai";
 import { choiceFieldsForPrompt, resolveGeneratedFields } from "@/lib/ai-fields";
 import { getSettings } from "@/models/settings";
@@ -77,7 +76,7 @@ export const GET = withProjectAccess(async () => {
   return NextResponse.json({ enabled: isAIEnabled() });
 });
 
-export const POST = withProjectAccess(async (request, { params, user }) => {
+export const POST = withProjectAccess(async (request, { params, user, db }) => {
   const { projectId } = await params;
 
   if (!isAIEnabled()) {
@@ -130,23 +129,23 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
       );
     }
 
-    const project = await Project.findById(projectId);
+    const project = await db.Project.findById(projectId);
     if (!project) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
-    return await generate(project, projectId, prompt);
+    return await generate(db, project, projectId, prompt);
   } finally {
     inFlight.delete(holder);
   }
 });
 
-async function generate(project: HydratedDocument<IProject>, projectId: string, prompt: string) {
+async function generate(db: ScopedDb, project: HydratedDocument<IProject>, projectId: string, prompt: string) {
   const [readme, tasks] = await Promise.all([
     // raw.githubusercontent.com only serves github.com, so a project hosted anywhere else — and
     // that now includes this instance's own GitHub Enterprise — gets no README rather than a
     // request that cannot work, sent to a host that should never see the address
     fetchReadme(repositoryProvider(project) === "github" ? projectRepositoryUrl(project) : ""),
-    Task.find(
+    db.Task.find(
       { project: projectId, status: { $ne: "done" } },
       "taskNumber title status description"
     )

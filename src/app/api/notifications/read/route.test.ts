@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const getAuthUser = vi.fn();
 const findOneAndUpdate = vi.fn();
@@ -45,6 +46,7 @@ describe("PATCH /api/notifications/read", () => {
       _id: ROW,
       recipient: READER,
       inApp: { $ne: false },
+      tenant: DEFAULT_TENANT_ID,
     });
     expect(updateMany).not.toHaveBeenCalled();
   });
@@ -57,6 +59,7 @@ describe("PATCH /api/notifications/read", () => {
       recipient: READER,
       read: false,
       inApp: { $ne: false },
+      tenant: DEFAULT_TENANT_ID,
     });
     expect(findOneAndUpdate).not.toHaveBeenCalled();
   });

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
@@ -27,7 +28,7 @@ vi.mock("@/lib/worker-service", async (importOriginal) => {
   return { ...actual, registerWorker };
 });
 vi.mock("@/models/project", () => ({
-  Project: { findById: () => ({ select: projectSelect }), updateOne: projectUpdateOne },
+  Project: { findOne: () => ({ select: projectSelect }), updateOne: projectUpdateOne },
 }));
 vi.mock("@/models/deviceEnrolment", () => ({
   DeviceEnrolment: { updateOne: deviceEnrolmentUpdateOne },
@@ -162,7 +163,7 @@ describe("POST /api/workers/enrolment/device/:userCode/approve", () => {
       const response = await POST(request({ projectId: PROJECT_ID }), ctx());
 
       expect(projectUpdateOne).toHaveBeenCalledWith(
-        { _id: PROJECT_ID },
+        { _id: PROJECT_ID, tenant: DEFAULT_TENANT_ID },
         { $set: { "worker.enabled": true } }
       );
       expect((await response.json()).workersEnabled).toBe(true);
@@ -193,7 +194,7 @@ describe("POST /api/workers/enrolment/device/:userCode/approve", () => {
       const response = await POST(request({ projectId: PROJECT_ID }), ctx());
 
       expect(projectUpdateOne).toHaveBeenCalledWith(
-        { _id: PROJECT_ID },
+        { _id: PROJECT_ID, tenant: DEFAULT_TENANT_ID },
         { $set: { "worker.enabled": true } }
       );
       expect((await response.json()).workersEnabled).toBe(true);

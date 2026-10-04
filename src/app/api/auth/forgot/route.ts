@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { passwordSignInEnabled, passwordSignInOff } from "@/lib/password-sign-in";
 import { readJsonBody } from "@/lib/request-body";
 import { connectDB } from "@/lib/db";
+import { scopedToDefaultTenant } from "@/lib/db-scope";
 import { getClientIp } from "@/lib/auth";
 import { APP_NAME } from "@/lib/brand";
 import { isEmailConfigured, normaliseEmail, sendEmail } from "@/lib/email";
@@ -15,7 +16,6 @@ import {
   sourceKey,
 } from "@/lib/rate-limit";
 import { provenanceRefusal, selfOrigin } from "@/lib/session";
-import { User } from "@/models/user";
 
 // One answer for every outcome: account found, no such account, account with no address, machine
 // account. Anything else turns this endpoint into a way to ask "does owner have an account here",
@@ -30,6 +30,7 @@ const UNIFORM_ANSWER = {
 const REQUESTS_PER_SOURCE = 10;
 
 export async function POST(request: Request) {
+  const db = scopedToDefaultTenant();
   if (!passwordSignInEnabled()) return passwordSignInOff();
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
@@ -98,8 +99,8 @@ export async function POST(request: Request) {
   // Both lookups, always, and in parallel: doing the second only when the first misses makes the
   // miss path measurably slower than the hit path, which is the same oracle read backwards.
   const [byEmail, byUsername] = await Promise.all([
-    User.findOne({ ...humans, email: normaliseEmail(typed) }).select(fields),
-    User.findOne({ ...humans, username: normaliseUsername(typed) }).select(fields),
+    db.User.findOne({ ...humans, email: normaliseEmail(typed) }).select(fields),
+    db.User.findOne({ ...humans, username: normaliseUsername(typed) }).select(fields),
   ]);
   // Address wins: nothing stops an account being named `bob@corp.com` while a different account
   // holds that as its address, and letting the planter decide would send Bob's link elsewhere.

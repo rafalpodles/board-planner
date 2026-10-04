@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const issueInvitation = vi.fn();
 const recordDelivery = vi.fn();
@@ -12,12 +13,15 @@ const selfOrigin = vi.fn();
 let caller: Record<string, unknown>;
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
-vi.mock("@/lib/middleware", () => ({
-  withAdmin:
-    (handler: (r: Request, c: unknown) => unknown) =>
-    (request: Request) =>
-      handler(request, { params: Promise.resolve({}), user: caller }),
-}));
+vi.mock("@/lib/middleware", async () => {
+  const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+  return {
+    withAdmin:
+      (handler: (r: Request, c: unknown) => unknown) =>
+      (request: Request) =>
+        handler(request, { params: Promise.resolve({}), user: caller, db: scopedToDefaultTenant() }),
+  };
+});
 vi.mock("@/lib/session", () => ({ selfOrigin }));
 vi.mock("@/lib/invitations", () => ({ issueInvitation, recordDelivery }));
 vi.mock("@/lib/invitation-mail", async () => {
@@ -161,8 +165,11 @@ describe("GET /api/invitations", () => {
 
     const res = await GET(new Request("http://x/api/invitations"), CTX);
 
-    expect(invitationFind).toHaveBeenCalledWith({ status: "pending" });
-    expect(userFind).toHaveBeenCalledWith({ email: { $in: ["ada@example.com", "grace@example.com"] } });
+    expect(invitationFind).toHaveBeenCalledWith({ status: "pending", tenant: DEFAULT_TENANT_ID });
+    expect(userFind).toHaveBeenCalledWith({
+      email: { $in: ["ada@example.com", "grace@example.com"] },
+      tenant: DEFAULT_TENANT_ID,
+    });
     expect(await res.json()).toEqual([{ email: "ada@example.com" }]);
   });
 

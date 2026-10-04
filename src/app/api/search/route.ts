@@ -2,8 +2,6 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withAuth } from "@/lib/middleware";
 import { accessibleProjectIds } from "@/lib/grants";
-import { Task } from "@/models/task";
-import { Project } from "@/models/project";
 import { DEFAULT_PRIORITY } from "@/types";
 import { PROJECT_KEY_PATTERN } from "@/lib/urls";
 import { withApiExecutions } from "@/lib/task-execution-view";
@@ -13,7 +11,7 @@ function withPriorityDefault<T extends { priority?: string }>(tasks: T[]): T[] {
   return tasks.map((t) => ({ ...t, priority: t.priority ?? DEFAULT_PRIORITY }));
 }
 
-export const GET = withAuth(async (request, { user }) => {
+export const GET = withAuth(async (request, { user, db }) => {
   await connectDB();
 
   const { searchParams } = new URL(request.url);
@@ -51,7 +49,7 @@ export const GET = withAuth(async (request, { user }) => {
     // that answers to this key *today* could lose to one that merely used to — measured, and the
     // winner was whichever was inserted first. A live key is never ambiguous; a retired one is
     // only consulted when nothing holds it now (BP-573 review)
-    const boards = await Project.find({ $or: [{ key: byKey }, { formerKeys: byKey }] })
+    const boards = await db.Project.find({ $or: [{ key: byKey }, { formerKeys: byKey }] })
       .select("_id key")
       .lean();
     const project = boards.find((board) => byKey.test(board.key as string)) ?? boards[0];
@@ -62,7 +60,7 @@ export const GET = withAuth(async (request, { user }) => {
     const reachable = !allowed || allowed.some((id) => String(id) === String(project?._id));
 
     if (project && reachable) {
-      const tasks = await Task.find({ ...filter, project: project._id, taskNumber })
+      const tasks = await db.Task.find({ ...filter, project: project._id, taskNumber })
         .populate("project", "name key")
         .populate("assignee", "username fullName")
         .lean();
@@ -77,7 +75,7 @@ export const GET = withAuth(async (request, { user }) => {
   const regex = { $regex: escaped, $options: "i" };
   filter.$or = [{ title: regex }, { description: regex }];
 
-  const tasks = await Task.find(filter)
+  const tasks = await db.Task.find(filter)
     .populate("project", "name key")
     .populate("assignee", "username fullName")
     .sort({ updatedAt: -1 })

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { replaceProviderLinks } from "@/lib/pr-links";
+import { scopedToDefaultTenant } from "@/lib/db-scope";
 
 /**
  * BP-429. This route is unchanged by that ticket; the tests are what it was missing. Its
@@ -11,10 +12,10 @@ import { replaceProviderLinks } from "@/lib/pr-links";
 
 // Hoisted: `@/lib/pr-links` above reaches `@/models/task`, so the factory below runs before a
 // plain `const` in this scope is initialised (BP-559).
-const { fetchPullRequests, projectFindById, taskFindOne, taskUpdateOne, taskFind, logActivity } = vi.hoisted(
+const { fetchPullRequests, projectFindOne, taskFindOne, taskUpdateOne, taskFind, logActivity } = vi.hoisted(
   () => ({
     fetchPullRequests: vi.fn(),
-    projectFindById: vi.fn(),
+    projectFindOne: vi.fn(),
     taskFindOne: vi.fn(),
     taskUpdateOne: vi.fn(),
     taskFind: vi.fn(),
@@ -25,7 +26,7 @@ const { fetchPullRequests, projectFindById, taskFindOne, taskUpdateOne, taskFind
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/encryption", () => ({ decryptSecret: (v: string) => `plain:${v}` }));
 vi.mock("@/lib/activity", () => ({ logActivity }));
-vi.mock("@/models/project", () => ({ Project: { findById: projectFindById } }));
+vi.mock("@/models/project", () => ({ Project: { findOne: projectFindOne } }));
 // `find` is the second pass BP-610 added: the tasks this round contradicts without visiting.
 // Every test here drives a round whose matches are its whole story, so it answers with nothing.
 vi.mock("@/models/task", () => ({
@@ -38,7 +39,7 @@ vi.mock("@/lib/github", async (importOriginal) => ({
 vi.mock("@/lib/middleware", () => ({
   withProjectAccess:
     (handler: (req: Request, ctx: unknown) => Promise<Response>) => (req: Request, ctx: unknown) =>
-      handler(req, { ...(ctx as object), user: { _id: "u1" } }),
+      handler(req, { ...(ctx as object), user: { _id: "u1" }, db: scopedToDefaultTenant() }),
 }));
 
 const { POST } = await import("./route");
@@ -96,7 +97,7 @@ const ctx = () => ({ params: Promise.resolve({ projectId: "p1" }) });
 beforeEach(() => {
   taskUpdateOne.mockResolvedValue({ modifiedCount: 1 });
   vi.clearAllMocks();
-  projectFindById.mockReturnValue({ lean: () => project() });
+  projectFindOne.mockReturnValue({ lean: () => project() });
   taskFindOne.mockResolvedValue(task());
   taskFind.mockResolvedValue([]);
   fetchPullRequests.mockResolvedValue([]);
@@ -108,7 +109,7 @@ const actionsLogged = () => logActivity.mock.calls.map((call: unknown[]) => call
 
 describe("POST .../github/sync", () => {
   it("still finds pull requests opened under a key the project has since left", async () => {
-    projectFindById.mockReturnValue({ lean: () => project({ formerKeys: ["CP"] }) });
+    projectFindOne.mockReturnValue({ lean: () => project({ formerKeys: ["CP"] }) });
     fetchPullRequests.mockResolvedValue([pr({ ref: "cp-5/old-prefix" })]);
 
     const body = await (await POST(request(), ctx())).json();
@@ -210,7 +211,7 @@ describe("POST .../github/sync", () => {
     // BP-110 made GitLab's transition role-based and left this one keyed to the seeded ids, so a
     // renamed board gets a sync that reports success and moves nothing. Asserted so that whoever
     // closes it has to come here and say so, instead of finding a test that agrees either way.
-    projectFindById.mockReturnValue({ lean: () => project({ columns: RENAMED_COLUMNS }) });
+    projectFindOne.mockReturnValue({ lean: () => project({ columns: RENAMED_COLUMNS }) });
     const doc = task({ status: "checking" });
     taskFindOne.mockResolvedValue(doc);
     fetchPullRequests.mockResolvedValue([pr({ merged_at: "2026-08-02T00:00:00Z" })]);

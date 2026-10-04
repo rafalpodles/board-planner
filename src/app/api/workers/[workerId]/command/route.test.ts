@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
-const workerFindByIdAndUpdate = vi.fn();
+const workerFindOneAndUpdate = vi.fn();
 const publishToWorker = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
@@ -11,7 +12,7 @@ vi.mock("@/lib/auth", () => ({
   RateLimitError: class RateLimitError extends Error {},
 }));
 vi.mock("@/lib/grants", () => ({ check, accessibleProjectIds: vi.fn() }));
-vi.mock("@/models/worker", () => ({ Worker: { findByIdAndUpdate: workerFindByIdAndUpdate } }));
+vi.mock("@/models/worker", () => ({ Worker: { findOneAndUpdate: workerFindOneAndUpdate } }));
 vi.mock("@/lib/worker-events", () => ({ publishToWorker }));
 
 const { POST } = await import("./route");
@@ -36,7 +37,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   check.mockResolvedValue(false);
   getAuthUser.mockResolvedValue(ADMIN);
-  workerFindByIdAndUpdate.mockResolvedValue({
+  workerFindOneAndUpdate.mockResolvedValue({
     _id: WORKER_ID,
     command: "pause",
     commandIssuedAt: new Date("2026-08-01T12:00:00.000Z"),
@@ -52,7 +53,7 @@ describe("POST /api/workers/:workerId/command", () => {
     const response = await POST(req, ctx);
 
     expect(response.status).toBe(403);
-    expect(workerFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(workerFindOneAndUpdate).not.toHaveBeenCalled();
     expect(publishToWorker).not.toHaveBeenCalled();
   });
 
@@ -62,7 +63,7 @@ describe("POST /api/workers/:workerId/command", () => {
     const response = await POST(req, ctx);
 
     expect(response.status).toBe(400);
-    expect(workerFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(workerFindOneAndUpdate).not.toHaveBeenCalled();
     expect(publishToWorker).not.toHaveBeenCalled();
   });
 
@@ -81,12 +82,12 @@ describe("POST /api/workers/:workerId/command", () => {
     const response = await POST(req, ctx);
 
     expect(response.status).toBe(404);
-    expect(workerFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(workerFindOneAndUpdate).not.toHaveBeenCalled();
     expect(publishToWorker).not.toHaveBeenCalled();
   });
 
   it("404s a well-formed but unknown worker id", async () => {
-    workerFindByIdAndUpdate.mockResolvedValue(null);
+    workerFindOneAndUpdate.mockResolvedValue(null);
     const { req, ctx } = request({ command: "stop" });
 
     const response = await POST(req, ctx);
@@ -101,8 +102,8 @@ describe("POST /api/workers/:workerId/command", () => {
     const response = await POST(req, ctx);
 
     expect(response.status).toBe(200);
-    expect(workerFindByIdAndUpdate).toHaveBeenCalledWith(
-      WORKER_ID,
+    expect(workerFindOneAndUpdate).toHaveBeenCalledWith(
+      { _id: WORKER_ID, tenant: DEFAULT_TENANT_ID },
       { $set: { command: "pause", commandIssuedAt: expect.any(Date), commandAckedAt: null } },
       { returnDocument: "after" }
     );

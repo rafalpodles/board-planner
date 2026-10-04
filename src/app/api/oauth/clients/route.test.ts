@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
-const findById = vi.fn();
+const findOne = vi.fn();
 const clientDeleteOne = vi.fn();
 const tokenDeleteMany = vi.fn();
 const codeDeleteMany = vi.fn();
@@ -8,19 +9,22 @@ const consentDeleteMany = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/oauthClient", () => ({
-  OAuthClient: { findById, deleteOne: clientDeleteOne, find: vi.fn() },
+  OAuthClient: { findOne, deleteOne: clientDeleteOne, find: vi.fn() },
 }));
 vi.mock("@/models/oauthToken", () => ({
   OAuthToken: { deleteMany: tokenDeleteMany, aggregate: vi.fn() },
 }));
 vi.mock("@/models/oauthCode", () => ({ OAuthCode: { deleteMany: codeDeleteMany } }));
 vi.mock("@/models/oauthConsent", () => ({ OAuthConsent: { deleteMany: consentDeleteMany } }));
-vi.mock("@/lib/middleware", () => ({
-  withAdmin:
-    (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
-    (req: Request, ctx: unknown) =>
-      handler(req, { ...(ctx as object), user: { _id: "a1", role: "admin" } }),
-}));
+vi.mock("@/lib/middleware", async () => {
+  const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+  return {
+    withAdmin:
+      (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
+      (req: Request, ctx: unknown) =>
+        handler(req, { ...(ctx as object), user: { _id: "a1", role: "admin" }, db: scopedToDefaultTenant() }),
+  };
+});
 
 const { DELETE } = await import("./route");
 
@@ -38,7 +42,7 @@ const ctx = () => ({ params: Promise.resolve({}) });
 
 beforeEach(() => {
   vi.clearAllMocks();
-  findById.mockResolvedValue({ _id: VALID_ID, clientId: "client-abc" });
+  findOne.mockResolvedValue({ _id: VALID_ID, clientId: "client-abc" });
 });
 
 describe("DELETE /api/oauth/clients", () => {
@@ -46,8 +50,8 @@ describe("DELETE /api/oauth/clients", () => {
     const res = await DELETE(request({ id: VALID_ID }), ctx());
 
     expect(res.status).toBe(200);
-    expect(tokenDeleteMany).toHaveBeenCalledWith({ clientId: "client-abc" });
-    expect(clientDeleteOne).toHaveBeenCalledWith({ _id: VALID_ID });
+    expect(tokenDeleteMany).toHaveBeenCalledWith({ clientId: "client-abc", tenant: DEFAULT_TENANT_ID });
+    expect(clientDeleteOne).toHaveBeenCalledWith({ _id: VALID_ID, tenant: DEFAULT_TENANT_ID });
   });
 
   // BP-747: a refresh or code exchange racing this handler checks OAuthClient.exists after it
@@ -70,7 +74,7 @@ describe("DELETE /api/oauth/clients", () => {
     const res = await DELETE(request({ id: { $ne: null } }), ctx());
 
     expect(res.status).toBe(400);
-    expect(findById).not.toHaveBeenCalled();
+    expect(findOne).not.toHaveBeenCalled();
     expect(tokenDeleteMany).not.toHaveBeenCalled();
     expect(clientDeleteOne).not.toHaveBeenCalled();
   });
@@ -88,7 +92,7 @@ describe("DELETE /api/oauth/clients", () => {
     );
 
     expect(res.status).toBe(400);
-    expect(findById).not.toHaveBeenCalled();
+    expect(findOne).not.toHaveBeenCalled();
     expect(clientDeleteOne).not.toHaveBeenCalled();
   });
 });

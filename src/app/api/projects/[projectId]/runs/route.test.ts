@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const create = vi.fn();
 const findOne = vi.fn();
@@ -8,25 +9,29 @@ const declaredReach: unknown[] = [];
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/agentRun", () => ({ AgentRun: { create, findOne } }));
 vi.mock("@/models/task", () => ({ Task: { exists: taskExists } }));
-vi.mock("@/models/agent", () => ({ Agent: { findById: () => ({ lean: async () => null }) } }));
+vi.mock("@/models/agent", () => ({ Agent: { findOne: () => ({ lean: async () => null }) } }));
 vi.mock("@/lib/agent-service", () => ({ toApiRun: (run: unknown) => run }));
 // `workerId` is what the real middleware sets ONLY after verifying the credential against exactly
 // that id, and leaves unset on the person branch. Both are driven below; `beforeEach` puts it back
 // to a verified machine.
 let callingWorker: string | undefined;
 
-vi.mock("@/lib/middleware", () => ({
-  withProjectAccessOrWorker:
-    (handler: (req: Request, ctx: unknown) => Promise<Response>, options?: unknown) => {
-      declaredReach.push(options);
-      return (req: Request, ctx: unknown) =>
-        handler(req, {
-          ...(ctx as object),
-          user: { _id: "u1", viaMachineCredential: false },
-          workerId: callingWorker,
-        });
-    },
-}));
+vi.mock("@/lib/middleware", async () => {
+  const { scopedToDefaultTenant } = await vi.importActual<typeof import("@/lib/db-scope")>("@/lib/db-scope");
+  return {
+    withProjectAccessOrWorker:
+      (handler: (req: Request, ctx: unknown) => Promise<Response>, options?: unknown) => {
+        declaredReach.push(options);
+        return (req: Request, ctx: unknown) =>
+          handler(req, {
+            ...(ctx as object),
+            user: { _id: "u1", viaMachineCredential: false },
+            workerId: callingWorker,
+            db: scopedToDefaultTenant(),
+          });
+      },
+  };
+});
 
 const { POST } = await import("./route");
 
@@ -140,7 +145,7 @@ describe("POST .../runs keeps one record per run", () => {
 
     expect(res.status).toBe(200);
     // The machine is part of the key: one naming another's run must not stand in for its record
-    expect(findOne).toHaveBeenCalledWith({ task: TASK_ID, runId: RUN_ID, worker: WORKER_ID });
+    expect(findOne).toHaveBeenCalledWith({ task: TASK_ID, runId: RUN_ID, worker: WORKER_ID, tenant: DEFAULT_TENANT_ID });
     expect(create).not.toHaveBeenCalled();
   });
 

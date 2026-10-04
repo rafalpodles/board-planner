@@ -1,15 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
-const agentFindById = vi.fn();
+const agentFindOne = vi.fn();
 const projectFindOneAndUpdate = vi.fn();
 const logProjectAudit = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ getAuthUser, RateLimitError: class extends Error {} }));
 vi.mock("@/lib/grants", () => ({ check }));
-vi.mock("@/models/agent", () => ({ Agent: { findById: agentFindById } }));
+vi.mock("@/models/agent", () => ({ Agent: { findOne: agentFindOne } }));
 vi.mock("@/models/project", () => ({ Project: { findOneAndUpdate: projectFindOneAndUpdate } }));
 vi.mock("@/lib/projectAudit", () => ({ logProjectAudit }));
 
@@ -33,7 +34,7 @@ const RUNNABLE = { implementation: [{ key: "claude-code" }] };
 
 /** The agent as stored. Scope decides who may choose it; composition decides whether it can run. */
 function agent(overrides: Record<string, unknown> = {}) {
-  agentFindById.mockReturnValue({
+  agentFindOne.mockReturnValue({
     lean: async () => ({
       name: "Ship it",
       scope: "global",
@@ -67,7 +68,7 @@ describe("PUT /api/projects/:projectId/agent", () => {
 
     expect(res.status).toBe(200);
     expect(projectFindOneAndUpdate).toHaveBeenCalledWith(
-      { _id: PROJECT_ID },
+      { _id: PROJECT_ID, tenant: DEFAULT_TENANT_ID },
       expect.anything(),
       expect.objectContaining({ returnDocument: "before" })
     );
@@ -81,7 +82,7 @@ describe("PUT /api/projects/:projectId/agent", () => {
 
     expect(res.status).toBe(200);
     expect(stored()).toEqual({ $set: { "worker.agent": null } });
-    expect(agentFindById).not.toHaveBeenCalled();
+    expect(agentFindOne).not.toHaveBeenCalled();
   });
 
   /**
@@ -106,12 +107,12 @@ describe("PUT /api/projects/:projectId/agent", () => {
     const OLD_ID = "507f1f77bcf86cd799439031";
 
     function namedAgents(names: Record<string, string>) {
-      agentFindById.mockImplementation((id: string) => ({
+      agentFindOne.mockImplementation((filter: { _id: string }) => ({
         lean: async () =>
-          id === AGENT_ID
+          filter._id === AGENT_ID
             ? { name: names[AGENT_ID], scope: "global", project: null, composition: RUNNABLE }
-            : names[id]
-              ? { name: names[id] }
+            : names[filter._id]
+              ? { name: names[filter._id] }
               : null,
       }));
     }
@@ -155,9 +156,9 @@ describe("PUT /api/projects/:projectId/agent", () => {
 
     it("still records the change, and answers, when the old agent's name cannot be read", async () => {
       previously(OLD_ID);
-      agentFindById.mockImplementation((id: string) => ({
+      agentFindOne.mockImplementation((filter: { _id: string }) => ({
         lean: () =>
-          id === AGENT_ID
+          filter._id === AGENT_ID
             ? Promise.resolve({ name: "Ship it", scope: "global", project: null, composition: RUNNABLE })
             : Promise.reject(new Error("the read gave up")),
       }));
@@ -225,7 +226,7 @@ describe("PUT /api/projects/:projectId/agent", () => {
     });
 
     it("404s for an agent that does not exist", async () => {
-      agentFindById.mockReturnValue({ lean: async () => null });
+      agentFindOne.mockReturnValue({ lean: async () => null });
 
       expect((await put({ agentId: AGENT_ID })).status).toBe(404);
       expect(projectFindOneAndUpdate).not.toHaveBeenCalled();

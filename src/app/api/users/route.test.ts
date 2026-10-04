@@ -1,5 +1,7 @@
+import { Types } from "mongoose";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { isValidUsername } from "@/lib/identifiers";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const create = vi.fn();
 const countDocuments = vi.fn();
@@ -63,7 +65,8 @@ vi.mock("@/lib/session", () => ({
   provenanceRefusal: () => null,
 }));
 vi.mock("@/lib/middleware", () => ({
-  withAdmin: (h: (r: Request, c: unknown) => unknown) => (r: Request) => h(r, { user: { _id: "a1" } }),
+  withAdmin: (h: (r: Request, c: unknown) => unknown) => (r: Request) =>
+    h(r, { user: { _id: "a1" }, db: scopedToDefaultTenant() }),
 }));
 
 const nameOrganisation = vi.hoisted(() => vi.fn());
@@ -73,6 +76,7 @@ vi.mock("@/lib/tenant", async (importOriginal) => ({
 }));
 
 const { GET, POST } = await import("@/app/api/users/route");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
 
 const post = (body: unknown) =>
   POST(new Request("http://x/api/users", { method: "POST", body: JSON.stringify(body) }));
@@ -294,6 +298,17 @@ describe("claiming an instance nobody has claimed", () => {
     expect(nameOrganisation).not.toHaveBeenCalled();
   });
 
+  it("creates a member in the administrator's own tenant, not the default one (BP-663)", async () => {
+    const tenant = Types.ObjectId.createFromHexString("0000000000000000000000b2");
+    countDocuments.mockResolvedValue(3);
+    getAuthUser.mockResolvedValue({ _id: "a1", role: "admin", username: "owner", tenant });
+
+    const res = await post({ ...VALID, username: "someone" });
+
+    expect(res.status).toBe(201);
+    expect(create.mock.calls[0][0].tenant).toEqual(tenant);
+  });
+
   it("creates the administrator when the operator's code is given", async () => {
     const res = await post({ ...VALID, username: "firstadmin", setupCode: "operator-held-setup-code" });
 
@@ -388,7 +403,7 @@ describe("which accounts the list returns", () => {
 
     await list();
 
-    expect(identityFind).toHaveBeenCalledWith({ user: { $in: ["u1"] }, live: "only" });
+    expect(identityFind).toHaveBeenCalledWith({ user: { $in: ["u1"] }, live: "only", tenant: DEFAULT_TENANT_ID });
   });
 
   it("counts no link to a provider the instance no longer has as a way in", async () => {
@@ -442,17 +457,17 @@ describe("which accounts the list returns", () => {
 
   it("leaves machine accounts out by default", async () => {
     await list();
-    expect(find).toHaveBeenCalledWith({ kind: { $ne: "machine" } });
+    expect(find).toHaveBeenCalledWith({ kind: { $ne: "machine" }, tenant: DEFAULT_TENANT_ID });
   });
 
   it("includes them when asked for machines", async () => {
     await list("?include=machines");
-    expect(find).toHaveBeenCalledWith({});
+    expect(find).toHaveBeenCalledWith({ tenant: DEFAULT_TENANT_ID });
   });
 
   it("does not read any other value as the opt-in", async () => {
     await list("?include=machine");
-    expect(find).toHaveBeenCalledWith({ kind: { $ne: "machine" } });
+    expect(find).toHaveBeenCalledWith({ kind: { $ne: "machine" }, tenant: DEFAULT_TENANT_ID });
   });
 });
 

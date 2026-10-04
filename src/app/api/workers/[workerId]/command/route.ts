@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withAdmin } from "@/lib/middleware";
-import { Worker } from "@/models/worker";
 import { publishToWorker } from "@/lib/worker-events";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 
@@ -11,7 +10,7 @@ const COMMANDS = ["pause", "resume", "stop"] as const;
 // Issuing a command is its own endpoint, not a PATCH field: it clears
 // commandAckedAt so the console can tell "asked to pause" from "actually paused",
 // which a field-by-field edit on /api/workers/:workerId must not be able to do
-export const POST = withAdmin(async (request, { params, user }) => {
+export const POST = withAdmin(async (request, { params, user, db }) => {
   // A machine credential must not reach a kill switch. An unscoped admin API token keeps
   // role: "admin" and so passes withAdmin; the counterpart to this action is already gated
   // this way, and the asymmetry was the bug (BP-306).
@@ -32,7 +31,7 @@ export const POST = withAdmin(async (request, { params, user }) => {
     return NextResponse.json({ error: "command must be pause, resume or stop" }, { status: 400 });
   }
 
-  const worker = await Worker.findByIdAndUpdate(
+  const worker = await db.Worker.findByIdAndUpdate(
     workerId,
     { $set: { command, commandIssuedAt: new Date(), commandAckedAt: null } },
     { returnDocument: "after" }

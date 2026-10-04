@@ -2,9 +2,8 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withAuth } from "@/lib/middleware";
 import { accessibleProjectIds } from "@/lib/grants";
-import { Notification } from "@/models/notification";
 
-export const GET = withAuth(async (_request, { user }) => {
+export const GET = withAuth(async (_request, { user, db }) => {
   await connectDB();
 
   // The badge is a read as well: a count that keeps moving tells a removed member the board is
@@ -20,7 +19,7 @@ export const GET = withAuth(async (_request, { user }) => {
   };
   if (projectIds !== null) filter.project = { $in: projectIds };
 
-  const count = await Notification.countDocuments(filter);
+  const count = await db.Notification.countDocuments(filter);
 
   return NextResponse.json({ count });
 });

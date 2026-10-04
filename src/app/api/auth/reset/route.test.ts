@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const consumeResetToken = vi.fn();
 const invalidateResetTokens = vi.fn();
 const releaseResetToken = vi.fn();
 const revokeUserCredentials = vi.fn();
 const logInstanceAudit = vi.fn();
-const userFindById = vi.fn();
+const userFindOne = vi.fn();
 const userUpdateOne = vi.fn();
 const hash = vi.fn();
 
@@ -28,7 +29,7 @@ vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/lib/session", () => ({ provenanceRefusal: () => null, revokeUserCredentials }));
 vi.mock("bcryptjs", () => ({ default: { hash } }));
 vi.mock("@/models/user", () => ({
-  User: { findById: userFindById, updateOne: userUpdateOne },
+  User: { findOne: userFindOne, updateOne: userUpdateOne },
 }));
 
 const { POST } = await import("./route");
@@ -44,7 +45,7 @@ function post(body: unknown = { token: "cpr_good", newPassword: "a-brand-new-pas
 }
 
 function accountIs(user: unknown) {
-  userFindById.mockReturnValue({ select: () => Promise.resolve(user) });
+  userFindOne.mockReturnValue({ select: () => Promise.resolve(user) });
 }
 
 beforeEach(async () => {
@@ -101,11 +102,14 @@ describe("POST /api/auth/reset", () => {
 
     expect(res.status).toBe(200);
     expect(hash).toHaveBeenCalledWith("a-brand-new-password", 10);
-    expect(userUpdateOne).toHaveBeenCalledWith({ _id: "u1" }, { $set: { password: "new-hash" } });
+    expect(userUpdateOne).toHaveBeenCalledWith(
+      { _id: "u1", tenant: DEFAULT_TENANT_ID },
+      { $set: { password: "new-hash" } }
+    );
     // The link reached the address it was mailed to, and proves that one only while it is still the
     // account's: an address changed meanwhile was never reached (BP-842)
     expect(userUpdateOne).toHaveBeenCalledWith(
-      { _id: "u1", email: "owner@example.com" },
+      { _id: "u1", email: "owner@example.com", tenant: DEFAULT_TENANT_ID },
       { $set: { emailVerifiedAt: expect.any(Date) } }
     );
     // Whoever knew the old password is signed out — usually the reason somebody is resetting
@@ -139,7 +143,10 @@ describe("POST /api/auth/reset", () => {
 
     expect((await POST(post())).status).toBe(200);
     expect(userUpdateOne).toHaveBeenCalledTimes(1);
-    expect(userUpdateOne).toHaveBeenCalledWith({ _id: "u1" }, { $set: { password: "new-hash" } });
+    expect(userUpdateOne).toHaveBeenCalledWith(
+      { _id: "u1", tenant: DEFAULT_TENANT_ID },
+      { $set: { password: "new-hash" } }
+    );
   });
 
   it.each([

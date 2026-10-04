@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withAdmin } from "@/lib/middleware";
-import { Project } from "@/models/project";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { describeSettingsChanges } from "@/lib/settings-audit";
 import { projectWriteImages } from "@/lib/project-write-images";
@@ -11,7 +10,7 @@ const MAX_MODEL_LENGTH = 100;
 
 // Deliberately narrow: this endpoint exists so an instance admin can govern
 // agents, not as a second way to write arbitrary project config
-export const PATCH = withAdmin(async (request, { params, user }) => {
+export const PATCH = withAdmin(async (request, { params, user, db }) => {
   // A machine credential must not reach a kill switch. An unscoped admin API token keeps
   // role: "admin" and so passes withAdmin; the counterpart to this action is already gated
   // this way, and the asymmetry was the bug (BP-306).
@@ -67,7 +66,7 @@ export const PATCH = withAdmin(async (request, { params, user }) => {
   }
 
   await connectDB();
-  const beforeImage = await Project.findByIdAndUpdate(projectId, { $set: updates }, {
+  const beforeImage = await db.Project.findByIdAndUpdate(projectId, { $set: updates }, {
     returnDocument: "before",
   }).lean();
   if (!beforeImage) {

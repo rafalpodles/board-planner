@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
 const sprintFind = vi.fn();
-const projectFindById = vi.fn();
+const projectFindOne = vi.fn();
 const taskAggregate = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
@@ -13,7 +14,7 @@ vi.mock("@/lib/auth", () => ({
 }));
 vi.mock("@/lib/grants", () => ({ check }));
 vi.mock("@/models/sprint", () => ({ Sprint: { find: sprintFind } }));
-vi.mock("@/models/project", () => ({ Project: { findById: projectFindById } }));
+vi.mock("@/models/project", () => ({ Project: { findOne: projectFindOne } }));
 vi.mock("@/models/task", () => ({ Task: { aggregate: taskAggregate } }));
 
 const { GET } = await import("./route");
@@ -40,13 +41,13 @@ async function json(res: Response) {
 // Task.aggregate returns — never what MongoDB itself does with a string in $convert. That
 // question belongs to e2e/sprint-estimates.spec.ts, against a real database.
 function mockNoDesignation() {
-  projectFindById.mockReturnValue({
+  projectFindOne.mockReturnValue({
     lean: () => Promise.resolve({ columns: [TODO_COLUMN, DONE_COLUMN], estimateFieldId: "" }),
   });
 }
 
 function mockDesignation() {
-  projectFindById.mockReturnValue({
+  projectFindOne.mockReturnValue({
     lean: () =>
       Promise.resolve({
         columns: [TODO_COLUMN, DONE_COLUMN],
@@ -108,7 +109,7 @@ describe("GET /api/projects/[projectId]/sprints — estimate accumulators", () =
 
     await GET(req(), ctx());
 
-    expect(projectFindById).toHaveBeenCalledWith(PROJECT_ID, "columns estimateFieldId");
+    expect(projectFindOne).toHaveBeenCalledWith({ _id: PROJECT_ID, tenant: DEFAULT_TENANT_ID }, "columns estimateFieldId");
   });
 
   it("carries estimateTotal/estimateDone from the aggregate result through to the response", async () => {
@@ -148,7 +149,7 @@ describe("GET /api/projects/[projectId]/sprints — estimate accumulators", () =
   // at parse time — the one failure onError/onNull cannot cover, since they guard conversion,
   // not a malformed path.
   it("treats a non-hex estimateFieldId (e.g. one starting with '$') as no designation", async () => {
-    projectFindById.mockReturnValue({
+    projectFindOne.mockReturnValue({
       lean: () =>
         Promise.resolve({ columns: [TODO_COLUMN, DONE_COLUMN], estimateFieldId: "$where" }),
     });
@@ -161,7 +162,7 @@ describe("GET /api/projects/[projectId]/sprints — estimate accumulators", () =
   });
 
   it("treats an estimateFieldId of the wrong length as no designation, even if every character is hex", async () => {
-    projectFindById.mockReturnValue({
+    projectFindOne.mockReturnValue({
       lean: () =>
         Promise.resolve({
           columns: [TODO_COLUMN, DONE_COLUMN],
@@ -177,7 +178,7 @@ describe("GET /api/projects/[projectId]/sprints — estimate accumulators", () =
   });
 
   it("also omits the malformed-designation case from the response, matching no-designation", async () => {
-    projectFindById.mockReturnValue({
+    projectFindOne.mockReturnValue({
       lean: () =>
         Promise.resolve({ columns: [TODO_COLUMN, DONE_COLUMN], estimateFieldId: "$where" }),
     });

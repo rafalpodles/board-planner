@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const getAuthUser = vi.fn();
 const compare = vi.fn();
-const userFindById = vi.fn();
+const userFindOne = vi.fn();
 const revokeUserCredentials = vi.fn();
 const invalidateResetTokens = vi.fn();
 const logInstanceAudit = vi.fn();
@@ -27,7 +27,7 @@ vi.mock("@/lib/password-reset", () => ({ invalidateResetTokens }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/lib/grants", () => ({ check: vi.fn(), accessibleProjectIds: vi.fn() }));
 vi.mock("bcryptjs", () => ({ default: { compare, hash: vi.fn().mockResolvedValue("new-hash") } }));
-vi.mock("@/models/user", () => ({ User: { findById: userFindById } }));
+vi.mock("@/models/user", () => ({ User: { findOne: userFindOne } }));
 
 const { PUT } = await import("./route");
 const { resetRateLimits, lockoutKey, recordFailedAttempt, isRateLimited, ANONYMOUS_ACCOUNT_ATTEMPTS } =
@@ -61,7 +61,7 @@ beforeEach(async () => {
   vi.clearAllMocks();
   await resetRateLimits();
   record = { password: "old-hash", save: vi.fn().mockResolvedValue(undefined) };
-  userFindById.mockReturnValue({ select: () => Promise.resolve(record) });
+  userFindOne.mockReturnValue({ select: () => Promise.resolve(record) });
   getAuthUser.mockResolvedValue(browserUser("changer"));
   compare.mockResolvedValue(true);
   revokeUserCredentials.mockResolvedValue(0);

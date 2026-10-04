@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
@@ -15,8 +16,8 @@ vi.mock("@/models/task", () => ({ Task: { find: taskFind, exists: taskExists } }
 vi.mock("@/models/worker", () => ({ Worker: { find: workerFind } }));
 const userFindOne = vi.fn();
 vi.mock("@/models/user", () => ({ User: { findOne: userFindOne } }));
-const projectFindById = vi.fn();
-vi.mock("@/models/project", () => ({ Project: { findById: projectFindById } }));
+const projectFindOne = vi.fn();
+vi.mock("@/models/project", () => ({ Project: { findOne: projectFindOne } }));
 // Partial, so `taskPopulateFields` is the REAL list this route hands to populate. Stubbing it here
 // would make the assertion below about the stub, which is exactly the drift that let three copies
 // of that list disagree.
@@ -68,7 +69,7 @@ beforeEach(() => {
   );
   workerFind.mockReturnValue({ select: () => Promise.resolve([]) });
   userFindOne.mockReturnValue({ lean: async () => null });
-  projectFindById.mockReturnValue({ lean: async () => ({ categories: [{ name: "bug" }, { name: "doc" }] }) });
+  projectFindOne.mockReturnValue({ lean: async () => ({ categories: [{ name: "bug" }, { name: "doc" }] }) });
 });
 
 /** The filter the route actually handed Mongoose */
@@ -140,7 +141,7 @@ describe("GET /api/projects/:projectId/tasks — assignee filter", () => {
     const res = await GET(request("?assignee=owner"), ctx());
 
     expect(res.status).toBe(200);
-    expect(userFindOne).toHaveBeenCalledWith({ username: "owner" }, "_id");
+    expect(userFindOne).toHaveBeenCalledWith({ username: "owner", tenant: DEFAULT_TENANT_ID }, "_id");
     expect(filterUsed()?.assignee).toBe("u7");
   });
 
@@ -149,7 +150,7 @@ describe("GET /api/projects/:projectId/tasks — assignee filter", () => {
 
     await GET(request("?assignee=OwNeR"), ctx());
 
-    expect(userFindOne).toHaveBeenCalledWith({ username: "owner" }, "_id");
+    expect(userFindOne).toHaveBeenCalledWith({ username: "owner", tenant: DEFAULT_TENANT_ID }, "_id");
   });
 
   // The whole point of refusing: an empty list and a typo read identically to whoever asked
@@ -246,7 +247,7 @@ describe("GET /api/projects/:projectId/tasks — category and priority", () => {
   // The escape both writers have, copied faithfully: a project that defines no categories at all
   // must not have every category filter refused
   it("lets any category through on a project that defines none", async () => {
-    projectFindById.mockReturnValue({ lean: async () => ({ categories: [] }) });
+    projectFindOne.mockReturnValue({ lean: async () => ({ categories: [] }) });
 
     const res = await GET(request("?category=anything"), ctx());
 
@@ -279,7 +280,7 @@ describe("GET /api/projects/:projectId/tasks — the status filter", () => {
    * its seeded columns are byte-identical to those defaults.
    */
   beforeEach(() => {
-    projectFindById.mockImplementation((_id: unknown, projection?: string) => ({
+    projectFindOne.mockImplementation((_filter: { _id: unknown }, projection?: string) => ({
       lean: async () => ({
         categories: [{ name: "bug" }],
         ...(String(projection).split(/\s+/).includes("columns") ? { columns: COLUMNS } : {}),
@@ -315,6 +316,7 @@ describe("GET /api/projects/:projectId/tasks — the status filter", () => {
     expect(taskExists).toHaveBeenCalledWith({
       project: PROJECT_ID,
       status: { $in: ["in_progress"] },
+      tenant: DEFAULT_TENANT_ID,
     });
   });
 
@@ -329,6 +331,7 @@ describe("GET /api/projects/:projectId/tasks — the status filter", () => {
     expect(taskExists).toHaveBeenCalledWith({
       project: PROJECT_ID,
       status: { $in: ["nonesuch", "in_progress"] },
+      tenant: DEFAULT_TENANT_ID,
     });
   });
 
@@ -372,7 +375,7 @@ describe("GET /api/projects/:projectId/tasks — the status filter", () => {
   // A board predating the seeding migration stores no columns and runs on the built-in seven, so
   // the seeded ids are what it must still answer to
   it("judges a board with no stored columns by the built-in ones", async () => {
-    projectFindById.mockReturnValue({ lean: async () => ({ categories: [], columns: [] }) });
+    projectFindOne.mockReturnValue({ lean: async () => ({ categories: [], columns: [] }) });
 
     const seeded = await GET(request("?status=in_progress"), ctx());
     expect(seeded.status).toBe(200);

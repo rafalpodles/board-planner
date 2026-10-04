@@ -3,13 +3,13 @@ import { DEFAULT_PROJECT_COLUMNS } from "@/types";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
-const projectFindById = vi.fn();
+const projectFindOne = vi.fn();
 const taskFind = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ getAuthUser, RateLimitError: class extends Error {} }));
 vi.mock("@/lib/grants", () => ({ check }));
-vi.mock("@/models/project", () => ({ Project: { findById: projectFindById } }));
+vi.mock("@/models/project", () => ({ Project: { findOne: projectFindOne } }));
 vi.mock("@/models/task", () => ({ Task: { find: taskFind } }));
 vi.mock("@/lib/projectAudit", () => ({ logProjectAudit: vi.fn() }));
 
@@ -23,7 +23,7 @@ type Column = { id: string; label: string; color: string; role: string; order: n
 /** The board as stored, and the tasks standing in it, keyed by column id. */
 function board(columns: Column[], tasksByColumn: Record<string, number[]> = {}) {
   const doc = { key: "TP", columns, save: vi.fn(async () => {}) };
-  projectFindById.mockResolvedValue(doc);
+  projectFindOne.mockResolvedValue(doc);
   taskFind.mockImplementation((filter: { status: string }) => ({
     select: () => ({
       sort: () => ({

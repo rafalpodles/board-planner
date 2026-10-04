@@ -2,20 +2,18 @@ import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withAuth } from "@/lib/middleware";
-import { OAuthToken } from "@/models/oauthToken";
-import { OAuthClient } from "@/models/oauthClient";
 
 // A user's own active OAuth connections (one per issued access token).
-export const GET = withAuth(async (_request, { user }) => {
+export const GET = withAuth(async (_request, { user, db }) => {
   await connectDB();
 
-  const tokens = await OAuthToken.find({ user: user._id })
+  const tokens = await db.OAuthToken.find({ user: user._id })
     .select("clientId allowedProjects accessExpiresAt createdAt")
     .sort({ createdAt: -1 })
     .lean();
 
   const clientIds = [...new Set(tokens.map((t) => t.clientId))];
-  const clients = await OAuthClient.find({ clientId: { $in: clientIds } })
+  const clients = await db.OAuthClient.find({ clientId: { $in: clientIds } })
     .select("clientId clientName")
     .lean();
   const nameMap = new Map(clients.map((c) => [c.clientId, c.clientName]));
@@ -32,7 +30,7 @@ export const GET = withAuth(async (_request, { user }) => {
   );
 });
 
-export const DELETE = withAuth(async (request, { user }) => {
+export const DELETE = withAuth(async (request, { user, db }) => {
   await connectDB();
 
   const body = await request.json().catch(() => null);
@@ -43,7 +41,7 @@ export const DELETE = withAuth(async (request, { user }) => {
     return NextResponse.json({ error: "Connection id is required" }, { status: 400 });
   }
 
-  const result = await OAuthToken.findOneAndDelete({ _id: id, user: user._id });
+  const result = await db.OAuthToken.findOneAndDelete({ _id: id, user: user._id });
   if (!result) {
     return NextResponse.json({ error: "Connection not found" }, { status: 404 });
   }
