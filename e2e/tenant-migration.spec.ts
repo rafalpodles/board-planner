@@ -162,7 +162,7 @@ const declaredPerTenantUniques: Spec[] = scopedModelNames().flatMap((model) =>
   mongoose
     .model(model)
     .schema.indexes()
-    .filter(([fields, options]) => options?.unique && "tenant" in fields)
+    .filter(([fields, options]) => options?.unique && "tenant" in fields && Object.keys(fields).length > 1)
     .map(([fields, options]) => ({ model, fields: fields as Record<string, number>, options: options as Spec["options"] }))
 );
 
@@ -277,3 +277,15 @@ for (const { model, fields, options } of declaredPerTenantUniques) {
     }
   });
 }
+
+test("BP-667: Settings is one row per tenant, unique on the tenant alone", async () => {
+  const declared = mongoose.model("Settings").schema.indexes();
+  expect(declared).toContainEqual([{ tenant: 1 }, expect.objectContaining({ unique: true })]);
+
+  const fresh = col("fresh_settings");
+  await fresh.createIndex({ tenant: 1 }, { unique: true });
+  expect(await insertOutcome(fresh.insertOne({ tenant: OTHER_TENANT }))).toBe("inserted");
+  expect(await insertOutcome(fresh.insertOne({ tenant: THIRD_TENANT }))).toBe("inserted");
+  expect(await insertOutcome(fresh.insertOne({ tenant: OTHER_TENANT }))).toEqual({ refused: "tenant" });
+});
+
