@@ -152,7 +152,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
     // link existed; it must not outlive the session that made it (BP-842)
     if (current.sessionId && !(await own.Session.exists({ _id: current.sessionId }))) {
       await own.Identity.deleteOne({ issuer: claims.issuer, subject: claims.subject, user: user._id });
-      void logInstanceAudit(db, {
+      void logInstanceAudit(own, {
         action: "identity_unlinked",
         user: user._id,
         actorUsername: user.username,

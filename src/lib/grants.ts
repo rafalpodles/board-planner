@@ -74,7 +74,7 @@ export async function check(db: ScopedDb, user: IdentifiedSubject, projectId: st
 }
 
 /**
- * Which of these projects this person may administer — check(user, id, "admin") for a list, in
+ * Which of these projects this person may administer — check(db, user, id, "admin") for a list, in
  * one query rather than one per project.
  */
 export async function administeredProjectIds(

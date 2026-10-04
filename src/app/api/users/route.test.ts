@@ -307,6 +307,7 @@ describe("claiming an instance nobody has claimed", () => {
 
     expect(res.status).toBe(201);
     expect(create.mock.calls[0][0].tenant).toEqual(tenant);
+    expect(revokePendingInvitationsFor.mock.calls[0][0].tenant).toEqual(tenant);
   });
 
   it("creates the administrator when the operator's code is given", async () => {

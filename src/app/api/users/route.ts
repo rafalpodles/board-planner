@@ -139,15 +139,16 @@ export async function POST(request: Request) {
 
   const hashedPassword = await bcrypt.hash(password, PASSWORD_COST_FACTOR);
 
+  const accountDb = authUser ? scopedFor(authUser) : db;
   try {
-    const user = await (authUser ? scopedFor(authUser) : db).User.create({
+    const user = await accountDb.User.create({
       username: storedUsername,
       password: hashedPassword,
       fullName: storedFullName,
       email,
       role: isBootstrap ? "admin" : "member",
     });
-    await revokePendingInvitationsFor(db, email);
+    await revokePendingInvitationsFor(accountDb, email);
     if (isBootstrap && organisation.value) {
       await nameOrganisation(organisation.value).catch((err) =>
         console.error("[users] naming the organisation failed; the account was created", err)
@@ -156,7 +157,7 @@ export async function POST(request: Request) {
     // The account's own beginning, which nothing recorded: the log knew that somebody's display
     // name changed and not that the account existed. `target` is the username because this row has
     // to still name them after the account is gone.
-    void logInstanceAudit(db, {
+    void logInstanceAudit(accountDb, {
       action: "user_created",
       user: authUser?._id ?? null,
       actorUsername: authUser?.username ?? "",

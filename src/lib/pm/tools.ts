@@ -35,7 +35,7 @@ export interface PmToolContext {
  * BP-419 made a PM assignment claimable, and the claim's own filter pairs this with
  * `assignee: <machine owner>` — so a machine runs a PM hand-over only when the person who asked
  * for it is the person receiving it. Without this, the PM chat is reachable by any project member
- * (`check(user, projectId, "access")`), and asking it to assign a task to a colleague would start
+ * (`check(db, user, projectId, "access")`), and asking it to assign a task to a colleague would start
  * a run on that colleague's machine, carrying text the member wrote. The old filter refused every
  * PM assignment, so that path did not exist before this change and must not be opened by it.
  */
