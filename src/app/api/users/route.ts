@@ -1,7 +1,7 @@
-import { checkOrganisationName, nameOrganisation } from "@/lib/tenant";
 import { NextResponse } from "next/server";
 import { passwordSignInEnabled } from "@/lib/password-sign-in";
 import { readJsonBody } from "@/lib/request-body";
+import { checkOrganisationName, nameOrganisation } from "@/lib/tenant";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
 import { getAuthUser, getClientIp, PASSWORD_COST_FACTOR } from "@/lib/auth";
