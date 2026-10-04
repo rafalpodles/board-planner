@@ -272,8 +272,12 @@ describe("claiming an instance nobody has claimed", () => {
   });
 
   it("ignores an organisation name once the instance is claimed: an administrator adding a member cannot rename it", async () => {
-    await post({ ...VALID, username: "someone", organisation: "Hijacked" });
+    countDocuments.mockResolvedValue(3);
+    getAuthUser.mockResolvedValue({ _id: "a1", role: "admin", username: "owner" });
 
+    const res = await post({ ...VALID, username: "someone", organisation: "Hijacked" });
+
+    expect(res.status).toBe(201);
     expect(nameOrganisation).not.toHaveBeenCalled();
   });
 
