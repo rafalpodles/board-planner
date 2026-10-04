@@ -32,12 +32,20 @@ describe("GET /api/entitlements", () => {
   it("answers the tenant's plan, features and expiry for any authenticated user", async () => {
     getAuthUser.mockResolvedValue({ _id: "u1", username: "member", role: "member" });
     getTenant.mockResolvedValue({
+      name: "Acme",
       entitlements: { plan: "pro", features: ["integrations.coda"], expiresAt: undefined },
     });
 
     const res = await get();
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ plan: "pro", features: ["integrations.coda"], expiresAt: null });
+    expect(await res.json()).toEqual({ organisation: "Acme", plan: "pro", features: ["integrations.coda"], expiresAt: null });
+  });
+
+  it("calls an organisation that was never named the default one", async () => {
+    getAuthUser.mockResolvedValue({ _id: "u1", username: "member", role: "member" });
+    getTenant.mockResolvedValue({ entitlements: { plan: "free", features: [] } });
+
+    expect(await (await get()).json()).toMatchObject({ organisation: "default" });
   });
 });
