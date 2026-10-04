@@ -9,6 +9,7 @@ import {
   USERNAME,
   asTenant,
   bearer,
+  oauthBearer,
   hostOf,
   originOf,
   seedTwoTenants,
@@ -37,6 +38,31 @@ test.describe("BP-670: two organisations on one instance, each on its own subdom
       expect(names, who.slug).toContain(who.projectName);
       expect(names, who.slug).not.toContain(other.projectName);
     }
+  });
+
+  test("an OAuth access token works on its own organisation's host and is no credential on the other's", async ({ request }) => {
+    const own = await get(request, "/api/projects", { ...asTenant(ACME), ...oauthBearer(ACME) });
+    expect(own.status()).toBe(200);
+    expect(JSON.stringify(await own.json())).toContain(ACME.projectName);
+
+    expect((await get(request, "/api/projects", { ...asTenant(GLOBEX), ...oauthBearer(ACME) })).status()).toBe(401);
+  });
+
+  test("notifications: each person's bell holds only their own organisation's, and nobody marks another's read", async ({ request }) => {
+    const bell = async (who: typeof ACME) =>
+      JSON.stringify(await (await get(request, "/api/notifications", { ...asTenant(who), ...bearer(who) })).json());
+
+    expect(await bell(ACME)).toContain("acme notice");
+    expect(await bell(GLOBEX)).not.toContain("acme notice");
+
+    const marked = await request.patch(`${TENANTS_API}/api/notifications/read`, {
+      headers: { ...asTenant(GLOBEX), ...bearer(GLOBEX), "content-type": "application/json" },
+      data: { id: String(ACME.notificationId) },
+    });
+    expect(marked.status()).toBeLessThan(500);
+    const acmeRows = JSON.parse(await bell(ACME)) as { notifications?: { _id: string; read: boolean }[] } | { _id: string; read: boolean }[];
+    const rows = Array.isArray(acmeRows) ? acmeRows : acmeRows.notifications ?? [];
+    expect(rows.find((row) => row._id === String(ACME.notificationId))?.read).toBe(false);
   });
 
   test("a token is no credential on another organisation's host", async ({ request }) => {

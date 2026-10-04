@@ -17,9 +17,12 @@ export interface TenantFixture {
   projectId: mongoose.Types.ObjectId;
   projectName: string;
   workerId: mongoose.Types.ObjectId;
+  oauthToken: string;
+  notificationId: mongoose.Types.ObjectId;
 }
 
 export const USERNAME = "boss";
+const OAUTH_CLIENT_ID = "e2e-tenants-client";
 export const SHARED_KEY = "SAME";
 
 export const ACME: TenantFixture = {
@@ -32,6 +35,8 @@ export const ACME: TenantFixture = {
   projectId: id("e2e0000000000000000ac003"),
   projectName: "Acme Rockets",
   workerId: id("e2e0000000000000000ac004"),
+  oauthToken: "cpat_e2eac005deadbeefdeadbeefdeadbeef",
+  notificationId: id("e2e0000000000000000ac006"),
 };
 
 export const GLOBEX: TenantFixture = {
@@ -44,6 +49,8 @@ export const GLOBEX: TenantFixture = {
   projectId: id("e2e0000000000000000ab003"),
   projectName: "Globex Doomsday",
   workerId: id("e2e0000000000000000ab004"),
+  oauthToken: "cpat_e2eab005deadbeefdeadbeefdeadbeef",
+  notificationId: id("e2e0000000000000000ab006"),
 };
 
 export const hostOf = (who: TenantFixture | string) =>
@@ -73,6 +80,14 @@ export async function seedTwoTenants(): Promise<void> {
   const now = new Date();
   const template = await handle.collection("projects").findOne({ _id: PROJECT_ID });
   const machine = await handle.collection("workers").findOne({ _id: WORKER_ID });
+  const sha = (raw: string) => crypto.createHash("sha256").update(raw).digest("hex");
+  const later = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  await handle.collection("oauthclients").insertOne({
+    clientId: OAUTH_CLIENT_ID,
+    clientName: "BP-670 client",
+    redirectUris: ["http://localhost/callback"],
+    createdAt: now,
+  });
   for (const who of [ACME, GLOBEX]) {
     await handle.collection("tenants").insertOne({ _id: who.tenant, name: who.projectName.split(" ")[0], slug: who.slug });
     await handle.collection("users").insertOne({
@@ -117,6 +132,29 @@ export async function seedTwoTenants(): Promise<void> {
       name: `${who.slug}-machine`,
       owner: who.adminId,
     });
+    await handle.collection("oauthtokens").insertOne({
+      tenant: who.tenant,
+      accessTokenHash: sha(who.oauthToken),
+      refreshTokenHash: sha(`${who.oauthToken}-refresh`),
+      clientId: OAUTH_CLIENT_ID,
+      user: who.adminId,
+      scope: "mcp",
+      allowedProjects: [],
+      accessExpiresAt: later,
+      refreshExpiresAt: later,
+      createdAt: now,
+    });
+    await handle.collection("notifications").insertOne({
+      _id: who.notificationId,
+      tenant: who.tenant,
+      recipient: who.adminId,
+      type: "board_access",
+      project: who.projectId,
+      actor: who.adminId,
+      title: `${who.slug} notice`,
+      read: false,
+      createdAt: now,
+    });
     const { _id: _ignored, ...rest } = template!;
     await handle.collection("projects").insertOne({
       ...rest,
@@ -149,4 +187,6 @@ export const workerHeaders = (who: TenantFixture) => ({
   "x-worker-id": String(who.workerId),
   "x-cp-protocol": "1",
 });
+
+export const oauthBearer = (who: TenantFixture) => ({ authorization: `Bearer ${who.oauthToken}` });
 
