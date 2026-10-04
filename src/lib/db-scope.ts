@@ -96,7 +96,9 @@ export type ScopedModel<M> = M extends Model<infer T>
     }
   : never;
 
-export type ScopedDb = { [K in keyof typeof SCOPED_MODELS]: ScopedModel<ReturnType<(typeof SCOPED_MODELS)[K]>> };
+export type ScopedDb = { readonly tenant: Types.ObjectId } & {
+  [K in keyof typeof SCOPED_MODELS]: ScopedModel<ReturnType<(typeof SCOPED_MODELS)[K]>>;
+};
 
 export class TenantKeyError extends Error {
   constructor(where: string) {
@@ -234,8 +236,9 @@ export function scoped(tenant: Types.ObjectId | string): ScopedDb {
   if (cached) return cached;
 
   const built = new Map<string, unknown>();
-  const db = new Proxy({} as ScopedDb, {
-    get(_target, name) {
+  const db = new Proxy({ tenant: id } as ScopedDb, {
+    get(target, name) {
+      if (name === "tenant") return target.tenant;
       if (typeof name !== "string" || !Object.hasOwn(SCOPED_MODELS, name)) return undefined;
       if (!built.has(name)) {
         built.set(name, scopeModel(SCOPED_MODELS[name as keyof typeof SCOPED_MODELS]() as unknown as Model<never>, id));
