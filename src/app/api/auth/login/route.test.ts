@@ -398,7 +398,7 @@ describe("POST /api/auth/login — cookie", () => {
 
     await POST(request({ "sec-fetch-site": "same-origin" }));
 
-    expect(createSession.mock.calls[0][0].tenant).toBe(tenant);
+    expect(createSession.mock.calls[0][0].tenant).toEqual(tenant);
   });
 
   it("issues a fresh row and deletes nothing", async () => {
