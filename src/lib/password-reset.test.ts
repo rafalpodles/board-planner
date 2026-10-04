@@ -13,6 +13,8 @@ vi.mock("@/models/passwordResetToken", () => ({
 
 const { issueResetToken, consumeResetToken, invalidateResetTokens, RESET_TOKEN_PREFIX } =
   await import("./password-reset");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
 
 const sha256 = (v: string) => createHash("sha256").update(v).digest("hex");
 
@@ -25,7 +27,7 @@ beforeEach(() => {
 
 describe("issuing a link", () => {
   it("stores the hash and hands back the only copy of the token", async () => {
-    const token = await issueResetToken("u1", "ada@example.com");
+    const token = await issueResetToken(scopedToDefaultTenant(), "u1", "ada@example.com");
 
     expect(token.startsWith(RESET_TOKEN_PREFIX)).toBe(true);
     const stored = create.mock.calls[0][0];
@@ -37,7 +39,7 @@ describe("issuing a link", () => {
 
   it("expires within the hour", async () => {
     const before = Date.now();
-    await issueResetToken("u1", "ada@example.com");
+    await issueResetToken(scopedToDefaultTenant(), "u1", "ada@example.com");
 
     const { expiresAt } = create.mock.calls[0][0];
     expect(expiresAt.getTime()).toBeGreaterThan(before);
@@ -47,21 +49,21 @@ describe("issuing a link", () => {
   // Two live links means the older one is still spendable by whoever intercepted it, and the
   // person who asked twice has no way of knowing
   it("kills any link already outstanding for that account", async () => {
-    await issueResetToken("u1", "ada@example.com");
+    await issueResetToken(scopedToDefaultTenant(), "u1", "ada@example.com");
 
-    expect(deleteMany).toHaveBeenCalledWith({ user: "u1", usedAt: null });
+    expect(deleteMany).toHaveBeenCalledWith({ user: "u1", usedAt: null, tenant: DEFAULT_TENANT_ID });
   });
 
   // BP-842. Spending the link proves this address, and no other the account has been given since
   it("records the address the link was mailed to", async () => {
-    await issueResetToken("u1", "ada@example.com");
+    await issueResetToken(scopedToDefaultTenant(), "u1", "ada@example.com");
 
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ user: "u1", sentTo: "ada@example.com" }));
   });
 
   it("never issues the same token twice", async () => {
     const tokens = new Set<string>();
-    for (let i = 0; i < 50; i++) tokens.add(await issueResetToken("u1", "ada@example.com"));
+    for (let i = 0; i < 50; i++) tokens.add(await issueResetToken(scopedToDefaultTenant(), "u1", "ada@example.com"));
 
     expect(tokens.size).toBe(50);
   });
@@ -71,7 +73,7 @@ describe("spending a link", () => {
   it("claims and marks it in one update, matching on it being unspent", async () => {
     findOneAndUpdate.mockResolvedValue({ user: "u1", sentTo: "ada@example.com" });
 
-    const outcome = await consumeResetToken("cpr_abc");
+    const outcome = await consumeResetToken(scopedToDefaultTenant(), "cpr_abc");
 
     expect(outcome).toEqual({ ok: true, userId: "u1", sentTo: "ada@example.com" });
     const [filter, update] = findOneAndUpdate.mock.calls[0];
@@ -86,7 +88,7 @@ describe("spending a link", () => {
   it("looks the token up by hash, never by its raw value", async () => {
     findOneAndUpdate.mockResolvedValue(null);
 
-    await consumeResetToken("cpr_abc");
+    await consumeResetToken(scopedToDefaultTenant(), "cpr_abc");
 
     expect(JSON.stringify(findOneAndUpdate.mock.calls[0][0])).not.toContain("cpr_abc");
   });
@@ -99,7 +101,7 @@ describe("spending a link", () => {
     findOneAndUpdate.mockResolvedValue(null);
     findOne.mockReturnValue({ lean: () => Promise.resolve(existing) });
 
-    expect(await consumeResetToken("cpr_abc")).toEqual({ ok: false, reason });
+    expect(await consumeResetToken(scopedToDefaultTenant(), "cpr_abc")).toEqual({ ok: false, reason });
   });
 });
 
@@ -109,8 +111,8 @@ describe("invalidating", () => {
   // "This link has already been used" into "This link is not valid" for everyone who double-clicks
   // their own email.
   it("drops the links that could still be spent, and leaves the spent one behind", async () => {
-    await invalidateResetTokens("u1");
+    await invalidateResetTokens(scopedToDefaultTenant(), "u1");
 
-    expect(deleteMany).toHaveBeenCalledWith({ user: "u1", usedAt: null });
+    expect(deleteMany).toHaveBeenCalledWith({ user: "u1", usedAt: null, tenant: DEFAULT_TENANT_ID });
   });
 });

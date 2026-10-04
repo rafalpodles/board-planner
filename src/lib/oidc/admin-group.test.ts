@@ -7,9 +7,11 @@ vi.mock("@/models/user", () => ({ User: { updateOne, countDocuments } }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 
 const { applyAdminGroup } = await import("./admin-group");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
 
 const account = (role: "admin" | "member", extra = {}) =>
-  ({ _id: "u1", username: "ada", role, kind: "human", deactivatedAt: null, ...extra }) as never as Parameters<typeof applyAdminGroup>[0];
+  ({ _id: "u1", username: "ada", role, kind: "human", deactivatedAt: null, ...extra }) as never as Parameters<typeof applyAdminGroup>[1];
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -26,11 +28,12 @@ describe("the admin group", () => {
   it("makes a member in the group an admin, and records it", async () => {
     const user = account("member");
 
-    await applyAdminGroup(user, "oidc", ["staff", "planner-admins"]);
+    await applyAdminGroup(scopedToDefaultTenant(), user, "oidc", ["staff", "planner-admins"]);
 
-    expect(updateOne).toHaveBeenCalledWith({ _id: "u1", role: "member" }, { $set: { role: "admin" } });
+    expect(updateOne).toHaveBeenCalledWith({ _id: "u1", role: "member", tenant: DEFAULT_TENANT_ID }, { $set: { role: "admin" } });
     expect(user.role).toBe("admin");
     expect(logInstanceAudit).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       expect.objectContaining({ action: "user_role_changed", target: "ada", detail: expect.stringContaining("member → admin") })
     );
   });
@@ -38,27 +41,28 @@ describe("the admin group", () => {
   it("makes an admin outside the group a member, and records it", async () => {
     const user = account("admin");
 
-    await applyAdminGroup(user, "oidc", ["staff"]);
+    await applyAdminGroup(scopedToDefaultTenant(), user, "oidc", ["staff"]);
 
-    expect(updateOne).toHaveBeenCalledWith({ _id: "u1", role: "admin" }, { $set: { role: "member" } });
+    expect(updateOne).toHaveBeenCalledWith({ _id: "u1", role: "admin", tenant: DEFAULT_TENANT_ID }, { $set: { role: "member" } });
     expect(user.role).toBe("member");
     expect(logInstanceAudit).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       expect.objectContaining({ action: "user_role_changed", detail: expect.stringContaining("admin → member") })
     );
   });
 
   // BP-845. A deactivated admin administers nothing, so is no admin left
   it("counts only active administrators when deciding whether one would be left", async () => {
-    await applyAdminGroup(account("admin"), "oidc", []);
+    await applyAdminGroup(scopedToDefaultTenant(), account("admin"), "oidc", []);
 
-    expect(countDocuments).toHaveBeenCalledWith({ role: "admin", deactivatedAt: null });
+    expect(countDocuments).toHaveBeenCalledWith({ role: "admin", deactivatedAt: null, tenant: DEFAULT_TENANT_ID });
   });
 
   it("records nothing and changes nothing when a racing request promoted them first", async () => {
     updateOne.mockResolvedValue({ modifiedCount: 0 });
     const user = account("member");
 
-    await applyAdminGroup(user, "oidc", ["planner-admins"]);
+    await applyAdminGroup(scopedToDefaultTenant(), user, "oidc", ["planner-admins"]);
 
     expect(user.role).toBe("member");
     expect(logInstanceAudit).not.toHaveBeenCalled();
@@ -68,15 +72,15 @@ describe("the admin group", () => {
     updateOne.mockResolvedValue({ modifiedCount: 0 });
     const user = account("admin");
 
-    await applyAdminGroup(user, "oidc", []);
+    await applyAdminGroup(scopedToDefaultTenant(), user, "oidc", []);
 
     expect(user.role).toBe("admin");
     expect(logInstanceAudit).not.toHaveBeenCalled();
   });
 
   it("changes nothing for a machine account", async () => {
-    await applyAdminGroup(account("member", { kind: "machine" }), "oidc", ["planner-admins"]);
-    await applyAdminGroup(account("admin", { kind: "machine" }), "oidc", []);
+    await applyAdminGroup(scopedToDefaultTenant(), account("member", { kind: "machine" }), "oidc", ["planner-admins"]);
+    await applyAdminGroup(scopedToDefaultTenant(), account("admin", { kind: "machine" }), "oidc", []);
 
     expect(updateOne).not.toHaveBeenCalled();
   });
@@ -85,7 +89,7 @@ describe("the admin group", () => {
     countDocuments.mockResolvedValue(1);
     const user = account("admin");
 
-    await applyAdminGroup(user, "oidc", []);
+    await applyAdminGroup(scopedToDefaultTenant(), user, "oidc", []);
 
     expect(updateOne).not.toHaveBeenCalled();
     expect(user.role).toBe("admin");
@@ -96,16 +100,16 @@ describe("the admin group", () => {
     countDocuments.mockResolvedValueOnce(2).mockResolvedValueOnce(0);
     const user = account("admin");
 
-    await applyAdminGroup(user, "oidc", []);
+    await applyAdminGroup(scopedToDefaultTenant(), user, "oidc", []);
 
-    expect(updateOne).toHaveBeenLastCalledWith({ _id: "u1" }, { $set: { role: "admin" } });
+    expect(updateOne).toHaveBeenLastCalledWith({ _id: "u1", tenant: DEFAULT_TENANT_ID }, { $set: { role: "admin" } });
     expect(user.role).toBe("admin");
     expect(logInstanceAudit).not.toHaveBeenCalled();
   });
 
   it("leaves alone a role it already agrees with", async () => {
-    await applyAdminGroup(account("admin"), "oidc", ["planner-admins"]);
-    await applyAdminGroup(account("member"), "oidc", []);
+    await applyAdminGroup(scopedToDefaultTenant(), account("admin"), "oidc", ["planner-admins"]);
+    await applyAdminGroup(scopedToDefaultTenant(), account("member"), "oidc", []);
 
     expect(updateOne).not.toHaveBeenCalled();
   });
@@ -117,14 +121,14 @@ describe("the admin group", () => {
   ])("changes nothing for %s", async (_label, setUp, provider) => {
     setUp();
 
-    await applyAdminGroup(account("member"), provider, ["planner-admins"]);
-    await applyAdminGroup(account("admin"), provider, []);
+    await applyAdminGroup(scopedToDefaultTenant(), account("member"), provider, ["planner-admins"]);
+    await applyAdminGroup(scopedToDefaultTenant(), account("admin"), provider, []);
 
     expect(updateOne).not.toHaveBeenCalled();
   });
 
   it("changes nothing for a deactivated account", async () => {
-    await applyAdminGroup(account("member", { deactivatedAt: new Date() }), "oidc", ["planner-admins"]);
+    await applyAdminGroup(scopedToDefaultTenant(), account("member", { deactivatedAt: new Date() }), "oidc", ["planner-admins"]);
 
     expect(updateOne).not.toHaveBeenCalled();
   });

@@ -100,7 +100,7 @@ describe("withWorker", () => {
     );
 
     expect(res.status).toBe(401);
-    expect(userExists).toHaveBeenCalledWith({ _id: "u9", deactivatedAt: { $ne: null } });
+    expect(userExists).toHaveBeenCalledWith({ _id: "u9", deactivatedAt: { $ne: null }, tenant: DEFAULT_TENANT_ID });
     expect(handler).not.toHaveBeenCalled();
   });
 

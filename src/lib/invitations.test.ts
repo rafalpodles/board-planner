@@ -41,6 +41,8 @@ const {
   INVITATION_TOKEN_PREFIX,
   INVITATION_TTL_MS,
 } = await import("./invitations");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
 
 const sha256 = (v: string) => createHash("sha256").update(v).digest("hex");
 const duplicate = Object.assign(new Error("E11000"), { code: 11000 });
@@ -60,7 +62,7 @@ beforeEach(() => {
 
 describe("issuing an invitation", () => {
   it("stores only the hash and hands back the one copy of the token", async () => {
-    const { token } = await issueInvitation(ISSUE);
+    const { token } = await issueInvitation(scopedToDefaultTenant(), ISSUE);
 
     expect(token.startsWith(INVITATION_TOKEN_PREFIX)).toBe(true);
     const update = findOneAndUpdate.mock.calls[0][1];
@@ -70,7 +72,7 @@ describe("issuing an invitation", () => {
 
   it("expires seven days out", async () => {
     const before = Date.now();
-    await issueInvitation(ISSUE);
+    await issueInvitation(scopedToDefaultTenant(), ISSUE);
 
     const { expiresAt } = findOneAndUpdate.mock.calls[0][1].$set;
     expect(expiresAt.getTime()).toBeGreaterThanOrEqual(before + INVITATION_TTL_MS);
@@ -79,15 +81,15 @@ describe("issuing an invitation", () => {
   });
 
   it("replaces the address's pending invitation rather than adding a second one", async () => {
-    await issueInvitation(ISSUE);
+    await issueInvitation(scopedToDefaultTenant(), ISSUE);
 
     const [filter, , options] = findOneAndUpdate.mock.calls[0];
-    expect(filter).toEqual({ email: "ada@example.com", status: "pending" });
+    expect(filter).toEqual({ email: "ada@example.com", status: "pending", tenant: DEFAULT_TENANT_ID });
     expect(options).toMatchObject({ upsert: true });
   });
 
   it("records who added each board", async () => {
-    await issueInvitation({ ...ISSUE, boards: [{ project: "p1", relation: "owner" }] });
+    await issueInvitation(scopedToDefaultTenant(), { ...ISSUE, boards: [{ project: "p1", relation: "owner" }] });
 
     expect(findOneAndUpdate.mock.calls[0][1].$set.boards).toEqual([
       { project: "p1", relation: "owner", addedBy: "admin-1" },
@@ -97,7 +99,7 @@ describe("issuing an invitation", () => {
   it("retries once when a concurrent upsert won the insert", async () => {
     findOneAndUpdate.mockRejectedValueOnce(duplicate);
 
-    const { invitation } = await issueInvitation(ISSUE);
+    const { invitation } = await issueInvitation(scopedToDefaultTenant(), ISSUE);
 
     expect(findOneAndUpdate).toHaveBeenCalledTimes(2);
     expect(invitation).toMatchObject({ _id: "inv-1" });
@@ -106,7 +108,7 @@ describe("issuing an invitation", () => {
   it("does not swallow any other failure", async () => {
     findOneAndUpdate.mockRejectedValueOnce(new Error("disk full"));
 
-    await expect(issueInvitation(ISSUE)).rejects.toThrow("disk full");
+    await expect(issueInvitation(scopedToDefaultTenant(), ISSUE)).rejects.toThrow("disk full");
   });
 });
 
@@ -124,11 +126,11 @@ describe("sending again", () => {
   it("drops a board its adder can no longer grant before endorsing the rest", async () => {
     authorityAtAcceptance.mockResolvedValue({ role: "member", boards: [BOARD_A] });
 
-    await reissueInvitation("inv-1", "admin-2");
+    await reissueInvitation(scopedToDefaultTenant(), "inv-1", "admin-2");
 
-    expect(authorityAtAcceptance).toHaveBeenCalledWith({ role: "member", boards: [BOARD_A, BOARD_B], invitedBy: "admin-2" });
+    expect(authorityAtAcceptance).toHaveBeenCalledWith(scopedToDefaultTenant(), { role: "member", boards: [BOARD_A, BOARD_B], invitedBy: "admin-2" });
     expect(updateOne).toHaveBeenCalledWith(
-      { _id: "inv-1", status: "pending" },
+      { _id: "inv-1", status: "pending", tenant: DEFAULT_TENANT_ID },
       { $pull: { boards: { $or: [{ project: "p-b", addedBy: "owner-b" }] } } }
     );
     expect(updateOne.mock.invocationCallOrder[0]).toBeLessThan(findOneAndUpdate.mock.invocationCallOrder[0]);
@@ -138,7 +140,7 @@ describe("sending again", () => {
     authorityAtAcceptance.mockResolvedValue({ role: "member", boards: [BOARD_A] });
     findOneAndUpdate.mockResolvedValue({ _id: "inv-1", boards: [BOARD_A, { ...BOARD_B, addedBy: "owner-c" }] });
 
-    const result = await reissueInvitation("inv-1", "admin-2");
+    const result = await reissueInvitation(scopedToDefaultTenant(), "inv-1", "admin-2");
 
     expect(result?.dropped).toEqual([]);
   });
@@ -147,7 +149,7 @@ describe("sending again", () => {
     authorityAtAcceptance.mockResolvedValue({ role: "member", boards: [BOARD_A] });
     findOneAndUpdate.mockResolvedValue({ _id: "inv-1", boards: [BOARD_A] });
 
-    expect((await reissueInvitation("inv-1", "admin-2"))?.dropped).toEqual([BOARD_B]);
+    expect((await reissueInvitation(scopedToDefaultTenant(), "inv-1", "admin-2"))?.dropped).toEqual([BOARD_B]);
   });
 
   // BP-826 decided a resend takes over a deleted inviter's invitation; a deleted account decided
@@ -156,29 +158,29 @@ describe("sending again", () => {
     authorityAtAcceptance.mockResolvedValue({ role: "member", boards: [BOARD_A] });
     existingUsers = ["owner-a"];
 
-    const result = await reissueInvitation("inv-1", "admin-2");
+    const result = await reissueInvitation(scopedToDefaultTenant(), "inv-1", "admin-2");
 
     expect(updateOne).not.toHaveBeenCalled();
     expect(result?.dropped).toEqual([]);
   });
 
   it("pulls nothing while every board is still backed", async () => {
-    await reissueInvitation("inv-1", "admin-2");
+    await reissueInvitation(scopedToDefaultTenant(), "inv-1", "admin-2");
 
     expect(updateOne).not.toHaveBeenCalled();
   });
 
   it("changes the token, so the link mailed before stops working", async () => {
-    const { token } = (await reissueInvitation("inv-1", "admin-2"))!;
+    const { token } = (await reissueInvitation(scopedToDefaultTenant(), "inv-1", "admin-2"))!;
 
     const [filter, update] = findOneAndUpdate.mock.calls[0];
-    expect(filter).toEqual({ _id: "inv-1", status: "pending" });
+    expect(filter).toEqual({ _id: "inv-1", status: "pending", tenant: DEFAULT_TENANT_ID });
     expect(update.$set.tokenHash).toBe(sha256(token));
   });
 
   it("starts the seven days again", async () => {
     const before = Date.now();
-    await reissueInvitation("inv-1", "admin-2");
+    await reissueInvitation(scopedToDefaultTenant(), "inv-1", "admin-2");
 
     expect(findOneAndUpdate.mock.calls[0][1].$set.expiresAt.getTime()).toBeGreaterThanOrEqual(
       before + INVITATION_TTL_MS
@@ -188,7 +190,7 @@ describe("sending again", () => {
   // Acceptance checks the people an invitation names; a resent link naming a deleted inviter
   // would be refused after the invitee had filled in the form
   it("is endorsed by whoever sends it, for the role and every board", async () => {
-    await reissueInvitation("inv-1", "admin-2");
+    await reissueInvitation(scopedToDefaultTenant(), "inv-1", "admin-2");
 
     const { $set } = findOneAndUpdate.mock.calls[0][1];
     expect($set.invitedBy).toBe("admin-2");
@@ -198,18 +200,19 @@ describe("sending again", () => {
   it("finds nothing to send for an invitation that is no longer pending", async () => {
     findOneAndUpdate.mockResolvedValue(null);
 
-    expect(await reissueInvitation("inv-1", "admin-2")).toBeNull();
+    expect(await reissueInvitation(scopedToDefaultTenant(), "inv-1", "admin-2")).toBeNull();
   });
 });
 
 describe("revoking", () => {
   it("revokes a pending invitation, and one whose acceptance has not produced an account yet", async () => {
-    await revokeInvitation("inv-1");
+    await revokeInvitation(scopedToDefaultTenant(), "inv-1");
 
     const [filter, update] = findOneAndUpdate.mock.calls[0];
     expect(filter).toEqual({
       _id: "inv-1",
       $or: [{ status: "pending" }, { status: "accepted", acceptedBy: null }],
+      tenant: DEFAULT_TENANT_ID,
     });
     expect(update).toEqual({ $set: { status: "revoked" } });
   });
@@ -219,9 +222,9 @@ describe("recording an acceptance", () => {
   it("ties the account only to a claim that is still held", async () => {
     updateOne.mockResolvedValue({ matchedCount: 1 });
 
-    expect(await recordAcceptance("inv-1", "u1")).toBe(true);
+    expect(await recordAcceptance(scopedToDefaultTenant(), "inv-1", "u1")).toBe(true);
     expect(updateOne.mock.calls[0]).toEqual([
-      { _id: "inv-1", status: "accepted", acceptedBy: { $in: [null, "u1"] } },
+      { _id: "inv-1", status: "accepted", acceptedBy: { $in: [null, "u1"] }, tenant: DEFAULT_TENANT_ID },
       { $set: { acceptedBy: "u1" } },
     ]);
   });
@@ -230,14 +233,14 @@ describe("recording an acceptance", () => {
   it("counts a claim already tied to this same account as held", async () => {
     updateOne.mockResolvedValue({ matchedCount: 1 });
 
-    expect(await recordAcceptance("inv-1", "u1")).toBe(true);
+    expect(await recordAcceptance(scopedToDefaultTenant(), "inv-1", "u1")).toBe(true);
     expect(updateOne.mock.calls[0][0].acceptedBy.$in).toContain("u1");
   });
 
   it("says so when the invitation was revoked meanwhile", async () => {
     updateOne.mockResolvedValue({ matchedCount: 0 });
 
-    expect(await recordAcceptance("inv-1", "u1")).toBe(false);
+    expect(await recordAcceptance(scopedToDefaultTenant(), "inv-1", "u1")).toBe(false);
   });
 });
 
@@ -248,7 +251,7 @@ describe("spending the link", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-10-02T12:00:00Z"));
 
-    const outcome = await claimInvitation("cpi_abc");
+    const outcome = await claimInvitation(scopedToDefaultTenant(), "cpi_abc");
 
     expect(outcome.ok).toBe(true);
     const [filter, update] = findOneAndUpdate.mock.calls[0];
@@ -256,6 +259,7 @@ describe("spending the link", () => {
       tokenHash: sha256("cpi_abc"),
       status: "pending",
       expiresAt: { $gt: new Date("2026-10-02T12:00:00Z") },
+      tenant: DEFAULT_TENANT_ID,
     });
     expect(update.$set.status).toBe("accepted");
   });
@@ -269,7 +273,7 @@ describe("spending the link", () => {
     findOneAndUpdate.mockResolvedValue(null);
     stored(row);
 
-    expect(await claimInvitation("cpi_abc")).toEqual({ ok: false, reason });
+    expect(await claimInvitation(scopedToDefaultTenant(), "cpi_abc")).toEqual({ ok: false, reason });
   });
 });
 
@@ -277,7 +281,7 @@ describe("reading the link without spending it", () => {
   it("answers for a pending, unexpired invitation", async () => {
     stored({ status: "pending", expiresAt: new Date(Date.now() + 1000), email: "ada@example.com" });
 
-    const found = await findInvitationByToken("cpi_abc");
+    const found = await findInvitationByToken(scopedToDefaultTenant(), "cpi_abc");
 
     expect(found.ok).toBe(true);
     expect(findOneAndUpdate).not.toHaveBeenCalled();
@@ -286,16 +290,16 @@ describe("reading the link without spending it", () => {
   it("refuses an expired one even though it is still marked pending", async () => {
     stored({ status: "pending", expiresAt: new Date(Date.now() - 1000) });
 
-    expect(await findInvitationByToken("cpi_abc")).toEqual({ ok: false, reason: "expired" });
+    expect(await findInvitationByToken(scopedToDefaultTenant(), "cpi_abc")).toEqual({ ok: false, reason: "expired" });
   });
 });
 
 describe("putting a claimed link back", () => {
   it("only reopens an acceptance that never produced an account, back to pending", async () => {
-    await releaseInvitation("inv-1");
+    await releaseInvitation(scopedToDefaultTenant(), "inv-1");
 
     expect(updateOne.mock.calls[0]).toEqual([
-      { _id: "inv-1", status: "accepted", acceptedBy: null },
+      { _id: "inv-1", status: "accepted", acceptedBy: null, tenant: DEFAULT_TENANT_ID },
       { $set: { status: "pending", acceptedAt: null } },
     ]);
   });
@@ -303,23 +307,23 @@ describe("putting a claimed link back", () => {
   it("does not swallow any other failure", async () => {
     updateOne.mockRejectedValue(new Error("disk full"));
 
-    await expect(releaseInvitation("inv-1")).rejects.toThrow("disk full");
+    await expect(releaseInvitation(scopedToDefaultTenant(), "inv-1")).rejects.toThrow("disk full");
   });
 
   it("leaves it spent when the address has been invited again since", async () => {
     updateOne.mockRejectedValue(duplicate);
 
-    await expect(releaseInvitation("inv-1")).resolves.toBeUndefined();
+    await expect(releaseInvitation(scopedToDefaultTenant(), "inv-1")).resolves.toBeUndefined();
   });
 });
 
 describe("revoking because nothing backs it any more", () => {
   // A lookup racing an acceptance in another tab must not kill the account being made
   it("revokes only pending invitations for an address", async () => {
-    await revokePendingInvitationsFor("ada@example.com");
+    await revokePendingInvitationsFor(scopedToDefaultTenant(), "ada@example.com");
 
     expect(updateMany).toHaveBeenCalledWith(
-      { email: "ada@example.com", status: "pending" },
+      { email: "ada@example.com", status: "pending", tenant: DEFAULT_TENANT_ID },
       { $set: { status: "revoked" } }
     );
   });
@@ -327,20 +331,20 @@ describe("revoking because nothing backs it any more", () => {
   it("never throws: its callers are mid-way through security steps", async () => {
     updateMany.mockRejectedValue(new Error("write timeout"));
 
-    await expect(revokePendingInvitationsFor("ada@example.com")).resolves.toBeUndefined();
+    await expect(revokePendingInvitationsFor(scopedToDefaultTenant(), "ada@example.com")).resolves.toBeUndefined();
   });
 
   it("does nothing for an account with no address", async () => {
-    await revokePendingInvitationsFor("");
+    await revokePendingInvitationsFor(scopedToDefaultTenant(), "");
 
     expect(updateMany).not.toHaveBeenCalled();
   });
 
   it("revokes an acceptance's own claim and never a finished one", async () => {
-    await revokeClaimedInvitation("inv-1");
+    await revokeClaimedInvitation(scopedToDefaultTenant(), "inv-1");
 
     expect(updateOne).toHaveBeenCalledWith(
-      { _id: "inv-1", status: "accepted", acceptedBy: null },
+      { _id: "inv-1", status: "accepted", acceptedBy: null, tenant: DEFAULT_TENANT_ID },
       { $set: { status: "revoked" } }
     );
   });
@@ -358,7 +362,7 @@ describe("a board owner inviting", () => {
   });
 
   it("starts a member invitation for this board alone when none is pending", async () => {
-    const outcome = await inviteToBoard(INVITE);
+    const outcome = await inviteToBoard(scopedToDefaultTenant(), INVITE);
 
     expect(outcome.kind).toBe("created");
     const doc = create.mock.calls[0][0];
@@ -377,7 +381,7 @@ describe("a board owner inviting", () => {
   it("only adds this board to an invitation already pending, and changes nothing else", async () => {
     findOneAndUpdate.mockResolvedValueOnce(null).mockResolvedValueOnce({ _id: "inv-admin", role: "admin" });
 
-    const outcome = await inviteToBoard(INVITE);
+    const outcome = await inviteToBoard(scopedToDefaultTenant(), INVITE);
 
     expect(outcome.kind).toBe("added");
     expect(create).not.toHaveBeenCalled();
@@ -395,7 +399,7 @@ describe("a board owner inviting", () => {
   it("re-relates this board's entry when it is already on the invitation, and says so", async () => {
     findOneAndUpdate.mockResolvedValueOnce({ _id: "inv-1" });
 
-    const outcome = await inviteToBoard(INVITE);
+    const outcome = await inviteToBoard(scopedToDefaultTenant(), INVITE);
 
     expect(outcome.kind).toBe("updated");
     const [filter, update] = findOneAndUpdate.mock.calls[0];
@@ -407,25 +411,25 @@ describe("a board owner inviting", () => {
   it("refuses to join an invitation whose link somebody else was shown", async () => {
     stored({ invitedBy: "a1", expiresAt: new Date(Date.now() + 60_000) });
 
-    const outcome = await inviteToBoard(INVITE);
+    const outcome = await inviteToBoard(scopedToDefaultTenant(), INVITE);
 
     expect(outcome).toEqual({ kind: "held", invitedBy: "a1", expired: false });
     expect(create).not.toHaveBeenCalled();
     // A pending invitation holds the address, lapsed or not (BP-843); a revoked or accepted one must not
-    expect(findOne).toHaveBeenCalledWith({ email: "ada@example.com", status: "pending" });
+    expect(findOne).toHaveBeenCalledWith({ email: "ada@example.com", status: "pending", tenant: DEFAULT_TENANT_ID });
   });
 
   it("says when the invitation holding the address has lapsed", async () => {
     stored({ invitedBy: "a1", expiresAt: new Date(Date.now() - 60_000) });
 
-    expect(await inviteToBoard(INVITE)).toEqual({ kind: "held", invitedBy: "a1", expired: true });
+    expect(await inviteToBoard(scopedToDefaultTenant(), INVITE)).toEqual({ kind: "held", invitedBy: "a1", expired: true });
   });
 
   it("retires its own expired invitation before looking for one to join", async () => {
-    await inviteToBoard(INVITE);
+    await inviteToBoard(scopedToDefaultTenant(), INVITE);
 
     expect(updateMany).toHaveBeenCalledWith(
-      { email: "ada@example.com", status: "pending", expiresAt: { $lte: expect.any(Date) }, invitedBy: INVITE.invitedBy },
+      { email: "ada@example.com", status: "pending", expiresAt: { $lte: expect.any(Date) }, invitedBy: INVITE.invitedBy, tenant: DEFAULT_TENANT_ID },
       { $set: { status: "revoked" } }
     );
   });
@@ -438,7 +442,7 @@ describe("a board owner inviting", () => {
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({ _id: "inv-race" });
 
-    const outcome = await inviteToBoard(INVITE);
+    const outcome = await inviteToBoard(scopedToDefaultTenant(), INVITE);
 
     expect(outcome).toEqual({ kind: "added", invitation: { _id: "inv-race" } });
     expect(updateMany).toHaveBeenCalledTimes(2);
@@ -449,23 +453,23 @@ describe("recording how a link went out", () => {
   it("never throws: the invitation has already gone out", async () => {
     updateOne.mockRejectedValueOnce(new Error("write timeout"));
 
-    await expect(recordDelivery("inv-1", "cpi_abc", "link")).resolves.toBeUndefined();
+    await expect(recordDelivery(scopedToDefaultTenant(), "inv-1", "cpi_abc", "link")).resolves.toBeUndefined();
   });
 
   it("ties the record to the link it describes", async () => {
-    await recordDelivery("inv-1", "cpi_abc", "link");
+    await recordDelivery(scopedToDefaultTenant(), "inv-1", "cpi_abc", "link");
 
     expect(updateOne).toHaveBeenCalledWith(
-      { _id: "inv-1", tokenHash: sha256("cpi_abc") },
+      { _id: "inv-1", tokenHash: sha256("cpi_abc"), tenant: DEFAULT_TENANT_ID },
       { $set: { deliveredAs: "link" } }
     );
   });
 
   it("forgets it whenever a new link is issued", async () => {
-    await issueInvitation(ISSUE);
+    await issueInvitation(scopedToDefaultTenant(), ISSUE);
     stored({ role: "member", boards: [] });
     authorityAtAcceptance.mockResolvedValue({ role: "member", boards: [] });
-    await reissueInvitation("inv-1", "admin-2");
+    await reissueInvitation(scopedToDefaultTenant(), "inv-1", "admin-2");
 
     expect(findOneAndUpdate.mock.calls[0][1].$set.deliveredAs).toBeNull();
     expect(findOneAndUpdate.mock.calls[1][1].$set.deliveredAs).toBeNull();
@@ -476,10 +480,10 @@ describe("withdrawing a board from an invitation", () => {
   it("pulls only that board, only from a pending invitation that has it", async () => {
     findOneAndUpdate.mockResolvedValueOnce({ _id: "inv-1", boards: [] });
 
-    await removeBoardFromInvitation("inv-1", "p1");
+    await removeBoardFromInvitation(scopedToDefaultTenant(), "inv-1", "p1");
 
     expect(findOneAndUpdate.mock.calls.at(-1)!.slice(0, 2)).toEqual([
-      { _id: "inv-1", status: "pending", "boards.project": "p1" },
+      { _id: "inv-1", status: "pending", "boards.project": "p1", tenant: DEFAULT_TENANT_ID },
       { $pull: { boards: { project: "p1" } } },
     ]);
   });
@@ -488,11 +492,11 @@ describe("withdrawing a board from an invitation", () => {
   it("revokes only the empty invitation it read, never a re-invite that landed since", async () => {
     updateOne.mockResolvedValue({ modifiedCount: 1 });
 
-    const revoked = await revokeIfEmpty({ _id: "inv-1", invitedBy: "o1", tokenHash: "h1" } as never);
+    const revoked = await revokeIfEmpty(scopedToDefaultTenant(), { _id: "inv-1", invitedBy: "o1", tokenHash: "h1" } as never);
 
     expect(revoked).toBe(true);
     expect(updateOne).toHaveBeenCalledWith(
-      { _id: "inv-1", status: "pending", boards: { $size: 0 }, invitedBy: "o1", tokenHash: "h1" },
+      { _id: "inv-1", status: "pending", boards: { $size: 0 }, invitedBy: "o1", tokenHash: "h1", tenant: DEFAULT_TENANT_ID },
       { $set: { status: "revoked" } }
     );
   });

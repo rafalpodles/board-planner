@@ -3,8 +3,8 @@ import sift from "sift";
 
 const verifyWorkerCredential = vi.fn();
 const getAuthUser = vi.fn();
-const projectFindById = vi.fn();
-const userFindById = vi.fn();
+const projectFindOne = vi.fn();
+const userFindOne = vi.fn();
 const userExists = vi.fn();
 const check = vi.fn();
 const accessibleProjectIds = vi.fn();
@@ -19,14 +19,16 @@ vi.mock("./auth", () => ({ getAuthUser, RateLimitError: class extends Error {} }
 // ownerReachableProjectIds, because a machine reaches exactly what its owner reaches (BP-358)
 vi.mock("./grants", () => ({ check, accessibleProjectIds }));
 vi.mock("@/models/project", () => ({
-  Project: { findById: projectFindById, findOne: vi.fn() },
+  Project: { findOne: projectFindOne },
 }));
-vi.mock("@/models/user", () => ({ User: { findById: userFindById, exists: userExists } }));
+vi.mock("@/models/user", () => ({ User: { findOne: userFindOne, exists: userExists } }));
 const taskExists = vi.fn();
 const taskFindOne = vi.fn();
 vi.mock("@/models/task", () => ({ Task: { findOne: taskFindOne, exists: taskExists } }));
 
 const { withProjectAccessOrWorker } = await import("./middleware");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
 
 const PROJECT_ID = "69a52e3b399b27d3cbb2c5a5";
 const IDENTITY_ID = "69a52e3b399b27d3cbb2c5b7";
@@ -81,9 +83,9 @@ const context = () => ({ params: Promise.resolve({ projectId: PROJECT_ID }) });
 beforeEach(() => {
   vi.clearAllMocks();
   verifyWorkerCredential.mockResolvedValue(workerDoc());
-  projectFindById.mockReturnValue({ select: () => ({ lean: () => Promise.resolve(projectDoc()) }) });
-  userFindById.mockImplementation((id: string) =>
-    Promise.resolve(String(id) === OWNER_ID ? ownerDoc() : identityDoc())
+  projectFindOne.mockReturnValue({ select: () => ({ lean: () => Promise.resolve(projectDoc()) }) });
+  userFindOne.mockImplementation((filter: { _id: string }) =>
+    Promise.resolve(String(filter._id) === OWNER_ID ? ownerDoc() : identityDoc())
   );
   accessibleProjectIds.mockResolvedValue([PROJECT_ID]);
   // Nothing in flight unless a test says so
@@ -147,7 +149,7 @@ describe("a worker reporting with its own credential", () => {
     const handler = vi.fn().mockResolvedValue(new Response("ok"));
     getAuthUser.mockResolvedValue({ _id: "u1", role: "member" });
     check.mockResolvedValue(true);
-    projectFindById.mockReturnValue({ select: () => ({ _id: PROJECT_ID }) });
+    projectFindOne.mockReturnValue({ select: () => ({ _id: PROJECT_ID }) });
 
     // A cookie session — no Bearer — carrying a forged x-worker-id
     const forged = new Request(`https://example.com/api/projects/${PROJECT_ID}/tasks/t1/comments`, {
@@ -174,7 +176,7 @@ describe("a worker reporting with its own credential", () => {
 
 describe("the grant is re-derived on every call", () => {
   it("refuses a project that is not enabled for workers", async () => {
-    projectFindById.mockReturnValue({
+    projectFindOne.mockReturnValue({
       select: () => ({ lean: () => Promise.resolve(projectDoc({ worker: { enabled: false } })) }),
     });
     const handler = vi.fn();
@@ -186,7 +188,7 @@ describe("the grant is re-derived on every call", () => {
   });
 
   it("refuses a project an instance admin locked, though its owner switched workers on", async () => {
-    projectFindById.mockReturnValue({
+    projectFindOne.mockReturnValue({
       select: () => ({
         lean: () =>
           Promise.resolve(projectDoc({ worker: { enabled: true, lockedByInstance: true } })),
@@ -306,6 +308,7 @@ describe("the grant is re-derived on every call", () => {
         project: PROJECT_ID,
         "execution.workerId": "w1",
         "execution.runId": { $nin: ["", null] },
+        tenant: DEFAULT_TENANT_ID,
       });
     });
 
@@ -361,7 +364,7 @@ describe("the grant is re-derived on every call", () => {
       const lockedContext = taskContext;
 
       beforeEach(() => {
-        projectFindById.mockReturnValue({
+        projectFindOne.mockReturnValue({
           select: () => ({
             lean: () =>
               Promise.resolve(projectDoc({ worker: { enabled: true, lockedByInstance: true } })),
@@ -441,6 +444,7 @@ describe("the grant is re-derived on every call", () => {
       const stored = docs.map((doc) => ({
         ...doc,
         project: PROJECT_ID,
+        tenant: DEFAULT_TENANT_ID,
         execution: Object.fromEntries(
           Object.entries(doc.execution).filter(([, value]) => value !== undefined)
         ),
@@ -470,7 +474,7 @@ describe("the grant is re-derived on every call", () => {
 
     describe("from a machine the project no longer serves", () => {
       beforeEach(() => {
-        projectFindById.mockReturnValue({
+        projectFindOne.mockReturnValue({
           select: () => ({
             lean: () =>
               Promise.resolve(projectDoc({ worker: { enabled: true, lockedByInstance: true } })),
@@ -485,7 +489,7 @@ describe("the grant is re-derived on every call", () => {
       });
 
       it("goes through when workers were switched off or the grant revoked mid-run", async () => {
-        projectFindById.mockReturnValue({
+        projectFindOne.mockReturnValue({
           select: () => ({ lean: () => Promise.resolve(projectDoc({ worker: { enabled: false } })) }),
         });
         accessibleProjectIds.mockResolvedValue([]);
@@ -628,6 +632,7 @@ describe("the grant is re-derived on every call", () => {
     );
 
     expect(accessibleProjectIds).toHaveBeenCalledWith(
+      scopedToDefaultTenant(),
       expect.objectContaining({ _id: OWNER_ID, username: "owner" })
     );
   });

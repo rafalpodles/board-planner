@@ -32,11 +32,14 @@ vi.mock("@/models/identity", () => ({ Identity: { create: identityCreate, delete
 vi.mock("@/models/user", () => ({ User: { create: userCreate, deleteOne: userDeleteOne } }));
 
 const { completeAcceptance } = await import("./invitation-acceptance");
+const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
 
 const INVITATION = { _id: "inv-1", email: "ada@example.com", role: "member", boards: [], deliveredAs: "link" };
 const IDENTITY = { provider: "oidc", issuer: "https://id.example.com", subject: "s9", email: "ada@example.com" };
 const accept = (identity?: typeof IDENTITY, providerProvesAddress = true, deliveredAs = "link") =>
   completeAcceptance(
+    scopedToDefaultTenant(),
     { ...INVITATION, deliveredAs } as never,
     { username: "ada", fullName: "Ada", passwordHash: identity ? null : "hash", identity, providerProvesAddress },
     new Request("http://x"),
@@ -61,7 +64,7 @@ describe("an acceptance that fails part way", () => {
     authorityAtAcceptance.mockRejectedValue(new Error("db blip"));
 
     await expect(accept(IDENTITY)).rejects.toThrow("db blip");
-    expect(releaseInvitation).toHaveBeenCalledWith("inv-1");
+    expect(releaseInvitation).toHaveBeenCalledWith(scopedToDefaultTenant(), "inv-1");
     expect(userCreate).not.toHaveBeenCalled();
   });
 
@@ -76,7 +79,7 @@ describe("an acceptance that fails part way", () => {
     recordAcceptance.mockRejectedValueOnce(new Error("db blip")).mockResolvedValueOnce(false);
 
     expect((await accept(IDENTITY)).status).toBe(400);
-    expect(userDeleteOne).toHaveBeenCalledWith({ _id: "u-new" });
+    expect(userDeleteOne).toHaveBeenCalledWith({ _id: "u-new", tenant: DEFAULT_TENANT_ID });
   });
 });
 
@@ -85,13 +88,14 @@ describe("completing an acceptance through a sign-in provider", () => {
     applyAdminGroup.mockImplementationOnce(async () => expect(createSession).not.toHaveBeenCalled());
 
     await completeAcceptance(
+      scopedToDefaultTenant(),
       INVITATION as never,
       { username: "ada", fullName: "Ada", passwordHash: null, identity: IDENTITY, providerProvesAddress: true, groups: ["admins"] },
       new Request("http://x"),
       null
     );
 
-    expect(applyAdminGroup).toHaveBeenCalledWith(expect.objectContaining({ _id: "u-new" }), "oidc", ["admins"]);
+    expect(applyAdminGroup).toHaveBeenCalledWith(scopedToDefaultTenant(), expect.objectContaining({ _id: "u-new" }), "oidc", ["admins"]);
     expect(createSession).toHaveBeenCalled();
   });
 
@@ -108,7 +112,7 @@ describe("completing an acceptance through a sign-in provider", () => {
     const doc = userCreate.mock.calls[0][0];
     expect(doc.password).toBeUndefined();
     expect(doc.emailVerifiedAt).toBeInstanceOf(Date);
-    expect(identityCreate).toHaveBeenCalledWith(expect.objectContaining({ user: "u-new", ...IDENTITY }));
+    expect(identityCreate).toHaveBeenCalledWith(expect.objectContaining({ user: "u-new", ...IDENTITY, tenant: DEFAULT_TENANT_ID }));
   });
 
   // GitHub's `verified` is no proof of the mailbox today, so it must not make one either: a later
@@ -139,8 +143,8 @@ describe("completing an acceptance through a sign-in provider", () => {
 
     expect(res.status).toBe(409);
     expect(recordAcceptance).not.toHaveBeenCalled();
-    expect(userDeleteOne).toHaveBeenCalledWith({ _id: "u-new" });
-    expect(releaseInvitation).toHaveBeenCalledWith("inv-1");
+    expect(userDeleteOne).toHaveBeenCalledWith({ _id: "u-new", tenant: DEFAULT_TENANT_ID });
+    expect(releaseInvitation).toHaveBeenCalledWith(scopedToDefaultTenant(), "inv-1");
   });
 
   it("takes the identity with the account when the invitation was revoked meanwhile", async () => {
@@ -149,7 +153,7 @@ describe("completing an acceptance through a sign-in provider", () => {
     const res = await accept(IDENTITY);
 
     expect(res.status).toBe(400);
-    expect(identityDeleteMany).toHaveBeenCalledWith({ user: "u-new" });
-    expect(userDeleteOne).toHaveBeenCalledWith({ _id: "u-new" });
+    expect(identityDeleteMany).toHaveBeenCalledWith({ user: "u-new", tenant: DEFAULT_TENANT_ID });
+    expect(userDeleteOne).toHaveBeenCalledWith({ _id: "u-new", tenant: DEFAULT_TENANT_ID });
   });
 });
