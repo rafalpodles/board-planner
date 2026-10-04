@@ -130,6 +130,7 @@ export const GROUPS = {
     "db-scope.spec.ts",
     "credential-tenant-binding.spec.ts",
     "tenants-isolation.spec.ts",
+    "tenants-route-families.spec.ts",
     "sessions-and-auth.spec.ts",
     "proxied-login-throttle.spec.ts",
     "compose-cookie.spec.ts",
