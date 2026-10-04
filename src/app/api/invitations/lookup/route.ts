@@ -1,5 +1,6 @@
+import { hostNotFound } from "@/lib/middleware";
 import { NextResponse } from "next/server";
-import { scopedToDefaultTenant } from "@/lib/db-scope";
+import { scopedForRequest } from "@/lib/db-scope";
 import { readJsonBody } from "@/lib/request-body";
 import { getClientIp } from "@/lib/auth";
 import { isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
@@ -11,7 +12,8 @@ import { toApiInvitations } from "@/lib/invitation-view";
 const LOOKUPS_PER_SOURCE = 60;
 
 export async function POST(request: Request) {
-  const db = scopedToDefaultTenant();
+  const db = await scopedForRequest(request);
+  if (!db) return hostNotFound();
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
 

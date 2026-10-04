@@ -1,5 +1,5 @@
 import { connectDB } from "@/lib/db";
-import { scopedToDefaultTenant, type ScopedDb, tenantOf } from "@/lib/db-scope";
+import { type ScopedDb, tenantOf, scopedForRequest } from "@/lib/db-scope";
 import { passwordSignInEnabled } from "@/lib/password-sign-in";
 import { configuredProviders } from "@/lib/oidc/providers";
 import { getClientIp, verifyCredentials } from "@/lib/auth";
@@ -30,6 +30,7 @@ import {
 import { IOAuthClient, IOAuthConsent, IUser } from "@/types";
 import { APP_NAME } from "@/lib/brand";
 import { NONCE_HEADER } from "@/lib/csp";
+import { hostNotFound } from "@/lib/middleware";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -418,7 +419,8 @@ function switchAccountHref(p: AuthParams): string {
 }
 
 export async function GET(req: Request) {
-  const db = scopedToDefaultTenant();
+  const db = await scopedForRequest(req);
+  if (!db) return hostNotFound();
   await connectDB();
   const query = new URL(req.url).searchParams;
   const p = readParamsFromQuery(query);
@@ -462,7 +464,8 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const db = scopedToDefaultTenant();
+  const db = await scopedForRequest(req);
+  if (!db) return hostNotFound();
   // What this closes is CSRF from somebody's browser: a page on another origin auto-submitting this
   // form, where the victim's cookies ride along and `Sec-Fetch-Site` is a forbidden header the page
   // cannot forge. The login route has refused that for a while; this endpoint verifies a credential

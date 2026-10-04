@@ -1,3 +1,4 @@
+import { Types } from "mongoose";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const { verifyWorkerCredential, getAuthUser, getTenant, userExists } = vi.hoisted(() => ({
@@ -8,6 +9,8 @@ const { verifyWorkerCredential, getAuthUser, getTenant, userExists } = vi.hoiste
 }));
 
 vi.mock("./worker-service", () => ({ verifyWorkerCredential }));
+const tenantOfRequest = vi.hoisted(() => vi.fn());
+vi.mock("./tenant-host", () => ({ tenantOfRequest }));
 vi.mock("./auth", () => ({ getAuthUser }));
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
 vi.mock("./tenant", () => ({ getTenant }));
@@ -159,10 +162,17 @@ describe("withWorker", () => {
   });
 });
 
+beforeEach(() => {
+  tenantOfRequest.mockReset().mockResolvedValue({ kind: "tenant", tenant: DEFAULT_TENANT_ID });
+});
+
 describe("the db a handler is handed (BP-663)", () => {
   const OTHER = "0000000000000000000000b2";
+  const onOthersHost = () =>
+    tenantOfRequest.mockResolvedValue({ kind: "tenant", tenant: Types.ObjectId.createFromHexString(OTHER) });
 
   it("withAuth confines it to the signed-in user's tenant", async () => {
+    onOthersHost();
     getAuthUser.mockResolvedValue({ _id: "u1", tenant: OTHER });
     const handler = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
 
@@ -173,6 +183,7 @@ describe("the db a handler is handed (BP-663)", () => {
   });
 
   it("withWorker confines it to the machine's tenant", async () => {
+    onOthersHost();
     verifyWorkerCredential.mockResolvedValue({ _id: "w1", tenant: OTHER, credentialHash: "hash" });
     userExists.mockResolvedValue(null);
     const handler = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
@@ -182,6 +193,50 @@ describe("the db a handler is handed (BP-663)", () => {
     });
 
     expect(handler.mock.calls[0][1].db).toBe(scoped(OTHER));
+  });
+});
+
+describe("a credential on another tenant's host (BP-666)", () => {
+  const OTHER = "0000000000000000000000b2";
+
+  it("is refused like no credential, and the handler never runs", async () => {
+    getAuthUser.mockResolvedValue({ _id: "u1", tenant: OTHER });
+    const handler = vi.fn();
+
+    const res = await withAuth(handler)(request(), { params: paramsOf() });
+
+    expect(res.status).toBe(401);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("refuses a machine credential the same way", async () => {
+    verifyWorkerCredential.mockResolvedValue({ _id: "w1", tenant: OTHER, credentialHash: "hash" });
+    const handler = vi.fn();
+
+    const res = await withWorker(handler)(request({ authorization: "Bearer cpw_x", "x-worker-id": "w1" }), {
+      params: paramsOf({}),
+    });
+
+    expect(res.status).toBe(401);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("answers 404 on a host that names no tenant, before anything else", async () => {
+    tenantOfRequest.mockResolvedValue({ kind: "none" });
+    getAuthUser.mockResolvedValue({ _id: "u1" });
+    const handler = vi.fn();
+
+    const res = await withAuth(handler)(request(), { params: paramsOf() });
+
+    expect(res.status).toBe(404);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("answers 404 on the platform host too", async () => {
+    tenantOfRequest.mockResolvedValue({ kind: "platform" });
+    getAuthUser.mockResolvedValue({ _id: "u1" });
+
+    expect((await withAuth(vi.fn())(request(), { params: paramsOf() })).status).toBe(404);
   });
 });
 

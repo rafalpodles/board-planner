@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { scopedFor, scopedToDefaultTenant } from "@/lib/db-scope";
+import { scopedFor, scopedForRequest } from "@/lib/db-scope";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { auditChange } from "@/lib/settings-audit";
 import { serverNamed, writeServerOauth } from "@/lib/pm/oauth-writes";
@@ -10,6 +10,7 @@ import { check } from "@/lib/grants";
 import { decryptSecret, encryptSecret } from "@/lib/encryption";
 import { exchangeCode, getPmOauthRedirectUri } from "@/lib/pm/mcp-oauth";
 import { IUser } from "@/types";
+import { hostNotFound } from "@/lib/middleware";
 
 export const maxDuration = 60;
 
@@ -28,7 +29,8 @@ function settingsRedirect(projectId: string | null, result: string): NextRespons
 // Unauthenticated by necessity (browser redirect carries no Authorization header);
 // authenticated by the single-use, TTL-bound state instead.
 export async function GET(request: Request) {
-  const db = scopedToDefaultTenant();
+  const db = await scopedForRequest(request);
+  if (!db) return hostNotFound();
   await connectDB();
   const url = new URL(request.url);
   const state = url.searchParams.get("state") || "";

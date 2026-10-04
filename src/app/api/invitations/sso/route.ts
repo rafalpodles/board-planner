@@ -1,5 +1,6 @@
+import { hostNotFound } from "@/lib/middleware";
 import { NextResponse } from "next/server";
-import { scopedToDefaultTenant } from "@/lib/db-scope";
+import { scopedForRequest } from "@/lib/db-scope";
 import { readJsonBody } from "@/lib/request-body";
 import { getClientIp } from "@/lib/auth";
 import { isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
@@ -17,7 +18,8 @@ const EXPIRED = "That sign-in has expired. Sign in again, or open the invitation
 
 /** The invitation a verified sign-in is waiting to accept, read without spending anything. */
 export async function GET(request: Request) {
-  const db = scopedToDefaultTenant();
+  const db = await scopedForRequest(request);
+  if (!db) return hostNotFound();
   const held = await heldAcceptance(db, readFlowCookie(request, ACCEPT_COOKIE));
   if (!held?.claims) return NextResponse.json({ error: EXPIRED }, { status: 400 });
   const invitation = await db.Invitation.findOne({
@@ -37,7 +39,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const db = scopedToDefaultTenant();
+  const db = await scopedForRequest(request);
+  if (!db) return hostNotFound();
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
 

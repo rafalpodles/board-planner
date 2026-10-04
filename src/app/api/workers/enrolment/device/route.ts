@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { readJsonBody } from "@/lib/request-body";
 import { connectDB } from "@/lib/db";
-import { protocolOf } from "@/lib/middleware";
+import { protocolOf, hostNotFound } from "@/lib/middleware";
 import { PROTOCOL_VERSION } from "@/lib/worker-service";
 import { stripControlCharacters } from "@/lib/identifiers";
 import {
@@ -17,7 +17,7 @@ import {
   recordFailedAttempt,
   sourceKey,
 } from "@/lib/rate-limit";
-import { scopedToDefaultTenant } from "@/lib/db-scope";
+import { scopedForRequest } from "@/lib/db-scope";
 
 const ENROLMENTS_PER_WINDOW = 10;
 
@@ -25,7 +25,8 @@ const ENROLMENTS_PER_WINDOW = 10;
 // exists so nobody has to copy a token onto it by hand. Nothing is granted here. A pending row is
 // worth nothing until a signed-in person confirms it, and it reaps itself in fifteen minutes.
 export async function POST(request: Request) {
-  const db = scopedToDefaultTenant();
+  const db = await scopedForRequest(request);
+  if (!db) return hostNotFound();
   await connectDB();
 
   if (protocolOf(request) !== PROTOCOL_VERSION) {

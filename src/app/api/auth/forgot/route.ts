@@ -1,8 +1,9 @@
+import { hostNotFound } from "@/lib/middleware";
 import { NextResponse } from "next/server";
 import { passwordSignInEnabled, passwordSignInOff } from "@/lib/password-sign-in";
 import { readJsonBody } from "@/lib/request-body";
 import { connectDB } from "@/lib/db";
-import { scopedToDefaultTenant } from "@/lib/db-scope";
+import { scopedForRequest } from "@/lib/db-scope";
 import { getClientIp } from "@/lib/auth";
 import { APP_NAME } from "@/lib/brand";
 import { isEmailConfigured, normaliseEmail, sendEmail } from "@/lib/email";
@@ -31,7 +32,8 @@ const UNIFORM_ANSWER = {
 const REQUESTS_PER_SOURCE = 10;
 
 export async function POST(request: Request) {
-  const db = scopedToDefaultTenant();
+  const db = await scopedForRequest(request);
+  if (!db) return hostNotFound();
   if (!passwordSignInEnabled()) return passwordSignInOff();
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;

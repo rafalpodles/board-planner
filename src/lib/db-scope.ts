@@ -259,3 +259,10 @@ export const scopedFor = (user: { tenant?: Types.ObjectId | string | null }): Sc
 
 // TODO(BP-666): a request with no caller yet takes its tenant from the host; until then there is one
 export const scopedToDefaultTenant = (): ScopedDb => scoped(DEFAULT_TENANT_ID);
+
+export async function scopedForRequest(request: Request): Promise<ScopedDb | null> {
+  const { tenantOfRequest } = await import("./tenant-host");
+  const host = await tenantOfRequest(request);
+  return host.kind === "tenant" ? scoped(host.tenant) : null;
+}
+

@@ -1,6 +1,7 @@
+import { hostNotFound } from "@/lib/middleware";
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { scopedFor, scopedToDefaultTenant, type ScopedDb, tenantOf } from "@/lib/db-scope";
+import { scopedFor, type ScopedDb, tenantOf, scopedForRequest } from "@/lib/db-scope";
 import { getAuthUser, getClientIp } from "@/lib/auth";
 import { isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
 import {
@@ -110,7 +111,8 @@ async function accountFor(db: ScopedDb, provider: OidcProvider, claims: Verified
 }
 
 export async function GET(request: Request, { params }: { params: Promise<{ provider: string }> }) {
-  const db = scopedToDefaultTenant();
+  const db = await scopedForRequest(request);
+  if (!db) return hostNotFound();
   const origin = selfOrigin();
   if (!origin) return NextResponse.json({ error: "PUBLIC_ORIGIN is not set" }, { status: 500 });
   const provider = providerById((await params).provider);

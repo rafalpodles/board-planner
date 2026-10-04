@@ -4,13 +4,13 @@ import { readJsonBody } from "@/lib/request-body";
 import { checkOrganisationName, nameOrganisation } from "@/lib/tenant";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
-import { scopedFor, scopedToDefaultTenant, type ScopedDb } from "@/lib/db-scope";
+import { scopedFor, type ScopedDb, scopedForRequest } from "@/lib/db-scope";
 import { getAuthUser, getClientIp, PASSWORD_COST_FACTOR } from "@/lib/auth";
 import { refuseSetupCode } from "@/lib/setup-code";
 import { checkNewAccount } from "@/lib/new-account";
 import { duplicateKeyField } from "@/lib/mongo-errors";
 import { ProvenanceError, provenanceRefusal } from "@/lib/session";
-import { withAdmin } from "@/lib/middleware";
+import { withAdmin, hostNotFound } from "@/lib/middleware";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { revokePendingInvitationsFor } from "@/lib/invitations";
 import { liveIdentityFilter, providerById } from "@/lib/oidc/providers";
@@ -74,7 +74,8 @@ function latest(...times: (number | undefined)[]): string | null {
 }
 
 export async function POST(request: Request) {
-  const db = scopedToDefaultTenant();
+  const db = await scopedForRequest(request);
+  if (!db) return hostNotFound();
   if (!passwordSignInEnabled()) {
     return NextResponse.json(
       {

@@ -18,7 +18,7 @@ describe("GET /api/auth/instance", () => {
   it("says an empty instance is unclaimed", async () => {
     countDocuments.mockResolvedValue(0);
 
-    expect(await (await GET()).json()).toEqual({ unclaimed: true, passwordSignIn: true });
+    expect(await (await GET(new Request("http://localhost/api/auth/instance"))).json()).toEqual({ unclaimed: true, passwordSignIn: true });
   });
 
   // The control, and the half the bug was on: without it "answers unclaimed" and "answers the
@@ -26,7 +26,7 @@ describe("GET /api/auth/instance", () => {
   it("says an instance with one user is not", async () => {
     countDocuments.mockResolvedValue(1);
 
-    expect(await (await GET()).json()).toEqual({ unclaimed: false, passwordSignIn: true });
+    expect(await (await GET(new Request("http://localhost/api/auth/instance"))).json()).toEqual({ unclaimed: false, passwordSignIn: true });
   });
 
   it("says when the operator turned password sign-in off", async () => {
@@ -34,7 +34,7 @@ describe("GET /api/auth/instance", () => {
     process.env.PASSWORD_SIGN_IN = "off";
 
     try {
-      expect((await (await GET()).json()).passwordSignIn).toBe(false);
+      expect((await (await GET(new Request("http://localhost/api/auth/instance"))).json()).passwordSignIn).toBe(false);
     } finally {
       delete process.env.PASSWORD_SIGN_IN;
     }
@@ -48,7 +48,7 @@ describe("GET /api/auth/instance", () => {
     );
 
     process.env.PASSWORD_SIGN_IN = "off";
-    const res = await GET();
+    const res = await GET(new Request("http://localhost/api/auth/instance"));
     delete process.env.PASSWORD_SIGN_IN;
 
     expect(res.status).toBe(503);
