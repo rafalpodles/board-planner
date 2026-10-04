@@ -86,7 +86,7 @@ describe("decide", () => {
   });
 });
 
-describe("decide across tenants (BP-663)", () => {
+describe("decide across tenants (BP-664)", () => {
   it("refuses a project of another tenant before anything else, even to an instance admin or an owner", () => {
     const elsewhere = { id: P, tenant: ELSEWHERE };
     expect(decide(principal({ instanceAdmin: true }), null, "access", elsewhere)).toBe(false);
@@ -229,9 +229,10 @@ describe("check", () => {
     expect(projectFind).toHaveBeenCalledWith({ _id: { $in: [P] }, tenant: DEFAULT_TENANT_ID });
   });
 
-  it("refuses when the db it was handed is not the caller's own tenant", async () => {
+  it("refuses when the db it was handed is not the caller's own tenant, before reading anything", async () => {
     const admin = { _id: "a1", role: "admin", tenant: ELSEWHERE } as never;
     expect(await check(scopedToDefaultTenant(), admin, P, "access")).toBe(false);
+    expect(projectFind).not.toHaveBeenCalled();
   });
 
   it("refuses an id that is not a project id at all, without querying", async () => {

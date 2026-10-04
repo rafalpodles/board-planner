@@ -3,7 +3,7 @@ import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
 
 const getAuthUser = vi.fn();
 const accessibleProjectIds = vi.fn();
-const check = vi.fn();
+const administeredProjectIds = vi.fn();
 const projectFind = vi.fn();
 const projectCreate = vi.fn();
 const projectDeleteOne = vi.fn();
@@ -16,7 +16,7 @@ vi.mock("@/lib/auth", () => ({
   getAuthUser,
   RateLimitError: class RateLimitError extends Error {},
 }));
-vi.mock("@/lib/grants", () => ({ accessibleProjectIds, check }));
+vi.mock("@/lib/grants", () => ({ accessibleProjectIds, administeredProjectIds }));
 vi.mock("@/models/project", () => ({
   Project: { find: projectFind, create: projectCreate, deleteOne: projectDeleteOne },
 }));
@@ -52,7 +52,7 @@ const ctx = () => ({ params: Promise.resolve({}) });
 beforeEach(() => {
   vi.clearAllMocks();
   getAuthUser.mockResolvedValue(MEMBER);
-  check.mockResolvedValue(false);
+  administeredProjectIds.mockResolvedValue(new Set());
   projectFind.mockReturnValue({
     populate: () => ({ sort: () => Promise.resolve([projectDoc("p1")]) }),
   });
@@ -91,14 +91,23 @@ describe("GET /api/projects", () => {
 
   // canAdmin gates every project-admin section of the settings page, so it has to be the grant
   // layer's answer and not a constant
-  it("reports canAdmin from the grant layer, per project", async () => {
+  it("reports canAdmin from the grant layer, for the whole list in one call", async () => {
     accessibleProjectIds.mockResolvedValue(["p1"]);
-    check.mockResolvedValue(true);
+    administeredProjectIds.mockResolvedValue(new Set(["p1"]));
 
     const body = await (await GET(request(), ctx())).json();
 
-    expect(check).toHaveBeenCalledWith(scopedToDefaultTenant(), MEMBER, "p1", "admin");
+    expect(administeredProjectIds).toHaveBeenCalledTimes(1);
+    expect(administeredProjectIds).toHaveBeenCalledWith(scopedToDefaultTenant(), MEMBER, ["p1"]);
     expect(body[0].canAdmin).toBe(true);
+  });
+
+  it("reports canAdmin false for a project the grant layer leaves out", async () => {
+    accessibleProjectIds.mockResolvedValue(["p1"]);
+
+    const body = await (await GET(request(), ctx())).json();
+
+    expect(body[0].canAdmin).toBe(false);
   });
 });
 

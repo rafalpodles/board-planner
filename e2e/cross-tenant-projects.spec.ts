@@ -70,11 +70,11 @@ test("on screen, another tenant's board looks like a board that does not exist",
   await signIn(page, "admin");
 
   await page.goto("/projects/NOPE");
-  await page.waitForLoadState("networkidle");
+  await expect(page.getByText("There is no board here")).toBeVisible();
   const missing = (await page.locator("main").innerText()).replaceAll("NOPE", "?");
 
   await page.goto("/projects/FAR");
-  await page.waitForLoadState("networkidle");
+  await expect(page.getByText("There is no board here")).toBeVisible();
   const foreign = (await page.locator("main").innerText()).replaceAll("FAR", "?");
 
   expect(foreign).toBe(missing);
