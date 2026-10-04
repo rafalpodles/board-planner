@@ -148,7 +148,7 @@ describe("who asked, and what that earns", () => {
     ]);
     // The status write is the one that must not happen; the link write still must
     expect(taskUpdateOne).toHaveBeenCalledTimes(1);
-    expect(taskUpdateOne.mock.calls[0][0]).toEqual({ _id: "t1" });
+    expect(taskUpdateOne.mock.calls[0][0]).toEqual({ _id: "t1", tenant: DEFAULT_TENANT_ID });
     // The control: the sync ran, so the silence above is the rule rather than an empty fetch
     expect(result).toMatchObject({ prsLinked: 1 });
   });

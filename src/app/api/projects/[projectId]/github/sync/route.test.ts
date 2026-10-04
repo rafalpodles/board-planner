@@ -136,7 +136,7 @@ describe("POST .../github/sync", () => {
     // the second half: a sync is not somebody editing the task, and the dashboard reads a done
     // task's `updatedAt` as the day it was finished (BP-627).
     expect(options).toEqual({ updatePipeline: true, timestamps: false });
-    expect(filter).toEqual({ _id: doc._id });
+    expect(filter).toEqual({ _id: doc._id, tenant: DEFAULT_TENANT_ID });
     expect(update).toEqual(
       replaceProviderLinks("github", [expect.objectContaining({ number: 1 })], [PR_URL])
     );

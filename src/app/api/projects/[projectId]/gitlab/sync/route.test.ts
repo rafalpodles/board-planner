@@ -141,7 +141,7 @@ describe("POST .../gitlab/sync — linking", () => {
     const [filter, update, options] = taskUpdateOne.mock.calls[0];
     // Both options, for the reason its GitHub twin carries: a sync is not an edit (BP-627)
     expect(options).toEqual({ updatePipeline: true, timestamps: false });
-    expect(filter).toEqual({ _id: doc._id });
+    expect(filter).toEqual({ _id: doc._id, tenant: DEFAULT_TENANT_ID });
     expect(update).toEqual(
       replaceProviderLinks(
         "gitlab",

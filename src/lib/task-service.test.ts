@@ -1015,7 +1015,7 @@ describe("recordTaskPhase", () => {
   // run identity precisely so that replaying it reaches nothing — and note the release also unsets
   // phaseSeq, so the $exists branch would otherwise accept any seq, however stale
   it("drops a replay of the run the task was released from", async () => {
-    const released = { _id: TASK_ID, execution: { workerId: "w1", attempts: 1 } };
+    const released = { _id: TASK_ID, tenant: DEFAULT_TENANT_ID, execution: { workerId: "w1", attempts: 1 } };
     expect(matches(await filterFor(1), released)).toBe(false);
   });
 
@@ -1679,8 +1679,8 @@ describe("releaseTask only applies to a task the run still holds", () => {
     ],
   };
 
-  const held = { _id: "t1", project: "p1", status: "reviewing", execution: { runId: "r1", attempts: 1 } };
-  const released = { _id: "t1", project: "p1", status: "reviewing", execution: { runId: "", attempts: 1 } };
+  const held = { _id: "t1", tenant: DEFAULT_TENANT_ID, project: "p1", status: "reviewing", execution: { runId: "r1", attempts: 1 } };
+  const released = { _id: "t1", tenant: DEFAULT_TENANT_ID, project: "p1", status: "reviewing", execution: { runId: "", attempts: 1 } };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -3798,6 +3798,7 @@ describe("whose machine choosing an agent can reach", () => {
       ? setStage(findOneAndUpdate.mock.calls[0][1])
       : {};
     const document = {
+      tenant: DEFAULT_TENANT_ID,
       project: "p1",
       status: "ready",
       assignee,
@@ -4005,6 +4006,7 @@ describe("what a change of hands does to the agent already on the task", () => {
       result,
       written,
       document: {
+        tenant: DEFAULT_TENANT_ID,
         project: "p1",
         status: "ready",
         assignee: HOLDER,

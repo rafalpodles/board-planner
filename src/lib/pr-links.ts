@@ -214,13 +214,14 @@ export function replaceProviderLinks(
  * field of view, not this task's share of it. That is what makes a removal a fact.
  */
 export async function writeProviderLinks(
+  db: ScopedDb,
   taskId: mongoose.Types.ObjectId,
   provider: "github" | "gitlab",
   docs: (Record<string, unknown> & { _id?: never })[],
   seen: string[]
 ): Promise<void> {
   const withIds = docs.map((doc) => ({ _id: new mongoose.Types.ObjectId(), ...doc }));
-  await Task.updateOne({ _id: taskId }, replaceProviderLinks(provider, withIds, seen), {
+  await Task.updateOne({ _id: taskId, tenant: db.tenant }, replaceProviderLinks(provider, withIds, seen), {
     updatePipeline: true,
     // `updatedAt` means "when somebody changed this task", and a sync is not somebody. Mongoose
     // stamps a pipeline update like any other unless told not to, and `stats/route.ts:70,147`
