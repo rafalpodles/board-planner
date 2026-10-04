@@ -101,8 +101,22 @@ export async function tenantOrigin(tenant: Types.ObjectId): Promise<string | nul
   if (!slug) return null;
   const host = `${slug}.${domain}`;
   const routesBack = classifyHost(host, domain);
-  return routesBack.kind === "tenant" && routesBack.slug === slug ? `https://${host}` : null;
+  if (routesBack.kind !== "tenant" || routesBack.slug !== slug) return null;
+  return `${platformScheme(domain)}//${host}${platformPort(domain)}`;
 }
+
+function platformUrl(domain: string): URL | null {
+  const platform = selfOrigin();
+  if (!platform) return null;
+  const url = new URL(platform);
+  return url.hostname === domain || url.hostname.endsWith(`.${domain}`) ? url : null;
+}
+
+const platformScheme = (domain: string) => platformUrl(domain)?.protocol ?? "https:";
+const platformPort = (domain: string) => {
+  const port = platformUrl(domain)?.port;
+  return port ? `:${port}` : "";
+};
 
 export const originFor = (db: ScopedDb): Promise<string | null> => tenantOrigin(db.tenant);
 

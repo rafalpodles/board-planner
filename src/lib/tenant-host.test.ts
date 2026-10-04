@@ -160,3 +160,29 @@ describe("tenantOrigin: the address a link to a tenant is built on", () => {
     });
   });
 });
+
+describe("tenantOrigin on a platform served over another scheme or port (BP-670)", () => {
+  afterEach(() => {
+    delete process.env.TENANT_DOMAIN;
+    delete process.env.PUBLIC_ORIGIN;
+  });
+
+  it("keeps the platform's scheme and port, so a local or test deployment links to itself", async () => {
+    process.env.TENANT_DOMAIN = "tenants.localhost";
+    process.env.PUBLIC_ORIGIN = "http://tenants.localhost:46625";
+    forgetTenantSlugs();
+    findById.mockReturnValue({ select: () => ({ lean: async () => ({ _id: ACME, slug: "acme" }) }) });
+
+    expect(await tenantOrigin(ACME)).toBe("http://acme.tenants.localhost:46625");
+  });
+
+  it("uses https and no port when PUBLIC_ORIGIN is some other host", async () => {
+    process.env.TENANT_DOMAIN = "board-planner.com";
+    process.env.PUBLIC_ORIGIN = "http://elsewhere.example:8080";
+    forgetTenantSlugs();
+    findById.mockReturnValue({ select: () => ({ lean: async () => ({ _id: ACME, slug: "acme" }) }) });
+
+    expect(await tenantOrigin(ACME)).toBe("https://acme.board-planner.com");
+  });
+});
+
