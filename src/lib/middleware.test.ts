@@ -13,7 +13,9 @@ vi.mock("./db", () => ({ connectDB: vi.fn() }));
 vi.mock("./tenant", () => ({ getTenant }));
 vi.mock("@/models/user", () => ({ User: { exists: userExists } }));
 
-const { withWorker, protocolOf, withEntitlement } = await import("./middleware");
+const { withWorker, withAuth, protocolOf, withEntitlement } = await import("./middleware");
+const { scoped } = await import("./db-scope");
+const { DEFAULT_TENANT_ID } = await import("./tenant-field");
 
 function request(headers: Record<string, string> = {}): Request {
   return new Request("https://example.com/api/workers/w1/heartbeat", {
@@ -154,6 +156,32 @@ describe("withWorker", () => {
     });
 
     expect(handler.mock.calls[0][1].worker.credentialHash).toBeFalsy();
+  });
+});
+
+describe("the db a handler is handed (BP-663)", () => {
+  const OTHER = "0000000000000000000000b2";
+
+  it("withAuth confines it to the signed-in user's tenant", async () => {
+    getAuthUser.mockResolvedValue({ _id: "u1", tenant: OTHER });
+    const handler = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+
+    await withAuth(handler)(request(), { params: paramsOf() });
+
+    expect(handler.mock.calls[0][1].db).toBe(scoped(OTHER));
+    expect(handler.mock.calls[0][1].db).not.toBe(scoped(DEFAULT_TENANT_ID));
+  });
+
+  it("withWorker confines it to the machine's tenant", async () => {
+    verifyWorkerCredential.mockResolvedValue({ _id: "w1", tenant: OTHER, credentialHash: "hash" });
+    userExists.mockResolvedValue(null);
+    const handler = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+
+    await withWorker(handler)(request({ authorization: "Bearer cpw_x", "x-worker-id": "w1" }), {
+      params: paramsOf({}),
+    });
+
+    expect(handler.mock.calls[0][1].db).toBe(scoped(OTHER));
   });
 });
 

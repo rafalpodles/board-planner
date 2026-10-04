@@ -126,6 +126,7 @@ export const GROUPS = {
     "entitlements.spec.ts",
     "licence.spec.ts",
     "tenant-migration.spec.ts",
+    "db-scope.spec.ts",
     "sessions-and-auth.spec.ts",
     "proxied-login-throttle.spec.ts",
     "compose-cookie.spec.ts",
