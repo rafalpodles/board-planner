@@ -209,11 +209,21 @@ test("a write through the model that names no tenant is refused rather than give
 test("the instance's settings row is created in the default tenant, by a read or by a change", async () => {
   const settings = () => mongoose.connection.db!.collection("settings").find({}).toArray();
 
-  await updateSettings({ $set: { aiModel: "first" } });
+  await updateSettings(scoped(DEFAULT_TENANT_ID), { $set: { aiModel: "first" } });
   expect(await settings()).toMatchObject([{ tenant: DEFAULT_TENANT_ID, aiModel: "first" }]);
 
   await mongoose.connection.db!.collection("settings").deleteMany({});
-  await getSettings();
+  await getSettings(scoped(DEFAULT_TENANT_ID));
   expect(await settings()).toMatchObject([{ tenant: DEFAULT_TENANT_ID }]);
+});
+
+test("BP-667: each tenant has its own settings row, and a change in one leaves the other alone", async () => {
+  await updateSettings(scoped(A), { $set: { aiModel: "a-model", signUpDomains: ["a.example"] } });
+  await updateSettings(scoped(B), { $set: { aiModel: "b-model" } });
+  await updateSettings(scoped(A), { $set: { aiModel: "a-model-2" } });
+
+  expect(await getSettings(scoped(A))).toMatchObject({ aiModel: "a-model-2", signUpDomains: ["a.example"] });
+  expect(await getSettings(scoped(B))).toMatchObject({ aiModel: "b-model", signUpDomains: [] });
+  expect(await mongoose.connection.db!.collection("settings").countDocuments({})).toBe(2);
 });
 

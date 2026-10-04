@@ -1,3 +1,4 @@
+import type { ScopedDb } from "@/lib/db-scope";
 import { connectDB } from "@/lib/db";
 import { getSettings } from "@/models/settings";
 
@@ -21,10 +22,10 @@ export function parseSignUpDomains(input: unknown): DomainsCheck {
 }
 
 /** Exactly the domain after the @: a listed domain opens none of its subdomains. */
-export async function signUpOpenTo(email: string): Promise<boolean> {
+export async function signUpOpenTo(db: ScopedDb, email: string): Promise<boolean> {
   const at = email.lastIndexOf("@");
   if (at < 0) return false;
   await connectDB();
-  const { signUpDomains } = await getSettings();
+  const { signUpDomains } = await getSettings(db);
   return (signUpDomains ?? []).includes(email.slice(at + 1).toLowerCase());
 }

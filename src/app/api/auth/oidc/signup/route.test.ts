@@ -118,7 +118,7 @@ describe("POST /api/auth/oidc/signup", () => {
     const res = await post();
 
     expect(res.status).toBe(403);
-    expect(signUpOpenTo).toHaveBeenCalledWith("grace@corp.example");
+    expect(signUpOpenTo).toHaveBeenCalledWith((await import("@/lib/db-scope")).scopedToDefaultTenant(), "grace@corp.example");
     expect(userCreate).not.toHaveBeenCalled();
     expect(createSession).not.toHaveBeenCalled();
   });

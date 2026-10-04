@@ -1,6 +1,7 @@
 import mongoose, { Schema, Model, type UpdateQuery } from "mongoose";
-import { upsertSingleton } from "@/lib/singleton";
-import { DEFAULT_TENANT_ID, withTenant } from "@/lib/tenant-field";
+import { duplicateKeyField } from "@/lib/mongo-errors";
+import type { ScopedDb } from "@/lib/db-scope";
+import { withTenant } from "@/lib/tenant-field";
 
 export interface ISettings {
   _id: mongoose.Types.ObjectId;
@@ -30,18 +31,22 @@ const settingsSchema = new Schema<ISettings>({
 });
 
 withTenant(settingsSchema);
+settingsSchema.index({ tenant: 1 }, { unique: true });
 
 export const Settings: Model<ISettings> =
   mongoose.models.Settings || mongoose.model<ISettings>("Settings", settingsSchema);
 
-// TODO(BP-667): one Settings row per tenant
-export function updateSettings(update: UpdateQuery<ISettings>): Promise<ISettings> {
-  return upsertSingleton(Settings, {
-    ...update,
-    $setOnInsert: { ...(update.$setOnInsert ?? {}), tenant: DEFAULT_TENANT_ID },
-  });
+export async function updateSettings(db: ScopedDb, update: UpdateQuery<ISettings>): Promise<ISettings> {
+  const write = () =>
+    db.Settings.findOneAndUpdate({}, update, { upsert: true, returnDocument: "after" }) as Promise<ISettings>;
+  try {
+    return await write();
+  } catch (err) {
+    if (duplicateKeyField(err) !== "tenant") throw err;
+    return write();
+  }
 }
 
-export async function getSettings(): Promise<ISettings> {
-  return updateSettings({ $setOnInsert: { aiModel: "gpt-4o-mini" } });
+export async function getSettings(db: ScopedDb): Promise<ISettings> {
+  return updateSettings(db, { $setOnInsert: { aiModel: "gpt-4o-mini" } });
 }

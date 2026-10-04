@@ -35,7 +35,7 @@ function put(body: unknown) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  updateSettings.mockImplementation(async (update) => update.$set);
+  updateSettings.mockImplementation(async (_db, update) => update.$set);
 });
 
 // BP-326: these are the defaults behind every project's PM model and daily turn cap
@@ -65,7 +65,7 @@ describe("PUT /api/settings", () => {
     const res = await put({ pmDefaultDailyTurnCap: 250, pmDefaultModel: "some/model" });
 
     expect(res.status).toBe(200);
-    expect(updateSettings).toHaveBeenCalledWith({
+    expect(updateSettings).toHaveBeenCalledWith(scopedToDefaultTenant(), {
       $set: { pmDefaultModel: "some/model", pmDefaultDailyTurnCap: 250 },
     });
     expect(logInstanceAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), {

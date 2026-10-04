@@ -66,7 +66,7 @@ export async function POST(request: Request) {
 
   // Read again now: the list, or the provider, may have changed since the callback held this
   const provider = providerById(held.provider);
-  if (!provider?.linksByAddress || !(await signUpOpenTo(held.claims.email))) {
+  if (!provider?.linksByAddress || !(await signUpOpenTo(db, held.claims.email))) {
     return NextResponse.json({ error: CLOSED }, { status: 403 });
   }
 

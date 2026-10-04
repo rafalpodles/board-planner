@@ -213,7 +213,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
         ]);
       }
     }
-    if (found.refused === "no_account" && (await mayJoin(provider, claims))) {
+    if (found.refused === "no_account" && (await mayJoin(db, provider, claims))) {
       const binder = await holdForSignUp(db, { provider, claims });
       return redirectTo(origin, "/join/sso", [buildFlowCookie(JOIN_COOKIE, binder, Math.floor(ACCEPT_TTL_MS / 1000))]);
     }
@@ -237,8 +237,8 @@ function provesTheAddress(provider: OidcProvider, claims: VerifiedClaims) {
   return provider.linksByAddress && claims.emailVerified && Boolean(claims.email);
 }
 
-async function mayJoin(provider: OidcProvider, claims: VerifiedClaims) {
-  return provesTheAddress(provider, claims) && (await signUpOpenTo(claims.email));
+async function mayJoin(db: ScopedDb, provider: OidcProvider, claims: VerifiedClaims) {
+  return provesTheAddress(provider, claims) && (await signUpOpenTo(db, claims.email));
 }
 
 async function signInAs(user: IUser, request: Request, origin: string, clientIp: string | null, path: string) {

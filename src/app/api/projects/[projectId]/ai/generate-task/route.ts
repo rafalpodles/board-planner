@@ -164,7 +164,7 @@ async function generate(db: ScopedDb, project: HydratedDocument<IProject>, proje
   const choiceFields = choiceFieldsForPrompt(project.customFields || []);
 
   try {
-    const settings = await getSettings();
+    const settings = await getSettings(db);
     const task = await generateTask(
       prompt.trim(),
       {

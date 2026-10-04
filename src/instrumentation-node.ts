@@ -89,8 +89,7 @@ async function bootWhenDatabaseIsReady(): Promise<void> {
 
   try {
     console.log("MongoDB connected successfully");
-    const { scopedToDefaultTenant } = await import("@/lib/db-scope");
-    const db = scopedToDefaultTenant();
+    const { forEachServedTenant } = await import("@/lib/tenant-jobs");
 
     const { backfillTenants } = await import("@/lib/tenant-migration");
     const { default: mongoose } = await import("mongoose");
@@ -107,8 +106,10 @@ async function bootWhenDatabaseIsReady(): Promise<void> {
     // Said, not refused: the state can arise at runtime (a demotion, a deactivation, an unlink), and
     // exiting would turn a restart into an outage for every member, not only the administrators
     const { adminsLockedOut } = await import("@/lib/password-sign-in");
-    const lockedOut = await adminsLockedOut(db);
-    if (lockedOut) console.error(`WARNING: ${lockedOut}`);
+    await forEachServedTenant("Sign-in check", async (db) => {
+      const lockedOut = await adminsLockedOut(db);
+      if (lockedOut) console.error(`WARNING: ${lockedOut}`);
+    });
 
     const { Project } = await import("@/models/project");
     const { DEFAULT_PROJECT_CATEGORIES, DEFAULT_PROJECT_COLUMNS } = await import("@/types");
@@ -132,9 +133,11 @@ async function bootWhenDatabaseIsReady(): Promise<void> {
     // connection problem, which it is not. An instance without the catalog cannot run a worker
     // but is otherwise usable.
     const { seedAgents } = await import("@/lib/agent-seed");
-    await seedAgents(db).catch((error) => {
-      console.error("Failed to seed the agent catalog:", error);
-    });
+    await forEachServedTenant("Agent catalog seed", (db) =>
+      seedAgents(db).catch((error) => {
+        console.error("Failed to seed the agent catalog:", error);
+      })
+    );
 
     // The backfill that stood here set `worker.agent` to the shipped Default on every project
     // where it was null — on **every start**, not once. It existed so the task picker's first
@@ -152,15 +155,16 @@ async function bootWhenDatabaseIsReady(): Promise<void> {
     if ((await User.countDocuments()) === 0) setupCode();
 
     const { markPmAsMachine } = await import("@/lib/pm/pm-user");
-    await markPmAsMachine(db);
-
     // Caught like the catalog seed: a name it could not repair must not keep the schedulers down
     const { repairMachineNames } = await import("@/lib/worker-user");
-    const repaired = await repairMachineNames(db).catch((error) => {
-      console.error("Failed to repair machine names:", error);
-      return 0;
+    await forEachServedTenant("Machine accounts", async (db) => {
+      await markPmAsMachine(db);
+      const repaired = await repairMachineNames(db).catch((error) => {
+        console.error("Failed to repair machine names:", error);
+        return 0;
+      });
+      if (repaired > 0) console.log(`Repaired the display name of ${repaired} machine(s)`);
     });
-    if (repaired > 0) console.log(`Repaired the display name of ${repaired} machine(s)`);
 
     const { startPmScheduler } = await import("@/lib/pm/scheduler");
     startPmScheduler();

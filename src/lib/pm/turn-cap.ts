@@ -16,7 +16,7 @@ export async function isOverDailyTurnCap(
   projectId: string,
   pm: { dailyTurnCap?: number; autonomy?: { timezone?: string } }
 ): Promise<{ over: boolean; cap: number; used: number }> {
-  const cap = await resolveDailyTurnCap(pm.dailyTurnCap);
+  const cap = await resolveDailyTurnCap(db, pm.dailyTurnCap);
   // The project's day, not the server's. Railway runs UTC, so a Warsaw board's allowance turned
   // over at 02:00 local and a 23:00 session was already spending tomorrow's. Same zone the
   // scheduled review reads, and the same default when a board never named one.

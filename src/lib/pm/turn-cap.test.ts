@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const { countDocuments, resolveDailyTurnCap } = vi.hoisted(() => ({
   countDocuments: vi.fn(async (_filter?: unknown): Promise<number> => 0),
-  resolveDailyTurnCap: vi.fn(async (v?: number): Promise<number> => v || 100),
+  resolveDailyTurnCap: vi.fn(async (_db: unknown, v?: number): Promise<number> => v || 100),
 }));
 vi.mock("@/models/pmMessage", () => ({ PmMessage: { countDocuments } }));
 vi.mock("./availability", () => ({ resolveDailyTurnCap }));

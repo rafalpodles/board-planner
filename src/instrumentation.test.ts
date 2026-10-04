@@ -36,6 +36,14 @@ const startDigestScheduler = vi.fn(() => ({ started: true as const, tickMs: 300_
 
 const backfillTenants = vi.fn((): Promise<unknown> => Promise.resolve({ total: 0, byCollection: {} }));
 vi.mock("@/lib/tenant-migration", () => ({ backfillTenants }));
+vi.mock("@/lib/tenant-jobs", async () => {
+  const { scoped } = await import("@/lib/db-scope");
+  const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
+  return {
+    forEachServedTenant: async (_job: string, work: (db: unknown, tenant: unknown) => Promise<void>) =>
+      work(scoped(DEFAULT_TENANT_ID), { _id: DEFAULT_TENANT_ID }),
+  };
+});
 vi.mock("@/models/project", () => ({ Project: { updateMany } }));
 vi.mock("@/lib/agent-seed", () => ({ seedAgents }));
 vi.mock("@/models/user", () => ({ User: { countDocuments, find: userFind } }));

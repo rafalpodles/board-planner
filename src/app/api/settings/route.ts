@@ -6,9 +6,9 @@ import { logInstanceAudit } from "@/lib/instanceAudit";
 
 const MAX_MODEL_LENGTH = 100;
 
-export const GET = withAuth(async () => {
+export const GET = withAuth(async (_request, { db }) => {
   await connectDB();
-  const settings = await getSettings();
+  const settings = await getSettings(db);
   return NextResponse.json({
     aiModel: settings.aiModel,
     pmDefaultModel: settings.pmDefaultModel || "",
@@ -61,7 +61,7 @@ export const PUT = withAdmin(async (request, { user, db }) => {
     return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
   }
 
-  const settings = await updateSettings({ $set: updates });
+  const settings = await updateSettings(db, { $set: updates });
 
   void logInstanceAudit(db, {
     action: "instance_settings_changed",

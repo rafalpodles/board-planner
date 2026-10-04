@@ -162,8 +162,9 @@ PM_DAILY_TOKEN_CAP=       # Optional — tokens per project per day; unset means
                           # real turns, calls and tokens to set it from
 PM_SCHEDULER_TICK_MS=     # Optional — PM autonomy scheduler tick (default: 300000)
 WEBHOOK_SIGNING_SECRET=   # Optional — HMACs outgoing webhook deliveries (x-boardplanner-signature)
-DIGEST_HOUR=              # Optional — hour the opt-in daily digest goes out (default 7)
-DIGEST_TIMEZONE=          # Optional — the zone that hour is read in (default Europe/Warsaw)
+DIGEST_HOUR=              # Optional — hour the opt-in daily digest goes out (default 7); an organisation's own
+                          # Tenant.digestHour wins (BP-667)
+DIGEST_TIMEZONE=          # Optional — the zone that hour is read in (default Europe/Warsaw); Tenant.timezone wins
 DIGEST_TICK_MS=           # Optional — digest scheduler tick (default 300000)
 GITHUB_SYNC_TICK_MS=      # Optional — how often every project with a GitHub token is re-synced,
                           # which is what keeps a pull request's CI badge current (default

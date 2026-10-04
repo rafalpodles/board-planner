@@ -1,28 +1,39 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { Types } from "mongoose";
+import type { ScopedDb } from "@/lib/db-scope";
 
-const upsertSingleton = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/singleton", () => ({ upsertSingleton }));
+const { getSettings, updateSettings } = await import("./settings");
 
-const { Settings, getSettings, updateSettings } = await import("./settings");
-const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
+const findOneAndUpdate = vi.fn();
+const db = { tenant: new Types.ObjectId(), Settings: { findOneAndUpdate } } as unknown as ScopedDb;
+const duplicateOn = (field: string) => Object.assign(new Error("E11000"), { code: 11000, keyPattern: { [field]: 1 } });
 
-beforeEach(() => upsertSingleton.mockReset());
+beforeEach(() => findOneAndUpdate.mockReset().mockResolvedValue({ aiModel: "m" }));
 
-describe("the instance's settings row (BP-663)", () => {
-  it("is created in the default tenant by a change, and the change itself is kept", async () => {
-    await updateSettings({ $set: { aiModel: "m" } });
+describe("a tenant's settings row (BP-667)", () => {
+  it("is upserted through the tenant's own db, so each tenant has one", async () => {
+    await updateSettings(db, { $set: { aiModel: "m" } });
 
-    expect(upsertSingleton).toHaveBeenCalledWith(Settings, {
-      $set: { aiModel: "m" },
-      $setOnInsert: { tenant: DEFAULT_TENANT_ID },
-    });
+    expect(findOneAndUpdate).toHaveBeenCalledWith({}, { $set: { aiModel: "m" } }, { upsert: true, returnDocument: "after" });
   });
 
-  it("is created in the default tenant by a first read too", async () => {
-    await getSettings();
+  it("is created by a first read with the default model", async () => {
+    await getSettings(db);
 
-    expect(upsertSingleton).toHaveBeenCalledWith(Settings, {
-      $setOnInsert: { aiModel: "gpt-4o-mini", tenant: DEFAULT_TENANT_ID },
-    });
+    expect(findOneAndUpdate).toHaveBeenCalledWith({}, { $setOnInsert: { aiModel: "gpt-4o-mini" } }, { upsert: true, returnDocument: "after" });
+  });
+
+  it("retries once when a concurrent first write created the tenant's row", async () => {
+    findOneAndUpdate.mockRejectedValueOnce(duplicateOn("tenant"));
+
+    expect(await updateSettings(db, { $set: { aiModel: "m" } })).toEqual({ aiModel: "m" });
+    expect(findOneAndUpdate).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry any other failure", async () => {
+    findOneAndUpdate.mockRejectedValueOnce(duplicateOn("_id"));
+
+    await expect(updateSettings(db, { $set: { aiModel: "m" } })).rejects.toThrow("E11000");
+    expect(findOneAndUpdate).toHaveBeenCalledTimes(1);
   });
 });
