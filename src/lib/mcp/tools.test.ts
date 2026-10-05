@@ -2121,6 +2121,15 @@ describe("archiving and deleting a task", () => {
       expect(said.get("archive_task")).toMatch(/unarchive_task/);
       expect(said.get("unarchive_task")).toMatch(/Any member/);
     });
+
+    it("say what an archived blocker does to the tasks it blocks, and do not claim the PM agent loses sight of it", () => {
+      const said = descriptions();
+
+      expect(said.get("archive_task")).toMatch(/archived blocker no longer holds back/);
+      expect(said.get("unarchive_task")).toMatch(/holds back the tasks it\s+blocks again/);
+      expect(said.get("archive_task")).not.toMatch(/PM agent's view/);
+      expect(said.get("archive_task")).toMatch(/PM agent can still open it by its key/);
+    });
   });
 
   describe("delete_task", () => {
@@ -2174,6 +2183,13 @@ describe("archiving and deleting a task", () => {
       expect(said).toMatch(/archive_task/);
       expect(said).toMatch(/cannot be undone/);
       expect(said).toMatch(/never forced/);
+    });
+
+    it("does not claim the confirmation stops a wrong target, which both keys come from the caller", () => {
+      const said = descriptions().get("delete_task")!;
+
+      expect(said).not.toMatch(/wrong key cannot delete/);
+      expect(said).toMatch(/not against naming the wrong task/);
     });
   });
 

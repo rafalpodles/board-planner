@@ -455,10 +455,11 @@ export function registerPlannerTools(server: McpServer): void {
     "archive_task",
     {
       description:
-        "Archive a task: it leaves the board, every list, search, my_tasks, the counts and the PM agent's view, " +
-        "and no worker will claim it, but it keeps its comments and history and can be restored with unarchive_task. " +
-        "Any member of the board may archive. Refused while a worker is running the task. list_tasks with archived " +
-        "finds archived tasks; get_task and every key-addressed tool still reach one by its key.",
+        "Archive a task: it leaves the board, every list, search, my_tasks and the counts (the PM agent's lists " +
+        "too, though the PM agent can still open it by its key), and no worker will claim it, but it keeps its " +
+        "comments and history and can be restored with unarchive_task. An archived blocker no longer holds back the " +
+        "tasks it blocked. Any member of the board may archive. Refused while a worker is running the task. " +
+        "list_tasks with archived finds archived tasks; get_task and every key-addressed tool still reach one by its key.",
       inputSchema: strictInput({ taskKey: z.string().describe("Task key (e.g. 'CP-1')") }, { writes: true }),
     },
     async ({ taskKey }, extra) => {
@@ -472,7 +473,9 @@ export function registerPlannerTools(server: McpServer): void {
   server.registerTool(
     "unarchive_task",
     {
-      description: "Restore an archived task to the board, in the column it was archived from. Any member of the board may.",
+      description:
+        "Restore an archived task to the board, in the column it was archived from. It holds back the tasks it " +
+        "blocks again while it is not done. Any member of the board may.",
       inputSchema: strictInput({ taskKey: z.string().describe("Task key (e.g. 'CP-1')") }, { writes: true }),
     },
     async ({ taskKey }, extra) => {
@@ -489,7 +492,7 @@ export function registerPlannerTools(server: McpServer): void {
       description:
         "Delete a task for good, with its comments, history and notifications. It cannot be undone, so unless the " +
         "task is truly unwanted use archive_task. Only the board's owner may delete; a member who is not the owner " +
-        "can only archive. confirmKey has to repeat the task's key, so a wrong key cannot delete the wrong task. " +
+        "can only archive. confirmKey has to repeat taskKey, which guards against a slip of the hand, not against naming the wrong task: both come from the caller. " +
         "Refused, and never forced, while a worker is running the task.",
       inputSchema: strictInput(
         {
