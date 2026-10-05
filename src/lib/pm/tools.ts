@@ -1,6 +1,7 @@
 import { Types } from "mongoose";
 import { PRIORITIES } from "@/types";
 import { resolveFieldsByName } from "@/lib/custom-fields";
+import { mergeCriteria } from "@/lib/checklist";
 import {
   createTask,
   updateTask,
@@ -475,6 +476,11 @@ export const PM_TOOLS: Record<string, PmTool> = {
       }
       const updates = await fieldValuesFor(db, ctx.projectId, args.fields);
       if ("error" in updates) return { result: { error: updates.error as string } };
+      if (typeof body.acceptanceCriteria === "string") {
+        // Read against the criteria the task holds, so an unchanged line keeps its id and its tick
+        body.checklist = mergeCriteria(body.acceptanceCriteria, (resolved.task.checklist ?? []) as never);
+        delete body.acceptanceCriteria;
+      }
       if (Object.keys(updates).length) {
         // customFieldValues is replaced wholesale, so the task's other values are
         // merged back in rather than cleared by naming a single field

@@ -67,7 +67,7 @@ const TASK_FIELD_HINTS: Record<string, string> = {
   order: "the reorder_tasks tool",
   blockedBy: "the link_tasks tool on /api/mcp",
   relations: "the link_tasks tool on /api/mcp",
-  checklist: "acceptanceCriteria, a markdown checklist",
+  checklist: "acceptanceCriteria for the whole list, or add_checklist_item, set_checklist_item and remove_checklist_item for one criterion",
   difficulty: "the fields parameter, keyed by field name",
   component: "the fields parameter, keyed by field name",
   customFieldValues: "the fields parameter, keyed by field name",

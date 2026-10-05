@@ -518,92 +518,120 @@ describe("reorder_tasks", () => {
 describe("checklist tools and acceptanceCriteria", () => {
   const A = "507f1f77bcf86cd799439011";
   const B = "507f1f77bcf86cd799439012";
+  const C = "507f1f77bcf86cd799439013";
+  // The one that is ticked has an unticked neighbour on each side: a change applied to every item shows
   const HELD = [
-    { _id: A, text: "first", done: true },
-    { _id: B, text: "second", done: false },
+    { _id: A, text: "first", done: false },
+    { _id: B, text: "second", done: true },
+    { _id: C, text: "third", done: false },
   ];
   const parse = (result: unknown) => JSON.parse((result as { content: { text: string }[] }).content[0].text);
-  let wrote: MockInstance<PlannerClient["updateTask"]>;
+  const stored = HELD.map((item) => ({ ...item }));
 
   beforeEach(() => {
     vi.spyOn(PlannerClient.prototype, "getTask").mockResolvedValue({ checklist: HELD });
-    wrote = vi.spyOn(PlannerClient.prototype, "updateTask").mockImplementation(async (_p, _t, data) => ({
-      checklist: ((data.checklist as { _id?: string; text: string; done: boolean }[]) ?? []).map((item, i) => ({
-        _id: item._id ?? `507f1f77bcf86cd7994399${String(i).padStart(2, "0")}`,
-        ...item,
-      })),
-    }));
   });
 
   const run = (name: string, args: Record<string, unknown>) =>
     registered().get(name)!.handler({ taskKey: "BP-1", ...args }, extra);
-  const sentList = () => (wrote.mock.calls[0][2] as { checklist: unknown[] }).checklist;
 
-  it("add_checklist_item writes the list back with every id and the new item last", async () => {
-    const answer = parse(await run("add_checklist_item", { text: "third" }));
+  it("add_checklist_item adds one in one update and answers with the list and every id", async () => {
+    const add = vi.spyOn(PlannerClient.prototype, "addChecklistItem").mockResolvedValue({
+      checklist: [...stored, { _id: "507f1f77bcf86cd799439014", text: "fourth", done: false }],
+    });
 
-    expect(sentList()).toEqual([
-      { _id: A, text: "first", done: true },
-      { _id: B, text: "second", done: false },
-      { text: "third", done: false },
-    ]);
-    expect(answer.checklist.map((c: { text: string }) => c.text)).toEqual(["first", "second", "third"]);
-    expect(answer.checklist[0]).toEqual({ id: A, text: "first", done: true });
+    const answer = parse(await run("add_checklist_item", { text: "fourth" }));
+
+    expect(add).toHaveBeenCalledWith("p1", "t1", { text: "fourth", done: false });
+    expect(answer.checklist).toHaveLength(4);
+    expect(answer.checklist[3]).toEqual({ id: "507f1f77bcf86cd799439014", text: "fourth", done: false });
   });
 
-  it("set_checklist_item ticks one by its text and leaves the other alone", async () => {
-    await run("set_checklist_item", { item: "SECOND", done: true });
+  it("set_checklist_item changes the one criterion by its id, taken from its text in any case", async () => {
+    const set = vi.spyOn(PlannerClient.prototype, "setChecklistItem").mockResolvedValue({ checklist: stored });
 
-    expect(sentList()).toEqual([
-      { _id: A, text: "first", done: true },
-      { _id: B, text: "second", done: true },
-    ]);
+    await run("set_checklist_item", { item: "FIRST", done: true });
+
+    expect(set).toHaveBeenCalledWith("p1", "t1", A, { done: true });
   });
 
-  it("set_checklist_item rewords one by id", async () => {
-    await run("set_checklist_item", { item: A, text: "first, reworded" });
+  it("set_checklist_item rewords by id and sends nothing it was not given", async () => {
+    const set = vi.spyOn(PlannerClient.prototype, "setChecklistItem").mockResolvedValue({ checklist: stored });
 
-    expect(sentList()).toEqual([
-      { _id: A, text: "first, reworded", done: true },
-      { _id: B, text: "second", done: false },
-    ]);
+    await run("set_checklist_item", { item: C, text: "third, reworded" });
+
+    expect(set).toHaveBeenCalledWith("p1", "t1", C, { text: "third, reworded" });
   });
 
-  it("set_checklist_item with nothing to change is refused before anything is read", async () => {
+  it("set_checklist_item with nothing to change is refused before the task is read", async () => {
+    const read = vi.spyOn(PlannerClient.prototype, "getTask");
+    const set = vi.spyOn(PlannerClient.prototype, "setChecklistItem").mockResolvedValue({ checklist: stored });
+
     await expect(run("set_checklist_item", { item: A })).rejects.toThrow(/nothing to change/);
-    expect(wrote).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+    expect(set).not.toHaveBeenCalled();
   });
 
-  it("remove_checklist_item drops one and keeps the other with its id", async () => {
-    await run("remove_checklist_item", { item: "first" });
+  it("remove_checklist_item removes the one criterion by its id", async () => {
+    const remove = vi.spyOn(PlannerClient.prototype, "removeChecklistItem").mockResolvedValue({ checklist: [stored[0], stored[2]] });
 
-    expect(sentList()).toEqual([{ _id: B, text: "second", done: false }]);
+    const answer = parse(await run("remove_checklist_item", { item: "second" }));
+
+    expect(remove).toHaveBeenCalledWith("p1", "t1", B);
+    expect(answer.checklist.map((c: { id: string }) => c.id)).toEqual([A, C]);
   });
 
   it("refuses an item the task does not have, writing nothing", async () => {
-    await expect(run("set_checklist_item", { item: "third", done: true })).rejects.toThrow(/No criterion "third"/);
-    await expect(run("remove_checklist_item", { item: "third" })).rejects.toThrow(/No criterion "third"/);
-    expect(wrote).not.toHaveBeenCalled();
+    const set = vi.spyOn(PlannerClient.prototype, "setChecklistItem");
+    const remove = vi.spyOn(PlannerClient.prototype, "removeChecklistItem");
+
+    await expect(run("set_checklist_item", { item: "fourth", done: true })).rejects.toThrow(/No criterion "fourth"/);
+    await expect(run("remove_checklist_item", { item: "fourth" })).rejects.toThrow(/No criterion "fourth"/);
+    expect(set).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
   });
 
-  it("update_task keeps the id and the ticked state of a line whose text is unchanged", async () => {
-    await run("update_task", { acceptanceCriteria: "first\nsecond, reworded\n- a new one" });
+  describe("acceptanceCriteria on update_task", () => {
+    let wrote: MockInstance<PlannerClient["updateTask"]>;
 
-    const data = wrote.mock.calls[0][2];
-    expect(data).not.toHaveProperty("acceptanceCriteria");
-    expect(data.checklist).toEqual([
-      { _id: A, text: "first", done: true },
-      { text: "second, reworded", done: false },
-      { text: "a new one", done: false },
-    ]);
-  });
+    beforeEach(() => {
+      wrote = vi.spyOn(PlannerClient.prototype, "updateTask").mockResolvedValue({});
+    });
 
-  it("update_task still lets a line state its own box", async () => {
-    await run("update_task", { acceptanceCriteria: "- [ ] first\n- [x] second" });
+    it("keeps the id and the tick of a line whose text is unchanged, and sends a list, not the string", async () => {
+      await run("update_task", { acceptanceCriteria: "first\nsecond\nthird, reworded\n- a new one" });
 
-    expect(wrote.mock.calls[0][2].checklist).toEqual([
-      { _id: A, text: "first", done: false },
-      { _id: B, text: "second", done: true },
-    ]);
+      const data = wrote.mock.calls[0][2];
+      expect(data).not.toHaveProperty("acceptanceCriteria");
+      expect(data.checklist).toEqual([
+        { _id: A, text: "first", done: false },
+        { _id: B, text: "second", done: true },
+        { text: "third, reworded", done: false },
+        { text: "a new one", done: false },
+      ]);
+    });
+
+    it("still lets a line state its own box", async () => {
+      await run("update_task", { acceptanceCriteria: "- [x] first\n- [ ] second" });
+
+      expect(wrote.mock.calls[0][2].checklist).toEqual([
+        { _id: A, text: "first", done: true },
+        { _id: B, text: "second", done: false },
+      ]);
+    });
+
+    it("reads the task once when it also changes a project field", async () => {
+      const read = vi.spyOn(PlannerClient.prototype, "getTask");
+      vi.spyOn(PlannerClient.prototype, "getProject").mockResolvedValue({
+        _id: "p1",
+        customFields: [{ _id: "f9", name: "Notes", fieldType: "text" }],
+      } as never);
+
+      await run("update_task", { acceptanceCriteria: "first", fields: { Notes: "hi" } });
+
+      expect(read).toHaveBeenCalledTimes(1);
+      expect(wrote.mock.calls[0][2]).toHaveProperty("customFieldValues");
+      expect(wrote.mock.calls[0][2]).toHaveProperty("checklist");
+    });
   });
 });

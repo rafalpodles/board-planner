@@ -954,7 +954,8 @@ test("one checklist item is added, ticked, reworded and removed without disturbi
     [third._id, "third", false],
     [now[3]._id, "fourth", false],
   ]);
-  expect(added.parsed.checklist[3]).toEqual({ id: now[3]._id, text: "fourth", done: false });
+  const fourthId = now[3]._id;
+  expect(added.parsed.checklist[3]).toEqual({ id: fourthId, text: "fourth", done: false });
 
   // Ticked by its text, then reworded by its id; the neighbours keep their ids and their state
   accepted(await session.callTool("set_checklist_item", { taskKey: key, item: "SECOND", done: true }));
@@ -964,7 +965,7 @@ test("one checklist item is added, ticked, reworded and removed without disturbi
     [first._id, "first", true],
     [second._id, "second", true],
     [third._id, "third, reworded", false],
-    [now[3]._id, "fourth", false],
+    [fourthId, "fourth", false],
   ]);
 
   // The history says what happened, as it does when a person ticks the box
@@ -982,9 +983,8 @@ test("one checklist item is added, ticked, reworded and removed without disturbi
     [first._id, "first", true],
     [second._id, "second", true],
     [expect.not.stringMatching(third._id), "third, reworded again", false],
-    [now[3]._id, "fourth", false],
+    [fourthId, "fourth", false],
   ]);
-  expect(now[3]._id).toBeTruthy();
 
   accepted(await session.callTool("remove_checklist_item", { taskKey: key, item: "fourth" }));
   expect((await items()).map((i) => i.text)).toEqual(["first", "second", "third, reworded again"]);
@@ -995,6 +995,27 @@ test("one checklist item is added, ticked, reworded and removed without disturbi
   refused(missing);
   expect(missing.text).toContain('No criterion "fifth"');
   expect(JSON.stringify(await items())).toBe(before);
+});
+
+test("ticks made at the same moment all land: one criterion changes, not the whole list", async ({ request }) => {
+  const session = await connected(request);
+  const created = await session.callTool("create_task", {
+    project: PROJECT_KEY,
+    title: "Ticked all at once",
+    acceptanceCriteria: Array.from({ length: 8 }, (_, i) => `- [ ] criterion ${i + 1}`).join("\n"),
+  });
+  accepted(created);
+  const key = `${PROJECT_KEY}-${created.parsed.taskNumber}`;
+  const ids = (created.parsed.checklist as { _id: string }[]).map((c) => c._id);
+
+  // A list written back whole would let each call overwrite the ticks the others made in between
+  const answers = await Promise.all(ids.map((id) => session.callTool("set_checklist_item", { taskKey: key, item: id, done: true })));
+  for (const answer of answers) accepted(answer);
+
+  const stored = (await storedApiTask(request, created.parsed._id)).checklist as { done: boolean }[];
+  expect(stored.map((c) => c.done)).toEqual(ids.map(() => true));
+  const activity = JSON.stringify(await (await request.get(`/api/projects/${PROJECT_ID}/tasks/${created.parsed._id}/activity`, { headers: ADMIN_AUTH })).json());
+  expect(activity.match(/criterion_checked/g)).toHaveLength(ids.length);
 });
 
 test("an item two criteria share is refused with their ids rather than guessed", async ({ request }) => {
