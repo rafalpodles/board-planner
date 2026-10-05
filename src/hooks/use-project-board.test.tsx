@@ -635,7 +635,7 @@ describe("a child moving out from under an epic's progress", () => {
 
 describe("archiving or restoring a child under an epic's progress", () => {
   const parent = { _id: "e1", taskNumber: 1, title: "Epic", status: "todo" };
-  let progress = { total: 2, done: 0, byStatus: { todo: 2 } };
+  let progress: { total: number; done: number; byStatus: Record<string, number> } = { total: 2, done: 0, byStatus: { todo: 2 } };
 
   async function mountedEpic() {
     progress = { total: 2, done: 0, byStatus: { todo: 2 } };
