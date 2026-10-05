@@ -61,6 +61,8 @@ export function describeRequestError(
 
   const parts = [
     `${request.method} ${request.path.split("?")[0]}`,
+    // Written outside the request's own context, so the host is what names the organisation here
+    header(request, "host") ? `host=${JSON.stringify(header(request, "host"))}` : "",
     context.routePath && context.routePath !== request.path.split("?")[0]
       ? `route=${context.routePath}`
       : "",

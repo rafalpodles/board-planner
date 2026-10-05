@@ -5,6 +5,8 @@ const getAuthUser = vi.fn();
 const check = vi.fn();
 const resolveProjectId = vi.fn();
 const openUploadStream = vi.fn();
+const aggregate = vi.fn();
+let storedBytes = 0;
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({
@@ -60,8 +62,11 @@ beforeEach(() => {
   vi.spyOn(mongoose.mongo, "GridFSBucket").mockImplementation(
     () => ({ openUploadStream }) as unknown as mongoose.mongo.GridFSBucket
   );
+  storedBytes = 0;
+  delete process.env.ORGANISATION_STORAGE_MB;
+  aggregate.mockImplementation(() => ({ toArray: async () => [{ bytes: storedBytes }] }));
   vi.spyOn(mongoose, "connection", "get").mockReturnValue({
-    db: {},
+    db: { collection: () => ({ aggregate }) },
   } as unknown as mongoose.Connection);
 });
 
@@ -147,5 +152,22 @@ describe("POST /api/uploads", () => {
     const response = await POST(request(form({ projectId: "BP" })), ctx());
 
     expect(response.status).toBe(400);
+  });
+
+  it("refuses a file that would take the organisation past its storage, counting only its own files (BP-894)", async () => {
+    process.env.ORGANISATION_STORAGE_MB = "1";
+    storedBytes = 1024 * 1024 - 5;
+
+    const response = await POST(request(form({ file: png("big.png", 10), projectId: "BP" })), ctx());
+
+    expect(response.status).toBe(413);
+    expect((await response.json()).error).toMatch(/of its 1 MB of file storage/);
+    expect(openUploadStream).not.toHaveBeenCalled();
+    expect(aggregate.mock.calls[0][0][0]).toEqual({
+      $match: { "metadata.organisation": scopedToDefaultOrganisation().organisation },
+    });
+
+    storedBytes = 1024 * 1024 - 10;
+    expect((await POST(request(form({ file: png("fits.png", 10), projectId: "BP" })), ctx())).status).toBe(200);
   });
 });

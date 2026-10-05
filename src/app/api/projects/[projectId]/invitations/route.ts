@@ -15,6 +15,8 @@ import { ApiBoardInvitation, GRANT_RELATIONS, GrantRelation } from "@/types";
 // and one address gets a ceiling of its own, however many owners take turns
 const INVITES_PER_OWNER = 30;
 const INVITES_PER_ADDRESS = 5;
+// Across every organisation, so the address's inbox keeps a ceiling however many organisations there are
+const INVITES_PER_ADDRESS_EVERYWHERE = 20;
 
 export const GET = withProjectOwner(async (_request, { params, user, db }) => {
   if (user.viaMachineCredential) {
@@ -98,8 +100,12 @@ export const POST = withProjectOwner(async (request, { params, user, db }) => {
     );
   }
 
-  const addressKey = `board-invite-to:${email}`;
-  if (await isRateLimited(addressKey, INVITES_PER_ADDRESS)) {
+  const addressKey = `board-invite-to:${db.organisation.toHexString()}:${email}`;
+  const inboxKey = `board-invite-to:${email}`;
+  if (
+    (await isRateLimited(addressKey, INVITES_PER_ADDRESS)) ||
+    (await isRateLimited(inboxKey, INVITES_PER_ADDRESS_EVERYWHERE))
+  ) {
     return NextResponse.json(
       { error: "That address has been invited too often. Try again in 15 minutes." },
       { status: 429 }
@@ -139,6 +145,7 @@ export const POST = withProjectOwner(async (request, { params, user, db }) => {
   }
 
   await recordFailedAttempt(addressKey);
+  await recordFailedAttempt(inboxKey);
   const delivery = await deliverTo(
     email,
     outcome.token,

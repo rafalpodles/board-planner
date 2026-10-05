@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { outsideOrganisation } from "./organisation-log";
 import type { MongoClient } from "mongodb";
 import { DatabaseUnavailableError, isDatabaseUnreachable } from "./db-errors";
 
@@ -247,7 +248,7 @@ export async function connectDB(): Promise<typeof mongoose> {
     cached.conn = await cached.promise;
     cached.failedAt = null;
     if (cached.reportedAt !== null) {
-      console.log("MongoDB is reachable again");
+      outsideOrganisation(() => console.log("MongoDB is reachable again"));
       cached.reportedAt = null;
     }
   } catch (err) {
@@ -258,7 +259,7 @@ export async function connectDB(): Promise<typeof mongoose> {
       // A deployment fault: it will not come right on its own, so it is said every time and left to
       // answer 500 rather than being dressed up as an outage somebody should wait out
       cached.promise = null;
-      console.error("MongoDB refused the connection as configured:", detail);
+      outsideOrganisation(() => console.error("MongoDB refused the connection as configured:", detail));
       throw err;
     }
 
@@ -268,9 +269,8 @@ export async function connectDB(): Promise<typeof mongoose> {
     // symptom at exactly the moment somebody is reading the log to find it
     if (cached.reportedAt === null || Date.now() - cached.reportedAt >= OUTAGE_LOG_INTERVAL_MS) {
       cached.reportedAt = Date.now();
-      console.error(
-        "MongoDB is unreachable — requests needing it will answer 503 until it returns:",
-        detail
+      outsideOrganisation(() =>
+        console.error("MongoDB is unreachable — requests needing it will answer 503 until it returns:", detail)
       );
     }
     // Drop the rejected promise, or it is the answer to every request from here on. The reset above

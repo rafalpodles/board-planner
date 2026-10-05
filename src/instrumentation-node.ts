@@ -1,4 +1,7 @@
 export async function bootNode(): Promise<void> {
+  const { tagConsoleWithOrganisation } = await import("@/lib/organisation-log");
+  tagConsoleWithOrganisation();
+
   // Read here so a fumbled value is one startup failure naming the variable, and so an operator
   // can see which answer the instance settled on — the throttle keys on it, and getting it wrong
   // is silent in both directions (BP-318). This lived in a second copy of this file under src/
@@ -109,6 +112,9 @@ async function bootWhenDatabaseIsReady(): Promise<void> {
         `WARNING: ${organisationless.total} row(s) belong to no organisation and are invisible to every request; scripts/migrate-organisation.ts gives them one`
       );
     }
+
+    const { ensureUploadIndexes } = await import("@/lib/upload-ownership");
+    await ensureUploadIndexes().catch((error) => console.error("Failed to index uploads by organisation:", error));
 
     // Said, not refused: the state can arise at runtime (a demotion, a deactivation, an unlink), and
     // exiting would turn a restart into an outage for every member, not only the administrators

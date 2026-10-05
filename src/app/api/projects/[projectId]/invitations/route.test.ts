@@ -42,7 +42,7 @@ vi.mock("@/models/invitation", () => ({ Invitation: { find: invitationFind } }))
 
 const { GET, POST } = await import("./route");
 const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
-const { resetRateLimits } = await import("@/lib/rate-limit");
+const { resetRateLimits, recordFailedAttempt } = await import("@/lib/rate-limit");
 
 const CTX = { params: Promise.resolve({ projectId: "p1" }) };
 const post = (body: unknown) =>
@@ -183,6 +183,13 @@ describe("POST /api/projects/:id/invitations", () => {
       expect((await post({ email: "ada@example.com" })).status).toBe(201);
     }
     caller = { ...caller, _id: "o9" };
+
+    expect((await post({ email: "ada@example.com" })).status).toBe(429);
+    expect((await post({ email: "someone-else@example.com" })).status).toBe(201);
+  });
+
+  it("keeps a ceiling for the address across every organisation, so its inbox is not one per organisation (BP-894)", async () => {
+    for (let i = 0; i < 20; i++) await recordFailedAttempt("board-invite-to:ada@example.com");
 
     expect((await post({ email: "ada@example.com" })).status).toBe(429);
     expect((await post({ email: "someone-else@example.com" })).status).toBe(201);

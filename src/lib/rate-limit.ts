@@ -122,6 +122,10 @@ export async function recordFailedAttempt(key: string, windowMs = WINDOW_MS): Pr
  * budget that must hold under a burst compares this answer rather than asking first (BP-323).
  */
 export async function countAttempt(key: string, windowMs = WINDOW_MS): Promise<number> {
+  return (await countInWindow(key, windowMs)).count;
+}
+
+export async function countInWindow(key: string, windowMs = WINDOW_MS): Promise<{ count: number; resetAt: Date }> {
   await connectDB();
   try {
     return await incrementAttempt(key, windowMs);
@@ -132,7 +136,7 @@ export async function countAttempt(key: string, windowMs = WINDOW_MS): Promise<n
   }
 }
 
-async function incrementAttempt(key: string, windowMs: number): Promise<number> {
+async function incrementAttempt(key: string, windowMs: number): Promise<{ count: number; resetAt: Date }> {
   const now = new Date();
   const fresh = new Date(now.getTime() + windowMs);
 
@@ -152,9 +156,9 @@ async function incrementAttempt(key: string, windowMs: number): Promise<number> 
     // without it — which once made every failed login answer 500 and record nothing (BP-318)
     { upsert: true, updatePipeline: true, returnDocument: "after" }
   ).lean();
-  const count = (counted as { count?: number } | null)?.count;
-  if (typeof count !== "number") throw new Error(`rate limit row ${key} came back without a count`);
-  return count;
+  const { count, resetAt } = (counted as { count?: number; resetAt?: Date } | null) ?? {};
+  if (typeof count !== "number" || !(resetAt instanceof Date)) throw new Error(`rate limit row ${key} came back without a count`);
+  return { count, resetAt };
 }
 
 export async function clearAttempts(key: string): Promise<void> {

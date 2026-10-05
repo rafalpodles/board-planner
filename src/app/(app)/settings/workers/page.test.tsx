@@ -21,6 +21,8 @@ const { api, toast, replace, auth } = vi.hoisted(() => ({
     refreshUser: vi.fn(),
     onUnauthorized: vi.fn(),
     noteApiStatus: vi.fn(),
+    requestLimit: null,
+    noteRequestLimit: vi.fn(),
   } satisfies AuthState,
 }));
 

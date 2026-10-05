@@ -137,6 +137,7 @@ export const GROUPS = {
     "organisations-webhook-signing.spec.ts",
     "organisations-secrets.spec.ts",
     "organisations-licence.spec.ts",
+    "organisations-limits.spec.ts",
     "organisations-oidc-relay.spec.ts",
     "organisations-route-families.spec.ts",
     "organisations-addresses.spec.ts",

@@ -4,6 +4,7 @@ import { DEFAULT_ORGANISATION_ID } from "./organisation-field";
 import { scoped, type ScopedDb } from "./db-scope";
 import { organisationDomain } from "./organisation-host";
 import { Organisation } from "@/models/organisation";
+import { inOrganisation } from "./organisation-log";
 
 export type ServedOrganisation = { _id: Types.ObjectId; digestHour?: number; timezone?: string };
 
@@ -22,7 +23,7 @@ export async function forEachServedOrganisation(
 ): Promise<void> {
   for (const organisation of await servedOrganisations()) {
     try {
-      await work(scoped(organisation._id), organisation);
+      await inOrganisation(organisation._id, () => work(scoped(organisation._id), organisation));
     } catch (err) {
       console.error(`${job} failed for organisation ${organisation._id.toHexString()}:`, err);
     }

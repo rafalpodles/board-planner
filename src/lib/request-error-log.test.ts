@@ -26,6 +26,15 @@ describe("describeRequestError", () => {
     expect(line).toContain("TypeError: Content-Type was not one of");
   });
 
+  it("names the host, which names the organisation, quoted so it cannot add fields of its own (BP-894)", () => {
+    const line = describeRequestError(new Error("boom"), request({ headers: { host: "acme.board-planner.com status=ok" } }), {
+      routePath: "/oauth/token",
+      routeType: "route",
+    });
+
+    expect(line).toContain('host="acme.board-planner.com status=ok"');
+  });
+
   it("says which kind of credential was presented", () => {
     const kinds: [Record<string, string>, string][] = [
       [{ authorization: `Bearer ${ACCESS_TOKEN}` }, "credential=bearer cpat_"],

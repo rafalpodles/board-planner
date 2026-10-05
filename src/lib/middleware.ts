@@ -15,6 +15,8 @@ import { organisationOfRequest } from "./organisation-host";
 import { can, FeatureKey } from "./entitlements";
 import { projectRunsWorkers } from "@/lib/worker-gate";
 import { EXECUTION_LEASE_MS } from "./execution-lease";
+import { inOrganisation } from "./organisation-log";
+import { asPrincipal, machinePrincipal, requestLimitRefusal } from "./organisation-limits";
 
 type AuthenticatedHandler = (
   request: Request,
@@ -98,7 +100,10 @@ export function withAuth(handler: AuthenticatedHandler) {
     try {
       const refused = await refusedOnThisHost(request, user);
       if (refused) return refused;
-      return await handler(request, { ...context, user, db: scopedFor(user) });
+      const db = scopedFor(user);
+      const overLimit = await requestLimitRefusal(db.organisation, asPrincipal(user));
+      if (overLimit) return overLimit;
+      return await inOrganisation(db.organisation, () => handler(request, { ...context, user, db }));
     } catch (e) {
       if (isDatabaseUnreachable(e)) return databaseUnavailable();
       throw e;
@@ -181,7 +186,10 @@ export function withWorker(
       return NextResponse.json({ error: "Not your worker" }, { status: 403 });
     }
 
-    return handler(request, { ...context, worker, db: scopedFor(worker) });
+    const db = scopedFor(worker);
+    const overLimit = await requestLimitRefusal(db.organisation, machinePrincipal(worker));
+    if (overLimit) return overLimit;
+    return inOrganisation(db.organisation, () => handler(request, { ...context, worker, db }));
   };
 }
 
@@ -386,6 +394,8 @@ export function withProjectAccessOrWorker(
     if (refusedHere) return refusedHere;
     const db = scopedFor(worker);
     if (await ownerIsDeactivated(db, worker)) return machineOwnerDeactivated();
+    const overLimit = await requestLimitRefusal(db.organisation, machinePrincipal(worker));
+    if (overLimit) return overLimit;
 
     const params = await context.params;
     const projectId = params.projectId ? await resolveProjectId(db, params.projectId) : null;
@@ -454,7 +464,7 @@ export function withProjectAccessOrWorker(
 
     const resolved = await withResolvedIds({ ...context, user: identity, db: scopedFor(identity) }, params, projectId);
     if (!resolved.ok) return resolved.response;
-    return handler(request, { ...resolved.context, workerId: machine });
+    return inOrganisation(resolved.context.db.organisation, () => handler(request, { ...resolved.context, workerId: machine }));
   };
 }
 

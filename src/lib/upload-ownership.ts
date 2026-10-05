@@ -10,6 +10,11 @@ function uploadsBucket(): mongoose.mongo.GridFSBucket | null {
 
 export type UploadedFile = mongoose.mongo.GridFSFile;
 
+// GridFS is the driver's, so no schema declares this: every read and the storage ceiling filter on it
+export async function ensureUploadIndexes(): Promise<void> {
+  await mongoose.connection.db?.collection(`${UPLOAD_BUCKET}.files`).createIndex({ "metadata.organisation": 1, _id: 1 });
+}
+
 /**
  * The bucket as one organisation sees it. GridFS is the driver's, so the organisation wall under
  * the models never sees it: every read here names the organisation in its filter, every file
@@ -23,6 +28,16 @@ export function organisationUploads(db: ScopedDb) {
       bucket.find({ _id: { $in: ids }, "metadata.organisation": db.organisation }).toArray(),
     // Only for a file `find` has just returned
     download: (file: UploadedFile) => bucket.openDownloadStream(file._id),
+    bytesStored: async (): Promise<number> => {
+      const [stored] = await mongoose.connection
+        .db!.collection(`${UPLOAD_BUCKET}.files`)
+        .aggregate<{ bytes: number }>([
+          { $match: { "metadata.organisation": db.organisation } },
+          { $group: { _id: null, bytes: { $sum: "$length" } } },
+        ])
+        .toArray();
+      return stored?.bytes ?? 0;
+    },
     upload: (name: string, metadata: Record<string, unknown>) =>
       bucket.openUploadStream(name, { metadata: { ...metadata, organisation: db.organisation } }),
   };

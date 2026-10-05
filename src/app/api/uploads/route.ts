@@ -5,6 +5,7 @@ import { connectDB } from "@/lib/db";
 import { withAuth, resolveProjectId } from "@/lib/middleware";
 import { check } from "@/lib/grants";
 import { organisationUploads } from "@/lib/upload-ownership";
+import { storageLimitRefusal } from "@/lib/organisation-limits";
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 // The whole multipart envelope, not the file: part headers, the boundary and the projectId field
@@ -91,6 +92,8 @@ export const POST = withAuth(async (request, { user, db }) => {
       { status: 500 }
     );
   }
+  const overStorage = storageLimitRefusal(await uploads.bytesStored(), file.size);
+  if (overStorage) return overStorage;
 
   const uploadStream = uploads.upload(file.name, {
     contentType: file.type,

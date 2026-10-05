@@ -9,6 +9,9 @@ import {
   useMemo,
 } from "react";
 import { ApiUser } from "@/types";
+import type { RequestLimitScope } from "@/lib/organisation-limit-header";
+
+export type RequestLimit = { scope: RequestLimitScope; until: Date };
 
 export type LoginResult = { ok: true } | { ok: false; reason: string };
 
@@ -47,6 +50,9 @@ export interface AuthState {
    * (BP-607 review).
    */
   noteApiStatus: (status: number, opts?: { relayed?: boolean }) => void;
+  /** Whose requests for the minute are spent, and until when, while they are (BP-894) */
+  requestLimit: RequestLimit | null;
+  noteRequestLimit: (scope: RequestLimitScope, retryAfterSeconds: number) => void;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -63,6 +69,7 @@ export function useAuthProvider(): AuthState {
   const [user, setUser] = useState<ApiUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [outage, setOutage] = useState(false);
+  const [requestLimit, setRequestLimit] = useState<RequestLimit | null>(null);
 
   const fetchUser = useCallback(async (): Promise<void> => {
     try {
@@ -148,6 +155,22 @@ export function useAuthProvider(): AuthState {
     setOutage(status >= 500);
   }, []);
 
+  const noteRequestLimit = useCallback((scope: RequestLimitScope, retryAfterSeconds: number) => {
+    const until = Date.now() + Math.max(1, retryAfterSeconds) * 1000;
+    // Every refused poll reports the same minute; only a later end is news
+    setRequestLimit((current) =>
+      current && current.scope === scope && Math.abs(current.until.getTime() - until) < 1000
+        ? current
+        : { scope, until: new Date(until) }
+    );
+  }, []);
+
+  useEffect(() => {
+    if (!requestLimit) return;
+    const timer = setTimeout(() => setRequestLimit(null), requestLimit.until.getTime() - Date.now());
+    return () => clearTimeout(timer);
+  }, [requestLimit]);
+
   // Preferences saved elsewhere in the app have to reach the cached user, or a
   // client-side navigation keeps rendering the value from page load
   const refreshUser = useCallback(async () => {
@@ -167,8 +190,10 @@ export function useAuthProvider(): AuthState {
       refreshUser,
       onUnauthorized,
       noteApiStatus,
+      requestLimit,
+      noteRequestLimit,
     }),
-    [user, isAdmin, isLoading, outage, login, logout, refreshUser, onUnauthorized, noteApiStatus]
+    [user, isAdmin, isLoading, outage, login, logout, refreshUser, onUnauthorized, noteApiStatus, requestLimit, noteRequestLimit]
   );
 }
 
