@@ -1,5 +1,6 @@
 import nodemailer, { type Transporter } from "nodemailer";
 import { APP_NAME, APP_DOMAIN } from "@/lib/brand";
+import { organisationDomain } from "./organisation-host";
 
 const SMTP_HOST = process.env.SMTP_HOST;
 const SMTP_PORT = parseInt(process.env.SMTP_PORT || "587", 10);
@@ -114,14 +115,15 @@ export async function sendEmail(params: SendEmailParams): Promise<boolean> {
 }
 
 /** What an instance admin may see about the mail server. Never the password. */
-export function emailSettingsSummary(): {
-  configured: boolean;
-  host: string;
-  port: number;
-  user: string;
-  from: string;
-} {
+export type EmailSettingsSummary =
+  | { managedByPlatform: false; configured: boolean; host: string; port: number; user: string; from: string }
+  // On a shared instance the mail server is the platform's, so an organisation sees only that it works
+  | { managedByPlatform: true; configured: boolean; from: string };
+
+export function emailSettingsSummary(): EmailSettingsSummary {
+  if (organisationDomain()) return { managedByPlatform: true, configured: isEmailConfigured(), from: SMTP_FROM };
   return {
+    managedByPlatform: false,
     configured: isEmailConfigured(),
     host: SMTP_HOST ?? "",
     port: SMTP_PORT,
