@@ -112,7 +112,7 @@ export async function dispatchWebhooks(
 
       await safeFetch(webhook.url, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...signatureHeaders(body) },
+        headers: { "Content-Type": "application/json", ...signatureHeaders(body, db.organisation) },
         body,
         signal: AbortSignal.timeout(10_000),
       }, WEBHOOK_DESTINATION).then(

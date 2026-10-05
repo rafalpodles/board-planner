@@ -25,6 +25,7 @@ import { SettingsCard, EmptyState } from "@/components/settings/SettingsCard";
 import { Connections, IntegrationId } from "@/components/settings/Connections";
 import { useDirtyGroup } from "@/components/settings/settings-context";
 import { CodaPanel, useCodaSettings } from "@/ee/connectors/coda/settings";
+import { WebhookSigningSecret } from "@/components/settings/WebhookSigningSecret";
 import { SectionProps } from "./types";
 
 type ChannelDraft = ApiNotificationChannel & {
@@ -821,6 +822,7 @@ export function IntegrationsSection({
                   <p className="text-sm text-text-muted">
                     Raw HTTP POST to your own endpoint when an event fires.
                   </p>
+                  <WebhookSigningSecret projectId={projectId} />
                   <div className="space-y-3">
                     {webhooks.value.webhooks.map((wh, i) => {
                       // A webhook has no name of its own, so the masked URL is what tells one row
