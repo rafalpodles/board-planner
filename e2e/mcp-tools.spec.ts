@@ -996,6 +996,9 @@ test("a task key that names nothing is refused as such, and a malformed one as m
   const own = await session.callTool("get_task", { taskKey: KEPT_TASK_KEY });
   accepted(own);
   expect(own.parsed.title).toBe(KEPT_TASK_TITLE);
+});
+
+/**
  * BP-907. The answers are what a bulk run reads back, so they are asserted against what the board
  * holds: the key in a minimal answer opens the task it names, and the keys get_task prints for a
  * link are the ones the other end carries.
