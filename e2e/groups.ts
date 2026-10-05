@@ -118,6 +118,7 @@ export const GROUPS = {
     "agent-block-editing.spec.ts",
     "project-settings-controls.spec.ts",
     "dark-theme.spec.ts",
+    "mcp-config.spec.ts",
   ],
   people: [
     "day-zero.spec.ts",

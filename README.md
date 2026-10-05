@@ -239,7 +239,7 @@ the client at one URL:
 }
 ```
 
-Thirty-seven tools, in the groups an agent works in — the full list and what each answers is on the
+Forty-three tools, in the groups an agent works in — the full list and what each answers is on the
 [MCP page](https://board-planner.com/docs/ai/claude-code-and-mcp/):
 
 - **Projects and tasks:** `list_projects`, `get_project`, `list_tasks`, `get_task`, `create_task`,
@@ -252,6 +252,10 @@ Thirty-seven tools, in the groups an agent works in — the full list and what e
   `watch_task`, `unwatch_task`
 - **People and agents:** `list_members`, `whoami`, `list_agents`
 - **Reporting:** `get_project_stats`, `list_runs`, `list_notifications`, `mark_notifications_read`
+- **Board setup (add only):** `add_custom_field`, `add_field_option`, `add_category` (any member, as in the app),
+  `add_column`, `rename_column` (the project owner). Removing or renaming anything else stays in the app.
+- **Repository:** `sync_repository` refreshes a board's pull or merge requests and their CI badges, as the Sync
+  button does
 
 Clients that want a connector instead of a pasted token get full **OAuth 2.1 with PKCE** and dynamic
 client registration at the same URL — no client secret.
