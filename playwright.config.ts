@@ -93,6 +93,8 @@ export const PASSWORDLESS_RELAY_ORIGIN = `http://127.0.0.1:${PASSWORDLESS_PORT}`
 export const ORGANISATIONS_PORT = Number(process.env.E2E_ORGANISATIONS_PORT ?? PORT + 10005);
 export const ORGANISATION_DOMAIN = "organisations.localhost";
 export const ORGANISATIONS_PLATFORM_ORIGIN = `http://${ORGANISATION_DOMAIN}:${ORGANISATIONS_PORT}`;
+// Where production keeps the default organisation once organisations live on subdomains (BP-671)
+export const ORGANISATIONS_DEFAULT_HOST = `app.${ORGANISATION_DOMAIN}`;
 export const RUN_ORGANISATIONS_SERVER = process.env.E2E_ORGANISATIONS_SERVER === "1";
 export const ORGANISATIONS_RELAY_ORIGIN = `http://127.0.0.1:${ORGANISATIONS_PORT}`;
 
@@ -453,6 +455,7 @@ export default defineConfig({
             env: {
               ...devServerEnv(ORGANISATIONS_PLATFORM_ORIGIN),
               ORGANISATION_DOMAIN,
+              ORGANISATION_DEFAULT_HOST: ORGANISATIONS_DEFAULT_HOST,
               APP_ORIGIN: ORGANISATIONS_PLATFORM_ORIGIN,
               PLATFORM_REQUEST_KEYS: `${E2E_PLATFORM_REQUEST_KEY.keyId}:${E2E_PLATFORM_REQUEST_KEY.x}`,
               // Off every organisation's host, as login.board-planner.com is (BP-895)
