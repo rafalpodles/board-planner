@@ -225,8 +225,10 @@ OIDC_RELAY_ORIGIN=        # Optional — another address of this instance that e
                           # the browser back to: redirect URI OIDC_RELAY_ORIGIN +
                           # /api/auth/oidc/{oidc,google,github}/relay, which finds the sign-in by its
                           # state and forwards the answer unchanged to the callback on PUBLIC_ORIGIN
-                          # (BP-851; per organisation from BP-666, because Google takes no wildcard redirect
-                          # URI for organisation subdomains). A bare https origin (http only to
+                          # (BP-851). With ORGANISATION_DOMAIN it is the platform's (login.…): it finds
+                          # the sign-in in whichever organisation began it and forwards to that
+                          # organisation's own host, because Google takes no wildcard redirect URI for
+                          # organisation subdomains (BP-895). A bare https origin (http only to
                           # 127.0.0.1/[::1]); anything else stops the app at startup. Unset: providers
                           # return to PUBLIC_ORIGIN's callback, as before. Set it in a deploy after the
                           # one that ships it; removing it strands sign-ins begun in the last 10 minutes

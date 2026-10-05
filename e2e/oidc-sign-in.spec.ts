@@ -187,9 +187,11 @@ test("a callback completed in another browser signs nobody in", async ({ page, b
   // refuses it has to be which flow its cookie names, not merely that it has one
   const elsewhere = await fresh(browser);
   let ownStarted = false;
+  // A 204 rather than an abort: an aborted navigation lands on Chrome's error page late enough to
+  // interrupt the goto below, which failed this test about one run in two
   await elsewhere.page.route(`${OIDC_STUB_URL}/authorize**`, async (route) => {
     ownStarted = true;
-    await route.abort();
+    await route.fulfill({ status: 204 });
   });
   await elsewhere.page.goto("/login");
   await providerButton(elsewhere.page).click();
