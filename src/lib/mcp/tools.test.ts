@@ -1700,3 +1700,327 @@ describe("batch tools", () => {
     });
   });
 });
+
+/**
+ * BP-914. Configuration an agent may add to a board and nothing else: a field, an option, a category, a
+ * column and a column's label. Removing or renaming the rest stays in the app, so the descriptions say so.
+ */
+describe("board setup", () => {
+  const parse = (result: unknown) => JSON.parse((result as { content: { text: string }[] }).content[0].text);
+  const run = (name: string, args: Record<string, unknown>) =>
+    registered().get(name)!.handler({ project: "bp", ...args }, extra);
+
+  const FIELD_ID = "6a70afff45d39cd9bc8bb5d3";
+  const NOTES_ID = "6a70afff45d39cd9bc8bb5d4";
+  const difficulty = {
+    _id: FIELD_ID,
+    name: "Difficulty",
+    fieldType: "dropdown",
+    options: [{ id: "s", value: "S", color: "#4ade80", order: 0 }],
+  };
+  const notes = { _id: NOTES_ID, name: "Notes", fieldType: "text", options: [] };
+  const columns = [
+    { _id: "c1", id: "todo", label: "To Do", color: "#3b82f6", role: "approved", order: 0, triggersPmReview: false },
+    { _id: "c2", id: "doing", label: "Doing", color: "#f59e0b", role: "active", order: 1, triggersPmReview: false },
+  ];
+
+  const asOwner = (canAdmin: boolean) =>
+    vi.spyOn(PlannerClient.prototype, "getProjectByKey").mockResolvedValue({
+      _id: "p1",
+      canAdmin,
+      customFields: [difficulty, notes],
+      columns,
+    } as never);
+
+  beforeEach(() => {
+    asOwner(true);
+  });
+
+  describe("add_custom_field", () => {
+    it("sends what was named and nothing it was not, and answers with the field and its option ids", async () => {
+      const add = vi.spyOn(PlannerClient.prototype, "addCustomField").mockResolvedValue([
+        difficulty,
+        { _id: "f2", name: "Size", fieldType: "dropdown", options: [{ id: "xs-1", value: "XS", color: "#64748b", order: 0 }], required: true },
+      ] as never);
+
+      const answer = parse(
+        await run("add_custom_field", { name: "Size", fieldType: "dropdown", options: ["XS", { value: "XL", color: "#112233" }], required: true })
+      );
+
+      expect(add).toHaveBeenCalledWith("p1", {
+        name: "Size",
+        fieldType: "dropdown",
+        options: ["XS", { value: "XL", color: "#112233" }],
+        required: true,
+      });
+      expect(answer).toMatchObject({
+        field: { id: "f2", name: "Size", fieldType: "dropdown", required: true, options: [{ id: "xs-1", value: "XS" }] },
+        fieldCount: 2,
+      });
+    });
+
+    it("does not send flags nobody named, so the route's own defaults stand", async () => {
+      const add = vi.spyOn(PlannerClient.prototype, "addCustomField").mockResolvedValue([notes] as never);
+
+      await run("add_custom_field", { name: "Notes", fieldType: "text" });
+
+      expect(add).toHaveBeenCalledWith("p1", { name: "Notes", fieldType: "text" });
+    });
+
+    it.each(["dropdown", "multiselect"])("refuses a %s field with no options before writing", async (fieldType) => {
+      const add = vi.spyOn(PlannerClient.prototype, "addCustomField");
+
+      await expect(run("add_custom_field", { name: "Size", fieldType })).rejects.toThrow(/needs at least one option. Nothing was written/);
+      await expect(run("add_custom_field", { name: "Size", fieldType, options: [] })).rejects.toThrow(/needs at least one option/);
+      expect(add).not.toHaveBeenCalled();
+    });
+
+    it.each(["text", "number", "date", "checkbox"])("refuses options on a %s field, which has none to take", async (fieldType) => {
+      const add = vi.spyOn(PlannerClient.prototype, "addCustomField");
+
+      await expect(run("add_custom_field", { name: "Size", fieldType, options: ["A"] })).rejects.toThrow(/has no options/);
+      expect(add).not.toHaveBeenCalled();
+    });
+
+    it("hands the route's refusal on as it was said", async () => {
+      vi.spyOn(PlannerClient.prototype, "addCustomField").mockRejectedValue(new Error("Field with this name already exists"));
+
+      await expect(run("add_custom_field", { name: "Notes", fieldType: "text" })).rejects.toThrow("Field with this name already exists");
+    });
+
+    it("takes only the six field types, and options as strings or { value, color } with a real colour", () => {
+      const { schema } = registered().get("add_custom_field")!;
+      const base = { project: "BP", name: "N", fieldType: "dropdown" };
+
+      expect(schema.safeParse({ ...base, options: ["A", { value: "B", color: "#a1b2c3" }] }).success).toBe(true);
+      expect(schema.safeParse({ ...base, fieldType: "formula" }).success).toBe(false);
+      expect(schema.safeParse({ ...base, options: [{ value: "B", color: "red" }] }).success).toBe(false);
+      expect(schema.safeParse({ ...base, options: [{ value: "B", extra: 1 }] }).success).toBe(false);
+      expect(schema.safeParse({ ...base, options: Array.from({ length: 101 }, (_, i) => `o${i}`) }).success).toBe(false);
+    });
+  });
+
+  describe("add_field_option", () => {
+    const answer = {
+      option: { id: "xl-1", value: "XL", color: "#64748b" },
+      field: { ...difficulty, options: [...difficulty.options, { id: "xl-1", value: "XL", color: "#64748b", order: 1 }] },
+    };
+
+    it("finds the field by name and adds the option to it by id", async () => {
+      const add = vi.spyOn(PlannerClient.prototype, "addFieldOption").mockResolvedValue(answer as never);
+
+      const said = parse(await run("add_field_option", { field: "difficulty", option: "XL" }));
+
+      expect(add).toHaveBeenCalledWith("p1", FIELD_ID, { value: "XL" });
+      expect(said).toEqual({
+        field: "Difficulty",
+        added: { id: "xl-1", value: "XL", color: "#64748b" },
+        options: [
+          { id: "s", value: "S", color: "#4ade80" },
+          { id: "xl-1", value: "XL", color: "#64748b" },
+        ],
+      });
+    });
+
+    it("sends a colour only when one was named", async () => {
+      const add = vi.spyOn(PlannerClient.prototype, "addFieldOption").mockResolvedValue(answer as never);
+
+      await run("add_field_option", { field: FIELD_ID, option: "XL", color: "#112233" });
+
+      expect(add).toHaveBeenCalledWith("p1", FIELD_ID, { value: "XL", color: "#112233" });
+    });
+
+    it("refuses a field that takes no options, before writing", async () => {
+      const add = vi.spyOn(PlannerClient.prototype, "addFieldOption");
+
+      await expect(run("add_field_option", { field: "Notes", option: "x" })).rejects.toThrow(/Notes is a text field and has no options. Nothing was written/);
+      expect(add).not.toHaveBeenCalled();
+    });
+
+    it("refuses a field the board does not have, naming the ones it has", async () => {
+      const add = vi.spyOn(PlannerClient.prototype, "addFieldOption");
+
+      await expect(run("add_field_option", { field: "Nope", option: "x" })).rejects.toThrow(/No field "Nope".*Difficulty, Notes/);
+      expect(add).not.toHaveBeenCalled();
+    });
+
+    it("hands the route's refusal on", async () => {
+      vi.spyOn(PlannerClient.prototype, "addFieldOption").mockRejectedValue(new Error('"XL" is already an option of Difficulty'));
+
+      await expect(run("add_field_option", { field: "Difficulty", option: "XL" })).rejects.toThrow(/already an option/);
+    });
+  });
+
+  describe("add_category", () => {
+    it("adds one and answers with what was added and the names the board has", async () => {
+      const add = vi.spyOn(PlannerClient.prototype, "addCategory").mockResolvedValue([
+        { name: "bug", color: "#ef4444" },
+        { name: "chore", color: "#3b82f6" },
+      ] as never);
+
+      const said = parse(await run("add_category", { name: "chore" }));
+
+      expect(add).toHaveBeenCalledWith("p1", { name: "chore" });
+      expect(said).toEqual({ added: { name: "chore", color: "#3b82f6" }, categories: ["bug", "chore"] });
+    });
+
+    it("sends a colour when named, and hands a duplicate's refusal on", async () => {
+      const add = vi.spyOn(PlannerClient.prototype, "addCategory").mockRejectedValue(new Error("Category already exists"));
+
+      await expect(run("add_category", { name: "bug", color: "#112233" })).rejects.toThrow("Category already exists");
+      expect(add).toHaveBeenCalledWith("p1", { name: "bug", color: "#112233" });
+    });
+  });
+
+  describe("add_column", () => {
+    const after = [...columns, { _id: "c3", id: "qa", label: "QA", color: "#6b7280", role: "review", order: 2, triggersPmReview: false }];
+
+    it("adds the column with its role and answers with it and the board's columns", async () => {
+      const add = vi.spyOn(PlannerClient.prototype, "addColumn").mockResolvedValue(after as never);
+
+      const said = parse(await run("add_column", { label: "QA", role: "review" }));
+
+      expect(add).toHaveBeenCalledWith("p1", { label: "QA", role: "review" });
+      expect(said.added).toEqual({ id: "qa", label: "QA", role: "review", color: "#6b7280", order: 2 });
+      expect(said.columns.map((c: { id: string }) => c.id)).toEqual(["todo", "doing", "qa"]);
+    });
+
+    it("refuses somebody who is not the owner, saying so, and writes nothing", async () => {
+      asOwner(false);
+      const add = vi.spyOn(PlannerClient.prototype, "addColumn");
+
+      await expect(run("add_column", { label: "QA", role: "review" })).rejects.toThrow(
+        "Only a project owner can add a column on BP, as in the app. Nothing was changed."
+      );
+      expect(add).not.toHaveBeenCalled();
+    });
+
+    it("hands the route's own refusal on when the server says no after all", async () => {
+      vi.spyOn(PlannerClient.prototype, "addColumn").mockRejectedValue(new Error("Forbidden"));
+
+      await expect(run("add_column", { label: "QA", role: "review" })).rejects.toThrow("Forbidden");
+    });
+
+    it("takes only the six roles the automation keys on", () => {
+      const { schema } = registered().get("add_column")!;
+
+      for (const role of ["backlog", "approved", "active", "review", "blocked", "done"]) {
+        expect(schema.safeParse({ project: "BP", label: "X", role }).success).toBe(true);
+      }
+      expect(schema.safeParse({ project: "BP", label: "X", role: "testing" }).success).toBe(false);
+      expect(schema.safeParse({ project: "BP", label: "X" }).success).toBe(false);
+    });
+  });
+
+  describe("rename_column", () => {
+    it("finds the column by label and renames it by id", async () => {
+      const rename = vi.spyOn(PlannerClient.prototype, "renameColumn").mockResolvedValue([
+        columns[0],
+        { ...columns[1], label: "In flight" },
+      ] as never);
+
+      const said = parse(await run("rename_column", { column: "doing", label: "In flight" }));
+
+      expect(rename).toHaveBeenCalledWith("p1", "doing", "In flight");
+      expect(said.renamed).toMatchObject({ id: "doing", label: "In flight", role: "active" });
+      expect(said.columns).toHaveLength(2);
+    });
+
+    it("refuses somebody who is not the owner, and a column the board does not have, before writing", async () => {
+      const rename = vi.spyOn(PlannerClient.prototype, "renameColumn");
+
+      asOwner(false);
+      await expect(run("rename_column", { column: "doing", label: "X" })).rejects.toThrow(/Only a project owner can rename a column on BP/);
+
+      asOwner(true);
+      await expect(run("rename_column", { column: "nope", label: "X" })).rejects.toThrow(/No column "nope".*To Do \(todo\)/);
+      expect(rename).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("sync_repository", () => {
+    const repo = (over: object = {}) =>
+      vi.spyOn(PlannerClient.prototype, "getProject").mockResolvedValue({
+        _id: "p1",
+        repositoryUrl: "https://github.com/example/board",
+        repositoryProvider: "github",
+        githubTokenSet: true,
+        ...over,
+      } as never);
+
+    it("runs the provider the board is on and answers with counts and a sentence", async () => {
+      repo();
+      const sync = vi.spyOn(PlannerClient.prototype, "syncRepository").mockResolvedValue({
+        synced: true,
+        prsFound: 2,
+        tasksLinked: 2,
+        prsLinked: 2,
+        prsUnlinked: 0,
+        autoTransitioned: 1,
+      });
+
+      const said = parse(await run("sync_repository", {}));
+
+      expect(sync).toHaveBeenCalledWith("p1", "github");
+      expect(said).toMatchObject({ provider: "github", synced: true, matched: 2, tasksMoved: 1 });
+      expect(said.summary).toContain("Refreshed 2 pull requests on 2 tasks");
+    });
+
+    it("runs GitLab's for a board that is on GitLab", async () => {
+      repo({ repositoryProvider: "gitlab", gitlabTokenSet: true, githubTokenSet: false });
+      const sync = vi.spyOn(PlannerClient.prototype, "syncRepository").mockResolvedValue({ prsFound: 0 });
+
+      const said = parse(await run("sync_repository", {}));
+
+      expect(sync).toHaveBeenCalledWith("p1", "gitlab");
+      expect(said.summary).toMatch(/No merge request names a task/);
+    });
+
+    it("refuses a board with no repository, or no token, without asking the provider", async () => {
+      const sync = vi.spyOn(PlannerClient.prototype, "syncRepository");
+
+      repo({ repositoryUrl: "", repositoryProvider: "" });
+      await expect(run("sync_repository", {})).rejects.toThrow(/has no repository/);
+      repo({ githubTokenSet: false });
+      await expect(run("sync_repository", {})).rejects.toThrow(/no GitHub token/);
+      expect(sync).not.toHaveBeenCalled();
+    });
+
+    it("hands on what went wrong reaching the provider", async () => {
+      repo();
+      vi.spyOn(PlannerClient.prototype, "syncRepository").mockRejectedValue(new Error("GitHub could not be reached: HTTP 401"));
+
+      await expect(run("sync_repository", {})).rejects.toThrow("GitHub could not be reached: HTTP 401");
+    });
+
+    it("passes on the route's counters and nothing else it was answered with", async () => {
+      repo();
+      vi.spyOn(PlannerClient.prototype, "syncRepository").mockResolvedValue({
+        synced: true,
+        prsFound: 1,
+        tasksLinked: 1,
+        prsLinked: 1,
+        githubToken: "ghp_secret",
+        token: "ghp_secret",
+      });
+
+      const text = (await run("sync_repository", {}) as { content: { text: string }[] }).content[0].text;
+
+      expect(text).not.toContain("ghp_secret");
+    });
+  });
+
+  it("says in every description what stays in the app, and which tools need the owner", () => {
+    const said = descriptions();
+
+    expect(said.get("add_custom_field")).toMatch(/cannot be renamed, archived or deleted here, nor an option removed/);
+    expect(said.get("add_field_option")).toMatch(/cannot be renamed, recoloured, reordered or removed here/);
+    expect(said.get("add_category")).toMatch(/cannot be renamed, recoloured or deleted here/);
+    expect(said.get("add_column")).toMatch(/Needs the project owner/);
+    expect(said.get("add_column")).toMatch(/cannot be removed, reordered or given another role here/);
+    expect(said.get("add_column")).toContain("approved (Ready to pick up");
+    expect(said.get("rename_column")).toMatch(/Needs the project owner/);
+    expect(said.get("rename_column")).toMatch(/a column cannot be removed/);
+    expect(said.get("sync_repository")).toMatch(/no repository or no stored token is refused/);
+  });
+});

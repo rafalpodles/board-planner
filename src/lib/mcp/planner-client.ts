@@ -1,4 +1,4 @@
-import type { ApiCustomField } from "@/types";
+import type { ApiCustomField, ApiProjectCategory, ApiProjectColumn } from "@/types";
 import { echo } from "@/lib/echo";
 import { isValidProjectKey } from "@/lib/identifiers";
 /** Only what the tools read: the id, and the field definitions the `fields` parameter resolves against */
@@ -7,6 +7,13 @@ export interface McpProject {
   /** Whether the caller administers the board: what the app gates run history on */
   canAdmin?: boolean;
   customFields?: ApiCustomField[];
+  categories?: ApiProjectCategory[];
+  columns?: ApiProjectColumn[];
+  /** Only the single-project read carries these: where the repository is, and whether a token is stored (never the token) */
+  repositoryUrl?: string;
+  repositoryProvider?: "github" | "gitlab" | "";
+  githubTokenSet?: boolean;
+  gitlabTokenSet?: boolean;
 }
 
 /**
@@ -282,6 +289,45 @@ export class PlannerClient {
 
   async listAgents(): Promise<unknown[]> {
     return this.request("GET", "/api/agents") as Promise<unknown[]>;
+  }
+
+  async addCustomField(projectId: string, field: Record<string, unknown>): Promise<ApiCustomField[]> {
+    return (await this.request("POST", `/api/projects/${seg(projectId)}/custom-fields`, field)) as ApiCustomField[];
+  }
+
+  async addFieldOption(
+    projectId: string,
+    fieldId: string,
+    option: { value: string; color?: string }
+  ): Promise<{ option: { id: string; value: string; color: string }; field: ApiCustomField }> {
+    return (await this.request(
+      "POST",
+      `/api/projects/${seg(projectId)}/custom-fields/${seg(fieldId)}/options`,
+      option
+    )) as never;
+  }
+
+  async addCategory(projectId: string, category: { name: string; color?: string }): Promise<ApiProjectCategory[]> {
+    return (await this.request("POST", `/api/projects/${seg(projectId)}/categories`, category)) as ApiProjectCategory[];
+  }
+
+  async addColumn(
+    projectId: string,
+    column: { label: string; role: string; color?: string }
+  ): Promise<ApiProjectColumn[]> {
+    return (await this.request("POST", `/api/projects/${seg(projectId)}/columns`, column)) as ApiProjectColumn[];
+  }
+
+  async renameColumn(projectId: string, columnId: string, label: string): Promise<ApiProjectColumn[]> {
+    return (await this.request(
+      "PATCH",
+      `/api/projects/${seg(projectId)}/columns/${seg(columnId)}`,
+      { label }
+    )) as ApiProjectColumn[];
+  }
+
+  async syncRepository(projectId: string, provider: "github" | "gitlab"): Promise<Record<string, unknown>> {
+    return (await this.request("POST", `/api/projects/${seg(projectId)}/${provider}/sync`, {})) as Record<string, unknown>;
   }
 
   /** The page a person opens for this task: what a minimal answer hands back so the work can be found. */

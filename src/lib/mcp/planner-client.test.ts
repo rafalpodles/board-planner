@@ -307,3 +307,47 @@ describe("the lookups one call repeats", () => {
     expect(clientFrom({ ...(extra as object) } as never)).not.toBe(clientFrom(extra));
   });
 });
+
+describe("PlannerClient board setup", () => {
+  const client = new PlannerClient("https://board.example.com", "cp_token");
+  beforeEach(() => {
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+  });
+  const FIELD = "507f1f77bcf86cd799439013";
+  const sent = () => {
+    const [url, init] = fetchMock.mock.calls.at(-1)! as [string, { method: string; body?: string }];
+    return { path: new URL(url).pathname, method: init.method, body: init.body ? JSON.parse(init.body) : undefined };
+  };
+
+  it("adds a field, an option, a category and a column with a POST to the project's own collection", async () => {
+    await client.addCustomField(PROJECT, { name: "Size", fieldType: "text" });
+    expect(sent()).toEqual({ path: `/api/projects/${PROJECT}/custom-fields`, method: "POST", body: { name: "Size", fieldType: "text" } });
+
+    await client.addFieldOption(PROJECT, FIELD, { value: "XL" });
+    expect(sent()).toEqual({ path: `/api/projects/${PROJECT}/custom-fields/${FIELD}/options`, method: "POST", body: { value: "XL" } });
+
+    await client.addCategory(PROJECT, { name: "chore" });
+    expect(sent()).toEqual({ path: `/api/projects/${PROJECT}/categories`, method: "POST", body: { name: "chore" } });
+
+    await client.addColumn(PROJECT, { label: "QA", role: "review" });
+    expect(sent()).toEqual({ path: `/api/projects/${PROJECT}/columns`, method: "POST", body: { label: "QA", role: "review" } });
+  });
+
+  it("renames one column with a PATCH to that column alone, not a PUT of the board", async () => {
+    await client.renameColumn(PROJECT, "in_progress", "Doing");
+
+    expect(sent()).toEqual({ path: `/api/projects/${PROJECT}/columns/in_progress`, method: "PATCH", body: { label: "Doing" } });
+  });
+
+  it("syncs through the route of the provider it was asked for", async () => {
+    await client.syncRepository(PROJECT, "gitlab");
+
+    expect(sent()).toEqual({ path: `/api/projects/${PROJECT}/gitlab/sync`, method: "POST", body: {} });
+  });
+
+  it("will not build a path out of a field or column id that walks away from the project", async () => {
+    await expect(client.addFieldOption(PROJECT, "..", { value: "x" })).rejects.toThrow(/Invalid path segment/);
+    await expect(client.renameColumn(PROJECT, "../..", "x")).rejects.toThrow(/Invalid path segment/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
