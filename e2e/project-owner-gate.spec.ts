@@ -108,6 +108,14 @@ const RECIPES: Record<string, Recipe> = {
     send: withBody("put", { columns: [] }),
     handled: { status: 400, body: /columns must be an array of 1-12 entries/ },
   },
+  "POST /api/projects/[projectId]/columns": {
+    send: withBody("post", { label: "QA", role: "nonsense" }),
+    handled: { status: 400, body: /Column role must be one of/ },
+  },
+  "PATCH /api/projects/[projectId]/columns/[columnId]": {
+    send: withBody("patch", {}),
+    handled: { status: 400, body: /Column labels must be 1-40 chars/ },
+  },
   "DELETE /api/projects/[projectId]/custom-fields/[fieldId]": {
     // A well-formed id no field has: the handler answers with the board's fields and removes nothing
     send: (request, path) => request.delete(path, { headers: SAME_ORIGIN }),
@@ -211,6 +219,7 @@ const ROUTES = scanOwnerGatedRoutes();
 function concrete(path: string): string {
   return path
     .replace("[projectId]", PROJECT_KEY)
+    .replace("[columnId]", "done")
     .replace("[fieldId]", new mongoose.Types.ObjectId().toString())
     .replace("[invitationId]", new mongoose.Types.ObjectId().toString());
 }
