@@ -63,8 +63,8 @@ const OBJECT_ID = /^[0-9a-fA-F]{24}$/;
 
 export type SprintRow = { _id: string; name: string; status?: string };
 
-/** What a sprint is called when it has to be told apart from another: its name and its state. */
-const describe = (s: SprintRow) => `${s._id} (${s.status ?? "unknown"})`;
+/** How a sprint is pointed at when it has to be told apart from another of the same name: its id and its state. */
+const withState = (s: SprintRow) => `${s._id} (${s.status ?? "unknown"})`;
 
 /**
  * The one sprint a reference names, among this board's own. Names are not unique — a finished and a
@@ -79,7 +79,7 @@ export function sprintMatching(ref: string, sprints: SprintRow[]): SprintRow {
   if (byId) return byId;
   const named = sprints.filter((s) => s.name.trim().toLowerCase() === wanted.toLowerCase());
   if (named.length > 1) {
-    throw new Error(`${named.length} sprints are named "${echo(wanted)}" — pass the id of one: ${named.map(describe).join(", ")}`);
+    throw new Error(`${named.length} sprints are named "${echo(wanted)}" — pass the id of one: ${named.map(withState).join(", ")}`);
   }
   if (!named[0]) {
     const known = sprints.map((s) => s.name).join(", ") || "none";
