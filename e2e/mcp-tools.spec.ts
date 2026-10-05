@@ -1054,6 +1054,12 @@ test("list_runs reads the runs on a board, newest first", async ({ request }) =>
   expect(runs.parsed[0]).toMatchObject({ taskKey: RUN_TASK_KEY, outcome: "refused", refusedBy: "review-gate", detail: "the diff is too large" });
   expect(runs.parsed[1]).toMatchObject({ outcome: "delivered", costUsd: 1.5, agent: "Default", minutes: 12 });
   expect((await session.callTool("list_runs", { project: PROJECT_KEY, limit: 1 })).parsed).toHaveLength(1);
+
+  // Run history is for a board's admins, as the app has it: a member's token is refused, not shown it
+  const member = await connected(request, MEMBER_API_TOKEN);
+  const notAdmin = await member.callTool("list_runs", { project: PROJECT_KEY });
+  refused(notAdmin);
+  expect(notAdmin.text).toContain("Run history is for the admins");
 });
 
 test("list_notifications and mark_notifications_read work on the caller's own bell", async ({ request }) => {
@@ -1066,7 +1072,7 @@ test("list_notifications and mark_notifications_read work on the caller's own be
 
   const bell = await member.callTool("list_notifications");
   accepted(bell);
-  expect(bell.parsed.unread).toBeGreaterThanOrEqual(1);
+  expect(bell.parsed.unreadOnPage).toBeGreaterThanOrEqual(1);
   const [first] = bell.parsed.notifications as { id: string; read: boolean; by: string; task: string | null }[];
   expect(first).toMatchObject({ read: false, by: ADMIN_USERNAME });
   expect(first.task).toMatch(new RegExp(`^${PROJECT_KEY}-\\d+$`));
@@ -1079,14 +1085,18 @@ test("list_notifications and mark_notifications_read work on the caller's own be
 
   // Then all of them
   accepted(await member.callTool("mark_notifications_read"));
-  expect((await member.callTool("list_notifications")).parsed.unread).toBe(0);
-
-  // The admin's own bell was not touched by any of it
-  const adminBell = await admin.callTool("list_notifications");
-  expect((adminBell.parsed.notifications as { id: string }[]).some((n) => n.id === first.id)).toBe(false);
+  expect((await member.callTool("list_notifications")).parsed.unreadOnPage).toBe(0);
 
   // A page is a page: one row, and a cursor to the next while more remain
   const paged = await member.callTool("list_notifications", { limit: 1 });
   expect(paged.parsed.returned).toBe(1);
   expect(paged.parsed.nextBefore).toBeTruthy();
+  // The cursor leads to the other row, not back to this one
+  const older = await member.callTool("list_notifications", { limit: 1, before: paged.parsed.nextBefore });
+  accepted(older);
+  expect((older.parsed.notifications as { id: string }[]).map((n) => n.id)).not.toContain(paged.parsed.notifications[0].id);
+
+  // A cursor that is not a time is refused as such
+  const garbled = await member.callTool("list_notifications", { before: "last week" });
+  expect(garbled.raw.error?.message ?? garbled.text).toContain("timestamp");
 });

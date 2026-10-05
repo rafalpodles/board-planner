@@ -65,7 +65,7 @@ describe("noticeLines", () => {
     const answer = noticeLines([row(2, false), row(1, true)], 30);
 
     expect(answer.notifications[0]).toMatchObject({ id: "n2", task: "BP-2", by: "rafal", read: false, project: "BP" });
-    expect(answer).toMatchObject({ returned: 2, unread: 1 });
+    expect(answer).toMatchObject({ returned: 2, unreadOnPage: 1 });
   });
 
   it("hands back a cursor only for a full page: a short one is the end", () => {

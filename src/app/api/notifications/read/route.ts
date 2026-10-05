@@ -10,6 +10,10 @@ import { withAuth } from "@/lib/middleware";
 export const PATCH = withAuth(async (request, { user, db }) => {
   await connectDB();
 
+  // A token limited to some boards sees only those boards' rows through the list, so it clears only those.
+  // A person who lost a grant is not narrowed: their old rows stay clearable, which is what the comment above is about
+  const narrowed = user.tokenScope ? { project: { $in: user.tokenScope } } : {};
+
   const body = await request.json().catch(() => ({}));
   const { id } = body as { id?: unknown };
 
@@ -25,14 +29,14 @@ export const PATCH = withAuth(async (request, { user, db }) => {
     // Same guard as the branch below: a row the bell never showed cannot have been read here, and
     // marking it read would take it out of tomorrow's digest
     await db.Notification.findOneAndUpdate(
-      { _id: id, recipient: user._id, inApp: { $ne: false } },
+      { _id: id, recipient: user._id, inApp: { $ne: false }, ...narrowed },
       { $set: { read: true } }
     );
   } else {
     // Mark all as read — only what the bell showed. A row the grid hid was never seen here, and
     // the digest lists what is unread: marking it read would drop it from tomorrow's mail.
     await db.Notification.updateMany(
-      { recipient: user._id, read: false, inApp: { $ne: false } },
+      { recipient: user._id, read: false, inApp: { $ne: false }, ...narrowed },
       { $set: { read: true } }
     );
   }

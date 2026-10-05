@@ -4,6 +4,8 @@ import { isValidProjectKey } from "@/lib/identifiers";
 /** Only what the tools read: the id, and the field definitions the `fields` parameter resolves against */
 export interface McpProject {
   _id: string;
+  /** Whether the caller administers the board: what the app gates run history on */
+  canAdmin?: boolean;
   customFields?: ApiCustomField[];
 }
 

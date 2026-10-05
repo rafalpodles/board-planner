@@ -51,6 +51,24 @@ describe("PATCH /api/notifications/read", () => {
     expect(updateMany).not.toHaveBeenCalled();
   });
 
+  // The list narrows to the token's boards, so clearing the bell must not reach past them: the other boards'
+  // rows would be marked read without ever having been shown, and dropped from tomorrow's digest
+  it("clears only the boards a limited token reaches, for one row and for all", async () => {
+    getAuthUser.mockImplementation(async () => ({ _id: READER, role: "member", tokenScope: ["board-a"] }));
+
+    await PATCH(request({ id: ROW }), noParams);
+    await PATCH(request({}), noParams);
+
+    expect(findOneAndUpdate.mock.calls[0][0]).toMatchObject({ project: { $in: ["board-a"] } });
+    expect(updateMany.mock.calls[0][0]).toMatchObject({ read: false, project: { $in: ["board-a"] } });
+  });
+
+  it("does not narrow a person's own session", async () => {
+    await PATCH(request({}), noParams);
+
+    expect(updateMany.mock.calls[0][0]).not.toHaveProperty("project");
+  });
+
   it("marks everything unread read when no id is named", async () => {
     const res = await PATCH(request({}), noParams);
 

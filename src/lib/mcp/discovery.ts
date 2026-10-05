@@ -89,5 +89,5 @@ export function noticeLines(notices: Notice[], limit: number) {
     at: notice.createdAt ?? null,
   }));
   const last = lines.at(-1);
-  return { returned: lines.length, unread: lines.filter((l) => !l.read).length, nextBefore: lines.length >= limit ? (last?.at ?? null) : null, notifications: lines };
+  return { returned: lines.length, unreadOnPage: lines.filter((l) => !l.read).length, nextBefore: lines.length >= limit ? (last?.at ?? null) : null, notifications: lines };
 }

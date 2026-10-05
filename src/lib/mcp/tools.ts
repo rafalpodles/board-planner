@@ -77,7 +77,8 @@ export function registerPlannerTools(server: McpServer): void {
     },
     async ({ query }, extra) => {
       const found = (await clientFrom(extra).searchTasks(query)) as Parameters<typeof searchLines>[0];
-      return json({ returned: found.length, tasks: searchLines(found) });
+      // The route stops at 50 text hits, so a full answer may be the first page of more
+      return json({ returned: found.length, truncated: found.length >= 50, tasks: searchLines(found) });
     }
   );
 
@@ -101,7 +102,7 @@ export function registerPlannerTools(server: McpServer): void {
     {
       description:
         "The runs workers have made on a board, newest first: the task, the agent, how each ended (and what refused it), " +
-        "minutes and cost. Useful before handing a task to a machine.",
+        "minutes and cost. For a board's admins, as in the app: the detail of a run can carry gate output.",
       inputSchema: strictInput({
         project: z.string().describe("Project key (e.g. 'CP')"),
         limit: z.number().int().min(1).max(100).optional().describe("Runs to return (default 20)"),
@@ -110,6 +111,10 @@ export function registerPlannerTools(server: McpServer): void {
     async ({ project, limit }, extra) => {
       const client = clientFrom(extra);
       const proj = await client.getProjectByKey(project);
+      // The app shows run history only to a board's admins (Settings → Workers); the route would answer any member
+      if (!proj.canAdmin) {
+        throw new Error(`Run history is for the admins of ${echo(project.toUpperCase())}, as in the app. Nothing was read.`);
+      }
       return json(runLines((await client.listRuns(proj._id, limit ?? 20)) as Parameters<typeof runLines>[0]));
     }
   );
@@ -122,7 +127,11 @@ export function registerPlannerTools(server: McpServer): void {
         "A full page carries nextBefore; pass it back as `before` for the older ones.",
       inputSchema: strictInput({
         limit: z.number().int().min(1).max(100).optional().describe("Notifications to return (default 30)"),
-        before: z.string().optional().describe("A nextBefore from a previous answer"),
+        before: z
+          .string()
+          .refine((value) => !Number.isNaN(Date.parse(value)), "a timestamp, as nextBefore gives")
+          .optional()
+          .describe("A nextBefore from a previous answer"),
       }),
     },
     async ({ limit, before }, extra) => {
@@ -136,8 +145,8 @@ export function registerPlannerTools(server: McpServer): void {
     "mark_notifications_read",
     {
       description:
-        "Mark one notification read by its id, or — with no id — every notification the bell shows. Anything else about a " +
-        "notification is left alone.",
+        "Mark one notification read by its id, or — with no id — every notification the list shows: a connection " +
+        "limited to some boards clears only those boards'. Anything else about a notification is left alone.",
       inputSchema: strictInput(
         { id: z.string().optional().describe("A notification's id, from list_notifications; leave out for all") },
         { writes: true }
