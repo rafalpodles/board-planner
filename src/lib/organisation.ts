@@ -62,7 +62,7 @@ export function licenceOf(row: Pick<IOrganisation, "_id" | "licenceKey">, now: n
   const id = String(row._id);
   return organisationDomain()
     ? storedLicence(row.licenceKey, id, now)
-    : currentLicence(process.env, now, process.env.NODE_ENV, id);
+    : currentLicence(process.env, now);
 }
 
 export const getOrganisation = (organisation: Types.ObjectId | string): Promise<IOrganisation> =>

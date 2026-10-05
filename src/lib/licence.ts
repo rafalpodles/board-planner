@@ -5,7 +5,9 @@ import { LICENCE_PUBLIC_KEYS, type LicencePublicKey } from "./licence-keys";
 import type { IOrganisationEntitlements } from "@/models/organisation";
 
 export interface LicencePayload {
-  v: 1;
+  // 2 for a key bound to an organisation, so a release that predates the claim refuses it rather
+  // than reading it as floating
+  v: 1 | 2;
   customer: string;
   plan: Plan;
   features: string[];
@@ -71,7 +73,7 @@ export function signLicence(
   signingKey: LicenceSigningKey
 ): string {
   const body = Buffer.from(
-    canonicalPayload({ ...payload, v: 1, keyId: signingKey.keyId }),
+    canonicalPayload({ ...payload, v: payload.organisation === undefined ? 1 : 2, keyId: signingKey.keyId }),
     "utf8"
   );
   const privateKey = createPrivateKey({
@@ -89,7 +91,8 @@ function isIsoDate(value: unknown): value is string {
 function asPayload(value: unknown): LicencePayload | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   const p = value as Record<string, unknown>;
-  if (p.v !== 1) return null;
+  if (p.v !== 1 && p.v !== 2) return null;
+  if ((p.v === 2) !== (p.organisation !== undefined)) return null;
   if (typeof p.customer !== "string" || !p.customer.trim()) return null;
   if (p.plan !== "free" && p.plan !== "pro") return null;
   if (!Array.isArray(p.features) || !p.features.every((f) => typeof f === "string")) return null;
@@ -97,7 +100,7 @@ function asPayload(value: unknown): LicencePayload | null {
   if (typeof p.keyId !== "string" || !p.keyId) return null;
   if (p.organisation !== undefined && (typeof p.organisation !== "string" || !/^[0-9a-f]{24}$/.test(p.organisation))) return null;
   return {
-    v: 1,
+    v: p.v,
     customer: p.customer,
     plan: p.plan,
     features: p.features as string[],
@@ -188,15 +191,16 @@ function licenceKeyInEffect(env: NodeJS.ProcessEnv, nodeEnv: string | undefined)
 }
 
 // `null` when no LICENCE_KEY is set, so the caller can tell "no key" from "a key that failed"
+// The environment's key floats: one naming an organisation is refused, because the default
+// organisation has the same id on every instance and a cloud key for it would unlock them all
 export function currentLicence(
   env: NodeJS.ProcessEnv = process.env,
   now: number = Date.now(),
-  nodeEnv: string | undefined = process.env.NODE_ENV,
-  organisation?: string
+  nodeEnv: string | undefined = process.env.NODE_ENV
 ): LicenceCheck | null {
   const key = licenceKeyInEffect(env, nodeEnv);
   if (!key) return null;
-  return verifyLicenceKey(key, { keys: licenceKeysInEffect(env, nodeEnv), now, organisation });
+  return verifyLicenceKey(key, { keys: licenceKeysInEffect(env, nodeEnv), now });
 }
 
 // A key the licence service stored on the organisation: it must name that organisation, so a key

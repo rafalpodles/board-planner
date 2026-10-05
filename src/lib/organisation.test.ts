@@ -106,10 +106,10 @@ describe("getOrganisation on a single-organisation instance: LICENCE_KEY", () =>
     expect((await getOrganisation(DEFAULT_ORGANISATION_ID)).entitlements).toEqual(FREE);
   });
 
-  it("accepts a key that names this organisation", async () => {
+  it("refuses even a key naming this organisation: the default one has the same id on every instance", async () => {
     process.env.LICENCE_KEY = key({ organisation: DEFAULT_ORGANISATION_ID.toHexString() });
 
-    expect((await getOrganisation(DEFAULT_ORGANISATION_ID)).entitlements.plan).toBe("pro");
+    expect((await getOrganisation(DEFAULT_ORGANISATION_ID)).entitlements).toEqual(FREE);
   });
 });
 

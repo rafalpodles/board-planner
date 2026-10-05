@@ -179,7 +179,25 @@ describe("verifyLicenceKey: a key bound to an organisation (BP-891)", () => {
 
   it("signs a floating key exactly as before, so every key issued already still verifies", () => {
     const [body] = licence(OLD.signing).split(".");
-    expect(JSON.parse(Buffer.from(body, "base64url").toString("utf8"))).not.toHaveProperty("organisation");
+    const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
+    expect(payload).not.toHaveProperty("organisation");
+    expect(payload.v).toBe(1);
+  });
+
+  it("marks a bound key v2, so a release that reads only v1 refuses it instead of taking it as floating", () => {
+    const [body] = licence(OLD.signing, { organisation: ACME }).split(".");
+    expect(JSON.parse(Buffer.from(body, "base64url").toString("utf8")).v).toBe(2);
+  });
+
+  it("refuses a v1 payload that names an organisation and a v2 payload that names none", () => {
+    const forge = (payload: Record<string, unknown>) => {
+      const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+      const signature = sign(null, Buffer.from(body, "base64url"), createPrivateKey({ key: { kty: "OKP", crv: "Ed25519", d: OLD.signing.d, x: OLD.signing.x }, format: "jwk" }));
+      return `${body}.${signature.toString("base64url")}`;
+    };
+    const base = { customer: "Acme Ltd", plan: "pro", features: [], issuedAt: "2026-01-01T00:00:00.000Z", expiresAt: new Date(EXPIRES).toISOString(), keyId: "old" };
+    expect(verifyLicenceKey(forge({ v: 1, ...base, organisation: ACME }), { keys: BOTH, now: before, organisation: ACME }).verdict).toBe("malformed");
+    expect(verifyLicenceKey(forge({ v: 2, ...base }), { keys: BOTH, now: before }).verdict).toBe("malformed");
   });
 });
 
