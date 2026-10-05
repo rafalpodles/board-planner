@@ -60,31 +60,58 @@ describe("organisation limits (BP-894)", () => {
   });
 
   it("refuses an organisation past its requests for the minute, naming the limit and when it resets, and not another", async () => {
-    process.env.ORGANISATION_REQUESTS_PER_MINUTE = "3";
+    process.env.ORGANISATION_REQUESTS_PER_MINUTE = "4";
 
-    for (let i = 0; i < 3; i++) expect(await requestLimitRefusal(ACME)).toBeNull();
-    const refused = await requestLimitRefusal(ACME);
+    for (const principal of ["p1", "p1", "p2", "p2"]) expect(await requestLimitRefusal(ACME, { id: principal })).toBeNull();
+    const refused = await requestLimitRefusal(ACME, { id: "p3" });
 
     expect(refused?.status).toBe(429);
+    expect(refused!.headers.get("x-organisation-limit")).toBe("organisation");
     const seconds = Number(refused!.headers.get("Retry-After"));
     expect(seconds).toBeGreaterThan(0);
     expect(seconds).toBeLessThanOrEqual(60);
     const body = await refused!.json();
-    expect(body.error).toMatch(/more than 3 requests in a minute\. Try again in \d+ s/);
-    expect(body.limit).toBe(3);
+    expect(body.error).toBe(`This organisation has made more than 4 requests in a minute. Try again in ${seconds} s.`);
+    expect(body.limit).toBe(4);
     expect(new Date(body.resetAt).getTime()).toBeGreaterThan(Date.now());
 
-    expect(await requestLimitRefusal(GLOBEX)).toBeNull();
+    expect(await requestLimitRefusal(GLOBEX, { id: "g1" })).toBeNull();
+  });
+
+  it("cuts one account off at its share before it can spend everybody's minute", async () => {
+    process.env.ORGANISATION_REQUESTS_PER_MINUTE = "4";
+
+    const answers = [];
+    for (let i = 0; i < 10; i++) answers.push(await requestLimitRefusal(ACME, { id: "runaway" }));
+    expect(answers.filter((answer) => answer === null)).toHaveLength(2);
+    const refused = answers.at(-1)!;
+    expect(refused.headers.get("x-organisation-limit")).toBe("principal");
+    expect((await refused.json()).error).toMatch(/^You have made more than 2 requests in a minute\. Try again in \d+ s\.$/);
+
+    expect(await requestLimitRefusal(ACME, { id: "colleague" })).toBeNull();
+    expect(await requestLimitRefusal(ACME, { id: "colleague" })).toBeNull();
+  });
+
+  it("lets an administrator at the keyboard in past the organisation's minute, but not past their own share", async () => {
+    process.env.ORGANISATION_REQUESTS_PER_MINUTE = "4";
+    for (const principal of ["p1", "p1", "p2", "p2"]) await requestLimitRefusal(ACME, { id: principal });
+    expect((await requestLimitRefusal(ACME, { id: "p3" }))?.status).toBe(429);
+
+    const admin = { id: "admin", interactiveAdmin: true };
+    expect(await requestLimitRefusal(ACME, admin)).toBeNull();
+    expect(await requestLimitRefusal(ACME, admin)).toBeNull();
+    expect((await requestLimitRefusal(ACME, admin))?.headers.get("x-organisation-limit")).toBe("principal");
   });
 
   it("lets the organisation in again once the minute is over", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
-    process.env.ORGANISATION_REQUESTS_PER_MINUTE = "1";
-    expect(await requestLimitRefusal(ACME)).toBeNull();
-    expect((await requestLimitRefusal(ACME))?.status).toBe(429);
+    process.env.ORGANISATION_REQUESTS_PER_MINUTE = "2";
+    expect(await requestLimitRefusal(ACME, { id: "p1" })).toBeNull();
+    expect(await requestLimitRefusal(ACME, { id: "p2" })).toBeNull();
+    expect((await requestLimitRefusal(ACME, { id: "p3" }))?.status).toBe(429);
 
     vi.setSystemTime(Date.now() + 61_000);
-    expect(await requestLimitRefusal(ACME)).toBeNull();
+    expect(await requestLimitRefusal(ACME, { id: "p3" })).toBeNull();
   });
 
   it("lets through an upload that fills the storage exactly, and refuses one byte more", async () => {

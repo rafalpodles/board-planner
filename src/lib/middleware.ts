@@ -16,7 +16,7 @@ import { can, FeatureKey } from "./entitlements";
 import { projectRunsWorkers } from "@/lib/worker-gate";
 import { EXECUTION_LEASE_MS } from "./execution-lease";
 import { inOrganisation } from "./organisation-log";
-import { requestLimitRefusal } from "./organisation-limits";
+import { requestLimitRefusal, type RequestPrincipal } from "./organisation-limits";
 
 type AuthenticatedHandler = (
   request: Request,
@@ -71,6 +71,10 @@ export async function refusedOnThisHost(
   return null;
 }
 
+export function asPrincipal(user: IUser): RequestPrincipal {
+  return { id: String(user._id), interactiveAdmin: user.role === "admin" && !user.viaMachineCredential };
+}
+
 export function withAuth(handler: AuthenticatedHandler) {
   return async (
     request: Request,
@@ -101,7 +105,7 @@ export function withAuth(handler: AuthenticatedHandler) {
       const refused = await refusedOnThisHost(request, user);
       if (refused) return refused;
       const db = scopedFor(user);
-      const overLimit = await requestLimitRefusal(db.organisation);
+      const overLimit = await requestLimitRefusal(db.organisation, asPrincipal(user));
       if (overLimit) return overLimit;
       return await inOrganisation(db.organisation, () => handler(request, { ...context, user, db }));
     } catch (e) {
@@ -187,7 +191,7 @@ export function withWorker(
     }
 
     const db = scopedFor(worker);
-    const overLimit = await requestLimitRefusal(db.organisation);
+    const overLimit = await requestLimitRefusal(db.organisation, { id: String(worker._id) });
     if (overLimit) return overLimit;
     return inOrganisation(db.organisation, () => handler(request, { ...context, worker, db }));
   };
@@ -394,7 +398,7 @@ export function withProjectAccessOrWorker(
     if (refusedHere) return refusedHere;
     const db = scopedFor(worker);
     if (await ownerIsDeactivated(db, worker)) return machineOwnerDeactivated();
-    const overLimit = await requestLimitRefusal(db.organisation);
+    const overLimit = await requestLimitRefusal(db.organisation, { id: String(worker._id) });
     if (overLimit) return overLimit;
 
     const params = await context.params;

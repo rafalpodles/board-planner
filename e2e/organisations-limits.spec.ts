@@ -1,8 +1,9 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
+import crypto from "node:crypto";
 import mongoose from "mongoose";
-import { RUN_ORGANISATIONS_SERVER } from "../playwright.config";
+import { ORGANISATION_DOMAIN, RUN_ORGANISATIONS_SERVER } from "../playwright.config";
 import { E2E_MONGODB_URI } from "./seed";
-import { CLOUD_REQUESTS_PER_MINUTE, CLOUD_STORAGE_MB, organisationRequestsKey } from "../src/lib/organisation-limits";
+import { CLOUD_REQUESTS_PER_MINUTE, CLOUD_STORAGE_MB, organisationRequestsKey, principalRequestsKey } from "../src/lib/organisation-limits";
 import {
   ACME,
   GLOBEX,
@@ -13,6 +14,7 @@ import {
   originOf,
   seedTwoOrganisations,
   signInOn,
+  workerHeaders,
   type OrganisationFixture,
 } from "./organisations";
 
@@ -42,6 +44,40 @@ function spendTheMinute(who: OrganisationFixture) {
     )
   );
 }
+
+// A member of the board who is not an administrator, signed in through a session of their own
+async function aMember(who: OrganisationFixture): Promise<string> {
+  const sessionToken = `cps_member_${who.slug}_${crypto.randomBytes(8).toString("hex")}`;
+  const now = new Date();
+  const later = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  await withDb(async (db) => {
+    const { insertedId: member } = await db.collection("users").insertOne({
+      organisation: who.organisation,
+      username: "crew",
+      fullName: `${who.slug} crew`,
+      email: `crew@${who.slug}.example`,
+      kind: "human",
+      role: "member",
+      createdAt: now,
+    });
+    await db.collection("grants").insertOne({ organisation: who.organisation, subject: member, relation: "member", objectType: "project", object: who.projectId, createdAt: now });
+    await db.collection("sessions").insertOne({
+      organisation: who.organisation,
+      tokenHash: crypto.createHash("sha256").update(sessionToken).digest("hex"),
+      user: member,
+      expiresAt: later,
+      absoluteExpiresAt: later,
+      lastUsedAt: now,
+      userAgent: "",
+      ip: "",
+      createdAt: now,
+    });
+  });
+  return sessionToken;
+}
+
+const counted = (key: string) =>
+  withDb(async (db) => (await db.collection<{ _id: string; count: number }>("ratelimits").findOne({ _id: key }))?.count ?? 0);
 
 const tasks = (request: APIRequestContext, who: OrganisationFixture) =>
   request.get(`${ORGANISATIONS_API}/api/projects/${SHARED_KEY}/tasks`, { headers: { ...asOrganisation(who), ...bearer(who) } });
@@ -84,10 +120,15 @@ test.describe("BP-894: one organisation's limits do not touch another's", () => 
     expect((await tasks(request, GLOBEX)).status()).toBe(200);
   });
 
-  test("on screen: the board says why it cannot load for the organisation over its limit, and loads for the other", async ({ page }) => {
+  test("on screen: a member over the organisation's minute is told so and until when, its administrator still gets in, and the other organisation is untouched", async ({ browser }) => {
+    const memberSession = await aMember(ACME);
     await spendTheMinute(ACME);
 
-    await signInOn(page.context(), ACME);
+    const member = await browser.newContext();
+    await member.addCookies([
+      { name: "__Host-bp_session", value: memberSession, domain: `${ACME.slug}.${ORGANISATION_DOMAIN}`, path: "/", httpOnly: true, secure: true, sameSite: "Lax" },
+    ]);
+    const page = await member.newPage();
     await page.goto(`${originOf(ACME)}/projects/${SHARED_KEY}`);
     await expect(page.getByRole("status").filter({ hasText: "Your organisation has made more requests this minute than it may." })).toContainText(
       /Pages will load again after \d/
@@ -96,11 +137,45 @@ test.describe("BP-894: one organisation's limits do not touch another's", () => 
     await page.screenshot({ path: "e2e/.artifacts/bp894-limit-desktop.png" });
     await page.setViewportSize({ width: 390, height: 844 });
     await page.screenshot({ path: "e2e/.artifacts/bp894-limit-phone.png" });
+    await member.close();
 
-    await signInOn(page.context(), GLOBEX);
-    await page.goto(`${originOf(GLOBEX)}/projects/${SHARED_KEY}`);
-    await expect(page.getByText(GLOBEX.projectName).first()).toBeVisible();
-    await expect(page.getByText(/more requests this minute/)).toHaveCount(0);
+    // Signed in as the administrator, who must be able to stop whoever is spending the minute
+    const admin = await browser.newContext();
+    await signInOn(admin, ACME);
+    const adminPage = await admin.newPage();
+    await adminPage.goto(`${originOf(ACME)}/projects/${SHARED_KEY}`);
+    await expect(adminPage.getByText(ACME.projectName).first()).toBeVisible();
+    await expect(adminPage.getByText(/more requests this minute/)).toHaveCount(0);
+    await admin.close();
+
+    const other = await browser.newContext();
+    await signInOn(other, GLOBEX);
+    const otherPage = await other.newPage();
+    await otherPage.goto(`${originOf(GLOBEX)}/projects/${SHARED_KEY}`);
+    await expect(otherPage.getByText(GLOBEX.projectName).first()).toBeVisible();
+    await other.close();
+  });
+
+  test("every authenticated way in counts once, against the caller and its organisation, and nothing anonymous or foreign counts at all", async ({ request }) => {
+    const on = (who: OrganisationFixture, extra: Record<string, string>) => ({ headers: { ...asOrganisation(who), ...extra } });
+    // A wrong token, another organisation's token, and another organisation's machine, all on Acme's host
+    expect((await request.get(`${ORGANISATIONS_API}/api/projects`, on(ACME, { authorization: "Bearer cp_nobody" }))).status()).toBe(401);
+    expect((await request.get(`${ORGANISATIONS_API}/api/projects`, on(ACME, bearer(GLOBEX)))).status()).toBe(401);
+    expect((await request.post(`${ORGANISATIONS_API}/api/workers/${GLOBEX.workerId}/heartbeat`, { ...on(ACME, workerHeaders(GLOBEX)), data: {} })).status()).toBe(401);
+    expect(await counted(organisationRequestsKey(ACME.organisation))).toBe(0);
+
+    await request.get(`${ORGANISATIONS_API}/api/projects`, on(ACME, bearer(ACME)));
+    await request.get(`${ORGANISATIONS_API}/api/projects/${SHARED_KEY}/tasks`, on(ACME, bearer(ACME)));
+    await request.get(`${ORGANISATIONS_API}/api/projects/${SHARED_KEY}`, on(ACME, bearer(ACME)));
+    await request.post(`${ORGANISATIONS_API}/api/projects/${SHARED_KEY}/pm/chat`, { ...on(ACME, bearer(ACME)), data: { message: "hello" } });
+    await request.post(`${ORGANISATIONS_API}/api/workers/${ACME.workerId}/heartbeat`, { ...on(ACME, workerHeaders(ACME)), data: {} });
+    await request.get(`${ORGANISATIONS_API}/api/projects/${ACME.projectId}/runs`, on(ACME, workerHeaders(ACME)));
+
+    expect(await counted(organisationRequestsKey(ACME.organisation))).toBe(6);
+    expect(await counted(principalRequestsKey(String(ACME.adminId)))).toBe(4);
+    expect(await counted(principalRequestsKey(String(ACME.workerId)))).toBe(2);
+    expect(await counted(organisationRequestsKey(GLOBEX.organisation))).toBe(0);
+    expect(await counted(principalRequestsKey(String(GLOBEX.adminId)))).toBe(0);
   });
 
   test("an organisation whose files fill its storage cannot upload another, while the other can", async ({ request }) => {

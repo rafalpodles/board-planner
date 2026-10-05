@@ -11,7 +11,7 @@ import { dailyPmSpend, isOverDailyTurnCap } from "@/lib/pm/turn-cap";
 import { MAX_STEPS } from "@/lib/pm/agent";
 import { isPmRunnable, pmDisabledReason, resolvePmModel } from "@/lib/pm/availability";
 import { IMAGE_MIME_TYPES, MAX_ATTACHMENTS_PER_MESSAGE, anyAttachmentReadable, modelAcceptsImages } from "@/lib/pm/attachments";
-import { databaseUnavailable, resolveProjectId, refusedOnThisHost } from "@/lib/middleware";
+import { asPrincipal, databaseUnavailable, resolveProjectId, refusedOnThisHost } from "@/lib/middleware";
 import { check } from "@/lib/grants";
 import { IUser, PmAttachment } from "@/types";
 import { inOrganisation } from "@/lib/organisation-log";
@@ -41,7 +41,7 @@ export async function POST(
   const refusedHere = await refusedOnThisHost(request, user);
   if (refusedHere) return refusedHere;
   const db = scopedFor(user);
-  const overLimit = await requestLimitRefusal(db.organisation);
+  const overLimit = await requestLimitRefusal(db.organisation, asPrincipal(user));
   if (overLimit) return overLimit;
   return inOrganisation(db.organisation, () => chat(request, params, user, db));
 }

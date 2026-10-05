@@ -2,7 +2,7 @@
 
 import { useAuth } from "./use-auth";
 import { useCallback, useMemo } from "react";
-import { ORGANISATION_LIMIT_HEADER } from "@/lib/organisation-limit-header";
+import { ORGANISATION_LIMIT_HEADER, type RequestLimitScope } from "@/lib/organisation-limit-header";
 
 interface ApiOptions {
   body?: unknown;
@@ -12,16 +12,17 @@ interface ApiOptions {
 }
 
 export function useApi() {
-  const { onUnauthorized, noteApiStatus: noteStatus, noteOrganisationLimit } = useAuth();
+  const { onUnauthorized, noteApiStatus: noteStatus, noteRequestLimit } = useAuth();
 
   const noteApiStatus = useCallback(
     (res: Response, opts?: { relayed?: boolean }) => {
       noteStatus(res.status, opts);
-      if (res.status === 429 && res.headers.get(ORGANISATION_LIMIT_HEADER)) {
-        noteOrganisationLimit(Number(res.headers.get("retry-after")) || 60);
+      const scope = res.status === 429 ? res.headers.get(ORGANISATION_LIMIT_HEADER) : null;
+      if (scope === "organisation" || scope === "principal") {
+        noteRequestLimit(scope satisfies RequestLimitScope, Number(res.headers.get("retry-after")) || 60);
       }
     },
-    [noteStatus, noteOrganisationLimit]
+    [noteStatus, noteRequestLimit]
   );
 
   const request = useCallback(

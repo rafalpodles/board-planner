@@ -20,8 +20,8 @@ const { api, nav, auth, projectsState } = vi.hoisted(() => ({
     refreshUser: vi.fn(),
     onUnauthorized: vi.fn(),
     noteApiStatus: vi.fn(),
-    organisationLimitedUntil: null,
-    noteOrganisationLimit: vi.fn(),
+    requestLimit: null,
+    noteRequestLimit: vi.fn(),
   } satisfies AuthState,
 }));
 

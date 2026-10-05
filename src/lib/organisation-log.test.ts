@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { Types } from "mongoose";
-import { inOrganisation, loggingOrganisation, tagConsoleWithOrganisation } from "./organisation-log";
+import { inOrganisation, loggingOrganisation, outsideOrganisation, tagConsoleWithOrganisation } from "./organisation-log";
 
 const ACME = new Types.ObjectId("0000000000000000000000a1");
 const GLOBEX = new Types.ObjectId("0000000000000000000000b2");
@@ -22,7 +22,7 @@ describe("organisation in every log line (BP-894)", () => {
       target.error("sync failed", 42);
     });
 
-    expect(calls).toEqual([[`[organisation ${ACME.toHexString()}]`, "sync failed", 42]]);
+    expect(calls).toEqual([[`[organisation ${ACME.toHexString()}] sync failed`, 42]]);
   });
 
   it("keeps two organisations' concurrent work apart", async () => {
@@ -38,8 +38,8 @@ describe("organisation in every log line (BP-894)", () => {
       }),
     ]);
 
-    expect(calls).toContainEqual([`[organisation ${GLOBEX.toHexString()}]`, "globex"]);
-    expect(calls).toContainEqual([`[organisation ${ACME.toHexString()}]`, "acme"]);
+    expect(calls).toContainEqual([`[organisation ${GLOBEX.toHexString()}] globex`]);
+    expect(calls).toContainEqual([`[organisation ${ACME.toHexString()}] acme`]);
   });
 
   it("writes a line outside any organisation as it was", () => {
@@ -50,10 +50,30 @@ describe("organisation in every log line (BP-894)", () => {
     expect(loggingOrganisation()).toBeUndefined();
     expect(calls).toEqual([["boot"]]);
   });
+
+  it("keeps a format string a format string, and tags a line that does not start with one", () => {
+    const { target, calls } = fakeConsole();
+
+    inOrganisation(ACME, () => {
+      target.log("%s took %d ms", "sync", 12);
+      target.error(new Error("boom"));
+    });
+
+    expect(calls[0]).toEqual([`[organisation ${ACME.toHexString()}] %s took %d ms`, "sync", 12]);
+    expect(calls[1][0]).toBe(`[organisation ${ACME.toHexString()}]`);
+  });
+
+  it("leaves untagged a line about the whole instance, written from inside an organisation", () => {
+    const { target, calls } = fakeConsole();
+
+    inOrganisation(ACME, () => outsideOrganisation(() => target.error("MongoDB is unreachable")));
+
+    expect(calls).toEqual([["MongoDB is unreachable"]]);
+  });
 });
 
 describe("the middleware and the jobs run inside their organisation", () => {
-  it("forEachServedOrganisation runs each organisation's work, and logs its failure, inside it", async () => {
+  it("forEachServedOrganisation runs each organisation's work inside it", async () => {
     vi.resetModules();
     vi.doMock("./db", () => ({ connectDB: vi.fn() }));
     vi.doMock("@/models/organisation", () => ({

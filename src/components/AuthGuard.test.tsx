@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, act } from "@testing-library/react";
 import { AuthGuard } from "@/components/AuthGuard";
-import type { AuthState } from "@/hooks/use-auth";
+import type { AuthState, RequestLimit } from "@/hooks/use-auth";
 import type { ApiUser } from "@/types";
 
 const { nav, auth } = vi.hoisted(() => ({
@@ -19,8 +19,8 @@ const { nav, auth } = vi.hoisted(() => ({
     refreshUser: vi.fn(),
     onUnauthorized: vi.fn(),
     noteApiStatus: vi.fn(),
-    organisationLimitedUntil: null as Date | null,
-    noteOrganisationLimit: vi.fn(),
+    requestLimit: null as RequestLimit | null,
+    noteRequestLimit: vi.fn(),
     // satisfies, not `as`: this checks the mock is still a whole AuthState while leaving the
     // members their mock types, so `refreshUser.mockClear()` still type-checks
   } satisfies AuthState,
@@ -50,7 +50,7 @@ describe("AuthGuard", () => {
     auth.user = null;
     auth.isLoading = false;
     auth.outage = false;
-    auth.organisationLimitedUntil = null;
+    auth.requestLimit = null;
     window.history.replaceState({}, "", "/projects/BP?column=active");
   });
 
@@ -68,17 +68,27 @@ describe("AuthGuard", () => {
     expect(nav.replace).not.toHaveBeenCalled();
   });
 
-  it("says when the organisation's requests for the minute are spent, and until when (BP-894)", () => {
+  it("says whose requests for the minute are spent, and until when (BP-894)", () => {
     auth.user = SIGNED_IN;
     const until = new Date(Date.now() + 30_000);
-    auth.organisationLimitedUntil = until;
+    auth.requestLimit = { scope: "organisation", until };
 
-    renderGuard();
+    const { rerender } = renderGuard();
 
-    expect(screen.getByRole("status").textContent).toContain(
+    expect(screen.getByRole("status").textContent).toBe(
       `Your organisation has made more requests this minute than it may. Pages will load again after ${until.toLocaleTimeString()}.`
     );
     expect(screen.getByTestId("app")).toBeTruthy();
+
+    auth.requestLimit = { scope: "principal", until };
+    rerender(
+      <AuthGuard>
+        <span data-testid="app">the board</span>
+      </AuthGuard>
+    );
+    expect(screen.getByRole("status").textContent).toBe(
+      `You have made more requests this minute than one account may. Pages will load again after ${until.toLocaleTimeString()}.`
+    );
   });
 
   it("sends a signed-out visitor to sign in, carrying where they were going", () => {

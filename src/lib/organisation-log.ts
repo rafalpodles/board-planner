@@ -13,6 +13,11 @@ export function inOrganisation<T>(organisation: Types.ObjectId, work: () => T): 
   return store.run({ organisation: organisation.toHexString() }, work);
 }
 
+// For lines about the whole instance, written from inside one organisation's request
+export function outsideOrganisation<T>(work: () => T): T {
+  return store.exit(work);
+}
+
 export function loggingOrganisation(): string | undefined {
   return store.getStore()?.organisation;
 }
@@ -26,7 +31,10 @@ export function tagConsoleWithOrganisation(target: Pick<Console, (typeof METHODS
     const original = target[method].bind(target);
     target[method] = (...args: unknown[]) => {
       const organisation = loggingOrganisation();
-      return organisation ? original(`[organisation ${organisation}]`, ...args) : original(...args);
+      if (!organisation) return original(...args);
+      const tag = `[organisation ${organisation}]`;
+      // Into the first string, not before it, or its %s/%d placeholders stop being a format
+      return typeof args[0] === "string" ? original(`${tag} ${args[0]}`, ...args.slice(1)) : original(tag, ...args);
     };
   }
   if (target === console) shared[PATCHED] = true;
