@@ -237,6 +237,11 @@ test.describe("BP-893: an organisation's life cycle", () => {
 
     expect((await resume(request, GLOBEX)).status()).toBe(409);
     expect((await suspend(request, GLOBEX)).status()).toBe(409);
+    const path = `${organisationPath(GLOBEX)}/export`;
+    const exported = await request.get(`${ORGANISATIONS_API}${path}`, {
+      headers: { host: PLATFORM_HOST, ...signPlatformRequest({ method: "GET", path, body: new Uint8Array() }, E2E_PLATFORM_REQUEST_KEY) },
+    });
+    expect(exported.status()).toBe(409);
     expect((await projects(request, GLOBEX)).status()).toBe(503);
   });
 

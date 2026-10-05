@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Types } from "mongoose";
 
-const { find, deleteOne, taskDeleteMany, deleteAllUploads } = vi.hoisted(() => ({
+const { find, deleteOne, updateOne, exists, taskDeleteMany, deleteAllUploads } = vi.hoisted(() => ({
+  updateOne: vi.fn(),
+  exists: vi.fn(),
   find: vi.fn(),
   deleteOne: vi.fn(),
   taskDeleteMany: vi.fn(),
@@ -9,12 +11,12 @@ const { find, deleteOne, taskDeleteMany, deleteAllUploads } = vi.hoisted(() => (
 }));
 
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
-vi.mock("@/models/organisation", () => ({ Organisation: { find, deleteOne } }));
+vi.mock("@/models/organisation", () => ({ Organisation: { find, deleteOne, updateOne, exists } }));
 vi.mock("./organisation-migration", () => ({ scopedModelNames: () => ["Task"] }));
 vi.mock("./db-scope", () => ({ scoped: () => ({ Task: { deleteMany: taskDeleteMany } }), SCOPED_MODELS: {} }));
 vi.mock("./upload-ownership", () => ({ UPLOAD_BUCKET: "uploads", organisationUploads: () => ({ deleteAll: deleteAllUploads }) }));
 
-const { sweepDeletedOrganisations, TOMBSTONE_DAYS } = await import("./organisation-life-cycle");
+const { claimDeletion, sweepDeletedOrganisations, SUSPENSION_SETTLE_MS, TOMBSTONE_DAYS } = await import("./organisation-life-cycle");
 
 const GONE = new Types.ObjectId();
 const NOW = Date.parse("2027-03-01T00:00:00Z");
@@ -36,5 +38,21 @@ describe("sweepDeletedOrganisations (BP-893)", () => {
     expect(deleteAllUploads).toHaveBeenCalled();
     expect(taskDeleteMany.mock.invocationCallOrder[0]).toBeLessThan(deleteOne.mock.invocationCallOrder[0]);
     expect(deleteOne).toHaveBeenCalledWith({ _id: GONE, deletedAt: { $ne: null } });
+  });
+});
+
+describe("claimDeletion (BP-893)", () => {
+  it("claims only an organisation suspended for the whole settle window, judged in the write itself", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+    exists.mockResolvedValue({ _id: GONE });
+
+    expect(await claimDeletion(GONE)).toBe(true);
+
+    const [[filter, update]] = updateOne.mock.calls;
+    expect(filter).toMatchObject({ _id: GONE, deletedAt: null, deletingAt: null });
+    expect(filter.suspendedAt).toEqual({ $ne: null, $lte: new Date(NOW - SUSPENSION_SETTLE_MS) });
+    expect(update).toEqual({ $set: { deletingAt: new Date(NOW) } });
+    vi.useRealTimers();
   });
 });

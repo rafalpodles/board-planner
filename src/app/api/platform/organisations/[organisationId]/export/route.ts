@@ -1,3 +1,4 @@
+import { NextResponse } from "next/server";
 import { scoped } from "@/lib/db-scope";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { organisationExportResponse } from "@/lib/organisation-export-response";
@@ -10,6 +11,7 @@ export const GET = withPlatformRequest<{ organisationId: string }>(async (_reque
   const found = await organisationForLifeCycle(params.organisationId);
   if (!found.ok) return lifeCycleRefused(found.reason);
   const { row } = found;
+  if (row.deletingAt) return NextResponse.json({ error: "The organisation is being deleted" }, { status: 409 });
   const db = scoped(row._id);
   // In the organisation's own log as well: its admins can see the operator took a copy
   return organisationExportResponse(db, row.slug ?? "organisation", async () => {

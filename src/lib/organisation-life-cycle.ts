@@ -89,8 +89,9 @@ export async function setSuspended(organisation: Types.ObjectId, suspended: bool
 
 // Marks the delete before any row goes, so nothing can resume or license it meanwhile; a delete that died halfway claims again
 export async function claimDeletion(organisation: Types.ObjectId): Promise<boolean> {
+  // The settle window again, in the claim itself: a resume and a suspend between the route's check and here restart it
   await Organisation.updateOne(
-    { _id: organisation, deletedAt: null, deletingAt: null, suspendedAt: { $ne: null } },
+    { _id: organisation, deletedAt: null, deletingAt: null, suspendedAt: { $ne: null, $lte: new Date(Date.now() - SUSPENSION_SETTLE_MS) } },
     { $set: { deletingAt: new Date() } }
   );
   return (await Organisation.exists({ _id: organisation, deletedAt: null, deletingAt: { $ne: null } })) !== null;
