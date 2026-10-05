@@ -1,7 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 import { BOOTSTRAP_TOKEN, E2E_ENCRYPTION_KEY, E2E_MONGODB_URI } from "./e2e/seed";
 import { GROUPS } from "./e2e/groups";
-import { E2E_LICENCE_PUBLIC_KEY } from "./e2e/licence-key";
+import { E2E_LICENCE_PUBLIC_KEY, E2E_PLATFORM_REQUEST_KEY } from "./e2e/licence-key";
 
 // 3987, not the usual 3456: a developer's own dev server and other agents share this machine
 const PORT = Number(process.env.E2E_PORT ?? 3987);
@@ -453,6 +453,7 @@ export default defineConfig({
               ...devServerEnv(ORGANISATIONS_PLATFORM_ORIGIN),
               ORGANISATION_DOMAIN,
               APP_ORIGIN: ORGANISATIONS_PLATFORM_ORIGIN,
+              PLATFORM_REQUEST_KEYS: `${E2E_PLATFORM_REQUEST_KEY.keyId}:${E2E_PLATFORM_REQUEST_KEY.x}`,
               NEXT_DIST_DIR: ".next-organisations",
             },
           },
