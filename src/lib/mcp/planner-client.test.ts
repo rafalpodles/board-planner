@@ -102,6 +102,14 @@ describe("a segment that could choose the path is refused, not encoded", () => {
     ["listSprints", (v: string) => client.listSprints(v)],
     ["createSprint", (v: string) => client.createSprint(v, {})],
     ["updateSprint", (v: string) => client.updateSprint(v, "s1", {})],
+    ["editComment (project)", (v: string) => client.editComment(v, TASK, "c1", "x")],
+    ["editComment (task)", (v: string) => client.editComment(PROJECT, v, "c1", "x")],
+    ["editComment (comment)", (v: string) => client.editComment(PROJECT, TASK, v, "x")],
+    ["deleteComment (project)", (v: string) => client.deleteComment(v, TASK, "c1")],
+    ["deleteComment (task)", (v: string) => client.deleteComment(PROJECT, v, "c1")],
+    ["deleteComment (comment)", (v: string) => client.deleteComment(PROJECT, TASK, v)],
+    ["getTaskActivity (project)", (v: string) => client.getTaskActivity(v, TASK)],
+    ["getTaskActivity (task)", (v: string) => client.getTaskActivity(PROJECT, v)],
   ])("%s refuses it as well", async (_name, call) => {
     await expect(call("..")).rejects.toThrow(/Invalid path segment/);
     expect(fetchMock).not.toHaveBeenCalled();

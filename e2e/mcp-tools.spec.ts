@@ -1014,14 +1014,13 @@ test("a comment is edited and deleted by its author, and refused to anybody else
   const listed = await session.callTool("list_comments", { taskKey: SIBLING_TASK_KEY });
   accepted(listed);
   expect(listed.parsed.comments).toEqual([
-    expect.objectContaining({ id, author: ADMIN_USERNAME, body: "First draft", edited: false, reactions: [] }),
+    expect.objectContaining({ id, author: ADMIN_USERNAME, body: "First draft", reactions: [] }),
   ]);
 
   const edited = await session.callTool("edit_comment", { taskKey: SIBLING_TASK_KEY, commentId: id, body: "Second draft" });
   accepted(edited);
   expect(edited.parsed).toMatchObject({ id, body: "Second draft", author: ADMIN_USERNAME });
   expect((await stored()).map((c) => c.body)).toEqual(["Second draft"]);
-  expect((await session.callTool("list_comments", { taskKey: SIBLING_TASK_KEY })).parsed.comments[0].edited).toBe(true);
 
   // A blank text is refused as the API refuses it, and the comment keeps what it had
   const blank = await session.callTool("edit_comment", { taskKey: SIBLING_TASK_KEY, commentId: id, body: "  " });
@@ -1088,6 +1087,15 @@ test("get_task_activity reads what changed, newest first, and who changed it", a
     ])
   );
   expect(entries.at(-1)!.action).toBe("created");
+
+  // A description is said to be added, edited or removed — never given back as text, never mistaken for cleared
+  accepted(await session.callTool("update_task", { taskKey: key, description: "first words" }));
+  accepted(await session.callTool("update_task", { taskKey: key, description: "other words" }));
+  const withDescription = (await session.callTool("get_task_activity", { taskKey: key })).parsed.entries as { field: string; from: string; to: string }[];
+  const described = withDescription.filter((e) => e.field === "description");
+  // Two edits in a row by one person read as one entry, the way the task page folds them: the net change is an addition
+  expect(described.map((e) => [e.from, e.to])).toEqual([["", "(added)"]]);
+  expect(JSON.stringify(described)).not.toContain("words");
   const times = entries.map((e) => e.at);
   expect([...times].sort().reverse()).toEqual(times);
   expect((await session.callTool("get_task_activity", { taskKey: key, limit: 1 })).parsed.entries).toHaveLength(1);

@@ -525,7 +525,6 @@ describe("comments and history", () => {
     author: { username: "rafal" },
     body: `comment ${i + 1}`,
     createdAt: "2026-10-05T10:00:00.000Z",
-    updatedAt: "2026-10-05T10:00:00.000Z",
     reactions: [],
   }));
 
@@ -539,7 +538,7 @@ describe("comments and history", () => {
     const last = parse(await run("list_comments", { limit: 2, offset: 4 }));
     expect(last.comments.map((c: { id: string }) => c.id)).toEqual(["c5"]);
     expect(last.nextOffset).toBeNull();
-    expect(Object.keys(first.comments[0]).sort()).toEqual(["author", "body", "createdAt", "edited", "id", "reactions"]);
+    expect(Object.keys(first.comments[0]).sort()).toEqual(["author", "body", "createdAt", "id", "reactions"]);
   });
 
   it("list_comments refuses a page bigger than it will build", () => {
@@ -550,16 +549,12 @@ describe("comments and history", () => {
   });
 
   it("edit_comment sends the new text for that comment and answers with it as a line", async () => {
-    const edit = vi.spyOn(PlannerClient.prototype, "editComment").mockResolvedValue({
-      ...comments[0],
-      body: "changed",
-      updatedAt: "2026-10-05T11:00:00.000Z",
-    });
+    const edit = vi.spyOn(PlannerClient.prototype, "editComment").mockResolvedValue({ ...comments[0], body: "changed" });
 
     const answer = parse(await run("edit_comment", { commentId: "c1", body: "changed" }));
 
     expect(edit).toHaveBeenCalledWith("p1", "t1", "c1", "changed");
-    expect(answer).toMatchObject({ id: "c1", body: "changed", edited: true });
+    expect(answer).toMatchObject({ id: "c1", body: "changed" });
   });
 
   it("edit_comment and delete_comment pass the API's refusal on, not a success of their own", async () => {

@@ -7,10 +7,9 @@ describe("commentLines", () => {
       commentLines([
         {
           _id: "c1",
-          author: { username: "rafal", ...{ fullName: "Rafal", _id: "u1" } },
+          author: { username: "rafal" },
           body: "Looks right",
           createdAt: "2026-10-05T10:00:00.000Z",
-          updatedAt: "2026-10-05T10:00:00.000Z",
           reactions: [{ emoji: "👍" }, { emoji: "👍" }, { emoji: "🎉" }],
         },
       ])
@@ -20,7 +19,6 @@ describe("commentLines", () => {
         author: "rafal",
         body: "Looks right",
         createdAt: "2026-10-05T10:00:00.000Z",
-        edited: false,
         reactions: [
           { emoji: "👍", count: 2 },
           { emoji: "🎉", count: 1 },
@@ -29,16 +27,8 @@ describe("commentLines", () => {
     ]);
   });
 
-  it("says a comment was edited when it changed after it was written", () => {
-    const [line] = commentLines([
-      { _id: "c1", author: { username: "a" }, body: "b", createdAt: "2026-10-05T10:00:00.000Z", updatedAt: "2026-10-05T11:00:00.000Z" },
-    ]);
-
-    expect(line.edited).toBe(true);
-  });
-
   it("has no author to name for a comment whose author is gone", () => {
-    expect(commentLines([{ _id: "c1", author: null, body: "b" }])[0]).toMatchObject({ author: null, createdAt: null, edited: false });
+    expect(commentLines([{ _id: "c1", author: null, body: "b" }])[0]).toMatchObject({ author: null, createdAt: null });
   });
 });
 
@@ -61,17 +51,32 @@ describe("activityLines", () => {
     expect(activityLines(rows, 2)).toHaveLength(2);
   });
 
-  it("clips a long value instead of handing a whole description back, and says a cleared one is cleared", () => {
-    const [long, cleared] = activityLines(
+  it("clips a long value of an ordinary field", () => {
+    const [long] = activityLines([{ action: "updated", field: "title", oldValue: "x".repeat(5_000), newValue: "y".repeat(5_000) }], 10);
+
+    expect(long.from).toBe(`${"x".repeat(300)}…`);
+    expect(long.to).toBe(`${"y".repeat(300)}…`);
+  });
+
+  // The route blanks a description's new text and keeps the old, and says only whether it was cleared; the
+  // task page reads that as added, edited or removed, and so must this — "to" empty reads as "cleared"
+  it("says a description was added, edited or removed, as the task page does, and never hands its text back", () => {
+    const [added, edited, removed] = activityLines(
       [
-        { action: "updated", field: "description", oldValue: "x".repeat(5_000), newValue: "y".repeat(5_000) },
-        { action: "updated", field: "description", oldValue: "was", newValue: "", cleared: true },
+        { action: "updated", field: "description", oldValue: "", newValue: "", cleared: false },
+        { action: "updated", field: "description", oldValue: "the old text", newValue: "", cleared: false },
+        { action: "updated", field: "description", oldValue: "the old text", newValue: "", cleared: true },
       ],
       10
     );
 
-    expect(long.from).toBe(`${"x".repeat(300)}…`);
-    expect(long.to).toBe(`${"y".repeat(300)}…`);
-    expect(cleared.to).toBe("(cleared)");
+    expect([added.to, edited.to, removed.to]).toEqual(["(added)", "(edited)", "(removed)"]);
+    expect([added.from, edited.from, removed.from]).toEqual(["", "", ""]);
+  });
+
+  it("treats a project field that happens to be called description as the ordinary field it is", () => {
+    const [row] = activityLines([{ action: "updated", field: "description", customField: true, oldValue: "a", newValue: "b" }], 10);
+
+    expect(row).toMatchObject({ from: "a", to: "b" });
   });
 });
