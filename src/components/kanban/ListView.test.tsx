@@ -544,4 +544,13 @@ describe("ListView and an archived task", () => {
 
     expect(screen.getAllByTestId("row-archived")).toHaveLength(1);
   });
+
+  it("is set apart by its border and colour, not by fading the whole row under the chip and title", () => {
+    renderList({ tasks: [{ ...tasks[0], archivedAt: "2026-10-05T10:00:00.000Z" }] as ApiTask[] });
+
+    const row = screen.getByTestId("row-archived").closest("tr")!;
+    expect(row.className).not.toContain("opacity-");
+    expect(row.className).toContain("border-dashed");
+    expect(screen.getByText(tasks[0].title).className).toContain("text-text-muted");
+  });
 });
