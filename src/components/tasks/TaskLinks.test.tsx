@@ -200,4 +200,18 @@ describe("an epic's progress on the task page", () => {
     render(<TaskLinks projectId="p1" projectKey="TP" task={baseTask()} onChanged={() => {}} />);
     expect(screen.queryByRole("progressbar")).toBeNull();
   });
+
+  it("marks an archived child beside the bar that does not count it", () => {
+    const archivedChild = { ...linked("k3", 4, "Dropped slice"), archivedAt: "2026-10-05T10:00:00.000Z" };
+    const task = baseTask({
+      relations: [...children, archivedChild].map((child) => ({ task: child, type: "parent_of" as const })),
+      progress: { total: 2, done: 1, byStatus: { done: 1, todo: 1 } },
+    });
+    render(<TaskLinks projectId="p1" projectKey="TP" task={task} onChanged={() => {}} />);
+
+    const badges = screen.getAllByTestId("link-archived");
+    expect(badges).toHaveLength(1);
+    expect(badges[0].textContent).toBe("Archived");
+    expect(badges[0].closest("div")?.textContent).toContain("Dropped slice");
+  });
 });
