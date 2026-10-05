@@ -113,6 +113,15 @@ const RECIPES: Record<string, Recipe> = {
     send: (request, path) => request.delete(path, { headers: SAME_ORIGIN }),
     handled: { status: 200, body: JSON_ARRAY },
   },
+  // A single-organisation instance: the owner is told the operator's secret signs, and is never shown it (BP-669)
+  "GET /api/projects/[projectId]/webhooks/signing-secret": {
+    send: get,
+    handled: { status: 200, body: /^\{"signing":"instance"\}$/ },
+  },
+  "POST /api/projects/[projectId]/webhooks/signing-secret": {
+    send: withBody("post", {}),
+    handled: { status: 409, body: /signs with one secret set by its operator/ },
+  },
   "GET /api/projects/[projectId]/members": {
     send: get,
     handled: { status: 200, body: new RegExp(`"username":"${OWNER_USERNAME}"[^}]*"relation":"owner"`) },

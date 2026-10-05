@@ -133,6 +133,7 @@ export const GROUPS = {
     "organisation-wall-values.spec.ts",
     "credential-organisation-binding.spec.ts",
     "organisations-isolation.spec.ts",
+    "organisations-webhook-signing.spec.ts",
     "organisations-licence.spec.ts",
     "organisations-oidc-relay.spec.ts",
     "organisations-route-families.spec.ts",

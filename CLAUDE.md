@@ -162,6 +162,9 @@ PM_DAILY_TOKEN_CAP=       # Optional — tokens per project per day; unset means
                           # real turns, calls and tokens to set it from
 PM_SCHEDULER_TICK_MS=     # Optional — PM autonomy scheduler tick (default: 300000)
 WEBHOOK_SIGNING_SECRET=   # Optional — HMACs outgoing webhook deliveries (x-boardplanner-signature)
+                          # as set; with ORGANISATION_DOMAIN each organisation signs with its own key,
+                          # HMAC(secret, its id), which project owners read in the Webhooks panel and
+                          # the API never serves on a single-organisation instance (BP-669)
 DIGEST_HOUR=              # Optional — hour the opt-in daily digest goes out (default 7); an organisation's own
                           # Organisation.digestHour wins (BP-667)
 DIGEST_TIMEZONE=          # Optional — the zone that hour is read in (default Europe/Warsaw); Organisation.timezone wins
