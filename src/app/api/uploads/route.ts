@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { readFormBody } from "@/lib/request-body";
-import mongoose from "mongoose";
 import { Readable } from "stream";
 import { connectDB } from "@/lib/db";
 import { withAuth, resolveProjectId } from "@/lib/middleware";
 import { check } from "@/lib/grants";
+import { organisationUploads } from "@/lib/upload-ownership";
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 // The whole multipart envelope, not the file: part headers, the boundary and the projectId field
@@ -31,7 +31,7 @@ const ALLOWED_MIME_TYPES = new Set([
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 ]);
 
-export const POST = withAuth(async (request, { user, db: scopedDb }) => {
+export const POST = withAuth(async (request, { user, db }) => {
   await connectDB();
 
   // Counted through, not just declared. The file.size check further down cannot be the bound:
@@ -61,11 +61,11 @@ export const POST = withAuth(async (request, { user, db: scopedDb }) => {
     return NextResponse.json({ error: "projectId is required" }, { status: 400 });
   }
   // Callers hold a project key; grants are keyed on the id
-  const project = await resolveProjectId(scopedDb, projectId);
+  const project = await resolveProjectId(db, projectId);
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
-  if (!(await check(scopedDb, user, project, "access"))) {
+  if (!(await check(db, user, project, "access"))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -84,26 +84,20 @@ export const POST = withAuth(async (request, { user, db: scopedDb }) => {
   }
 
   const buffer = Buffer.from(await file.arrayBuffer());
-  const db = mongoose.connection.db;
-  if (!db) {
+  const uploads = organisationUploads(db);
+  if (!uploads) {
     return NextResponse.json(
       { error: "Database not connected" },
       { status: 500 }
     );
   }
 
-  const bucket = new mongoose.mongo.GridFSBucket(db, {
-    bucketName: "uploads",
-  });
-
-  const uploadStream = bucket.openUploadStream(file.name, {
-    metadata: {
-      contentType: file.type,
-      originalName: file.name,
-      size: file.size,
-      project: project,
-      uploadedBy: String(user._id),
-    },
+  const uploadStream = uploads.upload(file.name, {
+    contentType: file.type,
+    originalName: file.name,
+    size: file.size,
+    project: project,
+    uploadedBy: String(user._id),
   });
 
   await new Promise<void>((resolve, reject) => {

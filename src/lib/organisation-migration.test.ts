@@ -24,9 +24,21 @@ describe("backfillOrganisations", () => {
 
     const { total } = await backfillOrganisations(connection, { apply: true });
 
-    expect(calls.updateMany).toHaveBeenCalledTimes(scopedModelNames().length);
+    expect(calls.updateMany).toHaveBeenCalledTimes(scopedModelNames().length + 1);
     expect(calls.updateMany).toHaveBeenCalledWith({ organisation: null }, { $set: { organisation: DEFAULT_ORGANISATION_ID } });
-    expect(total).toBe(2 * scopedModelNames().length);
+    expect(total).toBe(2 * (scopedModelNames().length + 1));
+  });
+
+  it("gives every uploaded file without one the default organisation in its metadata (BP-668)", async () => {
+    const { connection, calls, touched } = fakeDb(1);
+
+    await backfillOrganisations(connection, { apply: true });
+
+    expect(touched).toContain("uploads.files");
+    expect(calls.updateMany).toHaveBeenCalledWith(
+      { "metadata.organisation": null },
+      { $set: { "metadata.organisation": DEFAULT_ORGANISATION_ID } }
+    );
   });
 
   it("touches neither the organisation table nor the throttle", async () => {
@@ -45,7 +57,7 @@ describe("backfillOrganisations", () => {
     const { total } = await backfillOrganisations(connection, { apply: false });
 
     expect(calls.updateMany).not.toHaveBeenCalled();
-    expect(total).toBe(3 * scopedModelNames().length);
+    expect(total).toBe(3 * (scopedModelNames().length + 1));
   });
 
   it("refuses a connection that has no database", async () => {

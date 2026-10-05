@@ -78,6 +78,7 @@ describe("POST /api/uploads", () => {
     expect(check).toHaveBeenCalledWith(scopedToDefaultOrganisation(), USER, PROJECT, "access");
     expect(uploadedMetadata().project).toBe(PROJECT);
     expect(uploadedMetadata().uploadedBy).toBe("u1");
+    expect(String(uploadedMetadata().organisation)).toBe(String(scopedToDefaultOrganisation().organisation));
   });
 
   // Without an owner a file id is a bearer token for anyone who guesses it

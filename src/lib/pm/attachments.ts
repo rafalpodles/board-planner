@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
-import { projectForUpload, UPLOAD_BUCKET } from "@/lib/upload-ownership";
+import { organisationUploads, projectForUpload } from "@/lib/upload-ownership";
+import type { ScopedDb } from "@/lib/db-scope";
 import { connectDB } from "@/lib/db";
 import { PmAttachment } from "@/types";
 
@@ -27,12 +28,13 @@ export function estimateImageTokens(a: PmAttachment): number {
 // projectId is required, not optional: this is the second way to read a file out of GridFS, and
 // leaving it ungated made the ownership check on GET /api/uploads/[fileId] bypassable outright.
 export async function loadAttachmentDataUri(
+  db: ScopedDb,
   a: PmAttachment,
   projectId: string
 ): Promise<string | null> {
   await connectDB();
-  const db = mongoose.connection.db;
-  if (!db) return null;
+  const uploads = organisationUploads(db);
+  if (!uploads) return null;
 
   let objectId: mongoose.Types.ObjectId;
   try {
@@ -41,8 +43,7 @@ export async function loadAttachmentDataUri(
     return null;
   }
 
-  const bucket = new mongoose.mongo.GridFSBucket(db, { bucketName: UPLOAD_BUCKET });
-  const found = await bucket.find({ _id: objectId }).toArray();
+  const found = await uploads.find([objectId]);
   if (found.length === 0) return null;
 
   // Before the bytes are read, not after. The route beside this one refuses first and streams
@@ -56,7 +57,7 @@ export async function loadAttachmentDataUri(
 
   const chunks: Buffer[] = [];
   try {
-    for await (const chunk of bucket.openDownloadStream(objectId)) {
+    for await (const chunk of uploads.download(found[0])) {
       chunks.push(chunk as Buffer);
     }
   } catch {
@@ -83,12 +84,13 @@ export async function loadAttachmentDataUri(
  * file, or one belonging to another board.
  */
 export async function anyAttachmentReadable(
+  db: ScopedDb,
   attachments: PmAttachment[],
   projectId: string
 ): Promise<boolean> {
   await connectDB();
-  const db = mongoose.connection.db;
-  if (!db) return false;
+  const uploads = organisationUploads(db);
+  if (!uploads) return false;
 
   // Keyed by the canonical id, not by what the client typed: ObjectId accepts hex in any case and
   // stringifies it lowercase, so a raw-string key misses for every non-canonical spelling.
@@ -103,8 +105,7 @@ export async function anyAttachmentReadable(
   const ids = [...claimed.keys()].map((id) => new mongoose.Types.ObjectId(id));
   if (ids.length === 0) return false;
 
-  const bucket = new mongoose.mongo.GridFSBucket(db, { bucketName: UPLOAD_BUCKET });
-  const found = await bucket.find({ _id: { $in: ids } }).toArray();
+  const found = await uploads.find(ids);
   return found.some(
     (file) =>
       projectForUpload(file) === String(projectId) &&
@@ -117,6 +118,7 @@ export async function anyAttachmentReadable(
 // A message the model receives: plain string when there is nothing attached, so text-only
 // turns keep exactly the shape they had before
 export async function buildUserContent(
+  db: ScopedDb,
   text: string,
   attachments: PmAttachment[] | undefined,
   projectId: string
@@ -126,7 +128,7 @@ export async function buildUserContent(
   // An image on its own carries no text, and an empty text block is something providers reject
   const blocks: Record<string, unknown>[] = text.trim() ? [{ type: "text", text }] : [];
   for (const a of attachments) {
-    const url = await loadAttachmentDataUri(a, projectId);
+    const url = await loadAttachmentDataUri(db, a, projectId);
     if (url) blocks.push({ type: "image_url", image_url: { url } });
   }
   return blocks.some((b) => b.type === "image_url") ? blocks : text;

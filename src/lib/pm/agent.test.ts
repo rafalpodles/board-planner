@@ -85,7 +85,7 @@ vi.mock("./history", () => ({
 // A function, not a constant: a turn carrying only a picture puts an extra system message in
 // front of the user content, and that nudge is one of the things the cache boundary must exclude
 const buildUserContentMock = vi.fn(async (text: string): Promise<unknown> => text);
-vi.mock("./attachments", () => ({ buildUserContent: (text: string) => buildUserContentMock(text) }));
+vi.mock("./attachments", () => ({ buildUserContent: (_db: unknown, text: string) => buildUserContentMock(text) }));
 vi.mock("@/lib/columns", () => ({
   getProjectColumns: () => [{ id: "todo", role: "approved" }],
   defaultStatusFor: () => "todo",
@@ -648,7 +648,7 @@ describe("the history a turn replays", () => {
 
     await turn([]);
 
-    const [history, , opts] = replayHistoryMock.mock.calls.at(-1)!;
+    const [, history, , opts] = replayHistoryMock.mock.calls.at(-1)!;
     expect(history).toHaveLength(30);
     expect(opts).toEqual({ olderExist: true });
     // Newest thirty, oldest first: the extra row fetched is the one dropped
@@ -662,6 +662,6 @@ describe("the history a turn replays", () => {
 
     await turn([]);
 
-    expect(replayHistoryMock.mock.calls.at(-1)![2]).toEqual({ olderExist: false });
+    expect(replayHistoryMock.mock.calls.at(-1)![3]).toEqual({ olderExist: false });
   });
 });
