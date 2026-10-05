@@ -328,6 +328,34 @@ describe("TaskDetail", () => {
       await waitFor(() => expect(screen.queryByTestId("archived-banner")).toBeNull());
     });
 
+    it("keeps focus on the page when the banner it was clicked in goes away", async () => {
+      serve({ task: { archivedAt: "2026-10-05T10:00:00.000Z" } });
+      api.del.mockResolvedValue({ archivedAt: null });
+      renderDetail();
+      await loaded();
+
+      await act(async () =>
+        within(screen.getByTestId("archived-banner")).getByRole("button", { name: "Restore" }).click()
+      );
+
+      await waitFor(() => expect(screen.queryByTestId("archived-banner")).toBeNull());
+      expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Task title" }));
+    });
+
+    it("leaves focus on Restore when the restore fails, so it can be tried again", async () => {
+      serve({ task: { archivedAt: "2026-10-05T10:00:00.000Z" } });
+      api.del.mockRejectedValue(new Error("boom"));
+      renderDetail();
+      await loaded();
+      const restore = within(screen.getByTestId("archived-banner")).getByRole("button", { name: "Restore" });
+      restore.focus();
+
+      await act(async () => restore.click());
+
+      await waitFor(() => expect(toast).toHaveBeenCalledWith("Failed to restore task", "error"));
+      expect(document.activeElement).toBe(restore);
+    });
+
     it("dates an old archive instead of printing a bare locale date after 'Archived'", async () => {
       serve({ task: { archivedAt: "2026-08-05T10:00:00.000Z" } });
       renderDetail();

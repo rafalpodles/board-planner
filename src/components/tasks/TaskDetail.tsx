@@ -458,7 +458,7 @@ function TaskDetailView({
     }
   }
 
-  async function handleRestore() {
+  async function handleRestore(): Promise<boolean> {
     setArchiving(true);
     try {
       await api.del(`/api/projects/${projectId}/tasks/${task._id}/archive`);
@@ -466,10 +466,18 @@ function TaskDetailView({
       wroteHistory();
       emitBoardRefresh(projectId);
       toast("Task restored", "success");
+      return true;
     } catch {
       toast("Failed to restore task", "error");
+      return false;
     } finally {
       setArchiving(false);
+    }
+  }
+
+  async function restoreFromBanner() {
+    if (await handleRestore()) {
+      scrollBox?.querySelector<HTMLTextAreaElement>('textarea[aria-label="Task title"]')?.focus();
     }
   }
 
@@ -518,7 +526,7 @@ function TaskDetailView({
             <strong className="font-medium text-text">Archived</strong> {agoOrOn(archivedAt)}. This
             task is hidden from the board and every list; it can still be opened from its link.
           </span>
-          <Button size="sm" variant="secondary" onClick={handleRestore} disabled={archiving}>
+          <Button size="sm" variant="secondary" onClick={restoreFromBanner} disabled={archiving}>
             Restore
           </Button>
         </div>
