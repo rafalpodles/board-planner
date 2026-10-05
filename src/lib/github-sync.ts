@@ -6,6 +6,7 @@ import { decryptSecret } from "@/lib/encryption";
 import { fetchPullRequests, matchPRsToTasks, parseRepoString, withChecks } from "@/lib/github";
 import { logActivity } from "@/lib/activity";
 import { getProjectColumns } from "@/lib/columns";
+import { NOT_ARCHIVED } from "@/lib/task-archive";
 import {
   addedLinks,
   recordLinkChanges,
@@ -364,7 +365,7 @@ export async function syncGithubPullRequests(
       // it two overlapping syncs both saw `in_review`, both wrote `ready_to_test`, and both logged
       // the transition — one move, two rows in the task's history.
       const moved = await db.Task.updateOne(
-        { _id: task._id, status: "in_review" },
+        { _id: task._id, status: "in_review", "execution.runId": { $in: ["", null] }, ...NOT_ARCHIVED },
         { $set: { status: "ready_to_test" } }
       );
       if (moved.modifiedCount === 1) {

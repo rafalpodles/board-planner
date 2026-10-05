@@ -162,10 +162,21 @@ describe("POST .../gitlab/sync — linking", () => {
     const body = await (await POST(request(), ctx())).json();
 
     expect(taskUpdateOne).toHaveBeenCalledWith(
-      { _id: doc._id, status: doc.status, organisation: DEFAULT_ORGANISATION_ID },
+      { _id: doc._id, status: doc.status, "execution.runId": { $in: ["", null] }, archivedAt: null, organisation: DEFAULT_ORGANISATION_ID },
       { $set: { status: "ready_to_test" } }
     );
     expect(body.autoTransitioned).toBe(1);
+  });
+
+  it("moves a merged task only while no run holds it and it is not archived", async () => {
+    const doc = task({ status: "in_review" });
+    taskFindOne.mockResolvedValue(doc);
+    fetchMergeRequests.mockResolvedValue([mr({ state: "merged", merged_at: "2026-08-02T00:00:00Z" })]);
+
+    await POST(request(), ctx());
+
+    const moved = taskUpdateOne.mock.calls.find(([, update]) => update.$set?.status === "ready_to_test");
+    expect(moved?.[0]).toMatchObject({ "execution.runId": { $in: ["", null] }, archivedAt: null });
   });
 
   it("records the column it actually moved to", async () => {
@@ -287,7 +298,7 @@ describe("POST .../gitlab/sync — linking", () => {
     await POST(request(), ctx());
 
     expect(taskUpdateOne).toHaveBeenCalledWith(
-      { _id: doc._id, status: doc.status, organisation: DEFAULT_ORGANISATION_ID },
+      { _id: doc._id, status: doc.status, "execution.runId": { $in: ["", null] }, archivedAt: null, organisation: DEFAULT_ORGANISATION_ID },
       { $set: { status: "verifying" } }
     );
     // On the default board the destination happens to BE "ready_to_test", so the hardcoded string
