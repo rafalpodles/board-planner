@@ -54,6 +54,7 @@ jobs:
         env:
           DEMO_USERNAME: ${{ vars.TRAWLER_APP_USERNAME }}
           DEMO_PASSWORD: ${{ vars.TRAWLER_APP_PASSWORD }}
+          TRAWLER_ACCOUNT_PEOPLE: ${{ vars.TRAWLER_ACCOUNT_PEOPLE }}
 
       - uses: actions/checkout@v7
         with:
