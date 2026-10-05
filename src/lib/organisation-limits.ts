@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { Types } from "mongoose";
+import type { IUser } from "@/types";
 import { countInWindow } from "./rate-limit";
 import { organisationDomain } from "./organisation-host";
 import { ORGANISATION_LIMIT_HEADER, type RequestLimitScope } from "./organisation-limit-header";
@@ -42,6 +43,10 @@ export interface RequestPrincipal {
   id: string;
   // An administrator at the keyboard must still be able to stop whoever is spending the minute
   interactiveAdmin?: boolean;
+}
+
+export function asPrincipal(user: IUser): RequestPrincipal {
+  return { id: String(user._id), interactiveAdmin: user.role === "admin" && !user.viaMachineCredential };
 }
 
 export function organisationRequestsKey(organisation: Types.ObjectId): string {

@@ -16,7 +16,7 @@ import { can, FeatureKey } from "./entitlements";
 import { projectRunsWorkers } from "@/lib/worker-gate";
 import { EXECUTION_LEASE_MS } from "./execution-lease";
 import { inOrganisation } from "./organisation-log";
-import { requestLimitRefusal, type RequestPrincipal } from "./organisation-limits";
+import { asPrincipal, requestLimitRefusal } from "./organisation-limits";
 
 type AuthenticatedHandler = (
   request: Request,
@@ -69,10 +69,6 @@ export async function refusedOnThisHost(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   return null;
-}
-
-export function asPrincipal(user: IUser): RequestPrincipal {
-  return { id: String(user._id), interactiveAdmin: user.role === "admin" && !user.viaMachineCredential };
 }
 
 export function withAuth(handler: AuthenticatedHandler) {

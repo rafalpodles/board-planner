@@ -11,11 +11,11 @@ import { dailyPmSpend, isOverDailyTurnCap } from "@/lib/pm/turn-cap";
 import { MAX_STEPS } from "@/lib/pm/agent";
 import { isPmRunnable, pmDisabledReason, resolvePmModel } from "@/lib/pm/availability";
 import { IMAGE_MIME_TYPES, MAX_ATTACHMENTS_PER_MESSAGE, anyAttachmentReadable, modelAcceptsImages } from "@/lib/pm/attachments";
-import { asPrincipal, databaseUnavailable, resolveProjectId, refusedOnThisHost } from "@/lib/middleware";
+import { databaseUnavailable, resolveProjectId, refusedOnThisHost } from "@/lib/middleware";
 import { check } from "@/lib/grants";
 import { IUser, PmAttachment } from "@/types";
 import { inOrganisation } from "@/lib/organisation-log";
-import { requestLimitRefusal } from "@/lib/organisation-limits";
+import { asPrincipal, requestLimitRefusal } from "@/lib/organisation-limits";
 
 export const maxDuration = 300;
 
