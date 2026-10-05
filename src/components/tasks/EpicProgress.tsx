@@ -15,6 +15,7 @@ export function EpicProgress({
         role="progressbar"
         aria-label="Children done"
         aria-valuenow={progress.done}
+        aria-valuetext={progressLine(progress)}
         aria-valuemin={0}
         aria-valuemax={progress.total}
         className="h-1.5 flex-1 overflow-hidden rounded-full bg-bg-input"
