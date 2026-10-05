@@ -47,7 +47,7 @@ async function open(page: Page, url: string) {
 async function chooseTheme(page: Page, name: "Light" | "Dark") {
   await open(page, board);
   const group = page.getByRole("group", { name: "Theme" });
-  await page.getByRole("button", { name: /E2E Admin/ }).click();
+  await page.getByRole("button", { name: "Account menu" }).click();
   await group.getByRole("button", { name, exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", name.toLowerCase());
   await page.mouse.move(0, 0);
