@@ -136,6 +136,9 @@ test.describe("BP-894: one organisation's limits do not touch another's", () => 
     await expect(page.getByRole("alert").filter({ hasText: "Failed to load this board." })).toBeVisible();
     await page.screenshot({ path: "e2e/.artifacts/bp894-limit-desktop.png" });
     await page.setViewportSize({ width: 390, height: 844 });
+    await page.reload();
+    await expect(page.getByRole("status").filter({ hasText: "Your organisation has made more requests this minute" })).toBeVisible();
+    await expect(page.getByRole("alert").filter({ hasText: "Failed to load this board." })).toBeVisible();
     await page.screenshot({ path: "e2e/.artifacts/bp894-limit-phone.png" });
     await member.close();
 
