@@ -47,13 +47,13 @@ describe("resealUnderOrganisationKeys (BP-898)", () => {
     expect(report.needsAttention).toEqual([expect.stringMatching(/changed while this ran/)]);
   });
 
-  it("leaves a row with no organisation, and plaintext and v3 values, alone", async () => {
+  it("leaves a row with no organisation, and v3 and empty values, alone", async () => {
     const { resealUnderOrganisationKeys } = await import("./organisation-secrets-migration");
     const { encryptSecret } = await import("./encryption");
     const { connection, updateOne } = fakeConnection({
       projects: [
         { _id: new Types.ObjectId(), githubToken: await v2("orphan") },
-        { _id: new Types.ObjectId(), organisation: ORGANISATION, githubToken: "plain", codaToken: encryptSecret("x", ORGANISATION) },
+        { _id: new Types.ObjectId(), organisation: ORGANISATION, githubToken: "", codaToken: encryptSecret("x", ORGANISATION) },
       ],
     });
 
@@ -62,5 +62,20 @@ describe("resealUnderOrganisationKeys (BP-898)", () => {
     expect(updateOne).not.toHaveBeenCalled();
     expect(report.resealed).toBe(0);
     expect(report.needsAttention).toEqual([expect.stringMatching(/no organisation/)]);
+  });
+
+  it("seals a value stored in the clear before encryption under the organisation's key", async () => {
+    const { resealUnderOrganisationKeys } = await import("./organisation-secrets-migration");
+    const { decryptSecret } = await import("./encryption");
+    const { connection, updateOne } = fakeConnection({
+      projects: [{ _id: new Types.ObjectId(), organisation: ORGANISATION, githubToken: "ghp_plain" }],
+    });
+
+    const report = await resealUnderOrganisationKeys(connection, { apply: true });
+
+    expect(report.resealed).toBe(1);
+    const [[filter, update]] = updateOne.mock.calls as unknown as [[Record<string, unknown>, { $set: { githubToken: string } }]];
+    expect(filter).toMatchObject({ githubToken: "ghp_plain" });
+    expect(decryptSecret(update.$set.githubToken, ORGANISATION)).toBe("ghp_plain");
   });
 });

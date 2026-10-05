@@ -1,5 +1,5 @@
 import type mongoose from "mongoose";
-import { decryptSecret, encryptSecret, isInstanceKeySecret } from "./encryption";
+import { decryptSecret, encryptSecret, isEncryptedSecret, isInstanceKeySecret } from "./encryption";
 
 type Row = Record<string, unknown> & { _id: mongoose.Types.ObjectId; organisation?: mongoose.Types.ObjectId };
 
@@ -23,6 +23,10 @@ const PROJECT_SECRETS: string[][] = [
 ];
 const USER_SECRETS: string[][] = [["notifications", "chat", "webhookUrl"]];
 
+function notUnderOrganisationKey(value: string): boolean {
+  return value !== "" && (isInstanceKeySecret(value) || !isEncryptedSecret(value));
+}
+
 function found(node: unknown, steps: string[], at: string[] = []): { path: string; value: string }[] {
   if (steps.length === 0) return typeof node === "string" ? [{ path: at.join("."), value: node }] : [];
   if (typeof node !== "object" || node === null) return [];
@@ -34,8 +38,8 @@ function found(node: unknown, steps: string[], at: string[] = []): { path: strin
 }
 
 /**
- * BP-898: rewrites every secret still sealed under the instance key (v1, v2) under its
- * organisation's own data key (v3). Run after the release that reads v3, never before: the one
+ * BP-898: rewrites every secret still sealed under the instance key (v1, v2), or stored in the
+ * clear by a release before encryption, under its organisation's own data key (v3). Run after the release that reads v3, never before: the one
  * before cannot open v3. Each row is rewritten only if every value this read is still there.
  */
 export async function resealUnderOrganisationKeys(
@@ -52,7 +56,7 @@ export async function resealUnderOrganisationKeys(
   ] as const) {
     report.byCollection[collection] = 0;
     for await (const row of db.collection<Row>(collection).find({})) {
-      const stale = paths.flatMap((steps) => found(row, steps)).filter(({ value }) => isInstanceKeySecret(value));
+      const stale = paths.flatMap((steps) => found(row, steps)).filter(({ value }) => notUnderOrganisationKey(value));
       if (stale.length === 0) continue;
       if (!row.organisation) {
         report.needsAttention.push(`${collection} ${row._id}: no organisation, so no key to seal under`);

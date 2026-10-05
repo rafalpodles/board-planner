@@ -35,6 +35,7 @@ test.beforeEach(async () => {
     _id: PROJECT,
     organisation: ACME,
     githubToken: legacyV2("ghp_acme"),
+    gitlabToken: "glpat-stored-before-encryption",
     notificationChannels: [{ _id: new mongoose.Types.ObjectId(), name: "Releases", webhookUrl: legacyV2("https://hooks.slack.com/x") }],
     pm: { mcpServers: [{ name: "tracker", authToken: legacyV2("mcp-token"), oauth: { clientSecret: "", accessToken: legacyV2("at"), refreshToken: "" } }] },
   } as never);
@@ -46,21 +47,22 @@ test.afterEach(async () => {
   await mongoose.disconnect();
 });
 
-test("BP-898: the reseal moves every instance-key secret under its organisation's key, a dry run writes nothing, and a second run finds nothing", async () => {
+test("BP-898: the reseal moves every instance-key or plaintext secret under its organisation's key, a dry run writes nothing, and a second run finds nothing", async () => {
   const { resealUnderOrganisationKeys, decryptSecret } = await encryption();
 
   const dry = await resealUnderOrganisationKeys(mongoose.connection, { apply: false });
-  expect(dry.byCollection).toEqual({ projects: 4, users: 1 });
+  expect(dry.byCollection).toEqual({ projects: 5, users: 1 });
   expect((await col("projects").findOne({ _id: PROJECT }))!.githubToken).toMatch(/^enc:v2:/);
 
   const done = await resealUnderOrganisationKeys(mongoose.connection, { apply: true });
-  expect(done.resealed).toBe(5);
+  expect(done.resealed).toBe(6);
   expect(done.needsAttention).toEqual([]);
 
   const project = (await col("projects").findOne({ _id: PROJECT }))!;
   const user = (await col("users").findOne({ _id: USER }))!;
   for (const value of [
     project.githubToken,
+    project.gitlabToken,
     project.notificationChannels[0].webhookUrl,
     project.pm.mcpServers[0].authToken,
     project.pm.mcpServers[0].oauth.accessToken,
@@ -69,6 +71,7 @@ test("BP-898: the reseal moves every instance-key secret under its organisation'
     expect(value).toMatch(/^enc:v3:/);
   }
   expect(decryptSecret(project.githubToken, ACME)).toBe("ghp_acme");
+  expect(decryptSecret(project.gitlabToken, ACME)).toBe("glpat-stored-before-encryption");
   expect(decryptSecret(user.notifications.chat.webhookUrl, ACME)).toBe("https://hooks.slack.com/me");
   expect(() => decryptSecret(project.githubToken, new mongoose.Types.ObjectId("0000000000000000000000b2"))).toThrow(/another organisation/);
   expect(project.pm.mcpServers[0].oauth.refreshToken).toBe("");

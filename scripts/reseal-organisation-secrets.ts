@@ -1,11 +1,11 @@
 /**
- * BP-898: reseals every secret still under the instance key with its organisation's own key.
+ * BP-898: reseals every secret still under the instance key, or in the clear, with its organisation's own key.
  * Run after the deploy that reads both, with the ENCRYPTION_KEY (and ENCRYPTION_KEYS_OLD) the app runs with.
  *
  *   MONGODB_URI=... ENCRYPTION_KEY=... npx tsx scripts/reseal-organisation-secrets.ts            # dry run
  *   MONGODB_URI=... ENCRYPTION_KEY=... npx tsx scripts/reseal-organisation-secrets.ts --apply
  *
- * Safe to re-run: done when a dry run reports 0 and nothing to act on.
+ * Safe to re-run: done when a dry run reports 0 and exits 0; anything to act on exits 1.
  */
 
 import mongoose from "mongoose";
@@ -26,8 +26,11 @@ async function main() {
   const report = await resealUnderOrganisationKeys(mongoose.connection, { apply });
   console.log(JSON.stringify(report.byCollection, null, 2));
   console.log(`${apply ? "Resealed" : "Would reseal"} ${report.resealed} secret(s).`);
-  if (report.needsAttention.length) console.log(`Act on these:\n${report.needsAttention.map((line) => `  ${line}`).join("\n")}`);
   await mongoose.disconnect();
+  if (report.needsAttention.length) {
+    console.error(`Act on these:\n${report.needsAttention.map((line) => `  ${line}`).join("\n")}`);
+    process.exitCode = 1;
+  }
 }
 
 main().catch((err) => {

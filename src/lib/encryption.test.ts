@@ -276,13 +276,18 @@ describe("a data key per organisation (BP-898)", () => {
     expect(() => decryptSecret(sealed, OTHER)).toThrow(/another organisation/);
   });
 
-  it("is not the instance key: the same secret seals differently for two organisations, and not as v2", async () => {
+  it("is not the instance key: a secret seals as v3, which a v2 reader of the instance key cannot open", async () => {
     process.env.ENCRYPTION_KEY = KEY_A;
     const { encryptSecret, isInstanceKeySecret } = await load();
 
     const sealed = encryptSecret("ghp", TEST_ORGANISATION);
     expect(sealed.startsWith("enc:v3:")).toBe(true);
     expect(isInstanceKeySecret(sealed)).toBe(false);
+    const [, , , payload] = sealed.split(":");
+    const raw = Buffer.from(payload, "base64");
+    const decipher = crypto.createDecipheriv("aes-256-gcm", Buffer.from(KEY_A, "hex"), raw.subarray(0, 12));
+    decipher.setAuthTag(raw.subarray(12, 28));
+    expect(() => Buffer.concat([decipher.update(raw.subarray(28)), decipher.final()])).toThrow();
   });
 
   it("still reads a secret written under the instance key before, for any organisation", async () => {
