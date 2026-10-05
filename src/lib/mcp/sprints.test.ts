@@ -33,7 +33,7 @@ describe("findSprint", () => {
 });
 
 describe("incompleteDestination", () => {
-  const [active, planned, completed] = SPRINTS;
+  const [active, planned] = SPRINTS;
 
   it("sends unfinished tasks to the backlog, or to another sprint by its id", () => {
     expect(incompleteDestination("Backlog", SPRINTS, active)).toEqual({ moveIncompleteToBacklog: true });
@@ -43,7 +43,6 @@ describe("incompleteDestination", () => {
   it("refuses the sprint being closed as its own destination, and a completed sprint", () => {
     expect(() => incompleteDestination("Sprint 4", SPRINTS, active)).toThrow(/its own destination/);
     expect(() => incompleteDestination("Old", SPRINTS, active)).toThrow(/is completed/);
-    expect(completed.status).toBe("completed");
   });
 
   it("refuses a sprint the board does not have", () => {

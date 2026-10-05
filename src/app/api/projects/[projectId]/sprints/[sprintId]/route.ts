@@ -79,6 +79,16 @@ export const PUT = withProjectAccess(async (request, { params, db }) => {
   if (updates.status && !SPRINT_STATUSES.includes(updates.status as SprintStatus)) {
     return NextResponse.json({ error: "Invalid sprint status" }, { status: 400 });
   }
+  // Every refusal ahead of every write: the move of unfinished tasks below runs before the update, so a
+  // name or a date the update would then refuse left the sprint open with its tasks already carried away
+  if (typeof updates.name === "string" && updates.name.trim() === "") {
+    return NextResponse.json({ error: "A sprint needs a name" }, { status: 400 });
+  }
+  for (const field of ["startDate", "endDate"] as const) {
+    if (updates[field] instanceof Date && Number.isNaN((updates[field] as Date).getTime())) {
+      return NextResponse.json({ error: `Invalid ${field}` }, { status: 400 });
+    }
+  }
 
   // If activating, deactivate other active sprints in this project
   if (updates.status === "active") {

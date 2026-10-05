@@ -635,7 +635,7 @@ export function registerPlannerTools(server: McpServer): void {
         {
           project: z.string().describe("Project key (e.g. 'CP')"),
           sprint: z.string().describe("The sprint, by name or id"),
-          confirmName: z.string().describe("The sprint's name, exactly as list_sprints shows it, to confirm"),
+          confirmName: z.string().describe("The sprint's name, as list_sprints shows it (case does not matter), to confirm"),
         },
         { writes: true }
       ),
@@ -679,8 +679,20 @@ export function registerPlannerTools(server: McpServer): void {
       }, { writes: true }),
     },
     async ({ project, sprintId, name, startDate, endDate, goal, status, moveIncomplete }, extra) => {
-      if (![name, startDate, endDate, goal, status].some((v) => v !== undefined)) {
+      if (![name, startDate, endDate, goal, status, moveIncomplete].some((v) => v !== undefined)) {
         throw new Error(`update_sprint ${NOTHING_TO_CHANGE}`);
+      }
+      // Before any lookup, and before the route's move of unfinished tasks, which runs ahead of the write
+      // that would then fail on it: a name that is blank or a day that is not one must not leave a sprint
+      // open with its tasks already carried away
+      if (name !== undefined && name.trim() === "") throw new Error("A sprint needs a name. Nothing was written.");
+      for (const [label, day] of [["startDate", startDate], ["endDate", endDate]] as const) {
+        if (day !== undefined && Number.isNaN(Date.parse(day))) {
+          throw new Error(`Invalid ${label} "${echo(day)}" — a day, YYYY-MM-DD. Nothing was written.`);
+        }
+      }
+      if (moveIncomplete !== undefined && status !== "completed") {
+        throw new Error("moveIncomplete goes with status completed: it says where the unfinished tasks go as the sprint closes. Nothing was written.");
       }
 
       const client = clientFrom(extra);
@@ -691,16 +703,12 @@ export function registerPlannerTools(server: McpServer): void {
       if (endDate !== undefined) updates.endDate = endDate;
       if (goal !== undefined) updates.goal = goal;
       if (status !== undefined) updates.status = status;
-      if (Object.keys(updates).length === 0) throw new Error(`update_sprint ${NOTHING_TO_CHANGE}`);
 
       // Named or numbered by the caller, but acted on by id — and checked against this board's own
       // sprints first, so a name two sprints share cannot complete the wrong one
       const sprints = (await client.listSprints(proj._id)) as SprintRow[];
       const target = findSprint(sprintId, sprints);
       if (moveIncomplete !== undefined) {
-        if (status !== "completed") {
-          throw new Error("moveIncomplete goes with status completed: it says where the unfinished tasks go as the sprint closes. Nothing was written.");
-        }
         Object.assign(updates, incompleteDestination(moveIncomplete, sprints, target));
       }
 

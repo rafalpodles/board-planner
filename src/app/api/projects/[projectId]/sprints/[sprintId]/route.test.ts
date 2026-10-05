@@ -128,6 +128,20 @@ describe("PUT .../sprints/[sprintId] — our own sprint", () => {
     });
   });
 
+  // The move below runs before the update. A name or a date the update would then refuse used to leave the
+  // sprint open with its unfinished tasks already carried away
+  it.each([
+    ["a blank name", { name: "  " }],
+    ["a start that is not a date", { startDate: "next monday" }],
+    ["an end that is not a date", { endDate: "soon" }],
+  ])("refuses %s before any task is moved", async (_what, extra) => {
+    const res = await PUT(request({ status: "completed", moveIncompleteToBacklog: true, ...extra }), ctx(OUR_SPRINT));
+
+    expect(res.status).toBe(400);
+    expect(taskUpdateMany).not.toHaveBeenCalled();
+    expect(sprintUpdateMany).not.toHaveBeenCalled();
+  });
+
   it("refuses a destination sprint that is not this project's", async () => {
     const res = await PUT(
       request({ status: "completed", moveIncompleteToSprint: THEIR_SPRINT }),

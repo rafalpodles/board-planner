@@ -799,10 +799,32 @@ describe("sprints", () => {
     });
 
     it("still refuses a call that names nothing to change, before any lookup", async () => {
+      const project = vi.mocked(PlannerClient.prototype.getProjectByKey);
       const lookup = vi.spyOn(PlannerClient.prototype, "listSprints");
+      project.mockClear();
 
       await expect(run("update_sprint", { sprintId: "Sprint 4" })).rejects.toThrow(/nothing to change/);
+      expect(project).not.toHaveBeenCalled();
       expect(lookup).not.toHaveBeenCalled();
+    });
+
+    it("says moveIncomplete needs a completion when that is all it was given", async () => {
+      await expect(run("update_sprint", { sprintId: "Sprint 4", moveIncomplete: "backlog" })).rejects.toThrow(
+        /goes with status completed/
+      );
+    });
+
+    // The route moves the unfinished tasks before it writes the sprint, so a write it then refuses would
+    // leave the sprint open with its tasks gone
+    it("refuses a blank name and a day that is not one before anything is looked up or moved", async () => {
+      const lookup = vi.spyOn(PlannerClient.prototype, "listSprints");
+
+      await expect(run("update_sprint", { sprintId: "Sprint 4", status: "completed", moveIncomplete: "backlog", name: "  " })).rejects.toThrow(/needs a name/);
+      await expect(run("update_sprint", { sprintId: "Sprint 4", status: "completed", moveIncomplete: "backlog", startDate: "next monday" })).rejects.toThrow(
+        /Invalid startDate "next monday"/
+      );
+      expect(lookup).not.toHaveBeenCalled();
+      expect(wrote).not.toHaveBeenCalled();
     });
   });
 });
