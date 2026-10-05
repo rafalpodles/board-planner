@@ -26,6 +26,16 @@ beforeEach(() => {
   getAuthUser.mockResolvedValue({ _id: "a1", role: "admin" });
 });
 
+describe("GET /api/tasks/mine and archived tasks", () => {
+  it("asks only for the tasks nobody archived", async () => {
+    taskFind.mockReturnValue(rows([]));
+
+    await GET(new Request("http://localhost/api/tasks/mine"), { params: Promise.resolve({}) });
+
+    expect(taskFind).toHaveBeenCalledWith(expect.objectContaining({ assignee: "a1", archivedAt: null }));
+  });
+});
+
 // BP-326: every task-returning route publishes execution the same way
 describe("GET /api/tasks/mine", () => {
   it("does not publish a held task's run id", async () => {

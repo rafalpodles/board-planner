@@ -51,6 +51,16 @@ export interface ProjectBoard {
   heldDelete: { retry: () => Promise<unknown>; conflict: RunConflict; taskKey: string } | null;
   setHeldDelete: (held: ProjectBoard["heldDelete"]) => void;
   forceHeldDelete: () => Promise<void>;
+  /** Archived tasks are hidden from the board and the list unless this is on */
+  showArchived: boolean;
+  setShowArchived: (show: boolean) => void;
+  // Its own state like heldDelete: archiving takes the task off the machine, and says so
+  heldArchive: { retry: () => Promise<unknown>; conflict: RunConflict; taskKey: string } | null;
+  setHeldArchive: (held: ProjectBoard["heldArchive"]) => void;
+  forceHeldArchive: () => Promise<void>;
+  handleContextArchive: (taskId: string) => Promise<void>;
+  handleContextRestore: (taskId: string) => Promise<void>;
+  handleBulkArchive: () => Promise<void>;
   handleStatusChange: (taskId: string, status: string) => Promise<void>;
   handleTaskDrop: (taskId: string, status: string, dropIndex: number) => Promise<void>;
   handleReorder: (orderedIds: string[]) => Promise<void>;
@@ -169,6 +179,8 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
   const [heldDelete, setHeldDelete] = useState<ProjectBoard["heldDelete"]>(null);
   const [confirmContextDelete, setConfirmContextDelete] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const [heldArchive, setHeldArchive] = useState<ProjectBoard["heldArchive"]>(null);
 
   const [viewMode, setViewModeState] = useState<"board" | "list">(() => {
     if (typeof window === "undefined") return "board";
@@ -192,8 +204,11 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
     // chosen after it left
     const requestScope = scope;
     try {
-      const sprintParam =
-        requestScope && requestScope !== "all" ? `?sprint=${requestScope}` : "";
+      const query = [
+        requestScope && requestScope !== "all" ? `sprint=${requestScope}` : "",
+        showArchived ? "archived=include" : "",
+      ].filter(Boolean);
+      const sprintParam = query.length ? `?${query.join("&")}` : "";
       const [proj, taskList, sprintList] = await Promise.all([
         api.get(`/api/projects/${projectId}`),
         requestScope === null
@@ -228,7 +243,7 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
       if (seq === loadSeq.current) setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, scope]);
+  }, [projectId, scope, showArchived]);
 
   // Once, not on the board poll: the roster does not change while you work
   useEffect(() => {
@@ -622,6 +637,93 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
     }
   }
 
+  function applyArchived(ids: Iterable<string>, archivedAt: string | null) {
+    const changed = new Set(ids);
+    dropReadsInFlight();
+    setTasks((prev) =>
+      showArchived
+        ? prev.map((t) => (changed.has(t._id) ? { ...t, archivedAt } : t))
+        : prev.filter((t) => !changed.has(t._id))
+    );
+  }
+
+  async function handleContextArchive(taskId: string, force?: boolean) {
+    const archive = (asForce?: boolean) =>
+      api.post(`/api/projects/${projectId}/tasks/${taskId}/archive`, asForce ? { force: true } : {});
+    try {
+      const updated = (await writing(() => archive(force))) as Partial<ApiTask>;
+      applyArchived([taskId], updated.archivedAt ?? new Date().toISOString());
+      toast("Task archived", "success");
+    } catch (err) {
+      const failure = err as { status?: number; body?: { runConflict?: RunConflict } };
+      if (failure?.status === 409 && failure.body?.runConflict) {
+        const task = tasks.find((t) => t._id === taskId);
+        setHeldArchive({
+          retry: () => archive(true),
+          conflict: failure.body.runConflict,
+          taskKey: `${project?.key}-${task?.taskNumber}`,
+        });
+        return;
+      }
+      toast("Failed to archive task", "error");
+    }
+  }
+
+  async function forceHeldArchive() {
+    if (!heldArchive) return;
+    const pending = heldArchive;
+    setForcing(true);
+    try {
+      await pending.retry();
+      toast(`${pending.taskKey} taken from the worker and archived`, "success");
+    } catch {
+      toast("Failed to archive task", "error");
+    } finally {
+      setForcing(false);
+      setHeldArchive(null);
+    }
+    loadData();
+  }
+
+  async function handleContextRestore(taskId: string) {
+    try {
+      await writing(() => api.del(`/api/projects/${projectId}/tasks/${taskId}/archive`));
+      applyArchived([taskId], null);
+      toast("Task restored", "success");
+    } catch {
+      toast("Failed to restore task", "error");
+    }
+  }
+
+  async function handleBulkArchive() {
+    const ids = Array.from(selectedTasks);
+    const outcomes = await Promise.allSettled(
+      ids.map((id) => api.post(`/api/projects/${projectId}/tasks/${id}/archive`, {}))
+    );
+    const archived = ids.filter((_, i) => outcomes[i].status === "fulfilled");
+    const held = outcomes
+      .map((outcome, i) => ({ outcome, id: ids[i] }))
+      .filter(({ outcome }) => {
+        if (outcome.status !== "rejected") return false;
+        const failure = outcome.reason as { status?: number; body?: { runConflict?: unknown } };
+        return failure?.status === 409 && !!failure.body?.runConflict;
+      })
+      .map(({ id }) => tasks.find((t) => t._id === id)?.taskNumber)
+      .filter(Boolean);
+
+    applyArchived(archived, new Date().toISOString());
+    setSelectedTasks(new Set());
+
+    if (archived.length === ids.length) {
+      toast(`Archived ${ids.length} task${ids.length === 1 ? "" : "s"}`, "success");
+    } else if (held.length > 0) {
+      const names = held.map((n) => `${project?.key}-${n}`).join(", ");
+      toast(`Archived ${archived.length} of ${ids.length}. ${names} being executed by a worker.`, "error");
+    } else {
+      toast(`Archived ${archived.length} of ${ids.length}`, "error");
+    }
+  }
+
   async function forceHeldDelete() {
     if (!heldDelete) return;
     const pending = heldDelete;
@@ -667,6 +769,14 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
     heldDelete,
     setHeldDelete,
     forceHeldDelete,
+    showArchived,
+    setShowArchived,
+    heldArchive,
+    setHeldArchive,
+    forceHeldArchive,
+    handleContextArchive,
+    handleContextRestore,
+    handleBulkArchive,
     setHeldMove,
     forceHeldMove,
     forcing,

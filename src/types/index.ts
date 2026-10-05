@@ -1169,6 +1169,9 @@ export interface ITask {
   execution: ITaskExecution;
   // Absent on every task that has never had a change refused, which is nearly all of them
   decision?: ITaskDecision | null;
+  // Absent or null on a task nobody archived, which is nearly all of them
+  archivedAt?: Date | null;
+  archivedBy?: Types.ObjectId | IUser | null;
   createdBy: Types.ObjectId | IUser;
   createdAt: Date;
   updatedAt: Date;
@@ -1427,6 +1430,9 @@ export interface ApiTask {
   decision?: ApiTaskDecision;
   /** Machines have spent every attempt on it; no claim takes it again (GET task only) */
   attemptsExhausted?: boolean;
+  /** Set while the task is archived: hidden from every list until someone restores it */
+  archivedAt?: string | null;
+  archivedBy?: ApiUserSummary | string | null;
 }
 
 // Only what a reader needs. lastError is deliberately absent — task-service writes it as "" and
@@ -1536,6 +1542,9 @@ export type ActivityAction =
   // from its own side (BP-658).
   | "link_added"
   | "link_removed"
+  // Taken off every list, and put back
+  | "archived"
+  | "unarchived"
   // `field` holds the criterion's id, so an edit is folded per criterion rather than per list
   | CriterionAction;
 

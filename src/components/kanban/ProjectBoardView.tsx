@@ -69,6 +69,14 @@ export function ProjectBoardView({
     heldDelete,
     setHeldDelete,
     forceHeldDelete,
+    showArchived,
+    setShowArchived,
+    heldArchive,
+    setHeldArchive,
+    forceHeldArchive,
+    handleContextArchive,
+    handleContextRestore,
+    handleBulkArchive,
     setHeldMove,
     forceHeldMove,
     forcing,
@@ -223,6 +231,8 @@ export function ProjectBoardView({
         projectCategories={project.categories || []}
         projectId={projectId}
         currentUsername={user?.username}
+        showArchived={showArchived}
+        onShowArchivedChange={setShowArchived}
         sortField={sortField}
         sortDir={sortDir}
         onSortChange={(field, dir) => {
@@ -381,6 +391,14 @@ export function ProjectBoardView({
             columns={project.columns || []}
             currentSprint={task.sprint}
             selectedCount={bulk}
+            archived={!!task.archivedAt}
+            canDelete={!!project.canAdmin}
+            onArchive={() => {
+              if (bulk > 1) handleBulkArchive();
+              else if (task.archivedAt) handleContextRestore(contextMenu.taskId);
+              else handleContextArchive(contextMenu.taskId);
+              setContextMenu(null);
+            }}
             onStatusChange={(status) =>
               bulk > 1 ? handleBulkMove(status) : handleStatusChange(contextMenu.taskId, status)
             }
@@ -433,6 +451,24 @@ export function ProjectBoardView({
             : ""
         }
         confirmLabel="Delete anyway"
+      />
+
+      <ConfirmDialog
+        open={!!heldArchive}
+        onClose={() => {
+          setHeldArchive(null);
+          reload();
+        }}
+        onConfirm={forceHeldArchive}
+        loading={forcing}
+        title="This task is being executed"
+        message={
+          heldArchive
+            ? `${heldArchive.taskKey} is being executed by ${heldArchive.conflict.workerName || heldArchive.conflict.workerId || "a worker"} (phase ${heldArchive.conflict.phase}). Archiving it takes the task off that worker and its work is lost.`
+            : ""
+        }
+        confirmLabel="Archive anyway"
+        loadingLabel="Archiving..."
       />
 
       {/* The move was refused because a worker is running the task. Taking it costs that run,

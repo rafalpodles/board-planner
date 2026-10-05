@@ -78,6 +78,14 @@ const MINIMAL_PARAM = z
 /** `CP` of `CP-12`, `MY-APP` of `MY-APP-3`: a project key may itself hold hyphens. */
 const keyPrefix = (taskKey: string) => taskKey.slice(0, taskKey.lastIndexOf("-")).toUpperCase();
 
+/** The same task named twice: the project prefix in any case, and `CP-007` is `CP-7`. */
+function sameTaskKey(a: string, b: string) {
+  const parts = (key: string) => key.trim().match(/^(.+)-(\d+)$/);
+  const left = parts(a);
+  const right = parts(b);
+  return !!left && !!right && left[1].toUpperCase() === right[1].toUpperCase() && Number(left[2]) === Number(right[2]);
+}
+
 /** Keyed from the stored number, not the argument: `cp-007` is `CP-7`. */
 function summarised(client: PlannerClient, task: { taskNumber?: number }, taskKey: string) {
   const canonical = `${keyPrefix(taskKey)}-${task.taskNumber}`;
@@ -342,6 +350,13 @@ export function registerPlannerTools(server: McpServer): void {
               "Dropdown, multiselect, text (containing, any case), number and checkbox fields; get_project lists them. " +
               "A multiselect given several options needs all of them."
           ),
+        archived: z
+          .enum(["only", "include"])
+          .optional()
+          .describe(
+            "Archived tasks are left out unless asked for: only lists just the archived ones, include lists them " +
+              "with the rest (each marked archived: true)"
+          ),
         limit: z.number().int().min(1).max(MAX_LIST_LIMIT).optional().describe(`Page size (default ${DEFAULT_LIST_LIMIT})`),
         offset: z.number().int().min(0).optional().describe("Tasks to skip, from a previous answer's nextOffset"),
         detail: z
@@ -351,7 +366,7 @@ export function registerPlannerTools(server: McpServer): void {
       }),
     },
     async (
-      { project, status, assignee, category, priority, sprint, search, parent, dueBefore, dueAfter, updatedSince, blocked, fields, limit, offset, detail },
+      { project, status, assignee, category, priority, sprint, search, parent, dueBefore, dueAfter, updatedSince, blocked, fields, archived, limit, offset, detail },
       extra
     ) => {
       const client = clientFrom(extra);
@@ -366,6 +381,7 @@ export function registerPlannerTools(server: McpServer): void {
       if (dueAfter) filters.dueAfter = dueAfter;
       if (updatedSince) filters.updatedSince = updatedSince;
       if (blocked !== undefined) filters.blocked = String(blocked);
+      if (archived) filters.archived = archived;
 
       if (sprint) {
         const sprints = sprintNeedsLookup(sprint)
@@ -424,6 +440,73 @@ export function registerPlannerTools(server: McpServer): void {
       const { projectId, taskId } = await client.resolveTaskKey(taskKey);
       const task = (await client.getTask(projectId, taskId)) as Record<string, unknown>;
       return json(withTaskKeys(task, keyPrefix(taskKey)));
+    }
+  );
+
+  server.registerTool(
+    "archive_task",
+    {
+      description:
+        "Archive a task: it leaves the board, every list, search, my_tasks, the counts and the PM agent's view, " +
+        "and no worker will claim it, but it keeps its comments and history and can be restored with unarchive_task. " +
+        "Any member of the board may archive. Refused while a worker is running the task. list_tasks with archived " +
+        "finds archived tasks; get_task and every key-addressed tool still reach one by its key.",
+      inputSchema: strictInput({ taskKey: z.string().describe("Task key (e.g. 'CP-1')") }, { writes: true }),
+    },
+    async ({ taskKey }, extra) => {
+      const client = clientFrom(extra);
+      const { projectId, taskId } = await client.resolveTaskKey(taskKey);
+      const task = (await client.archiveTask(projectId, taskId)) as { taskNumber?: number };
+      return json({ archived: true, ...summarised(client, task, taskKey) });
+    }
+  );
+
+  server.registerTool(
+    "unarchive_task",
+    {
+      description: "Restore an archived task to the board, in the column it was archived from. Any member of the board may.",
+      inputSchema: strictInput({ taskKey: z.string().describe("Task key (e.g. 'CP-1')") }, { writes: true }),
+    },
+    async ({ taskKey }, extra) => {
+      const client = clientFrom(extra);
+      const { projectId, taskId } = await client.resolveTaskKey(taskKey);
+      const task = (await client.unarchiveTask(projectId, taskId)) as { taskNumber?: number };
+      return json({ archived: false, ...summarised(client, task, taskKey) });
+    }
+  );
+
+  server.registerTool(
+    "delete_task",
+    {
+      description:
+        "Delete a task for good, with its comments, history and notifications. It cannot be undone, so unless the " +
+        "task is truly unwanted use archive_task. Only the board's owner may delete; a member who is not the owner " +
+        "can only archive. confirmKey has to repeat the task's key, so a wrong key cannot delete the wrong task. " +
+        "Refused, and never forced, while a worker is running the task.",
+      inputSchema: strictInput(
+        {
+          taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
+          confirmKey: z.string().describe("The task's key again (the project prefix may be in any case), to confirm"),
+        },
+        { writes: true }
+      ),
+    },
+    async ({ taskKey, confirmKey }, extra) => {
+      if (!sameTaskKey(taskKey, confirmKey)) {
+        throw new Error(
+          `Not deleted: confirmKey "${echo(confirmKey)}" is not the key of the task to delete, "${echo(taskKey)}". Nothing was written.`
+        );
+      }
+      const client = clientFrom(extra);
+      const { projectId, taskId } = await client.resolveTaskKey(taskKey);
+      if (!(await client.getProject(projectId)).canAdmin) {
+        throw new Error(
+          `Not deleted: only the board's owner may delete a task, and this connection is not the owner's. ` +
+            `Use archive_task for ${echo(taskKey.toUpperCase())} instead. Nothing was written.`
+        );
+      }
+      await client.deleteTask(projectId, taskId);
+      return json({ deleted: taskKey.toUpperCase() });
     }
   );
 

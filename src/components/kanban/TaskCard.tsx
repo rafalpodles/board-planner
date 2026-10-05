@@ -93,6 +93,7 @@ export function TaskCard({
         transition-colors group
         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary
         ${running ? (quiet ? "task-running run-quiet" : "task-running") : ""}
+        ${task.archivedAt ? "opacity-60" : ""}
         ${selected
           ? "border-primary bg-primary/5"
           : tinted
@@ -147,6 +148,15 @@ export function TaskCard({
             {/* `gates:<name>` takes its name from project config, so the length is not ours to
                 assume — the card header is narrow and would wrap for the whole column */}
             <span className="max-w-24 truncate">{runPhase}</span>
+          </span>
+        )}
+        {task.archivedAt && (
+          <span
+            data-testid="card-archived"
+            className="chip text-[11px] px-1.5 py-0.5 rounded font-medium"
+            style={{ "--chip": "var(--color-text-muted)" } as CSSProperties}
+          >
+            Archived
           </span>
         )}
         <Badge variant="priority" value={task.priority} className={COMPACT_BADGE}>

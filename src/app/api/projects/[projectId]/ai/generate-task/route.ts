@@ -11,6 +11,7 @@ import { bareHost, hostOf, projectRepositoryUrl, repositoryProvider } from "@/li
 import { countAttempt, sourceKey } from "@/lib/rate-limit";
 import { AI_PROMPT_MAX_LENGTH } from "@/lib/identifiers";
 import { readJsonBody } from "@/lib/request-body";
+import { NOT_ARCHIVED } from "@/lib/task-archive";
 
 export const MAX_PROMPT_LENGTH = AI_PROMPT_MAX_LENGTH;
 /** Generations one person may start in the rate limiter's 15-minute window */
@@ -146,7 +147,7 @@ async function generate(db: ScopedDb, project: HydratedDocument<IProject>, proje
     // request that cannot work, sent to a host that should never see the address
     fetchReadme(repositoryProvider(project) === "github" ? projectRepositoryUrl(project) : ""),
     db.Task.find(
-      { project: projectId, status: { $ne: "done" } },
+      { project: projectId, status: { $ne: "done" }, ...NOT_ARCHIVED },
       "taskNumber title status description"
     )
       .sort({ taskNumber: -1 })

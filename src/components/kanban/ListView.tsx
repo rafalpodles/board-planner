@@ -454,7 +454,7 @@ export function ListView({
                   }}
                   className={`group/row border-b border-border last:border-b-0 transition-colors ${
                     tinted ? "cat-row" : "hover:bg-bg-input/50"
-                  } ${selected ? "bg-primary/10" : ""} ${
+                  } ${task.archivedAt ? "opacity-60" : ""} ${selected ? "bg-primary/10" : ""} ${
                     index === focusedIndex
                       ? "ring-2 ring-primary ring-inset bg-primary/5"
                       : ""
@@ -527,7 +527,17 @@ export function ListView({
                         53px title without the floor and a 176px one with it, at the cost of a
                         597px row in a 474px scrollport. From about 900 the floor stops binding —
                         the title is over 176px on its own — so this only decides small screens */}
-                    <div className="truncate w-full">{task.title}</div>
+                    <div className="flex w-full items-center gap-2">
+                      {task.archivedAt && (
+                        <span
+                          data-testid="row-archived"
+                          className="shrink-0 rounded bg-bg-input px-1.5 py-0.5 text-[11px] font-medium text-text-muted"
+                        >
+                          Archived
+                        </span>
+                      )}
+                      <span className="truncate">{task.title}</span>
+                    </div>
                   </td>
                   {show("status") && (
                     <td className="px-2 py-2">

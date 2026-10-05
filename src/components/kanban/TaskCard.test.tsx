@@ -500,3 +500,17 @@ describe("TaskCard with a due date that is not a date", () => {
     expect(screen.getByTestId("task-card-due")).toBeTruthy();
   });
 });
+
+describe("TaskCard and an archived task", () => {
+  it("marks it, so it cannot pass for a live one when archived tasks are shown", () => {
+    renderCard({ task: { ...task, archivedAt: "2026-10-05T10:00:00.000Z" } as ApiTask });
+
+    expect(screen.getByTestId("card-archived").textContent).toBe("Archived");
+  });
+
+  it("marks nothing on a task nobody archived", () => {
+    renderCard();
+
+    expect(screen.queryByTestId("card-archived")).toBeNull();
+  });
+});

@@ -117,12 +117,40 @@ describe("GET /api/projects/:projectId/tasks — taskNumber filter", () => {
   });
 });
 
+describe("GET /api/projects/:projectId/tasks — archived tasks", () => {
+  it("leaves archived tasks out unless asked", async () => {
+    await GET(request(), ctx());
+
+    expect(filterUsed()).toMatchObject({ project: PROJECT_ID, archivedAt: null });
+  });
+
+  it("lists only the archived ones with archived=only", async () => {
+    await GET(request("?archived=only"), ctx());
+
+    expect(filterUsed()).toMatchObject({ archivedAt: { $ne: null } });
+  });
+
+  it("lists everything with archived=include", async () => {
+    await GET(request("?archived=include&taskNumber=4"), ctx());
+
+    expect(filterUsed()).not.toHaveProperty("archivedAt");
+    expect(filterUsed()).toMatchObject({ taskNumber: 4 });
+  });
+
+  it("refuses a value it does not have, without reading anything", async () => {
+    const response = await GET(request("?archived=yes"), ctx());
+
+    expect(response.status).toBe(400);
+    expect(taskFind).not.toHaveBeenCalled();
+  });
+});
+
 /**
  * BP-906. A listing a model reads has to fit in its context: paging and a short view, and filters
  * that run in the database rather than over a board already loaded.
  */
 describe("GET /api/projects/:projectId/tasks — paging, the summary view and the narrower filters", () => {
-  const SELECT_FIELDS = "taskNumber title status priority assignee dueDate sprint order updatedAt";
+  const SELECT_FIELDS = "taskNumber title status priority assignee dueDate sprint order updatedAt archivedAt";
   // The scoped db wraps `populate` on the query it is handed, so the spy lives outside that object
   let query: Record<"sort" | "select" | "skip" | "limit" | "populate", ReturnType<typeof vi.fn>>;
   let populateSpy: ReturnType<typeof vi.fn>;

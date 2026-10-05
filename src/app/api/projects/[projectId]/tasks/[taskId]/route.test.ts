@@ -14,8 +14,10 @@ const activityDeleteMany = vi.fn();
 const notificationDeleteMany = vi.fn();
 const taskUpdateMany = vi.fn();
 const severLinksToDeletedTask = vi.fn();
+const check = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+vi.mock("@/lib/grants", () => ({ check }));
 vi.mock("@/lib/task-service", () => ({
   updateTask,
   heldRunRefusal,
@@ -111,6 +113,7 @@ beforeEach(() => {
   taskDeleteOne.mockResolvedValue({ deletedCount: 1 });
   projectFindOne.mockReturnValue({ lean: () => Promise.resolve({ key: "TP" }) });
   heldRunRefusal.mockResolvedValue(null);
+  check.mockResolvedValue(true);
 });
 
 // BP-802: a throw here is logged as an unhandled error, and a client hanging up mid-body is one
@@ -307,6 +310,38 @@ describe("DELETE .../tasks/:taskId and the run hold", () => {
 
     expect(res.status).toBe(404);
     expect(taskDeleteOne).not.toHaveBeenCalled();
+  });
+});
+
+describe("DELETE .../tasks/:taskId is the board owner's", () => {
+  it("refuses a member who is not the owner, pointing at archive, and touches nothing", async () => {
+    check.mockResolvedValue(false);
+
+    const res = await DELETE(deleteRequest(), ctx());
+
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toMatch(/archive/i);
+    expect(check).toHaveBeenCalledWith(scopedToDefaultOrganisation(), expect.objectContaining({ _id: "u1" }), "p1", "admin");
+    expect(taskFindOne).not.toHaveBeenCalled();
+    expect(taskDeleteOne).not.toHaveBeenCalled();
+    expect(commentDeleteMany).not.toHaveBeenCalled();
+  });
+
+  it("refuses a member's force as well", async () => {
+    check.mockResolvedValue(false);
+
+    const res = await DELETE(deleteRequest({ force: true }), ctx());
+
+    expect(res.status).toBe(403);
+    expect(taskDeleteOne).not.toHaveBeenCalled();
+  });
+
+  it("deletes for the owner", async () => {
+    const res = await DELETE(deleteRequest(), ctx());
+
+    expect(res.status).toBe(200);
+    expect(taskDeleteOne).toHaveBeenCalled();
+    expect(commentDeleteMany).toHaveBeenCalled();
   });
 });
 

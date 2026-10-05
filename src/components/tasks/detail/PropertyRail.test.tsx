@@ -82,6 +82,10 @@ function renderRail(over: Partial<React.ComponentProps<typeof PropertyRail>> = {
       onRepairAssigner={() => {}}
       currentUsername="owner"
       reporter="Claude Code"
+      archived={false}
+      canDelete
+      onArchive={() => {}}
+      onRestore={() => {}}
       onDelete={() => {}}
       {...over}
     />
@@ -361,6 +365,26 @@ describe("PropertyRail", () => {
     expect(screen.getByText(/Reported by Claude Code/)).toBeTruthy();
     screen.getByRole("button", { name: "Delete task" }).click();
     expect(onDelete).toHaveBeenCalled();
+  });
+
+  // BP-915: the server refuses a delete from anybody but the board's owner, so offering the button
+  // to a member is a control that can only answer 403
+  it("does not render Delete for somebody who is not the board's owner, and still offers Archive", () => {
+    const onArchive = vi.fn();
+    renderRail({ canDelete: false, onArchive });
+
+    expect(screen.queryByRole("button", { name: "Delete task" })).toBeNull();
+    screen.getByRole("button", { name: "Archive task" }).click();
+    expect(onArchive).toHaveBeenCalled();
+  });
+
+  it("offers Restore, not Archive, on an archived task", () => {
+    const onRestore = vi.fn();
+    renderRail({ archived: true, onRestore });
+
+    expect(screen.queryByRole("button", { name: "Archive task" })).toBeNull();
+    screen.getByRole("button", { name: "Restore task" }).click();
+    expect(onRestore).toHaveBeenCalled();
   });
 });
 

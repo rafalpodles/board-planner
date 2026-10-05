@@ -152,6 +152,14 @@ function makeBoard(overrides: Partial<ProjectBoard> = {}): ProjectBoard {
     handleRowSprintChange: vi.fn(),
     handleContextDuplicate: vi.fn(),
     handleContextDelete: vi.fn(),
+    showArchived: false,
+    setShowArchived: vi.fn(),
+    heldArchive: null,
+    setHeldArchive: vi.fn(),
+    forceHeldArchive: vi.fn(),
+    handleContextArchive: vi.fn(),
+    handleContextRestore: vi.fn(),
+    handleBulkArchive: vi.fn(),
     ...overrides,
   };
 }

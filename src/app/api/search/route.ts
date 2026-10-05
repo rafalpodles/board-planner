@@ -5,6 +5,7 @@ import { accessibleProjectIds } from "@/lib/grants";
 import { DEFAULT_PRIORITY } from "@/types";
 import { PROJECT_KEY_PATTERN } from "@/lib/urls";
 import { withApiExecutions } from "@/lib/task-execution-view";
+import { NOT_ARCHIVED } from "@/lib/task-archive";
 
 // Lean queries skip schema defaults, so tasks predating the priority field need it applied here
 function withPriorityDefault<T extends { priority?: string }>(tasks: T[]): T[] {
@@ -21,7 +22,7 @@ export const GET = withAuth(async (request, { user, db }) => {
     return NextResponse.json([]);
   }
 
-  const filter: Record<string, unknown> = {};
+  const filter: Record<string, unknown> = { ...NOT_ARCHIVED };
 
   // Members can only see tasks from their allowed projects
   const allowed = user.role === "admin" ? null : ((await accessibleProjectIds(db, user)) ?? []);

@@ -213,6 +213,13 @@ describe("the other two handlers", () => {
     );
   });
 
+  it("GET counts neither the sprint's archived tasks nor their finished share", async () => {
+    await GET(new Request("https://app.example.com/x"), ctx(OUR_SPRINT));
+
+    expect(taskCountDocuments).toHaveBeenCalledTimes(2);
+    for (const [filter] of taskCountDocuments.mock.calls) expect(filter).toMatchObject({ archivedAt: null });
+  });
+
   it("GET refuses another project's sprint", async () => {
     const res = await GET(new Request("https://app.example.com/x"), ctx(THEIR_SPRINT));
 

@@ -12,9 +12,8 @@ vi.mock("@/lib/ai", () => ({ isAIEnabled: () => true, generateTask }));
 vi.mock("@/lib/ai-fields", () => ({ choiceFieldsForPrompt: () => [], resolveGeneratedFields: () => ({}) }));
 vi.mock("@/models/settings", () => ({ getSettings: async () => ({ aiModel: "m" }) }));
 vi.mock("@/models/project", () => ({ Project: { findOne: projectFindOne } }));
-vi.mock("@/models/task", () => ({
-  Task: { find: () => ({ sort: () => ({ limit: () => ({ lean: async () => [] }) }) }) },
-}));
+const taskFind = vi.fn((..._args: unknown[]) => ({ sort: () => ({ limit: () => ({ lean: async () => [] }) }) }));
+vi.mock("@/models/task", () => ({ Task: { find: taskFind } }));
 vi.mock("@/lib/middleware", async () => {
   const { scopedToDefaultOrganisation } = await vi.importActual<typeof import("@/lib/db-scope")>("@/lib/db-scope");
   return {
@@ -58,6 +57,12 @@ describe("POST generate-task", () => {
 
     expect(res.status).toBe(400);
     expect(generateTask).not.toHaveBeenCalled();
+  });
+
+  it("tells the model about the board's live tasks, not the archived ones", async () => {
+    await generate("a task");
+
+    expect(taskFind.mock.calls[0][0]).toMatchObject({ project: "p1", archivedAt: null });
   });
 
   it("generates for a prompt at the cap", async () => {

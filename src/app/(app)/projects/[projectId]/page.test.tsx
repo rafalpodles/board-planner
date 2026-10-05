@@ -33,6 +33,7 @@ const project = {
   _id: "p1",
   key: "TP",
   name: "Test Project",
+  canAdmin: true,
   columns: [
     { id: "todo", label: "To Do", color: "#3b82f6", role: "approved", order: 0 },
     { id: "in_progress", label: "In Progress", color: "#f59e0b", role: "active", order: 1 },
@@ -83,11 +84,11 @@ function apiError(status: number, body: Record<string, unknown>) {
 const heldError = () =>
   apiError(409, { error: "Task is being executed by a worker", runConflict: conflict });
 
-async function renderBoard() {
+async function renderBoard(boardProject: ApiProject = project, served: ApiTask[] = tasks) {
   api.get.mockImplementation((url: string) => {
-    if (url === "/api/projects/p1") return Promise.resolve(project);
+    if (url === "/api/projects/p1") return Promise.resolve(boardProject);
     if (url.startsWith("/api/projects/p1/tasks")) {
-      return Promise.resolve(tasks.map((t) => ({ ...t })));
+      return Promise.resolve(served.map((t) => ({ ...t })));
     }
     if (url === "/api/projects/p1/sprints") return Promise.resolve([]);
     if (url.endsWith("/assignable-users")) return Promise.resolve([]);
@@ -395,5 +396,108 @@ describe("Moving a held task through the status endpoint", () => {
 
     await waitFor(() => expect(toast).toHaveBeenCalledWith("Failed to update status", "error"));
     expect(heldDialog()).toBeNull();
+  });
+});
+
+/**
+ * BP-915. Archiving is anybody's who can edit; deleting is the board's owner's. The server refuses
+ * the second with a 403, so the board must not offer it to a member.
+ */
+describe("Archiving from the board", () => {
+  const member = { ...project, canAdmin: false } as ApiProject;
+
+  it("offers a member Archive and no Delete on one task", async () => {
+    await renderBoard(member);
+    await rightClick("TP-2");
+
+    expect(screen.getByRole("button", { name: "Archive" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+  });
+
+  it("offers a member Archive and no Delete on a selection", async () => {
+    await renderBoard(member);
+    await select("TP-2", "TP-3");
+    await rightClick("TP-2");
+
+    expect(screen.getByRole("button", { name: "Archive 2 tasks" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Delete 2 tasks" })).toBeNull();
+  });
+
+  it("still offers the owner both", async () => {
+    await renderBoard();
+    await rightClick("TP-2");
+
+    expect(screen.getByRole("button", { name: "Archive" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
+  });
+
+  it("archives with one POST, without a confirmation, and takes the card off the board", async () => {
+    api.post.mockResolvedValue({ archivedAt: "2026-10-05T10:00:00.000Z" });
+    await renderBoard(member);
+    await rightClick("TP-2");
+
+    await click(screen.getByRole("button", { name: "Archive" }));
+
+    expect(api.post).toHaveBeenCalledWith("/api/projects/p1/tasks/t2/archive", {});
+    await waitFor(() => expect(screen.queryByText("A free task")).toBeNull());
+    expect(screen.getByText("A task a worker is running")).toBeTruthy();
+    expect(toast).toHaveBeenCalledWith("Task archived", "success");
+  });
+
+  it("archives a selection in one pass and names a task a worker holds", async () => {
+    api.post.mockImplementation((url: string) =>
+      url.includes("/t3/") ? Promise.reject(heldError()) : Promise.resolve({ archivedAt: "2026-10-05T10:00:00.000Z" })
+    );
+    await renderBoard(member);
+    await select("TP-2", "TP-3");
+    await rightClick("TP-2");
+
+    await click(screen.getByRole("button", { name: "Archive 2 tasks" }));
+
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith("Archived 1 of 2. TP-3 being executed by a worker.", "error")
+    );
+    expect(screen.queryByText("A free task")).toBeNull();
+    expect(screen.getByText("A task a worker is running")).toBeTruthy();
+  });
+
+  it("asks before taking a held task, and resends the archive with force", async () => {
+    api.post.mockRejectedValueOnce(heldError());
+    await renderBoard(member);
+    await rightClick("TP-3");
+    await click(screen.getByRole("button", { name: "Archive" }));
+
+    await waitFor(() => expect(heldDialog()).toBeTruthy());
+    expect(toast).not.toHaveBeenCalledWith("Failed to archive task", "error");
+    api.post.mockResolvedValue({ archivedAt: "2026-10-05T10:00:00.000Z" });
+    await click(heldDialog()!.getByRole("button", { name: "Archive anyway" }));
+
+    await waitFor(() =>
+      expect(api.post).toHaveBeenLastCalledWith("/api/projects/p1/tasks/t3/archive", { force: true })
+    );
+  });
+
+  it("loads archived tasks only once Show archived is on, and restores one from its menu", async () => {
+    const archived = { ...tasks[0], archivedAt: "2026-10-05T10:00:00.000Z" } as ApiTask;
+    await renderBoard(member, [tasks[1], tasks[0]]);
+    expect(api.get.mock.calls.some(([url]) => String(url).includes("archived="))).toBe(false);
+
+    api.get.mockImplementation((url: string) => {
+      if (url === "/api/projects/p1") return Promise.resolve(member);
+      if (url.includes("archived=include")) return Promise.resolve([archived, tasks[1]]);
+      if (url.startsWith("/api/projects/p1/tasks")) return Promise.resolve([tasks[1]]);
+      if (url === "/api/projects/p1/sprints") return Promise.resolve([]);
+      return Promise.resolve([]);
+    });
+    await click(screen.getByText("Filters"));
+    await click(screen.getByRole("checkbox", { name: "Show archived" }));
+    await screen.findByTestId("card-archived");
+
+    api.del.mockResolvedValue({});
+    await rightClick("TP-2");
+    await click(screen.getByRole("button", { name: "Restore" }));
+
+    expect(api.del).toHaveBeenCalledWith("/api/projects/p1/tasks/t2/archive");
+    await waitFor(() => expect(screen.queryByTestId("card-archived")).toBeNull());
   });
 });

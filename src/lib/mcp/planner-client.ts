@@ -141,6 +141,18 @@ export class PlannerClient {
     return this.request("PUT", `/api/projects/${seg(projectId)}/tasks/reorder`, { order: taskIds });
   }
 
+  async archiveTask(projectId: string, taskId: string): Promise<unknown> {
+    return this.request("POST", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}/archive`, {});
+  }
+
+  async unarchiveTask(projectId: string, taskId: string): Promise<unknown> {
+    return this.request("DELETE", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}/archive`);
+  }
+
+  async deleteTask(projectId: string, taskId: string): Promise<unknown> {
+    return this.request("DELETE", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}`);
+  }
+
   async addTaskLink(
     projectId: string,
     taskId: string,
@@ -351,7 +363,7 @@ export class PlannerClient {
     // The row is matched on its number rather than taken on trust: a server that does not know the
     // filter (a rolling deploy) answers with the whole board, and the first row is somebody else's task
     const task = lookable
-      ? ((await this.listTasks(project._id, { taskNumber: String(taskNumber) })) as {
+      ? ((await this.listTasks(project._id, { taskNumber: String(taskNumber), archived: "include" })) as {
           _id: string;
           taskNumber: number;
         }[]).find((t) => t.taskNumber === taskNumber)

@@ -239,11 +239,12 @@ the client at one URL:
 }
 ```
 
-Forty-three tools, in the groups an agent works in — the full list and what each answers is on the
+Forty-six tools, in the groups an agent works in — the full list and what each answers is on the
 [MCP page](https://board-planner.com/docs/ai/claude-code-and-mcp/):
 
 - **Projects and tasks:** `list_projects`, `get_project`, `list_tasks`, `get_task`, `create_task`,
-  `update_task`, `change_task_status`, `reorder_tasks`, `search_tasks`, `my_tasks`
+  `update_task`, `change_task_status`, `reorder_tasks`, `search_tasks`, `my_tasks`, `archive_task`,
+  `unarchive_task`, `delete_task` (the board's owner only)
 - **Batches:** `create_tasks`, `update_tasks`, `link_task_pairs` (up to 30 or 60 items a call, answered per item)
 - **Links and checklists:** `link_tasks`, `unlink_tasks`, `add_checklist_item`, `set_checklist_item`,
   `remove_checklist_item`
