@@ -4,7 +4,7 @@ import { scoped, SCOPED_MODELS, type ScopedDb } from "./db-scope";
 import { DEFAULT_ORGANISATION_ID } from "./organisation-field";
 import { forgetOrganisationSlugs } from "./organisation-host";
 import { scopedModelNames } from "./organisation-migration";
-import { dropSecrets } from "./secret-paths";
+import { dropPaths, dropSecrets } from "./secret-paths";
 import { organisationUploads, UPLOAD_BUCKET } from "./upload-ownership";
 import { Organisation } from "@/models/organisation";
 
@@ -31,9 +31,12 @@ export const NOT_EXPORTED: Record<string, string> = {
 
 const CREDENTIAL_FIELD = /hash$/i;
 
+// Stored in the clear, but a receiver's address often carries its own token
+const NOT_EXPORTED_PATHS: Record<string, string[][]> = { Project: [["webhooks", "*", "url"]] };
+
 export function exportableRow(model: string, document: Record<string, unknown>): Record<string, unknown> {
   const kept = Object.fromEntries(Object.entries(document).filter(([key]) => key !== "password" && !CREDENTIAL_FIELD.test(key)));
-  return dropSecrets(model, kept);
+  return dropPaths(dropSecrets(model, kept), NOT_EXPORTED_PATHS[model] ?? []);
 }
 
 function modelOf(db: ScopedDb, name: string) {
@@ -56,28 +59,41 @@ export function hiddenPaths(name: string): string[] {
 }
 
 export type LifeCycleRefusal = "not_found" | "default_organisation" | "deleted";
-type LifeCycleRow = { _id: Types.ObjectId; slug?: string; suspendedAt?: Date | null };
+type LifeCycleRow = { _id: Types.ObjectId; slug?: string; suspendedAt?: Date | null; deletingAt?: Date | null };
 
 export async function organisationForLifeCycle(id: string): Promise<{ ok: true; row: LifeCycleRow } | { ok: false; reason: LifeCycleRefusal }> {
   const hex = id.toLowerCase();
   if (!/^[0-9a-f]{24}$/.test(hex)) return { ok: false, reason: "not_found" };
   if (hex === DEFAULT_ORGANISATION_ID.toHexString()) return { ok: false, reason: "default_organisation" };
   await connectDB();
-  const row = await Organisation.findById(hex).select("slug suspendedAt deletedAt").lean();
+  const row = await Organisation.findById(hex).select("slug suspendedAt deletedAt deletingAt").lean();
   if (!row) return { ok: false, reason: "not_found" };
   if (row.deletedAt) return { ok: false, reason: "deleted" };
   return { ok: true, row };
 }
 
-export async function setSuspended(organisation: Types.ObjectId, suspended: boolean, reason = ""): Promise<void> {
+// Refused once a delete has begun: a resume halfway through would hand back half an organisation
+export async function setSuspended(organisation: Types.ObjectId, suspended: boolean, reason = ""): Promise<boolean> {
+  const live = { _id: organisation, deletingAt: null, deletedAt: null };
   if (suspended) {
     // Suspending again keeps the first time, which is what the delete's settle window counts from
-    await Organisation.updateOne({ _id: organisation, suspendedAt: null }, { $set: { suspendedAt: new Date() } });
-    await Organisation.updateOne({ _id: organisation }, { $set: { suspendedReason: reason } });
-  } else {
-    await Organisation.updateOne({ _id: organisation }, { $set: { suspendedAt: null, suspendedReason: "" } });
+    await Organisation.updateOne({ ...live, suspendedAt: null }, { $set: { suspendedAt: new Date() } });
+    const changed = await Organisation.updateOne(live, { $set: { suspendedReason: reason } });
+    forgetOrganisationSlugs();
+    return changed.matchedCount > 0;
   }
+  const changed = await Organisation.updateOne(live, { $set: { suspendedAt: null, suspendedReason: "" } });
   forgetOrganisationSlugs();
+  return changed.matchedCount > 0;
+}
+
+// Marks the delete before any row goes, so nothing can resume or license it meanwhile; a delete that died halfway claims again
+export async function claimDeletion(organisation: Types.ObjectId): Promise<boolean> {
+  await Organisation.updateOne(
+    { _id: organisation, deletedAt: null, deletingAt: null, suspendedAt: { $ne: null } },
+    { $set: { deletingAt: new Date() } }
+  );
+  return (await Organisation.exists({ _id: organisation, deletedAt: null, deletingAt: { $ne: null } })) !== null;
 }
 
 export function settledSince(suspendedAt: Date | null | undefined, now = Date.now()): boolean {

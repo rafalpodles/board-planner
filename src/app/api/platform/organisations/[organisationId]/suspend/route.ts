@@ -20,7 +20,9 @@ export const POST = withPlatformRequest<{ organisationId: string }>(async (_requ
 
   const found = await organisationForLifeCycle(params.organisationId);
   if (!found.ok) return lifeCycleRefused(found.reason);
-  await setSuspended(found.row._id, true, reason);
+  if (!(await setSuspended(found.row._id, true, reason))) {
+    return NextResponse.json({ error: "The organisation is being deleted" }, { status: 409 });
+  }
   await logPlatformAudit({ action: "organisation_suspended", keyId, subject: found.row._id, detail: reason });
   return NextResponse.json({ suspended: true });
 });

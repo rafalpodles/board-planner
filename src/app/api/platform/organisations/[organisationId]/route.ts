@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { deleteOrganisationData, organisationFootprint, organisationForLifeCycle, settledSince, SUSPENSION_SETTLE_MS } from "@/lib/organisation-life-cycle";
+import { claimDeletion, deleteOrganisationData, organisationFootprint, organisationForLifeCycle, settledSince, SUSPENSION_SETTLE_MS } from "@/lib/organisation-life-cycle";
 import { lifeCycleRefused } from "@/lib/platform-life-cycle-route";
 import { logPlatformAudit, withPlatformRequest } from "@/lib/platform-route";
 
@@ -23,6 +23,10 @@ export const DELETE = withPlatformRequest<{ organisationId: string }>(async (req
     return NextResponse.json({ error: "confirm must name the organisation's slug" }, { status: 400 });
   }
 
+  if (!(await claimDeletion(row._id))) {
+    return NextResponse.json({ error: "The organisation changed meanwhile; send it again" }, { status: 409 });
+  }
+  await logPlatformAudit({ action: "organisation_delete_started", keyId, subject: row._id, detail: row.slug }, { strict: true });
   const removed = await deleteOrganisationData(row._id);
   await logPlatformAudit({ action: "organisation_deleted", keyId, subject: row._id, detail: `${row.slug}: ${JSON.stringify(removed)}` });
   return NextResponse.json({ deleted: true, counts: removed });

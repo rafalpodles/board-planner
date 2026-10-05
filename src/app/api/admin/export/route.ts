@@ -10,6 +10,6 @@ export const GET = withAdmin(async (_request, { user, db }) => {
   }
   const slug = (await getOrganisation(db.organisation)).slug ?? "organisation";
   return organisationExportResponse(db, slug, () =>
-    logInstanceAudit(db, { action: "organisation_exported", user: user._id, actorUsername: user.username, target: slug })
+    logInstanceAudit(db, { action: "organisation_exported", user: user._id, actorUsername: user.username, target: slug }, { strict: true })
   );
 });

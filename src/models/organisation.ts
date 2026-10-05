@@ -23,6 +23,7 @@ export interface IOrganisation {
   suspendedAt?: Date | null;
   suspendedReason?: string;
   deletedAt?: Date | null;
+  deletingAt?: Date | null;
 }
 
 const entitlementsSchema = new Schema<IOrganisationEntitlements>(
@@ -46,6 +47,7 @@ const organisationSchema = new Schema<IOrganisation>({
   suspendedAt: { type: Date, default: null },
   suspendedReason: { type: String, default: "" },
   deletedAt: { type: Date, default: null },
+  deletingAt: { type: Date, default: null },
   entitlements: {
     type: entitlementsSchema,
     default: () => ({ plan: "free", features: [], source: "none" }),

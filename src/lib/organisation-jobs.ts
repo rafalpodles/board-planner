@@ -11,11 +11,18 @@ export type ServedOrganisation = { _id: Types.ObjectId; digestHour?: number; tim
 export async function servedOrganisations({ includeSuspended = false } = {}): Promise<ServedOrganisation[]> {
   await connectDB();
   const single = !organisationDomain();
-  const live = includeSuspended ? { deletedAt: null } : { suspendedAt: null, deletedAt: null };
+  const live = includeSuspended ? { deletedAt: null, deletingAt: null } : { suspendedAt: null, deletedAt: null, deletingAt: null };
   const rows = await Organisation.find(single ? { _id: DEFAULT_ORGANISATION_ID } : live)
     .select("digestHour timezone")
     .lean<ServedOrganisation[]>();
   return single && rows.length === 0 ? [{ _id: DEFAULT_ORGANISATION_ID }] : rows;
+}
+
+// Asked again inside a long job's loop: a suspension or a delete must stop work that began before it
+export async function stillServed(organisation: Types.ObjectId): Promise<boolean> {
+  if (!organisationDomain()) return true;
+  await connectDB();
+  return (await Organisation.exists({ _id: organisation, suspendedAt: null, deletedAt: null, deletingAt: null })) !== null;
 }
 
 // Boot's repairs and seeding include a suspended organisation, which nothing would bring them to on resume
@@ -25,6 +32,7 @@ export async function forEachServedOrganisation(
   { includeSuspended = false }: { includeSuspended?: boolean } = {}
 ): Promise<void> {
   for (const organisation of await servedOrganisations({ includeSuspended })) {
+    if (!includeSuspended && !(await stillServed(organisation._id))) continue;
     try {
       await inOrganisation(organisation._id, () => work(scoped(organisation._id), organisation));
     } catch (err) {

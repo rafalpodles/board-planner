@@ -19,7 +19,7 @@ interface InstanceAuditEntry {
 
 // Fire and forget, like logProjectAudit: an audit write that could fail the action it records would
 // be worse than the gap it closes.
-export async function logInstanceAudit(db: ScopedDb, entry: InstanceAuditEntry): Promise<void> {
+export async function logInstanceAudit(db: ScopedDb, entry: InstanceAuditEntry, { strict = false } = {}): Promise<void> {
   try {
     await db.InstanceAuditLog.create({
       user: entry.user ?? null,
@@ -28,7 +28,9 @@ export async function logInstanceAudit(db: ScopedDb, entry: InstanceAuditEntry):
       target: entry.target || "",
       detail: entry.detail || "",
     });
-  } catch {
+  } catch (error) {
+    // Strict where the action must not happen unrecorded, such as handing out a whole organisation
+    if (strict) throw error;
     console.warn("Failed to log instance audit");
   }
 }

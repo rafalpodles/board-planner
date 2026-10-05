@@ -21,6 +21,7 @@ vi.mock("@/lib/organisation-jobs", async () => {
   const { scoped } = await import("@/lib/db-scope");
   const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
   return {
+    stillServed: async () => true,
     forEachServedOrganisation: async (_job: string, work: (db: unknown, organisation: unknown) => Promise<void>) => {
       for (const organisation of servedOrganisations.list ?? [{ _id: DEFAULT_ORGANISATION_ID }]) await work(scoped(organisation._id as never), organisation);
     },

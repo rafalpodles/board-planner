@@ -24,8 +24,8 @@ export function secretsIn(node: unknown, steps: string[], at: string[] = []): { 
 }
 
 // In place: a lean row is the caller's own, and a copy would lose its ObjectIds and Dates
-export function dropSecrets(model: string, document: Record<string, unknown>): Record<string, unknown> {
-  for (const steps of SECRET_PATHS[model] ?? []) {
+export function dropPaths(document: Record<string, unknown>, paths: string[][]): Record<string, unknown> {
+  for (const steps of paths) {
     for (const { path } of secretsIn(document, steps)) {
       const keys = path.split(".");
       const holder = keys.slice(0, -1).reduce<Record<string, unknown>>((node, key) => node[key] as Record<string, unknown>, document);
@@ -34,3 +34,5 @@ export function dropSecrets(model: string, document: Record<string, unknown>): R
   }
   return document;
 }
+
+export const dropSecrets = (model: string, document: Record<string, unknown>) => dropPaths(document, SECRET_PATHS[model] ?? []);

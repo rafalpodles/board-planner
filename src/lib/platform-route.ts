@@ -39,10 +39,11 @@ export async function logPlatformAudit(entry: {
   keyId: string;
   subject?: Types.ObjectId | string | null;
   detail?: string;
-}): Promise<void> {
+}, { strict = false } = {}): Promise<void> {
   try {
     await PlatformAuditLog.create({ ...entry, subject: entry.subject ?? null, detail: entry.detail ?? "" });
   } catch (error) {
+    if (strict) throw error;
     console.error("Failed to write the platform audit log:", error);
   }
 }
