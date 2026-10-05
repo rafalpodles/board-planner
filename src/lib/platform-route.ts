@@ -14,11 +14,6 @@ type PlatformHandler<P> = (
   context: { keyId: string; body: Uint8Array; params: P }
 ) => Promise<Response>;
 
-/**
- * The platform operator's way in: the licence service, signing each request with a key listed in
- * PLATFORM_REQUEST_KEYS. It has no account here, so no session, token or organisation admin reaches
- * these routes, and they answer only on the platform host.
- */
 export function withPlatformRequest<P = Record<string, string>>(
   handler: PlatformHandler<P>,
   { maxBodyBytes = DEFAULT_MAX_BODY_BYTES }: { maxBodyBytes?: number } = {}
@@ -32,7 +27,7 @@ export function withPlatformRequest<P = Record<string, string>>(
     await connectDB();
     const verdict = await verifyPlatformRequest(request, read.value);
     if (!verdict.ok) {
-      console.warn(`Platform request refused: ${verdict.reason} (key ${verdict.keyId ?? "none"})`);
+      console.warn(`Platform request refused: ${verdict.reason} (key ${JSON.stringify(verdict.keyId?.slice(0, 64) ?? null)})`);
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     return handler(request, { keyId: verdict.keyId, body: read.value, params: await context.params });

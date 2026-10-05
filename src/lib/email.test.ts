@@ -67,13 +67,16 @@ describe("emailSettingsSummary", () => {
     vi.stubEnv("ORGANISATION_DOMAIN", "board-planner.com");
     const cloud = await import("./email");
 
-    const summary = cloud.emailSettingsSummary();
-    expect(summary).toEqual({ managedByPlatform: true, configured: expect.any(Boolean), from: expect.any(String) });
-    expect(JSON.stringify(summary)).not.toMatch(/smtp\.platform\.example|platform-mailer/);
+    try {
+      const summary = cloud.emailSettingsSummary();
+      expect(summary).toEqual({ managedByPlatform: true, configured: expect.any(Boolean), from: expect.any(String) });
+      expect(JSON.stringify(summary)).not.toMatch(/smtp\.platform\.example|platform-mailer/);
 
-    vi.stubEnv("ORGANISATION_DOMAIN", "");
-    expect(cloud.emailSettingsSummary()).toMatchObject({ managedByPlatform: false, host: "smtp.platform.example", user: "platform-mailer" });
-    vi.unstubAllEnvs();
+      vi.stubEnv("ORGANISATION_DOMAIN", "");
+      expect(cloud.emailSettingsSummary()).toMatchObject({ managedByPlatform: false, host: "smtp.platform.example", user: "platform-mailer" });
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   // The screen has two branches and this decides which one an admin gets. Since BP-465 the e2e run

@@ -1,4 +1,5 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
+import { generateKeyPairSync } from "node:crypto";
 import mongoose from "mongoose";
 import { MAIL_SERVER, RUN_ORGANISATIONS_SERVER } from "../playwright.config";
 import { signPlatformRequest } from "../src/lib/platform-request";
@@ -107,6 +108,13 @@ test.describe("BP-892: the platform operator is the licence service, not an orga
         expect(onOwnHost.status(), `${kind} ${path} on its own host`).toBe(404);
       }
     }
+    // The operator's own signature counts on the platform host only, and nobody else's counts anywhere
+    const path = "/api/platform/organisations";
+    const valid = () => signPlatformRequest({ method: "GET", path, body: EMPTY }, E2E_PLATFORM_REQUEST_KEY);
+    expect((await request.get(`${ORGANISATIONS_API}${path}`, { headers: { ...asOrganisation(ACME), ...valid() } })).status()).toBe(404);
+    const { d, x } = generateKeyPairSync("ed25519").privateKey.export({ format: "jwk" });
+    const stranger = signPlatformRequest({ method: "GET", path, body: EMPTY }, { keyId: E2E_PLATFORM_REQUEST_KEY.keyId, d: d!, x: x! });
+    expect((await request.get(`${ORGANISATIONS_API}${path}`, { headers: { host: PLATFORM_HOST, ...stranger } })).status()).toBe(401);
     expect(await platformLogRows()).toEqual([]);
   });
 

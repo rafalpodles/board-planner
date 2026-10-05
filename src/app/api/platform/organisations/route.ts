@@ -8,10 +8,9 @@ import { Organisation } from "@/models/organisation";
 const MAX_LIMIT = 200;
 const DEFAULT_LIMIT = 100;
 
-// Metadata only: who the organisations are and what they hold, never anything inside them
 export const GET = withPlatformRequest(async (request, { keyId }) => {
   const query = new URL(request.url).searchParams;
-  const limit = Math.min(MAX_LIMIT, Math.max(1, Number(query.get("limit")) || DEFAULT_LIMIT));
+  const limit = Math.min(MAX_LIMIT, Math.max(1, Math.floor(Number(query.get("limit"))) || DEFAULT_LIMIT));
   const after = query.get("after");
   if (after !== null && !isValidObjectId(after)) {
     return NextResponse.json({ error: "after must be an organisation id" }, { status: 400 });
@@ -48,4 +47,4 @@ export const GET = withPlatformRequest(async (request, { keyId }) => {
 
   await logPlatformAudit({ action: "organisations_listed", keyId, detail: `${organisations.length} organisation(s)${after ? ` after ${after}` : ""}` });
   return NextResponse.json({ organisations, next: rows.length > limit ? String(page[page.length - 1]._id) : null });
-});
+}, { maxBodyBytes: 0 });

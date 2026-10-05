@@ -260,8 +260,8 @@ LICENCE_KEY=              # Optional — a Pro licence, Ed25519-signed, verified
 PLATFORM_REQUEST_KEYS=    # Optional — `keyId:x,...`, the licence service's Ed25519 request keys (public
                           # halves). That endpoint accepts only a request signed by one over method,
                           # path, x-bp-timestamp (±5 min), single-use x-bp-nonce and the body's SHA-256;
-                          # unset, it refuses everything (src/lib/platform-request.ts). The query is signed
-                          # with the path. These keys are the platform operator: the licence service, which
+                          # unset, it refuses everything (src/lib/platform-request.ts). What is signed is
+                          # the WHATWG-normalised URL's pathname + search, so the query is covered. These keys are the platform operator: the licence service, which
                           # has no account here and alone reaches /api/platform/* (withPlatformRequest in
                           # src/lib/platform-route.ts) — the organisations list, the platform audit log
                           # (PlatformAuditLog, outside every organisation) and the licence push (BP-892)

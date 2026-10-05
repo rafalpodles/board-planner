@@ -8,7 +8,7 @@ const DEFAULT_LIMIT = 50;
 
 export const GET = withPlatformRequest(async (request) => {
   const query = new URL(request.url).searchParams;
-  const limit = Math.min(MAX_LIMIT, Math.max(1, Number(query.get("limit")) || DEFAULT_LIMIT));
+  const limit = Math.min(MAX_LIMIT, Math.max(1, Math.floor(Number(query.get("limit"))) || DEFAULT_LIMIT));
   const before = query.get("before");
   if (before !== null && !isValidObjectId(before)) {
     return NextResponse.json({ error: "before must be an entry id" }, { status: 400 });
@@ -30,4 +30,4 @@ export const GET = withPlatformRequest(async (request) => {
     })),
     next: rows.length > limit ? String(page[page.length - 1]._id) : null,
   });
-});
+}, { maxBodyBytes: 0 });
