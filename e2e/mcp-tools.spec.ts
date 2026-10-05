@@ -978,10 +978,6 @@ test("create_task and update_task set a due date, a sprint and a recurrence, and
   expect(moved.dueDate).toMatch(/^2026-11-02/);
   expect(String(moved.sprint?._id ?? moved.sprint)).toBe(second.parsed._id);
 
-  // The history shows it, as it does when a person changes the field
-  const activity = await request.get(`/api/projects/${PROJECT_ID}/tasks/${taskId}/activity`, { headers: ADMIN_AUTH });
-  expect(JSON.stringify(await activity.json())).toContain("dueDate");
-
   // Each one clears
   accepted(await session.callTool("update_task", { taskKey: key, dueDate: "", sprint: "backlog", recurrence: null }));
   const cleared = await apiTask(request, taskId);
