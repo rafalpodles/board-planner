@@ -923,3 +923,104 @@ test("reorder_tasks refuses keys it cannot place, and a board the caller cannot 
   const after = await storedOrders(request, PROJECT_ID);
   expect(after[SIBLING_TASK_NUMBER]).toBeLessThan(after[HELD_TASK_NUMBER]);
 });
+
+/**
+ * BP-908. A checklist is read back from the API after each call, because the reply is the one thing a
+ * write that stored nothing can still get right. What matters is what happens to the items that were
+ * not touched: their ids, which the history and a worker's tick are keyed on, and their ticks.
+ */
+test("one checklist item is added, ticked, reworded and removed without disturbing the others", async ({ request }) => {
+  const session = await connected(request);
+  const created = await session.callTool("create_task", {
+    project: PROJECT_KEY,
+    title: "With a checklist",
+    acceptanceCriteria: "- [x] first\n- [ ] second\n- [ ] third",
+  });
+  accepted(created);
+  const key = `${PROJECT_KEY}-${created.parsed.taskNumber}`;
+  const taskId: string = created.parsed._id;
+  const items = async () => ((await storedApiTask(request, taskId)).checklist as { _id: string; text: string; done: boolean }[]);
+
+  const [first, second, third] = await items();
+  expect([first.done, second.done, third.done]).toEqual([true, false, false]);
+
+  // Added at the end, the others exactly as they were
+  const added = await session.callTool("add_checklist_item", { taskKey: key, text: "fourth" });
+  accepted(added);
+  let now = await items();
+  expect(now.map((i) => [i._id, i.text, i.done])).toEqual([
+    [first._id, "first", true],
+    [second._id, "second", false],
+    [third._id, "third", false],
+    [now[3]._id, "fourth", false],
+  ]);
+  expect(added.parsed.checklist[3]).toEqual({ id: now[3]._id, text: "fourth", done: false });
+
+  // Ticked by its text, then reworded by its id; the neighbours keep their ids and their state
+  accepted(await session.callTool("set_checklist_item", { taskKey: key, item: "SECOND", done: true }));
+  accepted(await session.callTool("set_checklist_item", { taskKey: key, item: third._id, text: "third, reworded" }));
+  now = await items();
+  expect(now.map((i) => [i._id, i.text, i.done])).toEqual([
+    [first._id, "first", true],
+    [second._id, "second", true],
+    [third._id, "third, reworded", false],
+    [now[3]._id, "fourth", false],
+  ]);
+
+  // The history says what happened, as it does when a person ticks the box
+  const activity = JSON.stringify(await (await request.get(`/api/projects/${PROJECT_ID}/tasks/${taskId}/activity`, { headers: ADMIN_AUTH })).json());
+  expect(activity).toContain("criterion_checked");
+  expect(activity).toContain("criterion_edited");
+  expect(activity).toContain("criterion_added");
+
+  // Resending the list as plain lines, one of them reworded, keeps the id and tick of every other line
+  accepted(
+    await session.callTool("update_task", { taskKey: key, acceptanceCriteria: "first\nsecond\nthird, reworded again\nfourth" })
+  );
+  now = await items();
+  expect(now.map((i) => [i._id, i.text, i.done])).toEqual([
+    [first._id, "first", true],
+    [second._id, "second", true],
+    [expect.not.stringMatching(third._id), "third, reworded again", false],
+    [now[3]._id, "fourth", false],
+  ]);
+  expect(now[3]._id).toBeTruthy();
+
+  accepted(await session.callTool("remove_checklist_item", { taskKey: key, item: "fourth" }));
+  expect((await items()).map((i) => i.text)).toEqual(["first", "second", "third, reworded again"]);
+
+  // An item that is not there is refused, and nothing is written
+  const before = JSON.stringify(await items());
+  const missing = await session.callTool("set_checklist_item", { taskKey: key, item: "fifth", done: true });
+  refused(missing);
+  expect(missing.text).toContain('No criterion "fifth"');
+  expect(JSON.stringify(await items())).toBe(before);
+});
+
+test("an item two criteria share is refused with their ids rather than guessed", async ({ request }) => {
+  const session = await connected(request);
+  const created = await session.callTool("create_task", {
+    project: PROJECT_KEY,
+    title: "Twins",
+    acceptanceCriteria: "- [ ] same\n- [ ] same",
+  });
+  accepted(created);
+  const key = `${PROJECT_KEY}-${created.parsed.taskNumber}`;
+  const ids = (created.parsed.checklist as { _id: string }[]).map((c) => c._id);
+
+  const ambiguous = await session.callTool("set_checklist_item", { taskKey: key, item: "same", done: true });
+  refused(ambiguous);
+  expect(ambiguous.text).toContain('2 criteria read "same"');
+  for (const id of ids) expect(ambiguous.text).toContain(id);
+
+  // By id it is exact
+  accepted(await session.callTool("set_checklist_item", { taskKey: key, item: ids[1], done: true }));
+  const stored = (await storedApiTask(request, created.parsed._id)).checklist as { _id: string; done: boolean }[];
+  expect(stored.map((c) => [c._id, c.done])).toEqual([[ids[0], false], [ids[1], true]]);
+});
+
+async function storedApiTask(request: APIRequestContext, taskId: string) {
+  const response = await request.get(`/api/projects/${PROJECT_ID}/tasks/${taskId}`, { headers: ADMIN_AUTH });
+  expect(response.status()).toBe(200);
+  return response.json();
+}

@@ -15,6 +15,7 @@ import {
   taskIdsInOrder,
 } from "./strict-input";
 import { MAX_REORDER_IDS } from "@/lib/reorder";
+import { addItem, mergeCriteria, removeItem, setItem, shownCriteria, type Criterion } from "./checklist-edit";
 
 type ToolExtra = { authInfo?: AuthInfo };
 
@@ -238,7 +239,12 @@ export function registerPlannerTools(server: McpServer): void {
       if (description !== undefined) data.description = description;
       if (priority !== undefined) data.priority = priority;
       if (category !== undefined) data.category = category;
-      if (acceptanceCriteria !== undefined) data.acceptanceCriteria = acceptanceCriteria;
+      if (acceptanceCriteria !== undefined) {
+        // The API replaces the whole checklist, minting every id anew and reading done off the text. Read
+        // against what the task holds, an unchanged line keeps its id and its done state.
+        const held = ((await client.getTask(projectId, taskId)) as { checklist?: Criterion[] }).checklist ?? [];
+        data.checklist = mergeCriteria(acceptanceCriteria, held);
+      }
 
       if (fields && Object.keys(fields).length) {
         // customFieldValues is replaced wholesale by the API, so naming one field
@@ -301,6 +307,85 @@ export function registerPlannerTools(server: McpServer): void {
 
       return json(await client.updateTask(projectId, taskId, data));
     }
+  );
+
+  // --- Checklist ---
+
+  // Read, change one item, write the list back with every id: the API stores the list as a whole, and
+  // a write that dropped an id would be a new criterion to the history and to anyone watching it.
+  async function editChecklist(
+    extra: ToolExtra,
+    taskKey: string,
+    change: (items: Criterion[]) => Criterion[]
+  ) {
+    const client = clientFrom(extra);
+    const { projectId, taskId } = await client.resolveTaskKey(taskKey);
+    const held = ((await client.getTask(projectId, taskId)) as { checklist?: Criterion[] }).checklist ?? [];
+    const next = change(held.map((item) => ({ _id: String(item._id), text: item.text, done: !!item.done })));
+    const stored = (await client.updateTask(projectId, taskId, {
+      checklist: next.map(({ _id, text, done }) => ({ ...(_id ? { _id } : {}), text, done })),
+    })) as { checklist?: Criterion[] };
+    return json({ taskKey: taskKey.toUpperCase(), checklist: shownCriteria(stored.checklist ?? []) });
+  }
+
+  const ITEM_PARAM = z
+    .string()
+    .describe("The criterion: its id (get_task and these tools list them) or its exact text");
+
+  server.registerTool(
+    "add_checklist_item",
+    {
+      description:
+        "Add one acceptance criterion to the end of a task's checklist. The others are left exactly as they are — " +
+        "update_task's acceptanceCriteria rewrites the whole list. Answers with the checklist and each item's id.",
+      inputSchema: strictInput(
+        {
+          taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
+          text: z.string().describe("The criterion"),
+          done: z.boolean().optional().describe("Already done (default: not)"),
+        },
+        { writes: true }
+      ),
+    },
+    async ({ taskKey, text, done }, extra) =>
+      editChecklist(extra, taskKey, (items) => addItem(items, text, done ?? false))
+  );
+
+  server.registerTool(
+    "set_checklist_item",
+    {
+      description:
+        "Change one acceptance criterion: tick or untick it, or reword it, leaving the rest of the list alone. " +
+        "Ticking is `done: true`. Answers with the checklist and each item's id.",
+      inputSchema: strictInput(
+        {
+          taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
+          item: ITEM_PARAM,
+          text: z.string().optional().describe("The new wording"),
+          done: z.boolean().optional().describe("true to tick it, false to untick it"),
+        },
+        { writes: true }
+      ),
+    },
+    async ({ taskKey, item, text, done }, extra) => {
+      if (text === undefined && done === undefined) throw new Error(`set_checklist_item ${NOTHING_TO_CHANGE}`);
+      return editChecklist(extra, taskKey, (items) =>
+        setItem(items, item, { ...(text !== undefined ? { text } : {}), ...(done !== undefined ? { done } : {}) })
+      );
+    }
+  );
+
+  server.registerTool(
+    "remove_checklist_item",
+    {
+      description:
+        "Remove one acceptance criterion, leaving the rest of the list alone. Answers with the checklist and each item's id.",
+      inputSchema: strictInput(
+        { taskKey: z.string().describe("Task key (e.g. 'CP-1')"), item: ITEM_PARAM },
+        { writes: true }
+      ),
+    },
+    async ({ taskKey, item }, extra) => editChecklist(extra, taskKey, (items) => removeItem(items, item))
   );
 
   server.registerTool(

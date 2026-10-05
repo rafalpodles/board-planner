@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, type MockInstance } from "vitest";
 import { z } from "zod";
 import { registerPlannerTools } from "./tools";
 import { PlannerClient } from "./planner-client";
@@ -508,5 +508,102 @@ describe("reorder_tasks", () => {
 
     expect(refusal.success).toBe(false);
     expect(refusal.error!.issues[0].message).toContain('"order" — use the reorder_tasks tool');
+  });
+});
+
+/**
+ * BP-908. A whole checklist was one string: updating one line minted every item anew and read done
+ * off the text, so resending a list with a line reworded un-ticked everything that had been ticked.
+ */
+describe("checklist tools and acceptanceCriteria", () => {
+  const A = "507f1f77bcf86cd799439011";
+  const B = "507f1f77bcf86cd799439012";
+  const HELD = [
+    { _id: A, text: "first", done: true },
+    { _id: B, text: "second", done: false },
+  ];
+  const parse = (result: unknown) => JSON.parse((result as { content: { text: string }[] }).content[0].text);
+  let wrote: MockInstance<PlannerClient["updateTask"]>;
+
+  beforeEach(() => {
+    vi.spyOn(PlannerClient.prototype, "getTask").mockResolvedValue({ checklist: HELD });
+    wrote = vi.spyOn(PlannerClient.prototype, "updateTask").mockImplementation(async (_p, _t, data) => ({
+      checklist: ((data.checklist as { _id?: string; text: string; done: boolean }[]) ?? []).map((item, i) => ({
+        _id: item._id ?? `507f1f77bcf86cd7994399${String(i).padStart(2, "0")}`,
+        ...item,
+      })),
+    }));
+  });
+
+  const run = (name: string, args: Record<string, unknown>) =>
+    registered().get(name)!.handler({ taskKey: "BP-1", ...args }, extra);
+  const sentList = () => (wrote.mock.calls[0][2] as { checklist: unknown[] }).checklist;
+
+  it("add_checklist_item writes the list back with every id and the new item last", async () => {
+    const answer = parse(await run("add_checklist_item", { text: "third" }));
+
+    expect(sentList()).toEqual([
+      { _id: A, text: "first", done: true },
+      { _id: B, text: "second", done: false },
+      { text: "third", done: false },
+    ]);
+    expect(answer.checklist.map((c: { text: string }) => c.text)).toEqual(["first", "second", "third"]);
+    expect(answer.checklist[0]).toEqual({ id: A, text: "first", done: true });
+  });
+
+  it("set_checklist_item ticks one by its text and leaves the other alone", async () => {
+    await run("set_checklist_item", { item: "SECOND", done: true });
+
+    expect(sentList()).toEqual([
+      { _id: A, text: "first", done: true },
+      { _id: B, text: "second", done: true },
+    ]);
+  });
+
+  it("set_checklist_item rewords one by id", async () => {
+    await run("set_checklist_item", { item: A, text: "first, reworded" });
+
+    expect(sentList()).toEqual([
+      { _id: A, text: "first, reworded", done: true },
+      { _id: B, text: "second", done: false },
+    ]);
+  });
+
+  it("set_checklist_item with nothing to change is refused before anything is read", async () => {
+    await expect(run("set_checklist_item", { item: A })).rejects.toThrow(/nothing to change/);
+    expect(wrote).not.toHaveBeenCalled();
+  });
+
+  it("remove_checklist_item drops one and keeps the other with its id", async () => {
+    await run("remove_checklist_item", { item: "first" });
+
+    expect(sentList()).toEqual([{ _id: B, text: "second", done: false }]);
+  });
+
+  it("refuses an item the task does not have, writing nothing", async () => {
+    await expect(run("set_checklist_item", { item: "third", done: true })).rejects.toThrow(/No criterion "third"/);
+    await expect(run("remove_checklist_item", { item: "third" })).rejects.toThrow(/No criterion "third"/);
+    expect(wrote).not.toHaveBeenCalled();
+  });
+
+  it("update_task keeps the id and the ticked state of a line whose text is unchanged", async () => {
+    await run("update_task", { acceptanceCriteria: "first\nsecond, reworded\n- a new one" });
+
+    const data = wrote.mock.calls[0][2];
+    expect(data).not.toHaveProperty("acceptanceCriteria");
+    expect(data.checklist).toEqual([
+      { _id: A, text: "first", done: true },
+      { text: "second, reworded", done: false },
+      { text: "a new one", done: false },
+    ]);
+  });
+
+  it("update_task still lets a line state its own box", async () => {
+    await run("update_task", { acceptanceCriteria: "- [ ] first\n- [x] second" });
+
+    expect(wrote.mock.calls[0][2].checklist).toEqual([
+      { _id: A, text: "first", done: false },
+      { _id: B, text: "second", done: true },
+    ]);
   });
 });
