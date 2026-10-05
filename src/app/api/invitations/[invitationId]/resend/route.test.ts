@@ -39,10 +39,14 @@ const { POST } = await import("./route");
 const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 
 const ID = "64b0000000000000000000aa";
-const resend = () =>
-  POST(new Request(`http://x/api/invitations/${ID}/resend`, { method: "POST" }), {
-    params: Promise.resolve({ invitationId: ID }),
-  });
+const resend = (body?: unknown) =>
+  POST(
+    new Request(`http://x/api/invitations/${ID}/resend`, {
+      method: "POST",
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    }),
+    { params: Promise.resolve({ invitationId: ID }) }
+  );
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -71,6 +75,7 @@ describe("POST /api/invitations/:id/resend", () => {
     expect(deliverTo.mock.calls[0][1]).toBe("cpi_new");
     expect(deliverTo.mock.calls[0][3]).toBe(caller);
     expect(JSON.stringify(await res.json())).not.toContain("cpi_new");
+    expect(logInstanceAudit.mock.calls[0][1]).toMatchObject({ action: "invitation_resent" });
   });
 
   // BP-843. Nobody chose to drop them, so the answer names them
@@ -93,6 +98,31 @@ describe("POST /api/invitations/:id/resend", () => {
     });
 
     expect(await (await resend()).json()).toMatchObject({ delivery: "link", reason: "no_mail_server" });
+  });
+
+  it("issues a link without mailing it when asked for one", async () => {
+    const res = await resend({ delivery: "link" });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      delivery: "link",
+      link: "https://planner.example/invite?token=cpi_new",
+      reason: "requested",
+    });
+    expect(deliverTo).not.toHaveBeenCalled();
+    expect(recordDelivery).toHaveBeenCalledWith(scopedToDefaultOrganisation(), ID, "cpi_new", "link");
+    expect(logInstanceAudit.mock.calls[0][1]).toMatchObject({ action: "invitation_link_issued" });
+  });
+
+  it("refuses an unknown delivery before touching the invitation", async () => {
+    expect((await resend({ delivery: "carrier-pigeon" })).status).toBe(400);
+    expect(reissueInvitation).not.toHaveBeenCalled();
+  });
+
+  it("mails it for an explicit email delivery and for a null body", async () => {
+    expect((await resend({ delivery: "email" })).status).toBe(200);
+    expect((await resend(null)).status).toBe(200);
+    expect(deliverTo).toHaveBeenCalledTimes(2);
   });
 
   // The same escalation POST refuses: an admin API token reading a working admin link back

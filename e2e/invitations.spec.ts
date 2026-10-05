@@ -177,6 +177,43 @@ test("resend kills the previous link, and revoke kills the current one", async (
   await stranger.context.close();
 });
 
+// BP-902. A mail server that accepts the message is no proof it arrived, so the admin can take the
+// link instead: a new one, mailed to nobody, the previous one dead, and the address not confirmed
+test("copy link hands the admin a new link without mailing it", async ({ page, browser }) => {
+  const email = freshAddress("copied");
+  await signInAsAdmin(page);
+  const { dialog } = await invite(page, email);
+  await dialog.getByRole("button", { name: "Done" }).click();
+  const mailed = await latestLink(email, 1);
+
+  const row = page.getByTestId("pending-invitation").filter({ hasText: email });
+  const [issued] = await Promise.all([
+    page.waitForResponse((r) => r.url().endsWith("/resend")),
+    row.getByRole("button", { name: `Copy link for ${email}` }).click(),
+  ]);
+  expect(issued.status()).toBe(200);
+  const linkDialog = page.getByRole("dialog", { name: "New invitation link" });
+  await expect(linkDialog.getByText(`No email was sent. Send this link to ${email} yourself.`)).toBeVisible();
+  const copied = (await linkDialog.getByTestId("invitation-link").textContent())!.trim();
+  expect(copied).toMatch(/\/invite\?token=cpi_[0-9a-f]+$/);
+  expect(copied).not.toBe(mailed);
+  await page.waitForTimeout(1_000);
+  expect(await mailFor(email)).toHaveLength(1);
+
+  const stranger = await asStranger(browser);
+  await stranger.page.goto(mailed);
+  await expect(alertOn(stranger.page)).toHaveText(
+    "This invitation link is not valid. Ask whoever invited you for a new one."
+  );
+  await accept(stranger.page, copied, "copied-link-person");
+  await expect(stranger.page).toHaveURL(BOARD_URL);
+  await stranger.context.close();
+
+  const account = await (await db()).collection("users").findOne({ username: "copied-link-person" });
+  expect(account?.email).toBe(email);
+  expect(account?.emailVerifiedAt).toBeNull();
+});
+
 test("an address that already has an account is not invited", async ({ page }) => {
   const handle = await db();
   const existing = freshAddress("member");

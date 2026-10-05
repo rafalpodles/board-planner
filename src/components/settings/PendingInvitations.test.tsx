@@ -84,4 +84,30 @@ describe("pending invitations", () => {
 
     expect(toast).toHaveBeenCalledWith("Left out Beta, Gamma: whoever added them can no longer grant them.", "info");
   });
+
+  it("asks for a link without mail and shows it", async () => {
+    api.post.mockResolvedValue({
+      invitation: invitation("ada@example.com"),
+      delivery: "link",
+      link: "https://planner.example/invite?token=cpi_new",
+      reason: "requested",
+    });
+    render(<PendingInvitations invitations={[invitation("ada@example.com")]} onChanged={vi.fn()} />);
+
+    await act(async () => screen.getByRole("button", { name: "Copy link for ada@example.com" }).click());
+
+    expect(api.post).toHaveBeenCalledWith("/api/invitations/id-ada@example.com/resend", { delivery: "link" });
+    expect(screen.getByTestId("invitation-link").textContent).toBe("https://planner.example/invite?token=cpi_new");
+    expect(screen.getByText("No email was sent. Send this link to ada@example.com yourself.")).toBeTruthy();
+  });
+
+  it("asks a resend for mail", async () => {
+    api.post.mockResolvedValue({ invitation: invitation("ada@example.com"), delivery: "email" });
+    render(<PendingInvitations invitations={[invitation("ada@example.com")]} onChanged={vi.fn()} />);
+
+    await act(async () => screen.getByRole("button", { name: "Resend the invitation for ada@example.com" }).click());
+
+    expect(api.post).toHaveBeenCalledWith("/api/invitations/id-ada@example.com/resend", { delivery: "email" });
+    expect(screen.queryByTestId("invitation-link")).toBeNull();
+  });
 });

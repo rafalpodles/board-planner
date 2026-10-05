@@ -3,6 +3,14 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
+import { InvitationLinkReason } from "@/types";
+
+const HEADLINE: Record<InvitationLinkReason, (email: string) => string> = {
+  no_mail_server: (email) =>
+    `No email was sent — this instance has no mail server. Send this link to ${email} yourself.`,
+  mail_failed: (email) => `The email to ${email} could not be sent. Send this link yourself.`,
+  requested: (email) => `No email was sent. Send this link to ${email} yourself.`,
+};
 
 export function InvitationLink({
   email,
@@ -11,7 +19,7 @@ export function InvitationLink({
 }: {
   email: string;
   link: string;
-  reason: "no_mail_server" | "mail_failed";
+  reason: InvitationLinkReason;
 }) {
   const { toast } = useToast();
   const [copied, setCopied] = useState(false);
@@ -29,9 +37,7 @@ export function InvitationLink({
   return (
     <div className="bg-warning/10 border border-warning/30 rounded-lg p-4 space-y-2">
       <p className="text-sm font-medium text-warning">
-        {reason === "no_mail_server"
-          ? `No email was sent — this instance has no mail server. Send this link to ${email} yourself.`
-          : `The email to ${email} could not be sent. Send this link yourself.`}
+        {HEADLINE[reason](email)}
       </p>
       <div className="flex gap-2">
         <code

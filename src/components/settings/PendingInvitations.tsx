@@ -30,13 +30,13 @@ export function PendingInvitations({
   const [revokeError, setRevokeError] = useState("");
   const [linkFor, setLinkFor] = useState<Reissued | null>(null);
 
-  async function resend(invitation: ApiInvitation) {
+  async function reissue(invitation: ApiInvitation, delivery: "email" | "link") {
     if (busy) return;
     setBusy(invitation._id);
     try {
       const result: Reissued = await api.post(
         `/api/invitations/${invitation._id}/resend`,
-        {},
+        { delivery },
       );
       if (result.delivery === "email") {
         toast(`Invitation sent again to ${invitation.email}`, "success");
@@ -55,7 +55,9 @@ export function PendingInvitations({
       toast(
         err instanceof Error
           ? err.message
-          : "The invitation could not be sent again",
+          : delivery === "link"
+            ? "A new link could not be made"
+            : "The invitation could not be sent again",
         "error",
       );
     } finally {
@@ -148,9 +150,18 @@ export function PendingInvitations({
                     variant="secondary"
                     aria-label={`Resend the invitation for ${invitation.email}`}
                     disabled={!!busy}
-                    onClick={() => resend(invitation)}
+                    onClick={() => reissue(invitation, "email")}
                   >
                     Resend
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    aria-label={`Copy link for ${invitation.email}`}
+                    disabled={!!busy}
+                    onClick={() => reissue(invitation, "link")}
+                  >
+                    Copy link
                   </Button>
                   <Button
                     size="sm"
