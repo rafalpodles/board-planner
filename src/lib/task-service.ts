@@ -1640,6 +1640,7 @@ export async function releaseExpiredTasks(db: ScopedDb, projectId: string, now =
     project: projectId,
     status: { $in: active },
     "execution.startedAt": { $lt: new Date(now.getTime() - EXECUTION_LEASE_MS) },
+    ...NOT_ARCHIVED,
   };
   const outOfAttempts = { ...expired, "execution.attempts": { $gte: MAX_EXECUTION_ATTEMPTS } };
 

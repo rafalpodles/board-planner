@@ -6,7 +6,8 @@ import readers from "./task-archive.readers.json";
 const SRC = join(__dirname, "..");
 const ROOT = join(SRC, "..");
 
-const TASK_READ = /\bTask\.(?:find|findOne|findById|aggregate|countDocuments|distinct|exists|findOneAndUpdate)\b/;
+const TASK_READ =
+  /\bTask\.(?:find|findOne|findById|aggregate|countDocuments|distinct|exists|findOneAndUpdate|findOneAndDelete|findOneAndReplace|findByIdAndUpdate|findByIdAndDelete|updateMany|updateOne|replaceOne|deleteMany|deleteOne|bulkWrite)\b/;
 const USES_THE_FILTER = /from\s+["']@\/lib\/task-archive["']/;
 
 function sources(dir: string): string[] {

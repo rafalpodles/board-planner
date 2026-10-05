@@ -70,6 +70,59 @@ describe("archiveTask", () => {
     expect(update.$unset).toMatchObject({ "execution.runId": "" });
   });
 
+  it("gives back the assignee a run invented, and the lease clock, so nothing sweeps the archived task", async () => {
+    taskFindOne.mockReturnValue(reads(HELD));
+    taskFindOneAndUpdate.mockReturnValue(writes({ ...HELD, archivedAt: new Date() }));
+
+    await archiveTask(db, "p1", TASK, ACTOR, true);
+
+    const [, update] = taskFindOneAndUpdate.mock.calls[0];
+    expect(update.$set).toMatchObject({ assignee: null, assignedBy: null });
+    expect(update.$unset).toMatchObject({ "execution.runId": "", "execution.startedAt": "" });
+  });
+
+  it("keeps the assignee a person made when the run only borrowed the task", async () => {
+    taskFindOne.mockReturnValue(reads({ ...HELD, execution: { ...HELD.execution, assignedByRun: false } }));
+    taskFindOneAndUpdate.mockReturnValue(writes({ ...HELD, archivedAt: new Date() }));
+
+    await archiveTask(db, "p1", TASK, ACTOR, true);
+
+    const [, update] = taskFindOneAndUpdate.mock.calls[0];
+    expect(update.$set).not.toHaveProperty("assignee");
+    expect(update.$unset).toMatchObject({ "execution.runId": "" });
+  });
+
+  it("unsets the run on a forced write even when the read saw the task free, since a claim can land between", async () => {
+    taskFindOne.mockReturnValue(reads(FREE));
+    taskFindOneAndUpdate.mockReturnValue(writes({ ...FREE, archivedAt: new Date() }));
+
+    await archiveTask(db, "p1", TASK, ACTOR, true);
+
+    const [, update] = taskFindOneAndUpdate.mock.calls[0];
+    expect(update.$unset).toMatchObject({ "execution.runId": "" });
+  });
+
+  it("tries again once when the run was released between the read and the write, rather than calling the task missing", async () => {
+    taskFindOne.mockReturnValueOnce(reads(HELD)).mockReturnValueOnce(reads(FREE));
+    taskFindOneAndUpdate.mockReturnValueOnce(writes(null)).mockReturnValueOnce(writes({ ...FREE, archivedAt: new Date() }));
+
+    const result = await archiveTask(db, "p1", TASK, ACTOR, true);
+    expect(result.ok).toBe(true);
+    expect(taskFindOneAndUpdate).toHaveBeenCalledTimes(2);
+    expect(activityCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers 409 rather than 404 when the write misses twice on a task that exists", async () => {
+    taskFindOne.mockReturnValue(reads(FREE));
+    taskFindOneAndUpdate.mockReturnValue(writes(null));
+
+    const result = await archiveTask(db, "p1", TASK, ACTOR);
+
+    expect(result).toMatchObject({ ok: false, status: 409 });
+    expect(result.ok === false && result.error).toMatch(/try again/);
+    expect(activityCreate).not.toHaveBeenCalled();
+  });
+
   it("loses a race with a claim to the same 409 rather than archiving over the new run", async () => {
     taskFindOne.mockReturnValueOnce(reads(FREE)).mockReturnValueOnce(reads(HELD));
     taskFindOneAndUpdate.mockReturnValue(writes(null));

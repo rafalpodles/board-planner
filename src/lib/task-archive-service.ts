@@ -13,45 +13,48 @@ export async function archiveTask(
 ): Promise<TaskServiceResult> {
   await connectDB();
 
-  const current = await db.Task.findOne({ _id: taskId, project: projectId })
-    .select("execution taskNumber archivedAt")
-    .lean();
-  if (!current) return { ok: false, error: "Task not found", status: 404 };
-
   const populated = () => db.Task.findOne({ _id: taskId, project: projectId }).populate(taskPopulateFields);
-  if (current.archivedAt) return { ok: true, data: (await populated()) as ITask };
 
-  const held = !!current.execution?.runId;
-  if (held && !force) {
-    const project = await db.Project.findById(projectId, "key").lean();
-    const refusal = await heldRunRefusal(db, current, project?.key as string | undefined, "archive");
-    if (refusal) return refusal;
-  }
-
-  const archived = await db.Task.findOneAndUpdate(
-    {
-      _id: taskId,
-      project: projectId,
-      archivedAt: null,
-      ...(force ? {} : { "execution.runId": { $in: ["", null] } }),
-    },
-    { $set: { archivedAt: new Date(), archivedBy: actorId }, ...(held && force ? { $unset: UNSET_RUN } : {}) },
-    { returnDocument: "after" }
-  ).populate(taskPopulateFields);
-
-  if (!archived) {
-    const after = await db.Task.findOne({ _id: taskId, project: projectId })
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const current = await db.Task.findOne({ _id: taskId, project: projectId })
       .select("execution taskNumber archivedAt")
       .lean();
-    if (!after) return { ok: false, error: "Task not found", status: 404 };
-    if (after.archivedAt) return { ok: true, data: (await populated()) as ITask };
-    const project = await db.Project.findById(projectId, "key").lean();
-    const refusal = await heldRunRefusal(db, after, project?.key as string | undefined, "archive");
-    return refusal ?? { ok: false, error: "Task not found", status: 404 };
+    if (!current) return { ok: false, error: "Task not found", status: 404 };
+    if (current.archivedAt) return { ok: true, data: (await populated()) as ITask };
+
+    const held = !!current.execution?.runId;
+    if (held && !force) {
+      const project = await db.Project.findById(projectId, "key").lean();
+      const refusal = await heldRunRefusal(db, current, project?.key as string | undefined, "archive");
+      if (refusal) return refusal;
+    }
+
+    const releasesWorker = held && current.execution?.assignedByRun !== false;
+    const archived = await db.Task.findOneAndUpdate(
+      {
+        _id: taskId,
+        project: projectId,
+        archivedAt: null,
+        ...(force ? {} : { "execution.runId": { $in: ["", null] } }),
+      },
+      {
+        $set: {
+          archivedAt: new Date(),
+          archivedBy: actorId,
+          ...(force && releasesWorker ? { assignee: null, assignedBy: null } : {}),
+        },
+        ...(force ? { $unset: { ...UNSET_RUN, "execution.startedAt": "" } } : {}),
+      },
+      { returnDocument: "after" }
+    ).populate(taskPopulateFields);
+
+    if (archived) {
+      await logActivity(db, taskId, actorId, "archived");
+      return { ok: true, data: archived as ITask };
+    }
   }
 
-  await logActivity(db, taskId, actorId, "archived");
-  return { ok: true, data: archived as ITask };
+  return { ok: false, error: "The task changed while it was being archived, try again", status: 409 };
 }
 
 export async function unarchiveTask(

@@ -850,6 +850,14 @@ describe("releaseExpiredTasks", () => {
     expect(filter.project).toBe("p1");
   });
 
+  it("leaves an archived task alone, in both the read and the two writes", async () => {
+    await releaseExpiredTasks(db, "p1", now);
+
+    expect(find.mock.calls[0][0]).toMatchObject({ archivedAt: null });
+    expect(updateMany.mock.calls).toHaveLength(2);
+    for (const [filter] of updateMany.mock.calls) expect(filter).toMatchObject({ archivedAt: null });
+  });
+
   it("returns a task with attempts left to the queue", async () => {
     await releaseExpiredTasks(db, "p1", now);
 
