@@ -9,13 +9,9 @@ import { Button } from "@/components/ui/Button";
 import { LoadFailed } from "@/components/ui/LoadFailed";
 import { useToast } from "@/components/ui/Toast";
 
-interface EmailSettings {
-  configured: boolean;
-  host: string;
-  port: number;
-  user: string;
-  from: string;
-}
+type EmailSettings =
+  | { managedByPlatform: false; configured: boolean; host: string; port: number; user: string; from: string }
+  | { managedByPlatform: true; configured: boolean; from: string };
 
 export default function EmailSettingsPage() {
   const api = useApi();
@@ -91,7 +87,9 @@ export default function EmailSettingsPage() {
     <>
       <h2 className="text-lg font-semibold mb-1">Email</h2>
       <p className="text-sm text-text-muted mb-6">
-        Configured in the environment, not here. This screen shows whether it works.
+        {settings?.managedByPlatform
+          ? "Sent by the service's own mail server. This screen shows whether it works."
+          : "Configured in the environment, not here. This screen shows whether it works."}
       </p>
     </>
   );
@@ -113,13 +111,24 @@ export default function EmailSettingsPage() {
     <div className="max-w-2xl">
       {header}
 
-      {settings.configured ? (
+      {settings.managedByPlatform && !settings.configured ? (
+        <div className="mb-6 rounded-lg border border-border p-4 text-sm">
+          <p className="font-medium">Mail is not available on this service yet.</p>
+          <p className="mt-1 text-text-muted">Until it is, no email is sent.</p>
+        </div>
+      ) : settings.configured ? (
         <dl className="mb-6 divide-y divide-border rounded-lg border border-border text-sm">
-          {[
-            ["Server", `${settings.host}:${settings.port}`],
-            ["Username", settings.user],
-            ["From", settings.from],
-          ].map(([label, value]) => (
+          {(settings.managedByPlatform
+            ? [
+                ["Server", "Provided by the service"],
+                ["From", settings.from],
+              ]
+            : [
+                ["Server", `${settings.host}:${settings.port}`],
+                ["Username", settings.user],
+                ["From", settings.from],
+              ]
+          ).map(([label, value]) => (
             <div key={label} className="flex gap-4 px-4 py-2">
               <dt className="w-24 shrink-0 text-text-muted sm:w-48">{label}</dt>
               <dd className="min-w-0 break-all">{value}</dd>
