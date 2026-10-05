@@ -182,6 +182,21 @@ describe("the db a handler is handed (BP-663)", () => {
     expect(handler.mock.calls[0][1].db).not.toBe(scoped(DEFAULT_ORGANISATION_ID));
   });
 
+  it("withAuth runs the handler with the user's organisation in every log line (BP-894)", async () => {
+    onOthersHost();
+    getAuthUser.mockResolvedValue({ _id: "u1", organisation: OTHER });
+    const { loggingOrganisation } = await import("./organisation-log");
+    let logged: string | undefined;
+
+    await withAuth(async () => {
+      await Promise.resolve();
+      logged = loggingOrganisation();
+      return new Response(null, { status: 200 });
+    })(request(), { params: paramsOf() });
+
+    expect(logged).toBe(OTHER);
+  });
+
   it("withWorker confines it to the machine's organisation", async () => {
     onOthersHost();
     verifyWorkerCredential.mockResolvedValue({ _id: "w1", organisation: OTHER, credentialHash: "hash" });

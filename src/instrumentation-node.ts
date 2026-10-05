@@ -1,4 +1,7 @@
 export async function bootNode(): Promise<void> {
+  const { tagConsoleWithOrganisation } = await import("@/lib/organisation-log");
+  tagConsoleWithOrganisation();
+
   // Read here so a fumbled value is one startup failure naming the variable, and so an operator
   // can see which answer the instance settled on — the throttle keys on it, and getting it wrong
   // is silent in both directions (BP-318). This lived in a second copy of this file under src/
