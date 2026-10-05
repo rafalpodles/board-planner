@@ -21,6 +21,7 @@ import { getProjectColumns } from "@/lib/columns";
 import { echo } from "@/lib/echo";
 import { isWorkerLockedByInstance } from "@/lib/worker-gate";
 import type { ScopedDb } from "@/lib/db-scope";
+import { NOT_ARCHIVED } from "@/lib/task-archive";
 
 export interface PmToolContext {
   projectId: string;
@@ -260,7 +261,7 @@ export const PM_TOOLS: Record<string, PmTool> = {
       },
     },
     async execute(db, args, ctx) {
-      const filter: Record<string, unknown> = { project: ctx.projectId };
+      const filter: Record<string, unknown> = { project: ctx.projectId, ...NOT_ARCHIVED };
       if (args.status !== undefined) {
         // This tool queries Mongo directly, so the route's refusal does not cover it. Columns are
         // project-defined, and an id the board has not got answered `[]` — which a model reports
@@ -337,7 +338,7 @@ export const PM_TOOLS: Record<string, PmTool> = {
     },
     async execute(db, _args, ctx) {
       const rows = await db.Task.aggregate([
-        { $match: { project: resolveObjectId(ctx.projectId) } },
+        { $match: { project: resolveObjectId(ctx.projectId), ...NOT_ARCHIVED } },
         { $group: { _id: "$status", count: { $sum: 1 } } },
       ]);
       const byStatus: Record<string, number> = {};

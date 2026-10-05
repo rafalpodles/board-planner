@@ -5,6 +5,7 @@ import type { ScopedDb } from "@/lib/db-scope";
 import { withProjectAccess } from "@/lib/middleware";
 import { SprintStatus, SPRINT_STATUSES } from "@/types";
 import { columnIdsWithRole } from "@/lib/columns";
+import { NOT_ARCHIVED } from "@/lib/task-archive";
 
 // A board may define more than one done column, and a project that renamed its board has none
 // called "done" at all. Resolved per request from the project's own columns.
@@ -41,10 +42,11 @@ export const GET = withProjectAccess(async (_request, { params, db }) => {
     return NextResponse.json({ error: "Sprint not found" }, { status: 404 });
   }
 
-  const taskCount = await db.Task.countDocuments({ project: projectId, sprint: sprintId });
+  const taskCount = await db.Task.countDocuments({ project: projectId, sprint: sprintId, ...NOT_ARCHIVED });
   const doneCount = await db.Task.countDocuments({
     project: projectId,
     sprint: sprintId,
+    ...NOT_ARCHIVED,
     status: { $in: await doneColumnIds(db, projectId) },
   });
 

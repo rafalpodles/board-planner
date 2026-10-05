@@ -5,6 +5,7 @@ import { columnIdsWithRole } from "@/lib/columns";
 import { normalizeOptions } from "@/lib/custom-fields";
 import { TASK_STATUSES } from "@/types";
 import mongoose from "mongoose";
+import { NOT_ARCHIVED } from "@/lib/task-archive";
 
 const WEEK_MS = 7 * 86400000;
 const WEEKS = 8;
@@ -46,7 +47,7 @@ export const GET = withProjectAccess(async (_request, { params, db }) => {
 
   const [breakdowns, recentTasks, fieldUsage] = await Promise.all([
     db.Task.aggregate([
-      { $match: { project: projectOid } },
+      { $match: { project: projectOid, ...NOT_ARCHIVED } },
       {
         $group: {
           _id: null,
@@ -62,6 +63,7 @@ export const GET = withProjectAccess(async (_request, { params, db }) => {
     db.Task.find(
       {
         project: projectOid,
+        ...NOT_ARCHIVED,
         $or: [
           { createdAt: { $gte: since } },
           { status: { $in: doneIds }, updatedAt: { $gte: since } },

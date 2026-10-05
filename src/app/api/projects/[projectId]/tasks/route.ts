@@ -8,6 +8,7 @@ import { withApiExecutions } from "@/lib/task-execution-view";
 import { parentsOf } from "@/lib/task-parents";
 import { getColumnIds } from "@/lib/columns";
 import { normalizeOptions } from "@/lib/custom-fields";
+import { archivedFilter, archivedScopeOf } from "@/lib/task-archive";
 
 
 const MAX_TASK_NUMBERS = 100;
@@ -23,7 +24,7 @@ const isCalendarDay = (value: string) => {
 };
 
 /** What a card in a list needs, and what an agent reading a board needs to pick work from it. */
-const SUMMARY_FIELDS = "taskNumber title status priority assignee dueDate sprint order updatedAt";
+const SUMMARY_FIELDS = "taskNumber title status priority assignee dueDate sprint order updatedAt archivedAt";
 
 export const GET = withProjectAccess(async (request, { params, db }) => {
   const { projectId } = await params;
@@ -182,6 +183,12 @@ export const GET = withProjectAccess(async (request, { params, db }) => {
   // Every condition below is its own clause, so none can replace the `$or` the text search owns
   const clauses: Record<string, unknown>[] = [];
   const refuse = (error: string) => NextResponse.json({ error }, { status: 400 });
+
+  const archived = archivedScopeOf(url.searchParams.get("archived"));
+  if (!archived) {
+    return refuse(`Invalid archived "${String(url.searchParams.get("archived")).slice(0, 64)}" — only or include; left out, archived tasks are not listed`);
+  }
+  Object.assign(filter, archivedFilter(archived));
 
   const dueBefore = url.searchParams.get("dueBefore");
   const dueAfter = url.searchParams.get("dueAfter");

@@ -223,6 +223,15 @@ const taskSchema = new Schema<ITask>(
       },
       default: null,
     },
+    archivedAt: {
+      type: Date,
+      default: null,
+    },
+    archivedBy: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
     createdBy: {
       type: Schema.Types.ObjectId,
       ref: "User",

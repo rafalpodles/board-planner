@@ -4,6 +4,7 @@ import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { columnIdsWithRole } from "@/lib/columns";
 import { isObjectIdSegment } from "@/lib/urls";
+import { NOT_ARCHIVED } from "@/lib/task-archive";
 
 export const GET = withProjectAccess(async (_request, { params, db }) => {
   const { projectId } = await params;
@@ -40,7 +41,7 @@ export const GET = withProjectAccess(async (_request, { params, db }) => {
     : null;
 
   const counts = await db.Task.aggregate([
-    { $match: { project: new mongoose.Types.ObjectId(projectId), sprint: { $in: sprintIds } } },
+    { $match: { project: new mongoose.Types.ObjectId(projectId), sprint: { $in: sprintIds }, ...NOT_ARCHIVED } },
     {
       $group: {
         _id: "$sprint",

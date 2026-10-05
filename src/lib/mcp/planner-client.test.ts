@@ -207,6 +207,17 @@ describe("resolveTaskKey", () => {
     expect(taskReads[0].searchParams.get("taskNumber")).toBe("7");
   });
 
+  // An archived task is hidden from the list by default, and a key still has to reach it: restoring
+  // one, or reading its history, starts from the key
+  it("asks for archived tasks too, since a key names one whether or not it is archived", async () => {
+    board(["BP"]);
+
+    await client.resolveTaskKey("BP-7");
+
+    const taskRead = requested().find((url) => url.pathname.endsWith("/tasks"));
+    expect(taskRead?.searchParams.get("archived")).toBe("include");
+  });
+
   it("says a number the board does not hold is not found", async () => {
     board(["BP"], []);
 

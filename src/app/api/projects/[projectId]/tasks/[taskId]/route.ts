@@ -3,6 +3,7 @@ import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import type { ScopedDb } from "@/lib/db-scope";
 import { withProjectAccess } from "@/lib/middleware";
+import { check } from "@/lib/grants";
 import { machineMayNotForce, MACHINE_FORCE_REFUSAL } from "@/lib/force-guard";
 import {
   toApiExecution,
@@ -138,6 +139,13 @@ export const DELETE = withProjectAccess(async (request, { params, user, db }) =>
     return NextResponse.json({ error: "Invalid task id" }, { status: 400 });
   }
   await connectDB();
+
+  if (!(await check(db, user, projectId, "admin"))) {
+    return NextResponse.json(
+      { error: "Only the board's owner may delete a task. Archive it instead: it leaves the board and every list, and can be restored." },
+      { status: 403 }
+    );
+  }
 
   // A delete carries no body unless the caller means to force, and `request.json()` throws on an
   // empty one — so an absent body is "do not force" rather than a 500.

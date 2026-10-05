@@ -7,6 +7,7 @@ import { accessibleProjectIds, administeredProjectIds } from "@/lib/grants";
 import { legacyFieldSeeds } from "@/lib/legacy-fields";
 import { sanitizeMcpServers } from "@/lib/pm/config";
 import { sanitizeProjectSecrets } from "@/lib/project-secrets";
+import { NOT_ARCHIVED } from "@/lib/task-archive";
 
 export const GET = withAuth(async (_request, { user, db }) => {
   await connectDB();
@@ -26,7 +27,7 @@ export const GET = withAuth(async (_request, { user, db }) => {
   const ids = projects.map((p) => p._id);
   const [taskStats, activeSprints] = await Promise.all([
     db.Task.aggregate([
-      { $match: { project: { $in: ids } } },
+      { $match: { project: { $in: ids }, ...NOT_ARCHIVED } },
       {
         $group: {
           _id: "$project",

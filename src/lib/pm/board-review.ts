@@ -2,6 +2,7 @@ import { Types } from "mongoose";
 import { ColumnRole } from "@/types";
 import { getProjectColumns } from "@/lib/columns";
 import type { ScopedDb } from "@/lib/db-scope";
+import { NOT_ARCHIVED } from "@/lib/task-archive";
 
 const STALE_DAYS_BY_ROLE: Partial<Record<ColumnRole, number>> = {
   approved: 7,
@@ -91,7 +92,7 @@ export async function buildBoardDigest(db: ScopedDb, projectId: string): Promise
   const labelOf = new Map(columns.map((c) => [c.id, c.label]));
   const doneStatuses = columns.filter((c) => c.role === "done").map((c) => c.id);
 
-  const filter = { project: project._id, status: { $nin: doneStatuses } };
+  const filter = { project: project._id, status: { $nin: doneStatuses }, ...NOT_ARCHIVED };
   const [openTotal, tasks] = await Promise.all([
     db.Task.countDocuments(filter),
     db.Task.find(filter, "taskNumber title status description checklist createdAt")

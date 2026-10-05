@@ -1700,3 +1700,123 @@ describe("batch tools", () => {
     });
   });
 });
+
+/**
+ * BP-915. A member can take a task off every list and bring it back; only the board's owner can
+ * delete one, and the call has to repeat the task's key.
+ */
+describe("archiving and deleting a task", () => {
+  const parse = (result: unknown) => JSON.parse((result as { content: { text: string }[] }).content[0].text);
+  const run = (name: string, args: Record<string, unknown>) => registered().get(name)!.handler(args, extra);
+
+  describe("archive_task and unarchive_task", () => {
+    it("archive by key and answer with the task's key and link", async () => {
+      const archive = vi
+        .spyOn(PlannerClient.prototype, "archiveTask")
+        .mockResolvedValue({ taskNumber: 7, title: "T", status: "todo", priority: "high" });
+
+      const answer = parse(await run("archive_task", { taskKey: "bp-7" }));
+
+      expect(archive).toHaveBeenCalledWith("p1", "t1");
+      expect(answer).toMatchObject({ archived: true, key: "BP-7", title: "T" });
+    });
+
+    it("restore by key", async () => {
+      const restore = vi.spyOn(PlannerClient.prototype, "unarchiveTask").mockResolvedValue({ taskNumber: 7 });
+
+      const answer = parse(await run("unarchive_task", { taskKey: "BP-7" }));
+
+      expect(restore).toHaveBeenCalledWith("p1", "t1");
+      expect(answer).toMatchObject({ archived: false, key: "BP-7" });
+    });
+
+    it("say who may, and that restoring is possible", () => {
+      const said = descriptions();
+
+      expect(said.get("archive_task")).toMatch(/Any member/);
+      expect(said.get("archive_task")).toMatch(/unarchive_task/);
+      expect(said.get("unarchive_task")).toMatch(/Any member/);
+    });
+  });
+
+  describe("delete_task", () => {
+    beforeEach(() => {
+      vi.spyOn(PlannerClient.prototype, "getProject").mockResolvedValue({ _id: "p1", canAdmin: true });
+    });
+
+    it("deletes for the owner when the key is repeated, whatever the case of the prefix", async () => {
+      const del = vi.spyOn(PlannerClient.prototype, "deleteTask").mockResolvedValue({ message: "Task deleted" });
+
+      const answer = parse(await run("delete_task", { taskKey: "BP-7", confirmKey: "bp-7" }));
+
+      expect(del).toHaveBeenCalledWith("p1", "t1");
+      expect(answer).toEqual({ deleted: "BP-7" });
+    });
+
+    it("refuses a confirmKey that is another task's, before reading or writing anything", async () => {
+      const del = vi.spyOn(PlannerClient.prototype, "deleteTask").mockResolvedValue({});
+      const resolve = vi.mocked(PlannerClient.prototype.resolveTaskKey);
+
+      await expect(run("delete_task", { taskKey: "BP-7", confirmKey: "BP-8" })).rejects.toThrow(
+        /confirmKey "BP-8" is not the key of the task to delete, "BP-7". Nothing was written/
+      );
+      expect(resolve).not.toHaveBeenCalled();
+      expect(del).not.toHaveBeenCalled();
+    });
+
+    it.each(["", "7", "BP", "OTHER-7"])("refuses the confirmKey %j", async (confirmKey) => {
+      const del = vi.spyOn(PlannerClient.prototype, "deleteTask").mockResolvedValue({});
+
+      await expect(run("delete_task", { taskKey: "BP-7", confirmKey })).rejects.toThrow(/Not deleted/);
+      expect(del).not.toHaveBeenCalled();
+    });
+
+    it("refuses a member who is not the owner, pointing at archive_task, and deletes nothing", async () => {
+      vi.spyOn(PlannerClient.prototype, "getProject").mockResolvedValue({ _id: "p1", canAdmin: false });
+      const del = vi.spyOn(PlannerClient.prototype, "deleteTask").mockResolvedValue({});
+
+      await expect(run("delete_task", { taskKey: "BP-7", confirmKey: "BP-7" })).rejects.toThrow(/only the board's owner[\s\S]*archive_task[\s\S]*BP-7/);
+      expect(del).not.toHaveBeenCalled();
+    });
+
+    it("declares confirmKey, so a call without it never reaches the handler", () => {
+      expect(registered().get("delete_task")!.schema.safeParse({ taskKey: "BP-1" }).success).toBe(false);
+    });
+
+    it("says who may, that it is for good and that a worker's run is never forced", () => {
+      const said = descriptions().get("delete_task")!;
+
+      expect(said).toMatch(/Only the board's owner/);
+      expect(said).toMatch(/archive_task/);
+      expect(said).toMatch(/cannot be undone/);
+      expect(said).toMatch(/never forced/);
+    });
+  });
+
+  describe("list_tasks", () => {
+    it("passes archived on, and offers only the two values that mean something", async () => {
+      vi.spyOn(PlannerClient.prototype, "getProjectByKey").mockResolvedValue({ _id: "p1" } as never);
+      const page = vi
+        .spyOn(PlannerClient.prototype, "pageTasks")
+        .mockResolvedValue({ tasks: [], total: 0, limit: 50, offset: 0 });
+
+      await run("list_tasks", { project: "BP", archived: "only" });
+
+      expect(page.mock.calls[0][1]).toMatchObject({ archived: "only" });
+      const schema = registered().get("list_tasks")!.schema;
+      expect(schema.safeParse({ project: "BP", archived: "include" }).success).toBe(true);
+      expect(schema.safeParse({ project: "BP", archived: "exclude" }).success).toBe(false);
+    });
+
+    it("sends nothing about archived by default, so archived tasks stay out", async () => {
+      vi.spyOn(PlannerClient.prototype, "getProjectByKey").mockResolvedValue({ _id: "p1" } as never);
+      const page = vi
+        .spyOn(PlannerClient.prototype, "pageTasks")
+        .mockResolvedValue({ tasks: [], total: 0, limit: 50, offset: 0 });
+
+      await run("list_tasks", { project: "BP" });
+
+      expect(page.mock.calls[0][1]).not.toHaveProperty("archived");
+    });
+  });
+});

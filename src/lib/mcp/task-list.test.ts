@@ -29,6 +29,12 @@ describe("listedTask", () => {
     });
   });
 
+  it("marks an archived task, and only that", () => {
+    expect(listedTask({ taskNumber: 1, archivedAt: "2026-10-05T10:00:00.000Z" }, "BP")).toMatchObject({ archived: true });
+    expect(listedTask({ taskNumber: 1, archivedAt: null }, "BP")).not.toHaveProperty("archived");
+    expect(listedTask({ taskNumber: 1 }, "BP")).not.toHaveProperty("archived");
+  });
+
   it("says nothing where there is nothing, and reads a task predating priority as medium", () => {
     expect(listedTask({ taskNumber: 1, title: "T", status: "todo" }, "BP")).toMatchObject({
       priority: "medium",

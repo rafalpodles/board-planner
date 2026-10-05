@@ -5,11 +5,12 @@ import { accessibleProjectIds } from "@/lib/grants";
 import { columnFor } from "@/lib/columns";
 import { withApiExecutions } from "@/lib/task-execution-view";
 import "@/models/project";
+import { NOT_ARCHIVED } from "@/lib/task-archive";
 
 export const GET = withAuth(async (_request, { user, db }) => {
   await connectDB();
 
-  const filter: Record<string, unknown> = { assignee: user._id };
+  const filter: Record<string, unknown> = { assignee: user._id, ...NOT_ARCHIVED };
 
   // Members can only see tasks from their allowed projects
   if (user.role !== "admin") {

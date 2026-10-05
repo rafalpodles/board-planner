@@ -1,0 +1,43 @@
+{
+  "hides": [
+    "src/app/api/projects/[projectId]/ai/generate-task/route.ts",
+    "src/app/api/projects/[projectId]/sprints/[sprintId]/route.ts",
+    "src/app/api/projects/[projectId]/sprints/route.ts",
+    "src/app/api/projects/[projectId]/stats/route.ts",
+    "src/app/api/projects/[projectId]/tasks/route.ts",
+    "src/app/api/projects/[projectId]/tasks/suggest/route.ts",
+    "src/app/api/projects/route.ts",
+    "src/app/api/search/route.ts",
+    "src/app/api/tasks/mine/route.ts",
+    "src/ee/connectors/coda/sync.ts",
+    "src/lib/pm/board-review.ts",
+    "src/lib/pm/tools.ts",
+    "src/lib/task-service.ts"
+  ],
+  "sees": {
+    "src/app/api/admin/workers/route.ts": "the tasks a run holds: an archived task is never held, and a held one cannot be archived without force",
+    "src/app/api/agents/[agentId]/route.ts": "what still names the agent, archived or not, before it may be deleted",
+    "src/app/api/projects/[projectId]/categories/route.ts": "what still uses a category, archived or not",
+    "src/app/api/projects/[projectId]/columns/route.ts": "what still sits in a column, archived or not",
+    "src/app/api/projects/[projectId]/gitlab/sync/route.ts": "a merge request is linked to its task by key, archived or not",
+    "src/app/api/projects/[projectId]/route.ts": "deleting a project takes every task with it",
+    "src/app/api/projects/[projectId]/runs/route.ts": "a run record names its task by id",
+    "src/app/api/projects/[projectId]/tasks/[taskId]/activity/route.ts": "by id: an archived task keeps its history",
+    "src/app/api/projects/[projectId]/tasks/[taskId]/checklist/[itemId]/route.ts": "by id",
+    "src/app/api/projects/[projectId]/tasks/[taskId]/checklist/route.ts": "by id",
+    "src/app/api/projects/[projectId]/tasks/[taskId]/comments/[commentId]/route.ts": "by id",
+    "src/app/api/projects/[projectId]/tasks/[taskId]/comments/route.ts": "by id",
+    "src/app/api/projects/[projectId]/tasks/[taskId]/decision/route.ts": "by id",
+    "src/app/api/projects/[projectId]/tasks/[taskId]/gitlab-activity/route.ts": "by id",
+    "src/app/api/projects/[projectId]/tasks/[taskId]/route.ts": "by key and by link, and a relation's other end is shown whatever its state",
+    "src/app/api/projects/[projectId]/tasks/[taskId]/watch/route.ts": "by id",
+    "src/app/api/projects/[projectId]/tasks/reorder/route.ts": "the order is one sequence over the whole board",
+    "src/lib/github-sync.ts": "a pull request is linked to its task by key, archived or not",
+    "src/lib/middleware.ts": "resolves a task key to an id, and a worker's run to its task",
+    "src/lib/pm/triggers.ts": "by id",
+    "src/lib/task-archive-service.ts": "the archive and restore writers read the task they act on",
+    "src/lib/task-decisions.ts": "a refused change waits on a person whether or not its task was archived since",
+    "src/lib/task-links.ts": "dependency and parent graphs span the whole board, so a cycle through an archived task is still a cycle",
+    "src/lib/task-parents.ts": "a card names its parent whatever the parent's state"
+  }
+}

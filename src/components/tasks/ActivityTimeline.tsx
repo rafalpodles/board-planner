@@ -43,6 +43,10 @@ function actionIcon(action: string) {
       return "↗";
     case "link_removed":
       return "×";
+    case "archived":
+      return "▣";
+    case "unarchived":
+      return "↺";
     case "criterion_added":
       return "+";
     case "criterion_removed":
@@ -184,6 +188,10 @@ function describeAction(log: ApiActivityLog): string {
         self: "this task",
         other: log.oldValue,
       });
+    case "archived":
+      return `${userName} archived this task`;
+    case "unarchived":
+      return `${userName} restored this task from the archive`;
     // Whole, not clipped: an edit past the sixtieth character would read as a change to nothing
     case "criterion_added":
       return `${userName} added criterion “${log.newValue}”`;

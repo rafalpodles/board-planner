@@ -84,6 +84,14 @@ describe("GET /api/search", () => {
     expect(lastQuery.filter).toMatchObject({ project: { $in: ALLOWED } });
   });
 
+  it("never finds an archived task, by text or by key", async () => {
+    await search("zeppelin");
+    expect(lastQuery.filter).toMatchObject({ archivedAt: null });
+
+    await search("TP-10");
+    expect(lastQuery.filter).toMatchObject({ project: "p1", taskNumber: 10, archivedAt: null });
+  });
+
   it("leaves an instance admin unfiltered", async () => {
     getAuthUser.mockResolvedValue(ADMIN);
 
