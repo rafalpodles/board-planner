@@ -8,6 +8,7 @@
   "src/instrumentation-node.ts",
   "src/lib/auth.ts",
   "src/lib/db.ts",
+  "src/lib/oidc/relay.ts",
   "src/lib/organisation-migration.ts",
   "src/lib/pm/availability.ts",
   "src/lib/pr-links.ts",
