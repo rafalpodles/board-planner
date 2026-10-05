@@ -12,7 +12,7 @@ const accessibleProjectIds = vi.fn();
 
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
 const organisationOfRequest = vi.hoisted(() => vi.fn());
-vi.mock("./organisation-host", () => ({ organisationOfRequest }));
+vi.mock("./organisation-host", () => ({ organisationOfRequest, organisationDomain: () => null }));
 vi.mock("./worker-service", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./worker-service")>();
   return { ...actual, verifyWorkerCredential };
