@@ -122,6 +122,7 @@ export const PUT = withProjectAccess(async (request, { params, db }) => {
       project: projectId,
       sprint: sprintId,
       status: { $nin: await doneColumnIds(db, projectId) },
+      ...NOT_ARCHIVED,
     };
 
     // Exclusive: a body carrying both used to run the sweep and then the move over the top of it

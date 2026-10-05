@@ -116,6 +116,15 @@ describe("PUT .../sprints/[sprintId] — our own sprint", () => {
     );
   });
 
+  it.each([
+    ["to the backlog", { moveIncompleteToBacklog: true }],
+    ["to another sprint", { moveIncompleteToSprint: OUR_OTHER_SPRINT }],
+  ])("leaves an archived task where it is when unfinished ones go %s", async (_label, move) => {
+    await PUT(request({ status: "completed", ...move }), ctx(OUR_SPRINT));
+
+    expect(taskUpdateMany.mock.calls[0][0]).toMatchObject({ archivedAt: null });
+  });
+
   it("moves unfinished tasks to another sprint of this project", async () => {
     await PUT(
       request({ status: "completed", moveIncompleteToSprint: OUR_OTHER_SPRINT }),
