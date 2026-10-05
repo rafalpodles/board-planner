@@ -47,6 +47,9 @@ export interface AuthState {
    * (BP-607 review).
    */
   noteApiStatus: (status: number, opts?: { relayed?: boolean }) => void;
+  /** Until when the organisation's requests for the minute are spent, while they are (BP-894) */
+  organisationLimitedUntil: Date | null;
+  noteOrganisationLimit: (retryAfterSeconds: number) => void;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -63,6 +66,7 @@ export function useAuthProvider(): AuthState {
   const [user, setUser] = useState<ApiUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [outage, setOutage] = useState(false);
+  const [organisationLimitedUntil, setOrganisationLimitedUntil] = useState<Date | null>(null);
 
   const fetchUser = useCallback(async (): Promise<void> => {
     try {
@@ -148,6 +152,16 @@ export function useAuthProvider(): AuthState {
     setOutage(status >= 500);
   }, []);
 
+  const noteOrganisationLimit = useCallback((retryAfterSeconds: number) => {
+    setOrganisationLimitedUntil(new Date(Date.now() + Math.max(1, retryAfterSeconds) * 1000));
+  }, []);
+
+  useEffect(() => {
+    if (!organisationLimitedUntil) return;
+    const timer = setTimeout(() => setOrganisationLimitedUntil(null), organisationLimitedUntil.getTime() - Date.now());
+    return () => clearTimeout(timer);
+  }, [organisationLimitedUntil]);
+
   // Preferences saved elsewhere in the app have to reach the cached user, or a
   // client-side navigation keeps rendering the value from page load
   const refreshUser = useCallback(async () => {
@@ -167,8 +181,10 @@ export function useAuthProvider(): AuthState {
       refreshUser,
       onUnauthorized,
       noteApiStatus,
+      organisationLimitedUntil,
+      noteOrganisationLimit,
     }),
-    [user, isAdmin, isLoading, outage, login, logout, refreshUser, onUnauthorized, noteApiStatus]
+    [user, isAdmin, isLoading, outage, login, logout, refreshUser, onUnauthorized, noteApiStatus, organisationLimitedUntil, noteOrganisationLimit]
   );
 }
 

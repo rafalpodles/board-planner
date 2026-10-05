@@ -2,6 +2,7 @@
 
 import { useAuth } from "./use-auth";
 import { useCallback, useMemo } from "react";
+import { ORGANISATION_LIMIT_HEADER } from "@/lib/organisation-limit-header";
 
 interface ApiOptions {
   body?: unknown;
@@ -11,7 +12,17 @@ interface ApiOptions {
 }
 
 export function useApi() {
-  const { onUnauthorized, noteApiStatus } = useAuth();
+  const { onUnauthorized, noteApiStatus: noteStatus, noteOrganisationLimit } = useAuth();
+
+  const noteApiStatus = useCallback(
+    (res: Response, opts?: { relayed?: boolean }) => {
+      noteStatus(res.status, opts);
+      if (res.status === 429 && res.headers.get(ORGANISATION_LIMIT_HEADER)) {
+        noteOrganisationLimit(Number(res.headers.get("retry-after")) || 60);
+      }
+    },
+    [noteStatus, noteOrganisationLimit]
+  );
 
   const request = useCallback(
     async (method: string, url: string, opts?: ApiOptions) => {
@@ -29,7 +40,7 @@ export function useApi() {
       // 502 and no other status: that is the one this endpoint speaks for somebody else with. A
       // 503 from the same route is the middleware answering for this instance, database and all,
       // and the shell still has to hear it.
-      noteApiStatus(res.status, { relayed: opts?.relayed === true && res.status === 502 });
+      noteApiStatus(res, { relayed: opts?.relayed === true && res.status === 502 });
 
       if (!res.ok) {
         // Only a 401. A 5xx means the server could not answer, and clearing the session on that is
@@ -56,7 +67,7 @@ export function useApi() {
         body: formData,
       });
 
-      noteApiStatus(res.status);
+      noteApiStatus(res);
 
       if (!res.ok) {
         // Only a 401. A 5xx means the server could not answer, and clearing the session on that is
@@ -84,7 +95,7 @@ export function useApi() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      noteApiStatus(res.status);
+      noteApiStatus(res);
       if (res.status === 401) onUnauthorized();
       return res;
     },

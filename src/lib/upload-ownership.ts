@@ -23,6 +23,16 @@ export function organisationUploads(db: ScopedDb) {
       bucket.find({ _id: { $in: ids }, "metadata.organisation": db.organisation }).toArray(),
     // Only for a file `find` has just returned
     download: (file: UploadedFile) => bucket.openDownloadStream(file._id),
+    bytesStored: async (): Promise<number> => {
+      const [stored] = await mongoose.connection
+        .db!.collection(`${UPLOAD_BUCKET}.files`)
+        .aggregate<{ bytes: number }>([
+          { $match: { "metadata.organisation": db.organisation } },
+          { $group: { _id: null, bytes: { $sum: "$length" } } },
+        ])
+        .toArray();
+      return stored?.bytes ?? 0;
+    },
     upload: (name: string, metadata: Record<string, unknown>) =>
       bucket.openUploadStream(name, { metadata: { ...metadata, organisation: db.organisation } }),
   };

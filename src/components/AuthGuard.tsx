@@ -11,7 +11,7 @@ const FIRST_RETRY_MS = 10_000;
 const MAX_RETRY_MS = 60_000;
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
-  const { user, isLoading, outage, refreshUser } = useAuth();
+  const { user, isLoading, outage, refreshUser, organisationLimitedUntil } = useAuth();
   const router = useRouter();
   // usePathname only to re-run on navigation; the destination itself comes from window below.
   // useSearchParams here would opt every page under this layout out of static prerendering.
@@ -100,6 +100,15 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
         >
           This instance is having trouble reaching its database. You are still signed in; what you
           are looking at may be out of date.
+        </div>
+      )}
+      {organisationLimitedUntil && (
+        <div
+          role="status"
+          className="px-4 py-2 text-center text-sm bg-warning/15 text-text border-b border-border"
+        >
+          Your organisation has made more requests this minute than it may. Pages will load again
+          after {organisationLimitedUntil.toLocaleTimeString()}.
         </div>
       )}
       {children}

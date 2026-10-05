@@ -10,7 +10,7 @@ const { verifyWorkerCredential, getAuthUser, getOrganisation, userExists } = vi.
 
 vi.mock("./worker-service", () => ({ verifyWorkerCredential }));
 const organisationOfRequest = vi.hoisted(() => vi.fn());
-vi.mock("./organisation-host", () => ({ organisationOfRequest }));
+vi.mock("./organisation-host", () => ({ organisationOfRequest, organisationDomain: () => null }));
 vi.mock("./auth", () => ({ getAuthUser }));
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
 vi.mock("./organisation", () => ({ getOrganisation }));

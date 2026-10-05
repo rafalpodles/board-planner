@@ -5,13 +5,15 @@ import { useApi } from "./use-api";
 
 const onUnauthorized = vi.fn();
 const noteApiStatus = vi.fn();
-vi.mock("./use-auth", () => ({ useAuth: () => ({ onUnauthorized, noteApiStatus }) }));
+const noteOrganisationLimit = vi.fn();
+vi.mock("./use-auth", () => ({ useAuth: () => ({ onUnauthorized, noteApiStatus, noteOrganisationLimit }) }));
 
-function response(status: number, statusText: string, body?: unknown): Response {
+function response(status: number, statusText: string, body?: unknown, headers: Record<string, string> = {}): Response {
   return {
     ok: status >= 200 && status < 300,
     status,
     statusText,
+    headers: new Headers(headers),
     json: () => (body === undefined ? Promise.reject(new Error("no body")) : Promise.resolve(body)),
   } as Response;
 }
@@ -19,6 +21,7 @@ function response(status: number, statusText: string, body?: unknown): Response 
 beforeEach(() => {
   onUnauthorized.mockClear();
   noteApiStatus.mockClear();
+  noteOrganisationLimit.mockClear();
   vi.stubGlobal("fetch", vi.fn());
 });
 afterEach(() => {
@@ -159,7 +162,32 @@ describe("useApi during an outage", () => {
     await expect(result.current.upload("/api/uploads", new FormData())).rejects.toThrow();
     await result.current.stream("/api/pm/chat", {});
 
-    expect(noteApiStatus.mock.calls).toEqual([[503], [503]]);
+    expect(noteApiStatus.mock.calls).toEqual([[503, undefined], [503, undefined]]);
   });
 });
 
+describe("useApi organisation limit (BP-894)", () => {
+  it("tells the shell when the organisation's requests for the minute are spent, from every kind of call", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      response(429, "Too Many Requests", { error: "This organisation has made more than 6000 requests in a minute." }, {
+        "retry-after": "42",
+        "x-organisation-limit": "requests",
+      })
+    );
+    const { result } = renderHook(() => useApi());
+
+    await expect(result.current.get("/api/x")).rejects.toThrow("This organisation has made more than 6000 requests");
+    await expect(result.current.upload("/api/uploads", new FormData())).rejects.toThrow();
+    await result.current.stream("/api/pm/chat", {});
+
+    expect(noteOrganisationLimit.mock.calls).toEqual([[42], [42], [42]]);
+  });
+
+  it("leaves it alone for a 429 that is one person's throttle", async () => {
+    vi.mocked(fetch).mockResolvedValue(response(429, "Too Many Requests", { error: "Too many invitations." }, { "retry-after": "900" }));
+    const { result } = renderHook(() => useApi());
+
+    await expect(result.current.get("/api/x")).rejects.toThrow("Too many invitations.");
+    expect(noteOrganisationLimit).not.toHaveBeenCalled();
+  });
+});

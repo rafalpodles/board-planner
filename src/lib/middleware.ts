@@ -16,6 +16,7 @@ import { can, FeatureKey } from "./entitlements";
 import { projectRunsWorkers } from "@/lib/worker-gate";
 import { EXECUTION_LEASE_MS } from "./execution-lease";
 import { inOrganisation } from "./organisation-log";
+import { requestLimitRefusal } from "./organisation-limits";
 
 type AuthenticatedHandler = (
   request: Request,
@@ -100,6 +101,8 @@ export function withAuth(handler: AuthenticatedHandler) {
       const refused = await refusedOnThisHost(request, user);
       if (refused) return refused;
       const db = scopedFor(user);
+      const overLimit = await requestLimitRefusal(db.organisation);
+      if (overLimit) return overLimit;
       return await inOrganisation(db.organisation, () => handler(request, { ...context, user, db }));
     } catch (e) {
       if (isDatabaseUnreachable(e)) return databaseUnavailable();
@@ -184,6 +187,8 @@ export function withWorker(
     }
 
     const db = scopedFor(worker);
+    const overLimit = await requestLimitRefusal(db.organisation);
+    if (overLimit) return overLimit;
     return inOrganisation(db.organisation, () => handler(request, { ...context, worker, db }));
   };
 }
@@ -389,6 +394,8 @@ export function withProjectAccessOrWorker(
     if (refusedHere) return refusedHere;
     const db = scopedFor(worker);
     if (await ownerIsDeactivated(db, worker)) return machineOwnerDeactivated();
+    const overLimit = await requestLimitRefusal(db.organisation);
+    if (overLimit) return overLimit;
 
     const params = await context.params;
     const projectId = params.projectId ? await resolveProjectId(db, params.projectId) : null;

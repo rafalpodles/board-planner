@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { scopedFor } from "@/lib/db-scope";
+import { scopedFor, type ScopedDb } from "@/lib/db-scope";
 import { isDatabaseUnreachable } from "@/lib/db-errors";
 import { getAuthUser } from "@/lib/auth";
 import { ProvenanceError } from "@/lib/session";
@@ -13,7 +13,9 @@ import { isPmRunnable, pmDisabledReason, resolvePmModel } from "@/lib/pm/availab
 import { IMAGE_MIME_TYPES, MAX_ATTACHMENTS_PER_MESSAGE, anyAttachmentReadable, modelAcceptsImages } from "@/lib/pm/attachments";
 import { databaseUnavailable, resolveProjectId, refusedOnThisHost } from "@/lib/middleware";
 import { check } from "@/lib/grants";
-import { PmAttachment } from "@/types";
+import { IUser, PmAttachment } from "@/types";
+import { inOrganisation } from "@/lib/organisation-log";
+import { requestLimitRefusal } from "@/lib/organisation-limits";
 
 export const maxDuration = 300;
 
@@ -39,7 +41,12 @@ export async function POST(
   const refusedHere = await refusedOnThisHost(request, user);
   if (refusedHere) return refusedHere;
   const db = scopedFor(user);
+  const overLimit = await requestLimitRefusal(db.organisation);
+  if (overLimit) return overLimit;
+  return inOrganisation(db.organisation, () => chat(request, params, user, db));
+}
 
+async function chat(request: Request, params: Promise<Record<string, string>>, user: IUser, db: ScopedDb) {
   // This route authenticates by hand (it streams SSE) and so never passes through
   // withProjectAccess, which is where key -> id resolution normally happens
   const { projectId: projectRef } = await params;

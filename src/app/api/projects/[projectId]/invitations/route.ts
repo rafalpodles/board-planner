@@ -98,7 +98,7 @@ export const POST = withProjectOwner(async (request, { params, user, db }) => {
     );
   }
 
-  const addressKey = `board-invite-to:${email}`;
+  const addressKey = `board-invite-to:${db.organisation.toHexString()}:${email}`;
   if (await isRateLimited(addressKey, INVITES_PER_ADDRESS)) {
     return NextResponse.json(
       { error: "That address has been invited too often. Try again in 15 minutes." },
