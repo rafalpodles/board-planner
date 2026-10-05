@@ -536,7 +536,7 @@ function TaskDetailView({
         ref={setScrollBox}
         tabIndex={-1}
         data-testid="task-scroll"
-        className="min-h-0 flex-1 overflow-y-auto overscroll-contain focus:outline-none"
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
       >
         <div className="grid lg:grid-cols-[minmax(0,1fr)_312px]">
           <div
