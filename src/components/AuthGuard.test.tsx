@@ -22,6 +22,7 @@ const { nav, auth } = vi.hoisted(() => ({
     noteApiStatus: vi.fn(),
     requestLimit: null as RequestLimit | null,
     noteRequestLimit: vi.fn(),
+    noteSuspended: vi.fn(),
     // satisfies, not `as`: this checks the mock is still a whole AuthState while leaving the
     // members their mock types, so `refreshUser.mockClear()` still type-checks
   } satisfies AuthState,
@@ -101,6 +102,29 @@ describe("AuthGuard", () => {
     expect(screen.getByRole("status").textContent).toContain("This organisation is suspended");
     expect(screen.queryByTestId("app")).toBeNull();
     expect(nav.replace).not.toHaveBeenCalled();
+  });
+
+  it("keeps asking while suspended, and shows the app again once the suspension is lifted (BP-893)", async () => {
+    vi.useFakeTimers();
+    auth.user = SIGNED_IN;
+    auth.suspended = true;
+    auth.refreshUser.mockImplementation(async () => {
+      auth.suspended = false;
+    });
+
+    const { rerender } = renderGuard();
+    expect(screen.getByRole("status").textContent).toContain("This organisation is suspended");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(auth.refreshUser).toHaveBeenCalled();
+    rerender(
+      <AuthGuard>
+        <span data-testid="app">the board</span>
+      </AuthGuard>
+    );
+    expect(screen.getByTestId("app")).toBeTruthy();
   });
 
   it("sends a signed-out visitor to sign in, carrying where they were going", () => {

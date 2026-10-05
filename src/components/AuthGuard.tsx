@@ -34,8 +34,10 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   // somebody to reload a page that looks broken. Chained after each attempt settles, so a slow
   // request never overlaps the next one.
   const retryDelay = useRef(FIRST_RETRY_MS);
+  // A suspension is lifted by the service, not by anybody here, so the page asks again until it is
+  const waiting = (outage && !user) || suspended;
   useEffect(() => {
-    if (!outage || user) {
+    if (!waiting) {
       retryDelay.current = FIRST_RETRY_MS;
       return;
     }
@@ -57,7 +59,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
       stopped = true;
       clearTimeout(timer);
     };
-  }, [outage, user, refreshUser]);
+  }, [waiting, refreshUser]);
 
   if (isLoading) {
     return (

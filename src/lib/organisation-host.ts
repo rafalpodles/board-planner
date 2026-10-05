@@ -89,8 +89,8 @@ async function slugOfOrganisation(organisation: Types.ObjectId): Promise<string 
   const cached = slugOfOrganisationCache.get(key);
   if (cached && Date.now() - cached.at < SLUG_CACHE_MS) return cached.slug;
   await connectDB();
-  const found = await Organisation.findById(organisation).select("slug").lean();
-  const slug = found?.slug ?? null;
+  const found = await Organisation.findById(organisation).select("slug deletedAt").lean();
+  const slug = found && !found.deletedAt ? (found.slug ?? null) : null;
   remember(slugOfOrganisationCache, key, { slug, at: Date.now() });
   return slug;
 }

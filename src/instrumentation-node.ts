@@ -146,7 +146,7 @@ async function bootWhenDatabaseIsReady(): Promise<void> {
       if (seededColumns.modifiedCount > 0) {
         console.log(`Seeded default columns on ${seededColumns.modifiedCount} project(s)`);
       }
-    });
+    }, { includeSuspended: true });
 
     // Caught here rather than left to the outer handler: the backfill and the PM scheduler are
     // below this line, so an unhandled seed failure would skip both — and be logged as a
@@ -156,7 +156,8 @@ async function bootWhenDatabaseIsReady(): Promise<void> {
     await forEachServedOrganisation("Agent catalog seed", (db) =>
       seedAgents(db).catch((error) => {
         console.error("Failed to seed the agent catalog:", error);
-      })
+      }),
+      { includeSuspended: true }
     );
 
     // The backfill that stood here set `worker.agent` to the shipped Default on every project
@@ -185,7 +186,7 @@ async function bootWhenDatabaseIsReady(): Promise<void> {
         return 0;
       });
       if (repaired > 0) console.log(`Repaired the display name of ${repaired} machine(s)`);
-    });
+    }, { includeSuspended: true });
 
     const { startPmScheduler } = await import("@/lib/pm/scheduler");
     startPmScheduler();

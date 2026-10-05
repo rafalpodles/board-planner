@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { deleteOrganisationData, organisationFootprint, organisationForLifeCycle } from "@/lib/organisation-life-cycle";
+import { deleteOrganisationData, organisationFootprint, organisationForLifeCycle, settledSince, SUSPENSION_SETTLE_MS } from "@/lib/organisation-life-cycle";
 import { lifeCycleRefused } from "@/lib/platform-life-cycle-route";
 import { logPlatformAudit, withPlatformRequest } from "@/lib/platform-route";
 
@@ -14,6 +14,10 @@ export const DELETE = withPlatformRequest<{ organisationId: string }>(async (req
   }
   if (!row.suspendedAt) {
     return NextResponse.json({ error: "Suspend the organisation before deleting it" }, { status: 409 });
+  }
+  if (!settledSince(row.suspendedAt)) {
+    const after = new Date(row.suspendedAt.getTime() + SUSPENSION_SETTLE_MS).toISOString();
+    return NextResponse.json({ error: `Work admitted before the suspension may still be writing; delete after ${after}`, after }, { status: 409 });
   }
   if (!row.slug || query.get("confirm") !== row.slug) {
     return NextResponse.json({ error: "confirm must name the organisation's slug" }, { status: 400 });

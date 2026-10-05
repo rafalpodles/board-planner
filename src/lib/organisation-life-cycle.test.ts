@@ -16,3 +16,26 @@ describe("an organisation's export and delete cover every model it has (BP-893)"
     }
   });
 });
+
+describe("what an export row keeps (BP-893)", () => {
+  it("drops passwords, token hashes and every stored secret, nested ones included, and keeps the rest", async () => {
+    const { exportableRow } = await import("./organisation-life-cycle");
+    const project = exportableRow("Project", {
+      name: "Rockets",
+      githubToken: "enc:v3:k:aaa",
+      notificationChannels: [{ name: "Releases", webhookUrl: "enc:v3:k:bbb" }],
+      pm: { mcpServers: [{ name: "tracker", authToken: "enc:v3:k:ccc", oauth: { clientId: "id", accessToken: "enc:v3:k:ddd" } }] },
+    });
+    const user = exportableRow("User", { username: "boss", password: "$2b$...", notifications: { chat: { kind: "slack", webhookUrl: "enc:v3:k:eee" } } });
+    const token = exportableRow("ApiToken", { name: "ci", tokenHash: "f00", prefix: "cp_abc" });
+
+    expect(JSON.stringify([project, user, token])).not.toMatch(/enc:v3|\$2b|f00/);
+    expect(project).toEqual({
+      name: "Rockets",
+      notificationChannels: [{ name: "Releases" }],
+      pm: { mcpServers: [{ name: "tracker", oauth: { clientId: "id" } }] },
+    });
+    expect(user).toEqual({ username: "boss", notifications: { chat: { kind: "slack" } } });
+    expect(token).toEqual({ name: "ci", prefix: "cp_abc" });
+  });
+});

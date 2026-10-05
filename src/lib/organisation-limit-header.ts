@@ -3,3 +3,5 @@
 export const ORGANISATION_LIMIT_HEADER = "x-organisation-limit";
 
 export type RequestLimitScope = "organisation" | "principal";
+
+export const ORGANISATION_SUSPENDED_HEADER = "x-organisation-suspended";

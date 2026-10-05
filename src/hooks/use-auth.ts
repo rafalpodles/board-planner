@@ -9,7 +9,7 @@ import {
   useMemo,
 } from "react";
 import { ApiUser } from "@/types";
-import type { RequestLimitScope } from "@/lib/organisation-limit-header";
+import { ORGANISATION_SUSPENDED_HEADER, type RequestLimitScope } from "@/lib/organisation-limit-header";
 
 export type RequestLimit = { scope: RequestLimitScope; until: Date };
 
@@ -55,6 +55,7 @@ export interface AuthState {
   /** Whose requests for the minute are spent, and until when, while they are (BP-894) */
   requestLimit: RequestLimit | null;
   noteRequestLimit: (scope: RequestLimitScope, retryAfterSeconds: number) => void;
+  noteSuspended: () => void;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -82,11 +83,12 @@ export function useAuthProvider(): AuthState {
       if (res.ok) {
         setUser(await res.json());
         setOutage(false);
+        setSuspended(false);
         return;
       }
       // Only a 401 is evidence about the session. A 5xx says the answer never arrived.
       if (res.status === 401) setUser(null);
-      const refusedAsSuspended = res.status === 503 && (await res.json().catch(() => ({}))).suspended === true;
+      const refusedAsSuspended = res.status === 503 && res.headers.get(ORGANISATION_SUSPENDED_HEADER) === "1";
       setSuspended(refusedAsSuspended);
       setOutage(res.status >= 500 && !refusedAsSuspended);
     } catch {
@@ -160,6 +162,8 @@ export function useAuthProvider(): AuthState {
     setOutage(status >= 500);
   }, []);
 
+  const noteSuspended = useCallback(() => setSuspended(true), []);
+
   const noteRequestLimit = useCallback((scope: RequestLimitScope, retryAfterSeconds: number) => {
     const until = Date.now() + Math.max(1, retryAfterSeconds) * 1000;
     // Every refused poll reports the same minute; only a later end is news
@@ -198,8 +202,9 @@ export function useAuthProvider(): AuthState {
       noteApiStatus,
       requestLimit,
       noteRequestLimit,
+      noteSuspended,
     }),
-    [user, isAdmin, isLoading, outage, suspended, login, logout, refreshUser, onUnauthorized, noteApiStatus, requestLimit, noteRequestLimit]
+    [user, isAdmin, isLoading, outage, suspended, login, logout, refreshUser, onUnauthorized, noteApiStatus, requestLimit, noteRequestLimit, noteSuspended]
   );
 }
 
