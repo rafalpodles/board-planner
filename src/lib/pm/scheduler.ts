@@ -24,7 +24,10 @@ export function startPmScheduler(): void {
   started = true;
   setInterval(() => {
     // A tick that outlasts the interval is let finish rather than joined by another from the top
-    if (ticking) return;
+    if (ticking) {
+      console.warn("PM scheduler tick skipped: the previous one is still running");
+      return;
+    }
     ticking = true;
     pmSchedulerTick()
       .catch((err) => console.error("PM scheduler tick failed:", err))

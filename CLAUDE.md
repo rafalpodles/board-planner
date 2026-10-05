@@ -274,8 +274,9 @@ ORGANISATION_DEFAULT_HOST= # Optional, with ORGANISATION_DOMAIN only — the hos
                           # organisation though `app` is reserved, and its links are built on it, so its people,
                           # sessions, tokens, MCP and workers notice nothing. Its label must be a reserved one, or
                           # it must lie outside the domain; set and unset it together with ORGANISATION_DOMAIN,
-                          # which also needs TRUSTED_PROXY_HOPS above 0. The default organisation's webhooks keep
-                          # the instance's WEBHOOK_SIGNING_SECRET until a project rotates (BP-671)
+                          # which also needs TRUSTED_PROXY_HOPS above 0. Webhooks are then signed per project for
+                          # every organisation, the default one included: a receiver verifying the instance's
+                          # WEBHOOK_SIGNING_SECRET needs the project's key from Settings → Integrations (BP-671)
 ORGANISATION_REQUESTS_PER_MINUTE= # Optional — authenticated requests one organisation may make in a minute,
                           # counted after the credential and the host check (an anonymous caller spends
                           # nobody's); past it 429 with Retry-After and the reset time. One account or

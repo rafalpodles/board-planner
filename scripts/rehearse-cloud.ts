@@ -68,11 +68,23 @@ async function waitForApp(server: ChildProcess) {
   throw new Error("the app did not answer within two minutes");
 }
 
+let server: ChildProcess | null = null;
+function stop() {
+  server?.kill("SIGTERM");
+  execSync(`docker rm -fv ${CONTAINER} >/dev/null 2>&1 || true`, { shell: "/bin/sh" });
+}
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.on(signal, () => {
+    stop();
+    process.exit(130);
+  });
+}
+
 async function main() {
   if (!dumpDir) throw new Error("Usage: npx tsx scripts/rehearse-cloud.ts <dump dir> [--keep]");
 
   console.log(`Copy: ${dumpDir} → ${CONTAINER} on port ${MONGO_PORT}`);
-  execSync(`docker rm -fv ${CONTAINER} >/dev/null 2>&1 || true; docker run -d --name ${CONTAINER} -p ${MONGO_PORT}:27017 mongo:4.4 >/dev/null`, { stdio: "inherit", shell: "/bin/sh" });
+  execSync(`docker rm -fv ${CONTAINER} >/dev/null 2>&1 || true; docker run -d --name ${CONTAINER} -p 127.0.0.1:${MONGO_PORT}:27017 mongo:4.4 >/dev/null`, { stdio: "inherit", shell: "/bin/sh" });
   for (let i = 0; i < 30; i++) {
     try {
       execSync(`docker exec ${CONTAINER} mongo --quiet --eval "db.runCommand({ping:1})" >/dev/null 2>&1`, { shell: "/bin/sh" });
@@ -81,7 +93,12 @@ async function main() {
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
   }
-  execSync(`npx tsx scripts/dump-collections.ts restore "${dumpDir}"`, { stdio: "inherit", env: { ...process.env, MONGODB_URI, MONGODB_DB: DB } });
+  // Its output is per-collection counts, but a failed insert's error would print a document
+  try {
+    execSync(`npx tsx scripts/dump-collections.ts restore "${dumpDir}"`, { stdio: "ignore", env: { ...process.env, MONGODB_URI, MONGODB_DB: DB } });
+  } catch {
+    throw new Error("the restore failed; nothing of the copy is printed, so run dump-collections.ts restore by hand against a scratch database to see why");
+  }
 
   await mongoose.connect(MONGODB_URI, { autoIndex: false, autoCreate: false });
   const before = await backfillOrganisations(mongoose.connection, { apply: false });
@@ -105,6 +122,8 @@ async function main() {
   const probeToken = `cp_${randomBytes(16).toString("hex")}`;
   await probe.ApiToken.create({ user: probeUser._id, name: "rehearsal", tokenHash: bcrypt.hashSync(probeToken, 4), prefix: probeToken.slice(0, 11) });
   await probe.Project.create({ key: "PRB", name: "Probe board", columns: DEFAULT_PROJECT_COLUMNS, createdBy: probeUser._id });
+  // Receivers are real addresses; the copy must not deliver to them
+  await mongoose.connection.db!.collection("projects").updateMany({}, { $set: { webhooks: [] } });
   await mongoose.disconnect();
 
   const { privateKey } = generateKeyPairSync("ed25519");
@@ -112,12 +131,16 @@ async function main() {
   const platformKey = { keyId: "rehearsal", d: jwk.d!, x: jwk.x! };
 
   console.log("Building the app (a few minutes)…");
-  execSync("npm run build", { stdio: process.env.REHEARSAL_VERBOSE ? "inherit" : "ignore" });
+  const DIST = ".next-rehearsal";
+  execSync("npm run build", { stdio: process.env.REHEARSAL_VERBOSE ? "inherit" : "ignore", env: { ...process.env, NEXT_DIST_DIR: DIST } });
   const origin = `http://${DEFAULT_HOST}:${PORT}`;
-  const server = spawn("npx", ["next", "start", "-p", String(PORT)], {
+  server = spawn("npx", ["next", "start", "-p", String(PORT), "-H", "127.0.0.1"], {
     stdio: process.env.REHEARSAL_VERBOSE ? "inherit" : "ignore",
+    // Only what it needs: a shell holding production's variables must not hand them to the copy
     env: {
-      ...process.env,
+      PATH: process.env.PATH ?? "",
+      HOME: process.env.HOME ?? "",
+      NEXT_DIST_DIR: DIST,
       MONGODB_URI,
       ORGANISATION_DOMAIN: DOMAIN,
       ORGANISATION_DEFAULT_HOST: DEFAULT_HOST,
@@ -129,16 +152,12 @@ async function main() {
       GITHUB_SYNC_TICK_MS: "0",
       PM_SCHEDULER_TICK_MS: "86400000",
       DIGEST_TICK_MS: "86400000",
-      SMTP_HOST: "",
-      OPENROUTER_API_KEY: "",
-      OPENAI_API_KEY: "",
-      LICENCE_KEY: "",
       NODE_ENV: "production",
     },
   });
 
   try {
-    await waitForApp(server);
+    await waitForApp(server!);
     const homeCookie = { cookie: `__Host-bp_session=${homeSession}` };
     const probeBearer = { authorization: `Bearer ${probeToken}` };
     const probeHost = `${PROBE_SLUG}.${DOMAIN}`;
@@ -168,12 +187,11 @@ async function main() {
     const failed = results.filter((r) => !r.ok).length;
     console.log(`\n${results.length - failed} passed, ${failed} failed`);
     if (keep) {
-      console.log(`\nStill running: open ${origin} in Chrome and sign in as usual. Ctrl-C stops it; then: docker rm -fv ${CONTAINER}`);
+      console.log(`\nStill running: open ${origin} in Chrome and sign in as usual. Ctrl-C stops it and removes the copy.`);
       process.exitCode = failed ? 1 : 0;
-      await new Promise<void>((resolve) => server.on("exit", () => resolve()));
+      await new Promise<void>((resolve) => server!.on("exit", () => resolve()));
     } else {
-      server.kill("SIGTERM");
-      execSync(`docker rm -fv ${CONTAINER} >/dev/null 2>&1 || true`, { shell: "/bin/sh" });
+      stop();
       process.exitCode = failed ? 1 : 0;
     }
   }
@@ -181,6 +199,6 @@ async function main() {
 
 main().catch((error) => {
   console.error(error instanceof Error ? error.message : error);
-  execSync(`docker rm -fv ${CONTAINER} >/dev/null 2>&1 || true`, { shell: "/bin/sh" });
+  stop();
   process.exit(1);
 });

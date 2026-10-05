@@ -456,7 +456,8 @@ export default defineConfig({
               ...devServerEnv(ORGANISATIONS_PLATFORM_ORIGIN),
               ORGANISATION_DOMAIN,
               ORGANISATION_DEFAULT_HOST: ORGANISATIONS_DEFAULT_HOST,
-              // Refused at 0 with ORGANISATION_DOMAIN (BP-671); nothing here sends X-Forwarded-For
+              // Refused at 0 with ORGANISATION_DOMAIN (BP-671). Next adds the socket's own address, so the
+              // throttles key on loopback here, and the specs' wipe clears them
               TRUSTED_PROXY_HOPS: "1",
               APP_ORIGIN: ORGANISATIONS_PLATFORM_ORIGIN,
               PLATFORM_REQUEST_KEYS: `${E2E_PLATFORM_REQUEST_KEY.keyId}:${E2E_PLATFORM_REQUEST_KEY.x}`,

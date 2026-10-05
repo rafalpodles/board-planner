@@ -11,6 +11,7 @@
 /.next-organisations/
 # BP-313's production-build e2e run
 /.next-e2e-prod/
+/.next-rehearsal/
 
 # production
 /build

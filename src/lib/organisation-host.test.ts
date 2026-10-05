@@ -170,6 +170,10 @@ describe("assertOrganisationDomainConfig", () => {
       expect(() => assertOrganisationDomainConfig()).not.toThrow();
       process.env.ORGANISATION_DEFAULT_HOST = "board.example.org";
       expect(() => assertOrganisationDomainConfig()).not.toThrow();
+      process.env.OIDC_RELAY_ORIGIN = "https://login.board-planner.com";
+      process.env.ORGANISATION_DEFAULT_HOST = "login.board-planner.com";
+      expect(() => assertOrganisationDomainConfig()).toThrow(/not the OIDC relay's/);
+      delete process.env.OIDC_RELAY_ORIGIN;
       for (const value of ["board-planner.com", "https://app.board-planner.com", "app.board-planner.com:443", "planner.board-planner.com", "a.b.board-planner.com"]) {
         process.env.ORGANISATION_DEFAULT_HOST = value;
         expect(() => assertOrganisationDomainConfig(), value).toThrow(/ORGANISATION_DEFAULT_HOST must be a host outside ORGANISATION_DOMAIN, or one of its reserved names/);
