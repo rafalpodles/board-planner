@@ -42,11 +42,12 @@ test("401s without credentials", async ({ request }) => {
 // it back to the default — two such reads would still agree with each other, since the default
 // is deterministic. Seeding a value the default cannot produce, and requiring both reads to
 // return exactly that value, is what actually tells "found it" apart from "made a fresh one".
-test("reads the existing singleton rather than inserting a fresh default over it", async ({
+test("reads the existing organisation row rather than inserting a fresh default over it", async ({
   request,
 }) => {
   const handle = await db();
   await handle.collection("organisations").insertOne({
+    _id: new mongoose.Types.ObjectId("000000000000000000000001"),
     entitlements: {
       plan: "pro",
       features: ["integrations.jira"],
