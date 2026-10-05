@@ -5,6 +5,9 @@ import { renderEmail } from "@/lib/email-template";
 import { withAdmin } from "@/lib/middleware";
 import { originFor } from "@/lib/organisation-host";
 import { APP_NAME } from "@/lib/brand";
+import { countAttempt, sourceKey } from "@/lib/rate-limit";
+
+const TESTS_PER_WINDOW = 5;
 
 // A mail server refusing AUTH sometimes quotes the offending command back, and that command
 // carries SMTP_PASS. One line, capped, keeps the diagnosis without the credential.
@@ -29,6 +32,10 @@ export const GET = withAdmin(async (_request, { user, db }) => {
 export const POST = withAdmin(async (_request, { user, db }) => {
   if (user.viaMachineCredential) {
     return NextResponse.json({ error: "Interactive admin session required" }, { status: 403 });
+  }
+
+  if ((await countAttempt(sourceKey(String(user._id), "email-test"))) > TESTS_PER_WINDOW) {
+    return NextResponse.json({ error: "Too many test messages. Try again in 15 minutes." }, { status: 429 });
   }
 
   await connectDB();
@@ -82,7 +89,8 @@ export const POST = withAdmin(async (_request, { user, db }) => {
     // that command carries SMTP_PASS, which this screen deliberately never shows.
     console.error("Test email failed:", err);
     return NextResponse.json(
-      { error: firstLine(err) },
+      // The server's own words name its host, address or login, which on a shared instance are the platform's
+      { error: settings.managedByPlatform ? "The service's mail server did not accept the message." : firstLine(err) },
       { status: 502 }
     );
   }

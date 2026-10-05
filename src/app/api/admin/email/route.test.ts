@@ -21,8 +21,13 @@ vi.mock("@/lib/email", () => ({
   },
 }));
 vi.mock("@/models/user", () => ({ User: { findOne: userFindOne } }));
+vi.mock("@/models/rateLimit", async () => {
+  const { inMemoryRateLimitModel } = await import("@/lib/rate-limit-test-store");
+  return { RateLimit: inMemoryRateLimitModel() };
+});
 
 const { GET, POST } = await import("./route");
+const { resetRateLimits } = await import("@/lib/rate-limit");
 
 const ADMIN = { _id: "admin-1", role: "admin" };
 const ctx = () => ({ params: Promise.resolve({}) });
@@ -32,12 +37,14 @@ function adminRecord(email: string | undefined) {
   userFindOne.mockReturnValue({ select: () => Promise.resolve(email ? { email } : {}) });
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
+  await resetRateLimits();
   getAuthUser.mockResolvedValue(ADMIN);
   adminRecord("admin@example.com");
   sendEmailOrThrow.mockResolvedValue(undefined);
   emailSettingsSummary.mockReturnValue({
+    managedByPlatform: false,
     configured: true,
     host: "smtp.example.com",
     port: 587,
@@ -47,6 +54,29 @@ beforeEach(() => {
 });
 
 describe("POST /api/admin/email", () => {
+  it("on a shared instance, reports a refusal without the mail server's own words, which name the platform's host (BP-892)", async () => {
+    emailSettingsSummary.mockReturnValue({ managedByPlatform: true, configured: true, from: "Board Planner <noreply@example.com>" });
+    sendEmailOrThrow.mockRejectedValue(new Error("getaddrinfo ENOTFOUND smtp.platform.example"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await POST(req(), ctx());
+
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ error: "The service's mail server did not accept the message." });
+    const sent = sendEmailOrThrow.mock.calls[0][0] as { text: string };
+    expect(sent.text).not.toMatch(/\bHost\b/);
+    expect(sent.text).not.toContain("undefined");
+  });
+
+  it("holds one administrator to five test messages a window (BP-892)", async () => {
+    for (let i = 0; i < 5; i++) expect((await POST(req(), ctx())).status).toBe(200);
+
+    const refused = await POST(req(), ctx());
+
+    expect(refused.status).toBe(429);
+    expect(sendEmailOrThrow).toHaveBeenCalledTimes(5);
+  });
+
   it("sends to the caller's own address and reports it", async () => {
     const res = await POST(req(), ctx());
 
