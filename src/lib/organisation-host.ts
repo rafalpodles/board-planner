@@ -71,10 +71,10 @@ export function assertOrganisationDomainConfig(): void {
         return null;
       }
     })();
-    // The relay's host is the platform's, which an organisation must not take over
-    if (!DOMAIN_PATTERN.test(defaultHost) || defaultHost === domain || defaultHost === relayHost || (label !== null && !RESERVED_SLUGS.includes(label))) {
+    // The relay's host, and login. which will carry it, are the platform's; an organisation must not take them over
+    if (!DOMAIN_PATTERN.test(defaultHost) || defaultHost === domain || defaultHost === relayHost || label === "login" || (label !== null && !RESERVED_SLUGS.includes(label))) {
       throw new Error(
-        `ORGANISATION_DEFAULT_HOST must be a host outside ORGANISATION_DOMAIN, or one of its reserved names such as app.${domain}, and not the OIDC relay's; got "${process.env.ORGANISATION_DEFAULT_HOST}"`
+        `ORGANISATION_DEFAULT_HOST must be a host outside ORGANISATION_DOMAIN, or one of its reserved names such as app.${domain}, and not login. or the OIDC relay's; got "${process.env.ORGANISATION_DEFAULT_HOST}"`
       );
     }
   }

@@ -34,7 +34,7 @@ vi.mock("./board-review", () => ({
   renderBoardDigest: () => "- BP-1 has no acceptance criteria",
 }));
 
-const { pmSchedulerTick, startBoardReview } = await import("./scheduler");
+const { pmSchedulerTick, startBoardReview, startPmScheduler } = await import("./scheduler");
 const { isTurnRunning } = await import("./turn-lock");
 const { BOARD_REVIEW_DISALLOWED_TOOLS, currentReviewSlot } = await import("./autonomy");
 const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
@@ -209,5 +209,26 @@ describe("startBoardReview", () => {
     expect(runPmTurn).toHaveBeenCalledTimes(1);
     expect(isTurnRunning("p1")).toBe(false);
     error.mockRestore();
+  });
+});
+
+describe("startPmScheduler", () => {
+  it("skips a tick while the previous one still runs, and says so (BP-671)", async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { connectDB } = await import("@/lib/db");
+    vi.mocked(connectDB).mockReturnValueOnce(new Promise(() => {}));
+    try {
+      startPmScheduler();
+      await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+      expect(connectDB).toHaveBeenCalledTimes(1);
+      expect(warn).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+      expect(connectDB).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith("PM scheduler tick skipped: the previous one is still running");
+    } finally {
+      warn.mockRestore();
+      vi.useRealTimers();
+    }
   });
 });

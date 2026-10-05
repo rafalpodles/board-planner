@@ -76,7 +76,7 @@ function stop() {
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     stop();
-    process.exit(130);
+    process.exit(signal === "SIGINT" ? 130 : 143);
   });
 }
 
@@ -123,7 +123,8 @@ async function main() {
   await probe.ApiToken.create({ user: probeUser._id, name: "rehearsal", tokenHash: bcrypt.hashSync(probeToken, 4), prefix: probeToken.slice(0, 11) });
   await probe.Project.create({ key: "PRB", name: "Probe board", columns: DEFAULT_PROJECT_COLUMNS, createdBy: probeUser._id });
   // Receivers are real addresses; the copy must not deliver to them
-  await mongoose.connection.db!.collection("projects").updateMany({}, { $set: { webhooks: [] } });
+  await mongoose.connection.db!.collection("projects").updateMany({}, { $set: { webhooks: [], notificationChannels: [] } });
+  await mongoose.connection.db!.collection("users").updateMany({}, { $set: { "notifications.chat.webhookUrl": "" } });
   await mongoose.disconnect();
 
   const { privateKey } = generateKeyPairSync("ed25519");
@@ -132,7 +133,7 @@ async function main() {
 
   console.log("Building the app (a few minutes)…");
   const DIST = ".next-rehearsal";
-  execSync("npm run build", { stdio: process.env.REHEARSAL_VERBOSE ? "inherit" : "ignore", env: { ...process.env, NEXT_DIST_DIR: DIST } });
+  execSync("npm run build", { stdio: process.env.REHEARSAL_VERBOSE ? "inherit" : "ignore", env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", NEXT_DIST_DIR: DIST, NODE_ENV: "production" } });
   const origin = `http://${DEFAULT_HOST}:${PORT}`;
   server = spawn("npx", ["next", "start", "-p", String(PORT), "-H", "127.0.0.1"], {
     stdio: process.env.REHEARSAL_VERBOSE ? "inherit" : "ignore",
