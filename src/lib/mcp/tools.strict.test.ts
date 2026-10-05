@@ -197,9 +197,9 @@ describe("a parameter the tool does not declare is refused, not dropped", () => 
       _id: "p1",
       key: "BP",
     } as never);
-    vi.spyOn(PlannerClient.prototype, "listTasks").mockResolvedValue([]);
+    vi.spyOn(PlannerClient.prototype, "pageTasks").mockResolvedValue({ tasks: [], total: 0, limit: 50, offset: 0 });
 
-    const read = await call("list_tasks", { project: "BP", sprint: "s1" });
+    const read = await call("list_tasks", { project: "BP", author: "nobody" });
     const write = await call("add_comment", { taskKey: "BP-1", body: "x", author: "nobody" });
 
     expect(read.refused).toBe(true);
