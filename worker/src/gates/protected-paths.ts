@@ -71,8 +71,8 @@ export const EXECUTABLE_CONFIG_FILE =
 // review gate, a change to a build backend, a task runner or a dependency pin reaches the default
 // branch with no human in the loop, and the target's own CI executes it there.
 //
-// Matched at any depth, not only at the repository root: this repository alone has three manifests
-// (root, worker/, mcp-server/), and an agent editing worker/package.json is doing the same thing as
+// Matched at any depth, not only at the repository root: this repository alone has two manifests
+// (root and worker/), and an agent editing worker/package.json is doing the same thing as
 // one editing the root — so anchoring to the root would protect the least interesting one.
 export const BUILD_MANIFEST_FILE =
   /(^|\/)(pyproject\.toml|poetry\.lock|Pipfile(\.lock)?|requirements[^/]*\.txt|setup\.(py|cfg)|tox\.ini|pom\.xml|build\.gradle(\.kts)?|settings\.gradle(\.kts)?|gradle\.properties|Gemfile(\.lock)?|Rakefile|Cargo\.(toml|lock)|go\.(mod|sum)|composer\.(json|lock)|mix\.exs|pubspec\.yaml|Dockerfile|docker-compose\.ya?ml|\.gitlab-ci\.ya?ml|Jenkinsfile)$/i;

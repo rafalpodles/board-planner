@@ -1,6 +1,5 @@
 # dependencies
 /node_modules
-/mcp-server/node_modules
 /worker/node_modules
 
 # next.js
@@ -36,9 +35,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
-
-# mcp-server build
-/mcp-server/dist/
 
 # worker build
 /worker/dist/

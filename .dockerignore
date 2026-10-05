@@ -17,6 +17,5 @@ docs
 test-results
 playwright-report
 blob-report
-mcp-server/dist
 worker/dist
 menubar/build
