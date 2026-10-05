@@ -228,7 +228,7 @@ describe("getAuthUser — an OAuth row that cannot be shown to be live", () => {
     await expect(
       getAuthUser(request({ authorization: `Bearer ${MACHINE_TOKEN}` }))
     ).resolves.toBeNull();
-    expect(oauthClientExists).toHaveBeenCalledWith({ clientId: "deleted-client", organisation: ORGANISATION });
+    expect(oauthClientExists).toHaveBeenCalledWith({ clientId: "deleted-client" });
     // Refused before the user lookup — the same "the token's refusal, not the user's" shape as
     // the expiry checks above
     expect(userFindById).not.toHaveBeenCalled();

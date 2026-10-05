@@ -201,9 +201,12 @@ type PopulateOptions = { path?: string; match?: unknown; populate?: unknown };
 function confineNested(nested: unknown, organisation: Types.ObjectId): unknown {
   if (typeof nested === "string") return nested.split(/\s+/).filter(Boolean).map((path) => confine({ path }, organisation));
   if (Array.isArray(nested)) return nested.flatMap((item) => confineNested(item, organisation));
-  if (isDoc(nested)) return confine(nested as PopulateOptions, organisation);
+  if (isDoc(nested)) return confine({ ...(nested as PopulateOptions) }, organisation);
   return nested;
 }
+
+// For a populate on a query the scoped db did not build: the paths, each confined to the organisation
+export const populateWithin = (paths: unknown, organisation: Types.ObjectId): unknown => confineNested(paths, organisation);
 
 function confine<O extends PopulateOptions>(options: O, organisation: Types.ObjectId): O {
   const match = options.match;

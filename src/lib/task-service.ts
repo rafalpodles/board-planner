@@ -53,7 +53,7 @@ import { workerUsername } from "@/lib/worker-user";
 import { EXECUTION_LEASE_MS } from "@/lib/execution-lease";
 import { pmUserId } from "@/lib/pm/pm-user";
 import { supersedableStates } from "@/lib/task-decisions";
-import type { ScopedDb } from "@/lib/db-scope";
+import { populateWithin, type ScopedDb } from "@/lib/db-scope";
 
 export const MAX_EXECUTION_ATTEMPTS = 3;
 
@@ -852,7 +852,7 @@ export async function changeStatus(
   // The board reconciles the row it moved from this answer (BP-558), so anything this leaves as a
   // bare id overwrites the populated value the list had put there — `agent` and `relations[].task`
   // among them. The same set as everywhere else is the only shape a caller can merge safely.
-  ).populate(taskPopulateFields);
+  ).populate(populateWithin(taskPopulateFields, db.organisation) as typeof taskPopulateFields);
 
   if (!task) {
     if (leavesColumn) {

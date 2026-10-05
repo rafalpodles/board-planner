@@ -127,7 +127,10 @@ async function verifyOAuthAccessToken(token: string): Promise<IUser | null> {
   // step of that four-part, non-transactional cascade fails partway through. Checked here too, so
   // the cascade's ordering stops being the only thing standing between a deleted client and a
   // token that still verifies (BP-747 review).
-  const clientStillExists = await OAuthClient.exists({ clientId: record.clientId, organisation: record.organisation });
+  const clientStillExists = await acrossOrganisations(
+    OAuthClient.exists({ clientId: record.clientId }),
+    "a client id is issued at random and unique across organisations"
+  );
   if (!clientStillExists) return null;
 
   const user = await User.findOne({ _id: record.user as Types.ObjectId, organisation: record.organisation });
