@@ -2,12 +2,11 @@
 
 ## Unit
 
-- `npm test` is vitest. It does not reach `worker/` or `mcp-server/`; run `npm test` inside each one the change touches.
+- `npm test` is vitest. It does not reach `worker/`; run `npm test` inside it when the change touches it.
 - `npx tsc --noEmit` is the only local check that type-checks test files. CI runs it. Run it before every push.
 - `npm run lint` lints nothing. Do not report it as a check.
 - A component with a sibling `*.test.tsx` gets a unit test in the same pattern, next to the e2e.
 - After adding a `next/navigation` call to a shared hook: `grep -rln 'vi.mock("next/navigation"' src | xargs grep -L <hook>` lists the specs whose mock must grow.
-- A fresh worktree needs `npm ci && (cd mcp-server && npm ci)`, or five tests fail with `Cannot find module '../../../mcp-server/node_modules/zod'`.
 
 ## End-to-end (Playwright, `e2e/`)
 

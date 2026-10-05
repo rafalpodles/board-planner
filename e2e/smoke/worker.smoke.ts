@@ -10,8 +10,8 @@
  * loopback, because delivery refuses the `file` transport. The stub still runs under the worker's
  * seatbelt profile, so this job is macOS-only.
  *
- * Decision (BP-711): mcp-server and the worker get a live path each, in jobs of their own outside
- * the six e2e groups; the menubar stays on its Swift unit tests and the contract tests, because
+ * Decision (BP-711): the worker gets a live path, in a job of its own outside the six e2e
+ * groups; the menubar stays on its Swift unit tests and the contract tests, because
  * driving a UI app against a server needs macOS UI automation and this smoke already covers the
  * protocol the menubar wraps.
  *
