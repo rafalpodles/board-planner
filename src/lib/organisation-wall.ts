@@ -48,12 +48,52 @@ function equalities(filter: unknown): unknown[] {
   return found;
 }
 
-function check(filter: unknown, want: Types.ObjectId | undefined, what: string): void {
+function check(filter: unknown, want: Types.ObjectId | undefined, what: string): Types.ObjectId {
   const named = equalities(filter);
   if (!named.length) throw new OrganisationWallError(`${what} names no organisation`);
   const ids = named.map(asId);
   if (ids.some((id) => id === null)) throw new OrganisationWallError(`${what} names its organisation by something other than one id`);
   if (want && ids.some((id) => !id!.equals(want))) throw new OrganisationWallError(`${what} names another organisation than the one it was scoped to`);
+  return ids[0]!;
+}
+
+const namesOrganisation = (path: string) => path === "organisation" || path.startsWith("organisation.");
+
+function touchesOrganisation(node: unknown): boolean {
+  if (typeof node === "string") return namesOrganisation(node);
+  if (Array.isArray(node)) return node.some(touchesOrganisation);
+  if (!isDoc(node)) return false;
+  return Object.entries(node).some(
+    ([key, value]) => namesOrganisation(key) || key === "$replaceRoot" || key === "$replaceWith" || touchesOrganisation(value)
+  );
+}
+
+const sameId = (value: unknown, id: Types.ObjectId) => asId(value)?.equals(id) ?? false;
+
+// What a write puts there, not only what it matches: a filter on one organisation must not move rows to another
+function checkWrite(update: unknown, id: Types.ObjectId, replacing: boolean, what: string): void {
+  if (update === undefined || update === null) return;
+  if (Array.isArray(update)) {
+    if (touchesOrganisation(update)) throw new OrganisationWallError(`${what} rewrites the organisation in an update pipeline`);
+    return;
+  }
+  if (!isDoc(update)) return;
+  if (replacing) {
+    if (!sameId(update.organisation, id)) throw new OrganisationWallError(`${what} replaces the document without its organisation`);
+    return;
+  }
+  for (const [key, value] of Object.entries(update)) {
+    if (namesOrganisation(key)) {
+      if (key === "organisation" && sameId(value, id)) continue;
+      throw new OrganisationWallError(`${what} moves a document to another organisation`);
+    }
+    if (!key.startsWith("$") || !isDoc(value)) continue;
+    for (const [path, set] of Object.entries(value)) {
+      if (!namesOrganisation(path)) continue;
+      if ((key === "$set" || key === "$setOnInsert") && path === "organisation" && sameId(set, id)) continue;
+      throw new OrganisationWallError(`${what} moves a document to another organisation`);
+    }
+  }
 }
 
 const FOREIGN_STAGES = ["$lookup", "$graphLookup", "$unionWith", "$merge", "$out"];
@@ -75,11 +115,15 @@ function foreignStage(node: unknown): string | null {
   return null;
 }
 
-type Guarded = { getFilter(): unknown; model: { modelName: string }; op?: string };
+type Guarded = { getFilter(): unknown; getUpdate(): unknown; model: { modelName: string }; op?: string };
+
+const REPLACING = ["replaceOne", "findOneAndReplace"];
 
 function guardQuery(query: Guarded): void {
   if (crossing.has(query)) return;
-  check(query.getFilter(), expected.get(query), `A ${query.op ?? "query"} on ${query.model.modelName}`);
+  const what = `A ${query.op ?? "query"} on ${query.model.modelName}`;
+  const id = check(query.getFilter(), expected.get(query), what);
+  checkWrite(query.getUpdate(), id, REPLACING.includes(query.op ?? ""), what);
 }
 
 type GuardedAggregate = { pipeline(): unknown[]; model(): { modelName: string } };
@@ -105,8 +149,11 @@ function guardBulk(modelName: string, operations: unknown): void {
     if (!isDoc(body)) continue;
     const what = `A bulk ${name} on ${modelName}`;
     if (name === "insertOne") check(isDoc(body.document) ? { organisation: body.document.organisation } : undefined, undefined, what);
-    else if (FILTERED_BULK.includes(name)) check(body.filter, undefined, what);
-    else throw new OrganisationWallError(`${what} cannot be checked`);
+    else if (FILTERED_BULK.includes(name)) {
+      const id = check(body.filter, undefined, what);
+      if (name === "replaceOne") checkWrite(body.replacement, id, true, what);
+      else checkWrite(body.update, id, false, what);
+    } else throw new OrganisationWallError(`${what} cannot be checked`);
   }
 }
 
@@ -126,15 +173,29 @@ const QUERY_OPERATIONS = [
   "findOneAndDelete",
 ] as const;
 
+// Marked as Mongoose's own, which `{ middleware: false }` cannot switch off the way it does a plugin's hooks
+const builtIn = <F extends (...args: never[]) => void>(hook: F): F =>
+  Object.assign(hook, { [Symbol.for("mongoose:built-in-middleware")]: true });
+
 export function organisationWall(schema: Schema): void {
   schema.set("shardKey", { organisation: 1 });
-  schema.pre([...QUERY_OPERATIONS], { document: false, query: true }, function () {
-    guardQuery(this as unknown as Guarded);
-  });
-  schema.pre("aggregate", function () {
-    guardAggregate(this as unknown as GuardedAggregate);
-  });
-  schema.pre("bulkWrite", function (this: { modelName: string }, operations: unknown) {
-    guardBulk(this.modelName, operations);
-  });
+  schema.pre(
+    [...QUERY_OPERATIONS],
+    { document: false, query: true },
+    builtIn(function (this: unknown) {
+      guardQuery(this as Guarded);
+    })
+  );
+  schema.pre(
+    "aggregate",
+    builtIn(function (this: unknown) {
+      guardAggregate(this as GuardedAggregate);
+    })
+  );
+  schema.pre(
+    "bulkWrite",
+    builtIn(function (this: { modelName: string }, operations: unknown) {
+      guardBulk(this.modelName, operations);
+    })
+  );
 }

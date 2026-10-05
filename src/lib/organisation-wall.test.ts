@@ -29,12 +29,12 @@ describe("organisationWall: a query that names no organisation is refused before
     ["distinct", () => Thing.distinct("title"), () => Thing.distinct("title", { organisation: ACME })],
     ["updateOne", () => Thing.updateOne({}, { title: "x" }), () => Thing.updateOne({ organisation: ACME }, { title: "x" })],
     ["updateMany", () => Thing.updateMany({}, { title: "x" }), () => Thing.updateMany({ organisation: ACME }, { title: "x" })],
-    ["replaceOne", () => Thing.replaceOne({}, { title: "x" }), () => Thing.replaceOne({ organisation: ACME }, { title: "x" })],
+    ["replaceOne", () => Thing.replaceOne({}, { title: "x" }), () => Thing.replaceOne({ organisation: ACME }, { title: "x", organisation: ACME } as never)],
     ["deleteOne", () => Thing.deleteOne({}), () => Thing.deleteOne({ organisation: ACME })],
     ["deleteMany", () => Thing.deleteMany({}), () => Thing.deleteMany({ organisation: ACME })],
     ["findOneAndUpdate", () => Thing.findOneAndUpdate({}, { title: "x" }), () => Thing.findOneAndUpdate({ organisation: ACME }, { title: "x" })],
     ["findOneAndDelete", () => Thing.findOneAndDelete({}), () => Thing.findOneAndDelete({ organisation: ACME })],
-    ["findOneAndReplace", () => Thing.findOneAndReplace({}, { title: "x" }), () => Thing.findOneAndReplace({ organisation: ACME }, { title: "x" })],
+    ["findOneAndReplace", () => Thing.findOneAndReplace({}, { title: "x" }), () => Thing.findOneAndReplace({ organisation: ACME }, { title: "x", organisation: ACME } as never)],
     ["aggregate", () => Thing.aggregate([{ $match: {} }]), () => Thing.aggregate([{ $match: { organisation: ACME } }])],
     ["bulkWrite", () => Thing.bulkWrite([{ deleteMany: { filter: {} } }]), () => Thing.bulkWrite([{ deleteMany: { filter: { organisation: ACME } } }])],
   ];
@@ -92,6 +92,36 @@ describe("organisationWall: what counts as naming the organisation", () => {
   it("refuses a bulk insert of a document with no organisation, and an operation it cannot read", async () => {
     expect(await verdict(() => Thing.bulkWrite([{ insertOne: { document: { title: "x" } } }]))).toBe("walled");
     expect(await verdict(() => Thing.bulkWrite([{ insertOne: { document: { title: "x", organisation: ACME } } }]))).toBe("passed");
+  });
+
+  it("refuses a write that moves a document to another organisation, however the update is shaped", async () => {
+    const named = { organisation: ACME };
+    for (const run of [
+      () => Thing.updateOne(named, [{ $set: { organisation: GLOBEX } }], { updatePipeline: true }),
+      () => Thing.updateOne(named, [{ $unset: "organisation" }], { updatePipeline: true }),
+      () => Thing.updateOne(named, [{ $replaceWith: { title: "x" } }], { updatePipeline: true }),
+      () => Thing.updateOne(named, { $setOnInsert: { organisation: GLOBEX } }, { upsert: true }),
+      () => Thing.updateOne(named, { $set: { organisation: GLOBEX } }, { overwriteImmutable: true }),
+      () => Thing.updateOne(named, { $unset: { organisation: 1 } }),
+      () => Thing.replaceOne(named, { title: "x", organisation: GLOBEX } as never),
+      () => Thing.replaceOne(named, { title: "x" }),
+      () => Thing.bulkWrite([{ replaceOne: { filter: named, replacement: { title: "x", organisation: GLOBEX } as never } }]),
+      () => Thing.bulkWrite([{ updateOne: { filter: named, update: [{ $set: { organisation: GLOBEX } }] } }]),
+    ]) {
+      expect(await verdict(run), run.toString()).toBe("walled");
+    }
+  });
+
+  it("lets a write through that keeps the organisation it named", async () => {
+    expect(await verdict(() => Thing.updateOne({ organisation: ACME }, [{ $set: { title: "x" } }], { updatePipeline: true }))).toBe("passed");
+    expect(await verdict(() => Thing.updateOne({ organisation: ACME }, { $setOnInsert: { organisation: ACME } }, { upsert: true }))).toBe("passed");
+  });
+
+  it("cannot be switched off with Mongoose's middleware option", async () => {
+    expect(await verdict(() => Thing.find({}, null, { middleware: false }))).toBe("walled");
+    expect(await verdict(() => Thing.updateMany({}, { title: "x" }, { middleware: { pre: false } }))).toBe("walled");
+    expect(await verdict(() => Thing.aggregate([{ $match: {} }]).option({ middleware: false } as never))).toBe("walled");
+    expect(await verdict(() => Thing.bulkWrite([{ deleteMany: { filter: {} } }], { middleware: false } as never))).toBe("walled");
   });
 
   it("an escape needs a reason", () => {

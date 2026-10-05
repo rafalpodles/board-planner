@@ -212,7 +212,9 @@ function confine<O extends PopulateOptions>(options: O, organisation: Types.Obje
   const match = options.match;
   options.match =
     typeof match === "function"
-      ? (...args: unknown[]) => ({ ...((match as Loose)(...args) as Doc | undefined), organisation })
+      ? function (this: unknown, ...args: unknown[]) {
+          return { ...((match as Loose).apply(this, args) as Doc | undefined), organisation };
+        }
       : { ...(isDoc(match) ? match : {}), organisation };
   if (options.populate !== undefined) options.populate = confineNested(options.populate, organisation);
   return options;

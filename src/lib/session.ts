@@ -413,7 +413,10 @@ export const RECENT_SIGN_IN_REQUIRED =
 export async function signedInRecently(sessionId: unknown): Promise<boolean> {
   if (!sessionId) return false;
   await connectDB();
-  const row = await byUser(Session.findOne({ _id: sessionId }).select("createdAt")).lean();
+  const row = await acrossOrganisations(
+    Session.findOne({ _id: sessionId }).select("createdAt"),
+    "keyed by the caller's own session id, which is unique across organisations"
+  ).lean();
   return !!row?.createdAt && Date.now() - new Date(row.createdAt).getTime() < RECENT_SIGN_IN_MS;
 }
 

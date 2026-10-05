@@ -30,6 +30,9 @@ import { dbName, resolveUri } from "./mongo-uri";
 import { Comment } from "../src/models/comment";
 import { PmMessage } from "../src/models/pmMessage";
 import { Task } from "../src/models/task";
+import { acrossOrganisations } from "../src/lib/organisation-wall";
+
+const EVERY_ORGANISATION = "a one-off migration over every organisation";
 
 const DRY_RUN = process.argv.includes("--dry-run");
 
@@ -37,19 +40,20 @@ async function projectsReferencing(fileId: string): Promise<Set<string>> {
   const reference = `/api/uploads/${fileId}`;
   const found = new Set<string>();
 
-  for (const m of await PmMessage.find({ "attachments.fileId": fileId }).select("project").lean()) {
+  for (const m of await acrossOrganisations(PmMessage.find({ "attachments.fileId": fileId }), EVERY_ORGANISATION).select("project").lean()) {
     if (m.project) found.add(String(m.project));
   }
 
-  const comments = await Comment.find({ body: { $regex: reference } }).select("task").lean();
+  const comments = await acrossOrganisations(Comment.find({ body: { $regex: reference } }), EVERY_ORGANISATION).select("task").lean();
   for (const c of comments) {
-    const task = await Task.findById(c.task).select("project").lean();
+    const task = await acrossOrganisations(Task.findById(c.task), EVERY_ORGANISATION).select("project").lean();
     if (task?.project) found.add(String(task.project));
   }
 
-  const tasks = await Task.find({
-    $or: [{ description: { $regex: reference } }, { "checklist.text": { $regex: reference } }],
-  })
+  const tasks = await acrossOrganisations(
+    Task.find({ $or: [{ description: { $regex: reference } }, { "checklist.text": { $regex: reference } }] }),
+    EVERY_ORGANISATION
+  )
     .select("project")
     .lean();
   for (const t of tasks) {

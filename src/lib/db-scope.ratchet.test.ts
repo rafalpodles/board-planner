@@ -58,7 +58,7 @@ describe("the ratchet on raw database access (BP-663)", () => {
   });
 });
 
-const CROSSING = /\bacrossOrganisations\(/;
+const CROSSING = /\bacrossOrganisations\b/;
 const crossing = sources(SRC)
   .filter((path) => relative(SRC, path) !== join("lib", "organisation-wall.ts"))
   .filter((path) => CROSSING.test(readFileSync(path, "utf8")))
