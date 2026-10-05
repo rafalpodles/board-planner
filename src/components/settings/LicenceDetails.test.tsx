@@ -44,6 +44,7 @@ describe("LicenceDetails", () => {
     ["unknown_key", "signed by a key this build does not know"],
     ["invalid_signature", "its signature does not match its contents"],
     ["malformed", "is not a licence key"],
+    ["wrong_organisation", "issued for another organisation"],
   ] as const)("names %s and stays on the Free plan", (verdict, words) => {
     render(<LicenceDetails licence={{ configured: true, verdict }} />);
 

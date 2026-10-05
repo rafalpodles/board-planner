@@ -24,7 +24,7 @@ const BOTH = [OLD.public, NEW.public];
 const EXPIRES = Date.parse("2027-01-01T00:00:00.000Z");
 const DAY = 24 * 60 * 60 * 1000;
 
-function licence(signing = OLD.signing, overrides: Partial<{ customer: string; expiresAt: string }> = {}) {
+function licence(signing = OLD.signing, overrides: Partial<{ customer: string; expiresAt: string; organisation: string }> = {}) {
   return signLicence(
     {
       customer: "Acme Ltd",
@@ -146,6 +146,40 @@ describe("verifyLicenceKey", () => {
     expect(verifyLicenceKey(forged, { keys: BOTH, now: EXPIRES + 100 * DAY }).verdict).toBe(
       "invalid_signature"
     );
+  });
+});
+
+describe("verifyLicenceKey: a key bound to an organisation (BP-891)", () => {
+  const before = EXPIRES - DAY;
+  const ACME = "0000000000000000000000a1";
+  const GLOBEX = "0000000000000000000000b2";
+
+  it("accepts a key naming the organisation that reads it, and refuses it for any other", () => {
+    const bound = licence(OLD.signing, { organisation: ACME });
+    expect(verifyLicenceKey(bound, { keys: BOTH, now: before, organisation: ACME }).verdict).toBe("valid");
+    expect(verifyLicenceKey(bound, { keys: BOTH, now: before, organisation: GLOBEX }).verdict).toBe("wrong_organisation");
+    expect(verifyLicenceKey(bound, { keys: BOTH, now: before }).verdict).toBe("wrong_organisation");
+  });
+
+  it("lets a floating key through unless the reader requires a bound one", () => {
+    const floating = licence(OLD.signing);
+    expect(verifyLicenceKey(floating, { keys: BOTH, now: before, organisation: ACME }).verdict).toBe("valid");
+    expect(verifyLicenceKey(floating, { keys: BOTH, now: before, organisation: ACME, bound: true }).verdict).toBe("wrong_organisation");
+  });
+
+  it("checks the claim only after the signature, so a forged claim reads as forged", () => {
+    const [, signature] = licence(OLD.signing, { organisation: ACME }).split(".");
+    const [otherBody] = licence(OLD.signing, { organisation: GLOBEX }).split(".");
+    expect(verifyLicenceKey(`${otherBody}.${signature}`, { keys: BOTH, now: before, organisation: GLOBEX }).verdict).toBe("invalid_signature");
+  });
+
+  it("refuses an organisation claim that is not an id", () => {
+    expect(verifyLicenceKey(licence(OLD.signing, { organisation: "acme" }), { keys: BOTH, now: before, organisation: "acme" }).verdict).toBe("malformed");
+  });
+
+  it("signs a floating key exactly as before, so every key issued already still verifies", () => {
+    const [body] = licence(OLD.signing).split(".");
+    expect(JSON.parse(Buffer.from(body, "base64url").toString("utf8"))).not.toHaveProperty("organisation");
   });
 });
 

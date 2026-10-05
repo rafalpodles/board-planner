@@ -26,15 +26,15 @@ export type JsonBody<T> = { ok: true; value: T } | BodyRefusal;
  * be wrong. It is checked first because when it is honest the refusal costs nothing, and the
  * stream is counted anyway because when it is not, that is the case that matters.
  */
-export async function readJsonBody<T = Record<string, unknown>>(
+export async function readBodyBytes(
   request: Request,
   maxBytes: number = MAX_JSON_BODY_BYTES
-): Promise<JsonBody<T>> {
+): Promise<{ ok: true; value: Uint8Array } | BodyRefusal> {
   const declared = Number(request.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > maxBytes) return tooLarge(maxBytes);
 
   const reader = request.body?.getReader();
-  if (!reader) return { ok: true, value: {} as T };
+  if (!reader) return { ok: true, value: new Uint8Array(0) };
 
   const chunks: Uint8Array[] = [];
   let size = 0;
@@ -57,6 +57,18 @@ export async function readJsonBody<T = Record<string, unknown>>(
     body.set(chunk, at);
     at += chunk.byteLength;
   }
+  return { ok: true, value: body };
+}
+
+export async function readJsonBody<T = Record<string, unknown>>(
+  request: Request,
+  maxBytes: number = MAX_JSON_BODY_BYTES
+): Promise<JsonBody<T>> {
+  const sent = request.body !== null;
+  const read = await readBodyBytes(request, maxBytes);
+  if (!read.ok) return read;
+  if (!sent) return { ok: true, value: {} as T };
+  const body = read.value;
 
   try {
     const parsed: unknown = JSON.parse(new TextDecoder().decode(body));

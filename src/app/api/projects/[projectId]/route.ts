@@ -118,7 +118,7 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
     }
   }
   if (CODA_SETTINGS_FIELDS.some((field) => field in updates) && !onlyClearsCoda(updates)) {
-    const refusal = await entitlementRefusal("integrations.coda");
+    const refusal = await entitlementRefusal(db, "integrations.coda");
     if (refusal) return refusal;
   }
   if (body.key !== undefined) {

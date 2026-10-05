@@ -11,13 +11,6 @@ export async function bootNode(): Promise<void> {
       : `TRUSTED_PROXY_HOPS=${hops} — the client address is taken ${hops} entries from the right of X-Forwarded-For`
   );
 
-  // A bad key is a line in the log and the Free plan, never a failed start
-  const { currentLicence, describeLicenceAtStartup } = await import("@/lib/licence");
-  const licence = currentLicence();
-  const licenceLine = describeLicenceAtStartup(licence);
-  if (licence && licence.verdict !== "valid") console.warn(licenceLine);
-  else console.log(licenceLine);
-
   // Above the try for the same reason the hops are: a fumbled value has to be one startup
   // failure naming the variable. `assertEncryptionConfig` throws on a malformed key on purpose
   // (BP-282) — but every other path to this module goes through the PM scheduler, inside the
@@ -48,6 +41,21 @@ export async function bootNode(): Promise<void> {
     // docker-compose.yml all carry.
     console.error(err instanceof Error ? err.message : err);
     process.exit(1);
+  }
+
+  // A bad key is a line in the log and the Free plan, never a failed start
+  const { currentLicence, describeLicenceAtStartup } = await import("@/lib/licence");
+  const { organisationDomain } = await import("@/lib/organisation-host");
+  const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
+  if (organisationDomain()) {
+    if (process.env.LICENCE_KEY?.trim()) {
+      console.warn("WARNING: LICENCE_KEY is ignored: with ORGANISATION_DOMAIN set, each organisation carries the licence the licence service stored on it");
+    }
+  } else {
+    const licence = currentLicence(process.env, Date.now(), process.env.NODE_ENV, DEFAULT_ORGANISATION_ID.toHexString());
+    const licenceLine = describeLicenceAtStartup(licence);
+    if (licence && licence.verdict !== "valid") console.warn(licenceLine);
+    else console.log(licenceLine);
   }
 
   await bootWhenDatabaseIsReady();
