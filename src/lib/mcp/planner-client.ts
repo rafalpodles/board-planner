@@ -161,7 +161,7 @@ export class PlannerClient {
   async resolveTaskKey(taskKey: string): Promise<{ projectId: string; taskId: string }> {
     // Split on the LAST hyphen: a project key may itself hold hyphens, underscores and digits
     const match = taskKey.match(/^(.+)-(\d+)$/);
-    if (!match || !isValidProjectKey(match[1].toUpperCase())) {
+    if (!match || !isValidProjectKey(match[1])) {
       throw new Error(`Invalid task key: "${echo(taskKey)}". Expected format: "CP-1"`);
     }
 
@@ -170,9 +170,14 @@ export class PlannerClient {
     // Zero and anything past what a counter reaches name no task, and the route refuses them as
     // malformed rather than as absent — so the answer a caller gets stays "not found"
     const lookable = taskNumber >= 1 && taskNumber <= 999_999_999;
-    const [task] = lookable
-      ? ((await this.listTasks(project._id, { taskNumber: String(taskNumber) })) as { _id: string }[])
-      : [];
+    // The row is matched on its number rather than taken on trust: a server that does not know the
+    // filter (a rolling deploy) answers with the whole board, and the first row is somebody else's task
+    const task = lookable
+      ? ((await this.listTasks(project._id, { taskNumber: String(taskNumber) })) as {
+          _id: string;
+          taskNumber: number;
+        }[]).find((t) => t.taskNumber === taskNumber)
+      : undefined;
 
     if (!task) throw new Error(`Task ${echo(taskKey.toUpperCase())} not found`);
     return { projectId: project._id, taskId: task._id };

@@ -75,8 +75,6 @@ beforeEach(() => {
 /** The filter the route actually handed Mongoose */
 const filterUsed = () => taskFind.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
 
-// A stale bookmark or a link to a deleted sprint used to reach Mongoose as a raw string
-// and crash with a CastError 500 — this is every caller's protection, not just the board's
 // BP-904: how a caller holding "BP-12" gets that task without downloading the board
 describe("GET /api/projects/:projectId/tasks — taskNumber filter", () => {
   it("narrows to one task by its number", async () => {
@@ -115,6 +113,8 @@ describe("GET /api/projects/:projectId/tasks — taskNumber filter", () => {
   });
 });
 
+// A stale bookmark or a link to a deleted sprint used to reach Mongoose as a raw string
+// and crash with a CastError 500 — this is every caller's protection, not just the board's
 describe("GET /api/projects/:projectId/tasks — sprint filter", () => {
   it("answers a malformed sprint id with 400, not a crash", async () => {
     const response = await GET(request("?sprint=not-an-id"), ctx());

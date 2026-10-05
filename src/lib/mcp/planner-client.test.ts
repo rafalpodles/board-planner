@@ -145,13 +145,14 @@ describe("resolveTaskKey", () => {
   const PROJECT_ID = "507f1f77bcf86cd7994390aa";
   const TASK_ID = "507f1f77bcf86cd7994390bb";
   const client = new PlannerClient("https://board.example.com", "cp_token");
+  const idOf = (key: string) => `${PROJECT_ID.slice(0, -2)}${key.length.toString(16).padStart(2, "0")}`;
 
-  /** The projects list names three boards; a task lookup answers with `tasks`. */
+  /** The projects list names the boards, each with its own id; a task lookup answers with `tasks`. */
   function board(keys: string[], tasks: unknown[] = [{ _id: TASK_ID, taskNumber: 7 }]) {
     fetchMock.mockImplementation(async (url: string) => {
       const path = new URL(url).pathname;
       const body =
-        path === "/api/projects" ? keys.map((key) => ({ _id: PROJECT_ID, key })) : tasks;
+        path === "/api/projects" ? keys.map((key) => ({ _id: idOf(key), key })) : tasks;
       return new Response(JSON.stringify(body), {
         status: 200,
         headers: { "content-type": "application/json" },
@@ -161,10 +162,30 @@ describe("resolveTaskKey", () => {
 
   const requested = () => fetchMock.mock.calls.map(([url]) => new URL(url as string));
 
-  it.each(["BP-7", "BP2-7", "MY_APP-7", "MY-APP-7", "my-app-7"])("resolves %s", async (key) => {
+  it.each([
+    ["BP-7", "BP"],
+    ["BP2-7", "BP2"],
+    ["MY_APP-7", "MY_APP"],
+    ["MY-APP-7", "MY-APP"],
+    ["my-app-7", "MY-APP"],
+  ])("resolves %s on the board %s", async (key, boardKey) => {
     board(["BP", "BP2", "MY_APP", "MY-APP"]);
 
-    await expect(client.resolveTaskKey(key)).resolves.toEqual({ projectId: PROJECT_ID, taskId: TASK_ID });
+    await expect(client.resolveTaskKey(key)).resolves.toEqual({ projectId: idOf(boardKey), taskId: TASK_ID });
+  });
+
+  // A server that predates the filter ignores it and answers with the whole board, so the first row
+  // is whichever task is on top — and an update would land on it, silently
+  it("does not take the first row of an answer that ignored the filter", async () => {
+    board(["BP"], [{ _id: "507f1f77bcf86cd7994390cc", taskNumber: 3 }, { _id: TASK_ID, taskNumber: 7 }]);
+
+    await expect(client.resolveTaskKey("BP-7")).resolves.toMatchObject({ taskId: TASK_ID });
+  });
+
+  it("says not found when an answer that ignored the filter does not hold the number", async () => {
+    board(["BP"], [{ _id: "507f1f77bcf86cd7994390cc", taskNumber: 3 }]);
+
+    await expect(client.resolveTaskKey("BP-7")).rejects.toThrow("Task BP-7 not found");
   });
 
   it("asks the server for the one number, and never for the board's task list", async () => {
