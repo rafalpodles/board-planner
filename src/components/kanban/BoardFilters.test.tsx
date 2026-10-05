@@ -570,6 +570,9 @@ describe("BoardFilters epic", () => {
 
     await openPopover();
     expect(screen.getByLabelText("Remove Epic filter")).toBeTruthy();
+    expect([...(screen.getByLabelText("Epic") as HTMLSelectElement).options].map((o) => o.textContent)).toContain(
+      "Epic (not in this view)"
+    );
     await act(async () => {
       screen.getByLabelText("Remove Epic filter").click();
     });

@@ -209,7 +209,7 @@ export function BoardFilters({
 
   const epicChoices = epicOptions(tasks, projectKey);
   if (filters.epic && !epicChoices.some((o) => o.value === filters.epic)) {
-    epicChoices.push({ value: filters.epic, label: "Epic no longer on this board", taskNumber: 0 });
+    epicChoices.push({ value: filters.epic, label: "Epic (not in this view)", taskNumber: 0 });
   }
 
   const activeCount = countActiveFilters(filters) + (showArchived ? 1 : 0);
