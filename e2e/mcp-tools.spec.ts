@@ -380,7 +380,7 @@ test("sprints are created, listed and updated, and another board's sprint is out
     name: "Renamed from the wrong board",
   });
   refused(foreign);
-  expect(foreign.text).toContain("Sprint not found");
+  expect(foreign.text).toContain(`No sprint "${FOREIGN_SPRINT_ID}"`);
   expect((await storedSprint(FOREIGN_SPRINT_ID))?.name).toBe(FOREIGN_SPRINT_NAME);
 
   const row = await storedSprint(new mongoose.Types.ObjectId(sprintId));
