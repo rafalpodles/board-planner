@@ -473,6 +473,20 @@ describe("BoardFilters and archived tasks", () => {
   });
 });
 
+describe("BoardFilters archived tasks while Show archived is off", () => {
+  const withArchived = [...tasks, task({ _id: "4", taskNumber: 4, title: "Old", archivedAt: "2026-10-05T10:00:00.000Z" })];
+
+  it("hands on no archived task until the choice is on, even if the list still holds one", () => {
+    const { onFilter } = renderFilters({ tasks: withArchived, showArchived: false });
+    expect((onFilter.mock.calls.at(-1)?.[0] as ApiTask[]).map((t) => t._id)).toEqual(["1", "2", "3"]);
+  });
+
+  it("hands them on once it is on", () => {
+    const { onFilter } = renderFilters({ tasks: withArchived, showArchived: true });
+    expect((onFilter.mock.calls.at(-1)?.[0] as ApiTask[]).map((t) => t._id)).toContain("4");
+  });
+});
+
 describe("BoardFilters epic", () => {
   const link = (id: string, taskNumber: number, title: string) => ({ _id: id, taskNumber, title, status: "todo" });
   const epics = [

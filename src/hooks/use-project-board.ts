@@ -1,7 +1,7 @@
 "use client";
 
 import { boardRefusal } from "@/lib/board-load-failure";
-import { Dispatch, SetStateAction, useCallback, useEffect, useRef, useState } from "react";
+import { Dispatch, SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
 import { ApiProject, ApiSprint, ApiTask, ApiUserSummary, RunConflict } from "@/types";
@@ -746,9 +746,14 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
     loadData();
   }
 
+  const visibleTasks = useMemo(
+    () => (showArchived ? tasks : tasks.filter((t) => !t.archivedAt)),
+    [tasks, showArchived]
+  );
+
   return {
     project,
-    tasks,
+    tasks: visibleTasks,
     sprints,
     assignableUsers,
     loading,

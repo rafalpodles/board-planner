@@ -216,7 +216,7 @@ export function BoardFilters({
   const hasActiveFilters = activeCount > 0;
 
   useEffect(() => {
-    let result = tasks;
+    let result = showArchived ? tasks : tasks.filter((t) => !t.archivedAt);
 
     if (filters.search) {
       const q = filters.search.toLowerCase().trim();

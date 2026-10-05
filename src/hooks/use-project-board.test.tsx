@@ -710,3 +710,31 @@ describe("archiving or restoring a child under an epic's progress", () => {
     expect(taskReads()).toBe(reads);
   });
 });
+
+describe("turning Show archived off", () => {
+  it("takes archived cards off the screen before the refetch lands", async () => {
+    api.get.mockImplementation((path: string) => {
+      if (path.includes("/tasks")) {
+        return Promise.resolve([task("t1", 0), { ...task("t2", 1), archivedAt: "2026-10-05T10:00:00.000Z" }]);
+      }
+      if (path.endsWith("/sprints")) return Promise.resolve([]);
+      return Promise.resolve(PROJECT);
+    });
+    probeScope = "all";
+    render(<Probe />);
+    await waitFor(() => expect(orderOnScreen()).toBe("t1:0"));
+    act(() => board.setShowArchived(true));
+    await act(async () => {
+      await board.reload();
+    });
+    expect(orderOnScreen()).toBe("t1:0,t2:1");
+
+    const refetch = held<unknown[]>();
+    api.get.mockImplementation((path: string) =>
+      path.includes("/tasks") ? refetch.promise : Promise.resolve(path.endsWith("/sprints") ? [] : PROJECT)
+    );
+    act(() => board.setShowArchived(false));
+
+    expect(orderOnScreen()).toBe("t1:0");
+  });
+});
