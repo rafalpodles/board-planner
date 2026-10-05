@@ -7,8 +7,11 @@ export class OrganisationWallError extends Error {
   }
 }
 
-const expected = new WeakMap<object, Types.ObjectId>();
-const crossing = new WeakMap<object, string>();
+type Marks = { expected: WeakMap<object, Types.ObjectId>; crossing: WeakMap<object, string> };
+// Shared across Next's copies of this module: Mongoose keeps only the hooks of the copy that registered first
+const MARKS = Symbol.for("board-planner.organisation-wall");
+const shared = globalThis as typeof globalThis & { [MARKS]?: Marks };
+const { expected, crossing } = (shared[MARKS] ??= { expected: new WeakMap(), crossing: new WeakMap() });
 
 const isMarkable = (value: unknown): value is object => (typeof value === "object" || typeof value === "function") && value !== null;
 
