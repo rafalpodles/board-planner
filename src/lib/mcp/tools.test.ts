@@ -2022,7 +2022,10 @@ describe("board setup", () => {
     expect(said.get("rename_column")).toMatch(/Needs the project owner/);
     expect(said.get("rename_column")).toMatch(/a column cannot be removed/);
     expect(said.get("sync_repository")).toMatch(/no repository or no stored token is refused/);
+  });
+});
 
+/**
  * BP-915. A member can take a task off every list and bring it back; only the board's owner can
  * delete one, and the call has to repeat the task's key.
  */
