@@ -32,17 +32,27 @@ import { agentLines, memberLines, myTaskLines } from "./people";
 import { noticeLines, runLines, searchLines, statsSummary } from "./discovery";
 import { activityLines, commentLines } from "./history";
 import { DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT, pageOf } from "./paging";
+import { BATCH_LIMIT, LINK_BATCH_LIMIT, failure, referencedKey } from "./batch";
 
 type ToolExtra = { authInfo?: AuthInfo };
 
-function clientFrom(extra: ToolExtra): PlannerClient {
+// One client per call, so the lookups a batch repeats for every item — the board list, a roster, the
+// sprints — are made once. `extra` is made per request by the SDK, so the client does not outlive its call.
+const clients = new WeakMap<object, PlannerClient>();
+
+export function clientFrom(extra: ToolExtra): PlannerClient {
   const auth = extra.authInfo;
   if (!auth) throw new Error("Unauthorized");
   const baseUrl = auth.extra?.baseUrl;
   if (typeof baseUrl !== "string" || !baseUrl) {
     throw new Error("Missing base URL in auth context");
   }
-  return new PlannerClient(baseUrl, auth.token);
+  let client = clients.get(extra);
+  if (!client) {
+    client = new PlannerClient(baseUrl, auth.token);
+    clients.set(extra, client);
+  }
+  return client;
 }
 
 const MINIMAL_PARAM = z
@@ -67,6 +77,14 @@ function json(value: unknown) {
 }
 
 export function registerPlannerTools(server: McpServer): void {
+  // The handlers the batch tools call: the same code the single tools run, not a second copy of it
+  type Handler = (args: Record<string, unknown>, extra: ToolExtra) => Promise<{ content: { text: string }[] }>;
+  const handlers: Record<string, Handler> = {};
+  const register: McpServer["registerTool"] = (name, config, handler) => {
+    handlers[name] = handler as unknown as Handler;
+    return server.registerTool(name, config as never, handler as never) as never;
+  };
+
   // --- Projects ---
 
   server.registerTool(
@@ -397,12 +415,8 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.registerTool(
-    "create_task",
-    {
-      description: "Create a new task in a project",
-      inputSchema: strictInput({
-        project: z.string().describe("Project key (e.g. 'CP')"),
+  // The fields of a task as create_task takes them — and as each item of create_tasks does, so the two cannot drift
+  const CREATE_SHAPE = {
         title: z.string().describe("Task title"),
         description: z.string().optional().describe("Task description"),
         priority: z.string().optional().describe("Priority: low, medium, high, or urgent (default: medium)"),
@@ -419,7 +433,6 @@ export function registerPlannerTools(server: McpServer): void {
           .string()
           .optional()
           .describe("Acceptance criteria (markdown checklist, converted to structured checklist items)"),
-        minimal: MINIMAL_PARAM,
         dueDate: DUE_DATE_PARAM,
         sprint: SPRINT_PARAM,
         recurrence: RECURRENCE_PARAM,
@@ -430,6 +443,16 @@ export function registerPlannerTools(server: McpServer): void {
             "Project-defined fields keyed by field name, e.g. { \"Owoce\": \"Apples\" }. " +
               "get_project lists this project's fields and the options each one accepts."
           ),
+  };
+
+  register(
+    "create_task",
+    {
+      description: "Create a new task in a project",
+      inputSchema: strictInput({
+        project: z.string().describe("Project key (e.g. 'CP')"),
+        ...CREATE_SHAPE,
+        minimal: MINIMAL_PARAM,
       }, { hints: CREATE_TASK_HINTS, writes: true }),
     },
     async (
@@ -474,12 +497,7 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.registerTool(
-    "update_task",
-    {
-      description: "Update an existing task's fields by task key",
-      inputSchema: strictInput({
-        taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
+  const UPDATE_SHAPE = {
         title: z.string().optional(),
         description: z.string().optional(),
         priority: z.string().optional().describe("Priority: low, medium, high, or urgent"),
@@ -506,7 +524,6 @@ export function registerPlannerTools(server: McpServer): void {
               "line leaves the tick as it was, and \"- [ ]\" / \"- [x]\" sets it. To change one criterion use " +
               "set_checklist_item, add_checklist_item or remove_checklist_item."
           ),
-        minimal: MINIMAL_PARAM,
         dueDate: DUE_DATE_PARAM,
         sprint: SPRINT_PARAM,
         recurrence: RECURRENCE_PARAM,
@@ -517,6 +534,16 @@ export function registerPlannerTools(server: McpServer): void {
             "Project-defined fields keyed by field name. Only the named fields change; " +
               "the task's other field values are left alone. get_project lists them."
           ),
+  };
+
+  register(
+    "update_task",
+    {
+      description: "Update an existing task's fields by task key",
+      inputSchema: strictInput({
+        taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
+        ...UPDATE_SHAPE,
+        minimal: MINIMAL_PARAM,
       }, { hints: UPDATE_TASK_HINTS, writes: true }),
     },
     async (
@@ -821,7 +848,7 @@ export function registerPlannerTools(server: McpServer): void {
 
   const LINK_TYPE_PARAM = "Which kind of link, read from taskKey's side — see the description.";
 
-  server.registerTool(
+  register(
     "link_tasks",
     {
       description:
@@ -890,6 +917,150 @@ export function registerPlannerTools(server: McpServer): void {
 
       await client.removeTaskLink(projectId, taskId, targetTaskId, type);
       return json(describeLink(type, taskKey, targetTaskKey, true));
+    }
+  );
+
+  // --- Batches ---
+
+  // Each item goes through the tool of the same name — the same validation, the same refusals, the same
+  // history — one after another, and one that fails does not stop the rest. A batch is NOT atomic: the
+  // answer says, item by item, what was done.
+  const parsed = (result: { content: { text: string }[] }) => JSON.parse(result.content[0].text);
+
+  server.registerTool(
+    "create_tasks",
+    {
+      description:
+        `Create up to ${BATCH_LIMIT} tasks on one board in one call, in order, each exactly as create_task would — ` +
+        "and answer with one line per item: its key, or why it failed. One failing item does not stop the others, " +
+        "and a batch is not atomic: nothing already made is undone. An item can name its `parent` and what it is " +
+        "`blockedBy`, each either the key of a task that exists or `#3`, the third item of this same call (which has " +
+        "to come earlier), so an epic and its sub-tasks are one call. A link that fails is reported on its item " +
+        "(`linkErrors`) while the task it belongs to stays made.",
+      inputSchema: strictInput(
+        {
+          project: z.string().describe("Project key (e.g. 'CP')"),
+          tasks: z
+            .array(
+              z
+                .object({
+                  ...CREATE_SHAPE,
+                  parent: z.string().optional().describe("The task this one is a sub-task of: a key, or #n for an earlier item"),
+                  blockedBy: z.array(z.string()).optional().describe("Tasks that block this one: keys, or #n for earlier items"),
+                })
+                .strict()
+            )
+            .min(1)
+            .max(BATCH_LIMIT),
+        },
+        { writes: true }
+      ),
+    },
+    async ({ project, tasks }, extra) => {
+      const made: (string | null)[] = [];
+      const results: Record<string, unknown>[] = [];
+
+      for (const [at, item] of tasks.entries()) {
+        const n = at + 1;
+        try {
+          const { parent, blockedBy, ...fields } = item;
+          // Every reference is read before anything is created, so a bad one refuses its item whole
+          const parentKey = parent ? referencedKey(parent, made, n) : null;
+          const blockerKeys = (blockedBy ?? []).map((ref) => referencedKey(ref, made, n));
+
+          const created = parsed(await handlers.create_task({ project, ...fields, minimal: true }, extra));
+          made[at] = created.key;
+
+          const linkErrors: string[] = [];
+          const link = async (taskKey: string, targetTaskKey: string, type: string, label: string) => {
+            try {
+              await handlers.link_tasks({ taskKey, targetTaskKey, type }, extra);
+            } catch (error) {
+              linkErrors.push(`${label}: ${failure(error)}`);
+            }
+          };
+          if (parentKey) await link(parentKey, created.key, "parent_of", `parent ${parentKey}`);
+          for (const blocker of blockerKeys) await link(created.key, blocker, "blocked_by", `blocked by ${blocker}`);
+
+          results.push({ n, ...created, ...(linkErrors.length ? { linkErrors } : {}) });
+        } catch (error) {
+          made[at] = null;
+          results.push({ n, error: failure(error) });
+        }
+      }
+
+      const failed = results.filter((r) => r.error).length;
+      return json({ requested: tasks.length, created: tasks.length - failed, failed, results });
+    }
+  );
+
+  server.registerTool(
+    "update_tasks",
+    {
+      description:
+        `Update up to ${BATCH_LIMIT} tasks in one call, in order, each exactly as update_task would, and answer with ` +
+        "one line per item: the task as it now is, or why it failed. One failing item does not stop the others, and a " +
+        "batch is not atomic: nothing already changed is undone.",
+      inputSchema: strictInput(
+        {
+          updates: z
+            .array(z.object({ taskKey: z.string().describe("Task key (e.g. 'CP-1')"), ...UPDATE_SHAPE }).strict())
+            .min(1)
+            .max(BATCH_LIMIT),
+        },
+        { writes: true }
+      ),
+    },
+    async ({ updates }, extra) => {
+      const results: Record<string, unknown>[] = [];
+      for (const [at, item] of updates.entries()) {
+        try {
+          results.push({ n: at + 1, ...parsed(await handlers.update_task({ ...item, minimal: true }, extra)) });
+        } catch (error) {
+          results.push({ n: at + 1, taskKey: item.taskKey.toUpperCase(), error: failure(error) });
+        }
+      }
+      const failed = results.filter((r) => r.error).length;
+      return json({ requested: updates.length, updated: updates.length - failed, failed, results });
+    }
+  );
+
+  server.registerTool(
+    "link_task_pairs",
+    {
+      description:
+        `Link up to ${LINK_BATCH_LIMIT} pairs of tasks in one call, each exactly as link_tasks would (` +
+        LINK_DIRECTION +
+        ") and answer with one line per pair: what was linked, or why it was not. One failing pair does not stop the others.",
+      inputSchema: strictInput(
+        {
+          links: z
+            .array(
+              z
+                .object({
+                  taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
+                  targetTaskKey: z.string().describe("The task at the other end (e.g. 'CP-2')"),
+                  type: z.enum(DEPENDENCY_TYPES).describe(LINK_TYPE_PARAM),
+                })
+                .strict()
+            )
+            .min(1)
+            .max(LINK_BATCH_LIMIT),
+        },
+        { writes: true }
+      ),
+    },
+    async ({ links }, extra) => {
+      const results: Record<string, unknown>[] = [];
+      for (const [at, pair] of links.entries()) {
+        try {
+          results.push({ n: at + 1, ...parsed(await handlers.link_tasks({ ...pair }, extra)) });
+        } catch (error) {
+          results.push({ n: at + 1, taskKey: pair.taskKey.toUpperCase(), targetTaskKey: pair.targetTaskKey.toUpperCase(), type: pair.type, error: failure(error) });
+        }
+      }
+      const failed = results.filter((r) => r.error).length;
+      return json({ requested: links.length, linked: links.length - failed, failed, results });
     }
   );
 

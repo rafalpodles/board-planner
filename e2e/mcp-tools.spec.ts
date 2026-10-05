@@ -1870,3 +1870,106 @@ test("list_notifications and mark_notifications_read work on the caller's own be
   const garbled = await member.callTool("list_notifications", { before: "last week" });
   expect(garbled.raw.error?.message ?? garbled.text).toContain("timestamp");
 });
+
+/**
+ * BP-909. A board seeded in a few calls instead of a few hundred. Everything is read back from the board
+ * afterwards — the replies are the one thing a batch that stored nothing can still get right.
+ */
+test("create_tasks builds an epic with its sub-tasks and blockers in one call, and says which items failed", async ({ request }) => {
+  const session = await connected(request);
+  const answer = await session.callTool("create_tasks", {
+    project: PROJECT_KEY,
+    tasks: [
+      { title: "Epic", description: "the parent", priority: "high" },
+      { title: "Child one", parent: "#1", acceptanceCriteria: "- [ ] done well" },
+      { title: "Child two", parent: "#1", blockedBy: ["#2"] },
+      { title: "Wrong category", category: "chore", parent: "#1" },
+      { title: "Child of a task that was never made", parent: "#4" },
+      { title: "Blocked by an existing one", blockedBy: [SIBLING_TASK_KEY] },
+      { title: "Bad link", parent: "TP-9999" },
+    ],
+  });
+  accepted(answer);
+  expect(answer.parsed).toMatchObject({ requested: 7, created: 5, failed: 2 });
+  const rows = answer.parsed.results as { n: number; key?: string; error?: string; linkErrors?: string[] }[];
+  const key = (n: number) => rows[n - 1].key!;
+  expect(rows.map((r) => r.n)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+  expect(rows[3].error).toContain('Invalid category "chore"');
+  expect(rows[4].error).toMatch(/#4 did not create a task/);
+  expect(rows[6].key).toBeTruthy();
+  expect(rows[6].linkErrors?.[0]).toContain("TP-9999");
+
+  // What the board holds: the epic has its two children, the second child is blocked by the first
+  const epic = await session.callTool("get_task", { taskKey: key(1) });
+  expect(epic.parsed).toMatchObject({ title: "Epic", description: "the parent", priority: "high" });
+  expect((epic.parsed.children as { key: string }[]).map((c) => c.key).sort()).toEqual([key(2), key(3)].sort());
+  const second = await session.callTool("get_task", { taskKey: key(3) });
+  expect((second.parsed.blockedBy as { key: string }[]).map((b) => b.key)).toEqual([key(2)]);
+  expect(second.parsed.parent.key).toBe(key(1));
+  const first = await session.callTool("get_task", { taskKey: key(2) });
+  expect(first.parsed.checklist.map((c: { text: string }) => c.text)).toEqual(["done well"]);
+  const blocked = await session.callTool("get_task", { taskKey: key(6) });
+  expect((blocked.parsed.blockedBy as { key: string }[]).map((b) => b.key)).toEqual([SIBLING_TASK_KEY]);
+
+  // The tasks that failed were not made, and did not spend a number
+  const all = await session.callTool("list_tasks", { project: PROJECT_KEY, search: "Wrong category" });
+  expect(all.parsed.total).toBe(0);
+});
+
+test("create_tasks takes a whole batch at its limit, and refuses one past it", async ({ request }) => {
+  const session = await connected(request);
+  const before = (await session.callTool("list_tasks", { project: PROJECT_KEY, limit: 1 })).parsed.total as number;
+
+  const tasks = Array.from({ length: 30 }, (_, i) => ({ title: `Seeded ${i + 1}`, priority: i % 2 ? "low" : "medium" }));
+  const started = Date.now();
+  const answer = await session.callTool("create_tasks", { project: PROJECT_KEY, tasks });
+  accepted(answer);
+  expect(answer.parsed).toMatchObject({ requested: 30, created: 30, failed: 0 });
+  expect(Date.now() - started).toBeLessThan(60_000);
+  expect((await session.callTool("list_tasks", { project: PROJECT_KEY, limit: 1 })).parsed.total).toBe(before + 30);
+
+  const tooMany = await session.callTool("create_tasks", { project: PROJECT_KEY, tasks: [...tasks, { title: "one more" }] });
+  expect(tooMany.raw.error?.message ?? tooMany.text).toContain("30");
+  expect((await session.callTool("list_tasks", { project: PROJECT_KEY, limit: 1 })).parsed.total).toBe(before + 30);
+});
+
+test("update_tasks and link_task_pairs act on many tasks and report each item", async ({ request }) => {
+  const session = await connected(request);
+  const made = await session.callTool("create_tasks", { project: PROJECT_KEY, tasks: [{ title: "A" }, { title: "B" }, { title: "C" }] });
+  accepted(made);
+  const [a, b, c] = (made.parsed.results as { key: string }[]).map((r) => r.key);
+
+  const updated = await session.callTool("update_tasks", {
+    updates: [
+      { taskKey: a, title: "A renamed", priority: "urgent" },
+      { taskKey: `${PROJECT_KEY}-9999`, title: "Nobody home" },
+      { taskKey: b, assignee: MEMBER_USERNAME, dueDate: "2026-10-10" },
+      { taskKey: c },
+    ],
+  });
+  accepted(updated);
+  expect(updated.parsed).toMatchObject({ requested: 4, updated: 2, failed: 2 });
+  expect(updated.parsed.results[0]).toMatchObject({ n: 1, key: a, title: "A renamed", priority: "urgent" });
+  expect(updated.parsed.results[1].error).toContain("not found");
+  expect(updated.parsed.results[3].error).toContain("nothing to change");
+  expect((await session.callTool("get_task", { taskKey: a })).parsed).toMatchObject({ title: "A renamed", priority: "urgent" });
+  expect((await session.callTool("get_task", { taskKey: b })).parsed).toMatchObject({ dueDate: expect.stringMatching(/^2026-10-10/) });
+
+  await seedSecondProject();
+  await seedDemotableAdmin();
+  const linked = await session.callTool("link_task_pairs", {
+    links: [
+      { taskKey: a, targetTaskKey: b, type: "parent_of" },
+      { taskKey: c, targetTaskKey: a, type: "blocked_by" },
+      { taskKey: a, targetTaskKey: KEPT_TASK_KEY, type: "relates" },
+    ],
+  });
+  accepted(linked);
+  expect(linked.parsed).toMatchObject({ requested: 3, linked: 2, failed: 1 });
+  expect(linked.parsed.results[0].message).toBe(`Linked: ${a} is the parent of ${b}`);
+  expect(linked.parsed.results[2].error).toContain("different boards");
+
+  const parent = await session.callTool("get_task", { taskKey: a });
+  expect((parent.parsed.children as { key: string }[]).map((x) => x.key)).toEqual([b]);
+  expect((parent.parsed.blocking as { key: string }[]).map((x) => x.key)).toEqual([c]);
+});

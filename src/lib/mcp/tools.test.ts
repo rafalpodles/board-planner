@@ -1458,3 +1458,192 @@ describe("looking around", () => {
     expect(mark.mock.calls.map((c) => c[0])).toEqual(["n1", undefined]);
   });
 });
+
+/**
+ * BP-909. Seeding a board of 85 tasks and about a hundred links was 185 tool calls, each paying for its own
+ * lookups. The batch tools run each item through the tool of the same name, report per item, and make the
+ * lookups once per call.
+ */
+describe("batch tools", () => {
+  const parse = (result: unknown) => JSON.parse((result as { content: { text: string }[] }).content[0].text);
+  const run = (name: string, args: Record<string, unknown>) => registered().get(name)!.handler(args, extra);
+  let made: string[];
+  let links: unknown[][];
+
+  beforeEach(() => {
+    made = [];
+    links = [];
+    vi.spyOn(PlannerClient.prototype, "getProjectByKey").mockResolvedValue({ _id: "p1", customFields: [] } as never);
+    vi.spyOn(PlannerClient.prototype, "createTask").mockImplementation(async (_p, data) => {
+      if (String(data.title).startsWith("FAIL")) throw new Error(`refused ${data.title}`);
+      made.push(String(data.title));
+      return { taskNumber: made.length, title: data.title, status: "todo", priority: "medium", assignee: null };
+    });
+    // A key is a number on board p1; the id is the number, so a link can be read back as keys
+    vi.spyOn(PlannerClient.prototype, "resolveTaskKey").mockImplementation(async (key: string) => {
+      if (key.toUpperCase().startsWith("OTHER-")) return { projectId: "p2", taskId: key };
+      return { projectId: "p1", taskId: key.toUpperCase() };
+    });
+    vi.spyOn(PlannerClient.prototype, "addTaskLink").mockImplementation(async (...args) => {
+      links.push(args);
+      return { message: "Dependency added" };
+    });
+  });
+
+  describe("create_tasks", () => {
+    it("makes each item as create_task does, in order, and answers one line per item", async () => {
+      const answer = parse(await run("create_tasks", { project: "bp", tasks: [{ title: "One", priority: "high" }, { title: "Two" }] }));
+
+      expect(made).toEqual(["One", "Two"]);
+      expect(answer).toMatchObject({ requested: 2, created: 2, failed: 0 });
+      expect(answer.results.map((r: { n: number; key: string }) => [r.n, r.key])).toEqual([[1, "BP-1"], [2, "BP-2"]]);
+      expect(answer.results[0]).toMatchObject({ title: "One", status: "todo", url: "https://board.example.com/projects/BP/tasks/1" });
+    });
+
+    it("links an item to an earlier one by #n, so an epic and its children are one call", async () => {
+      const answer = parse(
+        await run("create_tasks", {
+          project: "bp",
+          tasks: [{ title: "Epic" }, { title: "Child", parent: "#1" }, { title: "Blocked", blockedBy: ["#1", "BP-99"] }],
+        })
+      );
+
+      expect(answer.failed).toBe(0);
+      expect(links).toEqual([
+        ["p1", "BP-1", "BP-2", "parent_of"],
+        ["p1", "BP-3", "BP-1", "blocked_by"],
+        ["p1", "BP-3", "BP-99", "blocked_by"],
+      ]);
+    });
+
+    it("carries on past an item that fails, and says why, without undoing what was made", async () => {
+      const answer = parse(
+        await run("create_tasks", { project: "bp", tasks: [{ title: "One" }, { title: "FAIL two" }, { title: "Three" }] })
+      );
+
+      expect(made).toEqual(["One", "Three"]);
+      expect(answer).toMatchObject({ requested: 3, created: 2, failed: 1 });
+      expect(answer.results[1]).toEqual({ n: 2, error: "refused FAIL two" });
+      expect(answer.results[2].key).toBe("BP-2");
+    });
+
+    it("refuses an item whose reference points at nothing before it makes anything", async () => {
+      const answer = parse(
+        await run("create_tasks", {
+          project: "bp",
+          tasks: [{ title: "FAIL one" }, { title: "Two", parent: "#1" }, { title: "Three", parent: "#3" }, { title: "Four", parent: "#9" }],
+        })
+      );
+
+      expect(made).toEqual([]);
+      expect(answer.results[1].error).toMatch(/#1 did not create a task/);
+      expect(answer.results[2].error).toMatch(/#3 must name an earlier item.*item #3/);
+      expect(answer.results[3].error).toMatch(/#9 must name an earlier item/);
+    });
+
+    it("keeps a task that was made when only its link fails, and reports the link on the item", async () => {
+      vi.mocked(PlannerClient.prototype.addTaskLink).mockRejectedValue(new Error("Task not found"));
+
+      const answer = parse(await run("create_tasks", { project: "bp", tasks: [{ title: "Epic" }, { title: "Child", parent: "#1" }] }));
+
+      expect(answer).toMatchObject({ created: 2, failed: 0 });
+      expect(answer.results[1].linkErrors).toEqual(["parent BP-1: Task not found"]);
+    });
+
+    it("runs every item through the same refusals as create_task", async () => {
+      vi.spyOn(PlannerClient.prototype, "listSprints").mockResolvedValue([]);
+
+      const answer = parse(await run("create_tasks", { project: "bp", tasks: [{ title: "One", sprint: "Nope" }, { title: "Two", dueDate: "2026-02-31" }] }));
+
+      expect(answer.results[0].error).toMatch(/No sprint "Nope"/);
+      expect(answer.results[1].error).toMatch(/Invalid dueDate/);
+      expect(made).toEqual([]);
+    });
+
+    it("takes at most the batch limit, at least one, and no key the item does not declare", () => {
+      const { schema } = registered().get("create_tasks")!;
+      const item = (n: number) => Array.from({ length: n }, (_, i) => ({ title: `T${i}` }));
+
+      expect(schema.safeParse({ project: "BP", tasks: item(30) }).success).toBe(true);
+      expect(schema.safeParse({ project: "BP", tasks: item(31) }).success).toBe(false);
+      expect(schema.safeParse({ project: "BP", tasks: [] }).success).toBe(false);
+      expect(schema.safeParse({ project: "BP", tasks: [{ title: "T", status_id: "x" }] }).success).toBe(false);
+      expect(schema.safeParse({ project: "BP", tasks: [{ title: "T", parent: "#1", blockedBy: ["BP-2"] }] }).success).toBe(true);
+    });
+  });
+
+  describe("update_tasks", () => {
+    it("updates each item as update_task does and carries on past one that fails", async () => {
+      const wrote = vi.spyOn(PlannerClient.prototype, "updateTask").mockImplementation(async (_p, id, data) => {
+        if (id === "BP-2") throw new Error("Task not found");
+        return { taskNumber: Number(String(id).slice(3)), title: data.title ?? "t", status: "todo" };
+      });
+
+      const answer = parse(
+        await run("update_tasks", { updates: [{ taskKey: "bp-1", title: "A" }, { taskKey: "BP-2", title: "B" }, { taskKey: "BP-3", priority: "high" }] })
+      );
+
+      expect(wrote.mock.calls.map((c) => [c[1], c[2]])).toEqual([["BP-1", { title: "A" }], ["BP-2", { title: "B" }], ["BP-3", { priority: "high" }]]);
+      expect(answer).toMatchObject({ requested: 3, updated: 2, failed: 1 });
+      expect(answer.results[0]).toMatchObject({ n: 1, key: "BP-1", title: "A" });
+      expect(answer.results[1]).toEqual({ n: 2, taskKey: "BP-2", error: "Task not found" });
+    });
+
+    it("refuses an item that names nothing to change, as update_task does, and the rest still run", async () => {
+      vi.spyOn(PlannerClient.prototype, "updateTask").mockResolvedValue({ taskNumber: 2, title: "t" });
+
+      const answer = parse(await run("update_tasks", { updates: [{ taskKey: "BP-1" }, { taskKey: "BP-2", title: "x" }] }));
+
+      expect(answer.results[0].error).toMatch(/nothing to change/);
+      expect(answer.results[1].key).toBe("BP-2");
+    });
+
+    it("takes at most the batch limit", () => {
+      const { schema } = registered().get("update_tasks")!;
+
+      expect(schema.safeParse({ updates: Array.from({ length: 31 }, () => ({ taskKey: "BP-1", title: "x" })) }).success).toBe(false);
+      expect(schema.safeParse({ updates: [{ taskKey: "BP-1", nope: 1 }] }).success).toBe(false);
+    });
+  });
+
+  describe("link_task_pairs", () => {
+    it("links each pair as link_tasks does, naming what was linked", async () => {
+      const answer = parse(
+        await run("link_task_pairs", {
+          links: [
+            { taskKey: "BP-1", targetTaskKey: "BP-2", type: "parent_of" },
+            { taskKey: "BP-3", targetTaskKey: "BP-1", type: "blocked_by" },
+          ],
+        })
+      );
+
+      expect(links).toEqual([["p1", "BP-1", "BP-2", "parent_of"], ["p1", "BP-3", "BP-1", "blocked_by"]]);
+      expect(answer).toMatchObject({ requested: 2, linked: 2, failed: 0 });
+      expect(answer.results[0]).toMatchObject({ n: 1, message: "Linked: BP-1 is the parent of BP-2" });
+    });
+
+    it("reports a pair on two boards by name and carries on with the rest", async () => {
+      const answer = parse(
+        await run("link_task_pairs", {
+          links: [
+            { taskKey: "BP-1", targetTaskKey: "OTHER-1", type: "relates" },
+            { taskKey: "BP-1", targetTaskKey: "BP-2", type: "relates" },
+          ],
+        })
+      );
+
+      expect(answer).toMatchObject({ linked: 1, failed: 1 });
+      expect(answer.results[0].error).toMatch(/BP-1 and OTHER-1 are on different boards/);
+      expect(links).toHaveLength(1);
+    });
+
+    it("takes at most the batch limit and only the four link types", () => {
+      const { schema } = registered().get("link_task_pairs")!;
+      const pair = { taskKey: "BP-1", targetTaskKey: "BP-2", type: "relates" };
+
+      expect(schema.safeParse({ links: Array.from({ length: 60 }, () => pair) }).success).toBe(true);
+      expect(schema.safeParse({ links: Array.from({ length: 61 }, () => pair) }).success).toBe(false);
+      expect(schema.safeParse({ links: [{ ...pair, type: "friends" }] }).success).toBe(false);
+    });
+  });
+});

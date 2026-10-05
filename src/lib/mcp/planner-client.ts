@@ -40,6 +40,19 @@ const seg = (value: string) => {
 export class PlannerClient {
   private baseUrl: string;
   private token: string;
+  // What one tool call looks up more than once — the board list, a roster, a board's sprints — is asked for
+  // once. A client lives for one call (see clientFrom), so nothing here outlives the call it was made for
+  private memo = new Map<string, Promise<unknown>>();
+
+  private remember<T>(key: string, load: () => Promise<T>): Promise<T> {
+    let found = this.memo.get(key) as Promise<T> | undefined;
+    if (!found) {
+      found = load();
+      this.memo.set(key, found);
+      found.catch(() => this.memo.delete(key));
+    }
+    return found;
+  }
 
   constructor(baseUrl: string, token: string) {
     this.baseUrl = baseUrl.replace(/\/$/, "");
@@ -65,7 +78,7 @@ export class PlannerClient {
   }
 
   async listProjects(): Promise<unknown[]> {
-    return this.request("GET", "/api/projects") as Promise<unknown[]>;
+    return this.remember("projects", () => this.request("GET", "/api/projects") as Promise<unknown[]>);
   }
 
   async getProject(id: string): Promise<McpProject> {
@@ -202,26 +215,32 @@ export class PlannerClient {
   }
 
   async listSprints(projectId: string): Promise<unknown[]> {
-    return this.request("GET", `/api/projects/${seg(projectId)}/sprints`) as Promise<unknown[]>;
+    return this.remember(
+      `sprints:${projectId}`,
+      () => this.request("GET", `/api/projects/${seg(projectId)}/sprints`) as Promise<unknown[]>
+    );
   }
 
   async createSprint(projectId: string, data: Record<string, unknown>): Promise<unknown> {
+    this.memo.delete(`sprints:${projectId}`);
     return this.request("POST", `/api/projects/${seg(projectId)}/sprints`, data);
   }
 
   async updateSprint(projectId: string, sprintId: string, data: Record<string, unknown>): Promise<unknown> {
+    this.memo.delete(`sprints:${projectId}`);
     return this.request("PUT", `/api/projects/${seg(projectId)}/sprints/${seg(sprintId)}`, data);
   }
 
   async deleteSprint(projectId: string, sprintId: string): Promise<unknown> {
+    this.memo.delete(`sprints:${projectId}`);
     return this.request("DELETE", `/api/projects/${seg(projectId)}/sprints/${seg(sprintId)}`);
   }
 
   async listAssignableUsers(projectId: string): Promise<unknown[]> {
-    return this.request(
-      "GET",
-      `/api/projects/${seg(projectId)}/assignable-users`
-    ) as Promise<unknown[]>;
+    return this.remember(
+      `members:${projectId}`,
+      () => this.request("GET", `/api/projects/${seg(projectId)}/assignable-users`) as Promise<unknown[]>
+    );
   }
 
   /** Sets the caller's watch to the state asked for; the route does it in one update, so a retry cannot undo it. */
