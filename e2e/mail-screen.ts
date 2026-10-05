@@ -17,6 +17,7 @@ type EmailSettings = ReturnType<typeof import("../src/lib/email").emailSettingsS
  */
 export async function answerNoMailServer(page: Page) {
   const unconfigured: EmailSettings = {
+    managedByPlatform: false,
     configured: false,
     host: "",
     port: 587,

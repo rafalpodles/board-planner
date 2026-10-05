@@ -114,6 +114,17 @@ describe("assertOrganisationDomainConfig", () => {
       expect(() => assertOrganisationDomainConfig(), value).toThrow(/ORGANISATION_DOMAIN/);
     }
   });
+
+  it("refuses OIDC_ADMIN_GROUP on a shared instance, where it would make one group admin of every organisation (BP-892)", () => {
+    process.env.OIDC_ADMIN_GROUP = "board-admins";
+    try {
+      expect(() => assertOrganisationDomainConfig()).not.toThrow();
+      process.env.ORGANISATION_DOMAIN = "board-planner.com";
+      expect(() => assertOrganisationDomainConfig()).toThrow(/OIDC_ADMIN_GROUP cannot be set with ORGANISATION_DOMAIN/);
+    } finally {
+      delete process.env.OIDC_ADMIN_GROUP;
+    }
+  });
 });
 
 describe("organisationOrigin: the address a link to an organisation is built on", () => {

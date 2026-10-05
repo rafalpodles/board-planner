@@ -20,6 +20,7 @@ import "./oidcFlow";
 import "./passwordResetToken";
 import "./pmMessage";
 import "./pmOauthState";
+import "./platformAuditLog";
 import "./pmTrigger";
 import "./project";
 import "./projectAuditLog";

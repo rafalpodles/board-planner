@@ -7,7 +7,7 @@ import crossingAllowed from "./organisation-wall.crossings.json";
 const SRC = join(__dirname, "..");
 const ROOT = join(SRC, "..");
 
-const UNSCOPED = ["organisation", "rateLimit"];
+const UNSCOPED = ["organisation", "rateLimit", "platformAuditLog"];
 const MODELS_PATH = String.raw`["'](?:@\/models\/|(?:\.\.?\/)+models\/)([A-Za-z]+)["']`;
 const MODEL_IMPORT = new RegExp(
   String.raw`^\s*(?:import|export)\s+(?!type\b)[^;]*?from\s+${MODELS_PATH}|(?:import|require)\s*\(\s*${MODELS_PATH}|^\s*import\s+${MODELS_PATH}`,

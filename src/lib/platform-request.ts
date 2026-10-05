@@ -103,7 +103,9 @@ export async function verifyPlatformRequest(
   const key = keys.find((candidate) => candidate.keyId === keyId);
   if (!key) return { ok: false, reason: "unknown_key", keyId };
 
-  const path = new URL(request.url).pathname;
+  // The query too, so a list's cursor or limit cannot be changed under a valid signature
+  const url = new URL(request.url);
+  const path = url.pathname + url.search;
   if (!signatureMatches(platformSigningString(request.method, path, timestamp, nonce, body), signature, key)) {
     return { ok: false, reason: "bad_signature", keyId };
   }

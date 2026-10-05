@@ -1,35 +1,17 @@
 import { NextResponse } from "next/server";
-import { connectDB } from "@/lib/db";
 import { scoped } from "@/lib/db-scope";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { storedLicence } from "@/lib/licence";
 import { hostNotFound } from "@/lib/middleware";
-import { organisationOfRequest } from "@/lib/organisation-host";
-import { verifyPlatformRequest } from "@/lib/platform-request";
-import { readBodyBytes } from "@/lib/request-body";
+import { logPlatformAudit, withPlatformRequest } from "@/lib/platform-route";
 import { Organisation } from "@/models/organisation";
 
-const MAX_BODY_BYTES = 16 * 1024;
 const OBJECT_ID = /^[0-9a-f]{24}$/;
 
-const refused = () => NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-export async function POST(request: Request, { params }: { params: Promise<{ organisationId: string }> }) {
-  if ((await organisationOfRequest(request)).kind !== "platform") return hostNotFound();
-
-  const read = await readBodyBytes(request, MAX_BODY_BYTES);
-  if (!read.ok) return read.response;
-
-  await connectDB();
-  const verdict = await verifyPlatformRequest(request, read.value);
-  if (!verdict.ok) {
-    console.warn(`Platform request refused: ${verdict.reason} (key ${verdict.keyId ?? "none"})`);
-    return refused();
-  }
-
+export const POST = withPlatformRequest<{ organisationId: string }>(async (_request, { keyId, body, params }) => {
   let licenceKey: unknown;
   try {
-    licenceKey = (JSON.parse(new TextDecoder().decode(read.value)) as { licenceKey?: unknown })?.licenceKey;
+    licenceKey = (JSON.parse(new TextDecoder().decode(body)) as { licenceKey?: unknown })?.licenceKey;
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
@@ -37,7 +19,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ org
     return NextResponse.json({ error: "licenceKey is required" }, { status: 400 });
   }
 
-  const { organisationId } = await params;
+  const { organisationId } = params;
   if (!OBJECT_ID.test(organisationId)) return hostNotFound();
   const organisation = await Organisation.findById(organisationId).lean();
   if (!organisation) return hostNotFound();
@@ -61,10 +43,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ org
     return NextResponse.json({ error: "The organisation's licence changed meanwhile; send it again" }, { status: 409 });
   }
 
-  void logInstanceAudit(scoped(organisationId), {
-    action: "licence_stored",
-    target: offered.payload.customer,
-    detail: `${offered.payload.plan} until ${offered.payload.expiresAt}, issued ${offered.payload.issuedAt} (request key ${verdict.keyId})`,
-  });
+  const detail = `${offered.payload.plan} until ${offered.payload.expiresAt}, issued ${offered.payload.issuedAt} (request key ${keyId})`;
+  void logInstanceAudit(scoped(organisationId), { action: "licence_stored", target: offered.payload.customer, detail });
+  await logPlatformAudit({ action: "licence_stored", keyId, subject: organisationId, detail: `${offered.payload.customer}: ${detail}` });
   return NextResponse.json({ stored: true, plan: offered.payload.plan, expiresAt: offered.payload.expiresAt });
-}
+});

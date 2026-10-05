@@ -43,7 +43,7 @@ export const POST = withAdmin(async (_request, { user, db }) => {
 
   const settings = emailSettingsSummary();
   const { html, text } = renderEmail({
-    preheader: `Delivery works from ${settings.host || "this deployment"}.`,
+    preheader: `Delivery works from ${(!settings.managedByPlatform && settings.host) || "this deployment"}.`,
     kicker: "Delivery test",
     heading: "Your mail server accepted this message",
     alert: {
@@ -53,7 +53,7 @@ export const POST = withAdmin(async (_request, { user, db }) => {
       ],
     },
     rows: [
-      { label: "Host", value: `${settings.host}:${settings.port}` },
+      ...(settings.managedByPlatform ? [] : [{ label: "Host", value: `${settings.host}:${settings.port}` }]),
       { label: "From", value: settings.from },
       { label: "Requested by", value: `${admin?.username ?? ""} · ${new Date().toUTCString()}` },
       { label: "Instance", value: (await originFor(db)) ?? "not configured" },

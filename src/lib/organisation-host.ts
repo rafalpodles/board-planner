@@ -50,6 +50,11 @@ export function assertOrganisationDomainConfig(): void {
       `ORGANISATION_DOMAIN must be a bare domain such as board-planner.com, with no scheme, port or path; got "${process.env.ORGANISATION_DOMAIN}"`
     );
   }
+  if (domain !== null && process.env.OIDC_ADMIN_GROUP?.trim()) {
+    throw new Error(
+      "OIDC_ADMIN_GROUP cannot be set with ORGANISATION_DOMAIN: one identity provider's group would make its members administrators of every organisation on the instance"
+    );
+  }
 }
 
 export type HostKind = { kind: "organisation"; slug: string } | { kind: "platform" } | { kind: "unknown" };

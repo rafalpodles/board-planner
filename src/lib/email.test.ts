@@ -60,6 +60,22 @@ describe("emailSettingsSummary", () => {
     expect(JSON.stringify(emailSettingsSummary())).not.toContain("secret");
   });
 
+  it("names neither the platform's mail server nor its login to an organisation on a shared instance (BP-892)", async () => {
+    vi.resetModules();
+    vi.stubEnv("SMTP_HOST", "smtp.platform.example");
+    vi.stubEnv("SMTP_USER", "platform-mailer");
+    vi.stubEnv("ORGANISATION_DOMAIN", "board-planner.com");
+    const cloud = await import("./email");
+
+    const summary = cloud.emailSettingsSummary();
+    expect(summary).toEqual({ managedByPlatform: true, configured: expect.any(Boolean), from: expect.any(String) });
+    expect(JSON.stringify(summary)).not.toMatch(/smtp\.platform\.example|platform-mailer/);
+
+    vi.stubEnv("ORGANISATION_DOMAIN", "");
+    expect(cloud.emailSettingsSummary()).toMatchObject({ managedByPlatform: false, host: "smtp.platform.example", user: "platform-mailer" });
+    vi.unstubAllEnvs();
+  });
+
   // The screen has two branches and this decides which one an admin gets. Since BP-465 the e2e run
   // has a mail server, so the unconfigured branch is reachable there only through a stubbed route —
   // this is the one place left that asserts the mapping against the environment itself.
@@ -98,7 +114,7 @@ describe("emailSettingsSummary", () => {
     vi.stubEnv("SMTP_FROM", "");
     const fresh = await import("./email");
 
-    expect(fresh.emailSettingsSummary().port).toBe(587);
+    expect(fresh.emailSettingsSummary()).toMatchObject({ port: 587 });
     // Against the brand constants the default is built from: `/^.+ <.+@.+>$/` would be satisfied
     // by any name and any domain, including somebody else's
     expect(fresh.emailSettingsSummary().from).toBe(`${APP_NAME} <noreply@${APP_DOMAIN}>`);
