@@ -268,7 +268,10 @@ ORGANISATION_DOMAIN=      # Optional — e.g. board-planner.com: organisations l
                           # value with a scheme, port or path stops the app at boot (BP-666)
 ORGANISATION_REQUESTS_PER_MINUTE= # Optional — authenticated requests one organisation may make in a minute,
                           # counted after the credential and the host check (an anonymous caller spends
-                          # nobody's); past it 429 with Retry-After and the reset time. Default 6000
+                          # nobody's); past it 429 with Retry-After and the reset time. One account or
+                          # machine may spend half of it, and what that share refuses does not count
+                          # against the organisation; an administrator's own session is never held to the
+                          # organisation's minute, so they can stop a runaway credential. Default 6000
                           # with ORGANISATION_DOMAIN set, off without; 0 is off (BP-894)
 ORGANISATION_STORAGE_MB=  # Optional — uploaded files one organisation may keep; past it an upload is
                           # 413. Default 5120 with ORGANISATION_DOMAIN set, off without; 0 is off
