@@ -333,6 +333,7 @@ function TaskDetailView({
     try {
       await patch();
       wroteHistory();
+      emitBoardRefresh(projectId);
       // A status change ends any run the task was under, and the server clears the execution phase
       // in the same write — so patching status alone would leave the panel asserting a live run the
       // user just stopped, counting up from a snapshot that is no longer true
@@ -360,6 +361,7 @@ function TaskDetailView({
     try {
       await pending.retry();
       wroteHistory();
+      emitBoardRefresh(projectId);
       toast(`${taskKey} taken from the worker`, "success");
     } catch {
       toast("Failed to update status", "error");

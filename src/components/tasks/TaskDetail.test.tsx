@@ -4,6 +4,7 @@ import { render, screen, cleanup, waitFor, act, within, fireEvent } from "@testi
 import { TaskDetail } from "./TaskDetail";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { APP_NAME } from "@/lib/brand";
+import { emitBoardRefresh } from "@/lib/board-refresh";
 
 const { api, auth, toast } = vi.hoisted(() => ({
   toast: vi.fn(),
@@ -171,6 +172,18 @@ describe("TaskDetail", () => {
     await act(async () => screen.getByRole("option", { name: /In Progress/i }).click());
 
     expect(key()).toBeGreaterThan(before);
+  });
+
+  it("tells the board behind it to refresh after a status change, so its epic's progress follows", async () => {
+    api.patch.mockResolvedValue({});
+    renderDetail();
+    await loaded();
+    vi.mocked(emitBoardRefresh).mockClear();
+
+    await act(async () => screen.getByRole("combobox", { name: "Status" }).click());
+    await act(async () => screen.getByRole("option", { name: /In Progress/i }).click());
+
+    expect(emitBoardRefresh).toHaveBeenCalledWith("TP");
   });
 
   it("moves status changes through the endpoint that runs the transition", async () => {
@@ -614,6 +627,21 @@ describe("TaskDetail, moving a task a worker is running", () => {
       status: "in_progress",
       force: true,
     });
+  });
+
+  it("tells the board to refresh once the forced change has gone through", async () => {
+    api.patch.mockRejectedValueOnce(refusal());
+    api.patch.mockResolvedValueOnce({});
+    renderDetail();
+    await loaded();
+    vi.mocked(emitBoardRefresh).mockClear();
+
+    await act(async () => screen.getByRole("combobox", { name: "Status" }).click());
+    await act(async () => screen.getByRole("option", { name: /In Progress/i }).click());
+    expect(emitBoardRefresh).not.toHaveBeenCalled();
+    await act(async () => screen.getByRole("button", { name: "Move anyway" }).click());
+
+    expect(emitBoardRefresh).toHaveBeenCalledWith("TP");
   });
 
   // A refusal for any other reason is still a failure, and must not be dressed up as a question
