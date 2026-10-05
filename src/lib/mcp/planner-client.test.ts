@@ -268,8 +268,15 @@ describe("the lookups one call repeats", () => {
   it("keeps each board's roster and sprints apart", async () => {
     await client.listSprints("p1");
     await client.listSprints("p2");
+    await client.listAssignableUsers("p1");
+    await client.listAssignableUsers("p2");
 
-    expect(paths()).toEqual(["/api/projects/p1/sprints", "/api/projects/p2/sprints"]);
+    expect(paths()).toEqual([
+      "/api/projects/p1/sprints",
+      "/api/projects/p2/sprints",
+      "/api/projects/p1/assignable-users",
+      "/api/projects/p2/assignable-users",
+    ]);
   });
 
   it("forgets a board's sprints when the call itself changes them", async () => {

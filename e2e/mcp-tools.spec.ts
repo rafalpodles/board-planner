@@ -1911,9 +1911,12 @@ test("create_tasks builds an epic with its sub-tasks and blockers in one call, a
   const blocked = await session.callTool("get_task", { taskKey: key(6) });
   expect((blocked.parsed.blockedBy as { key: string }[]).map((b) => b.key)).toEqual([SIBLING_TASK_KEY]);
 
-  // The tasks that failed were not made, and did not spend a number
+  // The tasks that failed were not made, and did not spend a number: the next one follows the last that was
   const all = await session.callTool("list_tasks", { project: PROJECT_KEY, search: "Wrong category" });
   expect(all.parsed.total).toBe(0);
+  const lastMade = Math.max(...rows.filter((r) => r.key).map((r) => Number(r.key!.split("-").at(-1))));
+  const next = await session.callTool("create_task", { project: PROJECT_KEY, title: "Right after the batch" });
+  expect(next.parsed.taskNumber).toBe(lastMade + 1);
 });
 
 test("create_tasks takes a whole batch at its limit, and refuses one past it", async ({ request }) => {
@@ -1953,7 +1956,10 @@ test("update_tasks and link_task_pairs act on many tasks and report each item", 
   expect(updated.parsed.results[1].error).toContain("not found");
   expect(updated.parsed.results[3].error).toContain("nothing to change");
   expect((await session.callTool("get_task", { taskKey: a })).parsed).toMatchObject({ title: "A renamed", priority: "urgent" });
-  expect((await session.callTool("get_task", { taskKey: b })).parsed).toMatchObject({ dueDate: expect.stringMatching(/^2026-10-10/) });
+  expect((await session.callTool("get_task", { taskKey: b })).parsed).toMatchObject({
+    dueDate: expect.stringMatching(/^2026-10-10/),
+    assignee: expect.objectContaining({ username: MEMBER_USERNAME }),
+  });
 
   await seedSecondProject();
   await seedDemotableAdmin();

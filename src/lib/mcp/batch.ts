@@ -1,5 +1,6 @@
 export const BATCH_LIMIT = 30;
 export const LINK_BATCH_LIMIT = 60;
+export const MAX_BLOCKERS_PER_ITEM = 10;
 
 /**
  * The task a reference in a batch names: a key of a task that exists already, or `#3` — the third item of

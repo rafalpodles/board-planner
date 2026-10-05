@@ -428,7 +428,7 @@ describe("link_tasks and unlink_tasks", () => {
 
     expect(refusal.success).toBe(false);
     expect(refusal.error!.issues[0].message).toContain(
-      '"blockedBy" — use the link_tasks tool on /api/mcp'
+      '"blockedBy" — use the link_tasks tool, or the blockedBy of an item in create_tasks'
     );
   });
 });
@@ -1558,6 +1558,59 @@ describe("batch tools", () => {
       expect(answer.results[0].error).toMatch(/No sprint "Nope"/);
       expect(answer.results[1].error).toMatch(/Invalid dueDate/);
       expect(made).toEqual([]);
+    });
+
+    it("bounds the links as well as the items, since each link is several requests", () => {
+      const { schema } = registered().get("create_tasks")!;
+      const blockers = (n: number) => Array.from({ length: n }, () => "#1");
+
+      expect(schema.safeParse({ project: "BP", tasks: [{ title: "T", blockedBy: blockers(10) }] }).success).toBe(true);
+      expect(schema.safeParse({ project: "BP", tasks: [{ title: "T", blockedBy: blockers(11) }] }).success).toBe(false);
+      // 7 items of 10 blockers + a parent: 77 links, over the 60 a call may carry
+      const heavy = Array.from({ length: 7 }, () => ({ title: "T", parent: "#1", blockedBy: blockers(10) }));
+      expect(schema.safeParse({ project: "BP", tasks: heavy }).success).toBe(false);
+      expect(schema.safeParse({ project: "BP", tasks: heavy.slice(0, 5) }).success).toBe(true);
+    });
+
+    it("stops starting items when the client has gone, and says which were not attempted", async () => {
+      const gone = new AbortController();
+      const extraWithSignal = { ...(extra as object), signal: gone.signal } as never;
+      vi.mocked(PlannerClient.prototype.createTask).mockImplementation(async (_p, data) => {
+        made.push(String(data.title));
+        if (made.length === 2) gone.abort();
+        return { taskNumber: made.length, title: data.title };
+      });
+
+      const answer = parse(
+        await registered().get("create_tasks")!.handler(
+          { project: "bp", tasks: [{ title: "One" }, { title: "Two" }, { title: "Three" }, { title: "Four" }] },
+          extraWithSignal
+        )
+      );
+
+      expect(made).toEqual(["One", "Two"]);
+      expect(answer).toMatchObject({ requested: 4, created: 2, failed: 2, cancelled: true });
+      expect(answer.results[2]).toEqual({ n: 3, error: "not attempted: the call was cancelled" });
+    });
+
+    it("is an error to the caller when not one item worked, with the reasons still in the answer", async () => {
+      const result = (await run("create_tasks", { project: "bp", tasks: [{ title: "FAIL a" }, { title: "FAIL b" }] })) as { isError?: boolean };
+
+      expect(result.isError).toBe(true);
+      expect(parse(result)).toMatchObject({ requested: 2, created: 0, failed: 2 });
+    });
+
+    it("is not an error when some did", async () => {
+      const result = (await run("create_tasks", { project: "bp", tasks: [{ title: "FAIL a" }, { title: "ok" }] })) as { isError?: boolean };
+
+      expect(result.isError).toBeUndefined();
+    });
+
+    it("refuses an item that names a field create_task has not, such as a status of its own or minimal", () => {
+      const { schema } = registered().get("create_tasks")!;
+
+      expect(schema.safeParse({ project: "BP", tasks: [{ title: "T", minimal: false }] }).success).toBe(false);
+      expect(schema.safeParse({ project: "BP", tasks: [{ title: "T", taskKey: "BP-1" }] }).success).toBe(false);
     });
 
     it("takes at most the batch limit, at least one, and no key the item does not declare", () => {

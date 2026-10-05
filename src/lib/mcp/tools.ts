@@ -32,9 +32,9 @@ import { agentLines, memberLines, myTaskLines } from "./people";
 import { noticeLines, runLines, searchLines, statsSummary } from "./discovery";
 import { activityLines, commentLines } from "./history";
 import { DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT, pageOf } from "./paging";
-import { BATCH_LIMIT, LINK_BATCH_LIMIT, failure, referencedKey } from "./batch";
+import { BATCH_LIMIT, LINK_BATCH_LIMIT, MAX_BLOCKERS_PER_ITEM, failure, referencedKey } from "./batch";
 
-type ToolExtra = { authInfo?: AuthInfo };
+type ToolExtra = { authInfo?: AuthInfo; signal?: AbortSignal };
 
 // One client per call, so the lookups a batch repeats for every item — the board list, a roster, the
 // sprints — are made once. `extra` is made per request by the SDK, so the client does not outlive its call.
@@ -926,6 +926,9 @@ export function registerPlannerTools(server: McpServer): void {
   // history — one after another, and one that fails does not stop the rest. A batch is NOT atomic: the
   // answer says, item by item, what was done.
   const parsed = (result: { content: { text: string }[] }) => JSON.parse(result.content[0].text);
+  // A batch where nothing worked is an error to the caller, with the per-item reasons still in the text
+  const batchAnswer = (answer: Record<string, unknown>, nothingWorked: boolean) =>
+    nothingWorked ? { ...json(answer), isError: true } : json(answer);
 
   server.registerTool(
     "create_tasks",
@@ -946,12 +949,21 @@ export function registerPlannerTools(server: McpServer): void {
                 .object({
                   ...CREATE_SHAPE,
                   parent: z.string().optional().describe("The task this one is a sub-task of: a key, or #n for an earlier item"),
-                  blockedBy: z.array(z.string()).optional().describe("Tasks that block this one: keys, or #n for earlier items"),
+                  blockedBy: z
+                    .array(z.string())
+                    .max(MAX_BLOCKERS_PER_ITEM)
+                    .optional()
+                    .describe(`Tasks that block this one: keys, or #n for earlier items (at most ${MAX_BLOCKERS_PER_ITEM})`),
                 })
                 .strict()
             )
             .min(1)
-            .max(BATCH_LIMIT),
+            .max(BATCH_LIMIT)
+            // Every link is several requests behind the call, so the links are bounded as well as the items
+            .refine(
+              (items) => items.reduce((n, item) => n + (item.parent ? 1 : 0) + (item.blockedBy?.length ?? 0), 0) <= LINK_BATCH_LIMIT,
+              `At most ${LINK_BATCH_LIMIT} links in one call, counting every parent and blocker`
+            ),
         },
         { writes: true }
       ),
@@ -960,8 +972,16 @@ export function registerPlannerTools(server: McpServer): void {
       const made: (string | null)[] = [];
       const results: Record<string, unknown>[] = [];
 
+      let stopped = false;
       for (const [at, item] of tasks.entries()) {
         const n = at + 1;
+        // A client that gave up (its own timeout) must not leave the server making what it will ask for again
+        if (extra.signal?.aborted) {
+          stopped = true;
+          made[at] = null;
+          results.push({ n, error: "not attempted: the call was cancelled" });
+          continue;
+        }
         try {
           const { parent, blockedBy, ...fields } = item;
           // Every reference is read before anything is created, so a bad one refuses its item whole
@@ -990,7 +1010,7 @@ export function registerPlannerTools(server: McpServer): void {
       }
 
       const failed = results.filter((r) => r.error).length;
-      return json({ requested: tasks.length, created: tasks.length - failed, failed, results });
+      return batchAnswer({ requested: tasks.length, created: tasks.length - failed, failed, ...(stopped ? { cancelled: true } : {}), results }, failed === tasks.length);
     }
   );
 
@@ -1014,6 +1034,10 @@ export function registerPlannerTools(server: McpServer): void {
     async ({ updates }, extra) => {
       const results: Record<string, unknown>[] = [];
       for (const [at, item] of updates.entries()) {
+        if (extra.signal?.aborted) {
+          results.push({ n: at + 1, taskKey: item.taskKey.toUpperCase(), error: "not attempted: the call was cancelled" });
+          continue;
+        }
         try {
           results.push({ n: at + 1, ...parsed(await handlers.update_task({ ...item, minimal: true }, extra)) });
         } catch (error) {
@@ -1021,7 +1045,7 @@ export function registerPlannerTools(server: McpServer): void {
         }
       }
       const failed = results.filter((r) => r.error).length;
-      return json({ requested: updates.length, updated: updates.length - failed, failed, results });
+      return batchAnswer({ requested: updates.length, updated: updates.length - failed, failed, results }, failed === updates.length);
     }
   );
 
@@ -1053,6 +1077,10 @@ export function registerPlannerTools(server: McpServer): void {
     async ({ links }, extra) => {
       const results: Record<string, unknown>[] = [];
       for (const [at, pair] of links.entries()) {
+        if (extra.signal?.aborted) {
+          results.push({ n: at + 1, taskKey: pair.taskKey.toUpperCase(), targetTaskKey: pair.targetTaskKey.toUpperCase(), type: pair.type, error: "not attempted: the call was cancelled" });
+          continue;
+        }
         try {
           results.push({ n: at + 1, ...parsed(await handlers.link_tasks({ ...pair }, extra)) });
         } catch (error) {
@@ -1060,7 +1088,7 @@ export function registerPlannerTools(server: McpServer): void {
         }
       }
       const failed = results.filter((r) => r.error).length;
-      return json({ requested: links.length, linked: links.length - failed, failed, results });
+      return batchAnswer({ requested: links.length, linked: links.length - failed, failed, results }, failed === links.length);
     }
   );
 

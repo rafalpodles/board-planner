@@ -62,7 +62,7 @@ const UNREACHABLE_TASK_FIELDS: Record<string, string> = {
 const TASK_FIELD_HINTS: Record<string, string> = {
   ...UNREACHABLE_TASK_FIELDS,
   order: "the reorder_tasks tool",
-  blockedBy: "the link_tasks tool on /api/mcp",
+  blockedBy: "the link_tasks tool, or the blockedBy of an item in create_tasks",
   relations: "the link_tasks tool on /api/mcp",
   checklist: "acceptanceCriteria for the whole list, or add_checklist_item, set_checklist_item and remove_checklist_item for one criterion",
   difficulty: "the fields parameter, keyed by field name",
