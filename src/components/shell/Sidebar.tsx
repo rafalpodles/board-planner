@@ -4,7 +4,7 @@ import { mayLeave } from "@/hooks/use-leave-guard";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useCallback } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { useApi } from "@/hooks/use-api";
 import { useTheme } from "@/components/ThemeProvider";
@@ -165,16 +165,32 @@ export function Sidebar({
   const [narrowMode, setNarrowMode] = useState<Exclude<SidebarMode, "expanded">>("collapsed");
   const [hovered, setHovered] = useState(false);
   const [focusedWithin, setFocusedWithin] = useState(false);
-  const pointerFocus = useRef(false);
+  const arrivedByTab = useRef(false);
+  const [dragging, setDragging] = useState(false);
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const stored = readMode();
     setMode(stored);
     if (stored !== "expanded") setNarrowMode(stored);
+  }, []);
+
+  useEffect(() => {
+    const note = (e: KeyboardEvent) => {
+      arrivedByTab.current = e.key === "Tab";
+    };
+    const forget = () => {
+      arrivedByTab.current = false;
+    };
+    document.addEventListener("keydown", note, true);
+    document.addEventListener("pointerdown", forget, true);
+    return () => {
+      document.removeEventListener("keydown", note, true);
+      document.removeEventListener("pointerdown", forget, true);
+    };
   }, []);
 
   useEffect(
@@ -194,8 +210,8 @@ export function Sidebar({
     chooseMode(mode === "expanded" ? narrowMode : "expanded");
   }, [chooseMode, mode, narrowMode]);
 
-  function startHover() {
-    if (mode !== "hover" || hoverTimer.current) return;
+  function startHover(e: React.PointerEvent) {
+    if (e.pointerType !== "mouse" || mode !== "hover" || hoverTimer.current) return;
     hoverTimer.current = setTimeout(() => {
       hoverTimer.current = null;
       setHovered(true);
@@ -248,7 +264,7 @@ export function Sidebar({
   if (!user) return null;
 
   // The drawer is always full width, so the icon-only rail is a desktop-only state
-  const peeking = mode === "hover" && (hovered || focusedWithin || menuOpen);
+  const peeking = mode === "hover" && (hovered || focusedWithin || menuOpen || dragging);
   const compact = (mode === "collapsed" || (mode === "hover" && !peeking)) && !mobileOpen;
   const floats = mode === "hover";
 
@@ -267,15 +283,12 @@ export function Sidebar({
       {floats && <div aria-hidden className="hidden w-14 shrink-0 md:block" />}
     <aside
       ref={asideRef}
-      onMouseEnter={startHover}
-      onMouseLeave={endHover}
-      onMouseDown={() => {
-        pointerFocus.current = true;
+      onPointerEnter={startHover}
+      onPointerLeave={(e) => {
+        if (e.pointerType === "mouse") endHover();
       }}
       onFocus={() => {
-        // A click focuses what it lands on; only a keyboard arriving counts as a reason to open
-        if (pointerFocus.current) pointerFocus.current = false;
-        else if (mode === "hover") setFocusedWithin(true);
+        if (mode === "hover" && arrivedByTab.current) setFocusedWithin(true);
       }}
       onBlur={(e) => {
         if (!asideRef.current?.contains(e.relatedTarget as Node | null)) setFocusedWithin(false);
@@ -288,7 +301,7 @@ export function Sidebar({
         if ((e.target as HTMLElement).closest("a")) onNavigate();
       }}
       className={`fixed inset-y-0 left-0 z-50 flex w-[260px] shrink-0 flex-col border-r border-border bg-bg-card transition-transform md:h-dvh md:translate-x-0 md:transition-[width] ${
-        floats ? "md:fixed md:top-0 md:z-30" : "md:sticky md:top-0 md:z-30"
+        floats ? "md:fixed md:top-0 md:z-[45]" : "md:sticky md:top-0 md:z-30"
       } ${mobileOpen ? "translate-x-0" : "-translate-x-full"} ${
         compact ? "md:w-14" : "md:w-[260px]"
       } ${floats && peeking ? "md:shadow-xl" : ""}`}
@@ -372,6 +385,7 @@ export function Sidebar({
             pathname={pathname}
             isAdmin={isAdmin}
             onReorder={isAdmin ? reorder : undefined}
+            onDragActiveChange={setDragging}
           />
         )}
       </nav>

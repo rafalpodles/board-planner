@@ -165,25 +165,26 @@ describe("Sidebar", () => {
     it("opens over the page once the pointer rests on it, and closes when it leaves", async () => {
       const aside = await renderHoverSidebar();
 
-      fireEvent.mouseEnter(aside);
+      fireEvent.pointerEnter(aside, { pointerType: "mouse" });
       expect(await screen.findByText("My Tasks")).toBeTruthy();
       expect(aside.className).toContain("md:w-[260px]");
       expect(aside.previousElementSibling?.className).toContain("w-14");
 
-      fireEvent.mouseLeave(aside);
+      fireEvent.pointerLeave(aside, { pointerType: "mouse" });
       await waitFor(() => expect(screen.queryByText("My Tasks")).toBeNull());
     });
 
     it("does not open for a pointer that only passes over the edge", async () => {
       const aside = await renderHoverSidebar();
-      fireEvent.mouseEnter(aside);
-      fireEvent.mouseLeave(aside);
+      fireEvent.pointerEnter(aside, { pointerType: "mouse" });
+      fireEvent.pointerLeave(aside, { pointerType: "mouse" });
       await new Promise((resolve) => setTimeout(resolve, 250));
       expect(screen.queryByText("My Tasks")).toBeNull();
     });
 
     it("opens for a keyboard user who tabs into the rail", async () => {
       const aside = await renderHoverSidebar();
+      fireEvent.keyDown(document.body, { key: "Tab" });
       fireEvent.focus(screen.getByTitle("My Tasks"));
       expect(await screen.findByText("My Tasks")).toBeTruthy();
       fireEvent.blur(screen.getByText("My Tasks").closest("a")!, { relatedTarget: document.body });
@@ -191,10 +192,25 @@ describe("Sidebar", () => {
       expect(aside.className).toContain("md:w-14");
     });
 
+    it("does not open for focus handed back by script, such as when the search palette closes", async () => {
+      const aside = await renderHoverSidebar();
+      fireEvent.keyDown(document.body, { key: "Escape" });
+      fireEvent.focus(screen.getByTitle("My Tasks"));
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      expect(aside.className).toContain("md:w-14");
+    });
+
+    it("does not open for a finger tapping the rail", async () => {
+      const aside = await renderHoverSidebar();
+      fireEvent.pointerEnter(aside, { pointerType: "touch" });
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      expect(aside.className).toContain("md:w-14");
+    });
+
     it("does not open for the focus a click leaves behind", async () => {
       const aside = await renderHoverSidebar();
       const link = screen.getByTitle("My Tasks");
-      fireEvent.mouseDown(link);
+      fireEvent.pointerDown(link);
       fireEvent.focus(link);
       await new Promise((resolve) => setTimeout(resolve, 250));
       expect(screen.queryByText("My Tasks")).toBeNull();

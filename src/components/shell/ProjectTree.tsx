@@ -180,6 +180,7 @@ interface ProjectTreeProps {
   isAdmin: boolean;
   /** Omitted for anyone who may not change the shared order */
   onReorder?: (orderedIds: string[]) => void;
+  onDragActiveChange?: (active: boolean) => void;
 }
 
 export function ProjectTree({
@@ -187,6 +188,7 @@ export function ProjectTree({
   pathname,
   isAdmin,
   onReorder,
+  onDragActiveChange,
 }: ProjectTreeProps) {
   const routeProject = projects.find((p) =>
     isNavItemActive(pathname, projectPath(p.key)) || isNavItemActive(pathname, projectPath(p._id))
@@ -208,6 +210,7 @@ export function ProjectTree({
   const [expandedBeforeDrag, setExpandedBeforeDrag] = useState<string | null>(null);
 
   function handleDragStart() {
+    onDragActiveChange?.(true);
     // manuallyExpanded, not expandedId: the latter falls back to the route's project,
     // so storing it would pin an expansion the user never chose and kill
     // expand-on-navigate for the rest of the session
@@ -216,6 +219,7 @@ export function ProjectTree({
   }
 
   function restoreExpanded() {
+    onDragActiveChange?.(false);
     setManuallyExpanded(expandedBeforeDrag);
     setExpandedBeforeDrag(null);
   }

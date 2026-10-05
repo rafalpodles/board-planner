@@ -49,6 +49,7 @@ export function ProjectRail({ projects, pathname }: ProjectRailProps) {
               title={project.name}
               aria-label={project.name}
               data-active-project={isRouteProject || undefined}
+              aria-current={isRouteProject ? "true" : undefined}
               className={`${ROW} text-[17px] leading-none ${
                 isRouteProject
                   ? "bg-bg-hover shadow-[inset_3px_0_0_var(--color-primary)]"
