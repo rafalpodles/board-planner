@@ -81,6 +81,17 @@ function rowsNaming(who: OrganisationFixture) {
   });
 }
 
+// As if the suspension had been in place long enough for work admitted before it to have finished
+const settle = (who: OrganisationFixture) =>
+  withDb((db) => db.collection("organisations").updateOne({ _id: who.organisation }, { $set: { suspendedAt: new Date(Date.now() - 11 * 60 * 1000) } }));
+
+const orphanChunks = () =>
+  withDb(async (db) => {
+    const files = new Set((await db.collection("uploads.files").find({}, { projection: { _id: 1 } }).toArray()).map((row) => String(row._id)));
+    const chunks = await db.collection("uploads.chunks").find({}, { projection: { files_id: 1 } }).toArray();
+    return chunks.filter((chunk) => !files.has(String(chunk.files_id))).length;
+  });
+
 const platformActions = () => withDb(async (db) => (await db.collection("platformauditlogs").find({}).sort({ _id: 1 }).toArray()).map((row) => row.action));
 
 test.beforeEach(async ({ request }) => {
@@ -140,9 +151,29 @@ test.describe("BP-893: an organisation's life cycle", () => {
     await other.close();
   });
 
+  test("on screen: a page already open learns of the suspension at its next request, and comes back by itself once it is lifted", async ({ page, request }) => {
+    test.setTimeout(90_000);
+    await signInOn(page.context(), GLOBEX);
+    await page.goto(`${originOf(GLOBEX)}/projects/${SHARED_KEY}`);
+    await expect(page.getByText(GLOBEX.projectName).first()).toBeVisible();
+
+    expect((await suspend(request, GLOBEX)).status()).toBe(200);
+    await page.getByRole("link", { name: "My Tasks" }).click();
+    await expect(page.getByRole("heading", { name: "This organisation is suspended" })).toBeVisible();
+    await expect(page.getByText(/having trouble reaching its database/)).toHaveCount(0);
+
+    expect((await resume(request, GLOBEX)).status()).toBe(200);
+    await expect(page.getByRole("heading", { name: "This organisation is suspended" })).toHaveCount(0, { timeout: 30_000 });
+  });
+
   test("on screen: the organisation's admin downloads everything it holds and nothing of another, with no credential in it", async ({ page, request }) => {
     expect((await upload(request, ACME)).status()).toBe(200);
     expect((await upload(request, GLOBEX)).status()).toBe(200);
+
+    await withDb(async (db) => {
+      await db.collection("projects").updateOne({ _id: ACME.projectId }, { $set: { githubToken: "enc:v3:e2e:sealed-github-token" } });
+      await db.collection("users").updateOne({ _id: ACME.adminId }, { $set: { "notifications.chat": { kind: "slack", webhookUrl: "enc:v3:e2e:sealed-webhook" } } });
+    });
 
     await signInOn(page.context(), ACME);
     await page.goto(`${originOf(ACME)}/settings/export`);
@@ -162,10 +193,26 @@ test.describe("BP-893: an organisation's life cycle", () => {
     expect(text).not.toContain(GLOBEX.organisation.toHexString());
     expect(text).not.toContain(GLOBEX.projectName);
     expect(text).not.toMatch(/"[A-Za-z]*[Hh]ash"\s*:|"password"\s*:/);
+    expect(text).not.toContain("enc:v3:");
 
     const user = rows.find((row) => row.collection === "User")!.document as Record<string, unknown>;
     expect(user.username).toBe("boss");
-    expect(await withDb(async (db) => db.collection("instanceauditlogs").countDocuments({ organisation: ACME.organisation, action: "organisation_exported" }))).toBe(1);
+    await expect
+      .poll(() => withDb(async (db) => db.collection("instanceauditlogs").countDocuments({ organisation: ACME.organisation, action: "organisation_exported" })))
+      .toBe(1);
+  });
+
+  test("the operator can export a suspended organisation that can no longer sign in to take its own", async ({ request }) => {
+    expect((await suspend(request, GLOBEX)).status()).toBe(200);
+    const path = `${organisationPath(GLOBEX)}/export`;
+    const response = await request.get(`${ORGANISATIONS_API}${path}`, {
+      headers: { host: PLATFORM_HOST, ...signPlatformRequest({ method: "GET", path, body: new Uint8Array() }, E2E_PLATFORM_REQUEST_KEY) },
+    });
+    expect(response.status()).toBe(200);
+    const text = gunzipSync(await response.body()).toString("utf8");
+    expect(text).toContain(GLOBEX.projectName);
+    expect(text).not.toContain(ACME.organisation.toHexString());
+    await expect.poll(platformActions).toEqual(["organisation_suspended", "organisation_exported"]);
   });
 
   test("the operator deletes an organisation: counts first, only once suspended and named, then nothing of it remains and the other keeps everything", async ({ request }) => {
@@ -179,12 +226,17 @@ test.describe("BP-893: an organisation's life cycle", () => {
 
     expect((await remove(request, GLOBEX, `confirm=${GLOBEX.slug}`)).status()).toBe(409);
     expect((await suspend(request, GLOBEX)).status()).toBe(200);
+    const tooSoon = await remove(request, GLOBEX, `confirm=${GLOBEX.slug}`);
+    expect(tooSoon.status()).toBe(409);
+    expect((await tooSoon.json()).error).toMatch(/may still be writing; delete after /);
+    await settle(GLOBEX);
     expect((await remove(request, GLOBEX, "confirm=acme")).status()).toBe(400);
     const deleted = await remove(request, GLOBEX, `confirm=${GLOBEX.slug}`);
     expect(deleted.status(), await deleted.text()).toBe(200);
     expect((await deleted.json()).counts).toMatchObject({ Project: 1, "uploads.files": 1 });
 
     expect(await rowsNaming(GLOBEX)).toEqual({});
+    expect(await orphanChunks()).toBe(0);
     expect(await rowsNaming(ACME)).toEqual(acmeBefore);
     const tombstone = await withDb((db) => db.collection("organisations").findOne({ _id: GLOBEX.organisation }));
     expect(tombstone).toMatchObject({ slug: GLOBEX.slug, deletedAt: expect.any(Date) });
