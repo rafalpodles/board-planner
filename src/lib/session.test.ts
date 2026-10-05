@@ -57,12 +57,14 @@ const {
 } = await import("./session");
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const SESSION_ORGANISATION = new Types.ObjectId("0000000000000000000000c3");
 
 function row(overrides: Record<string, unknown> = {}) {
   const now = Date.now();
   return {
     _id: "session-1",
     user: "user-1",
+    organisation: SESSION_ORGANISATION,
     expiresAt: new Date(now + SESSION_IDLE_TTL_MS),
     absoluteExpiresAt: new Date(now + 90 * DAY_MS),
     ...overrides,
@@ -457,7 +459,7 @@ describe("createSession", () => {
     const before = Date.now();
     await createSession({ userId: "user-1", organisation: ORGANISATION });
 
-    expect(userUpdateOne).toHaveBeenCalledWith({ _id: "user-1" }, { $set: { lastSignInAt: expect.any(Date) } });
+    expect(userUpdateOne).toHaveBeenCalledWith({ _id: "user-1", organisation: ORGANISATION }, { $set: { lastSignInAt: expect.any(Date) } });
     const stamped = (userUpdateOne.mock.calls[0][1] as { $set: { lastSignInAt: Date } }).$set.lastSignInAt;
     expect(stamped.getTime()).toBeGreaterThanOrEqual(before);
   });
@@ -472,6 +474,12 @@ describe("createSession", () => {
 describe("resolveSession", () => {
   it("is null when nothing hashes to the token", async () => {
     expect(await resolveSession("cps_nope")).toBeNull();
+  });
+
+  it("refuses a row that names no organisation, rather than querying around the wall", async () => {
+    found(row({ organisation: undefined }));
+    expect(await resolveSession("cps_abc")).toBeNull();
+    expect(updateOne).not.toHaveBeenCalled();
   });
 
   it("refuses a session past expiresAt", async () => {
@@ -540,7 +548,7 @@ describe("resolveSession", () => {
 
     expect(updateOne).toHaveBeenCalledTimes(1);
     const [filter, update] = updateOne.mock.calls[0];
-    expect(filter).toEqual({ _id: "session-1" });
+    expect(filter).toEqual({ _id: "session-1", organisation: SESSION_ORGANISATION });
     expect(update.$set.expiresAt.getTime() - before).toBeGreaterThanOrEqual(
       SESSION_IDLE_TTL_MS - 1000
     );
@@ -794,7 +802,7 @@ describe("revokeUserCredentials", () => {
 
 describe("signedInRecently (BP-830)", () => {
   const opened = (msAgo: number) =>
-    findById.mockReturnValue({ select: () => ({ lean: () => Promise.resolve({ createdAt: new Date(Date.now() - msAgo) }) }) });
+    findOne.mockReturnValue({ select: () => ({ lean: () => Promise.resolve({ createdAt: new Date(Date.now() - msAgo) }) }) });
 
   it("is true for a session opened minutes ago", async () => {
     opened(RECENT_SIGN_IN_MS - 60_000);
@@ -805,7 +813,7 @@ describe("signedInRecently (BP-830)", () => {
     opened(RECENT_SIGN_IN_MS + 60_000);
     expect(await signedInRecently("s1")).toBe(false);
 
-    findById.mockReturnValue({ select: () => ({ lean: () => Promise.resolve(null) }) });
+    findOne.mockReturnValue({ select: () => ({ lean: () => Promise.resolve(null) }) });
     expect(await signedInRecently("s1")).toBe(false);
     expect(await signedInRecently(undefined)).toBe(false);
   });

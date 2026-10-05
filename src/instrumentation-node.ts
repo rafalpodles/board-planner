@@ -111,22 +111,23 @@ async function bootWhenDatabaseIsReady(): Promise<void> {
       if (lockedOut) console.error(`WARNING: ${lockedOut}`);
     });
 
-    const { Project } = await import("@/models/project");
     const { DEFAULT_PROJECT_CATEGORIES, DEFAULT_PROJECT_COLUMNS } = await import("@/types");
-    const seeded = await Project.updateMany(
-      { categories: { $exists: false } },
-      { $set: { categories: DEFAULT_PROJECT_CATEGORIES } }
-    );
-    if (seeded.modifiedCount > 0) {
-      console.log(`Seeded default categories on ${seeded.modifiedCount} project(s)`);
-    }
-    const seededColumns = await Project.updateMany(
-      { columns: { $exists: false } },
-      { $set: { columns: DEFAULT_PROJECT_COLUMNS } }
-    );
-    if (seededColumns.modifiedCount > 0) {
-      console.log(`Seeded default columns on ${seededColumns.modifiedCount} project(s)`);
-    }
+    await forEachServedOrganisation("Project defaults", async (db) => {
+      const seeded = await db.Project.updateMany(
+        { categories: { $exists: false } },
+        { $set: { categories: DEFAULT_PROJECT_CATEGORIES } }
+      );
+      if (seeded.modifiedCount > 0) {
+        console.log(`Seeded default categories on ${seeded.modifiedCount} project(s)`);
+      }
+      const seededColumns = await db.Project.updateMany(
+        { columns: { $exists: false } },
+        { $set: { columns: DEFAULT_PROJECT_COLUMNS } }
+      );
+      if (seededColumns.modifiedCount > 0) {
+        console.log(`Seeded default columns on ${seededColumns.modifiedCount} project(s)`);
+      }
+    });
 
     // Caught here rather than left to the outer handler: the backfill and the PM scheduler are
     // below this line, so an unhandled seed failure would skip both — and be logged as a
@@ -150,9 +151,10 @@ async function bootWhenDatabaseIsReady(): Promise<void> {
     // Projects it already reached keep what it wrote; removing it unsets nothing.
 
     const { User } = await import("@/models/user");
+    const { acrossOrganisations } = await import("@/lib/organisation-wall");
     // Printed now rather than on the first visit, so the operator finds it in the startup log
     const { setupCode } = await import("@/lib/setup-code");
-    if ((await User.countDocuments()) === 0) setupCode();
+    if ((await acrossOrganisations(User.countDocuments(), "the setup code exists only while the instance has no account at all")) === 0) setupCode();
 
     const { markPmAsMachine } = await import("@/lib/pm/pm-user");
     // Caught like the catalog seed: a name it could not repair must not keep the schedulers down

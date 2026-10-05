@@ -128,6 +128,7 @@ export const GROUPS = {
     "licence.spec.ts",
     "organisation-migration.spec.ts",
     "db-scope.spec.ts",
+    "organisation-wall.spec.ts",
     "credential-organisation-binding.spec.ts",
     "organisations-isolation.spec.ts",
     "organisations-route-families.spec.ts",
