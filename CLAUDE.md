@@ -195,7 +195,9 @@ OIDC_CLIENT_SECRET=       # /api/auth/oidc/oidc/callback. Plain http only for an
 OIDC_LABEL=               # Optional — the button's name (default "Single sign-on") (BP-828)
 OIDC_ADMIN_GROUP=         # Optional — at each sign-in through OIDC_ISSUER, an account in this group is
                           # made an admin and one outside it a member, never the last active admin;
-                          # no groups claim at all counts as outside (src/lib/oidc/admin-group.ts)
+                          # no groups claim at all counts as outside (src/lib/oidc/admin-group.ts).
+                          # Refused at startup with ORGANISATION_DOMAIN: one IdP group would be admin of
+                          # every organisation (BP-892)
 OIDC_GROUPS_CLAIM=        # Optional — the ID token claim holding the groups (default "groups") (BP-833)
 GOOGLE_CLIENT_ID=         # Optional — sign-in with Google, the same code path at Google's issuer;
 GOOGLE_CLIENT_SECRET=     # redirect URI PUBLIC_ORIGIN + /api/auth/oidc/google/callback (BP-828)
@@ -258,7 +260,11 @@ LICENCE_KEY=              # Optional — a Pro licence, Ed25519-signed, verified
 PLATFORM_REQUEST_KEYS=    # Optional — `keyId:x,...`, the licence service's Ed25519 request keys (public
                           # halves). That endpoint accepts only a request signed by one over method,
                           # path, x-bp-timestamp (±5 min), single-use x-bp-nonce and the body's SHA-256;
-                          # unset, it refuses everything (src/lib/platform-request.ts)
+                          # unset, it refuses everything (src/lib/platform-request.ts). The query is signed
+                          # with the path. These keys are the platform operator: the licence service, which
+                          # has no account here and alone reaches /api/platform/* (withPlatformRequest in
+                          # src/lib/platform-route.ts) — the organisations list, the platform audit log
+                          # (PlatformAuditLog, outside every organisation) and the licence push (BP-892)
 BOOTSTRAP_TOKEN=          # Optional — setup code for the first account; unset, one is generated and
                           # printed to the server log while the instance has no users (BP-325)
 ORGANISATION_DOMAIN=      # Optional — e.g. board-planner.com: organisations live on <slug>.ORGANISATION_DOMAIN, the

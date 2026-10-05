@@ -49,6 +49,15 @@ describe("verifyPlatformRequest", () => {
     expect(await verifyPlatformRequest(elsewhere, BODY, { keys: KEYS, now: NOW })).toMatchObject({ ok: false, reason: "bad_signature" });
   });
 
+  it("signs the query with the path, so a list's cursor cannot be changed under a valid signature (BP-892)", async () => {
+    const listing = "https://board-planner.test/api/platform/organisations";
+    const get = (url: string, headers: Record<string, string>) => new Request(url, { method: "GET", headers });
+    const headers = signPlatformRequest({ method: "GET", path: "/api/platform/organisations?limit=1", body: new Uint8Array(), now: NOW }, SERVICE);
+
+    expect(await verifyPlatformRequest(get(`${listing}?limit=200`, headers), new Uint8Array(), { keys: KEYS, now: NOW })).toMatchObject({ ok: false, reason: "bad_signature" });
+    expect(await verifyPlatformRequest(get(`${listing}?limit=1`, headers), new Uint8Array(), { keys: KEYS, now: NOW })).toEqual({ ok: true, keyId: SERVICE.keyId });
+  });
+
   it("refuses a timestamp more than five minutes off, either way", async () => {
     for (const at of [NOW - PLATFORM_REQUEST_WINDOW_MS - 1, NOW + PLATFORM_REQUEST_WINDOW_MS + 1]) {
       expect(await verifyPlatformRequest(request(signed(SERVICE, at)), BODY, { keys: KEYS, now: NOW })).toMatchObject({ ok: false, reason: "stale_timestamp" });
