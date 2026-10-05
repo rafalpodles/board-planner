@@ -1,6 +1,12 @@
 import mongoose, { Schema, Model } from "mongoose";
 
-export const PLATFORM_AUDIT_ACTIONS = ["licence_stored", "organisations_listed"] as const;
+export const PLATFORM_AUDIT_ACTIONS = [
+  "licence_stored",
+  "organisations_listed",
+  "organisation_suspended",
+  "organisation_resumed",
+  "organisation_deleted",
+] as const;
 export type PlatformAuditAction = (typeof PLATFORM_AUDIT_ACTIONS)[number];
 
 export interface IPlatformAuditLog {

@@ -22,7 +22,7 @@ export const POST = withPlatformRequest<{ organisationId: string }>(async (_requ
   const { organisationId } = params;
   if (!OBJECT_ID.test(organisationId)) return hostNotFound();
   const organisation = await Organisation.findById(organisationId).lean();
-  if (!organisation) return hostNotFound();
+  if (!organisation || organisation.deletedAt) return hostNotFound();
 
   const offered = storedLicence(licenceKey, organisationId);
   if (offered?.verdict !== "valid" && offered?.verdict !== "grace") {

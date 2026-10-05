@@ -19,14 +19,14 @@ export const GET = withPlatformRequest(async (request, { keyId }) => {
   const rows = await Organisation.find(after ? { _id: { $gt: after } } : {})
     .sort({ _id: 1 })
     .limit(limit + 1)
-    .select("name slug licenceKey")
+    .select("name slug licenceKey suspendedAt deletedAt")
     .lean();
   const page = rows.slice(0, limit);
 
   const organisations = await Promise.all(
     page.map(async (row) => {
       const db = scoped(row._id);
-      const [members, projects] = await Promise.all([
+      const [members, projects] = row.deletedAt ? [0, 0] : await Promise.all([
         db.User.countDocuments({ kind: { $ne: "machine" }, deactivatedAt: null }),
         db.Project.countDocuments({}),
       ]);
@@ -41,6 +41,8 @@ export const GET = withPlatformRequest(async (request, { keyId }) => {
         licence: licence ? { verdict: licence.verdict, customer: licence.payload?.customer ?? null, expiresAt: licence.payload?.expiresAt ?? null } : null,
         members,
         projects,
+        suspendedAt: row.suspendedAt ?? null,
+        deletedAt: row.deletedAt ?? null,
       };
     })
   );

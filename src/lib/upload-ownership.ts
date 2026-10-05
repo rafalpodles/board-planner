@@ -40,6 +40,23 @@ export function organisationUploads(db: ScopedDb) {
     },
     upload: (name: string, metadata: Record<string, unknown>) =>
       bucket.openUploadStream(name, { metadata: { ...metadata, organisation: db.organisation } }),
+    count: (): Promise<number> =>
+      mongoose.connection.db!.collection(`${UPLOAD_BUCKET}.files`).countDocuments({ "metadata.organisation": db.organisation }),
+    async *rows(): AsyncGenerator<{ collection: string; document: Record<string, unknown> }> {
+      const files = mongoose.connection.db!.collection(`${UPLOAD_BUCKET}.files`);
+      const chunks = mongoose.connection.db!.collection(`${UPLOAD_BUCKET}.chunks`);
+      for await (const file of files.find({ "metadata.organisation": db.organisation }).sort({ _id: 1 })) {
+        yield { collection: `${UPLOAD_BUCKET}.files`, document: file };
+        for await (const chunk of chunks.find({ files_id: file._id }).sort({ n: 1 })) {
+          yield { collection: `${UPLOAD_BUCKET}.chunks`, document: chunk };
+        }
+      }
+    },
+    deleteAll: async (): Promise<number> => {
+      const ids = await bucket.find({ "metadata.organisation": db.organisation }, { projection: { _id: 1 } }).toArray();
+      for (const { _id } of ids) await bucket.delete(_id);
+      return ids.length;
+    },
   };
 }
 
