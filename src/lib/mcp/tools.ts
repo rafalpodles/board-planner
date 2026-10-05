@@ -122,7 +122,8 @@ export function registerPlannerTools(server: McpServer): void {
     {
       description:
         "The agents update_task can hand a task to on this board, by name: the board's own, the caller's personal " +
-        "ones and the global ones. `steps` is how many steps each runs — an agent with none is refused.",
+        "ones and the global ones. `steps` is how many steps each runs — an agent with none is refused, and a " +
+        "personal agent only runs a task assigned to its owner.",
       inputSchema: strictInput({ project: z.string().describe("Project key (e.g. 'CP')") }),
     },
     async ({ project }, extra) => {

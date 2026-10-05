@@ -560,15 +560,15 @@ describe("people and agents", () => {
     vi.spyOn(PlannerClient.prototype, "listAgents").mockResolvedValue([
       { _id: "a1", name: "Default", scope: "global", projectId: null, composition: { steps: [{}] } },
       { _id: "a2", name: "Other board", scope: "project", projectId: "p2", composition: { steps: [{}] } },
+      { _id: "a3", name: "Here", scope: "project", projectId: "p1", composition: { steps: [{}] } },
     ]);
 
-    expect(parse(await run("list_agents", { project: "BP" })).map((a: { name: string }) => a.name)).toEqual(["Default"]);
+    // The board is asked for by its id, not by the key the caller typed
+    expect(parse(await run("list_agents", { project: "BP" })).map((a: { name: string }) => a.name)).toEqual(["Default", "Here"]);
   });
 
-  it("each is a tool the strict schema knows, and declares no stray parameter", () => {
-    for (const name of ["list_members", "whoami", "my_tasks", "list_agents"]) {
-      expect(registered().get(name)).toBeDefined();
-    }
+  it("my_tasks refuses a page bigger than it will build", () => {
     expect(registered().get("my_tasks")!.schema.safeParse({ limit: 101 }).success).toBe(false);
+    expect(registered().get("my_tasks")!.schema.safeParse({ limit: 100 }).success).toBe(true);
   });
 });

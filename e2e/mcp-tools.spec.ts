@@ -980,6 +980,7 @@ test("my_tasks lists the caller's own open work by key, and finished work only w
 });
 
 test("list_agents offers what update_task can choose on the board, and not another board's agent", async ({ request }) => {
+  await seedSecondProject();
   await seedAgents();
   await seedForeignAgent();
   const session = await connected(request);
