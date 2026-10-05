@@ -89,12 +89,18 @@ test.describe("BP-894: one organisation's limits do not touch another's", () => 
 
     await signInOn(page.context(), ACME);
     await page.goto(`${originOf(ACME)}/projects/${SHARED_KEY}`);
-    await expect(page.getByText(/This organisation has made more than \d+ requests in a minute/).first()).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "Your organisation has made more requests this minute than it may." })).toContainText(
+      /Pages will load again after \d/
+    );
+    await expect(page.getByRole("alert").filter({ hasText: "Failed to load this board." })).toBeVisible();
+    await page.screenshot({ path: "e2e/.artifacts/bp894-limit-desktop.png" });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: "e2e/.artifacts/bp894-limit-phone.png" });
 
     await signInOn(page.context(), GLOBEX);
     await page.goto(`${originOf(GLOBEX)}/projects/${SHARED_KEY}`);
     await expect(page.getByText(GLOBEX.projectName).first()).toBeVisible();
-    await expect(page.getByText(/requests in a minute/)).toHaveCount(0);
+    await expect(page.getByText(/more requests this minute/)).toHaveCount(0);
   });
 
   test("an organisation whose files fill its storage cannot upload another, while the other can", async ({ request }) => {
