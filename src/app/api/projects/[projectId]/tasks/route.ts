@@ -9,6 +9,8 @@ import { parentsOf } from "@/lib/task-parents";
 import { getColumnIds } from "@/lib/columns";
 
 
+const MAX_TASK_NUMBERS = 100;
+
 export const GET = withProjectAccess(async (request, { params, db }) => {
   const { projectId } = await params;
   await connectDB();
@@ -132,6 +134,25 @@ export const GET = withProjectAccess(async (request, { params, db }) => {
       return NextResponse.json({ error: "Invalid sprint id" }, { status: 400 });
     }
     filter.sprint = sprint;
+  }
+
+  // One task, or a few, by the number in their key. How a caller that holds "BP-12" gets the task
+  // without downloading the board: every key-addressed MCP tool resolves through this (BP-904).
+  const taskNumberParam = url.searchParams.get("taskNumber");
+  if (taskNumberParam) {
+    const numbers = taskNumberParam.split(",").map((n) => n.trim());
+    const valid =
+      numbers.length <= MAX_TASK_NUMBERS &&
+      numbers.every((n) => /^\d{1,9}$/.test(n) && Number(n) > 0);
+    if (!valid) {
+      return NextResponse.json(
+        {
+          error: `Invalid taskNumber "${taskNumberParam.slice(0, 64)}" — positive whole numbers, comma-separated, at most ${MAX_TASK_NUMBERS}`,
+        },
+        { status: 400 }
+      );
+    }
+    filter.taskNumber = numbers.length === 1 ? Number(numbers[0]) : { $in: numbers.map(Number) };
   }
 
   const search = url.searchParams.get("search");
