@@ -177,3 +177,16 @@ describe("what an autonomous PM review tells the watchers", () => {
     expect(createNotifications).not.toHaveBeenCalled();
   });
 });
+
+describe("drainPmTriggers (BP-671)", () => {
+  it("stops after its limit even while the queue still has work, so one organisation cannot hold a tick", async () => {
+    const { drainPmTriggers } = await import("./triggers");
+    const findOneAndUpdate = vi.fn(async () => ({ _id: "t", attempts: 99, lastError: "" }));
+    const findByIdAndUpdate = vi.fn(async () => null);
+    const db = { PmTrigger: { findOneAndUpdate, findByIdAndUpdate } } as never;
+
+    await drainPmTriggers(db, { limit: 3 });
+
+    expect(findOneAndUpdate).toHaveBeenCalledTimes(3);
+  });
+});

@@ -76,6 +76,15 @@ describe("pmSchedulerTick", () => {
     expect(BOARD_REVIEW_DISALLOWED_TOOLS).toEqual(expect.arrayContaining(["change_status", "create_task"]));
   });
 
+  it("drains a bounded number of one organisation's triggers per tick, so a queue that never empties holds nobody else back (BP-671)", async () => {
+    const { pmSchedulerTick, TRIGGERS_PER_ORGANISATION_PER_TICK } = await import("./scheduler");
+
+    await pmSchedulerTick();
+
+    expect(drainPmTriggers).toHaveBeenCalledWith(expect.anything(), { limit: TRIGGERS_PER_ORGANISATION_PER_TICK });
+    expect(TRIGGERS_PER_ORGANISATION_PER_TICK).toBeLessThan(10);
+  });
+
   it("runs one project's review at a time", async () => {
     projectFind.mockReturnValue({
       lean: async () => [
