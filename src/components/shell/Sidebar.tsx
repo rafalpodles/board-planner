@@ -390,7 +390,7 @@ export function Sidebar({
         <div className="relative">
           <button
             onClick={() => setMenuOpen((v) => !v)}
-            aria-label="Account menu"
+            aria-label={`Account menu: ${user.fullName}`}
             aria-expanded={menuOpen}
             title={compact ? user.fullName : undefined}
             className={`focus-ring flex min-h-[44px] w-full items-center gap-2 rounded-lg p-1 text-left transition-colors hover:bg-bg-hover md:min-h-0 ${
