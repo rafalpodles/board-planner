@@ -116,6 +116,12 @@ async function bootWhenDatabaseIsReady(): Promise<void> {
     const { ensureUploadIndexes } = await import("@/lib/upload-ownership");
     await ensureUploadIndexes().catch((error) => console.error("Failed to index uploads by organisation:", error));
 
+    const { sweepDeletedOrganisations } = await import("@/lib/organisation-life-cycle");
+    const sweep = () =>
+      sweepDeletedOrganisations().catch((error) => console.error("Failed to sweep deleted organisations:", error));
+    await sweep();
+    setInterval(sweep, 24 * 60 * 60 * 1000).unref();
+
     // Said, not refused: the state can arise at runtime (a demotion, a deactivation, an unlink), and
     // exiting would turn a restart into an outage for every member, not only the administrators
     const { adminsLockedOut } = await import("@/lib/password-sign-in");
