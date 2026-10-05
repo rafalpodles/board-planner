@@ -157,7 +157,7 @@ export function PendingInvitations({
                   <Button
                     size="sm"
                     variant="secondary"
-                    aria-label={`Copy a new link for ${invitation.email}`}
+                    aria-label={`Copy link for ${invitation.email}`}
                     disabled={!!busy}
                     onClick={() => reissue(invitation, "link")}
                   >

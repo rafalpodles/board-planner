@@ -119,6 +119,12 @@ describe("POST /api/invitations/:id/resend", () => {
     expect(reissueInvitation).not.toHaveBeenCalled();
   });
 
+  it("mails it for an explicit email delivery and for a null body", async () => {
+    expect((await resend({ delivery: "email" })).status).toBe(200);
+    expect((await resend(null)).status).toBe(200);
+    expect(deliverTo).toHaveBeenCalledTimes(2);
+  });
+
   // The same escalation POST refuses: an admin API token reading a working admin link back
   it("refuses a machine credential", async () => {
     caller = { ...caller, viaMachineCredential: true };

@@ -16,7 +16,7 @@ export const POST = withAdmin(async (request, { params, user, db }) => {
   if (!isValidObjectId(invitationId)) {
     return NextResponse.json({ error: "Invitation not found" }, { status: 404 });
   }
-  const body = (await request.json().catch(() => ({}))) as { delivery?: unknown };
+  const body = ((await request.json().catch(() => null)) ?? {}) as { delivery?: unknown };
   if (body.delivery !== undefined && body.delivery !== "email" && body.delivery !== "link") {
     return NextResponse.json({ error: 'delivery must be "email" or "link"' }, { status: 400 });
   }

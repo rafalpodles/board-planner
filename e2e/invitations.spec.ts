@@ -189,7 +189,7 @@ test("copy link hands the admin a new link without mailing it", async ({ page, b
   const row = page.getByTestId("pending-invitation").filter({ hasText: email });
   const [issued] = await Promise.all([
     page.waitForResponse((r) => r.url().endsWith("/resend")),
-    row.getByRole("button", { name: `Copy a new link for ${email}` }).click(),
+    row.getByRole("button", { name: `Copy link for ${email}` }).click(),
   ]);
   expect(issued.status()).toBe(200);
   const linkDialog = page.getByRole("dialog", { name: "New invitation link" });

@@ -94,7 +94,7 @@ describe("pending invitations", () => {
     });
     render(<PendingInvitations invitations={[invitation("ada@example.com")]} onChanged={vi.fn()} />);
 
-    await act(async () => screen.getByRole("button", { name: "Copy a new link for ada@example.com" }).click());
+    await act(async () => screen.getByRole("button", { name: "Copy link for ada@example.com" }).click());
 
     expect(api.post).toHaveBeenCalledWith("/api/invitations/id-ada@example.com/resend", { delivery: "link" });
     expect(screen.getByTestId("invitation-link").textContent).toBe("https://planner.example/invite?token=cpi_new");
