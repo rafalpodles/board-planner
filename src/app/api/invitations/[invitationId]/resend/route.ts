@@ -3,11 +3,12 @@ import { isValidObjectId } from "mongoose";
 import { withAdmin } from "@/lib/middleware";
 import { originFor } from "@/lib/organisation-host";
 import { recordDelivery, reissueInvitation } from "@/lib/invitations";
-import { deliverTo, INTERACTIVE_ONLY, NO_ORIGIN_ERROR } from "@/lib/invitation-mail";
+import { deliverTo, INTERACTIVE_ONLY, invitationLink, NO_ORIGIN_ERROR } from "@/lib/invitation-mail";
 import { describeInvitation, toApiInvitations } from "@/lib/invitation-view";
 import { logInstanceAudit } from "@/lib/instanceAudit";
+import { InvitationDelivery } from "@/types";
 
-export const POST = withAdmin(async (_request, { params, user, db }) => {
+export const POST = withAdmin(async (request, { params, user, db }) => {
   if (user.viaMachineCredential) {
     return NextResponse.json({ error: INTERACTIVE_ONLY }, { status: 403 });
   }
@@ -15,6 +16,11 @@ export const POST = withAdmin(async (_request, { params, user, db }) => {
   if (!isValidObjectId(invitationId)) {
     return NextResponse.json({ error: "Invitation not found" }, { status: 404 });
   }
+  const body = (await request.json().catch(() => ({}))) as { delivery?: unknown };
+  if (body.delivery !== undefined && body.delivery !== "email" && body.delivery !== "link") {
+    return NextResponse.json({ error: 'delivery must be "email" or "link"' }, { status: 400 });
+  }
+  const linkOnly = body.delivery === "link";
   const origin = await originFor(db);
   if (!origin) return NextResponse.json({ error: NO_ORIGIN_ERROR }, { status: 500 });
 
@@ -32,19 +38,13 @@ export const POST = withAdmin(async (_request, { params, user, db }) => {
   const projects = await db.Project.find({ _id: { $in: invitation.boards.map((b) => b.project) } })
     .select("key name")
     .lean();
-  const delivery = await deliverTo(
-    invitation.email,
-    token,
-    origin,
-    user,
-    invitation.role,
-    invitation.boards,
-    projects
-  );
+  const delivery: InvitationDelivery = linkOnly
+    ? { delivery: "link", link: invitationLink(origin, token), reason: "requested" }
+    : await deliverTo(invitation.email, token, origin, user, invitation.role, invitation.boards, projects);
   await recordDelivery(db, invitation._id, token, delivery.delivery);
 
   void logInstanceAudit(db, {
-    action: "invitation_resent",
+    action: linkOnly ? "invitation_link_issued" : "invitation_resent",
     user: user._id,
     actorUsername: user.username,
     target: invitation.email,

@@ -30,6 +30,7 @@ const LABELS: Partial<Record<InstanceAuditAction, string>> = {
   user_role_changed: "Role changed",
   invitation_sent: "Invitation sent",
   invitation_resent: "Invitation sent again",
+  invitation_link_issued: "Invitation link issued",
   invitation_revoked: "Invitation revoked",
   invitation_accepted: "Invitation accepted",
   identity_linked: "Sign-in provider linked",

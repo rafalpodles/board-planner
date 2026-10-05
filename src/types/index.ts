@@ -304,9 +304,11 @@ export interface ApiBoardInvitation {
   expired: boolean;
 }
 
+export type InvitationLinkReason = "no_mail_server" | "mail_failed" | "requested";
+
 export type InvitationDelivery =
   | { delivery: "email" }
-  | { delivery: "link"; link: string; reason: "no_mail_server" | "mail_failed" };
+  | { delivery: "link"; link: string; reason: InvitationLinkReason };
 
 export interface IGrant {
   _id: Types.ObjectId;
@@ -1651,6 +1653,7 @@ export const INSTANCE_AUDIT_ACTIONS = [
   "user_role_changed",
   "invitation_sent",
   "invitation_resent",
+  "invitation_link_issued",
   "invitation_revoked",
   "invitation_accepted",
   "identity_linked",

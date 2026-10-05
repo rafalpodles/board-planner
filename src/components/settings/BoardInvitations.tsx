@@ -12,11 +12,11 @@ import { LoadFailed } from "@/components/ui/LoadFailed";
 import { SettingsCard, ListRow } from "@/components/settings/SettingsCard";
 import { InvitationLink } from "@/components/settings/InvitationLink";
 import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";
-import { ApiBoardInvitation, GrantRelation } from "@/types";
+import { ApiBoardInvitation, GrantRelation, InvitationLinkReason } from "@/types";
 
 type Sent =
   | { outcome: "created"; delivery: "email" }
-  | { outcome: "created"; delivery: "link"; link: string; reason: "no_mail_server" | "mail_failed" }
+  | { outcome: "created"; delivery: "link"; link: string; reason: InvitationLinkReason }
   | { outcome: "added" }
   | { outcome: "updated" };
 
@@ -30,7 +30,7 @@ export function BoardInvitations({ projectId }: { projectId: string }) {
   const [relation, setRelation] = useState<GrantRelation>("member");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
-  const [link, setLink] = useState<{ email: string; link: string; reason: "no_mail_server" | "mail_failed" } | null>(null);
+  const [link, setLink] = useState<{ email: string; link: string; reason: InvitationLinkReason } | null>(null);
   const [removing, setRemoving] = useState<ApiBoardInvitation | null>(null);
   const [removeBusy, setRemoveBusy] = useState(false);
   const [removeError, setRemoveError] = useState("");
