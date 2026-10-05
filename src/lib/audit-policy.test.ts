@@ -139,16 +139,16 @@ describe("what an acceptance actually accepts", () => {
   });
 
   /**
-   * Staleness is asked across every tree at once, never per verdict. An entry scoped to mcp-server
+   * Staleness is asked across every tree at once, never per verdict. An entry scoped to another tree
    * is doing its job there while the root's verdict has never heard of it, and reporting it dead
    * on that basis is how a line stops being read.
    */
   it("does not call an entry stale because the tree being judged did not see it", () => {
-    const mcpOnly = [accept({ id: "GHSA-scoped-0009", package: "p", trees: ["mcp-server"] })];
+    const otherOnly = [accept({ id: "GHSA-scoped-0009", package: "p", trees: ["second-tree"] })];
     const one = report({ p: { severity: "high", via: [via("GHSA-scoped-0009", "high")] } });
 
-    expect(judge(one, mcpOnly, ".").blocking.map((f) => f.id)).toEqual(["GHSA-scoped-0009"]);
-    expect(staleEntries(["GHSA-scoped-0009"], mcpOnly)).toEqual([]);
+    expect(judge(one, otherOnly, ".").blocking.map((f) => f.id)).toEqual(["GHSA-scoped-0009"]);
+    expect(staleEntries(["GHSA-scoped-0009"], otherOnly)).toEqual([]);
   });
 });
 
@@ -369,9 +369,8 @@ describe("an acceptance npm itself contradicts", () => {
 });
 
 /**
- * The trees are separate programs with separate lockfiles, and they are built to diverge — the root
- * pins its MCP SDK through mcp-handler while mcp-server floats. A reason written about one must not
- * excuse the same advisory in the other.
+ * Trees are separate programs with separate lockfiles and may diverge. A reason written about one
+ * must not excuse the same advisory in another.
  */
 describe("which tree a reason covers", () => {
   const rootOnly = [accept({ id: "GHSA-tree-0008", package: "p", trees: ["."] })];
@@ -382,14 +381,14 @@ describe("which tree a reason covers", () => {
   });
 
   it("blocks the same advisory in a tree it does not name", () => {
-    expect(judge(one, rootOnly, "mcp-server").blocking.map((f) => f.id)).toEqual(["GHSA-tree-0008"]);
+    expect(judge(one, rootOnly, "second-tree").blocking.map((f) => f.id)).toEqual(["GHSA-tree-0008"]);
   });
 
   it("accepts in both when both are named", () => {
-    const both = [accept({ id: "GHSA-tree-0008", package: "p", trees: [".", "mcp-server"] })];
+    const both = [accept({ id: "GHSA-tree-0008", package: "p", trees: [".", "second-tree"] })];
 
     expect(judge(one, both, ".").blocking).toEqual([]);
-    expect(judge(one, both, "mcp-server").blocking).toEqual([]);
+    expect(judge(one, both, "second-tree").blocking).toEqual([]);
   });
 });
 
@@ -427,8 +426,8 @@ describe("which registry the gate will trust", () => {
  * ships — the same shape of hole this whole ticket is about, one level up.
  */
 describe("which trees are audited", () => {
-  it("covers both programs that reach production", () => {
-    expect([...AUDITED_TREES]).toEqual([".", "mcp-server"]);
+  it("covers the program that reaches production", () => {
+    expect([...AUDITED_TREES]).toEqual(["."]);
   });
 });
 

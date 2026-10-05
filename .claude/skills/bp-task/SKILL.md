@@ -19,7 +19,7 @@ A task is done when it is merged, documented, cleaned up after, and nobody was a
 - Commit each part as it works.
 - Something noticed on the way: if it belongs to the task, fix it now; if it is separate, `create_task` in `todo` with file:line, after grepping `list_tasks` titles for a duplicate.
 - Tests: an e2e in `e2e/` listed in `e2e/groups.ts`, and a unit test. Both. Each new test goes red with the fix removed, for the stated reason: the red check in `references/e2e.md`.
-- `npx tsc --noEmit`, `npm test`, `rm -rf .next && npm run build`; `npm test` inside `worker/` or `mcp-server/` when touched.
+- `npx tsc --noEmit`, `npm test`, `rm -rf .next && npm run build`; `npm test` inside `worker/` when touched.
 - `change_task_status` to `in_review`. Comment: what changed, how it was verified.
 
 ## 2. Review loop

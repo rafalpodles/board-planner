@@ -14,7 +14,7 @@ Also `git worktree list`. A branch, PR or worktree named for the ticket means so
 ```bash
 git fetch origin
 git worktree add -b bp-<n>/<slug> ~/Documents/Projects/ClaudePlanner-worktrees/bp-<n> origin/main
-cd ~/Documents/Projects/ClaudePlanner-worktrees/bp-<n> && npm ci && (cd mcp-server && npm ci)
+cd ~/Documents/Projects/ClaudePlanner-worktrees/bp-<n> && npm ci
 git config --local user.name && git config --local user.email   # must both be set here, not inherited
 ```
 

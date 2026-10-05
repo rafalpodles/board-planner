@@ -244,12 +244,7 @@ Fifteen tools: `list_projects`, `get_project`, `list_tasks`, `get_task`, `create
 `update_sprint`, `add_comment`, `list_comments`, `link_tasks`, `unlink_tasks`.
 
 Clients that want a connector instead of a pasted token get full **OAuth 2.1 with PKCE** and dynamic
-client registration at the same URL — no client secret. For stdio-only clients, a standalone server
-ships in [`mcp-server/`](mcp-server); it builds on its own and is not part of the Docker image:
-
-```bash
-cd mcp-server && npm install && npm run build
-```
+client registration at the same URL — no client secret.
 
 ## Configuration
 
@@ -437,7 +432,6 @@ src/
   components/       kanban/, tasks/, search/, shell/, pm/, settings/, ui/
   lib/              auth, notifications, webhooks, custom fields, PM agent, force guard
   models/           Mongoose schemas
-mcp-server/         standalone stdio MCP server
 worker/             execution worker — claims tasks, runs an agent, enforces gates
 menubar/            macOS menu bar app
 e2e/                Playwright specs

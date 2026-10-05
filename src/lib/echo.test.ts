@@ -1,6 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "fs";
-import { join } from "path";
 import { ECHO_LIMIT, echo } from "./echo";
 
 /**
@@ -42,20 +40,5 @@ describe("echo", () => {
     expect(echo(12)).toBe("12");
     expect(echo({ a: 1 })).toBe("[object Object]");
     expect(echo(["x".repeat(200)]).length).toBe(ECHO_LIMIT + 1);
-  });
-});
-
-/**
- * `mcp-server` is built as its own package and `vitest.config.ts` scopes `include` to `src/**`, so
- * a copy that drifts compiles clean on both sides and nothing says a word — the reason
- * api-client-drift.test.ts exists. The same applies here, and this file is the one place the bound
- * is stated.
- */
-describe("the standalone copy of the bound", () => {
-  const here = readFileSync(join(process.cwd(), "src/lib/echo.ts"), "utf8");
-  const there = readFileSync(join(process.cwd(), "mcp-server/src/echo.ts"), "utf8");
-
-  it("is the same file", () => {
-    expect(there).toBe(here);
   });
 });

@@ -30,9 +30,7 @@ import {
 } from "../src/lib/audit-policy.ts";
 
 /**
- * Both packages that reach production. `mcp-server/` is a separate tree with its own lockfile and
- * its own copy of the same transitive dependencies — it shipped `fast-uri@3.1.0` while the root
- * had 3.1.3 — and auditing only the root left it unwatched (BP-599 review).
+ * The package that reaches production.
  *
  * `worker/` is deliberately not here, and the reason is remediability rather than ownership — its
  * lockfile IS committed, so an operator installs these pins, and the worker holds board credentials
@@ -99,7 +97,7 @@ function mustHaveRun(report: unknown, cwd: string): unknown {
 /**
  * Asked per tree, inside the loop, because `npm config get registry` is answered by whatever
  * `.npmrc` is in scope for that directory. Asking once about the root and then auditing
- * `mcp-server` would leave half the surface pointed wherever an `.npmrc` there said — which is
+ * another tree would leave half the surface pointed wherever an `.npmrc` there said — which is
  * exactly the failure this check exists to stop (BP-599 review).
  *
  * The trailing slash is normalised away before comparing: npm returns `registry=…npmjs.org` as

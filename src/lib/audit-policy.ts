@@ -26,10 +26,9 @@ export interface AcceptedAdvisory {
   id: string;
   package: string;
   /**
-   * Which audited trees this reason covers. They are separate programs with separate lockfiles and
-   * they are built to diverge — the root pins its MCP SDK through mcp-handler while mcp-server
-   * floats — so a reason written about one of them must not quietly excuse the same advisory in
-   * the other (BP-599 review).
+   * Which audited trees this reason covers. Trees are separate programs with separate lockfiles and
+   * may diverge, so a reason written about one of them must not quietly excuse the same advisory in
+   * another (BP-599 review).
    */
   trees: string[];
   /** Why the vulnerable code path cannot be reached from this deployment */
@@ -58,7 +57,7 @@ export const ENFORCED_SEVERITIES = ["critical", "high"] as const;
  * tree matches nothing and the advisory blocks, which is the safe direction but leaves an entry
  * that reads as authoritative while doing nothing (BP-599 review).
  */
-export const AUDITED_TREES = [".", "mcp-server"] as const;
+export const AUDITED_TREES = ["."] as const;
 
 /**
  * The registry whose answer this gate is willing to treat as authoritative.
@@ -253,8 +252,8 @@ export function judge(
  * thing this file exists to prevent comes back.
  *
  * Takes the ids seen across every audited tree rather than one verdict's, because an entry earning
- * its keep in one program is not dead. Judging it per-tree would report an mcp-server acceptance
- * as stale while looking at the root, and a line that cries wolf is a line people stop reading.
+ * its keep in one program is not dead. Judging it per-tree would report an acceptance scoped to
+ * another tree as stale while looking at the root, and a line that cries wolf is a line people stop reading.
  */
 export function staleEntries(
   seenAnywhere: Iterable<string>,

@@ -43,7 +43,7 @@ Both are derived, never hard-coded — the checks are in the skill's `references
 - MongoDB 4.4+ (Railway) + Mongoose ODM — aggregations must avoid 5.0-only operators (`$dateTrunc`, `$dateAdd`/`$dateDiff`, `$setWindowFields`, `$lookup` mixing `localField`/`foreignField` with an inline `pipeline`)
 - Tailwind CSS 4
 - Session cookie (browser) + Bearer token (API tokens, OAuth)
-- MCP Server (separate package in `mcp-server/`)
+- MCP server: the `/api/mcp` route, tools in `src/lib/mcp/` (OAuth, or a Bearer API token)
 
 ## Project structure
 ```
@@ -81,9 +81,6 @@ src/
     user.ts, task.ts, project.ts, comment.ts, sprint.ts,
     apiToken.ts, notification.ts, activityLog.ts, projectAuditLog.ts, settings.ts
   types/index.ts      # Shared TypeScript types
-mcp-server/           # Standalone MCP server (stdio transport)
-  src/index.ts        # Tools: list/get/create/update tasks, sprints, comments, projects
-  src/api-client.ts   # HTTP client to backend API
 ```
 
 ## Key patterns
@@ -309,7 +306,6 @@ PUBLIC_ORIGIN=            # This instance's own address, at runtime. Required fo
 ## Build
 ```bash
 npm run build                    # Next.js app
-cd mcp-server && npm run build   # MCP server
 docker compose up -d --build     # app + MongoDB 4.4, no local Node or Mongo needed
 ```
 `next.config.ts` emits `output: "standalone"` only when `BUILD_STANDALONE` is set, which the Dockerfile
