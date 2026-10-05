@@ -40,8 +40,27 @@ describe("findColumn", () => {
     expect(findColumn("to do", columns).id).toBe("todo");
   });
 
-  it("prefers an id over a label that happens to be the same word", () => {
-    expect(findColumn("doing", columns).id).toBe("doing");
+  it("prefers an id over a label that happens to be the same word, when no other column carries it as a label", () => {
+    expect(findColumn("doing", [column("doing", "Working"), column("also", "Other")]).id).toBe("doing");
+  });
+
+  it("refuses an id that another column also carries as its label, naming both ids", () => {
+    expect(() => findColumn("doing", columns)).toThrow(/id of column doing and the label of column also/);
+  });
+
+  it("refuses a word that is one column's id and another column's label, naming both ids", () => {
+    const board = [column("in_progress", "Review"), column("x", "in_progress")];
+
+    expect(() => findColumn("in_progress", board)).toThrow(/id of column in_progress and the label of column x.*"Review"/);
+  });
+
+  it("does not refuse a column whose label repeats its own id", () => {
+    expect(findColumn("Doing", [column("doing", "Doing"), column("other", "Other")]).id).toBe("doing");
+  });
+
+  it("resolves over the seven defaults for a board stored with no columns", () => {
+    expect(findColumn<ApiProjectColumn>("in progress", []).id).toBe("in_progress");
+    expect(findColumn<ApiProjectColumn>("done", undefined).id).toBe("done");
   });
 
   it("refuses a label two columns share, naming their ids", () => {

@@ -1945,6 +1945,14 @@ describe("board setup", () => {
       expect(said.columns.map((c: { id: string }) => c.id)).toEqual(["todo", "doing", "qa"]);
     });
 
+    it("finds the new column by its id when the server does not answer it last", async () => {
+      vi.spyOn(PlannerClient.prototype, "addColumn").mockResolvedValue([after[2], after[0], after[1]] as never);
+
+      const said = parse(await run("add_column", { label: "QA", role: "review" }));
+
+      expect(said.added).toMatchObject({ id: "qa", label: "QA" });
+    });
+
     it("refuses somebody who is not the owner, saying so, and writes nothing", async () => {
       asOwner(false);
       const add = vi.spyOn(PlannerClient.prototype, "addColumn");
@@ -1984,6 +1992,18 @@ describe("board setup", () => {
       expect(rename).toHaveBeenCalledWith("p1", "doing", "In flight");
       expect(said.renamed).toMatchObject({ id: "doing", label: "In flight", role: "active" });
       expect(said.columns).toHaveLength(2);
+    });
+
+    it("renames a column of a board stored with no columns, which the app shows as the seven defaults", async () => {
+      vi.spyOn(PlannerClient.prototype, "getProjectByKey").mockResolvedValue({ _id: "p1", canAdmin: true, columns: [] } as never);
+      const rename = vi.spyOn(PlannerClient.prototype, "renameColumn").mockResolvedValue([
+        { id: "in_progress", label: "Under way", role: "active", color: "#f59e0b", order: 2 },
+      ] as never);
+
+      const said = parse(await run("rename_column", { column: "In Progress", label: "Under way" }));
+
+      expect(rename).toHaveBeenCalledWith("p1", "in_progress", "Under way");
+      expect(said.renamed).toMatchObject({ id: "in_progress", label: "Under way" });
     });
 
     it("refuses somebody who is not the owner, and a column the board does not have, before writing", async () => {

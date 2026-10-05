@@ -44,6 +44,7 @@ import {
   requireOwner,
 } from "./board-config";
 import { syncProvider, syncSummary } from "./sync-repository";
+import { effectiveColumns } from "@/lib/columns";
 import { BATCH_LIMIT, LINK_BATCH_LIMIT, MAX_BLOCKERS_PER_ITEM, failure, referencedKey } from "./batch";
 
 type ToolExtra = { authInfo?: AuthInfo; signal?: AbortSignal };
@@ -1611,8 +1612,10 @@ export function registerPlannerTools(server: McpServer): void {
       const client = clientFrom(extra);
       const proj = await client.getProjectByKey(project);
       requireOwner(proj, project, "add a column");
+      const before = new Set(effectiveColumns(proj.columns).map((c) => c.id));
       const columns = await client.addColumn(proj._id, { label, role, ...(color ? { color } : {}) });
-      return json({ added: columnSummary(columns[columns.length - 1]), columns: columns.map(columnSummary) });
+      const added = columns.find((c) => !before.has(c.id));
+      return json({ added: added ? columnSummary(added) : null, columns: columns.map(columnSummary) });
     }
   );
 
@@ -1639,7 +1642,7 @@ export function registerPlannerTools(server: McpServer): void {
       const client = clientFrom(extra);
       const proj = await client.getProjectByKey(project);
       requireOwner(proj, project, "rename a column");
-      const found = findColumn(column, proj.columns ?? []);
+      const found = findColumn(column, proj.columns);
       const columns = await client.renameColumn(proj._id, found.id, label);
       return json({ renamed: columnSummary(columns.find((c) => c.id === found.id) ?? found), columns: columns.map(columnSummary) });
     }

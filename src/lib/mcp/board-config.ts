@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { echo } from "@/lib/echo";
 import { normalizeOptions } from "@/lib/custom-fields";
-import type { ApiCustomField, ApiProjectColumn } from "@/types";
+import { effectiveColumns, type AnyColumn } from "@/lib/columns";
+import type { ApiCustomField } from "@/types";
 import type { McpProject } from "./planner-client";
 
 export const COLOUR_PARAM = z
@@ -38,12 +39,28 @@ export function findField(ref: string, fields: ApiCustomField[]): ApiCustomField
   return found;
 }
 
-/** The column a reference names: its id, or its label in any case; a label two columns share is refused with their ids. */
-export function findColumn(ref: string, columns: ApiProjectColumn[]): ApiProjectColumn {
+/**
+ * The column a reference names: its id, or its label in any case, over the columns the board shows (the seven defaults
+ * when none are stored). A label two columns share, or a word that is one column's id and another's label, is refused.
+ */
+export function findColumn<C extends AnyColumn>(ref: string, stored: C[] | null | undefined): C {
+  const columns = effectiveColumns(stored) as C[];
   const wanted = ref.trim().toLowerCase();
   const byId = columns.find((c) => c.id.toLowerCase() === wanted);
-  if (byId) return byId;
   const labelled = columns.filter((c) => c.label.trim().toLowerCase() === wanted);
+  if (byId) {
+    const other = labelled.find((c) => c.id !== byId.id);
+    if (other) {
+      const way =
+        byId.label.trim().toLowerCase() === wanted
+          ? "rename one of the two in the app"
+          : `name ${byId.id} by its label "${echo(byId.label)}", or rename one of the two in the app`;
+      throw new Error(
+        `"${echo(ref.trim())}" is the id of column ${byId.id} and the label of column ${other.id} — nothing was changed; ${way}.`
+      );
+    }
+    return byId;
+  }
   if (labelled.length > 1) {
     throw new Error(
       `${labelled.length} columns are labelled "${echo(ref.trim())}" — pass the id of one: ${labelled.map((c) => c.id).join(", ")}`
@@ -74,7 +91,7 @@ export const fieldSummary = (field: ApiCustomField) => ({
   archived: !!field.archived,
 });
 
-export const columnSummary = (column: ApiProjectColumn) => ({
+export const columnSummary = (column: AnyColumn) => ({
   id: column.id,
   label: column.label,
   role: column.role,
