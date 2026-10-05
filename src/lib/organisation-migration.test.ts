@@ -41,14 +41,15 @@ describe("backfillOrganisations", () => {
     );
   });
 
-  it("touches neither the organisation table nor the throttle", async () => {
+  it("touches neither the organisation table, the throttle nor the platform log", async () => {
     const { connection, touched } = fakeDb(1);
 
     await backfillOrganisations(connection, { apply: true });
 
     expect(touched).not.toContain("organisations");
     expect(touched).not.toContain("ratelimits");
-    expect(UNSCOPED_MODELS).toEqual(["Organisation", "RateLimit"]);
+    expect(touched).not.toContain("platformauditlogs");
+    expect(UNSCOPED_MODELS).toEqual(["Organisation", "RateLimit", "PlatformAuditLog"]);
   });
 
   it("only counts in a dry run", async () => {
