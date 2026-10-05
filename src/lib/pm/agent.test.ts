@@ -648,7 +648,9 @@ describe("the history a turn replays", () => {
 
     await turn([]);
 
-    const [, history, , opts] = replayHistoryMock.mock.calls.at(-1)!;
+    const [replayDb, history, , opts] = replayHistoryMock.mock.calls.at(-1)!;
+    // The turn's own organisation, which is what decides whose files the replay may read (BP-668)
+    expect(replayDb).toBe(db);
     expect(history).toHaveLength(30);
     expect(opts).toEqual({ olderExist: true });
     // Newest thirty, oldest first: the extra row fetched is the one dropped

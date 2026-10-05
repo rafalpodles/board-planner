@@ -3,7 +3,7 @@ import type { ScopedDb } from "./db-scope";
 
 export const UPLOAD_BUCKET = "uploads";
 
-export function uploadsBucket(): mongoose.mongo.GridFSBucket | null {
+function uploadsBucket(): mongoose.mongo.GridFSBucket | null {
   const db = mongoose.connection.db;
   return db ? new mongoose.mongo.GridFSBucket(db, { bucketName: UPLOAD_BUCKET }) : null;
 }
