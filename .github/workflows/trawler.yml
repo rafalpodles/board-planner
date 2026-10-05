@@ -26,8 +26,14 @@ jobs:
           HAS_TOKEN: ${{ secrets.TRAWLER_API_TOKEN != '' }}
           HAS_API: ${{ vars.TRAWLER_API != '' }}
           HAS_PROJECT: ${{ vars.TRAWLER_PROJECT != '' }}
+          EVENT: ${{ github.event_name }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_TYPES: ${{ vars.TRAWLER_PR_TYPES || 'feat|fix' }}
         run: |
-          if [ "$FROM_FORK" = true ]; then
+          if [ "$EVENT" = pull_request ] && ! printf '%s' "$PR_TITLE" | grep -Eq "^($PR_TYPES)(\([^)]*\))?!?:"; then
+            echo "::notice::Trawler is skipped: the pull request title does not start with one of: ${PR_TYPES//|/, }"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          elif [ "$FROM_FORK" = true ]; then
             echo "::notice::Trawler is skipped for pull requests from forks: they get no secrets"
             echo "run=false" >> "$GITHUB_OUTPUT"
           elif [ "$HAS_TOKEN" != true ] || [ "$HAS_API" != true ] || [ "$HAS_PROJECT" != true ]; then
