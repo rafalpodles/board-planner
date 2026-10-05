@@ -170,3 +170,34 @@ describe("the add-dependency picker", () => {
     expect(screen.getByRole("button", { name: /duplicates this one/i })).toBeTruthy();
   });
 });
+
+describe("an epic's progress on the task page", () => {
+  const children = [linked("k1", 2, "First slice"), linked("k2", 3, "Second slice")];
+
+  it("sits under the Children heading, with the children listed beneath it", () => {
+    const task = baseTask({
+      relations: children.map((child) => ({ task: child, type: "parent_of" as const })),
+      progress: { total: 2, done: 1, byStatus: { done: 1, todo: 1 } },
+    });
+    render(<TaskLinks projectId="p1" projectKey="TP" task={task} onChanged={() => {}} />);
+
+    expect(screen.getByText("Children")).toBeTruthy();
+    expect(screen.getByText("1 of 2 done")).toBeTruthy();
+    expect(screen.getByRole("progressbar", { name: "Children done" }).getAttribute("aria-valuenow")).toBe("1");
+    expect(screen.getByRole("button", { name: "TP-2" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "TP-3" })).toBeTruthy();
+  });
+
+  it("is not drawn for a task whose children are not counted, nor for a plain task", () => {
+    const uncounted = baseTask({
+      relations: children.map((child) => ({ task: child, type: "parent_of" as const })),
+    });
+    const { unmount } = render(<TaskLinks projectId="p1" projectKey="TP" task={uncounted} onChanged={() => {}} />);
+    expect(screen.getByText("Children")).toBeTruthy();
+    expect(screen.queryByRole("progressbar")).toBeNull();
+    unmount();
+
+    render(<TaskLinks projectId="p1" projectKey="TP" task={baseTask()} onChanged={() => {}} />);
+    expect(screen.queryByRole("progressbar")).toBeNull();
+  });
+});

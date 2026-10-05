@@ -30,6 +30,7 @@ import {
   migratePersistedFilters,
   isFieldFilterSet,
   matchesStatusFilter,
+  epicOptions,
   statusLabel,
   statusOptions,
   statusRoleMap,
@@ -206,6 +207,11 @@ export function BoardFilters({
     statusChoices.push({ value: filters.status, label: statusLabel(filters.status) });
   }
 
+  const epicChoices = epicOptions(tasks, projectKey);
+  if (filters.epic && !epicChoices.some((o) => o.value === filters.epic)) {
+    epicChoices.push({ value: filters.epic, label: "Epic no longer on this board", taskNumber: 0 });
+  }
+
   const activeCount = countActiveFilters(filters) + (showArchived ? 1 : 0);
   const hasActiveFilters = activeCount > 0;
 
@@ -239,6 +245,9 @@ export function BoardFilters({
     }
     if (filters.status) {
       result = result.filter((t) => matchesStatusFilter(t.status, filters.status, roleByColumn));
+    }
+    if (filters.epic) {
+      result = result.filter((t) => t.parent?._id === filters.epic);
     }
     if (Object.keys(filters.fields || {}).length) {
       result = result.filter((t) =>
@@ -355,6 +364,13 @@ export function BoardFilters({
     chips.push({
       key: "status",
       label: statusLabel(filters.status),
+    });
+  }
+  if (filters.epic) {
+    const epic = epicChoices.find((o) => o.value === filters.epic);
+    chips.push({
+      key: "epic",
+      label: epic?.taskNumber ? `Epic ${projectKey ?? ""}-${epic.taskNumber}` : "Epic",
     });
   }
   if (filters.dateRange) {
@@ -566,6 +582,23 @@ export function BoardFilters({
                   ))}
                 </select>
               </Field>
+
+              {epicChoices.length > 0 && (
+                <Field label="Epic">
+                  <select
+                    value={filters.epic}
+                    onChange={(e) => setFilters((f) => ({ ...f, epic: e.target.value }))}
+                    className={selectClass}
+                  >
+                    <option value="">All epics</option>
+                    {epicChoices.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              )}
             </div>
 
             {onShowArchivedChange && (

@@ -606,6 +606,28 @@ describe("what the tools answer", () => {
     expect(answer.children).toEqual([{ key: "MY-APP-8", title: "Child", status: "todo" }]);
   });
 
+  it("get_task passes an epic's progress through beside its children, and says nothing of it for a plain task", async () => {
+    const progress = { total: 2, done: 1, byStatus: { done: 1, todo: 1 } };
+    const get = vi.spyOn(PlannerClient.prototype, "getTask");
+    get.mockResolvedValueOnce({
+      title: "Epic",
+      progress,
+      relations: [
+        { type: "parent_of", task: { _id: "a", taskNumber: 8, title: "A", status: "done" } },
+        { type: "parent_of", task: { _id: "b", taskNumber: 9, title: "B", status: "todo" } },
+      ],
+    });
+    get.mockResolvedValueOnce({ title: "Plain", relations: [] });
+
+    const epic = parse(await registered().get("get_task")!.handler({ taskKey: "my-app-5" }, extra));
+    const plain = parse(await registered().get("get_task")!.handler({ taskKey: "my-app-6" }, extra));
+
+    expect(epic.progress).toEqual(progress);
+    expect(epic.children).toHaveLength(2);
+    expect(plain).not.toHaveProperty("progress");
+    expect(plain.children).toEqual([]);
+  });
+
   it("link_tasks says what it linked, not just that something was", async () => {
     vi.spyOn(PlannerClient.prototype, "addTaskLink").mockResolvedValue({ message: "Dependency added" });
     vi.spyOn(PlannerClient.prototype, "resolveTaskKey").mockResolvedValue({ projectId: "p1", taskId: "t" });
@@ -769,6 +791,44 @@ describe("list_tasks", () => {
 
       await expect(run({ parent: "OTHER-7" })).rejects.toThrow(/is not on MY-APP/);
       expect(page).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("hasChildren", () => {
+    it.each([[true, "true"], [false, "false"]])("%s is sent to the route as %s", async (value, sentAs) => {
+      await run({ hasChildren: value });
+
+      expect(sent()[1].hasChildren).toBe(sentAs);
+    });
+
+    it("is left off when not given", async () => {
+      await run({});
+
+      expect(sent()[1]).not.toHaveProperty("hasChildren");
+    });
+
+    it("lists an epic with how many of its children are done, and a plain task without it", async () => {
+      page.mockResolvedValue({
+        tasks: [
+          { taskNumber: 1, title: "Epic", status: "todo", progress: { total: 5, done: 2, byStatus: {} } },
+          { taskNumber: 2, title: "Plain", status: "todo" },
+        ],
+        total: 2,
+        limit: 50,
+        offset: 0,
+      });
+
+      const answer = parse(await run({ hasChildren: true }));
+
+      expect(answer.tasks[0].progress).toBe("2 of 5 done");
+      expect(answer.tasks[1]).not.toHaveProperty("progress");
+    });
+
+    it("is a boolean, so a string is refused rather than sent on", () => {
+      const { schema } = registered().get("list_tasks")!;
+
+      expect(schema.safeParse({ project: "BP", hasChildren: true }).success).toBe(true);
+      expect(schema.safeParse({ project: "BP", hasChildren: "yes" }).success).toBe(false);
     });
   });
 

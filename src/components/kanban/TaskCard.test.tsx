@@ -514,3 +514,42 @@ describe("TaskCard and an archived task", () => {
     expect(screen.queryByTestId("card-archived")).toBeNull();
   });
 });
+
+describe("TaskCard on an epic", () => {
+  const epic = { ...task, progress: { total: 4, done: 1, byStatus: { done: 1, todo: 3 } } } as ApiTask;
+
+  it("says how many of its children are done, and draws the bar to match", () => {
+    renderCard({ task: epic });
+
+    expect(screen.getByText("1 of 4 done")).toBeTruthy();
+    const bar = screen.getByRole("progressbar", { name: "Children done" });
+    expect(bar.getAttribute("aria-valuenow")).toBe("1");
+    expect(bar.getAttribute("aria-valuemax")).toBe("4");
+    expect((bar.firstElementChild as HTMLElement).style.width).toBe("25%");
+  });
+
+  it("draws a full bar once every child is done", () => {
+    renderCard({ task: { ...epic, progress: { total: 2, done: 2, byStatus: { done: 2 } } } as ApiTask });
+
+    expect(screen.getByText("2 of 2 done")).toBeTruthy();
+    expect((screen.getByRole("progressbar").firstElementChild as HTMLElement).style.width).toBe("100%");
+  });
+
+  // The control: a task with children is the only one that gets the bar
+  it("draws nothing on a task without children, nor on one that is only somebody's child", () => {
+    renderCard();
+    expect(screen.queryByTestId("epic-progress")).toBeNull();
+    cleanup();
+
+    renderCard({ task: { ...task, parent: { _id: "e", taskNumber: 1, title: "Epic", status: "todo" } } as ApiTask });
+    expect(screen.queryByTestId("epic-progress")).toBeNull();
+  });
+
+  it("keeps its checklist bar apart from the epic's", () => {
+    renderCard({ task: { ...epic, checklist: [{ _id: "c", text: "x", done: true }] } as ApiTask });
+
+    expect(screen.getAllByRole("progressbar")).toHaveLength(1);
+    expect(screen.getByText("1/1")).toBeTruthy();
+    expect(screen.getByText("1 of 4 done")).toBeTruthy();
+  });
+});

@@ -10,6 +10,7 @@ import { taskPath } from "@/lib/urls";
 import { dateOnlyKey, dueDateClass, formatDateOnly } from "@/lib/date-only";
 import { CopyTaskLink } from "@/components/tasks/CopyTaskLink";
 import { PullRequestState } from "@/components/tasks/PullRequestBadge";
+import { EpicProgress } from "@/components/tasks/EpicProgress";
 
 // A card is a summary; past a few badges it stops being one
 const MAX_CARD_BADGES = 3;
@@ -240,6 +241,10 @@ export function TaskCard({
           </div>
         );
       })()}
+
+      {task.progress && task.progress.total > 0 && (
+        <EpicProgress progress={task.progress} className="mb-2" />
+      )}
 
       {task.checklist && task.checklist.length > 0 && (
         <div className="mb-2 flex items-center gap-1.5">

@@ -13,6 +13,7 @@ import {
   MAX_EXECUTION_ATTEMPTS,
 } from "@/lib/task-service";
 import { severLinksToDeletedTask } from "@/lib/task-links";
+import { epicProgressFor } from "@/lib/epics";
 import { ITaskExecution } from "@/types";
 import { withApiExecution } from "@/lib/task-execution-view";
 import {
@@ -63,6 +64,9 @@ export const GET = withProjectAccess(async (_request, { params, user, db }) => {
         task: { _id: t._id, taskNumber: t.taskNumber, title: t.title, status: t.status },
       }))
   );
+
+  const progress = (await epicProgressFor(db, projectId, [taskId])).get(String(task._id));
+  if (progress) taskObj.progress = progress;
 
   taskObj.attemptsExhausted = (task.execution?.attempts ?? 0) >= MAX_EXECUTION_ATTEMPTS;
   taskObj.execution = toApiExecution(task.execution, await workerNamesFor(db, [task.execution]));

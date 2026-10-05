@@ -67,6 +67,7 @@ export const GROUPS = {
     "list-view-seams.spec.ts",
     "card-shows-its-parent.spec.ts",
     "board-scope-and-filters.spec.ts",
+    "epics.spec.ts",
   ],
   project: [
     "organisation-on-product-writes.spec.ts",

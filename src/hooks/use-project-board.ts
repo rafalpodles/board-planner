@@ -291,6 +291,7 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
       prev.map((t) => (movedIds.has(t._id) ? { ...t, status: status as ApiTask["status"] } : t))
     );
     setSelectedTasks(new Set());
+    if (tasks.some((t) => movedIds.has(t._id) && t.parent)) loadDataRef.current();
 
     if (movedIds.size === ids.length) {
       toast(`Moved ${ids.length} task${ids.length === 1 ? "" : "s"}`, "success");
@@ -435,6 +436,7 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
       // nobody had written, until the next poll corrected it (BP-558)
       const updated = (await writing(patch)) as Partial<ApiTask>;
       setTasks((prev) => prev.map((t) => (t._id === taskId ? { ...t, ...updated } : t)));
+      if (tasks.find((t) => t._id === taskId)?.parent) loadDataRef.current();
     } catch (err) {
       if (parkIfHeld(err, taskId, () => patch(true))) return;
       toast("Failed to update status", "error");
@@ -486,6 +488,8 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
         api.put(`/api/projects/${projectId}/tasks/${taskId}`, body)
       )) as Partial<ApiTask>;
       setTasks((prev) => prev.map((t) => (t._id === taskId ? { ...t, ...updated } : t)));
+      // The parent's progress is counted on the server, and only a read brings it back
+      if (moved?.parent && moved.status !== status) loadDataRef.current();
     } catch (err) {
       // A worker is running this task. Ask rather than silently taking it off the machine —
       // the optimistic move is rolled back either way, by confirming or by loadData below.

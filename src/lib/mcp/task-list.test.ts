@@ -46,6 +46,18 @@ describe("listedTask", () => {
   });
 });
 
+describe("listedTask on an epic", () => {
+  it("adds how many of its children are done", () => {
+    expect(
+      listedTask({ taskNumber: 1, title: "E", status: "todo", progress: { done: 2, total: 5 } }, "BP").progress
+    ).toBe("2 of 5 done");
+  });
+
+  it("adds nothing to a task without children", () => {
+    expect(listedTask({ taskNumber: 1, title: "E", status: "todo" }, "BP")).not.toHaveProperty("progress");
+  });
+});
+
 describe("pageOf", () => {
   it("points at the next page while the total is not reached", () => {
     expect(pageOf(["a", "b"], 5, 0)).toEqual({ total: 5, returned: 2, offset: 0, nextOffset: 2, tasks: ["a", "b"] });
