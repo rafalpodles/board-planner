@@ -923,3 +923,77 @@ test("reorder_tasks refuses keys it cannot place, and a board the caller cannot 
   const after = await storedOrders(request, PROJECT_ID);
   expect(after[SIBLING_TASK_NUMBER]).toBeLessThan(after[HELD_TASK_NUMBER]);
 });
+
+/**
+ * BP-904. A project key may hold digits, hyphens and underscores, and the tools parsed only
+ * letters — so a board keyed MY_APP could be created, shown and worked in the browser and was
+ * invisible to every key-addressed tool. Each board here is made the way a person would, through
+ * the API, and every tool is then driven by the key it would be given.
+ */
+for (const key of ["BP2", "MY_APP", "MY-APP"]) {
+  test(`every key-addressed tool works on a board keyed ${key}`, async ({ request }) => {
+    const created = await request.post("/api/projects", {
+      headers: ADMIN_AUTH,
+      data: { name: `Odd key ${key}`, key },
+    });
+    expect(created.status(), await created.text()).toBe(201);
+    const { _id: projectId } = (await created.json()) as { _id: string };
+
+    for (const title of ["First", "Second"]) {
+      const task = await request.post(`/api/projects/${projectId}/tasks`, { headers: ADMIN_AUTH, data: { title } });
+      expect(task.status(), await task.text()).toBe(201);
+    }
+    const first = `${key}-1`;
+    const second = `${key}-2`;
+    const session = await connected(request);
+
+    const read = await session.callTool("get_task", { taskKey: second });
+    accepted(read);
+    expect(read.parsed).toMatchObject({ taskNumber: 2, title: "Second" });
+
+    // Each write ends on what the board holds, not on the reply
+    accepted(await session.callTool("update_task", { taskKey: second, title: "Renamed" }));
+    accepted(await session.callTool("change_task_status", { taskKey: second, status: "in_progress" }));
+    accepted(await session.callTool("add_comment", { taskKey: second, body: `noted on ${key}` }));
+    accepted(await session.callTool("link_tasks", { taskKey: first, targetTaskKey: second, type: "parent_of" }));
+
+    const stored = await request.get(`/api/projects/${projectId}/tasks?taskNumber=2`, { headers: ADMIN_AUTH });
+    expect(stored.status()).toBe(200);
+    expect((await stored.json()) as unknown[]).toEqual([
+      expect.objectContaining({ taskNumber: 2, title: "Renamed", status: "in_progress" }),
+    ]);
+
+    const comments = await session.callTool("list_comments", { taskKey: second });
+    accepted(comments);
+    expect(comments.parsed.map((c: { body: string }) => c.body)).toEqual([`noted on ${key}`]);
+
+    accepted(await session.callTool("unlink_tasks", { taskKey: first, targetTaskKey: second, type: "parent_of" }));
+  });
+}
+
+test("a task key that names nothing is refused as such, and a malformed one as malformed", async ({ request }) => {
+  const session = await connected(request);
+
+  const absent = await session.callTool("get_task", { taskKey: `${PROJECT_KEY}-9999` });
+  refused(absent);
+  expect(absent.text).toContain(`Task ${PROJECT_KEY}-9999 not found`);
+
+  const unknownBoard = await session.callTool("get_task", { taskKey: "NOSUCH-1" });
+  refused(unknownBoard);
+  expect(unknownBoard.text).toContain('Project with key "NOSUCH" not found');
+
+  const malformed = await session.callTool("get_task", { taskKey: `${PROJECT_KEY}1` });
+  refused(malformed);
+  expect(malformed.text).toContain(`Invalid task key: "${PROJECT_KEY}1"`);
+
+  // The number exists, but on the other board: the lookup is scoped to the board the key names
+  await seedSecondProject();
+  await seedDemotableAdmin();
+  const wrongBoard = await session.callTool("get_task", { taskKey: `${SECOND_PROJECT_KEY}-${SIBLING_TASK_NUMBER}` });
+  refused(wrongBoard);
+  expect(wrongBoard.text).toContain(`Task ${SECOND_PROJECT_KEY}-${SIBLING_TASK_NUMBER} not found`);
+
+  const own = await session.callTool("get_task", { taskKey: KEPT_TASK_KEY });
+  accepted(own);
+  expect(own.parsed.title).toBe(KEPT_TASK_TITLE);
+});
