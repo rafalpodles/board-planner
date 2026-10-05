@@ -15,6 +15,7 @@ import {
   taskIdsInOrder,
 } from "./strict-input";
 import { MAX_REORDER_IDS } from "@/lib/reorder";
+import { noticeLines, runLines, searchLines, statsSummary } from "./discovery";
 
 type ToolExtra = { authInfo?: AuthInfo };
 
@@ -61,6 +62,90 @@ export function registerPlannerTools(server: McpServer): void {
         project = await client.getProjectByKey(identifier);
       }
       return json(project);
+    }
+  );
+
+  // --- Looking around ---
+
+  server.registerTool(
+    "search_tasks",
+    {
+      description:
+        "Find tasks across every board the caller can reach, which list_tasks (one board) cannot. A task key such as " +
+        "CP-12 finds that task; anything else matches text in the title or description, newest first, at most 50.",
+      inputSchema: strictInput({ query: z.string().min(2).describe("A task key, or at least two characters of text") }),
+    },
+    async ({ query }, extra) => {
+      const found = (await clientFrom(extra).searchTasks(query)) as Parameters<typeof searchLines>[0];
+      return json({ returned: found.length, tasks: searchLines(found) });
+    }
+  );
+
+  server.registerTool(
+    "get_project_stats",
+    {
+      description:
+        "A board's numbers: how many tasks and how many are finished (by the board's own done columns), the " +
+        "breakdown by status, category, assignee and difficulty, and the last weeks' created and completed counts.",
+      inputSchema: strictInput({ project: z.string().describe("Project key (e.g. 'CP')") }),
+    },
+    async ({ project }, extra) => {
+      const client = clientFrom(extra);
+      const proj = await client.getProjectByKey(project);
+      return json(statsSummary(await client.getProjectStats(proj._id)));
+    }
+  );
+
+  server.registerTool(
+    "list_runs",
+    {
+      description:
+        "The runs workers have made on a board, newest first: the task, the agent, how each ended (and what refused it), " +
+        "minutes and cost. Useful before handing a task to a machine.",
+      inputSchema: strictInput({
+        project: z.string().describe("Project key (e.g. 'CP')"),
+        limit: z.number().int().min(1).max(100).optional().describe("Runs to return (default 20)"),
+      }),
+    },
+    async ({ project, limit }, extra) => {
+      const client = clientFrom(extra);
+      const proj = await client.getProjectByKey(project);
+      return json(runLines((await client.listRuns(proj._id, limit ?? 20)) as Parameters<typeof runLines>[0]));
+    }
+  );
+
+  server.registerTool(
+    "list_notifications",
+    {
+      description:
+        "The caller's own notifications, newest first: what happened, on which task, by whom, and whether it is read. " +
+        "A full page carries nextBefore; pass it back as `before` for the older ones.",
+      inputSchema: strictInput({
+        limit: z.number().int().min(1).max(100).optional().describe("Notifications to return (default 30)"),
+        before: z.string().optional().describe("A nextBefore from a previous answer"),
+      }),
+    },
+    async ({ limit, before }, extra) => {
+      const asked = limit ?? 30;
+      const rows = (await clientFrom(extra).listNotifications(asked, before)) as Parameters<typeof noticeLines>[0];
+      return json(noticeLines(rows, asked));
+    }
+  );
+
+  server.registerTool(
+    "mark_notifications_read",
+    {
+      description:
+        "Mark one notification read by its id, or — with no id — every notification the bell shows. Anything else about a " +
+        "notification is left alone.",
+      inputSchema: strictInput(
+        { id: z.string().optional().describe("A notification's id, from list_notifications; leave out for all") },
+        { writes: true }
+      ),
+    },
+    async ({ id }, extra) => {
+      await clientFrom(extra).markNotificationsRead(id);
+      return json({ read: id ?? "all" });
     }
   );
 

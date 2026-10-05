@@ -38,6 +38,8 @@ import {
   WORKER_NAME,
   seed,
   seedAgents,
+  seedRuns,
+  RUN_TASK_KEY,
   seedDemotableAdmin,
   seedForeignAgent,
   seedForeignSprint,
@@ -996,4 +998,95 @@ test("a task key that names nothing is refused as such, and a malformed one as m
   const own = await session.callTool("get_task", { taskKey: KEPT_TASK_KEY });
   accepted(own);
   expect(own.parsed.title).toBe(KEPT_TASK_TITLE);
+});
+
+/**
+ * BP-913. What a person reads daily and an MCP client could not: a search across boards, a board's
+ * numbers, the runs workers made, and the bell. Each answer is checked against what the API says or
+ * against what the test itself caused.
+ */
+test("search_tasks finds a task by key and by text, across the boards the caller can reach", async ({ request }) => {
+  await seedSecondProject();
+  await seedDemotableAdmin();
+  const session = await connected(request);
+  const mine = await session.callTool("create_task", { project: PROJECT_KEY, title: "A needle in the first board" });
+  accepted(mine);
+  const key = `${PROJECT_KEY}-${mine.parsed.taskNumber}`;
+
+  const byKey = await session.callTool("search_tasks", { query: key });
+  accepted(byKey);
+  expect(byKey.parsed.tasks).toEqual([expect.objectContaining({ key, title: "A needle in the first board", project: PROJECT_NAME })]);
+
+  const byText = await session.callTool("search_tasks", { query: "needle" });
+  expect((byText.parsed.tasks as { key: string }[]).map((t) => t.key)).toEqual([key]);
+
+  // Across boards: the second board's one task is found by its own text, which list_tasks on this board cannot do
+  const other = await session.callTool("search_tasks", { query: KEPT_TASK_TITLE.slice(0, 8) });
+  expect((other.parsed.tasks as { key: string }[]).map((t) => t.key)).toContain(KEPT_TASK_KEY);
+
+  // A member reaches only their own boards' tasks
+  const member = await connected(request, MEMBER_API_TOKEN);
+  const memberHits = await member.callTool("search_tasks", { query: KEPT_TASK_TITLE.slice(0, 8) });
+  expect((memberHits.parsed.tasks as { key: string }[]).map((t) => t.key)).not.toContain(KEPT_TASK_KEY);
+
+  const tooShort = await session.callTool("search_tasks", { query: "a" });
+  expect(tooShort.raw.error?.message ?? tooShort.raw.result?.isError).toBeTruthy();
+});
+
+test("get_project_stats reports the same numbers the stats route does, without its per-field table", async ({ request }) => {
+  const session = await connected(request);
+  const route = (await (await request.get(`/api/projects/${PROJECT_ID}/stats`, { headers: ADMIN_AUTH })).json()) as Record<string, unknown>;
+
+  const stats = await session.callTool("get_project_stats", { project: PROJECT_KEY });
+  accepted(stats);
+  expect(stats.parsed).toMatchObject({ total: route.total, done: route.done, statusBreakdown: route.statusBreakdown, velocity: route.velocity });
+  expect(stats.parsed).not.toHaveProperty("customFieldUsage");
+  expect(stats.parsed.total).toBeGreaterThan(0);
+});
+
+test("list_runs reads the runs on a board, newest first", async ({ request }) => {
+  await seedRuns();
+  const session = await connected(request);
+
+  const runs = await session.callTool("list_runs", { project: PROJECT_KEY });
+  accepted(runs);
+  expect(runs.parsed).toHaveLength(2);
+  expect(runs.parsed[0]).toMatchObject({ taskKey: RUN_TASK_KEY, outcome: "refused", refusedBy: "review-gate", detail: "the diff is too large" });
+  expect(runs.parsed[1]).toMatchObject({ outcome: "delivered", costUsd: 1.5, agent: "Default", minutes: 12 });
+  expect((await session.callTool("list_runs", { project: PROJECT_KEY, limit: 1 })).parsed).toHaveLength(1);
+});
+
+test("list_notifications and mark_notifications_read work on the caller's own bell", async ({ request }) => {
+  const admin = await connected(request);
+  const member = await connected(request, MEMBER_API_TOKEN);
+  // Handing the member a task is what puts a row on their bell
+  for (const taskKey of [SIBLING_TASK_KEY, HELD_TASK_KEY]) {
+    accepted(await admin.callTool("update_task", { taskKey, assignee: MEMBER_USERNAME }));
+  }
+
+  const bell = await member.callTool("list_notifications");
+  accepted(bell);
+  expect(bell.parsed.unread).toBeGreaterThanOrEqual(1);
+  const [first] = bell.parsed.notifications as { id: string; read: boolean; by: string; task: string | null }[];
+  expect(first).toMatchObject({ read: false, by: ADMIN_USERNAME });
+  expect(first.task).toMatch(new RegExp(`^${PROJECT_KEY}-\\d+$`));
+
+  // One by its id, and only that one
+  accepted(await member.callTool("mark_notifications_read", { id: first.id }));
+  const after = (await member.callTool("list_notifications")).parsed.notifications as { id: string; read: boolean }[];
+  expect(after.find((n) => n.id === first.id)!.read).toBe(true);
+  expect(after.some((n) => !n.read)).toBe(true);
+
+  // Then all of them
+  accepted(await member.callTool("mark_notifications_read"));
+  expect((await member.callTool("list_notifications")).parsed.unread).toBe(0);
+
+  // The admin's own bell was not touched by any of it
+  const adminBell = await admin.callTool("list_notifications");
+  expect((adminBell.parsed.notifications as { id: string }[]).some((n) => n.id === first.id)).toBe(false);
+
+  // A page is a page: one row, and a cursor to the next while more remain
+  const paged = await member.callTool("list_notifications", { limit: 1 });
+  expect(paged.parsed.returned).toBe(1);
+  expect(paged.parsed.nextBefore).toBeTruthy();
 });

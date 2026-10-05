@@ -154,6 +154,27 @@ export class PlannerClient {
     ) as Promise<unknown[]>;
   }
 
+  async searchTasks(query: string): Promise<unknown[]> {
+    return (await this.request("GET", `/api/search?q=${encodeURIComponent(query)}`)) as unknown[];
+  }
+
+  async getProjectStats(projectId: string): Promise<Record<string, unknown>> {
+    return (await this.request("GET", `/api/projects/${seg(projectId)}/stats`)) as Record<string, unknown>;
+  }
+
+  async listRuns(projectId: string, limit: number): Promise<unknown[]> {
+    return (await this.request("GET", `/api/projects/${seg(projectId)}/runs?limit=${limit}`)) as unknown[];
+  }
+
+  async listNotifications(limit: number, before?: string): Promise<unknown[]> {
+    const params = new URLSearchParams({ limit: String(limit), ...(before ? { before } : {}) });
+    return (await this.request("GET", `/api/notifications?${params}`)) as unknown[];
+  }
+
+  async markNotificationsRead(id?: string): Promise<unknown> {
+    return this.request("PATCH", "/api/notifications/read", id ? { id } : {});
+  }
+
   async listAgents(): Promise<unknown[]> {
     return this.request("GET", "/api/agents") as Promise<unknown[]>;
   }

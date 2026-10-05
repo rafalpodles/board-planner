@@ -2638,3 +2638,35 @@ export async function blockTask(blocked: mongoose.Types.ObjectId, blocker: mongo
   await db.collection("tasks").updateOne({ _id: blocked }, { $set: { blockedBy: [blocker] } });
   await mongoose.disconnect();
 }
+
+/**
+ * BP-913. Two finished runs on the seeded board, for the one reader of them over MCP. Inserted
+ * directly: a run is recorded by a worker, and the point here is what is read back.
+ */
+export const RUN_TASK_KEY = `${PROJECT_KEY}-${HELD_TASK_NUMBER}`;
+
+export async function seedRuns() {
+  const db = (await connect()).db!;
+  const now = Date.now();
+  const run = (minutesAgo: number, fields: Record<string, unknown>) => ({
+    project: PROJECT_ID,
+    task: HELD_TASK_ID,
+    taskKey: RUN_TASK_KEY,
+    worker: null,
+    agent: null,
+    agentName: "Default",
+    refusedBy: "",
+    detail: "",
+    startedAt: new Date(now - (minutesAgo + 12) * 60_000),
+    finishedAt: new Date(now - minutesAgo * 60_000),
+    costUsd: 0,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    ...fields,
+  });
+  await db.collection("agentruns").insertMany([
+    run(30, { outcome: "delivered", costUsd: 1.5, detail: "opened a pull request" }),
+    run(5, { outcome: "refused", refusedBy: "review-gate", detail: "the diff is too large" }),
+  ]);
+  await stampOrganisationAndDisconnect();
+}
