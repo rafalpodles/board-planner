@@ -42,13 +42,16 @@ function modelOf(db: ScopedDb, name: string) {
   return model;
 }
 
-// A field the schema hides from every read is still the organisation's data
-function hiddenPaths(name: string): string[] {
-  const schema = (SCOPED_MODELS as Record<string, () => mongoose.Model<unknown>>)[name]().schema;
+// A field the schema hides from every read is still the organisation's data, nested ones included
+export function hiddenPaths(name: string): string[] {
   const hidden: string[] = [];
-  schema.eachPath((path, type) => {
-    if (type.options?.select === false) hidden.push(`+${path}`);
-  });
+  const walk = (schema: mongoose.Schema, prefix: string) =>
+    schema.eachPath((path, type) => {
+      if (type.options?.select === false) hidden.push(`+${prefix}${path}`);
+      const nested = (type as { schema?: mongoose.Schema }).schema;
+      if (nested) walk(nested, `${prefix}${path}.`);
+    });
+  walk((SCOPED_MODELS as Record<string, () => mongoose.Model<unknown>>)[name]().schema, "");
   return hidden;
 }
 

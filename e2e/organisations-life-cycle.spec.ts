@@ -173,6 +173,14 @@ test.describe("BP-893: an organisation's life cycle", () => {
     await withDb(async (db) => {
       await db.collection("projects").updateOne({ _id: ACME.projectId }, { $set: { githubToken: "enc:v3:e2e:sealed-github-token" } });
       await db.collection("users").updateOne({ _id: ACME.adminId }, { $set: { "notifications.chat": { kind: "slack", webhookUrl: "enc:v3:e2e:sealed-webhook" } } });
+      await db.collection("tasks").insertOne({
+        organisation: ACME.organisation,
+        project: ACME.projectId,
+        taskNumber: 900,
+        title: "Held for a decision",
+        status: "needs_human_review",
+        decision: { patch: "diff --git a/acme-hidden-patch b/acme-hidden-patch", files: ["src/rocket.ts"] },
+      });
     });
 
     await signInOn(page.context(), ACME);
@@ -194,6 +202,8 @@ test.describe("BP-893: an organisation's life cycle", () => {
     expect(text).not.toContain(GLOBEX.projectName);
     expect(text).not.toMatch(/"[A-Za-z]*[Hh]ash"\s*:|"password"\s*:/);
     expect(text).not.toContain("enc:v3:");
+    // A field the schema hides from every read is still the organisation's data
+    expect(text).toContain("acme-hidden-patch");
 
     const user = rows.find((row) => row.collection === "User")!.document as Record<string, unknown>;
     expect(user.username).toBe("boss");

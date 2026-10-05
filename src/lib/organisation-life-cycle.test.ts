@@ -39,3 +39,14 @@ describe("what an export row keeps (BP-893)", () => {
     expect(token).toEqual({ name: "ci", prefix: "cp_abc" });
   });
 });
+
+describe("the fields an export reads although the schema hides them (BP-893)", () => {
+  it("reaches into subdocuments, so a task's decision, its patch and its attempts are not lost", async () => {
+    const { hiddenPaths } = await import("./organisation-life-cycle");
+
+    expect(hiddenPaths("Task")).toEqual(
+      expect.arrayContaining(["+decision.files", "+decision.protectedFiles", "+decision.patch", "+decision.patchSha256", "+decision.attempts"])
+    );
+    expect(hiddenPaths("Worker")).toContain("+credentialHash");
+  });
+});

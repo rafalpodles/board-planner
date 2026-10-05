@@ -1,19 +1,16 @@
 import type { ScopedDb } from "./db-scope";
 import { organisationExport } from "./organisation-life-cycle";
 
-// The audit row is written when the last line has gone, so a download that failed halfway is not recorded as taken
-export function organisationExportResponse(db: ScopedDb, slug: string, onComplete: () => Promise<void>): Response {
+// Recorded before the first byte: a download abandoned near its end has still carried the data away
+export async function organisationExportResponse(db: ScopedDb, slug: string, record: () => Promise<void>): Promise<Response> {
+  await record();
   const filename = `${slug.replace(/[^a-z0-9-]/g, "") || "organisation"}-export-${new Date().toISOString().slice(0, 10)}.ndjson.gz`;
   const lines = organisationExport(db);
   const body = new ReadableStream<string>({
     async pull(controller) {
       const next = await lines.next();
-      if (next.done) {
-        controller.close();
-        await onComplete();
-      } else {
-        controller.enqueue(next.value);
-      }
+      if (next.done) controller.close();
+      else controller.enqueue(next.value);
     },
     async cancel() {
       await lines.return(undefined);
