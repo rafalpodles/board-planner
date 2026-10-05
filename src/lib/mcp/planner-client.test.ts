@@ -145,7 +145,8 @@ describe("resolveTaskKey", () => {
   const PROJECT_ID = "507f1f77bcf86cd7994390aa";
   const TASK_ID = "507f1f77bcf86cd7994390bb";
   const client = new PlannerClient("https://board.example.com", "cp_token");
-  const idOf = (key: string) => `${PROJECT_ID.slice(0, -2)}${key.length.toString(16).padStart(2, "0")}`;
+  const BOARDS = ["BP", "BP2", "MY_APP", "MY-APP", "NOPE"];
+  const idOf = (key: string) => `${PROJECT_ID.slice(0, -2)}${BOARDS.indexOf(key).toString(16).padStart(2, "0")}`;
 
   /** The projects list names the boards, each with its own id; a task lookup answers with `tasks`. */
   function board(keys: string[], tasks: unknown[] = [{ _id: TASK_ID, taskNumber: 7 }]) {
