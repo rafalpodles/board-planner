@@ -2,26 +2,22 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectOwner } from "@/lib/middleware";
 import { logProjectAudit } from "@/lib/projectAudit";
-import { COLUMN_ROLES, ColumnRole, ROLE_LABELS } from "@/types";
-import { columnIdsWithRole, effectiveColumns } from "@/lib/columns";
-
-const MAX_COLUMNS = 12;
-const MAX_LABEL = 40;
+import { COLUMN_ROLES, ColumnRole, DEFAULT_PROJECT_COLUMNS, ROLE_LABELS } from "@/types";
+import {
+  columnIdsWithRole,
+  columnLabelOrRefusal,
+  effectiveColumns,
+  freeColumnId,
+  MAX_COLUMNS,
+  MAX_COLUMN_LABEL as MAX_LABEL,
+  slugify,
+} from "@/lib/columns";
 
 // What a board loses with its last column of the role, in the refusal's own words
 const LOAD_BEARING: Partial<Record<ColumnRole, string>> = {
   done: "sprint progress reads 0% for ever and no worker will take a task from it",
   active: "a worker has nowhere to move a task it takes, so it claims nothing",
 };
-
-function slugify(label: string): string {
-  return label
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .slice(0, 32);
-}
 
 export const GET = withProjectOwner(async (_request, { params, db }) => {
   const { projectId } = await params;
@@ -32,6 +28,93 @@ export const GET = withProjectOwner(async (_request, { params, db }) => {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
   return NextResponse.json(project.columns || []);
+});
+
+const APPEND_ATTEMPTS = 3;
+
+// Adds one column to the end of the board in one update. PUT replaces the whole list from a read, so
+// a column added or renamed between that read and the write is put back the way it was; this does
+// not send the list. The ceiling and the id are in the write's own filter, for the reason the
+// category and checklist adds carry theirs: every racer sees the same pre-write board.
+export const POST = withProjectOwner(async (request, { params, user, db }) => {
+  const { projectId } = await params;
+  await connectDB();
+
+  const body = (await request.json().catch(() => null)) as
+    | { label?: unknown; role?: unknown; color?: unknown }
+    | null;
+  const label = columnLabelOrRefusal(body?.label);
+  if ("error" in label) return NextResponse.json({ error: label.error }, { status: 400 });
+  if (!COLUMN_ROLES.includes(body?.role as ColumnRole)) {
+    return NextResponse.json(
+      { error: `Column role must be one of: ${COLUMN_ROLES.join(", ")}` },
+      { status: 400 }
+    );
+  }
+  const color = typeof body?.color === "string" && body.color ? body.color : "#6b7280";
+
+  for (let attempt = 0; attempt < APPEND_ATTEMPTS; attempt++) {
+    const project = await db.Project.findById(projectId).select("columns").lean();
+    if (!project) {
+      return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+
+    const stored = project.columns ?? [];
+    const existing = effectiveColumns(stored);
+    if (existing.length >= MAX_COLUMNS) {
+      return NextResponse.json({ error: `A board may have at most ${MAX_COLUMNS} columns` }, { status: 400 });
+    }
+    const id = freeColumnId(label.label, existing.map((c) => c.id));
+    if (!id) {
+      return NextResponse.json(
+        { error: `Column label "${label.label}" produces an empty id` },
+        { status: 400 }
+      );
+    }
+    const column = {
+      id,
+      label: label.label,
+      color,
+      role: body!.role as ColumnRole,
+      order: Math.max(...existing.map((c) => c.order)) + 1,
+      triggersPmReview: false,
+    };
+
+    // A board stored with `columns: []` is shown the seven defaults, so the first column added to it
+    // has to keep them: a push onto the empty array would leave a board of one
+    const added =
+      stored.length === 0
+        ? await db.Project.findOneAndUpdate(
+            { _id: projectId, "columns.0": { $exists: false } },
+            { $set: { columns: [...DEFAULT_PROJECT_COLUMNS, column] } },
+            { returnDocument: "after" }
+          )
+        : await db.Project.findOneAndUpdate(
+            {
+              _id: projectId,
+              "columns.0": { $exists: true },
+              [`columns.${MAX_COLUMNS - 1}`]: { $exists: false },
+              columns: { $not: { $elemMatch: { id } } },
+            },
+            { $push: { columns: column } },
+            { returnDocument: "after" }
+          );
+    if (!added) continue;
+
+    logProjectAudit(
+      db,
+      projectId,
+      user._id,
+      "settings_updated",
+      `Column added: ${column.label} (${column.id}, ${ROLE_LABELS[column.role].label})`
+    );
+    return NextResponse.json(effectiveColumns(added.columns), { status: 201 });
+  }
+
+  return NextResponse.json(
+    { error: "The board's columns changed while this was being added — nothing was written, try again" },
+    { status: 409 }
+  );
 });
 
 export const PUT = withProjectOwner(async (request, { params, user, db }) => {
