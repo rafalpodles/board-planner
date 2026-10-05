@@ -508,6 +508,15 @@ describe("TaskCard and an archived task", () => {
     expect(screen.getByTestId("card-archived").textContent).toBe("Archived");
   });
 
+  it("is set apart by its border and colour, not by fading the whole card under the chip and title", () => {
+    renderCard({ task: { ...task, archivedAt: "2026-10-05T10:00:00.000Z" } as ApiTask });
+
+    const card = screen.getByTestId("card-archived").closest("a")!;
+    expect(card.className).not.toContain("opacity-");
+    expect(card.className).toContain("border-dashed");
+    expect(screen.getByRole("heading", { name: task.title }).className).toContain("text-text-muted");
+  });
+
   it("marks nothing on a task nobody archived", () => {
     renderCard();
 

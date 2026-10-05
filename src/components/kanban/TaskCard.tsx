@@ -94,7 +94,7 @@ export function TaskCard({
         transition-colors group
         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary
         ${running ? (quiet ? "task-running run-quiet" : "task-running") : ""}
-        ${task.archivedAt ? "opacity-60" : ""}
+        ${task.archivedAt ? "border-dashed saturate-50" : ""}
         ${selected
           ? "border-primary bg-primary/5"
           : tinted
@@ -173,7 +173,7 @@ export function TaskCard({
         </Badge>
       </div>
 
-      <h3 className="text-sm font-medium mb-2 line-clamp-2">{task.title}</h3>
+      <h3 className={`text-sm font-medium mb-2 line-clamp-2 ${task.archivedAt ? "text-text-muted" : ""}`}>{task.title}</h3>
 
       {shownBadges.length > 0 && (
         <div className="flex flex-wrap gap-1 mb-2">

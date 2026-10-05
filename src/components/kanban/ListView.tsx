@@ -454,7 +454,7 @@ export function ListView({
                   }}
                   className={`group/row border-b border-border last:border-b-0 transition-colors ${
                     tinted ? "cat-row" : "hover:bg-bg-input/50"
-                  } ${task.archivedAt ? "opacity-60" : ""} ${selected ? "bg-primary/10" : ""} ${
+                  } ${task.archivedAt ? "border-dashed saturate-50" : ""} ${selected ? "bg-primary/10" : ""} ${
                     index === focusedIndex
                       ? "ring-2 ring-primary ring-inset bg-primary/5"
                       : ""
@@ -536,7 +536,7 @@ export function ListView({
                           Archived
                         </span>
                       )}
-                      <span className="truncate">{task.title}</span>
+                      <span className={`truncate ${task.archivedAt ? "text-text-muted" : ""}`}>{task.title}</span>
                     </div>
                   </td>
                   {show("status") && (
