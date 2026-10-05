@@ -1,3 +1,4 @@
+import type { Types } from "mongoose";
 import {
   IPmAutonomy,
   IPmConfig,
@@ -228,7 +229,8 @@ function plainOauth(oauth: IPmMcpOauth): IPmMcpOauth {
 
 export function mergeMcpServerTokens(
   incoming: IPmMcpServer[],
-  existing: IPmMcpServer[] | undefined
+  existing: IPmMcpServer[] | undefined,
+  organisation: Types.ObjectId
 ): { valid: true; value: IPmMcpServer[] } | { valid: false; error: string } {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const carriesSecret = incoming.some((s) => s.authToken || (s as any).oauthClientSecret);
@@ -250,7 +252,7 @@ export function mergeMcpServerTokens(
     // paid for by re-entering a token the admin may not hold.
     const sameServer = !!prior && sameEndpoint(prior.url, server.url);
     const carriedOver = sameServer ? prior.authToken ?? "" : "";
-    const authToken = server.authToken ? encryptSecret(server.authToken) : carriedOver;
+    const authToken = server.authToken ? encryptSecret(server.authToken, organisation) : carriedOver;
     if (server.authType === "bearer" && !authToken) {
       return {
         valid: false,
@@ -280,7 +282,7 @@ export function mergeMcpServerTokens(
         oauth = { ...oauth, ...EMPTY_OAUTH_CLIENT, clientId: transient.oauthClientId };
       }
       if (transient.oauthClientSecret) {
-        oauth.clientSecret = encryptSecret(transient.oauthClientSecret);
+        oauth.clientSecret = encryptSecret(transient.oauthClientSecret, organisation);
       }
     }
     delete transient.oauthClientId;
@@ -291,8 +293,11 @@ export function mergeMcpServerTokens(
   return { valid: true, value: merged };
 }
 
-export function resolveMcpAuthToken(server: Pick<IPmMcpServer, "authType" | "authToken">): string | undefined {
-  return server.authType === "bearer" && server.authToken ? decryptSecret(server.authToken) : undefined;
+export function resolveMcpAuthToken(
+  server: Pick<IPmMcpServer, "authType" | "authToken">,
+  organisation: Types.ObjectId
+): string | undefined {
+  return server.authType === "bearer" && server.authToken ? decryptSecret(server.authToken, organisation) : undefined;
 }
 
 export function sanitizeMcpServers(

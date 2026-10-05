@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import type { Types } from "mongoose";
 
 // AES-256-GCM encryption for secrets at rest (e.g. project GitHub tokens).
 // ENCRYPTION_KEY is the key new secrets are written with; ENCRYPTION_KEYS_OLD
@@ -7,9 +8,12 @@ import crypto from "crypto";
 //
 // The v2 envelope carries a key id, so a value names the key that wrote it.
 // v1 values carry no id and are tried against every configured key.
+// v3 (BP-898) is v2 under the organisation's own data key, derived from the instance key and the
+// organisation's id: a secret copied onto another organisation's row does not decrypt there.
 
 const PREFIX_V1 = "enc:v1:";
 const PREFIX_V2 = "enc:v2:";
+const PREFIX_V3 = "enc:v3:";
 
 interface EncryptionKey {
   id: string;
@@ -98,17 +102,27 @@ export function isEncryptionConfigured(): boolean {
 export function readableSecretPatterns(): RegExp[] {
   const keys = allKeys();
   return [
-    new RegExp(`^(?!${PREFIX_V1}|${PREFIX_V2})`),
+    new RegExp(`^(?!${PREFIX_V1}|${PREFIX_V2}|${PREFIX_V3})`),
     ...(keys.length > 0 ? [new RegExp(`^${PREFIX_V1}`)] : []),
     ...keys.map((key) => new RegExp(`^${PREFIX_V2}${key.id}:`)),
+    ...keys.map((key) => new RegExp(`^${PREFIX_V3}${key.id}:`)),
   ];
 }
 
 export function isEncryptedSecret(value: string | undefined | null): boolean {
+  return !!value && (value.startsWith(PREFIX_V1) || value.startsWith(PREFIX_V2) || value.startsWith(PREFIX_V3));
+}
+
+// Written before BP-898 under the instance key itself, and so readable for any organisation
+export function isInstanceKeySecret(value: string | undefined | null): boolean {
   return !!value && (value.startsWith(PREFIX_V1) || value.startsWith(PREFIX_V2));
 }
 
-export function encryptSecret(plaintext: string): string {
+function organisationKey(material: Buffer, organisation: Types.ObjectId): Buffer {
+  return Buffer.from(crypto.hkdfSync("sha256", material, Buffer.alloc(0), `board-planner:organisation:${organisation.toHexString()}`, 32));
+}
+
+export function encryptSecret(plaintext: string, organisation: Types.ObjectId): string {
   if (!plaintext) return plaintext;
   const key = primaryKey();
   if (!key) {
@@ -117,10 +131,10 @@ export function encryptSecret(plaintext: string): string {
     );
   }
   const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv("aes-256-gcm", key.material, iv);
+  const cipher = crypto.createCipheriv("aes-256-gcm", organisationKey(key.material, organisation), iv);
   const enc = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
-  return PREFIX_V2 + key.id + ":" + Buffer.concat([iv, tag, enc]).toString("base64");
+  return PREFIX_V3 + key.id + ":" + Buffer.concat([iv, tag, enc]).toString("base64");
 }
 
 function open(payload: string, material: Buffer): string {
@@ -130,8 +144,25 @@ function open(payload: string, material: Buffer): string {
   return Buffer.concat([decipher.update(buf.subarray(28)), decipher.final()]).toString("utf8");
 }
 
-export function decryptSecret(value: string): string {
+export function decryptSecret(value: string, organisation: Types.ObjectId): string {
   if (!value) return value;
+
+  if (value.startsWith(PREFIX_V3)) {
+    const rest = value.slice(PREFIX_V3.length);
+    const separator = rest.indexOf(":");
+    const id = rest.slice(0, separator);
+    const key = allKeys().find((k) => k.id === id);
+    if (!key) {
+      throw new Error(
+        `No configured encryption key matches id ${id}. Add the key that wrote this secret to ENCRYPTION_KEYS_OLD, or re-enter the secret.`
+      );
+    }
+    try {
+      return open(rest.slice(separator + 1), organisationKey(key.material, organisation));
+    } catch {
+      throw new Error("This secret belongs to another organisation, or was altered. Re-enter it.");
+    }
+  }
 
   if (value.startsWith(PREFIX_V2)) {
     const rest = value.slice(PREFIX_V2.length);

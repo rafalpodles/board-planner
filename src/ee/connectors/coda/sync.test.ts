@@ -73,7 +73,7 @@ describe("POST .../coda/sync — configuration", () => {
   it("decrypts the stored token before calling Coda, never the ciphertext", async () => {
     await syncProjectToCoda(scopedToDefaultOrganisation(), "p1");
 
-    expect(decryptSecret).toHaveBeenCalledWith("enc-token");
+    expect(decryptSecret).toHaveBeenCalledWith("enc-token", expect.anything());
     expect(fetchTableColumns).toHaveBeenCalledWith("https://coda.io", "doc1", "table1", "plain:enc-token");
   });
 });

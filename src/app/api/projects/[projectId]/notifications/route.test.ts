@@ -1,6 +1,10 @@
+import { Types } from "mongoose";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { MAX_NOTIFICATION_CHANNELS } from "@/lib/webhook-input";
 import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
+
+const TEST_ORGANISATION = new Types.ObjectId("000000000000000000000001");
+
 
 const KEY = "a".repeat(64);
 process.env.ENCRYPTION_KEY = KEY;
@@ -173,7 +177,7 @@ describe("PUT /api/projects/:projectId/notifications", () => {
 
     expect(channel.webhookUrl).not.toContain("hooks.slack.com");
     expect(channel.webhookUrl).not.toBe("https://hooks.slack.com/b");
-    expect(decryptSecret(channel.webhookUrl)).toBe("https://hooks.slack.com/b");
+    expect(decryptSecret(channel.webhookUrl, TEST_ORGANISATION)).toBe("https://hooks.slack.com/b");
   });
 
   it("refuses a replacement URL when no encryption key is configured", async () => {
@@ -209,12 +213,12 @@ describe("PUT /api/projects/:projectId/notifications", () => {
 
     expect(res.status).toBe(200);
     expect(channel.webhookUrl).not.toContain("hooks.slack.com");
-    expect(decryptSecret(channel.webhookUrl)).toBe("https://hooks.slack.com/a");
+    expect(decryptSecret(channel.webhookUrl, TEST_ORGANISATION)).toBe("https://hooks.slack.com/a");
   });
 
   it("re-encrypts nothing when the stored URL is already encrypted", async () => {
     const { encryptSecret } = await import("@/lib/encryption");
-    channel.webhookUrl = encryptSecret("https://hooks.slack.com/a");
+    channel.webhookUrl = encryptSecret("https://hooks.slack.com/a", TEST_ORGANISATION);
     const before = channel.webhookUrl;
 
     await PUT(request("PUT", { channelId: C1, name: "Ops" }), ctx());
@@ -244,7 +248,7 @@ describe("POST /api/projects/:projectId/notifications", () => {
     expect(res.status).toBe(201);
     const added = project.notificationChannels[1];
     expect(added.webhookUrl).not.toContain("hooks.slack.com");
-    expect(decryptSecret(added.webhookUrl)).toBe("https://hooks.slack.com/new");
+    expect(decryptSecret(added.webhookUrl, TEST_ORGANISATION)).toBe("https://hooks.slack.com/new");
     expect(JSON.stringify(project.notificationChannels)).not.toContain("hooks.slack.com/new");
   });
 
@@ -387,7 +391,7 @@ describe("what a channel edit records", () => {
 
   it("does not call the address it already had a replacement", async () => {
     const { encryptSecret } = await import("@/lib/encryption");
-    channel.webhookUrl = encryptSecret("https://hooks.slack.com/a");
+    channel.webhookUrl = encryptSecret("https://hooks.slack.com/a", TEST_ORGANISATION);
 
     await PUT(request("PUT", { channelId: C1, webhookUrl: "https://hooks.slack.com/a" }), ctx());
 
@@ -397,7 +401,7 @@ describe("what a channel edit records", () => {
   it("records nothing for the cleartext upgrade alone", async () => {
     await PUT(request("PUT", { channelId: C1, enabled: true }), ctx());
 
-    expect(decryptSecret(channel.webhookUrl)).toBe("https://hooks.slack.com/a");
+    expect(decryptSecret(channel.webhookUrl, TEST_ORGANISATION)).toBe("https://hooks.slack.com/a");
     expect(logProjectAudit).not.toHaveBeenCalled();
   });
 
@@ -488,7 +492,7 @@ describe("a channel id sent in upper case", () => {
     );
 
     expect(res.status).toBe(200);
-    expect(decryptSecret(channel.webhookUrl)).toBe("https://hooks.slack.com/b");
+    expect(decryptSecret(channel.webhookUrl, TEST_ORGANISATION)).toBe("https://hooks.slack.com/b");
     expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "p1", "owner1", "settings_updated", [
       "Notification channel Slack · Webhook URL replaced",
     ]);

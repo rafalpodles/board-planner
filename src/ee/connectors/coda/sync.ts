@@ -28,7 +28,7 @@ export async function syncProjectToCoda(db: ScopedDb, projectId: string): Promis
   }
 
   const host = normaliseCodaHost(project.codaHost);
-  const token = decryptSecret(project.codaToken);
+  const token = decryptSecret(project.codaToken, db.organisation);
 
   let columns: string[];
   try {

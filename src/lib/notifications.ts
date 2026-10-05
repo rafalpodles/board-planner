@@ -277,7 +277,7 @@ export async function dispatchNotifications(
     void runBounded(active, OUTBOUND_CONCURRENCY, async (channel) => {
       let webhookUrl: string;
       try {
-        webhookUrl = decryptSecret(channel.webhookUrl);
+        webhookUrl = decryptSecret(channel.webhookUrl, db.organisation);
       } catch {
         // A rotation that lost the old key leaves an unreadable value; posting the ciphertext at
         // some URL is the only worse answer than saying nothing. Named, because a channel that

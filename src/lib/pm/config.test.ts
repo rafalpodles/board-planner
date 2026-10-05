@@ -1,4 +1,8 @@
+import { Types } from "mongoose";
 import { describe, it, expect, vi } from "vitest";
+
+const TEST_ORGANISATION = new Types.ObjectId("000000000000000000000001");
+
 
 vi.mock("@/lib/encryption", () => ({
   encryptSecret: (v: string) => `enc:${v}`,
@@ -33,7 +37,7 @@ function stored(overrides: Record<string, unknown> = {}) {
 // have it delivered. The OAuth branch beside it already dropped its tokens on a URL change.
 describe("mergeMcpServerTokens and a moved URL", () => {
   it("carries the stored token forward while the URL is unchanged", () => {
-    const result = mergeMcpServerTokens([server()], stored());
+    const result = mergeMcpServerTokens([server()], stored(), TEST_ORGANISATION);
 
     expect(result.valid).toBe(true);
     if (result.valid) expect(result.value[0].authToken).toBe("enc:stored-secret");
@@ -43,7 +47,7 @@ describe("mergeMcpServerTokens and a moved URL", () => {
     const result = mergeMcpServerTokens(
       [server({ url: "https://collector.attacker.example/mcp" })],
       stored()
-    );
+    , TEST_ORGANISATION);
 
     expect(result.valid).toBe(false);
     if (!result.valid) expect(result.error).toMatch(/re-entering its token/);
@@ -53,7 +57,7 @@ describe("mergeMcpServerTokens and a moved URL", () => {
     const result = mergeMcpServerTokens(
       [server({ url: "https://collector.attacker.example/mcp", authToken: "fresh" })],
       stored()
-    );
+    , TEST_ORGANISATION);
 
     expect(result.valid).toBe(true);
     if (result.valid) expect(result.value[0].authToken).toBe("enc:fresh");
@@ -64,7 +68,7 @@ describe("mergeMcpServerTokens and a moved URL", () => {
     const result = mergeMcpServerTokens(
       [server({ url: "https://mcp.notion.com/other" })],
       stored()
-    );
+    , TEST_ORGANISATION);
 
     expect(result.valid).toBe(false);
   });
@@ -73,7 +77,7 @@ describe("mergeMcpServerTokens and a moved URL", () => {
     const result = mergeMcpServerTokens(
       [server({ authType: "none", url: "https://elsewhere.example/mcp" })],
       stored({ authType: "none" })
-    );
+    , TEST_ORGANISATION);
 
     expect(result.valid).toBe(true);
     if (result.valid) expect(result.value[0].authToken).toBe("");
@@ -85,7 +89,7 @@ describe("mergeMcpServerTokens and a moved URL", () => {
     "https://mcp.notion.com/mcp/",
     "https://MCP.Notion.com/mcp",
   ])("carries the token across the cosmetic difference in %s", (url) => {
-    const result = mergeMcpServerTokens([server({ url })], stored());
+    const result = mergeMcpServerTokens([server({ url })], stored(), TEST_ORGANISATION);
 
     expect(result.valid).toBe(true);
     if (result.valid) expect(result.value[0].authToken).toBe("enc:stored-secret");
@@ -116,7 +120,7 @@ describe("mergeMcpServerTokens and moved OAuth credentials", () => {
   const moved = { url: "https://collector.attacker.example/mcp" };
 
   it("drops the access and refresh tokens when the URL moves", () => {
-    const result = mergeMcpServerTokens([server({ authType: "oauth", ...moved })], oauthStored());
+    const result = mergeMcpServerTokens([server({ authType: "oauth", ...moved })], oauthStored(), TEST_ORGANISATION);
 
     expect(result.valid).toBe(true);
     if (result.valid) {
@@ -128,7 +132,7 @@ describe("mergeMcpServerTokens and moved OAuth credentials", () => {
   // A client registered with the old provider is not a credential for the new one. Keeping it made
   // the next Connect skip re-registration and send the secret to the new server's token endpoint.
   it("drops the client registration when the URL moves", () => {
-    const result = mergeMcpServerTokens([server({ authType: "oauth", ...moved })], oauthStored());
+    const result = mergeMcpServerTokens([server({ authType: "oauth", ...moved })], oauthStored(), TEST_ORGANISATION);
 
     expect(result.valid).toBe(true);
     if (result.valid) {
@@ -143,7 +147,7 @@ describe("mergeMcpServerTokens and moved OAuth credentials", () => {
     const first = mergeMcpServerTokens(
       [server({ authType: "none", ...moved })],
       oauthStored()
-    );
+    , TEST_ORGANISATION);
 
     expect(first.valid).toBe(true);
     if (!first.valid) return;
@@ -152,7 +156,7 @@ describe("mergeMcpServerTokens and moved OAuth credentials", () => {
     const second = mergeMcpServerTokens(
       [server({ authType: "oauth", ...moved })],
       first.value
-    );
+    , TEST_ORGANISATION);
 
     expect(second.valid).toBe(true);
     if (second.valid) expect(second.value[0].oauth?.accessToken ?? "").toBe("");
@@ -164,7 +168,7 @@ describe("mergeMcpServerTokens and moved OAuth credentials", () => {
     const result = mergeMcpServerTokens(
       [server({ authType: "oauth", ...moved, oauthClientId: "client-1" })],
       oauthStored()
-    );
+    , TEST_ORGANISATION);
 
     expect(result.valid).toBe(true);
     if (result.valid) expect(result.value[0].oauth?.clientId).toBe("");
@@ -174,14 +178,14 @@ describe("mergeMcpServerTokens and moved OAuth credentials", () => {
     const result = mergeMcpServerTokens(
       [server({ authType: "oauth", ...moved, oauthClientId: "client-2" })],
       oauthStored()
-    );
+    , TEST_ORGANISATION);
 
     expect(result.valid).toBe(true);
     if (result.valid) expect(result.value[0].oauth?.clientId).toBe("client-2");
   });
 
   it("keeps the whole OAuth connection while the URL is unchanged", () => {
-    const result = mergeMcpServerTokens([server({ authType: "oauth" })], oauthStored());
+    const result = mergeMcpServerTokens([server({ authType: "oauth" })], oauthStored(), TEST_ORGANISATION);
 
     expect(result.valid).toBe(true);
     if (result.valid) {
@@ -218,7 +222,7 @@ describe("mergeMcpServerTokens against a stored project", () => {
         ],
       },
     });
-    const result = mergeMcpServerTokens([server({ authType: "oauth", ...typed })], project.pm!.mcpServers);
+    const result = mergeMcpServerTokens([server({ authType: "oauth", ...typed })], project.pm!.mcpServers, TEST_ORGANISATION);
     if (!result.valid) throw new Error(result.error);
     const query = Project.findByIdAndUpdate(project._id, { pm: { mcpServers: result.value } });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -343,8 +347,8 @@ describe("mergeMcpServerTokens and the input it is given", () => {
     ];
     const copy = JSON.parse(JSON.stringify(incoming));
 
-    const first = mergeMcpServerTokens(incoming, stored());
-    const second = mergeMcpServerTokens(incoming, stored());
+    const first = mergeMcpServerTokens(incoming, stored(), TEST_ORGANISATION);
+    const second = mergeMcpServerTokens(incoming, stored(), TEST_ORGANISATION);
 
     expect(incoming).toEqual(copy);
     expect(first.valid && first.value[0].oauth?.clientId).toBe("typed-id");

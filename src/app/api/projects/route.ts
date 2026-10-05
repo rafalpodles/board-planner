@@ -43,7 +43,7 @@ export const GET = withAuth(async (_request, { user, db }) => {
   const administered = await administeredProjectIds(db, user, ids.map(String));
   const sanitized = projects.map((p) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const obj: any = sanitizeProjectSecrets(p.toObject());
+    const obj: any = sanitizeProjectSecrets(p.toObject(), db.organisation);
     if (obj.pm) obj.pm.mcpServers = sanitizeMcpServers(obj.pm.mcpServers);
 
     const stats = statsByProject.get(String(p._id));
@@ -108,5 +108,5 @@ export const POST = withAdmin(async (request, { user, db }) => {
   }
 
   const populated = await project.populate({ path: "createdBy", select: "username fullName", match: { organisation: db.organisation } });
-  return NextResponse.json(sanitizeProjectSecrets(populated.toObject()), { status: 201 });
+  return NextResponse.json(sanitizeProjectSecrets(populated.toObject(), db.organisation), { status: 201 });
 });

@@ -34,7 +34,7 @@ export const GET = withProjectAccessOrWorker(async (_request, { params, user, db
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const obj: any = sanitizeProjectSecrets(project.toObject());
+  const obj: any = sanitizeProjectSecrets(project.toObject(), db.organisation);
   // One repository field, resolved here so no consumer has to know the legacy pair still exists
   obj.repositoryUrl = projectRepositoryUrl(obj);
   obj.repositoryProvider = repositoryProvider(obj);
@@ -98,7 +98,7 @@ async function writeProjectSettings(
       };
     }
     pmServers.stored = fresh.pm?.mcpServers ?? [];
-    const merged = mergeMcpServerTokens(pmServers.incoming, fresh.pm?.mcpServers);
+    const merged = mergeMcpServerTokens(pmServers.incoming, fresh.pm?.mcpServers, db.organisation);
     if (!merged.valid) return { error: merged.error, status: 400 as const };
     updates["pm.mcpServers"] = merged.value;
   }
@@ -262,7 +262,7 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
     }
     if (sent.has("mcpServers")) {
       const stored = existing.pm?.mcpServers ?? [];
-      const merged = mergeMcpServerTokens(pm.mcpServers ?? [], stored);
+      const merged = mergeMcpServerTokens(pm.mcpServers ?? [], stored, db.organisation);
       if (!merged.valid) {
         return NextResponse.json({ error: merged.error }, { status: 400 });
       }
@@ -327,7 +327,7 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
   }
   for (const field of incomingTokens) {
     if (typeof updates[field] === "string" && updates[field]) {
-      updates[field] = encryptSecret(updates[field] as string);
+      updates[field] = encryptSecret(updates[field] as string, db.organisation);
     }
   }
 
@@ -377,7 +377,7 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
   }
   await project.populate({ path: "createdBy", select: "username fullName", match: { organisation: db.organisation } });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const obj: any = sanitizeProjectSecrets(project.toObject());
+  const obj: any = sanitizeProjectSecrets(project.toObject(), db.organisation);
   // One repository field, resolved here so no consumer has to know the legacy pair still exists
   obj.repositoryUrl = projectRepositoryUrl(obj);
   obj.repositoryProvider = repositoryProvider(obj);

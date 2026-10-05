@@ -101,7 +101,7 @@ export async function GET(request: Request) {
     const tokens = await exchangeCode({
       tokenEndpoint: server.oauth.tokenEndpoint,
       clientId: server.oauth.clientId,
-      clientSecret: server.oauth.clientSecret ? decryptSecret(server.oauth.clientSecret) : "",
+      clientSecret: server.oauth.clientSecret ? decryptSecret(server.oauth.clientSecret, own.organisation) : "",
       tokenAuthMethod: server.oauth.tokenAuthMethod || "none",
       code,
       codeVerifier: pending.codeVerifier,
@@ -111,8 +111,8 @@ export async function GET(request: Request) {
     // The tokens belong to the client they were exchanged for: if that changed during the
     // exchange, they are not this connection's to store
     const before = await writeServerOauth(own, projectId, server, {
-      accessToken: encryptSecret(tokens.accessToken),
-      refreshToken: tokens.refreshToken ? encryptSecret(tokens.refreshToken) : "",
+      accessToken: encryptSecret(tokens.accessToken, own.organisation),
+      refreshToken: tokens.refreshToken ? encryptSecret(tokens.refreshToken, own.organisation) : "",
       expiresAt: tokens.expiresAt,
       status: "connected",
     });

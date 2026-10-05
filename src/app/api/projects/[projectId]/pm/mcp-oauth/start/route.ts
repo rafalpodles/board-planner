@@ -110,7 +110,7 @@ export const POST = withProjectOwner(async (request, { params, user, db }) => {
       }
       const registered = await registerClient(oauth.registrationEndpoint, redirectUri);
       oauth.clientId = registered.clientId;
-      oauth.clientSecret = registered.clientSecret ? encryptSecret(registered.clientSecret) : "";
+      oauth.clientSecret = registered.clientSecret ? encryptSecret(registered.clientSecret, db.organisation) : "";
       oauth.clientSource = "registered";
       if (registered.clientSecret) oauth.tokenAuthMethod = "client_secret_basic";
       clientRegistered = true;

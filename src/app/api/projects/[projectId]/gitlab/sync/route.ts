@@ -51,7 +51,7 @@ export const POST = withProjectAccess(async (_request, { params, user, db }) => 
   const host = project.gitlabHost || "https://gitlab.com";
   let rawMRs;
   try {
-    rawMRs = await fetchMergeRequests(host, projectPath, decryptSecret(project.gitlabToken));
+    rawMRs = await fetchMergeRequests(host, projectPath, decryptSecret(project.gitlabToken, db.organisation));
   } catch (err) {
     const message = err instanceof Error ? err.message : "GitLab request failed";
     return NextResponse.json({ error: message }, { status: 502 });
