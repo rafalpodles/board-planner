@@ -74,7 +74,7 @@ jobs:
       - name: Run Trawler against the app
         run: |
           set -o pipefail
-          node .trawler/apps/ci/src/main.ts run --api "$TRAWLER_API" --project "$TRAWLER_PROJECT" --url http://localhost:3000 --runner own --conversation --fail-on never --cap 1 2>&1 | tee trawler-run.log
+          node .trawler/apps/ci/src/main.ts run --api "$TRAWLER_API" --project "$TRAWLER_PROJECT" --url http://localhost:3000 --runner own --conversation --accounts "$TRAWLER_ACCOUNTS_FILE" --fail-on never --cap 1 2>&1 | tee trawler-run.log
         env:
           TRAWLER_API: ${{ vars.TRAWLER_API }}
           TRAWLER_PROJECT: ${{ vars.TRAWLER_PROJECT }}
