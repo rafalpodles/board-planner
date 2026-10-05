@@ -38,6 +38,7 @@ import {
   WORKER_NAME,
   seed,
   seedAgents,
+  seedCustomFields,
   seedDemotableAdmin,
   seedForeignAgent,
   seedForeignSprint,
@@ -922,4 +923,124 @@ test("reorder_tasks refuses keys it cannot place, and a board the caller cannot 
   accepted(reachable);
   const after = await storedOrders(request, PROJECT_ID);
   expect(after[SIBLING_TASK_NUMBER]).toBeLessThan(after[HELD_TASK_NUMBER]);
+});
+
+/**
+ * BP-906. A listing has to fit in a model's context and has to say what it left out: one ordinary
+ * query on the BP board was 393,665 characters. Everything below ends on keys read back from the
+ * tool, checked against tasks this test made and so knows the answer for.
+ */
+const keysOf = (call: ToolCall) => (call.parsed.tasks as { key: string }[]).map((t) => t.key);
+
+async function fileTask(session: McpSession, args: Record<string, unknown>) {
+  const created = await session.callTool("create_task", { project: PROJECT_KEY, ...args });
+  accepted(created);
+  return { key: `${PROJECT_KEY}-${created.parsed.taskNumber}`, id: created.parsed._id as string };
+}
+
+test("list_tasks answers in short lines, a page at a time, and says where the next page starts", async ({ request }) => {
+  const session = await connected(request);
+  const made = [];
+  for (const n of [1, 2, 3, 4, 5]) made.push((await fileTask(session, { title: `Paged ${n}` })).key);
+
+  const first = await session.callTool("list_tasks", { project: PROJECT_KEY, limit: 2 });
+  accepted(first);
+  expect(first.parsed).toMatchObject({ returned: 2, offset: 0, nextOffset: 2 });
+  expect(first.parsed.total).toBeGreaterThanOrEqual(made.length);
+  // A line, not a body: no checklist, no organisation, no author — and the keys to act on it by
+  expect(Object.keys(first.parsed.tasks[0]).sort()).toEqual(
+    ["assignee", "dueDate", "key", "parent", "priority", "sprint", "status", "title"]
+  );
+  expect(first.text.length).toBeLessThan(2_000);
+
+  // Following nextOffset reads the whole board once: no task twice, none missed
+  const seen: string[] = [];
+  let offset: number | null = 0;
+  while (offset !== null) {
+    const page: ToolCall = await session.callTool("list_tasks", { project: PROJECT_KEY, limit: 2, offset });
+    accepted(page);
+    seen.push(...keysOf(page));
+    offset = page.parsed.nextOffset;
+  }
+  expect(new Set(seen).size).toBe(seen.length);
+  expect(seen).toHaveLength(first.parsed.total);
+  for (const key of made) expect(seen).toContain(key);
+
+  const full = await session.callTool("list_tasks", { project: PROJECT_KEY, limit: 1, detail: "full" });
+  accepted(full);
+  expect(full.parsed.tasks[0].checklist).toBeDefined();
+  expect(full.parsed.tasks[0].createdBy).toBeDefined();
+});
+
+test("list_tasks narrows by sprint, text, due date, parent, blocker and field", async ({ request }) => {
+  await seedCustomFields();
+  const session = await connected(request);
+
+  const large = await fileTask(session, { title: "Needle large", fields: { Difficulty: "L" } });
+  const small = await fileTask(session, { title: "Other small", fields: { Difficulty: "S" } });
+  const plain = await fileTask(session, { title: "Plain" });
+
+  // A sprint, a due date: set through the API, since this PR is about reading them back
+  const sprint = await session.callTool("create_sprint", {
+    project: PROJECT_KEY,
+    name: "Hardening",
+    startDate: "2026-10-01",
+    endDate: "2026-10-14",
+  });
+  accepted(sprint);
+  const put = (id: string, data: Record<string, unknown>) =>
+    request.put(`/api/projects/${PROJECT_ID}/tasks/${id}`, { headers: ADMIN_AUTH, data });
+  expect((await put(large.id, { sprint: sprint.parsed._id })).status()).toBe(200);
+  expect((await put(small.id, { dueDate: "2026-10-10" })).status()).toBe(200);
+
+  const list = async (args: Record<string, unknown>) => {
+    const call = await session.callTool("list_tasks", { project: PROJECT_KEY, ...args });
+    accepted(call);
+    return keysOf(call);
+  };
+
+  expect(await list({ fields: { Difficulty: "L" } })).toEqual([large.key]);
+  expect(await list({ fields: { difficulty: "S" } })).toEqual([small.key]);
+  expect(await list({ sprint: "hardening" })).toEqual([large.key]);
+  expect(await list({ sprint: "backlog" })).not.toContain(large.key);
+  expect(await list({ search: "needle" })).toEqual([large.key]);
+
+  // The end day is included, and a task with no due date is in no range
+  expect(await list({ dueBefore: "2026-10-10" })).toEqual([small.key]);
+  expect(await list({ dueAfter: "2026-10-10" })).toEqual([small.key]);
+  expect(await list({ dueBefore: "2026-10-09" })).toEqual([]);
+  expect(await list({ dueAfter: "2026-10-11" })).toEqual([]);
+
+  accepted(await session.callTool("link_tasks", { taskKey: large.key, targetTaskKey: small.key, type: "parent_of" }));
+  accepted(await session.callTool("link_tasks", { taskKey: plain.key, targetTaskKey: large.key, type: "blocked_by" }));
+  expect(await list({ parent: large.key })).toEqual([small.key]);
+  expect(await list({ blocked: true })).toEqual([plain.key]);
+  expect(await list({ blocked: false })).not.toContain(plain.key);
+  const children = await session.callTool("list_tasks", { project: PROJECT_KEY, sprint: "backlog", parent: large.key });
+  expect(children.parsed.tasks[0]).toMatchObject({ key: small.key, parent: large.key });
+
+  // updatedSince: everything this test touched is newer than a day ago, and nothing is newer than tomorrow
+  const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+  expect(await list({ updatedSince: "2020-01-01" })).toEqual(expect.arrayContaining([large.key, small.key, plain.key]));
+  expect(await list({ updatedSince: tomorrow })).toEqual([]);
+});
+
+test("list_tasks refuses a filter that names nothing the board has, rather than answering an empty list", async ({ request }) => {
+  await seedCustomFields();
+  const session = await connected(request);
+
+  const noSprint = await session.callTool("list_tasks", { project: PROJECT_KEY, sprint: "Nowhere" });
+  refused(noSprint);
+  expect(noSprint.text).toContain('No sprint named "Nowhere"');
+
+  const noField = await session.callTool("list_tasks", { project: PROJECT_KEY, fields: { Colour: "red" } });
+  refused(noField);
+  expect(noField.text).toContain('Unknown field "Colour"');
+
+  const badDay = await session.callTool("list_tasks", { project: PROJECT_KEY, dueBefore: "next week" });
+  refused(badDay);
+  expect(badDay.text).toContain("Invalid dueBefore");
+
+  const tooMany = await session.callTool("list_tasks", { project: PROJECT_KEY, limit: 500 });
+  refused(tooMany);
 });

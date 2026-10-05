@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, type MockInstance } from "vitest";
 import { z } from "zod";
 import { registerPlannerTools } from "./tools";
 import { PlannerClient } from "./planner-client";
@@ -508,5 +508,155 @@ describe("reorder_tasks", () => {
 
     expect(refusal.success).toBe(false);
     expect(refusal.error!.issues[0].message).toContain('"order" — use the reorder_tasks tool');
+  });
+});
+
+/**
+ * BP-906. list_tasks answered with every matching task's whole body — 393,665 characters for one
+ * ordinary query on the BP board — and took four filters. It now pages, answers in short lines, and
+ * filters on what REST already could (sprint, search) and on parent, due dates, blockers and fields.
+ */
+describe("list_tasks", () => {
+  const SIZE_FIELD = { _id: "f1", name: "Size", fieldType: "dropdown", options: [{ id: "opt-l", value: "L" }] };
+  let page: MockInstance<PlannerClient["pageTasks"]>;
+
+  const run = (args: Record<string, unknown>) =>
+    registered().get("list_tasks")!.handler({ project: "my-app", ...args }, extra);
+  const parse = (result: unknown) => JSON.parse((result as { content: { text: string }[] }).content[0].text);
+  const sent = () => page.mock.calls[0] as [string, Record<string, string>, string[]];
+
+  beforeEach(() => {
+    vi.spyOn(PlannerClient.prototype, "getProjectByKey").mockResolvedValue({
+      _id: "p1",
+      customFields: [SIZE_FIELD],
+    } as never);
+    page = vi
+      .spyOn(PlannerClient.prototype, "pageTasks")
+      .mockResolvedValue({ tasks: [], total: 0, limit: 50, offset: 0 });
+  });
+
+  it("asks for one short page by default, and says what it did not return", async () => {
+    page.mockResolvedValue({
+      tasks: [
+        { taskNumber: 3, title: "Three", status: "todo", priority: "high", assignee: { username: "rafal" }, sprint: null, parent: null },
+        { taskNumber: 4, title: "Four", status: "todo", assignee: null, sprint: { name: "S1" }, parent: { taskNumber: 1 } },
+      ],
+      total: 130,
+      limit: 2,
+      offset: 0,
+    });
+
+    const answer = parse(await run({ limit: 2 }));
+
+    expect(sent()[1]).toEqual({ limit: "2", offset: "0", view: "summary" });
+    expect(answer).toMatchObject({ total: 130, returned: 2, offset: 0, nextOffset: 2 });
+    expect(answer.tasks[0]).toEqual({
+      key: "MY-APP-3",
+      title: "Three",
+      status: "todo",
+      priority: "high",
+      assignee: "rafal",
+      dueDate: null,
+      sprint: null,
+      parent: null,
+    });
+    expect(answer.tasks[1]).toMatchObject({ key: "MY-APP-4", sprint: "S1", parent: "MY-APP-1" });
+  });
+
+  it("starts from 50 and carries an offset through", async () => {
+    await run({ offset: 100 });
+
+    expect(sent()[1]).toMatchObject({ limit: "50", offset: "100", view: "summary" });
+  });
+
+  it("hands back the whole bodies, still paged, when asked for the full detail", async () => {
+    const stored = { taskNumber: 3, title: "Three", checklist: [{ _id: "c" }] };
+    page.mockResolvedValue({ tasks: [stored], total: 1, limit: 50, offset: 0 });
+
+    const answer = parse(await run({ detail: "full" }));
+
+    expect(sent()[1]).not.toHaveProperty("view");
+    expect(answer.tasks).toEqual([stored]);
+    expect(answer.nextOffset).toBeNull();
+  });
+
+  it("refuses a page bigger than it will build", () => {
+    const { schema } = registered().get("list_tasks")!;
+
+    expect(schema.safeParse({ project: "BP", limit: 101 }).success).toBe(false);
+    expect(schema.safeParse({ project: "BP", limit: 0 }).success).toBe(false);
+    expect(schema.safeParse({ project: "BP", offset: -1 }).success).toBe(false);
+    expect(schema.safeParse({ project: "BP", limit: 100, offset: 0 }).success).toBe(true);
+  });
+
+  it("passes the text, date and blocker filters on as the route spells them", async () => {
+    await run({ search: "login", dueBefore: "2026-10-10", dueAfter: "2026-10-01", updatedSince: "2026-09-30", blocked: false });
+
+    expect(sent()[1]).toMatchObject({
+      search: "login",
+      dueBefore: "2026-10-10",
+      dueAfter: "2026-10-01",
+      updatedSince: "2026-09-30",
+      blocked: "false",
+    });
+  });
+
+  describe("sprint", () => {
+    it("is looked up by name", async () => {
+      vi.spyOn(PlannerClient.prototype, "listSprints").mockResolvedValue([
+        { _id: "507f1f77bcf86cd799439012", name: "Hardening" },
+      ]);
+
+      await run({ sprint: "hardening" });
+
+      expect(sent()[1].sprint).toBe("507f1f77bcf86cd799439012");
+    });
+
+    it("needs no lookup for the backlog or an id", async () => {
+      const lookup = vi.spyOn(PlannerClient.prototype, "listSprints");
+
+      await run({ sprint: "backlog" });
+      await run({ sprint: "507f1f77bcf86cd799439012" });
+
+      expect(lookup).not.toHaveBeenCalled();
+    });
+
+    it("is refused, naming the sprints, when no sprint has the name", async () => {
+      vi.spyOn(PlannerClient.prototype, "listSprints").mockResolvedValue([{ _id: "s1", name: "Hardening" }]);
+
+      await expect(run({ sprint: "Nope" })).rejects.toThrow(/No sprint named "Nope".*Hardening/);
+      expect(page).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("parent", () => {
+    it("is given by key and sent as the task's id", async () => {
+      vi.spyOn(PlannerClient.prototype, "resolveTaskKey").mockResolvedValue({ projectId: "p1", taskId: "epic-id" });
+
+      await run({ parent: "MY-APP-7" });
+
+      expect(sent()[1].parent).toBe("epic-id");
+    });
+
+    it("is refused when it belongs to another board", async () => {
+      vi.spyOn(PlannerClient.prototype, "resolveTaskKey").mockResolvedValue({ projectId: "p2", taskId: "x" });
+
+      await expect(run({ parent: "OTHER-7" })).rejects.toThrow(/is not on MY-APP/);
+      expect(page).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("fields", () => {
+    it("are named the way a person reads them and sent as ids", async () => {
+      await run({ fields: { size: "L" } });
+
+      expect(sent()[2]).toEqual(["f1:opt-l"]);
+    });
+
+    it("are refused when the board has no such field, or the field no such option", async () => {
+      await expect(run({ fields: { Colour: "red" } })).rejects.toThrow(/Unknown field "Colour".*Size/);
+      await expect(run({ fields: { Size: "XXL" } })).rejects.toThrow(/"XXL" is not an option of Size/);
+      expect(page).not.toHaveBeenCalled();
+    });
   });
 });

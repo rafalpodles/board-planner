@@ -7,7 +7,16 @@ import { createTask, taskPopulateFields } from "@/lib/task-service";
 import { withApiExecutions } from "@/lib/task-execution-view";
 import { parentsOf } from "@/lib/task-parents";
 import { getColumnIds } from "@/lib/columns";
+import { normalizeOptions } from "@/lib/custom-fields";
 
+
+const MAX_FIELD_FILTERS = 5;
+const DEFAULT_PAGE = 50;
+const MAX_PAGE = 200;
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/** What a card in a list needs, and what an agent reading a board needs to pick work from it. */
+const SUMMARY_FIELDS = "taskNumber title status priority assignee dueDate sprint order updatedAt";
 
 export const GET = withProjectAccess(async (request, { params, db }) => {
   const { projectId } = await params;
@@ -21,9 +30,10 @@ export const GET = withProjectAccess(async (request, { params, db }) => {
   const statusParam = url.searchParams.get("status");
   const category = url.searchParams.get("category");
   // One read, shared by the two project-defined filters below and skipped when neither is asked for
+  const fieldParams = url.searchParams.getAll("field");
   const board =
-    statusParam || category
-      ? await db.Project.findById(projectId, "categories columns").lean()
+    statusParam || category || fieldParams.length
+      ? await db.Project.findById(projectId, "categories columns customFields").lean()
       : null;
 
   if (statusParam) {
@@ -143,9 +153,120 @@ export const GET = withProjectAccess(async (request, { params, db }) => {
     ];
   }
 
-  const tasks = await db.Task.find(filter)
-    .sort({ order: 1, createdAt: -1 })
-    .populate(taskPopulateFields);
+  // Every condition below is its own clause, so none can replace the `$or` the text search owns
+  const clauses: Record<string, unknown>[] = [];
+  const refuse = (error: string) => NextResponse.json({ error }, { status: 400 });
+
+  const dueBefore = url.searchParams.get("dueBefore");
+  const dueAfter = url.searchParams.get("dueAfter");
+  for (const [name, value, edge] of [
+    ["dueBefore", dueBefore, "$lte"],
+    ["dueAfter", dueAfter, "$gte"],
+  ] as const) {
+    if (!value) continue;
+    if (!DAY.test(value) || Number.isNaN(Date.parse(value))) {
+      return refuse(`Invalid ${name} "${value.slice(0, 64)}" — a day, YYYY-MM-DD`);
+    }
+    // A due date is a day: "before the 10th" includes the 10th
+    clauses.push({
+      dueDate: { [edge]: new Date(edge === "$lte" ? `${value}T23:59:59.999Z` : `${value}T00:00:00.000Z`) },
+    });
+  }
+
+  const updatedSince = url.searchParams.get("updatedSince");
+  if (updatedSince) {
+    if (!DAY.test(updatedSince.slice(0, 10)) || Number.isNaN(Date.parse(updatedSince))) {
+      return refuse(`Invalid updatedSince "${updatedSince.slice(0, 64)}" — a day or an ISO timestamp`);
+    }
+    clauses.push({ updatedAt: { $gte: new Date(updatedSince) } });
+  }
+
+  const blocked = url.searchParams.get("blocked");
+  if (blocked) {
+    if (blocked !== "true" && blocked !== "false") {
+      return refuse(`Invalid blocked "${blocked.slice(0, 64)}" — true or false`);
+    }
+    clauses.push(
+      blocked === "true"
+        ? { "blockedBy.0": { $exists: true } }
+        : { $or: [{ blockedBy: { $exists: false } }, { blockedBy: { $size: 0 } }] }
+    );
+  }
+
+  // The children of one task: parent_of lives on the parent's document, so they are read from there
+  const parent = url.searchParams.get("parent");
+  if (parent) {
+    if (!isValidObjectId(parent)) return refuse("Invalid parent id");
+    const parentTask = await db.Task.findOne({ _id: parent, project: projectId }, "relations").lean();
+    if (!parentTask) return refuse("Invalid parent — no such task on this board");
+    const children = (parentTask.relations ?? [])
+      .filter((r: { type?: string }) => r.type === "parent_of")
+      .map((r: { task: unknown }) => r.task);
+    clauses.push({ _id: { $in: children } });
+  }
+
+  if (fieldParams.length > MAX_FIELD_FILTERS) {
+    return refuse(`At most ${MAX_FIELD_FILTERS} field filters`);
+  }
+  for (const raw of fieldParams) {
+    const cut = raw.indexOf(":");
+    const fieldId = cut < 0 ? "" : raw.slice(0, cut);
+    const value = cut < 0 ? "" : raw.slice(cut + 1);
+    const def = (board?.customFields ?? []).find(
+      (f: { _id: { toString(): string }; archived?: boolean }) => !f.archived && String(f._id) === fieldId
+    );
+    if (!def) return refuse(`Invalid field "${raw.slice(0, 64)}" — expected <fieldId>:<value> for one of this board's fields`);
+
+    let wanted: unknown = value;
+    if (def.fieldType === "dropdown" || def.fieldType === "multiselect") {
+      if (!normalizeOptions(def.options).some((o) => o.id === value)) {
+        return refuse(`Invalid option "${value.slice(0, 64)}" for field "${String(def.name).slice(0, 64)}"`);
+      }
+    } else if (def.fieldType === "number") {
+      if (value.trim() === "" || Number.isNaN(Number(value))) {
+        return refuse(`Invalid number "${value.slice(0, 64)}" for field "${String(def.name).slice(0, 64)}"`);
+      }
+      wanted = Number(value);
+    } else if (def.fieldType === "checkbox") {
+      if (value !== "true" && value !== "false") {
+        return refuse(`Invalid value "${value.slice(0, 64)}" for field "${String(def.name).slice(0, 64)}" — true or false`);
+      }
+      wanted = value === "true";
+    } else if (def.fieldType !== "text") {
+      return refuse(`A ${def.fieldType} field cannot be filtered on`);
+    }
+    clauses.push({ [`customFieldValues.${fieldId}`]: wanted });
+  }
+  if (clauses.length) filter.$and = clauses;
+
+  const view = url.searchParams.get("view");
+  if (view && view !== "summary") return refuse(`Invalid view "${view.slice(0, 64)}" — summary`);
+
+  const limitParam = url.searchParams.get("limit");
+  const offsetParam = url.searchParams.get("offset");
+  const paged = limitParam !== null || offsetParam !== null;
+  const limit = limitParam === null ? DEFAULT_PAGE : Number(limitParam);
+  const offset = offsetParam === null ? 0 : Number(offsetParam);
+  if (paged) {
+    if (!Number.isInteger(limit) || limit < 1 || limit > MAX_PAGE) {
+      return refuse(`Invalid limit "${String(limitParam).slice(0, 64)}" — a whole number from 1 to ${MAX_PAGE}`);
+    }
+    if (!Number.isInteger(offset) || offset < 0) {
+      return refuse(`Invalid offset "${String(offsetParam).slice(0, 64)}" — a whole number, 0 or more`);
+    }
+  }
+
+  // `_id` last, so a page boundary falls in the same place on every request
+  let query = db.Task.find(filter).sort({ order: 1, createdAt: -1, _id: 1 });
+  if (view === "summary") query = query.select(SUMMARY_FIELDS);
+  if (paged) query = query.skip(offset).limit(limit);
+  const tasks = await (view === "summary"
+    ? query.populate([
+        { path: "assignee", select: "username fullName" },
+        { path: "sprint", select: "name" },
+      ])
+    : query.populate(taskPopulateFields));
+  const total = paged ? await db.Task.countDocuments(filter) : undefined;
 
   // A card shows its parent, and the link lives on the parent's document — so it is resolved from
   // the far end, once for the list. Not part of taskPopulateFields, which can only follow refs a
@@ -155,10 +276,12 @@ export const GET = withProjectAccess(async (request, { params, db }) => {
 
   // The board loads every task, so a raw document here would publish each one's whole execution
   // subdocument — run identity included — to every project member on every page load
-  const published = await withApiExecutions(db, tasks);
-  return NextResponse.json(
-    published.map((task) => ({ ...task, parent: parents.get(String(task._id)) ?? null }))
-  );
+  const published =
+    view === "summary"
+      ? tasks.map((task) => (typeof task.toObject === "function" ? task.toObject() : { ...task }))
+      : await withApiExecutions(db, tasks);
+  const listed = published.map((task) => ({ ...task, parent: parents.get(String(task._id)) ?? null }));
+  return NextResponse.json(paged ? { tasks: listed, total, limit, offset } : listed);
 });
 
 

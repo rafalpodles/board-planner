@@ -82,6 +82,22 @@ export class PlannerClient {
     return this.request("GET", `/api/projects/${seg(projectId)}/tasks${query}`) as Promise<unknown[]>;
   }
 
+  /** One page of the board, with the total the filter matches. `fields` repeat as `field=<id>:<value>`. */
+  async pageTasks(
+    projectId: string,
+    filters: Record<string, string>,
+    fields: string[] = []
+  ): Promise<{ tasks: unknown[]; total: number; limit: number; offset: number }> {
+    const params = new URLSearchParams(filters);
+    for (const field of fields) params.append("field", field);
+    return this.request("GET", `/api/projects/${seg(projectId)}/tasks?${params}`) as Promise<{
+      tasks: unknown[];
+      total: number;
+      limit: number;
+      offset: number;
+    }>;
+  }
+
   async getTask(projectId: string, taskId: string): Promise<unknown> {
     return this.request("GET", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}`);
   }

@@ -4,6 +4,8 @@ import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 const getAuthUser = vi.fn();
 const check = vi.fn();
 const taskFind = vi.fn();
+const taskFindOne = vi.fn();
+const taskCount = vi.fn();
 // Whether any task on this board is sitting in the asked-for status — what tells an orphaned
 // column id apart from a typo (BP-514)
 const taskExists = vi.fn();
@@ -12,7 +14,9 @@ const workerFind = vi.fn();
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ getAuthUser, RateLimitError: class extends Error {} }));
 vi.mock("@/lib/grants", () => ({ check }));
-vi.mock("@/models/task", () => ({ Task: { find: taskFind, exists: taskExists } }));
+vi.mock("@/models/task", () => ({
+  Task: { find: taskFind, exists: taskExists, findOne: taskFindOne, countDocuments: taskCount },
+}));
 vi.mock("@/models/worker", () => ({ Worker: { find: workerFind } }));
 const userFindOne = vi.fn();
 vi.mock("@/models/user", () => ({ User: { findOne: userFindOne } }));
@@ -74,6 +78,233 @@ beforeEach(() => {
 
 /** The filter the route actually handed Mongoose */
 const filterUsed = () => taskFind.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
+
+/**
+ * BP-906. A listing a model reads has to fit in its context: paging and a short view, and filters
+ * that run in the database rather than over a board already loaded.
+ */
+describe("GET /api/projects/:projectId/tasks — paging, the summary view and the narrower filters", () => {
+  const SELECT_FIELDS = "taskNumber title status priority assignee dueDate sprint order updatedAt";
+  // The scoped db wraps `populate` on the query it is handed, so the spy lives outside that object
+  let query: Record<"sort" | "select" | "skip" | "limit" | "populate", ReturnType<typeof vi.fn>>;
+  let populateSpy: ReturnType<typeof vi.fn>;
+  const FIELD_ID = "507f1f77bcf86cd799439a01";
+  const NUMBER_ID = "507f1f77bcf86cd799439a02";
+  const CHECK_ID = "507f1f77bcf86cd799439a03";
+  const DATE_ID = "507f1f77bcf86cd799439a04";
+  const OPTION_ID = "opt-large";
+
+  beforeEach(() => {
+    query = {
+      sort: vi.fn(() => query),
+      select: vi.fn(() => query),
+      skip: vi.fn(() => query),
+      limit: vi.fn(() => query),
+      populate: (...args: unknown[]) => populateSpy(...args),
+    } as typeof query;
+    populateSpy = vi.fn(async () => listed);
+    taskFind.mockImplementation((_filter: unknown, projection?: unknown) =>
+      projection === undefined ? query : { lean: async () => parentDocs }
+    );
+    taskCount.mockResolvedValue(57);
+    projectFindOne.mockReturnValue({
+      lean: async () => ({
+        categories: [{ name: "bug" }],
+        customFields: [
+          { _id: FIELD_ID, name: "Size", fieldType: "dropdown", options: [{ id: OPTION_ID, value: "L" }] },
+          { _id: NUMBER_ID, name: "Points", fieldType: "number" },
+          { _id: CHECK_ID, name: "Flagged", fieldType: "checkbox" },
+          { _id: DATE_ID, name: "Due-ish", fieldType: "date" },
+        ],
+      }),
+    });
+  });
+
+  const clauses = () => (filterUsed() as { $and?: unknown[] }).$and;
+
+  describe("paging", () => {
+    it("answers a bare array, as the board has always read it, when no page is asked for", async () => {
+      listed = [{ _id: "a", taskNumber: 1 }];
+      const body = await (await GET(request(), ctx())).json();
+
+      expect(Array.isArray(body)).toBe(true);
+      expect(query.skip).not.toHaveBeenCalled();
+      expect(taskCount).not.toHaveBeenCalled();
+    });
+
+    it("skips and limits in the query, and says what the filter matches in all", async () => {
+      listed = [{ _id: "a", taskNumber: 21 }];
+      const response = await GET(request("?limit=10&offset=20"), ctx());
+      const body = await response.json();
+
+      expect(query.skip).toHaveBeenCalledWith(20);
+      expect(query.limit).toHaveBeenCalledWith(10);
+      expect(body).toMatchObject({ total: 57, limit: 10, offset: 20, tasks: [{ taskNumber: 21 }] });
+      expect(taskCount).toHaveBeenCalledWith(filterUsed());
+    });
+
+    it("breaks ties on the id, so a page boundary falls in the same place every time", async () => {
+      await GET(request("?limit=10"), ctx());
+
+      expect(query.sort).toHaveBeenCalledWith({ order: 1, createdAt: -1, _id: 1 });
+    });
+
+    it("pages from the default size when only an offset is given", async () => {
+      const body = await (await GET(request("?offset=5"), ctx())).json();
+
+      expect(query.limit).toHaveBeenCalledWith(50);
+      expect(body.limit).toBe(50);
+    });
+
+    it.each(["0", "201", "abc", "1.5", "-3", ""])("refuses limit=%j with 400", async (limit) => {
+      const response = await GET(request(`?limit=${limit}`), ctx());
+
+      expect(response.status).toBe(400);
+      expect(taskFind).not.toHaveBeenCalled();
+    });
+
+    it.each(["-1", "abc", "2.5"])("refuses offset=%j with 400", async (offset) => {
+      const response = await GET(request(`?limit=10&offset=${offset}`), ctx());
+
+      expect(response.status).toBe(400);
+      expect(taskFind).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("the summary view", () => {
+    it("reads only the fields a listing shows, and names the people and sprints it points at", async () => {
+      await GET(request("?view=summary"), ctx());
+
+      expect(query.select).toHaveBeenCalledWith(SELECT_FIELDS);
+      expect(populateSpy).toHaveBeenCalledWith([
+        { path: "assignee", select: "username fullName" },
+        { path: "sprint", select: "name" },
+      ]);
+    });
+
+    it("leaves the whole task alone without it", async () => {
+      await GET(request(), ctx());
+
+      expect(query.select).not.toHaveBeenCalled();
+    });
+
+    it("refuses a view it does not have", async () => {
+      expect((await GET(request("?view=everything"), ctx())).status).toBe(400);
+    });
+  });
+
+  describe("due dates, updates and blockers", () => {
+    it("takes a due date range as whole days, the end day included", async () => {
+      await GET(request("?dueAfter=2026-10-01&dueBefore=2026-10-10"), ctx());
+
+      expect(clauses()).toEqual([
+        { dueDate: { $lte: new Date("2026-10-10T23:59:59.999Z") } },
+        { dueDate: { $gte: new Date("2026-10-01T00:00:00.000Z") } },
+      ]);
+    });
+
+    it.each(["dueBefore=10/10/2026", "dueAfter=2026-13-45", "dueBefore=tomorrow", "updatedSince=yesterday"])(
+      "refuses %s with 400",
+      async (param) => {
+        expect((await GET(request(`?${param}`), ctx())).status).toBe(400);
+        expect(taskFind).not.toHaveBeenCalled();
+      }
+    );
+
+    it("takes updatedSince as a day or a timestamp", async () => {
+      await GET(request("?updatedSince=2026-10-01T08:30:00Z"), ctx());
+
+      expect(clauses()).toEqual([{ updatedAt: { $gte: new Date("2026-10-01T08:30:00Z") } }]);
+    });
+
+    it("asks for tasks that have a blocker, or have none", async () => {
+      await GET(request("?blocked=true"), ctx());
+      expect(clauses()).toEqual([{ "blockedBy.0": { $exists: true } }]);
+
+      taskFind.mockClear();
+      await GET(request("?blocked=false"), ctx());
+      expect(clauses()).toEqual([{ $or: [{ blockedBy: { $exists: false } }, { blockedBy: { $size: 0 } }] }]);
+    });
+
+    it("refuses a blocked it cannot read", async () => {
+      expect((await GET(request("?blocked=maybe"), ctx())).status).toBe(400);
+    });
+
+    it("keeps the text search it was combined with", async () => {
+      await GET(request("?search=login&blocked=true"), ctx());
+
+      expect(filterUsed()).toMatchObject({ $or: expect.any(Array), $and: [{ "blockedBy.0": { $exists: true } }] });
+    });
+  });
+
+  describe("the children of one task", () => {
+    const PARENT = "507f1f77bcf86cd799439b01";
+
+    it("reads them from the parent's parent_of links, and only those", async () => {
+      taskFindOne.mockReturnValue({
+        lean: async () => ({
+          relations: [
+            { type: "parent_of", task: "c1" },
+            { type: "relates", task: "other" },
+            { type: "parent_of", task: "c2" },
+          ],
+        }),
+      });
+      await GET(request(`?parent=${PARENT}`), ctx());
+
+      expect(taskFindOne).toHaveBeenCalledWith(
+        expect.objectContaining({ _id: PARENT, project: PROJECT_ID }),
+        "relations"
+      );
+      expect(clauses()).toEqual([{ _id: { $in: ["c1", "c2"] } }]);
+    });
+
+    it("refuses a parent that is not an id, or is not on this board", async () => {
+      expect((await GET(request("?parent=BP-1"), ctx())).status).toBe(400);
+
+      taskFindOne.mockReturnValue({ lean: async () => null });
+      expect((await GET(request(`?parent=${PARENT}`), ctx())).status).toBe(400);
+      expect(taskFind).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("project fields", () => {
+    it("matches a dropdown on its option id", async () => {
+      await GET(request(`?field=${FIELD_ID}:${OPTION_ID}`), ctx());
+
+      expect(clauses()).toEqual([{ [`customFieldValues.${FIELD_ID}`]: OPTION_ID }]);
+    });
+
+    it("reads a number as a number and a checkbox as a boolean", async () => {
+      await GET(request(`?field=${NUMBER_ID}:5&field=${CHECK_ID}:true`), ctx());
+
+      expect(clauses()).toEqual([
+        { [`customFieldValues.${NUMBER_ID}`]: 5 },
+        { [`customFieldValues.${CHECK_ID}`]: true },
+      ]);
+    });
+
+    it.each([
+      ["a field this board does not have", "507f1f77bcf86cd799439aff:x"],
+      ["no value part", "nonsense"],
+      ["an option the field does not offer", `${FIELD_ID}:nope`],
+      ["a number that is not one", `${NUMBER_ID}:five`],
+      ["a checkbox that is neither true nor false", `${CHECK_ID}:yes`],
+      ["a type that cannot be filtered", `${DATE_ID}:2026-10-10`],
+    ])("refuses %s", async (_what, value) => {
+      const response = await GET(request(`?field=${value}`), ctx());
+
+      expect(response.status).toBe(400);
+      expect(taskFind).not.toHaveBeenCalled();
+    });
+
+    it("refuses more field filters than it will combine", async () => {
+      const many = Array.from({ length: 6 }, () => `field=${FIELD_ID}:${OPTION_ID}`).join("&");
+
+      expect((await GET(request(`?${many}`), ctx())).status).toBe(400);
+    });
+  });
+});
 
 // A stale bookmark or a link to a deleted sprint used to reach Mongoose as a raw string
 // and crash with a CastError 500 — this is every caller's protection, not just the board's

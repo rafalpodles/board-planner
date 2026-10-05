@@ -15,6 +15,7 @@ import {
   taskIdsInOrder,
 } from "./strict-input";
 import { MAX_REORDER_IDS } from "@/lib/reorder";
+import { DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT, listedTask, pageOf, sprintParam } from "./task-list";
 
 type ToolExtra = { authInfo?: AuthInfo };
 
@@ -69,7 +70,11 @@ export function registerPlannerTools(server: McpServer): void {
   server.registerTool(
     "list_tasks",
     {
-      description: "List tasks in a project with optional filters",
+      description:
+        `List tasks in a project with optional filters, one page at a time (default ${DEFAULT_LIST_LIMIT}, at most ` +
+        `${MAX_LIST_LIMIT}). The answer says the total the filters match and the offset of the next page; ` +
+        "follow nextOffset until it is null to read the rest. Each task is a short line — key, title, status, " +
+        "priority, assignee, dueDate, sprint name and parent key — unless detail is \"full\"; get_task reads one in full.",
       inputSchema: strictInput({
         project: z.string().describe("Project key (e.g. 'CP')"),
         // The same lie the category description carried, and a worse one: columns have been
@@ -90,9 +95,41 @@ export function registerPlannerTools(server: McpServer): void {
           .optional()
           .describe("Filter by category (project-defined; defaults: bug, doc, user-story, idea)"),
         priority: z.string().optional().describe("Filter by priority: low, medium, high, urgent"),
+        sprint: z
+          .string()
+          .optional()
+          .describe("Filter by sprint name (or id), or \"backlog\" for tasks in no sprint"),
+        search: z.string().optional().describe("Text in the title or description, case-insensitive"),
+        parent: z
+          .string()
+          .optional()
+          .describe("Only the children of this task (its parent_of links), by key — the epic's key lists the epic's tasks"),
+        dueBefore: z.string().optional().describe("Due on or before this day (YYYY-MM-DD); tasks with no due date are left out"),
+        dueAfter: z.string().optional().describe("Due on or after this day (YYYY-MM-DD); tasks with no due date are left out"),
+        updatedSince: z.string().optional().describe("Changed since this day or ISO timestamp"),
+        blocked: z
+          .boolean()
+          .optional()
+          .describe("true: only tasks with at least one blocked_by link; false: only tasks with none"),
+        fields: z
+          .record(z.any())
+          .optional()
+          .describe(
+            "Filter by project-defined fields, keyed by field name, e.g. { \"Difficulty\": \"L\" } — all must match. " +
+              "Dropdown, multiselect, text, number and checkbox fields; get_project lists them."
+          ),
+        limit: z.number().int().min(1).max(MAX_LIST_LIMIT).optional().describe(`Page size (default ${DEFAULT_LIST_LIMIT})`),
+        offset: z.number().int().min(0).optional().describe("Tasks to skip, from a previous answer's nextOffset"),
+        detail: z
+          .enum(["summary", "full"])
+          .optional()
+          .describe("summary (default): one short line per task. full: each task's whole stored body, which is large"),
       }),
     },
-    async ({ project, status, assignee, category, priority }, extra) => {
+    async (
+      { project, status, assignee, category, priority, sprint, search, parent, dueBefore, dueAfter, updatedSince, blocked, fields, limit, offset, detail },
+      extra
+    ) => {
       const client = clientFrom(extra);
       const proj = await client.getProjectByKey(project);
       const filters: Record<string, string> = {};
@@ -100,7 +137,46 @@ export function registerPlannerTools(server: McpServer): void {
       if (assignee) filters.assignee = assignee;
       if (category) filters.category = category;
       if (priority) filters.priority = priority;
-      return json(await client.listTasks(proj._id, filters));
+      if (search) filters.search = search;
+      if (dueBefore) filters.dueBefore = dueBefore;
+      if (dueAfter) filters.dueAfter = dueAfter;
+      if (updatedSince) filters.updatedSince = updatedSince;
+      if (blocked !== undefined) filters.blocked = String(blocked);
+
+      if (sprint) {
+        const needsLookup = !/^[0-9a-f]{24}$/i.test(sprint.trim()) && sprint.trim().toLowerCase() !== "backlog";
+        const sprints = needsLookup ? ((await client.listSprints(proj._id)) as { _id: string; name: string }[]) : [];
+        filters.sprint = sprintParam(sprint, sprints);
+      }
+
+      if (parent) {
+        const end = await client.resolveTaskKey(parent);
+        if (end.projectId !== proj._id) {
+          throw new Error(`${echo(parent.toUpperCase())} is not on ${echo(project.toUpperCase())}, so it has no children here.`);
+        }
+        filters.parent = end.taskId;
+      }
+
+      const fieldFilters: string[] = [];
+      if (fields && Object.keys(fields).length) {
+        const resolved = resolveFieldsByName(fields, proj.customFields || []);
+        for (const [fieldId, value] of Object.entries(resolved)) {
+          for (const one of Array.isArray(value) ? value : [value]) fieldFilters.push(`${fieldId}:${String(one)}`);
+        }
+      }
+
+      const pageSize = limit ?? DEFAULT_LIST_LIMIT;
+      const start = offset ?? 0;
+      const page = await client.pageTasks(
+        proj._id,
+        { ...filters, limit: String(pageSize), offset: String(start), ...(detail === "full" ? {} : { view: "summary" }) },
+        fieldFilters
+      );
+      const shown =
+        detail === "full"
+          ? page.tasks
+          : (page.tasks as Parameters<typeof listedTask>[0][]).map((row) => listedTask(row, project.toUpperCase()));
+      return json(pageOf(shown, page.total, page.offset));
     }
   );
 
