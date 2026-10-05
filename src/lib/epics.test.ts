@@ -55,16 +55,15 @@ describe("progressLine", () => {
 });
 
 describe("epicProgressFor", () => {
-  it("takes done from the column's role, on a board whose done column is not called done", async () => {
+  it("takes done from the column's role: shipped counts, a column merely named done does not", async () => {
     const { db } = fakeDb({
       parents: [{ _id: EPIC, relations: [{ type: "parent_of", task: A }, { type: "parent_of", task: B }, { type: "parent_of", task: C }] }],
-      statuses: { [A]: "shipped", [B]: "doing", [C]: "done" },
+      statuses: { [A]: "shipped", [B]: "shipped", [C]: "done" },
       columns: [column("todo", "backlog", 0), column("doing", "active", 1), column("shipped", "done", 2), column("done", "active", 3)],
     });
-
     const progress = await epicProgressFor(db, "p1", [EPIC]);
 
-    expect(progress.get(EPIC)).toEqual({ total: 3, done: 1, byStatus: { shipped: 1, doing: 1, done: 1 } });
+    expect(progress.get(EPIC)).toEqual({ total: 3, done: 2, byStatus: { shipped: 2, done: 1 } });
   });
 
   it("counts every column carrying the done role", async () => {

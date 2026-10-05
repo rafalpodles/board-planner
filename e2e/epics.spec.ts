@@ -159,12 +159,17 @@ test("done is the column's role, so a board whose done column is called shipped 
     await mongoose.disconnect();
   }
   const { alpha, alphaKids } = await twoEpics(request, "shipped");
-  // A task sitting in the column that is merely NAMED done does not count
-  await request.put(`/api/projects/${PROJECT_ID}/tasks/${alphaKids[0]._id}`, { headers: ADMIN_AUTH, data: { status: "done" } });
+  const move = async (kid: { _id: string }, status: string) => {
+    const response = await request.put(`/api/projects/${PROJECT_ID}/tasks/${kid._id}`, { headers: ADMIN_AUTH, data: { status } });
+    expect(response.status(), await response.text()).toBe(200);
+  };
+  await move(alphaKids[0], "shipped");
+  // In the column that is merely NAMED done, whose role is not: it does not count
+  await move(alphaKids[1], "done");
 
   await signIn(page);
   await page.goto(taskUrl(alpha.taskNumber));
-  await expect(page.getByText("1 of 4 done")).toBeVisible();
+  await expect(page.getByText("2 of 4 done")).toBeVisible();
 });
 
 test.describe("the epic filter", () => {
