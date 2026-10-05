@@ -312,3 +312,22 @@ test.describe("over MCP", () => {
     );
   });
 });
+
+test("an archived child leaves its epic's count, and comes back with a restore", async ({ page, request }) => {
+  const { alpha, alphaKids } = await twoEpics(request);
+  await openBoard(page);
+  const alphaCard = card(page, alpha.taskNumber);
+  await expect(alphaCard.getByText("1 of 4 done")).toBeVisible();
+
+  const archive = await request.post(`/api/projects/${PROJECT_ID}/tasks/${alphaKids[0]._id}/archive`, { headers: ADMIN_AUTH });
+  expect(archive.status(), await archive.text()).toBe(200);
+  await page.reload();
+  await expect(page.locator(CARDS).first()).toBeVisible();
+  await expect(alphaCard.getByText("1 of 3 done")).toBeVisible();
+
+  const restore = await request.delete(`/api/projects/${PROJECT_ID}/tasks/${alphaKids[0]._id}/archive`, { headers: ADMIN_AUTH });
+  expect(restore.status(), await restore.text()).toBe(200);
+  await page.reload();
+  await expect(page.locator(CARDS).first()).toBeVisible();
+  await expect(alphaCard.getByText("1 of 4 done")).toBeVisible();
+});
