@@ -186,7 +186,7 @@ export const taskPopulateFields = [
   // cannot resolve the id and renders "No agent" over a task that is carrying one.
   { path: "agent", select: "name" },
   { path: "blockedBy", select: "taskNumber title status" },
-  { path: "relations.task", select: "taskNumber title status" },
+  { path: "relations.task", select: "taskNumber title status archivedAt" },
 ];
 
 /** The id behind a ref that may or may not have been populated. Guarded first: typeof null is "object". */

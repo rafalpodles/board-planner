@@ -129,6 +129,41 @@ describe("the PM agent's get_task on an epic", () => {
     });
   });
 
+  it("marks an archived child, and asks the relation for archivedAt to know", async () => {
+    epicProgressFor.mockResolvedValue(new Map([["e", { total: 1, done: 0, byStatus: {} }]]));
+    const asked: unknown[][] = [];
+    const task = {
+      _id: "e",
+      taskNumber: 1,
+      title: "Epic",
+      status: "todo",
+      priority: "medium",
+      description: "",
+      checklist: [],
+      blockedBy: [],
+      relations: [
+        { type: "parent_of", task: { taskNumber: 8, title: "A", status: "todo" } },
+        { type: "parent_of", task: { taskNumber: 10, title: "B", status: "todo", archivedAt: new Date() } },
+      ],
+    };
+    const populated = {
+      populate: (...args: unknown[]) => {
+        asked.push(args);
+        return populated;
+      },
+      then: (resolve: (t: unknown) => void) => resolve(task),
+    };
+    const db = { Task: { findOne: async () => task, findById: () => populated } } as never;
+
+    const { result } = await PM_TOOLS.get_task.execute(db, { taskKey: "BP-1" }, ctx);
+
+    expect((result as { children: unknown[] }).children).toEqual([
+      { key: "BP-8", title: "A", status: "todo" },
+      { key: "BP-10", title: "B", status: "todo", archived: true },
+    ]);
+    expect(asked.find(([path]) => path === "relations.task")?.[1]).toMatch(/archivedAt/);
+  });
+
   it("leaves both out for a task with no children", async () => {
     const { result } = await PM_TOOLS.get_task.execute(getDb([]), { taskKey: "BP-1" }, ctx);
 

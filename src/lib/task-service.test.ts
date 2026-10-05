@@ -4379,6 +4379,10 @@ describe("what a task is populated with before it is answered", () => {
     expect(path("agent")).toEqual({ path: "agent", select: "name" });
   });
 
+  it("asks a related task whether it is archived, so the page can dim an archived child", () => {
+    expect(path("relations.task")?.select).toMatch(/\barchivedAt\b/);
+  });
+
   it("still names everyone else a task detail renders", () => {
     expect(taskPopulateFields.map((f) => f.path)).toEqual([
       "assignee",

@@ -328,7 +328,7 @@ export const PM_TOOLS: Record<string, PmTool> = {
       const t = await db.Task.findById(resolved.task._id)
         .populate("assignee", "username fullName")
         .populate("blockedBy", "taskNumber title status")
-        .populate("relations.task", "taskNumber title status");
+        .populate("relations.task", "taskNumber title status archivedAt");
       if (!t) return { result: { error: "Task not found" } };
       const progress = (await epicProgressFor(db, ctx.projectId, [String(t._id)])).get(String(t._id));
       return {
@@ -350,7 +350,14 @@ export const PM_TOOLS: Record<string, PmTool> = {
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 children: (t.relations || []).flatMap((r: any) =>
                   r.type === "parent_of" && r.task?.taskNumber
-                    ? [{ key: `${ctx.projectKey}-${r.task.taskNumber}`, title: r.task.title, status: r.task.status }]
+                    ? [
+                        {
+                          key: `${ctx.projectKey}-${r.task.taskNumber}`,
+                          title: r.task.title,
+                          status: r.task.status,
+                          ...(r.task.archivedAt ? { archived: true } : {}),
+                        },
+                      ]
                     : []
                 ),
               }

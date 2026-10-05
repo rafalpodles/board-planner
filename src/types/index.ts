@@ -1375,6 +1375,7 @@ export interface ApiTaskLink {
   taskNumber: number;
   title: string;
   status: TaskStatus;
+  archivedAt?: string | null;
 }
 
 /** Children of an epic, counted on the server; `done` is the board's done column role, not an id */
