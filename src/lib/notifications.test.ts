@@ -1,4 +1,8 @@
+import { Types } from "mongoose";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+const TEST_ORGANISATION = new Types.ObjectId("000000000000000000000001");
+
 
 const KEY = "b".repeat(64);
 const OTHER_KEY = "c".repeat(64);
@@ -62,7 +66,7 @@ afterEach(() => {
 describe("dispatchNotifications", () => {
   // BP-372
   it("posts to the URL a stored ciphertext decrypts to, not to the ciphertext", async () => {
-    projectWith(encryptSecret("https://hooks.slack.com/services/T/B/secret"));
+    projectWith(encryptSecret("https://hooks.slack.com/services/T/B/secret", TEST_ORGANISATION));
 
     await dispatchNotifications(scopedToDefaultOrganisation(), "p1", "task_created", PAYLOAD);
 
@@ -81,7 +85,7 @@ describe("dispatchNotifications", () => {
   });
 
   it("reads a value written by a retired key", async () => {
-    const written = encryptSecret("https://hooks.slack.com/services/T/B/rotated");
+    const written = encryptSecret("https://hooks.slack.com/services/T/B/rotated", TEST_ORGANISATION);
     process.env.ENCRYPTION_KEYS_OLD = KEY;
     process.env.ENCRYPTION_KEY = OTHER_KEY;
     projectWith(written);
@@ -95,10 +99,10 @@ describe("dispatchNotifications", () => {
   // down with it, which is what letting decryptSecret throw into the outer catch would do
   it("skips only the channel whose URL no configured key can read, and names it", async () => {
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
-    const lost = encryptSecret("https://hooks.slack.com/services/T/B/lost");
+    const lost = encryptSecret("https://hooks.slack.com/services/T/B/lost", TEST_ORGANISATION);
     process.env.ENCRYPTION_KEYS_OLD = OTHER_KEY;
     process.env.ENCRYPTION_KEY = OTHER_KEY;
-    projectWith(lost, encryptSecret("https://hooks.slack.com/services/T/B/readable"));
+    projectWith(lost, encryptSecret("https://hooks.slack.com/services/T/B/readable", TEST_ORGANISATION));
 
     await dispatchNotifications(scopedToDefaultOrganisation(), "p1", "task_created", PAYLOAD);
 
@@ -114,7 +118,7 @@ describe("dispatchNotifications", () => {
   });
 
   it("still refuses a decrypted URL the allowlist rejects", async () => {
-    projectWith(encryptSecret("http://127.0.0.1/internal"));
+    projectWith(encryptSecret("http://127.0.0.1/internal", TEST_ORGANISATION));
 
     await dispatchNotifications(scopedToDefaultOrganisation(), "p1", "task_created", PAYLOAD);
 
@@ -312,7 +316,7 @@ describe("dispatchNotifications — which channels are eligible", () => {
           notificationChannels: rows.map((row, i) => ({
             type: "slack",
             name: row.name,
-            webhookUrl: encryptSecret(`https://hooks.slack.com/services/T/B/${i}`),
+            webhookUrl: encryptSecret(`https://hooks.slack.com/services/T/B/${i}`, TEST_ORGANISATION),
             events: row.events,
             enabled: row.enabled,
           })),
@@ -352,7 +356,7 @@ describe("dispatchNotifications — which channels are eligible", () => {
 
 describe("where a project channel message may go", () => {
   it("fetches with the webhook destination rule", async () => {
-    projectWith(encryptSecret("https://hooks.slack.com/services/T/B/secret"));
+    projectWith(encryptSecret("https://hooks.slack.com/services/T/B/secret", TEST_ORGANISATION));
 
     await dispatchNotifications(scopedToDefaultOrganisation(), "p1", "task_created", PAYLOAD);
 

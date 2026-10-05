@@ -1,5 +1,9 @@
+import { Types } from "mongoose";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import crypto from "crypto";
+
+const TEST_ORGANISATION = new Types.ObjectId("000000000000000000000001");
+
 
 const KEY_A = crypto.randomBytes(32).toString("hex");
 const KEY_B = crypto.randomBytes(32).toString("base64");
@@ -25,10 +29,10 @@ describe("encryptSecret", () => {
     process.env.ENCRYPTION_KEY = KEY_A;
     const { encryptSecret, decryptSecret } = await load();
 
-    const sealed = encryptSecret("ghp_supersecret");
+    const sealed = encryptSecret("ghp_supersecret", TEST_ORGANISATION);
 
     expect(sealed).not.toContain("ghp_supersecret");
-    expect(decryptSecret(sealed)).toBe("ghp_supersecret");
+    expect(decryptSecret(sealed, TEST_ORGANISATION)).toBe("ghp_supersecret");
   });
 
   // BP-282: with no key it used to return the plaintext, which was then stored as-is.
@@ -36,14 +40,14 @@ describe("encryptSecret", () => {
   it("refuses to hand back plaintext when no key is configured", async () => {
     const { encryptSecret } = await load();
 
-    expect(() => encryptSecret("ghp_supersecret")).toThrowError(/ENCRYPTION_KEY is not configured/);
+    expect(() => encryptSecret("ghp_supersecret", TEST_ORGANISATION)).toThrowError(/ENCRYPTION_KEY is not configured/);
   });
 
   it("stamps the envelope with the id of the key that wrote it", async () => {
     process.env.ENCRYPTION_KEY = KEY_A;
     const { encryptSecret } = await load();
 
-    expect(encryptSecret("x")).toMatch(/^enc:v2:[0-9a-f]{8}:/);
+    expect(encryptSecret("x", TEST_ORGANISATION)).toMatch(/^enc:v3:[0-9a-f]{8}:/);
   });
 });
 
@@ -79,7 +83,7 @@ describe("assertEncryptionConfig", () => {
     for (const key of [KEY_A, KEY_B, KEY_B.replace(/=$/, "")]) {
       process.env.ENCRYPTION_KEY = key;
       const { encryptSecret, decryptSecret } = await load();
-      expect(decryptSecret(encryptSecret("ghp_supersecret"))).toBe("ghp_supersecret");
+      expect(decryptSecret(encryptSecret("ghp_supersecret", TEST_ORGANISATION), TEST_ORGANISATION)).toBe("ghp_supersecret");
     }
   });
 
@@ -111,13 +115,13 @@ describe("rotation", () => {
   it("reads a secret written by a key that has since been retired", async () => {
     process.env.ENCRYPTION_KEY = KEY_A;
     const before = await load();
-    const sealed = before.encryptSecret("gitlab-token");
+    const sealed = before.encryptSecret("gitlab-token", TEST_ORGANISATION);
 
     process.env.ENCRYPTION_KEY = KEY_B;
     process.env.ENCRYPTION_KEYS_OLD = KEY_A;
     const after = await load();
 
-    expect(after.decryptSecret(sealed)).toBe("gitlab-token");
+    expect(after.decryptSecret(sealed, TEST_ORGANISATION)).toBe("gitlab-token");
   });
 
   // Without the key id this was the whole failure mode: every stored secret threw at
@@ -125,13 +129,13 @@ describe("rotation", () => {
   it("names the missing key id when the key that wrote a secret is gone", async () => {
     process.env.ENCRYPTION_KEY = KEY_A;
     const before = await load();
-    const sealed = before.encryptSecret("gitlab-token");
+    const sealed = before.encryptSecret("gitlab-token", TEST_ORGANISATION);
     const id = sealed.split(":")[2];
 
     process.env.ENCRYPTION_KEY = KEY_B;
     const after = await load();
 
-    expect(() => after.decryptSecret(sealed)).toThrowError(new RegExp(`key matches id ${id}`));
+    expect(() => after.decryptSecret(sealed, TEST_ORGANISATION)).toThrowError(new RegExp(`key matches id ${id}`));
   });
 
   it("still reads a v1 envelope written before key ids existed", async () => {
@@ -144,7 +148,7 @@ describe("rotation", () => {
     const enc = Buffer.concat([cipher.update("legacy", "utf8"), cipher.final()]);
     const v1 = "enc:v1:" + Buffer.concat([iv, cipher.getAuthTag(), enc]).toString("base64");
 
-    expect(decryptSecret(v1)).toBe("legacy");
+    expect(decryptSecret(v1, TEST_ORGANISATION)).toBe("legacy");
   });
 
   it("tries every configured key against a v1 envelope, which carries no id", async () => {
@@ -157,11 +161,11 @@ describe("rotation", () => {
     const enc = Buffer.concat([cipher.update("legacy", "utf8"), cipher.final()]);
     const v1 = "enc:v1:" + Buffer.concat([iv, cipher.getAuthTag(), enc]).toString("base64");
 
-    expect(() => decryptSecret(v1)).toThrowError(/No configured encryption key can read/);
+    expect(() => decryptSecret(v1, TEST_ORGANISATION)).toThrowError(/No configured encryption key can read/);
 
     process.env.ENCRYPTION_KEYS_OLD = KEY_B;
     const after = await load();
-    expect(after.decryptSecret(v1)).toBe("legacy");
+    expect(after.decryptSecret(v1, TEST_ORGANISATION)).toBe("legacy");
   });
 });
 
@@ -170,8 +174,8 @@ describe("decryptSecret", () => {
     process.env.ENCRYPTION_KEY = KEY_A;
     const { decryptSecret } = await load();
 
-    expect(decryptSecret("plain-legacy-token")).toBe("plain-legacy-token");
-    expect(decryptSecret("")).toBe("");
+    expect(decryptSecret("plain-legacy-token", TEST_ORGANISATION)).toBe("plain-legacy-token");
+    expect(decryptSecret("", TEST_ORGANISATION)).toBe("");
   });
 });
 
@@ -187,14 +191,14 @@ describe("isEncryptedSecret", () => {
 
     expect(isEncryptedSecret("enc:v1:" + Buffer.from("anything").toString("base64"))).toBe(true);
     expect(isEncryptedSecret("enc:v2:deadbeef:" + Buffer.from("anything").toString("base64"))).toBe(true);
-    expect(isEncryptedSecret(encryptSecret("https://hooks.slack.com/services/T/B/x"))).toBe(true);
+    expect(isEncryptedSecret(encryptSecret("https://hooks.slack.com/services/T/B/x", TEST_ORGANISATION))).toBe(true);
   });
 
   it("says no to a plaintext URL, to a near-miss prefix, and to nothing at all", async () => {
     const { isEncryptedSecret } = await load();
 
     expect(isEncryptedSecret("https://hooks.slack.com/services/T/B/x")).toBe(false);
-    expect(isEncryptedSecret("enc:v3:deadbeef:zzz")).toBe(false);
+    expect(isEncryptedSecret("enc:v4:deadbeef:zzz")).toBe(false);
     expect(isEncryptedSecret("enc:")).toBe(false);
     expect(isEncryptedSecret("")).toBe(false);
     expect(isEncryptedSecret(undefined)).toBe(false);
@@ -209,16 +213,16 @@ describe("readableSecretPatterns", () => {
 
   it("agrees with decryptSecret on plaintext, the current key's envelope and a lost key's", async () => {
     process.env.ENCRYPTION_KEY = KEY_B;
-    const lost = (await load()).encryptSecret("https://hooks.example.com/lost");
+    const lost = (await load()).encryptSecret("https://hooks.example.com/lost", TEST_ORGANISATION);
     process.env.ENCRYPTION_KEY = KEY_A;
-    const current = (await load()).encryptSecret("https://hooks.example.com/current");
+    const current = (await load()).encryptSecret("https://hooks.example.com/current", TEST_ORGANISATION);
     const { readableSecretPatterns, decryptSecret } = await load();
     const patterns = readableSecretPatterns();
 
     for (const value of [current, lost, "https://hooks.example.com/plain"]) {
       let opens = true;
       try {
-        decryptSecret(value);
+        decryptSecret(value, TEST_ORGANISATION);
       } catch {
         opens = false;
       }
@@ -229,7 +233,7 @@ describe("readableSecretPatterns", () => {
 
   it("admits a retired key's envelope while that key stays configured", async () => {
     process.env.ENCRYPTION_KEY = KEY_B;
-    const retired = (await load()).encryptSecret("x");
+    const retired = (await load()).encryptSecret("x", TEST_ORGANISATION);
     process.env.ENCRYPTION_KEY = KEY_A;
     process.env.ENCRYPTION_KEYS_OLD = KEY_B;
     const { readableSecretPatterns } = await load();
@@ -239,7 +243,7 @@ describe("readableSecretPatterns", () => {
 
   it("admits no envelope at all when no key is configured", async () => {
     process.env.ENCRYPTION_KEY = KEY_A;
-    const sealed = (await load()).encryptSecret("x");
+    const sealed = (await load()).encryptSecret("x", TEST_ORGANISATION);
     delete process.env.ENCRYPTION_KEY;
     const { readableSecretPatterns } = await load();
     const patterns = readableSecretPatterns();
@@ -247,5 +251,68 @@ describe("readableSecretPatterns", () => {
     expect(readable(patterns, sealed)).toBe(false);
     expect(readable(patterns, "enc:v1:abc")).toBe(false);
     expect(readable(patterns, "https://hooks.example.com/plain")).toBe(true);
+  });
+});
+
+describe("a data key per organisation (BP-898)", () => {
+  const OTHER = new Types.ObjectId("0000000000000000000000b2");
+
+  // The v2 envelope as the release before wrote it: the instance key itself, no organisation
+  function legacyV2(plaintext: string, raw: string): string {
+    const material = /^[0-9a-f]{64}$/.test(raw) ? Buffer.from(raw, "hex") : Buffer.from(raw, "base64");
+    const id = crypto.createHash("sha256").update(material).digest("hex").slice(0, 8);
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv("aes-256-gcm", material, iv);
+    const enc = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+    return `enc:v2:${id}:${Buffer.concat([iv, cipher.getAuthTag(), enc]).toString("base64")}`;
+  }
+
+  it("does not open one organisation's secret for another, though both hold the same instance key", async () => {
+    process.env.ENCRYPTION_KEY = KEY_A;
+    const { encryptSecret, decryptSecret } = await load();
+    const sealed = encryptSecret("ghp_acme", TEST_ORGANISATION);
+
+    expect(decryptSecret(sealed, TEST_ORGANISATION)).toBe("ghp_acme");
+    expect(() => decryptSecret(sealed, OTHER)).toThrow(/another organisation/);
+  });
+
+  it("is not the instance key: a secret seals as v3, which a v2 reader of the instance key cannot open", async () => {
+    process.env.ENCRYPTION_KEY = KEY_A;
+    const { encryptSecret, isInstanceKeySecret } = await load();
+
+    const sealed = encryptSecret("ghp", TEST_ORGANISATION);
+    expect(sealed.startsWith("enc:v3:")).toBe(true);
+    expect(isInstanceKeySecret(sealed)).toBe(false);
+    const [, , , payload] = sealed.split(":");
+    const raw = Buffer.from(payload, "base64");
+    const decipher = crypto.createDecipheriv("aes-256-gcm", Buffer.from(KEY_A, "hex"), raw.subarray(0, 12));
+    decipher.setAuthTag(raw.subarray(12, 28));
+    expect(() => Buffer.concat([decipher.update(raw.subarray(28)), decipher.final()])).toThrow();
+  });
+
+  it("still reads a secret written under the instance key before, for any organisation", async () => {
+    process.env.ENCRYPTION_KEY = KEY_A;
+    const { decryptSecret, isInstanceKeySecret } = await load();
+    const old = legacyV2("ghp_old", KEY_A);
+
+    expect(isInstanceKeySecret(old)).toBe(true);
+    expect(decryptSecret(old, TEST_ORGANISATION)).toBe("ghp_old");
+    expect(decryptSecret(old, OTHER)).toBe("ghp_old");
+  });
+
+  it("survives a rotation: a v3 secret written under a retired key opens once that key is in ENCRYPTION_KEYS_OLD", async () => {
+    process.env.ENCRYPTION_KEY = KEY_A;
+    const sealed = (await load()).encryptSecret("ghp_rotated", TEST_ORGANISATION);
+
+    process.env.ENCRYPTION_KEY = KEY_B;
+    process.env.ENCRYPTION_KEYS_OLD = KEY_A;
+    const after = await load();
+    expect(after.decryptSecret(sealed, TEST_ORGANISATION)).toBe("ghp_rotated");
+    expect(after.readableSecretPatterns().some((pattern) => pattern.test(sealed))).toBe(true);
+
+    delete process.env.ENCRYPTION_KEYS_OLD;
+    const lost = await load();
+    expect(() => lost.decryptSecret(sealed, TEST_ORGANISATION)).toThrow(/No configured encryption key/);
+    expect(lost.readableSecretPatterns().some((pattern) => pattern.test(sealed))).toBe(false);
   });
 });

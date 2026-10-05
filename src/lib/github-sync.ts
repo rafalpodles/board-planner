@@ -270,7 +270,7 @@ export async function syncGithubPullRequests(
     };
   }
 
-  const token = decryptSecret(project.githubToken);
+  const token = decryptSecret(project.githubToken, db.organisation);
   const rawPRs = await fetchPullRequests(parsed.owner, parsed.repo, token);
   const matchedPRs = await withChecks(
     matchPRsToTasks(rawPRs, project.key, project.formerKeys || []),

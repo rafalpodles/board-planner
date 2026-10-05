@@ -2431,12 +2431,12 @@ export const GITLAB_TASK_TITLE = "Mirror the fix on GitLab";
 
 // Imported lazily and under the server's key: encryption.ts checks the variable when it loads, and
 // the runner's own environment has none, or whatever the developer's shell exported.
-async function sealedWithTheServersKey(secret: string): Promise<string> {
+async function sealedWithTheServersKey(secret: string, organisation = DEFAULT_ORGANISATION_ID): Promise<string> {
   const own = process.env.ENCRYPTION_KEY;
   process.env.ENCRYPTION_KEY = E2E_ENCRYPTION_KEY;
   try {
     const { encryptSecret } = await import("@/lib/encryption");
-    return encryptSecret(secret);
+    return encryptSecret(secret, organisation);
   } finally {
     if (own === undefined) delete process.env.ENCRYPTION_KEY;
     else process.env.ENCRYPTION_KEY = own;

@@ -26,7 +26,7 @@ export const GET = withProjectAccess(async (_request, { params, db }) => {
   }
 
   const host = project.gitlabHost || "https://gitlab.com";
-  const token = decryptSecret(project.gitlabToken);
+  const token = decryptSecret(project.gitlabToken, db.organisation);
   const taskKey = `${project.key}-${task.taskNumber}`;
 
   // Commit search needs GitLab's search feature; a repo without it should still

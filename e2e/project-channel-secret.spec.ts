@@ -10,7 +10,7 @@ import { signIn } from "./session";
  *
  * **What a browser can reach here and the unit tests cannot.** The screen never holds the real URL:
  * it renders `webhookUrlMasked`, which `sanitizeProjectSecrets` computes from the stored string. An
- * `enc:v2:…` envelope is a perfectly parseable URL with a non-special scheme, so masking the stored
+ * `enc:v3:…` envelope is a perfectly parseable URL with a non-special scheme, so masking the stored
  * value without decrypting first yields `null/••••` plus a tail of ciphertext — a settings screen on
  * which no owner can tell one channel from another, and nothing below the browser notices.
  *
@@ -102,7 +102,7 @@ async function addChannelThroughTheForm(page: Page, name: string, url: string) {
   // that answer is the one surface `sanitizeProjectSecrets` has to strip on the way out
   const body = JSON.stringify(await response.json());
   expect(body).not.toContain(url);
-  expect(body).not.toContain("enc:v2:");
+  expect(body).not.toMatch(/enc:v\d:/);
   expect(body).toContain("webhookUrlMasked");
 }
 
@@ -118,7 +118,7 @@ test.describe("a project's chat webhook URL", () => {
     expect(stored.webhookUrl).not.toContain(RAW_URL);
     expect(stored.webhookUrl).not.toContain("hooks.slack.com");
     expect(stored.webhookUrl).not.toContain("writeThroughTheForm");
-    expect(stored.webhookUrl).toMatch(/^enc:v2:[0-9a-f]{8}:/);
+    expect(stored.webhookUrl).toMatch(/^enc:v3:[0-9a-f]{8}:/);
 
     // …and the control, because ciphertext nobody can read back is not a fix: the row is still on
     // screen, named by the host it points at rather than by the envelope it is stored as
@@ -134,7 +134,7 @@ test.describe("a project's chat webhook URL", () => {
     // form was holding, which is the read the unmasked ciphertext would have broken
     await openTeamChannels(page);
     await expect(page.getByText("https://hooks.slack.com/••••Form")).toBeVisible();
-    await expect(page.getByText(/^enc:v2:/)).toHaveCount(0);
+    await expect(page.getByText(/^enc:v\d:/)).toHaveCount(0);
     await expect(page.getByText("null/••••")).toHaveCount(0);
   });
 
@@ -157,12 +157,12 @@ test.describe("a project's chat webhook URL", () => {
     // it is held to the same three assertions the POST answer is
     const body = JSON.stringify(await response.json());
     expect(body).not.toContain(REPLACEMENT_URL);
-    expect(body).not.toContain("enc:v2:");
+    expect(body).not.toMatch(/enc:v\d:/);
     expect(body).toContain("webhookUrlMasked");
 
     const stored = await storedChannel("Releases");
     expect(stored.webhookUrl).not.toContain("typedIntoTheRow");
-    expect(stored.webhookUrl).toMatch(/^enc:v2:[0-9a-f]{8}:/);
+    expect(stored.webhookUrl).toMatch(/^enc:v3:[0-9a-f]{8}:/);
     // A fresh envelope, not the old one carried over — the replacement really was written
     expect(stored.webhookUrl).not.toBe(first.webhookUrl);
     await expect(page.getByText("https://hooks.slack.com/••••eRow")).toBeVisible();
@@ -190,14 +190,14 @@ test.describe("a project's chat webhook URL", () => {
 
     const stored = await storedChannel("Legacy");
     expect(stored.webhookUrl).not.toContain("hooks.slack.com");
-    expect(stored.webhookUrl).toMatch(/^enc:v2:[0-9a-f]{8}:/);
+    expect(stored.webhookUrl).toMatch(/^enc:v3:[0-9a-f]{8}:/);
 
     // Reloaded before reading the screen. The same masked string was already on it before the save
     // — `decryptSecret` passes plaintext through, so both states mask identically — and asserting
     // it in place would be satisfied by the DOM the trigger had not yet replaced.
     await openTeamChannels(page);
     await expect(page.getByText("https://hooks.slack.com/••••p372")).toBeVisible();
-    await expect(page.getByText(/^enc:v2:/)).toHaveCount(0);
+    await expect(page.getByText(/^enc:v\d:/)).toHaveCount(0);
     await expect(page.getByText("null/••••")).toHaveCount(0);
   });
 });

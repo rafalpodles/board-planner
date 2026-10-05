@@ -1,4 +1,8 @@
+import { Types } from "mongoose";
 import { describe, it, expect, vi, afterEach } from "vitest";
+
+const TEST_ORGANISATION = new Types.ObjectId("000000000000000000000001");
+
 
 process.env.ENCRYPTION_KEY = "d".repeat(64);
 
@@ -46,7 +50,7 @@ describe("sanitizeProjectSecrets", () => {
       githubToken: "ghp_aaa",
       gitlabToken: "glpat_bbb",
       codaToken: "coda_ccc",
-    });
+    }, TEST_ORGANISATION);
 
     expect(sanitized).toMatchObject({
       name: "Test",
@@ -60,7 +64,7 @@ describe("sanitizeProjectSecrets", () => {
   });
 
   it("reports a token as unset rather than omitting the flag", () => {
-    const sanitized = sanitizeProjectSecrets({ name: "Test" });
+    const sanitized = sanitizeProjectSecrets({ name: "Test" }, TEST_ORGANISATION);
 
     expect(sanitized).toMatchObject({
       githubTokenSet: false,
@@ -81,7 +85,7 @@ describe("sanitizeProjectSecrets", () => {
           enabled: true,
         },
       ],
-    });
+    }, TEST_ORGANISATION);
 
     const channel = (sanitized.notificationChannels as Record<string, unknown>[])[0];
     expect(channel).toMatchObject({
@@ -97,10 +101,10 @@ describe("sanitizeProjectSecrets", () => {
   // scheme — masking it without decrypting first prints `null/••••` and a tail of ciphertext
   it("masks a stored channel URL by its real host, and never leaks the ciphertext", () => {
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
-    const stored = encryptSecret("https://hooks.slack.com/services/T000/B111/abcdef123456");
+    const stored = encryptSecret("https://hooks.slack.com/services/T000/B111/abcdef123456", TEST_ORGANISATION);
     const sanitized = sanitizeProjectSecrets({
       notificationChannels: [{ _id: "c1", name: "Releases", webhookUrl: stored, enabled: true }],
-    });
+    }, TEST_ORGANISATION);
 
     const channel = (sanitized.notificationChannels as Record<string, unknown>[])[0];
     expect(channel.webhookUrlMasked).toBe("https://hooks.slack.com/••••3456");
@@ -121,7 +125,7 @@ describe("sanitizeProjectSecrets", () => {
         notificationChannels: [
           { _id: "c1", name, webhookUrl: "enc:v2:deadbeef:Zm9v", enabled: true },
         ],
-      });
+      }, TEST_ORGANISATION);
 
     const sanitized = unreadable();
 
@@ -149,7 +153,7 @@ describe("sanitizeProjectSecrets", () => {
       webhooks: [
         { _id: "w1", url: "https://example.com/hooks/secret-path-9876", enabled: true },
       ],
-    });
+    }, TEST_ORGANISATION);
 
     const webhook = (sanitized.webhooks as Record<string, unknown>[])[0];
     expect(webhook).toMatchObject({
@@ -171,7 +175,7 @@ describe("sanitizeProjectSecrets", () => {
       createdBy: null,
       owner: "507f1f77bcf86cd799439011",
       admins: ["507f1f77bcf86cd799439012"],
-    });
+    }, TEST_ORGANISATION);
 
     expect(sanitized).not.toHaveProperty("owner");
     expect(sanitized).not.toHaveProperty("admins");
@@ -179,7 +183,7 @@ describe("sanitizeProjectSecrets", () => {
   });
 
   it("leaves a project with no channels or webhooks alone", () => {
-    const sanitized: Record<string, unknown> = sanitizeProjectSecrets({ name: "Bare" });
+    const sanitized: Record<string, unknown> = sanitizeProjectSecrets({ name: "Bare" }, TEST_ORGANISATION);
 
     expect(sanitized.notificationChannels).toBeUndefined();
     expect(sanitized.webhooks).toBeUndefined();

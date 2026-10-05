@@ -1,4 +1,8 @@
+import { Types } from "mongoose";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+const TEST_ORGANISATION = new Types.ObjectId("000000000000000000000001");
+
 
 const PROJECT = "507f1f77bcf86cd799439021";
 const OTHER_PROJECT = "507f1f77bcf86cd799439022";
@@ -438,7 +442,7 @@ describe("a board with more subscribers than the cap", () => {
       const saved = { key: process.env.ENCRYPTION_KEY, old: process.env.ENCRYPTION_KEYS_OLD };
       const sealedWith = (key: string) => {
         process.env.ENCRYPTION_KEY = key;
-        return encryptSecret("https://hooks.slack.com/services/T0/B0/x");
+        return encryptSecret("https://hooks.slack.com/services/T0/B0/x", TEST_ORGANISATION);
       };
       const chatOnly = (n: number, webhookUrl: string) =>
         member(n, {

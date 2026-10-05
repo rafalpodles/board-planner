@@ -71,7 +71,7 @@ async function resolveOauthAccessToken(
   const fresh =
     !opts.force &&
     (!oauth.expiresAt || new Date(oauth.expiresAt).getTime() > Date.now() + EXPIRY_MARGIN_MS);
-  if (fresh) return decryptSecret(oauth.accessToken);
+  if (fresh) return decryptSecret(oauth.accessToken, db.organisation);
 
   if (!oauth.refreshToken) {
     await persistOauthFields(db, projectId, server, { status: "needs_reauth" });
@@ -87,14 +87,14 @@ async function resolveOauthAccessToken(
       const tokens = await refreshTokens({
         tokenEndpoint: oauth.tokenEndpoint,
         clientId: oauth.clientId,
-        clientSecret: oauth.clientSecret ? decryptSecret(oauth.clientSecret) : "",
+        clientSecret: oauth.clientSecret ? decryptSecret(oauth.clientSecret, db.organisation) : "",
         tokenAuthMethod: oauth.tokenAuthMethod || "none",
-        refreshToken: decryptSecret(oauth.refreshToken),
+        refreshToken: decryptSecret(oauth.refreshToken, db.organisation),
         resource: server.url,
       });
       const fields = {
-        accessToken: encryptSecret(tokens.accessToken),
-        refreshToken: tokens.refreshToken ? encryptSecret(tokens.refreshToken) : oauth.refreshToken,
+        accessToken: encryptSecret(tokens.accessToken, db.organisation),
+        refreshToken: tokens.refreshToken ? encryptSecret(tokens.refreshToken, db.organisation) : oauth.refreshToken,
         expiresAt: tokens.expiresAt,
         status: "connected" as const,
       };
@@ -127,7 +127,7 @@ export async function resolveServerToken(
   if (server.authType === "oauth") {
     return resolveOauthAccessToken(db, projectId, server);
   }
-  return resolveMcpAuthToken(server);
+  return resolveMcpAuthToken(server, db.organisation);
 }
 
 // The transport status, not the message: a JSON-RPC-level error's `message` is text the MCP peer

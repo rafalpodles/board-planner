@@ -46,6 +46,7 @@ interface StoredChannel {
 
 interface StoredProject {
   _id: mongoose.Types.ObjectId;
+  organisation: mongoose.Types.ObjectId;
   key?: string;
   notificationChannels?: StoredChannel[];
 }
@@ -99,7 +100,7 @@ async function main() {
         // including a webhook rotated in response to this script's own closing advice.
         const result = await db.collection("projects").updateOne(
           { _id: project._id },
-          { $set: { "notificationChannels.$[c].webhookUrl": encryptSecret(url) } },
+          { $set: { "notificationChannels.$[c].webhookUrl": encryptSecret(url, project.organisation) } },
           { arrayFilters: [{ "c._id": channel._id, "c.webhookUrl": url }] }
         );
         if (result.modifiedCount === 0) {

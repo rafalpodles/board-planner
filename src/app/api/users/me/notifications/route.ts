@@ -1,3 +1,4 @@
+import type { Types } from "mongoose";
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withAuth } from "@/lib/middleware";
@@ -50,7 +51,8 @@ type Refusal = { error: string; status: number };
  */
 function resolveChat(
   body: unknown,
-  storedChat: { kind?: string; webhookUrl?: string } | undefined
+  storedChat: { kind?: string; webhookUrl?: string } | undefined,
+  organisation: Types.ObjectId
 ): ChatOutcome | Refusal {
   const chat = (body as { chat?: unknown })?.chat;
   // Absent says nothing about the connection, and neither does a value that is not an object.
@@ -107,7 +109,7 @@ function resolveChat(
       status: 503,
     };
   }
-  return { writes: { kind, webhookUrl: encryptSecret(url) } };
+  return { writes: { kind, webhookUrl: encryptSecret(url, organisation) } };
 }
 
 function isRefusal(outcome: ChatOutcome | Refusal): outcome is Refusal {
@@ -141,7 +143,7 @@ export const PUT = withAuth(async (request, { user, db }) => {
   }
 
   const stored = await db.User.findById(user._id, "notifications.chat").lean();
-  const chat = resolveChat(body, stored?.notifications?.chat);
+  const chat = resolveChat(body, stored?.notifications?.chat, db.organisation);
   if (isRefusal(chat)) {
     return NextResponse.json({ error: chat.error }, { status: chat.status });
   }

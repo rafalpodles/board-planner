@@ -1,3 +1,4 @@
+import type { Types } from "mongoose";
 import { decryptSecret } from "./encryption";
 
 const MASK = "••••";
@@ -39,13 +40,14 @@ export function maskSecretUrl(value: string | undefined): string {
  */
 function maskStoredUrl(
   value: string | undefined,
+  organisation: Types.ObjectId,
   row: string,
   project: string,
   channel: string
 ): string {
   if (!value) return "";
   try {
-    return maskSecretUrl(decryptSecret(value));
+    return maskSecretUrl(decryptSecret(value, organisation));
   } catch {
     // The bare mask is also what an unparseable URL gets, so on screen the two are one state.
     // A rotation that lost the old key is otherwise silent in both directions: the channel stops
@@ -68,7 +70,7 @@ function maskStoredUrl(
  * Masked values land under a different key on purpose: a client that never holds
  * `webhookUrl` cannot echo the mask back and overwrite the real URL with dots.
  */
-export function sanitizeProjectSecrets<T extends object>(project: T): T {
+export function sanitizeProjectSecrets<T extends object>(project: T, organisation: Types.ObjectId): T {
   const obj = project as Record<string, unknown>;
 
   for (const field of TOKEN_FIELDS) {
@@ -88,6 +90,7 @@ export function sanitizeProjectSecrets<T extends object>(project: T): T {
         ...rest,
         webhookUrlMasked: maskStoredUrl(
           webhookUrl as string | undefined,
+          organisation,
           // Keyed on ids, never on names: a rename is a new key, so the same broken row would
           // report itself again on every rename — and renaming is exactly what an owner does
           // while trying to fix it.

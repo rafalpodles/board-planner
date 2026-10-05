@@ -1,3 +1,4 @@
+import type { Types } from "mongoose";
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectOwner } from "@/lib/middleware";
@@ -10,8 +11,8 @@ import { WEBHOOK_EVENTS } from "@/types";
 import { isAllowedWebhookUrl, WEBHOOK_DESTINATION, WEBHOOK_DESTINATION_REFUSED } from "@/lib/url-validation";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function masked(project: any) {
-  return sanitizeProjectSecrets(project.toObject()).webhooks || [];
+function masked(project: any, organisation: Types.ObjectId) {
+  return sanitizeProjectSecrets(project.toObject(), organisation).webhooks || [];
 }
 
 // All three writers below use an atomic operator ($push/$set/$pull) rather than load, mutate
@@ -58,7 +59,7 @@ export const POST = withProjectOwner(async (request, { params, user, db }) => {
 
   logProjectAudit(db, projectId, user._id, "settings_updated", `Webhook added: ${maskSecretUrl(parsedUrl)}`);
 
-  return NextResponse.json(masked(project), { status: 201 });
+  return NextResponse.json(masked(project, db.organisation), { status: 201 });
 });
 
 export const PUT = withProjectOwner(async (request, { params, user, db }) => {
@@ -116,7 +117,7 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
     if (lines.length > 0) logProjectAudit(db, projectId, user._id, "settings_updated", lines);
   }
 
-  return NextResponse.json(sanitizeProjectSecrets({ webhooks }).webhooks);
+  return NextResponse.json(sanitizeProjectSecrets({ webhooks }, db.organisation).webhooks);
 });
 
 export const DELETE = withProjectOwner(async (request, { params, user, db }) => {
@@ -141,5 +142,5 @@ export const DELETE = withProjectOwner(async (request, { params, user, db }) => 
   if (removed) logProjectAudit(db, projectId, user._id, "settings_updated", `Webhook removed: ${maskSecretUrl(removed.url)}`);
 
   const webhooks = (before.webhooks ?? []).filter((w) => w !== removed);
-  return NextResponse.json(sanitizeProjectSecrets({ webhooks }).webhooks);
+  return NextResponse.json(sanitizeProjectSecrets({ webhooks }, db.organisation).webhooks);
 });

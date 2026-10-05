@@ -1,3 +1,4 @@
+import type { Types } from "mongoose";
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectOwner } from "@/lib/middleware";
@@ -19,16 +20,16 @@ const noKey = () =>
   );
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function masked(project: any) {
-  return sanitizeProjectSecrets(typeof project.toObject === "function" ? project.toObject() : project)
+function masked(project: any, organisation: Types.ObjectId) {
+  return sanitizeProjectSecrets(typeof project.toObject === "function" ? project.toObject() : project, organisation)
     .notificationChannels || [];
 }
 
-function storedUrl(value: string | undefined): string | null {
+function storedUrl(value: string | undefined, organisation: Types.ObjectId): string | null {
   if (!value) return null;
   if (!isEncryptedSecret(value)) return value;
   try {
-    return decryptSecret(value);
+    return decryptSecret(value, organisation);
   } catch {
     return null;
   }
@@ -43,7 +44,7 @@ export const GET = withProjectOwner(async (_request, { params, db }) => {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  return NextResponse.json(masked(project));
+  return NextResponse.json(masked(project, db.organisation));
 });
 
 export const POST = withProjectOwner(async (request, { params, user, db }) => {
@@ -99,7 +100,7 @@ export const POST = withProjectOwner(async (request, { params, user, db }) => {
         notificationChannels: {
           type: type as NotificationChannelType,
           name: name.trim(),
-          webhookUrl: encryptSecret(parsedUrl),
+          webhookUrl: encryptSecret(parsedUrl, db.organisation),
           events: parsedEvents,
           enabled: true,
         },
@@ -121,7 +122,7 @@ export const POST = withProjectOwner(async (request, { params, user, db }) => {
 
   logProjectAudit(db, projectId, user._id, "settings_updated", `Notification channel added: ${name.trim()} (${type})`);
 
-  return NextResponse.json(masked(updated), { status: 201 });
+  return NextResponse.json(masked(updated, db.organisation), { status: 201 });
 });
 
 export const PUT = withProjectOwner(async (request, { params, user, db }) => {
@@ -155,7 +156,7 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
     }
     if (!isEncryptionConfigured()) return noKey();
     newUrl = parsedUrl;
-    changes.webhookUrl = encryptSecret(parsedUrl);
+    changes.webhookUrl = encryptSecret(parsedUrl, db.organisation);
   }
   if (updates.events !== undefined) {
     const parsedEvents = parseWebhookEvents(updates.events);
@@ -194,7 +195,7 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
   // Rows written before BP-372 hold the URL in the clear. Any save on the channel carries them
   // over, so renaming one is enough to migrate it — but only the value this save read
   if (!changes.webhookUrl && was.webhookUrl && !isEncryptedSecret(was.webhookUrl) && isEncryptionConfigured()) {
-    const sealed = encryptSecret(was.webhookUrl);
+    const sealed = encryptSecret(was.webhookUrl, db.organisation);
     const migrated = await db.Project.updateOne(
       {
         _id: projectId,
@@ -205,11 +206,11 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
     if (migrated.modifiedCount > 0) is = { ...is, webhookUrl: sealed };
   }
 
-  const lines = channelChanges(was, is, newUrl !== null && newUrl !== storedUrl(was.webhookUrl));
+  const lines = channelChanges(was, is, newUrl !== null && newUrl !== storedUrl(was.webhookUrl, db.organisation));
   if (lines.length > 0) logProjectAudit(db, projectId, user._id, "settings_updated", lines);
 
   const notificationChannels = channels.map((ch) => (ch === was ? is : ch));
-  return NextResponse.json(masked({ _id: before._id, key: before.key, notificationChannels }));
+  return NextResponse.json(masked({ _id: before._id, key: before.key, notificationChannels }, db.organisation));
 });
 
 export const DELETE = withProjectOwner(async (request, { params, user, db }) => {
@@ -237,5 +238,5 @@ export const DELETE = withProjectOwner(async (request, { params, user, db }) => 
   }
 
   const notificationChannels = channels.filter((ch) => ch !== removed);
-  return NextResponse.json(masked({ _id: before._id, key: before.key, notificationChannels }));
+  return NextResponse.json(masked({ _id: before._id, key: before.key, notificationChannels }, db.organisation));
 });

@@ -74,7 +74,7 @@ export async function sendPersonalChat(n: {
 
     let webhookUrl: string;
     try {
-      webhookUrl = decryptSecret(stored);
+      webhookUrl = decryptSecret(stored, n.organisation);
     } catch {
       // A key rotation that lost the old key leaves an undecryptable value. Skipping is the only
       // safe answer: the alternative is posting the ciphertext at some URL.
