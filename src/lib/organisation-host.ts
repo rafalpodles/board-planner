@@ -1,6 +1,7 @@
 import { Types } from "mongoose";
 import { connectDB } from "./db";
 import { DEFAULT_ORGANISATION_ID } from "./organisation-field";
+import { trustedProxyHops } from "./client-ip";
 import { Organisation } from "@/models/organisation";
 import { selfOrigin } from "./session";
 import type { ScopedDb } from "./db-scope";
@@ -61,11 +62,17 @@ export function assertOrganisationDomainConfig(): void {
   const defaultHost = defaultOrganisationHost();
   if (defaultHost !== null) {
     if (domain === null) throw new Error("ORGANISATION_DEFAULT_HOST needs ORGANISATION_DOMAIN: without it every host is the default organisation's");
-    if (!DOMAIN_PATTERN.test(defaultHost) || defaultHost === domain) {
+    const label = defaultHost.endsWith(`.${domain}`) ? defaultHost.slice(0, -domain.length - 1) : null;
+    // A label an organisation could take as its slug would make that organisation unreachable
+    if (!DOMAIN_PATTERN.test(defaultHost) || defaultHost === domain || (label !== null && !RESERVED_SLUGS.includes(label))) {
       throw new Error(
-        `ORGANISATION_DEFAULT_HOST must be a bare host name other than ORGANISATION_DOMAIN itself, such as app.${domain}; got "${process.env.ORGANISATION_DEFAULT_HOST}"`
+        `ORGANISATION_DEFAULT_HOST must be a host outside ORGANISATION_DOMAIN, or one of its reserved names such as app.${domain}; got "${process.env.ORGANISATION_DEFAULT_HOST}"`
       );
     }
+  }
+  // With no proxy hops every anonymous caller shares one throttle bucket, which one organisation could empty for all
+  if (domain !== null && trustedProxyHops() === 0) {
+    throw new Error("ORGANISATION_DOMAIN needs TRUSTED_PROXY_HOPS set to the proxies in front of the app: at 0 one organisation's failed sign-ins throttle every organisation");
   }
   if (domain !== null && process.env.OIDC_ADMIN_GROUP?.trim()) {
     throw new Error(

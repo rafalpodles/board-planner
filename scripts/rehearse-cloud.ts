@@ -125,6 +125,7 @@ async function main() {
       APP_ORIGIN: origin,
       PLATFORM_REQUEST_KEYS: `${platformKey.keyId}:${platformKey.x}`,
       ENCRYPTION_KEY: randomBytes(32).toString("hex"),
+      TRUSTED_PROXY_HOPS: "1",
       GITHUB_SYNC_TICK_MS: "0",
       PM_SCHEDULER_TICK_MS: "86400000",
       DIGEST_TICK_MS: "86400000",

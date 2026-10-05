@@ -133,6 +133,21 @@ describe("classifyHost", () => {
 });
 
 describe("assertOrganisationDomainConfig", () => {
+  beforeEach(() => {
+    process.env.TRUSTED_PROXY_HOPS = "1";
+  });
+  afterEach(() => {
+    delete process.env.TRUSTED_PROXY_HOPS;
+  });
+
+  it("refuses organisations on subdomains with no proxy hops, where one organisation's failed sign-ins throttle all (BP-671)", () => {
+    process.env.ORGANISATION_DOMAIN = "board-planner.com";
+    delete process.env.TRUSTED_PROXY_HOPS;
+    expect(() => assertOrganisationDomainConfig()).toThrow(/needs TRUSTED_PROXY_HOPS/);
+    process.env.TRUSTED_PROXY_HOPS = "2";
+    expect(() => assertOrganisationDomainConfig()).not.toThrow();
+  });
+
   it("accepts no value and a bare domain", () => {
     expect(() => assertOrganisationDomainConfig()).not.toThrow();
     process.env.ORGANISATION_DOMAIN = "board-planner.com";
@@ -152,9 +167,11 @@ describe("assertOrganisationDomainConfig", () => {
       expect(() => assertOrganisationDomainConfig()).toThrow(/needs ORGANISATION_DOMAIN/);
       process.env.ORGANISATION_DOMAIN = "board-planner.com";
       expect(() => assertOrganisationDomainConfig()).not.toThrow();
-      for (const value of ["board-planner.com", "https://app.board-planner.com", "app.board-planner.com:443"]) {
+      process.env.ORGANISATION_DEFAULT_HOST = "board.example.org";
+      expect(() => assertOrganisationDomainConfig()).not.toThrow();
+      for (const value of ["board-planner.com", "https://app.board-planner.com", "app.board-planner.com:443", "planner.board-planner.com", "a.b.board-planner.com"]) {
         process.env.ORGANISATION_DEFAULT_HOST = value;
-        expect(() => assertOrganisationDomainConfig(), value).toThrow(/ORGANISATION_DEFAULT_HOST must be/);
+        expect(() => assertOrganisationDomainConfig(), value).toThrow(/ORGANISATION_DEFAULT_HOST must be a host outside ORGANISATION_DOMAIN, or one of its reserved names/);
       }
     } finally {
       delete process.env.ORGANISATION_DEFAULT_HOST;
