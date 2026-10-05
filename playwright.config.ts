@@ -94,6 +94,7 @@ export const ORGANISATIONS_PORT = Number(process.env.E2E_ORGANISATIONS_PORT ?? P
 export const ORGANISATION_DOMAIN = "organisations.localhost";
 export const ORGANISATIONS_PLATFORM_ORIGIN = `http://${ORGANISATION_DOMAIN}:${ORGANISATIONS_PORT}`;
 export const RUN_ORGANISATIONS_SERVER = process.env.E2E_ORGANISATIONS_SERVER === "1";
+export const ORGANISATIONS_RELAY_ORIGIN = `http://127.0.0.1:${ORGANISATIONS_PORT}`;
 
 // `next start` over a fresh build instead of `next dev`, for the specs whose subject only exists in
 // production output — the CSP nonce, where dev adds 'unsafe-eval' and scripts of its own (BP-313).
@@ -454,6 +455,8 @@ export default defineConfig({
               ORGANISATION_DOMAIN,
               APP_ORIGIN: ORGANISATIONS_PLATFORM_ORIGIN,
               PLATFORM_REQUEST_KEYS: `${E2E_PLATFORM_REQUEST_KEY.keyId}:${E2E_PLATFORM_REQUEST_KEY.x}`,
+              // Off every organisation's host, as login.board-planner.com is (BP-895)
+              OIDC_RELAY_ORIGIN: ORGANISATIONS_RELAY_ORIGIN,
               NEXT_DIST_DIR: ".next-organisations",
             },
           },

@@ -1,10 +1,8 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { scopedToDefaultOrganisation } from "@/lib/db-scope";
-import { selfOrigin } from "@/lib/session";
 import { providerById } from "@/lib/oidc/providers";
 import { redirectUri } from "@/lib/oidc/flow";
-import { relayOrigin } from "@/lib/oidc/relay";
+import { relayedHome, relayOrigin } from "@/lib/oidc/relay";
 
 const EXPIRED_PAGE = `<!doctype html>
 <html lang="en">
@@ -34,18 +32,15 @@ function expired() {
 }
 
 export async function GET(request: Request, { params }: { params: Promise<{ provider: string }> }) {
-  const db = scopedToDefaultOrganisation();
   if (!relayOrigin()) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const provider = providerById((await params).provider);
   const { search, searchParams } = new URL(request.url);
   const state = searchParams.get("state");
   if (!provider || !state) return expired();
 
-  const home = selfOrigin();
-  if (!home) return NextResponse.json({ error: "PUBLIC_ORIGIN is not set" }, { status: 500 });
-
   await connectDB();
-  const live = await db.OidcFlow.exists({ state, provider: provider.id, claims: null, expiresAt: { $gt: new Date() } });
-  if (!live) return expired();
+  const home = await relayedHome(provider.id, state);
+  if (home === "expired") return expired();
+  if (!home) return NextResponse.json({ error: "This sign-in has no address to return to" }, { status: 500 });
   return NextResponse.redirect(`${redirectUri(provider, home)}${search}`, 303);
 }

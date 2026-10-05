@@ -298,7 +298,6 @@ export function organisationOf(user: { organisation?: Types.ObjectId | string | 
 
 export const scopedFor = (user: { organisation?: Types.ObjectId | string | null }): ScopedDb => scoped(organisationOf(user));
 
-// TODO(BP-895): the OIDC relay finds its flow in the default organisation until it looks across organisations
 export const scopedToDefaultOrganisation = (): ScopedDb => scoped(DEFAULT_ORGANISATION_ID);
 
 export async function scopedForRequest(request: Request): Promise<ScopedDb | null> {
