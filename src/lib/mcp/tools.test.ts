@@ -684,3 +684,125 @@ describe("list_tasks", () => {
     });
   });
 });
+
+/**
+ * BP-911. Sprints could be created and updated over MCP and nothing else. REST also reads one with its
+ * tasks and deletes it — which sends every task back to the backlog — and completing a sprint can carry
+ * its unfinished tasks somewhere, which update_sprint did not offer.
+ */
+describe("sprints", () => {
+  const SPRINTS = [
+    { _id: "507f1f77bcf86cd799439011", name: "Sprint 4", status: "active", taskCount: 3, doneCount: 1 },
+    { _id: "507f1f77bcf86cd799439012", name: "Hardening", status: "planned", taskCount: 0, doneCount: 0 },
+    { _id: "507f1f77bcf86cd799439013", name: "Old", status: "completed", taskCount: 4, doneCount: 4 },
+  ];
+  const parse = (result: unknown) => JSON.parse((result as { content: { text: string }[] }).content[0].text);
+  const run = (name: string, args: Record<string, unknown>) =>
+    registered().get(name)!.handler({ project: "my-app", ...args }, extra);
+
+  beforeEach(() => {
+    vi.spyOn(PlannerClient.prototype, "getProjectByKey").mockResolvedValue({ _id: "p1" } as never);
+    vi.spyOn(PlannerClient.prototype, "listSprints").mockResolvedValue(SPRINTS);
+  });
+
+  describe("get_sprint", () => {
+    it("answers with the sprint and its tasks as short lines, a page at a time", async () => {
+      const page = vi.spyOn(PlannerClient.prototype, "pageTasks").mockResolvedValue({
+        tasks: [{ taskNumber: 7, title: "Seven", status: "todo", sprint: { name: "Sprint 4" } }],
+        total: 3,
+        limit: 1,
+        offset: 0,
+      });
+
+      const answer = parse(await run("get_sprint", { sprint: "SPRINT 4", limit: 1 }));
+
+      expect(page).toHaveBeenCalledWith("p1", { sprint: "507f1f77bcf86cd799439011", limit: "1", offset: "0", view: "summary" });
+      expect(answer.sprint).toMatchObject({ id: "507f1f77bcf86cd799439011", name: "Sprint 4", taskCount: 3, doneCount: 1 });
+      expect(answer).toMatchObject({ total: 3, returned: 1, nextOffset: 1 });
+      expect(answer.tasks[0]).toMatchObject({ key: "MY-APP-7", title: "Seven", sprint: "Sprint 4" });
+    });
+
+    it("is refused for a sprint the board does not have, reading no tasks", async () => {
+      const page = vi.spyOn(PlannerClient.prototype, "pageTasks");
+
+      await expect(run("get_sprint", { sprint: "Nope" })).rejects.toThrow(/No sprint "Nope"/);
+      expect(page).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("delete_sprint", () => {
+    it("deletes only when the name is repeated, and says its tasks went back to the backlog", async () => {
+      const del = vi.spyOn(PlannerClient.prototype, "deleteSprint").mockResolvedValue({ message: "Sprint deleted" });
+
+      const answer = parse(await run("delete_sprint", { sprint: "507f1f77bcf86cd799439011", confirmName: "sprint 4" }));
+
+      expect(del).toHaveBeenCalledWith("p1", "507f1f77bcf86cd799439011");
+      expect(answer).toEqual({ deleted: "Sprint 4", id: "507f1f77bcf86cd799439011", tasksReturnedToBacklog: 3 });
+    });
+
+    it("refuses a confirmation that is not the sprint's name, before anything is deleted", async () => {
+      const del = vi.spyOn(PlannerClient.prototype, "deleteSprint").mockResolvedValue({});
+
+      await expect(run("delete_sprint", { sprint: "Sprint 4", confirmName: "Hardening" })).rejects.toThrow(
+        /confirmName "Hardening" is not the name of that sprint, "Sprint 4"/
+      );
+      expect(del).not.toHaveBeenCalled();
+    });
+
+    it("needs a sprint that is on the board", async () => {
+      const del = vi.spyOn(PlannerClient.prototype, "deleteSprint").mockResolvedValue({});
+
+      await expect(run("delete_sprint", { sprint: "Nope", confirmName: "Nope" })).rejects.toThrow(/No sprint "Nope"/);
+      expect(del).not.toHaveBeenCalled();
+    });
+
+    it("declares confirmName, so a call without it never reaches the handler", () => {
+      expect(registered().get("delete_sprint")!.schema.safeParse({ project: "BP", sprint: "S" }).success).toBe(false);
+    });
+  });
+
+  describe("update_sprint", () => {
+    let wrote: MockInstance<PlannerClient["updateSprint"]>;
+
+    beforeEach(() => {
+      wrote = vi.spyOn(PlannerClient.prototype, "updateSprint").mockResolvedValue({});
+    });
+
+    it("takes the sprint by name and acts on its id", async () => {
+      await run("update_sprint", { sprintId: "hardening", goal: "Fewer bugs" });
+
+      expect(wrote).toHaveBeenCalledWith("p1", "507f1f77bcf86cd799439012", { goal: "Fewer bugs" });
+    });
+
+    it("carries unfinished tasks to the backlog or to another sprint as it completes", async () => {
+      await run("update_sprint", { sprintId: "Sprint 4", status: "completed", moveIncomplete: "backlog" });
+      await run("update_sprint", { sprintId: "Sprint 4", status: "completed", moveIncomplete: "Hardening" });
+
+      expect(wrote.mock.calls.map((c) => c[2])).toEqual([
+        { status: "completed", moveIncompleteToBacklog: true },
+        { status: "completed", moveIncompleteToSprint: "507f1f77bcf86cd799439012" },
+      ]);
+    });
+
+    it("refuses moveIncomplete without completing, and an unusable destination, writing nothing", async () => {
+      await expect(run("update_sprint", { sprintId: "Sprint 4", goal: "x", moveIncomplete: "backlog" })).rejects.toThrow(
+        /goes with status completed/
+      );
+      await expect(run("update_sprint", { sprintId: "Sprint 4", status: "completed", moveIncomplete: "Old" })).rejects.toThrow(
+        /is completed/
+      );
+      await expect(run("update_sprint", { sprintId: "Sprint 4", status: "completed", moveIncomplete: "Sprint 4" })).rejects.toThrow(
+        /own destination/
+      );
+      await expect(run("update_sprint", { sprintId: "Nope", goal: "x" })).rejects.toThrow(/No sprint "Nope"/);
+      expect(wrote).not.toHaveBeenCalled();
+    });
+
+    it("still refuses a call that names nothing to change, before any lookup", async () => {
+      const lookup = vi.spyOn(PlannerClient.prototype, "listSprints");
+
+      await expect(run("update_sprint", { sprintId: "Sprint 4" })).rejects.toThrow(/nothing to change/);
+      expect(lookup).not.toHaveBeenCalled();
+    });
+  });
+});

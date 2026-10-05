@@ -1054,3 +1054,116 @@ test("list_tasks refuses a filter that names nothing the board has, rather than 
   const tooMany = await session.callTool("list_tasks", { project: PROJECT_KEY, limit: 500 });
   refused(tooMany);
 });
+
+/**
+ * BP-911. A sprint is read with its tasks, closed with its unfinished work carried somewhere, and
+ * deleted — each checked against what the API holds afterwards, since a reply can be right about a
+ * move that did not happen.
+ */
+test("a sprint is read with its tasks, completed with its unfinished work carried on, and deleted", async ({ request }) => {
+  await seedSecondProject();
+  await seedForeignSprint();
+  const session = await connected(request);
+  const sprint = async (name: string, startDate: string, endDate: string) => {
+    const made = await session.callTool("create_sprint", { project: PROJECT_KEY, name, startDate, endDate });
+    accepted(made);
+    return made.parsed._id as string;
+  };
+  const alpha = await sprint("Alpha", "2026-10-01", "2026-10-14");
+  const beta = await sprint("Beta", "2026-10-15", "2026-10-28");
+
+  const file = async (title: string) => {
+    const created = await session.callTool("create_task", { project: PROJECT_KEY, title });
+    accepted(created);
+    return { key: `${PROJECT_KEY}-${created.parsed.taskNumber}`, id: created.parsed._id as string };
+  };
+  const [one, two, three] = [await file("One"), await file("Two"), await file("Three")];
+  const put = (id: string, data: Record<string, unknown>) =>
+    request.put(`/api/projects/${PROJECT_ID}/tasks/${id}`, { headers: ADMIN_AUTH, data });
+  for (const task of [one, two, three]) expect((await put(task.id, { sprint: alpha })).status()).toBe(200);
+  accepted(await session.callTool("change_task_status", { taskKey: three.key, status: "done" }));
+  const sprintOf = async (id: string) => {
+    const stored = await (await request.get(`/api/projects/${PROJECT_ID}/tasks/${id}`, { headers: ADMIN_AUTH })).json();
+    return stored.sprint ? String(stored.sprint._id ?? stored.sprint) : null;
+  };
+
+  // Read by name: its counts, its tasks as lines, a page at a time
+  const read = await session.callTool("get_sprint", { project: PROJECT_KEY, sprint: "alpha", limit: 2 });
+  accepted(read);
+  expect(read.parsed.sprint).toMatchObject({ id: alpha, name: "Alpha", taskCount: 3, doneCount: 1, startDate: "2026-10-01" });
+  expect(read.parsed).toMatchObject({ total: 3, returned: 2, nextOffset: 2 });
+  const rest = await session.callTool("get_sprint", { project: PROJECT_KEY, sprint: alpha, limit: 2, offset: 2 });
+  const keys = [...(read.parsed.tasks as { key: string }[]), ...(rest.parsed.tasks as { key: string }[])].map((t) => t.key);
+  expect(keys.sort()).toEqual([one.key, two.key, three.key].sort());
+  expect(rest.parsed.nextOffset).toBeNull();
+
+  // Refused before anything moves: the wrong destination, and a move without a completion
+  for (const [args, said] of [
+    [{ status: "completed", moveIncomplete: "Alpha" }, "own destination"],
+    [{ status: "completed", moveIncomplete: "Nowhere" }, 'No sprint "Nowhere"'],
+    [{ goal: "x", moveIncomplete: "backlog" }, "goes with status completed"],
+  ] as const) {
+    const refusedCall = await session.callTool("update_sprint", { project: PROJECT_KEY, sprintId: "Alpha", ...args });
+    refused(refusedCall);
+    expect(refusedCall.text).toContain(said);
+  }
+  expect(await sprintOf(one.id)).toBe(alpha);
+
+  // Completed by name: the two unfinished tasks move to Beta, the finished one stays where it was done
+  accepted(await session.callTool("update_sprint", { project: PROJECT_KEY, sprintId: "Alpha", status: "completed", moveIncomplete: "Beta" }));
+  expect(await sprintOf(one.id)).toBe(beta);
+  expect(await sprintOf(two.id)).toBe(beta);
+  expect(await sprintOf(three.id)).toBe(alpha);
+
+  // A completed sprint is not a destination
+  const closed = await session.callTool("update_sprint", { project: PROJECT_KEY, sprintId: "Beta", status: "completed", moveIncomplete: "Alpha" });
+  refused(closed);
+  expect(closed.text).toContain("is completed");
+
+  // Deleting needs the name repeated, sends every task back to the backlog, and leaves the tasks themselves
+  const wrongName = await session.callTool("delete_sprint", { project: PROJECT_KEY, sprint: "Beta", confirmName: "Alpha" });
+  refused(wrongName);
+  expect(await sprintOf(one.id)).toBe(beta);
+  const deleted = await session.callTool("delete_sprint", { project: PROJECT_KEY, sprint: "Beta", confirmName: "beta" });
+  accepted(deleted);
+  expect(deleted.parsed).toEqual({ deleted: "Beta", id: beta, tasksReturnedToBacklog: 2 });
+  expect(await sprintOf(one.id)).toBeNull();
+  expect(await sprintOf(two.id)).toBeNull();
+  const sprints = await session.callTool("list_sprints", { project: PROJECT_KEY });
+  expect((sprints.parsed as { name: string }[]).map((s) => s.name)).toEqual(["Alpha"]);
+
+  // Another board's sprint is out of reach for all three
+  for (const call of [
+    session.callTool("get_sprint", { project: PROJECT_KEY, sprint: String(FOREIGN_SPRINT_ID) }),
+    session.callTool("delete_sprint", { project: PROJECT_KEY, sprint: String(FOREIGN_SPRINT_ID), confirmName: FOREIGN_SPRINT_NAME }),
+    session.callTool("update_sprint", { project: PROJECT_KEY, sprintId: String(FOREIGN_SPRINT_ID), goal: "mine now" }),
+  ]) {
+    const result = await call;
+    refused(result);
+    expect(result.text).toContain("No sprint");
+  }
+  expect((await storedSprint(FOREIGN_SPRINT_ID))?.name).toBe(FOREIGN_SPRINT_NAME);
+});
+
+test("a sprint name two sprints share is refused with their ids, by every tool that acts on one", async ({ request }) => {
+  const session = await connected(request);
+  const first = await session.callTool("create_sprint", { project: PROJECT_KEY, name: "Twin", startDate: "2026-10-01", endDate: "2026-10-07" });
+  const second = await session.callTool("create_sprint", { project: PROJECT_KEY, name: "Twin", startDate: "2026-10-08", endDate: "2026-10-14" });
+  accepted(first);
+  accepted(second);
+
+  for (const call of [
+    session.callTool("get_sprint", { project: PROJECT_KEY, sprint: "Twin" }),
+    session.callTool("update_sprint", { project: PROJECT_KEY, sprintId: "Twin", goal: "which?" }),
+    session.callTool("delete_sprint", { project: PROJECT_KEY, sprint: "Twin", confirmName: "Twin" }),
+  ]) {
+    const result = await call;
+    refused(result);
+    expect(result.text).toContain('2 sprints are named "Twin"');
+    expect(result.text).toContain(first.parsed._id);
+    expect(result.text).toContain(second.parsed._id);
+  }
+  // By id it is exact, and only that one goes
+  accepted(await session.callTool("delete_sprint", { project: PROJECT_KEY, sprint: first.parsed._id, confirmName: "Twin" }));
+  expect(((await session.callTool("list_sprints", { project: PROJECT_KEY })).parsed as { _id: string }[]).map((s) => s._id)).toEqual([second.parsed._id]);
+});

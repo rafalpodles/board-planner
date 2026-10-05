@@ -162,6 +162,10 @@ export class PlannerClient {
     return this.request("PUT", `/api/projects/${seg(projectId)}/sprints/${seg(sprintId)}`, data);
   }
 
+  async deleteSprint(projectId: string, sprintId: string): Promise<unknown> {
+    return this.request("DELETE", `/api/projects/${seg(projectId)}/sprints/${seg(sprintId)}`);
+  }
+
   async listAssignableUsers(projectId: string): Promise<unknown[]> {
     return this.request(
       "GET",
