@@ -36,7 +36,60 @@ const SUB_ICONS = {
   plus: "M12 4v16m8-8H4",
 } as const;
 
-function SubIcon({ d }: { d: string }) {
+export interface ProjectSection {
+  href: string;
+  icon: string;
+  label: string;
+  active: boolean;
+  dot?: boolean;
+  pill?: number;
+}
+
+/** What a project offers under its name; the open tree and the collapsed rail both draw it */
+export function projectSections(project: ApiProject, pathname: string): ProjectSection[] {
+  const base = projectPath(project.key);
+  return [
+    {
+      href: base,
+      icon: SUB_ICONS.board,
+      label: "Board",
+      active: pathname === base || pathname === `${base}/`,
+      pill: project.taskCount,
+    },
+    {
+      href: `${base}/sprints`,
+      icon: SUB_ICONS.sprints,
+      label: "Sprints",
+      active: isNavItemActive(pathname, `${base}/sprints`),
+      dot: project.hasActiveSprint,
+    },
+    {
+      href: `${base}/dashboard`,
+      icon: SUB_ICONS.dashboard,
+      label: "Dashboard",
+      active: isNavItemActive(pathname, `${base}/dashboard`),
+    },
+    ...(project.pm?.lockedByInstance
+      ? []
+      : [
+          {
+            href: `${base}/pm`,
+            icon: SUB_ICONS.pm,
+            label: "PM agent",
+            active: isNavItemActive(pathname, `${base}/pm`),
+            dot: project.pm?.enabled,
+          },
+        ]),
+    {
+      href: `${base}/settings`,
+      icon: SUB_ICONS.settings,
+      label: "Settings",
+      active: isNavItemActive(pathname, `${base}/settings`),
+    },
+  ];
+}
+
+export function SubIcon({ d }: { d: string }) {
   return (
     <svg
       className="h-[15px] w-[15px] shrink-0"
@@ -262,47 +315,9 @@ export function ProjectTree({
 
             {expanded && (
               <div className="ml-5 flex flex-col gap-px border-l border-border pl-3">
-                <SubItem
-                  href={base}
-                  icon={SUB_ICONS.board}
-                  label="Board"
-                  active={pathname === base || pathname === `${base}/`}
-                  pill={project.taskCount}
-                />
-                <SubItem
-                  href={`${base}/sprints`}
-                  icon={SUB_ICONS.sprints}
-                  label="Sprints"
-                  active={isNavItemActive(pathname, `${base}/sprints`)}
-                  dot={project.hasActiveSprint}
-                />
-                <SubItem
-                  href={`${base}/dashboard`}
-                  icon={SUB_ICONS.dashboard}
-                  label="Dashboard"
-                  active={isNavItemActive(pathname, `${base}/dashboard`)}
-                />
-                {!project.pm?.lockedByInstance && (
-                  <SubItem
-                    href={`${base}/pm`}
-                    icon={SUB_ICONS.pm}
-                    label="PM agent"
-                    active={isNavItemActive(pathname, `${base}/pm`)}
-                    dot={project.pm?.enabled}
-                  />
-                )}
-                {/* Not gated on canAdmin since BP-371. That gate encoded a premise which has
-                    stopped being true — that this page holds nothing for a member — now that
-                    their own notification settings live there. The page hides every section they
-                    may not open and says so in as many words. */}
-                {(
-                  <SubItem
-                    href={`${base}/settings`}
-                    icon={SUB_ICONS.settings}
-                    label="Settings"
-                    active={isNavItemActive(pathname, `${base}/settings`)}
-                  />
-                )}
+                {projectSections(project, pathname).map((section) => (
+                  <SubItem key={section.label} {...section} />
+                ))}
               </div>
             )}
           </div>

@@ -14,6 +14,7 @@ import { useMediaQuery } from "@/hooks/use-media-query";
 import { isNavItemActive } from "@/lib/nav-active";
 import { useProjects } from "@/hooks/use-projects";
 import { ProjectTree } from "./ProjectTree";
+import { ProjectRail } from "./ProjectRail";
 import { APP_NAME } from "@/lib/brand";
 
 const ICONS = {
@@ -21,7 +22,6 @@ const ICONS = {
     "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2",
   bell: "M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9",
   search: "M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z",
-  projects: "M4 6a2 2 0 012-2h12a2 2 0 012 2v12a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM4 10h16M10 10v10",
   settings:
     "M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z",
   settingsInner: "M15 12a3 3 0 11-6 0 3 3 0 016 0z",
@@ -43,7 +43,23 @@ const THEME_OPTIONS = [
   { value: "system", label: "System", icon: ICONS.monitor },
 ] as const;
 
-const COLLAPSED_KEY = "sidebar-collapsed";
+const MODE_KEY = "sidebar-mode";
+const LEGACY_COLLAPSED_KEY = "sidebar-collapsed";
+const HOVER_INTENT_MS = 120;
+
+export type SidebarMode = "expanded" | "hover" | "collapsed";
+
+const MODE_OPTIONS: { value: SidebarMode; label: string }[] = [
+  { value: "expanded", label: "Expanded" },
+  { value: "hover", label: "Expand on hover" },
+  { value: "collapsed", label: "Collapsed" },
+];
+
+function readMode(): SidebarMode {
+  const stored = localStorage.getItem(MODE_KEY);
+  if (stored === "expanded" || stored === "hover" || stored === "collapsed") return stored;
+  return localStorage.getItem(LEGACY_COLLAPSED_KEY) === "1" ? "collapsed" : "expanded";
+}
 
 function Icon({ d, className = "" }: { d: string; className?: string }) {
   return (
@@ -145,21 +161,54 @@ export function Sidebar({
   const router = useRouter();
   const api = useApi();
 
-  const [collapsed, setCollapsed] = useState(false);
+  const [mode, setMode] = useState<SidebarMode>("expanded");
+  const [narrowMode, setNarrowMode] = useState<Exclude<SidebarMode, "expanded">>("collapsed");
+  const [hovered, setHovered] = useState(false);
+  const [focusedWithin, setFocusedWithin] = useState(false);
+  const pointerFocus = useRef(false);
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setCollapsed(localStorage.getItem(COLLAPSED_KEY) === "1");
+    const stored = readMode();
+    setMode(stored);
+    if (stored !== "expanded") setNarrowMode(stored);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (hoverTimer.current) clearTimeout(hoverTimer.current);
+    },
+    [],
+  );
+
+  const chooseMode = useCallback((next: SidebarMode) => {
+    localStorage.setItem(MODE_KEY, next);
+    setMode(next);
+    if (next !== "expanded") setNarrowMode(next);
   }, []);
 
   const toggleCollapsed = useCallback(() => {
-    setCollapsed((prev) => {
-      localStorage.setItem(COLLAPSED_KEY, prev ? "0" : "1");
-      return !prev;
-    });
-  }, []);
+    chooseMode(mode === "expanded" ? narrowMode : "expanded");
+  }, [chooseMode, mode, narrowMode]);
+
+  function startHover() {
+    if (mode !== "hover" || hoverTimer.current) return;
+    hoverTimer.current = setTimeout(() => {
+      hoverTimer.current = null;
+      setHovered(true);
+    }, HOVER_INTENT_MS);
+  }
+
+  function endHover() {
+    if (hoverTimer.current) {
+      clearTimeout(hoverTimer.current);
+      hoverTimer.current = null;
+    }
+    setHovered(false);
+  }
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -199,19 +248,38 @@ export function Sidebar({
   if (!user) return null;
 
   // The drawer is always full width, so the icon-only rail is a desktop-only state
-  const compact = collapsed && !mobileOpen;
+  const peeking = mode === "hover" && (hovered || focusedWithin || menuOpen);
+  const compact = (mode === "collapsed" || (mode === "hover" && !peeking)) && !mobileOpen;
+  const floats = mode === "hover";
 
   const isActive = (href: string) => isNavItemActive(pathname, href);
 
   const drawerAwareCollapseLabel = isDrawer
     ? "Close navigation"
-    : compact
-      ? "Expand sidebar"
-      : "Collapse sidebar";
+    : mode === "hover"
+      ? "Pin sidebar open"
+      : mode === "collapsed"
+        ? "Expand sidebar"
+        : "Collapse sidebar";
 
   return (
+    <>
+      {floats && <div aria-hidden className="hidden w-14 shrink-0 md:block" />}
     <aside
       ref={asideRef}
+      onMouseEnter={startHover}
+      onMouseLeave={endHover}
+      onMouseDown={() => {
+        pointerFocus.current = true;
+      }}
+      onFocus={() => {
+        // A click focuses what it lands on; only a keyboard arriving counts as a reason to open
+        if (pointerFocus.current) pointerFocus.current = false;
+        else if (mode === "hover") setFocusedWithin(true);
+      }}
+      onBlur={(e) => {
+        if (!asideRef.current?.contains(e.relatedTarget as Node | null)) setFocusedWithin(false);
+      }}
       tabIndex={isDrawer ? -1 : undefined}
       role={isDrawer ? "dialog" : undefined}
       aria-modal={isDrawer ? true : undefined}
@@ -219,9 +287,11 @@ export function Sidebar({
       onClick={(e) => {
         if ((e.target as HTMLElement).closest("a")) onNavigate();
       }}
-      className={`fixed inset-y-0 left-0 z-50 flex w-[260px] shrink-0 flex-col border-r border-border bg-bg-card transition-transform md:sticky md:top-0 md:z-auto md:h-dvh md:translate-x-0 md:transition-[width] ${
-        mobileOpen ? "translate-x-0" : "-translate-x-full"
-      } ${compact ? "md:w-14" : "md:w-[260px]"}`}
+      className={`fixed inset-y-0 left-0 z-50 flex w-[260px] shrink-0 flex-col border-r border-border bg-bg-card transition-transform md:h-dvh md:translate-x-0 md:transition-[width] ${
+        floats ? "md:fixed md:top-0 md:z-50" : "md:sticky md:top-0 md:z-auto"
+      } ${mobileOpen ? "translate-x-0" : "-translate-x-full"} ${
+        compact ? "md:w-14" : "md:w-[260px]"
+      } ${floats && peeking ? "md:shadow-xl" : ""}`}
     >
       <div
         className={`flex items-center gap-2 px-3.5 pb-2.5 pt-3.5 ${
@@ -295,13 +365,7 @@ export function Sidebar({
         </div>
 
         {compact ? (
-          <NavItem
-            href="/projects"
-            icon={ICONS.projects}
-            label="All projects"
-            active={isActive("/projects")}
-            collapsed
-          />
+          <ProjectRail projects={projects} pathname={pathname} />
         ) : (
           <ProjectTree
             projects={projects}
@@ -359,6 +423,19 @@ export function Sidebar({
                 <Icon d={ICONS.settings} className="h-4 w-4" />
                 Settings
               </Link>
+              <div role="group" aria-label="Sidebar" className="border-t border-border py-1">
+                {MODE_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    onClick={() => chooseMode(option.value)}
+                    aria-pressed={mode === option.value}
+                    className="focus-ring-inset flex min-h-[44px] w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-sm text-text-muted hover:bg-bg-hover hover:text-text md:min-h-0"
+                  >
+                    <span className="flex-1">{option.label}</span>
+                    {mode === option.value && <Icon d={ICONS.check} className="h-4 w-4" />}
+                  </button>
+                ))}
+              </div>
               <div role="group" aria-label="Theme" className="border-y border-border py-1">
                 {THEME_OPTIONS.map((option) => (
                   <button
@@ -390,5 +467,6 @@ export function Sidebar({
         </div>
       </div>
     </aside>
+    </>
   );
 }
