@@ -195,7 +195,7 @@ test("a document's organisation cannot be moved, by a save or by a raw update", 
   const doc = await scoped(B).Sprint.findOne({ name: "b-one" });
   doc!.set("organisation", A);
   await doc!.save();
-  await Sprint.updateOne({ name: "b-one", organisation: B }, { $set: { organisation: A } });
+  await expect(Sprint.updateOne({ name: "b-one", organisation: B }, { $set: { organisation: A } })).rejects.toThrow(/moves a document to another organisation/);
 
   expect(B.equals((await rawRows()).find((row) => row.name === "b-one")?.organisation)).toBe(true);
 });
