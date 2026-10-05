@@ -83,6 +83,8 @@ describe("ActivityTimeline", () => {
     ["criterion_edited", "Loads", "Loads fast", "changed criterion “Loads” to “Loads fast”"],
     ["criterion_checked", "", "Loads fast", "checked criterion “Loads fast”"],
     ["criterion_unchecked", "", "Loads fast", "unchecked criterion “Loads fast”"],
+    ["archived", "", "", "archived this task"],
+    ["unarchived", "", "", "restored this task from the archive"],
   ])("says what %s did to which criterion", async (action, oldValue, newValue, sentence) => {
     api.get.mockResolvedValue([{ ...log, action, field: "c1", oldValue, newValue }]);
     render(<ActivityTimeline projectId="TP" taskId="t1" />);

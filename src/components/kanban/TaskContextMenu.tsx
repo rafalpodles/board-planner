@@ -12,6 +12,10 @@ interface TaskContextMenuProps {
   columns?: ApiProjectColumn[];
   currentSprint?: string | null;
   selectedCount?: number;
+  archived?: boolean;
+  /** Only the board's owner may delete; everybody who can edit may archive */
+  canDelete?: boolean;
+  onArchive: () => void;
   onStatusChange: (status: string) => void;
   onSprintChange?: (sprintId: string | null) => void;
   onDuplicate: () => void;
@@ -27,6 +31,9 @@ export function TaskContextMenu({
   columns,
   currentSprint,
   selectedCount = 1,
+  archived = false,
+  canDelete = false,
+  onArchive,
   onStatusChange,
   onSprintChange,
   onDuplicate,
@@ -149,11 +156,19 @@ export function TaskContextMenu({
         </button>
       )}
       <button
-        onClick={() => { onDelete(); onClose(); }}
-        className="w-full text-left px-3 py-1.5 hover:bg-bg-input transition-colors text-danger"
+        onClick={() => { onArchive(); onClose(); }}
+        className="w-full text-left px-3 py-1.5 hover:bg-bg-input transition-colors"
       >
-        {selectedCount > 1 ? `Delete ${selectedCount} tasks` : "Delete"}
+        {selectedCount > 1 ? `Archive ${selectedCount} tasks` : archived ? "Restore" : "Archive"}
       </button>
+      {canDelete && (
+        <button
+          onClick={() => { onDelete(); onClose(); }}
+          className="w-full text-left px-3 py-1.5 hover:bg-bg-input transition-colors text-danger"
+        >
+          {selectedCount > 1 ? `Delete ${selectedCount} tasks` : "Delete"}
+        </button>
+      )}
     </div>
   );
 }

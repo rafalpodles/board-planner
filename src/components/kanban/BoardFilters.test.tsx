@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, act, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, act, fireEvent, waitFor, within } from "@testing-library/react";
 import { BoardFilters } from "./BoardFilters";
 import { ApiCustomField, ApiTask } from "@/types";
 import { UNFILED } from "@/lib/board-filters-state";
@@ -437,5 +437,38 @@ describe("BoardFilters unassigned", () => {
 
     const last = onFilter.mock.calls.at(-1)?.[0] as ApiTask[];
     expect(last.map((t) => t._id).sort()).toEqual(["1", "3"]);
+  });
+});
+
+// BP-915: archived tasks are loaded by whoever owns the task list, so the option is handed up
+describe("BoardFilters and archived tasks", () => {
+  it("offers Show archived, and reports the choice upwards", async () => {
+    const onShowArchivedChange = vi.fn();
+    renderFilters({ onShowArchivedChange });
+    await openPopover();
+
+    await act(async () => screen.getByRole("checkbox", { name: "Show archived" }).click());
+
+    expect(onShowArchivedChange).toHaveBeenCalledWith(true);
+  });
+
+  it("offers nothing where the host does not load archived tasks", async () => {
+    renderFilters();
+    await openPopover();
+
+    expect(screen.queryByRole("checkbox", { name: "Show archived" })).toBeNull();
+  });
+
+  it("counts it as an active filter, says so in a chip, and clears it with the rest", async () => {
+    const onShowArchivedChange = vi.fn();
+    renderFilters({ showArchived: true, onShowArchivedChange });
+    await openPopover();
+
+    const popover = within(screen.getByRole("dialog", { name: "Filters" }));
+    expect(popover.getByText("Archived shown")).toBeTruthy();
+    expect((popover.getByRole("checkbox", { name: "Show archived" }) as HTMLInputElement).checked).toBe(true);
+    await act(async () => popover.getByRole("button", { name: "Clear all" }).click());
+
+    expect(onShowArchivedChange).toHaveBeenCalledWith(false);
   });
 });

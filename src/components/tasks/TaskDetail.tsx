@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
-import { subscribeBoardRefresh } from "@/lib/board-refresh";
+import { emitBoardRefresh, subscribeBoardRefresh } from "@/lib/board-refresh";
 import { taskPath } from "@/lib/urls";
 import { duplicatePayload } from "@/lib/task-duplicate";
 import { timeAgo } from "@/lib/time";
@@ -271,6 +271,11 @@ function TaskDetailView({
   const [addingChildSaving, setAddingChildSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+  // Its own state like heldDelete: archiving takes the task off the machine, nothing more
+  const [heldArchive, setHeldArchive] = useState<RunConflict | null>(null);
+  const canDelete = !!project.canAdmin;
+  const archivedAt = task.archivedAt ?? null;
   const [commentRefreshKey, setCommentRefreshKey] = useState(0);
   const [historyWrites, setHistoryWrites] = useState(0);
   const wroteHistory = () => setHistoryWrites((n) => n + 1);
@@ -426,6 +431,51 @@ function TaskDetailView({
     }
   }
 
+  async function handleArchive(force?: boolean) {
+    setArchiving(true);
+    try {
+      const updated = await api.post(
+        `/api/projects/${projectId}/tasks/${task._id}/archive`,
+        force ? { force: true } : {}
+      );
+      onTaskChange((prev) => (prev ? { ...prev, archivedAt: updated.archivedAt } : prev));
+      wroteHistory();
+      emitBoardRefresh(projectId);
+      toast("Task archived", "success");
+      setHeldArchive(null);
+    } catch (err) {
+      const failure = err as { status?: number; body?: { runConflict?: RunConflict } };
+      if (failure?.status === 409 && failure.body?.runConflict) {
+        setHeldArchive(failure.body.runConflict);
+      } else {
+        setHeldArchive(null);
+        toast("Failed to archive task", "error");
+      }
+    } finally {
+      setArchiving(false);
+    }
+  }
+
+  async function handleRestore() {
+    setArchiving(true);
+    try {
+      await api.del(`/api/projects/${projectId}/tasks/${task._id}/archive`);
+      onTaskChange((prev) => (prev ? { ...prev, archivedAt: null } : prev));
+      wroteHistory();
+      emitBoardRefresh(projectId);
+      toast("Task restored", "success");
+    } catch {
+      toast("Failed to restore task", "error");
+    } finally {
+      setArchiving(false);
+    }
+  }
+
+  function requestArchive() {
+    setDetailsOpen(false);
+    void handleArchive();
+  }
+
   function requestDelete() {
     setDetailsOpen(false);
     setConfirmDelete(true);
@@ -448,9 +498,29 @@ function TaskDetailView({
         onToggleWatch={handleToggleWatch}
         onDuplicate={handleDuplicate}
         onAddChild={() => setAddingChild(true)}
+        archived={!!archivedAt}
+        canDelete={canDelete}
+        onArchive={requestArchive}
+        onRestore={handleRestore}
         onDelete={requestDelete}
         onClose={onClose}
       />
+
+      {archivedAt && (
+        <div
+          data-testid="archived-banner"
+          role="status"
+          className="flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border bg-bg-input px-4 py-2.5 text-sm text-text-muted sm:px-7"
+        >
+          <span>
+            <strong className="font-medium text-text">Archived</strong> {timeAgo(archivedAt)}. This
+            task is hidden from the board and every list; it can still be opened from its link.
+          </span>
+          <Button size="sm" variant="secondary" onClick={handleRestore} disabled={archiving}>
+            Restore
+          </Button>
+        </div>
+      )}
 
       <div
         ref={setScrollBox}
@@ -584,6 +654,10 @@ function TaskDetailView({
               categories={project.categories || []}
               customFields={project.customFields || []}
               reporter={reporter}
+              archived={!!archivedAt}
+              canDelete={canDelete}
+              onArchive={requestArchive}
+              onRestore={handleRestore}
               onDelete={requestDelete}
             />
           </aside>
@@ -627,6 +701,10 @@ function TaskDetailView({
           categories={project.categories || []}
           customFields={project.customFields || []}
           reporter={reporter}
+          archived={!!archivedAt}
+          canDelete={canDelete}
+          onArchive={requestArchive}
+          onRestore={handleRestore}
           onDelete={requestDelete}
           touch
         />
@@ -683,6 +761,21 @@ function TaskDetailView({
         }
         confirmLabel="Delete anyway"
         loading={deleting}
+      />
+
+      <ConfirmDialog
+        open={!!heldArchive}
+        onClose={() => setHeldArchive(null)}
+        onConfirm={() => handleArchive(true)}
+        title="This task is being executed"
+        message={
+          heldArchive
+            ? `${taskKey} is being executed by ${heldArchive.workerName || heldArchive.workerId || "a worker"} (phase ${heldArchive.phase}). Archiving it takes the task off that worker and its work is lost.`
+            : ""
+        }
+        confirmLabel="Archive anyway"
+        loadingLabel="Archiving..."
+        loading={archiving}
       />
 
       <ConfirmDialog

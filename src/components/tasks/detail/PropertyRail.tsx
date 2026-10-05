@@ -416,6 +416,11 @@ interface PropertyRailProps {
   categories: ApiProjectCategory[];
   customFields: ApiCustomField[];
   reporter: string | null;
+  archived: boolean;
+  /** Only the board's owner may delete; anybody who can edit may archive */
+  canDelete: boolean;
+  onArchive: () => void;
+  onRestore: () => void;
   onDelete: () => void;
   /** Sheet rows are taller and the delete affordance sits beside the sheet's Done */
   touch?: boolean;
@@ -444,6 +449,10 @@ export function PropertyRail({
   categories,
   customFields,
   reporter,
+  archived,
+  canDelete,
+  onArchive,
+  onRestore,
   onDelete,
   touch = false,
 }: PropertyRailProps) {
@@ -834,13 +843,24 @@ export function PropertyRail({
         )}
         <button
           type="button"
-          onClick={onDelete}
-          className={`focus-ring -mx-2.5 rounded-lg px-2.5 text-left text-sm text-danger transition-colors hover:bg-danger/10 ${
+          onClick={archived ? onRestore : onArchive}
+          className={`focus-ring -mx-2.5 rounded-lg px-2.5 text-left text-sm text-text-muted transition-colors hover:bg-bg-hover hover:text-text ${
             touch ? "min-h-[44px]" : "py-1.5"
           }`}
         >
-          Delete task
+          {archived ? "Restore task" : "Archive task"}
         </button>
+        {canDelete && (
+          <button
+            type="button"
+            onClick={onDelete}
+            className={`focus-ring -mx-2.5 rounded-lg px-2.5 text-left text-sm text-danger transition-colors hover:bg-danger/10 ${
+              touch ? "min-h-[44px]" : "py-1.5"
+            }`}
+          >
+            Delete task
+          </button>
+        )}
       </div>
     </div>
   );

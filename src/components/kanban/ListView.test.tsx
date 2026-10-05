@@ -532,3 +532,16 @@ describe("ListView dates, read west of UTC", () => {
     expect(sprintCell(), "the day after it").not.toContain("font-medium");
   });
 });
+
+describe("ListView and an archived task", () => {
+  it("marks its row, and only that one", () => {
+    renderList({
+      tasks: [
+        { ...tasks[0], archivedAt: "2026-10-05T10:00:00.000Z" },
+        { ...tasks[0], _id: "t2", taskNumber: 192 },
+      ] as ApiTask[],
+    });
+
+    expect(screen.getAllByTestId("row-archived")).toHaveLength(1);
+  });
+});
