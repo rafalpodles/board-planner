@@ -1374,6 +1374,13 @@ export interface ApiTaskLink {
   status: TaskStatus;
 }
 
+/** Children of an epic, counted on the server; `done` is the board's done column role, not an id */
+export interface ApiEpicProgress {
+  total: number;
+  done: number;
+  byStatus: Record<string, number>;
+}
+
 export interface ApiRecurrence {
   frequency: RecurrenceFrequency;
   interval: number;
@@ -1411,6 +1418,8 @@ export interface ApiTask {
    * is what answers when the parent is not one of them, which a sprint-scoped board is full of.
    */
   parent?: ApiTaskLink | null;
+  /** Present on a task that has children; the list route and the task GET supply it */
+  progress?: ApiEpicProgress;
   watchers: string[];
   sprint: string | null;
   // Populated where the task is read whole, a bare id where a writer echoes back what it sent —

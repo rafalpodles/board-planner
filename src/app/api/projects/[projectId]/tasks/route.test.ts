@@ -31,6 +31,13 @@ vi.mock("@/lib/task-service", async (importOriginal) => ({
   toApiExecution: vi.fn(() => undefined),
 }));
 
+// The counting itself is epics.test.ts's job; here the route only has to hand it this page and attach the answer
+const epicProgressFor = vi.fn(async () => new Map());
+vi.mock("@/lib/epics", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/epics")>()),
+  epicProgressFor,
+}));
+
 const { GET, POST } = await import("./route");
 const { createTask } = await import("@/lib/task-service");
 
@@ -324,6 +331,42 @@ describe("GET /api/projects/:projectId/tasks — paging, the summary view and th
       taskFindOne.mockReturnValue({ lean: async () => null });
       expect((await GET(request(`?parent=${PARENT}`), ctx())).status).toBe(400);
       expect(taskFind).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("tasks that have children", () => {
+    it("hasChildren=true asks for a parent_of link and nothing else", async () => {
+      const response = await GET(request("?hasChildren=true"), ctx());
+
+      expect(response.status).toBe(200);
+      expect(clauses()).toEqual([{ relations: { $elemMatch: { type: "parent_of" } } }]);
+    });
+
+    it("hasChildren=false asks for tasks with none", async () => {
+      await GET(request("?hasChildren=false"), ctx());
+
+      expect(clauses()).toEqual([{ relations: { $not: { $elemMatch: { type: "parent_of" } } } }]);
+    });
+
+    it("leaves the filter off when not asked", async () => {
+      await GET(request(), ctx());
+
+      expect(clauses()).toBeUndefined();
+    });
+
+    it("refuses a value that is not true or false, rather than listing the whole board", async () => {
+      const response = await GET(request("?hasChildren=yes"), ctx());
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toContain("true or false");
+      expect(taskFind).not.toHaveBeenCalled();
+    });
+
+    it("sits beside the other conditions instead of replacing them", async () => {
+      taskFindOne.mockReturnValue({ lean: async () => ({ relations: [{ type: "parent_of", task: "c1" }] }) });
+      await GET(request("?hasChildren=true&blocked=true&parent=507f1f77bcf86cd799439b01"), ctx());
+
+      expect(clauses()).toHaveLength(3);
     });
   });
 
@@ -763,6 +806,46 @@ describe("GET /api/projects/:projectId/tasks — the parent each card belongs to
 
     expect(body[0].parent?.taskNumber).toBe(644);
     expect(body[1].parent).toBeNull();
+  });
+});
+
+describe("GET /api/projects/:projectId/tasks — the progress of an epic on the page", () => {
+  const progress = { total: 4, done: 1, byStatus: { done: 1, todo: 3 } };
+  const epic = { _id: "epic", title: "Epic", toObject: () => ({ _id: "epic", title: "Epic" }) };
+  const plain = { _id: "plain", title: "Plain", toObject: () => ({ _id: "plain", title: "Plain" }) };
+
+  it("is attached to the task that has children and to no other", async () => {
+    listed = [epic, plain];
+    epicProgressFor.mockResolvedValueOnce(new Map([["epic", progress]]));
+
+    const body = await (await GET(request(), ctx())).json();
+
+    expect(body[0].progress).toEqual(progress);
+    expect(body[1]).not.toHaveProperty("progress");
+  });
+
+  it("is counted for the ids this response carries, not for the board", async () => {
+    listed = [epic, plain];
+
+    await GET(request(), ctx());
+
+    expect(epicProgressFor).toHaveBeenCalledWith(expect.anything(), PROJECT_ID, ["epic", "plain"]);
+  });
+
+  it("is attached in the summary view and a page too", async () => {
+    taskFind.mockImplementation((_filter: unknown, projection?: unknown) => {
+      const query: Record<string, unknown> = {};
+      for (const step of ["sort", "select", "skip", "limit"]) query[step] = () => query;
+      query.populate = async () => listed;
+      return projection === undefined ? query : { lean: async () => parentDocs };
+    });
+    taskCount.mockResolvedValue(1);
+    listed = [epic];
+    epicProgressFor.mockResolvedValueOnce(new Map([["epic", progress]]));
+
+    const body = await (await GET(request("?view=summary&limit=10"), ctx())).json();
+
+    expect(body.tasks[0].progress).toEqual(progress);
   });
 });
 
