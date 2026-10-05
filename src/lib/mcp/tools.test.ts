@@ -1371,3 +1371,90 @@ describe("comments and history", () => {
     expect(registered().get("get_task_activity")!.schema.safeParse({ taskKey: "BP-1", limit: 101 }).success).toBe(false);
   });
 });
+
+/**
+ * BP-913. The read-only surface a person uses daily and an MCP client could not reach.
+ */
+describe("looking around", () => {
+  const parse = (result: unknown) => JSON.parse((result as { content: { text: string }[] }).content[0].text);
+  const run = (name: string, args: Record<string, unknown> = {}) => registered().get(name)!.handler(args, extra);
+
+  beforeEach(() => {
+    vi.spyOn(PlannerClient.prototype, "getProjectByKey").mockResolvedValue({ _id: "p1", canAdmin: true } as never);
+  });
+
+  it("list_runs is for a board's admins, as the app is, and reads nothing for anybody else", async () => {
+    vi.spyOn(PlannerClient.prototype, "getProjectByKey").mockResolvedValue({ _id: "p1", canAdmin: false } as never);
+    const runs = vi.spyOn(PlannerClient.prototype, "listRuns").mockResolvedValue([]);
+
+    await expect(run("list_runs", { project: "bp" })).rejects.toThrow(/Run history is for the admins of BP/);
+    expect(runs).not.toHaveBeenCalled();
+  });
+
+  it("search_tasks says when a full answer may be the first page of more", async () => {
+    const many = Array.from({ length: 50 }, (_, i) => ({ taskNumber: i + 1, title: "t", project: { key: "BP", name: "BP" } }));
+    const found = vi.spyOn(PlannerClient.prototype, "searchTasks");
+
+    found.mockResolvedValue(many);
+    expect(parse(await run("search_tasks", { query: "t1" })).truncated).toBe(true);
+    found.mockResolvedValue(many.slice(0, 3));
+    expect(parse(await run("search_tasks", { query: "t1" })).truncated).toBe(false);
+  });
+
+  it("search_tasks sends the query as given and answers with lines", async () => {
+    const found = vi.spyOn(PlannerClient.prototype, "searchTasks").mockResolvedValue([
+      { taskNumber: 1, title: "Login", project: { key: "BP", name: "BP" } },
+    ]);
+
+    const answer = parse(await run("search_tasks", { query: "login flow" }));
+
+    expect(found).toHaveBeenCalledWith("login flow");
+    expect(answer).toMatchObject({ returned: 1 });
+    expect(answer.tasks[0].key).toBe("BP-1");
+    expect(registered().get("search_tasks")!.schema.safeParse({ query: "a" }).success).toBe(false);
+  });
+
+  it("get_project_stats reads the board it was asked for", async () => {
+    const stats = vi.spyOn(PlannerClient.prototype, "getProjectStats").mockResolvedValue({ total: 3, done: 1, customFieldUsage: [] });
+
+    const answer = parse(await run("get_project_stats", { project: "bp" }));
+
+    expect(stats).toHaveBeenCalledWith("p1");
+    expect(answer).toMatchObject({ total: 3, done: 1 });
+    expect(answer).not.toHaveProperty("customFieldUsage");
+  });
+
+  it("list_runs asks for twenty unless told otherwise, and never for more than a hundred", async () => {
+    const runs = vi.spyOn(PlannerClient.prototype, "listRuns").mockResolvedValue([{ taskKey: "BP-1", outcome: "refused" }]);
+
+    expect(parse(await run("list_runs", { project: "bp" }))[0]).toMatchObject({ taskKey: "BP-1", outcome: "refused" });
+    await run("list_runs", { project: "bp", limit: 5 });
+
+    expect(runs.mock.calls.map((c) => c[1])).toEqual([20, 5]);
+    expect(registered().get("list_runs")!.schema.safeParse({ project: "BP", limit: 101 }).success).toBe(false);
+  });
+
+  it("list_notifications pages by a cursor and says what is unread", async () => {
+    const list = vi.spyOn(PlannerClient.prototype, "listNotifications").mockResolvedValue([
+      { _id: "n1", title: "Assigned", read: false, createdAt: "2026-10-05T10:00:00.000Z", task: { taskNumber: 4 }, project: { key: "BP" } },
+    ]);
+
+    const answer = parse(await run("list_notifications", { limit: 1, before: "2026-10-06T00:00:00.000Z" }));
+
+    expect(list).toHaveBeenCalledWith(1, "2026-10-06T00:00:00.000Z");
+    await run("list_notifications");
+    expect(list).toHaveBeenLastCalledWith(30, undefined);
+    expect(registered().get("list_notifications")!.schema.safeParse({ before: "last week" }).success).toBe(false);
+    expect(registered().get("list_notifications")!.schema.safeParse({ before: "2026-10-05T10:00:00.000Z" }).success).toBe(true);
+    expect(answer).toMatchObject({ returned: 1, unreadOnPage: 1, nextBefore: "2026-10-05T10:00:00.000Z" });
+    expect(answer.notifications[0].task).toBe("BP-4");
+  });
+
+  it("mark_notifications_read marks one by its id, or all when given none", async () => {
+    const mark = vi.spyOn(PlannerClient.prototype, "markNotificationsRead").mockResolvedValue({ ok: true });
+
+    expect(parse(await run("mark_notifications_read", { id: "n1" }))).toEqual({ read: "n1" });
+    expect(parse(await run("mark_notifications_read"))).toEqual({ read: "all" });
+    expect(mark.mock.calls.map((c) => c[0])).toEqual(["n1", undefined]);
+  });
+});

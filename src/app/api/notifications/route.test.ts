@@ -38,7 +38,7 @@ function chain(rows: unknown[]) {
 
 const { GET } = await import("./route");
 
-const request = () => new Request("https://app.example.com/api/notifications");
+const request = (query = "") => new Request(`https://app.example.com/api/notifications${query}`);
 const noParams = { params: Promise.resolve({}) };
 
 function filterUsed() {
@@ -75,6 +75,20 @@ describe("GET /api/notifications", () => {
     expect(scoped).toEqual([ALSO_REACHABLE]);
     expect(scoped).not.toContain(REACHABLE);
     expect(scoped).not.toContain(LOST);
+  });
+
+  it("refuses a cursor that is not a time with 400, rather than letting it reach the database", async () => {
+    const res = await GET(request("?before=last%20week"), noParams);
+
+    expect(res.status).toBe(400);
+    expect(notificationFind).not.toHaveBeenCalled();
+  });
+
+  it("takes a cursor that is a time", async () => {
+    const res = await GET(request("?before=2026-10-05T10%3A00%3A00.000Z"), noParams);
+
+    expect(res.status).toBe(200);
+    expect(filterUsed()).toMatchObject({ createdAt: { $lt: new Date("2026-10-05T10:00:00.000Z") } });
   });
 
   it("returns an empty feed to a reader who holds no grant anywhere", async () => {
