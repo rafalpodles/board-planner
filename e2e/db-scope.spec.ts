@@ -188,14 +188,14 @@ test("the schema default is not what scopes a scoped write: the default organisa
 
   expect(names(await scoped(A).Sprint.find({}))).toEqual(["a-one", "a-two"]);
   expect(names(await scoped(defaultOrganisation).Sprint.find({}))).toEqual(["default-one"]);
-  expect(await Sprint.countDocuments({})).toBe(4);
+  expect(await rawRows()).toHaveLength(4);
 });
 
 test("a document's organisation cannot be moved, by a save or by a raw update", async () => {
   const doc = await scoped(B).Sprint.findOne({ name: "b-one" });
   doc!.set("organisation", A);
   await doc!.save();
-  await Sprint.updateOne({ name: "b-one" }, { $set: { organisation: A } });
+  await expect(Sprint.updateOne({ name: "b-one", organisation: B }, { $set: { organisation: A } })).rejects.toThrow(/moves a document to another organisation/);
 
   expect(B.equals((await rawRows()).find((row) => row.name === "b-one")?.organisation)).toBe(true);
 });

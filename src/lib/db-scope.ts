@@ -31,6 +31,7 @@ import { Task } from "@/models/task";
 import { User } from "@/models/user";
 import { Worker } from "@/models/worker";
 import { DEFAULT_ORGANISATION_ID } from "./organisation-field";
+import { expectOrganisation } from "./organisation-wall";
 
 // Thunks: a test that mocks one model must not fail on the exports of the others
 export const SCOPED_MODELS = {
@@ -195,9 +196,50 @@ function scopeBulk(operations: unknown, organisation: Types.ObjectId): Doc[] {
 
 type Loose = (...args: unknown[]) => unknown;
 
+type PopulateOptions = { path?: string; match?: unknown; populate?: unknown };
+
+function confineNested(nested: unknown, organisation: Types.ObjectId): unknown {
+  if (typeof nested === "string") return nested.split(/\s+/).filter(Boolean).map((path) => confine({ path }, organisation));
+  if (Array.isArray(nested)) return nested.flatMap((item) => confineNested(item, organisation));
+  if (isDoc(nested)) return confine({ ...(nested as PopulateOptions) }, organisation);
+  return nested;
+}
+
+// For a populate on a query the scoped db did not build: the paths, each confined to the organisation
+export const populateWithin = (paths: unknown, organisation: Types.ObjectId): unknown => confineNested(paths, organisation);
+
+function confine<O extends PopulateOptions>(options: O, organisation: Types.ObjectId): O {
+  const match = options.match;
+  options.match =
+    typeof match === "function"
+      ? function (this: unknown, ...args: unknown[]) {
+          return { ...((match as Loose).apply(this, args) as Doc | undefined), organisation };
+        }
+      : { ...(isDoc(match) ? match : {}), organisation };
+  if (options.populate !== undefined) options.populate = confineNested(options.populate, organisation);
+  return options;
+}
+
+type ScopedQuery = { populate?: Loose; _mongooseOptions?: { populate?: Record<string, PopulateOptions> } };
+
+function bind(result: unknown, organisation: Types.ObjectId): unknown {
+  if (typeof result !== "object" || result === null) return result;
+  expectOrganisation(result, organisation);
+  const query = result as ScopedQuery;
+  const populate = query.populate;
+  if (typeof populate === "function") {
+    query.populate = function (this: ScopedQuery, ...args: unknown[]) {
+      const returned = populate.apply(this, args);
+      for (const options of Object.values(this._mongooseOptions?.populate ?? {})) confine(options, organisation);
+      return returned;
+    };
+  }
+  return result;
+}
+
 function scopeModel(model: Model<never>, organisation: Types.ObjectId): unknown {
   const raw = model as unknown as Record<string, Loose>;
-  const call = (method: string, ...args: unknown[]) => raw[method].call(model, ...args);
+  const call = (method: string, ...args: unknown[]) => bind(raw[method].call(model, ...args), organisation);
   const byId = (id: unknown) => scopeFilter({ _id: id ?? null }, organisation);
 
   const methods: Record<string, Loose> = {

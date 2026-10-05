@@ -13,6 +13,7 @@ import { isWorkerLockedByInstance, projectRunsWorkers } from "@/lib/worker-gate"
 import type { ApiMachineCondition, MachineState, WorkerHalt, WorkerHaltSource } from "@/types";
 import { bindingErrorFor } from "@/lib/binding-error";
 import type { ScopedDb } from "@/lib/db-scope";
+import { acrossOrganisations } from "./organisation-wall";
 
 export const PROTOCOL_VERSION = 1;
 export const WORKER_STALE_MS = 5 * 60 * 1000;
@@ -568,7 +569,10 @@ export async function verifyWorkerCredential(
   if (!isValidObjectId(workerId) || typeof credential !== "string") return null;
   await connectDB();
   // credentialHash is select: false on the schema; it must be asked for explicitly
-  const worker = await Worker.findById(workerId).select("+credentialHash");
+  const worker = await acrossOrganisations(
+    Worker.findById(workerId).select("+credentialHash"),
+    "a machine names its organisation only once its credential is found"
+  );
   if (!worker) return null;
   return (await bcrypt.compare(credential, worker.credentialHash)) ? worker : null;
 }

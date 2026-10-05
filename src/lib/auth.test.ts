@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const userFindById = vi.fn();
 const apiTokenFind = vi.fn();
-const apiTokenFindByIdAndUpdate = vi.fn();
+const apiTokenUpdateOne = vi.fn();
 const oauthTokenFindOne = vi.fn();
 const oauthClientExists = vi.fn();
 const sessionFindOne = vi.fn();
@@ -21,9 +21,21 @@ vi.mock("bcryptjs", () => ({
   default: { compare: bcryptCompare, hashSync: bcryptHashSync },
 }));
 const userFindOne = vi.fn();
-vi.mock("@/models/user", () => ({ User: { findById: userFindById, findOne: userFindOne } }));
+// A lookup by id now names the credential's organisation; the fake honours that, so a person in
+// another organisation is not found, as in the database
+const userInOrganisation = (filter: { _id: unknown; organisation?: unknown }) =>
+  Promise.resolve(userFindById(filter._id)).then((found: { organisation?: unknown } | null) =>
+    found && filter.organisation && String(found.organisation) === String(filter.organisation) ? found : null
+  );
+vi.mock("@/models/user", () => ({
+  User: {
+    findById: userFindById,
+    findOne: (filter: { _id?: unknown; organisation?: unknown }, ...rest: unknown[]) =>
+      filter && "_id" in filter ? userInOrganisation(filter as { _id: unknown }) : userFindOne(filter, ...rest),
+  },
+}));
 vi.mock("@/models/apiToken", () => ({
-  ApiToken: { find: apiTokenFind, findByIdAndUpdate: apiTokenFindByIdAndUpdate },
+  ApiToken: { find: apiTokenFind, updateOne: apiTokenUpdateOne },
 }));
 vi.mock("@/models/oauthToken", () => ({ OAuthToken: { findOne: oauthTokenFindOne } }));
 vi.mock("@/models/oauthClient", () => ({ OAuthClient: { exists: oauthClientExists } }));
@@ -76,7 +88,7 @@ beforeEach(() => {
   sessionFound(null);
   sessionUpdateOne.mockResolvedValue({});
   apiTokenFind.mockReturnValue({ lean: () => Promise.resolve([]) });
-  apiTokenFindByIdAndUpdate.mockReturnValue(Promise.resolve(null));
+  apiTokenUpdateOne.mockReturnValue(Promise.resolve(null));
   oauthTokenFindOne.mockResolvedValue(null);
   oauthClientExists.mockResolvedValue({ _id: "c1" });
   userFindById.mockResolvedValue(user());

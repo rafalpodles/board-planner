@@ -14,6 +14,11 @@ import { OAuthCode } from "@/models/oauthCode";
 import { OAuthToken } from "@/models/oauthToken";
 import { Worker } from "@/models/worker";
 import { User } from "@/models/user";
+import { acrossOrganisations } from "./organisation-wall";
+
+const BY_CREDENTIAL = "a credential names its organisation only once it is found";
+const BY_USER_ID = "keyed by one user's id, which is unique across organisations";
+const byUser = <Q,>(query: Q): Q => acrossOrganisations(query, BY_USER_ID);
 
 export const SESSION_TOKEN_PREFIX = "cps_";
 export const SESSION_IDLE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -361,7 +366,7 @@ export async function createSession(params: {
     ip: (params.ip ?? "").slice(0, 128),
   });
   // A stamp the Users screen reads; failing to write it must not fail the sign-in
-  await User.updateOne({ _id: params.userId }, { $set: { lastSignInAt: new Date(now) } }).catch(() => {});
+  await User.updateOne({ _id: params.userId, organisation: params.organisation }, { $set: { lastSignInAt: new Date(now) } }).catch(() => {});
 
   return { token, sessionId: row._id, expiresAt, absoluteExpiresAt };
 }
@@ -372,8 +377,8 @@ export async function resolveSession(
   if (!token) return null;
   await connectDB();
 
-  const row = await Session.findOne({ tokenHash: sha256(token) }).lean();
-  if (!row) return null;
+  const row = await acrossOrganisations(Session.findOne({ tokenHash: sha256(token) }), BY_CREDENTIAL).lean();
+  if (!row?.organisation) return null;
 
   const now = Date.now();
   const expiresAt = new Date(row.expiresAt).getTime();
@@ -382,12 +387,12 @@ export async function resolveSession(
 
   const sessionId = row._id;
   const userId = row.user as Types.ObjectId;
-  const organisation = (row.organisation as Types.ObjectId | undefined) ?? null;
+  const organisation = row.organisation as Types.ObjectId;
   const extended = new Date(Math.min(now + SESSION_IDLE_TTL_MS, absoluteExpiresAt));
 
   if (extended.getTime() - expiresAt > SESSION_SLIDE_THROTTLE_MS) {
     await Session.updateOne(
-      { _id: sessionId },
+      { _id: sessionId, organisation },
       { $set: { expiresAt: extended, lastUsedAt: new Date(now) } }
     );
     return { sessionId, userId, organisation, expiresAt: extended };
@@ -408,14 +413,17 @@ export const RECENT_SIGN_IN_REQUIRED =
 export async function signedInRecently(sessionId: unknown): Promise<boolean> {
   if (!sessionId) return false;
   await connectDB();
-  const row = await Session.findById(sessionId).select("createdAt").lean();
+  const row = await acrossOrganisations(
+    Session.findOne({ _id: sessionId }).select("createdAt"),
+    "keyed by the caller's own session id, which is unique across organisations"
+  ).lean();
   return !!row?.createdAt && Date.now() - new Date(row.createdAt).getTime() < RECENT_SIGN_IN_MS;
 }
 
 export async function revokeSession(token: string): Promise<boolean> {
   if (!token) return false;
   await connectDB();
-  const result = await Session.deleteOne({ tokenHash: sha256(token) });
+  const result = await acrossOrganisations(Session.deleteOne({ tokenHash: sha256(token) }), BY_CREDENTIAL);
   return (result?.deletedCount ?? 0) > 0;
 }
 
@@ -426,22 +434,22 @@ export async function revokeUserCredentials(
   options: { keepIdentities?: boolean } = {}
 ): Promise<{ identitiesUnlinked: number }> {
   await revokeUserSessions(userId, exceptSessionId);
-  await ApiToken.deleteMany({ user: userId });
-  await OAuthToken.deleteMany({ user: userId });
-  await OAuthCode.deleteMany({ user: userId });
-  await EnrolmentToken.deleteMany({ createdBy: userId, usedAt: null });
-  await DeviceEnrolment.deleteMany({ enrolledBy: userId, deliveredAt: null });
+  await byUser(ApiToken.deleteMany({ user: userId }));
+  await byUser(OAuthToken.deleteMany({ user: userId }));
+  await byUser(OAuthCode.deleteMany({ user: userId }));
+  await byUser(EnrolmentToken.deleteMany({ createdBy: userId, usedAt: null }));
+  await byUser(DeviceEnrolment.deleteMany({ enrolledBy: userId, deliveredAt: null }));
   // A pending address change is a link somebody else may hold: confirmed after the recovery, it
   // would move the address back to them and hand them the next reset (BP-359 review)
-  await EmailChangeToken.deleteMany({ user: userId, usedAt: null });
+  await byUser(EmailChangeToken.deleteMany({ user: userId, usedAt: null }));
   // A machine keeps its identity and owner; only the credential it holds stops matching
   const unmatchable = await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 10);
-  await Worker.updateMany({ owner: userId }, { $set: { credentialHash: unmatchable } });
+  await byUser(Worker.updateMany({ owner: userId }, { $set: { credentialHash: unmatchable } }));
   // A linked sign-in provider is a standing way in like any token: one linked from a borrowed
   // session would otherwise outlive the password change meant to end it (BP-828). Kept by a
   // deactivation, which refuses every sign-in instead and must leave a way back (BP-832)
   if (options.keepIdentities) return { identitiesUnlinked: 0 };
-  const unlinked = await Identity.deleteMany({ user: userId });
+  const unlinked = await byUser(Identity.deleteMany({ user: userId }));
   return { identitiesUnlinked: unlinked.deletedCount ?? 0 };
 }
 
@@ -454,6 +462,6 @@ export async function revokeUserSessions(
   if (exceptSessionId) {
     filter._id = { $ne: exceptSessionId };
   }
-  const result = await Session.deleteMany(filter);
+  const result = await byUser(Session.deleteMany(filter));
   return result?.deletedCount ?? 0;
 }

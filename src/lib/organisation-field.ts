@@ -1,4 +1,5 @@
 import mongoose, { Schema } from "mongoose";
+import { organisationWall } from "./organisation-wall";
 
 export const DEFAULT_ORGANISATION_ID = new mongoose.Types.ObjectId("000000000000000000000001");
 
@@ -11,5 +12,6 @@ export function withOrganisation<S extends Schema>(schema: S): S {
       immutable: true,
     },
   });
+  schema.plugin(organisationWall);
   return schema;
 }

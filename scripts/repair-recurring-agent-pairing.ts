@@ -26,6 +26,9 @@ import { Task } from "../src/models/task";
 import { Project } from "../src/models/project";
 import { personalAgentAlienTo } from "../src/lib/task-service";
 import { scopedToDefaultOrganisation } from "../src/lib/db-scope";
+import { acrossOrganisations } from "../src/lib/organisation-wall";
+
+const EVERY_ORGANISATION = "a one-off repair pass over every organisation";
 
 const DRY_RUN = process.argv.includes("--dry-run");
 
@@ -40,16 +43,16 @@ async function main() {
   // those two — while never having taken the live self-heal path this script's scope otherwise
   // relies on: clearing `recurrence` doesn't touch `assignee`, so it never trips `updateTask`'s
   // `personalAgentAlienTo` check. Caught by checking whether any task names it as a parent.
-  const seriesRootIds = await Task.distinct("recurringParentId", { recurringParentId: { $ne: null } });
+  const seriesRootIds = await acrossOrganisations(Task.distinct("recurringParentId", { recurringParentId: { $ne: null } }), EVERY_ORGANISATION);
 
-  const candidates = await Task.find({
+  const candidates = await acrossOrganisations(Task.find({
     agent: { $ne: null },
     $or: [
       { recurrence: { $ne: null } },
       { recurringParentId: { $ne: null } },
       { _id: { $in: seriesRootIds } },
     ],
-  })
+  }), EVERY_ORGANISATION)
     .select("project taskNumber title assignee agent")
     .lean();
 
@@ -58,7 +61,7 @@ async function main() {
   const projectKeys = new Map<string, string>();
   async function keyFor(projectId: string): Promise<string> {
     if (!projectKeys.has(projectId)) {
-      const project = await Project.findById(projectId, "key").lean();
+      const project = await acrossOrganisations(Project.findById(projectId, "key"), EVERY_ORGANISATION).lean();
       projectKeys.set(projectId, project?.key ?? projectId);
     }
     return projectKeys.get(projectId)!;
@@ -106,9 +109,9 @@ async function main() {
     // working through earlier rows, that write already ran personalAgentAlienTo and may have left
     // a now-valid agent in place — clearing it here on the strength of a stale snapshot would
     // destroy a currently-correct assignment instead of a stale one.
-    const result = await Task.updateOne(
-      { _id: task._id, agent: task.agent },
-      { $set: { agent: null } }
+    const result = await acrossOrganisations(
+      Task.updateOne({ _id: task._id, agent: task.agent }, { $set: { agent: null } }),
+      EVERY_ORGANISATION
     );
     // The filter above requires `agent` to still equal the snapshot value, so a miss here always
     // means the row moved on its own since the snapshot was taken — deleted, or its agent already

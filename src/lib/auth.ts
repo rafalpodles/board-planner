@@ -7,6 +7,7 @@ import { ApiToken } from "@/models/apiToken";
 import { OAuthToken } from "@/models/oauthToken";
 import { OAuthClient } from "@/models/oauthClient";
 import { sha256 } from "./oauth";
+import { acrossOrganisations } from "./organisation-wall";
 import {
   ProvenanceError,
   checkProvenance,
@@ -79,15 +80,16 @@ async function verifyBearerToken(token: string): Promise<IUser | null> {
   const prefix = token.substring(0, 11);
 
   // Find candidate tokens by prefix
-  const candidates = await ApiToken.find({ prefix }).lean();
+  const candidates = await acrossOrganisations(ApiToken.find({ prefix }), "a token names its organisation only once it is found").lean();
 
   for (const candidate of candidates) {
     const valid = await bcrypt.compare(token, candidate.tokenHash);
     if (valid) {
       // Update lastUsedAt (fire-and-forget)
-      ApiToken.findByIdAndUpdate(candidate._id, { lastUsedAt: new Date() }).catch(() => {});
+      if (!candidate.organisation) return null;
+      ApiToken.updateOne({ _id: candidate._id, organisation: candidate.organisation }, { lastUsedAt: new Date() }).catch(() => {});
 
-      const user = await User.findById(candidate.user);
+      const user = await User.findOne({ _id: candidate.user as Types.ObjectId, organisation: candidate.organisation });
       if (!user || user.deactivatedAt || !sameOrganisation(user, candidate.organisation)) return null;
 
       // Every API token is a machine credential, scoped or not. tokenScoped answers a narrower
@@ -105,8 +107,11 @@ async function verifyBearerToken(token: string): Promise<IUser | null> {
 async function verifyOAuthAccessToken(token: string): Promise<IUser | null> {
   await connectDB();
 
-  const record = await OAuthToken.findOne({ accessTokenHash: sha256(token) });
-  if (!record) return null;
+  const record = await acrossOrganisations(
+    OAuthToken.findOne({ accessTokenHash: sha256(token) }),
+    "a token names its organisation only once it is found"
+  );
+  if (!record?.organisation) return null;
   // A row whose expiry is missing, null or unreadable is a credential that cannot be shown to be
   // live, and the bare `.getTime()` this replaces read both the wrong way: absent threw a TypeError
   // out of an ordinary refusal, and an unparseable date returned NaN — which is not less than
@@ -122,10 +127,13 @@ async function verifyOAuthAccessToken(token: string): Promise<IUser | null> {
   // step of that four-part, non-transactional cascade fails partway through. Checked here too, so
   // the cascade's ordering stops being the only thing standing between a deleted client and a
   // token that still verifies (BP-747 review).
-  const clientStillExists = await OAuthClient.exists({ clientId: record.clientId });
+  const clientStillExists = await acrossOrganisations(
+    OAuthClient.exists({ clientId: record.clientId }),
+    "a client id is issued at random and unique across organisations"
+  );
   if (!clientStillExists) return null;
 
-  const user = await User.findById(record.user);
+  const user = await User.findOne({ _id: record.user as Types.ObjectId, organisation: record.organisation });
   if (!user || user.deactivatedAt || !sameOrganisation(user, record.organisation)) return null;
 
   // An OAuth access token is held by an application, not typed by a person at a keyboard
@@ -144,10 +152,10 @@ async function verifySessionCookie(request: Request): Promise<IUser | null> {
   // One token: under auto the prefixed cookie wins whenever it is present, dead or alive, and the
   // plain name is read only when there is no prefixed cookie at all (BP-773 review).
   const session = await resolveSession(tokens[0]);
-  if (!session) return null;
+  if (!session?.organisation) return null;
 
   await connectDB();
-  const user = await User.findById(session.userId);
+  const user = await User.findOne({ _id: session.userId, organisation: session.organisation });
   // Deactivation revokes every session, so this is the second line: one minted in the moment
   // between the check and the revoke must not resolve either
   if (!user || user.deactivatedAt || !sameOrganisation(user, session.organisation)) return null;
