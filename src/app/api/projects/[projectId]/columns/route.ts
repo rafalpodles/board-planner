@@ -208,11 +208,13 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
   const removed = existing.filter((c) => !claimed.has(c.id));
   for (const col of removed) {
     const inUse = await db.Task.find({ project: projectId, status: col.id })
-      .select("taskNumber")
+      .select("taskNumber archivedAt")
       .sort({ taskNumber: 1 })
       .limit(11);
     if (inUse.length > 0) {
-      const keys = inUse.slice(0, 10).map((t) => `${project.key}-${t.taskNumber}`);
+      const keys = inUse
+        .slice(0, 10)
+        .map((t) => `${project.key}-${t.taskNumber}${t.archivedAt ? " (archived)" : ""}`);
       const suffix = inUse.length > 10 ? " and more" : "";
       return NextResponse.json(
         { error: `Column "${col.label}" still has tasks: ${keys.join(", ")}${suffix}` },

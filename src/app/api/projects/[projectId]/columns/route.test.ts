@@ -21,13 +21,16 @@ const ctx = () => ({ params: Promise.resolve({ projectId: PROJECT_ID }) });
 type Column = { id: string; label: string; color: string; role: string; order: number };
 
 /** The board as stored, and the tasks standing in it, keyed by column id. */
-function board(columns: Column[], tasksByColumn: Record<string, number[]> = {}) {
+function board(columns: Column[], tasksByColumn: Record<string, number[]> = {}, archived: number[] = []) {
   const doc = { key: "TP", columns, save: vi.fn(async () => {}) };
   projectFindOne.mockResolvedValue(doc);
   taskFind.mockImplementation((filter: { status: string }) => ({
     select: () => ({
       sort: () => ({
-        limit: async () => (tasksByColumn[filter.status] ?? []).map((taskNumber) => ({ taskNumber })),
+        limit: async () => (tasksByColumn[filter.status] ?? []).map((taskNumber) => ({
+          taskNumber,
+          archivedAt: archived.includes(taskNumber) ? new Date() : null,
+        })),
       }),
     }),
   }));
@@ -163,6 +166,14 @@ describe("PUT columns · which removals are checked for tasks", () => {
     col("in_progress", "In Progress", "active", 1),
     col("done", "Done", "done", 2),
   ];
+
+  it("names an archived task as archived, since nobody sees it on the board", async () => {
+    board(stored, { todo: [4, 7] }, [7]);
+    const res = await put([col("in_progress", "In Progress", "active", 1), col("done", "Done", "done", 2)]);
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Column "To Do" still has tasks: TP-4, TP-7 (archived)');
+  });
 
   it("refuses a removal whose id a newcomer reclaims, naming the tasks", async () => {
     board(stored, { todo: [4] });
