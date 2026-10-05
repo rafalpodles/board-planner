@@ -3,7 +3,7 @@ import { connectDB } from "@/lib/db";
 import { withProjectOwner } from "@/lib/middleware";
 import { organisationDomain } from "@/lib/organisation-host";
 import { logProjectAudit } from "@/lib/projectAudit";
-import { isWebhookSigningConfigured, webhookSigningSecret } from "@/lib/webhook-signature";
+import { isWebhookSigningConfigured, signsWithInstanceSecret, webhookSigningSecret } from "@/lib/webhook-signature";
 
 export type WebhookSigning = { signing: "off" } | { signing: "instance" } | { signing: "project"; secret: string };
 
@@ -20,6 +20,7 @@ export const GET = withProjectOwner(async (_request, { params, user, db }) => {
   await connectDB();
   const project = await db.Project.findById(projectId, "webhookSigningVersion").lean();
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+  if (signsWithInstanceSecret(db.organisation, project)) return answer({ signing: "instance" });
   await logProjectAudit(db, project._id, user._id, "webhook_secret_revealed");
   return answer({ signing: "project", secret: webhookSigningSecret(db.organisation, project) });
 });

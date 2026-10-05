@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import type { Types } from "mongoose";
+import { DEFAULT_ORGANISATION_ID } from "./organisation-field";
 import { organisationDomain } from "./organisation-host";
 
 /**
@@ -24,9 +25,16 @@ export type SigningProject = { _id: Types.ObjectId | string; webhookSigningVersi
  * project's key can verify — and forge — nothing else, and a key handed to somebody who leaves is
  * retired by rotating. Nothing is stored. A single-organisation instance signs with the secret as set.
  */
+// The default organisation keeps the instance's secret until a project rotates: its receivers
+// already verify with it, and switching an instance to subdomains must not break them
+export function signsWithInstanceSecret(organisation: Types.ObjectId, project: SigningProject): boolean {
+  if (!organisationDomain()) return true;
+  return organisation.equals(DEFAULT_ORGANISATION_ID) && !((project.webhookSigningVersion ?? 0) > 0);
+}
+
 export function webhookSigningSecret(organisation: Types.ObjectId, project: SigningProject): string {
   const key = instanceSecret();
-  if (!key || !organisationDomain()) return key;
+  if (!key || signsWithInstanceSecret(organisation, project)) return key;
   const scope = `webhook-signing:${organisation.toHexString()}:${String(project._id)}:${project.webhookSigningVersion ?? 0}`;
   return crypto.createHmac("sha256", key).update(scope).digest("hex");
 }

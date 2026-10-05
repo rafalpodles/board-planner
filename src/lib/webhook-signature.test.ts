@@ -81,6 +81,17 @@ describe("webhookSigningSecret (BP-669)", () => {
     expect(signWebhook("{}", "1", ACME, BOARD)).not.toBe(signWebhook("{}", "1", ACME, OTHER_BOARD));
   });
 
+  it("keeps the instance's secret for the default organisation when it moves to subdomains, until a project rotates (BP-671)", () => {
+    process.env.ORGANISATION_DOMAIN = "board-planner.test";
+    const DEFAULT = new Types.ObjectId("000000000000000000000001");
+
+    expect(webhookSigningSecret(DEFAULT, BOARD)).toBe("shhh");
+    expect(webhookSigningSecret(DEFAULT, { ...BOARD, webhookSigningVersion: 0 })).toBe("shhh");
+    const rotated = webhookSigningSecret(DEFAULT, { ...BOARD, webhookSigningVersion: 1 });
+    expect(rotated).toMatch(/^[0-9a-f]{64}$/);
+    expect(rotated).not.toBe("shhh");
+  });
+
   it("changes when the project rotates it, and when the instance secret does", () => {
     process.env.ORGANISATION_DOMAIN = "board-planner.test";
     const key = webhookSigningSecret(ACME, BOARD);
