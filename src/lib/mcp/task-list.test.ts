@@ -74,13 +74,13 @@ describe("sprintParam", () => {
     ];
 
     expect(() => sprintParam("Sprint 4", twins)).toThrow(
-      /2 sprints are named "Sprint 4".*507f1f77bcf86cd799439011, 507f1f77bcf86cd799439022/
+      /2 sprints are named "Sprint 4".*507f1f77bcf86cd799439011.*507f1f77bcf86cd799439022/
     );
     // ...and an id still says which one
     expect(sprintParam("507f1f77bcf86cd799439022", twins)).toBe("507f1f77bcf86cd799439022");
   });
 
   it("names the sprints the board has when the name matches none", () => {
-    expect(() => sprintParam("Sprint 9", sprints)).toThrow(/No sprint named "Sprint 9".*Sprint 4, Hardening/);
+    expect(() => sprintParam("Sprint 9", sprints)).toThrow(/No sprint "Sprint 9".*Sprint 4, Hardening/);
   });
 });

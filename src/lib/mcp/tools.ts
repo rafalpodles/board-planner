@@ -18,6 +18,15 @@ import { MAX_REORDER_IDS } from "@/lib/reorder";
 import { taskSummary, withTaskKeys, describeLink } from "./task-shape";
 import { findSprint, incompleteDestination, sprintSummary, type SprintRow } from "./sprints";
 import { DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT, listedTask, pageOf, sprintNeedsLookup, sprintParam } from "./task-list";
+import {
+  DUE_DATE_PARAM,
+  RECURRENCE_PARAM,
+  SPRINT_PARAM,
+  dueDateValue,
+  recurrenceValue,
+  sprintClears,
+  sprintForWrite,
+} from "./task-fields";
 
 type ToolExtra = { authInfo?: AuthInfo };
 
@@ -246,6 +255,9 @@ export function registerPlannerTools(server: McpServer): void {
           .optional()
           .describe("Acceptance criteria (markdown checklist, converted to structured checklist items)"),
         minimal: MINIMAL_PARAM,
+        dueDate: DUE_DATE_PARAM,
+        sprint: SPRINT_PARAM,
+        recurrence: RECURRENCE_PARAM,
         fields: z
           .record(z.any())
           .optional()
@@ -255,7 +267,10 @@ export function registerPlannerTools(server: McpServer): void {
           ),
       }, { hints: CREATE_TASK_HINTS, writes: true }),
     },
-    async ({ project, title, description, priority, category, assignee, status, acceptanceCriteria, minimal, fields }, extra) => {
+    async (
+      { project, title, description, priority, category, assignee, status, acceptanceCriteria, minimal, dueDate, sprint, recurrence, fields },
+      extra
+    ) => {
       const client = clientFrom(extra);
       const proj = await client.getProjectByKey(project);
       const data: Record<string, unknown> = { title };
@@ -265,6 +280,11 @@ export function registerPlannerTools(server: McpServer): void {
       if (category) data.category = category;
       if (status) data.status = status;
       if (acceptanceCriteria) data.acceptanceCriteria = acceptanceCriteria;
+      if (dueDate) data.dueDate = dueDateValue(dueDate);
+      if (recurrence) data.recurrence = recurrenceValue(recurrence);
+      if (sprint && !sprintClears(sprint)) {
+        data.sprint = sprintForWrite(sprint, (await client.listSprints(proj._id)) as SprintRow[]);
+      }
       if (fields && Object.keys(fields).length) {
         data.customFieldValues = resolveFieldsByName(fields, proj.customFields || []);
       }
@@ -318,6 +338,9 @@ export function registerPlannerTools(server: McpServer): void {
           .optional()
           .describe("Acceptance criteria (markdown checklist, converted to structured checklist items)"),
         minimal: MINIMAL_PARAM,
+        dueDate: DUE_DATE_PARAM,
+        sprint: SPRINT_PARAM,
+        recurrence: RECURRENCE_PARAM,
         fields: z
           .record(z.any())
           .optional()
@@ -327,11 +350,14 @@ export function registerPlannerTools(server: McpServer): void {
           ),
       }, { hints: UPDATE_TASK_HINTS, writes: true }),
     },
-    async ({ taskKey, title, description, priority, category, assignee, agent, acceptanceCriteria, minimal, fields }, extra) => {
+    async (
+      { taskKey, title, description, priority, category, assignee, agent, acceptanceCriteria, minimal, dueDate, sprint, recurrence, fields },
+      extra
+    ) => {
       // Before the lookup, so a call that changes nothing costs nothing and the refusal is the
       // first thing that happens rather than the last
       if (
-        ![title, description, priority, category, assignee, agent, acceptanceCriteria].some(
+        ![title, description, priority, category, assignee, agent, acceptanceCriteria, dueDate, sprint, recurrence].some(
           (v) => v !== undefined
         ) &&
         !Object.keys(fields || {}).length
@@ -348,6 +374,13 @@ export function registerPlannerTools(server: McpServer): void {
       if (priority !== undefined) data.priority = priority;
       if (category !== undefined) data.category = category;
       if (acceptanceCriteria !== undefined) data.acceptanceCriteria = acceptanceCriteria;
+      if (dueDate !== undefined) data.dueDate = dueDateValue(dueDate);
+      if (recurrence !== undefined) data.recurrence = recurrenceValue(recurrence);
+      if (sprint !== undefined) {
+        data.sprint = sprintClears(sprint)
+          ? null
+          : sprintForWrite(sprint, (await client.listSprints(projectId)) as SprintRow[]);
+      }
 
       if (fields && Object.keys(fields).length) {
         // customFieldValues is replaced wholesale by the API, so naming one field
@@ -412,6 +445,26 @@ export function registerPlannerTools(server: McpServer): void {
       return json(minimal ? summarised(client, updated as { taskNumber?: number }, taskKey) : updated);
     }
   );
+
+  // The route is told the state wanted and sets it in one update, so a retry — or two calls at once —
+  // ends where the first one did.
+  for (const [name, want] of [["watch_task", true], ["unwatch_task", false]] as const) {
+    server.registerTool(
+      name,
+      {
+        description: want
+          ? "Watch a task as the caller, so its changes reach you. Safe to repeat: watching a task already watched changes nothing."
+          : "Stop watching a task as the caller. Safe to repeat: a task not watched stays unwatched.",
+        inputSchema: strictInput({ taskKey: z.string().describe("Task key (e.g. 'CP-1')") }, { writes: true }),
+      },
+      async ({ taskKey }, extra) => {
+        const client = clientFrom(extra);
+        const { projectId, taskId } = await client.resolveTaskKey(taskKey);
+        const { watching } = await client.setWatching(projectId, taskId, want);
+        return json({ taskKey: taskKey.toUpperCase(), watching });
+      }
+    );
+  }
 
   server.registerTool(
     "change_task_status",

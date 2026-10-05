@@ -1202,7 +1202,7 @@ test("list_tasks refuses a filter that names nothing the board has, rather than 
 
   const noSprint = await session.callTool("list_tasks", { project: PROJECT_KEY, sprint: "Nowhere" });
   refused(noSprint);
-  expect(noSprint.text).toContain('No sprint named "Nowhere"');
+  expect(noSprint.text).toContain('No sprint "Nowhere"');
 
   const noField = await session.callTool("list_tasks", { project: PROJECT_KEY, fields: { Colour: "red" } });
   refused(noField);
@@ -1327,4 +1327,129 @@ test("a sprint name two sprints share is refused with their ids, by every tool t
   // By id it is exact, and only that one goes
   accepted(await session.callTool("delete_sprint", { project: PROJECT_KEY, sprint: first.parsed._id, confirmName: "Twin" }));
   expect(((await session.callTool("list_sprints", { project: PROJECT_KEY })).parsed as { _id: string }[]).map((s) => s._id)).toEqual([second.parsed._id]);
+});
+
+/**
+ * BP-905. The task carried a due date, a sprint and a recurrence an agent could read and not write.
+ * Each write ends on what the API stores afterwards, and the clearing is asserted too — a field that
+ * can be set and not unset is a trap.
+ */
+async function apiTask(request: APIRequestContext, taskId: string) {
+  const response = await request.get(`/api/projects/${PROJECT_ID}/tasks/${taskId}`, { headers: ADMIN_AUTH });
+  expect(response.status()).toBe(200);
+  return response.json();
+}
+
+test("create_task and update_task set a due date, a sprint and a recurrence, and clear them again", async ({ request }) => {
+  await seedSecondProject();
+  await seedForeignSprint();
+  const session = await connected(request);
+
+  const sprint = await session.callTool("create_sprint", {
+    project: PROJECT_KEY,
+    name: "Hardening",
+    startDate: "2026-10-01",
+    endDate: "2026-10-14",
+  });
+  accepted(sprint);
+
+  const created = await session.callTool("create_task", {
+    project: PROJECT_KEY,
+    title: "Dated and repeating",
+    dueDate: "2026-10-10",
+    sprint: "hardening",
+    recurrence: { frequency: "weekly", interval: 2, endDate: "2026-12-31" },
+  });
+  accepted(created);
+  const key = `${PROJECT_KEY}-${created.parsed.taskNumber}`;
+  const taskId: string = created.parsed._id;
+
+  const stored = await apiTask(request, taskId);
+  expect(stored.dueDate).toMatch(/^2026-10-10/);
+  expect(String(stored.sprint?._id ?? stored.sprint)).toBe(sprint.parsed._id);
+  expect(stored.recurrence).toMatchObject({ frequency: "weekly", interval: 2 });
+  expect(stored.recurrence.endDate).toMatch(/^2026-12-31/);
+
+  // Moved to another sprint and another day
+  const second = await session.callTool("create_sprint", {
+    project: PROJECT_KEY,
+    name: "Next",
+    startDate: "2026-10-15",
+    endDate: "2026-10-28",
+  });
+  accepted(second);
+  accepted(await session.callTool("update_task", { taskKey: key, dueDate: "2026-11-02", sprint: "Next" }));
+  const moved = await apiTask(request, taskId);
+  expect(moved.dueDate).toMatch(/^2026-11-02/);
+  expect(String(moved.sprint?._id ?? moved.sprint)).toBe(second.parsed._id);
+
+  // Each one clears
+  accepted(await session.callTool("update_task", { taskKey: key, dueDate: "", sprint: "backlog", recurrence: null }));
+  const cleared = await apiTask(request, taskId);
+  expect(cleared.dueDate).toBeNull();
+  expect(cleared.sprint).toBeNull();
+  expect(cleared.recurrence).toBeNull();
+
+  // Refused before anything is written: another board's sprint, a day that does not exist, a series the route would refuse
+  const foreign = await session.callTool("update_task", { taskKey: key, sprint: String(FOREIGN_SPRINT_ID) });
+  refused(foreign);
+  expect(foreign.text).toContain(`No sprint "${FOREIGN_SPRINT_ID}"`);
+  const impossible = await session.callTool("update_task", { taskKey: key, dueDate: "2026-02-31" });
+  refused(impossible);
+  expect(impossible.text).toContain("Invalid dueDate");
+  // ...and a series the schema refuses, or one with a key it does not know (which would otherwise be dropped)
+  for (const recurrence of [
+    { frequency: "yearly", interval: 1 },
+    { frequency: "daily", interval: 1, until: "2026-12-31" },
+  ]) {
+    const never = await session.callTool("update_task", { taskKey: key, recurrence });
+    expect(never.raw.error?.message ?? never.raw.result?.isError, never.text).toBeTruthy();
+  }
+  const untouched = await apiTask(request, taskId);
+  expect(untouched.sprint).toBeNull();
+  expect(untouched.dueDate).toBeNull();
+
+  // A name two sprints share is refused with their ids; a completed sprint is refused outright
+  accepted(await session.callTool("create_sprint", { project: PROJECT_KEY, name: "Hardening", startDate: "2026-11-01", endDate: "2026-11-14" }));
+  const twin = await session.callTool("update_task", { taskKey: key, sprint: "Hardening" });
+  refused(twin);
+  expect(twin.text).toContain('2 sprints are named "Hardening"');
+  expect(twin.text).toContain(String(sprint.parsed._id));
+  accepted(await session.callTool("update_sprint", { project: PROJECT_KEY, sprintId: second.parsed._id, status: "completed" }));
+  const closed = await session.callTool("update_task", { taskKey: key, sprint: "Next" });
+  refused(closed);
+  expect(closed.text).toContain('Sprint "Next" is completed');
+  expect((await apiTask(request, taskId)).sprint).toBeNull();
+
+  // A create naming another board's sprint is refused rather than answered 200 for a task in no sprint
+  const strayed = await session.callTool("create_task", {
+    project: PROJECT_KEY,
+    title: "Never made",
+    sprint: String(FOREIGN_SPRINT_ID),
+  });
+  refused(strayed);
+});
+
+test("watch_task and unwatch_task are idempotent and show on the task", async ({ request }) => {
+  const session = await connected(request);
+  const created = await session.callTool("create_task", { project: PROJECT_KEY, title: "Watched" });
+  accepted(created);
+  const key = `${PROJECT_KEY}-${created.parsed.taskNumber}`;
+  const taskId: string = created.parsed._id;
+  const me = (await (await request.get("/api/auth/me", { headers: ADMIN_AUTH })).json()) as { _id: string };
+  const watchers = async () => ((await apiTask(request, taskId)).watchers as unknown[]).map((w) => String((w as { _id?: string })?._id ?? w));
+
+  // Twice each: a retried flip would undo itself
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const on = await session.callTool("watch_task", { taskKey: key });
+    accepted(on);
+    expect(on.parsed).toEqual({ taskKey: key, watching: true });
+    expect(await watchers()).toEqual([me._id]);
+  }
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const off = await session.callTool("unwatch_task", { taskKey: key });
+    accepted(off);
+    expect(off.parsed).toEqual({ taskKey: key, watching: false });
+    expect(await watchers()).toEqual([]);
+  }
 });

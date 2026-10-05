@@ -174,6 +174,13 @@ export class PlannerClient {
     ) as Promise<unknown[]>;
   }
 
+  /** Sets the caller's watch to the state asked for; the route does it in one update, so a retry cannot undo it. */
+  async setWatching(projectId: string, taskId: string, watching: boolean): Promise<{ watching: boolean }> {
+    return (await this.request("POST", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}/watch`, {
+      watching,
+    })) as { watching: boolean };
+  }
+
   async listAgents(): Promise<unknown[]> {
     return this.request("GET", "/api/agents") as Promise<unknown[]>;
   }
