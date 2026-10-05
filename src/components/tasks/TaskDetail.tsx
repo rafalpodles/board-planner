@@ -5,7 +5,7 @@ import { useApi } from "@/hooks/use-api";
 import { emitBoardRefresh, subscribeBoardRefresh } from "@/lib/board-refresh";
 import { taskPath } from "@/lib/urls";
 import { duplicatePayload } from "@/lib/task-duplicate";
-import { timeAgo } from "@/lib/time";
+import { agoOrOn, timeAgo } from "@/lib/time";
 import { useAuth } from "@/hooks/use-auth";
 import {
   ApiAgent,
@@ -515,7 +515,7 @@ function TaskDetailView({
           className="flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border bg-bg-input px-4 py-2.5 text-sm text-text-muted sm:px-7"
         >
           <span>
-            <strong className="font-medium text-text">Archived</strong> {timeAgo(archivedAt)}. This
+            <strong className="font-medium text-text">Archived</strong> {agoOrOn(archivedAt)}. This
             task is hidden from the board and every list; it can still be opened from its link.
           </span>
           <Button size="sm" variant="secondary" onClick={handleRestore} disabled={archiving}>

@@ -328,6 +328,16 @@ describe("TaskDetail", () => {
       await waitFor(() => expect(screen.queryByTestId("archived-banner")).toBeNull());
     });
 
+    it("dates an old archive instead of printing a bare locale date after 'Archived'", async () => {
+      serve({ task: { archivedAt: "2026-08-05T10:00:00.000Z" } });
+      renderDetail();
+      await loaded();
+
+      const text = screen.getByTestId("archived-banner").textContent ?? "";
+      expect(text).toMatch(/^Archived on .*2026\. This task is hidden/);
+      expect(text).not.toMatch(/Archived \d/);
+    });
+
     it("asks before taking a task from a running worker, and resends the archive with force", async () => {
       api.post
         .mockRejectedValueOnce({
