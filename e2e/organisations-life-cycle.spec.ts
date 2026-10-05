@@ -158,8 +158,8 @@ test.describe("BP-893: an organisation's life cycle", () => {
     await expect(page.getByText(GLOBEX.projectName).first()).toBeVisible();
 
     expect((await suspend(request, GLOBEX)).status()).toBe(200);
-    await page.getByRole("link", { name: "My Tasks" }).click();
-    await expect(page.getByRole("heading", { name: "This organisation is suspended" })).toBeVisible();
+    // The board's own refresh, every 10 s, is the next request
+    await expect(page.getByRole("heading", { name: "This organisation is suspended" })).toBeVisible({ timeout: 20_000 });
     await expect(page.getByText(/having trouble reaching its database/)).toHaveCount(0);
 
     expect((await resume(request, GLOBEX)).status()).toBe(200);
