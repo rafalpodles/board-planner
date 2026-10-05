@@ -23,7 +23,7 @@ function request(headers: Record<string, string>, body: Uint8Array = BODY, url =
 }
 
 const signed = (key = SERVICE, at = NOW, body = BODY) =>
-  signPlatformRequest({ method: "POST", path: new URL(URL_).pathname, body, now: at }, key);
+  signPlatformRequest({ method: "POST", host: new URL(URL_).host, path: new URL(URL_).pathname, body, now: at }, key);
 
 beforeEach(() => {
   create.mockReset().mockResolvedValue({});
@@ -52,10 +52,15 @@ describe("verifyPlatformRequest", () => {
   it("signs the query with the path, so a list's cursor cannot be changed under a valid signature (BP-892)", async () => {
     const listing = "https://board-planner.test/api/platform/organisations";
     const get = (url: string, headers: Record<string, string>) => new Request(url, { method: "GET", headers });
-    const headers = signPlatformRequest({ method: "GET", path: "/api/platform/organisations?limit=1", body: new Uint8Array(), now: NOW }, SERVICE);
+    const headers = signPlatformRequest({ method: "GET", host: "board-planner.test", path: "/api/platform/organisations?limit=1", body: new Uint8Array(), now: NOW }, SERVICE);
 
     expect(await verifyPlatformRequest(get(`${listing}?limit=200`, headers), new Uint8Array(), { keys: KEYS, now: NOW })).toMatchObject({ ok: false, reason: "bad_signature" });
     expect(await verifyPlatformRequest(get(`${listing}?limit=1`, headers), new Uint8Array(), { keys: KEYS, now: NOW })).toEqual({ ok: true, keyId: SERVICE.keyId });
+  });
+
+  it("refuses a request signed for another host, so one instance's request cannot be replayed on another trusting the same key (BP-671)", async () => {
+    const elsewhere = new Request(URL_.replace("board-planner.test", "staging.board-planner.test"), { method: "POST", headers: signed(), body: Buffer.from(BODY) });
+    expect(await verifyPlatformRequest(elsewhere, BODY, { keys: KEYS, now: NOW })).toMatchObject({ ok: false, reason: "bad_signature" });
   });
 
   it("refuses a timestamp more than five minutes off, either way", async () => {

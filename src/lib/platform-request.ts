@@ -32,19 +32,20 @@ export function platformRequestKeys(env: NodeJS.ProcessEnv = process.env): Platf
     });
 }
 
-export function platformSigningString(method: string, path: string, timestamp: string, nonce: string, body: Uint8Array): string {
+// The host is signed too, so a request made for one instance cannot be replayed on another that trusts the same key
+export function platformSigningString(method: string, host: string, path: string, timestamp: string, nonce: string, body: Uint8Array): string {
   const digest = createHash("sha256").update(body).digest("hex");
-  return [method.toUpperCase(), path, timestamp, nonce, digest].join("\n");
+  return [method.toUpperCase(), host.toLowerCase(), path, timestamp, nonce, digest].join("\n");
 }
 
 export function signPlatformRequest(
-  { method, path, body, now = Date.now() }: { method: string; path: string; body: Uint8Array; now?: number },
+  { method, host, path, body, now = Date.now() }: { method: string; host: string; path: string; body: Uint8Array; now?: number },
   key: { keyId: string; d: string; x: string }
 ): Record<string, string> {
   const timestamp = String(now);
   const nonce = randomBytes(18).toString("base64url");
   const privateKey = createPrivateKey({ key: { kty: "OKP", crv: "Ed25519", d: key.d, x: key.x }, format: "jwk" });
-  const signature = sign(null, Buffer.from(platformSigningString(method, path, timestamp, nonce, body)), privateKey);
+  const signature = sign(null, Buffer.from(platformSigningString(method, host, path, timestamp, nonce, body)), privateKey);
   return {
     [PLATFORM_HEADERS.keyId]: key.keyId,
     [PLATFORM_HEADERS.timestamp]: timestamp,
@@ -105,7 +106,8 @@ export async function verifyPlatformRequest(
 
   const url = new URL(request.url);
   const path = url.pathname + url.search;
-  if (!signatureMatches(platformSigningString(request.method, path, timestamp, nonce, body), signature, key)) {
+  const host = request.headers.get("host") ?? url.host;
+  if (!signatureMatches(platformSigningString(request.method, host, path, timestamp, nonce, body), signature, key)) {
     return { ok: false, reason: "bad_signature", keyId };
   }
   if (Math.abs(now - Number(timestamp)) > PLATFORM_REQUEST_WINDOW_MS) return { ok: false, reason: "stale_timestamp", keyId };

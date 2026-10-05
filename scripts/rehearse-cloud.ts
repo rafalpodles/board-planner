@@ -160,7 +160,7 @@ async function main() {
     check("app. is not the platform", (await call(DEFAULT_HOST, "/api/platform/organisations")).status === 404);
 
     const path = "/api/platform/organisations";
-    const signed = await call(`login.${DOMAIN}`, path, signPlatformRequest({ method: "GET", path, body: new Uint8Array() }, platformKey));
+    const signed = await call(`login.${DOMAIN}`, path, signPlatformRequest({ method: "GET", host: `login.${DOMAIN}:${PORT}`, path, body: new Uint8Array() }, platformKey));
     const organisations = (json(signed.body)?.organisations ?? []) as { id: string; projects: number }[];
     const listedHome = organisations.find((row) => row.id === DEFAULT_ORGANISATION_ID.toHexString());
     check("the operator lists both organisations on login.", signed.status === 200 && organisations.length === 2 && listedHome?.projects === homeProjects, `HTTP ${signed.status}, ${organisations.length} organisations`);
