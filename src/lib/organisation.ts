@@ -1,8 +1,10 @@
 import { cache } from "react";
+import { Types } from "mongoose";
 import { connectDB } from "./db";
 import { Organisation, IOrganisation } from "@/models/organisation";
-import { upsertSingleton } from "./singleton";
-import { currentLicence, entitlementsFromLicence } from "./licence";
+import { currentLicence, entitlementsFromLicence, storedLicence, type LicenceCheck } from "./licence";
+import { DEFAULT_ORGANISATION_ID } from "./organisation-field";
+import { organisationDomain } from "./organisation-host";
 
 export const ORGANISATION_NAME_MAX = 80;
 
@@ -18,9 +20,19 @@ export function checkOrganisationName(
   return { ok: true, value: name || null };
 }
 
+const FREE = { plan: "free", features: [], source: "none" } as const;
+
+function ensureDefaultOrganisation(update: Record<string, unknown> = {}) {
+  return Organisation.findOneAndUpdate(
+    { _id: DEFAULT_ORGANISATION_ID },
+    { ...update, $setOnInsert: { entitlements: { ...FREE, features: [] } } },
+    { upsert: true, returnDocument: "after" }
+  ).lean<IOrganisation>();
+}
+
 export async function nameOrganisation(name: string): Promise<void> {
   await connectDB();
-  await upsertSingleton(Organisation, { $set: { name } });
+  await ensureDefaultOrganisation({ $set: { name } });
 }
 
 // React's cache() only dedupes calls made during a Server Component render — confirmed against
@@ -28,12 +40,30 @@ export async function nameOrganisation(name: string): Promise<void> {
 // dispatcher active), so every call from here today — Route Handlers only — still pays its own
 // query; a future Server Component reading organisation/plan data would share one.
 // Kept anyway: it costs nothing where it doesn't apply, and is correct where it does.
-export const getOrganisation = cache(async (): Promise<IOrganisation> => {
+const readOrganisation = cache(async (id: string): Promise<IOrganisation> => {
   await connectDB();
-  const stored = await upsertSingleton(Organisation, {
-    $setOnInsert: { entitlements: { plan: "free", features: [], source: "none" } },
-  });
+  const stored = DEFAULT_ORGANISATION_ID.equals(id)
+    ? await ensureDefaultOrganisation()
+    : await Organisation.findById(id).lean<IOrganisation>();
+  const row: IOrganisation = stored ?? { _id: new Types.ObjectId(id), name: "", entitlements: { ...FREE, features: [] } };
+
+  // With organisations on subdomains each one's plan is the key the licence service stored on it,
+  // and nothing else: no environment key, and no plan written straight into the row
+  if (organisationDomain()) {
+    const fromKey = entitlementsFromLicence(licenceOf(row), "service");
+    return { ...row, entitlements: fromKey ?? { ...FREE, features: [] } };
+  }
   // Derived on every read and never written back, so removing the key is all it takes to undo it
-  const fromLicence = entitlementsFromLicence(currentLicence());
-  return fromLicence ? { _id: stored._id, name: stored.name, entitlements: fromLicence } : stored;
+  const fromLicence = entitlementsFromLicence(licenceOf(row));
+  return fromLicence ? { ...row, entitlements: fromLicence } : row;
 });
+
+export function licenceOf(row: Pick<IOrganisation, "_id" | "licenceKey">, now: number = Date.now()): LicenceCheck | null {
+  const id = String(row._id);
+  return organisationDomain()
+    ? storedLicence(row.licenceKey, id, now)
+    : currentLicence(process.env, now);
+}
+
+export const getOrganisation = (organisation: Types.ObjectId | string): Promise<IOrganisation> =>
+  readOrganisation(String(organisation));

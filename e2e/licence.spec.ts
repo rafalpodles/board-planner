@@ -63,6 +63,18 @@ test("a signed key turns the instance Pro and the page shows who it is for", asy
   await expect(screen.getByRole("button")).toHaveCount(0);
 });
 
+// BP-891 review: the default organisation has the same id on every instance, so a key bound to it
+// in the cloud must not unlock a self-hosted one that pastes it into LICENCE_KEY
+test("a key bound to an organisation, even this instance's own, is refused in LICENCE_KEY", async ({ page, request }) => {
+  await useLicenceKey(request, e2eLicence({ organisation: "000000000000000000000001" }));
+
+  await openLicenceSettings(page);
+
+  await expect(page.getByTestId("licence-free")).toContainText("Free plan");
+  await expect(page.getByTestId("licence-page")).toContainText("issued for another organisation");
+  expect(await planSeenByAMember(request)).toBe("free");
+});
+
 test("each kind of bad key is named, and every one leaves the instance free", async ({ page, request }) => {
   const good = e2eLicence();
   const [body, signature] = good.split(".");

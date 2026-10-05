@@ -18,6 +18,7 @@ export interface IOrganisation {
   slug?: string;
   digestHour?: number;
   timezone?: string;
+  licenceKey?: string;
   entitlements: IOrganisationEntitlements;
 }
 
@@ -38,6 +39,7 @@ const organisationSchema = new Schema<IOrganisation>({
   slug: { type: String, trim: true, lowercase: true },
   digestHour: { type: Number, min: 0, max: 23 },
   timezone: { type: String, trim: true },
+  licenceKey: { type: String },
   entitlements: {
     type: entitlementsSchema,
     default: () => ({ plan: "free", features: [], source: "none" }),

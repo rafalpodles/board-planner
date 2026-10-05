@@ -11,6 +11,13 @@ export const E2E_LICENCE_SIGNING_KEY = {
 };
 export const E2E_LICENCE_PUBLIC_KEY = E2E_LICENCE_SIGNING_KEY.x;
 
+// The licence service's request key, as the e2e organisations server lists it in PLATFORM_REQUEST_KEYS
+export const E2E_PLATFORM_REQUEST_KEY = {
+  keyId: "e2e-request",
+  d: "4KTi2vT_bLK_AmGmLZOIi_sNQbVUcaNWx1XvCt6PQKk",
+  x: "O8oCMfZiZp2tFnZpT8I5C1A4bQ95veiR9riXvLD069c",
+};
+
 const DAY = 24 * 60 * 60 * 1000;
 
 export function e2eLicence(

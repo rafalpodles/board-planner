@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { ENTITLEMENT_GRACE_MS } from "@/lib/entitlements";
-import { currentLicence } from "@/lib/licence";
 import { withAdmin } from "@/lib/middleware";
+import { getOrganisation, licenceOf } from "@/lib/organisation";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -10,9 +10,9 @@ function utcDay(ms: number): number {
   return Math.floor(ms / DAY_MS);
 }
 
-export const GET = withAdmin(async () => {
+export const GET = withAdmin(async (_request, { db }) => {
   const now = Date.now();
-  const check = currentLicence(process.env, now);
+  const check = licenceOf(await getOrganisation(db.organisation), now);
   if (!check) return NextResponse.json({ configured: false });
   if (!check.payload) return NextResponse.json({ configured: true, verdict: check.verdict });
 

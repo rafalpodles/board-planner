@@ -1,110 +1,157 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { generateKeyPairSync } from "node:crypto";
+import { Types } from "mongoose";
 
-const { connectDB, findOneAndUpdate } = vi.hoisted(() => ({
+const { connectDB, findOneAndUpdate, findById } = vi.hoisted(() => ({
   connectDB: vi.fn(),
   findOneAndUpdate: vi.fn(),
+  findById: vi.fn(),
 }));
 
 vi.mock("./db", () => ({ connectDB }));
-vi.mock("@/models/organisation", () => ({ Organisation: { findOneAndUpdate } }));
+vi.mock("@/models/organisation", () => ({ Organisation: { findOneAndUpdate, findById } }));
 
-const { getOrganisation, checkOrganisationName, nameOrganisation, ORGANISATION_NAME_MAX } = await import("./organisation");
-const { SINGLETON_ID } = await import("./singleton");
+const { getOrganisation, licenceOf, checkOrganisationName, nameOrganisation, ORGANISATION_NAME_MAX } = await import("./organisation");
+const { DEFAULT_ORGANISATION_ID } = await import("./organisation-field");
 const { signLicence } = await import("./licence");
+
+const OTHER = new Types.ObjectId("0000000000000000000000b2");
+const FREE = { plan: "free", features: [], source: "none" };
+const resolves = (value: unknown) => ({ lean: () => Promise.resolve(value) });
+
+const ORIGINAL = { ...process.env };
+const jwk = generateKeyPairSync("ed25519").privateKey.export({ format: "jwk" });
+const signing = { keyId: "e2e", d: jwk.d!, x: jwk.x! };
+const DAY = 24 * 60 * 60 * 1000;
+
+function key({ expiresAt = new Date(Date.now() + 30 * DAY), organisation }: { expiresAt?: Date; organisation?: string } = {}) {
+  return signLicence(
+    { customer: "Acme Ltd", plan: "pro", features: [], issuedAt: new Date().toISOString(), expiresAt: expiresAt.toISOString(), organisation },
+    signing
+  );
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // The suite's own key, accepted outside a production build — the same door e2e uses
+  process.env.E2E = "1";
+  process.env.E2E_LICENCE_PUBLIC_KEY = signing.x;
+  delete process.env.LICENCE_KEY;
+  delete process.env.ORGANISATION_DOMAIN;
+});
+
+afterEach(() => {
+  process.env = { ...ORIGINAL };
 });
 
 describe("getOrganisation", () => {
-  it("upserts the singleton with the documented default on first read", async () => {
-    findOneAndUpdate.mockResolvedValue({
-      _id: "organisation-1",
-      entitlements: { plan: "free", features: [], source: "none" },
-    });
+  it("reads the default organisation by its own id, creating it free on first read", async () => {
+    findOneAndUpdate.mockReturnValue(resolves({ _id: DEFAULT_ORGANISATION_ID, entitlements: FREE }));
 
-    const organisation = await getOrganisation();
+    const organisation = await getOrganisation(DEFAULT_ORGANISATION_ID);
 
     expect(connectDB).toHaveBeenCalled();
     expect(findOneAndUpdate).toHaveBeenCalledWith(
-      {},
-      {
-        $setOnInsert: {
-          entitlements: { plan: "free", features: [], source: "none" },
-          _id: SINGLETON_ID,
-        },
-      },
+      { _id: DEFAULT_ORGANISATION_ID },
+      { $setOnInsert: { entitlements: FREE } },
       { upsert: true, returnDocument: "after" }
     );
-    expect(organisation.entitlements).toEqual({ plan: "free", features: [], source: "none" });
+    expect(organisation.entitlements).toEqual(FREE);
   });
 
-  it("issues the exact same idempotent upsert on a second read, not a differently-shaped write", async () => {
-    // What actually makes a second read safe is that every call sends the identical {} filter
-    // and $setOnInsert — a mocked model returns whatever it's told to regardless of arguments,
-    // so asserting only the resolved value here would pass even for a second call that switched
-    // to Organisation.create() or changed the filter, either of which would create a second document
-    // against a real Mongo.
-    const existing = { _id: "organisation-1", entitlements: { plan: "pro", features: [], source: "service" } };
-    findOneAndUpdate.mockResolvedValue(existing);
+  it("reads any other organisation by its id and never creates one", async () => {
+    findById.mockReturnValue(resolves({ _id: OTHER, name: "Globex", entitlements: FREE }));
 
-    await getOrganisation();
-    await getOrganisation();
+    expect((await getOrganisation(OTHER)).name).toBe("Globex");
+    expect(findById).toHaveBeenCalledWith(String(OTHER));
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
+  });
 
-    expect(findOneAndUpdate).toHaveBeenCalledTimes(2);
-    const [firstCall, secondCall] = findOneAndUpdate.mock.calls;
-    expect(secondCall).toEqual(firstCall);
+  it("answers free for an organisation with no row", async () => {
+    findById.mockReturnValue(resolves(null));
+
+    expect((await getOrganisation(OTHER)).entitlements).toEqual(FREE);
   });
 });
 
-describe("getOrganisation with LICENCE_KEY", () => {
-  const ORIGINAL = { ...process.env };
-  const jwk = generateKeyPairSync("ed25519").privateKey.export({ format: "jwk" });
-  const signing = { keyId: "e2e", d: jwk.d!, x: jwk.x! };
-  const stored = { _id: "organisation-1", entitlements: { plan: "free", features: [], source: "none" } };
-
-  function key(expiresAt: Date, customer = "Acme Ltd") {
-    return signLicence(
-      { customer, plan: "pro", features: [], issuedAt: new Date().toISOString(), expiresAt: expiresAt.toISOString() },
-      signing
-    );
-  }
-
-  beforeEach(() => {
-    // The suite's own key, accepted outside a production build — the same door e2e uses
-    process.env.E2E = "1";
-    process.env.E2E_LICENCE_PUBLIC_KEY = signing.x;
-    findOneAndUpdate.mockResolvedValue(stored);
-  });
-
-  afterEach(() => {
-    process.env = { ...ORIGINAL };
-  });
+describe("getOrganisation on a single-organisation instance: LICENCE_KEY", () => {
+  const stored = { _id: DEFAULT_ORGANISATION_ID, entitlements: FREE };
+  beforeEach(() => findOneAndUpdate.mockReturnValue(resolves(stored)));
 
   it("derives pro from a valid key without writing it to the stored organisation", async () => {
-    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-    process.env.LICENCE_KEY = key(expiresAt);
+    const expiresAt = new Date(Date.now() + 30 * DAY);
+    process.env.LICENCE_KEY = key({ expiresAt });
 
-    const organisation = await getOrganisation();
+    const organisation = await getOrganisation(DEFAULT_ORGANISATION_ID);
 
     expect(organisation.entitlements).toMatchObject({ plan: "pro", customer: "Acme Ltd", expiresAt, source: "env" });
-    expect(organisation._id).toBe("organisation-1");
-    expect(findOneAndUpdate.mock.calls[0][1]).toEqual({
-      $setOnInsert: expect.objectContaining({ entitlements: { plan: "free", features: [], source: "none" } }),
-    });
+    expect(findOneAndUpdate.mock.calls[0][1]).toEqual({ $setOnInsert: { entitlements: FREE } });
   });
 
   it("reports free for a key past its grace period", async () => {
-    process.env.LICENCE_KEY = key(new Date(Date.now() - 15 * 24 * 60 * 60 * 1000));
+    process.env.LICENCE_KEY = key({ expiresAt: new Date(Date.now() - 15 * DAY) });
 
-    expect((await getOrganisation()).entitlements).toEqual({ plan: "free", features: [], source: "env" });
+    expect((await getOrganisation(DEFAULT_ORGANISATION_ID)).entitlements).toEqual({ plan: "free", features: [], source: "env" });
   });
 
   it("leaves the stored entitlements for a key that does not verify", async () => {
     process.env.LICENCE_KEY = "garbage";
 
-    expect(await getOrganisation()).toBe(stored);
+    expect((await getOrganisation(DEFAULT_ORGANISATION_ID)).entitlements).toEqual(FREE);
+  });
+
+  it("refuses a key issued for another organisation", async () => {
+    process.env.LICENCE_KEY = key({ organisation: OTHER.toHexString() });
+
+    expect((await getOrganisation(DEFAULT_ORGANISATION_ID)).entitlements).toEqual(FREE);
+  });
+
+  it("refuses even a key naming this organisation: the default one has the same id on every instance", async () => {
+    process.env.LICENCE_KEY = key({ organisation: DEFAULT_ORGANISATION_ID.toHexString() });
+
+    expect((await getOrganisation(DEFAULT_ORGANISATION_ID)).entitlements).toEqual(FREE);
+  });
+});
+
+describe("getOrganisation with organisations on subdomains", () => {
+  beforeEach(() => {
+    process.env.ORGANISATION_DOMAIN = "board-planner.test";
+  });
+
+  it("ignores LICENCE_KEY, so one key never makes every organisation Pro", async () => {
+    process.env.LICENCE_KEY = key();
+    findOneAndUpdate.mockReturnValue(resolves({ _id: DEFAULT_ORGANISATION_ID, entitlements: FREE }));
+    findById.mockReturnValue(resolves({ _id: OTHER, entitlements: FREE }));
+
+    expect((await getOrganisation(DEFAULT_ORGANISATION_ID)).entitlements.plan).toBe("free");
+    expect((await getOrganisation(OTHER)).entitlements.plan).toBe("free");
+  });
+
+  it("derives the plan from the key stored on the organisation, when it names that organisation", async () => {
+    findById.mockReturnValue(resolves({ _id: OTHER, licenceKey: key({ organisation: OTHER.toHexString() }), entitlements: FREE }));
+
+    expect((await getOrganisation(OTHER)).entitlements).toMatchObject({ plan: "pro", source: "service" });
+  });
+
+  it("refuses a stored key that names another organisation, or none", async () => {
+    findById.mockReturnValueOnce(resolves({ _id: OTHER, licenceKey: key({ organisation: DEFAULT_ORGANISATION_ID.toHexString() }), entitlements: FREE }));
+    expect((await getOrganisation(OTHER)).entitlements.plan).toBe("free");
+
+    findById.mockReturnValueOnce(resolves({ _id: OTHER, licenceKey: key(), entitlements: FREE }));
+    expect((await getOrganisation(OTHER)).entitlements.plan).toBe("free");
+  });
+
+  it("reports, for Settings → Licence, the stored key's verdict and never LICENCE_KEY", () => {
+    process.env.LICENCE_KEY = key();
+    expect(licenceOf({ _id: OTHER })).toBeNull();
+    expect(licenceOf({ _id: OTHER, licenceKey: key({ organisation: OTHER.toHexString() }) })?.verdict).toBe("valid");
+    expect(licenceOf({ _id: OTHER, licenceKey: key({ organisation: DEFAULT_ORGANISATION_ID.toHexString() }) })?.verdict).toBe("wrong_organisation");
+  });
+
+  it("never takes a plan written straight into the row", async () => {
+    findById.mockReturnValue(resolves({ _id: OTHER, entitlements: { plan: "pro", features: [], source: "service" } }));
+
+    expect((await getOrganisation(OTHER)).entitlements.plan).toBe("free");
   });
 });
 
@@ -127,14 +174,14 @@ describe("checkOrganisationName", () => {
 });
 
 describe("nameOrganisation", () => {
-  it("sets the name on the instance's one organisation row", async () => {
-    findOneAndUpdate.mockResolvedValue({ _id: "organisation-1" });
+  it("sets the name on the default organisation's row", async () => {
+    findOneAndUpdate.mockReturnValue(resolves({ _id: DEFAULT_ORGANISATION_ID }));
 
     await nameOrganisation("Rafał-org");
 
     expect(findOneAndUpdate).toHaveBeenCalledWith(
-      {},
-      { $set: { name: "Rafał-org" }, $setOnInsert: { _id: SINGLETON_ID } },
+      { _id: DEFAULT_ORGANISATION_ID },
+      { $set: { name: "Rafał-org" }, $setOnInsert: { entitlements: FREE } },
       { upsert: true, returnDocument: "after" }
     );
   });

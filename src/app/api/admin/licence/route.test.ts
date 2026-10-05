@@ -6,6 +6,13 @@ const { getAuthUser } = vi.hoisted(() => ({ getAuthUser: vi.fn() }));
 
 vi.mock("@/lib/auth", () => ({ getAuthUser }));
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+const stored = vi.hoisted(() => ({ row: {} as Record<string, unknown> }));
+vi.mock("@/models/organisation", () => ({
+  Organisation: {
+    findOneAndUpdate: () => ({ lean: () => Promise.resolve(stored.row) }),
+    findById: () => ({ lean: () => Promise.resolve(stored.row) }),
+  },
+}));
 
 const { GET } = await import("./route");
 
@@ -24,6 +31,8 @@ beforeEach(() => {
   process.env.E2E = "1";
   process.env.E2E_LICENCE_PUBLIC_KEY = signing.x;
   delete process.env.LICENCE_KEY;
+  delete process.env.ORGANISATION_DOMAIN;
+  stored.row = { _id: "000000000000000000000001", entitlements: { plan: "free", features: [], source: "none" } };
 });
 
 afterEach(() => {

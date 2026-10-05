@@ -116,8 +116,8 @@ export function withAdmin(handler: AuthenticatedHandler) {
 }
 
 // 402, not 404 or 403, so the UI can upsell rather than treat this as missing or off-limits.
-export async function entitlementRefusal(feature: FeatureKey): Promise<NextResponse | null> {
-  const organisation = await getOrganisation();
+export async function entitlementRefusal(db: ScopedDb, feature: FeatureKey): Promise<NextResponse | null> {
+  const organisation = await getOrganisation(db.organisation);
   if (can(organisation, feature)) return null;
   return NextResponse.json(
     { error: "This feature requires a plan upgrade", feature, plan: organisation.entitlements.plan },
@@ -127,7 +127,7 @@ export async function entitlementRefusal(feature: FeatureKey): Promise<NextRespo
 
 /** Inside another guard, e.g. `withProjectOwner(requireEntitlement(feature, handler))`. */
 export function requireEntitlement(feature: FeatureKey, handler: AuthenticatedHandler): AuthenticatedHandler {
-  return async (request, context) => (await entitlementRefusal(feature)) ?? handler(request, context);
+  return async (request, context) => (await entitlementRefusal(context.db, feature)) ?? handler(request, context);
 }
 
 export function withEntitlement(feature: FeatureKey) {

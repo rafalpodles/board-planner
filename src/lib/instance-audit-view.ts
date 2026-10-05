@@ -23,6 +23,7 @@ const LABELS: Partial<Record<InstanceAuditAction, string>> = {
   user_email_changed_self: "Address changed by the account itself",
   user_password_reset_by_email: "Password reset by email",
   user_full_name_changed_self: "Name changed by the account itself",
+  licence_stored: "Licence stored by the licence service",
   user_created: "Account created",
   user_deleted: "Account deleted",
   // The direction is in `detail`, the way the address change carries old → new

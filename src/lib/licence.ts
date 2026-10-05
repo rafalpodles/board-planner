@@ -5,13 +5,16 @@ import { LICENCE_PUBLIC_KEYS, type LicencePublicKey } from "./licence-keys";
 import type { IOrganisationEntitlements } from "@/models/organisation";
 
 export interface LicencePayload {
-  v: 1;
+  // 2 for a key bound to an organisation, so a release that predates the claim refuses it rather
+  // than reading it as floating
+  v: 1 | 2;
   customer: string;
   plan: Plan;
   features: string[];
   issuedAt: string;
   expiresAt: string;
   keyId: string;
+  organisation?: string;
 }
 
 export type LicenceVerdict =
@@ -20,11 +23,14 @@ export type LicenceVerdict =
   | "expired"
   | "invalid_signature"
   | "unknown_key"
-  | "malformed";
+  | "malformed"
+  | "wrong_organisation";
+
+export type LicenceRefusal = "invalid_signature" | "unknown_key" | "malformed" | "wrong_organisation";
 
 export type LicenceCheck =
   | { verdict: "valid" | "grace" | "expired"; payload: LicencePayload }
-  | { verdict: "invalid_signature" | "unknown_key" | "malformed"; payload?: undefined };
+  | { verdict: LicenceRefusal; payload?: undefined };
 
 export interface LicenceSigningKey {
   keyId: string;
@@ -44,6 +50,7 @@ function canonicalPayload(payload: LicencePayload): string {
     issuedAt: payload.issuedAt,
     expiresAt: payload.expiresAt,
     keyId: payload.keyId,
+    ...(payload.organisation === undefined ? {} : { organisation: payload.organisation }),
   });
 }
 
@@ -66,7 +73,7 @@ export function signLicence(
   signingKey: LicenceSigningKey
 ): string {
   const body = Buffer.from(
-    canonicalPayload({ ...payload, v: 1, keyId: signingKey.keyId }),
+    canonicalPayload({ ...payload, v: payload.organisation === undefined ? 1 : 2, keyId: signingKey.keyId }),
     "utf8"
   );
   const privateKey = createPrivateKey({
@@ -84,26 +91,38 @@ function isIsoDate(value: unknown): value is string {
 function asPayload(value: unknown): LicencePayload | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   const p = value as Record<string, unknown>;
-  if (p.v !== 1) return null;
+  if (p.v !== 1 && p.v !== 2) return null;
+  if ((p.v === 2) !== (p.organisation !== undefined)) return null;
   if (typeof p.customer !== "string" || !p.customer.trim()) return null;
   if (p.plan !== "free" && p.plan !== "pro") return null;
   if (!Array.isArray(p.features) || !p.features.every((f) => typeof f === "string")) return null;
   if (!isIsoDate(p.issuedAt) || !isIsoDate(p.expiresAt)) return null;
   if (typeof p.keyId !== "string" || !p.keyId) return null;
+  if (p.organisation !== undefined && (typeof p.organisation !== "string" || !/^[0-9a-f]{24}$/.test(p.organisation))) return null;
   return {
-    v: 1,
+    v: p.v,
     customer: p.customer,
     plan: p.plan,
     features: p.features as string[],
     issuedAt: p.issuedAt,
     expiresAt: p.expiresAt,
     keyId: p.keyId,
+    ...(p.organisation === undefined ? {} : { organisation: p.organisation }),
   };
+}
+
+export interface LicenceReader {
+  keys?: readonly LicencePublicKey[];
+  now?: number;
+  // The organisation reading the key: a key naming another is refused
+  organisation?: string;
+  // A key stored on an organisation must name it; only the environment's key may float
+  bound?: boolean;
 }
 
 export function verifyLicenceKey(
   key: string,
-  { keys = LICENCE_PUBLIC_KEYS, now = Date.now() }: { keys?: readonly LicencePublicKey[]; now?: number } = {}
+  { keys = LICENCE_PUBLIC_KEYS, now = Date.now(), organisation, bound = false }: LicenceReader = {}
 ): LicenceCheck {
   const parts = key.trim().split(".");
   if (parts.length !== 2 || !parts.every((part) => BASE64URL.test(part))) {
@@ -136,6 +155,8 @@ export function verifyLicenceKey(
     signed = false;
   }
   if (!signed) return { verdict: "invalid_signature" };
+  if (bound && payload.organisation === undefined) return { verdict: "wrong_organisation" };
+  if (payload.organisation !== undefined && payload.organisation !== organisation) return { verdict: "wrong_organisation" };
 
   const expiresAt = Date.parse(payload.expiresAt);
   if (now <= expiresAt) return { verdict: "valid", payload };
@@ -170,6 +191,8 @@ function licenceKeyInEffect(env: NodeJS.ProcessEnv, nodeEnv: string | undefined)
 }
 
 // `null` when no LICENCE_KEY is set, so the caller can tell "no key" from "a key that failed"
+// The environment's key floats: one naming an organisation is refused, because the default
+// organisation has the same id on every instance and a cloud key for it would unlock them all
 export function currentLicence(
   env: NodeJS.ProcessEnv = process.env,
   now: number = Date.now(),
@@ -180,11 +203,27 @@ export function currentLicence(
   return verifyLicenceKey(key, { keys: licenceKeysInEffect(env, nodeEnv), now });
 }
 
+// A key the licence service stored on the organisation: it must name that organisation, so a key
+// copied onto another one does not verify
+export function storedLicence(
+  key: string | undefined | null,
+  organisation: string,
+  now: number = Date.now(),
+  env: NodeJS.ProcessEnv = process.env,
+  nodeEnv: string | undefined = process.env.NODE_ENV
+): LicenceCheck | null {
+  if (!key?.trim()) return null;
+  return verifyLicenceKey(key, { keys: licenceKeysInEffect(env, nodeEnv), now, organisation, bound: true });
+}
+
 // `null` means the licence grants nothing and the stored entitlements stand
-export function entitlementsFromLicence(check: LicenceCheck | null): IOrganisationEntitlements | null {
+export function entitlementsFromLicence(
+  check: LicenceCheck | null,
+  source: "env" | "service" = "env"
+): IOrganisationEntitlements | null {
   if (!check?.payload) return null;
   if (check.verdict === "expired") {
-    return { plan: "free", features: [], source: "env" };
+    return { plan: "free", features: [], source };
   }
   return {
     plan: check.payload.plan,
@@ -192,7 +231,7 @@ export function entitlementsFromLicence(check: LicenceCheck | null): IOrganisati
     customer: check.payload.customer,
     issuedAt: new Date(check.payload.issuedAt),
     expiresAt: new Date(check.payload.expiresAt),
-    source: "env",
+    source,
   };
 }
 
@@ -213,5 +252,7 @@ export function describeLicenceAtStartup(check: LicenceCheck | null): string {
       return "LICENCE_KEY has a signature that does not match its contents — Free plan";
     case "malformed":
       return "LICENCE_KEY is not a licence key (truncated or mistyped?) — Free plan";
+    case "wrong_organisation":
+      return "LICENCE_KEY was issued for another organisation — Free plan";
   }
 }

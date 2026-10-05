@@ -242,7 +242,15 @@ ENCRYPTION_KEYS_OLD=      # Optional — comma-separated retired keys, so a rota
 LICENCE_KEY=              # Optional — a Pro licence, Ed25519-signed, verified against the public keys
                           # in src/lib/licence-keys.ts on every getOrganisation(); nothing is stored. A bad
                           # key is a startup warning and the Free plan; expired keys keep Pro for 14
-                          # days. Signed by the licence service, or scripts/sign-licence.ts (BP-650)
+                          # days. Signed by the licence service, or scripts/sign-licence.ts (BP-650).
+                          # Self-hosted only: it must float (a key naming an organisation is refused),
+                          # and with ORGANISATION_DOMAIN set it is ignored with a warning — each
+                          # organisation's plan is then the v2 key bound to it, stored on its row by
+                          # POST /api/platform/organisations/:id/licence (BP-891)
+PLATFORM_REQUEST_KEYS=    # Optional — `keyId:x,...`, the licence service's Ed25519 request keys (public
+                          # halves). That endpoint accepts only a request signed by one over method,
+                          # path, x-bp-timestamp (±5 min), single-use x-bp-nonce and the body's SHA-256;
+                          # unset, it refuses everything (src/lib/platform-request.ts)
 BOOTSTRAP_TOKEN=          # Optional — setup code for the first account; unset, one is generated and
                           # printed to the server log while the instance has no users (BP-325)
 ORGANISATION_DOMAIN=      # Optional — e.g. board-planner.com: organisations live on <slug>.ORGANISATION_DOMAIN, the

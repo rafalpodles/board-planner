@@ -7,7 +7,7 @@ export const EXPIRY_WARNING_DAYS = 30;
 
 export type LicenceSummary =
   | { configured: false }
-  | { configured: true; verdict: "invalid_signature" | "unknown_key" | "malformed" }
+  | { configured: true; verdict: "invalid_signature" | "unknown_key" | "malformed" | "wrong_organisation" }
   | {
       configured: true;
       verdict: "valid" | "grace" | "expired";
@@ -21,7 +21,8 @@ export type LicenceSummary =
       keyId: string;
     };
 
-const REFUSALS: Record<"invalid_signature" | "unknown_key" | "malformed", string> = {
+const REFUSALS: Record<"invalid_signature" | "unknown_key" | "malformed" | "wrong_organisation", string> = {
+  wrong_organisation: "The licence key was issued for another organisation.",
   unknown_key: "The key in LICENCE_KEY was signed by a key this build does not know.",
   invalid_signature: "The key in LICENCE_KEY has been altered: its signature does not match its contents.",
   malformed: "The value in LICENCE_KEY is not a licence key. It may be truncated or mistyped.",
