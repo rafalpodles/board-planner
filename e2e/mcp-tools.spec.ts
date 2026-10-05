@@ -309,7 +309,7 @@ test("add_comment shows on the task under the token's holder, and a blank one is
   expect(missing.text).toContain(`Task ${PROJECT_KEY}-99 not found`);
 
   const listed = await session.callTool("list_comments", { taskKey: SIBLING_TASK_KEY });
-  expect(listed.parsed.map((c: { body: string }) => c.body)).toEqual(["Noted over MCP"]);
+  expect(listed.parsed.comments.map((c: { body: string }) => c.body)).toEqual(["Noted over MCP"]);
 
   await signIn(page);
   await page.goto(taskUrl(SIBLING_TASK_NUMBER));
@@ -966,7 +966,7 @@ for (const key of ["BP2", "MY_APP", "MY-APP"]) {
 
     const comments = await session.callTool("list_comments", { taskKey: second });
     accepted(comments);
-    expect(comments.parsed.map((c: { body: string }) => c.body)).toEqual([`noted on ${key}`]);
+    expect(comments.parsed.comments.map((c: { body: string }) => c.body)).toEqual([`noted on ${key}`]);
 
     accepted(await session.callTool("unlink_tasks", { taskKey: first, targetTaskKey: second, type: "parent_of" }));
   });
@@ -1663,4 +1663,107 @@ test("list_agents offers what update_task can choose on the board, and not anoth
 
   // Every name listed is one update_task takes
   accepted(await session.callTool("update_task", { taskKey: SIBLING_TASK_KEY, agent: PROJECT_AGENT_NAME }));
+});
+
+/**
+ * BP-912. A comment is corrected and removed by the person who wrote it — the API's rule, which these
+ * tools do not widen — and the history is read back as the task page shows it. Each write ends on the
+ * comment as the page reads it, not on the reply.
+ */
+test("a comment is edited and deleted by its author, and refused to anybody else", async ({ request }) => {
+  const session = await connected(request);
+  const added = await session.callTool("add_comment", { taskKey: SIBLING_TASK_KEY, body: "First draft" });
+  accepted(added);
+  const id: string = added.parsed._id;
+  const stored = async () =>
+    ((await (await request.get(`/api/projects/${PROJECT_ID}/tasks/${SIBLING_TASK_ID}/comments`, { headers: ADMIN_AUTH })).json()) as { _id: string; body: string }[]);
+
+  const listed = await session.callTool("list_comments", { taskKey: SIBLING_TASK_KEY });
+  accepted(listed);
+  expect(listed.parsed.comments).toEqual([
+    expect.objectContaining({ id, author: ADMIN_USERNAME, body: "First draft", reactions: [] }),
+  ]);
+
+  const edited = await session.callTool("edit_comment", { taskKey: SIBLING_TASK_KEY, commentId: id, body: "Second draft" });
+  accepted(edited);
+  expect(edited.parsed).toMatchObject({ id, body: "Second draft", author: ADMIN_USERNAME });
+  expect((await stored()).map((c) => c.body)).toEqual(["Second draft"]);
+
+  // A blank text is refused as the API refuses it, and the comment keeps what it had
+  const blank = await session.callTool("edit_comment", { taskKey: SIBLING_TASK_KEY, commentId: id, body: "  " });
+  refused(blank);
+  expect(blank.text).toContain("Comment body is required");
+  expect((await stored()).map((c) => c.body)).toEqual(["Second draft"]);
+
+  // Somebody else's comment is theirs: the member may neither edit nor delete it
+  const member = await connected(request, MEMBER_API_TOKEN);
+  const notYours = await member.callTool("edit_comment", { taskKey: SIBLING_TASK_KEY, commentId: id, body: "Hijacked" });
+  refused(notYours);
+  expect(notYours.text).toContain("Forbidden");
+  const notDeleted = await member.callTool("delete_comment", { taskKey: SIBLING_TASK_KEY, commentId: id });
+  refused(notDeleted);
+  expect((await stored()).map((c) => c.body)).toEqual(["Second draft"]);
+
+  // A comment that is not there
+  const gone = await session.callTool("edit_comment", { taskKey: SIBLING_TASK_KEY, commentId: "507f1f77bcf86cd7994399ff", body: "x" });
+  refused(gone);
+  expect(gone.text).toContain("Comment not found");
+
+  const deleted = await session.callTool("delete_comment", { taskKey: SIBLING_TASK_KEY, commentId: id });
+  accepted(deleted);
+  expect(deleted.parsed).toEqual({ deleted: id, taskKey: SIBLING_TASK_KEY });
+  expect(await stored()).toEqual([]);
+});
+
+test("list_comments pages through a long thread without a comment twice or missing", async ({ request }) => {
+  const session = await connected(request);
+  const bodies = Array.from({ length: 7 }, (_, i) => `note ${i + 1}`);
+  for (const body of bodies) accepted(await session.callTool("add_comment", { taskKey: SIBLING_TASK_KEY, body }));
+
+  const seen: string[] = [];
+  let offset: number | null = 0;
+  while (offset !== null) {
+    const page: ToolCall = await session.callTool("list_comments", { taskKey: SIBLING_TASK_KEY, limit: 3, offset });
+    accepted(page);
+    expect(page.parsed.total).toBe(7);
+    seen.push(...(page.parsed.comments as { body: string }[]).map((c) => c.body));
+    offset = page.parsed.nextOffset;
+  }
+  expect(seen).toEqual(bodies);
+});
+
+test("get_task_activity reads what changed, newest first, and who changed it", async ({ request }) => {
+  const session = await connected(request);
+  const created = await session.callTool("create_task", { project: PROJECT_KEY, title: "Before" });
+  accepted(created);
+  const key = `${PROJECT_KEY}-${created.parsed.taskNumber}`;
+  accepted(await session.callTool("update_task", { taskKey: key, title: "After", priority: "high" }));
+  accepted(await session.callTool("change_task_status", { taskKey: key, status: "in_progress" }));
+
+  const history = await session.callTool("get_task_activity", { taskKey: key });
+  accepted(history);
+  const entries = history.parsed.entries as { by: string; action: string; field: string | null; from: string; to: string; at: string }[];
+  expect(history.parsed.total).toBe(entries.length);
+  // Newest first: the status move, then the edits, then the creation
+  expect(entries[0]).toMatchObject({ by: ADMIN_USERNAME, action: "status_changed", field: "status", to: "in_progress" });
+  expect(entries).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ action: "updated", field: "title", from: "Before", to: "After" }),
+      expect.objectContaining({ action: "updated", field: "priority", to: "high" }),
+      expect.objectContaining({ action: "created", by: ADMIN_USERNAME }),
+    ])
+  );
+  expect(entries.at(-1)!.action).toBe("created");
+
+  // A description is said to be added, edited or removed — never given back as text, never mistaken for cleared
+  accepted(await session.callTool("update_task", { taskKey: key, description: "first words" }));
+  accepted(await session.callTool("update_task", { taskKey: key, description: "other words" }));
+  const withDescription = (await session.callTool("get_task_activity", { taskKey: key })).parsed.entries as { field: string; from: string; to: string }[];
+  const described = withDescription.filter((e) => e.field === "description");
+  // Two edits in a row by one person read as one entry, the way the task page folds them: the net change is an addition
+  expect(described.map((e) => [e.from, e.to])).toEqual([["", "(added)"]]);
+  expect(JSON.stringify(described)).not.toContain("words");
+  const times = entries.map((e) => e.at);
+  expect([...times].sort().reverse()).toEqual(times);
+  expect((await session.callTool("get_task_activity", { taskKey: key, limit: 1 })).parsed.entries).toHaveLength(1);
 });

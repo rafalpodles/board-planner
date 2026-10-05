@@ -29,6 +29,7 @@ import {
 } from "./task-fields";
 import { findItem, mergeCriteria, shownCriteria, type Criterion } from "./checklist-edit";
 import { agentLines, memberLines, myTaskLines } from "./people";
+import { activityLines, commentLines } from "./history";
 import { DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT, pageOf } from "./paging";
 
 type ToolExtra = { authInfo?: AuthInfo };
@@ -979,13 +980,87 @@ export function registerPlannerTools(server: McpServer): void {
   server.registerTool(
     "list_comments",
     {
-      description: "List all comments on a task by task key (e.g. 'CP-1')",
-      inputSchema: strictInput({ taskKey: z.string().describe("Task key (e.g. 'CP-1')") }),
+      description:
+        "A task's comments, oldest first, a page at a time (default 50, at most 100; nextOffset is null on the " +
+        "last page). Each carries the id edit_comment and delete_comment address it by.",
+      inputSchema: strictInput({
+        taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
+        limit: z.number().int().min(1).max(MAX_LIST_LIMIT).optional().describe(`Page size (default ${DEFAULT_LIST_LIMIT})`),
+        offset: z.number().int().min(0).optional().describe("Comments to skip, from a previous answer's nextOffset"),
+      }),
     },
-    async ({ taskKey }, extra) => {
+    async ({ taskKey, limit, offset }, extra) => {
       const client = clientFrom(extra);
       const { projectId, taskId } = await client.resolveTaskKey(taskKey);
-      return json(await client.listComments(projectId, taskId));
+      const all = (await client.listComments(projectId, taskId)) as Parameters<typeof commentLines>[0];
+      const from = offset ?? 0;
+      const page = all.slice(from, from + (limit ?? DEFAULT_LIST_LIMIT));
+      const { tasks, ...rest } = pageOf(commentLines(page), all.length, from);
+      return json({ ...rest, comments: tasks });
+    }
+  );
+
+  server.registerTool(
+    "edit_comment",
+    {
+      description:
+        "Change the text of a comment — only the person who wrote it may, which for a connection is the account it " +
+        "acts as (whoami). Take the id from list_comments.",
+      inputSchema: strictInput(
+        {
+          taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
+          commentId: z.string().describe("The comment's id, from list_comments"),
+          body: z.string().describe("The new text"),
+        },
+        { writes: true }
+      ),
+    },
+    async ({ taskKey, commentId, body }, extra) => {
+      const client = clientFrom(extra);
+      const { projectId, taskId } = await client.resolveTaskKey(taskKey);
+      const edited = (await client.editComment(projectId, taskId, commentId, body)) as Parameters<typeof commentLines>[0][number];
+      return json(commentLines([edited])[0]);
+    }
+  );
+
+  server.registerTool(
+    "delete_comment",
+    {
+      description:
+        "Delete a comment for good — only the person who wrote it may, which for a connection is the account it acts " +
+        "as (whoami). Take the id from list_comments.",
+      inputSchema: strictInput(
+        {
+          taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
+          commentId: z.string().describe("The comment's id, from list_comments"),
+        },
+        { writes: true }
+      ),
+    },
+    async ({ taskKey, commentId }, extra) => {
+      const client = clientFrom(extra);
+      const { projectId, taskId } = await client.resolveTaskKey(taskKey);
+      await client.deleteComment(projectId, taskId, commentId);
+      return json({ deleted: commentId, taskKey: taskKey.toUpperCase() });
+    }
+  );
+
+  server.registerTool(
+    "get_task_activity",
+    {
+      description:
+        "What changed on a task, newest first: when, by whom, which field and the value before and after. A run of " +
+        "edits to one field by one person reads as one entry, as on the task page. At most 100 entries exist to read.",
+      inputSchema: strictInput({
+        taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
+        limit: z.number().int().min(1).max(MAX_LIST_LIMIT).optional().describe("Entries to return (default 30)"),
+      }),
+    },
+    async ({ taskKey, limit }, extra) => {
+      const client = clientFrom(extra);
+      const { projectId, taskId } = await client.resolveTaskKey(taskKey);
+      const logs = (await client.getTaskActivity(projectId, taskId)) as Parameters<typeof activityLines>[0];
+      return json({ total: logs.length, entries: activityLines(logs, limit ?? 30) });
     }
   );
 }
