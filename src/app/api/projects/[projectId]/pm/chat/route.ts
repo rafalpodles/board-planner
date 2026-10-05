@@ -169,7 +169,7 @@ export async function POST(
   // a GridFS round trip. An image-only turn stands or falls on the image: everything above checks
   // the *shape* of an attachment, so a well-formed fileId naming no file would otherwise start a
   // turn whose user content is the empty string (BP-451 review).
-  if (!message.trim() && !(await anyAttachmentReadable(parsedAttachments, projectId))) {
+  if (!message.trim() && !(await anyAttachmentReadable(db, parsedAttachments, projectId))) {
     return NextResponse.json(
       { error: "That image could not be read. Attach it again, or type a message." },
       { status: 400 }

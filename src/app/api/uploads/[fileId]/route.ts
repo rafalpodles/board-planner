@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withAuth } from "@/lib/middleware";
 import { check } from "@/lib/grants";
-import { projectForUpload, uploadsBucket } from "@/lib/upload-ownership";
+import { organisationUploads, projectForUpload } from "@/lib/upload-ownership";
 
 // SVG excluded: served as attachment so scripts never run in the app's origin
 const INLINE_SAFE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
@@ -18,12 +18,12 @@ export const GET = withAuth(async (_request, { params, user, db }) => {
     return new Response("Invalid file ID", { status: 400 });
   }
 
-  const bucket = uploadsBucket();
-  if (!bucket) {
+  const uploads = organisationUploads(db);
+  if (!uploads) {
     return new Response("Database not connected", { status: 500 });
   }
 
-  const files = await bucket.find({ _id: objectId }).toArray();
+  const files = await uploads.find([objectId]);
   if (files.length === 0) {
     return new Response("File not found", { status: 404 });
   }
@@ -44,7 +44,7 @@ export const GET = withAuth(async (_request, { params, user, db }) => {
     (file.metadata?.contentType as string) || "application/octet-stream";
 
   const chunks: Buffer[] = [];
-  const downloadStream = bucket.openDownloadStream(objectId);
+  const downloadStream = uploads.download(file);
 
   await new Promise<void>((resolve, reject) => {
     downloadStream.on("data", (chunk: Buffer) => chunks.push(chunk));

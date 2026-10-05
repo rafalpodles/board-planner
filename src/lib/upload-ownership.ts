@@ -1,10 +1,31 @@
 import mongoose from "mongoose";
+import type { ScopedDb } from "./db-scope";
 
 export const UPLOAD_BUCKET = "uploads";
 
-export function uploadsBucket(): mongoose.mongo.GridFSBucket | null {
+function uploadsBucket(): mongoose.mongo.GridFSBucket | null {
   const db = mongoose.connection.db;
   return db ? new mongoose.mongo.GridFSBucket(db, { bucketName: UPLOAD_BUCKET }) : null;
+}
+
+export type UploadedFile = mongoose.mongo.GridFSFile;
+
+/**
+ * The bucket as one organisation sees it. GridFS is the driver's, so the organisation wall under
+ * the models never sees it: every read here names the organisation in its filter, every file
+ * written here carries it, and a file of another organisation is simply not found.
+ */
+export function organisationUploads(db: ScopedDb) {
+  const bucket = uploadsBucket();
+  if (!bucket) return null;
+  return {
+    find: (ids: mongoose.Types.ObjectId[]): Promise<UploadedFile[]> =>
+      bucket.find({ _id: { $in: ids }, "metadata.organisation": db.organisation }).toArray(),
+    // Only for a file `find` has just returned
+    download: (file: UploadedFile) => bucket.openDownloadStream(file._id),
+    upload: (name: string, metadata: Record<string, unknown>) =>
+      bucket.openUploadStream(name, { metadata: { ...metadata, organisation: db.organisation } }),
+  };
 }
 
 /**

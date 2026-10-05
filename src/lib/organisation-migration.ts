@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import "@/models/all";
 import { DEFAULT_ORGANISATION_ID } from "./organisation-field";
+import { UPLOAD_BUCKET } from "./upload-ownership";
 
 export const UNSCOPED_MODELS = ["Organisation", "RateLimit"];
 
@@ -24,6 +25,15 @@ export async function backfillOrganisations(
     byCollection[collection.collectionName] = count;
     total += count;
   }
+
+  // GridFS is the driver's: its files carry the organisation in their metadata (BP-668)
+  const files = db.collection(`${UPLOAD_BUCKET}.files`);
+  const untagged = { "metadata.organisation": null };
+  const count = apply
+    ? (await files.updateMany(untagged, { $set: { "metadata.organisation": DEFAULT_ORGANISATION_ID } })).matchedCount
+    : await files.countDocuments(untagged);
+  byCollection[files.collectionName] = count;
+  total += count;
   return { total, byCollection };
 }
 

@@ -7,6 +7,11 @@ const openDownloadStream = vi.fn();
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 
 const { loadAttachmentDataUri, buildUserContent, anyAttachmentReadable } = await import("./attachments");
+const { scoped } = await import("@/lib/db-scope");
+
+const ORGANISATION = new mongoose.Types.ObjectId("0000000000000000000000a1");
+const OTHER_ORGANISATION = new mongoose.Types.ObjectId("0000000000000000000000b2");
+const DB = scoped(ORGANISATION);
 
 const FILE_ID = "507f1f77bcf86cd799439011";
 const PROJECT = "69a52e3b399b27d3cbb2c5a5";
@@ -17,13 +22,13 @@ function attachment(overrides: Record<string, unknown> = {}) {
   return { fileId: FILE_ID, mimeType: "image/png", ...overrides } as never;
 }
 
+// Honours the filter the way GridFS would, so a file of another organisation is not found
 function bucketHas(metadata: Record<string, unknown> | null) {
-  find.mockReturnValue({
+  const rows = metadata === null ? [] : [{ _id: new mongoose.Types.ObjectId(FILE_ID), metadata: { organisation: ORGANISATION, ...metadata } }];
+  find.mockImplementation((filter: Record<string, unknown>) => ({
     toArray: () =>
-      Promise.resolve(
-        metadata === null ? [] : [{ _id: new mongoose.Types.ObjectId(FILE_ID), metadata }]
-      ),
-  });
+      Promise.resolve(rows.filter((row) => String(row.metadata.organisation) === String(filter["metadata.organisation"]))),
+  }));
 }
 
 beforeEach(() => {
@@ -50,7 +55,7 @@ beforeEach(() => {
  */
 describe("loadAttachmentDataUri", () => {
   it("returns the image when the file belongs to the project asking for it", async () => {
-    const uri = await loadAttachmentDataUri(attachment(), PROJECT);
+    const uri = await loadAttachmentDataUri(DB, attachment(), PROJECT);
 
     expect(uri).toBe(`data:image/png;base64,${PIXEL.toString("base64")}`);
   });
@@ -58,7 +63,7 @@ describe("loadAttachmentDataUri", () => {
   it("returns nothing for a file belonging to another project", async () => {
     bucketHas({ project: OTHER_PROJECT, contentType: "image/png" });
 
-    expect(await loadAttachmentDataUri(attachment(), PROJECT)).toBeNull();
+    expect(await loadAttachmentDataUri(DB, attachment(), PROJECT)).toBeNull();
   });
 
   // Files stored before the owner was recorded: unreadable rather than readable by everyone
@@ -69,7 +74,7 @@ describe("loadAttachmentDataUri", () => {
   ])("returns nothing for a file with %s", async (_case, metadata) => {
     bucketHas(metadata ?? {});
 
-    expect(await loadAttachmentDataUri(attachment(), PROJECT)).toBeNull();
+    expect(await loadAttachmentDataUri(DB, attachment(), PROJECT)).toBeNull();
   });
 
   // The route refuses first and streams second; this used to drain the whole file and compare
@@ -78,7 +83,7 @@ describe("loadAttachmentDataUri", () => {
   it("does not read the bytes of a file it is going to refuse", async () => {
     bucketHas({ project: OTHER_PROJECT, contentType: "image/png" });
 
-    await loadAttachmentDataUri(attachment(), PROJECT);
+    await loadAttachmentDataUri(DB, attachment(), PROJECT);
 
     expect(openDownloadStream).not.toHaveBeenCalled();
   });
@@ -86,12 +91,12 @@ describe("loadAttachmentDataUri", () => {
   it("returns nothing when there is no such file", async () => {
     bucketHas(null);
 
-    expect(await loadAttachmentDataUri(attachment(), PROJECT)).toBeNull();
+    expect(await loadAttachmentDataUri(DB, attachment(), PROJECT)).toBeNull();
     expect(openDownloadStream).not.toHaveBeenCalled();
   });
 
   it("returns nothing for a file id that is not an ObjectId", async () => {
-    expect(await loadAttachmentDataUri(attachment({ fileId: "nope" }), PROJECT)).toBeNull();
+    expect(await loadAttachmentDataUri(DB, attachment({ fileId: "nope" }), PROJECT)).toBeNull();
     expect(find).not.toHaveBeenCalled();
   });
 
@@ -100,26 +105,26 @@ describe("loadAttachmentDataUri", () => {
   it("takes the content type from the file, not from the caller", async () => {
     bucketHas({ project: PROJECT, contentType: "application/pdf" });
 
-    expect(await loadAttachmentDataUri(attachment({ mimeType: "image/png" }), PROJECT)).toBeNull();
+    expect(await loadAttachmentDataUri(DB, attachment({ mimeType: "image/png" }), PROJECT)).toBeNull();
   });
 
   it("refuses a non-image even when it belongs to the project", async () => {
     bucketHas({ project: PROJECT, contentType: "text/csv" });
 
-    expect(await loadAttachmentDataUri(attachment({ mimeType: "text/csv" }), PROJECT)).toBeNull();
+    expect(await loadAttachmentDataUri(DB, attachment({ mimeType: "text/csv" }), PROJECT)).toBeNull();
   });
 });
 
 describe("buildUserContent", () => {
   it("leaves a text-only turn exactly as it was", async () => {
-    expect(await buildUserContent("hello", undefined, PROJECT)).toBe("hello");
-    expect(await buildUserContent("hello", [], PROJECT)).toBe("hello");
+    expect(await buildUserContent(DB, "hello", undefined, PROJECT)).toBe("hello");
+    expect(await buildUserContent(DB, "hello", [], PROJECT)).toBe("hello");
   });
 
   it("drops an attachment the project may not read rather than failing the turn", async () => {
     bucketHas({ project: OTHER_PROJECT, contentType: "image/png" });
 
-    const content = await buildUserContent("look", [attachment()], PROJECT);
+    const content = await buildUserContent(DB, "look", [attachment()], PROJECT);
 
     expect(JSON.stringify(content)).not.toContain("base64");
   });
@@ -128,7 +133,7 @@ describe("buildUserContent", () => {
   it("sends the picture with no text block when nothing was typed", async () => {
     bucketHas({ project: PROJECT, contentType: "image/png" });
 
-    const content = (await buildUserContent("", [attachment()], PROJECT)) as Record<
+    const content = (await buildUserContent(DB, "", [attachment()], PROJECT)) as Record<
       string,
       unknown
     >[];
@@ -140,7 +145,7 @@ describe("buildUserContent", () => {
   it("keeps the text block when there is text", async () => {
     bucketHas({ project: PROJECT, contentType: "image/png" });
 
-    const content = (await buildUserContent("look", [attachment()], PROJECT)) as Record<
+    const content = (await buildUserContent(DB, "look", [attachment()], PROJECT)) as Record<
       string,
       unknown
     >[];
@@ -153,7 +158,7 @@ describe("buildUserContent", () => {
   it("falls back to the text, which for an image-only turn is empty", async () => {
     bucketHas({ project: OTHER_PROJECT, contentType: "image/png" });
 
-    expect(await buildUserContent("", [attachment()], PROJECT)).toBe("");
+    expect(await buildUserContent(DB, "", [attachment()], PROJECT)).toBe("");
   });
 });
 
@@ -161,26 +166,26 @@ describe("anyAttachmentReadable", () => {
   it("accepts an image this project owns", async () => {
     bucketHas({ project: PROJECT, contentType: "image/png" });
 
-    expect(await anyAttachmentReadable([attachment()], PROJECT)).toBe(true);
+    expect(await anyAttachmentReadable(DB, [attachment()], PROJECT)).toBe(true);
   });
 
   // The arm the e2e cannot reach, and the one whose absence is a cross-board read
   it("refuses one that belongs to another board", async () => {
     bucketHas({ project: OTHER_PROJECT, contentType: "image/png" });
 
-    expect(await anyAttachmentReadable([attachment()], PROJECT)).toBe(false);
+    expect(await anyAttachmentReadable(DB, [attachment()], PROJECT)).toBe(false);
   });
 
   it("refuses a file that is not an image", async () => {
     bucketHas({ project: PROJECT, contentType: "text/csv" });
 
-    expect(await anyAttachmentReadable([attachment({ mimeType: "text/csv" })], PROJECT)).toBe(false);
+    expect(await anyAttachmentReadable(DB, [attachment({ mimeType: "text/csv" })], PROJECT)).toBe(false);
   });
 
   it("refuses a fileId that names no file, and one that is not an id at all", async () => {
     bucketHas(null);
-    expect(await anyAttachmentReadable([attachment()], PROJECT)).toBe(false);
-    expect(await anyAttachmentReadable([attachment({ fileId: "not-an-id" })], PROJECT)).toBe(false);
+    expect(await anyAttachmentReadable(DB, [attachment()], PROJECT)).toBe(false);
+    expect(await anyAttachmentReadable(DB, [attachment({ fileId: "not-an-id" })], PROJECT)).toBe(false);
   });
 
   // ObjectId takes hex in any case and stringifies it lowercase, so a map keyed on what the client
@@ -188,7 +193,7 @@ describe("anyAttachmentReadable", () => {
   it("takes the claimed mime for a legacy file however the id was spelled", async () => {
     bucketHas({ project: PROJECT });
 
-    expect(await anyAttachmentReadable([attachment({ fileId: FILE_ID.toUpperCase() })], PROJECT)).toBe(
+    expect(await anyAttachmentReadable(DB, [attachment({ fileId: FILE_ID.toUpperCase() })], PROJECT)).toBe(
       true
     );
   });

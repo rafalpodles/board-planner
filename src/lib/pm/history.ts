@@ -16,6 +16,7 @@ export interface PmHistoryEntry {
 }
 
 import { ACTION_RECORD_LABEL, HISTORY_AUTHOR_PREFIX } from "./labels";
+import type { ScopedDb } from "@/lib/db-scope";
 
 export { ACTION_RECORD_LABEL, HISTORY_AUTHOR_PREFIX };
 
@@ -107,6 +108,7 @@ export const OMITTED_HISTORY_NOTICE =
   "Earlier messages in this thread are not included here, to keep the conversation within its size limit. If the answer depends on something said before them, say so rather than guessing.";
 
 export async function replayHistory(
+  db: ScopedDb,
   history: PmHistoryEntry[],
   projectId: string,
   opts: { olderExist?: boolean } = {}
@@ -139,7 +141,7 @@ export async function replayHistory(
       messages.push({
         role: entry.role,
         content: replayable.has(entry)
-          ? await buildUserContent(labelled, entry.attachments, projectId)
+          ? await buildUserContent(db, labelled, entry.attachments, projectId)
           : labelled,
       });
     }

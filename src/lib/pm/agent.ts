@@ -246,6 +246,7 @@ export async function runPmTurn(db: ScopedDb, opts: {
   ].filter((t) => !blocked.has(t.name));
 
   const userContent = await buildUserContent(
+    db,
     stripSpoofedLabels(opts.userMessage),
     opts.attachments,
     opts.projectId
@@ -291,7 +292,7 @@ export async function runPmTurn(db: ScopedDb, opts: {
     return finalize("⚠️ That image could not be read, so there was nothing to send.");
   }
 
-  const replayed = await replayHistory(history, opts.projectId, { olderExist });
+  const replayed = await replayHistory(db, history, opts.projectId, { olderExist });
   const messages: OrChatMessage[] = [
     { role: "system", content: buildSystemPrompt(project, mcp, disallowedTools, actor) },
     ...replayed,

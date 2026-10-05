@@ -12,15 +12,10 @@ vi.mock("@/lib/auth", () => ({
   RateLimitError: class RateLimitError extends Error {},
 }));
 vi.mock("@/lib/grants", () => ({ check }));
-vi.mock("@/lib/upload-ownership", async (importOriginal) => ({
-  // projectForUpload stays real: it is half of the rule under test, and a mock of it would
-  // assert my own arrangement rather than the code's
-  ...(await importOriginal<typeof import("@/lib/upload-ownership")>()),
-  uploadsBucket: () => ({ find, openDownloadStream }),
-}));
 
 const { GET } = await import("./route");
 const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
+const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
 
 const OWNER = { _id: "u1", role: "member" };
 const FILE_ID = "507f1f77bcf86cd799439011";
@@ -28,7 +23,7 @@ const PROJECT = "69a52e3b399b27d3cbb2c5a5";
 const OTHER_PROJECT = "69a52e3b399b27d3cbb2c5b7";
 
 function storedFile(metadata: Record<string, unknown> | null = { project: PROJECT }) {
-  return { _id: new mongoose.Types.ObjectId(FILE_ID), metadata };
+  return { _id: new mongoose.Types.ObjectId(FILE_ID), metadata: metadata && { organisation: DEFAULT_ORGANISATION_ID, ...metadata } };
 }
 
 function request() {
@@ -37,12 +32,20 @@ function request() {
 
 const ctx = (fileId = FILE_ID) => ({ params: Promise.resolve({ fileId }) });
 
-function bucketHas(...files: unknown[]) {
-  find.mockReturnValue({ toArray: () => Promise.resolve(files) });
+// Honours the organisation in the filter the way GridFS would
+function bucketHas(...files: { metadata?: Record<string, unknown> | null }[]) {
+  find.mockImplementation((filter: Record<string, unknown>) => ({
+    toArray: () =>
+      Promise.resolve(files.filter((file) => String(file.metadata?.organisation) === String(filter["metadata.organisation"]))),
+  }));
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.spyOn(mongoose.mongo, "GridFSBucket").mockImplementation(
+    () => ({ find, openDownloadStream }) as unknown as mongoose.mongo.GridFSBucket
+  );
+  vi.spyOn(mongoose, "connection", "get").mockReturnValue({ db: {} } as unknown as mongoose.Connection);
   getAuthUser.mockResolvedValue(OWNER);
   check.mockResolvedValue(true);
   bucketHas(storedFile());
@@ -137,6 +140,17 @@ describe("GET /api/uploads/[fileId]", () => {
     await GET(request(), ctx());
 
     expect(check).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OWNER, OTHER_PROJECT, "access");
+  });
+
+  it("does not find a file of another organisation, and never asks the grants about it (BP-668)", async () => {
+    bucketHas(storedFile({ project: PROJECT, organisation: new mongoose.Types.ObjectId("0000000000000000000000b2") }));
+
+    const response = await GET(request(), ctx());
+
+    expect(response.status).toBe(404);
+    expect(find).toHaveBeenCalledWith(expect.objectContaining({ "metadata.organisation": DEFAULT_ORGANISATION_ID }));
+    expect(check).not.toHaveBeenCalled();
+    expect(openDownloadStream).not.toHaveBeenCalled();
   });
 
   it("refuses a file id that is not an ObjectId", async () => {
