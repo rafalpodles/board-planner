@@ -104,7 +104,7 @@ export function PmChat({
 
   const refreshTaskMap = useCallback(async () => {
     try {
-      const tasks: ApiTask[] = await api.get(`/api/projects/${projectId}/tasks`);
+      const tasks: ApiTask[] = await api.get(`/api/projects/${projectId}/tasks?archived=include`);
       const proj = project ?? (await api.get(`/api/projects/${projectId}`));
       const map: Record<string, string> = {};
       for (const t of tasks) map[`${proj.key}-${t.taskNumber}`] = t._id;
