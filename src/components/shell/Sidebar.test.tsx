@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, waitFor, act } from "@testing-library/react";
+import { render, screen, cleanup, waitFor, act, fireEvent } from "@testing-library/react";
 import { Sidebar } from "./Sidebar";
 import { useLeaveGuard } from "@/hooks/use-leave-guard";
 
@@ -99,6 +99,14 @@ describe("Sidebar", () => {
     expect(screen.queryByText("150")).toBeNull();
   });
 
+  it("keeps the logo, as a link home, on the collapsed rail", async () => {
+    localStorage.setItem("sidebar-collapsed", "1");
+    renderSidebar({ mobileOpen: false });
+    await waitFor(() => expect(screen.queryByText("My Tasks")).toBeNull());
+    expect(screen.getByLabelText("Board Planner").getAttribute("href")).toBe("/projects");
+    expect(screen.getByTestId("logo")).toBeTruthy();
+  });
+
   it("hides labels when collapsed on desktop", async () => {
     localStorage.setItem("sidebar-collapsed", "1");
     renderSidebar({ mobileOpen: false });
@@ -128,15 +136,120 @@ describe("Sidebar", () => {
       screen.getByLabelText("Collapse sidebar").click();
     });
 
-    expect(localStorage.getItem("sidebar-collapsed")).toBe("1");
+    expect(localStorage.getItem("sidebar-mode")).toBe("collapsed");
     expect(screen.queryByText("My Tasks")).toBeNull();
 
     await act(async () => {
       screen.getByLabelText("Expand sidebar").click();
     });
 
-    expect(localStorage.getItem("sidebar-collapsed")).toBe("0");
+    expect(localStorage.getItem("sidebar-mode")).toBe("expanded");
     expect(screen.getByText("My Tasks")).toBeTruthy();
+  });
+
+  // The choice used to be one boolean; a browser that stored it must keep its rail
+  it("reads the old collapsed flag when no mode was stored", async () => {
+    localStorage.setItem("sidebar-collapsed", "1");
+    renderSidebar();
+    await waitFor(() => expect(screen.queryByText("My Tasks")).toBeNull());
+    expect(screen.getByLabelText("Expand sidebar")).toBeTruthy();
+  });
+
+  describe("expand on hover", () => {
+    async function renderHoverSidebar() {
+      localStorage.setItem("sidebar-mode", "hover");
+      const { container } = renderSidebar();
+      await waitFor(() => expect(screen.queryByText("My Tasks")).toBeNull());
+      return container.querySelector("aside")!;
+    }
+
+    it("rests as the narrow rail and leaves its width in the layout", async () => {
+      const aside = await renderHoverSidebar();
+      expect(aside.className).toContain("md:w-14");
+      expect(aside.className).toContain("md:fixed");
+      expect(aside.previousElementSibling?.className).toContain("w-14");
+    });
+
+    it("opens over the page once the pointer rests on it, and closes when it leaves", async () => {
+      const aside = await renderHoverSidebar();
+
+      fireEvent.pointerEnter(aside, { pointerType: "mouse" });
+      expect(await screen.findByText("My Tasks")).toBeTruthy();
+      expect(aside.className).toContain("md:w-[260px]");
+      expect(aside.previousElementSibling?.className).toContain("w-14");
+
+      fireEvent.pointerLeave(aside, { pointerType: "mouse" });
+      await waitFor(() => expect(screen.queryByText("My Tasks")).toBeNull());
+    });
+
+    it("does not open for a pointer that only passes over the edge", async () => {
+      const aside = await renderHoverSidebar();
+      fireEvent.pointerEnter(aside, { pointerType: "mouse" });
+      fireEvent.pointerLeave(aside, { pointerType: "mouse" });
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      expect(screen.queryByText("My Tasks")).toBeNull();
+    });
+
+    it("opens for a keyboard user who tabs into the rail", async () => {
+      const aside = await renderHoverSidebar();
+      fireEvent.keyDown(document.body, { key: "Tab" });
+      fireEvent.focus(screen.getByTitle("My Tasks"));
+      expect(await screen.findByText("My Tasks")).toBeTruthy();
+      fireEvent.blur(screen.getByText("My Tasks").closest("a")!, { relatedTarget: document.body });
+      await waitFor(() => expect(screen.queryByText("My Tasks")).toBeNull());
+      expect(aside.className).toContain("md:w-14");
+    });
+
+    it("does not open for focus handed back by script, such as when the search palette closes", async () => {
+      const aside = await renderHoverSidebar();
+      fireEvent.keyDown(document.body, { key: "Escape" });
+      fireEvent.focus(screen.getByTitle("My Tasks"));
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      expect(aside.className).toContain("md:w-14");
+    });
+
+    it("does not open for a finger tapping the rail", async () => {
+      const aside = await renderHoverSidebar();
+      fireEvent.pointerEnter(aside, { pointerType: "touch" });
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      expect(aside.className).toContain("md:w-14");
+    });
+
+    it("does not open for the focus a click leaves behind", async () => {
+      const aside = await renderHoverSidebar();
+      const link = screen.getByTitle("My Tasks");
+      fireEvent.pointerDown(link);
+      fireEvent.focus(link);
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      expect(screen.queryByText("My Tasks")).toBeNull();
+      expect(aside.className).toContain("md:w-14");
+    });
+
+    it("pins open from the header button", async () => {
+      await renderHoverSidebar();
+      await act(async () => {
+        screen.getByLabelText("Pin sidebar open").click();
+      });
+      expect(localStorage.getItem("sidebar-mode")).toBe("expanded");
+      expect(screen.getByText("My Tasks")).toBeTruthy();
+    });
+
+    it("is one of the three choices in the account menu", async () => {
+      await renderHoverSidebar();
+      await act(async () => {
+        screen.getByText("A").closest("button")!.click();
+      });
+      const group = screen.getByRole("group", { name: "Sidebar" });
+      const pressed = Array.from(group.querySelectorAll("button")).filter(
+        (b) => b.getAttribute("aria-pressed") === "true",
+      );
+      expect(pressed.map((b) => b.textContent)).toEqual(["Expand on hover"]);
+
+      await act(async () => {
+        screen.getByText("Collapsed").click();
+      });
+      expect(localStorage.getItem("sidebar-mode")).toBe("collapsed");
+    });
   });
 
   // The Settings row this used to assert on left with the Instance group (CP-216);
@@ -149,14 +262,22 @@ describe("Sidebar", () => {
     expect(screen.getByText("Notifications").closest("a")?.getAttribute("aria-current")).toBeNull();
   });
 
-  // The expanded sidebar hands the Projects group to ProjectTree; only the
-  // collapsed rail still renders a single flat entry
-  it("falls back to one All projects entry on the collapsed rail", async () => {
+  // The expanded sidebar hands the Projects group to ProjectTree, the collapsed
+  // rail to ProjectRail; either way a project's own screens stay one click away
+  it("keeps the project's Board and Sprints reachable on the collapsed rail", async () => {
     localStorage.setItem("sidebar-collapsed", "1");
     nav.pathname = "/projects/TP/tasks/1";
+    projectsState.projects = [
+      { _id: "1", key: "TP", name: "Test Project", icon: "🚀", taskCount: 2, hasActiveSprint: false },
+      { _id: "2", key: "MOB", name: "Mobile App", icon: "📱", taskCount: 0, hasActiveSprint: false },
+    ];
     renderSidebar({ mobileOpen: false });
-    const entry = await screen.findByTitle("All projects");
-    expect(entry.getAttribute("aria-current")).toBe("page");
+    expect((await screen.findByLabelText("Sprints")).getAttribute("href")).toBe(
+      "/projects/TP/sprints",
+    );
+    expect(screen.getByLabelText("Board").getAttribute("href")).toBe("/projects/TP");
+    expect(screen.getByLabelText("Mobile App").getAttribute("href")).toBe("/projects/MOB");
+    expect(screen.getByLabelText("All projects").getAttribute("href")).toBe("/projects");
   });
 });
 
