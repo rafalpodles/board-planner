@@ -131,6 +131,22 @@ export class PlannerClient {
     return this.request("GET", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}/comments`) as Promise<unknown[]>;
   }
 
+  async editComment(projectId: string, taskId: string, commentId: string, body: string): Promise<unknown> {
+    return this.request(
+      "PUT",
+      `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}/comments/${seg(commentId)}`,
+      { body }
+    );
+  }
+
+  async deleteComment(projectId: string, taskId: string, commentId: string): Promise<unknown> {
+    return this.request("DELETE", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}/comments/${seg(commentId)}`);
+  }
+
+  async getTaskActivity(projectId: string, taskId: string): Promise<unknown[]> {
+    return this.request("GET", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}/activity`) as Promise<unknown[]>;
+  }
+
   async addComment(projectId: string, taskId: string, body: string): Promise<unknown> {
     return this.request("POST", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}/comments`, { body });
   }

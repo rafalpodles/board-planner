@@ -510,3 +510,91 @@ describe("reorder_tasks", () => {
     expect(refusal.error!.issues[0].message).toContain('"order" — use the reorder_tasks tool');
   });
 });
+
+/**
+ * BP-912. Comments could be added and read and not corrected, and the history a person reads on the
+ * task page could not be read at all. Who may edit or delete a comment is decided by the API (its
+ * author), and is not widened here.
+ */
+describe("comments and history", () => {
+  const parse = (result: unknown) => JSON.parse((result as { content: { text: string }[] }).content[0].text);
+  const run = (name: string, args: Record<string, unknown> = {}) =>
+    registered().get(name)!.handler({ taskKey: "BP-1", ...args }, extra);
+  const comments = Array.from({ length: 5 }, (_, i) => ({
+    _id: `c${i + 1}`,
+    author: { username: "rafal" },
+    body: `comment ${i + 1}`,
+    createdAt: "2026-10-05T10:00:00.000Z",
+    updatedAt: "2026-10-05T10:00:00.000Z",
+    reactions: [],
+  }));
+
+  it("list_comments pages, oldest first, and carries the id each comment is addressed by", async () => {
+    vi.spyOn(PlannerClient.prototype, "listComments").mockResolvedValue(comments);
+
+    const first = parse(await run("list_comments", { limit: 2 }));
+    expect(first).toMatchObject({ total: 5, returned: 2, offset: 0, nextOffset: 2 });
+    expect(first.comments.map((c: { id: string }) => c.id)).toEqual(["c1", "c2"]);
+
+    const last = parse(await run("list_comments", { limit: 2, offset: 4 }));
+    expect(last.comments.map((c: { id: string }) => c.id)).toEqual(["c5"]);
+    expect(last.nextOffset).toBeNull();
+    expect(Object.keys(first.comments[0]).sort()).toEqual(["author", "body", "createdAt", "edited", "id", "reactions"]);
+  });
+
+  it("list_comments refuses a page bigger than it will build", () => {
+    const { schema } = registered().get("list_comments")!;
+
+    expect(schema.safeParse({ taskKey: "BP-1", limit: 101 }).success).toBe(false);
+    expect(schema.safeParse({ taskKey: "BP-1", limit: 100 }).success).toBe(true);
+  });
+
+  it("edit_comment sends the new text for that comment and answers with it as a line", async () => {
+    const edit = vi.spyOn(PlannerClient.prototype, "editComment").mockResolvedValue({
+      ...comments[0],
+      body: "changed",
+      updatedAt: "2026-10-05T11:00:00.000Z",
+    });
+
+    const answer = parse(await run("edit_comment", { commentId: "c1", body: "changed" }));
+
+    expect(edit).toHaveBeenCalledWith("p1", "t1", "c1", "changed");
+    expect(answer).toMatchObject({ id: "c1", body: "changed", edited: true });
+  });
+
+  it("edit_comment and delete_comment pass the API's refusal on, not a success of their own", async () => {
+    vi.spyOn(PlannerClient.prototype, "editComment").mockRejectedValue(new Error("Forbidden"));
+    vi.spyOn(PlannerClient.prototype, "deleteComment").mockRejectedValue(new Error("Forbidden"));
+
+    await expect(run("edit_comment", { commentId: "c1", body: "x" })).rejects.toThrow("Forbidden");
+    await expect(run("delete_comment", { commentId: "c1" })).rejects.toThrow("Forbidden");
+  });
+
+  it("delete_comment deletes that comment and says which", async () => {
+    const del = vi.spyOn(PlannerClient.prototype, "deleteComment").mockResolvedValue({ message: "Comment deleted" });
+
+    expect(parse(await run("delete_comment", { commentId: "c3" }))).toEqual({ deleted: "c3", taskKey: "BP-1" });
+    expect(del).toHaveBeenCalledWith("p1", "t1", "c3");
+  });
+
+  it("get_task_activity answers with the newest entries as lines, and says how many there were", async () => {
+    vi.spyOn(PlannerClient.prototype, "getTaskActivity").mockResolvedValue(
+      Array.from({ length: 40 }, (_, i) => ({
+        user: { username: "rafal" },
+        action: "updated",
+        field: "title",
+        oldValue: `v${i}`,
+        newValue: `v${i + 1}`,
+        createdAt: "2026-10-05T10:00:00.000Z",
+      }))
+    );
+
+    const answer = parse(await run("get_task_activity"));
+    expect(answer.total).toBe(40);
+    expect(answer.entries).toHaveLength(30);
+    expect(answer.entries[0]).toEqual({ at: "2026-10-05T10:00:00.000Z", by: "rafal", action: "updated", field: "title", from: "v0", to: "v1" });
+
+    expect(parse(await run("get_task_activity", { limit: 5 })).entries).toHaveLength(5);
+    expect(registered().get("get_task_activity")!.schema.safeParse({ taskKey: "BP-1", limit: 101 }).success).toBe(false);
+  });
+});
