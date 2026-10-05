@@ -40,10 +40,11 @@ function modelOf(db: ScopedDb, name: string) {
 export type LifeCycleRefusal = "not_found" | "default_organisation" | "deleted";
 
 export async function organisationForLifeCycle(id: string): Promise<{ ok: true; row: { _id: Types.ObjectId; slug?: string; suspendedAt?: Date | null } } | { ok: false; reason: LifeCycleRefusal }> {
+  if (!/^[0-9a-f]{24}$/.test(id)) return { ok: false, reason: "not_found" };
+  if (id === DEFAULT_ORGANISATION_ID.toHexString()) return { ok: false, reason: "default_organisation" };
   await connectDB();
   const row = await Organisation.findById(id).select("slug suspendedAt deletedAt").lean();
   if (!row) return { ok: false, reason: "not_found" };
-  if (row._id.equals(DEFAULT_ORGANISATION_ID)) return { ok: false, reason: "default_organisation" };
   if (row.deletedAt) return { ok: false, reason: "deleted" };
   return { ok: true, row };
 }

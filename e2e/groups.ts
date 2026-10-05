@@ -138,6 +138,7 @@ export const GROUPS = {
     "organisations-secrets.spec.ts",
     "organisations-licence.spec.ts",
     "organisations-platform.spec.ts",
+    "organisations-life-cycle.spec.ts",
     "organisations-limits.spec.ts",
     "organisations-oidc-relay.spec.ts",
     "organisations-route-families.spec.ts",
