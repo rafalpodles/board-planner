@@ -21,11 +21,29 @@ const A = "507f1f77bcf86cd799439041";
 const B = "507f1f77bcf86cd799439042";
 const ME = new Types.ObjectId("507f1f77bcf86cd799439031");
 
-// As the row stood BEFORE the write: the route hands the history what this write changed
+/**
+ * What a hydrated subdocument is: its fields are getters on the prototype and none of them is an
+ * own property, so `{ ...row }` copies its internals and not its values. A plain object in the mock
+ * is what let a spread of one pass.
+ */
+class HydratedRow {
+  constructor(private readonly doc: { _id: Types.ObjectId; text: string; done: boolean }) {}
+  get _id() {
+    return this.doc._id;
+  }
+  get text() {
+    return this.doc.text;
+  }
+  get done() {
+    return this.doc.done;
+  }
+}
+
+// As the rows stood BEFORE the write: the route hands the history what this write changed
 const BEFORE = {
   checklist: [
-    { _id: new Types.ObjectId(A), text: "first", done: false },
-    { _id: new Types.ObjectId(B), text: "second", done: true },
+    new HydratedRow({ _id: new Types.ObjectId(A), text: "first", done: false }),
+    new HydratedRow({ _id: new Types.ObjectId(B), text: "second", done: true }),
   ],
 };
 
@@ -55,7 +73,32 @@ describe("PATCH …/checklist/:itemId", () => {
     expect(filter()).toMatchObject({ _id: TASK_ID, project: PROJECT_ID, "checklist._id": A });
     expect(change()).toEqual({ $set: { "checklist.$[c].done": true } });
     expect(options()).toMatchObject({ arrayFilters: [{ "c._id": A }], returnDocument: "before" });
-    expect((await res.json()).checklist.map((c: { done: boolean }) => c.done)).toEqual([true, true]);
+    // Plain rows with their ids and values, not the internals of a document
+    expect((await res.json()).checklist).toEqual([
+      { _id: A, text: "first", done: true },
+      { _id: B, text: "second", done: true },
+    ]);
+  });
+
+  // Each of these used to record a row nobody made: a tick as an edit to "undefined", a reword as an untick
+  it("records a tick as a tick only, and a reword of a ticked row as a reword only", async () => {
+    await request("PATCH", { done: true });
+    expect(logActivity.mock.calls.map((c) => c[3])).toEqual(["criterion_checked"]);
+    expect(logActivity).toHaveBeenCalledWith(expect.anything(), TASK_ID, ME, "criterion_checked", A, "", "first");
+
+    logActivity.mockClear();
+    const res = await request("PATCH", { text: "second, reworded" }, { taskId: TASK_ID, itemId: B });
+    expect(logActivity.mock.calls.map((c) => c[3])).toEqual(["criterion_edited"]);
+    expect((await res.json()).checklist[1]).toEqual({ _id: B, text: "second, reworded", done: true });
+  });
+
+  it("takes an id written in capitals as the same id, and still records what happened", async () => {
+    const res = await request("PATCH", { done: true }, { taskId: TASK_ID, itemId: A.toUpperCase() });
+
+    expect(res.status).toBe(200);
+    expect(filter()).toMatchObject({ "checklist._id": A });
+    expect(options().arrayFilters).toEqual([{ "c._id": A }]);
+    expect(logActivity).toHaveBeenCalledWith(expect.anything(), TASK_ID, ME, "criterion_checked", A, "", "first");
   });
 
   it("sets only what it was given", async () => {
@@ -112,7 +155,15 @@ describe("DELETE …/checklist/:itemId", () => {
 
     expect(change()).toEqual({ $pull: { checklist: { _id: A } } });
     expect(filter()).toMatchObject({ _id: TASK_ID, project: PROJECT_ID, "checklist._id": A });
-    expect((await res.json()).checklist.map((c: { text: string }) => c.text)).toEqual(["second"]);
+    expect((await res.json()).checklist).toEqual([{ _id: B, text: "second", done: true }]);
+  });
+
+  it("takes an id written in capitals as the same id, and still records the removal", async () => {
+    const res = await request("DELETE", undefined, { taskId: TASK_ID, itemId: B.toUpperCase() });
+
+    expect(res.status).toBe(200);
+    expect(change()).toEqual({ $pull: { checklist: { _id: B } } });
+    expect(logActivity).toHaveBeenCalledWith(expect.anything(), TASK_ID, ME, "criterion_removed", B, "second", "");
   });
 
   it("records the removal with the text that was removed", async () => {

@@ -187,6 +187,15 @@ describe("mergeCriteria", () => {
     ]);
   });
 
+  it("gives a criterion to the line that matches it exactly, not to an earlier line that only matches loosely", () => {
+    const held = [{ _id: "507f1f77bcf86cd799439031", text: "foo", done: true }];
+
+    expect(mergeCriteria("FOO\nfoo", held)).toEqual([
+      { text: "FOO", done: false },
+      { _id: held[0]._id, text: "foo", done: true },
+    ]);
+  });
+
   it("prefers an exact match to a loose one", () => {
     const twins = [
       { _id: "507f1f77bcf86cd799439021", text: "Same", done: true },

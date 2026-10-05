@@ -5,7 +5,16 @@ import { withProjectAccess } from "@/lib/middleware";
 import { logActivity } from "@/lib/activity";
 import { criterionTextOrRefusal } from "@/lib/checklist-item";
 
-type Row = { _id: unknown; text: string; done?: boolean };
+type Row = { _id: string; text: string; done: boolean };
+
+// Read off the rows one property at a time: what comes back is a hydrated document, whose fields are
+// getters on a prototype, so spreading a row copies its internals and none of its values
+const plainRows = (checklist: unknown): Row[] =>
+  ((checklist ?? []) as { _id: unknown; text: unknown; done?: unknown }[]).map((row) => ({
+    _id: String(row._id),
+    text: String(row.text),
+    done: !!row.done,
+  }));
 
 async function missing(db: Parameters<Parameters<typeof withProjectAccess>[0]>[1]["db"], projectId: string, taskId: string) {
   return (await db.Task.exists({ _id: taskId, project: projectId }))
@@ -16,10 +25,12 @@ async function missing(db: Parameters<Parameters<typeof withProjectAccess>[0]>[1
 // One criterion, changed in place by its id. `returnDocument: "before"` hands back the row as it was, so
 // the history records what this write changed rather than what it overwrote.
 export const PATCH = withProjectAccess(async (request, { params, user, db }) => {
-  const { projectId, taskId, itemId } = await params;
-  if (!isValidObjectId(taskId) || !isValidObjectId(itemId)) {
+  const { projectId, taskId, itemId: rawItemId } = await params;
+  if (!isValidObjectId(taskId) || !isValidObjectId(rawItemId)) {
     return NextResponse.json({ error: "Invalid id" }, { status: 400 });
   }
+  // An id written in capitals is the same id to the database and a different string to the comparison below
+  const itemId = rawItemId.toLowerCase();
   await connectDB();
 
   const body = (await request.json().catch(() => null)) as { text?: unknown; done?: unknown } | null;
@@ -46,23 +57,27 @@ export const PATCH = withProjectAccess(async (request, { params, user, db }) => 
   );
   if (!before) return missing(db, projectId, taskId);
 
-  const rows = (before.checklist ?? []) as Row[];
-  const old = rows.find((row) => String(row._id) === itemId)!;
-  const next = { ...old, ...(change["checklist.$[c].text"] !== undefined ? { text: change["checklist.$[c].text"] as string } : {}), ...(change["checklist.$[c].done"] !== undefined ? { done: change["checklist.$[c].done"] as boolean } : {}) };
+  const rows = plainRows(before.checklist);
+  const old = rows.find((row) => row._id === itemId)!;
+  const next: Row = {
+    ...old,
+    ...(change["checklist.$[c].text"] !== undefined ? { text: change["checklist.$[c].text"] as string } : {}),
+    ...(change["checklist.$[c].done"] !== undefined ? { done: change["checklist.$[c].done"] as boolean } : {}),
+  };
   if (next.text !== old.text) await logActivity(db, taskId, user._id, "criterion_edited", itemId, old.text, next.text);
-  if (!!next.done !== !!old.done) {
+  if (next.done !== old.done) {
     await logActivity(db, taskId, user._id, next.done ? "criterion_checked" : "criterion_unchecked", itemId, "", next.text);
   }
 
-  const checklist = rows.map((row) => (String(row._id) === itemId ? { ...row, text: next.text, done: !!next.done } : row));
-  return NextResponse.json({ checklist });
+  return NextResponse.json({ checklist: rows.map((row) => (row._id === itemId ? next : row)) });
 });
 
 export const DELETE = withProjectAccess(async (_request, { params, user, db }) => {
-  const { projectId, taskId, itemId } = await params;
-  if (!isValidObjectId(taskId) || !isValidObjectId(itemId)) {
+  const { projectId, taskId, itemId: rawItemId } = await params;
+  if (!isValidObjectId(taskId) || !isValidObjectId(rawItemId)) {
     return NextResponse.json({ error: "Invalid id" }, { status: 400 });
   }
+  const itemId = rawItemId.toLowerCase();
   await connectDB();
 
   const before = await db.Task.findOneAndUpdate(
@@ -72,8 +87,8 @@ export const DELETE = withProjectAccess(async (_request, { params, user, db }) =
   );
   if (!before) return missing(db, projectId, taskId);
 
-  const rows = (before.checklist ?? []) as Row[];
-  const old = rows.find((row) => String(row._id) === itemId)!;
+  const rows = plainRows(before.checklist);
+  const old = rows.find((row) => row._id === itemId)!;
   await logActivity(db, taskId, user._id, "criterion_removed", itemId, old.text, "");
-  return NextResponse.json({ checklist: rows.filter((row) => String(row._id) !== itemId) });
+  return NextResponse.json({ checklist: rows.filter((row) => row._id !== itemId) });
 });

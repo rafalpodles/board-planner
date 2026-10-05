@@ -958,8 +958,18 @@ test("one checklist item is added, ticked, reworded and removed without disturbi
   expect(added.parsed.checklist[3]).toEqual({ id: fourthId, text: "fourth", done: false });
 
   // Ticked by its text, then reworded by its id; the neighbours keep their ids and their state
-  accepted(await session.callTool("set_checklist_item", { taskKey: key, item: "SECOND", done: true }));
-  accepted(await session.callTool("set_checklist_item", { taskKey: key, item: third._id, text: "third, reworded" }));
+  const ticked = await session.callTool("set_checklist_item", { taskKey: key, item: "SECOND", done: true });
+  accepted(ticked);
+  // The answer names every item with its id and its state as stored — not the internals of a document
+  expect(ticked.parsed.checklist).toEqual([
+    { id: first._id, text: "first", done: true },
+    { id: second._id, text: "second", done: true },
+    { id: third._id, text: "third", done: false },
+    { id: expect.stringMatching(/^[0-9a-f]{24}$/), text: "fourth", done: false },
+  ]);
+  const reworded = await session.callTool("set_checklist_item", { taskKey: key, item: third._id, text: "third, reworded" });
+  accepted(reworded);
+  expect(reworded.parsed.checklist[2]).toEqual({ id: third._id, text: "third, reworded", done: false });
   now = await items();
   expect(now.map((i) => [i._id, i.text, i.done])).toEqual([
     [first._id, "first", true],
@@ -973,6 +983,10 @@ test("one checklist item is added, ticked, reworded and removed without disturbi
   expect(activity).toContain("criterion_checked");
   expect(activity).toContain("criterion_edited");
   expect(activity).toContain("criterion_added");
+  // ...and nothing it did not do: a tick is not an edit, and a reword is not an untick
+  expect(activity.match(/criterion_edited/g)).toHaveLength(1);
+  expect(activity).not.toContain("criterion_unchecked");
+  expect(activity).not.toContain("undefined");
 
   // Resending the list as plain lines, one of them reworded, keeps the id and tick of every other line
   accepted(

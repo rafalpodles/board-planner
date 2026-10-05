@@ -105,14 +105,22 @@ type Held = { _id?: unknown; text: string; done?: boolean };
  * ("- [x]" or "- [ ]"): a plain line says nothing about done.
  */
 export function mergeCriteria(markdown: string, held: Held[]): { _id?: unknown; text: string; done: boolean }[] {
+  const lines = parseChecklistLines(markdown);
   const unused = [...held];
+  const matched: (Held | undefined)[] = lines.map(() => undefined);
   const loose = (text: string) => text.replace(/\s+/g, " ").trim().toLowerCase();
-  return parseChecklistLines(markdown).map(({ text, explicit }) => {
-    let at = unused.findIndex((item) => item.text.trim() === text);
-    if (at === -1) at = unused.findIndex((item) => loose(item.text) === loose(text));
-    if (at === -1) return { text, done: explicit ?? false };
-    const [kept] = unused.splice(at, 1);
-    return { _id: kept._id, text, done: explicit ?? !!kept.done };
+  // Exact matches for every line first, then the loose ones among what is left: a line that only
+  // matches loosely must not take the criterion another line matches exactly
+  for (const same of [(a: string, b: string) => a.trim() === b.trim(), (a: string, b: string) => loose(a) === loose(b)]) {
+    lines.forEach((line, i) => {
+      if (matched[i]) return;
+      const at = unused.findIndex((item) => same(item.text, line.text));
+      if (at !== -1) matched[i] = unused.splice(at, 1)[0];
+    });
+  }
+  return lines.map(({ text, explicit }, i) => {
+    const kept = matched[i];
+    return kept ? { _id: kept._id, text, done: explicit ?? !!kept.done } : { text, done: explicit ?? false };
   });
 }
 
