@@ -115,6 +115,8 @@ describe("organisationWall: what counts as naming the organisation", () => {
   it("refuses a $rename onto the organisation, and an update pipeline stage it cannot read", async () => {
     expect(await verdict(() => Thing.updateOne({ organisation: ACME }, { $rename: { title: "organisation" } }))).toBe("walled");
     expect(await verdict(() => Thing.updateOne({ organisation: ACME }, [{ $project: { organisation: 0 } }], { updatePipeline: true }))).toBe("walled");
+    // Inclusion drops every field it does not list, the organisation among them, without naming it
+    expect(await verdict(() => Thing.updateOne({ organisation: ACME }, [{ $project: { title: 1 } }], { updatePipeline: true }))).toBe("walled");
   });
 
   it("reads paths, never values: a status or a title that says organisation is written", async () => {

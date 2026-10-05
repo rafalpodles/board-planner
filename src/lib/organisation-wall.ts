@@ -63,9 +63,9 @@ const namesOrganisation = (path: string) => path === "organisation" || path.star
 function stageTouchesOrganisation(stage: unknown): boolean {
   if (!isDoc(stage)) return true;
   return Object.entries(stage).some(([operator, spec]) => {
-    if (operator === "$replaceRoot" || operator === "$replaceWith") return true;
+    if (operator === "$replaceRoot" || operator === "$replaceWith" || operator === "$project") return true;
     if (operator === "$unset") return (Array.isArray(spec) ? spec : [spec]).some((path) => typeof path === "string" && namesOrganisation(path));
-    if (operator === "$set" || operator === "$addFields" || operator === "$project") return isDoc(spec) && Object.keys(spec).some(namesOrganisation);
+    if (operator === "$set" || operator === "$addFields") return isDoc(spec) && Object.keys(spec).some(namesOrganisation);
     return true;
   });
 }
