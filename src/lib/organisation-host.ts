@@ -69,16 +69,17 @@ export function classifyHost(host: string | null, domain: string): HostKind {
 }
 
 const SLUG_CACHE_MS = 30_000;
-const slugCache = new Map<string, { organisation: Types.ObjectId | null; at: number }>();
+type SlugAnswer = { organisation: Types.ObjectId; suspended: boolean } | null;
+const slugCache = new Map<string, { answer: SlugAnswer; at: number }>();
 
-async function organisationWithSlug(slug: string): Promise<Types.ObjectId | null> {
+async function organisationWithSlug(slug: string): Promise<SlugAnswer> {
   const cached = slugCache.get(slug);
-  if (cached && Date.now() - cached.at < SLUG_CACHE_MS) return cached.organisation;
+  if (cached && Date.now() - cached.at < SLUG_CACHE_MS) return cached.answer;
   await connectDB();
-  const found = await Organisation.findOne({ slug }).select("_id").lean();
-  const organisation = found ? found._id : null;
-  remember(slugCache, slug, { organisation, at: Date.now() });
-  return organisation;
+  const found = await Organisation.findOne({ slug }).select("_id suspendedAt deletedAt").lean();
+  const answer = found && !found.deletedAt ? { organisation: found._id, suspended: !!found.suspendedAt } : null;
+  remember(slugCache, slug, { answer, at: Date.now() });
+  return answer;
 }
 
 const slugOfOrganisationCache = new Map<string, { slug: string | null; at: number }>();
@@ -88,8 +89,8 @@ async function slugOfOrganisation(organisation: Types.ObjectId): Promise<string 
   const cached = slugOfOrganisationCache.get(key);
   if (cached && Date.now() - cached.at < SLUG_CACHE_MS) return cached.slug;
   await connectDB();
-  const found = await Organisation.findById(organisation).select("slug").lean();
-  const slug = found?.slug ?? null;
+  const found = await Organisation.findById(organisation).select("slug deletedAt").lean();
+  const slug = found && !found.deletedAt ? (found.slug ?? null) : null;
   remember(slugOfOrganisationCache, key, { slug, at: Date.now() });
   return slug;
 }
@@ -125,7 +126,11 @@ const platformPort = (domain: string) => {
 
 export const originFor = (db: ScopedDb): Promise<string | null> => organisationOrigin(db.organisation);
 
-export type RequestOrganisation = { kind: "organisation"; organisation: Types.ObjectId } | { kind: "platform" } | { kind: "none" };
+export type RequestOrganisation =
+  | { kind: "organisation"; organisation: Types.ObjectId }
+  | { kind: "suspended"; organisation: Types.ObjectId }
+  | { kind: "platform" }
+  | { kind: "none" };
 
 export async function organisationOfRequest(request: Request): Promise<RequestOrganisation> {
   const domain = organisationDomain();
@@ -133,6 +138,7 @@ export async function organisationOfRequest(request: Request): Promise<RequestOr
   const host = classifyHost(request.headers.get("host"), domain);
   if (host.kind === "platform") return { kind: "platform" };
   if (host.kind === "unknown") return { kind: "none" };
-  const organisation = await organisationWithSlug(host.slug);
-  return organisation ? { kind: "organisation", organisation } : { kind: "none" };
+  const found = await organisationWithSlug(host.slug);
+  if (!found) return { kind: "none" };
+  return { kind: found.suspended ? "suspended" : "organisation", organisation: found.organisation };
 }

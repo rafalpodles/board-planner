@@ -4,6 +4,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/Button";
+import { OrganisationSuspended } from "@/components/OrganisationSuspended";
 
 // Backed off rather than a fixed interval: /api/auth/me can take seconds to fail during an outage,
 // and a fixed 10 s left three requests in flight at once on a tab nobody was watching
@@ -11,7 +12,7 @@ const FIRST_RETRY_MS = 10_000;
 const MAX_RETRY_MS = 60_000;
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
-  const { user, isLoading, outage, refreshUser, requestLimit } = useAuth();
+  const { user, isLoading, outage, suspended, refreshUser, requestLimit } = useAuth();
   const router = useRouter();
   // usePathname only to re-run on navigation; the destination itself comes from window below.
   // useSearchParams here would opt every page under this layout out of static prerendering.
@@ -20,21 +21,23 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     // `outage` means the server never answered the question, so there is nothing here to act on.
     // Redirecting anyway sent people to a sign-in page that could not sign them in either (BP-362).
-    if (!isLoading && !user && !outage) {
+    if (!isLoading && !user && !outage && !suspended) {
       // Carry where they were going. Arriving from another application — the menubar app opens the
       // approval page — this is the difference between signing in and being dropped on the board
       // with no idea what happened to the link they clicked.
       const intended = window.location.pathname + window.location.search;
       router.replace(`/login?next=${encodeURIComponent(intended)}`);
     }
-  }, [user, isLoading, outage, router, pathname]);
+  }, [user, isLoading, outage, suspended, router, pathname]);
 
   // The session cookie is untouched, so the app can come back by itself rather than waiting for
   // somebody to reload a page that looks broken. Chained after each attempt settles, so a slow
   // request never overlaps the next one.
   const retryDelay = useRef(FIRST_RETRY_MS);
+  // A suspension is lifted by the service, not by anybody here, so the page asks again until it is
+  const waiting = (outage && !user) || suspended;
   useEffect(() => {
-    if (!outage || user) {
+    if (!waiting) {
       retryDelay.current = FIRST_RETRY_MS;
       return;
     }
@@ -56,7 +59,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
       stopped = true;
       clearTimeout(timer);
     };
-  }, [outage, user, refreshUser]);
+  }, [waiting, refreshUser]);
 
   if (isLoading) {
     return (
@@ -69,6 +72,8 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
       </div>
     );
   }
+
+  if (suspended) return <OrganisationSuspended />;
 
   if (!user && outage) {
     return (

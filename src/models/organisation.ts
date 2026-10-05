@@ -20,6 +20,10 @@ export interface IOrganisation {
   timezone?: string;
   licenceKey?: string;
   entitlements: IOrganisationEntitlements;
+  suspendedAt?: Date | null;
+  suspendedReason?: string;
+  deletedAt?: Date | null;
+  deletingAt?: Date | null;
 }
 
 const entitlementsSchema = new Schema<IOrganisationEntitlements>(
@@ -40,6 +44,10 @@ const organisationSchema = new Schema<IOrganisation>({
   digestHour: { type: Number, min: 0, max: 23 },
   timezone: { type: String, trim: true },
   licenceKey: { type: String },
+  suspendedAt: { type: Date, default: null },
+  suspendedReason: { type: String, default: "" },
+  deletedAt: { type: Date, default: null },
+  deletingAt: { type: Date, default: null },
   entitlements: {
     type: entitlementsSchema,
     default: () => ({ plan: "free", features: [], source: "none" }),

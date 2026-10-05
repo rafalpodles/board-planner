@@ -14,6 +14,7 @@ const { nav, auth } = vi.hoisted(() => ({
     isAdmin: false,
     isLoading: false as boolean,
     outage: false as boolean,
+    suspended: false as boolean,
     login: vi.fn(),
     logout: vi.fn(),
     refreshUser: vi.fn(),
@@ -21,6 +22,7 @@ const { nav, auth } = vi.hoisted(() => ({
     noteApiStatus: vi.fn(),
     requestLimit: null as RequestLimit | null,
     noteRequestLimit: vi.fn(),
+    noteSuspended: vi.fn(),
     // satisfies, not `as`: this checks the mock is still a whole AuthState while leaving the
     // members their mock types, so `refreshUser.mockClear()` still type-checks
   } satisfies AuthState,
@@ -50,6 +52,7 @@ describe("AuthGuard", () => {
     auth.user = null;
     auth.isLoading = false;
     auth.outage = false;
+    auth.suspended = false;
     auth.requestLimit = null;
     window.history.replaceState({}, "", "/projects/BP?column=active");
   });
@@ -89,6 +92,39 @@ describe("AuthGuard", () => {
     expect(screen.getByRole("status").textContent).toBe(
       `You have made more requests this minute than one account may. Pages will load again after ${until.toLocaleTimeString()}.`
     );
+  });
+
+  it("says the organisation is suspended, and sends nobody to a sign-in that cannot sign them in (BP-893)", () => {
+    auth.suspended = true;
+
+    renderGuard();
+
+    expect(screen.getByRole("status").textContent).toContain("This organisation is suspended");
+    expect(screen.queryByTestId("app")).toBeNull();
+    expect(nav.replace).not.toHaveBeenCalled();
+  });
+
+  it("keeps asking while suspended, and shows the app again once the suspension is lifted (BP-893)", async () => {
+    vi.useFakeTimers();
+    auth.user = SIGNED_IN;
+    auth.suspended = true;
+    auth.refreshUser.mockImplementation(async () => {
+      auth.suspended = false;
+    });
+
+    const { rerender } = renderGuard();
+    expect(screen.getByRole("status").textContent).toContain("This organisation is suspended");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(auth.refreshUser).toHaveBeenCalled();
+    rerender(
+      <AuthGuard>
+        <span data-testid="app">the board</span>
+      </AuthGuard>
+    );
+    expect(screen.getByTestId("app")).toBeTruthy();
   });
 
   it("sends a signed-out visitor to sign in, carrying where they were going", () => {

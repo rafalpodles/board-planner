@@ -36,6 +36,7 @@ const startDigestScheduler = vi.fn(() => ({ started: true as const, tickMs: 300_
 
 const backfillOrganisations = vi.fn((): Promise<unknown> => Promise.resolve({ total: 0, byCollection: {} }));
 vi.mock("@/lib/organisation-migration", () => ({ backfillOrganisations }));
+vi.mock("@/lib/organisation-life-cycle", () => ({ sweepDeletedOrganisations: vi.fn(async () => 0) }));
 vi.mock("@/lib/organisation-jobs", async () => {
   const { scoped } = await import("@/lib/db-scope");
   const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");

@@ -22,7 +22,7 @@ export const POST = withPlatformRequest<{ organisationId: string }>(async (_requ
   const { organisationId } = params;
   if (!OBJECT_ID.test(organisationId)) return hostNotFound();
   const organisation = await Organisation.findById(organisationId).lean();
-  if (!organisation) return hostNotFound();
+  if (!organisation || organisation.deletedAt || organisation.deletingAt) return hostNotFound();
 
   const offered = storedLicence(licenceKey, organisationId);
   if (offered?.verdict !== "valid" && offered?.verdict !== "grace") {
@@ -36,7 +36,7 @@ export const POST = withPlatformRequest<{ organisationId: string }>(async (_requ
   }
 
   const written = await Organisation.updateOne(
-    { _id: organisationId, licenceKey: organisation.licenceKey ?? null },
+    { _id: organisationId, licenceKey: organisation.licenceKey ?? null, deletedAt: null, deletingAt: null },
     { $set: { licenceKey } }
   );
   if (written.matchedCount === 0) {

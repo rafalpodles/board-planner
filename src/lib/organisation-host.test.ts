@@ -87,6 +87,20 @@ describe("ORGANISATION_DOMAIN set: the host names the organisation", () => {
     expect(findOne).toHaveBeenCalledTimes(1);
   });
 
+  it("names a suspended organisation as suspended, hands it no db, and treats a deleted one as nobody's (BP-893)", async () => {
+    process.env.ORGANISATION_DOMAIN = "board-planner.com";
+    findOne.mockImplementation((filter: { slug: string }) => ({
+      select: () => ({
+        lean: async () =>
+          filter.slug === "acme" ? { _id: ACME, suspendedAt: new Date() } : filter.slug === "gone" ? { _id: UNNAMED, deletedAt: new Date() } : null,
+      }),
+    }));
+
+    expect(await organisationOfRequest(on("acme.board-planner.com"))).toEqual({ kind: "suspended", organisation: ACME });
+    expect(await scopedForRequest(on("acme.board-planner.com"))).toBeNull();
+    expect(await organisationOfRequest(on("gone.board-planner.com"))).toEqual({ kind: "none" });
+  });
+
   it("hands a request on an organisation's host that organisation's db, and nothing anywhere else", async () => {
     expect((await scopedForRequest(on("acme.board-planner.com")))?.organisation.equals(ACME)).toBe(true);
     expect(await scopedForRequest(on("nobody.board-planner.com"))).toBeNull();

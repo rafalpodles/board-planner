@@ -1,4 +1,4 @@
-import { forEachServedOrganisation } from "@/lib/organisation-jobs";
+import { forEachServedOrganisation, stillServed } from "@/lib/organisation-jobs";
 import type { Types } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { APP_NAME } from "@/lib/brand";
@@ -345,6 +345,7 @@ async function digestTickFor(db: ScopedDb, now: Date, day: string): Promise<numb
   let sent = 0;
 
   for (const user of waiting) {
+    if (!(await stillServed(db.organisation))) break;
     // Claimed before the work, and by the day rather than by a timestamp: a crash between here
     // and the send costs one digest instead of sending it from every app instance at once.
     //

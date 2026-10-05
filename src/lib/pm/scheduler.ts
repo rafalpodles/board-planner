@@ -1,4 +1,4 @@
-import { forEachServedOrganisation } from "@/lib/organisation-jobs";
+import { forEachServedOrganisation, stillServed } from "@/lib/organisation-jobs";
 import { connectDB } from "@/lib/db";
 import { runPmTurn } from "./agent";
 import { dailyPmSpend, isOverDailyTurnCap } from "./turn-cap";
@@ -41,6 +41,7 @@ async function pmSchedulerTickFor(db: ScopedDb): Promise<void> {
   const pmUser = await getPmUser(db);
 
   for (const project of projects) {
+    if (!(await stillServed(db.organisation))) return;
     const slot = dueReviewSlot(now, project.pm?.autonomy);
     if (!slot) continue;
     // Not claimed while a turn holds the project: a review refused for the lock would spend the slot

@@ -17,6 +17,7 @@ import { projectRunsWorkers } from "@/lib/worker-gate";
 import { EXECUTION_LEASE_MS } from "./execution-lease";
 import { inOrganisation } from "./organisation-log";
 import { asPrincipal, machinePrincipal, requestLimitRefusal } from "./organisation-limits";
+import { ORGANISATION_SUSPENDED_HEADER } from "./organisation-limit-header";
 
 type AuthenticatedHandler = (
   request: Request,
@@ -53,6 +54,13 @@ export function hostNotFound(): NextResponse {
   return NextResponse.json({ error: "Not found" }, { status: 404 });
 }
 
+export function organisationSuspended(): NextResponse {
+  return NextResponse.json(
+    { error: "This organisation is suspended.", suspended: true },
+    { status: 503, headers: { [ORGANISATION_SUSPENDED_HEADER]: "1" } }
+  );
+}
+
 export async function refusedOnThisHost(
   request: Request,
   principal: { organisation?: Types.ObjectId | null }
@@ -64,6 +72,7 @@ export async function refusedOnThisHost(
     if (isDatabaseUnreachable(e)) return databaseUnavailable();
     throw e;
   }
+  if (host.kind === "suspended") return organisationSuspended();
   if (host.kind !== "organisation") return hostNotFound();
   if (!organisationOf(principal).equals(host.organisation)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

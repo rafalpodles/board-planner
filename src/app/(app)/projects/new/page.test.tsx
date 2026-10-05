@@ -15,6 +15,7 @@ const { api, nav, auth, projectsState } = vi.hoisted(() => ({
     isAdmin: true as boolean,
     isLoading: false as boolean,
     outage: false as boolean,
+    suspended: false as boolean,
     login: vi.fn(),
     logout: vi.fn(),
     refreshUser: vi.fn(),
@@ -22,6 +23,7 @@ const { api, nav, auth, projectsState } = vi.hoisted(() => ({
     noteApiStatus: vi.fn(),
     requestLimit: null,
     noteRequestLimit: vi.fn(),
+    noteSuspended: vi.fn(),
   } satisfies AuthState,
 }));
 

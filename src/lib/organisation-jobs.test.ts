@@ -2,8 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Types } from "mongoose";
 
 const find = vi.hoisted(() => vi.fn());
+const exists = vi.hoisted(() => vi.fn());
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
-vi.mock("@/models/organisation", () => ({ Organisation: { find } }));
+vi.mock("@/models/organisation", () => ({ Organisation: { find, exists } }));
 
 const { servedOrganisations, forEachServedOrganisation } = await import("./organisation-jobs");
 const { DEFAULT_ORGANISATION_ID } = await import("./organisation-field");
@@ -12,7 +13,10 @@ const A = new Types.ObjectId("0000000000000000000000a1");
 const B = new Types.ObjectId("0000000000000000000000b2");
 const rows = (list: unknown[]) => ({ select: () => ({ lean: async () => list }) });
 
-beforeEach(() => find.mockReset());
+beforeEach(() => {
+  find.mockReset();
+  exists.mockReset().mockResolvedValue({ _id: A });
+});
 afterEach(() => {
   delete process.env.ORGANISATION_DOMAIN;
 });
@@ -24,12 +28,12 @@ describe("the organisations background work serves (BP-667)", () => {
     expect(find).toHaveBeenCalledWith({ _id: DEFAULT_ORGANISATION_ID });
   });
 
-  it("is every organisation, with its own clock, when organisations live on subdomains", async () => {
+  it("is every organisation neither suspended nor deleted, with its own clock, when organisations live on subdomains (BP-893)", async () => {
     process.env.ORGANISATION_DOMAIN = "board-planner.com";
     find.mockReturnValue(rows([{ _id: A, timezone: "Asia/Tokyo" }, { _id: B }]));
 
     expect(await servedOrganisations()).toEqual([{ _id: A, timezone: "Asia/Tokyo" }, { _id: B }]);
-    expect(find).toHaveBeenCalledWith({});
+    expect(find).toHaveBeenCalledWith({ suspendedAt: null, deletedAt: null, deletingAt: null });
   });
 
   it("hands each organisation its own db, and one organisation's failure does not stop the next", async () => {
@@ -45,5 +49,19 @@ describe("the organisations background work serves (BP-667)", () => {
 
     expect(seen).toEqual([A.toHexString(), B.toHexString()]);
     expect(console.error).toHaveBeenCalledWith(expect.stringContaining(`test job failed for organisation ${A.toHexString()}`), expect.any(Error));
+  });
+
+  it("asks again before each organisation's work, so one suspended after the list was read is skipped (BP-893)", async () => {
+    process.env.ORGANISATION_DOMAIN = "board-planner.com";
+    find.mockReturnValue(rows([{ _id: A }, { _id: B }]));
+    exists.mockImplementation(async (filter: { _id: Types.ObjectId }) => (filter._id.equals(A) ? null : { _id: B }));
+    const seen: string[] = [];
+
+    await forEachServedOrganisation("test job", async (db) => {
+      seen.push(db.organisation.toHexString());
+    });
+
+    expect(seen).toEqual([B.toHexString()]);
+    expect(exists).toHaveBeenCalledWith({ _id: A, suspendedAt: null, deletedAt: null, deletingAt: null });
   });
 });

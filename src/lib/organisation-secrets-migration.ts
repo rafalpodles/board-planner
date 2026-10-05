@@ -1,4 +1,5 @@
 import type mongoose from "mongoose";
+import { SECRET_PATHS, secretsIn } from "./secret-paths";
 import { decryptSecret, encryptSecret, isEncryptedSecret, isInstanceKeySecret } from "./encryption";
 
 type Row = Record<string, unknown> & { _id: mongoose.Types.ObjectId; organisation?: mongoose.Types.ObjectId };
@@ -10,31 +11,11 @@ export interface ResealReport {
   needsAttention: string[];
 }
 
-// Every path a secret is stored at, as an array of steps; "*" walks an array
-const PROJECT_SECRETS: string[][] = [
-  ["githubToken"],
-  ["gitlabToken"],
-  ["codaToken"],
-  ["notificationChannels", "*", "webhookUrl"],
-  ["pm", "mcpServers", "*", "authToken"],
-  ["pm", "mcpServers", "*", "oauth", "clientSecret"],
-  ["pm", "mcpServers", "*", "oauth", "accessToken"],
-  ["pm", "mcpServers", "*", "oauth", "refreshToken"],
-];
-const USER_SECRETS: string[][] = [["notifications", "chat", "webhookUrl"]];
+const PROJECT_SECRETS = SECRET_PATHS.Project;
+const USER_SECRETS = SECRET_PATHS.User;
 
 function notUnderOrganisationKey(value: string): boolean {
   return value !== "" && (isInstanceKeySecret(value) || !isEncryptedSecret(value));
-}
-
-function found(node: unknown, steps: string[], at: string[] = []): { path: string; value: string }[] {
-  if (steps.length === 0) return typeof node === "string" ? [{ path: at.join("."), value: node }] : [];
-  if (typeof node !== "object" || node === null) return [];
-  const [step, ...rest] = steps;
-  if (step === "*") {
-    return Array.isArray(node) ? node.flatMap((item, index) => found(item, rest, [...at, String(index)])) : [];
-  }
-  return found((node as Record<string, unknown>)[step], rest, [...at, step]);
 }
 
 /**
@@ -56,7 +37,7 @@ export async function resealUnderOrganisationKeys(
   ] as const) {
     report.byCollection[collection] = 0;
     for await (const row of db.collection<Row>(collection).find({})) {
-      const stale = paths.flatMap((steps) => found(row, steps)).filter(({ value }) => notUnderOrganisationKey(value));
+      const stale = paths.flatMap((steps) => secretsIn(row, steps)).filter(({ value }) => notUnderOrganisationKey(value));
       if (stale.length === 0) continue;
       if (!row.organisation) {
         report.needsAttention.push(`${collection} ${row._id}: no organisation, so no key to seal under`);

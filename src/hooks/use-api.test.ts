@@ -6,7 +6,8 @@ import { useApi } from "./use-api";
 const onUnauthorized = vi.fn();
 const noteApiStatus = vi.fn();
 const noteRequestLimit = vi.fn();
-vi.mock("./use-auth", () => ({ useAuth: () => ({ onUnauthorized, noteApiStatus, noteRequestLimit }) }));
+const noteSuspended = vi.fn();
+vi.mock("./use-auth", () => ({ useAuth: () => ({ onUnauthorized, noteApiStatus, noteRequestLimit, noteSuspended }) }));
 
 function response(status: number, statusText: string, body?: unknown, headers: Record<string, string> = {}): Response {
   return {
@@ -22,6 +23,7 @@ beforeEach(() => {
   onUnauthorized.mockClear();
   noteApiStatus.mockClear();
   noteRequestLimit.mockClear();
+  noteSuspended.mockClear();
   vi.stubGlobal("fetch", vi.fn());
 });
 afterEach(() => {
@@ -206,5 +208,27 @@ describe("useApi organisation limit (BP-894)", () => {
 
     await expect(result.current.get("/api/x")).rejects.toThrow("You have made more than 3000 requests");
     expect(noteRequestLimit).toHaveBeenCalledWith("principal", 7);
+  });
+});
+
+describe("useApi suspended organisation (BP-893)", () => {
+  it("tells the shell the organisation is suspended instead of reporting an outage, from an already open page", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      response(503, "Service Unavailable", { error: "This organisation is suspended.", suspended: true }, { "x-organisation-suspended": "1" })
+    );
+    const { result } = renderHook(() => useApi());
+
+    await expect(result.current.get("/api/x")).rejects.toThrow("This organisation is suspended.");
+    expect(noteSuspended).toHaveBeenCalledTimes(1);
+    expect(noteApiStatus).not.toHaveBeenCalled();
+  });
+
+  it("still reports an ordinary 503 as an outage", async () => {
+    vi.mocked(fetch).mockResolvedValue(response(503, "Service Unavailable", { error: "The database is unreachable." }));
+    const { result } = renderHook(() => useApi());
+
+    await expect(result.current.get("/api/x")).rejects.toThrow();
+    expect(noteSuspended).not.toHaveBeenCalled();
+    expect(noteApiStatus).toHaveBeenCalledWith(503, { relayed: false });
   });
 });
