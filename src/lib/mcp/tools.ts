@@ -15,6 +15,8 @@ import {
   taskIdsInOrder,
 } from "./strict-input";
 import { MAX_REORDER_IDS } from "@/lib/reorder";
+import { agentLines, memberLines, myTaskLines } from "./people";
+import { DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT } from "./paging";
 
 type ToolExtra = { authInfo?: AuthInfo };
 
@@ -61,6 +63,72 @@ export function registerPlannerTools(server: McpServer): void {
         project = await client.getProjectByKey(identifier);
       }
       return json(project);
+    }
+  );
+
+  // --- People and agents ---
+
+  server.registerTool(
+    "list_members",
+    {
+      description:
+        "The people a board can hand work to, by the username assignee takes. Only people with access to the " +
+        "board: a name that is not here is refused as an assignee, which is how a typo and somebody without " +
+        "access are deliberately not told apart.",
+      inputSchema: strictInput({ project: z.string().describe("Project key (e.g. 'CP')") }),
+    },
+    async ({ project }, extra) => {
+      const client = clientFrom(extra);
+      const proj = await client.getProjectByKey(project);
+      return json(memberLines((await client.listAssignableUsers(proj._id)) as { username: string }[]));
+    }
+  );
+
+  server.registerTool(
+    "whoami",
+    {
+      description: "The account this connection acts as: its username, name and role. Use it for \"assign to me\".",
+      inputSchema: strictInput({}),
+    },
+    async (_args, extra) => {
+      const me = await clientFrom(extra).getMe();
+      return json({ username: me.username, fullName: me.fullName ?? "", role: me.role ?? "member" });
+    }
+  );
+
+  server.registerTool(
+    "my_tasks",
+    {
+      description:
+        "The caller's own tasks across every board, most recently changed first, a page at a time. Finished " +
+        "work (a column with the done role) is left out unless includeDone. The answer says the total and the " +
+        "offset of the next page.",
+      inputSchema: strictInput({
+        includeDone: z.boolean().optional().describe("Also the tasks in a done column (default: not)"),
+        limit: z.number().int().min(1).max(MAX_LIST_LIMIT).optional().describe(`Page size (default ${DEFAULT_LIST_LIMIT})`),
+        offset: z.number().int().min(0).optional().describe("Tasks to skip, from a previous answer's nextOffset"),
+      }),
+    },
+    async ({ includeDone, limit, offset }, extra) => {
+      const tasks = (await clientFrom(extra).listMyTasks()) as Parameters<typeof myTaskLines>[0];
+      return json(
+        myTaskLines(tasks, { includeDone: includeDone ?? false, limit: limit ?? DEFAULT_LIST_LIMIT, offset: offset ?? 0 })
+      );
+    }
+  );
+
+  server.registerTool(
+    "list_agents",
+    {
+      description:
+        "The agents update_task can hand a task to on this board, by name: the board's own, the caller's personal " +
+        "ones and the global ones. `steps` is how many steps each runs — an agent with none is refused.",
+      inputSchema: strictInput({ project: z.string().describe("Project key (e.g. 'CP')") }),
+    },
+    async ({ project }, extra) => {
+      const client = clientFrom(extra);
+      const proj = await client.getProjectByKey(project);
+      return json(agentLines((await client.listAgents()) as Parameters<typeof agentLines>[0], proj._id));
     }
   );
 

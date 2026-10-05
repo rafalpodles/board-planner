@@ -510,3 +510,65 @@ describe("reorder_tasks", () => {
     expect(refusal.error!.issues[0].message).toContain('"order" — use the reorder_tasks tool');
   });
 });
+
+/**
+ * BP-910. create_task and update_task refuse an assignee who is not on the board, and nothing told a
+ * caller who is; update_task names an agent and nothing listed them.
+ */
+describe("people and agents", () => {
+  const parse = (result: unknown) => JSON.parse((result as { content: { text: string }[] }).content[0].text);
+  const run = (name: string, args: Record<string, unknown> = {}) => registered().get(name)!.handler(args, extra);
+
+  beforeEach(() => {
+    vi.spyOn(PlannerClient.prototype, "getProjectByKey").mockResolvedValue({ _id: "p1" } as never);
+  });
+
+  it("list_members answers with names only, from the board's own roster", async () => {
+    const roster = vi
+      .spyOn(PlannerClient.prototype, "listAssignableUsers")
+      .mockResolvedValue([{ _id: "u1", username: "rafal", fullName: "Rafal", email: "x@example.com" }]);
+
+    expect(parse(await run("list_members", { project: "bp" }))).toEqual([{ username: "rafal", fullName: "Rafal" }]);
+    expect(roster).toHaveBeenCalledWith("p1");
+  });
+
+  it("whoami says who the connection is, without the address the account route also carries", async () => {
+    vi.spyOn(PlannerClient.prototype, "getMe").mockResolvedValue({
+      _id: "u1",
+      username: "rafal",
+      fullName: "Rafal",
+      email: "r@example.com",
+      role: "admin",
+    } as never);
+
+    expect(parse(await run("whoami"))).toEqual({ username: "rafal", fullName: "Rafal", role: "admin" });
+  });
+
+  it("my_tasks leaves finished work out, and pages", async () => {
+    vi.spyOn(PlannerClient.prototype, "listMyTasks").mockResolvedValue([
+      { taskNumber: 2, title: "Open", statusRole: "active", project: { key: "BP", name: "BP" } },
+      { taskNumber: 1, title: "Shipped", statusRole: "done", project: { key: "BP", name: "BP" } },
+    ]);
+
+    const answer = parse(await run("my_tasks"));
+    expect(answer).toMatchObject({ total: 1, returned: 1, nextOffset: null });
+    expect(answer.tasks[0].key).toBe("BP-2");
+    expect(parse(await run("my_tasks", { includeDone: true })).total).toBe(2);
+  });
+
+  it("list_agents offers what update_task could choose on this board", async () => {
+    vi.spyOn(PlannerClient.prototype, "listAgents").mockResolvedValue([
+      { _id: "a1", name: "Default", scope: "global", projectId: null, composition: { steps: [{}] } },
+      { _id: "a2", name: "Other board", scope: "project", projectId: "p2", composition: { steps: [{}] } },
+    ]);
+
+    expect(parse(await run("list_agents", { project: "BP" })).map((a: { name: string }) => a.name)).toEqual(["Default"]);
+  });
+
+  it("each is a tool the strict schema knows, and declares no stray parameter", () => {
+    for (const name of ["list_members", "whoami", "my_tasks", "list_agents"]) {
+      expect(registered().get(name)).toBeDefined();
+    }
+    expect(registered().get("my_tasks")!.schema.safeParse({ limit: 101 }).success).toBe(false);
+  });
+});
