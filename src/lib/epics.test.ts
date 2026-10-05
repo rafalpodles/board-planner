@@ -108,6 +108,18 @@ describe("epicProgressFor", () => {
     expect(progress.get(EPIC)).toMatchObject({ total: 1, done: 1 });
   });
 
+  it("does not count an archived child: the statuses are read from the children that are not archived", async () => {
+    const { db, taskFind } = fakeDb({
+      parents: [{ _id: EPIC, relations: [{ type: "parent_of", task: A }, { type: "parent_of", task: B }] }],
+      statuses: { [A]: "done", [B]: "todo" },
+      columns: [column("todo", "backlog", 0), column("done", "done", 1)],
+    });
+
+    await epicProgressFor(db, "p1", [EPIC]);
+
+    expect(taskFind.mock.calls[1][0]).toMatchObject({ _id: { $in: [A, B] }, archivedAt: null });
+  });
+
   it("answers for a whole page in two reads of tasks, however many epics it holds", async () => {
     const { db, taskFind } = fakeDb({
       parents: [

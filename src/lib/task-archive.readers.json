@@ -10,6 +10,7 @@
     "src/app/api/search/route.ts",
     "src/app/api/tasks/mine/route.ts",
     "src/ee/connectors/coda/sync.ts",
+    "src/lib/epics.ts",
     "src/lib/pm/board-review.ts",
     "src/lib/pm/tools.ts",
     "src/lib/task-service.ts"

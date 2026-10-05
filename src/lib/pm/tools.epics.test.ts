@@ -36,7 +36,7 @@ describe("the PM agent's list_tasks and an epic", () => {
     await PM_TOOLS.list_tasks.execute(db, { parent: "BP-7" }, ctx);
 
     expect(epicClauses).toHaveBeenCalledWith(db, "p1", { parent: EPIC_ID, hasChildren: undefined });
-    const used = { project: "p1", $and: [clause] };
+    const used = { project: "p1", archivedAt: null, $and: [clause] };
     expect(find).toHaveBeenCalledWith(used);
     expect(countDocuments).toHaveBeenCalledWith(used);
   });
@@ -54,7 +54,7 @@ describe("the PM agent's list_tasks and an epic", () => {
 
     await PM_TOOLS.list_tasks.execute(db, {}, ctx);
 
-    expect(find).toHaveBeenCalledWith({ project: "p1" });
+    expect(find).toHaveBeenCalledWith({ project: "p1", archivedAt: null });
   });
 
   it("says what is wrong rather than listing the whole board", async () => {

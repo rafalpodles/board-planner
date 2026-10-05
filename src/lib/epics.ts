@@ -1,6 +1,7 @@
 import { isValidObjectId } from "mongoose";
 import { columnIdsWithRole } from "@/lib/columns";
 import { tallyProgress } from "@/lib/epic-progress";
+import { NOT_ARCHIVED } from "@/lib/task-archive";
 import type { ApiEpicProgress } from "@/types";
 import type { ScopedDb } from "@/lib/db-scope";
 
@@ -31,7 +32,7 @@ export async function epicProgressFor(
 
   const childIds = [...new Set(parents.flatMap(childIdsOf))];
   const [children, project] = await Promise.all([
-    db.Task.find({ project: projectId, _id: { $in: childIds } }, "status").lean(),
+    db.Task.find({ project: projectId, _id: { $in: childIds }, ...NOT_ARCHIVED }, "status").lean(),
     db.Project.findById(projectId, "columns").lean(),
   ]);
   const statusOf = new Map(children.map((c: { _id: unknown; status: string }) => [String(c._id), c.status]));
