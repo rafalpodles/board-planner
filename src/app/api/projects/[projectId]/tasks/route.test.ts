@@ -92,6 +92,7 @@ describe("GET /api/projects/:projectId/tasks — paging, the summary view and th
   const NUMBER_ID = "507f1f77bcf86cd799439a02";
   const CHECK_ID = "507f1f77bcf86cd799439a03";
   const DATE_ID = "507f1f77bcf86cd799439a04";
+  const TEXT_ID = "507f1f77bcf86cd799439a05";
   const OPTION_ID = "opt-large";
 
   beforeEach(() => {
@@ -115,6 +116,7 @@ describe("GET /api/projects/:projectId/tasks — paging, the summary view and th
           { _id: NUMBER_ID, name: "Points", fieldType: "number" },
           { _id: CHECK_ID, name: "Flagged", fieldType: "checkbox" },
           { _id: DATE_ID, name: "Due-ish", fieldType: "date" },
+          { _id: TEXT_ID, name: "Notes", fieldType: "text" },
         ],
       }),
     });
@@ -140,6 +142,13 @@ describe("GET /api/projects/:projectId/tasks — paging, the summary view and th
       expect(query.skip).toHaveBeenCalledWith(20);
       expect(query.limit).toHaveBeenCalledWith(10);
       expect(body).toMatchObject({ total: 57, limit: 10, offset: 20, tasks: [{ taskNumber: 21 }] });
+
+      // The total is of what the filters match, not of the board: asked again with a filter, the
+      // count is handed the narrowed one
+      taskCount.mockClear();
+      taskFind.mockClear();
+      await GET(request("?limit=10&blocked=true"), ctx());
+      expect(filterUsed()).toMatchObject({ $and: [{ "blockedBy.0": { $exists: true } }] });
       expect(taskCount).toHaveBeenCalledWith(filterUsed());
     });
 
@@ -230,10 +239,22 @@ describe("GET /api/projects/:projectId/tasks — paging, the summary view and th
       expect((await GET(request("?blocked=maybe"), ctx())).status).toBe(400);
     });
 
+    // blocked=false is the one clause that is itself an $or, and the one that could overwrite the search's
     it("keeps the text search it was combined with", async () => {
-      await GET(request("?search=login&blocked=true"), ctx());
+      await GET(request("?search=login&blocked=false"), ctx());
 
-      expect(filterUsed()).toMatchObject({ $or: expect.any(Array), $and: [{ "blockedBy.0": { $exists: true } }] });
+      expect(filterUsed()).toMatchObject({
+        $or: [{ title: expect.anything() }, { description: expect.anything() }],
+        $and: [{ $or: [{ blockedBy: { $exists: false } }, { blockedBy: { $size: 0 } }] }],
+      });
+    });
+
+    it("refuses a day that does not exist rather than moving the range into the next month", async () => {
+      for (const param of ["dueBefore=2026-02-31", "dueAfter=2026-04-31", "updatedSince=2026-02-30"]) {
+        taskFind.mockClear();
+        expect((await GET(request(`?${param}`), ctx())).status).toBe(400);
+        expect(taskFind).not.toHaveBeenCalled();
+      }
     });
   });
 
@@ -275,6 +296,22 @@ describe("GET /api/projects/:projectId/tasks — paging, the summary view and th
       expect(clauses()).toEqual([{ [`customFieldValues.${FIELD_ID}`]: OPTION_ID }]);
     });
 
+    // The board shows a checkbox nobody touched as "No", so "No" has to find it
+    it("finds a checkbox nobody touched when asked for unticked", async () => {
+      await GET(request(`?field=${CHECK_ID}:false`), ctx());
+
+      expect(clauses()).toEqual([{ [`customFieldValues.${CHECK_ID}`]: { $ne: true } }]);
+    });
+
+    it("matches a text field the way the board does: containing, in any case", async () => {
+      projectFindOne.mockReturnValue({
+        lean: async () => ({ customFields: [{ _id: FIELD_ID, name: "Notes", fieldType: "text" }] }),
+      });
+      await GET(request(`?field=${FIELD_ID}:Log.in`), ctx());
+
+      expect(clauses()).toEqual([{ [`customFieldValues.${FIELD_ID}`]: { $regex: "Log\\.in", $options: "i" } }]);
+    });
+
     it("reads a number as a number and a checkbox as a boolean", async () => {
       await GET(request(`?field=${NUMBER_ID}:5&field=${CHECK_ID}:true`), ctx());
 
@@ -291,6 +328,7 @@ describe("GET /api/projects/:projectId/tasks — paging, the summary view and th
       ["a number that is not one", `${NUMBER_ID}:five`],
       ["a checkbox that is neither true nor false", `${CHECK_ID}:yes`],
       ["a type that cannot be filtered", `${DATE_ID}:2026-10-10`],
+      ["an empty value for a text field", `${TEXT_ID}:`],
     ])("refuses %s", async (_what, value) => {
       const response = await GET(request(`?field=${value}`), ctx());
 

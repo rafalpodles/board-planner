@@ -15,6 +15,12 @@ const DEFAULT_PAGE = 50;
 const MAX_PAGE = 200;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
+/** A day that exists: `Date` takes 2026-02-31 and moves it into March, which would shift a range silently. */
+const isCalendarDay = (value: string) => {
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return DAY.test(value) && !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+};
+
 /** What a card in a list needs, and what an agent reading a board needs to pick work from it. */
 const SUMMARY_FIELDS = "taskNumber title status priority assignee dueDate sprint order updatedAt";
 
@@ -164,7 +170,7 @@ export const GET = withProjectAccess(async (request, { params, db }) => {
     ["dueAfter", dueAfter, "$gte"],
   ] as const) {
     if (!value) continue;
-    if (!DAY.test(value) || Number.isNaN(Date.parse(value))) {
+    if (!isCalendarDay(value)) {
       return refuse(`Invalid ${name} "${value.slice(0, 64)}" — a day, YYYY-MM-DD`);
     }
     // A due date is a day: "before the 10th" includes the 10th
@@ -175,7 +181,7 @@ export const GET = withProjectAccess(async (request, { params, db }) => {
 
   const updatedSince = url.searchParams.get("updatedSince");
   if (updatedSince) {
-    if (!DAY.test(updatedSince.slice(0, 10)) || Number.isNaN(Date.parse(updatedSince))) {
+    if (!isCalendarDay(updatedSince.slice(0, 10)) || Number.isNaN(Date.parse(updatedSince))) {
       return refuse(`Invalid updatedSince "${updatedSince.slice(0, 64)}" — a day or an ISO timestamp`);
     }
     clauses.push({ updatedAt: { $gte: new Date(updatedSince) } });
@@ -232,10 +238,16 @@ export const GET = withProjectAccess(async (request, { params, db }) => {
         return refuse(`Invalid value "${value.slice(0, 64)}" for field "${String(def.name).slice(0, 64)}" — true or false`);
       }
       wanted = value === "true";
-    } else if (def.fieldType !== "text") {
+    } else if (def.fieldType === "text") {
+      if (value === "") return refuse(`Empty value for field "${String(def.name).slice(0, 64)}"`);
+      // The board's own filter is a case-insensitive "contains", so this answers what the board would
+      wanted = { $regex: value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), $options: "i" };
+    } else {
       return refuse(`A ${def.fieldType} field cannot be filtered on`);
     }
-    clauses.push({ [`customFieldValues.${fieldId}`]: wanted });
+    const path = `customFieldValues.${fieldId}`;
+    // A checkbox nobody touched has no value at all, and the board reads that as "No"
+    clauses.push(wanted === false ? { [path]: { $ne: true } } : { [path]: wanted });
   }
   if (clauses.length) filter.$and = clauses;
 
