@@ -36,7 +36,7 @@ function platform(request: APIRequestContext, method: "POST" | "DELETE", path: s
     headers: {
       host: PLATFORM_HOST,
       ...(data ? { "content-type": "application/json" } : {}),
-      ...signPlatformRequest({ method, path, body }, E2E_PLATFORM_REQUEST_KEY),
+      ...signPlatformRequest({ method, host: PLATFORM_HOST, path, body }, E2E_PLATFORM_REQUEST_KEY),
     },
     ...(data ? { data: body } : {}),
   });
@@ -220,7 +220,7 @@ test.describe("BP-893: an organisation's life cycle", () => {
     expect((await suspend(request, GLOBEX)).status()).toBe(200);
     const path = `${organisationPath(GLOBEX)}/export`;
     const response = await request.get(`${ORGANISATIONS_API}${path}`, {
-      headers: { host: PLATFORM_HOST, ...signPlatformRequest({ method: "GET", path, body: new Uint8Array() }, E2E_PLATFORM_REQUEST_KEY) },
+      headers: { host: PLATFORM_HOST, ...signPlatformRequest({ method: "GET", host: PLATFORM_HOST, path, body: new Uint8Array() }, E2E_PLATFORM_REQUEST_KEY) },
     });
     expect(response.status()).toBe(200);
     const text = gunzipSync(await response.body()).toString("utf8");
@@ -239,7 +239,7 @@ test.describe("BP-893: an organisation's life cycle", () => {
     expect((await suspend(request, GLOBEX)).status()).toBe(409);
     const path = `${organisationPath(GLOBEX)}/export`;
     const exported = await request.get(`${ORGANISATIONS_API}${path}`, {
-      headers: { host: PLATFORM_HOST, ...signPlatformRequest({ method: "GET", path, body: new Uint8Array() }, E2E_PLATFORM_REQUEST_KEY) },
+      headers: { host: PLATFORM_HOST, ...signPlatformRequest({ method: "GET", host: PLATFORM_HOST, path, body: new Uint8Array() }, E2E_PLATFORM_REQUEST_KEY) },
     });
     expect(exported.status()).toBe(409);
     expect((await projects(request, GLOBEX)).status()).toBe(503);

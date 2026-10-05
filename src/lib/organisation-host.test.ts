@@ -99,6 +99,7 @@ describe("ORGANISATION_DOMAIN set: the host names the organisation", () => {
     expect(await organisationOfRequest(on("acme.board-planner.com"))).toEqual({ kind: "suspended", organisation: ACME });
     expect(await scopedForRequest(on("acme.board-planner.com"))).toBeNull();
     expect(await organisationOfRequest(on("gone.board-planner.com"))).toEqual({ kind: "none" });
+  });
 
   it("serves the default organisation on ORGANISATION_DEFAULT_HOST, though its first label is reserved, and builds its links there (BP-671)", async () => {
     process.env.ORGANISATION_DOMAIN = "board-planner.com";
