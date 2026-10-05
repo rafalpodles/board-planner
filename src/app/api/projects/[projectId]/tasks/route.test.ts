@@ -77,6 +77,44 @@ const filterUsed = () => taskFind.mock.calls[0]?.[0] as Record<string, unknown> 
 
 // A stale bookmark or a link to a deleted sprint used to reach Mongoose as a raw string
 // and crash with a CastError 500 — this is every caller's protection, not just the board's
+// BP-904: how a caller holding "BP-12" gets that task without downloading the board
+describe("GET /api/projects/:projectId/tasks — taskNumber filter", () => {
+  it("narrows to one task by its number", async () => {
+    const response = await GET(request("?taskNumber=12"), ctx());
+
+    expect(response.status).toBe(200);
+    expect(taskFind).toHaveBeenCalledWith(expect.objectContaining({ taskNumber: 12 }));
+  });
+
+  it("takes several numbers, comma-separated", async () => {
+    await GET(request("?taskNumber=3,%205,9"), ctx());
+
+    expect(filterUsed()).toMatchObject({ taskNumber: { $in: [3, 5, 9] } });
+  });
+
+  it("stays inside the board the path names", async () => {
+    await GET(request("?taskNumber=12"), ctx());
+
+    expect(filterUsed()).toMatchObject({ project: PROJECT_ID, taskNumber: 12 });
+  });
+
+  it.each(["0", "-1", "abc", "1,,2", "1.5", "1234567890", "1;2", `${Array.from({ length: 101 }, (_, i) => i + 1)}`])(
+    "refuses %j with 400 rather than asking Mongoose",
+    async (value) => {
+      const response = await GET(request(`?taskNumber=${encodeURIComponent(value)}`), ctx());
+
+      expect(response.status).toBe(400);
+      expect(taskFind).not.toHaveBeenCalled();
+    }
+  );
+
+  it("leaves the filter unscoped when no number is given", async () => {
+    await GET(request(), ctx());
+
+    expect(filterUsed()).not.toHaveProperty("taskNumber");
+  });
+});
+
 describe("GET /api/projects/:projectId/tasks — sprint filter", () => {
   it("answers a malformed sprint id with 400, not a crash", async () => {
     const response = await GET(request("?sprint=not-an-id"), ctx());

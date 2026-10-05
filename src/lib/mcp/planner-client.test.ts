@@ -135,3 +135,77 @@ describe("what resolveTaskKey quotes back", () => {
     await expect(client.resolveTaskKey("BP1")).rejects.toThrow('Invalid task key: "BP1"');
   });
 });
+
+/**
+ * BP-904. Every key-addressed tool resolves its key here. It used to download the board's whole
+ * task list and scan it for the number — ~400 KB per call on a board the size of BP — and it only
+ * parsed keys made of letters, so a board keyed BP2, MY_APP or MY-APP was unreachable.
+ */
+describe("resolveTaskKey", () => {
+  const PROJECT_ID = "507f1f77bcf86cd7994390aa";
+  const TASK_ID = "507f1f77bcf86cd7994390bb";
+  const client = new PlannerClient("https://board.example.com", "cp_token");
+
+  /** The projects list names three boards; a task lookup answers with `tasks`. */
+  function board(keys: string[], tasks: unknown[] = [{ _id: TASK_ID, taskNumber: 7 }]) {
+    fetchMock.mockImplementation(async (url: string) => {
+      const path = new URL(url).pathname;
+      const body =
+        path === "/api/projects" ? keys.map((key) => ({ _id: PROJECT_ID, key })) : tasks;
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+  }
+
+  const requested = () => fetchMock.mock.calls.map(([url]) => new URL(url as string));
+
+  it.each(["BP-7", "BP2-7", "MY_APP-7", "MY-APP-7", "my-app-7"])("resolves %s", async (key) => {
+    board(["BP", "BP2", "MY_APP", "MY-APP"]);
+
+    await expect(client.resolveTaskKey(key)).resolves.toEqual({ projectId: PROJECT_ID, taskId: TASK_ID });
+  });
+
+  it("asks the server for the one number, and never for the board's task list", async () => {
+    board(["MY-APP"]);
+
+    await client.resolveTaskKey("MY-APP-7");
+
+    const taskReads = requested().filter((url) => url.pathname.endsWith("/tasks"));
+    expect(taskReads).toHaveLength(1);
+    expect(taskReads[0].searchParams.get("taskNumber")).toBe("7");
+  });
+
+  it("says a number the board does not hold is not found", async () => {
+    board(["BP"], []);
+
+    await expect(client.resolveTaskKey("BP-999")).rejects.toThrow("Task BP-999 not found");
+  });
+
+  it.each(["BP-0", "BP-1000000000", `BP-${"9".repeat(40)}`])(
+    "says %s is not found without asking the server for a task",
+    async (key) => {
+      board(["BP"]);
+
+      await expect(client.resolveTaskKey(key)).rejects.toThrow(/not found/);
+      expect(requested().filter((url) => url.pathname.endsWith("/tasks"))).toEqual([]);
+    }
+  );
+
+  it("says a board that is not there is not there", async () => {
+    board(["BP"]);
+
+    await expect(client.resolveTaskKey("NOPE-1")).rejects.toThrow('Project with key "NOPE" not found');
+  });
+
+  it.each(["BP", "BP7", "-7", "BP-", "1BP-7", "MY APP-7", "A".repeat(21) + "-7", "BP-7a", "BP/..-7"])(
+    "refuses %s as a malformed key, before asking anything",
+    async (key) => {
+      board(["BP"]);
+
+      await expect(client.resolveTaskKey(key)).rejects.toThrow(/Invalid task key/);
+      expect(fetchMock).not.toHaveBeenCalled();
+    }
+  );
+});

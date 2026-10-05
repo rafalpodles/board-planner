@@ -1,5 +1,6 @@
 import type { ApiCustomField } from "@/types";
 import { echo } from "@/lib/echo";
+import { isValidProjectKey } from "@/lib/identifiers";
 /** Only what the tools read: the id, and the field definitions the `fields` parameter resolves against */
 export interface McpProject {
   _id: string;
@@ -158,13 +159,20 @@ export class PlannerClient {
   }
 
   async resolveTaskKey(taskKey: string): Promise<{ projectId: string; taskId: string }> {
-    const match = taskKey.match(/^([A-Z]+)-(\d+)$/i);
-    if (!match) throw new Error(`Invalid task key: "${echo(taskKey)}". Expected format: "CP-1"`);
+    // Split on the LAST hyphen: a project key may itself hold hyphens, underscores and digits
+    const match = taskKey.match(/^(.+)-(\d+)$/);
+    if (!match || !isValidProjectKey(match[1].toUpperCase())) {
+      throw new Error(`Invalid task key: "${echo(taskKey)}". Expected format: "CP-1"`);
+    }
 
-    const [, projectKey, taskNumberStr] = match;
-    const project = await this.getProjectByKey(projectKey);
-    const tasks = (await this.listTasks(project._id)) as { _id: string; taskNumber: number }[];
-    const task = tasks.find((t) => t.taskNumber === parseInt(taskNumberStr, 10));
+    const project = await this.getProjectByKey(match[1]);
+    const taskNumber = Number(match[2]);
+    // Zero and anything past what a counter reaches name no task, and the route refuses them as
+    // malformed rather than as absent — so the answer a caller gets stays "not found"
+    const lookable = taskNumber >= 1 && taskNumber <= 999_999_999;
+    const [task] = lookable
+      ? ((await this.listTasks(project._id, { taskNumber: String(taskNumber) })) as { _id: string }[])
+      : [];
 
     if (!task) throw new Error(`Task ${echo(taskKey.toUpperCase())} not found`);
     return { projectId: project._id, taskId: task._id };
