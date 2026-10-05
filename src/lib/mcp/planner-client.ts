@@ -213,6 +213,15 @@ export class PlannerClient {
     })) as { watching: boolean };
   }
 
+  /** The caller's own account, for whoami. Never handed on whole: it carries an address. */
+  async getMe(): Promise<{ username: string; fullName?: string; role?: string }> {
+    return (await this.request("GET", "/api/auth/me")) as { username: string; fullName?: string; role?: string };
+  }
+
+  async listMyTasks(): Promise<unknown[]> {
+    return (await this.request("GET", "/api/tasks/mine")) as unknown[];
+  }
+
   async listAgents(): Promise<unknown[]> {
     return this.request("GET", "/api/agents") as Promise<unknown[]>;
   }

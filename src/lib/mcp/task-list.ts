@@ -1,8 +1,8 @@
 import { taskKeyOf } from "@/lib/task-key";
 import { findSprint, type SprintRow } from "./sprints";
 
-export const DEFAULT_LIST_LIMIT = 50;
-export const MAX_LIST_LIMIT = 100;
+export { DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT, pageOf } from "./paging";
+
 
 type Row = {
   taskNumber: number;
@@ -27,15 +27,6 @@ export function listedTask(row: Row, projectKey: string) {
     sprint: row.sprint?.name ?? null,
     parent: typeof row.parent?.taskNumber === "number" ? taskKeyOf(projectKey, row.parent.taskNumber) : null,
   };
-}
-
-/**
- * A page that says how much of the whole it is. A truncated list reads as a complete one, so
- * `nextOffset` is null only when nothing follows.
- */
-export function pageOf<T>(tasks: T[], total: number, offset: number) {
-  const end = offset + tasks.length;
-  return { total, returned: tasks.length, offset, nextOffset: end < total ? end : null, tasks };
 }
 
 const OBJECT_ID = /^[0-9a-fA-F]{24}$/;

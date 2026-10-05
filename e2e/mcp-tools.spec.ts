@@ -1589,3 +1589,78 @@ async function storedApiTask(request: APIRequestContext, taskId: string) {
   expect(response.status()).toBe(200);
   return response.json();
 }
+
+/**
+ * BP-910. create_task and update_task refuse an assignee who is not on the board and nothing said who
+ * is; update_task names an agent and nothing listed them. Each answer is checked against what the
+ * API itself says, and against what it must not say.
+ */
+test("list_members and whoami say who the board has and who is asking, and nothing more about them", async ({ request }) => {
+  const session = await connected(request);
+
+  const members = await session.callTool("list_members", { project: PROJECT_KEY });
+  accepted(members);
+  const roster = (await (await request.get(`/api/projects/${PROJECT_ID}/assignable-users`, { headers: ADMIN_AUTH })).json()) as {
+    username: string;
+  }[];
+  expect((members.parsed as { username: string }[]).map((m) => m.username)).toEqual(roster.map((r) => r.username));
+  expect(members.parsed.map((m: { username: string }) => m.username)).toEqual(expect.arrayContaining([ADMIN_USERNAME, MEMBER_USERNAME]));
+  for (const member of members.parsed) expect(Object.keys(member).sort()).toEqual(["fullName", "username"]);
+
+  // A name on the list is one assignee takes
+  accepted(await session.callTool("update_task", { taskKey: SIBLING_TASK_KEY, assignee: members.parsed[0].username }));
+
+  const me = await session.callTool("whoami");
+  accepted(me);
+  expect(me.parsed).toEqual({ username: ADMIN_USERNAME, fullName: expect.any(String), role: "admin" });
+
+  // Another board is not this caller's to read
+  await seedSecondProject();
+  const member = await connected(request, MEMBER_API_TOKEN);
+  const refusedBoard = await member.callTool("list_members", { project: SECOND_PROJECT_KEY });
+  refused(refusedBoard);
+});
+
+test("my_tasks lists the caller's own open work by key, and finished work only when asked", async ({ request }) => {
+  const session = await connected(request);
+  const open = await session.callTool("create_task", { project: PROJECT_KEY, title: "Mine, open", assignee: ADMIN_USERNAME });
+  const shipped = await session.callTool("create_task", { project: PROJECT_KEY, title: "Mine, shipped", assignee: ADMIN_USERNAME });
+  const theirs = await session.callTool("create_task", { project: PROJECT_KEY, title: "Somebody else's", assignee: MEMBER_USERNAME });
+  for (const made of [open, shipped, theirs]) accepted(made);
+  accepted(await session.callTool("change_task_status", { taskKey: `${PROJECT_KEY}-${shipped.parsed.taskNumber}`, status: "done" }));
+
+  const mine = await session.callTool("my_tasks");
+  accepted(mine);
+  const keys = (mine.parsed.tasks as { key: string }[]).map((t) => t.key);
+  expect(keys).toContain(`${PROJECT_KEY}-${open.parsed.taskNumber}`);
+  expect(keys).not.toContain(`${PROJECT_KEY}-${shipped.parsed.taskNumber}`);
+  expect(keys).not.toContain(`${PROJECT_KEY}-${theirs.parsed.taskNumber}`);
+  expect(mine.parsed).toMatchObject({ returned: keys.length, total: keys.length, nextOffset: null });
+
+  const everything = await session.callTool("my_tasks", { includeDone: true });
+  expect((everything.parsed.tasks as { key: string }[]).map((t) => t.key)).toContain(`${PROJECT_KEY}-${shipped.parsed.taskNumber}`);
+
+  const paged = await session.callTool("my_tasks", { includeDone: true, limit: 1 });
+  expect(paged.parsed).toMatchObject({ returned: 1, nextOffset: 1 });
+  expect(paged.parsed.total).toBe(everything.parsed.total);
+});
+
+test("list_agents offers what update_task can choose on the board, and not another board's agent", async ({ request }) => {
+  await seedSecondProject();
+  await seedAgents();
+  await seedForeignAgent();
+  const session = await connected(request);
+
+  const agents = await session.callTool("list_agents", { project: PROJECT_KEY });
+  accepted(agents);
+  const names = (agents.parsed as { name: string }[]).map((a) => a.name);
+  expect(names).toContain(PROJECT_AGENT_NAME);
+  expect(names).not.toContain(FOREIGN_ONLY_AGENT_NAME);
+  for (const agent of agents.parsed) {
+    expect(Object.keys(agent).sort()).toEqual(["description", "name", "scope", "steps"]);
+    expect(agent.steps).toBeGreaterThanOrEqual(0);
+  }
+
+  // Every name listed is one update_task takes
+  accepted(await session.callTool("update_task", { taskKey: SIBLING_TASK_KEY, agent: PROJECT_AGENT_NAME }));
+});
