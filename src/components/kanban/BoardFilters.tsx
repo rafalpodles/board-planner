@@ -602,7 +602,7 @@ export function BoardFilters({
             </div>
 
             {onShowArchivedChange && (
-              <label className="mt-3 flex cursor-pointer items-center gap-2 text-[12px] text-text">
+              <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-2 text-[12px] text-text sm:min-h-[36px]">
                 <input
                   type="checkbox"
                   checked={showArchived}

@@ -452,6 +452,15 @@ describe("BoardFilters and archived tasks", () => {
     expect(onShowArchivedChange).toHaveBeenCalledWith(true);
   });
 
+  it("gives the checkbox's label a phone-sized touch target, like the buttons beside it", async () => {
+    renderFilters({ onShowArchivedChange: vi.fn() });
+    await openPopover();
+
+    const label = screen.getByRole("checkbox", { name: "Show archived" }).closest("label")!;
+    expect(label.className).toContain("min-h-11");
+    expect(label.className).toContain("sm:min-h-[36px]");
+  });
+
   it("offers nothing where the host does not load archived tasks", async () => {
     renderFilters();
     await openPopover();
