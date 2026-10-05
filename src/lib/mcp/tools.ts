@@ -40,8 +40,10 @@ const MINIMAL_PARAM = z
 /** `CP` of `CP-12`, `MY-APP` of `MY-APP-3`: a project key may itself hold hyphens. */
 const keyPrefix = (taskKey: string) => taskKey.slice(0, taskKey.lastIndexOf("-")).toUpperCase();
 
+/** Keyed from the stored number, not the argument: `cp-007` is `CP-7`. */
 function summarised(client: PlannerClient, task: { taskNumber?: number }, taskKey: string) {
-  return taskSummary(task as Parameters<typeof taskSummary>[0], taskKey.toUpperCase(), client.taskUrl(taskKey));
+  const canonical = `${keyPrefix(taskKey)}-${task.taskNumber}`;
+  return taskSummary(task as Parameters<typeof taskSummary>[0], canonical, client.taskUrl(canonical));
 }
 
 function json(value: unknown) {

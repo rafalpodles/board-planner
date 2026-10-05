@@ -569,11 +569,25 @@ describe("what the tools answer", () => {
 
   it("does not count `minimal` alone as something to change", async () => {
     const update = vi.spyOn(PlannerClient.prototype, "updateTask").mockResolvedValue(FULL);
+    const resolve = vi.spyOn(PlannerClient.prototype, "resolveTaskKey");
 
     await expect(
       registered().get("update_task")!.handler({ taskKey: "MY-APP-12", minimal: true }, extra)
     ).rejects.toThrow(/nothing to change/);
+    // Refused before the lookup, so a call that changes nothing costs nothing
+    expect(resolve).not.toHaveBeenCalled();
     expect(update).not.toHaveBeenCalled();
+  });
+
+  it("keys a minimal answer from the stored number, so a padded key is answered canonically", async () => {
+    vi.spyOn(PlannerClient.prototype, "updateTask").mockResolvedValue(FULL);
+
+    const answer = parse(
+      await registered().get("update_task")!.handler({ taskKey: "my-app-0012", title: "Written", minimal: true }, extra)
+    );
+
+    expect(answer.key).toBe("MY-APP-12");
+    expect(answer.url).toBe("https://board.example.com/projects/MY-APP/tasks/12");
   });
 
   it("get_task names every linked task by key, and the parent and children", async () => {
