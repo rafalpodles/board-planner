@@ -477,7 +477,7 @@ function TaskDetailView({
 
   async function restoreFromBanner() {
     if (await handleRestore()) {
-      scrollBox?.querySelector<HTMLTextAreaElement>('textarea[aria-label="Task title"]')?.focus();
+      scrollBox?.focus();
     }
   }
 
@@ -534,8 +534,9 @@ function TaskDetailView({
 
       <div
         ref={setScrollBox}
+        tabIndex={-1}
         data-testid="task-scroll"
-        className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain focus:outline-none"
       >
         <div className="grid lg:grid-cols-[minmax(0,1fr)_312px]">
           <div

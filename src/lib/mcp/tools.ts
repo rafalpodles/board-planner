@@ -1614,7 +1614,8 @@ export function registerPlannerTools(server: McpServer): void {
       requireOwner(proj, project, "add a column");
       const before = new Set(effectiveColumns(proj.columns).map((c) => c.id));
       const columns = await client.addColumn(proj._id, { label, role, ...(color ? { color } : {}) });
-      const added = columns.find((c) => !before.has(c.id));
+      const fresh = columns.filter((c) => !before.has(c.id));
+      const added = fresh.find((c) => c.label === label.trim() && c.role === role) ?? fresh[0];
       return json({ added: added ? columnSummary(added) : null, columns: columns.map(columnSummary) });
     }
   );

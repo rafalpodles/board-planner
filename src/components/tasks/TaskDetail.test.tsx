@@ -339,7 +339,7 @@ describe("TaskDetail", () => {
       );
 
       await waitFor(() => expect(screen.queryByTestId("archived-banner")).toBeNull());
-      expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Task title" }));
+      expect(document.activeElement).toBe(screen.getByTestId("task-scroll"));
     });
 
     it("leaves focus on Restore when the restore fails, so it can be tried again", async () => {

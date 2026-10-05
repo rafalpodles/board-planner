@@ -1953,6 +1953,15 @@ describe("board setup", () => {
       expect(said.added).toMatchObject({ id: "qa", label: "QA" });
     });
 
+    it("reports the column it sent, not one another owner added in the same moment", async () => {
+      const theirs = { _id: "c9", id: "docs", label: "Docs", color: "#6b7280", role: "backlog", order: 2, triggersPmReview: false };
+      vi.spyOn(PlannerClient.prototype, "addColumn").mockResolvedValue([...columns, theirs, after[2]] as never);
+
+      const said = parse(await run("add_column", { label: "QA", role: "review" }));
+
+      expect(said.added).toMatchObject({ id: "qa", label: "QA" });
+    });
+
     it("refuses somebody who is not the owner, saying so, and writes nothing", async () => {
       asOwner(false);
       const add = vi.spyOn(PlannerClient.prototype, "addColumn");
