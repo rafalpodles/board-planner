@@ -462,6 +462,28 @@ describe("PlanningView", () => {
   });
 });
 
+describe("PlanningView with archived tasks shown on the board", () => {
+  it("keeps an archived task out of the sprint column and out of the counts it reports", async () => {
+    const onTasksChange = vi.fn();
+    api.get.mockImplementation(() => Promise.resolve(backlogTasks.map((t) => ({ ...t }))));
+    const archived = { ...sprintTasks[0], _id: "t10", taskNumber: 10, title: "Old header", archivedAt: "2026-10-05T10:00:00.000Z" } as ApiTask;
+
+    render(
+      <PlanningView
+        projectId="p1"
+        board={makeBoard({ tasks: [...sprintTasks, archived], showArchived: true })}
+        sprintId="s1"
+        onTasksChange={onTasksChange}
+      />
+    );
+    await screen.findByText("Backlog (2)");
+
+    expect(screen.getByText("Ship the header")).toBeTruthy();
+    expect(screen.queryByText("Old header")).toBeNull();
+    expect(onTasksChange).toHaveBeenLastCalledWith([sprintTasks[0]]);
+  });
+});
+
 describe("PlanningView estimate", () => {
   it("shows nothing about the estimate when the project designates no field", async () => {
     await renderPlanning();
