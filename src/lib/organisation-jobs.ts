@@ -11,7 +11,7 @@ export type ServedOrganisation = { _id: Types.ObjectId; digestHour?: number; tim
 export async function servedOrganisations(): Promise<ServedOrganisation[]> {
   await connectDB();
   const single = !organisationDomain();
-  const rows = await Organisation.find(single ? { _id: DEFAULT_ORGANISATION_ID } : {})
+  const rows = await Organisation.find(single ? { _id: DEFAULT_ORGANISATION_ID } : { suspendedAt: null, deletedAt: null })
     .select("digestHour timezone")
     .lean<ServedOrganisation[]>();
   return single && rows.length === 0 ? [{ _id: DEFAULT_ORGANISATION_ID }] : rows;

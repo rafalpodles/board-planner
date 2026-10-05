@@ -16,6 +16,7 @@ const { api, toast, replace, auth } = vi.hoisted(() => ({
     isAdmin: true,
     isLoading: false as boolean,
     outage: false as boolean,
+    suspended: false as boolean,
     login: vi.fn(),
     logout: vi.fn(),
     refreshUser: vi.fn(),

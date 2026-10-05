@@ -14,6 +14,7 @@ const { nav, auth } = vi.hoisted(() => ({
     isAdmin: false,
     isLoading: false as boolean,
     outage: false as boolean,
+    suspended: false as boolean,
     login: vi.fn(),
     logout: vi.fn(),
     refreshUser: vi.fn(),
@@ -50,6 +51,7 @@ describe("AuthGuard", () => {
     auth.user = null;
     auth.isLoading = false;
     auth.outage = false;
+    auth.suspended = false;
     auth.requestLimit = null;
     window.history.replaceState({}, "", "/projects/BP?column=active");
   });
@@ -89,6 +91,16 @@ describe("AuthGuard", () => {
     expect(screen.getByRole("status").textContent).toBe(
       `You have made more requests this minute than one account may. Pages will load again after ${until.toLocaleTimeString()}.`
     );
+  });
+
+  it("says the organisation is suspended, and sends nobody to a sign-in that cannot sign them in (BP-893)", () => {
+    auth.suspended = true;
+
+    renderGuard();
+
+    expect(screen.getByRole("status").textContent).toContain("This organisation is suspended");
+    expect(screen.queryByTestId("app")).toBeNull();
+    expect(nav.replace).not.toHaveBeenCalled();
   });
 
   it("sends a signed-out visitor to sign in, carrying where they were going", () => {

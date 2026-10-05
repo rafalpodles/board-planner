@@ -3,7 +3,8 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { scopedForRequest } from "@/lib/db-scope";
 import { isDatabaseUnreachable } from "@/lib/db-errors";
-import { databaseUnavailable, hostNotFound } from "@/lib/middleware";
+import { databaseUnavailable, hostNotFound, organisationSuspended } from "@/lib/middleware";
+import { organisationOfRequest } from "@/lib/organisation-host";
 import { passwordSignInEnabled } from "@/lib/password-sign-in";
 
 /**
@@ -28,6 +29,7 @@ import { passwordSignInEnabled } from "@/lib/password-sign-in";
  * one to describe as none.
  */
 export async function GET(request: Request) {
+  if ((await organisationOfRequest(request)).kind === "suspended") return organisationSuspended();
   const db = await scopedForRequest(request);
   if (!db) return hostNotFound();
   // Read from the environment, so it is answered even when the database is not: a page that waited

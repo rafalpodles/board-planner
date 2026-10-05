@@ -24,12 +24,12 @@ describe("the organisations background work serves (BP-667)", () => {
     expect(find).toHaveBeenCalledWith({ _id: DEFAULT_ORGANISATION_ID });
   });
 
-  it("is every organisation, with its own clock, when organisations live on subdomains", async () => {
+  it("is every organisation neither suspended nor deleted, with its own clock, when organisations live on subdomains (BP-893)", async () => {
     process.env.ORGANISATION_DOMAIN = "board-planner.com";
     find.mockReturnValue(rows([{ _id: A, timezone: "Asia/Tokyo" }, { _id: B }]));
 
     expect(await servedOrganisations()).toEqual([{ _id: A, timezone: "Asia/Tokyo" }, { _id: B }]);
-    expect(find).toHaveBeenCalledWith({});
+    expect(find).toHaveBeenCalledWith({ suspendedAt: null, deletedAt: null });
   });
 
   it("hands each organisation its own db, and one organisation's failure does not stop the next", async () => {
