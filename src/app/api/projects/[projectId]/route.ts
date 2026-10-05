@@ -375,7 +375,7 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
-  await project.populate("createdBy", "username fullName");
+  await project.populate({ path: "createdBy", select: "username fullName", match: { organisation: db.organisation } });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const obj: any = sanitizeProjectSecrets(project.toObject());
   // One repository field, resolved here so no consumer has to know the legacy pair still exists

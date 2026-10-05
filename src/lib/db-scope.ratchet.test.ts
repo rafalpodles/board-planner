@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import allowed from "./db-scope.ratchet.json";
+import crossingAllowed from "./organisation-wall.crossings.json";
 
 const SRC = join(__dirname, "..");
 const ROOT = join(SRC, "..");
@@ -54,5 +55,25 @@ describe("the ratchet on raw database access (BP-663)", () => {
 
   it("is sorted and free of duplicates", () => {
     expect(allowed).toEqual([...new Set(allowed)].sort());
+  });
+});
+
+const CROSSING = /\bacrossOrganisations\(/;
+const crossing = sources(SRC)
+  .filter((path) => relative(SRC, path) !== join("lib", "organisation-wall.ts"))
+  .filter((path) => CROSSING.test(readFileSync(path, "utf8")))
+  .map((path) => relative(ROOT, path))
+  .sort();
+
+describe("the ratchet on queries that cross organisations (BP-890)", () => {
+  it("lets no new file step around the organisation wall", () => {
+    expect(
+      crossing.filter((path) => !crossingAllowed.includes(path)),
+      "These files call acrossOrganisations. Name the organisation in the filter instead of adding to src/lib/organisation-wall.crossings.json."
+    ).toEqual([]);
+  });
+
+  it("lists only files that still do, so the list can only shrink", () => {
+    expect(crossingAllowed.filter((path) => !crossing.includes(path))).toEqual([]);
   });
 });

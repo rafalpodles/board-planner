@@ -107,6 +107,6 @@ export const POST = withAdmin(async (request, { user, db }) => {
     throw e;
   }
 
-  const populated = await project.populate("createdBy", "username fullName");
+  const populated = await project.populate({ path: "createdBy", select: "username fullName", match: { organisation: db.organisation } });
   return NextResponse.json(sanitizeProjectSecrets(populated.toObject()), { status: 201 });
 });
