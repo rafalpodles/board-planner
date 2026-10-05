@@ -94,3 +94,45 @@ export function criterionChanges(before: StoredCriterion[], after: StoredCriteri
   }
   return changes;
 }
+
+type Held = { _id?: unknown; text: string; done?: boolean };
+
+/**
+ * Reads an acceptanceCriteria list against the criteria a task already holds. The plain write replaces
+ * the whole checklist, minting every id anew and reading done off the text, so resending a list with
+ * one line reworded un-ticked everything. Here a line whose text matches a held one (exactly, else
+ * ignoring case and spacing) keeps its id and its done state unless the line states a box itself
+ * ("- [x]" or "- [ ]"): a plain line says nothing about done.
+ */
+export function mergeCriteria(markdown: string, held: Held[]): { _id?: unknown; text: string; done: boolean }[] {
+  const lines = parseChecklistLines(markdown);
+  const unused = [...held];
+  const matched: (Held | undefined)[] = lines.map(() => undefined);
+  const loose = (text: string) => text.replace(/\s+/g, " ").trim().toLowerCase();
+  // Exact matches for every line first, then the loose ones among what is left: a line that only
+  // matches loosely must not take the criterion another line matches exactly
+  for (const same of [(a: string, b: string) => a.trim() === b.trim(), (a: string, b: string) => loose(a) === loose(b)]) {
+    lines.forEach((line, i) => {
+      if (matched[i]) return;
+      const at = unused.findIndex((item) => same(item.text, line.text));
+      if (at !== -1) matched[i] = unused.splice(at, 1)[0];
+    });
+  }
+  return lines.map(({ text, explicit }, i) => {
+    const kept = matched[i];
+    return kept ? { _id: kept._id, text, done: explicit ?? !!kept.done } : { text, done: explicit ?? false };
+  });
+}
+
+/** The lines of a markdown list, each with the box it states, if it states one. */
+function parseChecklistLines(markdown: string): { text: string; explicit: boolean | undefined }[] {
+  return markdown
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      const box = line.match(/^[-*]\s*\[([ xX])\]\s*(.+)$/);
+      if (box) return { text: box[2].trim(), explicit: box[1].toLowerCase() === "x" };
+      return { text: (line.match(/^[-*]\s+(.+)$/)?.[1] ?? line).trim(), explicit: undefined };
+    });
+}

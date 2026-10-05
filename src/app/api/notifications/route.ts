@@ -9,6 +9,10 @@ export const GET = withAuth(async (request, { user, db }) => {
   const url = new URL(request.url);
   const limit = Math.min(parseInt(url.searchParams.get("limit") || "30"), 100);
   const before = url.searchParams.get("before"); // cursor pagination
+  // A cursor that is not a time reached Mongoose as a CastError and answered 500 with nothing to read
+  if (before && Number.isNaN(Date.parse(before))) {
+    return NextResponse.json({ error: "Invalid before — a timestamp, as the previous page's last row gives" }, { status: 400 });
+  }
 
   // Rows banked before a grant was revoked are still addressed to the reader, so keying the feed
   // on the recipient alone hands them back afterwards (BP-328). null means every project.

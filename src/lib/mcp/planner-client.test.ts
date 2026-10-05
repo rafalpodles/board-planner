@@ -102,6 +102,14 @@ describe("a segment that could choose the path is refused, not encoded", () => {
     ["listSprints", (v: string) => client.listSprints(v)],
     ["createSprint", (v: string) => client.createSprint(v, {})],
     ["updateSprint", (v: string) => client.updateSprint(v, "s1", {})],
+    ["editComment (project)", (v: string) => client.editComment(v, TASK, "c1", "x")],
+    ["editComment (task)", (v: string) => client.editComment(PROJECT, v, "c1", "x")],
+    ["editComment (comment)", (v: string) => client.editComment(PROJECT, TASK, v, "x")],
+    ["deleteComment (project)", (v: string) => client.deleteComment(v, TASK, "c1")],
+    ["deleteComment (task)", (v: string) => client.deleteComment(PROJECT, v, "c1")],
+    ["deleteComment (comment)", (v: string) => client.deleteComment(PROJECT, TASK, v)],
+    ["getTaskActivity (project)", (v: string) => client.getTaskActivity(v, TASK)],
+    ["getTaskActivity (task)", (v: string) => client.getTaskActivity(PROJECT, v)],
   ])("%s refuses it as well", async (_name, call) => {
     await expect(call("..")).rejects.toThrow(/Invalid path segment/);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -230,4 +238,72 @@ describe("resolveTaskKey", () => {
       expect(fetchMock).not.toHaveBeenCalled();
     }
   );
+});
+
+/**
+ * BP-909. A batch looks the same things up for every item. A client lives for one tool call, so what it
+ * has already asked it remembers — and forgets what the call itself changed.
+ */
+describe("the lookups one call repeats", () => {
+  let client: PlannerClient;
+  const paths = () => fetchMock.mock.calls.map(([url]) => new URL(url as string).pathname);
+
+  beforeEach(() => {
+    client = new PlannerClient("https://board.example.com", "cp_token");
+    fetchMock.mockImplementation(async () =>
+      new Response(JSON.stringify([{ _id: "p1", key: "BP" }]), { status: 200, headers: { "content-type": "application/json" } })
+    );
+  });
+
+  it("asks for the board list, a roster and the sprints once however often they are read", async () => {
+    await Promise.all([client.listProjects(), client.listProjects(), client.getProjectByKey("BP")]);
+    await client.listAssignableUsers("p1");
+    await client.listAssignableUsers("p1");
+    await client.listSprints("p1");
+    await client.listSprints("p1");
+
+    expect(paths()).toEqual(["/api/projects", "/api/projects/p1/assignable-users", "/api/projects/p1/sprints"]);
+  });
+
+  it("keeps each board's roster and sprints apart", async () => {
+    await client.listSprints("p1");
+    await client.listSprints("p2");
+    await client.listAssignableUsers("p1");
+    await client.listAssignableUsers("p2");
+
+    expect(paths()).toEqual([
+      "/api/projects/p1/sprints",
+      "/api/projects/p2/sprints",
+      "/api/projects/p1/assignable-users",
+      "/api/projects/p2/assignable-users",
+    ]);
+  });
+
+  it("forgets a board's sprints when the call itself changes them", async () => {
+    await client.listSprints("p1");
+    await client.createSprint("p1", { name: "S" });
+    await client.listSprints("p1");
+    await client.updateSprint("p1", "s1", { goal: "g" });
+    await client.listSprints("p1");
+    await client.deleteSprint("p1", "s1");
+    await client.listSprints("p1");
+
+    expect(paths().filter((p) => p.endsWith("/sprints") ).length).toBe(5);
+  });
+
+  it("does not remember a lookup that failed", async () => {
+    fetchMock.mockRejectedValueOnce(new Error("network"));
+
+    await expect(client.listProjects()).rejects.toThrow("network");
+    await expect(client.listProjects()).resolves.toHaveLength(1);
+  });
+
+  it("is made once per call, not once per tool inside it", async () => {
+    // The memo above only helps a batch if the tools it runs share the client
+    const { clientFrom } = await import("./tools");
+    const extra = { authInfo: { token: "cp_x", extra: { baseUrl: "https://board.example.com" } } } as never;
+
+    expect(clientFrom(extra)).toBe(clientFrom(extra));
+    expect(clientFrom({ ...(extra as object) } as never)).not.toBe(clientFrom(extra));
+  });
 });

@@ -56,18 +56,15 @@ export const NOTHING_TO_CHANGE = "named nothing to change. Nothing was written."
  * a refusal that named them and pointed nowhere would be a different kind of unhelpful.
  */
 const UNREACHABLE_TASK_FIELDS: Record<string, string> = {
-  dueDate: "the app — MCP does not set it",
-  sprint: "the app — MCP does not set it",
-  recurrence: "the app — MCP does not set it",
-  watchers: "the app — MCP does not set them",
+  watchers: "the watch_task and unwatch_task tools, which watch for the caller",
 };
 
 const TASK_FIELD_HINTS: Record<string, string> = {
   ...UNREACHABLE_TASK_FIELDS,
   order: "the reorder_tasks tool",
-  blockedBy: "the link_tasks tool on /api/mcp",
+  blockedBy: "the link_tasks tool, or the blockedBy of an item in create_tasks",
   relations: "the link_tasks tool on /api/mcp",
-  checklist: "acceptanceCriteria, a markdown checklist",
+  checklist: "acceptanceCriteria for the whole list, or add_checklist_item, set_checklist_item and remove_checklist_item for one criterion",
   difficulty: "the fields parameter, keyed by field name",
   component: "the fields parameter, keyed by field name",
   customFieldValues: "the fields parameter, keyed by field name",

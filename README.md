@@ -239,9 +239,19 @@ the client at one URL:
 }
 ```
 
-Fifteen tools: `list_projects`, `get_project`, `list_tasks`, `get_task`, `create_task`,
-`update_task`, `change_task_status`, `reorder_tasks`, `list_sprints`, `create_sprint`,
-`update_sprint`, `add_comment`, `list_comments`, `link_tasks`, `unlink_tasks`.
+Thirty-seven tools, in the groups an agent works in — the full list and what each answers is on the
+[MCP page](https://board-planner.com/docs/ai/claude-code-and-mcp/):
+
+- **Projects and tasks:** `list_projects`, `get_project`, `list_tasks`, `get_task`, `create_task`,
+  `update_task`, `change_task_status`, `reorder_tasks`, `search_tasks`, `my_tasks`
+- **Batches:** `create_tasks`, `update_tasks`, `link_task_pairs` (up to 30 or 60 items a call, answered per item)
+- **Links and checklists:** `link_tasks`, `unlink_tasks`, `add_checklist_item`, `set_checklist_item`,
+  `remove_checklist_item`
+- **Sprints:** `list_sprints`, `get_sprint`, `create_sprint`, `update_sprint`, `delete_sprint`
+- **Comments and history:** `add_comment`, `list_comments`, `edit_comment`, `delete_comment`, `get_task_activity`,
+  `watch_task`, `unwatch_task`
+- **People and agents:** `list_members`, `whoami`, `list_agents`
+- **Reporting:** `get_project_stats`, `list_runs`, `list_notifications`, `mark_notifications_read`
 
 Clients that want a connector instead of a pasted token get full **OAuth 2.1 with PKCE** and dynamic
 client registration at the same URL — no client secret.

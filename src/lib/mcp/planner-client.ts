@@ -4,6 +4,8 @@ import { isValidProjectKey } from "@/lib/identifiers";
 /** Only what the tools read: the id, and the field definitions the `fields` parameter resolves against */
 export interface McpProject {
   _id: string;
+  /** Whether the caller administers the board: what the app gates run history on */
+  canAdmin?: boolean;
   customFields?: ApiCustomField[];
 }
 
@@ -38,6 +40,19 @@ const seg = (value: string) => {
 export class PlannerClient {
   private baseUrl: string;
   private token: string;
+  // What one tool call looks up more than once — the board list, a roster, a board's sprints — is asked for
+  // once. A client lives for one call (see clientFrom), so nothing here outlives the call it was made for
+  private memo = new Map<string, Promise<unknown>>();
+
+  private remember<T>(key: string, load: () => Promise<T>): Promise<T> {
+    let found = this.memo.get(key) as Promise<T> | undefined;
+    if (!found) {
+      found = load();
+      this.memo.set(key, found);
+      found.catch(() => this.memo.delete(key));
+    }
+    return found;
+  }
 
   constructor(baseUrl: string, token: string) {
     this.baseUrl = baseUrl.replace(/\/$/, "");
@@ -63,7 +78,7 @@ export class PlannerClient {
   }
 
   async listProjects(): Promise<unknown[]> {
-    return this.request("GET", "/api/projects") as Promise<unknown[]>;
+    return this.remember("projects", () => this.request("GET", "/api/projects") as Promise<unknown[]>);
   }
 
   async getProject(id: string): Promise<McpProject> {
@@ -81,6 +96,22 @@ export class PlannerClient {
     const params = new URLSearchParams(filters || {}).toString();
     const query = params ? `?${params}` : "";
     return this.request("GET", `/api/projects/${seg(projectId)}/tasks${query}`) as Promise<unknown[]>;
+  }
+
+  /** One page of the board, with the total the filter matches. `fields` repeat as `field=<id>:<value>`. */
+  async pageTasks(
+    projectId: string,
+    filters: Record<string, string>,
+    fields: string[] = []
+  ): Promise<{ tasks: unknown[]; total: number; limit: number; offset: number }> {
+    const params = new URLSearchParams(filters);
+    for (const field of fields) params.append("field", field);
+    return this.request("GET", `/api/projects/${seg(projectId)}/tasks?${params}`) as Promise<{
+      tasks: unknown[];
+      total: number;
+      limit: number;
+      offset: number;
+    }>;
   }
 
   async getTask(projectId: string, taskId: string): Promise<unknown> {
@@ -127,8 +158,56 @@ export class PlannerClient {
     });
   }
 
+  async addChecklistItem(
+    projectId: string,
+    taskId: string,
+    item: { text: string; done: boolean }
+  ): Promise<{ checklist: { _id: string; text: string; done: boolean }[] }> {
+    return (await this.request("POST", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}/checklist`, item)) as never;
+  }
+
+  async setChecklistItem(
+    projectId: string,
+    taskId: string,
+    itemId: string,
+    change: { text?: string; done?: boolean }
+  ): Promise<{ checklist: { _id: string; text: string; done: boolean }[] }> {
+    return (await this.request(
+      "PATCH",
+      `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}/checklist/${seg(itemId)}`,
+      change
+    )) as never;
+  }
+
+  async removeChecklistItem(
+    projectId: string,
+    taskId: string,
+    itemId: string
+  ): Promise<{ checklist: { _id: string; text: string; done: boolean }[] }> {
+    return (await this.request(
+      "DELETE",
+      `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}/checklist/${seg(itemId)}`
+    )) as never;
+  }
+
   async listComments(projectId: string, taskId: string): Promise<unknown[]> {
     return this.request("GET", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}/comments`) as Promise<unknown[]>;
+  }
+
+  async editComment(projectId: string, taskId: string, commentId: string, body: string): Promise<unknown> {
+    return this.request(
+      "PUT",
+      `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}/comments/${seg(commentId)}`,
+      { body }
+    );
+  }
+
+  async deleteComment(projectId: string, taskId: string, commentId: string): Promise<unknown> {
+    return this.request("DELETE", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}/comments/${seg(commentId)}`);
+  }
+
+  async getTaskActivity(projectId: string, taskId: string): Promise<unknown[]> {
+    return this.request("GET", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}/activity`) as Promise<unknown[]>;
   }
 
   async addComment(projectId: string, taskId: string, body: string): Promise<unknown> {
@@ -136,26 +215,79 @@ export class PlannerClient {
   }
 
   async listSprints(projectId: string): Promise<unknown[]> {
-    return this.request("GET", `/api/projects/${seg(projectId)}/sprints`) as Promise<unknown[]>;
+    return this.remember(
+      `sprints:${projectId}`,
+      () => this.request("GET", `/api/projects/${seg(projectId)}/sprints`) as Promise<unknown[]>
+    );
   }
 
   async createSprint(projectId: string, data: Record<string, unknown>): Promise<unknown> {
+    this.memo.delete(`sprints:${projectId}`);
     return this.request("POST", `/api/projects/${seg(projectId)}/sprints`, data);
   }
 
   async updateSprint(projectId: string, sprintId: string, data: Record<string, unknown>): Promise<unknown> {
+    this.memo.delete(`sprints:${projectId}`);
     return this.request("PUT", `/api/projects/${seg(projectId)}/sprints/${seg(sprintId)}`, data);
   }
 
+  async deleteSprint(projectId: string, sprintId: string): Promise<unknown> {
+    this.memo.delete(`sprints:${projectId}`);
+    return this.request("DELETE", `/api/projects/${seg(projectId)}/sprints/${seg(sprintId)}`);
+  }
+
   async listAssignableUsers(projectId: string): Promise<unknown[]> {
-    return this.request(
-      "GET",
-      `/api/projects/${seg(projectId)}/assignable-users`
-    ) as Promise<unknown[]>;
+    return this.remember(
+      `members:${projectId}`,
+      () => this.request("GET", `/api/projects/${seg(projectId)}/assignable-users`) as Promise<unknown[]>
+    );
+  }
+
+  /** Sets the caller's watch to the state asked for; the route does it in one update, so a retry cannot undo it. */
+  async setWatching(projectId: string, taskId: string, watching: boolean): Promise<{ watching: boolean }> {
+    return (await this.request("POST", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}/watch`, {
+      watching,
+    })) as { watching: boolean };
+  }
+
+  /** The caller's own account, for whoami. Never handed on whole: it carries an address. */
+  async getMe(): Promise<{ username: string; fullName?: string; role?: string }> {
+    return (await this.request("GET", "/api/auth/me")) as { username: string; fullName?: string; role?: string };
+  }
+
+  async listMyTasks(): Promise<unknown[]> {
+    return (await this.request("GET", "/api/tasks/mine")) as unknown[];
+  }
+
+  async searchTasks(query: string): Promise<unknown[]> {
+    return (await this.request("GET", `/api/search?q=${encodeURIComponent(query)}`)) as unknown[];
+  }
+
+  async getProjectStats(projectId: string): Promise<Record<string, unknown>> {
+    return (await this.request("GET", `/api/projects/${seg(projectId)}/stats`)) as Record<string, unknown>;
+  }
+
+  async listRuns(projectId: string, limit: number): Promise<unknown[]> {
+    return (await this.request("GET", `/api/projects/${seg(projectId)}/runs?limit=${limit}`)) as unknown[];
+  }
+
+  async listNotifications(limit: number, before?: string): Promise<unknown[]> {
+    const params = new URLSearchParams({ limit: String(limit), ...(before ? { before } : {}) });
+    return (await this.request("GET", `/api/notifications?${params}`)) as unknown[];
+  }
+
+  async markNotificationsRead(id?: string): Promise<unknown> {
+    return this.request("PATCH", "/api/notifications/read", id ? { id } : {});
   }
 
   async listAgents(): Promise<unknown[]> {
     return this.request("GET", "/api/agents") as Promise<unknown[]>;
+  }
+
+  /** The page a person opens for this task: what a minimal answer hands back so the work can be found. */
+  taskUrl(taskKey: string): string {
+    const cut = taskKey.lastIndexOf("-");
+    return `${this.baseUrl}/projects/${seg(taskKey.slice(0, cut).toUpperCase())}/tasks/${seg(taskKey.slice(cut + 1))}`;
   }
 
   async resolveTaskKey(taskKey: string): Promise<{ projectId: string; taskId: string }> {

@@ -4,7 +4,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { z } from "zod";
 import { registerPlannerTools } from "./tools";
-import { unknownParameterMessage } from "./strict-input";
+import { unknownParameterMessage, UPDATE_TASK_HINTS } from "./strict-input";
 import { PlannerClient } from "./planner-client";
 
 /**
@@ -197,9 +197,9 @@ describe("a parameter the tool does not declare is refused, not dropped", () => 
       _id: "p1",
       key: "BP",
     } as never);
-    vi.spyOn(PlannerClient.prototype, "listTasks").mockResolvedValue([]);
+    vi.spyOn(PlannerClient.prototype, "pageTasks").mockResolvedValue({ tasks: [], total: 0, limit: 50, offset: 0 });
 
-    const read = await call("list_tasks", { project: "BP", sprint: "s1" });
+    const read = await call("list_tasks", { project: "BP", author: "nobody" });
     const write = await call("add_comment", { taskKey: "BP-1", body: "x", author: "nobody" });
 
     expect(read.refused).toBe(true);
@@ -211,12 +211,12 @@ describe("a parameter the tool does not declare is refused, not dropped", () => 
 
   // Not asserted through tools/list: zod-to-json-schema emits additionalProperties: false for a
   // stripping object too, so the advertised schema reads identically either way and cannot carry
-  // this. The schemas themselves can, and there are fifteen of them to keep honest.
+  // this. The schemas themselves can, and there are thirty-seven of them to keep honest.
   it("holds for every tool, not just the two that were reported", () => {
     const schemas = registeredSchemas();
 
     // guards the guard: an empty map would satisfy the loop below without proving anything
-    expect(schemas.size).toBe(15);
+    expect(schemas.size).toBe(37);
 
     const permissive = [...schemas.entries()].filter(([, schema]) => {
       const result = schema.safeParse({ __stray__: 1 });
@@ -272,5 +272,21 @@ describe("an update that names nothing to change", () => {
     expect(refused).toBe(true);
     expect(said).toContain("nothing to change");
     expect(update).not.toHaveBeenCalled();
+  });
+});
+
+// BP-905: the hints that said "the app — MCP does not set it" are gone for the three fields MCP now sets
+describe("the fields MCP now sets are accepted, and the one it cannot is pointed at its tools", () => {
+  it("accepts dueDate, sprint and recurrence on create and update", () => {
+    const schemas = registeredSchemas();
+    const create = schemas.get("create_task")!;
+    const update = schemas.get("update_task")!;
+
+    expect(create.safeParse({ project: "BP", title: "T", dueDate: "2026-10-10", sprint: "S", recurrence: null }).success).toBe(true);
+    expect(update.safeParse({ taskKey: "BP-1", dueDate: "", sprint: "backlog", recurrence: { frequency: "daily", interval: 1 } }).success).toBe(true);
+  });
+
+  it("sends a watchers guess to watch_task and unwatch_task", () => {
+    expect(unknownParameterMessage(["watchers"], UPDATE_TASK_HINTS, true)).toContain("watch_task and unwatch_task");
   });
 });
