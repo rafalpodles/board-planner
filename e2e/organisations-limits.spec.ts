@@ -172,8 +172,9 @@ test.describe("BP-894: one organisation's limits do not touch another's", () => 
     await request.get(`${ORGANISATIONS_API}/api/projects/${ACME.projectId}/runs`, on(ACME, workerHeaders(ACME)));
 
     expect(await counted(organisationRequestsKey(ACME.organisation))).toBe(6);
-    expect(await counted(principalRequestsKey(String(ACME.adminId)))).toBe(4);
-    expect(await counted(principalRequestsKey(String(ACME.workerId)))).toBe(2);
+    // The machine is the administrator's, so it spends the administrator's share, not one of its own
+    expect(await counted(principalRequestsKey(String(ACME.adminId)))).toBe(6);
+    expect(await counted(principalRequestsKey(String(ACME.workerId)))).toBe(0);
     expect(await counted(organisationRequestsKey(GLOBEX.organisation))).toBe(0);
     expect(await counted(principalRequestsKey(String(GLOBEX.adminId)))).toBe(0);
   });

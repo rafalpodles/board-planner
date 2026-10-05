@@ -16,7 +16,7 @@ import { can, FeatureKey } from "./entitlements";
 import { projectRunsWorkers } from "@/lib/worker-gate";
 import { EXECUTION_LEASE_MS } from "./execution-lease";
 import { inOrganisation } from "./organisation-log";
-import { asPrincipal, requestLimitRefusal } from "./organisation-limits";
+import { asPrincipal, machinePrincipal, requestLimitRefusal } from "./organisation-limits";
 
 type AuthenticatedHandler = (
   request: Request,
@@ -187,7 +187,7 @@ export function withWorker(
     }
 
     const db = scopedFor(worker);
-    const overLimit = await requestLimitRefusal(db.organisation, { id: String(worker._id) });
+    const overLimit = await requestLimitRefusal(db.organisation, machinePrincipal(worker));
     if (overLimit) return overLimit;
     return inOrganisation(db.organisation, () => handler(request, { ...context, worker, db }));
   };
@@ -394,7 +394,7 @@ export function withProjectAccessOrWorker(
     if (refusedHere) return refusedHere;
     const db = scopedFor(worker);
     if (await ownerIsDeactivated(db, worker)) return machineOwnerDeactivated();
-    const overLimit = await requestLimitRefusal(db.organisation, { id: String(worker._id) });
+    const overLimit = await requestLimitRefusal(db.organisation, machinePrincipal(worker));
     if (overLimit) return overLimit;
 
     const params = await context.params;

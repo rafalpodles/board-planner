@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type { Types } from "mongoose";
-import type { IUser } from "@/types";
+import type { IUser, IWorker } from "@/types";
 import { countInWindow } from "./rate-limit";
 import { organisationDomain } from "./organisation-host";
 import { ORGANISATION_LIMIT_HEADER, type RequestLimitScope } from "./organisation-limit-header";
@@ -47,6 +47,12 @@ export interface RequestPrincipal {
 
 export function asPrincipal(user: IUser): RequestPrincipal {
   return { id: String(user._id), interactiveAdmin: user.role === "admin" && !user.viaMachineCredential };
+}
+
+// A machine spends its owner's share: enrolling more machines must not buy a person more of the minute
+export function machinePrincipal(worker: Pick<IWorker, "_id" | "owner">): RequestPrincipal {
+  // An ObjectId's _id is itself, so this reads a populated owner and a bare id alike
+  return { id: String(worker.owner?._id ?? worker._id) };
 }
 
 export function organisationRequestsKey(organisation: Types.ObjectId): string {

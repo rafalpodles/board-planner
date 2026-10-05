@@ -11,6 +11,7 @@ import { resetRateLimits } from "./rate-limit";
 import {
   CLOUD_REQUESTS_PER_MINUTE,
   CLOUD_STORAGE_MB,
+  machinePrincipal,
   requestLimitRefusal,
   requestsPerMinute,
   storageLimitBytes,
@@ -90,6 +91,15 @@ describe("organisation limits (BP-894)", () => {
 
     expect(await requestLimitRefusal(ACME, { id: "colleague" })).toBeNull();
     expect(await requestLimitRefusal(ACME, { id: "colleague" })).toBeNull();
+  });
+
+  it("counts a machine against its owner, and one with no owner on its own", () => {
+    const owner = new Types.ObjectId();
+    const machine = new Types.ObjectId();
+
+    expect(machinePrincipal({ _id: machine, owner } as never)).toEqual({ id: String(owner) });
+    expect(machinePrincipal({ _id: machine, owner: { _id: owner, username: "boss" } } as never)).toEqual({ id: String(owner) });
+    expect(machinePrincipal({ _id: machine, owner: null } as never)).toEqual({ id: String(machine) });
   });
 
   it("lets an administrator at the keyboard in past the organisation's minute, but not past their own share", async () => {
