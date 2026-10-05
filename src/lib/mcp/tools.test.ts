@@ -653,6 +653,30 @@ describe("list_tasks", () => {
       expect(sent()[2]).toEqual(["f1:opt-l"]);
     });
 
+    it("send a multiselect given several options as one condition per option", async () => {
+      vi.mocked(PlannerClient.prototype.getProjectByKey).mockResolvedValue({
+        _id: "p1",
+        customFields: [
+          { _id: "f2", name: "Platforms", fieldType: "multiselect", options: [{ id: "o-ios", value: "iOS" }, { id: "o-web", value: "Web" }] },
+          { _id: "f3", name: "Flagged", fieldType: "checkbox" },
+        ],
+      } as never);
+
+      await run({ fields: { Platforms: ["iOS", "web"], Flagged: false } });
+
+      expect(sent()[2]).toEqual(["f2:o-ios", "f2:o-web", "f3:false"]);
+    });
+
+    it("hold a checkbox to true or false, since anything else would filter on the unticked", async () => {
+      vi.mocked(PlannerClient.prototype.getProjectByKey).mockResolvedValue({
+        _id: "p1",
+        customFields: [{ _id: "f3", name: "Flagged", fieldType: "checkbox" }],
+      } as never);
+
+      await expect(run({ fields: { Flagged: "yes" } })).rejects.toThrow(/checkbox: filter on true or false/);
+      expect(page).not.toHaveBeenCalled();
+    });
+
     it("are refused when the board has no such field, or the field no such option", async () => {
       await expect(run({ fields: { Colour: "red" } })).rejects.toThrow(/Unknown field "Colour".*Size/);
       await expect(run({ fields: { Size: "XXL" } })).rejects.toThrow(/"XXL" is not an option of Size/);

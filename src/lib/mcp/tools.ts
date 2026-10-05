@@ -15,7 +15,7 @@ import {
   taskIdsInOrder,
 } from "./strict-input";
 import { MAX_REORDER_IDS } from "@/lib/reorder";
-import { DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT, listedTask, pageOf, sprintParam } from "./task-list";
+import { DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT, listedTask, pageOf, sprintNeedsLookup, sprintParam } from "./task-list";
 
 type ToolExtra = { authInfo?: AuthInfo };
 
@@ -116,7 +116,8 @@ export function registerPlannerTools(server: McpServer): void {
           .optional()
           .describe(
             "Filter by project-defined fields, keyed by field name, e.g. { \"Difficulty\": \"L\" } — all must match. " +
-              "Dropdown, multiselect, text, number and checkbox fields; get_project lists them."
+              "Dropdown, multiselect, text (containing, any case), number and checkbox fields; get_project lists them. " +
+              "A multiselect given several options needs all of them."
           ),
         limit: z.number().int().min(1).max(MAX_LIST_LIMIT).optional().describe(`Page size (default ${DEFAULT_LIST_LIMIT})`),
         offset: z.number().int().min(0).optional().describe("Tasks to skip, from a previous answer's nextOffset"),
@@ -144,8 +145,9 @@ export function registerPlannerTools(server: McpServer): void {
       if (blocked !== undefined) filters.blocked = String(blocked);
 
       if (sprint) {
-        const needsLookup = !/^[0-9a-f]{24}$/i.test(sprint.trim()) && sprint.trim().toLowerCase() !== "backlog";
-        const sprints = needsLookup ? ((await client.listSprints(proj._id)) as { _id: string; name: string }[]) : [];
+        const sprints = sprintNeedsLookup(sprint)
+          ? ((await client.listSprints(proj._id)) as { _id: string; name: string }[])
+          : [];
         filters.sprint = sprintParam(sprint, sprints);
       }
 
@@ -159,6 +161,14 @@ export function registerPlannerTools(server: McpServer): void {
 
       const fieldFilters: string[] = [];
       if (fields && Object.keys(fields).length) {
+        // The resolver reads any checkbox value that is not true as false; as a filter that would
+        // quietly ask for the unticked tasks, so a checkbox is held to true or false
+        for (const [name, value] of Object.entries(fields)) {
+          const def = (proj.customFields || []).find((f) => f.name.toLowerCase() === name.trim().toLowerCase());
+          if (def?.fieldType === "checkbox" && ![true, false, "true", "false"].includes(value as never)) {
+            throw new Error(`"${echo(name)}" is a checkbox: filter on true or false`);
+          }
+        }
         const resolved = resolveFieldsByName(fields, proj.customFields || []);
         for (const [fieldId, value] of Object.entries(resolved)) {
           for (const one of Array.isArray(value) ? value : [value]) fieldFilters.push(`${fieldId}:${String(one)}`);

@@ -337,7 +337,7 @@ describe("GET /api/projects/:projectId/tasks — paging, the summary view and th
     });
 
     it("refuses more field filters than it will combine", async () => {
-      const many = Array.from({ length: 6 }, () => `field=${FIELD_ID}:${OPTION_ID}`).join("&");
+      const many = Array.from({ length: 11 }, () => `field=${FIELD_ID}:${OPTION_ID}`).join("&");
 
       expect((await GET(request(`?${many}`), ctx())).status).toBe(400);
     });

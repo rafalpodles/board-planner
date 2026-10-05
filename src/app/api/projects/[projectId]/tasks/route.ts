@@ -10,7 +10,7 @@ import { getColumnIds } from "@/lib/columns";
 import { normalizeOptions } from "@/lib/custom-fields";
 
 
-const MAX_FIELD_FILTERS = 5;
+const MAX_FIELD_FILTERS = 10;
 const DEFAULT_PAGE = 50;
 const MAX_PAGE = 200;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;

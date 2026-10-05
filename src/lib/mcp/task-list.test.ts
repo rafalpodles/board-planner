@@ -67,6 +67,19 @@ describe("sprintParam", () => {
     expect(sprintParam("Backlog", [])).toBe("backlog");
   });
 
+  it("refuses a name two sprints share, with their ids, instead of answering for the first", () => {
+    const twins = [
+      { _id: "507f1f77bcf86cd799439011", name: "Sprint 4" },
+      { _id: "507f1f77bcf86cd799439022", name: "sprint 4" },
+    ];
+
+    expect(() => sprintParam("Sprint 4", twins)).toThrow(
+      /2 sprints are named "Sprint 4".*507f1f77bcf86cd799439011, 507f1f77bcf86cd799439022/
+    );
+    // ...and an id still says which one
+    expect(sprintParam("507f1f77bcf86cd799439022", twins)).toBe("507f1f77bcf86cd799439022");
+  });
+
   it("names the sprints the board has when the name matches none", () => {
     expect(() => sprintParam("Sprint 9", sprints)).toThrow(/No sprint named "Sprint 9".*Sprint 4, Hardening/);
   });

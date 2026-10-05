@@ -39,14 +39,28 @@ export function pageOf<T>(tasks: T[], total: number, offset: number) {
 
 const OBJECT_ID = /^[0-9a-fA-F]{24}$/;
 
-/** What the tasks route's `sprint` filter takes: an id, or "backlog". A name is looked up. */
+/** An id and the backlog sentinel go to the route as they are; only a name needs the board's sprints. */
+export const sprintNeedsLookup = (ref: string) =>
+  !OBJECT_ID.test(ref.trim()) && ref.trim().toLowerCase() !== "backlog";
+
+/**
+ * What the tasks route's `sprint` filter takes: an id, or "backlog". A name is looked up — and
+ * names are not unique (a finished and a planned sprint can both be "Sprint 4"), so a name that two
+ * sprints share is refused with their ids rather than answered for whichever came first.
+ */
 export function sprintParam(ref: string, sprints: { _id: string; name: string }[]): string {
   const wanted = ref.trim();
-  if (wanted.toLowerCase() === "backlog" || OBJECT_ID.test(wanted)) return wanted.toLowerCase() === "backlog" ? "backlog" : wanted;
-  const match = sprints.find((s) => s.name.trim().toLowerCase() === wanted.toLowerCase());
-  if (!match) {
+  if (wanted.toLowerCase() === "backlog") return "backlog";
+  if (OBJECT_ID.test(wanted)) return wanted;
+  const matches = sprints.filter((s) => s.name.trim().toLowerCase() === wanted.toLowerCase());
+  if (matches.length > 1) {
+    throw new Error(
+      `${matches.length} sprints are named "${wanted.slice(0, 64)}" — pass the id of one: ${matches.map((s) => s._id).join(", ")}`
+    );
+  }
+  if (!matches[0]) {
     const known = sprints.map((s) => s.name).join(", ") || "none";
     throw new Error(`No sprint named "${wanted.slice(0, 64)}" on this board. Sprints: ${known}, or "backlog" for tasks in none`);
   }
-  return match._id;
+  return matches[0]._id;
 }

@@ -214,7 +214,7 @@ test("create_task refuses what the board does not have, and mints no number doin
   expect(armed.text).toContain("Nothing was written.");
 
   const listed = await session.callTool("list_tasks", { project: PROJECT_KEY });
-  expect(listed.parsed).toHaveLength(4);
+  expect(listed.parsed.total).toBe(4);
 
   // The control, and the number: five refusals cost nothing
   const created = await session.callTool("create_task", { project: PROJECT_KEY, title: "The one that lands" });
@@ -976,7 +976,10 @@ test("list_tasks narrows by sprint, text, due date, parent, blocker and field", 
   await seedCustomFields();
   const session = await connected(request);
 
-  const large = await fileTask(session, { title: "Needle large", fields: { Difficulty: "L" } });
+  const large = await fileTask(session, {
+    title: "Needle large",
+    fields: { Difficulty: "L", Platforms: ["iOS", "Web"], "Spike?": true },
+  });
   const small = await fileTask(session, { title: "Other small", fields: { Difficulty: "S" } });
   const plain = await fileTask(session, { title: "Plain" });
 
@@ -1001,6 +1004,13 @@ test("list_tasks narrows by sprint, text, due date, parent, blocker and field", 
 
   expect(await list({ fields: { Difficulty: "L" } })).toEqual([large.key]);
   expect(await list({ fields: { difficulty: "S" } })).toEqual([small.key]);
+  // A multiselect needs every option asked for, and a checkbox nobody ticked is "No"
+  expect(await list({ fields: { Platforms: ["iOS"] } })).toEqual([large.key]);
+  expect(await list({ fields: { Platforms: ["iOS", "Web"] } })).toEqual([large.key]);
+  expect(await list({ fields: { "Spike?": true } })).toEqual([large.key]);
+  const unticked = await list({ fields: { "Spike?": false } });
+  expect(unticked).not.toContain(large.key);
+  expect(unticked).toEqual(expect.arrayContaining([small.key, plain.key]));
   expect(await list({ sprint: "hardening" })).toEqual([large.key]);
   expect(await list({ sprint: "backlog" })).not.toContain(large.key);
   expect(await list({ search: "needle" })).toEqual([large.key]);
