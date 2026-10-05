@@ -197,9 +197,9 @@ describe("a parameter the tool does not declare is refused, not dropped", () => 
       _id: "p1",
       key: "BP",
     } as never);
-    vi.spyOn(PlannerClient.prototype, "listTasks").mockResolvedValue([]);
+    vi.spyOn(PlannerClient.prototype, "pageTasks").mockResolvedValue({ tasks: [], total: 0, limit: 50, offset: 0 });
 
-    const read = await call("list_tasks", { project: "BP", sprint: "s1" });
+    const read = await call("list_tasks", { project: "BP", author: "nobody" });
     const write = await call("add_comment", { taskKey: "BP-1", body: "x", author: "nobody" });
 
     expect(read.refused).toBe(true);
@@ -211,12 +211,12 @@ describe("a parameter the tool does not declare is refused, not dropped", () => 
 
   // Not asserted through tools/list: zod-to-json-schema emits additionalProperties: false for a
   // stripping object too, so the advertised schema reads identically either way and cannot carry
-  // this. The schemas themselves can, and there are fifteen of them to keep honest.
+  // this. The schemas themselves can, and there are seventeen of them to keep honest.
   it("holds for every tool, not just the two that were reported", () => {
     const schemas = registeredSchemas();
 
     // guards the guard: an empty map would satisfy the loop below without proving anything
-    expect(schemas.size).toBe(15);
+    expect(schemas.size).toBe(17);
 
     const permissive = [...schemas.entries()].filter(([, schema]) => {
       const result = schema.safeParse({ __stray__: 1 });

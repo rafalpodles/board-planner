@@ -16,6 +16,8 @@ import {
 } from "./strict-input";
 import { MAX_REORDER_IDS } from "@/lib/reorder";
 import { taskSummary, withTaskKeys, describeLink } from "./task-shape";
+import { findSprint, incompleteDestination, sprintSummary, type SprintRow } from "./sprints";
+import { DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT, listedTask, pageOf, sprintNeedsLookup, sprintParam } from "./task-list";
 
 type ToolExtra = { authInfo?: AuthInfo };
 
@@ -87,7 +89,11 @@ export function registerPlannerTools(server: McpServer): void {
   server.registerTool(
     "list_tasks",
     {
-      description: "List tasks in a project with optional filters",
+      description:
+        `List tasks in a project with optional filters, one page at a time (default ${DEFAULT_LIST_LIMIT}, at most ` +
+        `${MAX_LIST_LIMIT}). The answer says the total the filters match and the offset of the next page; ` +
+        "follow nextOffset until it is null to read the rest. Each task is a short line — key, title, status, " +
+        "priority, assignee, dueDate, sprint name and parent key — unless detail is \"full\"; get_task reads one in full.",
       inputSchema: strictInput({
         project: z.string().describe("Project key (e.g. 'CP')"),
         // The same lie the category description carried, and a worse one: columns have been
@@ -108,9 +114,42 @@ export function registerPlannerTools(server: McpServer): void {
           .optional()
           .describe("Filter by category (project-defined; defaults: bug, doc, user-story, idea)"),
         priority: z.string().optional().describe("Filter by priority: low, medium, high, urgent"),
+        sprint: z
+          .string()
+          .optional()
+          .describe("Filter by sprint name (or id), or \"backlog\" for tasks in no sprint"),
+        search: z.string().optional().describe("Text in the title or description, case-insensitive"),
+        parent: z
+          .string()
+          .optional()
+          .describe("Only the children of this task (its parent_of links), by key — the epic's key lists the epic's tasks"),
+        dueBefore: z.string().optional().describe("Due on or before this day (YYYY-MM-DD); tasks with no due date are left out"),
+        dueAfter: z.string().optional().describe("Due on or after this day (YYYY-MM-DD); tasks with no due date are left out"),
+        updatedSince: z.string().optional().describe("Changed since this day or ISO timestamp"),
+        blocked: z
+          .boolean()
+          .optional()
+          .describe("true: only tasks with at least one blocked_by link; false: only tasks with none"),
+        fields: z
+          .record(z.any())
+          .optional()
+          .describe(
+            "Filter by project-defined fields, keyed by field name, e.g. { \"Difficulty\": \"L\" } — all must match. " +
+              "Dropdown, multiselect, text (containing, any case), number and checkbox fields; get_project lists them. " +
+              "A multiselect given several options needs all of them."
+          ),
+        limit: z.number().int().min(1).max(MAX_LIST_LIMIT).optional().describe(`Page size (default ${DEFAULT_LIST_LIMIT})`),
+        offset: z.number().int().min(0).optional().describe("Tasks to skip, from a previous answer's nextOffset"),
+        detail: z
+          .enum(["summary", "full"])
+          .optional()
+          .describe("summary (default): one short line per task. full: each task's whole stored body, which is large"),
       }),
     },
-    async ({ project, status, assignee, category, priority }, extra) => {
+    async (
+      { project, status, assignee, category, priority, sprint, search, parent, dueBefore, dueAfter, updatedSince, blocked, fields, limit, offset, detail },
+      extra
+    ) => {
       const client = clientFrom(extra);
       const proj = await client.getProjectByKey(project);
       const filters: Record<string, string> = {};
@@ -118,7 +157,55 @@ export function registerPlannerTools(server: McpServer): void {
       if (assignee) filters.assignee = assignee;
       if (category) filters.category = category;
       if (priority) filters.priority = priority;
-      return json(await client.listTasks(proj._id, filters));
+      if (search) filters.search = search;
+      if (dueBefore) filters.dueBefore = dueBefore;
+      if (dueAfter) filters.dueAfter = dueAfter;
+      if (updatedSince) filters.updatedSince = updatedSince;
+      if (blocked !== undefined) filters.blocked = String(blocked);
+
+      if (sprint) {
+        const sprints = sprintNeedsLookup(sprint)
+          ? ((await client.listSprints(proj._id)) as { _id: string; name: string }[])
+          : [];
+        filters.sprint = sprintParam(sprint, sprints);
+      }
+
+      if (parent) {
+        const end = await client.resolveTaskKey(parent);
+        if (end.projectId !== proj._id) {
+          throw new Error(`${echo(parent.toUpperCase())} is not on ${echo(project.toUpperCase())}, so it has no children here.`);
+        }
+        filters.parent = end.taskId;
+      }
+
+      const fieldFilters: string[] = [];
+      if (fields && Object.keys(fields).length) {
+        // The resolver reads any checkbox value that is not true as false; as a filter that would
+        // quietly ask for the unticked tasks, so a checkbox is held to true or false
+        for (const [name, value] of Object.entries(fields)) {
+          const def = (proj.customFields || []).find((f) => f.name.toLowerCase() === name.trim().toLowerCase());
+          if (def?.fieldType === "checkbox" && ![true, false, "true", "false"].includes(value as never)) {
+            throw new Error(`"${echo(name)}" is a checkbox: filter on true or false`);
+          }
+        }
+        const resolved = resolveFieldsByName(fields, proj.customFields || []);
+        for (const [fieldId, value] of Object.entries(resolved)) {
+          for (const one of Array.isArray(value) ? value : [value]) fieldFilters.push(`${fieldId}:${String(one)}`);
+        }
+      }
+
+      const pageSize = limit ?? DEFAULT_LIST_LIMIT;
+      const start = offset ?? 0;
+      const page = await client.pageTasks(
+        proj._id,
+        { ...filters, limit: String(pageSize), offset: String(start), ...(detail === "full" ? {} : { view: "summary" }) },
+        fieldFilters
+      );
+      const shown =
+        detail === "full"
+          ? page.tasks
+          : (page.tasks as Parameters<typeof listedTask>[0][]).map((row) => listedTask(row, project.toUpperCase()));
+      return json(pageOf(shown, page.total, page.offset));
     }
   );
 
@@ -531,22 +618,108 @@ export function registerPlannerTools(server: McpServer): void {
   );
 
   server.registerTool(
-    "update_sprint",
+    "get_sprint",
     {
-      description: "Update an existing sprint (name, dates, goal, status)",
+      description:
+        "One sprint with its dates, goal, status and counts, and its tasks as short lines, a page at a time " +
+        "(default 50, at most 100; nextOffset is null on the last page).",
       inputSchema: strictInput({
         project: z.string().describe("Project key (e.g. 'CP')"),
-        sprintId: z.string().describe("Sprint ID"),
+        sprint: z.string().describe("The sprint, by name or id"),
+        limit: z.number().int().min(1).max(MAX_LIST_LIMIT).optional().describe(`Page size (default ${DEFAULT_LIST_LIMIT})`),
+        offset: z.number().int().min(0).optional().describe("Tasks to skip, from a previous answer's nextOffset"),
+      }),
+    },
+    async ({ project, sprint, limit, offset }, extra) => {
+      const client = clientFrom(extra);
+      const proj = await client.getProjectByKey(project);
+      const found = findSprint(sprint, (await client.listSprints(proj._id)) as SprintRow[]);
+      const page = await client.pageTasks(proj._id, {
+        sprint: found._id,
+        limit: String(limit ?? DEFAULT_LIST_LIMIT),
+        offset: String(offset ?? 0),
+        view: "summary",
+      });
+      return json({
+        sprint: sprintSummary(found),
+        ...pageOf(
+          (page.tasks as Parameters<typeof listedTask>[0][]).map((row) => listedTask(row, project.toUpperCase())),
+          page.total,
+          page.offset
+        ),
+      });
+    }
+  );
+
+  server.registerTool(
+    "delete_sprint",
+    {
+      description:
+        "Delete a sprint. Its tasks are not deleted: every one goes back to the backlog, finished or not. To carry " +
+        "the unfinished ones to another sprint instead, complete it with update_sprint and moveIncomplete first. " +
+        "confirmName has to repeat the sprint's name, so a wrong name or id cannot delete the wrong sprint.",
+      inputSchema: strictInput(
+        {
+          project: z.string().describe("Project key (e.g. 'CP')"),
+          sprint: z.string().describe("The sprint, by name or id"),
+          confirmName: z.string().describe("The sprint's name, as list_sprints shows it (case does not matter), to confirm"),
+        },
+        { writes: true }
+      ),
+    },
+    async ({ project, sprint, confirmName }, extra) => {
+      const client = clientFrom(extra);
+      const proj = await client.getProjectByKey(project);
+      const found = findSprint(sprint, (await client.listSprints(proj._id)) as SprintRow[]);
+      if (confirmName.trim().toLowerCase() !== found.name.trim().toLowerCase()) {
+        throw new Error(
+          `Not deleted: confirmName "${echo(confirmName)}" is not the name of that sprint, "${echo(found.name)}". Nothing was written.`
+        );
+      }
+      await client.deleteSprint(proj._id, found._id);
+      return json({ deleted: found.name, id: String(found._id), tasksReturnedToBacklog: found.taskCount ?? 0 });
+    }
+  );
+
+  server.registerTool(
+    "update_sprint",
+    {
+      description:
+        "Update an existing sprint (name, dates, goal, status). Making a sprint active completes the board's other " +
+        "active one. Completing a sprint can carry its unfinished tasks to the backlog or to another sprint with " +
+        "moveIncomplete; without it they stay in the completed sprint.",
+      inputSchema: strictInput({
+        project: z.string().describe("Project key (e.g. 'CP')"),
+        sprintId: z.string().describe("The sprint, by name or id (list_sprints shows both)"),
         name: z.string().optional(),
         startDate: z.string().optional(),
         endDate: z.string().optional(),
         goal: z.string().optional(),
         status: z.string().optional().describe("planned, active, or completed"),
+        moveIncomplete: z
+          .string()
+          .optional()
+          .describe(
+            "With status completed: where the tasks not in a done column go — \"backlog\", or another sprint " +
+              "of this board that is not completed, by name or id"
+          ),
       }, { writes: true }),
     },
-    async ({ project, sprintId, name, startDate, endDate, goal, status }, extra) => {
-      if (![name, startDate, endDate, goal, status].some((v) => v !== undefined)) {
+    async ({ project, sprintId, name, startDate, endDate, goal, status, moveIncomplete }, extra) => {
+      if (![name, startDate, endDate, goal, status, moveIncomplete].some((v) => v !== undefined)) {
         throw new Error(`update_sprint ${NOTHING_TO_CHANGE}`);
+      }
+      // Before any lookup, and before the route's move of unfinished tasks, which runs ahead of the write
+      // that would then fail on it: a name that is blank or a day that is not one must not leave a sprint
+      // open with its tasks already carried away
+      if (name !== undefined && name.trim() === "") throw new Error("A sprint needs a name. Nothing was written.");
+      for (const [label, day] of [["startDate", startDate], ["endDate", endDate]] as const) {
+        if (day !== undefined && Number.isNaN(Date.parse(day))) {
+          throw new Error(`Invalid ${label} "${echo(day)}" — a day, YYYY-MM-DD. Nothing was written.`);
+        }
+      }
+      if (moveIncomplete !== undefined && status !== "completed") {
+        throw new Error("moveIncomplete goes with status completed: it says where the unfinished tasks go as the sprint closes. Nothing was written.");
       }
 
       const client = clientFrom(extra);
@@ -557,9 +730,16 @@ export function registerPlannerTools(server: McpServer): void {
       if (endDate !== undefined) updates.endDate = endDate;
       if (goal !== undefined) updates.goal = goal;
       if (status !== undefined) updates.status = status;
-      if (Object.keys(updates).length === 0) throw new Error(`update_sprint ${NOTHING_TO_CHANGE}`);
 
-      return json(await client.updateSprint(proj._id, sprintId, updates));
+      // Named or numbered by the caller, but acted on by id — and checked against this board's own
+      // sprints first, so a name two sprints share cannot complete the wrong one
+      const sprints = (await client.listSprints(proj._id)) as SprintRow[];
+      const target = findSprint(sprintId, sprints);
+      if (moveIncomplete !== undefined) {
+        Object.assign(updates, incompleteDestination(moveIncomplete, sprints, target));
+      }
+
+      return json(await client.updateSprint(proj._id, target._id, updates));
     }
   );
 

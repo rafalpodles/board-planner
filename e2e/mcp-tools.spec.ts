@@ -38,6 +38,7 @@ import {
   WORKER_NAME,
   seed,
   seedAgents,
+  seedCustomFields,
   seedDemotableAdmin,
   seedForeignAgent,
   seedForeignSprint,
@@ -213,7 +214,7 @@ test("create_task refuses what the board does not have, and mints no number doin
   expect(armed.text).toContain("Nothing was written.");
 
   const listed = await session.callTool("list_tasks", { project: PROJECT_KEY });
-  expect(listed.parsed).toHaveLength(4);
+  expect(listed.parsed.total).toBe(4);
 
   // The control, and the number: five refusals cost nothing
   const created = await session.callTool("create_task", { project: PROJECT_KEY, title: "The one that lands" });
@@ -379,7 +380,7 @@ test("sprints are created, listed and updated, and another board's sprint is out
     name: "Renamed from the wrong board",
   });
   refused(foreign);
-  expect(foreign.text).toContain("Sprint not found");
+  expect(foreign.text).toContain(`No sprint "${FOREIGN_SPRINT_ID}"`);
   expect((await storedSprint(FOREIGN_SPRINT_ID))?.name).toBe(FOREIGN_SPRINT_NAME);
 
   const row = await storedSprint(new mongoose.Types.ObjectId(sprintId));
@@ -1083,4 +1084,247 @@ test("link_tasks says what it linked, and get_task names the parent and children
   accepted(unlinked);
   expect(unlinked.parsed.message).toBe(`Removed: ${HELD_TASK_KEY} is the parent of ${SIBLING_TASK_KEY}`);
   expect((await session.callTool("get_task", { taskKey: HELD_TASK_KEY })).parsed.children).toEqual([]);
+});
+
+/**
+ * BP-906. A listing has to fit in a model's context and has to say what it left out: one ordinary
+ * query on the BP board was 393,665 characters. Everything below ends on keys read back from the
+ * tool, checked against tasks this test made and so knows the answer for.
+ */
+const keysOf = (call: ToolCall) => (call.parsed.tasks as { key: string }[]).map((t) => t.key);
+
+async function fileTask(session: McpSession, args: Record<string, unknown>) {
+  const created = await session.callTool("create_task", { project: PROJECT_KEY, ...args });
+  accepted(created);
+  return { key: `${PROJECT_KEY}-${created.parsed.taskNumber}`, id: created.parsed._id as string };
+}
+
+test("list_tasks answers in short lines, a page at a time, and says where the next page starts", async ({ request }) => {
+  const session = await connected(request);
+  const made = [];
+  for (const n of [1, 2, 3, 4, 5]) made.push((await fileTask(session, { title: `Paged ${n}` })).key);
+
+  const first = await session.callTool("list_tasks", { project: PROJECT_KEY, limit: 2 });
+  accepted(first);
+  expect(first.parsed).toMatchObject({ returned: 2, offset: 0, nextOffset: 2 });
+  expect(first.parsed.total).toBeGreaterThanOrEqual(made.length);
+  // A line, not a body: no checklist, no organisation, no author — and the keys to act on it by
+  expect(Object.keys(first.parsed.tasks[0]).sort()).toEqual(
+    ["assignee", "dueDate", "key", "parent", "priority", "sprint", "status", "title"]
+  );
+  expect(first.text.length).toBeLessThan(2_000);
+
+  // Following nextOffset reads the whole board once: no task twice, none missed
+  const seen: string[] = [];
+  let offset: number | null = 0;
+  while (offset !== null) {
+    const page: ToolCall = await session.callTool("list_tasks", { project: PROJECT_KEY, limit: 2, offset });
+    accepted(page);
+    seen.push(...keysOf(page));
+    offset = page.parsed.nextOffset;
+  }
+  expect(new Set(seen).size).toBe(seen.length);
+  expect(seen).toHaveLength(first.parsed.total);
+  for (const key of made) expect(seen).toContain(key);
+
+  const full = await session.callTool("list_tasks", { project: PROJECT_KEY, limit: 1, detail: "full" });
+  accepted(full);
+  expect(full.parsed.tasks[0].checklist).toBeDefined();
+  expect(full.parsed.tasks[0].createdBy).toBeDefined();
+});
+
+test("list_tasks narrows by sprint, text, due date, parent, blocker and field", async ({ request }) => {
+  await seedCustomFields();
+  const session = await connected(request);
+
+  const large = await fileTask(session, {
+    title: "Needle large",
+    fields: { Difficulty: "L", Platforms: ["iOS", "Web"], "Spike?": true },
+  });
+  const small = await fileTask(session, { title: "Other small", fields: { Difficulty: "S" } });
+  const plain = await fileTask(session, { title: "Plain" });
+
+  // A sprint, a due date: set through the API, since this PR is about reading them back
+  const sprint = await session.callTool("create_sprint", {
+    project: PROJECT_KEY,
+    name: "Hardening",
+    startDate: "2026-10-01",
+    endDate: "2026-10-14",
+  });
+  accepted(sprint);
+  const put = (id: string, data: Record<string, unknown>) =>
+    request.put(`/api/projects/${PROJECT_ID}/tasks/${id}`, { headers: ADMIN_AUTH, data });
+  expect((await put(large.id, { sprint: sprint.parsed._id })).status()).toBe(200);
+  expect((await put(small.id, { dueDate: "2026-10-10" })).status()).toBe(200);
+
+  const list = async (args: Record<string, unknown>) => {
+    const call = await session.callTool("list_tasks", { project: PROJECT_KEY, ...args });
+    accepted(call);
+    return keysOf(call);
+  };
+
+  expect(await list({ fields: { Difficulty: "L" } })).toEqual([large.key]);
+  expect(await list({ fields: { difficulty: "S" } })).toEqual([small.key]);
+  // A multiselect needs every option asked for, and a checkbox nobody ticked is "No"
+  expect(await list({ fields: { Platforms: ["iOS"] } })).toEqual([large.key]);
+  expect(await list({ fields: { Platforms: ["iOS", "Web"] } })).toEqual([large.key]);
+  expect(await list({ fields: { "Spike?": true } })).toEqual([large.key]);
+  const unticked = await list({ fields: { "Spike?": false } });
+  expect(unticked).not.toContain(large.key);
+  expect(unticked).toEqual(expect.arrayContaining([small.key, plain.key]));
+  expect(await list({ sprint: "hardening" })).toEqual([large.key]);
+  expect(await list({ sprint: "backlog" })).not.toContain(large.key);
+  expect(await list({ search: "needle" })).toEqual([large.key]);
+
+  // The end day is included, and a task with no due date is in no range
+  expect(await list({ dueBefore: "2026-10-10" })).toEqual([small.key]);
+  expect(await list({ dueAfter: "2026-10-10" })).toEqual([small.key]);
+  expect(await list({ dueBefore: "2026-10-09" })).toEqual([]);
+  expect(await list({ dueAfter: "2026-10-11" })).toEqual([]);
+
+  accepted(await session.callTool("link_tasks", { taskKey: large.key, targetTaskKey: small.key, type: "parent_of" }));
+  accepted(await session.callTool("link_tasks", { taskKey: plain.key, targetTaskKey: large.key, type: "blocked_by" }));
+  expect(await list({ parent: large.key })).toEqual([small.key]);
+  expect(await list({ blocked: true })).toEqual([plain.key]);
+  expect(await list({ blocked: false })).not.toContain(plain.key);
+  const children = await session.callTool("list_tasks", { project: PROJECT_KEY, sprint: "backlog", parent: large.key });
+  expect(children.parsed.tasks[0]).toMatchObject({ key: small.key, parent: large.key });
+
+  // updatedSince: everything this test touched is newer than a day ago, and nothing is newer than tomorrow
+  const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+  expect(await list({ updatedSince: "2020-01-01" })).toEqual(expect.arrayContaining([large.key, small.key, plain.key]));
+  expect(await list({ updatedSince: tomorrow })).toEqual([]);
+});
+
+test("list_tasks refuses a filter that names nothing the board has, rather than answering an empty list", async ({ request }) => {
+  await seedCustomFields();
+  const session = await connected(request);
+
+  const noSprint = await session.callTool("list_tasks", { project: PROJECT_KEY, sprint: "Nowhere" });
+  refused(noSprint);
+  expect(noSprint.text).toContain('No sprint named "Nowhere"');
+
+  const noField = await session.callTool("list_tasks", { project: PROJECT_KEY, fields: { Colour: "red" } });
+  refused(noField);
+  expect(noField.text).toContain('Unknown field "Colour"');
+
+  const badDay = await session.callTool("list_tasks", { project: PROJECT_KEY, dueBefore: "next week" });
+  refused(badDay);
+  expect(badDay.text).toContain("Invalid dueBefore");
+
+  const tooMany = await session.callTool("list_tasks", { project: PROJECT_KEY, limit: 500 });
+  refused(tooMany);
+});
+
+/**
+ * BP-911. A sprint is read with its tasks, closed with its unfinished work carried somewhere, and
+ * deleted — each checked against what the API holds afterwards, since a reply can be right about a
+ * move that did not happen.
+ */
+test("a sprint is read with its tasks, completed with its unfinished work carried on, and deleted", async ({ request }) => {
+  await seedSecondProject();
+  await seedForeignSprint();
+  const session = await connected(request);
+  const sprint = async (name: string, startDate: string, endDate: string) => {
+    const made = await session.callTool("create_sprint", { project: PROJECT_KEY, name, startDate, endDate });
+    accepted(made);
+    return made.parsed._id as string;
+  };
+  const alpha = await sprint("Alpha", "2026-10-01", "2026-10-14");
+  const beta = await sprint("Beta", "2026-10-15", "2026-10-28");
+
+  const file = async (title: string) => {
+    const created = await session.callTool("create_task", { project: PROJECT_KEY, title });
+    accepted(created);
+    return { key: `${PROJECT_KEY}-${created.parsed.taskNumber}`, id: created.parsed._id as string };
+  };
+  const [one, two, three] = [await file("One"), await file("Two"), await file("Three")];
+  const put = (id: string, data: Record<string, unknown>) =>
+    request.put(`/api/projects/${PROJECT_ID}/tasks/${id}`, { headers: ADMIN_AUTH, data });
+  for (const task of [one, two, three]) expect((await put(task.id, { sprint: alpha })).status()).toBe(200);
+  accepted(await session.callTool("change_task_status", { taskKey: three.key, status: "done" }));
+  const sprintOf = async (id: string) => {
+    const stored = await (await request.get(`/api/projects/${PROJECT_ID}/tasks/${id}`, { headers: ADMIN_AUTH })).json();
+    return stored.sprint ? String(stored.sprint._id ?? stored.sprint) : null;
+  };
+
+  // Read by name: its counts, its tasks as lines, a page at a time
+  const read = await session.callTool("get_sprint", { project: PROJECT_KEY, sprint: "alpha", limit: 2 });
+  accepted(read);
+  expect(read.parsed.sprint).toMatchObject({ id: alpha, name: "Alpha", taskCount: 3, doneCount: 1, startDate: "2026-10-01" });
+  expect(read.parsed).toMatchObject({ total: 3, returned: 2, nextOffset: 2 });
+  const rest = await session.callTool("get_sprint", { project: PROJECT_KEY, sprint: alpha, limit: 2, offset: 2 });
+  const keys = [...(read.parsed.tasks as { key: string }[]), ...(rest.parsed.tasks as { key: string }[])].map((t) => t.key);
+  expect(keys.sort()).toEqual([one.key, two.key, three.key].sort());
+  expect(rest.parsed.nextOffset).toBeNull();
+
+  // Refused before anything moves: the wrong destination, and a move without a completion
+  for (const [args, said] of [
+    [{ status: "completed", moveIncomplete: "Alpha" }, "own destination"],
+    [{ status: "completed", moveIncomplete: "Nowhere" }, 'No sprint "Nowhere"'],
+    [{ goal: "x", moveIncomplete: "backlog" }, "goes with status completed"],
+  ] as const) {
+    const refusedCall = await session.callTool("update_sprint", { project: PROJECT_KEY, sprintId: "Alpha", ...args });
+    refused(refusedCall);
+    expect(refusedCall.text).toContain(said);
+  }
+  expect(await sprintOf(one.id)).toBe(alpha);
+
+  // Completed by name: the two unfinished tasks move to Beta, the finished one stays where it was done
+  accepted(await session.callTool("update_sprint", { project: PROJECT_KEY, sprintId: "Alpha", status: "completed", moveIncomplete: "Beta" }));
+  expect(await sprintOf(one.id)).toBe(beta);
+  expect(await sprintOf(two.id)).toBe(beta);
+  expect(await sprintOf(three.id)).toBe(alpha);
+
+  // A completed sprint is not a destination
+  const closed = await session.callTool("update_sprint", { project: PROJECT_KEY, sprintId: "Beta", status: "completed", moveIncomplete: "Alpha" });
+  refused(closed);
+  expect(closed.text).toContain("is completed");
+
+  // Deleting needs the name repeated, sends every task back to the backlog, and leaves the tasks themselves
+  const wrongName = await session.callTool("delete_sprint", { project: PROJECT_KEY, sprint: "Beta", confirmName: "Alpha" });
+  refused(wrongName);
+  expect(await sprintOf(one.id)).toBe(beta);
+  const deleted = await session.callTool("delete_sprint", { project: PROJECT_KEY, sprint: "Beta", confirmName: "beta" });
+  accepted(deleted);
+  expect(deleted.parsed).toEqual({ deleted: "Beta", id: beta, tasksReturnedToBacklog: 2 });
+  expect(await sprintOf(one.id)).toBeNull();
+  expect(await sprintOf(two.id)).toBeNull();
+  const sprints = await session.callTool("list_sprints", { project: PROJECT_KEY });
+  expect((sprints.parsed as { name: string }[]).map((s) => s.name)).toEqual(["Alpha"]);
+
+  // Another board's sprint is out of reach for all three
+  for (const call of [
+    session.callTool("get_sprint", { project: PROJECT_KEY, sprint: String(FOREIGN_SPRINT_ID) }),
+    session.callTool("delete_sprint", { project: PROJECT_KEY, sprint: String(FOREIGN_SPRINT_ID), confirmName: FOREIGN_SPRINT_NAME }),
+    session.callTool("update_sprint", { project: PROJECT_KEY, sprintId: String(FOREIGN_SPRINT_ID), goal: "mine now" }),
+  ]) {
+    const result = await call;
+    refused(result);
+    expect(result.text).toContain("No sprint");
+  }
+  expect((await storedSprint(FOREIGN_SPRINT_ID))?.name).toBe(FOREIGN_SPRINT_NAME);
+});
+
+test("a sprint name two sprints share is refused with their ids, by every tool that acts on one", async ({ request }) => {
+  const session = await connected(request);
+  const first = await session.callTool("create_sprint", { project: PROJECT_KEY, name: "Twin", startDate: "2026-10-01", endDate: "2026-10-07" });
+  const second = await session.callTool("create_sprint", { project: PROJECT_KEY, name: "Twin", startDate: "2026-10-08", endDate: "2026-10-14" });
+  accepted(first);
+  accepted(second);
+
+  for (const call of [
+    session.callTool("get_sprint", { project: PROJECT_KEY, sprint: "Twin" }),
+    session.callTool("update_sprint", { project: PROJECT_KEY, sprintId: "Twin", goal: "which?" }),
+    session.callTool("delete_sprint", { project: PROJECT_KEY, sprint: "Twin", confirmName: "Twin" }),
+  ]) {
+    const result = await call;
+    refused(result);
+    expect(result.text).toContain('2 sprints are named "Twin"');
+    expect(result.text).toContain(first.parsed._id);
+    expect(result.text).toContain(second.parsed._id);
+  }
+  // By id it is exact, and only that one goes
+  accepted(await session.callTool("delete_sprint", { project: PROJECT_KEY, sprint: first.parsed._id, confirmName: "Twin" }));
+  expect(((await session.callTool("list_sprints", { project: PROJECT_KEY })).parsed as { _id: string }[]).map((s) => s._id)).toEqual([second.parsed._id]);
 });

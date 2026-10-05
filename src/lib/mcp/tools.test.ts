@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, type MockInstance } from "vitest";
 import { z } from "zod";
 import { registerPlannerTools } from "./tools";
 import { PlannerClient } from "./planner-client";
@@ -634,5 +634,323 @@ describe("what the tools answer", () => {
     );
 
     expect(answer.message).toBe("Removed: BP-1 relates to BP-2");
+  });
+});
+
+/**
+ * BP-906. list_tasks answered with every matching task's whole body — 393,665 characters for one
+ * ordinary query on the BP board — and took four filters. It now pages, answers in short lines, and
+ * filters on what REST already could (sprint, search) and on parent, due dates, blockers and fields.
+ */
+describe("list_tasks", () => {
+  const SIZE_FIELD = { _id: "f1", name: "Size", fieldType: "dropdown", options: [{ id: "opt-l", value: "L" }] };
+  let page: MockInstance<PlannerClient["pageTasks"]>;
+
+  const run = (args: Record<string, unknown>) =>
+    registered().get("list_tasks")!.handler({ project: "my-app", ...args }, extra);
+  const parse = (result: unknown) => JSON.parse((result as { content: { text: string }[] }).content[0].text);
+  const sent = () => page.mock.calls[0] as [string, Record<string, string>, string[]];
+
+  beforeEach(() => {
+    vi.spyOn(PlannerClient.prototype, "getProjectByKey").mockResolvedValue({
+      _id: "p1",
+      customFields: [SIZE_FIELD],
+    } as never);
+    page = vi
+      .spyOn(PlannerClient.prototype, "pageTasks")
+      .mockResolvedValue({ tasks: [], total: 0, limit: 50, offset: 0 });
+  });
+
+  it("asks for one short page by default, and says what it did not return", async () => {
+    page.mockResolvedValue({
+      tasks: [
+        { taskNumber: 3, title: "Three", status: "todo", priority: "high", assignee: { username: "rafal" }, sprint: null, parent: null },
+        { taskNumber: 4, title: "Four", status: "todo", assignee: null, sprint: { name: "S1" }, parent: { taskNumber: 1 } },
+      ],
+      total: 130,
+      limit: 2,
+      offset: 0,
+    });
+
+    const answer = parse(await run({ limit: 2 }));
+
+    expect(sent()[1]).toEqual({ limit: "2", offset: "0", view: "summary" });
+    expect(answer).toMatchObject({ total: 130, returned: 2, offset: 0, nextOffset: 2 });
+    expect(answer.tasks[0]).toEqual({
+      key: "MY-APP-3",
+      title: "Three",
+      status: "todo",
+      priority: "high",
+      assignee: "rafal",
+      dueDate: null,
+      sprint: null,
+      parent: null,
+    });
+    expect(answer.tasks[1]).toMatchObject({ key: "MY-APP-4", sprint: "S1", parent: "MY-APP-1" });
+  });
+
+  it("starts from 50 and carries an offset through", async () => {
+    await run({ offset: 100 });
+
+    expect(sent()[1]).toMatchObject({ limit: "50", offset: "100", view: "summary" });
+  });
+
+  it("hands back the whole bodies, still paged, when asked for the full detail", async () => {
+    const stored = { taskNumber: 3, title: "Three", checklist: [{ _id: "c" }] };
+    page.mockResolvedValue({ tasks: [stored], total: 1, limit: 50, offset: 0 });
+
+    const answer = parse(await run({ detail: "full" }));
+
+    expect(sent()[1]).not.toHaveProperty("view");
+    expect(answer.tasks).toEqual([stored]);
+    expect(answer.nextOffset).toBeNull();
+  });
+
+  it("refuses a page bigger than it will build", () => {
+    const { schema } = registered().get("list_tasks")!;
+
+    expect(schema.safeParse({ project: "BP", limit: 101 }).success).toBe(false);
+    expect(schema.safeParse({ project: "BP", limit: 0 }).success).toBe(false);
+    expect(schema.safeParse({ project: "BP", offset: -1 }).success).toBe(false);
+    expect(schema.safeParse({ project: "BP", limit: 100, offset: 0 }).success).toBe(true);
+  });
+
+  it("passes the text, date and blocker filters on as the route spells them", async () => {
+    await run({ search: "login", dueBefore: "2026-10-10", dueAfter: "2026-10-01", updatedSince: "2026-09-30", blocked: false });
+
+    expect(sent()[1]).toMatchObject({
+      search: "login",
+      dueBefore: "2026-10-10",
+      dueAfter: "2026-10-01",
+      updatedSince: "2026-09-30",
+      blocked: "false",
+    });
+  });
+
+  describe("sprint", () => {
+    it("is looked up by name", async () => {
+      vi.spyOn(PlannerClient.prototype, "listSprints").mockResolvedValue([
+        { _id: "507f1f77bcf86cd799439012", name: "Hardening" },
+      ]);
+
+      await run({ sprint: "hardening" });
+
+      expect(sent()[1].sprint).toBe("507f1f77bcf86cd799439012");
+    });
+
+    it("needs no lookup for the backlog or an id", async () => {
+      const lookup = vi.spyOn(PlannerClient.prototype, "listSprints");
+
+      await run({ sprint: "backlog" });
+      await run({ sprint: "507f1f77bcf86cd799439012" });
+
+      expect(lookup).not.toHaveBeenCalled();
+    });
+
+    it("is refused, naming the sprints, when no sprint has the name", async () => {
+      vi.spyOn(PlannerClient.prototype, "listSprints").mockResolvedValue([{ _id: "s1", name: "Hardening" }]);
+
+      await expect(run({ sprint: "Nope" })).rejects.toThrow(/No sprint named "Nope".*Hardening/);
+      expect(page).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("parent", () => {
+    it("is given by key and sent as the task's id", async () => {
+      vi.spyOn(PlannerClient.prototype, "resolveTaskKey").mockResolvedValue({ projectId: "p1", taskId: "epic-id" });
+
+      await run({ parent: "MY-APP-7" });
+
+      expect(sent()[1].parent).toBe("epic-id");
+    });
+
+    it("is refused when it belongs to another board", async () => {
+      vi.spyOn(PlannerClient.prototype, "resolveTaskKey").mockResolvedValue({ projectId: "p2", taskId: "x" });
+
+      await expect(run({ parent: "OTHER-7" })).rejects.toThrow(/is not on MY-APP/);
+      expect(page).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("fields", () => {
+    it("are named the way a person reads them and sent as ids", async () => {
+      await run({ fields: { size: "L" } });
+
+      expect(sent()[2]).toEqual(["f1:opt-l"]);
+    });
+
+    it("send a multiselect given several options as one condition per option", async () => {
+      vi.mocked(PlannerClient.prototype.getProjectByKey).mockResolvedValue({
+        _id: "p1",
+        customFields: [
+          { _id: "f2", name: "Platforms", fieldType: "multiselect", options: [{ id: "o-ios", value: "iOS" }, { id: "o-web", value: "Web" }] },
+          { _id: "f3", name: "Flagged", fieldType: "checkbox" },
+        ],
+      } as never);
+
+      await run({ fields: { Platforms: ["iOS", "web"], Flagged: false } });
+
+      expect(sent()[2]).toEqual(["f2:o-ios", "f2:o-web", "f3:false"]);
+    });
+
+    it("hold a checkbox to true or false, since anything else would filter on the unticked", async () => {
+      vi.mocked(PlannerClient.prototype.getProjectByKey).mockResolvedValue({
+        _id: "p1",
+        customFields: [{ _id: "f3", name: "Flagged", fieldType: "checkbox" }],
+      } as never);
+
+      await expect(run({ fields: { Flagged: "yes" } })).rejects.toThrow(/checkbox: filter on true or false/);
+      expect(page).not.toHaveBeenCalled();
+    });
+
+    it("are refused when the board has no such field, or the field no such option", async () => {
+      await expect(run({ fields: { Colour: "red" } })).rejects.toThrow(/Unknown field "Colour".*Size/);
+      await expect(run({ fields: { Size: "XXL" } })).rejects.toThrow(/"XXL" is not an option of Size/);
+      expect(page).not.toHaveBeenCalled();
+    });
+  });
+});
+
+/**
+ * BP-911. Sprints could be created and updated over MCP and nothing else. REST also reads one with its
+ * tasks and deletes it — which sends every task back to the backlog — and completing a sprint can carry
+ * its unfinished tasks somewhere, which update_sprint did not offer.
+ */
+describe("sprints", () => {
+  const SPRINTS = [
+    { _id: "507f1f77bcf86cd799439011", name: "Sprint 4", status: "active", taskCount: 3, doneCount: 1 },
+    { _id: "507f1f77bcf86cd799439012", name: "Hardening", status: "planned", taskCount: 0, doneCount: 0 },
+    { _id: "507f1f77bcf86cd799439013", name: "Old", status: "completed", taskCount: 4, doneCount: 4 },
+  ];
+  const parse = (result: unknown) => JSON.parse((result as { content: { text: string }[] }).content[0].text);
+  const run = (name: string, args: Record<string, unknown>) =>
+    registered().get(name)!.handler({ project: "my-app", ...args }, extra);
+
+  beforeEach(() => {
+    vi.spyOn(PlannerClient.prototype, "getProjectByKey").mockResolvedValue({ _id: "p1" } as never);
+    vi.spyOn(PlannerClient.prototype, "listSprints").mockResolvedValue(SPRINTS);
+  });
+
+  describe("get_sprint", () => {
+    it("answers with the sprint and its tasks as short lines, a page at a time", async () => {
+      const page = vi.spyOn(PlannerClient.prototype, "pageTasks").mockResolvedValue({
+        tasks: [{ taskNumber: 7, title: "Seven", status: "todo", sprint: { name: "Sprint 4" } }],
+        total: 3,
+        limit: 1,
+        offset: 0,
+      });
+
+      const answer = parse(await run("get_sprint", { sprint: "SPRINT 4", limit: 1 }));
+
+      expect(page).toHaveBeenCalledWith("p1", { sprint: "507f1f77bcf86cd799439011", limit: "1", offset: "0", view: "summary" });
+      expect(answer.sprint).toMatchObject({ id: "507f1f77bcf86cd799439011", name: "Sprint 4", taskCount: 3, doneCount: 1 });
+      expect(answer).toMatchObject({ total: 3, returned: 1, nextOffset: 1 });
+      expect(answer.tasks[0]).toMatchObject({ key: "MY-APP-7", title: "Seven", sprint: "Sprint 4" });
+    });
+
+    it("is refused for a sprint the board does not have, reading no tasks", async () => {
+      const page = vi.spyOn(PlannerClient.prototype, "pageTasks");
+
+      await expect(run("get_sprint", { sprint: "Nope" })).rejects.toThrow(/No sprint "Nope"/);
+      expect(page).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("delete_sprint", () => {
+    it("deletes only when the name is repeated, and says its tasks went back to the backlog", async () => {
+      const del = vi.spyOn(PlannerClient.prototype, "deleteSprint").mockResolvedValue({ message: "Sprint deleted" });
+
+      const answer = parse(await run("delete_sprint", { sprint: "507f1f77bcf86cd799439011", confirmName: "sprint 4" }));
+
+      expect(del).toHaveBeenCalledWith("p1", "507f1f77bcf86cd799439011");
+      expect(answer).toEqual({ deleted: "Sprint 4", id: "507f1f77bcf86cd799439011", tasksReturnedToBacklog: 3 });
+    });
+
+    it("refuses a confirmation that is not the sprint's name, before anything is deleted", async () => {
+      const del = vi.spyOn(PlannerClient.prototype, "deleteSprint").mockResolvedValue({});
+
+      await expect(run("delete_sprint", { sprint: "Sprint 4", confirmName: "Hardening" })).rejects.toThrow(
+        /confirmName "Hardening" is not the name of that sprint, "Sprint 4"/
+      );
+      expect(del).not.toHaveBeenCalled();
+    });
+
+    it("needs a sprint that is on the board", async () => {
+      const del = vi.spyOn(PlannerClient.prototype, "deleteSprint").mockResolvedValue({});
+
+      await expect(run("delete_sprint", { sprint: "Nope", confirmName: "Nope" })).rejects.toThrow(/No sprint "Nope"/);
+      expect(del).not.toHaveBeenCalled();
+    });
+
+    it("declares confirmName, so a call without it never reaches the handler", () => {
+      expect(registered().get("delete_sprint")!.schema.safeParse({ project: "BP", sprint: "S" }).success).toBe(false);
+    });
+  });
+
+  describe("update_sprint", () => {
+    let wrote: MockInstance<PlannerClient["updateSprint"]>;
+
+    beforeEach(() => {
+      wrote = vi.spyOn(PlannerClient.prototype, "updateSprint").mockResolvedValue({});
+    });
+
+    it("takes the sprint by name and acts on its id", async () => {
+      await run("update_sprint", { sprintId: "hardening", goal: "Fewer bugs" });
+
+      expect(wrote).toHaveBeenCalledWith("p1", "507f1f77bcf86cd799439012", { goal: "Fewer bugs" });
+    });
+
+    it("carries unfinished tasks to the backlog or to another sprint as it completes", async () => {
+      await run("update_sprint", { sprintId: "Sprint 4", status: "completed", moveIncomplete: "backlog" });
+      await run("update_sprint", { sprintId: "Sprint 4", status: "completed", moveIncomplete: "Hardening" });
+
+      expect(wrote.mock.calls.map((c) => c[2])).toEqual([
+        { status: "completed", moveIncompleteToBacklog: true },
+        { status: "completed", moveIncompleteToSprint: "507f1f77bcf86cd799439012" },
+      ]);
+    });
+
+    it("refuses moveIncomplete without completing, and an unusable destination, writing nothing", async () => {
+      await expect(run("update_sprint", { sprintId: "Sprint 4", goal: "x", moveIncomplete: "backlog" })).rejects.toThrow(
+        /goes with status completed/
+      );
+      await expect(run("update_sprint", { sprintId: "Sprint 4", status: "completed", moveIncomplete: "Old" })).rejects.toThrow(
+        /is completed/
+      );
+      await expect(run("update_sprint", { sprintId: "Sprint 4", status: "completed", moveIncomplete: "Sprint 4" })).rejects.toThrow(
+        /own destination/
+      );
+      await expect(run("update_sprint", { sprintId: "Nope", goal: "x" })).rejects.toThrow(/No sprint "Nope"/);
+      expect(wrote).not.toHaveBeenCalled();
+    });
+
+    it("still refuses a call that names nothing to change, before any lookup", async () => {
+      const project = vi.mocked(PlannerClient.prototype.getProjectByKey);
+      const lookup = vi.spyOn(PlannerClient.prototype, "listSprints");
+      project.mockClear();
+
+      await expect(run("update_sprint", { sprintId: "Sprint 4" })).rejects.toThrow(/nothing to change/);
+      expect(project).not.toHaveBeenCalled();
+      expect(lookup).not.toHaveBeenCalled();
+    });
+
+    it("says moveIncomplete needs a completion when that is all it was given", async () => {
+      await expect(run("update_sprint", { sprintId: "Sprint 4", moveIncomplete: "backlog" })).rejects.toThrow(
+        /goes with status completed/
+      );
+    });
+
+    // The route moves the unfinished tasks before it writes the sprint, so a write it then refuses would
+    // leave the sprint open with its tasks gone
+    it("refuses a blank name and a day that is not one before anything is looked up or moved", async () => {
+      const lookup = vi.spyOn(PlannerClient.prototype, "listSprints");
+
+      await expect(run("update_sprint", { sprintId: "Sprint 4", status: "completed", moveIncomplete: "backlog", name: "  " })).rejects.toThrow(/needs a name/);
+      await expect(run("update_sprint", { sprintId: "Sprint 4", status: "completed", moveIncomplete: "backlog", startDate: "next monday" })).rejects.toThrow(
+        /Invalid startDate "next monday"/
+      );
+      expect(lookup).not.toHaveBeenCalled();
+      expect(wrote).not.toHaveBeenCalled();
+    });
   });
 });
