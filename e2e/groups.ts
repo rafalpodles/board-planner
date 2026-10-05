@@ -89,6 +89,7 @@ export const GROUPS = {
     "project-owner-gate.spec.ts",
     "owner-manages-workers.spec.ts",
     "sidebar-reorder.spec.ts",
+    "collapsed-sidebar.spec.ts",
     "error-boundary.spec.ts",
     "dashboard-reads-the-board.spec.ts",
     "dashboard-says-why.spec.ts",
