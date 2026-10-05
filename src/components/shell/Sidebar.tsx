@@ -308,18 +308,18 @@ export function Sidebar({
     >
       <div
         className={`flex items-center gap-2 px-3.5 pb-2.5 pt-3.5 ${
-          compact ? "justify-center px-0" : ""
+          compact ? "flex-col justify-center px-0" : ""
         }`}
       >
-        {!compact && (
-          <Link
-            href="/projects"
-            className="focus-ring flex min-h-[44px] min-w-0 items-center gap-2 rounded md:min-h-0"
-          >
-            <Image src="/logo.svg" alt="" width={24} height={24} />
-            <span className="truncate text-[15px] font-bold">{APP_NAME}</span>
-          </Link>
-        )}
+        <Link
+          href="/projects"
+          aria-label={compact ? APP_NAME : undefined}
+          title={compact ? APP_NAME : undefined}
+          className="focus-ring flex min-h-[44px] min-w-0 items-center gap-2 rounded md:min-h-0"
+        >
+          <Image src="/logo.svg" alt="" width={24} height={24} />
+          {!compact && <span className="truncate text-[15px] font-bold">{APP_NAME}</span>}
+        </Link>
         <button
           onClick={isDrawer ? onCloseMobile : toggleCollapsed}
           title={drawerAwareCollapseLabel}

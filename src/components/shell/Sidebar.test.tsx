@@ -99,6 +99,14 @@ describe("Sidebar", () => {
     expect(screen.queryByText("150")).toBeNull();
   });
 
+  it("keeps the logo, as a link home, on the collapsed rail", async () => {
+    localStorage.setItem("sidebar-collapsed", "1");
+    renderSidebar({ mobileOpen: false });
+    await waitFor(() => expect(screen.queryByText("My Tasks")).toBeNull());
+    expect(screen.getByLabelText("Board Planner").getAttribute("href")).toBe("/projects");
+    expect(screen.getByTestId("logo")).toBeTruthy();
+  });
+
   it("hides labels when collapsed on desktop", async () => {
     localStorage.setItem("sidebar-collapsed", "1");
     renderSidebar({ mobileOpen: false });
