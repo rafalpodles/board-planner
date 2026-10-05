@@ -1,4 +1,4 @@
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Types } from "mongoose";
 
@@ -34,8 +34,8 @@ vi.mock("@/models/user", () => ({ User: { findOne: userFindOne, countDocuments: 
 vi.mock("@/lib/setup-code", () => ({ refuseSetupCode }));
 vi.mock("bcryptjs", () => ({ default: { compare } }));
 const ACME = new Types.ObjectId();
-vi.mock("@/models/tenant", () => ({
-  Tenant: {
+vi.mock("@/models/organisation", () => ({
+  Organisation: {
     findOne: (filter: { slug: string }) => ({
       select: () => ({ lean: async () => (filter.slug === "acme" ? { _id: ACME } : null) }),
     }),
@@ -46,7 +46,7 @@ vi.mock("@/models/tenant", () => ({
 }));
 
 const { POST } = await import("./route");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { isRateLimited, lockoutKey, resetRateLimits } = await import("@/lib/rate-limit");
 
 const start = (body: unknown, provider = "oidc") =>
@@ -76,7 +76,7 @@ describe("POST /api/auth/oidc/:provider/start", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ url: "https://id.example.com/authorize?x" });
     expect(res.headers.get("set-cookie")).toBe("bp_oidc=cpo_b");
-    expect(beginFlow).toHaveBeenCalledWith(scopedToDefaultTenant(), expect.objectContaining({ intent: "signin" }));
+    expect(beginFlow).toHaveBeenCalledWith(scopedToDefaultOrganisation(), expect.objectContaining({ intent: "signin" }));
   });
 
   // BP-840
@@ -127,7 +127,7 @@ describe("POST /api/auth/oidc/:provider/start", () => {
 
       expect(res.status).toBe(200);
       expect(compare).toHaveBeenCalledWith("right", "$2a$10$hash");
-      expect(beginFlow).toHaveBeenCalledWith(scopedToDefaultTenant(), expect.objectContaining({ intent: "link", userId: "u1" }));
+      expect(beginFlow).toHaveBeenCalledWith(scopedToDefaultOrganisation(), expect.objectContaining({ intent: "link", userId: "u1" }));
     });
 
     describe("guessing the password", () => {
@@ -145,8 +145,8 @@ describe("POST /api/auth/oidc/:provider/start", () => {
       it("counts in its own family, not the e-mail change's", async () => {
         for (let i = 0; i < 10; i++) await guess("wrong");
 
-        expect(await isRateLimited(lockoutKey(DEFAULT_TENANT_ID, "203.0.113.9", "ada", "link-provider"))).toBe(true);
-        expect(await isRateLimited(lockoutKey(DEFAULT_TENANT_ID, "203.0.113.9", "ada", "email-change"))).toBe(false);
+        expect(await isRateLimited(lockoutKey(DEFAULT_ORGANISATION_ID, "203.0.113.9", "ada", "link-provider"))).toBe(true);
+        expect(await isRateLimited(lockoutKey(DEFAULT_ORGANISATION_ID, "203.0.113.9", "ada", "email-change"))).toBe(false);
       });
 
       it("forgets the session's failures once the password matches", async () => {
@@ -190,13 +190,13 @@ describe("returning to where sign-in was asked for", () => {
   it("keeps a same-origin path for after the sign-in", async () => {
     await start({ next: "/oauth/authorize?client_id=c1" });
 
-    expect(beginFlow).toHaveBeenCalledWith(scopedToDefaultTenant(), expect.objectContaining({ next: "/oauth/authorize?client_id=c1" }));
+    expect(beginFlow).toHaveBeenCalledWith(scopedToDefaultOrganisation(), expect.objectContaining({ next: "/oauth/authorize?client_id=c1" }));
   });
 
   it("turns an address elsewhere into the default", async () => {
     await start({ next: "https://evil.example/x" });
 
-    expect(beginFlow).toHaveBeenCalledWith(scopedToDefaultTenant(), expect.objectContaining({ next: "/projects" }));
+    expect(beginFlow).toHaveBeenCalledWith(scopedToDefaultOrganisation(), expect.objectContaining({ next: "/projects" }));
   });
 });
 
@@ -222,7 +222,7 @@ describe("setting up an empty instance (BP-830)", () => {
     expect(res.status).toBe(200);
     expect(refuseSetupCode).toHaveBeenCalledWith("203.0.113.9", "code");
     expect(beginFlow).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       expect.objectContaining({ intent: "bootstrap", bootstrap: { username: "ada", fullName: "Ada Lovelace" } })
     );
   });
@@ -265,13 +265,13 @@ describe("linking with password sign-in off (BP-830)", () => {
   });
 });
 
-describe("POST /api/auth/oidc/:provider/start with TENANT_DOMAIN set (BP-666)", () => {
+describe("POST /api/auth/oidc/:provider/start with ORGANISATION_DOMAIN set (BP-666)", () => {
   afterEach(() => {
-    delete process.env.TENANT_DOMAIN;
+    delete process.env.ORGANISATION_DOMAIN;
   });
 
-  it("registers the tenant's own callback address with the provider, not the configured origin", async () => {
-    process.env.TENANT_DOMAIN = "board-planner.com";
+  it("registers the organisation's own callback address with the provider, not the configured origin", async () => {
+    process.env.ORGANISATION_DOMAIN = "board-planner.com";
 
     const res = await POST(
       new Request("https://acme.board-planner.com/api/auth/oidc/oidc/start", {
@@ -284,7 +284,7 @@ describe("POST /api/auth/oidc/:provider/start with TENANT_DOMAIN set (BP-666)", 
 
     expect(res.status).toBe(200);
     expect(beginFlow).toHaveBeenCalledWith(
-      expect.objectContaining({ tenant: ACME }),
+      expect.objectContaining({ organisation: ACME }),
       expect.objectContaining({ origin: "https://acme.board-planner.com" })
     );
   });

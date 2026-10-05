@@ -13,13 +13,13 @@ const grantFind = vi.fn();
 
 let grantedProjects: string[] = [];
 
-const servedTenants = vi.hoisted(() => ({ list: null as null | { _id: unknown; digestHour?: number; timezone?: string }[] }));
-vi.mock("@/lib/tenant-jobs", async () => {
+const servedOrganisations = vi.hoisted(() => ({ list: null as null | { _id: unknown; digestHour?: number; timezone?: string }[] }));
+vi.mock("@/lib/organisation-jobs", async () => {
   const { scoped } = await import("@/lib/db-scope");
-  const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
+  const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
   return {
-    forEachServedTenant: async (_job: string, work: (db: unknown, tenant: unknown) => Promise<void>) => {
-      for (const tenant of servedTenants.list ?? [{ _id: DEFAULT_TENANT_ID }]) await work(scoped(tenant._id as never), tenant);
+    forEachServedOrganisation: async (_job: string, work: (db: unknown, organisation: unknown) => Promise<void>) => {
+      for (const organisation of servedOrganisations.list ?? [{ _id: DEFAULT_ORGANISATION_ID }]) await work(scoped(organisation._id as never), organisation);
     },
   };
 });
@@ -54,7 +54,7 @@ vi.mock("@/models/notification", () => ({
 
 const {
   digestTick,
-  tenantDigestClock,
+  organisationDigestClock,
   dueDigestDay,
   digestHour,
   digestTimezone,
@@ -65,7 +65,7 @@ const {
   digestAttemptLimit,
   lineFor,
 } = await import("@/lib/digest");
-const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
+const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
 
 /** What the module's own interval allows, so the fixtures below cannot drift from the rule. */
 const ATTEMPT_LIMIT = digestAttemptLimit();
@@ -424,15 +424,15 @@ describe("lineFor", () => {
   });
 });
 
-describe("digestTick across tenants in their own timezones (BP-667)", () => {
+describe("digestTick across organisations in their own timezones (BP-667)", () => {
   afterEach(() => {
-    servedTenants.list = null;
+    servedOrganisations.list = null;
   });
 
-  it("sends to a tenant whose own hour has come in its own zone, not to one whose has not, at the same instant", async () => {
+  it("sends to an organisation whose own hour has come in its own zone, not to one whose has not, at the same instant", async () => {
     const warsaw = new Types.ObjectId("0000000000000000000000a1");
     const tokyo = new Types.ObjectId("0000000000000000000000b2");
-    servedTenants.list = [
+    servedOrganisations.list = [
       { _id: warsaw, timezone: "Europe/Warsaw", digestHour: 9 },
       { _id: tokyo, timezone: "Asia/Tokyo", digestHour: 9 },
     ];
@@ -440,22 +440,22 @@ describe("digestTick across tenants in their own timezones (BP-667)", () => {
     // 05:30Z is 07:30 in Warsaw and 14:30 in Tokyo: Tokyo's 09:00 has come, Warsaw's 09:00 has not
     await digestTick(new Date("2026-10-05T05:30:00Z"));
 
-    const asked = userFind.mock.calls.map(([filter]) => String((filter as { tenant: unknown }).tenant));
+    const asked = userFind.mock.calls.map(([filter]) => String((filter as { organisation: unknown }).organisation));
     expect(asked).toEqual([tokyo.toHexString()]);
   });
 
-  it("falls back to the instance's hour and zone for a tenant that set neither", async () => {
-    servedTenants.list = [{ _id: new Types.ObjectId("0000000000000000000000a1") }];
+  it("falls back to the instance's hour and zone for an organisation that set neither", async () => {
+    servedOrganisations.list = [{ _id: new Types.ObjectId("0000000000000000000000a1") }];
 
     expect(await digestTick(new Date("2026-08-17T09:00:00Z"))).toBe(1);
   });
 });
 
-describe("tenantDigestClock", () => {
-  it("takes the tenant's hour and zone, and the instance's for anything unusable", () => {
-    expect(tenantDigestClock({ digestHour: 9, timezone: "Asia/Tokyo" })).toEqual({ hour: 9, timezone: "Asia/Tokyo" });
-    expect(tenantDigestClock({ digestHour: 24, timezone: "Not/AZone" })).toEqual({ hour: digestHour(), timezone: digestTimezone() });
-    expect(tenantDigestClock({})).toEqual({ hour: digestHour(), timezone: digestTimezone() });
+describe("organisationDigestClock", () => {
+  it("takes the organisation's hour and zone, and the instance's for anything unusable", () => {
+    expect(organisationDigestClock({ digestHour: 9, timezone: "Asia/Tokyo" })).toEqual({ hour: 9, timezone: "Asia/Tokyo" });
+    expect(organisationDigestClock({ digestHour: 24, timezone: "Not/AZone" })).toEqual({ hour: digestHour(), timezone: digestTimezone() });
+    expect(organisationDigestClock({})).toEqual({ hour: digestHour(), timezone: digestTimezone() });
   });
 });
 
@@ -494,7 +494,7 @@ describe("digestTick", () => {
     expect(await digestTick(morning)).toBe(0);
     expect(sendEmail).not.toHaveBeenCalled();
     expect(userFindOneAndUpdate).toHaveBeenCalledWith(
-      { _id: "u1", lastDigestDay: { $ne: "2026-08-17" }, tenant: DEFAULT_TENANT_ID },
+      { _id: "u1", lastDigestDay: { $ne: "2026-08-17" }, organisation: DEFAULT_ORGANISATION_ID },
       { $set: { lastDigestDay: "2026-08-17" } }
     );
   });
@@ -534,7 +534,7 @@ describe("digestTick", () => {
       email: { $ne: "" },
       deactivatedAt: null,
       lastDigestDay: { $ne: "2026-08-17" },
-      tenant: DEFAULT_TENANT_ID,
+      organisation: DEFAULT_ORGANISATION_ID,
     });
   });
 
@@ -612,7 +612,7 @@ describe("digestTick", () => {
     // Back to "", which is the schema's default and what a fresh document holds — and the attempt
     // recorded against today, which is what stops this retrying until midnight
     expect(userUpdateOne).toHaveBeenCalledWith(
-      { _id: "u1", lastDigestDay: MORNING_DAY, tenant: DEFAULT_TENANT_ID },
+      { _id: "u1", lastDigestDay: MORNING_DAY, organisation: DEFAULT_ORGANISATION_ID },
       { $set: { lastDigestDay: "", digestRetry: { day: MORNING_DAY, attempts: 1 } } }
     );
     // Named: `email.ts` logs "Failed to send email" without saying whose message it was, so an
@@ -640,7 +640,7 @@ describe("digestTick", () => {
     // The claim stays: no `lastDigestDay: ""` in this write, so the candidate query passes this
     // reader over for the rest of the day
     expect(userUpdateOne).toHaveBeenCalledWith(
-      { _id: "u1", lastDigestDay: MORNING_DAY, tenant: DEFAULT_TENANT_ID },
+      { _id: "u1", lastDigestDay: MORNING_DAY, organisation: DEFAULT_ORGANISATION_ID },
       { $set: { digestRetry: { day: MORNING_DAY, attempts: ATTEMPT_LIMIT } } }
     );
     expect(logged).toHaveBeenCalledWith(expect.stringContaining("waiting for tomorrow"));
@@ -660,7 +660,7 @@ describe("digestTick", () => {
     await digestTick(morning);
 
     expect(userUpdateOne).toHaveBeenCalledWith(
-      { _id: "u1", lastDigestDay: MORNING_DAY, tenant: DEFAULT_TENANT_ID },
+      { _id: "u1", lastDigestDay: MORNING_DAY, organisation: DEFAULT_ORGANISATION_ID },
       { $set: { lastDigestDay: "", digestRetry: { day: MORNING_DAY, attempts: ATTEMPT_LIMIT - 1 } } }
     );
   });
@@ -677,7 +677,7 @@ describe("digestTick", () => {
     await digestTick(morning);
 
     expect(userUpdateOne).toHaveBeenCalledWith(
-      { _id: "u1", lastDigestDay: MORNING_DAY, tenant: DEFAULT_TENANT_ID },
+      { _id: "u1", lastDigestDay: MORNING_DAY, organisation: DEFAULT_ORGANISATION_ID },
       { $set: { lastDigestDay: "", digestRetry: { day: MORNING_DAY, attempts: 1 } } }
     );
   });
@@ -724,7 +724,7 @@ describe("digestTick", () => {
 
     expect(await digestTick(morning)).toBe(0);
     expect(userUpdateOne).toHaveBeenCalledWith(
-      { _id: "u1", lastDigestDay: MORNING_DAY, tenant: DEFAULT_TENANT_ID },
+      { _id: "u1", lastDigestDay: MORNING_DAY, organisation: DEFAULT_ORGANISATION_ID },
       { $set: { lastDigestDay: "", digestRetry: { day: MORNING_DAY, attempts: 1 } } }
     );
   });
@@ -922,7 +922,7 @@ describe("how long a failing digest keeps being retried", () => {
 
     try {
       expect(userUpdateOne).toHaveBeenCalledWith(
-        { _id: "u1", lastDigestDay: MORNING_DAY, tenant: DEFAULT_TENANT_ID },
+        { _id: "u1", lastDigestDay: MORNING_DAY, organisation: DEFAULT_ORGANISATION_ID },
         { $set: { lastDigestDay: "", digestRetry: { day: MORNING_DAY, attempts: 1 } } }
       );
     } finally {

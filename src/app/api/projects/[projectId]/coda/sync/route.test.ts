@@ -8,13 +8,13 @@ const plan = vi.hoisted(() => ({ value: "pro" as "free" | "pro" }));
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ getAuthUser }));
 vi.mock("@/lib/grants", () => ({ check }));
-vi.mock("@/lib/tenant", () => ({
-  getTenant: async () => ({ _id: "t1", entitlements: { plan: plan.value, features: [] } }),
+vi.mock("@/lib/organisation", () => ({
+  getOrganisation: async () => ({ _id: "t1", entitlements: { plan: plan.value, features: [] } }),
 }));
 vi.mock("@/ee/connectors/coda/sync", () => ({ syncProjectToCoda }));
 
 const { POST } = await import("./route");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 
 const PROJECT_ID = "507f1f77bcf86cd799439011";
 const sync = () =>
@@ -35,7 +35,7 @@ describe("POST /api/projects/[projectId]/coda/sync", () => {
     const res = await sync();
 
     expect(res.status).toBe(200);
-    expect(syncProjectToCoda).toHaveBeenCalledWith(scopedToDefaultTenant(), PROJECT_ID);
+    expect(syncProjectToCoda).toHaveBeenCalledWith(scopedToDefaultOrganisation(), PROJECT_ID);
   });
 
   it("answers 402 on a free instance, without syncing", async () => {

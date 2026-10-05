@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const mayDecide = vi.fn();
 const recordVerdict = vi.fn();
@@ -30,7 +30,7 @@ vi.mock("@/models/worker", () => ({ Worker: { findOne: workerFindOne } }));
 // The same shape the status route's mock models: a Bearer is a machine credential, a cookie
 // session is a person. Deriving one from the other is what made the hole in BP-336 inexpressible.
 vi.mock("@/lib/middleware", async () => {
-  const { scopedToDefaultTenant } = await vi.importActual<typeof import("@/lib/db-scope")>("@/lib/db-scope");
+  const { scopedToDefaultOrganisation } = await vi.importActual<typeof import("@/lib/db-scope")>("@/lib/db-scope");
   return {
     withProjectAccess:
       (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
@@ -43,12 +43,12 @@ vi.mock("@/lib/middleware", async () => {
             role: "member",
             viaMachineCredential: (req.headers.get("authorization") ?? "").startsWith("Bearer "),
           },
-          db: scopedToDefaultTenant(),
+          db: scopedToDefaultOrganisation(),
         }),
   };
 });
 
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { GET, POST } = await import("./route");
 
 const TASK_ID = "69a52e3b399b27d3cbb2c5b7";
@@ -114,7 +114,7 @@ describe("answering a refused change", () => {
     const { req, ctx } = call({ verdict });
 
     expect((await POST(req, ctx)).status).toBe(200);
-    expect(recordVerdict).toHaveBeenCalledWith(scopedToDefaultTenant(), TASK_ID, verdict, "u1", {
+    expect(recordVerdict).toHaveBeenCalledWith(scopedToDefaultOrganisation(), TASK_ID, verdict, "u1", {
       workerId: WORKER_ID,
       commit: "a".repeat(40),
     });
@@ -175,7 +175,7 @@ describe("answering a refused change", () => {
 
     await POST(req, ctx);
 
-    expect(recordVerdict).toHaveBeenCalledWith(scopedToDefaultTenant(), TASK_ID, "accept", "u1", {
+    expect(recordVerdict).toHaveBeenCalledWith(scopedToDefaultOrganisation(), TASK_ID, "accept", "u1", {
       workerId: "another-machine",
       commit: "f".repeat(40),
     });
@@ -205,7 +205,7 @@ describe("answering a refused change", () => {
     await POST(req, ctx);
 
     expect(mayDecide).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       "6a70afff45d39cd9bc8bb601",
       expect.objectContaining({ _id: "u1" })
     );
@@ -216,7 +216,7 @@ describe("answering a refused change", () => {
     const { req, ctx } = call({ verdict: "accept" });
     await POST(req, ctx);
 
-    expect(taskFindOne).toHaveBeenCalledWith({ _id: TASK_ID, project: "p1", tenant: DEFAULT_TENANT_ID });
+    expect(taskFindOne).toHaveBeenCalledWith({ _id: TASK_ID, project: "p1", organisation: DEFAULT_ORGANISATION_ID });
   });
 
   /**
@@ -292,7 +292,7 @@ describe("the audit row", () => {
     const { req, ctx } = call({ verdict });
     await POST(req, ctx);
 
-    expect(logInstanceAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), expect.objectContaining({ action }));
+    expect(logInstanceAudit).toHaveBeenCalledWith(scopedToDefaultOrganisation(), expect.objectContaining({ action }));
   });
 
   /**
@@ -307,7 +307,7 @@ describe("the audit row", () => {
     await POST(req, ctx);
 
     expect(logInstanceAudit).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       expect.objectContaining({ detail: expect.stringContaining("700 file(s)") })
     );
   });
@@ -321,7 +321,7 @@ describe("the audit row", () => {
     await POST(req, ctx);
 
     expect(logInstanceAudit).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       expect.objectContaining({ detail: expect.stringContaining("2 file(s)") })
     );
   });
@@ -331,7 +331,7 @@ describe("the audit row", () => {
     await POST(req, ctx);
 
     expect(logInstanceAudit).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       expect.objectContaining({
         target: "e2e-macbook-pro",
         actorUsername: "owner",
@@ -423,6 +423,6 @@ describe("reading what is waiting", () => {
     const { req, ctx } = call({});
     await GET(req, ctx);
 
-    expect(taskFindOne).toHaveBeenCalledWith({ _id: TASK_ID, project: "p1", tenant: DEFAULT_TENANT_ID });
+    expect(taskFindOne).toHaveBeenCalledWith({ _id: TASK_ID, project: "p1", organisation: DEFAULT_ORGANISATION_ID });
   });
 });

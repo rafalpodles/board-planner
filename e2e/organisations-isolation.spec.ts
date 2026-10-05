@@ -1,30 +1,30 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
-import { RUN_TENANTS_SERVER } from "../playwright.config";
+import { RUN_ORGANISATIONS_SERVER } from "../playwright.config";
 import {
   ACME,
   GLOBEX,
   PLATFORM_HOST,
   SHARED_KEY,
-  TENANTS_API,
+  ORGANISATIONS_API,
   USERNAME,
-  asTenant,
+  asOrganisation,
   bearer,
   oauthBearer,
   hostOf,
   originOf,
-  seedTwoTenants,
+  seedTwoOrganisations,
   signInOn,
-} from "./tenants";
+} from "./organisations";
 
-const SKIP_REASON = "needs the TENANT_DOMAIN server — set E2E_TENANTS_SERVER=1";
-test.skip(!RUN_TENANTS_SERVER, SKIP_REASON);
+const SKIP_REASON = "needs the ORGANISATION_DOMAIN server — set E2E_ORGANISATIONS_SERVER=1";
+test.skip(!RUN_ORGANISATIONS_SERVER, SKIP_REASON);
 
 test.beforeEach(async () => {
-  await seedTwoTenants();
+  await seedTwoOrganisations();
 });
 
 const get = (request: APIRequestContext, path: string, headers: Record<string, string>) =>
-  request.get(`${TENANTS_API}${path}`, { headers });
+  request.get(`${ORGANISATIONS_API}${path}`, { headers });
 
 test.describe("BP-670: two organisations on one instance, each on its own subdomain", () => {
   test("a token lists its own organisation's projects on its own host", async ({ request }) => {
@@ -32,7 +32,7 @@ test.describe("BP-670: two organisations on one instance, each on its own subdom
       [ACME, GLOBEX],
       [GLOBEX, ACME],
     ] as const) {
-      const res = await get(request, "/api/projects", { ...asTenant(who), ...bearer(who) });
+      const res = await get(request, "/api/projects", { ...asOrganisation(who), ...bearer(who) });
       expect(res.status(), who.slug).toBe(200);
       const names = ((await res.json()) as { name: string }[]).map((p) => p.name);
       expect(names, who.slug).toContain(who.projectName);
@@ -41,22 +41,22 @@ test.describe("BP-670: two organisations on one instance, each on its own subdom
   });
 
   test("an OAuth access token works on its own organisation's host and is no credential on the other's", async ({ request }) => {
-    const own = await get(request, "/api/projects", { ...asTenant(ACME), ...oauthBearer(ACME) });
+    const own = await get(request, "/api/projects", { ...asOrganisation(ACME), ...oauthBearer(ACME) });
     expect(own.status()).toBe(200);
     expect(JSON.stringify(await own.json())).toContain(ACME.projectName);
 
-    expect((await get(request, "/api/projects", { ...asTenant(GLOBEX), ...oauthBearer(ACME) })).status()).toBe(401);
+    expect((await get(request, "/api/projects", { ...asOrganisation(GLOBEX), ...oauthBearer(ACME) })).status()).toBe(401);
   });
 
   test("notifications: each person's bell holds only their own organisation's, and nobody marks another's read", async ({ request }) => {
     const bell = async (who: typeof ACME) =>
-      JSON.stringify(await (await get(request, "/api/notifications", { ...asTenant(who), ...bearer(who) })).json());
+      JSON.stringify(await (await get(request, "/api/notifications", { ...asOrganisation(who), ...bearer(who) })).json());
 
     expect(await bell(ACME)).toContain("acme notice");
     expect(await bell(GLOBEX)).not.toContain("acme notice");
 
-    const marked = await request.patch(`${TENANTS_API}/api/notifications/read`, {
-      headers: { ...asTenant(GLOBEX), ...bearer(GLOBEX), "content-type": "application/json" },
+    const marked = await request.patch(`${ORGANISATIONS_API}/api/notifications/read`, {
+      headers: { ...asOrganisation(GLOBEX), ...bearer(GLOBEX), "content-type": "application/json" },
       data: { id: String(ACME.notificationId) },
     });
     expect(marked.status()).toBeLessThan(500);
@@ -66,12 +66,12 @@ test.describe("BP-670: two organisations on one instance, each on its own subdom
   });
 
   test("a token is no credential on another organisation's host", async ({ request }) => {
-    const res = await get(request, "/api/projects", { ...asTenant(GLOBEX), ...bearer(ACME) });
+    const res = await get(request, "/api/projects", { ...asOrganisation(GLOBEX), ...bearer(ACME) });
     expect(res.status()).toBe(401);
   });
 
   test("a host that names no organisation, and the platform host, answer 404 before anything else", async ({ request }) => {
-    for (const host of [`nobody.tenants.localhost:${hostOf(ACME).split(":")[1]}`, PLATFORM_HOST]) {
+    for (const host of [`nobody.organisations.localhost:${hostOf(ACME).split(":")[1]}`, PLATFORM_HOST]) {
       const res = await get(request, "/api/projects", { host, "sec-fetch-site": "same-origin", ...bearer(ACME) });
       expect(res.status(), host).toBe(404);
     }
@@ -79,23 +79,23 @@ test.describe("BP-670: two organisations on one instance, each on its own subdom
 
   test("the same project key in both organisations names each one's own board", async ({ request }) => {
     for (const who of [ACME, GLOBEX]) {
-      const res = await get(request, `/api/projects/${SHARED_KEY}`, { ...asTenant(who), ...bearer(who) });
+      const res = await get(request, `/api/projects/${SHARED_KEY}`, { ...asOrganisation(who), ...bearer(who) });
       expect(res.status(), who.slug).toBe(200);
       expect((await res.json()).name, who.slug).toBe(who.projectName);
     }
   });
 
   test("another organisation's project id is not there, even for an admin", async ({ request }) => {
-    const foreign = await get(request, `/api/projects/${GLOBEX.projectId}`, { ...asTenant(ACME), ...bearer(ACME) });
-    const missing = await get(request, "/api/projects/e2e0000000000000000ff0ff", { ...asTenant(ACME), ...bearer(ACME) });
+    const foreign = await get(request, `/api/projects/${GLOBEX.projectId}`, { ...asOrganisation(ACME), ...bearer(ACME) });
+    const missing = await get(request, "/api/projects/e2e0000000000000000ff0ff", { ...asOrganisation(ACME), ...bearer(ACME) });
     expect(foreign.status()).toBe(404);
     expect(await foreign.text()).toBe(await missing.text());
   });
 
   test("the same username signs in to each organisation with that organisation's password only", async ({ request }) => {
     const login = (who: typeof ACME, password: string) =>
-      request.post(`${TENANTS_API}/api/auth/login`, {
-        headers: { ...asTenant(who), origin: originOf(who), "content-type": "application/json" },
+      request.post(`${ORGANISATIONS_API}/api/auth/login`, {
+        headers: { ...asOrganisation(who), origin: originOf(who), "content-type": "application/json" },
         data: { username: USERNAME, password },
       });
 
@@ -108,11 +108,11 @@ test.describe("BP-670: two organisations on one instance, each on its own subdom
   test("/me answers on its own host and refuses the session on another", async ({ request }) => {
     const cookie = (who: typeof ACME) => ({ cookie: `__Host-bp_session=${who.sessionToken}` });
 
-    const home = await get(request, "/api/auth/me", { ...asTenant(ACME), ...cookie(ACME) });
+    const home = await get(request, "/api/auth/me", { ...asOrganisation(ACME), ...cookie(ACME) });
     expect(home.status()).toBe(200);
     expect((await home.json()).username).toBe(USERNAME);
 
-    expect((await get(request, "/api/auth/me", { ...asTenant(GLOBEX), ...cookie(ACME) })).status()).toBe(401);
+    expect((await get(request, "/api/auth/me", { ...asOrganisation(GLOBEX), ...cookie(ACME) })).status()).toBe(401);
   });
 
   test("on screen: signed in to one organisation, its board is there and the other's is not", async ({ page }) => {

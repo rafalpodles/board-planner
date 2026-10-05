@@ -1,6 +1,6 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { IUser, NOTIFICATION_TYPES, PERSONAL_CHAT_KINDS } from "@/types";
-import { withTenant } from "@/lib/tenant-field";
+import { withOrganisation } from "@/lib/organisation-field";
 
 // One sub-schema reused by the global grid and by every project override, so a row cannot mean
 // one thing in one place and something else in the other. `_id: false` keeps Mongoose from
@@ -136,8 +136,8 @@ const userSchema = new Schema<IUser>({
 // twice over — the two options cannot be combined, and $ne is not a supported partial expression.
 // Mongoose swallows the CannotCreateIndex, so the index nobody built enforced nothing: two
 // accounts could hold one address, the lookup a password reset by email depends on.
-userSchema.index({ email: 1, tenant: 1 }, { unique: true, partialFilterExpression: { email: { $gt: "" } } });
-userSchema.index({ username: 1, tenant: 1 }, { unique: true });
+userSchema.index({ email: 1, organisation: 1 }, { unique: true, partialFilterExpression: { email: { $gt: "" } } });
+userSchema.index({ username: 1, organisation: 1 }, { unique: true });
 
 // Remove the credentials from JSON output. The webhook is encrypted at rest, but it rides on the
 // user document, and two routes serialise a whole user — the admin list and the caller's own PUT —
@@ -156,7 +156,7 @@ userSchema.set("toJSON", {
   },
 });
 
-withTenant(userSchema);
+withOrganisation(userSchema);
 
 export const User: Model<IUser> =
   mongoose.models.User || mongoose.model<IUser>("User", userSchema);

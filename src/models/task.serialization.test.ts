@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { Task } from "./task";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 import {
   toApiDecision,
   DECISION_FIELDS_A_READER_NEEDS,
@@ -51,7 +51,7 @@ describe("Task schema", () => {
 describe("a recurrence stored before the interval had a bound", () => {
   const legacy = (interval: number) =>
     new Task({
-      tenant: DEFAULT_TENANT_ID,
+      organisation: DEFAULT_ORGANISATION_ID,
       project: "6a69903ec4c79d7d07a5eda8",
       taskNumber: 1,
       title: "Pay the annual thing",

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NOTIFICATION_TYPES } from "@/types";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
@@ -72,7 +72,7 @@ describe("PUT /api/users/me/notifications/:projectId", () => {
     const res = await call(PUT, { matrix: oneRowTicked });
 
     expect(res.status).toBe(200);
-    expect(filter(0)).toEqual({ _id: ME, "notifications.projects.project": PROJECT_ID, tenant: DEFAULT_TENANT_ID });
+    expect(filter(0)).toEqual({ _id: ME, "notifications.projects.project": PROJECT_ID, organisation: DEFAULT_ORGANISATION_ID });
     expect(update(0)).toEqual({
       $set: { "notifications.projects.$.matrix": expect.objectContaining(oneRowTicked) },
     });
@@ -112,7 +112,7 @@ describe("PUT /api/users/me/notifications/:projectId", () => {
       $expr: {
         $lt: [{ $size: { $ifNull: ["$notifications.projects", []] } }, MAX_OVERRIDES],
       },
-      tenant: DEFAULT_TENANT_ID,
+      organisation: DEFAULT_ORGANISATION_ID,
     });
     expect(userFindOne).not.toHaveBeenCalled();
   });
@@ -184,7 +184,7 @@ describe("DELETE /api/users/me/notifications/:projectId", () => {
     const res = await call(DELETE);
 
     expect(res.status).toBe(200);
-    expect(userFindOneAndUpdate).toHaveBeenCalledWith({ _id: ME, tenant: DEFAULT_TENANT_ID }, {
+    expect(userFindOneAndUpdate).toHaveBeenCalledWith({ _id: ME, organisation: DEFAULT_ORGANISATION_ID }, {
       $pull: { "notifications.projects": { project: PROJECT_ID } },
     });
   });

@@ -9,7 +9,7 @@ vi.mock("@/lib/auth", () => ({ getAuthUser, RateLimitError: class extends Error 
 vi.mock("@/lib/email-change", () => ({ pendingEmailChange, cancelEmailChange }));
 
 const { GET, DELETE } = await import("./route");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 
 const request = (method: string) =>
   new Request("https://app.example.com/api/users/me/email-change", {
@@ -30,7 +30,7 @@ describe("/api/users/me/email-change", () => {
 
     expect(await (await GET(request("GET"), ctx)).json()).toMatchObject({ pending: { email: "new@example.com" } });
     expect((await DELETE(request("DELETE"), ctx)).status).toBe(200);
-    expect(cancelEmailChange).toHaveBeenCalledWith(scopedToDefaultTenant(), "u1");
+    expect(cancelEmailChange).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "u1");
   });
 
   it("refuses a machine credential either way", async () => {

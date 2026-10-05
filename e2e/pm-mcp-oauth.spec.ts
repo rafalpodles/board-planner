@@ -8,7 +8,7 @@ import { BASE_URL, MCP_SERVER_STUB_URL, PM_STUB_URL } from "../playwright.config
 /**
  * BP-707. An MCP server behind OAuth: Connect, the authorization server's consent page, the
  * callback, and what the connection does afterwards. The authorization server is the MCP stub's
- * `/oauth/<tenant>` space (e2e/mcp-oauth-stub.mjs), a fresh tenant per test, reached by the
+ * `/oauth/<organisation>` space (e2e/mcp-oauth-stub.mjs), a fresh organisation per test, reached by the
  * browser the way a real provider is — the app is never told where it is beyond the MCP url.
  */
 
@@ -30,14 +30,14 @@ interface TokenLogEntry {
 }
 type LogEntry = TokenLogEntry | { type: "register" | "authorize"; clientId: string };
 
-function newTenant(): string {
+function newOrganisation(): string {
   return `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 }
 
-const serverUrl = (tenant: string) => `${MCP_SERVER_STUB_URL}/oauth/${tenant}/mcp`;
+const serverUrl = (organisation: string) => `${MCP_SERVER_STUB_URL}/oauth/${organisation}/mcp`;
 
-async function stubLog(request: APIRequestContext, tenant: string): Promise<LogEntry[]> {
-  return (await request.get(`${MCP_SERVER_STUB_URL}/_control/oauth/${tenant}/log`)).json();
+async function stubLog(request: APIRequestContext, organisation: string): Promise<LogEntry[]> {
+  return (await request.get(`${MCP_SERVER_STUB_URL}/_control/oauth/${organisation}/log`)).json();
 }
 
 const tokenRequests = (log: LogEntry[]) => log.filter((e): e is TokenLogEntry => e.type === "token");
@@ -73,10 +73,10 @@ async function openSettings(page: Page) {
   await expect(page.getByRole("heading", { name: "MCP connections" })).toBeVisible();
 }
 
-async function addOauthServer(page: Page, tenant: string, client?: { id: string; secret: string }) {
+async function addOauthServer(page: Page, organisation: string, client?: { id: string; secret: string }) {
   await page.getByRole("button", { name: "Add MCP server" }).click();
   await page.getByLabel("Name for Server 1").fill(ROW);
-  await page.getByLabel(`URL for ${ROW}`).fill(serverUrl(tenant));
+  await page.getByLabel(`URL for ${ROW}`).fill(serverUrl(organisation));
   await page.getByLabel(`Authentication for ${ROW}`).selectOption("oauth");
   if (client) await typeClient(page, client);
 }
@@ -86,9 +86,9 @@ async function typeClient(page: Page, client: { id: string; secret: string }) {
   await page.getByLabel(`Client secret for ${ROW}`).fill(client.secret);
 }
 
-async function clickConnect(page: Page, tenant: string, label = "Connect") {
+async function clickConnect(page: Page, organisation: string, label = "Connect") {
   await page.getByRole("button", { name: `${label} ${ROW}`, exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(`^${MCP_SERVER_STUB_URL}/oauth/${tenant}/authorize\\?`));
+  await expect(page).toHaveURL(new RegExp(`^${MCP_SERVER_STUB_URL}/oauth/${organisation}/authorize\\?`));
 }
 
 /** Approves on the provider's page and returns where the callback sent the browser. */
@@ -102,8 +102,8 @@ async function approve(page: Page): Promise<string> {
   return res.headers()["location"] ?? "";
 }
 
-async function connect(page: Page, tenant: string, label = "Connect") {
-  await clickConnect(page, tenant, label);
+async function connect(page: Page, organisation: string, label = "Connect") {
+  await clickConnect(page, organisation, label);
   expect(await approve(page)).toContain("mcp_oauth=ok");
   await expect(page.getByText("MCP OAuth connection established")).toBeVisible();
   await expect(page.getByText("Connected", { exact: true })).toBeVisible();
@@ -129,14 +129,14 @@ test.afterEach(async ({ request }) => {
 });
 
 test("Connect registers a client, signs in through the provider, and the token reaches a turn", async ({ page, request }) => {
-  const tenant = newTenant();
+  const organisation = newOrganisation();
   await signIn(page, "admin");
   await openSettings(page);
-  await addOauthServer(page, tenant);
+  await addOauthServer(page, organisation);
 
-  await connect(page, tenant);
+  await connect(page, organisation);
 
-  const log = await stubLog(request, tenant);
+  const log = await stubLog(request, organisation);
   const registrations = log.filter((e) => e.type === "register");
   expect(registrations).toEqual([
     expect.objectContaining({ redirectUris: [CALLBACK] }),
@@ -181,12 +181,12 @@ test("a second signed-in user cannot finish someone else's connection; that admi
   browser,
   baseURL,
 }) => {
-  const tenant = newTenant();
+  const organisation = newOrganisation();
   await signIn(page, "admin");
   await openSettings(page);
-  await addOauthServer(page, tenant);
+  await addOauthServer(page, organisation);
 
-  await clickConnect(page, tenant);
+  await clickConnect(page, organisation);
   const authorizationUrl = page.url();
 
   const memberContext = await browser.newContext({ baseURL });
@@ -212,13 +212,13 @@ test("a second signed-in user cannot finish someone else's connection; that admi
   expect((await storedOauth()).status).not.toBe("connected");
 
   // Positive control: the admin who actually started a flow can still finish one.
-  await connect(page, tenant);
+  await connect(page, organisation);
 });
 
 test("a client typed by hand is the one the token request carries; an unknown one is refused", async ({ page, request }) => {
-  const tenant = newTenant();
-  const typed = { id: `typed-${tenant}`, secret: `typed-secret-${tenant}` };
-  await request.post(`${MCP_SERVER_STUB_URL}/_control/oauth/${tenant}/client`, {
+  const organisation = newOrganisation();
+  const typed = { id: `typed-${organisation}`, secret: `typed-secret-${organisation}` };
+  await request.post(`${MCP_SERVER_STUB_URL}/_control/oauth/${organisation}/client`, {
     data: {
       client_id: typed.id,
       client_secret: typed.secret,
@@ -229,22 +229,22 @@ test("a client typed by hand is the one the token request carries; an unknown on
   await signIn(page, "admin");
   await openSettings(page);
 
-  await addOauthServer(page, tenant, { id: "nobody-registered-this", secret: "whatever" });
-  await clickConnect(page, tenant);
+  await addOauthServer(page, organisation, { id: "nobody-registered-this", secret: "whatever" });
+  await clickConnect(page, organisation);
   await expect(page.getByRole("heading", { name: "Unknown client" })).toBeVisible();
 
   await openSettings(page);
   // Typed over the stored registration, which a save used to drop in silence
   await typeClient(page, { id: typed.id, secret: "not-the-secret" });
-  await clickConnect(page, tenant);
+  await clickConnect(page, organisation);
   expect(await approve(page)).toContain("mcp_oauth=error%3Atoken_exchange");
   await expect(page.getByText("MCP OAuth failed: token_exchange")).toBeVisible();
   await expect(page.getByText("Not connected", { exact: true })).toBeVisible();
 
   await typeClient(page, typed);
-  await connect(page, tenant);
+  await connect(page, organisation);
 
-  const log = await stubLog(request, tenant);
+  const log = await stubLog(request, organisation);
   expect(log.filter((e) => e.type === "register")).toEqual([]);
   expect(tokenRequests(log)).toEqual([
     expect.objectContaining({
@@ -288,11 +288,11 @@ test("a client typed by hand is the one the token request carries; an unknown on
 });
 
 test("a token that expires is refreshed; once the refresh is refused the panel says to sign in again, and reconnecting recovers", async ({ page, request }) => {
-  const tenant = newTenant();
+  const organisation = newOrganisation();
   await signIn(page, "admin");
   await openSettings(page);
-  await addOauthServer(page, tenant);
-  await connect(page, tenant);
+  await addOauthServer(page, organisation);
+  await connect(page, organisation);
 
   // The control: an expired token with a refresh the provider still honours stays connected
   const before = await storedOauth();
@@ -302,16 +302,16 @@ test("a token that expires is refreshed; once the refresh is refused the panel s
   const refreshed = await storedOauth();
   expect(refreshed.status).toBe("connected");
   expect(refreshed.accessToken).not.toBe(before.accessToken);
-  expect(tokenRequests(await stubLog(request, tenant)).map((e) => [e.grantType, e.outcome])).toEqual([
+  expect(tokenRequests(await stubLog(request, organisation)).map((e) => [e.grantType, e.outcome])).toEqual([
     ["authorization_code", "issued"],
     ["refresh_token", "issued"],
   ]);
 
-  await request.post(`${MCP_SERVER_STUB_URL}/_control/oauth/${tenant}/revoke`);
+  await request.post(`${MCP_SERVER_STUB_URL}/_control/oauth/${organisation}/revoke`);
   await expireStoredToken();
   await testConnection(page);
   await expect(page.getByText("✗ OAuth connection not established — click Connect first")).toBeVisible();
-  expect(tokenRequests(await stubLog(request, tenant)).map((e) => [e.grantType, e.outcome])).toEqual([
+  expect(tokenRequests(await stubLog(request, organisation)).map((e) => [e.grantType, e.outcome])).toEqual([
     ["authorization_code", "issued"],
     ["refresh_token", "issued"],
     ["refresh_token", "invalid_grant"],
@@ -322,7 +322,7 @@ test("a token that expires is refreshed; once the refresh is refused the panel s
   await expect(page.getByText("Needs re-auth", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: `Disconnect ${ROW}` })).toHaveCount(0);
 
-  await connect(page, tenant);
+  await connect(page, organisation);
   expect((await storedOauth()).status).toBe("connected");
   await testConnection(page);
   await expect(page.getByText("✓ Connected — 1 tools offered. Tick the ones the agent should get.")).toBeVisible();
@@ -333,14 +333,14 @@ test("a token that expires is refreshed; once the refresh is refused the panel s
 // fresh" check would otherwise hand a dead token straight to the call, exactly like a real early
 // revocation between one PM turn and the next.
 test("an access token revoked early, but not locally expired, is refreshed on the next PM turn", async ({ page, request }) => {
-  const tenant = newTenant();
+  const organisation = newOrganisation();
   await signIn(page, "admin");
   await openSettings(page);
-  await addOauthServer(page, tenant);
-  await connect(page, tenant);
+  await addOauthServer(page, organisation);
+  await connect(page, organisation);
 
   const before = await storedOauth();
-  await request.post(`${MCP_SERVER_STUB_URL}/_control/oauth/${tenant}/revoke-access`);
+  await request.post(`${MCP_SERVER_STUB_URL}/_control/oauth/${organisation}/revoke-access`);
 
   await request.post(`${PM_STUB_URL}/reset`);
   await page.goto(PM_URL);
@@ -355,7 +355,7 @@ test("an access token revoked early, but not locally expired, is refreshed on th
   const after = await storedOauth();
   expect(after.status).toBe("connected");
   expect(after.accessToken).not.toBe(before.accessToken);
-  expect(tokenRequests(await stubLog(request, tenant)).map((e) => [e.grantType, e.outcome])).toEqual([
+  expect(tokenRequests(await stubLog(request, organisation)).map((e) => [e.grantType, e.outcome])).toEqual([
     ["authorization_code", "issued"],
     ["refresh_token", "issued"],
   ]);
@@ -365,11 +365,11 @@ test("an access token revoked early, but not locally expired, is refreshed on th
 });
 
 test("Disconnect deletes the stored tokens, not only the badge", async ({ page }) => {
-  const tenant = newTenant();
+  const organisation = newOrganisation();
   await signIn(page, "admin");
   await openSettings(page);
-  await addOauthServer(page, tenant);
-  await connect(page, tenant);
+  await addOauthServer(page, organisation);
+  await connect(page, organisation);
 
   const connected = await storedOauth();
   expect(String(connected.accessToken).length).toBeGreaterThan(0);

@@ -1,6 +1,6 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { AGENT_BUCKETS, AGENT_SCOPES, IAgent } from "@/types";
-import { withTenant } from "@/lib/tenant-field";
+import { withOrganisation } from "@/lib/organisation-field";
 
 // One position in the sequence. The key says which block; params override that block's own, for
 // this position only — which is what lets one agent carry two Size gates with different limits
@@ -63,7 +63,7 @@ agentSchema.pre("init", function (raw: Record<string, unknown>) {
 agentSchema.index({ scope: 1, owner: 1 });
 agentSchema.index({ scope: 1, project: 1 });
 
-withTenant(agentSchema);
+withOrganisation(agentSchema);
 
 export const Agent: Model<IAgent> =
   mongoose.models.Agent || mongoose.model<IAgent>("Agent", agentSchema);

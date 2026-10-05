@@ -1,8 +1,8 @@
 import { Model, UpdateQuery } from "mongoose";
 import { duplicateKeyField } from "./mongo-errors";
-import { DEFAULT_TENANT_ID } from "./tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "./organisation-field";
 
-export const SINGLETON_ID = DEFAULT_TENANT_ID;
+export const SINGLETON_ID = DEFAULT_ORGANISATION_ID;
 
 export async function upsertSingleton<T>(model: Model<T>, update: UpdateQuery<T>): Promise<T> {
   const withFixedId = {

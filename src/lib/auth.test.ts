@@ -32,17 +32,17 @@ vi.mock("@/models/session", () => ({
 }));
 
 const { getAuthUser, verifyCredentials, PASSWORD_COST_FACTOR } = await import("./auth");
-const { scopedToDefaultTenant } = await import("./db-scope");
+const { scopedToDefaultOrganisation } = await import("./db-scope");
 const { ProvenanceError, SESSION_IDLE_TTL_MS } = await import("./session");
 const { sha256 } = await import("./oauth");
-const { DEFAULT_TENANT_ID: TENANT } = await import("./tenant-field");
+const { DEFAULT_ORGANISATION_ID: ORGANISATION } = await import("./organisation-field");
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const SESSION_TOKEN = "cps_" + "a".repeat(64);
 const MACHINE_TOKEN = "cpat_" + "b".repeat(64);
 
 function user(overrides: Record<string, unknown> = {}) {
-  return { _id: "u1", username: "owner", role: "admin", tenant: TENANT, ...overrides };
+  return { _id: "u1", username: "owner", role: "admin", organisation: ORGANISATION, ...overrides };
 }
 
 function sessionRow(overrides: Record<string, unknown> = {}) {
@@ -50,7 +50,7 @@ function sessionRow(overrides: Record<string, unknown> = {}) {
   return {
     _id: "s1",
     user: "u1",
-    tenant: TENANT,
+    organisation: ORGANISATION,
     expiresAt: new Date(now + SESSION_IDLE_TTL_MS),
     absoluteExpiresAt: new Date(now + 90 * DAY_MS),
     ...overrides,
@@ -123,7 +123,7 @@ describe("getAuthUser — session cookie", () => {
 describe("getAuthUser — machine credentials", () => {
   it("marks an OAuth access token as a machine credential", async () => {
     oauthTokenFindOne.mockResolvedValue({
-      tenant: TENANT,
+      organisation: ORGANISATION,
       user: "u1",
       accessExpiresAt: new Date(Date.now() + DAY_MS),
       allowedProjects: [],
@@ -140,7 +140,7 @@ describe("getAuthUser — machine credentials", () => {
   it("marks an API token as a machine credential", async () => {
     const token = "cp_" + "c".repeat(64);
     apiTokenFind.mockReturnValue({
-      lean: () => Promise.resolve([{ _id: "t1", user: "u1", tenant: TENANT, tokenHash: "hashed", allowedProjects: [] }]),
+      lean: () => Promise.resolve([{ _id: "t1", user: "u1", organisation: ORGANISATION, tokenHash: "hashed", allowedProjects: [] }]),
     });
     bcryptCompare.mockResolvedValue(true);
 
@@ -161,7 +161,7 @@ describe("getAuthUser — an OAuth row that cannot be shown to be live", () => {
     ["an unparseable date", new Date("not a date")],
   ])("refuses a row whose accessExpiresAt is %s without throwing", async (_label, value) => {
     oauthTokenFindOne.mockResolvedValue({
-      tenant: TENANT,
+      organisation: ORGANISATION,
       user: "u1",
       accessExpiresAt: value,
       allowedProjects: [],
@@ -177,7 +177,7 @@ describe("getAuthUser — an OAuth row that cannot be shown to be live", () => {
 
   it("still refuses a plainly expired row, and still admits a live one", async () => {
     oauthTokenFindOne.mockResolvedValue({
-      tenant: TENANT,
+      organisation: ORGANISATION,
       user: "u1",
       accessExpiresAt: new Date(Date.now() - 1000),
       allowedProjects: [],
@@ -187,7 +187,7 @@ describe("getAuthUser — an OAuth row that cannot be shown to be live", () => {
     ).resolves.toBeNull();
 
     oauthTokenFindOne.mockResolvedValue({
-      tenant: TENANT,
+      organisation: ORGANISATION,
       user: "u1",
       accessExpiresAt: new Date(Date.now() + DAY_MS),
       allowedProjects: [],
@@ -205,7 +205,7 @@ describe("getAuthUser — an OAuth row that cannot be shown to be live", () => {
   // depend on the cascade completing at all.
   it("refuses a token whose client no longer exists, live row or not", async () => {
     oauthTokenFindOne.mockResolvedValue({
-      tenant: TENANT,
+      organisation: ORGANISATION,
       clientId: "deleted-client",
       user: "u1",
       accessExpiresAt: new Date(Date.now() + DAY_MS),
@@ -246,7 +246,7 @@ describe("getAuthUser — Basic auth is gone", () => {
 describe("getAuthUser — machine token planted in the session cookie", () => {
   it("refuses a cpat_ carried in the cookie: it is not in the Session collection", async () => {
     oauthTokenFindOne.mockResolvedValue({
-      tenant: TENANT,
+      organisation: ORGANISATION,
       user: "u1",
       accessExpiresAt: new Date(Date.now() + DAY_MS),
       allowedProjects: [],
@@ -264,7 +264,7 @@ describe("getAuthUser — machine token planted in the session cookie", () => {
   it("refuses a cpat_ in the cookie even when a session row happens to carry that hash", async () => {
     sessionFound(sessionRow());
     oauthTokenFindOne.mockResolvedValue({
-      tenant: TENANT,
+      organisation: ORGANISATION,
       user: "u1",
       accessExpiresAt: new Date(Date.now() + DAY_MS),
       allowedProjects: [],
@@ -281,7 +281,7 @@ describe("getAuthUser — machine token planted in the session cookie", () => {
   it("refuses a cp_ carried in the cookie without consulting the API tokens", async () => {
     bcryptCompare.mockResolvedValue(true);
     apiTokenFind.mockReturnValue({
-      lean: () => Promise.resolve([{ _id: "t1", user: "u1", tenant: TENANT, tokenHash: "hashed", allowedProjects: [] }]),
+      lean: () => Promise.resolve([{ _id: "t1", user: "u1", organisation: ORGANISATION, tokenHash: "hashed", allowedProjects: [] }]),
     });
 
     const result = await getAuthUser(withCookie("cp_" + "c".repeat(64)));
@@ -327,7 +327,7 @@ describe("getAuthUser — provenance on the cookie branch", () => {
 
   it("does not apply the check to the Bearer path, which machines cannot satisfy", async () => {
     oauthTokenFindOne.mockResolvedValue({
-      tenant: TENANT,
+      organisation: ORGANISATION,
       user: "u1",
       accessExpiresAt: new Date(Date.now() + DAY_MS),
       allowedProjects: [],
@@ -388,7 +388,7 @@ describe("getAuthUser — two cookie names under auto", () => {
     sessionFindOne.mockImplementation((query: { tokenHash?: unknown }) => ({
       lean: async () => (JSON.stringify(query).includes(sha256("cps_plain")) ? sessionRow() : null),
     }));
-    userFindById.mockResolvedValue({ _id: "u1", username: "ada", tenant: TENANT });
+    userFindById.mockResolvedValue({ _id: "u1", username: "ada", organisation: ORGANISATION });
 
     expect(await getAuthUser(both())).toBeNull();
   });
@@ -397,7 +397,7 @@ describe("getAuthUser — two cookie names under auto", () => {
     sessionFindOne.mockImplementation((query: { tokenHash?: unknown }) => ({
       lean: async () => (JSON.stringify(query).includes(sha256("cps_plain")) ? sessionRow() : null),
     }));
-    userFindById.mockResolvedValue({ _id: "u1", username: "ada", tenant: TENANT });
+    userFindById.mockResolvedValue({ _id: "u1", username: "ada", organisation: ORGANISATION });
 
     const result = await getAuthUser(request({ cookie: "bp_session=cps_plain" }));
 
@@ -406,7 +406,7 @@ describe("getAuthUser — two cookie names under auto", () => {
 
   it("reads the prefixed name first when both are live", async () => {
     sessionFound(sessionRow());
-    userFindById.mockResolvedValue({ _id: "u1", username: "ada", tenant: TENANT });
+    userFindById.mockResolvedValue({ _id: "u1", username: "ada", organisation: ORGANISATION });
 
     await getAuthUser(both());
 
@@ -455,7 +455,7 @@ describe("getAuthUser — the five machine-gated endpoints", () => {
 
   it("keeps a strict true on both machine paths", async () => {
     oauthTokenFindOne.mockResolvedValue({
-      tenant: TENANT,
+      organisation: ORGANISATION,
       user: "u1",
       accessExpiresAt: new Date(Date.now() + DAY_MS),
       allowedProjects: [],
@@ -466,7 +466,7 @@ describe("getAuthUser — the five machine-gated endpoints", () => {
     bcryptCompare.mockResolvedValue(true);
     apiTokenFind.mockReturnValue({
       lean: () =>
-        Promise.resolve([{ _id: "t1", user: "u1", tenant: TENANT, tokenHash: "hashed", allowedProjects: [] }]),
+        Promise.resolve([{ _id: "t1", user: "u1", organisation: ORGANISATION, tokenHash: "hashed", allowedProjects: [] }]),
     });
     const viaToken = await getAuthUser(request({ authorization: `Bearer cp_${"c".repeat(64)}` }));
     expect(viaToken?.viaMachineCredential).toBe(true);
@@ -486,14 +486,14 @@ describe("verifyCredentials and the username oracle", () => {
     lookupReturns({ username: "pm", kind: "machine", password: "$2a$10$stored" });
     bcryptCompare.mockResolvedValue(true);
 
-    expect(await verifyCredentials(scopedToDefaultTenant(), "pm", "the-password-it-was-given")).toBeNull();
+    expect(await verifyCredentials(scopedToDefaultOrganisation(), "pm", "the-password-it-was-given")).toBeNull();
   });
 
   it("still signs in a person whose password matches", async () => {
     lookupReturns({ username: "owner", kind: "human", password: "$2a$10$stored" });
     bcryptCompare.mockResolvedValue(true);
 
-    expect(await verifyCredentials(scopedToDefaultTenant(), "owner", "hunter2")).toMatchObject({ username: "owner" });
+    expect(await verifyCredentials(scopedToDefaultOrganisation(), "owner", "hunter2")).toMatchObject({ username: "owner" });
   });
 
   // BP-828: an account made through an identity provider has no password at all; it must refuse,
@@ -502,7 +502,7 @@ describe("verifyCredentials and the username oracle", () => {
     lookupReturns({ username: "sso-only", kind: "human" });
     bcryptCompare.mockResolvedValue(true);
 
-    expect(await verifyCredentials(scopedToDefaultTenant(), "sso-only", "anything")).toBeNull();
+    expect(await verifyCredentials(scopedToDefaultOrganisation(), "sso-only", "anything")).toBeNull();
     expect(bcryptCompare).toHaveBeenCalledTimes(1);
     expect(bcryptCompare.mock.calls[0][1]).toBe("$2a$10$absent");
   });
@@ -510,7 +510,7 @@ describe("verifyCredentials and the username oracle", () => {
   it("compares against a hash even when no such user exists", async () => {
     lookupReturns(null);
 
-    const result = await verifyCredentials(scopedToDefaultTenant(), "nobody", "hunter2");
+    const result = await verifyCredentials(scopedToDefaultOrganisation(), "nobody", "hunter2");
 
     expect(result).toBeNull();
     expect(bcryptCompare).toHaveBeenCalledTimes(1);
@@ -519,13 +519,13 @@ describe("verifyCredentials and the username oracle", () => {
 
   it("does the same amount of comparing for a hit and a miss", async () => {
     lookupReturns(null);
-    await verifyCredentials(scopedToDefaultTenant(), "nobody", "hunter2");
+    await verifyCredentials(scopedToDefaultOrganisation(), "nobody", "hunter2");
     const onMiss = bcryptCompare.mock.calls.length;
 
     bcryptCompare.mockClear();
     lookupReturns({ username: "owner", password: "$2a$10$stored" });
     bcryptCompare.mockResolvedValue(true);
-    await verifyCredentials(scopedToDefaultTenant(), "owner", "hunter2");
+    await verifyCredentials(scopedToDefaultOrganisation(), "owner", "hunter2");
 
     expect(bcryptCompare.mock.calls.length).toBe(onMiss);
   });
@@ -536,7 +536,7 @@ describe("verifyCredentials and the username oracle", () => {
   it("compares against the module's own hash, not against something cheap", async () => {
     lookupReturns(null);
 
-    await verifyCredentials(scopedToDefaultTenant(), "nobody", "hunter2");
+    await verifyCredentials(scopedToDefaultOrganisation(), "nobody", "hunter2");
 
     // The mocked hashSync returns this; the assertion is that the compare uses what the module
     // hashed at load, not a literal that bcrypt would reject in microseconds
@@ -552,7 +552,7 @@ describe("verifyCredentials and the username oracle", () => {
     lookupReturns({ username: "owner", password: "$2a$10$stored" });
     bcryptCompare.mockResolvedValue(false);
 
-    expect(await verifyCredentials(scopedToDefaultTenant(), "owner", "wrong")).toBeNull();
+    expect(await verifyCredentials(scopedToDefaultOrganisation(), "owner", "wrong")).toBeNull();
   });
 });
 
@@ -577,7 +577,7 @@ describe("a deactivated account", () => {
 
   it("resolves from no API token", async () => {
     apiTokenFind.mockReturnValue({
-      lean: () => Promise.resolve([{ _id: "t1", user: "u1", tenant: TENANT, tokenHash: "hashed", allowedProjects: [] }]),
+      lean: () => Promise.resolve([{ _id: "t1", user: "u1", organisation: ORGANISATION, tokenHash: "hashed", allowedProjects: [] }]),
     });
     bcryptCompare.mockResolvedValue(true);
     userFindById.mockResolvedValue(off());
@@ -591,44 +591,44 @@ describe("a deactivated account", () => {
     });
     bcryptCompare.mockResolvedValue(true);
 
-    expect(await verifyCredentials(scopedToDefaultTenant(), "owner", "hunter2")).toBeNull();
+    expect(await verifyCredentials(scopedToDefaultOrganisation(), "owner", "hunter2")).toBeNull();
     expect(bcryptCompare).toHaveBeenCalledTimes(1);
   });
 });
 
-describe("getAuthUser — a credential bound to its own tenant (BP-665)", () => {
+describe("getAuthUser — a credential bound to its own organisation (BP-665)", () => {
   const ELSEWHERE = new Types.ObjectId("0000000000000000000000b2");
   const cookie = () => request({ cookie: `__Host-bp_session=${SESSION_TOKEN}`, "sec-fetch-site": "same-origin" });
 
-  it("refuses a session row whose tenant is not its person's", async () => {
-    sessionFound(sessionRow({ tenant: ELSEWHERE }));
+  it("refuses a session row whose organisation is not its person's", async () => {
+    sessionFound(sessionRow({ organisation: ELSEWHERE }));
     expect(await getAuthUser(cookie())).toBeNull();
     sessionFound(sessionRow());
     expect(await getAuthUser(cookie())).not.toBeNull();
   });
 
-  it("refuses a session row that carries no tenant", async () => {
-    sessionFound(sessionRow({ tenant: null }));
+  it("refuses a session row that carries no organisation", async () => {
+    sessionFound(sessionRow({ organisation: null }));
     expect(await getAuthUser(cookie())).toBeNull();
   });
 
-  it("refuses a person with no tenant at all, rather than placing them in the default one", async () => {
+  it("refuses a person with no organisation at all, rather than placing them in the default one", async () => {
     sessionFound(sessionRow());
-    userFindById.mockResolvedValue(user({ tenant: undefined }));
+    userFindById.mockResolvedValue(user({ organisation: undefined }));
     expect(await getAuthUser(cookie())).toBeNull();
   });
 
-  it("refuses an API token minted in another tenant than its person's", async () => {
+  it("refuses an API token minted in another organisation than its person's", async () => {
     apiTokenFind.mockReturnValue({
-      lean: () => Promise.resolve([{ _id: "t1", user: "u1", tenant: ELSEWHERE, tokenHash: "hashed", allowedProjects: [] }]),
+      lean: () => Promise.resolve([{ _id: "t1", user: "u1", organisation: ELSEWHERE, tokenHash: "hashed", allowedProjects: [] }]),
     });
     bcryptCompare.mockResolvedValue(true);
     expect(await getAuthUser(request({ authorization: `Bearer cp_${"c".repeat(64)}` }))).toBeNull();
   });
 
-  it("refuses an OAuth token whose tenant is not its person's", async () => {
+  it("refuses an OAuth token whose organisation is not its person's", async () => {
     oauthTokenFindOne.mockResolvedValue({
-      tenant: ELSEWHERE,
+      organisation: ELSEWHERE,
       user: "u1",
       clientId: "c1",
       accessExpiresAt: new Date(Date.now() + 60_000),

@@ -4,7 +4,7 @@ import { safeFetch } from "./safe-fetch";
 import { OUTBOUND_CONCURRENCY, runBounded } from "./bounded";
 import { decryptSecret } from "./encryption";
 import type { Types } from "mongoose";
-import { tenantOrigin } from "./tenant-host";
+import { organisationOrigin } from "./organisation-host";
 import { notificationPath } from "./urls";
 import { DISCORD_NO_MENTIONS, escapeDiscord, escapeSlack } from "./chat-markup";
 import type { NotificationEmail } from "./in-app-notifications";
@@ -37,8 +37,8 @@ function line(type: NotificationType, title: string, url?: string): string {
   return `*${HEADLINE[type]}*\n${subject}`;
 }
 
-async function urlFor(tenant: Types.ObjectId, email?: NotificationEmail): Promise<string | undefined> {
-  const origin = await tenantOrigin(tenant);
+async function urlFor(organisation: Types.ObjectId, email?: NotificationEmail): Promise<string | undefined> {
+  const origin = await organisationOrigin(organisation);
   const path = email && notificationPath(email);
   return origin && path ? `${origin}${path}` : undefined;
 }
@@ -57,13 +57,13 @@ function bodyFor(
 }
 
 export async function sendPersonalChat(n: {
-  tenant: Types.ObjectId;
+  organisation: Types.ObjectId;
   users: PersonalChatRecipient[];
   type: NotificationType;
   title: string;
   email?: NotificationEmail;
 }): Promise<void> {
-  const url = await urlFor(n.tenant, n.email);
+  const url = await urlFor(n.organisation, n.email);
 
   const recipients = n.users.filter(
     (user) => user.notifications?.chat?.kind && user.notifications?.chat?.webhookUrl

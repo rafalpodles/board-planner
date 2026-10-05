@@ -15,8 +15,8 @@ class McpHttpError extends Error {
 vi.mock("./mcp-client", () => ({ McpClient: McpClientMock, McpHttpError }));
 
 const { discoverMcpTools } = await import("./mcp-tools");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
-const db = scopedToDefaultTenant();
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
+const db = scopedToDefaultOrganisation();
 
 const readTools = (prefix: string, n: number) =>
   Array.from({ length: n }, (_, i) => ({ name: `list_${prefix}_thing_${i}`, description: "d" }));

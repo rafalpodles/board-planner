@@ -9,7 +9,7 @@ vi.mock("@/lib/url-validation", () => ({ isAllowedMcpServerUrl: () => true }));
 const { getPmOauthRedirectUri } = await import("./mcp-oauth");
 
 const ORIGINAL = { ...process.env };
-const TENANT = new Types.ObjectId();
+const ORGANISATION = new Types.ObjectId();
 
 beforeEach(() => {
   delete process.env.APP_ORIGIN;
@@ -29,19 +29,19 @@ describe("getPmOauthRedirectUri", () => {
   it("builds the callback from the configured origin", async () => {
     process.env.PUBLIC_ORIGIN = "https://board.example.com";
 
-    expect(await getPmOauthRedirectUri(TENANT)).toBe("https://board.example.com/api/pm/oauth/callback");
+    expect(await getPmOauthRedirectUri(ORGANISATION)).toBe("https://board.example.com/api/pm/oauth/callback");
   });
 
-  it("takes a tenant and nothing else, so no request can reach it", async () => {
+  it("takes an organisation and nothing else, so no request can reach it", async () => {
     process.env.PUBLIC_ORIGIN = "https://board.example.com";
 
     // A request-derived implementation needs the request; this pins that it is not threaded in
     expect(getPmOauthRedirectUri.length).toBe(1);
-    expect(await getPmOauthRedirectUri(TENANT)).toBe("https://board.example.com/api/pm/oauth/callback");
+    expect(await getPmOauthRedirectUri(ORGANISATION)).toBe("https://board.example.com/api/pm/oauth/callback");
   });
 
   it("refuses rather than registering a guessed address", async () => {
-    await expect(getPmOauthRedirectUri(TENANT)).rejects.toThrow(/PUBLIC_ORIGIN/);
+    await expect(getPmOauthRedirectUri(ORGANISATION)).rejects.toThrow(/PUBLIC_ORIGIN/);
   });
 
   // "board.example.com:8443" parses as an opaque URL whose origin is the string "null", which is
@@ -49,6 +49,6 @@ describe("getPmOauthRedirectUri", () => {
   it("refuses an origin that new URL() accepts but cannot address", async () => {
     process.env.PUBLIC_ORIGIN = "board.example.com:8443";
 
-    await expect(getPmOauthRedirectUri(TENANT)).rejects.toThrow(/PUBLIC_ORIGIN/);
+    await expect(getPmOauthRedirectUri(ORGANISATION)).rejects.toThrow(/PUBLIC_ORIGIN/);
   });
 });

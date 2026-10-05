@@ -1,5 +1,5 @@
 import { connectDB } from "@/lib/db";
-import { type ScopedDb, tenantOf, scopedForRequest } from "@/lib/db-scope";
+import { type ScopedDb, organisationOf, scopedForRequest } from "@/lib/db-scope";
 import { passwordSignInEnabled } from "@/lib/password-sign-in";
 import { configuredProviders } from "@/lib/oidc/providers";
 import { getClientIp, verifyCredentials } from "@/lib/auth";
@@ -513,7 +513,7 @@ export async function POST(req: Request) {
   const password = String(form.get("password") || "");
   const clientIp = getClientIp(req);
   const { lockedOut, result: user } = await withLockout(
-    lockoutKey(db.tenant, clientIp ?? "-", username),
+    lockoutKey(db.organisation, clientIp ?? "-", username),
     () => verifyCredentials(db, username, password),
     clientIp ? sourceKey(clientIp) : undefined
   );
@@ -529,7 +529,7 @@ export async function POST(req: Request) {
   // session-bound ticket, so no ticket is unbound any more (BP-383 review).
   const session = await createSession({
     userId: user._id,
-    tenant: tenantOf(user),
+    organisation: organisationOf(user),
     userAgent: req.headers.get("user-agent"),
     ip: clientIp,
   });
@@ -639,7 +639,7 @@ async function handleConsent(db: ScopedDb, req: Request, form: FormData): Promis
   // The grant outlives this browser window, so it is worth a line in an inbox the account holder
   // reads even when the authorization happened somewhere they were not looking.
   void notifyCredentialCreated({
-    tenant: db.tenant,
+    organisation: db.organisation,
     email: user.email,
     username: user.username,
     kind: "oauth",

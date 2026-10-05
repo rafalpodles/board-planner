@@ -3,7 +3,7 @@ import { connectDB } from "@/lib/db";
 import { EmailNotConfiguredError, emailSettingsSummary, sendEmailOrThrow } from "@/lib/email";
 import { renderEmail } from "@/lib/email-template";
 import { withAdmin } from "@/lib/middleware";
-import { originFor } from "@/lib/tenant-host";
+import { originFor } from "@/lib/organisation-host";
 import { APP_NAME } from "@/lib/brand";
 
 // A mail server refusing AUTH sometimes quotes the offending command back, and that command

@@ -4,15 +4,15 @@ import { readBody } from "./stub-guard.mjs";
 /**
  * An OAuth-protected MCP server, served from the MCP stub's own process (BP-707).
  *
- * Every path carries a tenant — `/oauth/<tenant>/mcp` — and each tenant is a separate
+ * Every path carries an organisation — `/oauth/<organisation>/mcp` — and each organisation is a separate
  * authorization server with its own clients, codes, tokens and request log, so tests sharing
  * this one process for the whole run cannot see each other's state.
  *
  * Discovery is the path-aware kind `mcp-oauth.ts` performs: a 401 naming the protected-resource
- * metadata, whose `authorization_servers` points at `/oauth/<tenant>`, whose own metadata lives at
- * `/.well-known/oauth-authorization-server/oauth/<tenant>`.
+ * metadata, whose `authorization_servers` points at `/oauth/<organisation>`, whose own metadata lives at
+ * `/.well-known/oauth-authorization-server/oauth/<organisation>`.
  *
- * `/_control/oauth/<tenant>/…` is the test's side door: pre-register a client (the one an admin
+ * `/_control/oauth/<organisation>/…` is the test's side door: pre-register a client (the one an admin
  * types by hand), revoke every token, and read back what each token request carried.
  */
 
@@ -20,10 +20,10 @@ export const OAUTH_TOOLS = [
   { name: "list_oauth_record", description: "Read the record only a signed-in client may see" },
 ];
 
-const tenants = new Map();
+const organisations = new Map();
 
-function tenantOf(name) {
-  let t = tenants.get(name);
+function organisationOf(name) {
+  let t = organisations.get(name);
   if (!t) {
     t = {
       clients: new Map(),
@@ -33,7 +33,7 @@ function tenantOf(name) {
       revoked: false,
       log: [],
     };
-    tenants.set(name, t);
+    organisations.set(name, t);
   }
   return t;
 }
@@ -132,7 +132,7 @@ async function handleToken(req, res, t, resource) {
 }
 
 /**
- * Answers the request if it belongs to the OAuth tenant space, and returns whether it did.
+ * Answers the request if it belongs to the OAuth organisation space, and returns whether it did.
  * `answerRpc(req, res, catalogue, name)` is the plain MCP server, reached only with a live token.
  */
 export async function handleOauth(req, res, origin, answerRpc) {
@@ -165,7 +165,7 @@ export async function handleOauth(req, res, origin, answerRpc) {
   }
 
   if ((m = path.match(/^\/_control\/oauth\/([\w-]+)\/(client|revoke|revoke-access|log)$/))) {
-    const t = tenantOf(m[1]);
+    const t = organisationOf(m[1]);
     if (m[2] === "client") {
       const body = JSON.parse((await readBody(req)) || "{}");
       t.clients.set(body.client_id, {
@@ -192,7 +192,7 @@ export async function handleOauth(req, res, origin, answerRpc) {
 
   m = path.match(/^\/oauth\/([\w-]+)\/(mcp|register|authorize|approve|token)$/);
   if (!m) return false;
-  const t = tenantOf(m[1]);
+  const t = organisationOf(m[1]);
   const resource = `${origin}/oauth/${m[1]}/mcp`;
   const badAuthorizationRequest = (q) =>
     q.get("response_type") !== "code" ||

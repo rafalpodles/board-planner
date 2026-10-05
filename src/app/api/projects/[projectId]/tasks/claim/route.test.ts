@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { BoardCannotClaim } from "@/lib/claim-refusal";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const verifyWorkerCredential = vi.fn();
 const verdictFor = vi.fn();
@@ -48,7 +48,7 @@ vi.mock("@/models/agentRun", () => ({
 const snapshotFor = vi.fn(async () => ({ agentId: "a1", name: "Default", sequence: [] }));
 vi.mock("@/lib/agent-snapshot", () => ({ snapshotFor }));
 vi.mock("@/lib/middleware", async () => {
-  const { scopedToDefaultTenant } = await vi.importActual<typeof import("@/lib/db-scope")>("@/lib/db-scope");
+  const { scopedToDefaultOrganisation } = await vi.importActual<typeof import("@/lib/db-scope")>("@/lib/db-scope");
   return {
     resolveProjectId,
     protocolOf: (r: Request) => Number(r.headers.get("x-cp-protocol") ?? NaN),
@@ -62,12 +62,12 @@ vi.mock("@/lib/middleware", async () => {
         }
         const worker = await verifyWorkerCredential(id, auth.slice(7));
         if (!worker) return new Response("{}", { status: 401 });
-        return handler(req, { ...ctx, worker, db: scopedToDefaultTenant() });
+        return handler(req, { ...ctx, worker, db: scopedToDefaultOrganisation() });
       },
   };
 });
 
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { POST } = await import("./route");
 
 const OID = "69a52e3b399b27d3cbb2c5a5";
@@ -144,7 +144,7 @@ describe("POST /tasks/claim", () => {
       params: Promise.resolve({ projectId: "CP" }),
     });
 
-    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultTenant(), OID, OID, "run-1", null);
+    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", null);
   });
 
   /**
@@ -158,8 +158,8 @@ describe("POST /tasks/claim", () => {
 
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
-    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultTenant(), OID, OID, "run-1", OWNER);
-    expect(snapshotFor).toHaveBeenCalledWith(scopedToDefaultTenant(), OID, undefined, OWNER);
+    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", OWNER);
+    expect(snapshotFor).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, undefined, OWNER);
   });
 
   // The fleet route populates `owner`, and String() on a populated document is its inspect output —
@@ -173,14 +173,14 @@ describe("POST /tasks/claim", () => {
 
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
-    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultTenant(), OID, OID, "run-1", OWNER);
-    expect(snapshotFor).toHaveBeenCalledWith(scopedToDefaultTenant(), OID, undefined, OWNER);
+    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", OWNER);
+    expect(snapshotFor).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, undefined, OWNER);
   });
 
   it("resolves a project key before asking the verdict or the claim", async () => {
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
-    expect(resolveProjectId).toHaveBeenCalledWith(scopedToDefaultTenant(), "CP");
+    expect(resolveProjectId).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "CP");
     // The verdict now decides against the project itself, since assignment is the project being
     // enabled and this machine reporting a checkout of its repository
     expect(verdictFor.mock.calls[0][1]).toMatchObject({ worker: { enabled: true } });
@@ -192,7 +192,7 @@ describe("POST /tasks/claim", () => {
 
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
-    expect(releaseExpiredTasks).toHaveBeenCalledWith(scopedToDefaultTenant(), OID);
+    expect(releaseExpiredTasks).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID);
   });
 
   // The worker reads taskNumber, _id and checklist off the top level of this body. Nothing asserted
@@ -246,7 +246,7 @@ describe("POST /tasks/claim", () => {
       await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
       expect(agentRunFindOneArgs).toHaveBeenCalledWith(
-        { task: "t-specific", tenant: DEFAULT_TENANT_ID },
+        { task: "t-specific", organisation: DEFAULT_ORGANISATION_ID },
         "outcome detail"
       );
       expect(agentRunSort).toHaveBeenCalledWith({ finishedAt: -1 });
@@ -280,7 +280,7 @@ describe("POST /tasks/claim", () => {
     it("spends the attempt rather than refunding it", async () => {
       await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
-      expect(releaseTask).toHaveBeenCalledWith(scopedToDefaultTenant(), OID, "t1", {
+      expect(releaseTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, "t1", {
         refund: false,
         workerId: OID,
       });
@@ -446,7 +446,7 @@ describe("the worker's identity does not travel with the claim", () => {
 
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
-    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultTenant(), OID, OID, "run-1", "u-owner");
+    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", "u-owner");
   });
 });
 
@@ -463,7 +463,7 @@ describe("the worker's owner travels with the claim", () => {
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
     expect(ownerReachableProjectIds).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       expect.objectContaining({ owner: "u-owner" })
     );
     expect(verdictFor.mock.calls[0][5]).toEqual(["p1", "p2"]);
@@ -481,7 +481,7 @@ describe("the worker's owner travels with the claim", () => {
 
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
-    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultTenant(), OID, OID, "run-1", "u-owner");
+    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", "u-owner");
   });
 
   it("passes the owner set at enrolment", async () => {
@@ -490,6 +490,6 @@ describe("the worker's owner travels with the claim", () => {
 
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
-    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultTenant(), OID, OID, "run-1", "u-owner");
+    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", "u-owner");
   });
 });

@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import { PM_USERNAME } from "@/lib/pm/username";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 // Never the development database. The URI is passed to the dev server too, so a mistake here
 // would have the browser writing into whatever the developer is using at the time.
@@ -144,7 +144,7 @@ export function e2eDatabaseName() {
   return dbName;
 }
 
-const UNSCOPED_COLLECTIONS = ["tenants", "ratelimits"];
+const UNSCOPED_COLLECTIONS = ["organisations", "ratelimits"];
 
 function stampsFixtures(collection: mongoose.mongo.Collection): boolean {
   const name = collection.collectionName;
@@ -152,33 +152,33 @@ function stampsFixtures(collection: mongoose.mongo.Collection): boolean {
 }
 
 type Row = Record<string, unknown>;
-const withTenant = (doc: Row): Row => ("tenant" in doc ? doc : { ...doc, tenant: DEFAULT_TENANT_ID });
+const withOrganisation = (doc: Row): Row => ("organisation" in doc ? doc : { ...doc, organisation: DEFAULT_ORGANISATION_ID });
 
-function upsertingWithTenant(update: unknown, options: { upsert?: boolean } | undefined): unknown {
+function upsertingWithOrganisation(update: unknown, options: { upsert?: boolean } | undefined): unknown {
   if (!options?.upsert || Array.isArray(update) || !update || typeof update !== "object") return update;
   const ops = update as Record<string, Row | undefined>;
-  if (!Object.keys(ops).some((key) => key.startsWith("$"))) return withTenant(ops as Row);
-  if (ops.$set && "tenant" in ops.$set) return update;
-  return { ...ops, $setOnInsert: withTenant(ops.$setOnInsert ?? {}) };
+  if (!Object.keys(ops).some((key) => key.startsWith("$"))) return withOrganisation(ops as Row);
+  if (ops.$set && "organisation" in ops.$set) return update;
+  return { ...ops, $setOnInsert: withOrganisation(ops.$setOnInsert ?? {}) };
 }
 
 // Fixture rows inserted straight into the e2e database belong to the one organisation, as the app's own writes do (BP-663)
-function stampFixtureRowsWithTheTenant() {
+function stampFixtureRowsWithTheOrganisation() {
   const proto = mongoose.mongo.Collection.prototype as unknown as Record<string, (...args: unknown[]) => unknown>;
-  if ((proto as { tenantStamped?: boolean }).tenantStamped) return;
-  (proto as { tenantStamped?: boolean }).tenantStamped = true;
+  if ((proto as { organisationStamped?: boolean }).organisationStamped) return;
+  (proto as { organisationStamped?: boolean }).organisationStamped = true;
   const wrap = (method: string, rewrite: (args: unknown[]) => unknown[]) => {
     const original = proto[method];
     proto[method] = function (this: mongoose.mongo.Collection, ...args: unknown[]) {
       return original.apply(this, stampsFixtures(this) ? rewrite(args) : args);
     };
   };
-  wrap("insertOne", ([doc, ...rest]) => [withTenant(doc as Row), ...rest]);
-  wrap("insertMany", ([docs, ...rest]) => [(docs as Row[]).map(withTenant), ...rest]);
+  wrap("insertOne", ([doc, ...rest]) => [withOrganisation(doc as Row), ...rest]);
+  wrap("insertMany", ([docs, ...rest]) => [(docs as Row[]).map(withOrganisation), ...rest]);
   for (const method of ["updateOne", "updateMany", "findOneAndUpdate", "replaceOne", "findOneAndReplace"]) {
     wrap(method, ([filter, update, options, ...rest]) => [
       filter,
-      upsertingWithTenant(update, options as { upsert?: boolean }),
+      upsertingWithOrganisation(update, options as { upsert?: boolean }),
       options,
       ...rest,
     ]);
@@ -186,13 +186,13 @@ function stampFixtureRowsWithTheTenant() {
   wrap("bulkWrite", ([operations, ...rest]) => [
     (operations as Row[]).map((operation) => {
       const insert = operation.insertOne as { document: Row } | undefined;
-      return insert ? { insertOne: { ...insert, document: withTenant(insert.document) } } : operation;
+      return insert ? { insertOne: { ...insert, document: withOrganisation(insert.document) } } : operation;
     }),
     ...rest,
   ]);
 }
 
-stampFixtureRowsWithTheTenant();
+stampFixtureRowsWithTheOrganisation();
 
 async function connect() {
   e2eDatabaseName();
@@ -212,15 +212,15 @@ export async function wipe() {
   await mongoose.disconnect();
 }
 
-// Seeded rows are stamped so tenant-on-product-writes can tell the app's own writes from fixtures
-async function stampTenantAndDisconnect() {
+// Seeded rows are stamped so organisation-on-product-writes can tell the app's own writes from fixtures
+async function stampOrganisationAndDisconnect() {
   try {
     const db = mongoose.connection.db!;
     const names = (await db.listCollections().toArray())
       .map((c) => c.name)
-      .filter((name) => name !== "tenants" && name !== "ratelimits" && !name.includes("."));
+      .filter((name) => name !== "organisations" && name !== "ratelimits" && !name.includes("."));
     await Promise.all(
-      names.map((name) => db.collection(name).updateMany({ tenant: null }, { $set: { tenant: DEFAULT_TENANT_ID } }))
+      names.map((name) => db.collection(name).updateMany({ organisation: null }, { $set: { organisation: DEFAULT_ORGANISATION_ID } }))
     );
   } finally {
     await mongoose.disconnect();
@@ -279,7 +279,7 @@ async function addTask(over: Record<string, unknown>, taskNumber: number) {
   await db
     .collection("projects")
     .updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: taskNumber } });
-  await stampTenantAndDisconnect();
+  await stampOrganisationAndDisconnect();
 }
 
 /**
@@ -362,7 +362,7 @@ export async function seedTaskInCompletedSprint() {
   await db
     .collection("projects")
     .updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: STRANDED_TASK_NUMBER } });
-  await stampTenantAndDisconnect();
+  await stampOrganisationAndDisconnect();
 }
 
 /**
@@ -564,7 +564,7 @@ export async function seedSecondPlanningSprint() {
     createdAt: now,
     updatedAt: now,
   });
-  await stampTenantAndDisconnect();
+  await stampOrganisationAndDisconnect();
 }
 
 export async function seedSprintPlanning() {
@@ -614,7 +614,7 @@ export async function seedSprintPlanning() {
     .collection("projects")
     .updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: PLANNING_BACKLOG_TASK_NUMBER } });
 
-  await stampTenantAndDisconnect();
+  await stampOrganisationAndDisconnect();
 }
 
 // BP-208 Task 11: a sprint whose tasks span every shape a numeric field's stored value takes in
@@ -701,7 +701,7 @@ export async function seedSprintEstimates() {
   ]);
   await db.collection("projects").updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: 104 } });
 
-  await stampTenantAndDisconnect();
+  await stampOrganisationAndDisconnect();
 }
 
 // BP-389. A board with a sprint history: two sprints already closed, one running with a finished
@@ -863,7 +863,7 @@ export async function seedSprintLifecycle() {
   ]);
   await db.collection("projects").updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: 125 } });
 
-  await stampTenantAndDisconnect();
+  await stampOrganisationAndDisconnect();
 }
 
 /**
@@ -937,7 +937,7 @@ export async function seedOlderCompletedSprints() {
       closed("05", LIFECYCLE_OLDEST_CLOSED_NAME, -104),
       closed("06", "Sprint 2", -88),
     ]);
-  await stampTenantAndDisconnect();
+  await stampOrganisationAndDisconnect();
 }
 
 /** A sprint as the database holds it, for assertions the API's derived counts would blur. */
@@ -993,7 +993,7 @@ export async function seedBoardFeedBystander() {
     updatedAt: now,
   });
 
-  await stampTenantAndDisconnect();
+  await stampOrganisationAndDisconnect();
 }
 
 export async function seedQuietTask(quietForMs: number) {
@@ -1280,7 +1280,7 @@ async function seedBoard(withSessions: boolean) {
     }),
   ]);
 
-  await stampTenantAndDisconnect();
+  await stampOrganisationAndDisconnect();
 }
 
 export const seed = () => seedBoard(true);
@@ -1537,7 +1537,7 @@ export async function seedSearchCorpus() {
 
   await db.collection("projects").updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: META_HIT_NUMBER } });
 
-  await stampTenantAndDisconnect();
+  await stampOrganisationAndDisconnect();
 }
 
 /**
@@ -1580,7 +1580,7 @@ export async function seedAssignmentOutsider() {
     createdAt: now,
   });
 
-  await stampTenantAndDisconnect();
+  await stampOrganisationAndDisconnect();
 
   await addTask(
     {
@@ -1703,7 +1703,7 @@ export async function seedSecondProject() {
     updatedAt: now,
   });
 
-  await stampTenantAndDisconnect();
+  await stampOrganisationAndDisconnect();
 }
 
 /**
@@ -1774,7 +1774,7 @@ export async function seedDemotableAdmin() {
     .collection("projects")
     .updateOne({ _id: SECOND_PROJECT_ID }, { $max: { taskCounter: KEPT_TASK_NUMBER } });
 
-  await stampTenantAndDisconnect();
+  await stampOrganisationAndDisconnect();
 }
 
 /** A webhook on the seeded project, written straight in: adding one through the settings screen is
@@ -1963,7 +1963,7 @@ export async function seedAgents() {
     agent({ _id: PROJECT_AGENT_ID, name: PROJECT_AGENT_NAME, scope: "project", project: PROJECT_ID }),
     agent({ _id: PERSONAL_AGENT_ID, name: PERSONAL_AGENT_NAME, scope: "user", owner: ADMIN_ID }),
   ]);
-  await stampTenantAndDisconnect();
+  await stampOrganisationAndDisconnect();
 }
 
 /**
@@ -1989,7 +1989,7 @@ export async function seedForeignAgent() {
     createdAt: now,
     updatedAt: now,
   });
-  await stampTenantAndDisconnect();
+  await stampOrganisationAndDisconnect();
 }
 
 /**
@@ -2013,7 +2013,7 @@ export async function seedForeignSprint() {
     createdAt: now,
     updatedAt: now,
   });
-  await stampTenantAndDisconnect();
+  await stampOrganisationAndDisconnect();
 }
 
 export const PM_USER_ID = id("e2e00000000000000000a009");
@@ -2097,7 +2097,7 @@ export async function seedHandoverStates() {
   await db
     .collection("projects")
     .updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: ASSIGNED_BY_SOMEONE_ELSE_TASK_NUMBER } });
-  await stampTenantAndDisconnect();
+  await stampOrganisationAndDisconnect();
 }
 
 /** A task on the seeded board as the database holds it, for the fields the API populates or renames. */
@@ -2279,7 +2279,7 @@ export async function seedMyTasks() {
     .collection("projects")
     .updateOne({ _id: SECOND_PROJECT_ID }, { $max: { taskCounter: MINE_OTHER_BOARD_NUMBER } });
 
-  await stampTenantAndDisconnect();
+  await stampOrganisationAndDisconnect();
 }
 
 /**
@@ -2363,7 +2363,7 @@ export async function seedNewestProject() {
     updatedAt: now,
   });
 
-  await stampTenantAndDisconnect();
+  await stampOrganisationAndDisconnect();
 }
 
 /**
@@ -2384,7 +2384,7 @@ export async function grantMemberOn(projectId: mongoose.Types.ObjectId) {
     createdAt: now,
     updatedAt: now,
   });
-  await stampTenantAndDisconnect();
+  await stampOrganisationAndDisconnect();
 }
 
 export const MENTION_CAP_USERNAME_PREFIX = "mention-cap-";
@@ -2412,7 +2412,7 @@ export async function seedManyMentionCandidates() {
       createdAt: now,
     }))
   );
-  await stampTenantAndDisconnect();
+  await stampOrganisationAndDisconnect();
 }
 
 /**
@@ -2483,7 +2483,7 @@ export async function seedGitlabProject(host: string) {
     })
   );
 
-  await stampTenantAndDisconnect();
+  await stampOrganisationAndDisconnect();
 }
 
 // BP-727, BP-728, BP-731. A task the member handed to themselves, with an agent, in the approved
@@ -2546,7 +2546,7 @@ export async function seedMemberHandover() {
   await db
     .collection("projects")
     .updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: MEMBER_BACKLOG_TASK_NUMBER } });
-  await stampTenantAndDisconnect();
+  await stampOrganisationAndDisconnect();
 }
 
 export async function setBoardReadiness(fields: {
@@ -2617,7 +2617,7 @@ export async function seedMachine(
     createdAt: now,
     updatedAt: now,
   });
-  await stampTenantAndDisconnect();
+  await stampOrganisationAndDisconnect();
 }
 
 export async function spendAttempts(taskId: mongoose.Types.ObjectId, attempts: number) {

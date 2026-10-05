@@ -1,13 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { getAuthUser, getTenant } = vi.hoisted(() => ({
+const { getAuthUser, getOrganisation } = vi.hoisted(() => ({
   getAuthUser: vi.fn(),
-  getTenant: vi.fn(),
+  getOrganisation: vi.fn(),
 }));
 
 vi.mock("@/lib/auth", () => ({ getAuthUser }));
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
-vi.mock("@/lib/tenant", () => ({ getTenant }));
+vi.mock("@/lib/organisation", () => ({ getOrganisation }));
 
 const { GET } = await import("./route");
 
@@ -26,12 +26,12 @@ describe("GET /api/entitlements", () => {
     const res = await get();
 
     expect(res.status).toBe(401);
-    expect(getTenant).not.toHaveBeenCalled();
+    expect(getOrganisation).not.toHaveBeenCalled();
   });
 
-  it("answers the tenant's plan, features and expiry for any authenticated user", async () => {
+  it("answers the organisation's plan, features and expiry for any authenticated user", async () => {
     getAuthUser.mockResolvedValue({ _id: "u1", username: "member", role: "member" });
-    getTenant.mockResolvedValue({
+    getOrganisation.mockResolvedValue({
       name: "Acme",
       entitlements: { plan: "pro", features: ["integrations.coda"], expiresAt: undefined },
     });
@@ -44,7 +44,7 @@ describe("GET /api/entitlements", () => {
 
   it("calls an organisation that was never named the default one", async () => {
     getAuthUser.mockResolvedValue({ _id: "u1", username: "member", role: "member" });
-    getTenant.mockResolvedValue({ entitlements: { plan: "free", features: [] } });
+    getOrganisation.mockResolvedValue({ entitlements: { plan: "free", features: [] } });
 
     expect(await (await get()).json()).toMatchObject({ organisation: "default" });
   });

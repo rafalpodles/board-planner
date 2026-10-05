@@ -426,8 +426,8 @@ jobs:
           E2E_PROXIED_SERVER: ${{ matrix.group == 'people' && '1' || '' }}
           # The same for the server with password sign-in off (BP-830)
           E2E_PASSWORDLESS_SERVER: ${{ matrix.group == 'people' && '1' || '' }}
-          # And the one with TENANT_DOMAIN set, where organisations live on subdomains (BP-670)
-          E2E_TENANTS_SERVER: ${{ matrix.group == 'people' && '1' || '' }}
+          # And the one with ORGANISATION_DOMAIN set, where organisations live on subdomains (BP-670)
+          E2E_ORGANISATIONS_SERVER: ${{ matrix.group == 'people' && '1' || '' }}
         run: npx playwright test --project=${{ matrix.group }}
 
       # The trace is the only way to see what the page looked like when a run fails on a machine

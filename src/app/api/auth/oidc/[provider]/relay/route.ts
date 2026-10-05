@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { scopedToDefaultTenant } from "@/lib/db-scope";
+import { scopedToDefaultOrganisation } from "@/lib/db-scope";
 import { selfOrigin } from "@/lib/session";
 import { providerById } from "@/lib/oidc/providers";
 import { redirectUri } from "@/lib/oidc/flow";
@@ -34,7 +34,7 @@ function expired() {
 }
 
 export async function GET(request: Request, { params }: { params: Promise<{ provider: string }> }) {
-  const db = scopedToDefaultTenant();
+  const db = scopedToDefaultOrganisation();
   if (!relayOrigin()) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const provider = providerById((await params).provider);
   const { search, searchParams } = new URL(request.url);

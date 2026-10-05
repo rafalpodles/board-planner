@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const MAX_FIELDS = 50;
 
@@ -22,7 +22,7 @@ vi.mock("@/models/project", () => ({
 }));
 
 const { GET, POST } = await import("./route");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 
 const OWNER = { _id: "u1", role: "member" };
 const PROJECT_ID = "507f1f77bcf86cd799439011";
@@ -204,7 +204,7 @@ describe("POST /api/projects/:projectId/custom-fields", () => {
         _id: PROJECT_ID,
         [`customFields.${MAX_FIELDS - 1}`]: { $exists: false },
         customFields: { $not: { $elemMatch: { name: { $regex: "^Points$", $options: "i" } } } },
-        tenant: DEFAULT_TENANT_ID,
+        organisation: DEFAULT_ORGANISATION_ID,
       },
       {
         $push: {
@@ -239,7 +239,7 @@ describe("what adding a field records", () => {
 
     expect(res.status).toBe(201);
     expect(logProjectAudit).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       PROJECT_ID,
       "u1",
       "settings_updated",

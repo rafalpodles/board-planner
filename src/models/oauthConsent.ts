@@ -1,6 +1,6 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { IOAuthConsent } from "@/types";
-import { withTenant } from "@/lib/tenant-field";
+import { withOrganisation } from "@/lib/organisation-field";
 
 const oauthConsentSchema = new Schema<IOAuthConsent>(
   {
@@ -21,7 +21,7 @@ const oauthConsentSchema = new Schema<IOAuthConsent>(
 
 oauthConsentSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
-withTenant(oauthConsentSchema);
+withOrganisation(oauthConsentSchema);
 
 export const OAuthConsent: Model<IOAuthConsent> =
   mongoose.models.OAuthConsent || mongoose.model<IOAuthConsent>("OAuthConsent", oauthConsentSchema);

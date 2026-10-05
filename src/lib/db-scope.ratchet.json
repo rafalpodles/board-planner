@@ -9,6 +9,8 @@
   "src/instrumentation-node.ts",
   "src/lib/auth.ts",
   "src/lib/db.ts",
+  "src/lib/organisation-field-migration.ts",
+  "src/lib/organisation-migration.ts",
   "src/lib/pm/attachments.ts",
   "src/lib/pm/availability.ts",
   "src/lib/pr-links.ts",
@@ -16,7 +18,6 @@
   "src/lib/session.ts",
   "src/lib/sign-up-domains.ts",
   "src/lib/task-service.ts",
-  "src/lib/tenant-migration.ts",
   "src/lib/upload-ownership.ts",
   "src/lib/worker-service.ts"
 ]

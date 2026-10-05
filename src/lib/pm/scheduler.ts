@@ -1,4 +1,4 @@
-import { forEachServedTenant } from "@/lib/tenant-jobs";
+import { forEachServedOrganisation } from "@/lib/organisation-jobs";
 import { connectDB } from "@/lib/db";
 import { runPmTurn } from "./agent";
 import { dailyPmSpend, isOverDailyTurnCap } from "./turn-cap";
@@ -25,7 +25,7 @@ export function startPmScheduler(): void {
 
 export async function pmSchedulerTick(): Promise<void> {
   await connectDB();
-  await forEachServedTenant("PM scheduler", (db) => pmSchedulerTickFor(db));
+  await forEachServedOrganisation("PM scheduler", (db) => pmSchedulerTickFor(db));
 }
 
 async function pmSchedulerTickFor(db: ScopedDb): Promise<void> {

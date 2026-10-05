@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { replaceProviderLinks } from "@/lib/pr-links";
-import { scopedToDefaultTenant } from "@/lib/db-scope";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { scopedToDefaultOrganisation } from "@/lib/db-scope";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 /**
  * BP-429. The post-fetch half of sync had no test at any level, which is how three separate things
@@ -41,7 +41,7 @@ vi.mock("@/lib/gitlab", async (importOriginal) => ({
 vi.mock("@/lib/middleware", () => ({
   withProjectAccess:
     (handler: (req: Request, ctx: unknown) => Promise<Response>) => (req: Request, ctx: unknown) =>
-      handler(req, { ...(ctx as object), user: { _id: "u1" }, db: scopedToDefaultTenant() }),
+      handler(req, { ...(ctx as object), user: { _id: "u1" }, db: scopedToDefaultOrganisation() }),
 }));
 
 const { POST } = await import("./route");
@@ -141,7 +141,7 @@ describe("POST .../gitlab/sync — linking", () => {
     const [filter, update, options] = taskUpdateOne.mock.calls[0];
     // Both options, for the reason its GitHub twin carries: a sync is not an edit (BP-627)
     expect(options).toEqual({ updatePipeline: true, timestamps: false });
-    expect(filter).toEqual({ _id: doc._id, tenant: DEFAULT_TENANT_ID });
+    expect(filter).toEqual({ _id: doc._id, organisation: DEFAULT_ORGANISATION_ID });
     expect(update).toEqual(
       replaceProviderLinks(
         "gitlab",
@@ -162,7 +162,7 @@ describe("POST .../gitlab/sync — linking", () => {
     const body = await (await POST(request(), ctx())).json();
 
     expect(taskUpdateOne).toHaveBeenCalledWith(
-      { _id: doc._id, status: doc.status, tenant: DEFAULT_TENANT_ID },
+      { _id: doc._id, status: doc.status, organisation: DEFAULT_ORGANISATION_ID },
       { $set: { status: "ready_to_test" } }
     );
     expect(body.autoTransitioned).toBe(1);
@@ -176,7 +176,7 @@ describe("POST .../gitlab/sync — linking", () => {
     await POST(request(), ctx());
 
     expect(logActivity).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       "t1",
       "u1",
       "status_changed",
@@ -287,13 +287,13 @@ describe("POST .../gitlab/sync — linking", () => {
     await POST(request(), ctx());
 
     expect(taskUpdateOne).toHaveBeenCalledWith(
-      { _id: doc._id, status: doc.status, tenant: DEFAULT_TENANT_ID },
+      { _id: doc._id, status: doc.status, organisation: DEFAULT_ORGANISATION_ID },
       { $set: { status: "verifying" } }
     );
     // On the default board the destination happens to BE "ready_to_test", so the hardcoded string
     // this route used to log was indistinguishable from the real one. Here it is not.
     expect(logActivity).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       "t1",
       "u1",
       "status_changed",
@@ -334,7 +334,7 @@ describe("POST .../gitlab/sync — the tasks a round contradicts without visitin
     expect(taskFind).toHaveBeenCalledWith({
       project: "p1",
       linkedPRs: { $elemMatch: { url: { $in: [mrUrl(1)] }, provider: "gitlab" } },
-      tenant: DEFAULT_TENANT_ID,
+      organisation: DEFAULT_ORGANISATION_ID,
     });
     const pruned = taskUpdateOne.mock.calls.find(([filter]) => filter._id === "t8");
     expect(pruned?.[1]).toEqual(replaceProviderLinks("gitlab", [], [mrUrl(1)]));
@@ -374,7 +374,7 @@ describe("POST .../gitlab/sync — the tasks a round contradicts without visitin
     expect(taskFind).toHaveBeenCalledWith({
       project: "p1",
       linkedPRs: { $elemMatch: { url: { $in: [mrUrl(1)] }, provider: "gitlab" } },
-      tenant: DEFAULT_TENANT_ID,
+      organisation: DEFAULT_ORGANISATION_ID,
     });
     expect(body.prsUnlinked).toBe(1);
   });
@@ -428,7 +428,7 @@ describe("POST .../gitlab/sync — what a round may contradict, and what it reco
     await POST(request(), ctx());
 
     expect(rowsOf("pr_linked")).toEqual([
-      [scopedToDefaultTenant(), "t1", "u1", "pr_linked", "linkedPRs", "", mrUrl(7)],
+      [scopedToDefaultOrganisation(), "t1", "u1", "pr_linked", "linkedPRs", "", mrUrl(7)],
     ]);
   });
 
@@ -480,7 +480,7 @@ describe("POST .../gitlab/sync — what a round may contradict, and what it reco
     await POST(request(), ctx());
 
     expect(rowsOf("pr_unlinked")).toEqual([
-      [scopedToDefaultTenant(), "t8", "u1", "pr_unlinked", "linkedPRs", mrUrl(1), ""],
+      [scopedToDefaultOrganisation(), "t8", "u1", "pr_unlinked", "linkedPRs", mrUrl(1), ""],
     ]);
   });
 });

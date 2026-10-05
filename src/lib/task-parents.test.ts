@@ -4,9 +4,9 @@ const { find } = vi.hoisted(() => ({ find: vi.fn() }));
 vi.mock("@/models/task", () => ({ Task: { find } }));
 
 const { parentsOf } = await import("./task-parents");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
-const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
-const db = scopedToDefaultTenant();
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
+const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
+const db = scopedToDefaultOrganisation();
 
 /** What `Task.find(...).lean()` hands back. */
 function found(docs: unknown[]) {
@@ -83,7 +83,7 @@ describe("parentsOf", () => {
     await parentsOf(db, "p1", ["child-a"]);
 
     expect(find).toHaveBeenCalledWith(
-      { project: "p1", "relations.type": "parent_of", tenant: DEFAULT_TENANT_ID },
+      { project: "p1", "relations.type": "parent_of", organisation: DEFAULT_ORGANISATION_ID },
       "taskNumber title status relations"
     );
   });

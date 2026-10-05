@@ -216,8 +216,8 @@ test.describe("Workers · Default agent", () => {
   test("is set and cleared through its picker, and the store follows both", async ({ page }) => {
     await mongoose.connect(E2E_MONGODB_URI);
     const { seedAgents } = await import("@/lib/agent-seed");
-    const { scopedToDefaultTenant } = await import("@/lib/db-scope");
-    await seedAgents(scopedToDefaultTenant());
+    const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
+    await seedAgents(scopedToDefaultOrganisation());
     await mongoose.disconnect();
     const defaultId = String(
       (await withDb((db) => db.collection("agents").findOne({ name: "Default" })))?._id

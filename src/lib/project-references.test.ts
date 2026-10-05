@@ -28,9 +28,9 @@ vi.mock("@/models/agent", () => ({ Agent: model("Agent") }));
 const { dropProjectReferences, scopedOnlyTo, scopedToItAndAnother } = await import(
   "./project-references"
 );
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
-const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
-const tenant = DEFAULT_TENANT_ID;
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
+const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
+const organisation = DEFAULT_ORGANISATION_ID;
 
 const PROJECT = new Types.ObjectId("6a70afff45d39cd9bc8bb511");
 
@@ -44,10 +44,10 @@ describe("dropProjectReferences", () => {
   it.each(["ApiToken", "OAuthToken", "OAuthCode"])(
     "revokes a %s scoped to nothing but the project",
     async (name) => {
-      await dropProjectReferences(scopedToDefaultTenant(), PROJECT);
+      await dropProjectReferences(scopedToDefaultOrganisation(), PROJECT);
 
       expect(on(name, "deleteMany")).toEqual([
-        { model: name, op: "deleteMany", filter: { ...scopedOnlyTo(PROJECT), tenant } },
+        { model: name, op: "deleteMany", filter: { ...scopedOnlyTo(PROJECT), organisation } },
       ]);
     }
   );
@@ -55,13 +55,13 @@ describe("dropProjectReferences", () => {
   it.each(["ApiToken", "OAuthToken", "OAuthCode"])(
     "pulls the project from a %s only where another project stays in scope",
     async (name) => {
-      await dropProjectReferences(scopedToDefaultTenant(), PROJECT);
+      await dropProjectReferences(scopedToDefaultOrganisation(), PROJECT);
 
       expect(on(name, "updateMany")).toEqual([
         {
           model: name,
           op: "updateMany",
-          filter: { ...scopedToItAndAnother(PROJECT), tenant },
+          filter: { ...scopedToItAndAnother(PROJECT), organisation },
           update: { $pull: { allowedProjects: PROJECT } },
         },
       ]);
@@ -71,7 +71,7 @@ describe("dropProjectReferences", () => {
   it.each(["ApiToken", "OAuthToken", "OAuthCode"])(
     "revokes the %s rows before narrowing the rest",
     async (name) => {
-      await dropProjectReferences(scopedToDefaultTenant(), PROJECT);
+      await dropProjectReferences(scopedToDefaultOrganisation(), PROJECT);
 
       const ops = calls.filter((c) => c.model === name).map((c) => c.op);
       expect(ops).toEqual(["deleteMany", "updateMany"]);
@@ -79,47 +79,47 @@ describe("dropProjectReferences", () => {
   );
 
   it("pulls the project from a machine's picked projects", async () => {
-    await dropProjectReferences(scopedToDefaultTenant(), PROJECT);
+    await dropProjectReferences(scopedToDefaultOrganisation(), PROJECT);
 
     expect(on("Worker", "updateMany")).toEqual([
       {
         model: "Worker",
         op: "updateMany",
-        filter: { desiredProjects: PROJECT, tenant },
+        filter: { desiredProjects: PROJECT, organisation },
         update: { $pull: { desiredProjects: PROJECT } },
       },
     ]);
   });
 
   it("drops every user's notification override for the project", async () => {
-    await dropProjectReferences(scopedToDefaultTenant(), PROJECT);
+    await dropProjectReferences(scopedToDefaultOrganisation(), PROJECT);
 
     expect(on("User", "updateMany")).toEqual([
       {
         model: "User",
         op: "updateMany",
-        filter: { "notifications.projects.project": PROJECT, tenant },
+        filter: { "notifications.projects.project": PROJECT, organisation },
         update: { $pull: { "notifications.projects": { project: PROJECT } } },
       },
     ]);
   });
 
   it("deletes the project's PM triggers and pending MCP authorizations", async () => {
-    await dropProjectReferences(scopedToDefaultTenant(), PROJECT);
+    await dropProjectReferences(scopedToDefaultOrganisation(), PROJECT);
 
     expect(on("PmTrigger", "deleteMany")).toEqual([
-      { model: "PmTrigger", op: "deleteMany", filter: { project: PROJECT, tenant } },
+      { model: "PmTrigger", op: "deleteMany", filter: { project: PROJECT, organisation } },
     ]);
     expect(on("PmOauthState", "deleteMany")).toEqual([
-      { model: "PmOauthState", op: "deleteMany", filter: { project: PROJECT, tenant } },
+      { model: "PmOauthState", op: "deleteMany", filter: { project: PROJECT, organisation } },
     ]);
   });
 
   it("deletes the project's own agents and no personal or global one", async () => {
-    await dropProjectReferences(scopedToDefaultTenant(), PROJECT);
+    await dropProjectReferences(scopedToDefaultOrganisation(), PROJECT);
 
     expect(on("Agent", "deleteMany")).toEqual([
-      { model: "Agent", op: "deleteMany", filter: { scope: "project", project: PROJECT, tenant } },
+      { model: "Agent", op: "deleteMany", filter: { scope: "project", project: PROJECT, organisation } },
     ]);
   });
 });

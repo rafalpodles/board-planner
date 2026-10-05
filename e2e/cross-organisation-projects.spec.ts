@@ -17,9 +17,9 @@ test.beforeEach(async () => {
   await seed();
   const handle = await db();
   const home = await handle.collection("projects").findOne({ _id: PROJECT_ID });
-  await handle.collection("projects").insertOne({ ...home, _id: FOREIGN, tenant: ELSEWHERE, key: "FAR", name: "Elsewhere" });
+  await handle.collection("projects").insertOne({ ...home, _id: FOREIGN, organisation: ELSEWHERE, key: "FAR", name: "Elsewhere" });
   await handle.collection("grants").insertOne({
-    tenant: ELSEWHERE,
+    organisation: ELSEWHERE,
     subject: MEMBER_ID,
     objectType: "project",
     object: FOREIGN,
@@ -36,8 +36,8 @@ async function answer(request: APIRequestContext, path: string, headers: Record<
   return { status: res.status(), body: await res.text() };
 }
 
-// BP-664: another tenant's project is not there, whoever asks and however they name it
-test("an instance admin gets for another tenant's project exactly what a project that does not exist gets", async ({ request }) => {
+// BP-664: another organisation's project is not there, whoever asks and however they name it
+test("an instance admin gets for another organisation's project exactly what a project that does not exist gets", async ({ request }) => {
   for (const suffix of ["", "/tasks", "/sprints"]) {
     const foreign = await answer(request, `/api/projects/${FOREIGN}${suffix}`, ADMIN_AUTH);
     const missing = await answer(request, `/api/projects/${NOWHERE}${suffix}`, ADMIN_AUTH);
@@ -47,7 +47,7 @@ test("an instance admin gets for another tenant's project exactly what a project
   expect(await answer(request, "/api/projects/FAR", ADMIN_AUTH)).toEqual(await answer(request, "/api/projects/NOPE", ADMIN_AUTH));
 });
 
-test("a grant held in another tenant carries nobody into it", async ({ request }) => {
+test("a grant held in another organisation carries nobody into it", async ({ request }) => {
   const foreign = await answer(request, `/api/projects/${FOREIGN}`, MEMBER_AUTH);
   const missing = await answer(request, `/api/projects/${NOWHERE}`, MEMBER_AUTH);
 
@@ -56,7 +56,7 @@ test("a grant held in another tenant carries nobody into it", async ({ request }
   expect((await answer(request, `/api/projects/${PROJECT_ID}`, ADMIN_AUTH)).status).toBe(200);
 });
 
-test("another tenant's project is in nobody's project list", async ({ request }) => {
+test("another organisation's project is in nobody's project list", async ({ request }) => {
   for (const auth of [ADMIN_AUTH, MEMBER_AUTH]) {
     const res = await request.get("/api/projects", { headers: auth });
     expect(res.status()).toBe(200);
@@ -66,7 +66,7 @@ test("another tenant's project is in nobody's project list", async ({ request })
   }
 });
 
-test("on screen, another tenant's board looks like a board that does not exist", async ({ page }) => {
+test("on screen, another organisation's board looks like a board that does not exist", async ({ page }) => {
   await signIn(page, "admin");
 
   await page.goto("/projects/NOPE");

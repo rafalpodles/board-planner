@@ -334,7 +334,7 @@ export function provenanceRefusal(request: Request): NextResponse | null {
 
 export async function createSession(params: {
   userId: Types.ObjectId | string;
-  tenant: Types.ObjectId;
+  organisation: Types.ObjectId;
   userAgent?: string | null;
   ip?: string | null;
 }): Promise<{
@@ -351,7 +351,7 @@ export async function createSession(params: {
   const expiresAt = new Date(Math.min(now + SESSION_IDLE_TTL_MS, absoluteExpiresAt.getTime()));
 
   const row = await Session.create({
-    tenant: params.tenant,
+    organisation: params.organisation,
     tokenHash: sha256(token),
     user: params.userId,
     expiresAt,
@@ -368,7 +368,7 @@ export async function createSession(params: {
 
 export async function resolveSession(
   token: string
-): Promise<{ sessionId: Types.ObjectId; userId: Types.ObjectId; tenant: Types.ObjectId | null; expiresAt: Date } | null> {
+): Promise<{ sessionId: Types.ObjectId; userId: Types.ObjectId; organisation: Types.ObjectId | null; expiresAt: Date } | null> {
   if (!token) return null;
   await connectDB();
 
@@ -382,7 +382,7 @@ export async function resolveSession(
 
   const sessionId = row._id;
   const userId = row.user as Types.ObjectId;
-  const tenant = (row.tenant as Types.ObjectId | undefined) ?? null;
+  const organisation = (row.organisation as Types.ObjectId | undefined) ?? null;
   const extended = new Date(Math.min(now + SESSION_IDLE_TTL_MS, absoluteExpiresAt));
 
   if (extended.getTime() - expiresAt > SESSION_SLIDE_THROTTLE_MS) {
@@ -390,10 +390,10 @@ export async function resolveSession(
       { _id: sessionId },
       { $set: { expiresAt: extended, lastUsedAt: new Date(now) } }
     );
-    return { sessionId, userId, tenant, expiresAt: extended };
+    return { sessionId, userId, organisation, expiresAt: extended };
   }
 
-  return { sessionId, userId, tenant, expiresAt: new Date(expiresAt) };
+  return { sessionId, userId, organisation, expiresAt: new Date(expiresAt) };
 }
 
 export const RECENT_SIGN_IN_MS = 10 * 60 * 1000;

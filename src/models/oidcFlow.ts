@@ -1,6 +1,6 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { IOidcFlow } from "@/types";
-import { withTenant } from "@/lib/tenant-field";
+import { withOrganisation } from "@/lib/organisation-field";
 
 const claimsSchema = new Schema(
   { issuer: String, subject: String, email: String, name: String, groups: [String] },
@@ -34,7 +34,7 @@ const oidcFlowSchema = new Schema<IOidcFlow>(
 oidcFlowSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 oidcFlowSchema.index({ state: 1 });
 
-withTenant(oidcFlowSchema);
+withOrganisation(oidcFlowSchema);
 
 export const OidcFlow: Model<IOidcFlow> =
   mongoose.models.OidcFlow || mongoose.model<IOidcFlow>("OidcFlow", oidcFlowSchema);

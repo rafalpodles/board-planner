@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const issueInvitation = vi.fn();
 const recordDelivery = vi.fn();
@@ -14,12 +14,12 @@ let caller: Record<string, unknown>;
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/middleware", async () => {
-  const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+  const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
   return {
     withAdmin:
       (handler: (r: Request, c: unknown) => unknown) =>
       (request: Request) =>
-        handler(request, { params: Promise.resolve({}), user: caller, db: scopedToDefaultTenant() }),
+        handler(request, { params: Promise.resolve({}), user: caller, db: scopedToDefaultOrganisation() }),
   };
 });
 vi.mock("@/lib/session", () => ({ selfOrigin }));
@@ -38,7 +38,7 @@ vi.mock("@/models/project", () => ({ Project: { find: projectFind } }));
 vi.mock("@/models/invitation", () => ({ Invitation: { find: invitationFind } }));
 
 const { GET, POST } = await import("./route");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 
 const P1 = "64b000000000000000000001";
 const CTX = { params: Promise.resolve({}) };
@@ -76,7 +76,7 @@ describe("POST /api/invitations", () => {
     const res = await POST(post({ email: " Ada@Example.com ", boards: [{ project: P1, relation: "owner" }] }), CTX);
 
     expect(res.status).toBe(201);
-    expect(issueInvitation).toHaveBeenCalledWith(scopedToDefaultTenant(), {
+    expect(issueInvitation).toHaveBeenCalledWith(scopedToDefaultOrganisation(), {
       email: "ada@example.com",
       role: "member",
       boards: [{ project: P1, relation: "owner" }],
@@ -84,10 +84,10 @@ describe("POST /api/invitations", () => {
     });
     const body = await res.json();
     expect(body.delivery).toBe("email");
-    expect(recordDelivery).toHaveBeenCalledWith(scopedToDefaultTenant(), "inv-1", "cpi_secret", "email");
+    expect(recordDelivery).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "inv-1", "cpi_secret", "email");
     expect(JSON.stringify(body)).not.toContain("cpi_secret");
     expect(logInstanceAudit).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       expect.objectContaining({ action: "invitation_sent", target: "ada@example.com" })
     );
   });
@@ -167,10 +167,10 @@ describe("GET /api/invitations", () => {
 
     const res = await GET(new Request("http://x/api/invitations"), CTX);
 
-    expect(invitationFind).toHaveBeenCalledWith({ status: "pending", tenant: DEFAULT_TENANT_ID });
+    expect(invitationFind).toHaveBeenCalledWith({ status: "pending", organisation: DEFAULT_ORGANISATION_ID });
     expect(userFind).toHaveBeenCalledWith({
       email: { $in: ["ada@example.com", "grace@example.com"] },
-      tenant: DEFAULT_TENANT_ID,
+      organisation: DEFAULT_ORGANISATION_ID,
     });
     expect(await res.json()).toEqual([{ email: "ada@example.com" }]);
   });

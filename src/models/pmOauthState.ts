@@ -1,6 +1,6 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { IPmOauthState } from "@/types";
-import { withTenant } from "@/lib/tenant-field";
+import { withOrganisation } from "@/lib/organisation-field";
 
 const pmOauthStateSchema = new Schema<IPmOauthState>(
   {
@@ -16,7 +16,7 @@ const pmOauthStateSchema = new Schema<IPmOauthState>(
 // Pending authorizations expire after 10 minutes
 pmOauthStateSchema.index({ createdAt: 1 }, { expireAfterSeconds: 600 });
 
-withTenant(pmOauthStateSchema);
+withOrganisation(pmOauthStateSchema);
 
 export const PmOauthState: Model<IPmOauthState> =
   mongoose.models.PmOauthState || mongoose.model<IPmOauthState>("PmOauthState", pmOauthStateSchema);

@@ -14,7 +14,7 @@ let caller: { _id: string; viaMachineCredential?: boolean } = { _id: "u1" };
 vi.mock("@/lib/middleware", () => ({
   withAuth:
     (handler: (req: Request, ctx: { user: typeof caller; db: unknown }) => unknown) => (req: Request) =>
-      handler(req, { user: caller, db: scopedToDefaultTenant() }),
+      handler(req, { user: caller, db: scopedToDefaultOrganisation() }),
 }));
 vi.mock("@/lib/encryption", () => ({
   encryptSecret: (v: string) => `enc:${v}`,
@@ -32,7 +32,7 @@ vi.mock("@/lib/url-validation", () => ({
 
 const { GET, PUT } = await import("@/app/api/users/me/notifications/route");
 const { NOTIFICATION_TYPES } = await import("@/types");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 
 const grid = (chat: boolean) =>
   Object.fromEntries(NOTIFICATION_TYPES.map((t) => [t, { inApp: true, email: true, chat }]));

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const getAuthUser = vi.fn();
 const compare = vi.fn();
@@ -46,7 +46,7 @@ vi.mock("@/models/user", () => ({
 }));
 
 const { PUT } = await import("./route");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { resetRateLimits, sourceKey, recordFailedAttempt, isRateLimited, EXCLUSIVE_SOURCE_ATTEMPTS } =
   await import("@/lib/rate-limit");
 
@@ -136,7 +136,7 @@ describe("PUT /api/users/me — changing the address that can reset the password
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ email: "old@example.com", pendingEmail: "new@example.com" });
     expect(userFindOneAndUpdate).not.toHaveBeenCalled();
-    expect(issueEmailChange).toHaveBeenCalledWith(scopedToDefaultTenant(), "u1", "new@example.com");
+    expect(issueEmailChange).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "u1", "new@example.com");
     expect(invalidateResetTokens).not.toHaveBeenCalled();
     expect(logInstanceAudit).not.toHaveBeenCalled();
     expect(revokePendingInvitationsFor).not.toHaveBeenCalled();
@@ -194,13 +194,13 @@ describe("PUT /api/users/me — changing the address that can reset the password
 
     expect(response.status).toBe(200);
     expect(userFindOneAndUpdate).toHaveBeenCalledWith(
-      { _id: "u1", tenant: DEFAULT_TENANT_ID },
+      { _id: "u1", organisation: DEFAULT_ORGANISATION_ID },
       { $set: { email: "new@example.com", emailVerifiedAt: null } },
       expect.anything()
     );
     expect(issueEmailChange).not.toHaveBeenCalled();
     expect(logInstanceAudit).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       expect.objectContaining({ action: "user_email_changed_self", detail: expect.stringContaining("old@example.com") })
     );
     // An address claimed with no inbox behind it proves nothing, so it must not withdraw
@@ -214,11 +214,11 @@ describe("PUT /api/users/me — changing the address that can reset the password
 
     expect(response.status).toBe(200);
     expect(userFindOneAndUpdate).toHaveBeenCalledWith(
-      { _id: "u1", tenant: DEFAULT_TENANT_ID },
+      { _id: "u1", organisation: DEFAULT_ORGANISATION_ID },
       { $set: { email: "", emailVerifiedAt: null } },
       expect.anything()
     );
-    expect(cancelEmailChange).toHaveBeenCalledWith(scopedToDefaultTenant(), "u1");
+    expect(cancelEmailChange).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "u1");
     expect(issueEmailChange).not.toHaveBeenCalled();
     expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({ to: "old@example.com" }));
   });
@@ -234,7 +234,7 @@ describe("PUT /api/users/me — changing the address that can reset the password
     expect(response.status).toBe(200);
     expect(compare).not.toHaveBeenCalled();
     expect(userFindOneAndUpdate).toHaveBeenCalledWith(
-      { _id: "u1", tenant: DEFAULT_TENANT_ID },
+      { _id: "u1", organisation: DEFAULT_ORGANISATION_ID },
       { $set: { emailNotifications: true } },
       expect.anything()
     );
@@ -365,7 +365,7 @@ describe("PUT /api/users/me — changing your own display name", () => {
 
     expect(response.status).toBe(200);
     expect(userFindOneAndUpdate).toHaveBeenCalledWith(
-      { _id: "u1", tenant: DEFAULT_TENANT_ID },
+      { _id: "u1", organisation: DEFAULT_ORGANISATION_ID },
       { $set: { fullName: "Ówner Nàme" } },
       expect.anything()
     );
@@ -385,7 +385,7 @@ describe("PUT /api/users/me — changing your own display name", () => {
     await PUT(put({ fullName: "  Ówner Nàme  " }), context);
 
     expect(userFindOneAndUpdate).toHaveBeenCalledWith(
-      { _id: "u1", tenant: DEFAULT_TENANT_ID },
+      { _id: "u1", organisation: DEFAULT_ORGANISATION_ID },
       { $set: { fullName: "Ówner Nàme" } },
       expect.anything()
     );
@@ -430,7 +430,7 @@ describe("PUT /api/users/me — changing your own display name", () => {
     await PUT(put({ fullName: "Ówner Nàme" }), context);
 
     expect(logInstanceAudit).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       expect.objectContaining({
         action: "user_full_name_changed_self",
         target: "owner",
@@ -460,11 +460,11 @@ describe("PUT /api/users/me — changing your own display name", () => {
     expect(response.status).toBe(200);
     // The name at once; the address only once its inbox confirms it
     expect(userFindOneAndUpdate).toHaveBeenCalledWith(
-      { _id: "u1", tenant: DEFAULT_TENANT_ID },
+      { _id: "u1", organisation: DEFAULT_ORGANISATION_ID },
       { $set: { fullName: "Ówner Nàme" } },
       expect.anything()
     );
-    expect(issueEmailChange).toHaveBeenCalledWith(scopedToDefaultTenant(), "u1", "new@example.com");
+    expect(issueEmailChange).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "u1", "new@example.com");
     expect(await response.json()).toMatchObject({ fullName: "Ówner Nàme", pendingEmail: "new@example.com" });
   });
 

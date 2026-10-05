@@ -13,8 +13,8 @@ vi.mock("@/models/emailChangeToken", () => ({
 
 const { issueEmailChange, consumeEmailChange, pendingEmailChange, cancelEmailChange, releaseEmailChange } = await import("./email-change");
 const { sha256 } = await import("./oauth");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
-const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
+const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -23,19 +23,19 @@ beforeEach(() => {
 // BP-359
 describe("email change links", () => {
   it("stores only a hash, and replaces any link still pending for the account", async () => {
-    const token = await issueEmailChange(scopedToDefaultTenant(), "u1", "new@example.com");
+    const token = await issueEmailChange(scopedToDefaultOrganisation(), "u1", "new@example.com");
 
     expect(token).toMatch(/^cpe_[0-9a-f]{64}$/);
-    expect(deleteMany).toHaveBeenCalledWith({ user: "u1", usedAt: null, tenant: DEFAULT_TENANT_ID });
+    expect(deleteMany).toHaveBeenCalledWith({ user: "u1", usedAt: null, organisation: DEFAULT_ORGANISATION_ID });
     const stored = create.mock.calls[0][0];
-    expect(stored).toMatchObject({ user: "u1", email: "new@example.com", tokenHash: sha256(token), tenant: DEFAULT_TENANT_ID });
+    expect(stored).toMatchObject({ user: "u1", email: "new@example.com", tokenHash: sha256(token), organisation: DEFAULT_ORGANISATION_ID });
     expect(JSON.stringify(stored)).not.toContain(token);
     expect(deleteMany.mock.invocationCallOrder[0]).toBeLessThan(create.mock.invocationCallOrder[0]);
   });
 
   it("gives a link a day", async () => {
     const before = Date.now();
-    await issueEmailChange(scopedToDefaultTenant(), "u1", "new@example.com");
+    await issueEmailChange(scopedToDefaultOrganisation(), "u1", "new@example.com");
 
     const expiresAt: Date = create.mock.calls[0][0].expiresAt;
     expect(expiresAt.getTime() - before).toBeGreaterThanOrEqual(24 * 60 * 60 * 1000 - 1000);
@@ -45,11 +45,11 @@ describe("email change links", () => {
   it("claims a link only while it is unused and unexpired, in one write", async () => {
     findOneAndUpdate.mockResolvedValue({ user: "u1", email: "new@example.com" });
 
-    const outcome = await consumeEmailChange(scopedToDefaultTenant(), "cpe_x");
+    const outcome = await consumeEmailChange(scopedToDefaultOrganisation(), "cpe_x");
 
     expect(outcome).toEqual({ ok: true, userId: "u1", email: "new@example.com", claimedAt: expect.any(Date) });
     const [filter, update] = findOneAndUpdate.mock.calls[0];
-    expect(filter).toEqual({ tokenHash: sha256("cpe_x"), usedAt: null, expiresAt: { $gt: expect.any(Date) }, tenant: DEFAULT_TENANT_ID });
+    expect(filter).toEqual({ tokenHash: sha256("cpe_x"), usedAt: null, expiresAt: { $gt: expect.any(Date) }, organisation: DEFAULT_ORGANISATION_ID });
     expect(update).toEqual({ $set: { usedAt: expect.any(Date) } });
     // The release matches on this exact value, so it must be the one the claim wrote
     expect(outcome.ok && outcome.claimedAt).toBe(update.$set.usedAt);
@@ -59,34 +59,34 @@ describe("email change links", () => {
     findOneAndUpdate.mockResolvedValue(null);
 
     findOne.mockReturnValueOnce({ lean: async () => null });
-    expect(await consumeEmailChange(scopedToDefaultTenant(), "cpe_x")).toEqual({ ok: false, reason: "unknown" });
+    expect(await consumeEmailChange(scopedToDefaultOrganisation(), "cpe_x")).toEqual({ ok: false, reason: "unknown" });
     findOne.mockReturnValueOnce({ lean: async () => ({ usedAt: new Date() }) });
-    expect(await consumeEmailChange(scopedToDefaultTenant(), "cpe_x")).toEqual({ ok: false, reason: "used" });
+    expect(await consumeEmailChange(scopedToDefaultOrganisation(), "cpe_x")).toEqual({ ok: false, reason: "used" });
     findOne.mockReturnValueOnce({ lean: async () => ({ usedAt: null }) });
-    expect(await consumeEmailChange(scopedToDefaultTenant(), "cpe_x")).toEqual({ ok: false, reason: "expired" });
+    expect(await consumeEmailChange(scopedToDefaultOrganisation(), "cpe_x")).toEqual({ ok: false, reason: "expired" });
   });
 
   it("reports only a pending link that can still be confirmed", async () => {
     findOne.mockReturnValue({ sort: () => ({ lean: async () => ({ email: "new@example.com", expiresAt: new Date(1) }) }) });
 
-    expect(await pendingEmailChange(scopedToDefaultTenant(), "u1")).toEqual({ email: "new@example.com", expiresAt: new Date(1) });
-    expect(findOne.mock.calls[0][0]).toEqual({ user: "u1", usedAt: null, expiresAt: { $gt: expect.any(Date) }, tenant: DEFAULT_TENANT_ID });
+    expect(await pendingEmailChange(scopedToDefaultOrganisation(), "u1")).toEqual({ email: "new@example.com", expiresAt: new Date(1) });
+    expect(findOne.mock.calls[0][0]).toEqual({ user: "u1", usedAt: null, expiresAt: { $gt: expect.any(Date) }, organisation: DEFAULT_ORGANISATION_ID });
 
     findOne.mockReturnValue({ sort: () => ({ lean: async () => null }) });
-    expect(await pendingEmailChange(scopedToDefaultTenant(), "u1")).toBeNull();
+    expect(await pendingEmailChange(scopedToDefaultOrganisation(), "u1")).toBeNull();
   });
 
   it("cancels only links not yet spent", async () => {
-    await cancelEmailChange(scopedToDefaultTenant(), "u1");
+    await cancelEmailChange(scopedToDefaultOrganisation(), "u1");
 
-    expect(deleteMany).toHaveBeenCalledWith({ user: "u1", usedAt: null, tenant: DEFAULT_TENANT_ID });
+    expect(deleteMany).toHaveBeenCalledWith({ user: "u1", usedAt: null, organisation: DEFAULT_ORGANISATION_ID });
   });
 
   it("gives back only its own claim, so a link cancelled meanwhile is not revived", async () => {
     const claimedAt = new Date("2026-09-16T10:00:00Z");
 
-    await releaseEmailChange(scopedToDefaultTenant(), "cpe_x", claimedAt);
+    await releaseEmailChange(scopedToDefaultOrganisation(), "cpe_x", claimedAt);
 
-    expect(updateOne).toHaveBeenCalledWith({ tokenHash: sha256("cpe_x"), usedAt: claimedAt, tenant: DEFAULT_TENANT_ID }, { $set: { usedAt: null } });
+    expect(updateOne).toHaveBeenCalledWith({ tokenHash: sha256("cpe_x"), usedAt: claimedAt, organisation: DEFAULT_ORGANISATION_ID }, { $set: { usedAt: null } });
   });
 });

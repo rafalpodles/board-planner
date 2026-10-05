@@ -1,9 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 import type mongoose from "mongoose";
-import { DEFAULT_TENANT_ID } from "./tenant-field";
-import { backfillTenants, ensureOrganisation, scopedModelNames, UNSCOPED_MODELS } from "./tenant-migration";
+import { DEFAULT_ORGANISATION_ID } from "./organisation-field";
+import { backfillOrganisations, ensureOrganisation, scopedModelNames, UNSCOPED_MODELS } from "./organisation-migration";
 
-function fakeDb(missing: number, tenantRows: Record<string, unknown>[] = []) {
+function fakeDb(missing: number, organisationRows: Record<string, unknown>[] = []) {
   const calls = { updateMany: vi.fn(() => Promise.resolve({ matchedCount: missing })), insertOne: vi.fn(), deleteOne: vi.fn(), updateOne: vi.fn() };
   const touched: string[] = [];
   const collection = (name: string) => {
@@ -11,45 +11,45 @@ function fakeDb(missing: number, tenantRows: Record<string, unknown>[] = []) {
     return {
       collectionName: name,
       countDocuments: () => Promise.resolve(missing),
-      find: () => ({ toArray: () => Promise.resolve(tenantRows) }),
+      find: () => ({ toArray: () => Promise.resolve(organisationRows) }),
       ...calls,
     };
   };
   return { connection: { db: { collection } } as unknown as mongoose.Connection, calls, touched };
 }
 
-describe("backfillTenants", () => {
-  it("gives every scoped collection the default tenant where it has none, and counts what it gave", async () => {
+describe("backfillOrganisations", () => {
+  it("gives every scoped collection the default organisation where it has none, and counts what it gave", async () => {
     const { connection, calls } = fakeDb(2);
 
-    const { total } = await backfillTenants(connection, { apply: true });
+    const { total } = await backfillOrganisations(connection, { apply: true });
 
     expect(calls.updateMany).toHaveBeenCalledTimes(scopedModelNames().length);
-    expect(calls.updateMany).toHaveBeenCalledWith({ tenant: null }, { $set: { tenant: DEFAULT_TENANT_ID } });
+    expect(calls.updateMany).toHaveBeenCalledWith({ organisation: null }, { $set: { organisation: DEFAULT_ORGANISATION_ID } });
     expect(total).toBe(2 * scopedModelNames().length);
   });
 
-  it("touches neither the tenant table nor the throttle", async () => {
+  it("touches neither the organisation table nor the throttle", async () => {
     const { connection, touched } = fakeDb(1);
 
-    await backfillTenants(connection, { apply: true });
+    await backfillOrganisations(connection, { apply: true });
 
-    expect(touched).not.toContain("tenants");
+    expect(touched).not.toContain("organisations");
     expect(touched).not.toContain("ratelimits");
-    expect(UNSCOPED_MODELS).toEqual(["Tenant", "RateLimit"]);
+    expect(UNSCOPED_MODELS).toEqual(["Organisation", "RateLimit"]);
   });
 
   it("only counts in a dry run", async () => {
     const { connection, calls } = fakeDb(3);
 
-    const { total } = await backfillTenants(connection, { apply: false });
+    const { total } = await backfillOrganisations(connection, { apply: false });
 
     expect(calls.updateMany).not.toHaveBeenCalled();
     expect(total).toBe(3 * scopedModelNames().length);
   });
 
   it("refuses a connection that has no database", async () => {
-    await expect(backfillTenants({} as mongoose.Connection, { apply: false })).rejects.toThrow("No database handle");
+    await expect(backfillOrganisations({} as mongoose.Connection, { apply: false })).rejects.toThrow("No database handle");
   });
 });
 
@@ -62,26 +62,26 @@ describe("ensureOrganisation", () => {
     expect(await ensureOrganisation(connection, { apply: true, name: "Rafał-org" })).toBe("re-keyed");
 
     expect(calls.insertOne).toHaveBeenCalledWith(
-      expect.objectContaining({ _id: DEFAULT_TENANT_ID, name: "Rafał-org", entitlements: legacy.entitlements })
+      expect.objectContaining({ _id: DEFAULT_ORGANISATION_ID, name: "Rafał-org", entitlements: legacy.entitlements })
     );
     expect(calls.deleteOne).toHaveBeenCalledWith({ _id: "legacy-id" });
   });
 
-  it("creates the organisation when the instance has no tenant row", async () => {
+  it("creates the organisation when the instance has no organisation row", async () => {
     const { connection, calls } = fakeDb(0, []);
 
     expect(await ensureOrganisation(connection, { apply: true, name: "Acme" })).toBe("created");
 
-    expect(calls.insertOne).toHaveBeenCalledWith(expect.objectContaining({ _id: DEFAULT_TENANT_ID, name: "Acme" }));
+    expect(calls.insertOne).toHaveBeenCalledWith(expect.objectContaining({ _id: DEFAULT_ORGANISATION_ID, name: "Acme" }));
     expect(calls.deleteOne).not.toHaveBeenCalled();
   });
 
   it("only renames an organisation that already has the default id", async () => {
-    const { connection, calls } = fakeDb(0, [{ _id: DEFAULT_TENANT_ID }]);
+    const { connection, calls } = fakeDb(0, [{ _id: DEFAULT_ORGANISATION_ID }]);
 
     expect(await ensureOrganisation(connection, { apply: true, name: "New name" })).toBe("present");
 
-    expect(calls.updateOne).toHaveBeenCalledWith({ _id: DEFAULT_TENANT_ID }, { $set: { name: "New name" } });
+    expect(calls.updateOne).toHaveBeenCalledWith({ _id: DEFAULT_ORGANISATION_ID }, { $set: { name: "New name" } });
     expect(calls.insertOne).not.toHaveBeenCalled();
   });
 
@@ -95,7 +95,7 @@ describe("ensureOrganisation", () => {
     expect(calls.updateOne).not.toHaveBeenCalled();
   });
 
-  it("refuses to guess between several tenant rows", async () => {
+  it("refuses to guess between several organisation rows", async () => {
     const { connection } = fakeDb(0, [legacy, { _id: "other" }]);
 
     await expect(ensureOrganisation(connection, { apply: true, name: "X" })).rejects.toThrow(/cannot tell which is the organisation/);

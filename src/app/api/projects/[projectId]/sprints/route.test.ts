@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
@@ -109,7 +109,7 @@ describe("GET /api/projects/[projectId]/sprints — estimate accumulators", () =
 
     await GET(req(), ctx());
 
-    expect(projectFindOne).toHaveBeenCalledWith({ _id: PROJECT_ID, tenant: DEFAULT_TENANT_ID }, "columns estimateFieldId");
+    expect(projectFindOne).toHaveBeenCalledWith({ _id: PROJECT_ID, organisation: DEFAULT_ORGANISATION_ID }, "columns estimateFieldId");
   });
 
   it("carries estimateTotal/estimateDone from the aggregate result through to the response", async () => {

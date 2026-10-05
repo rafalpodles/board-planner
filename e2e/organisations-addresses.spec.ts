@@ -1,13 +1,13 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
-import { RUN_TENANTS_SERVER, TENANTS_PORT } from "../playwright.config";
-import { ACME, GLOBEX, PLATFORM_HOST, TENANTS_API, asTenant, bearer, originOf, seedTwoTenants, type TenantFixture } from "./tenants";
+import { RUN_ORGANISATIONS_SERVER, ORGANISATIONS_PORT } from "../playwright.config";
+import { ACME, GLOBEX, PLATFORM_HOST, ORGANISATIONS_API, asOrganisation, bearer, originOf, seedTwoOrganisations, type OrganisationFixture } from "./organisations";
 import { MCP_HEADERS } from "./mcp";
 import { bodyOf, mailFor } from "./mailbox";
 
-test.skip(!RUN_TENANTS_SERVER, "needs the TENANT_DOMAIN server — set E2E_TENANTS_SERVER=1");
+test.skip(!RUN_ORGANISATIONS_SERVER, "needs the ORGANISATION_DOMAIN server — set E2E_ORGANISATIONS_SERVER=1");
 
 test.beforeEach(async () => {
-  await seedTwoTenants();
+  await seedTwoOrganisations();
 });
 
 const TINY_PNG = Buffer.from(
@@ -15,9 +15,9 @@ const TINY_PNG = Buffer.from(
   "base64"
 );
 
-async function upload(request: APIRequestContext, who: TenantFixture) {
-  const res = await request.post(`${TENANTS_API}/api/uploads`, {
-    headers: { ...asTenant(who), cookie: `__Host-bp_session=${who.sessionToken}`, origin: originOf(who) },
+async function upload(request: APIRequestContext, who: OrganisationFixture) {
+  const res = await request.post(`${ORGANISATIONS_API}/api/uploads`, {
+    headers: { ...asOrganisation(who), cookie: `__Host-bp_session=${who.sessionToken}`, origin: originOf(who) },
     multipart: { file: { name: "plan.png", mimeType: "image/png", buffer: TINY_PNG }, projectId: String(who.projectId) },
   });
   expect(res.status(), await res.text()).toBe(200);
@@ -28,28 +28,28 @@ async function upload(request: APIRequestContext, who: TenantFixture) {
 test.describe("BP-670: each organisation's own addresses, documents and files", () => {
   test("the OAuth discovery documents name each organisation's own host, and none for a host with no organisation", async ({ request }) => {
     for (const who of [ACME, GLOBEX]) {
-      const res = await request.get(`${TENANTS_API}/.well-known/oauth-authorization-server`, { headers: asTenant(who) });
+      const res = await request.get(`${ORGANISATIONS_API}/.well-known/oauth-authorization-server`, { headers: asOrganisation(who) });
       expect(res.status(), who.slug).toBe(200);
       const doc = await res.json();
       expect(doc.issuer, who.slug).toBe(originOf(who));
       expect(doc.token_endpoint, who.slug).toBe(`${originOf(who)}/oauth/token`);
     }
-    const nobody = await request.get(`${TENANTS_API}/.well-known/oauth-authorization-server`, {
-      headers: { host: `nobody.tenants.localhost:${TENANTS_PORT}` },
+    const nobody = await request.get(`${ORGANISATIONS_API}/.well-known/oauth-authorization-server`, {
+      headers: { host: `nobody.organisations.localhost:${ORGANISATIONS_PORT}` },
     });
     expect(nobody.status()).toBe(404);
   });
 
   test("MCP answers an organisation's credential on its own host, and refuses it on the other's", async ({ request }) => {
-    const list = (who: TenantFixture, host: TenantFixture) =>
-      request.post(`${TENANTS_API}/api/mcp`, {
-        headers: { ...asTenant(host), ...bearer(who), ...MCP_HEADERS },
+    const list = (who: OrganisationFixture, host: OrganisationFixture) =>
+      request.post(`${ORGANISATIONS_API}/api/mcp`, {
+        headers: { ...asOrganisation(host), ...bearer(who), ...MCP_HEADERS },
         data: { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} },
       });
 
     expect((await list(ACME, ACME)).status()).toBe(200);
     expect((await list(ACME, GLOBEX)).status()).toBe(401);
-    const platform = await request.post(`${TENANTS_API}/api/mcp`, {
+    const platform = await request.post(`${ORGANISATIONS_API}/api/mcp`, {
       headers: { host: PLATFORM_HOST, ...bearer(ACME), ...MCP_HEADERS },
       data: { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} },
     });
@@ -58,8 +58,8 @@ test.describe("BP-670: each organisation's own addresses, documents and files", 
 
   test("a password reset mailed from one organisation links back to that organisation's host", async ({ request }) => {
     const address = `boss@${GLOBEX.slug}.example`;
-    const res = await request.post(`${TENANTS_API}/api/auth/forgot`, {
-      headers: { ...asTenant(GLOBEX), origin: originOf(GLOBEX), "content-type": "application/json" },
+    const res = await request.post(`${ORGANISATIONS_API}/api/auth/forgot`, {
+      headers: { ...asOrganisation(GLOBEX), origin: originOf(GLOBEX), "content-type": "application/json" },
       data: { identifier: address },
     });
     expect(res.status(), await res.text()).toBeLessThan(300);
@@ -74,8 +74,8 @@ test.describe("BP-670: each organisation's own addresses, documents and files", 
     const acmeAddress = `boss@${ACME.slug}.example`;
     const before = (await mailFor(acmeAddress)).length;
 
-    await request.post(`${TENANTS_API}/api/auth/forgot`, {
-      headers: { ...asTenant(GLOBEX), origin: originOf(GLOBEX), "content-type": "application/json" },
+    await request.post(`${ORGANISATIONS_API}/api/auth/forgot`, {
+      headers: { ...asOrganisation(GLOBEX), origin: originOf(GLOBEX), "content-type": "application/json" },
       data: { identifier: acmeAddress },
     });
 
@@ -87,10 +87,10 @@ test.describe("BP-670: each organisation's own addresses, documents and files", 
     const { url } = await upload(request, ACME);
     const path = new URL(url, originOf(ACME)).pathname;
 
-    const own = await request.get(`${TENANTS_API}${path}`, { headers: { ...asTenant(ACME), ...bearer(ACME) } });
+    const own = await request.get(`${ORGANISATIONS_API}${path}`, { headers: { ...asOrganisation(ACME), ...bearer(ACME) } });
     expect(own.status()).toBe(200);
 
-    const other = await request.get(`${TENANTS_API}${path}`, { headers: { ...asTenant(GLOBEX), ...bearer(GLOBEX) } });
+    const other = await request.get(`${ORGANISATIONS_API}${path}`, { headers: { ...asOrganisation(GLOBEX), ...bearer(GLOBEX) } });
     expect([403, 404]).toContain(other.status());
   });
 });

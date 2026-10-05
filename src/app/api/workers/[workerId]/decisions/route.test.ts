@@ -11,7 +11,7 @@ vi.mock("@/lib/worker-service", async (importOriginal) => {
   return { ...actual, verifyWorkerCredential };
 });
 
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { POST, PATCH } = await import("./route");
 
 const WORKER_ID = "69a52e3b399b27d3cbb2c5a5";
@@ -95,7 +95,7 @@ describe("POST /api/workers/:workerId/decisions", () => {
 
     expect((await POST(req, ctx)).status).toBe(201);
     expect(createDecision).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       TASK_ID,
       WORKER_ID,
       "run-1",
@@ -309,7 +309,7 @@ describe("PATCH /api/workers/:workerId/decisions", () => {
     });
 
     expect((await PATCH(req, ctx)).status).toBe(200);
-    expect(settleDecision).toHaveBeenCalledWith(scopedToDefaultTenant(), TASK_ID, WORKER_ID, "delivered", {
+    expect(settleDecision).toHaveBeenCalledWith(scopedToDefaultOrganisation(), TASK_ID, WORKER_ID, "delivered", {
       prUrl: "https://github.com/o/r/pull/7",
       error: "",
       attempts: 0,

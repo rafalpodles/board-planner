@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const reissueInvitation = vi.fn();
 const recordDelivery = vi.fn();
@@ -12,12 +12,12 @@ const selfOrigin = vi.fn();
 let caller: Record<string, unknown>;
 
 vi.mock("@/lib/middleware", async () => {
-  const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+  const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
   return {
     withAdmin:
       (handler: (r: Request, c: unknown) => unknown) =>
       (request: Request, ctx: { params: Promise<Record<string, string>> }) =>
-        handler(request, { params: ctx.params, user: caller, db: scopedToDefaultTenant() }),
+        handler(request, { params: ctx.params, user: caller, db: scopedToDefaultOrganisation() }),
   };
 });
 vi.mock("@/lib/session", () => ({ selfOrigin }));
@@ -36,7 +36,7 @@ vi.mock("@/models/user", () => ({ User: { exists: userExists } }));
 vi.mock("@/models/project", () => ({ Project: { find: projectFind } }));
 
 const { POST } = await import("./route");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 
 const ID = "64b0000000000000000000aa";
 const resend = () =>
@@ -66,8 +66,8 @@ describe("POST /api/invitations/:id/resend", () => {
     const res = await resend();
 
     expect(res.status).toBe(200);
-    expect(reissueInvitation).toHaveBeenCalledWith(scopedToDefaultTenant(), ID, "admin-2");
-    expect(recordDelivery).toHaveBeenCalledWith(scopedToDefaultTenant(), ID, "cpi_new", "email");
+    expect(reissueInvitation).toHaveBeenCalledWith(scopedToDefaultOrganisation(), ID, "admin-2");
+    expect(recordDelivery).toHaveBeenCalledWith(scopedToDefaultOrganisation(), ID, "cpi_new", "email");
     expect(deliverTo.mock.calls[0][1]).toBe("cpi_new");
     expect(deliverTo.mock.calls[0][3]).toBe(caller);
     expect(JSON.stringify(await res.json())).not.toContain("cpi_new");
@@ -107,7 +107,7 @@ describe("POST /api/invitations/:id/resend", () => {
     userExists.mockResolvedValue({ _id: "u2" });
 
     expect((await resend()).status).toBe(409);
-    expect(userExists).toHaveBeenCalledWith({ email: "ada@example.com", tenant: DEFAULT_TENANT_ID });
+    expect(userExists).toHaveBeenCalledWith({ email: "ada@example.com", organisation: DEFAULT_ORGANISATION_ID });
     expect(reissueInvitation).not.toHaveBeenCalled();
   });
 

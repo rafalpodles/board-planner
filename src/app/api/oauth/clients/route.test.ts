@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const findOne = vi.fn();
 const clientDeleteOne = vi.fn();
@@ -17,12 +17,12 @@ vi.mock("@/models/oauthToken", () => ({
 vi.mock("@/models/oauthCode", () => ({ OAuthCode: { deleteMany: codeDeleteMany } }));
 vi.mock("@/models/oauthConsent", () => ({ OAuthConsent: { deleteMany: consentDeleteMany } }));
 vi.mock("@/lib/middleware", async () => {
-  const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+  const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
   return {
     withAdmin:
       (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
       (req: Request, ctx: unknown) =>
-        handler(req, { ...(ctx as object), user: { _id: "a1", role: "admin" }, db: scopedToDefaultTenant() }),
+        handler(req, { ...(ctx as object), user: { _id: "a1", role: "admin" }, db: scopedToDefaultOrganisation() }),
   };
 });
 
@@ -50,8 +50,8 @@ describe("DELETE /api/oauth/clients", () => {
     const res = await DELETE(request({ id: VALID_ID }), ctx());
 
     expect(res.status).toBe(200);
-    expect(tokenDeleteMany).toHaveBeenCalledWith({ clientId: "client-abc", tenant: DEFAULT_TENANT_ID });
-    expect(clientDeleteOne).toHaveBeenCalledWith({ _id: VALID_ID, tenant: DEFAULT_TENANT_ID });
+    expect(tokenDeleteMany).toHaveBeenCalledWith({ clientId: "client-abc", organisation: DEFAULT_ORGANISATION_ID });
+    expect(clientDeleteOne).toHaveBeenCalledWith({ _id: VALID_ID, organisation: DEFAULT_ORGANISATION_ID });
   });
 
   // BP-747: a refresh or code exchange racing this handler checks OAuthClient.exists after it

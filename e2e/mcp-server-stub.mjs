@@ -9,7 +9,7 @@ import { handleOauth } from "./mcp-oauth-stub.mjs";
  * only honest way to test the picker and the budget warning is to have a server that really
  * offers a lot of them. `wide` offers more than the budget, `narrow` offers three.
  *
- * `/oauth/<tenant>/mcp` is the same server behind an authorization server — see mcp-oauth-stub.mjs.
+ * `/oauth/<organisation>/mcp` is the same server behind an authorization server — see mcp-oauth-stub.mjs.
  */
 
 const PORT = Number(process.env.MCP_SERVER_STUB_PORT ?? 3993);

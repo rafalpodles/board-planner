@@ -4,7 +4,7 @@ import { safeFetch } from "./safe-fetch";
 import { OUTBOUND_CONCURRENCY, runBounded } from "./bounded";
 import { decryptSecret } from "./encryption";
 import { DISCORD_NO_MENTIONS, escapeDiscord, escapeSlack, excerpt } from "./chat-markup";
-import { originFor } from "./tenant-host";
+import { originFor } from "./organisation-host";
 import type { ScopedDb } from "@/lib/db-scope";
 
 interface NotificationPayload {

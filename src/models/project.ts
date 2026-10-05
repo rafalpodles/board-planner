@@ -1,6 +1,6 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { IProject, DEFAULT_PROJECT_CATEGORIES, DEFAULT_PROJECT_COLUMNS, COLUMN_ROLES, WEBHOOK_EVENTS, NOTIFICATION_CHANNEL_TYPES, CUSTOM_FIELD_TYPES } from "@/types";
-import { withTenant } from "@/lib/tenant-field";
+import { withOrganisation } from "@/lib/organisation-field";
 
 const categorySchema = new Schema(
   {
@@ -280,9 +280,9 @@ const projectSchema = new Schema<IProject>(
   { timestamps: true }
 );
 
-projectSchema.index({ key: 1, tenant: 1 }, { unique: true });
+projectSchema.index({ key: 1, organisation: 1 }, { unique: true });
 
-withTenant(projectSchema);
+withOrganisation(projectSchema);
 
 export const Project: Model<IProject> =
   mongoose.models.Project ||

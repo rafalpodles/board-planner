@@ -1,6 +1,6 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { IOAuthCode } from "@/types";
-import { withTenant } from "@/lib/tenant-field";
+import { withOrganisation } from "@/lib/organisation-field";
 
 const oauthCodeSchema = new Schema<IOAuthCode>(
   {
@@ -22,7 +22,7 @@ const oauthCodeSchema = new Schema<IOAuthCode>(
 
 oauthCodeSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
-withTenant(oauthCodeSchema);
+withOrganisation(oauthCodeSchema);
 
 export const OAuthCode: Model<IOAuthCode> =
   mongoose.models.OAuthCode || mongoose.model<IOAuthCode>("OAuthCode", oauthCodeSchema);

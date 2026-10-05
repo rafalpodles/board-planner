@@ -12,9 +12,9 @@ const revokeUserCredentials = vi.fn();
 vi.mock("@/lib/session", () => ({ revokeUserCredentials }));
 
 const { getPmUser, markPmAsMachine } = await import("./pm-user");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
-const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
-const db = scopedToDefaultTenant();
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
+const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
+const db = scopedToDefaultOrganisation();
 
 beforeEach(() => {
   updateOne.mockReset();
@@ -66,8 +66,8 @@ describe("markPmAsMachine", () => {
     try {
       await markPmAsMachine(db);
 
-      expect(findOne).toHaveBeenCalledWith({ username: "pm", kind: { $ne: "machine" }, tenant: DEFAULT_TENANT_ID });
-      expect(updateOne).toHaveBeenCalledWith({ _id: "pm-1", tenant: DEFAULT_TENANT_ID }, { $set: { kind: "machine" } });
+      expect(findOne).toHaveBeenCalledWith({ username: "pm", kind: { $ne: "machine" }, organisation: DEFAULT_ORGANISATION_ID });
+      expect(updateOne).toHaveBeenCalledWith({ _id: "pm-1", organisation: DEFAULT_ORGANISATION_ID }, { $set: { kind: "machine" } });
       expect(revokeUserCredentials).toHaveBeenCalledWith("pm-1");
       expect(warn.mock.calls[0][0]).toContain("role admin");
       // An address is a person's data, and the role is all an operator needs to act

@@ -10,17 +10,17 @@ vi.mock("@/lib/email", () => ({
   isEmailConfigured: () => isEmailConfigured(),
 }));
 vi.mock("@/lib/session", () => ({ selfOrigin: () => selfOrigin() }));
-const tenantSlug = vi.fn<(id: Types.ObjectId) => string | undefined>(() => undefined);
+const organisationSlug = vi.fn<(id: Types.ObjectId) => string | undefined>(() => undefined);
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
-vi.mock("@/models/tenant", () => ({
-  Tenant: { findById: (id: Types.ObjectId) => ({ select: () => ({ lean: async () => ({ slug: tenantSlug(id) }) }) }) },
+vi.mock("@/models/organisation", () => ({
+  Organisation: { findById: (id: Types.ObjectId) => ({ select: () => ({ lean: async () => ({ slug: organisationSlug(id) }) }) }) },
 }));
 
 const { notifyPasswordChanged, notifyAddressChanged, notifyCredentialCreated, notifyIdentityLinked, maskAddress } =
   await import("@/lib/security-mail");
-const { forgetTenantSlugs } = await import("@/lib/tenant-host");
+const { forgetOrganisationSlugs } = await import("@/lib/organisation-host");
 
-const TENANT = new Types.ObjectId();
+const ORGANISATION = new Types.ObjectId();
 
 const sent = () => sendEmail.mock.calls.at(-1)?.[0] as { to: string; subject: string; html: string; text: string };
 
@@ -33,7 +33,7 @@ beforeEach(() => {
 describe("notifyPasswordChanged", () => {
   it("warns hard when a reset link did it, because that is the takeover case", async () => {
     await notifyPasswordChanged({
-      tenant: TENANT,
+      organisation: ORGANISATION,
       email: "owner@example.com",
       username: "owner",
       how: "reset_link",
@@ -47,7 +47,7 @@ describe("notifyPasswordChanged", () => {
 
   it("names the administrator and says the password was not sent", async () => {
     await notifyPasswordChanged({
-      tenant: TENANT,
+      organisation: ORGANISATION,
       email: "owner@example.com",
       username: "owner",
       how: "admin",
@@ -61,7 +61,7 @@ describe("notifyPasswordChanged", () => {
   });
 
   it("says nothing to an account with no address", async () => {
-    await notifyPasswordChanged({ tenant: TENANT, email: "", username: "owner", how: "admin" });
+    await notifyPasswordChanged({ organisation: ORGANISATION, email: "", username: "owner", how: "admin" });
 
     expect(sendEmail).not.toHaveBeenCalled();
   });
@@ -70,7 +70,7 @@ describe("notifyPasswordChanged", () => {
     sendEmail.mockRejectedValueOnce(new Error("smtp is down"));
 
     await expect(
-      notifyPasswordChanged({ tenant: TENANT, email: "owner@example.com", username: "owner", how: "admin" })
+      notifyPasswordChanged({ organisation: ORGANISATION, email: "owner@example.com", username: "owner", how: "admin" })
     ).resolves.toBeUndefined();
   });
 });
@@ -112,7 +112,7 @@ describe("maskAddress", () => {
 describe("notifyCredentialCreated", () => {
   it("names what was created and what it can reach", async () => {
     await notifyCredentialCreated({
-      tenant: TENANT,
+      organisation: ORGANISATION,
       email: "owner@example.com",
       username: "owner",
       kind: "token",
@@ -130,7 +130,7 @@ describe("notifyCredentialCreated", () => {
     selfOrigin.mockReturnValue(null);
 
     await notifyCredentialCreated({
-      tenant: TENANT,
+      organisation: ORGANISATION,
       email: "owner@example.com",
       username: "owner",
       kind: "oauth",
@@ -144,7 +144,7 @@ describe("notifyCredentialCreated", () => {
 });
 
 describe("notifyIdentityLinked", () => {
-  const LINKED = { tenant: TENANT, email: "owner@example.com", username: "owner", provider: "Acme", providerEmail: "o@acme.example" };
+  const LINKED = { organisation: ORGANISATION, email: "owner@example.com", username: "owner", provider: "Acme", providerEmail: "o@acme.example" };
 
   it("tells the owner to change the password, which unlinks it", async () => {
     await notifyIdentityLinked(LINKED);
@@ -166,33 +166,33 @@ describe("notifyIdentityLinked", () => {
   });
 });
 
-describe("with TENANT_DOMAIN set, every button leads to the account's own tenant (BP-666)", () => {
+describe("with ORGANISATION_DOMAIN set, every button leads to the account's own organisation (BP-666)", () => {
   beforeEach(() => {
-    process.env.TENANT_DOMAIN = "board-planner.com";
-    tenantSlug.mockImplementation((id) => (id.equals(TENANT) ? "acme" : "elsewhere"));
-    forgetTenantSlugs();
+    process.env.ORGANISATION_DOMAIN = "board-planner.com";
+    organisationSlug.mockImplementation((id) => (id.equals(ORGANISATION) ? "acme" : "elsewhere"));
+    forgetOrganisationSlugs();
   });
 
   afterEach(() => {
-    delete process.env.TENANT_DOMAIN;
+    delete process.env.ORGANISATION_DOMAIN;
   });
 
-  it("signs in, reviews tokens and reviews providers on the tenant's subdomain", async () => {
-    await notifyPasswordChanged({ tenant: TENANT, email: "owner@example.com", username: "owner", how: "admin" });
+  it("signs in, reviews tokens and reviews providers on the organisation's subdomain", async () => {
+    await notifyPasswordChanged({ organisation: ORGANISATION, email: "owner@example.com", username: "owner", how: "admin" });
     expect(sent().html).toContain("https://acme.board-planner.com/login");
 
-    await notifyCredentialCreated({ tenant: TENANT, email: "owner@example.com", username: "owner", kind: "token", name: "ci", scope: "BP" });
+    await notifyCredentialCreated({ organisation: ORGANISATION, email: "owner@example.com", username: "owner", kind: "token", name: "ci", scope: "BP" });
     expect(sent().html).toContain("https://acme.board-planner.com/settings/tokens");
 
-    await notifyIdentityLinked({ tenant: TENANT, email: "owner@example.com", username: "owner", provider: "Acme", providerEmail: "o@acme.example" });
+    await notifyIdentityLinked({ organisation: ORGANISATION, email: "owner@example.com", username: "owner", provider: "Acme", providerEmail: "o@acme.example" });
     expect(sent().html).toContain("https://acme.board-planner.com/settings/security");
     expect(JSON.stringify(sendEmail.mock.calls)).not.toMatch(/app\.example\.com|elsewhere/);
   });
 
-  it("leaves the button out for a tenant with no address, rather than linking to another", async () => {
-    tenantSlug.mockImplementation(() => undefined);
+  it("leaves the button out for an organisation with no address, rather than linking to another", async () => {
+    organisationSlug.mockImplementation(() => undefined);
 
-    await notifyPasswordChanged({ tenant: TENANT, email: "owner@example.com", username: "owner", how: "admin" });
+    await notifyPasswordChanged({ organisation: ORGANISATION, email: "owner@example.com", username: "owner", how: "admin" });
 
     expect(sent().html).not.toContain("href=\"http");
   });

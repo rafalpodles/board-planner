@@ -264,7 +264,7 @@ export const PUT = withAdmin(async (request, { params, user: admin, db }) => {
     // lift a login lockout too — including one an attacker aimed at them, which on a deployment
     // with no client address anybody can fill (BP-353). After the save, because unlike the revoke
     // above there is nothing to undo if it fails.
-    await clearAccountAttempts(db.tenant, target.username).catch(() => {});
+    await clearAccountAttempts(db.organisation, target.username).catch(() => {});
 
     void logInstanceAudit(db, {
       action: "user_password_reset",
@@ -277,7 +277,7 @@ export const PUT = withAdmin(async (request, { params, user: admin, db }) => {
     // in the case that matters, one PUT setting a password AND repointing the address, it is the
     // victim's inbox rather than the inbox the change just handed the account to.
     void notifyPasswordChanged({
-      tenant: db.tenant,
+      organisation: db.organisation,
       email: previousEmail || target.email,
       username: target.username,
       how: "admin",

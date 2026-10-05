@@ -28,8 +28,8 @@ const {
   formatUserCode,
   normaliseUserCode,
 } = await import("./device-enrolment");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
-const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
+const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
 
 const bcrypt = (await import("bcryptjs")).default;
 
@@ -64,7 +64,7 @@ beforeEach(() => {
 
 describe("starting an enrolment", () => {
   it("mints a device code the app keeps and a short code a person reads", async () => {
-    const started = await startDeviceEnrolment(scopedToDefaultTenant(), { machineName: "MacBook", machineHost: "mac.local" });
+    const started = await startDeviceEnrolment(scopedToDefaultOrganisation(), { machineName: "MacBook", machineHost: "mac.local" });
 
     expect(started.deviceCode).toMatch(/^cpd_[0-9a-f]{64}$/);
     expect(started.userCode).toMatch(/^[BCDFGHJKMNPQRSTVWXZ23456789]{8}$/);
@@ -72,7 +72,7 @@ describe("starting an enrolment", () => {
 
   // The device code is the app's half of the exchange and is what the credential is handed to
   it("stores only a hash of the device code", async () => {
-    const started = await startDeviceEnrolment(scopedToDefaultTenant(), { machineName: "MacBook", machineHost: "" });
+    const started = await startDeviceEnrolment(scopedToDefaultOrganisation(), { machineName: "MacBook", machineHost: "" });
     const stored = create.mock.calls[0][0];
 
     expect(stored.deviceCodeHash).not.toBe(started.deviceCode);
@@ -80,7 +80,7 @@ describe("starting an enrolment", () => {
   });
 
   it("starts pending, so nothing is granted before a person approves", async () => {
-    await startDeviceEnrolment(scopedToDefaultTenant(), { machineName: "MacBook", machineHost: "" });
+    await startDeviceEnrolment(scopedToDefaultOrganisation(), { machineName: "MacBook", machineHost: "" });
 
     expect(create.mock.calls[0][0].status).toBe("pending");
   });
@@ -88,7 +88,7 @@ describe("starting an enrolment", () => {
   it("expires within the quarter hour, so an abandoned attempt reaps itself", async () => {
     const now = new Date("2026-08-05T10:00:00.000Z");
 
-    const started = await startDeviceEnrolment(scopedToDefaultTenant(), { machineName: "M", machineHost: "" }, now);
+    const started = await startDeviceEnrolment(scopedToDefaultOrganisation(), { machineName: "M", machineHost: "" }, now);
 
     expect(started.expiresAt.getTime() - now.getTime()).toBe(15 * 60 * 1000);
   });
@@ -99,12 +99,12 @@ describe("starting an enrolment", () => {
     create.mockRejectedValueOnce(Object.assign(new Error("dup"), { code: 11000 }));
     create.mockResolvedValueOnce({});
 
-    await expect(startDeviceEnrolment(scopedToDefaultTenant(), { machineName: "M", machineHost: "" })).resolves.toBeTruthy();
+    await expect(startDeviceEnrolment(scopedToDefaultOrganisation(), { machineName: "M", machineHost: "" })).resolves.toBeTruthy();
     expect(create).toHaveBeenCalledTimes(2);
   });
 
   it("uses no character anyone has to squint at", async () => {
-    const started = await startDeviceEnrolment(scopedToDefaultTenant(), { machineName: "M", machineHost: "" });
+    const started = await startDeviceEnrolment(scopedToDefaultOrganisation(), { machineName: "M", machineHost: "" });
 
     expect(started.userCode).not.toMatch(/[O0I1LUAEY]/);
   });
@@ -115,7 +115,7 @@ describe("starting an enrolment", () => {
 // unauthenticated start endpoint
 describe("the cost of a poll", () => {
   it("narrows candidates by the indexed prefix instead of a 200-row window", async () => {
-    await pollDeviceEnrolment(scopedToDefaultTenant(), "cpd_" + "a".repeat(64));
+    await pollDeviceEnrolment(scopedToDefaultOrganisation(), "cpd_" + "a".repeat(64));
 
     expect(find).toHaveBeenCalledWith(
       expect.objectContaining({ deviceCodePrefix: "cpd_aaaaaaaa" })
@@ -124,7 +124,7 @@ describe("the cost of a poll", () => {
   });
 
   it("stores the prefix so the narrowed lookup can find the row", async () => {
-    const started = await startDeviceEnrolment(scopedToDefaultTenant(), { machineName: "MacBook", machineHost: "" });
+    const started = await startDeviceEnrolment(scopedToDefaultOrganisation(), { machineName: "MacBook", machineHost: "" });
 
     expect(create.mock.calls[0][0].deviceCodePrefix).toBe(started.deviceCode.slice(0, 12));
   });
@@ -135,7 +135,7 @@ describe("the cost of a poll", () => {
     countDocuments.mockResolvedValue(MAX_PENDING_ENROLMENTS);
     oldestPending([{ _id: "oldest" }]);
 
-    const started = await startDeviceEnrolment(scopedToDefaultTenant(), { machineName: "MacBook", machineHost: "" });
+    const started = await startDeviceEnrolment(scopedToDefaultOrganisation(), { machineName: "MacBook", machineHost: "" });
 
     expect(started.userCode).toBeTruthy();
     expect(create).toHaveBeenCalled();
@@ -147,7 +147,7 @@ describe("the cost of a poll", () => {
     countDocuments.mockResolvedValue(MAX_PENDING_ENROLMENTS + 2);
     oldestPending([{ _id: "a" }, { _id: "b" }, { _id: "c" }]);
 
-    await startDeviceEnrolment(scopedToDefaultTenant(), { machineName: "MacBook", machineHost: "" });
+    await startDeviceEnrolment(scopedToDefaultOrganisation(), { machineName: "MacBook", machineHost: "" });
 
     // Ascending, so it is the oldest that goes. Descending would evict the row the operator is
     // holding at that moment and leave the flood's own rows in place.
@@ -157,7 +157,7 @@ describe("the cost of a poll", () => {
     expect(find.mock.calls[0][0]).toEqual({
       status: "pending",
       expiresAt: { $gt: expect.any(Date) },
-      tenant: DEFAULT_TENANT_ID,
+      organisation: DEFAULT_ORGANISATION_ID,
     });
     expect(select).toHaveBeenCalledWith("_id");
     // The delete carries the same filter as the find. On ids alone, a row approved in between is
@@ -168,14 +168,14 @@ describe("the cost of a poll", () => {
       status: "pending",
       expiresAt: { $gt: expect.any(Date) },
       _id: { $in: ["a", "b", "c"] },
-      tenant: DEFAULT_TENANT_ID,
+      organisation: DEFAULT_ORGANISATION_ID,
     });
   });
 
   it("touches nothing while the window has room — the control", async () => {
     countDocuments.mockResolvedValue(3);
 
-    await startDeviceEnrolment(scopedToDefaultTenant(), { machineName: "MacBook", machineHost: "" });
+    await startDeviceEnrolment(scopedToDefaultOrganisation(), { machineName: "MacBook", machineHost: "" });
 
     expect(deleteMany).not.toHaveBeenCalled();
     expect(create).toHaveBeenCalled();
@@ -204,7 +204,7 @@ describe("polling for the credential", () => {
     const { deviceCode, doc } = await row({ status: "pending", credential: "" });
     candidates([doc]);
 
-    expect(await pollDeviceEnrolment(scopedToDefaultTenant(), deviceCode)).toEqual({ state: "pending" });
+    expect(await pollDeviceEnrolment(scopedToDefaultOrganisation(), deviceCode)).toEqual({ state: "pending" });
   });
 
   it("hands back the credential once approved", async () => {
@@ -212,7 +212,7 @@ describe("polling for the credential", () => {
     candidates([doc]);
     findOneAndUpdate.mockResolvedValue({ credential: "cpw_secret", worker: "w1", project: "p1" });
 
-    expect(await pollDeviceEnrolment(scopedToDefaultTenant(), deviceCode)).toEqual({
+    expect(await pollDeviceEnrolment(scopedToDefaultOrganisation(), deviceCode)).toEqual({
       state: "approved",
       workerId: "w1",
       credential: "cpw_secret",
@@ -229,7 +229,7 @@ describe("polling for the credential", () => {
     candidates([doc]);
     findOneAndUpdate.mockResolvedValue({ credential: "cpw_secret", worker: "w1", project: "p1" });
 
-    await pollDeviceEnrolment(scopedToDefaultTenant(), deviceCode);
+    await pollDeviceEnrolment(scopedToDefaultOrganisation(), deviceCode);
 
     const [filter, update] = findOneAndUpdate.mock.calls[0];
     expect(filter.credential).toEqual({ $ne: "" });
@@ -241,14 +241,14 @@ describe("polling for the credential", () => {
     candidates([doc]);
     findOneAndUpdate.mockResolvedValue(null);
 
-    expect(await pollDeviceEnrolment(scopedToDefaultTenant(), deviceCode)).toEqual({ state: "expired" });
+    expect(await pollDeviceEnrolment(scopedToDefaultOrganisation(), deviceCode)).toEqual({ state: "expired" });
   });
 
   it("refuses an expired approval rather than handing over a stale credential", async () => {
     const { deviceCode, doc } = await row({ expiresAt: new Date(Date.now() - 1) });
     candidates([doc]);
 
-    expect(await pollDeviceEnrolment(scopedToDefaultTenant(), deviceCode)).toEqual({ state: "expired" });
+    expect(await pollDeviceEnrolment(scopedToDefaultOrganisation(), deviceCode)).toEqual({ state: "expired" });
     expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 
@@ -256,11 +256,11 @@ describe("polling for the credential", () => {
   it("answers the same for a device code nobody ever issued", async () => {
     candidates([]);
 
-    expect(await pollDeviceEnrolment(scopedToDefaultTenant(), `cpd_${"b".repeat(64)}`)).toEqual({ state: "expired" });
+    expect(await pollDeviceEnrolment(scopedToDefaultOrganisation(), `cpd_${"b".repeat(64)}`)).toEqual({ state: "expired" });
   });
 
   it("does not go near the database for a string that is not a device code", async () => {
-    expect(await pollDeviceEnrolment(scopedToDefaultTenant(), "not-a-code")).toEqual({ state: "expired" });
+    expect(await pollDeviceEnrolment(scopedToDefaultOrganisation(), "not-a-code")).toEqual({ state: "expired" });
     expect(find).not.toHaveBeenCalled();
   });
 });
@@ -269,7 +269,7 @@ describe("refusing an enrolment", () => {
   it("only ever moves a pending row, so an approval cannot be undone into a denial", async () => {
     updateOne.mockResolvedValue({ modifiedCount: 1 });
 
-    await denyDeviceEnrolment(scopedToDefaultTenant(), "BCDF-2345");
+    await denyDeviceEnrolment(scopedToDefaultOrganisation(), "BCDF-2345");
 
     expect(updateOne.mock.calls[0][0].status).toBe("pending");
     expect(updateOne.mock.calls[0][1].$set.credential).toBe("");

@@ -1,6 +1,6 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { IOAuthToken } from "@/types";
-import { withTenant } from "@/lib/tenant-field";
+import { withOrganisation } from "@/lib/organisation-field";
 
 const oauthTokenSchema = new Schema<IOAuthToken>(
   {
@@ -21,7 +21,7 @@ const oauthTokenSchema = new Schema<IOAuthToken>(
 
 oauthTokenSchema.index({ refreshExpiresAt: 1 }, { expireAfterSeconds: 0 });
 
-withTenant(oauthTokenSchema);
+withOrganisation(oauthTokenSchema);
 
 export const OAuthToken: Model<IOAuthToken> =
   mongoose.models.OAuthToken || mongoose.model<IOAuthToken>("OAuthToken", oauthTokenSchema);

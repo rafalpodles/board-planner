@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
@@ -39,7 +39,7 @@ vi.mock("@/lib/repository", () => ({
     p.repositoryUrl || (p.githubRepo ? `git@github.com:${p.githubRepo}.git` : ""),
 }));
 
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { GET } = await import("./route");
 
 const MEMBER = { _id: "member-1", role: "member", fullName: "Owner", username: "owner" };
@@ -87,8 +87,8 @@ describe("GET /api/workers/enrolment/device/:userCode", () => {
   it("asks only for the projects this person can reach", async () => {
     const response = await GET(request(), ctx());
 
-    expect(accessibleProjectIds).toHaveBeenCalledWith(scopedToDefaultTenant(), expect.objectContaining({ _id: "member-1" }));
-    expect(projectFind).toHaveBeenCalledWith({ _id: { $in: [MINE] }, tenant: DEFAULT_TENANT_ID });
+    expect(accessibleProjectIds).toHaveBeenCalledWith(scopedToDefaultOrganisation(), expect.objectContaining({ _id: "member-1" }));
+    expect(projectFind).toHaveBeenCalledWith({ _id: { $in: [MINE] }, organisation: DEFAULT_ORGANISATION_ID });
     expect((await response.json()).projects.map((p: { _id: string }) => p._id)).toEqual([MINE]);
     expect(JSON.stringify(await GET(request(), ctx()).then((r) => r.json()))).not.toContain(THEIRS);
   });
@@ -100,7 +100,7 @@ describe("GET /api/workers/enrolment/device/:userCode", () => {
 
     await GET(request(), ctx());
 
-    expect(projectFind).toHaveBeenCalledWith({ tenant: DEFAULT_TENANT_ID });
+    expect(projectFind).toHaveBeenCalledWith({ organisation: DEFAULT_ORGANISATION_ID });
   });
 
   // Rendered so the page can say the machine will connect and then sit idle, which is the one

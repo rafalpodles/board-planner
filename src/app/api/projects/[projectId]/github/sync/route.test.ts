@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { replaceProviderLinks } from "@/lib/pr-links";
-import { scopedToDefaultTenant } from "@/lib/db-scope";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { scopedToDefaultOrganisation } from "@/lib/db-scope";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 /**
  * BP-429. This route is unchanged by that ticket; the tests are what it was missing. Its
@@ -40,7 +40,7 @@ vi.mock("@/lib/github", async (importOriginal) => ({
 vi.mock("@/lib/middleware", () => ({
   withProjectAccess:
     (handler: (req: Request, ctx: unknown) => Promise<Response>) => (req: Request, ctx: unknown) =>
-      handler(req, { ...(ctx as object), user: { _id: "u1" }, db: scopedToDefaultTenant() }),
+      handler(req, { ...(ctx as object), user: { _id: "u1" }, db: scopedToDefaultOrganisation() }),
 }));
 
 const { POST } = await import("./route");
@@ -136,7 +136,7 @@ describe("POST .../github/sync", () => {
     // the second half: a sync is not somebody editing the task, and the dashboard reads a done
     // task's `updatedAt` as the day it was finished (BP-627).
     expect(options).toEqual({ updatePipeline: true, timestamps: false });
-    expect(filter).toEqual({ _id: doc._id, tenant: DEFAULT_TENANT_ID });
+    expect(filter).toEqual({ _id: doc._id, organisation: DEFAULT_ORGANISATION_ID });
     expect(update).toEqual(
       replaceProviderLinks("github", [expect.objectContaining({ number: 1 })], [PR_URL])
     );
@@ -168,12 +168,12 @@ describe("POST .../github/sync", () => {
 
     // The move is a guarded write now, so what proves it is what the database was asked for
     expect(taskUpdateOne).toHaveBeenCalledWith(
-      { _id: doc._id, status: "in_review", tenant: DEFAULT_TENANT_ID },
+      { _id: doc._id, status: "in_review", organisation: DEFAULT_ORGANISATION_ID },
       { $set: { status: "ready_to_test" } }
     );
     expect(body.autoTransitioned).toBe(1);
     expect(logActivity).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       "t1",
       "u1",
       "status_changed",
@@ -243,7 +243,7 @@ describe("POST .../github/sync", () => {
 
     expect(body.autoTransitioned).toBe(0);
     expect(logActivity).not.toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       "t1",
       "u1",
       "status_changed",

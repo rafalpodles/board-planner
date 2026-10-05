@@ -20,7 +20,7 @@ vi.mock("@/lib/upload-ownership", async (importOriginal) => ({
 }));
 
 const { GET } = await import("./route");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 
 const OWNER = { _id: "u1", role: "member" };
 const FILE_ID = "507f1f77bcf86cd799439011";
@@ -70,7 +70,7 @@ describe("GET /api/uploads/[fileId]", () => {
 
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("file-bytes");
-    expect(check).toHaveBeenCalledWith(scopedToDefaultTenant(), OWNER, PROJECT, "access");
+    expect(check).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OWNER, PROJECT, "access");
   });
 
   it("refuses somebody whose grants do not cover that project", async () => {
@@ -136,7 +136,7 @@ describe("GET /api/uploads/[fileId]", () => {
 
     await GET(request(), ctx());
 
-    expect(check).toHaveBeenCalledWith(scopedToDefaultTenant(), OWNER, OTHER_PROJECT, "access");
+    expect(check).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OWNER, OTHER_PROJECT, "access");
   });
 
   it("refuses a file id that is not an ObjectId", async () => {

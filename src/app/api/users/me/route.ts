@@ -7,7 +7,7 @@ import { isValidEmail, normaliseEmail } from "@/lib/email";
 import { notifyAddressChanged, sendAddressConfirmation } from "@/lib/security-mail";
 import { cancelEmailChange, issueEmailChange } from "@/lib/email-change";
 import { isEmailConfigured } from "@/lib/email";
-import { originFor } from "@/lib/tenant-host";
+import { originFor } from "@/lib/organisation-host";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { withAuth } from "@/lib/middleware";
 import { FULL_NAME_RULE, isValidFullName, normaliseFullName } from "@/lib/identifiers";
@@ -108,7 +108,7 @@ export const PUT = withAuth(async (request, { user, db }) => {
       }
       const currentPassword = body.currentPassword;
       const { lockedOut, result: passwordMatches } = await withLockout(
-        lockoutKey(db.tenant, getClientIp(request) ?? "-", user.username, "email-change"),
+        lockoutKey(db.organisation, getClientIp(request) ?? "-", user.username, "email-change"),
         async () => (record.password && (await bcrypt.compare(currentPassword, record.password)) ? true : null),
         sourceKey(String(user._id), "email-change"),
         EXCLUSIVE_SOURCE_ATTEMPTS

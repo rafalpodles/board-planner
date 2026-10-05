@@ -14,7 +14,7 @@ import { applyAdminGroup } from "@/lib/oidc/admin-group";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { IInvitation } from "@/types";
 import type { ScopedDb } from "@/lib/db-scope";
-import { tenantOf } from "@/lib/db-scope";
+import { organisationOf } from "@/lib/db-scope";
 
 export interface NewAccount {
   username: string;
@@ -145,7 +145,7 @@ export async function completeAcceptance(
 
   const { token: sessionToken, absoluteExpiresAt } = await createSession({
     userId: user._id,
-    tenant: tenantOf(user),
+    organisation: organisationOf(user),
     userAgent: request.headers.get("user-agent"),
     ip: clientIp,
   });

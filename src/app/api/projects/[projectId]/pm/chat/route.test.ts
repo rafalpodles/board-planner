@@ -15,7 +15,7 @@ vi.mock("@/lib/pm/config", () => ({ isPmAvailable }));
 vi.mock("@/lib/pm/agent", () => ({ runPmTurn }));
 
 const { POST } = await import("./route");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 
 const PROJECT_ID = "69a52e3b399b27d3cbb2c5a5";
 const USER = { _id: "u1", role: "member" };
@@ -54,7 +54,7 @@ describe("POST /api/projects/:projectId/pm/chat", () => {
   it("authorises the resolved project id, not the key in the path", async () => {
     await POST(request(), ctx());
 
-    expect(check).toHaveBeenCalledWith(scopedToDefaultTenant(), USER, PROJECT_ID, "access");
+    expect(check).toHaveBeenCalledWith(scopedToDefaultOrganisation(), USER, PROJECT_ID, "access");
   });
 
   it("lets an allowed user past the gate", async () => {
@@ -73,7 +73,7 @@ describe("POST /api/projects/:projectId/pm/chat", () => {
   });
 });
 
-describe("POST /api/projects/:id/pm/chat on another tenant's host (BP-666)", () => {
+describe("POST /api/projects/:id/pm/chat on another organisation's host (BP-666)", () => {
   it("answers whatever the host check answers and runs no turn", async () => {
     refusedOnThisHost.mockResolvedValueOnce(new Response(null, { status: 401 }));
     getAuthUser.mockResolvedValue({ _id: "u1", role: "member" });

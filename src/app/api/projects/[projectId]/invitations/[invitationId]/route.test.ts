@@ -8,12 +8,12 @@ const logInstanceAudit = vi.fn();
 let caller: Record<string, unknown> = {};
 
 vi.mock("@/lib/middleware", async () => {
-  const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+  const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
   return {
     withProjectOwner:
       (handler: (r: Request, c: unknown) => unknown) =>
       (request: Request, ctx: { params: Promise<Record<string, string>> }) =>
-        handler(request, { params: ctx.params, user: caller, db: scopedToDefaultTenant() }),
+        handler(request, { params: ctx.params, user: caller, db: scopedToDefaultOrganisation() }),
   };
 });
 vi.mock("@/lib/invitations", () => ({ removeBoardFromInvitation, revokeIfEmpty }));
@@ -22,7 +22,7 @@ vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/models/user", () => ({ User: { findOne: userFindOne } }));
 
 const { DELETE } = await import("./route");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 
 const ID = "64b0000000000000000000aa";
 const del = (invitationId = ID) =>
@@ -48,10 +48,10 @@ describe("DELETE /api/projects/:id/invitations/:invitationId", () => {
     const res = await del();
 
     expect(res.status).toBe(200);
-    expect(removeBoardFromInvitation).toHaveBeenCalledWith(scopedToDefaultTenant(), ID, "p1");
+    expect(removeBoardFromInvitation).toHaveBeenCalledWith(scopedToDefaultOrganisation(), ID, "p1");
     expect(revokeIfEmpty).not.toHaveBeenCalled();
     expect(logProjectAudit).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       "p1",
       "o1",
       "member_invitation_removed",
@@ -65,9 +65,9 @@ describe("DELETE /api/projects/:id/invitations/:invitationId", () => {
 
     await del();
 
-    expect(revokeIfEmpty).toHaveBeenCalledWith(scopedToDefaultTenant(), row);
+    expect(revokeIfEmpty).toHaveBeenCalledWith(scopedToDefaultOrganisation(), row);
     expect(logInstanceAudit).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       expect.objectContaining({ action: "invitation_revoked", target: "ada@example.com" })
     );
   });

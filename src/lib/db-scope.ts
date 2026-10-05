@@ -30,7 +30,7 @@ import { Sprint } from "@/models/sprint";
 import { Task } from "@/models/task";
 import { User } from "@/models/user";
 import { Worker } from "@/models/worker";
-import { DEFAULT_TENANT_ID } from "./tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "./organisation-field";
 
 // Thunks: a test that mocks one model must not fail on the exports of the others
 export const SCOPED_MODELS = {
@@ -88,28 +88,28 @@ const SAFE_METHODS = [
   "bulkWrite",
 ] as const;
 
-/** The Mongoose call signatures a handler may use: every one is confined to the caller's tenant. */
+/** The Mongoose call signatures a handler may use: every one is confined to the caller's organisation. */
 export type ScopedModel<M> = M extends Model<infer T>
   ? Pick<M, (typeof SAFE_METHODS)[number]> & {
-      /** `new Model(doc)` with the tenant set, for the code that builds a document and saves it. */
+      /** `new Model(doc)` with the organisation set, for the code that builds a document and saves it. */
       build(doc?: Partial<T>): HydratedDocument<T>;
     }
   : never;
 
-export type ScopedDb = { readonly tenant: Types.ObjectId } & {
+export type ScopedDb = { readonly organisation: Types.ObjectId } & {
   [K in keyof typeof SCOPED_MODELS]: ScopedModel<ReturnType<(typeof SCOPED_MODELS)[K]>>;
 };
 
-export class TenantKeyError extends Error {
+export class OrganisationKeyError extends Error {
   constructor(where: string) {
-    super(`${where} names a tenant. A scoped model sets the tenant itself; it is never the caller's to choose.`);
-    this.name = "TenantKeyError";
+    super(`${where} names an organisation. A scoped model sets the organisation itself; it is never the caller's to choose.`);
+    this.name = "OrganisationKeyError";
   }
 }
 
 export class UnscopableError extends Error {
   constructor(what: string) {
-    super(`${what} cannot be scoped to a tenant here.`);
+    super(`${what} cannot be scoped to an organisation here.`);
     this.name = "UnscopableError";
   }
 }
@@ -119,42 +119,42 @@ type Doc = Record<string, unknown>;
 const isDoc = (value: unknown): value is Doc =>
   typeof value === "object" && value !== null && !Array.isArray(value) && !(value instanceof Types.ObjectId);
 
-function scopeFilter(filter: unknown, tenant: Types.ObjectId): Doc {
-  if (filter === undefined || filter === null) return { tenant };
+function scopeFilter(filter: unknown, organisation: Types.ObjectId): Doc {
+  if (filter === undefined || filter === null) return { organisation };
   if (!isDoc(filter)) throw new UnscopableError("A filter that is not an object");
-  if ("tenant" in filter) throw new TenantKeyError("A filter");
-  return { ...filter, tenant };
+  if ("organisation" in filter) throw new OrganisationKeyError("A filter");
+  return { ...filter, organisation };
 }
 
 function checkUpdate(update: unknown): unknown {
   if (update === undefined || update === null) return update;
   if (Array.isArray(update)) throw new UnscopableError("An update pipeline");
   if (!isDoc(update)) return update;
-  if ("tenant" in update) throw new TenantKeyError("An update");
+  if ("organisation" in update) throw new OrganisationKeyError("An update");
   for (const [key, value] of Object.entries(update)) {
     if (!key.startsWith("$") || !isDoc(value)) continue;
-    if ("tenant" in value) throw new TenantKeyError(`An update's ${key}`);
-    if (key === "$rename" && Object.values(value).includes("tenant")) throw new TenantKeyError("An update's $rename");
+    if ("organisation" in value) throw new OrganisationKeyError(`An update's ${key}`);
+    if (key === "$rename" && Object.values(value).includes("organisation")) throw new OrganisationKeyError("An update's $rename");
   }
   return update;
 }
 
-function stamp(doc: unknown, tenant: Types.ObjectId): Doc {
+function stamp(doc: unknown, organisation: Types.ObjectId): Doc {
   if (!isDoc(doc)) throw new UnscopableError("A document that is not an object");
-  if ("tenant" in doc) throw new TenantKeyError("A document");
-  return { ...doc, tenant };
+  if ("organisation" in doc) throw new OrganisationKeyError("A document");
+  return { ...doc, organisation };
 }
 
-function stampCreate(given: unknown[], tenant: Types.ObjectId): unknown[] {
+function stampCreate(given: unknown[], organisation: Types.ObjectId): unknown[] {
   const args = [...given];
   while (args.length > 1 && (args[args.length - 1] === undefined || args[args.length - 1] === null)) args.pop();
   const [first, ...rest] = args;
-  if (Array.isArray(first)) return [first.map((doc) => stamp(doc, tenant)), ...rest];
-  return args.map((doc) => stamp(doc, tenant));
+  if (Array.isArray(first)) return [first.map((doc) => stamp(doc, organisation)), ...rest];
+  return args.map((doc) => stamp(doc, organisation));
 }
 
-const stampAll = (docs: unknown, tenant: Types.ObjectId) =>
-  Array.isArray(docs) ? docs.map((doc) => stamp(doc, tenant)) : stamp(docs, tenant);
+const stampAll = (docs: unknown, organisation: Types.ObjectId) =>
+  Array.isArray(docs) ? docs.map((doc) => stamp(doc, organisation)) : stamp(docs, organisation);
 
 const FOREIGN_STAGES = ["$lookup", "$graphLookup", "$unionWith", "$merge", "$out"];
 
@@ -167,26 +167,26 @@ function refuseForeignStages(node: unknown): void {
   }
 }
 
-function scopePipeline(pipeline: unknown, tenant: Types.ObjectId): Doc[] {
+function scopePipeline(pipeline: unknown, organisation: Types.ObjectId): Doc[] {
   if (!Array.isArray(pipeline)) throw new UnscopableError("A pipeline that is not an array");
   refuseForeignStages(pipeline);
-  return [{ $match: { tenant } }, ...pipeline];
+  return [{ $match: { organisation } }, ...pipeline];
 }
 
 const BULK_FILTERED = ["updateOne", "updateMany", "deleteOne", "deleteMany", "replaceOne"];
 
-function scopeBulk(operations: unknown, tenant: Types.ObjectId): Doc[] {
+function scopeBulk(operations: unknown, organisation: Types.ObjectId): Doc[] {
   if (!Array.isArray(operations)) throw new UnscopableError("Bulk operations that are not an array");
   return operations.map((operation) => {
     if (!isDoc(operation)) throw new UnscopableError("A bulk operation that is not an object");
     const [name] = Object.keys(operation);
     const body = operation[name];
     if (!isDoc(body)) throw new UnscopableError(`The ${name} bulk operation`);
-    if (name === "insertOne") return { insertOne: { ...body, document: stamp(body.document, tenant) } };
+    if (name === "insertOne") return { insertOne: { ...body, document: stamp(body.document, organisation) } };
     if (BULK_FILTERED.includes(name)) {
-      const scoped: Doc = { ...body, filter: scopeFilter(body.filter, tenant) };
+      const scoped: Doc = { ...body, filter: scopeFilter(body.filter, organisation) };
       if ("update" in body) scoped.update = checkUpdate(body.update);
-      if ("replacement" in body) scoped.replacement = stamp(body.replacement, tenant);
+      if ("replacement" in body) scoped.replacement = stamp(body.replacement, organisation);
       return { [name]: scoped };
     }
     throw new UnscopableError(`The ${name} bulk operation`);
@@ -195,50 +195,50 @@ function scopeBulk(operations: unknown, tenant: Types.ObjectId): Doc[] {
 
 type Loose = (...args: unknown[]) => unknown;
 
-function scopeModel(model: Model<never>, tenant: Types.ObjectId): unknown {
+function scopeModel(model: Model<never>, organisation: Types.ObjectId): unknown {
   const raw = model as unknown as Record<string, Loose>;
   const call = (method: string, ...args: unknown[]) => raw[method].call(model, ...args);
-  const byId = (id: unknown) => scopeFilter({ _id: id ?? null }, tenant);
+  const byId = (id: unknown) => scopeFilter({ _id: id ?? null }, organisation);
 
   const methods: Record<string, Loose> = {
-    find: (filter, ...rest) => call("find", scopeFilter(filter, tenant), ...rest),
-    findOne: (filter, ...rest) => call("findOne", scopeFilter(filter, tenant), ...rest),
+    find: (filter, ...rest) => call("find", scopeFilter(filter, organisation), ...rest),
+    findOne: (filter, ...rest) => call("findOne", scopeFilter(filter, organisation), ...rest),
     findById: (id, ...rest) => call("findOne", byId(id), ...rest),
     findOneAndUpdate: (filter, update, ...rest) =>
-      call("findOneAndUpdate", scopeFilter(filter, tenant), checkUpdate(update), ...rest),
+      call("findOneAndUpdate", scopeFilter(filter, organisation), checkUpdate(update), ...rest),
     findByIdAndUpdate: (id, update, ...rest) =>
       call("findOneAndUpdate", byId(id), checkUpdate(update), ...rest),
-    findOneAndDelete: (filter, ...rest) => call("findOneAndDelete", scopeFilter(filter, tenant), ...rest),
+    findOneAndDelete: (filter, ...rest) => call("findOneAndDelete", scopeFilter(filter, organisation), ...rest),
     findByIdAndDelete: (id, ...rest) => call("findOneAndDelete", byId(id), ...rest),
-    updateOne: (filter, update, ...rest) => call("updateOne", scopeFilter(filter, tenant), checkUpdate(update), ...rest),
+    updateOne: (filter, update, ...rest) => call("updateOne", scopeFilter(filter, organisation), checkUpdate(update), ...rest),
     updateMany: (filter, update, ...rest) =>
-      call("updateMany", scopeFilter(filter, tenant), checkUpdate(update), ...rest),
-    deleteOne: (filter, ...rest) => call("deleteOne", scopeFilter(filter, tenant), ...rest),
-    deleteMany: (filter, ...rest) => call("deleteMany", scopeFilter(filter, tenant), ...rest),
-    countDocuments: (filter, ...rest) => call("countDocuments", scopeFilter(filter, tenant), ...rest),
-    exists: (filter) => call("exists", scopeFilter(filter, tenant)),
-    distinct: (field, filter, ...rest) => call("distinct", field, scopeFilter(filter, tenant), ...rest),
-    create: (...args) => call("create", ...stampCreate(args, tenant)),
-    insertMany: (docs, ...rest) => call("insertMany", stampAll(docs, tenant), ...rest),
-    aggregate: (pipeline, ...rest) => call("aggregate", scopePipeline(pipeline, tenant), ...rest),
-    bulkWrite: (operations, ...rest) => call("bulkWrite", scopeBulk(operations, tenant), ...rest),
-    build: (doc) => new (model as unknown as new (doc: unknown) => unknown)(stamp(doc ?? {}, tenant)),
+      call("updateMany", scopeFilter(filter, organisation), checkUpdate(update), ...rest),
+    deleteOne: (filter, ...rest) => call("deleteOne", scopeFilter(filter, organisation), ...rest),
+    deleteMany: (filter, ...rest) => call("deleteMany", scopeFilter(filter, organisation), ...rest),
+    countDocuments: (filter, ...rest) => call("countDocuments", scopeFilter(filter, organisation), ...rest),
+    exists: (filter) => call("exists", scopeFilter(filter, organisation)),
+    distinct: (field, filter, ...rest) => call("distinct", field, scopeFilter(filter, organisation), ...rest),
+    create: (...args) => call("create", ...stampCreate(args, organisation)),
+    insertMany: (docs, ...rest) => call("insertMany", stampAll(docs, organisation), ...rest),
+    aggregate: (pipeline, ...rest) => call("aggregate", scopePipeline(pipeline, organisation), ...rest),
+    bulkWrite: (operations, ...rest) => call("bulkWrite", scopeBulk(operations, organisation), ...rest),
+    build: (doc) => new (model as unknown as new (doc: unknown) => unknown)(stamp(doc ?? {}, organisation)),
   };
   return methods;
 }
 
 const cache = new Map<string, ScopedDb>();
 
-export function scoped(tenant: Types.ObjectId | string): ScopedDb {
-  const id = new Types.ObjectId(String(tenant));
+export function scoped(organisation: Types.ObjectId | string): ScopedDb {
+  const id = new Types.ObjectId(String(organisation));
   const key = id.toHexString();
   const cached = cache.get(key);
   if (cached) return cached;
 
   const built = new Map<string, unknown>();
-  const db = new Proxy({ tenant: id } as ScopedDb, {
+  const db = new Proxy({ organisation: id } as ScopedDb, {
     get(target, name) {
-      if (name === "tenant") return target.tenant;
+      if (name === "organisation") return target.organisation;
       if (typeof name !== "string" || !Object.hasOwn(SCOPED_MODELS, name)) return undefined;
       if (!built.has(name)) {
         built.set(name, scopeModel(SCOPED_MODELS[name as keyof typeof SCOPED_MODELS]() as unknown as Model<never>, id));
@@ -250,18 +250,18 @@ export function scoped(tenant: Types.ObjectId | string): ScopedDb {
   return db;
 }
 
-export function tenantOf(user: { tenant?: Types.ObjectId | string | null }): Types.ObjectId {
-  return user.tenant ? new Types.ObjectId(String(user.tenant)) : DEFAULT_TENANT_ID;
+export function organisationOf(user: { organisation?: Types.ObjectId | string | null }): Types.ObjectId {
+  return user.organisation ? new Types.ObjectId(String(user.organisation)) : DEFAULT_ORGANISATION_ID;
 }
 
-export const scopedFor = (user: { tenant?: Types.ObjectId | string | null }): ScopedDb => scoped(tenantOf(user));
+export const scopedFor = (user: { organisation?: Types.ObjectId | string | null }): ScopedDb => scoped(organisationOf(user));
 
-// TODO(BP-895): the OIDC relay finds its flow in the default tenant until it looks across tenants
-export const scopedToDefaultTenant = (): ScopedDb => scoped(DEFAULT_TENANT_ID);
+// TODO(BP-895): the OIDC relay finds its flow in the default organisation until it looks across organisations
+export const scopedToDefaultOrganisation = (): ScopedDb => scoped(DEFAULT_ORGANISATION_ID);
 
 export async function scopedForRequest(request: Request): Promise<ScopedDb | null> {
-  const { tenantOfRequest } = await import("./tenant-host");
-  const host = await tenantOfRequest(request);
-  return host.kind === "tenant" ? scoped(host.tenant) : null;
+  const { organisationOfRequest } = await import("./organisation-host");
+  const host = await organisationOfRequest(request);
+  return host.kind === "organisation" ? scoped(host.organisation) : null;
 }
 

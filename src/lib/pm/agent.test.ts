@@ -108,8 +108,8 @@ vi.mock("./tools", () => ({
 }));
 
 const { runPmTurn } = await import("./agent");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
-const db = scopedToDefaultTenant();
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
+const db = scopedToDefaultOrganisation();
 // Not mocked: what the sticky key is computed FROM is the claim under test, and the function that
 // computes it is pinned separately in prompt-cache.test.ts
 const { pmSessionId } = await import("./prompt-cache");

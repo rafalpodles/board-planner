@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
@@ -15,7 +15,7 @@ vi.mock("@/models/project", () => ({ Project: { findOneAndUpdate: projectFindOne
 vi.mock("@/lib/projectAudit", () => ({ logProjectAudit }));
 
 const { PUT } = await import("./route");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 
 const PROJECT_ID = "507f1f77bcf86cd799439011";
 const OTHER_PROJECT = "507f1f77bcf86cd799439012";
@@ -69,7 +69,7 @@ describe("PUT /api/projects/:projectId/agent", () => {
 
     expect(res.status).toBe(200);
     expect(projectFindOneAndUpdate).toHaveBeenCalledWith(
-      { _id: PROJECT_ID, tenant: DEFAULT_TENANT_ID },
+      { _id: PROJECT_ID, organisation: DEFAULT_ORGANISATION_ID },
       expect.anything(),
       expect.objectContaining({ returnDocument: "before" })
     );
@@ -125,7 +125,7 @@ describe("PUT /api/projects/:projectId/agent", () => {
       await put({ agentId: AGENT_ID });
 
       expect(logProjectAudit).toHaveBeenCalledWith(
-        scopedToDefaultTenant(),
+        scopedToDefaultOrganisation(),
         PROJECT_ID,
         "u1",
         "settings_updated",
@@ -140,7 +140,7 @@ describe("PUT /api/projects/:projectId/agent", () => {
       await put({ agentId: "" });
 
       expect(logProjectAudit).toHaveBeenCalledWith(
-        scopedToDefaultTenant(),
+        scopedToDefaultOrganisation(),
         PROJECT_ID,
         "u1",
         "settings_updated",

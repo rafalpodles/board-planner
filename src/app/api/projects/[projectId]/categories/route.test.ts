@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { MAX_CATEGORIES } from "@/lib/identifiers";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
@@ -215,7 +215,7 @@ describe("POST /api/projects/:projectId/categories", () => {
     await call(POST, { name: "feature" });
 
     expect(projectFindOneAndUpdate).toHaveBeenCalledWith(
-      { _id: PROJECT_ID, [`categories.${MAX_CATEGORIES - 1}`]: { $exists: false }, tenant: DEFAULT_TENANT_ID },
+      { _id: PROJECT_ID, [`categories.${MAX_CATEGORIES - 1}`]: { $exists: false }, organisation: DEFAULT_ORGANISATION_ID },
       { $push: { categories: { name: "feature", color: "#3b82f6" } } },
       { returnDocument: "after" }
     );
@@ -250,7 +250,7 @@ describe("PATCH /api/projects/:projectId/categories", () => {
 
     expect(names(await res.json())).toEqual(["doc", "defect"]);
     expect(taskUpdateMany).toHaveBeenCalledWith(
-      { project: PROJECT_ID, category: "bug", tenant: DEFAULT_TENANT_ID },
+      { project: PROJECT_ID, category: "bug", organisation: DEFAULT_ORGANISATION_ID },
       { $set: { category: "defect" } }
     );
     expect(doc.categories.map((c) => c.name)).toEqual(["doc", "defect"]);

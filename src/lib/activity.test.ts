@@ -8,9 +8,9 @@ vi.mock("@/models/activityLog", () => ({ ActivityLog: { create, insertMany } }))
 const { logActivity, logActivities, editSessions, presentSessions, EDIT_SESSION_MS } = await import(
   "./activity"
 );
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
-const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
-const db = scopedToDefaultTenant();
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
+const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
+const db = scopedToDefaultOrganisation();
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -49,7 +49,7 @@ describe("logActivities", () => {
     ]);
 
     expect(insertMany.mock.calls[0][0]).toEqual([
-      { task: "a", user: "u1", action: "link_removed", field: "parent_of", oldValue: "BP-9", newValue: "", tenant: DEFAULT_TENANT_ID },
+      { task: "a", user: "u1", action: "link_removed", field: "parent_of", oldValue: "BP-9", newValue: "", organisation: DEFAULT_ORGANISATION_ID },
     ]);
   });
 
@@ -114,7 +114,7 @@ describe("logActivity", () => {
       field: "",
       oldValue: "",
       newValue: "",
-      tenant: DEFAULT_TENANT_ID,
+      organisation: DEFAULT_ORGANISATION_ID,
     });
   });
 

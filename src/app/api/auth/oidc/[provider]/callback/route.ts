@@ -1,7 +1,7 @@
 import { hostNotFound } from "@/lib/middleware";
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { scopedFor, type ScopedDb, tenantOf, scopedForRequest } from "@/lib/db-scope";
+import { scopedFor, type ScopedDb, organisationOf, scopedForRequest } from "@/lib/db-scope";
 import { getAuthUser, getClientIp } from "@/lib/auth";
 import { isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
 import {
@@ -11,7 +11,7 @@ import {
   legacySessionCookies,
   readFlowCookie,
 } from "@/lib/session";
-import { originFor, tenantDomain } from "@/lib/tenant-host";
+import { originFor, organisationDomain } from "@/lib/organisation-host";
 import { providerById, OidcProvider } from "@/lib/oidc/providers";
 import {
   ACCEPT_COOKIE,
@@ -76,7 +76,7 @@ async function link(db: ScopedDb, provider: OidcProvider, claims: VerifiedClaims
     detail: `${provider.label}, ${how}`,
   });
   void notifyIdentityLinked({
-    tenant: db.tenant,
+    organisation: db.organisation,
     email: user.email,
     username: user.username,
     provider: provider.label,
@@ -144,7 +144,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
     const back = (result: string) => redirectTo(origin, `/settings/security?link=${result}`);
     // The session that started the link has to be the one finishing it
     const current = await getAuthUser(request).catch(() => null);
-    if (!current || current.viaMachineCredential || String(current._id) !== outcome.userId || !tenantOf(current).equals(db.tenant)) {
+    if (!current || current.viaMachineCredential || String(current._id) !== outcome.userId || !organisationOf(current).equals(db.organisation)) {
       return back("failed");
     }
     const own = scopedFor(current);
@@ -244,7 +244,7 @@ async function mayJoin(db: ScopedDb, provider: OidcProvider, claims: VerifiedCla
 async function signInAs(user: IUser, request: Request, origin: string, clientIp: string | null, path: string) {
   const { token, absoluteExpiresAt } = await createSession({
     userId: user._id,
-    tenant: tenantOf(user),
+    organisation: organisationOf(user),
     userAgent: request.headers.get("user-agent"),
     ip: clientIp,
   });
@@ -263,7 +263,7 @@ async function setUpFirstAccount(
   profile: { username: string; fullName: string } | null
 ) {
   if (!profile) return { refused: "failed" as const };
-  if (tenantDomain() || (await db.User.countDocuments()) > 0) return { refused: "claimed" as const };
+  if (organisationDomain() || (await db.User.countDocuments()) > 0) return { refused: "claimed" as const };
   if (!claims.email) return { refused: "no_email" as const };
   let user;
   try {

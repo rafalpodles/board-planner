@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const flowExists = vi.fn();
 let home: string | null = "https://acme.example";
@@ -44,7 +44,7 @@ describe("the relay", () => {
       provider: "oidc",
       claims: null,
       expiresAt: { $gt: expect.any(Date) },
-      tenant: DEFAULT_TENANT_ID,
+      organisation: DEFAULT_ORGANISATION_ID,
     });
   });
 

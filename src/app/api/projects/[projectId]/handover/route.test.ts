@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
@@ -75,7 +75,7 @@ describe("GET handover readiness", () => {
   it("asks only about the reader's own machines", async () => {
     await read();
 
-    expect(workerFind.mock.calls[0][0]).toEqual({ owner: READER, tenant: DEFAULT_TENANT_ID });
+    expect(workerFind.mock.calls[0][0]).toEqual({ owner: READER, organisation: DEFAULT_ORGANISATION_ID });
   });
 
   // BP-763: who holds a role on the board is not a member's business, so nobody is named at all

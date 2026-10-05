@@ -9,9 +9,9 @@ import { canServe, ownerReachableProjectIds, verifyWorkerCredential } from "./wo
 import { IUser, IWorker } from "@/types";
 import { PROJECT_KEY_PATTERN } from "./urls";
 import { matchRepo } from "./repo-match";
-import { getTenant } from "./tenant";
-import { scopedFor, tenantOf, type ScopedDb } from "./db-scope";
-import { tenantOfRequest } from "./tenant-host";
+import { getOrganisation } from "./organisation";
+import { scopedFor, organisationOf, type ScopedDb } from "./db-scope";
+import { organisationOfRequest } from "./organisation-host";
 import { can, FeatureKey } from "./entitlements";
 import { projectRunsWorkers } from "@/lib/worker-gate";
 import { EXECUTION_LEASE_MS } from "./execution-lease";
@@ -53,17 +53,17 @@ export function hostNotFound(): NextResponse {
 
 export async function refusedOnThisHost(
   request: Request,
-  principal: { tenant?: Types.ObjectId | null }
+  principal: { organisation?: Types.ObjectId | null }
 ): Promise<NextResponse | null> {
   let host;
   try {
-    host = await tenantOfRequest(request);
+    host = await organisationOfRequest(request);
   } catch (e) {
     if (isDatabaseUnreachable(e)) return databaseUnavailable();
     throw e;
   }
-  if (host.kind !== "tenant") return hostNotFound();
-  if (!tenantOf(principal).equals(host.tenant)) {
+  if (host.kind !== "organisation") return hostNotFound();
+  if (!organisationOf(principal).equals(host.organisation)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   return null;
@@ -117,10 +117,10 @@ export function withAdmin(handler: AuthenticatedHandler) {
 
 // 402, not 404 or 403, so the UI can upsell rather than treat this as missing or off-limits.
 export async function entitlementRefusal(feature: FeatureKey): Promise<NextResponse | null> {
-  const tenant = await getTenant();
-  if (can(tenant, feature)) return null;
+  const organisation = await getOrganisation();
+  if (can(organisation, feature)) return null;
   return NextResponse.json(
-    { error: "This feature requires a plan upgrade", feature, plan: tenant.entitlements.plan },
+    { error: "This feature requires a plan upgrade", feature, plan: organisation.entitlements.plan },
     { status: 402 }
   );
 }
@@ -247,7 +247,7 @@ async function withResolvedIds(
 }
 
 // An unknown identifier must look the same to a non-admin as one they cannot reach, otherwise the
-// 400/403 split turns into a project-key oracle; and to an admin as one in another tenant (BP-664)
+// 400/403 split turns into a project-key oracle; and to an admin as one in another organisation (BP-664)
 function unresolvedProject(user: IUser) {
   return user.role === "admin"
     ? NextResponse.json({ error: "Project not found" }, { status: 404 })

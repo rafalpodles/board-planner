@@ -1,6 +1,6 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { IPmMessage, PmMessageTrigger, PM_TRIGGER_TYPES } from "@/types";
-import { withTenant } from "@/lib/tenant-field";
+import { withOrganisation } from "@/lib/organisation-field";
 
 // Separate schema: an inline subdocument with a field named "type" collides with Mongoose's typeKey
 const triggerSchema = new Schema<PmMessageTrigger>(
@@ -72,7 +72,7 @@ pmMessageSchema.index({ project: 1, createdAt: -1 });
 // Threads are read per user, newest first, with _id as the paging cursor
 pmMessageSchema.index({ project: 1, triggeredBy: 1, _id: -1 });
 
-withTenant(pmMessageSchema);
+withOrganisation(pmMessageSchema);
 
 export const PmMessage: Model<IPmMessage> =
   mongoose.models.PmMessage || mongoose.model<IPmMessage>("PmMessage", pmMessageSchema);

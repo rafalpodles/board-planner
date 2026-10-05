@@ -5,7 +5,7 @@ import { Types } from "mongoose";
 import { sendEmail, isEmailConfigured } from "@/lib/email";
 import { APP_NAME } from "@/lib/brand";
 import { Pill, renderEmail } from "@/lib/email-template";
-import { tenantOrigin } from "@/lib/tenant-host";
+import { organisationOrigin } from "@/lib/organisation-host";
 import { notificationPath } from "@/lib/urls";
 import { recipientsWithAccess } from "@/lib/grants";
 import type { ScopedDb } from "@/lib/db-scope";
@@ -146,7 +146,7 @@ async function notify(db: ScopedDb, {
       return !user.emailDigest;
     });
     if (mailTo.length > 0) {
-      sendEmailNotifications({ tenant: db.tenant, users: mailTo, type, title, body: body || "", email }).catch((err) =>
+      sendEmailNotifications({ organisation: db.organisation, users: mailTo, type, title, body: body || "", email }).catch((err) =>
         console.error("Failed to send email notifications:", err)
       );
     }
@@ -156,7 +156,7 @@ async function notify(db: ScopedDb, {
     (user) => wants.get(String(user._id).toLowerCase())?.chat && user.notifications?.chat?.kind
   );
   if (chatTo.length > 0) {
-    sendPersonalChat({ tenant: db.tenant, users: chatTo, type, title, email }).catch((err) =>
+    sendPersonalChat({ organisation: db.organisation, users: chatTo, type, title, email }).catch((err) =>
       console.error("Failed to send chat notifications:", err)
     );
   }
@@ -185,7 +185,7 @@ function reasonFor(
 }
 
 async function sendEmailNotifications(n: {
-  tenant: Types.ObjectId;
+  organisation: Types.ObjectId;
   users: MailRecipient[];
   type: NotificationType;
   title: string;
@@ -197,7 +197,7 @@ async function sendEmailNotifications(n: {
 
   // Without a configured origin there is no address to link to. The mail still goes out, just
   // without the button — the alternative is a link to a build-machine literal (BP-316).
-  const origin = await tenantOrigin(n.tenant);
+  const origin = await organisationOrigin(n.organisation);
   const e = n.email;
   const path = e && notificationPath(e);
   const taskUrl = origin && path ? `${origin}${path}` : undefined;

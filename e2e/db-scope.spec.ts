@@ -1,11 +1,11 @@
 import { test, expect } from "@playwright/test";
 import mongoose from "mongoose";
 import { E2E_MONGODB_URI, e2eDatabaseName } from "./seed";
-import { SCOPED_MODELS, scoped, TenantKeyError, UnscopableError } from "../src/lib/db-scope";
-import { scopedModelNames } from "../src/lib/tenant-migration";
+import { SCOPED_MODELS, scoped, OrganisationKeyError, UnscopableError } from "../src/lib/db-scope";
+import { scopedModelNames } from "../src/lib/organisation-migration";
 import { Sprint } from "../src/models/sprint";
 import { getSettings, updateSettings } from "../src/models/settings";
-import { DEFAULT_TENANT_ID } from "../src/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "../src/lib/organisation-field";
 
 mongoose.set("autoIndex", false);
 mongoose.set("autoCreate", false);
@@ -47,19 +47,19 @@ test.beforeEach(async () => {
   await scoped(B).Sprint.create(sprint("b-one"));
 });
 
-test("the accessor covers exactly the models that carry a tenant", () => {
+test("the accessor covers exactly the models that carry an organisation", () => {
   expect(Object.values(SCOPED_MODELS).map((model) => model().modelName).sort()).toEqual([...scopedModelNames()].sort());
 });
 
-test("create and insertMany stamp the caller's tenant, never the schema default", async () => {
+test("create and insertMany stamp the caller's organisation, never the schema default", async () => {
   const rows = await rawRows();
-  expect(rows.filter((row) => A.equals(row.tenant))).toHaveLength(2);
-  expect(rows.filter((row) => B.equals(row.tenant))).toHaveLength(1);
+  expect(rows.filter((row) => A.equals(row.organisation))).toHaveLength(2);
+  expect(rows.filter((row) => B.equals(row.organisation))).toHaveLength(1);
 
   await scoped(B).Sprint.insertMany([sprint("b-two"), sprint("b-three")]);
   const second = (await rawRows()).filter((row) => String(row.name).startsWith("b-"));
   expect(second).toHaveLength(3);
-  expect(second.every((row) => B.equals(row.tenant))).toBe(true);
+  expect(second.every((row) => B.equals(row.organisation))).toBe(true);
 });
 
 test("create with several documents stamps every one, none falls back to the schema default", async () => {
@@ -67,10 +67,10 @@ test("create with several documents stamps every one, none falls back to the sch
 
   const rows = (await rawRows()).filter((row) => /^b-[xyz]$/.test(String(row.name)));
   expect(rows).toHaveLength(3);
-  expect(rows.every((row) => B.equals(row.tenant))).toBe(true);
+  expect(rows.every((row) => B.equals(row.organisation))).toBe(true);
 });
 
-test("reads see only the caller's tenant", async () => {
+test("reads see only the caller's organisation", async () => {
   expect(names(await scoped(A).Sprint.find({}))).toEqual(["a-one", "a-two"]);
   expect(names(await scoped(B).Sprint.find({}))).toEqual(["b-one"]);
   expect(names(await scoped(A).Sprint.find())).toEqual(["a-one", "a-two"]);
@@ -83,19 +83,19 @@ test("reads see only the caller's tenant", async () => {
   expect((await scoped(A).Sprint.distinct("name")).sort()).toEqual(["a-one", "a-two"]);
 });
 
-test("a row of another tenant cannot be fetched by its id", async () => {
+test("a row of another organisation cannot be fetched by its id", async () => {
   const [b] = await scoped(B).Sprint.find({});
   expect(await scoped(A).Sprint.findById(b._id)).toBeNull();
   expect(await scoped(B).Sprint.findById(b._id)).not.toBeNull();
   expect(await scoped(A).Sprint.findById(undefined)).toBeNull();
 });
 
-test("a $or in a filter cannot reach past the tenant", async () => {
+test("a $or in a filter cannot reach past the organisation", async () => {
   const found = await scoped(A).Sprint.find({ $or: [{ name: "b-one" }, { name: "a-one" }] });
   expect(names(found)).toEqual(["a-one"]);
 });
 
-test("writes by another tenant change nothing", async () => {
+test("writes by another organisation change nothing", async () => {
   const [b] = await scoped(B).Sprint.find({});
 
   expect((await scoped(A).Sprint.updateOne({ _id: b._id }, { $set: { goal: "taken" } })).matchedCount).toBe(0);
@@ -110,41 +110,41 @@ test("writes by another tenant change nothing", async () => {
   expect(stillThere?.goal).toBe("");
 });
 
-test("deleteMany with no filter deletes the caller's tenant and nobody else's", async () => {
+test("deleteMany with no filter deletes the caller's organisation and nobody else's", async () => {
   expect((await scoped(A).Sprint.deleteMany({})).deletedCount).toBe(2);
   expect(names(await rawRows())).toEqual(["b-one"]);
   expect((await scoped(B).Sprint.deleteMany()).deletedCount).toBe(1);
   expect(await rawRows()).toHaveLength(0);
 });
 
-test("an upsert creates the row in the caller's tenant, not the schema default", async () => {
+test("an upsert creates the row in the caller's organisation, not the schema default", async () => {
   await scoped(A).Sprint.updateOne({ name: "fresh" }, { $set: { ...sprint("fresh") } }, { upsert: true });
   await scoped(B).Sprint.findOneAndUpdate({ name: "fresh-b" }, { $set: sprint("fresh-b") }, { upsert: true });
 
   const rows = await rawRows();
-  expect(A.equals(rows.find((row) => row.name === "fresh")?.tenant)).toBe(true);
-  expect(B.equals(rows.find((row) => row.name === "fresh-b")?.tenant)).toBe(true);
+  expect(A.equals(rows.find((row) => row.name === "fresh")?.organisation)).toBe(true);
+  expect(B.equals(rows.find((row) => row.name === "fresh-b")?.organisation)).toBe(true);
 });
 
-test("an upsert in one tenant does not touch the same key in another", async () => {
+test("an upsert in one organisation does not touch the same key in another", async () => {
   await scoped(B).Sprint.updateOne({ name: "a-one" }, { $set: { goal: "b's own", ...sprint("a-one") } }, { upsert: true });
 
   const rows = (await rawRows()).filter((row) => row.name === "a-one");
   expect(rows).toHaveLength(2);
-  expect(rows.find((row) => A.equals(row.tenant))?.goal).toBe("");
-  expect(rows.find((row) => B.equals(row.tenant))?.goal).toBe("b's own");
+  expect(rows.find((row) => A.equals(row.organisation))?.goal).toBe("");
+  expect(rows.find((row) => B.equals(row.organisation))?.goal).toBe("b's own");
 });
 
-test("a tenant named in a filter, a document or an update is refused, not honoured", async () => {
-  expect(() => scoped(A).Sprint.find({ tenant: B })).toThrow(TenantKeyError);
-  expect(() => scoped(A).Sprint.findOne({ tenant: B })).toThrow(TenantKeyError);
-  expect(() => scoped(A).Sprint.deleteMany({ tenant: B })).toThrow(TenantKeyError);
-  expect(() => scoped(A).Sprint.updateOne({}, { $set: { tenant: B } })).toThrow(TenantKeyError);
-  expect(() => scoped(A).Sprint.updateOne({}, { $setOnInsert: { tenant: B } })).toThrow(TenantKeyError);
-  expect(() => scoped(A).Sprint.updateOne({}, { tenant: B })).toThrow(TenantKeyError);
-  expect(() => scoped(A).Sprint.updateOne({}, { $rename: { goal: "tenant" } })).toThrow(TenantKeyError);
-  await expect(async () => scoped(A).Sprint.create({ ...sprint("x"), tenant: B } as never)).rejects.toThrow(TenantKeyError);
-  await expect(async () => scoped(A).Sprint.insertMany([{ ...sprint("x"), tenant: B }] as never)).rejects.toThrow(TenantKeyError);
+test("an organisation named in a filter, a document or an update is refused, not honoured", async () => {
+  expect(() => scoped(A).Sprint.find({ organisation: B })).toThrow(OrganisationKeyError);
+  expect(() => scoped(A).Sprint.findOne({ organisation: B })).toThrow(OrganisationKeyError);
+  expect(() => scoped(A).Sprint.deleteMany({ organisation: B })).toThrow(OrganisationKeyError);
+  expect(() => scoped(A).Sprint.updateOne({}, { $set: { organisation: B } })).toThrow(OrganisationKeyError);
+  expect(() => scoped(A).Sprint.updateOne({}, { $setOnInsert: { organisation: B } })).toThrow(OrganisationKeyError);
+  expect(() => scoped(A).Sprint.updateOne({}, { organisation: B })).toThrow(OrganisationKeyError);
+  expect(() => scoped(A).Sprint.updateOne({}, { $rename: { goal: "organisation" } })).toThrow(OrganisationKeyError);
+  await expect(async () => scoped(A).Sprint.create({ ...sprint("x"), organisation: B } as never)).rejects.toThrow(OrganisationKeyError);
+  await expect(async () => scoped(A).Sprint.insertMany([{ ...sprint("x"), organisation: B }] as never)).rejects.toThrow(OrganisationKeyError);
   expect(await scoped(B).Sprint.countDocuments({})).toBe(1);
 });
 
@@ -170,54 +170,54 @@ test("bulkWrite scopes every operation it carries", async () => {
   ] as never);
 
   const rows = await rawRows();
-  expect(A.equals(rows.find((row) => row.name === "a-bulk")?.tenant)).toBe(true);
+  expect(A.equals(rows.find((row) => row.name === "a-bulk")?.organisation)).toBe(true);
   const untouched = rows.find((row) => row.name === "b-one");
   expect(untouched?.goal).toBe("");
 });
 
-test("build gives a document that saves into the caller's tenant", async () => {
+test("build gives a document that saves into the caller's organisation", async () => {
   const doc = scoped(B).Sprint.build(sprint("built"));
   await doc.save();
 
-  expect(B.equals((await rawRows()).find((row) => row.name === "built")?.tenant)).toBe(true);
+  expect(B.equals((await rawRows()).find((row) => row.name === "built")?.organisation)).toBe(true);
 });
 
-test("the schema default is not what scopes a scoped write: the default tenant is just another tenant", async () => {
-  const defaultTenant = new mongoose.Types.ObjectId("000000000000000000000001");
-  await scoped(defaultTenant).Sprint.create(sprint("default-one"));
+test("the schema default is not what scopes a scoped write: the default organisation is just another organisation", async () => {
+  const defaultOrganisation = new mongoose.Types.ObjectId("000000000000000000000001");
+  await scoped(defaultOrganisation).Sprint.create(sprint("default-one"));
 
   expect(names(await scoped(A).Sprint.find({}))).toEqual(["a-one", "a-two"]);
-  expect(names(await scoped(defaultTenant).Sprint.find({}))).toEqual(["default-one"]);
+  expect(names(await scoped(defaultOrganisation).Sprint.find({}))).toEqual(["default-one"]);
   expect(await Sprint.countDocuments({})).toBe(4);
 });
 
-test("a document's tenant cannot be moved, by a save or by a raw update", async () => {
+test("a document's organisation cannot be moved, by a save or by a raw update", async () => {
   const doc = await scoped(B).Sprint.findOne({ name: "b-one" });
-  doc!.set("tenant", A);
+  doc!.set("organisation", A);
   await doc!.save();
-  await Sprint.updateOne({ name: "b-one" }, { $set: { tenant: A } });
+  await Sprint.updateOne({ name: "b-one" }, { $set: { organisation: A } });
 
-  expect(B.equals((await rawRows()).find((row) => row.name === "b-one")?.tenant)).toBe(true);
+  expect(B.equals((await rawRows()).find((row) => row.name === "b-one")?.organisation)).toBe(true);
 });
 
-test("a write through the model that names no tenant is refused rather than given one", async () => {
-  await expect(Sprint.create(sprint("orphan"))).rejects.toThrow(/tenant.*required/i);
+test("a write through the model that names no organisation is refused rather than given one", async () => {
+  await expect(Sprint.create(sprint("orphan"))).rejects.toThrow(/organisation.*required/i);
 
   expect((await rawRows()).find((row) => row.name === "orphan")).toBeUndefined();
 });
 
-test("the instance's settings row is created in the default tenant, by a read or by a change", async () => {
+test("the instance's settings row is created in the default organisation, by a read or by a change", async () => {
   const settings = () => mongoose.connection.db!.collection("settings").find({}).toArray();
 
-  await updateSettings(scoped(DEFAULT_TENANT_ID), { $set: { aiModel: "first" } });
-  expect(await settings()).toMatchObject([{ tenant: DEFAULT_TENANT_ID, aiModel: "first" }]);
+  await updateSettings(scoped(DEFAULT_ORGANISATION_ID), { $set: { aiModel: "first" } });
+  expect(await settings()).toMatchObject([{ organisation: DEFAULT_ORGANISATION_ID, aiModel: "first" }]);
 
   await mongoose.connection.db!.collection("settings").deleteMany({});
-  await getSettings(scoped(DEFAULT_TENANT_ID));
-  expect(await settings()).toMatchObject([{ tenant: DEFAULT_TENANT_ID }]);
+  await getSettings(scoped(DEFAULT_ORGANISATION_ID));
+  expect(await settings()).toMatchObject([{ organisation: DEFAULT_ORGANISATION_ID }]);
 });
 
-test("BP-667: each tenant has its own settings row, and a change in one leaves the other alone", async () => {
+test("BP-667: each organisation has its own settings row, and a change in one leaves the other alone", async () => {
   await updateSettings(scoped(A), { $set: { aiModel: "a-model", signUpDomains: ["a.example"] } });
   await updateSettings(scoped(B), { $set: { aiModel: "b-model" } });
   await updateSettings(scoped(A), { $set: { aiModel: "a-model-2" } });

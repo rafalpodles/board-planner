@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const findInvitationByToken = vi.fn();
 const userExists = vi.fn();
@@ -73,7 +73,7 @@ describe("POST /api/invitations/lookup", () => {
 
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: INVITATION_REFUSALS.used, reason: "used" });
-    expect(userExists).toHaveBeenCalledWith({ email: "ada@example.com", tenant: DEFAULT_TENANT_ID });
+    expect(userExists).toHaveBeenCalledWith({ email: "ada@example.com", organisation: DEFAULT_ORGANISATION_ID });
   });
 
   it("refuses a request with no token", async () => {

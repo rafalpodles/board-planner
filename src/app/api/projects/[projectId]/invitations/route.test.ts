@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const inviteToBoard = vi.fn();
 const recordDelivery = vi.fn();
@@ -20,12 +20,12 @@ vi.mock("@/models/rateLimit", async () => {
   return { RateLimit: inMemoryRateLimitModel() };
 });
 vi.mock("@/lib/middleware", async () => {
-  const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+  const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
   return {
     withProjectOwner:
       (handler: (r: Request, c: unknown) => unknown) =>
       (request: Request) =>
-        handler(request, { params: Promise.resolve({ projectId: "p1" }), user: caller, db: scopedToDefaultTenant() }),
+        handler(request, { params: Promise.resolve({ projectId: "p1" }), user: caller, db: scopedToDefaultOrganisation() }),
   };
 });
 vi.mock("@/lib/session", () => ({ selfOrigin }));
@@ -41,7 +41,7 @@ vi.mock("@/models/project", () => ({ Project: { findOne: projectFindOne } }));
 vi.mock("@/models/invitation", () => ({ Invitation: { find: invitationFind } }));
 
 const { GET, POST } = await import("./route");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { resetRateLimits } = await import("@/lib/rate-limit");
 
 const CTX = { params: Promise.resolve({ projectId: "p1" }) };
@@ -68,8 +68,8 @@ describe("POST /api/projects/:id/invitations", () => {
     expect(res.status).toBe(201);
     const body = await res.json();
     expect(body).toEqual({ outcome: "created", delivery: "email" });
-    expect(recordDelivery).toHaveBeenCalledWith(scopedToDefaultTenant(), "inv-1", "cpi_secret", "email");
-    expect(inviteToBoard).toHaveBeenCalledWith(scopedToDefaultTenant(), {
+    expect(recordDelivery).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "inv-1", "cpi_secret", "email");
+    expect(inviteToBoard).toHaveBeenCalledWith(scopedToDefaultOrganisation(), {
       email: "ada@example.com",
       project: "p1",
       relation: "owner",
@@ -82,7 +82,7 @@ describe("POST /api/projects/:id/invitations", () => {
       "member",
       [{ project: "p1", relation: "owner" }],
     ]);
-    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), "p1", "o1", "member_invited", "ada@example.com: invited as owner");
+    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "p1", "o1", "member_invited", "ada@example.com: invited as owner");
   });
 
   it("hands the owner the link when no mail went out, and records that it did", async () => {
@@ -96,7 +96,7 @@ describe("POST /api/projects/:id/invitations", () => {
       link: "https://planner.example/invite?token=cpi_secret",
       reason: "no_mail_server",
     });
-    expect(recordDelivery).toHaveBeenCalledWith(scopedToDefaultTenant(), "inv-1", "cpi_secret", "link");
+    expect(recordDelivery).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "inv-1", "cpi_secret", "link");
   });
 
   // The invitation already sent is somebody else's: no new link, no mail, nothing to hand back
@@ -269,7 +269,7 @@ describe("GET /api/projects/:id/invitations", () => {
 
     const res = await GET(new Request("http://x/api/projects/p1/invitations"), CTX);
 
-    expect(invitationFind).toHaveBeenCalledWith({ status: "pending", "boards.project": "p1", tenant: DEFAULT_TENANT_ID });
+    expect(invitationFind).toHaveBeenCalledWith({ status: "pending", "boards.project": "p1", organisation: DEFAULT_ORGANISATION_ID });
     expect(await res.json()).toEqual([
       expect.objectContaining({ _id: "inv-1", email: "ada@example.com", relation: "member", addedBy: "owner", expired: false }),
       expect.objectContaining({ _id: "inv-3", relation: "owner", expired: true }),

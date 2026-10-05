@@ -7,9 +7,9 @@ const { connectDB, findOneAndUpdate } = vi.hoisted(() => ({
 }));
 
 vi.mock("./db", () => ({ connectDB }));
-vi.mock("@/models/tenant", () => ({ Tenant: { findOneAndUpdate } }));
+vi.mock("@/models/organisation", () => ({ Organisation: { findOneAndUpdate } }));
 
-const { getTenant, checkOrganisationName, nameOrganisation, ORGANISATION_NAME_MAX } = await import("./tenant");
+const { getOrganisation, checkOrganisationName, nameOrganisation, ORGANISATION_NAME_MAX } = await import("./organisation");
 const { SINGLETON_ID } = await import("./singleton");
 const { signLicence } = await import("./licence");
 
@@ -17,14 +17,14 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe("getTenant", () => {
+describe("getOrganisation", () => {
   it("upserts the singleton with the documented default on first read", async () => {
     findOneAndUpdate.mockResolvedValue({
-      _id: "tenant-1",
+      _id: "organisation-1",
       entitlements: { plan: "free", features: [], source: "none" },
     });
 
-    const tenant = await getTenant();
+    const organisation = await getOrganisation();
 
     expect(connectDB).toHaveBeenCalled();
     expect(findOneAndUpdate).toHaveBeenCalledWith(
@@ -37,20 +37,20 @@ describe("getTenant", () => {
       },
       { upsert: true, returnDocument: "after" }
     );
-    expect(tenant.entitlements).toEqual({ plan: "free", features: [], source: "none" });
+    expect(organisation.entitlements).toEqual({ plan: "free", features: [], source: "none" });
   });
 
   it("issues the exact same idempotent upsert on a second read, not a differently-shaped write", async () => {
     // What actually makes a second read safe is that every call sends the identical {} filter
     // and $setOnInsert — a mocked model returns whatever it's told to regardless of arguments,
     // so asserting only the resolved value here would pass even for a second call that switched
-    // to Tenant.create() or changed the filter, either of which would create a second document
+    // to Organisation.create() or changed the filter, either of which would create a second document
     // against a real Mongo.
-    const existing = { _id: "tenant-1", entitlements: { plan: "pro", features: [], source: "service" } };
+    const existing = { _id: "organisation-1", entitlements: { plan: "pro", features: [], source: "service" } };
     findOneAndUpdate.mockResolvedValue(existing);
 
-    await getTenant();
-    await getTenant();
+    await getOrganisation();
+    await getOrganisation();
 
     expect(findOneAndUpdate).toHaveBeenCalledTimes(2);
     const [firstCall, secondCall] = findOneAndUpdate.mock.calls;
@@ -58,11 +58,11 @@ describe("getTenant", () => {
   });
 });
 
-describe("getTenant with LICENCE_KEY", () => {
+describe("getOrganisation with LICENCE_KEY", () => {
   const ORIGINAL = { ...process.env };
   const jwk = generateKeyPairSync("ed25519").privateKey.export({ format: "jwk" });
   const signing = { keyId: "e2e", d: jwk.d!, x: jwk.x! };
-  const stored = { _id: "tenant-1", entitlements: { plan: "free", features: [], source: "none" } };
+  const stored = { _id: "organisation-1", entitlements: { plan: "free", features: [], source: "none" } };
 
   function key(expiresAt: Date, customer = "Acme Ltd") {
     return signLicence(
@@ -82,14 +82,14 @@ describe("getTenant with LICENCE_KEY", () => {
     process.env = { ...ORIGINAL };
   });
 
-  it("derives pro from a valid key without writing it to the stored tenant", async () => {
+  it("derives pro from a valid key without writing it to the stored organisation", async () => {
     const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
     process.env.LICENCE_KEY = key(expiresAt);
 
-    const tenant = await getTenant();
+    const organisation = await getOrganisation();
 
-    expect(tenant.entitlements).toMatchObject({ plan: "pro", customer: "Acme Ltd", expiresAt, source: "env" });
-    expect(tenant._id).toBe("tenant-1");
+    expect(organisation.entitlements).toMatchObject({ plan: "pro", customer: "Acme Ltd", expiresAt, source: "env" });
+    expect(organisation._id).toBe("organisation-1");
     expect(findOneAndUpdate.mock.calls[0][1]).toEqual({
       $setOnInsert: expect.objectContaining({ entitlements: { plan: "free", features: [], source: "none" } }),
     });
@@ -98,13 +98,13 @@ describe("getTenant with LICENCE_KEY", () => {
   it("reports free for a key past its grace period", async () => {
     process.env.LICENCE_KEY = key(new Date(Date.now() - 15 * 24 * 60 * 60 * 1000));
 
-    expect((await getTenant()).entitlements).toEqual({ plan: "free", features: [], source: "env" });
+    expect((await getOrganisation()).entitlements).toEqual({ plan: "free", features: [], source: "env" });
   });
 
   it("leaves the stored entitlements for a key that does not verify", async () => {
     process.env.LICENCE_KEY = "garbage";
 
-    expect(await getTenant()).toBe(stored);
+    expect(await getOrganisation()).toBe(stored);
   });
 });
 
@@ -127,8 +127,8 @@ describe("checkOrganisationName", () => {
 });
 
 describe("nameOrganisation", () => {
-  it("sets the name on the instance's one tenant row", async () => {
-    findOneAndUpdate.mockResolvedValue({ _id: "tenant-1" });
+  it("sets the name on the instance's one organisation row", async () => {
+    findOneAndUpdate.mockResolvedValue({ _id: "organisation-1" });
 
     await nameOrganisation("Rafał-org");
 

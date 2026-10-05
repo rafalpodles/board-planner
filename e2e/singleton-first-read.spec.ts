@@ -34,7 +34,7 @@ test.beforeEach(seed);
 
 for (const [path, collection] of [
   ["/api/settings", "settings"],
-  ["/api/entitlements", "tenants"],
+  ["/api/entitlements", "organisations"],
 ] as const) {
   test(`simultaneous first reads of ${path} leave exactly one document`, async ({ request }) => {
     // Warm-up: otherwise the reads queue behind the route's first compile and never overlap

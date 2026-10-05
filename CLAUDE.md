@@ -90,7 +90,7 @@ mcp-server/           # Standalone MCP server (stdio transport)
 - **Auth**: `getAuthUser(req)` tries Bearer token first (`cpat_` OAuth, `cp_` API token), then the session cookie. A presented Bearer that resolves to nothing returns null rather than falling back to the cookie. Basic Auth was removed in BP-293; the browser holds an opaque `cps_` session token in an httpOnly cookie, never a password. Only the cookie path yields `viaMachineCredential = false`.
 - **Middleware**: `withAuth` → `withAdmin` → `withProjectAccess` (composable)
 - **Task numbers**: Auto-increment per project via atomic `$inc` on `Project.taskCounter`
-- **Tenant**: every model except `Tenant` and `RateLimit` has a required, immutable `tenant` with no default (`withTenant` in `src/lib/tenant-field.ts`). Handlers never import those models: `withAuth`/`withProject*`/`withWorker` hand them `db` (`src/lib/db-scope.ts`), whose methods have Mongoose's signatures but AND every filter with the caller's tenant, stamp every create and refuse a `tenant` key, an update pipeline or a cross-collection aggregation stage; lib functions take that `db` as their first parameter, and code with no caller yet (sign-in, ticks, boot) uses `scopedToDefaultTenant()`, the one place BP-664 replaces. `src/lib/db-scope.ratchet.json` lists the files still allowed raw access (credential resolution, GridFS, the Settings singleton, pipeline writes that filter on `db.tenant`); a test fails on a new one and on a stale one. Production joined its organisation once, by hand (`scripts/migrate-tenant.ts`, BP-662); boot warns if any row has no tenant. A per-tenant unique leads with the chosen field and ends with `tenant`; the old global uniques are gone from the schemas (BP-665) and `scripts/drop-global-uniques.ts` drops them from a database that still has them. Every credential (session, API/OAuth token) must belong to its person's tenant, and login lockouts are counted per tenant. With `TENANT_DOMAIN` set the Host names the tenant (`src/lib/tenant-host.ts`) and a credential is refused on another tenant's host; unset, there is one tenant
+- **Organisation**: every model except `Organisation` and `RateLimit` has a required, immutable `organisation` with no default (`withOrganisation` in `src/lib/organisation-field.ts`). Handlers never import those models: `withAuth`/`withProject*`/`withWorker` hand them `db` (`src/lib/db-scope.ts`), whose methods have Mongoose's signatures but AND every filter with the caller's organisation, stamp every create and refuse a `organisation` key, an update pipeline or a cross-collection aggregation stage; lib functions take that `db` as their first parameter, and code with no caller yet (sign-in, ticks, boot) uses `scopedToDefaultOrganisation()`, the one place BP-664 replaces. `src/lib/db-scope.ratchet.json` lists the files still allowed raw access (credential resolution, GridFS, the Settings singleton, pipeline writes that filter on `db.organisation`); a test fails on a new one and on a stale one. Production joined its organisation once, by hand (`scripts/migrate-organisation.ts`, BP-662); boot warns if any row has no organisation. A per-organisation unique leads with the chosen field and ends with `organisation`; the old global uniques are gone from the schemas (BP-665) and `scripts/drop-global-uniques.ts` drops them from a database that still has them. Every credential (session, API/OAuth token) must belong to its person's organisation, and login lockouts are counted per organisation. With `ORGANISATION_DOMAIN` set the Host names the organisation (`src/lib/organisation-host.ts`) and a credential is refused on another organisation's host; unset, there is one organisation
 - **Task keys**: `PROJECT_KEY-NUMBER` (e.g., `CP-5`), used in MCP and GitHub matching
 - **Activity logging**: a failed write never breaks the request, but `updateTask` awaits its rows
   before answering, because the task view refetches History on the response. Rows are append-only;
@@ -163,8 +163,8 @@ PM_DAILY_TOKEN_CAP=       # Optional — tokens per project per day; unset means
 PM_SCHEDULER_TICK_MS=     # Optional — PM autonomy scheduler tick (default: 300000)
 WEBHOOK_SIGNING_SECRET=   # Optional — HMACs outgoing webhook deliveries (x-boardplanner-signature)
 DIGEST_HOUR=              # Optional — hour the opt-in daily digest goes out (default 7); an organisation's own
-                          # Tenant.digestHour wins (BP-667)
-DIGEST_TIMEZONE=          # Optional — the zone that hour is read in (default Europe/Warsaw); Tenant.timezone wins
+                          # Organisation.digestHour wins (BP-667)
+DIGEST_TIMEZONE=          # Optional — the zone that hour is read in (default Europe/Warsaw); Organisation.timezone wins
 DIGEST_TICK_MS=           # Optional — digest scheduler tick (default 300000)
 GITHUB_SYNC_TICK_MS=      # Optional — how often every project with a GitHub token is re-synced,
                           # which is what keeps a pull request's CI badge current (default
@@ -225,8 +225,8 @@ OIDC_RELAY_ORIGIN=        # Optional — another address of this instance that e
                           # the browser back to: redirect URI OIDC_RELAY_ORIGIN +
                           # /api/auth/oidc/{oidc,google,github}/relay, which finds the sign-in by its
                           # state and forwards the answer unchanged to the callback on PUBLIC_ORIGIN
-                          # (BP-851; per tenant from BP-666, because Google takes no wildcard redirect
-                          # URI for tenant subdomains). A bare https origin (http only to
+                          # (BP-851; per organisation from BP-666, because Google takes no wildcard redirect
+                          # URI for organisation subdomains). A bare https origin (http only to
                           # 127.0.0.1/[::1]); anything else stops the app at startup. Unset: providers
                           # return to PUBLIC_ORIGIN's callback, as before. Set it in a deploy after the
                           # one that ships it; removing it strands sign-ins begun in the last 10 minutes
@@ -240,15 +240,15 @@ ENCRYPTION_KEY=           # 32 bytes (hex or base64) — without it integration 
                           # key stops the app from starting
 ENCRYPTION_KEYS_OLD=      # Optional — comma-separated retired keys, so a rotation can still decrypt
 LICENCE_KEY=              # Optional — a Pro licence, Ed25519-signed, verified against the public keys
-                          # in src/lib/licence-keys.ts on every getTenant(); nothing is stored. A bad
+                          # in src/lib/licence-keys.ts on every getOrganisation(); nothing is stored. A bad
                           # key is a startup warning and the Free plan; expired keys keep Pro for 14
                           # days. Signed by the licence service, or scripts/sign-licence.ts (BP-650)
 BOOTSTRAP_TOKEN=          # Optional — setup code for the first account; unset, one is generated and
                           # printed to the server log while the instance has no users (BP-325)
-TENANT_DOMAIN=            # Optional — e.g. board-planner.com: organisations live on <slug>.TENANT_DOMAIN, the
-                          # Host header names the tenant, every address is built from the tenant's slug
-                          # (tenantOrigin), and the bare domain and reserved names (app, login, www…) are
-                          # the platform. Unset (self-hosted): one tenant, PUBLIC_ORIGIN, as before. A
+ORGANISATION_DOMAIN=      # Optional — e.g. board-planner.com: organisations live on <slug>.ORGANISATION_DOMAIN, the
+                          # Host header names the organisation, every address is built from the organisation's slug
+                          # (organisationOrigin), and the bare domain and reserved names (app, login, www…) are
+                          # the platform. Unset (self-hosted): one organisation, PUBLIC_ORIGIN, as before. A
                           # value with a scheme, port or path stops the app at boot (BP-666)
 APP_ORIGIN=               # Comma-separated origins allowed to write — the CSRF allowlist, together
                           # with PUBLIC_ORIGIN, whenever a request carries no Sec-Fetch-Site (BP-361)

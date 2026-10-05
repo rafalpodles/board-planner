@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
@@ -141,7 +141,7 @@ describe("GET /api/projects/:projectId/tasks — assignee filter", () => {
     const res = await GET(request("?assignee=owner"), ctx());
 
     expect(res.status).toBe(200);
-    expect(userFindOne).toHaveBeenCalledWith({ username: "owner", tenant: DEFAULT_TENANT_ID }, "_id");
+    expect(userFindOne).toHaveBeenCalledWith({ username: "owner", organisation: DEFAULT_ORGANISATION_ID }, "_id");
     expect(filterUsed()?.assignee).toBe("u7");
   });
 
@@ -150,7 +150,7 @@ describe("GET /api/projects/:projectId/tasks — assignee filter", () => {
 
     await GET(request("?assignee=OwNeR"), ctx());
 
-    expect(userFindOne).toHaveBeenCalledWith({ username: "owner", tenant: DEFAULT_TENANT_ID }, "_id");
+    expect(userFindOne).toHaveBeenCalledWith({ username: "owner", organisation: DEFAULT_ORGANISATION_ID }, "_id");
   });
 
   // The whole point of refusing: an empty list and a typo read identically to whoever asked
@@ -316,7 +316,7 @@ describe("GET /api/projects/:projectId/tasks — the status filter", () => {
     expect(taskExists).toHaveBeenCalledWith({
       project: PROJECT_ID,
       status: { $in: ["in_progress"] },
-      tenant: DEFAULT_TENANT_ID,
+      organisation: DEFAULT_ORGANISATION_ID,
     });
   });
 
@@ -331,7 +331,7 @@ describe("GET /api/projects/:projectId/tasks — the status filter", () => {
     expect(taskExists).toHaveBeenCalledWith({
       project: PROJECT_ID,
       status: { $in: ["nonesuch", "in_progress"] },
-      tenant: DEFAULT_TENANT_ID,
+      organisation: DEFAULT_ORGANISATION_ID,
     });
   });
 

@@ -28,6 +28,6 @@ import "./session";
 import "./settings";
 import "./sprint";
 import "./task";
-import "./tenant";
+import "./organisation";
 import "./user";
 import "./worker";

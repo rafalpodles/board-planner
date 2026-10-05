@@ -24,7 +24,7 @@ vi.mock("@/lib/project-write-images", () => ({
 }));
 
 const { PATCH } = await import("./route");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 
 const PROJECT_ID = "507f1f77bcf86cd799439011";
 const ADMIN = "507f1f77bcf86cd799439031";
@@ -113,7 +113,7 @@ describe("PATCH /api/admin/agents/:projectId", () => {
     await patch({ enabled: false, dailyTurnCap: 0 });
 
     expect(logProjectAudit).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       PROJECT_ID,
       ADMIN,
       "settings_updated",

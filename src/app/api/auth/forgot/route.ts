@@ -17,7 +17,7 @@ import {
   sourceKey,
 } from "@/lib/rate-limit";
 import { provenanceRefusal } from "@/lib/session";
-import { originFor } from "@/lib/tenant-host";
+import { originFor } from "@/lib/organisation-host";
 import type { ScopedDb } from "@/lib/db-scope";
 
 // One answer for every outcome: account found, no such account, account with no address, machine

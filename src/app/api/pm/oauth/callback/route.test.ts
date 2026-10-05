@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const findOne = vi.fn();
 const findOneAndDelete = vi.fn();
@@ -21,7 +21,7 @@ vi.mock("@/lib/pm/mcp-oauth", () => ({
 }));
 
 const { GET } = await import("./route");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 
 const OWNER = { _id: "owner1", viaMachineCredential: false };
 
@@ -97,7 +97,7 @@ describe("GET /api/pm/oauth/callback — binding the flow to whoever started it"
     const res = await GET(approveRequest());
 
     expect(res.headers.get("location")).toBe("/projects/p1/settings?mcp_oauth=error%3Awrong_user");
-    expect(findOneAndDelete).toHaveBeenCalledWith({ state: "s", tenant: DEFAULT_TENANT_ID });
+    expect(findOneAndDelete).toHaveBeenCalledWith({ state: "s", organisation: DEFAULT_ORGANISATION_ID });
   });
 
   it("refuses when nobody is signed in, and consumes the state since a real code was presented", async () => {
@@ -107,7 +107,7 @@ describe("GET /api/pm/oauth/callback — binding the flow to whoever started it"
     const res = await GET(approveRequest());
 
     expect(res.headers.get("location")).toBe("/projects/p1/settings?mcp_oauth=error%3Awrong_user");
-    expect(findOneAndDelete).toHaveBeenCalledWith({ state: "s", tenant: DEFAULT_TENANT_ID });
+    expect(findOneAndDelete).toHaveBeenCalledWith({ state: "s", organisation: DEFAULT_ORGANISATION_ID });
   });
 
   it("refuses a machine credential even when its user id matches", async () => {
@@ -140,9 +140,9 @@ describe("GET /api/pm/oauth/callback — binding the flow to whoever started it"
 
     const res = await GET(approveRequest());
 
-    expect(check).toHaveBeenCalledWith(scopedToDefaultTenant(), { _id: "owner1", viaMachineCredential: false }, "p1", "admin");
+    expect(check).toHaveBeenCalledWith(scopedToDefaultOrganisation(), { _id: "owner1", viaMachineCredential: false }, "p1", "admin");
     expect(res.headers.get("location")).toBe("/projects/p1/settings?mcp_oauth=error%3Awrong_user");
-    expect(findOneAndDelete).toHaveBeenCalledWith({ state: "s", tenant: DEFAULT_TENANT_ID });
+    expect(findOneAndDelete).toHaveBeenCalledWith({ state: "s", organisation: DEFAULT_ORGANISATION_ID });
   });
 
   it("admits the user who started the flow, and consumes the state", async () => {
@@ -156,7 +156,7 @@ describe("GET /api/pm/oauth/callback — binding the flow to whoever started it"
 
     const res = await GET(approveRequest());
 
-    expect(findOneAndDelete).toHaveBeenCalledWith({ state: "s", tenant: DEFAULT_TENANT_ID });
+    expect(findOneAndDelete).toHaveBeenCalledWith({ state: "s", organisation: DEFAULT_ORGANISATION_ID });
     expect(res.headers.get("location")).toBe("/projects/p1/settings?mcp_oauth=error%3Aconnection_gone");
   });
 
@@ -171,7 +171,7 @@ describe("GET /api/pm/oauth/callback — binding the flow to whoever started it"
 
     expect(res.headers.get("location")).toBe("/projects/p1/settings?mcp_oauth=error%3Awrong_user");
     // A real code was presented, same as any other refusal here — consumed for the same reason.
-    expect(findOneAndDelete).toHaveBeenCalledWith({ state: "s", tenant: DEFAULT_TENANT_ID });
+    expect(findOneAndDelete).toHaveBeenCalledWith({ state: "s", organisation: DEFAULT_ORGANISATION_ID });
   });
 
   it("does not consume the state on a provenance failure when there is no code", async () => {
@@ -234,7 +234,7 @@ describe("GET /api/pm/oauth/callback — storing the connection", () => {
         "pm.mcpServers": {
           $elemMatch: { name: "notion", url: "https://mcp.notion.com/mcp", "oauth.clientId": "c1" },
         },
-        tenant: DEFAULT_TENANT_ID,
+        organisation: DEFAULT_ORGANISATION_ID,
       },
       {
         $set: {
@@ -254,7 +254,7 @@ describe("GET /api/pm/oauth/callback — storing the connection", () => {
     await approve();
 
     expect(logProjectAudit).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       "p1",
       "owner1",
       "settings_updated",
@@ -268,7 +268,7 @@ describe("GET /api/pm/oauth/callback — storing the connection", () => {
     await approve();
 
     expect(logProjectAudit).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       "p1",
       "owner1",
       "settings_updated",

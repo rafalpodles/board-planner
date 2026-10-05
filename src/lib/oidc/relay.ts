@@ -1,6 +1,6 @@
 /**
  * `OIDC_RELAY_ORIGIN`: another address of this instance that providers send the browser back to,
- * which forwards the answer to the callback on `selfOrigin()` (per tenant from BP-666). Null when
+ * which forwards the answer to the callback on `selfOrigin()` (per organisation from BP-666). Null when
  * unset; a value that is not a bare https origin (http only to 127.0.0.1/[::1]) throws, and
  * `assertSignInConfig` does so at startup.
  */

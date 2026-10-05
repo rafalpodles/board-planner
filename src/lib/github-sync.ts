@@ -1,4 +1,4 @@
-import { forEachServedTenant } from "@/lib/tenant-jobs";
+import { forEachServedOrganisation } from "@/lib/organisation-jobs";
 import type { Types } from "mongoose";
 import { connectDB } from "@/lib/db";
 import type { SchedulerStart } from "@/lib/scheduler";
@@ -447,7 +447,7 @@ export async function syncGithubPullRequests(
  */
 export async function githubSyncTick(): Promise<void> {
   await connectDB();
-  await forEachServedTenant("GitHub sync", (db) => githubSyncTickFor(db));
+  await forEachServedOrganisation("GitHub sync", (db) => githubSyncTickFor(db));
 }
 
 async function githubSyncTickFor(db: ScopedDb): Promise<void> {

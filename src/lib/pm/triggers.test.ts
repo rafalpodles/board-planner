@@ -60,9 +60,9 @@ vi.mock("./config", () => ({ isPmAvailable: () => isPmAvailable() }));
 
 const { runPmTrigger } = await import("./triggers");
 const { NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS } = await import("./autonomy");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
-const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
-const db = scopedToDefaultTenant();
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
+const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
+const db = scopedToDefaultOrganisation();
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const trigger = { _id: "t1", project: "p1", task: "task1", taskKey: "BP-1", attempts: 1 } as any;
@@ -89,7 +89,7 @@ describe("runPmTrigger", () => {
     await runPmTrigger(db, trigger);
 
     expect(runPmTurn).not.toHaveBeenCalled();
-    expect(findOneAndUpdate).toHaveBeenCalledWith({ _id: "t1", tenant: DEFAULT_TENANT_ID }, {
+    expect(findOneAndUpdate).toHaveBeenCalledWith({ _id: "t1", organisation: DEFAULT_ORGANISATION_ID }, {
       $set: { state: "failed", lastError: "The PM agent is not configured on this instance", active: false },
     });
   });
@@ -108,7 +108,7 @@ describe("runPmTrigger", () => {
       })
     );
     expect(findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: "t1", tenant: DEFAULT_TENANT_ID },
+      { _id: "t1", organisation: DEFAULT_ORGANISATION_ID },
       expect.objectContaining({ $set: expect.objectContaining({ state: "done" }) })
     );
   });

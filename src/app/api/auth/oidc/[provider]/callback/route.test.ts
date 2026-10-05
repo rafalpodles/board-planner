@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const finishFlow = vi.fn();
 const holdForAcceptance = vi.fn();
@@ -79,7 +79,7 @@ vi.mock("@/models/user", () => ({
 vi.mock("@/models/invitation", () => ({ Invitation: { findOne: invitationFindOne } }));
 
 const { GET } = await import("./route");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { resetRateLimits } = await import("@/lib/rate-limit");
 
 const ISSUER = "https://id.example.com";
@@ -127,7 +127,7 @@ describe("GET /api/auth/oidc/:provider/callback, signing in", () => {
 
     const res = await callback();
 
-    expect(identityFindOne).toHaveBeenCalledWith({ issuer: ISSUER, subject: "s1", tenant: DEFAULT_TENANT_ID });
+    expect(identityFindOne).toHaveBeenCalledWith({ issuer: ISSUER, subject: "s1", organisation: DEFAULT_ORGANISATION_ID });
     expect(location(res)).toBe("/projects");
     expect(createSession).toHaveBeenCalledWith(expect.objectContaining({ userId: "u1" }));
     expect(res.headers.get("set-cookie")).toContain("session=cps_new");
@@ -143,12 +143,12 @@ describe("GET /api/auth/oidc/:provider/callback, signing in", () => {
     expect(userFindOne).toHaveBeenCalledWith({
       email: "ada@example.com",
       kind: { $ne: "machine" },
-      tenant: DEFAULT_TENANT_ID,
+      organisation: DEFAULT_ORGANISATION_ID,
     });
     expect(identityCreate).toHaveBeenCalledWith(
       expect.objectContaining({ user: "u1", provider: "oidc", issuer: ISSUER, subject: "s1" })
     );
-    expect(logInstanceAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), expect.objectContaining({ action: "identity_linked", target: "ada" }));
+    expect(logInstanceAudit).toHaveBeenCalledWith(scopedToDefaultOrganisation(), expect.objectContaining({ action: "identity_linked", target: "ada" }));
     expect(notifyIdentityLinked).toHaveBeenCalledWith(expect.objectContaining({ email: "ada@example.com", provider: "Acme" }));
   });
 
@@ -210,7 +210,7 @@ describe("GET /api/auth/oidc/:provider/callback, signing in", () => {
 
     const res = await callback();
 
-    expect(identityDeleteOne).toHaveBeenCalledWith({ _id: "i-dead", tenant: DEFAULT_TENANT_ID });
+    expect(identityDeleteOne).toHaveBeenCalledWith({ _id: "i-dead", organisation: DEFAULT_ORGANISATION_ID });
     expect(location(res)).toBe("/login?sso=no_account");
   });
 
@@ -261,7 +261,7 @@ describe("GET /api/auth/oidc/:provider/callback, signing in", () => {
 
     await callback();
 
-    expect(finishFlow).toHaveBeenCalledWith(scopedToDefaultTenant(), expect.objectContaining({ binder: "cpo_binder" }));
+    expect(finishFlow).toHaveBeenCalledWith(scopedToDefaultOrganisation(), expect.objectContaining({ binder: "cpo_binder" }));
   });
 
   // GitHub's `verified` is one click, long ago, by whoever held the mailbox then
@@ -304,7 +304,7 @@ describe("GET /api/auth/oidc/:provider/callback, signing up in an allowed domain
 
     const res = await callback();
 
-    expect(signUpOpenTo).toHaveBeenCalledWith((await import("@/lib/db-scope")).scopedToDefaultTenant(), "grace@corp.example");
+    expect(signUpOpenTo).toHaveBeenCalledWith((await import("@/lib/db-scope")).scopedToDefaultOrganisation(), "grace@corp.example");
     expect(holdForSignUp.mock.calls[0][1].claims).toMatchObject({ email: "grace@corp.example", groups: ["staff"] });
     expect(location(res)).toBe("/join/sso");
     expect(res.headers.get("set-cookie")).toContain("bp_oidc_join=cpo_join");
@@ -322,7 +322,7 @@ describe("GET /api/auth/oidc/:provider/callback, signing up in an allowed domain
     expect(invitationFindOne).toHaveBeenCalledWith(
       expect.objectContaining({ email: "grace@corp.example", status: "pending", expiresAt: { $gt: expect.any(Date) } })
     );
-    expect(holdForAcceptance).toHaveBeenCalledWith(scopedToDefaultTenant(), expect.objectContaining({ invitationTokenHash: "h-grace" }));
+    expect(holdForAcceptance).toHaveBeenCalledWith(scopedToDefaultOrganisation(), expect.objectContaining({ invitationTokenHash: "h-grace" }));
     expect(holdForSignUp).not.toHaveBeenCalled();
     expect(location(res)).toBe("/invite/sso");
     expect(res.headers.get("set-cookie")).toContain("bp_oidc_accept=cpo_accept");
@@ -338,7 +338,7 @@ describe("GET /api/auth/oidc/:provider/callback, signing up in an allowed domain
     const res = await callback();
 
     expect(location(res)).toBe("/invite/sso");
-    expect(holdForAcceptance).toHaveBeenCalledWith(scopedToDefaultTenant(), expect.objectContaining({ invitationTokenHash: "h-grace" }));
+    expect(holdForAcceptance).toHaveBeenCalledWith(scopedToDefaultOrganisation(), expect.objectContaining({ invitationTokenHash: "h-grace" }));
     expect(holdForSignUp).not.toHaveBeenCalled();
   });
 
@@ -389,7 +389,7 @@ describe("GET /api/auth/oidc/:provider/callback, the admin group (BP-833)", () =
 
     await callback();
 
-    expect(applyAdminGroup).toHaveBeenCalledWith(scopedToDefaultTenant(), ADA, "oidc", ["admins"]);
+    expect(applyAdminGroup).toHaveBeenCalledWith(scopedToDefaultOrganisation(), ADA, "oidc", ["admins"]);
     expect(createSession).toHaveBeenCalled();
   });
 });
@@ -454,15 +454,15 @@ describe("GET /api/auth/oidc/:provider/callback, linking from settings", () => {
     const res = await callback();
 
     expect(identityCreate).toHaveBeenCalled();
-    expect(sessionExists).toHaveBeenCalledWith({ _id: "s-1", tenant: DEFAULT_TENANT_ID });
+    expect(sessionExists).toHaveBeenCalledWith({ _id: "s-1", organisation: DEFAULT_ORGANISATION_ID });
     expect(identityDeleteOne).toHaveBeenCalledWith({
       issuer: ISSUER,
       subject: "s1",
       user: "u1",
-      tenant: DEFAULT_TENANT_ID,
+      organisation: DEFAULT_ORGANISATION_ID,
     });
     expect(location(res)).toBe("/settings/security?link=failed");
-    expect(logInstanceAudit).toHaveBeenLastCalledWith(scopedToDefaultTenant(), expect.objectContaining({ action: "identity_unlinked" }));
+    expect(logInstanceAudit).toHaveBeenLastCalledWith(scopedToDefaultOrganisation(), expect.objectContaining({ action: "identity_unlinked" }));
   });
 
   it("keeps the link while the session that made it is still there", async () => {
@@ -546,7 +546,7 @@ describe("GET /api/auth/oidc/:provider/callback, accepting an invitation", () =>
       tokenHash: "h1",
       status: "pending",
       expiresAt: { $gt: expect.any(Date) },
-      tenant: DEFAULT_TENANT_ID,
+      organisation: DEFAULT_ORGANISATION_ID,
     });
     expect(createSession).not.toHaveBeenCalled();
   });
@@ -566,7 +566,7 @@ describe("GET /api/auth/oidc/:provider/callback, accepting an invitation", () =>
 
     expect(location(await callback("github"))).toBe("/invite/sso");
     expect(holdForAcceptance).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       expect.objectContaining({ claims: expect.objectContaining({ email: "ada@example.com" }) })
     );
   });
@@ -590,7 +590,7 @@ describe("GET /api/auth/oidc/:provider/callback, accepting an invitation", () =>
     identityFindOne.mockReturnValue(lean({ _id: "i1", user: "u1" }));
 
     expect(location(await callback())).toBe("/invite/sso?error=linked");
-    expect(identityFindOne).toHaveBeenCalledWith({ issuer: ISSUER, subject: "s1", tenant: DEFAULT_TENANT_ID });
+    expect(identityFindOne).toHaveBeenCalledWith({ issuer: ISSUER, subject: "s1", organisation: DEFAULT_ORGANISATION_ID });
     expect(holdForAcceptance).not.toHaveBeenCalled();
   });
 });
@@ -625,7 +625,7 @@ describe("GET /api/auth/oidc/:provider/callback, setting up an empty instance (B
     expect(userCreate.mock.calls[0][0].emailVerifiedAt).toBeInstanceOf(Date);
     expect(identityCreate).toHaveBeenCalledWith(expect.objectContaining({ user: "u-first", issuer: ISSUER, subject: "s1" }));
     expect(createSession).toHaveBeenCalledWith(expect.objectContaining({ userId: "u-first" }));
-    expect(logInstanceAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), expect.objectContaining({ action: "user_created", target: "ada" }));
+    expect(logInstanceAudit).toHaveBeenCalledWith(scopedToDefaultOrganisation(), expect.objectContaining({ action: "user_created", target: "ada" }));
   });
 
   it("proves no address on a provider whose word is not proof", async () => {
@@ -670,7 +670,7 @@ describe("GET /api/auth/oidc/:provider/callback, setting up an empty instance (B
     identityCreate.mockRejectedValue(Object.assign(new Error("E11000"), { code: 11000 }));
 
     expect(location(await callback())).toBe("/login?sso=linked");
-    expect(userDeleteOne).toHaveBeenCalledWith({ _id: "u-first", tenant: DEFAULT_TENANT_ID });
+    expect(userDeleteOne).toHaveBeenCalledWith({ _id: "u-first", organisation: DEFAULT_ORGANISATION_ID });
     expect(createSession).not.toHaveBeenCalled();
   });
 
@@ -680,7 +680,7 @@ describe("GET /api/auth/oidc/:provider/callback, setting up an empty instance (B
     identityCreate.mockRejectedValue(new Error("mongo is having a moment"));
 
     await expect(callback()).rejects.toThrow("mongo is having a moment");
-    expect(userDeleteOne).toHaveBeenCalledWith({ _id: "u-first", tenant: DEFAULT_TENANT_ID });
+    expect(userDeleteOne).toHaveBeenCalledWith({ _id: "u-first", organisation: DEFAULT_ORGANISATION_ID });
   });
 });
 

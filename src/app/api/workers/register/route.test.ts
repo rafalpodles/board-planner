@@ -25,7 +25,7 @@ vi.mock("@/lib/worker-service", async (importOriginal) => {
   return { ...actual, registerWorker };
 });
 
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { POST } = await import("./route");
 
 const WORKER = {
@@ -66,13 +66,13 @@ describe("POST /api/workers/register", () => {
     const json = await response.json();
     expect(json.workerId).toBe("w1");
     expect(json.credential).toBe("cpw_secret");
-    expect(consumeEnrolmentToken).toHaveBeenCalledWith(scopedToDefaultTenant(), "cpe_good");
+    expect(consumeEnrolmentToken).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "cpe_good");
   });
 
   it("records which worker spent the token", async () => {
     await POST(request(VALID, "cpe_good"));
 
-    expect(attachWorkerToEnrolment).toHaveBeenCalledWith(scopedToDefaultTenant(), "e1", "w1");
+    expect(attachWorkerToEnrolment).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "e1", "w1");
   });
 
   // BP-358: enrolment is enrolment whichever door it comes through. This path has no admin session

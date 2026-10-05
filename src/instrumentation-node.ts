@@ -36,8 +36,8 @@ export async function bootNode(): Promise<void> {
     // Passwords off with no provider is an instance nobody can sign in to (BP-830)
     const { assertSignInConfig } = await import("@/lib/password-sign-in");
     assertSignInConfig();
-    const { assertTenantDomainConfig } = await import("@/lib/tenant-host");
-    assertTenantDomainConfig();
+    const { assertOrganisationDomainConfig } = await import("@/lib/organisation-host");
+    assertOrganisationDomainConfig();
   } catch (err) {
     // Exiting rather than throwing, and this is not belt-and-braces. `NextServer.prepare()`
     // awaits the real prepare only when `dev` (next/dist/server/next.js), so under `next start`
@@ -89,24 +89,24 @@ async function bootWhenDatabaseIsReady(): Promise<void> {
 
   try {
     console.log("MongoDB connected successfully");
-    const { forEachServedTenant } = await import("@/lib/tenant-jobs");
+    const { forEachServedOrganisation } = await import("@/lib/organisation-jobs");
 
-    const { backfillTenants } = await import("@/lib/tenant-migration");
+    const { backfillOrganisations } = await import("@/lib/organisation-migration");
     const { default: mongoose } = await import("mongoose");
-    const untenanted = await backfillTenants(mongoose.connection, { apply: false }).catch((error) => {
+    const organisationless = await backfillOrganisations(mongoose.connection, { apply: false }).catch((error) => {
       console.error("Failed to count rows with no organisation:", error);
       return null;
     });
-    if (untenanted && untenanted.total > 0) {
+    if (organisationless && organisationless.total > 0) {
       console.error(
-        `WARNING: ${untenanted.total} row(s) belong to no organisation and are invisible to every request; scripts/migrate-tenant.ts gives them one`
+        `WARNING: ${organisationless.total} row(s) belong to no organisation and are invisible to every request; scripts/migrate-organisation.ts gives them one`
       );
     }
 
     // Said, not refused: the state can arise at runtime (a demotion, a deactivation, an unlink), and
     // exiting would turn a restart into an outage for every member, not only the administrators
     const { adminsLockedOut } = await import("@/lib/password-sign-in");
-    await forEachServedTenant("Sign-in check", async (db) => {
+    await forEachServedOrganisation("Sign-in check", async (db) => {
       const lockedOut = await adminsLockedOut(db);
       if (lockedOut) console.error(`WARNING: ${lockedOut}`);
     });
@@ -133,7 +133,7 @@ async function bootWhenDatabaseIsReady(): Promise<void> {
     // connection problem, which it is not. An instance without the catalog cannot run a worker
     // but is otherwise usable.
     const { seedAgents } = await import("@/lib/agent-seed");
-    await forEachServedTenant("Agent catalog seed", (db) =>
+    await forEachServedOrganisation("Agent catalog seed", (db) =>
       seedAgents(db).catch((error) => {
         console.error("Failed to seed the agent catalog:", error);
       })
@@ -157,7 +157,7 @@ async function bootWhenDatabaseIsReady(): Promise<void> {
     const { markPmAsMachine } = await import("@/lib/pm/pm-user");
     // Caught like the catalog seed: a name it could not repair must not keep the schedulers down
     const { repairMachineNames } = await import("@/lib/worker-user");
-    await forEachServedTenant("Machine accounts", async (db) => {
+    await forEachServedOrganisation("Machine accounts", async (db) => {
       await markPmAsMachine(db);
       const repaired = await repairMachineNames(db).catch((error) => {
         console.error("Failed to repair machine names:", error);

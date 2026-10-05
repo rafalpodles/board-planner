@@ -14,8 +14,8 @@ vi.mock("@/models/enrolmentToken", () => ({
 
 const { mintEnrolmentToken, consumeEnrolmentToken, enrolmentTokenOwnerId, ENROLMENT_TTL_MS } =
   await import("./enrolment");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
-const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
+const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
 
 const now = new Date("2026-08-03T12:00:00.000Z");
 
@@ -42,7 +42,7 @@ beforeEach(() => {
 
 describe("mintEnrolmentToken", () => {
   it("issues a recognisable token and never stores it in the clear", async () => {
-    const { token } = await mintEnrolmentToken(scopedToDefaultTenant(), "admin-1", "rig laptop", now);
+    const { token } = await mintEnrolmentToken(scopedToDefaultOrganisation(), "admin-1", "rig laptop", now);
 
     expect(token.startsWith("cpe_")).toBe(true);
     const stored = create.mock.calls[0][0];
@@ -51,15 +51,15 @@ describe("mintEnrolmentToken", () => {
   });
 
   it("expires an hour out, so a token left in a chat log stops working", async () => {
-    const { expiresAt } = await mintEnrolmentToken(scopedToDefaultTenant(), "admin-1", "", now);
+    const { expiresAt } = await mintEnrolmentToken(scopedToDefaultOrganisation(), "admin-1", "", now);
 
     expect(expiresAt.getTime() - now.getTime()).toBe(ENROLMENT_TTL_MS);
   });
 
   it("stores it unused and unattached", async () => {
-    await mintEnrolmentToken(scopedToDefaultTenant(), "admin-1", "", now);
+    await mintEnrolmentToken(scopedToDefaultOrganisation(), "admin-1", "", now);
 
-    expect(create.mock.calls[0][0]).toMatchObject({ usedAt: null, usedByWorker: null, tenant: DEFAULT_TENANT_ID });
+    expect(create.mock.calls[0][0]).toMatchObject({ usedAt: null, usedByWorker: null, organisation: DEFAULT_ORGANISATION_ID });
   });
 });
 
@@ -68,11 +68,11 @@ describe("consumeEnrolmentToken", () => {
     const token = "cpe_" + "a".repeat(48);
     find.mockResolvedValue([await row(token)]);
 
-    const result = await consumeEnrolmentToken(scopedToDefaultTenant(), token, now);
+    const result = await consumeEnrolmentToken(scopedToDefaultOrganisation(), token, now);
 
     expect(result).toEqual({ ok: true, tokenId: "e1" });
     expect(findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: "e1", usedAt: null, tenant: DEFAULT_TENANT_ID },
+      { _id: "e1", usedAt: null, organisation: DEFAULT_ORGANISATION_ID },
       { $set: { usedAt: now } },
       { returnDocument: "after" }
     );
@@ -85,7 +85,7 @@ describe("consumeEnrolmentToken", () => {
     find.mockResolvedValue([await row(token)]);
     findOneAndUpdate.mockResolvedValue(null);
 
-    expect(await consumeEnrolmentToken(scopedToDefaultTenant(), token, now)).toEqual({ ok: false, reason: "used" });
+    expect(await consumeEnrolmentToken(scopedToDefaultOrganisation(), token, now)).toEqual({ ok: false, reason: "used" });
   });
 
   it("refuses an expired token without spending it", async () => {
@@ -94,7 +94,7 @@ describe("consumeEnrolmentToken", () => {
       await row(token, { expiresAt: new Date(now.getTime() - 1) }),
     ]);
 
-    expect(await consumeEnrolmentToken(scopedToDefaultTenant(), token, now)).toEqual({ ok: false, reason: "expired" });
+    expect(await consumeEnrolmentToken(scopedToDefaultOrganisation(), token, now)).toEqual({ ok: false, reason: "expired" });
     expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 
@@ -102,13 +102,13 @@ describe("consumeEnrolmentToken", () => {
     const token = "cpe_" + "d".repeat(48);
     find.mockResolvedValue([await row(token, { expiresAt: new Date(now.getTime()) })]);
 
-    expect(await consumeEnrolmentToken(scopedToDefaultTenant(), token, now)).toEqual({ ok: false, reason: "expired" });
+    expect(await consumeEnrolmentToken(scopedToDefaultOrganisation(), token, now)).toEqual({ ok: false, reason: "expired" });
   });
 
   it("refuses a string that was never issued", async () => {
     find.mockResolvedValue([]);
 
-    expect(await consumeEnrolmentToken(scopedToDefaultTenant(), "cpe_" + "e".repeat(48), now)).toEqual({
+    expect(await consumeEnrolmentToken(scopedToDefaultOrganisation(), "cpe_" + "e".repeat(48), now)).toEqual({
       ok: false,
       reason: "unknown",
     });
@@ -120,16 +120,16 @@ describe("consumeEnrolmentToken", () => {
     const guessed = "cpe_" + "f".repeat(47) + "0";
     find.mockResolvedValue([await row(issued)]);
 
-    expect(await consumeEnrolmentToken(scopedToDefaultTenant(), guessed, now)).toEqual({ ok: false, reason: "unknown" });
+    expect(await consumeEnrolmentToken(scopedToDefaultOrganisation(), guessed, now)).toEqual({ ok: false, reason: "unknown" });
     expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it("refuses anything not shaped like an enrolment token without touching the database", async () => {
-    expect(await consumeEnrolmentToken(scopedToDefaultTenant(), "cp_an_api_token", now)).toEqual({
+    expect(await consumeEnrolmentToken(scopedToDefaultOrganisation(), "cp_an_api_token", now)).toEqual({
       ok: false,
       reason: "unknown",
     });
-    expect(await consumeEnrolmentToken(scopedToDefaultTenant(), "", now)).toEqual({ ok: false, reason: "unknown" });
+    expect(await consumeEnrolmentToken(scopedToDefaultOrganisation(), "", now)).toEqual({ ok: false, reason: "unknown" });
     expect(find).not.toHaveBeenCalled();
   });
 });
@@ -144,14 +144,14 @@ describe("enrolmentTokenOwnerId", () => {
     const select = vi.fn().mockReturnValue({ lean: () => Promise.resolve({ createdBy }) });
     findOne.mockReturnValue({ select });
 
-    expect(await enrolmentTokenOwnerId(scopedToDefaultTenant(), "e1")).toBe("6a732075133f935b19154cd2");
-    expect(findOne).toHaveBeenCalledWith({ _id: "e1", tenant: DEFAULT_TENANT_ID });
+    expect(await enrolmentTokenOwnerId(scopedToDefaultOrganisation(), "e1")).toBe("6a732075133f935b19154cd2");
+    expect(findOne).toHaveBeenCalledWith({ _id: "e1", organisation: DEFAULT_ORGANISATION_ID });
     expect(select).toHaveBeenCalledWith("createdBy");
   });
 
   it("returns null when the token cannot be found", async () => {
     findOne.mockReturnValue({ select: () => ({ lean: () => Promise.resolve(null) }) });
 
-    expect(await enrolmentTokenOwnerId(scopedToDefaultTenant(), "missing")).toBeNull();
+    expect(await enrolmentTokenOwnerId(scopedToDefaultOrganisation(), "missing")).toBeNull();
   });
 });

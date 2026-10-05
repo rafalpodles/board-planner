@@ -26,8 +26,8 @@ vi.mock("@/models/identity", () => ({
 }));
 
 const { adminsLockedOut, assertSignInConfig, passwordSignInEnabled } = await import("./password-sign-in");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
-const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
+const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
 
 const KEYS = [
   "PASSWORD_SIGN_IN",
@@ -112,45 +112,45 @@ describe("whether passwords off would lock every administrator out", () => {
     process.env.PASSWORD_SIGN_IN = "on";
     withOidc();
 
-    expect(await adminsLockedOut(scopedToDefaultTenant())).toBeNull();
+    expect(await adminsLockedOut(scopedToDefaultOrganisation())).toBeNull();
   });
 
   it("names the lockout when no active administrator has a provider or a proven address", async () => {
     withOidc();
 
-    expect(await adminsLockedOut(scopedToDefaultTenant())).toMatch(/no active administrator can sign in through a configured provider/);
-    expect(userFind).toHaveBeenCalledWith({ role: "admin", deactivatedAt: null, kind: { $ne: "machine" }, tenant: DEFAULT_TENANT_ID });
+    expect(await adminsLockedOut(scopedToDefaultOrganisation())).toMatch(/no active administrator can sign in through a configured provider/);
+    expect(userFind).toHaveBeenCalledWith({ role: "admin", deactivatedAt: null, kind: { $ne: "machine" }, organisation: DEFAULT_ORGANISATION_ID });
   });
 
   it("lets an administrator in by a proven address an OpenID Connect provider links by", async () => {
     withOidc();
     admins = [{ _id: "a1", emailVerifiedAt: new Date() }];
 
-    expect(await adminsLockedOut(scopedToDefaultTenant())).toBeNull();
+    expect(await adminsLockedOut(scopedToDefaultOrganisation())).toBeNull();
   });
 
   it("does not count a proven address when only GitHub, which never links by address, is set up", async () => {
     withGitHub();
     admins = [{ _id: "a1", emailVerifiedAt: new Date() }];
 
-    expect(await adminsLockedOut(scopedToDefaultTenant())).not.toBeNull();
+    expect(await adminsLockedOut(scopedToDefaultOrganisation())).not.toBeNull();
   });
 
   // Google vouches only for its own domains; a Workspace's cannot be told from here
   it("counts a proven address under Google only when it is a Gmail one", async () => {
     Object.assign(process.env, { GOOGLE_CLIENT_ID: "g", GOOGLE_CLIENT_SECRET: "gs" });
     admins = [{ _id: "a1", email: "admin@corp.example", emailVerifiedAt: new Date() }];
-    expect(await adminsLockedOut(scopedToDefaultTenant())).not.toBeNull();
+    expect(await adminsLockedOut(scopedToDefaultOrganisation())).not.toBeNull();
 
     admins = [{ _id: "a1", email: "admin@gmail.com", emailVerifiedAt: new Date() }];
-    expect(await adminsLockedOut(scopedToDefaultTenant())).toBeNull();
+    expect(await adminsLockedOut(scopedToDefaultOrganisation())).toBeNull();
   });
 
   it("lets an administrator in through a provider linked to them that is still set up", async () => {
     withGitHub();
     identities = [{ user: "a1", provider: "github", issuer: "https://github.com" }];
 
-    expect(await adminsLockedOut(scopedToDefaultTenant())).toBeNull();
+    expect(await adminsLockedOut(scopedToDefaultOrganisation())).toBeNull();
   });
 
   // BP-842's rule: a link made while the provider signed as another issuer is no way in
@@ -158,27 +158,27 @@ describe("whether passwords off would lock every administrator out", () => {
     withOidc();
     identities = [{ user: "a1", provider: "oidc", issuer: "https://former-issuer.example" }];
 
-    expect(await adminsLockedOut(scopedToDefaultTenant())).not.toBeNull();
+    expect(await adminsLockedOut(scopedToDefaultOrganisation())).not.toBeNull();
   });
 
   it("does not count a link to a provider no longer set up", async () => {
     withOidc();
     identities = [{ user: "a1", provider: "google", issuer: "https://accounts.google.com" }];
 
-    expect(await adminsLockedOut(scopedToDefaultTenant())).not.toBeNull();
+    expect(await adminsLockedOut(scopedToDefaultOrganisation())).not.toBeNull();
   });
 
   it("does not count a link belonging to somebody who is not an administrator", async () => {
     withOidc();
     identities = [{ user: "m1", provider: "oidc", issuer: "https://id.example.com" }];
 
-    expect(await adminsLockedOut(scopedToDefaultTenant())).not.toBeNull();
+    expect(await adminsLockedOut(scopedToDefaultOrganisation())).not.toBeNull();
   });
 
   it("has nobody to lock out on an instance with no administrator yet", async () => {
     withOidc();
     admins = [];
 
-    expect(await adminsLockedOut(scopedToDefaultTenant())).toBeNull();
+    expect(await adminsLockedOut(scopedToDefaultOrganisation())).toBeNull();
   });
 });

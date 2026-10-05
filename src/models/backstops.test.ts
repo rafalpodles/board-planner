@@ -4,7 +4,7 @@ import { Task } from "./task";
 import { Comment } from "./comment";
 import { Project } from "./project";
 import { Worker } from "./worker";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const id = () => new mongoose.Types.ObjectId();
 const errorsOf = (doc: mongoose.Document) => Object.keys(doc.validateSync()?.errors ?? {});
@@ -12,11 +12,11 @@ const errorsOf = (doc: mongoose.Document) => Object.keys(doc.validateSync()?.err
 // BP-323: the routes hold the product's caps; these hold a writer that forgets one to a bound
 describe("schema backstops", () => {
   it("bounds a task's title, description, criteria text and criteria count", () => {
-    const ok = new Task({ tenant: DEFAULT_TENANT_ID, project: id(), createdBy: id(), taskNumber: 1, title: "t", description: "d", checklist: [{ text: "c" }] });
+    const ok = new Task({ organisation: DEFAULT_ORGANISATION_ID, project: id(), createdBy: id(), taskNumber: 1, title: "t", description: "d", checklist: [{ text: "c" }] });
     expect(errorsOf(ok)).toEqual([]);
 
     const over = new Task({
-      tenant: DEFAULT_TENANT_ID,
+      organisation: DEFAULT_ORGANISATION_ID,
       project: id(),
       createdBy: id(),
       taskNumber: 1,
@@ -26,13 +26,13 @@ describe("schema backstops", () => {
     });
     expect(errorsOf(over)).toEqual(expect.arrayContaining(["title", "description", "checklist.0.text"]));
 
-    const many = new Task({ tenant: DEFAULT_TENANT_ID, project: id(), createdBy: id(), taskNumber: 1, title: "t", checklist: Array.from({ length: 2_001 }, () => ({ text: "c" })) });
+    const many = new Task({ organisation: DEFAULT_ORGANISATION_ID, project: id(), createdBy: id(), taskNumber: 1, title: "t", checklist: Array.from({ length: 2_001 }, () => ({ text: "c" })) });
     expect(errorsOf(many)).toContain("checklist");
   });
 
   it("bounds a comment's body", () => {
-    expect(errorsOf(new Comment({ tenant: DEFAULT_TENANT_ID, task: id(), author: id(), body: "b".repeat(100_000) }))).toEqual([]);
-    expect(errorsOf(new Comment({ tenant: DEFAULT_TENANT_ID, task: id(), author: id(), body: "b".repeat(100_001) }))).toContain("body");
+    expect(errorsOf(new Comment({ organisation: DEFAULT_ORGANISATION_ID, task: id(), author: id(), body: "b".repeat(100_000) }))).toEqual([]);
+    expect(errorsOf(new Comment({ organisation: DEFAULT_ORGANISATION_ID, task: id(), author: id(), body: "b".repeat(100_001) }))).toContain("body");
   });
 
   it("bounds a webhook URL and a chat channel's name and stored URL", () => {

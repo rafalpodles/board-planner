@@ -11,7 +11,7 @@ vi.mock("./db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/task", () => ({ Task: { findOneAndUpdate, find } }));
 vi.mock("@/models/worker", () => ({ Worker: { findOne: workerFindOne } }));
 // Honours the filter, so a query that stopped asking for the lock would match every project
-let storedProjects: { _id: string; tenant?: unknown; worker?: { lockedByInstance?: boolean } }[] = [];
+let storedProjects: { _id: string; organisation?: unknown; worker?: { lockedByInstance?: boolean } }[] = [];
 vi.mock("@/models/project", () => ({
   Project: {
     find: (query: Record<string, unknown>) => {
@@ -33,9 +33,9 @@ const {
   supersedableStates,
   toApiDecision,
 } = await import("./task-decisions");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
-const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
-const db = scopedToDefaultTenant();
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
+const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
+const db = scopedToDefaultOrganisation();
 
 const WORKER = "6a7c686f70ed274cf658b1b3";
 const OWNER = "69a52b0b903d41d473ae02f6";
@@ -203,7 +203,7 @@ function record() {
 function live(over: Record<string, unknown>): Record<string, unknown> {
   return {
     _id: "t1",
-    tenant: DEFAULT_TENANT_ID,
+    organisation: DEFAULT_ORGANISATION_ID,
     execution: { workerId: WORKER, runId: "run-1" },
     ...over,
   };
@@ -532,7 +532,7 @@ describe("what the machine is told is waiting on it", () => {
     expect(find.mock.calls[0][0]).toEqual({
       "decision.workerId": WORKER,
       "decision.state": { $nin: ["delivered", "discarded", "abandoned", "superseded"] },
-      tenant: DEFAULT_TENANT_ID,
+      organisation: DEFAULT_ORGANISATION_ID,
     });
   });
 
@@ -565,8 +565,8 @@ describe("what the machine is told is waiting on it", () => {
   describe("on a project an instance admin has locked workers off", () => {
     beforeEach(() => {
       storedProjects = [
-        { _id: "p1", tenant: DEFAULT_TENANT_ID, worker: { lockedByInstance: true } },
-        { _id: "p2", tenant: DEFAULT_TENANT_ID, worker: { lockedByInstance: false } },
+        { _id: "p1", organisation: DEFAULT_ORGANISATION_ID, worker: { lockedByInstance: true } },
+        { _id: "p2", organisation: DEFAULT_ORGANISATION_ID, worker: { lockedByInstance: false } },
       ];
     });
 

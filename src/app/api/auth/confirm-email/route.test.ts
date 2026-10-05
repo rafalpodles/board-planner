@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const consumeEmailChange = vi.fn();
 const releaseEmailChange = vi.fn();
@@ -29,7 +29,7 @@ vi.mock("@/models/user", () => ({
 }));
 
 const { POST } = await import("./route");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const CLAIMED = new Date("2026-09-16T10:00:00Z");
 const { resetRateLimits } = await import("@/lib/rate-limit");
 const { NextResponse } = await import("next/server");
@@ -64,19 +64,19 @@ describe("POST /api/auth/confirm-email", () => {
     expect(await response.json()).toEqual({ ok: true, email: "new@example.com" });
     // Confirming is what proves the address, which is what a sign-in provider links by (BP-828)
     expect(userUpdateOne).toHaveBeenCalledWith(
-      { _id: "u1", tenant: DEFAULT_TENANT_ID },
+      { _id: "u1", organisation: DEFAULT_ORGANISATION_ID },
       { $set: { email: "new@example.com", emailVerifiedAt: expect.any(Date) } }
     );
-    expect(invalidateResetTokens).toHaveBeenCalledWith(scopedToDefaultTenant(), "u1");
+    expect(invalidateResetTokens).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "u1");
     // BP-826: an invitation to the address would otherwise come back when this account left it
-    expect(revokePendingInvitationsFor).toHaveBeenCalledWith(scopedToDefaultTenant(), "new@example.com");
+    expect(revokePendingInvitationsFor).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "new@example.com");
   });
 
   it("audits the change and tells the address that no longer recovers the account", async () => {
     await POST(post());
 
     expect(logInstanceAudit).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       expect.objectContaining({
         action: "user_email_changed_self",
         target: "owner",
@@ -116,7 +116,7 @@ describe("POST /api/auth/confirm-email", () => {
     userUpdateOne.mockRejectedValue(new Error("db down"));
 
     await expect(POST(post())).rejects.toThrow("db down");
-    expect(releaseEmailChange).toHaveBeenCalledWith(scopedToDefaultTenant(), "cpe_good", CLAIMED);
+    expect(releaseEmailChange).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "cpe_good", CLAIMED);
   });
 
   it("refuses a machine account", async () => {
@@ -162,7 +162,7 @@ describe("POST /api/auth/confirm-email", () => {
     const response = await POST(post());
 
     expect(response.status).toBe(409);
-    expect(releaseEmailChange).toHaveBeenCalledWith(scopedToDefaultTenant(), "cpe_good", CLAIMED);
+    expect(releaseEmailChange).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "cpe_good", CLAIMED);
     expect(notifyAddressChanged).not.toHaveBeenCalled();
   });
 
@@ -171,7 +171,7 @@ describe("POST /api/auth/confirm-email", () => {
 
     await POST(post());
 
-    expect(releaseEmailChange).toHaveBeenCalledWith(scopedToDefaultTenant(), "cpe_good", CLAIMED);
+    expect(releaseEmailChange).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "cpe_good", CLAIMED);
   });
 
   it("writes, audits and mails nothing when the address is already the one on the account", async () => {

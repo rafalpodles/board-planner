@@ -285,7 +285,7 @@ export async function readBoundedText(response: Response, maxBytes: number): Pro
 
 /**
  * The same bound for a JSON response. `await res.json()` has none, and on every one of these the
- * host is tenant configuration — so bounding only the streaming branch left the other one open, and
+ * host is organisation configuration — so bounding only the streaming branch left the other one open, and
  * the peer chooses which it gets with a `content-type` header (BP-317 review).
  */
 export async function readBoundedJson<T>(response: Response, maxBytes: number): Promise<T> {

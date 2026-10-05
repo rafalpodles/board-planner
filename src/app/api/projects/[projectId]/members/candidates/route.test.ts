@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
@@ -41,7 +41,7 @@ vi.mock("@/models/user", () => ({
 vi.mock("@/models/project", () => ({ Project: { findOne: vi.fn() } }));
 vi.mock("@/models/task", () => ({ Task: {} }));
 
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { GET } = await import("./route");
 
 const PROJECT = "69a52e3b399b27d3cbb2c5a5";
@@ -60,7 +60,7 @@ function expectedFilter(over: { nin?: string[]; pattern?: RegExp } = {}) {
     deactivatedAt: null,
     _id: { $nin: over.nin ?? [] },
     $or: [{ username: pattern }, { fullName: pattern }],
-    tenant: DEFAULT_TENANT_ID,
+    organisation: DEFAULT_ORGANISATION_ID,
   };
 }
 
@@ -105,7 +105,7 @@ describe("GET member candidates", () => {
 
   it("scopes the grant lookup used for exclusion to this project", async () => {
     await GET(req("ann"), { params });
-    expect(grantFind).toHaveBeenCalledWith({ objectType: "project", object: PROJECT, tenant: DEFAULT_TENANT_ID });
+    expect(grantFind).toHaveBeenCalledWith({ objectType: "project", object: PROJECT, organisation: DEFAULT_ORGANISATION_ID });
   });
 
   it("caps results at 10", async () => {
@@ -121,7 +121,7 @@ describe("GET member candidates", () => {
 
   it("checks owner-level access, not merely project membership", async () => {
     await GET(req("ann"), { params });
-    expect(check).toHaveBeenCalledWith(scopedToDefaultTenant(), { _id: "o1", role: "member" }, PROJECT, "admin");
+    expect(check).toHaveBeenCalledWith(scopedToDefaultOrganisation(), { _id: "o1", role: "member" }, PROJECT, "admin");
   });
 
   it("refuses anyone who is not an owner of this project", async () => {

@@ -6,9 +6,9 @@ const resolveDailyTokenCap = vi.fn();
 vi.mock("./availability", () => ({ resolveDailyTokenCap, resolveDailyTurnCap: vi.fn() }));
 
 const { dailyPmSpend } = await import("./turn-cap");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
-const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
-const db = scopedToDefaultTenant();
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
+const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
+const db = scopedToDefaultOrganisation();
 
 const PROJECT = "507f1f77bcf86cd799439011";
 
@@ -157,7 +157,7 @@ describe("dailyPmSpend", () => {
   it("asks only for today, in the project's own timezone", async () => {
     await dailyPmSpend(db, PROJECT, { autonomy: { timezone: "Europe/Warsaw" } });
 
-    expect(aggregate.mock.calls[0][0][0]).toEqual({ $match: { tenant: DEFAULT_TENANT_ID } });
+    expect(aggregate.mock.calls[0][0][0]).toEqual({ $match: { organisation: DEFAULT_ORGANISATION_ID } });
     const match = aggregate.mock.calls[0][0][1].$match;
     expect(match.createdAt.$gte).toBeInstanceOf(Date);
     expect(String(match.project)).toBe(PROJECT);

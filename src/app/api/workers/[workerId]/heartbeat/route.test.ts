@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import sift from "sift";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const verifyWorkerCredential = vi.fn();
 const touchWorker = vi.fn();
@@ -156,9 +156,9 @@ describe("POST /api/workers/:workerId/heartbeat", () => {
     await POST(req, ctx);
 
     const matches = sift(projectFindQuery.mock.calls[0][0]);
-    expect(matches({ tenant: DEFAULT_TENANT_ID, worker: { enabled: true } })).toBe(true);
-    expect(matches({ tenant: DEFAULT_TENANT_ID, worker: { enabled: true, lockedByInstance: true } })).toBe(false);
-    expect(matches({ tenant: DEFAULT_TENANT_ID, worker: { enabled: false } })).toBe(false);
+    expect(matches({ organisation: DEFAULT_ORGANISATION_ID, worker: { enabled: true } })).toBe(true);
+    expect(matches({ organisation: DEFAULT_ORGANISATION_ID, worker: { enabled: true, lockedByInstance: true } })).toBe(false);
+    expect(matches({ organisation: DEFAULT_ORGANISATION_ID, worker: { enabled: false } })).toBe(false);
   });
 
   // The whole inversion in one assertion: a remote comes back, never a path.
@@ -197,7 +197,7 @@ describe("POST /api/workers/:workerId/heartbeat", () => {
     await POST(req, ctx);
 
     expect(workerUpdateOne).toHaveBeenCalledWith(
-      { _id: WORKER_ID, tenant: DEFAULT_TENANT_ID },
+      { _id: WORKER_ID, organisation: DEFAULT_ORGANISATION_ID },
       { $set: { repos: reported } }
     );
   });

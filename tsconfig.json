@@ -50,8 +50,8 @@
     // BP-830's password-sign-in-off e2e server, for the same reason
     ".next-passwordless/types/**/*.ts",
     ".next-passwordless/dev/types/**/*.ts",
-    ".next-tenants/types/**/*.ts",
-    ".next-tenants/dev/types/**/*.ts"
+    ".next-organisations/types/**/*.ts",
+    ".next-organisations/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",

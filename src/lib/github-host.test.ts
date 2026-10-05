@@ -28,8 +28,8 @@ describe("githubWebBase", () => {
     expect(githubWebBase("https://api.github.com")).toBe("https://github.com");
   });
 
-  // Enterprise Cloud with data residency, where the same subdomain rule applies under a tenant
-  it("drops it for the tenant form too", () => {
+  // Enterprise Cloud with data residency, where the same subdomain rule applies under an enterprise's own subdomain
+  it("drops it for the data residency form too", () => {
     expect(githubWebBase("https://api.acme.ghe.com")).toBe("https://acme.ghe.com");
   });
 

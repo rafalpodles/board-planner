@@ -1,6 +1,6 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { IPmTrigger, PM_TRIGGER_STATES } from "@/types";
-import { withTenant } from "@/lib/tenant-field";
+import { withOrganisation } from "@/lib/organisation-field";
 
 const pmTriggerSchema = new Schema<IPmTrigger>(
   {
@@ -25,7 +25,7 @@ pmTriggerSchema.index(
   { unique: true, partialFilterExpression: { active: true } }
 );
 
-withTenant(pmTriggerSchema);
+withOrganisation(pmTriggerSchema);
 
 export const PmTrigger: Model<IPmTrigger> =
   mongoose.models.PmTrigger || mongoose.model<IPmTrigger>("PmTrigger", pmTriggerSchema);

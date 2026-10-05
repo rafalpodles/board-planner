@@ -24,7 +24,7 @@ test.afterEach(async () => {
   if (mongoose.connection.readyState !== 0) await mongoose.disconnect();
 });
 
-test("answers the tenant's plan and features for any authenticated user", async ({ request }) => {
+test("answers the organisation's plan and features for any authenticated user", async ({ request }) => {
   const response = await request.get("/api/entitlements", { headers: MEMBER_AUTH });
 
   expect(response.status(), await response.text()).toBe(200);
@@ -46,7 +46,7 @@ test("reads the existing singleton rather than inserting a fresh default over it
   request,
 }) => {
   const handle = await db();
-  await handle.collection("tenants").insertOne({
+  await handle.collection("organisations").insertOne({
     entitlements: {
       plan: "pro",
       features: ["integrations.jira"],

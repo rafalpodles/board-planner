@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { MAX_NOTIFICATION_CHANNELS } from "@/lib/webhook-input";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const KEY = "a".repeat(64);
 process.env.ENCRYPTION_KEY = KEY;
@@ -20,10 +20,10 @@ vi.mock("@/lib/middleware", () => ({
   withProjectOwner:
     (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
     (req: Request, ctx: unknown) =>
-      handler(req, { ...(ctx as object), user: { _id: "owner1" }, db: scopedToDefaultTenant() }),
+      handler(req, { ...(ctx as object), user: { _id: "owner1" }, db: scopedToDefaultOrganisation() }),
 }));
 
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { PUT, POST, DELETE } = await import("./route");
 const { decryptSecret } = await import("@/lib/encryption");
 
@@ -159,7 +159,7 @@ describe("PUT /api/projects/:projectId/notifications", () => {
     expect(channel.name).toBe("Ops");
     expect(channel.events).toEqual(["status_changed"]);
     expect(findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: "p1", "notificationChannels._id": C1, tenant: DEFAULT_TENANT_ID },
+      { _id: "p1", "notificationChannels._id": C1, organisation: DEFAULT_ORGANISATION_ID },
       { $set: expect.objectContaining({ "notificationChannels.$.name": "Ops" }) },
       { returnDocument: "before" }
     );
@@ -315,7 +315,7 @@ describe("POST /api/projects/:projectId/notifications", () => {
       {
         _id: "p1",
         [`notificationChannels.${MAX_NOTIFICATION_CHANNELS - 1}`]: { $exists: false },
-        tenant: DEFAULT_TENANT_ID,
+        organisation: DEFAULT_ORGANISATION_ID,
       },
       { $push: { notificationChannels: expect.objectContaining({ name: "Releases", type: "slack" }) } },
       { returnDocument: "after" }
@@ -376,7 +376,7 @@ describe("what a channel edit records", () => {
       ctx()
     );
 
-    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), "p1", "owner1", "settings_updated", [
+    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "p1", "owner1", "settings_updated", [
       "Notification channel Slack · Name: Slack → Ops",
       "Notification channel Slack · Webhook URL replaced",
       "Notification channel Slack · Events: task_created → status_changed",
@@ -444,14 +444,14 @@ describe("DELETE /api/projects/:projectId/notifications", () => {
 
     expect(res.status).toBe(200);
     expect(findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: "p1", tenant: DEFAULT_TENANT_ID },
+      { _id: "p1", organisation: DEFAULT_ORGANISATION_ID },
       { $pull: { notificationChannels: { _id: C1 } } },
       { returnDocument: "before" }
     );
     expect(findOne).not.toHaveBeenCalled();
     expect(save).not.toHaveBeenCalled();
     expect(logProjectAudit).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       "p1",
       "owner1",
       "settings_updated",
@@ -489,7 +489,7 @@ describe("a channel id sent in upper case", () => {
 
     expect(res.status).toBe(200);
     expect(decryptSecret(channel.webhookUrl)).toBe("https://hooks.slack.com/b");
-    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultTenant(), "p1", "owner1", "settings_updated", [
+    expect(logProjectAudit).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "p1", "owner1", "settings_updated", [
       "Notification channel Slack · Webhook URL replaced",
     ]);
   });
@@ -499,7 +499,7 @@ describe("a channel id sent in upper case", () => {
 
     expect(project.notificationChannels).toEqual([]);
     expect(logProjectAudit).toHaveBeenCalledWith(
-      scopedToDefaultTenant(),
+      scopedToDefaultOrganisation(),
       "p1",
       "owner1",
       "settings_updated",

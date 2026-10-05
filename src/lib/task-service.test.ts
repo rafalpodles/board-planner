@@ -227,9 +227,9 @@ const {
   heldRunRefusal,
   CRITERION_ROWS_PER_WRITE,
 } = await import("./task-service");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
-const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
-const db = scopedToDefaultTenant();
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
+const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
+const db = scopedToDefaultOrganisation();
 
 const { logActivity, logActivities } = await import("@/lib/activity");
 const { dispatchWebhooks } = await import("@/lib/webhooks");
@@ -279,7 +279,7 @@ const OWNER = "6a70afff45d39cd9bc8bb5fe";
 // A document satisfying every clause of the claim filter, so a sift verdict on one built from it
 // is about the clause the test varies and nothing else
 const task = (over: Record<string, unknown> = {}) => ({
-  tenant: DEFAULT_TENANT_ID,
+  organisation: DEFAULT_ORGANISATION_ID,
   project: "p1",
   status: "ready",
   assignee: OWNER,
@@ -387,7 +387,7 @@ describe("claimNextTask", () => {
         project: "p1",
         _id: { $in: [OPEN] },
         status: { $nin: ["shipped"] },
-        tenant: DEFAULT_TENANT_ID,
+        organisation: DEFAULT_ORGANISATION_ID,
       });
     });
 
@@ -915,7 +915,7 @@ describe("releaseExpiredTasks", () => {
       expect(notification.email.kicker).toBe("Run abandoned");
       expect(notification.email.taskPills).toEqual([{ label: "Escalated", tone: "review" }]);
       expect(notification.email.projectRef).toBe("TP");
-      expect(userFindOne).toHaveBeenCalledWith({ username: "worker-w1", tenant: DEFAULT_TENANT_ID }, "_id");
+      expect(userFindOne).toHaveBeenCalledWith({ username: "worker-w1", organisation: DEFAULT_ORGANISATION_ID }, "_id");
       expect(notification.actorId).toBe("worker-user-1");
     });
 
@@ -980,7 +980,7 @@ describe("recordTaskPhase", () => {
   const TASK_ID = "69a52e3b399b27d3cbb2c5b7";
   const holder = {
     _id: TASK_ID,
-    tenant: DEFAULT_TENANT_ID,
+    organisation: DEFAULT_ORGANISATION_ID,
     execution: { workerId: "w1", runId: "run-1", attempts: 1 },
   };
 
@@ -1015,7 +1015,7 @@ describe("recordTaskPhase", () => {
   // run identity precisely so that replaying it reaches nothing — and note the release also unsets
   // phaseSeq, so the $exists branch would otherwise accept any seq, however stale
   it("drops a replay of the run the task was released from", async () => {
-    const released = { _id: TASK_ID, tenant: DEFAULT_TENANT_ID, execution: { workerId: "w1", attempts: 1 } };
+    const released = { _id: TASK_ID, organisation: DEFAULT_ORGANISATION_ID, execution: { workerId: "w1", attempts: 1 } };
     expect(matches(await filterFor(1), released)).toBe(false);
   });
 
@@ -1679,8 +1679,8 @@ describe("releaseTask only applies to a task the run still holds", () => {
     ],
   };
 
-  const held = { _id: "t1", tenant: DEFAULT_TENANT_ID, project: "p1", status: "reviewing", execution: { runId: "r1", attempts: 1 } };
-  const released = { _id: "t1", tenant: DEFAULT_TENANT_ID, project: "p1", status: "reviewing", execution: { runId: "", attempts: 1 } };
+  const held = { _id: "t1", organisation: DEFAULT_ORGANISATION_ID, project: "p1", status: "reviewing", execution: { runId: "r1", attempts: 1 } };
+  const released = { _id: "t1", organisation: DEFAULT_ORGANISATION_ID, project: "p1", status: "reviewing", execution: { runId: "", attempts: 1 } };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1960,7 +1960,7 @@ describe("a status change announces the same things whichever path made it", () 
     await flush();
 
     expect(taskCreate.mock.calls[0]?.[0].assignee).toBeNull();
-    expect(userExists).toHaveBeenCalledWith({ _id: "u9", deactivatedAt: null, tenant: DEFAULT_TENANT_ID });
+    expect(userExists).toHaveBeenCalledWith({ _id: "u9", deactivatedAt: null, organisation: DEFAULT_ORGANISATION_ID });
   });
 
   it("keeps an active assignee on the next occurrence", async () => {
@@ -2288,7 +2288,7 @@ describe("what the next occurrence of a recurring task is", () => {
     await changeStatus(db, "p1", "t1", "shipped", "actor");
     await flush();
 
-    expect(taskExists).toHaveBeenCalledWith({ recurringParentId: "t1", tenant: DEFAULT_TENANT_ID });
+    expect(taskExists).toHaveBeenCalledWith({ recurringParentId: "t1", organisation: DEFAULT_ORGANISATION_ID });
     expect(taskCreate).not.toHaveBeenCalled();
     expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
   });
@@ -2527,7 +2527,7 @@ describe("a task's sprint has to belong to the task's project", () => {
     const result = await updateTask(db, "p1", "t1", { sprint: OTHER }, "actor");
 
     expect(result.ok).toBe(false);
-    expect(sprintExists).toHaveBeenCalledWith({ _id: OTHER, project: "p1", tenant: DEFAULT_TENANT_ID });
+    expect(sprintExists).toHaveBeenCalledWith({ _id: OTHER, project: "p1", organisation: DEFAULT_ORGANISATION_ID });
   });
 
   it("refuses a sprint id that is not an object id at all", async () => {
@@ -2561,7 +2561,7 @@ describe("a task's sprint has to belong to the task's project", () => {
     const result = await updateTask(db, "p1", "t1", { sprint: OURS }, "actor");
 
     expect(result.ok).toBe(true);
-    expect(sprintExists).toHaveBeenCalledWith({ _id: OURS, project: "p1", tenant: DEFAULT_TENANT_ID });
+    expect(sprintExists).toHaveBeenCalledWith({ _id: OURS, project: "p1", organisation: DEFAULT_ORGANISATION_ID });
   });
 });
 
@@ -2587,7 +2587,7 @@ describe("createTask and a foreign sprint", () => {
   it("does not store a sprint belonging to another project", async () => {
     await createTask(db, "p1", "actor", { title: "x", sprint: OTHER });
 
-    expect(sprintExists).toHaveBeenCalledWith({ _id: OTHER, project: "p1", tenant: DEFAULT_TENANT_ID });
+    expect(sprintExists).toHaveBeenCalledWith({ _id: OTHER, project: "p1", organisation: DEFAULT_ORGANISATION_ID });
     expect(taskCreate.mock.calls.at(-1)?.[0].sprint).toBeNull();
   });
 
@@ -3449,7 +3449,7 @@ describe("an assignee username nobody holds", () => {
     const result = await updateTask(db, "p1", "t1", { assignee: "  KUBA " }, "actor");
 
     expect(result.ok).toBe(true);
-    expect(userFindOne).toHaveBeenCalledWith({ username: "kuba", tenant: DEFAULT_TENANT_ID });
+    expect(userFindOne).toHaveBeenCalledWith({ username: "kuba", organisation: DEFAULT_ORGANISATION_ID });
   });
 
   // The message reaches a model as a tool result, so it is not a place to echo an unbounded
@@ -3798,7 +3798,7 @@ describe("whose machine choosing an agent can reach", () => {
       ? setStage(findOneAndUpdate.mock.calls[0][1])
       : {};
     const document = {
-      tenant: DEFAULT_TENANT_ID,
+      organisation: DEFAULT_ORGANISATION_ID,
       project: "p1",
       status: "ready",
       assignee,
@@ -4006,7 +4006,7 @@ describe("what a change of hands does to the agent already on the task", () => {
       result,
       written,
       document: {
-        tenant: DEFAULT_TENANT_ID,
+        organisation: DEFAULT_ORGANISATION_ID,
         project: "p1",
         status: "ready",
         assignee: HOLDER,
@@ -4260,7 +4260,7 @@ describe("personalAgentAlienTo", () => {
   it("looks up the agent argument, not the assignee", async () => {
     agentInTheCatalog({ scope: "user", owner: "u1" });
     await personalAgentAlienTo(db, "the-agent-id", "u1");
-    expect(agentFindOne).toHaveBeenCalledWith({ _id: "the-agent-id", tenant: DEFAULT_TENANT_ID }, "scope owner");
+    expect(agentFindOne).toHaveBeenCalledWith({ _id: "the-agent-id", organisation: DEFAULT_ORGANISATION_ID }, "scope owner");
   });
 
   it("is not alien when the personal agent's owner is the assignee", async () => {

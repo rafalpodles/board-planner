@@ -1,16 +1,16 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
-import { RUN_TENANTS_SERVER } from "../playwright.config";
-import { ACME, GLOBEX, SHARED_KEY, TENANTS_API, asTenant, bearer, originOf, seedTwoTenants, signInOn, type TenantFixture } from "./tenants";
+import { RUN_ORGANISATIONS_SERVER } from "../playwright.config";
+import { ACME, GLOBEX, SHARED_KEY, ORGANISATIONS_API, asOrganisation, bearer, originOf, seedTwoOrganisations, signInOn, type OrganisationFixture } from "./organisations";
 
-test.skip(!RUN_TENANTS_SERVER, "needs the TENANT_DOMAIN server — set E2E_TENANTS_SERVER=1");
+test.skip(!RUN_ORGANISATIONS_SERVER, "needs the ORGANISATION_DOMAIN server — set E2E_ORGANISATIONS_SERVER=1");
 
 test.beforeEach(async () => {
-  await seedTwoTenants();
+  await seedTwoOrganisations();
 });
 
-const as = (who: TenantFixture) => ({ ...asTenant(who), ...bearer(who), "content-type": "application/json" });
-const call = (request: APIRequestContext, method: "get" | "post" | "put" | "patch" | "delete", path: string, who: TenantFixture, data?: unknown) =>
-  request[method](`${TENANTS_API}${path}`, { headers: as(who), ...(data === undefined ? {} : { data }) });
+const as = (who: OrganisationFixture) => ({ ...asOrganisation(who), ...bearer(who), "content-type": "application/json" });
+const call = (request: APIRequestContext, method: "get" | "post" | "put" | "patch" | "delete", path: string, who: OrganisationFixture, data?: unknown) =>
+  request[method](`${ORGANISATIONS_API}${path}`, { headers: as(who), ...(data === undefined ? {} : { data }) });
 
 async function acmeTask(request: APIRequestContext, title = "Acme secret launch plan") {
   const res = await call(request, "post", `/api/projects/${ACME.projectId}/tasks`, ACME, { title });
@@ -87,9 +87,9 @@ test.describe("BP-670: what one organisation can reach of another's, route famil
   });
 
   test("users: another organisation's person cannot be changed or deleted by id", async ({ request }) => {
-    const asGlobexAdmin = { ...asTenant(GLOBEX), cookie: `__Host-bp_session=${GLOBEX.sessionToken}`, origin: originOf(GLOBEX), "content-type": "application/json" };
-    const put = await request.put(`${TENANTS_API}/api/users/${ACME.adminId}`, { headers: asGlobexAdmin, data: { fullName: "renamed by globex" } });
-    const del = await request.delete(`${TENANTS_API}/api/users/${ACME.adminId}`, { headers: asGlobexAdmin });
+    const asGlobexAdmin = { ...asOrganisation(GLOBEX), cookie: `__Host-bp_session=${GLOBEX.sessionToken}`, origin: originOf(GLOBEX), "content-type": "application/json" };
+    const put = await request.put(`${ORGANISATIONS_API}/api/users/${ACME.adminId}`, { headers: asGlobexAdmin, data: { fullName: "renamed by globex" } });
+    const del = await request.delete(`${ORGANISATIONS_API}/api/users/${ACME.adminId}`, { headers: asGlobexAdmin });
     expect([put.status(), del.status()]).toEqual([404, 404]);
 
     const acmePeople = await call(request, "get", "/api/users", ACME);
@@ -97,8 +97,8 @@ test.describe("BP-670: what one organisation can reach of another's, route famil
   });
 
   test("settings: a change in one organisation leaves the other's alone", async ({ request }) => {
-    const put = await request.put(`${TENANTS_API}/api/settings`, {
-      headers: { ...asTenant(ACME), cookie: `__Host-bp_session=${ACME.sessionToken}`, origin: originOf(ACME), "content-type": "application/json" },
+    const put = await request.put(`${ORGANISATIONS_API}/api/settings`, {
+      headers: { ...asOrganisation(ACME), cookie: `__Host-bp_session=${ACME.sessionToken}`, origin: originOf(ACME), "content-type": "application/json" },
       data: { pmDefaultModel: "acme/model" },
     });
     expect(put.status(), await put.text()).toBe(200);
@@ -116,14 +116,14 @@ test.describe("BP-670: what one organisation can reach of another's, route famil
   });
 
   test("invitations: one organisation's invitation is invisible to the other", async ({ request }) => {
-    const invite = await request.post(`${TENANTS_API}/api/invitations`, {
-      headers: { ...asTenant(ACME), cookie: `__Host-bp_session=${ACME.sessionToken}`, origin: originOf(ACME), "content-type": "application/json" },
+    const invite = await request.post(`${ORGANISATIONS_API}/api/invitations`, {
+      headers: { ...asOrganisation(ACME), cookie: `__Host-bp_session=${ACME.sessionToken}`, origin: originOf(ACME), "content-type": "application/json" },
       data: { email: "newbie@acme.example" },
     });
     expect(invite.status(), await invite.text()).toBeLessThan(300);
 
-    const theirs = await request.get(`${TENANTS_API}/api/invitations`, {
-      headers: { ...asTenant(GLOBEX), cookie: `__Host-bp_session=${GLOBEX.sessionToken}` },
+    const theirs = await request.get(`${ORGANISATIONS_API}/api/invitations`, {
+      headers: { ...asOrganisation(GLOBEX), cookie: `__Host-bp_session=${GLOBEX.sessionToken}` },
     });
     expect(theirs.status()).toBe(200);
     expect(JSON.stringify(await theirs.json())).not.toContain("newbie@acme.example");

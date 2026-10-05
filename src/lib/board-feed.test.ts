@@ -90,7 +90,7 @@ vi.mock("@/models/user", () => ({
       userFind(...a);
       const filter = a[0] as Record<string, unknown>;
       const hits = stored
-        .map((doc): Record<string, unknown> => ({ tenant: DEFAULT_TENANT_ID, ...doc }))
+        .map((doc): Record<string, unknown> => ({ organisation: DEFAULT_ORGANISATION_ID, ...doc }))
         .filter((doc) => matches(doc, filter));
       // Sorted by _id the way the query asks, so the cap below takes a defined set
       hits.sort((x, y) => String(x._id).localeCompare(String(y._id)));
@@ -117,9 +117,9 @@ const { boardFeedSubscribers, notifyBoardFeed, BOARD_FEED_FANOUT_LIMIT } = await
   "@/lib/board-feed"
 );
 const { encryptSecret } = await import("@/lib/encryption");
-const { scopedToDefaultTenant } = await import("@/lib/db-scope");
-const { DEFAULT_TENANT_ID } = await import("@/lib/tenant-field");
-const db = scopedToDefaultTenant();
+const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
+const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
+const db = scopedToDefaultOrganisation();
 
 const id = (n: number) => `507f1f77bcf86cd7994${String(n).padStart(5, "0")}`;
 

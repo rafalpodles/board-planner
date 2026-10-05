@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { scopedToDefaultTenant } from "@/lib/db-scope";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { scopedToDefaultOrganisation } from "@/lib/db-scope";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const identityFind = vi.fn();
 let caller: Record<string, unknown>;
@@ -8,7 +8,7 @@ let caller: Record<string, unknown>;
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/middleware", () => ({
   withAuth: (handler: (r: Request, c: unknown) => unknown) => (request: Request) =>
-    handler(request, { user: caller, db: scopedToDefaultTenant() }),
+    handler(request, { user: caller, db: scopedToDefaultOrganisation() }),
 }));
 vi.mock("@/lib/oidc/providers", () => ({
   providerById: () => ({ label: "Acme" }),
@@ -38,6 +38,6 @@ describe("GET /api/users/me/identities", () => {
     const res = await GET(new Request("http://x/api/users/me/identities"), { params: Promise.resolve({}) });
 
     expect(res.status).toBe(200);
-    expect(identityFind).toHaveBeenCalledWith({ user: "u1", live: "only", tenant: DEFAULT_TENANT_ID });
+    expect(identityFind).toHaveBeenCalledWith({ user: "u1", live: "only", organisation: DEFAULT_ORGANISATION_ID });
   });
 });

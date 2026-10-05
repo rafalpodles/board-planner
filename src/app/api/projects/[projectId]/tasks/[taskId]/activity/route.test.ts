@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { DEFAULT_TENANT_ID } from "@/lib/tenant-field";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const exists = vi.fn();
 const find = vi.fn();
@@ -10,11 +10,11 @@ vi.mock("@/models/activityLog", () => ({ ActivityLog: { find } }));
 const agentFind = vi.fn();
 vi.mock("@/models/agent", () => ({ Agent: { find: agentFind } }));
 vi.mock("@/lib/middleware", async () => {
-  const { scopedToDefaultTenant } = await vi.importActual<typeof import("@/lib/db-scope")>("@/lib/db-scope");
+  const { scopedToDefaultOrganisation } = await vi.importActual<typeof import("@/lib/db-scope")>("@/lib/db-scope");
   return {
     withProjectAccess:
       (handler: (req: Request, ctx: unknown) => Promise<Response>) => (req: Request, ctx: unknown) =>
-        handler(req, { ...(ctx as object), db: scopedToDefaultTenant() }),
+        handler(req, { ...(ctx as object), db: scopedToDefaultOrganisation() }),
   };
 });
 
@@ -81,7 +81,7 @@ describe("GET task activity", () => {
     serve([row("a", 1)]);
     await read();
 
-    expect(find).toHaveBeenCalledWith({ task: "t1", tenant: DEFAULT_TENANT_ID });
+    expect(find).toHaveBeenCalledWith({ task: "t1", organisation: DEFAULT_ORGANISATION_ID });
     expect(headerQuery.sort).toHaveBeenCalledWith({ createdAt: -1, _id: -1 });
     const columns = String(headerQuery.select.mock.calls[0][0]).split(" ");
     expect(columns).toEqual(expect.arrayContaining(["user", "action", "field", "customField", "fieldType", "createdAt"]));
@@ -148,7 +148,7 @@ describe("GET task activity", () => {
 
       const shown = await read();
 
-      expect(agentFind).toHaveBeenCalledWith({ _id: { $in: [GONE, KEPT] }, tenant: DEFAULT_TENANT_ID }, "name");
+      expect(agentFind).toHaveBeenCalledWith({ _id: { $in: [GONE, KEPT] }, organisation: DEFAULT_ORGANISATION_ID }, "name");
       expect(shown[0]).toMatchObject({ oldValue: "a deleted agent", newValue: "Merges its own work" });
     });
 

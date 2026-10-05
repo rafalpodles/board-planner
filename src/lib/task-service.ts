@@ -844,7 +844,7 @@ export async function changeStatus(
     // workers) can then not both land. The loser's precondition stops matching the instant the
     // winner's write commits, so only one of them ever reaches announceStatusChange below and
     // mints a recurring task's next occurrence (BP-489).
-    { _id: taskId, tenant: db.tenant, project: projectId, ...(leavesColumn ? { status: oldTask.status } : {}) },
+    { _id: taskId, organisation: db.organisation, project: projectId, ...(leavesColumn ? { status: oldTask.status } : {}) },
     leavesColumn
       ? [{ $set: { status, ...CLEAR_WORKER_ASSIGNEE } }, { $unset: RUN_FIELDS }]
       : [{ $set: { status } }],
@@ -1654,12 +1654,12 @@ export async function releaseExpiredTasks(db: ScopedDb, projectId: string, now =
   // attempts and reach a human, rather than cycling through the queue forever
   const [spent, retryable] = await Promise.all([
     Task.updateMany(
-      { ...outOfAttempts, tenant: db.tenant },
+      { ...outOfAttempts, organisation: db.organisation },
       [{ $set: { status: exhausted, ...CLEAR_WORKER_ASSIGNEE } }, { $unset: RUN_FIELDS }],
       { updatePipeline: true }
     ),
     Task.updateMany(
-      { ...expired, tenant: db.tenant, "execution.attempts": { $lt: MAX_EXECUTION_ATTEMPTS } },
+      { ...expired, organisation: db.organisation, "execution.attempts": { $lt: MAX_EXECUTION_ATTEMPTS } },
       [{ $set: { status: approved, ...CLEAR_WORKER_ASSIGNEE } }, { $unset: RUN_FIELDS }],
       { updatePipeline: true }
     ),
@@ -1826,7 +1826,7 @@ export async function claimNextTask(
   // a validator elsewhere, so if that rule ever loosens they want `$literal` too (BP-329).
   return Task.findOneAndUpdate(
     {
-      tenant: db.tenant,
+      organisation: db.organisation,
       project: projectId,
       status: { $in: approved },
       // Assigned to the owner, by the owner or by the PM. A *person* assigning you work is still a
@@ -1949,7 +1949,7 @@ export async function releaseTask(
     const exhausted = escalationColumnId(columns) ?? approved;
 
     return Task.findOneAndUpdate(
-      { _id: taskId, tenant: db.tenant, project: projectId, status: { $in: active }, ...held },
+      { _id: taskId, organisation: db.organisation, project: projectId, status: { $in: active }, ...held },
       [
         {
           $set: {
@@ -1972,7 +1972,7 @@ export async function releaseTask(
   return Task.findOneAndUpdate(
     {
       _id: taskId,
-      tenant: db.tenant,
+      organisation: db.organisation,
       project: projectId,
       status: { $in: active },
       "execution.attempts": { $gt: 0 },

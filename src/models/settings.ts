@@ -1,7 +1,7 @@
 import mongoose, { Schema, Model, type UpdateQuery } from "mongoose";
 import { duplicateKeyField } from "@/lib/mongo-errors";
 import type { ScopedDb } from "@/lib/db-scope";
-import { withTenant } from "@/lib/tenant-field";
+import { withOrganisation } from "@/lib/organisation-field";
 
 export interface ISettings {
   _id: mongoose.Types.ObjectId;
@@ -30,8 +30,8 @@ const settingsSchema = new Schema<ISettings>({
   },
 });
 
-withTenant(settingsSchema);
-settingsSchema.index({ tenant: 1 }, { unique: true });
+withOrganisation(settingsSchema);
+settingsSchema.index({ organisation: 1 }, { unique: true });
 
 export const Settings: Model<ISettings> =
   mongoose.models.Settings || mongoose.model<ISettings>("Settings", settingsSchema);
@@ -42,7 +42,7 @@ export async function updateSettings(db: ScopedDb, update: UpdateQuery<ISettings
   try {
     return await write();
   } catch (err) {
-    if (duplicateKeyField(err) !== "tenant") throw err;
+    if (duplicateKeyField(err) !== "organisation") throw err;
     return write();
   }
 }
