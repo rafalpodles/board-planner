@@ -178,7 +178,7 @@ for (const cwd of AUDITED) {
   }
   for (const finding of verdict.accepted) {
     console.log(`accepted in ${cwd}: ${finding.severity} ${finding.package} ${finding.id} — ${finding.title}`);
-    // Counted by id, not by occurrence: an advisory live in both trees is one decision, and the
+    // Counted by id, not by occurrence: an advisory live in several trees is one decision, and the
     // summary line saying "2 accepted" for it would misdescribe the allowlist
     acceptedIds.add(finding.id);
   }

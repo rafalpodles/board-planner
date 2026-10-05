@@ -60,9 +60,9 @@ jobs:
       # hide a type error behind a supply-chain event; run last and skipped on cancellation, the
       # compile and build results still reach whoever is waiting for them.
       #
-      # `npm audit` reads the lockfile, so nothing needs installing first. Fails on a critical or high against a production dependency
-      # unless src/lib/audit-policy.ts accepts that exact advisory with a reason, and on an audit
-      # that could not run at all. BP-599 exists because a reachability judgement written on a
+      # `npm audit` reads the lockfile, so nothing needs installing first. Fails on a critical or
+      # high against a production dependency unless src/lib/audit-policy.ts accepts that exact
+      # advisory with a reason, and on an audit that could not run at all. BP-599 exists because a reachability judgement written on a
       # ticket in August was false by September with nothing failing in between.
       - name: Production dependencies carry no unaccepted advisory
         if: ${{ !cancelled() }}
