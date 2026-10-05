@@ -517,8 +517,9 @@ describe("reorder_tasks", () => {
  */
 describe("due date, sprint, recurrence and watching", () => {
   const SPRINTS = [
-    { _id: "507f1f77bcf86cd799439011", name: "Sprint 4" },
-    { _id: "507f1f77bcf86cd799439012", name: "Hardening" },
+    { _id: "507f1f77bcf86cd799439011", name: "Sprint 4", status: "active" },
+    { _id: "507f1f77bcf86cd799439012", name: "Hardening", status: "planned" },
+    { _id: "507f1f77bcf86cd799439013", name: "Old", status: "completed" },
   ];
 
   beforeEach(() => {
@@ -550,7 +551,7 @@ describe("due date, sprint, recurrence and watching", () => {
     it("refuses a sprint the board does not have, and writes nothing", async () => {
       const made = vi.spyOn(PlannerClient.prototype, "createTask").mockResolvedValue({});
 
-      await expect(create({ sprint: "Nope" })).rejects.toThrow(/No sprint named "Nope".*Sprint 4, Hardening/);
+      await expect(create({ sprint: "Nope" })).rejects.toThrow(/No sprint "Nope".*Sprint 4, Hardening/);
       await expect(create({ dueDate: "2026-02-31" })).rejects.toThrow(/Invalid dueDate/);
       expect(made).not.toHaveBeenCalled();
     });
@@ -601,7 +602,8 @@ describe("due date, sprint, recurrence and watching", () => {
     it("refuses what the route would refuse, before writing", async () => {
       const wrote = vi.spyOn(PlannerClient.prototype, "updateTask").mockResolvedValue({});
 
-      await expect(update({ sprint: "507f1f77bcf86cd7994390ff" })).rejects.toThrow(/No sprint named/);
+      await expect(update({ sprint: "507f1f77bcf86cd7994390ff" })).rejects.toThrow(/No sprint "507f1f77bcf86cd7994390ff"/);
+      await expect(update({ sprint: "Old" })).rejects.toThrow(/is completed/);
       await expect(update({ dueDate: "soon" })).rejects.toThrow(/Invalid dueDate/);
       expect(wrote).not.toHaveBeenCalled();
     });
@@ -615,54 +617,43 @@ describe("due date, sprint, recurrence and watching", () => {
       expect(parse({ frequency: "yearly", interval: 1 })).toBe(false);
       expect(parse({ frequency: "daily", interval: 0 })).toBe(false);
       expect(parse({ frequency: "daily", interval: 366 })).toBe(false);
+      // A stray key would be dropped and the series would run forever under a 200
+      expect(parse({ frequency: "daily", interval: 1, until: "2026-12-31" })).toBe(false);
+      expect(parse({ frequency: "daily", interval: 1, endDate: null })).toBe(true);
+    });
+
+    it("does not look the sprints up just to clear the sprint", async () => {
+      const lookup = vi.spyOn(PlannerClient.prototype, "listSprints");
+      vi.spyOn(PlannerClient.prototype, "updateTask").mockResolvedValue({});
+
+      await update({ sprint: "backlog" });
+      await update({ sprint: "" });
+
+      expect(lookup).not.toHaveBeenCalled();
     });
   });
 
   describe("watch_task and unwatch_task", () => {
-    const ME = { _id: "u1", username: "rafal" };
-    let toggle: MockInstance<PlannerClient["toggleWatch"]>;
+    let set: MockInstance<PlannerClient["setWatching"]>;
 
     beforeEach(() => {
-      vi.spyOn(PlannerClient.prototype, "getMe").mockResolvedValue(ME);
-      toggle = vi.spyOn(PlannerClient.prototype, "toggleWatch").mockResolvedValue({ watching: true });
+      set = vi.spyOn(PlannerClient.prototype, "setWatching").mockImplementation(async (_p, _t, watching) => ({ watching }));
     });
 
-    const watching = (watchers: unknown[]) =>
-      vi.spyOn(PlannerClient.prototype, "getTask").mockResolvedValue({ watchers });
     const run = (name: string) => registered().get(name)!.handler({ taskKey: "bp-1" }, extra);
     const parse = (result: unknown) => JSON.parse((result as { content: { text: string }[] }).content[0].text);
 
-    it("watches a task that is not watched", async () => {
-      watching(["u2"]);
-
+    it("asks for the state, not for a flip, so a retry cannot undo it", async () => {
       expect(parse(await run("watch_task"))).toEqual({ taskKey: "BP-1", watching: true });
-      expect(toggle).toHaveBeenCalledTimes(1);
-    });
-
-    it("leaves a task already watched alone, so a retry cannot undo itself", async () => {
-      watching(["u1"]);
-
-      expect(parse(await run("watch_task"))).toEqual({ taskKey: "BP-1", watching: true });
-      expect(toggle).not.toHaveBeenCalled();
-    });
-
-    it("stops watching a task that is watched, and leaves one that is not", async () => {
-      watching(["u1", "u2"]);
-      await run("unwatch_task");
-      expect(toggle).toHaveBeenCalledTimes(1);
-
-      toggle.mockClear();
-      watching(["u2"]);
       expect(parse(await run("unwatch_task"))).toEqual({ taskKey: "BP-1", watching: false });
-      expect(toggle).not.toHaveBeenCalled();
+
+      expect(set.mock.calls.map((c) => c[2])).toEqual([true, false]);
     });
 
-    it("reads a watcher whether the API sent an id or a populated user", async () => {
-      watching([{ _id: "u1", username: "rafal" }]);
+    it("reports the state the route settled on, not the one it asked for", async () => {
+      set.mockResolvedValue({ watching: false });
 
-      await run("watch_task");
-
-      expect(toggle).not.toHaveBeenCalled();
+      expect(parse(await run("watch_task")).watching).toBe(false);
     });
   });
 });

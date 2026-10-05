@@ -16,11 +16,13 @@ import {
 } from "./strict-input";
 import { MAX_REORDER_IDS } from "@/lib/reorder";
 import {
+  type SprintRow,
   DUE_DATE_PARAM,
   RECURRENCE_PARAM,
   SPRINT_PARAM,
   dueDateValue,
   recurrenceValue,
+  sprintClears,
   sprintForWrite,
 } from "./task-fields";
 
@@ -174,9 +176,8 @@ export function registerPlannerTools(server: McpServer): void {
       if (acceptanceCriteria) data.acceptanceCriteria = acceptanceCriteria;
       if (dueDate) data.dueDate = dueDateValue(dueDate);
       if (recurrence) data.recurrence = recurrenceValue(recurrence);
-      if (sprint) {
-        const id = sprintForWrite(sprint, (await client.listSprints(proj._id)) as { _id: string; name: string }[]);
-        if (id) data.sprint = id;
+      if (sprint && !sprintClears(sprint)) {
+        data.sprint = sprintForWrite(sprint, (await client.listSprints(proj._id)) as SprintRow[]);
       }
       if (fields && Object.keys(fields).length) {
         data.customFieldValues = resolveFieldsByName(fields, proj.customFields || []);
@@ -268,7 +269,9 @@ export function registerPlannerTools(server: McpServer): void {
       if (dueDate !== undefined) data.dueDate = dueDateValue(dueDate);
       if (recurrence !== undefined) data.recurrence = recurrenceValue(recurrence);
       if (sprint !== undefined) {
-        data.sprint = sprintForWrite(sprint, (await client.listSprints(projectId)) as { _id: string; name: string }[]);
+        data.sprint = sprintClears(sprint)
+          ? null
+          : sprintForWrite(sprint, (await client.listSprints(projectId)) as SprintRow[]);
       }
 
       if (fields && Object.keys(fields).length) {
@@ -334,8 +337,8 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  // The route flips the caller's watch, and a retried flip undoes itself — so these read the state
-  // first and only flip toward the one asked for.
+  // The route is told the state wanted and sets it in one update, so a retry — or two calls at once —
+  // ends where the first one did.
   for (const [name, want] of [["watch_task", true], ["unwatch_task", false]] as const) {
     server.registerTool(
       name,
@@ -348,13 +351,8 @@ export function registerPlannerTools(server: McpServer): void {
       async ({ taskKey }, extra) => {
         const client = clientFrom(extra);
         const { projectId, taskId } = await client.resolveTaskKey(taskKey);
-        const [me, task] = await Promise.all([
-          client.getMe(),
-          client.getTask(projectId, taskId) as Promise<{ watchers?: unknown[] }>,
-        ]);
-        const watching = (task.watchers ?? []).some((w) => String((w as { _id?: unknown })?._id ?? w) === String(me._id));
-        if (watching !== want) await client.toggleWatch(projectId, taskId);
-        return json({ taskKey: taskKey.toUpperCase(), watching: want });
+        const { watching } = await client.setWatching(projectId, taskId, want);
+        return json({ taskKey: taskKey.toUpperCase(), watching });
       }
     );
   }

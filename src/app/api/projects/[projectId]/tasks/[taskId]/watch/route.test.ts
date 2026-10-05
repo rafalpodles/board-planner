@@ -21,10 +21,11 @@ const TASK_ID = "507f1f77bcf86cd799439021";
 const ME = new Types.ObjectId("507f1f77bcf86cd799439031");
 const SOMEBODY_ELSE = new Types.ObjectId("507f1f77bcf86cd799439032");
 
-function post(taskId = TASK_ID) {
+function post(taskId = TASK_ID, body?: unknown) {
   return POST(
     new Request(`http://localhost/api/projects/${PROJECT_ID}/tasks/${taskId}/watch`, {
       method: "POST",
+      ...(body === undefined ? {} : { body: JSON.stringify(body), headers: { "content-type": "application/json" } }),
     }),
     { params: Promise.resolve({ projectId: PROJECT_ID, taskId }) }
   );
@@ -113,6 +114,62 @@ describe("POST /api/projects/:projectId/tasks/:taskId/watch", () => {
       expect((await post()).status).toBe(404);
       expect(taskFindOneAndUpdate).not.toHaveBeenCalled();
       expect(taskFindOne).toHaveBeenCalledWith({ _id: TASK_ID, project: PROJECT_ID, organisation: DEFAULT_ORGANISATION_ID });
+    });
+  });
+
+  /**
+   * BP-905. A flip read before it writes: two asks at once both read "not watching" and both flip, and
+   * the pair ends where it started. Told the state wanted, the route sets it in one update.
+   */
+  describe("when told the state wanted", () => {
+    it("adds the caller without reading the task first", async () => {
+      watchedBy(ME);
+
+      const res = await post(TASK_ID, { watching: true });
+
+      expect(await res.json()).toEqual({ watching: true });
+      expect(update()).toEqual({ $addToSet: { watchers: ME } });
+      expect(taskFindOne).not.toHaveBeenCalled();
+    });
+
+    it("removes the caller without reading the task first", async () => {
+      const res = await post(TASK_ID, { watching: false });
+
+      expect(await res.json()).toEqual({ watching: false });
+      expect(update()).toEqual({ $pull: { watchers: ME } });
+      expect(taskFindOne).not.toHaveBeenCalled();
+    });
+
+    it("asks the same thing twice and ends in the same state", async () => {
+      expect(await (await post(TASK_ID, { watching: true })).json()).toEqual({ watching: true });
+      expect(await (await post(TASK_ID, { watching: true })).json()).toEqual({ watching: true });
+      expect(taskFindOneAndUpdate.mock.calls.map((c) => c[1])).toEqual([
+        { $addToSet: { watchers: ME } },
+        { $addToSet: { watchers: ME } },
+      ]);
+    });
+
+    it("stays inside the project the path names, and answers 404 for a task that is not there", async () => {
+      taskFindOneAndUpdate.mockResolvedValue(null);
+
+      const res = await post(TASK_ID, { watching: true });
+
+      expect(res.status).toBe(404);
+      expect(taskFindOneAndUpdate.mock.calls[0][0]).toMatchObject({ _id: TASK_ID, project: PROJECT_ID });
+    });
+
+    it.each(["yes", 1, null, {}])("refuses watching: %j with 400", async (value) => {
+      const res = await post(TASK_ID, { watching: value });
+
+      expect(res.status).toBe(400);
+      expect(taskFindOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it("still flips when the body names no state", async () => {
+      watchedBy(SOMEBODY_ELSE);
+
+      expect(await (await post(TASK_ID, {})).json()).toEqual({ watching: true });
+      expect(taskFindOne).toHaveBeenCalled();
     });
   });
 });

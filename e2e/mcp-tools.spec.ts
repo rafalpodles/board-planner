@@ -988,19 +988,33 @@ test("create_task and update_task set a due date, a sprint and a recurrence, and
   // Refused before anything is written: another board's sprint, a day that does not exist, a series the route would refuse
   const foreign = await session.callTool("update_task", { taskKey: key, sprint: String(FOREIGN_SPRINT_ID) });
   refused(foreign);
-  expect(foreign.text).toContain("No sprint named");
+  expect(foreign.text).toContain(`No sprint "${FOREIGN_SPRINT_ID}"`);
   const impossible = await session.callTool("update_task", { taskKey: key, dueDate: "2026-02-31" });
   refused(impossible);
   expect(impossible.text).toContain("Invalid dueDate");
-  const never = await session.callTool("update_task", {
-    taskKey: key,
-    recurrence: { frequency: "yearly", interval: 1 },
-  });
-  expect(never.status).toBe(200);
-  expect(never.raw.error ?? never.raw.result?.isError).toBeTruthy();
+  // ...and a series the schema refuses, or one with a key it does not know (which would otherwise be dropped)
+  for (const recurrence of [
+    { frequency: "yearly", interval: 1 },
+    { frequency: "daily", interval: 1, until: "2026-12-31" },
+  ]) {
+    const never = await session.callTool("update_task", { taskKey: key, recurrence });
+    expect(never.raw.error?.message ?? never.raw.result?.isError, never.text).toBeTruthy();
+  }
   const untouched = await apiTask(request, taskId);
   expect(untouched.sprint).toBeNull();
   expect(untouched.dueDate).toBeNull();
+
+  // A name two sprints share is refused with their ids; a completed sprint is refused outright
+  accepted(await session.callTool("create_sprint", { project: PROJECT_KEY, name: "Hardening", startDate: "2026-11-01", endDate: "2026-11-14" }));
+  const twin = await session.callTool("update_task", { taskKey: key, sprint: "Hardening" });
+  refused(twin);
+  expect(twin.text).toContain('2 sprints are named "Hardening"');
+  expect(twin.text).toContain(String(sprint.parsed._id));
+  accepted(await session.callTool("update_sprint", { project: PROJECT_KEY, sprintId: second.parsed._id, status: "completed" }));
+  const closed = await session.callTool("update_task", { taskKey: key, sprint: "Next" });
+  refused(closed);
+  expect(closed.text).toContain('Sprint "Next" is completed');
+  expect((await apiTask(request, taskId)).sprint).toBeNull();
 
   // A create naming another board's sprint is refused rather than answered 200 for a task in no sprint
   const strayed = await session.callTool("create_task", {
