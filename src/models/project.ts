@@ -100,6 +100,8 @@ const projectSchema = new Schema<IProject>(
       type: String,
       default: "",
     },
+    // Bumped to rotate the project's webhook signing key with organisations on subdomains (BP-669)
+    webhookSigningVersion: { type: Number, default: 0 },
     webhooks: {
       type: [{
         url: { type: String, required: true, trim: true, maxlength: 2048 },

@@ -20,6 +20,15 @@ export function WebhookSigningSecret({ projectId }: { projectId: string }) {
     }
   }
 
+  async function rotate() {
+    try {
+      setSigning(await api.post(`/api/projects/${projectId}/webhooks/signing-secret`, {}));
+      toast("New signing secret — give it to every receiver", "success");
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Could not rotate the signing secret", "error");
+    }
+  }
+
   async function copy(secret: string) {
     try {
       await navigator.clipboard.writeText(secret);
@@ -55,8 +64,11 @@ export function WebhookSigningSecret({ projectId }: { projectId: string }) {
         <Button size="sm" variant="secondary" onClick={() => copy(signing.secret)}>
           {copied ? "Copied!" : "Copy"}
         </Button>
+        <Button size="sm" variant="secondary" onClick={rotate}>
+          Rotate
+        </Button>
       </div>
-      <p className="text-xs text-text-muted">Your organisation&apos;s key for verifying deliveries.</p>
+      <p className="text-xs text-text-muted">This project&apos;s key for verifying deliveries.</p>
     </div>
   );
 }

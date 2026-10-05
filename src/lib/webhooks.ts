@@ -84,7 +84,7 @@ export async function dispatchWebhooks(
   payload: Omit<WebhookPayload, "event" | "timestamp">
 ): Promise<void> {
   try {
-    const project = await db.Project.findById(projectId, "webhooks").lean();
+    const project = await db.Project.findById(projectId, "webhooks webhookSigningVersion").lean();
     if (!project?.webhooks?.length) return;
 
     const activeWebhooks = project.webhooks.filter(
@@ -112,7 +112,7 @@ export async function dispatchWebhooks(
 
       await safeFetch(webhook.url, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...signatureHeaders(body, db.organisation) },
+        headers: { "Content-Type": "application/json", ...signatureHeaders(body, db.organisation, project) },
         body,
         signal: AbortSignal.timeout(10_000),
       }, WEBHOOK_DESTINATION).then(

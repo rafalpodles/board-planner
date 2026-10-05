@@ -958,6 +958,7 @@ export interface IProject {
   // project does not estimate. Must always name a live number field — cleared by the
   // custom-fields route the moment that field is archived or deleted.
   estimateFieldId: string;
+  webhookSigningVersion?: number;
   webhooks: IWebhook[];
   notificationChannels: INotificationChannel[];
   worker: ProjectWorkerConfig;
@@ -1608,7 +1609,9 @@ export type ProjectAuditAction =
   | "task_deleted"
   | "bulk_delete"
   | "bulk_move"
-  | "worker_updated";
+  | "worker_updated"
+  | "webhook_secret_revealed"
+  | "webhook_secret_rotated";
 
 // The kill switch first, because "who stopped this machine" is the question this log exists to
 // answer. Separate verbs rather than one worker_updated with a detail column: an operator scanning

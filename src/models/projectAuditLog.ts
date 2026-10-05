@@ -21,6 +21,8 @@ const ACTIONS = [
   "bulk_delete",
   "bulk_move",
   "worker_updated",
+  "webhook_secret_revealed",
+  "webhook_secret_rotated",
 ];
 
 const projectAuditLogSchema = new Schema<IProjectAuditLog>(

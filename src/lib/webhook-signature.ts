@@ -16,31 +16,40 @@ function instanceSecret(): string {
   return process.env.WEBHOOK_SIGNING_SECRET?.trim() ?? "";
 }
 
+export type SigningProject = { _id: Types.ObjectId | string; webhookSigningVersion?: number | null };
+
 /**
- * With organisations on subdomains each one signs with its own key, derived from the instance's,
- * so no organisation can verify — or forge — another's deliveries; nothing is stored, and rotating
- * the instance secret rotates them all. A single-organisation instance signs with the secret as set.
+ * With organisations on subdomains each project signs with its own key, derived from the
+ * instance's, its organisation, its id and a version its owner bumps to rotate: whoever reads one
+ * project's key can verify — and forge — nothing else, and a key handed to somebody who leaves is
+ * retired by rotating. Nothing is stored. A single-organisation instance signs with the secret as set.
  */
-export function webhookSigningSecret(organisation: Types.ObjectId): string {
+export function webhookSigningSecret(organisation: Types.ObjectId, project: SigningProject): string {
   const key = instanceSecret();
   if (!key || !organisationDomain()) return key;
-  return crypto.createHmac("sha256", key).update(`webhook-signing:${organisation.toHexString()}`).digest("hex");
+  const scope = `webhook-signing:${organisation.toHexString()}:${String(project._id)}:${project.webhookSigningVersion ?? 0}`;
+  return crypto.createHmac("sha256", key).update(scope).digest("hex");
 }
 
 export function isWebhookSigningConfigured(): boolean {
   return instanceSecret().length > 0;
 }
 
-export function signWebhook(body: string, timestamp: string, organisation: Types.ObjectId): string | null {
-  const key = webhookSigningSecret(organisation);
+export function signWebhook(body: string, timestamp: string, organisation: Types.ObjectId, project: SigningProject): string | null {
+  const key = webhookSigningSecret(organisation, project);
   if (!key) return null;
   const mac = crypto.createHmac("sha256", key).update(`${timestamp}.${body}`).digest("hex");
   return `t=${timestamp},v1=${mac}`;
 }
 
-export function signatureHeaders(body: string, organisation: Types.ObjectId, now = Date.now()): Record<string, string> {
+export function signatureHeaders(
+  body: string,
+  organisation: Types.ObjectId,
+  project: SigningProject,
+  now = Date.now()
+): Record<string, string> {
   const timestamp = String(Math.floor(now / 1000));
-  const signature = signWebhook(body, timestamp, organisation);
+  const signature = signWebhook(body, timestamp, organisation, project);
   // Unsigned rather than undelivered when no secret is set: an instance that never configured one
   // has receivers that do not check, and silently dropping their deliveries would be the worse bug
   if (!signature) return {};
