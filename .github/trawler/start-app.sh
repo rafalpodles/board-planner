@@ -5,7 +5,7 @@ port="${APP_PORT:-3000}"
 origin="http://localhost:${port}"
 username="${DEMO_USERNAME:-trawler}"
 password="${DEMO_PASSWORD:-$(openssl rand -hex 12)}"
-person="${TRAWLER_ACCOUNT_PERSON:-Daniel}"
+people="${TRAWLER_ACCOUNT_PEOPLE:-Maya,Daniel}"
 accounts_file="${TRAWLER_ACCOUNTS_FILE:-${RUNNER_TEMP:-/tmp}/trawler-accounts.json}"
 export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-trawler-demo}"
 export BOARD_PLANNER_VERSION=trawler-ci
@@ -61,7 +61,7 @@ if [ "$status" != 200 ]; then
 fi
 
 echo "::add-mask::${password}"
-(umask 077; printf '{"%s":{"username":"%s","password":"%s"}}' "$person" "$username" "$password" > "$accounts_file")
+(umask 077; entries=""; IFS=,; for person in $people; do entries="${entries:+$entries,}\"$person\":{\"username\":\"$username\",\"password\":\"$password\"}"; done; printf '{%s}' "$entries" > "$accounts_file")
 [ -z "${GITHUB_ENV:-}" ] || echo "TRAWLER_ACCOUNTS_FILE=${accounts_file}" >> "$GITHUB_ENV"
 
 echo "Board Planner is up on ${origin}; demo account '${username}' can sign in"
