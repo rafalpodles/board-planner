@@ -112,6 +112,19 @@ describe("organisationWall: what counts as naming the organisation", () => {
     }
   });
 
+  it("refuses a $rename onto the organisation, and an update pipeline stage it cannot read", async () => {
+    expect(await verdict(() => Thing.updateOne({ organisation: ACME }, { $rename: { title: "organisation" } }))).toBe("walled");
+    expect(await verdict(() => Thing.updateOne({ organisation: ACME }, [{ $project: { organisation: 0 } }], { updatePipeline: true }))).toBe("walled");
+  });
+
+  it("reads paths, never values: a status or a title that says organisation is written", async () => {
+    expect(await verdict(() => Thing.updateOne({ organisation: ACME }, [{ $set: { title: "organisation" } }], { updatePipeline: true }))).toBe("passed");
+    expect(
+      await verdict(() => Thing.updateOne({ organisation: ACME }, [{ $set: { links: { $literal: [{ title: "organisation.ts: fix" }] } } }], { updatePipeline: true }))
+    ).toBe("passed");
+    expect(await verdict(() => Thing.updateOne({ organisation: ACME }, { $set: { title: "organisation" } }))).toBe("passed");
+  });
+
   it("lets a write through that keeps the organisation it named", async () => {
     expect(await verdict(() => Thing.updateOne({ organisation: ACME }, [{ $set: { title: "x" } }], { updatePipeline: true }))).toBe("passed");
     expect(await verdict(() => Thing.updateOne({ organisation: ACME }, { $setOnInsert: { organisation: ACME } }, { upsert: true }))).toBe("passed");

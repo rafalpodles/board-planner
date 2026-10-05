@@ -59,13 +59,15 @@ function check(filter: unknown, want: Types.ObjectId | undefined, what: string):
 
 const namesOrganisation = (path: string) => path === "organisation" || path.startsWith("organisation.");
 
-function touchesOrganisation(node: unknown): boolean {
-  if (typeof node === "string") return namesOrganisation(node);
-  if (Array.isArray(node)) return node.some(touchesOrganisation);
-  if (!isDoc(node)) return false;
-  return Object.entries(node).some(
-    ([key, value]) => namesOrganisation(key) || key === "$replaceRoot" || key === "$replaceWith" || touchesOrganisation(value)
-  );
+// Paths only, never values: a status or a pull request title may well read "organisation"
+function stageTouchesOrganisation(stage: unknown): boolean {
+  if (!isDoc(stage)) return true;
+  return Object.entries(stage).some(([operator, spec]) => {
+    if (operator === "$replaceRoot" || operator === "$replaceWith") return true;
+    if (operator === "$unset") return (Array.isArray(spec) ? spec : [spec]).some((path) => typeof path === "string" && namesOrganisation(path));
+    if (operator === "$set" || operator === "$addFields" || operator === "$project") return isDoc(spec) && Object.keys(spec).some(namesOrganisation);
+    return true;
+  });
 }
 
 const sameId = (value: unknown, id: Types.ObjectId) => asId(value)?.equals(id) ?? false;
@@ -74,7 +76,7 @@ const sameId = (value: unknown, id: Types.ObjectId) => asId(value)?.equals(id) ?
 function checkWrite(update: unknown, id: Types.ObjectId, replacing: boolean, what: string): void {
   if (update === undefined || update === null) return;
   if (Array.isArray(update)) {
-    if (touchesOrganisation(update)) throw new OrganisationWallError(`${what} rewrites the organisation in an update pipeline`);
+    if (update.some(stageTouchesOrganisation)) throw new OrganisationWallError(`${what} rewrites the organisation in an update pipeline`);
     return;
   }
   if (!isDoc(update)) return;
@@ -89,6 +91,9 @@ function checkWrite(update: unknown, id: Types.ObjectId, replacing: boolean, wha
     }
     if (!key.startsWith("$") || !isDoc(value)) continue;
     for (const [path, set] of Object.entries(value)) {
+      if (key === "$rename" && typeof set === "string" && namesOrganisation(set)) {
+        throw new OrganisationWallError(`${what} moves a document to another organisation`);
+      }
       if (!namesOrganisation(path)) continue;
       if ((key === "$set" || key === "$setOnInsert") && path === "organisation" && sameId(set, id)) continue;
       throw new OrganisationWallError(`${what} moves a document to another organisation`);
