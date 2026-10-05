@@ -439,3 +439,93 @@ describe("BoardFilters unassigned", () => {
     expect(last.map((t) => t._id).sort()).toEqual(["1", "3"]);
   });
 });
+
+describe("BoardFilters epic", () => {
+  const link = (id: string, taskNumber: number, title: string) => ({ _id: id, taskNumber, title, status: "todo" });
+  const epics = [
+    task({ _id: "e1", taskNumber: 10, title: "Epic one", relations: [{ type: "parent_of", task: link("a", 11, "A") }] } as never),
+    task({ _id: "e2", taskNumber: 20, title: "Epic two", relations: [{ type: "parent_of", task: link("c", 21, "C") }] } as never),
+    task({ _id: "a", taskNumber: 11, title: "A", parent: link("e1", 10, "Epic one") } as never),
+    task({ _id: "b", taskNumber: 12, title: "B, nobody's child" }),
+    task({ _id: "c", taskNumber: 21, title: "C", parent: link("e2", 20, "Epic two") } as never),
+  ];
+
+  async function pick(value: string) {
+    const select = screen.getByLabelText("Epic") as HTMLSelectElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(select, value);
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  }
+  const titlesShown = (onFilter: ReturnType<typeof vi.fn>) =>
+    (onFilter.mock.calls.at(-1)![0] as ApiTask[]).map((t) => t.title).sort();
+
+  it("offers the tasks that have children, named by key, and hides itself on a board with none", async () => {
+    const { unmount } = renderFilters({ tasks: epics });
+    await openPopover();
+    const select = screen.getByLabelText("Epic") as HTMLSelectElement;
+    expect([...select.options].map((o) => o.textContent)).toEqual(["All epics", "TP-10 Epic one", "TP-20 Epic two"]);
+    unmount();
+
+    renderFilters();
+    await openPopover();
+    expect(screen.queryByLabelText("Epic")).toBeNull();
+  });
+
+  it("keeps only the children of the chosen epic, and a different epic changes it", async () => {
+    const { onFilter } = renderFilters({ tasks: epics });
+    await openPopover();
+
+    await pick("e1");
+    expect(titlesShown(onFilter)).toEqual(["A"]);
+
+    await pick("e2");
+    expect(titlesShown(onFilter)).toEqual(["C"]);
+
+    await pick("");
+    expect(titlesShown(onFilter)).toHaveLength(5);
+  });
+
+  it("offers an epic whose children are on the board and which is not, as a sprint's board has it", async () => {
+    const onlyChild = [task({ _id: "a", taskNumber: 11, title: "A", parent: link("e1", 10, "Epic one") } as never)];
+    renderFilters({ tasks: onlyChild });
+    await openPopover();
+
+    expect([...(screen.getByLabelText("Epic") as HTMLSelectElement).options].map((o) => o.value)).toContain("e1");
+  });
+
+  it("counts on the pill, shows a chip that clears it, and survives a reload", async () => {
+    const { onFilter, unmount } = renderFilters({ tasks: epics });
+    await openPopover();
+    await pick("e1");
+
+    expect(screen.getByLabelText("Remove Epic TP-10 filter")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Filters/ }).textContent).toContain("1");
+    unmount();
+
+    const again = renderFilters({ tasks: epics });
+    await waitFor(() => expect(titlesShown(again.onFilter)).toEqual(["A"]));
+
+    await act(async () => {
+      screen.getByLabelText("Remove Epic TP-10 filter").click();
+    });
+    expect(titlesShown(again.onFilter)).toHaveLength(5);
+    void onFilter;
+  });
+
+  it("leaves a chip to clear for a stored epic that is gone, rather than a filter nobody can see", async () => {
+    localStorage.setItem(
+      "board-filters:TP",
+      JSON.stringify({ filters: { epic: "gone" }, sortField: "manual", sortDir: "asc", showFilters: false, hiddenColumns: [] })
+    );
+    const { onFilter } = renderFilters({ tasks: epics });
+    await waitFor(() => expect(titlesShown(onFilter)).toEqual([]));
+
+    await openPopover();
+    expect(screen.getByLabelText("Remove Epic filter")).toBeTruthy();
+    await act(async () => {
+      screen.getByLabelText("Remove Epic filter").click();
+    });
+    expect(titlesShown(onFilter)).toHaveLength(5);
+  });
+});

@@ -17,6 +17,8 @@ export interface BoardFilterValues {
   priority: string;
   status: string;
   dateRange: string;
+  /** Id of the epic whose children are shown */
+  epic: string;
 }
 
 export interface PersistedBoardFilters {
@@ -42,6 +44,7 @@ export const EMPTY_FILTERS: BoardFilterValues = {
   priority: "",
   status: "",
   dateRange: "",
+  epic: "",
 };
 
 /** The built-in keys only — `fields` is a map and is counted separately */
@@ -91,6 +94,40 @@ export function statusOptions(
     options.push({ value: UNFILED, label: statusLabel(UNFILED) });
   }
   return options;
+}
+
+export interface EpicOption {
+  value: string;
+  label: string;
+  taskNumber: number;
+}
+
+type EpicSource = {
+  _id: string;
+  taskNumber: number;
+  title: string;
+  parent?: { _id: string; taskNumber: number; title: string } | null;
+  relations?: { type: string }[];
+};
+
+/**
+ * Every task on the board that has children: the ones carrying a `parent_of` link, and the parent
+ * each child names. A sprint-scoped board holds an epic's children without the epic, and the
+ * second source is what keeps that epic choosable there.
+ */
+export function epicOptions(tasks: EpicSource[], projectKey = ""): EpicOption[] {
+  const epics = new Map<string, { taskNumber: number; title: string }>();
+  for (const task of tasks) {
+    if (task.parent) epics.set(task.parent._id, task.parent);
+    if ((task.relations ?? []).some((r) => r.type === "parent_of")) epics.set(task._id, task);
+  }
+  return [...epics.entries()]
+    .map(([value, epic]) => ({
+      value,
+      taskNumber: epic.taskNumber,
+      label: `${projectKey}-${epic.taskNumber} ${epic.title}`.trim(),
+    }))
+    .sort((a, b) => a.taskNumber - b.taskNumber);
 }
 
 export function statusRoleMap(columns: AnyColumn[] | null | undefined): Map<string, ColumnRole> {

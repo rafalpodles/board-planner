@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import { taskPath } from "@/lib/urls";
 import { useOpenTask } from "@/hooks/use-open-task";
+import { EpicProgress } from "@/components/tasks/EpicProgress";
 
 const DEPENDENCY_LABELS: { value: DependencyType; label: string }[] = [
   { value: "blocked_by", label: "Blocked by" },
@@ -250,6 +251,9 @@ export function TaskLinks({
         section.items.length === 0 ? null : (
           <div key={section.heading}>
             <h4 className="text-xs font-medium text-text-muted mb-1">{section.heading}</h4>
+            {section.heading === "Children" && task.progress && task.progress.total > 0 && (
+              <EpicProgress progress={task.progress} className="mb-2" />
+            )}
             <div className="space-y-1.5">
               {section.items.map((r) => (
                 <LinkRow
