@@ -15,6 +15,7 @@ import {
   taskIdsInOrder,
 } from "./strict-input";
 import { MAX_REORDER_IDS } from "@/lib/reorder";
+import { taskSummary, withTaskKeys, describeLink } from "./task-shape";
 
 type ToolExtra = { authInfo?: AuthInfo };
 
@@ -26,6 +27,21 @@ function clientFrom(extra: ToolExtra): PlannerClient {
     throw new Error("Missing base URL in auth context");
   }
   return new PlannerClient(baseUrl, auth.token);
+}
+
+const MINIMAL_PARAM = z
+  .boolean()
+  .optional()
+  .describe(
+    "Answer with just the key, title, status, priority, assignee and a link instead of the whole " +
+      "task. Use it when writing many tasks: the full answer is mostly ids you will not read."
+  );
+
+/** `CP` of `CP-12`, `MY-APP` of `MY-APP-3`: a project key may itself hold hyphens. */
+const keyPrefix = (taskKey: string) => taskKey.slice(0, taskKey.lastIndexOf("-")).toUpperCase();
+
+function summarised(client: PlannerClient, task: { taskNumber?: number }, taskKey: string) {
+  return taskSummary(task as Parameters<typeof taskSummary>[0], taskKey.toUpperCase(), client.taskUrl(taskKey));
 }
 
 function json(value: unknown) {
@@ -113,7 +129,8 @@ export function registerPlannerTools(server: McpServer): void {
     async ({ taskKey }, extra) => {
       const client = clientFrom(extra);
       const { projectId, taskId } = await client.resolveTaskKey(taskKey);
-      return json(await client.getTask(projectId, taskId));
+      const task = (await client.getTask(projectId, taskId)) as Record<string, unknown>;
+      return json(withTaskKeys(task, keyPrefix(taskKey)));
     }
   );
 
@@ -139,6 +156,7 @@ export function registerPlannerTools(server: McpServer): void {
           .string()
           .optional()
           .describe("Acceptance criteria (markdown checklist, converted to structured checklist items)"),
+        minimal: MINIMAL_PARAM,
         fields: z
           .record(z.any())
           .optional()
@@ -148,7 +166,7 @@ export function registerPlannerTools(server: McpServer): void {
           ),
       }, { hints: CREATE_TASK_HINTS, writes: true }),
     },
-    async ({ project, title, description, priority, category, assignee, status, acceptanceCriteria, fields }, extra) => {
+    async ({ project, title, description, priority, category, assignee, status, acceptanceCriteria, minimal, fields }, extra) => {
       const client = clientFrom(extra);
       const proj = await client.getProjectByKey(project);
       const data: Record<string, unknown> = { title };
@@ -177,7 +195,8 @@ export function registerPlannerTools(server: McpServer): void {
         data.assignee = user.username;
       }
 
-      return json(await client.createTask(proj._id, data));
+      const created = (await client.createTask(proj._id, data)) as { taskNumber: number };
+      return json(minimal ? summarised(client, created, `${project.toUpperCase()}-${created.taskNumber}`) : created);
     }
   );
 
@@ -209,6 +228,7 @@ export function registerPlannerTools(server: McpServer): void {
           .string()
           .optional()
           .describe("Acceptance criteria (markdown checklist, converted to structured checklist items)"),
+        minimal: MINIMAL_PARAM,
         fields: z
           .record(z.any())
           .optional()
@@ -218,7 +238,7 @@ export function registerPlannerTools(server: McpServer): void {
           ),
       }, { hints: UPDATE_TASK_HINTS, writes: true }),
     },
-    async ({ taskKey, title, description, priority, category, assignee, agent, acceptanceCriteria, fields }, extra) => {
+    async ({ taskKey, title, description, priority, category, assignee, agent, acceptanceCriteria, minimal, fields }, extra) => {
       // Before the lookup, so a call that changes nothing costs nothing and the refusal is the
       // first thing that happens rather than the last
       if (
@@ -299,7 +319,8 @@ export function registerPlannerTools(server: McpServer): void {
       // everything else, before the lookup
       if (Object.keys(data).length === 0) throw new Error(`update_task ${NOTHING_TO_CHANGE}`);
 
-      return json(await client.updateTask(projectId, taskId, data));
+      const updated = await client.updateTask(projectId, taskId, data);
+      return json(minimal ? summarised(client, updated as { taskNumber?: number }, taskKey) : updated);
     }
   );
 
@@ -310,12 +331,14 @@ export function registerPlannerTools(server: McpServer): void {
       inputSchema: strictInput({
         taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
         status: z.string().describe("New status"),
+        minimal: MINIMAL_PARAM,
       }, { hints: CHANGE_STATUS_HINTS, writes: true }),
     },
-    async ({ taskKey, status }, extra) => {
+    async ({ taskKey, status, minimal }, extra) => {
       const client = clientFrom(extra);
       const { projectId, taskId } = await client.resolveTaskKey(taskKey);
-      return json(await client.changeTaskStatus(projectId, taskId, status));
+      const changed = await client.changeTaskStatus(projectId, taskId, status);
+      return json(minimal ? summarised(client, changed as { taskNumber?: number }, taskKey) : changed);
     }
   );
 
@@ -412,7 +435,7 @@ export function registerPlannerTools(server: McpServer): void {
         "it is the CHILD that moves, and its previous parent loses it without being named in the " +
         "call. Cycles are refused for parent_of and blocked_by, the two types that carry an " +
         "ordering; relates and duplicates have no ordering to close. get_task reads the links " +
-        "back — as task numbers, not keys, so an agent rebuilds KEY-<n> from the key it already has.",
+        "back, each linked task with its key, and parent and children read parent_of from both ends.",
       inputSchema: strictInput({
         taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
         targetTaskKey: z.string().describe("The task at the other end (e.g. 'CP-2')"),
@@ -422,7 +445,8 @@ export function registerPlannerTools(server: McpServer): void {
     async ({ taskKey, targetTaskKey, type }, extra) => {
       const client = clientFrom(extra);
       const { projectId, taskId, targetTaskId } = await bothEnds(client, taskKey, targetTaskKey);
-      return json(await client.addTaskLink(projectId, taskId, targetTaskId, type));
+      await client.addTaskLink(projectId, taskId, targetTaskId, type);
+      return json(describeLink(type, taskKey, targetTaskKey, false));
     }
   );
 
@@ -465,7 +489,8 @@ export function registerPlannerTools(server: McpServer): void {
         );
       }
 
-      return json(await client.removeTaskLink(projectId, taskId, targetTaskId, type));
+      await client.removeTaskLink(projectId, taskId, targetTaskId, type);
+      return json(describeLink(type, taskKey, targetTaskKey, true));
     }
   );
 

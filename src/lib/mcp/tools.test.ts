@@ -510,3 +510,115 @@ describe("reorder_tasks", () => {
     expect(refusal.error!.issues[0].message).toContain('"order" — use the reorder_tasks tool');
   });
 });
+
+/**
+ * BP-907. A bulk run is mostly answers: every write returned the whole stored task (createdBy,
+ * assignedBy, organisation, checklist ids…), link_tasks said "Dependency added" whatever it had
+ * linked, and get_task named linked tasks only by number.
+ */
+describe("what the tools answer", () => {
+  const FULL = {
+    _id: "t1",
+    taskNumber: 12,
+    title: "Written",
+    status: "todo",
+    priority: "high",
+    assignee: { _id: "u1", username: "rafal", fullName: "Rafal" },
+    createdBy: { _id: "u1", username: "rafal" },
+    organisation: "o1",
+    checklist: [{ _id: "c1", text: "x", done: false }],
+  };
+  const SUMMARY = {
+    key: "MY-APP-12",
+    title: "Written",
+    status: "todo",
+    priority: "high",
+    assignee: "rafal",
+    url: "https://board.example.com/projects/MY-APP/tasks/12",
+  };
+  const parse = (result: unknown) =>
+    JSON.parse((result as { content: { text: string }[] }).content[0].text);
+
+  beforeEach(() => {
+    vi.spyOn(PlannerClient.prototype, "getProjectByKey").mockResolvedValue({ _id: "p1" });
+  });
+
+  it.each([
+    ["create_task", () => vi.spyOn(PlannerClient.prototype, "createTask"), { project: "my-app", title: "Written" }],
+    ["update_task", () => vi.spyOn(PlannerClient.prototype, "updateTask"), { taskKey: "MY-APP-12", title: "Written" }],
+    ["change_task_status", () => vi.spyOn(PlannerClient.prototype, "changeTaskStatus"), { taskKey: "MY-APP-12", status: "todo" }],
+  ])("%s answers with the full task unless asked for less", async (name, spy, args) => {
+    spy().mockResolvedValue(FULL);
+
+    const answer = parse(await registered().get(name)!.handler(args, extra));
+
+    expect(answer).toEqual(FULL);
+  });
+
+  it.each([
+    ["create_task", () => vi.spyOn(PlannerClient.prototype, "createTask"), { project: "my-app", title: "Written" }],
+    ["update_task", () => vi.spyOn(PlannerClient.prototype, "updateTask"), { taskKey: "MY-APP-12", title: "Written" }],
+    ["change_task_status", () => vi.spyOn(PlannerClient.prototype, "changeTaskStatus"), { taskKey: "MY-APP-12", status: "todo" }],
+  ])("%s answers with key, title, status, priority, assignee and a link when minimal", async (name, spy, args) => {
+    spy().mockResolvedValue(FULL);
+
+    const answer = parse(await registered().get(name)!.handler({ ...args, minimal: true }, extra));
+
+    expect(answer).toEqual(SUMMARY);
+  });
+
+  it("does not count `minimal` alone as something to change", async () => {
+    const update = vi.spyOn(PlannerClient.prototype, "updateTask").mockResolvedValue(FULL);
+
+    await expect(
+      registered().get("update_task")!.handler({ taskKey: "MY-APP-12", minimal: true }, extra)
+    ).rejects.toThrow(/nothing to change/);
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("get_task names every linked task by key, and the parent and children", async () => {
+    vi.spyOn(PlannerClient.prototype, "getTask").mockResolvedValue({
+      title: "Epic",
+      blockedBy: [{ _id: "b", taskNumber: 3, title: "Blocker", status: "todo" }],
+      relations: [{ type: "parent_of", task: { _id: "k", taskNumber: 8, title: "Child", status: "todo" } }],
+      relatedFrom: [{ type: "parent_of", task: { _id: "p", taskNumber: 1, title: "Top", status: "todo" } }],
+    });
+
+    const answer = parse(await registered().get("get_task")!.handler({ taskKey: "my-app-5" }, extra));
+
+    expect(answer.blockedBy[0].key).toBe("MY-APP-3");
+    expect(answer.relations[0].task.key).toBe("MY-APP-8");
+    expect(answer.parent).toEqual({ key: "MY-APP-1", title: "Top", status: "todo" });
+    expect(answer.children).toEqual([{ key: "MY-APP-8", title: "Child", status: "todo" }]);
+  });
+
+  it("link_tasks says what it linked, not just that something was", async () => {
+    vi.spyOn(PlannerClient.prototype, "addTaskLink").mockResolvedValue({ message: "Dependency added" });
+    vi.spyOn(PlannerClient.prototype, "resolveTaskKey").mockResolvedValue({ projectId: "p1", taskId: "t" });
+
+    const answer = parse(
+      await registered().get("link_tasks")!.handler({ taskKey: "bp-1", targetTaskKey: "bp-2", type: "parent_of" }, extra)
+    );
+
+    expect(answer).toEqual({
+      message: "Linked: BP-1 is the parent of BP-2",
+      taskKey: "BP-1",
+      targetTaskKey: "BP-2",
+      type: "parent_of",
+    });
+  });
+
+  it("unlink_tasks says what it removed", async () => {
+    vi.spyOn(PlannerClient.prototype, "removeTaskLink").mockResolvedValue({ message: "Dependency removed" });
+    vi.spyOn(PlannerClient.prototype, "resolveTaskKey").mockResolvedValue({ projectId: "p1", taskId: "t" });
+    vi.spyOn(PlannerClient.prototype, "getTask").mockResolvedValue({
+      relations: [{ task: { _id: "t" }, type: "relates" }],
+    });
+
+    const answer = parse(
+      await registered().get("unlink_tasks")!.handler({ taskKey: "BP-1", targetTaskKey: "BP-2", type: "relates" }, extra)
+    );
+
+    expect(answer.message).toBe("Removed: BP-1 relates to BP-2");
+  });
+});

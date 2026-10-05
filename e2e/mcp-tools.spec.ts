@@ -996,4 +996,88 @@ test("a task key that names nothing is refused as such, and a malformed one as m
   const own = await session.callTool("get_task", { taskKey: KEPT_TASK_KEY });
   accepted(own);
   expect(own.parsed.title).toBe(KEPT_TASK_TITLE);
+ * BP-907. The answers are what a bulk run reads back, so they are asserted against what the board
+ * holds: the key in a minimal answer opens the task it names, and the keys get_task prints for a
+ * link are the ones the other end carries.
+ */
+test("minimal answers carry the key and a link that opens the task, and the full answer stays the default", async ({
+  page,
+  request,
+}) => {
+  await signIn(page);
+  const session = await connected(request);
+
+  const created = await session.callTool("create_task", {
+    project: PROJECT_KEY,
+    title: "Filed minimally",
+    priority: "high",
+    assignee: MEMBER_USERNAME,
+    minimal: true,
+  });
+  accepted(created);
+  const key = `${PROJECT_KEY}-${NEXT_TASK_NUMBER}`;
+  expect(created.parsed).toEqual({
+    key,
+    title: "Filed minimally",
+    status: expect.any(String),
+    priority: "high",
+    assignee: MEMBER_USERNAME,
+    url: expect.stringMatching(new RegExp(`/projects/${PROJECT_KEY}/tasks/${NEXT_TASK_NUMBER}$`)),
+  });
+
+  // The link goes where it says
+  await page.goto(new URL(created.parsed.url).pathname);
+  await expect(page.getByText("Filed minimally").first()).toBeVisible();
+
+  const renamed = await session.callTool("update_task", { taskKey: key, title: "Renamed minimally", minimal: true });
+  accepted(renamed);
+  expect(renamed.parsed).toMatchObject({ key, title: "Renamed minimally" });
+  expect(Object.keys(renamed.parsed).sort()).toEqual(["assignee", "key", "priority", "status", "title", "url"]);
+
+  const moved = await session.callTool("change_task_status", { taskKey: key, status: SPARE_COLUMN.id, minimal: true });
+  accepted(moved);
+  expect(moved.parsed).toMatchObject({ key, status: SPARE_COLUMN.id });
+
+  // The stored task agrees with what was reported, and unasked-for minimal leaves the full answer
+  const full = await session.callTool("update_task", { taskKey: key, description: "now with a body" });
+  accepted(full);
+  expect(full.parsed).toMatchObject({ taskNumber: NEXT_TASK_NUMBER, title: "Renamed minimally", status: SPARE_COLUMN.id });
+  expect(full.parsed.checklist).toBeDefined();
+  expect(full.parsed.createdBy.username).toBe(ADMIN_USERNAME);
+});
+
+test("link_tasks says what it linked, and get_task names the parent and children by key", async ({ request }) => {
+  const session = await connected(request);
+
+  const linked = await session.callTool("link_tasks", {
+    taskKey: HELD_TASK_KEY,
+    targetTaskKey: SIBLING_TASK_KEY,
+    type: "parent_of",
+  });
+  accepted(linked);
+  expect(linked.parsed).toEqual({
+    message: `Linked: ${HELD_TASK_KEY} is the parent of ${SIBLING_TASK_KEY}`,
+    taskKey: HELD_TASK_KEY,
+    targetTaskKey: SIBLING_TASK_KEY,
+    type: "parent_of",
+  });
+
+  const parent = await session.callTool("get_task", { taskKey: HELD_TASK_KEY });
+  expect(parent.parsed.children).toEqual([
+    expect.objectContaining({ key: SIBLING_TASK_KEY, title: expect.any(String), status: expect.any(String) }),
+  ]);
+  expect(parent.parsed.relations[0].task.key).toBe(SIBLING_TASK_KEY);
+
+  const child = await session.callTool("get_task", { taskKey: SIBLING_TASK_KEY });
+  expect(child.parsed.parent).toEqual(expect.objectContaining({ key: HELD_TASK_KEY }));
+  expect(child.parsed.relatedFrom[0].task.key).toBe(HELD_TASK_KEY);
+
+  const unlinked = await session.callTool("unlink_tasks", {
+    taskKey: HELD_TASK_KEY,
+    targetTaskKey: SIBLING_TASK_KEY,
+    type: "parent_of",
+  });
+  accepted(unlinked);
+  expect(unlinked.parsed.message).toBe(`Removed: ${HELD_TASK_KEY} is the parent of ${SIBLING_TASK_KEY}`);
+  expect((await session.callTool("get_task", { taskKey: HELD_TASK_KEY })).parsed.children).toEqual([]);
 });

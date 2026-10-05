@@ -158,6 +158,12 @@ export class PlannerClient {
     return this.request("GET", "/api/agents") as Promise<unknown[]>;
   }
 
+  /** The page a person opens for this task: what a minimal answer hands back so the work can be found. */
+  taskUrl(taskKey: string): string {
+    const cut = taskKey.lastIndexOf("-");
+    return `${this.baseUrl}/projects/${seg(taskKey.slice(0, cut).toUpperCase())}/tasks/${seg(taskKey.slice(cut + 1))}`;
+  }
+
   async resolveTaskKey(taskKey: string): Promise<{ projectId: string; taskId: string }> {
     // Split on the LAST hyphen: a project key may itself hold hyphens, underscores and digits
     const match = taskKey.match(/^(.+)-(\d+)$/);
