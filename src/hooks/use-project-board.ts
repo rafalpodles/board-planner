@@ -644,11 +644,13 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
   function applyArchived(ids: Iterable<string>, archivedAt: string | null) {
     const changed = new Set(ids);
     dropReadsInFlight();
+    const touchesEpic = tasks.some((t) => changed.has(t._id) && t.parent);
     setTasks((prev) =>
       showArchived
         ? prev.map((t) => (changed.has(t._id) ? { ...t, archivedAt } : t))
         : prev.filter((t) => !changed.has(t._id))
     );
+    if (touchesEpic) loadDataRef.current();
   }
 
   async function handleContextArchive(taskId: string, force?: boolean) {
