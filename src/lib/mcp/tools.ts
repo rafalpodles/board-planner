@@ -285,7 +285,8 @@ export function registerPlannerTools(server: McpServer): void {
         `List tasks in a project with optional filters, one page at a time (default ${DEFAULT_LIST_LIMIT}, at most ` +
         `${MAX_LIST_LIMIT}). The answer says the total the filters match and the offset of the next page; ` +
         "follow nextOffset until it is null to read the rest. Each task is a short line — key, title, status, " +
-        "priority, assignee, dueDate, sprint name and parent key — unless detail is \"full\"; get_task reads one in full.",
+        "priority, assignee, dueDate, sprint name and parent key, and for an epic how many of its children are done — " +
+        "unless detail is \"full\"; get_task reads one in full.",
       inputSchema: strictInput({
         project: z.string().describe("Project key (e.g. 'CP')"),
         // The same lie the category description carried, and a worse one: columns have been
@@ -322,6 +323,10 @@ export function registerPlannerTools(server: McpServer): void {
           .boolean()
           .optional()
           .describe("true: only tasks with at least one blocked_by link; false: only tasks with none"),
+        hasChildren: z
+          .boolean()
+          .optional()
+          .describe("true: only tasks that have children — the epics, each with how many of its children are done; false: only tasks with none"),
         fields: z
           .record(z.any())
           .optional()
@@ -339,7 +344,7 @@ export function registerPlannerTools(server: McpServer): void {
       }),
     },
     async (
-      { project, status, assignee, category, priority, sprint, search, parent, dueBefore, dueAfter, updatedSince, blocked, fields, limit, offset, detail },
+      { project, status, assignee, category, priority, sprint, search, parent, dueBefore, dueAfter, updatedSince, blocked, hasChildren, fields, limit, offset, detail },
       extra
     ) => {
       const client = clientFrom(extra);
@@ -354,6 +359,7 @@ export function registerPlannerTools(server: McpServer): void {
       if (dueAfter) filters.dueAfter = dueAfter;
       if (updatedSince) filters.updatedSince = updatedSince;
       if (blocked !== undefined) filters.blocked = String(blocked);
+      if (hasChildren !== undefined) filters.hasChildren = String(hasChildren);
 
       if (sprint) {
         const sprints = sprintNeedsLookup(sprint)
@@ -404,7 +410,9 @@ export function registerPlannerTools(server: McpServer): void {
   server.registerTool(
     "get_task",
     {
-      description: "Get full task details by task key (e.g. 'CP-1')",
+      description:
+        "Get full task details by task key (e.g. 'CP-1'). An epic — a task with children — also answers children " +
+        "(key, title, status) and progress: how many of them are done (total, done, byStatus), done being the board's done column.",
       inputSchema: strictInput({ taskKey: z.string().describe("Task key (e.g. 'CP-1')") }),
     },
     async ({ taskKey }, extra) => {
