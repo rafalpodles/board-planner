@@ -269,6 +269,14 @@ ORGANISATION_DOMAIN=      # Optional — e.g. board-planner.com: organisations l
                           # (organisationOrigin), and the bare domain and reserved names (app, login, www…) are
                           # the platform. Unset (self-hosted): one organisation, PUBLIC_ORIGIN, as before. A
                           # value with a scheme, port or path stops the app at boot (BP-666)
+ORGANISATION_DEFAULT_HOST= # Optional, with ORGANISATION_DOMAIN only — the host the default organisation keeps when
+                          # an instance moves to subdomains, e.g. app.board-planner.com: it answers as that
+                          # organisation though `app` is reserved, and its links are built on it, so its people,
+                          # sessions, tokens, MCP and workers notice nothing. Its label must be a reserved one, or
+                          # it must lie outside the domain; set and unset it together with ORGANISATION_DOMAIN,
+                          # which also needs TRUSTED_PROXY_HOPS above 0. Webhooks are then signed per project for
+                          # every organisation, the default one included: a receiver verifying the instance's
+                          # WEBHOOK_SIGNING_SECRET needs the project's key from Settings → Integrations (BP-671)
 ORGANISATION_REQUESTS_PER_MINUTE= # Optional — authenticated requests one organisation may make in a minute,
                           # counted after the credential and the host check (an anonymous caller spends
                           # nobody's); past it 429 with Retry-After and the reset time. One account or

@@ -181,8 +181,8 @@ export async function runPmTrigger(db: ScopedDb, trigger: IPmTrigger): Promise<P
   return "ran";
 }
 
-export async function drainPmTriggers(db: ScopedDb): Promise<void> {
-  for (;;) {
+export async function drainPmTriggers(db: ScopedDb, { limit = Infinity }: { limit?: number } = {}): Promise<void> {
+  for (let run = 0; run < limit; run++) {
     if (!(await stillServed(db.organisation))) return;
     const claimed = await db.PmTrigger.findOneAndUpdate(
       { state: "pending" },

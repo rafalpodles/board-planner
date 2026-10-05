@@ -37,7 +37,7 @@ function push(
   { host = PLATFORM_HOST, headers }: { host?: string; headers?: Record<string, string> } = {}
 ) {
   const body = Buffer.from(JSON.stringify({ licenceKey }));
-  const signed = headers ?? signPlatformRequest({ method: "POST", path: pathFor(who), body }, E2E_PLATFORM_REQUEST_KEY);
+  const signed = headers ?? signPlatformRequest({ method: "POST", host, path: pathFor(who), body }, E2E_PLATFORM_REQUEST_KEY);
   return {
     headers: signed,
     send: () =>
@@ -138,12 +138,12 @@ test.describe("BP-891: each organisation carries its own licence", () => {
     });
     const foreign = await push(request, ACME, key, {
       headers: signPlatformRequest(
-        { method: "POST", path: pathFor(ACME), body: Buffer.from(JSON.stringify({ licenceKey: key })) },
+        { method: "POST", host: PLATFORM_HOST, path: pathFor(ACME), body: Buffer.from(JSON.stringify({ licenceKey: key })) },
         stranger()
       ),
     }).send();
     const signedForOther = signPlatformRequest(
-      { method: "POST", path: pathFor(ACME), body: Buffer.from(JSON.stringify({ licenceKey: keyFor(ACME, { plan: "free" }) })) },
+      { method: "POST", host: PLATFORM_HOST, path: pathFor(ACME), body: Buffer.from(JSON.stringify({ licenceKey: keyFor(ACME, { plan: "free" }) })) },
       E2E_PLATFORM_REQUEST_KEY
     );
     const tampered = await push(request, ACME, key, { headers: signedForOther }).send();

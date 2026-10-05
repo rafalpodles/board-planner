@@ -1,6 +1,7 @@
 import { Types } from "mongoose";
 import { connectDB } from "./db";
 import { DEFAULT_ORGANISATION_ID } from "./organisation-field";
+import { trustedProxyHops } from "./client-ip";
 import { Organisation } from "@/models/organisation";
 import { selfOrigin } from "./session";
 import type { ScopedDb } from "./db-scope";
@@ -43,12 +44,43 @@ export function organisationDomain(): string | null {
   return value ? value : null;
 }
 
+// The host the default organisation keeps when organisations move to subdomains: production stays where its people are
+export function defaultOrganisationHost(): string | null {
+  const value = process.env.ORGANISATION_DEFAULT_HOST?.trim().toLowerCase();
+  return value ? value : null;
+}
+
+const hostName = (host: string | null) => (host ?? "").trim().toLowerCase().replace(/:\d+$/, "").replace(/\.$/, "");
+
 export function assertOrganisationDomainConfig(): void {
   const domain = organisationDomain();
   if (domain !== null && !DOMAIN_PATTERN.test(domain)) {
     throw new Error(
       `ORGANISATION_DOMAIN must be a bare domain such as board-planner.com, with no scheme, port or path; got "${process.env.ORGANISATION_DOMAIN}"`
     );
+  }
+  const defaultHost = defaultOrganisationHost();
+  if (defaultHost !== null) {
+    if (domain === null) throw new Error("ORGANISATION_DEFAULT_HOST needs ORGANISATION_DOMAIN: without it every host is the default organisation's");
+    const label = defaultHost.endsWith(`.${domain}`) ? defaultHost.slice(0, -domain.length - 1) : null;
+    // A label an organisation could take as its slug would make that organisation unreachable
+    const relayHost = (() => {
+      try {
+        return process.env.OIDC_RELAY_ORIGIN ? new URL(process.env.OIDC_RELAY_ORIGIN).hostname : null;
+      } catch {
+        return null;
+      }
+    })();
+    // The relay's host, and login. which will carry it, are the platform's; an organisation must not take them over
+    if (!DOMAIN_PATTERN.test(defaultHost) || defaultHost === domain || defaultHost === relayHost || label === "login" || (label !== null && !RESERVED_SLUGS.includes(label))) {
+      throw new Error(
+        `ORGANISATION_DEFAULT_HOST must be a host outside ORGANISATION_DOMAIN, or one of its reserved names such as app.${domain}, and not login. or the OIDC relay's; got "${process.env.ORGANISATION_DEFAULT_HOST}"`
+      );
+    }
+  }
+  // With no proxy hops every anonymous caller shares one throttle bucket, which one organisation could empty for all
+  if (domain !== null && trustedProxyHops() === 0) {
+    throw new Error("ORGANISATION_DOMAIN needs TRUSTED_PROXY_HOPS set to the proxies in front of the app: at 0 one organisation's failed sign-ins throttle every organisation");
   }
   if (domain !== null && process.env.OIDC_ADMIN_GROUP?.trim()) {
     throw new Error(
@@ -60,7 +92,7 @@ export function assertOrganisationDomainConfig(): void {
 export type HostKind = { kind: "organisation"; slug: string } | { kind: "platform" } | { kind: "unknown" };
 
 export function classifyHost(host: string | null, domain: string): HostKind {
-  const name = (host ?? "").trim().toLowerCase().replace(/:\d+$/, "").replace(/\.$/, "");
+  const name = hostName(host);
   if (name === domain) return { kind: "platform" };
   if (!name.endsWith(`.${domain}`)) return { kind: "unknown" };
   const label = name.slice(0, -domain.length - 1);
@@ -103,6 +135,8 @@ export function forgetOrganisationSlugs(): void {
 export async function organisationOrigin(organisation: Types.ObjectId): Promise<string | null> {
   const domain = organisationDomain();
   if (!domain) return selfOrigin();
+  const defaultHost = defaultOrganisationHost();
+  if (defaultHost && organisation.equals(DEFAULT_ORGANISATION_ID)) return `${platformScheme(domain)}//${defaultHost}${platformPort(domain)}`;
   const slug = await slugOfOrganisation(organisation);
   if (!slug) return null;
   const host = `${slug}.${domain}`;
@@ -135,6 +169,10 @@ export type RequestOrganisation =
 export async function organisationOfRequest(request: Request): Promise<RequestOrganisation> {
   const domain = organisationDomain();
   if (!domain) return { kind: "organisation", organisation: DEFAULT_ORGANISATION_ID };
+  const defaultHost = defaultOrganisationHost();
+  if (defaultHost && hostName(request.headers.get("host")) === defaultHost) {
+    return { kind: "organisation", organisation: DEFAULT_ORGANISATION_ID };
+  }
   const host = classifyHost(request.headers.get("host"), domain);
   if (host.kind === "platform") return { kind: "platform" };
   if (host.kind === "unknown") return { kind: "none" };

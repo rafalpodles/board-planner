@@ -101,6 +101,24 @@ describe("ORGANISATION_DOMAIN set: the host names the organisation", () => {
     expect(await organisationOfRequest(on("gone.board-planner.com"))).toEqual({ kind: "none" });
   });
 
+  it("serves the default organisation on ORGANISATION_DEFAULT_HOST, though its first label is reserved, and builds its links there (BP-671)", async () => {
+    process.env.ORGANISATION_DOMAIN = "board-planner.com";
+    process.env.ORGANISATION_DEFAULT_HOST = "app.board-planner.com";
+    process.env.PUBLIC_ORIGIN = "https://app.board-planner.com";
+    try {
+      expect(await organisationOfRequest(on("App.Board-Planner.com:443"))).toEqual({ kind: "organisation", organisation: DEFAULT_ORGANISATION_ID });
+      expect(findOne).not.toHaveBeenCalled();
+      expect(await organisationOrigin(DEFAULT_ORGANISATION_ID)).toBe("https://app.board-planner.com");
+      expect(await organisationOrigin(ACME)).toBe("https://acme.board-planner.com");
+      expect(await organisationOfRequest(on("login.board-planner.com"))).toEqual({ kind: "platform" });
+
+      delete process.env.ORGANISATION_DEFAULT_HOST;
+      expect(await organisationOfRequest(on("app.board-planner.com"))).toEqual({ kind: "platform" });
+    } finally {
+      delete process.env.ORGANISATION_DEFAULT_HOST;
+    }
+  });
+
   it("hands a request on an organisation's host that organisation's db, and nothing anywhere else", async () => {
     expect((await scopedForRequest(on("acme.board-planner.com")))?.organisation.equals(ACME)).toBe(true);
     expect(await scopedForRequest(on("nobody.board-planner.com"))).toBeNull();
@@ -116,6 +134,21 @@ describe("classifyHost", () => {
 });
 
 describe("assertOrganisationDomainConfig", () => {
+  beforeEach(() => {
+    process.env.TRUSTED_PROXY_HOPS = "1";
+  });
+  afterEach(() => {
+    delete process.env.TRUSTED_PROXY_HOPS;
+  });
+
+  it("refuses organisations on subdomains with no proxy hops, where one organisation's failed sign-ins throttle all (BP-671)", () => {
+    process.env.ORGANISATION_DOMAIN = "board-planner.com";
+    delete process.env.TRUSTED_PROXY_HOPS;
+    expect(() => assertOrganisationDomainConfig()).toThrow(/needs TRUSTED_PROXY_HOPS/);
+    process.env.TRUSTED_PROXY_HOPS = "2";
+    expect(() => assertOrganisationDomainConfig()).not.toThrow();
+  });
+
   it("accepts no value and a bare domain", () => {
     expect(() => assertOrganisationDomainConfig()).not.toThrow();
     process.env.ORGANISATION_DOMAIN = "board-planner.com";
@@ -126,6 +159,32 @@ describe("assertOrganisationDomainConfig", () => {
     for (const value of ["https://board-planner.com", "board-planner.com:443", "board-planner.com/x", "*.board-planner.com"]) {
       process.env.ORGANISATION_DOMAIN = value;
       expect(() => assertOrganisationDomainConfig(), value).toThrow(/ORGANISATION_DOMAIN/);
+    }
+  });
+
+  it("takes ORGANISATION_DEFAULT_HOST only beside ORGANISATION_DOMAIN, as a bare host other than the domain itself (BP-671)", () => {
+    try {
+      process.env.ORGANISATION_DEFAULT_HOST = "app.board-planner.com";
+      expect(() => assertOrganisationDomainConfig()).toThrow(/needs ORGANISATION_DOMAIN/);
+      process.env.ORGANISATION_DOMAIN = "board-planner.com";
+      expect(() => assertOrganisationDomainConfig()).not.toThrow();
+      process.env.ORGANISATION_DEFAULT_HOST = "board.example.org";
+      expect(() => assertOrganisationDomainConfig()).not.toThrow();
+      process.env.OIDC_RELAY_ORIGIN = "https://login.board-planner.com";
+      process.env.ORGANISATION_DEFAULT_HOST = "login.board-planner.com";
+      expect(() => assertOrganisationDomainConfig()).toThrow(/not login\. or the OIDC relay's/);
+      delete process.env.OIDC_RELAY_ORIGIN;
+      expect(() => assertOrganisationDomainConfig()).toThrow(/not login\. or the OIDC relay's/);
+      process.env.OIDC_RELAY_ORIGIN = "https://Sign-In.example.org:8443";
+      process.env.ORGANISATION_DEFAULT_HOST = "sign-in.example.org";
+      expect(() => assertOrganisationDomainConfig()).toThrow(/not login\. or the OIDC relay's/);
+      delete process.env.OIDC_RELAY_ORIGIN;
+      for (const value of ["board-planner.com", "https://app.board-planner.com", "app.board-planner.com:443", "planner.board-planner.com", "a.b.board-planner.com"]) {
+        process.env.ORGANISATION_DEFAULT_HOST = value;
+        expect(() => assertOrganisationDomainConfig(), value).toThrow(/ORGANISATION_DEFAULT_HOST must be a host outside ORGANISATION_DOMAIN, or one of its reserved names/);
+      }
+    } finally {
+      delete process.env.ORGANISATION_DEFAULT_HOST;
     }
   });
 
