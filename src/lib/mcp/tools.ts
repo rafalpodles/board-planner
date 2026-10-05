@@ -27,6 +27,7 @@ import {
   sprintClears,
   sprintForWrite,
 } from "./task-fields";
+import { findItem, mergeCriteria, shownCriteria, type Criterion } from "./checklist-edit";
 
 type ToolExtra = { authInfo?: AuthInfo };
 
@@ -336,7 +337,11 @@ export function registerPlannerTools(server: McpServer): void {
         acceptanceCriteria: z
           .string()
           .optional()
-          .describe("Acceptance criteria (markdown checklist, converted to structured checklist items)"),
+          .describe(
+            "The whole checklist as markdown lines. A line whose text is unchanged keeps its id and its tick; a plain " +
+              "line leaves the tick as it was, and \"- [ ]\" / \"- [x]\" sets it. To change one criterion use " +
+              "set_checklist_item, add_checklist_item or remove_checklist_item."
+          ),
         minimal: MINIMAL_PARAM,
         dueDate: DUE_DATE_PARAM,
         sprint: SPRINT_PARAM,
@@ -373,7 +378,12 @@ export function registerPlannerTools(server: McpServer): void {
       if (description !== undefined) data.description = description;
       if (priority !== undefined) data.priority = priority;
       if (category !== undefined) data.category = category;
-      if (acceptanceCriteria !== undefined) data.acceptanceCriteria = acceptanceCriteria;
+      // Read once, for whichever of the two needs what the task holds now
+      const held =
+        acceptanceCriteria !== undefined || (fields && Object.keys(fields).length)
+          ? ((await client.getTask(projectId, taskId)) as { checklist?: Criterion[]; customFieldValues?: Record<string, unknown> })
+          : null;
+      if (acceptanceCriteria !== undefined) data.checklist = mergeCriteria(acceptanceCriteria, held?.checklist ?? []);
       if (dueDate !== undefined) data.dueDate = dueDateValue(dueDate);
       if (recurrence !== undefined) data.recurrence = recurrenceValue(recurrence);
       if (sprint !== undefined) {
@@ -386,11 +396,8 @@ export function registerPlannerTools(server: McpServer): void {
         // customFieldValues is replaced wholesale by the API, so naming one field
         // would otherwise clear every other value on the task
         const project = await client.getProject(projectId);
-        const task = (await client.getTask(projectId, taskId)) as {
-          customFieldValues?: Record<string, unknown>;
-        };
         data.customFieldValues = {
-          ...(task.customFieldValues || {}),
+          ...(held?.customFieldValues || {}),
           ...resolveFieldsByName(fields, project.customFields || []),
         };
       }
@@ -465,6 +472,92 @@ export function registerPlannerTools(server: McpServer): void {
       }
     );
   }
+
+  // --- Checklist ---
+
+  // Each tool changes one criterion in one update, by its id, on the server: a tick or an edit
+  // landing from somewhere else while a call is in flight is not overwritten. The read below is only
+  // to turn a text into the id.
+  async function criterionOf(extra: ToolExtra, taskKey: string, ref: string) {
+    const client = clientFrom(extra);
+    const { projectId, taskId } = await client.resolveTaskKey(taskKey);
+    const held = ((await client.getTask(projectId, taskId)) as { checklist?: Criterion[] }).checklist ?? [];
+    return { client, projectId, taskId, itemId: String(held[findItem(held, ref)]._id) };
+  }
+
+  const checklistAnswer = (taskKey: string, stored: { checklist?: Criterion[] }) =>
+    json({ taskKey: taskKey.toUpperCase(), checklist: shownCriteria(stored.checklist ?? []) });
+
+  const ITEM_PARAM = z
+    .string()
+    .describe("The criterion: its id (get_task and these tools list them) or its exact text");
+
+  server.registerTool(
+    "add_checklist_item",
+    {
+      description:
+        "Add one acceptance criterion to the end of a task's checklist, in one update that leaves the others alone — " +
+        "update_task's acceptanceCriteria rewrites the whole list. Answers with the checklist and each item's id.",
+      inputSchema: strictInput(
+        {
+          taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
+          text: z.string().describe("The criterion"),
+          done: z.boolean().optional().describe("Already done (default: not)"),
+        },
+        { writes: true }
+      ),
+    },
+    async ({ taskKey, text, done }, extra) => {
+      const client = clientFrom(extra);
+      const { projectId, taskId } = await client.resolveTaskKey(taskKey);
+      return checklistAnswer(taskKey, await client.addChecklistItem(projectId, taskId, { text, done: done ?? false }));
+    }
+  );
+
+  server.registerTool(
+    "set_checklist_item",
+    {
+      description:
+        "Change one acceptance criterion in one update: tick or untick it (done), or reword it (text). The rest of the " +
+        "list is not touched. Answers with the checklist and each item's id.",
+      inputSchema: strictInput(
+        {
+          taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
+          item: ITEM_PARAM,
+          text: z.string().optional().describe("The new wording"),
+          done: z.boolean().optional().describe("true to tick it, false to untick it"),
+        },
+        { writes: true }
+      ),
+    },
+    async ({ taskKey, item, text, done }, extra) => {
+      if (text === undefined && done === undefined) throw new Error(`set_checklist_item ${NOTHING_TO_CHANGE}`);
+      const { client, projectId, taskId, itemId } = await criterionOf(extra, taskKey, item);
+      return checklistAnswer(
+        taskKey,
+        await client.setChecklistItem(projectId, taskId, itemId, {
+          ...(text !== undefined ? { text } : {}),
+          ...(done !== undefined ? { done } : {}),
+        })
+      );
+    }
+  );
+
+  server.registerTool(
+    "remove_checklist_item",
+    {
+      description:
+        "Remove one acceptance criterion in one update, leaving the rest of the list alone. Answers with the checklist and each item's id.",
+      inputSchema: strictInput(
+        { taskKey: z.string().describe("Task key (e.g. 'CP-1')"), item: ITEM_PARAM },
+        { writes: true }
+      ),
+    },
+    async ({ taskKey, item }, extra) => {
+      const { client, projectId, taskId, itemId } = await criterionOf(extra, taskKey, item);
+      return checklistAnswer(taskKey, await client.removeChecklistItem(projectId, taskId, itemId));
+    }
+  );
 
   server.registerTool(
     "change_task_status",

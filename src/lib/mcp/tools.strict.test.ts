@@ -211,12 +211,12 @@ describe("a parameter the tool does not declare is refused, not dropped", () => 
 
   // Not asserted through tools/list: zod-to-json-schema emits additionalProperties: false for a
   // stripping object too, so the advertised schema reads identically either way and cannot carry
-  // this. The schemas themselves can, and there are seventeen of them to keep honest.
+  // this. The schemas themselves can, and there are twenty-two of them to keep honest.
   it("holds for every tool, not just the two that were reported", () => {
     const schemas = registeredSchemas();
 
     // guards the guard: an empty map would satisfy the loop below without proving anything
-    expect(schemas.size).toBe(19);
+    expect(schemas.size).toBe(22);
 
     const permissive = [...schemas.entries()].filter(([, schema]) => {
       const result = schema.safeParse({ __stray__: 1 });

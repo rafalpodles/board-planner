@@ -143,6 +143,38 @@ export class PlannerClient {
     });
   }
 
+  async addChecklistItem(
+    projectId: string,
+    taskId: string,
+    item: { text: string; done: boolean }
+  ): Promise<{ checklist: { _id: string; text: string; done: boolean }[] }> {
+    return (await this.request("POST", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}/checklist`, item)) as never;
+  }
+
+  async setChecklistItem(
+    projectId: string,
+    taskId: string,
+    itemId: string,
+    change: { text?: string; done?: boolean }
+  ): Promise<{ checklist: { _id: string; text: string; done: boolean }[] }> {
+    return (await this.request(
+      "PATCH",
+      `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}/checklist/${seg(itemId)}`,
+      change
+    )) as never;
+  }
+
+  async removeChecklistItem(
+    projectId: string,
+    taskId: string,
+    itemId: string
+  ): Promise<{ checklist: { _id: string; text: string; done: boolean }[] }> {
+    return (await this.request(
+      "DELETE",
+      `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}/checklist/${seg(itemId)}`
+    )) as never;
+  }
+
   async listComments(projectId: string, taskId: string): Promise<unknown[]> {
     return this.request("GET", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}/comments`) as Promise<unknown[]>;
   }
