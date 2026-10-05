@@ -171,7 +171,10 @@ test.describe("BP-893: an organisation's life cycle", () => {
     expect((await upload(request, GLOBEX)).status()).toBe(200);
 
     await withDb(async (db) => {
-      await db.collection("projects").updateOne({ _id: ACME.projectId }, { $set: { githubToken: "enc:v3:e2e:sealed-github-token" } });
+      await db.collection("projects").updateOne(
+        { _id: ACME.projectId },
+        { $set: { githubToken: "enc:v3:e2e:sealed-github-token", webhooks: [{ name: "zapier", url: "https://hooks.example.test/catch/acme-receiver-token", events: [], enabled: true }] } }
+      );
       await db.collection("users").updateOne({ _id: ACME.adminId }, { $set: { "notifications.chat": { kind: "slack", webhookUrl: "enc:v3:e2e:sealed-webhook" } } });
       await db.collection("tasks").insertOne({
         organisation: ACME.organisation,
@@ -202,6 +205,7 @@ test.describe("BP-893: an organisation's life cycle", () => {
     expect(text).not.toContain(GLOBEX.projectName);
     expect(text).not.toMatch(/"[A-Za-z]*[Hh]ash"\s*:|"password"\s*:/);
     expect(text).not.toContain("enc:v3:");
+    expect(text).not.toContain("acme-receiver-token");
     // A field the schema hides from every read is still the organisation's data
     expect(text).toContain("acme-hidden-patch");
 
@@ -223,6 +227,17 @@ test.describe("BP-893: an organisation's life cycle", () => {
     expect(text).toContain(GLOBEX.projectName);
     expect(text).not.toContain(ACME.organisation.toHexString());
     await expect.poll(platformActions).toEqual(["organisation_suspended", "organisation_exported"]);
+    // Where Globex's own admins can see it
+    expect(await withDb(async (db) => db.collection("instanceauditlogs").countDocuments({ organisation: GLOBEX.organisation, action: "organisation_exported" }))).toBe(1);
+  });
+
+  test("while a delete is under way, the organisation can be neither resumed nor licensed", async ({ request }) => {
+    expect((await suspend(request, GLOBEX)).status()).toBe(200);
+    await withDb((db) => db.collection("organisations").updateOne({ _id: GLOBEX.organisation }, { $set: { deletingAt: new Date() } }));
+
+    expect((await resume(request, GLOBEX)).status()).toBe(409);
+    expect((await suspend(request, GLOBEX)).status()).toBe(409);
+    expect((await projects(request, GLOBEX)).status()).toBe(503);
   });
 
   test("the operator deletes an organisation: counts first, only once suspended and named, then nothing of it remains and the other keeps everything", async ({ request }) => {
@@ -253,7 +268,7 @@ test.describe("BP-893: an organisation's life cycle", () => {
     expect(tombstone).not.toHaveProperty("licenceKey");
     expect((await request.get(`${ORGANISATIONS_API}/api/auth/instance`, { headers: asOrganisation(GLOBEX) })).status()).toBe(404);
     expect((await remove(request, GLOBEX, "dryRun=1")).status()).toBe(404);
-    expect(await platformActions()).toEqual(["organisation_suspended", "organisation_deleted"]);
+    expect(await platformActions()).toEqual(["organisation_suspended", "organisation_delete_started", "organisation_deleted"]);
   });
 
   test("the default organisation can be neither suspended nor deleted", async ({ request }) => {
