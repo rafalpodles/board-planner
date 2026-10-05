@@ -153,6 +153,18 @@ export class PlannerClient {
     ) as Promise<unknown[]>;
   }
 
+  /** The caller's own account, which is who a watch is recorded for. */
+  async getMe(): Promise<{ _id: string; username: string }> {
+    return (await this.request("GET", "/api/auth/me")) as { _id: string; username: string };
+  }
+
+  /** The route flips the caller's watch; callers that want a state read it first. */
+  async toggleWatch(projectId: string, taskId: string): Promise<{ watching: boolean }> {
+    return (await this.request("POST", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}/watch`)) as {
+      watching: boolean;
+    };
+  }
+
   async listAgents(): Promise<unknown[]> {
     return this.request("GET", "/api/agents") as Promise<unknown[]>;
   }

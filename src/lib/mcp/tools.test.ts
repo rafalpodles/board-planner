@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, type MockInstance } from "vitest";
 import { z } from "zod";
 import { registerPlannerTools } from "./tools";
 import { PlannerClient } from "./planner-client";
@@ -508,5 +508,161 @@ describe("reorder_tasks", () => {
 
     expect(refusal.success).toBe(false);
     expect(refusal.error!.issues[0].message).toContain('"order" — use the reorder_tasks tool');
+  });
+});
+
+/**
+ * BP-905. The task object carried a due date, a sprint and a recurrence an agent could read and not
+ * write, and a watch could only be flipped. The write path already took all of them.
+ */
+describe("due date, sprint, recurrence and watching", () => {
+  const SPRINTS = [
+    { _id: "507f1f77bcf86cd799439011", name: "Sprint 4" },
+    { _id: "507f1f77bcf86cd799439012", name: "Hardening" },
+  ];
+
+  beforeEach(() => {
+    vi.spyOn(PlannerClient.prototype, "getProjectByKey").mockResolvedValue({ _id: "p1" } as never);
+    vi.spyOn(PlannerClient.prototype, "listSprints").mockResolvedValue(SPRINTS);
+  });
+
+  describe("create_task", () => {
+    const create = (args: Record<string, unknown>) =>
+      registered().get("create_task")!.handler({ project: "BP", title: "T", ...args }, extra);
+
+    it("writes all three, with the sprint resolved to its id", async () => {
+      const made = vi.spyOn(PlannerClient.prototype, "createTask").mockResolvedValue({});
+
+      await create({
+        dueDate: "2026-10-10",
+        sprint: "hardening",
+        recurrence: { frequency: "weekly", interval: 2, endDate: "2026-12-31" },
+      });
+
+      expect(made).toHaveBeenCalledWith("p1", {
+        title: "T",
+        dueDate: "2026-10-10",
+        sprint: "507f1f77bcf86cd799439012",
+        recurrence: { frequency: "weekly", interval: 2, endDate: "2026-12-31" },
+      });
+    });
+
+    it("refuses a sprint the board does not have, and writes nothing", async () => {
+      const made = vi.spyOn(PlannerClient.prototype, "createTask").mockResolvedValue({});
+
+      await expect(create({ sprint: "Nope" })).rejects.toThrow(/No sprint named "Nope".*Sprint 4, Hardening/);
+      await expect(create({ dueDate: "2026-02-31" })).rejects.toThrow(/Invalid dueDate/);
+      expect(made).not.toHaveBeenCalled();
+    });
+
+    it("puts a new task in no sprint on backlog", async () => {
+      const made = vi.spyOn(PlannerClient.prototype, "createTask").mockResolvedValue({});
+
+      await create({ sprint: "backlog" });
+
+      expect(made).toHaveBeenCalledWith("p1", { title: "T" });
+    });
+  });
+
+  describe("update_task", () => {
+    const update = (args: Record<string, unknown>) =>
+      registered().get("update_task")!.handler({ taskKey: "BP-1", ...args }, extra);
+
+    it("sets each, and any one of them alone is something to change", async () => {
+      const wrote = vi.spyOn(PlannerClient.prototype, "updateTask").mockResolvedValue({});
+
+      await update({ dueDate: "2026-10-10" });
+      await update({ sprint: "Sprint 4" });
+      await update({ recurrence: { frequency: "monthly", interval: 1 } });
+
+      expect(wrote.mock.calls.map((c) => c[2])).toEqual([
+        { dueDate: "2026-10-10" },
+        { sprint: "507f1f77bcf86cd799439011" },
+        { recurrence: { frequency: "monthly", interval: 1 } },
+      ]);
+    });
+
+    it("clears each: an empty due date, the backlog (or an empty sprint), a null recurrence", async () => {
+      const wrote = vi.spyOn(PlannerClient.prototype, "updateTask").mockResolvedValue({});
+
+      await update({ dueDate: "" });
+      await update({ sprint: "backlog" });
+      await update({ sprint: "" });
+      await update({ recurrence: null });
+
+      expect(wrote.mock.calls.map((c) => c[2])).toEqual([
+        { dueDate: null },
+        { sprint: null },
+        { sprint: null },
+        { recurrence: null },
+      ]);
+    });
+
+    it("refuses what the route would refuse, before writing", async () => {
+      const wrote = vi.spyOn(PlannerClient.prototype, "updateTask").mockResolvedValue({});
+
+      await expect(update({ sprint: "507f1f77bcf86cd7994390ff" })).rejects.toThrow(/No sprint named/);
+      await expect(update({ dueDate: "soon" })).rejects.toThrow(/Invalid dueDate/);
+      expect(wrote).not.toHaveBeenCalled();
+    });
+
+    it("declares recurrence so that a series outside what the route accepts never leaves", () => {
+      const { schema } = registered().get("update_task")!;
+      const parse = (recurrence: unknown) => schema.safeParse({ taskKey: "BP-1", recurrence }).success;
+
+      expect(parse({ frequency: "weekly", interval: 2 })).toBe(true);
+      expect(parse(null)).toBe(true);
+      expect(parse({ frequency: "yearly", interval: 1 })).toBe(false);
+      expect(parse({ frequency: "daily", interval: 0 })).toBe(false);
+      expect(parse({ frequency: "daily", interval: 366 })).toBe(false);
+    });
+  });
+
+  describe("watch_task and unwatch_task", () => {
+    const ME = { _id: "u1", username: "rafal" };
+    let toggle: MockInstance<PlannerClient["toggleWatch"]>;
+
+    beforeEach(() => {
+      vi.spyOn(PlannerClient.prototype, "getMe").mockResolvedValue(ME);
+      toggle = vi.spyOn(PlannerClient.prototype, "toggleWatch").mockResolvedValue({ watching: true });
+    });
+
+    const watching = (watchers: unknown[]) =>
+      vi.spyOn(PlannerClient.prototype, "getTask").mockResolvedValue({ watchers });
+    const run = (name: string) => registered().get(name)!.handler({ taskKey: "bp-1" }, extra);
+    const parse = (result: unknown) => JSON.parse((result as { content: { text: string }[] }).content[0].text);
+
+    it("watches a task that is not watched", async () => {
+      watching(["u2"]);
+
+      expect(parse(await run("watch_task"))).toEqual({ taskKey: "BP-1", watching: true });
+      expect(toggle).toHaveBeenCalledTimes(1);
+    });
+
+    it("leaves a task already watched alone, so a retry cannot undo itself", async () => {
+      watching(["u1"]);
+
+      expect(parse(await run("watch_task"))).toEqual({ taskKey: "BP-1", watching: true });
+      expect(toggle).not.toHaveBeenCalled();
+    });
+
+    it("stops watching a task that is watched, and leaves one that is not", async () => {
+      watching(["u1", "u2"]);
+      await run("unwatch_task");
+      expect(toggle).toHaveBeenCalledTimes(1);
+
+      toggle.mockClear();
+      watching(["u2"]);
+      expect(parse(await run("unwatch_task"))).toEqual({ taskKey: "BP-1", watching: false });
+      expect(toggle).not.toHaveBeenCalled();
+    });
+
+    it("reads a watcher whether the API sent an id or a populated user", async () => {
+      watching([{ _id: "u1", username: "rafal" }]);
+
+      await run("watch_task");
+
+      expect(toggle).not.toHaveBeenCalled();
+    });
   });
 });

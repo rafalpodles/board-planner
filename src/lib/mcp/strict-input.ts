@@ -56,10 +56,7 @@ export const NOTHING_TO_CHANGE = "named nothing to change. Nothing was written."
  * a refusal that named them and pointed nowhere would be a different kind of unhelpful.
  */
 const UNREACHABLE_TASK_FIELDS: Record<string, string> = {
-  dueDate: "the app — MCP does not set it",
-  sprint: "the app — MCP does not set it",
-  recurrence: "the app — MCP does not set it",
-  watchers: "the app — MCP does not set them",
+  watchers: "the watch_task and unwatch_task tools, which watch for the caller",
 };
 
 const TASK_FIELD_HINTS: Record<string, string> = {

@@ -15,6 +15,14 @@ import {
   taskIdsInOrder,
 } from "./strict-input";
 import { MAX_REORDER_IDS } from "@/lib/reorder";
+import {
+  DUE_DATE_PARAM,
+  RECURRENCE_PARAM,
+  SPRINT_PARAM,
+  dueDateValue,
+  recurrenceValue,
+  sprintForWrite,
+} from "./task-fields";
 
 type ToolExtra = { authInfo?: AuthInfo };
 
@@ -139,6 +147,9 @@ export function registerPlannerTools(server: McpServer): void {
           .string()
           .optional()
           .describe("Acceptance criteria (markdown checklist, converted to structured checklist items)"),
+        dueDate: DUE_DATE_PARAM,
+        sprint: SPRINT_PARAM,
+        recurrence: RECURRENCE_PARAM,
         fields: z
           .record(z.any())
           .optional()
@@ -148,7 +159,10 @@ export function registerPlannerTools(server: McpServer): void {
           ),
       }, { hints: CREATE_TASK_HINTS, writes: true }),
     },
-    async ({ project, title, description, priority, category, assignee, status, acceptanceCriteria, fields }, extra) => {
+    async (
+      { project, title, description, priority, category, assignee, status, acceptanceCriteria, dueDate, sprint, recurrence, fields },
+      extra
+    ) => {
       const client = clientFrom(extra);
       const proj = await client.getProjectByKey(project);
       const data: Record<string, unknown> = { title };
@@ -158,6 +172,12 @@ export function registerPlannerTools(server: McpServer): void {
       if (category) data.category = category;
       if (status) data.status = status;
       if (acceptanceCriteria) data.acceptanceCriteria = acceptanceCriteria;
+      if (dueDate) data.dueDate = dueDateValue(dueDate);
+      if (recurrence) data.recurrence = recurrenceValue(recurrence);
+      if (sprint) {
+        const id = sprintForWrite(sprint, (await client.listSprints(proj._id)) as { _id: string; name: string }[]);
+        if (id) data.sprint = id;
+      }
       if (fields && Object.keys(fields).length) {
         data.customFieldValues = resolveFieldsByName(fields, proj.customFields || []);
       }
@@ -209,6 +229,9 @@ export function registerPlannerTools(server: McpServer): void {
           .string()
           .optional()
           .describe("Acceptance criteria (markdown checklist, converted to structured checklist items)"),
+        dueDate: DUE_DATE_PARAM,
+        sprint: SPRINT_PARAM,
+        recurrence: RECURRENCE_PARAM,
         fields: z
           .record(z.any())
           .optional()
@@ -218,11 +241,14 @@ export function registerPlannerTools(server: McpServer): void {
           ),
       }, { hints: UPDATE_TASK_HINTS, writes: true }),
     },
-    async ({ taskKey, title, description, priority, category, assignee, agent, acceptanceCriteria, fields }, extra) => {
+    async (
+      { taskKey, title, description, priority, category, assignee, agent, acceptanceCriteria, dueDate, sprint, recurrence, fields },
+      extra
+    ) => {
       // Before the lookup, so a call that changes nothing costs nothing and the refusal is the
       // first thing that happens rather than the last
       if (
-        ![title, description, priority, category, assignee, agent, acceptanceCriteria].some(
+        ![title, description, priority, category, assignee, agent, acceptanceCriteria, dueDate, sprint, recurrence].some(
           (v) => v !== undefined
         ) &&
         !Object.keys(fields || {}).length
@@ -239,6 +265,11 @@ export function registerPlannerTools(server: McpServer): void {
       if (priority !== undefined) data.priority = priority;
       if (category !== undefined) data.category = category;
       if (acceptanceCriteria !== undefined) data.acceptanceCriteria = acceptanceCriteria;
+      if (dueDate !== undefined) data.dueDate = dueDateValue(dueDate);
+      if (recurrence !== undefined) data.recurrence = recurrenceValue(recurrence);
+      if (sprint !== undefined) {
+        data.sprint = sprintForWrite(sprint, (await client.listSprints(projectId)) as { _id: string; name: string }[]);
+      }
 
       if (fields && Object.keys(fields).length) {
         // customFieldValues is replaced wholesale by the API, so naming one field
@@ -302,6 +333,31 @@ export function registerPlannerTools(server: McpServer): void {
       return json(await client.updateTask(projectId, taskId, data));
     }
   );
+
+  // The route flips the caller's watch, and a retried flip undoes itself — so these read the state
+  // first and only flip toward the one asked for.
+  for (const [name, want] of [["watch_task", true], ["unwatch_task", false]] as const) {
+    server.registerTool(
+      name,
+      {
+        description: want
+          ? "Watch a task as the caller, so its changes reach you. Safe to repeat: watching a task already watched changes nothing."
+          : "Stop watching a task as the caller. Safe to repeat: a task not watched stays unwatched.",
+        inputSchema: strictInput({ taskKey: z.string().describe("Task key (e.g. 'CP-1')") }, { writes: true }),
+      },
+      async ({ taskKey }, extra) => {
+        const client = clientFrom(extra);
+        const { projectId, taskId } = await client.resolveTaskKey(taskKey);
+        const [me, task] = await Promise.all([
+          client.getMe(),
+          client.getTask(projectId, taskId) as Promise<{ watchers?: unknown[] }>,
+        ]);
+        const watching = (task.watchers ?? []).some((w) => String((w as { _id?: unknown })?._id ?? w) === String(me._id));
+        if (watching !== want) await client.toggleWatch(projectId, taskId);
+        return json({ taskKey: taskKey.toUpperCase(), watching: want });
+      }
+    );
+  }
 
   server.registerTool(
     "change_task_status",
