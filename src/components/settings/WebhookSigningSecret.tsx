@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import type { WebhookSigning } from "@/app/api/projects/[projectId]/webhooks/signing-secret/route";
 
 export function WebhookSigningSecret({ projectId }: { projectId: string }) {
@@ -11,6 +12,8 @@ export function WebhookSigningSecret({ projectId }: { projectId: string }) {
   const { toast } = useToast();
   const [signing, setSigning] = useState<WebhookSigning | null>(null);
   const [copied, setCopied] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [rotating, setRotating] = useState(false);
 
   async function show() {
     try {
@@ -21,11 +24,15 @@ export function WebhookSigningSecret({ projectId }: { projectId: string }) {
   }
 
   async function rotate() {
+    setRotating(true);
     try {
       setSigning(await api.post(`/api/projects/${projectId}/webhooks/signing-secret`, {}));
       toast("New signing secret — give it to every receiver", "success");
     } catch (error) {
       toast(error instanceof Error ? error.message : "Could not rotate the signing secret", "error");
+    } finally {
+      setRotating(false);
+      setConfirming(false);
     }
   }
 
@@ -64,11 +71,20 @@ export function WebhookSigningSecret({ projectId }: { projectId: string }) {
         <Button size="sm" variant="secondary" onClick={() => copy(signing.secret)}>
           {copied ? "Copied!" : "Copy"}
         </Button>
-        <Button size="sm" variant="secondary" onClick={rotate}>
+        <Button size="sm" variant="secondary" onClick={() => setConfirming(true)}>
           Rotate
         </Button>
       </div>
       <p className="text-xs text-text-muted">This project&apos;s key for verifying deliveries.</p>
+      <ConfirmDialog
+        open={confirming}
+        onClose={() => setConfirming(false)}
+        onConfirm={rotate}
+        title="Rotate signing secret"
+        message="Every receiver rejects deliveries until it has the new key."
+        confirmLabel="Rotate"
+        loading={rotating}
+      />
     </div>
   );
 }

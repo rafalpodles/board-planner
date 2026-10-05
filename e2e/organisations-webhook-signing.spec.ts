@@ -86,6 +86,10 @@ test.describe("BP-669: each project signs its webhook deliveries with its own ke
 
     await test.step("rotating on screen retires the old key: the next delivery verifies with the new one only", async () => {
       await page.getByRole("button", { name: "Rotate" }).click();
+      const dialog = page.getByRole("dialog", { name: "Rotate signing secret" });
+      await expect(dialog).toBeVisible();
+      await expect(page.getByTestId("webhook-signing-secret")).toHaveText(shown);
+      await dialog.getByRole("button", { name: "Rotate" }).click();
       const shownAfter = page.getByTestId("webhook-signing-secret");
       await expect(shownAfter).not.toHaveText(shown);
       const rotated = (await shownAfter.textContent())!;
