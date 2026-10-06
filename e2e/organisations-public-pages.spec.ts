@@ -36,6 +36,7 @@ test.describe("BP-921: public pages on a host that serves no organisation", () =
     await expect(page.getByTestId("no-organisation-here").getByRole("link")).toHaveAttribute("href", "/");
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto(`${originOf("nosuch")}/login`);
+    await expect(page.getByTestId("no-organisation-here")).toBeVisible();
     await page.screenshot({ path: "e2e/.artifacts/bp921-no-organisation-phone.png" });
   });
 
