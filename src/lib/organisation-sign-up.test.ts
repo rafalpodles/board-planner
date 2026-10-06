@@ -12,7 +12,10 @@ const { hash, create, deleteOne, userCreate, seedAgents, purgeOrganisationRows, 
 }));
 
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
-vi.mock("bcryptjs", () => ({ default: { hash } }));
+vi.mock("bcryptjs", async (original) => {
+  const real = (await original<{ default: object }>()).default;
+  return { default: { ...real, hash } };
+});
 vi.mock("@/models/organisation", () => ({ Organisation: { create, deleteOne } }));
 vi.mock("./db-scope", () => ({ scoped: (organisation: unknown) => ({ organisation, User: { create: userCreate } }) }));
 vi.mock("./agent-seed", () => ({ seedAgents }));
