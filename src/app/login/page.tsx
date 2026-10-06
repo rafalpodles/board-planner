@@ -72,6 +72,8 @@ export default function LoginPage() {
     const query = new URLSearchParams(window.location.search);
     const reason = query.get("sso");
     if (reason) setSsoReason(reason);
+    const handoff = query.get("handoff");
+    if (handoff) setSsoReason(handoff === "throttled" ? "throttled" : "handoff_expired");
     if (query.get("next")) setNext(safeNextPath(query.get("next")));
   }, []);
 

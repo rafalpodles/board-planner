@@ -146,6 +146,7 @@ export interface IUser {
   fullName: string;
   email: string;
   emailVerifiedAt?: Date | null;
+  emailVouchedByAdmin?: boolean;
   deactivatedAt?: Date | null;
   lastSignInAt?: Date | null;
   /** @deprecated Superseded by `notifications`. Kept as the fallback for accounts that predate it. */

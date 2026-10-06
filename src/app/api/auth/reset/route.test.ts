@@ -111,7 +111,7 @@ describe("POST /api/auth/reset", () => {
     // account's: an address changed meanwhile was never reached (BP-842)
     expect(userUpdateOne).toHaveBeenCalledWith(
       { _id: "u1", email: "owner@example.com", organisation: DEFAULT_ORGANISATION_ID },
-      { $set: { emailVerifiedAt: expect.any(Date) } }
+      { $set: { emailVerifiedAt: expect.any(Date), emailVouchedByAdmin: false } }
     );
     // Whoever knew the old password is signed out — usually the reason somebody is resetting
     expect(revokeUserCredentials).toHaveBeenCalledWith("u1");

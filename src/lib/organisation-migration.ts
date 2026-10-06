@@ -3,7 +3,7 @@ import "@/models/all";
 import { DEFAULT_ORGANISATION_ID } from "./organisation-field";
 import { UPLOAD_BUCKET } from "./upload-ownership";
 
-export const UNSCOPED_MODELS = ["Organisation", "RateLimit", "PlatformAuditLog"];
+export const UNSCOPED_MODELS = ["Organisation", "RateLimit", "PlatformAuditLog", "PlatformSignIn"];
 
 export const scopedModelNames = () =>
   mongoose.modelNames().filter((name) => !UNSCOPED_MODELS.includes(name));

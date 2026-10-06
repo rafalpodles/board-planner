@@ -195,7 +195,7 @@ describe("PUT /api/users/me — changing the address that can reset the password
     expect(response.status).toBe(200);
     expect(userFindOneAndUpdate).toHaveBeenCalledWith(
       { _id: "u1", organisation: DEFAULT_ORGANISATION_ID },
-      { $set: { email: "new@example.com", emailVerifiedAt: null } },
+      { $set: { email: "new@example.com", emailVerifiedAt: null, emailVouchedByAdmin: false } },
       expect.anything()
     );
     expect(issueEmailChange).not.toHaveBeenCalled();
@@ -215,7 +215,7 @@ describe("PUT /api/users/me — changing the address that can reset the password
     expect(response.status).toBe(200);
     expect(userFindOneAndUpdate).toHaveBeenCalledWith(
       { _id: "u1", organisation: DEFAULT_ORGANISATION_ID },
-      { $set: { email: "", emailVerifiedAt: null } },
+      { $set: { email: "", emailVerifiedAt: null, emailVouchedByAdmin: false } },
       expect.anything()
     );
     expect(cancelEmailChange).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "u1");

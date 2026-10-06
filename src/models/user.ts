@@ -49,6 +49,10 @@ const userSchema = new Schema<IUser>({
     type: Date,
     default: null,
   },
+  emailVouchedByAdmin: {
+    type: Boolean,
+    default: false,
+  },
   // Set while an administrator has turned the account off: it keeps its history and signs in by
   // no path, holds no credential and is offered to nobody (BP-832)
   deactivatedAt: {

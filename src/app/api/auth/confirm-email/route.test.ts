@@ -65,7 +65,7 @@ describe("POST /api/auth/confirm-email", () => {
     // Confirming is what proves the address, which is what a sign-in provider links by (BP-828)
     expect(userUpdateOne).toHaveBeenCalledWith(
       { _id: "u1", organisation: DEFAULT_ORGANISATION_ID },
-      { $set: { email: "new@example.com", emailVerifiedAt: expect.any(Date) } }
+      { $set: { email: "new@example.com", emailVerifiedAt: expect.any(Date), emailVouchedByAdmin: false } }
     );
     expect(invalidateResetTokens).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "u1");
     // BP-826: an invitation to the address would otherwise come back when this account left it

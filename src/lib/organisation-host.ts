@@ -166,6 +166,14 @@ export type RequestOrganisation =
   | { kind: "platform" }
   | { kind: "none" };
 
+export function isPlatformHost(host: string | null): boolean {
+  const domain = organisationDomain();
+  if (!domain) return false;
+  const defaultHost = defaultOrganisationHost();
+  if (defaultHost && hostName(host) === defaultHost) return false;
+  return classifyHost(host, domain).kind === "platform";
+}
+
 export async function organisationOfRequest(request: Request): Promise<RequestOrganisation> {
   const domain = organisationDomain();
   if (!domain) return { kind: "organisation", organisation: DEFAULT_ORGANISATION_ID };
