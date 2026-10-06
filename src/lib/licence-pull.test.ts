@@ -83,6 +83,8 @@ describe("pullLicence (BP-897)", () => {
     expect(await pullLicence(config, organisation)).toEqual({ status: "refused", httpStatus: 401 });
     fetchMock.mockRejectedValueOnce(new Error("ECONNREFUSED"));
     expect(await pullLicence(config, organisation)).toEqual({ status: "unreachable" });
+    fetchMock.mockResolvedValueOnce(new Response("x".repeat(70_000), { status: 200 }));
+    expect(await pullLicence(config, organisation)).toEqual({ status: "oversized" });
     expect(storeOrganisationLicence).not.toHaveBeenCalled();
   });
 });

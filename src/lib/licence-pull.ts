@@ -68,7 +68,7 @@ export function assertLicencePullConfig(): void {
   licencePullConfig();
 }
 
-export type PullOutcome = StoreOutcome | { status: "none" } | { status: "refused"; httpStatus: number } | { status: "unreachable" };
+export type PullOutcome = StoreOutcome | { status: "none" } | { status: "refused"; httpStatus: number } | { status: "unreachable" } | { status: "oversized" };
 
 export async function pullLicence(config: LicencePullConfig, organisation: { _id: { toHexString(): string }; name?: string; slug?: string | null }): Promise<PullOutcome> {
   const id = organisation._id.toHexString();
@@ -89,8 +89,12 @@ export async function pullLicence(config: LicencePullConfig, organisation: { _id
   }
   if (!response.ok) return { status: "refused", httpStatus: response.status };
 
+  if (Number(response.headers.get("content-length") ?? 0) > MAX_RESPONSE_BYTES) {
+    await response.body?.cancel().catch(() => {});
+    return { status: "oversized" };
+  }
   const text = await response.text().catch(() => "");
-  if (text.length > MAX_RESPONSE_BYTES) return { status: "refused", httpStatus: response.status };
+  if (Buffer.byteLength(text) > MAX_RESPONSE_BYTES) return { status: "oversized" };
   let answer: { licenceKey?: unknown } | null = null;
   try {
     answer = JSON.parse(text);
@@ -107,7 +111,7 @@ export async function pullEveryLicence(config: LicencePullConfig): Promise<void>
     const row = await Organisation.findById(db.organisation).select("name slug").lean();
     if (!row) return;
     const outcome = await pullLicence(config, row);
-    if (outcome.status === "refused" || outcome.status === "unreachable" || outcome.status === "invalid") {
+    if (outcome.status === "refused" || outcome.status === "unreachable" || outcome.status === "invalid" || outcome.status === "oversized") {
       console.warn(`Licence pull: ${outcome.status}${"httpStatus" in outcome ? ` (${outcome.httpStatus})` : ""}`);
     }
   });
