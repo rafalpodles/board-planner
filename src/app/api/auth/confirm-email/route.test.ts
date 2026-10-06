@@ -3,6 +3,7 @@ import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const consumeEmailChange = vi.fn();
 const releaseEmailChange = vi.fn();
+const cancelEmailChange = vi.fn();
 const invalidateResetTokens = vi.fn();
 const logInstanceAudit = vi.fn();
 const notifyAddressChanged = vi.fn();
@@ -18,7 +19,7 @@ vi.mock("@/models/rateLimit", async () => {
   const { inMemoryRateLimitModel } = await import("@/lib/rate-limit-test-store");
   return { RateLimit: inMemoryRateLimitModel() };
 });
-vi.mock("@/lib/email-change", () => ({ consumeEmailChange, releaseEmailChange }));
+vi.mock("@/lib/email-change", () => ({ consumeEmailChange, releaseEmailChange, cancelEmailChange }));
 vi.mock("@/lib/password-reset", () => ({ invalidateResetTokens }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/lib/security-mail", () => ({ notifyAddressChanged }));
@@ -45,12 +46,12 @@ function post(body: unknown = { token: "cpe_good" }) {
 beforeEach(async () => {
   vi.clearAllMocks();
   await resetRateLimits();
-  consumeEmailChange.mockResolvedValue({ ok: true, userId: "u1", email: "new@example.com", claimedAt: CLAIMED });
+  consumeEmailChange.mockResolvedValue({ ok: true, userId: "u1", email: "new@example.com", claimedAt: CLAIMED, ofCurrentAddress: false });
   userFindOne.mockReturnValue({
     select: () => Promise.resolve({ _id: "u1", username: "owner", kind: "human", email: "old@example.com" }),
   });
   userExists.mockResolvedValue(null);
-  userUpdateOne.mockResolvedValue({});
+  userUpdateOne.mockResolvedValue({ matchedCount: 1 });
   releaseEmailChange.mockResolvedValue(undefined);
   provenanceRefusal.mockReturnValue(null);
 });
@@ -68,6 +69,7 @@ describe("POST /api/auth/confirm-email", () => {
       { $set: { email: "new@example.com", emailVerifiedAt: expect.any(Date), emailVouchedByAdmin: false } }
     );
     expect(invalidateResetTokens).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "u1");
+    expect(cancelEmailChange).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "u1");
     // BP-826: an invitation to the address would otherwise come back when this account left it
     expect(revokePendingInvitationsFor).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "new@example.com");
   });
@@ -174,14 +176,38 @@ describe("POST /api/auth/confirm-email", () => {
     expect(releaseEmailChange).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "cpe_good", CLAIMED);
   });
 
-  it("writes, audits and mails nothing when the address is already the one on the account", async () => {
-    consumeEmailChange.mockResolvedValue({ ok: true, userId: "u1", email: "old@example.com" });
+  it("records the proof, and only the proof, when the address is already the one on the account", async () => {
+    consumeEmailChange.mockResolvedValue({ ok: true, userId: "u1", email: "old@example.com", claimedAt: CLAIMED, ofCurrentAddress: true });
 
     const response = await POST(post());
 
     expect(response.status).toBe(200);
+    expect(userUpdateOne).toHaveBeenCalledTimes(1);
+    expect(userUpdateOne).toHaveBeenCalledWith(
+      { _id: "u1", email: "old@example.com", organisation: expect.anything() },
+      { $set: { emailVerifiedAt: expect.any(Date), emailVouchedByAdmin: false } }
+    );
+    expect(logInstanceAudit).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ action: "user_email_confirmed_self", detail: "old@example.com" }));
+    expect(notifyAddressChanged).not.toHaveBeenCalled();
+  });
+
+  it("refuses a link issued to confirm the address the account had once it has another, and moves nothing", async () => {
+    consumeEmailChange.mockResolvedValue({ ok: true, userId: "u1", email: "older@example.com", claimedAt: CLAIMED, ofCurrentAddress: true });
+
+    const response = await POST(post());
+
+    expect(response.status).toBe(400);
     expect(userUpdateOne).not.toHaveBeenCalled();
     expect(logInstanceAudit).not.toHaveBeenCalled();
-    expect(notifyAddressChanged).not.toHaveBeenCalled();
+  });
+
+  it("says nothing was confirmed when the address changed between reading it and recording the proof", async () => {
+    consumeEmailChange.mockResolvedValue({ ok: true, userId: "u1", email: "old@example.com", claimedAt: CLAIMED, ofCurrentAddress: true });
+    userUpdateOne.mockResolvedValue({ matchedCount: 0 });
+
+    const response = await POST(post());
+
+    expect(response.status).toBe(400);
+    expect(logInstanceAudit).not.toHaveBeenCalled();
   });
 });

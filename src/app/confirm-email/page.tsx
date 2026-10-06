@@ -75,7 +75,7 @@ export default function ConfirmEmailPage() {
       <div className="w-full max-w-sm text-center">
         <h1 className="text-2xl font-bold mb-2">Confirm this email address</h1>
         <p className="text-sm text-text-muted mb-6">
-          It replaces the address on your account and receives password reset links from now on.
+          Once confirmed, it is the address on your account and receives password reset links.
         </p>
         {error && (
           <p role="alert" className="text-sm text-danger mb-4">

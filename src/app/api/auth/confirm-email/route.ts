@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { scopedForRequest } from "@/lib/db-scope";
 import { getClientIp } from "@/lib/auth";
-import { consumeEmailChange, releaseEmailChange } from "@/lib/email-change";
+import { cancelEmailChange, consumeEmailChange, releaseEmailChange } from "@/lib/email-change";
 import { revokePendingInvitationsFor } from "@/lib/invitations";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { duplicateKeyField } from "@/lib/mongo-errors";
@@ -55,6 +55,10 @@ export async function POST(request: Request) {
   }
   const previousEmail = user.email ?? "";
 
+  if (outcome.ofCurrentAddress && previousEmail !== outcome.email) {
+    return NextResponse.json({ error: REFUSALS.unknown }, { status: 400 });
+  }
+
   if (previousEmail !== outcome.email) {
     const taken = await db.User.exists({ email: outcome.email, _id: { $ne: user._id } });
     if (taken) {
@@ -72,6 +76,7 @@ export async function POST(request: Request) {
       throw err;
     }
     await revokePendingInvitationsFor(db, outcome.email);
+    await cancelEmailChange(db, user._id);
 
     // A link already sent to the old inbox must not outlive the move away from it
     await invalidateResetTokens(db, user._id);
@@ -84,6 +89,19 @@ export async function POST(request: Request) {
       detail: `${previousEmail || "none"} → ${outcome.email}`,
     });
     void notifyAddressChanged({ previousEmail, username: user.username, newEmail: outcome.email });
+  } else {
+    const proved = await db.User.updateOne(
+      { _id: user._id, email: outcome.email },
+      { $set: { emailVerifiedAt: new Date(), emailVouchedByAdmin: false } }
+    );
+    if (proved.matchedCount === 0) return NextResponse.json({ error: REFUSALS.unknown }, { status: 400 });
+    void logInstanceAudit(db, {
+      action: "user_email_confirmed_self",
+      user: user._id,
+      actorUsername: user.username,
+      target: user.username,
+      detail: outcome.email,
+    });
   }
 
   return NextResponse.json({ ok: true, email: outcome.email });

@@ -201,6 +201,7 @@ export interface AddressConfirmationNotice {
   email: string;
   username: string;
   confirmUrl: string;
+  alreadyOnTheAccount?: boolean;
 }
 
 /**
@@ -213,7 +214,9 @@ export async function sendAddressConfirmation(n: AddressConfirmationNotice): Pro
     kicker: "Account security",
     heading: "Confirm this email address",
     intro: [
-      `The account ${n.username} asked to use this address. It takes effect only once you confirm it here, and the link works for 24 hours.`,
+      n.alreadyOnTheAccount
+        ? `The account ${n.username} already uses this address, and its owner asked to confirm it. Confirming proves the address is yours, and the link works for 24 hours.`
+        : `The account ${n.username} asked to use this address. It takes effect only once you confirm it here, and the link works for 24 hours.`,
     ],
     rows: [{ label: "Account", value: n.username }],
     button: { label: "Confirm this address", url: n.confirmUrl },

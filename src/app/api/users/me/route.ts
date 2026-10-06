@@ -5,7 +5,7 @@ import { connectDB } from "@/lib/db";
 import { getClientIp } from "@/lib/auth";
 import { isValidEmail, normaliseEmail } from "@/lib/email";
 import { notifyAddressChanged, sendAddressConfirmation } from "@/lib/security-mail";
-import { cancelEmailChange, issueEmailChange } from "@/lib/email-change";
+import { CONFIRMATIONS_PER_WINDOW, cancelEmailChange, issueEmailChange } from "@/lib/email-change";
 import { isEmailConfigured } from "@/lib/email";
 import { originFor } from "@/lib/organisation-host";
 import { logInstanceAudit } from "@/lib/instanceAudit";
@@ -21,9 +21,6 @@ import {
   sourceKey,
   withLockout,
 } from "@/lib/rate-limit";
-
-// Confirmation mails one account may send in the rate limiter's window
-const CONFIRMATIONS_PER_WINDOW = 3;
 
 export const PUT = withAuth(async (request, { user, db }) => {
   await connectDB();

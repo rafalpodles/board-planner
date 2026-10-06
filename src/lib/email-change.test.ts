@@ -33,6 +33,14 @@ describe("email change links", () => {
     expect(deleteMany.mock.invocationCallOrder[0]).toBeLessThan(create.mock.invocationCallOrder[0]);
   });
 
+  it("remembers that a link only confirms the address the account had when it was sent", async () => {
+    await issueEmailChange(scopedToDefaultOrganisation(), "u1", "pat@example.com", { ofCurrentAddress: true });
+    expect(create.mock.calls[0][0].ofCurrentAddress).toBe(true);
+
+    findOneAndUpdate.mockResolvedValue({ user: "u1", email: "pat@example.com", ofCurrentAddress: true });
+    expect(await consumeEmailChange(scopedToDefaultOrganisation(), "cpe_x")).toMatchObject({ ofCurrentAddress: true });
+  });
+
   it("gives a link a day", async () => {
     const before = Date.now();
     await issueEmailChange(scopedToDefaultOrganisation(), "u1", "new@example.com");
@@ -47,7 +55,7 @@ describe("email change links", () => {
 
     const outcome = await consumeEmailChange(scopedToDefaultOrganisation(), "cpe_x");
 
-    expect(outcome).toEqual({ ok: true, userId: "u1", email: "new@example.com", claimedAt: expect.any(Date) });
+    expect(outcome).toEqual({ ok: true, userId: "u1", email: "new@example.com", claimedAt: expect.any(Date), ofCurrentAddress: false });
     const [filter, update] = findOneAndUpdate.mock.calls[0];
     expect(filter).toEqual({ tokenHash: sha256("cpe_x"), usedAt: null, expiresAt: { $gt: expect.any(Date) }, organisation: DEFAULT_ORGANISATION_ID });
     expect(update).toEqual({ $set: { usedAt: expect.any(Date) } });
