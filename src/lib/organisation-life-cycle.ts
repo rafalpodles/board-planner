@@ -23,6 +23,7 @@ export const NOT_EXPORTED: Record<string, string> = {
   OAuthConsent: "a consent screen in flight",
   OidcFlow: "a provider sign-in in flight",
   PasswordResetToken: "a reset link",
+  HandoffCode: "a sign-in in flight",
   EmailChangeToken: "a confirmation link",
   EnrolmentToken: "a machine enrolment code",
   DeviceEnrolment: "a machine enrolment in flight",

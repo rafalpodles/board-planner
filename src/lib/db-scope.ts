@@ -9,6 +9,7 @@ import { DeviceEnrolment } from "@/models/deviceEnrolment";
 import { EmailChangeToken } from "@/models/emailChangeToken";
 import { EnrolmentToken } from "@/models/enrolmentToken";
 import { Grant } from "@/models/grant";
+import { HandoffCode } from "@/models/handoffCode";
 import { Identity } from "@/models/identity";
 import { InstanceAuditLog } from "@/models/instanceAuditLog";
 import { Invitation } from "@/models/invitation";
@@ -45,6 +46,7 @@ export const SCOPED_MODELS = {
   EmailChangeToken: () => EmailChangeToken,
   EnrolmentToken: () => EnrolmentToken,
   Grant: () => Grant,
+  HandoffCode: () => HandoffCode,
   Identity: () => Identity,
   InstanceAuditLog: () => InstanceAuditLog,
   Invitation: () => Invitation,

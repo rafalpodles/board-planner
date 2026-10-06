@@ -49,7 +49,7 @@ describe("backfillOrganisations", () => {
     expect(touched).not.toContain("organisations");
     expect(touched).not.toContain("ratelimits");
     expect(touched).not.toContain("platformauditlogs");
-    expect(UNSCOPED_MODELS).toEqual(["Organisation", "RateLimit", "PlatformAuditLog"]);
+    expect(UNSCOPED_MODELS).toEqual(["Organisation", "RateLimit", "PlatformAuditLog", "PlatformSignIn"]);
   });
 
   it("only counts in a dry run", async () => {
