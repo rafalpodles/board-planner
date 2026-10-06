@@ -1,4 +1,4 @@
-import { hostNotFound } from "@/lib/middleware";
+import { refusedHost } from "@/lib/middleware";
 import { NextResponse } from "next/server";
 import { passwordSignInEnabled, passwordSignInOff } from "@/lib/password-sign-in";
 import { readJsonBody } from "@/lib/request-body";
@@ -34,7 +34,7 @@ const REQUESTS_PER_SOURCE = 10;
 
 export async function POST(request: Request) {
   const db = await scopedForRequest(request);
-  if (!db) return hostNotFound();
+  if (!db) return refusedHost(request);
   if (!passwordSignInEnabled()) return passwordSignInOff();
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;

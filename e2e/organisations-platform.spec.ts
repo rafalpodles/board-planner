@@ -25,7 +25,7 @@ const EMPTY = new Uint8Array();
 
 function signedGet(request: APIRequestContext, path: string, { sign = path }: { sign?: string } = {}) {
   return request.get(`${ORGANISATIONS_API}${path}`, {
-    headers: { host: PLATFORM_HOST, ...signPlatformRequest({ method: "GET", path: sign, body: EMPTY }, E2E_PLATFORM_REQUEST_KEY) },
+    headers: { host: PLATFORM_HOST, ...signPlatformRequest({ method: "GET", host: PLATFORM_HOST, path: sign, body: EMPTY }, E2E_PLATFORM_REQUEST_KEY) },
   });
 }
 
@@ -33,7 +33,7 @@ function pushLicence(request: APIRequestContext, who: OrganisationFixture) {
   const path = `/api/platform/organisations/${who.organisation.toHexString()}/licence`;
   const body = Buffer.from(JSON.stringify({ licenceKey: e2eLicence({ customer: `${who.slug} customer`, organisation: who.organisation.toHexString() }) }));
   return request.post(`${ORGANISATIONS_API}${path}`, {
-    headers: { host: PLATFORM_HOST, "content-type": "application/json", ...signPlatformRequest({ method: "POST", path, body }, E2E_PLATFORM_REQUEST_KEY) },
+    headers: { host: PLATFORM_HOST, "content-type": "application/json", ...signPlatformRequest({ method: "POST", host: PLATFORM_HOST, path, body }, E2E_PLATFORM_REQUEST_KEY) },
     data: body,
   });
 }
@@ -110,10 +110,10 @@ test.describe("BP-892: the platform operator is the licence service, not an orga
     }
     // The operator's own signature counts on the platform host only, and nobody else's counts anywhere
     const path = "/api/platform/organisations";
-    const valid = () => signPlatformRequest({ method: "GET", path, body: EMPTY }, E2E_PLATFORM_REQUEST_KEY);
+    const valid = () => signPlatformRequest({ method: "GET", host: PLATFORM_HOST, path, body: EMPTY }, E2E_PLATFORM_REQUEST_KEY);
     expect((await request.get(`${ORGANISATIONS_API}${path}`, { headers: { ...asOrganisation(ACME), ...valid() } })).status()).toBe(404);
     const { d, x } = generateKeyPairSync("ed25519").privateKey.export({ format: "jwk" });
-    const stranger = signPlatformRequest({ method: "GET", path, body: EMPTY }, { keyId: E2E_PLATFORM_REQUEST_KEY.keyId, d: d!, x: x! });
+    const stranger = signPlatformRequest({ method: "GET", host: PLATFORM_HOST, path, body: EMPTY }, { keyId: E2E_PLATFORM_REQUEST_KEY.keyId, d: d!, x: x! });
     expect((await request.get(`${ORGANISATIONS_API}${path}`, { headers: { host: PLATFORM_HOST, ...stranger } })).status()).toBe(401);
     expect(await platformLogRows()).toEqual([]);
   });

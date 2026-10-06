@@ -1,3 +1,4 @@
+import { stillServed } from "@/lib/organisation-jobs";
 import { IPmTrigger } from "@/types";
 import { createNotifications, collectRecipients, assigneeIdOf } from "@/lib/in-app-notifications";
 import { pillToneForRole } from "@/lib/email-template";
@@ -180,8 +181,9 @@ export async function runPmTrigger(db: ScopedDb, trigger: IPmTrigger): Promise<P
   return "ran";
 }
 
-export async function drainPmTriggers(db: ScopedDb): Promise<void> {
-  for (;;) {
+export async function drainPmTriggers(db: ScopedDb, { limit = Infinity }: { limit?: number } = {}): Promise<void> {
+  for (let run = 0; run < limit; run++) {
+    if (!(await stillServed(db.organisation))) return;
     const claimed = await db.PmTrigger.findOneAndUpdate(
       { state: "pending" },
       { $set: { state: "running", active: true }, $inc: { attempts: 1 } },

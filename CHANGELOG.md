@@ -1,5 +1,39 @@
 # Changelog
 
+## [1.5.0](https://github.com/rafalpodles/board-planner/compare/v1.4.0...v1.5.0) (2026-10-05)
+
+
+### Features
+
+* a Mongoose wall refuses any query on an organisation's data that does not name it (BP-890) ([#556](https://github.com/rafalpodles/board-planner/issues/556)) ([04b4828](https://github.com/rafalpodles/board-planner/commit/04b48282fff0cea0f24a232d934713f07b951fb2))
+* a person and every credential belong to one tenant; the global uniques go (BP-665) ([#550](https://github.com/rafalpodles/board-planner/issues/550)) ([52e5b53](https://github.com/rafalpodles/board-planner/commit/52e5b5381dbddd654565a766a63093b3fc4355a3))
+* admins can copy a pending invitation's link instead of resending the email (BP-902) ([#564](https://github.com/rafalpodles/board-planner/issues/564)) ([785a14c](https://github.com/rafalpodles/board-planner/commit/785a14c504656a547c97ed9bbe105f8424d630d0))
+* an organisation can be suspended, exported and deleted, by the operator and its own admin (BP-893) ([#573](https://github.com/rafalpodles/board-planner/issues/573)) ([e618b94](https://github.com/rafalpodles/board-planner/commit/e618b94e676daefcd271cb086b4f22bf285a80d3))
+* Coda becomes the first Pro connector, in src/ee behind integrations.coda (BP-651) ([#540](https://github.com/rafalpodles/board-planner/issues/540)) ([0b97bc3](https://github.com/rafalpodles/board-planner/commit/0b97bc34e1e85d5e78bd4a1d60aa6252998c3fc3))
+* db-scope.ts, a tenant-confined model accessor, and a ratchet on raw model access (BP-663) ([#544](https://github.com/rafalpodles/board-planner/issues/544)) ([96f0f01](https://github.com/rafalpodles/board-planner/commit/96f0f0115ea13a8b41704632ac5cfae8c00eb35b))
+* each organisation carries its own licence, stored by the licence service through a signed request (BP-891) ([#555](https://github.com/rafalpodles/board-planner/issues/555)) ([63c58ee](https://github.com/rafalpodles/board-planner/commit/63c58ee7f0c1f8c4cb62808e0890188ecb47f33f))
+* each organisation's secrets are sealed under its own data key (BP-898) ([#562](https://github.com/rafalpodles/board-planner/issues/562)) ([23398ea](https://github.com/rafalpodles/board-planner/commit/23398eaa8ebf716c18af9037057d2619b3bc0882))
+* each project signs its webhook deliveries with its own key, and can rotate it (BP-669) ([#561](https://github.com/rafalpodles/board-planner/issues/561)) ([1a43087](https://github.com/rafalpodles/board-planner/commit/1a43087563d08ce1ab4f6562cde02cb7fc31f168))
+* every log line names its organisation, and one organisation cannot eat another's share of the instance (BP-894) ([#563](https://github.com/rafalpodles/board-planner/issues/563)) ([69aa4eb](https://github.com/rafalpodles/board-planner/commit/69aa4ebe40c482b3c24abff27d1ffb95a6298022))
+* every model carries a tenant, and a one-off script puts one there (BP-662) ([#542](https://github.com/rafalpodles/board-planner/issues/542)) ([6761f0e](https://github.com/rafalpodles/board-planner/commit/6761f0ebf8162523d6cbbcf564cb5975c5cd1395))
+* grants refuse a project outside the caller's tenant first (BP-664) ([#548](https://github.com/rafalpodles/board-planner/issues/548)) ([75b108b](https://github.com/rafalpodles/board-planner/commit/75b108bac68f36750c347c99df8eae80f4f69963))
+* MCP parity — answers, paging and filters, task fields, checklists, batches, people, sprints, comments, reporting (BP-905 to BP-913) ([#572](https://github.com/rafalpodles/board-planner/issues/572)) ([ee401e0](https://github.com/rafalpodles/board-planner/commit/ee401e09b5763864af6a40fa031fc28e9ec7fb3e))
+* production keeps app.board-planner.com as the default organisation's host when organisations move to subdomains (BP-671) ([#576](https://github.com/rafalpodles/board-planner/issues/576)) ([130725d](https://github.com/rafalpodles/board-planner/commit/130725d4a7e35d9b85fa6094e7836d0d245619be))
+* remove the stdio MCP server, /api/mcp is the one transport (BP-291) ([#567](https://github.com/rafalpodles/board-planner/issues/567)) ([73546e2](https://github.com/rafalpodles/board-planner/commit/73546e229950e904299cec12e92ca52450c351a1))
+* settings per tenant, and schedulers run for every tenant in its own clock (BP-667) ([#551](https://github.com/rafalpodles/board-planner/issues/551)) ([760e370](https://github.com/rafalpodles/board-planner/commit/760e370a42e6d74ba7e591ba0ff62925a961a536))
+* **shell:** the collapsed sidebar lists projects and sections, and can expand on hover (BP-918) ([#574](https://github.com/rafalpodles/board-planner/issues/574)) ([868dae3](https://github.com/rafalpodles/board-planner/commit/868dae3e1db16fa3b39b43fda317559ac14fe088))
+* tenant is required and immutable, with no default (BP-663) ([#547](https://github.com/rafalpodles/board-planner/issues/547)) ([851816d](https://github.com/rafalpodles/board-planner/commit/851816dac2fb415cf9a603284e220cc6a78a3985))
+* the first account names the instance's organisation (BP-888) ([#543](https://github.com/rafalpodles/board-planner/issues/543)) ([cb88809](https://github.com/rafalpodles/board-planner/commit/cb88809cd64eaa7b66d746d0d43ebc0d1d5a0513))
+* the host names the tenant and every address is the tenant's own, behind TENANT_DOMAIN (BP-666) ([#549](https://github.com/rafalpodles/board-planner/issues/549)) ([6c3c419](https://github.com/rafalpodles/board-planner/commit/6c3c4192613907f5cdde892787f53f797b06451a))
+* the OIDC relay finds a sign-in in any organisation and sends it home there (BP-895) ([#559](https://github.com/rafalpodles/board-planner/issues/559)) ([c0f72ad](https://github.com/rafalpodles/board-planner/commit/c0f72ad09855b973daf7ea8d6029474878246ab4))
+* the platform operator is the licence service, with a platform log, and an organisation's admin sees nothing instance-wide (BP-892) ([#566](https://github.com/rafalpodles/board-planner/issues/566)) ([4d61325](https://github.com/rafalpodles/board-planner/commit/4d613251ec795b1e175ca7c588ff61899ba9a1b8))
+* uploaded files carry their organisation, and every read of GridFS names it (BP-668) ([#558](https://github.com/rafalpodles/board-planner/issues/558)) ([682473d](https://github.com/rafalpodles/board-planner/commit/682473d6db8953009a35092afdf193bd9a907663))
+
+
+### Bug Fixes
+
+* MCP resolves a task key with one read and accepts every valid project key (BP-904) ([#568](https://github.com/rafalpodles/board-planner/issues/568)) ([38203ca](https://github.com/rafalpodles/board-planner/commit/38203caa004d6f8b76742d765d16e1e224549605))
+
 ## [1.4.0](https://github.com/rafalpodles/board-planner/compare/v1.3.0...v1.4.0) (2026-10-03)
 
 

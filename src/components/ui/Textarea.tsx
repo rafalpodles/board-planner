@@ -15,6 +15,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
     const textareaId = id ?? generated;
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [uploading, setUploading] = useState(false);
+    const [uploadError, setUploadError] = useState("");
     const innerRef = useRef<HTMLTextAreaElement | null>(null);
 
     const setRefs = useCallback(
@@ -58,11 +59,12 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
       async (file: File) => {
         if (!onFileUpload) return;
         setUploading(true);
+        setUploadError("");
         try {
           const markdown = await onFileUpload(file);
           insertAtCursor(markdown + "\n");
         } catch (err) {
-          console.error("Upload failed:", err);
+          setUploadError(err instanceof Error && err.message ? err.message : `${file.name} could not be uploaded.`);
         } finally {
           setUploading(false);
         }
@@ -136,6 +138,8 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={uploading}
+                aria-label="Attach a file"
+                aria-busy={uploading}
                 className="absolute bottom-2 right-2 text-text-muted hover:text-text p-1 rounded transition-colors"
                 title="Attach file (or paste/drop)"
               >
@@ -164,6 +168,11 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
           )}
         </div>
         {error && <p className="mt-1 text-sm text-danger">{error}</p>}
+        {uploadError && (
+          <p role="alert" className="mt-1 text-sm text-danger" data-testid="upload-error">
+            {uploadError}
+          </p>
+        )}
       </div>
     );
   }

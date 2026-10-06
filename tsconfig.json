@@ -51,7 +51,9 @@
     ".next-passwordless/types/**/*.ts",
     ".next-passwordless/dev/types/**/*.ts",
     ".next-organisations/types/**/*.ts",
-    ".next-organisations/dev/types/**/*.ts"
+    ".next-organisations/dev/types/**/*.ts",
+    ".next-rehearsal/types/**/*.ts",
+    ".next-rehearsal/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",

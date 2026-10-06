@@ -26,6 +26,7 @@ const GLOBAL_UNIQUE: Record<string, string> = {
   "DeviceEnrolment.userCode": "short code typed on the verification page; looked up before the organisation is known",
   "EmailChangeToken.tokenHash": "random token",
   "Grant.subject+objectType+object": "subject and object are organisation-owned ids",
+  "HandoffCode.codeHash": "random code",
   "Invitation.tokenHash": "random token",
   "OAuthClient.clientId": "random id issued by /oauth/register; looked up by id alone on every cpat_ request",
   "OAuthCode.codeHash": "random code",
@@ -36,6 +37,7 @@ const GLOBAL_UNIQUE: Record<string, string> = {
   "PmTrigger.project+task": "project is an organisation-owned id",
   "AgentRun.task+runId+worker": "task is an organisation-owned id",
   "Session.tokenHash": "random token",
+  "PlatformSignIn.binderHash": "random cookie value; a platform row with no organisation",
   "Organisation.slug": "the subdomain naming the organisation: unique across the platform by definition (BP-666)",
   "Task.project+taskNumber": "project is an organisation-owned id",
 };

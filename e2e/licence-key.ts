@@ -18,6 +18,13 @@ export const E2E_PLATFORM_REQUEST_KEY = {
   x: "O8oCMfZiZp2tFnZpT8I5C1A4bQ95veiR9riXvLD069c",
 };
 
+// Board Planner's own key for asking the licence service, as the e2e organisations server holds it in LICENCE_PULL_KEY
+export const E2E_LICENCE_PULL_KEY = {
+  keyId: "e2e-pull",
+  d: "7KfhSe5yz2pTT5QTGZQNkg82QRSjYP5ZJ1_4F4o0r8s",
+  x: "gC2F09TvCTmOG9BCCVxDPyflFqTe2pu4MQf9DqDq_3E",
+};
+
 const DAY = 24 * 60 * 60 * 1000;
 
 export function e2eLicence(

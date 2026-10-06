@@ -1,4 +1,4 @@
-import { forEachServedOrganisation } from "@/lib/organisation-jobs";
+import { forEachServedOrganisation, stillServed } from "@/lib/organisation-jobs";
 import { connectDB } from "@/lib/db";
 import { runPmTurn } from "./agent";
 import { dailyPmSpend, isOverDailyTurnCap } from "./turn-cap";
@@ -13,13 +13,27 @@ import { type ScopedDb } from "@/lib/db-scope";
 
 const TICK_MS = Number(process.env.PM_SCHEDULER_TICK_MS) || 5 * 60 * 1000;
 
+// Triggers one organisation may run in a tick: a queue that never empties must not hold back the rest
+export const TRIGGERS_PER_ORGANISATION_PER_TICK = 3;
+
 let started = false;
+let ticking = false;
 
 export function startPmScheduler(): void {
   if (started) return;
   started = true;
   setInterval(() => {
-    pmSchedulerTick().catch((err) => console.error("PM scheduler tick failed:", err));
+    // A tick that outlasts the interval is let finish rather than joined by another from the top
+    if (ticking) {
+      console.warn("PM scheduler tick skipped: the previous one is still running");
+      return;
+    }
+    ticking = true;
+    pmSchedulerTick()
+      .catch((err) => console.error("PM scheduler tick failed:", err))
+      .finally(() => {
+        ticking = false;
+      });
   }, TICK_MS).unref();
 }
 
@@ -29,7 +43,7 @@ export async function pmSchedulerTick(): Promise<void> {
 }
 
 async function pmSchedulerTickFor(db: ScopedDb): Promise<void> {
-  await drainPmTriggers(db);
+  await drainPmTriggers(db, { limit: TRIGGERS_PER_ORGANISATION_PER_TICK });
 
   const now = new Date();
   const projects = await db.Project.find(
@@ -41,6 +55,7 @@ async function pmSchedulerTickFor(db: ScopedDb): Promise<void> {
   const pmUser = await getPmUser(db);
 
   for (const project of projects) {
+    if (!(await stillServed(db.organisation))) return;
     const slot = dueReviewSlot(now, project.pm?.autonomy);
     if (!slot) continue;
     // Not claimed while a turn holds the project: a review refused for the lock would spend the slot

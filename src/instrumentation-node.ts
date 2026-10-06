@@ -34,6 +34,8 @@ export async function bootNode(): Promise<void> {
     assertSignInConfig();
     const { assertOrganisationDomainConfig } = await import("@/lib/organisation-host");
     assertOrganisationDomainConfig();
+    const { assertLicencePullConfig } = await import("@/lib/licence-pull");
+    assertLicencePullConfig();
   } catch (err) {
     // Exiting rather than throwing, and this is not belt-and-braces. `NextServer.prepare()`
     // awaits the real prepare only when `dev` (next/dist/server/next.js), so under `next start`
@@ -116,6 +118,12 @@ async function bootWhenDatabaseIsReady(): Promise<void> {
     const { ensureUploadIndexes } = await import("@/lib/upload-ownership");
     await ensureUploadIndexes().catch((error) => console.error("Failed to index uploads by organisation:", error));
 
+    const { sweepDeletedOrganisations } = await import("@/lib/organisation-life-cycle");
+    const sweep = () =>
+      sweepDeletedOrganisations().catch((error) => console.error("Failed to sweep deleted organisations:", error));
+    await sweep();
+    setInterval(sweep, 24 * 60 * 60 * 1000).unref();
+
     // Said, not refused: the state can arise at runtime (a demotion, a deactivation, an unlink), and
     // exiting would turn a restart into an outage for every member, not only the administrators
     const { adminsLockedOut } = await import("@/lib/password-sign-in");
@@ -140,7 +148,7 @@ async function bootWhenDatabaseIsReady(): Promise<void> {
       if (seededColumns.modifiedCount > 0) {
         console.log(`Seeded default columns on ${seededColumns.modifiedCount} project(s)`);
       }
-    });
+    }, { includeSuspended: true });
 
     // Caught here rather than left to the outer handler: the backfill and the PM scheduler are
     // below this line, so an unhandled seed failure would skip both — and be logged as a
@@ -150,7 +158,8 @@ async function bootWhenDatabaseIsReady(): Promise<void> {
     await forEachServedOrganisation("Agent catalog seed", (db) =>
       seedAgents(db).catch((error) => {
         console.error("Failed to seed the agent catalog:", error);
-      })
+      }),
+      { includeSuspended: true }
     );
 
     // The backfill that stood here set `worker.agent` to the shipped Default on every project
@@ -179,7 +188,7 @@ async function bootWhenDatabaseIsReady(): Promise<void> {
         return 0;
       });
       if (repaired > 0) console.log(`Repaired the display name of ${repaired} machine(s)`);
-    });
+    }, { includeSuspended: true });
 
     const { startPmScheduler } = await import("@/lib/pm/scheduler");
     startPmScheduler();
@@ -209,6 +218,10 @@ async function bootWhenDatabaseIsReady(): Promise<void> {
           ? "Digest scheduler is off (no SMTP server configured)"
           : "Digest scheduler was already running"
     );
+
+    const { startLicencePull } = await import("@/lib/licence-pull");
+    const licencePull = startLicencePull();
+    console.log(licencePull.started ? "Licence pull started" : `Licence pull is off (${licencePull.reason})`);
   } catch (err) {
     // Don't crash the server on a transient boot-time failure after connecting;
     // route handlers already work, only the seeding/backfill/schedulers above are at risk.

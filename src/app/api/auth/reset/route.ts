@@ -20,7 +20,7 @@ import {
   releaseResetToken,
 } from "@/lib/password-reset";
 import { provenanceRefusal, revokeUserCredentials } from "@/lib/session";
-import { hostNotFound } from "@/lib/middleware";
+import { refusedHost } from "@/lib/middleware";
 
 const ATTEMPTS_PER_SOURCE = 20;
 
@@ -32,7 +32,7 @@ const REFUSALS: Record<string, string> = {
 
 export async function POST(request: Request) {
   const db = await scopedForRequest(request);
-  if (!db) return hostNotFound();
+  if (!db) return refusedHost(request);
   if (!passwordSignInEnabled()) return passwordSignInOff();
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
@@ -119,7 +119,7 @@ export async function POST(request: Request) {
   // only while that is still the account's address (BP-842). After the password, and on its own:
   // failing here must not give back a link whose password is already set
   if (outcome.sentTo) {
-    await db.User.updateOne({ _id: user._id, email: outcome.sentTo }, { $set: { emailVerifiedAt: new Date() } }).catch(
+    await db.User.updateOne({ _id: user._id, email: outcome.sentTo }, { $set: { emailVerifiedAt: new Date(), emailVouchedByAdmin: false } }).catch(
       (err) => console.error("Failed to record a reset's proof of address:", err)
     );
   }

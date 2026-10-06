@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useAuth } from "@/hooks/use-auth";
 import { APP_NAME } from "@/lib/brand";
+import { OrganisationSuspended } from "@/components/OrganisationSuspended";
 import {
   ProviderButtons,
   SIGN_IN_REFUSALS,
@@ -29,6 +30,7 @@ export default function LoginPage() {
   // Unknown until the server answers, and drawn as on meanwhile — the default, and on an instance
   // that turned it off the form only refuses itself until the answer replaces it
   const [passwordSignIn, setPasswordSignIn] = useState<boolean | null>(null);
+  const [suspended, setSuspended] = useState(false);
   const [next, setNext] = useState<string | undefined>(undefined);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -49,6 +51,7 @@ export default function LoginPage() {
         if (!live) return;
         setUnclaimed(ok && data.unclaimed === true);
         setPasswordSignIn(data.passwordSignIn !== false);
+        setSuspended(data.suspended === true);
       })
       .catch((err) => {
         // Says why rather than failing silently: on a fresh instance whose database is flapping,
@@ -69,6 +72,8 @@ export default function LoginPage() {
     const query = new URLSearchParams(window.location.search);
     const reason = query.get("sso");
     if (reason) setSsoReason(reason);
+    const handoff = query.get("handoff");
+    if (handoff) setSsoReason(handoff === "throttled" ? "throttled" : "handoff_expired");
     if (query.get("next")) setNext(safeNextPath(query.get("next")));
   }, []);
 
@@ -125,6 +130,8 @@ export default function LoginPage() {
       </p>
     </div>
   );
+
+  if (suspended) return <OrganisationSuspended />;
 
   return (
     <div className="flex items-center justify-center min-h-screen px-4">

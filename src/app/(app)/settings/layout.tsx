@@ -27,15 +27,19 @@ const GROUPS: SettingsGroup[] = [
     ],
   },
   {
+    title: "Organisation",
+    sections: [{ id: "organisation", label: "Overview" }],
+  },
+  {
     title: "Administration",
     adminOnly: true,
     sections: [
       { id: "users", label: "Users" },
       { id: "email", label: "Email" },
-      { id: "licence", label: "Licence" },
       { id: "agents", label: "PM Agents" },
       { id: "workers", label: "Workers" },
       { id: "audit", label: "Audit log" },
+      { id: "export", label: "Export" },
     ],
   },
 ];

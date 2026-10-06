@@ -1,7 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 import { BOOTSTRAP_TOKEN, E2E_ENCRYPTION_KEY, E2E_MONGODB_URI } from "./e2e/seed";
 import { GROUPS } from "./e2e/groups";
-import { E2E_LICENCE_PUBLIC_KEY, E2E_PLATFORM_REQUEST_KEY } from "./e2e/licence-key";
+import { E2E_LICENCE_PUBLIC_KEY, E2E_LICENCE_PULL_KEY, E2E_PLATFORM_REQUEST_KEY } from "./e2e/licence-key";
 
 // 3987, not the usual 3456: a developer's own dev server and other agents share this machine
 const PORT = Number(process.env.E2E_PORT ?? 3987);
@@ -92,7 +92,11 @@ export const PASSWORDLESS_RELAY_ORIGIN = `http://127.0.0.1:${PASSWORDLESS_PORT}`
 // Chromium resolves to loopback by itself. Opt-in like the two above, in the people job.
 export const ORGANISATIONS_PORT = Number(process.env.E2E_ORGANISATIONS_PORT ?? PORT + 10005);
 export const ORGANISATION_DOMAIN = "organisations.localhost";
+// The licence service, as a server the organisations spec starts itself
+export const LICENCE_STUB_PORT = Number(process.env.E2E_LICENCE_STUB_PORT ?? PORT + 10006);
 export const ORGANISATIONS_PLATFORM_ORIGIN = `http://${ORGANISATION_DOMAIN}:${ORGANISATIONS_PORT}`;
+// Where production keeps the default organisation once organisations live on subdomains (BP-671)
+export const ORGANISATIONS_DEFAULT_HOST = `app.${ORGANISATION_DOMAIN}`;
 export const RUN_ORGANISATIONS_SERVER = process.env.E2E_ORGANISATIONS_SERVER === "1";
 export const ORGANISATIONS_RELAY_ORIGIN = `http://127.0.0.1:${ORGANISATIONS_PORT}`;
 
@@ -453,8 +457,15 @@ export default defineConfig({
             env: {
               ...devServerEnv(ORGANISATIONS_PLATFORM_ORIGIN),
               ORGANISATION_DOMAIN,
+              ORGANISATION_DEFAULT_HOST: ORGANISATIONS_DEFAULT_HOST,
+              // Refused at 0 with ORGANISATION_DOMAIN (BP-671). Next adds the socket's own address, so the
+              // throttles key on loopback here, and the specs' wipe clears them
+              TRUSTED_PROXY_HOPS: "1",
               APP_ORIGIN: ORGANISATIONS_PLATFORM_ORIGIN,
               PLATFORM_REQUEST_KEYS: `${E2E_PLATFORM_REQUEST_KEY.keyId}:${E2E_PLATFORM_REQUEST_KEY.x}`,
+              LICENCE_SERVICE_URL: `http://127.0.0.1:${LICENCE_STUB_PORT}`,
+              LICENCE_PULL_KEY: JSON.stringify(E2E_LICENCE_PULL_KEY),
+              LICENCE_PULL_TICK_MS: "0",
               // Off every organisation's host, as login.board-planner.com is (BP-895)
               OIDC_RELAY_ORIGIN: ORGANISATIONS_RELAY_ORIGIN,
               NEXT_DIST_DIR: ".next-organisations",

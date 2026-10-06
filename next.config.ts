@@ -60,6 +60,10 @@ const nextConfig: NextConfig = {
         source: "/api/auth/oidc/:provider/relay",
         headers: [{ key: "Referrer-Policy", value: "no-referrer" }],
       },
+      {
+        source: "/api/auth/handoff",
+        headers: [{ key: "Referrer-Policy", value: "no-referrer" }],
+      },
     ];
   },
 };

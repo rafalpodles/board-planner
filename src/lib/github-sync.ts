@@ -1,4 +1,4 @@
-import { forEachServedOrganisation } from "@/lib/organisation-jobs";
+import { forEachServedOrganisation, stillServed } from "@/lib/organisation-jobs";
 import type { Types } from "mongoose";
 import { connectDB } from "@/lib/db";
 import type { SchedulerStart } from "@/lib/scheduler";
@@ -460,6 +460,7 @@ async function githubSyncTickFor(db: ScopedDb): Promise<void> {
   ).lean();
 
   for (const project of projects) {
+    if (!(await stillServed(db.organisation))) return;
     try {
       const result = await syncGithubPullRequests(db, project, null);
       if (!result.ok) continue;

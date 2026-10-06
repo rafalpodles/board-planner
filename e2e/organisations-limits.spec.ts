@@ -140,6 +140,10 @@ test.describe("BP-894: one organisation's limits do not touch another's", () => 
     await expect(page.getByRole("status").filter({ hasText: "Your organisation has made more requests this minute" })).toBeVisible();
     await expect(page.getByRole("alert").filter({ hasText: "Failed to load this board." })).toBeVisible();
     await page.screenshot({ path: "e2e/.artifacts/bp894-limit-phone.png" });
+    // BP-921: the banner sat above a full-height shell, so the page grew by its height and the bottom of the screen went out of reach
+    expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThanOrEqual(844);
+    const main = await page.locator("main").boundingBox();
+    expect(main!.y + main!.height).toBeLessThanOrEqual(844);
     await member.close();
 
     // Signed in as the administrator, who must be able to stop whoever is spending the minute

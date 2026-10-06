@@ -4,14 +4,37 @@ import { useAuth } from "@/hooks/use-auth";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/Button";
+import { OrganisationSuspended } from "@/components/OrganisationSuspended";
 
 // Backed off rather than a fixed interval: /api/auth/me can take seconds to fail during an outage,
 // and a fixed 10 s left three requests in flight at once on a tab nobody was watching
 const FIRST_RETRY_MS = 10_000;
 const MAX_RETRY_MS = 60_000;
 
-export function AuthGuard({ children }: { children: React.ReactNode }) {
-  const { user, isLoading, outage, refreshUser, requestLimit } = useAuth();
+export function StatusBanners() {
+  const { outage, requestLimit } = useAuth();
+  return (
+    <div role="status" className="shrink-0" data-testid="status-banners">
+      {outage && (
+        <div className="px-4 py-2 text-center text-sm bg-warning/15 text-text border-b border-border">
+          This instance is having trouble reaching its database. You are still signed in; what you
+          are looking at may be out of date.
+        </div>
+      )}
+      {requestLimit && (
+        <div className="px-4 py-2 text-center text-sm bg-warning/15 text-text border-b border-border">
+          {requestLimit.scope === "organisation"
+            ? "Your organisation has made more requests this minute than it may."
+            : "You have made more requests this minute than one account may."}{" "}
+          Pages will load again after {requestLimit.until.toLocaleTimeString()}.
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function AuthGuard({ children, bannersInShell = false }: { children: React.ReactNode; bannersInShell?: boolean }) {
+  const { user, isLoading, outage, suspended, refreshUser } = useAuth();
   const router = useRouter();
   // usePathname only to re-run on navigation; the destination itself comes from window below.
   // useSearchParams here would opt every page under this layout out of static prerendering.
@@ -20,21 +43,23 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     // `outage` means the server never answered the question, so there is nothing here to act on.
     // Redirecting anyway sent people to a sign-in page that could not sign them in either (BP-362).
-    if (!isLoading && !user && !outage) {
+    if (!isLoading && !user && !outage && !suspended) {
       // Carry where they were going. Arriving from another application — the menubar app opens the
       // approval page — this is the difference between signing in and being dropped on the board
       // with no idea what happened to the link they clicked.
       const intended = window.location.pathname + window.location.search;
       router.replace(`/login?next=${encodeURIComponent(intended)}`);
     }
-  }, [user, isLoading, outage, router, pathname]);
+  }, [user, isLoading, outage, suspended, router, pathname]);
 
   // The session cookie is untouched, so the app can come back by itself rather than waiting for
   // somebody to reload a page that looks broken. Chained after each attempt settles, so a slow
   // request never overlaps the next one.
   const retryDelay = useRef(FIRST_RETRY_MS);
+  // A suspension is lifted by the service, not by anybody here, so the page asks again until it is
+  const waiting = (outage && !user) || suspended;
   useEffect(() => {
-    if (!outage || user) {
+    if (!waiting) {
       retryDelay.current = FIRST_RETRY_MS;
       return;
     }
@@ -56,7 +81,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
       stopped = true;
       clearTimeout(timer);
     };
-  }, [outage, user, refreshUser]);
+  }, [waiting, refreshUser]);
 
   if (isLoading) {
     return (
@@ -69,6 +94,8 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
       </div>
     );
   }
+
+  if (suspended) return <OrganisationSuspended />;
 
   if (!user && outage) {
     return (
@@ -91,28 +118,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 
   return (
     <>
-      {/* Somebody already signed in is never sent back through /api/auth/me, so without this the
-          instance going down showed up only as every screen failing to load for its own reasons */}
-      {outage && (
-        <div
-          role="status"
-          className="px-4 py-2 text-center text-sm bg-warning/15 text-text border-b border-border"
-        >
-          This instance is having trouble reaching its database. You are still signed in; what you
-          are looking at may be out of date.
-        </div>
-      )}
-      {requestLimit && (
-        <div
-          role="status"
-          className="px-4 py-2 text-center text-sm bg-warning/15 text-text border-b border-border"
-        >
-          {requestLimit.scope === "organisation"
-            ? "Your organisation has made more requests this minute than it may."
-            : "You have made more requests this minute than one account may."}{" "}
-          Pages will load again after {requestLimit.until.toLocaleTimeString()}.
-        </div>
-      )}
+      {!bannersInShell && <StatusBanners />}
       {children}
     </>
   );

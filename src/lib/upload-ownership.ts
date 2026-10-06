@@ -40,6 +40,30 @@ export function organisationUploads(db: ScopedDb) {
     },
     upload: (name: string, metadata: Record<string, unknown>) =>
       bucket.openUploadStream(name, { metadata: { ...metadata, organisation: db.organisation } }),
+    count: (): Promise<number> =>
+      mongoose.connection.db!.collection(`${UPLOAD_BUCKET}.files`).countDocuments({ "metadata.organisation": db.organisation }),
+    async *rows(): AsyncGenerator<{ collection: string; document: Record<string, unknown> }> {
+      const files = mongoose.connection.db!.collection(`${UPLOAD_BUCKET}.files`);
+      const chunks = mongoose.connection.db!.collection(`${UPLOAD_BUCKET}.chunks`);
+      // Read up front, one file's chunks at a time: no cursor stays open across a slow download
+      for (const file of await files.find({ "metadata.organisation": db.organisation }).sort({ _id: 1 }).toArray()) {
+        yield { collection: `${UPLOAD_BUCKET}.files`, document: file };
+        for (const chunk of await chunks.find({ files_id: file._id }).sort({ n: 1 }).toArray()) {
+          yield { collection: `${UPLOAD_BUCKET}.chunks`, document: chunk };
+        }
+      }
+    },
+    // Chunks before their file row, so an interrupted run leaves a row it can find again
+    deleteAll: async (): Promise<number> => {
+      const files = mongoose.connection.db!.collection(`${UPLOAD_BUCKET}.files`);
+      const chunks = mongoose.connection.db!.collection(`${UPLOAD_BUCKET}.chunks`);
+      const ids = await files.find({ "metadata.organisation": db.organisation }, { projection: { _id: 1 } }).toArray();
+      for (const { _id } of ids) {
+        await chunks.deleteMany({ files_id: _id });
+        await files.deleteOne({ _id });
+      }
+      return ids.length;
+    },
   };
 }
 

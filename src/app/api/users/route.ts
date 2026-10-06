@@ -11,7 +11,7 @@ import { refuseSetupCode } from "@/lib/setup-code";
 import { checkNewAccount } from "@/lib/new-account";
 import { duplicateKeyField } from "@/lib/mongo-errors";
 import { ProvenanceError, provenanceRefusal } from "@/lib/session";
-import { withAdmin, hostNotFound, refusedOnThisHost } from "@/lib/middleware";
+import { withAdmin, refusedOnThisHost, refusedHost } from "@/lib/middleware";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { revokePendingInvitationsFor } from "@/lib/invitations";
 import { liveIdentityFilter, providerById } from "@/lib/oidc/providers";
@@ -76,7 +76,7 @@ function latest(...times: (number | undefined)[]): string | null {
 
 export async function POST(request: Request) {
   const db = await scopedForRequest(request);
-  if (!db) return hostNotFound();
+  if (!db) return refusedHost(request);
   if (!passwordSignInEnabled()) {
     return NextResponse.json(
       {
