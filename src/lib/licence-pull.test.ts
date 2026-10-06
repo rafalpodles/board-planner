@@ -4,7 +4,7 @@ import { Types } from "mongoose";
 const { storeOrganisationLicence } = vi.hoisted(() => ({ storeOrganisationLicence: vi.fn() }));
 vi.mock("./organisation-licence", () => ({ storeOrganisationLicence }));
 
-const { licencePullConfig, licencePullTickMs, pullLicence, LICENCE_PULL_PATH } = await import("./licence-pull");
+const { licencePullConfig, licencePullTickMs, pullLicence, pullNewOrganisationLicence, LICENCE_PULL_PATH } = await import("./licence-pull");
 const { platformSigningString, PLATFORM_HEADERS } = await import("./platform-request");
 const { createPublicKey, generateKeyPairSync, verify } = await import("node:crypto");
 
@@ -104,5 +104,30 @@ describe("licencePullTickMs (BP-897)", () => {
     expect(licencePullTickMs("-5")).toBe(24 * 60 * 60 * 1000);
     expect(warn).toHaveBeenCalledTimes(2);
     warn.mockRestore();
+  });
+});
+
+describe("pullNewOrganisationLicence (BP-929)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("does nothing, and asks nobody, on an instance with no licence service", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubEnv("LICENCE_SERVICE_URL", "");
+    vi.stubEnv("LICENCE_PULL_KEY", "");
+    await expect(pullNewOrganisationLicence(new Types.ObjectId().toHexString())).resolves.toBeUndefined();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("never throws into a sign-up, even on a half-set configuration", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubEnv("LICENCE_SERVICE_URL", "https://licence.example");
+    vi.stubEnv("LICENCE_PULL_KEY", "");
+    await expect(pullNewOrganisationLicence(new Types.ObjectId().toHexString())).resolves.toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("new organisation"), expect.stringContaining("go together"));
   });
 });

@@ -4,6 +4,7 @@ import { sha256 } from "@/lib/oauth";
 import { passwordSignInEnabled, passwordSignInOff } from "@/lib/password-sign-in";
 import { claimProof, endSignIn, issueHandoff, releaseProof, scopedToOrganisation, servedOrganisationById } from "@/lib/platform-sign-in";
 import { clearedSignInCookie, provenEmail, rememberCookie, signInBinder, signInRoute, startAgain } from "@/lib/platform-sign-in-route";
+import { pullNewOrganisationLicence } from "@/lib/licence-pull";
 import { SLUG_UNAVAILABLE, checkSignUp, createOrganisation, slugTaken } from "@/lib/organisation-sign-up";
 import { countAttempt, sourceKey } from "@/lib/rate-limit";
 import { readJsonBody } from "@/lib/request-body";
@@ -41,6 +42,8 @@ export const POST = signInRoute(async (request) => {
 
     const created = await createOrganisation(checked.value);
     if (!created.ok) return refused(created.error);
+
+    await pullNewOrganisationLicence(String(created.organisation));
 
     const organisation = await servedOrganisationById(String(created.organisation));
     if (!organisation) return refused("The organisation was created but has no address yet. Sign in to it in a minute.", 500);
