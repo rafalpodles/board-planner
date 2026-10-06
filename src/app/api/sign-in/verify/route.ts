@@ -1,16 +1,15 @@
 import { NextResponse } from "next/server";
+import { passwordSignInEnabled } from "@/lib/password-sign-in";
 import { getClientIp } from "@/lib/client-ip";
 import { organisationsFor, verifiedEmail, verifySignInCode } from "@/lib/platform-sign-in";
-import { refusedOffThePlatform, signInBinder, startAgain } from "@/lib/platform-sign-in-route";
-import { anonymousMultiplier, isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
+import { signInBinder, startAgain, signInRoute } from "@/lib/platform-sign-in-route";
+import { isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
 import { readJsonBody } from "@/lib/request-body";
 import { provenanceRefusal } from "@/lib/session";
 
 const WRONG_CODES_PER_SOURCE = 30;
 
-export async function POST(request: Request) {
-  const offPlatform = await refusedOffThePlatform(request);
-  if (offPlatform) return offPlatform;
+export const POST = signInRoute(async (request) => {
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
 
@@ -18,8 +17,8 @@ export async function POST(request: Request) {
   if (!binder) return startAgain();
 
   const clientIp = getClientIp(request);
-  const perSource = sourceKey(clientIp ?? "-", "platform-sign-in-code");
-  if (await isRateLimited(perSource, anonymousMultiplier(clientIp, WRONG_CODES_PER_SOURCE))) {
+  const perSource = clientIp ? sourceKey(clientIp, "platform-sign-in-code") : null;
+  if (perSource && (await isRateLimited(perSource, WRONG_CODES_PER_SOURCE))) {
     return NextResponse.json({ error: "Too many attempts. Try again in 15 minutes." }, { status: 429 });
   }
 
@@ -31,11 +30,11 @@ export async function POST(request: Request) {
   const verdict = await verifySignInCode(binder, code);
   if (verdict === "expired") return startAgain();
   if (verdict === "wrong") {
-    await recordFailedAttempt(perSource);
+    if (perSource) await recordFailedAttempt(perSource);
     return NextResponse.json({ error: "That code is not right. Check the e-mail and try again." }, { status: 400 });
   }
 
   const email = await verifiedEmail(binder);
   if (!email) return startAgain();
-  return NextResponse.json({ email, organisations: await organisationsFor(email) });
-}
+  return NextResponse.json({ email, organisations: await organisationsFor(email), passwordSignIn: passwordSignInEnabled() });
+});

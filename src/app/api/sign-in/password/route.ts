@@ -2,17 +2,15 @@ import { NextResponse } from "next/server";
 import { getClientIp } from "@/lib/client-ip";
 import { verifyCredentials } from "@/lib/auth";
 import { passwordSignInEnabled, passwordSignInOff } from "@/lib/password-sign-in";
-import { accountByEmail, issueHandoff, scopedToOrganisation, servedOrganisationById } from "@/lib/platform-sign-in";
-import { provenEmail, refusedOffThePlatform, rememberCookie, startAgain } from "@/lib/platform-sign-in-route";
+import { accountByEmail, endSignIn, issueHandoff, scopedToOrganisation, servedOrganisationById } from "@/lib/platform-sign-in";
+import { clearedSignInCookie, provenEmail, rememberCookie, signInBinder, startAgain, signInRoute } from "@/lib/platform-sign-in-route";
 import { lockoutKey, sourceKey, withLockout } from "@/lib/rate-limit";
 import { readJsonBody } from "@/lib/request-body";
 import { provenanceRefusal } from "@/lib/session";
 
 const invalid = () => NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
 
-export async function POST(request: Request) {
-  const offPlatform = await refusedOffThePlatform(request);
-  if (offPlatform) return offPlatform;
+export const POST = signInRoute(async (request) => {
   if (!passwordSignInEnabled()) return passwordSignInOff();
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
@@ -41,7 +39,9 @@ export async function POST(request: Request) {
   if (!user || !account || !user._id.equals(account._id)) return invalid();
 
   const code = await issueHandoff(db, user._id);
+  await endSignIn(signInBinder(request));
   const response = NextResponse.json({ location: `${organisation.origin}/api/auth/handoff?code=${encodeURIComponent(code)}` });
   response.headers.append("Set-Cookie", rememberCookie(organisation.id));
+  response.headers.append("Set-Cookie", clearedSignInCookie());
   return response;
-}
+});

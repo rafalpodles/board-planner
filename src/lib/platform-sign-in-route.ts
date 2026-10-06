@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { hostNotFound } from "./middleware";
+import { isDatabaseUnreachable } from "./db-errors";
+import { databaseUnavailable, hostNotFound } from "./middleware";
 import { organisationOfRequest } from "./organisation-host";
 import { buildFlowCookie, readFlowCookie } from "./session";
 import { REMEMBERED_ORGANISATION_COOKIE, SIGN_IN_COOKIE, VERIFIED_TTL_MS, verifiedEmail } from "./platform-sign-in";
@@ -28,3 +29,16 @@ export async function provenEmail(request: Request): Promise<string | null> {
 
 export const startAgain = () =>
   NextResponse.json({ error: "This sign-in has expired. Enter your e-mail address again.", restart: true }, { status: 401 });
+
+export function signInRoute(handler: (request: Request) => Promise<Response>) {
+  return async (request: Request): Promise<Response> => {
+    try {
+      const offPlatform = await refusedOffThePlatform(request);
+      if (offPlatform) return offPlatform;
+      return await handler(request);
+    } catch (error) {
+      if (isDatabaseUnreachable(error)) return databaseUnavailable();
+      throw error;
+    }
+  };
+}

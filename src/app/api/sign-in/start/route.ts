@@ -5,19 +5,19 @@ import { isEmailConfigured, isValidEmail, normaliseEmail, sendEmail } from "@/li
 import { renderEmail } from "@/lib/email-template";
 import { sha256 } from "@/lib/oauth";
 import { CODE_TTL_MS, startSignIn } from "@/lib/platform-sign-in";
-import { refusedOffThePlatform, signInCookie } from "@/lib/platform-sign-in-route";
+import { signInCookie, signInRoute } from "@/lib/platform-sign-in-route";
 import { anonymousMultiplier, isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
 import { readJsonBody } from "@/lib/request-body";
 import { provenanceRefusal } from "@/lib/session";
 
 const CODES_PER_SOURCE = 20;
 const CODES_PER_ADDRESS = 5;
+const CODES_PER_ADDRESS_PER_DAY = 15;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 const tooMany = () => NextResponse.json({ error: "Too many requests. Try again in 15 minutes." }, { status: 429 });
 
-export async function POST(request: Request) {
-  const offPlatform = await refusedOffThePlatform(request);
-  if (offPlatform) return offPlatform;
+export const POST = signInRoute(async (request) => {
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
 
@@ -36,8 +36,13 @@ export async function POST(request: Request) {
   }
 
   const perAddress = `platform-sign-in:address:${sha256(email)}`;
+  const perAddressPerDay = `platform-sign-in:address-day:${sha256(email)}`;
   if (await isRateLimited(perAddress, CODES_PER_ADDRESS)) return tooMany();
+  if (await isRateLimited(perAddressPerDay, CODES_PER_ADDRESS_PER_DAY)) {
+    return NextResponse.json({ error: "Too many codes for this address today. Try again tomorrow." }, { status: 429 });
+  }
   await recordFailedAttempt(perAddress);
+  await recordFailedAttempt(perAddressPerDay, DAY_MS);
 
   const { binder, code } = await startSignIn(email);
   void deliverCode(email, code);
@@ -45,7 +50,7 @@ export async function POST(request: Request) {
   const response = NextResponse.json({ sent: true });
   response.headers.append("Set-Cookie", signInCookie(binder));
   return response;
-}
+});
 
 async function deliverCode(email: string, code: string): Promise<void> {
   try {

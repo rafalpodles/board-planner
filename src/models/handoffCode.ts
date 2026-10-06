@@ -11,7 +11,6 @@ export interface IHandoffCode {
   createdAt: Date;
 }
 
-// A sign-in finished on the platform host, waiting for the organisation's own host to turn it into a session
 const handoffCodeSchema = new Schema<IHandoffCode>(
   {
     codeHash: { type: String, required: true, unique: true },

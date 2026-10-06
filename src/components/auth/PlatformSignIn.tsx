@@ -17,8 +17,8 @@ type Step =
   | { name: "remembered"; organisation: { name: string; origin: string } }
   | { name: "email" }
   | { name: "code"; email: string }
-  | { name: "organisations"; email: string; organisations: Organisation[] }
-  | { name: "password"; email: string; organisation: Organisation; organisations: Organisation[] };
+  | { name: "organisations"; email: string; organisations: Organisation[]; passwordSignIn: boolean }
+  | { name: "password"; email: string; organisation: Organisation; organisations: Organisation[]; passwordSignIn: boolean };
 
 async function send(path: string, method: string, body?: unknown) {
   const res = await fetch(path, {
@@ -92,10 +92,11 @@ export function PlatformSignIn() {
       }
       if (!ok) return setError(data.error ?? "That code did not work.");
       const organisations: Organisation[] = data.organisations ?? [];
+      const passwordSignIn = data.passwordSignIn !== false;
       if (organisations.length === 1) {
-        setStep({ name: "password", email: data.email, organisation: organisations[0], organisations });
+        setStep({ name: "password", email: data.email, organisation: organisations[0], organisations, passwordSignIn });
       } else {
-        setStep({ name: "organisations", email: data.email, organisations });
+        setStep({ name: "organisations", email: data.email, organisations, passwordSignIn });
       }
     });
   };
@@ -138,7 +139,7 @@ export function PlatformSignIn() {
         )}
 
         {step.name === "loading" && (
-          <div className="flex justify-center py-6">
+          <div className="flex justify-center py-6" role="status" aria-label="Loading">
             <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />
           </div>
         )}
@@ -151,7 +152,7 @@ export function PlatformSignIn() {
             >
               Continue to {step.organisation.name}
             </a>
-            <button type="button" onClick={forget} className="focus-ring w-full text-sm text-text-muted underline">
+            <button type="button" onClick={forget} disabled={busy} className="focus-ring w-full text-sm text-text-muted underline">
               Use another e-mail address
             </button>
           </div>
@@ -215,7 +216,7 @@ export function PlatformSignIn() {
                         onClick={() => {
                           setPassword("");
                           setError("");
-                          setStep({ name: "password", email: step.email, organisation, organisations: step.organisations });
+                          setStep({ name: "password", email: step.email, organisation, organisations: step.organisations, passwordSignIn: step.passwordSignIn });
                         }}
                         className="focus-ring flex min-h-[44px] w-full min-w-0 flex-col items-start rounded-lg border border-border px-4 py-2 text-left hover:bg-bg-hover"
                       >
@@ -233,9 +234,26 @@ export function PlatformSignIn() {
           </div>
         )}
 
-        {step.name === "password" && (
+        {step.name === "password" && !step.passwordSignIn && (
+          <div className="space-y-3">
+            <p className="text-sm break-words">
+              <strong>{step.organisation.name}</strong> signs in through its own page.
+            </p>
+            <a
+              href={`${step.organisation.origin}/login`}
+              className="focus-ring flex min-h-[44px] w-full items-center justify-center rounded-lg bg-primary-solid px-4 py-2 text-sm font-medium text-white hover:bg-primary-solid-hover"
+            >
+              Continue on {hostOf(step.organisation.origin)}
+            </a>
+            <button type="button" onClick={backToEmail} className="focus-ring w-full text-sm text-text-muted underline">
+              Use another e-mail address
+            </button>
+          </div>
+        )}
+
+        {step.name === "password" && step.passwordSignIn && (
           <form onSubmit={submitPassword} className="space-y-4">
-            <p className="text-sm">
+            <p className="text-sm break-words">
               Signing in to <strong>{step.organisation.name}</strong>{" "}
               <span className="text-text-muted">({hostOf(step.organisation.origin)})</span> as{" "}
               <strong className="break-all">{step.email}</strong>.
@@ -252,15 +270,26 @@ export function PlatformSignIn() {
             <Button type="submit" className="w-full" disabled={busy}>
               {busy ? "Signing in…" : "Sign in"}
             </Button>
+            <p className="flex flex-wrap justify-between gap-2 text-sm">
+              <a href={`${step.organisation.origin}/login`} className="focus-ring text-text-muted underline">
+                Sign in another way
+              </a>
+              <a href={`${step.organisation.origin}/forgot`} className="focus-ring text-text-muted underline">
+                Forgot password?
+              </a>
+            </p>
             {step.organisations.length > 1 && (
               <button
                 type="button"
-                onClick={() => setStep({ name: "organisations", email: step.email, organisations: step.organisations })}
+                onClick={() => setStep({ name: "organisations", email: step.email, organisations: step.organisations, passwordSignIn: step.passwordSignIn })}
                 className="focus-ring w-full text-sm text-text-muted underline"
               >
                 Choose another organisation
               </button>
             )}
+            <button type="button" onClick={backToEmail} className="focus-ring w-full text-sm text-text-muted underline">
+              Use another e-mail address
+            </button>
           </form>
         )}
       </div>

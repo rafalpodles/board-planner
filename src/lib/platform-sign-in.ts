@@ -75,6 +75,14 @@ export async function endSignIn(binder: string | null): Promise<void> {
   await PlatformSignIn.deleteOne({ binderHash: sha256(binder) });
 }
 
+// An address an administrator typed onto an account proves nothing, so it neither lists nor opens that organisation
+const provenAccount = (email: string) => ({
+  email: normaliseEmail(email),
+  emailVerifiedAt: { $ne: null },
+  kind: { $ne: "machine" as const },
+  deactivatedAt: null,
+});
+
 export interface PlatformOrganisation {
   id: string;
   name: string;
@@ -87,13 +95,13 @@ const servedOrganisation = { suspendedAt: null, deletingAt: null, deletedAt: nul
 export async function organisationsFor(email: string): Promise<PlatformOrganisation[]> {
   await connectDB();
   const accounts = await acrossOrganisations(
-    User.find({ email: normaliseEmail(email), kind: { $ne: "machine" }, deactivatedAt: null }).select("organisation").lean(),
+    User.find({ ...provenAccount(email) }).select("organisation").lean(),
     "an address proven on the platform host is shown where it has accounts"
   );
   const ids = [...new Set(accounts.map((account) => String(account.organisation)))].map((id) => new Types.ObjectId(id));
   if (ids.length === 0) return [];
 
-  const rows = await Organisation.find({ _id: { $in: ids }, ...servedOrganisation }).select("name slug").sort({ name: 1 }).lean();
+  const rows = await Organisation.find({ _id: { $in: ids }, ...servedOrganisation }).select("name slug").sort({ name: 1 }).collation({ locale: "en", strength: 2 }).lean();
   const listed = await Promise.all(
     rows.map(async (row) => {
       const origin = await organisationOrigin(row._id);
@@ -113,7 +121,7 @@ export async function servedOrganisationById(id: unknown): Promise<PlatformOrgan
 }
 
 export async function accountByEmail(db: ScopedDb, email: string) {
-  return db.User.findOne({ email: normaliseEmail(email), kind: { $ne: "machine" }, deactivatedAt: null })
+  return db.User.findOne(provenAccount(email))
     .select("_id username")
     .lean();
 }

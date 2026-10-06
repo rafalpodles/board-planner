@@ -18,8 +18,8 @@ async function withDb<T>(work: (db: mongoose.mongo.Db) => Promise<T>): Promise<T
   }
 }
 
-const giveAddress = (who: OrganisationFixture, email: string) =>
-  withDb((db) => db.collection("users").updateOne({ _id: who.adminId }, { $set: { email } }));
+const giveAddress = (who: OrganisationFixture, email: string, emailVerifiedAt: Date | null = new Date()) =>
+  withDb((db) => db.collection("users").updateOne({ _id: who.adminId }, { $set: { email, emailVerifiedAt } }));
 
 let sequence = 0;
 const freshAddress = (name: string) => `${name}-${Date.now()}-${sequence++}@people.example`;
@@ -156,6 +156,13 @@ test.describe("BP-919: signing in on the platform host, e-mail first", () => {
     expect(location.host).toBe(hostOf(ACME));
     const code = location.searchParams.get("code")!;
 
+    const planted = await request.get(`${ORGANISATIONS_API}/api/auth/handoff?code=${code}`, {
+      headers: { ...asOrganisation(ACME), "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate" },
+      maxRedirects: 0,
+    });
+    expect(planted.headers()["location"]).toContain("/login?handoff=expired");
+    expect(planted.headers()["set-cookie"] ?? "").not.toContain("bp_session");
+
     const elsewhere = await request.get(`${ORGANISATIONS_API}/api/auth/handoff?code=${code}`, { headers: asOrganisation(GLOBEX), maxRedirects: 0 });
     expect(elsewhere.status()).toBe(303);
     expect(elsewhere.headers()["location"]).toContain("/login?handoff=expired");
@@ -179,6 +186,7 @@ test.describe("BP-919: signing in on the platform host, e-mail first", () => {
     for (const path of ["start", "verify", "password"]) {
       expect((await request.post(`${ORGANISATIONS_API}/api/sign-in/${path}`, { headers: asOrganisation(ACME), data: {} })).status()).toBe(404);
     }
+    expect((await request.get(`${ORGANISATIONS_API}/api/sign-in/remembered`, { headers: asOrganisation(ACME) })).status()).toBe(404);
 
     const email = freshAddress("cross");
     await giveAddress(ACME, email);
@@ -189,6 +197,32 @@ test.describe("BP-919: signing in on the platform host, e-mail first", () => {
       data: { organisation: String(GLOBEX.organisation), password: ACME.password },
     });
     expect(crossed.status()).toBe(401);
+  });
+
+  test("an address an administrator typed onto an account, never proven, lists and opens nothing", async ({ page, request }) => {
+    const email = freshAddress("typed");
+    await giveAddress(GLOBEX, email, null);
+
+    await provideAddressAndCode(page, email);
+    await expect(page.getByTestId("no-organisations")).toBeVisible();
+
+    const signedIn = await apiCode(request, email);
+    const refused = await request.post(`${ORGANISATIONS_API}/api/sign-in/password`, {
+      headers: signedIn,
+      data: { organisation: String(GLOBEX.organisation), password: GLOBEX.password },
+    });
+    expect(refused.status()).toBe(401);
+  });
+
+  test("the password step offers the organisation's own page for every other way in, and a way back", async ({ page }) => {
+    const email = freshAddress("other");
+    await giveAddress(ACME, email);
+
+    await provideAddressAndCode(page, email);
+    await expect(page.getByRole("link", { name: "Sign in another way" })).toHaveAttribute("href", `${originOf(ACME)}/login`);
+    await expect(page.getByRole("link", { name: "Forgot password?" })).toHaveAttribute("href", `${originOf(ACME)}/forgot`);
+    await page.getByRole("button", { name: "Use another e-mail address" }).click();
+    await expect(page.getByLabel("E-mail address")).toBeVisible();
   });
 
   test("an address gets five codes in fifteen minutes, then is told to wait", async ({ request }) => {

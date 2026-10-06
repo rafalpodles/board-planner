@@ -11,7 +11,6 @@ export interface IPlatformSignIn {
   createdAt: Date;
 }
 
-// An e-mail address proving itself on the platform host, before it is anybody's account anywhere
 const platformSignInSchema = new Schema<IPlatformSignIn>(
   {
     binderHash: { type: String, required: true, unique: true },
