@@ -13,6 +13,7 @@ import { useFocusTrap } from "@/hooks/use-focus-trap";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { isNavItemActive } from "@/lib/nav-active";
 import { useProjects } from "@/hooks/use-projects";
+import { useOrganisation } from "@/hooks/use-organisation";
 import { ProjectTree } from "./ProjectTree";
 import { ProjectRail } from "./ProjectRail";
 import { APP_NAME } from "@/lib/brand";
@@ -156,6 +157,7 @@ export function Sidebar({
 }: SidebarProps) {
   const { user, isAdmin, logout } = useAuth();
   const { projects, reorder } = useProjects();
+  const { organisation } = useOrganisation();
   const { preference, setPreference } = useTheme();
   const pathname = usePathname() ?? "";
   const router = useRouter();
@@ -331,6 +333,16 @@ export function Sidebar({
           <Icon d={isDrawer ? ICONS.close : ICONS.collapse} className="h-4 w-4" />
         </button>
       </div>
+      {organisation?.named && !compact && (
+        <Link
+          href="/settings/organisation"
+          title={organisation.name}
+          data-testid="sidebar-organisation"
+          className="focus-ring mx-2.5 mb-2 truncate rounded px-1 text-xs font-medium text-text-muted hover:text-text"
+        >
+          {organisation.name}
+        </Link>
+      )}
 
       <nav className="flex flex-1 flex-col gap-4 overflow-y-auto px-2.5 pb-2.5">
         <div>

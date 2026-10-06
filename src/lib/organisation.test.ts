@@ -2,16 +2,17 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { generateKeyPairSync } from "node:crypto";
 import { Types } from "mongoose";
 
-const { connectDB, findOneAndUpdate, findById } = vi.hoisted(() => ({
+const { connectDB, findOneAndUpdate, findById, updateOne } = vi.hoisted(() => ({
   connectDB: vi.fn(),
   findOneAndUpdate: vi.fn(),
   findById: vi.fn(),
+  updateOne: vi.fn(),
 }));
 
 vi.mock("./db", () => ({ connectDB }));
-vi.mock("@/models/organisation", () => ({ Organisation: { findOneAndUpdate, findById } }));
+vi.mock("@/models/organisation", () => ({ Organisation: { findOneAndUpdate, findById, updateOne } }));
 
-const { getOrganisation, licenceOf, checkOrganisationName, nameOrganisation, ORGANISATION_NAME_MAX } = await import("./organisation");
+const { getOrganisation, licenceOf, checkOrganisationName, nameOrganisation, renameOrganisation, organisationIsNamed, ORGANISATION_NAME_MAX } = await import("./organisation");
 const { DEFAULT_ORGANISATION_ID } = await import("./organisation-field");
 const { signLicence } = await import("./licence");
 
@@ -184,5 +185,40 @@ describe("nameOrganisation", () => {
       { $set: { name: "Rafał-org" }, $setOnInsert: { entitlements: FREE } },
       { upsert: true, returnDocument: "after" }
     );
+  });
+});
+
+describe("renameOrganisation (BP-920)", () => {
+  it("renames another organisation's row by its id alone, creating nothing", async () => {
+    await renameOrganisation(OTHER, "Globex");
+
+    expect(updateOne).toHaveBeenCalledWith({ _id: OTHER }, { $set: { name: "Globex" } });
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("renames the default organisation through the row it is sure to have", async () => {
+    findOneAndUpdate.mockReturnValue(resolves({ _id: DEFAULT_ORGANISATION_ID }));
+
+    await renameOrganisation(DEFAULT_ORGANISATION_ID, "Acme");
+
+    expect(findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: DEFAULT_ORGANISATION_ID },
+      { $set: { name: "Acme" }, $setOnInsert: { entitlements: FREE } },
+      { upsert: true, returnDocument: "after" }
+    );
+    expect(updateOne).not.toHaveBeenCalled();
+  });
+});
+
+describe("organisationIsNamed (BP-920)", () => {
+  it("names a self-hosted organisation only when its first run gave it a name", () => {
+    expect(organisationIsNamed({ name: "default" })).toBe(false);
+    expect(organisationIsNamed({ name: "" })).toBe(false);
+    expect(organisationIsNamed({ name: "Acme" })).toBe(true);
+  });
+
+  it("names every organisation on subdomains, \"default\" included", () => {
+    process.env.ORGANISATION_DOMAIN = "board-planner.test";
+    expect(organisationIsNamed({ name: "default" })).toBe(true);
   });
 });

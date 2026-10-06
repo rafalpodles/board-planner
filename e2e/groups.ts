@@ -146,6 +146,7 @@ export const GROUPS = {
     "organisations-route-families.spec.ts",
     "organisations-addresses.spec.ts",
     "organisations-boards.spec.ts",
+    "organisations-name.spec.ts",
     "sessions-and-auth.spec.ts",
     "proxied-login-throttle.spec.ts",
     "compose-cookie.spec.ts",

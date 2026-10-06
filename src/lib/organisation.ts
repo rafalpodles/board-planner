@@ -6,19 +6,7 @@ import { currentLicence, entitlementsFromLicence, storedLicence, type LicenceChe
 import { DEFAULT_ORGANISATION_ID } from "./organisation-field";
 import { organisationDomain } from "./organisation-host";
 
-export const ORGANISATION_NAME_MAX = 80;
-
-export function checkOrganisationName(
-  value: unknown
-): { ok: true; value: string | null } | { ok: false; error: string } {
-  if (value === undefined || value === null) return { ok: true, value: null };
-  if (typeof value !== "string") return { ok: false, error: "organisation must be a string" };
-  const name = value.trim();
-  if (name.length > ORGANISATION_NAME_MAX) {
-    return { ok: false, error: `organisation is at most ${ORGANISATION_NAME_MAX} characters` };
-  }
-  return { ok: true, value: name || null };
-}
+export { ORGANISATION_NAME_MAX, checkOrganisationName } from "./organisation-name";
 
 const FREE = { plan: "free", features: [], source: "none" } as const;
 
@@ -34,6 +22,16 @@ export async function nameOrganisation(name: string): Promise<void> {
   await connectDB();
   await ensureDefaultOrganisation({ $set: { name } });
 }
+
+export async function renameOrganisation(organisation: Types.ObjectId, name: string): Promise<void> {
+  await connectDB();
+  if (DEFAULT_ORGANISATION_ID.equals(organisation)) await ensureDefaultOrganisation({ $set: { name } });
+  else await Organisation.updateOne({ _id: organisation }, { $set: { name } });
+}
+
+// A self-hosted instance whose first run named nothing has no organisation worth naming on screen
+export const organisationIsNamed = (row: Pick<IOrganisation, "name">): boolean =>
+  organisationDomain() !== null || (!!row.name && row.name !== "default");
 
 // React's cache() only dedupes calls made during a Server Component render — confirmed against
 // this app's own Next config (Route Handlers run the handler as a plain function, with no render

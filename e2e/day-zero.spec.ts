@@ -77,8 +77,9 @@ test.describe("an instance nobody has claimed", () => {
     await expect(page).not.toHaveURL(/\/login/);
 
     expect(await (await page.request.get("/api/entitlements")).json()).toMatchObject({ organisation: "Rafał-org" });
-    await page.goto("/settings/licence");
-    await expect(page.getByTestId("organisation-name")).toHaveText("Organisation: Rafał-org");
+    await page.goto("/settings/organisation");
+    await expect(page.getByLabel("Name", { exact: true })).toHaveValue("Rafał-org");
+    await expect(page.getByTestId("sidebar-organisation")).toHaveText("Rafał-org");
   });
 
   test("an instance whose first account gives no name is the default organisation", async ({ page, request }) => {
@@ -95,6 +96,10 @@ test.describe("an instance nobody has claimed", () => {
     await expect(page).not.toHaveURL(/\/login/);
 
     expect(await (await page.request.get("/api/entitlements")).json()).toMatchObject({ organisation: "default" });
+    // BP-920: a self-hosted instance nobody named has no organisation worth naming in the sidebar
+    await page.goto("/settings/organisation");
+    await expect(page.getByLabel("Name", { exact: true })).toHaveValue("default");
+    await expect(page.getByTestId("sidebar-organisation")).toHaveCount(0);
   });
 
   test("refuses an organisation name that is too long, before making the account", async ({ request }) => {
