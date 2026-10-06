@@ -26,8 +26,8 @@ const slugFrom = (name: string) =>
     .toLowerCase()
     .normalize("NFKD")
     .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 40);
+    .slice(0, 40)
+    .replace(/^-+|-+$/g, "");
 
 async function send(path: string, method: string, body?: unknown) {
   const res = await fetch(path, {
@@ -166,7 +166,7 @@ export function PlatformSignIn() {
       <div className="w-full max-w-sm" data-testid="platform-sign-in">
         <div className="flex flex-col items-center mb-8">
           <Image src="/logo.svg" alt={APP_NAME} width={48} height={48} className="mb-3" />
-          <h1 className="text-2xl font-bold">Sign in to {APP_NAME}</h1>
+          <h1 className="text-2xl font-bold text-center">{step.name === "create" ? "Create an organisation" : `Sign in to ${APP_NAME}`}</h1>
         </div>
 
         {error && (
@@ -230,9 +230,6 @@ export function PlatformSignIn() {
             <Button type="submit" className="w-full" disabled={busy || code.length !== 6}>
               {busy ? "Checking…" : "Continue"}
             </Button>
-            <button type="button" onClick={startCreating} className="focus-ring w-full text-sm text-text-muted underline">
-              Create another organisation
-            </button>
             <button type="button" onClick={backToEmail} className="focus-ring w-full text-sm text-text-muted underline">
               Use another e-mail address
             </button>
@@ -386,6 +383,9 @@ export function PlatformSignIn() {
             )}
             <button type="button" onClick={backToEmail} className="focus-ring w-full text-sm text-text-muted underline">
               Use another e-mail address
+            </button>
+            <button type="button" onClick={startCreating} className="focus-ring w-full text-sm text-text-muted underline">
+              Create another organisation
             </button>
           </form>
         )}

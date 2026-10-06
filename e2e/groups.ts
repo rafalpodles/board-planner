@@ -148,6 +148,7 @@ export const GROUPS = {
     "organisations-boards.spec.ts",
     "organisations-name.spec.ts",
     "organisations-sign-in.spec.ts",
+    "organisations-sign-up.spec.ts",
     "sessions-and-auth.spec.ts",
     "proxied-login-throttle.spec.ts",
     "compose-cookie.spec.ts",
