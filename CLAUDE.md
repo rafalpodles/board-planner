@@ -262,6 +262,13 @@ PLATFORM_REQUEST_KEYS=    # Optional — `keyId:x,...`, the licence service's Ed
                           # has no account here and alone reaches /api/platform/* (withPlatformRequest in
                           # src/lib/platform-route.ts) — the organisations list, the platform audit log
                           # (PlatformAuditLog, outside every organisation) and the licence push (BP-892)
+LICENCE_SERVICE_URL=      # Optional, with LICENCE_PULL_KEY — the licence service's origin (https; http only to
+LICENCE_PULL_KEY=         # loopback) and Board Planner's own Ed25519 key {keyId,d,x}. With ORGANISATION_DOMAIN,
+                          # once a minute after boot and then every LICENCE_PULL_TICK_MS (default a day, 0 off),
+                          # each served organisation asks POST /api/organisations/licence, signed like a platform
+                          # request with the service's host, and any key returned is stored through the same
+                          # checks as the push (storeOrganisationLicence: bound to it, newer, compare-and-set).
+                          # One without the other stops the app at boot (BP-897)
 BOOTSTRAP_TOKEN=          # Optional — setup code for the first account; unset, one is generated and
                           # printed to the server log while the instance has no users (BP-325)
 ORGANISATION_DOMAIN=      # Optional — e.g. board-planner.com: organisations live on <slug>.ORGANISATION_DOMAIN, the
