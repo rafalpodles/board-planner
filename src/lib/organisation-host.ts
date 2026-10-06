@@ -7,21 +7,40 @@ import { selfOrigin } from "./session";
 import type { ScopedDb } from "./db-scope";
 
 export const RESERVED_SLUGS = [
+  "abuse",
+  "account",
+  "accounts",
   "admin",
   "api",
   "app",
   "assets",
   "auth",
+  "autoconfig",
+  "autodiscover",
   "billing",
+  "board-planner",
+  "boardplanner",
   "cdn",
+  "console",
+  "dashboard",
+  "dev",
   "docs",
   "help",
   "login",
   "mail",
+  "mta-sts",
+  "platform",
+  "postmaster",
+  "relay",
+  "security",
+  "signup",
   "smtp",
+  "sso",
+  "staging",
   "static",
   "status",
   "support",
+  "webmail",
   "www",
 ];
 
@@ -52,6 +71,14 @@ export function defaultOrganisationHost(): string | null {
 
 const hostName = (host: string | null) => (host ?? "").trim().toLowerCase().replace(/:\d+$/, "").replace(/\.$/, "");
 
+function relayHostName(): string | null {
+  try {
+    return process.env.OIDC_RELAY_ORIGIN ? new URL(process.env.OIDC_RELAY_ORIGIN).hostname : null;
+  } catch {
+    return null;
+  }
+}
+
 export function assertOrganisationDomainConfig(): void {
   const domain = organisationDomain();
   if (domain !== null && !DOMAIN_PATTERN.test(domain)) {
@@ -64,19 +91,17 @@ export function assertOrganisationDomainConfig(): void {
     if (domain === null) throw new Error("ORGANISATION_DEFAULT_HOST needs ORGANISATION_DOMAIN: without it every host is the default organisation's");
     const label = defaultHost.endsWith(`.${domain}`) ? defaultHost.slice(0, -domain.length - 1) : null;
     // A label an organisation could take as its slug would make that organisation unreachable
-    const relayHost = (() => {
-      try {
-        return process.env.OIDC_RELAY_ORIGIN ? new URL(process.env.OIDC_RELAY_ORIGIN).hostname : null;
-      } catch {
-        return null;
-      }
-    })();
+    const relayHost = relayHostName();
     // The relay's host, and login. which will carry it, are the platform's; an organisation must not take them over
     if (!DOMAIN_PATTERN.test(defaultHost) || defaultHost === domain || defaultHost === relayHost || label === "login" || (label !== null && !RESERVED_SLUGS.includes(label))) {
       throw new Error(
         `ORGANISATION_DEFAULT_HOST must be a host outside ORGANISATION_DOMAIN, or one of its reserved names such as app.${domain}, and not login. or the OIDC relay's; got "${process.env.ORGANISATION_DEFAULT_HOST}"`
       );
     }
+  }
+  const relayHost = relayHostName();
+  if (domain !== null && relayHost !== null && relayHost.endsWith(`.${domain}`) && !RESERVED_SLUGS.includes(relayHost.slice(0, -domain.length - 1))) {
+    throw new Error(`OIDC_RELAY_ORIGIN on ORGANISATION_DOMAIN must use one of its reserved names, such as login.${domain}, or an organisation could take it`);
   }
   // With no proxy hops every anonymous caller shares one throttle bucket, which one organisation could empty for all
   if (domain !== null && trustedProxyHops() === 0) {

@@ -35,12 +35,19 @@ const LETTERS_WITHOUT_A_DECOMPOSITION: Record<string, string> = {
   Œ: "OE",
 };
 
-export function suggestProjectKey(name: string, taken: Iterable<string> = []): string {
-  const words = name
+export function latinFold(text: string): string {
+  return text
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[ŁØÆŒłøæœ]/g, (letter) => {
+      const folded = LETTERS_WITHOUT_A_DECOMPOSITION[letter.toUpperCase()];
+      return letter === letter.toUpperCase() ? folded : folded.toLowerCase();
+    });
+}
+
+export function suggestProjectKey(name: string, taken: Iterable<string> = []): string {
+  const words = latinFold(name)
     .toUpperCase()
-    .replace(/[ŁØÆŒ]/g, (letter) => LETTERS_WITHOUT_A_DECOMPOSITION[letter])
     .split(/[^A-Z0-9]+/)
     .filter(Boolean);
   while (words.length > 0 && !/^[A-Z]/.test(words[0])) words.shift();

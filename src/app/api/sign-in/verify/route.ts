@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { passwordSignInEnabled } from "@/lib/password-sign-in";
+import { organisationDomain } from "@/lib/organisation-host";
 import { getClientIp } from "@/lib/client-ip";
 import { organisationsFor, verifiedEmail, verifySignInCode } from "@/lib/platform-sign-in";
 import { signInBinder, startAgain, signInRoute } from "@/lib/platform-sign-in-route";
@@ -36,5 +37,5 @@ export const POST = signInRoute(async (request) => {
 
   const email = await verifiedEmail(binder);
   if (!email) return startAgain();
-  return NextResponse.json({ email, organisations: await organisationsFor(email), passwordSignIn: passwordSignInEnabled() });
+  return NextResponse.json({ email, organisations: await organisationsFor(email), passwordSignIn: passwordSignInEnabled(), domain: organisationDomain() });
 });

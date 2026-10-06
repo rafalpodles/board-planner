@@ -7,6 +7,7 @@ export interface IPlatformSignIn {
   codeHash: string;
   attempts: number;
   verifiedAt: Date | null;
+  claimedAt: Date | null;
   expiresAt: Date;
   createdAt: Date;
 }
@@ -18,6 +19,7 @@ const platformSignInSchema = new Schema<IPlatformSignIn>(
     codeHash: { type: String, required: true },
     attempts: { type: Number, required: true, default: 0 },
     verifiedAt: { type: Date, default: null },
+    claimedAt: { type: Date, default: null },
     expiresAt: { type: Date, required: true },
   },
   { timestamps: { createdAt: true, updatedAt: false } }
