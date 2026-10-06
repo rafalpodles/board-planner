@@ -27,4 +27,4 @@ export async function provenEmail(request: Request): Promise<string | null> {
 }
 
 export const startAgain = () =>
-  NextResponse.json({ error: "This sign-in has expired. Enter your e-mail address again." }, { status: 401 });
+  NextResponse.json({ error: "This sign-in has expired. Enter your e-mail address again.", restart: true }, { status: 401 });
