@@ -57,9 +57,19 @@ describe("GET /api/organisation (BP-920)", () => {
     const res = await call(GET, "GET");
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ name: "Acme", named: true, cloud: false, address: "planner.example.org", plan: "pro" });
+    expect(await res.json()).toEqual({ name: "Acme", named: true, cloud: false, address: "planner.example.org", plan: "pro", planEndsAt: null });
     expect(countUsers).not.toHaveBeenCalled();
     expect(countProjects).not.toHaveBeenCalled();
+  });
+
+  it("tells everyone when a Pro licence ends, and nothing of the date on Free", async () => {
+    getAuthUser.mockResolvedValue(MEMBER);
+    const expiresAt = new Date("2026-11-05T23:59:59.000Z");
+    getOrganisation.mockResolvedValue({ _id: DEFAULT_ORGANISATION_ID, name: "Acme", entitlements: { plan: "pro", features: [], expiresAt } });
+    expect((await (await call(GET, "GET")).json()).planEndsAt).toBe("2026-11-05T23:59:59.000Z");
+
+    getOrganisation.mockResolvedValue({ _id: DEFAULT_ORGANISATION_ID, name: "Acme", entitlements: { plan: "free", features: [], expiresAt } });
+    expect((await (await call(GET, "GET")).json()).planEndsAt).toBeNull();
   });
 
   it("gives an admin the people and boards, counted in their own organisation only", async () => {
