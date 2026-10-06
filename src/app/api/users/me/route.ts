@@ -153,6 +153,7 @@ export const PUT = withAuth(async (request, { user, db }) => {
         // has no confirmation to offer
         updates.email = email;
         updates.emailVerifiedAt = null;
+        updates.emailVouchedByAdmin = false;
         await cancelEmailChange(db, user._id);
       }
     }

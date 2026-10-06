@@ -119,7 +119,7 @@ export async function POST(request: Request) {
   // only while that is still the account's address (BP-842). After the password, and on its own:
   // failing here must not give back a link whose password is already set
   if (outcome.sentTo) {
-    await db.User.updateOne({ _id: user._id, email: outcome.sentTo }, { $set: { emailVerifiedAt: new Date() } }).catch(
+    await db.User.updateOne({ _id: user._id, email: outcome.sentTo }, { $set: { emailVerifiedAt: new Date(), emailVouchedByAdmin: false } }).catch(
       (err) => console.error("Failed to record a reset's proof of address:", err)
     );
   }

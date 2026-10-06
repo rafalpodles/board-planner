@@ -159,7 +159,10 @@ export const PUT = withAdmin(async (request, { params, user: admin, db }) => {
     }
     emailWasChanged = email !== previousEmail;
     target.email = email;
-    if (emailWasChanged) target.emailVerifiedAt = null;
+    if (emailWasChanged) {
+      target.emailVerifiedAt = null;
+      target.emailVouchedByAdmin = false;
+    }
   }
 
   let passwordWasSet = false;
@@ -463,7 +466,10 @@ async function accountAction(
   }
   if (action === "confirm") {
     if (!target.email) return NextResponse.json({ error: "This account has no address" }, { status: 400 });
-    target.emailVerifiedAt = new Date();
+    if (!target.emailVerifiedAt) {
+      target.emailVerifiedAt = new Date();
+      target.emailVouchedByAdmin = true;
+    }
     await target.save();
     void logInstanceAudit(db, {
       action: "user_email_confirmed",
