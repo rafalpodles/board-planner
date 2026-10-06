@@ -34,6 +34,8 @@ export async function bootNode(): Promise<void> {
     assertSignInConfig();
     const { assertOrganisationDomainConfig } = await import("@/lib/organisation-host");
     assertOrganisationDomainConfig();
+    const { assertLicencePullConfig } = await import("@/lib/licence-pull");
+    assertLicencePullConfig();
   } catch (err) {
     // Exiting rather than throwing, and this is not belt-and-braces. `NextServer.prepare()`
     // awaits the real prepare only when `dev` (next/dist/server/next.js), so under `next start`
@@ -216,6 +218,10 @@ async function bootWhenDatabaseIsReady(): Promise<void> {
           ? "Digest scheduler is off (no SMTP server configured)"
           : "Digest scheduler was already running"
     );
+
+    const { startLicencePull } = await import("@/lib/licence-pull");
+    const licencePull = startLicencePull();
+    console.log(licencePull.started ? "Licence pull started" : `Licence pull is off (${licencePull.reason})`);
   } catch (err) {
     // Don't crash the server on a transient boot-time failure after connecting;
     // route handlers already work, only the seeding/backfill/schedulers above are at risk.
