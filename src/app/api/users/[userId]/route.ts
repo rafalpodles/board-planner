@@ -466,8 +466,10 @@ async function accountAction(
   }
   if (action === "confirm") {
     if (!target.email) return NextResponse.json({ error: "This account has no address" }, { status: 400 });
-    target.emailVerifiedAt = new Date();
-    target.emailVouchedByAdmin = true;
+    if (!target.emailVerifiedAt) {
+      target.emailVerifiedAt = new Date();
+      target.emailVouchedByAdmin = true;
+    }
     await target.save();
     void logInstanceAudit(db, {
       action: "user_email_confirmed",
