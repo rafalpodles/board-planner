@@ -10,6 +10,7 @@ export const LICENCE_PULL_PATH = "/api/organisations/licence";
 const DAY_MS = 24 * 60 * 60 * 1000;
 const FIRST_PULL_DELAY_MS = 60 * 1000;
 const REQUEST_TIMEOUT_MS = 10_000;
+const SIGN_UP_PULL_TIMEOUT_MS = 4_000;
 const MAX_RESPONSE_BYTES = 64 * 1024;
 const MAX_TIMER_MS = 2_147_483_647;
 const BASE64URL = /^[A-Za-z0-9_-]+$/;
@@ -70,7 +71,11 @@ export function assertLicencePullConfig(): void {
 
 export type PullOutcome = StoreOutcome | { status: "none" } | { status: "refused"; httpStatus: number } | { status: "unreachable" } | { status: "oversized" };
 
-export async function pullLicence(config: LicencePullConfig, organisation: { _id: { toHexString(): string }; name?: string; slug?: string | null }): Promise<PullOutcome> {
+export async function pullLicence(
+  config: LicencePullConfig,
+  organisation: { _id: { toHexString(): string }; name?: string; slug?: string | null },
+  timeoutMs = REQUEST_TIMEOUT_MS
+): Promise<PullOutcome> {
   const id = organisation._id.toHexString();
   const body = new TextEncoder().encode(JSON.stringify({ organisation: id, name: organisation.name ?? "", slug: organisation.slug ?? null }));
   const headers = signPlatformRequest({ method: "POST", host: config.url.host, path: LICENCE_PULL_PATH, body }, config.key);
@@ -81,7 +86,7 @@ export async function pullLicence(config: LicencePullConfig, organisation: { _id
       method: "POST",
       headers: { ...headers, "content-type": "application/json" },
       body,
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
       redirect: "error",
     });
   } catch {
@@ -103,6 +108,19 @@ export async function pullLicence(config: LicencePullConfig, organisation: { _id
   }
   if (typeof answer?.licenceKey !== "string" || !answer.licenceKey) return { status: "none" };
   return storeOrganisationLicence(id, answer.licenceKey, `pull:${config.key.keyId}`);
+}
+
+export async function pullNewOrganisationLicence(organisationId: string): Promise<void> {
+  try {
+    const config = licencePullConfig();
+    if (!config) return;
+    await connectDB();
+    const row = await Organisation.findById(organisationId).select("name slug").lean();
+    if (!row) return;
+    await pullLicence(config, row, SIGN_UP_PULL_TIMEOUT_MS);
+  } catch (error) {
+    console.warn("Licence pull for a new organisation failed:", error instanceof Error ? error.message : error);
+  }
 }
 
 export async function pullEveryLicence(config: LicencePullConfig): Promise<void> {
