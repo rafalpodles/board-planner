@@ -1031,7 +1031,7 @@ describe("PUT /api/users/:id — account actions", () => {
 
     expect(res.status).toBe(200);
     expect(target.emailVerifiedAt).toBeInstanceOf(Date);
-    expect(target.emailVouchedByAdmin).toBe(true);
+    expect((target as { emailVouchedByAdmin?: boolean }).emailVouchedByAdmin).toBe(true);
     expect(target.save).toHaveBeenCalled();
     expect(logInstanceAudit).toHaveBeenCalledWith(
       scopedToDefaultOrganisation(),
