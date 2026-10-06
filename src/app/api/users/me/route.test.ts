@@ -32,7 +32,7 @@ vi.mock("@/lib/session", () => ({
 }));
 const issueEmailChange = vi.fn();
 const cancelEmailChange = vi.fn();
-vi.mock("@/lib/email-change", () => ({ issueEmailChange, cancelEmailChange }));
+vi.mock("@/lib/email-change", () => ({ issueEmailChange, cancelEmailChange, CONFIRMATIONS_PER_WINDOW: 3 }));
 vi.mock("@/lib/password-reset", () => ({ invalidateResetTokens }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/lib/email", async () => {

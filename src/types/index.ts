@@ -1692,6 +1692,7 @@ export const INSTANCE_AUDIT_ACTIONS = [
   "licence_stored",
   "organisation_exported",
   "organisation_renamed",
+  "user_email_confirmed_self",
 ] as const;
 
 export type InstanceAuditAction = (typeof INSTANCE_AUDIT_ACTIONS)[number];

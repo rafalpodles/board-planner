@@ -27,6 +27,9 @@ export default function ProfilePage() {
   const [loaded, setLoaded] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
   const [pendingEmail, setPendingEmail] = useState("");
+  const [confirmed, setConfirmed] = useState<boolean | null>(null);
+  const [confirmationSentTo, setConfirmationSentTo] = useState("");
+  const [confirming, setConfirming] = useState(false);
 
   // Trimmed and lowercased the way the server normalises it, so the password prompt does not
   // appear for a stray capital that will not change anything
@@ -68,10 +71,26 @@ export default function ProfilePage() {
       .catch(() => {});
     api
       .get("/api/users/me/email-change")
-      .then((data: { pending: { email: string } | null }) => setPendingEmail(data.pending?.email ?? ""))
+      .then((data: { pending: { email: string } | null; confirmed: boolean }) => {
+        setPendingEmail(data.pending?.email ?? "");
+        setConfirmed(data.confirmed);
+      })
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function confirmAddress() {
+    setConfirming(true);
+    try {
+      const answer: { sent?: string; confirmed?: boolean } = await api.post("/api/users/me/email-change", {});
+      if (answer.confirmed) setConfirmed(true);
+      else setConfirmationSentTo(answer.sent ?? savedEmail);
+    } catch (err) {
+      toast(err instanceof Error && err.message ? err.message : "Could not send the confirmation link", "error");
+    } finally {
+      setConfirming(false);
+    }
+  }
 
   async function cancelPending() {
     try {
@@ -170,6 +189,31 @@ export default function ProfilePage() {
         {passwordSignIn === false && (
           <p id="emailByAdmin" className="-mt-2 text-xs text-text-muted">
             An administrator changes it on this instance.
+          </p>
+        )}
+
+        {!emailChanged && savedEmail && !pendingEmail && confirmed === false && (
+          <div className="-mt-2 space-y-2" data-testid="confirm-address">
+            {confirmationSentTo ? (
+              <p role="status" className="text-sm text-text-muted [overflow-wrap:anywhere]">
+                We sent a confirmation link to <strong>{confirmationSentTo}</strong>. Open it to confirm.
+              </p>
+            ) : (
+              <>
+                <p className="text-xs text-text-muted">
+                  This address is not confirmed yet. We will send a link to it, and following the link proves
+                  the address is yours.
+                </p>
+                <Button type="button" variant="secondary" onClick={() => void confirmAddress()} disabled={confirming}>
+                  {confirming ? "Sending…" : "Confirm this address"}
+                </Button>
+              </>
+            )}
+          </div>
+        )}
+        {!emailChanged && savedEmail && confirmed === true && (
+          <p className="-mt-2 text-xs text-text-muted" data-testid="address-confirmed">
+            This address is confirmed.
           </p>
         )}
 

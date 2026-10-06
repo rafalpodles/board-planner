@@ -5,6 +5,7 @@ import type { ScopedDb } from "@/lib/db-scope";
 
 export const EMAIL_CHANGE_TOKEN_PREFIX = "cpe_";
 export const EMAIL_CHANGE_TTL_MS = 24 * 60 * 60 * 1000;
+export const CONFIRMATIONS_PER_WINDOW = 3;
 
 /** A new request replaces the one before it, so only the latest address can be confirmed. */
 export async function issueEmailChange(

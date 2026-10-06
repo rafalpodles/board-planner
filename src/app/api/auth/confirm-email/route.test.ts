@@ -174,14 +174,18 @@ describe("POST /api/auth/confirm-email", () => {
     expect(releaseEmailChange).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "cpe_good", CLAIMED);
   });
 
-  it("writes, audits and mails nothing when the address is already the one on the account", async () => {
+  it("records the proof, and only the proof, when the address is already the one on the account", async () => {
     consumeEmailChange.mockResolvedValue({ ok: true, userId: "u1", email: "old@example.com" });
 
     const response = await POST(post());
 
     expect(response.status).toBe(200);
-    expect(userUpdateOne).not.toHaveBeenCalled();
-    expect(logInstanceAudit).not.toHaveBeenCalled();
+    expect(userUpdateOne).toHaveBeenCalledTimes(1);
+    expect(userUpdateOne).toHaveBeenCalledWith(
+      { _id: "u1", email: "old@example.com", organisation: expect.anything() },
+      { $set: { emailVerifiedAt: expect.any(Date), emailVouchedByAdmin: false } }
+    );
+    expect(logInstanceAudit).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ action: "user_email_confirmed_self", detail: "old@example.com" }));
     expect(notifyAddressChanged).not.toHaveBeenCalled();
   });
 });

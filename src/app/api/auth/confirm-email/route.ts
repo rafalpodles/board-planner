@@ -84,6 +84,18 @@ export async function POST(request: Request) {
       detail: `${previousEmail || "none"} → ${outcome.email}`,
     });
     void notifyAddressChanged({ previousEmail, username: user.username, newEmail: outcome.email });
+  } else {
+    await db.User.updateOne(
+      { _id: user._id, email: outcome.email },
+      { $set: { emailVerifiedAt: new Date(), emailVouchedByAdmin: false } }
+    );
+    void logInstanceAudit(db, {
+      action: "user_email_confirmed_self",
+      user: user._id,
+      actorUsername: user.username,
+      target: user.username,
+      detail: outcome.email,
+    });
   }
 
   return NextResponse.json({ ok: true, email: outcome.email });
