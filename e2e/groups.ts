@@ -177,6 +177,7 @@ export const GROUPS = {
     "users-screen.spec.ts",
     "email-on-account.spec.ts",
     "email-change-confirmation.spec.ts",
+    "confirm-current-address.spec.ts",
     "reserved-usernames.spec.ts",
     "mail-test-send.spec.ts",
     "own-display-name.spec.ts",

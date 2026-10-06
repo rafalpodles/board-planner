@@ -114,7 +114,11 @@ export default function ProfilePage() {
       setSavedEmail(inForce);
       setEmail(inForce);
       if (saved.pendingEmail) setPendingEmail(saved.pendingEmail);
-      else if (emailChanged) setPendingEmail("");
+      else if (emailChanged) {
+        setPendingEmail("");
+        setConfirmed(false);
+        setConfirmationSentTo("");
+      }
       setSavedFullName(fullName.trim());
       setFullName(fullName.trim());
       setCurrentPassword("");
