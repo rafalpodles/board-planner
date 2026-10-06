@@ -2,7 +2,7 @@ import { test, expect, type APIRequestContext } from "@playwright/test";
 import { ORGANISATION_DOMAIN, ORGANISATIONS_PORT, RUN_ORGANISATIONS_SERVER } from "../playwright.config";
 import { signPlatformRequest } from "../src/lib/platform-request";
 import { E2E_PLATFORM_REQUEST_KEY } from "./licence-key";
-import { GLOBEX, ORGANISATIONS_API, PLATFORM_HOST, asOrganisation, originOf, seedTwoOrganisations } from "./organisations";
+import { ACME, GLOBEX, ORGANISATIONS_API, PLATFORM_HOST, asOrganisation, originOf, seedTwoOrganisations } from "./organisations";
 
 test.skip(!RUN_ORGANISATIONS_SERVER, "needs the ORGANISATION_DOMAIN server — set E2E_ORGANISATIONS_SERVER=1");
 
@@ -15,8 +15,15 @@ function suspend(request: APIRequestContext) {
   return request.post(`${ORGANISATIONS_API}${path}`, { headers: { host: PLATFORM_HOST, "content-type": "application/json", ...headers }, data: body });
 }
 
-test.beforeEach(async () => {
+const forgetHosts = (request: APIRequestContext) => request.post(`${ORGANISATIONS_API}/api/e2e/organisation-cache`, { headers: asOrganisation(ACME) });
+
+test.beforeEach(async ({ request }) => {
   await seedTwoOrganisations();
+  await forgetHosts(request);
+});
+
+test.afterEach(async ({ request }) => {
+  await forgetHosts(request);
 });
 
 // BP-921: these pages took a 404 from a host with no organisation for "passwords are on" and offered a form that could only fail
