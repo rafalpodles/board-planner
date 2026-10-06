@@ -4,7 +4,7 @@ import { Types } from "mongoose";
 const { storeOrganisationLicence } = vi.hoisted(() => ({ storeOrganisationLicence: vi.fn() }));
 vi.mock("./organisation-licence", () => ({ storeOrganisationLicence }));
 
-const { licencePullConfig, pullLicence, LICENCE_PULL_PATH } = await import("./licence-pull");
+const { licencePullConfig, licencePullTickMs, pullLicence, LICENCE_PULL_PATH } = await import("./licence-pull");
 const { platformSigningString, PLATFORM_HEADERS } = await import("./platform-request");
 const { createPublicKey, generateKeyPairSync, verify } = await import("node:crypto");
 
@@ -25,6 +25,16 @@ describe("licencePullConfig (BP-897)", () => {
 
   it.each(["{", JSON.stringify({ keyId: "k", d: "a b", x: "c" }), JSON.stringify({ d: "a", x: "b" })])("refuses the key %s", (key) => {
     expect(() => licencePullConfig(env({ LICENCE_SERVICE_URL: "https://licence.example", LICENCE_PULL_KEY: key }))).toThrow(/LICENCE_PULL_KEY/);
+  });
+
+  it("refuses a key whose halves do not belong together", () => {
+    const other = generateKeyPairSync("ed25519").privateKey.export({ format: "jwk" });
+    const mismatched = JSON.stringify({ keyId: "k", d: KEY.d, x: other.x });
+    expect(() => licencePullConfig(env({ LICENCE_SERVICE_URL: "https://licence.example", LICENCE_PULL_KEY: mismatched }))).toThrow(/LICENCE_PULL_KEY/);
+  });
+
+  it("refuses localhost over plain http, which need not be this machine", () => {
+    expect(() => licencePullConfig(env({ LICENCE_SERVICE_URL: "http://localhost:4000", LICENCE_PULL_KEY: JSON.stringify(KEY) }))).toThrow(/https/);
   });
 
   it("takes https, and plain http to loopback only", () => {
@@ -74,5 +84,23 @@ describe("pullLicence (BP-897)", () => {
     fetchMock.mockRejectedValueOnce(new Error("ECONNREFUSED"));
     expect(await pullLicence(config, organisation)).toEqual({ status: "unreachable" });
     expect(storeOrganisationLicence).not.toHaveBeenCalled();
+  });
+});
+
+describe("licencePullTickMs (BP-897)", () => {
+  it("is a day when unset or empty, off at 0, at least a minute, and never past what a timer can hold", () => {
+    expect(licencePullTickMs(undefined)).toBe(24 * 60 * 60 * 1000);
+    expect(licencePullTickMs("")).toBe(24 * 60 * 60 * 1000);
+    expect(licencePullTickMs("0")).toBe(0);
+    expect(licencePullTickMs("5")).toBe(60_000);
+    expect(licencePullTickMs("3000000000")).toBe(2_147_483_647);
+  });
+
+  it("falls back to a day for a value that is not a number, and says so", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(licencePullTickMs("abc")).toBe(24 * 60 * 60 * 1000);
+    expect(licencePullTickMs("-5")).toBe(24 * 60 * 60 * 1000);
+    expect(warn).toHaveBeenCalledTimes(2);
+    warn.mockRestore();
   });
 });

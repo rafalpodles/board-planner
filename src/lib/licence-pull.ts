@@ -1,3 +1,4 @@
+import { createPrivateKey, createPublicKey } from "node:crypto";
 import { connectDB } from "./db";
 import { forEachServedOrganisation } from "./organisation-jobs";
 import { organisationDomain } from "./organisation-host";
@@ -9,6 +10,8 @@ export const LICENCE_PULL_PATH = "/api/organisations/licence";
 const DAY_MS = 24 * 60 * 60 * 1000;
 const FIRST_PULL_DELAY_MS = 60 * 1000;
 const REQUEST_TIMEOUT_MS = 10_000;
+const MAX_RESPONSE_BYTES = 64 * 1024;
+const MAX_TIMER_MS = 2_147_483_647;
 const BASE64URL = /^[A-Za-z0-9_-]+$/;
 
 export interface LicencePullConfig {
@@ -17,7 +20,16 @@ export interface LicencePullConfig {
 }
 
 function isLoopback(hostname: string): boolean {
-  return hostname === "127.0.0.1" || hostname === "[::1]" || hostname === "localhost";
+  return hostname === "127.0.0.1" || hostname === "[::1]";
+}
+
+function keyPairMatches(key: { d: string; x: string }): boolean {
+  try {
+    const derived = createPublicKey(createPrivateKey({ key: { kty: "OKP", crv: "Ed25519", d: key.d, x: key.x }, format: "jwk" })).export({ format: "jwk" });
+    return derived.x === key.x;
+  } catch {
+    return false;
+  }
 }
 
 export function licencePullConfig(env: NodeJS.ProcessEnv = process.env): LicencePullConfig | null {
@@ -46,7 +58,7 @@ export function licencePullConfig(env: NodeJS.ProcessEnv = process.env): Licence
     throw new Error("LICENCE_PULL_KEY must be the JSON {keyId, d, x} of an Ed25519 key");
   }
   const { keyId, d, x } = (key ?? {}) as Record<string, unknown>;
-  if (typeof keyId !== "string" || !keyId || typeof d !== "string" || !BASE64URL.test(d) || typeof x !== "string" || !BASE64URL.test(x)) {
+  if (typeof keyId !== "string" || !keyId || typeof d !== "string" || !BASE64URL.test(d) || typeof x !== "string" || !BASE64URL.test(x) || !keyPairMatches({ d, x })) {
     throw new Error("LICENCE_PULL_KEY must be the JSON {keyId, d, x} of an Ed25519 key");
   }
   return { url, key: { keyId, d, x } };
@@ -77,7 +89,14 @@ export async function pullLicence(config: LicencePullConfig, organisation: { _id
   }
   if (!response.ok) return { status: "refused", httpStatus: response.status };
 
-  const answer = (await response.json().catch(() => null)) as { licenceKey?: unknown } | null;
+  const text = await response.text().catch(() => "");
+  if (text.length > MAX_RESPONSE_BYTES) return { status: "refused", httpStatus: response.status };
+  let answer: { licenceKey?: unknown } | null = null;
+  try {
+    answer = JSON.parse(text);
+  } catch {
+    answer = null;
+  }
   if (typeof answer?.licenceKey !== "string" || !answer.licenceKey) return { status: "none" };
   return storeOrganisationLicence(id, answer.licenceKey, `pull:${config.key.keyId}`);
 }
@@ -94,6 +113,18 @@ export async function pullEveryLicence(config: LicencePullConfig): Promise<void>
   });
 }
 
+export function licencePullTickMs(raw: string | undefined = process.env.LICENCE_PULL_TICK_MS): number {
+  const value = raw?.trim();
+  if (!value) return DAY_MS;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    console.warn(`LICENCE_PULL_TICK_MS=${JSON.stringify(value)} is not a number of milliseconds; pulling daily`);
+    return DAY_MS;
+  }
+  if (parsed === 0) return 0;
+  return Math.min(Math.max(parsed, FIRST_PULL_DELAY_MS), MAX_TIMER_MS);
+}
+
 let started = false;
 
 export function startLicencePull(): { started: boolean; reason?: string } {
@@ -101,8 +132,8 @@ export function startLicencePull(): { started: boolean; reason?: string } {
   if (!organisationDomain()) return { started: false, reason: "organisations are not on subdomains" };
   const config = licencePullConfig();
   if (!config) return { started: false, reason: "LICENCE_SERVICE_URL and LICENCE_PULL_KEY are not set" };
-  const tickMs = process.env.LICENCE_PULL_TICK_MS === undefined ? DAY_MS : Number(process.env.LICENCE_PULL_TICK_MS);
-  if (!Number.isFinite(tickMs) || tickMs <= 0) return { started: false, reason: "LICENCE_PULL_TICK_MS is 0" };
+  const tickMs = licencePullTickMs();
+  if (tickMs === 0) return { started: false, reason: "LICENCE_PULL_TICK_MS is 0" };
 
   started = true;
   let pulling = false;
@@ -116,6 +147,6 @@ export function startLicencePull(): { started: boolean; reason?: string } {
       });
   };
   setTimeout(pull, FIRST_PULL_DELAY_MS).unref();
-  setInterval(pull, Math.max(tickMs, FIRST_PULL_DELAY_MS)).unref();
+  setInterval(pull, tickMs).unref();
   return { started: true };
 }

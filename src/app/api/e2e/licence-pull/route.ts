@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { e2eOnlyMounted } from "@/lib/e2e-only";
 import { licencePullConfig, pullEveryLicence } from "@/lib/licence-pull";
 
-// The daily pull, on demand: a spec cannot wait a day, and the server runs with the timer off
 export async function POST() {
   if (!e2eOnlyMounted(process.env.E2E, process.env.NODE_ENV)) {
     return new NextResponse(null, { status: 404 });
