@@ -54,6 +54,10 @@ export function hostNotFound(): NextResponse {
   return NextResponse.json({ error: "Not found" }, { status: 404 });
 }
 
+export async function refusedHost(request: Request): Promise<NextResponse> {
+  return (await organisationOfRequest(request)).kind === "suspended" ? organisationSuspended() : hostNotFound();
+}
+
 export function organisationSuspended(): NextResponse {
   return NextResponse.json(
     { error: "This organisation is suspended.", suspended: true },

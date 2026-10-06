@@ -1,4 +1,4 @@
-import { hostNotFound } from "@/lib/middleware";
+import { refusedHost } from "@/lib/middleware";
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { scopedFor, type ScopedDb, organisationOf, scopedForRequest } from "@/lib/db-scope";
@@ -113,7 +113,7 @@ async function accountFor(db: ScopedDb, provider: OidcProvider, claims: Verified
 
 export async function GET(request: Request, { params }: { params: Promise<{ provider: string }> }) {
   const db = await scopedForRequest(request);
-  if (!db) return hostNotFound();
+  if (!db) return refusedHost(request);
   const origin = await originFor(db);
   if (!origin) return NextResponse.json({ error: "PUBLIC_ORIGIN is not set" }, { status: 500 });
   const provider = providerById((await params).provider);

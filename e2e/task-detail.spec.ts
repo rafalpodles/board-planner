@@ -452,6 +452,8 @@ test("uploads: an image attaches into the description, an oversized one is refus
     // toHaveValue would pass on its first poll and never see an insert landing a tick later
     await page.waitForTimeout(1_000);
     expect(await descriptionField.inputValue()).toBe(before);
+    // BP-921: the refusal used to reach the console and nobody else
+    await expect(page.getByTestId("upload-error")).toHaveText("File too large. Maximum size is 5MB.");
   });
 
   await test.step("the stored file answers only to somebody carrying credentials", async () => {

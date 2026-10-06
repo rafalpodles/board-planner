@@ -185,6 +185,11 @@ const platformPort = (domain: string) => {
 
 export const originFor = (db: ScopedDb): Promise<string | null> => organisationOrigin(db.organisation);
 
+export function platformSignInOrigin(): string | null {
+  const domain = organisationDomain();
+  return domain ? `${platformScheme(domain)}//login.${domain}${platformPort(domain)}` : null;
+}
+
 export type RequestOrganisation =
   | { kind: "organisation"; organisation: Types.ObjectId }
   | { kind: "suspended"; organisation: Types.ObjectId }

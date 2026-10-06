@@ -190,7 +190,7 @@ test.describe("BP-893: an organisation's life cycle", () => {
     await page.goto(`${originOf(ACME)}/settings/export`);
     await expect(page.getByRole("heading", { name: "Export" })).toBeVisible();
     await page.screenshot({ path: "e2e/.artifacts/bp893-export-desktop.png" });
-    const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("link", { name: "Download the export" }).click()]);
+    const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Download the export" }).click()]);
     expect(download.suggestedFilename()).toMatch(/^acme-export-\d{4}-\d{2}-\d{2}\.ndjson\.gz$/);
 
     const text = gunzipSync(readFileSync((await download.path())!)).toString("utf8");
