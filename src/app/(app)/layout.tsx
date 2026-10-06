@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useCallback, useRef, useState } from "react";
-import { AuthGuard } from "@/components/AuthGuard";
+import { AuthGuard, StatusBanners } from "@/components/AuthGuard";
 import { SearchLayer } from "@/components/search/SearchLayer";
 import { SearchPageLink } from "@/components/search/SearchTrigger";
 import { PmChatWidget } from "@/components/pm/PmChatWidget";
@@ -19,7 +19,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const closeSearch = useCallback(() => setSearchOpen(false), []);
 
   return (
-    <AuthGuard>
+    <AuthGuard bannersInShell>
       <ProjectsProvider>
         <a
           href="#main-content"
@@ -70,6 +70,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 <SearchPageLink />
               </div>
             </div>
+
+            <StatusBanners />
 
             {/* tabIndex makes the target focusable, or the skip link moves the
                 viewport without moving focus and the next Tab starts from the top again */}
