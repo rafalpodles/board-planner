@@ -40,7 +40,6 @@ interface Screen {
 const SCREENS: Screen[] = [
   { path: "/settings/users", heading: "Users", api: "/api/users" },
   { path: "/settings/email", heading: "Email", api: "/api/admin/email" },
-  { path: "/settings/licence", heading: "Licence", api: "/api/admin/licence" },
   { path: "/settings/agents", heading: "PM agents", api: "/api/admin/agents" },
   { path: "/settings/workers", heading: "Worker fleet", api: "/api/admin/workers" },
   { path: "/settings/workers/runs", heading: "Run history", api: "/api/admin/runs" },
@@ -132,7 +131,7 @@ test.describe("the administration screens", () => {
     await signIn(page, "admin");
     await page.goto("/settings/profile");
     await expect(nav(page).getByRole("heading", { name: "Administration" })).toBeVisible();
-    for (const label of ["Users", "Email", "Licence", "PM Agents", "Workers", "Audit log"]) {
+    for (const label of ["Users", "Email", "PM Agents", "Workers", "Audit log", "Organisation"]) {
       await expect(nav(page).getByRole("link", { name: label, exact: true })).toBeVisible();
     }
 
@@ -145,8 +144,9 @@ test.describe("the administration screens", () => {
     // absence below it
     await expect(nav(memberPage).getByRole("link", { name: "Profile" })).toBeVisible();
     await expect(nav(memberPage).getByRole("link", { name: "Security" })).toBeVisible();
+    await expect(nav(memberPage).getByRole("link", { name: "Organisation", exact: true })).toBeVisible();
     await expect(nav(memberPage).getByRole("heading", { name: "Administration" })).toHaveCount(0);
-    for (const label of ["Users", "Email", "Licence", "PM Agents", "Workers", "Audit log"]) {
+    for (const label of ["Users", "Email", "PM Agents", "Workers", "Audit log"]) {
       await expect(nav(memberPage).getByRole("link", { name: label, exact: true })).toHaveCount(0);
     }
 
@@ -175,6 +175,37 @@ test.describe("the administration screens", () => {
     }
 
     await theirs.close();
+  });
+});
+
+// BP-920: the licence moved onto Settings → Organisation, which a member may read but not its licence
+test.describe("Settings → Organisation", () => {
+  test("a member reads the organisation there, and is never handed its licence", async ({ page }) => {
+    await signIn(page, "member");
+    const licenceAnswers: string[] = [];
+    page.on("response", (res) => {
+      if (new URL(res.url()).pathname === "/api/admin/licence") licenceAnswers.push(String(res.status()));
+    });
+
+    await page.goto("/settings/licence");
+    await expect(page).toHaveURL("/settings/organisation");
+    await expect(page.getByRole("heading", { name: "Organisation", exact: true })).toBeVisible();
+    await expect(page.getByTestId("organisation-name")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Licence" })).toHaveCount(0);
+    await expect(page.getByLabel("Name", { exact: true })).toHaveCount(0);
+    expect(licenceAnswers).toEqual([]);
+    expect((await page.request.get("/api/admin/licence")).status()).toBe(403);
+  });
+
+  test("an admin finds the licence there, through the old address too", async ({ page }) => {
+    await signIn(page, "admin");
+    const licence = page.waitForResponse((res) => new URL(res.url()).pathname === "/api/admin/licence");
+
+    await page.goto("/settings/licence");
+    await expect(page).toHaveURL("/settings/organisation");
+    expect((await licence).status()).toBe(200);
+    await expect(page.getByRole("heading", { name: "Licence" })).toBeVisible();
+    await expect(page.getByLabel("Name", { exact: true })).toBeVisible();
   });
 });
 
