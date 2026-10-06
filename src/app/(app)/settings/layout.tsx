@@ -28,7 +28,7 @@ const GROUPS: SettingsGroup[] = [
   },
   {
     title: "Organisation",
-    sections: [{ id: "organisation", label: "Organisation" }],
+    sections: [{ id: "organisation", label: "Overview" }],
   },
   {
     title: "Administration",

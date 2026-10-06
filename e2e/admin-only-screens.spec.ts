@@ -131,7 +131,7 @@ test.describe("the administration screens", () => {
     await signIn(page, "admin");
     await page.goto("/settings/profile");
     await expect(nav(page).getByRole("heading", { name: "Administration" })).toBeVisible();
-    for (const label of ["Users", "Email", "PM Agents", "Workers", "Audit log", "Organisation"]) {
+    for (const label of ["Users", "Email", "PM Agents", "Workers", "Audit log", "Overview"]) {
       await expect(nav(page).getByRole("link", { name: label, exact: true })).toBeVisible();
     }
 
@@ -144,7 +144,7 @@ test.describe("the administration screens", () => {
     // absence below it
     await expect(nav(memberPage).getByRole("link", { name: "Profile" })).toBeVisible();
     await expect(nav(memberPage).getByRole("link", { name: "Security" })).toBeVisible();
-    await expect(nav(memberPage).getByRole("link", { name: "Organisation", exact: true })).toBeVisible();
+    await expect(nav(memberPage).getByRole("link", { name: "Overview", exact: true })).toBeVisible();
     await expect(nav(memberPage).getByRole("heading", { name: "Administration" })).toHaveCount(0);
     for (const label of ["Users", "Email", "PM Agents", "Workers", "Audit log"]) {
       await expect(nav(memberPage).getByRole("link", { name: label, exact: true })).toHaveCount(0);
@@ -189,7 +189,7 @@ test.describe("Settings → Organisation", () => {
 
     await page.goto("/settings/licence");
     await expect(page).toHaveURL("/settings/organisation");
-    await expect(page.getByRole("heading", { name: "Organisation", exact: true })).toBeVisible();
+    await expect(page.getByTestId("organisation-page").getByRole("heading", { name: "Organisation", exact: true })).toBeVisible();
     await expect(page.getByTestId("organisation-name")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Licence" })).toHaveCount(0);
     await expect(page.getByLabel("Name", { exact: true })).toHaveCount(0);

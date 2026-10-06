@@ -90,6 +90,7 @@ test.describe("BP-920: the app names the organisation you are in", () => {
       await expect(page.getByTestId("organisation-members")).toHaveText("1");
       await expect(page.getByTestId("organisation-projects")).toHaveText("1");
       await expect(page.getByRole("heading", { name: "Licence" })).toBeVisible();
+      await page.screenshot({ path: `e2e/.artifacts/bp920-settings-${who.slug}.png` });
       await context.close();
     }
   });
@@ -153,7 +154,8 @@ test.describe("BP-920: the app names the organisation you are in", () => {
 
     await page.getByRole("button", { name: "Open navigation" }).click();
     const line = page.getByTestId("sidebar-organisation");
-    await expect(line).toBeVisible();
+    await expect(line).toBeInViewport({ ratio: 1 });
+    await page.waitForFunction(() => document.querySelector("aside")?.getBoundingClientRect().left === 0);
     await expect(line).toHaveAttribute("title", "Acme Interplanetary Rocket and Propulsion Works Limited");
     const box = await line.boundingBox();
     expect(box!.height).toBeLessThan(24);
