@@ -109,6 +109,7 @@ const OWNED: readonly { prefix: string; groups: readonly GroupName[] }[] = [
   { prefix: "src/app/api/admin/email/", groups: ["people"] },
   { prefix: "src/app/api/admin/licence/", groups: ["people"] },
   { prefix: "src/app/api/organisation/", groups: ["people"] },
+  { prefix: "src/app/api/sign-in/", groups: ["people"] },
   { prefix: "src/app/api/admin/", groups: ["project"] },
   { prefix: "src/app/api/agents/", groups: ["project"] },
   { prefix: "src/app/api/agent-blocks/", groups: ["project", "automation"] },

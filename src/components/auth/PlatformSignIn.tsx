@@ -132,7 +132,7 @@ export function PlatformSignIn() {
         </div>
 
         {error && (
-          <p role="alert" className="mb-4 rounded-lg border border-danger/40 bg-danger/10 p-3 text-sm">
+          <p role="alert" data-testid="sign-in-error" className="mb-4 rounded-lg border border-danger/40 bg-danger/10 p-3 text-sm">
             {error}
           </p>
         )}
