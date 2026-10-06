@@ -4,6 +4,7 @@ import { render, screen, cleanup, waitFor, act, within, fireEvent } from "@testi
 import { TaskDetail } from "./TaskDetail";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { APP_NAME } from "@/lib/brand";
+import { emitBoardRefresh } from "@/lib/board-refresh";
 
 const { api, auth, toast } = vi.hoisted(() => ({
   toast: vi.fn(),
@@ -83,6 +84,7 @@ const project = {
   _id: "p1",
   key: "TP",
   name: "Test Project",
+  canAdmin: true,
   components: [],
   categories: [{ name: "idea" }],
   columns: [],
@@ -172,6 +174,18 @@ describe("TaskDetail", () => {
     expect(key()).toBeGreaterThan(before);
   });
 
+  it("tells the board behind it to refresh after a status change, so its epic's progress follows", async () => {
+    api.patch.mockResolvedValue({});
+    renderDetail();
+    await loaded();
+    vi.mocked(emitBoardRefresh).mockClear();
+
+    await act(async () => screen.getByRole("combobox", { name: "Status" }).click());
+    await act(async () => screen.getByRole("option", { name: /In Progress/i }).click());
+
+    expect(emitBoardRefresh).toHaveBeenCalledWith("TP");
+  });
+
   it("moves status changes through the endpoint that runs the transition", async () => {
     api.patch.mockResolvedValue({});
     renderDetail();
@@ -244,6 +258,133 @@ describe("TaskDetail", () => {
     await loaded();
     await act(async () => screen.getByRole("button", { name: "All details" }).click());
     expect(screen.getByRole("dialog")).toBeTruthy();
+  });
+
+  describe("archiving and deleting (BP-915)", () => {
+    function serve(over: { project?: Record<string, unknown>; task?: Record<string, unknown> }) {
+      api.get.mockImplementation((url: string) => {
+        if (url === "/api/projects/TP/assignable-users") return Promise.resolve([]);
+        if (url.startsWith("/api/agent")) return Promise.resolve([]);
+        if (url.includes("/tasks/")) return Promise.resolve({ ...task, ...over.task });
+        if (url.includes("/sprints")) return Promise.resolve([]);
+        return Promise.resolve({ ...project, ...over.project });
+      });
+    }
+
+    const overflow = async () => {
+      await act(async () => screen.getByRole("button", { name: "More actions" }).click());
+      return within(screen.getByRole("listbox", { name: "More actions" }));
+    };
+
+    it("does not render Delete for a member who is not the owner, in the rail or the overflow menu", async () => {
+      serve({ project: { canAdmin: false } });
+      renderDetail();
+      await loaded();
+
+      expect(screen.queryAllByRole("button", { name: "Delete task" })).toHaveLength(0);
+      // The control: the same member still has the way out that is theirs
+      expect(screen.getAllByRole("button", { name: "Archive task" }).length).toBeGreaterThan(0);
+      const menu = await overflow();
+      expect(menu.queryByRole("option", { name: "Delete task" })).toBeNull();
+      expect(menu.getByRole("option", { name: "Archive task" })).toBeTruthy();
+    });
+
+    it("renders Delete for the owner", async () => {
+      renderDetail();
+      await loaded();
+
+      expect(screen.getAllByRole("button", { name: "Delete task" }).length).toBeGreaterThan(0);
+      expect((await overflow()).getByRole("option", { name: "Delete task" })).toBeTruthy();
+    });
+
+    it("archives without a confirmation, shows the banner, and says so in History", async () => {
+      api.post.mockResolvedValue({ archivedAt: "2026-10-05T10:00:00.000Z" });
+      renderDetail();
+      await loaded();
+      expect(screen.queryByTestId("archived-banner")).toBeNull();
+      const before = Number(screen.getByTestId("activity-panel").dataset.historyKey);
+
+      await act(async () => screen.getAllByRole("button", { name: "Archive task" })[0].click());
+
+      expect(api.post).toHaveBeenCalledWith("/api/projects/TP/tasks/t1/archive", {});
+      await waitFor(() => expect(screen.getByTestId("archived-banner")).toBeTruthy());
+      expect(Number(screen.getByTestId("activity-panel").dataset.historyKey)).toBeGreaterThan(before);
+      expect(toast).toHaveBeenCalledWith("Task archived", "success");
+    });
+
+    it("shows an archived task with its banner and restores it from there", async () => {
+      serve({ task: { archivedAt: "2026-10-05T10:00:00.000Z" } });
+      api.del.mockResolvedValue({ archivedAt: null });
+      renderDetail();
+      await loaded();
+
+      const banner = screen.getByTestId("archived-banner");
+      expect(banner.textContent).toMatch(/hidden from the board and every list/);
+      expect(screen.queryByRole("button", { name: "Archive task" })).toBeNull();
+
+      await act(async () => within(banner).getByRole("button", { name: "Restore" }).click());
+
+      expect(api.del).toHaveBeenCalledWith("/api/projects/TP/tasks/t1/archive");
+      await waitFor(() => expect(screen.queryByTestId("archived-banner")).toBeNull());
+    });
+
+    it("keeps focus on the page when the banner it was clicked in goes away", async () => {
+      serve({ task: { archivedAt: "2026-10-05T10:00:00.000Z" } });
+      api.del.mockResolvedValue({ archivedAt: null });
+      renderDetail();
+      await loaded();
+
+      await act(async () =>
+        within(screen.getByTestId("archived-banner")).getByRole("button", { name: "Restore" }).click()
+      );
+
+      await waitFor(() => expect(screen.queryByTestId("archived-banner")).toBeNull());
+      expect(document.activeElement).toBe(screen.getByTestId("task-scroll"));
+    });
+
+    it("leaves focus on Restore when the restore fails, so it can be tried again", async () => {
+      serve({ task: { archivedAt: "2026-10-05T10:00:00.000Z" } });
+      api.del.mockRejectedValue(new Error("boom"));
+      renderDetail();
+      await loaded();
+      const restore = within(screen.getByTestId("archived-banner")).getByRole("button", { name: "Restore" });
+      restore.focus();
+
+      await act(async () => restore.click());
+
+      await waitFor(() => expect(toast).toHaveBeenCalledWith("Failed to restore task", "error"));
+      expect(document.activeElement).toBe(restore);
+    });
+
+    it("dates an old archive instead of printing a bare locale date after 'Archived'", async () => {
+      serve({ task: { archivedAt: "2026-08-05T10:00:00.000Z" } });
+      renderDetail();
+      await loaded();
+
+      const text = screen.getByTestId("archived-banner").textContent ?? "";
+      expect(text).toMatch(/^Archived on .*2026\. This task is hidden/);
+      expect(text).not.toMatch(/Archived \d/);
+    });
+
+    it("asks before taking a task from a running worker, and resends the archive with force", async () => {
+      api.post
+        .mockRejectedValueOnce({
+          status: 409,
+          body: { runConflict: { workerId: "w1", workerName: "mac", phase: "agent", phaseAt: null } },
+        })
+        .mockResolvedValueOnce({ archivedAt: "2026-10-05T10:00:00.000Z" });
+      renderDetail();
+      await loaded();
+
+      await act(async () => screen.getAllByRole("button", { name: "Archive task" })[0].click());
+      expect(screen.getByText(/being executed by mac \(phase agent\)/)).toBeTruthy();
+      expect(toast).not.toHaveBeenCalledWith("Failed to archive task", "error");
+
+      await act(async () => screen.getByRole("button", { name: "Archive anyway" }).click());
+
+      expect(api.post).toHaveBeenLastCalledWith("/api/projects/TP/tasks/t1/archive", { force: true });
+      await waitFor(() => expect(screen.getByTestId("archived-banner")).toBeTruthy());
+    });
   });
 
   it("keeps delete out of the main surface and behind a confirmation", async () => {
@@ -524,6 +665,21 @@ describe("TaskDetail, moving a task a worker is running", () => {
       status: "in_progress",
       force: true,
     });
+  });
+
+  it("tells the board to refresh once the forced change has gone through", async () => {
+    api.patch.mockRejectedValueOnce(refusal());
+    api.patch.mockResolvedValueOnce({});
+    renderDetail();
+    await loaded();
+    vi.mocked(emitBoardRefresh).mockClear();
+
+    await act(async () => screen.getByRole("combobox", { name: "Status" }).click());
+    await act(async () => screen.getByRole("option", { name: /In Progress/i }).click());
+    expect(emitBoardRefresh).not.toHaveBeenCalled();
+    await act(async () => screen.getByRole("button", { name: "Move anyway" }).click());
+
+    expect(emitBoardRefresh).toHaveBeenCalledWith("TP");
   });
 
   // A refusal for any other reason is still a failure, and must not be dressed up as a question

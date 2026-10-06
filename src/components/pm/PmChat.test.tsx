@@ -349,3 +349,15 @@ describe("the composer's placeholder (BP-817)", () => {
     );
   });
 });
+
+describe("Task chips", () => {
+  it("map keys from archived tasks too, so a mention of one still links", async () => {
+    render(<PmChat projectId="p1" preloadedProject={PROJECT as never} />);
+    await screen.findByRole("textbox");
+
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith("/api/projects/p1/tasks?archived=include")
+    );
+    expect(api.get).not.toHaveBeenCalledWith("/api/projects/p1/tasks");
+  });
+});

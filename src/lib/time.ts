@@ -94,3 +94,10 @@ export function timeAgo(dateStr: string): string {
   if (days < 30) return `${days}d ago`;
   return new Date(dateStr).toLocaleDateString();
 }
+
+export function agoOrOn(dateStr: string): string {
+  const days = Math.floor((Date.now() - new Date(dateStr).getTime()) / 86_400_000);
+  if (days < 30) return timeAgo(dateStr);
+  const date = new Date(dateStr).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  return `on ${date}`;
+}

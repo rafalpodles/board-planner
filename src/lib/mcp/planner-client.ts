@@ -1,4 +1,4 @@
-import type { ApiCustomField } from "@/types";
+import type { ApiCustomField, ApiProjectCategory, ApiProjectColumn } from "@/types";
 import { echo } from "@/lib/echo";
 import { isValidProjectKey } from "@/lib/identifiers";
 /** Only what the tools read: the id, and the field definitions the `fields` parameter resolves against */
@@ -7,6 +7,13 @@ export interface McpProject {
   /** Whether the caller administers the board: what the app gates run history on */
   canAdmin?: boolean;
   customFields?: ApiCustomField[];
+  categories?: ApiProjectCategory[];
+  columns?: ApiProjectColumn[];
+  /** Only the single-project read carries these: where the repository is, and whether a token is stored (never the token) */
+  repositoryUrl?: string;
+  repositoryProvider?: "github" | "gitlab" | "";
+  githubTokenSet?: boolean;
+  gitlabTokenSet?: boolean;
 }
 
 /**
@@ -132,6 +139,18 @@ export class PlannerClient {
 
   async reorderTasks(projectId: string, taskIds: string[]): Promise<unknown> {
     return this.request("PUT", `/api/projects/${seg(projectId)}/tasks/reorder`, { order: taskIds });
+  }
+
+  async archiveTask(projectId: string, taskId: string): Promise<unknown> {
+    return this.request("POST", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}/archive`, {});
+  }
+
+  async unarchiveTask(projectId: string, taskId: string): Promise<unknown> {
+    return this.request("DELETE", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}/archive`);
+  }
+
+  async deleteTask(projectId: string, taskId: string): Promise<unknown> {
+    return this.request("DELETE", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}`);
   }
 
   async addTaskLink(
@@ -284,6 +303,45 @@ export class PlannerClient {
     return this.request("GET", "/api/agents") as Promise<unknown[]>;
   }
 
+  async addCustomField(projectId: string, field: Record<string, unknown>): Promise<ApiCustomField[]> {
+    return (await this.request("POST", `/api/projects/${seg(projectId)}/custom-fields`, field)) as ApiCustomField[];
+  }
+
+  async addFieldOption(
+    projectId: string,
+    fieldId: string,
+    option: { value: string; color?: string }
+  ): Promise<{ option: { id: string; value: string; color: string }; field: ApiCustomField }> {
+    return (await this.request(
+      "POST",
+      `/api/projects/${seg(projectId)}/custom-fields/${seg(fieldId)}/options`,
+      option
+    )) as never;
+  }
+
+  async addCategory(projectId: string, category: { name: string; color?: string }): Promise<ApiProjectCategory[]> {
+    return (await this.request("POST", `/api/projects/${seg(projectId)}/categories`, category)) as ApiProjectCategory[];
+  }
+
+  async addColumn(
+    projectId: string,
+    column: { label: string; role: string; color?: string }
+  ): Promise<ApiProjectColumn[]> {
+    return (await this.request("POST", `/api/projects/${seg(projectId)}/columns`, column)) as ApiProjectColumn[];
+  }
+
+  async renameColumn(projectId: string, columnId: string, label: string): Promise<ApiProjectColumn[]> {
+    return (await this.request(
+      "PATCH",
+      `/api/projects/${seg(projectId)}/columns/${seg(columnId)}`,
+      { label }
+    )) as ApiProjectColumn[];
+  }
+
+  async syncRepository(projectId: string, provider: "github" | "gitlab"): Promise<Record<string, unknown>> {
+    return (await this.request("POST", `/api/projects/${seg(projectId)}/${provider}/sync`, {})) as Record<string, unknown>;
+  }
+
   /** The page a person opens for this task: what a minimal answer hands back so the work can be found. */
   taskUrl(taskKey: string): string {
     const cut = taskKey.lastIndexOf("-");
@@ -305,7 +363,7 @@ export class PlannerClient {
     // The row is matched on its number rather than taken on trust: a server that does not know the
     // filter (a rolling deploy) answers with the whole board, and the first row is somebody else's task
     const task = lookable
-      ? ((await this.listTasks(project._id, { taskNumber: String(taskNumber) })) as {
+      ? ((await this.listTasks(project._id, { taskNumber: String(taskNumber), archived: "include" })) as {
           _id: string;
           taskNumber: number;
         }[]).find((t) => t.taskNumber === taskNumber)

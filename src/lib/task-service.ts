@@ -54,6 +54,7 @@ import { EXECUTION_LEASE_MS } from "@/lib/execution-lease";
 import { pmUserId } from "@/lib/pm/pm-user";
 import { supersedableStates } from "@/lib/task-decisions";
 import { populateWithin, type ScopedDb } from "@/lib/db-scope";
+import { NOT_ARCHIVED } from "@/lib/task-archive";
 
 export const MAX_EXECUTION_ATTEMPTS = 3;
 
@@ -69,7 +70,7 @@ const PHASE_FIELDS = ["execution.phase", "execution.phaseAt", "execution.phaseSe
 // behind on a released task lets that worker replay its own old run onto a task it no longer holds
 // — and the release unsets phaseSeq, so the $exists branch would accept any seq, stale ones too.
 const RUN_FIELDS = [...PHASE_FIELDS, "execution.runId"];
-const UNSET_RUN = Object.fromEntries(RUN_FIELDS.map((field) => [field, ""]));
+export const UNSET_RUN = Object.fromEntries(RUN_FIELDS.map((field) => [field, ""]));
 
 // A worker used to claim an unassigned task and assign it to itself, and that assignment has to die
 // with the run — every way back to the board, or the task is left assigned to a machine that is not
@@ -185,7 +186,7 @@ export const taskPopulateFields = [
   // cannot resolve the id and renders "No agent" over a task that is carrying one.
   { path: "agent", select: "name" },
   { path: "blockedBy", select: "taskNumber title status" },
-  { path: "relations.task", select: "taskNumber title status" },
+  { path: "relations.task", select: "taskNumber title status archivedAt" },
 ];
 
 /** The id behind a ref that may or may not have been populated. Guarded first: typeof null is "object". */
@@ -958,7 +959,7 @@ async function announceStatusChange(db: ScopedDb, a: StatusChangeAnnouncement): 
   // two of them, and a hop between the two closes nothing — it used to mint an occurrence each way
   const closes =
     roleOf(a.project, status) === "done" && roleOf(a.project, a.oldTask.status) !== "done";
-  if (closes && a.oldTask.recurrence) {
+  if (closes && a.oldTask.recurrence && !a.oldTask.archivedAt) {
     createNextRecurrence(db, a.oldTask, a.projectId, a.actorId).catch((err) =>
       console.error("Failed to create recurring task:", err)
     );
@@ -1639,6 +1640,7 @@ export async function releaseExpiredTasks(db: ScopedDb, projectId: string, now =
     project: projectId,
     status: { $in: active },
     "execution.startedAt": { $lt: new Date(now.getTime() - EXECUTION_LEASE_MS) },
+    ...NOT_ARCHIVED,
   };
   const outOfAttempts = { ...expired, "execution.attempts": { $gte: MAX_EXECUTION_ATTEMPTS } };
 
@@ -1743,7 +1745,7 @@ async function openBlockersFor(
   done: string[]
 ): Promise<Types.ObjectId[]> {
   const waiting = await db.Task.find(
-    { project: projectId, status: { $in: approved }, blockedBy: { $exists: true, $ne: [] } },
+    { project: projectId, status: { $in: approved }, blockedBy: { $exists: true, $ne: [] }, ...NOT_ARCHIVED },
     "blockedBy"
   ).lean();
 
@@ -1759,7 +1761,7 @@ async function openBlockersFor(
   // status judged against this board's done ids, and a board that calls finished anything else
   // would freeze the dependent for good. Scoped, it drops out and the dependent goes through.
   const open = await db.Task.find(
-    { project: projectId, _id: { $in: named }, status: { $nin: done } },
+    { project: projectId, _id: { $in: named }, status: { $nin: done }, ...NOT_ARCHIVED },
     "_id"
   ).lean();
   return open.map((t) => t._id);
@@ -1829,6 +1831,7 @@ export async function claimNextTask(
       organisation: db.organisation,
       project: projectId,
       status: { $in: approved },
+      ...NOT_ARCHIVED,
       // Assigned to the owner, by the owner or by the PM. A *person* assigning you work is still a
       // proposal, and the surface for accepting one does not exist yet — so it is refused rather
       // than run unattended. The PM is not somebody else: it is a first-party actor on this

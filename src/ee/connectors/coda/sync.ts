@@ -12,6 +12,7 @@ import {
 } from "./client";
 import type { ScopedDb } from "@/lib/db-scope";
 import { originFor } from "@/lib/organisation-host";
+import { NOT_ARCHIVED } from "@/lib/task-archive";
 
 export async function syncProjectToCoda(db: ScopedDb, projectId: string): Promise<NextResponse> {
   await connectDB();
@@ -47,7 +48,7 @@ export async function syncProjectToCoda(db: ScopedDb, projectId: string): Promis
   }
 
   const tasks = await db.Task.find(
-    { project: projectId },
+    { project: projectId, ...NOT_ARCHIVED },
     "taskNumber title status assignee priority category dueDate customFieldValues"
   )
     .sort({ taskNumber: 1 })

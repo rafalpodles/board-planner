@@ -1,7 +1,7 @@
 import { taskKeyOf } from "@/lib/task-key";
 import type { DependencyType } from "@/types";
 
-type Linked = { _id?: unknown; taskNumber?: number; title?: string; status?: string };
+type Linked = { _id?: unknown; taskNumber?: number; title?: string; status?: string; archivedAt?: unknown };
 type Relation = { type?: string; task?: Linked | null };
 
 type TaskLike = {
@@ -31,7 +31,12 @@ const withKey = (projectKey: string, task: Linked | null | undefined) =>
 
 const brief = (projectKey: string, task: Linked | null | undefined) =>
   task && typeof task.taskNumber === "number"
-    ? { key: taskKeyOf(projectKey, task.taskNumber), title: task.title, status: task.status }
+    ? {
+        key: taskKeyOf(projectKey, task.taskNumber),
+        title: task.title,
+        status: task.status,
+        ...(task.archivedAt ? { archived: true } : {}),
+      }
     : null;
 
 /**

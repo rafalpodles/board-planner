@@ -6,6 +6,7 @@ import {
   EMPTY_FILTERS,
   sanitizeFieldFilters,
   matchesStatusFilter,
+  epicOptions,
   statusLabel,
   statusOptions,
   statusRoleMap,
@@ -250,5 +251,44 @@ describe("migratePersistedFilters — status", () => {
 
   it("counts as an active filter", () => {
     expect(countActiveFilters({ ...EMPTY_FILTERS, status: "active" })).toBe(1);
+  });
+});
+
+describe("the epic filter", () => {
+  const link = (id: string, taskNumber: number, title: string) => ({ _id: id, taskNumber, title });
+
+  it("is stored with the other filters and counted once", () => {
+    const restored = migratePersistedFilters({ filters: { epic: "e1" } });
+
+    expect(restored.filters.epic).toBe("e1");
+    expect(countActiveFilters(restored.filters)).toBe(1);
+  });
+
+  it("is empty for a blob that predates it, and for a value that is not text", () => {
+    expect(migratePersistedFilters({ filters: { priority: "high" } }).filters.epic).toBe("");
+    expect(migratePersistedFilters({ filters: { epic: 7 } }).filters.epic).toBe("");
+  });
+
+  describe("epicOptions", () => {
+    it("names each task that has children once, by number order, however many children name it", () => {
+      const options = epicOptions(
+        [
+          { _id: "e2", taskNumber: 20, title: "Two", relations: [{ type: "parent_of" }] },
+          { _id: "a", taskNumber: 11, title: "A", parent: link("e1", 10, "One") },
+          { _id: "b", taskNumber: 12, title: "B", parent: link("e1", 10, "One") },
+          { _id: "r", taskNumber: 13, title: "Relates only", relations: [{ type: "relates" }] },
+        ],
+        "BP"
+      );
+
+      expect(options).toEqual([
+        { value: "e1", taskNumber: 10, label: "BP-10 One" },
+        { value: "e2", taskNumber: 20, label: "BP-20 Two" },
+      ]);
+    });
+
+    it("offers nothing on a board without children", () => {
+      expect(epicOptions([{ _id: "x", taskNumber: 1, title: "X" }], "BP")).toEqual([]);
+    });
   });
 });

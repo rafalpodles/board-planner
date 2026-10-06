@@ -59,6 +59,23 @@ describe("withTaskKeys", () => {
     expect(keyed.children).toEqual([{ key: "BP-8", title: "Child one", status: "todo" }]);
   });
 
+  it("marks an archived child rather than hiding it, since the progress already leaves it out", () => {
+    const keyed = withTaskKeys(
+      {
+        relations: [
+          { type: "parent_of", task: { _id: "k1", taskNumber: 8, title: "Live", status: "todo", archivedAt: null } },
+          { type: "parent_of", task: { _id: "k2", taskNumber: 9, title: "Gone", status: "todo", archivedAt: "2026-10-01T00:00:00.000Z" } },
+        ],
+      },
+      "BP"
+    );
+
+    expect(keyed.children).toEqual([
+      { key: "BP-8", title: "Live", status: "todo" },
+      { key: "BP-9", title: "Gone", status: "todo", archived: true },
+    ]);
+  });
+
   it("has no parent and no children when nothing is linked", () => {
     const keyed = withTaskKeys({ title: "Lone" }, "BP");
 

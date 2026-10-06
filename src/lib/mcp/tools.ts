@@ -3,7 +3,8 @@ import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { z } from "zod";
 import { PlannerClient } from "./planner-client";
 import { resolveFieldsByName } from "@/lib/custom-fields";
-import { DEPENDENCY_TYPES } from "@/types";
+import { COLUMN_ROLES, CUSTOM_FIELD_TYPES, DEPENDENCY_TYPES, OPTION_FIELD_TYPES, ROLE_LABELS } from "@/types";
+import { MAX_OPTIONS } from "@/lib/custom-fields";
 import { APP_NAME } from "@/lib/brand";
 import { echo } from "@/lib/echo";
 import {
@@ -32,6 +33,18 @@ import { agentLines, memberLines, myTaskLines } from "./people";
 import { noticeLines, runLines, searchLines, statsSummary } from "./discovery";
 import { activityLines, commentLines } from "./history";
 import { DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT, pageOf } from "./paging";
+import {
+  ADD_ONLY,
+  COLOUR_PARAM,
+  columnSummary,
+  fieldSummary,
+  findColumn,
+  findField,
+  optionLines,
+  requireOwner,
+} from "./board-config";
+import { syncProvider, syncSummary } from "./sync-repository";
+import { effectiveColumns } from "@/lib/columns";
 import { BATCH_LIMIT, LINK_BATCH_LIMIT, MAX_BLOCKERS_PER_ITEM, failure, referencedKey } from "./batch";
 
 type ToolExtra = { authInfo?: AuthInfo; signal?: AbortSignal };
@@ -65,6 +78,14 @@ const MINIMAL_PARAM = z
 
 /** `CP` of `CP-12`, `MY-APP` of `MY-APP-3`: a project key may itself hold hyphens. */
 const keyPrefix = (taskKey: string) => taskKey.slice(0, taskKey.lastIndexOf("-")).toUpperCase();
+
+/** The same task named twice: the project prefix in any case, and `CP-007` is `CP-7`. */
+function sameTaskKey(a: string, b: string) {
+  const parts = (key: string) => key.trim().match(/^(.+)-(\d+)$/);
+  const left = parts(a);
+  const right = parts(b);
+  return !!left && !!right && left[1].toUpperCase() === right[1].toUpperCase() && Number(left[2]) === Number(right[2]);
+}
 
 /** Keyed from the stored number, not the argument: `cp-007` is `CP-7`. */
 function summarised(client: PlannerClient, task: { taskNumber?: number }, taskKey: string) {
@@ -285,7 +306,8 @@ export function registerPlannerTools(server: McpServer): void {
         `List tasks in a project with optional filters, one page at a time (default ${DEFAULT_LIST_LIMIT}, at most ` +
         `${MAX_LIST_LIMIT}). The answer says the total the filters match and the offset of the next page; ` +
         "follow nextOffset until it is null to read the rest. Each task is a short line — key, title, status, " +
-        "priority, assignee, dueDate, sprint name and parent key — unless detail is \"full\"; get_task reads one in full.",
+        "priority, assignee, dueDate, sprint name and parent key, and for an epic how many of its children are done — " +
+        "unless detail is \"full\"; get_task reads one in full.",
       inputSchema: strictInput({
         project: z.string().describe("Project key (e.g. 'CP')"),
         // The same lie the category description carried, and a worse one: columns have been
@@ -322,6 +344,10 @@ export function registerPlannerTools(server: McpServer): void {
           .boolean()
           .optional()
           .describe("true: only tasks with at least one blocked_by link; false: only tasks with none"),
+        hasChildren: z
+          .boolean()
+          .optional()
+          .describe("true: only tasks that have children — the epics, each with how many of its children are done; false: only tasks with none"),
         fields: z
           .record(z.any())
           .optional()
@@ -329,6 +355,13 @@ export function registerPlannerTools(server: McpServer): void {
             "Filter by project-defined fields, keyed by field name, e.g. { \"Difficulty\": \"L\" } — all must match. " +
               "Dropdown, multiselect, text (containing, any case), number and checkbox fields; get_project lists them. " +
               "A multiselect given several options needs all of them."
+          ),
+        archived: z
+          .enum(["only", "include"])
+          .optional()
+          .describe(
+            "Archived tasks are left out unless asked for: only lists just the archived ones, include lists them " +
+              "with the rest (each marked archived: true)"
           ),
         limit: z.number().int().min(1).max(MAX_LIST_LIMIT).optional().describe(`Page size (default ${DEFAULT_LIST_LIMIT})`),
         offset: z.number().int().min(0).optional().describe("Tasks to skip, from a previous answer's nextOffset"),
@@ -339,7 +372,7 @@ export function registerPlannerTools(server: McpServer): void {
       }),
     },
     async (
-      { project, status, assignee, category, priority, sprint, search, parent, dueBefore, dueAfter, updatedSince, blocked, fields, limit, offset, detail },
+      { project, status, assignee, category, priority, sprint, search, parent, dueBefore, dueAfter, updatedSince, blocked, hasChildren, fields, archived, limit, offset, detail },
       extra
     ) => {
       const client = clientFrom(extra);
@@ -354,6 +387,8 @@ export function registerPlannerTools(server: McpServer): void {
       if (dueAfter) filters.dueAfter = dueAfter;
       if (updatedSince) filters.updatedSince = updatedSince;
       if (blocked !== undefined) filters.blocked = String(blocked);
+      if (archived) filters.archived = archived;
+      if (hasChildren !== undefined) filters.hasChildren = String(hasChildren);
 
       if (sprint) {
         const sprints = sprintNeedsLookup(sprint)
@@ -404,7 +439,9 @@ export function registerPlannerTools(server: McpServer): void {
   server.registerTool(
     "get_task",
     {
-      description: "Get full task details by task key (e.g. 'CP-1')",
+      description:
+        "Get full task details by task key (e.g. 'CP-1'). An epic — a task with children — also answers children " +
+        "(key, title, status) and progress: how many of them are done (total, done, byStatus), done being the board's done column.",
       inputSchema: strictInput({ taskKey: z.string().describe("Task key (e.g. 'CP-1')") }),
     },
     async ({ taskKey }, extra) => {
@@ -412,6 +449,76 @@ export function registerPlannerTools(server: McpServer): void {
       const { projectId, taskId } = await client.resolveTaskKey(taskKey);
       const task = (await client.getTask(projectId, taskId)) as Record<string, unknown>;
       return json(withTaskKeys(task, keyPrefix(taskKey)));
+    }
+  );
+
+  server.registerTool(
+    "archive_task",
+    {
+      description:
+        "Archive a task: it leaves the board, every list, search, my_tasks and the counts (the PM agent's lists " +
+        "too, though the PM agent can still open it by its key), and no worker will claim it, but it keeps its " +
+        "comments and history and can be restored with unarchive_task. An archived blocker no longer holds back the " +
+        "tasks it blocked. Any member of the board may archive. Refused while a worker is running the task. " +
+        "list_tasks with archived finds archived tasks; get_task and every key-addressed tool still reach one by its key.",
+      inputSchema: strictInput({ taskKey: z.string().describe("Task key (e.g. 'CP-1')") }, { writes: true }),
+    },
+    async ({ taskKey }, extra) => {
+      const client = clientFrom(extra);
+      const { projectId, taskId } = await client.resolveTaskKey(taskKey);
+      const task = (await client.archiveTask(projectId, taskId)) as { taskNumber?: number };
+      return json({ archived: true, ...summarised(client, task, taskKey) });
+    }
+  );
+
+  server.registerTool(
+    "unarchive_task",
+    {
+      description:
+        "Restore an archived task to the board, in the column it was archived from. It holds back the tasks it " +
+        "blocks again while it is not done. Any member of the board may.",
+      inputSchema: strictInput({ taskKey: z.string().describe("Task key (e.g. 'CP-1')") }, { writes: true }),
+    },
+    async ({ taskKey }, extra) => {
+      const client = clientFrom(extra);
+      const { projectId, taskId } = await client.resolveTaskKey(taskKey);
+      const task = (await client.unarchiveTask(projectId, taskId)) as { taskNumber?: number };
+      return json({ archived: false, ...summarised(client, task, taskKey) });
+    }
+  );
+
+  server.registerTool(
+    "delete_task",
+    {
+      description:
+        "Delete a task for good, with its comments, history and notifications. It cannot be undone, so unless the " +
+        "task is truly unwanted use archive_task. Only the board's owner may delete; a member who is not the owner " +
+        "can only archive. confirmKey has to repeat taskKey, which guards against a slip of the hand, not against naming the wrong task: both come from the caller. " +
+        "Refused, and never forced, while a worker is running the task.",
+      inputSchema: strictInput(
+        {
+          taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
+          confirmKey: z.string().describe("The task's key again (the project prefix may be in any case), to confirm"),
+        },
+        { writes: true }
+      ),
+    },
+    async ({ taskKey, confirmKey }, extra) => {
+      if (!sameTaskKey(taskKey, confirmKey)) {
+        throw new Error(
+          `Not deleted: confirmKey "${echo(confirmKey)}" is not the key of the task to delete, "${echo(taskKey)}". Nothing was written.`
+        );
+      }
+      const client = clientFrom(extra);
+      const { projectId, taskId } = await client.resolveTaskKey(taskKey);
+      if (!(await client.getProject(projectId)).canAdmin) {
+        throw new Error(
+          `Not deleted: only the board's owner may delete a task, and this connection is not the owner's. ` +
+            `Use archive_task for ${echo(taskKey.toUpperCase())} instead. Nothing was written.`
+        );
+      }
+      await client.deleteTask(projectId, taskId);
+      return json({ deleted: taskKey.toUpperCase() });
     }
   );
 
@@ -1354,6 +1461,213 @@ export function registerPlannerTools(server: McpServer): void {
       const { projectId, taskId } = await client.resolveTaskKey(taskKey);
       const logs = (await client.getTaskActivity(projectId, taskId)) as Parameters<typeof activityLines>[0];
       return json({ total: logs.length, entries: activityLines(logs, limit ?? 30) });
+    }
+  );
+
+  // --- Board setup: configuration that can only be added to ---
+
+  server.registerTool(
+    "add_custom_field",
+    {
+      description:
+        "Add a project field to a board: text, number, date, checkbox, or a dropdown or multiselect with its options. " +
+        "update_task and create_task then take it by name in `fields`. As in the app, any member of the board may " +
+        `add one, and its name must be new on the board. ${ADD_ONLY} A field cannot be renamed, archived or deleted ` +
+        "here, nor an option removed — add_field_option adds one. Answers with the field and each option's id.",
+      inputSchema: strictInput(
+        {
+          project: z.string().describe("Project key (e.g. 'CP')"),
+          name: z.string().describe("The field's name, new on this board"),
+          fieldType: z.enum(CUSTOM_FIELD_TYPES as [string, ...string[]]).describe(CUSTOM_FIELD_TYPES.join(", ")),
+          options: z
+            .array(z.union([z.string(), z.object({ value: z.string(), color: COLOUR_PARAM }).strict()]))
+            .max(MAX_OPTIONS)
+            .optional()
+            .describe(
+              "For dropdown and multiselect, and only for those: the choices, each a string or { value, color } (#rrggbb)"
+            ),
+          required: z.boolean().optional().describe("Every task must fill it (default: not)"),
+          showOnCard: z.boolean().optional().describe("Show its value on the board's cards (default: not)"),
+          showInList: z.boolean().optional().describe("Offer it as a column in the list view (default: not)"),
+          filterable: z.boolean().optional().describe("Offer it as a board filter (default: not)"),
+        },
+        {
+          writes: true,
+          hints: {
+            archived: "the app: a field is archived or deleted there",
+            order: "the app: fields are reordered there",
+          },
+        }
+      ),
+    },
+    async ({ project, name, fieldType, options, required, showOnCard, showInList, filterable }, extra) => {
+      const hasOptions = OPTION_FIELD_TYPES.includes(fieldType as never);
+      if (hasOptions && !options?.length) {
+        throw new Error(`A ${fieldType} field needs at least one option. Nothing was written.`);
+      }
+      if (!hasOptions && options !== undefined) {
+        throw new Error(`A ${fieldType} field has no options — leave options out. Nothing was written.`);
+      }
+      const client = clientFrom(extra);
+      const proj = await client.getProjectByKey(project);
+      const fields = await client.addCustomField(proj._id, {
+        name,
+        fieldType,
+        ...(options ? { options } : {}),
+        ...(required !== undefined ? { required } : {}),
+        ...(showOnCard !== undefined ? { showOnCard } : {}),
+        ...(showInList !== undefined ? { showInList } : {}),
+        ...(filterable !== undefined ? { filterable } : {}),
+      });
+      return json({ field: fieldSummary(fields[fields.length - 1]), fieldCount: fields.length });
+    }
+  );
+
+  server.registerTool(
+    "add_field_option",
+    {
+      description:
+        "Add one option to the end of a board's dropdown or multiselect field, in one update: the options it has, and " +
+        "every task's choice among them, are left alone. As in the app, any member of the board may. An option cannot " +
+        "be renamed, recoloured, reordered or removed here. Answers with the new option and the field's options, by id.",
+      inputSchema: strictInput(
+        {
+          project: z.string().describe("Project key (e.g. 'CP')"),
+          field: z.string().describe("The field, by name or id — get_project lists them"),
+          option: z.string().describe("The new option's text, which the field does not already offer (any case)"),
+          color: COLOUR_PARAM.describe("The option's colour, #rrggbb (default: grey)"),
+        },
+        { writes: true }
+      ),
+    },
+    async ({ project, field, option, color }, extra) => {
+      const client = clientFrom(extra);
+      const proj = await client.getProjectByKey(project);
+      const found = findField(field, proj.customFields ?? []);
+      if (!OPTION_FIELD_TYPES.includes(found.fieldType)) {
+        throw new Error(`${found.name} is a ${found.fieldType} field and has no options. Nothing was written.`);
+      }
+      const added = await client.addFieldOption(proj._id, String(found._id), { value: option, ...(color ? { color } : {}) });
+      return json({
+        field: added.field.name,
+        added: { id: added.option.id, value: added.option.value, color: added.option.color },
+        options: optionLines(added.field.options),
+      });
+    }
+  );
+
+  server.registerTool(
+    "add_category",
+    {
+      description:
+        "Add a category to a board, which tasks can then be filed under. As in the app, any member of the board may; " +
+        `the name must be new on the board (any case), and a board holds a limited number. ${ADD_ONLY} A category ` +
+        "cannot be renamed, recoloured or deleted here. Answers with the board's categories.",
+      inputSchema: strictInput(
+        {
+          project: z.string().describe("Project key (e.g. 'CP')"),
+          name: z.string().describe("The category's name"),
+          color: COLOUR_PARAM.describe("A colour, #rrggbb (default: blue)"),
+        },
+        { writes: true }
+      ),
+    },
+    async ({ project, name, color }, extra) => {
+      const client = clientFrom(extra);
+      const proj = await client.getProjectByKey(project);
+      const categories = await client.addCategory(proj._id, { name, ...(color ? { color } : {}) });
+      const added = categories[categories.length - 1];
+      return json({ added: { name: added.name, color: added.color }, categories: categories.map((c) => c.name) });
+    }
+  );
+
+  const roleGuide = COLUMN_ROLES.map((role) => `${role} (${ROLE_LABELS[role].label}: ${ROLE_LABELS[role].hint})`).join(" ");
+
+  server.registerTool(
+    "add_column",
+    {
+      description:
+        "Add one column to the end of a board, in one update that leaves the others alone. Needs the project owner, as " +
+        "the Board settings do. The role is what automation follows — never the name: " +
+        `${roleGuide} The id comes from the label and is what change_task_status takes. The column does not ask the ` +
+        `PM agent for a review (the app sets that). ${ADD_ONLY} A column cannot be removed, reordered or given another ` +
+        "role here. Answers with the new column and the board's columns.",
+      inputSchema: strictInput(
+        {
+          project: z.string().describe("Project key (e.g. 'CP')"),
+          label: z.string().describe("The column's name, at most 40 characters"),
+          role: z.enum(COLUMN_ROLES).describe("What the column means to automation"),
+          color: COLOUR_PARAM.describe("A colour, #rrggbb (default: grey)"),
+        },
+        {
+          writes: true,
+          hints: {
+            order: "the app: columns are reordered there",
+            triggersPmReview: "the app: Settings → Board",
+          },
+        }
+      ),
+    },
+    async ({ project, label, role, color }, extra) => {
+      const client = clientFrom(extra);
+      const proj = await client.getProjectByKey(project);
+      requireOwner(proj, project, "add a column");
+      const before = new Set(effectiveColumns(proj.columns).map((c) => c.id));
+      const columns = await client.addColumn(proj._id, { label, role, ...(color ? { color } : {}) });
+      const fresh = columns.filter((c) => !before.has(c.id));
+      const added = fresh.find((c) => c.label === label.trim() && c.role === role) ?? fresh[0];
+      return json({ added: added ? columnSummary(added) : null, columns: columns.map(columnSummary) });
+    }
+  );
+
+  server.registerTool(
+    "rename_column",
+    {
+      description:
+        "Change one column's label, in one update that leaves the rest of the board alone. Needs the project owner. " +
+        "The column's id, role and tasks do not change, so nothing that points at it breaks. Its role, colour and " +
+        "position cannot be changed here, and a column cannot be removed. Answers with the board's columns.",
+      inputSchema: strictInput(
+        {
+          project: z.string().describe("Project key (e.g. 'CP')"),
+          column: z.string().describe("The column, by id or label — get_project lists them"),
+          label: z.string().describe("The new label, at most 40 characters"),
+        },
+        {
+          writes: true,
+          hints: { role: "the app: Settings → Board", color: "the app: Settings → Board", order: "the app: Settings → Board" },
+        }
+      ),
+    },
+    async ({ project, column, label }, extra) => {
+      const client = clientFrom(extra);
+      const proj = await client.getProjectByKey(project);
+      requireOwner(proj, project, "rename a column");
+      const found = findColumn(column, proj.columns);
+      const columns = await client.renameColumn(proj._id, found.id, label);
+      return json({ renamed: columnSummary(columns.find((c) => c.id === found.id) ?? found), columns: columns.map(columnSummary) });
+    }
+  );
+
+  // --- Repository ---
+
+  server.registerTool(
+    "sync_repository",
+    {
+      description:
+        "Refresh a board's pull requests (GitHub) or merge requests (GitLab) from its repository now, which is what the " +
+        "Sync button in the app does: it re-links them to their tasks by the task key in the branch or title, and " +
+        "refreshes the CI result each shows. Like the button, a task whose request has merged moves to the next " +
+        "review column. The provider is the one the board's repository is on. A board with no repository or no stored " +
+        "token is refused, saying which. Answers with a few counts and a sentence; no token or provider answer is passed on.",
+      inputSchema: strictInput({ project: z.string().describe("Project key (e.g. 'CP')") }, { writes: true }),
+    },
+    async ({ project }, extra) => {
+      const client = clientFrom(extra);
+      const proj = await client.getProjectByKey(project);
+      const full = await client.getProject(proj._id);
+      const provider = syncProvider(full, project);
+      return json(syncSummary(provider, (await client.syncRepository(proj._id, provider)) as Parameters<typeof syncSummary>[1]));
     }
   );
 }

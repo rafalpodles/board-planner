@@ -29,6 +29,12 @@ describe("listedTask", () => {
     });
   });
 
+  it("marks an archived task, and only that", () => {
+    expect(listedTask({ taskNumber: 1, archivedAt: "2026-10-05T10:00:00.000Z" }, "BP")).toMatchObject({ archived: true });
+    expect(listedTask({ taskNumber: 1, archivedAt: null }, "BP")).not.toHaveProperty("archived");
+    expect(listedTask({ taskNumber: 1 }, "BP")).not.toHaveProperty("archived");
+  });
+
   it("says nothing where there is nothing, and reads a task predating priority as medium", () => {
     expect(listedTask({ taskNumber: 1, title: "T", status: "todo" }, "BP")).toMatchObject({
       priority: "medium",
@@ -37,6 +43,18 @@ describe("listedTask", () => {
       sprint: null,
       parent: null,
     });
+  });
+});
+
+describe("listedTask on an epic", () => {
+  it("adds how many of its children are done", () => {
+    expect(
+      listedTask({ taskNumber: 1, title: "E", status: "todo", progress: { done: 2, total: 5 } }, "BP").progress
+    ).toBe("2 of 5 done");
+  });
+
+  it("adds nothing to a task without children", () => {
+    expect(listedTask({ taskNumber: 1, title: "E", status: "todo" }, "BP")).not.toHaveProperty("progress");
   });
 });
 

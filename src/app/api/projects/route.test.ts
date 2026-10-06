@@ -72,6 +72,17 @@ beforeEach(() => {
 // null from accessibleProjectIds means "no restriction", not "no projects". Collapsing this to
 // an unconditional {} shows every project to every member, and `?? []` hides every project from
 // an instance admin — both are one-line mistakes the contract invites.
+describe("GET /api/projects — task counts", () => {
+  it("count the tasks nobody archived", async () => {
+    accessibleProjectIds.mockResolvedValue(null);
+
+    await GET(request(), ctx());
+
+    const stages = taskAggregate.mock.calls[0][0] as { $match?: Record<string, unknown> }[];
+    expect(stages.find((stage) => stage.$match?.project)?.$match).toMatchObject({ archivedAt: null });
+  });
+});
+
 describe("GET /api/projects", () => {
   it("queries without a filter when the grant layer reports no restriction", async () => {
     accessibleProjectIds.mockResolvedValue(null);

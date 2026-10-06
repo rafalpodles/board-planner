@@ -551,3 +551,190 @@ describe("a board that refuses the reader", () => {
     expect(board.project).not.toBeNull();
   });
 });
+
+describe("a child moving out from under an epic's progress", () => {
+  const parent = { _id: "e1", taskNumber: 1, title: "Epic", status: "todo" };
+  let progress: { total: number; done: number; byStatus: Record<string, number> } = { total: 2, done: 0, byStatus: { todo: 2 } };
+
+  function epicBoard() {
+    api.get.mockImplementation((path: string) => {
+      if (path.endsWith("/tasks"))
+        return Promise.resolve([
+          { ...task("e1", 0), progress },
+          { ...task("t2", 1), parent },
+          { ...task("t3", 2), parent },
+          task("t4", 3),
+        ]);
+      if (path.endsWith("/sprints")) return Promise.resolve([]);
+      return Promise.resolve(PROJECT);
+    });
+  }
+  const epicDone = () => board.tasks.find((t) => t._id === "e1")?.progress?.done;
+
+  async function mountedEpic() {
+    progress = { total: 2, done: 0, byStatus: { todo: 2 } };
+    epicBoard();
+    probeScope = "all";
+    render(<Probe />);
+    await waitFor(() => expect(epicDone()).toBe(0));
+    api.patch.mockImplementation((path: string) => Promise.resolve({ _id: path.split("/").at(-2), status: "done" }));
+    api.put.mockResolvedValue({ status: "done" });
+  }
+
+  it("reads the board again after a status change, which is the only way the count comes back", async () => {
+    await mountedEpic();
+    progress = { total: 2, done: 1, byStatus: { todo: 1, done: 1 } };
+    const reads = taskReads();
+
+    await act(async () => {
+      await board.handleStatusChange("t2", "done");
+    });
+
+    await waitFor(() => expect(epicDone()).toBe(1));
+    expect(taskReads()).toBe(reads + 1);
+  });
+
+  it("does the same after a drop into another column", async () => {
+    await mountedEpic();
+    progress = { total: 2, done: 1, byStatus: { todo: 1, done: 1 } };
+
+    await act(async () => {
+      await board.handleTaskDrop("t2", "done", 0);
+    });
+
+    await waitFor(() => expect(epicDone()).toBe(1));
+  });
+
+  it("does the same after a bulk move", async () => {
+    await mountedEpic();
+    progress = { total: 2, done: 2, byStatus: { done: 2 } };
+    act(() => board.setSelectedTasks(new Set(["t2", "t3"])));
+
+    await act(async () => {
+      await board.handleBulkMove("done");
+    });
+
+    await waitFor(() => expect(epicDone()).toBe(2));
+  });
+
+  // The control: the other writes, and a task with no parent, cost no extra read
+  it("reads nothing more for a task that is nobody's child, nor for a reorder inside a column", async () => {
+    await mountedEpic();
+    const reads = taskReads();
+
+    await act(async () => {
+      await board.handleStatusChange("t4", "done");
+    });
+    await act(async () => {
+      await board.handleTaskDrop("t2", "todo", 0);
+    });
+
+    expect(taskReads()).toBe(reads);
+  });
+});
+
+describe("archiving or restoring a child under an epic's progress", () => {
+  const parent = { _id: "e1", taskNumber: 1, title: "Epic", status: "todo" };
+  let progress: { total: number; done: number; byStatus: Record<string, number> } = { total: 2, done: 0, byStatus: { todo: 2 } };
+
+  async function mountedEpic() {
+    progress = { total: 2, done: 0, byStatus: { todo: 2 } };
+    api.get.mockImplementation((path: string) => {
+      if (path.includes("/tasks"))
+        return Promise.resolve([
+          { ...task("e1", 0), progress },
+          { ...task("t2", 1), parent },
+          { ...task("t3", 2), parent },
+          task("t4", 3),
+        ]);
+      if (path.endsWith("/sprints")) return Promise.resolve([]);
+      return Promise.resolve(PROJECT);
+    });
+    probeScope = "all";
+    render(<Probe />);
+    await waitFor(() => expect(board.tasks.find((t) => t._id === "e1")?.progress?.total).toBe(2));
+    api.post.mockResolvedValue({ archivedAt: "2026-10-05T10:00:00.000Z" });
+    api.del.mockResolvedValue({});
+  }
+  const epicTotal = () => board.tasks.find((t) => t._id === "e1")?.progress?.total;
+
+  it("reads the board again after one child is archived", async () => {
+    await mountedEpic();
+    progress = { total: 1, done: 0, byStatus: { todo: 1 } };
+    const reads = taskReads();
+
+    await act(async () => {
+      await board.handleContextArchive("t2");
+    });
+
+    await waitFor(() => expect(epicTotal()).toBe(1));
+    expect(taskReads()).toBe(reads + 1);
+  });
+
+  it("reads the board again after a bulk archive that holds a child", async () => {
+    await mountedEpic();
+    progress = { total: 0, done: 0, byStatus: {} };
+    act(() => board.setSelectedTasks(new Set(["t2", "t3"])));
+
+    await act(async () => {
+      await board.handleBulkArchive();
+    });
+
+    await waitFor(() => expect(epicTotal()).toBe(0));
+  });
+
+  it("reads the board again after a child is restored", async () => {
+    await mountedEpic();
+    act(() => board.setShowArchived(true));
+    await act(async () => {
+      await board.reload();
+    });
+    expect(api.get).toHaveBeenCalledWith(expect.stringContaining("archived=include"));
+    const reads = taskReads();
+
+    await act(async () => {
+      await board.handleContextRestore("t2");
+    });
+
+    await waitFor(() => expect(taskReads()).toBe(reads + 1));
+  });
+
+  it("reads nothing more for an archived task that is nobody's child", async () => {
+    await mountedEpic();
+    const reads = taskReads();
+
+    await act(async () => {
+      await board.handleContextArchive("t4");
+    });
+
+    expect(taskReads()).toBe(reads);
+  });
+});
+
+describe("turning Show archived off", () => {
+  it("takes archived cards off the screen before the refetch lands", async () => {
+    api.get.mockImplementation((path: string) => {
+      if (path.includes("/tasks")) {
+        return Promise.resolve([task("t1", 0), { ...task("t2", 1), archivedAt: "2026-10-05T10:00:00.000Z" }]);
+      }
+      if (path.endsWith("/sprints")) return Promise.resolve([]);
+      return Promise.resolve(PROJECT);
+    });
+    probeScope = "all";
+    render(<Probe />);
+    await waitFor(() => expect(orderOnScreen()).toBe("t1:0"));
+    act(() => board.setShowArchived(true));
+    await act(async () => {
+      await board.reload();
+    });
+    expect(orderOnScreen()).toBe("t1:0,t2:1");
+
+    const refetch = held<unknown[]>();
+    api.get.mockImplementation((path: string) =>
+      path.includes("/tasks") ? refetch.promise : Promise.resolve(path.endsWith("/sprints") ? [] : PROJECT)
+    );
+    act(() => board.setShowArchived(false));
+
+    expect(orderOnScreen()).toBe("t1:0");
+  });
+});

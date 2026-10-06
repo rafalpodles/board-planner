@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, act, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, act, fireEvent, waitFor, within } from "@testing-library/react";
 import { BoardFilters } from "./BoardFilters";
 import { ApiCustomField, ApiTask } from "@/types";
 import { UNFILED } from "@/lib/board-filters-state";
@@ -437,5 +437,154 @@ describe("BoardFilters unassigned", () => {
 
     const last = onFilter.mock.calls.at(-1)?.[0] as ApiTask[];
     expect(last.map((t) => t._id).sort()).toEqual(["1", "3"]);
+  });
+});
+
+// BP-915: archived tasks are loaded by whoever owns the task list, so the option is handed up
+describe("BoardFilters and archived tasks", () => {
+  it("offers Show archived, and reports the choice upwards", async () => {
+    const onShowArchivedChange = vi.fn();
+    renderFilters({ onShowArchivedChange });
+    await openPopover();
+
+    await act(async () => screen.getByRole("checkbox", { name: "Show archived" }).click());
+
+    expect(onShowArchivedChange).toHaveBeenCalledWith(true);
+  });
+
+  it("gives the checkbox's label a phone-sized touch target, like the buttons beside it", async () => {
+    renderFilters({ onShowArchivedChange: vi.fn() });
+    await openPopover();
+
+    const label = screen.getByRole("checkbox", { name: "Show archived" }).closest("label")!;
+    expect(label.className).toContain("min-h-11");
+    expect(label.className).toContain("sm:min-h-[36px]");
+  });
+
+  it("offers nothing where the host does not load archived tasks", async () => {
+    renderFilters();
+    await openPopover();
+
+    expect(screen.queryByRole("checkbox", { name: "Show archived" })).toBeNull();
+  });
+
+  it("counts it as an active filter, says so in a chip, and clears it with the rest", async () => {
+    const onShowArchivedChange = vi.fn();
+    renderFilters({ showArchived: true, onShowArchivedChange });
+    await openPopover();
+
+    const popover = within(screen.getByRole("dialog", { name: "Filters" }));
+    expect(popover.getByText("Archived shown")).toBeTruthy();
+    expect((popover.getByRole("checkbox", { name: "Show archived" }) as HTMLInputElement).checked).toBe(true);
+    await act(async () => popover.getByRole("button", { name: "Clear all" }).click());
+
+    expect(onShowArchivedChange).toHaveBeenCalledWith(false);
+  });
+});
+
+describe("BoardFilters archived tasks while Show archived is off", () => {
+  const withArchived = [...tasks, task({ _id: "4", taskNumber: 4, title: "Old", archivedAt: "2026-10-05T10:00:00.000Z" })];
+
+  it("hands on no archived task until the choice is on, even if the list still holds one", () => {
+    const { onFilter } = renderFilters({ tasks: withArchived, showArchived: false });
+    expect((onFilter.mock.calls.at(-1)?.[0] as ApiTask[]).map((t) => t._id)).toEqual(["1", "2", "3"]);
+  });
+
+  it("hands them on once it is on", () => {
+    const { onFilter } = renderFilters({ tasks: withArchived, showArchived: true });
+    expect((onFilter.mock.calls.at(-1)?.[0] as ApiTask[]).map((t) => t._id)).toContain("4");
+  });
+});
+
+describe("BoardFilters epic", () => {
+  const link = (id: string, taskNumber: number, title: string) => ({ _id: id, taskNumber, title, status: "todo" });
+  const epics = [
+    task({ _id: "e1", taskNumber: 10, title: "Epic one", relations: [{ type: "parent_of", task: link("a", 11, "A") }] } as never),
+    task({ _id: "e2", taskNumber: 20, title: "Epic two", relations: [{ type: "parent_of", task: link("c", 21, "C") }] } as never),
+    task({ _id: "a", taskNumber: 11, title: "A", parent: link("e1", 10, "Epic one") } as never),
+    task({ _id: "b", taskNumber: 12, title: "B, nobody's child" }),
+    task({ _id: "c", taskNumber: 21, title: "C", parent: link("e2", 20, "Epic two") } as never),
+  ];
+
+  async function pick(value: string) {
+    const select = screen.getByLabelText("Epic") as HTMLSelectElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(select, value);
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  }
+  const titlesShown = (onFilter: ReturnType<typeof vi.fn>) =>
+    (onFilter.mock.calls.at(-1)![0] as ApiTask[]).map((t) => t.title).sort();
+
+  it("offers the tasks that have children, named by key, and hides itself on a board with none", async () => {
+    const { unmount } = renderFilters({ tasks: epics });
+    await openPopover();
+    const select = screen.getByLabelText("Epic") as HTMLSelectElement;
+    expect([...select.options].map((o) => o.textContent)).toEqual(["All epics", "TP-10 Epic one", "TP-20 Epic two"]);
+    unmount();
+
+    renderFilters();
+    await openPopover();
+    expect(screen.queryByLabelText("Epic")).toBeNull();
+  });
+
+  it("keeps only the children of the chosen epic, and a different epic changes it", async () => {
+    const { onFilter } = renderFilters({ tasks: epics });
+    await openPopover();
+
+    await pick("e1");
+    expect(titlesShown(onFilter)).toEqual(["A"]);
+
+    await pick("e2");
+    expect(titlesShown(onFilter)).toEqual(["C"]);
+
+    await pick("");
+    expect(titlesShown(onFilter)).toHaveLength(5);
+  });
+
+  it("offers an epic whose children are on the board and which is not, as a sprint's board has it", async () => {
+    const onlyChild = [task({ _id: "a", taskNumber: 11, title: "A", parent: link("e1", 10, "Epic one") } as never)];
+    renderFilters({ tasks: onlyChild });
+    await openPopover();
+
+    expect([...(screen.getByLabelText("Epic") as HTMLSelectElement).options].map((o) => o.value)).toContain("e1");
+  });
+
+  it("counts on the pill, shows a chip that clears it, and survives a reload", async () => {
+    const { onFilter, unmount } = renderFilters({ tasks: epics });
+    await openPopover();
+    await pick("e1");
+
+    expect(screen.getByLabelText("Remove Epic TP-10 filter")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Filters/ }).textContent).toContain("1");
+    unmount();
+
+    const again = renderFilters({ tasks: epics });
+    await waitFor(() => expect(titlesShown(again.onFilter)).toEqual(["A"]));
+
+    await act(async () => {
+      screen.getByLabelText("Remove Epic TP-10 filter").click();
+    });
+    expect(titlesShown(again.onFilter)).toHaveLength(5);
+    void onFilter;
+  });
+
+  it("leaves a chip to clear for a stored epic that is gone, rather than a filter nobody can see", async () => {
+    localStorage.setItem(
+      "board-filters:TP",
+      JSON.stringify({ filters: { epic: "gone" }, sortField: "manual", sortDir: "asc", showFilters: false, hiddenColumns: [] })
+    );
+    const { onFilter } = renderFilters({ tasks: epics });
+    await waitFor(() => expect(titlesShown(onFilter)).toEqual([]));
+
+    await openPopover();
+    expect(screen.getByLabelText("Remove Epic filter")).toBeTruthy();
+    expect([...(screen.getByLabelText("Epic") as HTMLSelectElement).options].map((o) => o.textContent)).toContain(
+      "Epic (not in this view)"
+    );
+    await act(async () => {
+      screen.getByLabelText("Remove Epic filter").click();
+    });
+    expect(titlesShown(onFilter)).toHaveLength(5);
   });
 });

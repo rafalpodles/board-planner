@@ -182,6 +182,16 @@ describe("the browser tab's title", () => {
     expect(document.title).not.toContain("(");
   });
 
+  it("does not count an archived task shown on the board", async () => {
+    renderBoard(project(), [
+      task("t1", "queued"),
+      { ...task("t2", "queued"), archivedAt: "2026-09-01T00:00:00Z" },
+      { ...task("t3", "doing"), archivedAt: "2026-09-01T00:00:00Z" },
+    ]);
+
+    await expectTitle(`Test Project (1 todo) — ${APP_NAME}`);
+  });
+
   it("puts the plain app name back on the way out", async () => {
     const view = renderBoard(project(), [task("t3", "doing")]);
     await expectTitle(`Test Project (1 in progress) — ${APP_NAME}`);

@@ -3,6 +3,7 @@ import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import type { ScopedDb } from "@/lib/db-scope";
 import { withProjectAccess } from "@/lib/middleware";
+import { check } from "@/lib/grants";
 import { machineMayNotForce, MACHINE_FORCE_REFUSAL } from "@/lib/force-guard";
 import {
   toApiExecution,
@@ -12,6 +13,7 @@ import {
   MAX_EXECUTION_ATTEMPTS,
 } from "@/lib/task-service";
 import { severLinksToDeletedTask } from "@/lib/task-links";
+import { epicProgressFor } from "@/lib/epics";
 import { ITaskExecution } from "@/types";
 import { withApiExecution } from "@/lib/task-execution-view";
 import {
@@ -62,6 +64,9 @@ export const GET = withProjectAccess(async (_request, { params, user, db }) => {
         task: { _id: t._id, taskNumber: t.taskNumber, title: t.title, status: t.status },
       }))
   );
+
+  const progress = (await epicProgressFor(db, projectId, [taskId])).get(String(task._id));
+  if (progress) taskObj.progress = progress;
 
   taskObj.attemptsExhausted = (task.execution?.attempts ?? 0) >= MAX_EXECUTION_ATTEMPTS;
   taskObj.execution = toApiExecution(task.execution, await workerNamesFor(db, [task.execution]));
@@ -138,6 +143,13 @@ export const DELETE = withProjectAccess(async (request, { params, user, db }) =>
     return NextResponse.json({ error: "Invalid task id" }, { status: 400 });
   }
   await connectDB();
+
+  if (!(await check(db, user, projectId, "admin"))) {
+    return NextResponse.json(
+      { error: "Only the board's owner may delete a task. Archive it instead: it leaves the board and every list, and can be restored." },
+      { status: 403 }
+    );
+  }
 
   // A delete carries no body unless the caller means to force, and `request.json()` throws on an
   // empty one — so an absent body is "do not force" rather than a 500.

@@ -239,11 +239,12 @@ the client at one URL:
 }
 ```
 
-Thirty-seven tools, in the groups an agent works in — the full list and what each answers is on the
+Forty-six tools, in the groups an agent works in — the full list and what each answers is on the
 [MCP page](https://board-planner.com/docs/ai/claude-code-and-mcp/):
 
 - **Projects and tasks:** `list_projects`, `get_project`, `list_tasks`, `get_task`, `create_task`,
-  `update_task`, `change_task_status`, `reorder_tasks`, `search_tasks`, `my_tasks`
+  `update_task`, `change_task_status`, `reorder_tasks`, `search_tasks`, `my_tasks`, `archive_task`,
+  `unarchive_task`, `delete_task` (the board's owner only)
 - **Batches:** `create_tasks`, `update_tasks`, `link_task_pairs` (up to 30 or 60 items a call, answered per item)
 - **Links and checklists:** `link_tasks`, `unlink_tasks`, `add_checklist_item`, `set_checklist_item`,
   `remove_checklist_item`
@@ -252,6 +253,10 @@ Thirty-seven tools, in the groups an agent works in — the full list and what e
   `watch_task`, `unwatch_task`
 - **People and agents:** `list_members`, `whoami`, `list_agents`
 - **Reporting:** `get_project_stats`, `list_runs`, `list_notifications`, `mark_notifications_read`
+- **Board setup (add only):** `add_custom_field`, `add_field_option`, `add_category` (any member, as in the app),
+  `add_column`, `rename_column` (the project owner). Removing or renaming anything else stays in the app.
+- **Repository:** `sync_repository` refreshes a board's pull or merge requests and their CI badges, as the Sync
+  button does
 
 Clients that want a connector instead of a pasted token get full **OAuth 2.1 with PKCE** and dynamic
 client registration at the same URL — no client secret.

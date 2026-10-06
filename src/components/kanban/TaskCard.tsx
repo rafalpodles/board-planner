@@ -10,6 +10,7 @@ import { taskPath } from "@/lib/urls";
 import { dateOnlyKey, dueDateClass, formatDateOnly } from "@/lib/date-only";
 import { CopyTaskLink } from "@/components/tasks/CopyTaskLink";
 import { PullRequestState } from "@/components/tasks/PullRequestBadge";
+import { EpicProgress } from "@/components/tasks/EpicProgress";
 
 // A card is a summary; past a few badges it stops being one
 const MAX_CARD_BADGES = 3;
@@ -93,6 +94,7 @@ export function TaskCard({
         transition-colors group
         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary
         ${running ? (quiet ? "task-running run-quiet" : "task-running") : ""}
+        ${task.archivedAt ? "border-dashed saturate-50" : ""}
         ${selected
           ? "border-primary bg-primary/5"
           : tinted
@@ -149,6 +151,15 @@ export function TaskCard({
             <span className="max-w-24 truncate">{runPhase}</span>
           </span>
         )}
+        {task.archivedAt && (
+          <span
+            data-testid="card-archived"
+            className="chip text-[11px] px-1.5 py-0.5 rounded font-medium"
+            style={{ "--chip": "var(--color-text-muted)" } as CSSProperties}
+          >
+            Archived
+          </span>
+        )}
         <Badge variant="priority" value={task.priority} className={COMPACT_BADGE}>
           {PRIORITY_LABELS[task.priority] ?? task.priority}
         </Badge>
@@ -162,7 +173,7 @@ export function TaskCard({
         </Badge>
       </div>
 
-      <h3 className="text-sm font-medium mb-2 line-clamp-2">{task.title}</h3>
+      <h3 className={`text-sm font-medium mb-2 line-clamp-2 ${task.archivedAt ? "text-text-muted" : ""}`}>{task.title}</h3>
 
       {shownBadges.length > 0 && (
         <div className="flex flex-wrap gap-1 mb-2">
@@ -230,6 +241,10 @@ export function TaskCard({
           </div>
         );
       })()}
+
+      {task.progress && task.progress.total > 0 && (
+        <EpicProgress progress={task.progress} className="mb-2" />
+      )}
 
       {task.checklist && task.checklist.length > 0 && (
         <div className="mb-2 flex items-center gap-1.5">

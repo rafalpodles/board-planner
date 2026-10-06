@@ -299,6 +299,40 @@ describe("claimNextTask", () => {
     find.mockReturnValue({ lean: () => Promise.resolve([]) });
   });
 
+  describe("an archived task", () => {
+    async function claimFilter(): Promise<Record<string, unknown>> {
+      findOneAndUpdate.mockResolvedValue(null);
+      await claimNextTask(db, "p1", "worker-a", "run-1", OWNER);
+      return findOneAndUpdate.mock.calls[0][0];
+    }
+
+    it("is not claimable, though everything else about it qualifies", async () => {
+      const filter = await claimFilter();
+
+      expect(matches(filter, task({ archivedAt: new Date() }))).toBe(false);
+    });
+
+    it("leaves a task nobody archived claimable, whether the field is null or was never written", async () => {
+      const filter = await claimFilter();
+
+      expect(matches(filter, task({ archivedAt: null }))).toBe(true);
+      expect(matches(filter, task())).toBe(true);
+    });
+
+    it("does not hold a dependent back, and is not waited for as a blocker", async () => {
+      find.mockReset();
+      find.mockReturnValueOnce({ lean: () => Promise.resolve([{ blockedBy: ["6a70afff45d39cd9bc8bb600"] }]) });
+      find.mockReturnValueOnce({ lean: () => Promise.resolve([]) });
+      findOneAndUpdate.mockResolvedValue(null);
+
+      await claimNextTask(db, "p1", "worker-a", "run-1", OWNER);
+
+      const [waiting, blockers] = find.mock.calls.map((call) => call[0]);
+      expect(matches(waiting, { project: "p1", status: "ready", blockedBy: ["x"], organisation: DEFAULT_ORGANISATION_ID, archivedAt: new Date() })).toBe(false);
+      expect(matches(blockers, { project: "p1", _id: "6a70afff45d39cd9bc8bb600", status: "doing", organisation: DEFAULT_ORGANISATION_ID, archivedAt: new Date() })).toBe(false);
+    });
+  });
+
   // A task nobody can start yet is not work, and the worker was taking it anyway: blockedBy was
   // never consulted. Judged through sift rather than by reading the filter, because what matters
   // is what MongoDB does with $nin over an array field, not that the source says "$nin".
@@ -387,6 +421,7 @@ describe("claimNextTask", () => {
         project: "p1",
         _id: { $in: [OPEN] },
         status: { $nin: ["shipped"] },
+        archivedAt: null,
         organisation: DEFAULT_ORGANISATION_ID,
       });
     });
@@ -813,6 +848,14 @@ describe("releaseExpiredTasks", () => {
       $lt: new Date(now.getTime() - EXECUTION_LEASE_MS),
     });
     expect(filter.project).toBe("p1");
+  });
+
+  it("leaves an archived task alone, in both the read and the two writes", async () => {
+    await releaseExpiredTasks(db, "p1", now);
+
+    expect(find.mock.calls[0][0]).toMatchObject({ archivedAt: null });
+    expect(updateMany.mock.calls).toHaveLength(2);
+    for (const [filter] of updateMany.mock.calls) expect(filter).toMatchObject({ archivedAt: null });
   });
 
   it("returns a task with attempts left to the queue", async () => {
@@ -2194,6 +2237,19 @@ describe("what the next occurrence of a recurring task is", () => {
     await flush();
 
     expect(minted()?.dueDate?.toISOString()).toBe("2026-03-31T00:00:00.000Z");
+  });
+
+  it("is not minted when the closed task was archived, though the same close mints one otherwise", async () => {
+    setup();
+    await changeStatus(db, "p1", "t1", "shipped", "actor");
+    await flush();
+    expect(taskCreate).toHaveBeenCalledTimes(1);
+
+    setup({ archivedAt: new Date() });
+    await changeStatus(db, "p1", "t1", "shipped", "actor");
+    await flush();
+
+    expect(taskCreate).not.toHaveBeenCalled();
   });
 
   it("is born in the backlog column even when that is not the first one", async () => {
@@ -4321,6 +4377,10 @@ describe("what a task is populated with before it is answered", () => {
   // field that decides what executes on a machine.
   it("names the agent the task carries, which no other route will tell the reader", () => {
     expect(path("agent")).toEqual({ path: "agent", select: "name" });
+  });
+
+  it("asks a related task whether it is archived, so the page can dim an archived child", () => {
+    expect(path("relations.task")?.select).toMatch(/\barchivedAt\b/);
   });
 
   it("still names everyone else a task detail renders", () => {

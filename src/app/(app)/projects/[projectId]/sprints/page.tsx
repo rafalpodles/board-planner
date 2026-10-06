@@ -172,6 +172,7 @@ export default function SprintsPage() {
   // and showing them under this name would be the page stating something untrue
   const tasksLoaded = scope !== null && board.loadedScope === scope;
   const doneIds = new Set(columnIdsWithRole(board.project, "done"));
+  const liveBoardTasks = board.tasks.filter((t) => !t.archivedAt);
   // The planning view's own merged list is the truth while it's mounted, since it is the
   // only place a task moved in from the backlog exists; the sprint list's own counts stand
   // in until the first round trip lands, and board.tasks after that
@@ -179,13 +180,13 @@ export default function SprintsPage() {
     view === "planning" && planningTasks
       ? planningTasks.filter((t) => doneIds.has(t.status)).length
       : tasksLoaded
-        ? board.tasks.filter((t) => doneIds.has(t.status)).length
+        ? liveBoardTasks.filter((t) => doneIds.has(t.status)).length
         : selected?.doneCount ?? 0;
   const totalCount =
     view === "planning" && planningTasks
       ? planningTasks.length
       : tasksLoaded
-        ? board.tasks.length
+        ? liveBoardTasks.length
         : selected?.taskCount ?? 0;
   const estimateField = resolveEstimateField(board.project);
   const estimateFieldId = estimateField?._id ?? "";
@@ -197,13 +198,13 @@ export default function SprintsPage() {
     view === "planning" && planningTasks
       ? sumEstimates(planningTasks, estimateFieldId)
       : tasksLoaded
-        ? sumEstimates(board.tasks, estimateFieldId)
+        ? sumEstimates(liveBoardTasks, estimateFieldId)
         : selected?.estimateTotal ?? 0;
   const estimateDone =
     view === "planning" && planningTasks
       ? sumEstimates(planningTasks.filter((t) => doneIds.has(t.status)), estimateFieldId)
       : tasksLoaded
-        ? sumEstimates(board.tasks.filter((t) => doneIds.has(t.status)), estimateFieldId)
+        ? sumEstimates(liveBoardTasks.filter((t) => doneIds.has(t.status)), estimateFieldId)
         : selected?.estimateDone ?? 0;
   const estimate = estimateField
     ? { total: estimateTotal, done: estimateDone, label: estimateField.name }

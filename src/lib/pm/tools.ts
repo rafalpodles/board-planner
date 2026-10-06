@@ -19,8 +19,12 @@ import { projectRepositoryUrl } from "@/lib/repository";
 import type { AnyColumn } from "@/lib/columns";
 import { getProjectColumns } from "@/lib/columns";
 import { echo } from "@/lib/echo";
+import { epicClauses, epicProgressFor } from "@/lib/epics";
+import { progressLine } from "@/lib/epic-progress";
+import type { ApiEpicProgress } from "@/types";
 import { isWorkerLockedByInstance } from "@/lib/worker-gate";
 import type { ScopedDb } from "@/lib/db-scope";
+import { NOT_ARCHIVED } from "@/lib/task-archive";
 
 export interface PmToolContext {
   projectId: string;
@@ -103,13 +107,14 @@ async function fieldValuesFor(
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function compactTask(ctx: PmToolContext, t: any) {
+function compactTask(ctx: PmToolContext, t: any, progress?: ApiEpicProgress) {
   return {
     key: `${ctx.projectKey}-${t.taskNumber}`,
     title: t.title,
     status: t.status,
     assignee: t.assignee && typeof t.assignee === "object" ? t.assignee.username : null,
     priority: t.priority,
+    ...(progress ? { progress: progressLine(progress) } : {}),
   };
 }
 
@@ -248,19 +253,33 @@ export const PM_TOOLS: Record<string, PmTool> = {
     definition: {
       name: "list_tasks",
       description:
-        "List tasks in the project (compact: key, title, status, assignee, priority). Use get_task for full details.",
+        "List tasks in the project (compact: key, title, status, assignee, priority; an epic also says how many of its children are done). Use get_task for full details.",
       parameters: {
         type: "object",
         properties: {
           status: { type: "string", description: "Optional status filter — a column id of this project (see the system prompt)" },
           limit: { type: "number", description: "Max results, default 50, cap 100" },
+          parent: { type: "string", description: "Optional: only the children of this task, by key (e.g. CP-12) — an epic's key lists the epic's tasks" },
+          hasChildren: { type: "boolean", description: "Optional: true lists only tasks that have children (the epics); false only tasks that have none" },
           offset: { type: "number", description: "Skip N results (pagination)" },
         },
         additionalProperties: false,
       },
     },
     async execute(db, args, ctx) {
-      const filter: Record<string, unknown> = { project: ctx.projectId };
+      const filter: Record<string, unknown> = { project: ctx.projectId, ...NOT_ARCHIVED };
+      if (args.hasChildren !== undefined && typeof args.hasChildren !== "boolean") {
+        return { result: { error: "hasChildren must be true or false" } };
+      }
+      let parentId: string | undefined;
+      if (args.parent !== undefined) {
+        const resolved = await resolveTask(db, ctx, args.parent);
+        if ("error" in resolved) return { result: { error: resolved.error } };
+        parentId = String(resolved.task._id);
+      }
+      const epic = await epicClauses(db, ctx.projectId, { parent: parentId, hasChildren: args.hasChildren });
+      if ("error" in epic) return { result: { error: epic.error } };
+      if (epic.clauses.length) filter.$and = epic.clauses;
       if (args.status !== undefined) {
         // This tool queries Mongo directly, so the route's refusal does not cover it. Columns are
         // project-defined, and an id the board has not got answered `[]` — which a model reports
@@ -286,7 +305,8 @@ export const PM_TOOLS: Record<string, PmTool> = {
           .limit(limit)
           .populate("assignee", "username"),
       ]);
-      return { result: { total, offset, tasks: tasks.map((t) => compactTask(ctx, t)) } };
+      const progress = await epicProgressFor(db, ctx.projectId, tasks.map((t) => String(t._id)));
+      return { result: { total, offset, tasks: tasks.map((t) => compactTask(ctx, t, progress.get(String(t._id)))) } };
     },
   },
 
@@ -307,11 +327,13 @@ export const PM_TOOLS: Record<string, PmTool> = {
       if ("error" in resolved) return { result: { error: resolved.error } };
       const t = await db.Task.findById(resolved.task._id)
         .populate("assignee", "username fullName")
-        .populate("blockedBy", "taskNumber title status");
+        .populate("blockedBy", "taskNumber title status")
+        .populate("relations.task", "taskNumber title status archivedAt");
       if (!t) return { result: { error: "Task not found" } };
+      const progress = (await epicProgressFor(db, ctx.projectId, [String(t._id)])).get(String(t._id));
       return {
         result: {
-          ...compactTask(ctx, t),
+          ...compactTask(ctx, t, progress),
           description: (t.description || "").slice(0, MAX_TEXT_RESULT),
           category: t.category,
           dueDate: t.dueDate,
@@ -323,6 +345,23 @@ export const PM_TOOLS: Record<string, PmTool> = {
               : null
           ).filter(Boolean),
           recurrence: t.recurrence,
+          ...(progress
+            ? {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                children: (t.relations || []).flatMap((r: any) =>
+                  r.type === "parent_of" && r.task?.taskNumber
+                    ? [
+                        {
+                          key: `${ctx.projectKey}-${r.task.taskNumber}`,
+                          title: r.task.title,
+                          status: r.task.status,
+                          ...(r.task.archivedAt ? { archived: true } : {}),
+                        },
+                      ]
+                    : []
+                ),
+              }
+            : {}),
         },
       };
     },
@@ -337,7 +376,7 @@ export const PM_TOOLS: Record<string, PmTool> = {
     },
     async execute(db, _args, ctx) {
       const rows = await db.Task.aggregate([
-        { $match: { project: resolveObjectId(ctx.projectId) } },
+        { $match: { project: resolveObjectId(ctx.projectId), ...NOT_ARCHIVED } },
         { $group: { _id: "$status", count: { $sum: 1 } } },
       ]);
       const byStatus: Record<string, number> = {};

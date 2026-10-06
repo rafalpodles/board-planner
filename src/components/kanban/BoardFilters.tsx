@@ -30,6 +30,7 @@ import {
   migratePersistedFilters,
   isFieldFilterSet,
   matchesStatusFilter,
+  epicOptions,
   statusLabel,
   statusOptions,
   statusRoleMap,
@@ -77,6 +78,9 @@ interface BoardFiltersProps {
   currentUsername?: string;
   projectCategories?: ApiProjectCategory[];
   extraControls?: React.ReactNode;
+  /** Archived tasks are loaded by the owner of the task list, so the choice is handed up */
+  showArchived?: boolean;
+  onShowArchivedChange?: (show: boolean) => void;
   /** Sort is owned above this component so the list view's column headers and
       this dropdown drive the same value */
   sortField: SortKey;
@@ -109,6 +113,8 @@ export function BoardFilters({
   currentUsername,
   projectCategories,
   extraControls,
+  showArchived = false,
+  onShowArchivedChange,
   sortField,
   sortDir,
   onSortChange,
@@ -201,11 +207,16 @@ export function BoardFilters({
     statusChoices.push({ value: filters.status, label: statusLabel(filters.status) });
   }
 
-  const activeCount = countActiveFilters(filters);
+  const epicChoices = epicOptions(tasks, projectKey);
+  if (filters.epic && !epicChoices.some((o) => o.value === filters.epic)) {
+    epicChoices.push({ value: filters.epic, label: "Epic (not in this view)", taskNumber: 0 });
+  }
+
+  const activeCount = countActiveFilters(filters) + (showArchived ? 1 : 0);
   const hasActiveFilters = activeCount > 0;
 
   useEffect(() => {
-    let result = tasks;
+    let result = showArchived ? tasks : tasks.filter((t) => !t.archivedAt);
 
     if (filters.search) {
       const q = filters.search.toLowerCase().trim();
@@ -234,6 +245,9 @@ export function BoardFilters({
     }
     if (filters.status) {
       result = result.filter((t) => matchesStatusFilter(t.status, filters.status, roleByColumn));
+    }
+    if (filters.epic) {
+      result = result.filter((t) => t.parent?._id === filters.epic);
     }
     if (Object.keys(filters.fields || {}).length) {
       result = result.filter((t) =>
@@ -273,14 +287,18 @@ export function BoardFilters({
 
     onFilter(result, { activeCount, searching: !!filters.search, clearAll });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters, tasks, sortField, sortDir, sortContext, currentUsername, projectKey, roleByColumn]);
+  }, [filters, tasks, sortField, sortDir, sortContext, currentUsername, projectKey, roleByColumn, showArchived]);
 
   function clearFilters() {
     setFilters((f) => ({ ...EMPTY_FILTERS, search: f.search }));
+    onShowArchivedChange?.(false);
   }
 
+  const onShowArchivedChangeRef = useRef(onShowArchivedChange);
+  onShowArchivedChangeRef.current = onShowArchivedChange;
   const clearAll = useCallback(() => {
     setFilters({ ...EMPTY_FILTERS, search: "" });
+    onShowArchivedChangeRef.current?.(false);
   }, []);
 
   function unset(key: BuiltInFilterKey) {
@@ -348,6 +366,13 @@ export function BoardFilters({
       label: statusLabel(filters.status),
     });
   }
+  if (filters.epic) {
+    const epic = epicChoices.find((o) => o.value === filters.epic);
+    chips.push({
+      key: "epic",
+      label: epic?.taskNumber ? `Epic ${projectKey ?? ""}-${epic.taskNumber}` : "Epic",
+    });
+  }
   if (filters.dateRange) {
     chips.push({
       key: "dateRange",
@@ -368,6 +393,8 @@ export function BoardFilters({
         : `${field.name}: ${range[0] || "…"}–${range[1] || "…"}`;
     chips.push({ key: `field:${field._id}`, label, colour: option?.color, fieldId: field._id });
   }
+
+  if (showArchived) chips.push({ key: "archived", label: "Archived shown" });
 
   const selectClass =
     "focus-ring h-8 w-full rounded-lg border border-border bg-bg-input px-2 text-[12px] text-text";
@@ -468,7 +495,9 @@ export function BoardFilters({
                       onRemove={() =>
                         chip.fieldId
                           ? clearFieldFilter(chip.fieldId)
-                          : unset(chip.key as BuiltInFilterKey)
+                          : chip.key === "archived"
+                            ? onShowArchivedChange?.(false)
+                            : unset(chip.key as BuiltInFilterKey)
                       }
                     />
                   ))}
@@ -553,7 +582,36 @@ export function BoardFilters({
                   ))}
                 </select>
               </Field>
+
+              {epicChoices.length > 0 && (
+                <Field label="Epic">
+                  <select
+                    value={filters.epic}
+                    onChange={(e) => setFilters((f) => ({ ...f, epic: e.target.value }))}
+                    className={selectClass}
+                  >
+                    <option value="">All epics</option>
+                    {epicChoices.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              )}
             </div>
+
+            {onShowArchivedChange && (
+              <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-2 text-[12px] text-text sm:min-h-[36px]">
+                <input
+                  type="checkbox"
+                  checked={showArchived}
+                  onChange={(e) => onShowArchivedChange(e.target.checked)}
+                  className="focus-ring h-4 w-4"
+                />
+                Show archived
+              </label>
+            )}
 
             {filterableFields.length > 0 && (
               <>

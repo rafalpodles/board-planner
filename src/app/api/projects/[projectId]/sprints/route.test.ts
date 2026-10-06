@@ -76,6 +76,15 @@ function groupStageOf(pipeline: unknown[]): Record<string, unknown> {
   return stage.$group;
 }
 
+describe("GET /api/projects/[projectId]/sprints — archived tasks", () => {
+  it("counts only the tasks nobody archived", async () => {
+    await GET(req(), ctx());
+
+    const stages = taskAggregate.mock.calls[0][0] as { $match?: Record<string, unknown> }[];
+    expect(stages.find((stage) => stage.$match?.sprint)?.$match).toMatchObject({ archivedAt: null });
+  });
+});
+
 describe("GET /api/projects/[projectId]/sprints — estimate accumulators", () => {
   it("omits the estimate accumulators from the pipeline when the project designates no field", async () => {
     await GET(req(), ctx());

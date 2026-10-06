@@ -143,6 +143,13 @@ describe("who asked, and what that earns", () => {
     );
   });
 
+  it("moves a merged task only while no run holds it and it is not archived", async () => {
+    await syncGithubPullRequests(db, project(), "u1");
+
+    const moved = taskUpdateOne.mock.calls.find(([, update]) => update.$set?.status === "ready_to_test");
+    expect(moved?.[0]).toMatchObject({ status: "in_review", "execution.runId": { $in: ["", null] }, archivedAt: null });
+  });
+
   /**
    * The reason the background tick exists in this shape. A column change has an author in the
    * task's history, and a tick has no person to put there — so it refreshes the links and leaves

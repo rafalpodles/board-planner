@@ -152,6 +152,14 @@ function makeBoard(overrides: Partial<ProjectBoard> = {}): ProjectBoard {
     handleRowSprintChange: vi.fn(),
     handleContextDuplicate: vi.fn(),
     handleContextDelete: vi.fn(),
+    showArchived: false,
+    setShowArchived: vi.fn(),
+    heldArchive: null,
+    setHeldArchive: vi.fn(),
+    forceHeldArchive: vi.fn(),
+    handleContextArchive: vi.fn(),
+    handleContextRestore: vi.fn(),
+    handleBulkArchive: vi.fn(),
     ...overrides,
   };
 }
@@ -451,6 +459,28 @@ describe("PlanningView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
 
     expect(await screen.findByText("Backlog (2)")).toBeTruthy();
+  });
+});
+
+describe("PlanningView with archived tasks shown on the board", () => {
+  it("keeps an archived task out of the sprint column and out of the counts it reports", async () => {
+    const onTasksChange = vi.fn();
+    api.get.mockImplementation(() => Promise.resolve(backlogTasks.map((t) => ({ ...t }))));
+    const archived = { ...sprintTasks[0], _id: "t10", taskNumber: 10, title: "Old header", archivedAt: "2026-10-05T10:00:00.000Z" } as ApiTask;
+
+    render(
+      <PlanningView
+        projectId="p1"
+        board={makeBoard({ tasks: [...sprintTasks, archived], showArchived: true })}
+        sprintId="s1"
+        onTasksChange={onTasksChange}
+      />
+    );
+    await screen.findByText("Backlog (2)");
+
+    expect(screen.getByText("Ship the header")).toBeTruthy();
+    expect(screen.queryByText("Old header")).toBeNull();
+    expect(onTasksChange).toHaveBeenLastCalledWith([sprintTasks[0]]);
   });
 });
 

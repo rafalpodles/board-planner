@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
+import { NOT_ARCHIVED } from "@/lib/task-archive";
 
 const LIMIT = 10;
 
@@ -14,7 +15,7 @@ export const GET = withProjectAccess(async (request, { params, db }) => {
   await connectDB();
 
   const q = (new URL(request.url).searchParams.get("q") ?? "").trim().slice(0, 40);
-  const filter: Record<string, unknown> = { project: projectId };
+  const filter: Record<string, unknown> = { project: projectId, ...NOT_ARCHIVED };
 
   if (/^\d+$/.test(q)) {
     // By prefix, on the number as written. Expressed as a regex over the stringified number rather

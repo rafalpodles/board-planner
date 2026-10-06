@@ -72,7 +72,9 @@ export function PlanningView({ projectId, board, sprintId, onTasksChange }: Plan
   const sprintTasks = useMemo(
     () =>
       tasksLoaded
-        ? [...board.tasks, ...sprintOverlay.filter((t) => !board.tasks.some((bt) => bt._id === t._id))]
+        ? [...board.tasks, ...sprintOverlay.filter((t) => !board.tasks.some((bt) => bt._id === t._id))].filter(
+            (t) => !t.archivedAt
+          )
         : [],
     [tasksLoaded, board.tasks, sprintOverlay]
   );

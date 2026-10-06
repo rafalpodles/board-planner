@@ -859,6 +859,34 @@ describe("Board / Planning toggle", () => {
   });
 });
 
+describe("Sprint header with archived tasks shown", () => {
+  it("counts only live tasks, in the progress and in the estimate, while Show archived is on", async () => {
+    const archived = {
+      ...sprintTasksWithEstimate[0],
+      _id: "t9",
+      taskNumber: 9,
+      title: "Task 9",
+      archivedAt: "2026-10-05T10:00:00.000Z",
+    } as ApiTask;
+    await renderSprints(sprints, { tasks: sprintTasksWithEstimate, project: projectWithEstimate });
+    expect(screen.getByTestId("sprint-progress").textContent).toBe("4/8");
+
+    api.get.mockImplementation((url: string) => {
+      if (url === "/api/projects/p1") return Promise.resolve(projectWithEstimate);
+      if (url.includes("archived=include")) return Promise.resolve([...sprintTasksWithEstimate, archived]);
+      if (url.startsWith("/api/projects/p1/tasks")) return Promise.resolve(sprintTasksWithEstimate);
+      if (url === "/api/projects/p1/sprints") return Promise.resolve(sprints);
+      return Promise.resolve([]);
+    });
+    await click(screen.getByText("Filters"));
+    await click(screen.getByRole("checkbox", { name: "Show archived" }));
+    await screen.findByTestId("card-archived");
+
+    expect(screen.getByTestId("sprint-progress").textContent).toBe("4/8");
+    expect(screen.getByTestId("sprint-estimate-progress").textContent).toBe("8/20 Story points");
+  });
+});
+
 describe("Sprint header estimate", () => {
   it("shows nothing about the estimate when the project designates no field", async () => {
     await renderSprints();

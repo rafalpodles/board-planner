@@ -6,8 +6,10 @@ import { DEFAULT_PRIORITY, PRIORITIES } from "@/types";
 import { createTask, taskPopulateFields } from "@/lib/task-service";
 import { withApiExecutions } from "@/lib/task-execution-view";
 import { parentsOf } from "@/lib/task-parents";
+import { epicClauses, epicProgressFor } from "@/lib/epics";
 import { getColumnIds } from "@/lib/columns";
 import { normalizeOptions } from "@/lib/custom-fields";
+import { archivedFilter, archivedScopeOf } from "@/lib/task-archive";
 
 
 const MAX_TASK_NUMBERS = 100;
@@ -23,7 +25,7 @@ const isCalendarDay = (value: string) => {
 };
 
 /** What a card in a list needs, and what an agent reading a board needs to pick work from it. */
-const SUMMARY_FIELDS = "taskNumber title status priority assignee dueDate sprint order updatedAt";
+const SUMMARY_FIELDS = "taskNumber title status priority assignee dueDate sprint order updatedAt archivedAt";
 
 export const GET = withProjectAccess(async (request, { params, db }) => {
   const { projectId } = await params;
@@ -183,6 +185,12 @@ export const GET = withProjectAccess(async (request, { params, db }) => {
   const clauses: Record<string, unknown>[] = [];
   const refuse = (error: string) => NextResponse.json({ error }, { status: 400 });
 
+  const archived = archivedScopeOf(url.searchParams.get("archived"));
+  if (!archived) {
+    return refuse(`Invalid archived "${String(url.searchParams.get("archived")).slice(0, 64)}" — only or include; left out, archived tasks are not listed`);
+  }
+  Object.assign(filter, archivedFilter(archived));
+
   const dueBefore = url.searchParams.get("dueBefore");
   const dueAfter = url.searchParams.get("dueAfter");
   for (const [name, value, edge] of [
@@ -219,17 +227,17 @@ export const GET = withProjectAccess(async (request, { params, db }) => {
     );
   }
 
-  // The children of one task: parent_of lives on the parent's document, so they are read from there
-  const parent = url.searchParams.get("parent");
-  if (parent) {
-    if (!isValidObjectId(parent)) return refuse("Invalid parent id");
-    const parentTask = await db.Task.findOne({ _id: parent, project: projectId }, "relations").lean();
-    if (!parentTask) return refuse("Invalid parent — no such task on this board");
-    const children = (parentTask.relations ?? [])
-      .filter((r: { type?: string }) => r.type === "parent_of")
-      .map((r: { task: unknown }) => r.task);
-    clauses.push({ _id: { $in: children } });
+  // parent_of lives on the parent's document, so both are read from there
+  const hasChildren = url.searchParams.get("hasChildren");
+  if (hasChildren && hasChildren !== "true" && hasChildren !== "false") {
+    return refuse(`Invalid hasChildren "${hasChildren.slice(0, 64)}" — true or false`);
   }
+  const epic = await epicClauses(db, projectId, {
+    parent: url.searchParams.get("parent") ?? undefined,
+    hasChildren: hasChildren ? hasChildren === "true" : undefined,
+  });
+  if ("error" in epic) return refuse(epic.error);
+  clauses.push(...epic.clauses);
 
   if (fieldParams.length > MAX_FIELD_FILTERS) {
     return refuse(`At most ${MAX_FIELD_FILTERS} field filters`);
@@ -304,7 +312,11 @@ export const GET = withProjectAccess(async (request, { params, db }) => {
   // the far end, once for the list. Not part of taskPopulateFields, which can only follow refs a
   // task holds itself, and not left to the browser's own reverse derivation, which only sees the
   // tasks this response carried: under ?sprint= the parent usually is not one of them.
-  const parents = await parentsOf(db, projectId, tasks.map((task) => String(task._id)));
+  const taskIds = tasks.map((task) => String(task._id));
+  const [parents, progress] = await Promise.all([
+    parentsOf(db, projectId, taskIds),
+    epicProgressFor(db, projectId, taskIds),
+  ]);
 
   // The board loads every task, so a raw document here would publish each one's whole execution
   // subdocument — run identity included — to every project member on every page load
@@ -312,7 +324,10 @@ export const GET = withProjectAccess(async (request, { params, db }) => {
     view === "summary"
       ? tasks.map((task) => (typeof task.toObject === "function" ? task.toObject() : { ...task }))
       : await withApiExecutions(db, tasks);
-  const listed = published.map((task) => ({ ...task, parent: parents.get(String(task._id)) ?? null }));
+  const listed = published.map((task) => {
+    const counted = progress.get(String(task._id));
+    return { ...task, parent: parents.get(String(task._id)) ?? null, ...(counted ? { progress: counted } : {}) };
+  });
   return NextResponse.json(paged ? { tasks: listed, total, limit, offset } : listed);
 });
 

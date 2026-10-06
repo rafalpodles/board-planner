@@ -29,6 +29,11 @@ interface TaskTopBarProps {
   onToggleWatch: () => void;
   onDuplicate: () => void;
   onAddChild: () => void;
+  archived: boolean;
+  /** Only the board's owner may delete; anybody who can edit may archive */
+  canDelete: boolean;
+  onArchive: () => void;
+  onRestore: () => void;
   onDelete: () => void;
   onClose: () => void;
 }
@@ -48,6 +53,10 @@ export function TaskTopBar({
   onToggleWatch,
   onDuplicate,
   onAddChild,
+  archived,
+  canDelete,
+  onArchive,
+  onRestore,
   onDelete,
   onClose,
 }: TaskTopBarProps) {
@@ -123,7 +132,7 @@ export function TaskTopBar({
       </button>
 
       {/* Everything in here has its own control once there is room — Watch and Duplicate
-          above, Add subtask in the linked-work section, Delete at the foot of the property
+          above, Add subtask in the linked-work section, Archive and Delete at the foot of the property
           rail. The rail itself only appears at lg, so this menu carries them until then. */}
       <div className="lg:hidden">
         <Popover
@@ -169,14 +178,25 @@ export function TaskTopBar({
                 Add subtask
               </OptionItem>
               <OptionItem
-                danger
                 onClick={() => {
-                  onDelete();
+                  if (archived) onRestore();
+                  else onArchive();
                   close();
                 }}
               >
-                Delete task
+                {archived ? "Restore task" : "Archive task"}
               </OptionItem>
+              {canDelete && (
+                <OptionItem
+                  danger
+                  onClick={() => {
+                    onDelete();
+                    close();
+                  }}
+                >
+                  Delete task
+                </OptionItem>
+              )}
             </OptionList>
           )}
         </Popover>

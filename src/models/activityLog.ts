@@ -13,6 +13,8 @@ const ACTIONS = [
   "pr_unlinked",
   "link_added",
   "link_removed",
+  "archived",
+  "unarchived",
   "criterion_added",
   "criterion_removed",
   "criterion_edited",

@@ -14,8 +14,11 @@ const activityDeleteMany = vi.fn();
 const notificationDeleteMany = vi.fn();
 const taskUpdateMany = vi.fn();
 const severLinksToDeletedTask = vi.fn();
+const check = vi.fn();
+const epicProgressFor = vi.fn(async () => new Map());
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+vi.mock("@/lib/grants", () => ({ check }));
 vi.mock("@/lib/task-service", () => ({
   updateTask,
   heldRunRefusal,
@@ -26,6 +29,8 @@ vi.mock("@/lib/task-service", () => ({
 // The severance itself — what it reads, pulls, and announces — is task-links.test.ts's job; this
 // file only has to prove the route hands it the right deleted-task identity.
 vi.mock("@/lib/task-links", () => ({ severLinksToDeletedTask }));
+// What it reads and how it counts is epics.test.ts's job; here the route only has to hand it this task
+vi.mock("@/lib/epics", () => ({ epicProgressFor }));
 vi.mock("@/models/task", () => ({
   Task: { findOne: taskFindOne, find: taskFind, updateMany: taskUpdateMany, deleteOne: taskDeleteOne, findOneAndDelete: vi.fn() },
 }));
@@ -111,6 +116,7 @@ beforeEach(() => {
   taskDeleteOne.mockResolvedValue({ deletedCount: 1 });
   projectFindOne.mockReturnValue({ lean: () => Promise.resolve({ key: "TP" }) });
   heldRunRefusal.mockResolvedValue(null);
+  check.mockResolvedValue(true);
 });
 
 // BP-802: a throw here is logged as an unhandled error, and a client hanging up mid-body is one
@@ -310,6 +316,38 @@ describe("DELETE .../tasks/:taskId and the run hold", () => {
   });
 });
 
+describe("DELETE .../tasks/:taskId is the board owner's", () => {
+  it("refuses a member who is not the owner, pointing at archive, and touches nothing", async () => {
+    check.mockResolvedValue(false);
+
+    const res = await DELETE(deleteRequest(), ctx());
+
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toMatch(/archive/i);
+    expect(check).toHaveBeenCalledWith(scopedToDefaultOrganisation(), expect.objectContaining({ _id: "u1" }), "p1", "admin");
+    expect(taskFindOne).not.toHaveBeenCalled();
+    expect(taskDeleteOne).not.toHaveBeenCalled();
+    expect(commentDeleteMany).not.toHaveBeenCalled();
+  });
+
+  it("refuses a member's force as well", async () => {
+    check.mockResolvedValue(false);
+
+    const res = await DELETE(deleteRequest({ force: true }), ctx());
+
+    expect(res.status).toBe(403);
+    expect(taskDeleteOne).not.toHaveBeenCalled();
+  });
+
+  it("deletes for the owner", async () => {
+    const res = await DELETE(deleteRequest(), ctx());
+
+    expect(res.status).toBe(200);
+    expect(taskDeleteOne).toHaveBeenCalled();
+    expect(commentDeleteMany).toHaveBeenCalled();
+  });
+});
+
 /**
  * BP-381. `decision.patch` and `decision.protectedFiles` are both `select: false` on the schema, so
  * that no other reader ships them by accident — and this is the read the panel is served by. The
@@ -380,5 +418,38 @@ describe("GET: whether machines have given up on the task", () => {
     [{ attempts: 4 }, true],
   ])("with execution %o answers %s", async (execution, expected) => {
     expect(await served(execution)).toBe(expected);
+  });
+});
+
+describe("GET: an epic's progress", () => {
+  const progress = { total: 3, done: 1, byStatus: { done: 1, todo: 2 } };
+
+  async function served(counted: Map<string, unknown>) {
+    const task = {
+      _id: "t-epic",
+      decision: null,
+      relations: [],
+      toObject: () => ({ taskNumber: 1 }),
+    };
+    taskFindOne.mockReturnValue({
+      select: () => ({ populate: () => ({ populate: () => Promise.resolve(task) }) }),
+    });
+    workerFindOne.mockReturnValue({ select: () => ({ lean: async () => null }) });
+    epicProgressFor.mockResolvedValueOnce(counted);
+    const res = await GET(new Request(`https://app.example.com/api/projects/p1/tasks/${TASK}`), ctx());
+    return res.json();
+  }
+
+  it("is served with the task when it has children", async () => {
+    const body = await served(new Map([["t-epic", progress]]));
+
+    expect(body.progress).toEqual(progress);
+    expect(epicProgressFor).toHaveBeenCalledWith(expect.anything(), "p1", [TASK]);
+  });
+
+  it("is left out of a task with none, which is not a task at 0 of 0", async () => {
+    const body = await served(new Map());
+
+    expect(body).not.toHaveProperty("progress");
   });
 });

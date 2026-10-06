@@ -112,6 +112,16 @@ describe("POST .../coda/sync — the column check", () => {
   });
 });
 
+describe("POST .../coda/sync — archived tasks", () => {
+  it("pushes the tasks nobody archived", async () => {
+    taskFind.mockReturnValue({ sort: () => ({ populate: () => ({ lean: () => Promise.resolve([]) }) }) });
+
+    await syncProjectToCoda(scopedToDefaultOrganisation(), "p1");
+
+    expect(taskFind.mock.calls[0][0]).toMatchObject({ project: "p1", archivedAt: null });
+  });
+});
+
 describe("POST .../coda/sync — the pushed rows", () => {
   it("shapes each task into the row Coda expects, keyed by the project's own key", async () => {
     taskFind.mockReturnValue({

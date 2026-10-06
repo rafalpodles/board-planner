@@ -36,6 +36,7 @@ export const GROUPS = {
     "due-date-in-the-viewers-day.spec.ts",
     "task-tab-title.spec.ts",
     "comment-shown-once.spec.ts",
+    "archive-and-delete.spec.ts",
   ],
   "task-fields": [
     "field-history.spec.ts",
@@ -66,6 +67,7 @@ export const GROUPS = {
     "list-view-seams.spec.ts",
     "card-shows-its-parent.spec.ts",
     "board-scope-and-filters.spec.ts",
+    "epics.spec.ts",
   ],
   project: [
     "organisation-on-product-writes.spec.ts",
@@ -119,6 +121,7 @@ export const GROUPS = {
     "agent-block-editing.spec.ts",
     "project-settings-controls.spec.ts",
     "dark-theme.spec.ts",
+    "mcp-config.spec.ts",
   ],
   people: [
     "day-zero.spec.ts",

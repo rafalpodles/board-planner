@@ -12,6 +12,7 @@ import {
   PROJECT_AGENT_ID,
   PROJECT_ID,
   PROJECT_KEY,
+  SIBLING_TASK_ID,
   seed,
   seedAgents,
   seedCustomFields,
@@ -107,6 +108,14 @@ const RECIPES: Record<string, Recipe> = {
   "PUT /api/projects/[projectId]/columns": {
     send: withBody("put", { columns: [] }),
     handled: { status: 400, body: /columns must be an array of 1-12 entries/ },
+  },
+  "POST /api/projects/[projectId]/columns": {
+    send: withBody("post", { label: "QA", role: "nonsense" }),
+    handled: { status: 400, body: /Column role must be one of/ },
+  },
+  "PATCH /api/projects/[projectId]/columns/[columnId]": {
+    send: withBody("patch", {}),
+    handled: { status: 400, body: /Column labels must be 1-40 chars/ },
   },
   "DELETE /api/projects/[projectId]/custom-fields/[fieldId]": {
     // A well-formed id no field has: the handler answers with the board's fields and removes nothing
@@ -211,6 +220,7 @@ const ROUTES = scanOwnerGatedRoutes();
 function concrete(path: string): string {
   return path
     .replace("[projectId]", PROJECT_KEY)
+    .replace("[columnId]", "done")
     .replace("[fieldId]", new mongoose.Types.ObjectId().toString())
     .replace("[invitationId]", new mongoose.Types.ObjectId().toString());
 }
@@ -390,6 +400,12 @@ const INLINE_RECIPES: Record<string, InlineRecipe> = {
     member: { status: 403, body: /Only a project owner can remove an option a field already has/ },
     owner: { status: 200, body: new RegExp(`^\\[(?!.*"${FIELDS.difficulty.options[1].id}").*"${FIELDS.difficulty.options[0].id}"`) },
   },
+  "DELETE /api/projects/[projectId]/tasks/[taskId]": {
+    // Deleting a task is the board owner's; a member archives instead
+    send: (request, path) => request.delete(path, { headers: SAME_ORIGIN }),
+    member: { status: 403, body: /Only the board's owner may delete a task/ },
+    owner: { status: 200, body: /Task deleted/ },
+  },
   "GET /api/projects/[projectId]/handover": {
     send: get,
     read: field((readiness: Listed) => readiness.canAdmin),
@@ -461,7 +477,8 @@ function concreteInline(path: string): string {
   return path
     .replace("[projectId]", PROJECT_KEY)
     .replace("[fieldId]", String(FIELDS.difficulty._id))
-    .replace("[agentId]", String(PROJECT_AGENT_ID));
+    .replace("[agentId]", String(PROJECT_AGENT_ID))
+    .replace("[taskId]", String(SIBLING_TASK_ID));
 }
 
 test("the scan found the inline owner checks, and every one of them has a recipe", () => {

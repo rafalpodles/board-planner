@@ -19,8 +19,9 @@ function boardDocumentTitle(project: ApiProject | null, tasks: ApiTask[]): strin
   // By role: a board that renamed these columns counted nothing and showed a bare project name
   const approved = new Set(columnIdsWithRole(project, "approved"));
   const active = new Set(columnIdsWithRole(project, "active"));
-  const todoCount = tasks.filter((t) => approved.has(t.status)).length;
-  const inProgressCount = tasks.filter((t) => active.has(t.status)).length;
+  const live = tasks.filter((t) => !t.archivedAt);
+  const todoCount = live.filter((t) => approved.has(t.status)).length;
+  const inProgressCount = live.filter((t) => active.has(t.status)).length;
   const parts: string[] = [];
   if (inProgressCount > 0) parts.push(`${inProgressCount} in progress`);
   if (todoCount > 0) parts.push(`${todoCount} todo`);

@@ -168,7 +168,7 @@ describe("POST .../github/sync", () => {
 
     // The move is a guarded write now, so what proves it is what the database was asked for
     expect(taskUpdateOne).toHaveBeenCalledWith(
-      { _id: doc._id, status: "in_review", organisation: DEFAULT_ORGANISATION_ID },
+      { _id: doc._id, status: "in_review", "execution.runId": { $in: ["", null] }, archivedAt: null, organisation: DEFAULT_ORGANISATION_ID },
       { $set: { status: "ready_to_test" } }
     );
     expect(body.autoTransitioned).toBe(1);

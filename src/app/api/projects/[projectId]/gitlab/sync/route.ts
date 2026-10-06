@@ -5,6 +5,7 @@ import { fetchMergeRequests, matchMRsToTasks, parseGitlabRepo } from "@/lib/gitl
 import { logActivity } from "@/lib/activity";
 import { decryptSecret } from "@/lib/encryption";
 import { mergedReviewDestination } from "@/lib/columns";
+import { NOT_ARCHIVED } from "@/lib/task-archive";
 import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
 import {
   addedLinks,
@@ -117,7 +118,7 @@ export const POST = withProjectAccess(async (_request, { params, user, db }) => 
       // review column and both logged the move, so one transition wrote two history rows.
       const oldStatus = task.status;
       const moved = await db.Task.updateOne(
-        { _id: task._id, status: oldStatus },
+        { _id: task._id, status: oldStatus, "execution.runId": { $in: ["", null] }, ...NOT_ARCHIVED },
         { $set: { status: destination } }
       );
       if (moved.modifiedCount === 1) {

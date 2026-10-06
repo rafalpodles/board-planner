@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import { taskPath } from "@/lib/urls";
 import { useOpenTask } from "@/hooks/use-open-task";
+import { EpicProgress } from "@/components/tasks/EpicProgress";
 
 const DEPENDENCY_LABELS: { value: DependencyType; label: string }[] = [
   { value: "blocked_by", label: "Blocked by" },
@@ -250,12 +251,16 @@ export function TaskLinks({
         section.items.length === 0 ? null : (
           <div key={section.heading}>
             <h4 className="text-xs font-medium text-text-muted mb-1">{section.heading}</h4>
+            {section.heading === "Children" && task.progress && task.progress.total > 0 && (
+              <EpicProgress progress={task.progress} className="mb-2" />
+            )}
             <div className="space-y-1.5">
               {section.items.map((r) => (
                 <LinkRow
                   key={`${section.heading}-${r.task._id}`}
                   taskKey={`${projectKey}-${r.task.taskNumber}`}
                   title={r.task.title}
+                  archived={!!(r.task as { archivedAt?: string | null }).archivedAt}
                   status={statusChip(r.task.status)}
                   onOpen={() => navigateToTask(r.task.taskNumber)}
                   onRemove={
@@ -350,12 +355,13 @@ function AddDependencyButton({ onClick }: { onClick: () => void }) {
 interface LinkRowProps {
   taskKey: string;
   title: string;
+  archived?: boolean;
   status: ReactNode;
   onOpen: () => void;
   onRemove?: () => void;
 }
 
-function LinkRow({ taskKey, title, status, onOpen, onRemove }: LinkRowProps) {
+function LinkRow({ taskKey, title, archived, status, onOpen, onRemove }: LinkRowProps) {
   return (
     <div className="group flex items-center gap-3 rounded-lg border border-border bg-bg-input/40 px-3 py-2.5 text-sm">
       <button
@@ -365,7 +371,15 @@ function LinkRow({ taskKey, title, status, onOpen, onRemove }: LinkRowProps) {
       >
         {taskKey}
       </button>
-      <span className="min-w-0 flex-1 truncate">{title}</span>
+      <span className={`min-w-0 flex-1 truncate ${archived ? "text-text-muted" : ""}`}>{title}</span>
+      {archived && (
+        <span
+          data-testid="link-archived"
+          className="shrink-0 rounded bg-bg-input px-1.5 py-0.5 text-[11px] font-medium text-text-muted"
+        >
+          Archived
+        </span>
+      )}
       {status}
       {onRemove && (
         <button

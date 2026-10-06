@@ -1,4 +1,38 @@
 import { ColumnRole, DEFAULT_PROJECT_COLUMNS, IProjectColumn } from "@/types";
+import { hasControlCharacters } from "@/lib/identifiers";
+
+export const MAX_COLUMNS = 12;
+export const MAX_COLUMN_LABEL = 40;
+
+export function slugify(label: string): string {
+  return label
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 32);
+}
+
+/** The id a new column gets: its label's slug, suffixed past every id the board already has */
+export function freeColumnId(label: string, taken: Iterable<string>): string | null {
+  const base = slugify(label);
+  if (!base) return null;
+  const used = new Set(taken);
+  let candidate = base;
+  for (let n = 2; used.has(candidate); n++) candidate = `${base}_${n}`;
+  return candidate;
+}
+
+export function columnLabelOrRefusal(raw: unknown): { label: string } | { error: string } {
+  const label = typeof raw === "string" ? raw.trim() : "";
+  if (!label || label.length > MAX_COLUMN_LABEL) {
+    return { error: `Column labels must be 1-${MAX_COLUMN_LABEL} chars` };
+  }
+  if (hasControlCharacters(label)) {
+    return { error: "A column label cannot contain control characters" };
+  }
+  return { label };
+}
 
 // Structural shape shared by IProjectColumn (server) and ApiProjectColumn (client)
 export type AnyColumn = {
