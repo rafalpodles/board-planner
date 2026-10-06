@@ -193,7 +193,6 @@ export interface ISession {
 }
 
 export interface IEmailChangeToken {
-  ofCurrentAddress?: boolean;
   _id: Types.ObjectId;
   tokenHash: string;
   user: Types.ObjectId | IUser;
@@ -201,6 +200,7 @@ export interface IEmailChangeToken {
   expiresAt: Date;
   usedAt: Date | null;
   createdAt: Date;
+  ofCurrentAddress?: boolean;
 }
 
 export interface IPasswordResetToken {

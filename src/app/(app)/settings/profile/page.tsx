@@ -200,7 +200,12 @@ export default function ProfilePage() {
           </p>
         )}
 
-        <div ref={confirmationStatus} role="status" tabIndex={-1} className="-mt-2 text-sm text-text-muted [overflow-wrap:anywhere]">
+        <div
+          ref={confirmationStatus}
+          role="status"
+          tabIndex={-1}
+          className={confirmationSentTo ? "-mt-2 text-sm text-text-muted [overflow-wrap:anywhere]" : "sr-only"}
+        >
           {confirmationSentTo && (
             <>
               We sent a confirmation link to <strong>{confirmationSentTo}</strong>. Open it to confirm.
