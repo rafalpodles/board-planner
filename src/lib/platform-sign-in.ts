@@ -69,6 +69,23 @@ export async function verifiedEmail(binder: string | null): Promise<string | nul
   return row?.email ?? null;
 }
 
+export async function claimProof(binder: string | null): Promise<string | null> {
+  if (!binder) return null;
+  await connectDB();
+  const row = await PlatformSignIn.findOneAndUpdate(
+    { binderHash: sha256(binder), verifiedAt: { $ne: null }, claimedAt: null, expiresAt: { $gt: new Date() } },
+    { $set: { claimedAt: new Date() } },
+    { returnDocument: "after" }
+  ).lean();
+  return row?.email ?? null;
+}
+
+export async function releaseProof(binder: string | null): Promise<void> {
+  if (!binder) return;
+  await connectDB();
+  await PlatformSignIn.updateOne({ binderHash: sha256(binder) }, { $set: { claimedAt: null } });
+}
+
 export async function endSignIn(binder: string | null): Promise<void> {
   if (!binder) return;
   await connectDB();

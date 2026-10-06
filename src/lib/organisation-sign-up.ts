@@ -8,7 +8,7 @@ import { duplicateKeyField } from "./mongo-errors";
 import { checkOrganisationName } from "./organisation";
 import { RESERVED_SLUGS, forgetOrganisationSlugs, isSlug } from "./organisation-host";
 import { purgeOrganisationRows } from "./organisation-life-cycle";
-import { checkNewAccount } from "./new-account";
+import { checkNewAccount, type NewAccountFields } from "./new-account";
 import { logInstanceAudit } from "./instanceAudit";
 import { Organisation } from "@/models/organisation";
 
@@ -16,6 +16,12 @@ export const SLUG_RULE = "An address is 3 to 40 lowercase letters, digits or hyp
 export const SLUG_UNAVAILABLE = "That address is not available. Try another.";
 
 export type SignUpInput = { name?: unknown; slug?: unknown; username?: unknown; fullName?: unknown; password?: unknown };
+
+export interface SignUp {
+  name: string;
+  slug: string;
+  account: NewAccountFields;
+}
 
 export type SignUpOutcome =
   | { ok: true; organisation: Types.ObjectId; user: Types.ObjectId }
@@ -28,7 +34,7 @@ export function checkSlug(value: unknown): { ok: true; slug: string } | { ok: fa
   return { ok: true, slug };
 }
 
-export async function createOrganisation(email: string, input: SignUpInput): Promise<SignUpOutcome> {
+export function checkSignUp(email: string, input: SignUpInput): { ok: true; value: SignUp } | { ok: false; error: string } {
   const name = checkOrganisationName(input.name);
   if (!name.ok) return { ok: false, error: name.error.replace(/^organisation/, "The organisation's name") };
   if (!name.value) return { ok: false, error: "Give the organisation a name" };
@@ -36,11 +42,20 @@ export async function createOrganisation(email: string, input: SignUpInput): Pro
   if (!slug.ok) return slug;
   const account = checkNewAccount({ username: input.username, fullName: input.fullName, email, password: input.password });
   if (!account.ok) return account;
+  return { ok: true, value: { name: name.value, slug: slug.slug, account: account.value } };
+}
 
+export async function slugTaken(slug: string): Promise<boolean> {
   await connectDB();
+  return (await Organisation.countDocuments({ slug })) > 0;
+}
+
+export async function createOrganisation(signUp: SignUp): Promise<SignUpOutcome> {
+  await connectDB();
+  const password = await bcrypt.hash(signUp.account.password, PASSWORD_COST_FACTOR);
   const organisation = new Types.ObjectId();
   try {
-    await Organisation.create({ _id: organisation, name: name.value, slug: slug.slug });
+    await Organisation.create({ _id: organisation, name: signUp.name, slug: signUp.slug });
   } catch (error) {
     if (duplicateKeyField(error) !== null) return { ok: false, error: SLUG_UNAVAILABLE };
     throw error;
@@ -49,11 +64,11 @@ export async function createOrganisation(email: string, input: SignUpInput): Pro
   try {
     const db = scoped(organisation);
     const user = await db.User.create({
-      username: account.value.username,
-      fullName: account.value.fullName,
-      email: account.value.email,
+      username: signUp.account.username,
+      fullName: signUp.account.fullName,
+      email: signUp.account.email,
       emailVerifiedAt: new Date(),
-      password: await bcrypt.hash(account.value.password, PASSWORD_COST_FACTOR),
+      password,
       role: "admin",
       kind: "human",
     });
@@ -63,7 +78,7 @@ export async function createOrganisation(email: string, input: SignUpInput): Pro
       user: user._id,
       actorUsername: user.username,
       target: user.username,
-      detail: `created the organisation ${slug.slug} at sign-up`,
+      detail: `created the organisation ${signUp.slug} at sign-up`,
     });
     forgetOrganisationSlugs();
     return { ok: true, organisation, user: user._id };

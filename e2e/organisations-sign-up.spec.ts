@@ -10,7 +10,7 @@ const PASSWORD = "initech-password-1";
 async function fillTheForm(page: Page, name: string, fields: { slug?: string; username?: string } = {}) {
   await page.getByRole("button", { name: "Create an organisation" }).click();
   await page.getByLabel("Organisation name").fill(name);
-  if (fields.slug !== undefined) await page.getByLabel("Address").fill(fields.slug);
+  if (fields.slug !== undefined) await page.getByLabel("Organisation address").fill(fields.slug);
   await page.getByLabel("Your name").fill("Bill Lumbergh");
   if (fields.username !== undefined) await page.getByLabel("Username").fill(fields.username);
   await page.getByLabel("Password").fill(PASSWORD);
@@ -22,7 +22,6 @@ test.beforeEach(async () => {
   await seedTwoOrganisations();
 });
 
-// BP-673: a stranger with a proven address gets an organisation of their own and is its administrator
 test.describe("BP-673: creating an organisation from the platform host", () => {
   test("a new address proves itself, names an organisation, and lands in it as its administrator, with the agent catalog seeded", async ({ page }) => {
     const email = freshAddress("bill");
@@ -30,7 +29,7 @@ test.describe("BP-673: creating an organisation from the platform host", () => {
     await expect(page.getByTestId("no-organisations")).toBeVisible();
 
     await fillTheForm(page, "Initech Systems");
-    await expect(page.getByLabel("Address")).toHaveValue("initech-systems");
+    await expect(page.getByLabel("Organisation address")).toHaveValue("initech-systems");
     await expect(page.getByLabel("Username")).toHaveValue(/^bill-/);
     await page.screenshot({ path: "e2e/.artifacts/bp673-form.png" });
     await page.getByRole("button", { name: "Create the organisation" }).click();
@@ -80,6 +79,21 @@ test.describe("BP-673: creating an organisation from the platform host", () => {
     await page.getByLabel("Password").fill(PASSWORD);
     await page.getByRole("button", { name: "Create the organisation" }).click();
     await page.waitForURL(`${originOf("second-shop")}/projects`);
+
+    const [acme, second] = await withDb(async (db) => [
+      await db.collection("users").findOne({ _id: ACME.adminId }),
+      await db.collection("users").findOne({ email, organisation: (await db.collection("organisations").findOne({ slug: "second-shop" }))!._id }),
+    ]);
+    expect(acme).toMatchObject({ email, role: "admin" });
+    expect(second).toMatchObject({ role: "admin", fullName: "Boss" });
+    expect(String(second!._id)).not.toBe(String(ACME.adminId));
+  });
+
+  test("a Polish name becomes a plain address", async ({ page }) => {
+    await provideAddressAndCode(page, freshAddress("krakow"));
+    await page.getByRole("button", { name: "Create an organisation" }).click();
+    await page.getByLabel("Organisation name").fill("Zażółć Gęślą Kraków");
+    await expect(page.getByLabel("Organisation address")).toHaveValue("zazolc-gesla-krakow");
   });
 
   test("it exists on the platform host only, needs a proven address, and an address creates three a day", async ({ request }) => {
@@ -99,6 +113,20 @@ test.describe("BP-673: creating an organisation from the platform host", () => {
       });
       if (n <= 3) expect(again.status(), "a sign-in is spent by the organisation it created").toBe(401);
     }
+  });
+
+  test("a burst of requests on one proven address creates one organisation, not one each", async ({ request }) => {
+    const signedIn = await apiCode(request, freshAddress("burst"));
+    const answers = await Promise.all(
+      Array.from({ length: 6 }, (_, n) =>
+        request.post(`${ORGANISATIONS_API}/api/sign-in/organisation`, {
+          headers: signedIn,
+          data: { name: `Burst ${n}`, slug: `burst-${n}-${Date.now()}`, fullName: "Owner", username: "owner", password: PASSWORD },
+        })
+      )
+    );
+    expect(answers.map((answer) => answer.status()).filter((status) => status === 201)).toHaveLength(1);
+    expect(await withDb((db) => db.collection("organisations").countDocuments({ name: /^Burst / }))).toBe(1);
   });
 
   test("on a phone the form fits the screen", async ({ page }) => {

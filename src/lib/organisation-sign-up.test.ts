@@ -21,7 +21,12 @@ vi.mock("./organisation-host", async (original) => ({
   forgetOrganisationSlugs,
 }));
 
-const { checkSlug, createOrganisation, SLUG_UNAVAILABLE } = await import("./organisation-sign-up");
+const { checkSignUp, checkSlug, createOrganisation: create_, SLUG_UNAVAILABLE } = await import("./organisation-sign-up");
+
+async function createOrganisation(email: string, input: Parameters<typeof checkSignUp>[1]) {
+  const checked = checkSignUp(email, input);
+  return checked.ok ? create_(checked.value) : checked;
+}
 
 const INPUT = { name: " Initech ", slug: "Initech", username: "bill", fullName: "Bill", password: "long-enough-1" };
 
@@ -83,5 +88,21 @@ describe("createOrganisation (BP-673)", () => {
     const organisation = create.mock.calls[0][0]._id;
     expect(purgeOrganisationRows).toHaveBeenCalledWith(organisation);
     expect(deleteOne).toHaveBeenCalledWith({ _id: organisation });
+  });
+
+  it("removes the organisation when its administrator cannot be written either", async () => {
+    userCreate.mockRejectedValue(new Error("users down"));
+
+    await expect(createOrganisation("bill@initech.example", INPUT)).rejects.toThrow("users down");
+    expect(deleteOne).toHaveBeenCalledWith({ _id: create.mock.calls[0][0]._id });
+  });
+
+  it("hashes the password before the organisation exists, so the row waits on nothing slow", async () => {
+    const order: string[] = [];
+    create.mockImplementation(async () => order.push("organisation"));
+    userCreate.mockImplementation(async (row) => (order.push(`user:${row.password.startsWith("$2")}`), { _id: "user-1", ...row }));
+
+    await createOrganisation("bill@initech.example", INPUT);
+    expect(order).toEqual(["organisation", "user:true"]);
   });
 });

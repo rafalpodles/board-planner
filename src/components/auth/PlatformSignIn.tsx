@@ -5,6 +5,7 @@ import Image from "next/image";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { APP_NAME } from "@/lib/brand";
+import { latinFold } from "@/lib/identifiers";
 
 interface Organisation {
   id: string;
@@ -22,9 +23,8 @@ type Step =
   | { name: "create"; email: string; organisations: Organisation[]; passwordSignIn: boolean };
 
 const slugFrom = (name: string) =>
-  name
+  latinFold(name)
     .toLowerCase()
-    .normalize("NFKD")
     .replace(/[^a-z0-9]+/g, "-")
     .slice(0, 40)
     .replace(/^-+|-+$/g, "");
@@ -138,7 +138,15 @@ export function PlatformSignIn() {
     if (step.name !== "organisations" && step.name !== "password") return;
     setError("");
     setPassword("");
-    setUsername(step.email.split("@")[0].toLowerCase().replace(/[^a-z0-9._-]/g, "").slice(0, 32));
+    if (!username) {
+      setUsername(
+        latinFold(step.email.split("@")[0].split("+")[0])
+          .toLowerCase()
+          .replace(/[^a-z0-9._-]/g, "")
+          .replace(/^[._-]+/, "")
+          .slice(0, 32)
+      );
+    }
     setStep({ name: "create", email: step.email, organisations: step.organisations, passwordSignIn: step.passwordSignIn });
   };
 
@@ -296,7 +304,7 @@ export function PlatformSignIn() {
             />
             <div>
               <Input
-                label="Address"
+                label="Organisation address"
                 value={slug}
                 maxLength={40}
                 onChange={(e) => {
@@ -309,7 +317,7 @@ export function PlatformSignIn() {
                 required
               />
               <p id="organisation-address-hint" className="mt-1 break-all text-xs text-text-muted">
-                {slug || "your-team"}.{domain}
+                {slug ? `${slug}.${domain}` : `Letters, digits and hyphens, then .${domain}`}
               </p>
             </div>
             <Input label="Your name" value={fullName} maxLength={80} onChange={(e) => setFullName(e.target.value)} autoComplete="name" required />
@@ -320,7 +328,14 @@ export function PlatformSignIn() {
             </Button>
             <button
               type="button"
-              onClick={() => setStep({ name: "organisations", email: step.email, organisations: step.organisations, passwordSignIn: step.passwordSignIn })}
+              onClick={() => {
+                setError("");
+                setStep(
+                  step.organisations.length === 1
+                    ? { name: "password", email: step.email, organisation: step.organisations[0], organisations: step.organisations, passwordSignIn: step.passwordSignIn }
+                    : { name: "organisations", email: step.email, organisations: step.organisations, passwordSignIn: step.passwordSignIn }
+                );
+              }}
               className="focus-ring w-full text-sm text-text-muted underline"
             >
               Back
