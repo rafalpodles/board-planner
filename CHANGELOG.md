@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.6.0](https://github.com/rafalpodles/board-planner/compare/v1.5.0...v1.6.0) (2026-10-06)
+
+
+### Features
+
+* a Confirm this address button on Profile proves the address an account already has (BP-928) ([#584](https://github.com/rafalpodles/board-planner/issues/584)) ([d636af2](https://github.com/rafalpodles/board-planner/commit/d636af25b430dc578debca1611104bd615a94ec2))
+* a proven address creates an organisation on its own subdomain from the platform host, as its first administrator (BP-673) ([#582](https://github.com/rafalpodles/board-planner/issues/582)) ([adc9179](https://github.com/rafalpodles/board-planner/commit/adc9179e28348cbfa359c1c55a67af1bfdcbd5c6))
+* each hosted organisation pulls its licence from the licence service daily, through the push's own checks (BP-897) ([#581](https://github.com/rafalpodles/board-planner/issues/581)) ([39858c4](https://github.com/rafalpodles/board-planner/commit/39858c43e6d08b9ff7e462d619b3f3c2f9365ff2))
+* MCP adds board setup, archive and owner-only delete, epic progress and a repository sync (BP-914 to BP-917) ([#575](https://github.com/rafalpodles/board-planner/issues/575)) ([f5d1429](https://github.com/rafalpodles/board-planner/commit/f5d14290adf9e6d4f0d74b6182e8bf778ca9fa77))
+* sign in on the platform host by e-mail first, then the organisation's password, handed to its own host by a single-use code (BP-919) ([#578](https://github.com/rafalpodles/board-planner/issues/578)) ([4e368e1](https://github.com/rafalpodles/board-planner/commit/4e368e195d90a48eca96b9f2d020240491404d3e))
+* the app names its organisation in the sidebar and on Settings → Organisation, where an admin renames it (BP-920) ([#577](https://github.com/rafalpodles/board-planner/issues/577)) ([930e687](https://github.com/rafalpodles/board-planner/commit/930e6874a6a943e577a09ac2eef879a288de4721))
+
+
+### Bug Fixes
+
+* **deps:** proxy-addr 2.0.8 and source-map-js 1.2.2 for two advisories published today (BP-925) ([#580](https://github.com/rafalpodles/board-planner/issues/580)) ([0c5628c](https://github.com/rafalpodles/board-planner/commit/0c5628c32dce60f45d878a5684c8d95737238430))
+* public pages on an address with no organisation or a suspended one, refused uploads, the banners' layout and the export, from the Phase 2 UI review (BP-921) ([#583](https://github.com/rafalpodles/board-planner/issues/583)) ([341bfb8](https://github.com/rafalpodles/board-planner/commit/341bfb8ceb595c7173ef3b005cdc0360746131e2))
+
 ## [1.5.0](https://github.com/rafalpodles/board-planner/compare/v1.4.0...v1.5.0) (2026-10-05)
 
 
