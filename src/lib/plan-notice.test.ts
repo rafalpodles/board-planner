@@ -20,6 +20,12 @@ describe("planNotice (BP-930)", () => {
     expect(planNotice({ plan: "pro", planEndsAt: day(0.1) }, NOW)).toMatchObject({ kind: "ending", daysLeft: 1 });
   });
 
+  it("at the very instant it ends a licence is still valid, one millisecond later it is in grace", () => {
+    const ends = new Date(NOW).toISOString();
+    expect(planNotice({ plan: "pro", planEndsAt: ends }, NOW)).toMatchObject({ kind: "ending", daysLeft: 0 });
+    expect(planNotice({ plan: "pro", planEndsAt: ends }, NOW + 1)).toMatchObject({ kind: "grace" });
+  });
+
   it("a Pro licence past its end is in grace for 14 days", () => {
     const ended = day(-3);
     expect(planNotice({ plan: "pro", planEndsAt: ended }, NOW)).toEqual({ kind: "grace", endedAt: ended, graceEndsAt: day(11) });

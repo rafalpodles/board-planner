@@ -35,8 +35,9 @@ export function PlanBadge({ compact }: { compact: boolean }) {
       <Link
         href={isAdmin && action ? UPGRADE_HREF : "/settings/organisation"}
         title={title}
+        aria-label={title}
         data-testid="plan-badge"
-        className={`focus-ring mx-auto mb-2 block rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-semibold ${notice.kind === "pro" ? "text-primary" : tone}`}
+        className={`focus-ring mx-auto mb-2 block rounded-full bg-primary/15 px-2 py-1 text-[11px] font-semibold ${notice.kind === "pro" ? "text-primary" : tone}`}
       >
         {name}
       </Link>
@@ -58,7 +59,7 @@ export function PlanBadge({ compact }: { compact: boolean }) {
         <Link
           href={UPGRADE_HREF}
           data-testid="plan-badge-action"
-          className="focus-ring mt-2 flex min-h-[36px] w-full items-center justify-center rounded-md bg-primary-solid px-3 text-xs font-semibold text-white transition-colors hover:bg-primary-solid-hover md:min-h-0 md:py-1.5"
+          className="focus-ring mt-2 flex min-h-[44px] w-full items-center justify-center rounded-md bg-primary-solid px-3 text-xs font-semibold text-white transition-colors hover:bg-primary-solid-hover md:min-h-0 md:py-1.5"
         >
           {action}
         </Link>

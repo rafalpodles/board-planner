@@ -62,5 +62,14 @@ describe("PlanBadge (BP-930)", () => {
     const badge = screen.getByTestId("plan-badge");
     expect(badge.textContent).toBe("Pro");
     expect(badge.getAttribute("title")).toMatch(/^Pro plan, ends /);
+    expect(badge.getAttribute("aria-label")).toBe(badge.getAttribute("title"));
+    expect(badge.getAttribute("href")).toBe("/settings/licence");
+  });
+
+  it("in a collapsed sidebar a member is never sent to the licence page", () => {
+    state.isAdmin = false;
+    state.organisation = { plan: "free", planEndsAt: null };
+    render(<PlanBadge compact />);
+    expect(screen.getByTestId("plan-badge").getAttribute("href")).toBe("/settings/organisation");
   });
 });
