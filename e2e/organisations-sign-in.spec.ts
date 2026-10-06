@@ -214,6 +214,16 @@ test.describe("BP-919: signing in on the platform host, e-mail first", () => {
     expect(refused.status()).toBe(401);
   });
 
+  test("an address an administrator vouched for proves it inside that organisation only", async ({ page }) => {
+    const email = freshAddress("vouched");
+    await giveAddress(ACME, email);
+    await giveAddress(GLOBEX, email);
+    await withDb((db) => db.collection("users").updateOne({ _id: GLOBEX.adminId }, { $set: { emailVouchedByAdmin: true } }));
+
+    await provideAddressAndCode(page, email);
+    await expect(page.getByText("Signing in to Acme")).toBeVisible();
+  });
+
   test("the password step offers the organisation's own page for every other way in, and a way back", async ({ page }) => {
     const email = freshAddress("other");
     await giveAddress(ACME, email);

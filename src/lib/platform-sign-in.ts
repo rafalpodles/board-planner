@@ -5,7 +5,7 @@ import { scoped, type ScopedDb } from "./db-scope";
 import { normaliseEmail } from "./email";
 import { randomToken, sha256 } from "./oauth";
 import { acrossOrganisations } from "./organisation-wall";
-import { organisationOrigin } from "./organisation-host";
+import { organisationDomain, organisationOrigin } from "./organisation-host";
 import { Organisation } from "@/models/organisation";
 import { PlatformSignIn } from "@/models/platformSignIn";
 import { User } from "@/models/user";
@@ -75,10 +75,10 @@ export async function endSignIn(binder: string | null): Promise<void> {
   await PlatformSignIn.deleteOne({ binderHash: sha256(binder) });
 }
 
-// An address an administrator typed onto an account proves nothing, so it neither lists nor opens that organisation
 const provenAccount = (email: string) => ({
   email: normaliseEmail(email),
   emailVerifiedAt: { $ne: null },
+  emailVouchedByAdmin: { $ne: true },
   kind: { $ne: "machine" as const },
   deactivatedAt: null,
 });
@@ -105,10 +105,15 @@ export async function organisationsFor(email: string): Promise<PlatformOrganisat
   const listed = await Promise.all(
     rows.map(async (row) => {
       const origin = await organisationOrigin(row._id);
-      return origin ? { id: String(row._id), name: row.name, slug: row.slug ?? null, origin } : null;
+      return origin && onThePlatformsSite(origin) ? { id: String(row._id), name: row.name, slug: row.slug ?? null, origin } : null;
     })
   );
   return listed.filter((row): row is PlatformOrganisation => row !== null);
+}
+
+function onThePlatformsSite(origin: string): boolean {
+  const domain = organisationDomain();
+  return !!domain && new URL(origin).hostname.endsWith(`.${domain}`);
 }
 
 export async function servedOrganisationById(id: unknown): Promise<PlatformOrganisation | null> {
@@ -117,7 +122,7 @@ export async function servedOrganisationById(id: unknown): Promise<PlatformOrgan
   const row = await Organisation.findOne({ _id: new Types.ObjectId(id), ...servedOrganisation }).select("name slug").lean();
   if (!row) return null;
   const origin = await organisationOrigin(row._id);
-  return origin ? { id: String(row._id), name: row.name, slug: row.slug ?? null, origin } : null;
+  return origin && onThePlatformsSite(origin) ? { id: String(row._id), name: row.name, slug: row.slug ?? null, origin } : null;
 }
 
 export async function accountByEmail(db: ScopedDb, email: string) {

@@ -16,7 +16,6 @@ function redirectTo(origin: string, path: string, cookies: string[] = []) {
   return response;
 }
 
-// The legitimate hop is a navigation from the platform host, a sibling; a page elsewhere must not plant somebody else's session
 function arrivedFromThisSite(request: Request): boolean {
   const site = request.headers.get("sec-fetch-site");
   const mode = request.headers.get("sec-fetch-mode");
@@ -40,8 +39,6 @@ async function handOff(request: Request) {
   const origin = await originFor(db);
   if (!origin) return NextResponse.json({ error: "This organisation has no address" }, { status: 500 });
 
-  // With no address there is no source, and one shared bucket would let anybody stop every handoff;
-  // the code is 32 random bytes, which no budget is needed to protect
   const clientIp = getClientIp(request);
   const perSource = clientIp ? sourceKey(clientIp, "handoff") : null;
   if (perSource && (await isRateLimited(perSource, FAILED_HANDOFFS_PER_SOURCE))) {

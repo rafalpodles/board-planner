@@ -203,7 +203,9 @@ export function PlatformSignIn() {
           <div className="space-y-3">
             {step.organisations.length === 0 ? (
               <p className="text-sm" data-testid="no-organisations">
-                <strong className="break-all">{step.email}</strong> has no account in any organisation yet.
+                No organisation has confirmed <strong className="break-all">{step.email}</strong> as an account&apos;s
+                address. If you have an account, sign in on your organisation&apos;s own address and confirm your
+                e-mail there.
               </p>
             ) : (
               <>
