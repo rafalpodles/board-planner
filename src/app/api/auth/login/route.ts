@@ -3,7 +3,7 @@ import { passwordSignInEnabled, passwordSignInOff } from "@/lib/password-sign-in
 import { readJsonBody } from "@/lib/request-body";
 import { getClientIp, verifyCredentials } from "@/lib/auth";
 import { isDatabaseUnreachable } from "@/lib/db-errors";
-import { databaseUnavailable, hostNotFound } from "@/lib/middleware";
+import { databaseUnavailable, hostNotFound, refusedHost } from "@/lib/middleware";
 import { lockoutKey, sourceKey, withLockout } from "@/lib/rate-limit";
 import { scopedForRequest, organisationOf } from "@/lib/db-scope";
 import {
@@ -24,7 +24,7 @@ export async function POST(request: Request) {
     if (isDatabaseUnreachable(e)) return databaseUnavailable();
     throw e;
   }
-  if (!db) return hostNotFound();
+  if (!db) return refusedHost(request);
 
   const read = await readJsonBody<{ username?: unknown; password?: unknown }>(request);
   if (!read.ok) return read.response;

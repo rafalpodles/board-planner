@@ -19,7 +19,7 @@ import { JOIN_COOKIE, heldSignUp, spendAcceptance } from "@/lib/oidc/flow";
 import { applyAdminGroup } from "@/lib/oidc/admin-group";
 import { providerById } from "@/lib/oidc/providers";
 import { signUpOpenTo } from "@/lib/sign-up-domains";
-import { hostNotFound } from "@/lib/middleware";
+import { hostNotFound, refusedHost } from "@/lib/middleware";
 
 const ATTEMPTS_PER_SOURCE = 20;
 const EXPIRED = "That sign-in has expired. Sign in again.";
@@ -28,7 +28,7 @@ const CLOSED = "Sign-up is no longer open to that address. Ask an administrator 
 /** Who a verified sign-in in an allowed domain is about to become, read without spending anything. */
 export async function GET(request: Request) {
   const db = await scopedForRequest(request);
-  if (!db) return hostNotFound();
+  if (!db) return refusedHost(request);
   const held = await heldSignUp(db, readFlowCookie(request, JOIN_COOKIE));
   if (!held?.claims) return NextResponse.json({ error: EXPIRED }, { status: 400 });
   return NextResponse.json({
@@ -40,7 +40,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const db = await scopedForRequest(request);
-  if (!db) return hostNotFound();
+  if (!db) return refusedHost(request);
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
 

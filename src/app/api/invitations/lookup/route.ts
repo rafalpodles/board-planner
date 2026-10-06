@@ -1,4 +1,4 @@
-import { hostNotFound } from "@/lib/middleware";
+import { hostNotFound, refusedHost } from "@/lib/middleware";
 import { NextResponse } from "next/server";
 import { scopedForRequest } from "@/lib/db-scope";
 import { readJsonBody } from "@/lib/request-body";
@@ -13,7 +13,7 @@ const LOOKUPS_PER_SOURCE = 60;
 
 export async function POST(request: Request) {
   const db = await scopedForRequest(request);
-  if (!db) return hostNotFound();
+  if (!db) return refusedHost(request);
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
 

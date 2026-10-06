@@ -1,4 +1,4 @@
-import { hostNotFound } from "@/lib/middleware";
+import { hostNotFound, refusedHost } from "@/lib/middleware";
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { scopedForRequest } from "@/lib/db-scope";
@@ -25,7 +25,7 @@ const REFUSALS: Record<string, string> = {
 // inbox would otherwise confirm an address nobody there asked for (BP-359)
 export async function POST(request: Request) {
   const db = await scopedForRequest(request);
-  if (!db) return hostNotFound();
+  if (!db) return refusedHost(request);
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
 

@@ -1,4 +1,4 @@
-import { hostNotFound } from "@/lib/middleware";
+import { hostNotFound, refusedHost } from "@/lib/middleware";
 import { NextResponse } from "next/server";
 import { readJsonBody } from "@/lib/request-body";
 import { getAuthUser, getClientIp } from "@/lib/auth";
@@ -35,7 +35,7 @@ const STARTS_PER_SOURCE = 30;
 
 export async function POST(request: Request, { params }: { params: Promise<{ provider: string }> }) {
   const db = await scopedForRequest(request);
-  if (!db) return hostNotFound();
+  if (!db) return refusedHost(request);
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
 

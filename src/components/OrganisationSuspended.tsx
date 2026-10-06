@@ -8,7 +8,7 @@ export function OrganisationSuspended() {
   return (
     <div className="flex items-center justify-center min-h-screen px-4">
       <div role="status" className="w-full max-w-sm text-center">
-        <h1 ref={heading} tabIndex={-1} className="text-lg font-semibold mb-2 outline-none">
+        <h1 ref={heading} tabIndex={-1} className="text-lg font-semibold mb-2">
           This organisation is suspended
         </h1>
         <p className="text-sm text-text">
