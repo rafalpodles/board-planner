@@ -10,6 +10,7 @@ export interface OrganisationSummary {
   cloud: boolean;
   address: string | null;
   plan: "free" | "pro";
+  planEndsAt: string | null;
   members?: number;
   projects?: number;
 }

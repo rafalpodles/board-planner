@@ -19,6 +19,7 @@ async function describe(db: ScopedDb, admin: boolean) {
     cloud: organisationDomain() !== null,
     address: origin ? new URL(origin).host : null,
     plan: organisation.entitlements.plan,
+    planEndsAt: organisation.entitlements.plan === "pro" ? organisation.entitlements.expiresAt?.toISOString() ?? null : null,
     ...(counts ? { members: counts[0], projects: counts[1] } : {}),
   };
 }

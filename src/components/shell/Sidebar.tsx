@@ -14,6 +14,7 @@ import { useMediaQuery } from "@/hooks/use-media-query";
 import { isNavItemActive } from "@/lib/nav-active";
 import { useProjects } from "@/hooks/use-projects";
 import { useOrganisation } from "@/hooks/use-organisation";
+import { PlanBadge } from "./PlanBadge";
 import { ProjectTree } from "./ProjectTree";
 import { ProjectRail } from "./ProjectRail";
 import { APP_NAME } from "@/lib/brand";
@@ -401,6 +402,8 @@ export function Sidebar({
           />
         )}
       </nav>
+
+      <PlanBadge compact={compact} />
 
       <div className="px-2.5 pb-2.5">
         <NavItem

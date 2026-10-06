@@ -173,3 +173,56 @@ test.describe("BP-891: each organisation carries its own licence", () => {
     expect((await push(request, ghost, keyFor(ghost)).send()).status()).toBe(404);
   });
 });
+
+// BP-930: the sidebar says which plan this organisation is on, and until when
+test.describe("BP-930: the plan badge above the agents", () => {
+  const badge = (page: Page) => page.getByTestId("plan-badge");
+
+  async function openApp(page: Page, who: OrganisationFixture) {
+    await signInOn(page.context(), who);
+    await page.goto(`${originOf(who)}/projects`);
+    await expect(badge(page)).toBeVisible();
+  }
+
+  test("Free offers an administrator Upgrade, which opens the licence page", async ({ page }) => {
+    await openApp(page, ACME);
+    await expect(badge(page)).toContainText("Free");
+    await page.screenshot({ path: "e2e/.artifacts/bp930-free.png" });
+    await page.getByTestId("plan-badge-action").click();
+    await page.waitForURL(/\/settings\/licence$/);
+    await expect(page.getByTestId("licence-free")).toBeVisible();
+  });
+
+  test("Pro with more than 30 days left says the plan is active and offers nothing to renew", async ({ page, request }) => {
+    expect((await push(request, ACME, keyFor(ACME)).send()).status()).toBe(200);
+    await openApp(page, ACME);
+    await expect(badge(page)).toContainText("Pro");
+    await expect(page.getByTestId("plan-badge-detail")).toHaveText("Plan active");
+    await expect(page.getByTestId("plan-badge-action")).toHaveCount(0);
+  });
+
+  test("Pro ending in 12 days counts them and offers Renew", async ({ page, request }) => {
+    const ending = e2eLicence({ customer: "acme customer", organisation: ACME.organisation.toHexString(), expiresInDays: 12 });
+    expect((await push(request, ACME, ending).send()).status()).toBe(200);
+    await openApp(page, ACME);
+    await expect(page.getByTestId("plan-badge-detail")).toContainText(/1[23] days left/);
+    await expect(page.getByTestId("plan-badge-action")).toHaveText("Renew");
+    await page.screenshot({ path: "e2e/.artifacts/bp930-ending.png" });
+    await page.setViewportSize({ width: 390, height: 780 });
+    await page.getByRole("button", { name: "Open navigation" }).click();
+    await expect(badge(page)).toBeVisible();
+    await expect(page.getByTestId("plan-badge-action")).toBeVisible();
+    await expect.poll(async () => (await badge(page).boundingBox())?.x).toBeGreaterThanOrEqual(0);
+    await page.screenshot({ path: "e2e/.artifacts/bp930-ending-phone.png" });
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.screenshot({ path: "e2e/.artifacts/bp930-ending-phone-dark.png" });
+  });
+
+  test("a licence past its end shows the grace period in force", async ({ page, request }) => {
+    const lapsed = e2eLicence({ customer: "acme customer", organisation: ACME.organisation.toHexString(), expiresInDays: -3 });
+    expect((await push(request, ACME, lapsed).send()).status()).toBe(200);
+    await openApp(page, ACME);
+    await expect(page.getByTestId("plan-badge-detail")).toContainText(/^Ended .* · until /);
+    await expect(page.getByTestId("plan-badge-action")).toHaveText("Renew");
+  });
+});
