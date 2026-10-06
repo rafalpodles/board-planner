@@ -38,11 +38,12 @@ async function codeSentTo(email: string, previous = 0): Promise<string> {
 }
 
 async function provideAddressAndCode(page: Page, email: string) {
+  const before = (await mailFor(email)).length;
   await page.goto(`${ORGANISATIONS_PLATFORM_ORIGIN}/`);
   await page.getByLabel("E-mail address").fill(email);
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByText(`We sent a code to ${email}`)).toBeVisible();
-  await page.getByLabel("Code").fill(await codeSentTo(email));
+  await page.getByLabel("Code").fill(await codeSentTo(email, before));
   await page.getByRole("button", { name: "Continue" }).click();
 }
 
