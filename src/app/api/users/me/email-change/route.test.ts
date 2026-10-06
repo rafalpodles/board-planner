@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { getAuthUser, pendingEmailChange, cancelEmailChange, issueEmailChange, sendAddressConfirmation, isEmailConfigured, originFor, countAttempt, findById } = vi.hoisted(() => ({
+const { getAuthUser, pendingEmailChange, cancelEmailChange, issueEmailChange, sendAddressConfirmation, isEmailConfigured, originFor, countAttempt } = vi.hoisted(() => ({
   getAuthUser: vi.fn(),
   pendingEmailChange: vi.fn(),
   cancelEmailChange: vi.fn(),
@@ -9,7 +9,6 @@ const { getAuthUser, pendingEmailChange, cancelEmailChange, issueEmailChange, se
   isEmailConfigured: vi.fn(),
   originFor: vi.fn(),
   countAttempt: vi.fn(),
-  findById: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
@@ -41,7 +40,6 @@ beforeEach(() => {
   originFor.mockResolvedValue("https://app.example.com");
   countAttempt.mockResolvedValue(1);
   issueEmailChange.mockResolvedValue("cpe_token");
-  void findById;
 });
 
 // BP-359 review: like PUT /api/users/me, the recovery address is not a machine credential's business
@@ -89,7 +87,7 @@ describe("POST /api/users/me/email-change (BP-928)", () => {
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ sent: "pat@example.com" });
-    expect(issueEmailChange).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "u1", "pat@example.com");
+    expect(issueEmailChange).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "u1", "pat@example.com", { ofCurrentAddress: true });
     expect(sendAddressConfirmation).toHaveBeenCalledWith({
       email: "pat@example.com",
       username: "pat",

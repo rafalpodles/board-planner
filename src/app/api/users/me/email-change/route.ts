@@ -47,7 +47,7 @@ export const POST = withAuth(async (_request, { user, db }) => {
     return NextResponse.json({ error: "Too many confirmation emails. Try again in 15 minutes." }, { status: 429 });
   }
 
-  const token = await issueEmailChange(db, user._id, user.email);
+  const token = await issueEmailChange(db, user._id, user.email, { ofCurrentAddress: true });
   void sendAddressConfirmation({
     email: user.email,
     username: user.username,

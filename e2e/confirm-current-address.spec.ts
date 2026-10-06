@@ -1,7 +1,7 @@
 import { test, expect, type Page, type TestInfo } from "@playwright/test";
 import mongoose from "mongoose";
 import { E2E_MONGODB_URI, MEMBER_ID, seed } from "./seed";
-import { signIn } from "./session";
+import { signIn, signInContext } from "./session";
 import { bodyOf, confirmLinkIn, mailFor } from "./mailbox";
 
 /**
@@ -46,6 +46,7 @@ test("an address with no proof is confirmed by the link sent to it, and the addr
 
   await page.getByRole("button", { name: "Confirm this address" }).click();
   await expect(page.getByRole("status").filter({ hasText: `We sent a confirmation link to ${address}` })).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: `We sent a confirmation link to ${address}` })).toBeFocused();
   await expect(page.getByRole("button", { name: "Confirm this address" })).toHaveCount(0);
   await page.screenshot({ path: "e2e/.artifacts/bp928-profile-sent.png" });
 
@@ -73,7 +74,7 @@ test("an address with no proof is confirmed by the link sent to it, and the addr
   expect(audited).toBe(1);
 });
 
-test("an address already confirmed by its owner offers no button and sends no mail", async ({ page, request }, testInfo) => {
+test("an address already confirmed by its owner offers no button and sends no mail", async ({ page }, testInfo) => {
   const address = addressFor(testInfo);
   await withAddress(address, { emailVerifiedAt: new Date(), emailVouchedByAdmin: false });
   await openProfile(page, address);
@@ -83,7 +84,6 @@ test("an address already confirmed by its owner offers no button and sends no ma
   const direct = await page.request.post("/api/users/me/email-change", { data: {}, headers: { "sec-fetch-site": "same-origin" } });
   expect(await direct.json()).toEqual({ confirmed: true });
   expect(await mailFor(address)).toHaveLength(0);
-  void request;
 });
 
 test("an administrator's word for an address is not the owner's, so the button is there and replaces it", async ({ page, browser }, testInfo) => {
@@ -99,7 +99,31 @@ test("an administrator's word for an address is not the owner's, so the button i
   await expect(inbox.getByRole("heading", { name: "Address confirmed" })).toBeVisible();
   await inbox.close();
 
-  expect((await storedMember())?.emailVouchedByAdmin).toBe(false);
+  const member = await storedMember();
+  expect(member?.emailVouchedByAdmin).toBe(false);
+  expect(member?.emailVerifiedAt).toBeInstanceOf(Date);
+});
+
+test("a link for the address an account had proves nothing once an administrator has moved the address", async ({ page, browser }, testInfo) => {
+  const address = addressFor(testInfo);
+  await withAddress(address, { emailVerifiedAt: null });
+  await openProfile(page, address);
+  await page.getByRole("button", { name: "Confirm this address" }).click();
+  await expect.poll(async () => (await mailFor(address)).length, { timeout: 30_000 }).toBe(1);
+  const link = confirmLinkIn((await mailFor(address))[0]);
+
+  const admin = await browser.newContext();
+  await signInContext(admin, "admin");
+  const moved = await admin.request.put(`/api/users/${MEMBER_ID}`, { headers: { "sec-fetch-site": "same-origin" }, data: { email: `moved-${address}` } });
+  expect(moved.status()).toBe(200);
+  await admin.close();
+
+  const inbox = await browser.newPage();
+  await inbox.goto(link);
+  await inbox.getByRole("button", { name: "Confirm this address" }).click();
+  await expect(inbox.getByText("This link is not valid")).toBeVisible();
+  await inbox.close();
+  expect((await storedMember())?.email).toBe(`moved-${address}`);
 });
 
 test("a change of address waiting for its link keeps the button away, and the endpoint refuses", async ({ page }, testInfo) => {

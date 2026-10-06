@@ -22,8 +22,6 @@ import {
   withLockout,
 } from "@/lib/rate-limit";
 
-// Confirmation mails one account may send in the rate limiter's window
-
 export const PUT = withAuth(async (request, { user, db }) => {
   await connectDB();
 

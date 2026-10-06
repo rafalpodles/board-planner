@@ -11,7 +11,8 @@ export const CONFIRMATIONS_PER_WINDOW = 3;
 export async function issueEmailChange(
   db: ScopedDb,
   userId: Types.ObjectId | string,
-  email: string
+  email: string,
+  { ofCurrentAddress = false }: { ofCurrentAddress?: boolean } = {}
 ): Promise<string> {
   await connectDB();
   const token = randomToken(EMAIL_CHANGE_TOKEN_PREFIX);
@@ -21,12 +22,13 @@ export async function issueEmailChange(
     email,
     tokenHash: sha256(token),
     expiresAt: new Date(Date.now() + EMAIL_CHANGE_TTL_MS),
+    ofCurrentAddress,
   });
   return token;
 }
 
 export type EmailChangeOutcome =
-  | { ok: true; userId: Types.ObjectId; email: string; claimedAt: Date }
+  | { ok: true; userId: Types.ObjectId; email: string; claimedAt: Date; ofCurrentAddress: boolean }
   | { ok: false; reason: "unknown" | "expired" | "used" };
 
 /** Claimed atomically, like a reset link: two clicks arriving together cannot both win. */
@@ -40,7 +42,9 @@ export async function consumeEmailChange(db: ScopedDb, token: string): Promise<E
     { $set: { usedAt: now } },
     { returnDocument: "after" }
   );
-  if (claimed) return { ok: true, userId: claimed.user as Types.ObjectId, email: claimed.email, claimedAt: now };
+  if (claimed) {
+    return { ok: true, userId: claimed.user as Types.ObjectId, email: claimed.email, claimedAt: now, ofCurrentAddress: !!claimed.ofCurrentAddress };
+  }
 
   const existing = await db.EmailChangeToken.findOne({ tokenHash }).lean();
   if (!existing) return { ok: false, reason: "unknown" };
