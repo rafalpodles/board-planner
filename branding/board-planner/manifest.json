@@ -1,0 +1,460 @@
+[
+  {
+    "file": "logos/mark-color.svg",
+    "title": "Primary mark",
+    "category": "Logos",
+    "width": 512,
+    "height": 512,
+    "format": "SVG",
+    "usage": "Avatars, application identity and small placements.",
+    "preview": "light"
+  },
+  {
+    "file": "logos/mark-color.png",
+    "title": "Primary mark",
+    "category": "Logos",
+    "width": 512,
+    "height": 512,
+    "format": "PNG",
+    "usage": "Avatars, application identity and small placements.",
+    "preview": "light"
+  },
+  {
+    "file": "logos/mark-navy.svg",
+    "title": "Navy mark",
+    "category": "Logos",
+    "width": 512,
+    "height": 512,
+    "format": "SVG",
+    "usage": "Avatars, application identity and small placements.",
+    "preview": "light"
+  },
+  {
+    "file": "logos/mark-navy.png",
+    "title": "Navy mark",
+    "category": "Logos",
+    "width": 512,
+    "height": 512,
+    "format": "PNG",
+    "usage": "Avatars, application identity and small placements.",
+    "preview": "light"
+  },
+  {
+    "file": "logos/mark-white.svg",
+    "title": "Reverse mark",
+    "category": "Logos",
+    "width": 512,
+    "height": 512,
+    "format": "SVG",
+    "usage": "Avatars, application identity and small placements.",
+    "preview": "dark"
+  },
+  {
+    "file": "logos/mark-white.png",
+    "title": "Reverse mark",
+    "category": "Logos",
+    "width": 512,
+    "height": 512,
+    "format": "PNG",
+    "usage": "Avatars, application identity and small placements.",
+    "preview": "dark"
+  },
+  {
+    "file": "logos/wordmark-navy.svg",
+    "title": "Horizontal logo · navy",
+    "category": "Logos",
+    "width": 760,
+    "height": 128,
+    "format": "SVG",
+    "usage": "Website headers, documents and presentations. Transparent background.",
+    "preview": "light"
+  },
+  {
+    "file": "logos/wordmark-navy.png",
+    "title": "Horizontal logo · navy",
+    "category": "Logos",
+    "width": 760,
+    "height": 128,
+    "format": "PNG",
+    "usage": "Website headers, documents and presentations. Transparent background.",
+    "preview": "light"
+  },
+  {
+    "file": "logos/stacked-navy.svg",
+    "title": "Stacked logo · navy",
+    "category": "Logos",
+    "width": 560,
+    "height": 304,
+    "format": "SVG",
+    "usage": "Centered layouts and compact covers. Transparent background.",
+    "preview": "light"
+  },
+  {
+    "file": "logos/stacked-navy.png",
+    "title": "Stacked logo · navy",
+    "category": "Logos",
+    "width": 560,
+    "height": 304,
+    "format": "PNG",
+    "usage": "Centered layouts and compact covers. Transparent background.",
+    "preview": "light"
+  },
+  {
+    "file": "logos/wordmark-white.svg",
+    "title": "Horizontal logo · white",
+    "category": "Logos",
+    "width": 760,
+    "height": 128,
+    "format": "SVG",
+    "usage": "Website headers, documents and presentations. Transparent background.",
+    "preview": "dark"
+  },
+  {
+    "file": "logos/wordmark-white.png",
+    "title": "Horizontal logo · white",
+    "category": "Logos",
+    "width": 760,
+    "height": 128,
+    "format": "PNG",
+    "usage": "Website headers, documents and presentations. Transparent background.",
+    "preview": "dark"
+  },
+  {
+    "file": "logos/stacked-white.svg",
+    "title": "Stacked logo · white",
+    "category": "Logos",
+    "width": 560,
+    "height": 304,
+    "format": "SVG",
+    "usage": "Centered layouts and compact covers. Transparent background.",
+    "preview": "dark"
+  },
+  {
+    "file": "logos/stacked-white.png",
+    "title": "Stacked logo · white",
+    "category": "Logos",
+    "width": 560,
+    "height": 304,
+    "format": "PNG",
+    "usage": "Centered layouts and compact covers. Transparent background.",
+    "preview": "dark"
+  },
+  {
+    "file": "icons/app-16.png",
+    "title": "App icon · 16",
+    "category": "Icons",
+    "width": 16,
+    "height": 16,
+    "format": "PNG",
+    "usage": "App icons, favicons and avatars.",
+    "preview": "light"
+  },
+  {
+    "file": "icons/app-32.png",
+    "title": "App icon · 32",
+    "category": "Icons",
+    "width": 32,
+    "height": 32,
+    "format": "PNG",
+    "usage": "App icons, favicons and avatars.",
+    "preview": "light"
+  },
+  {
+    "file": "icons/app-48.png",
+    "title": "App icon · 48",
+    "category": "Icons",
+    "width": 48,
+    "height": 48,
+    "format": "PNG",
+    "usage": "App icons, favicons and avatars.",
+    "preview": "light"
+  },
+  {
+    "file": "icons/app-64.png",
+    "title": "App icon · 64",
+    "category": "Icons",
+    "width": 64,
+    "height": 64,
+    "format": "PNG",
+    "usage": "App icons, favicons and avatars.",
+    "preview": "light"
+  },
+  {
+    "file": "icons/app-128.png",
+    "title": "App icon · 128",
+    "category": "Icons",
+    "width": 128,
+    "height": 128,
+    "format": "PNG",
+    "usage": "App icons, favicons and avatars.",
+    "preview": "light"
+  },
+  {
+    "file": "icons/app-180.png",
+    "title": "App icon · 180",
+    "category": "Icons",
+    "width": 180,
+    "height": 180,
+    "format": "PNG",
+    "usage": "Apple touch icon",
+    "preview": "light"
+  },
+  {
+    "file": "icons/app-192.png",
+    "title": "App icon · 192",
+    "category": "Icons",
+    "width": 192,
+    "height": 192,
+    "format": "PNG",
+    "usage": "Web app manifest icon",
+    "preview": "light"
+  },
+  {
+    "file": "icons/app-256.png",
+    "title": "App icon · 256",
+    "category": "Icons",
+    "width": 256,
+    "height": 256,
+    "format": "PNG",
+    "usage": "App icons, favicons and avatars.",
+    "preview": "light"
+  },
+  {
+    "file": "icons/app-512.png",
+    "title": "App icon · 512",
+    "category": "Icons",
+    "width": 512,
+    "height": 512,
+    "format": "PNG",
+    "usage": "Web app manifest icon",
+    "preview": "light"
+  },
+  {
+    "file": "icons/app-1024.png",
+    "title": "App icon · 1024",
+    "category": "Icons",
+    "width": 1024,
+    "height": 1024,
+    "format": "PNG",
+    "usage": "App icons, favicons and avatars.",
+    "preview": "light"
+  },
+  {
+    "file": "icons/favicon.ico",
+    "title": "Multi-size favicon",
+    "category": "Icons",
+    "format": "ICO",
+    "usage": "16, 32 and 48 px entries.",
+    "preview": "light"
+  },
+  {
+    "file": "social/open-graph-light.svg",
+    "title": "Open Graph · light",
+    "category": "Social",
+    "width": 1200,
+    "height": 630,
+    "format": "SVG",
+    "usage": "Website link previews and launch announcements.",
+    "preview": "light"
+  },
+  {
+    "file": "social/open-graph-light.png",
+    "title": "Open Graph · light",
+    "category": "Social",
+    "width": 1200,
+    "height": 630,
+    "format": "PNG",
+    "usage": "Website link previews and launch announcements.",
+    "preview": "light"
+  },
+  {
+    "file": "social/square-light.svg",
+    "title": "Square post · light",
+    "category": "Social",
+    "width": 1080,
+    "height": 1080,
+    "format": "SVG",
+    "usage": "Square social announcements and community posts.",
+    "preview": "light"
+  },
+  {
+    "file": "social/square-light.png",
+    "title": "Square post · light",
+    "category": "Social",
+    "width": 1080,
+    "height": 1080,
+    "format": "PNG",
+    "usage": "Square social announcements and community posts.",
+    "preview": "light"
+  },
+  {
+    "file": "banners/header-light.svg",
+    "title": "Community header · light",
+    "category": "Banners",
+    "width": 1500,
+    "height": 500,
+    "format": "SVG",
+    "usage": "General community and repository headers. Adapt crop for each platform.",
+    "preview": "light"
+  },
+  {
+    "file": "banners/header-light.png",
+    "title": "Community header · light",
+    "category": "Banners",
+    "width": 1500,
+    "height": 500,
+    "format": "PNG",
+    "usage": "General community and repository headers. Adapt crop for each platform.",
+    "preview": "light"
+  },
+  {
+    "file": "banners/presentation-light.svg",
+    "title": "Presentation cover · light",
+    "category": "Banners",
+    "width": 1600,
+    "height": 900,
+    "format": "SVG",
+    "usage": "16:9 presentation and video title cards.",
+    "preview": "light"
+  },
+  {
+    "file": "banners/presentation-light.png",
+    "title": "Presentation cover · light",
+    "category": "Banners",
+    "width": 1600,
+    "height": 900,
+    "format": "PNG",
+    "usage": "16:9 presentation and video title cards.",
+    "preview": "light"
+  },
+  {
+    "file": "patterns/board-grid-light.svg",
+    "title": "Board pattern · light",
+    "category": "Patterns",
+    "width": 1200,
+    "height": 800,
+    "format": "SVG",
+    "usage": "Decorative backgrounds. Keep copy on a separate solid area.",
+    "preview": "light"
+  },
+  {
+    "file": "patterns/board-grid-light.png",
+    "title": "Board pattern · light",
+    "category": "Patterns",
+    "width": 1200,
+    "height": 800,
+    "format": "PNG",
+    "usage": "Decorative backgrounds. Keep copy on a separate solid area.",
+    "preview": "light"
+  },
+  {
+    "file": "social/open-graph-dark.svg",
+    "title": "Open Graph · dark",
+    "category": "Social",
+    "width": 1200,
+    "height": 630,
+    "format": "SVG",
+    "usage": "Website link previews and launch announcements.",
+    "preview": "dark"
+  },
+  {
+    "file": "social/open-graph-dark.png",
+    "title": "Open Graph · dark",
+    "category": "Social",
+    "width": 1200,
+    "height": 630,
+    "format": "PNG",
+    "usage": "Website link previews and launch announcements.",
+    "preview": "dark"
+  },
+  {
+    "file": "social/square-dark.svg",
+    "title": "Square post · dark",
+    "category": "Social",
+    "width": 1080,
+    "height": 1080,
+    "format": "SVG",
+    "usage": "Square social announcements and community posts.",
+    "preview": "dark"
+  },
+  {
+    "file": "social/square-dark.png",
+    "title": "Square post · dark",
+    "category": "Social",
+    "width": 1080,
+    "height": 1080,
+    "format": "PNG",
+    "usage": "Square social announcements and community posts.",
+    "preview": "dark"
+  },
+  {
+    "file": "banners/header-dark.svg",
+    "title": "Community header · dark",
+    "category": "Banners",
+    "width": 1500,
+    "height": 500,
+    "format": "SVG",
+    "usage": "General community and repository headers. Adapt crop for each platform.",
+    "preview": "dark"
+  },
+  {
+    "file": "banners/header-dark.png",
+    "title": "Community header · dark",
+    "category": "Banners",
+    "width": 1500,
+    "height": 500,
+    "format": "PNG",
+    "usage": "General community and repository headers. Adapt crop for each platform.",
+    "preview": "dark"
+  },
+  {
+    "file": "banners/presentation-dark.svg",
+    "title": "Presentation cover · dark",
+    "category": "Banners",
+    "width": 1600,
+    "height": 900,
+    "format": "SVG",
+    "usage": "16:9 presentation and video title cards.",
+    "preview": "dark"
+  },
+  {
+    "file": "banners/presentation-dark.png",
+    "title": "Presentation cover · dark",
+    "category": "Banners",
+    "width": 1600,
+    "height": 900,
+    "format": "PNG",
+    "usage": "16:9 presentation and video title cards.",
+    "preview": "dark"
+  },
+  {
+    "file": "patterns/board-grid-dark.svg",
+    "title": "Board pattern · dark",
+    "category": "Patterns",
+    "width": 1200,
+    "height": 800,
+    "format": "SVG",
+    "usage": "Decorative backgrounds. Keep copy on a separate solid area.",
+    "preview": "dark"
+  },
+  {
+    "file": "patterns/board-grid-dark.png",
+    "title": "Board pattern · dark",
+    "category": "Patterns",
+    "width": 1200,
+    "height": 800,
+    "format": "PNG",
+    "usage": "Decorative backgrounds. Keep copy on a separate solid area.",
+    "preview": "dark"
+  },
+  {
+    "file": "illustrations/shared-board.png",
+    "title": "Shared board illustration",
+    "category": "Illustration",
+    "width": 1536,
+    "height": 1024,
+    "format": "PNG",
+    "usage": "Hero artwork and editorial campaign illustration. AI-generated, conceptual artwork.",
+    "preview": "light"
+  }
+]

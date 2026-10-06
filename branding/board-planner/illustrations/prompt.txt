@@ -1,0 +1,8 @@
+Use case: ads-marketing
+Asset type: reusable wide editorial brand illustration for Board Planner, a Kanban product where small teams and coding agents work on the same board.
+Primary request: create a polished wide landscape illustration showing work moving through three Kanban columns, with tactile cards and restrained paths connecting them, conveying clarity, progress and coordinated work.
+Style/medium: sophisticated architectural 3D editorial rendering, matte paper and ceramic blocks, precise soft rounded corners, crisp geometries, subtle material grain, gentle shadows. Premium calm developer-product identity.
+Composition/framing: 3:2 landscape. Arrange the board objects predominantly in the right two thirds, with generous clean negative space in the left third for separate typeset copy. Three upright navy board columns, white staggered cards, one vivid blue card transferring between columns, a small violet checkpoint, and one green completed card. Ground-level view with slight isometric perspective, visually quiet and deliberate.
+Color palette: cobalt #3B82F6 and #2563EB, deep navy #0F172A, slate #1E293B, white #F8FAFC, restrained violet #C084FC and green #4ADE80 accents. Pale cool gray studio background.
+Lighting/mood: soft daylight, grounded, confident, beautifully crafted.
+Constraints: NO text, letters, numbers, logos, people, robots, screens or watermark. This is an abstract brand illustration, not a product UI screenshot. No neon, no holograms, no busy gradients. Keep silhouettes legible.
