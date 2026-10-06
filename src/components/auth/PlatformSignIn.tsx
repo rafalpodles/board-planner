@@ -82,6 +82,7 @@ export function PlatformSignIn() {
 
   function backToEmail() {
     setCode("");
+    setUsername("");
     setPassword("");
     setError("");
     setStep({ name: "email" });

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { create, deleteOne, userCreate, seedAgents, purgeOrganisationRows, logInstanceAudit, forgetOrganisationSlugs } = vi.hoisted(() => ({
+const { hash, create, deleteOne, userCreate, seedAgents, purgeOrganisationRows, logInstanceAudit, forgetOrganisationSlugs } = vi.hoisted(() => ({
+  hash: vi.fn(),
   create: vi.fn(),
   deleteOne: vi.fn(),
   userCreate: vi.fn(),
@@ -11,6 +12,7 @@ const { create, deleteOne, userCreate, seedAgents, purgeOrganisationRows, logIns
 }));
 
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
+vi.mock("bcryptjs", () => ({ default: { hash } }));
 vi.mock("@/models/organisation", () => ({ Organisation: { create, deleteOne } }));
 vi.mock("./db-scope", () => ({ scoped: (organisation: unknown) => ({ organisation, User: { create: userCreate } }) }));
 vi.mock("./agent-seed", () => ({ seedAgents }));
@@ -35,6 +37,7 @@ beforeEach(() => {
   create.mockResolvedValue({});
   deleteOne.mockResolvedValue({});
   userCreate.mockImplementation(async (row) => ({ _id: "user-1", ...row }));
+  hash.mockResolvedValue("$2a$10$hashed");
   seedAgents.mockResolvedValue(undefined);
   purgeOrganisationRows.mockResolvedValue({});
 });
@@ -99,10 +102,11 @@ describe("createOrganisation (BP-673)", () => {
 
   it("hashes the password before the organisation exists, so the row waits on nothing slow", async () => {
     const order: string[] = [];
+    hash.mockImplementation(async () => (order.push("hash"), "$2a$10$hashed"));
     create.mockImplementation(async () => order.push("organisation"));
-    userCreate.mockImplementation(async (row) => (order.push(`user:${row.password.startsWith("$2")}`), { _id: "user-1", ...row }));
+    userCreate.mockImplementation(async (row) => (order.push(`user:${row.password}`), { _id: "user-1", ...row }));
 
     await createOrganisation("bill@initech.example", INPUT);
-    expect(order).toEqual(["organisation", "user:true"]);
+    expect(order).toEqual(["hash", "organisation", "user:$2a$10$hashed"]);
   });
 });
