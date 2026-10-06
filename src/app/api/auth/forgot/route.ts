@@ -1,4 +1,4 @@
-import { hostNotFound, refusedHost } from "@/lib/middleware";
+import { refusedHost } from "@/lib/middleware";
 import { NextResponse } from "next/server";
 import { passwordSignInEnabled, passwordSignInOff } from "@/lib/password-sign-in";
 import { readJsonBody } from "@/lib/request-body";

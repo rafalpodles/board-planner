@@ -20,7 +20,7 @@ import {
   releaseResetToken,
 } from "@/lib/password-reset";
 import { provenanceRefusal, revokeUserCredentials } from "@/lib/session";
-import { hostNotFound, refusedHost } from "@/lib/middleware";
+import { refusedHost } from "@/lib/middleware";
 
 const ATTEMPTS_PER_SOURCE = 20;
 

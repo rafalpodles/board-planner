@@ -55,7 +55,6 @@ export function hostNotFound(): NextResponse {
 }
 
 export async function refusedHost(request: Request): Promise<NextResponse> {
-  const { organisationOfRequest } = await import("./organisation-host");
   return (await organisationOfRequest(request)).kind === "suspended" ? organisationSuspended() : hostNotFound();
 }
 

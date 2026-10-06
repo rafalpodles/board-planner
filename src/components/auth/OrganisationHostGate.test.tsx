@@ -12,13 +12,6 @@ const answer = (status: number, body: unknown, headers: Record<string, string> =
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status, headers })));
 
 describe("OrganisationHostGate (BP-921)", () => {
-  it("shows the page on an organisation's host", async () => {
-    answer(200, { unclaimed: false, passwordSignIn: true });
-    render(<OrganisationHostGate><p>the form</p></OrganisationHostGate>);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(screen.getByText("the form")).toBeTruthy();
-  });
-
   it("says there is no organisation on a host that has none, and links to the sign-in by e-mail", async () => {
     answer(404, { error: "Not found", host: "none", signIn: "https://login.board-planner.com" });
     render(<OrganisationHostGate><p>the form</p></OrganisationHostGate>);

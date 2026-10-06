@@ -1,4 +1,4 @@
-import { hostNotFound, refusedHost } from "@/lib/middleware";
+import { refusedHost } from "@/lib/middleware";
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { scopedFor, type ScopedDb, organisationOf, scopedForRequest } from "@/lib/db-scope";

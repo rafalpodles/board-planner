@@ -7,7 +7,7 @@ test.beforeEach(seed);
 // BP-921: a bare download link saved whatever the server answered, a refusal included, as the export
 test("a refused export says why on the page and saves nothing", async ({ page }) => {
   await signIn(page, "admin");
-  await page.route("**/api/admin/export", (route) =>
+  await page.route((url) => url.pathname === "/api/admin/export" && url.searchParams.get("check") === "1", (route) =>
     route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "The database is unreachable. This is not a problem with your session." }) })
   );
   let downloaded = false;

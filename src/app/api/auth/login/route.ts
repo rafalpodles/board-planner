@@ -3,7 +3,7 @@ import { passwordSignInEnabled, passwordSignInOff } from "@/lib/password-sign-in
 import { readJsonBody } from "@/lib/request-body";
 import { getClientIp, verifyCredentials } from "@/lib/auth";
 import { isDatabaseUnreachable } from "@/lib/db-errors";
-import { databaseUnavailable, hostNotFound, refusedHost } from "@/lib/middleware";
+import { databaseUnavailable, refusedHost } from "@/lib/middleware";
 import { lockoutKey, sourceKey, withLockout } from "@/lib/rate-limit";
 import { scopedForRequest, organisationOf } from "@/lib/db-scope";
 import {

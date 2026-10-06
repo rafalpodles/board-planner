@@ -19,7 +19,7 @@ import { JOIN_COOKIE, heldSignUp, spendAcceptance } from "@/lib/oidc/flow";
 import { applyAdminGroup } from "@/lib/oidc/admin-group";
 import { providerById } from "@/lib/oidc/providers";
 import { signUpOpenTo } from "@/lib/sign-up-domains";
-import { hostNotFound, refusedHost } from "@/lib/middleware";
+import { refusedHost } from "@/lib/middleware";
 
 const ATTEMPTS_PER_SOURCE = 20;
 const EXPIRED = "That sign-in has expired. Sign in again.";
