@@ -110,7 +110,7 @@ export async function organisationFootprint(organisation: Types.ObjectId): Promi
   return counts;
 }
 
-async function purgeOrganisationRows(organisation: Types.ObjectId): Promise<Record<string, number>> {
+export async function purgeOrganisationRows(organisation: Types.ObjectId): Promise<Record<string, number>> {
   const db = scoped(organisation);
   const removed: Record<string, number> = {};
   removed[`${UPLOAD_BUCKET}.files`] = (await organisationUploads(db)?.deleteAll()) ?? 0;

@@ -18,7 +18,16 @@ type Step =
   | { name: "email" }
   | { name: "code"; email: string }
   | { name: "organisations"; email: string; organisations: Organisation[]; passwordSignIn: boolean }
-  | { name: "password"; email: string; organisation: Organisation; organisations: Organisation[]; passwordSignIn: boolean };
+  | { name: "password"; email: string; organisation: Organisation; organisations: Organisation[]; passwordSignIn: boolean }
+  | { name: "create"; email: string; organisations: Organisation[]; passwordSignIn: boolean };
+
+const slugFrom = (name: string) =>
+  name
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
 
 async function send(path: string, method: string, body?: unknown) {
   const res = await fetch(path, {
@@ -39,6 +48,12 @@ export function PlatformSignIn() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [domain, setDomain] = useState("");
+  const [orgName, setOrgName] = useState("");
+  const [slug, setSlug] = useState("");
+  const [slugEdited, setSlugEdited] = useState(false);
+  const [fullName, setFullName] = useState("");
+  const [username, setUsername] = useState("");
 
   useEffect(() => {
     let live = true;
@@ -93,6 +108,7 @@ export function PlatformSignIn() {
       if (!ok) return setError(data.error ?? "That code did not work.");
       const organisations: Organisation[] = data.organisations ?? [];
       const passwordSignIn = data.passwordSignIn !== false;
+      setDomain(data.domain ?? "");
       if (organisations.length === 1) {
         setStep({ name: "password", email: data.email, organisation: organisations[0], organisations, passwordSignIn });
       } else {
@@ -114,6 +130,27 @@ export function PlatformSignIn() {
         return setError(data.error);
       }
       if (!ok) return setError(data.error ?? "Could not sign in.");
+      window.location.assign(data.location);
+    });
+  };
+
+  const startCreating = () => {
+    if (step.name !== "organisations" && step.name !== "password") return;
+    setError("");
+    setPassword("");
+    setUsername(step.email.split("@")[0].toLowerCase().replace(/[^a-z0-9._-]/g, "").slice(0, 32));
+    setStep({ name: "create", email: step.email, organisations: step.organisations, passwordSignIn: step.passwordSignIn });
+  };
+
+  const submitCreate = (e: FormEvent) => {
+    e.preventDefault();
+    void run(async () => {
+      const { ok, data } = await send("/api/sign-in/organisation", "POST", { name: orgName, slug, fullName, username, password });
+      if (data.restart) {
+        backToEmail();
+        return setError(data.error);
+      }
+      if (!ok) return setError(data.error ?? "Could not create the organisation.");
       window.location.assign(data.location);
     });
   };
@@ -193,6 +230,9 @@ export function PlatformSignIn() {
             <Button type="submit" className="w-full" disabled={busy || code.length !== 6}>
               {busy ? "Checking…" : "Continue"}
             </Button>
+            <button type="button" onClick={startCreating} className="focus-ring w-full text-sm text-text-muted underline">
+              Create another organisation
+            </button>
             <button type="button" onClick={backToEmail} className="focus-ring w-full text-sm text-text-muted underline">
               Use another e-mail address
             </button>
@@ -230,10 +270,65 @@ export function PlatformSignIn() {
                 </ul>
               </>
             )}
+            {step.passwordSignIn && (
+              <Button type="button" variant={step.organisations.length === 0 ? "primary" : "secondary"} className="w-full" onClick={startCreating}>
+                Create an organisation
+              </Button>
+            )}
             <button type="button" onClick={backToEmail} className="focus-ring w-full text-sm text-text-muted underline">
               Use another e-mail address
             </button>
           </div>
+        )}
+
+        {step.name === "create" && (
+          <form onSubmit={submitCreate} className="space-y-4" data-testid="create-organisation">
+            <p className="text-sm break-words">
+              A new organisation, with <strong className="break-all">{step.email}</strong> as its first administrator.
+            </p>
+            <Input
+              label="Organisation name"
+              value={orgName}
+              maxLength={80}
+              onChange={(e) => {
+                setOrgName(e.target.value);
+                if (!slugEdited) setSlug(slugFrom(e.target.value));
+              }}
+              required
+              autoFocus
+            />
+            <div>
+              <Input
+                label="Address"
+                value={slug}
+                maxLength={40}
+                onChange={(e) => {
+                  setSlugEdited(true);
+                  setSlug(e.target.value.toLowerCase());
+                }}
+                aria-describedby="organisation-address-hint"
+                autoCapitalize="none"
+                spellCheck={false}
+                required
+              />
+              <p id="organisation-address-hint" className="mt-1 break-all text-xs text-text-muted">
+                {slug || "your-team"}.{domain}
+              </p>
+            </div>
+            <Input label="Your name" value={fullName} maxLength={80} onChange={(e) => setFullName(e.target.value)} autoComplete="name" required />
+            <Input label="Username" value={username} maxLength={32} onChange={(e) => setUsername(e.target.value.toLowerCase())} autoComplete="username" required />
+            <Input label="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" required />
+            <Button type="submit" className="w-full" disabled={busy}>
+              {busy ? "Creating…" : "Create the organisation"}
+            </Button>
+            <button
+              type="button"
+              onClick={() => setStep({ name: "organisations", email: step.email, organisations: step.organisations, passwordSignIn: step.passwordSignIn })}
+              className="focus-ring w-full text-sm text-text-muted underline"
+            >
+              Back
+            </button>
+          </form>
         )}
 
         {step.name === "password" && !step.passwordSignIn && (
