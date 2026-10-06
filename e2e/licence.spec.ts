@@ -19,8 +19,8 @@ async function planSeenByAMember(request: APIRequestContext): Promise<string> {
 
 async function openLicenceSettings(page: Page) {
   await page.goto("/settings/profile");
-  await page.getByRole("link", { name: "Licence" }).click();
-  await expect(page).toHaveURL(/\/settings\/licence$/);
+  await page.getByRole("link", { name: "Overview" }).click();
+  await expect(page).toHaveURL(/\/settings\/organisation$/);
   await expect(page.getByRole("heading", { name: "Licence" })).toBeVisible();
 }
 

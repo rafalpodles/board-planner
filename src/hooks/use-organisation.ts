@@ -29,7 +29,6 @@ const subscribe = (listener: () => void) => {
   return () => listeners.delete(listener);
 };
 
-// One read shared by the sidebar and Settings → Organisation, so a rename shows in both at once
 export function useOrganisation() {
   const api = useApi();
   const { user } = useAuth();
@@ -37,11 +36,13 @@ export function useOrganisation() {
   const current = useSyncExternalStore(subscribe, () => snapshot, () => snapshot);
 
   const reload = useCallback(async () => {
+    let next: Snapshot;
     try {
-      publish({ summary: await api.get("/api/organisation"), failed: false, forUser: userId });
+      next = { summary: await api.get("/api/organisation"), failed: false, forUser: userId };
     } catch {
-      publish({ summary: null, failed: true, forUser: userId });
+      next = { summary: null, failed: true, forUser: userId };
     }
+    if (snapshot.forUser === userId) publish(next);
   }, [api, userId]);
 
   useEffect(() => {
@@ -53,7 +54,8 @@ export function useOrganisation() {
 
   const rename = useCallback(
     async (name: string) => {
-      publish({ summary: await api.put("/api/organisation", { name }), failed: false, forUser: userId });
+      const summary = await api.put("/api/organisation", { name });
+      if (snapshot.forUser === userId) publish({ summary, failed: false, forUser: userId });
     },
     [api, userId]
   );

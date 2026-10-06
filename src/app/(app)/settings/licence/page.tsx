@@ -1,12 +1,5 @@
-"use client";
-
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { redirect } from "next/navigation";
 
 export default function LicenceSettingsPage() {
-  const router = useRouter();
-  useEffect(() => {
-    router.replace("/settings/organisation");
-  }, [router]);
-  return null;
+  redirect("/settings/organisation");
 }
