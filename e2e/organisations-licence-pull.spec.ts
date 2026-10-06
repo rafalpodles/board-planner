@@ -5,7 +5,7 @@ import { LICENCE_STUB_PORT, RUN_ORGANISATIONS_SERVER } from "../playwright.confi
 import { PLATFORM_HEADERS, platformSigningString } from "../src/lib/platform-request";
 import { E2E_LICENCE_PULL_KEY, e2eLicence } from "./licence-key";
 import { ACME, GLOBEX, ORGANISATIONS_API, asOrganisation, bearer, originOf, seedTwoOrganisations, type OrganisationFixture } from "./organisations";
-import { freshAddress, provideAddressAndCode } from "./platform-sign-in";
+import { freshAddress, provideAddressAndCode, withDb } from "./platform-sign-in";
 
 test.skip(!RUN_ORGANISATIONS_SERVER, "needs the ORGANISATION_DOMAIN server — set E2E_ORGANISATIONS_SERVER=1");
 test.describe.configure({ mode: "serial" });
@@ -127,12 +127,14 @@ test.describe("BP-929: signing up an organisation pulls its licence at once", ()
 
     const entitlements = await page.request.get(`${originOf("trial-works")}/api/entitlements`);
     expect((await entitlements.json()).plan).toBe("pro");
-    expect(asked.some((entry) => entry.signed)).toBe(true);
+    const created = await withDb((db) => db.collection("organisations").findOne({ slug: "trial-works" }));
+    expect(asked).toEqual([{ organisation: created!._id.toHexString(), signed: true }]);
   });
 
   test("a licence service that is down does not stop the sign-up, and the organisation starts on Free", async ({ page }) => {
     answerWith = 500;
     await signUp(page, "Down Works", "down-works");
+    expect(asked).toHaveLength(1);
 
     const entitlements = await page.request.get(`${originOf("down-works")}/api/entitlements`);
     expect((await entitlements.json()).plan).toBe("free");

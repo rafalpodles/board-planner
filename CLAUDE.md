@@ -268,6 +268,7 @@ LICENCE_PULL_KEY=         # loopback) and Board Planner's own Ed25519 key {keyId
                           # each served organisation asks POST /api/organisations/licence, signed like a platform
                           # request with the service's host, and any key returned is stored through the same
                           # checks as the push (storeOrganisationLicence: bound to it, newer, compare-and-set).
+                          # A new organisation also asks once, at sign-up and whatever LICENCE_PULL_TICK_MS says, waiting at most 4 s and never failing the sign-up (BP-929).
                           # One without the other stops the app at boot (BP-897)
 BOOTSTRAP_TOKEN=          # Optional — setup code for the first account; unset, one is generated and
                           # printed to the server log while the instance has no users (BP-325)

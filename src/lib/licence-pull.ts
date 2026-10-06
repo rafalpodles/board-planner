@@ -117,7 +117,10 @@ export async function pullNewOrganisationLicence(organisationId: string): Promis
     await connectDB();
     const row = await Organisation.findById(organisationId).select("name slug").lean();
     if (!row) return;
-    await pullLicence(config, row, SIGN_UP_PULL_TIMEOUT_MS);
+    const outcome = await pullLicence(config, row, SIGN_UP_PULL_TIMEOUT_MS);
+    if (outcome.status === "refused" || outcome.status === "unreachable" || outcome.status === "invalid" || outcome.status === "oversized") {
+      console.warn(`Licence pull for a new organisation: ${outcome.status}${"httpStatus" in outcome ? ` (${outcome.httpStatus})` : ""}`);
+    }
   } catch (error) {
     console.warn("Licence pull for a new organisation failed:", error instanceof Error ? error.message : error);
   }
