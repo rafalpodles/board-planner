@@ -30,6 +30,7 @@ interface AgentRow {
 interface AgentsResponse {
   pmAvailable: boolean;
   pmNeedsPlan?: boolean;
+  pmKeyUnreadable?: boolean;
   defaults: { pmDefaultModel: string; pmDefaultDailyTurnCap: number; envModel: string };
   projects: AgentRow[];
 }
@@ -163,7 +164,15 @@ export default function AdminAgentsPage() {
       {!data.pmAvailable && (
         <div className="mb-6 flex gap-3 rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm">
           <span aria-hidden="true">⚠</span>
-          {data.pmNeedsPlan ? (
+          {data.pmKeyUnreadable ? (
+            <p>
+              <strong className="font-semibold">No agent can run</strong>: the stored OpenRouter key cannot be read.{" "}
+              <Link href="/settings/ai-keys" className="underline">
+                Enter it again
+              </Link>
+              .
+            </p>
+          ) : data.pmNeedsPlan ? (
             <p>
               <strong className="font-semibold">No agent can run</strong>: on the Free plan the PM agent needs your
               own OpenRouter key.{" "}

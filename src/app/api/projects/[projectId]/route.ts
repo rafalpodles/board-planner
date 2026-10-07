@@ -45,6 +45,7 @@ export const GET = withProjectAccessOrWorker(async (_request, { params, user, db
   const pmAccess = await pmAvailability(db);
   obj.pmAvailable = pmAccess.available;
   obj.pmNeedsPlan = pmAccess.needsPlan;
+  obj.pmKeyUnreadable = pmAccess.keyUnreadable;
   obj.canAdmin = await check(db, user, String(project._id), "admin");
   return NextResponse.json(obj);
 }, { reach: "board" });
@@ -390,6 +391,7 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
   const pmAccess = await pmAvailability(db);
   obj.pmAvailable = pmAccess.available;
   obj.pmNeedsPlan = pmAccess.needsPlan;
+  obj.pmKeyUnreadable = pmAccess.keyUnreadable;
   obj.canAdmin = await check(db, user, String(project._id), "admin");
   return NextResponse.json(obj);
 });

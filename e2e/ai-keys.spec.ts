@@ -52,7 +52,7 @@ async function askThePm(page: Page, prompt: string, replies: number) {
 async function saveKey(page: Page, label: "OpenRouter key" | "OpenAI key", value: string) {
   const card = page.locator("section", { has: page.getByRole("heading", { name: label }) });
   const saved = page.waitForResponse((r) => r.request().method() === "PUT" && r.url().includes("/api/settings/ai-keys"));
-  await card.getByLabel(/Add your key|Replace the key/).fill(value);
+  await card.getByLabel(/^(Add|Replace) your/).fill(value);
   await card.getByRole("button", { name: /Save key|Replace key/ }).click();
   expect((await saved).status()).toBe(200);
   return card;
@@ -77,7 +77,8 @@ test("the PM agent is called with the key the admin stored, and with the server'
     const card = await saveKey(page, "OpenRouter key", OWN_OPENROUTER);
 
     await expect(card.getByText(OWN_OPENROUTER.slice(-4), { exact: true })).toBeVisible();
-    expect(await page.content()).not.toContain(OWN_OPENROUTER);
+    // A password field's value is not in the markup, so the field itself is what is read
+    await expect(page.getByLabel("Replace your OpenRouter key")).toHaveValue("");
     const row = await storedKeys();
     expect(row?.openrouterKey).toMatch(/^enc:v3:/);
     expect(row?.openrouterKey).not.toContain(OWN_OPENROUTER);
@@ -92,6 +93,7 @@ test("the PM agent is called with the key the admin stored, and with the server'
     await page.goto("/settings/ai-keys");
     const removed = page.waitForResponse((r) => r.request().method() === "PUT" && r.url().includes("/api/settings/ai-keys"));
     await page.getByRole("button", { name: "Remove key" }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Remove key" }).click();
     expect((await removed).status()).toBe(200);
     await expect(page.getByRole("button", { name: "Remove key" })).toHaveCount(0);
     expect((await storedKeys())?.openrouterKey).toBeUndefined();
@@ -135,7 +137,7 @@ test("a member is turned away from the AI keys, on screen and at the route", asy
     return { put: [put.status, (await put.json()).error], get: [get.status, (await get.json()).error] };
   }, OWN_OPENROUTER);
   expect(answers).toEqual({ put: [403, "Forbidden"], get: [403, "Forbidden"] });
-  expect(await storedKeys()).toBeNull();
+  expect((await storedKeys())?.openrouterKey).toBeUndefined();
 });
 
 test("a key that is too short is refused on screen, and nothing is stored", async ({ page }) => {
@@ -144,10 +146,10 @@ test("a key that is too short is refused on screen, and nothing is stored", asyn
 
   const card = page.locator("section", { has: page.getByRole("heading", { name: "OpenRouter key" }) });
   const refused = page.waitForResponse((r) => r.request().method() === "PUT" && r.url().includes("/api/settings/ai-keys"));
-  await card.getByLabel("Add your key").fill("short");
+  await card.getByLabel("Add your OpenRouter key").fill("short");
   await card.getByRole("button", { name: "Save key" }).click();
 
   expect((await refused).status()).toBe(400);
-  await expect(card.getByText(/must be 8 to 300 characters/)).toBeVisible();
-  expect(await storedKeys()).toBeNull();
+  await expect(card.getByRole("alert")).toContainText(/must be 20 to 300 printable characters/);
+  expect((await storedKeys())?.openrouterKey).toBeUndefined();
 });

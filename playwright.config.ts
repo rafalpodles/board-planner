@@ -160,7 +160,8 @@ function devServerEnv(origin: string) {
     TRUSTED_PROXY_HOPS: "0",
     // Known to day-zero.spec.ts, which claims an empty instance the way an operator does (BP-325)
     BOOTSTRAP_TOKEN,
-    // Presence alone is what isPmAvailable checks; the stub never looks at it
+    // The server's own key, which an organisation that stored none is given where its plan includes it
+    // (src/lib/model-keys.ts); the stub never looks at it
     OPENROUTER_API_KEY: "e2e-stub-key",
     OPENROUTER_BASE_URL: `${PM_STUB_URL}/v1`,
     // Effectively never. The scheduler starts with the app (src/instrumentation.ts), and a
@@ -168,8 +169,7 @@ function devServerEnv(origin: string) {
     // at the 5-minute default a tick can land mid-run and spend a real turn against the cap
     // the turn-cap specs are counting.
     PM_SCHEDULER_TICK_MS: String(24 * 60 * 60 * 1000),
-    // isAIEnabled() checks the key's presence and the form hides AI Assist without it; the
-    // base URL is what keeps the SDK off api.openai.com
+    // The form hides AI Assist without a key; the base URL is what keeps the SDK off api.openai.com
     OPENAI_API_KEY: "e2e-stub-key",
     OPENAI_BASE_URL: `${AI_STUB_URL}/v1`,
     WEBHOOK_SIGNING_SECRET: WEBHOOK_SECRET,

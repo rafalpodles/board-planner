@@ -29,7 +29,7 @@ import { AI_PROMPT_MAX_LENGTH, TASK_TITLE_MAX_LENGTH } from "@/lib/identifiers";
 import { MAX_RECURRENCE_INTERVAL, clampInterval } from "@/lib/recurrence";
 import { activeFields, sortedFields, orderedOptions } from "@/lib/custom-fields";
 import type { GeneratedTask } from "@/lib/ai";
-import { AiNeedsKey } from "@/components/AiNeedsKey";
+import { AiKeyUnreadable, AiNeedsKey } from "@/components/AiNeedsKey";
 
 /**
  * Creates a task. An existing one is edited in place by the detail view, which owns
@@ -95,6 +95,7 @@ export function TaskForm({
   const [uploads, setUploads] = useState(0);
   const [aiEnabled, setAiEnabled] = useState(false);
   const [aiNeedsPlan, setAiNeedsPlan] = useState(false);
+  const [aiKeyUnreadable, setAiKeyUnreadable] = useState(false);
   const [aiInsights, setAiInsights] = useState<GeneratedTask | null>(null);
   const api = useApi();
   // What a dialog around this form must not be dismissed during: the create, and an upload whose
@@ -115,9 +116,10 @@ export function TaskForm({
       .catch(() => toast("Failed to load users", "error"));
     api
       .get(`/api/projects/${projectId}/ai/generate-task`)
-      .then((res: { enabled: boolean; needsPlan?: boolean }) => {
+      .then((res: { enabled: boolean; needsPlan?: boolean; keyUnreadable?: boolean }) => {
         setAiEnabled(res.enabled);
         setAiNeedsPlan(!!res.needsPlan);
+        setAiKeyUnreadable(!!res.keyUnreadable);
       })
       .catch(() => setAiEnabled(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -256,6 +258,7 @@ export function TaskForm({
       )}
 
       {!aiEnabled && aiNeedsPlan && <AiNeedsKey what="AI Assist" />}
+      {!aiEnabled && aiKeyUnreadable && <AiKeyUnreadable what="AI Assist" />}
 
       {aiEnabled && (
         <div className="bg-bg-input border border-border rounded-lg p-3 space-y-2">

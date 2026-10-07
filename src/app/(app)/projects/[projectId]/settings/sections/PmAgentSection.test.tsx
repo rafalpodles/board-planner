@@ -20,6 +20,7 @@ const { api, toast } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
+vi.mock("@/hooks/use-auth", () => ({ useAuth: () => ({ isAdmin: true }) }));
 vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast }) }));
 
 function project(over: Partial<ApiProject> = {}): ApiProject {
@@ -441,6 +442,30 @@ describe("the rows moving under a disconnect", () => {
 
     // A baseline captured before the save would come back here and make every saved field dirty
     expect(dirtyCount()).toBe(0);
+  });
+});
+
+// BP-652
+describe("when the PM agent cannot run for want of a key", () => {
+  const renderUnavailable = (over: Partial<ApiProject>) => renderSection(true, { pmAvailable: false, ...over });
+
+  it("offers a Free organisation its own key or Pro, not an environment variable", () => {
+    renderUnavailable({ pmNeedsPlan: true });
+
+    expect(screen.getByTestId("ai-needs-key").textContent).toMatch(/The PM agent runs on your own key on the Free plan/);
+    expect(screen.queryByText(/OPENROUTER_API_KEY/)).toBeNull();
+  });
+
+  it("says a stored key that cannot be read has to be entered again", () => {
+    renderUnavailable({ pmKeyUnreadable: true });
+
+    expect(screen.getByTestId("ai-key-unreadable").textContent).toMatch(/stored AI key cannot be read/);
+  });
+
+  it("tells an instance with no key to set it, or to have an admin add one", () => {
+    renderUnavailable({});
+
+    expect(screen.getByText(/environment variable on the server/).textContent).toMatch(/Settings → AI keys/);
   });
 });
 

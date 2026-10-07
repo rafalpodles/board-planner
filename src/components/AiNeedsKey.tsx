@@ -30,3 +30,24 @@ export function AiNeedsKey({ what, className = "" }: { what: string; className?:
     </div>
   );
 }
+
+/** The key the organisation stored cannot be opened any more, which is not the same as having none */
+export function AiKeyUnreadable({ what, className = "" }: { what: string; className?: string }) {
+  const { isAdmin } = useAuth();
+
+  return (
+    <div role="note" data-testid="ai-key-unreadable" className={`rounded-lg border border-danger/40 bg-danger/10 p-3 text-sm ${className}`}>
+      <p className="font-medium">{what} cannot run: the stored AI key cannot be read.</p>
+      {isAdmin ? (
+        <p className="mt-1 text-text-muted">
+          <Link href="/settings/ai-keys" className="underline">
+            Enter it again
+          </Link>{" "}
+          in Settings.
+        </p>
+      ) : (
+        <p className="mt-1 text-text-muted">Ask an administrator of this organisation to enter the key again.</p>
+      )}
+    </div>
+  );
+}

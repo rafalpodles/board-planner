@@ -6,7 +6,7 @@ const getOrganisation = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/organisation", () => ({ getOrganisation }));
 
 const { encryptSecret } = await import("./encryption");
-const { describeModelKeyRefusal, resolveModelKey } = await import("./model-keys");
+const { describeModelKeyRefusal, forgetManagedPlans, modelKeyAvailability, modelKeyRefusalResponse, resolveModelKey } = await import("./model-keys");
 
 const ORGANISATION = new Types.ObjectId();
 const OTHER = new Types.ObjectId();
@@ -28,6 +28,7 @@ beforeEach(() => {
   for (const name of ENV) delete process.env[name];
   process.env.ENCRYPTION_KEY = "ab".repeat(32);
   getOrganisation.mockReset();
+  forgetManagedPlans();
 });
 afterEach(() => {
   for (const name of ENV) delete process.env[name];
@@ -83,7 +84,7 @@ describe("a cloud organisation (ORGANISATION_DOMAIN set)", () => {
     expect(await resolveModelKey(dbWith(null), "openrouter")).toEqual({ ok: true, key: "sk-operators", source: "managed" });
   });
 
-  it("uses its own key on Free, uncapped by anything here and never the operator's", async () => {
+  it("uses its own key on Free, and never the operator's", async () => {
     organisationOn("free");
     const own = encryptSecret("sk-own", ORGANISATION);
 
@@ -136,5 +137,104 @@ describe("what a refusal says", () => {
     const refusal = { ok: false, reason: "not_configured", plan: "free" } as const;
 
     expect(describeModelKeyRefusal(refusal, { error: "PM is off", status: 503 })).toEqual({ error: "PM is off", status: 503 });
+  });
+});
+
+describe("what the screens are told (modelKeyAvailability)", () => {
+  it("says a self-hosted server runs where it has a key, and reads nothing about a plan", async () => {
+    process.env.OPENROUTER_API_KEY = "sk-instance";
+
+    expect(await modelKeyAvailability(dbWith(null), "openrouter")).toEqual({ available: true, needsPlan: false, unreadable: false });
+    expect(await modelKeyAvailability(dbWith(null), "openai")).toEqual({ available: false, needsPlan: false, unreadable: false });
+    expect(getOrganisation).not.toHaveBeenCalled();
+  });
+
+  it("says a stored key that opens runs, and one that does not is unreadable rather than missing", async () => {
+    const readable = encryptSecret("sk-own", ORGANISATION);
+    const copied = encryptSecret("sk-someone-elses", OTHER);
+
+    expect(await modelKeyAvailability(dbWith({ openrouterKey: readable }), "openrouter")).toEqual({ available: true, needsPlan: false, unreadable: false });
+    expect(await modelKeyAvailability(dbWith({ openrouterKey: copied }), "openrouter")).toEqual({ available: false, needsPlan: false, unreadable: true });
+  });
+
+  describe("in the cloud", () => {
+    beforeEach(() => {
+      process.env.ORGANISATION_DOMAIN = "board-planner.test";
+      process.env.OPENROUTER_API_KEY = "sk-operators";
+    });
+
+    it("says a Free organisation would run with a plan, and a Pro one runs", async () => {
+      organisationOn("free");
+      expect(await modelKeyAvailability(dbWith(null), "openrouter")).toEqual({ available: false, needsPlan: true, unreadable: false });
+
+      forgetManagedPlans();
+      organisationOn("pro");
+      expect(await modelKeyAvailability(dbWith(null), "openrouter")).toEqual({ available: true, needsPlan: false, unreadable: false });
+    });
+
+    it("does not say a plan would help when the operator has no key to give", async () => {
+      organisationOn("free");
+      delete process.env.OPENROUTER_API_KEY;
+
+      expect(await modelKeyAvailability(dbWith(null), "openrouter")).toEqual({ available: false, needsPlan: false, unreadable: false });
+    });
+
+    it("remembers the plan for a few seconds, so a board that polls does not read the organisation each time, and then asks again", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      try {
+        organisationOn("free");
+        await modelKeyAvailability(dbWith(null), "openrouter");
+        await modelKeyAvailability(dbWith(null), "openrouter");
+        expect(getOrganisation).toHaveBeenCalledTimes(1);
+
+        vi.setSystemTime(Date.now() + 11_000);
+        organisationOn("pro");
+        expect(await modelKeyAvailability(dbWith(null), "openrouter")).toMatchObject({ available: true });
+        expect(getOrganisation).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("never lets that memory stand in for a call: a key is resolved against the plan as it is now", async () => {
+      organisationOn("pro");
+      await modelKeyAvailability(dbWith(null), "openrouter");
+
+      organisationOn("free");
+
+      expect(await resolveModelKey(dbWith(null), "openrouter")).toMatchObject({ ok: false, reason: "needs_plan" });
+    });
+
+    it("keeps one organisation's plan from answering for another", async () => {
+      organisationOn("pro");
+      await modelKeyAvailability(dbWith(null), "openrouter");
+      organisationOn("free");
+      const other = { organisation: OTHER, Settings: { findOne: () => ({ lean: async () => null }) } } as never;
+
+      expect(await modelKeyAvailability(other, "openrouter")).toMatchObject({ available: false, needsPlan: true });
+    });
+  });
+});
+
+describe("what a refusal says, beyond the plan", () => {
+  it("tells a hosted organisation to add its own key, not to set an environment variable", () => {
+    process.env.ORGANISATION_DOMAIN = "board-planner.test";
+    const refusal = { ok: false, reason: "not_configured", plan: "free" } as const;
+
+    const { error, status } = describeModelKeyRefusal(refusal, { error: "Set OPENAI_API_KEY", status: 501 });
+
+    expect(error).toMatch(/Settings → AI keys/);
+    expect(error).not.toMatch(/OPENAI_API_KEY/);
+    expect(status).toBe(501);
+  });
+
+  it("names the refusal in the body, so a screen can tell a plan from a key it cannot read", async () => {
+    const plan = modelKeyRefusalResponse({ ok: false, reason: "needs_plan", plan: "free" }, { error: "x", status: 503 });
+    const unreadable = modelKeyRefusalResponse({ ok: false, reason: "own_key_unreadable", plan: "pro" }, { error: "x", status: 503 });
+
+    expect(plan.status).toBe(402);
+    expect(await plan.json()).toMatchObject({ reason: "needs_plan", feature: "ai.managed", plan: "free" });
+    expect(unreadable.status).toBe(503);
+    expect(await unreadable.json()).toMatchObject({ reason: "own_key_unreadable" });
   });
 });

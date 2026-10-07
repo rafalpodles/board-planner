@@ -38,9 +38,12 @@ export async function generateTask(
   prompt: string,
   context: ProjectContext,
   model: string,
-  apiKey: string
+  apiKey: string,
+  ownKey = false
 ): Promise<GeneratedTask> {
-  const client = new OpenAI({ apiKey });
+  // The SDK reads the operator's organisation and project from the environment, which belong to the
+  // operator's key and not to one an organisation brought
+  const client = new OpenAI({ apiKey, ...(ownKey ? { organization: null, project: null } : {}) });
 
   const categoryList =
     context.categories && context.categories.length > 0

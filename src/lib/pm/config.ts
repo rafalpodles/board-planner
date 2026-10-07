@@ -10,7 +10,7 @@ import {
 } from "@/types";
 import type { ScopedDb } from "@/lib/db-scope";
 import { encryptSecret, decryptSecret, isEncryptionConfigured } from "@/lib/encryption";
-import { resolveModelKey } from "@/lib/model-keys";
+import { modelKeyAvailability } from "@/lib/model-keys";
 import { isAllowedMcpServerUrl } from "@/lib/url-validation";
 import { sameEndpoint } from "@/lib/host-bound-secrets";
 import { isValidTimezone } from "./autonomy";
@@ -323,7 +323,13 @@ export function sanitizeMcpServers(
   }));
 }
 
-export async function pmAvailability(db: ScopedDb): Promise<{ available: boolean; needsPlan: boolean }> {
-  const key = await resolveModelKey(db, "openrouter");
-  return { available: key.ok, needsPlan: !key.ok && key.reason === "needs_plan" };
+/** What the PM screens show; a failed read is "not available" until the next poll, never a failed response */
+export async function pmAvailability(db: ScopedDb): Promise<{ available: boolean; needsPlan: boolean; keyUnreadable: boolean }> {
+  try {
+    const { available, needsPlan, unreadable } = await modelKeyAvailability(db, "openrouter");
+    return { available, needsPlan, keyUnreadable: unreadable };
+  } catch (err) {
+    console.warn("Could not tell whether the PM agent has a key:", err instanceof Error ? err.message : err);
+    return { available: false, needsPlan: false, keyUnreadable: false };
+  }
 }

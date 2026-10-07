@@ -16,6 +16,7 @@ const { api } = vi.hoisted(() => ({
 
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/hooks/use-open-task", () => ({ useOpenTask: () => vi.fn() }));
+vi.mock("@/hooks/use-auth", () => ({ useAuth: () => ({ isAdmin: true }) }));
 vi.mock("@/lib/board-refresh", () => ({ emitBoardRefresh: vi.fn(), subscribeBoardRefresh: () => () => {} }));
 vi.mock("@/hooks/use-poll-while-visible", () => ({ usePollWhileVisible: () => {} }));
 const media = vi.hoisted(() => ({ wide: true }));
@@ -204,6 +205,64 @@ describe("a board the reader cannot open", () => {
     expect(await screen.findByText("You do not have access to this board.")).toBeTruthy();
     expect(screen.queryByText(/not configured on the server/)).toBeNull();
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+});
+
+// BP-652
+describe("a PM page where the key is the problem", () => {
+  it("offers a Free organisation its own key or Pro, instead of a composer or a server setting", async () => {
+    render(<PmChat projectId="p1" preloadedProject={{ ...PROJECT, pmAvailable: false, pmNeedsPlan: true } as never} />);
+
+    expect((await screen.findByTestId("ai-needs-key")).textContent).toMatch(/The PM agent runs on your own key on the Free plan/);
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.queryByText(/OPENROUTER_API_KEY/)).toBeNull();
+  });
+
+  it("says a stored key that cannot be read has to be entered again, not that the server has none", async () => {
+    render(<PmChat projectId="p1" preloadedProject={{ ...PROJECT, pmAvailable: false, pmKeyUnreadable: true } as never} />);
+
+    expect((await screen.findByTestId("ai-key-unreadable")).textContent).toMatch(/stored AI key cannot be read/);
+    expect(screen.queryByText(/OPENROUTER_API_KEY/)).toBeNull();
+  });
+
+  it("still blames the server's configuration when nothing says otherwise", async () => {
+    render(<PmChat projectId="p1" preloadedProject={{ ...PROJECT, pmAvailable: false } as never} />);
+
+    expect(await screen.findByText(/OPENROUTER_API_KEY missing/)).toBeTruthy();
+  });
+});
+
+describe("a turn the server refuses because of the key", () => {
+  async function sendRefused(status: number, body: Record<string, unknown>) {
+    api.stream.mockResolvedValue(new Response(JSON.stringify(body), { status }));
+    render(<PmChat projectId="p1" preloadedProject={PROJECT as never} />);
+    const box = await screen.findByRole("textbox");
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(box, "Hello");
+      box.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      screen.getByRole("button", { name: /send/i }).click();
+    });
+  }
+
+  it("shows the server's words for a plan refusal", async () => {
+    await sendRefused(402, { error: "On the Free plan the AI runs on your own key.", reason: "needs_plan" });
+
+    expect(await screen.findByText("On the Free plan the AI runs on your own key.")).toBeTruthy();
+  });
+
+  it("shows the server's words for a key that cannot be read, where it used to say the server has none", async () => {
+    await sendRefused(503, { error: "The stored AI key cannot be read. Enter it again in Settings → AI keys.", reason: "own_key_unreadable" });
+
+    expect(await screen.findByText(/Enter it again in Settings/)).toBeTruthy();
+    expect(screen.queryByText(/OPENROUTER_API_KEY missing/)).toBeNull();
+  });
+
+  it("keeps the old words for an instance with no key at all", async () => {
+    await sendRefused(503, { error: "PM agent is not configured (OPENROUTER_API_KEY missing)", reason: "not_configured" });
+
+    expect(await screen.findByText(/PM is not configured on the server \(OPENROUTER_API_KEY missing\)/)).toBeTruthy();
   });
 });
 

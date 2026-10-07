@@ -40,6 +40,7 @@ const put = (body: unknown) =>
 const get = () => GET(new Request("http://x/api/settings/ai-keys"), ctx());
 
 const KEY = "sk-or-v1-0123456789abcdef";
+const OPENAI_KEY = "sk-openai-0123456789";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -70,7 +71,7 @@ describe("PUT /api/settings/ai-keys", () => {
   });
 
   it("records that a key was set, not what it is", async () => {
-    await put({ openrouterKey: KEY, openaiKey: "sk-openai-0123456789" });
+    await put({ openrouterKey: KEY, openaiKey: OPENAI_KEY });
 
     const entry = logInstanceAudit.mock.calls[0][1];
     expect(entry).toMatchObject({ action: "instance_settings_changed", actorUsername: "root" });
@@ -79,7 +80,7 @@ describe("PUT /api/settings/ai-keys", () => {
   });
 
   it("removes a key, and its hint with it, when given null or an empty string", async () => {
-    await put({ openrouterKey: KEY, openaiKey: "sk-openai-0123456789" });
+    await put({ openrouterKey: KEY, openaiKey: OPENAI_KEY });
 
     await put({ openrouterKey: null, openaiKey: "" });
 
@@ -88,7 +89,7 @@ describe("PUT /api/settings/ai-keys", () => {
   });
 
   it("leaves the other provider's key alone", async () => {
-    await put({ openrouterKey: KEY, openaiKey: "sk-openai-0123456789" });
+    await put({ openrouterKey: KEY, openaiKey: OPENAI_KEY });
     const openai = row!.openaiKey;
 
     await put({ openrouterKey: null });
@@ -98,8 +99,11 @@ describe("PUT /api/settings/ai-keys", () => {
 
   it.each([
     ["too short", "sk-1"],
-    ["with a space in it", "sk-or-v1 0123456789"],
-    ["with a newline in it", "sk-or-v1-0123\n456789"],
+    ["too short to hide behind four visible characters", "sk-or-v1-0123456"],
+    ["with a space in it", "sk-or-v1 0123456789abcdef"],
+    ["with a newline in it", "sk-or-v1-0123\n456789abcdef"],
+    ["with a zero-width space in it, which a header cannot carry", "sk-or-v1-0123\u200b456789abcdef"],
+    ["with an accent in it", "sk-or-v1-0123é456789abcdef"],
     ["longer than any key is", "k".repeat(301)],
     ["not a string", 12345678],
   ])("refuses a key %s and stores nothing", async (_why, bad) => {
@@ -111,6 +115,20 @@ describe("PUT /api/settings/ai-keys", () => {
 
   it("refuses a body that names nothing to change", async () => {
     expect((await put({})).status).toBe(400);
+  });
+
+  it.each([["null", null], ["an array", []], ["a string", "sk-or-v1-0123456789abcdef"]])("refuses a body that is %s, rather than failing", async (_what, body) => {
+    const res = await put(body);
+
+    expect(res.status).toBe(400);
+    expect(row).toBeNull();
+  });
+
+  it("stores neither key when one of the two is refused", async () => {
+    const res = await put({ openrouterKey: KEY, openaiKey: "short" });
+
+    expect(res.status).toBe(400);
+    expect(row).toBeNull();
   });
 
   it("cannot store a key without ENCRYPTION_KEY, and says why", async () => {
@@ -139,6 +157,23 @@ describe("PUT /api/settings/ai-keys", () => {
 });
 
 describe("GET /api/settings/ai-keys", () => {
+  it("says a stored key that can no longer be opened is unreadable, and never shows what it was", async () => {
+    const { encryptSecret } = await import("@/lib/encryption");
+    row = { openrouterKey: encryptSecret("sk-someone-elses-0123456789", new (await import("mongoose")).Types.ObjectId()), openrouterKeyHint: "6789" };
+
+    const body = await (await get()).json();
+
+    expect(body.providers.openrouter).toMatchObject({ set: true, unreadable: true });
+    expect(body.providers.openai).toMatchObject({ set: false, unreadable: false });
+    expect(JSON.stringify(body)).not.toContain("enc:v3");
+  });
+
+  it("says a key it can open is readable", async () => {
+    await put({ openrouterKey: KEY });
+
+    expect((await (await get()).json()).providers.openrouter).toMatchObject({ set: true, unreadable: false });
+  });
+
   it("answers no member", async () => {
     getAuthUser.mockResolvedValue({ ...ADMIN, role: "member" });
 

@@ -35,6 +35,42 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+// BP-652: the banner says what would fix it, and a fix that is not a server setting is not told as one
+describe("the banner when no agent can run", () => {
+  const answer = (over: Record<string, unknown>) =>
+    api.get.mockImplementation(async (url: string) =>
+      url === "/api/settings"
+        ? { aiModel: "" }
+        : { pmAvailable: false, defaults: { pmDefaultModel: "", pmDefaultDailyTurnCap: 0, envModel: "m" }, projects: [ROW], ...over }
+    );
+
+  it("offers a Free organisation its own key or Pro", async () => {
+    answer({ pmNeedsPlan: true });
+    render(<AdminAgentsPage />);
+
+    expect(await screen.findByText(/on the Free plan the PM agent needs your own OpenRouter key/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Add a key" }).getAttribute("href")).toBe("/settings/ai-keys");
+    expect(screen.getByRole("link", { name: "upgrade to Pro" }).getAttribute("href")).toBe("/settings/organisation");
+    expect(screen.queryByText(/No OpenRouter key is configured/)).toBeNull();
+  });
+
+  it("says a stored key that cannot be read has to be entered again", async () => {
+    answer({ pmKeyUnreadable: true });
+    render(<AdminAgentsPage />);
+
+    expect(await screen.findByText(/the stored OpenRouter key cannot be read/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Enter it again" }).getAttribute("href")).toBe("/settings/ai-keys");
+  });
+
+  it("still says no key is configured where nothing else is the matter, and points at where one can be added", async () => {
+    answer({});
+    render(<AdminAgentsPage />);
+
+    expect(await screen.findByText(/No OpenRouter key is configured/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Add one here" }).getAttribute("href")).toBe("/settings/ai-keys");
+  });
+});
+
 // BP-471: the row's save answered with every field as stored, and the merge took all of them
 describe("a governance row while one field's save is in flight", () => {
   it("keeps the turn cap typed meanwhile when the model's save lands", async () => {

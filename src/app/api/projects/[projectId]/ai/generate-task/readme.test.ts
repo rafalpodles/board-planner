@@ -5,7 +5,7 @@ vi.mock("@/lib/middleware", () => ({ withProjectAccess: (h: unknown) => h }));
 vi.mock("@/models/project", () => ({ Project: { findById: vi.fn() } }));
 vi.mock("@/models/task", () => ({ Task: { find: vi.fn() } }));
 vi.mock("@/models/settings", () => ({ getSettings: vi.fn() }));
-vi.mock("@/lib/ai", () => ({ isAIEnabled: () => true, generateTask: vi.fn() }));
+vi.mock("@/lib/ai", () => ({ generateTask: vi.fn() }));
 vi.mock("@/lib/ai-fields", () => ({
   choiceFieldsForPrompt: vi.fn(),
   resolveGeneratedFields: vi.fn(),

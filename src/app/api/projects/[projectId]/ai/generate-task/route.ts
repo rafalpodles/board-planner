@@ -5,7 +5,7 @@ import { withProjectAccess } from "@/lib/middleware";
 import type { HydratedDocument } from "mongoose";
 import type { IProject } from "@/types";
 import { generateTask, ExistingTaskSummary } from "@/lib/ai";
-import { modelKeyRefusalResponse, resolveModelKey } from "@/lib/model-keys";
+import { modelKeyAvailability, modelKeyRefusalResponse, resolveModelKey } from "@/lib/model-keys";
 import { choiceFieldsForPrompt, resolveGeneratedFields } from "@/lib/ai-fields";
 import { getSettings } from "@/models/settings";
 import { bareHost, hostOf, projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
@@ -75,8 +75,8 @@ export async function fetchReadme(githubRepo: string): Promise<string | undefine
 }
 
 export const GET = withProjectAccess(async (_request, { db }) => {
-  const key = await resolveModelKey(db, "openai");
-  return NextResponse.json({ enabled: key.ok, needsPlan: !key.ok && key.reason === "needs_plan" });
+  const key = await modelKeyAvailability(db, "openai");
+  return NextResponse.json({ enabled: key.available, needsPlan: key.needsPlan, keyUnreadable: key.unreadable });
 });
 
 export const POST = withProjectAccess(async (request, { params, user, db }) => {
@@ -116,9 +116,9 @@ export const POST = withProjectAccess(async (request, { params, user, db }) => {
   }
   inFlight.add(holder);
   try {
-    // Every generation is spent on the instance's own key, so each one counts whether or not it
-    // succeeds — and is counted in the same write that is compared, so a burst cannot slip past
-    // the budget between a check and a record (BP-323)
+    // Every generation counts whether or not it succeeds, whichever key it is made with — and is
+    // counted in the same write that is compared, so a burst cannot slip past the budget between a
+    // check and a record (BP-323)
     if ((await countAttempt(sourceKey(`user:${holder}`, "ai-generate"))) > GENERATIONS_PER_USER_WINDOW) {
       return NextResponse.json(
         { error: "Too many generations. Try again in 15 minutes." },
@@ -137,7 +137,7 @@ export const POST = withProjectAccess(async (request, { params, user, db }) => {
     if (!project) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
-    return await generate(db, project, projectId, prompt, modelKey.key);
+    return await generate(db, project, projectId, prompt, modelKey);
   } finally {
     inFlight.delete(holder);
   }
@@ -148,7 +148,7 @@ async function generate(
   project: HydratedDocument<IProject>,
   projectId: string,
   prompt: string,
-  apiKey: string
+  modelKey: { key: string; source: string }
 ) {
   const [readme, tasks] = await Promise.all([
     // raw.githubusercontent.com only serves github.com, so a project hosted anywhere else — and
@@ -186,7 +186,8 @@ async function generate(
         existingTasks,
       },
       settings.aiModel,
-      apiKey
+      modelKey.key,
+      modelKey.source === "own"
     );
 
     // Resolved here, where the field definitions live, so the client never has to work

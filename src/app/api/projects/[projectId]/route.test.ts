@@ -20,7 +20,8 @@ const dropProjectReferences = vi.fn();
 const logInstanceAudit = vi.fn();
 const logProjectAudit = vi.fn();
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
-vi.mock("@/lib/model-keys", () => ({ resolveModelKey: async () => ({ ok: true, key: "k", source: "own" }) }));
+const modelKeyAvailability = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/model-keys", () => ({ modelKeyAvailability }));
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({
   getAuthUser,
@@ -128,6 +129,7 @@ const saved = () => Promise.resolve(SAVED);
 
 beforeEach(() => {
   vi.clearAllMocks();
+  modelKeyAvailability.mockResolvedValue({ available: true, needsPlan: false, unreadable: false });
   plan.value = "pro";
   getAuthUser.mockResolvedValue(OWNER);
   projectFindOne.mockReturnValue({
@@ -990,6 +992,43 @@ describe("PUT /api/projects/[projectId] PM settings", () => {
 
 // BP-739: the settings field classifies a draft URL in the browser, which cannot read this
 // instance's GITHUB_API_BASE_URL, so both answers carry the GitHub origin it derives
+// BP-652: what the PM screens draw depends on whether a call would run, and why not
+describe("the project answer says whether the PM agent can run", () => {
+  beforeEach(() => {
+    check.mockResolvedValue(true);
+  });
+
+  it.each([
+    ["with a key", { available: true, needsPlan: false, unreadable: false }, { pmAvailable: true, pmNeedsPlan: false, pmKeyUnreadable: false }],
+    ["when only a plan would turn it on", { available: false, needsPlan: true, unreadable: false }, { pmAvailable: false, pmNeedsPlan: true, pmKeyUnreadable: false }],
+    ["when the stored key cannot be read", { available: false, needsPlan: false, unreadable: true }, { pmAvailable: false, pmNeedsPlan: false, pmKeyUnreadable: true }],
+  ])("on a read, %s", async (_case, availability, expected) => {
+    modelKeyAvailability.mockResolvedValue(availability);
+
+    const res = await GET(new Request("http://localhost/api/projects/p1"), ctx());
+
+    expect(await res.json()).toMatchObject(expected);
+    expect(modelKeyAvailability).toHaveBeenCalledWith(expect.anything(), "openrouter");
+  });
+
+  it("on a save, too", async () => {
+    modelKeyAvailability.mockResolvedValue({ available: false, needsPlan: true, unreadable: false });
+
+    const res = await PUT(putRequest({ name: "Renamed" }), ctx());
+
+    expect(await res.json()).toMatchObject({ pmAvailable: false, pmNeedsPlan: true });
+  });
+
+  it("answers the project, with the PM agent unavailable, when the key cannot be looked up", async () => {
+    modelKeyAvailability.mockRejectedValue(new Error("database blip"));
+
+    const res = await GET(new Request("http://localhost/api/projects/p1"), ctx());
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ pmAvailable: false, pmNeedsPlan: false, pmKeyUnreadable: false });
+  });
+});
+
 describe("the project answer names this instance's GitHub", () => {
   beforeEach(() => {
     check.mockResolvedValue(true);

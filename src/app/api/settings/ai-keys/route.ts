@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import type { ScopedDb } from "@/lib/db-scope";
-import { encryptSecret, isEncryptionConfigured } from "@/lib/encryption";
+import { decryptSecret, encryptSecret, isEncryptionConfigured } from "@/lib/encryption";
 import { can } from "@/lib/entitlements";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { withAdmin } from "@/lib/middleware";
@@ -10,7 +10,8 @@ import { organisationDomain } from "@/lib/organisation-host";
 import { duplicateKeyField } from "@/lib/mongo-errors";
 
 const MAX_KEY_LENGTH = 300;
-const MIN_KEY_LENGTH = 8;
+// Long enough that the four characters shown afterwards are not half of it
+const MIN_KEY_LENGTH = 20;
 const PROVIDERS = [
   { name: "openrouter", field: "openrouterKey", hint: "openrouterKeyHint", env: () => !!process.env.OPENROUTER_API_KEY },
   {
@@ -22,6 +23,15 @@ const PROVIDERS = [
 ] as const;
 
 type Provider = (typeof PROVIDERS)[number];
+
+function readable(sealed: string, db: ScopedDb): boolean {
+  try {
+    decryptSecret(sealed, db.organisation);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 async function view(db: ScopedDb) {
   const [settings, organisation] = await Promise.all([
@@ -39,6 +49,8 @@ async function view(db: ScopedDb) {
         {
           set: !!settings?.[p.field],
           hint: settings?.[p.field] ? (settings[p.hint] ?? "") : "",
+          // Stored, but sealed under a key this server no longer has: every call fails until it is entered again
+          unreadable: !!settings?.[p.field] && !readable(settings[p.field] as string, db),
           // What the instance offers when the organisation stores nothing: its own key where
           // self-hosted, the operator's where the plan includes managed AI
           included: p.env() && managed,
@@ -53,14 +65,10 @@ export const GET = withAdmin(async (_request, { db }) => {
   return NextResponse.json(await view(db));
 });
 
+// Printable ASCII only: a header cannot carry anything else, so a pasted zero-width space or an accent
+// would be stored as a key that fails every call
 function validKey(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    value.length >= MIN_KEY_LENGTH &&
-    value.length <= MAX_KEY_LENGTH &&
-    // eslint-disable-next-line no-control-regex
-    !/[\s\u0000-\u001f\u007f]/.test(value)
-  );
+  return typeof value === "string" && value.length >= MIN_KEY_LENGTH && value.length <= MAX_KEY_LENGTH && /^[\x21-\x7e]+$/.test(value);
 }
 
 export const PUT = withAdmin(async (request, { user, db }) => {
@@ -75,6 +83,9 @@ export const PUT = withAdmin(async (request, { user, db }) => {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return NextResponse.json({ error: "Expected an object" }, { status: 400 });
   }
 
   const set: Record<string, string> = {};
@@ -91,7 +102,7 @@ export const PUT = withAdmin(async (request, { user, db }) => {
     }
     if (!validKey(incoming)) {
       return NextResponse.json(
-        { error: `${provider.field} must be ${MIN_KEY_LENGTH} to ${MAX_KEY_LENGTH} characters with no spaces` },
+        { error: `${provider.field} must be ${MIN_KEY_LENGTH} to ${MAX_KEY_LENGTH} printable characters with no spaces` },
         { status: 400 }
       );
     }

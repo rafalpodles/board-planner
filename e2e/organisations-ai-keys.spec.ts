@@ -1,7 +1,10 @@
 import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
+import mongoose from "mongoose";
 import { AI_STUB_URL, PM_STUB_URL, RUN_ORGANISATIONS_SERVER } from "../playwright.config";
 import { signPlatformRequest } from "../src/lib/platform-request";
+import { encryptSecret } from "../src/lib/encryption";
 import { E2E_PLATFORM_REQUEST_KEY, e2eLicence } from "./licence-key";
+import { E2E_ENCRYPTION_KEY, E2E_MONGODB_URI } from "./seed";
 import {
   ACME,
   GLOBEX,
@@ -101,9 +104,6 @@ test.describe("a Free organisation with no key of its own", () => {
     await page.goto(`${originOf(ACME)}/projects/${SHARED_KEY}/pm`);
     await expect(page.getByTestId("ai-needs-key")).toContainText("The PM agent runs on your own key on the Free plan.");
     await expect(page.getByPlaceholder(/Message the PM/)).toHaveCount(0);
-
-    expect(await lastAuthorization(AI_STUB_URL)).toBeNull();
-    expect(await lastAuthorization(PM_STUB_URL)).toBeNull();
   });
 
   test("is refused with 402 at the routes, naming the feature, and no model is called", async ({ page }) => {
@@ -124,6 +124,47 @@ test.describe("a Free organisation with no key of its own", () => {
     await page.goto(`${originOf(ACME)}/settings/ai-keys`);
 
     await expect(page.getByText(/it does not run on the Free plan/)).toHaveCount(2);
+  });
+});
+
+test.describe("a stored key that can no longer be read", () => {
+  test("is said to be unreadable on every screen and at the route, and is never replaced by the operator's key, whatever the plan", async ({ page }) => {
+    // Sealed under another organisation's data key, which is how a value copied between rows, or a key that was rotated away, reads
+    process.env.ENCRYPTION_KEY = E2E_ENCRYPTION_KEY;
+    await mongoose.connect(E2E_MONGODB_URI);
+    try {
+      for (const who of [ACME, GLOBEX]) {
+        await mongoose.connection.db!.collection("settings").updateOne(
+          { organisation: who.organisation },
+          {
+            $set: {
+              openrouterKey: encryptSecret("sk-or-copied-0123456789", who === ACME ? GLOBEX.organisation : ACME.organisation),
+              openrouterKeyHint: "6789",
+            },
+            $setOnInsert: { aiModel: "gpt-4o-mini", signUpDomains: [] },
+          },
+          { upsert: true }
+        );
+      }
+    } finally {
+      await mongoose.disconnect();
+    }
+
+    for (const who of [ACME, GLOBEX]) {
+      await signInOn(page.context(), who);
+
+      await page.goto(`${originOf(who)}/settings/ai-keys`);
+      await expect(page.getByText("Cannot be read")).toBeVisible();
+      await expect(page.getByRole("alert")).toContainText(/cannot be read, so every call fails/);
+
+      await page.goto(`${originOf(who)}/projects/${SHARED_KEY}/pm`);
+      await expect(page.getByTestId("ai-key-unreadable")).toContainText("the stored AI key cannot be read");
+      await expect(page.getByPlaceholder(/Message the PM/)).toHaveCount(0);
+
+      const chat = await post(page, `/api/projects/${SHARED_KEY}/pm/chat`, { message: "hello" });
+      expect(chat, who.slug).toMatchObject({ status: 503, body: { reason: "own_key_unreadable" } });
+      expect(await lastAuthorization(PM_STUB_URL), `${who.slug}: the operator's key must not stand in`).toBeNull();
+    }
   });
 });
 
@@ -156,7 +197,7 @@ test.describe("an organisation's own key", () => {
       ] as const) {
         const card = page.locator("section", { has: page.getByRole("heading", { name: label }) });
         const saved = page.waitForResponse((r) => r.request().method() === "PUT" && r.url().includes("/api/settings/ai-keys"));
-        await card.getByLabel("Add your key").fill(value);
+        await card.getByLabel(/^Add your/).fill(value);
         await card.getByRole("button", { name: "Save key" }).click();
         expect((await saved).status()).toBe(200);
         await expect(card.getByText(value.slice(-4), { exact: true })).toBeVisible();

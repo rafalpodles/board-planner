@@ -153,6 +153,24 @@ describe("startBoardReview", () => {
     expect(isTurnRunning("p1")).toBe(false);
   });
 
+  // BP-652: the reason is what the owner who pressed "Run a review now" is told
+  it("says a Free organisation needs a key of its own or Pro, and spends nothing", async () => {
+    resolveModelKey.mockResolvedValueOnce({ ok: false, reason: "needs_plan", plan: "free" });
+
+    const start = await startBoardReview(db, "p1", "BP", PM, "pm-user");
+
+    expect(start).toEqual({ status: "skipped", reason: expect.stringMatching(/your own key.*upgrade to Pro/) });
+    expect(runPmTurn).not.toHaveBeenCalled();
+  });
+
+  it("says a stored key that cannot be read has to be entered again", async () => {
+    resolveModelKey.mockResolvedValueOnce({ ok: false, reason: "own_key_unreadable", plan: "pro" });
+
+    const start = await startBoardReview(db, "p1", "BP", PM, "pm-user");
+
+    expect(start).toEqual({ status: "skipped", reason: expect.stringMatching(/cannot be read.*Enter it again/) });
+  });
+
   it("refuses at once when the turn cap is reached, and spends nothing", async () => {
     isOverDailyTurnCap.mockResolvedValue({ over: true, cap: 3 });
 

@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 const generateTask = vi.fn();
 const projectFindOne = vi.fn();
 const resolveModelKey = vi.hoisted(() => vi.fn());
+const modelKeyAvailability = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/rateLimit", async () => {
@@ -13,6 +14,7 @@ vi.mock("@/lib/ai", () => ({ generateTask }));
 vi.mock("@/lib/model-keys", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/model-keys")>()),
   resolveModelKey,
+  modelKeyAvailability,
 }));
 vi.mock("@/lib/ai-fields", () => ({ choiceFieldsForPrompt: () => [], resolveGeneratedFields: () => ({}) }));
 vi.mock("@/models/settings", () => ({ getSettings: async () => ({ aiModel: "m" }) }));
@@ -66,6 +68,16 @@ describe("which key generate-task spends", () => {
     expect(generateTask.mock.calls[0][3]).toBe("sk-the-orgs-key");
   });
 
+  it("tells the client not to inherit the operator's OpenAI organisation and project for a key the organisation brought", async () => {
+    await generate("a task");
+    expect(generateTask.mock.calls[0][4]).toBe(true);
+
+    generateTask.mockClear();
+    resolveModelKey.mockResolvedValue({ ok: true, key: "sk-operators", source: "managed" });
+    await generate("a task", "u2");
+    expect(generateTask.mock.calls[0][4]).toBe(false);
+  });
+
   it("answers 402 when the plan has no managed AI and there is no key of its own, and generates nothing", async () => {
     resolveModelKey.mockResolvedValue({ ok: false, reason: "needs_plan", plan: "free" });
 
@@ -82,15 +94,18 @@ describe("which key generate-task spends", () => {
     expect((await generate("a task")).status).toBe(501);
   });
 
-  it("tells the form whether the feature is on, and whether a plan would turn it on", async () => {
+  it("tells the form whether the feature is on, whether a plan would turn it on, and whether a stored key is broken", async () => {
     const ask = () => GET(new Request("https://app.example.com/x"), { params: Promise.resolve({ projectId: "p1" }) } as never);
-    expect(await (await ask()).json()).toEqual({ enabled: true, needsPlan: false });
+    modelKeyAvailability.mockResolvedValue({ available: true, needsPlan: false, unreadable: false });
+    expect(await (await ask()).json()).toEqual({ enabled: true, needsPlan: false, keyUnreadable: false });
 
-    resolveModelKey.mockResolvedValue({ ok: false, reason: "needs_plan", plan: "free" });
-    expect(await (await ask()).json()).toEqual({ enabled: false, needsPlan: true });
+    modelKeyAvailability.mockResolvedValue({ available: false, needsPlan: true, unreadable: false });
+    expect(await (await ask()).json()).toEqual({ enabled: false, needsPlan: true, keyUnreadable: false });
 
-    resolveModelKey.mockResolvedValue({ ok: false, reason: "not_configured", plan: "free" });
-    expect(await (await ask()).json()).toEqual({ enabled: false, needsPlan: false });
+    modelKeyAvailability.mockResolvedValue({ available: false, needsPlan: false, unreadable: true });
+    expect(await (await ask()).json()).toEqual({ enabled: false, needsPlan: false, keyUnreadable: true });
+
+    expect(modelKeyAvailability).toHaveBeenCalledWith(expect.anything(), "openai");
   });
 });
 

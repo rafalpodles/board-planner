@@ -16,7 +16,7 @@ import { useOpenTask } from "@/hooks/use-open-task";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { Modal } from "@/components/ui/Modal";
 import { BoardLoadFailed } from "@/components/ui/LoadFailed";
-import { AiNeedsKey } from "@/components/AiNeedsKey";
+import { AiKeyUnreadable, AiNeedsKey } from "@/components/AiNeedsKey";
 import { EMPTY_THREAD, withNewestPage, withOlderPage, type ThreadPage } from "./thread-paging";
 
 const MAX_ATTACHMENTS = 4;
@@ -348,10 +348,11 @@ export function PmChat({
     // so it may even be this reader's own turn from another tab (BP-452).
     if (!response.ok) {
       const err = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
-      if (response.status === 503) {
-        unsend("PM is not configured on the server (OPENROUTER_API_KEY missing).", false);
-      } else if (response.status === 402) {
+      // The server's own words for a refusal about the key: it knows whether a plan or a re-entered key is the fix
+      if (response.status === 402 || (response.status === 503 && err.reason === "own_key_unreadable")) {
         unsend(err.error || "The PM agent needs your own key or the Pro plan.", false);
+      } else if (response.status === 503) {
+        unsend("PM is not configured on the server (OPENROUTER_API_KEY missing).", false);
       } else {
         // A 400 is deterministic in the request; a 409 or 429 is about the moment
         unsend(err.error || "Request failed.", response.status !== 400);
@@ -496,6 +497,15 @@ export function PmChat({
           setLoadAttempt((n) => n + 1);
         }}
       />
+    );
+  }
+
+  if (!project?.pmAvailable && project?.pmKeyUnreadable) {
+    return (
+      <div className="mx-auto max-w-md px-4 py-10 space-y-3">
+        <h1 className="text-xl font-bold text-center">PM Agent</h1>
+        <AiKeyUnreadable what="The PM agent" />
+      </div>
     );
   }
 

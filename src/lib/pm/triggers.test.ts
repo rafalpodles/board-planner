@@ -97,6 +97,17 @@ describe("runPmTrigger", () => {
     });
   });
 
+  it("settles the trigger with the reason a Free organisation has no model, and runs nothing", async () => {
+    resolveModelKey.mockResolvedValueOnce({ ok: false, reason: "needs_plan", plan: "free" });
+
+    await runPmTrigger(db, trigger);
+
+    expect(runPmTurn).not.toHaveBeenCalled();
+    expect(findOneAndUpdate).toHaveBeenCalledWith({ _id: "t1", organisation: DEFAULT_ORGANISATION_ID }, {
+      $set: { state: "failed", lastError: expect.stringMatching(/your own key.*upgrade to Pro/), active: false },
+    });
+  });
+
   it("withholds assign_task and change_status from the turn", async () => {
     await runPmTrigger(db, trigger);
 

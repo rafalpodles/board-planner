@@ -146,7 +146,8 @@ export async function chatCompletion(opts: {
 
   if (!response.ok) {
     const bodyText = await response.text().catch(() => "");
-    return { type: "error", error: `OpenRouter HTTP ${response.status}: ${bodyText.slice(0, 300)}` };
+    // A provider's refusal of a key can quote it back, and this lands in a thread every member reads
+    return { type: "error", error: `OpenRouter HTTP ${response.status}: ${bodyText.replaceAll(apiKey, "[key]").slice(0, 300)}` };
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

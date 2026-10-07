@@ -1284,6 +1284,8 @@ export interface ApiProject {
   pmAvailable?: boolean;
   // The PM agent would run if the organisation had a key of its own or a plan that includes ours
   pmNeedsPlan?: boolean;
+  // The key the organisation stored can no longer be read, so it has to be entered again
+  pmKeyUnreadable?: boolean;
   createdBy?: ApiUser | string;
   canAdmin?: boolean;
   createdAt: string;
