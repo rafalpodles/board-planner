@@ -15,10 +15,5 @@ export default function AiKeysSettingsPage() {
 
   if (isLoading || !isAdmin) return null;
 
-  return (
-    <div className="max-w-2xl">
-      <h2 className="text-lg font-semibold mb-1">AI keys</h2>
-      <AiKeys />
-    </div>
-  );
+  return <AiKeys />;
 }

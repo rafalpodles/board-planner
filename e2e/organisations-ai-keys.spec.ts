@@ -133,18 +133,16 @@ test.describe("a stored key that can no longer be read", () => {
     process.env.ENCRYPTION_KEY = E2E_ENCRYPTION_KEY;
     await mongoose.connect(E2E_MONGODB_URI);
     try {
+      const settings = mongoose.connection.db!.collection("settings");
       for (const who of [ACME, GLOBEX]) {
-        await mongoose.connection.db!.collection("settings").updateOne(
-          { organisation: who.organisation },
-          {
-            $set: {
-              openrouterKey: encryptSecret("sk-or-copied-0123456789", who === ACME ? GLOBEX.organisation : ACME.organisation),
-              openrouterKeyHint: "6789",
-            },
-            $setOnInsert: { aiModel: "gpt-4o-mini", signUpDomains: [] },
-          },
-          { upsert: true }
-        );
+        await settings.deleteMany({ organisation: who.organisation });
+        await settings.insertOne({
+          organisation: who.organisation,
+          aiModel: "gpt-4o-mini",
+          signUpDomains: [],
+          openrouterKey: encryptSecret("sk-or-copied-0123456789", who === ACME ? GLOBEX.organisation : ACME.organisation),
+          openrouterKeyHint: "6789",
+        });
       }
     } finally {
       await mongoose.disconnect();
@@ -154,8 +152,8 @@ test.describe("a stored key that can no longer be read", () => {
       await signInOn(page.context(), who);
 
       await page.goto(`${originOf(who)}/settings/ai-keys`);
-      await expect(page.getByText("Cannot be read")).toBeVisible();
-      await expect(page.getByRole("alert")).toContainText(/cannot be read, so every call fails/);
+      await expect(page.getByText("Cannot be read", { exact: true })).toBeVisible();
+      await expect(page.getByText(/The stored key cannot be read, so every call fails/)).toBeVisible();
 
       await page.goto(`${originOf(who)}/projects/${SHARED_KEY}/pm`);
       await expect(page.getByTestId("ai-key-unreadable")).toContainText("the stored AI key cannot be read");

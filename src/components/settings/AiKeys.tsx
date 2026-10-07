@@ -197,13 +197,17 @@ export function AiKeys() {
     load();
   }, [load]);
 
+  // The heading waits for the answer, as the neighbouring screens' do: it is what says the page has loaded
   if (failed) {
     return (
-      <LoadFailed
-        testId="ai-keys-error"
-        message="Failed to read the AI keys, so this page cannot say which key runs the AI."
-        onRetry={load}
-      />
+      <div className="max-w-2xl">
+        <h2 className="text-lg font-semibold mb-1">AI keys</h2>
+        <LoadFailed
+          testId="ai-keys-error"
+          message="Failed to read the AI keys, so this page cannot say which key runs the AI."
+          onRetry={load}
+        />
+      </div>
     );
   }
   if (!answer) {
@@ -216,6 +220,7 @@ export function AiKeys() {
 
   return (
     <div className="max-w-2xl">
+      <h2 className="text-lg font-semibold mb-1">AI keys</h2>
       <p className="mb-4 text-sm text-text-muted">
         {answer.hosted
           ? "Your own key is used first, on every plan. Pro and the trial can also use ours."
