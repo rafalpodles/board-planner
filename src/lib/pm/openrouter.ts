@@ -111,6 +111,8 @@ export async function chatCompletion(opts: {
   signal?: AbortSignal;
 }): Promise<OrCompletionResult> {
   const { apiKey } = opts;
+  // A provider's refusal of a key can quote it back, and what lands here reaches a thread every member reads
+  const withoutKey = (text: string) => (apiKey ? text.replaceAll(apiKey, "[key]") : text);
 
   let response: Response;
   try {
@@ -141,13 +143,12 @@ export async function chatCompletion(opts: {
     });
   } catch (err) {
     if (opts.signal?.aborted) return { type: "aborted" };
-    return { type: "error", error: `OpenRouter request failed: ${err instanceof Error ? err.message : String(err)}` };
+    return { type: "error", error: `OpenRouter request failed: ${withoutKey(err instanceof Error ? err.message : String(err))}` };
   }
 
   if (!response.ok) {
     const bodyText = await response.text().catch(() => "");
-    // A provider's refusal of a key can quote it back, and this lands in a thread every member reads
-    return { type: "error", error: `OpenRouter HTTP ${response.status}: ${bodyText.replaceAll(apiKey, "[key]").slice(0, 300)}` };
+    return { type: "error", error: `OpenRouter HTTP ${response.status}: ${withoutKey(bodyText).slice(0, 300)}` };
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -162,7 +163,7 @@ export async function chatCompletion(opts: {
   const message = data?.choices?.[0]?.message;
   if (!message) {
     const apiError = data?.error?.message;
-    return { type: "error", error: apiError ? `OpenRouter error: ${apiError}` : "OpenRouter returned no choices" };
+    return { type: "error", error: apiError ? `OpenRouter error: ${withoutKey(String(apiError))}` : "OpenRouter returned no choices" };
   }
 
   const rawCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];

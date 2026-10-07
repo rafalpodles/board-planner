@@ -1019,13 +1019,15 @@ describe("the project answer says whether the PM agent can run", () => {
     expect(await res.json()).toMatchObject({ pmAvailable: false, pmNeedsPlan: true });
   });
 
-  it("answers the project, with the PM agent unavailable, when the key cannot be looked up", async () => {
+  it("answers the project, and leaves the three fields out so a poll keeps what the screen knew, when the key cannot be looked up", async () => {
     modelKeyAvailability.mockRejectedValue(new Error("database blip"));
 
     const res = await GET(new Request("http://localhost/api/projects/p1"), ctx());
+    const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ pmAvailable: false, pmNeedsPlan: false, pmKeyUnreadable: false });
+    expect(body).toMatchObject({ name: "Test Project" });
+    for (const field of ["pmAvailable", "pmNeedsPlan", "pmKeyUnreadable"]) expect(body).not.toHaveProperty(field);
   });
 });
 

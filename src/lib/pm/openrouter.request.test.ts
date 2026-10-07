@@ -69,6 +69,22 @@ describe("a refusal of the key", () => {
   });
 });
 
+describe("the other ways a provider's answer can quote the key", () => {
+  const KEY = "sk-or-secret-0123456789";
+
+  it("is not repeated from a 200 that carries an error", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: { message: `bad ${KEY}` } }), { status: 200 })));
+
+    expect(JSON.stringify(await send({ apiKey: KEY }))).not.toContain(KEY);
+  });
+
+  it("is not repeated from a failure to connect", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new Error(`connect failed for ${KEY}`))));
+
+    expect(JSON.stringify(await send({ apiKey: KEY }))).not.toContain(KEY);
+  });
+});
+
 describe("the sticky-routing key on the wire", () => {
   it("is sent when the caller names a session", async () => {
     await send({ sessionId: "abc123" });

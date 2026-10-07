@@ -15,9 +15,9 @@ export const GET = withAdmin(async (_request, { db }) => {
   ]);
 
   return NextResponse.json({
-    pmAvailable: availability.available,
-    pmNeedsPlan: availability.needsPlan,
-    pmKeyUnreadable: availability.keyUnreadable,
+    pmAvailable: availability?.available ?? false,
+    pmNeedsPlan: availability?.needsPlan ?? false,
+    pmKeyUnreadable: availability?.keyUnreadable ?? false,
     defaults: {
       pmDefaultModel: settings.pmDefaultModel || "",
       pmDefaultDailyTurnCap: settings.pmDefaultDailyTurnCap || 0,

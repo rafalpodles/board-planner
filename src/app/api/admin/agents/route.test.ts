@@ -41,6 +41,12 @@ describe("GET /api/admin/agents", () => {
     });
   });
 
+  it("says the agent cannot run, rather than failing, when availability cannot be read", async () => {
+    pmAvailability.mockResolvedValue(null);
+
+    expect(await (await ask()).json()).toMatchObject({ pmAvailable: false, pmNeedsPlan: false, pmKeyUnreadable: false });
+  });
+
   it("answers no member", async () => {
     getAuthUser.mockResolvedValue({ ...ADMIN, role: "member" });
 

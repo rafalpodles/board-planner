@@ -94,7 +94,7 @@ test.afterEach(async ({ request }) => {
 });
 
 test.describe("a Free organisation with no key of its own", () => {
-  test("is offered its own key or Pro where AI Assist and the PM agent would be, and nothing is spent", async ({ page }) => {
+  test("is offered its own key or Pro where AI Assist and the PM agent would be", async ({ page }) => {
     const modal = await openNewTaskForm(page, ACME);
 
     await expect(modal.getByTestId("ai-needs-key")).toContainText("AI Assist runs on your own key on the Free plan.");
