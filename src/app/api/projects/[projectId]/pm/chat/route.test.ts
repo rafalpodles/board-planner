@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const getAuthUser = vi.fn();
 const check = vi.fn();
 const resolveProjectId = vi.fn();
-const isPmAvailable = vi.fn();
+const resolveModelKey = vi.hoisted(() => vi.fn());
 const runPmTurn = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
@@ -11,7 +11,10 @@ vi.mock("@/lib/auth", () => ({ getAuthUser, RateLimitError: class extends Error 
 vi.mock("@/lib/grants", () => ({ check, accessibleProjectIds: vi.fn() }));
 const refusedOnThisHost = vi.hoisted(() => vi.fn(async () => null as Response | null));
 vi.mock("@/lib/middleware", () => ({ resolveProjectId, refusedOnThisHost }));
-vi.mock("@/lib/pm/config", () => ({ isPmAvailable }));
+vi.mock("@/lib/model-keys", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/model-keys")>()),
+  resolveModelKey,
+}));
 vi.mock("@/lib/pm/agent", () => ({ runPmTurn }));
 
 const { POST } = await import("./route");
@@ -36,7 +39,7 @@ beforeEach(() => {
   resolveProjectId.mockResolvedValue(PROJECT_ID);
   check.mockResolvedValue(true);
   // Nothing past the gate is under test, and an unconfigured PM is the first thing beyond it
-  isPmAvailable.mockReturnValue(false);
+  resolveModelKey.mockResolvedValue({ ok: false, reason: "not_configured", plan: "free" });
 });
 
 // This route streams SSE, so it authenticates by hand and sits behind no middleware — the one
@@ -61,6 +64,26 @@ describe("POST /api/projects/:projectId/pm/chat", () => {
     const response = await POST(request(), ctx());
 
     expect(response.status).toBe(503);
+  });
+
+  // BP-652
+  it("answers 402 for an organisation whose plan has no managed AI and that has no key of its own", async () => {
+    resolveModelKey.mockResolvedValue({ ok: false, reason: "needs_plan", plan: "free" });
+
+    const response = await POST(request(), ctx());
+
+    expect(response.status).toBe(402);
+    expect(await response.json()).toMatchObject({ feature: "ai.managed", plan: "free" });
+    expect(runPmTurn).not.toHaveBeenCalled();
+  });
+
+  it("says so, and stops, when the organisation's own key can no longer be read", async () => {
+    resolveModelKey.mockResolvedValue({ ok: false, reason: "own_key_unreadable", plan: "pro" });
+
+    const response = await POST(request(), ctx());
+
+    expect(response.status).toBe(503);
+    expect((await response.json()).error).toMatch(/Enter it again/);
   });
 
   it("rejects a project reference that resolves to nothing", async () => {

@@ -97,6 +97,7 @@ function cacheTokensOf(details: any): { cachedPromptTokens: number; cacheWriteTo
 
 export async function chatCompletion(opts: {
   model: string;
+  apiKey: string;
   messages: OrChatMessage[];
   tools: OrToolDefinition[];
   /**
@@ -109,10 +110,7 @@ export async function chatCompletion(opts: {
   sessionId?: string;
   signal?: AbortSignal;
 }): Promise<OrCompletionResult> {
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) {
-    return { type: "error", error: "OPENROUTER_API_KEY is not configured" };
-  }
+  const { apiKey } = opts;
 
   let response: Response;
   try {

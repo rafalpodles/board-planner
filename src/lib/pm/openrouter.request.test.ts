@@ -8,12 +8,14 @@ import { chatCompletion } from "./openrouter";
  */
 
 const bodies: Record<string, unknown>[] = [];
+const authorizations: (string | undefined)[] = [];
 
 function captureRequests() {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (_url: string, init: RequestInit) => {
       bodies.push(JSON.parse(String(init.body)));
+      authorizations.push((init.headers as Record<string, string>).Authorization);
       return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), { status: 200 });
     })
   );
@@ -25,15 +27,31 @@ const MESSAGES = [
 ];
 
 const send = (over: Record<string, unknown> = {}) =>
-  chatCompletion({ model: "deepseek/deepseek-v4-flash-0731", messages: MESSAGES, tools: [], ...over });
+  chatCompletion({ model: "deepseek/deepseek-v4-flash-0731", apiKey: "test-key", messages: MESSAGES, tools: [], ...over });
 
 beforeEach(() => {
-  process.env.OPENROUTER_API_KEY = "test-key";
   bodies.length = 0;
+  authorizations.length = 0;
   captureRequests();
 });
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe("the key the call is made with", () => {
+  /**
+   * BP-652. The key is the caller's: an organisation's own key, or the instance's for one that may
+   * use it. The environment must not leak in underneath, or a Free organisation's call is billed
+   * to the operator.
+   */
+  it("is the one passed in, whatever the environment holds", async () => {
+    process.env.OPENROUTER_API_KEY = "the-operators-key";
+
+    await send({ apiKey: "the-organisations-own-key" });
+
+    expect(authorizations).toEqual(["Bearer the-organisations-own-key"]);
+    delete process.env.OPENROUTER_API_KEY;
+  });
 });
 
 describe("the sticky-routing key on the wire", () => {

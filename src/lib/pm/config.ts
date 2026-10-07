@@ -8,7 +8,9 @@ import {
   PM_MCP_AUTH_TYPES,
   PmMcpAuthType,
 } from "@/types";
+import type { ScopedDb } from "@/lib/db-scope";
 import { encryptSecret, decryptSecret, isEncryptionConfigured } from "@/lib/encryption";
+import { resolveModelKey } from "@/lib/model-keys";
 import { isAllowedMcpServerUrl } from "@/lib/url-validation";
 import { sameEndpoint } from "@/lib/host-bound-secrets";
 import { isValidTimezone } from "./autonomy";
@@ -321,6 +323,7 @@ export function sanitizeMcpServers(
   }));
 }
 
-export function isPmAvailable(): boolean {
-  return !!process.env.OPENROUTER_API_KEY;
+export async function pmAvailability(db: ScopedDb): Promise<{ available: boolean; needsPlan: boolean }> {
+  const key = await resolveModelKey(db, "openrouter");
+  return { available: key.ok, needsPlan: !key.ok && key.reason === "needs_plan" };
 }

@@ -6,7 +6,7 @@ import { chatCompletion } from "./openrouter";
  * downstream mocks `chatCompletion`, so nothing exercised this parsing — removing it from the text
  * arm left the whole PM suite green, which is why this file exists at all.
  */
-const call = () => chatCompletion({ model: "m", messages: [], tools: [] });
+const call = () => chatCompletion({ model: "m", apiKey: "test-key", messages: [], tools: [] });
 
 function respondWith(body: unknown) {
   vi.stubGlobal(
@@ -23,9 +23,6 @@ const TOOLS = {
 };
 const USAGE = { prompt_tokens: 1200, completion_tokens: 300, total_tokens: 1500 };
 
-beforeEach(() => {
-  process.env.OPENROUTER_API_KEY = "test-key";
-});
 afterEach(() => {
   vi.unstubAllGlobals();
 });

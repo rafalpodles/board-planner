@@ -1282,6 +1282,8 @@ export interface ApiProject {
   hasActiveSprint?: boolean;
   pm?: ApiPmConfig;
   pmAvailable?: boolean;
+  // The PM agent would run if the organisation had a key of its own or a plan that includes ours
+  pmNeedsPlan?: boolean;
   createdBy?: ApiUser | string;
   canAdmin?: boolean;
   createdAt: string;

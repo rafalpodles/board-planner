@@ -13,6 +13,7 @@ import { pmThreadFilter } from "./thread";
 import { getProjectColumns, defaultStatusFor } from "@/lib/columns";
 import { APP_NAME } from "@/lib/brand";
 import type { ScopedDb } from "@/lib/db-scope";
+import { describeModelKeyRefusal, resolveModelKey } from "@/lib/model-keys";
 
 /** Round-trips one turn may make. Exported because the cap the operator sees is in turns, and the
  * screens that show it have to be able to say what a turn can cost (BP-284). */
@@ -185,6 +186,12 @@ export async function runPmTurn(db: ScopedDb, opts: {
   if (!project) return { ok: false, message: null, error: "Project not found" };
   if (!isPmRunnable(project.pm)) return { ok: false, message: null, error: pmDisabledReason(project.pm) };
 
+  const modelKey = await resolveModelKey(db, "openrouter");
+  if (!modelKey.ok) {
+    const { error } = describeModelKeyRefusal(modelKey, { error: "The PM agent is not configured on this instance", status: 503 });
+    return { ok: false, message: null, error };
+  }
+
   const pmUser = await getPmUser(db);
   const model = await resolvePmModel(db, project.pm.model);
   const trigger = opts.trigger ?? { type: "chat" as const };
@@ -351,6 +358,7 @@ export async function runPmTurn(db: ScopedDb, opts: {
 
     const completion = await chatCompletion({
       model,
+      apiKey: modelKey.key,
       messages,
       tools: toolDefinitions,
       // Everything the loop appends from here — assistant tool calls and their results — grows

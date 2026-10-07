@@ -2,13 +2,18 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const generateTask = vi.fn();
 const projectFindOne = vi.fn();
+const resolveModelKey = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/rateLimit", async () => {
   const { inMemoryRateLimitModel } = await import("@/lib/rate-limit-test-store");
   return { RateLimit: inMemoryRateLimitModel() };
 });
-vi.mock("@/lib/ai", () => ({ isAIEnabled: () => true, generateTask }));
+vi.mock("@/lib/ai", () => ({ generateTask }));
+vi.mock("@/lib/model-keys", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/model-keys")>()),
+  resolveModelKey,
+}));
 vi.mock("@/lib/ai-fields", () => ({ choiceFieldsForPrompt: () => [], resolveGeneratedFields: () => ({}) }));
 vi.mock("@/models/settings", () => ({ getSettings: async () => ({ aiModel: "m" }) }));
 vi.mock("@/models/project", () => ({ Project: { findOne: projectFindOne } }));
@@ -24,7 +29,7 @@ vi.mock("@/lib/middleware", async () => {
   };
 });
 
-const { POST, MAX_PROMPT_LENGTH, GENERATIONS_PER_USER_WINDOW } = await import("./route");
+const { GET, POST, MAX_PROMPT_LENGTH, GENERATIONS_PER_USER_WINDOW } = await import("./route");
 const { resetRateLimits } = await import("@/lib/rate-limit");
 
 function generate(prompt: unknown, userId = "u1", projectId = "p1") {
@@ -43,6 +48,7 @@ beforeEach(async () => {
   await resetRateLimits();
   projectFindOne.mockResolvedValue({ name: "Board", description: "", customFields: [], categories: [] });
   generateTask.mockResolvedValue({ title: "T", fields: {} });
+  resolveModelKey.mockResolvedValue({ ok: true, key: "sk-the-orgs-key", source: "own" });
 });
 
 afterEach(() => {
@@ -51,6 +57,43 @@ afterEach(() => {
 
 // BP-323: the PM chat beside this route had a length cap, a throttle, a daily cap and a lock; this
 // one shipped any prompt to the instance's OpenAI key as often as it was asked
+// BP-652. Whose key a generation is spent on is decided per organisation, before anything is counted
+describe("which key generate-task spends", () => {
+  it("makes the call with the key it resolved for this organisation", async () => {
+    await generate("a task");
+
+    expect(resolveModelKey).toHaveBeenCalledWith(expect.anything(), "openai");
+    expect(generateTask.mock.calls[0][3]).toBe("sk-the-orgs-key");
+  });
+
+  it("answers 402 when the plan has no managed AI and there is no key of its own, and generates nothing", async () => {
+    resolveModelKey.mockResolvedValue({ ok: false, reason: "needs_plan", plan: "free" });
+
+    const res = await generate("a task");
+
+    expect(res.status).toBe(402);
+    expect(await res.json()).toMatchObject({ feature: "ai.managed", plan: "free" });
+    expect(generateTask).not.toHaveBeenCalled();
+  });
+
+  it("keeps answering 501 where nothing is configured at all", async () => {
+    resolveModelKey.mockResolvedValue({ ok: false, reason: "not_configured", plan: "free" });
+
+    expect((await generate("a task")).status).toBe(501);
+  });
+
+  it("tells the form whether the feature is on, and whether a plan would turn it on", async () => {
+    const ask = () => GET(new Request("https://app.example.com/x"), { params: Promise.resolve({ projectId: "p1" }) } as never);
+    expect(await (await ask()).json()).toEqual({ enabled: true, needsPlan: false });
+
+    resolveModelKey.mockResolvedValue({ ok: false, reason: "needs_plan", plan: "free" });
+    expect(await (await ask()).json()).toEqual({ enabled: false, needsPlan: true });
+
+    resolveModelKey.mockResolvedValue({ ok: false, reason: "not_configured", plan: "free" });
+    expect(await (await ask()).json()).toEqual({ enabled: false, needsPlan: false });
+  });
+});
+
 describe("POST generate-task", () => {
   it("refuses a prompt past the length cap without spending anything", async () => {
     const res = await generate("p".repeat(MAX_PROMPT_LENGTH + 1));

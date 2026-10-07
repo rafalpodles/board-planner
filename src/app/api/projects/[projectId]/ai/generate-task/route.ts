@@ -4,7 +4,8 @@ import type { ScopedDb } from "@/lib/db-scope";
 import { withProjectAccess } from "@/lib/middleware";
 import type { HydratedDocument } from "mongoose";
 import type { IProject } from "@/types";
-import { isAIEnabled, generateTask, ExistingTaskSummary } from "@/lib/ai";
+import { generateTask, ExistingTaskSummary } from "@/lib/ai";
+import { modelKeyRefusalResponse, resolveModelKey } from "@/lib/model-keys";
 import { choiceFieldsForPrompt, resolveGeneratedFields } from "@/lib/ai-fields";
 import { getSettings } from "@/models/settings";
 import { bareHost, hostOf, projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
@@ -73,18 +74,20 @@ export async function fetchReadme(githubRepo: string): Promise<string | undefine
   }
 }
 
-export const GET = withProjectAccess(async () => {
-  return NextResponse.json({ enabled: isAIEnabled() });
+export const GET = withProjectAccess(async (_request, { db }) => {
+  const key = await resolveModelKey(db, "openai");
+  return NextResponse.json({ enabled: key.ok, needsPlan: !key.ok && key.reason === "needs_plan" });
 });
 
 export const POST = withProjectAccess(async (request, { params, user, db }) => {
   const { projectId } = await params;
 
-  if (!isAIEnabled()) {
-    return NextResponse.json(
-      { error: "AI is not configured. Set OPENAI_API_KEY environment variable." },
-      { status: 501 }
-    );
+  const modelKey = await resolveModelKey(db, "openai");
+  if (!modelKey.ok) {
+    return modelKeyRefusalResponse(modelKey, {
+      error: "AI is not configured. Set OPENAI_API_KEY environment variable.",
+      status: 501,
+    });
   }
 
   await connectDB();
@@ -134,13 +137,19 @@ export const POST = withProjectAccess(async (request, { params, user, db }) => {
     if (!project) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
-    return await generate(db, project, projectId, prompt);
+    return await generate(db, project, projectId, prompt, modelKey.key);
   } finally {
     inFlight.delete(holder);
   }
 });
 
-async function generate(db: ScopedDb, project: HydratedDocument<IProject>, projectId: string, prompt: string) {
+async function generate(
+  db: ScopedDb,
+  project: HydratedDocument<IProject>,
+  projectId: string,
+  prompt: string,
+  apiKey: string
+) {
   const [readme, tasks] = await Promise.all([
     // raw.githubusercontent.com only serves github.com, so a project hosted anywhere else — and
     // that now includes this instance's own GitHub Enterprise — gets no README rather than a
@@ -176,7 +185,8 @@ async function generate(db: ScopedDb, project: HydratedDocument<IProject>, proje
         readme,
         existingTasks,
       },
-      settings.aiModel
+      settings.aiModel,
+      apiKey
     );
 
     // Resolved here, where the field definitions live, so the client never has to work

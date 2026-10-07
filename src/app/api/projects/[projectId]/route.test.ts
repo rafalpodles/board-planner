@@ -20,6 +20,7 @@ const dropProjectReferences = vi.fn();
 const logInstanceAudit = vi.fn();
 const logProjectAudit = vi.fn();
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
+vi.mock("@/lib/model-keys", () => ({ resolveModelKey: async () => ({ ok: true, key: "k", source: "own" }) }));
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({
   getAuthUser,

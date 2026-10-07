@@ -1,19 +1,6 @@
 import OpenAI from "openai";
 import type { PromptField } from "./ai-fields";
 
-const apiKey = process.env.OPENAI_API_KEY || process.env.OPENAPI_KEY;
-
-export function isAIEnabled(): boolean {
-  return !!apiKey;
-}
-
-function getClient(): OpenAI {
-  if (!apiKey) {
-    throw new Error("OpenAI API key not configured");
-  }
-  return new OpenAI({ apiKey });
-}
-
 export interface GeneratedTask {
   title: string;
   description: string;
@@ -50,9 +37,10 @@ interface ProjectContext {
 export async function generateTask(
   prompt: string,
   context: ProjectContext,
-  model: string = "gpt-4o-mini"
+  model: string,
+  apiKey: string
 ): Promise<GeneratedTask> {
-  const client = getClient();
+  const client = new OpenAI({ apiKey });
 
   const categoryList =
     context.categories && context.categories.length > 0

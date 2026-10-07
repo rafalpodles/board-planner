@@ -26,8 +26,11 @@ vi.mock("./agent", () => ({ runPmTurn }));
 vi.mock("./turn-cap", () => ({ isOverDailyTurnCap, dailyPmSpend }));
 vi.mock("./triggers", () => ({ drainPmTriggers }));
 vi.mock("./pm-user", () => ({ getPmUser: async () => ({ _id: "pm-user" }) }));
-const isPmAvailable = vi.fn(() => true);
-vi.mock("./config", () => ({ isPmAvailable: () => isPmAvailable() }));
+const resolveModelKey = vi.hoisted(() => vi.fn(async () => ({ ok: true, key: "k", source: "own" }) as unknown));
+vi.mock("@/lib/model-keys", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/model-keys")>()),
+  resolveModelKey,
+}));
 vi.mock("./board-review", () => ({
   buildBoardDigest,
   digestHeadline: () => "Board review: 2 findings",
@@ -141,7 +144,7 @@ describe("pmSchedulerTick", () => {
 
 describe("startBoardReview", () => {
   it("refuses without a model, rather than spending a turn on a warning", async () => {
-    isPmAvailable.mockReturnValueOnce(false);
+    resolveModelKey.mockResolvedValueOnce({ ok: false, reason: "not_configured", plan: "free" });
 
     const start = await startBoardReview(db, "p1", "BP", PM, "pm-user");
 

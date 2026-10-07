@@ -19,6 +19,7 @@ import type { McpCatalogTool } from "@/components/settings/McpToolPicker";
 import { assessToolBudget, describeToolBudget } from "@/lib/pm/tool-budget";
 import { catalogKey } from "@/lib/pm/catalog-key";
 import { distinctRowNames } from "@/lib/row-names";
+import { AiNeedsKey } from "@/components/AiNeedsKey";
 import { SectionProps } from "./types";
 
 interface McpServerDraft {
@@ -483,6 +484,14 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
     } catch (err) {
       toast(err instanceof Error ? err.message : "Disconnect failed", "error");
     }
+  }
+
+  if (!project.pmAvailable && project.pmNeedsPlan) {
+    return (
+      <SettingsCard title="PM agent">
+        <AiNeedsKey what="The PM agent" />
+      </SettingsCard>
+    );
   }
 
   if (!project.pmAvailable) {
