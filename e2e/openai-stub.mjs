@@ -24,6 +24,8 @@ const LOOPBACK = "127.0.0.1";
 const PORT = Number(process.env.AI_STUB_PORT ?? 3989);
 
 let lastRequest = null;
+// Which key the last call was made with (BP-652), read off the wire
+let lastAuthorization = null;
 
 function json(res, body, status = 200) {
   const payload = JSON.stringify(body);
@@ -49,8 +51,14 @@ serve({
       return;
     }
 
+    if (req.url === "/last-authorization") {
+      json(res, { authorization: lastAuthorization });
+      return;
+    }
+
     if (req.url === "/reset") {
       lastRequest = null;
+      lastAuthorization = null;
       json(res, { ok: true });
       return;
     }
@@ -60,6 +68,7 @@ serve({
       return;
     }
 
+    lastAuthorization = req.headers.authorization ?? null;
     const raw = await readBody(req);
     let request = {};
     try {

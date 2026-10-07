@@ -55,6 +55,10 @@ function reply(res, body) {
 // The shape of the last completion request, for /last
 let received = null;
 
+// The Authorization header of the last completion request, for /last-authorization (BP-652): which
+// key a call was made with is only visible on the wire
+let lastAuthorization = null;
+
 /**
  * One entry per completion request, for /requests (BP-568). What a turn's second call sends in
  * front of the cache breakpoint has to be the same bytes as its first, and no assertion on the
@@ -121,6 +125,7 @@ serve({
     if (req.url === "/reset") {
       seen.clear();
       received = null;
+      lastAuthorization = null;
       requests = [];
       res.writeHead(200, { "Content-Type": "text/plain" }).end("ok");
       return;
@@ -131,6 +136,11 @@ serve({
     // rather than merely that a turn ran (BP-451 review).
     if (req.url === "/last") {
       res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(received));
+      return;
+    }
+
+    if (req.url === "/last-authorization") {
+      res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ authorization: lastAuthorization }));
       return;
     }
 
@@ -156,6 +166,7 @@ serve({
       return;
     }
 
+    lastAuthorization = req.headers.authorization ?? null;
     const raw = await readBody(req);
     let messages = [];
     let offeredTools = [];
