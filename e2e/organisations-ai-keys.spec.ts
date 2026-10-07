@@ -142,6 +142,8 @@ test.describe("a stored key that can no longer be read", () => {
           signUpDomains: [],
           openrouterKey: encryptSecret("sk-or-copied-0123456789", who === ACME ? GLOBEX.organisation : ACME.organisation),
           openrouterKeyHint: "6789",
+          openaiKey: encryptSecret("sk-copied-0123456789", who === ACME ? GLOBEX.organisation : ACME.organisation),
+          openaiKeyHint: "6789",
         });
       }
     } finally {
@@ -152,8 +154,15 @@ test.describe("a stored key that can no longer be read", () => {
       await signInOn(page.context(), who);
 
       await page.goto(`${originOf(who)}/settings/ai-keys`);
-      await expect(page.getByText("Cannot be read", { exact: true })).toBeVisible();
-      await expect(page.getByText(/The stored key cannot be read, so every call fails/)).toBeVisible();
+      await expect(page.getByText("Cannot be read", { exact: true })).toHaveCount(2);
+      await expect(page.getByText(/The stored key cannot be read, so every call fails/)).toHaveCount(2);
+
+      await page.goto(`${originOf(who)}/projects/${SHARED_KEY}`);
+      await page.getByRole("button", { name: "New task" }).click();
+      const modal = page.getByRole("dialog", { name: "New Task" });
+      await expect(modal.getByTestId("ai-key-unreadable")).toContainText("AI Assist cannot run: the stored AI key cannot be read");
+      await expect(modal.getByPlaceholder("Describe what you need")).toHaveCount(0);
+      await page.keyboard.press("Escape");
 
       await page.goto(`${originOf(who)}/projects/${SHARED_KEY}/pm`);
       await expect(page.getByTestId("ai-key-unreadable")).toContainText("the stored AI key cannot be read");
