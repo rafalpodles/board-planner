@@ -54,6 +54,21 @@ describe("the key the call is made with", () => {
   });
 });
 
+describe("a refusal of the key", () => {
+  // The answer lands in a thread every member of the project reads, and a provider may quote the key back
+  it("does not carry the key into the error it reports", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ error: { message: "Invalid key sk-or-secret-0123456789" } }), { status: 401 }))
+    );
+
+    const result = await send({ apiKey: "sk-or-secret-0123456789" });
+
+    expect(result).toMatchObject({ type: "error", error: expect.stringContaining("OpenRouter HTTP 401") });
+    expect(JSON.stringify(result)).not.toContain("sk-or-secret-0123456789");
+  });
+});
+
 describe("the sticky-routing key on the wire", () => {
   it("is sent when the caller names a session", async () => {
     await send({ sessionId: "abc123" });
