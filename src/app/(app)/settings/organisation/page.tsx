@@ -40,9 +40,11 @@ export default function OrganisationSettingsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Read again when the plan changes under the page, as it does when a payment is followed
+  const planKey = `${organisation?.plan}|${organisation?.planEndsAt}`;
   useEffect(() => {
     if (!authLoading && isAdmin) void loadLicence();
-  }, [authLoading, isAdmin, loadLicence]);
+  }, [authLoading, isAdmin, loadLicence, planKey]);
 
   async function save(e: React.FormEvent) {
     e.preventDefault();

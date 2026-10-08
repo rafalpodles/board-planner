@@ -245,6 +245,8 @@ test("back from paying, the page follows the plan until it is Pro", async ({ pag
   await expect(page.getByTestId("subscription-returned")).toHaveText("Your subscription is active.");
   await expect(page.getByTestId("plan-badge")).toContainText("Pro");
   await expect(page.getByTestId("organisation-name-input")).toHaveValue("Acme, renamed but not yet saved");
+  await expect(page.getByTestId("licence-details")).toContainText("acme customer");
+  await expect(page.getByTestId("licence-free")).toHaveCount(0);
   await expect(page.getByTestId("organisation-plan")).toHaveText("Pro");
   await page.screenshot({ path: "e2e/.artifacts/bp676-after-payment.png", fullPage: true });
 });

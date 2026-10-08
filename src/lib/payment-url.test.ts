@@ -7,6 +7,12 @@ describe("paymentUrl", () => {
     expect(paymentUrl("https://checkout.stripe.com/c/pay/cs_test_1#frag")).toBe("https://checkout.stripe.com/c/pay/cs_test_1#frag");
   });
 
+  it("takes the long address a live Checkout session has, fragment and all", () => {
+    const live = `https://checkout.stripe.com/c/pay/cs_live_a1#fid${"x".repeat(4000)}`;
+
+    expect(paymentUrl(live)).toBe(live);
+  });
+
   it.each([
     ["a script", "javascript:alert(1)"],
     ["a data page", "data:text/html,<script>1</script>"],
@@ -15,7 +21,7 @@ describe("paymentUrl", () => {
     ["a path with no host", "/c/pay/cs_test_1"],
     ["a number", 5],
     ["nothing", undefined],
-    ["an address too long to be one", `https://checkout.stripe.com/${"a".repeat(2100)}`],
+    ["an address too long to be one", `https://checkout.stripe.com/${"a".repeat(9000)}`],
   ])("refuses %s", (_why, value) => {
     expect(paymentUrl(value)).toBeNull();
   });
