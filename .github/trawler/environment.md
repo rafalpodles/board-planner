@@ -16,3 +16,4 @@ Trawler reads this file when it plans what to test for a pull request. It descri
 ## Limits of the people Trawler sends in
 - They cannot type into a password-type input except on the sign-in form, so a key or secret field cannot be filled in.
 - They only use the browser; they cannot reach the database, the licence service or the command line.
+- They have no AI client. Anything Board Planner renders inside a client that talks to the MCP server (MCP apps, tool views, the "assistant you use for work") cannot be opened; only the web app's own pages can.
