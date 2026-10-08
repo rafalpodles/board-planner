@@ -232,13 +232,21 @@ test.describe("BP-893: an organisation's life cycle", () => {
     const exported = new Map<string, string[]>();
     for (const row of lines) exported.set(row.collection, [...(exported.get(row.collection) ?? []), String(row.document._id)]);
 
+    const storedIds = new Map<string, string[]>();
+    await withDb(async (db) => {
+      for (const name of scopedModelNames()) {
+        const collection = (SCOPED_MODELS as Record<string, () => { collection: { name: string } }>)[name]().collection.name;
+        const rows = await db.collection(collection).find({ organisation: ACME.organisation }, { projection: { _id: 1 } }).toArray();
+        storedIds.set(collection, rows.map((row) => String(row._id)).sort());
+      }
+    });
     for (const name of scopedModelNames()) {
       if (Object.hasOwn(NOT_EXPORTED, name)) {
         expect(exported.get(name) ?? [], `${name} is kept out of an export`).toEqual([]);
         continue;
       }
       const collection = (SCOPED_MODELS as Record<string, () => { collection: { name: string } }>)[name]().collection.name;
-      const stored = (await withDb((db) => db.collection(collection).find({ organisation: ACME.organisation }, { projection: { _id: 1 } }).toArray())).map((row) => String(row._id)).sort();
+      const stored = storedIds.get(collection) ?? [];
       expect((exported.get(name) ?? []).sort(), `${name}: the export against the ${collection} collection`).toEqual(stored);
     }
     // The bulk of an organisation is in it, which the comparison above would also accept if it were nowhere
@@ -282,7 +290,7 @@ test.describe("BP-893: an organisation's life cycle", () => {
 
     const dryRun = await remove(request, GLOBEX, "dryRun=1");
     expect(dryRun.status()).toBe(200);
-    expect((await dryRun.json()).counts).toMatchObject({ User: expect.any(Number), Project: 1, "uploads.files": 1 });
+    expect((await dryRun.json()).counts).toMatchObject({ User: expect.any(Number), Project: 1, "uploads.files": 1, Task: 2, Comment: 2, Sprint: 1, ActivityLog: 3, ProjectAuditLog: 1 });
     // Its work and the history of it are there to be deleted, not only its board and its people
     expect(Object.keys(await rowsNaming(GLOBEX))).toEqual(expect.arrayContaining(["tasks", "comments", "sprints", "activitylogs", "projectauditlogs"]));
 
@@ -295,7 +303,7 @@ test.describe("BP-893: an organisation's life cycle", () => {
     expect((await remove(request, GLOBEX, "confirm=acme")).status()).toBe(400);
     const deleted = await remove(request, GLOBEX, `confirm=${GLOBEX.slug}`);
     expect(deleted.status(), await deleted.text()).toBe(200);
-    expect((await deleted.json()).counts).toMatchObject({ Project: 1, "uploads.files": 1 });
+    expect((await deleted.json()).counts).toMatchObject({ Project: 1, "uploads.files": 1, Task: 2, Comment: 2, Sprint: 1, ActivityLog: 3, ProjectAuditLog: 1 });
 
     expect(await rowsNaming(GLOBEX)).toEqual({});
     expect(await orphanChunks()).toBe(0);
