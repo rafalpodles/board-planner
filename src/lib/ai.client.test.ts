@@ -40,6 +40,14 @@ describe("the client generateTask makes", () => {
     });
   });
 
+  it("names itself to OpenRouter the way the PM agent does", async () => {
+    await generateTask("a task", CONTEXT, "m", "sk-given");
+
+    expect(constructed[0]).toMatchObject({
+      defaultHeaders: { "HTTP-Referer": expect.stringMatching(/^https?:\/\//), "X-Title": expect.stringContaining("AI Assist") },
+    });
+  });
+
   it("goes where OPENROUTER_BASE_URL says, as the PM agent does", async () => {
     process.env.OPENROUTER_BASE_URL = "http://127.0.0.1:9/v1";
 

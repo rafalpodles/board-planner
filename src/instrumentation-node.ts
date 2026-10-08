@@ -62,6 +62,10 @@ export async function bootNode(): Promise<void> {
     else console.log(licenceLine);
   }
 
+  if ((process.env.OPENAI_API_KEY || process.env.OPENAPI_KEY) && !process.env.OPENROUTER_API_KEY) {
+    console.warn("WARNING: OPENAI_API_KEY is no longer read: AI Assist runs on OPENROUTER_API_KEY, which is not set, so it is off");
+  }
+
   await bootWhenDatabaseIsReady();
 }
 

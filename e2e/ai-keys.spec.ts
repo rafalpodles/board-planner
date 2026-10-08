@@ -69,7 +69,7 @@ test.afterEach(async ({ request }) => {
 test("the PM agent is called with the key the admin stored, and with the server's again once it is removed", async ({ page }) => {
   await signIn(page, "admin");
   await page.goto("/settings/ai-keys");
-  await expect(page.getByRole("heading", { name: "AI key" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "AI key", exact: true })).toBeVisible();
 
   await test.step("the key is stored sealed, and the page shows only how it ends", async () => {
     const card = await saveKey(page, OWN_OPENROUTER);

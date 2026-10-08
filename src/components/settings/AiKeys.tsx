@@ -136,9 +136,13 @@ function KeyCard({ state, onSaved }: { state: AiKeysAnswer; onSaved: (answer: Ai
         onClose={() => setConfirmingRemoval(false)}
         onConfirm={() => send(null, `${TITLE} removed`)}
         title="Remove the OpenRouter key?"
-        message={`${USE} They stop running on this key at once${
-          hosted && plan === "free" ? ", and on the Free plan it does not run without one" : ""
-        }. You will need the key to add it again.`}
+        message={`The PM agent and AI Assist stop using this key at once. ${
+          state.included
+            ? "They fall back to the key this instance offers."
+            : hosted && plan === "free"
+              ? "On the Free plan they do not run without one."
+              : "They do not run without one."
+        } You will need the key to add it again.`}
         confirmLabel="Remove key"
         loadingLabel="Removing…"
         loading={busy}

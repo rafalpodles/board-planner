@@ -323,7 +323,7 @@ export function sanitizeMcpServers(
   }));
 }
 
-/** What the PM screens show. A failed read is null, so the answer leaves the three fields out and a poll keeps what the screen already knew */
+/** What the PM screens show. A failed read is null, so the answer leaves the three fields out and the screen shows PM as not configured until the next answer */
 export async function pmAvailability(db: ScopedDb): Promise<{ available: boolean; needsPlan: boolean; keyUnreadable: boolean } | null> {
   try {
     const { available, needsPlan, unreadable } = await modelKeyAvailability(db);

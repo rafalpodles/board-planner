@@ -5,15 +5,14 @@
  *   export MONGODB_URI=mongodb://localhost:27017/boardplanner_docs DEMO_PASSWORD=<anything>
  *   npx tsx scripts/docs-screens/demo.ts seed
  *   npx tsx scripts/docs-screens/ai-stub.ts &
- *   npm run build && OPENAI_API_KEY=stub OPENAI_BASE_URL=http://127.0.0.1:3616/v1 \
- *     OPENROUTER_API_KEY=stub OPENROUTER_BASE_URL=http://127.0.0.1:9 npm start
+ *   npm run build && OPENROUTER_API_KEY=stub OPENROUTER_BASE_URL=http://127.0.0.1:3616/v1 npm start
  *   npx tsx scripts/docs-screens/demo.ts ready
  *   BASE_URL=http://localhost:3000 OUT_DIR=../board-planner-site/public/screens \
  *     npx tsx scripts/docs-screens/capture.ts [name ...]
  *
  * A production build, because `next dev` paints its indicator over the account menu. The model
- * keys are stubs: the task form's AI Assist only shows with one set, and the PM agent's own must
- * lead nowhere so a scheduled review cannot spend money. `seed` moves every date in the data so its
+ * key is a stub: the task form's AI Assist only shows with one set, and the stub answers AI Assist alone, so
+ * the PM agent, which runs on the same key, gets a refusal and a scheduled review cannot spend money. `seed` moves every date in the data so its
  * "now" lands an hour ago — due dates stay due and "2h ago" stays true — and `ready` runs once the
  * app has started, because the agents it names are the ones the app seeds on boot.
  */

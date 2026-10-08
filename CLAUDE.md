@@ -69,7 +69,7 @@ src/
     session.ts        # session cookie: issue, resolve, revoke, provenance check
     db.ts             # MongoDB connection (cached)
     middleware.ts     # withAuth, withAdmin, withProjectAccess
-    ai.ts             # OpenAI task generation
+    ai.ts             # AI Assist task generation, through OpenRouter
     notifications.ts  # a project's shared Slack/Discord channel
     notification-prefs.ts # resolveChannels: which channels an event may use, per project
     personal-chat.ts  # the reader's own Slack/Discord webhook

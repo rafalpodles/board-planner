@@ -212,6 +212,9 @@ export default function AdminAgentsPage() {
             placeholder="gpt-4o-mini"
           />
         </div>
+        <p className="mt-2 text-xs text-text-muted">
+          An OpenRouter model name. One without a provider, such as gpt-4o-mini, is read as openai/gpt-4o-mini.
+        </p>
         <div className="mt-3">
           <Button size="sm" onClick={saveAiModel} disabled={savingAiModel}>
             {savingAiModel ? "Saving..." : "Save model"}

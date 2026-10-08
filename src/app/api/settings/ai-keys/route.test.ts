@@ -127,6 +127,13 @@ describe("PUT /api/settings/ai-keys", () => {
     expect(row).toBeNull();
   });
 
+  it("does not count an OpenAI key as the instance's key", async () => {
+    process.env.OPENAI_API_KEY = "sk-openai-0123456789abcdef";
+
+    expect((await (await get()).json()).included).toBe(false);
+    delete process.env.OPENAI_API_KEY;
+  });
+
   it("answers no member", async () => {
     getAuthUser.mockResolvedValue({ ...ADMIN, role: "member" });
 

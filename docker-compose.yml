@@ -51,7 +51,6 @@ services:
       # The setup code for the first account; empty means one is generated and printed to the log
       BOOTSTRAP_TOKEN: ${BOOTSTRAP_TOKEN:-}
       # Everything below is optional — leave it empty and the feature stays off
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       AI_DAILY_GENERATION_CAP: ${AI_DAILY_GENERATION_CAP:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       PM_MODEL: ${PM_MODEL:-}

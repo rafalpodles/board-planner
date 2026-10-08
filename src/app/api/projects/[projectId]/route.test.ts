@@ -1019,7 +1019,7 @@ describe("the project answer says whether the PM agent can run", () => {
     expect(await res.json()).toMatchObject({ pmAvailable: false, pmNeedsPlan: true });
   });
 
-  it("answers the project, and leaves the three fields out so a poll keeps what the screen knew, when the key cannot be looked up", async () => {
+  it("answers the project, and leaves the three fields out, when the key cannot be looked up", async () => {
     modelKeyAvailability.mockRejectedValue(new Error("database blip"));
 
     const res = await GET(new Request("http://localhost/api/projects/p1"), ctx());
@@ -1027,6 +1027,16 @@ describe("the project answer says whether the PM agent can run", () => {
 
     expect(res.status).toBe(200);
     expect(body).toMatchObject({ name: "Test Project" });
+    for (const field of ["pmAvailable", "pmNeedsPlan", "pmKeyUnreadable"]) expect(body).not.toHaveProperty(field);
+  });
+
+  it("saves, and answers the project without the three fields, when the key cannot be looked up", async () => {
+    modelKeyAvailability.mockRejectedValue(new Error("database blip"));
+
+    const res = await PUT(putRequest({ name: "Renamed" }), ctx());
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
     for (const field of ["pmAvailable", "pmNeedsPlan", "pmKeyUnreadable"]) expect(body).not.toHaveProperty(field);
   });
 });

@@ -79,7 +79,10 @@ describe("which key generate-task spends", () => {
   it("keeps answering 501 where nothing is configured at all", async () => {
     resolveModelKey.mockResolvedValue({ ok: false, reason: "not_configured", plan: "free" });
 
-    expect((await generate("a task")).status).toBe(501);
+    const res = await generate("a task");
+
+    expect(res.status).toBe(501);
+    expect((await res.json()).error).toContain("OPENROUTER_API_KEY");
   });
 
   it("tells the form whether the feature is on, whether a plan would turn it on, and whether a stored key is broken", async () => {

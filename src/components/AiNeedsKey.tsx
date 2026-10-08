@@ -12,7 +12,7 @@ export function AiNeedsKey({ what, className = "" }: { what: string; className?:
 
   return (
     <div role="note" data-testid="ai-needs-key" className={`rounded-lg border border-border bg-bg-input p-3 text-sm ${className}`}>
-      <p className="font-medium">{what} runs on your own key on the Free plan.</p>
+      <p className="font-medium">{what} runs on your own OpenRouter key on the Free plan.</p>
       {isAdmin ? (
         <p className="mt-1 text-text-muted">
           <Link href="/settings/ai-keys" className="underline">

@@ -14,7 +14,7 @@ describe("what a Free cloud organisation sees where an AI feature would be", () 
     useAuth.mockReturnValue({ isAdmin: true });
     render(<AiNeedsKey what="AI Assist" />);
 
-    expect(screen.getByText("AI Assist runs on your own key on the Free plan.")).toBeTruthy();
+    expect(screen.getByText("AI Assist runs on your own OpenRouter key on the Free plan.")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Add a key" }).getAttribute("href")).toBe("/settings/ai-keys");
     expect(screen.getByRole("link", { name: "upgrade to Pro" }).getAttribute("href")).toBe("/settings/organisation");
   });

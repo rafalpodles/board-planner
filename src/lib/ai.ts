@@ -1,5 +1,6 @@
 import OpenAI from "openai";
-import { APP_NAME } from "./brand";
+import { APP_DOMAIN, APP_NAME } from "./brand";
+import { selfOrigin } from "./session";
 import { OPENROUTER_BASE_URL } from "./pm/openrouter";
 import type { PromptField } from "./ai-fields";
 
@@ -52,7 +53,7 @@ export async function generateTask(
     baseURL: OPENROUTER_BASE_URL(),
     organization: null,
     project: null,
-    defaultHeaders: { "X-Title": `${APP_NAME} AI Assist` },
+    defaultHeaders: { "HTTP-Referer": selfOrigin() ?? `https://${APP_DOMAIN}`, "X-Title": `${APP_NAME} AI Assist` },
   });
 
   const categoryList =

@@ -30,6 +30,12 @@ describe("Settings → AI key", () => {
     expect(screen.queryByText(/OpenAI/)).toBeNull();
   });
 
+  it("is headed in the singular", async () => {
+    render(<AiKeys />);
+
+    expect((await screen.findByRole("heading", { level: 2 })).textContent).toBe("AI key");
+  });
+
   it("says a Free cloud organisation without a key gets no AI", async () => {
     render(<AiKeys />);
 
@@ -121,6 +127,7 @@ describe("Settings → AI key", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Remove key" }));
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByText(/Remove the OpenRouter key\?/)).toBeTruthy();
+    expect(dialog.textContent).toMatch(/On the Free plan they do not run without one/);
     expect(api.put).not.toHaveBeenCalled();
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Remove key" }));

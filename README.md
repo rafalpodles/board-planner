@@ -68,7 +68,7 @@ reorganising your board overnight.
 It is off by default, per project, and metered rather than trusted: a daily cap on turns and an
 optional cap on tokens, both spent by autonomous turns as well as yours, and an instance
 administrator can lock it off for a project in a way project settings cannot override. Without
-`OPENROUTER_API_KEY` the pages say so and the feature stays inert.
+`OPENROUTER_API_KEY` the pages say so and the feature stays inert; AI Assist runs on the same key.
 
 📖 [PM agent](https://board-planner.com/docs/ai/pm-agent/) ·
 [Autonomous board reviews](https://board-planner.com/docs/ai/autonomous-board-reviews/)
@@ -280,10 +280,9 @@ Everything is optional except the database. Put overrides in a `.env` file next 
 | `ENCRYPTION_KEY` | — | 32 bytes, hex or standard base64 (not base64url), encrypting stored integration tokens and chat webhook URLs at rest |
 | `ENCRYPTION_KEYS_OLD` | — | Comma-separated retired keys, so a rotation can still read what they wrote |
 | `WEBHOOK_SIGNING_SECRET` | — | Signs outgoing webhook deliveries |
-| `OPENAI_API_KEY` | — | AI task generation in the task form. The older name `OPENAPI_KEY` is still accepted |
-| `AI_DAILY_GENERATION_CAP` | `200` | AI task generations one project may run per day, on the instance's key. Each person may also start 20 per 15 minutes, one at a time |
-| `OPENROUTER_API_KEY`, `PM_MODEL`, `PM_MAX_TOKENS`, `PM_DAILY_TURN_CAP`, `PM_DAILY_TOKEN_CAP`, `PM_SCHEDULER_TICK_MS` | — | PM agent |
-| `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | Where PM agent calls go — a proxy, or another OpenAI-compatible endpoint |
+| `AI_DAILY_GENERATION_CAP` | `200` | AI Assist generations one project may run per day, on the instance's key. Each person may also start 20 per 15 minutes, one at a time |
+| `OPENROUTER_API_KEY`, `PM_MODEL`, `PM_MAX_TOKENS`, `PM_DAILY_TURN_CAP`, `PM_DAILY_TOKEN_CAP`, `PM_SCHEDULER_TICK_MS` | — | The PM agent and AI Assist (task drafting) both run on `OPENROUTER_API_KEY`. `OPENAI_API_KEY` is no longer read |
+| `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | Where PM agent and AI Assist calls go — a proxy, or another OpenAI-compatible endpoint |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | — | Email notifications |
 | `DIGEST_HOUR`, `DIGEST_TIMEZONE`, `DIGEST_TICK_MS` | `7`, `Europe/Warsaw`, `300000` | When the opt-in daily digest goes out |
 | `GITHUB_SYNC_TICK_MS` | `300000` | How often projects with a GitHub token are re-synced; `0` turns the background sync off |
