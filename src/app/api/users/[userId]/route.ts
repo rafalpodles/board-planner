@@ -8,6 +8,7 @@ import { MIN_PASSWORD_LENGTH, PASSWORD_COST_FACTOR } from "@/lib/auth";
 import { isValidEmail, normaliseEmail } from "@/lib/email";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { revokePendingInvitationsFor } from "@/lib/invitations";
+import { memberLimitRefusal } from "@/lib/member-limit";
 import { notifyAddressChanged, notifyPasswordChanged } from "@/lib/security-mail";
 import { invalidateResetTokens } from "@/lib/password-reset";
 import { cancelEmailChange } from "@/lib/email-change";
@@ -529,6 +530,8 @@ async function accountAction(
   }
   if (action === "reactivate") {
     if (!target.deactivatedAt) return NextResponse.json({ ok: true });
+    const full = await memberLimitRefusal(db);
+    if (full) return full;
     // Anything minted in the instant between the flag and the first revoke was refused while
     // deactivated, and would work again from here; it goes now, while sign-in is still refused
     await revokeUserCredentials(target._id, null, { keepIdentities: true });

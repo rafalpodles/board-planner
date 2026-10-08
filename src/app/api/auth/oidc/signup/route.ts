@@ -14,6 +14,7 @@ import {
 import { checkProfile } from "@/lib/new-account";
 import { duplicateKeyField } from "@/lib/mongo-errors";
 import { revokePendingInvitationsFor } from "@/lib/invitations";
+import { memberLimitRefusal } from "@/lib/member-limit";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { JOIN_COOKIE, heldSignUp, spendAcceptance } from "@/lib/oidc/flow";
 import { applyAdminGroup } from "@/lib/oidc/admin-group";
@@ -69,6 +70,9 @@ export async function POST(request: Request) {
   if (!provider?.linksByAddress || !(await signUpOpenTo(db, held.claims.email))) {
     return NextResponse.json({ error: CLOSED }, { status: 403 });
   }
+
+  const full = await memberLimitRefusal(db, { email: held.claims.email });
+  if (full) return full;
 
   let user;
   try {
