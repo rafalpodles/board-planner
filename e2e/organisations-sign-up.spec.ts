@@ -115,6 +115,45 @@ test.describe("BP-673: creating an organisation from the platform host", () => {
     }
   });
 
+  // BP-674: the limits are on the mailbox and the company, not on how an address happens to be spelt
+  const createOne = async (request: Parameters<typeof apiCode>[0], email: string, n: number) => {
+    const signedIn = await apiCode(request, email);
+    return request.post(`${ORGANISATIONS_API}/api/sign-in/organisation`, {
+      headers: signedIn,
+      data: { name: `Alias ${n}`, slug: `alias-${n}-${Date.now()}`, fullName: "Owner", username: "owner", password: PASSWORD },
+    });
+  };
+
+  test("spellings of one Gmail mailbox share the three a day", async ({ request }) => {
+    const base = `alias${Date.now()}`;
+    const spellings = [`${base}@gmail.com`, `${base}+shop@gmail.com`, `${base[0]}.${base.slice(1)}@googlemail.com`, `${base}+four@gmail.com`];
+    for (const [n, email] of spellings.entries()) {
+      expect((await createOne(request, email, n)).status(), email).toBe(n < 3 ? 201 : 429);
+    }
+  });
+
+  test("a company domain gets five a day however many addresses it mints", async ({ request }) => {
+    const company = `corp-${Date.now()}.example`;
+    for (let n = 1; n <= 6; n++) {
+      expect((await createOne(request, `person${n}@${company}`, n)).status(), `company address ${n}`).toBe(n <= 5 ? 201 : 429);
+    }
+  });
+
+  test("a public mail provider is not held to the company-domain limit", async ({ request }) => {
+    for (let n = 1; n <= 6; n++) {
+      expect((await createOne(request, `someone${n}-${Date.now()}@gmail.com`, n)).status(), `gmail address ${n}`).toBe(201);
+    }
+  });
+
+  test("a person refused for their own address does not spend their colleagues' share of the company", async ({ request }) => {
+    const company = `corp-${Date.now()}.example`;
+    for (let n = 1; n <= 7; n++) {
+      expect((await createOne(request, `lead@${company}`, n)).status(), `lead's attempt ${n}`).toBe(n <= 3 ? 201 : 429);
+    }
+    expect((await createOne(request, `second@${company}`, 20)).status()).toBe(201);
+    expect((await createOne(request, `third@${company}`, 21)).status()).toBe(201);
+  });
+
   test("a burst of requests on one proven address creates one organisation, not one each", async ({ request }) => {
     const signedIn = await apiCode(request, freshAddress("burst"));
     const answers = await Promise.all(

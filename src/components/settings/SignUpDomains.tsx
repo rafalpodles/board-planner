@@ -5,6 +5,7 @@ import { useApi } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import { PUBLIC_MAIL_DOMAINS } from "@/lib/public-mail-domains";
 
 interface SignUp {
   domains: string[];
@@ -13,12 +14,6 @@ interface SignUp {
 }
 
 const asText = (domains: string[]) => domains.join(", ");
-
-const PUBLIC_MAIL = new Set([
-  "gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "msn.com", "yahoo.com", "yahoo.co.uk",
-  "aol.com", "icloud.com", "me.com", "proton.me", "protonmail.com", "pm.me", "gmx.com", "gmx.de", "web.de",
-  "mail.com", "yandex.ru", "mail.ru", "qq.com", "163.com",
-]);
 
 const typedDomains = (text: string) => text.split(/[\s,]+/).filter(Boolean);
 
@@ -64,7 +59,7 @@ export function SignUpDomains() {
   const providers = saved.providers.join(" or ");
   const publicMail = typedDomains(text)
     .map((d) => d.toLowerCase().replace(/^@/, ""))
-    .filter((d) => PUBLIC_MAIL.has(d));
+    .filter((d) => PUBLIC_MAIL_DOMAINS.has(d));
   return (
     <section className="mt-8" aria-labelledby="sign-up-domains">
       <h2 id="sign-up-domains" className="text-lg font-semibold mb-1">
