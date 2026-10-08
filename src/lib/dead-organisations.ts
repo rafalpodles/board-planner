@@ -15,20 +15,28 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** From the notice to the deletion */
 export const DEAD_NOTICE_DAYS = 14;
+/** How long past its fortnight a notice stays good, before it is given again */
+export const DEAD_STALE_DAYS = 3;
 export const DEAD_REASON = "dead organisation: nobody signed in after the plan ended";
 export const SWEEP_KEY = "dead-organisation-sweep";
 
 let warned = false;
 
-/** 0 is off, and it is the default: a job that deletes data is switched on by somebody who means it */
+export const MIN_DEAD_DAYS = 30;
+export const DEFAULT_DEAD_DAYS = 60;
+
+/**
+ * 60 days in the cloud unless somebody sets otherwise, and never fewer than 30 (a typo of 6 must not mean
+ * six days). 0 is off, and so is everything outside the cloud, where there is one organisation and it is never swept.
+ */
 export function deadOrganisationDays(env: Record<string, string | undefined> = process.env): number {
   const raw = env.DEAD_ORGANISATION_DAYS?.trim();
-  if (!raw) return 0;
+  if (!raw) return organisationDomain() ? DEFAULT_DEAD_DAYS : 0;
   const value = Number(raw);
-  if (Number.isInteger(value) && value >= 0) return value;
+  if (Number.isInteger(value) && (value === 0 || value >= MIN_DEAD_DAYS)) return value;
   if (!warned) {
     warned = true;
-    console.warn(`DEAD_ORGANISATION_DAYS="${raw}" is not a whole number of days; the dead-organisation sweep stays off`);
+    console.warn(`DEAD_ORGANISATION_DAYS="${raw}" is not 0 or a whole number of at least ${MIN_DEAD_DAYS} days; the dead-organisation sweep stays off`);
   }
   return 0;
 }
@@ -55,6 +63,8 @@ export function deadStep(f: DeadFacts): DeadStep {
   const dead = !f.planIsPro && f.now - f.endedAt.getTime() >= period && f.now - f.lastActiveAt.getTime() >= period;
   if (!dead) return f.noticeAt || f.suspendedByTheSweep ? "clear" : "alive";
   if (!f.noticeAt) return "notice";
+  // A notice nothing followed for days (the sweep was off, or an operator resumed the organisation) is told again
+  if (!f.suspendedAt && f.now - f.noticeAt.getTime() >= (DEAD_NOTICE_DAYS + DEAD_STALE_DAYS) * DAY_MS) return "notice";
   if (f.now - f.noticeAt.getTime() < DEAD_NOTICE_DAYS * DAY_MS) return "wait";
   if (!f.suspendedAt) return "suspend";
   return f.suspendedByTheSweep && settledSince(f.suspendedAt, f.now) ? "delete" : "wait";
@@ -68,33 +78,55 @@ async function adminAddresses(organisation: Types.ObjectId): Promise<string[]> {
   return [...new Set(admins.map((a) => a.email))];
 }
 
-/** The latest sign-in or arrival of any person in it; an organisation with nobody in it is as old as it is */
+/**
+ * The latest sign of anybody using the organisation: a sign-in, a browser session in use (they last up to 90
+ * days, so a person who signed in months ago may use it daily), an API token, a worker, a refreshed connected
+ * app. An organisation with nobody in it is as old as it is.
+ */
 async function lastActiveOf(organisation: Types.ObjectId, madeAt: Date): Promise<Date> {
   const db = scoped(organisation);
-  const people = await db.User.find({ kind: { $ne: "machine" } }).select("lastSignInAt createdAt").lean<{ lastSignInAt?: Date | null; createdAt?: Date }[]>();
-  let latest = 0;
-  for (const p of people) latest = Math.max(latest, p.lastSignInAt?.getTime() ?? 0, p.createdAt?.getTime() ?? 0);
-  return new Date(latest || madeAt.getTime());
+  const latest = async (read: PromiseLike<unknown>, field: string): Promise<number> => {
+    const value = ((await read) as Record<string, unknown> | null)?.[field];
+    return value instanceof Date ? value.getTime() : 0;
+  };
+  const times = await Promise.all([
+    latest(db.User.findOne({ kind: { $ne: "machine" } }).sort({ lastSignInAt: -1 }).select("lastSignInAt").lean(), "lastSignInAt"),
+    latest(db.User.findOne({ kind: { $ne: "machine" } }).sort({ createdAt: -1 }).select("createdAt").lean(), "createdAt"),
+    latest(db.Session.findOne({}).sort({ lastUsedAt: -1 }).select("lastUsedAt").lean(), "lastUsedAt"),
+    latest(db.ApiToken.findOne({}).sort({ lastUsedAt: -1 }).select("lastUsedAt").lean(), "lastUsedAt"),
+    latest(db.Worker.findOne({}).sort({ lastSeenAt: -1 }).select("lastSeenAt").lean(), "lastSeenAt"),
+    latest(db.OAuthToken.findOne({}).sort({ createdAt: -1 }).select("createdAt").lean(), "createdAt"),
+  ]);
+  return new Date(Math.max(...times) || madeAt.getTime());
 }
 
 async function sendNotice(organisation: Types.ObjectId, name: string, slug: string | undefined, deleteAfter: Date): Promise<number> {
   const to = await adminAddresses(organisation);
   const origin = await organisationOrigin(organisation);
-  const date = deleteAfter.toUTCString().replace(/ \d\d:\d\d:\d\d.*/, "");
+  const label = name || slug || "Your organisation";
+  const date = deleteAfter.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
   let sent = 0;
   for (const address of to) {
     const { html, text } = renderEmail({
-      preheader: `${name || slug || "Your organisation"} will be deleted after ${date} unless somebody signs in.`,
+      preheader: `${label} will be suspended and deleted on ${date} unless somebody uses it.`,
       kicker: "Your organisation",
-      heading: `${name || slug || "Your organisation"} will be deleted`,
+      heading: `${label} will be deleted`,
       intro: [
-        `Nobody has signed in to this ${APP_NAME} organisation for a long while, and its plan has ended.`,
-        `If nobody signs in before ${date}, the organisation and everything in it will be deleted. Signing in once is enough to keep it. Settings → Export downloads everything first.`,
+        `Nobody has used this ${APP_NAME} organisation for a long while, and it has no plan.`,
+        "Settings → Export downloads everything in it. Signing in is enough to keep it.",
+      ],
+      alert: {
+        tone: "warning",
+        lines: [`On ${date} the organisation is suspended, and it is deleted with everything in it soon after. Nobody can sign in to a suspended organisation.`],
+      },
+      rows: [
+        { label: "Organisation", value: label },
+        { label: "Suspended and deleted", value: date },
       ],
       button: origin ? { label: `Sign in to ${APP_NAME}`, url: `${origin}/login` } : undefined,
-      footer: ["Sent to the administrators of an organisation with no plan and no sign-in. This notice cannot be turned off."],
+      footer: ["Sent to the administrators of an organisation with no plan and no recent use. This notice cannot be turned off."],
     });
-    if (await sendEmail({ to: address, subject: `${name || slug || "Your organisation"} will be deleted unless somebody signs in`, text, html })) sent += 1;
+    if (await sendEmail({ to: address, subject: `${label} will be suspended and deleted on ${date}`, text, html })) sent += 1;
   }
   return sent;
 }
@@ -107,6 +139,14 @@ export interface SweepSummary {
   deleted: number;
 }
 
+async function finishDeletion(row: { _id: Types.ObjectId; slug?: string }, summary: SweepSummary): Promise<void> {
+  if (!(await claimDeletion(row._id))) return;
+  await logPlatformAudit({ action: "organisation_delete_started", keyId: SWEEP_KEY, subject: row._id, detail: row.slug ?? "" }, { strict: true });
+  const removed = await deleteOrganisationData(row._id);
+  await logPlatformAudit({ action: "organisation_deleted", keyId: SWEEP_KEY, subject: row._id, detail: `${row.slug ?? ""}: ${JSON.stringify(removed)}` });
+  summary.deleted += 1;
+}
+
 /**
  * One pass, run daily. Per organisation: tell its administrators, give them a fortnight, and only then
  * suspend and delete it. Signing in, or a plan, at any point before the deletion cancels it. The default
@@ -116,37 +156,56 @@ export async function sweepDeadOrganisations(now: number = Date.now(), days: num
   const summary: SweepSummary = { looked: 0, noticed: 0, cleared: 0, suspended: 0, deleted: 0 };
   if (days <= 0 || !organisationDomain()) return summary;
   await connectDB();
-  const rows = await Organisation.find({ _id: { $ne: DEFAULT_ORGANISATION_ID }, deletedAt: null, deletingAt: null })
-    .select("name slug licenceKey suspendedAt suspendedReason deadNoticeAt")
+  const rows = await Organisation.find({ _id: { $ne: DEFAULT_ORGANISATION_ID }, deletedAt: null })
+    .select("name slug licenceKey suspendedAt suspendedReason deadNoticeAt deletingAt")
     .lean();
   for (const row of rows) {
     summary.looked += 1;
     try {
       const byTheSweep = !!row.suspendedAt && row.suspendedReason === DEAD_REASON;
+      // A delete that died halfway is finished by whoever began it: the sweep's own, never an operator's
+      if (row.deletingAt) {
+        if (byTheSweep) await finishDeletion(row, summary);
+        continue;
+      }
       // Somebody else's suspension is not ours to build on
       if (row.suspendedAt && !byTheSweep) continue;
 
-      const organisation = await getOrganisation(row._id);
       const check = licenceOf({ _id: row._id, licenceKey: row.licenceKey }, now);
+      // A key that is stored and does not verify is a plan nobody can read (a rotated public key, a bad deploy), not no plan
+      if (row.licenceKey?.trim() && !check?.payload) continue;
+
+      const organisation = await getOrganisation(row._id);
       // An id minted with a clock in the future would otherwise make the organisation younger than everything
       const madeAt = new Date(Math.min(row._id.getTimestamp().getTime(), now));
       const endedAt = check?.payload ? new Date(check.payload.expiresAt) : madeAt;
+      const noticeAt = row.deadNoticeAt ?? null;
       const step = deadStep({
         now,
         days,
         planIsPro: organisation.entitlements.plan === "pro",
         endedAt,
         lastActiveAt: await lastActiveOf(row._id, madeAt),
-        noticeAt: row.deadNoticeAt ?? null,
+        noticeAt,
         suspendedAt: row.suspendedAt ?? null,
         suspendedByTheSweep: byTheSweep,
       });
 
       if (step === "notice") {
-        const sent = isEmailConfigured() ? await sendNotice(row._id, row.name, row.slug, new Date(now + DEAD_NOTICE_DAYS * DAY_MS)) : 0;
+        if (!isEmailConfigured()) continue;
+        // Taken before the mail goes, so two processes do not both send it; given back if nobody could be told
+        const staleBefore = new Date(now - (DEAD_NOTICE_DAYS + DEAD_STALE_DAYS) * DAY_MS);
+        const taken = await Organisation.updateOne(
+          { _id: row._id, $or: [{ deadNoticeAt: null }, { deadNoticeAt: { $lte: staleBefore } }] },
+          { $set: { deadNoticeAt: new Date(now) } }
+        );
+        if (taken.modifiedCount !== 1) continue;
+        const sent = await sendNotice(row._id, row.name, row.slug, new Date(now + DEAD_NOTICE_DAYS * DAY_MS));
         // Nothing is ever deleted that nobody was told about
-        if (sent === 0) continue;
-        await Organisation.updateOne({ _id: row._id, deadNoticeAt: null }, { $set: { deadNoticeAt: new Date(now) } });
+        if (sent === 0) {
+          await Organisation.updateOne({ _id: row._id, deadNoticeAt: new Date(now) }, { $set: { deadNoticeAt: noticeAt } });
+          continue;
+        }
         await logPlatformAudit({ action: "organisation_dead_noticed", keyId: SWEEP_KEY, subject: row._id, detail: `${row.slug ?? ""}: ${sent} administrator(s) told` });
         summary.noticed += 1;
       } else if (step === "clear") {
@@ -159,11 +218,7 @@ export async function sweepDeadOrganisations(now: number = Date.now(), days: num
         await logPlatformAudit({ action: "organisation_suspended", keyId: SWEEP_KEY, subject: row._id, detail: DEAD_REASON });
         summary.suspended += 1;
       } else if (step === "delete") {
-        if (!(await claimDeletion(row._id))) continue;
-        await logPlatformAudit({ action: "organisation_delete_started", keyId: SWEEP_KEY, subject: row._id, detail: row.slug ?? "" }, { strict: true });
-        const removed = await deleteOrganisationData(row._id);
-        await logPlatformAudit({ action: "organisation_deleted", keyId: SWEEP_KEY, subject: row._id, detail: `${row.slug ?? ""}: ${JSON.stringify(removed)}` });
-        summary.deleted += 1;
+        await finishDeletion(row, summary);
       }
     } catch (error) {
       console.error(`Dead-organisation sweep failed for ${row._id.toHexString()}:`, error);

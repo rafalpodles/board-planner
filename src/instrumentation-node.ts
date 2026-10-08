@@ -128,14 +128,15 @@ async function bootWhenDatabaseIsReady(): Promise<void> {
     await sweep();
     setInterval(sweep, 24 * 60 * 60 * 1000).unref();
 
-    // Switched on by DEAD_ORGANISATION_DAYS and by nothing else: it tells people, then deletes (BP-674)
+    // On in the cloud (60 days unless DEAD_ORGANISATION_DAYS says otherwise, 0 is off): it tells people, then deletes (BP-674)
     const { deadOrganisationDays, sweepDeadOrganisations } = await import("@/lib/dead-organisations");
     if (deadOrganisationDays() > 0) {
       const sweepDead = () =>
         sweepDeadOrganisations()
           .then((done) => console.log(`Dead-organisation sweep: ${JSON.stringify(done)}`))
           .catch((error) => console.error("Failed to sweep dead organisations:", error));
-      await sweepDead();
+      // Not awaited: it mails, and deletes, and boot has other things to do
+      void sweepDead();
       setInterval(sweepDead, 24 * 60 * 60 * 1000).unref();
     }
 

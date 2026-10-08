@@ -107,3 +107,31 @@ test("an operator's own suspension is not the sweep's to build on", async ({ req
   expect(await sweep(request, { daysFromNow: 90 })).toMatchObject({ suspended: 0, deleted: 0 });
   expect((await organisationRow(ACME))?.suspendedReason).toBe("chargeback");
 });
+
+test("use through a token counts as use, however long ago anybody signed in", async ({ request }) => {
+  await withDb((db) =>
+    db.collection("apitokens").updateMany({ organisation: ACME.organisation as never }, { $set: { lastUsedAt: new Date(Date.now() + 70 * 24 * 60 * 60 * 1000) } })
+  );
+
+  expect(await sweep(request, { daysFromNow: 75 })).toMatchObject({ noticed: 0, suspended: 0, deleted: 0 });
+  expect((await organisationRow(ACME))?.deadNoticeAt ?? null).toBeNull();
+});
+
+test("a stored key that does not verify is a plan nobody can read, not no plan", async ({ request }) => {
+  await withDb((db) => db.collection("organisations").updateOne({ _id: ACME.organisation as never }, { $set: { licenceKey: "not-a-key.at-all" } }));
+
+  expect(await sweep(request, { daysFromNow: 61 })).toMatchObject({ noticed: 0 });
+  expect(await sweep(request, { daysFromNow: 90 })).toMatchObject({ suspended: 0, deleted: 0 });
+});
+
+test("a notice nothing followed is given again, and an operator's resume voids it", async ({ request }) => {
+  await withDb((db) => db.collection("organisations").updateOne({ _id: ACME.organisation as never }, { $set: { deadNoticeAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } }));
+  expect(await sweep(request, { daysFromNow: 61 })).toMatchObject({ noticed: 1, suspended: 0, deleted: 0 });
+
+  const path = `/api/platform/organisations/${ACME.organisation.toHexString()}/resume`;
+  const resumed = await request.post(`${ORGANISATIONS_API}${path}`, {
+    headers: { host: PLATFORM_HOST, ...signPlatformRequest({ method: "POST", host: PLATFORM_HOST, path, body: new Uint8Array() }, E2E_PLATFORM_REQUEST_KEY) },
+  });
+  expect(resumed.status()).toBe(200);
+  expect((await organisationRow(ACME))?.deadNoticeAt ?? null).toBeNull();
+});
