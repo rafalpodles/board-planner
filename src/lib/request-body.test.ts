@@ -201,12 +201,43 @@ describe("readFormBody", () => {
 
     const result = await readFormBody(
       request(stream, { "content-type": "multipart/form-data; boundary=x", "content-length": String(total) }),
-      64 * 1024
+      64 * 1024,
+      { drainRefused: true }
     );
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.response.status).toBe(413);
     expect(state.pulled).toBe(total);
+  });
+
+  it("reads nothing of a refused form unless the caller asks, as an anonymous endpoint must not pay for it", async () => {
+    const total = 200 * 1024;
+    const { stream, state } = countingBody(total);
+
+    const result = await readFormBody(
+      request(stream, { "content-type": "multipart/form-data; boundary=x", "content-length": String(total) }),
+      64 * 1024
+    );
+
+    expect(result.ok).toBe(false);
+    expect(state.pulled).toBeLessThanOrEqual(16 * 1024);
+  });
+
+  it("still answers 413 when the client hangs up while the refused body is being read", async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      pull() {
+        throw new Error("aborted");
+      },
+    });
+
+    const result = await readFormBody(
+      request(stream, { "content-type": "multipart/form-data; boundary=x", "content-length": String(200 * 1024) }),
+      64 * 1024,
+      { drainRefused: true }
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.response.status).toBe(413);
   });
 
   it("does not read a refused upload past the bound, which is not a reason to pay for it", async () => {
@@ -215,7 +246,8 @@ describe("readFormBody", () => {
 
     const result = await readFormBody(
       request(stream, { "content-type": "multipart/form-data; boundary=x", "content-length": String(declared) }),
-      64 * 1024
+      64 * 1024,
+      { drainRefused: true }
     );
 
     expect(result.ok).toBe(false);
