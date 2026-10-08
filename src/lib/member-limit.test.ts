@@ -15,6 +15,7 @@ function fakeDb({ users, invitations, pendingFor }: Counts) {
     db: { organisation: "org-1", User: { countDocuments: userCount }, Invitation: { countDocuments: invitationCount, exists } } as never,
     userCount,
     invitationCount,
+    exists,
   };
 }
 
@@ -69,6 +70,8 @@ describe("memberLimitRefusal", () => {
     const full = fakeDb({ users: 6, invitations: 4, pendingFor: "pat@example.test" });
 
     expect(await memberLimitRefusal(full.db, { email: "pat@example.test" })).toBeNull();
+    // Only a live invitation is that seat: a lapsed one holds none
+    expect(full.exists).toHaveBeenCalledWith({ email: "pat@example.test", status: "pending", expiresAt: { $gt: expect.any(Date) } });
     expect((await memberLimitRefusal(full.db, { email: "new@example.test" }))?.status).toBe(402);
   });
 

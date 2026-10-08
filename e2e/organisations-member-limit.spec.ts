@@ -141,11 +141,38 @@ test("Pro is not limited: the eleventh and the twentieth are invited", async ({ 
   await expect(page.getByTestId("plan-badge-members")).toHaveCount(0);
 });
 
-test("the limit is each organisation's own: a full Free organisation does not stop another's invitation", async ({ browser, request }) => {
+test("the limit is each organisation's own: a full Free organisation does not stop another Free one with room", async ({ browser }) => {
   await addPeople(ACME, 9);
-  await makePro(request, GLOBEX);
+  await addPeople(GLOBEX, 1);
   const globex = await (await browser.newContext()).newPage();
   await openAs(globex, GLOBEX);
 
   expect((await invite(globex, "someone@globex.example")).status).toBe(201);
+  const acme = await (await browser.newContext()).newPage();
+  await openAs(acme, ACME);
+  expect((await invite(acme, "someone@acme.example")).status).toBe(402);
+});
+
+test("a lapsed invitation holds no seat, so sending it again takes one, and is refused at ten", async ({ page }) => {
+  await addPeople(ACME, 9);
+  await withDb((db) =>
+    db.collection("invitations").insertOne({
+      organisation: ACME.organisation,
+      email: "lapsed@acme.example",
+      role: "member",
+      boards: [],
+      invitedBy: ACME.adminId,
+      tokenHash: "lapsed-hash",
+      expiresAt: new Date(Date.now() - 60_000),
+      status: "pending",
+      deliveredAs: null,
+    })
+  );
+  await openAs(page, ACME);
+  const lapsed = await withDb((db) => db.collection("invitations").findOne({ email: "lapsed@acme.example" }));
+
+  const resent = await send(page, "POST", `/api/invitations/${lapsed!._id}/resend`, { delivery: "link" });
+
+  expect(resent.status).toBe(402);
+  expect(resent.body).toMatchObject({ members: 10, limit: 10 });
 });

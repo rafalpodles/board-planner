@@ -9,6 +9,7 @@ const userExists = vi.fn();
 const projectFind = vi.fn();
 const logInstanceAudit = vi.fn();
 const selfOrigin = vi.fn();
+const memberLimitRefusal = vi.fn();
 let caller: Record<string, unknown>;
 
 vi.mock("@/lib/middleware", async () => {
@@ -21,6 +22,7 @@ vi.mock("@/lib/middleware", async () => {
   };
 });
 vi.mock("@/lib/session", () => ({ selfOrigin }));
+vi.mock("@/lib/member-limit", () => ({ memberLimitRefusal }));
 vi.mock("@/lib/invitations", () => ({ reissueInvitation, recordDelivery }));
 vi.mock("@/lib/invitation-mail", async () => {
   const actual = await vi.importActual<typeof import("@/lib/invitation-mail")>("@/lib/invitation-mail");
@@ -53,9 +55,10 @@ beforeEach(() => {
   caller = { _id: "admin-2", username: "second", fullName: "Second Admin", role: "admin" };
   selfOrigin.mockReturnValue("https://planner.example");
   invitationFindOne.mockReturnValue({
-    select: () => ({ lean: () => Promise.resolve({ email: "ada@example.com" }) }),
+    select: () => ({ lean: () => Promise.resolve({ email: "ada@example.com", expiresAt: new Date(Date.now() + 86_400_000) }) }),
   });
   userExists.mockResolvedValue(null);
+  memberLimitRefusal.mockResolvedValue(null);
   projectFind.mockReturnValue({ select: () => ({ lean: () => Promise.resolve([]) }) });
   reissueInvitation.mockResolvedValue({
     invitation: { _id: ID, email: "ada@example.com", role: "member", boards: [] },
@@ -146,5 +149,23 @@ describe("POST /api/invitations/:id/resend", () => {
 
     expect((await resend()).status).toBe(404);
     expect(deliverTo).not.toHaveBeenCalled();
+  });
+
+  // BP-948: a lapsed invitation holds no seat, so resending it takes one
+  it("refuses to resend a lapsed invitation when the organisation is full, and resends a live one at the same count", async () => {
+    memberLimitRefusal.mockResolvedValue(Response.json({ feature: "members.limit", members: 10, limit: 10 }, { status: 402 }));
+
+    expect((await resend()).status).toBe(200);
+    expect(memberLimitRefusal).not.toHaveBeenCalled();
+
+    invitationFindOne.mockReturnValue({
+      select: () => ({ lean: () => Promise.resolve({ email: "ada@example.com", expiresAt: new Date(Date.now() - 1000) }) }),
+    });
+    reissueInvitation.mockClear();
+    const refused = await resend();
+
+    expect(refused.status).toBe(402);
+    expect(memberLimitRefusal).toHaveBeenCalledWith(scopedToDefaultOrganisation());
+    expect(reissueInvitation).not.toHaveBeenCalled();
   });
 });
