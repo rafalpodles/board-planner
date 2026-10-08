@@ -51,6 +51,13 @@ describe("PlanBadge (BP-930)", () => {
     expect(screen.getByTestId("plan-badge-action").textContent).toBe("Upgrade");
   });
 
+  it("offers Upgrade on a trial's first day too, when more than 30 days of it are left", () => {
+    state.organisation = { plan: "pro", planEndsAt: inDays(30.5), trial: true };
+    render(<PlanBadge compact={false} />);
+    expect(screen.getByTestId("plan-badge-action").textContent).toBe("Upgrade");
+    expect(screen.getByTestId("plan-badge-detail").textContent).toMatch(/^Ends /);
+  });
+
   it("shows no grace for a trial whose end has passed on the viewer's clock", () => {
     state.organisation = { plan: "pro", planEndsAt: inDays(-0.01), trial: true };
     render(<PlanBadge compact={false} />);

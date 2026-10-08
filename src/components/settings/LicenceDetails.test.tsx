@@ -106,6 +106,15 @@ describe("LicenceDetails", () => {
     expect(row("Plan")).toBe("Pro (expired)");
   });
 
+  it("tells a live trial it ends, and does not ask it to renew", () => {
+    render(<LicenceDetails licence={valid({ trial: true, daysLeft: 20 })} />);
+
+    expect(screen.getByTestId("licence-warning").textContent).toBe(
+      "This trial ends in 20 days, on January 1, 2027. After that this instance is on the Free plan unless a licence key is set."
+    );
+    expect(screen.getByTestId("licence-warning").textContent).not.toMatch(/Renew/);
+  });
+
   it("marks a live trial in the plan row", () => {
     render(<LicenceDetails licence={valid({ trial: true })} />);
 

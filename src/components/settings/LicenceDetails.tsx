@@ -100,6 +100,13 @@ function Notice({ verdict, daysLeft, expiresAt, graceEndsAt, trial }: {
       </p>
     );
   }
+  if (trial) {
+    return (
+      <p role="status" className="mb-4 rounded-lg border border-border p-4 text-sm" data-testid="licence-warning">
+        This trial ends {expiresWhen(daysLeft)}, on {formatDate(expiresAt)}. After that this instance is on the Free plan unless a licence key is set.
+      </p>
+    );
+  }
   if (daysLeft <= EXPIRY_WARNING_DAYS) {
     return (
       <p role="status" className="mb-4 rounded-lg border border-border p-4 text-sm" data-testid="licence-warning">

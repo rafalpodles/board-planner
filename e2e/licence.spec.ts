@@ -140,6 +140,7 @@ test("a live trial is marked as one on the licence page and is Pro until its day
   await openLicenceSettings(page);
 
   await expect(row(page, "Plan")).toHaveText("Pro (trial)");
+  await expect(page.getByTestId("licence-warning")).toContainText(/^This trial ends in 20 days, on /);
   expect(await planSeenByAMember(request)).toBe("pro");
 });
 
