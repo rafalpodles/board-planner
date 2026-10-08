@@ -298,6 +298,12 @@ ORGANISATION_REQUESTS_PER_MINUTE= # Optional — authenticated requests one orga
                           # with ORGANISATION_DOMAIN set, off without; 0 is off (BP-894)
 ORGANISATION_STORAGE_MB=  # Optional — uploaded files one organisation may keep; past it an upload is
                           # 413. Default 5120 with ORGANISATION_DOMAIN set, off without; 0 is off
+DEAD_ORGANISATION_DAYS=   # Optional — an organisation with no plan, whose plan ended that many days ago and where
+                          # nobody has used it (a sign-in, a session, an API token, a worker, a connected app) for as
+                          # long, is mailed to its administrators, suspended 14 days later and deleted after it; use
+                          # or a plan at any point before the delete cancels it, and an operator's resume voids the
+                          # notice. Default 60 with ORGANISATION_DOMAIN set, nothing without; 0 is off, anything
+                          # under 30 is refused (src/lib/dead-organisations.ts, BP-674)
 APP_ORIGIN=               # Comma-separated origins allowed to write — the CSRF allowlist, together
                           # with PUBLIC_ORIGIN, whenever a request carries no Sec-Fetch-Site (BP-361)
 TRUSTED_PROXY_HOPS=       # Proxies appending to X-Forwarded-For in front of the app; default 0,
