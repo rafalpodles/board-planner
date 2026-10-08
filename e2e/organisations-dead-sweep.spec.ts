@@ -44,7 +44,9 @@ test.beforeEach(async ({ request }) => {
 });
 
 test("an organisation with no plan and no sign-in is told first, then suspended after a fortnight, then deleted; one with a plan is never touched", async ({ request }) => {
+  // The mail stub keeps everything the run has sent, so every assertion is against what it held before this one
   const mailBefore = (await mailFor("boss@acme.example")).length;
+  const globexBefore = (await mailFor("boss@globex.example")).length;
 
   expect(await sweep(request, { daysFromNow: 61 })).toMatchObject({ noticed: 1, suspended: 0, deleted: 0 });
   await expect.poll(async () => (await mailFor("boss@acme.example")).length).toBe(mailBefore + 1);
@@ -70,7 +72,7 @@ test("an organisation with no plan and no sign-in is told first, then suspended 
   // The organisation with a plan, and its people, are as they were
   expect((await organisationRow(GLOBEX))?.deadNoticeAt ?? null).toBeNull();
   expect(await withDb((db) => db.collection("users").countDocuments({ organisation: GLOBEX.organisation as never }))).toBeGreaterThan(0);
-  expect(await mailFor("boss@globex.example")).toHaveLength(0);
+  expect(await mailFor("boss@globex.example")).toHaveLength(globexBefore);
   const audit = await withDb((db) => db.collection("platformauditlogs").find({ keyId: "dead-organisation-sweep" }).toArray());
   expect(audit.map((a) => a.action)).toEqual(["organisation_dead_noticed", "organisation_suspended", "organisation_delete_started", "organisation_deleted"]);
 });
@@ -136,10 +138,11 @@ test("a stored key that does not verify is a plan nobody can read, not no plan",
     });
   });
 
+  const oldBefore = (await mailFor("boss@old-co.example")).length;
   expect(await sweep(request, { daysFromNow: 61 })).toMatchObject({ noticed: 1 });
   expect((await organisationRow({ organisation: old }))?.deadNoticeAt ?? null).toBeNull();
   expect((await organisationRow(ACME))?.deadNoticeAt).toBeInstanceOf(Date);
-  expect(await mailFor("boss@old-co.example")).toHaveLength(0);
+  expect(await mailFor("boss@old-co.example")).toHaveLength(oldBefore);
 });
 
 test("a notice nothing followed is given again, and an operator's resume voids it", async ({ request }) => {
