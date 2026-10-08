@@ -1,4 +1,5 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
+import mongoose from "mongoose";
 import { RUN_ORGANISATIONS_SERVER } from "../playwright.config";
 import { signPlatformRequest } from "../src/lib/platform-request";
 import { E2E_PLATFORM_REQUEST_KEY, e2eLicence } from "./licence-key";
@@ -118,10 +119,25 @@ test("use through a token counts as use, however long ago anybody signed in", as
 });
 
 test("a stored key that does not verify is a plan nobody can read, not no plan", async ({ request }) => {
-  await withDb((db) => db.collection("organisations").updateOne({ _id: ACME.organisation as never }, { $set: { licenceKey: "not-a-key.at-all" } }));
+  // An organisation that is old by its id, with one old person and a key that does not verify
+  const old = new mongoose.Types.ObjectId(`${Math.floor(Date.UTC(2025, 0, 1) / 1000).toString(16)}0000000000000000`);
+  await withDb(async (db) => {
+    await db.collection("organisations").insertOne({ _id: old as never, name: "Old Co", slug: "old-co", licenceKey: "not-a-key.at-all" });
+    await db.collection("users").insertOne({
+      organisation: old as never,
+      username: "oldboss",
+      fullName: "Old Boss",
+      email: "boss@old-co.example",
+      kind: "human",
+      role: "admin",
+      createdAt: new Date(Date.UTC(2025, 0, 1)),
+    });
+  });
 
-  expect(await sweep(request, { daysFromNow: 61 })).toMatchObject({ noticed: 0 });
-  expect(await sweep(request, { daysFromNow: 90 })).toMatchObject({ suspended: 0, deleted: 0 });
+  expect(await sweep(request, { daysFromNow: 61 })).toMatchObject({ noticed: 1 });
+  expect((await organisationRow({ organisation: old }))?.deadNoticeAt ?? null).toBeNull();
+  expect((await organisationRow(ACME))?.deadNoticeAt).toBeInstanceOf(Date);
+  expect(await mailFor("boss@old-co.example")).toHaveLength(0);
 });
 
 test("a notice nothing followed is given again, and an operator's resume voids it", async ({ request }) => {
