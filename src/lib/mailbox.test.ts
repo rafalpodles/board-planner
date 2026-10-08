@@ -20,6 +20,12 @@ describe("mailboxOf", () => {
     expect(mailboxOf("a@googlemail.com").domain).toBe("gmail.com");
   });
 
+  it("keeps an address whose local part the fold would empty as it was, so two such addresses are not one", () => {
+    expect(mailboxOf("+x@corp.example").canonical).toBe("+x@corp.example");
+    expect(mailboxOf("+x@corp.example").canonical).not.toBe(mailboxOf("+y@corp.example").canonical);
+    expect(mailboxOf("..@gmail.com").canonical).toBe("..@gmail.com");
+  });
+
   it("gives something with no @ back as it is, with no domain, so no domain limit is applied to it", () => {
     expect(mailboxOf("nobody")).toEqual({ canonical: "nobody", domain: "" });
   });

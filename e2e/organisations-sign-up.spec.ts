@@ -132,10 +132,10 @@ test.describe("BP-673: creating an organisation from the platform host", () => {
     }
   });
 
-  test("a company domain gets five a day however many addresses it mints", async ({ request }) => {
+  test("a company domain gets ten organisations a day however many addresses it mints", async ({ request }) => {
     const company = `corp-${Date.now()}.example`;
-    for (let n = 1; n <= 6; n++) {
-      expect((await createOne(request, `person${n}@${company}`, n)).status(), `company address ${n}`).toBe(n <= 5 ? 201 : 429);
+    for (let n = 1; n <= 11; n++) {
+      expect((await createOne(request, `person${n}@${company}`, n)).status(), `company address ${n}`).toBe(n <= 10 ? 201 : 429);
     }
   });
 
@@ -145,13 +145,16 @@ test.describe("BP-673: creating an organisation from the platform host", () => {
     }
   });
 
-  test("a person refused for their own address does not spend their colleagues' share of the company", async ({ request }) => {
+  test("attempts that create nothing do not spend the company's share", async ({ request }) => {
     const company = `corp-${Date.now()}.example`;
     for (let n = 1; n <= 7; n++) {
       expect((await createOne(request, `lead@${company}`, n)).status(), `lead's attempt ${n}`).toBe(n <= 3 ? 201 : 429);
     }
-    expect((await createOne(request, `second@${company}`, 20)).status()).toBe(201);
-    expect((await createOne(request, `third@${company}`, 21)).status()).toBe(201);
+    // Only the lead's three organisations were created, however many times the lead was turned away
+    for (let n = 1; n <= 7; n++) {
+      expect((await createOne(request, `colleague${n}@${company}`, 20 + n)).status(), `colleague ${n}`).toBe(201);
+    }
+    expect((await createOne(request, `colleague8@${company}`, 30)).status()).toBe(429);
   });
 
   test("a burst of requests on one proven address creates one organisation, not one each", async ({ request }) => {
