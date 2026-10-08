@@ -51,5 +51,8 @@ export async function askBilling(action: BillingAction, payload: Record<string, 
   }
   if (parsed.billing === false) return { status: "off" };
   if (response.ok) return { status: "ok", body: parsed };
-  return response.status >= 500 ? { status: "unreachable" } : { status: "refused", httpStatus: response.status, body: parsed };
+  if (response.status >= 500) return { status: "unreachable" };
+  // 404 and 409 are answers about the organisation; the rest (a signature it refused, a request it could not read) are ours to fix
+  if (response.status !== 404 && response.status !== 409) console.warn(`The licence service refused a billing ${action} request: ${response.status}`);
+  return { status: "refused", httpStatus: response.status, body: parsed };
 }

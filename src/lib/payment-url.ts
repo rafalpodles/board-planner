@@ -1,0 +1,11 @@
+/** An address the browser is sent to for paying or managing a subscription: Stripe's page, over https, nothing else */
+export function paymentUrl(value: unknown): string | null {
+  if (typeof value !== "string" || value.length > 2048) return null;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  return url.protocol === "https:" && !url.username && !url.password ? url.toString() : null;
+}

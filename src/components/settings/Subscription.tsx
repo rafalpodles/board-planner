@@ -5,8 +5,8 @@ import { useApi } from "@/hooks/use-api";
 import { useOrganisation } from "@/hooks/use-organisation";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
-import { formatPlanDate } from "@/lib/plan-notice";
-import type { BillingSummary, SubscriptionSummary } from "@/app/api/admin/billing/route";
+import { formatPlanDate, planNotice } from "@/lib/plan-notice";
+import type { BillingSummary, SubscriptionSummary } from "@/lib/subscription-summary";
 
 const LIVE = ["active", "trialing", "past_due", "unpaid"];
 const POLL_MS = 3_000;
@@ -46,62 +46,98 @@ export function Subscription() {
   const api = useApi();
   const { toast } = useToast();
   const { organisation, reload } = useOrganisation();
-  const [billing, setBilling] = useState<BillingSummary | null>(null);
+  const [billing, setBilling] = useState<(BillingSummary & { unreachable?: boolean }) | null>(null);
   const [interval, setInterval] = useState<Interval>("month");
   const [busy, setBusy] = useState<"checkout" | "portal" | null>(null);
   const [returned, setReturned] = useState<"success" | "cancelled" | null>(null);
+  const [pollEnded, setPollEnded] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      setBilling(await api.get("/api/admin/billing"));
+      const next: BillingSummary & { unreachable?: boolean } = await api.get("/api/admin/billing");
+      // A service that cannot be reached for a moment is not one that takes no payments: keep what the page showed
+      setBilling((previous) => (!next.available && next.unreachable && previous ? previous : next));
     } catch {
-      setBilling({ available: false });
+      setBilling((previous) => previous ?? { available: false });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     void load();
-    const result = new URLSearchParams(window.location.search).get("checkout");
-    if (result === "success" || result === "cancelled") setReturned(result);
+    const params = new URLSearchParams(window.location.search);
+    const result = params.get("checkout");
+    if (result === "success" || result === "cancelled") {
+      setReturned(result);
+      // Said once: a reload must not thank for a payment again
+      params.delete("checkout");
+      const query = params.toString();
+      window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`);
+    }
   }, [load]);
 
-  // The payment is Stripe's word reaching us through a webhook, so the plan follows the redirect by a few seconds
+  // The browser's Back from Stripe may show this page as it was left, with the button still busy
   useEffect(() => {
-    if (returned !== "success") return;
+    const restored = (event: PageTransitionEvent) => {
+      if (event.persisted) setBusy(null);
+    };
+    window.addEventListener("pageshow", restored);
+    return () => window.removeEventListener("pageshow", restored);
+  }, []);
+
+  const subscription = billing?.available ? billing.subscription : null;
+  const live = isLiveSubscription(subscription);
+  const plan = organisation?.plan;
+  const settled = live && plan === "pro";
+
+  // The payment is Stripe's word reaching us through a webhook and then the key reaching the product, so the
+  // plan follows the redirect by a few seconds
+  useEffect(() => {
+    if (returned !== "success" || pollEnded || settled) return;
     let times = 0;
     const timer = window.setInterval(() => {
       times += 1;
       void reload();
       void load();
-      if (times >= POLL_TIMES) window.clearInterval(timer);
+      if (times >= POLL_TIMES) {
+        window.clearInterval(timer);
+        setPollEnded(true);
+      }
     }, POLL_MS);
     return () => window.clearInterval(timer);
-  }, [returned, reload, load]);
+  }, [returned, pollEnded, settled, reload, load]);
 
   async function go(action: "checkout" | "portal") {
     setBusy(action);
     try {
-      const answer = await api.post(`/api/admin/billing/${action}`, action === "checkout" ? { interval } : {});
+      // A 502 here is the payment service failing, which says nothing about this instance's database (BP-607)
+      const answer = await api.post(`/api/admin/billing/${action}`, action === "checkout" ? { interval } : {}, { relayed: true });
       window.location.assign(answer.url);
     } catch (err) {
       toast(err instanceof Error && err.message ? err.message : "Could not reach the payment service", "error");
       setBusy(null);
+      // "Already subscribed" or "nothing to manage" means the page was out of date
+      void load();
     }
   }
 
   if (!billing || !billing.available || !organisation) return null;
-  const subscription = billing.subscription;
-  const live = isLiveSubscription(subscription);
-  const operatorManaged = !live && organisation.plan === "pro" && organisation.trial !== true;
+  const notice = planNotice(organisation);
+  // Pro that nobody pays for through here, and that is not about to end, has nothing to subscribe to: an operator holds it
+  const operatorManaged = !live && organisation.plan === "pro" && organisation.trial !== true && notice.kind === "pro";
   if (operatorManaged) return null;
+  const confirming = returned === "success" && !live && !pollEnded;
 
   return (
     <section data-testid="subscription" className="mb-6 space-y-3">
       <h3 className="text-base font-semibold">Subscription</h3>
       {returned === "success" && (
         <p role="status" className="rounded-lg border border-border p-4 text-sm" data-testid="subscription-returned">
-          Thank you. The payment is being confirmed; this page updates in a moment.
+          {live
+            ? "Your subscription is active."
+            : pollEnded
+              ? "The payment is taking longer than usual to confirm. Reload this page in a few minutes."
+              : "Thank you. The payment is being confirmed; this page updates in a moment."}
         </p>
       )}
       {returned === "cancelled" && (
@@ -118,7 +154,7 @@ export function Subscription() {
           )}
           {subscription.cancelAtPeriodEnd && (
             <p role="status" className="rounded-lg border border-border p-4 text-sm" data-testid="subscription-cancelling">
-              The subscription is cancelled and ends with the paid period. After that this organisation is on the Free plan; no data is removed.
+              The subscription is cancelled and ends with the paid period. Pro stays on for 14 days after that, then this organisation is on the Free plan; no data is removed.
             </p>
           )}
           <Details subscription={subscription} />
@@ -130,18 +166,21 @@ export function Subscription() {
         <>
           <p className="text-sm text-text-muted">
             {organisation.trial ? "Subscribe to keep Pro when the trial ends." : "Upgrade to Pro: more than 10 members, managed AI and the rest of the Pro features."}
-            {billing.launchOpen && " The launch price is open, and a subscription keeps it for as long as it runs."}
+            {billing.launchOpen && " The launch price is open: a subscription that starts at it keeps it for as long as it runs without a gap."}
           </p>
-          <fieldset className="flex flex-wrap gap-3" disabled={busy !== null}>
+          <fieldset className="flex flex-wrap gap-3" disabled={busy !== null || confirming}>
             <legend className="sr-only">Billing period</legend>
             {(["month", "year"] as const).map((value) => (
-              <label key={value} className="flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border border-border px-4 text-sm has-[:checked]:border-primary">
+              <label
+                key={value}
+                className="flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border border-border px-4 text-sm has-[:checked]:border-primary focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-primary"
+              >
                 <input type="radio" name="billing-interval" checked={interval === value} onChange={() => setInterval(value)} />
                 {value === "month" ? "Monthly" : "Yearly"}
               </label>
             ))}
           </fieldset>
-          <Button onClick={() => go("checkout")} disabled={busy !== null} data-testid="subscription-checkout">
+          <Button onClick={() => go("checkout")} disabled={busy !== null || confirming} data-testid="subscription-checkout">
             {busy === "checkout" ? "Opening…" : "Continue to payment"}
           </Button>
         </>

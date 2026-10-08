@@ -40,7 +40,7 @@ const PERIOD_END = new Date(Date.now() + 20 * 24 * 60 * 60 * 1000).toISOString()
 const running = (over: Record<string, unknown> = {}) => ({
   billing: true,
   launchOpen: false,
-  subscription: { status: "active", interval: "year", launch: true, extraMembers: 3, currentPeriodEnd: PERIOD_END, cancelAtPeriodEnd: false, ...over },
+  subscription: { status: "active", interval: "year", launch: true, extraMembers: 3, currentPeriodEnd: PERIOD_END, cancelAtPeriodEnd: false, stripeCustomerId: "cus_not_for_the_browser", ...over },
 });
 const none = { billing: true, launchOpen: true, subscription: null };
 
@@ -69,8 +69,8 @@ test.beforeEach(async ({ page }) => {
   await seedTwoOrganisations();
   asked.length = 0;
   statusAnswer = { code: 200, body: none };
-  urlAnswer = { code: 200, body: { url: "http://stripe.test/pay/cs_test_1" } };
-  await page.route("http://stripe.test/**", (route) => route.fulfill({ contentType: "text/html", body: "<h1>Stripe stand-in</h1>" }));
+  urlAnswer = { code: 200, body: { url: "https://stripe.test/pay/cs_test_1" } };
+  await page.route("https://stripe.test/**", (route) => route.fulfill({ contentType: "text/html", body: "<h1>Stripe stand-in</h1>" }));
   await signInOn(page.context(), ACME);
 });
 
@@ -131,6 +131,7 @@ test("a Free organisation's admin chooses a period and is sent to Stripe, with w
   await expect(panel).toContainText("The launch price is open");
   await page.screenshot({ path: "e2e/.artifacts/bp676-upgrade.png", fullPage: true });
   await page.setViewportSize({ width: 375, height: 812 });
+  await page.reload();
   await expect(page.getByTestId("subscription-checkout")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   await page.screenshot({ path: "e2e/.artifacts/bp676-upgrade-phone.png", fullPage: true });
@@ -139,7 +140,7 @@ test("a Free organisation's admin chooses a period and is sent to Stripe, with w
   await panel.getByLabel("Yearly").check();
   await page.getByTestId("subscription-checkout").click();
 
-  await expect(page).toHaveURL("http://stripe.test/pay/cs_test_1");
+  await expect(page).toHaveURL("https://stripe.test/pay/cs_test_1");
   const checkout = asked.find((a) => a.path === "/api/billing/checkout")!;
   expect(checkout.signed).toBe(true);
   expect(checkout.body).toEqual({
@@ -154,19 +155,21 @@ test("a Free organisation's admin chooses a period and is sent to Stripe, with w
 
 test("a running subscription is shown with its period, and Manage subscription goes to the portal", async ({ page }) => {
   statusAnswer = { code: 200, body: running() };
-  urlAnswer = { code: 200, body: { url: "http://stripe.test/portal/bps_1" } };
+  urlAnswer = { code: 200, body: { url: "https://stripe.test/portal/bps_1" } };
   await open(page);
 
   const details = page.getByTestId("subscription-details");
   await expect(details).toContainText("Yearly");
   await expect(details).toContainText("Launch price");
   await expect(details).toContainText("3 above the 10 included");
+  const read = (await (await page.request.get(`${originOf(ACME)}/api/admin/billing`)).json()) as { subscription: Record<string, unknown> };
+  expect(Object.keys(read.subscription).sort()).toEqual(["cancelAtPeriodEnd", "currentPeriodEnd", "extraMembers", "interval", "launch", "status"]);
   await expect(page.getByTestId("subscription-checkout")).toHaveCount(0);
   await page.screenshot({ path: "e2e/.artifacts/bp676-subscribed.png", fullPage: true });
 
   await page.getByTestId("subscription-manage").click();
 
-  await expect(page).toHaveURL("http://stripe.test/portal/bps_1");
+  await expect(page).toHaveURL("https://stripe.test/portal/bps_1");
   expect(asked.find((a) => a.path === "/api/billing/portal")).toMatchObject({ signed: true, body: { organisation: ACME.organisation.toHexString(), returnUrl: `${originOf(ACME)}/settings/organisation` } });
 });
 
@@ -182,6 +185,7 @@ test("with no payment service the Licence section is what it was, with no Subscr
   statusAnswer = { code: 200, body: { billing: false } };
   await open(page);
 
+  await expect.poll(() => asked.some((a) => a.path === "/api/billing/status")).toBe(true);
   await expect(page.getByTestId("licence-free")).toBeVisible();
   await expect(page.getByTestId("subscription")).toHaveCount(0);
 });
@@ -193,8 +197,20 @@ test("a payment service that fails says so and leaves the person where they were
   await page.getByTestId("subscription-checkout").click();
 
   await expect(page.getByText("Could not reach the payment service. Try again in a moment.")).toBeVisible();
+  // A payment service failing is not this instance losing its database (BP-607)
+  await expect(page.getByText("having trouble reaching its database")).toHaveCount(0);
   expect(page.url()).toContain("/settings/organisation");
   await expect(page.getByTestId("subscription-checkout")).toBeEnabled();
+});
+
+test("a payment service that answers with something that is not a web page sends the person nowhere", async ({ page }) => {
+  urlAnswer = { code: 200, body: { url: "javascript:alert(1)" } };
+  await open(page);
+
+  await page.getByTestId("subscription-checkout").click();
+
+  await expect(page.getByText("Could not reach the payment service. Try again in a moment.")).toBeVisible();
+  expect(page.url()).toContain("/settings/organisation");
 });
 
 test("an organisation that already pays is told so, not sent to pay twice", async ({ page }) => {
@@ -218,13 +234,17 @@ test("a token, even an admin's, cannot start a payment, and the service is never
 test("back from paying, the page follows the plan until it is Pro", async ({ page, request }) => {
   await open(page, "?checkout=success");
   await expect(page.getByTestId("subscription-returned")).toContainText("Thank you");
-  await expect(page.getByTestId("subscription-checkout")).toBeVisible();
+  await expect(page.getByTestId("subscription-checkout")).toBeDisabled();
+  expect(page.url()).not.toContain("checkout=success");
+  await page.getByTestId("organisation-name-input").fill("Acme, renamed but not yet saved");
 
   statusAnswer = { code: 200, body: running({ launch: false, extraMembers: 0, interval: "month" }) };
   expect((await pushKey(request)).status()).toBe(200);
 
   await expect(page.getByTestId("subscription-details")).toContainText("Monthly", { timeout: 30_000 });
+  await expect(page.getByTestId("subscription-returned")).toHaveText("Your subscription is active.");
   await expect(page.getByTestId("plan-badge")).toContainText("Pro");
+  await expect(page.getByTestId("organisation-name-input")).toHaveValue("Acme, renamed but not yet saved");
   await expect(page.getByTestId("organisation-plan")).toHaveText("Pro");
   await page.screenshot({ path: "e2e/.artifacts/bp676-after-payment.png", fullPage: true });
 });

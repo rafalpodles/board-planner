@@ -108,6 +108,8 @@ const OWNED: readonly { prefix: string; groups: readonly GroupName[] }[] = [
   { prefix: "src/app/api/admin/workers/", groups: ["automation"] },
   { prefix: "src/app/api/admin/email/", groups: ["people"] },
   { prefix: "src/app/api/admin/licence/", groups: ["people"] },
+  // BP-676: organisations-billing.spec.ts drives these routes and is in people; api/admin/ alone would run only project
+  { prefix: "src/app/api/admin/billing/", groups: ["people"] },
   { prefix: "src/app/api/organisation/", groups: ["people"] },
   { prefix: "src/app/api/sign-in/", groups: ["people"] },
   { prefix: "src/app/api/admin/", groups: ["project"] },

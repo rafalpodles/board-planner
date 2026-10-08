@@ -24,9 +24,11 @@ export default function OrganisationSettingsPage() {
   const [licence, setLicence] = useState<LicenceSummary | null>(null);
   const [licenceFailed, setLicenceFailed] = useState(false);
 
+  // The name, not the summary: the summary is read again while a payment is followed, and an unsaved edit stays
+  const organisationName = organisation?.name;
   useEffect(() => {
-    if (organisation) setName(organisation.name);
-  }, [organisation]);
+    if (organisationName !== undefined) setName(organisationName);
+  }, [organisationName]);
 
   const loadLicence = useCallback(async () => {
     setLicenceFailed(false);

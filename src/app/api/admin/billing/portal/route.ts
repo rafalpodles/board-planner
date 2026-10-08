@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { askBilling } from "@/lib/billing-client";
 import { billingRefusal } from "@/lib/billing-refusal";
+import { paymentUrl } from "@/lib/payment-url";
 import { withAdmin } from "@/lib/middleware";
 import { organisationDomain, organisationOrigin } from "@/lib/organisation-host";
 
@@ -11,6 +12,6 @@ export const POST = withAdmin(async (_request, { user, db }) => {
   if (!origin) return NextResponse.json({ error: "This organisation has no address to return to" }, { status: 409 });
 
   const answer = await askBilling("portal", { organisation: db.organisation.toHexString(), returnUrl: `${origin}/settings/organisation` });
-  if (answer.status === "ok" && typeof answer.body.url === "string") return NextResponse.json({ url: answer.body.url });
-  return billingRefusal(answer);
+  const url = answer.status === "ok" ? paymentUrl(answer.body.url) : null;
+  return url ? NextResponse.json({ url }) : billingRefusal(answer);
 });

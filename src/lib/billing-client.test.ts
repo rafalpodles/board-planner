@@ -68,6 +68,22 @@ describe("askBilling", () => {
     expect(await askBilling("checkout", {})).toEqual({ status: "refused", httpStatus: 409, body: { error: "This organisation already has a subscription", reason: "already_subscribed" } });
   });
 
+  it("says so in the log when the service refuses the request itself, but not when it answers about the organisation", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    answer(401, { error: "Unauthorized" });
+    await askBilling("checkout", {});
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("checkout request: 401"));
+
+    warn.mockClear();
+    answer(409, {});
+    await askBilling("checkout", {});
+    answer(404, {});
+    await askBilling("portal", {});
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
   it("is unreachable when the service is down, fails, or answers with more than it should", async () => {
     answer(500, "boom");
     expect(await askBilling("portal", {})).toEqual({ status: "unreachable" });

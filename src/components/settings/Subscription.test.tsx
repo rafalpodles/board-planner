@@ -15,7 +15,7 @@ vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast: m.toast, dis
 vi.mock("@/hooks/use-organisation", () => ({ useOrganisation: () => ({ organisation: m.organisation.current, reload: m.reload }) }));
 
 const PERIOD_END = "2026-11-08T21:00:00.000Z";
-const FREE = { name: "Acme", cloud: true, plan: "free", trial: false };
+const FREE = { name: "Acme", cloud: true, plan: "free", planEndsAt: null, trial: false };
 const live = (over: Record<string, unknown> = {}) => ({
   available: true,
   launchOpen: false,
@@ -23,10 +23,16 @@ const live = (over: Record<string, unknown> = {}) => ({
 });
 
 let assign: ReturnType<typeof vi.fn>;
+let replaceState: ReturnType<typeof vi.fn>;
 const setLocation = (search = "") => {
   assign = vi.fn();
-  Object.defineProperty(window, "location", { value: { assign, search }, writable: true, configurable: true });
+  replaceState = vi.fn();
+  Object.defineProperty(window, "location", { value: { assign, search, pathname: "/settings/organisation", hash: "" }, writable: true, configurable: true });
+  Object.defineProperty(window, "history", { value: { replaceState }, writable: true, configurable: true });
 };
+const DAY = 86_400_000;
+const endsIn = (days: number) => new Date(Date.now() + days * DAY).toISOString();
+const shown = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -65,6 +71,7 @@ describe("Subscription", () => {
     expect(await screen.findByText(/Upgrade to Pro/)).toBeTruthy();
     expect(screen.getByText(/The launch price is open/)).toBeTruthy();
     expect((screen.getByLabelText("Monthly") as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByRole("group", { name: "Billing period" })).toBeTruthy();
   });
 
   it("does not mention the launch price once it is closed", async () => {
@@ -89,7 +96,7 @@ describe("Subscription", () => {
     fireEvent.click(await screen.findByTestId("subscription-checkout"));
 
     await waitFor(() => expect(assign).toHaveBeenCalledWith("https://checkout.stripe.test/c/1"));
-    expect(m.api.post).toHaveBeenCalledWith("/api/admin/billing/checkout", { interval: "month" });
+    expect(m.api.post).toHaveBeenCalledWith("/api/admin/billing/checkout", { interval: "month" }, { relayed: true });
   });
 
   it("starts a yearly checkout when Yearly is chosen", async () => {
@@ -99,7 +106,7 @@ describe("Subscription", () => {
     fireEvent.click(await screen.findByLabelText("Yearly"));
     fireEvent.click(screen.getByTestId("subscription-checkout"));
 
-    await waitFor(() => expect(m.api.post).toHaveBeenCalledWith("/api/admin/billing/checkout", { interval: "year" }));
+    await waitFor(() => expect(m.api.post).toHaveBeenCalledWith("/api/admin/billing/checkout", { interval: "year" }, { relayed: true }));
   });
 
   it("says what went wrong and gives the button back when no payment page comes", async () => {
@@ -119,6 +126,7 @@ describe("Subscription", () => {
     render(<Subscription />);
 
     const details = await screen.findByTestId("subscription-details");
+    expect(screen.getByTestId("subscription-period").textContent).toBe(shown(PERIOD_END));
     expect(details.textContent).toContain("Yearly");
     expect(details.textContent).toContain("Launch price");
     expect(details.textContent).toContain("4 above the 10 included");
@@ -127,7 +135,7 @@ describe("Subscription", () => {
 
     fireEvent.click(screen.getByTestId("subscription-manage"));
     await waitFor(() => expect(assign).toHaveBeenCalledWith("https://billing.stripe.test/p/1"));
-    expect(m.api.post).toHaveBeenCalledWith("/api/admin/billing/portal", {});
+    expect(m.api.post).toHaveBeenCalledWith("/api/admin/billing/portal", {}, { relayed: true });
   });
 
   it("says a failed payment is to be fixed in the portal, with the grace that follows", async () => {
@@ -149,7 +157,7 @@ describe("Subscription", () => {
     m.api.get.mockResolvedValue(live({ cancelAtPeriodEnd: true }));
     render(<Subscription />);
 
-    expect((await screen.findByTestId("subscription-cancelling")).textContent).toMatch(/ends with the paid period.*no data is removed/);
+    expect((await screen.findByTestId("subscription-cancelling")).textContent).toMatch(/ends with the paid period.*14 days.*no data is removed/);
     expect(screen.getByText("Ends")).toBeTruthy();
   });
 
@@ -189,5 +197,138 @@ describe("Subscription", () => {
       await vi.advanceTimersByTimeAsync(30_000);
     });
     expect(m.reload).not.toHaveBeenCalled();
+  });
+
+  it("shows a trialing subscription as a running one", async () => {
+    m.api.get.mockResolvedValue(live({ status: "trialing" }));
+    render(<Subscription />);
+
+    expect(await screen.findByTestId("subscription-manage")).toBeTruthy();
+  });
+
+  it("offers a subscription to an organisation whose Pro is in its grace days or ending, as the sidebar's Renew does", async () => {
+    for (const planEndsAt of [endsIn(-3), endsIn(10)]) {
+      cleanup();
+      m.organisation.current = { ...FREE, plan: "pro", planEndsAt };
+      render(<Subscription />);
+      expect(await screen.findByTestId("subscription-checkout"), planEndsAt).toBeTruthy();
+    }
+  });
+
+  it("shows nothing for Pro an operator holds with time left", async () => {
+    m.organisation.current = { ...FREE, plan: "pro", planEndsAt: endsIn(200) };
+    const { container } = render(<Subscription />);
+
+    await waitFor(() => expect(m.api.get).toHaveBeenCalled());
+    await act(async () => {});
+    expect(container.textContent).toBe("");
+  });
+
+  it("takes the thank-you parameter off the address, keeping the others, so a reload does not repeat it", async () => {
+    setLocation("?tab=plan&checkout=success");
+    render(<Subscription />);
+    await act(async () => {});
+
+    expect(replaceState).toHaveBeenCalledWith(null, "", "/settings/organisation?tab=plan");
+  });
+
+  it("says the subscription is active once it is, and stops following the plan when it is Pro", async () => {
+    vi.useFakeTimers();
+    setLocation("?checkout=success");
+    m.organisation.current = { ...FREE, plan: "pro", planEndsAt: endsIn(30) };
+    m.api.get.mockResolvedValue(live());
+    render(<Subscription />);
+    await act(async () => {});
+
+    expect(screen.getByTestId("subscription-returned").textContent).toBe("Your subscription is active.");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(m.reload).not.toHaveBeenCalled();
+  });
+
+  it("keeps following the plan while the subscription is recorded and the key has not yet arrived", async () => {
+    vi.useFakeTimers();
+    setLocation("?checkout=success");
+    m.api.get.mockResolvedValue(live());
+    render(<Subscription />);
+    await act(async () => {});
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_000);
+    });
+
+    expect(m.reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("holds the payment button while a payment is being confirmed, and gives it back, with the truth, when it is not", async () => {
+    vi.useFakeTimers();
+    setLocation("?checkout=success");
+    render(<Subscription />);
+    await act(async () => {});
+
+    expect((screen.getByTestId("subscription-checkout") as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(31_000);
+    });
+
+    expect(screen.getByTestId("subscription-returned").textContent).toMatch(/taking longer than usual/);
+    expect((screen.getByTestId("subscription-checkout") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("stops following the plan when the page goes away", async () => {
+    vi.useFakeTimers();
+    setLocation("?checkout=success");
+    const { unmount } = render(<Subscription />);
+    await act(async () => {});
+    unmount();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+
+    expect(m.reload).not.toHaveBeenCalled();
+  });
+
+  it("keeps what it showed when the service cannot be reached for a moment, and hides only for a service that takes no payments", async () => {
+    vi.useFakeTimers();
+    setLocation("?checkout=success");
+    m.api.get.mockResolvedValueOnce(live()).mockResolvedValue({ available: false, unreachable: true });
+    render(<Subscription />);
+    await act(async () => {});
+    expect(screen.getByTestId("subscription-details")).toBeTruthy();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_000);
+    });
+    expect(screen.getByTestId("subscription-details")).toBeTruthy();
+
+    m.api.get.mockResolvedValue({ available: false });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_000);
+    });
+    expect(screen.queryByTestId("subscription")).toBeNull();
+  });
+
+  it("reads the subscription again when the service says the page was out of date", async () => {
+    m.api.post.mockRejectedValue(new Error("This organisation already has a subscription"));
+    render(<Subscription />);
+    fireEvent.click(await screen.findByTestId("subscription-checkout"));
+    await waitFor(() => expect(m.toast).toHaveBeenCalled());
+
+    await waitFor(() => expect(m.api.get).toHaveBeenCalledTimes(2));
+  });
+
+  it("is not stuck on Opening… when the browser restores the page after Back from Stripe", async () => {
+    m.api.post.mockReturnValue(new Promise(() => {}));
+    render(<Subscription />);
+    fireEvent.click(await screen.findByTestId("subscription-checkout"));
+    expect(screen.getByTestId("subscription-checkout").textContent).toBe("Opening…");
+
+    await act(async () => {
+      window.dispatchEvent(Object.assign(new Event("pageshow"), { persisted: true }));
+    });
+
+    expect(screen.getByTestId("subscription-checkout").textContent).toBe("Continue to payment");
   });
 });
