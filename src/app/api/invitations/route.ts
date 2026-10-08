@@ -6,6 +6,7 @@ import { withAdmin } from "@/lib/middleware";
 import { isValidEmail, normaliseEmail } from "@/lib/email";
 import { originFor } from "@/lib/organisation-host";
 import { issueInvitation, InvitationBoardInput, recordDelivery } from "@/lib/invitations";
+import { memberLimitRefusal } from "@/lib/member-limit";
 import { deliverTo, INTERACTIVE_ONLY, NO_ORIGIN_ERROR } from "@/lib/invitation-mail";
 import { describeInvitation, toApiInvitations } from "@/lib/invitation-view";
 import { logInstanceAudit } from "@/lib/instanceAudit";
@@ -84,6 +85,8 @@ export const POST = withAdmin(async (request, { user, db }) => {
       { status: 409 }
     );
   }
+  const full = await memberLimitRefusal(db, { email });
+  if (full) return full;
   const projects = await db.Project.find({ _id: { $in: boards.value.map((b) => b.project) } })
     .select("key name")
     .lean();

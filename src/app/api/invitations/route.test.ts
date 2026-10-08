@@ -10,6 +10,7 @@ const invitationFind = vi.fn();
 const projectFind = vi.fn();
 const logInstanceAudit = vi.fn();
 const selfOrigin = vi.fn();
+const memberLimitRefusal = vi.fn();
 let caller: Record<string, unknown>;
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
@@ -23,6 +24,7 @@ vi.mock("@/lib/middleware", async () => {
   };
 });
 vi.mock("@/lib/session", () => ({ selfOrigin }));
+vi.mock("@/lib/member-limit", () => ({ memberLimitRefusal }));
 vi.mock("@/lib/invitations", () => ({ issueInvitation, recordDelivery }));
 vi.mock("@/lib/invitation-mail", async () => {
   const actual = await vi.importActual<typeof import("@/lib/invitation-mail")>("@/lib/invitation-mail");
@@ -63,6 +65,7 @@ beforeEach(() => {
   caller = { _id: "admin-1", username: "owner", fullName: "Owner", role: "admin" };
   selfOrigin.mockReturnValue("https://planner.example");
   userExists.mockResolvedValue(null);
+  memberLimitRefusal.mockResolvedValue(null);
   boardsExist([P1]);
   issueInvitation.mockResolvedValue({
     invitation: { _id: "inv-1", email: "ada@example.com" },
@@ -114,6 +117,17 @@ describe("POST /api/invitations", () => {
 
   // A machine credential minting an admin invitation would be a way to make an account and sign
   // in as it — the same escalation POST /api/users refuses
+  // BP-948
+  it("refuses with the member limit's own answer when the organisation is full, issuing nothing", async () => {
+    memberLimitRefusal.mockResolvedValue(Response.json({ feature: "members.limit", members: 10, limit: 10 }, { status: 402 }));
+
+    const res = await POST(post({ email: "ada@example.com", boards: [{ project: P1, relation: "member" }] }), CTX);
+
+    expect(res.status).toBe(402);
+    expect(memberLimitRefusal).toHaveBeenCalledWith(scopedToDefaultOrganisation(), { email: "ada@example.com" });
+    expect(issueInvitation).not.toHaveBeenCalled();
+  });
+
   it("refuses a machine credential", async () => {
     caller = { ...caller, viaMachineCredential: true };
 

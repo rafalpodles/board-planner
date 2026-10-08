@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { getAuthUser, logInstanceAudit, getOrganisation, renameOrganisation, organisationOrigin } = vi.hoisted(() => ({
+const { getAuthUser, logInstanceAudit, getOrganisation, renameOrganisation, organisationOrigin, memberLimitOf } = vi.hoisted(() => ({
+  memberLimitOf: vi.fn(),
   getAuthUser: vi.fn(),
   logInstanceAudit: vi.fn(),
   getOrganisation: vi.fn(),
@@ -9,6 +10,7 @@ const { getAuthUser, logInstanceAudit, getOrganisation, renameOrganisation, orga
 }));
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+vi.mock("@/lib/member-limit", async (original) => ({ ...(await original<typeof import("@/lib/member-limit")>()), memberLimitOf }));
 vi.mock("@/lib/auth", () => ({ getAuthUser, RateLimitError: class RateLimitError extends Error {} }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/lib/organisation", async (original) => ({
@@ -24,6 +26,7 @@ vi.mock("@/lib/organisation-host", async (original) => ({
 const { GET, PUT } = await import("./route");
 const { User } = await import("@/models/user");
 const { Project } = await import("@/models/project");
+const { Invitation } = await import("@/models/invitation");
 const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
 
 const ADMIN = { _id: "admin-1", username: "root", role: "admin", viaMachineCredential: false };
@@ -48,6 +51,8 @@ beforeEach(() => {
   getOrganisation.mockResolvedValue({ _id: DEFAULT_ORGANISATION_ID, name: "Acme", entitlements: { plan: "pro", features: [] } });
   countUsers = vi.spyOn(User, "countDocuments").mockResolvedValue(4 as never);
   countProjects = vi.spyOn(Project, "countDocuments").mockResolvedValue(2 as never);
+  vi.spyOn(Invitation, "countDocuments").mockResolvedValue(3 as never);
+  memberLimitOf.mockResolvedValue(null);
 });
 
 describe("GET /api/organisation (BP-920)", () => {
@@ -87,9 +92,22 @@ describe("GET /api/organisation (BP-920)", () => {
 
     const body = await (await call(GET, "GET")).json();
 
-    expect(body).toMatchObject({ members: 4, projects: 2 });
+    expect(body).toMatchObject({ members: 4, projects: 2, memberLimit: null, invited: 3 });
     expect(countUsers).toHaveBeenCalledWith(expect.objectContaining({ organisation: DEFAULT_ORGANISATION_ID, kind: { $ne: "machine" }, deactivatedAt: null }));
     expect(countProjects).toHaveBeenCalledWith(expect.objectContaining({ organisation: DEFAULT_ORGANISATION_ID }));
+  });
+
+  // BP-948: the admin banner reads these; a member is told none of it
+  it("tells an admin of a Free cloud organisation its member limit and how many are invited, and a member nothing of it", async () => {
+    memberLimitOf.mockResolvedValue(10);
+
+    getAuthUser.mockResolvedValue(ADMIN);
+    expect(await (await call(GET, "GET")).json()).toMatchObject({ memberLimit: 10, invited: 3 });
+
+    getAuthUser.mockResolvedValue(MEMBER);
+    const asMember = await (await call(GET, "GET")).json();
+    expect(asMember).not.toHaveProperty("memberLimit");
+    expect(asMember).not.toHaveProperty("invited");
   });
 
   it("calls a self-hosted organisation nobody named unnamed", async () => {

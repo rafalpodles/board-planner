@@ -13,6 +13,8 @@ export interface OrganisationSummary {
   planEndsAt: string | null;
   trial?: boolean;
   members?: number;
+  memberLimit?: number | null;
+  invited?: number;
   projects?: number;
 }
 

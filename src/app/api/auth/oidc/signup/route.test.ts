@@ -13,6 +13,7 @@ const userCreate = vi.fn();
 const userDeleteOne = vi.fn();
 const identityCreate = vi.fn();
 const providerById = vi.fn();
+const memberLimitRefusal = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 let clientIp: string | null = "203.0.113.9";
@@ -33,6 +34,7 @@ vi.mock("@/lib/oidc/flow", () => ({ JOIN_COOKIE: "bp_oidc_join", heldSignUp, spe
 vi.mock("@/lib/oidc/providers", () => ({ providerById }));
 vi.mock("@/lib/oidc/admin-group", () => ({ applyAdminGroup }));
 vi.mock("@/lib/sign-up-domains", () => ({ signUpOpenTo }));
+vi.mock("@/lib/member-limit", () => ({ memberLimitRefusal }));
 vi.mock("@/lib/invitations", () => ({ revokePendingInvitationsFor }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/models/user", () => ({ User: { create: userCreate, deleteOne: userDeleteOne } }));
@@ -58,6 +60,7 @@ beforeEach(async () => {
   heldSignUp.mockResolvedValue(HELD);
   provenanceRefusal.mockReturnValue(null);
   signUpOpenTo.mockResolvedValue(true);
+  memberLimitRefusal.mockResolvedValue(null);
   providerById.mockReturnValue({ id: "oidc", label: "Acme", linksByAddress: true });
   userCreate.mockResolvedValue(GRACE);
   identityCreate.mockResolvedValue({});
@@ -110,6 +113,19 @@ describe("POST /api/auth/oidc/signup", () => {
     await post();
 
     expect(applyAdminGroup).toHaveBeenCalledWith(scopedToDefaultOrganisation(), GRACE, "oidc", ["staff"]);
+  });
+
+  // BP-948: sign-up by company domain is a way in, so a full Free organisation refuses it
+  it("refuses with the limit's own answer when the organisation is full, making nothing", async () => {
+    memberLimitRefusal.mockResolvedValue(Response.json({ feature: "members.limit", members: 10, limit: 10 }, { status: 402 }));
+
+    const res = await post();
+
+    expect(res.status).toBe(402);
+    expect(await res.json()).toMatchObject({ feature: "members.limit", limit: 10 });
+    expect(memberLimitRefusal).toHaveBeenCalledWith(scopedToDefaultOrganisation(), { email: "grace@corp.example" });
+    expect(userCreate).not.toHaveBeenCalled();
+    expect(createSession).not.toHaveBeenCalled();
   });
 
   it("refuses once the domain is no longer open, making nothing", async () => {

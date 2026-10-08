@@ -3,14 +3,16 @@ import { logInstanceAudit } from "@/lib/instanceAudit";
 import { withAdmin, withAuth } from "@/lib/middleware";
 import { checkOrganisationName, getOrganisation, organisationIsNamed, renameOrganisation } from "@/lib/organisation";
 import { organisationDomain, organisationOrigin } from "@/lib/organisation-host";
+import { memberCounts, memberLimitOf } from "@/lib/member-limit";
 import type { ScopedDb } from "@/lib/db-scope";
 
 async function describe(db: ScopedDb, admin: boolean) {
   const [organisation, origin] = await Promise.all([getOrganisation(db.organisation), organisationOrigin(db.organisation)]);
   const counts = admin
     ? await Promise.all([
-        db.User.countDocuments({ kind: { $ne: "machine" }, deactivatedAt: null }),
         db.Project.countDocuments({}),
+        memberLimitOf(db),
+        memberCounts(db),
       ])
     : null;
   return {
@@ -21,7 +23,7 @@ async function describe(db: ScopedDb, admin: boolean) {
     plan: organisation.entitlements.plan,
     planEndsAt: organisation.entitlements.plan === "pro" ? organisation.entitlements.expiresAt?.toISOString() ?? null : null,
     trial: organisation.entitlements.plan === "pro" && organisation.entitlements.trial === true,
-    ...(counts ? { members: counts[0], projects: counts[1] } : {}),
+    ...(counts ? { members: counts[2].active, projects: counts[0], memberLimit: counts[1], invited: counts[2].pending } : {}),
   };
 }
 

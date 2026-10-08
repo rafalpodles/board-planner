@@ -29,6 +29,9 @@ export function PlanBadge({ compact }: { compact: boolean }) {
           ? `${trial ? "Pro trial" : "Pro plan"}, ends ${formatPlanDate(notice.endsAt)}`
           : `Pro plan ended ${formatPlanDate(notice.endedAt)}, in force until ${formatPlanDate(notice.graceEndsAt)}`;
   const name = notice.kind === "free" ? "Free" : trial ? "Trial" : "Pro";
+  const held = (organisation.members ?? 0) + (organisation.invited ?? 0);
+  const limit = isAdmin ? organisation.memberLimit ?? null : null;
+  const membersNote = limit !== null && held >= limit ? `${held} of ${limit} members on Free` : null;
   const action =
     notice.kind === "free" || (trial && (notice.kind === "ending" || notice.kind === "pro"))
       ? "Upgrade"
@@ -61,6 +64,11 @@ export function PlanBadge({ compact }: { compact: boolean }) {
           {notice.kind === "grace" && `Ended ${formatPlanDate(notice.endedAt)} · until ${formatPlanDate(notice.graceEndsAt)}`}
         </span>
       </div>
+      {membersNote && (
+        <p className="mt-1 text-xs text-warning" data-testid="plan-badge-members">
+          {membersNote}
+        </p>
+      )}
       {isAdmin && action && (
         <Link
           href={UPGRADE_HREF}

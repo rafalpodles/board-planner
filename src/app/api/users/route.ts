@@ -14,6 +14,7 @@ import { ProvenanceError, provenanceRefusal } from "@/lib/session";
 import { withAdmin, refusedOnThisHost, refusedHost } from "@/lib/middleware";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { revokePendingInvitationsFor } from "@/lib/invitations";
+import { memberLimitRefusal } from "@/lib/member-limit";
 import { liveIdentityFilter, providerById } from "@/lib/oidc/providers";
 import { HydratedDocument } from "mongoose";
 import { IUser } from "@/types";
@@ -141,9 +142,14 @@ export async function POST(request: Request) {
     if (refusedHere) return refusedHere;
   }
 
+  const accountDb = authUser ? scopedFor(authUser) : db;
+  if (!isBootstrap) {
+    const full = await memberLimitRefusal(accountDb, { email });
+    if (full) return full;
+  }
+
   const hashedPassword = await bcrypt.hash(password, PASSWORD_COST_FACTOR);
 
-  const accountDb = authUser ? scopedFor(authUser) : db;
   try {
     const user = await accountDb.User.create({
       username: storedUsername,

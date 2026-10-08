@@ -3,6 +3,7 @@ import { isValidObjectId } from "mongoose";
 import { withAdmin } from "@/lib/middleware";
 import { originFor } from "@/lib/organisation-host";
 import { recordDelivery, reissueInvitation } from "@/lib/invitations";
+import { memberLimitRefusal } from "@/lib/member-limit";
 import { deliverTo, INTERACTIVE_ONLY, invitationLink, NO_ORIGIN_ERROR } from "@/lib/invitation-mail";
 import { describeInvitation, toApiInvitations } from "@/lib/invitation-view";
 import { logInstanceAudit } from "@/lib/instanceAudit";
@@ -24,12 +25,17 @@ export const POST = withAdmin(async (request, { params, user, db }) => {
   const origin = await originFor(db);
   if (!origin) return NextResponse.json({ error: NO_ORIGIN_ERROR }, { status: 500 });
 
-  const current = await db.Invitation.findById(invitationId).select("email").lean();
+  const current = await db.Invitation.findById(invitationId).select("email expiresAt").lean();
   if (current && (await db.User.exists({ email: current.email }))) {
     return NextResponse.json(
       { error: "That address already has an account. Add them to a board instead." },
       { status: 409 }
     );
+  }
+  // A lapsed invitation holds no seat, so sending it again takes one; a live one is that seat already
+  if (current && current.expiresAt <= new Date()) {
+    const full = await memberLimitRefusal(db);
+    if (full) return full;
   }
   const reissued = await reissueInvitation(db, invitationId, user._id);
   if (!reissued) return NextResponse.json({ error: "Invitation not found" }, { status: 404 });

@@ -6,6 +6,7 @@ import { isValidEmail, normaliseEmail } from "@/lib/email";
 import { isRateLimited, recordFailedAttempt } from "@/lib/rate-limit";
 import { originFor } from "@/lib/organisation-host";
 import { inviteToBoard, recordDelivery } from "@/lib/invitations";
+import { memberLimitRefusal } from "@/lib/member-limit";
 import { deliverTo, INTERACTIVE_ONLY, NO_ORIGIN_ERROR } from "@/lib/invitation-mail";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { logProjectAudit } from "@/lib/projectAudit";
@@ -111,6 +112,10 @@ export const POST = withProjectOwner(async (request, { params, user, db }) => {
       { status: 429 }
     );
   }
+
+  // An address that is already a pending invitation joins that seat; only a new one needs room
+  const full = await memberLimitRefusal(db, { email });
+  if (full) return full;
 
   const outcome = await inviteToBoard(db, {
     email,
