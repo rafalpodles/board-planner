@@ -29,6 +29,8 @@ interface AgentRow {
 
 interface AgentsResponse {
   pmAvailable: boolean;
+  pmNeedsPlan?: boolean;
+  pmKeyUnreadable?: boolean;
   defaults: { pmDefaultModel: string; pmDefaultDailyTurnCap: number; envModel: string };
   projects: AgentRow[];
 }
@@ -162,10 +164,37 @@ export default function AdminAgentsPage() {
       {!data.pmAvailable && (
         <div className="mb-6 flex gap-3 rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm">
           <span aria-hidden="true">⚠</span>
-          <p>
-            <strong className="font-semibold">No OpenRouter key is configured</strong>, so no agent can
-            run regardless of the switches below.
-          </p>
+          {data.pmKeyUnreadable ? (
+            <p>
+              <strong className="font-semibold">No agent can run</strong>: the stored OpenRouter key cannot be read.{" "}
+              <Link href="/settings/ai-keys" className="underline">
+                Enter it again
+              </Link>
+              .
+            </p>
+          ) : data.pmNeedsPlan ? (
+            <p>
+              <strong className="font-semibold">No agent can run</strong>: on the Free plan the PM agent needs your
+              own OpenRouter key.{" "}
+              <Link href="/settings/ai-keys" className="underline">
+                Add a key
+              </Link>
+              , or{" "}
+              <Link href="/settings/organisation" className="underline">
+                upgrade to Pro
+              </Link>{" "}
+              and use ours.
+            </p>
+          ) : (
+            <p>
+              <strong className="font-semibold">No OpenRouter key is configured</strong>, so no agent can
+              run regardless of the switches below.{" "}
+              <Link href="/settings/ai-keys" className="underline">
+                Add one here
+              </Link>
+              .
+            </p>
+          )}
         </div>
       )}
 
@@ -183,6 +212,9 @@ export default function AdminAgentsPage() {
             placeholder="gpt-4o-mini"
           />
         </div>
+        <p className="mt-2 text-xs text-text-muted">
+          An OpenRouter model name. One without a provider, such as gpt-4o-mini, is read as openai/gpt-4o-mini.
+        </p>
         <div className="mt-3">
           <Button size="sm" onClick={saveAiModel} disabled={savingAiModel}>
             {savingAiModel ? "Saving..." : "Save model"}

@@ -2,19 +2,22 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withAdmin } from "@/lib/middleware";
 import { getSettings } from "@/models/settings";
-import { isPmAvailable } from "@/lib/pm/config";
+import { pmAvailability } from "@/lib/pm/config";
 import { DEFAULT_PM_MODEL } from "@/lib/pm/openrouter";
 
 export const GET = withAdmin(async (_request, { db }) => {
   await connectDB();
 
-  const [projects, settings] = await Promise.all([
+  const [projects, settings, availability] = await Promise.all([
     db.Project.find({}, "key name icon pm").sort({ key: 1 }).lean(),
     getSettings(db),
+    pmAvailability(db),
   ]);
 
   return NextResponse.json({
-    pmAvailable: isPmAvailable(),
+    pmAvailable: availability?.available ?? false,
+    pmNeedsPlan: availability?.needsPlan ?? false,
+    pmKeyUnreadable: availability?.keyUnreadable ?? false,
     defaults: {
       pmDefaultModel: settings.pmDefaultModel || "",
       pmDefaultDailyTurnCap: settings.pmDefaultDailyTurnCap || 0,

@@ -40,6 +40,20 @@ describe("what an export row keeps (BP-893)", () => {
     expect(user).toEqual({ username: "boss", notifications: { chat: { kind: "slack" } } });
     expect(token).toEqual({ name: "ci", prefix: "cp_abc" });
   });
+
+  // BP-652: an organisation's own model keys are credentials like any other
+  it("leaves out the organisation's own model keys, and keeps the rest of its settings", async () => {
+    const { exportableRow } = await import("./organisation-life-cycle");
+
+    const settings = exportableRow("Settings", {
+      aiModel: "gpt-4o-mini",
+      openrouterKey: "enc:v3:k:fff",
+      openrouterKeyHint: "1234",
+    });
+
+    expect(JSON.stringify(settings)).not.toContain("enc:v3");
+    expect(settings).toEqual({ aiModel: "gpt-4o-mini", openrouterKeyHint: "1234" });
+  });
 });
 
 describe("the fields an export reads although the schema hides them (BP-893)", () => {

@@ -4,6 +4,7 @@ const chatCompletion = vi.fn();
 const changeStatusExecute = vi.fn();
 const assignTaskExecute = vi.fn();
 const addCommentExecute = vi.fn();
+const resolveModelKey = vi.hoisted(() => vi.fn());
 
 const PROJECT = {
   _id: "69a52e3b399b27d3cbb2c5a5",
@@ -58,6 +59,10 @@ vi.mock("./pm-user", () => ({
   PM_USERNAME: "pm",
 }));
 vi.mock("./openrouter", () => ({ chatCompletion }));
+vi.mock("@/lib/model-keys", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/model-keys")>()),
+  resolveModelKey,
+}));
 vi.mock("./availability", () => ({
   isPmRunnable: () => true,
   pmDisabledReason: () => "",
@@ -144,6 +149,30 @@ function toolReplies() {
 beforeEach(() => {
   vi.clearAllMocks();
   addCommentExecute.mockResolvedValue({ result: { ok: true } });
+  resolveModelKey.mockResolvedValue({ ok: true, key: "sk-the-orgs-own-key", source: "own" });
+});
+
+// BP-652. The key is resolved once for the turn and every call of it is made with that key
+describe("runPmTurn's model key", () => {
+  it("makes every call of the turn with the key resolved for the organisation", async () => {
+    chatCompletion
+      .mockResolvedValueOnce(toolCall("add_comment", { taskKey: "BP-1", body: "answer" }))
+      .mockResolvedValueOnce({ type: "text", content: "done" });
+
+    await turn(NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS);
+
+    expect(resolveModelKey).toHaveBeenCalledWith(db);
+    expect(chatCompletion.mock.calls.map((call) => call[0].apiKey)).toEqual(["sk-the-orgs-own-key", "sk-the-orgs-own-key"]);
+  });
+
+  it("refuses the turn, calling no model and storing no message, when no key may be used", async () => {
+    resolveModelKey.mockResolvedValue({ ok: false, reason: "needs_plan", plan: "free" });
+
+    const result = await turn(NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS);
+
+    expect(result).toMatchObject({ ok: false, error: expect.stringMatching(/your own key.*upgrade to Pro/) });
+    expect(chatCompletion).not.toHaveBeenCalled();
+  });
 });
 
 // BP-301: board text reaches this turn verbatim, so withholding has to survive a model

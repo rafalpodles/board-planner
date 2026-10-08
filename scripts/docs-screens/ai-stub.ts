@@ -1,6 +1,6 @@
 /**
  * Answers the task form's AI Assist with the one draft the documentation shows: a CSV export that
- * duplicates ORB-4 and waits on it. Point the app at it with OPENAI_BASE_URL — see demo.ts.
+ * duplicates ORB-4 and waits on it. Point the app at it with OPENROUTER_BASE_URL — see demo.ts. Only a JSON-mode request, which is AI Assist, is answered.
  *
  *   npx tsx scripts/docs-screens/ai-stub.ts
  */
@@ -29,10 +29,19 @@ const DRAFT = {
 };
 
 createServer((request, response) => {
-  request.resume();
+  const chunks: Buffer[] = [];
+  request.on("data", (chunk: Buffer) => chunks.push(chunk));
   request.on("end", () => {
     if (request.method !== "POST" || !request.url?.endsWith("/chat/completions")) {
       response.writeHead(404).end();
+      return;
+    }
+    let jsonMode = false;
+    try {
+      jsonMode = JSON.parse(Buffer.concat(chunks).toString()).response_format?.type === "json_object";
+    } catch {}
+    if (!jsonMode) {
+      response.writeHead(503).end();
       return;
     }
     response.writeHead(200, { "content-type": "application/json" });

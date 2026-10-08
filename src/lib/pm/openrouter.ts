@@ -2,7 +2,7 @@ import { APP_NAME, APP_DOMAIN } from "@/lib/brand";
 import { selfOrigin } from "@/lib/session";
 import { withCacheBreakpoints } from "./prompt-cache";
 
-const BASE_URL = () => process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1";
+export const OPENROUTER_BASE_URL = () => process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1";
 
 export const DEFAULT_PM_MODEL = () => process.env.PM_MODEL || "moonshotai/kimi-k2.6";
 
@@ -97,6 +97,7 @@ function cacheTokensOf(details: any): { cachedPromptTokens: number; cacheWriteTo
 
 export async function chatCompletion(opts: {
   model: string;
+  apiKey: string;
   messages: OrChatMessage[];
   tools: OrToolDefinition[];
   /**
@@ -109,14 +110,13 @@ export async function chatCompletion(opts: {
   sessionId?: string;
   signal?: AbortSignal;
 }): Promise<OrCompletionResult> {
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) {
-    return { type: "error", error: "OPENROUTER_API_KEY is not configured" };
-  }
+  const { apiKey } = opts;
+  // A provider's refusal of a key can quote it back, and what lands here reaches a thread every member reads
+  const withoutKey = (text: string) => (apiKey ? text.replaceAll(apiKey, "[key]") : text);
 
   let response: Response;
   try {
-    response = await fetch(`${BASE_URL()}/chat/completions`, {
+    response = await fetch(`${OPENROUTER_BASE_URL()}/chat/completions`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -143,12 +143,12 @@ export async function chatCompletion(opts: {
     });
   } catch (err) {
     if (opts.signal?.aborted) return { type: "aborted" };
-    return { type: "error", error: `OpenRouter request failed: ${err instanceof Error ? err.message : String(err)}` };
+    return { type: "error", error: `OpenRouter request failed: ${withoutKey(err instanceof Error ? err.message : String(err))}` };
   }
 
   if (!response.ok) {
     const bodyText = await response.text().catch(() => "");
-    return { type: "error", error: `OpenRouter HTTP ${response.status}: ${bodyText.slice(0, 300)}` };
+    return { type: "error", error: `OpenRouter HTTP ${response.status}: ${withoutKey(bodyText).slice(0, 300)}` };
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -163,7 +163,7 @@ export async function chatCompletion(opts: {
   const message = data?.choices?.[0]?.message;
   if (!message) {
     const apiError = data?.error?.message;
-    return { type: "error", error: apiError ? `OpenRouter error: ${apiError}` : "OpenRouter returned no choices" };
+    return { type: "error", error: apiError ? `OpenRouter error: ${withoutKey(String(apiError))}` : "OpenRouter returned no choices" };
   }
 
   const rawCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];

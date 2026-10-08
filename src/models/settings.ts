@@ -9,6 +9,8 @@ export interface ISettings {
   pmDefaultModel: string;
   pmDefaultDailyTurnCap: number;
   signUpDomains: string[];
+  openrouterKey?: string;
+  openrouterKeyHint?: string;
 }
 
 const settingsSchema = new Schema<ISettings>({
@@ -28,6 +30,8 @@ const settingsSchema = new Schema<ISettings>({
     type: [String],
     default: [],
   },
+  openrouterKey: { type: String },
+  openrouterKeyHint: { type: String },
 });
 
 withOrganisation(settingsSchema);

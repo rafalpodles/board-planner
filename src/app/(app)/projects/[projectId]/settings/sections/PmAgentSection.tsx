@@ -19,6 +19,7 @@ import type { McpCatalogTool } from "@/components/settings/McpToolPicker";
 import { assessToolBudget, describeToolBudget } from "@/lib/pm/tool-budget";
 import { catalogKey } from "@/lib/pm/catalog-key";
 import { distinctRowNames } from "@/lib/row-names";
+import { AiKeyUnreadable, AiNeedsKey } from "@/components/AiNeedsKey";
 import { SectionProps } from "./types";
 
 interface McpServerDraft {
@@ -485,12 +486,29 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
     }
   }
 
+  if (!project.pmAvailable && project.pmKeyUnreadable) {
+    return (
+      <SettingsCard title="PM agent">
+        <AiKeyUnreadable what="The PM agent" />
+      </SettingsCard>
+    );
+  }
+
+  if (!project.pmAvailable && project.pmNeedsPlan) {
+    return (
+      <SettingsCard title="PM agent">
+        <AiNeedsKey what="The PM agent" />
+      </SettingsCard>
+    );
+  }
+
   if (!project.pmAvailable) {
     return (
       <SettingsCard title="PM agent">
         <p className="text-sm text-text-muted">
           Set the <code>OPENROUTER_API_KEY</code> environment variable on the server to enable the PM
-          agent (optionally <code>PM_MODEL</code> for the default model).
+          agent (optionally <code>PM_MODEL</code> for the default model), or have an instance admin add a key in
+          Settings → AI key.
         </p>
       </SettingsCard>
     );

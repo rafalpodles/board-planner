@@ -1,18 +1,8 @@
 import OpenAI from "openai";
+import { APP_DOMAIN, APP_NAME } from "./brand";
+import { selfOrigin } from "./session";
+import { OPENROUTER_BASE_URL } from "./pm/openrouter";
 import type { PromptField } from "./ai-fields";
-
-const apiKey = process.env.OPENAI_API_KEY || process.env.OPENAPI_KEY;
-
-export function isAIEnabled(): boolean {
-  return !!apiKey;
-}
-
-function getClient(): OpenAI {
-  if (!apiKey) {
-    throw new Error("OpenAI API key not configured");
-  }
-  return new OpenAI({ apiKey });
-}
 
 export interface GeneratedTask {
   title: string;
@@ -47,12 +37,24 @@ interface ProjectContext {
   existingTasks?: ExistingTaskSummary[];
 }
 
+/** The model setting predates OpenRouter and holds a bare OpenAI name such as `gpt-4o-mini` */
+export const openrouterModel = (model: string): string => (model.includes("/") ? model : `openai/${model}`);
+
 export async function generateTask(
   prompt: string,
   context: ProjectContext,
-  model: string = "gpt-4o-mini"
+  model: string,
+  apiKey: string
 ): Promise<GeneratedTask> {
-  const client = getClient();
+  // OpenRouter speaks OpenAI's protocol, so the SDK does the talking. It would otherwise send the
+  // OpenAI organisation and project the operator's environment names to a service that is not OpenAI.
+  const client = new OpenAI({
+    apiKey,
+    baseURL: OPENROUTER_BASE_URL(),
+    organization: null,
+    project: null,
+    defaultHeaders: { "HTTP-Referer": selfOrigin() ?? `https://${APP_DOMAIN}`, "X-Title": `${APP_NAME} AI Assist` },
+  });
 
   const categoryList =
     context.categories && context.categories.length > 0
@@ -113,7 +115,7 @@ Write clear, actionable descriptions. Focus on the "what" and "why", not the "ho
 When analyzing duplicates and dependencies, consider the semantic meaning, not just keyword matching.`;
 
   const response = await client.chat.completions.create({
-    model,
+    model: openrouterModel(model),
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: prompt },

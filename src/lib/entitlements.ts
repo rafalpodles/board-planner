@@ -2,6 +2,7 @@ export const FEATURE_KEYS = [
   "ai.pm_agent",
   "ai.task_generation",
   "ai.byok",
+  "ai.managed",
   "integrations.coda",
   "integrations.jira",
   "audit.export",

@@ -41,6 +41,7 @@ const SCREENS: Screen[] = [
   { path: "/settings/users", heading: "Users", api: "/api/users" },
   { path: "/settings/email", heading: "Email", api: "/api/admin/email" },
   { path: "/settings/agents", heading: "PM agents", api: "/api/admin/agents" },
+  { path: "/settings/ai-keys", heading: "AI key", api: "/api/settings/ai-keys" },
   { path: "/settings/workers", heading: "Worker fleet", api: "/api/admin/workers" },
   { path: "/settings/workers/runs", heading: "Run history", api: "/api/admin/runs" },
   { path: "/settings/audit", heading: "Instance audit log", api: "/api/admin/audit" },
@@ -131,7 +132,7 @@ test.describe("the administration screens", () => {
     await signIn(page, "admin");
     await page.goto("/settings/profile");
     await expect(nav(page).getByRole("heading", { name: "Administration" })).toBeVisible();
-    for (const label of ["Users", "Email", "PM Agents", "Workers", "Audit log", "Overview"]) {
+    for (const label of ["Users", "Email", "PM Agents", "AI key", "Workers", "Audit log", "Overview"]) {
       await expect(nav(page).getByRole("link", { name: label, exact: true })).toBeVisible();
     }
 
@@ -146,7 +147,7 @@ test.describe("the administration screens", () => {
     await expect(nav(memberPage).getByRole("link", { name: "Security" })).toBeVisible();
     await expect(nav(memberPage).getByRole("link", { name: "Overview", exact: true })).toBeVisible();
     await expect(nav(memberPage).getByRole("heading", { name: "Administration" })).toHaveCount(0);
-    for (const label of ["Users", "Email", "PM Agents", "Workers", "Audit log"]) {
+    for (const label of ["Users", "Email", "PM Agents", "AI key", "Workers", "Audit log"]) {
       await expect(nav(memberPage).getByRole("link", { name: label, exact: true })).toHaveCount(0);
     }
 

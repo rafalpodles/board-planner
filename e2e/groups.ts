@@ -41,6 +41,7 @@ export const GROUPS = {
   "task-fields": [
     "field-history.spec.ts",
     "ai-task-generation.spec.ts",
+    "ai-keys.spec.ts",
     "search.spec.ts",
     "search-page.spec.ts",
   ],
@@ -142,6 +143,7 @@ export const GROUPS = {
     "organisations-webhook-signing.spec.ts",
     "organisations-secrets.spec.ts",
     "organisations-licence.spec.ts",
+    "organisations-ai-keys.spec.ts",
     "organisations-licence-pull.spec.ts",
     "organisations-default-host.spec.ts",
     "organisations-platform.spec.ts",

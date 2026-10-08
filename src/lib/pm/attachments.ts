@@ -144,7 +144,7 @@ const capabilityCache = new Map<string, ModelCapability>();
 
 // Asked before an attachment is accepted, so a text-only model produces a clear message
 // instead of a provider error the user cannot interpret
-export async function modelAcceptsImages(model: string): Promise<boolean | null> {
+export async function modelAcceptsImages(model: string, apiKey?: string): Promise<boolean | null> {
   const cached = capabilityCache.get(model);
   if (cached && Date.now() - cached.checkedAt < CAPABILITY_TTL_MS) {
     return cached.acceptsImages;
@@ -153,7 +153,7 @@ export async function modelAcceptsImages(model: string): Promise<boolean | null>
   const base = process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1";
   try {
     const res = await fetch(`${base}/models`, {
-      headers: { Authorization: `Bearer ${process.env.OPENROUTER_API_KEY ?? ""}` },
+      headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
     });
     if (!res.ok) return null;
     const data = await res.json();

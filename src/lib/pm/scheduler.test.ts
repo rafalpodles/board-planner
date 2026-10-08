@@ -26,8 +26,11 @@ vi.mock("./agent", () => ({ runPmTurn }));
 vi.mock("./turn-cap", () => ({ isOverDailyTurnCap, dailyPmSpend }));
 vi.mock("./triggers", () => ({ drainPmTriggers }));
 vi.mock("./pm-user", () => ({ getPmUser: async () => ({ _id: "pm-user" }) }));
-const isPmAvailable = vi.fn(() => true);
-vi.mock("./config", () => ({ isPmAvailable: () => isPmAvailable() }));
+const resolveModelKey = vi.hoisted(() => vi.fn(async () => ({ ok: true, key: "k", source: "own" }) as unknown));
+vi.mock("@/lib/model-keys", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/model-keys")>()),
+  resolveModelKey,
+}));
 vi.mock("./board-review", () => ({
   buildBoardDigest,
   digestHeadline: () => "Board review: 2 findings",
@@ -141,13 +144,31 @@ describe("pmSchedulerTick", () => {
 
 describe("startBoardReview", () => {
   it("refuses without a model, rather than spending a turn on a warning", async () => {
-    isPmAvailable.mockReturnValueOnce(false);
+    resolveModelKey.mockResolvedValueOnce({ ok: false, reason: "not_configured", plan: "free" });
 
     const start = await startBoardReview(db, "p1", "BP", PM, "pm-user");
 
     expect(start).toEqual({ status: "skipped", reason: "the PM agent is not configured on this instance" });
     expect(runPmTurn).not.toHaveBeenCalled();
     expect(isTurnRunning("p1")).toBe(false);
+  });
+
+  // BP-652: the reason is what the owner who pressed "Run a review now" is told
+  it("says a Free organisation needs a key of its own or Pro, and spends nothing", async () => {
+    resolveModelKey.mockResolvedValueOnce({ ok: false, reason: "needs_plan", plan: "free" });
+
+    const start = await startBoardReview(db, "p1", "BP", PM, "pm-user");
+
+    expect(start).toEqual({ status: "skipped", reason: expect.stringMatching(/your own key.*upgrade to Pro/) });
+    expect(runPmTurn).not.toHaveBeenCalled();
+  });
+
+  it("says a stored key that cannot be read has to be entered again", async () => {
+    resolveModelKey.mockResolvedValueOnce({ ok: false, reason: "own_key_unreadable", plan: "pro" });
+
+    const start = await startBoardReview(db, "p1", "BP", PM, "pm-user");
+
+    expect(start).toEqual({ status: "skipped", reason: expect.stringMatching(/cannot be read.*Enter it again/) });
   });
 
   it("refuses at once when the turn cap is reached, and spends nothing", async () => {

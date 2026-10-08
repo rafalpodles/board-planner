@@ -224,6 +224,38 @@ describe("register", () => {
     expect(exited).not.toHaveBeenCalled();
   });
 
+  it("says OPENAI_API_KEY is no longer read when it is set and the OpenRouter key is not", async () => {
+    process.env.NEXT_RUNTIME = "nodejs";
+    delete process.env.ENCRYPTION_KEY;
+    delete process.env.OPENROUTER_API_KEY;
+    process.env.OPENAI_API_KEY = "sk-openai-0123456789abcdef";
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(process, "exit").mockImplementation((() => {}) as never);
+    const { register } = await import("./instrumentation");
+
+    await register();
+
+    expect(warned).toHaveBeenCalledWith(expect.stringContaining("OPENAI_API_KEY is no longer read"));
+  });
+
+  it("stays quiet about OPENAI_API_KEY once the OpenRouter key is set", async () => {
+    process.env.NEXT_RUNTIME = "nodejs";
+    delete process.env.ENCRYPTION_KEY;
+    process.env.OPENROUTER_API_KEY = "sk-or-v1-0123456789abcdef";
+    process.env.OPENAI_API_KEY = "sk-openai-0123456789abcdef";
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(process, "exit").mockImplementation((() => {}) as never);
+    const { register } = await import("./instrumentation");
+
+    await register();
+
+    expect(warned).not.toHaveBeenCalledWith(expect.stringContaining("OPENAI_API_KEY"));
+  });
+
   // BP-650. Unlike ENCRYPTION_KEY, a bad licence is the Free plan, never a crash-loop
   it("starts with a malformed LICENCE_KEY and says so once in the log", async () => {
     process.env.NEXT_RUNTIME = "nodejs";

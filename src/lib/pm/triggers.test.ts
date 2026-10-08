@@ -55,8 +55,11 @@ vi.mock("./turn-lock", () => ({
   releaseTurnLock: vi.fn(),
 }));
 vi.mock("./availability", () => ({ isPmRunnable: () => true }));
-const isPmAvailable = vi.fn(() => true);
-vi.mock("./config", () => ({ isPmAvailable: () => isPmAvailable() }));
+const resolveModelKey = vi.hoisted(() => vi.fn(async () => ({ ok: true, key: "k", source: "own" }) as unknown));
+vi.mock("@/lib/model-keys", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/model-keys")>()),
+  resolveModelKey,
+}));
 
 const { runPmTrigger } = await import("./triggers");
 const { NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS } = await import("./autonomy");
@@ -84,13 +87,24 @@ beforeEach(() => {
 describe("runPmTrigger", () => {
   // BP-476 review: retried three times, each attempt a turn from the cap and a warning in every thread
   it("settles the trigger as failed without a turn when no model is configured", async () => {
-    isPmAvailable.mockReturnValueOnce(false);
+    resolveModelKey.mockResolvedValueOnce({ ok: false, reason: "not_configured", plan: "free" });
 
     await runPmTrigger(db, trigger);
 
     expect(runPmTurn).not.toHaveBeenCalled();
     expect(findOneAndUpdate).toHaveBeenCalledWith({ _id: "t1", organisation: DEFAULT_ORGANISATION_ID }, {
       $set: { state: "failed", lastError: "The PM agent is not configured on this instance", active: false },
+    });
+  });
+
+  it("settles the trigger with the reason a Free organisation has no model, and runs nothing", async () => {
+    resolveModelKey.mockResolvedValueOnce({ ok: false, reason: "needs_plan", plan: "free" });
+
+    await runPmTrigger(db, trigger);
+
+    expect(runPmTurn).not.toHaveBeenCalled();
+    expect(findOneAndUpdate).toHaveBeenCalledWith({ _id: "t1", organisation: DEFAULT_ORGANISATION_ID }, {
+      $set: { state: "failed", lastError: expect.stringMatching(/your own key.*upgrade to Pro/), active: false },
     });
   });
 

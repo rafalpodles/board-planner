@@ -45,7 +45,7 @@ import { expectToast, recordToasts } from "./toasts";
  * thing on that board only the browser decides (BP-441).
  *
  * Give this run its own database and port block; the fixture empties whatever it is pointed at:
- *   E2E_PORT=4060 PM_STUB_PORT=4061 AI_STUB_PORT=4062 WEBHOOK_RECEIVER_PORT=4063 \
+ *   E2E_PORT=4060 PM_STUB_PORT=4061 WEBHOOK_RECEIVER_PORT=4063 \
  *   E2E_MONGODB_URI=mongodb://localhost:27017/bp389_e2e npx playwright test e2e/sprints-ui.spec.ts
  *
  * Every assertion about a write is taken from the database rather than from the screen it was made

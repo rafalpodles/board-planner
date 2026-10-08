@@ -4,7 +4,8 @@ import type { ScopedDb } from "@/lib/db-scope";
 import { withProjectAccess } from "@/lib/middleware";
 import type { HydratedDocument } from "mongoose";
 import type { IProject } from "@/types";
-import { isAIEnabled, generateTask, ExistingTaskSummary } from "@/lib/ai";
+import { generateTask, ExistingTaskSummary } from "@/lib/ai";
+import { modelKeyAvailability, modelKeyRefusalResponse, resolveModelKey } from "@/lib/model-keys";
 import { choiceFieldsForPrompt, resolveGeneratedFields } from "@/lib/ai-fields";
 import { getSettings } from "@/models/settings";
 import { bareHost, hostOf, projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
@@ -18,7 +19,7 @@ export const MAX_PROMPT_LENGTH = AI_PROMPT_MAX_LENGTH;
 export const GENERATIONS_PER_USER_WINDOW = 20;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** Generations one project may run in a day, on the instance's own OpenAI key */
+/** Generations one project may run in a day, on the instance's OpenRouter key */
 export function dailyGenerationCap(): number {
   const configured = Number(process.env.AI_DAILY_GENERATION_CAP);
   return Number.isInteger(configured) && configured > 0 ? configured : 200;
@@ -73,18 +74,20 @@ export async function fetchReadme(githubRepo: string): Promise<string | undefine
   }
 }
 
-export const GET = withProjectAccess(async () => {
-  return NextResponse.json({ enabled: isAIEnabled() });
+export const GET = withProjectAccess(async (_request, { db }) => {
+  const key = await modelKeyAvailability(db);
+  return NextResponse.json({ enabled: key.available, needsPlan: key.needsPlan, keyUnreadable: key.unreadable });
 });
 
 export const POST = withProjectAccess(async (request, { params, user, db }) => {
   const { projectId } = await params;
 
-  if (!isAIEnabled()) {
-    return NextResponse.json(
-      { error: "AI is not configured. Set OPENAI_API_KEY environment variable." },
-      { status: 501 }
-    );
+  const modelKey = await resolveModelKey(db);
+  if (!modelKey.ok) {
+    return modelKeyRefusalResponse(modelKey, {
+      error: "AI is not configured. Set the OPENROUTER_API_KEY environment variable.",
+      status: 501,
+    });
   }
 
   await connectDB();
@@ -113,9 +116,9 @@ export const POST = withProjectAccess(async (request, { params, user, db }) => {
   }
   inFlight.add(holder);
   try {
-    // Every generation is spent on the instance's own key, so each one counts whether or not it
-    // succeeds — and is counted in the same write that is compared, so a burst cannot slip past
-    // the budget between a check and a record (BP-323)
+    // Every generation counts whether or not it succeeds, whichever key it is made with — and is
+    // counted in the same write that is compared, so a burst cannot slip past the budget between a
+    // check and a record (BP-323)
     if ((await countAttempt(sourceKey(`user:${holder}`, "ai-generate"))) > GENERATIONS_PER_USER_WINDOW) {
       return NextResponse.json(
         { error: "Too many generations. Try again in 15 minutes." },
@@ -134,13 +137,19 @@ export const POST = withProjectAccess(async (request, { params, user, db }) => {
     if (!project) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
-    return await generate(db, project, projectId, prompt);
+    return await generate(db, project, projectId, prompt, modelKey.key);
   } finally {
     inFlight.delete(holder);
   }
 });
 
-async function generate(db: ScopedDb, project: HydratedDocument<IProject>, projectId: string, prompt: string) {
+async function generate(
+  db: ScopedDb,
+  project: HydratedDocument<IProject>,
+  projectId: string,
+  prompt: string,
+  apiKey: string
+) {
   const [readme, tasks] = await Promise.all([
     // raw.githubusercontent.com only serves github.com, so a project hosted anywhere else — and
     // that now includes this instance's own GitHub Enterprise — gets no README rather than a
@@ -176,7 +185,8 @@ async function generate(db: ScopedDb, project: HydratedDocument<IProject>, proje
         readme,
         existingTasks,
       },
-      settings.aiModel
+      settings.aiModel,
+      apiKey
     );
 
     // Resolved here, where the field definitions live, so the client never has to work

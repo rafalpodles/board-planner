@@ -8,7 +8,9 @@ import {
   PM_MCP_AUTH_TYPES,
   PmMcpAuthType,
 } from "@/types";
+import type { ScopedDb } from "@/lib/db-scope";
 import { encryptSecret, decryptSecret, isEncryptionConfigured } from "@/lib/encryption";
+import { modelKeyAvailability } from "@/lib/model-keys";
 import { isAllowedMcpServerUrl } from "@/lib/url-validation";
 import { sameEndpoint } from "@/lib/host-bound-secrets";
 import { isValidTimezone } from "./autonomy";
@@ -321,6 +323,13 @@ export function sanitizeMcpServers(
   }));
 }
 
-export function isPmAvailable(): boolean {
-  return !!process.env.OPENROUTER_API_KEY;
+/** What the PM screens show. A failed read is null, so the answer leaves the three fields out and the screen shows PM as not configured until the next answer */
+export async function pmAvailability(db: ScopedDb): Promise<{ available: boolean; needsPlan: boolean; keyUnreadable: boolean } | null> {
+  try {
+    const { available, needsPlan, unreadable } = await modelKeyAvailability(db);
+    return { available, needsPlan, keyUnreadable: unreadable };
+  } catch (err) {
+    console.warn("Could not tell whether the PM agent has a key:", err instanceof Error ? err.message : err);
+    return null;
+  }
 }

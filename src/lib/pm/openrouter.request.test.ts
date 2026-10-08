@@ -8,12 +8,14 @@ import { chatCompletion } from "./openrouter";
  */
 
 const bodies: Record<string, unknown>[] = [];
+const authorizations: (string | undefined)[] = [];
 
 function captureRequests() {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (_url: string, init: RequestInit) => {
       bodies.push(JSON.parse(String(init.body)));
+      authorizations.push((init.headers as Record<string, string>).Authorization);
       return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), { status: 200 });
     })
   );
@@ -25,15 +27,62 @@ const MESSAGES = [
 ];
 
 const send = (over: Record<string, unknown> = {}) =>
-  chatCompletion({ model: "deepseek/deepseek-v4-flash-0731", messages: MESSAGES, tools: [], ...over });
+  chatCompletion({ model: "deepseek/deepseek-v4-flash-0731", apiKey: "test-key", messages: MESSAGES, tools: [], ...over });
 
 beforeEach(() => {
-  process.env.OPENROUTER_API_KEY = "test-key";
   bodies.length = 0;
+  authorizations.length = 0;
   captureRequests();
 });
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe("the key the call is made with", () => {
+  /**
+   * BP-652. The key is the caller's: an organisation's own key, or the instance's for one that may
+   * use it. The environment must not leak in underneath, or a Free organisation's call is billed
+   * to the operator.
+   */
+  it("is the one passed in, whatever the environment holds", async () => {
+    process.env.OPENROUTER_API_KEY = "the-operators-key";
+
+    await send({ apiKey: "the-organisations-own-key" });
+
+    expect(authorizations).toEqual(["Bearer the-organisations-own-key"]);
+    delete process.env.OPENROUTER_API_KEY;
+  });
+});
+
+describe("a refusal of the key", () => {
+  // The answer lands in a thread every member of the project reads, and a provider may quote the key back
+  it("does not carry the key into the error it reports", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ error: { message: "Invalid key sk-or-secret-0123456789" } }), { status: 401 }))
+    );
+
+    const result = await send({ apiKey: "sk-or-secret-0123456789" });
+
+    expect(result).toMatchObject({ type: "error", error: expect.stringContaining("OpenRouter HTTP 401") });
+    expect(JSON.stringify(result)).not.toContain("sk-or-secret-0123456789");
+  });
+});
+
+describe("the other ways a provider's answer can quote the key", () => {
+  const KEY = "sk-or-secret-0123456789";
+
+  it("is not repeated from a 200 that carries an error", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: { message: `bad ${KEY}` } }), { status: 200 })));
+
+    expect(JSON.stringify(await send({ apiKey: KEY }))).not.toContain(KEY);
+  });
+
+  it("is not repeated from a failure to connect", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new Error(`connect failed for ${KEY}`))));
+
+    expect(JSON.stringify(await send({ apiKey: KEY }))).not.toContain(KEY);
+  });
 });
 
 describe("the sticky-routing key on the wire", () => {

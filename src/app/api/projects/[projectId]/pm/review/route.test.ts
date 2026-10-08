@@ -10,8 +10,11 @@ vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/project", () => ({ Project: { findOne } }));
 vi.mock("@/lib/pm/pm-user", () => ({ getPmUser: async () => ({ _id: "pm-user" }) }));
 vi.mock("@/lib/pm/scheduler", () => ({ startBoardReview }));
-const isPmAvailable = vi.fn();
-vi.mock("@/lib/pm/config", () => ({ isPmAvailable }));
+const resolveModelKey = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/model-keys", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/model-keys")>()),
+  resolveModelKey,
+}));
 vi.mock("@/lib/middleware", () => ({
   withProjectOwner:
     (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
@@ -30,7 +33,7 @@ beforeEach(() => {
   user = { _id: "owner", viaMachineCredential: false };
   findOne.mockReturnValue({ lean: async () => ({ _id: "p1", key: "BP", pm: { enabled: true } }) });
   startBoardReview.mockResolvedValue({ status: "started", done: Promise.resolve() });
-  isPmAvailable.mockReturnValue(true);
+  resolveModelKey.mockResolvedValue({ ok: true, key: "k", source: "own" });
 });
 
 // BP-471
@@ -64,7 +67,7 @@ describe("POST /api/projects/:projectId/pm/review", () => {
   });
 
   it("refuses without a model key, rather than spending a turn on a warning", async () => {
-    isPmAvailable.mockReturnValue(false);
+    resolveModelKey.mockResolvedValue({ ok: false, reason: "not_configured", plan: "free" });
 
     const res = await run();
 
