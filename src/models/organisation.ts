@@ -25,6 +25,8 @@ export interface IOrganisation {
   suspendedReason?: string;
   deletedAt?: Date | null;
   deletingAt?: Date | null;
+  // When the admins were told the organisation will be deleted for want of anybody signing in (BP-674)
+  deadNoticeAt?: Date | null;
 }
 
 const entitlementsSchema = new Schema<IOrganisationEntitlements>(
@@ -50,6 +52,7 @@ const organisationSchema = new Schema<IOrganisation>({
   suspendedReason: { type: String, default: "" },
   deletedAt: { type: Date, default: null },
   deletingAt: { type: Date, default: null },
+  deadNoticeAt: { type: Date, default: null },
   entitlements: {
     type: entitlementsSchema,
     default: () => ({ plan: "free", features: [], source: "none" }),

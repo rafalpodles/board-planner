@@ -8,6 +8,8 @@ export const PLATFORM_AUDIT_ACTIONS = [
   "organisation_delete_started",
   "organisation_deleted",
   "organisation_exported",
+  "organisation_dead_noticed",
+  "organisation_dead_cleared",
 ] as const;
 export type PlatformAuditAction = (typeof PLATFORM_AUDIT_ACTIONS)[number];
 

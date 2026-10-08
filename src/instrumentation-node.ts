@@ -128,6 +128,17 @@ async function bootWhenDatabaseIsReady(): Promise<void> {
     await sweep();
     setInterval(sweep, 24 * 60 * 60 * 1000).unref();
 
+    // Switched on by DEAD_ORGANISATION_DAYS and by nothing else: it tells people, then deletes (BP-674)
+    const { deadOrganisationDays, sweepDeadOrganisations } = await import("@/lib/dead-organisations");
+    if (deadOrganisationDays() > 0) {
+      const sweepDead = () =>
+        sweepDeadOrganisations()
+          .then((done) => console.log(`Dead-organisation sweep: ${JSON.stringify(done)}`))
+          .catch((error) => console.error("Failed to sweep dead organisations:", error));
+      await sweepDead();
+      setInterval(sweepDead, 24 * 60 * 60 * 1000).unref();
+    }
+
     // Said, not refused: the state can arise at runtime (a demotion, a deactivation, an unlink), and
     // exiting would turn a restart into an outage for every member, not only the administrators
     const { adminsLockedOut } = await import("@/lib/password-sign-in");
