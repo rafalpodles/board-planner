@@ -74,7 +74,7 @@ test.beforeEach(async ({ page }) => {
   await signInOn(page.context(), ACME);
 });
 
-// People and unexpired invitations beyond the administrator, which is what a checkout bills members above ten for
+// People and unexpired invitations beyond the administrator; a checkout bills the people above ten and not the invitations
 async function addHeadcount(people: number, invitations: number) {
   await mongoose.connect(E2E_MONGODB_URI);
   try {
@@ -124,7 +124,7 @@ const pushKey = (request: APIRequestContext) => {
 };
 
 test("a Free organisation's admin chooses a period and is sent to Stripe, with what the service needs to price it", async ({ page }) => {
-  await addHeadcount(9, 2);
+  await addHeadcount(12, 3);
   await open(page);
   const panel = page.getByTestId("subscription");
   await expect(panel).toContainText("Upgrade to Pro");
@@ -146,7 +146,7 @@ test("a Free organisation's admin chooses a period and is sent to Stripe, with w
   expect(checkout.body).toEqual({
     organisation: ACME.organisation.toHexString(),
     interval: "year",
-    members: 12,
+    members: 13,
     email: "boss@acme.example",
     successUrl: `${originOf(ACME)}/settings/organisation?checkout=success`,
     cancelUrl: `${originOf(ACME)}/settings/organisation?checkout=cancelled`,

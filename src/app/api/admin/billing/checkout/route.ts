@@ -15,11 +15,12 @@ export const POST = withAdmin(async (request, { user, db }) => {
   const origin = await organisationOrigin(db.organisation);
   if (!origin) return NextResponse.json({ error: "This organisation has no address to return to" }, { status: 409 });
 
-  const { active, pending } = await memberCounts(db);
+  // What is billed is the people with access: an invitation nobody has accepted is not a seat to pay for (BP-949)
+  const { active } = await memberCounts(db);
   const answer = await askBilling("checkout", {
     organisation: db.organisation.toHexString(),
     interval,
-    members: active + pending,
+    members: active,
     email: user.email,
     successUrl: `${origin}/settings/organisation?checkout=success`,
     cancelUrl: `${origin}/settings/organisation?checkout=cancelled`,
