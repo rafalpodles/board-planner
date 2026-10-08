@@ -3,7 +3,7 @@ import { RUN_ORGANISATIONS_SERVER } from "../playwright.config";
 import { signPlatformRequest } from "../src/lib/platform-request";
 import { E2E_PLATFORM_REQUEST_KEY, e2eLicence } from "./licence-key";
 import { mailFor } from "./mailbox";
-import { ACME, GLOBEX, ORGANISATIONS_API, PLATFORM_HOST, asOrganisation, seedTwoOrganisations } from "./organisations";
+import { ACME, GLOBEX, ORGANISATIONS_API, PLATFORM_HOST, asOrganisation, bearer, seedTwoOrganisations } from "./organisations";
 import { withDb } from "./platform-sign-in";
 
 test.skip(!RUN_ORGANISATIONS_SERVER, "needs the ORGANISATION_DOMAIN server — set E2E_ORGANISATIONS_SERVER=1");
@@ -56,9 +56,12 @@ test("an organisation with no plan and no sign-in is told first, then suspended 
 
   expect(await sweep(request, { daysFromNow: 76 })).toMatchObject({ suspended: 1, deleted: 0 });
   expect((await organisationRow(ACME))?.suspendedReason).toMatch(/dead organisation/);
-  const refused = await request.get(`${ORGANISATIONS_API}/api/projects`, { headers: asOrganisation(ACME) });
+  const refused = await request.get(`${ORGANISATIONS_API}/api/projects`, { headers: { ...asOrganisation(ACME), ...bearer(ACME) } });
   expect(refused.status()).toBe(503);
 
+  // Work admitted before the suspension may still be writing, so a delete waits ten minutes after it; the suite does not
+  expect(await sweep(request, { daysFromNow: 77 })).toMatchObject({ deleted: 0 });
+  await withDb((db) => db.collection("organisations").updateOne({ _id: ACME.organisation as never }, { $set: { suspendedAt: new Date(Date.now() - 11 * 60 * 1000) } }));
   expect(await sweep(request, { daysFromNow: 77 })).toMatchObject({ deleted: 1 });
   expect((await organisationRow(ACME))?.deletedAt).toBeInstanceOf(Date);
   expect(await withDb((db) => db.collection("users").countDocuments({ organisation: ACME.organisation as never }))).toBe(0);

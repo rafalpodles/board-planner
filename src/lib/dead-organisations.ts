@@ -68,12 +68,13 @@ async function adminAddresses(organisation: Types.ObjectId): Promise<string[]> {
   return [...new Set(admins.map((a) => a.email))];
 }
 
+/** The latest sign-in or arrival of any person in it; an organisation with nobody in it is as old as it is */
 async function lastActiveOf(organisation: Types.ObjectId, madeAt: Date): Promise<Date> {
   const db = scoped(organisation);
   const people = await db.User.find({ kind: { $ne: "machine" } }).select("lastSignInAt createdAt").lean<{ lastSignInAt?: Date | null; createdAt?: Date }[]>();
-  let latest = madeAt.getTime();
+  let latest = 0;
   for (const p of people) latest = Math.max(latest, p.lastSignInAt?.getTime() ?? 0, p.createdAt?.getTime() ?? 0);
-  return new Date(latest);
+  return new Date(latest || madeAt.getTime());
 }
 
 async function sendNotice(organisation: Types.ObjectId, name: string, slug: string | undefined, deleteAfter: Date): Promise<number> {
@@ -127,7 +128,8 @@ export async function sweepDeadOrganisations(now: number = Date.now(), days: num
 
       const organisation = await getOrganisation(row._id);
       const check = licenceOf({ _id: row._id, licenceKey: row.licenceKey }, now);
-      const madeAt = row._id.getTimestamp();
+      // An id minted with a clock in the future would otherwise make the organisation younger than everything
+      const madeAt = new Date(Math.min(row._id.getTimestamp().getTime(), now));
       const endedAt = check?.payload ? new Date(check.payload.expiresAt) : madeAt;
       const step = deadStep({
         now,
