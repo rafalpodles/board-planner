@@ -12,6 +12,7 @@ const nextConfig: NextConfig = {
   // Next refuses to support `next start` against standalone output, and Railway deploys that way.
   // Only the Docker build asks for the minimal server, and it runs it directly.
   output: process.env.BUILD_STANDALONE ? "standalone" : undefined,
+  outputFileTracingIncludes: { "/api/mcp": ["./mcp-apps/dist/*.html"] },
 
   // Lets a second `next dev` run against this same checkout without the two racing on one
   // `.next` (BP-409: the proxied-throttle e2e server runs alongside the suite's main dev server).

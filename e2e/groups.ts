@@ -116,6 +116,7 @@ export const GROUPS = {
     "mcp-oauth.spec.ts",
     "credential-rotation.spec.ts",
     "mcp-tools.spec.ts",
+    "mcp-apps.spec.ts",
     "db-reconnect-leaks.spec.ts",
     "settings-fields-and-templates.spec.ts",
     "picker-search-announces.spec.ts",

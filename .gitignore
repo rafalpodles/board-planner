@@ -54,3 +54,6 @@ backups/
 # Per-machine permission state, and any backup of it. The exact filename is covered by a
 # global ignore, which does not catch variants — one such copy reached a commit.
 .claude/settings.local.json*
+
+# MCP Apps single-file bundles, generated before dev/build
+/mcp-apps/dist/

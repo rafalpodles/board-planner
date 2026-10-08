@@ -8,6 +8,7 @@ import { ProvenanceError, ORIGIN_REQUIRED } from "@/lib/session";
 import { scopedForRequest, organisationOf } from "@/lib/db-scope";
 import { hostNotFound } from "@/lib/middleware";
 import { originFor } from "@/lib/organisation-host";
+import { registerPlannerAppResources } from "@/lib/mcp/apps";
 import { registerPlannerTools } from "@/lib/mcp/tools";
 
 /**
@@ -32,6 +33,7 @@ export const maxDuration = 60;
 const baseHandler = createMcpHandler(
   (server) => {
     registerPlannerTools(server);
+    registerPlannerAppResources(server);
   },
   { serverInfo: { name: "boardplanner", version: "1.0.0" } },
   { basePath: "/api", disableSse: true },
