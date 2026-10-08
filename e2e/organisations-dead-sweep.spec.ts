@@ -151,3 +151,18 @@ test("a notice nothing followed is given again, and an operator's resume voids i
   expect(resumed.status()).toBe(200);
   expect((await organisationRow(ACME))?.deadNoticeAt ?? null).toBeNull();
 });
+
+test("a process already sending the notice holds the others off, and a lease that has run out is taken over without the notice having gone out", async ({ request }) => {
+  const sendingNow = new Date(Date.now() + 61 * 24 * 60 * 60 * 1000);
+  await withDb((db) => db.collection("organisations").updateOne({ _id: ACME.organisation as never }, { $set: { deadNoticeClaimedAt: sendingNow } }));
+  expect(await sweep(request, { daysFromNow: 61 })).toMatchObject({ noticed: 0 });
+  expect((await organisationRow(ACME))?.deadNoticeAt ?? null).toBeNull();
+  expect(await mailFor("boss@acme.example")).toHaveLength(0);
+
+  // The lease is only a lease: it is released once the mail is out, and a dead sender's runs out
+  await withDb((db) => db.collection("organisations").updateOne({ _id: ACME.organisation as never }, { $set: { deadNoticeClaimedAt: new Date(sendingNow.getTime() - 11 * 60 * 1000) } }));
+  expect(await sweep(request, { daysFromNow: 61 })).toMatchObject({ noticed: 1 });
+  const row = await organisationRow(ACME);
+  expect(row?.deadNoticeAt).toBeInstanceOf(Date);
+  expect(row?.deadNoticeClaimedAt ?? null).toBeNull();
+});

@@ -17,6 +17,9 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export const DEAD_NOTICE_DAYS = 14;
 /** How long past its fortnight a notice stays good, before it is given again */
 export const DEAD_STALE_DAYS = 3;
+const NOTICE_LEASE_MS = 10 * 60 * 1000;
+/** A delete that began and has not finished for this long is dead, and only then is it taken up again */
+const STALLED_DELETE_MS = 60 * 60 * 1000;
 export const DEAD_REASON = "dead organisation: nobody signed in after the plan ended";
 export const SWEEP_KEY = "dead-organisation-sweep";
 
@@ -165,7 +168,7 @@ export async function sweepDeadOrganisations(now: number = Date.now(), days: num
       const byTheSweep = !!row.suspendedAt && row.suspendedReason === DEAD_REASON;
       // A delete that died halfway is finished by whoever began it: the sweep's own, never an operator's
       if (row.deletingAt) {
-        if (byTheSweep) await finishDeletion(row, summary);
+        if (byTheSweep && now - row.deletingAt.getTime() >= STALLED_DELETE_MS) await finishDeletion(row, summary);
         continue;
       }
       // Somebody else's suspension is not ours to build on
@@ -193,19 +196,23 @@ export async function sweepDeadOrganisations(now: number = Date.now(), days: num
 
       if (step === "notice") {
         if (!isEmailConfigured()) continue;
-        // Taken before the mail goes, so two processes do not both send it; given back if nobody could be told
-        const staleBefore = new Date(now - (DEAD_NOTICE_DAYS + DEAD_STALE_DAYS) * DAY_MS);
+        // A lease on the sending, not the notice: a process that dies mid-send leaves a lease that runs out and no
+        // notice, so nothing is ever suspended that nobody was told about
         const taken = await Organisation.updateOne(
-          { _id: row._id, $or: [{ deadNoticeAt: null }, { deadNoticeAt: { $lte: staleBefore } }] },
-          { $set: { deadNoticeAt: new Date(now) } }
+          { _id: row._id, $or: [{ deadNoticeClaimedAt: null }, { deadNoticeClaimedAt: { $lte: new Date(now - NOTICE_LEASE_MS) } }] },
+          { $set: { deadNoticeClaimedAt: new Date(now) } }
         );
         if (taken.modifiedCount !== 1) continue;
-        const sent = await sendNotice(row._id, row.name, row.slug, new Date(now + DEAD_NOTICE_DAYS * DAY_MS));
-        // Nothing is ever deleted that nobody was told about
-        if (sent === 0) {
-          await Organisation.updateOne({ _id: row._id, deadNoticeAt: new Date(now) }, { $set: { deadNoticeAt: noticeAt } });
-          continue;
+        let sent = 0;
+        try {
+          sent = await sendNotice(row._id, row.name, row.slug, new Date(now + DEAD_NOTICE_DAYS * DAY_MS));
+        } finally {
+          await Organisation.updateOne(
+            { _id: row._id },
+            sent > 0 ? { $set: { deadNoticeAt: new Date(now), deadNoticeClaimedAt: null } } : { $set: { deadNoticeClaimedAt: null } }
+          );
         }
+        if (sent === 0) continue;
         await logPlatformAudit({ action: "organisation_dead_noticed", keyId: SWEEP_KEY, subject: row._id, detail: `${row.slug ?? ""}: ${sent} administrator(s) told` });
         summary.noticed += 1;
       } else if (step === "clear") {

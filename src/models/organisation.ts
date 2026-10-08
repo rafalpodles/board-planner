@@ -27,6 +27,8 @@ export interface IOrganisation {
   deletingAt?: Date | null;
   // When the admins were told the organisation will be deleted for want of anybody signing in (BP-674)
   deadNoticeAt?: Date | null;
+  // Held while a process is sending the notice, so two do not; it never counts as the notice having gone out
+  deadNoticeClaimedAt?: Date | null;
 }
 
 const entitlementsSchema = new Schema<IOrganisationEntitlements>(
@@ -53,6 +55,7 @@ const organisationSchema = new Schema<IOrganisation>({
   deletedAt: { type: Date, default: null },
   deletingAt: { type: Date, default: null },
   deadNoticeAt: { type: Date, default: null },
+  deadNoticeClaimedAt: { type: Date, default: null },
   entitlements: {
     type: entitlementsSchema,
     default: () => ({ plan: "free", features: [], source: "none" }),
