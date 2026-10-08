@@ -166,15 +166,15 @@ function ExternalLink({ url, label: text, className, children }: { url?: string;
     void app.openLink({ url }).catch((error: Error) => update(current, locked, error.message));
   }}>{children}</a>;
 }
-function Avatar({ value, size = 22 }: { value: Person; size?: number }) {
+function Avatar({ value, size = 22, decorative = false }: { value: Person; size?: number; decorative?: boolean }) {
   const who = name(value);
   const style = { width: size, height: size, fontSize: Math.max(10, size * 0.45), "--hue": [...who].reduce((sum, ch) => (sum * 31 + ch.charCodeAt(0)) % 360, 7) } as CSSProperties;
-  if (!who) return <span className="avatar empty" style={style} role="img" aria-label="Unassigned"><Icon d={person} size={size * 0.62} /></span>;
+  if (!who) return <span className="avatar empty" style={style} {...(decorative ? { "aria-hidden": true } : { role: "img", "aria-label": "Unassigned" })}><Icon d={person} size={size * 0.62} /></span>;
   const initials = who.split(/\s+/).map((part) => part[0]).slice(0, 2).join("").toUpperCase();
-  return <span className="avatar" style={style} role="img" aria-label={who} title={who}>{initials}</span>;
+  return <span className="avatar" style={style} {...(decorative ? { "aria-hidden": true } : { role: "img", "aria-label": who, title: who })}>{initials}</span>;
 }
 function Assignee({ value }: { value: Person }) {
-  return <span className="assignee"><Avatar value={value} />{name(value) || "Unassigned"}</span>;
+  return <span className="assignee"><Avatar value={value} decorative />{name(value) || "Unassigned"}</span>;
 }
 function PriorityChip({ value = "medium" }: { value?: string }) {
   return <span className="chip"><span className="swatch" style={{ background: priorityColor[value] ?? priorityColor.medium }} aria-hidden="true" /><span className="sr-only">Priority: </span>{value[0].toUpperCase() + value.slice(1)}</span>;
