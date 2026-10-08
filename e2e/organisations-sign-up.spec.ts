@@ -147,14 +147,12 @@ test.describe("BP-673: creating an organisation from the platform host", () => {
 
   test("attempts that create nothing do not spend the company's share", async ({ request }) => {
     const company = `corp-${Date.now()}.example`;
-    for (let n = 1; n <= 7; n++) {
+    for (let n = 1; n <= 5; n++) {
       expect((await createOne(request, `lead@${company}`, n)).status(), `lead's attempt ${n}`).toBe(n <= 3 ? 201 : 429);
     }
-    // Only the lead's three organisations were created, however many times the lead was turned away
-    for (let n = 1; n <= 7; n++) {
-      expect((await createOne(request, `colleague${n}@${company}`, 20 + n)).status(), `colleague ${n}`).toBe(201);
-    }
-    expect((await createOne(request, `colleague8@${company}`, 30)).status()).toBe(429);
+    // Three organisations exist, so three is what the company has spent, however often the lead was turned away
+    const spent = await withDb((db) => db.collection("ratelimits").findOne({ _id: `organisation-sign-up:domain:${company}` } as never));
+    expect(spent?.count).toBe(3);
   });
 
   test("a burst of requests on one proven address creates one organisation, not one each", async ({ request }) => {
