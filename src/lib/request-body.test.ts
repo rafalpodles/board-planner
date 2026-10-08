@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readJsonBody, readFormBody, MAX_JSON_BODY_BYTES } from "./request-body";
+import { readJsonBody, readFormBody, MAX_JSON_BODY_BYTES, MAX_DRAINED_BYTES } from "./request-body";
 
 /**
  * BP-322. The point of the cap is what does NOT happen: an oversized body must be refused without
@@ -191,6 +191,36 @@ describe("readFormBody", () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.response.status).toBe(413);
+  });
+
+  // Node 26.11 resets the socket of a client still sending when the answer goes out, so the browser
+  // never read the 413. The body is read off the wire and thrown away first, never buffered.
+  it("reads a refused upload to its end, up to a bound, so the client can read the refusal", async () => {
+    const total = 200 * 1024;
+    const { stream, state } = countingBody(total);
+
+    const result = await readFormBody(
+      request(stream, { "content-type": "multipart/form-data; boundary=x", "content-length": String(total) }),
+      64 * 1024
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.response.status).toBe(413);
+    expect(state.pulled).toBe(total);
+  });
+
+  it("does not read a refused upload past the bound, which is not a reason to pay for it", async () => {
+    const declared = MAX_DRAINED_BYTES + 1;
+    const { stream, state } = countingBody(declared);
+
+    const result = await readFormBody(
+      request(stream, { "content-type": "multipart/form-data; boundary=x", "content-length": String(declared) }),
+      64 * 1024
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.response.status).toBe(413);
+    expect(state.pulled).toBeLessThanOrEqual(16 * 1024);
   });
 
   it("refuses the same body when it declares no length at all", async () => {
