@@ -134,7 +134,9 @@ export async function pullEveryLicence(config: LicencePullConfig): Promise<void>
   await forEachServedOrganisation("Licence pull", async (db) => {
     const row = await Organisation.findById(db.organisation).select("name slug").lean();
     if (!row) return;
-    const outcome = await pullLicence(config, row, undefined, (await memberCounts(db)).active);
+    // The count is a courtesy to the ask: not being able to read it must not cost the organisation its licence
+    const members = await memberCounts(db).then((counts) => counts.active, () => undefined);
+    const outcome = await pullLicence(config, row, undefined, members);
     if (outcome.status === "refused" || outcome.status === "unreachable" || outcome.status === "invalid" || outcome.status === "oversized") {
       console.warn(`Licence pull: ${outcome.status}${"httpStatus" in outcome ? ` (${outcome.httpStatus})` : ""}`);
     }

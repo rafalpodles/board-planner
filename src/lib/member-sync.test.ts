@@ -21,7 +21,7 @@ vi.mock("./organisation-jobs", () => ({
   },
 }));
 
-const { memberSyncTickMs, runMemberSync, startMemberSync, syncMembersOf } = await import("./member-sync");
+const { forgetMemberSyncFailures, memberSyncTickMs, runMemberSync, startMemberSync, syncMembersOf } = await import("./member-sync");
 
 const ORG = "0123456789abcdef01234567";
 const db = { organisation: { toHexString: () => ORG } } as never;
@@ -29,6 +29,7 @@ const pro = (over: Record<string, unknown> = {}) => ({ entitlements: { plan: "pr
 
 let warn: ReturnType<typeof vi.spyOn>;
 beforeEach(() => {
+  forgetMemberSyncFailures();
   m.ask.mockReset().mockResolvedValue({ status: "ok", body: { status: "updated", extraMembers: 4 } });
   m.getOrganisation.mockReset().mockResolvedValue(pro());
   m.record.mockReset().mockResolvedValue(undefined);
@@ -93,12 +94,63 @@ describe("syncMembersOf", () => {
   });
 });
 
+describe("a service that does not answer", () => {
+  const MINUTE = 60_000;
+  const T0 = Date.UTC(2026, 9, 9, 12, 0, 0);
+
+  it("is asked again a minute later, then two, then four, and no more often than every half hour", async () => {
+    m.ask.mockResolvedValue({ status: "unreachable" });
+    const at = (minutes: number) => syncMembersOf(db, T0 + minutes * MINUTE);
+
+    expect(await at(0)).toBe("failed");
+    expect(await at(0.5)).toBe("waiting");
+    expect(await at(1)).toBe("failed");
+    expect(await at(2)).toBe("waiting");
+    expect(await at(3)).toBe("failed");
+    expect(await at(6)).toBe("waiting");
+    expect(await at(7)).toBe("failed");
+    expect(m.ask).toHaveBeenCalledTimes(4);
+
+    for (let minute = 8; minute < 200; minute += 1) await at(minute);
+    const late = m.ask.mock.calls.length;
+    await at(300);
+    await at(301);
+    await at(331);
+    expect(m.ask.mock.calls.length - late).toBeLessThanOrEqual(3);
+  });
+
+  it("says so the first time and then every eighth, and says nothing of a service that takes no payments", async () => {
+    m.ask.mockResolvedValue({ status: "unreachable" });
+    for (let i = 0; i < 17; i++) await syncMembersOf(db, T0 + i * 31 * MINUTE);
+    expect(warn).toHaveBeenCalledTimes(3);
+
+    warn.mockClear();
+    forgetMemberSyncFailures();
+    m.ask.mockResolvedValue({ status: "off" });
+    for (let i = 0; i < 17; i++) await syncMembersOf(db, T0 + i * 31 * MINUTE);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("is forgotten once it answers, so the next failure starts the pauses again", async () => {
+    m.ask.mockResolvedValue({ status: "unreachable" });
+    await syncMembersOf(db, T0);
+    await syncMembersOf(db, T0 + MINUTE);
+    m.ask.mockResolvedValue({ status: "ok", body: { status: "updated" } });
+    expect(await syncMembersOf(db, T0 + 3 * MINUTE)).toBe("sent");
+
+    m.getOrganisation.mockResolvedValue(pro({ memberSync: { members: 20, at: new Date() } }));
+    m.ask.mockResolvedValue({ status: "unreachable" });
+    expect(await syncMembersOf(db, T0 + 4 * MINUTE)).toBe("failed");
+    expect(await syncMembersOf(db, T0 + 5 * MINUTE)).toBe("failed");
+  });
+});
+
 describe("runMemberSync", () => {
   it("goes through every organisation served and says how it went", async () => {
     m.served.push({ organisation: ORG }, { organisation: "76543210fedcba9876543210" }, { organisation: "00000000000000000000000a" });
     m.getOrganisation.mockResolvedValueOnce(pro()).mockResolvedValueOnce(pro({ entitlements: { plan: "free" } })).mockResolvedValueOnce(pro({ memberSync: { members: 14, at: new Date() } }));
 
-    expect(await runMemberSync()).toEqual({ skipped: 1, unchanged: 1, sent: 1, failed: 0 });
+    expect(await runMemberSync()).toEqual({ skipped: 1, unchanged: 1, sent: 1, failed: 0, waiting: 0 });
   });
 });
 

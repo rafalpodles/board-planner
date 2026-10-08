@@ -172,6 +172,13 @@ test("a running subscription is shown with its period, and Manage subscription g
   await expect(page.getByTestId("subscription-checkout")).toHaveCount(0);
   await page.screenshot({ path: "e2e/.artifacts/bp676-subscribed.png", fullPage: true });
 
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.reload();
+  await expect(page.getByTestId("subscription-details")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  await page.screenshot({ path: "e2e/.artifacts/bp949-subscribed-phone.png", fullPage: true });
+  await page.setViewportSize({ width: 1280, height: 720 });
+
   await page.getByTestId("subscription-manage").click();
 
   await expect(page).toHaveURL("https://stripe.test/portal/bps_1");
@@ -258,7 +265,8 @@ test("back from paying, the page follows the plan until it is Pro", async ({ pag
 
 // BP-949: the people are told to the licence service when they change; the service sets the members on the subscription
 const memberAsks = () => asked.filter((a) => a.path === "/api/billing/members");
-const syncNow = async (request: APIRequestContext) => (await request.post(`${ORGANISATIONS_API}/api/e2e/member-sync`, { headers: asOrganisation(ACME), data: {} })).json() as Promise<Record<string, number>>;
+const syncNow = async (request: APIRequestContext, minutesFromNow = 0) =>
+  (await request.post(`${ORGANISATIONS_API}/api/e2e/member-sync`, { headers: asOrganisation(ACME), data: { minutesFromNow } })).json() as Promise<Record<string, number>>;
 const storedSync = async () => {
   await mongoose.connect(E2E_MONGODB_URI);
   try {
@@ -295,8 +303,12 @@ test("a Free organisation is told to nobody, and a service that fails is asked a
   expect(await syncNow(request)).toMatchObject({ failed: 1, sent: 0 });
   expect(await storedSync()).toBeUndefined();
 
+  // Not at once: a service that failed is left alone for a minute
+  expect(await syncNow(request)).toMatchObject({ waiting: 1, sent: 0 });
+  expect(memberAsks()).toHaveLength(1);
+
   membersAnswer = { code: 200, body: { status: "updated", extraMembers: 3 } };
-  expect(await syncNow(request)).toMatchObject({ sent: 1, failed: 0 });
+  expect(await syncNow(request, 5)).toMatchObject({ sent: 1, failed: 0 });
   expect(memberAsks()).toHaveLength(2);
 });
 
