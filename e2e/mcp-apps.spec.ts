@@ -161,6 +161,15 @@ test("stats and sprint views show real counts and sprint navigation", async ({ p
   await next.close();
 });
 
+test("a task card names its sprint instead of showing the stored id", async ({ page }) => {
+  const session = await sessionFor(page);
+  const sprint = await session.callTool("create_sprint", { project: PROJECT_KEY, name: "Named sprint", startDate: "2026-10-01", endDate: "2026-10-15" });
+  await session.callTool("update_task", { taskKey: SIBLING_TASK_KEY, sprint: sprint.parsed._id });
+  const card = await host(page, session, "get_task", { taskKey: SIBLING_TASK_KEY });
+  await expect(card.getByText("Named sprint")).toBeVisible();
+  await expect(card.getByText(String(sprint.parsed._id))).toHaveCount(0);
+});
+
 test("a host without tool interactions still renders the task", async ({ page }) => {
   const session = await sessionFor(page);
   const original = await session.callTool("get_task", { taskKey: SIBLING_TASK_KEY });
@@ -209,7 +218,7 @@ for (const navigation of ["task", "sprint"]) {
         await expect(view.getByRole("alert")).toContainText("cancelled");
       }
       await page.evaluate(() => (window as unknown as { releaseTool: Function }).releaseTool());
-      await expect.poll(() => page.evaluate(() => (window as unknown as { completedCalls: string[] }).completedCalls)).toContain(navigation === "task" ? "get_project" : "get_sprint");
+      await expect.poll(() => page.evaluate(() => (window as unknown as { completedCalls: string[] }).completedCalls)).toContain(navigation === "task" ? "get_task" : "get_sprint");
       // The final response was delivered. Let its continuation settle, then force a render to expose any stale history.
       await page.waitForTimeout(1000);
       await page.evaluate(() => (window as unknown as { send: Function }).send("ui/notifications/tool-cancelled", {}));

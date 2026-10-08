@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -6,17 +6,25 @@ import { App, applyDocumentTheme, applyHostStyleVariables, type McpUiHostContext
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import "./style.css";
 
+type Person = string | { username?: string; fullName?: string } | null | undefined;
 type Row = {
   key?: string; taskNumber?: number; title?: string; status?: string; category?: string;
-  priority?: string; assignee?: string | { username?: string; fullName?: string } | null;
-  sprint?: string | { name?: string } | null; description?: string; url?: string;
+  priority?: string; assignee?: Person; sprint?: string | { name?: string } | null;
+  description?: string; dueDate?: string | null; url?: string;
   checklist?: { _id: string; text: string; done: boolean }[];
 };
 type Sprint = { id?: string; _id?: string; name: string; status?: string; goal?: string; startDate?: string; endDate?: string; taskCount?: number; doneCount?: number };
 type Column = { id: string; label: string; color?: string };
 type View = { tool: string; args: Record<string, unknown>; origin?: string; data: Record<string, unknown> | Sprint[]; columns?: Column[] };
+type ViewMeta = { tool?: string; arguments?: Record<string, unknown>; origin?: string };
+
+const VIEW_META = "boardplanner/view";
 const app = new App({ name: "Board Planner", version: "1.0.0" }, {}, { autoResize: true });
+const columnsByProject = new Map<string, Column[]>();
+const sprintNames = new Map<string, string>();
 const taskTools = new Set(["get_task", "create_task", "update_task", "change_task_status"]);
+const priorityColor: Record<string, string> = { urgent: "#d93025", high: "#e8710a", medium: "#5b7bd5", low: "#8a93a3" };
+const categoryColor: Record<string, string> = { bug: "#d93025", "user-story": "#2f9e5b", doc: "#3b7ddd", idea: "#d99a1e" };
 let generation = 0;
 let locked = false;
 let current: View | undefined;
@@ -29,7 +37,7 @@ function payload(result: CallToolResult): unknown {
   try { return JSON.parse(text); } catch { throw new Error("Board Planner returned an unreadable result."); }
 }
 async function call(name: string, args: Record<string, unknown>) {
-  return payload(await app.callServerTool({ name, arguments: args }));
+  return payload(await app.callServerTool({ name, arguments: args })) as View["data"];
 }
 function prefix(key: string) { return key.slice(0, key.lastIndexOf("-")).toUpperCase(); }
 function taskKey(view: View) {
@@ -39,29 +47,38 @@ function taskKey(view: View) {
   const project = String(view.args.project ?? prefix(requested));
   return row.taskNumber != null ? `${project.toUpperCase()}-${row.taskNumber}` : requested.toUpperCase();
 }
-function label(view: View, status: string) { return view.columns?.find((c) => c.id === status)?.label ?? status.replaceAll("_", " "); }
-function person(value: Row["assignee"]) { return typeof value === "string" ? value : value?.fullName || value?.username || "Unassigned"; }
-function sprintName(value: Row["sprint"]) { return typeof value === "string" ? value : value?.name || "Backlog"; }
+async function withColumns(view: View): Promise<View> {
+  const project = taskTools.has(view.tool) ? prefix(taskKey(view)) : String(view.args.project ?? "").toUpperCase();
+  if (!project || !app.getHostCapabilities()?.serverTools) return view;
+  if (!columnsByProject.has(project)) columnsByProject.set(project, ((await call("get_project", { identifier: project })) as { columns?: Column[] }).columns ?? []);
+  const sprint = taskTools.has(view.tool) ? (view.data as Row).sprint : undefined;
+  if (isId(sprint) && !sprintNames.has(sprint)) {
+    for (const row of (await call("list_sprints", { project })) as unknown as Sprint[]) sprintNames.set(String(row.id ?? row._id), row.name);
+  }
+  return { ...view, columns: columnsByProject.get(project) };
+}
+function column(view: View, status: string) { return view.columns?.find((c) => c.id === status); }
+function label(view: View, status: string) { return column(view, status)?.label ?? status.replaceAll("_", " "); }
+function name(value: Person) { return typeof value === "string" ? value : value?.fullName || value?.username || ""; }
+const isId = (value: unknown): value is string => typeof value === "string" && /^[0-9a-f]{24}$/i.test(value);
+function sprintName(value: Row["sprint"]) {
+  if (typeof value === "string") return sprintNames.get(value) ?? (isId(value) ? "In a sprint" : value || "Backlog");
+  return value?.name || "Backlog";
+}
 function taskUrl(view: View, key: string) {
-  if (!view.origin || !key.includes("-")) return undefined;
   const parts = key.match(/^(.+)-(\d+)$/);
-  if (!parts) return undefined;
+  if (!view.origin || !parts) return undefined;
   try {
     const base = new URL(view.origin);
     if (!["https:", "http:"].includes(base.protocol)) return undefined;
     return `${base.origin}/projects/${encodeURIComponent(parts[1])}/tasks/${parts[2]}`;
   } catch { return undefined; }
 }
-async function prepare(view: View) {
-  if (taskTools.has(view.tool) && app.getHostCapabilities()?.serverTools) {
-    const key = taskKey(view);
-    // Writes may answer with a minimal row or unpopulated refs. Read the resulting card once.
-    if (view.tool !== "get_task") view = { ...view, data: await call("get_task", { taskKey: key }) as View["data"] };
-    const project = await call("get_project", { identifier: prefix(key) }) as { columns?: Column[] };
-    view = { ...view, columns: project.columns };
-  }
-  return view;
+function shortDate(value?: string | null) {
+  const date = value ? new Date(value) : undefined;
+  return date && !Number.isNaN(date.getTime()) ? date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : undefined;
 }
+
 async function receive(result: CallToolResult) {
   const id = ++generation;
   locked = true;
@@ -69,9 +86,12 @@ async function receive(result: CallToolResult) {
   update(current, true, "");
   try {
     const data = payload(result) as View["data"];
-    const meta = result._meta?.["boardplanner/view"] as { tool?: string; arguments?: Record<string, unknown>; origin?: string } | undefined;
+    const meta = result._meta?.[VIEW_META] as ViewMeta | undefined;
     if (!meta?.tool) throw new Error("This result has no Board Planner view context.");
-    const view = await prepare({ tool: meta.tool, args: meta.arguments ?? {}, origin: meta.origin, data });
+    let view: View = { tool: meta.tool, args: meta.arguments ?? {}, origin: meta.origin, data };
+    // A write may answer with a minimal row or unpopulated refs: show the saved task.
+    if (taskTools.has(view.tool) && view.tool !== "get_task" && app.getHostCapabilities()?.serverTools) view = { ...view, data: await call("get_task", { taskKey: taskKey(view) }) };
+    view = await withColumns(view);
     if (id === generation) { current = view; update(current, false, ""); }
   } catch (error) {
     if (id === generation) update(current, false, error instanceof Error ? error.message : "Unable to load the view.");
@@ -94,125 +114,211 @@ async function action(work: () => Promise<View>, parent?: View) {
 }
 function openTask(key: string) {
   const source = current!;
-  void action(async () => {
-    const view = await prepare({ ...source, tool: "get_task", args: { taskKey: key }, data: await call("get_task", { taskKey: key }) as View["data"] });
-    return view;
-  }, source);
+  void action(async () => withColumns({ ...source, tool: "get_task", args: { taskKey: key }, data: await call("get_task", { taskKey: key }), columns: undefined }), source);
+}
+async function reload(source: View, key: string): Promise<View> {
+  return { ...source, data: await call("get_task", { taskKey: key }) };
 }
 function changeStatus(status: string) {
-  const view = current!;
-  const key = taskKey(view);
+  const source = current!;
+  const key = taskKey(source);
   void action(async () => {
     await call("change_task_status", { taskKey: key, status });
-    return { ...view, data: await call("get_task", { taskKey: key }) as View["data"] };
+    return reload(source, key);
   });
 }
 function toggle(item: string, done: boolean) {
-  const view = current!;
-  const key = taskKey(view);
+  const source = current!;
+  const key = taskKey(source);
   void action(async () => {
     await call("set_checklist_item", { taskKey: key, item, done });
-    return { ...view, data: await call("get_task", { taskKey: key }) as View["data"] };
+    return reload(source, key);
   });
 }
 function followPage(view: View, offset: number) {
-  void action(async () => ({ ...view, args: { ...view.args, offset }, data: await call(view.tool, { ...view.args, offset }) as View["data"] }));
+  void action(async () => {
+    const args = { ...view.args, offset };
+    return { ...view, args, data: await call(view.tool, args) };
+  });
 }
 function openSprint(view: View, sprint: Sprint) {
   void action(async () => {
     const args = { project: view.args.project, sprint: sprint.id ?? sprint._id };
-    const data = await call("get_sprint", args) as View["data"];
-    return { ...view, tool: "get_sprint", args, data };
+    return { ...view, tool: "get_sprint", args, data: await call("get_sprint", args) };
   }, view);
 }
 function hostStyle(context?: McpUiHostContext) {
   if (context?.theme) applyDocumentTheme(context.theme);
   if (context?.styles?.variables) applyHostStyleVariables(context.styles.variables);
 }
-function ExternalLink({ url, children }: { url?: string; children: React.ReactNode }) {
+
+function Icon({ d, size = 16 }: { d: string; size?: number }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={d} /></svg>;
+}
+const bookmark = "M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z";
+const external = "M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5";
+const person = "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0";
+
+function ExternalLink({ url, label: text, className, children }: { url?: string; label?: string; className?: string; children: ReactNode }) {
   if (!url) return null;
-  return <a href={url} onClick={(event) => {
+  return <a href={url} className={className} aria-label={text} title={text} onClick={(event) => {
     event.preventDefault();
     void app.openLink({ url }).catch((error: Error) => update(current, false, error.message));
   }}>{children}</a>;
 }
+function Avatar({ value, size = 22 }: { value: Person; size?: number }) {
+  const who = name(value);
+  const style = { width: size, height: size, fontSize: size * 0.42, "--hue": [...who].reduce((sum, ch) => (sum * 31 + ch.charCodeAt(0)) % 360, 7) } as CSSProperties;
+  if (!who) return <span className="avatar empty" style={style} role="img" aria-label="Unassigned"><Icon d={person} size={size * 0.62} /></span>;
+  const initials = who.split(/\s+/).map((part) => part[0]).slice(0, 2).join("").toUpperCase();
+  return <span className="avatar" style={style} aria-hidden="true">{initials}</span>;
+}
+function Assignee({ value }: { value: Person }) {
+  return <span className="assignee"><Avatar value={value} />{name(value) || "Unassigned"}</span>;
+}
+function PriorityChip({ value = "medium" }: { value?: string }) {
+  return <span className="chip" title="Priority"><span className="swatch" style={{ background: priorityColor[value] ?? priorityColor.medium }} aria-hidden="true" />{value[0].toUpperCase() + value.slice(1)}</span>;
+}
+function StatusSelect({ view, status = "", disabled, onChange }: { view: View; status?: string; disabled: boolean; onChange: (status: string) => void }) {
+  const known = !!column(view, status);
+  return <span className="select" style={{ "--col": column(view, status)?.color ?? "#6b7280" } as CSSProperties}>
+    <select className="status" aria-label="Task status" value={status} disabled={disabled || !view.columns?.length} onChange={(event) => onChange(event.target.value)}>
+      {!known && <option value={status}>{label(view, status)}</option>}
+      {view.columns?.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+    </select>
+  </span>;
+}
+function Progress({ total = 0, done = 0, caption = true }: { total?: number; done?: number; caption?: boolean }) {
+  return <div className="progress">
+    {caption && <div className="progress-label"><strong>{done} of {total} done</strong><span>{total ? Math.round(done / total * 100) : 0}%</span></div>}
+    <progress max={Math.max(total, 1)} value={done} aria-label="Tasks completed" />
+  </div>;
+}
+
 function TaskCard({ view, busy, interactive }: { view: View; busy: boolean; interactive: boolean }) {
   const row = view.data as Row;
   const key = taskKey(view);
+  const category = row.category ?? "task";
   const checked = row.checklist?.filter((item) => item.done).length ?? 0;
+  const due = shortDate(row.dueDate);
   return <article className="card">
-    <div className="eyebrow"><span className="mono">{key}</span><span>{row.category ?? "Task"}</span></div>
-    <h1>{row.title}</h1>
-    <div className="properties">
-      <label className="property"><span>Status</span><select aria-label="Task status" value={row.status ?? ""} disabled={busy || !interactive || !view.columns?.length} onChange={(event) => changeStatus(event.target.value)}>
-        {!view.columns?.some((c) => c.id === row.status) && <option value={row.status}>{label(view, row.status ?? "")}</option>}
-        {view.columns?.map((column) => <option key={column.id} value={column.id}>{column.label}</option>)}
-      </select></label>
-      <div className="property"><span>Assignee</span><strong>{person(row.assignee)}</strong></div>
-      <div className="property"><span>Priority</span><strong>{row.priority ?? "medium"}</strong></div>
-      <div className="property"><span>Sprint</span><strong>{sprintName(row.sprint)}</strong></div>
+    <header className="card-head">
+      <span className="type" style={{ "--tone": categoryColor[category] ?? "#6b7280" } as CSSProperties} role="img" aria-label={category}><Icon d={bookmark} size={20} /></span>
+      <div className="card-title">
+        <h1>{row.title}</h1>
+        <div className="meta">
+          <span className="mono">{key}</span><span className="sep" aria-hidden="true">•</span>
+          <Assignee value={row.assignee} /><span className="sep" aria-hidden="true">•</span>
+          <StatusSelect view={view} status={row.status} disabled={busy || !interactive} onChange={changeStatus} />
+        </div>
+      </div>
+      <ExternalLink url={taskUrl(view, key)} label="Open in Board Planner" className="open"><Icon d={external} size={18} /></ExternalLink>
+    </header>
+    <div className="chips">
+      <PriorityChip value={row.priority} />
+      <span className="chip" title="Sprint">{sprintName(row.sprint)}</span>
+      <span className="chip" title="Category">{category}</span>
+      {due && <span className="chip" title="Due date">Due {due}</span>}
     </div>
     {row.description && <section className="description" aria-label="Description"><Markdown remarkPlugins={[remarkGfm]} components={{
-      // Raw HTML is never enabled; remote images cannot bypass the resource's empty CSP.
       img: ({ alt }) => <span>{alt}</span>,
       a: ({ href, children }) => <ExternalLink url={href}>{children}</ExternalLink>,
     }}>{row.description}</Markdown></section>}
-    {!!row.checklist?.length && <section className="checklist" aria-label="Acceptance criteria"><h2>Acceptance criteria <span>{checked}/{row.checklist.length}</span></h2>
-      {row.checklist.map((item) => <label key={item._id} className="criterion"><input type="checkbox" checked={item.done} disabled={busy || !interactive} onChange={(event) => toggle(item._id, event.target.checked)} /><span className={item.done ? "completed" : ""}>{item.text}</span></label>)}
+    {!!row.checklist?.length && <section className="checklist" aria-label="Acceptance criteria">
+      <h2>Acceptance criteria <span>{checked}/{row.checklist.length}</span></h2>
+      <Progress total={row.checklist.length} done={checked} caption={false} />
+      {row.checklist.map((item) => <label key={item._id} className="criterion">
+        <input type="checkbox" checked={item.done} disabled={busy || !interactive} onChange={(event) => toggle(item._id, event.target.checked)} />
+        <span className={item.done ? "completed" : ""}>{item.text}</span>
+      </label>)}
     </section>}
-    <footer><ExternalLink url={taskUrl(view, key)}>Open in Board Planner ↗</ExternalLink></footer>
   </article>;
 }
 function TaskList({ view, busy, interactive }: { view: View; busy: boolean; interactive: boolean }) {
   const data = view.data as { tasks?: Row[]; total?: number; returned?: number; nextOffset?: number | null; truncated?: boolean };
   const groups = new Map<string, Row[]>();
   for (const row of data.tasks ?? []) { const status = row.status ?? "Unknown"; groups.set(status, [...(groups.get(status) ?? []), row]); }
-  return <section aria-label="Tasks"><p className="caption">{data.total != null ? `${data.tasks?.length ?? 0} of ${data.total} tasks` : `${data.returned ?? data.tasks?.length ?? 0} tasks`}</p>
-    {!groups.size && <p>No tasks found.</p>}
-    {[...groups].map(([status, tasks]) => <section className="group" key={status}><h2>{label(view, status)} <span>{tasks.length}</span></h2>
-      {tasks.map((row, index) => {
+  const order = (status: string) => view.columns?.findIndex((c) => c.id === status) ?? 0;
+  const offset = Number(view.args.offset ?? 0);
+  return <section aria-label="Tasks">
+    <p className="caption">{data.total != null ? `${data.tasks?.length ?? 0} of ${data.total} tasks` : `${data.returned ?? data.tasks?.length ?? 0} tasks`}</p>
+    {!groups.size && <p className="empty-state">No tasks found.</p>}
+    {[...groups].sort(([a], [b]) => order(a) - order(b)).map(([status, tasks]) => <section className="group" key={status}>
+      <h2><span className="swatch" style={{ background: column(view, status)?.color ?? "#6b7280" }} aria-hidden="true" />{label(view, status)}<span className="count">{tasks.length}</span></h2>
+      <div className="rows">{tasks.map((row, index) => {
         const key = row.key ?? `${String(view.args.project).toUpperCase()}-${row.taskNumber}`;
-        return <button className="task-row" key={`${key}-${index}`} disabled={busy || !interactive} onClick={() => openTask(key)}><span className="mono">{key}</span><span className="row-title">{row.title}</span><span className="row-meta">{view.tool !== "my_tasks" && <>{person(row.assignee)} · </>}{row.priority ?? "medium"}</span><span aria-hidden="true">›</span></button>;
-      })}
+        return <button className="task-row" key={`${key}-${index}`} disabled={busy || !interactive} onClick={() => openTask(key)}>
+          <span className="mono">{key}</span>
+          <span className="row-title">{row.title}</span>
+          {view.tool !== "my_tasks" && <Avatar value={row.assignee} size={20} />}
+          <span className="swatch" style={{ background: priorityColor[row.priority ?? "medium"] ?? priorityColor.medium }} title={`${row.priority ?? "medium"} priority`} aria-hidden="true" />
+        </button>;
+      })}</div>
     </section>)}
     <div className="pagination">
-      {Number(view.args.offset ?? 0) > 0 && <button disabled={busy || !interactive} onClick={() => followPage(view, Math.max(0, Number(view.args.offset) - Number(view.args.limit ?? 50)))}>Previous page</button>}
+      {offset > 0 && <button disabled={busy || !interactive} onClick={() => followPage(view, Math.max(0, offset - Number(view.args.limit ?? 50)))}>Previous page</button>}
       {data.nextOffset != null && <button disabled={busy || !interactive} onClick={() => followPage(view, data.nextOffset!)}>Next page</button>}
     </div>
     {data.truncated && <p className="caption">Search is limited to 50 matches. Refine your query to see other tasks.</p>}
   </section>;
 }
-function Progress({ total = 0, done = 0 }: { total?: number; done?: number }) {
-  return <div className="progress"><div className="progress-label"><strong>{done} of {total} done</strong><span>{total ? Math.round(done / total * 100) : 0}%</span></div><progress max={Math.max(total, 1)} value={done} aria-label="Tasks completed" /></div>;
-}
 function SprintView({ view, busy, interactive }: { view: View; busy: boolean; interactive: boolean }) {
   const one = view.data as { sprint: Sprint };
   const sprints = Array.isArray(view.data) ? view.data : [one.sprint];
-  return <section aria-label="Sprints">{!sprints.length && <p>No sprints yet.</p>}{sprints.map((sprint) => <article className="sprint" key={sprint.id ?? sprint._id}>
-    <div className="sprint-header"><h2>{view.tool === "list_sprints" ? <button disabled={busy || !interactive} onClick={() => openSprint(view, sprint)}>{sprint.name} ›</button> : sprint.name}</h2><span className="chip">{sprint.status}</span></div>
-    <p className="caption">{sprint.startDate?.slice(0, 10)} – {sprint.endDate?.slice(0, 10)}</p>
-    {sprint.goal && <p>{sprint.goal}</p>}<Progress total={sprint.taskCount} done={sprint.doneCount} />
-  </article>)}{view.tool === "get_sprint" && <TaskList view={view} busy={busy} interactive={interactive} />}</section>;
+  return <section aria-label="Sprints">
+    {!sprints.length && <p className="empty-state">No sprints yet.</p>}
+    {sprints.map((sprint) => <article className="card sprint" key={sprint.id ?? sprint._id}>
+      <div className="sprint-header">
+        <h2>{view.tool === "list_sprints" ? <button className="link" disabled={busy || !interactive} onClick={() => openSprint(view, sprint)}>{sprint.name} ›</button> : sprint.name}</h2>
+        <span className="chip">{sprint.status}</span>
+      </div>
+      <p className="caption">{shortDate(sprint.startDate)} – {shortDate(sprint.endDate)}</p>
+      {sprint.goal && <p>{sprint.goal}</p>}
+      <Progress total={sprint.taskCount} done={sprint.doneCount} />
+    </article>)}
+    {view.tool === "get_sprint" && <TaskList view={view} busy={busy} interactive={interactive} />}
+  </section>;
 }
 function Stats({ view }: { view: View }) {
   const stats = view.data as { total: number; done: number; statusBreakdown?: Record<string, number>; velocity?: { week: string; count: number }[] };
-  return <section aria-label="Project statistics"><h1>{String(view.args.project)} overview</h1><Progress total={stats.total} done={stats.done} />
-    <h2>Status distribution</h2>{Object.entries(stats.statusBreakdown ?? {}).map(([status, count]) => <div className="distribution" key={status}><span>{label(view, status)}</span><meter min={0} max={Math.max(stats.total, 1)} value={count} aria-label={`${status}: ${count} tasks`} /><strong>{count}</strong></div>)}
-    {!!stats.velocity?.length && <><h2>Completed per week</h2><div className="weeks">{stats.velocity.map((week) => <div key={week.week}><strong>{week.count}</strong><span>{week.week}</span></div>)}</div></>}
+  const order = (status: string) => view.columns?.findIndex((c) => c.id === status) ?? 0;
+  const peak = Math.max(1, ...(stats.velocity ?? []).map((week) => week.count));
+  return <section aria-label="Project statistics" className="card">
+    <h1 className="plain">{String(view.args.project)} overview</h1>
+    <div className="tiles">
+      <div><strong>{stats.total}</strong><span>Tasks</span></div>
+      <div><strong>{stats.done}</strong><span>Done</span></div>
+      <div><strong>{stats.total ? Math.round(stats.done / stats.total * 100) : 0}%</strong><span>Complete</span></div>
+    </div>
+    <Progress total={stats.total} done={stats.done} caption={false} />
+    <h2>Status distribution</h2>
+    {Object.entries(stats.statusBreakdown ?? {}).sort(([a], [b]) => order(a) - order(b)).map(([status, count]) => <div className="distribution" key={status}>
+      <span>{label(view, status)}</span>
+      <div className="bar" role="meter" aria-label={`${status}: ${count} tasks`} aria-valuemin={0} aria-valuemax={Math.max(stats.total, 1)} aria-valuenow={count}>
+        <i style={{ width: `${Math.max(2, count / Math.max(stats.total, 1) * 100)}%`, background: column(view, status)?.color ?? "#6b7280" }} />
+      </div>
+      <strong>{count}</strong>
+    </div>)}
+    {!!stats.velocity?.length && <><h2>Completed per week</h2><div className="weeks">{stats.velocity.map((week) => <div key={week.week}>
+      <strong>{week.count}</strong><i style={{ height: `${Math.max(4, week.count / peak * 56)}px` }} /><span>{week.week}</span>
+    </div>)}</div></>}
   </section>;
+}
+function Skeleton() {
+  return <div className="card skeleton" aria-hidden="true"><i style={{ width: "62%" }} /><i style={{ width: "38%" }} /><i /><i style={{ width: "80%" }} /></div>;
 }
 function Widget() {
   const [state, setState] = useState<{ view?: View; busy: boolean; error: string }>({ busy: true, error: "" });
   update = (view, busy, error) => setState({ view, busy, error });
   const { view, busy, error } = state;
   const interactive = !!app.getHostCapabilities()?.serverTools;
-  return <main aria-busy={busy}><header className="toolbar"><span className="brand">Board Planner</span><div>
-    {!!history.length && <button disabled={busy} onClick={() => { current = history.pop(); update(current, false, ""); }}>← Back</button>}
-    <span role="status">{busy ? "Loading…" : ""}</span>
-  </div></header>
+  return <main aria-busy={busy} className={busy && view ? "busy" : ""}>
+    <span className="sr-only" role="status">{busy ? "Loading…" : ""}</span>
+    {!!history.length && <button className="back" disabled={busy} onClick={() => { current = history.pop(); update(current, false, ""); }}>← Back</button>}
     {error && <p className="error" role="alert">{error}</p>}
-    {view && !interactive && <p className="caption">This host displays the view without tool interactions.</p>}
+    {!view && !error && <Skeleton />}
     {view && (taskTools.has(view.tool) ? <TaskCard view={view} busy={busy} interactive={interactive} /> : view.tool === "get_project_stats" ? <Stats view={view} /> : ["get_sprint", "list_sprints"].includes(view.tool) ? <SprintView view={view} busy={busy} interactive={interactive} /> : <TaskList view={view} busy={busy} interactive={interactive} />)}
+    {view && !interactive && <p className="caption">This host displays the view without tool interactions.</p>}
   </main>;
 }
 createRoot(document.getElementById("root")!).render(<Widget />);
