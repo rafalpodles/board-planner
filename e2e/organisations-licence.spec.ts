@@ -218,6 +218,30 @@ test.describe("BP-930: the plan badge above the agents", () => {
     await page.screenshot({ path: "e2e/.artifacts/bp930-ending-phone-dark.png" });
   });
 
+  test("a trial is a Trial with its days and Upgrade", async ({ page, request }) => {
+    const trial = e2eLicence({ customer: "acme trial", organisation: ACME.organisation.toHexString(), expiresInDays: 20, trial: true });
+    expect((await push(request, ACME, trial).send()).status()).toBe(200);
+    await openApp(page, ACME);
+    await expect(badge(page)).toContainText("Trial");
+    await expect(page.getByTestId("plan-badge-detail")).toContainText(/(19|20|21) days left/);
+    await expect(page.getByTestId("plan-badge-action")).toHaveText("Upgrade");
+    await page.screenshot({ path: "e2e/.artifacts/bp950-trial.png" });
+  });
+
+  // A stored key that has since run out is Free at once: the unit tests hold the clock for that. What the
+  // server can be asked here is that a trial which has already ended is not taken in the first place, where
+  // a paid key a few days past its end still is (the grace test below)
+  test("a trial that has already ended is refused, and the organisation stays Free", async ({ page, request }) => {
+    const ended = e2eLicence({ customer: "acme trial", organisation: ACME.organisation.toHexString(), expiresInDays: -1, trial: true });
+    const response = await push(request, ACME, ended).send();
+
+    expect(response.status()).toBe(422);
+    expect((await response.json()).verdict).toBe("expired");
+    await openApp(page, ACME);
+    await expect(badge(page)).toContainText("Free");
+    await expect(page.getByTestId("plan-badge-detail")).toHaveText("Free plan");
+  });
+
   test("a licence past its end shows the grace period in force", async ({ page, request }) => {
     const lapsed = e2eLicence({ customer: "acme customer", organisation: ACME.organisation.toHexString(), expiresInDays: -3 });
     expect((await push(request, ACME, lapsed).send()).status()).toBe(200);
