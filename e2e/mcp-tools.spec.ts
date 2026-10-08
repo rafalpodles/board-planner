@@ -210,7 +210,8 @@ test("create_task refuses what the board does not have, and mints no number doin
   refused(armed);
   // The SDK wraps the refusal in its own validation error, quotes escaped, so the wording is
   // asserted in pieces rather than as one phrase
-  expect(armed.text).toContain("unrecognized_keys");
+  expect(armed.text).toContain("Input validation error");
+  expect(armed.text).toContain("create_task");
   expect(armed.text).toContain("agent");
   expect(armed.text).toContain("use update_task, once the task exists");
   expect(armed.text).toContain("Nothing was written.");
