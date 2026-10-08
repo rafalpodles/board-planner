@@ -59,6 +59,16 @@ describe("pullLicence (BP-897)", () => {
     vi.unstubAllGlobals();
   });
 
+  it("carries the people count when it has one, so the licence service can put the members right, and says nothing of it when it has not", async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ licenceKey: "key-1" }), { status: 200 }));
+
+    await pullLicence(config, organisation, undefined, 14);
+    await pullLicence(config, organisation);
+
+    expect(JSON.parse(Buffer.from(fetchMock.mock.calls[0][1].body).toString())).toMatchObject({ members: 14 });
+    expect(JSON.parse(Buffer.from(fetchMock.mock.calls[1][1].body).toString())).not.toHaveProperty("members");
+  });
+
   it("asks for this organisation, signed over the service's host and path, and stores what comes back", async () => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ licenceKey: "key-1" }), { status: 200 }));
 

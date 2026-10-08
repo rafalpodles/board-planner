@@ -1,5 +1,6 @@
 import { createPrivateKey, createPublicKey } from "node:crypto";
 import { connectDB } from "./db";
+import { memberCounts } from "./member-limit";
 import { forEachServedOrganisation } from "./organisation-jobs";
 import { organisationDomain } from "./organisation-host";
 import { storeOrganisationLicence, type StoreOutcome } from "./organisation-licence";
@@ -74,10 +75,12 @@ export type PullOutcome = StoreOutcome | { status: "none" } | { status: "refused
 export async function pullLicence(
   config: LicencePullConfig,
   organisation: { _id: { toHexString(): string }; name?: string; slug?: string | null },
-  timeoutMs = REQUEST_TIMEOUT_MS
+  timeoutMs = REQUEST_TIMEOUT_MS,
+  members?: number
 ): Promise<PullOutcome> {
   const id = organisation._id.toHexString();
-  const body = new TextEncoder().encode(JSON.stringify({ organisation: id, name: organisation.name ?? "", slug: organisation.slug ?? null }));
+  // The count rides the daily ask so a change the member sync failed to send is put right within a day (BP-949)
+  const body = new TextEncoder().encode(JSON.stringify({ organisation: id, name: organisation.name ?? "", slug: organisation.slug ?? null, ...(members === undefined ? {} : { members }) }));
   const headers = signPlatformRequest({ method: "POST", host: config.url.host, path: LICENCE_PULL_PATH, body }, config.key);
 
   let response: Response;
@@ -131,7 +134,7 @@ export async function pullEveryLicence(config: LicencePullConfig): Promise<void>
   await forEachServedOrganisation("Licence pull", async (db) => {
     const row = await Organisation.findById(db.organisation).select("name slug").lean();
     if (!row) return;
-    const outcome = await pullLicence(config, row);
+    const outcome = await pullLicence(config, row, undefined, (await memberCounts(db)).active);
     if (outcome.status === "refused" || outcome.status === "unreachable" || outcome.status === "invalid" || outcome.status === "oversized") {
       console.warn(`Licence pull: ${outcome.status}${"httpStatus" in outcome ? ` (${outcome.httpStatus})` : ""}`);
     }

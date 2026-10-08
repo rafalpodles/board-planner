@@ -29,6 +29,8 @@ export interface IOrganisation {
   deadNoticeAt?: Date | null;
   // Held while a process is sending the notice, so two do not; it never counts as the notice having gone out
   deadNoticeClaimedAt?: Date | null;
+  // The people count last told to the licence service, so only a change is told again (BP-949)
+  memberSync?: { members: number; at: Date } | null;
 }
 
 const entitlementsSchema = new Schema<IOrganisationEntitlements>(
@@ -56,6 +58,7 @@ const organisationSchema = new Schema<IOrganisation>({
   deletingAt: { type: Date, default: null },
   deadNoticeAt: { type: Date, default: null },
   deadNoticeClaimedAt: { type: Date, default: null },
+  memberSync: { type: new Schema({ members: { type: Number, required: true, min: 0 }, at: { type: Date, required: true } }, { _id: false }), default: null },
   entitlements: {
     type: entitlementsSchema,
     default: () => ({ plan: "free", features: [], source: "none" }),

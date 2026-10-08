@@ -16,10 +16,13 @@ vi.mock("@/hooks/use-organisation", () => ({ useOrganisation: () => ({ organisat
 
 const PERIOD_END = "2026-11-08T21:00:00.000Z";
 const FREE = { name: "Acme", cloud: true, plan: "free", planEndsAt: null, trial: false };
-const live = (over: Record<string, unknown> = {}) => ({
+const live = (over: Record<string, unknown> = {}, extra: Record<string, unknown> = {}) => ({
   available: true,
   launchOpen: false,
   subscription: { status: "active", interval: "month", launch: false, extraMembers: 0, currentPeriodEnd: PERIOD_END, cancelAtPeriodEnd: false, ...over },
+  memberPrice: null,
+  upcoming: null,
+  ...extra,
 });
 
 let assign: ReturnType<typeof vi.fn>;
@@ -129,7 +132,7 @@ describe("Subscription", () => {
     expect(screen.getByTestId("subscription-period").textContent).toBe(shown(PERIOD_END));
     expect(details.textContent).toContain("Yearly");
     expect(details.textContent).toContain("Launch price");
-    expect(details.textContent).toContain("4 above the 10 included");
+    expect(screen.getByTestId("subscription-billed").textContent).toBe("4");
     expect(screen.getByText("Renews")).toBeTruthy();
     expect(screen.queryByTestId("subscription-checkout")).toBeNull();
 
@@ -385,5 +388,38 @@ describe("Subscription", () => {
     });
 
     expect(screen.getByTestId("subscription-checkout").textContent).toBe("Continue to payment");
+  });
+
+  describe("members and the next invoice (BP-949)", () => {
+    const priced = { memberPrice: { amount: 300, currency: "usd" }, upcoming: { amount: 5400, currency: "usd" } };
+
+    it("shows the people there are, what is included, what is billed above it at what price, and what the next invoice is", async () => {
+      m.organisation.current = { ...FREE, plan: "pro", planEndsAt: endsIn(20), members: 14 };
+      m.api.get.mockResolvedValue(live({ interval: "year", extraMembers: 4 }, priced));
+      render(<Subscription />);
+
+      expect((await screen.findByTestId("subscription-members")).textContent).toBe("14, 10 included");
+      expect(screen.getByTestId("subscription-billed").textContent).toBe("4 × $3.00 per year");
+      expect(screen.getByTestId("subscription-next-invoice").textContent).toBe(`$54.00 on ${shown(PERIOD_END)}`);
+    });
+
+    it("says nothing is billed above ten when nobody is, and names no price it was not given", async () => {
+      m.organisation.current = { ...FREE, plan: "pro", planEndsAt: endsIn(20), members: 8 };
+      m.api.get.mockResolvedValue(live());
+      render(<Subscription />);
+
+      expect((await screen.findByTestId("subscription-billed")).textContent).toBe("None");
+      expect(screen.queryByTestId("subscription-next-invoice")).toBeNull();
+    });
+
+    it("shows no next invoice for a subscription that is ending, and no members where the count is not known", async () => {
+      m.organisation.current = { ...FREE, plan: "pro", planEndsAt: endsIn(20) };
+      m.api.get.mockResolvedValue(live({ cancelAtPeriodEnd: true }, priced));
+      render(<Subscription />);
+
+      await screen.findByTestId("subscription-details");
+      expect(screen.queryByTestId("subscription-next-invoice")).toBeNull();
+      expect(screen.queryByTestId("subscription-members")).toBeNull();
+    });
   });
 });
