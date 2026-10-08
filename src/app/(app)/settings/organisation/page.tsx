@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/Input";
 import { LoadFailed } from "@/components/ui/LoadFailed";
 import { useToast } from "@/components/ui/Toast";
 import { LicenceDetails, type LicenceSummary } from "@/components/settings/LicenceDetails";
+import { Subscription } from "@/components/settings/Subscription";
 
 export default function OrganisationSettingsPage() {
   const api = useApi();
@@ -126,6 +127,7 @@ export default function OrganisationSettingsPage() {
               Read from <code>LICENCE_KEY</code> in the environment. To change it, set the variable and restart.
             </p>
           )}
+          {organisation.cloud && <Subscription />}
           {licenceFailed ? (
             <LoadFailed
               testId="licence-settings-error"
