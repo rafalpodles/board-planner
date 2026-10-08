@@ -68,22 +68,26 @@ async function receive(result: CallToolResult) {
   history.length = 0;
   update(current, true, "");
   try {
+    const data = payload(result) as View["data"];
     const meta = result._meta?.["boardplanner/view"] as { tool?: string; arguments?: Record<string, unknown>; origin?: string } | undefined;
     if (!meta?.tool) throw new Error("This result has no Board Planner view context.");
-    const view = await prepare({ tool: meta.tool, args: meta.arguments ?? {}, origin: meta.origin, data: payload(result) as View["data"] });
+    const view = await prepare({ tool: meta.tool, args: meta.arguments ?? {}, origin: meta.origin, data });
     if (id === generation) { current = view; update(current, false, ""); }
   } catch (error) {
     if (id === generation) update(current, false, error instanceof Error ? error.message : "Unable to load the view.");
   } finally { if (id === generation) locked = false; }
 }
-async function action(work: () => Promise<View>, success = "") {
+async function action(work: () => Promise<View>, parent?: View) {
   if (locked) return;
   locked = true;
   const id = generation;
   update(current, true, "");
   try {
     const view = await work();
-    if (id === generation) { current = view; update(current, false, success); }
+    if (id === generation) {
+      if (parent) history.push(parent);
+      current = view; update(current, false, "");
+    }
   } catch (error) {
     if (id === generation) update(current, false, error instanceof Error ? error.message : "The action failed.");
   } finally { if (id === generation) locked = false; }
@@ -92,9 +96,8 @@ function openTask(key: string) {
   const source = current!;
   void action(async () => {
     const view = await prepare({ ...source, tool: "get_task", args: { taskKey: key }, data: await call("get_task", { taskKey: key }) as View["data"] });
-    history.push(source);
     return view;
-  });
+  }, source);
 }
 function changeStatus(status: string) {
   const view = current!;
@@ -119,9 +122,8 @@ function openSprint(view: View, sprint: Sprint) {
   void action(async () => {
     const args = { project: view.args.project, sprint: sprint.id ?? sprint._id };
     const data = await call("get_sprint", args) as View["data"];
-    history.push(view);
     return { ...view, tool: "get_sprint", args, data };
-  });
+  }, view);
 }
 function hostStyle(context?: McpUiHostContext) {
   if (context?.theme) applyDocumentTheme(context.theme);
@@ -170,7 +172,7 @@ function TaskList({ view, busy, interactive }: { view: View; busy: boolean; inte
     {[...groups].map(([status, tasks]) => <section className="group" key={status}><h2>{label(view, status)} <span>{tasks.length}</span></h2>
       {tasks.map((row, index) => {
         const key = row.key ?? `${String(view.args.project).toUpperCase()}-${row.taskNumber}`;
-        return <button className="task-row" key={`${key}-${index}`} disabled={busy || !interactive} onClick={() => openTask(key)}><span className="mono">{key}</span><span className="row-title">{row.title}</span><span className="row-meta">{person(row.assignee)} · {row.priority ?? "medium"}</span><span aria-hidden="true">›</span></button>;
+        return <button className="task-row" key={`${key}-${index}`} disabled={busy || !interactive} onClick={() => openTask(key)}><span className="mono">{key}</span><span className="row-title">{row.title}</span><span className="row-meta">{view.tool !== "my_tasks" && <>{person(row.assignee)} · </>}{row.priority ?? "medium"}</span><span aria-hidden="true">›</span></button>;
       })}
     </section>)}
     <div className="pagination">

@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { McpSession } from "./mcp";
-import { API_TOKEN, PROJECT_KEY, SIBLING_TASK_KEY, SIBLING_TASK_NUMBER, SIBLING_TASK_TITLE, HELD_TASK_KEY, SOURCE_COLUMN, TARGET_COLUMN, seed, storedTask } from "./seed";
+import { API_TOKEN, PROJECT_KEY, SIBLING_TASK_KEY, SIBLING_TASK_NUMBER, SIBLING_TASK_TITLE, HELD_TASK_KEY, HELD_TASK_NUMBER, SOURCE_COLUMN, TARGET_COLUMN, seed, storedTask } from "./seed";
 const scriptJson = (value: unknown) => JSON.stringify(value).replace(/</g, "\\u003c");
 
 test.beforeEach(async () => { await seed(); });
@@ -25,7 +25,7 @@ async function host(page: Page, session: McpSession, tool: string, args: Record<
     return called.raw.result;
   });
   const html = `<!doctype html><html><head><meta charset="UTF-8"></head><body style="margin:0"><script>
-    window.calls = []; window.links = []; window.ready = false;
+    window.calls = []; window.completedCalls = []; window.links = []; window.ready = false;
     const frame = document.createElement('iframe'); frame.title = 'Board Planner App';
     frame.style = 'width:100%;height:900px;border:0'; frame.sandbox = 'allow-scripts';
     window.send = (method, params) => frame.contentWindow.postMessage({jsonrpc:'2.0', method, params}, '*');
@@ -41,7 +41,15 @@ async function host(page: Page, session: McpSession, tool: string, args: Record<
       if (message.id == null) return;
       let result;
       if (message.method === 'ui/initialize') result = {protocolVersion:'2026-01-26',hostInfo:{name:'e2e-host',version:'1'},hostCapabilities:{${interactive ? 'serverTools:{},' : ''}openLinks:{}},hostContext:{theme:${scriptJson(theme)},displayMode:'inline'}};
-      else if (message.method === 'tools/call') { window.calls.push(message.params); result = await window.forwardTool(message.params); }
+      else if (message.method === 'tools/call') {
+        window.calls.push(message.params);
+        if (window.deferTool === message.params.name) {
+          window.deferTool = undefined; window.pendingTool = true;
+          await new Promise(resolve => window.releaseTool = resolve);
+        }
+        result = await window.forwardTool(message.params);
+        window.completedCalls.push(message.params.name);
+      }
       else if (message.method === 'ui/open-link') { window.links.push(message.params.url); result = {}; }
       else result = {};
       frame.contentWindow.postMessage({jsonrpc:'2.0',id:message.id,result}, '*');
@@ -93,7 +101,7 @@ test("a refused write stays visible and leaves the card in its saved status", as
   await card.getByRole("combobox").selectOption(TARGET_COLUMN.id);
   await expect(card.getByRole("alert")).toContainText("worker");
   await expect(card.getByRole("combobox")).toHaveValue(SOURCE_COLUMN.id);
-  expect((await storedTask(SIBLING_TASK_NUMBER))?.status).toBe(SOURCE_COLUMN.id);
+  expect((await storedTask(HELD_TASK_NUMBER))?.status).toBe(SOURCE_COLUMN.id);
 });
 
 for (const tool of ["list_tasks", "my_tasks", "search_tasks"]) {
@@ -112,6 +120,7 @@ for (const tool of ["list_tasks", "my_tasks", "search_tasks"]) {
         await list.getByRole("button", { name: "Next page" }).click();
       }
     }
+    if (tool === "my_tasks") await expect(row).not.toContainText("Unassigned");
     await row.click();
     await expect(list.getByRole("heading", { name: SIBLING_TASK_TITLE })).toBeVisible();
     await list.getByRole("button", { name: "Back" }).click();
@@ -122,11 +131,16 @@ for (const tool of ["list_tasks", "my_tasks", "search_tasks"]) {
 for (const tool of ["create_task", "update_task", "change_task_status"]) {
   test(`${tool} minimal result shows the resulting full card`, async ({ page }) => {
     const session = await sessionFor(page);
+    if (tool === "change_task_status") await session.callTool("update_task", { taskKey: SIBLING_TASK_KEY, description: "Full saved description", acceptanceCriteria: "- [ ] Full saved criterion" });
     const args = tool === "create_task" ? { project: PROJECT_KEY, title: "Widget-created task", description: "Created description", minimal: true } : tool === "update_task" ? { taskKey: SIBLING_TASK_KEY, description: "Changed description", minimal: true } : { taskKey: SIBLING_TASK_KEY, status: TARGET_COLUMN.id, minimal: true };
     const card = await host(page, session, tool, args);
     await expect(card.getByRole("heading", { name: tool === "create_task" ? "Widget-created task" : SIBLING_TASK_TITLE })).toBeVisible();
     if (tool !== "change_task_status") await expect(card.getByRole("region", { name: "Description" })).toContainText(tool === "create_task" ? "Created description" : "Changed description");
-    else await expect(card.getByRole("combobox")).toHaveValue(TARGET_COLUMN.id);
+    else {
+      await expect(card.getByRole("combobox")).toHaveValue(TARGET_COLUMN.id);
+      await expect(card.getByRole("region", { name: "Description" })).toContainText("Full saved description");
+      await expect(card.getByRole("checkbox", { name: "Full saved criterion" })).toBeVisible();
+    }
   });
 }
 
@@ -156,3 +170,53 @@ test("a host without tool interactions still renders the task", async ({ page })
   await expect(card.getByRole("combobox")).toBeDisabled();
   await expect(card.getByText("This host displays the view without tool interactions.")).toBeVisible();
 });
+
+
+test("host-delivered tool errors retain their actual refusal reason without view metadata", async ({ page }) => {
+  const session = await sessionFor(page);
+  const card = await host(page, session, "get_task", { taskKey: HELD_TASK_KEY });
+  await expect(card.getByRole("heading")).toBeVisible();
+  const refused = await session.callTool("change_task_status", { taskKey: HELD_TASK_KEY, status: TARGET_COLUMN.id });
+  expect(refused.raw.result?.isError).toBe(true);
+  expect(refused.raw.result?._meta).toBeUndefined();
+  await page.evaluate((result) => (window as unknown as { send: Function }).send("ui/notifications/tool-result", result), refused.raw.result);
+  await expect(card.getByRole("alert")).toContainText("worker");
+  await expect(card.getByRole("combobox")).toHaveValue(SOURCE_COLUMN.id);
+});
+
+for (const navigation of ["task", "sprint"]) {
+  for (const event of ["result", "cancelled"]) {
+    test(`pending ${navigation} navigation cannot alter history after a newer ${event}`, async ({ page }) => {
+      const session = await sessionFor(page);
+      let tool = "list_tasks";
+      let rowName: string | RegExp = new RegExp(SIBLING_TASK_KEY);
+      if (navigation === "sprint") {
+        await session.callTool("create_sprint", { project: PROJECT_KEY, name: "Deferred sprint", startDate: "2026-10-01", endDate: "2026-10-15" });
+        tool = "list_sprints"; rowName = "Deferred sprint";
+      }
+      const view = await host(page, session, tool, { project: PROJECT_KEY });
+      await expect(view.getByRole("button", { name: rowName })).toBeEnabled();
+      const deferredTool = navigation === "task" ? "get_task" : "get_sprint";
+      await page.evaluate((name) => { (window as unknown as { deferTool: string }).deferTool = name; }, deferredTool);
+      await view.getByRole("button", { name: rowName }).click();
+      await expect.poll(() => page.evaluate(() => (window as unknown as { pendingTool: boolean }).pendingTool)).toBe(true);
+      if (event === "result") {
+        const newer = await session.callTool("get_project_stats", { project: PROJECT_KEY });
+        await page.evaluate((result) => (window as unknown as { send: Function }).send("ui/notifications/tool-result", result), newer.raw.result);
+        await expect(view.getByRole("heading", { name: "Status distribution" })).toBeVisible();
+      } else {
+        await page.evaluate(() => (window as unknown as { send: Function }).send("ui/notifications/tool-cancelled", {}));
+        await expect(view.getByRole("alert")).toContainText("cancelled");
+      }
+      await page.evaluate(() => (window as unknown as { releaseTool: Function }).releaseTool());
+      await expect.poll(() => page.evaluate(() => (window as unknown as { completedCalls: string[] }).completedCalls)).toContain(navigation === "task" ? "get_project" : "get_sprint");
+      // The final response was delivered. Let its continuation settle, then force a render to expose any stale history.
+      await page.waitForTimeout(1000);
+      await page.evaluate(() => (window as unknown as { send: Function }).send("ui/notifications/tool-cancelled", {}));
+      await expect(view.getByRole("alert")).toContainText("cancelled");
+      await expect(view.getByRole("button", { name: "Back" })).toHaveCount(0);
+      if (event === "result") await expect(view.getByRole("heading", { name: "Status distribution" })).toBeVisible();
+      else await expect(view.getByRole("button", { name: rowName })).toBeVisible();
+    });
+  }
+}
