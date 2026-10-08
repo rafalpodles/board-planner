@@ -18,17 +18,23 @@ export function PlanBadge({ compact }: { compact: boolean }) {
   if (!organisation) return null;
 
   const notice = planNotice(organisation);
+  const trial = organisation.trial === true && notice.kind !== "free";
   const tone = notice.kind === "grace" ? "text-danger" : notice.kind === "ending" ? "text-warning" : "text-text-muted";
   const title =
     notice.kind === "free"
       ? "Free plan"
       : notice.kind === "pro"
-        ? "Pro plan"
+        ? trial ? "Pro trial" : "Pro plan"
         : notice.kind === "ending"
-          ? `Pro plan, ends ${formatPlanDate(notice.endsAt)}`
+          ? `${trial ? "Pro trial" : "Pro plan"}, ends ${formatPlanDate(notice.endsAt)}`
           : `Pro plan ended ${formatPlanDate(notice.endedAt)}, in force until ${formatPlanDate(notice.graceEndsAt)}`;
-  const name = notice.kind === "free" ? "Free" : "Pro";
-  const action = notice.kind === "free" ? "Upgrade" : notice.kind === "ending" || notice.kind === "grace" ? "Renew" : null;
+  const name = notice.kind === "free" ? "Free" : trial ? "Trial" : "Pro";
+  const action =
+    notice.kind === "free" || (trial && (notice.kind === "ending" || notice.kind === "pro"))
+      ? "Upgrade"
+      : notice.kind === "ending" || notice.kind === "grace"
+        ? "Renew"
+        : null;
 
   if (compact) {
     return (
@@ -50,7 +56,7 @@ export function PlanBadge({ compact }: { compact: boolean }) {
         <span className="shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-semibold text-primary">{name}</span>
         <span className={`min-w-0 flex-1 text-xs ${tone}`} data-testid="plan-badge-detail">
           {notice.kind === "free" && "Free plan"}
-          {notice.kind === "pro" && "Plan active"}
+          {notice.kind === "pro" && (trial && organisation.planEndsAt ? `Ends ${formatPlanDate(organisation.planEndsAt)}` : "Plan active")}
           {notice.kind === "ending" && `${daysLabel(notice.daysLeft)} · ${formatPlanDate(notice.endsAt)}`}
           {notice.kind === "grace" && `Ended ${formatPlanDate(notice.endedAt)} · until ${formatPlanDate(notice.graceEndsAt)}`}
         </span>

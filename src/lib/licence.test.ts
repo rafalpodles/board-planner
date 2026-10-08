@@ -24,7 +24,7 @@ const BOTH = [OLD.public, NEW.public];
 const EXPIRES = Date.parse("2027-01-01T00:00:00.000Z");
 const DAY = 24 * 60 * 60 * 1000;
 
-function licence(signing = OLD.signing, overrides: Partial<{ customer: string; expiresAt: string; organisation: string }> = {}) {
+function licence(signing = OLD.signing, overrides: Partial<{ customer: string; expiresAt: string; organisation: string; trial: true }> = {}) {
   return signLicence(
     {
       customer: "Acme Ltd",
@@ -140,6 +140,46 @@ describe("verifyLicenceKey", () => {
     );
   });
 
+  // BP-950: the grace is for a failed payment, and a trial is not a payment
+  it("ends a trial key at its expiry instant, with no grace, while a paid key keeps its 14 days", () => {
+    const trial = licence(OLD.signing, { trial: true });
+    const paid = licence();
+
+    expect(verifyLicenceKey(trial, { keys: BOTH, now: EXPIRES }).verdict).toBe("valid");
+    expect(verifyLicenceKey(trial, { keys: BOTH, now: EXPIRES + 1 }).verdict).toBe("expired");
+    expect(verifyLicenceKey(trial, { keys: BOTH, now: EXPIRES + DAY }).verdict).toBe("expired");
+    expect(verifyLicenceKey(paid, { keys: BOTH, now: EXPIRES + 1 }).verdict).toBe("grace");
+    expect(verifyLicenceKey(paid, { keys: BOTH, now: EXPIRES + DAY }).verdict).toBe("grace");
+  });
+
+  it("signs the trial marker into the key, and only a trial carries it, so every key issued already still verifies", () => {
+    const decoded = (key: string) => JSON.parse(Buffer.from(key.split(".")[0], "base64url").toString("utf8"));
+
+    expect(decoded(licence(OLD.signing, { trial: true })).trial).toBe(true);
+    expect(decoded(licence())).not.toHaveProperty("trial");
+    expect(verifyLicenceKey(licence(OLD.signing, { trial: true }), { keys: BOTH, now: EXPIRES - DAY }).verdict).toBe("valid");
+  });
+
+  it("cannot be turned into a trial or out of one by editing the payload", () => {
+    const [body, signature] = licence(OLD.signing, { trial: true }).split(".");
+    const edited = Buffer.from(Buffer.from(body, "base64url").toString("utf8").replace(',"trial":true', ""), "utf8").toString("base64url");
+
+    expect(verifyLicenceKey(`${edited}.${signature}`, { keys: BOTH, now: EXPIRES - DAY }).verdict).toBe("invalid_signature");
+  });
+
+  it("refuses a trial marker that is not true", () => {
+    const forge = (trial: unknown) => {
+      const body = Buffer.from(
+        JSON.stringify({ v: 1, customer: "Acme Ltd", plan: "pro", features: [], issuedAt: "2026-01-01T00:00:00.000Z", expiresAt: new Date(EXPIRES).toISOString(), keyId: "old", trial })
+      ).toString("base64url");
+      const signature = sign(null, Buffer.from(body, "base64url"), createPrivateKey({ key: { kty: "OKP", crv: "Ed25519", d: OLD.signing.d, x: OLD.signing.x }, format: "jwk" }));
+      return `${body}.${signature.toString("base64url")}`;
+    };
+
+    expect(verifyLicenceKey(forge(false), { keys: BOTH, now: EXPIRES - DAY }).verdict).toBe("malformed");
+    expect(verifyLicenceKey(forge("yes"), { keys: BOTH, now: EXPIRES - DAY }).verdict).toBe("malformed");
+  });
+
   it("checks the signature before the clock, so an expired forgery is still a forgery", () => {
     const forged = flipLastSignatureChar(licence());
 
@@ -234,6 +274,14 @@ describe("entitlementsFromLicence", () => {
     const grace = verifyLicenceKey(licence(), { keys: BOTH, now: EXPIRES + DAY });
 
     expect(entitlementsFromLicence(grace)).toMatchObject({ plan: "pro", expiresAt: new Date(EXPIRES) });
+  });
+
+  it("marks a trial in the entitlements, and reports free the moment it ends", () => {
+    const trial = licence(OLD.signing, { trial: true });
+
+    expect(entitlementsFromLicence(verifyLicenceKey(trial, { keys: BOTH, now: EXPIRES - DAY }))).toMatchObject({ plan: "pro", trial: true });
+    expect(entitlementsFromLicence(verifyLicenceKey(trial, { keys: BOTH, now: EXPIRES + 1 }))).toEqual({ plan: "free", features: [], source: "env" });
+    expect(entitlementsFromLicence(valid)).not.toHaveProperty("trial");
   });
 
   it("reports free once the grace period is over", () => {

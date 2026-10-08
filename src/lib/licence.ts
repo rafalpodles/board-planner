@@ -15,6 +15,8 @@ export interface LicencePayload {
   expiresAt: string;
   keyId: string;
   organisation?: string;
+  // A trial ends on its day: the 14-day grace is for a failed payment, and a trial is not a payment
+  trial?: true;
 }
 
 export type LicenceVerdict =
@@ -51,6 +53,7 @@ function canonicalPayload(payload: LicencePayload): string {
     expiresAt: payload.expiresAt,
     keyId: payload.keyId,
     ...(payload.organisation === undefined ? {} : { organisation: payload.organisation }),
+    ...(payload.trial === undefined ? {} : { trial: payload.trial }),
   });
 }
 
@@ -99,6 +102,7 @@ function asPayload(value: unknown): LicencePayload | null {
   if (!isIsoDate(p.issuedAt) || !isIsoDate(p.expiresAt)) return null;
   if (typeof p.keyId !== "string" || !p.keyId) return null;
   if (p.organisation !== undefined && (typeof p.organisation !== "string" || !/^[0-9a-f]{24}$/.test(p.organisation))) return null;
+  if (p.trial !== undefined && p.trial !== true) return null;
   return {
     v: p.v,
     customer: p.customer,
@@ -108,6 +112,7 @@ function asPayload(value: unknown): LicencePayload | null {
     expiresAt: p.expiresAt,
     keyId: p.keyId,
     ...(p.organisation === undefined ? {} : { organisation: p.organisation }),
+    ...(p.trial === true ? { trial: true as const } : {}),
   };
 }
 
@@ -160,7 +165,7 @@ export function verifyLicenceKey(
 
   const expiresAt = Date.parse(payload.expiresAt);
   if (now <= expiresAt) return { verdict: "valid", payload };
-  if (now <= expiresAt + ENTITLEMENT_GRACE_MS) return { verdict: "grace", payload };
+  if (!payload.trial && now <= expiresAt + ENTITLEMENT_GRACE_MS) return { verdict: "grace", payload };
   return { verdict: "expired", payload };
 }
 
@@ -231,6 +236,7 @@ export function entitlementsFromLicence(
     customer: check.payload.customer,
     issuedAt: new Date(check.payload.issuedAt),
     expiresAt: new Date(check.payload.expiresAt),
+    ...(check.payload.trial ? { trial: true } : {}),
     source,
   };
 }
@@ -245,7 +251,9 @@ export function describeLicenceAtStartup(check: LicenceCheck | null): string {
         Date.parse(check.payload.expiresAt) + ENTITLEMENT_GRACE_MS
       ).toISOString()} — renew it before then`;
     case "expired":
-      return `LICENCE_KEY expired ${check.payload.expiresAt}, past its grace period — Free plan`;
+      return check.payload.trial
+        ? `LICENCE_KEY is a trial that ended ${check.payload.expiresAt} — Free plan`
+        : `LICENCE_KEY expired ${check.payload.expiresAt}, past its grace period — Free plan`;
     case "unknown_key":
       return "LICENCE_KEY was signed by a key this build does not know — Free plan";
     case "invalid_signature":

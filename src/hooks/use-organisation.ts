@@ -11,6 +11,7 @@ export interface OrganisationSummary {
   address: string | null;
   plan: "free" | "pro";
   planEndsAt: string | null;
+  trial?: boolean;
   members?: number;
   projects?: number;
 }

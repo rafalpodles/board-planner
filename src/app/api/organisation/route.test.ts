@@ -57,7 +57,7 @@ describe("GET /api/organisation (BP-920)", () => {
     const res = await call(GET, "GET");
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ name: "Acme", named: true, cloud: false, address: "planner.example.org", plan: "pro", planEndsAt: null });
+    expect(await res.json()).toEqual({ name: "Acme", named: true, cloud: false, address: "planner.example.org", plan: "pro", planEndsAt: null, trial: false });
     expect(countUsers).not.toHaveBeenCalled();
     expect(countProjects).not.toHaveBeenCalled();
   });
@@ -70,6 +70,16 @@ describe("GET /api/organisation (BP-920)", () => {
 
     getOrganisation.mockResolvedValue({ _id: DEFAULT_ORGANISATION_ID, name: "Acme", entitlements: { plan: "free", features: [], expiresAt } });
     expect((await (await call(GET, "GET")).json()).planEndsAt).toBeNull();
+  });
+
+  it("says a plan is a trial, so the badge shows no grace and the screen says what it is", async () => {
+    getAuthUser.mockResolvedValue(MEMBER);
+    const expiresAt = new Date("2026-11-05T23:59:59.000Z");
+    getOrganisation.mockResolvedValue({ _id: DEFAULT_ORGANISATION_ID, name: "Acme", entitlements: { plan: "pro", features: [], expiresAt, trial: true } });
+    expect((await (await call(GET, "GET")).json()).trial).toBe(true);
+
+    getOrganisation.mockResolvedValue({ _id: DEFAULT_ORGANISATION_ID, name: "Acme", entitlements: { plan: "free", features: [], expiresAt, trial: true } });
+    expect((await (await call(GET, "GET")).json()).trial).toBe(false);
   });
 
   it("gives an admin the people and boards, counted in their own organisation only", async () => {

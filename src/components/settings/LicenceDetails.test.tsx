@@ -96,6 +96,31 @@ describe("LicenceDetails", () => {
     expect(row("Days left")).toBe("0");
   });
 
+  it("says a trial ended and that nothing was removed, with no grace period in it", () => {
+    render(<LicenceDetails licence={valid({ verdict: "expired", trial: true, daysLeft: -1, graceEndsAt: "2027-01-01T00:00:00.000Z" })} />);
+
+    expect(screen.getByTestId("licence-warning").textContent).toBe(
+      "This trial ended on January 1, 2027, so this instance is on the Free plan. No data was removed, and a licence key restores the plan."
+    );
+    expect(screen.getByTestId("licence-warning").textContent).not.toMatch(/grace/);
+    expect(row("Plan")).toBe("Pro (expired)");
+  });
+
+  it("tells a live trial it ends, and does not ask it to renew", () => {
+    render(<LicenceDetails licence={valid({ trial: true, daysLeft: 20 })} />);
+
+    expect(screen.getByTestId("licence-warning").textContent).toBe(
+      "This trial ends in 20 days, on January 1, 2027. After that this instance is on the Free plan unless a licence key is set."
+    );
+    expect(screen.getByTestId("licence-warning").textContent).not.toMatch(/Renew/);
+  });
+
+  it("marks a live trial in the plan row", () => {
+    render(<LicenceDetails licence={valid({ trial: true })} />);
+
+    expect(row("Plan")).toBe("Pro (trial)");
+  });
+
   it("says the instance is on Free once the grace period is over", () => {
     render(<LicenceDetails licence={valid({ verdict: "expired", daysLeft: -20 })} />);
 

@@ -9,6 +9,7 @@ export interface IOrganisationEntitlements {
   customer?: string;
   issuedAt?: Date;
   expiresAt?: Date;
+  trial?: boolean;
   source: EntitlementSource;
 }
 
@@ -33,6 +34,7 @@ const entitlementsSchema = new Schema<IOrganisationEntitlements>(
     customer: { type: String },
     issuedAt: { type: Date },
     expiresAt: { type: Date },
+    trial: { type: Boolean },
     source: { type: String, enum: ["none", "env", "service"], default: "none" },
   },
   { _id: false }

@@ -12,6 +12,7 @@ export type LicenceSummary =
       configured: true;
       verdict: "valid" | "grace" | "expired";
       customer: string;
+      trial?: boolean;
       plan: string;
       features: string[];
       issuedAt: string;
@@ -67,11 +68,12 @@ function expiresWhen(daysLeft: number): string {
   return `in ${daysLeft} days`;
 }
 
-function Notice({ verdict, daysLeft, expiresAt, graceEndsAt }: {
+function Notice({ verdict, daysLeft, expiresAt, graceEndsAt, trial }: {
   verdict: LicenceVerdict;
   daysLeft: number;
   expiresAt: string;
   graceEndsAt: string;
+  trial?: boolean;
 }) {
   if (verdict === "grace") {
     return (
@@ -81,12 +83,27 @@ function Notice({ verdict, daysLeft, expiresAt, graceEndsAt }: {
       </p>
     );
   }
+  if (verdict === "expired" && trial) {
+    return (
+      <p role="alert" className="mb-4 rounded-lg border border-danger p-4 text-sm text-danger" data-testid="licence-warning">
+        This trial ended on {formatDate(expiresAt)}, so this instance is on the Free plan. No data was removed,
+        and a licence key restores the plan.
+      </p>
+    );
+  }
   if (verdict === "expired") {
     return (
       <p role="alert" className="mb-4 rounded-lg border border-danger p-4 text-sm text-danger" data-testid="licence-warning">
         This licence expired on {formatDate(expiresAt)} and its grace period ended on{" "}
         {formatDate(graceEndsAt)}, so this instance is on the Free plan. No data was removed, and a
         renewed key restores the licence.
+      </p>
+    );
+  }
+  if (trial) {
+    return (
+      <p role="status" className="mb-4 rounded-lg border border-border p-4 text-sm" data-testid="licence-warning">
+        This trial ends {expiresWhen(daysLeft)}, on {formatDate(expiresAt)}. After that this instance is on the Free plan unless a licence key is set.
       </p>
     );
   }
@@ -106,7 +123,7 @@ export function LicenceDetails({ licence }: { licence: LicenceSummary }) {
 
   const rows: [string, string][] = [
     ["Customer", licence.customer],
-    ["Plan", licence.verdict === "expired" ? `${planName(licence.plan)} (expired)` : planName(licence.plan)],
+    ["Plan", licence.verdict === "expired" ? `${planName(licence.plan)} (expired)` : licence.trial ? `${planName(licence.plan)} (trial)` : planName(licence.plan)],
     ["Features", licence.plan === "pro" ? "All" : licence.features.join(", ") || "None"],
     ["Issued", formatDate(licence.issuedAt)],
     ["Expires", formatDate(licence.expiresAt)],
@@ -120,6 +137,7 @@ export function LicenceDetails({ licence }: { licence: LicenceSummary }) {
         daysLeft={licence.daysLeft}
         expiresAt={licence.expiresAt}
         graceEndsAt={licence.graceEndsAt}
+        trial={licence.trial}
       />
       <dl className="divide-y divide-border rounded-lg border border-border text-sm" data-testid="licence-details">
         {rows.map(([label, value]) => (

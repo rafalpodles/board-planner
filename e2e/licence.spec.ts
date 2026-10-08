@@ -121,6 +121,29 @@ test("an expired key keeps Pro with a warning through its grace, and is Free aft
   expect(await planSeenByAMember(request)).toBe("free");
 });
 
+// BP-950: the 14-day grace is for a failed payment, and a trial is not a payment
+test("a trial key is Free the day after it ends, where a paid key a day past its end still has Pro", async ({ page, request }) => {
+  await useLicenceKey(request, e2eLicence({ expiresInDays: -1 }));
+  expect(await planSeenByAMember(request)).toBe("pro");
+
+  await useLicenceKey(request, e2eLicence({ expiresInDays: -1, trial: true }));
+  await openLicenceSettings(page);
+
+  await expect(page.getByTestId("licence-warning")).toContainText(/^This trial ended on .+, so this instance is on the Free plan\./);
+  await expect(page.getByTestId("licence-warning")).not.toContainText(/grace/);
+  await expect(row(page, "Plan")).toHaveText("Pro (expired)");
+  expect(await planSeenByAMember(request)).toBe("free");
+});
+
+test("a live trial is marked as one on the licence page and is Pro until its day ends", async ({ page, request }) => {
+  await useLicenceKey(request, e2eLicence({ expiresInDays: 20, trial: true }));
+  await openLicenceSettings(page);
+
+  await expect(row(page, "Plan")).toHaveText("Pro (trial)");
+  await expect(page.getByTestId("licence-warning")).toContainText(/^This trial ends in 20 days, on /);
+  expect(await planSeenByAMember(request)).toBe("pro");
+});
+
 test("a key with under 30 days left warns before it runs out", async ({ page, request }) => {
   await useLicenceKey(request, e2eLicence({ expiresInDays: 12 }));
   await openLicenceSettings(page);

@@ -64,9 +64,9 @@ describe("GET /api/admin/licence", () => {
       vi.useRealTimers();
     });
 
-    function keyExpiring(expiresAt: string) {
+    function keyExpiring(expiresAt: string, trial?: true) {
       return signLicence(
-        { customer: "Acme Ltd", plan: "pro", features: [], issuedAt: "2026-01-01T00:00:00.000Z", expiresAt },
+        { customer: "Acme Ltd", plan: "pro", features: [], issuedAt: "2026-01-01T00:00:00.000Z", expiresAt, ...(trial ? { trial } : {}) },
         signing
       );
     }
@@ -78,6 +78,7 @@ describe("GET /api/admin/licence", () => {
         configured: true,
         verdict: "valid",
         customer: "Acme Ltd",
+        trial: false,
         plan: "pro",
         features: [],
         issuedAt: "2026-01-01T00:00:00.000Z",
@@ -86,6 +87,18 @@ describe("GET /api/admin/licence", () => {
         daysLeft: 10,
         keyId: "e2e",
       });
+    });
+
+    it("says a trial has no grace: it is Free the moment it ends, and its grace end is its own end", async () => {
+      process.env.LICENCE_KEY = keyExpiring("2027-10-11T23:59:59.999Z", true);
+      const live = await (await get()).json();
+      expect(live).toMatchObject({ verdict: "valid", trial: true, expiresAt: "2027-10-11T23:59:59.999Z", graceEndsAt: "2027-10-11T23:59:59.999Z" });
+
+      process.env.LICENCE_KEY = keyExpiring("2027-09-30T23:59:59.999Z", true);
+      expect(await (await get()).json()).toMatchObject({ verdict: "expired", trial: true });
+
+      process.env.LICENCE_KEY = keyExpiring("2027-09-30T23:59:59.999Z");
+      expect(await (await get()).json()).toMatchObject({ verdict: "grace", trial: false });
     });
 
     // A key valid through tomorrow has 1 day left, not the 2 a rounded-up 35.99 hours would give
