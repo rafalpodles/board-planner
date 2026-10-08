@@ -213,7 +213,7 @@ describe("a PM page where the key is the problem", () => {
   it("offers a Free organisation its own key or Pro, instead of a composer or a server setting", async () => {
     render(<PmChat projectId="p1" preloadedProject={{ ...PROJECT, pmAvailable: false, pmNeedsPlan: true } as never} />);
 
-    expect((await screen.findByTestId("ai-needs-key")).textContent).toMatch(/The PM agent runs on your own key on the Free plan/);
+    expect((await screen.findByTestId("ai-needs-key")).textContent).toMatch(/The PM agent runs on your own OpenRouter key on the Free plan/);
     expect(screen.queryByRole("textbox")).toBeNull();
     expect(screen.queryByText(/OPENROUTER_API_KEY/)).toBeNull();
   });

@@ -95,12 +95,12 @@ test.describe("a Free organisation with no key of its own", () => {
   test("is offered its own key or Pro where AI Assist and the PM agent would be", async ({ page }) => {
     const modal = await openNewTaskForm(page, ACME);
 
-    await expect(modal.getByTestId("ai-needs-key")).toContainText("AI Assist runs on your own key on the Free plan.");
+    await expect(modal.getByTestId("ai-needs-key")).toContainText("AI Assist runs on your own OpenRouter key on the Free plan.");
     await expect(modal.getByPlaceholder("Describe what you need")).toHaveCount(0);
     await expect(modal.getByRole("link", { name: "Add a key" })).toHaveAttribute("href", "/settings/ai-keys");
 
     await page.goto(`${originOf(ACME)}/projects/${SHARED_KEY}/pm`);
-    await expect(page.getByTestId("ai-needs-key")).toContainText("The PM agent runs on your own key on the Free plan.");
+    await expect(page.getByTestId("ai-needs-key")).toContainText("The PM agent runs on your own OpenRouter key on the Free plan.");
     await expect(page.getByPlaceholder(/Message the PM/)).toHaveCount(0);
   });
 

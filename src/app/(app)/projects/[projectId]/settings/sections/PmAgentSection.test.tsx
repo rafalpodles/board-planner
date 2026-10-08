@@ -452,7 +452,7 @@ describe("when the PM agent cannot run for want of a key", () => {
   it("offers a Free organisation its own key or Pro, not an environment variable", () => {
     renderUnavailable({ pmNeedsPlan: true });
 
-    expect(screen.getByTestId("ai-needs-key").textContent).toMatch(/The PM agent runs on your own key on the Free plan/);
+    expect(screen.getByTestId("ai-needs-key").textContent).toMatch(/The PM agent runs on your own OpenRouter key on the Free plan/);
     expect(screen.queryByText(/OPENROUTER_API_KEY/)).toBeNull();
   });
 
