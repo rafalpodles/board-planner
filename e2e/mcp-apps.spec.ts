@@ -94,6 +94,19 @@ test("task card uses real writes, reflects checklist and status, and follows hos
   await expect.poll(() => page.evaluate(() => (window as unknown as { links: string[] }).links)).toEqual([expect.stringContaining(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`)]);
 });
 
+test("keyboard focus stays on a control after it writes", async ({ page }) => {
+  const session = await sessionFor(page);
+  await session.callTool("update_task", { taskKey: SIBLING_TASK_KEY, acceptanceCriteria: "- [ ] First\n- [ ] Second" });
+  const card = await host(page, session, "get_task", { taskKey: SIBLING_TASK_KEY });
+  const first = card.getByRole("checkbox", { name: "First" });
+  await first.focus();
+  await page.keyboard.press("Space");
+  await expect(first).toBeChecked();
+  await expect(first).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(card.getByRole("checkbox", { name: "Second" })).toBeFocused();
+});
+
 test("a refused write stays visible and leaves the card in its saved status", async ({ page }) => {
   const session = await sessionFor(page);
   const card = await host(page, session, "get_task", { taskKey: HELD_TASK_KEY });

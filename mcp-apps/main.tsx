@@ -163,35 +163,35 @@ function ExternalLink({ url, label: text, className, children }: { url?: string;
   if (!url) return null;
   return <a href={url} className={className} aria-label={text} title={text} onClick={(event) => {
     event.preventDefault();
-    void app.openLink({ url }).catch((error: Error) => update(current, false, error.message));
+    void app.openLink({ url }).catch((error: Error) => update(current, locked, error.message));
   }}>{children}</a>;
 }
 function Avatar({ value, size = 22 }: { value: Person; size?: number }) {
   const who = name(value);
-  const style = { width: size, height: size, fontSize: size * 0.42, "--hue": [...who].reduce((sum, ch) => (sum * 31 + ch.charCodeAt(0)) % 360, 7) } as CSSProperties;
+  const style = { width: size, height: size, fontSize: Math.max(10, size * 0.45), "--hue": [...who].reduce((sum, ch) => (sum * 31 + ch.charCodeAt(0)) % 360, 7) } as CSSProperties;
   if (!who) return <span className="avatar empty" style={style} role="img" aria-label="Unassigned"><Icon d={person} size={size * 0.62} /></span>;
   const initials = who.split(/\s+/).map((part) => part[0]).slice(0, 2).join("").toUpperCase();
-  return <span className="avatar" style={style} aria-hidden="true">{initials}</span>;
+  return <span className="avatar" style={style} role="img" aria-label={who} title={who}>{initials}</span>;
 }
 function Assignee({ value }: { value: Person }) {
   return <span className="assignee"><Avatar value={value} />{name(value) || "Unassigned"}</span>;
 }
 function PriorityChip({ value = "medium" }: { value?: string }) {
-  return <span className="chip" title="Priority"><span className="swatch" style={{ background: priorityColor[value] ?? priorityColor.medium }} aria-hidden="true" />{value[0].toUpperCase() + value.slice(1)}</span>;
+  return <span className="chip"><span className="swatch" style={{ background: priorityColor[value] ?? priorityColor.medium }} aria-hidden="true" /><span className="sr-only">Priority: </span>{value[0].toUpperCase() + value.slice(1)}</span>;
 }
-function StatusSelect({ view, status = "", disabled, onChange }: { view: View; status?: string; disabled: boolean; onChange: (status: string) => void }) {
+function StatusSelect({ view, status = "", busy, interactive, onChange }: { view: View; status?: string; busy: boolean; interactive: boolean; onChange: (status: string) => void }) {
   const known = !!column(view, status);
   return <span className="select" style={{ "--col": column(view, status)?.color ?? "#6b7280" } as CSSProperties}>
-    <select className="status" aria-label="Task status" value={status} disabled={disabled || !view.columns?.length} onChange={(event) => onChange(event.target.value)}>
+    <select className="status" aria-label="Task status" value={status} disabled={!interactive || !view.columns?.length} aria-disabled={busy} onChange={(event) => onChange(event.target.value)}>
       {!known && <option value={status}>{label(view, status)}</option>}
       {view.columns?.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
     </select>
   </span>;
 }
-function Progress({ total = 0, done = 0, caption = true }: { total?: number; done?: number; caption?: boolean }) {
+function Progress({ total = 0, done = 0, caption = true, name = "Tasks completed" }: { total?: number; done?: number; caption?: boolean; name?: string }) {
   return <div className="progress">
     {caption && <div className="progress-label"><strong>{done} of {total} done</strong><span>{total ? Math.round(done / total * 100) : 0}%</span></div>}
-    <progress max={Math.max(total, 1)} value={done} aria-label="Tasks completed" />
+    <progress max={Math.max(total, 1)} value={done} aria-label={name} />
   </div>;
 }
 
@@ -209,16 +209,16 @@ function TaskCard({ view, busy, interactive }: { view: View; busy: boolean; inte
         <div className="meta">
           <span className="mono">{key}</span><span className="sep" aria-hidden="true">•</span>
           <Assignee value={row.assignee} /><span className="sep" aria-hidden="true">•</span>
-          <StatusSelect view={view} status={row.status} disabled={busy || !interactive} onChange={changeStatus} />
+          <StatusSelect view={view} status={row.status} busy={busy} interactive={interactive} onChange={changeStatus} />
         </div>
       </div>
       <ExternalLink url={taskUrl(view, key)} label="Open in Board Planner" className="open"><Icon d={external} size={18} /></ExternalLink>
     </header>
     <div className="chips">
       <PriorityChip value={row.priority} />
-      <span className="chip" title="Sprint">{sprintName(row.sprint)}</span>
-      <span className="chip" title="Category">{category}</span>
-      {due && <span className="chip" title="Due date">Due {due}</span>}
+      <span className="chip"><span className="sr-only">Sprint: </span>{sprintName(row.sprint)}</span>
+      <span className="chip"><span className="sr-only">Category: </span>{category}</span>
+      {due && <span className="chip">Due {due}</span>}
     </div>
     {row.description && <section className="description" aria-label="Description"><Markdown remarkPlugins={[remarkGfm]} components={{
       img: ({ alt }) => <span>{alt}</span>,
@@ -226,9 +226,9 @@ function TaskCard({ view, busy, interactive }: { view: View; busy: boolean; inte
     }}>{row.description}</Markdown></section>}
     {!!row.checklist?.length && <section className="checklist" aria-label="Acceptance criteria">
       <h2>Acceptance criteria <span>{checked}/{row.checklist.length}</span></h2>
-      <Progress total={row.checklist.length} done={checked} caption={false} />
+      <Progress total={row.checklist.length} done={checked} caption={false} name="Acceptance criteria completed" />
       {row.checklist.map((item) => <label key={item._id} className="criterion">
-        <input type="checkbox" checked={item.done} disabled={busy || !interactive} onChange={(event) => toggle(item._id, event.target.checked)} />
+        <input type="checkbox" checked={item.done} disabled={!interactive} aria-disabled={busy} onChange={(event) => toggle(item._id, event.target.checked)} />
         <span className={item.done ? "completed" : ""}>{item.text}</span>
       </label>)}
     </section>}
@@ -247,17 +247,17 @@ function TaskList({ view, busy, interactive }: { view: View; busy: boolean; inte
       <h2><span className="swatch" style={{ background: column(view, status)?.color ?? "#6b7280" }} aria-hidden="true" />{label(view, status)}<span className="count">{tasks.length}</span></h2>
       <div className="rows">{tasks.map((row, index) => {
         const key = row.key ?? `${String(view.args.project).toUpperCase()}-${row.taskNumber}`;
-        return <button className="task-row" key={`${key}-${index}`} disabled={busy || !interactive} onClick={() => openTask(key)}>
+        return <button className="task-row" key={`${key}-${index}`} disabled={!interactive} aria-disabled={busy} onClick={() => openTask(key)}>
           <span className="mono">{key}</span>
           <span className="row-title">{row.title}</span>
           {view.tool !== "my_tasks" && <Avatar value={row.assignee} size={20} />}
-          <span className="swatch" style={{ background: priorityColor[row.priority ?? "medium"] ?? priorityColor.medium }} title={`${row.priority ?? "medium"} priority`} aria-hidden="true" />
+          <span className="swatch" style={{ background: priorityColor[row.priority ?? "medium"] ?? priorityColor.medium }} aria-hidden="true" /><span className="sr-only">{row.priority ?? "medium"} priority</span>
         </button>;
       })}</div>
     </section>)}
     <div className="pagination">
-      {offset > 0 && <button disabled={busy || !interactive} onClick={() => followPage(view, Math.max(0, offset - Number(view.args.limit ?? 50)))}>Previous page</button>}
-      {data.nextOffset != null && <button disabled={busy || !interactive} onClick={() => followPage(view, data.nextOffset!)}>Next page</button>}
+      {offset > 0 && <button disabled={!interactive} aria-disabled={busy} onClick={() => followPage(view, Math.max(0, offset - Number(view.args.limit ?? 50)))}>Previous page</button>}
+      {data.nextOffset != null && <button disabled={!interactive} aria-disabled={busy} onClick={() => followPage(view, data.nextOffset!)}>Next page</button>}
     </div>
     {data.truncated && <p className="caption">Search is limited to 50 matches. Refine your query to see other tasks.</p>}
   </section>;
@@ -269,7 +269,7 @@ function SprintView({ view, busy, interactive }: { view: View; busy: boolean; in
     {!sprints.length && <p className="empty-state">No sprints yet.</p>}
     {sprints.map((sprint) => <article className="card sprint" key={sprint.id ?? sprint._id}>
       <div className="sprint-header">
-        <h2>{view.tool === "list_sprints" ? <button className="link" disabled={busy || !interactive} onClick={() => openSprint(view, sprint)}>{sprint.name} ›</button> : sprint.name}</h2>
+        <h2>{view.tool === "list_sprints" ? <button className="link" disabled={!interactive} aria-disabled={busy} onClick={() => openSprint(view, sprint)}>{sprint.name} ›</button> : sprint.name}</h2>
         <span className="chip">{sprint.status}</span>
       </div>
       <p className="caption">{shortDate(sprint.startDate)} – {shortDate(sprint.endDate)}</p>
@@ -294,7 +294,7 @@ function Stats({ view }: { view: View }) {
     <h2>Status distribution</h2>
     {Object.entries(stats.statusBreakdown ?? {}).sort(([a], [b]) => order(a) - order(b)).map(([status, count]) => <div className="distribution" key={status}>
       <span>{label(view, status)}</span>
-      <div className="bar" role="meter" aria-label={`${status}: ${count} tasks`} aria-valuemin={0} aria-valuemax={Math.max(stats.total, 1)} aria-valuenow={count}>
+      <div className="bar" role="meter" aria-label={`${label(view, status)}: ${count} tasks`} aria-valuemin={0} aria-valuemax={Math.max(stats.total, 1)} aria-valuenow={count}>
         <i style={{ width: `${Math.max(2, count / Math.max(stats.total, 1) * 100)}%`, background: column(view, status)?.color ?? "#6b7280" }} />
       </div>
       <strong>{count}</strong>
@@ -314,7 +314,7 @@ function Widget() {
   const interactive = !!app.getHostCapabilities()?.serverTools;
   return <main aria-busy={busy} className={busy && view ? "busy" : ""}>
     <span className="sr-only" role="status">{busy ? "Loading…" : ""}</span>
-    {!!history.length && <button className="back" disabled={busy} onClick={() => { current = history.pop(); update(current, false, ""); }}>← Back</button>}
+    {!!history.length && <button className="back" aria-disabled={busy} onClick={() => { if (locked) return; current = history.pop(); update(current, false, ""); }}>← Back</button>}
     {error && <p className="error" role="alert">{error}</p>}
     {!view && !error && <Skeleton />}
     {view && (taskTools.has(view.tool) ? <TaskCard view={view} busy={busy} interactive={interactive} /> : view.tool === "get_project_stats" ? <Stats view={view} /> : ["get_sprint", "list_sprints"].includes(view.tool) ? <SprintView view={view} busy={busy} interactive={interactive} /> : <TaskList view={view} busy={busy} interactive={interactive} />)}
