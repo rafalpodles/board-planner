@@ -6,13 +6,19 @@ import { claimProof, endSignIn, issueHandoff, releaseProof, scopedToOrganisation
 import { clearedSignInCookie, provenEmail, rememberCookie, signInBinder, signInRoute, startAgain } from "@/lib/platform-sign-in-route";
 import { pullNewOrganisationLicence } from "@/lib/licence-pull";
 import { SLUG_UNAVAILABLE, checkSignUp, createOrganisation, slugTaken } from "@/lib/organisation-sign-up";
-import { countAttempt, sourceKey } from "@/lib/rate-limit";
+import { mailboxOf } from "@/lib/mailbox";
+import { PUBLIC_MAIL_DOMAINS } from "@/lib/public-mail-domains";
+import { countAttempt, isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
 import { readJsonBody } from "@/lib/request-body";
 import { provenanceRefusal } from "@/lib/session";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const ORGANISATIONS_PER_ADDRESS_PER_DAY = 3;
 const ORGANISATIONS_PER_SOURCE_PER_DAY = 10;
+// A company domain can mint addresses without end (a catch-all on one host), so the address limit alone is not a
+// limit. Counted on organisations created, not on attempts, so nobody can spend a company's share by failing; a
+// wildcard of subdomains is a separate bucket each and is not caught
+const ORGANISATIONS_PER_COMPANY_DOMAIN_PER_DAY = 8;
 
 const refused = (error: string, status = 400) => NextResponse.json({ error }, { status });
 
@@ -35,13 +41,20 @@ export const POST = signInRoute(async (request) => {
   let handedOff = false;
   try {
     const clientIp = getClientIp(request);
+    const mailbox = mailboxOf(email);
+    // The address and the network count every attempt; the company domain only reads here and counts below, once
+    // an organisation exists
+    const companyDomainKey =
+      mailbox.domain !== "" && !PUBLIC_MAIL_DOMAINS.has(mailbox.domain) ? `organisation-sign-up:domain:${mailbox.domain}` : null;
     const tooMany =
-      (await countAttempt(`organisation-sign-up:address:${sha256(email)}`, DAY_MS)) > ORGANISATIONS_PER_ADDRESS_PER_DAY ||
-      (clientIp !== null && (await countAttempt(sourceKey(clientIp, "organisation-sign-up"), DAY_MS)) > ORGANISATIONS_PER_SOURCE_PER_DAY);
-    if (tooMany) return refused("Too many organisations created from here today. Try again tomorrow.", 429);
+      (await countAttempt(`organisation-sign-up:address:${sha256(mailbox.canonical)}`, DAY_MS)) > ORGANISATIONS_PER_ADDRESS_PER_DAY ||
+      (clientIp !== null && (await countAttempt(sourceKey(clientIp, "organisation-sign-up"), DAY_MS)) > ORGANISATIONS_PER_SOURCE_PER_DAY) ||
+      (companyDomainKey !== null && (await isRateLimited(companyDomainKey, ORGANISATIONS_PER_COMPANY_DOMAIN_PER_DAY)));
+    if (tooMany) return refused("Too many organisations created from this address, network or company today. Try again tomorrow.", 429);
 
     const created = await createOrganisation(checked.value);
     if (!created.ok) return refused(created.error);
+    if (companyDomainKey !== null) await recordFailedAttempt(companyDomainKey, DAY_MS).catch(() => {});
 
     await pullNewOrganisationLicence(String(created.organisation));
 
