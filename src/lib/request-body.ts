@@ -14,9 +14,9 @@ export const MAX_JSON_BODY_BYTES = 64 * 1024;
 /**
  * How much of a refused upload is read and thrown away before the refusal is sent. Node 26.11 tears
  * the socket down when a response goes out while the client is still sending, so the browser reports a
- * network failure and never sees the 413 a person dragging a file in needs to read. Only a form body,
- * which a person's browser sends; a refused JSON body is somebody else's and is still not read. Past
- * this the connection is dropped as before: discarding is cheap, but not unbounded.
+ * network failure and never sees the 413 a person dragging a file in needs to read. Opt-in through
+ * `drainRefused`, for a route a signed-in person's browser posts to: an anonymous endpoint, and a refused
+ * JSON body, must not be made to read what they refuse. Past this the connection is dropped as before.
  */
 export const MAX_DRAINED_BYTES = 16 * 1024 * 1024;
 
@@ -24,12 +24,16 @@ async function discard(request: Request): Promise<void> {
   const reader = request.body?.getReader();
   if (!reader) return;
   let size = 0;
-  while (size <= MAX_DRAINED_BYTES) {
-    const { done, value } = await reader.read();
-    if (done) return;
-    size += value.byteLength;
+  try {
+    while (size <= MAX_DRAINED_BYTES) {
+      const { done, value } = await reader.read();
+      if (done) return;
+      size += value.byteLength;
+    }
+    await reader.cancel();
+  } catch {
+    // The client hung up mid-send: there is nobody left to read the refusal
   }
-  await reader.cancel();
 }
 
 /**
@@ -120,11 +124,12 @@ export async function readJsonBody<T = Record<string, unknown>>(
  */
 export async function readFormBody(
   request: Request,
-  maxBytes: number
+  maxBytes: number,
+  { drainRefused = false }: { drainRefused?: boolean } = {}
 ): Promise<JsonBody<FormData>> {
   const declared = Number(request.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > maxBytes) {
-    if (declared <= MAX_DRAINED_BYTES) await discard(request);
+    if (drainRefused && declared <= MAX_DRAINED_BYTES) await discard(request);
     return tooLarge(maxBytes);
   }
   if (!request.body) return { ok: true, value: new FormData() };

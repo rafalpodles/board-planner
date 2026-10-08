@@ -39,7 +39,7 @@ export const POST = withAuth(async (request, { user, db }) => {
   // it runs twenty-nine lines and several round trips after the body has been materialised, so
   // the 5 MB limit governs what reaches GridFS rather than what the process allocates — and a
   // request that simply omits Content-Length walked past a header check on its own.
-  const read = await readFormBody(request, MAX_UPLOAD_REQUEST_BYTES);
+  const read = await readFormBody(request, MAX_UPLOAD_REQUEST_BYTES, { drainRefused: true });
   if (!read.ok) {
     // Translated, not passed through: this refusal is read by somebody who has just dragged a file
     // in, and a byte count with no unit tells them nothing. The reader bounds the allocation; the
