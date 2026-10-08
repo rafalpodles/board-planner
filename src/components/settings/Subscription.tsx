@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { useOrganisation } from "@/hooks/use-organisation";
 import { Button } from "@/components/ui/Button";
@@ -87,8 +87,15 @@ export function Subscription() {
 
   const subscription = billing?.available ? billing.subscription : null;
   const live = isLiveSubscription(subscription);
-  const plan = organisation?.plan;
-  const settled = live && plan === "pro";
+
+  // What the organisation was when the person came back, so "paid for" is the plan or its end changing, which
+  // a trial or a Pro in its last days (already Pro) would otherwise never show
+  const before = useRef<{ plan: string; planEndsAt: string | null } | null>(null);
+  useEffect(() => {
+    if (returned === "success" && organisation && !before.current) before.current = { plan: organisation.plan, planEndsAt: organisation.planEndsAt };
+  }, [returned, organisation]);
+  const changed = !!organisation && !!before.current && (organisation.plan !== before.current.plan || organisation.planEndsAt !== before.current.planEndsAt);
+  const settled = live && changed && organisation?.plan === "pro";
 
   // The payment is Stripe's word reaching us through a webhook and then the key reaching the product, so the
   // plan follows the redirect by a few seconds
@@ -165,7 +172,11 @@ export function Subscription() {
       ) : (
         <>
           <p className="text-sm text-text-muted">
-            {organisation.trial ? "Subscribe to keep Pro when the trial ends." : "Upgrade to Pro: more than 10 members, managed AI and the rest of the Pro features."}
+            {organisation.trial
+              ? "Subscribe to keep Pro when the trial ends."
+              : organisation.plan === "pro"
+                ? "Subscribe to keep Pro when this plan ends."
+                : "Upgrade to Pro: more than 10 members, managed AI and the rest of the Pro features."}
             {billing.launchOpen && " The launch price is open: a subscription that starts at it keeps it for as long as it runs without a gap."}
           </p>
           <fieldset className="flex flex-wrap gap-3" disabled={busy !== null || confirming}>

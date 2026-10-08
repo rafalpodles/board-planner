@@ -235,16 +235,71 @@ describe("Subscription", () => {
   it("says the subscription is active once it is, and stops following the plan when it is Pro", async () => {
     vi.useFakeTimers();
     setLocation("?checkout=success");
-    m.organisation.current = { ...FREE, plan: "pro", planEndsAt: endsIn(30) };
     m.api.get.mockResolvedValue(live());
-    render(<Subscription />);
+    const { rerender } = render(<Subscription />);
+    await act(async () => {});
+    m.organisation.current = { ...FREE, plan: "pro", planEndsAt: endsIn(30) };
+    rerender(<Subscription />);
     await act(async () => {});
 
     expect(screen.getByTestId("subscription-returned").textContent).toBe("Your subscription is active.");
+    m.reload.mockClear();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(30_000);
     });
     expect(m.reload).not.toHaveBeenCalled();
+  });
+
+  it("keeps following a trial that has subscribed until the trial is over, though it was already Pro", async () => {
+    vi.useFakeTimers();
+    setLocation("?checkout=success");
+    const trial = { ...FREE, plan: "pro", planEndsAt: endsIn(5), trial: true };
+    m.organisation.current = trial;
+    m.api.get.mockResolvedValue(live());
+    const { rerender } = render(<Subscription />);
+    await act(async () => {});
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_000);
+    });
+    expect(m.reload).toHaveBeenCalledTimes(1);
+
+    m.organisation.current = { ...FREE, plan: "pro", planEndsAt: endsIn(30), trial: false };
+    rerender(<Subscription />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(m.reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps following Pro in its last days until its end moves", async () => {
+    vi.useFakeTimers();
+    setLocation("?checkout=success");
+    const ending = endsIn(10);
+    m.organisation.current = { ...FREE, plan: "pro", planEndsAt: ending };
+    m.api.get.mockResolvedValue(live());
+    const { rerender } = render(<Subscription />);
+    await act(async () => {});
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_000);
+    });
+    expect(m.reload).toHaveBeenCalledTimes(1);
+
+    m.organisation.current = { ...FREE, plan: "pro", planEndsAt: endsIn(40) };
+    rerender(<Subscription />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(m.reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("speaks of keeping Pro, not upgrading to it, to an organisation that is already Pro", async () => {
+    m.organisation.current = { ...FREE, plan: "pro", planEndsAt: endsIn(10) };
+    render(<Subscription />);
+
+    expect(await screen.findByText(/Subscribe to keep Pro when this plan ends/)).toBeTruthy();
+    expect(screen.queryByText(/Upgrade to Pro/)).toBeNull();
   });
 
   it("keeps following the plan while the subscription is recorded and the key has not yet arrived", async () => {
