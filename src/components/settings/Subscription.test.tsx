@@ -41,17 +41,22 @@ afterEach(() => {
 
 // BP-676
 describe("Subscription", () => {
-  it("shows nothing where the payment service is off, or an operator holds the organisation on Pro", async () => {
+  it("shows nothing where the payment service is off", async () => {
     m.api.get.mockResolvedValue({ available: false });
-    const { container, rerender } = render(<Subscription />);
-    await waitFor(() => expect(m.api.get).toHaveBeenCalled());
-    expect(container.textContent).toBe("");
+    const { container } = render(<Subscription />);
 
-    m.api.get.mockResolvedValue({ available: true, launchOpen: true, subscription: null });
-    m.organisation.current = { ...FREE, plan: "pro" };
-    rerender(<Subscription />);
+    await waitFor(() => expect(m.api.get).toHaveBeenCalled());
     await act(async () => {});
-    expect(screen.queryByTestId("subscription")).toBeNull();
+    expect(container.textContent).toBe("");
+  });
+
+  it("shows nothing for an organisation an operator holds on Pro, which has no subscription to start or manage", async () => {
+    m.organisation.current = { ...FREE, plan: "pro" };
+    const { container } = render(<Subscription />);
+
+    await waitFor(() => expect(m.api.get).toHaveBeenCalled());
+    await act(async () => {});
+    expect(container.textContent).toBe("");
   });
 
   it("offers a Free organisation monthly or yearly, and says the launch price is open", async () => {
@@ -130,6 +135,14 @@ describe("Subscription", () => {
     render(<Subscription />);
 
     expect((await screen.findByTestId("subscription-past-due")).textContent).toMatch(/Manage subscription.*14 days/);
+  });
+
+  it("says the same of a subscription Stripe has stopped collecting on", async () => {
+    m.api.get.mockResolvedValue(live({ status: "unpaid" }));
+    render(<Subscription />);
+
+    expect((await screen.findByTestId("subscription-past-due")).textContent).toMatch(/Manage subscription/);
+    expect(screen.queryByTestId("subscription-checkout")).toBeNull();
   });
 
   it("says a cancelled subscription ends with the paid period, and that nothing is removed", async () => {

@@ -8,7 +8,7 @@ import { useToast } from "@/components/ui/Toast";
 import { formatPlanDate } from "@/lib/plan-notice";
 import type { BillingSummary, SubscriptionSummary } from "@/app/api/admin/billing/route";
 
-const LIVE = ["active", "trialing", "past_due"];
+const LIVE = ["active", "trialing", "past_due", "unpaid"];
 const POLL_MS = 3_000;
 const POLL_TIMES = 10;
 
@@ -111,7 +111,7 @@ export function Subscription() {
       )}
       {live ? (
         <>
-          {subscription.status === "past_due" && (
+          {(subscription.status === "past_due" || subscription.status === "unpaid") && (
             <p role="alert" className="rounded-lg border border-danger p-4 text-sm text-danger" data-testid="subscription-past-due">
               The last payment failed. Update the payment method under Manage subscription: Pro stays on for 14 days after the paid period ends.
             </p>
