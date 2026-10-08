@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
+import { plannerAppRegistration } from "./apps";
 import { z } from "zod";
 import { PlannerClient } from "./planner-client";
 import { resolveFieldsByName } from "@/lib/custom-fields";
@@ -98,17 +99,18 @@ function json(value: unknown) {
 }
 
 export function registerPlannerTools(server: McpServer): void {
+  const registerTool = plannerAppRegistration(server);
   // The handlers the batch tools call: the same code the single tools run, not a second copy of it
   type Handler = (args: Record<string, unknown>, extra: ToolExtra) => Promise<{ content: { text: string }[] }>;
   const handlers: Record<string, Handler> = {};
   const register: McpServer["registerTool"] = (name, config, handler) => {
     handlers[name] = handler as unknown as Handler;
-    return server.registerTool(name, config as never, handler as never) as never;
+    return registerTool(name, config as never, handler as never) as never;
   };
 
   // --- Projects ---
 
-  server.registerTool(
+  registerTool(
     "list_projects",
     {
       description: `List all projects in ${APP_NAME}`,
@@ -119,7 +121,7 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.registerTool(
+  registerTool(
     "get_project",
     {
       description: "Get project details by project key (e.g. 'CP') or project ID",
@@ -139,7 +141,7 @@ export function registerPlannerTools(server: McpServer): void {
 
   // --- People and agents ---
 
-  server.registerTool(
+  registerTool(
     "list_members",
     {
       description:
@@ -155,7 +157,7 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.registerTool(
+  registerTool(
     "whoami",
     {
       description: "The account this connection acts as: its username, name and role. Use it for \"assign to me\".",
@@ -167,7 +169,7 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.registerTool(
+  registerTool(
     "my_tasks",
     {
       description:
@@ -188,7 +190,7 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.registerTool(
+  registerTool(
     "list_agents",
     {
       description:
@@ -206,7 +208,7 @@ export function registerPlannerTools(server: McpServer): void {
 
   // --- Looking around ---
 
-  server.registerTool(
+  registerTool(
     "search_tasks",
     {
       description:
@@ -221,7 +223,7 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.registerTool(
+  registerTool(
     "get_project_stats",
     {
       description:
@@ -236,7 +238,7 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.registerTool(
+  registerTool(
     "list_runs",
     {
       description:
@@ -258,7 +260,7 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.registerTool(
+  registerTool(
     "list_notifications",
     {
       description:
@@ -280,7 +282,7 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.registerTool(
+  registerTool(
     "mark_notifications_read",
     {
       description:
@@ -299,7 +301,7 @@ export function registerPlannerTools(server: McpServer): void {
 
   // --- Tasks ---
 
-  server.registerTool(
+  registerTool(
     "list_tasks",
     {
       description:
@@ -436,7 +438,7 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.registerTool(
+  registerTool(
     "get_task",
     {
       description:
@@ -452,7 +454,7 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.registerTool(
+  registerTool(
     "archive_task",
     {
       description:
@@ -471,7 +473,7 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.registerTool(
+  registerTool(
     "unarchive_task",
     {
       description:
@@ -487,7 +489,7 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.registerTool(
+  registerTool(
     "delete_task",
     {
       description:
@@ -754,7 +756,7 @@ export function registerPlannerTools(server: McpServer): void {
   // The route is told the state wanted and sets it in one update, so a retry — or two calls at once —
   // ends where the first one did.
   for (const [name, want] of [["watch_task", true], ["unwatch_task", false]] as const) {
-    server.registerTool(
+    registerTool(
       name,
       {
         description: want
@@ -790,7 +792,7 @@ export function registerPlannerTools(server: McpServer): void {
     .string()
     .describe("The criterion: its id (get_task and these tools list them) or its exact text");
 
-  server.registerTool(
+  registerTool(
     "add_checklist_item",
     {
       description:
@@ -812,7 +814,7 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.registerTool(
+  registerTool(
     "set_checklist_item",
     {
       description:
@@ -841,7 +843,7 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.registerTool(
+  registerTool(
     "remove_checklist_item",
     {
       description:
@@ -857,7 +859,7 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.registerTool(
+  registerTool(
     "change_task_status",
     {
       description: "Change the status of a task. Statuses are the project's column ids (defaults: planned, todo, in_progress, in_review, needs_human_review, ready_to_test, done — see get_project for the actual list with roles)",
@@ -875,7 +877,7 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.registerTool(
+  registerTool(
     "reorder_tasks",
     {
       description:
@@ -983,7 +985,7 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.registerTool(
+  registerTool(
     "unlink_tasks",
     {
       description:
@@ -1037,7 +1039,7 @@ export function registerPlannerTools(server: McpServer): void {
   const batchAnswer = (answer: Record<string, unknown>, nothingWorked: boolean) =>
     nothingWorked ? { ...json(answer), isError: true } : json(answer);
 
-  server.registerTool(
+  registerTool(
     "create_tasks",
     {
       description:
@@ -1121,7 +1123,7 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.registerTool(
+  registerTool(
     "update_tasks",
     {
       description:
@@ -1156,7 +1158,7 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.registerTool(
+  registerTool(
     "link_task_pairs",
     {
       description:
@@ -1201,7 +1203,7 @@ export function registerPlannerTools(server: McpServer): void {
 
   // --- Sprints ---
 
-  server.registerTool(
+  registerTool(
     "list_sprints",
     {
       description: "List all sprints in a project",
@@ -1214,7 +1216,7 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.registerTool(
+  registerTool(
     "create_sprint",
     {
       description: "Create a new sprint in a project",
@@ -1233,7 +1235,7 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.registerTool(
+  registerTool(
     "get_sprint",
     {
       description:
@@ -1267,7 +1269,7 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.registerTool(
+  registerTool(
     "delete_sprint",
     {
       description:
@@ -1297,7 +1299,7 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.registerTool(
+  registerTool(
     "update_sprint",
     {
       description:
@@ -1361,7 +1363,7 @@ export function registerPlannerTools(server: McpServer): void {
 
   // --- Comments ---
 
-  server.registerTool(
+  registerTool(
     "add_comment",
     {
       description: "Add a comment to a task by task key (e.g. 'CP-1')",
@@ -1377,7 +1379,7 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.registerTool(
+  registerTool(
     "list_comments",
     {
       description:
@@ -1400,7 +1402,7 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.registerTool(
+  registerTool(
     "edit_comment",
     {
       description:
@@ -1423,7 +1425,7 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.registerTool(
+  registerTool(
     "delete_comment",
     {
       description:
@@ -1445,7 +1447,7 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.registerTool(
+  registerTool(
     "get_task_activity",
     {
       description:
@@ -1466,7 +1468,7 @@ export function registerPlannerTools(server: McpServer): void {
 
   // --- Board setup: configuration that can only be added to ---
 
-  server.registerTool(
+  registerTool(
     "add_custom_field",
     {
       description:
@@ -1523,7 +1525,7 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.registerTool(
+  registerTool(
     "add_field_option",
     {
       description:
@@ -1556,7 +1558,7 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.registerTool(
+  registerTool(
     "add_category",
     {
       description:
@@ -1583,7 +1585,7 @@ export function registerPlannerTools(server: McpServer): void {
 
   const roleGuide = COLUMN_ROLES.map((role) => `${role} (${ROLE_LABELS[role].label}: ${ROLE_LABELS[role].hint})`).join(" ");
 
-  server.registerTool(
+  registerTool(
     "add_column",
     {
       description:
@@ -1620,7 +1622,7 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  server.registerTool(
+  registerTool(
     "rename_column",
     {
       description:
@@ -1651,7 +1653,7 @@ export function registerPlannerTools(server: McpServer): void {
 
   // --- Repository ---
 
-  server.registerTool(
+  registerTool(
     "sync_repository",
     {
       description:
