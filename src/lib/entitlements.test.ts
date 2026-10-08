@@ -35,6 +35,16 @@ describe("can", () => {
     expect(can(pro, "ai.byok")).toBe(true);
   });
 
+  it("ends a trial at its expiry with no grace, and still gives a paid organisation its 14 days", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-08T12:00:00Z"));
+    const ended = new Date("2026-10-08T11:59:59Z");
+
+    expect(can(organisation({ plan: "pro", trial: true, expiresAt: ended }), "ai.byok")).toBe(false);
+    expect(can(organisation({ plan: "pro", trial: true, expiresAt: new Date("2026-10-08T12:00:00Z") }), "ai.byok")).toBe(true);
+    expect(can(organisation({ plan: "pro", expiresAt: ended }), "ai.byok")).toBe(true);
+  });
+
   it("stays entitled through most of the grace window and refuses once it has fully passed", () => {
     const now = Date.now();
     const withinGrace = organisation({

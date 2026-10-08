@@ -9,10 +9,15 @@ export type PlanNotice =
   | { kind: "ending"; endsAt: string; daysLeft: number }
   | { kind: "grace"; endedAt: string; graceEndsAt: string };
 
-export function planNotice(plan: { plan: "free" | "pro"; planEndsAt: string | null }, now = Date.now()): PlanNotice {
+export function planNotice(
+  plan: { plan: "free" | "pro"; planEndsAt: string | null; trial?: boolean },
+  now = Date.now()
+): PlanNotice {
   if (plan.plan === "free") return { kind: "free" };
   const endsAt = plan.planEndsAt ? Date.parse(plan.planEndsAt) : NaN;
   if (Number.isNaN(endsAt)) return { kind: "pro" };
+  // The server has already put an ended trial on Free; a client whose clock runs ahead must agree
+  if (now > endsAt && plan.trial) return { kind: "free" };
   if (now > endsAt) return { kind: "grace", endedAt: plan.planEndsAt!, graceEndsAt: new Date(endsAt + ENTITLEMENT_GRACE_MS).toISOString() };
   const daysLeft = Math.ceil((endsAt - now) / DAY_MS);
   return daysLeft <= PLAN_WARNING_DAYS ? { kind: "ending", endsAt: plan.planEndsAt!, daysLeft } : { kind: "pro" };

@@ -4,7 +4,7 @@ import { render, screen, cleanup } from "@testing-library/react";
 import { PlanBadge } from "./PlanBadge";
 
 const { state } = vi.hoisted(() => ({
-  state: { organisation: null as null | { plan: "free" | "pro"; planEndsAt: string | null }, isAdmin: true },
+  state: { organisation: null as null | { plan: "free" | "pro"; planEndsAt: string | null; trial?: boolean }, isAdmin: true },
 }));
 vi.mock("@/hooks/use-organisation", () => ({ useOrganisation: () => ({ organisation: state.organisation }) }));
 vi.mock("@/hooks/use-auth", () => ({ useAuth: () => ({ isAdmin: state.isAdmin }) }));
@@ -40,6 +40,22 @@ describe("PlanBadge (BP-930)", () => {
     render(<PlanBadge compact={false} />);
     expect(screen.getByTestId("plan-badge-detail").textContent).toBe("Plan active");
     expect(screen.queryByTestId("plan-badge-action")).toBeNull();
+  });
+
+  // BP-950: a trial is not renewed, it is upgraded from, and it never shows a grace period
+  it("calls a trial a trial, counts its days and offers Upgrade, not Renew", () => {
+    state.organisation = { plan: "pro", planEndsAt: inDays(20), trial: true };
+    render(<PlanBadge compact={false} />);
+    expect(screen.getByTestId("plan-badge").textContent).toMatch(/^Trial/);
+    expect(screen.getByTestId("plan-badge-detail").textContent).toMatch(/^20 days left · /);
+    expect(screen.getByTestId("plan-badge-action").textContent).toBe("Upgrade");
+  });
+
+  it("shows no grace for a trial whose end has passed on the viewer's clock", () => {
+    state.organisation = { plan: "pro", planEndsAt: inDays(-0.01), trial: true };
+    render(<PlanBadge compact={false} />);
+    expect(screen.getByTestId("plan-badge-detail").textContent).toBe("Free plan");
+    expect(screen.queryByText(/until /)).toBeNull();
   });
 
   it("counts the days and offers Renew when Pro ends within 30 days", () => {
