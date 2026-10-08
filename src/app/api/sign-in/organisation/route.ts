@@ -18,7 +18,7 @@ const ORGANISATIONS_PER_SOURCE_PER_DAY = 10;
 // A company domain can mint addresses without end (a catch-all on one host), so the address limit alone is not a
 // limit. Counted on organisations created, not on attempts, so nobody can spend a company's share by failing; a
 // wildcard of subdomains is a separate bucket each and is not caught
-const ORGANISATIONS_PER_COMPANY_DOMAIN_PER_DAY = 10;
+const ORGANISATIONS_PER_COMPANY_DOMAIN_PER_DAY = 8;
 
 const refused = (error: string, status = 400) => NextResponse.json({ error }, { status });
 

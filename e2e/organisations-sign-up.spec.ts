@@ -132,10 +132,11 @@ test.describe("BP-673: creating an organisation from the platform host", () => {
     }
   });
 
-  test("a company domain gets ten organisations a day however many addresses it mints", async ({ request }) => {
+  // Eight, under the ten a network gets, so it is the company that is refused and not the address it comes from
+  test("a company domain gets eight organisations a day however many addresses it mints", async ({ request }) => {
     const company = `corp-${Date.now()}.example`;
-    for (let n = 1; n <= 11; n++) {
-      expect((await createOne(request, `person${n}@${company}`, n)).status(), `company address ${n}`).toBe(n <= 10 ? 201 : 429);
+    for (let n = 1; n <= 9; n++) {
+      expect((await createOne(request, `person${n}@${company}`, n)).status(), `company address ${n}`).toBe(n <= 8 ? 201 : 429);
     }
   });
 
