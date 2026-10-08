@@ -97,7 +97,9 @@ test("nothing happens when it is switched off, and nothing is deleted that nobod
 
   await withDb((db) => db.collection("users").updateOne({ _id: ACME.adminId as never }, { $set: { email: "" } }));
   expect(await sweep(request, { daysFromNow: 61 })).toMatchObject({ noticed: 0 });
-  expect(await sweep(request, { daysFromNow: 90 })).toMatchObject({ suspended: 0, deleted: 0 });
+  // Inside the window a notice that went out would now be due its suspension: one that did not must not be
+  expect(await sweep(request, { daysFromNow: 76 })).toMatchObject({ suspended: 0, deleted: 0 });
+  expect((await organisationRow(ACME))?.deadNoticeAt ?? null).toBeNull();
   expect((await organisationRow(ACME))?.deletedAt ?? null).toBeNull();
 });
 
@@ -153,11 +155,12 @@ test("a notice nothing followed is given again, and an operator's resume voids i
 });
 
 test("a process already sending the notice holds the others off, and a lease that has run out is taken over without the notice having gone out", async ({ request }) => {
+  const mailBefore = (await mailFor("boss@acme.example")).length;
   const sendingNow = new Date(Date.now() + 61 * 24 * 60 * 60 * 1000);
   await withDb((db) => db.collection("organisations").updateOne({ _id: ACME.organisation as never }, { $set: { deadNoticeClaimedAt: sendingNow } }));
   expect(await sweep(request, { daysFromNow: 61 })).toMatchObject({ noticed: 0 });
   expect((await organisationRow(ACME))?.deadNoticeAt ?? null).toBeNull();
-  expect(await mailFor("boss@acme.example")).toHaveLength(0);
+  expect(await mailFor("boss@acme.example")).toHaveLength(mailBefore);
 
   // The lease is only a lease: it is released once the mail is out, and a dead sender's runs out
   await withDb((db) => db.collection("organisations").updateOne({ _id: ACME.organisation as never }, { $set: { deadNoticeClaimedAt: new Date(sendingNow.getTime() - 11 * 60 * 1000) } }));
