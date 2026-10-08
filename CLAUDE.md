@@ -145,14 +145,14 @@ src/
 ## Environment variables
 ```
 MONGODB_URI=              # Required — MongoDB connection string
-OPENAI_API_KEY=           # Optional — AI task generation. Self-hosted, this is the customer's own key; with
-                          # ORGANISATION_DOMAIN it is the operator's, used only by an organisation whose plan
-                          # includes managed AI (`ai.managed`: Pro and the trial). An organisation's own key,
-                          # stored sealed in Settings → AI key, is used first on any plan and is never replaced
-                          # by this one (`src/lib/model-keys.ts`, BP-652)
+OPENROUTER_API_KEY=       # Optional — the PM agent (chat-driven project manager) and AI task generation both
+                          # run on it (OPENAI_API_KEY is no longer read). Self-hosted, this is the customer's
+                          # own key; with ORGANISATION_DOMAIN it is the operator's, used only by an organisation
+                          # whose plan includes managed AI (`ai.managed`: Pro and the trial). An organisation's
+                          # own key, stored sealed in Settings → AI key, is used first on any plan and is never
+                          # replaced by this one (`src/lib/model-keys.ts`, BP-652)
 AI_DAILY_GENERATION_CAP=  # Optional — AI task generations per project per day (default 200); each
                           # person is also held to 20 per 15 minutes, one at a time (BP-323)
-OPENROUTER_API_KEY=       # Optional — PM agent (chat-driven project manager); the same rules as OPENAI_API_KEY
 PM_MODEL=                 # Optional — PM agent model (default: moonshotai/kimi-k2.6)
 PM_MAX_TOKENS=            # Optional — PM agent max output tokens per call (default: 8192)
 PM_DAILY_TURN_CAP=        # Optional — PM agent turns per project per day (default: 100). A RATE
