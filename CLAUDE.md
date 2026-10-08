@@ -148,7 +148,7 @@ MONGODB_URI=              # Required — MongoDB connection string
 OPENAI_API_KEY=           # Optional — AI task generation. Self-hosted, this is the customer's own key; with
                           # ORGANISATION_DOMAIN it is the operator's, used only by an organisation whose plan
                           # includes managed AI (`ai.managed`: Pro and the trial). An organisation's own key,
-                          # stored sealed in Settings → AI keys, is used first on any plan and is never replaced
+                          # stored sealed in Settings → AI key, is used first on any plan and is never replaced
                           # by this one (`src/lib/model-keys.ts`, BP-652)
 AI_DAILY_GENERATION_CAP=  # Optional — AI task generations per project per day (default 200); each
                           # person is also held to 20 per 15 minutes, one at a time (BP-323)

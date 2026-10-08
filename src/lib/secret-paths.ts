@@ -11,7 +11,7 @@ export const SECRET_PATHS: Record<string, string[][]> = {
     ["pm", "mcpServers", "*", "oauth", "refreshToken"],
   ],
   User: [["notifications", "chat", "webhookUrl"]],
-  Settings: [["openrouterKey"], ["openaiKey"]],
+  Settings: [["openrouterKey"]],
 };
 
 export function secretsIn(node: unknown, steps: string[], at: string[] = []): { path: string; value: string }[] {

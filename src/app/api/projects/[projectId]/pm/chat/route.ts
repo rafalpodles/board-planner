@@ -58,7 +58,7 @@ async function chat(request: Request, params: Promise<Record<string, string>>, u
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const modelKey = await resolveModelKey(db, "openrouter");
+  const modelKey = await resolveModelKey(db);
   if (!modelKey.ok) {
     return modelKeyRefusalResponse(modelKey, {
       error: "PM agent is not configured (OPENROUTER_API_KEY missing)",

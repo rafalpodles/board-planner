@@ -57,25 +57,13 @@ afterEach(() => {
   delete process.env.AI_DAILY_GENERATION_CAP;
 });
 
-// BP-323: the PM chat beside this route had a length cap, a throttle, a daily cap and a lock; this
-// one shipped any prompt to the instance's OpenAI key as often as it was asked
 // BP-652. Whose key a generation is spent on is decided per organisation, before anything is counted
 describe("which key generate-task spends", () => {
   it("makes the call with the key it resolved for this organisation", async () => {
     await generate("a task");
 
-    expect(resolveModelKey).toHaveBeenCalledWith(expect.anything(), "openai");
+    expect(resolveModelKey).toHaveBeenCalledWith(expect.anything());
     expect(generateTask.mock.calls[0][3]).toBe("sk-the-orgs-key");
-  });
-
-  it("tells the client not to inherit the operator's OpenAI organisation and project for a key the organisation brought", async () => {
-    await generate("a task");
-    expect(generateTask.mock.calls[0][4]).toBe(true);
-
-    generateTask.mockClear();
-    resolveModelKey.mockResolvedValue({ ok: true, key: "sk-operators", source: "managed" });
-    await generate("a task", "u2");
-    expect(generateTask.mock.calls[0][4]).toBe(false);
   });
 
   it("answers 402 when the plan has no managed AI and there is no key of its own, and generates nothing", async () => {
@@ -105,10 +93,12 @@ describe("which key generate-task spends", () => {
     modelKeyAvailability.mockResolvedValue({ available: false, needsPlan: false, unreadable: true });
     expect(await (await ask()).json()).toEqual({ enabled: false, needsPlan: false, keyUnreadable: true });
 
-    expect(modelKeyAvailability).toHaveBeenCalledWith(expect.anything(), "openai");
+    expect(modelKeyAvailability).toHaveBeenCalledWith(expect.anything());
   });
 });
 
+// BP-323: the PM chat beside this route had a length cap, a throttle, a daily cap and a lock; this
+// one shipped any prompt to the instance's key as often as it was asked
 describe("POST generate-task", () => {
   it("refuses a prompt past the length cap without spending anything", async () => {
     const res = await generate("p".repeat(MAX_PROMPT_LENGTH + 1));

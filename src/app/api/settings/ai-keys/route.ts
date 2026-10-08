@@ -12,18 +12,6 @@ import { duplicateKeyField } from "@/lib/mongo-errors";
 const MAX_KEY_LENGTH = 300;
 // Long enough that the four characters shown afterwards are not half of it
 const MIN_KEY_LENGTH = 20;
-const PROVIDERS = [
-  { name: "openrouter", field: "openrouterKey", hint: "openrouterKeyHint", env: () => !!process.env.OPENROUTER_API_KEY },
-  {
-    name: "openai",
-    field: "openaiKey",
-    hint: "openaiKeyHint",
-    env: () => !!(process.env.OPENAI_API_KEY || process.env.OPENAPI_KEY),
-  },
-] as const;
-
-type Provider = (typeof PROVIDERS)[number];
-
 function readable(sealed: string, db: ScopedDb): boolean {
   try {
     decryptSecret(sealed, db.organisation);
@@ -35,28 +23,22 @@ function readable(sealed: string, db: ScopedDb): boolean {
 
 async function view(db: ScopedDb) {
   const [settings, organisation] = await Promise.all([
-    db.Settings.findOne({}, "openrouterKey openrouterKeyHint openaiKey openaiKeyHint").lean(),
+    db.Settings.findOne({}, "openrouterKey openrouterKeyHint").lean(),
     getOrganisation(db.organisation),
   ]);
   const hosted = organisationDomain() !== null;
   const managed = !hosted || can(organisation, "ai.managed");
+  const stored = settings?.openrouterKey;
   return {
     hosted,
     plan: organisation.entitlements.plan,
-    providers: Object.fromEntries(
-      PROVIDERS.map((p) => [
-        p.name,
-        {
-          set: !!settings?.[p.field],
-          hint: settings?.[p.field] ? (settings[p.hint] ?? "") : "",
-          // Stored, but sealed under a key this server no longer has: every call fails until it is entered again
-          unreadable: !!settings?.[p.field] && !readable(settings[p.field] as string, db),
-          // What the instance offers when the organisation stores nothing: its own key where
-          // self-hosted, the operator's where the plan includes managed AI
-          included: p.env() && managed,
-        },
-      ])
-    ),
+    set: !!stored,
+    hint: stored ? (settings.openrouterKeyHint ?? "") : "",
+    // Stored, but sealed under a key this server no longer has: every call fails until it is entered again
+    unreadable: !!stored && !readable(stored, db),
+    // What the instance offers when the organisation stores nothing: its own key where self-hosted,
+    // the operator's where the plan includes managed AI
+    included: !!process.env.OPENROUTER_API_KEY && managed,
   };
 }
 
@@ -88,21 +70,20 @@ export const PUT = withAdmin(async (request, { user, db }) => {
     return NextResponse.json({ error: "Expected an object" }, { status: 400 });
   }
 
-  const set: Record<string, string> = {};
-  const unset: Record<string, 1> = {};
-  const changed: string[] = [];
-  for (const provider of PROVIDERS as readonly Provider[]) {
-    const incoming = body[provider.field];
-    if (incoming === undefined) continue;
-    if (incoming === null || incoming === "") {
-      unset[provider.field] = 1;
-      unset[provider.hint] = 1;
-      changed.push(`${provider.field}: removed`);
-      continue;
-    }
+  const incoming = body.openrouterKey;
+  if (incoming === undefined) {
+    return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
+  }
+
+  let update: Record<string, Record<string, unknown>>;
+  let changed: string;
+  if (incoming === null || incoming === "") {
+    update = { $unset: { openrouterKey: 1, openrouterKeyHint: 1 } };
+    changed = "openrouterKey: removed";
+  } else {
     if (!validKey(incoming)) {
       return NextResponse.json(
-        { error: `${provider.field} must be ${MIN_KEY_LENGTH} to ${MAX_KEY_LENGTH} printable characters with no spaces` },
+        { error: `openrouterKey must be ${MIN_KEY_LENGTH} to ${MAX_KEY_LENGTH} printable characters with no spaces` },
         { status: 400 }
       );
     }
@@ -112,19 +93,10 @@ export const PUT = withAdmin(async (request, { user, db }) => {
         { status: 503 }
       );
     }
-    set[provider.field] = encryptSecret(incoming, db.organisation);
-    set[provider.hint] = incoming.slice(-4);
-    changed.push(`${provider.field}: set`);
+    update = { $set: { openrouterKey: encryptSecret(incoming, db.organisation), openrouterKeyHint: incoming.slice(-4) } };
+    changed = "openrouterKey: set";
   }
 
-  if (changed.length === 0) {
-    return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
-  }
-
-  const update = {
-    ...(Object.keys(set).length ? { $set: set } : {}),
-    ...(Object.keys(unset).length ? { $unset: unset } : {}),
-  };
   const write = () => db.Settings.findOneAndUpdate({}, update, { upsert: true });
   try {
     await write();
@@ -139,7 +111,7 @@ export const PUT = withAdmin(async (request, { user, db }) => {
     action: "instance_settings_changed",
     user: user._id,
     actorUsername: user.username,
-    detail: changed.join(", "),
+    detail: changed,
   });
 
   return NextResponse.json(await view(db));

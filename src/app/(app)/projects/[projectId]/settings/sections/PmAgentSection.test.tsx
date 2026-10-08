@@ -465,7 +465,7 @@ describe("when the PM agent cannot run for want of a key", () => {
   it("tells an instance with no key to set it, or to have an admin add one", () => {
     renderUnavailable({});
 
-    expect(screen.getByText(/environment variable on the server/).textContent).toMatch(/Settings → AI keys/);
+    expect(screen.getByText(/environment variable on the server/).textContent).toMatch(/Settings → AI key/);
   });
 });
 

@@ -95,7 +95,7 @@ export async function startBoardReview(
 ): Promise<BoardReviewStart> {
   // The scheduler starts whether or not a model is configured, and a review without one spent a
   // turn to post a warning into every thread on the board
-  const modelKey = await resolveModelKey(db, "openrouter");
+  const modelKey = await resolveModelKey(db);
   if (!modelKey.ok) {
     return {
       status: "skipped",

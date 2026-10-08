@@ -11,7 +11,7 @@ describe("pmAvailability", () => {
     modelKeyAvailability.mockResolvedValue({ available: false, needsPlan: true, unreadable: false });
 
     expect(await pmAvailability({} as never)).toEqual({ available: false, needsPlan: true, keyUnreadable: false });
-    expect(modelKeyAvailability).toHaveBeenCalledWith({}, "openrouter");
+    expect(modelKeyAvailability).toHaveBeenCalledWith({});
   });
 
   it("answers null, not a verdict, when the lookup fails", async () => {

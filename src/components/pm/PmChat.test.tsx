@@ -253,7 +253,7 @@ describe("a turn the server refuses because of the key", () => {
   });
 
   it("shows the server's words for a key that cannot be read, where it used to say the server has none", async () => {
-    await sendRefused(503, { error: "The stored AI key cannot be read. Enter it again in Settings → AI keys.", reason: "own_key_unreadable" });
+    await sendRefused(503, { error: "The stored AI key cannot be read. Enter it again in Settings → AI key.", reason: "own_key_unreadable" });
 
     expect(await screen.findByText(/Enter it again in Settings/)).toBeTruthy();
     expect(screen.queryByText(/OPENROUTER_API_KEY missing/)).toBeNull();

@@ -161,7 +161,7 @@ describe("runPmTurn's model key", () => {
 
     await turn(NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS);
 
-    expect(resolveModelKey).toHaveBeenCalledWith(db, "openrouter");
+    expect(resolveModelKey).toHaveBeenCalledWith(db);
     expect(chatCompletion.mock.calls.map((call) => call[0].apiKey)).toEqual(["sk-the-orgs-own-key", "sk-the-orgs-own-key"]);
   });
 

@@ -1,6 +1,6 @@
 import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 import mongoose from "mongoose";
-import { AI_STUB_URL, PM_STUB_URL, RUN_ORGANISATIONS_SERVER } from "../playwright.config";
+import { PM_STUB_URL, RUN_ORGANISATIONS_SERVER } from "../playwright.config";
 import { signPlatformRequest } from "../src/lib/platform-request";
 import { encryptSecret } from "../src/lib/encryption";
 import { E2E_PLATFORM_REQUEST_KEY, e2eLicence } from "./licence-key";
@@ -21,7 +21,7 @@ import {
 test.skip(!RUN_ORGANISATIONS_SERVER, "needs the ORGANISATION_DOMAIN server — set E2E_ORGANISATIONS_SERVER=1");
 
 /**
- * BP-652. In the cloud the model keys in the server's environment are the operator's, so they are
+ * BP-652. In the cloud the model key in the server's environment are the operator's, so they are
  * for the plans that include managed AI. A Free organisation gets an upsell and a 402 instead, and
  * an organisation's own key is used whatever its plan and never leaks to another organisation.
  *
@@ -30,10 +30,9 @@ test.skip(!RUN_ORGANISATIONS_SERVER, "needs the ORGANISATION_DOMAIN server — s
 
 const OPERATORS_KEY = "Bearer e2e-stub-key";
 const OWN_OPENROUTER = "sk-or-acme-e2e-0123456789";
-const OWN_OPENAI = "sk-acme-e2e-9876543210";
 
-async function lastAuthorization(stub: string): Promise<string | null> {
-  return (await (await fetch(`${stub}/last-authorization`)).json()).authorization;
+async function lastAuthorization(which: "pm" | "assist"): Promise<string | null> {
+  return (await (await fetch(`${PM_STUB_URL}/last-${which === "pm" ? "" : "assist-"}authorization`)).json()).authorization;
 }
 
 async function makePro(request: APIRequestContext, who: OrganisationFixture) {
@@ -82,7 +81,6 @@ test.beforeEach(async ({ request }) => {
   await request.post(`${ORGANISATIONS_API}/api/e2e/licence`, { headers: asOrganisation(ACME), data: {} });
   await makePro(request, GLOBEX);
   await request.post(`${PM_STUB_URL}/reset`);
-  await fetch(`${AI_STUB_URL}/reset`);
 });
 
 test.afterEach(async ({ request }) => {
@@ -115,15 +113,15 @@ test.describe("a Free organisation with no key of its own", () => {
 
     expect(generation).toMatchObject({ status: 402, body: { feature: "ai.managed", plan: "free" } });
     expect(chat).toMatchObject({ status: 402, body: { feature: "ai.managed", plan: "free" } });
-    expect(await lastAuthorization(AI_STUB_URL)).toBeNull();
-    expect(await lastAuthorization(PM_STUB_URL)).toBeNull();
+    expect(await lastAuthorization("assist")).toBeNull();
+    expect(await lastAuthorization("pm")).toBeNull();
   });
 
-  test("says on the AI keys screen that nothing runs without its own key", async ({ page }) => {
+  test("says on the AI key screen that nothing runs without its own key", async ({ page }) => {
     await signInOn(page.context(), ACME);
     await page.goto(`${originOf(ACME)}/settings/ai-keys`);
 
-    await expect(page.getByText(/it does not run on the Free plan/)).toHaveCount(2);
+    await expect(page.getByText(/it does not run on the Free plan/)).toHaveCount(1);
   });
 });
 
@@ -142,8 +140,6 @@ test.describe("a stored key that can no longer be read", () => {
           signUpDomains: [],
           openrouterKey: encryptSecret("sk-or-copied-0123456789", who === ACME ? GLOBEX.organisation : ACME.organisation),
           openrouterKeyHint: "6789",
-          openaiKey: encryptSecret("sk-copied-0123456789", who === ACME ? GLOBEX.organisation : ACME.organisation),
-          openaiKeyHint: "6789",
         });
       }
     } finally {
@@ -154,8 +150,8 @@ test.describe("a stored key that can no longer be read", () => {
       await signInOn(page.context(), who);
 
       await page.goto(`${originOf(who)}/settings/ai-keys`);
-      await expect(page.getByText("Cannot be read", { exact: true })).toHaveCount(2);
-      await expect(page.getByText(/The stored key cannot be read, so every call fails/)).toHaveCount(2);
+      await expect(page.getByText("Cannot be read", { exact: true })).toHaveCount(1);
+      await expect(page.getByText(/The stored key cannot be read, so every call fails/)).toHaveCount(1);
 
       await page.goto(`${originOf(who)}/projects/${SHARED_KEY}`);
       await page.getByRole("button", { name: "New task" }).click();
@@ -170,7 +166,7 @@ test.describe("a stored key that can no longer be read", () => {
 
       const chat = await post(page, `/api/projects/${SHARED_KEY}/pm/chat`, { message: "hello" });
       expect(chat, who.slug).toMatchObject({ status: 503, body: { reason: "own_key_unreadable" } });
-      expect(await lastAuthorization(PM_STUB_URL), `${who.slug}: the operator's key must not stand in`).toBeNull();
+      expect(await lastAuthorization("pm"), `${who.slug}: the operator's key must not stand in`).toBeNull();
     }
   });
 });
@@ -180,7 +176,7 @@ test.describe("a Pro organisation with no key of its own", () => {
     const modal = await openNewTaskForm(page, GLOBEX);
 
     expect((await generate(page, modal)).status()).toBe(200);
-    expect(await lastAuthorization(AI_STUB_URL)).toBe(OPERATORS_KEY);
+    expect(await lastAuthorization("assist")).toBe(OPERATORS_KEY);
 
     await page.goto(`${originOf(GLOBEX)}/projects/${SHARED_KEY}/pm`);
     const answered = page.waitForResponse((r) => r.request().method() === "POST" && r.url().includes("/pm/chat"));
@@ -188,27 +184,22 @@ test.describe("a Pro organisation with no key of its own", () => {
     await page.getByRole("button", { name: "Send", exact: true }).click();
     expect((await answered).status()).toBe(200);
     await expect(page.getByText("Done.", { exact: true })).toHaveCount(1);
-    expect(await lastAuthorization(PM_STUB_URL)).toBe(OPERATORS_KEY);
+    expect(await lastAuthorization("pm")).toBe(OPERATORS_KEY);
   });
 });
 
 test.describe("an organisation's own key", () => {
-  test("turns AI on for a Free organisation, is the key its calls are made with, and is nobody else's", async ({ page, browser }) => {
+  test("turns AI on for a Free organisation, is the key both its features are made with, and is nobody else's", async ({ page, browser }) => {
     await signInOn(page.context(), ACME);
 
-    await test.step("the admin stores both keys on the organisation's own host", async () => {
+    await test.step("the admin stores the key on the organisation's own host", async () => {
       await page.goto(`${originOf(ACME)}/settings/ai-keys`);
-      for (const [label, value] of [
-        ["OpenRouter key", OWN_OPENROUTER],
-        ["OpenAI key", OWN_OPENAI],
-      ] as const) {
-        const card = page.locator("section", { has: page.getByRole("heading", { name: label }) });
-        const saved = page.waitForResponse((r) => r.request().method() === "PUT" && r.url().includes("/api/settings/ai-keys"));
-        await card.getByLabel(/^Add your/).fill(value);
-        await card.getByRole("button", { name: "Save key" }).click();
-        expect((await saved).status()).toBe(200);
-        await expect(card.getByText(value.slice(-4), { exact: true })).toBeVisible();
-      }
+      const card = page.locator("section", { has: page.getByRole("heading", { name: "OpenRouter key" }) });
+      const saved = page.waitForResponse((r) => r.request().method() === "PUT" && r.url().includes("/api/settings/ai-keys"));
+      await card.getByLabel(/^Add your/).fill(OWN_OPENROUTER);
+      await card.getByRole("button", { name: "Save key" }).click();
+      expect((await saved).status()).toBe(200);
+      await expect(card.getByText(OWN_OPENROUTER.slice(-4), { exact: true })).toBeVisible();
     });
 
     await test.step("AI Assist is back, and the call is made with ACME's key, not the operator's", async () => {
@@ -218,17 +209,17 @@ test.describe("an organisation's own key", () => {
       await expect(modal.getByTestId("ai-needs-key")).toHaveCount(0);
 
       expect((await generate(page, modal)).status()).toBe(200);
-      expect(await lastAuthorization(AI_STUB_URL)).toBe(`Bearer ${OWN_OPENAI}`);
+      expect(await lastAuthorization("assist")).toBe(`Bearer ${OWN_OPENROUTER}`);
     });
 
-    await test.step("the PM agent runs on ACME's OpenRouter key", async () => {
+    await test.step("the PM agent runs on the same key", async () => {
       await page.goto(`${originOf(ACME)}/projects/${SHARED_KEY}/pm`);
       const answered = page.waitForResponse((r) => r.request().method() === "POST" && r.url().includes("/pm/chat"));
       await page.getByPlaceholder(/Message the PM/).fill(`hello <<${JSON.stringify({ say: "Done." })}>>`);
       await page.getByRole("button", { name: "Send", exact: true }).click();
       expect((await answered).status()).toBe(200);
       await expect(page.getByText("Done.", { exact: true })).toHaveCount(1);
-      expect(await lastAuthorization(PM_STUB_URL)).toBe(`Bearer ${OWN_OPENROUTER}`);
+      expect(await lastAuthorization("pm")).toBe(`Bearer ${OWN_OPENROUTER}`);
     });
 
     await test.step("control: GLOBEX has none of it, and still runs on the operator's key", async () => {
@@ -237,11 +228,10 @@ test.describe("an organisation's own key", () => {
         const globex = await other.newPage();
         const modal = await openNewTaskForm(globex, GLOBEX);
         expect((await generate(globex, modal)).status()).toBe(200);
-        expect(await lastAuthorization(AI_STUB_URL)).toBe(OPERATORS_KEY);
+        expect(await lastAuthorization("assist")).toBe(OPERATORS_KEY);
 
         const state = await globex.evaluate(async () => (await fetch("/api/settings/ai-keys")).json());
-        expect(state.providers.openrouter.set).toBe(false);
-        expect(state.providers.openai.set).toBe(false);
+        expect(state).toMatchObject({ set: false, hint: "" });
         expect(JSON.stringify(state)).not.toContain("acme-e2e");
       } finally {
         await other.close();

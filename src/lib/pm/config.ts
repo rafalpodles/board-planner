@@ -326,7 +326,7 @@ export function sanitizeMcpServers(
 /** What the PM screens show. A failed read is null, so the answer leaves the three fields out and a poll keeps what the screen already knew */
 export async function pmAvailability(db: ScopedDb): Promise<{ available: boolean; needsPlan: boolean; keyUnreadable: boolean } | null> {
   try {
-    const { available, needsPlan, unreadable } = await modelKeyAvailability(db, "openrouter");
+    const { available, needsPlan, unreadable } = await modelKeyAvailability(db);
     return { available, needsPlan, keyUnreadable: unreadable };
   } catch (err) {
     console.warn("Could not tell whether the PM agent has a key:", err instanceof Error ? err.message : err);

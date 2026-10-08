@@ -11,8 +11,7 @@ const { api, toast } = vi.hoisted(() => ({
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast, dismiss: vi.fn() }) }));
 
-const NOTHING = { set: false, hint: "", unreadable: false, included: false };
-const FREE_CLOUD = { hosted: true, plan: "free", providers: { openrouter: NOTHING, openai: NOTHING } };
+const FREE_CLOUD = { hosted: true, plan: "free", set: false, hint: "", unreadable: false, included: false };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -20,37 +19,40 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-const keyField = (provider: "OpenRouter" | "OpenAI", verb: "Add" | "Replace" = "Add") =>
-  screen.findByLabelText(`${verb} your ${provider} key`) as Promise<HTMLInputElement>;
+const keyField = (verb: "Add" | "Replace" = "Add") => screen.findByLabelText(`${verb} your OpenRouter key`) as Promise<HTMLInputElement>;
 
-describe("Settings → AI keys", () => {
-  it("says a Free cloud organisation without a key gets no AI, for each provider", async () => {
+describe("Settings → AI key", () => {
+  it("says it is one key, for the PM agent and for AI Assist", async () => {
     render(<AiKeys />);
 
-    expect(await screen.findAllByText(/it does not run on the Free plan/)).toHaveLength(2);
+    expect(await screen.findByText(/Runs the PM agent .* and AI Assist/)).toBeTruthy();
+    expect(document.querySelectorAll("input[type=password]")).toHaveLength(1);
+    expect(screen.queryByText(/OpenAI/)).toBeNull();
+  });
+
+  it("says a Free cloud organisation without a key gets no AI", async () => {
+    render(<AiKeys />);
+
+    expect(await screen.findByText(/it does not run on the Free plan/)).toBeTruthy();
   });
 
   it("says a Pro organisation with no key of its own, on a service with none to offer, gets no AI either, without naming the Free plan", async () => {
     api.get.mockResolvedValue({ ...FREE_CLOUD, plan: "pro" });
     render(<AiKeys />);
 
-    expect(await screen.findAllByText(/this service has no key to offer/)).toHaveLength(2);
+    expect(await screen.findByText(/this service has no key to offer/)).toBeTruthy();
     expect(screen.queryByText(/Free plan/)).toBeNull();
   });
 
   it("says a plan that includes managed AI covers an organisation with no key of its own", async () => {
-    api.get.mockResolvedValue({
-      ...FREE_CLOUD,
-      plan: "pro",
-      providers: { openrouter: { ...NOTHING, included: true }, openai: { ...NOTHING, included: true } },
-    });
+    api.get.mockResolvedValue({ ...FREE_CLOUD, plan: "pro", included: true });
     render(<AiKeys />);
 
-    expect(await screen.findAllByText(/runs on ours, which your plan includes/)).toHaveLength(2);
+    expect(await screen.findByText(/runs on ours, which your plan includes/)).toBeTruthy();
   });
 
   it("does not claim the key is free of limits, which this screen does not decide", async () => {
-    api.get.mockResolvedValue({ ...FREE_CLOUD, providers: { openrouter: { ...NOTHING, set: true, hint: "abcd" }, openai: NOTHING } });
+    api.get.mockResolvedValue({ ...FREE_CLOUD, set: true, hint: "abcd" });
     render(<AiKeys />);
     await screen.findByText("abcd");
 
@@ -58,17 +60,17 @@ describe("Settings → AI keys", () => {
   });
 
   it("shows a stored key by its last four characters only, and offers to replace or remove it", async () => {
-    api.get.mockResolvedValue({ ...FREE_CLOUD, providers: { openrouter: { ...NOTHING, set: true, hint: "abcd" }, openai: NOTHING } });
+    api.get.mockResolvedValue({ ...FREE_CLOUD, set: true, hint: "abcd" });
     render(<AiKeys />);
 
     expect(await screen.findByText("abcd")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Replace key" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Remove key" })).toBeTruthy();
-    expect(screen.getAllByRole("button", { name: "Save key" })).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Save key" })).toBeNull();
   });
 
   it("does not print an empty hint when a key was stored without one", async () => {
-    api.get.mockResolvedValue({ ...FREE_CLOUD, providers: { openrouter: { ...NOTHING, set: true, hint: "" }, openai: NOTHING } });
+    api.get.mockResolvedValue({ ...FREE_CLOUD, set: true, hint: "" });
     render(<AiKeys />);
 
     expect(await screen.findByText(/A key is stored\./)).toBeTruthy();
@@ -76,7 +78,7 @@ describe("Settings → AI keys", () => {
   });
 
   it("says a stored key that cannot be opened is broken, and asks for it again rather than showing it as set", async () => {
-    api.get.mockResolvedValue({ ...FREE_CLOUD, providers: { openrouter: { ...NOTHING, set: true, hint: "abcd", unreadable: true }, openai: NOTHING } });
+    api.get.mockResolvedValue({ ...FREE_CLOUD, set: true, hint: "abcd", unreadable: true });
     render(<AiKeys />);
 
     expect((await screen.findByRole("alert")).textContent).toMatch(/cannot be read, so every call fails/);
@@ -85,52 +87,50 @@ describe("Settings → AI keys", () => {
   });
 
   it("saves the key typed, trimmed, empties the field, and keeps nothing of the key on the page", async () => {
-    api.put.mockResolvedValue({ ...FREE_CLOUD, providers: { openrouter: { ...NOTHING, set: true, hint: "6789" }, openai: NOTHING } });
+    api.put.mockResolvedValue({ ...FREE_CLOUD, set: true, hint: "6789" });
     render(<AiKeys />);
-    const field = await keyField("OpenRouter");
+    const field = await keyField();
 
     fireEvent.change(field, { target: { value: "  sk-or-v1-0123456789  " } });
-    fireEvent.click(screen.getAllByRole("button", { name: "Save key" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Save key" }));
 
     await waitFor(() => expect(screen.getByText("6789")).toBeTruthy());
     expect(api.put).toHaveBeenCalledWith("/api/settings/ai-keys", { openrouterKey: "sk-or-v1-0123456789" });
     expect(toast).toHaveBeenCalledWith("OpenRouter key saved", "success");
     // The field is a password input, whose value is not in textContent: ask the field
-    expect((await keyField("OpenRouter", "Replace")).value).toBe("");
+    expect((await keyField("Replace")).value).toBe("");
   });
 
   it("offers nothing to save until something is typed, and a field of spaces is nothing", async () => {
     render(<AiKeys />);
-    const field = await keyField("OpenRouter");
+    const field = await keyField();
 
-    for (const button of screen.getAllByRole("button", { name: "Save key" })) {
-      expect((button as HTMLButtonElement).disabled).toBe(true);
-    }
+    expect((screen.getByRole("button", { name: "Save key" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(field, { target: { value: "     " } });
     // An empty string reaches the server as "remove", so a blank must not be sent at all
-    expect((screen.getAllByRole("button", { name: "Save key" })[0] as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Save key" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.submit(field.closest("form")!);
     expect(api.put).not.toHaveBeenCalled();
   });
 
-  it("asks before removing a key, and sends null for that provider only once confirmed", async () => {
-    api.get.mockResolvedValue({ ...FREE_CLOUD, providers: { openrouter: NOTHING, openai: { ...NOTHING, set: true, hint: "wxyz" } } });
+  it("asks before removing the key, and sends null only once confirmed", async () => {
+    api.get.mockResolvedValue({ ...FREE_CLOUD, set: true, hint: "wxyz" });
     api.put.mockResolvedValue(FREE_CLOUD);
     render(<AiKeys />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Remove key" }));
     const dialog = screen.getByRole("dialog");
-    expect(within(dialog).getByText(/Remove the OpenAI key\?/)).toBeTruthy();
+    expect(within(dialog).getByText(/Remove the OpenRouter key\?/)).toBeTruthy();
     expect(api.put).not.toHaveBeenCalled();
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Remove key" }));
 
-    await waitFor(() => expect(api.put).toHaveBeenCalledWith("/api/settings/ai-keys", { openaiKey: null }));
-    expect(toast).toHaveBeenCalledWith("OpenAI key removed", "success");
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith("/api/settings/ai-keys", { openrouterKey: null }));
+    expect(toast).toHaveBeenCalledWith("OpenRouter key removed", "success");
   });
 
   it("leaves the key where it is when the removal is called off", async () => {
-    api.get.mockResolvedValue({ ...FREE_CLOUD, providers: { openrouter: NOTHING, openai: { ...NOTHING, set: true, hint: "wxyz" } } });
+    api.get.mockResolvedValue({ ...FREE_CLOUD, set: true, hint: "wxyz" });
     render(<AiKeys />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Remove key" }));
@@ -142,10 +142,10 @@ describe("Settings → AI keys", () => {
   it("says why a save was refused, in an alert tied to the field, keeps what was typed, and clears it on the next keystroke", async () => {
     api.put.mockRejectedValue(new Error("openrouterKey must be 20 to 300 printable characters with no spaces"));
     render(<AiKeys />);
-    const field = await keyField("OpenRouter");
+    const field = await keyField();
 
     fireEvent.change(field, { target: { value: "bad key" } });
-    fireEvent.click(screen.getAllByRole("button", { name: "Save key" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Save key" }));
 
     const alert = await screen.findByText(/must be 20 to 300 printable characters/);
     expect(alert.getAttribute("role")).toBe("alert");
@@ -160,7 +160,7 @@ describe("Settings → AI keys", () => {
 
   it("keeps a password manager from filling the admin's own login into a key", async () => {
     render(<AiKeys />);
-    const field = await keyField("OpenRouter");
+    const field = await keyField();
 
     expect(field.type).toBe("password");
     expect(field.getAttribute("autocomplete")).toBe("new-password");
@@ -175,16 +175,18 @@ describe("Settings → AI keys", () => {
   });
 
   it("describes a self-hosted server's own key, not a plan", async () => {
-    api.get.mockResolvedValue({
-      hosted: false,
-      plan: "free",
-      providers: { openrouter: { ...NOTHING, included: true }, openai: NOTHING },
-    });
+    api.get.mockResolvedValue({ hosted: false, plan: "free", set: false, hint: "", unreadable: false, included: true });
     render(<AiKeys />);
 
     expect(await screen.findByText(/runs on the key this server was set up with/)).toBeTruthy();
     expect(screen.getByText("Server key")).toBeTruthy();
-    expect(screen.getByText(/no key was set on the server/)).toBeTruthy();
     expect(screen.queryByText(/Free plan/)).toBeNull();
+  });
+
+  it("says a self-hosted server with no key anywhere does not run", async () => {
+    api.get.mockResolvedValue({ hosted: false, plan: "free", set: false, hint: "", unreadable: false, included: false });
+    render(<AiKeys />);
+
+    expect(await screen.findByText(/no key was set on the server/)).toBeTruthy();
   });
 });

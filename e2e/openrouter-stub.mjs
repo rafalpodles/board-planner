@@ -59,6 +59,12 @@ let received = null;
 // key a call was made with is only visible on the wire
 let lastAuthorization = null;
 
+// AI Assist goes through OpenRouter too (src/lib/ai.ts), and what tells its request from the PM's is
+// the JSON mode it asks for. What it sent, and the key it sent it with, are kept apart from the PM's:
+// /last-assist-request and /last-assist-authorization
+let lastAssistRequest = null;
+let lastAssistAuthorization = null;
+
 /**
  * One entry per completion request, for /requests (BP-568). What a turn's second call sends in
  * front of the cache breakpoint has to be the same bytes as its first, and no assertion on the
@@ -126,6 +132,8 @@ serve({
       seen.clear();
       received = null;
       lastAuthorization = null;
+      lastAssistRequest = null;
+      lastAssistAuthorization = null;
       requests = [];
       res.writeHead(200, { "Content-Type": "text/plain" }).end("ok");
       return;
@@ -136,6 +144,16 @@ serve({
     // rather than merely that a turn ran (BP-451 review).
     if (req.url === "/last") {
       res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(received));
+      return;
+    }
+
+    if (req.url === "/last-assist-request") {
+      res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(lastAssistRequest ?? {}));
+      return;
+    }
+
+    if (req.url === "/last-assist-authorization") {
+      res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ authorization: lastAssistAuthorization }));
       return;
     }
 
@@ -166,8 +184,38 @@ serve({
       return;
     }
 
-    lastAuthorization = req.headers.authorization ?? null;
     const raw = await readBody(req);
+
+    // AI Assist: what the answer is travels in the prompt between << and >>, as for the PM below. A
+    // prompt with no directive gets OPENAI_STUB_TASK, and failing that an answer that is not JSON at
+    // all, which is the error path a stub that always succeeds cannot reach.
+    let assist = null;
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed?.response_format?.type === "json_object") assist = parsed;
+    } catch {
+      // Not JSON: the PM branch below reports it
+    }
+    if (assist) {
+      lastAssistAuthorization = req.headers.authorization ?? null;
+      lastAssistRequest = assist;
+      const asked = assist.messages ?? [];
+      const system = asked.find((m) => m?.role === "system")?.content ?? "";
+      const said = asked.find((m) => m?.role === "user")?.content ?? "";
+      const directive = /<<([\s\S]*?)>>/.exec(typeof said === "string" ? said : "");
+      const content = directive?.[1] ?? process.env.OPENAI_STUB_TASK ?? "not json at all";
+      reply(res, {
+        id: "chatcmpl-e2e",
+        object: "chat.completion",
+        created: Math.floor(Date.now() / 1000),
+        model: assist.model ?? "stub",
+        choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content } }],
+        usage: { prompt_tokens: system.length, completion_tokens: content.length, total_tokens: 0 },
+      });
+      return;
+    }
+
+    lastAuthorization = req.headers.authorization ?? null;
     let messages = [];
     let offeredTools = [];
     try {

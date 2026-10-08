@@ -1008,7 +1008,7 @@ describe("the project answer says whether the PM agent can run", () => {
     const res = await GET(new Request("http://localhost/api/projects/p1"), ctx());
 
     expect(await res.json()).toMatchObject(expected);
-    expect(modelKeyAvailability).toHaveBeenCalledWith(expect.anything(), "openrouter");
+    expect(modelKeyAvailability).toHaveBeenCalledWith(expect.anything());
   });
 
   it("on a save, too", async () => {

@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { AI_STUB_URL } from "../playwright.config";
+import { PM_STUB_URL } from "../playwright.config";
 import { ADMIN_AUTH } from "./api";
 import {
   ADMIN_PASSWORD,
@@ -16,7 +16,7 @@ import {
 import { signIn as arriveSignedIn } from "./session";
 
 /**
- * BP-396 — AI Assist in the new-task form, driven against a local stand-in for OpenAI.
+ * BP-396 — AI Assist in the new-task form, driven against a local stand-in for the model (OpenRouter, which AI Assist uses since BP-652).
  *
  * The stub answers; everything else is production code — the SDK, the route, the prompt built from
  * this project's own fields and open tasks, the JSON parse and sanitising in `src/lib/ai.ts`,
@@ -78,7 +78,7 @@ function expectToast(page: Page, message: string) {
 
 /** What the app last sent the model, read back from the stub. */
 async function lastPromptSent(): Promise<{ system: string; user: string; model: string }> {
-  const body = await (await fetch(`${AI_STUB_URL}/last-request`)).json();
+  const body = await (await fetch(`${PM_STUB_URL}/last-assist-request`)).json();
   const messages: { role: string; content: string }[] = body.messages ?? [];
   return {
     system: messages.find((m) => m.role === "system")?.content ?? "",
@@ -101,7 +101,7 @@ test.beforeEach(async () => {
   await seed();
   await seedCustomFields();
   await seedExtraCategory();
-  await fetch(`${AI_STUB_URL}/reset`);
+  await fetch(`${PM_STUB_URL}/reset`);
 });
 
 test("a generated task fills the form, is stored with the project's own option ids, and reports what it noticed", async ({
@@ -254,7 +254,7 @@ test("an answer the app cannot read leaves the form alone and says so", async ({
 
   // The server's own words, which the form now shows rather than a fixed line of its own
   await expectToast(page, "AI generation failed. Please try again.");
-  // The 500 also arrives when OPENAI_BASE_URL is wrong and the key goes to the real api.openai.com;
+  // The 500 also arrives when OPENROUTER_BASE_URL is wrong and the key goes to the real openrouter.ai;
   // this is what says the failure came from the answer rather than from the wiring
   expect((await lastPromptSent()).user).toContain("this is not JSON");
   // Nothing half-written: a failed generation must not leave a title the person did not type

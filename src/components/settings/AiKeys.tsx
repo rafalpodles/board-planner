@@ -10,53 +10,21 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { LoadFailed } from "@/components/ui/LoadFailed";
 import { SettingsCard } from "@/components/settings/SettingsCard";
 
-type ProviderName = "openrouter" | "openai";
-
-interface ProviderState {
+interface AiKeysAnswer {
+  hosted: boolean;
+  plan: "free" | "pro";
   set: boolean;
   hint: string;
   unreadable: boolean;
   included: boolean;
 }
 
-interface AiKeysAnswer {
-  hosted: boolean;
-  plan: "free" | "pro";
-  providers: Record<ProviderName, ProviderState>;
-}
+const TITLE = "OpenRouter key";
+const USE =
+  "Runs the PM agent (the chat, the scheduled board reviews and the review of a task that needs a person) and AI Assist, which drafts a task from a sentence.";
 
-const PROVIDERS: { name: ProviderName; field: string; title: string; short: string; use: string; placeholder: string }[] = [
-  {
-    name: "openrouter",
-    field: "openrouterKey",
-    title: "OpenRouter key",
-    short: "OpenRouter",
-    use: "Runs the PM agent: the chat, the scheduled board reviews and the review of a task that needs a person.",
-    placeholder: "sk-or-v1-…",
-  },
-  {
-    name: "openai",
-    field: "openaiKey",
-    title: "OpenAI key",
-    short: "OpenAI",
-    use: "Runs AI Assist, which drafts a task from a sentence.",
-    placeholder: "sk-…",
-  },
-];
-
-function KeyCard({
-  provider,
-  state,
-  hosted,
-  plan,
-  onSaved,
-}: {
-  provider: (typeof PROVIDERS)[number];
-  state: ProviderState;
-  hosted: boolean;
-  plan: AiKeysAnswer["plan"];
-  onSaved: (answer: AiKeysAnswer) => void;
-}) {
+function KeyCard({ state, onSaved }: { state: AiKeysAnswer; onSaved: (answer: AiKeysAnswer) => void }) {
+  const { hosted, plan } = state;
   const errorId = useId();
   const [confirmingRemoval, setConfirmingRemoval] = useState(false);
   const api = useApi();
@@ -65,11 +33,11 @@ function KeyCard({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
-  async function send(body: Record<string, string | null>, done: string) {
+  async function send(openrouterKey: string | null, done: string) {
     setBusy(true);
     setError("");
     try {
-      const answer: AiKeysAnswer = await api.put("/api/settings/ai-keys", body);
+      const answer: AiKeysAnswer = await api.put("/api/settings/ai-keys", { openrouterKey });
       setValue("");
       setConfirmingRemoval(false);
       onSaved(answer);
@@ -86,7 +54,7 @@ function KeyCard({
     e.preventDefault();
     // An empty key reaches the server as "remove", so a blank is never sent
     if (!value.trim()) return;
-    return send({ [provider.field]: value.trim() }, `${provider.title} saved`);
+    return send(value.trim(), `${TITLE} saved`);
   };
 
   const fallback = state.included
@@ -101,8 +69,8 @@ function KeyCard({
 
   return (
     <SettingsCard
-      title={provider.title}
-      description={provider.use}
+      title={TITLE}
+      description={USE}
       status={{
         label: state.unreadable ? "Cannot be read" : state.set ? "Your own key" : state.included ? (hosted ? "Included" : "Server key") : "Not set",
         on: !state.unreadable && (state.set || state.included),
@@ -129,7 +97,7 @@ function KeyCard({
 
       <form onSubmit={save} className="space-y-3">
         <Input
-          label={`${state.set ? "Replace your" : "Add your"} ${provider.short} key`}
+          label={state.set ? "Replace your OpenRouter key" : "Add your OpenRouter key"}
           type="password"
           // Not "off", which a password field ignores: this must not be filled with the admin's own login
           autoComplete="new-password"
@@ -141,7 +109,7 @@ function KeyCard({
             setValue(e.target.value);
             setError("");
           }}
-          placeholder={provider.placeholder}
+          placeholder="sk-or-v1-…"
           aria-invalid={error ? true : undefined}
           aria-describedby={error ? errorId : undefined}
           className={error ? "border-danger" : ""}
@@ -166,9 +134,9 @@ function KeyCard({
       <ConfirmDialog
         open={confirmingRemoval}
         onClose={() => setConfirmingRemoval(false)}
-        onConfirm={() => send({ [provider.field]: null }, `${provider.title} removed`)}
-        title={`Remove the ${provider.short} key?`}
-        message={`${provider.use} It stops running on this key at once${
+        onConfirm={() => send(null, `${TITLE} removed`)}
+        title="Remove the OpenRouter key?"
+        message={`${USE} They stop running on this key at once${
           hosted && plan === "free" ? ", and on the Free plan it does not run without one" : ""
         }. You will need the key to add it again.`}
         confirmLabel="Remove key"
@@ -201,10 +169,10 @@ export function AiKeys() {
   if (failed) {
     return (
       <div className="max-w-2xl">
-        <h2 className="text-lg font-semibold mb-1">AI keys</h2>
+        <h2 className="text-lg font-semibold mb-1">AI key</h2>
         <LoadFailed
           testId="ai-keys-error"
-          message="Failed to read the AI keys, so this page cannot say which key runs the AI."
+          message="Failed to read the AI key, so this page cannot say which key runs the AI."
           onRetry={load}
         />
       </div>
@@ -220,7 +188,7 @@ export function AiKeys() {
 
   return (
     <div className="max-w-2xl">
-      <h2 className="text-lg font-semibold mb-1">AI keys</h2>
+      <h2 className="text-lg font-semibold mb-1">AI key</h2>
       <p className="mb-4 text-sm text-text-muted">
         {answer.hosted
           ? "Your own key is used first, on every plan. Pro and the trial can also use ours."
@@ -234,16 +202,7 @@ export function AiKeys() {
           </>
         )}
       </p>
-      {PROVIDERS.map((provider) => (
-        <KeyCard
-          key={provider.name}
-          provider={provider}
-          state={answer.providers[provider.name]}
-          hosted={answer.hosted}
-          plan={answer.plan}
-          onSaved={setAnswer}
-        />
-      ))}
+      <KeyCard state={answer} onSaved={setAnswer} />
     </div>
   );
 }

@@ -2,7 +2,7 @@ import { APP_NAME, APP_DOMAIN } from "@/lib/brand";
 import { selfOrigin } from "@/lib/session";
 import { withCacheBreakpoints } from "./prompt-cache";
 
-const BASE_URL = () => process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1";
+export const OPENROUTER_BASE_URL = () => process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1";
 
 export const DEFAULT_PM_MODEL = () => process.env.PM_MODEL || "moonshotai/kimi-k2.6";
 
@@ -116,7 +116,7 @@ export async function chatCompletion(opts: {
 
   let response: Response;
   try {
-    response = await fetch(`${BASE_URL()}/chat/completions`, {
+    response = await fetch(`${OPENROUTER_BASE_URL()}/chat/completions`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,

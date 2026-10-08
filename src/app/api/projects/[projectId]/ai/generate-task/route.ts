@@ -19,7 +19,7 @@ export const MAX_PROMPT_LENGTH = AI_PROMPT_MAX_LENGTH;
 export const GENERATIONS_PER_USER_WINDOW = 20;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** Generations one project may run in a day, on the instance's own OpenAI key */
+/** Generations one project may run in a day, on the instance's OpenRouter key */
 export function dailyGenerationCap(): number {
   const configured = Number(process.env.AI_DAILY_GENERATION_CAP);
   return Number.isInteger(configured) && configured > 0 ? configured : 200;
@@ -75,17 +75,17 @@ export async function fetchReadme(githubRepo: string): Promise<string | undefine
 }
 
 export const GET = withProjectAccess(async (_request, { db }) => {
-  const key = await modelKeyAvailability(db, "openai");
+  const key = await modelKeyAvailability(db);
   return NextResponse.json({ enabled: key.available, needsPlan: key.needsPlan, keyUnreadable: key.unreadable });
 });
 
 export const POST = withProjectAccess(async (request, { params, user, db }) => {
   const { projectId } = await params;
 
-  const modelKey = await resolveModelKey(db, "openai");
+  const modelKey = await resolveModelKey(db);
   if (!modelKey.ok) {
     return modelKeyRefusalResponse(modelKey, {
-      error: "AI is not configured. Set OPENAI_API_KEY environment variable.",
+      error: "AI is not configured. Set the OPENROUTER_API_KEY environment variable.",
       status: 501,
     });
   }
@@ -137,7 +137,7 @@ export const POST = withProjectAccess(async (request, { params, user, db }) => {
     if (!project) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
-    return await generate(db, project, projectId, prompt, modelKey);
+    return await generate(db, project, projectId, prompt, modelKey.key);
   } finally {
     inFlight.delete(holder);
   }
@@ -148,7 +148,7 @@ async function generate(
   project: HydratedDocument<IProject>,
   projectId: string,
   prompt: string,
-  modelKey: { key: string; source: string }
+  apiKey: string
 ) {
   const [readme, tasks] = await Promise.all([
     // raw.githubusercontent.com only serves github.com, so a project hosted anywhere else — and
@@ -186,8 +186,7 @@ async function generate(
         existingTasks,
       },
       settings.aiModel,
-      modelKey.key,
-      modelKey.source === "own"
+      apiKey
     );
 
     // Resolved here, where the field definitions live, so the client never has to work

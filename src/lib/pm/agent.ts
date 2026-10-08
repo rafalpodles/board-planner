@@ -186,7 +186,7 @@ export async function runPmTurn(db: ScopedDb, opts: {
   if (!project) return { ok: false, message: null, error: "Project not found" };
   if (!isPmRunnable(project.pm)) return { ok: false, message: null, error: pmDisabledReason(project.pm) };
 
-  const modelKey = await resolveModelKey(db, "openrouter");
+  const modelKey = await resolveModelKey(db);
   if (!modelKey.ok) {
     const { error } = describeModelKeyRefusal(modelKey, { error: "The PM agent is not configured on this instance", status: 503 });
     return { ok: false, message: null, error };

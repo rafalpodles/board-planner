@@ -49,12 +49,10 @@ describe("what an export row keeps (BP-893)", () => {
       aiModel: "gpt-4o-mini",
       openrouterKey: "enc:v3:k:fff",
       openrouterKeyHint: "1234",
-      openaiKey: "enc:v3:k:ggg",
-      openaiKeyHint: "5678",
     });
 
     expect(JSON.stringify(settings)).not.toContain("enc:v3");
-    expect(settings).toEqual({ aiModel: "gpt-4o-mini", openrouterKeyHint: "1234", openaiKeyHint: "5678" });
+    expect(settings).toEqual({ aiModel: "gpt-4o-mini", openrouterKeyHint: "1234" });
   });
 });
 

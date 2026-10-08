@@ -1,26 +1,25 @@
 import { test, expect, type Page } from "@playwright/test";
 import mongoose from "mongoose";
-import { AI_STUB_URL, PM_STUB_URL } from "../playwright.config";
+import { PM_STUB_URL } from "../playwright.config";
 import { ADMIN_AUTH } from "./api";
 import { E2E_MONGODB_URI, PROJECT_KEY, seed } from "./seed";
 import { signIn } from "./session";
 
 /**
- * BP-652. An organisation can store its own OpenRouter and OpenAI keys, and a call is made with
- * the key it stored, not with the one in the server's environment.
+ * BP-652. An organisation can store its own OpenRouter key, and the PM agent and AI Assist are both made
+ * with the key it stored, not with the one in the server's environment.
  *
- * Which key a call used is not visible in anything the page shows, so both model stubs report the
- * Authorization header of the last call they received. The server here is the self-hosted one: its
+ * Which key a call used is not visible in anything the page shows, so the model stub reports the
+ * Authorization header of the last PM call and of the last AI Assist call it received. The server here is the self-hosted one: its
  * environment holds `e2e-stub-key`, which is therefore what a call uses when the organisation has
  * stored nothing, and what the control at the end of each test reads.
  */
 
 const OWN_OPENROUTER = "sk-or-own-e2e-0123456789";
-const OWN_OPENAI = "sk-own-e2e-9876543210";
 const ENVIRONMENT_KEY = "Bearer e2e-stub-key";
 
-async function lastAuthorization(stub: string): Promise<string | null> {
-  return (await (await fetch(`${stub}/last-authorization`)).json()).authorization;
+async function lastAuthorization(which: "pm" | "assist"): Promise<string | null> {
+  return (await (await fetch(`${PM_STUB_URL}/last-${which === "pm" ? "" : "assist-"}authorization`)).json()).authorization;
 }
 
 async function storedKeys(): Promise<Record<string, string> | null> {
@@ -28,7 +27,7 @@ async function storedKeys(): Promise<Record<string, string> | null> {
   if (!dbName.endsWith("_e2e")) throw new Error(`Refusing to read "${dbName}": this only runs against *_e2e`);
   await mongoose.connect(E2E_MONGODB_URI);
   try {
-    return (await mongoose.connection.db!.collection("settings").findOne({}, { projection: { openrouterKey: 1, openaiKey: 1 } })) as
+    return (await mongoose.connection.db!.collection("settings").findOne({}, { projection: { openrouterKey: 1 } })) as
       | Record<string, string>
       | null;
   } finally {
@@ -49,8 +48,8 @@ async function askThePm(page: Page, prompt: string, replies: number) {
   await expect(page.getByText("Done.", { exact: true })).toHaveCount(replies);
 }
 
-async function saveKey(page: Page, label: "OpenRouter key" | "OpenAI key", value: string) {
-  const card = page.locator("section", { has: page.getByRole("heading", { name: label }) });
+async function saveKey(page: Page, value: string) {
+  const card = page.locator("section", { has: page.getByRole("heading", { name: "OpenRouter key" }) });
   const saved = page.waitForResponse((r) => r.request().method() === "PUT" && r.url().includes("/api/settings/ai-keys"));
   await card.getByLabel(/^(Add|Replace) your/).fill(value);
   await card.getByRole("button", { name: /Save key|Replace key/ }).click();
@@ -61,7 +60,6 @@ async function saveKey(page: Page, label: "OpenRouter key" | "OpenAI key", value
 test.beforeEach(async ({ request }) => {
   await seed();
   await request.post(`${PM_STUB_URL}/reset`);
-  await fetch(`${AI_STUB_URL}/reset`);
 });
 
 test.afterEach(async ({ request }) => {
@@ -71,10 +69,10 @@ test.afterEach(async ({ request }) => {
 test("the PM agent is called with the key the admin stored, and with the server's again once it is removed", async ({ page }) => {
   await signIn(page, "admin");
   await page.goto("/settings/ai-keys");
-  await expect(page.getByRole("heading", { name: "AI keys" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "AI key" })).toBeVisible();
 
   await test.step("the key is stored sealed, and the page shows only how it ends", async () => {
-    const card = await saveKey(page, "OpenRouter key", OWN_OPENROUTER);
+    const card = await saveKey(page, OWN_OPENROUTER);
 
     await expect(card.getByText(OWN_OPENROUTER.slice(-4), { exact: true })).toBeVisible();
     // A password field's value is not in the markup, so the field itself is what is read
@@ -86,7 +84,7 @@ test("the PM agent is called with the key the admin stored, and with the server'
 
   await test.step("a turn is made with it, not with the environment's", async () => {
     await askThePm(page, "Which key is this?", 1);
-    expect(await lastAuthorization(PM_STUB_URL)).toBe(`Bearer ${OWN_OPENROUTER}`);
+    expect(await lastAuthorization("pm")).toBe(`Bearer ${OWN_OPENROUTER}`);
   });
 
   await test.step("control: with the key removed the same turn uses the server's", async () => {
@@ -99,28 +97,39 @@ test("the PM agent is called with the key the admin stored, and with the server'
     expect((await storedKeys())?.openrouterKey).toBeUndefined();
 
     await askThePm(page, "And now?", 2);
-    expect(await lastAuthorization(PM_STUB_URL)).toBe(ENVIRONMENT_KEY);
+    expect(await lastAuthorization("pm")).toBe(ENVIRONMENT_KEY);
   });
 });
 
-test("AI Assist is called with the OpenAI key the admin stored, and the OpenRouter key does not leak into it", async ({ page }) => {
+test("AI Assist is called with the same key the admin stored, and with the server's again once it is removed", async ({ page }) => {
   await signIn(page, "admin");
   await page.goto("/settings/ai-keys");
-  await saveKey(page, "OpenRouter key", OWN_OPENROUTER);
-  await saveKey(page, "OpenAI key", OWN_OPENAI);
+  await saveKey(page, OWN_OPENROUTER);
 
-  await page.goto(`/projects/${PROJECT_KEY}`);
-  await page.getByRole("button", { name: "New task" }).click();
-  const modal = page.getByRole("dialog", { name: "New Task" });
-  const generated = page.waitForResponse((r) => r.request().method() === "POST" && r.url().includes("/ai/generate-task"));
-  await modal.getByPlaceholder("Describe what you need").fill(`a task <<${JSON.stringify({ title: "Own key", description: "d", category: "bug", acceptanceCriteria: "" })}>>`);
-  await modal.getByRole("button", { name: "Generate" }).click();
-  expect((await generated).status()).toBe(200);
+  const generate = async () => {
+    await page.goto(`/projects/${PROJECT_KEY}`);
+    await page.getByRole("button", { name: "New task" }).click();
+    const modal = page.getByRole("dialog", { name: "New Task" });
+    const generated = page.waitForResponse((r) => r.request().method() === "POST" && r.url().includes("/ai/generate-task"));
+    await modal.getByPlaceholder("Describe what you need").fill(`a task <<${JSON.stringify({ title: "Own key", description: "d", category: "bug", acceptanceCriteria: "" })}>>`);
+    await modal.getByRole("button", { name: "Generate" }).click();
+    expect((await generated).status()).toBe(200);
+  };
 
-  expect(await lastAuthorization(AI_STUB_URL)).toBe(`Bearer ${OWN_OPENAI}`);
+  await generate();
+  expect(await lastAuthorization("assist")).toBe(`Bearer ${OWN_OPENROUTER}`);
+
+  await page.goto("/settings/ai-keys");
+  const removed = page.waitForResponse((r) => r.request().method() === "PUT" && r.url().includes("/api/settings/ai-keys"));
+  await page.getByRole("button", { name: "Remove key" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Remove key" }).click();
+  expect((await removed).status()).toBe(200);
+
+  await generate();
+  expect(await lastAuthorization("assist")).toBe(ENVIRONMENT_KEY);
 });
 
-test("a member is turned away from the AI keys, on screen and at the route", async ({ page }) => {
+test("a member is turned away from the AI key, on screen and at the route", async ({ page }) => {
   await signIn(page, "member");
 
   await page.goto("/settings/ai-keys");

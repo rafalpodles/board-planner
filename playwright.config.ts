@@ -11,13 +11,12 @@ export const BASE_URL = `http://localhost:${PORT}`;
 const PM_STUB_PORT = Number(process.env.PM_STUB_PORT ?? PORT + 1);
 export const PM_STUB_URL = `http://localhost:${PM_STUB_PORT}`;
 
-// The model behind AI task generation, replaced the same way.
+// AI task generation goes through OpenRouter too, so the same stand-in answers it (it tells the two
+// apart by the JSON mode AI Assist asks for), and E2E_PORT+2 is free.
 //
 // A run owns E2E_PORT through E2E_PORT+9, and every stub derives from that one number so setting
 // it reserves the whole block. Giving each stub a default of its own is what makes two operators
 // following the same "pick two adjacent numbers" habit collide on a port neither of them typed.
-const AI_STUB_PORT = Number(process.env.AI_STUB_PORT ?? PORT + 2);
-export const AI_STUB_URL = `http://localhost:${AI_STUB_PORT}`;
 
 // outbound-delivery.spec.ts verifies a received delivery against it (BP-408)
 export const WEBHOOK_SECRET = "e2e-webhook-signing-secret";
@@ -169,9 +168,6 @@ function devServerEnv(origin: string) {
     // at the 5-minute default a tick can land mid-run and spend a real turn against the cap
     // the turn-cap specs are counting.
     PM_SCHEDULER_TICK_MS: String(24 * 60 * 60 * 1000),
-    // The form hides AI Assist without a key; the base URL is what keeps the SDK off api.openai.com
-    OPENAI_API_KEY: "e2e-stub-key",
-    OPENAI_BASE_URL: `${AI_STUB_URL}/v1`,
     WEBHOOK_SIGNING_SECRET: WEBHOOK_SECRET,
     // The stub above. Without it the sync reaches the real api.github.com, which is why no
     // spec drove one before BP-443.
@@ -304,17 +300,6 @@ export default defineConfig({
       stdout: "pipe",
       stderr: "pipe",
       env: { PM_STUB_PORT: String(PM_STUB_PORT) },
-    },
-    {
-      // Stands in for OpenAI, so a generated task is produced by the production client, route and
-      // form rather than by a fixture
-      command: `node e2e/openai-stub.mjs`,
-      url: `${AI_STUB_URL}/health`,
-      reuseExistingServer: false,
-      timeout: 30_000,
-      stdout: "pipe",
-      stderr: "pipe",
-      env: { AI_STUB_PORT: String(AI_STUB_PORT) },
     },
     {
       command: `node e2e/mcp-server-stub.mjs`,

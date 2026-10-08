@@ -22,7 +22,7 @@ export const POST = withProjectOwner(async (_request, { params, user, db }) => {
   }
   // Without a model key a review would still take a turn from the cap and post a warning to the
   // thread; the chat route refuses the same way for the same reason
-  const modelKey = await resolveModelKey(db, "openrouter");
+  const modelKey = await resolveModelKey(db);
   if (!modelKey.ok) {
     return modelKeyRefusalResponse(modelKey, { error: "The PM agent is not configured on this instance", status: 503 });
   }

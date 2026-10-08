@@ -40,7 +40,6 @@ const put = (body: unknown) =>
 const get = () => GET(new Request("http://x/api/settings/ai-keys"), ctx());
 
 const KEY = "sk-or-v1-0123456789abcdef";
-const OPENAI_KEY = "sk-openai-0123456789";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -51,7 +50,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  for (const name of ["ENCRYPTION_KEY", "ORGANISATION_DOMAIN", "ORGANISATION_REQUESTS_PER_MINUTE", "OPENROUTER_API_KEY", "OPENAI_API_KEY"]) {
+  for (const name of ["ENCRYPTION_KEY", "ORGANISATION_DOMAIN", "ORGANISATION_REQUESTS_PER_MINUTE", "OPENROUTER_API_KEY"]) {
     delete process.env[name];
   }
 });
@@ -66,35 +65,29 @@ describe("PUT /api/settings/ai-keys", () => {
     expect(decryptSecret(row!.openrouterKey, scopedToDefaultOrganisation().organisation)).toBe(KEY);
     const text = JSON.stringify(await res.json());
     expect(text).not.toContain(KEY);
-    expect(JSON.parse(text).providers.openrouter).toMatchObject({ set: true, hint: KEY.slice(-4) });
-    expect(JSON.parse(text).providers.openai).toMatchObject({ set: false, hint: "" });
+    expect(JSON.parse(text)).toMatchObject({ set: true, hint: KEY.slice(-4), unreadable: false });
   });
 
   it("records that a key was set, not what it is", async () => {
-    await put({ openrouterKey: KEY, openaiKey: OPENAI_KEY });
+    await put({ openrouterKey: KEY });
 
     const entry = logInstanceAudit.mock.calls[0][1];
     expect(entry).toMatchObject({ action: "instance_settings_changed", actorUsername: "root" });
-    expect(entry.detail).toBe("openrouterKey: set, openaiKey: set");
+    expect(entry.detail).toBe("openrouterKey: set");
     expect(JSON.stringify(entry)).not.toContain(KEY);
   });
 
   it("removes a key, and its hint with it, when given null or an empty string", async () => {
-    await put({ openrouterKey: KEY, openaiKey: OPENAI_KEY });
-
-    await put({ openrouterKey: null, openaiKey: "" });
-
-    expect(row).toEqual({});
-    expect(logInstanceAudit.mock.calls[1][1].detail).toBe("openrouterKey: removed, openaiKey: removed");
-  });
-
-  it("leaves the other provider's key alone", async () => {
-    await put({ openrouterKey: KEY, openaiKey: OPENAI_KEY });
-    const openai = row!.openaiKey;
+    await put({ openrouterKey: KEY });
 
     await put({ openrouterKey: null });
 
-    expect(row).toEqual({ openaiKey: openai, openaiKeyHint: "6789" });
+    expect(row).toEqual({});
+    expect(logInstanceAudit.mock.calls[1][1].detail).toBe("openrouterKey: removed");
+
+    await put({ openrouterKey: KEY });
+    await put({ openrouterKey: "" });
+    expect(row).toEqual({});
   });
 
   it.each([
@@ -119,13 +112,6 @@ describe("PUT /api/settings/ai-keys", () => {
 
   it.each([["null", null], ["an array", []], ["a string", "sk-or-v1-0123456789abcdef"]])("refuses a body that is %s, rather than failing", async (_what, body) => {
     const res = await put(body);
-
-    expect(res.status).toBe(400);
-    expect(row).toBeNull();
-  });
-
-  it("stores neither key when one of the two is refused", async () => {
-    const res = await put({ openrouterKey: KEY, openaiKey: "short" });
 
     expect(res.status).toBe(400);
     expect(row).toBeNull();
@@ -163,15 +149,14 @@ describe("GET /api/settings/ai-keys", () => {
 
     const body = await (await get()).json();
 
-    expect(body.providers.openrouter).toMatchObject({ set: true, unreadable: true });
-    expect(body.providers.openai).toMatchObject({ set: false, unreadable: false });
+    expect(body).toMatchObject({ set: true, unreadable: true });
     expect(JSON.stringify(body)).not.toContain("enc:v3");
   });
 
   it("says a key it can open is readable", async () => {
     await put({ openrouterKey: KEY });
 
-    expect((await (await get()).json()).providers.openrouter).toMatchObject({ set: true, unreadable: false });
+    expect((await (await get()).json())).toMatchObject({ set: true, unreadable: false });
   });
 
   it("answers no member", async () => {
@@ -186,8 +171,7 @@ describe("GET /api/settings/ai-keys", () => {
     const body = await (await get()).json();
 
     expect(body).toMatchObject({ hosted: false, plan: "free" });
-    expect(body.providers.openrouter).toMatchObject({ set: false, included: true });
-    expect(body.providers.openai).toMatchObject({ set: false, included: false });
+    expect(body).toMatchObject({ set: false, included: true });
   });
 
   it("offers the operator's key in the cloud only to a plan that includes managed AI", async () => {
@@ -196,9 +180,9 @@ describe("GET /api/settings/ai-keys", () => {
     process.env.ORGANISATION_REQUESTS_PER_MINUTE = "0";
     process.env.OPENROUTER_API_KEY = "sk-operators";
 
-    expect((await (await get()).json()).providers.openrouter.included).toBe(false);
+    expect((await (await get()).json()).included).toBe(false);
 
     getOrganisation.mockResolvedValue({ entitlements: { plan: "pro", features: [], source: "service" } });
-    expect((await (await get()).json()).providers.openrouter.included).toBe(true);
+    expect((await (await get()).json()).included).toBe(true);
   });
 });

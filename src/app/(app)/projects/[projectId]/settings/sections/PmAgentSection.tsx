@@ -508,7 +508,7 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
         <p className="text-sm text-text-muted">
           Set the <code>OPENROUTER_API_KEY</code> environment variable on the server to enable the PM
           agent (optionally <code>PM_MODEL</code> for the default model), or have an instance admin add a key in
-          Settings → AI keys.
+          Settings → AI key.
         </p>
       </SettingsCard>
     );

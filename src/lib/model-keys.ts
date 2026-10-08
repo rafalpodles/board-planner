@@ -6,12 +6,7 @@ import { can, type Plan } from "@/lib/entitlements";
 import { getOrganisation } from "@/lib/organisation";
 import { organisationDomain } from "@/lib/organisation-host";
 
-export type ModelProvider = "openrouter" | "openai";
-
-const ENV_KEYS: Record<ModelProvider, () => string | undefined> = {
-  openrouter: () => process.env.OPENROUTER_API_KEY || undefined,
-  openai: () => process.env.OPENAI_API_KEY || process.env.OPENAPI_KEY || undefined,
-};
+const instanceKeyOf = (): string | undefined => process.env.OPENROUTER_API_KEY || undefined;
 
 export type ModelKeyRefusal = "needs_plan" | "not_configured" | "own_key_unreadable";
 
@@ -20,15 +15,15 @@ export type ModelKeyResult =
   | { ok: false; reason: ModelKeyRefusal; plan: Plan };
 
 /**
- * Which key a model call is made with, for one organisation. The organisation's own key always wins,
+ * Which OpenRouter key a model call is made with, for one organisation. The PM agent and AI Assist
+ * both run on it. The organisation's own key always wins,
  * and the plan's managed-AI allowance does not apply to it; ours is used only where the operator's
  * environment is the customer's own (self-hosted) or where the plan includes managed AI (Pro, and the
  * trial, which is a Pro key). An organisation that stored its own key never falls back to ours: a key
  * that fails there fails, it is not a way to spend the operator's money.
  */
-export async function resolveModelKey(db: ScopedDb, provider: ModelProvider): Promise<ModelKeyResult> {
-  const settings = await db.Settings.findOne({}, "openrouterKey openaiKey").lean();
-  const stored = provider === "openrouter" ? settings?.openrouterKey : settings?.openaiKey;
+export async function resolveModelKey(db: ScopedDb): Promise<ModelKeyResult> {
+  const stored = (await db.Settings.findOne({}, "openrouterKey").lean())?.openrouterKey;
   if (stored) {
     try {
       return { ok: true, key: decryptSecret(stored, db.organisation), source: "own" };
@@ -37,7 +32,7 @@ export async function resolveModelKey(db: ScopedDb, provider: ModelProvider): Pr
     }
   }
 
-  const instanceKey = ENV_KEYS[provider]();
+  const instanceKey = instanceKeyOf();
   const hosted = organisationDomain() !== null;
   if (!hosted) {
     return instanceKey
@@ -76,14 +71,13 @@ export interface ModelKeyAvailability {
 }
 
 /**
- * What the screens need to know about a provider: whether a call would run, and if not, whether a
+ * What the screens need to know about the key: whether a call would run, and if not, whether a
  * plan or a re-entered key would fix it. Asked on every board poll, so it costs one Settings read,
  * and the plan, which is the one thing that reads more, is remembered for a few seconds. A call
  * itself never goes through here: `resolveModelKey` asks the plan afresh.
  */
-export async function modelKeyAvailability(db: ScopedDb, provider: ModelProvider): Promise<ModelKeyAvailability> {
-  const settings = await db.Settings.findOne({}, "openrouterKey openaiKey").lean();
-  const stored = provider === "openrouter" ? settings?.openrouterKey : settings?.openaiKey;
+export async function modelKeyAvailability(db: ScopedDb): Promise<ModelKeyAvailability> {
+  const stored = (await db.Settings.findOne({}, "openrouterKey").lean())?.openrouterKey;
   if (stored) {
     try {
       decryptSecret(stored, db.organisation);
@@ -93,7 +87,7 @@ export async function modelKeyAvailability(db: ScopedDb, provider: ModelProvider
     }
   }
 
-  const hasInstanceKey = ENV_KEYS[provider]() !== undefined;
+  const hasInstanceKey = instanceKeyOf() !== undefined;
   if (organisationDomain() === null) return { available: hasInstanceKey, needsPlan: false, unreadable: false };
   if (!hasInstanceKey) return { available: false, needsPlan: false, unreadable: false };
   const entitled = await entitledToManagedAi(db.organisation);
@@ -101,7 +95,7 @@ export async function modelKeyAvailability(db: ScopedDb, provider: ModelProvider
 }
 
 const OWN_KEY_OR_PRO =
-  "On the Free plan the AI runs on your own key. An administrator can add one in Settings → AI keys, or upgrade to Pro.";
+  "On the Free plan the AI runs on your own key. An administrator can add one in Settings → AI key, or upgrade to Pro.";
 
 export type ModelKeyRefused = Extract<ModelKeyResult, { ok: false }>;
 
@@ -112,11 +106,11 @@ export function describeModelKeyRefusal(
 ): { error: string; status: number } {
   if (refusal.reason === "needs_plan") return { error: OWN_KEY_OR_PRO, status: 402 };
   if (refusal.reason === "own_key_unreadable") {
-    return { error: "The stored AI key cannot be read. Enter it again in Settings → AI keys.", status: 503 };
+    return { error: "The stored AI key cannot be read. Enter it again in Settings → AI key.", status: 503 };
   }
   // A hosted organisation cannot set an environment variable; the key it can add is its own
   if (organisationDomain() !== null) {
-    return { error: "No AI key is available. Add your own in Settings → AI keys.", status: notConfigured.status };
+    return { error: "No AI key is available. Add your own in Settings → AI key.", status: notConfigured.status };
   }
   return notConfigured;
 }

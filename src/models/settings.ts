@@ -11,8 +11,6 @@ export interface ISettings {
   signUpDomains: string[];
   openrouterKey?: string;
   openrouterKeyHint?: string;
-  openaiKey?: string;
-  openaiKeyHint?: string;
 }
 
 const settingsSchema = new Schema<ISettings>({
@@ -34,8 +32,6 @@ const settingsSchema = new Schema<ISettings>({
   },
   openrouterKey: { type: String },
   openrouterKeyHint: { type: String },
-  openaiKey: { type: String },
-  openaiKeyHint: { type: String },
 });
 
 withOrganisation(settingsSchema);

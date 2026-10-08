@@ -12,7 +12,7 @@ vi.mock("openai", () => ({
   },
 }));
 
-const { generateTask } = await import("./ai");
+const { generateTask, openrouterModel } = await import("./ai");
 
 const CONTEXT = { name: "Board", description: "", choiceFields: [] };
 
@@ -22,20 +22,45 @@ beforeEach(() => {
   create.mockResolvedValue({
     choices: [{ message: { content: JSON.stringify({ title: "T", description: "d", category: "bug", acceptanceCriteria: "" }) } }],
   });
+  delete process.env.OPENROUTER_BASE_URL;
 });
 
-// BP-652. The SDK reads the operator's OpenAI organisation and project from the environment unless told not to,
-// and those belong to the operator's key, not to one an organisation brought
+// BP-652. AI Assist runs on OpenRouter, through OpenAI's SDK, which would otherwise read the operator's
+// OpenAI organisation and project (and base URL) from the environment
 describe("the client generateTask makes", () => {
-  it("is made with the key it is given", async () => {
+  it("talks to OpenRouter with the key it is given, and inherits no OpenAI organisation or project", async () => {
     await generateTask("a task", CONTEXT, "m", "sk-given");
 
-    expect(constructed).toEqual([{ apiKey: "sk-given" }]);
+    expect(constructed).toHaveLength(1);
+    expect(constructed[0]).toMatchObject({
+      apiKey: "sk-given",
+      baseURL: "https://openrouter.ai/api/v1",
+      organization: null,
+      project: null,
+    });
   });
 
-  it("is told not to inherit the operator's organisation and project for a key the organisation brought", async () => {
-    await generateTask("a task", CONTEXT, "m", "sk-own", true);
+  it("goes where OPENROUTER_BASE_URL says, as the PM agent does", async () => {
+    process.env.OPENROUTER_BASE_URL = "http://127.0.0.1:9/v1";
 
-    expect(constructed).toEqual([{ apiKey: "sk-own", organization: null, project: null }]);
+    await generateTask("a task", CONTEXT, "m", "sk-given");
+
+    expect(constructed[0]).toMatchObject({ baseURL: "http://127.0.0.1:9/v1" });
+  });
+
+  it("asks for the model by its OpenRouter name", async () => {
+    await generateTask("a task", CONTEXT, "gpt-4o-mini", "sk-given");
+
+    expect(create.mock.calls[0][0]).toMatchObject({ model: "openai/gpt-4o-mini", response_format: { type: "json_object" } });
+  });
+});
+
+describe("the model name AI Assist sends", () => {
+  it("prefixes the bare OpenAI name the setting has always held", () => {
+    expect(openrouterModel("gpt-4o-mini")).toBe("openai/gpt-4o-mini");
+  });
+
+  it("leaves a name that already says whose it is", () => {
+    expect(openrouterModel("anthropic/claude-haiku")).toBe("anthropic/claude-haiku");
   });
 });
