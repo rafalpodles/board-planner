@@ -1,0 +1,174 @@
+import { test, expect, type APIRequestContext } from "@playwright/test";
+import mongoose from "mongoose";
+import { RUN_ORGANISATIONS_SERVER } from "../playwright.config";
+import { signPlatformRequest } from "../src/lib/platform-request";
+import { E2E_PLATFORM_REQUEST_KEY, e2eLicence } from "./licence-key";
+import { mailFor } from "./mailbox";
+import { ACME, GLOBEX, ORGANISATIONS_API, PLATFORM_HOST, asOrganisation, bearer, seedTwoOrganisations } from "./organisations";
+import { withDb } from "./platform-sign-in";
+
+test.skip(!RUN_ORGANISATIONS_SERVER, "needs the ORGANISATION_DOMAIN server — set E2E_ORGANISATIONS_SERVER=1");
+
+/**
+ * BP-674. An organisation whose plan ended and where nobody has signed in for a whole period is told it will
+ * be deleted, given a fortnight, then suspended and deleted. The sweep runs here with the clock moved forward
+ * (`POST /api/e2e/dead-organisations`), which is the only way to see two months go by.
+ */
+
+const sweep = async (request: APIRequestContext, body: { daysFromNow?: number; days?: number } = {}) => {
+  const response = await request.post(`${ORGANISATIONS_API}/api/e2e/dead-organisations`, { data: body });
+  expect(response.status(), await response.text()).toBe(200);
+  return response.json() as Promise<{ looked: number; noticed: number; cleared: number; suspended: number; deleted: number }>;
+};
+
+const organisationRow = (who: { organisation: unknown }) => withDb((db) => db.collection("organisations").findOne({ _id: who.organisation } as never));
+
+// ACME's plan ended 90 days ago; GLOBEX holds Pro
+async function endAcmesPlanAndGiveGlobexPro(request: APIRequestContext) {
+  await withDb((db) =>
+    db.collection("organisations").updateOne(
+      { _id: ACME.organisation as never },
+      { $set: { licenceKey: e2eLicence({ customer: "acme", organisation: ACME.organisation.toHexString(), expiresInDays: -90 }) } }
+    )
+  );
+  const path = `/api/platform/organisations/${GLOBEX.organisation.toHexString()}/licence`;
+  const body = Buffer.from(JSON.stringify({ licenceKey: e2eLicence({ customer: "globex", organisation: GLOBEX.organisation.toHexString() }) }));
+  const headers = signPlatformRequest({ method: "POST", host: PLATFORM_HOST, path, body }, E2E_PLATFORM_REQUEST_KEY);
+  const stored = await request.post(`${ORGANISATIONS_API}${path}`, { headers: { host: PLATFORM_HOST, "content-type": "application/json", ...headers }, data: body });
+  expect(stored.status(), await stored.text()).toBe(200);
+}
+
+test.beforeEach(async ({ request }) => {
+  await seedTwoOrganisations();
+  await endAcmesPlanAndGiveGlobexPro(request);
+});
+
+test("an organisation with no plan and no sign-in is told first, then suspended after a fortnight, then deleted; one with a plan is never touched", async ({ request }) => {
+  // The mail stub keeps everything the run has sent, so every assertion is against what it held before this one
+  const mailBefore = (await mailFor("boss@acme.example")).length;
+  const globexBefore = (await mailFor("boss@globex.example")).length;
+
+  expect(await sweep(request, { daysFromNow: 61 })).toMatchObject({ noticed: 1, suspended: 0, deleted: 0 });
+  await expect.poll(async () => (await mailFor("boss@acme.example")).length).toBe(mailBefore + 1);
+  expect((await mailFor("boss@acme.example")).at(-1)!.data).toMatch(/will be deleted/);
+  expect((await organisationRow(ACME))?.deadNoticeAt).toBeInstanceOf(Date);
+
+  // Inside the fortnight nothing more happens
+  expect(await sweep(request, { daysFromNow: 70 })).toMatchObject({ noticed: 0, suspended: 0, deleted: 0 });
+  expect((await organisationRow(ACME))?.suspendedAt ?? null).toBeNull();
+
+  expect(await sweep(request, { daysFromNow: 76 })).toMatchObject({ suspended: 1, deleted: 0 });
+  expect((await organisationRow(ACME))?.suspendedReason).toMatch(/dead organisation/);
+  const refused = await request.get(`${ORGANISATIONS_API}/api/projects`, { headers: { ...asOrganisation(ACME), ...bearer(ACME) } });
+  expect(refused.status()).toBe(503);
+
+  // Work admitted before the suspension may still be writing, so a delete waits ten minutes after it; the suite does not
+  expect(await sweep(request, { daysFromNow: 77 })).toMatchObject({ deleted: 0 });
+  await withDb((db) => db.collection("organisations").updateOne({ _id: ACME.organisation as never }, { $set: { suspendedAt: new Date(Date.now() - 11 * 60 * 1000) } }));
+  expect(await sweep(request, { daysFromNow: 77 })).toMatchObject({ deleted: 1 });
+  expect((await organisationRow(ACME))?.deletedAt).toBeInstanceOf(Date);
+  expect(await withDb((db) => db.collection("users").countDocuments({ organisation: ACME.organisation as never }))).toBe(0);
+
+  // The organisation with a plan, and its people, are as they were
+  expect((await organisationRow(GLOBEX))?.deadNoticeAt ?? null).toBeNull();
+  expect(await withDb((db) => db.collection("users").countDocuments({ organisation: GLOBEX.organisation as never }))).toBeGreaterThan(0);
+  expect(await mailFor("boss@globex.example")).toHaveLength(globexBefore);
+  const audit = await withDb((db) => db.collection("platformauditlogs").find({ keyId: "dead-organisation-sweep" }).toArray());
+  expect(audit.map((a) => a.action)).toEqual(["organisation_dead_noticed", "organisation_suspended", "organisation_delete_started", "organisation_deleted"]);
+});
+
+test("somebody signing in before the deletion calls it off, and a suspension the sweep made is lifted", async ({ request }) => {
+  await sweep(request, { daysFromNow: 61 });
+  await sweep(request, { daysFromNow: 76 });
+  expect((await organisationRow(ACME))?.suspendedAt).toBeInstanceOf(Date);
+
+  // A sign-in on the day the clock now says, 80 days on
+  const signedIn = new Date(Date.now() + 80 * 24 * 60 * 60 * 1000);
+  await withDb((db) => db.collection("users").updateOne({ _id: ACME.adminId as never }, { $set: { lastSignInAt: signedIn } }));
+
+  expect(await sweep(request, { daysFromNow: 81 })).toMatchObject({ cleared: 1, deleted: 0 });
+  const row = await organisationRow(ACME);
+  expect(row?.deadNoticeAt ?? null).toBeNull();
+  expect(row?.suspendedAt ?? null).toBeNull();
+  expect(row?.deletedAt ?? null).toBeNull();
+});
+
+test("nothing happens when it is switched off, and nothing is deleted that nobody could be told about", async ({ request }) => {
+  expect(await sweep(request, { daysFromNow: 61, days: 0 })).toMatchObject({ looked: 0, noticed: 0 });
+  expect((await organisationRow(ACME))?.deadNoticeAt ?? null).toBeNull();
+
+  await withDb((db) => db.collection("users").updateOne({ _id: ACME.adminId as never }, { $set: { email: "" } }));
+  expect(await sweep(request, { daysFromNow: 61 })).toMatchObject({ noticed: 0 });
+  // Inside the window a notice that went out would now be due its suspension: one that did not must not be
+  expect(await sweep(request, { daysFromNow: 76 })).toMatchObject({ suspended: 0, deleted: 0 });
+  expect((await organisationRow(ACME))?.deadNoticeAt ?? null).toBeNull();
+  expect((await organisationRow(ACME))?.deletedAt ?? null).toBeNull();
+});
+
+test("an operator's own suspension is not the sweep's to build on", async ({ request }) => {
+  await withDb((db) => db.collection("organisations").updateOne({ _id: ACME.organisation as never }, { $set: { suspendedAt: new Date(), suspendedReason: "chargeback" } }));
+
+  expect(await sweep(request, { daysFromNow: 61 })).toMatchObject({ noticed: 0 });
+  expect(await sweep(request, { daysFromNow: 90 })).toMatchObject({ suspended: 0, deleted: 0 });
+  expect((await organisationRow(ACME))?.suspendedReason).toBe("chargeback");
+});
+
+test("use through a token counts as use, however long ago anybody signed in", async ({ request }) => {
+  await withDb((db) =>
+    db.collection("apitokens").updateMany({ organisation: ACME.organisation as never }, { $set: { lastUsedAt: new Date(Date.now() + 70 * 24 * 60 * 60 * 1000) } })
+  );
+
+  expect(await sweep(request, { daysFromNow: 75 })).toMatchObject({ noticed: 0, suspended: 0, deleted: 0 });
+  expect((await organisationRow(ACME))?.deadNoticeAt ?? null).toBeNull();
+});
+
+test("a stored key that does not verify is a plan nobody can read, not no plan", async ({ request }) => {
+  // An organisation that is old by its id, with one old person and a key that does not verify
+  const old = new mongoose.Types.ObjectId(`${Math.floor(Date.UTC(2025, 0, 1) / 1000).toString(16)}0000000000000000`);
+  await withDb(async (db) => {
+    await db.collection("organisations").insertOne({ _id: old as never, name: "Old Co", slug: "old-co", licenceKey: "not-a-key.at-all" });
+    await db.collection("users").insertOne({
+      organisation: old as never,
+      username: "oldboss",
+      fullName: "Old Boss",
+      email: "boss@old-co.example",
+      kind: "human",
+      role: "admin",
+      createdAt: new Date(Date.UTC(2025, 0, 1)),
+    });
+  });
+
+  const oldBefore = (await mailFor("boss@old-co.example")).length;
+  expect(await sweep(request, { daysFromNow: 61 })).toMatchObject({ noticed: 1 });
+  expect((await organisationRow({ organisation: old }))?.deadNoticeAt ?? null).toBeNull();
+  expect((await organisationRow(ACME))?.deadNoticeAt).toBeInstanceOf(Date);
+  expect(await mailFor("boss@old-co.example")).toHaveLength(oldBefore);
+});
+
+test("a notice nothing followed is given again, and an operator's resume voids it", async ({ request }) => {
+  await withDb((db) => db.collection("organisations").updateOne({ _id: ACME.organisation as never }, { $set: { deadNoticeAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } }));
+  expect(await sweep(request, { daysFromNow: 61 })).toMatchObject({ noticed: 1, suspended: 0, deleted: 0 });
+
+  const path = `/api/platform/organisations/${ACME.organisation.toHexString()}/resume`;
+  const resumed = await request.post(`${ORGANISATIONS_API}${path}`, {
+    headers: { host: PLATFORM_HOST, ...signPlatformRequest({ method: "POST", host: PLATFORM_HOST, path, body: new Uint8Array() }, E2E_PLATFORM_REQUEST_KEY) },
+  });
+  expect(resumed.status()).toBe(200);
+  expect((await organisationRow(ACME))?.deadNoticeAt ?? null).toBeNull();
+});
+
+test("a process already sending the notice holds the others off, and a lease that has run out is taken over without the notice having gone out", async ({ request }) => {
+  const mailBefore = (await mailFor("boss@acme.example")).length;
+  const sendingNow = new Date(Date.now() + 61 * 24 * 60 * 60 * 1000);
+  await withDb((db) => db.collection("organisations").updateOne({ _id: ACME.organisation as never }, { $set: { deadNoticeClaimedAt: sendingNow } }));
+  expect(await sweep(request, { daysFromNow: 61 })).toMatchObject({ noticed: 0 });
+  expect((await organisationRow(ACME))?.deadNoticeAt ?? null).toBeNull();
+  expect(await mailFor("boss@acme.example")).toHaveLength(mailBefore);
+
+  // The lease is only a lease: it is released once the mail is out, and a dead sender's runs out
+  await withDb((db) => db.collection("organisations").updateOne({ _id: ACME.organisation as never }, { $set: { deadNoticeClaimedAt: new Date(sendingNow.getTime() - 11 * 60 * 1000) } }));
+  expect(await sweep(request, { daysFromNow: 61 })).toMatchObject({ noticed: 1 });
+  const row = await organisationRow(ACME);
+  expect(row?.deadNoticeAt).toBeInstanceOf(Date);
+  expect(row?.deadNoticeClaimedAt ?? null).toBeNull();
+});
