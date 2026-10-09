@@ -65,6 +65,8 @@ type Bucket = { key: string; label: string; color?: string; rank: number; tasks:
 
 const LAST = Number.MAX_SAFE_INTEGER;
 
+export const valueKey = (value: string) => `v:${value}`;
+
 /**
  * Splits already-sorted tasks into ordered groups. Tasks keep their relative order inside a group,
  * empty groups are not returned, and the "none" and "unfiled" groups come last.
@@ -85,7 +87,7 @@ export function groupTasks(tasks: ApiTask[], groupBy: GroupBy, ctx: GroupContext
       const byId = new Map(columns.map((c, i) => [c.id, { column: c, rank: i }]));
       for (const task of tasks) {
         const hit = byId.get(task.status);
-        if (hit) add(task, task.status, hit.column.label, hit.rank, hit.column.color);
+        if (hit) add(task, valueKey(task.status), hit.column.label, hit.rank, hit.column.color);
         else add(task, UNFILED_GROUP, "No column", LAST);
       }
       break;
@@ -94,14 +96,14 @@ export function groupTasks(tasks: ApiTask[], groupBy: GroupBy, ctx: GroupContext
       for (const task of tasks) {
         const priority = task.priority || DEFAULT_PRIORITY;
         const label = PRIORITY_LABELS[priority] ?? priority;
-        add(task, priority, label, PRIORITY_ORDER[priority] ?? LAST - 1);
+        add(task, valueKey(priority), label, PRIORITY_ORDER[priority] ?? LAST - 1);
       }
       break;
     }
     case "assignee": {
       for (const task of tasks) {
         const person = task.assignee && typeof task.assignee === "object" ? task.assignee : null;
-        if (person) add(task, person.username, person.fullName || person.username, 0);
+        if (person) add(task, valueKey(person.username), person.fullName || person.username, 0);
         else add(task, NONE_GROUP, "Unassigned", LAST);
       }
       break;
@@ -114,7 +116,7 @@ export function groupTasks(tasks: ApiTask[], groupBy: GroupBy, ctx: GroupContext
           continue;
         }
         const known = rankByName.get(task.category);
-        add(task, task.category, task.category, known?.rank ?? LAST - 1, known?.color);
+        add(task, valueKey(task.category), task.category, known?.rank ?? LAST - 1, known?.color);
       }
       break;
     }
@@ -127,7 +129,7 @@ export function groupTasks(tasks: ApiTask[], groupBy: GroupBy, ctx: GroupContext
       for (const task of tasks) {
         const raw = task.customFieldValues?.[field._id];
         const hit = typeof raw === "string" ? options.get(raw) : undefined;
-        if (hit) add(task, hit.option.id, hit.option.value, hit.rank, hit.option.color);
+        if (hit) add(task, valueKey(hit.option.id), hit.option.value, hit.rank, hit.option.color);
         else add(task, NONE_GROUP, `No ${field.name}`, LAST);
       }
     }

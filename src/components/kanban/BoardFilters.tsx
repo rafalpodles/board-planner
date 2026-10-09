@@ -94,8 +94,6 @@ interface BoardFiltersProps {
   hiddenColumns?: ListColumnId[];
   customFields?: ApiCustomField[];
   onHiddenColumnsChange?: (hidden: ListColumnId[]) => void;
-  /** Owned above, like the sort. The board has nothing to group yet, but it still hydrates and
-      persists the stored choice, or the next load from the board would write an empty one back */
   groupBy?: GroupBy;
   onGroupByChange?: (groupBy: GroupBy) => void;
   showGroupBy?: boolean;
@@ -705,7 +703,7 @@ export function BoardFilters({
             value={groupBy}
             aria-label="Group tasks by"
             onChange={(e) => onGroupByChange(e.target.value as GroupBy)}
-            className="focus-ring-inset h-full rounded-lg bg-transparent px-2.5 text-[13px] text-text-muted"
+            className="focus-ring-inset h-full max-w-[min(16rem,60vw)] truncate rounded-lg bg-transparent px-2.5 text-[13px] text-text-muted"
           >
             {groupByOptions(customFields).map((o) => (
               <option key={o.value} value={o.value}>

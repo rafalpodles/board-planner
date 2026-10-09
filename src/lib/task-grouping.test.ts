@@ -7,6 +7,7 @@ import {
   groupByOptions,
   groupTasks,
   sanitizeGroupBy,
+  valueKey,
 } from "./task-grouping";
 import { migratePersistedFilters } from "./board-filters-state";
 
@@ -64,7 +65,7 @@ describe("groupTasks", () => {
       task({ taskNumber: 4, status: "in_progress" }),
     ];
     const groups = groupTasks(tasks, "status", { columns: DEFAULT_PROJECT_COLUMNS });
-    expect(keys(groups)).toEqual(["todo", "in_progress", "done"]);
+    expect(keys(groups)).toEqual(["todo", "in_progress", "done"].map(valueKey));
     expect(numbers(groups[2].tasks)).toEqual([1, 3]);
   });
 
@@ -74,7 +75,7 @@ describe("groupTasks", () => {
       task({ taskNumber: 2, status: "todo" }),
     ];
     const groups = groupTasks(tasks, "status", { columns: DEFAULT_PROJECT_COLUMNS });
-    expect(keys(groups)).toEqual(["todo", UNFILED_GROUP]);
+    expect(keys(groups)).toEqual([valueKey("todo"), UNFILED_GROUP]);
     expect(groups[1].label).toBe("No column");
     expect(numbers(groups[1].tasks)).toEqual([1]);
   });
@@ -86,7 +87,7 @@ describe("groupTasks", () => {
       task({ taskNumber: 3, priority: "urgent" }),
     ];
     const groups = groupTasks(tasks, "priority");
-    expect(keys(groups)).toEqual(["urgent", "medium", "low"]);
+    expect(keys(groups)).toEqual(["urgent", "medium", "low"].map(valueKey));
     expect(numbers(groups[1].tasks)).toEqual([2]);
   });
 
@@ -114,7 +115,7 @@ describe("groupTasks", () => {
       task({ taskNumber: 3, category: "feature" }),
     ];
     const groups = groupTasks(tasks, "category", { categories });
-    expect(keys(groups)).toEqual(["feature", "bug", "retired"]);
+    expect(keys(groups)).toEqual(["feature", "bug", "retired"].map(valueKey));
     expect(groups[0].color).toBe("#111");
   });
 
@@ -138,11 +139,21 @@ describe("groupTasks", () => {
     expect(groupTasks(tasks, "field:f-labels", { customFields: [labelsField] })).toEqual([]);
   });
 
+  it("cannot confuse a category named like a sentinel with the none group", () => {
+    const tasks = [
+      task({ taskNumber: 1, category: NONE_GROUP }),
+      task({ taskNumber: 2, category: "" }),
+    ];
+    const groups = groupTasks(tasks, "category");
+    expect(groups).toHaveLength(2);
+    expect(new Set(keys(groups)).size).toBe(2);
+  });
+
   it("does not return empty groups", () => {
     const groups = groupTasks([task({ taskNumber: 1, status: "done" })], "status", {
       columns: DEFAULT_PROJECT_COLUMNS,
     });
-    expect(keys(groups)).toEqual(["done"]);
+    expect(keys(groups)).toEqual([valueKey("done")]);
   });
 
   it("flattens to the order the groups are drawn in, skipping collapsed ones", () => {
@@ -153,7 +164,7 @@ describe("groupTasks", () => {
     ];
     const groups = groupTasks(tasks, "status", { columns: DEFAULT_PROJECT_COLUMNS });
     expect(numbers(flattenGroups(groups))).toEqual([2, 1, 3]);
-    expect(numbers(flattenGroups(groups, new Set(["todo"])))).toEqual([1, 3]);
+    expect(numbers(flattenGroups(groups, new Set([valueKey("todo")])))).toEqual([1, 3]);
   });
 });
 

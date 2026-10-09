@@ -15,7 +15,7 @@ import {
   SortKey,
   defaultSortDir,
 } from "@/types";
-import { ListColumnId, isColumnVisible, listColumns as projectListColumns } from "@/lib/list-columns";
+import { BUILT_IN_COLUMNS, ListColumnId, isColumnVisible, listColumns as projectListColumns } from "@/lib/list-columns";
 import { fieldCellText, orderedOptions } from "@/lib/custom-fields";
 import { effectiveColumns } from "@/lib/columns";
 import { CopyTaskLink } from "@/components/tasks/CopyTaskLink";
@@ -76,7 +76,7 @@ interface ListViewProps {
   onCategoryChange?: (taskId: string, category: string) => void;
   onSprintChange?: (taskId: string, sprintId: string | null) => void;
   onFieldChange?: (taskId: string, fieldId: string, value: string) => void;
-  /** Present while grouped. `tasks` then holds the rows that are drawn, collapsed groups left out */
+  /** While grouped, `tasks` holds the rows that are drawn: collapsed groups are left out */
   groups?: TaskGroup[];
   collapsedGroups?: ReadonlySet<string>;
   onToggleGroup?: (key: string) => void;
@@ -352,8 +352,7 @@ export function ListView({
     2 +
     (canReorder ? 1 : 0) +
     (selectionActive ? 1 : 0) +
-    (["status", "pr", "assignee", "priority", "sprint", "category", "dueDate", "updatedAt"] as const).filter(show)
-      .length +
+    BUILT_IN_COLUMNS.filter((c) => !c.fixed && show(c.id)).length +
     fieldColumns.length;
 
   return (
@@ -450,7 +449,7 @@ export function ListView({
                     data-group-key={group.key}
                     className="border-b border-border bg-bg-input/60"
                   >
-                    <th scope="colgroup" colSpan={columnCount} className="p-0 text-left font-medium">
+                    <td colSpan={columnCount} className="p-0">
                       <button
                         type="button"
                         aria-expanded={!collapsed}
@@ -473,12 +472,14 @@ export function ListView({
                             style={{ backgroundColor: group.color }}
                           />
                         )}
-                        <span className="font-semibold">{group.label}</span>
+                        <span className="max-w-[24rem] truncate font-semibold" title={group.label}>
+                          {group.label}
+                        </span>
                         <span data-testid="list-group-count" className="text-text-muted">
                           {group.tasks.length}
                         </span>
                       </button>
-                    </th>
+                    </td>
                   </tr>
                 );
               }

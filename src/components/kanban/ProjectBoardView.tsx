@@ -7,7 +7,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { ProjectBoard } from "@/hooks/use-project-board";
 import { ApiTask, BOARD_SORT_FIELDS, LIST_SORT_FIELDS, SortKey, SortDir } from "@/types";
 import { effectiveColumns } from "@/lib/columns";
-import { GroupBy, flattenGroups, groupTasks } from "@/lib/task-grouping";
+import { GroupBy, flattenGroups, groupTasks, sanitizeGroupBy } from "@/lib/task-grouping";
 import { ListColumnId } from "@/lib/list-columns";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Board } from "@/components/kanban/Board";
@@ -129,6 +129,11 @@ export function ProjectBoardView({
     [project?.columns, project?.customFields, sprints]
   );
 
+  const customFieldList = project?.customFields;
+  useEffect(() => {
+    setGroupBy((current) => sanitizeGroupBy(current, customFieldList ?? []));
+  }, [customFieldList]);
+
   const groups = useMemo(
     () =>
       viewMode === "list"
@@ -152,6 +157,11 @@ export function ProjectBoardView({
   }
 
   function toggleGroup(key: string) {
+    const group = groups.find((g) => g.key === key);
+    if (group && !collapsedGroups.has(key)) {
+      const hidden = new Set(group.tasks.map((t) => t._id));
+      setSelectedTasks((prev) => new Set([...prev].filter((id) => !hidden.has(id))));
+    }
     setCollapsedGroups((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
@@ -218,7 +228,7 @@ export function ProjectBoardView({
         setFocusedTaskIndex((prev) => Math.max(prev - 1, 0));
         return;
       }
-      if (e.key === "Enter" && noMod && isListView && focusedTaskIndex >= 0 && focusedTaskIndex < listTasks.length) {
+      if (e.key === "Enter" && noMod && isListView && !(e.target as HTMLElement | null)?.closest("button, a") && focusedTaskIndex >= 0 && focusedTaskIndex < listTasks.length) {
         e.preventDefault();
         const task = listTasks[focusedTaskIndex];
         router.push(taskPath(projectId, task.taskNumber));

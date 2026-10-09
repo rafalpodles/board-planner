@@ -10,6 +10,7 @@ import {
   PROJECT_KEY,
   SIBLING_TASK_ID,
   parkTaskOnMissingColumn,
+  renameField,
   seed,
   seedListVisibleDropdownField,
 } from "./seed";
@@ -279,4 +280,52 @@ test("the grouped list on a phone keeps its headers readable with no page scroll
   ]);
   expect(rowHeader!.height).toBeGreaterThanOrEqual(32);
   expect(row).not.toBeNull();
+});
+
+test("Enter on a group header folds it instead of opening the focused task", async ({ page, request }) => {
+  await sortOutPriorities(request);
+  await openList(page);
+  await groupBy(page, "Group: Priority");
+  await page.locator("body").click({ position: { x: 5, y: 5 } });
+  await page.keyboard.press("j");
+  await expect.poll(() => focusedKey(page)).not.toBeNull();
+  const url = page.url();
+
+  const toggle = header(page, "Medium").getByRole("button");
+  await toggle.focus();
+  await page.keyboard.press("Enter");
+
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(taskRows(page)).toHaveCount(2);
+  expect(page.url()).toBe(url);
+});
+
+test("folding a group drops its tasks from the selection, so a bulk action cannot reach hidden rows", async ({ page, request }) => {
+  await sortOutPriorities(request);
+  await openList(page);
+  await groupBy(page, "Group: Priority");
+
+  await page.getByRole("button", { name: /^Select/ }).click();
+  await taskRows(page).first().click();
+  await expect(page.getByRole("button", { name: "Select (1)" })).toBeVisible();
+
+  await header(page, "Urgent").getByRole("button").click();
+
+  await expect(page.getByRole("button", { name: "Select (1)" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Select", exact: true })).toBeVisible();
+});
+
+test("a field with a very long name does not push the toolbar past a phone screen", async ({ page }) => {
+  await seedListVisibleDropdownField();
+  await renameField(LIST_DROPDOWN_FIELD_ID, { name: "Component ".repeat(10).trim() });
+  await page.setViewportSize({ width: 390, height: 800 });
+  await openList(page);
+
+  await expect(groupSelect(page)).toBeVisible();
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+  );
+  expect(overflow).toBeLessThanOrEqual(0);
+  const box = await groupSelect(page).boundingBox();
+  expect(box!.x + box!.width).toBeLessThanOrEqual(390);
 });
