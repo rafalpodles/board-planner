@@ -80,6 +80,7 @@ test.beforeEach(async ({ request }) => {
 });
 
 test.afterEach(async ({ request }) => {
+  await withDb((db) => db.collection("settings").deleteMany({ organisation: { $in: [ACME.organisation, GLOBEX.organisation] } }));
   for (const who of [ACME, GLOBEX]) {
     await request.post(`${ORGANISATIONS_API}/api/projects/${SHARED_KEY}/pm/interrupt`, { headers: { host: new URL(originOf(who)).host, authorization: `Bearer ${who.apiToken}` } });
   }
