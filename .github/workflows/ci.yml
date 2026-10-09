@@ -317,6 +317,14 @@ jobs:
             !e2e/.artifacts/licence-smoke/licence-service.log
           retention-days: 7
 
+  backup:
+    name: Backup — dump, upload, read back, restore
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - run: ./backup/test.sh
+
   plan_e2e:
     # Decides which of the six groups below this push can possibly affect, so a change confined to
     # one feature area doesn't pay for all six. See e2e/affected-groups.ts for the mapping and the
@@ -446,6 +454,7 @@ jobs:
       - e2e_production_csp
       - smoke_worker
       - smoke_licence
+      - backup
       - plan_e2e
       - e2e
     if: always()
