@@ -120,6 +120,35 @@ describe("gatewayChat", () => {
     );
   });
 
+  it("counts a stopped call's images at a flat figure each, not at the length of the base64 they travel as", async () => {
+    m.chatCompletion.mockResolvedValue({ type: "aborted" });
+    const messages = [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "x".repeat(100) },
+          { type: "image_url", image_url: { url: `data:image/png;base64,${"A".repeat(4_000_000)}` } },
+        ],
+      },
+    ];
+
+    await gatewayChat(db, CONTEXT, { ...CHAT, messages });
+
+    const { totalTokens } = m.recordUsage.mock.calls[0][1].usage;
+    expect(totalTokens).toBeGreaterThanOrEqual(1500);
+    expect(totalTokens).toBeLessThan(1700);
+  });
+
+  it("counts nothing for a call that was stopped before it was sent, and never reaches the provider", async () => {
+    const stopped = new AbortController();
+    stopped.abort();
+
+    expect(await gatewayChat(db, CONTEXT, { ...CHAT, signal: stopped.signal })).toEqual({ type: "aborted" });
+
+    expect(m.chatCompletion).not.toHaveBeenCalled();
+    expect(m.recordUsage).not.toHaveBeenCalled();
+  });
+
   it("gives the answer even when writing it down failed", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     m.chatCompletion.mockResolvedValue({ type: "text", content: "hi", usage: USAGE });

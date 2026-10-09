@@ -146,4 +146,11 @@ describe("what it reports about the cache", () => {
 
     expect(await call()).toMatchObject({ usage: { cachedPromptTokens: 0, cacheWriteTokens: 0 } });
   });
+
+  // BP-680: a limit is made of these numbers, and one that goes below nothing takes tokens off what was spent
+  it("reads a negative figure as nothing, and the total as what the other two make", async () => {
+    respondWith({ ...TEXT, usage: { prompt_tokens: -1000, completion_tokens: 1500, total_tokens: 0 } });
+
+    expect(await call()).toMatchObject({ usage: { promptTokens: 0, completionTokens: 1500, totalTokens: 1500 } });
+  });
 });

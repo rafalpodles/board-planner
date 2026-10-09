@@ -118,7 +118,7 @@ test("a trial has 3M tokens for the whole trial, counted under the trial and not
   const refused = await chat(page);
 
   expect(refused.status).toBe(429);
-  expect(refused.body).toMatchObject({ scope: "trial", used: 3_000_000, limit: 3_000_000 });
+  expect(refused.body).toMatchObject({ scope: "trial", used: 3_000_000, limit: 3_000_000, resetsAt: null });
   expect(refused.body.error).toMatch(/the allowance of its trial/);
   expect(refused.body.error).not.toMatch(/renews/);
 });

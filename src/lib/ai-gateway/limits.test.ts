@@ -4,10 +4,11 @@ const m = vi.hoisted(() => ({
   hosted: true,
   entitlements: { plan: "pro", trial: false, expiresAt: undefined as Date | undefined } as Record<string, unknown>,
   active: 10,
+  pending: 0,
 }));
 
 vi.mock("@/lib/organisation", () => ({ getOrganisation: async () => ({ entitlements: m.entitlements }) }));
-vi.mock("@/lib/member-limit", () => ({ memberCounts: async () => ({ active: m.active, pending: 0 }) }));
+vi.mock("@/lib/member-limit", () => ({ memberCounts: async () => ({ active: m.active, pending: m.pending }) }));
 vi.mock("@/lib/organisation-host", () => ({ organisationDomain: () => (m.hosted ? "board-planner.com" : null) }));
 
 const { budgetOf, limitFromEnv } = await import("./limits");
@@ -18,6 +19,7 @@ beforeEach(() => {
   m.hosted = true;
   m.entitlements = { plan: "pro", trial: false };
   m.active = 10;
+  m.pending = 0;
 });
 afterEach(() => vi.unstubAllEnvs());
 
@@ -75,6 +77,13 @@ describe("budgetOf", () => {
     expect(await budgetOf(db)).toEqual({ scope: "trial", limit: 3_000_000, dailyCeiling: 600_000 });
     m.active = 14;
     expect(await budgetOf(db)).toEqual({ scope: "trial", limit: 3_000_000, dailyCeiling: 600_000 });
+  });
+
+  it("counts the members who are in, not the ones who have only been invited", async () => {
+    m.active = 10;
+    m.pending = 5;
+
+    expect(await budgetOf(db)).toMatchObject({ limit: 15_000_000 });
   });
 
   it("rounds the daily ceiling up, and never to nothing", async () => {

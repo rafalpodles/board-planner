@@ -1,3 +1,6 @@
+// A server that is not on UTC is where a day read in local time goes wrong; the runner of the suite may well be on it
+process.env.TZ = "Pacific/Auckland";
+
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { recordUsage } from "./usage";
 
@@ -73,6 +76,12 @@ describe("recordUsage", () => {
 
   it("never takes tokens off a counter, whatever a provider reports", async () => {
     await recordUsage(db, { source: "pm", keySource: "managed", model: "m/x", usage: { ...USAGE, totalTokens: -500 } }, "month", NOW);
+
+    expect(updateOne).toHaveBeenCalledWith({ kind: "day", period: "2026-10-09" }, { $inc: { tokens: 0, calls: 1 } }, { upsert: true });
+  });
+
+  it("adds nothing, rather than not-a-number, for a total that is not a number: a counter that is NaN is never over its limit", async () => {
+    await recordUsage(db, { source: "pm", keySource: "managed", model: "m/x", usage: { ...USAGE, totalTokens: NaN } }, "month", NOW);
 
     expect(updateOne).toHaveBeenCalledWith({ kind: "day", period: "2026-10-09" }, { $inc: { tokens: 0, calls: 1 } }, { upsert: true });
   });

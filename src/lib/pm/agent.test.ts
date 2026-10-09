@@ -155,6 +155,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   addCommentExecute.mockResolvedValue({ result: { ok: true } });
   resolveModelKey.mockResolvedValue({ ok: true, key: "sk-the-orgs-own-key", source: "own" });
+  checkBudget.mockResolvedValue({ refusal: null, counter: "month" });
 });
 
 // BP-652. The key is resolved once for the turn and every call of it is made with that key
@@ -208,9 +209,14 @@ describe("runPmTurn's AI allowance", () => {
   it("records what each call cost for the project and for the person the turn was run for", async () => {
     chatCompletion.mockResolvedValueOnce({ type: "text", content: "done", usage: { promptTokens: 9, completionTokens: 1, totalTokens: 10, cachedPromptTokens: 0, cacheWriteTokens: 0 } });
 
-    await turn(NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS);
+    await runPmTurn(db, {
+      projectId: PROJECT._id,
+      userMessage: "what is next?",
+      triggeredByUserId: "person-7",
+      disallowedTools: NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS,
+    });
 
-    expect(recordUsage).toHaveBeenCalledWith(db, expect.objectContaining({ source: "pm", projectId: PROJECT._id, userId: "pm-user-id", keySource: "own" }), "month");
+    expect(recordUsage).toHaveBeenCalledWith(db, expect.objectContaining({ source: "pm", projectId: PROJECT._id, userId: "person-7", keySource: "own" }), "month");
   });
 });
 

@@ -6,6 +6,20 @@ import { describeBudgetRefusal } from "./refusal";
 import { recordUsage, type UsageEntry } from "./usage";
 
 const CHARACTERS_PER_TOKEN = 4;
+const TOKENS_PER_IMAGE = 1500;
+
+/** What was sent, as far as it is known: its text, and a flat figure for each image, which travels as base64 and is billed by its size on screen */
+function sentTokens(messages: unknown): number {
+  let images = 0;
+  const text = JSON.stringify(messages, (_key, value) => {
+    if (typeof value === "string" && value.startsWith("data:")) {
+      images++;
+      return "";
+    }
+    return value;
+  });
+  return Math.ceil(text.length / CHARACTERS_PER_TOKEN) + images * TOKENS_PER_IMAGE;
+}
 
 export type GatewayContext = Pick<UsageEntry, "source" | "projectId" | "userId">;
 
@@ -56,12 +70,15 @@ export async function gatewayChat(
   const gate = await openGate(db, { error: "The PM agent is not configured on this instance", status: 503 });
   if (!gate.ok) return { type: "error", error: gate.error, refused: true };
 
+  // Stopped while the gate was being opened: nothing was sent, so nothing is counted
+  if (opts.signal?.aborted) return { type: "aborted" };
+
   const completion = await chatCompletion({ ...opts, apiKey: gate.key });
   if (completion.type === "text" || completion.type === "tool_calls") {
     await record(db, { ...context, keySource: gate.keySource, model: opts.model, usage: completion.usage }, gate.counter);
   } else if (completion.type === "aborted") {
-    // A request that was sent is billed in full whether or not anyone waited for the answer; its size is what was sent
-    const sent = Math.ceil(JSON.stringify(opts.messages).length / CHARACTERS_PER_TOKEN);
+    // A request that reached the provider is billed whether or not anyone waited for the answer
+    const sent = sentTokens(opts.messages);
     const usage = { promptTokens: sent, completionTokens: 0, totalTokens: sent, cachedPromptTokens: 0, cacheWriteTokens: 0 };
     await record(db, { ...context, keySource: gate.keySource, model: opts.model, usage }, gate.counter);
   }

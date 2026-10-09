@@ -42,7 +42,9 @@ describe("the gateway is the only door to a model", () => {
 
   it("makes AI Assist's generation through the gateway, in the one route that makes it", () => {
     expect(whereIs(/\bgenerateTask\s*\(/)).toEqual(["src/app/api/projects/[projectId]/ai/generate-task/route.ts", "src/lib/ai.ts"]);
-    expect(readFileSync(join(ROOT, "src/app/api/projects/[projectId]/ai/generate-task/route.ts"), "utf8")).toMatch(
+    const route = readFileSync(join(ROOT, "src/app/api/projects/[projectId]/ai/generate-task/route.ts"), "utf8");
+    expect(route.match(/\bgenerateTask\s*\(/g)).toHaveLength(1);
+    expect(route).toMatch(
       /gatewayAssist\([^]*?\(apiKey, report\) =>\s*generateTask\([^]*?\bapiKey\b[^]*?\breport\b/
     );
   });

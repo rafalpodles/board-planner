@@ -125,15 +125,18 @@ describe("runPmTrigger", () => {
     });
   });
 
-  it("holds the trigger, with no attempt spent, while the day's ceiling pauses AI, so that it is reviewed when the day is over", async () => {
+  it("holds the trigger, with no attempt spent, while the day's ceiling pauses AI, and asks again on the next tick", async () => {
     resolveModelKey.mockResolvedValueOnce({ ok: true, key: "k", source: "managed" });
     checkBudget.mockResolvedValueOnce({ refusal: { scope: "day", used: 3_000_000, limit: 3_000_000, resetsAt: new Date("2026-10-10T00:00:00Z") }, counter: "month" });
 
     expect(await runPmTrigger(db, trigger)).toBe("deferred");
 
     expect(runPmTurn).not.toHaveBeenCalled();
-    expect(findOneAndUpdate).toHaveBeenCalledWith({ _id: "t1", organisation: DEFAULT_ORGANISATION_ID }, { $set: { state: "pending", lastError: "", active: true } });
-    expect(findOneAndUpdate).toHaveBeenCalledWith({ _id: "t1", organisation: DEFAULT_ORGANISATION_ID }, { $inc: { attempts: -1 } });
+    expect(findOneAndUpdate).toHaveBeenCalledTimes(1);
+    expect(findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: "t1", organisation: DEFAULT_ORGANISATION_ID },
+      { $set: { state: "pending", lastError: "", active: true }, $inc: { attempts: -1 } }
+    );
   });
 
   it("withholds assign_task and change_status from the turn", async () => {

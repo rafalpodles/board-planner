@@ -1,3 +1,6 @@
+// A server that is not on UTC is where a day read in local time goes wrong; the runner of the suite may well be on it
+process.env.TZ = "Pacific/Auckland";
+
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const m = vi.hoisted(() => ({ budget: null as unknown, rows: [] as { kind: string; period: string; tokens: number }[], trial: false }));
