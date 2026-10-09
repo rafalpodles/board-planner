@@ -70,10 +70,18 @@ export function sanitizeFieldFilters(
     const kept =
       field.fieldType === "multiselect"
         ? sanitizeMultiselect(filter, field)
-        : { ...filter, values: undefined, mode: undefined };
+        : sanitizeScalar(filter);
     if (isFieldFilterSet(kept)) result[id] = kept;
   }
   return result;
+}
+
+function sanitizeScalar(filter: FieldFilter): FieldFilter {
+  const kept: FieldFilter = {};
+  for (const key of ["value", "from", "to"] as const) {
+    if (typeof filter[key] === "string") kept[key] = filter[key];
+  }
+  return kept;
 }
 
 function sanitizeMultiselect(filter: FieldFilter, field: ApiCustomField): FieldFilter {

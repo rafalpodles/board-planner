@@ -218,6 +218,12 @@ describe("a multiselect filter", () => {
     });
   });
 
+  it("keeps only text in the value and range of a single-value filter", () => {
+    const text = { ...labels, _id: "ft", fieldType: "text" } as unknown as ApiCustomField;
+    expect(sanitizeFieldFilters({ ft: { value: 5 } }, [text])).toEqual({});
+    expect(sanitizeFieldFilters({ ft: { value: "x", from: 3 } }, [text])).toEqual({ ft: { value: "x" } });
+  });
+
   it("survives a stored list that is not a list", () => {
     expect(sanitizeFieldFilters({ fl: { values: "abc" } }, [labels])).toEqual({});
     expect(sanitizeFieldFilters({ fl: { values: { length: 1 } } }, [labels])).toEqual({});
@@ -227,7 +233,7 @@ describe("a multiselect filter", () => {
     const dropdown = { ...labels, _id: "fd", fieldType: "dropdown" } as unknown as ApiCustomField;
     expect(sanitizeFieldFilters({ fd: { values: ["a"], mode: "all" } }, [dropdown])).toEqual({});
     expect(sanitizeFieldFilters({ fd: { value: "a", values: ["b"] } }, [dropdown])).toEqual({
-      fd: { value: "a", values: undefined, mode: undefined },
+      fd: { value: "a" },
     });
   });
 
