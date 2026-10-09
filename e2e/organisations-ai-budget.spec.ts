@@ -20,9 +20,9 @@ const now = new Date();
 const TODAY = now.toISOString().slice(0, 10);
 const MONTH = now.toISOString().slice(0, 7);
 
-async function makePro(request: APIRequestContext, who: OrganisationFixture) {
+async function makePro(request: APIRequestContext, who: OrganisationFixture, trial = false) {
   const path = `/api/platform/organisations/${who.organisation.toHexString()}/licence`;
-  const body = Buffer.from(JSON.stringify({ licenceKey: e2eLicence({ customer: `${who.slug} customer`, organisation: who.organisation.toHexString() }) }));
+  const body = Buffer.from(JSON.stringify({ licenceKey: e2eLicence({ customer: `${who.slug} customer`, organisation: who.organisation.toHexString(), ...(trial ? { trial: true as const } : {}) }) }));
   const headers = signPlatformRequest({ method: "POST", host: PLATFORM_HOST, path, body }, E2E_PLATFORM_REQUEST_KEY);
   const response = await request.post(`${ORGANISATIONS_API}${path}`, { headers: { host: PLATFORM_HOST, "content-type": "application/json", ...headers }, data: body });
   expect(response.status(), await response.text()).toBe(200);
@@ -43,9 +43,9 @@ async function monthlyLimit(who: OrganisationFixture): Promise<number> {
   return 15_000_000 + 1_000_000 * Math.max(0, people - 10);
 }
 
-const spend = (who: OrganisationFixture, kind: "day" | "month", tokens: number) =>
+const spend = (who: OrganisationFixture, kind: "day" | "month" | "trial", tokens: number) =>
   withDb(async (db) => {
-    const period = kind === "day" ? TODAY : MONTH;
+    const period = kind === "day" ? TODAY : kind === "month" ? MONTH : "all";
     await db.collection("aibudgets").deleteMany({ organisation: who.organisation, kind, period });
     await db.collection("aibudgets").insertOne({ organisation: who.organisation, kind, period, tokens, calls: 1, ownTokens: 0, ownCalls: 0 });
   });
@@ -104,6 +104,23 @@ test("an organisation that has spent its month is refused with the number and th
   await open(page, GLOBEX);
   expect((await chat(page)).status).toBe(200);
   expect((await generate(page)).status).toBe(200);
+});
+
+test("a trial has 3M tokens for the whole trial, counted under the trial and not the month, and is refused at them", async ({ page, request }) => {
+  await makePro(request, ACME, true);
+  await open(page, ACME);
+  expect((await chat(page)).status).toBe(200);
+  const [dayRow, trialRow] = await counters(ACME);
+  expect(dayRow).toMatchObject({ kind: "day", tokens: 1200 });
+  expect(trialRow).toMatchObject({ kind: "trial", period: "all", tokens: 1200 });
+
+  await spend(ACME, "trial", 3_000_000);
+  const refused = await chat(page);
+
+  expect(refused.status).toBe(429);
+  expect(refused.body).toMatchObject({ scope: "trial", used: 3_000_000, limit: 3_000_000 });
+  expect(refused.body.error).toMatch(/the allowance of its trial/);
+  expect(refused.body.error).not.toMatch(/renews/);
 });
 
 test("the daily ceiling, a fifth of the month, refuses before the month does and starts again at midnight UTC", async ({ page }) => {
