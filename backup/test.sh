@@ -54,6 +54,12 @@ shimmed() { docker run --rm --network $net "${env_args[@]}" -v "$shim:/shim" -e 
 if shimmed -e BACKUP_STAMP=2027-01-01T01 bp965-backup backup.sh >/dev/null 2>&1; then fail "a dead dump passed"; fi
 list | grep -q '^hourly/2027-01-01T01' && fail "a dead dump became an hourly copy"
 
+echo "== a dump that hangs and ignores the first signal is killed, and the run fails"
+printf '#!/bin/sh\ntrap "" TERM\nsleep 600 & wait\n' > "$shim/mongodump"; chmod +x "$shim/mongodump"
+started=$(date +%s)
+if shimmed -e BACKUP_TIMEOUT=5s -e BACKUP_KILL_AFTER=3s -e BACKUP_STAMP=2027-02-01T01 bp965-backup backup.sh >/dev/null 2>&1; then fail "a hung dump passed"; fi
+[ $(( $(date +%s) - started )) -lt 60 ] || fail "the hung dump was not cut off"
+
 echo "== an upload that does not read back as it was sent is a failed backup, whether cut short or changed in the middle"
 rm -f "$shim/mongodump"
 for fault in 'head -c 200' '{ head -c 100; printf X; tail -c +102; }'; do
@@ -89,18 +95,20 @@ expect_failure "refusing to restore over" run bp965-backup restore.sh monthly/20
 sh_mongo bp965-scratch restore_check --eval 'db.users.insertOne({stray: true})' >/dev/null
 run -e FORCE=1 bp965-backup restore.sh monthly/2026-11.archive.gz.enc "$scratch" | grep -q '^users 250$' || fail "FORCE did not replace what was there"
 expect_failure "nothing was restored" run -e MONGODB_DB=other bp965-backup restore.sh monthly/2026-11.archive.gz.enc "$scratch" fresh
+expect_failure "nothing was restored" run -e FORCE=1 -e MONGODB_DB=other bp965-backup restore.sh monthly/2026-11.archive.gz.enc "$scratch" restore_check
 
 echo "== a wrong passphrase restores nothing"
 expect_failure "" run -e BACKUP_PASSPHRASE=wrong bp965-backup restore.sh monthly/2026-11.archive.gz.enc "$scratch" wrongkey
 [ "$(sh_mongo bp965-scratch wrongkey --eval 'db.getCollectionNames().length')" = 0 ] || fail "wrongkey has collections"
 
 echo "== old copies are pruned, current ones are not"
+now=$(date -u +%Y-%m-%dT%H)
 sh 'echo old | rclone rcat "$REMOTE/hourly/old.txt"'
-sleep 12
-run -e HOURLY_KEEP=10s bp965-backup backup.sh >/dev/null
+sleep 35
+run -e HOURLY_KEEP=30s -e BACKUP_STAMP="$now" bp965-backup backup.sh >/dev/null
 all=$(list)
 echo "$all" | grep -q 'old.txt' && fail "old.txt survived"
-echo "$all" | grep -q "^hourly/$(date -u +%Y-%m-%dT%H)" || fail "the fresh hourly copy was pruned"
+echo "$all" | grep -q "^hourly/$now" || fail "the fresh hourly copy was pruned"
 echo "$all" | grep -q '^daily/2026-11-01' || fail "the daily copy was pruned"
 
 echo "ALL GOOD"

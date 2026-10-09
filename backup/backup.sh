@@ -7,7 +7,7 @@ trap 'rc=$?; trap - EXIT; [ $rc -eq 0 ] || ping /fail; exit $rc' EXIT
 trap 'exit 143' TERM
 
 # A run that hangs would stop every later one
-if [ -z "${BACKUP_INNER:-}" ]; then BACKUP_INNER=1 exec timeout "${BACKUP_TIMEOUT:-45m}" "$0" "$@"; fi
+if [ -z "${BACKUP_INNER:-}" ]; then BACKUP_INNER=1 exec timeout -k "${BACKUP_KILL_AFTER:-2m}" "${BACKUP_TIMEOUT:-45m}" "$0" "$@"; fi
 
 : "${MONGODB_URI:?}" "${BACKUP_PASSPHRASE:?}"
 [ -n "${HEALTHCHECK_URL:-}" ] || [ "${ALLOW_NO_HEALTHCHECK:-}" = "1" ] || { echo "set HEALTHCHECK_URL: a backup that fails must tell somebody" >&2; exit 1; }
@@ -30,7 +30,7 @@ stamp="${BACKUP_STAMP:-$(date -u +%Y-%m-%dT%H)}"
 day=${stamp%T*}
 month=${day%-*}
 object="hourly/$stamp.archive.gz.enc"
-incoming="incoming/$stamp-$$.archive.gz.enc"
+incoming="incoming/$stamp-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n').archive.gz.enc"
 
 # Into incoming/ first: a dump that dies midway still uploads, and must not take the place of a good copy
 sent=$(mktemp)

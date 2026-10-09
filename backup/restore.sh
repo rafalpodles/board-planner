@@ -18,12 +18,11 @@ into="${3:-restore_check}"
 existing=$(mongosh "$target" --quiet --eval "db.getSiblingDB('$into').getCollectionNames().length")
 [ "$existing" = 0 ] || [ "${FORCE:-}" = "1" ] || { echo "$into already has $existing collections: restore into an empty database, or set FORCE=1 to replace them" >&2; exit 1; }
 
+log=$(mktemp)
 rclone cat "$REMOTE/$object" \
   | openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:BACKUP_PASSPHRASE \
-  | mongorestore --uri="$target" --archive --gzip --drop --stopOnError --nsInclude="$MONGODB_DB.*" --nsFrom="$MONGODB_DB.*" --nsTo="$into.*"
-
-restored=$(mongosh "$target" --quiet --eval "db.getSiblingDB('$into').getCollectionNames().length")
-[ "$restored" -gt 0 ] || { echo "nothing was restored into $into: is MONGODB_DB ($MONGODB_DB) the database that was backed up?" >&2; exit 1; }
+  | mongorestore --uri="$target" --archive --gzip --drop --stopOnError --nsInclude="$MONGODB_DB.*" --nsFrom="$MONGODB_DB.*" --nsTo="$into.*" 2>&1 | tee "$log"
+grep -Eq '[1-9][0-9]* document\(s\) restored successfully' "$log" || { echo "nothing was restored into $into: is MONGODB_DB ($MONGODB_DB) the database that was backed up?" >&2; exit 1; }
 
 # The dump reads collection after collection while the app writes: a project's counter can be behind its newest task, and every new task would then fail until it caught up
 mongosh "$target" --quiet --eval "
