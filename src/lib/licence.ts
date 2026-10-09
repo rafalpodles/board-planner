@@ -17,9 +17,7 @@ export interface LicencePayload {
   organisation?: string;
   // A trial ends on its day: the 14-day grace is for a failed payment, and a trial is not a payment
   trial?: true;
-  // The key of a paid period. "renewing": the subscription renews by itself, so there is nothing to warn about before its
-  // end, and running past it means a payment failed, which the grace is for. "ending": it was cancelled, so Pro ends on
-  // the day the key does, with no grace, like a trial.
+  // A paid period's key: "renewing" renews by itself (running past its end is a failed payment), "ending" was cancelled (no grace)
   subscription?: "renewing" | "ending";
 }
 

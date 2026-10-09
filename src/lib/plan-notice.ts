@@ -2,9 +2,7 @@ import { ENTITLEMENT_GRACE_MS } from "./entitlements";
 
 export const PLAN_WARNING_DAYS = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;
-// A subscription's key ends with its day, and Stripe takes the renewal's payment some time after the period ends (it holds
-// the invoice open for about an hour first): a renewing key that has just run out is a renewal on its way, not a payment
-// that failed. Only a whole day past its end is told as one.
+// Stripe takes a renewal's payment up to an hour after the period ends: a renewing key a day past its end is a failed payment
 export const RENEWAL_SETTLE_MS = DAY_MS;
 
 export type PlanNotice =
