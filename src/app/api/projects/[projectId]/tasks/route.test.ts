@@ -322,6 +322,44 @@ describe("GET /api/projects/:projectId/tasks — paging, the summary view and th
       });
     });
 
+    it("finds a task by the name of one of its labels, as well as by title and description", async () => {
+      projectFindOne.mockReturnValue({
+        lean: async () => ({
+          customFields: [
+            {
+              _id: FIELD_ID,
+              name: "Labels",
+              fieldType: "multiselect",
+              options: [
+                { id: "o-front", value: "Frontend", order: 0 },
+                { id: "o-back", value: "Backend", order: 1 },
+              ],
+            },
+          ],
+        }),
+      });
+      await GET(request("?search=front"), ctx());
+
+      expect((filterUsed() as { $or: unknown[] }).$or).toEqual([
+        { title: expect.anything() },
+        { description: expect.anything() },
+        { [`customFieldValues.${FIELD_ID}`]: { $in: ["o-front"] } },
+      ]);
+    });
+
+    it("adds no label clause when no label has that name or the field is archived", async () => {
+      projectFindOne.mockReturnValue({
+        lean: async () => ({
+          customFields: [
+            { _id: FIELD_ID, name: "Labels", fieldType: "multiselect", archived: true, options: [{ id: "o-front", value: "Frontend" }] },
+          ],
+        }),
+      });
+      await GET(request("?search=front"), ctx());
+
+      expect((filterUsed() as { $or: unknown[] }).$or).toHaveLength(2);
+    });
+
     it("refuses a day that does not exist rather than moving the range into the next month", async () => {
       for (const param of ["dueBefore=2026-02-31", "dueAfter=2026-04-31", "updatedSince=2026-02-30"]) {
         taskFind.mockClear();

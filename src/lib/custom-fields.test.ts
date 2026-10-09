@@ -10,6 +10,10 @@ import {
   sanitizeCustomFieldValues,
   matchesFieldFilter,
   matchesAllFieldFilters,
+  labelMatches,
+  labelSearchClauses,
+  pickedOptions,
+  taskMatchesLabelSearch,
   resolveFieldsByName,
   customFieldActivityChanges,
   parseOptions,
@@ -223,6 +227,26 @@ describe("matchesFieldFilter", () => {
     expect(matchesFieldFilter(["a", "b"], { value: "b" }, multi)).toBe(true);
     expect(matchesFieldFilter(["a"], { value: "b" }, multi)).toBe(false);
     expect(matchesFieldFilter(undefined, { value: "b" }, multi)).toBe(false);
+  });
+
+  it("matches a multiselect on any of several picked options, or on all of them", () => {
+    expect(matchesFieldFilter(["a"], { values: ["a", "b"] }, multi)).toBe(true);
+    expect(matchesFieldFilter(["a"], { values: ["a", "b"], mode: "any" }, multi)).toBe(true);
+    expect(matchesFieldFilter(["c"], { values: ["a", "b"] }, multi)).toBe(false);
+    expect(matchesFieldFilter(["a"], { values: ["a", "b"], mode: "all" }, multi)).toBe(false);
+    expect(matchesFieldFilter(["b", "a", "c"], { values: ["a", "b"], mode: "all" }, multi)).toBe(true);
+    expect(matchesFieldFilter(undefined, { values: ["a"], mode: "all" }, multi)).toBe(false);
+  });
+
+  it("lets everything through a multiselect that has no option picked, whatever the mode", () => {
+    expect(matchesFieldFilter(["a"], { values: [], mode: "all" }, multi)).toBe(true);
+    expect(matchesFieldFilter(undefined, { mode: "all" }, multi)).toBe(true);
+  });
+
+  it("still reads the single value an older filter stored", () => {
+    expect(pickedOptions({ value: "b" })).toEqual(["b"]);
+    expect(pickedOptions({ value: "b", values: ["a"] })).toEqual(["a"]);
+    expect(pickedOptions(undefined)).toEqual([]);
   });
 });
 
@@ -555,5 +579,41 @@ describe("sameFieldName", () => {
     expect(matches("Gam.a", "Gamma")).toBe(false);
     expect(() => sameFieldName("Cost (EUR")).not.toThrow();
     expect(matches("Cost (EUR", "cost (eur")).toBe(true);
+  });
+});
+
+describe("finding a task by the name of a label", () => {
+  const labels = {
+    _id: "f-labels",
+    fieldType: "multiselect" as const,
+    options: [
+      { id: "o-front", value: "Frontend", order: 0 },
+      { id: "o-back", value: "Backend", order: 1 },
+      { id: "o-front-end", value: "Front of house", order: 2 },
+    ],
+  };
+  const other = { _id: "f-other", fieldType: "dropdown" as const, options: [{ id: "x", value: "Frontend" }] };
+
+  it("matches an option whose name contains the text, in any case, in live multiselects only", () => {
+    expect(labelMatches([labels, other], "FRONT")).toEqual([
+      { fieldId: "f-labels", ids: ["o-front", "o-front-end"] },
+    ]);
+    expect(labelMatches([{ ...labels, archived: true }], "front")).toEqual([]);
+    expect(labelMatches([labels], "  ")).toEqual([]);
+    expect(labelMatches(undefined, "front")).toEqual([]);
+  });
+
+  it("finds the task that holds the label, and not one that holds another", () => {
+    expect(taskMatchesLabelSearch({ "f-labels": ["o-back", "o-front"] }, [labels], "front")).toBe(true);
+    expect(taskMatchesLabelSearch({ "f-labels": ["o-back"] }, [labels], "front")).toBe(false);
+    expect(taskMatchesLabelSearch({}, [labels], "front")).toBe(false);
+    expect(taskMatchesLabelSearch({ "f-labels": "o-front" }, [labels], "front")).toBe(false);
+  });
+
+  it("turns the same match into a clause per field", () => {
+    expect(labelSearchClauses([labels], "back")).toEqual([
+      { "customFieldValues.f-labels": { $in: ["o-back"] } },
+    ]);
+    expect(labelSearchClauses([labels], "zzz")).toEqual([]);
   });
 });
