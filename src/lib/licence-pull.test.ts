@@ -1,10 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Types } from "mongoose";
 
-const { storeOrganisationLicence } = vi.hoisted(() => ({ storeOrganisationLicence: vi.fn() }));
-vi.mock("./organisation-licence", () => ({ storeOrganisationLicence }));
+const m = vi.hoisted(() => ({ storeOrganisationLicence: vi.fn(), counts: vi.fn(), row: { _id: { toHexString: () => "0123456789abcdef01234567" }, name: "Acme", slug: "acme" } }));
+const { storeOrganisationLicence } = m;
+vi.mock("./organisation-licence", () => ({ storeOrganisationLicence: m.storeOrganisationLicence }));
+vi.mock("./db", () => ({ connectDB: vi.fn() }));
+vi.mock("./member-limit", () => ({ memberCounts: m.counts }));
+vi.mock("./organisation-jobs", () => ({ forEachServedOrganisation: async (_label: string, each: (db: { organisation: unknown }) => Promise<void>) => each({ organisation: m.row._id }) }));
+vi.mock("@/models/organisation", () => ({ Organisation: { findById: () => ({ select: () => ({ lean: async () => m.row }) }) } }));
 
-const { licencePullConfig, licencePullTickMs, pullLicence, pullNewOrganisationLicence, LICENCE_PULL_PATH } = await import("./licence-pull");
+const { licencePullConfig, licencePullTickMs, pullEveryLicence, pullLicence, pullNewOrganisationLicence, LICENCE_PULL_PATH } = await import("./licence-pull");
 const { platformSigningString, PLATFORM_HEADERS } = await import("./platform-request");
 const { createPublicKey, generateKeyPairSync, verify } = await import("node:crypto");
 
@@ -139,5 +144,40 @@ describe("pullNewOrganisationLicence (BP-929)", () => {
     vi.stubEnv("LICENCE_PULL_KEY", "");
     await expect(pullNewOrganisationLicence(new Types.ObjectId().toHexString())).resolves.toBeUndefined();
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("new organisation"), expect.stringContaining("go together"));
+  });
+});
+
+// BP-982: two bounds the sign-up and the daily ask depend on
+describe("what the daily ask and the sign-up ask put up with", () => {
+  const config = { url: new URL("https://licence.example"), key: KEY };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("is still sent, without the count, when the people cannot be counted: not being able to count must not cost an organisation its licence", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ licenceKey: "key-1" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    m.counts.mockRejectedValue(new Error("database busy"));
+    storeOrganisationLicence.mockResolvedValue({ status: "stored", plan: "pro", expiresAt: "2027-01-01" });
+
+    await pullEveryLicence(config);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(Buffer.from(fetchMock.mock.calls[0][1].body).toString())).not.toHaveProperty("members");
+    expect(storeOrganisationLicence).toHaveBeenCalledWith("0123456789abcdef01234567", "key-1", expect.any(String));
+  });
+
+  it("gives a licence service four seconds at sign-up, so one that hangs cannot hold a new organisation's first page", async () => {
+    vi.stubEnv("LICENCE_SERVICE_URL", "https://licence.example");
+    vi.stubEnv("LICENCE_PULL_KEY", JSON.stringify(KEY));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 200 })));
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+
+    await pullNewOrganisationLicence("0123456789abcdef01234567");
+
+    expect(timeout).toHaveBeenCalledWith(4_000);
   });
 });

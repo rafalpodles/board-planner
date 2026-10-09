@@ -140,8 +140,9 @@ test.describe("BP-673: creating an organisation from the platform host", () => {
     }
   });
 
+  // Nine, past the eight a company gets and under the ten a network gets, so only the exemption can let the ninth through
   test("a public mail provider is not held to the company-domain limit", async ({ request }) => {
-    for (let n = 1; n <= 6; n++) {
+    for (let n = 1; n <= 9; n++) {
       expect((await createOne(request, `someone${n}-${Date.now()}@gmail.com`, n)).status(), `gmail address ${n}`).toBe(201);
     }
   });

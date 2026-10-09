@@ -168,11 +168,14 @@ export async function seedTwoOrganisations(): Promise<void> {
   await mongoose.disconnect();
 }
 
-export async function signInOn(context: BrowserContext, who: OrganisationFixture): Promise<void> {
+export const signInOn = (context: BrowserContext, who: OrganisationFixture): Promise<void> => signInWithToken(context, who, who.sessionToken);
+
+/** The session cookie of somebody else in the organisation, whose session a spec has seeded */
+export async function signInWithToken(context: BrowserContext, who: OrganisationFixture, sessionToken: string): Promise<void> {
   await context.addCookies([
     {
       name: "__Host-bp_session",
-      value: who.sessionToken,
+      value: sessionToken,
       domain: `${who.slug}.${ORGANISATION_DOMAIN}`,
       path: "/",
       httpOnly: true,
