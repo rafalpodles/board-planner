@@ -9,6 +9,10 @@ const buildBoardDigest = vi.fn();
 const drainPmTriggers = vi.fn();
 
 const servedOrganisations = vi.hoisted(() => ({ list: null as null | { _id: unknown; digestHour?: number; timezone?: string }[] }));
+// The gateway's counters are its own tests' business (src/lib/ai-gateway): these only need the door to open
+const checkBudget = vi.hoisted(() => vi.fn(async () => ({ refusal: null as unknown, counter: "month" })));
+vi.mock("@/lib/ai-gateway/budget", () => ({ counterKindOf: async () => "month", checkBudget }));
+vi.mock("@/lib/ai-gateway/usage", () => ({ recordUsage: vi.fn() }));
 vi.mock("@/lib/organisation-jobs", async () => {
   const { scoped } = await import("@/lib/db-scope");
   const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
@@ -160,6 +164,17 @@ describe("startBoardReview", () => {
     const start = await startBoardReview(db, "p1", "BP", PM, "pm-user");
 
     expect(start).toEqual({ status: "skipped", reason: expect.stringMatching(/your own key.*upgrade to Pro/) });
+    expect(runPmTurn).not.toHaveBeenCalled();
+  });
+
+  // BP-680: the operator's key is only spent while the organisation has some of its allowance left
+  it("refuses a review the organisation has no AI allowance left for, naming the number and the renewal, and runs nothing", async () => {
+    resolveModelKey.mockResolvedValueOnce({ ok: true, key: "k", source: "managed" });
+    checkBudget.mockResolvedValueOnce({ refusal: { scope: "month", used: 15_000_000, limit: 15_000_000, resetsAt: new Date("2026-11-01T00:00:00Z") }, counter: "month" });
+
+    const start = await startBoardReview(db, "p1", "BP", PM, "pm-user");
+
+    expect(start).toEqual({ status: "skipped", reason: expect.stringMatching(/15,000,000 of 15,000,000.*1 November 2026/) });
     expect(runPmTurn).not.toHaveBeenCalled();
   });
 

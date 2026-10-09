@@ -23,6 +23,11 @@ function pmMessage() {
   return doc;
 }
 
+// The gateway's counters are its own tests' business (src/lib/ai-gateway): these only need the door to open
+const checkBudget = vi.hoisted(() => vi.fn(async () => ({ refusal: null as unknown, counter: "month" })));
+vi.mock("@/lib/ai-gateway/budget", () => ({ counterKindOf: async () => "month", checkBudget }));
+const recordUsage = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/ai-gateway/usage", () => ({ recordUsage }));
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/project", () => ({
   Project: { findOne: vi.fn().mockResolvedValue(PROJECT) },
@@ -150,6 +155,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   addCommentExecute.mockResolvedValue({ result: { ok: true } });
   resolveModelKey.mockResolvedValue({ ok: true, key: "sk-the-orgs-own-key", source: "own" });
+  checkBudget.mockResolvedValue({ refusal: null, counter: "month" });
 });
 
 // BP-652. The key is resolved once for the turn and every call of it is made with that key
@@ -172,6 +178,45 @@ describe("runPmTurn's model key", () => {
 
     expect(result).toMatchObject({ ok: false, error: expect.stringMatching(/your own key.*upgrade to Pro/) });
     expect(chatCompletion).not.toHaveBeenCalled();
+  });
+});
+
+// BP-679 / BP-680: what the operator's key may be spent on, and who is told it was
+describe("runPmTurn's AI allowance", () => {
+  it("refuses the turn, calling no model, when the organisation has used its allowance, and says which allowance", async () => {
+    resolveModelKey.mockResolvedValue({ ok: true, key: "sk-ours", source: "managed" });
+    checkBudget.mockResolvedValue({ refusal: { scope: "month", used: 15_000_000, limit: 15_000_000, resetsAt: new Date("2026-11-01T00:00:00Z") }, counter: "month" });
+
+    const result = await turn(NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS);
+
+    expect(result).toMatchObject({ ok: false, message: null, error: expect.stringMatching(/15,000,000 of 15,000,000.*1 November 2026/) });
+    expect(chatCompletion).not.toHaveBeenCalled();
+  });
+
+  it("stops the turn, and does not count a call the gate never let out, when the allowance runs out between two calls", async () => {
+    resolveModelKey.mockResolvedValue({ ok: true, key: "sk-ours", source: "managed" });
+    checkBudget.mockResolvedValueOnce({ refusal: null, counter: "month" }).mockResolvedValueOnce({ refusal: null, counter: "month" }).mockResolvedValue({ refusal: { scope: "day", used: 3_000_000, limit: 3_000_000, resetsAt: new Date("2026-10-10T00:00:00Z") }, counter: "month" });
+    chatCompletion.mockResolvedValueOnce(toolCall("add_comment", { taskKey: "BP-1", body: "answer" }));
+    createdMessages.length = 0;
+
+    const result = await turn(NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS);
+
+    expect(chatCompletion).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ ok: false, message: { content: expect.stringMatching(/paused for today/) } });
+    expect(createdMessages[createdMessages.length - 1].usage).toMatchObject({ calls: 1 });
+  });
+
+  it("records what each call cost for the project and for the person the turn was run for", async () => {
+    chatCompletion.mockResolvedValueOnce({ type: "text", content: "done", usage: { promptTokens: 9, completionTokens: 1, totalTokens: 10, cachedPromptTokens: 0, cacheWriteTokens: 0 } });
+
+    await runPmTurn(db, {
+      projectId: PROJECT._id,
+      userMessage: "what is next?",
+      triggeredByUserId: "person-7",
+      disallowedTools: NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS,
+    });
+
+    expect(recordUsage).toHaveBeenCalledWith(db, expect.objectContaining({ source: "pm", projectId: PROJECT._id, userId: "person-7", keySource: "own" }), "month");
   });
 });
 

@@ -2,7 +2,7 @@ import { after, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectOwner } from "@/lib/middleware";
 import { isPmRunnable, pmDisabledReason } from "@/lib/pm/gate";
-import { modelKeyRefusalResponse, resolveModelKey } from "@/lib/model-keys";
+import { openGate } from "@/lib/ai-gateway";
 import { getPmUser } from "@/lib/pm/pm-user";
 import { startBoardReview } from "@/lib/pm/scheduler";
 
@@ -22,10 +22,8 @@ export const POST = withProjectOwner(async (_request, { params, user, db }) => {
   }
   // Without a model key a review would still take a turn from the cap and post a warning to the
   // thread; the chat route refuses the same way for the same reason
-  const modelKey = await resolveModelKey(db);
-  if (!modelKey.ok) {
-    return modelKeyRefusalResponse(modelKey, { error: "The PM agent is not configured on this instance", status: 503 });
-  }
+  const gate = await openGate(db, { error: "The PM agent is not configured on this instance", status: 503 });
+  if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });
   const { projectId } = await params;
   await connectDB();
 

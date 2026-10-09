@@ -1,4 +1,6 @@
 import "./activityLog";
+import "./aiBudget";
+import "./aiUsage";
 import "./agent";
 import "./agentBlock";
 import "./agentRun";

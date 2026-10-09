@@ -115,15 +115,21 @@ export function describeModelKeyRefusal(
   return notConfigured;
 }
 
+export function modelKeyRefusalBody(
+  refusal: ModelKeyRefused,
+  notConfigured: { error: string; status: number }
+): { body: Record<string, unknown>; status: number } {
+  const { error, status } = describeModelKeyRefusal(refusal, notConfigured);
+  return {
+    body: status === 402 ? { error, reason: refusal.reason, feature: "ai.managed", plan: refusal.plan } : { error, reason: refusal.reason },
+    status,
+  };
+}
+
 export function modelKeyRefusalResponse(
   refusal: ModelKeyRefused,
   notConfigured: { error: string; status: number }
 ): NextResponse {
-  const { error, status } = describeModelKeyRefusal(refusal, notConfigured);
-  return NextResponse.json(
-    status === 402
-      ? { error, reason: refusal.reason, feature: "ai.managed", plan: refusal.plan }
-      : { error, reason: refusal.reason },
-    { status }
-  );
+  const { body, status } = modelKeyRefusalBody(refusal, notConfigured);
+  return NextResponse.json(body, { status });
 }

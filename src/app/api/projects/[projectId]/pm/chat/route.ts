@@ -5,7 +5,7 @@ import { isDatabaseUnreachable } from "@/lib/db-errors";
 import { getAuthUser } from "@/lib/auth";
 import { ProvenanceError } from "@/lib/session";
 import { runPmTurn } from "@/lib/pm/agent";
-import { modelKeyRefusalResponse, resolveModelKey } from "@/lib/model-keys";
+import { openGate } from "@/lib/ai-gateway";
 import { acquireTurnLock, releaseTurnLock } from "@/lib/pm/turn-lock";
 import { dailyPmSpend, isOverDailyTurnCap } from "@/lib/pm/turn-cap";
 import { MAX_STEPS } from "@/lib/pm/agent";
@@ -58,13 +58,8 @@ async function chat(request: Request, params: Promise<Record<string, string>>, u
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const modelKey = await resolveModelKey(db);
-  if (!modelKey.ok) {
-    return modelKeyRefusalResponse(modelKey, {
-      error: "PM agent is not configured (OPENROUTER_API_KEY missing)",
-      status: 503,
-    });
-  }
+  const gate = await openGate(db, { error: "PM agent is not configured (OPENROUTER_API_KEY missing)", status: 503 });
+  if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });
 
   await connectDB();
 
@@ -138,7 +133,7 @@ async function chat(request: Request, params: Promise<Record<string, string>>, u
     // Better a clear refusal than a provider error the user cannot act on. Unknown
     // capability (network failure, unlisted model) is allowed through rather than blocked.
     const model = await resolvePmModel(db, project.pm.model);
-    if ((await modelAcceptsImages(model, modelKey.key)) === false) {
+    if ((await modelAcceptsImages(model, gate.key)) === false) {
       return NextResponse.json(
         { error: `The configured PM model (${model}) does not accept images. Remove the attachment or switch models in settings.` },
         { status: 400 }

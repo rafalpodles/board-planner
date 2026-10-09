@@ -2,7 +2,7 @@ import { connectDB } from "@/lib/db";
 import { IPmMessage, PmAttachment, PmMessageTrigger } from "@/types";
 import { buildUserContent } from "./attachments";
 import { getPmUser, PM_USERNAME } from "./pm-user";
-import { chatCompletion, OrChatMessage } from "./openrouter";
+import { OrChatMessage } from "./openrouter";
 import { pmSessionId } from "./prompt-cache";
 import { isPmRunnable, pmDisabledReason, resolvePmModel } from "./availability";
 import { PM_TOOLS, pmToolDefinitions, PmToolContext, refuseUndeclaredArgs } from "./tools";
@@ -13,7 +13,7 @@ import { pmThreadFilter } from "./thread";
 import { getProjectColumns, defaultStatusFor } from "@/lib/columns";
 import { APP_NAME } from "@/lib/brand";
 import type { ScopedDb } from "@/lib/db-scope";
-import { describeModelKeyRefusal, resolveModelKey } from "@/lib/model-keys";
+import { gatewayChat, openGate } from "@/lib/ai-gateway";
 
 /** Round-trips one turn may make. Exported because the cap the operator sees is in turns, and the
  * screens that show it have to be able to say what a turn can cost (BP-284). */
@@ -186,11 +186,8 @@ export async function runPmTurn(db: ScopedDb, opts: {
   if (!project) return { ok: false, message: null, error: "Project not found" };
   if (!isPmRunnable(project.pm)) return { ok: false, message: null, error: pmDisabledReason(project.pm) };
 
-  const modelKey = await resolveModelKey(db);
-  if (!modelKey.ok) {
-    const { error } = describeModelKeyRefusal(modelKey, { error: "The PM agent is not configured on this instance", status: 503 });
-    return { ok: false, message: null, error };
-  }
+  const gate = await openGate(db, { error: "The PM agent is not configured on this instance", status: 503 });
+  if (!gate.ok) return { ok: false, message: null, error: gate.error };
 
   const pmUser = await getPmUser(db);
   const model = await resolvePmModel(db, project.pm.model);
@@ -356,9 +353,8 @@ export async function runPmTurn(db: ScopedDb, opts: {
   for (let step = 0; step < MAX_STEPS; step++) {
     if (opts.signal?.aborted) return interrupted();
 
-    const completion = await chatCompletion({
+    const completion = await gatewayChat(db, { source: "pm", projectId: opts.projectId, userId: opts.triggeredByUserId }, {
       model,
-      apiKey: modelKey.key,
       messages,
       tools: toolDefinitions,
       // Everything the loop appends from here — assistant tool calls and their results — grows
@@ -369,8 +365,8 @@ export async function runPmTurn(db: ScopedDb, opts: {
       signal: opts.signal,
     });
 
-    // Counted before the result is judged: the call was made and billed whatever it answered
-    spend.calls++;
+    // Counted before the result is judged: the call was made and billed whatever it answered, unless the gate never let it out
+    if (!("refused" in completion)) spend.calls++;
     if ("usage" in completion && completion.usage) {
       spend.promptTokens += completion.usage.promptTokens;
       spend.completionTokens += completion.usage.completionTokens;
