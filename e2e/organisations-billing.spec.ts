@@ -45,7 +45,13 @@ const running = (over: Record<string, unknown> = {}) => ({
   memberPrice: { unitAmount: 300, currency: "usd" },
   upcoming: { amountDue: 5400, currency: "usd" },
 });
-const none = { billing: true, launchOpen: true, subscription: null };
+const money = (unitAmount: number) => ({ unitAmount, currency: "usd" });
+const none = {
+  billing: true,
+  launchOpen: true,
+  subscription: null,
+  offer: { launch: true, includedMembers: 10, month: { base: money(2900), member: money(300) }, year: { base: money(29000), member: money(3000) } },
+};
 
 test.beforeAll(async () => {
   stub = http.createServer((request, response) => {
@@ -133,15 +139,23 @@ test("a Free organisation's admin chooses a period and is sent to Stripe, with w
   const panel = page.getByTestId("subscription");
   await expect(panel).toContainText("Upgrade to Pro");
   await expect(panel).toContainText("The launch price is open");
-  await page.screenshot({ path: "e2e/.artifacts/bp676-upgrade.png", fullPage: true });
+  await expect(page.getByTestId("subscription-price-month")).toHaveText("$29 per month");
+  await expect(page.getByTestId("subscription-price-year")).toHaveText("$290 per year");
+  await expect(page.getByTestId("subscription-saving")).toHaveText("Saves $58 a year");
+  await expect(page.getByTestId("subscription-includes")).toHaveText("Pro for the whole organisation: 10 members included, then $3 per member per month.");
+  await expect(page.getByTestId("subscription-checkout")).toHaveText("Continue to payment · $29 per month");
+  await page.screenshot({ path: "e2e/.artifacts/bp980-upgrade.png", fullPage: true });
   await page.setViewportSize({ width: 375, height: 812 });
   await page.reload();
   await expect(page.getByTestId("subscription-checkout")).toBeVisible();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
-  await page.screenshot({ path: "e2e/.artifacts/bp676-upgrade-phone.png", fullPage: true });
+  expect(await page.locator("#main-content").evaluate((main) => main.scrollWidth <= main.clientWidth)).toBe(true);
+  await page.getByTestId("subscription-checkout").scrollIntoViewIfNeeded();
+  await page.screenshot({ path: "e2e/.artifacts/bp980-upgrade-phone.png", fullPage: true });
   await page.setViewportSize({ width: 1280, height: 720 });
 
   await panel.getByLabel("Yearly").check();
+  await expect(page.getByTestId("subscription-includes")).toHaveText("Pro for the whole organisation: 10 members included, then $30 per member per year.");
+  await expect(page.getByTestId("subscription-checkout")).toHaveText("Continue to payment · $290 per year");
   await page.getByTestId("subscription-checkout").click();
 
   await expect(page).toHaveURL("https://stripe.test/pay/cs_test_1");

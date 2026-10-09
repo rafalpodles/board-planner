@@ -6,7 +6,7 @@ import { useOrganisation } from "@/hooks/use-organisation";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import { formatPlanDate, planNotice } from "@/lib/plan-notice";
-import { INCLUDED_MEMBERS, type BillingSummary, type Money, type SubscriptionSummary } from "@/lib/subscription-summary";
+import { INCLUDED_MEMBERS, type BillingSummary, type Money, type OfferSummary, type SubscriptionSummary } from "@/lib/subscription-summary";
 
 const LIVE = ["active", "trialing", "past_due", "unpaid"];
 const POLL_MS = 3_000;
@@ -18,6 +18,39 @@ export const isLiveSubscription = (subscription: SubscriptionSummary | null): su
   !!subscription && !!subscription.status && LIVE.includes(subscription.status);
 
 const money = ({ amount, currency }: Money) => new Intl.NumberFormat(undefined, { style: "currency", currency: currency.toUpperCase() }).format(amount / 100);
+
+const priceLabel = ({ amount, currency }: Money) =>
+  new Intl.NumberFormat(undefined, { style: "currency", currency: currency.toUpperCase(), minimumFractionDigits: amount % 100 === 0 ? 0 : 2 }).format(amount / 100);
+
+function PeriodChoice({ offer, interval, onChange, disabled }: { offer: OfferSummary | null; interval: Interval; onChange: (value: Interval) => void; disabled: boolean }) {
+  const saving = offer ? 12 * offer.month.base.amount - offer.year.base.amount : 0;
+  return (
+    <fieldset className="grid gap-3 sm:grid-cols-2" disabled={disabled}>
+      <legend className="sr-only">Billing period</legend>
+      {(["month", "year"] as const).map((value) => (
+        <label
+          key={value}
+          className="flex min-h-11 cursor-pointer items-start gap-3 rounded-lg border border-border p-4 text-sm has-[:checked]:border-primary has-[:checked]:bg-primary/5 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-primary"
+        >
+          <input type="radio" name="billing-interval" className="mt-1" checked={interval === value} onChange={() => onChange(value)} />
+          <span className="min-w-0">
+            <span className="block font-medium">{value === "month" ? "Monthly" : "Yearly"}</span>
+            {offer && (
+              <span className="block tabular-nums" data-testid={`subscription-price-${value}`}>
+                {priceLabel(offer[value].base)} per {value}
+              </span>
+            )}
+            {offer && value === "year" && saving > 0 && (
+              <span className="block text-text-muted" data-testid="subscription-saving">
+                Saves {priceLabel({ amount: saving, currency: offer.year.base.currency })} a year
+              </span>
+            )}
+          </span>
+        </label>
+      ))}
+    </fieldset>
+  );
+}
 
 function Row({ label, testId, children }: { label: string; testId?: string; children: React.ReactNode }) {
   return (
@@ -203,20 +236,17 @@ export function Subscription() {
                 : "Upgrade to Pro: more than 10 members, managed AI and the rest of the Pro features."}
             {billing.launchOpen && " The launch price is open: a subscription that starts at it keeps it for as long as it runs without a gap."}
           </p>
-          <fieldset className="flex flex-wrap gap-3" disabled={busy !== null || confirming}>
-            <legend className="sr-only">Billing period</legend>
-            {(["month", "year"] as const).map((value) => (
-              <label
-                key={value}
-                className="flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border border-border px-4 text-sm has-[:checked]:border-primary focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-primary"
-              >
-                <input type="radio" name="billing-interval" checked={interval === value} onChange={() => setInterval(value)} />
-                {value === "month" ? "Monthly" : "Yearly"}
-              </label>
-            ))}
-          </fieldset>
+          <PeriodChoice offer={billing.offer} interval={interval} onChange={setInterval} disabled={busy !== null || confirming} />
+          {billing.offer && (
+            <div className="space-y-1 text-sm">
+              <p data-testid="subscription-includes">
+                <span className="font-medium">Pro</span> for the whole organisation: {billing.offer.includedMembers} {billing.offer.includedMembers === 1 ? "member" : "members"} included, then {priceLabel(billing.offer[interval].member)} per member per {interval}.
+              </p>
+              <p className="text-xs text-text-muted">Prices are in {billing.offer.month.base.currency.toUpperCase()}. Tax is added at checkout where it applies.</p>
+            </div>
+          )}
           <Button onClick={() => go("checkout")} disabled={busy !== null || confirming} data-testid="subscription-checkout">
-            {busy === "checkout" ? "Opening…" : "Continue to payment"}
+            {busy === "checkout" ? "Opening…" : `Continue to payment${billing.offer ? ` · ${priceLabel(billing.offer[interval].base)} per ${interval}` : ""}`}
           </Button>
         </>
       )}
