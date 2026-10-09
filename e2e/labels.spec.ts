@@ -178,6 +178,10 @@ test("two quick picks in the list both reach the server, even when the first req
   await page.keyboard.press("Escape");
 
   let writes = 0;
+  let answered = 0;
+  page.on("response", (r) => {
+    if (r.request().method() === "PUT" && /\/tasks\/[^/]+$/.test(new URL(r.url()).pathname)) answered++;
+  });
   await page.route(/\/api\/projects\/[^/]+\/tasks\/[^/]+$/, async (route) => {
     if (route.request().method() === "PUT" && writes++ === 0) await new Promise((r) => setTimeout(r, 800));
     await route.continue();
@@ -189,8 +193,8 @@ test("two quick picks in the list both reach the server, even when the first req
   await listbox.getByRole("option", { name: "Design", exact: true }).click();
   await listbox.getByRole("option", { name: "Backend", exact: true }).click();
 
-  await expect.poll(() => storedLabels(request, 4), { timeout: 10_000 }).toEqual(["o-back", "o-design"]);
-  expect(writes).toBe(2);
+  await expect.poll(() => answered, { timeout: 10_000 }).toBe(2);
+  expect(await storedLabels(request, 4)).toEqual(["o-back", "o-design"]);
 });
 
 test.describe("a board without a Labels field", () => {
