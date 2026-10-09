@@ -121,6 +121,45 @@ describe("LicenceDetails", () => {
     expect(row("Plan")).toBe("Pro (trial)");
   });
 
+  // BP-983: the key of a subscription says whether it renews by itself or was cancelled
+  describe("a subscription's key", () => {
+    it("says nothing to renew while it renews by itself, however near its end", () => {
+      const { container } = render(<LicenceDetails licence={valid({ subscription: "renewing", daysLeft: 3 })} />);
+
+      expect(screen.queryByTestId("licence-warning")).toBeNull();
+      expect(container.textContent).not.toMatch(/Renew it/);
+    });
+
+    it("says nothing on the day after its end, which is the renewal's to be paid, and a payment failed from the day after", () => {
+      const settling = render(<LicenceDetails licence={valid({ verdict: "grace", subscription: "renewing", daysLeft: -1 })} />);
+      expect(screen.queryByTestId("licence-warning")).toBeNull();
+      settling.unmount();
+
+      render(<LicenceDetails licence={valid({ verdict: "grace", subscription: "renewing", daysLeft: -2 })} />);
+      expect(screen.getByTestId("licence-warning").textContent).toMatch(/^The last payment failed/);
+    });
+
+    it("says a payment failed, with the days that are left, when a renewing one has run past its end", () => {
+      render(<LicenceDetails licence={valid({ verdict: "grace", subscription: "renewing", daysLeft: -2 })} />);
+
+      expect(screen.getByTestId("licence-warning").textContent).toBe(
+        "The last payment failed. The paid period ended on January 1, 2027; Pro stays on until January 15, 2027 while the payment is retried, then this organisation moves to the Free plan. No data is removed."
+      );
+    });
+
+    it("says a cancelled one ends with its period and then Free, and when it has ended that it is Free with nothing removed", () => {
+      const live = render(<LicenceDetails licence={valid({ subscription: "ending", daysLeft: 20 })} />);
+      expect(screen.getByTestId("licence-warning").textContent).toBe("This subscription is cancelled: Pro ends on January 1, 2027, then this organisation is on the Free plan. No data is removed.");
+      live.unmount();
+
+      render(<LicenceDetails licence={valid({ verdict: "expired", subscription: "ending", daysLeft: -1, graceEndsAt: "2027-01-01T00:00:00.000Z" })} />);
+      expect(screen.getByTestId("licence-warning").textContent).toBe(
+        "This subscription ended on January 1, 2027, so this organisation is on the Free plan. No data was removed, and subscribing again restores the plan."
+      );
+      expect(screen.getByTestId("licence-warning").textContent).not.toMatch(/grace/);
+    });
+  });
+
   it("says the instance is on Free once the grace period is over", () => {
     render(<LicenceDetails licence={valid({ verdict: "expired", daysLeft: -20 })} />);
 

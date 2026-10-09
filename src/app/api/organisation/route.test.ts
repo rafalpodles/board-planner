@@ -62,7 +62,7 @@ describe("GET /api/organisation (BP-920)", () => {
     const res = await call(GET, "GET");
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ name: "Acme", named: true, cloud: false, address: "planner.example.org", plan: "pro", planEndsAt: null, trial: false });
+    expect(await res.json()).toEqual({ name: "Acme", named: true, cloud: false, address: "planner.example.org", plan: "pro", planEndsAt: null, trial: false, subscription: null });
     expect(countUsers).not.toHaveBeenCalled();
     expect(countProjects).not.toHaveBeenCalled();
   });
@@ -85,6 +85,21 @@ describe("GET /api/organisation (BP-920)", () => {
 
     getOrganisation.mockResolvedValue({ _id: DEFAULT_ORGANISATION_ID, name: "Acme", entitlements: { plan: "free", features: [], expiresAt, trial: true } });
     expect((await (await call(GET, "GET")).json()).trial).toBe(false);
+  });
+
+  // BP-983: the badge and the licence page read whether a subscription renews or was cancelled
+  it("says whether a subscription renews or was cancelled, for Pro only", async () => {
+    getAuthUser.mockResolvedValue(MEMBER);
+    const expiresAt = new Date("2026-11-05T23:59:59.000Z");
+    for (const subscription of ["renewing", "ending"] as const) {
+      getOrganisation.mockResolvedValue({ _id: DEFAULT_ORGANISATION_ID, name: "Acme", entitlements: { plan: "pro", features: [], expiresAt, subscription } });
+      expect((await (await call(GET, "GET")).json()).subscription).toBe(subscription);
+    }
+
+    getOrganisation.mockResolvedValue({ _id: DEFAULT_ORGANISATION_ID, name: "Acme", entitlements: { plan: "pro", features: [], expiresAt } });
+    expect((await (await call(GET, "GET")).json()).subscription).toBeNull();
+    getOrganisation.mockResolvedValue({ _id: DEFAULT_ORGANISATION_ID, name: "Acme", entitlements: { plan: "free", features: [], expiresAt, subscription: "renewing" } });
+    expect((await (await call(GET, "GET")).json()).subscription).toBeNull();
   });
 
   it("gives an admin the people and boards, counted in their own organisation only", async () => {

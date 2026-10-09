@@ -41,7 +41,7 @@ export default function OrganisationSettingsPage() {
   }, []);
 
   // Read again when the plan changes under the page, as it does when a payment is followed
-  const planKey = `${organisation?.plan}|${organisation?.planEndsAt}`;
+  const planKey = `${organisation?.plan}|${organisation?.planEndsAt}|${organisation?.subscription ?? ""}`;
   useEffect(() => {
     if (!authLoading && isAdmin) void loadLicence();
   }, [authLoading, isAdmin, loadLicence, planKey]);

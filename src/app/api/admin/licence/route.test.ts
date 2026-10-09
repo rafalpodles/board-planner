@@ -64,12 +64,24 @@ describe("GET /api/admin/licence", () => {
       vi.useRealTimers();
     });
 
-    function keyExpiring(expiresAt: string, trial?: true) {
+    function keyExpiring(expiresAt: string, trial?: true, subscription?: "renewing" | "ending") {
       return signLicence(
-        { customer: "Acme Ltd", plan: "pro", features: [], issuedAt: "2026-01-01T00:00:00.000Z", expiresAt, ...(trial ? { trial } : {}) },
+        { customer: "Acme Ltd", plan: "pro", features: [], issuedAt: "2026-01-01T00:00:00.000Z", expiresAt, ...(trial ? { trial } : {}), ...(subscription ? { subscription } : {}) },
         signing
       );
     }
+
+    // BP-983
+    it("says what a subscription's key is: a cancelled one has no grace, a renewing one that did not renew has its 14 days", async () => {
+      process.env.LICENCE_KEY = keyExpiring("2027-10-11T23:59:59.999Z", undefined, "ending");
+      expect(await (await get()).json()).toMatchObject({ verdict: "valid", subscription: "ending", graceEndsAt: "2027-10-11T23:59:59.999Z" });
+
+      process.env.LICENCE_KEY = keyExpiring("2027-09-30T23:59:59.999Z", undefined, "ending");
+      expect(await (await get()).json()).toMatchObject({ verdict: "expired", subscription: "ending" });
+
+      process.env.LICENCE_KEY = keyExpiring("2027-09-30T23:59:59.999Z", undefined, "renewing");
+      expect(await (await get()).json()).toMatchObject({ verdict: "grace", subscription: "renewing", graceEndsAt: "2027-10-14T23:59:59.999Z" });
+    });
 
     it("describes a valid key, its grace end and the calendar days to its expiry", async () => {
       process.env.LICENCE_KEY = keyExpiring("2027-10-11T23:59:59.999Z");
@@ -79,6 +91,7 @@ describe("GET /api/admin/licence", () => {
         verdict: "valid",
         customer: "Acme Ltd",
         trial: false,
+        subscription: null,
         plan: "pro",
         features: [],
         issuedAt: "2026-01-01T00:00:00.000Z",

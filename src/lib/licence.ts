@@ -17,6 +17,8 @@ export interface LicencePayload {
   organisation?: string;
   // A trial ends on its day: the 14-day grace is for a failed payment, and a trial is not a payment
   trial?: true;
+  // A paid period's key: "renewing" renews by itself (running past its end is a failed payment), "ending" was cancelled (no grace)
+  subscription?: "renewing" | "ending";
 }
 
 export type LicenceVerdict =
@@ -54,6 +56,7 @@ function canonicalPayload(payload: LicencePayload): string {
     keyId: payload.keyId,
     ...(payload.organisation === undefined ? {} : { organisation: payload.organisation }),
     ...(payload.trial === undefined ? {} : { trial: payload.trial }),
+    ...(payload.subscription === undefined ? {} : { subscription: payload.subscription }),
   });
 }
 
@@ -103,6 +106,9 @@ function asPayload(value: unknown): LicencePayload | null {
   if (typeof p.keyId !== "string" || !p.keyId) return null;
   if (p.organisation !== undefined && (typeof p.organisation !== "string" || !/^[0-9a-f]{24}$/.test(p.organisation))) return null;
   if (p.trial !== undefined && p.trial !== true) return null;
+  if (p.subscription !== undefined && p.subscription !== "renewing" && p.subscription !== "ending") return null;
+  // A trial is not a subscription
+  if (p.trial !== undefined && p.subscription !== undefined) return null;
   return {
     v: p.v,
     customer: p.customer,
@@ -113,6 +119,7 @@ function asPayload(value: unknown): LicencePayload | null {
     keyId: p.keyId,
     ...(p.organisation === undefined ? {} : { organisation: p.organisation }),
     ...(p.trial === true ? { trial: true as const } : {}),
+    ...(p.subscription === undefined ? {} : { subscription: p.subscription }),
   };
 }
 
@@ -165,7 +172,7 @@ export function verifyLicenceKey(
 
   const expiresAt = Date.parse(payload.expiresAt);
   if (now <= expiresAt) return { verdict: "valid", payload };
-  if (!payload.trial && now <= expiresAt + ENTITLEMENT_GRACE_MS) return { verdict: "grace", payload };
+  if (!payload.trial && payload.subscription !== "ending" && now <= expiresAt + ENTITLEMENT_GRACE_MS) return { verdict: "grace", payload };
   return { verdict: "expired", payload };
 }
 
@@ -237,6 +244,7 @@ export function entitlementsFromLicence(
     issuedAt: new Date(check.payload.issuedAt),
     expiresAt: new Date(check.payload.expiresAt),
     ...(check.payload.trial ? { trial: true } : {}),
+    ...(check.payload.subscription ? { subscription: check.payload.subscription } : {}),
     source,
   };
 }
@@ -253,7 +261,9 @@ export function describeLicenceAtStartup(check: LicenceCheck | null): string {
     case "expired":
       return check.payload.trial
         ? `LICENCE_KEY is a trial that ended ${check.payload.expiresAt} — Free plan`
-        : `LICENCE_KEY expired ${check.payload.expiresAt}, past its grace period — Free plan`;
+        : check.payload.subscription === "ending"
+          ? `LICENCE_KEY is a cancelled subscription that ended ${check.payload.expiresAt} — Free plan`
+          : `LICENCE_KEY expired ${check.payload.expiresAt}, past its grace period — Free plan`;
     case "unknown_key":
       return "LICENCE_KEY was signed by a key this build does not know — Free plan";
     case "invalid_signature":

@@ -24,7 +24,7 @@ const BOTH = [OLD.public, NEW.public];
 const EXPIRES = Date.parse("2027-01-01T00:00:00.000Z");
 const DAY = 24 * 60 * 60 * 1000;
 
-function licence(signing = OLD.signing, overrides: Partial<{ customer: string; expiresAt: string; organisation: string; trial: true }> = {}) {
+function licence(signing = OLD.signing, overrides: Partial<{ customer: string; expiresAt: string; organisation: string; trial: true; subscription: "renewing" | "ending" }> = {}) {
   return signLicence(
     {
       customer: "Acme Ltd",
@@ -178,6 +178,64 @@ describe("verifyLicenceKey", () => {
 
     expect(verifyLicenceKey(forge(false), { keys: BOTH, now: EXPIRES - DAY }).verdict).toBe("malformed");
     expect(verifyLicenceKey(forge("yes"), { keys: BOTH, now: EXPIRES - DAY }).verdict).toBe("malformed");
+  });
+
+  // BP-983: the key of a paid period says whether the subscription renews or was cancelled
+  describe("the subscription marker", () => {
+    const ORGANISATION = "0123456789abcdef01234567";
+    const renewing = () => licence(OLD.signing, { organisation: ORGANISATION, subscription: "renewing" });
+    const ending = () => licence(OLD.signing, { organisation: ORGANISATION, subscription: "ending" });
+    const decoded = (key: string) => JSON.parse(Buffer.from(key.split(".")[0], "base64url").toString("utf8"));
+    const forge = (extra: Record<string, unknown>) => {
+      const body = Buffer.from(
+        JSON.stringify({ v: 1, customer: "Acme Ltd", plan: "pro", features: [], issuedAt: "2026-01-01T00:00:00.000Z", expiresAt: new Date(EXPIRES).toISOString(), keyId: "old", ...extra })
+      ).toString("base64url");
+      const signature = sign(null, Buffer.from(body, "base64url"), createPrivateKey({ key: { kty: "OKP", crv: "Ed25519", d: OLD.signing.d, x: OLD.signing.x }, format: "jwk" }));
+      return `${body}.${signature.toString("base64url")}`;
+    };
+
+    it("ends a cancelled subscription's key at its expiry instant, and keeps 14 days for a renewing one that did not renew, which is a failed payment", () => {
+      const at = (key: string, now: number) => verifyLicenceKey(key, { organisation: ORGANISATION, keys: BOTH, now }).verdict;
+
+      expect(at(ending(), EXPIRES)).toBe("valid");
+      expect(at(ending(), EXPIRES + 1)).toBe("expired");
+      expect(at(ending(), EXPIRES + DAY)).toBe("expired");
+      expect(at(renewing(), EXPIRES)).toBe("valid");
+      expect(at(renewing(), EXPIRES + 1)).toBe("grace");
+      expect(at(renewing(), EXPIRES + ENTITLEMENT_GRACE_MS)).toBe("grace");
+      expect(at(renewing(), EXPIRES + ENTITLEMENT_GRACE_MS + 1)).toBe("expired");
+    });
+
+    it("signs the marker into the key, and only a subscription carries it, so every key issued already still verifies", () => {
+      expect(decoded(renewing()).subscription).toBe("renewing");
+      expect(decoded(ending()).subscription).toBe("ending");
+      expect(decoded(licence())).not.toHaveProperty("subscription");
+      expect(verifyLicenceKey(licence(), { keys: BOTH, now: EXPIRES - DAY }).verdict).toBe("valid");
+    });
+
+    it("cannot be turned into a renewing subscription, or out of a cancelled one, by editing the payload", () => {
+      const [body, signature] = ending().split(".");
+      const edited = Buffer.from(Buffer.from(body, "base64url").toString("utf8").replace('"subscription":"ending"', '"subscription":"renewing"'), "utf8").toString("base64url");
+
+      expect(verifyLicenceKey(`${edited}.${signature}`, { organisation: ORGANISATION, keys: BOTH, now: EXPIRES - DAY }).verdict).toBe("invalid_signature");
+    });
+
+    it("refuses a marker that is neither renewing nor ending, and a key that is both a trial and a subscription", () => {
+      expect(verifyLicenceKey(forge({ subscription: "maybe" }), { keys: BOTH, now: EXPIRES - DAY }).verdict).toBe("malformed");
+      expect(verifyLicenceKey(forge({ subscription: true }), { keys: BOTH, now: EXPIRES - DAY }).verdict).toBe("malformed");
+      expect(verifyLicenceKey(forge({ trial: true, subscription: "renewing" }), { keys: BOTH, now: EXPIRES - DAY }).verdict).toBe("malformed");
+      expect(verifyLicenceKey(forge({ subscription: "renewing" }), { keys: BOTH, now: EXPIRES - DAY }).verdict).toBe("valid");
+    });
+
+    it("carries the marker into the entitlements, and a cancelled subscription is Free the moment it ends while a renewing one stays Pro through its grace", () => {
+      const options = (now: number) => ({ organisation: ORGANISATION, keys: BOTH, now });
+
+      expect(entitlementsFromLicence(verifyLicenceKey(renewing(), options(EXPIRES - DAY)))).toMatchObject({ plan: "pro", subscription: "renewing" });
+      expect(entitlementsFromLicence(verifyLicenceKey(ending(), options(EXPIRES - DAY)))).toMatchObject({ plan: "pro", subscription: "ending" });
+      expect(entitlementsFromLicence(verifyLicenceKey(ending(), options(EXPIRES + 1)))).toEqual({ plan: "free", features: [], source: "env" });
+      expect(entitlementsFromLicence(verifyLicenceKey(renewing(), options(EXPIRES + DAY)))).toMatchObject({ plan: "pro", subscription: "renewing" });
+      expect(entitlementsFromLicence(verifyLicenceKey(licence(), { keys: BOTH, now: EXPIRES - DAY }))).not.toHaveProperty("subscription");
+    });
   });
 
   it("checks the signature before the clock, so an expired forgery is still a forgery", () => {

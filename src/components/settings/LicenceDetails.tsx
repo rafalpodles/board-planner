@@ -13,6 +13,7 @@ export type LicenceSummary =
       verdict: "valid" | "grace" | "expired";
       customer: string;
       trial?: boolean;
+      subscription?: "renewing" | "ending" | null;
       plan: string;
       features: string[];
       issuedAt: string;
@@ -68,18 +69,37 @@ function expiresWhen(daysLeft: number): string {
   return `in ${daysLeft} days`;
 }
 
-function Notice({ verdict, daysLeft, expiresAt, graceEndsAt, trial }: {
+function Notice({ verdict, daysLeft, expiresAt, graceEndsAt, trial, subscription }: {
   verdict: LicenceVerdict;
   daysLeft: number;
   expiresAt: string;
   graceEndsAt: string;
   trial?: boolean;
+  subscription?: "renewing" | "ending" | null;
 }) {
+  // The key ends with its UTC day and the renewal is paid some time after the period ends: that day is the renewal's, not a failure
+  if (verdict === "grace" && subscription === "renewing" && daysLeft >= -1) return null;
+  if (verdict === "grace" && subscription === "renewing") {
+    return (
+      <p role="alert" className="mb-4 rounded-lg border border-danger p-4 text-sm text-danger" data-testid="licence-warning">
+        The last payment failed. The paid period ended on {formatDate(expiresAt)}; Pro stays on until {formatDate(graceEndsAt)} while the payment is
+        retried, then this organisation moves to the Free plan. No data is removed.
+      </p>
+    );
+  }
   if (verdict === "grace") {
     return (
       <p role="alert" className="mb-4 rounded-lg border border-danger p-4 text-sm text-danger" data-testid="licence-warning">
         This licence expired on {formatDate(expiresAt)}. It stays in force until {formatDate(graceEndsAt)},
         then this instance moves to the Free plan. No data is removed.
+      </p>
+    );
+  }
+  if (verdict === "expired" && subscription === "ending") {
+    return (
+      <p role="alert" className="mb-4 rounded-lg border border-danger p-4 text-sm text-danger" data-testid="licence-warning">
+        This subscription ended on {formatDate(expiresAt)}, so this organisation is on the Free plan. No data was removed, and subscribing again restores
+        the plan.
       </p>
     );
   }
@@ -100,6 +120,15 @@ function Notice({ verdict, daysLeft, expiresAt, graceEndsAt, trial }: {
       </p>
     );
   }
+  if (subscription === "ending") {
+    return (
+      <p role="status" className="mb-4 rounded-lg border border-border p-4 text-sm" data-testid="licence-warning">
+        This subscription is cancelled: Pro ends on {formatDate(expiresAt)}, then this organisation is on the Free plan. No data is removed.
+      </p>
+    );
+  }
+  // The key of a subscription that renews by itself is replaced at each renewal: nothing to renew by hand
+  if (subscription === "renewing") return null;
   if (trial) {
     return (
       <p role="status" className="mb-4 rounded-lg border border-border p-4 text-sm" data-testid="licence-warning">
@@ -138,6 +167,7 @@ export function LicenceDetails({ licence }: { licence: LicenceSummary }) {
         expiresAt={licence.expiresAt}
         graceEndsAt={licence.graceEndsAt}
         trial={licence.trial}
+        subscription={licence.subscription}
       />
       <dl className="divide-y divide-border rounded-lg border border-border text-sm" data-testid="licence-details">
         {rows.map(([label, value]) => (

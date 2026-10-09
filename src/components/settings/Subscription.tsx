@@ -218,7 +218,7 @@ export function Subscription() {
           )}
           {subscription.cancelAtPeriodEnd && (
             <p role="status" className="rounded-lg border border-border p-4 text-sm" data-testid="subscription-cancelling">
-              The subscription is cancelled and ends with the paid period. Pro stays on for 14 days after that, then this organisation is on the Free plan; no data is removed.
+              The subscription is cancelled and ends with the paid period. After that this organisation is on the Free plan; no data is removed.
             </p>
           )}
           <Details subscription={subscription} members={organisation.members} memberPrice={billing.available ? billing.memberPrice : null} upcoming={billing.available ? billing.upcoming : null} />
