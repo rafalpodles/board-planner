@@ -29,7 +29,7 @@ const whereIs = (pattern: RegExp): string[] =>
 // BP-679: a model call made anywhere else is spend that no limit sees and a key that no plan gated
 describe("the gateway is the only door to a model", () => {
   it("names the SDK nowhere but the one module that speaks to the provider for AI Assist", () => {
-    expect(whereIs(/from\s+["']openai["']/)).toEqual(["src/lib/ai.ts"]);
+    expect(whereIs(/from\s+["']openai["']|import\(\s*["']openai["']|require\(\s*["']openai["']/)).toEqual(["src/lib/ai.ts"]);
   });
 
   it("calls the provider's completion endpoint from one module", () => {
@@ -37,15 +37,17 @@ describe("the gateway is the only door to a model", () => {
   });
 
   it("calls that module's chatCompletion from the gateway alone", () => {
-    expect(whereIs(/\bchatCompletion\s*\(/)).toEqual(["src/lib/ai-gateway/index.ts", "src/lib/pm/openrouter.ts"]);
+    expect(whereIs(/\bchatCompletion\b/)).toEqual(["src/lib/ai-gateway/index.ts", "src/lib/pm/openrouter.ts"]);
   });
 
   it("makes AI Assist's generation through the gateway, in the one route that makes it", () => {
     expect(whereIs(/\bgenerateTask\s*\(/)).toEqual(["src/app/api/projects/[projectId]/ai/generate-task/route.ts", "src/lib/ai.ts"]);
-    expect(readFileSync(join(ROOT, "src/app/api/projects/[projectId]/ai/generate-task/route.ts"), "utf8")).toMatch(/gatewayAssist\(/);
+    expect(readFileSync(join(ROOT, "src/app/api/projects/[projectId]/ai/generate-task/route.ts"), "utf8")).toMatch(
+      /gatewayAssist\([^]*?\(apiKey, report\) =>\s*generateTask\([^]*?\bapiKey\b[^]*?\breport\b/
+    );
   });
 
   it("resolves the key a model call is made with in the gateway alone, so no call is made with a key nobody gated", () => {
-    expect(whereIs(/\bresolveModelKey\s*\(/)).toEqual(["src/lib/ai-gateway/index.ts", "src/lib/model-keys.ts"]);
+    expect(whereIs(/\bresolveModelKey\b/)).toEqual(["src/lib/ai-gateway/index.ts", "src/lib/model-keys.ts"]);
   });
 });

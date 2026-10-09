@@ -14,13 +14,18 @@ export const HOSTED_DEFAULTS = {
 
 type LimitVariable = keyof typeof HOSTED_DEFAULTS;
 
+const warned = new Set<string>();
+
 /** A number in the environment applies anywhere and 0 turns it off; unset, the hosted default applies on a hosted instance only */
 export function limitFromEnv(name: LimitVariable): number {
   const raw = process.env[name]?.trim();
   if (raw) {
     const value = Number(raw);
     if (Number.isFinite(value) && value >= 0) return Math.floor(value);
-    console.warn(`${name}=${JSON.stringify(raw)} is not a number of at least 0; using the default`);
+    if (!warned.has(name + raw)) {
+      warned.add(name + raw);
+      console.warn(`${name}=${JSON.stringify(raw)} is not a number of at least 0; using the default`);
+    }
   }
   return organisationDomain() !== null ? HOSTED_DEFAULTS[name] : 0;
 }
@@ -32,8 +37,6 @@ export interface Budget {
   limit: number;
   /** Tokens on the operator's key in one UTC day, or 0 for no ceiling */
   dailyCeiling: number;
-  /** When a trial ends, which is when its allowance does */
-  endsAt?: Date;
 }
 
 /**
@@ -63,6 +66,5 @@ export async function budgetOf(db: ScopedDb): Promise<Budget | null> {
     scope: trial ? "trial" : "month",
     limit,
     dailyCeiling: percent > 0 ? Math.max(1, Math.ceil((limit * Math.min(percent, 100)) / 100)) : 0,
-    ...(trial && entitlements.expiresAt ? { endsAt: entitlements.expiresAt } : {}),
   };
 }

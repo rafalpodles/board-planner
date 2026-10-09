@@ -41,13 +41,24 @@ describe("checkBudget", () => {
     expect((await checkBudget(db, NOW)).refusal?.scope).toBe("month");
   });
 
-  it("refuses a trial at its allowance, which ends with the trial and starts again with nothing", async () => {
-    const endsAt = new Date("2026-11-08T23:59:59Z");
-    m.budget = { scope: "trial", limit: 3_000_000, dailyCeiling: 600_000, endsAt };
+  it("refuses a trial at its allowance, which does not start again", async () => {
+    m.budget = { scope: "trial", limit: 3_000_000, dailyCeiling: 600_000 };
     m.rows = [{ kind: "trial", period: "all", tokens: 3_000_000 }];
 
-    expect(await checkBudget(db, NOW)).toEqual({ counter: "trial", refusal: { scope: "trial", used: 3_000_000, limit: 3_000_000, resetsAt: endsAt } });
+    expect(await checkBudget(db, NOW)).toEqual({ counter: "trial", refusal: { scope: "trial", used: 3_000_000, limit: 3_000_000, resetsAt: null } });
     expect(find).toHaveBeenCalledWith({ $or: [{ kind: "day", period: "2026-10-09" }, { kind: "trial", period: "all" }] });
+  });
+
+  it("reads the day in UTC: a call at 23:30 and one at 00:30 the next morning are on different days, and in different months at the year's end", async () => {
+    await checkBudget(db, new Date("2026-12-31T23:30:00Z"));
+    expect(find).toHaveBeenLastCalledWith({ $or: [{ kind: "day", period: "2026-12-31" }, { kind: "month", period: "2026-12" }] });
+
+    m.rows = [{ kind: "month", period: "2026-12", tokens: 1000 }];
+    expect((await checkBudget(db, new Date("2026-12-31T23:30:00Z"))).refusal?.resetsAt).toEqual(new Date("2027-01-01T00:00:00Z"));
+    expect(find).toHaveBeenLastCalledWith({ $or: [{ kind: "day", period: "2026-12-31" }, { kind: "month", period: "2026-12" }] });
+
+    await checkBudget(db, new Date("2027-01-01T00:30:00Z"));
+    expect(find).toHaveBeenLastCalledWith({ $or: [{ kind: "day", period: "2027-01-01" }, { kind: "month", period: "2027-01" }] });
   });
 
   it("does not refuse for a day's ceiling that is off", async () => {

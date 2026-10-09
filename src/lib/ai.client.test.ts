@@ -72,3 +72,16 @@ describe("the model name AI Assist sends", () => {
     expect(openrouterModel("anthropic/claude-haiku")).toBe("anthropic/claude-haiku");
   });
 });
+
+// BP-679: a generation that was answered and then judged unusable was still billed
+describe("the usage generateTask reports", () => {
+  it("says what the provider reported, and says it even when the answer is empty and the generation fails", async () => {
+    const usage = { prompt_tokens: 900, completion_tokens: 100, total_tokens: 1000 };
+    const onUsage = vi.fn();
+    create.mockResolvedValue({ choices: [{ message: { content: "" } }], usage });
+
+    await expect(generateTask("a task", CONTEXT, "m", "sk-given", onUsage)).rejects.toThrow("Empty response from AI");
+
+    expect(onUsage).toHaveBeenCalledWith(expect.objectContaining({ promptTokens: 900, completionTokens: 100, totalTokens: 1000 }));
+  });
+});

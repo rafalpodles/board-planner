@@ -39,7 +39,7 @@ export async function checkBudget(db: ScopedDb, now: Date = new Date()): Promise
   if (allowance >= budget.limit) {
     return {
       counter: budget.scope,
-      refusal: { scope: budget.scope, used: allowance, limit: budget.limit, resetsAt: budget.scope === "month" ? nextUtcMonth(now) : budget.endsAt ?? null },
+      refusal: { scope: budget.scope, used: allowance, limit: budget.limit, resetsAt: budget.scope === "month" ? nextUtcMonth(now) : null },
     };
   }
   const today = spent("day");

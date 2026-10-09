@@ -126,6 +126,11 @@ export async function runPmTrigger(db: ScopedDb, trigger: IPmTrigger): Promise<P
   // same warning into every thread
   const gate = await openGate(db, { error: "The PM agent is not configured on this instance", status: 503 });
   if (!gate.ok) {
+    if (gate.body.reason === "ai_budget" && gate.body.scope === "day") {
+      await settleTrigger(db, trigger, "pending");
+      await db.PmTrigger.findByIdAndUpdate(trigger._id, { $inc: { attempts: -1 } });
+      return "deferred";
+    }
     await settleTrigger(db, trigger, "failed", gate.error);
     return "ran";
   }

@@ -39,6 +39,25 @@ describe("limitFromEnv", () => {
     expect(limitFromEnv("AI_MONTHLY_TOKENS")).toBe(0);
   });
 
+  it("reads an empty or blank variable as unset, which is what a compose file or a dashboard leaves behind", () => {
+    vi.stubEnv("AI_MONTHLY_TOKENS", "");
+    expect(limitFromEnv("AI_MONTHLY_TOKENS")).toBe(15_000_000);
+    vi.stubEnv("AI_MONTHLY_TOKENS", "   ");
+    expect(limitFromEnv("AI_MONTHLY_TOKENS")).toBe(15_000_000);
+  });
+
+  it("rounds a fraction down and refuses a negative number, saying so once however often it is read", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubEnv("AI_MONTHLY_TOKENS", "1500.7");
+    expect(limitFromEnv("AI_MONTHLY_TOKENS")).toBe(1500);
+
+    vi.stubEnv("AI_MONTHLY_TOKENS", "-5");
+    expect(limitFromEnv("AI_MONTHLY_TOKENS")).toBe(15_000_000);
+    expect(limitFromEnv("AI_MONTHLY_TOKENS")).toBe(15_000_000);
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+
   it("says so and falls back to the default for a value that is not a number", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.stubEnv("AI_MONTHLY_TOKENS", "lots");
@@ -50,11 +69,22 @@ describe("limitFromEnv", () => {
 });
 
 describe("budgetOf", () => {
-  it("gives a trial 3M tokens for the whole trial, with a daily ceiling of a fifth, and ends with the trial", async () => {
-    const endsAt = new Date("2026-11-08T23:59:59Z");
-    m.entitlements = { plan: "pro", trial: true, expiresAt: endsAt };
+  it("gives a trial 3M tokens for the whole trial, with a daily ceiling of a fifth, however many members it has", async () => {
+    m.entitlements = { plan: "pro", trial: true, expiresAt: new Date("2026-11-08T23:59:59Z") };
 
-    expect(await budgetOf(db)).toEqual({ scope: "trial", limit: 3_000_000, dailyCeiling: 600_000, endsAt });
+    expect(await budgetOf(db)).toEqual({ scope: "trial", limit: 3_000_000, dailyCeiling: 600_000 });
+    m.active = 14;
+    expect(await budgetOf(db)).toEqual({ scope: "trial", limit: 3_000_000, dailyCeiling: 600_000 });
+  });
+
+  it("rounds the daily ceiling up, and never to nothing", async () => {
+    m.hosted = false;
+    vi.stubEnv("AI_DAILY_PERCENT", "20");
+    vi.stubEnv("AI_MONTHLY_TOKENS", "1000001");
+    expect(await budgetOf(db)).toMatchObject({ dailyCeiling: 200_001 });
+
+    vi.stubEnv("AI_MONTHLY_TOKENS", "3");
+    expect(await budgetOf(db)).toMatchObject({ limit: 3, dailyCeiling: 1 });
   });
 
   it("gives Pro 15M a month, and 1M more for every member above the ten it includes", async () => {

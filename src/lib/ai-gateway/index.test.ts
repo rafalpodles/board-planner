@@ -37,6 +37,12 @@ describe("openGate", () => {
     expect(m.checkBudget).toHaveBeenCalledTimes(1);
   });
 
+  it("opens on the counter the budget says a call is added to: a trial's own, not the month", async () => {
+    m.checkBudget.mockResolvedValue({ refusal: null, counter: "trial" });
+
+    expect(await openGate(db, NOT_CONFIGURED)).toMatchObject({ ok: true, counter: "trial" });
+  });
+
   it("never asks the budget about an organisation's own key, which it pays for, and counts it all the same", async () => {
     m.resolveModelKey.mockResolvedValue({ ok: true, key: "sk-theirs", source: "own" });
     m.counterKindOf.mockResolvedValue("trial");
@@ -68,7 +74,7 @@ describe("gatewayChat", () => {
 
     const completion = await gatewayChat(db, CONTEXT, CHAT);
 
-    expect(completion).toMatchObject({ type: "error", error: expect.stringMatching(/paused for today/) });
+    expect(completion).toMatchObject({ type: "error", refused: true, error: expect.stringMatching(/paused for today/) });
     expect(m.chatCompletion).not.toHaveBeenCalled();
     expect(m.recordUsage).not.toHaveBeenCalled();
   });
@@ -91,13 +97,27 @@ describe("gatewayChat", () => {
     expect(m.recordUsage).toHaveBeenCalledWith(db, expect.objectContaining({ usage: undefined }), "month");
   });
 
-  it("records nothing for a call that was stopped or that the provider refused: no answer, no tokens to count", async () => {
-    m.chatCompletion.mockResolvedValueOnce({ type: "aborted" }).mockResolvedValueOnce({ type: "error", error: "HTTP 500" });
+  it("records nothing for a call the provider refused, and does not call it a refusal of the gate's", async () => {
+    m.chatCompletion.mockResolvedValue({ type: "error", error: "HTTP 500" });
 
-    await gatewayChat(db, CONTEXT, CHAT);
-    await gatewayChat(db, CONTEXT, CHAT);
+    const completion = await gatewayChat(db, CONTEXT, CHAT);
 
+    expect(completion).toEqual({ type: "error", error: "HTTP 500" });
     expect(m.recordUsage).not.toHaveBeenCalled();
+  });
+
+  it("counts a call that was stopped at the size of what was sent, because the provider bills a request it was sent", async () => {
+    m.chatCompletion.mockResolvedValue({ type: "aborted" });
+    const messages = [{ role: "user", content: "x".repeat(100) }];
+
+    const completion = await gatewayChat(db, CONTEXT, { ...CHAT, messages });
+
+    expect(completion).toEqual({ type: "aborted" });
+    expect(m.recordUsage).toHaveBeenCalledWith(
+      db,
+      expect.objectContaining({ source: "pm", keySource: "managed", usage: { promptTokens: 33, completionTokens: 0, totalTokens: 33, cachedPromptTokens: 0, cacheWriteTokens: 0 } }),
+      "month"
+    );
   });
 
   it("gives the answer even when writing it down failed", async () => {

@@ -66,8 +66,8 @@ export function usageOf(data: any): OrUsage | undefined {
   if (!Number.isFinite(prompt) && !Number.isFinite(completion) && !Number.isFinite(total)) {
     return undefined;
   }
-  const promptTokens = Number.isFinite(prompt) ? prompt : 0;
-  const completionTokens = Number.isFinite(completion) ? completion : 0;
+  const promptTokens = Number.isFinite(prompt) ? Math.max(0, prompt) : 0;
+  const completionTokens = Number.isFinite(completion) ? Math.max(0, completion) : 0;
   return {
     promptTokens,
     completionTokens,

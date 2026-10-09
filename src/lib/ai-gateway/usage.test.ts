@@ -60,5 +60,31 @@ describe("recordUsage", () => {
 
     updateOne.mockReset().mockRejectedValue(new Error("connection lost"));
     await expect(recordUsage(db, { source: "pm", keySource: "managed", model: "m/x", usage: USAGE }, "month", NOW)).rejects.toThrow("connection lost");
+    expect(updateOne).toHaveBeenCalledTimes(2);
+  });
+
+  it("adds the tokens to the counters even when the row that logs the call cannot be written, since the limits are made of the counters", async () => {
+    create.mockRejectedValue(new Error("db full"));
+
+    await expect(recordUsage(db, { source: "pm", keySource: "managed", model: "m/x", usage: USAGE }, "month", NOW)).rejects.toThrow("db full");
+
+    expect(updateOne).toHaveBeenCalledWith({ kind: "month", period: "2026-10" }, { $inc: { tokens: 1000, calls: 1 } }, { upsert: true });
+  });
+
+  it("never takes tokens off a counter, whatever a provider reports", async () => {
+    await recordUsage(db, { source: "pm", keySource: "managed", model: "m/x", usage: { ...USAGE, totalTokens: -500 } }, "month", NOW);
+
+    expect(updateOne).toHaveBeenCalledWith({ kind: "day", period: "2026-10-09" }, { $inc: { tokens: 0, calls: 1 } }, { upsert: true });
+  });
+
+  it("names the day and the month in UTC, not where the server is, at the edges of both", async () => {
+    await recordUsage(db, { source: "pm", keySource: "managed", model: "m/x", usage: USAGE }, "month", new Date("2026-12-31T23:30:00Z"));
+    expect(updateOne).toHaveBeenCalledWith({ kind: "day", period: "2026-12-31" }, expect.anything(), { upsert: true });
+    expect(updateOne).toHaveBeenCalledWith({ kind: "month", period: "2026-12" }, expect.anything(), { upsert: true });
+
+    updateOne.mockClear();
+    await recordUsage(db, { source: "pm", keySource: "managed", model: "m/x", usage: USAGE }, "month", new Date("2027-01-01T00:30:00Z"));
+    expect(updateOne).toHaveBeenCalledWith({ kind: "day", period: "2027-01-01" }, expect.anything(), { upsert: true });
+    expect(updateOne).toHaveBeenCalledWith({ kind: "month", period: "2027-01" }, expect.anything(), { upsert: true });
   });
 });

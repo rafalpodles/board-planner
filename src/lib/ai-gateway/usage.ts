@@ -32,7 +32,10 @@ async function add(db: ScopedDb, kind: AiBudgetKind, period: string, inc: Record
  */
 export async function recordUsage(db: ScopedDb, entry: UsageEntry, counter: "trial" | "month", now: Date = new Date()): Promise<void> {
   const usage = entry.usage;
-  const total = usage?.totalTokens ?? 0;
+  const total = Math.max(0, usage?.totalTokens ?? 0);
+  const inc: Record<string, number> = entry.keySource === "own" ? { ownTokens: total, ownCalls: 1 } : { tokens: total, calls: 1 };
+  // The counters are what the limits are made of and the row is only the log: a row that fails to write must not keep the tokens out
+  await Promise.all([add(db, "day", periodOf("day", now), inc), add(db, counter, periodOf(counter, now), inc)]);
   await db.AiUsage.create({
     ...(entry.projectId ? { project: entry.projectId } : {}),
     ...(entry.userId ? { user: entry.userId } : {}),
@@ -45,6 +48,4 @@ export async function recordUsage(db: ScopedDb, entry: UsageEntry, counter: "tri
     cachedPromptTokens: usage?.cachedPromptTokens ?? 0,
     cacheWriteTokens: usage?.cacheWriteTokens ?? 0,
   });
-  const inc: Record<string, number> = entry.keySource === "own" ? { ownTokens: total, ownCalls: 1 } : { tokens: total, calls: 1 };
-  await Promise.all([add(db, "day", periodOf("day", now), inc), add(db, counter, periodOf(counter, now), inc)]);
 }

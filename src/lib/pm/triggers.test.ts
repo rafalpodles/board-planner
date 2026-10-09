@@ -13,7 +13,8 @@ let reviewed: Record<string, unknown> | null = null;
 // Projection-aware, because runPmTrigger asks for the pm config and the notification asks for the
 // board's identity. One answer for both leaves the mail's project name and key untestable.
 // The gateway's counters are its own tests' business (src/lib/ai-gateway): these only need the door to open
-vi.mock("@/lib/ai-gateway/budget", () => ({ counterKindOf: async () => "month", checkBudget: async () => ({ refusal: null, counter: "month" }) }));
+const checkBudget = vi.hoisted(() => vi.fn(async () => ({ refusal: null as unknown, counter: "month" })));
+vi.mock("@/lib/ai-gateway/budget", () => ({ counterKindOf: async () => "month", checkBudget }));
 vi.mock("@/lib/ai-gateway/usage", () => ({ recordUsage: vi.fn() }));
 vi.mock("@/models/project", () => ({
   Project: {
@@ -109,6 +110,30 @@ describe("runPmTrigger", () => {
     expect(findOneAndUpdate).toHaveBeenCalledWith({ _id: "t1", organisation: DEFAULT_ORGANISATION_ID }, {
       $set: { state: "failed", lastError: expect.stringMatching(/your own key.*upgrade to Pro/), active: false },
     });
+  });
+
+  // BP-680
+  it("fails the trigger with the number and the renewal once the month's allowance is spent, and runs nothing", async () => {
+    resolveModelKey.mockResolvedValueOnce({ ok: true, key: "k", source: "managed" });
+    checkBudget.mockResolvedValueOnce({ refusal: { scope: "month", used: 15_000_000, limit: 15_000_000, resetsAt: new Date("2026-11-01T00:00:00Z") }, counter: "month" });
+
+    expect(await runPmTrigger(db, trigger)).toBe("ran");
+
+    expect(runPmTurn).not.toHaveBeenCalled();
+    expect(findOneAndUpdate).toHaveBeenCalledWith({ _id: "t1", organisation: DEFAULT_ORGANISATION_ID }, {
+      $set: { state: "failed", lastError: expect.stringMatching(/15,000,000 of 15,000,000.*1 November 2026/), active: false },
+    });
+  });
+
+  it("holds the trigger, with no attempt spent, while the day's ceiling pauses AI, so that it is reviewed when the day is over", async () => {
+    resolveModelKey.mockResolvedValueOnce({ ok: true, key: "k", source: "managed" });
+    checkBudget.mockResolvedValueOnce({ refusal: { scope: "day", used: 3_000_000, limit: 3_000_000, resetsAt: new Date("2026-10-10T00:00:00Z") }, counter: "month" });
+
+    expect(await runPmTrigger(db, trigger)).toBe("deferred");
+
+    expect(runPmTurn).not.toHaveBeenCalled();
+    expect(findOneAndUpdate).toHaveBeenCalledWith({ _id: "t1", organisation: DEFAULT_ORGANISATION_ID }, { $set: { state: "pending", lastError: "", active: true } });
+    expect(findOneAndUpdate).toHaveBeenCalledWith({ _id: "t1", organisation: DEFAULT_ORGANISATION_ID }, { $inc: { attempts: -1 } });
   });
 
   it("withholds assign_task and change_status from the turn", async () => {

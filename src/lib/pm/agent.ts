@@ -365,8 +365,8 @@ export async function runPmTurn(db: ScopedDb, opts: {
       signal: opts.signal,
     });
 
-    // Counted before the result is judged: the call was made and billed whatever it answered
-    spend.calls++;
+    // Counted before the result is judged: the call was made and billed whatever it answered, unless the gate never let it out
+    if (!("refused" in completion)) spend.calls++;
     if ("usage" in completion && completion.usage) {
       spend.promptTokens += completion.usage.promptTokens;
       spend.completionTokens += completion.usage.completionTokens;

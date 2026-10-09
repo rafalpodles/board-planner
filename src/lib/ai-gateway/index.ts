@@ -5,6 +5,8 @@ import { checkBudget, counterKindOf } from "./budget";
 import { describeBudgetRefusal } from "./refusal";
 import { recordUsage, type UsageEntry } from "./usage";
 
+const CHARACTERS_PER_TOKEN = 4;
+
 export type GatewayContext = Pick<UsageEntry, "source" | "projectId" | "userId">;
 
 export type OpenGate = { ok: true; key: string; keySource: UsageEntry["keySource"]; counter: "trial" | "month" };
@@ -50,13 +52,18 @@ export async function gatewayChat(
   db: ScopedDb,
   context: GatewayContext,
   opts: Omit<Parameters<typeof chatCompletion>[0], "apiKey">
-): Promise<OrCompletionResult> {
+): Promise<OrCompletionResult & { refused?: true }> {
   const gate = await openGate(db, { error: "The PM agent is not configured on this instance", status: 503 });
-  if (!gate.ok) return { type: "error", error: gate.error };
+  if (!gate.ok) return { type: "error", error: gate.error, refused: true };
 
   const completion = await chatCompletion({ ...opts, apiKey: gate.key });
   if (completion.type === "text" || completion.type === "tool_calls") {
     await record(db, { ...context, keySource: gate.keySource, model: opts.model, usage: completion.usage }, gate.counter);
+  } else if (completion.type === "aborted") {
+    // A request that was sent is billed in full whether or not anyone waited for the answer; its size is what was sent
+    const sent = Math.ceil(JSON.stringify(opts.messages).length / CHARACTERS_PER_TOKEN);
+    const usage = { promptTokens: sent, completionTokens: 0, totalTokens: sent, cachedPromptTokens: 0, cacheWriteTokens: 0 };
+    await record(db, { ...context, keySource: gate.keySource, model: opts.model, usage }, gate.counter);
   }
   return completion;
 }
