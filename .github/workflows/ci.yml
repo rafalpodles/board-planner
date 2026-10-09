@@ -259,6 +259,56 @@ jobs:
             ${{ runner.temp }}/mongod.log
           retention-days: 7
 
+  # The real licence service and the app together, against a Stripe stand-in (BP-979): each side's own suite stubs the
+  # other, so this is the only place the signatures and answers they exchange meet. The service is a private
+  # repository, so the job needs a token that can read it. Until the repository variable LICENCE_SMOKE_ENABLED is "true"
+  # and the secret LICENCE_SERVICE_TOKEN exists it is skipped, which the gate below counts as passing: run the smoke
+  # by hand meanwhile (e2e/smoke/licence.smoke.ts says how).
+  smoke_licence:
+    name: Smoke — the real licence service with the app
+    if: ${{ vars.LICENCE_SMOKE_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 })'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: rafalpodles/board-planner-licence
+          token: ${{ secrets.LICENCE_SERVICE_TOKEN }}
+          path: licence-service
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            licence-service/package-lock.json
+      - run: npm ci
+      - run: npm ci
+        working-directory: licence-service
+      - run: npx playwright install --with-deps chromium
+      - name: Smoke
+        env:
+          E2E_ORGANISATIONS_SERVER: "1"
+          LICENCE_SERVICE_DIR: ${{ github.workspace }}/licence-service
+        run: npx playwright test -c playwright.smoke.config.ts --project=licence
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: smoke-artifacts-licence
+          path: e2e/.artifacts
+          retention-days: 7
+
   plan_e2e:
     # Decides which of the six groups below this push can possibly affect, so a change confined to
     # one feature area doesn't pay for all six. See e2e/affected-groups.ts for the mapping and the
@@ -387,6 +437,7 @@ jobs:
       - worker-linux
       - e2e_production_csp
       - smoke_worker
+      - smoke_licence
       - plan_e2e
       - e2e
     if: always()

@@ -5,4 +5,5 @@
  */
 export const SMOKES = {
   worker: "worker.smoke.ts",
+  licence: "licence.smoke.ts",
 } as const;
