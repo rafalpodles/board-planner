@@ -152,5 +152,9 @@ describe("what it reports about the cache", () => {
     respondWith({ ...TEXT, usage: { prompt_tokens: -1000, completion_tokens: 1500, total_tokens: 0 } });
 
     expect(await call()).toMatchObject({ usage: { promptTokens: 0, completionTokens: 1500, totalTokens: 1500 } });
+
+    respondWith({ ...TEXT, usage: { prompt_tokens: 1500, completion_tokens: -1000, total_tokens: 0 } });
+
+    expect(await call()).toMatchObject({ usage: { promptTokens: 1500, completionTokens: 0, totalTokens: 1500 } });
   });
 });

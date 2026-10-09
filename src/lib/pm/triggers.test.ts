@@ -125,7 +125,7 @@ describe("runPmTrigger", () => {
     });
   });
 
-  it("holds the trigger, with no attempt spent, while the day's ceiling pauses AI, and asks again on the next tick", async () => {
+  it("holds the trigger, with no attempt spent, while the day's ceiling pauses AI, and spends no attempt on it", async () => {
     resolveModelKey.mockResolvedValueOnce({ ok: true, key: "k", source: "managed" });
     checkBudget.mockResolvedValueOnce({ refusal: { scope: "day", used: 3_000_000, limit: 3_000_000, resetsAt: new Date("2026-10-10T00:00:00Z") }, counter: "month" });
 

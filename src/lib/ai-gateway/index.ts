@@ -7,12 +7,13 @@ import { recordUsage, type UsageEntry } from "./usage";
 
 const CHARACTERS_PER_TOKEN = 4;
 const TOKENS_PER_IMAGE = 1500;
+const IMAGE_DATA_URI = /^data:image\/[^;,]+;base64,/;
 
 /** What was sent, as far as it is known: its text, and a flat figure for each image, which travels as base64 and is billed by its size on screen */
 function sentTokens(messages: unknown): number {
   let images = 0;
   const text = JSON.stringify(messages, (_key, value) => {
-    if (typeof value === "string" && value.startsWith("data:")) {
+    if (typeof value === "string" && IMAGE_DATA_URI.test(value)) {
       images++;
       return "";
     }
@@ -71,7 +72,7 @@ export async function gatewayChat(
   if (!gate.ok) return { type: "error", error: gate.error, refused: true };
 
   // Stopped while the gate was being opened: nothing was sent, so nothing is counted
-  if (opts.signal?.aborted) return { type: "aborted" };
+  if (opts.signal?.aborted) return { type: "aborted", refused: true };
 
   const completion = await chatCompletion({ ...opts, apiKey: gate.key });
   if (completion.type === "text" || completion.type === "tool_calls") {

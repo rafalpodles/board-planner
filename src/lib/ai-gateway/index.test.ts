@@ -134,16 +134,24 @@ describe("gatewayChat", () => {
 
     await gatewayChat(db, CONTEXT, { ...CHAT, messages });
 
-    const { totalTokens } = m.recordUsage.mock.calls[0][1].usage;
-    expect(totalTokens).toBeGreaterThanOrEqual(1500);
-    expect(totalTokens).toBeLessThan(1700);
+    const text = JSON.stringify(messages, (_key, value) => (typeof value === "string" && value.startsWith("data:") ? "" : value));
+    expect(m.recordUsage.mock.calls[0][1].usage.totalTokens).toBe(Math.ceil(text.length / 4) + 1500);
+  });
+
+  it("counts a message that merely starts with data: as the text it is", async () => {
+    m.chatCompletion.mockResolvedValue({ type: "aborted" });
+
+    await gatewayChat(db, CONTEXT, { ...CHAT, messages: [{ role: "user", content: "data: the export failed" }] });
+
+    expect(m.recordUsage.mock.calls[0][1].usage.totalTokens).toBeLessThan(100);
   });
 
   it("counts nothing for a call that was stopped before it was sent, and never reaches the provider", async () => {
+    m.chatCompletion.mockResolvedValue({ type: "aborted" });
     const stopped = new AbortController();
     stopped.abort();
 
-    expect(await gatewayChat(db, CONTEXT, { ...CHAT, signal: stopped.signal })).toEqual({ type: "aborted" });
+    expect(await gatewayChat(db, CONTEXT, { ...CHAT, signal: stopped.signal })).toEqual({ type: "aborted", refused: true });
 
     expect(m.chatCompletion).not.toHaveBeenCalled();
     expect(m.recordUsage).not.toHaveBeenCalled();
