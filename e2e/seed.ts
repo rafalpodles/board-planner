@@ -484,6 +484,48 @@ export async function seedListVisibleDropdownField() {
   await mongoose.disconnect();
 }
 
+export const LABELS_FIELD_ID = id("e2e00000000000000000f0a1");
+export const LABEL_OPTIONS = [
+  { id: "o-front", value: "Frontend", color: "#3b82f6", order: 0 },
+  { id: "o-back", value: "Backend", color: "#22c55e", order: 1 },
+  { id: "o-design", value: "Design", color: "#a855f7", order: 2 },
+] as const;
+
+/**
+ * A "Labels" multiselect on the board, with TP-1 carrying Frontend and Backend, TP-2 Backend,
+ * TP-3 Design and TP-4 nothing, so that an any/all filter, a search and an edit each have a
+ * different answer.
+ */
+export async function seedLabelsField() {
+  const db = (await connect()).db!;
+  await db.collection("projects").updateOne(
+    { _id: PROJECT_ID },
+    {
+      $set: {
+        customFields: [
+          {
+            _id: LABELS_FIELD_ID,
+            name: "Labels",
+            fieldType: "multiselect",
+            options: LABEL_OPTIONS.map((o) => ({ ...o })),
+            order: 0,
+            required: false,
+            showOnCard: true,
+            showInList: true,
+            filterable: true,
+            archived: false,
+          },
+        ],
+      },
+    }
+  );
+  const key = `customFieldValues.${LABELS_FIELD_ID}`;
+  await db.collection("tasks").updateOne({ _id: HELD_TASK_ID }, { $set: { [key]: ["o-front", "o-back"] } });
+  await db.collection("tasks").updateOne({ _id: DECOY_TASK_ID }, { $set: { [key]: ["o-back"] } });
+  await db.collection("tasks").updateOne({ _id: SIBLING_TASK_ID }, { $set: { [key]: ["o-design"] } });
+  await mongoose.disconnect();
+}
+
 /** When a task was last written, as the database has it — `timestamps: true` maintains this. */
 export async function storedUpdatedAt(taskId: mongoose.Types.ObjectId): Promise<number> {
   const db = (await connect()).db!;
