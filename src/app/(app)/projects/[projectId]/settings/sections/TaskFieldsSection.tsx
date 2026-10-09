@@ -23,6 +23,7 @@ import {
   LABELS_FIELD_DRAFT,
 } from "@/components/settings/CustomFieldForm";
 import { activeFields, sortedFields } from "@/lib/custom-fields";
+import { findLegacyField } from "@/lib/legacy-fields";
 import {
   SettingsCard,
   EmptyState,
@@ -63,9 +64,7 @@ export function TaskFieldsSection({
   const api = useApi();
   const { toast } = useToast();
 
-  const hasLabelsField = (project.customFields || []).some(
-    (f) => f.name.trim().toLowerCase() === "labels",
-  );
+  const hasLabelsField = !!findLegacyField(project.customFields, "labels");
   const numericFields = sortedFields(
     activeFields(project.customFields || []).filter((f) => f.fieldType === "number"),
   );

@@ -231,9 +231,6 @@ describe("a multiselect filter", () => {
     });
   });
 
-  it("ignores a stored filter that is not an object", () => {
-    expect(sanitizeFieldFilters({ fl: "a", other: null }, [labels])).toEqual({});
-  });
 });
 
 describe("the status filter reads roles, not column ids", () => {

@@ -405,7 +405,7 @@ export function BoardFilters({
     const option = chosen[0];
     const range = [filter?.from, filter?.to];
     const label = option
-      ? `${field.name}: ${chosen.map((o) => o.value).join(filter?.mode === "all" ? " + " : ", ")}`
+      ? `${field.name}: ${chosen.map((o) => o.value).join(filter?.mode === "all" ? " and " : " or ")}`
       : filter?.value
         ? `${field.name}: ${filter.value}`
         : `${field.name}: ${range[0] || "…"}–${range[1] || "…"}`;
@@ -636,8 +636,7 @@ export function BoardFilters({
                 <div className="my-3 h-px bg-border" />
                 <div className="grid grid-cols-2 gap-2">
                   {filterableFields.map((field) => field.fieldType === "multiselect" ? (
-                    <div key={field._id} className="col-span-2 flex flex-col gap-1">
-                      <span className="text-[11px] text-text-muted">{field.name}</span>
+                    <div key={field._id} className="col-span-2">
                       <OptionFilter
                         field={field}
                         filter={fieldFilter(field._id)}
@@ -827,7 +826,9 @@ function FilterChip({
           {initial}
         </span>
       )}
-      <span className="max-w-[9rem] truncate">{label}</span>
+      <span className="max-w-[9rem] truncate" title={label}>
+        {label}
+      </span>
       <button
         onClick={onRemove}
         aria-label={`Remove ${label} filter`}

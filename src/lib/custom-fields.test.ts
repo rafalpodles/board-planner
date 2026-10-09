@@ -240,7 +240,8 @@ describe("matchesFieldFilter", () => {
 
   it("lets everything through a multiselect that has no option picked, whatever the mode", () => {
     expect(matchesFieldFilter(["a"], { values: [], mode: "all" }, multi)).toBe(true);
-    expect(matchesFieldFilter(undefined, { mode: "all" }, multi)).toBe(true);
+    expect(matchesFieldFilter(["a"], { values: [] }, multi)).toBe(true);
+    expect(matchesFieldFilter(undefined, { mode: "any" }, multi)).toBe(true);
   });
 
   it("reads nothing from a malformed filter instead of throwing", () => {
@@ -607,6 +608,7 @@ describe("finding a task by the name of a label", () => {
     ]);
     expect(labelMatches([{ ...labels, archived: true }], "front")).toEqual([]);
     expect(labelMatches([labels], "  ")).toEqual([]);
+    expect(labelMatches([labels], " front ")).toEqual(labelMatches([labels], "front"));
     expect(labelMatches(undefined, "front")).toEqual([]);
   });
 

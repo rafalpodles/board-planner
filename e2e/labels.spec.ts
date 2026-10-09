@@ -7,6 +7,7 @@ import {
   HELD_TASK_TITLE,
   LABELS_FIELD_ID,
   LIST_DROPDOWN_FIELD_NAME,
+  LIST_DROPDOWN_OPTIONS,
   PROJECT_KEY,
   SIBLING_TASK_TITLE,
   seed,
@@ -75,7 +76,7 @@ test("the filter takes several labels, matches any or all of them, and keeps the
 
     await expect(row(page, HELD_TASK_TITLE)).toBeVisible();
     await expect(rows(page)).toHaveCount(1);
-    await expect(panel(page)).toContainText("Labels: Frontend + Backend");
+    await expect(panel(page)).toContainText("Labels: Frontend and Backend");
   });
 
   await test.step("the choice, mode included, is still there after a reload", async () => {
@@ -165,9 +166,20 @@ test("labels are edited from the list, several at a time", async ({ page, reques
   await written;
 
   expect(await storedLabels(request, 4)).toEqual(["o-back", "o-design"]);
+
+  written = write();
+  await listbox.getByRole("option", { name: "Design", exact: true }).click();
+  await written;
+  expect(await storedLabels(request, 4), "a ticked label unticks").toEqual(["o-back"]);
   await page.keyboard.press("Escape");
   await expect(row(page, FINISHED_TASK_TITLE)).toContainText("Backend");
-  await expect(row(page, FINISHED_TASK_TITLE)).toContainText("Design");
+  await expect(row(page, FINISHED_TASK_TITLE)).not.toContainText("Design");
+
+  await combo.click();
+  written = write();
+  await listbox.getByRole("option", { name: "Clear all" }).click();
+  await written;
+  expect(await storedLabels(request, 4)).toEqual([]);
 });
 
 test("two quick picks in the list both reach the server, even when the first request is slow", async ({ page, request }) => {
@@ -216,10 +228,15 @@ test.describe("a board without a Labels field", () => {
     await page.getByRole("button", { name: "Create field" }).click();
     expect((await created).status()).toBe(201);
 
+    await expect(page.getByRole("button", { name: "+ Add field" })).toBeVisible();
     await expect(page.getByRole("button", { name: "+ Add a Labels field" })).toHaveCount(0);
     const res = await request.get(`/api/projects/${PROJECT_KEY}/custom-fields`, { headers: ADMIN_AUTH });
     const stored = (await res.json()) as { name: string; fieldType: string; filterable: boolean; showOnCard: boolean }[];
     expect(stored.map((f) => f.name)).toEqual([LIST_DROPDOWN_FIELD_NAME, "Labels"]);
+    expect(stored[0]).toMatchObject({ fieldType: "dropdown", showInList: true });
+    expect((stored[0] as unknown as { options: { value: string }[] }).options.map((o) => o.value)).toEqual(
+      LIST_DROPDOWN_OPTIONS.map((o) => o.value)
+    );
     expect(stored[1]).toMatchObject({ fieldType: "multiselect", filterable: true, showOnCard: true });
   });
 

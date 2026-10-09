@@ -1,6 +1,6 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import { useId, type CSSProperties } from "react";
 import { ApiCustomField } from "@/types";
 import { FieldFilter, orderedOptions, pickedOptions } from "@/lib/custom-fields";
 
@@ -11,6 +11,7 @@ interface OptionFilterProps {
 }
 
 export function OptionFilter({ field, filter, onChange }: OptionFilterProps) {
+  const labelId = useId();
   const picked = pickedOptions(filter);
   const mode = filter.mode === "all" ? "all" : "any";
 
@@ -20,8 +21,11 @@ export function OptionFilter({ field, filter, onChange }: OptionFilterProps) {
   }
 
   return (
-    <div role="group" aria-label={field.name} className="flex flex-col gap-1.5">
-      <div className="-m-0.5 flex max-h-28 flex-wrap gap-1 overflow-y-auto p-0.5">
+    <div role="group" aria-labelledby={labelId} className="flex flex-col gap-1.5">
+      <span id={labelId} className="text-[11px] text-text-muted">
+        {field.name}
+      </span>
+      <div className="scroll-ring-room flex max-h-28 flex-wrap gap-1 overflow-y-auto">
         {orderedOptions(field).map((option) => {
           const on = picked.includes(option.id);
           return (
@@ -32,9 +36,10 @@ export function OptionFilter({ field, filter, onChange }: OptionFilterProps) {
               onClick={() => toggle(option.id)}
               style={{ "--chip": option.color } as CSSProperties}
               className={`focus-ring chip chip-custom max-w-full truncate rounded-full px-2 py-0.5 text-[12px] ${
-                on ? "ring-2 ring-primary" : "opacity-60 hover:opacity-100"
+                on ? "ring-2 ring-primary font-semibold" : "opacity-80 hover:opacity-100"
               }`}
             >
+              {on && <span aria-hidden>✓ </span>}
               {option.value}
             </button>
           );
