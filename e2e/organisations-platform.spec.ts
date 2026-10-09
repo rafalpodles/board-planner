@@ -63,6 +63,7 @@ test.describe("BP-892: the platform operator is the licence service, not an orga
     expect(bySlug.acme).toMatchObject({ id: ACME.organisation.toHexString(), plan: "pro", members: 1, projects: 1, licence: { verdict: "valid", customer: "acme customer" } });
     expect(bySlug.globex).toMatchObject({ id: GLOBEX.organisation.toHexString(), plan: "free", members: 1, projects: 1 });
     expect(JSON.stringify(organisations)).not.toContain(ACME.projectName);
+    expect(bySlug.acme.usage).toEqual({ requestsThisMinute: expect.any(Number), requestsPerMinute: expect.any(Number), storedBytes: 0, storageLimitBytes: expect.any(Number) });
 
     const rows = await platformLogRows();
     expect(rows.map((row) => row.action)).toEqual(["licence_stored", "organisations_listed"]);
@@ -115,6 +116,54 @@ test.describe("BP-892: the platform operator is the licence service, not an orga
     const { d, x } = generateKeyPairSync("ed25519").privateKey.export({ format: "jwk" });
     const stranger = signPlatformRequest({ method: "GET", host: PLATFORM_HOST, path, body: EMPTY }, { keyId: E2E_PLATFORM_REQUEST_KEY.keyId, d: d!, x: x! });
     expect((await request.get(`${ORGANISATIONS_API}${path}`, { headers: { host: PLATFORM_HOST, ...stranger } })).status()).toBe(401);
+    expect(await platformLogRows()).toEqual([]);
+  });
+
+  test("an organisation's administrator can neither suspend, resume, delete, export nor license any organisation, by session, API token or OAuth token, on either host", async ({ request }) => {
+    const credentials = {
+      session: { cookie: `__Host-bp_session=${ACME.sessionToken}` },
+      token: bearer(ACME),
+      oauth: oauthBearer(ACME),
+    };
+    const licence = JSON.stringify({ licenceKey: e2eLicence({ customer: "stolen", organisation: ACME.organisation.toHexString() }) });
+    const routes = (who: OrganisationFixture) => {
+      const base = `/api/platform/organisations/${who.organisation.toHexString()}`;
+      return [
+        { method: "POST", path: `${base}/suspend`, body: JSON.stringify({ reason: "x" }) },
+        { method: "POST", path: `${base}/resume`, body: "" },
+        { method: "DELETE", path: `${base}?confirm=${who.slug}`, body: "" },
+        { method: "DELETE", path: `${base}?dryRun=1`, body: "" },
+        { method: "GET", path: `${base}/export`, body: "" },
+        { method: "POST", path: `${base}/licence`, body: licence },
+      ];
+    };
+
+    for (const target of [ACME, GLOBEX]) {
+      for (const route of routes(target)) {
+        for (const [kind, credential] of Object.entries(credentials)) {
+          const send = (headers: Record<string, string>) =>
+            request.fetch(`${ORGANISATIONS_API}${route.path}`, { method: route.method, headers: { ...headers, ...(route.body ? { "content-type": "application/json" } : {}) }, ...(route.body ? { data: route.body } : {}) });
+          const label = `${kind} ${route.method} ${route.path.replace(/[0-9a-f]{24}/, ":id")} on ${target.slug}`;
+          expect((await send({ host: PLATFORM_HOST, ...credential })).status(), `${label}, platform host`).toBe(401);
+          expect((await send({ ...asOrganisation(ACME), ...credential })).status(), `${label}, its own host`).toBe(404);
+        }
+      }
+    }
+
+    // Nothing happened to either organisation, and nothing was logged as the operator's doing
+    await mongoose.connect(E2E_MONGODB_URI);
+    try {
+      const rows = await mongoose.connection.db!.collection("organisations").find({ _id: { $in: [ACME.organisation, GLOBEX.organisation] } }).toArray();
+      expect(rows).toHaveLength(2);
+      for (const row of rows) {
+        expect(row.suspendedAt ?? null, `${row.slug} suspended`).toBeNull();
+        expect(row.deletedAt ?? null, `${row.slug} deleted`).toBeNull();
+        expect(row.deletingAt ?? null, `${row.slug} being deleted`).toBeNull();
+        expect(row, `${row.slug} licensed`).not.toHaveProperty("licenceKey");
+      }
+    } finally {
+      await mongoose.disconnect();
+    }
     expect(await platformLogRows()).toEqual([]);
   });
 

@@ -76,6 +76,12 @@ export async function isRateLimited(key: string, threshold = MAX_ATTEMPTS): Prom
   return (entry?.count ?? 0) >= threshold;
 }
 
+export async function countInLiveWindow(key: string): Promise<number> {
+  await connectDB();
+  const entry = await RateLimit.findOne({ _id: key, resetAt: { $gt: new Date() } }).select("count").lean();
+  return entry?.count ?? 0;
+}
+
 /**
  * One operation, because two are not enough.
  *
