@@ -304,16 +304,40 @@ export function cardBadges(
   return badges;
 }
 
+/** Range for number and date fields, several options for a multiselect, `value` for every other type */
+export interface FieldFilter {
+  value?: string;
+  from?: string;
+  to?: string;
+  values?: string[];
+  mode?: "any" | "all";
+}
+
+/** The options a multiselect filter asks for; the single `value` older filters stored still counts */
+export function pickedOptions(filter: FieldFilter | undefined): string[] {
+  if (filter?.values?.length) return filter.values;
+  return filter?.value ? [filter.value] : [];
+}
+
 /**
  * Whether a task passes one field's filter. Ranges are inclusive and open-ended:
  * a `from` with no `to` means "at least this", which is how people read it.
  */
 export function matchesFieldFilter(
   value: unknown,
-  filter: { value?: string; from?: string; to?: string },
+  filter: FieldFilter,
   field: { fieldType: ICustomField["fieldType"] }
 ): boolean {
   const { value: wanted, from, to } = filter;
+
+  if (field.fieldType === "multiselect") {
+    const picked = pickedOptions(filter);
+    if (picked.length === 0) return true;
+    const held = Array.isArray(value) ? value : [];
+    return filter.mode === "all"
+      ? picked.every((id) => held.includes(id))
+      : picked.some((id) => held.includes(id));
+  }
 
   if (field.fieldType === "number" || field.fieldType === "date") {
     if (!from && !to) return true;
@@ -336,8 +360,6 @@ export function matchesFieldFilter(
   switch (field.fieldType) {
     case "checkbox":
       return String(!!value) === wanted;
-    case "multiselect":
-      return Array.isArray(value) && value.includes(wanted);
     case "dropdown":
       return value === wanted;
     default:
@@ -347,7 +369,7 @@ export function matchesFieldFilter(
 
 export function matchesAllFieldFilters(
   values: Record<string, unknown> | undefined,
-  filters: Record<string, { value?: string; from?: string; to?: string }>,
+  filters: Record<string, FieldFilter>,
   definitions: { _id: string; fieldType: ICustomField["fieldType"] }[]
 ): boolean {
   const byId = new Map(definitions.map((f) => [f._id, f]));
@@ -375,6 +397,53 @@ export function fieldCellText(
   }
   if (field.fieldType === "checkbox") return value === true ? "Yes" : "No";
   return String(value);
+}
+
+type LabelField = {
+  _id: unknown;
+  fieldType: ICustomField["fieldType"];
+  options?: LegacyOption[];
+  archived?: boolean;
+};
+
+/** For each live multiselect, the ids of the options whose name contains the text */
+export function labelMatches(
+  fields: LabelField[] | undefined,
+  query: string
+): { fieldId: string; ids: string[] }[] {
+  const wanted = query.trim().toLowerCase();
+  if (!wanted) return [];
+  const matches: { fieldId: string; ids: string[] }[] = [];
+  for (const field of fields ?? []) {
+    if (field.archived || field.fieldType !== "multiselect") continue;
+    const ids = normalizeOptions(field.options)
+      .filter((o) => o.value.toLowerCase().includes(wanted))
+      .map((o) => o.id);
+    if (ids.length) matches.push({ fieldId: String(field._id), ids });
+  }
+  return matches;
+}
+
+/** Whether a label of the task has a name containing the text, which is how a board's search finds one */
+export function taskMatchesLabelSearch(
+  values: Record<string, unknown> | undefined,
+  fields: LabelField[] | undefined,
+  query: string
+): boolean {
+  return labelMatches(fields, query).some(({ fieldId, ids }) => {
+    const held = values?.[fieldId];
+    return Array.isArray(held) && held.some((id) => ids.includes(String(id)));
+  });
+}
+
+/** The same test as a query, to sit among the `$or` clauses of a text search */
+export function labelSearchClauses(
+  fields: LabelField[] | undefined,
+  query: string
+): Record<string, unknown>[] {
+  return labelMatches(fields, query).map(({ fieldId, ids }) => ({
+    [`customFieldValues.${fieldId}`]: { $in: ids },
+  }));
 }
 
 export interface FieldChange {

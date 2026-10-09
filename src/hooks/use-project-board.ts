@@ -70,7 +70,7 @@ export interface ProjectBoard {
   applySprintChange: (taskIds: string[], sprintId: string | null) => void;
   patchTask: (taskId: string, patch: Record<string, unknown>, label: string) => Promise<void>;
   handleAssigneeChange: (taskId: string, username: string) => Promise<void>;
-  handleFieldValueChange: (taskId: string, fieldId: string, value: string) => Promise<void>;
+  handleFieldValueChange: (taskId: string, fieldId: string, value: string | string[]) => Promise<void>;
   handleRowSprintChange: (taskId: string, sprintId: string | null) => Promise<void>;
   handleContextDuplicate: (taskId: string) => Promise<void>;
   handleContextDelete: (taskId: string) => Promise<void>;
@@ -555,7 +555,7 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
     }
   }
 
-  async function handleFieldValueChange(taskId: string, fieldId: string, value: string) {
+  async function handleFieldValueChange(taskId: string, fieldId: string, value: string | string[]) {
     const task = tasks.find((t) => t._id === taskId);
     if (!task) return;
     const values = { ...(task.customFieldValues || {}), [fieldId]: value };

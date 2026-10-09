@@ -35,6 +35,9 @@ let lastQuery: { filter: unknown; limit?: number; sorted?: unknown };
 /** What the key branch asked the projects collection, and what it was told */
 let lastProjectQuery: unknown;
 let foundBoards: { _id: string; key: string }[];
+/** The boards with a multiselect, asked for once a text search is going to run */
+let lastLabelQuery: unknown;
+let labelBoards: { _id: string; customFields: unknown[] }[];
 
 function chain(rows: unknown[]) {
   const self = {
@@ -57,9 +60,15 @@ beforeEach(() => {
   lastQuery = { filter: undefined };
   lastProjectQuery = undefined;
   foundBoards = [{ _id: "p1", key: "TP" }];
+  lastLabelQuery = undefined;
+  labelBoards = [];
   getAuthUser.mockResolvedValue(MEMBER);
   accessibleProjectIds.mockResolvedValue(ALLOWED);
-  projectFind.mockImplementation((filter: unknown) => {
+  projectFind.mockImplementation((filter: Record<string, unknown>) => {
+    if ("customFields.fieldType" in filter) {
+      lastLabelQuery = filter;
+      return { select: () => ({ lean: () => Promise.resolve(labelBoards) }) };
+    }
     lastProjectQuery = filter;
     return { select: () => ({ lean: () => Promise.resolve(foundBoards) }) };
   });
@@ -224,7 +233,7 @@ describe("GET /api/search", () => {
   it("does not treat a ten-digit tail as a task number", async () => {
     await search("BP-1234567890");
 
-    expect(projectFind).not.toHaveBeenCalled();
+    expect(lastProjectQuery).toBeUndefined();
     expect(lastQuery.filter).toHaveProperty("$or");
   });
 
@@ -237,7 +246,7 @@ describe("GET /api/search", () => {
   ])("does not look up a board whose key %s", async (_label, query) => {
     await search(query);
 
-    expect(projectFind).not.toHaveBeenCalled();
+    expect(lastProjectQuery).toBeUndefined();
     expect(lastQuery.filter).toHaveProperty("$or");
   });
 
@@ -278,4 +287,41 @@ describe("GET /api/search — what a hit publishes", () => {
       expect(text).not.toContain("run-secret-123");
     }
   );
+
+  describe("a label name", () => {
+    const labels = {
+      _id: "f-labels",
+      fieldType: "multiselect",
+      options: [
+        { id: "o-front", value: "Frontend", order: 0 },
+        { id: "o-back", value: "Backend", order: 1 },
+      ],
+    };
+
+    it("finds the tasks of a board whose option carries that name, scoped to that board", async () => {
+      labelBoards = [{ _id: "p1", customFields: [labels] }];
+      await search("front");
+
+      const or = (lastQuery.filter as { $or: unknown[] }).$or;
+      expect(or).toHaveLength(3);
+      expect(or[2]).toEqual({
+        $and: [{ project: "p1" }, { "customFieldValues.f-labels": { $in: ["o-front"] } }],
+      });
+    });
+
+    it("asks only about the boards the reader can reach", async () => {
+      await search("front");
+      expect(lastLabelQuery).toMatchObject({ _id: { $in: ALLOWED } });
+
+      getAuthUser.mockResolvedValue(ADMIN);
+      await search("front");
+      expect(lastLabelQuery).not.toHaveProperty("_id");
+    });
+
+    it("adds nothing when no option is called that", async () => {
+      labelBoards = [{ _id: "p1", customFields: [labels] }];
+      await search("zzz");
+      expect((lastQuery.filter as { $or: unknown[] }).$or).toHaveLength(2);
+    });
+  });
 });

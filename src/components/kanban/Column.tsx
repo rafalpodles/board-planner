@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ApiTask, ApiLabel, ApiCustomField, ApiProjectCategory } from "@/types";
+import { ApiTask, ApiCustomField, ApiProjectCategory } from "@/types";
 import { AnyColumn } from "@/lib/columns";
 import { TaskCard } from "./TaskCard";
 

@@ -20,6 +20,7 @@ import { CustomFieldEditor } from "./CustomFieldEditor";
 import {
   CustomFieldForm,
   FieldDraft,
+  LABELS_FIELD_DRAFT,
 } from "@/components/settings/CustomFieldForm";
 import { activeFields, sortedFields } from "@/lib/custom-fields";
 import {
@@ -62,6 +63,9 @@ export function TaskFieldsSection({
   const api = useApi();
   const { toast } = useToast();
 
+  const hasLabelsField = (project.customFields || []).some(
+    (f) => f.name.trim().toLowerCase() === "labels",
+  );
   const numericFields = sortedFields(
     activeFields(project.customFields || []).filter((f) => f.fieldType === "number"),
   );
@@ -82,7 +86,7 @@ export function TaskFieldsSection({
     })),
   });
   // "new" opens the create form; a field id opens the same form over that field
-  const [fieldForm, setFieldForm] = useState<"new" | string | null>(null);
+  const [fieldForm, setFieldForm] = useState<"new" | "labels" | string | null>(null);
   const templates = useDraft<{ templates: ApiTaskTemplate[] }>({
     templates: project.taskTemplates || [],
   });
@@ -444,19 +448,31 @@ export function TaskFieldsSection({
           )}
         </div>
 
-        {fieldForm === "new" ? (
+        {fieldForm === "new" || fieldForm === "labels" ? (
           <CustomFieldForm
+            initial={fieldForm === "labels" ? LABELS_FIELD_DRAFT : undefined}
             onSubmit={addCustomField}
             onCancel={() => setFieldForm(null)}
           />
         ) : (
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => setFieldForm("new")}
-          >
-            + Add field
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setFieldForm("new")}
+            >
+              + Add field
+            </Button>
+            {!hasLabelsField && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setFieldForm("labels")}
+              >
+                + Add a Labels field
+              </Button>
+            )}
+          </div>
         )}
       </SettingsCard>
 

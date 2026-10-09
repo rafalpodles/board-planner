@@ -75,7 +75,7 @@ interface ListViewProps {
   onPriorityChange?: (taskId: string, priority: string) => void;
   onCategoryChange?: (taskId: string, category: string) => void;
   onSprintChange?: (taskId: string, sprintId: string | null) => void;
-  onFieldChange?: (taskId: string, fieldId: string, value: string) => void;
+  onFieldChange?: (taskId: string, fieldId: string, value: string | string[]) => void;
   /** While grouped, `tasks` holds the rows that are drawn: collapsed groups are left out */
   groups?: TaskGroup[];
   collapsedGroups?: ReadonlySet<string>;
@@ -172,6 +172,35 @@ function EnumCell({
       onChange={onChange}
       label={label}
       triggerClassName="w-full rounded"
+    >
+      {() => children}
+    </Combobox>
+  );
+}
+
+function MultiEnumCell({
+  value,
+  options,
+  label,
+  onChange,
+  children,
+}: {
+  value: string[];
+  options: ComboboxOption[];
+  label: string;
+  onChange?: (next: string[]) => void;
+  children: React.ReactNode;
+}) {
+  if (!onChange || options.length === 0) return <>{children}</>;
+  return (
+    <Combobox
+      multiple
+      value={value}
+      options={options}
+      onChange={onChange}
+      label={label}
+      emptyOption="Clear all"
+      triggerClassName="w-full rounded text-left"
     >
       {() => children}
     </Combobox>
@@ -818,8 +847,6 @@ export function ListView({
                       : raw === undefined || raw === null || raw === ""
                         ? []
                         : [String(raw)];
-                    // Only single-choice fields: a multiselect needs a control that
-                    // can hold several values, which this picker cannot
                     const choices =
                       field.fieldType === "dropdown"
                         ? [
@@ -831,6 +858,10 @@ export function ListView({
                             })),
                           ]
                         : [];
+                    const multiChoices =
+                      field.fieldType === "multiselect"
+                        ? options.map((o) => ({ value: o.id, label: o.value, color: o.color }))
+                        : [];
                     const picked = chosen
                       .map((id) => options.find((o) => o.id === id))
                       .filter((o): o is (typeof options)[number] => !!o);
@@ -840,6 +871,15 @@ export function ListView({
                         className="px-2 py-2 text-text-muted max-w-32"
                         title={text || undefined}
                       >
+                        <MultiEnumCell
+                          value={chosen}
+                          options={multiChoices}
+                          label={`${field.name} for ${taskKey}: ${task.title}`}
+                          onChange={
+                            onFieldChange &&
+                            ((next) => onFieldChange(task._id, field._id, next))
+                          }
+                        >
                         <EnumCell
                           value={chosen[0] ?? ""}
                           options={choices}
@@ -865,6 +905,7 @@ export function ListView({
                             <div className="truncate">{text || "—"}</div>
                           )}
                         </EnumCell>
+                        </MultiEnumCell>
                       </td>
                     );
                   })}
