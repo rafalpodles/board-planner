@@ -4,7 +4,10 @@ import { render, screen, cleanup } from "@testing-library/react";
 import { PlanBadge } from "./PlanBadge";
 
 const { state } = vi.hoisted(() => ({
-  state: { organisation: null as null | { plan: "free" | "pro"; planEndsAt: string | null; trial?: boolean }, isAdmin: true },
+  state: {
+    organisation: null as null | { plan: "free" | "pro"; planEndsAt: string | null; trial?: boolean; members?: number; invited?: number; memberLimit?: number | null },
+    isAdmin: true,
+  },
 }));
 vi.mock("@/hooks/use-organisation", () => ({ useOrganisation: () => ({ organisation: state.organisation }) }));
 vi.mock("@/hooks/use-auth", () => ({ useAuth: () => ({ isAdmin: state.isAdmin }) }));
@@ -94,5 +97,39 @@ describe("PlanBadge (BP-930)", () => {
     state.organisation = { plan: "free", planEndsAt: null };
     render(<PlanBadge compact />);
     expect(screen.getByTestId("plan-badge").getAttribute("href")).toBe("/settings/organisation");
+  });
+
+  // BP-982: the Free cloud holds ten; a pending invitation holds a seat, so it is counted in what the administrator is told
+  describe("the members note (BP-948)", () => {
+    const free = (members: number, invited: number, memberLimit: number | null = 10) => ({ plan: "free" as const, planEndsAt: null, members, invited, memberLimit });
+
+    it("tells an administrator how full the Free plan is once it is at its limit, invitations included, and when it is past it", () => {
+      state.organisation = free(8, 2);
+      render(<PlanBadge compact={false} />);
+      expect(screen.getByTestId("plan-badge-members").textContent).toBe("10 of 10 members on Free");
+      cleanup();
+
+      state.organisation = free(12, 0);
+      render(<PlanBadge compact={false} />);
+      expect(screen.getByTestId("plan-badge-members").textContent).toBe("12 of 10 members on Free");
+    });
+
+    it("says nothing below the limit, to a member, or where there is no limit", () => {
+      state.organisation = free(9, 0);
+      render(<PlanBadge compact={false} />);
+      expect(screen.queryByTestId("plan-badge-members")).toBeNull();
+      cleanup();
+
+      state.organisation = free(10, 0);
+      state.isAdmin = false;
+      render(<PlanBadge compact={false} />);
+      expect(screen.queryByTestId("plan-badge-members")).toBeNull();
+      cleanup();
+
+      state.isAdmin = true;
+      state.organisation = free(14, 0, null);
+      render(<PlanBadge compact={false} />);
+      expect(screen.queryByTestId("plan-badge-members")).toBeNull();
+    });
   });
 });

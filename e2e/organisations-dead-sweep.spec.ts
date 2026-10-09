@@ -1,6 +1,7 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
 import mongoose from "mongoose";
 import { RUN_ORGANISATIONS_SERVER } from "../playwright.config";
+import { DEFAULT_ORGANISATION_ID } from "../src/lib/organisation-field";
 import { signPlatformRequest } from "../src/lib/platform-request";
 import { E2E_PLATFORM_REQUEST_KEY, e2eLicence } from "./licence-key";
 import { mailFor } from "./mailbox";
@@ -120,6 +121,66 @@ test("use through a token counts as use, however long ago anybody signed in", as
 
   expect(await sweep(request, { daysFromNow: 75 })).toMatchObject({ noticed: 0, suspended: 0, deleted: 0 });
   expect((await organisationRow(ACME))?.deadNoticeAt ?? null).toBeNull();
+});
+
+// BP-982: deleting an organisation is not undone, so every kind of use the sweep reads has to be shown to count
+const FUTURE_USE = () => new Date(Date.now() + 70 * 24 * 60 * 60 * 1000);
+for (const [what, collection, field] of [
+  ["a browser session", "sessions", "lastUsedAt"],
+  ["a machine", "workers", "lastSeenAt"],
+  ["a connected app", "oauthtokens", "createdAt"],
+] as const) {
+  test(`use through ${what} counts as use, however long ago anybody signed in`, async ({ request }) => {
+    const { modifiedCount } = await withDb((db) => db.collection(collection).updateMany({ organisation: ACME.organisation as never }, { $set: { [field]: FUTURE_USE() } }));
+    expect(modifiedCount).toBeGreaterThan(0);
+
+    expect(await sweep(request, { daysFromNow: 75 })).toMatchObject({ noticed: 0, suspended: 0, deleted: 0 });
+    expect((await organisationRow(ACME))?.deadNoticeAt ?? null).toBeNull();
+  });
+}
+
+test("a person who has just joined counts as use, however long ago anybody signed in", async ({ request }) => {
+  await withDb((db) =>
+    db.collection("users").insertOne({
+      organisation: ACME.organisation,
+      username: "newcomer",
+      fullName: "New Comer",
+      email: "newcomer@acme.example",
+      kind: "human",
+      role: "member",
+      deactivatedAt: null,
+      createdAt: FUTURE_USE(),
+    })
+  );
+
+  expect(await sweep(request, { daysFromNow: 75 })).toMatchObject({ noticed: 0, suspended: 0, deleted: 0 });
+  expect((await organisationRow(ACME))?.deadNoticeAt ?? null).toBeNull();
+});
+
+test("the default organisation is never noticed, suspended or deleted, however old and quiet it is", async ({ request }) => {
+  await withDb(async (db) => {
+    await db.collection("organisations").insertOne({ _id: DEFAULT_ORGANISATION_ID as never, name: "Default", slug: "default", deletedAt: null });
+    await db.collection("users").insertOne({
+      organisation: DEFAULT_ORGANISATION_ID,
+      username: "root",
+      fullName: "Root",
+      email: "root@default.example",
+      kind: "human",
+      role: "admin",
+      deactivatedAt: null,
+      lastSignInAt: new Date(0),
+      createdAt: new Date(0),
+    });
+  });
+
+  for (const daysFromNow of [61, 76, 90]) await sweep(request, { daysFromNow });
+
+  const row = await withDb((db) => db.collection("organisations").findOne({ _id: DEFAULT_ORGANISATION_ID as never }));
+  expect(row).toMatchObject({ name: "Default" });
+  expect(row?.deadNoticeAt ?? null).toBeNull();
+  expect(row?.suspendedAt ?? null).toBeNull();
+  expect(row?.deletingAt ?? null).toBeNull();
+  expect(await mailFor("root@default.example")).toHaveLength(0);
 });
 
 test("a stored key that does not verify is a plan nobody can read, not no plan", async ({ request }) => {

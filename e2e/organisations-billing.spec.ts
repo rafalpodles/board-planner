@@ -1,12 +1,12 @@
 import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
-import { createPublicKey, verify } from "node:crypto";
+import { createHash, createPublicKey, verify } from "node:crypto";
 import http from "node:http";
 import mongoose from "mongoose";
 import { LICENCE_STUB_PORT, RUN_ORGANISATIONS_SERVER } from "../playwright.config";
 import { PLATFORM_HEADERS, platformSigningString, signPlatformRequest } from "../src/lib/platform-request";
 import { E2E_LICENCE_PULL_KEY, E2E_PLATFORM_REQUEST_KEY, e2eLicence } from "./licence-key";
 import { E2E_MONGODB_URI } from "./seed";
-import { ACME, ORGANISATIONS_API, PLATFORM_HOST, asOrganisation, bearer, originOf, seedTwoOrganisations, signInOn } from "./organisations";
+import { ACME, ORGANISATIONS_API, PLATFORM_HOST, asOrganisation, bearer, originOf, seedTwoOrganisations, signInOn, signInWithToken } from "./organisations";
 
 /**
  * BP-676, the product's half. In the cloud Settings → Organisation shows the subscription, starts a checkout or the
@@ -246,6 +246,58 @@ test("an organisation that already pays is told so, not sent to pay twice", asyn
   await page.getByTestId("subscription-checkout").click();
 
   await expect(page.getByText("This organisation already has a subscription")).toBeVisible();
+});
+
+// BP-982: the panel is hidden from a member, but the API is the gate
+async function seedMemberSession(): Promise<string> {
+  const token = "cps_e2eac00fdeadbeefdeadbeefdeadbeef";
+  const now = new Date();
+  await mongoose.connect(E2E_MONGODB_URI);
+  try {
+    const handle = mongoose.connection.db!;
+    const user = await handle.collection("users").insertOne({
+      organisation: ACME.organisation,
+      username: "plainmember",
+      fullName: "Plain Member",
+      email: "plainmember@acme.example",
+      kind: "human",
+      role: "member",
+      deactivatedAt: null,
+      createdAt: now,
+    });
+    await handle.collection("sessions").insertOne({
+      organisation: ACME.organisation,
+      tokenHash: createHash("sha256").update(token).digest("hex"),
+      user: user.insertedId,
+      expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
+      absoluteExpiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
+      lastUsedAt: now,
+      userAgent: "",
+      ip: "",
+      createdAt: now,
+    });
+  } finally {
+    await mongoose.disconnect();
+  }
+  return token;
+}
+
+test("a member who is not an administrator cannot read the subscription, start a payment or open the portal, and the service is never asked", async ({ page }) => {
+  await page.goto(`${originOf(ACME)}/settings/organisation`);
+  const call = (method: "GET" | "POST", path: string) =>
+    page.evaluate(
+      async ({ method, path }) => (await fetch(path, { method, headers: { "content-type": "application/json" }, body: method === "POST" ? JSON.stringify({ interval: "month" }) : undefined })).status,
+      { method, path }
+    );
+  expect(await call("GET", "/api/admin/billing")).toBe(200);
+  asked.length = 0;
+
+  await signInWithToken(page.context(), ACME, await seedMemberSession());
+
+  expect(await call("GET", "/api/admin/billing")).toBe(403);
+  expect(await call("POST", "/api/admin/billing/checkout")).toBe(403);
+  expect(await call("POST", "/api/admin/billing/portal")).toBe(403);
+  expect(asked).toHaveLength(0);
 });
 
 test("a token, even an admin's, cannot start a payment, and the service is never asked", async ({ request }) => {
