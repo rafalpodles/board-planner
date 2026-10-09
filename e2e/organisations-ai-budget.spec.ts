@@ -196,6 +196,7 @@ test("on screen: AI Assist and the PM chat say how much was used and when it ren
   await modal.getByRole("button", { name: "Generate" }).click();
   const refusal = new RegExp(`AI is unavailable: this organisation has used ${limit.toLocaleString("en-US")} of ${limit.toLocaleString("en-US")} AI tokens, its allowance for the month\\. It renews on 1 `);
   await expect(page.getByText(refusal)).toBeVisible();
+  await page.waitForTimeout(700);
   await page.screenshot({ path: "e2e/.artifacts/bp680-assist-refused.png" });
   await page.keyboard.press("Escape");
 
@@ -204,4 +205,11 @@ test("on screen: AI Assist and the PM chat say how much was used and when it ren
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(page.getByText(new RegExp(`AI is unavailable: this organisation has used ${limit.toLocaleString("en-US")} of`))).toBeVisible();
   await page.screenshot({ path: "e2e/.artifacts/bp680-chat-refused.png" });
+
+  await page.setViewportSize({ width: 390, height: 800 });
+  await page.goto(`${originOf(ACME)}/projects/${SHARED_KEY}/pm`);
+  await page.getByPlaceholder(/Message the PM/).fill("hello");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(page.getByText(/its allowance for the month\. It renews on 1 November 2026 \(UTC\)/)).toBeVisible();
+  await page.screenshot({ path: "e2e/.artifacts/bp680-chat-refused-phone.png" });
 });
