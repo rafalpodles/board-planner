@@ -209,7 +209,10 @@ export function BoardFilters({
         categories.length > 0 ? categories : undefined
       );
       const who = state.filters.assignee;
-      if (who && who !== ME && who !== UNASSIGNED && knownAssignees?.length && !knownAssignees.includes(who)) {
+      // Dropped only when nobody could be given a task by that name and no task carries it:
+      // the roster leaves out machines, and a person who lost access may still hold tasks here
+      const onATask = tasks.some((t) => typeof t.assignee === "object" && t.assignee?.username === who);
+      if (who && who !== ME && who !== UNASSIGNED && knownAssignees?.length && !knownAssignees.includes(who) && !onATask) {
         state.filters.assignee = "";
       }
       setFilters({ ...EMPTY_FILTERS, ...state.filters, search: view.search ?? "" });
@@ -219,10 +222,8 @@ export function BoardFilters({
       onShowArchivedChange?.(false);
       views?.onApplied(view);
     },
-    // The setters are the owner's, and re-creating this on their identity would re-run the effect
-    // below over a view that has already been applied
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [currentUsername, customFields, categories, knownAssignees, views?.onApplied]
+    [currentUsername, customFields, categories, knownAssignees, tasks, views?.onApplied]
   );
 
   useEffect(() => {
@@ -477,6 +478,7 @@ export function BoardFilters({
   }
 
   if (showArchived) chips.push({ key: "archived", label: "Archived shown" });
+  if (filters.search) chips.push({ key: "search", label: `Search: ${filters.search}` });
 
   const selectClass =
     "focus-ring h-8 w-full rounded-lg border border-border bg-bg-input px-2 text-[12px] text-text";
@@ -579,7 +581,9 @@ export function BoardFilters({
                           ? clearFieldFilter(chip.fieldId)
                           : chip.key === "archived"
                             ? onShowArchivedChange?.(false)
-                            : unset(chip.key as BuiltInFilterKey)
+                            : chip.key === "search"
+                              ? setFilters((f) => ({ ...f, search: "" }))
+                              : unset(chip.key as BuiltInFilterKey)
                       }
                     />
                   ))}

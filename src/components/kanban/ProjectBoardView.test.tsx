@@ -1,14 +1,16 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { render, screen, cleanup, fireEvent } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { ProjectBoardView } from "./ProjectBoardView";
 import { ProjectBoard } from "@/hooks/use-project-board";
 import { ApiProject, ApiTask } from "@/types";
 import { OWNS_ITS_KEYS } from "@/lib/keyboard-scope";
 
-vi.mock("@/hooks/use-api", () => ({
-  useApi: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), del: vi.fn() }),
+const { api, toast } = vi.hoisted(() => ({
+  api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), del: vi.fn() },
+  toast: vi.fn(),
 }));
+vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/hooks/use-auth", () => ({
   useAuth: () => ({ user: { username: "owner", collapseEmptyColumns: false }, isAdmin: false }),
 }));
@@ -16,7 +18,7 @@ vi.mock("next/navigation", () => ({
   useParams: () => ({ projectId: "p1" }),
   useRouter: () => ({ push: vi.fn() }),
 }));
-vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast: vi.fn() }) }));
+vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast }) }));
 
 const project = {
   _id: "p1",
@@ -516,5 +518,128 @@ describe("The board view with a filter that matches nothing", () => {
     expect(screen.queryByText("A bug")).toBeNull();
     expect(screen.queryByText(/No tasks match/)).toBeNull();
     expect(screen.getByText("To Do")).toBeTruthy();
+  });
+});
+
+describe("ProjectBoardView and a ?view= link", () => {
+  const savedView = (over: Record<string, unknown> = {}) => ({
+    _id: "v1",
+    name: "Urgent list",
+    shared: true,
+    mine: false,
+    canEdit: false,
+    filters: {},
+    search: "",
+    sortField: "manual",
+    sortDir: "asc",
+    viewMode: "list",
+    groupBy: "",
+    sprintScope: "all",
+    hiddenColumns: [],
+    ...over,
+  });
+
+  const at = (url: string) => window.history.replaceState(null, "", url);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    api.get.mockResolvedValue([]);
+    at("/projects/TP");
+  });
+
+  it("applies the view it names, and takes the parameter off the address, keeping the rest", async () => {
+    api.get.mockResolvedValue([savedView({ viewMode: "list", sprintScope: "s9" })]);
+    at("/projects/TP?sprint=s9&view=v1#top");
+    const setViewMode = vi.fn();
+    const onScopeChange = vi.fn();
+
+    render(
+      <ProjectBoardView
+        board={makeBoard({ tasks, setViewMode, sprints: [{ _id: "s9" } as never] })}
+        onScopeChange={onScopeChange}
+      />
+    );
+
+    await waitFor(() => expect(setViewMode).toHaveBeenCalledWith("list"));
+    expect(window.location.search).toBe("?sprint=s9");
+    expect(window.location.hash).toBe("#top");
+    expect(api.get).toHaveBeenCalledWith("/api/projects/p1/views");
+  });
+
+  it("asks for the list once, however often it renders", async () => {
+    at("/projects/TP?view=v1");
+    const { rerender } = render(<ProjectBoardView board={makeBoard({ tasks })} />);
+    rerender(<ProjectBoardView board={makeBoard({ tasks })} />);
+    rerender(<ProjectBoardView board={makeBoard({ tasks })} />);
+
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(1));
+  });
+
+  it("says so, and still cleans the address, when the view is gone or not for this reader", async () => {
+    api.get.mockResolvedValue([savedView({ _id: "other" })]);
+    at("/projects/TP?view=v1");
+
+    render(<ProjectBoardView board={makeBoard({ tasks })} />);
+
+    await waitFor(() => expect(toast).toHaveBeenCalledWith(expect.stringContaining("gone"), "error"));
+    expect(window.location.search).toBe("");
+  });
+
+  it("says so when the views could not be read", async () => {
+    api.get.mockRejectedValue(new Error("down"));
+    at("/projects/TP?view=v1");
+
+    render(<ProjectBoardView board={makeBoard({ tasks })} />);
+
+    await waitFor(() => expect(toast).toHaveBeenCalledWith(expect.stringContaining("could not be opened"), "error"));
+  });
+
+  it("does nothing without the parameter", async () => {
+    render(<ProjectBoardView board={makeBoard({ tasks })} />);
+    await Promise.resolve();
+    expect(api.get).not.toHaveBeenCalled();
+  });
+
+  it("leaves a pinned host alone, address included", async () => {
+    at("/projects/TP?view=v1");
+
+    render(<ProjectBoardView board={makeBoard({ tasks })} pinViewMode="board" readOnly />);
+    await Promise.resolve();
+
+    expect(api.get).not.toHaveBeenCalled();
+    expect(window.location.search).toBe("?view=v1");
+    expect(screen.queryByRole("button", { name: "Views" })).toBeNull();
+  });
+
+  it("offers the Views menu on the board's own page", () => {
+    render(<ProjectBoardView board={makeBoard({ tasks })} />);
+    expect(screen.getByRole("button", { name: "Views" })).toBeTruthy();
+  });
+
+  it("moves to the view's sprint scope when the sprint exists, and to all when it does not", async () => {
+    api.get.mockResolvedValue([savedView({ sprintScope: "ghost" })]);
+    at("/projects/TP?view=v1");
+    const onScopeChange = vi.fn();
+
+    render(
+      <ProjectBoardView board={makeBoard({ tasks, scope: "backlog" })} onScopeChange={onScopeChange} />
+    );
+
+    await waitFor(() => expect(onScopeChange).toHaveBeenCalledWith("all"));
+  });
+
+  it("leaves the scope alone when the view is already on it", async () => {
+    api.get.mockResolvedValue([savedView({ sprintScope: "backlog" })]);
+    at("/projects/TP?view=v1");
+    const onScopeChange = vi.fn();
+    const setViewMode = vi.fn();
+
+    render(
+      <ProjectBoardView board={makeBoard({ tasks, scope: "backlog", setViewMode })} onScopeChange={onScopeChange} />
+    );
+
+    await waitFor(() => expect(setViewMode).toHaveBeenCalled());
+    expect(onScopeChange).not.toHaveBeenCalled();
   });
 });

@@ -151,9 +151,10 @@ export function ProjectBoardView({
       .then((all) => {
         const hit = (all as ApiSavedView[]).find((v) => v._id === wanted);
         if (hit) setPendingView(hit);
+        else toast("That view is gone, or is not shared with you", "error");
       })
-      .catch(() => {});
-  }, [api, projectId, pinViewMode]);
+      .catch(() => toast("That view could not be opened", "error"));
+  }, [api, projectId, pinViewMode, toast]);
 
   function viewApplied(view: ApiSavedView) {
     if (!pinViewMode) setViewMode(view.viewMode);

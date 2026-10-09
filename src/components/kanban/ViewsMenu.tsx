@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { openLayerCount } from "@/lib/focus-trap";
 import { useApi } from "@/hooks/use-api";
 import { usePanelClamp } from "@/hooks/use-panel-clamp";
 import { useToast } from "@/components/ui/Toast";
@@ -46,15 +47,20 @@ export function ViewsMenu({ projectId, projectRef, canShare, snapshot, onApply }
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   const [removing, setRemoving] = useState<ApiSavedView | null>(null);
   const root = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const loadSeq = useRef(0);
   const panel = usePanelClamp(open);
   const base = `/api/projects/${projectId}/views`;
 
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     try {
-      setViews((await api.get(base)) as ApiSavedView[]);
+      const loaded = (await api.get(base)) as ApiSavedView[];
+      if (seq !== loadSeq.current) return;
+      setViews(loaded);
       setFailed(false);
     } catch {
-      setFailed(true);
+      if (seq === loadSeq.current) setFailed(true);
     }
   }, [api, base]);
 
@@ -67,14 +73,19 @@ export function ViewsMenu({ projectId, projectRef, canShare, snapshot, onApply }
     function outside(e: MouseEvent) {
       if (root.current && !root.current.contains(e.target as Node)) setOpen(false);
     }
+    // Capture phase and stopped, so the board's own Escape (which clears the selection) does not
+    // also fire; a dialog opened from here keeps the key for itself
     function escape(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key !== "Escape" || openLayerCount() > 0) return;
+      e.stopPropagation();
+      setOpen(false);
+      trigger.current?.focus();
     }
     document.addEventListener("mousedown", outside);
-    document.addEventListener("keydown", escape);
+    document.addEventListener("keydown", escape, true);
     return () => {
       document.removeEventListener("mousedown", outside);
-      document.removeEventListener("keydown", escape);
+      document.removeEventListener("keydown", escape, true);
     };
   }, [open]);
 
@@ -129,7 +140,11 @@ export function ViewsMenu({ projectId, projectRef, canShare, snapshot, onApply }
     <div className="relative shrink-0" ref={root}>
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        ref={trigger}
+        onClick={() => {
+          setOpen((v) => !v);
+          setProblem("");
+        }}
         aria-expanded={open}
         aria-haspopup="dialog"
         className="focus-ring flex h-11 items-center gap-1.5 rounded-lg border border-border px-2.5 text-[13px] font-medium text-text-muted transition-colors hover:text-text"
@@ -183,6 +198,7 @@ export function ViewsMenu({ projectId, projectRef, canShare, snapshot, onApply }
                     <input
                       autoFocus
                       aria-label={`New name for ${view.name}`}
+                      maxLength={100}
                       value={renaming.name}
                       onChange={(e) => setRenaming({ id: view._id, name: e.target.value })}
                       className={field}
@@ -330,8 +346,9 @@ export function ViewsMenu({ projectId, projectRef, canShare, snapshot, onApply }
           setRemoving(null);
         }}
         title="Delete view"
-        message={removing ? `Delete "${removing.name}"? ${removing.shared ? "Everyone on this board loses it." : ""}` : ""}
+        message={removing ? `Delete "${removing.name}"?${removing.shared ? " Everyone on this board loses it." : ""}` : ""}
         confirmLabel="Delete"
+        loading={busy}
       />
     </div>
   );
