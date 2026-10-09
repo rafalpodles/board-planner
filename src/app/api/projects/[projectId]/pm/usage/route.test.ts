@@ -4,8 +4,7 @@ const getAuthUser = vi.fn();
 const check = vi.fn();
 const findOne = vi.fn();
 const lean = vi.fn();
-const isOverDailyTurnCap = vi.fn();
-const dailyPmSpend = vi.fn();
+const pmDayUsage = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({
@@ -21,7 +20,7 @@ vi.mock("@/lib/grants", async (importOriginal) => {
 vi.mock("@/models/project", () => ({
   Project: { findOne: (...a: unknown[]) => (findOne(...a), { lean }) },
 }));
-vi.mock("@/lib/pm/turn-cap", () => ({ isOverDailyTurnCap, dailyPmSpend }));
+vi.mock("@/lib/pm/day-usage", () => ({ pmDayUsage }));
 vi.mock("@/lib/pm/agent", () => ({ MAX_STEPS: 15 }));
 
 const { GET } = await import("./route");
@@ -35,14 +34,13 @@ beforeEach(() => {
   getAuthUser.mockResolvedValue({ _id: "u1", role: "member" });
   check.mockResolvedValue(true);
   lean.mockResolvedValue({ pm: {} });
-  isOverDailyTurnCap.mockResolvedValue({ used: 0, cap: 0 });
-  dailyPmSpend.mockResolvedValue({
+  pmDayUsage.mockResolvedValue({
+    turns: 0,
     calls: 0,
     tokens: 0,
     promptTokens: 0,
     cachedTokens: 0,
     cacheWriteTokens: 0,
-    cap: 0,
     stepLimitHits: 0,
   });
 });
@@ -80,13 +78,13 @@ describe("GET pm/usage", () => {
    * and nothing else in the chain would have failed.
    */
   it("reports what was served from cache, beside the tokens it is part of", async () => {
-    dailyPmSpend.mockResolvedValue({
+    pmDayUsage.mockResolvedValue({
+      turns: 3,
       calls: 12,
       tokens: 120_000,
       promptTokens: 100_000,
       cachedTokens: 90_000,
       cacheWriteTokens: 4_000,
-      cap: 0,
       stepLimitHits: 0,
     });
 
@@ -99,6 +97,24 @@ describe("GET pm/usage", () => {
       promptTokens: 100_000,
       cachedTokens: 90_000,
       cacheWriteTokens: 4_000,
+    });
+  });
+
+  // BP-679: there is no cap on the screen any more, so the body carries no number that looks like one
+  it("reports the day's turns, calls and tokens, and no cap", async () => {
+    pmDayUsage.mockResolvedValue({ turns: 3, calls: 12, tokens: 120_000, promptTokens: 0, cachedTokens: 0, cacheWriteTokens: 0, stepLimitHits: 1 });
+
+    const body = await (await GET(new Request("http://x"), { params })).json();
+
+    expect(body).toEqual({
+      turns: 3,
+      calls: 12,
+      tokens: 120_000,
+      promptTokens: 0,
+      cachedTokens: 0,
+      cacheWriteTokens: 0,
+      stepLimitHits: 1,
+      maxCallsPerTurn: 15,
     });
   });
 });

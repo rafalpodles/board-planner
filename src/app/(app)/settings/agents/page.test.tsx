@@ -21,7 +21,6 @@ const ROW = {
   enabled: true,
   lockedByInstance: false,
   model: "",
-  dailyTurnCap: 50,
   autonomy: { dailyReview: false, reviewIntervalHours: 24, handleNeedsHumanReview: false },
 };
 
@@ -30,7 +29,7 @@ beforeEach(() => {
   api.get.mockImplementation(async (url: string) =>
     url === "/api/settings"
       ? { aiModel: "" }
-      : { pmAvailable: true, defaults: { pmDefaultModel: "", pmDefaultDailyTurnCap: 0, envModel: "m" }, projects: [ROW] }
+      : { pmAvailable: true, defaults: { pmDefaultModel: "", envModel: "m" }, projects: [ROW] }
   );
 });
 afterEach(cleanup);
@@ -41,7 +40,7 @@ describe("the banner when no agent can run", () => {
     api.get.mockImplementation(async (url: string) =>
       url === "/api/settings"
         ? { aiModel: "" }
-        : { pmAvailable: false, defaults: { pmDefaultModel: "", pmDefaultDailyTurnCap: 0, envModel: "m" }, projects: [ROW], ...over }
+        : { pmAvailable: false, defaults: { pmDefaultModel: "", envModel: "m" }, projects: [ROW], ...over }
     );
 
   it("offers a Free organisation its own key or Pro", async () => {
@@ -73,22 +72,20 @@ describe("the banner when no agent can run", () => {
 
 // BP-471: the row's save answered with every field as stored, and the merge took all of them
 describe("a governance row while one field's save is in flight", () => {
-  it("keeps the turn cap typed meanwhile when the model's save lands", async () => {
-    let answerModel!: (row: unknown) => void;
-    api.patch.mockImplementationOnce(() => new Promise((resolve) => (answerModel = resolve)));
+  it("keeps the model typed meanwhile when the lock's save lands", async () => {
+    let answerLock!: (row: unknown) => void;
+    api.patch.mockImplementationOnce(() => new Promise((resolve) => (answerLock = resolve)));
     render(<AdminAgentsPage />);
-    const model = await screen.findByLabelText("PM model for BP — Board");
-    const cap = screen.getByLabelText("Daily turn cap for BP — Board") as HTMLInputElement;
+    const model = (await screen.findByLabelText("PM model for BP — Board")) as HTMLInputElement;
 
-    fireEvent.change(model, { target: { value: "e2e/governed-model" } });
-    fireEvent.blur(model);
+    fireEvent.click(screen.getByRole("button", { name: "Lock" }));
     await waitFor(() => expect(api.patch).toHaveBeenCalledTimes(1));
-    fireEvent.change(cap, { target: { value: "7" } });
+    fireEvent.change(model, { target: { value: "e2e/governed-model" } });
 
-    // The model's answer carries the cap as it was stored before the edit
-    await act(async () => answerModel({ ...ROW, model: "e2e/governed-model", dailyTurnCap: 50 }));
+    // The lock's answer carries the model as it was stored before the edit
+    await act(async () => answerLock({ ...ROW, lockedByInstance: true, model: "" }));
 
-    expect(cap.value).toBe("7");
-    expect((screen.getByLabelText("PM model for BP — Board") as HTMLInputElement).value).toBe("e2e/governed-model");
+    expect(model.value).toBe("e2e/governed-model");
+    expect(screen.getByRole("button", { name: "Locked" })).toBeTruthy();
   });
 });

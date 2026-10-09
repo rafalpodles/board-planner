@@ -43,6 +43,31 @@ describe("openGate", () => {
     expect(await openGate(db, NOT_CONFIGURED)).toMatchObject({ ok: true, counter: "trial" });
   });
 
+  // BP-681: our key is never somebody's fallback, because the key is what we pay for
+  it("closes the gate on a stored key that cannot be read, and does not reach for ours", async () => {
+    m.resolveModelKey.mockResolvedValue({ ok: false, reason: "own_key_unreadable", plan: "pro" });
+
+    const gate = await openGate(db, NOT_CONFIGURED);
+    const completion = await gatewayChat(db, CONTEXT, CHAT);
+
+    expect(gate).toMatchObject({ ok: false, status: 503, body: { reason: "own_key_unreadable" } });
+    expect(completion).toMatchObject({ type: "error" });
+    expect(m.chatCompletion).not.toHaveBeenCalled();
+    expect(m.checkBudget).not.toHaveBeenCalled();
+  });
+
+  it("makes a call on an own key with that key once, and does not try ours when it fails", async () => {
+    m.resolveModelKey.mockResolvedValue({ ok: true, key: "sk-theirs", source: "own" });
+    m.chatCompletion.mockResolvedValue({ type: "error", error: "HTTP 401" });
+
+    const completion = await gatewayChat(db, CONTEXT, CHAT);
+
+    expect(completion).toEqual({ type: "error", error: "HTTP 401" });
+    expect(m.chatCompletion).toHaveBeenCalledTimes(1);
+    expect(m.chatCompletion).toHaveBeenCalledWith({ ...CHAT, apiKey: "sk-theirs" });
+    expect(m.checkBudget).not.toHaveBeenCalled();
+  });
+
   it("never asks the budget about an organisation's own key, which it pays for, and counts it all the same", async () => {
     m.resolveModelKey.mockResolvedValue({ ok: true, key: "sk-theirs", source: "own" });
     m.counterKindOf.mockResolvedValue("trial");
@@ -74,7 +99,7 @@ describe("gatewayChat", () => {
 
     const completion = await gatewayChat(db, CONTEXT, CHAT);
 
-    expect(completion).toMatchObject({ type: "error", refused: true, error: expect.stringMatching(/paused for today/) });
+    expect(completion).toMatchObject({ type: "error", error: expect.stringMatching(/paused for today/) });
     expect(m.chatCompletion).not.toHaveBeenCalled();
     expect(m.recordUsage).not.toHaveBeenCalled();
   });
@@ -97,7 +122,7 @@ describe("gatewayChat", () => {
     expect(m.recordUsage).toHaveBeenCalledWith(db, expect.objectContaining({ usage: undefined }), "month");
   });
 
-  it("records nothing for a call the provider refused, and does not call it a refusal of the gate's", async () => {
+  it("records nothing for a call the provider refused", async () => {
     m.chatCompletion.mockResolvedValue({ type: "error", error: "HTTP 500" });
 
     const completion = await gatewayChat(db, CONTEXT, CHAT);
@@ -151,7 +176,7 @@ describe("gatewayChat", () => {
     const stopped = new AbortController();
     stopped.abort();
 
-    expect(await gatewayChat(db, CONTEXT, { ...CHAT, signal: stopped.signal })).toEqual({ type: "aborted", refused: true });
+    expect(await gatewayChat(db, CONTEXT, { ...CHAT, signal: stopped.signal })).toEqual({ type: "aborted" });
 
     expect(m.chatCompletion).not.toHaveBeenCalled();
     expect(m.recordUsage).not.toHaveBeenCalled();

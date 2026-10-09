@@ -52,4 +52,19 @@ describe("the gateway is the only door to a model", () => {
   it("resolves the key a model call is made with in the gateway alone, so no call is made with a key nobody gated", () => {
     expect(whereIs(/\bresolveModelKey\b/)).toEqual(["src/lib/ai-gateway/index.ts", "src/lib/model-keys.ts"]);
   });
+
+  // BP-682: AI the operator runs for an organisation is counted; an agent a person runs on their own machine is theirs, and is never swept in
+  it("is entered from the PM agent's callers and AI Assist's route alone, and never from the worker's side", () => {
+    const users = whereIs(/@\/lib\/ai-gateway/);
+
+    expect(users).toEqual([
+      "src/app/api/projects/[projectId]/ai/generate-task/route.ts",
+      "src/app/api/projects/[projectId]/pm/chat/route.ts",
+      "src/app/api/projects/[projectId]/pm/review/route.ts",
+      "src/lib/pm/agent.ts",
+      "src/lib/pm/scheduler.ts",
+      "src/lib/pm/triggers.ts",
+    ]);
+    expect(users.filter((file) => /worker/i.test(file))).toEqual([]);
+  });
 });

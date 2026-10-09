@@ -260,26 +260,10 @@ export async function runPmTurn(db: ScopedDb, opts: {
   // screenshot is as likely to mint tasks as to ask what it is for (BP-451).
   const imageOnly = !opts.userMessage.trim() && Array.isArray(userContent);
 
-  /**
-   * What this turn is costing, summed as it goes (BP-284). A turn is up to MAX_STEPS round-trips,
-   * so `dailyTurnCap` — which counts turns — says nothing about spend on its own. Written on every
-   * exit, including the ones that fail: a turn that burned nine calls and then hit a provider error
-   * cost nine calls, and a record that forgave them would understate exactly the runs that hurt.
-   */
-  const spend = {
-    promptTokens: 0,
-    completionTokens: 0,
-    totalTokens: 0,
-    // A subset of promptTokens, recorded beside it rather than added to it: the operator sets a
-    // budget from the total, and needs to know how much of that total was billed at cache-read
-    // price (BP-568)
-    cachedPromptTokens: 0,
-    cacheWriteTokens: 0,
-    calls: 0,
-    hitStepLimit: false,
-  };
+  // What the usage rows cannot say about a turn: that it stopped for want of steps, not because it was finished
+  const outcome = { hitStepLimit: false };
   const record = () => {
-    assistantMessage.usage = { ...spend };
+    assistantMessage.usage = { ...outcome };
   };
 
   const finalize = async (content: string): Promise<PmTurnResult> => {
@@ -364,16 +348,6 @@ export async function runPmTurn(db: ScopedDb, opts: {
       sessionId,
       signal: opts.signal,
     });
-
-    // Counted before the result is judged: the call was made and billed whatever it answered, unless the gate never let it out
-    if (!("refused" in completion)) spend.calls++;
-    if ("usage" in completion && completion.usage) {
-      spend.promptTokens += completion.usage.promptTokens;
-      spend.completionTokens += completion.usage.completionTokens;
-      spend.totalTokens += completion.usage.totalTokens;
-      spend.cachedPromptTokens += completion.usage.cachedPromptTokens;
-      spend.cacheWriteTokens += completion.usage.cacheWriteTokens;
-    }
 
     if (completion.type === "aborted") {
       return interrupted();
@@ -480,7 +454,7 @@ export async function runPmTurn(db: ScopedDb, opts: {
 
   // Falling out of the loop means MAX_STEPS was spent rather than the turn finishing, which is a
   // different event and the most expensive one a turn can be
-  spend.hitStepLimit = true;
+  outcome.hitStepLimit = true;
 
   const summary =
     assistantMessage.actions.length > 0

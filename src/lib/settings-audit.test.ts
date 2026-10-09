@@ -193,8 +193,6 @@ describe("describeSettingsChanges", () => {
       model: "kimi",
       contextNotes: "",
       links: [{ label: "Docs", url: "https://docs.example" }],
-      dailyTurnCap: 0,
-      dailyTokenCap: 0,
       mcpServers: [github],
       autonomy: {
         dailyReview: false,
@@ -314,17 +312,15 @@ describe("describeSettingsChanges", () => {
       ]);
     });
 
-    it("names what a zero cap means rather than printing the zero", () => {
-      expect(changes({ pm }, { pm: { ...pm, dailyTurnCap: 50, dailyTokenCap: 200_000 } })).toEqual([
-        "PM turns per day: server default → 50",
-        "PM tokens per day: no ceiling → 200000",
-      ]);
+    it("does not report a cap that an older client still sends: there is none to change", () => {
+      expect(changes({ pm }, { pm: { ...pm, dailyTurnCap: 50, dailyTokenCap: 200_000 } })).toEqual([]);
     });
 
     it("reads an instance admin's single-field change the same way", () => {
-      expect(
-        changes({ pm: { dailyTurnCap: 40 } }, { "pm.dailyTurnCap": 0, "pm.enabled": true })
-      ).toEqual(["PM agent: off → on", "PM turns per day: 40 → server default"]);
+      expect(changes({ pm: { model: "a" } }, { "pm.model": "b", "pm.enabled": true })).toEqual([
+        "PM agent: off → on",
+        "PM model: a → b",
+      ]);
     });
   });
 

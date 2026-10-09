@@ -7,8 +7,6 @@ import { ProvenanceError } from "@/lib/session";
 import { runPmTurn } from "@/lib/pm/agent";
 import { openGate } from "@/lib/ai-gateway";
 import { acquireTurnLock, releaseTurnLock } from "@/lib/pm/turn-lock";
-import { dailyPmSpend, isOverDailyTurnCap } from "@/lib/pm/turn-cap";
-import { MAX_STEPS } from "@/lib/pm/agent";
 import { isPmRunnable, pmDisabledReason, resolvePmModel } from "@/lib/pm/availability";
 import { IMAGE_MIME_TYPES, MAX_ATTACHMENTS_PER_MESSAGE, anyAttachmentReadable, modelAcceptsImages } from "@/lib/pm/attachments";
 import { databaseUnavailable, resolveProjectId, refusedOnThisHost } from "@/lib/middleware";
@@ -139,29 +137,6 @@ async function chat(request: Request, params: Promise<Record<string, string>>, u
         { status: 400 }
       );
     }
-  }
-
-  const { over, cap } = await isOverDailyTurnCap(db, projectId, project.pm);
-  if (over) {
-    return NextResponse.json(
-      { error: `Daily PM turn cap (${cap}) reached for this project` },
-      { status: 429 }
-    );
-  }
-
-  // The second ceiling, in the units the operator pays in. Off unless configured, so this refuses
-  // nothing that works today (BP-284).
-  const spend = await dailyPmSpend(db, projectId, project.pm);
-  if (spend.over) {
-    return NextResponse.json(
-      {
-        error:
-          `Daily PM token cap reached for this project: ${spend.tokens.toLocaleString()} of ` +
-          `${spend.cap.toLocaleString()} tokens across ${spend.calls} model calls. ` +
-          `A turn is up to ${MAX_STEPS} calls, which is why the turn cap alone does not bound this.`,
-      },
-      { status: 429 }
-    );
   }
 
   const triggeredByUserId = String(user._id);

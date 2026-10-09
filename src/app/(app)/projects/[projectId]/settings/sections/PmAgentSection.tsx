@@ -63,8 +63,6 @@ function pmDraftFrom(p: ApiProject) {
   return {
     enabled: p.pm?.enabled || false,
     model: p.pm?.model || "",
-    dailyCap: p.pm?.dailyTurnCap ? String(p.pm.dailyTurnCap) : "",
-    dailyTokenCap: p.pm?.dailyTokenCap ? String(p.pm.dailyTokenCap) : "",
     contextNotes: p.pm?.contextNotes || "",
     links: (p.pm?.links || []).map((l) => ({ label: l.label, url: l.url })),
     dailyReview: p.pm?.autonomy?.dailyReview ?? false,
@@ -91,13 +89,12 @@ function pmDraftFrom(p: ApiProject) {
 }
 
 interface PmUsageToday {
-  turns: { used: number; cap: number };
+  turns: number;
   calls: number;
   tokens: number;
   promptTokens: number;
   cachedTokens: number;
   cacheWriteTokens: number;
-  tokenCap: number;
   stepLimitHits: number;
   maxCallsPerTurn: number;
 }
@@ -202,19 +199,11 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
         ? `Not a timezone this server knows: ${typedTimezone}`
         : "A review has to run somewhere — name a timezone, for example Europe/Warsaw.";
   // What the project already has, which is by definition something the server accepted
-  // The rule the SERVER uses, not a truthiness check: `turn-cap.ts` falls back when the stored
+  // The rule the SERVER uses, not a truthiness check: `day-usage.ts` falls back when the stored
   // zone is unreadable, so a legacy row holding "Warsaw" would otherwise be announced here while
   // the count ran in Europe/Warsaw.
   const stored = project.pm?.autonomy?.timezone;
   const storedTimezone = stored && isValidTimezone(stored) ? stored : DEFAULT_PM_AUTONOMY.timezone;
-
-  const typedCap = draft.value.dailyCap.trim();
-  const capNumber = Number(typedCap);
-  const capError =
-    typedCap &&
-    (!Number.isFinite(capNumber) || !Number.isInteger(capNumber) || capNumber < 0 || capNumber > 1000)
-      ? "A whole number of turns, 0 to 1000. 0 means the server's own default."
-      : "";
 
   const reviewTimes = reviewHoursOfDay(
     firstReviewHour({ reviewHour: Number(draft.value.reviewHour) }),
@@ -293,10 +282,10 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
   async function savePm(options?: { silent?: boolean }): Promise<boolean> {
     // The field already says what is wrong; sending it would answer 400 and say the same thing
     // one round trip later, in a toast that does not name the field.
-    if (timezoneError || capError) {
+    if (timezoneError) {
       // Not gated on `silent`: connectOauth saves silently first, and swallowing this made
       // Connect a button that flickered and did nothing with no reason given anywhere.
-      toast(timezoneError || capError, "error");
+      toast(timezoneError, "error");
       return false;
     }
     const v = draft.value;
@@ -317,8 +306,6 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
     if (isAdmin) {
       pm.enabled = v.enabled;
       pm.model = v.model.trim();
-      pm.dailyTurnCap = v.dailyCap.trim() ? Number(v.dailyCap) : 0;
-      pm.dailyTokenCap = v.dailyTokenCap.trim() ? Number(v.dailyTokenCap) : 0;
       pm.mcpServers = v.mcpServers
         .filter((s) => s.name.trim() || s.url.trim())
         .map((s) => ({
@@ -535,55 +522,17 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
             label="Run the PM agent on this project"
             hint="Turns on chat and, if you allow it below, autonomous turns."
           />
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <Input
-                label="Turns per day"
-                type="number"
-                min={0}
-                max={1000}
-                value={draft.value.dailyCap}
-                dirty={draft.isDirty("dailyCap")}
-                onChange={(e) => draft.set("dailyCap", e.target.value)}
-                error={capError}
-                placeholder="Leave empty for the server default"
-              />
-              <p className="mt-1 text-xs text-text-muted">
-                Autonomous turns count too, and so does a turn the model failed. Resets at midnight
-                in {storedTimezone}.{" "}
-                {/* The sentence this screen was missing: the cap above is in turns, and a turn is
-                    not one model call, so the number alone never said what it permitted. */}
-                <strong>One turn is up to {usage?.maxCallsPerTurn ?? 15} model calls</strong>, so
-                this is a rate limit rather than a budget.
-              </p>
-            </div>
-            <div>
-              <Input
-                label="Tokens per day"
-                type="number"
-                min={0}
-                value={draft.value.dailyTokenCap}
-                dirty={draft.isDirty("dailyTokenCap")}
-                onChange={(e) => draft.set("dailyTokenCap", e.target.value)}
-                placeholder="Leave empty for no ceiling"
-              />
-              <p className="mt-1 text-xs text-text-muted">
-                The budget, in what the model actually bills. Empty means no ceiling — set one from
-                what you see below rather than from a guess.
-              </p>
-            </div>
-          </div>
-
           {usage && (
             <div
               data-testid="pm-usage-today"
               className="mt-4 rounded-lg border border-border bg-bg-input/40 px-3 py-2 text-sm"
             >
               <p className="m-0 text-text-muted" data-testid="pm-usage-totals">
-                Today: <strong className="text-text">{usage.turns.used}</strong> turns,{" "}
+                Today, from midnight in {storedTimezone}: <strong className="text-text">{usage.turns}</strong> turns,{" "}
                 <strong className="text-text">{usage.calls}</strong> model calls,{" "}
-                <strong className="text-text">{usage.tokens.toLocaleString()}</strong> tokens
-                {usage.tokenCap > 0 && <> of {usage.tokenCap.toLocaleString()}</>}.
+                <strong className="text-text">{usage.tokens.toLocaleString()}</strong> tokens.
+                <br />
+                One turn is up to {usage.maxCallsPerTurn} model calls. The tokens are counted in the organisation&apos;s AI allowance.
                 {usage.stepLimitHits > 0 && (
                   <>
                     {" "}
@@ -716,7 +665,7 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
 
       <SettingsCard
         title="When it acts on its own"
-        description="Autonomous turns count against the daily turn cap and post into the PM chat thread."
+        description="Autonomous turns post into the PM chat thread and are counted in the organisation's AI allowance."
       >
         <Switch
           checked={draft.value.dailyReview}
@@ -761,7 +710,7 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
                     ? "One review a day"
                     : `${reviewTimes.length} reviews a day`}
                   , at {reviewTimes.map((h) => `${String(h).padStart(2, "0")}:00`).join(", ")} in{" "}
-                  {typedTimezone}. Each one uses a turn from the daily cap.
+                  {typedTimezone}. Each one is a PM turn, counted in the organisation's AI allowance.
                 </>
               )}
             </p>
@@ -772,7 +721,7 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
             {reviewStarting ? "Starting…" : "Run a review now"}
           </Button>
           <p className="text-xs text-text-muted">
-            One review of the board as it is, without waiting for the schedule. It uses a turn from the daily cap.
+            One review of the board as it is, without waiting for the schedule. It is a PM turn, counted in the organisation's AI allowance.
           </p>
         </div>
         <Switch
