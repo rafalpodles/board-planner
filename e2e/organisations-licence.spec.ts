@@ -250,3 +250,68 @@ test.describe("BP-930: the plan badge above the agents", () => {
     await expect(page.getByTestId("plan-badge-action")).toHaveText("Renew");
   });
 });
+
+// BP-983: a subscription's key says whether it renews by itself or was cancelled, and the badge and the licence page follow it
+test.describe("BP-983: the key of a subscription", () => {
+  const badge = (page: Page) => page.getByTestId("plan-badge");
+  const keyOf = (expiresInDays: number, subscription: "renewing" | "ending") =>
+    e2eLicence({ customer: "acme customer", organisation: ACME.organisation.toHexString(), expiresInDays, subscription });
+
+  async function openApp(page: Page, path = "/projects") {
+    await signInOn(page.context(), ACME);
+    await page.goto(`${originOf(ACME)}${path}`);
+    await expect(badge(page)).toBeVisible();
+  }
+
+  test("one that renews by itself shows no countdown and nothing to renew, even in its last days", async ({ page, request }) => {
+    expect((await push(request, ACME, keyOf(9, "renewing")).send()).status()).toBe(200);
+    await openApp(page);
+
+    await expect(badge(page)).toContainText("Pro");
+    await expect(page.getByTestId("plan-badge-detail")).toHaveText("Plan active");
+    await expect(page.getByTestId("plan-badge-action")).toHaveCount(0);
+
+    await page.goto(`${originOf(ACME)}/settings/licence`);
+    await expect(page.getByTestId("licence-details")).toBeVisible();
+    await expect(page.getByTestId("licence-warning")).toHaveCount(0);
+  });
+
+  test("a payment that failed says so, with the days of grace that are left, and offers to update the payment", async ({ page, request }) => {
+    expect((await push(request, ACME, keyOf(-3, "renewing")).send()).status()).toBe(200);
+    await openApp(page);
+
+    await expect(page.getByTestId("plan-badge-detail")).toHaveText(/^Payment failed · (10|11) days of grace left$/);
+    await expect(page.getByTestId("plan-badge-action")).toHaveText("Update payment");
+    await page.screenshot({ path: "e2e/.artifacts/bp983-payment-failed.png" });
+
+    await page.getByTestId("plan-badge-action").click();
+    await page.waitForURL(/\/settings\/licence$/);
+    await expect(page.getByTestId("licence-warning")).toContainText("The last payment failed");
+  });
+
+  test("a cancelled one says when it ends from the day it is cancelled, and offers Renew", async ({ page, request }) => {
+    expect((await push(request, ACME, keyOf(40, "ending")).send()).status()).toBe(200);
+    await openApp(page);
+
+    await expect(page.getByTestId("plan-badge-detail")).toHaveText(/^Cancelled · ends /);
+    await expect(page.getByTestId("plan-badge-action")).toHaveText("Renew");
+    await page.screenshot({ path: "e2e/.artifacts/bp983-cancelled.png" });
+
+    await page.goto(`${originOf(ACME)}/settings/licence`);
+    await expect(page.getByTestId("licence-warning")).toContainText("This subscription is cancelled: Pro ends on");
+  });
+
+  test("a cancelled one whose period has ended is not taken in: there is no grace after a cancellation, and the organisation stays Free", async ({ page, request }) => {
+    const ended = await push(request, ACME, keyOf(-1, "ending")).send();
+
+    expect(ended.status()).toBe(422);
+    expect((await ended.json()).verdict).toBe("expired");
+    await openApp(page);
+    await expect(page.getByTestId("plan-badge-detail")).toHaveText("Free plan");
+  });
+
+  test("a renewing one that is a few days past its end is in force, where a cancelled one is not", async ({ request }) => {
+    expect((await push(request, ACME, keyOf(-3, "renewing")).send()).status()).toBe(200);
+    expect(await planOf(request, ACME)).toBe("pro");
+  });
+});
