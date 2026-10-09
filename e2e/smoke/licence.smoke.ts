@@ -14,6 +14,7 @@ import { test, expect, type APIRequestContext } from "@playwright/test";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHmac } from "node:crypto";
 import { createWriteStream, existsSync, mkdirSync } from "node:fs";
+import { createServer } from "node:net";
 import { join, resolve } from "node:path";
 import bcrypt from "bcryptjs";
 import mongoose from "mongoose";
@@ -22,11 +23,12 @@ import { E2E_LICENCE_PULL_KEY, E2E_LICENCE_SIGNING_KEY, E2E_PLATFORM_REQUEST_KEY
 import { ACME, GLOBEX, ORGANISATIONS_API, asOrganisation, bearer, originOf, seedTwoOrganisations, signInOn } from "../organisations";
 import { E2E_MONGODB_URI } from "../seed";
 
-test.skip(!RUN_ORGANISATIONS_SERVER, "needs the ORGANISATION_DOMAIN server — set E2E_ORGANISATIONS_SERVER=1");
-test.describe.configure({ mode: "serial", timeout: 5 * 60_000 });
-
 const SERVICE_DIR = resolve(process.env.LICENCE_SERVICE_DIR ?? join(__dirname, "..", "..", "..", "board-planner-licence"));
-test.skip(!existsSync(join(SERVICE_DIR, "node_modules", ".bin", "next")), `LICENCE_SERVICE_DIR (${SERVICE_DIR}) is not a licence service checkout with its dependencies installed`);
+const SERVICE_INSTALLED = existsSync(join(SERVICE_DIR, "node_modules", ".bin", "next"));
+// Skipped on a laptop that has not set this up, but never in CI: a job that was meant to run this and skips it is a pass nobody earned
+test.skip(!RUN_ORGANISATIONS_SERVER && !process.env.CI, "needs the ORGANISATION_DOMAIN server — set E2E_ORGANISATIONS_SERVER=1");
+test.skip(!SERVICE_INSTALLED && !process.env.CI, `LICENCE_SERVICE_DIR (${SERVICE_DIR}) is not a licence service checkout with its dependencies installed`);
+test.describe.configure({ mode: "serial", timeout: 5 * 60_000 });
 
 const SERVICE_PORT = LICENCE_STUB_PORT;
 const SERVICE_URL = `http://127.0.0.1:${SERVICE_PORT}`;
@@ -42,23 +44,48 @@ const ARTIFACTS = resolve(__dirname, "..", ".artifacts", "licence-smoke");
 const SERVICE_DATABASE = E2E_MONGODB_URI.replace(/\/[^/?]+(\?|$)/, "/bpl_smoke$1");
 const DAY = 86_400;
 
-const children: ChildProcess[] = [];
+interface Started {
+  child: ChildProcess;
+  exited: Promise<void>;
+  hasExited: () => boolean;
+}
+const children: Started[] = [];
 
-function start(name: string, command: string, args: string[], env: Record<string, string>) {
+const portIsFree = (port: number) =>
+  new Promise<boolean>((resolvePort) => {
+    const probe = createServer();
+    probe.once("error", () => resolvePort(false));
+    probe.listen(port, "127.0.0.1", () => probe.close(() => resolvePort(true)));
+  });
+
+function start(name: string, command: string, args: string[], env: Record<string, string>): Started {
   mkdirSync(ARTIFACTS, { recursive: true });
   const log = createWriteStream(join(ARTIFACTS, `${name}.log`));
   // Its own process group, so stopping it stops what `next dev` started
   const child = spawn(command, args, { cwd: SERVICE_DIR, env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"], detached: true });
-  child.stdout?.pipe(log);
-  child.stderr?.pipe(log);
-  children.push(child);
+  child.stdout?.pipe(log, { end: false });
+  child.stderr?.pipe(log, { end: false });
+  let gone = false;
+  const exited = new Promise<void>((resolveExit) =>
+    child.once("exit", () => {
+      gone = true;
+      log.end();
+      resolveExit();
+    })
+  );
+  const started = { child, exited, hasExited: () => gone };
+  children.push(started);
+  return started;
 }
 
-async function waitFor(url: string, what: string) {
+// A process of an earlier run answering on the port would pass this and leave the new one dead of EADDRINUSE, so the
+// one being waited for must also still be alive
+async function waitFor(url: string, what: string, started: Started) {
   const until = Date.now() + 150_000;
   for (;;) {
+    if (started.hasExited()) throw new Error(`${what} exited before it came up; see ${ARTIFACTS}`);
     try {
-      if ((await fetch(url)).ok) return;
+      if ((await fetch(url, { signal: AbortSignal.timeout(2000) })).ok) return;
     } catch {
       // not up yet
     }
@@ -67,14 +94,31 @@ async function waitFor(url: string, what: string) {
   }
 }
 
+async function stop({ child, exited }: Started) {
+  if (!child.pid) return;
+  for (const signal of ["SIGTERM", "SIGKILL"] as const) {
+    try {
+      process.kill(-child.pid, signal);
+    } catch {
+      return;
+    }
+    const gone = await Promise.race([exited.then(() => true), new Promise<boolean>((resolveWait) => setTimeout(() => resolveWait(false), 10_000))]);
+    if (gone) return;
+  }
+}
+
 test.beforeAll(async () => {
+  expect(RUN_ORGANISATIONS_SERVER, "set E2E_ORGANISATIONS_SERVER=1: the smoke drives the server with ORGANISATION_DOMAIN").toBe(true);
+  expect(SERVICE_INSTALLED, `LICENCE_SERVICE_DIR (${SERVICE_DIR}) must be a licence service checkout with its dependencies installed`).toBe(true);
+  for (const port of [SERVICE_PORT, STRIPE_PORT]) expect(await portIsFree(port), `port ${port} is in use: stop what an earlier run left behind`).toBe(true);
+
   await mongoose.connect(SERVICE_DATABASE);
   await mongoose.connection.db!.dropDatabase();
   await mongoose.disconnect();
   await seedTwoOrganisations();
 
-  start("stripe-stub", "node", ["e2e/stripe-stub.mjs"], { STRIPE_STUB_PORT: String(STRIPE_PORT), STRIPE_STUB_SECRET: STRIPE_SECRET });
-  start("licence-service", "npx", ["next", "dev", "-p", String(SERVICE_PORT)], {
+  const stripe = start("stripe-stub", "node", ["e2e/stripe-stub.mjs"], { STRIPE_STUB_PORT: String(STRIPE_PORT), STRIPE_STUB_SECRET: STRIPE_SECRET });
+  const service = start("licence-service", "npx", ["next", "dev", "-p", String(SERVICE_PORT)], {
     MONGODB_URI: SERVICE_DATABASE,
     PUBLIC_ORIGIN: SERVICE_URL,
     COOKIE_INSECURE: "1",
@@ -92,18 +136,14 @@ test.beforeAll(async () => {
     STRIPE_PRICES: JSON.stringify(PRICES),
     STRIPE_API_ORIGIN: STRIPE_URL,
   });
-  await waitFor(`${STRIPE_URL}/health`, "the Stripe stand-in");
-  await waitFor(`${SERVICE_URL}/api/health`, "the licence service");
+  await waitFor(`${STRIPE_URL}/health`, "the Stripe stand-in", stripe);
+  await waitFor(`${SERVICE_URL}/api/health`, "the licence service", service);
+  // Nothing an earlier run asked of it may count towards this one
+  await fetch(`${STRIPE_URL}/__stub/reset`);
 });
 
 test.afterAll(async () => {
-  for (const child of children) {
-    try {
-      if (child.pid) process.kill(-child.pid, "SIGTERM");
-    } catch {
-      // already gone
-    }
-  }
+  await Promise.all(children.map(stop));
 });
 
 const admin = (who = ACME) => ({ ...asOrganisation(who), ...bearer(who) });
