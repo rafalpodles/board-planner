@@ -44,6 +44,7 @@ import { timeAgo } from "@/lib/time";
 import { daysUntil, dueDateClass, formatDateOnly } from "@/lib/date-only";
 import { RunDot } from "@/components/kanban/RunDot";
 import { PullRequestBadge } from "@/components/tasks/PullRequestBadge";
+import { TaskGroup } from "@/lib/task-grouping";
 
 interface ListViewProps {
   tasks: ApiTask[];
@@ -75,6 +76,10 @@ interface ListViewProps {
   onCategoryChange?: (taskId: string, category: string) => void;
   onSprintChange?: (taskId: string, sprintId: string | null) => void;
   onFieldChange?: (taskId: string, fieldId: string, value: string) => void;
+  /** Present while grouped. `tasks` then holds the rows that are drawn, collapsed groups left out */
+  groups?: TaskGroup[];
+  collapsedGroups?: ReadonlySet<string>;
+  onToggleGroup?: (key: string) => void;
 }
 
 function initials(fullName: string): string {
@@ -205,6 +210,9 @@ export function ListView({
   onSprintChange,
   onFieldChange,
   customFields = [],
+  groups,
+  collapsedGroups,
+  onToggleGroup,
 }: ListViewProps) {
   const selectionActive = selectionMode || (selectedTasks?.size ?? 0) > 0;
   const show = (id: ListColumnId) => isColumnVisible(id, hiddenColumns);
@@ -250,8 +258,20 @@ export function ListView({
   // direction matters too: descending manual reverses the rows, which would make a
   // drop reindex them backwards — reachable only from a sort saved before the
   // direction toggle was disabled for manual.
+  const grouped = !!groups && groups.length > 0;
   const canReorder =
-    !!onReorder && sortField === "manual" && sortDir === "asc" && sorted.length > 1;
+    !!onReorder && !grouped && sortField === "manual" && sortDir === "asc" && sorted.length > 1;
+
+  const rows = useMemo(() => {
+    const indexById = new Map(sorted.map((t, i) => [t._id, i]));
+    if (!grouped) return sorted.map((task, index) => ({ kind: "task" as const, task, index }));
+    return groups!.flatMap((group) => [
+      { kind: "header" as const, group },
+      ...(collapsedGroups?.has(group.key)
+        ? []
+        : group.tasks.map((task) => ({ kind: "task" as const, task, index: indexById.get(task._id) ?? -1 }))),
+    ]);
+  }, [sorted, grouped, groups, collapsedGroups]);
 
   const sensors = useSensors(
     // A few pixels of travel before a drag starts, so clicking the grip stays a click
@@ -324,9 +344,17 @@ export function ListView({
     );
   }
 
-  if (tasks.length === 0) {
+  if (tasks.length === 0 && !grouped) {
     return null;
   }
+
+  const columnCount =
+    2 +
+    (canReorder ? 1 : 0) +
+    (selectionActive ? 1 : 0) +
+    (["status", "pr", "assignee", "priority", "sprint", "category", "dueDate", "updatedAt"] as const).filter(show)
+      .length +
+    fieldColumns.length;
 
   return (
     <DndContext
@@ -411,7 +439,50 @@ export function ListView({
             </tr>
           </thead>
           <tbody>
-            {sorted.map((task, index) => {
+            {rows.map((entry) => {
+              if (entry.kind === "header") {
+                const { group } = entry;
+                const collapsed = collapsedGroups?.has(group.key) ?? false;
+                return (
+                  <tr
+                    key={`group:${group.key}`}
+                    data-testid="list-group-header"
+                    data-group-key={group.key}
+                    className="border-b border-border bg-bg-input/60"
+                  >
+                    <th scope="colgroup" colSpan={columnCount} className="p-0 text-left font-medium">
+                      <button
+                        type="button"
+                        aria-expanded={!collapsed}
+                        onClick={() => onToggleGroup?.(group.key)}
+                        className="focus-ring-inset sticky left-0 flex min-h-9 items-center gap-2 px-2 py-1.5 text-left text-xs text-text"
+                      >
+                        <svg
+                          aria-hidden
+                          className={`h-3 w-3 shrink-0 text-text-muted transition-transform ${collapsed ? "" : "rotate-90"}`}
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                        </svg>
+                        {group.color && (
+                          <span
+                            aria-hidden
+                            className="h-2.5 w-2.5 shrink-0 rounded-full"
+                            style={{ backgroundColor: group.color }}
+                          />
+                        )}
+                        <span className="font-semibold">{group.label}</span>
+                        <span data-testid="list-group-count" className="text-text-muted">
+                          {group.tasks.length}
+                        </span>
+                      </button>
+                    </th>
+                  </tr>
+                );
+              }
+              const { task, index } = entry;
               const dueDateInfo = task.dueDate
                 ? {
                     formatted: formatDateOnly(task.dueDate, { month: "short", day: "numeric" }),

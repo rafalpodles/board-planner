@@ -7,6 +7,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { ProjectBoard } from "@/hooks/use-project-board";
 import { ApiTask, BOARD_SORT_FIELDS, LIST_SORT_FIELDS, SortKey, SortDir } from "@/types";
 import { effectiveColumns } from "@/lib/columns";
+import { GroupBy, flattenGroups, groupTasks } from "@/lib/task-grouping";
 import { ListColumnId } from "@/lib/list-columns";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Board } from "@/components/kanban/Board";
@@ -106,6 +107,8 @@ export function ProjectBoardView({
   const [sortField, setSortField] = useState<SortKey>("manual");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [hiddenColumns, setHiddenColumns] = useState<ListColumnId[]>([]);
+  const [groupBy, setGroupBy] = useState<GroupBy>("");
+  const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(new Set());
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const [focusedTaskIndex, setFocusedTaskIndex] = useState(-1);
 
@@ -125,6 +128,38 @@ export function ProjectBoardView({
     }),
     [project?.columns, project?.customFields, sprints]
   );
+
+  const groups = useMemo(
+    () =>
+      viewMode === "list"
+        ? groupTasks(filteredTasks, groupBy, {
+            columns: project?.columns,
+            categories: project?.categories,
+            customFields: project?.customFields,
+          })
+        : [],
+    [viewMode, filteredTasks, groupBy, project?.columns, project?.categories, project?.customFields]
+  );
+  const listTasks = useMemo(
+    () => (groups.length > 0 ? flattenGroups(groups, collapsedGroups) : filteredTasks),
+    [groups, collapsedGroups, filteredTasks]
+  );
+
+  function changeGroupBy(next: GroupBy) {
+    setGroupBy(next);
+    setCollapsedGroups(new Set());
+    setFocusedTaskIndex(-1);
+  }
+
+  function toggleGroup(key: string) {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+    setFocusedTaskIndex(-1);
+  }
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -173,7 +208,7 @@ export function ProjectBoardView({
       if (e.key === "j" && noMod && isListView) {
         e.preventDefault();
         setFocusedTaskIndex((prev) => {
-          const max = filteredTasks.length - 1;
+          const max = listTasks.length - 1;
           return Math.min(prev + 1, max);
         });
         return;
@@ -183,9 +218,9 @@ export function ProjectBoardView({
         setFocusedTaskIndex((prev) => Math.max(prev - 1, 0));
         return;
       }
-      if (e.key === "Enter" && noMod && isListView && focusedTaskIndex >= 0 && focusedTaskIndex < filteredTasks.length) {
+      if (e.key === "Enter" && noMod && isListView && focusedTaskIndex >= 0 && focusedTaskIndex < listTasks.length) {
         e.preventDefault();
-        const task = filteredTasks[focusedTaskIndex];
+        const task = listTasks[focusedTaskIndex];
         router.push(taskPath(projectId, task.taskNumber));
         return;
       }
@@ -193,7 +228,7 @@ export function ProjectBoardView({
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [
-    filteredTasks,
+    listTasks,
     focusedTaskIndex,
     projectId,
     router,
@@ -244,6 +279,9 @@ export function ProjectBoardView({
         columns={project.columns}
         hiddenColumns={hiddenColumns}
         onHiddenColumnsChange={setHiddenColumns}
+        groupBy={groupBy}
+        onGroupByChange={changeGroupBy}
+        showGroupBy={viewMode === "list"}
         showColumnPicker={viewMode === "list"}
         extraControls={
           readOnly ? undefined : (
@@ -331,7 +369,10 @@ export function ProjectBoardView({
             </div>
           ) : (
             <ListView
-              tasks={filteredTasks}
+              tasks={listTasks}
+              groups={groups}
+              collapsedGroups={collapsedGroups}
+              onToggleGroup={toggleGroup}
               projectKey={project.key}
               projectId={projectId}
               customFields={project.customFields || []}

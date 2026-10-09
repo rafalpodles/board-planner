@@ -20,6 +20,7 @@ import { categoryColor } from "@/lib/category-colors";
 import { AnyColumn } from "@/lib/columns";
 import { SortContext, sortTasks } from "@/lib/task-sort";
 import { ListColumnId } from "@/lib/list-columns";
+import { GroupBy, groupByOptions } from "@/lib/task-grouping";
 import { ColumnPicker } from "./ColumnPicker";
 import { usePanelClamp } from "@/hooks/use-panel-clamp";
 import {
@@ -93,6 +94,11 @@ interface BoardFiltersProps {
   hiddenColumns?: ListColumnId[];
   customFields?: ApiCustomField[];
   onHiddenColumnsChange?: (hidden: ListColumnId[]) => void;
+  /** Owned above, like the sort. The board has nothing to group yet, but it still hydrates and
+      persists the stored choice, or the next load from the board would write an empty one back */
+  groupBy?: GroupBy;
+  onGroupByChange?: (groupBy: GroupBy) => void;
+  showGroupBy?: boolean;
   /** Separate from the handler above: the board has no columns to pick, but it still
       has to hydrate the stored set, or the next load writes an empty one back */
   showColumnPicker?: boolean;
@@ -123,6 +129,9 @@ export function BoardFilters({
   columns,
   hiddenColumns,
   onHiddenColumnsChange,
+  groupBy = "",
+  onGroupByChange,
+  showGroupBy,
   showColumnPicker,
   onFilter,
   customFields = [],
@@ -155,6 +164,7 @@ export function BoardFilters({
     setFilters((f) => ({ ...f, ...state.filters }));
     onSortChange(state.sortField, state.sortDir);
     onHiddenColumnsChange?.(state.hiddenColumns);
+    onGroupByChange?.(state.groupBy);
     setShowFilters(state.showFilters);
     setInitialized(true);
     // onSortChange is the owner's setter; re-running on its identity would
@@ -171,8 +181,9 @@ export function BoardFilters({
       sortDir,
       showFilters,
       hiddenColumns: hiddenColumns ?? [],
+      groupBy,
     });
-  }, [projectId, filters, sortField, sortDir, showFilters, hiddenColumns]);
+  }, [projectId, filters, sortField, sortDir, showFilters, hiddenColumns, groupBy]);
 
   useEffect(() => {
     if (initialized) persistState();
@@ -688,7 +699,28 @@ export function BoardFilters({
         </button>
       )}
 
-      <div className="flex h-11 shrink-0 items-center overflow-hidden rounded-lg border border-border bg-bg-card md:ml-auto">
+      {showGroupBy && onGroupByChange && (
+        <div className="flex h-11 shrink-0 items-center overflow-hidden rounded-lg border border-border bg-bg-card md:ml-auto">
+          <select
+            value={groupBy}
+            aria-label="Group tasks by"
+            onChange={(e) => onGroupByChange(e.target.value as GroupBy)}
+            className="focus-ring-inset h-full rounded-lg bg-transparent px-2.5 text-[13px] text-text-muted"
+          >
+            {groupByOptions(customFields).map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.value ? `Group: ${o.label}` : "No grouping"}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      <div
+        className={`flex h-11 shrink-0 items-center overflow-hidden rounded-lg border border-border bg-bg-card ${
+          showGroupBy && onGroupByChange ? "" : "md:ml-auto"
+        }`}
+      >
         <select
           value={sortField}
           aria-label="Sort tasks by"
