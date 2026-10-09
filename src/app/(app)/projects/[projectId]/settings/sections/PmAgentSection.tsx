@@ -515,7 +515,7 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
         </div>
       )}
       {isAdmin ? (
-        <SettingsCard title="Availability & cost" instanceScoped>
+        <SettingsCard title="Availability & usage" instanceScoped>
           <Switch
             checked={draft.value.enabled}
             onChange={(v) => draft.set("enabled", v)}

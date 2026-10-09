@@ -177,6 +177,14 @@ test("a turn's real cost is recorded and shown, in calls and tokens", async ({ p
     await expect(today).toContainText("1 turns");
     await expect(today).toContainText("model calls");
     await expect(today).toContainText("tokens");
+    await today.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: "e2e/.artifacts/bp682-pm-settings.png" });
+
+    await page.setViewportSize({ width: 390, height: 800 });
+    await page.reload();
+    await expect(page.getByTestId("pm-usage-today")).toContainText("1 turns");
+    await page.getByTestId("pm-usage-today").scrollIntoViewIfNeeded();
+    await page.screenshot({ path: "e2e/.artifacts/bp682-pm-settings-phone.png" });
   });
 });
 
