@@ -21,7 +21,7 @@ export function OptionFilter({ field, filter, onChange }: OptionFilterProps) {
 
   return (
     <div role="group" aria-label={field.name} className="flex flex-col gap-1.5">
-      <div className="flex max-h-28 flex-wrap gap-1 overflow-y-auto">
+      <div className="-m-0.5 flex max-h-28 flex-wrap gap-1 overflow-y-auto p-0.5">
         {orderedOptions(field).map((option) => {
           const on = picked.includes(option.id);
           return (
