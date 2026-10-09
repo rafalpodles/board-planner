@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import { APP_DOMAIN, APP_NAME } from "./brand";
 import { selfOrigin } from "./session";
-import { OPENROUTER_BASE_URL } from "./pm/openrouter";
+import { OPENROUTER_BASE_URL, usageOf, type OrUsage } from "./pm/openrouter";
 import type { PromptField } from "./ai-fields";
 
 export interface GeneratedTask {
@@ -44,7 +44,8 @@ export async function generateTask(
   prompt: string,
   context: ProjectContext,
   model: string,
-  apiKey: string
+  apiKey: string,
+  onUsage?: (usage: OrUsage | undefined) => void
 ): Promise<GeneratedTask> {
   // OpenRouter speaks OpenAI's protocol, so the SDK does the talking. It would otherwise send the
   // OpenAI organisation and project the operator's environment names to a service that is not OpenAI.
@@ -125,6 +126,8 @@ When analyzing duplicates and dependencies, consider the semantic meaning, not j
     max_tokens: 1500,
   });
 
+  // Said before the answer is judged: an empty or malformed one was still billed
+  onUsage?.(usageOf(response));
   const content = response.choices[0]?.message?.content;
   if (!content) {
     throw new Error("Empty response from AI");

@@ -12,6 +12,9 @@ let reviewed: Record<string, unknown> | null = null;
 
 // Projection-aware, because runPmTrigger asks for the pm config and the notification asks for the
 // board's identity. One answer for both leaves the mail's project name and key untestable.
+// The gateway's counters are its own tests' business (src/lib/ai-gateway): these only need the door to open
+vi.mock("@/lib/ai-gateway/budget", () => ({ counterKindOf: async () => "month", checkBudget: async () => ({ refusal: null, counter: "month" }) }));
+vi.mock("@/lib/ai-gateway/usage", () => ({ recordUsage: vi.fn() }));
 vi.mock("@/models/project", () => ({
   Project: {
     findOne: (_filter: unknown, projection?: string) => ({

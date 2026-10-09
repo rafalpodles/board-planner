@@ -5,6 +5,9 @@ const projectFindOne = vi.fn();
 const resolveModelKey = vi.hoisted(() => vi.fn());
 const modelKeyAvailability = vi.hoisted(() => vi.fn());
 
+// The gateway's counters are its own tests' business (src/lib/ai-gateway): these only need the door to open
+vi.mock("@/lib/ai-gateway/budget", () => ({ counterKindOf: async () => "month", checkBudget: async () => ({ refusal: null, counter: "month" }) }));
+vi.mock("@/lib/ai-gateway/usage", () => ({ recordUsage: vi.fn() }));
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/rateLimit", async () => {
   const { inMemoryRateLimitModel } = await import("@/lib/rate-limit-test-store");

@@ -10,7 +10,7 @@ import { acquireTurnLock, releaseTurnLock } from "./turn-lock";
 import { NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS, buildNeedsHumanReviewPrompt } from "./autonomy";
 import { getProjectColumns } from "@/lib/columns";
 import { isPmRunnable } from "./availability";
-import { describeModelKeyRefusal, resolveModelKey } from "@/lib/model-keys";
+import { openGate } from "@/lib/ai-gateway";
 import type { ScopedDb } from "@/lib/db-scope";
 
 const MAX_TRIGGER_ATTEMPTS = 3;
@@ -124,10 +124,9 @@ export async function runPmTrigger(db: ScopedDb, trigger: IPmTrigger): Promise<P
   }
   // Settled, not retried: without a model every attempt is a turn from the cap spent posting the
   // same warning into every thread
-  const modelKey = await resolveModelKey(db);
-  if (!modelKey.ok) {
-    const { error } = describeModelKeyRefusal(modelKey, { error: "The PM agent is not configured on this instance", status: 503 });
-    await settleTrigger(db, trigger, "failed", error);
+  const gate = await openGate(db, { error: "The PM agent is not configured on this instance", status: 503 });
+  if (!gate.ok) {
+    await settleTrigger(db, trigger, "failed", gate.error);
     return "ran";
   }
 

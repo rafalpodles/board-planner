@@ -8,7 +8,7 @@ import { getPmUser } from "./pm-user";
 import { BOARD_REVIEW_DISALLOWED_TOOLS, buildBoardReviewPrompt, dueReviewSlot } from "./autonomy";
 import { buildBoardDigest, digestHeadline, renderBoardDigest } from "./board-review";
 import { PM_RUNNABLE_QUERY } from "./availability";
-import { describeModelKeyRefusal, resolveModelKey } from "@/lib/model-keys";
+import { openGate } from "@/lib/ai-gateway";
 import { type ScopedDb } from "@/lib/db-scope";
 
 const TICK_MS = Number(process.env.PM_SCHEDULER_TICK_MS) || 5 * 60 * 1000;
@@ -95,13 +95,8 @@ export async function startBoardReview(
 ): Promise<BoardReviewStart> {
   // The scheduler starts whether or not a model is configured, and a review without one spent a
   // turn to post a warning into every thread on the board
-  const modelKey = await resolveModelKey(db);
-  if (!modelKey.ok) {
-    return {
-      status: "skipped",
-      reason: describeModelKeyRefusal(modelKey, { error: "the PM agent is not configured on this instance", status: 503 }).error,
-    };
-  }
+  const gate = await openGate(db, { error: "the PM agent is not configured on this instance", status: 503 });
+  if (!gate.ok) return { status: "skipped", reason: gate.error };
   const { over, cap } = await isOverDailyTurnCap(db, projectId, pm);
   if (over) return { status: "skipped", reason: `the daily turn cap (${cap}) is reached` };
 

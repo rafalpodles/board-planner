@@ -23,6 +23,8 @@ import { PasswordResetToken } from "@/models/passwordResetToken";
 import { PmMessage } from "@/models/pmMessage";
 import { PmOauthState } from "@/models/pmOauthState";
 import { PmTrigger } from "@/models/pmTrigger";
+import { AiBudget } from "@/models/aiBudget";
+import { AiUsage } from "@/models/aiUsage";
 import { Project } from "@/models/project";
 import { ProjectAuditLog } from "@/models/projectAuditLog";
 import { Session } from "@/models/session";
@@ -38,6 +40,8 @@ import { expectOrganisation } from "./organisation-wall";
 export const SCOPED_MODELS = {
   ActivityLog: () => ActivityLog,
   Agent: () => Agent,
+  AiBudget: () => AiBudget,
+  AiUsage: () => AiUsage,
   AgentBlock: () => AgentBlock,
   AgentRun: () => AgentRun,
   ApiToken: () => ApiToken,

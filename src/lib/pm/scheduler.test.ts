@@ -9,6 +9,9 @@ const buildBoardDigest = vi.fn();
 const drainPmTriggers = vi.fn();
 
 const servedOrganisations = vi.hoisted(() => ({ list: null as null | { _id: unknown; digestHour?: number; timezone?: string }[] }));
+// The gateway's counters are its own tests' business (src/lib/ai-gateway): these only need the door to open
+vi.mock("@/lib/ai-gateway/budget", () => ({ counterKindOf: async () => "month", checkBudget: async () => ({ refusal: null, counter: "month" }) }));
+vi.mock("@/lib/ai-gateway/usage", () => ({ recordUsage: vi.fn() }));
 vi.mock("@/lib/organisation-jobs", async () => {
   const { scoped } = await import("@/lib/db-scope");
   const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");

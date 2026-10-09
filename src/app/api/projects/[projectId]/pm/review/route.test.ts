@@ -5,6 +5,9 @@ const startBoardReview = vi.fn();
 const after = vi.fn();
 let user: Record<string, unknown> = {};
 
+// The gateway's counters are its own tests' business (src/lib/ai-gateway): these only need the door to open
+vi.mock("@/lib/ai-gateway/budget", () => ({ counterKindOf: async () => "month", checkBudget: async () => ({ refusal: null, counter: "month" }) }));
+vi.mock("@/lib/ai-gateway/usage", () => ({ recordUsage: vi.fn() }));
 vi.mock("next/server", async (importOriginal) => ({ ...(await importOriginal<typeof import("next/server")>()), after }));
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/project", () => ({ Project: { findOne } }));
