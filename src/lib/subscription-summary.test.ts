@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { moneyOf, subscriptionSummary } from "./subscription-summary";
+import { moneyOf, offerSummary, subscriptionSummary } from "./subscription-summary";
 
 // BP-676
 describe("subscriptionSummary", () => {
@@ -32,5 +32,44 @@ describe("moneyOf", () => {
 
   it.each([["nothing", null], ["the other field", { amountDue: 5400, currency: "usd" }], ["a string amount", { unitAmount: "300", currency: "usd" }], ["a currency that is not a code", { unitAmount: 300, currency: "dollars" }], ["no currency", { unitAmount: 300 }]])("reads %s as no amount", (_why, value) => {
     expect(moneyOf(value, "unitAmount")).toBeNull();
+  });
+});
+
+// BP-980
+describe("offerSummary", () => {
+  const usd = (unitAmount: number, currency = "usd") => ({ unitAmount, currency });
+  const offer = (over: Record<string, unknown> = {}) => ({
+    launch: true,
+    includedMembers: 10,
+    month: { base: usd(2900), member: usd(300) },
+    year: { base: usd(29000), member: usd(3000) },
+    ...over,
+  });
+
+  it("keeps the prices of both periods, what is included and whether it is the launch price, and drops the rest", () => {
+    expect(offerSummary({ ...offer(), stripePriceId: "price_secret" })).toEqual({
+      launch: true,
+      includedMembers: 10,
+      month: { base: { amount: 2900, currency: "usd" }, member: { amount: 300, currency: "usd" } },
+      year: { base: { amount: 29000, currency: "usd" }, member: { amount: 3000, currency: "usd" } },
+    });
+  });
+
+  it("reads a launch flag that is not true as the standard price", () => {
+    expect(offerSummary(offer({ launch: "yes" }))).toMatchObject({ launch: false });
+  });
+
+  it.each([
+    ["nothing", null],
+    ["a string", "$29"],
+    ["no year", offer({ year: undefined })],
+    ["a price with no amount", offer({ month: { base: usd(2900), member: { currency: "usd" } } })],
+    ["a member price in another currency than its base", offer({ month: { base: usd(2900), member: usd(300, "eur") } })],
+    ["a year in another currency than the month", offer({ year: { base: usd(29000, "eur"), member: usd(3000, "eur") } })],
+    ["no members included", offer({ includedMembers: 0 })],
+    ["a fraction of a member included", offer({ includedMembers: 2.5 })],
+    ["members included as text", offer({ includedMembers: "10" })],
+  ])("is nothing for %s, so the page never shows half a price list", (_why, value) => {
+    expect(offerSummary(value)).toBeNull();
   });
 });

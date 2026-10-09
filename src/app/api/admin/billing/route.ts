@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { askBilling } from "@/lib/billing-client";
 import { withAdmin } from "@/lib/middleware";
 import { organisationDomain } from "@/lib/organisation-host";
-import { moneyOf, subscriptionSummary } from "@/lib/subscription-summary";
+import { moneyOf, offerSummary, subscriptionSummary } from "@/lib/subscription-summary";
 
 export const GET = withAdmin(async (_request, { db }) => {
   if (organisationDomain() === null) return NextResponse.json({ available: false });
@@ -15,5 +15,6 @@ export const GET = withAdmin(async (_request, { db }) => {
     subscription: subscriptionSummary(answer.body.subscription),
     memberPrice: moneyOf(answer.body.memberPrice, "unitAmount"),
     upcoming: moneyOf(answer.body.upcoming, "amountDue"),
+    offer: offerSummary(answer.body.offer),
   });
 });

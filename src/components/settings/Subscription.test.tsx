@@ -390,6 +390,75 @@ describe("Subscription", () => {
     expect(screen.getByTestId("subscription-checkout").textContent).toBe("Continue to payment");
   });
 
+  describe("what is bought (BP-980)", () => {
+    const usd = (amount: number) => ({ amount, currency: "usd" });
+    const offered = (over: Record<string, unknown> = {}) => ({
+      available: true,
+      launchOpen: true,
+      subscription: null,
+      memberPrice: null,
+      upcoming: null,
+      offer: { launch: true, includedMembers: 10, month: { base: usd(2900), member: usd(300) }, year: { base: usd(29000), member: usd(3000) }, ...over },
+    });
+
+    it("says the price of each period, what a year saves, what is included and what a member above it costs, and the button names the amount", async () => {
+      m.api.get.mockResolvedValue(offered());
+      render(<Subscription />);
+
+      expect((await screen.findByTestId("subscription-price-month")).textContent).toBe("$29 per month");
+      expect(screen.getByTestId("subscription-price-year").textContent).toBe("$290 per year");
+      expect(screen.getByTestId("subscription-saving").textContent).toBe("Saves $58 a year");
+      expect(screen.getByTestId("subscription-includes").textContent).toBe("Pro for the whole organisation: 10 members included, then $3 per member per month.");
+      expect(screen.getByText("Prices are in USD. Tax is added at checkout where it applies.")).toBeTruthy();
+      expect(screen.getByTestId("subscription-checkout").textContent).toBe("Continue to payment · $29 per month");
+    });
+
+    it("follows the period that is chosen: the member price and the button name the year, and the checkout is for it", async () => {
+      m.api.post.mockResolvedValue({ url: "https://checkout.stripe.test/c/3" });
+      m.api.get.mockResolvedValue(offered());
+      render(<Subscription />);
+
+      fireEvent.click(await screen.findByRole("radio", { name: /Yearly/ }));
+
+      expect(screen.getByTestId("subscription-includes").textContent).toBe("Pro for the whole organisation: 10 members included, then $30 per member per year.");
+      expect(screen.getByTestId("subscription-checkout").textContent).toBe("Continue to payment · $290 per year");
+      fireEvent.click(screen.getByTestId("subscription-checkout"));
+      await waitFor(() => expect(m.api.post).toHaveBeenCalledWith("/api/admin/billing/checkout", { interval: "year" }, { relayed: true }));
+    });
+
+    it("shows the standard prices when that is what a checkout would charge, and no saving where a year saves nothing", async () => {
+      m.api.get.mockResolvedValue({ ...offered({ launch: false, month: { base: usd(4900), member: usd(500) }, year: { base: usd(58800), member: usd(6000) } }), launchOpen: false });
+      render(<Subscription />);
+
+      expect((await screen.findByTestId("subscription-price-month")).textContent).toBe("$49 per month");
+      expect(screen.getByTestId("subscription-price-year").textContent).toBe("$588 per year");
+      expect(screen.queryByTestId("subscription-saving")).toBeNull();
+      expect(screen.queryByText(/launch price/i)).toBeNull();
+    });
+
+    it("shows the cents a price has, and only those", async () => {
+      m.api.get.mockResolvedValue(offered({ month: { base: usd(2950), member: usd(325) } }));
+      render(<Subscription />);
+
+      expect((await screen.findByTestId("subscription-price-month")).textContent).toBe("$29.50 per month");
+      expect(screen.getByTestId("subscription-includes").textContent).toContain("then $3.25 per member");
+    });
+
+    it("names no price it was not given, and still starts a checkout", async () => {
+      m.api.post.mockResolvedValue({ url: "https://checkout.stripe.test/c/4" });
+      m.api.get.mockResolvedValue({ ...offered(), offer: null });
+      render(<Subscription />);
+
+      const button = await screen.findByTestId("subscription-checkout");
+      expect(button.textContent).toBe("Continue to payment");
+      expect(screen.queryByTestId("subscription-price-month")).toBeNull();
+      expect(screen.queryByTestId("subscription-includes")).toBeNull();
+      expect(screen.queryByText(/Tax is added/)).toBeNull();
+      fireEvent.click(button);
+      await waitFor(() => expect(assign).toHaveBeenCalledWith("https://checkout.stripe.test/c/4"));
+    });
+  });
+
   describe("members and the next invoice (BP-949)", () => {
     const priced = { memberPrice: { amount: 300, currency: "usd" }, upcoming: { amount: 5400, currency: "usd" } };
 
