@@ -6,7 +6,7 @@ import { useOrganisation } from "@/hooks/use-organisation";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import { formatPlanDate, planNotice } from "@/lib/plan-notice";
-import type { BillingSummary, SubscriptionSummary } from "@/lib/subscription-summary";
+import { INCLUDED_MEMBERS, type BillingSummary, type Money, type SubscriptionSummary } from "@/lib/subscription-summary";
 
 const LIVE = ["active", "trialing", "past_due", "unpaid"];
 const POLL_MS = 3_000;
@@ -17,26 +17,50 @@ type Interval = "month" | "year";
 export const isLiveSubscription = (subscription: SubscriptionSummary | null): subscription is SubscriptionSummary =>
   !!subscription && !!subscription.status && LIVE.includes(subscription.status);
 
-function Details({ subscription }: { subscription: SubscriptionSummary }) {
+const money = ({ amount, currency }: Money) => new Intl.NumberFormat(undefined, { style: "currency", currency: currency.toUpperCase() }).format(amount / 100);
+
+function Row({ label, testId, children }: { label: string; testId?: string; children: React.ReactNode }) {
+  return (
+    <div className="flex gap-4 px-4 py-2">
+      <dt className="w-24 shrink-0 text-text-muted sm:w-48">{label}</dt>
+      <dd className="min-w-0" data-testid={testId}>
+        {children}
+      </dd>
+    </div>
+  );
+}
+
+function Details({ subscription, members, memberPrice, upcoming }: { subscription: SubscriptionSummary; members: number | undefined; memberPrice: Money | null; upcoming: Money | null }) {
   const end = subscription.currentPeriodEnd ? formatPlanDate(subscription.currentPeriodEnd) : null;
+  const per = subscription.interval === "year" ? "year" : "month";
   return (
     <dl className="divide-y divide-border rounded-lg border border-border text-sm" data-testid="subscription-details">
-      <div className="flex gap-4 px-4 py-2">
-        <dt className="w-24 shrink-0 text-text-muted sm:w-48">Billing</dt>
-        <dd>
-          {subscription.interval === "year" ? "Yearly" : "Monthly"}
-          {subscription.launch && <span className="ml-2 rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-semibold text-primary">Launch price</span>}
-        </dd>
-      </div>
-      <div className="flex gap-4 px-4 py-2">
-        <dt className="w-24 shrink-0 text-text-muted sm:w-48">{subscription.cancelAtPeriodEnd ? "Ends" : "Renews"}</dt>
-        <dd data-testid="subscription-period">{end ?? "—"}</dd>
-      </div>
-      {subscription.extraMembers > 0 && (
-        <div className="flex gap-4 px-4 py-2">
-          <dt className="w-24 shrink-0 text-text-muted sm:w-48">Extra members</dt>
-          <dd className="tabular-nums">{subscription.extraMembers} above the 10 included</dd>
-        </div>
+      <Row label="Billing">
+        {subscription.interval === "year" ? "Yearly" : "Monthly"}
+        {subscription.launch && <span className="ml-2 rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-semibold text-primary">Launch price</span>}
+      </Row>
+      {members !== undefined && (
+        <Row label="Members" testId="subscription-members">
+          <span className="tabular-nums">{members}</span>, {INCLUDED_MEMBERS} included
+        </Row>
+      )}
+      <Row label={`Billed above ${INCLUDED_MEMBERS}`} testId="subscription-billed">
+        {subscription.extraMembers === 0 ? (
+          "None"
+        ) : (
+          <span className="tabular-nums">
+            {subscription.extraMembers}
+            {memberPrice && ` × ${money(memberPrice)} per ${per}`}
+          </span>
+        )}
+      </Row>
+      <Row label={subscription.cancelAtPeriodEnd ? "Ends" : "Renews"} testId="subscription-period">
+        {end ?? "—"}
+      </Row>
+      {upcoming && end && !subscription.cancelAtPeriodEnd && (
+        <Row label="Next invoice" testId="subscription-next-invoice">
+          {money(upcoming)} on {end}
+        </Row>
       )}
     </dl>
   );
@@ -164,7 +188,7 @@ export function Subscription() {
               The subscription is cancelled and ends with the paid period. Pro stays on for 14 days after that, then this organisation is on the Free plan; no data is removed.
             </p>
           )}
-          <Details subscription={subscription} />
+          <Details subscription={subscription} members={organisation.members} memberPrice={billing.available ? billing.memberPrice : null} upcoming={billing.available ? billing.upcoming : null} />
           <Button variant="secondary" onClick={() => go("portal")} disabled={busy !== null} data-testid="subscription-manage">
             {busy === "portal" ? "Opening…" : "Manage subscription"}
           </Button>

@@ -238,6 +238,10 @@ async function bootWhenDatabaseIsReady(): Promise<void> {
     const { startLicencePull } = await import("@/lib/licence-pull");
     const licencePull = startLicencePull();
     console.log(licencePull.started ? "Licence pull started" : `Licence pull is off (${licencePull.reason})`);
+
+    const { startMemberSync } = await import("@/lib/member-sync");
+    const memberSync = startMemberSync();
+    console.log(memberSync.started ? "Member sync started" : `Member sync is off (${memberSync.reason})`);
   } catch (err) {
     // Don't crash the server on a transient boot-time failure after connecting;
     // route handlers already work, only the seeding/backfill/schedulers above are at risk.

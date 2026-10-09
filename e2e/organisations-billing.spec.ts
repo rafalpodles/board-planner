@@ -26,6 +26,7 @@ const asked: Asked[] = [];
 let stub: http.Server;
 let statusAnswer: { code: number; body: unknown };
 let urlAnswer: { code: number; body: unknown };
+let membersAnswer: { code: number; body: unknown };
 
 const publicKey = createPublicKey({ key: { kty: "OKP", crv: "Ed25519", x: E2E_LICENCE_PULL_KEY.x }, format: "jwk" });
 
@@ -41,6 +42,8 @@ const running = (over: Record<string, unknown> = {}) => ({
   billing: true,
   launchOpen: false,
   subscription: { status: "active", interval: "year", launch: true, extraMembers: 3, currentPeriodEnd: PERIOD_END, cancelAtPeriodEnd: false, stripeCustomerId: "cus_not_for_the_browser", ...over },
+  memberPrice: { unitAmount: 300, currency: "usd" },
+  upcoming: { amountDue: 5400, currency: "usd" },
 });
 const none = { billing: true, launchOpen: true, subscription: null };
 
@@ -54,7 +57,7 @@ test.beforeAll(async () => {
       const path = request.url!;
       asked.push({ path, signed, body: JSON.parse(body.toString() || "{}") });
       if (!signed) return void response.writeHead(401).end();
-      const answer = path === "/api/billing/status" ? statusAnswer : urlAnswer;
+      const answer = path === "/api/billing/status" ? statusAnswer : path === "/api/billing/members" ? membersAnswer : urlAnswer;
       response.writeHead(answer.code, { "content-type": "application/json" }).end(JSON.stringify(answer.body));
     });
   });
@@ -70,35 +73,36 @@ test.beforeEach(async ({ page }) => {
   asked.length = 0;
   statusAnswer = { code: 200, body: none };
   urlAnswer = { code: 200, body: { url: "https://stripe.test/pay/cs_test_1" } };
+  membersAnswer = { code: 200, body: { status: "updated", extraMembers: 3 } };
   await page.route("https://stripe.test/**", (route) => route.fulfill({ contentType: "text/html", body: "<h1>Stripe stand-in</h1>" }));
   await signInOn(page.context(), ACME);
 });
 
 // People and unexpired invitations beyond the administrator; a checkout bills the people above ten and not the invitations
-async function addHeadcount(people: number, invitations: number) {
+async function addHeadcount(people: number, invitations: number, offset = 0) {
   await mongoose.connect(E2E_MONGODB_URI);
   try {
     const db = mongoose.connection.db!;
     await db.collection("users").insertMany(
       Array.from({ length: people }, (_, i) => ({
         organisation: ACME.organisation,
-        username: `crew${i}`,
-        fullName: `crew ${i}`,
-        email: `crew${i}@acme.example`,
+        username: `crew${i + offset}`,
+        fullName: `crew ${i + offset}`,
+        email: `crew${i + offset}@acme.example`,
         kind: "human",
         role: "member",
         deactivatedAt: null,
         createdAt: new Date(),
       }))
     );
-    await db.collection("invitations").insertMany(
+    if (invitations > 0) await db.collection("invitations").insertMany(
       Array.from({ length: invitations }, (_, i) => ({
         organisation: ACME.organisation,
-        email: `invited${i}@acme.example`,
+        email: `invited${i + offset}@acme.example`,
         role: "member",
         boards: [],
         invitedBy: ACME.adminId,
-        tokenHash: `hash${i}`,
+        tokenHash: `hash${i + offset}`,
         expiresAt: new Date(Date.now() + 60_000_000),
         status: "pending",
         deliveredAs: null,
@@ -161,11 +165,19 @@ test("a running subscription is shown with its period, and Manage subscription g
   const details = page.getByTestId("subscription-details");
   await expect(details).toContainText("Yearly");
   await expect(details).toContainText("Launch price");
-  await expect(details).toContainText("3 above the 10 included");
+  await expect(page.getByTestId("subscription-billed")).toHaveText("3 × $3.00 per year");
+  await expect(page.getByTestId("subscription-next-invoice")).toContainText("$54.00");
   const read = (await (await page.request.get(`${originOf(ACME)}/api/admin/billing`)).json()) as { subscription: Record<string, unknown> };
   expect(Object.keys(read.subscription).sort()).toEqual(["cancelAtPeriodEnd", "currentPeriodEnd", "extraMembers", "interval", "launch", "status"]);
   await expect(page.getByTestId("subscription-checkout")).toHaveCount(0);
   await page.screenshot({ path: "e2e/.artifacts/bp676-subscribed.png", fullPage: true });
+
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.reload();
+  await expect(page.getByTestId("subscription-details")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  await page.screenshot({ path: "e2e/.artifacts/bp949-subscribed-phone.png", fullPage: true });
+  await page.setViewportSize({ width: 1280, height: 720 });
 
   await page.getByTestId("subscription-manage").click();
 
@@ -249,4 +261,73 @@ test("back from paying, the page follows the plan until it is Pro", async ({ pag
   await expect(page.getByTestId("licence-free")).toHaveCount(0);
   await expect(page.getByTestId("organisation-plan")).toHaveText("Pro");
   await page.screenshot({ path: "e2e/.artifacts/bp676-after-payment.png", fullPage: true });
+});
+
+// BP-949: the people are told to the licence service when they change; the service sets the members on the subscription
+const memberAsks = () => asked.filter((a) => a.path === "/api/billing/members");
+const syncNow = async (request: APIRequestContext, minutesFromNow = 0) =>
+  (await request.post(`${ORGANISATIONS_API}/api/e2e/member-sync`, { headers: asOrganisation(ACME), data: { minutesFromNow } })).json() as Promise<Record<string, number>>;
+const storedSync = async () => {
+  await mongoose.connect(E2E_MONGODB_URI);
+  try {
+    return (await mongoose.connection.db!.collection("organisations").findOne({ _id: ACME.organisation }))?.memberSync as { members: number } | undefined;
+  } finally {
+    await mongoose.disconnect();
+  }
+};
+
+test("a Pro organisation's people are told to the licence service when they change, the people and not the invitations, and only then", async ({ request }) => {
+  expect((await pushKey(request)).status()).toBe(200);
+  await addHeadcount(12, 3);
+
+  expect(await syncNow(request)).toMatchObject({ sent: 1, failed: 0 });
+  expect(memberAsks()).toHaveLength(1);
+  expect(memberAsks()[0]).toMatchObject({ signed: true, body: { organisation: ACME.organisation.toHexString(), members: 13 } });
+  expect(await storedSync()).toMatchObject({ members: 13 });
+
+  expect(await syncNow(request)).toMatchObject({ unchanged: 1, sent: 0 });
+  expect(memberAsks()).toHaveLength(1);
+
+  await addHeadcount(1, 0, 100);
+  expect(await syncNow(request)).toMatchObject({ sent: 1 });
+  expect(memberAsks().at(-1)!.body).toMatchObject({ members: 14 });
+});
+
+test("a Free organisation is told to nobody, and a service that fails is asked again at the next run", async ({ request }) => {
+  await addHeadcount(12, 0);
+  expect(await syncNow(request)).toMatchObject({ skipped: 2, sent: 0 });
+  expect(memberAsks()).toHaveLength(0);
+
+  expect((await pushKey(request)).status()).toBe(200);
+  membersAnswer = { code: 500, body: {} };
+  expect(await syncNow(request)).toMatchObject({ failed: 1, sent: 0 });
+  expect(await storedSync()).toBeUndefined();
+
+  // Not at once: a service that failed is left alone for a minute
+  expect(await syncNow(request)).toMatchObject({ waiting: 1, sent: 0 });
+  expect(memberAsks()).toHaveLength(1);
+
+  membersAnswer = { code: 200, body: { status: "updated", extraMembers: 3 } };
+  expect(await syncNow(request, 5)).toMatchObject({ sent: 1, failed: 0 });
+  expect(memberAsks()).toHaveLength(2);
+});
+
+test("the daily ask carries the people count too, so a count that was never sent is put right within a day", async ({ request }) => {
+  await addHeadcount(12, 3);
+
+  expect((await request.post(`${ORGANISATIONS_API}/api/e2e/licence-pull`, { headers: asOrganisation(ACME), data: {} })).status()).toBe(204);
+
+  const ask = asked.filter((a) => a.path === "/api/organisations/licence" && (a.body as { organisation?: string }).organisation === ACME.organisation.toHexString());
+  expect(ask).toHaveLength(1);
+  expect(ask[0].body).toMatchObject({ members: 13 });
+});
+
+test("the panel shows the members, what is billed above ten, and the next invoice", async ({ page }) => {
+  await addHeadcount(12, 0);
+  statusAnswer = { code: 200, body: running({ interval: "month", extraMembers: 3 }) };
+  await open(page);
+
+  await expect(page.getByTestId("subscription-members")).toHaveText("13, 10 included");
+  await expect(page.getByTestId("subscription-billed")).toHaveText("3 × $3.00 per month");
+  await expect(page.getByTestId("subscription-next-invoice")).toContainText("$54.00");
 });

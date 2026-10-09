@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { subscriptionSummary } from "./subscription-summary";
+import { moneyOf, subscriptionSummary } from "./subscription-summary";
 
 // BP-676
 describe("subscriptionSummary", () => {
@@ -20,5 +20,17 @@ describe("subscriptionSummary", () => {
       currentPeriodEnd: null,
       cancelAtPeriodEnd: false,
     });
+  });
+});
+
+// BP-949
+describe("moneyOf", () => {
+  it("reads an amount in the smallest unit and its currency from the field the service uses", () => {
+    expect(moneyOf({ unitAmount: 300, currency: "USD", other: 1 }, "unitAmount")).toEqual({ amount: 300, currency: "usd" });
+    expect(moneyOf({ amountDue: 5400, currency: "eur" }, "amountDue")).toEqual({ amount: 5400, currency: "eur" });
+  });
+
+  it.each([["nothing", null], ["the other field", { amountDue: 5400, currency: "usd" }], ["a string amount", { unitAmount: "300", currency: "usd" }], ["a currency that is not a code", { unitAmount: 300, currency: "dollars" }], ["no currency", { unitAmount: 300 }]])("reads %s as no amount", (_why, value) => {
+    expect(moneyOf(value, "unitAmount")).toBeNull();
   });
 });

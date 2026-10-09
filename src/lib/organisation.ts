@@ -29,6 +29,11 @@ export async function renameOrganisation(organisation: Types.ObjectId, name: str
   else await Organisation.updateOne({ _id: organisation }, { $set: { name } });
 }
 
+export async function recordMemberSync(organisation: Types.ObjectId, members: number): Promise<void> {
+  await connectDB();
+  await Organisation.updateOne({ _id: organisation }, { $set: { memberSync: { members, at: new Date() } } });
+}
+
 // A self-hosted instance whose first run named nothing has no organisation worth naming on screen
 export const organisationIsNamed = (row: Pick<IOrganisation, "name">): boolean =>
   organisationDomain() !== null || (!!row.name && row.name !== "default");

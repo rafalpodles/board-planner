@@ -1,7 +1,7 @@
 import { licencePullConfig } from "./licence-pull";
 import { signPlatformRequest } from "./platform-request";
 
-export type BillingAction = "checkout" | "portal" | "status";
+export type BillingAction = "checkout" | "portal" | "status" | "members";
 
 export type BillingAnswer =
   | { status: "ok"; body: Record<string, unknown> }
