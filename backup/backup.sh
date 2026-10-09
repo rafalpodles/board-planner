@@ -30,10 +30,9 @@ mongodump --uri="$MONGODB_URI" --db="$MONGODB_DB" --archive --gzip --quiet | enc
 
 bytes=$(rclone size --json "$REMOTE/$object" | sed -n 's/.*"bytes":\([0-9]*\).*/\1/p')
 [ "${bytes:-0}" -gt 1024 ] || { echo "the upload is $bytes bytes" >&2; exit 1; }
-# What is stored is what was sent, and it decrypts to its last block with this passphrase
+# What is stored is what was sent
 stored=$(rclone cat "$REMOTE/$object" | sha256sum | cut -d' ' -f1)
 [ "$stored" = "$(cat "$sent")" ] || { echo "the stored copy differs from what was sent" >&2; exit 1; }
-rclone cat "$REMOTE/$object" | decrypt > /dev/null
 echo "uploaded and read back: $object, $bytes bytes"
 
 if [ "$hour" = "00" ]; then

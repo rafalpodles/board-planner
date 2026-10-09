@@ -29,11 +29,13 @@ echo "== a backup uploads, reads back, and lands under hourly/"
 run bp965-backup backup.sh
 [ "$(run bp965-backup restore.sh list | grep -c '^hourly/')" = 1 ] || fail "no hourly object"
 
-echo "== an upload that does not read back is a failed backup"
+echo "== an upload that does not read back as it was sent is a failed backup, whether cut short or changed in the middle"
 shim=$(mktemp -d)
-printf '#!/bin/sh\nif [ "$1" = cat ]; then /usr/bin/rclone "$@" | head -c 200; else exec /usr/bin/rclone "$@"; fi\n' > "$shim/rclone"
-chmod +x "$shim/rclone"
-docker run --rm --network $net "${env_args[@]}" -v "$shim:/shim" -e PATH="/shim:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" -e BACKUP_STAMP=2026-12-15T05 bp965-backup backup.sh >/dev/null 2>&1 && fail "a truncated read-back passed"
+for fault in 'head -c 200' '{ head -c 100; printf X; tail -c +102; }'; do
+  printf '#!/bin/sh\nif [ "$1" = cat ]; then /usr/bin/rclone "$@" | (%s); else exec /usr/bin/rclone "$@"; fi\n' "$fault" > "$shim/rclone"
+  chmod +x "$shim/rclone"
+  docker run --rm --network $net "${env_args[@]}" -v "$shim:/shim" -e PATH="/shim:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" -e BACKUP_STAMP=2026-12-15T05 bp965-backup backup.sh >/dev/null 2>&1 && fail "a changed read-back passed: $fault"
+done
 rm -rf "$shim"
 
 echo "== at midnight it keeps a daily copy, and on the first of the month a monthly one"
@@ -41,8 +43,10 @@ run -e BACKUP_STAMP=2026-11-01T00 bp965-backup backup.sh >/dev/null
 list=$(run bp965-backup restore.sh list)
 echo "$list" | grep -q '^daily/2026-11-01' || fail "no daily copy"
 echo "$list" | grep -q '^monthly/2026-11' || fail "no monthly copy"
-run -e BACKUP_STAMP=2026-11-02T00 bp965-backup backup.sh >/dev/null
-run bp965-backup restore.sh list | grep -q '^monthly/2026-11-02' && fail "a monthly copy on the second"
+run -e BACKUP_STAMP=2026-12-02T00 bp965-backup backup.sh >/dev/null
+list=$(run bp965-backup restore.sh list)
+echo "$list" | grep -q '^daily/2026-12-02' || fail "no daily copy on the second"
+echo "$list" | grep -q '^monthly/2026-12' && fail "a monthly copy on the second"
 
 echo "== it restores into a scratch database with the same documents, and refuses to restore over the source"
 out=$(run bp965-backup restore.sh hourly/$(run bp965-backup restore.sh list | grep '^hourly/' | head -1 | cut -d/ -f2) mongodb://bp965-scratch:27017)
