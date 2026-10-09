@@ -2,6 +2,10 @@ import { ENTITLEMENT_GRACE_MS } from "./entitlements";
 
 export const PLAN_WARNING_DAYS = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;
+// A subscription's key ends with its day, and Stripe takes the renewal's payment some time after the period ends (it holds
+// the invoice open for about an hour first): a renewing key that has just run out is a renewal on its way, not a payment
+// that failed. Only a whole day past its end is told as one.
+export const RENEWAL_SETTLE_MS = DAY_MS;
 
 export type PlanNotice =
   | { kind: "free" }
@@ -20,7 +24,10 @@ export function planNotice(
   if (Number.isNaN(endsAt)) return { kind: "pro" };
   // The server has already put an ended trial, or a cancelled subscription, on Free; a client whose clock runs ahead must agree
   if (now > endsAt && (plan.trial || plan.subscription === "ending")) return { kind: "free" };
+  // The server has put whatever is past its grace on Free; a client whose clock runs ahead must agree
+  if (now > endsAt + ENTITLEMENT_GRACE_MS) return { kind: "free" };
   if (now > endsAt) {
+    if (plan.subscription === "renewing" && now - endsAt < RENEWAL_SETTLE_MS) return { kind: "pro" };
     return { kind: "grace", endedAt: plan.planEndsAt!, graceEndsAt: new Date(endsAt + ENTITLEMENT_GRACE_MS).toISOString(), paymentFailed: plan.subscription === "renewing" };
   }
   const daysLeft = Math.ceil((endsAt - now) / DAY_MS);

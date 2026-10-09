@@ -77,6 +77,8 @@ function Notice({ verdict, daysLeft, expiresAt, graceEndsAt, trial, subscription
   trial?: boolean;
   subscription?: "renewing" | "ending" | null;
 }) {
+  // The key ends with its UTC day and the renewal is paid some time after the period ends: that day is the renewal's, not a failure
+  if (verdict === "grace" && subscription === "renewing" && daysLeft >= -1) return null;
   if (verdict === "grace" && subscription === "renewing") {
     return (
       <p role="alert" className="mb-4 rounded-lg border border-danger p-4 text-sm text-danger" data-testid="licence-warning">

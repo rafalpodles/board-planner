@@ -130,6 +130,15 @@ describe("LicenceDetails", () => {
       expect(container.textContent).not.toMatch(/Renew it/);
     });
 
+    it("says nothing on the day after its end, which is the renewal's to be paid, and a payment failed from the day after", () => {
+      const settling = render(<LicenceDetails licence={valid({ verdict: "grace", subscription: "renewing", daysLeft: -1 })} />);
+      expect(screen.queryByTestId("licence-warning")).toBeNull();
+      settling.unmount();
+
+      render(<LicenceDetails licence={valid({ verdict: "grace", subscription: "renewing", daysLeft: -2 })} />);
+      expect(screen.getByTestId("licence-warning").textContent).toMatch(/^The last payment failed/);
+    });
+
     it("says a payment failed, with the days that are left, when a renewing one has run past its end", () => {
       render(<LicenceDetails licence={valid({ verdict: "grace", subscription: "renewing", daysLeft: -2 })} />);
 

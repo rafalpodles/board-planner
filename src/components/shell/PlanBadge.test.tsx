@@ -144,6 +144,14 @@ describe("PlanBadge (BP-930)", () => {
       expect(screen.queryByTestId("plan-badge-action")).toBeNull();
     });
 
+    it("that ended half an hour ago is a renewal on its way, and says nothing is wrong", () => {
+      state.organisation = { plan: "pro", planEndsAt: inDays(-30 / 1440), subscription: "renewing" };
+      render(<PlanBadge compact={false} />);
+
+      expect(screen.getByTestId("plan-badge-detail").textContent).toBe("Plan active");
+      expect(screen.queryByTestId("plan-badge-action")).toBeNull();
+    });
+
     it("that did not renew says the payment failed and how many days of grace are left, and offers to update the payment", () => {
       state.organisation = { plan: "pro", planEndsAt: inDays(-3), subscription: "renewing" };
       render(<PlanBadge compact={false} />);

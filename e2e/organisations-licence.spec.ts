@@ -310,7 +310,16 @@ test.describe("BP-983: the key of a subscription", () => {
     await expect(page.getByTestId("plan-badge-detail")).toHaveText("Free plan");
   });
 
-  test("a renewing one that is a few days past its end is in force, where a cancelled one is not", async ({ request }) => {
+  test("a renewal on its way is not a failed payment: a key that ended an hour ago says nothing is wrong", async ({ page, request }) => {
+    expect((await push(request, ACME, keyOf(-1 / 24, "renewing")).send()).status()).toBe(200);
+    expect(await planOf(request, ACME)).toBe("pro");
+    await openApp(page);
+
+    await expect(page.getByTestId("plan-badge-detail")).toHaveText("Plan active");
+    await expect(page.getByTestId("plan-badge-action")).toHaveCount(0);
+  });
+
+  test("a renewing one that is a few days past its end is still in force: a payment that failed has its 14 days", async ({ request }) => {
     expect((await push(request, ACME, keyOf(-3, "renewing")).send()).status()).toBe(200);
     expect(await planOf(request, ACME)).toBe("pro");
   });

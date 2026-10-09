@@ -57,6 +57,22 @@ describe("planNotice (BP-930)", () => {
       expect(planNotice({ plan: "pro", planEndsAt: day(-3), subscription: "ending" }, NOW)).toEqual({ kind: "free" });
     });
 
+    it("that has just run out is a renewal on its way for a day, and a payment that failed after that", () => {
+      const at = (ago: number) => planNotice({ plan: "pro", planEndsAt: day(-ago), subscription: "renewing" }, NOW);
+
+      expect(at(30 / 1440)).toEqual({ kind: "pro" });
+      expect(at(0.99)).toEqual({ kind: "pro" });
+      expect(at(1.01)).toMatchObject({ kind: "grace", paymentFailed: true });
+      // Only a subscription that renews gets the day: an operator's key is in grace the moment it ends
+      expect(planNotice({ plan: "pro", planEndsAt: day(-30 / 1440) }, NOW)).toMatchObject({ kind: "grace", paymentFailed: false });
+    });
+
+    it("is Free once its grace is over, as the server has it, whoever issued the key", () => {
+      expect(planNotice({ plan: "pro", planEndsAt: day(-14.01), subscription: "renewing" }, NOW)).toEqual({ kind: "free" });
+      expect(planNotice({ plan: "pro", planEndsAt: day(-14.01) }, NOW)).toEqual({ kind: "free" });
+      expect(planNotice({ plan: "pro", planEndsAt: day(-13.9), subscription: "renewing" }, NOW)).toMatchObject({ kind: "grace" });
+    });
+
     it("leaves a trial as it was, whatever else is passed", () => {
       expect(planNotice({ plan: "pro", planEndsAt: day(5), trial: true, subscription: null }, NOW)).toMatchObject({ kind: "ending", daysLeft: 5, cancelled: false });
     });
