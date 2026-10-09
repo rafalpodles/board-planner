@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/Input";
 import { LoadFailed } from "@/components/ui/LoadFailed";
 import { useToast } from "@/components/ui/Toast";
 import { LicenceDetails, type LicenceSummary } from "@/components/settings/LicenceDetails";
+import { Subscription } from "@/components/settings/Subscription";
 
 export default function OrganisationSettingsPage() {
   const api = useApi();
@@ -23,9 +24,11 @@ export default function OrganisationSettingsPage() {
   const [licence, setLicence] = useState<LicenceSummary | null>(null);
   const [licenceFailed, setLicenceFailed] = useState(false);
 
+  // The name, not the summary: the summary is read again while a payment is followed, and an unsaved edit stays
+  const organisationName = organisation?.name;
   useEffect(() => {
-    if (organisation) setName(organisation.name);
-  }, [organisation]);
+    if (organisationName !== undefined) setName(organisationName);
+  }, [organisationName]);
 
   const loadLicence = useCallback(async () => {
     setLicenceFailed(false);
@@ -37,9 +40,11 @@ export default function OrganisationSettingsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Read again when the plan changes under the page, as it does when a payment is followed
+  const planKey = `${organisation?.plan}|${organisation?.planEndsAt}`;
   useEffect(() => {
     if (!authLoading && isAdmin) void loadLicence();
-  }, [authLoading, isAdmin, loadLicence]);
+  }, [authLoading, isAdmin, loadLicence, planKey]);
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -126,6 +131,7 @@ export default function OrganisationSettingsPage() {
               Read from <code>LICENCE_KEY</code> in the environment. To change it, set the variable and restart.
             </p>
           )}
+          {organisation.cloud && <Subscription />}
           {licenceFailed ? (
             <LoadFailed
               testId="licence-settings-error"

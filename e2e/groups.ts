@@ -146,6 +146,7 @@ export const GROUPS = {
     "organisations-licence.spec.ts",
     "organisations-ai-keys.spec.ts",
     "organisations-licence-pull.spec.ts",
+    "organisations-billing.spec.ts",
     "organisations-default-host.spec.ts",
     "organisations-platform.spec.ts",
     "organisations-life-cycle.spec.ts",

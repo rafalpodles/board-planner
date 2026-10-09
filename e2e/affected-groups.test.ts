@@ -43,6 +43,10 @@ describe("computeAffectedGroups", () => {
     expect(computeAffectedGroups(["src/app/api/admin/licence/route.ts"])).toEqual(["people"]);
   });
 
+  it("sends the billing routes to the group whose spec drives them (BP-676)", () => {
+    expect(computeAffectedGroups(["src/app/api/admin/billing/checkout/route.ts"])).toEqual(["people"]);
+  });
+
   it("orders the result canonically, not by discovery order", () => {
     // src/app/login/ (-> people) is discovered before src/components/kanban/ (-> board) here,
     // but board comes before people in GROUP_NAMES.
