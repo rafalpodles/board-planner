@@ -91,7 +91,7 @@ export function parseViewState(
   };
 }
 
-type StoredView = Pick<ISavedView, "owner" | "shared"> & { owner: { toString(): string } };
+type StoredView = { owner: { toString(): string }; shared: boolean };
 
 export function mayEditView(view: StoredView, userId: string, isAdmin: boolean): boolean {
   if (view.owner.toString() === userId) return true;
