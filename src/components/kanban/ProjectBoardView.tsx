@@ -33,6 +33,9 @@ interface ProjectBoardViewProps {
   pinViewMode?: "board" | "list";
 }
 
+const inGroupHeader = (el: EventTarget | null) =>
+  !!(el as HTMLElement | null)?.closest?.('[data-testid="list-group-header"]');
+
 export function ProjectBoardView({
   board,
   readOnly = false,
@@ -160,7 +163,9 @@ export function ProjectBoardView({
     const group = groups.find((g) => g.key === key);
     if (group && !collapsedGroups.has(key)) {
       const hidden = new Set(group.tasks.map((t) => t._id));
-      setSelectedTasks((prev) => new Set([...prev].filter((id) => !hidden.has(id))));
+      setSelectedTasks((prev) =>
+        [...prev].some((id) => hidden.has(id)) ? new Set([...prev].filter((id) => !hidden.has(id))) : prev
+      );
     }
     setCollapsedGroups((prev) => {
       const next = new Set(prev);
@@ -215,6 +220,9 @@ export function ProjectBoardView({
       }
       // J/K navigation in list view — the board draws no indicator for focusedTaskIndex (BP-544)
       const isListView = viewMode === "list";
+      if ((e.key === "j" || e.key === "k") && noMod && isListView && inGroupHeader(document.activeElement)) {
+        (document.activeElement as HTMLElement).blur();
+      }
       if (e.key === "j" && noMod && isListView) {
         e.preventDefault();
         setFocusedTaskIndex((prev) => {
@@ -228,7 +236,7 @@ export function ProjectBoardView({
         setFocusedTaskIndex((prev) => Math.max(prev - 1, 0));
         return;
       }
-      if (e.key === "Enter" && noMod && isListView && !(e.target as HTMLElement | null)?.closest("button, a") && focusedTaskIndex >= 0 && focusedTaskIndex < listTasks.length) {
+      if (e.key === "Enter" && noMod && isListView && !inGroupHeader(e.target) && focusedTaskIndex >= 0 && focusedTaskIndex < listTasks.length) {
         e.preventDefault();
         const task = listTasks[focusedTaskIndex];
         router.push(taskPath(projectId, task.taskNumber));

@@ -472,7 +472,7 @@ export function ListView({
                             style={{ backgroundColor: group.color }}
                           />
                         )}
-                        <span className="max-w-[24rem] truncate font-semibold" title={group.label}>
+                        <span className="max-w-[min(24rem,60vw)] truncate font-semibold" title={group.label}>
                           {group.label}
                         </span>
                         <span data-testid="list-group-count" className="text-text-muted">

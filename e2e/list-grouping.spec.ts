@@ -128,7 +128,7 @@ test("priority groups carry their headers and counts, in a stable order", async 
   });
 
   await test.step("grouping by category follows the project's own order", async () => {
-    await put(request, DECOY_TASK_ID, { category: "doc" });
+    await put(request, DECOY_TASK_ID, { category: "idea" });
     await put(request, HELD_TASK_ID, { category: "bug" });
     await page.reload();
     await expect(page.locator("table")).toBeVisible();
@@ -136,9 +136,9 @@ test("priority groups carry their headers and counts, in a stable order", async 
 
     await expect(headers(page)).toHaveCount(3);
     await expect(headers(page).nth(0)).toContainText("bug");
-    await expect(headers(page).nth(1)).toContainText("doc");
-    await expect(headers(page).nth(2)).toContainText("user-story");
-    await expect(headers(page).nth(2).getByTestId("list-group-count")).toHaveText("2");
+    await expect(headers(page).nth(1)).toContainText("user-story");
+    await expect(headers(page).nth(1).getByTestId("list-group-count")).toHaveText("2");
+    await expect(headers(page).nth(2)).toContainText("idea");
   });
 });
 
@@ -174,7 +174,7 @@ test("J and K walk the rows in the order they are drawn and skip a collapsed gro
   });
 
   await test.step("j visits each row top to bottom", async () => {
-    await page.locator("body").click({ position: { x: 5, y: 5 } });
+    await groupSelect(page).evaluate((el) => (el as HTMLElement).blur());
     const visited: (string | null)[] = [];
     for (let i = 0; i < order.length; i++) {
       await page.keyboard.press("j");
@@ -213,12 +213,26 @@ test("Enter opens the row that is focused, which is the one drawn there and not 
   await expect(headers(page)).toHaveCount(3);
   const order = await drawn(page);
   expect(order[0]).not.toBe("TP-1");
-  await page.locator("body").click({ position: { x: 5, y: 5 } });
+  await groupSelect(page).evaluate((el) => (el as HTMLElement).blur());
 
   await page.keyboard.press("j");
   await page.keyboard.press("j");
   await expect.poll(() => focusedKey(page)).toBe(order[1]);
   await page.keyboard.press("k");
+  await expect.poll(() => focusedKey(page)).toBe(order[0]);
+  await page.keyboard.press("Enter");
+
+  await expect(page).toHaveURL(new RegExp(`/tasks/${order[0].replace("TP-", "")}$`));
+});
+
+test("after a click on a group header, J then Enter still opens the focused task", async ({ page }) => {
+  await openList(page);
+  await groupBy(page, "Group: Status");
+  await expect(headers(page)).toHaveCount(3);
+  const order = await drawn(page);
+
+  await header(page, "In Review").getByRole("button").click();
+  await page.keyboard.press("j");
   await expect.poll(() => focusedKey(page)).toBe(order[0]);
   await page.keyboard.press("Enter");
 
@@ -347,7 +361,7 @@ test("Enter on a group header folds it instead of opening the focused task", asy
   await sortOutPriorities(request);
   await openList(page);
   await groupBy(page, "Group: Priority");
-  await page.locator("body").click({ position: { x: 5, y: 5 } });
+  await groupSelect(page).evaluate((el) => (el as HTMLElement).blur());
   await page.keyboard.press("j");
   await expect.poll(() => focusedKey(page)).not.toBeNull();
   const url = page.url();
@@ -358,7 +372,8 @@ test("Enter on a group header folds it instead of opening the focused task", asy
 
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
   await expect(taskRows(page)).toHaveCount(2);
-  expect(page.url()).toBe(url);
+  await page.waitForTimeout(500);
+  await expect(page).toHaveURL(url);
 });
 
 test("folding a group drops its tasks from the selection, so a bulk action cannot reach hidden rows", async ({ page, request }) => {
@@ -368,6 +383,10 @@ test("folding a group drops its tasks from the selection, so a bulk action canno
 
   await page.getByRole("button", { name: /^Select/ }).click();
   await taskRows(page).first().click();
+  await expect(page.getByRole("button", { name: "Select (1)" })).toBeVisible();
+
+  await header(page, "Medium").getByRole("button").click();
+  await expect(taskRows(page)).toHaveCount(2);
   await expect(page.getByRole("button", { name: "Select (1)" })).toBeVisible();
 
   await header(page, "Urgent").getByRole("button").click();
