@@ -188,7 +188,7 @@ describe("runPmTurn's AI allowance", () => {
 
     const result = await turn(NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS);
 
-    expect(result).toMatchObject({ ok: false, error: expect.stringMatching(/15,000,000 of 15,000,000.*1 November 2026/) });
+    expect(result).toMatchObject({ ok: false, message: null, error: expect.stringMatching(/15,000,000 of 15,000,000.*1 November 2026/) });
     expect(chatCompletion).not.toHaveBeenCalled();
   });
 

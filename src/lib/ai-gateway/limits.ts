@@ -65,6 +65,6 @@ export async function budgetOf(db: ScopedDb): Promise<Budget | null> {
   return {
     scope: trial ? "trial" : "month",
     limit,
-    dailyCeiling: percent > 0 ? Math.max(1, Math.ceil((limit * Math.min(percent, 100)) / 100)) : 0,
+    dailyCeiling: percent > 0 ? Math.ceil((limit * Math.min(percent, 100)) / 100) : 0,
   };
 }
