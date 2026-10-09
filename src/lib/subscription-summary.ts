@@ -46,7 +46,8 @@ function planPricesOf(value: unknown): PlanPrices | null {
   const v = value as Record<string, unknown>;
   const base = moneyOf(v.base, "unitAmount");
   const member = moneyOf(v.member, "unitAmount");
-  return base && member && base.currency === member.currency ? { base, member } : null;
+  const priced = (money: Money | null): money is Money => !!money && Number.isInteger(money.amount) && money.amount >= 0;
+  return priced(base) && priced(member) && base.currency === member.currency ? { base, member } : null;
 }
 
 /** What the licence service says a checkout would charge, or nothing unless every price is there and they are all in one currency */

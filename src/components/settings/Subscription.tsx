@@ -240,7 +240,7 @@ export function Subscription() {
           {billing.offer && (
             <div className="space-y-1 text-sm">
               <p data-testid="subscription-includes">
-                <span className="font-medium">Pro</span> for the whole organisation: {billing.offer.includedMembers} members included, then {priceLabel(billing.offer[interval].member)} per member per {interval}.
+                <span className="font-medium">Pro</span> for the whole organisation: {billing.offer.includedMembers} {billing.offer.includedMembers === 1 ? "member" : "members"} included, then {priceLabel(billing.offer[interval].member)} per member per {interval}.
               </p>
               <p className="text-xs text-text-muted">Prices are in {billing.offer.month.base.currency.toUpperCase()}. Tax is added at checkout where it applies.</p>
             </div>

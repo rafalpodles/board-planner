@@ -436,6 +436,15 @@ describe("Subscription", () => {
       expect(screen.queryByText(/launch price/i)).toBeNull();
     });
 
+    it("shows no saving when a year costs more than twelve months, and says 1 member, not 1 members", async () => {
+      m.api.get.mockResolvedValue(offered({ includedMembers: 1, year: { base: usd(35000), member: usd(3000) } }));
+      render(<Subscription />);
+
+      expect((await screen.findByTestId("subscription-price-year")).textContent).toBe("$350 per year");
+      expect(screen.queryByTestId("subscription-saving")).toBeNull();
+      expect(screen.getByTestId("subscription-includes").textContent).toContain("1 member included");
+    });
+
     it("shows the cents a price has, and only those", async () => {
       m.api.get.mockResolvedValue(offered({ month: { base: usd(2950), member: usd(325) } }));
       render(<Subscription />);

@@ -66,6 +66,8 @@ describe("offerSummary", () => {
     ["a price with no amount", offer({ month: { base: usd(2900), member: { currency: "usd" } } })],
     ["a member price in another currency than its base", offer({ month: { base: usd(2900), member: usd(300, "eur") } })],
     ["a year in another currency than the month", offer({ year: { base: usd(29000, "eur"), member: usd(3000, "eur") } })],
+    ["a negative price", offer({ month: { base: usd(-2900), member: usd(300) } })],
+    ["a price that is not a whole number of cents", offer({ year: { base: usd(29000.5), member: usd(3000) } })],
     ["no members included", offer({ includedMembers: 0 })],
     ["a fraction of a member included", offer({ includedMembers: 2.5 })],
     ["members included as text", offer({ includedMembers: "10" })],

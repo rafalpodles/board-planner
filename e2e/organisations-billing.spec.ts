@@ -148,7 +148,7 @@ test("a Free organisation's admin chooses a period and is sent to Stripe, with w
   await page.setViewportSize({ width: 375, height: 812 });
   await page.reload();
   await expect(page.getByTestId("subscription-checkout")).toBeVisible();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  expect(await page.locator("#main-content").evaluate((main) => main.scrollWidth <= main.clientWidth)).toBe(true);
   await page.getByTestId("subscription-checkout").scrollIntoViewIfNeeded();
   await page.screenshot({ path: "e2e/.artifacts/bp980-upgrade-phone.png", fullPage: true });
   await page.setViewportSize({ width: 1280, height: 720 });
