@@ -1,6 +1,7 @@
 import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 import { ADMIN_AUTH } from "./api";
 import {
+  DECOY_TASK_ID,
   FINISHED_TASK_ID,
   FINISHED_TASK_TITLE,
   HELD_TASK_ID,
@@ -59,6 +60,17 @@ async function drawn(page: Page): Promise<string[]> {
   );
 }
 
+/** Every body row top to bottom: `H:<group key>` for a header, the task key for a row. */
+async function layout(page: Page): Promise<string[]> {
+  return page.locator("table tbody tr").evaluateAll((els) =>
+    els.map((el) =>
+      el.getAttribute("data-testid") === "list-group-header"
+        ? `H:${el.getAttribute("data-group-key")}`
+        : (el.textContent?.match(/TP-\d+/)?.[0] ?? "?")
+    )
+  );
+}
+
 async function focusedKey(page: Page): Promise<string | null> {
   const focused = page.locator("table tbody tr.ring-primary");
   return (await focused.count()) === 1
@@ -68,6 +80,7 @@ async function focusedKey(page: Page): Promise<string | null> {
 
 test("priority groups carry their headers and counts, in a stable order", async ({ page, request }) => {
   await sortOutPriorities(request);
+  await put(request, FINISHED_TASK_ID, { priority: "high" });
   await openList(page);
 
   await test.step("the premise: ungrouped, no headers", async () => {
@@ -78,12 +91,21 @@ test("priority groups carry their headers and counts, in a stable order", async 
   await test.step("grouping by priority draws urgent first, then medium", async () => {
     await groupBy(page, "Group: Priority");
 
-    await expect(headers(page)).toHaveCount(2);
+    await expect(headers(page)).toHaveCount(3);
     await expect(headers(page).nth(0)).toContainText("Urgent");
     await expect(headers(page).nth(0).getByTestId("list-group-count")).toHaveText("2");
-    await expect(headers(page).nth(1)).toContainText("Medium");
-    await expect(headers(page).nth(1).getByTestId("list-group-count")).toHaveText("2");
-    expect((await drawn(page)).slice(0, 2).sort()).toEqual(["TP-1", "TP-3"]);
+    await expect(headers(page).nth(1)).toContainText("High");
+    await expect(headers(page).nth(1).getByTestId("list-group-count")).toHaveText("1");
+    await expect(headers(page).nth(2)).toContainText("Medium");
+    await expect(headers(page).nth(2).getByTestId("list-group-count")).toHaveText("1");
+  });
+
+  await test.step("each header sits directly above its own rows", async () => {
+    const seen = await layout(page);
+    expect(seen).toHaveLength(7);
+    expect(seen[0]).toBe("H:v:urgent");
+    expect(seen.slice(1, 3).sort()).toEqual(["TP-1", "TP-3"]);
+    expect(seen.slice(3)).toEqual(["H:v:high", "TP-4", "H:v:medium", "TP-2"]);
   });
 
   await test.step("the unassigned tasks form a none group after the people", async () => {
@@ -93,6 +115,7 @@ test("priority groups carry their headers and counts, in a stable order", async 
     await expect(headers(page).nth(1)).toContainText("Unassigned");
     await expect(headers(page).nth(1).getByTestId("list-group-count")).toHaveText("3");
     await expect(taskRows(page)).toHaveCount(4);
+    expect((await layout(page))[0]).toBe("H:v:member");
   });
 
   await test.step("grouping by status follows the columns, one group per column in use", async () => {
@@ -104,11 +127,18 @@ test("priority groups carry their headers and counts, in a stable order", async 
     await expect(header(page, "Done")).toHaveCount(0);
   });
 
-  await test.step("grouping by category", async () => {
+  await test.step("grouping by category follows the project's own order", async () => {
+    await put(request, DECOY_TASK_ID, { category: "doc" });
+    await put(request, HELD_TASK_ID, { category: "bug" });
+    await page.reload();
+    await expect(page.locator("table")).toBeVisible();
     await groupBy(page, "Group: Category");
 
-    await expect(headers(page)).toHaveCount(1);
-    await expect(headers(page).first()).toContainText("user-story");
+    await expect(headers(page)).toHaveCount(3);
+    await expect(headers(page).nth(0)).toContainText("bug");
+    await expect(headers(page).nth(1)).toContainText("doc");
+    await expect(headers(page).nth(2)).toContainText("user-story");
+    await expect(headers(page).nth(2).getByTestId("list-group-count")).toHaveText("2");
   });
 });
 
@@ -177,6 +207,24 @@ test("J and K walk the rows in the order they are drawn and skip a collapsed gro
   });
 });
 
+test("Enter opens the row that is focused, which is the one drawn there and not the one at that place in the flat list", async ({ page }) => {
+  await openList(page);
+  await groupBy(page, "Group: Status");
+  await expect(headers(page)).toHaveCount(3);
+  const order = await drawn(page);
+  expect(order[0]).not.toBe("TP-1");
+  await page.locator("body").click({ position: { x: 5, y: 5 } });
+
+  await page.keyboard.press("j");
+  await page.keyboard.press("j");
+  await expect.poll(() => focusedKey(page)).toBe(order[1]);
+  await page.keyboard.press("k");
+  await expect.poll(() => focusedKey(page)).toBe(order[0]);
+  await page.keyboard.press("Enter");
+
+  await expect(page).toHaveURL(new RegExp(`/tasks/${order[0].replace("TP-", "")}$`));
+});
+
 test("every group collapsed still leaves the headers to open them again", async ({ page, request }) => {
   await sortOutPriorities(request);
   await openList(page);
@@ -214,6 +262,7 @@ test("the choice survives a reload and is dropped when its field is archived", a
   await openList(page);
 
   await test.step("a built-in choice comes back after a reload", async () => {
+    await page.getByRole("button", { name: "Sort by Title", exact: true }).click();
     await groupBy(page, "Group: Priority");
     await expect(headers(page)).toHaveCount(1);
 
@@ -242,13 +291,18 @@ test("the choice survives a reload and is dropped when its field is archived", a
 
     await page.reload();
     await expect(page.locator("table")).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: "Sort by Title" })).toHaveAttribute(
+      "aria-sort",
+      "ascending"
+    );
     await expect(groupSelect(page)).toHaveValue("");
+    await expect(groupSelect(page).locator("option", { hasText: LIST_DROPDOWN_FIELD_NAME })).toHaveCount(0);
     await expect(headers(page)).toHaveCount(0);
     await expect(taskRows(page)).toHaveCount(4);
   });
 });
 
-test("a task on a deleted column lands in an unfiled group instead of vanishing", async ({ page }) => {
+test("a task whose column is gone lands in an unfiled group instead of vanishing", async ({ page }) => {
   await parkTaskOnMissingColumn(FINISHED_TASK_ID);
   await openList(page);
   await expect(taskRows(page)).toHaveCount(4);
@@ -274,12 +328,19 @@ test("the grouped list on a phone keeps its headers readable with no page scroll
   );
   expect(overflow).toBeLessThanOrEqual(0);
 
-  const [row, rowHeader] = await Promise.all([
-    taskRows(page).first().boundingBox(),
-    headers(page).first().getByRole("button").boundingBox(),
-  ]);
+  const rowHeader = await headers(page).first().getByRole("button").boundingBox();
   expect(rowHeader!.height).toBeGreaterThanOrEqual(32);
-  expect(row).not.toBeNull();
+
+  await test.step("panning the table sideways leaves the group name where it can be read", async () => {
+    await page.locator("table").evaluate((table) => {
+      const scroller = table.parentElement!;
+      scroller.scrollLeft = scroller.scrollWidth;
+    });
+    await expect
+      .poll(() => page.locator("table").evaluate((t) => t.parentElement!.scrollLeft))
+      .toBeGreaterThan(0);
+    await expect(headers(page).first().getByText("Urgent")).toBeInViewport();
+  });
 });
 
 test("Enter on a group header folds it instead of opening the focused task", async ({ page, request }) => {
@@ -328,4 +389,39 @@ test("a field with a very long name does not push the toolbar past a phone scree
   expect(overflow).toBeLessThanOrEqual(0);
   const box = await groupSelect(page).boundingBox();
   expect(box!.x + box!.width).toBeLessThanOrEqual(390);
+});
+
+test("switching what the list is grouped by opens every group again", async ({ page, request }) => {
+  await seedListVisibleDropdownField();
+  await put(request, HELD_TASK_ID, { customFieldValues: { [String(LIST_DROPDOWN_FIELD_ID)]: "aa-ui" } });
+  await openList(page);
+
+  await groupBy(page, "Group: Assignee");
+  await header(page, "Unassigned").getByRole("button").click();
+  await expect(taskRows(page)).toHaveCount(0);
+
+  await groupBy(page, `Group: ${LIST_DROPDOWN_FIELD_NAME}`);
+
+  await expect(header(page, `No ${LIST_DROPDOWN_FIELD_NAME}`).getByRole("button")).toHaveAttribute(
+    "aria-expanded",
+    "true"
+  );
+  await expect(taskRows(page)).toHaveCount(4);
+});
+
+test("the grouping is still there after a look at the board", async ({ page, request }) => {
+  await sortOutPriorities(request);
+  await openList(page);
+  await groupBy(page, "Group: Priority");
+  await expect(headers(page)).toHaveCount(2);
+
+  await page.getByRole("button", { name: "Board", exact: true }).click();
+  await expect(page.getByTestId("column-in_progress")).toBeVisible();
+  await expect(groupSelect(page)).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByTestId("column-in_progress")).toBeVisible();
+  await page.getByRole("button", { name: "List", exact: true }).click();
+
+  await expect(groupSelect(page)).toHaveValue("priority");
+  await expect(headers(page)).toHaveCount(2);
 });

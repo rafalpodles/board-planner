@@ -554,3 +554,77 @@ describe("ListView and an archived task", () => {
     expect(screen.getByText(tasks[0].title).className).toContain("text-text-muted");
   });
 });
+
+describe("ListView grouped", () => {
+  const second = { ...tasks[0], _id: "t2", taskNumber: 192, priority: "urgent" } as ApiTask;
+  const groups = [
+    { key: "v:urgent", label: "Urgent", tasks: [second] },
+    { key: "v:medium", label: "Medium", tasks: [tasks[0]] },
+  ];
+
+  function renderGrouped(over: Partial<React.ComponentProps<typeof ListView>> = {}) {
+    return renderList({
+      tasks: [second, tasks[0]],
+      groups,
+      collapsedGroups: new Set(),
+      onToggleGroup: () => {},
+      onReorder: () => {},
+      ...over,
+    });
+  }
+
+  const table = () => screen.getByRole("table");
+  const headerRows = () => screen.getAllByTestId("list-group-header");
+
+  it("spans each group header across every column, with and without the selection column", () => {
+    renderGrouped();
+    const columns = table().querySelectorAll("thead th").length;
+    expect(headerRows()[0].querySelector("td")!.colSpan).toBe(columns);
+
+    cleanup();
+    renderGrouped({ selectionMode: true });
+    expect(headerRows()[0].querySelector("td")!.colSpan).toBe(
+      table().querySelectorAll("thead th").length
+    );
+  });
+
+  it("draws a header before the rows of its group, in the order given", () => {
+    renderGrouped();
+    const order = [...table().querySelectorAll("tbody tr")].map((tr) =>
+      tr.getAttribute("data-testid") === "list-group-header"
+        ? `H:${tr.getAttribute("data-group-key")}`
+        : tr.textContent?.match(/CP-\d+/)?.[0]
+    );
+    expect(order).toEqual(["H:v:urgent", "CP-192", "H:v:medium", "CP-191"]);
+  });
+
+  it("says whether a group is open, and leaves out the rows of a folded one", () => {
+    renderGrouped({ collapsedGroups: new Set(["v:medium"]), tasks: [second] });
+    const [urgent, medium] = headerRows().map((h) => h.querySelector("button")!);
+    expect(urgent.getAttribute("aria-expanded")).toBe("true");
+    expect(medium.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("CP-191")).toBeNull();
+    expect(screen.getByText("CP-192")).toBeTruthy();
+  });
+
+  it("keeps the table and its headers when every group is folded", () => {
+    renderGrouped({ tasks: [], collapsedGroups: new Set(["v:urgent", "v:medium"]) });
+    expect(headerRows()).toHaveLength(2);
+  });
+
+  it("reports the group that was clicked", () => {
+    const onToggleGroup = vi.fn();
+    renderGrouped({ onToggleGroup });
+    act(() => headerRows()[1].querySelector("button")!.click());
+    expect(onToggleGroup).toHaveBeenCalledWith("v:medium");
+  });
+
+  it("offers no drag handle while grouped, and does when it is not", () => {
+    renderGrouped();
+    expect(screen.queryAllByLabelText(/^Reorder /)).toHaveLength(0);
+
+    cleanup();
+    renderList({ tasks: [second, tasks[0]], onReorder: () => {} });
+    expect(screen.queryAllByLabelText(/^Reorder /)).toHaveLength(2);
+  });
+});

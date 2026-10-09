@@ -57,10 +57,6 @@ export function sanitizeGroupBy(raw: unknown, customFields: ApiCustomField[] = [
   return groupByOptions(customFields).some((o) => o.value === raw) ? (raw as GroupBy) : "";
 }
 
-export function groupByLabel(groupBy: GroupBy, customFields: ApiCustomField[] = []): string {
-  return groupByOptions(customFields).find((o) => o.value === groupBy)?.label ?? "";
-}
-
 type Bucket = { key: string; label: string; color?: string; rank: number; tasks: ApiTask[] };
 
 const LAST = Number.MAX_SAFE_INTEGER;

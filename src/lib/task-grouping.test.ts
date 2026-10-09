@@ -37,8 +37,8 @@ const sizeField = {
   name: "Size",
   fieldType: "dropdown",
   options: [
-    { id: "s", value: "Small", color: "#0f0", order: 0 },
     { id: "l", value: "Large", color: "#f00", order: 1 },
+    { id: "s", value: "Small", color: "#0f0", order: 0 },
   ],
   archived: false,
   filterable: true,
@@ -91,6 +91,27 @@ describe("groupTasks", () => {
     expect(numbers(groups[1].tasks)).toEqual([2]);
   });
 
+  it("sorts people by the name shown, not by username, and falls back to the username without one", () => {
+    const tasks = [
+      task({ taskNumber: 1, assignee: person("aaa", "Zoe Zimmer") }),
+      task({ taskNumber: 2, assignee: person("zzz", "Amy Adams") }),
+      task({ taskNumber: 3, assignee: person("mid", "") }),
+    ];
+    expect(groupTasks(tasks, "assignee").map((g) => g.label)).toEqual(["Amy Adams", "mid", "Zoe Zimmer"]);
+  });
+
+  it("puts a task with no category in a none group after the project's own and the ones it lost", () => {
+    const categories = [{ _id: "1", name: "bug", color: "#222" }] as ApiProjectCategory[];
+    const tasks = [
+      task({ taskNumber: 1, category: "" }),
+      task({ taskNumber: 2, category: "retired" }),
+      task({ taskNumber: 3, category: "bug" }),
+    ];
+    const groups = groupTasks(tasks, "category", { categories });
+    expect(groups.map((g) => g.label)).toEqual(["bug", "retired", "No category"]);
+    expect(groups[2].key).toBe(NONE_GROUP);
+  });
+
   it("groups by assignee alphabetically by name with the unassigned group last", () => {
     const tasks = [
       task({ taskNumber: 1 }),
@@ -128,6 +149,7 @@ describe("groupTasks", () => {
     ];
     const groups = groupTasks(tasks, "field:f-size", { customFields: [sizeField] });
     expect(groups.map((g) => g.label)).toEqual(["Small", "Large", "No Size"]);
+    expect(groups.slice(0, 2).map((g) => g.color)).toEqual(["#0f0", "#f00"]);
     expect(numbers(groups[2].tasks)).toEqual([2, 4]);
   });
 

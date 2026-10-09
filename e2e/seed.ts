@@ -438,7 +438,7 @@ export async function seedCustomFields(values: Record<string, unknown> = {}) {
   await mongoose.disconnect();
 }
 
-/** What a column delete leaves behind: a task whose status names no column. Written straight to the row, since the API refuses it. */
+/** A task whose status names no column, the state the board must cope with. Written straight to the row, since the API refuses it. */
 export async function parkTaskOnMissingColumn(taskId: mongoose.Types.ObjectId, status = "removed_column") {
   const db = (await connect()).db!;
   await db.collection("tasks").updateOne({ _id: taskId }, { $set: { status } });
