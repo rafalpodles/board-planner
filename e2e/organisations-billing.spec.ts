@@ -307,6 +307,38 @@ test("a Pro organisation's people are told to the licence service when they chan
   expect(memberAsks().at(-1)!.body).toMatchObject({ members: 14 });
 });
 
+const idOf = async (username: string) => {
+  await mongoose.connect(E2E_MONGODB_URI);
+  try {
+    return String((await mongoose.connection.db!.collection("users").findOne({ organisation: ACME.organisation, username }))!._id);
+  } finally {
+    await mongoose.disconnect();
+  }
+};
+
+/** From inside the page, so the browser's own headers and cookie are on the request */
+const adminPut = (page: Page, path: string, body: unknown) =>
+  page.evaluate(async ({ path, body }) => (await fetch(path, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })).status, { path, body });
+
+test("a person who is deactivated stops being counted and one who is reactivated is counted again, at the next run", async ({ page, request }) => {
+  expect((await pushKey(request)).status()).toBe(200);
+  await addHeadcount(12, 3);
+  await open(page);
+  expect(await syncNow(request)).toMatchObject({ sent: 1 });
+  expect(memberAsks().at(-1)!.body).toMatchObject({ members: 13 });
+
+  const leaver = await idOf("crew0");
+  expect(await adminPut(page, `/api/users/${leaver}`, { deactivate: true })).toBe(200);
+  expect(await syncNow(request)).toMatchObject({ sent: 1 });
+  expect(memberAsks().at(-1)!.body).toMatchObject({ members: 12 });
+  expect(await storedSync()).toMatchObject({ members: 12 });
+
+  expect(await adminPut(page, `/api/users/${leaver}`, { reactivate: true })).toBe(200);
+  expect(await syncNow(request)).toMatchObject({ sent: 1 });
+  expect(memberAsks().at(-1)!.body).toMatchObject({ members: 13 });
+  expect(memberAsks()).toHaveLength(3);
+});
+
 test("a Free organisation is told to nobody, and a service that fails is asked again at the next run", async ({ request }) => {
   await addHeadcount(12, 0);
   expect(await syncNow(request)).toMatchObject({ skipped: 2, sent: 0 });
