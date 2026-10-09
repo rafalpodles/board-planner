@@ -6,6 +6,9 @@ import { RUN_ORGANISATIONS_SERVER } from "../playwright.config";
 import { signPlatformRequest } from "../src/lib/platform-request";
 import { E2E_PLATFORM_REQUEST_KEY } from "./licence-key";
 import { E2E_MONGODB_URI } from "./seed";
+import { SCOPED_MODELS } from "../src/lib/db-scope";
+import { NOT_EXPORTED } from "../src/lib/organisation-life-cycle";
+import { scopedModelNames } from "../src/lib/organisation-migration";
 import {
   ACME,
   GLOBEX,
@@ -15,6 +18,7 @@ import {
   asOrganisation,
   bearer,
   originOf,
+  seedOrganisationWork,
   seedTwoOrganisations,
   signInOn,
   workerHeaders,
@@ -96,6 +100,7 @@ const platformActions = () => withDb(async (db) => (await db.collection("platfor
 
 test.beforeEach(async ({ request }) => {
   await seedTwoOrganisations();
+  await seedOrganisationWork();
   expect((await request.post(`${ORGANISATIONS_API}/api/e2e/organisation-cache`, { headers: asOrganisation(ACME) })).status()).toBe(204);
 });
 
@@ -216,6 +221,40 @@ test.describe("BP-893: an organisation's life cycle", () => {
       .toBe(1);
   });
 
+  test("the export holds, model by model, exactly the rows the organisation has, those of its work and history included, and none of another's", async ({ request }) => {
+    const path = `${organisationPath(ACME)}/export`;
+    const response = await request.get(`${ORGANISATIONS_API}${path}`, {
+      headers: { host: PLATFORM_HOST, ...signPlatformRequest({ method: "GET", host: PLATFORM_HOST, path, body: new Uint8Array() }, E2E_PLATFORM_REQUEST_KEY) },
+    });
+    expect(response.status()).toBe(200);
+    const text = gunzipSync(await response.body()).toString("utf8");
+    const [, ...lines] = text.trim().split("\n").map((line) => EJSON.parse(line) as { collection: string; document: { _id: unknown } });
+    const exported = new Map<string, string[]>();
+    for (const row of lines) exported.set(row.collection, [...(exported.get(row.collection) ?? []), String(row.document._id)]);
+
+    const storedIds = new Map<string, string[]>();
+    await withDb(async (db) => {
+      for (const name of scopedModelNames()) {
+        const collection = (SCOPED_MODELS as Record<string, () => { collection: { name: string } }>)[name]().collection.name;
+        const rows = await db.collection(collection).find({ organisation: ACME.organisation }, { projection: { _id: 1 } }).toArray();
+        storedIds.set(collection, rows.map((row) => String(row._id)).sort());
+      }
+    });
+    for (const name of scopedModelNames()) {
+      if (Object.hasOwn(NOT_EXPORTED, name)) {
+        expect(exported.get(name) ?? [], `${name} is kept out of an export`).toEqual([]);
+        continue;
+      }
+      const collection = (SCOPED_MODELS as Record<string, () => { collection: { name: string } }>)[name]().collection.name;
+      const stored = storedIds.get(collection) ?? [];
+      expect((exported.get(name) ?? []).sort(), `${name}: the export against the ${collection} collection`).toEqual(stored);
+    }
+    // The bulk of an organisation is in it, which the comparison above would also accept if it were nowhere
+    for (const name of ["Task", "Comment", "Sprint", "ActivityLog", "ProjectAuditLog"]) expect(exported.get(name)?.length ?? 0, name).toBeGreaterThan(0);
+    expect(text).not.toContain(GLOBEX.organisation.toHexString());
+    expect(text).not.toContain("globex ");
+  });
+
   test("the operator can export a suspended organisation that can no longer sign in to take its own", async ({ request }) => {
     expect((await suspend(request, GLOBEX)).status()).toBe(200);
     const path = `${organisationPath(GLOBEX)}/export`;
@@ -251,8 +290,9 @@ test.describe("BP-893: an organisation's life cycle", () => {
 
     const dryRun = await remove(request, GLOBEX, "dryRun=1");
     expect(dryRun.status()).toBe(200);
-    expect((await dryRun.json()).counts).toMatchObject({ User: expect.any(Number), Project: 1, "uploads.files": 1 });
-    expect(await rowsNaming(GLOBEX)).not.toEqual({});
+    expect((await dryRun.json()).counts).toMatchObject({ User: expect.any(Number), Project: 1, "uploads.files": 1, Task: 2, Comment: 2, Sprint: 1, ActivityLog: 3, ProjectAuditLog: 1 });
+    // Its work and the history of it are there to be deleted, not only its board and its people
+    expect(Object.keys(await rowsNaming(GLOBEX))).toEqual(expect.arrayContaining(["tasks", "comments", "sprints", "activitylogs", "projectauditlogs"]));
 
     expect((await remove(request, GLOBEX, `confirm=${GLOBEX.slug}`)).status()).toBe(409);
     expect((await suspend(request, GLOBEX)).status()).toBe(200);
@@ -263,7 +303,7 @@ test.describe("BP-893: an organisation's life cycle", () => {
     expect((await remove(request, GLOBEX, "confirm=acme")).status()).toBe(400);
     const deleted = await remove(request, GLOBEX, `confirm=${GLOBEX.slug}`);
     expect(deleted.status(), await deleted.text()).toBe(200);
-    expect((await deleted.json()).counts).toMatchObject({ Project: 1, "uploads.files": 1 });
+    expect((await deleted.json()).counts).toMatchObject({ Project: 1, "uploads.files": 1, Task: 2, Comment: 2, Sprint: 1, ActivityLog: 3, ProjectAuditLog: 1 });
 
     expect(await rowsNaming(GLOBEX)).toEqual({});
     expect(await orphanChunks()).toBe(0);

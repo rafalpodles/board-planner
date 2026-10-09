@@ -190,3 +190,30 @@ export const workerHeaders = (who: OrganisationFixture) => ({
 
 export const oauthBearer = (who: OrganisationFixture) => ({ authorization: `Bearer ${who.oauthToken}` });
 
+// The work and history of an organisation, apart from seedTwoOrganisations so the specs that count tasks on the seeded board stay as they are (BP-952)
+export async function seedOrganisationWork(): Promise<void> {
+  const handle = await db();
+  const now = new Date();
+  for (const who of [ACME, GLOBEX]) {
+    const first = new mongoose.Types.ObjectId();
+    const second = new mongoose.Types.ObjectId();
+    const base = { organisation: who.organisation, createdAt: now, updatedAt: now };
+    const taskBase = { ...base, project: who.projectId, createdBy: who.adminId };
+    await handle.collection("tasks").insertMany([
+      { ...taskBase, _id: first, taskNumber: 1001, title: `${who.slug} first`, description: `${who.slug} description`, status: "todo", priority: "medium", checklist: [{ text: `${who.slug} criterion`, done: false }], relations: [], blockedBy: [], watchers: [] },
+      { ...taskBase, _id: second, taskNumber: 1002, title: `${who.slug} second`, description: "", status: "in_progress", priority: "high", checklist: [], relations: [{ task: first, type: "relates" }], blockedBy: [], watchers: [] },
+    ]);
+    await handle.collection("comments").insertMany([
+      { ...base, task: first, author: who.adminId, body: `${who.slug} comment one`, reactions: [] },
+      { ...base, task: second, author: who.adminId, body: `${who.slug} comment two`, reactions: [] },
+    ]);
+    await handle.collection("sprints").insertOne({ ...base, project: who.projectId, name: `${who.slug} sprint`, startDate: now, endDate: new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000), goal: "", status: "planned" });
+    await handle.collection("activitylogs").insertMany([
+      { ...base, task: first, user: who.adminId, action: "created", field: "", oldValue: "", newValue: "" },
+      { ...base, task: second, user: who.adminId, action: "created", field: "", oldValue: "", newValue: "" },
+      { ...base, task: second, user: who.adminId, action: "status_changed", field: "status", oldValue: "todo", newValue: "in_progress" },
+    ]);
+    await handle.collection("projectauditlogs").insertOne({ ...base, project: who.projectId, user: who.adminId, action: "settings_updated", detail: `${who.slug} board settings` });
+  }
+  await mongoose.disconnect();
+}
