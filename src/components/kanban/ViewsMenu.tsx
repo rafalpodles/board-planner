@@ -70,7 +70,7 @@ export function ViewsMenu({ projectId, projectRef, canShare, snapshot, onApply }
   }, [open, load]);
 
   useEffect(() => {
-    if (open) panelEl.current?.focus();
+    if (open) panelEl.current?.focus({ preventScroll: true });
   }, [open]);
 
   useEffect(() => {

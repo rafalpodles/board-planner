@@ -224,12 +224,15 @@ export function BoardFilters({
       // Dropped only when nobody could be given a task by that name and no task carries it:
       // the roster leaves out machines, and a person who lost access may still hold tasks here
       const onATask = tasks.some((t) => t.assignee && typeof t.assignee === "object" && t.assignee.username === who);
-      if (who && who !== ME && who !== UNASSIGNED && knownAssignees?.length && !knownAssignees.includes(who) && !onATask) {
+      // The tasks to look through are this scope's, so a view that moves to another scope keeps the
+      // person: a filter that finds nobody there can be cleared, one dropped wrongly cannot be told
+      const staysHere = view.sprintScope === (views?.sprintScope ?? "all");
+      if (staysHere && who && who !== ME && who !== UNASSIGNED && knownAssignees?.length && !knownAssignees.includes(who) && !onATask) {
         state.filters.assignee = "";
       }
       // The roster is a request of its own and may not have answered yet: the check is made again
       // when it does
-      viewAssignee.current = !knownAssignees?.length && who !== ME && who !== UNASSIGNED ? who : "";
+      viewAssignee.current = staysHere && !knownAssignees?.length && who !== ME && who !== UNASSIGNED ? who : "";
       setFilters({ ...EMPTY_FILTERS, ...state.filters, search: view.search ?? "" });
       onSortChange(state.sortField, state.sortDir);
       onHiddenColumnsChange?.(state.hiddenColumns);
@@ -238,7 +241,7 @@ export function BoardFilters({
       views?.onApplied(view);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [currentUsername, customFields, categories, knownAssignees, tasks, views?.onApplied]
+    [currentUsername, customFields, categories, knownAssignees, tasks, views?.onApplied, views?.sprintScope]
   );
 
   useEffect(() => {

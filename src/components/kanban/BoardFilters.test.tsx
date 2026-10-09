@@ -748,6 +748,11 @@ describe("applying a saved view", () => {
       await waitFor(() => expect(lastShown(onFilter)).toHaveLength(3));
     });
 
+    it("is kept when the view moves to another sprint scope, whose tasks are not on screen yet", async () => {
+      const { onFilter } = named("worker-bot", { pendingView: view({ filters: { assignee: "worker-bot" }, sprintScope: "backlog" }) });
+      await waitFor(() => expect(lastShown(onFilter)).toEqual([]));
+    });
+
     it("is kept when the roster has them", async () => {
       const { onFilter } = named("owner");
       await waitFor(() => expect(lastShown(onFilter)).toEqual(["Assigned work"]));
