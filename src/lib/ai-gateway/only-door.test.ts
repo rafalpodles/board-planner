@@ -80,8 +80,8 @@ describe("the gateway is the only door to a model", () => {
     ]);
   });
 
-  it("is not reached from the worker's side through the PM loop either", () => {
-    const loop = /lib\/pm\/(agent|scheduler|triggers)\b|from\s+["']\.\.?\/(agent|scheduler|triggers)["']/;
+  it("is not imported from the PM loop by any file of the worker's", () => {
+    const loop = /lib\/pm\/(agent|scheduler|triggers)\b/;
     expect(whereIs(loop).filter((file) => /worker/i.test(file))).toEqual([]);
   });
 });

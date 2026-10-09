@@ -136,11 +136,16 @@ describe("aiLimitWarnings", () => {
 
   it("says nothing bounds the key on a self-hosted instance that has one and no limit", () => {
     expect(aiLimitWarnings({ OPENROUTER_API_KEY: "sk-or-x" }, false)).toEqual([expect.stringContaining("nothing limits what AI may spend")]);
+    // A daily share or a per-member amount scales an allowance that is not there
+    expect(aiLimitWarnings({ OPENROUTER_API_KEY: "sk-or-x", AI_DAILY_PERCENT: "20", AI_MEMBER_TOKENS: "1000000" }, false)).toEqual([
+      expect.stringContaining("nothing limits what AI may spend"),
+    ]);
   });
 
   it("stays quiet where a limit is set, even one set to off, where the key is the organisation's own business, and where nothing is configured", () => {
     expect(aiLimitWarnings({ OPENROUTER_API_KEY: "sk-or-x", AI_MONTHLY_TOKENS: "5000000" }, false)).toEqual([]);
     expect(aiLimitWarnings({ OPENROUTER_API_KEY: "sk-or-x", AI_MONTHLY_TOKENS: "0" }, false)).toEqual([]);
+    expect(aiLimitWarnings({ OPENROUTER_API_KEY: "sk-or-x", AI_TRIAL_TOKENS: "3000000" }, false)).toEqual([]);
     expect(aiLimitWarnings({ OPENROUTER_API_KEY: "sk-or-x" }, true)).toEqual([]);
     expect(aiLimitWarnings({}, false)).toEqual([]);
   });

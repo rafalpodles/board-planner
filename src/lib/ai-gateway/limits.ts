@@ -77,7 +77,8 @@ export function aiLimitWarnings(env: Record<string, string | undefined>, hosted:
   const warnings = REMOVED_CAPS.filter(set).map(
     (name) => `WARNING: ${name} is no longer read: AI is counted in tokens per organisation now (AI_MONTHLY_TOKENS, AI_TRIAL_TOKENS, AI_MEMBER_TOKENS, AI_DAILY_PERCENT)`
   );
-  const limited = (Object.keys(HOSTED_DEFAULTS) as LimitVariable[]).some(set);
+  // Only the allowance itself bounds anything: a daily share or a per-member amount scales a limit that is not there
+  const limited = set("AI_MONTHLY_TOKENS") || set("AI_TRIAL_TOKENS");
   if (!hosted && set("OPENROUTER_API_KEY") && !limited) {
     warnings.push("WARNING: nothing limits what AI may spend of OPENROUTER_API_KEY: set AI_MONTHLY_TOKENS (and AI_DAILY_PERCENT) to bound it");
   }
