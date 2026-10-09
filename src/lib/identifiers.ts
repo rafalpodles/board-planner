@@ -196,6 +196,10 @@ export const AI_PROMPT_MAX_LENGTH = 10_000;
  */
 export const MAX_CATEGORIES = 50;
 export const MAX_TASK_TEMPLATES = 50;
+export const MAX_SAVED_VIEWS = 100;
+export const MAX_SAVED_VIEWS_PER_PERSON = 25;
+export const SAVED_VIEW_NAME_MAX_LENGTH = 100;
+export const SAVED_VIEW_TEXT_MAX_LENGTH = 200;
 export const CATEGORY_NAME_MAX_LENGTH = 50;
 export const TEMPLATE_NAME_MAX_LENGTH = 100;
 
