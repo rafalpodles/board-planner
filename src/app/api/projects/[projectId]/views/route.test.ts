@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { Types } from "mongoose";
 import { MAX_SAVED_VIEWS, MAX_SAVED_VIEWS_PER_PERSON, MAX_SHARED_VIEWS } from "@/lib/identifiers";
 
 const getAuthUser = vi.fn();
@@ -79,13 +80,13 @@ type Elem = { _id?: Id; owner?: Id; shared?: boolean; name?: { $regex: string };
 
 const sameId = (a: Id | undefined, b: Id | undefined) => !!a && !!b && a.toString() === b.toString();
 
-function elemMatches(v: Row, cond: Elem): boolean {
+function elemMatches(v: Row, cond: Elem & { name?: { $regex: string; $options?: string } }): boolean {
   if (cond._id && "$ne" in (cond._id as object)) {
     if (sameId(v._id, (cond._id as unknown as { $ne: Id }).$ne)) return false;
   } else if (cond._id && !sameId(v._id, cond._id)) return false;
   if (cond.owner && !sameId(v.owner, cond.owner)) return false;
   if (cond.shared !== undefined && v.shared !== cond.shared) return false;
-  if (cond.name && !new RegExp(cond.name.$regex, "i").test(v.name)) return false;
+  if (cond.name && !new RegExp(cond.name.$regex, cond.name.$options).test(v.name)) return false;
   return true;
 }
 
@@ -99,8 +100,10 @@ function savedViewsCondition(cond: { $elemMatch?: Elem; $not?: { $elemMatch: Ele
 /** `$lt: [ {$size: {$filter: {cond}}}, limit ]`, counted over the stored views */
 function ceilingHolds(lt: [{ $size: { $filter: { cond: { $eq: [string, unknown] } } } }, number]): boolean {
   const [path, wanted] = lt[0].$size.$filter.cond.$eq;
+  // An owner is compared as the ObjectId it is stored as: against a string it would match nothing,
+  // and the ceiling would never bite
   const count = stored.filter((v) =>
-    path === "$$view.owner" ? sameId(v.owner, wanted as Id) : v.shared === wanted
+    path === "$$view.owner" ? wanted instanceof Types.ObjectId && sameId(v.owner, wanted) : v.shared === wanted
   ).length;
   return count < lt[1];
 }
@@ -111,7 +114,8 @@ function ceilingHolds(lt: [{ $size: { $filter: { cond: { $eq: [string, unknown] 
  * a stampede of them can be counted and a write that lands after the list shifted can be checked.
  */
 function atomicPush(filter: Record<string, unknown>, update: { $push: { savedViews: Record<string, unknown> } }) {
-  if (`savedViews.${MAX_SAVED_VIEWS - 1}` in filter && stored.length >= MAX_SAVED_VIEWS) return null;
+  const total = filter[`savedViews.${MAX_SAVED_VIEWS - 1}`] as { $exists: boolean } | undefined;
+  if (total && total.$exists === false && stored.length >= MAX_SAVED_VIEWS) return null;
   const expr = filter.$expr as { $and: { $lt: never }[] };
   if (!expr.$and.every((c) => ceilingHolds(c.$lt))) return null;
   if (!savedViewsCondition(filter.savedViews as never)) return null;

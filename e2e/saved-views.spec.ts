@@ -220,7 +220,6 @@ test("a view that names an archived field and somebody who has left still applie
     filters: { assignee: "someone-who-left", fields: { [field]: { value: "zz-api" } } },
   });
 
-  console.log("STORED", JSON.stringify((await storedViews(request)).find((v) => v._id === onlyField._id)), JSON.stringify(await (await request.get(`/api/projects/${PROJECT_KEY}/custom-fields`, { headers: ADMIN_AUTH })).json()));
   await test.step("the control: while the field is live its filter narrows the list", async () => {
     await signIn(page, "member");
     await page.goto(`${BOARD}?view=${onlyField._id}`);
