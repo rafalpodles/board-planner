@@ -170,7 +170,7 @@ export async function seedTwoOrganisations(): Promise<void> {
 
 export const signInOn = (context: BrowserContext, who: OrganisationFixture): Promise<void> => signInWithToken(context, who, who.sessionToken);
 
-/** The session cookie of somebody else in the organisation, who `seedSession` made */
+/** The session cookie of somebody else in the organisation, whose session a spec has seeded */
 export async function signInWithToken(context: BrowserContext, who: OrganisationFixture, sessionToken: string): Promise<void> {
   await context.addCookies([
     {

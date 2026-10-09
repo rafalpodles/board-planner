@@ -283,7 +283,9 @@ async function seedMemberSession(): Promise<string> {
 }
 
 test("a member who is not an administrator cannot read the subscription, start a payment or open the portal, and the service is never asked", async ({ page }) => {
-  await page.goto(`${originOf(ACME)}/settings/organisation`);
+  await open(page);
+  // The panel asks for its own billing status on mount; let that finish before counting what the service is asked
+  await expect(page.getByTestId("subscription")).toBeVisible();
   const call = (method: "GET" | "POST", path: string) =>
     page.evaluate(
       async ({ method, path }) => (await fetch(path, { method, headers: { "content-type": "application/json" }, body: method === "POST" ? JSON.stringify({ interval: "month" }) : undefined })).status,

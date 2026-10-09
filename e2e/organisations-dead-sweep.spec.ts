@@ -136,6 +136,10 @@ for (const [what, collection, field] of [
 
     expect(await sweep(request, { daysFromNow: 75 })).toMatchObject({ noticed: 0, suspended: 0, deleted: 0 });
     expect((await organisationRow(ACME))?.deadNoticeAt ?? null).toBeNull();
+
+    // The use is what held it off, and the sweep does reach this organisation: sixty days after that use it is told
+    await sweep(request, { daysFromNow: 131 });
+    expect((await organisationRow(ACME))?.deadNoticeAt).toBeInstanceOf(Date);
   });
 }
 
@@ -155,6 +159,9 @@ test("a person who has just joined counts as use, however long ago anybody signe
 
   expect(await sweep(request, { daysFromNow: 75 })).toMatchObject({ noticed: 0, suspended: 0, deleted: 0 });
   expect((await organisationRow(ACME))?.deadNoticeAt ?? null).toBeNull();
+
+  await sweep(request, { daysFromNow: 131 });
+  expect((await organisationRow(ACME))?.deadNoticeAt).toBeInstanceOf(Date);
 });
 
 test("the default organisation is never noticed, suspended or deleted, however old and quiet it is", async ({ request }) => {
