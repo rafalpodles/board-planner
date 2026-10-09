@@ -84,6 +84,25 @@ describe("parseViewState", () => {
     });
   });
 
+  it("rebuilds every field filter from its known keys, so nothing odd reaches the stored document", () => {
+    const { filters } = stateOf({
+      filters: {
+        fields: {
+          "f-size": { value: "s", $gt: 5, "a.b": 1, from: { nested: true }, to: ["x"] },
+          ghost: { value: "x" },
+        },
+      },
+    });
+    expect(filters.fields).toEqual({ "f-size": { value: "s" } });
+  });
+
+  it("keeps a sort the board knows or a live field's, and falls back to manual for anything else", () => {
+    expect(stateOf({ sortField: "dueDate" }).sortField).toBe("dueDate");
+    expect(stateOf({ sortField: "f-size" }).sortField).toBe("f-size");
+    expect(stateOf({ sortField: "constructor" }).sortField).toBe("manual");
+    expect(stateOf({ sortField: "f-gone" }).sortField).toBe("manual");
+  });
+
   it("refuses each shape it cannot store", () => {
     expect(errorOf({ filters: [] })).toMatch(/filters/);
     expect(errorOf({ filters: { assignee: 5 } })).toMatch(/assignee/);

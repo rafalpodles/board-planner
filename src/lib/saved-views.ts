@@ -1,5 +1,5 @@
-import { ApiCustomField, ApiProjectCategory, ApiSavedView, ISavedView } from "@/types";
-import { FILTER_KEYS, migratePersistedFilters } from "./board-filters-state";
+import { ApiCustomField, ApiProjectCategory, ApiSavedView, ISavedView, SORT_OPTIONS } from "@/types";
+import { FILTER_KEYS, migratePersistedFilters, type FieldFilter } from "./board-filters-state";
 import { SAVED_VIEW_NAME_MAX_LENGTH, SAVED_VIEW_TEXT_MAX_LENGTH, hasControlCharacters } from "./identifiers";
 import { isSprintScopeShape } from "./sprint-scope";
 
@@ -25,6 +25,32 @@ export function viewNameOrRefusal(raw: unknown): { name: string } | { error: str
   }
   if (hasControlCharacters(name)) return { error: "A view name cannot contain control characters" };
   return { name };
+}
+
+const MAX_PICKS = 100;
+
+type StoredFieldFilter = FieldFilter & { values?: string[]; mode?: "any" | "all" };
+
+/** Each entry rebuilt from its known keys, so nothing but short text reaches the stored document */
+function cleanFieldFilters(raw: unknown): Record<string, StoredFieldFilter> {
+  const clean: Record<string, StoredFieldFilter> = {};
+  if (!raw || typeof raw !== "object") return clean;
+  const text = (v: unknown) => (typeof v === "string" && v.length <= SAVED_VIEW_TEXT_MAX_LENGTH ? v : undefined);
+  for (const [id, entry] of Object.entries(raw as Record<string, unknown>)) {
+    if (!entry || typeof entry !== "object") continue;
+    const e = entry as Record<string, unknown>;
+    const kept: StoredFieldFilter = {};
+    for (const key of ["value", "from", "to"] as const) {
+      const value = text(e[key]);
+      if (value !== undefined) kept[key] = value;
+    }
+    if (Array.isArray(e.values)) {
+      kept.values = e.values.slice(0, MAX_PICKS).filter((v): v is string => text(v) !== undefined);
+      kept.mode = e.mode === "all" ? "all" : "any";
+    }
+    if (Object.keys(kept).length) clean[id] = kept;
+  }
+  return clean;
 }
 
 /**
@@ -77,11 +103,14 @@ export function parseViewState(
     (board.categories ?? []).map((c) => c.name)
   );
 
+  const liveFields = new Set((board.customFields ?? []).map((f) => f._id));
+  const sortKnown = SORT_OPTIONS.some((o) => o.value === state.sortField) || liveFields.has(state.sortField);
+
   return {
     state: {
-      filters: state.filters as unknown as Record<string, unknown>,
+      filters: { ...state.filters, fields: cleanFieldFilters(state.filters.fields) } as unknown as Record<string, unknown>,
       search,
-      sortField: state.sortField,
+      sortField: sortKnown ? state.sortField : "manual",
       sortDir: state.sortDir,
       viewMode,
       groupBy: state.groupBy,
