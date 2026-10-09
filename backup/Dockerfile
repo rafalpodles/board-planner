@@ -1,4 +1,4 @@
-FROM mongo:7.0
+FROM public.ecr.aws/docker/library/mongo:7.0
 RUN apt-get update \
  && apt-get install -y --no-install-recommends rclone curl ca-certificates openssl bash \
  && rm -rf /var/lib/apt/lists/*
