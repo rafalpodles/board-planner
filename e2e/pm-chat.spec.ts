@@ -686,22 +686,37 @@ test.describe("attaching a screenshot", () => {
     await expect(page.getByRole("button", { name: "Retry" })).toHaveCount(0);
   });
 
-  test("a Retry with nothing left to send is not offered", async ({ page }) => {
+  test("a Retry with nothing left to send is not offered", async ({ page, browser }) => {
     // An image-only refusal has no typed text, so Retry stands or falls on the thumbnails. It used
-    // to survive them: clicking it called send("") and did nothing at all.
-    await pmSettings({ model: "e2e/text-only-model" });
-    await signIn(page);
+    // to survive them: clicking it called send("") and did nothing at all. The refusal is a 409: somebody else holds the turn.
+    await pmSettings({ model: "e2e/vision-model" });
+    await signIn(page, "admin");
     await openChat(page);
+    await say(page, "Hold the line.", { delayMs: 30_000, say: "Eventually." });
+    await expect(page.getByText("PM is thinking…")).toBeVisible();
 
-    await attach(page);
-    await sendButton(page).click();
+    const other = await browser.newContext();
+    await signInContext(other, "member");
+    const second = await other.newPage();
+    try {
+      await second.goto(PM_URL);
+      await expect(chatBox(second)).toBeVisible();
 
-    const retry = page.getByRole("button", { name: "Retry" });
-    await expect(retry).toBeVisible();
+      await attach(second);
+      await sendButton(second).click();
 
-    await page.getByRole("button", { name: "Remove attachment" }).click();
-    await expect(page.getByAltText("Attachment preview")).toHaveCount(0);
-    await expect(retry).toHaveCount(0);
+      const retry = second.getByRole("button", { name: "Retry" });
+      await expect(retry).toBeVisible();
+
+      await second.getByRole("button", { name: "Remove attachment" }).click();
+      await expect(second.getByAltText("Attachment preview")).toHaveCount(0);
+      await expect(retry).toHaveCount(0);
+    } finally {
+      await other.close();
+    }
+
+    await page.getByRole("button", { name: "Stop the PM turn" }).click();
+    await expect(page.getByText("⏹ Stopped by user.")).toBeVisible();
   });
 
   test("a turn that fails mid-stream offers no Retry when it carried a picture", async ({
