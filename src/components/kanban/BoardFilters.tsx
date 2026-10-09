@@ -211,7 +211,7 @@ export function BoardFilters({
       const who = state.filters.assignee;
       // Dropped only when nobody could be given a task by that name and no task carries it:
       // the roster leaves out machines, and a person who lost access may still hold tasks here
-      const onATask = tasks.some((t) => typeof t.assignee === "object" && t.assignee?.username === who);
+      const onATask = tasks.some((t) => t.assignee && typeof t.assignee === "object" && t.assignee.username === who);
       if (who && who !== ME && who !== UNASSIGNED && knownAssignees?.length && !knownAssignees.includes(who) && !onATask) {
         state.filters.assignee = "";
       }
