@@ -998,7 +998,7 @@ export interface PmMessageTrigger {
   taskKey?: string;
 }
 
-/** What one PM turn cost, summed over its round-trips (BP-284) */
+/** What a PM turn records about itself; its cost is the gateway's usage rows */
 export interface IPmUsage {
   /** The turn stopped because it ran out of steps, not because it was finished */
   hitStepLimit: boolean;

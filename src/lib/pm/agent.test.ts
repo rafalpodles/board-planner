@@ -450,15 +450,6 @@ describe("what a turn records about its own outcome", () => {
     expect(lastMessage().usage).toEqual({ hitStepLimit: false });
   });
 
-  it("keeps no count of tokens or calls on the message: the usage rows are the one place they are counted", async () => {
-    chatCompletion.mockResolvedValue(withUsage({ type: "text", content: "done" }, 10));
-
-    await turn([]);
-
-    expect(lastMessage().usage).not.toHaveProperty("totalTokens");
-    expect(lastMessage().usage).not.toHaveProperty("calls");
-  });
-
   it("writes one usage row for every round-trip it makes, with what the provider reported", async () => {
     chatCompletion
       .mockResolvedValueOnce(withUsage(toolCall("add_comment", { taskKey: "BP-1", body: "x" }), 100))

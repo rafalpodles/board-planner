@@ -143,7 +143,7 @@ async function chat(request: Request, params: Promise<Record<string, string>>, u
 
   // One turn per project even though conversations are private — the agent writes to a
   // board everyone shares
-  // After the cap, because that refusal is a count this request already had to make and this one is
+  // After the gate, because that refusal is a read this request already had to make and this one is
   // a GridFS round trip. An image-only turn stands or falls on the image: everything above checks
   // the *shape* of an attachment, so a well-formed fileId naming no file would otherwise start a
   // turn whose user content is the empty string (BP-451 review).

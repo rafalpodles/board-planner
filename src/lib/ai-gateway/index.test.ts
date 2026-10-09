@@ -44,7 +44,7 @@ describe("openGate", () => {
   });
 
   // BP-681: our key is never somebody's fallback, because the key is what we pay for
-  it("closes the gate on a stored key that cannot be read, and does not reach for ours", async () => {
+  it("closes the gate on a stored key that cannot be read: no call, no look at the budget", async () => {
     m.resolveModelKey.mockResolvedValue({ ok: false, reason: "own_key_unreadable", plan: "pro" });
 
     const gate = await openGate(db, NOT_CONFIGURED);

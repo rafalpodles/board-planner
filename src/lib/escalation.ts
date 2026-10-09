@@ -20,7 +20,7 @@ export function escalationColumnId(columns: Column[]): string | undefined {
  * The chosen column, with no fallback — for consumers where doing nothing is the right
  * answer when nobody chose one.
  *
- * A PM turn is opt-in and costs against the daily cap, so falling back to the first
+ * A PM turn is opt-in and is counted in the AI allowance, so falling back to the first
  * review column would queue one on every ordinary move into review. Parking a failed
  * worker run is not optional, which is why `escalationColumnId` still falls back.
  */

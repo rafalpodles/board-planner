@@ -2156,12 +2156,6 @@
           "$date": "2026-08-03T22:04:34.573Z"
         },
         "usage": {
-          "promptTokens": 41200,
-          "completionTokens": 910,
-          "totalTokens": 42110,
-          "cachedPromptTokens": 28800,
-          "cacheWriteTokens": 0,
-          "calls": 6,
           "hitStepLimit": false
         }
       },
@@ -2218,12 +2212,6 @@
           "$date": "2026-08-03T22:33:22.573Z"
         },
         "usage": {
-          "promptTokens": 30650,
-          "completionTokens": 640,
-          "totalTokens": 31290,
-          "cachedPromptTokens": 26100,
-          "cacheWriteTokens": 0,
-          "calls": 4,
           "hitStepLimit": false
         }
       }
@@ -3024,6 +3012,198 @@
         "detail": "Workers: off → on",
         "createdAt": {
           "$date": "2026-08-01T16:28:00Z"
+        }
+      }
+    ],
+    "aiusages": [
+      {
+        "_id": {
+          "$oid": "6a7121f0c6430fb9b1de0001"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "source": "pm",
+        "keySource": "managed",
+        "model": "moonshotai/kimi-k2.6",
+        "promptTokens": 6867,
+        "completionTokens": 152,
+        "totalTokens": 7019,
+        "cachedPromptTokens": 4800,
+        "cacheWriteTokens": 0,
+        "createdAt": {
+          "$date": "2026-08-03T22:04:34.573Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a7121f0c6430fb9b1de0002"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "source": "pm",
+        "keySource": "managed",
+        "model": "moonshotai/kimi-k2.6",
+        "promptTokens": 6867,
+        "completionTokens": 152,
+        "totalTokens": 7019,
+        "cachedPromptTokens": 4800,
+        "cacheWriteTokens": 0,
+        "createdAt": {
+          "$date": "2026-08-03T22:04:34.573Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a7121f0c6430fb9b1de0003"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "source": "pm",
+        "keySource": "managed",
+        "model": "moonshotai/kimi-k2.6",
+        "promptTokens": 6867,
+        "completionTokens": 152,
+        "totalTokens": 7019,
+        "cachedPromptTokens": 4800,
+        "cacheWriteTokens": 0,
+        "createdAt": {
+          "$date": "2026-08-03T22:04:34.573Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a7121f0c6430fb9b1de0004"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "source": "pm",
+        "keySource": "managed",
+        "model": "moonshotai/kimi-k2.6",
+        "promptTokens": 6867,
+        "completionTokens": 152,
+        "totalTokens": 7019,
+        "cachedPromptTokens": 4800,
+        "cacheWriteTokens": 0,
+        "createdAt": {
+          "$date": "2026-08-03T22:04:34.573Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a7121f0c6430fb9b1de0005"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "source": "pm",
+        "keySource": "managed",
+        "model": "moonshotai/kimi-k2.6",
+        "promptTokens": 6866,
+        "completionTokens": 151,
+        "totalTokens": 7017,
+        "cachedPromptTokens": 4800,
+        "cacheWriteTokens": 0,
+        "createdAt": {
+          "$date": "2026-08-03T22:04:34.573Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a7121f0c6430fb9b1de0006"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "source": "pm",
+        "keySource": "managed",
+        "model": "moonshotai/kimi-k2.6",
+        "promptTokens": 6866,
+        "completionTokens": 151,
+        "totalTokens": 7017,
+        "cachedPromptTokens": 4800,
+        "cacheWriteTokens": 0,
+        "createdAt": {
+          "$date": "2026-08-03T22:04:34.573Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a7121f0c6430fb9b1de0007"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "source": "pm",
+        "keySource": "managed",
+        "model": "moonshotai/kimi-k2.6",
+        "promptTokens": 7663,
+        "completionTokens": 160,
+        "totalTokens": 7823,
+        "cachedPromptTokens": 6525,
+        "cacheWriteTokens": 0,
+        "createdAt": {
+          "$date": "2026-08-03T22:33:22.573Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a7121f0c6430fb9b1de0008"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "source": "pm",
+        "keySource": "managed",
+        "model": "moonshotai/kimi-k2.6",
+        "promptTokens": 7663,
+        "completionTokens": 160,
+        "totalTokens": 7823,
+        "cachedPromptTokens": 6525,
+        "cacheWriteTokens": 0,
+        "createdAt": {
+          "$date": "2026-08-03T22:33:22.573Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a7121f0c6430fb9b1de0009"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "source": "pm",
+        "keySource": "managed",
+        "model": "moonshotai/kimi-k2.6",
+        "promptTokens": 7662,
+        "completionTokens": 160,
+        "totalTokens": 7822,
+        "cachedPromptTokens": 6525,
+        "cacheWriteTokens": 0,
+        "createdAt": {
+          "$date": "2026-08-03T22:33:22.573Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a7121f0c6430fb9b1de000a"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "source": "pm",
+        "keySource": "managed",
+        "model": "moonshotai/kimi-k2.6",
+        "promptTokens": 7662,
+        "completionTokens": 160,
+        "totalTokens": 7822,
+        "cachedPromptTokens": 6525,
+        "cacheWriteTokens": 0,
+        "createdAt": {
+          "$date": "2026-08-03T22:33:22.573Z"
         }
       }
     ]

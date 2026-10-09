@@ -121,7 +121,7 @@ export async function runPmTrigger(db: ScopedDb, trigger: IPmTrigger): Promise<P
     await settleTrigger(db, trigger, "done");
     return "ran";
   }
-  // Settled, not retried: without a model every attempt is a turn from the cap spent posting the
+  // Settled, not retried: without a model every attempt is a turn spent posting the
   // same warning into every thread
   const gate = await openGate(db, { error: "The PM agent is not configured on this instance", status: 503 });
   if (!gate.ok) {

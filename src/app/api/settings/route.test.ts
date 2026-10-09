@@ -63,8 +63,10 @@ describe("PUT /api/settings", () => {
     getAuthUser.mockResolvedValue(ADMIN);
 
     await put({ pmDefaultDailyTurnCap: 250 });
-
     expect(updateSettings).not.toHaveBeenCalled();
+
+    await put({ pmDefaultModel: "some/model", pmDefaultDailyTurnCap: 250 });
+    expect(updateSettings).toHaveBeenCalledWith(scopedToDefaultOrganisation(), { $set: { pmDefaultModel: "some/model" } });
   });
 
   it("writes the change for an interactive admin and records who made it", async () => {

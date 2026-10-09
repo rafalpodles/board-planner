@@ -189,10 +189,15 @@ describe("PATCH /api/admin/agents/:projectId", () => {
       expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
     });
 
-    it("writes nothing for a turn cap, which an older client may still send: there is none", async () => {
-      const res = await patch({ dailyTurnCap: 12 });
+    it("takes nothing from a turn cap that an older client still sends beside a field it does change: there is none", async () => {
+      const res = await patch({ enabled: false, dailyTurnCap: 12 });
 
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(200);
+      expect(written()).toEqual({ $set: { "pm.enabled": false } });
+    });
+
+    it("answers 400 for a request that carries nothing but the cap", async () => {
+      expect((await patch({ dailyTurnCap: 12 })).status).toBe(400);
       expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
     });
 

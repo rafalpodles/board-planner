@@ -188,9 +188,11 @@ test("an instance setting is stored, and a value the instance will not take is r
   await test.step("the instance writes no turn cap, whoever asks", async () => {
     const stored = await page.request.put("/api/settings", {
       headers: SAME_ORIGIN,
-      data: { pmDefaultDailyTurnCap: 30 },
+      data: { pmDefaultModel: "e2e/instance-default", pmDefaultDailyTurnCap: 30 },
     });
-    expect(stored.status()).toBe(400);
+    expect(stored.status()).toBe(200);
+    expect(await stored.json()).not.toHaveProperty("pmDefaultDailyTurnCap");
+    expect(await (await page.request.get("/api/settings")).json()).not.toHaveProperty("pmDefaultDailyTurnCap");
   });
 });
 

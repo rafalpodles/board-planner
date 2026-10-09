@@ -65,8 +65,8 @@ left the task where it was**, because it was told to. Board reviews run with `ch
 `create_task` withheld, so the autonomous path can tell you something is wrong without quietly
 reorganising your board overnight.
 
-It is off by default, per project, and metered rather than trusted: a daily cap on turns and an
-optional cap on tokens, both spent by autonomous turns as well as yours, and an instance
+It is off by default, per project, and metered rather than trusted: every call is counted in tokens
+against the organisation's AI allowance, autonomous turns as well as yours, and an instance
 administrator can lock it off for a project in a way project settings cannot override. Without
 `OPENROUTER_API_KEY` the pages say so and the feature stays inert; AI Assist runs on the same key.
 
@@ -478,7 +478,7 @@ on merge, so a page there is never behind the product.
 | --- | --- |
 | [What is Board Planner](https://board-planner.com/docs/getting-started/what-is-board-planner/) | The idea, who it is for, what it is not |
 | [Quick start](https://board-planner.com/docs/getting-started/quick-start/) | First project, first task, first agent |
-| [PM agent](https://board-planner.com/docs/ai/pm-agent/) | Turning it on, what it may change, the caps it spends against |
+| [PM agent](https://board-planner.com/docs/ai/pm-agent/) | Turning it on, what it may change, the allowance it spends against |
 | [Claude Code and MCP](https://board-planner.com/docs/ai/claude-code-and-mcp/) | The fourteen tools, scoped tokens, the OAuth connector |
 | [Agents](https://board-planner.com/docs/ai/agents/) | Steps, gates, and what a run actually does |
 | [Execution workers](https://board-planner.com/docs/ai/execution-workers/) | Enrolling a machine, which tasks get picked up, how to stop one |

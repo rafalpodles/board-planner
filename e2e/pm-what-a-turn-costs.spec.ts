@@ -11,15 +11,13 @@ import { PM_STUB_URL } from "../playwright.config";
  * provider client, the agent loop, the gateway and the route, and every unit test on the way mocks the next layer down.
  */
 
-/** The gateway's own rows for this project, summed in the database and not through the product */
-async function recordedUsage() {
+/** What an older version stored on the project, written straight to the database: the product no longer takes it in */
+async function plantOldCaps() {
   await mongoose.connect(E2E_MONGODB_URI);
   try {
-    const rows = await mongoose.connection
-      .db!.collection("aiusages")
-      .find({ project: new mongoose.Types.ObjectId(PROJECT_ID), source: "pm" })
-      .toArray();
-    return { calls: rows.length, tokens: rows.reduce((sum, row) => sum + (row.totalTokens ?? 0), 0) };
+    await mongoose.connection
+      .db!.collection("projects")
+      .updateOne({ _id: new mongoose.Types.ObjectId(PROJECT_ID) }, { $set: { "pm.dailyTurnCap": 1, "pm.dailyTokenCap": 1 } });
   } finally {
     await mongoose.disconnect();
   }
@@ -150,23 +148,11 @@ test("a turn's real cost is recorded and shown, in calls and tokens", async ({ p
   await expect(page.getByPlaceholder(/Message the PM/)).toBeVisible();
 
   await test.step("one turn that calls a tool costs more than one model call", async () => {
-    await say(page, "make a task", {
+    // Waits for the server's own answer: a usage row is written per round-trip, so "some calls" can be seen while the turn is still running
+    await sayAndWait(page, request, "make a task", {
       name: "create_task",
       arguments: { title: "Something to do", description: "" },
     });
-    /**
-     * Waits for the turn to have RUN, not for it to have been asked. `turns` counts stored
-     * user messages, so it reaches 1 the moment the request is accepted — before a single call has
-     * been made. This spec passed alone and failed after a loaded group on exactly that: `calls`
-     * read 0 while `turns` read 1.
-     *
-     * The wait and the assertion are different propositions on purpose: "at least one call was
-     * made" is what says the turn ran, and "more than one" is the claim this ticket is about, so a
-     * turn that really did cost one call still fails below.
-     */
-    await expect
-      .poll(async () => (await usage(request)).calls, { timeout: 40_000 })
-      .toBeGreaterThan(0);
 
     const spent = await usage(request);
     expect(spent.turns).toBe(1);
@@ -176,10 +162,11 @@ test("a turn's real cost is recorded and shown, in calls and tokens", async ({ p
     expect(spent.maxCallsPerTurn).toBe(15);
   });
 
-  await test.step("and what the screen says is what the gateway recorded, call for call", async () => {
+  await test.step("and what the screen says is what the provider was asked, call for call, at what it reported", async () => {
     const spent = await usage(request);
 
-    expect(await recordedUsage()).toEqual({ calls: spent.calls, tokens: spent.tokens });
+    expect(spent.calls).toBe((await sentRequests(request)).length);
+    expect(spent.tokens).toBe(spent.calls * 1200);
   });
 
   await test.step("and the settings screen says what a turn can cost, beside what it did", async () => {
@@ -197,26 +184,22 @@ test("a turn's real cost is recorded and shown, in calls and tokens", async ({ p
  * There is no ceiling on a project: what it may use is the organisation's allowance, which the gateway counts. A ceiling an
  * older version stored on the project is a field nothing reads, so it refuses nothing.
  */
-test("a project's old token ceiling is not enforced, and the usage carries no cap", async ({ page, request }) => {
-  const saved = await request.put(`/api/projects/${PROJECT_ID}`, {
-    headers: ADMIN_AUTH,
-    data: { pm: { enabled: true, model: "e2e/stub-model", dailyTokenCap: 1, dailyTurnCap: 1 } },
-  });
-  expect(saved.status(), await saved.text()).toBe(200);
+test("a project's old turn and token ceiling is not enforced, and the usage carries no cap", async ({ page, request }) => {
+  await plantOldCaps();
   expect(await usage(request)).not.toHaveProperty("tokenCap");
 
   await signIn(page, "admin");
   await page.goto(`/projects/${PROJECT_KEY}/pm`);
   await expect(page.getByPlaceholder(/Message the PM/)).toBeVisible();
-  await say(page, "say something", {});
-  await expect.poll(async () => (await usage(request)).tokens, { timeout: 40_000 }).toBeGreaterThan(1);
+  await sayAndWait(page, request, "say something", {});
+  expect((await usage(request)).tokens).toBeGreaterThan(1);
 
-  // Past what the old ceiling and the old turn cap would have allowed, the next turn is still taken
+  // Past what the old ceiling (one token) and the old turn cap (one turn) would have allowed, the next turn is still taken
   const again = await request.post(`/api/projects/${PROJECT_KEY}/pm/chat`, {
     headers: ADMIN_AUTH,
     data: { message: "again" },
   });
-  expect(again.status(), await again.text()).not.toBe(429);
+  expect(again.status(), await again.text()).toBe(200);
 });
 
 /**

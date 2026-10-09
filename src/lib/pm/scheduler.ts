@@ -81,7 +81,7 @@ export type BoardReviewStart =
   | { status: "skipped"; reason: string };
 
 /**
- * Checks the caps and takes the project's turn lock before anything is spent, then runs the review
+ * Checks the AI gate and takes the project's turn lock before anything is spent, then runs the review
  * in `done`. Split this way so the owner's "Run a review now" can answer at once with why a review
  * cannot run, while the scheduler still awaits one review at a time (BP-471).
  */

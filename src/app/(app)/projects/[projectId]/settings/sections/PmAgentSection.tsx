@@ -122,8 +122,8 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
   const draft = useDraft(pmDraftFrom(project));
 
   /**
-   * What today has actually cost (BP-284). Read once on mount rather than polled: it is a number to
-   * inform a setting, not a live meter, and a settings screen that refetched on a timer would be
+   * What today has actually used (BP-284). Read once on mount rather than polled: it is not a live
+   * meter, and a settings screen that refetched on a timer would be
    * spending requests to watch a number that changes when somebody else is chatting.
    */
   const [usage, setUsage] = useState<PmUsageToday | null>(null);
@@ -532,7 +532,7 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
                 <strong className="text-text">{usage.calls}</strong> model calls,{" "}
                 <strong className="text-text">{usage.tokens.toLocaleString()}</strong> tokens.
                 <br />
-                One turn is up to {usage.maxCallsPerTurn} model calls. The tokens are counted in the organisation&apos;s AI allowance.
+                One turn is up to {usage.maxCallsPerTurn} model calls.
                 {usage.stepLimitHits > 0 && (
                   <>
                     {" "}

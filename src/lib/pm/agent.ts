@@ -15,8 +15,7 @@ import { APP_NAME } from "@/lib/brand";
 import type { ScopedDb } from "@/lib/db-scope";
 import { gatewayChat, openGate } from "@/lib/ai-gateway";
 
-/** Round-trips one turn may make. Exported because the cap the operator sees is in turns, and the
- * screens that show it have to be able to say what a turn can cost (BP-284). */
+/** Round-trips one turn may make. Exported so the screens that show a project's day can say what a turn can cost (BP-284). */
 export const MAX_STEPS = 15;
 const MAX_WRITE_ACTIONS = 10;
 const HISTORY_LIMIT = 30;
@@ -275,7 +274,7 @@ export async function runPmTurn(db: ScopedDb, opts: {
 
   // The route checks the *files* document before the turn starts; the bytes are read here, and a
   // file whose chunks are gone fails only at this point. Without this the provider is handed an
-  // empty user message, and the turn is already counted against the cap (BP-451 review).
+  // empty user message, and the turn is already stored (BP-451 review).
   if (!opts.userMessage.trim() && !Array.isArray(userContent)) {
     return finalize("⚠️ That image could not be read, so there was nothing to send.");
   }
@@ -396,10 +395,6 @@ export async function runPmTurn(db: ScopedDb, opts: {
               const summary = `MCP write on ${mcpTool.serverName}: ${mcpTool.toolName}`;
               action = { type: "action", tool: mcpTool.exposedName, summary };
               assistantMessage.actions.push({ tool: mcpTool.exposedName, summary, at: new Date() });
-              // Recorded at the mid-loop saves too: a turn killed by a deploy or the route's
-              // 300s ceiling would otherwise store zero, under-reporting the long turns this
-              // counting exists for — see abandoned.ts, which patches content and never usage.
-              record();
               await assistantMessage.save();
               opts.onEvent?.(action);
             }

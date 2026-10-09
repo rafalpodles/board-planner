@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const usageAggregate = vi.fn();
 const messageAggregate = vi.fn();
@@ -75,5 +75,49 @@ describe("pmDayUsage", () => {
 
     expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
+  });
+
+  it("asks the thread for the turns that ran out of steps, of this project (an ObjectId, which an aggregate does not cast) and today", async () => {
+    await pmDayUsage(db, PROJECT, {});
+
+    const { $match } = messageAggregate.mock.calls[0][0][1];
+    expect($match["usage.hitStepLimit"]).toBe(true);
+    expect($match.project.constructor.name).toBe("ObjectId");
+    expect(String($match.project)).toBe(PROJECT);
+    expect($match.createdAt.$gte).toBeInstanceOf(Date);
+  });
+
+  describe("the project's day", () => {
+    beforeEach(() => vi.useFakeTimers({ toFake: ["Date"] }));
+    afterEach(() => vi.useRealTimers());
+
+    const sinceInEveryQuery = async (pm: { autonomy?: { timezone?: string } }) => {
+      usageAggregate.mockClear();
+      messageAggregate.mockClear();
+      countDocuments.mockClear();
+      await pmDayUsage(db, PROJECT, pm);
+      const starts = [
+        usageAggregate.mock.calls[0][0][1].$match.createdAt.$gte,
+        messageAggregate.mock.calls[0][0][1].$match.createdAt.$gte,
+        countDocuments.mock.calls[0][0].createdAt.$gte,
+      ] as Date[];
+      expect(new Set(starts.map((d) => d.toISOString())).size).toBe(1);
+      return starts[0].toISOString();
+    };
+
+    it("starts at midnight in the board's own zone, in all three queries, not at the server's", async () => {
+      vi.setSystemTime(new Date("2026-10-09T22:30:00Z"));
+
+      // 00:30 on the 10th in Warsaw, 11:30 on the 9th in Niue
+      expect(await sinceInEveryQuery({ autonomy: { timezone: "Europe/Warsaw" } })).toBe("2026-10-09T22:00:00.000Z");
+      expect(await sinceInEveryQuery({ autonomy: { timezone: "Pacific/Niue" } })).toBe("2026-10-09T11:00:00.000Z");
+    });
+
+    it("counts in Europe/Warsaw when the board never named a zone, or named one the server cannot read", async () => {
+      vi.setSystemTime(new Date("2026-10-09T22:30:00Z"));
+
+      expect(await sinceInEveryQuery({})).toBe("2026-10-09T22:00:00.000Z");
+      expect(await sinceInEveryQuery({ autonomy: { timezone: "Warsaw" } })).toBe("2026-10-09T22:00:00.000Z");
+    });
   });
 });

@@ -66,6 +66,9 @@ export async function bootNode(): Promise<void> {
     console.warn("WARNING: OPENAI_API_KEY is no longer read: AI Assist runs on OPENROUTER_API_KEY, which is not set, so it is off");
   }
 
+  const { aiLimitWarnings } = await import("@/lib/ai-gateway/limits");
+  for (const line of aiLimitWarnings(process.env, Boolean(organisationDomain()))) console.warn(line);
+
   await bootWhenDatabaseIsReady();
 }
 

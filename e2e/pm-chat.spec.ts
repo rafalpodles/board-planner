@@ -741,7 +741,7 @@ test.describe("attaching a screenshot", () => {
     async ({ page, request }) => {
     // Found reviewing this branch's own change. Everything the route checks above is the *shape* of
     // an attachment, so a well-formed fileId naming no file passed — and with no text either, the
-    // turn reached the provider with an empty user content, spending one against the daily cap.
+    // turn reached the provider with an empty user content, spending one on nothing.
     // Driven over the API because the composer can only offer files it has just uploaded.
     await pmSettings({ model: "e2e/vision-model" });
     await signIn(page);

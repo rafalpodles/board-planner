@@ -286,7 +286,7 @@ export function BoardSection({ projectId, project, patchProject, stats }: Sectio
           </select>
           <p className="mt-1.5 text-xs text-text-muted">
             A task whose worker run fails or times out is moved here, and — if PM autonomy is
-            on — arriving here queues a PM turn against the daily cap.
+            on — arriving here queues a PM turn, counted in the organisation's AI allowance.
           </p>
           {reviewColumns.length === 0 && (
             <p className="mt-1.5 text-xs text-text-muted">
