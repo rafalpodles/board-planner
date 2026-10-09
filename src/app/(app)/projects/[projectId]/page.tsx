@@ -80,7 +80,10 @@ export default function KanbanPage() {
         onRefresh={board.reload}
         onNewTask={() => board.setShowNewTask(true)}
       />
-      <ProjectBoardView board={board} />
+      <ProjectBoardView
+        board={board}
+        onScopeChange={(next) => router.push(projectPath(projectId) + sprintScopeToQuery(next))}
+      />
     </div>
   );
 }

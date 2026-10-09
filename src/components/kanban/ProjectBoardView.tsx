@@ -1,11 +1,11 @@
 "use client";
 
-import { ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { ProjectBoard } from "@/hooks/use-project-board";
-import { ApiTask, BOARD_SORT_FIELDS, LIST_SORT_FIELDS, SortKey, SortDir } from "@/types";
+import { ApiSavedView, ApiTask, BOARD_SORT_FIELDS, LIST_SORT_FIELDS, SortKey, SortDir } from "@/types";
 import { effectiveColumns } from "@/lib/columns";
 import { GroupBy, flattenGroups, groupTasks, sanitizeGroupBy } from "@/lib/task-grouping";
 import { ListColumnId } from "@/lib/list-columns";
@@ -31,6 +31,8 @@ interface ProjectBoardViewProps {
   // page that renders no view switcher of its own, so a stored "list" preference from
   // elsewhere can't strand it with no way back.
   pinViewMode?: "board" | "list";
+  // How a saved view's sprint scope is applied: the address owns it, so the page does
+  onScopeChange?: (scope: string) => void;
 }
 
 const inGroupHeader = (el: EventTarget | null) =>
@@ -41,6 +43,7 @@ export function ProjectBoardView({
   readOnly = false,
   emptyState,
   pinViewMode,
+  onScopeChange,
 }: ProjectBoardViewProps) {
   const { projectId } = useParams<{ projectId: string }>();
   const router = useRouter();
@@ -110,6 +113,8 @@ export function ProjectBoardView({
   const [sortField, setSortField] = useState<SortKey>("manual");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [hiddenColumns, setHiddenColumns] = useState<ListColumnId[]>([]);
+  const [pendingView, setPendingView] = useState<ApiSavedView | null>(null);
+  const viewParamHandled = useRef(false);
   const [groupBy, setGroupBy] = useState<GroupBy>("");
   const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(new Set());
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
@@ -131,6 +136,34 @@ export function ProjectBoardView({
     }),
     [project?.columns, project?.customFields, sprints]
   );
+
+  useEffect(() => {
+    if (pinViewMode || viewParamHandled.current) return;
+    const url = new URL(window.location.href);
+    const wanted = url.searchParams.get("view");
+    if (!wanted) return;
+    viewParamHandled.current = true;
+    // Native, not router.replace: this page sits under an @modal parallel route
+    url.searchParams.delete("view");
+    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+    api
+      .get(`/api/projects/${projectId}/views`)
+      .then((all) => {
+        const hit = (all as ApiSavedView[]).find((v) => v._id === wanted);
+        if (hit) setPendingView(hit);
+      })
+      .catch(() => {});
+  }, [api, projectId, pinViewMode]);
+
+  function viewApplied(view: ApiSavedView) {
+    if (!pinViewMode) setViewMode(view.viewMode);
+    const known =
+      view.sprintScope === "all" ||
+      view.sprintScope === "backlog" ||
+      sprints.some((s) => s._id === view.sprintScope);
+    const next = known ? view.sprintScope : "all";
+    if (next !== scope) onScopeChange?.(next);
+  }
 
   const customFieldList = project?.customFields;
   useEffect(() => {
@@ -300,6 +333,20 @@ export function ProjectBoardView({
         groupBy={groupBy}
         onGroupByChange={changeGroupBy}
         showGroupBy={viewMode === "list"}
+        views={
+          pinViewMode
+            ? undefined
+            : {
+                projectRef: project.key,
+                canShare: !!project.canAdmin,
+                viewMode,
+                sprintScope: scope ?? "all",
+                onApplied: viewApplied,
+              }
+        }
+        knownAssignees={assignableUsers.map((u) => u.username)}
+        pendingView={pendingView}
+        onPendingViewApplied={() => setPendingView(null)}
         showColumnPicker={viewMode === "list"}
         extraControls={
           readOnly ? undefined : (
