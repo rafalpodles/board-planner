@@ -665,7 +665,7 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
 
       <SettingsCard
         title="When it acts on its own"
-        description="Autonomous turns post into the PM chat thread and are counted in the organisation's AI allowance."
+        description="Autonomous turns post into the PM chat thread, and every call they make is counted in tokens."
       >
         <Switch
           checked={draft.value.dailyReview}
@@ -710,7 +710,7 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
                     ? "One review a day"
                     : `${reviewTimes.length} reviews a day`}
                   , at {reviewTimes.map((h) => `${String(h).padStart(2, "0")}:00`).join(", ")} in{" "}
-                  {typedTimezone}. Each one is a PM turn, counted in the organisation's AI allowance.
+                  {typedTimezone}. Each one is a PM turn.
                 </>
               )}
             </p>
@@ -721,7 +721,7 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
             {reviewStarting ? "Starting…" : "Run a review now"}
           </Button>
           <p className="text-xs text-text-muted">
-            One review of the board as it is, without waiting for the schedule. It is a PM turn, counted in the organisation's AI allowance.
+            One review of the board as it is, without waiting for the schedule. It is a PM turn like any other.
           </p>
         </div>
         <Switch

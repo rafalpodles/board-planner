@@ -66,7 +66,7 @@ left the task where it was**, because it was told to. Board reviews run with `ch
 reorganising your board overnight.
 
 It is off by default, per project, and metered rather than trusted: every call is counted in tokens
-against the organisation's AI allowance, autonomous turns as well as yours, and an instance
+per organisation, autonomous turns as well as yours, against an allowance an instance can set, and an instance
 administrator can lock it off for a project in a way project settings cannot override. Without
 `OPENROUTER_API_KEY` the pages say so and the feature stays inert; AI Assist runs on the same key.
 

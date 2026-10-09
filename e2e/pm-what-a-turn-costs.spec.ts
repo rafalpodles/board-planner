@@ -195,10 +195,12 @@ test("a project's old turn and token ceiling is not enforced, and the usage carr
   expect((await usage(request)).tokens).toBeGreaterThan(1);
 
   // Past what the old ceiling (one token) and the old turn cap (one turn) would have allowed, the next turn is still taken
-  const again = await request.post(`/api/projects/${PROJECT_KEY}/pm/chat`, {
-    headers: ADMIN_AUTH,
-    data: { message: "again" },
-  });
+  // The turn lock is let go a moment after the answer is stored, so a 409 for that moment is asked again
+  let again = await request.post(`/api/projects/${PROJECT_KEY}/pm/chat`, { headers: ADMIN_AUTH, data: { message: "again" } });
+  for (let tries = 0; again.status() === 409 && tries < 20; tries++) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    again = await request.post(`/api/projects/${PROJECT_KEY}/pm/chat`, { headers: ADMIN_AUTH, data: { message: "again" } });
+  }
   expect(again.status(), await again.text()).toBe(200);
 });
 
