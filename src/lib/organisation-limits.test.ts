@@ -8,10 +8,12 @@ vi.mock("@/models/rateLimit", async () => {
 });
 
 import { resetRateLimits } from "./rate-limit";
+import type { ScopedDb } from "./db-scope";
 import {
   CLOUD_REQUESTS_PER_MINUTE,
   CLOUD_STORAGE_MB,
   machinePrincipal,
+  organisationUsage,
   requestLimitRefusal,
   requestsPerMinute,
   storageLimitBytes,
@@ -133,5 +135,30 @@ describe("organisation limits (BP-894)", () => {
     expect((await refused!.json()).error).toBe(
       "This organisation has used 9 MB of its 10 MB of file storage, so no more files can be uploaded."
     );
+  });
+});
+
+describe("organisationUsage (BP-678)", () => {
+  const asDb = (organisation: Types.ObjectId) => ({ organisation }) as unknown as ScopedDb;
+
+  it("reads the organisation's own minute without spending it, with the limits it is held to", async () => {
+    process.env.ORGANISATION_DOMAIN = "board-planner.com";
+    const principal = { id: "u1", interactiveAdmin: false };
+    await requestLimitRefusal(ACME, principal);
+    await requestLimitRefusal(ACME, principal);
+    await requestLimitRefusal(GLOBEX, principal);
+
+    const first = await organisationUsage(asDb(ACME));
+    expect(first).toEqual({ requestsThisMinute: 2, requestsPerMinute: CLOUD_REQUESTS_PER_MINUTE, storedBytes: 0, storageLimitBytes: CLOUD_STORAGE_MB * MB });
+    expect((await organisationUsage(asDb(ACME))).requestsThisMinute).toBe(2);
+    expect((await organisationUsage(asDb(GLOBEX))).requestsThisMinute).toBe(1);
+  });
+
+  it("counts nothing once the minute has run out", async () => {
+    process.env.ORGANISATION_DOMAIN = "board-planner.com";
+    vi.useFakeTimers();
+    await requestLimitRefusal(ACME, { id: "u1" });
+    vi.advanceTimersByTime(61_000);
+    expect((await organisationUsage(asDb(ACME))).requestsThisMinute).toBe(0);
   });
 });

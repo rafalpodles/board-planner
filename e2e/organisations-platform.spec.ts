@@ -63,6 +63,7 @@ test.describe("BP-892: the platform operator is the licence service, not an orga
     expect(bySlug.acme).toMatchObject({ id: ACME.organisation.toHexString(), plan: "pro", members: 1, projects: 1, licence: { verdict: "valid", customer: "acme customer" } });
     expect(bySlug.globex).toMatchObject({ id: GLOBEX.organisation.toHexString(), plan: "free", members: 1, projects: 1 });
     expect(JSON.stringify(organisations)).not.toContain(ACME.projectName);
+    expect(bySlug.acme.usage).toEqual({ requestsThisMinute: expect.any(Number), requestsPerMinute: expect.any(Number), storedBytes: 0, storageLimitBytes: expect.any(Number) });
 
     const rows = await platformLogRows();
     expect(rows.map((row) => row.action)).toEqual(["licence_stored", "organisations_listed"]);
