@@ -20,7 +20,7 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 for _ in $(seq 1 30); do run bp965-backup bash -c '. /usr/local/bin/common.sh; RCLONE_CONFIG_R2_NO_CHECK_BUCKET=false rclone mkdir "$REMOTE"' 2>/dev/null && break; sleep 1; done
 
 echo "== an empty database is refused, not backed up"
-docker exec bp965-mongo mongo --quiet test --eval 'db.other.insertOne({a:1})' >/dev/null
+docker exec bp965-mongo mongo --quiet test --eval 'db.other.insertMany(Array.from({length: 3000}, (_, i) => ({n: i, filler: "x".repeat(40)})))' >/dev/null
 run bp965-backup backup.sh >/dev/null 2>&1 && fail "backed up a database with no users"
 
 docker exec bp965-mongo mongo --quiet test --eval 'db.users.insertMany(Array.from({length: 250}, (_, i) => ({n: i, name: "user" + i}))); db.tasks.insertMany(Array.from({length: 1000}, (_, i) => ({n: i})))' >/dev/null
@@ -28,6 +28,13 @@ docker exec bp965-mongo mongo --quiet test --eval 'db.users.insertMany(Array.fro
 echo "== a backup uploads, reads back, and lands under hourly/"
 run bp965-backup backup.sh
 [ "$(run bp965-backup restore.sh list | grep -c '^hourly/')" = 1 ] || fail "no hourly object"
+
+echo "== an upload that does not read back is a failed backup"
+shim=$(mktemp -d)
+printf '#!/bin/sh\nif [ "$1" = cat ]; then /usr/bin/rclone "$@" | head -c 200; else exec /usr/bin/rclone "$@"; fi\n' > "$shim/rclone"
+chmod +x "$shim/rclone"
+docker run --rm --network $net "${env_args[@]}" -v "$shim:/shim" -e PATH="/shim:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" -e BACKUP_STAMP=2026-12-15T05 bp965-backup backup.sh >/dev/null 2>&1 && fail "a truncated read-back passed"
+rm -rf "$shim"
 
 echo "== at midnight it keeps a daily copy, and on the first of the month a monthly one"
 run -e BACKUP_STAMP=2026-11-01T00 bp965-backup backup.sh >/dev/null
