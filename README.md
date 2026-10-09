@@ -280,8 +280,8 @@ Everything is optional except the database. Put overrides in a `.env` file next 
 | `ENCRYPTION_KEY` | — | 32 bytes, hex or standard base64 (not base64url), encrypting stored integration tokens and chat webhook URLs at rest |
 | `ENCRYPTION_KEYS_OLD` | — | Comma-separated retired keys, so a rotation can still read what they wrote |
 | `WEBHOOK_SIGNING_SECRET` | — | Signs outgoing webhook deliveries |
-| `AI_DAILY_GENERATION_CAP` | `200` | AI Assist generations one project may run per day, on the instance's key. Each person may also start 20 per 15 minutes, one at a time |
-| `OPENROUTER_API_KEY`, `PM_MODEL`, `PM_MAX_TOKENS`, `PM_DAILY_TURN_CAP`, `PM_DAILY_TOKEN_CAP`, `PM_SCHEDULER_TICK_MS` | — | The PM agent and AI Assist (task drafting) both run on `OPENROUTER_API_KEY`. `OPENAI_API_KEY` is no longer read |
+| `AI_MONTHLY_TOKENS`, `AI_MEMBER_TOKENS`, `AI_TRIAL_TOKENS`, `AI_DAILY_PERCENT` | — | What an organisation may spend of the instance's AI key, in tokens counted on every call: per UTC month (plus `AI_MEMBER_TOKENS` for each active member above ten), per trial, and at most `AI_DAILY_PERCENT` of it in a day. Past it AI answers `429` with the number used and the day it renews. Off unless set; `0` is off. An organisation's own key is counted, never limited. Each person may also start 20 AI Assist generations per 15 minutes, one at a time |
+| `OPENROUTER_API_KEY`, `PM_MODEL`, `PM_MAX_TOKENS`, `PM_SCHEDULER_TICK_MS` | — | The PM agent and AI Assist (task drafting) both run on `OPENROUTER_API_KEY`. `OPENAI_API_KEY` is no longer read |
 | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | Where PM agent and AI Assist calls go — a proxy, or another OpenAI-compatible endpoint |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | — | Email notifications |
 | `DIGEST_HOUR`, `DIGEST_TIMEZONE`, `DIGEST_TICK_MS` | `7`, `Europe/Warsaw`, `300000` | When the opt-in daily digest goes out |

@@ -45,7 +45,7 @@ const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
 const db = scopedToDefaultOrganisation();
 
-const PM = { enabled: true, dailyTurnCap: 100, autonomy: { dailyReview: true, handleNeedsHumanReview: false, reviewHour: 0, reviewIntervalHours: 24, timezone: "UTC", lastReviewSlot: "" } };
+const PM = { enabled: true, autonomy: { dailyReview: true, handleNeedsHumanReview: false, reviewHour: 0, reviewIntervalHours: 24, timezone: "UTC", lastReviewSlot: "" } };
 
 beforeEach(() => {
   vi.clearAllMocks();

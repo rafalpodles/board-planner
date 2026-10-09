@@ -868,8 +868,6 @@ describe("PUT /api/projects/[projectId] PM settings", () => {
       model: "",
       contextNotes: "notes",
       links: [],
-      dailyTurnCap: 0,
-      dailyTokenCap: 0,
       autonomy,
       mcpServers: [
         {

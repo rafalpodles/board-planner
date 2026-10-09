@@ -1,16 +1,29 @@
 import { test, expect, type APIRequestContext, type Locator, type Page } from "@playwright/test";
+import mongoose from "mongoose";
 import { ADMIN_AUTH, MEMBER_AUTH } from "./api";
-import { PROJECT_ID, PROJECT_KEY, seed } from "./seed";
+import { E2E_MONGODB_URI, PROJECT_ID, PROJECT_KEY, seed } from "./seed";
 import { signIn } from "./session";
 import { PM_STUB_URL } from "../playwright.config";
 
 /**
- * BP-284. `pm.dailyTurnCap` counts turns, and a turn is up to fifteen model round-trips — so a
- * hundred turns is between a hundred and fifteen hundred calls, and the settings screen showed only
- * the number that cannot say which. Driven end to end because the recording spans the provider
- * client, the agent loop and the stored message, and every unit test on the way mocks the next
- * layer down.
+ * BP-284, BP-682. A turn is up to fifteen model round-trips, so the settings screen shows turns beside the calls and tokens,
+ * and those are read from the gateway's usage rows, one per round-trip. Driven end to end because the recording spans the
+ * provider client, the agent loop, the gateway and the route, and every unit test on the way mocks the next layer down.
  */
+
+/** The gateway's own rows for this project, summed in the database and not through the product */
+async function recordedUsage() {
+  await mongoose.connect(E2E_MONGODB_URI);
+  try {
+    const rows = await mongoose.connection
+      .db!.collection("aiusages")
+      .find({ project: new mongoose.Types.ObjectId(PROJECT_ID), source: "pm" })
+      .toArray();
+    return { calls: rows.length, tokens: rows.reduce((sum, row) => sum + (row.totalTokens ?? 0), 0) };
+  } finally {
+    await mongoose.disconnect();
+  }
+}
 
 test.beforeEach(seed);
 
@@ -34,13 +47,12 @@ const usage = async (request: APIRequestContext) => {
   const res = await request.get(`/api/projects/${PROJECT_ID}/pm/usage`, { headers: ADMIN_AUTH });
   expect(res.status(), await res.text()).toBe(200);
   return res.json() as Promise<{
-    turns: { used: number; cap: number };
+    turns: number;
     calls: number;
     tokens: number;
     promptTokens: number;
     cachedTokens: number;
     cacheWriteTokens: number;
-    tokenCap: number;
     stepLimitHits: number;
     maxCallsPerTurn: number;
   }>;
@@ -131,7 +143,7 @@ async function sayAndWait(page: Page, request: APIRequestContext, prompt: string
 test("a turn's real cost is recorded and shown, in calls and tokens", async ({ page, request }) => {
   // The premise: nothing has been spent yet, so the numbers below came from the turn and not from
   // the seed
-  expect(await usage(request)).toMatchObject({ calls: 0, tokens: 0, turns: { used: 0 } });
+  expect(await usage(request)).toMatchObject({ calls: 0, tokens: 0, turns: 0 });
 
   await signIn(page, "admin");
   await page.goto(`/projects/${PROJECT_KEY}/pm`);
@@ -143,10 +155,10 @@ test("a turn's real cost is recorded and shown, in calls and tokens", async ({ p
       arguments: { title: "Something to do", description: "" },
     });
     /**
-     * Waits for the turn to have RUN, not for it to have been asked. `turns.used` counts stored
+     * Waits for the turn to have RUN, not for it to have been asked. `turns` counts stored
      * user messages, so it reaches 1 the moment the request is accepted — before a single call has
      * been made. This spec passed alone and failed after a loaded group on exactly that: `calls`
-     * read 0 while `turns.used` read 1.
+     * read 0 while `turns` read 1.
      *
      * The wait and the assertion are different propositions on purpose: "at least one call was
      * made" is what says the turn ran, and "more than one" is the claim this ticket is about, so a
@@ -157,11 +169,17 @@ test("a turn's real cost is recorded and shown, in calls and tokens", async ({ p
       .toBeGreaterThan(0);
 
     const spent = await usage(request);
-    expect(spent.turns.used).toBe(1);
+    expect(spent.turns).toBe(1);
     // The whole point of the ticket: one turn, more than one call
     expect(spent.calls).toBeGreaterThan(1);
     expect(spent.tokens).toBeGreaterThan(0);
     expect(spent.maxCallsPerTurn).toBe(15);
+  });
+
+  await test.step("and what the screen says is what the gateway recorded, call for call", async () => {
+    const spent = await usage(request);
+
+    expect(await recordedUsage()).toEqual({ calls: spent.calls, tokens: spent.tokens });
   });
 
   await test.step("and the settings screen says what a turn can cost, beside what it did", async () => {
@@ -176,71 +194,29 @@ test("a turn's real cost is recorded and shown, in calls and tokens", async ({ p
 });
 
 /**
- * The control the whole change is shaped around: the ceiling ships off, so nothing that worked
- * yesterday is refused today. A cap that stops the PM working would be worse than a cap that bounds
- * nothing.
+ * There is no ceiling on a project: what it may use is the organisation's allowance, which the gateway counts. A ceiling an
+ * older version stored on the project is a field nothing reads, so it refuses nothing.
  */
-test("the token ceiling refuses nothing while it is unset", async ({ page, request }) => {
-  expect((await usage(request)).tokenCap).toBe(0);
+test("a project's old token ceiling is not enforced, and the usage carries no cap", async ({ page, request }) => {
+  const saved = await request.put(`/api/projects/${PROJECT_ID}`, {
+    headers: ADMIN_AUTH,
+    data: { pm: { enabled: true, model: "e2e/stub-model", dailyTokenCap: 1, dailyTurnCap: 1 } },
+  });
+  expect(saved.status(), await saved.text()).toBe(200);
+  expect(await usage(request)).not.toHaveProperty("tokenCap");
 
   await signIn(page, "admin");
   await page.goto(`/projects/${PROJECT_KEY}/pm`);
   await expect(page.getByPlaceholder(/Message the PM/)).toBeVisible();
   await say(page, "say something", {});
+  await expect.poll(async () => (await usage(request)).tokens, { timeout: 40_000 }).toBeGreaterThan(1);
 
-  // Same reasoning as above: the call count is what says the turn ran
-  await expect
-    .poll(async () => (await usage(request)).calls, { timeout: 40_000 })
-    .toBeGreaterThan(0);
-  expect((await usage(request)).turns.used).toBe(1);
-});
-
-/**
- * The ceiling, driven the whole way: set through the product, then met.
- *
- * This is also the test whose absence let a dead input ship. The first cut dropped
- * `dailyTokenCap` in `validatePmConfig`'s whitelist rebuild, so the settings screen reported
- * success and wrote nothing — and this spec fails at the **save**, one step before the refusal it
- * is nominally about.
- */
-test("a ceiling set through the product is stored, and then refuses a turn", async ({
-  page,
-  request,
-}) => {
-  await test.step("it is actually stored", async () => {
-    const saved = await request.put(`/api/projects/${PROJECT_ID}`, {
-      headers: ADMIN_AUTH,
-      data: { pm: { enabled: true, model: "e2e/stub-model", dailyTokenCap: 1 } },
-    });
-    expect(saved.status(), await saved.text()).toBe(200);
-
-    // Read back, not assumed: a 200 says the request was accepted, never that the field survived
-    expect((await usage(request)).tokenCap).toBe(1);
+  // Past what the old ceiling and the old turn cap would have allowed, the next turn is still taken
+  const again = await request.post(`/api/projects/${PROJECT_KEY}/pm/chat`, {
+    headers: ADMIN_AUTH,
+    data: { message: "again" },
   });
-
-  await test.step("a turn spends past it", async () => {
-    await signIn(page, "admin");
-    await page.goto(`/projects/${PROJECT_KEY}/pm`);
-    await expect(page.getByPlaceholder(/Message the PM/)).toBeVisible();
-    await say(page, "say something", {});
-    await expect
-      .poll(async () => (await usage(request)).tokens, { timeout: 40_000 })
-      .toBeGreaterThan(1);
-  });
-
-  await test.step("and the next one is refused, saying what it cost and why the turn cap did not stop it", async () => {
-    const refused = await request.post(`/api/projects/${PROJECT_KEY}/pm/chat`, {
-      headers: ADMIN_AUTH,
-      data: { message: "again" },
-    });
-
-    expect(refused.status()).toBe(429);
-    const { error } = await refused.json();
-    expect(error).toMatch(/token cap/i);
-    expect(error).toMatch(/model calls/);
-    // The sentence the ticket is about
-    expect(error).toMatch(/up to 15 calls/);
-  });
+  expect(again.status(), await again.text()).not.toBe(429);
 });
 
 /**

@@ -172,42 +172,25 @@ test("an instance setting is stored, and a value the instance will not take is r
     await expect(page.getByLabel("Model", { exact: true })).toHaveValue("gpt-4o-mini-2026");
   });
 
-  await test.step("the PM defaults are stored, and a cap outside the range is not", async () => {
+  await test.step("the PM default model is stored, and the screen offers no turn cap to go with it", async () => {
     await recordToasts(page);
     const saved = settingsWrite(page);
     await fillStably(page.getByLabel("Default model"), "e2e/instance-default");
-    await fillStably(page.getByLabel("Default daily turn cap"), "25");
     await page.getByRole("button", { name: "Save defaults" }).click();
     await saved;
 
     await reloadSettled(page);
     await expect(page.getByLabel("Default model")).toHaveValue("e2e/instance-default");
-    await expect(page.getByLabel("Default daily turn cap")).toHaveValue("25");
-
-    await recordToasts(page);
-    await fillStably(page.getByLabel("Default daily turn cap"), "1001");
-    await page.getByRole("button", { name: "Save defaults" }).click();
-    await expectToast(page, "Default turn cap must be a whole number between 0 and 1000");
-
-    await reloadSettled(page);
-    await expect(page.getByLabel("Default daily turn cap")).toHaveValue("25");
+    await expect(page.getByLabel("Default daily turn cap")).toHaveCount(0);
   });
 
-  // The screen refuses that cap before it sends anything, so the screen is all the step above can
-  // speak for. The instance has to refuse it too, and only a request the screen cannot make asks
-  // it that. Sent through the browser's own session, because this route reads a cookie.
-  await test.step("the instance refuses it as well, not just the screen", async () => {
-    const refused = await page.request.put("/api/settings", {
-      headers: SAME_ORIGIN,
-      data: { pmDefaultDailyTurnCap: 1001 },
-    });
-    expect(refused.status()).toBe(400);
-
-    const accepted = await page.request.put("/api/settings", {
+  // A client older than the screen may still send the cap; it is not a setting any more, so the instance takes nothing from it
+  await test.step("the instance writes no turn cap, whoever asks", async () => {
+    const stored = await page.request.put("/api/settings", {
       headers: SAME_ORIGIN,
       data: { pmDefaultDailyTurnCap: 30 },
     });
-    expect(accepted.status()).toBe(200);
+    expect(stored.status()).toBe(400);
   });
 });
 

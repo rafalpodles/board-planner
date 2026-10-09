@@ -5,7 +5,7 @@ import { signIn } from "./session";
 
 /**
  * BP-471, last item. An instance admin governs each project's PM agent from /settings/agents: on or
- * off, a lock the project cannot lift, the model and the daily turn cap. Every spec that relied on
+ * off, a lock the project cannot lift, and the model. Every spec that relied on
  * those settings wrote them into Mongo itself, so the row that sets them had never been clicked.
  * Each change here is made on that row and read back twice: from the database, and from what the
  * project's own PM settings then do.
@@ -72,19 +72,16 @@ test("the lock on a project's row holds its agent off, whatever the project's ow
   await expect.poll(async () => (await storedPm()).lockedByInstance).toBe(false);
 });
 
-test("a model and a turn cap typed into the row are stored and shown again after a reload", async ({ page }) => {
+test("a model typed into the row is stored and shown again after a reload, and the row has no turn cap", async ({ page }) => {
   await signIn(page);
   await openAgents(page);
   const model = page.getByLabel(`PM model for ${PROJECT_KEY} — ${PROJECT_NAME}`);
-  const cap = page.getByLabel(`Daily turn cap for ${PROJECT_KEY} — ${PROJECT_NAME}`);
 
   await model.fill("e2e/governed-model");
   await model.blur();
-  await cap.fill("7");
-  await cap.blur();
 
-  await expect.poll(async () => storedPm()).toMatchObject({ model: "e2e/governed-model", dailyTurnCap: 7 });
+  await expect.poll(async () => storedPm()).toMatchObject({ model: "e2e/governed-model" });
   await page.reload();
   await expect(page.getByLabel(`PM model for ${PROJECT_KEY} — ${PROJECT_NAME}`)).toHaveValue("e2e/governed-model");
-  await expect(page.getByLabel(`Daily turn cap for ${PROJECT_KEY} — ${PROJECT_NAME}`)).toHaveValue("7");
+  await expect(page.getByLabel(`Daily turn cap for ${PROJECT_KEY} — ${PROJECT_NAME}`)).toHaveCount(0);
 });

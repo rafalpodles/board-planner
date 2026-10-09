@@ -246,7 +246,6 @@
           "lockedByInstance": false,
           "model": "",
           "contextNotes": "Ship the billing revamp before the end of the quarter. Prefer small, reviewable changes.",
-          "dailyTurnCap": 0,
           "autonomy": {
             "dailyReview": true,
             "reviewHour": 9,
@@ -445,7 +444,6 @@
           "lockedByInstance": false,
           "model": "",
           "contextNotes": "",
-          "dailyTurnCap": 0,
           "autonomy": {
             "dailyReview": false,
             "reviewHour": 9,
@@ -491,7 +489,6 @@
         },
         "__v": 0,
         "aiModel": "gpt-4o-mini",
-        "pmDefaultDailyTurnCap": 0,
         "pmDefaultModel": ""
       }
     ],

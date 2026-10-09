@@ -51,12 +51,13 @@ services:
       # The setup code for the first account; empty means one is generated and printed to the log
       BOOTSTRAP_TOKEN: ${BOOTSTRAP_TOKEN:-}
       # Everything below is optional — leave it empty and the feature stays off
-      AI_DAILY_GENERATION_CAP: ${AI_DAILY_GENERATION_CAP:-}
+      AI_TRIAL_TOKENS: ${AI_TRIAL_TOKENS:-}
+      AI_MONTHLY_TOKENS: ${AI_MONTHLY_TOKENS:-}
+      AI_MEMBER_TOKENS: ${AI_MEMBER_TOKENS:-}
+      AI_DAILY_PERCENT: ${AI_DAILY_PERCENT:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       PM_MODEL: ${PM_MODEL:-}
       PM_MAX_TOKENS: ${PM_MAX_TOKENS:-}
-      PM_DAILY_TURN_CAP: ${PM_DAILY_TURN_CAP:-}
-      PM_DAILY_TOKEN_CAP: ${PM_DAILY_TOKEN_CAP:-}
       PM_SCHEDULER_TICK_MS: ${PM_SCHEDULER_TICK_MS:-}
       # The exception to the line above, twice over: left empty, this one does not leave a feature
       # off, it refuses to store any secret — integration tokens, and a project's Slack/Discord
