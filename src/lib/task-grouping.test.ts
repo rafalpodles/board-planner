@@ -70,7 +70,7 @@ describe("groupTasks", () => {
 
   it("puts a task on a deleted column in an unfiled group, last, instead of dropping it", () => {
     const tasks = [
-      task({ taskNumber: 1, status: "gone" }),
+      task({ taskNumber: 1, status: "gone" as ApiTask["status"] }),
       task({ taskNumber: 2, status: "todo" }),
     ];
     const groups = groupTasks(tasks, "status", { columns: DEFAULT_PROJECT_COLUMNS });
