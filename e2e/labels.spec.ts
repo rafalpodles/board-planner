@@ -170,6 +170,29 @@ test("labels are edited from the list, several at a time", async ({ page, reques
   await expect(row(page, FINISHED_TASK_TITLE)).toContainText("Design");
 });
 
+test("two quick picks in the list both reach the server, even when the first request is slow", async ({ page, request }) => {
+  await seedLabelsField();
+  await openList(page);
+  await page.getByRole("button", { name: "Choose columns" }).click();
+  await page.getByRole("checkbox", { name: "Labels", exact: true }).check();
+  await page.keyboard.press("Escape");
+
+  let writes = 0;
+  await page.route(/\/api\/projects\/[^/]+\/tasks\/[^/]+$/, async (route) => {
+    if (route.request().method() === "PUT" && writes++ === 0) await new Promise((r) => setTimeout(r, 800));
+    await route.continue();
+  });
+
+  const rowLabel = `${FINISHED_TASK_KEY}: ${FINISHED_TASK_TITLE}`;
+  await page.getByRole("combobox", { name: `Labels for ${rowLabel}` }).click();
+  const listbox = page.getByRole("listbox", { name: `Labels for ${rowLabel}` });
+  await listbox.getByRole("option", { name: "Design", exact: true }).click();
+  await listbox.getByRole("option", { name: "Backend", exact: true }).click();
+
+  await expect.poll(() => storedLabels(request, 4), { timeout: 10_000 }).toEqual(["o-back", "o-design"]);
+  expect(writes).toBe(2);
+});
+
 test.describe("a board without a Labels field", () => {
   const SETTINGS = `/projects/${PROJECT_KEY}/settings?section=fields`;
 

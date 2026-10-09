@@ -218,6 +218,19 @@ describe("a multiselect filter", () => {
     });
   });
 
+  it("survives a stored list that is not a list", () => {
+    expect(sanitizeFieldFilters({ fl: { values: "abc" } }, [labels])).toEqual({});
+    expect(sanitizeFieldFilters({ fl: { values: { length: 1 } } }, [labels])).toEqual({});
+  });
+
+  it("strips picks and mode from a field that is not a multiselect", () => {
+    const dropdown = { ...labels, _id: "fd", fieldType: "dropdown" } as unknown as ApiCustomField;
+    expect(sanitizeFieldFilters({ fd: { values: ["a"], mode: "all" } }, [dropdown])).toEqual({});
+    expect(sanitizeFieldFilters({ fd: { value: "a", values: ["b"] } }, [dropdown])).toEqual({
+      fd: { value: "a", values: undefined, mode: undefined },
+    });
+  });
+
   it("ignores a stored filter that is not an object", () => {
     expect(sanitizeFieldFilters({ fl: "a", other: null }, [labels])).toEqual({});
   });

@@ -67,7 +67,10 @@ export function sanitizeFieldFilters(
   for (const [id, filter] of Object.entries(raw as Record<string, FieldFilter>)) {
     const field = live.get(id);
     if (!field || !filter || typeof filter !== "object") continue;
-    const kept = field.fieldType === "multiselect" ? sanitizeMultiselect(filter, field) : filter;
+    const kept =
+      field.fieldType === "multiselect"
+        ? sanitizeMultiselect(filter, field)
+        : { ...filter, values: undefined, mode: undefined };
     if (isFieldFilterSet(kept)) result[id] = kept;
   }
   return result;

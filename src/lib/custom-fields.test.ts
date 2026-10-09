@@ -243,6 +243,13 @@ describe("matchesFieldFilter", () => {
     expect(matchesFieldFilter(undefined, { mode: "all" }, multi)).toBe(true);
   });
 
+  it("reads nothing from a malformed filter instead of throwing", () => {
+    expect(pickedOptions({ values: "abc" as never })).toEqual([]);
+    expect(pickedOptions({ values: { length: 1 } as never })).toEqual([]);
+    expect(pickedOptions({ values: [1, "a", null] as never })).toEqual(["a"]);
+    expect(pickedOptions({ value: 5 as never })).toEqual([]);
+  });
+
   it("still reads the single value an older filter stored", () => {
     expect(pickedOptions({ value: "b" })).toEqual(["b"]);
     expect(pickedOptions({ value: "b", values: ["a"] })).toEqual(["a"]);
@@ -604,10 +611,12 @@ describe("finding a task by the name of a label", () => {
   });
 
   it("finds the task that holds the label, and not one that holds another", () => {
-    expect(taskMatchesLabelSearch({ "f-labels": ["o-back", "o-front"] }, [labels], "front")).toBe(true);
-    expect(taskMatchesLabelSearch({ "f-labels": ["o-back"] }, [labels], "front")).toBe(false);
-    expect(taskMatchesLabelSearch({}, [labels], "front")).toBe(false);
-    expect(taskMatchesLabelSearch({ "f-labels": "o-front" }, [labels], "front")).toBe(false);
+    const hits = labelMatches([labels], "front");
+    expect(taskMatchesLabelSearch({ "f-labels": ["o-back", "o-front"] }, hits)).toBe(true);
+    expect(taskMatchesLabelSearch({ "f-labels": ["o-back"] }, hits)).toBe(false);
+    expect(taskMatchesLabelSearch({}, hits)).toBe(false);
+    expect(taskMatchesLabelSearch({ "f-labels": "o-front" }, hits)).toBe(false);
+    expect(taskMatchesLabelSearch({ "f-labels": ["o-front"] }, [])).toBe(false);
   });
 
   it("turns the same match into a clause per field", () => {

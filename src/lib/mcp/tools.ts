@@ -213,7 +213,7 @@ export function registerPlannerTools(server: McpServer): void {
     {
       description:
         "Find tasks across every board the caller can reach, which list_tasks (one board) cannot. A task key such as " +
-        "CP-12 finds that task; anything else matches text in the title or description, newest first, at most 50.",
+        "CP-12 finds that task; anything else matches text in the title or description, or the name of one of its labels, newest first, at most 50.",
       inputSchema: strictInput({ query: z.string().min(2).describe("A task key, or at least two characters of text") }),
     },
     async ({ query }, extra) => {
@@ -334,7 +334,7 @@ export function registerPlannerTools(server: McpServer): void {
           .string()
           .optional()
           .describe("Filter by sprint name (or id), or \"backlog\" for tasks in no sprint"),
-        search: z.string().optional().describe("Text in the title or description, case-insensitive"),
+        search: z.string().optional().describe("Text in the title or description, or the name of one of a task's labels, case-insensitive"),
         parent: z
           .string()
           .optional()

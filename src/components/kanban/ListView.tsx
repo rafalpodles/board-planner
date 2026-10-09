@@ -872,7 +872,7 @@ export function ListView({
                         title={text || undefined}
                       >
                         <MultiEnumCell
-                          value={chosen}
+                          value={picked.map((o) => o.id)}
                           options={multiChoices}
                           label={`${field.name} for ${taskKey}: ${task.title}`}
                           onChange={

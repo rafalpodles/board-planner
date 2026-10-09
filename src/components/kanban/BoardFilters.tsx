@@ -43,6 +43,7 @@ import {
 import {
   activeFields,
   isOptionField,
+  labelMatches,
   matchesAllFieldFilters,
   orderedOptions,
   pickedOptions,
@@ -232,9 +233,10 @@ export function BoardFilters({
 
     if (filters.search) {
       const q = filters.search.toLowerCase().trim();
+      const labelHits = labelMatches(customFields, q);
       result = result.filter((t) => {
         if (t.title.toLowerCase().includes(q)) return true;
-        if (taskMatchesLabelSearch(t.customFieldValues, customFields, q)) return true;
+        if (taskMatchesLabelSearch(t.customFieldValues, labelHits)) return true;
         // Task-key search: "cp-128", "CP-128" and bare "128" all match CP-128
         const key = `${projectKey ?? ""}-${t.taskNumber}`.toLowerCase();
         return key.includes(q) || String(t.taskNumber).startsWith(q);

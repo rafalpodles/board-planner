@@ -315,8 +315,11 @@ export interface FieldFilter {
 
 /** The options a multiselect filter asks for; the single `value` older filters stored still counts */
 export function pickedOptions(filter: FieldFilter | undefined): string[] {
-  if (filter?.values?.length) return filter.values;
-  return filter?.value ? [filter.value] : [];
+  const values = Array.isArray(filter?.values)
+    ? filter.values.filter((v): v is string => typeof v === "string")
+    : [];
+  if (values.length) return values;
+  return typeof filter?.value === "string" && filter.value ? [filter.value] : [];
 }
 
 /**
@@ -427,10 +430,9 @@ export function labelMatches(
 /** Whether a label of the task has a name containing the text, which is how a board's search finds one */
 export function taskMatchesLabelSearch(
   values: Record<string, unknown> | undefined,
-  fields: LabelField[] | undefined,
-  query: string
+  matches: { fieldId: string; ids: string[] }[]
 ): boolean {
-  return labelMatches(fields, query).some(({ fieldId, ids }) => {
+  return matches.some(({ fieldId, ids }) => {
     const held = values?.[fieldId];
     return Array.isArray(held) && held.some((id) => ids.includes(String(id)));
   });
