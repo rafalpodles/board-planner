@@ -438,6 +438,13 @@ export async function seedCustomFields(values: Record<string, unknown> = {}) {
   await mongoose.disconnect();
 }
 
+/** A task whose status names no column, the state the board must cope with. Written straight to the row, since the API refuses it. */
+export async function parkTaskOnMissingColumn(taskId: mongoose.Types.ObjectId, status = "removed_column") {
+  const db = (await connect()).db!;
+  await db.collection("tasks").updateOne({ _id: taskId }, { $set: { status } });
+  await mongoose.disconnect();
+}
+
 export const LIST_DROPDOWN_FIELD_ID = id("e2e00000000000000000f009");
 export const LIST_DROPDOWN_FIELD_NAME = "Component";
 export const LIST_DROPDOWN_OPTIONS = [

@@ -1,6 +1,7 @@
 import { ApiCustomField, COLUMN_ROLES, ColumnRole, ROLE_LABELS, SortDir, SortField, SortKey } from "@/types";
 import { AnyColumn, effectiveColumns } from "./columns";
 import { ListColumnId, defaultHidden, sanitizeHidden } from "./list-columns";
+import { GroupBy, sanitizeGroupBy } from "./task-grouping";
 
 /** Range for number and date fields; `value` carries every other type */
 export interface FieldFilter {
@@ -27,6 +28,7 @@ export interface PersistedBoardFilters {
   sortDir: SortDir;
   showFilters: boolean;
   hiddenColumns: ListColumnId[];
+  groupBy: GroupBy;
 }
 
 /**
@@ -150,6 +152,7 @@ const DEFAULTS: PersistedBoardFilters = {
   sortDir: "asc",
   showFilters: false,
   hiddenColumns: [],
+  groupBy: "",
 };
 
 function str(value: unknown): string {
@@ -201,6 +204,7 @@ export function migratePersistedFilters(
     sortDir: str(blob.sortDir) === "desc" ? "desc" : "asc",
     showFilters: blob.showFilters === true,
     hiddenColumns: sanitizeHidden(blob.hiddenColumns, customFields),
+    groupBy: sanitizeGroupBy(blob.groupBy, customFields),
   };
 }
 

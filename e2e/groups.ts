@@ -66,6 +66,7 @@ export const GROUPS = {
     "list-view-status-filter.spec.ts",
     "board-irreversible.spec.ts",
     "list-view-seams.spec.ts",
+    "list-grouping.spec.ts",
     "card-shows-its-parent.spec.ts",
     "board-scope-and-filters.spec.ts",
     "epics.spec.ts",

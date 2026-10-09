@@ -147,6 +147,9 @@ const LIST_READ_SAFE_PROPS = new Set([
   "hiddenColumns",
   "assignableUsers",
   "onTaskClick",
+  "groups",
+  "collapsedGroups",
+  "onToggleGroup",
 ]);
 
 afterEach(() => {
