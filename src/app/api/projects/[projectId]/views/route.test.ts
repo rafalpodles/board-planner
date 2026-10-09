@@ -58,7 +58,21 @@ function query(doc: unknown) {
   return q;
 }
 
-const board = () => ({ customFields: [], categories: [{ name: "bug" }] });
+// The ids come back from a lean read as ObjectIds, not strings
+const board = () => ({
+  customFields: [
+    {
+      _id: { toString: () => "f-size" },
+      name: "Size",
+      fieldType: "dropdown",
+      filterable: true,
+      showInList: true,
+      archived: false,
+      options: [{ id: "s", value: "S", order: 0 }],
+    },
+  ],
+  categories: [{ name: "bug" }],
+});
 
 type Id = { toString: () => string };
 type Elem = { _id?: Id; owner?: Id; shared?: boolean; name?: { $regex: string }; [key: string]: unknown };
@@ -291,6 +305,21 @@ describe("POST /views", () => {
     const scope = projectFindOneAndUpdate.mock.calls[1][0].savedViews.$not.$elemMatch;
     expect(scope).toMatchObject({ shared: true });
     expect(scope).not.toHaveProperty("owner");
+  });
+
+  it("keeps a filter, a grouping and a hidden column that name one of the project's fields", async () => {
+    const body = await (
+      await call(POST, "POST", {
+        name: "By size",
+        groupBy: "field:f-size",
+        hiddenColumns: ["f-size"],
+        filters: { fields: { "f-size": { value: "s" }, ghost: { value: "x" } } },
+      })
+    ).json();
+
+    expect(body.filters.fields).toEqual({ "f-size": { value: "s" } });
+    expect(body.groupBy).toBe("field:f-size");
+    expect(body.hiddenColumns).toEqual(["f-size"]);
   });
 
   it("drops a filter on a category the project does not have", async () => {

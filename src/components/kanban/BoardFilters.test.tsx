@@ -725,6 +725,29 @@ describe("applying a saved view", () => {
       await waitFor(() => expect(lastShown(onFilter)).toEqual(["Bot work"]));
     });
 
+    it("is dropped once a roster that was slow arrives and does not have them either", async () => {
+      const { onFilter, rerender } = named("left-the-company", { knownAssignees: [] });
+      await waitFor(() => expect(lastShown(onFilter)).toEqual([]));
+
+      rerender(
+        <BoardFilters
+          tasks={tasks}
+          categories={["bug", "doc"]}
+          projectKey="TP"
+          projectId="TP"
+          currentUsername="owner"
+          sortField="manual"
+          sortDir="asc"
+          onSortChange={vi.fn()}
+          onFilter={onFilter}
+          views={viewsProp()}
+          knownAssignees={["owner"]}
+        />
+      );
+
+      await waitFor(() => expect(lastShown(onFilter)).toHaveLength(3));
+    });
+
     it("is kept when the roster has them", async () => {
       const { onFilter } = named("owner");
       await waitFor(() => expect(lastShown(onFilter)).toEqual(["Assigned work"]));

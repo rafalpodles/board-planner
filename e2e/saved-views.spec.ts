@@ -6,11 +6,13 @@ import {
   HELD_TASK_TITLE,
   LIST_DROPDOWN_FIELD_ID,
   MEMBER_USERNAME,
+  PLANNING_SPRINT_ID,
   PROJECT_KEY,
   SIBLING_TASK_ID,
   SIBLING_TASK_TITLE,
   seed,
   seedListVisibleDropdownField,
+  seedSprintPlanning,
 } from "./seed";
 import { signIn } from "./session";
 
@@ -60,6 +62,7 @@ async function openMenu(page: Page) {
 
 async function signInAgainAs(page: Page, who: "admin" | "member") {
   await page.context().clearCookies();
+  await page.evaluate(() => localStorage.clear());
   await signIn(page, who);
 }
 
@@ -137,33 +140,53 @@ test("a shared view is the whole board's, opens from its link, and the link clea
   await test.step("a link to a view that is not there, or is somebody's personal one, is cleaned and costs nothing", async () => {
     await page.evaluate(() => localStorage.clear());
     for (const id of ["507f1f77bcf86cd799439099", private_._id, "not-an-id"]) {
+      const listed = page.waitForResponse((r) => r.url().endsWith("/views") && r.request().method() === "GET");
       await page.goto(`${BOARD}?view=${id}`);
+      await listed;
       await expect(page.getByRole("button", { name: "Views", exact: true })).toBeVisible();
       await expect(page.getByText(HELD_TASK_TITLE).first()).toBeVisible();
       expect(new URL(page.url()).searchParams.has("view")).toBe(false);
-      await expect(page.getByRole("button", { name: /^Filters/ })).not.toContainText("1");
+      await expect(page.getByRole("button", { name: /^Filters/ })).not.toContainText(/\b[1-9]\b/);
+      await expect(page.getByText("That view is gone")).toBeVisible();
     }
   });
 });
 
 test("a project owner shares a view, copies its link, and can take it back", async ({ page, request, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-  const mine = await createView(request, { name: "Mine for now", filters: { priority: "high" } });
-  await openList(page, "admin");
+  await openList(page, "owner");
 
-  await openMenu(page);
-  await expect(entry(page, "Mine for now").getByRole("button", { name: "Copy link" }), "a personal view has no link to give").toHaveCount(0);
-  await entry(page, "Mine for now").getByRole("button", { name: "Share" }).click();
-  await expect(entry(page, "Mine for now")).toContainText("Shared");
-  expect((await storedViews(request, MEMBER_AUTH)).map((v) => v.name)).toEqual(["Mine for now"]);
+  await test.step("saves one for themselves and one for the whole board", async () => {
+    await openMenu(page);
+    await menu(page).getByLabel("View name").fill("Mine for now");
+    await menu(page).getByRole("button", { name: "Save view" }).click();
+    await expect(entry(page, "Mine for now")).toBeVisible();
+    await menu(page).getByLabel("View name").fill("Team cut");
+    await menu(page).getByLabel("Share with everyone on this board").check();
+    await menu(page).getByRole("button", { name: "Save view" }).click();
+    await expect(entry(page, "Team cut")).toContainText("Shared");
+    expect((await storedViews(request, MEMBER_AUTH)).map((v) => v.name)).toEqual(["Team cut"]);
+  });
 
-  await entry(page, "Mine for now").getByRole("button", { name: "Copy link" }).click();
-  const copied = await page.evaluate(() => navigator.clipboard.readText());
-  expect(copied).toBe(`${new URL(page.url()).origin}${BOARD}?view=${mine._id}`);
+  await test.step("a personal view has no link to give; sharing it gives one", async () => {
+    await expect(entry(page, "Mine for now")).toBeVisible();
+    await expect(entry(page, "Mine for now").getByRole("button", { name: "Copy link" })).toHaveCount(0);
+    await entry(page, "Mine for now").getByRole("button", { name: "Share" }).click();
+    await expect(entry(page, "Mine for now")).toContainText("Shared");
+    expect((await storedViews(request, MEMBER_AUTH)).map((v) => v.name).sort()).toEqual(["Mine for now", "Team cut"]);
 
-  await entry(page, "Mine for now").getByRole("button", { name: "Stop sharing" }).click();
-  await expect(entry(page, "Mine for now")).not.toContainText("Shared");
-  expect(await storedViews(request, MEMBER_AUTH)).toEqual([]);
+    const [mine] = (await storedViews(request, MEMBER_AUTH)).filter((v) => v.name === "Mine for now");
+    await entry(page, "Mine for now").getByRole("button", { name: "Copy link" }).click();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+      `${new URL(page.url()).origin}${BOARD}?view=${mine._id}`
+    );
+  });
+
+  await test.step("and takes it back", async () => {
+    await entry(page, "Mine for now").getByRole("button", { name: "Stop sharing" }).click();
+    await expect(entry(page, "Mine for now")).not.toContainText("Shared");
+    expect((await storedViews(request, MEMBER_AUTH)).map((v) => v.name)).toEqual(["Team cut"]);
+  });
 });
 
 test("Assigned to me is one view that shows each person their own tasks", async ({ page, request }) => {
@@ -183,27 +206,52 @@ test("Assigned to me is one view that shows each person their own tasks", async 
 });
 
 test("a view that names an archived field and somebody who has left still applies, without them", async ({ page, request }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
   await seedListVisibleDropdownField();
   const field = String(LIST_DROPDOWN_FIELD_ID);
   const filterable = await request.patch(`/api/projects/${PROJECT_KEY}/custom-fields/${field}`, { headers: ADMIN_AUTH, data: { filterable: true } });
   expect(filterable.status(), await filterable.text()).toBe(200);
+  const onlyField = await createView(request, { name: "Field only", shared: true, viewMode: "list", filters: { fields: { [field]: { value: "zz-api" } } } });
   const view = await createView(request, {
     name: "Old",
     shared: true,
     viewMode: "list",
     filters: { assignee: "someone-who-left", fields: { [field]: { value: "zz-api" } } },
   });
-  expect((await storedViews(request)).find((v) => v._id === view._id)?.filters).toMatchObject({ assignee: "someone-who-left" });
+
+  console.log("STORED", JSON.stringify((await storedViews(request)).find((v) => v._id === onlyField._id)), JSON.stringify(await (await request.get(`/api/projects/${PROJECT_KEY}/custom-fields`, { headers: ADMIN_AUTH })).json()));
+  await test.step("the control: while the field is live its filter narrows the list", async () => {
+    await signIn(page, "member");
+    await page.goto(`${BOARD}?view=${onlyField._id}`);
+    await expect(page.getByRole("button", { name: /^Filters/ })).toContainText("1");
+    await expect(rows(page)).toHaveCount(0);
+    await expect(page.getByText("No tasks match the filters")).toBeVisible();
+  });
+
   const archived = await request.patch(`/api/projects/${PROJECT_KEY}/custom-fields/${field}`, { headers: ADMIN_AUTH, data: { archived: true } });
   expect(archived.status(), await archived.text()).toBe(200);
+  await page.evaluate(() => localStorage.clear());
 
-  await signIn(page, "member");
-  await page.goto(`${BOARD}?view=${view._id}`);
+  await test.step("a slow roster is waited for: the person who left is dropped when it arrives", async () => {
+    await page.route("**/assignable-users", async (route) => {
+      await new Promise((r) => setTimeout(r, 1500));
+      await route.continue();
+    });
+    await page.goto(`${BOARD}?view=${view._id}`);
 
-  await expect(page.locator("table")).toBeVisible();
-  await expect(rows(page)).toHaveCount(4);
-  await expect(page.getByRole("button", { name: /^Filters/ })).not.toContainText("1");
-  await expect(page.getByText("No tasks match the filters")).toHaveCount(0);
+    await expect(page.locator("table")).toBeVisible();
+    await expect(rows(page)).toHaveCount(4, { timeout: 10_000 });
+    await expect(page.getByText("No tasks match the filters")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /^Filters/ })).not.toContainText(/\b[1-9]\b/);
+  });
+
+  await test.step("and the archived field's filter is not kept anywhere", async () => {
+    const stored = await page.evaluate(() => JSON.parse(localStorage.getItem("board-filters:TP") ?? "{}"));
+    expect(stored.filters.fields).toEqual({});
+    expect(stored.filters.assignee).toBe("");
+    expect(errors).toEqual([]);
+  });
 });
 
 test("a person renames, updates and deletes their own view from the menu", async ({ page, request }) => {
@@ -218,9 +266,14 @@ test("a person renames, updates and deletes their own view from the menu", async
   expect((await storedViews(request, MEMBER_AUTH)).map((v) => v.name)).toEqual(["Kept"]);
 
   await page.getByRole("button", { name: "Sort by Title", exact: true }).click();
+  await page.getByRole("button", { name: /^Filters/ }).click();
+  await page.getByRole("dialog", { name: "Filters" }).getByLabel("Priority").selectOption({ label: "Low" });
+  await page.getByRole("button", { name: /^Filters/ }).click();
   await openMenu(page);
   await entry(page, "Kept").getByRole("button", { name: "Update to current" }).click();
-  await expect.poll(async () => (await storedViews(request, MEMBER_AUTH))[0]?.sortField).toBe("title");
+  await expect
+    .poll(async () => (await storedViews(request, MEMBER_AUTH))[0])
+    .toMatchObject({ sortField: "title", viewMode: "list", filters: { priority: "low" } });
 
   await entry(page, "Kept").getByRole("button", { name: "Delete" }).click();
   await page.getByRole("dialog", { name: "Delete view" }).getByRole("button", { name: "Delete", exact: true }).click();
@@ -278,3 +331,45 @@ test("the project the views are on does not hand them out with itself", async ({
   expect(JSON.stringify(await all.json())).not.toContain("Private note");
 });
 
+test("the search text comes with a view only when asked, and the Me choice is in the assignee picker", async ({ page, request }) => {
+  await openList(page);
+  await page.getByPlaceholder(/^Search tasks/).fill("worker");
+  await page.getByRole("button", { name: /^Filters/ }).click();
+  await page.getByRole("dialog", { name: "Filters" }).getByLabel("Assignee").selectOption({ label: "Me" });
+  await page.getByRole("button", { name: /^Filters/ }).click();
+
+  await openMenu(page);
+  await menu(page).getByLabel("View name").fill("No search");
+  await menu(page).getByRole("button", { name: "Save view" }).click();
+  await expect(entry(page, "No search")).toBeVisible();
+  await menu(page).getByLabel("View name").fill("With search");
+  await menu(page).getByLabel("Include the search text").check();
+  await menu(page).getByRole("button", { name: "Save view" }).click();
+  await expect(entry(page, "With search")).toBeVisible();
+
+  const stored = await storedViews(request, MEMBER_AUTH);
+  expect(stored.find((v) => v.name === "No search")).toMatchObject({ filters: { assignee: "@me" } });
+  expect((stored.find((v) => v.name === "No search") as unknown as { search: string }).search).toBe("");
+  expect((stored.find((v) => v.name === "With search") as unknown as { search: string }).search).toBe("worker");
+
+  await page.getByPlaceholder(/^Search tasks/).fill("");
+  await entry(page, "With search").getByRole("button", { name: "With search" }).click();
+  await expect(page.getByPlaceholder(/^Search tasks/)).toHaveValue("worker");
+  await openMenu(page);
+  await entry(page, "No search").getByRole("button", { name: "No search" }).click();
+  await expect(page.getByPlaceholder(/^Search tasks/)).toHaveValue("");
+});
+
+test("a view carries its sprint scope, and falls back to the whole board when that sprint is gone", async ({ page, request }) => {
+  await seedSprintPlanning();
+  const inSprint = await createView(request, { name: "Sprint cut", shared: true, viewMode: "list", sprintScope: String(PLANNING_SPRINT_ID) });
+  const gone = await createView(request, { name: "Gone sprint", shared: true, viewMode: "list", sprintScope: "507f1f77bcf86cd799439055" });
+
+  await signIn(page, "member");
+  await page.goto(`${BOARD}?view=${inSprint._id}`);
+  await expect(page).toHaveURL(new RegExp(`[?&]sprint=${String(PLANNING_SPRINT_ID)}`));
+
+  await page.goto(`${BOARD}?sprint=backlog&view=${gone._id}`);
+  await expect(page.locator("table")).toBeVisible();
+  await expect(page).not.toHaveURL(/sprint=/);
+});

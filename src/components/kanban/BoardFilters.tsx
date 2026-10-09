@@ -194,6 +194,18 @@ export function BoardFilters({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, currentUsername]);
 
+  const viewAssignee = useRef("");
+  useEffect(() => {
+    const who = viewAssignee.current;
+    if (!who || !knownAssignees?.length) return;
+    viewAssignee.current = "";
+    const onATask = tasks.some((t) => t.assignee && typeof t.assignee === "object" && t.assignee.username === who);
+    if (!knownAssignees.includes(who) && !onATask) {
+      setFilters((f) => (f.assignee === who ? { ...f, assignee: "" } : f));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [knownAssignees]);
+
   const applyView = useCallback(
     (view: ApiSavedView) => {
       const state = migratePersistedFilters(
@@ -215,6 +227,9 @@ export function BoardFilters({
       if (who && who !== ME && who !== UNASSIGNED && knownAssignees?.length && !knownAssignees.includes(who) && !onATask) {
         state.filters.assignee = "";
       }
+      // The roster is a request of its own and may not have answered yet: the check is made again
+      // when it does
+      viewAssignee.current = !knownAssignees?.length && who !== ME && who !== UNASSIGNED ? who : "";
       setFilters({ ...EMPTY_FILTERS, ...state.filters, search: view.search ?? "" });
       onSortChange(state.sortField, state.sortDir);
       onHiddenColumnsChange?.(state.hiddenColumns);

@@ -19,9 +19,14 @@ type Stored = ISavedView & { _id: { toString(): string } };
 
 const SHARING_IS_FOR_OWNERS = "Only a project owner shares a view with the project";
 
+// A lean read hands the fields' ids back as ObjectIds, and everything that compares them is written
+// for the strings the client sees
 function board(project: { customFields?: unknown; categories?: unknown }) {
   return {
-    customFields: (project.customFields ?? []) as ApiCustomField[],
+    customFields: ((project.customFields ?? []) as { _id: { toString(): string } }[]).map((f) => ({
+      ...f,
+      _id: f._id.toString(),
+    })) as unknown as ApiCustomField[],
     categories: (project.categories ?? []) as ApiProjectCategory[],
   };
 }

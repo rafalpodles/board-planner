@@ -31,7 +31,7 @@ interface ViewsMenuProps {
 const field =
   "focus-ring h-8 w-full rounded-lg border border-border bg-bg-input px-2 text-[12px] text-text";
 const action =
-  "focus-ring rounded px-1 py-0.5 text-[12px] text-text-muted underline hover:text-text";
+  "focus-ring min-h-6 rounded px-1.5 py-1 text-[12px] text-text-muted underline hover:text-text";
 
 export function ViewsMenu({ projectId, projectRef, canShare, snapshot, onApply }: ViewsMenuProps) {
   const api = useApi();
@@ -48,6 +48,7 @@ export function ViewsMenu({ projectId, projectRef, canShare, snapshot, onApply }
   const [removing, setRemoving] = useState<ApiSavedView | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
+  const panelEl = useRef<HTMLDivElement | null>(null);
   const loadSeq = useRef(0);
   const panel = usePanelClamp(open);
   const base = `/api/projects/${projectId}/views`;
@@ -69,6 +70,10 @@ export function ViewsMenu({ projectId, projectRef, canShare, snapshot, onApply }
   }, [open, load]);
 
   useEffect(() => {
+    if (open) panelEl.current?.focus();
+  }, [open]);
+
+  useEffect(() => {
     if (!open) return;
     function outside(e: MouseEvent) {
       if (root.current && !root.current.contains(e.target as Node)) setOpen(false);
@@ -78,6 +83,11 @@ export function ViewsMenu({ projectId, projectRef, canShare, snapshot, onApply }
     function escape(e: KeyboardEvent) {
       if (e.key !== "Escape" || openLayerCount() > 0) return;
       e.stopPropagation();
+      // A rename in progress is what Escape cancels first
+      if (renaming) {
+        setRenaming(null);
+        return;
+      }
       setOpen(false);
       trigger.current?.focus();
     }
@@ -87,7 +97,7 @@ export function ViewsMenu({ projectId, projectRef, canShare, snapshot, onApply }
       document.removeEventListener("mousedown", outside);
       document.removeEventListener("keydown", escape, true);
     };
-  }, [open]);
+  }, [open, renaming]);
 
   async function write(run: () => Promise<unknown>, done?: string) {
     setBusy(true);
@@ -99,6 +109,7 @@ export function ViewsMenu({ projectId, projectRef, canShare, snapshot, onApply }
       return true;
     } catch (err) {
       setProblem(err instanceof Error ? err.message : "That did not save");
+      void load();
       return false;
     } finally {
       setBusy(false);
@@ -137,7 +148,13 @@ export function ViewsMenu({ projectId, projectRef, canShare, snapshot, onApply }
   const list = views ?? [];
 
   return (
-    <div className="relative shrink-0" ref={root}>
+    <div
+      className="relative shrink-0"
+      ref={root}
+      onBlur={(e) => {
+        if (open && e.relatedTarget && !root.current?.contains(e.relatedTarget as Node)) setOpen(false);
+      }}
+    >
       <button
         type="button"
         ref={trigger}
@@ -163,7 +180,11 @@ export function ViewsMenu({ projectId, projectRef, canShare, snapshot, onApply }
 
       {open && (
         <div
-          ref={panel.ref}
+          ref={(el) => {
+            panel.ref.current = el;
+            panelEl.current = el;
+          }}
+          tabIndex={-1}
           style={panel.style}
           role="dialog"
           aria-label="Views"
@@ -192,7 +213,7 @@ export function ViewsMenu({ projectId, projectRef, canShare, snapshot, onApply }
                     className="flex gap-1"
                     onSubmit={async (e) => {
                       e.preventDefault();
-                      if (await write(() => api.put(base, { viewId: view._id, name: renaming.name }))) setRenaming(null);
+                      if (await write(() => api.put(base, { viewId: view._id, name: renaming.name }), "View renamed")) setRenaming(null);
                     }}
                   >
                     <input
@@ -217,6 +238,7 @@ export function ViewsMenu({ projectId, projectRef, canShare, snapshot, onApply }
                       onClick={() => {
                         onApply(view);
                         setOpen(false);
+                        trigger.current?.focus();
                       }}
                       className="focus-ring min-w-0 flex-1 truncate rounded px-1 py-1 text-left text-[13px] font-medium text-text hover:bg-bg-input"
                       title={view.name}
@@ -264,7 +286,10 @@ export function ViewsMenu({ projectId, projectRef, canShare, snapshot, onApply }
                           type="button"
                           disabled={busy}
                           onClick={() =>
-                            void write(() => api.put(base, { viewId: view._id, shared: !view.shared }))
+                            void write(
+                              () => api.put(base, { viewId: view._id, shared: !view.shared }),
+                              view.shared ? `Stopped sharing ${view.name}` : `Shared ${view.name}`
+                            )
                           }
                           className={action}
                         >
@@ -288,16 +313,15 @@ export function ViewsMenu({ projectId, projectRef, canShare, snapshot, onApply }
             }}
             className="space-y-2 border-t border-border pt-3"
           >
+            <p className="text-[11px] font-semibold text-text-muted">Save what is on screen as a view</p>
             <label className="flex flex-col gap-1">
-              <span className="text-[11px] text-text-muted">Save what is on screen as a view</span>
+              <span className="text-[11px] text-text-muted">View name</span>
               <input
                 value={name}
                 onChange={(e) => {
                   setName(e.target.value);
                   setProblem("");
                 }}
-                placeholder="View name"
-                aria-label="View name"
                 maxLength={100}
                 className={field}
               />
