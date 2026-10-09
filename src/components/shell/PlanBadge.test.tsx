@@ -5,7 +5,7 @@ import { PlanBadge } from "./PlanBadge";
 
 const { state } = vi.hoisted(() => ({
   state: {
-    organisation: null as null | { plan: "free" | "pro"; planEndsAt: string | null; trial?: boolean; members?: number; invited?: number; memberLimit?: number | null },
+    organisation: null as null | { plan: "free" | "pro"; planEndsAt: string | null; trial?: boolean; subscription?: "renewing" | "ending" | null; members?: number; invited?: number; memberLimit?: number | null },
     isAdmin: true,
   },
 }));
@@ -130,6 +130,52 @@ describe("PlanBadge (BP-930)", () => {
       state.organisation = free(14, 0, null);
       render(<PlanBadge compact={false} />);
       expect(screen.queryByTestId("plan-badge-members")).toBeNull();
+    });
+  });
+
+  // BP-983: a subscriber is told nothing until a payment fails or the subscription is cancelled; a trial stays as it was
+  describe("a subscription", () => {
+    it("that renews by itself shows the plan and no countdown, however near the end of its paid period, and nothing to renew", () => {
+      state.organisation = { plan: "pro", planEndsAt: inDays(9), subscription: "renewing" };
+      render(<PlanBadge compact={false} />);
+
+      expect(screen.getByTestId("plan-badge").textContent).toMatch(/^Pro/);
+      expect(screen.getByTestId("plan-badge-detail").textContent).toBe("Plan active");
+      expect(screen.queryByTestId("plan-badge-action")).toBeNull();
+    });
+
+    it("that did not renew says the payment failed and how many days of grace are left, and offers to update the payment", () => {
+      state.organisation = { plan: "pro", planEndsAt: inDays(-3), subscription: "renewing" };
+      render(<PlanBadge compact={false} />);
+
+      expect(screen.getByTestId("plan-badge-detail").textContent).toBe("Payment failed · 11 days of grace left");
+      expect(screen.getByTestId("plan-badge-action").textContent).toBe("Update payment");
+      cleanup();
+
+      state.organisation = { plan: "pro", planEndsAt: inDays(-13.5), subscription: "renewing" };
+      render(<PlanBadge compact={false} />);
+      expect(screen.getByTestId("plan-badge-detail").textContent).toBe("Payment failed · last day of grace");
+    });
+
+    it("that was cancelled says when it ends from the day it is cancelled, offers Renew, and is Free once it has ended", () => {
+      state.organisation = { plan: "pro", planEndsAt: inDays(60), subscription: "ending" };
+      render(<PlanBadge compact={false} />);
+
+      expect(screen.getByTestId("plan-badge-detail").textContent).toMatch(/^Cancelled · ends /);
+      expect(screen.getByTestId("plan-badge-action").textContent).toBe("Renew");
+      cleanup();
+
+      state.organisation = { plan: "pro", planEndsAt: inDays(-0.5), subscription: "ending" };
+      render(<PlanBadge compact={false} />);
+      expect(screen.getByTestId("plan-badge-detail").textContent).toBe("Free plan");
+    });
+
+    it("leaves an operator-issued key's countdown and Renew as they were", () => {
+      state.organisation = { plan: "pro", planEndsAt: inDays(12), subscription: null };
+      render(<PlanBadge compact={false} />);
+
+      expect(screen.getByTestId("plan-badge-detail").textContent).toMatch(/^12 days left/);
+      expect(screen.getByTestId("plan-badge-action").textContent).toBe("Renew");
     });
   });
 });

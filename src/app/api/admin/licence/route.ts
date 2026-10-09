@@ -17,12 +17,13 @@ export const GET = withAdmin(async (_request, { db }) => {
   if (!check.payload) return NextResponse.json({ configured: true, verdict: check.verdict });
 
   const expiresAt = Date.parse(check.payload.expiresAt);
-  const graceEndsAt = expiresAt + (check.payload.trial ? 0 : ENTITLEMENT_GRACE_MS);
+  const graceEndsAt = expiresAt + (check.payload.trial || check.payload.subscription === "ending" ? 0 : ENTITLEMENT_GRACE_MS);
   return NextResponse.json({
     configured: true,
     verdict: check.verdict,
     customer: check.payload.customer,
     trial: check.payload.trial === true,
+    subscription: check.payload.subscription ?? null,
     plan: check.payload.plan,
     features: check.payload.features,
     issuedAt: check.payload.issuedAt,

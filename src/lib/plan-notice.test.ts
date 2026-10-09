@@ -34,6 +34,31 @@ describe("planNotice (BP-930)", () => {
 
   it("a Pro licence past its end is in grace for 14 days", () => {
     const ended = day(-3);
-    expect(planNotice({ plan: "pro", planEndsAt: ended }, NOW)).toEqual({ kind: "grace", endedAt: ended, graceEndsAt: day(11) });
+    expect(planNotice({ plan: "pro", planEndsAt: ended }, NOW)).toEqual({ kind: "grace", endedAt: ended, graceEndsAt: day(11), paymentFailed: false });
+  });
+
+  // BP-983: a subscription says whether it renews by itself or was cancelled
+  describe("a subscription", () => {
+    it("that renews by itself has nothing to warn about, however near its end", () => {
+      expect(planNotice({ plan: "pro", planEndsAt: day(12), subscription: "renewing" }, NOW)).toEqual({ kind: "pro" });
+      expect(planNotice({ plan: "pro", planEndsAt: day(0.1), subscription: "renewing" }, NOW)).toEqual({ kind: "pro" });
+      expect(planNotice({ plan: "pro", planEndsAt: day(12) }, NOW)).toMatchObject({ kind: "ending", cancelled: false });
+    });
+
+    it("that renewed does not run past its end: a payment failed, and the 14 days are said as such", () => {
+      const ended = day(-3);
+      expect(planNotice({ plan: "pro", planEndsAt: ended, subscription: "renewing" }, NOW)).toEqual({ kind: "grace", endedAt: ended, graceEndsAt: day(11), paymentFailed: true });
+      expect(planNotice({ plan: "pro", planEndsAt: ended }, NOW)).toEqual({ kind: "grace", endedAt: ended, graceEndsAt: day(11), paymentFailed: false });
+    });
+
+    it("that was cancelled says when it ends from the day it is cancelled, not in the last month, and is Free the moment it does", () => {
+      expect(planNotice({ plan: "pro", planEndsAt: day(90), subscription: "ending" }, NOW)).toEqual({ kind: "ending", endsAt: day(90), daysLeft: 90, cancelled: true });
+      expect(planNotice({ plan: "pro", planEndsAt: day(-0.001), subscription: "ending" }, NOW)).toEqual({ kind: "free" });
+      expect(planNotice({ plan: "pro", planEndsAt: day(-3), subscription: "ending" }, NOW)).toEqual({ kind: "free" });
+    });
+
+    it("leaves a trial as it was, whatever else is passed", () => {
+      expect(planNotice({ plan: "pro", planEndsAt: day(5), trial: true, subscription: null }, NOW)).toMatchObject({ kind: "ending", daysLeft: 5, cancelled: false });
+    });
   });
 });

@@ -24,13 +24,14 @@ export interface EntitlementGate {
     features: string[];
     expiresAt?: Date | null;
     trial?: boolean;
+    subscription?: "renewing" | "ending";
   };
 }
 
 export function can(organisation: EntitlementGate, feature: FeatureKey): boolean {
   const { entitlements } = organisation;
 
-  const grace = entitlements.trial ? 0 : ENTITLEMENT_GRACE_MS;
+  const grace = entitlements.trial || entitlements.subscription === "ending" ? 0 : ENTITLEMENT_GRACE_MS;
   if (entitlements.expiresAt && Date.now() > entitlements.expiresAt.getTime() + grace) {
     return false;
   }

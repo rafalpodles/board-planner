@@ -160,7 +160,8 @@ describe("Subscription", () => {
     m.api.get.mockResolvedValue(live({ cancelAtPeriodEnd: true }));
     render(<Subscription />);
 
-    expect((await screen.findByTestId("subscription-cancelling")).textContent).toMatch(/ends with the paid period.*14 days.*no data is removed/);
+    expect((await screen.findByTestId("subscription-cancelling")).textContent).toMatch(/ends with the paid period.*Free plan.*no data is removed/);
+    expect(screen.getByTestId("subscription-cancelling").textContent).not.toMatch(/14 days/);
     expect(screen.getByText("Ends")).toBeTruthy();
   });
 

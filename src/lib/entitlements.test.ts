@@ -45,6 +45,17 @@ describe("can", () => {
     expect(can(organisation({ plan: "pro", expiresAt: ended }), "ai.byok")).toBe(true);
   });
 
+  // BP-983: cancelling ends Pro with the paid period; the 14 days are for a payment that failed
+  it("ends a cancelled subscription at its expiry with no grace, and gives one that did not renew its 14 days", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-08T12:00:00Z"));
+    const ended = new Date("2026-10-08T11:59:59Z");
+
+    expect(can(organisation({ plan: "pro", subscription: "ending", expiresAt: ended }), "ai.byok")).toBe(false);
+    expect(can(organisation({ plan: "pro", subscription: "ending", expiresAt: new Date("2026-10-08T12:00:00Z") }), "ai.byok")).toBe(true);
+    expect(can(organisation({ plan: "pro", subscription: "renewing", expiresAt: ended }), "ai.byok")).toBe(true);
+  });
+
   it("stays entitled through most of the grace window and refuses once it has fully passed", () => {
     const now = Date.now();
     const withinGrace = organisation({

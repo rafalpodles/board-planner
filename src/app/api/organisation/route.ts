@@ -23,6 +23,7 @@ async function describe(db: ScopedDb, admin: boolean) {
     plan: organisation.entitlements.plan,
     planEndsAt: organisation.entitlements.plan === "pro" ? organisation.entitlements.expiresAt?.toISOString() ?? null : null,
     trial: organisation.entitlements.plan === "pro" && organisation.entitlements.trial === true,
+    subscription: organisation.entitlements.plan === "pro" ? organisation.entitlements.subscription ?? null : null,
     ...(counts ? { members: counts[2].active, projects: counts[0], memberLimit: counts[1], invited: counts[2].pending } : {}),
   };
 }

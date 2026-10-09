@@ -3,13 +3,19 @@
 import Link from "next/link";
 import { useOrganisation } from "@/hooks/use-organisation";
 import { useAuth } from "@/hooks/use-auth";
-import { formatPlanDate, planNotice } from "@/lib/plan-notice";
+import { formatPlanDate, graceDaysLeft, planNotice } from "@/lib/plan-notice";
 
 const UPGRADE_HREF = "/settings/licence";
 
 function daysLabel(daysLeft: number): string {
   if (daysLeft <= 1) return "ends within a day";
   return `${daysLeft} days left`;
+}
+
+function graceLabel(graceEndsAt: string): string {
+  const days = graceDaysLeft(graceEndsAt);
+  if (days <= 1) return "last day of grace";
+  return `${days} days of grace left`;
 }
 
 export function PlanBadge({ compact }: { compact: boolean }) {
@@ -26,8 +32,10 @@ export function PlanBadge({ compact }: { compact: boolean }) {
       : notice.kind === "pro"
         ? trial ? "Pro trial" : "Pro plan"
         : notice.kind === "ending"
-          ? `${trial ? "Pro trial" : "Pro plan"}, ends ${formatPlanDate(notice.endsAt)}`
-          : `Pro plan ended ${formatPlanDate(notice.endedAt)}, in force until ${formatPlanDate(notice.graceEndsAt)}`;
+          ? `${trial ? "Pro trial" : notice.cancelled ? "Pro plan, cancelled" : "Pro plan"}, ends ${formatPlanDate(notice.endsAt)}`
+          : notice.paymentFailed
+            ? `Payment failed, Pro stays on until ${formatPlanDate(notice.graceEndsAt)}`
+            : `Pro plan ended ${formatPlanDate(notice.endedAt)}, in force until ${formatPlanDate(notice.graceEndsAt)}`;
   const name = notice.kind === "free" ? "Free" : trial ? "Trial" : "Pro";
   const held = (organisation.members ?? 0) + (organisation.invited ?? 0);
   const limit = isAdmin ? organisation.memberLimit ?? null : null;
@@ -35,9 +43,11 @@ export function PlanBadge({ compact }: { compact: boolean }) {
   const action =
     notice.kind === "free" || (trial && (notice.kind === "ending" || notice.kind === "pro"))
       ? "Upgrade"
-      : notice.kind === "ending" || notice.kind === "grace"
-        ? "Renew"
-        : null;
+      : notice.kind === "grace" && notice.paymentFailed
+        ? "Update payment"
+        : notice.kind === "ending" || notice.kind === "grace"
+          ? "Renew"
+          : null;
 
   if (compact) {
     return (
@@ -60,8 +70,8 @@ export function PlanBadge({ compact }: { compact: boolean }) {
         <span className={`min-w-0 flex-1 text-xs ${tone}`} data-testid="plan-badge-detail">
           {notice.kind === "free" && "Free plan"}
           {notice.kind === "pro" && (trial && organisation.planEndsAt ? `Ends ${formatPlanDate(organisation.planEndsAt)}` : "Plan active")}
-          {notice.kind === "ending" && `${daysLabel(notice.daysLeft)} · ${formatPlanDate(notice.endsAt)}`}
-          {notice.kind === "grace" && `Ended ${formatPlanDate(notice.endedAt)} · until ${formatPlanDate(notice.graceEndsAt)}`}
+          {notice.kind === "ending" && (notice.cancelled ? `Cancelled · ends ${formatPlanDate(notice.endsAt)}` : `${daysLabel(notice.daysLeft)} · ${formatPlanDate(notice.endsAt)}`)}
+          {notice.kind === "grace" && (notice.paymentFailed ? `Payment failed · ${graceLabel(notice.graceEndsAt)}` : `Ended ${formatPlanDate(notice.endedAt)} · until ${formatPlanDate(notice.graceEndsAt)}`)}
         </span>
       </div>
       {membersNote && (

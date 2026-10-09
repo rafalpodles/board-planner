@@ -12,6 +12,7 @@ export interface OrganisationSummary {
   plan: "free" | "pro";
   planEndsAt: string | null;
   trial?: boolean;
+  subscription?: "renewing" | "ending" | null;
   members?: number;
   memberLimit?: number | null;
   invited?: number;
