@@ -180,6 +180,22 @@ test.describe("an organisation's AI allowance, set by the operator", () => {
     expect((await chat(page)).status).toBe(200);
   });
 
+  test("a figure set during a trial is for the whole trial: it is refused at it, and the list names the trial's counter", async ({ page, request }) => {
+    await makePro(request, ACME, true);
+    const set = await putAllowance(request, ACME, { tokens: 1_000 });
+    expect(await set.json()).toEqual({ aiAllowance: { tokens: 1_000, scope: "trial" } });
+    await withDb(async (db) => {
+      await db.collection("aibudgets").deleteMany({ organisation: ACME.organisation });
+      await db.collection("aibudgets").insertOne({ organisation: ACME.organisation, kind: "trial", period: "all", tokens: 1_000, calls: 1, ownTokens: 0, ownCalls: 0 });
+    });
+
+    expect((await listed(request)).acme.ai).toMatchObject({ scope: "trial", used: 1_000, limit: 1_000, overridden: true, resetsAt: null });
+    await open(page, ACME);
+    const refused = await chat(page);
+    expect(refused.status).toBe(429);
+    expect(refused.body).toMatchObject({ reason: "ai_budget", scope: "trial", used: 1_000, limit: 1_000 });
+  });
+
   test("says that an organisation whose plan has no managed AI has no limit to set", async ({ request }) => {
     await withDb((db) => db.collection("organisations").updateOne({ _id: GLOBEX.organisation }, { $unset: { licenceKey: 1 } }));
 
