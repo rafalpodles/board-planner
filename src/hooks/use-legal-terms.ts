@@ -11,8 +11,8 @@ export function useLegalTerms(): LegalTerms | null | undefined {
     let live = true;
     fetch("/api/legal/terms")
       .then(async (res) => (res.ok ? ((await res.json()) as { terms?: LegalTerms | null }) : null))
-      .then((data) => live && data && setTerms(data.terms ?? null))
-      .catch(() => {});
+      .then((data) => live && setTerms(data?.terms ?? null))
+      .catch(() => live && setTerms(null));
     return () => {
       live = false;
     };
