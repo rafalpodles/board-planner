@@ -1475,7 +1475,7 @@ export async function addComment(
       title: task.title,
       status: task.status,
     },
-    data: { commentBody: bodyText.trim().substring(0, 200), author: withAiMark(actor.username, actor.username) },
+    data: { commentBody: bodyText.trim().substring(0, 200), author: actor.username },
   };
   dispatchWebhooks(db, projectId, "comment_added", eventPayload);
   dispatchNotifications(db, projectId, "comment_added", eventPayload);

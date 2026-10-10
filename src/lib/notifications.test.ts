@@ -159,6 +159,32 @@ describe("dispatchNotifications — markup in what members write", () => {
     expect(text).toContain("see &lt;https://phish.example|Reset your password&gt;");
   });
 
+  // BP-942
+  it("names the PM as an AI in the team chat, on Slack and Discord, and a person plainly", async () => {
+    channelsOf("slack", ["comment_added"], "https://hooks.slack.com/services/T/B/x");
+    await dispatchNotifications(scopedToDefaultOrganisation(), "p1", "comment_added", {
+      ...PAYLOAD,
+      data: { commentBody: "Split it", author: "pm" },
+    });
+    expect(JSON.stringify(sentBody())).toContain("*By:* pm (AI)");
+
+    safeFetch.mockClear();
+    channelsOf("discord", ["comment_added"], "https://discord.com/api/webhooks/1/x");
+    await dispatchNotifications(scopedToDefaultOrganisation(), "p1", "comment_added", {
+      ...PAYLOAD,
+      data: { commentBody: "Split it", author: "pm" },
+    });
+    expect(sentBody().embeds[0].fields[0]).toMatchObject({ name: "Author", value: "pm \\(AI\\)" });
+
+    safeFetch.mockClear();
+    channelsOf("discord", ["comment_added"], "https://discord.com/api/webhooks/1/x");
+    await dispatchNotifications(scopedToDefaultOrganisation(), "p1", "comment_added", {
+      ...PAYLOAD,
+      data: { commentBody: "Split it", author: "anna" },
+    });
+    expect(sentBody().embeds[0].fields[0]).toMatchObject({ name: "Author", value: "anna" });
+  });
+
   it("does not let a Discord comment ping the room or forge markdown", async () => {
     channelsOf("discord", ["comment_added"], "https://discord.com/api/webhooks/1/x");
 
