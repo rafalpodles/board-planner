@@ -10,6 +10,7 @@ import { hostNotFound } from "@/lib/middleware";
 import { originFor } from "@/lib/organisation-host";
 import { registerPlannerAppResources } from "@/lib/mcp/apps";
 import { registerPlannerTools } from "@/lib/mcp/tools";
+import { SERVER_INSTRUCTIONS } from "@/lib/mcp/instructions";
 
 /**
  * The MCP tools call this instance's own API through it, so the base URL must come from
@@ -35,7 +36,7 @@ const baseHandler = createMcpHandler(
     registerPlannerTools(server);
     registerPlannerAppResources(server);
   },
-  { serverInfo: { name: "boardplanner", version: "1.0.0" } },
+  { serverInfo: { name: "boardplanner", version: "1.0.0" }, instructions: SERVER_INSTRUCTIONS },
   { basePath: "/api", disableSse: true },
 );
 
