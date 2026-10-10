@@ -11,7 +11,8 @@ const { api, toast } = vi.hoisted(() => ({
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast, dismiss: vi.fn() }) }));
 
-const FREE_CLOUD = { hosted: true, plan: "free", set: false, hint: "", unreadable: false, included: false };
+const NO_USAGE = { scope: "month", used: 0, limit: null, resetsAt: null, today: 0, dailyCeiling: null, ownTokens: 0, locked: false };
+const FREE_CLOUD = { hosted: true, plan: "free", set: false, hint: "", unreadable: false, included: false, usage: NO_USAGE };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -182,7 +183,7 @@ describe("Settings → AI key", () => {
   });
 
   it("describes a self-hosted server's own key, not a plan", async () => {
-    api.get.mockResolvedValue({ hosted: false, plan: "free", set: false, hint: "", unreadable: false, included: true });
+    api.get.mockResolvedValue({ hosted: false, plan: "free", set: false, hint: "", unreadable: false, included: true, usage: NO_USAGE });
     render(<AiKeys />);
 
     expect(await screen.findByText(/runs on the key this server was set up with/)).toBeTruthy();
@@ -191,9 +192,75 @@ describe("Settings → AI key", () => {
   });
 
   it("says a self-hosted server with no key anywhere does not run", async () => {
-    api.get.mockResolvedValue({ hosted: false, plan: "free", set: false, hint: "", unreadable: false, included: false });
+    api.get.mockResolvedValue({ hosted: false, plan: "free", set: false, hint: "", unreadable: false, included: false, usage: NO_USAGE });
     render(<AiKeys />);
 
     expect(await screen.findByText(/no key was set on the server/)).toBeTruthy();
+  });
+});
+
+// BP-680: what the organisation has used of what it may spend of the operator's key
+describe("Settings → AI key: usage", () => {
+  const usage = (over: Record<string, unknown> = {}) => ({
+    scope: "month",
+    used: 4_200_000,
+    limit: 15_000_000,
+    resetsAt: "2026-11-01T00:00:00.000Z",
+    today: 900_000,
+    dailyCeiling: 3_000_000,
+    ownTokens: 0,
+    locked: false,
+    ...over,
+  });
+  const PRO_CLOUD = { ...FREE_CLOUD, plan: "pro", included: true };
+
+  it("says how much of the month's allowance is used and when it renews, with the bar and the share", async () => {
+    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage() });
+    render(<AiKeys />);
+
+    const month = await screen.findByTestId("ai-usage-month");
+    expect(month.textContent).toBe("4,200,000 of 15,000,000 tokens used this month. It renews on 1 November 2026 (UTC).");
+    expect(screen.getByText("28% used")).toBeTruthy();
+    expect(screen.getByRole("progressbar", { name: "AI tokens used this month" }).getAttribute("aria-valuenow")).toBe("4200000");
+    expect(screen.getByTestId("ai-usage-today").textContent).toBe("Today (UTC): 900,000 tokens; one day may use at most 3,000,000.");
+  });
+
+  it("says a trial's allowance is for the trial, with nothing renewing", async () => {
+    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ scope: "trial", used: 3_000_000, limit: 3_000_000, resetsAt: null, dailyCeiling: 600_000 }) });
+    render(<AiKeys />);
+
+    expect((await screen.findByTestId("ai-usage-month")).textContent).toBe("3,000,000 of 3,000,000 tokens used in your trial.");
+    expect(screen.getByText("100% used")).toBeTruthy();
+  });
+
+  it("counts and shows tokens where nothing limits them, with no bar", async () => {
+    api.get.mockResolvedValue({ hosted: false, plan: "free", set: false, hint: "", unreadable: false, included: true, usage: usage({ limit: null, resetsAt: null, dailyCeiling: null, used: 12_345, today: 300 }) });
+    render(<AiKeys />);
+
+    expect((await screen.findByTestId("ai-usage-month")).textContent).toBe("12,345 tokens used this month, and nothing limits them.");
+    expect(screen.getByText("Not limited")).toBeTruthy();
+    expect(screen.queryByRole("progressbar")).toBeNull();
+    expect(screen.getByTestId("ai-usage-today").textContent).toBe("Today (UTC): 300 tokens.");
+  });
+
+  it("shows what an own key used apart, and says it is never limited, only when it used any", async () => {
+    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ ownTokens: 77_000 }) });
+    render(<AiKeys />);
+    expect((await screen.findByTestId("ai-usage-own")).textContent).toBe("Your own key: 77,000 tokens this month, counted and never limited.");
+
+    cleanup();
+    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ ownTokens: 0 }) });
+    render(<AiKeys />);
+    await screen.findByTestId("ai-usage-month");
+    expect(screen.queryByTestId("ai-usage-own")).toBeNull();
+  });
+
+  it("says the operator has switched the key off, and offers the own key as the way on", async () => {
+    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ locked: true }) });
+    render(<AiKeys />);
+
+    const alert = await screen.findByTestId("ai-usage-locked");
+    expect(alert.textContent).toMatch(/The operator has switched off the use of its key for this organisation\. Add your own key below to keep going\./);
+    expect(screen.getByText("Switched off")).toBeTruthy();
   });
 });

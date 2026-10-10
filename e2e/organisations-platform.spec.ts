@@ -131,6 +131,7 @@ test.describe("BP-892: the platform operator is the licence service, not an orga
       return [
         { method: "POST", path: `${base}/suspend`, body: JSON.stringify({ reason: "x" }) },
         { method: "POST", path: `${base}/resume`, body: "" },
+        { method: "POST", path: `${base}/ai`, body: JSON.stringify({ locked: true, reason: "x" }) },
         { method: "DELETE", path: `${base}?confirm=${who.slug}`, body: "" },
         { method: "DELETE", path: `${base}?dryRun=1`, body: "" },
         { method: "GET", path: `${base}/export`, body: "" },

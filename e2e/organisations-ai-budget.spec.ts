@@ -28,6 +28,18 @@ async function makePro(request: APIRequestContext, who: OrganisationFixture, tri
   expect(response.status(), await response.text()).toBe(200);
 }
 
+/** A request the operator signs: the platform host, and nothing an organisation's own credentials can make */
+async function platform(request: APIRequestContext, method: "GET" | "POST", path: string, data?: unknown) {
+  const body = data === undefined ? new Uint8Array() : Buffer.from(JSON.stringify(data));
+  return request.fetch(`${ORGANISATIONS_API}${path}`, {
+    method,
+    headers: { host: PLATFORM_HOST, ...(data === undefined ? {} : { "content-type": "application/json" }), ...signPlatformRequest({ method, host: PLATFORM_HOST, path, body }, E2E_PLATFORM_REQUEST_KEY) },
+    ...(data === undefined ? {} : { data: body }),
+  });
+}
+
+const aiLockPath = (who: OrganisationFixture) => `/api/platform/organisations/${who.organisation.toHexString()}/ai`;
+
 async function withDb<T>(run: (db: mongoose.mongo.Db) => Promise<T>): Promise<T> {
   await mongoose.connect(E2E_MONGODB_URI);
   try {
@@ -43,11 +55,11 @@ async function monthlyLimit(who: OrganisationFixture): Promise<number> {
   return 15_000_000 + 1_000_000 * Math.max(0, people - 10);
 }
 
-const spend = (who: OrganisationFixture, kind: "day" | "month" | "trial", tokens: number) =>
+const spend = (who: OrganisationFixture, kind: "day" | "month" | "trial", tokens: number, ownTokens = 0) =>
   withDb(async (db) => {
     const period = kind === "day" ? TODAY : kind === "month" ? MONTH : "all";
     await db.collection("aibudgets").deleteMany({ organisation: who.organisation, kind, period });
-    await db.collection("aibudgets").insertOne({ organisation: who.organisation, kind, period, tokens, calls: 1, ownTokens: 0, ownCalls: 0 });
+    await db.collection("aibudgets").insertOne({ organisation: who.organisation, kind, period, tokens, calls: 1, ownTokens, ownCalls: ownTokens ? 1 : 0 });
   });
 
 const counters = (who: OrganisationFixture) => withDb((db) => db.collection("aibudgets").find({ organisation: who.organisation }).sort({ kind: 1 }).toArray());
@@ -213,4 +225,105 @@ test("on screen: AI Assist and the PM chat say how much was used and when it ren
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(page.getByText(/its allowance for the month\. It renews on 1 November 2026 \(UTC\)/)).toBeVisible();
   await page.screenshot({ path: "e2e/.artifacts/bp680-chat-refused-phone.png" });
+});
+
+// BP-680: the operator's lock is about the operator's key: one organisation's, never the neighbour's, never an own key
+test("the operator switches its key off for one organisation: that one is refused, the neighbour and an own key are not, and switching on restores it", async ({ page, request }) => {
+  await open(page, ACME);
+
+  const locked = await platform(request, "POST", aiLockPath(ACME), { locked: true, reason: "abuse report 17" });
+  expect(locked.status(), await locked.text()).toBe(200);
+  expect(await locked.json()).toEqual({ locked: true });
+
+  const refused = await chat(page);
+  expect(refused.status).toBe(403);
+  expect(refused.body).toMatchObject({ reason: "ai_locked" });
+  expect(refused.body.error).toMatch(/AI is switched off for this organisation by the operator: abuse report 17\. Add your own key in Settings → AI key/);
+  expect((await generate(page)).status).toBe(403);
+  expect(await rows(ACME)).toEqual([]);
+
+  await open(page, GLOBEX);
+  expect((await chat(page)).status).toBe(200);
+  expect(await rows(GLOBEX)).toHaveLength(1);
+
+  process.env.ENCRYPTION_KEY = E2E_ENCRYPTION_KEY;
+  await withDb(async (db) => {
+    await db.collection("settings").deleteMany({ organisation: ACME.organisation });
+    await db.collection("settings").insertOne({ organisation: ACME.organisation, aiModel: "gpt-4o-mini", signUpDomains: [], openrouterKey: encryptSecret(OWN_KEY, ACME.organisation), openrouterKeyHint: "6789" });
+  });
+  await open(page, ACME);
+  expect((await chat(page)).status).toBe(200);
+  expect(await rows(ACME)).toEqual([expect.objectContaining({ keySource: "own" })]);
+
+  await withDb((db) => db.collection("settings").deleteMany({ organisation: ACME.organisation }));
+  expect((await chat(page)).status).toBe(403);
+  const unlocked = await platform(request, "POST", aiLockPath(ACME), { locked: false });
+  expect(await unlocked.json()).toEqual({ locked: false });
+  // The turn on the own key may still hold the project's one turn for a moment
+  let again = await chat(page);
+  for (let tries = 0; again.status === 409 && tries < 20; tries++) {
+    await page.waitForTimeout(250);
+    again = await chat(page);
+  }
+  expect(again.status).toBe(200);
+
+  const audit = await withDb((db) => db.collection("platformauditlogs").find({ subject: ACME.organisation, action: /^organisation_ai_/ }).sort({ createdAt: 1 }).toArray());
+  expect(audit.map((row) => [row.action, row.detail])).toEqual([["organisation_ai_locked", "abuse report 17"], ["organisation_ai_unlocked", ""]]);
+});
+
+test("the lock takes only what an operator may send: a true or false, a short reason, an organisation that exists", async ({ request }) => {
+  for (const [body, status] of [
+    [{ locked: "yes" }, 400],
+    [{}, 400],
+    [{ locked: true, reason: "x".repeat(501) }, 400],
+    [{ locked: true, reason: 5 }, 400],
+  ] as const) {
+    expect((await platform(request, "POST", aiLockPath(ACME), body)).status(), JSON.stringify(body)).toBe(status);
+  }
+  expect((await platform(request, "POST", "/api/platform/organisations/0123456789abcdef01234567/ai", { locked: true })).status()).toBe(404);
+  expect((await platform(request, "POST", "/api/platform/organisations/not-an-id/ai", { locked: true })).status()).toBe(404);
+
+  const locked = await withDb((db) => db.collection("organisations").findOne({ _id: ACME.organisation }, { projection: { aiLockedAt: 1 } }));
+  expect(locked?.aiLockedAt ?? null).toBeNull();
+});
+
+test("the operator's list says how much of its allowance each organisation has used and whether its key is switched off", async ({ request }) => {
+  const limit = await monthlyLimit(ACME);
+  await spend(ACME, "month", 4_200_000, 77_000);
+  await spend(ACME, "day", 900_000);
+  await platform(request, "POST", aiLockPath(GLOBEX), { locked: true, reason: "unpaid" });
+
+  const list = await (await platform(request, "GET", "/api/platform/organisations")).json();
+  const ai = (who: OrganisationFixture) => list.organisations.find((o: { id: string }) => o.id === who.organisation.toHexString()).ai;
+
+  expect(ai(ACME)).toMatchObject({ scope: "month", used: 4_200_000, limit, today: 900_000, dailyCeiling: Math.ceil(limit / 5), ownTokens: 77_000, locked: false });
+  expect(ai(ACME).resetsAt).toMatch(/^\d{4}-\d{2}-01T00:00:00\.000Z$/);
+  expect(ai(GLOBEX)).toMatchObject({ used: 0, locked: true });
+});
+
+test("on screen: Settings → AI key says what has been used and when it renews, and that the operator switched the key off", async ({ page, request }) => {
+  const limit = await monthlyLimit(ACME);
+  await spend(ACME, "month", 4_200_000, 77_000);
+  await spend(ACME, "day", 900_000);
+  await signInOn(page.context(), ACME);
+
+  await page.goto(`${originOf(ACME)}/settings/ai-keys`);
+  const month = page.getByTestId("ai-usage-month");
+  await expect(month).toContainText(`4,200,000 of ${limit.toLocaleString("en-US")} tokens used this month. It renews on 1 `);
+  await expect(page.getByText(`${Math.round((4_200_000 / limit) * 100)}% used`)).toBeVisible();
+  await expect(page.getByTestId("ai-usage-today")).toContainText(`Today (UTC): 900,000 tokens; one day may use at most ${Math.ceil(limit / 5).toLocaleString("en-US")}.`);
+  await expect(page.getByTestId("ai-usage-own")).toContainText("Your own key: 77,000 tokens this month, counted and never limited.");
+  await expect(page.getByTestId("ai-usage-locked")).toHaveCount(0);
+  await page.screenshot({ path: "e2e/.artifacts/bp680-ai-usage.png" });
+
+  await platform(request, "POST", aiLockPath(ACME), { locked: true, reason: "abuse report 17" });
+  await page.reload();
+  await expect(page.getByTestId("ai-usage-locked")).toContainText("The operator has switched off the use of its key for this organisation. Add your own key below to keep going.");
+  await expect(page.getByText("Switched off")).toBeVisible();
+  await page.screenshot({ path: "e2e/.artifacts/bp680-ai-usage-locked.png" });
+
+  await page.setViewportSize({ width: 390, height: 800 });
+  await page.reload();
+  await expect(page.getByTestId("ai-usage-month")).toBeVisible();
+  await page.screenshot({ path: "e2e/.artifacts/bp680-ai-usage-phone.png" });
 });

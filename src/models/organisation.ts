@@ -24,6 +24,9 @@ export interface IOrganisation {
   entitlements: IOrganisationEntitlements;
   suspendedAt?: Date | null;
   suspendedReason?: string;
+  // The operator switched off what this organisation may spend of the operator's AI key; its own key is not touched (BP-680)
+  aiLockedAt?: Date | null;
+  aiLockedReason?: string;
   deletedAt?: Date | null;
   deletingAt?: Date | null;
   // When the admins were told the organisation will be deleted for want of anybody signing in (BP-674)
@@ -56,6 +59,8 @@ const organisationSchema = new Schema<IOrganisation>({
   licenceKey: { type: String },
   suspendedAt: { type: Date, default: null },
   suspendedReason: { type: String, default: "" },
+  aiLockedAt: { type: Date, default: null },
+  aiLockedReason: { type: String, default: "" },
   deletedAt: { type: Date, default: null },
   deletingAt: { type: Date, default: null },
   deadNoticeAt: { type: Date, default: null },

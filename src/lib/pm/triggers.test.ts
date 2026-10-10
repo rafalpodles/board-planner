@@ -15,6 +15,7 @@ let reviewed: Record<string, unknown> | null = null;
 // The gateway's counters are its own tests' business (src/lib/ai-gateway): these only need the door to open
 const checkBudget = vi.hoisted(() => vi.fn(async () => ({ refusal: null as unknown, counter: "month" })));
 vi.mock("@/lib/ai-gateway/budget", () => ({ counterKindOf: async () => "month", checkBudget }));
+vi.mock("@/lib/organisation", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/organisation")>()), getOrganisation: async () => ({ aiLockedAt: null }) }));
 vi.mock("@/lib/ai-gateway/usage", () => ({ recordUsage: vi.fn() }));
 vi.mock("@/models/project", () => ({
   Project: {

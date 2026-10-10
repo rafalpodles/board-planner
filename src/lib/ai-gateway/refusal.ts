@@ -16,3 +16,10 @@ export function describeBudgetRefusal(refusal: BudgetRefusal): string {
   }
   return `AI is unavailable: this organisation has used ${counter} AI tokens, its allowance for the month. It renews on ${date(refusal.resetsAt ?? new Date())} (UTC).${own}`;
 }
+
+/** What a refusal says when the operator has switched off the use of its key for this organisation */
+export function describeAiLock(reason: string): string {
+  const own = organisationDomain() !== null ? " Add your own key in Settings → AI key to keep going." : "";
+  const why = reason.trim().replace(/[.\s]+$/, "");
+  return `AI is switched off for this organisation by the operator${why ? `: ${why}` : ""}.${own}`;
+}

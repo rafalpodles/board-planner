@@ -2,7 +2,8 @@ import type { ScopedDb } from "@/lib/db-scope";
 import { modelKeyRefusalBody, resolveModelKey } from "@/lib/model-keys";
 import { chatCompletion, type OrCompletionResult, type OrUsage } from "@/lib/pm/openrouter";
 import { checkBudget, counterKindOf } from "./budget";
-import { describeBudgetRefusal } from "./refusal";
+import { getOrganisation } from "@/lib/organisation";
+import { describeAiLock, describeBudgetRefusal } from "./refusal";
 import { recordUsage, type UsageEntry } from "./usage";
 
 const CHARACTERS_PER_TOKEN = 4;
@@ -39,6 +40,12 @@ export async function openGate(db: ScopedDb, notConfigured: { error: string; sta
     return { ok: false, status, error: String(body.error), body };
   }
   if (modelKey.source === "own") return { ok: true, key: modelKey.key, keySource: "own", counter: await counterKindOf(db) };
+
+  const { aiLockedAt, aiLockedReason } = await getOrganisation(db.organisation);
+  if (aiLockedAt) {
+    const error = describeAiLock(aiLockedReason ?? "");
+    return { ok: false, status: 403, error, body: { error, reason: "ai_locked" } };
+  }
 
   const { refusal, counter } = await checkBudget(db);
   if (refusal) {
