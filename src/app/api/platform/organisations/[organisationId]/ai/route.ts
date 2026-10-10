@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { setAiLocked } from "@/lib/ai-gateway/lock";
+import { forgetManagedPlans } from "@/lib/model-keys";
 import { logPlatformAudit, withPlatformRequest } from "@/lib/platform-route";
 
 const MAX_REASON = 500;
@@ -24,6 +25,8 @@ export const POST = withPlatformRequest<{ organisationId: string }>(async (_requ
     return NextResponse.json({ error: "The default organisation cannot be locked" }, { status: 409 });
   }
   if (outcome === "not_found") return NextResponse.json({ error: "Not found" }, { status: 404 });
+  // What the screens were last told is kept for a few seconds; this process stops telling it now, the others within those seconds
+  forgetManagedPlans();
   await logPlatformAudit({
     action: locked ? "organisation_ai_locked" : "organisation_ai_unlocked",
     keyId,
