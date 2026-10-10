@@ -146,7 +146,6 @@ test("a Free organisation's admin chooses a period and is sent to Stripe, with w
   await expect(page.getByTestId("subscription-price")).toHaveText("$29 per month plus VAT, renews until cancelled.");
   await expect(page.getByTestId("subscription-withdrawal-right")).toHaveText("You can withdraw within 14 days. Terms");
   await expect(panel.getByRole("link", { name: "Terms" })).toHaveAttribute("href", "https://board-planner.com/legal/terms");
-  await expect(page.getByTestId("subscription-seller")).toHaveText("Seller: Example Seller, 1 Example Street, 00-001 Warsaw, Poland");
   await expect(page.getByTestId("subscription-checkout")).toHaveText("Subscribe with an obligation to pay");
   await expect(page.getByTestId("subscription-checkout")).toBeDisabled();
   const consent = panel.getByRole("checkbox", { name: "Start Pro now. If I withdraw within 14 days I pay for the days used." });

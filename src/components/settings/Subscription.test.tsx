@@ -518,28 +518,18 @@ describe("Subscription", () => {
       subscription: null,
       memberPrice: null,
       upcoming: null,
-      seller: { name: "Jan Kowalski Board Planner", address: "ul. Prosta 1, 00-001 Warszawa, Poland" },
       offer: { launch: true, includedMembers: 10, taxInclusive: true, month: { base: eur(4999), member: eur(499) }, year: { base: eur(49990), member: eur(4990) } },
       ...over,
     });
     const button = () => screen.getByTestId("subscription-checkout") as HTMLButtonElement;
 
-    it("says the gross price, that it renews, the right to withdraw with the Terms, and the seller", async () => {
+    it("says the gross price, that it renews, and the right to withdraw with the Terms", async () => {
       m.api.get.mockResolvedValue(offered());
       render(<Subscription />);
 
       expect((await screen.findByTestId("subscription-price")).textContent).toBe("€49.99 per month including VAT, renews until cancelled.");
       expect(screen.getByTestId("subscription-withdrawal-right").textContent).toBe("You can withdraw within 14 days. Terms");
       expect(screen.getByRole("link", { name: "Terms" }).getAttribute("href")).toBe("https://board-planner.com/legal/terms");
-      expect(screen.getByTestId("subscription-seller").textContent).toBe("Seller: Jan Kowalski Board Planner, ul. Prosta 1, 00-001 Warszawa, Poland");
-    });
-
-    it("names no seller it was not given", async () => {
-      m.api.get.mockResolvedValue(offered({ seller: null }));
-      render(<Subscription />);
-
-      await screen.findByTestId("subscription-withdrawal-right");
-      expect(screen.queryByTestId("subscription-seller")).toBeNull();
     });
 
     it("holds the order until the unticked consent is ticked, and the button says the order obliges to pay", async () => {

@@ -32,7 +32,7 @@ export interface OfferSummary {
 
 export type BillingSummary =
   | { available: false; unreachable?: true }
-  | { available: true; launchOpen: boolean; subscription: SubscriptionSummary | null; memberPrice: Money | null; upcoming: Money | null; offer: OfferSummary | null; seller: { name: string; address: string } | null };
+  | { available: true; launchOpen: boolean; subscription: SubscriptionSummary | null; memberPrice: Money | null; upcoming: Money | null; offer: OfferSummary | null };
 
 /** An amount in the currency's smallest unit and the currency, read from what the service says under `field` */
 export function moneyOf(value: unknown, field: "unitAmount" | "amountDue"): Money | null {

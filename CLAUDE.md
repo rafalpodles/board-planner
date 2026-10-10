@@ -278,9 +278,6 @@ LICENCE_PULL_KEY=         # loopback) and Board Planner's own Ed25519 key {keyId
                           # checks as the push (storeOrganisationLicence: bound to it, newer, compare-and-set).
                           # A new organisation also asks once, at sign-up and whatever LICENCE_PULL_TICK_MS says, waiting at most 4 s and never failing the sign-up (BP-929).
                           # One without the other stops the app at boot (BP-897)
-LEGAL_SELLER_NAME=        # Optional, with LEGAL_SELLER_ADDRESS — the seller Settings → Organisation → Subscription
-LEGAL_SELLER_ADDRESS=     # names before a checkout. LEGAL_TERMS_VERSION, when set, goes to the licence service with
-                          # the order (BP-941)
 BOOTSTRAP_TOKEN=          # Optional — setup code for the first account; unset, one is generated and
                           # printed to the server log while the instance has no users (BP-325)
 ORGANISATION_DOMAIN=      # Optional — e.g. board-planner.com: organisations live on <slug>.ORGANISATION_DOMAIN, the

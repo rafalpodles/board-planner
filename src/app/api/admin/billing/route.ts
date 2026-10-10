@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { askBilling } from "@/lib/billing-client";
 import { withAdmin } from "@/lib/middleware";
 import { organisationDomain } from "@/lib/organisation-host";
-import { legalSeller } from "@/lib/legal-seller";
 import { moneyOf, offerSummary, subscriptionSummary } from "@/lib/subscription-summary";
 
 export const GET = withAdmin(async (_request, { db }) => {
@@ -17,6 +16,5 @@ export const GET = withAdmin(async (_request, { db }) => {
     memberPrice: moneyOf(answer.body.memberPrice, "unitAmount"),
     upcoming: moneyOf(answer.body.upcoming, "amountDue"),
     offer: offerSummary(answer.body.offer),
-    seller: legalSeller(),
   });
 });
