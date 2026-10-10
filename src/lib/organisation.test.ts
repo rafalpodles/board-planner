@@ -75,6 +75,45 @@ describe("getOrganisation", () => {
   });
 });
 
+describe("the default organisation's first write (BP-995)", () => {
+  const duplicateOn = (field: string) => Object.assign(new Error("E11000"), { code: 11000, keyPattern: { [field]: 1 } });
+  const rejects = (err: unknown) => ({ lean: () => Promise.reject(err) });
+
+  it("retries once when a concurrent first read inserted the row first, and answers with that row", async () => {
+    findOneAndUpdate
+      .mockReturnValueOnce(rejects(duplicateOn("_id")))
+      .mockReturnValueOnce(resolves({ _id: DEFAULT_ORGANISATION_ID, entitlements: FREE }));
+
+    const row = await getOrganisation(DEFAULT_ORGANISATION_ID);
+
+    expect(row.entitlements).toMatchObject(FREE);
+    expect(findOneAndUpdate).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries a rename the same way, keeping the name it was asked for", async () => {
+    findOneAndUpdate.mockReturnValueOnce(rejects(duplicateOn("_id"))).mockReturnValueOnce(resolves({}));
+
+    await renameOrganisation(DEFAULT_ORGANISATION_ID, "Acme");
+
+    expect(findOneAndUpdate).toHaveBeenCalledTimes(2);
+    expect(findOneAndUpdate.mock.calls[1][1]).toMatchObject({ $set: { name: "Acme" } });
+  });
+
+  it("does not retry a failure that is not a collision on the row's id", async () => {
+    findOneAndUpdate.mockReturnValueOnce(rejects(duplicateOn("slug")));
+
+    await expect(getOrganisation(DEFAULT_ORGANISATION_ID)).rejects.toThrow("E11000");
+    expect(findOneAndUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives up after the one retry rather than looping", async () => {
+    findOneAndUpdate.mockReturnValue(rejects(duplicateOn("_id")));
+
+    await expect(getOrganisation(DEFAULT_ORGANISATION_ID)).rejects.toThrow("E11000");
+    expect(findOneAndUpdate).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("getOrganisation on a single-organisation instance: LICENCE_KEY", () => {
   const stored = { _id: DEFAULT_ORGANISATION_ID, entitlements: FREE };
   beforeEach(() => findOneAndUpdate.mockReturnValue(resolves(stored)));
