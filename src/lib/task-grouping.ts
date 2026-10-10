@@ -139,3 +139,48 @@ export function groupTasks(tasks: ApiTask[], groupBy: GroupBy, ctx: GroupContext
 export function flattenGroups(groups: TaskGroup[], collapsed?: ReadonlySet<string>): ApiTask[] {
   return groups.flatMap((g) => (collapsed?.has(g.key) ? [] : g.tasks));
 }
+
+/** The row a board cell sits in: a drop there also gives the task this lane's value */
+export interface LaneRef {
+  groupBy: LaneGroupBy;
+  key: string;
+  label: string;
+}
+
+export const LANE_GROUP_BY = ["assignee", "priority", "category"] as const;
+
+export type LaneGroupBy = (typeof LANE_GROUP_BY)[number];
+
+/** What the board can lay out as rows; anything else the list groups by, the board draws without lanes */
+export function laneGroupBy(groupBy: GroupBy): LaneGroupBy | "" {
+  return (LANE_GROUP_BY as readonly string[]).includes(groupBy) ? (groupBy as LaneGroupBy) : "";
+}
+
+/** The key of the group `groupTasks` would put this task in, so a drop target and a task can be compared */
+export function laneKeyOf(groupBy: LaneGroupBy, task: ApiTask): string {
+  switch (groupBy) {
+    case "assignee": {
+      const person = task.assignee && typeof task.assignee === "object" ? task.assignee : null;
+      return person ? valueKey(person.username) : NONE_GROUP;
+    }
+    case "priority":
+      return valueKey(task.priority || DEFAULT_PRIORITY);
+    case "category":
+      return task.category ? valueKey(task.category) : NONE_GROUP;
+  }
+}
+
+/**
+ * The field a drop into a lane sets on the task, or null when the lane does not name a value to
+ * give: a task cannot be left without a category, so the "No category" lane changes nothing.
+ */
+export function laneChangeFor(
+  groupBy: LaneGroupBy,
+  key: string
+): { field: "assignee" | "priority" | "category"; value: string | null } | null {
+  if (key === NONE_GROUP) return groupBy === "assignee" ? { field: "assignee", value: null } : null;
+  const value = key.startsWith("v:") ? key.slice(2) : "";
+  if (!value) return null;
+  if (groupBy === "priority" && !(value in PRIORITY_ORDER)) return null;
+  return { field: groupBy, value };
+}
