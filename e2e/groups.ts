@@ -172,6 +172,8 @@ export const GROUPS = {
     "organisations-public-pages.spec.ts",
     "organisations-sign-in.spec.ts",
     "organisations-sign-up.spec.ts",
+    "organisations-terms.spec.ts",
+    "terms-self-hosted.spec.ts",
     "sessions-and-auth.spec.ts",
     "proxied-login-throttle.spec.ts",
     "search-engines-stay-out.spec.ts",

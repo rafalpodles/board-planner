@@ -15,6 +15,7 @@ import { logProjectAudit } from "@/lib/projectAudit";
 import { IInvitation } from "@/types";
 import type { ScopedDb } from "@/lib/db-scope";
 import { organisationOf } from "@/lib/db-scope";
+import type { TermsAcceptance } from "@/lib/legal-terms";
 
 export interface NewAccount {
   username: string;
@@ -26,6 +27,7 @@ export interface NewAccount {
   providerProvesAddress?: boolean;
   /** The groups that identity's provider named, for `OIDC_ADMIN_GROUP`. */
   groups?: string[];
+  terms: TermsAcceptance;
 }
 
 /**
@@ -61,6 +63,7 @@ export async function completeAcceptance(
       emailVerifiedAt:
         invitation.deliveredAs === "email" || (account.identity && account.providerProvesAddress) ? new Date() : null,
       role: authority.role,
+      ...account.terms,
     });
   } catch (err) {
     await releaseInvitation(db, invitation._id).catch(() => {});

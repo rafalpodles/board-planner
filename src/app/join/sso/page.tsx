@@ -7,6 +7,8 @@ import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { APP_NAME } from "@/lib/brand";
+import { useLegalTerms } from "@/hooks/use-legal-terms";
+import { TermsCheckbox, termsUnknown } from "@/components/legal/TermsCheckbox";
 
 interface Held {
   email: string;
@@ -22,6 +24,8 @@ function SsoSignUp() {
   const [username, setUsername] = useState("");
   const [fullName, setFullName] = useState("");
   const [error, setError] = useState("");
+  const [acceptTerms, setAcceptTerms] = useState(false);
+  const legal = useLegalTerms();
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -47,7 +51,7 @@ function SsoSignUp() {
       const res = await fetch("/api/auth/oidc/signup", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ username, fullName }),
+        body: JSON.stringify({ username, fullName, acceptTerms }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -101,12 +105,13 @@ function SsoSignUp() {
           onChange={(e) => setFullName(e.target.value)}
           required
         />
+        <TermsCheckbox legal={legal} checked={acceptTerms} onChange={setAcceptTerms} />
         {error && (
           <p role="alert" className="text-sm text-danger">
             {error}
           </p>
         )}
-        <Button type="submit" className="w-full" disabled={saving}>
+        <Button type="submit" className="w-full" disabled={saving || termsUnknown(legal)}>
           {saving ? "Creating your account…" : "Create my account"}
         </Button>
       </form>

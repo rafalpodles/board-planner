@@ -7,6 +7,8 @@ import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { APP_NAME } from "@/lib/brand";
+import { useLegalTerms } from "@/hooks/use-legal-terms";
+import { TermsCheckbox, termsUnknown } from "@/components/legal/TermsCheckbox";
 import { ProviderButtons } from "@/components/auth/ProviderButtons";
 import { usePasswordSignIn } from "@/hooks/use-password-sign-in";
 
@@ -47,6 +49,8 @@ function AcceptForm() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
+  const [acceptTerms, setAcceptTerms] = useState(false);
+  const legal = useLegalTerms();
   const [saving, setSaving] = useState(false);
   const [accepted, setAccepted] = useState(false);
   const passwordSignIn = usePasswordSignIn();
@@ -94,6 +98,7 @@ function AcceptForm() {
         username,
         fullName,
         password,
+        acceptTerms,
       });
       if (!ok) {
         setError(data.error || "Something went wrong. Try again.");
@@ -220,12 +225,13 @@ function AcceptForm() {
           onChange={(e) => setConfirmPassword(e.target.value)}
           required
         />
+        <TermsCheckbox legal={legal} checked={acceptTerms} onChange={setAcceptTerms} />
         {error && (
           <p role="alert" className="text-sm text-danger">
             {error}
           </p>
         )}
-        <Button type="submit" className="w-full" disabled={saving || accepted}>
+        <Button type="submit" className="w-full" disabled={saving || accepted || termsUnknown(legal)}>
           {saving || accepted ? "Creating your account…" : "Create my account"}
         </Button>
       </form>

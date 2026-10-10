@@ -12,6 +12,7 @@ import { claimInvitation, findInvitationByToken } from "@/lib/invitations";
 import { INVITATION_REFUSALS } from "@/lib/invitation-refusals";
 import { completeAcceptance } from "@/lib/invitation-acceptance";
 import { scopedForRequest } from "@/lib/db-scope";
+import { checkTermsAccepted } from "@/lib/legal-terms";
 
 const ATTEMPTS_PER_SOURCE = 20;
 
@@ -38,9 +39,10 @@ export async function POST(request: Request) {
     username?: unknown;
     fullName?: unknown;
     password?: unknown;
+    acceptTerms?: unknown;
   }>(request);
   if (!read.ok) return read.response;
-  const { token, ...fields } = read.value;
+  const { token, acceptTerms, ...fields } = read.value;
   if (typeof token !== "string" || !token) {
     return NextResponse.json({ error: INVITATION_REFUSALS.unknown }, { status: 400 });
   }
@@ -48,6 +50,8 @@ export async function POST(request: Request) {
   const checked = checkNewAccount({ ...fields, email: undefined });
   if (!checked.ok) return NextResponse.json({ error: checked.error }, { status: 400 });
   const { username, fullName, password } = checked.value;
+  const terms = checkTermsAccepted(acceptTerms);
+  if (!terms.ok) return NextResponse.json({ error: terms.error }, { status: 400 });
 
   await connectDB();
   // Read first, so the hash below costs only somebody holding a live link: with no client address
@@ -62,5 +66,5 @@ export async function POST(request: Request) {
   }
   const invitation = claimed.invitation;
 
-  return completeAcceptance(db, invitation, { username, fullName, passwordHash: hashed }, request, clientIp);
+  return completeAcceptance(db, invitation, { username, fullName, passwordHash: hashed, terms: terms.fields }, request, clientIp);
 }

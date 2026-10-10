@@ -144,10 +144,14 @@ const line = (value: unknown) => `${mongoose.mongo.BSON.EJSON.stringify(value, {
 export async function* organisationExport(db: ScopedDb): AsyncGenerator<string> {
   const names = scopedModelNames().sort();
   const exported = names.filter((name) => !Object.hasOwn(NOT_EXPORTED, name));
+  const terms = await Organisation.findById(db.organisation).select("termsAcceptedVersion termsAcceptedAt termsAcceptedBy").lean();
   yield line({
     format: EXPORT_FORMAT,
     version: EXPORT_VERSION,
     organisation: db.organisation,
+    ...(terms?.termsAcceptedVersion
+      ? { termsAccepted: { version: terms.termsAcceptedVersion, at: terms.termsAcceptedAt, by: terms.termsAcceptedBy } }
+      : {}),
     exportedAt: new Date(),
     collections: [...exported, `${UPLOAD_BUCKET}.files`, `${UPLOAD_BUCKET}.chunks`],
     notExported: NOT_EXPORTED,

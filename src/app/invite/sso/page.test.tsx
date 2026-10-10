@@ -6,6 +6,7 @@ import SsoAcceptancePage from "./page";
 const passwordSignIn = vi.hoisted(() => ({ value: true as boolean | null }));
 vi.mock("@/hooks/use-password-sign-in", () => ({ usePasswordSignIn: () => passwordSignIn.value }));
 vi.mock("@/hooks/use-auth", () => ({ useAuth: () => ({ refreshUser: vi.fn() }) }));
+vi.mock("@/hooks/use-legal-terms", () => ({ useLegalTerms: () => ({ terms: null, failed: false, retry: vi.fn() }) }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
   useSearchParams: () => new URLSearchParams("error=mismatch"),

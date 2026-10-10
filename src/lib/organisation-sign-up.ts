@@ -10,17 +10,26 @@ import { RESERVED_SLUGS, forgetOrganisationSlugs, isSlug } from "./organisation-
 import { purgeOrganisationRows } from "./organisation-life-cycle";
 import { checkNewAccount, type NewAccountFields } from "./new-account";
 import { logInstanceAudit } from "./instanceAudit";
+import { checkTermsAccepted, type TermsAcceptance } from "./legal-terms";
 import { Organisation } from "@/models/organisation";
 
 export const SLUG_RULE = "An address is 3 to 40 lowercase letters, digits or hyphens, starting and ending with a letter or digit";
 export const SLUG_UNAVAILABLE = "That address is not available. Try another.";
 
-export type SignUpInput = { name?: unknown; slug?: unknown; username?: unknown; fullName?: unknown; password?: unknown };
+export type SignUpInput = {
+  name?: unknown;
+  slug?: unknown;
+  username?: unknown;
+  fullName?: unknown;
+  password?: unknown;
+  acceptTerms?: unknown;
+};
 
 export interface SignUp {
   name: string;
   slug: string;
   account: NewAccountFields;
+  terms: TermsAcceptance;
 }
 
 export type SignUpOutcome =
@@ -42,7 +51,9 @@ export function checkSignUp(email: string, input: SignUpInput): { ok: true; valu
   if (!slug.ok) return slug;
   const account = checkNewAccount({ username: input.username, fullName: input.fullName, email, password: input.password });
   if (!account.ok) return account;
-  return { ok: true, value: { name: name.value, slug: slug.slug, account: account.value } };
+  const terms = checkTermsAccepted(input.acceptTerms);
+  if (!terms.ok) return terms;
+  return { ok: true, value: { name: name.value, slug: slug.slug, account: account.value, terms: terms.fields } };
 }
 
 export async function slugTaken(slug: string): Promise<boolean> {
@@ -54,8 +65,10 @@ export async function createOrganisation(signUp: SignUp): Promise<SignUpOutcome>
   await connectDB();
   const password = await bcrypt.hash(signUp.account.password, PASSWORD_COST_FACTOR);
   const organisation = new Types.ObjectId();
+  const creator = new Types.ObjectId();
+  const organisationTerms = "termsAcceptedVersion" in signUp.terms ? { ...signUp.terms, termsAcceptedBy: creator } : {};
   try {
-    await Organisation.create({ _id: organisation, name: signUp.name, slug: signUp.slug });
+    await Organisation.create({ _id: organisation, name: signUp.name, slug: signUp.slug, ...organisationTerms });
   } catch (error) {
     if (duplicateKeyField(error) !== null) return { ok: false, error: SLUG_UNAVAILABLE };
     throw error;
@@ -64,6 +77,7 @@ export async function createOrganisation(signUp: SignUp): Promise<SignUpOutcome>
   try {
     const db = scoped(organisation);
     const user = await db.User.create({
+      _id: creator,
       username: signUp.account.username,
       fullName: signUp.account.fullName,
       email: signUp.account.email,
@@ -71,6 +85,7 @@ export async function createOrganisation(signUp: SignUp): Promise<SignUpOutcome>
       password,
       role: "admin",
       kind: "human",
+      ...signUp.terms,
     });
     await seedAgents(db);
     void logInstanceAudit(db, {

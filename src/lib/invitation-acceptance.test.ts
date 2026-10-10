@@ -37,11 +37,11 @@ const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
 
 const INVITATION = { _id: "inv-1", email: "ada@example.com", role: "member", boards: [], deliveredAs: "link" };
 const IDENTITY = { provider: "oidc", issuer: "https://id.example.com", subject: "s9", email: "ada@example.com" };
-const accept = (identity?: typeof IDENTITY, providerProvesAddress = true, deliveredAs = "link") =>
+const accept = (identity?: typeof IDENTITY, providerProvesAddress = true, deliveredAs = "link", terms = {}) =>
   completeAcceptance(
     scopedToDefaultOrganisation(),
     { ...INVITATION, deliveredAs } as never,
-    { username: "ada", fullName: "Ada", passwordHash: identity ? null : "hash", identity, providerProvesAddress },
+    { username: "ada", fullName: "Ada", passwordHash: identity ? null : "hash", identity, providerProvesAddress, terms },
     new Request("http://x"),
     null
   );
@@ -83,6 +83,15 @@ describe("an acceptance that fails part way", () => {
   });
 });
 
+describe("the terms the invitee accepted (BP-939)", () => {
+  it("stores them on the account it creates", async () => {
+    const at = new Date("2026-10-20T10:00:00Z");
+    await accept(undefined, true, "link", { termsAcceptedVersion: "2026-10-15", termsAcceptedAt: at });
+
+    expect(userCreate).toHaveBeenCalledWith(expect.objectContaining({ termsAcceptedVersion: "2026-10-15", termsAcceptedAt: at }));
+  });
+});
+
 describe("completing an acceptance through a sign-in provider", () => {
   it("lets the provider's groups decide the role before the session is made (BP-833)", async () => {
     applyAdminGroup.mockImplementationOnce(async () => expect(createSession).not.toHaveBeenCalled());
@@ -90,7 +99,7 @@ describe("completing an acceptance through a sign-in provider", () => {
     await completeAcceptance(
       scopedToDefaultOrganisation(),
       INVITATION as never,
-      { username: "ada", fullName: "Ada", passwordHash: null, identity: IDENTITY, providerProvesAddress: true, groups: ["admins"] },
+      { username: "ada", fullName: "Ada", passwordHash: null, identity: IDENTITY, providerProvesAddress: true, groups: ["admins"], terms: {} },
       new Request("http://x"),
       null
     );

@@ -17,6 +17,7 @@ export interface OrganisationSummary {
   memberLimit?: number | null;
   invited?: number;
   projects?: number;
+  termsAcceptance?: { version: string; at: string | null; by: { username: string; fullName: string } | null } | null;
 }
 
 type Snapshot = { summary: OrganisationSummary | null; failed: boolean; forUser: string | null };

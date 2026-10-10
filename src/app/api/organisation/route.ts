@@ -5,6 +5,19 @@ import { checkOrganisationName, getOrganisation, organisationIsNamed, renameOrga
 import { organisationDomain, organisationOrigin } from "@/lib/organisation-host";
 import { memberCounts, memberLimitOf } from "@/lib/member-limit";
 import type { ScopedDb } from "@/lib/db-scope";
+import type { IOrganisation } from "@/models/organisation";
+
+async function termsAcceptance(db: ScopedDb, organisation: IOrganisation) {
+  if (!organisation.termsAcceptedVersion) return null;
+  const by = organisation.termsAcceptedBy
+    ? await db.User.findById(organisation.termsAcceptedBy).select("username fullName").lean()
+    : null;
+  return {
+    version: organisation.termsAcceptedVersion,
+    at: organisation.termsAcceptedAt?.toISOString() ?? null,
+    by: by ? { username: by.username, fullName: by.fullName } : null,
+  };
+}
 
 async function describe(db: ScopedDb, admin: boolean) {
   const [organisation, origin] = await Promise.all([getOrganisation(db.organisation), organisationOrigin(db.organisation)]);
@@ -15,16 +28,18 @@ async function describe(db: ScopedDb, admin: boolean) {
         memberCounts(db),
       ])
     : null;
+  const cloud = organisationDomain() !== null;
   return {
     name: organisation.name,
     named: organisationIsNamed(organisation),
-    cloud: organisationDomain() !== null,
+    cloud,
     address: origin ? new URL(origin).host : null,
     plan: organisation.entitlements.plan,
     planEndsAt: organisation.entitlements.plan === "pro" ? organisation.entitlements.expiresAt?.toISOString() ?? null : null,
     trial: organisation.entitlements.plan === "pro" && organisation.entitlements.trial === true,
     subscription: organisation.entitlements.plan === "pro" ? organisation.entitlements.subscription ?? null : null,
     ...(counts ? { members: counts[2].active, projects: counts[0], memberLimit: counts[1], invited: counts[2].pending } : {}),
+    ...(admin && cloud ? { termsAcceptance: await termsAcceptance(db, organisation) } : {}),
   };
 }
 

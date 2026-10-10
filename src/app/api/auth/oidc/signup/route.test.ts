@@ -40,9 +40,13 @@ vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/models/user", () => ({ User: { create: userCreate, deleteOne: userDeleteOne } }));
 vi.mock("@/models/identity", () => ({ Identity: { create: identityCreate } }));
 
+const checkTermsAccepted = vi.fn();
+vi.mock("@/lib/legal-terms", async (original) => ({ ...(await original<object>()), checkTermsAccepted }));
+
 const { GET, POST } = await import("./route");
 const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { resetRateLimits } = await import("@/lib/rate-limit");
+const legalTerms = await vi.importActual<typeof import("@/lib/legal-terms")>("@/lib/legal-terms");
 
 const HELD = {
   provider: "oidc",
@@ -66,6 +70,7 @@ beforeEach(async () => {
   identityCreate.mockResolvedValue({});
   userDeleteOne.mockResolvedValue({});
   createSession.mockResolvedValue({ token: "cps_new", absoluteExpiresAt: new Date() });
+  checkTermsAccepted.mockImplementation(legalTerms.checkTermsAccepted);
 });
 
 describe("GET /api/auth/oidc/signup", () => {
@@ -205,5 +210,30 @@ describe("POST /api/auth/oidc/signup", () => {
     for (let i = 0; i < 450; i++) await post();
 
     expect((await post()).status).toBe(400);
+  });
+});
+
+describe("with the cloud terms published (BP-939)", () => {
+  const at = new Date("2026-10-20T10:00:00Z");
+  beforeEach(() => {
+    checkTermsAccepted.mockImplementation((value: unknown) =>
+      value === true
+        ? { ok: true, fields: { termsAcceptedVersion: "2026-10-15", termsAcceptedAt: at } }
+        : { ok: false, error: legalTerms.TERMS_REFUSAL }
+    );
+  });
+
+  it("refuses a sign-up that did not accept them, and spends nothing", async () => {
+    const res = await post();
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe(legalTerms.TERMS_REFUSAL);
+    expect(userCreate).not.toHaveBeenCalled();
+  });
+
+  it("passes the accepted version on to the account", async () => {
+    expect((await post({ ...{ username: "Grace", fullName: "Grace Hopper" }, acceptTerms: true })).status).toBe(201);
+
+    expect(userCreate.mock.calls[0][0]).toMatchObject({ termsAcceptedVersion: "2026-10-15", termsAcceptedAt: at });
   });
 });

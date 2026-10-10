@@ -12,6 +12,7 @@ import { toApiInvitations } from "@/lib/invitation-view";
 import { completeAcceptance } from "@/lib/invitation-acceptance";
 import { ACCEPT_COOKIE, heldAcceptance, spendAcceptance } from "@/lib/oidc/flow";
 import { providerById } from "@/lib/oidc/providers";
+import { checkTermsAccepted } from "@/lib/legal-terms";
 
 const ATTEMPTS_PER_SOURCE = 20;
 const EXPIRED = "That sign-in has expired. Sign in again, or open the invitation link.";
@@ -61,10 +62,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: EXPIRED }, { status: 400 });
   }
 
-  const read = await readJsonBody<{ username?: unknown; fullName?: unknown }>(request);
+  const read = await readJsonBody<{ username?: unknown; fullName?: unknown; acceptTerms?: unknown }>(request);
   if (!read.ok) return read.response;
   const checked = checkProfile(read.value);
   if (!checked.ok) return NextResponse.json({ error: checked.error }, { status: 400 });
+  const terms = checkTermsAccepted(read.value.acceptTerms);
+  if (!terms.ok) return NextResponse.json({ error: terms.error }, { status: 400 });
 
   const claimed = await claimInvitationByHash(db, held.invitationTokenHash);
   if (!claimed.ok) {
@@ -90,6 +93,7 @@ export async function POST(request: Request) {
       },
       providerProvesAddress: providerById(held.provider)?.linksByAddress === true,
       groups: held.claims.groups ?? [],
+      terms: terms.fields,
     },
     request,
     clientIp

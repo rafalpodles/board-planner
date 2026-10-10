@@ -39,6 +39,8 @@ export async function bootNode(): Promise<void> {
     const { assertManagedModelsConfig } = await import("@/lib/managed-models");
     const { organisationDomain: hostedDomain } = await import("@/lib/organisation-host");
     assertManagedModelsConfig(hostedDomain() !== null);
+    const { assertLegalTermsConfig } = await import("@/lib/legal-terms");
+    assertLegalTermsConfig();
   } catch (err) {
     // Exiting rather than throwing, and this is not belt-and-braces. `NextServer.prepare()`
     // awaits the real prepare only when `dev` (next/dist/server/next.js), so under `next start`
@@ -68,6 +70,10 @@ export async function bootNode(): Promise<void> {
   if ((process.env.OPENAI_API_KEY || process.env.OPENAPI_KEY) && !process.env.OPENROUTER_API_KEY) {
     console.warn("WARNING: OPENAI_API_KEY is no longer read: AI Assist runs on OPENROUTER_API_KEY, which is not set, so it is off");
   }
+
+  const { legalTermsWarning } = await import("@/lib/legal-terms");
+  const termsWarning = legalTermsWarning();
+  if (termsWarning) console.warn(termsWarning);
 
   const { aiLimitWarnings } = await import("@/lib/ai-gateway/limits");
   for (const line of aiLimitWarnings(process.env, Boolean(organisationDomain()))) console.warn(line);

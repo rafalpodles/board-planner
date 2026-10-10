@@ -27,6 +27,7 @@ const LABELS: Partial<Record<InstanceAuditAction, string>> = {
   organisation_exported: "Organisation exported",
   organisation_renamed: "Organisation renamed",
   user_email_confirmed_self: "Address confirmed by its owner",
+  terms_change_seen: "Terms change seen",
   user_created: "Account created",
   user_deleted: "Account deleted",
   // The direction is in `detail`, the way the address change carries old → new

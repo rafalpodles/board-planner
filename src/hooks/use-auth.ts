@@ -120,6 +120,8 @@ export function useAuthProvider(): AuthState {
       if (res.ok) {
         setUser(await res.json());
         setOutage(false);
+        // The sign-in answer is the account alone; what the app shows besides it (BP-939) comes from /api/auth/me
+        void fetchUser();
         return { ok: true };
       }
 
@@ -137,7 +139,7 @@ export function useAuthProvider(): AuthState {
       setOutage(false);
       return { ok: false, reason: reason ?? "Invalid credentials" };
     },
-    []
+    [fetchUser]
   );
 
   const logout = useCallback(async () => {

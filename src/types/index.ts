@@ -149,6 +149,10 @@ export interface IUser {
   emailVouchedByAdmin?: boolean;
   deactivatedAt?: Date | null;
   lastSignInAt?: Date | null;
+  termsAcceptedVersion?: string;
+  termsAcceptedAt?: Date;
+  termsNotifiedVersion?: string;
+  termsNotifiedAt?: Date;
   /** @deprecated Superseded by `notifications`. Kept as the fallback for accounts that predate it. */
   emailNotifications: boolean;
   emailDigest: boolean;
@@ -1218,6 +1222,14 @@ export interface IComment {
 }
 
 // API response types (serialized, no ObjectId)
+export interface LegalTerms {
+  version: string;
+  terms: string;
+  privacy: string;
+  termsPl: string;
+  privacyPl: string;
+}
+
 export interface ApiUser {
   _id: string;
   username: string;
@@ -1233,6 +1245,12 @@ export interface ApiUser {
   deactivatedAt?: string | null;
   lastSignInAt?: string | null;
   lastActiveAt?: string | null;
+  termsAcceptedVersion?: string;
+  termsAcceptedAt?: string;
+  termsNotifiedVersion?: string;
+  termsNotifiedAt?: string;
+  /** Only on /api/auth/me: terms that changed since this person accepted or was told of them (BP-939) */
+  termsChanged?: LegalTerms | null;
   /** How the account can sign in: "Password" and each configured provider it linked (BP-831) */
   signInMethods?: string[];
 }
@@ -1720,6 +1738,7 @@ export const INSTANCE_AUDIT_ACTIONS = [
   "organisation_exported",
   "organisation_renamed",
   "user_email_confirmed_self",
+  "terms_change_seen",
 ] as const;
 
 export type InstanceAuditAction = (typeof INSTANCE_AUDIT_ACTIONS)[number];

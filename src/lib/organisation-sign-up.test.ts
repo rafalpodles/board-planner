@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const { hash, create, deleteOne, userCreate, seedAgents, purgeOrganisationRows, logInstanceAudit, forgetOrganisationSlugs } = vi.hoisted(() => ({
   hash: vi.fn(),
@@ -27,11 +27,14 @@ vi.mock("./organisation-host", async (original) => ({
 }));
 
 const { checkSignUp, checkSlug, createOrganisation: create_, SLUG_UNAVAILABLE } = await import("./organisation-sign-up");
+const { TERMS_REFUSAL } = await import("./legal-terms");
 
 async function createOrganisation(email: string, input: Parameters<typeof checkSignUp>[1]) {
   const checked = checkSignUp(email, input);
   return checked.ok ? create_(checked.value) : checked;
 }
+
+afterEach(() => vi.unstubAllEnvs());
 
 const INPUT = { name: " Initech ", slug: "Initech", username: "bill", fullName: "Bill", password: "long-enough-1" };
 
@@ -39,7 +42,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   create.mockResolvedValue({});
   deleteOne.mockResolvedValue({});
-  userCreate.mockImplementation(async (row) => ({ _id: "user-1", ...row }));
+  userCreate.mockImplementation(async (row) => ({ ...row, _id: "user-1" }));
   hash.mockResolvedValue("$2a$10$hashed");
   seedAgents.mockResolvedValue(undefined);
   purgeOrganisationRows.mockResolvedValue({});
@@ -111,5 +114,44 @@ describe("createOrganisation (BP-673)", () => {
 
     await createOrganisation("bill@initech.example", INPUT);
     expect(order).toEqual(["hash", "organisation", "user:$2a$10$hashed"]);
+  });
+});
+
+describe("terms at sign-up (BP-939)", () => {
+  const VERSION = "2026-10-15";
+  const cloud = () => {
+    vi.stubEnv("ORGANISATION_DOMAIN", "board-planner.example");
+    vi.stubEnv("LEGAL_TERMS_VERSION", VERSION);
+  };
+
+  it.each([undefined, false, "true", 1])("refuses acceptTerms %j on the cloud and creates nothing", async (acceptTerms) => {
+    cloud();
+    const outcome = await createOrganisation("bill@initech.example", { ...INPUT, acceptTerms });
+
+    expect(outcome).toEqual({ ok: false, error: TERMS_REFUSAL });
+    expect(create).not.toHaveBeenCalled();
+    expect(userCreate).not.toHaveBeenCalled();
+  });
+
+  it("stores the accepted version on the creator and on the organisation, naming the creator", async () => {
+    cloud();
+    expect(await createOrganisation("bill@initech.example", { ...INPUT, acceptTerms: true })).toMatchObject({ ok: true });
+
+    const organisation = create.mock.calls[0][0];
+    const user = userCreate.mock.calls[0][0];
+    expect(user).toMatchObject({ termsAcceptedVersion: VERSION, termsAcceptedAt: expect.any(Date) });
+    expect(organisation).toMatchObject({ termsAcceptedVersion: VERSION, termsAcceptedAt: user.termsAcceptedAt });
+    expect(String(organisation.termsAcceptedBy)).toBe(String(user._id));
+  });
+
+  it.each([
+    ["self-hosted, with a version set", { LEGAL_TERMS_VERSION: VERSION }],
+    ["the cloud, before the terms are published", { ORGANISATION_DOMAIN: "board-planner.example" }],
+  ])("asks nothing and stores nothing on %s", async (_, env) => {
+    for (const [name, value] of Object.entries(env)) vi.stubEnv(name, value);
+    expect(await createOrganisation("bill@initech.example", INPUT)).toMatchObject({ ok: true });
+
+    expect(create.mock.calls[0][0]).not.toHaveProperty("termsAcceptedVersion");
+    expect(userCreate.mock.calls[0][0]).not.toHaveProperty("termsAcceptedVersion");
   });
 });
