@@ -99,8 +99,11 @@ export function Column({
               onDragOverColumn?.(false);
               const taskId = e.dataTransfer.getData("text/plain");
               if (taskId) {
-                if (onTaskDrop && dropIndex !== null) {
-                  onTaskDrop(taskId, column.id, dropIndex, lane);
+                // In a row the plain status write is never enough: it would move the card to the
+                // column and leave the row's value behind, so a drop on the header or the empty
+                // cell's caption takes the end of the cell like one on its body
+                if (onTaskDrop && (dropIndex !== null || lane)) {
+                  onTaskDrop(taskId, column.id, dropIndex ?? tasks.length, lane);
                 } else {
                   onStatusChange?.(taskId, column.id);
                 }
@@ -114,7 +117,7 @@ export function Column({
       tabIndex={collapsed ? 0 : undefined}
       aria-label={
         collapsed
-          ? `Expand ${column.label}${lane ? `, ${lane.label}` : ""}`
+          ? `Expand ${column.label}`
           : lane
             ? `${column.label}, ${lane.label}`
             : undefined

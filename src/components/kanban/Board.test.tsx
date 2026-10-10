@@ -617,10 +617,54 @@ describe("Board in rows", () => {
     expect(screen.getAllByTestId("column-todo")).toHaveLength(1);
   });
 
-  it("rails a column that is empty in every row, and keeps one that is not", () => {
-    renderRows({ tasks: [all[0]], lanes: [lanes[0]], collapseEmptyColumns: true });
-    const done = screen.getAllByTestId("column-done")[0];
+  it("rails a column only when it is empty in every row, so the columns line up", () => {
+    const { container } = renderRows({ collapseEmptyColumns: true });
+    const cell = (lane: string, column: string) =>
+      container.querySelector(`[data-testid="column-${column}"][data-lane="${lane}"]`)!;
+    // Done is empty in the urgent row and holds t3 in the low one: a rail in neither
+    expect(cell("v:urgent", "done").getAttribute("role")).toBe("group");
+    expect(cell("v:low", "done").getAttribute("role")).toBe("group");
+
+    cleanup();
+    const alone = renderRows({ tasks: [all[0]], lanes: [lanes[0]], collapseEmptyColumns: true });
+    const done = alone.container.querySelector('[data-testid="column-done"]')!;
     expect(done.getAttribute("role")).toBe("button");
-    expect(screen.getAllByTestId("column-todo")[0].getAttribute("role")).not.toBe("button");
+  });
+
+  it("offers to fold a column only when it is empty in every row, and always offers to open a rail", () => {
+    const { container } = renderRows({ collapseEmptyColumns: true });
+    // t3 is in done in the low row, so the empty urgent cell has no business offering to fold it
+    const urgentDone = container.querySelector('[data-testid="column-done"][data-lane="v:urgent"]')!;
+    expect(urgentDone.querySelector('button[aria-label^="Collapse"]')).toBeNull();
+
+    cleanup();
+    const alone = renderRows({ tasks: [all[0]], lanes: [lanes[0]], collapseEmptyColumns: true });
+    expect(alone.container.querySelector('[data-testid="column-done"]')!.getAttribute("aria-label")).toBe("Expand Done");
+  });
+
+  it("counts in a row's header what its cells draw, leaving out a task on a column that is gone", () => {
+    const orphan = mk("t9", "removed_column", "low");
+    renderRows({ tasks: [...all, orphan], lanes: [lanes[0], { key: "v:low", label: "Low", tasks: [...lanes[1].tasks, orphan] }] });
+    expect(screen.getAllByTestId("board-lane-count").map((c) => c.textContent)).toEqual(["1", "2"]);
+  });
+
+  it("names a row's control with its count in words", () => {
+    renderRows();
+    expect(screen.getByRole("button", { name: "Urgent, 1 task" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Low, 2 tasks" })).toBeTruthy();
+  });
+
+  it("keeps a column open for the whole drag, however many rows the pointer crosses, and folds it back when the drag ends", () => {
+    const { container } = renderRows({ tasks: [all[0]], lanes: [lanes[0], { key: "v:low", label: "Low", tasks: [] }], collapseEmptyColumns: true });
+    const doneCell = (lane: string) => container.querySelector(`[data-testid="column-done"][data-lane="${lane}"]`)!;
+    expect(doneCell("v:urgent").getAttribute("role")).toBe("button");
+
+    fireEvent.dragEnter(doneCell("v:urgent"));
+    expect(doneCell("v:urgent").getAttribute("role")).toBe("group");
+    fireEvent.dragLeave(doneCell("v:urgent"), { relatedTarget: document.body });
+    expect(doneCell("v:low").getAttribute("role")).toBe("group");
+
+    fireEvent.dragEnd(document);
+    expect(doneCell("v:low").getAttribute("role")).toBe("button");
   });
 });

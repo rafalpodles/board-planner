@@ -741,7 +741,7 @@ describe("turning Show archived off", () => {
 
 describe("a drop into another row of the board", () => {
   const lane = (key: string, groupBy: "priority" | "assignee" | "category" = "priority", label = key) => ({ groupBy, key, label });
-  const person = (username: string) => ({ _id: `u-${username}`, username, fullName: username });
+  const person = (username: string) => ({ _id: `u-${username}`, username, fullName: `${username[0].toUpperCase()}${username.slice(1)} Builder` });
   const laneTasks = [
     { ...task("t1", 0, "todo"), priority: "medium", category: "bug", assignee: null },
     { ...task("t2", 5, "todo"), priority: "urgent", category: "bug", assignee: person("ann") },
@@ -749,9 +749,9 @@ describe("a drop into another row of the board", () => {
     { ...task("t4", 9, "todo"), priority: "urgent", category: "bug", assignee: person("ann") },
   ];
 
-  async function mountedLanes() {
+  async function mountedLanes(patch: Record<string, object> = {}) {
     api.get.mockImplementation((path: string) => {
-      if (path.endsWith("/tasks")) return Promise.resolve(laneTasks);
+      if (path.endsWith("/tasks")) return Promise.resolve(laneTasks.map((t) => ({ ...t, ...patch[t._id] })));
       if (path.endsWith("/sprints")) return Promise.resolve([]);
       if (path.endsWith("/assignable-users")) return Promise.resolve([person("ann"), person("bob")]);
       return Promise.resolve(PROJECT);
@@ -813,21 +813,71 @@ describe("a drop into another row of the board", () => {
       void board.handleTaskDrop("t1", "todo", 0, lane("v:bob", "assignee"));
     });
     expect(sent()).toMatchObject({ assignee: "bob" });
-    expect(find("t1").assignee).toMatchObject({ username: "bob" });
+    expect(find("t1").assignee).toMatchObject({ _id: "u-bob", username: "bob", fullName: "Bob Builder" });
+
+    // A person on no card of the roster but on another task is found there
+    act(() => {
+      void board.handleTaskDrop("t1", "todo", 0, lane("v:ann", "assignee"));
+    });
+    expect(find("t1").assignee).toMatchObject({ _id: "u-ann", fullName: "Ann Builder" });
   });
 
-  it("changes nothing about the category for the row of tasks that have none, and sets a real one", async () => {
+  it("does nothing for a row that has no value to give, and says so, instead of moving the card to a place worked out among another row's", async () => {
     await mountedLanes();
 
     await act(async () => {
-      await board.handleTaskDrop("t3", "todo", 0, lane("@none", "category"));
+      await board.handleTaskDrop("t3", "todo", 0, lane("@none", "category", "No category"));
     });
-    expect(sent()).not.toHaveProperty("category");
+
+    expect(api.put).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith(expect.stringContaining("No category"), "error");
+    expect(find("t3")).toMatchObject({ status: "in_progress", order: 3 });
+  });
+
+  it("sets a real category", async () => {
+    await mountedLanes();
 
     await act(async () => {
       await board.handleTaskDrop("t3", "todo", 0, lane("v:doc", "category"));
     });
     expect(sent()).toMatchObject({ category: "doc" });
+  });
+
+  it("will not hand a task a worker is running to somebody else by a drag, but moves its priority", async () => {
+    await mountedLanes({ t3: { execution: { workerId: "w1", workerName: "mac" } } });
+
+    await act(async () => {
+      await board.handleTaskDrop("t3", "in_progress", 0, lane("v:bob", "assignee"));
+    });
+    expect(api.put).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith(expect.stringContaining("change its assignee from the task"), "error");
+
+    await act(async () => {
+      await board.handleTaskDrop("t3", "in_progress", 0, lane("v:urgent"));
+    });
+    expect(sent()).toMatchObject({ priority: "urgent" });
+  });
+
+  it("passes on the reason the server gives for refusing a row's value", async () => {
+    await mountedLanes();
+    api.put.mockRejectedValue(Object.assign(new Error("bob is deactivated"), { status: 400, body: { error: "bob is deactivated" } }));
+
+    await act(async () => {
+      await board.handleTaskDrop("t3", "todo", 0, lane("v:bob", "assignee"));
+    });
+
+    expect(toast).toHaveBeenCalledWith("Failed to move task: bob is deactivated", "error");
+  });
+
+  it("keeps the plain message for a refusal of an ordinary move", async () => {
+    await mountedLanes();
+    api.put.mockRejectedValue(Object.assign(new Error("x"), { status: 500, body: { error: "boom" } }));
+
+    await act(async () => {
+      await board.handleTaskDrop("t3", "todo", 0);
+    });
+
+    expect(toast).toHaveBeenCalledWith("Failed to move task", "error");
   });
 
   it("puts everything back from the server when the write is refused, and says so", async () => {

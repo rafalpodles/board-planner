@@ -259,5 +259,7 @@ describe("rows for the board", () => {
   it("will not set a priority the board does not know", () => {
     expect(laneChangeFor("priority", valueKey("someday"))).toBeNull();
     expect(laneChangeFor("priority", "plain")).toBeNull();
+    expect(laneChangeFor("priority", valueKey("constructor"))).toBeNull();
+    expect(laneChangeFor("category", "plain")).toBeNull();
   });
 });

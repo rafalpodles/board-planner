@@ -190,6 +190,26 @@ describe("Column in a row of the board", () => {
     expect(onTaskDrop).toHaveBeenCalledWith("t9", "needs_human_review", expect.any(Number), lane);
   });
 
+  it("takes a drop on the header, or the empty cell's caption, as a drop at the end of the cell, row and all", () => {
+    const onTaskDrop = vi.fn();
+    const onStatusChange = vi.fn();
+    renderColumn({ lane, tasks: oneTask, onTaskDrop, onStatusChange });
+    drop(screen.getByRole("heading", { name: "Needs Human Review" }), "t9");
+
+    expect(onTaskDrop).toHaveBeenCalledWith("t9", "needs_human_review", 1, lane);
+    expect(onStatusChange).not.toHaveBeenCalled();
+  });
+
+  it("still takes a drop outside any row on the header as a plain status change", () => {
+    const onTaskDrop = vi.fn();
+    const onStatusChange = vi.fn();
+    renderColumn({ tasks: oneTask, onTaskDrop, onStatusChange });
+    drop(screen.getByRole("heading", { name: "Needs Human Review" }), "t9");
+
+    expect(onStatusChange).toHaveBeenCalledWith("t9", "needs_human_review");
+    expect(onTaskDrop).not.toHaveBeenCalled();
+  });
+
   it("hands no row to a drop outside any row", () => {
     const onTaskDrop = vi.fn();
     const { container } = renderColumn({ tasks: oneTask, onTaskDrop });
@@ -211,6 +231,6 @@ describe("Column in a row of the board", () => {
 
   it("names the row on its rail too", () => {
     const { container } = renderColumn({ lane, collapsed: true });
-    expect(container.firstElementChild!.getAttribute("aria-label")).toBe("Expand Needs Human Review, Urgent");
+    expect(container.firstElementChild!.getAttribute("aria-label")).toBe("Expand Needs Human Review");
   });
 });

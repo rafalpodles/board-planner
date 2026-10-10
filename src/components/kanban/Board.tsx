@@ -82,6 +82,10 @@ export function Board({
     return cells;
   }, [laneRows, boardColumns]);
 
+  // What a row's header counts is what its cells draw: a task whose status names no column is in none
+  const laneCount = (lane: TaskGroup) =>
+    lane.tasks.filter((t) => boardColumns.some((c) => c.id === t.status)).length;
+
   // Expanding a rail is a reading choice, not a preference — it lasts the session
   const [pinnedColumns, setPinnedColumns] = useState<Set<string>>(new Set());
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
@@ -98,6 +102,17 @@ export function Board({
       collapseEmptyColumns
     )
   );
+
+  useEffect(() => {
+    if (!laneRows) return;
+    const end = () => setDragOverColumn(null);
+    document.addEventListener("dragend", end);
+    document.addEventListener("drop", end);
+    return () => {
+      document.removeEventListener("dragend", end);
+      document.removeEventListener("drop", end);
+    };
+  }, [laneRows]);
 
   const scrollerRef = useRef<HTMLDivElement>(null);
   const [activeColumn, setActiveColumn] = useState(0);
@@ -267,6 +282,7 @@ export function Board({
                     <button
                       type="button"
                       aria-expanded={!folded}
+                      aria-label={`${lane.label}, ${laneCount(lane)} ${laneCount(lane) === 1 ? "task" : "tasks"}`}
                       onClick={() => onToggleLane?.(lane.key)}
                       className="focus-ring sticky left-0 flex min-h-9 max-w-[calc(100vw-2rem)] items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-text hover:bg-bg-input"
                     >
@@ -286,7 +302,7 @@ export function Board({
                         {lane.label}
                       </span>
                       <span data-testid="board-lane-count" className="text-xs text-text-muted">
-                        {lane.tasks.length}
+                        {laneCount(lane)}
                       </span>
                     </button>
                   </div>
@@ -308,7 +324,9 @@ export function Board({
                       // page: either way nothing can become a rail, so a collapse control would be
                       // a button that does nothing
                       onToggleCollapsed={
-                        collapseEmptyColumns && !paged
+                        // Between rows a column is a rail or not for all of them at once, so only a
+                        // column with nothing in any row offers to fold, and a rail always offers to open
+                        collapseEmptyColumns && !paged && (!laneRows || collapsed[i] || grouped[column.id].length === 0)
                           ? () =>
                               setPinnedColumns((prev) => {
                                 const next = new Set(prev);
@@ -321,9 +339,14 @@ export function Board({
                         readOnly
                           ? undefined
                           : (over) =>
-                              setDragOverColumn((prev) =>
-                                over ? column.id : prev === column.id ? null : prev
-                              )
+                              // Between rows the pointer leaves one cell of a column for the next,
+                              // and folding the column back to a rail in between would move
+                              // everything under it; it stays open until the drag ends
+                              laneRows && !over
+                                ? undefined
+                                : setDragOverColumn((prev) =>
+                                    over ? column.id : prev === column.id ? null : prev
+                                  )
                       }
                       onStatusChange={readOnly ? undefined : onStatusChange}
                       onTaskDrop={onTaskDrop}

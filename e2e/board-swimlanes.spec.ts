@@ -167,8 +167,8 @@ test("the position is among the neighbours in the row, not the whole column", as
   await dragTo(page, cardIn(cell(page, "v:urgent", "in_progress"), SIBLING), body(cell(page, "v:medium", "in_progress")));
   const sent = (await write).request().postDataJSON();
 
-  // The only task in the target cell is TP-1 at 10, so the drop goes after it; the whole column
-  // also held TP-2 at 99 in another row, which would have put it at 100 if it had been counted
+  // The only task in the target cell is TP-1 at 10, so the drop goes after it; counting TP-2 at 99
+  // in another row of the column as well would have put it between the two
   expect(sent.order).toBe(11);
 });
 
@@ -240,8 +240,40 @@ test("a drop into another row inside the column a worker holds the task in is no
   expect(res.status()).toBe(200);
   expect(res.request().postDataJSON()).toMatchObject({ priority: "urgent" });
   expect(res.request().postDataJSON()).not.toHaveProperty("status");
-  await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(cardIn(cell(page, "v:urgent", "in_progress"), HELD_TASK_NUMBER)).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect((await stored(request, HELD_TASK_NUMBER)).priority).toBe("urgent");
+});
+
+test("a drop on a cell's header counts as one on its body: the row's value comes with it", async ({ page, request }) => {
+  await openByPriority(page, request);
+
+  const write = taskPut(page, SIBLING_TASK_ID);
+  await dragTo(page, cardIn(cell(page, "v:urgent", "in_progress"), SIBLING), cell(page, "v:high", "in_review").locator("h3").first());
+  const res = await write;
+
+  expect(res.request().postDataJSON()).toMatchObject({ status: "in_review", priority: "high" });
+  await expect(cardIn(cell(page, "v:high", "in_review"), SIBLING)).toBeVisible();
+});
+
+test("dropping into a category row sets the category, with the column", async ({ page, request }) => {
+  await put(request, SIBLING_TASK_ID, { category: "bug" });
+  await put(request, DECOY_TASK_ID, { category: "doc" });
+  await page.setViewportSize({ width: 1280, height: 1100 });
+  await silenceBoardPoll(page);
+  await signIn(page);
+  await page.goto(BOARD);
+  await expect(page.locator("[data-column-body] a[href*='/tasks/']")).toHaveCount(SEEDED_TASKS);
+  await groupSelect(page).selectOption({ label: "Group: Category" });
+  await expect(headers(page)).toHaveCount(3);
+  await expect(headers(page).nth(0)).toContainText("bug");
+
+  const write = taskPut(page, SIBLING_TASK_ID);
+  await dragTo(page, cardIn(cell(page, "v:bug", "in_progress"), SIBLING), body(cell(page, "v:doc", "in_review")));
+  const res = await write;
+
+  expect(res.request().postDataJSON()).toMatchObject({ status: "in_review", category: "doc" });
+  expect(await stored(request, SIBLING)).toMatchObject({ status: "in_review", category: "doc" });
 });
 
 test("a refused drop puts the card back in its row and column, both of them", async ({ page, request }) => {
@@ -276,7 +308,7 @@ test("a row folds to its header, keeps its count, and opens again", async ({ pag
   await expect(cell(page, "v:medium", "in_progress")).toBeVisible();
 });
 
-test("the grouping is the list's too, comes back after a reload, and is not drawn where the view is pinned", async ({ page, request }) => {
+test("the grouping is the list's too, and comes back after a reload", async ({ page, request }) => {
   await openByPriority(page, request);
 
   await page.reload();
@@ -288,12 +320,13 @@ test("the grouping is the list's too, comes back after a reload, and is not draw
 
   await groupSelect(page).selectOption({ label: "Group: Status" });
   await page.getByRole("button", { name: "Board", exact: true }).click();
+  await expect(page.getByTestId("column-in_progress")).toBeVisible();
   await expect(headers(page), "status is the columns, so the board draws no rows for it").toHaveCount(0);
   await expect(groupSelect(page)).toHaveValue("");
 });
 
 test("on a phone the columns still page, the row's name stays on screen, and the board scrolls down through the rows", async ({ page, request }) => {
-  await page.setViewportSize({ width: 390, height: 800 });
+  await page.setViewportSize({ width: 390, height: 560 });
   await openByPriority(page, request);
 
   await expect(header(page, "Urgent")).toBeInViewport();
@@ -304,4 +337,12 @@ test("on a phone the columns still page, the row's name stays on screen, and the
 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);
+
+  await test.step("the rows below the first screen are reached by scrolling the board down", async () => {
+    const medium = header(page, "Medium").getByRole("button");
+    await expect(medium).not.toBeInViewport();
+    await medium.scrollIntoViewIfNeeded();
+    await expect(medium).toBeInViewport({ ratio: 1 });
+    await expect(cell(page, "v:medium", "in_review")).toBeInViewport();
+  });
 });

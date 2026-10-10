@@ -181,6 +181,6 @@ export function laneChangeFor(
   if (key === NONE_GROUP) return groupBy === "assignee" ? { field: "assignee", value: null } : null;
   const value = key.startsWith("v:") ? key.slice(2) : "";
   if (!value) return null;
-  if (groupBy === "priority" && !(value in PRIORITY_ORDER)) return null;
+  if (groupBy === "priority" && !Object.hasOwn(PRIORITY_ORDER, value)) return null;
   return { field: groupBy, value };
 }

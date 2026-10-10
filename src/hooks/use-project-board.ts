@@ -448,8 +448,20 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
     const moved = tasks.find((t) => t._id === taskId);
     // A drop into another lane gives the task the lane's value; one inside the lane it already
     // sits in is a reorder and sends no field
-    const laneChange =
-      lane && moved && laneKeyOf(lane.groupBy, moved) !== lane.key ? laneChangeFor(lane.groupBy, lane.key) : null;
+    const crossing = !!lane && !!moved && laneKeyOf(lane.groupBy, moved) !== lane.key;
+    const laneChange = crossing ? laneChangeFor(lane!.groupBy, lane!.key) : null;
+    // A row with no value to give: dropping there would take the card to the column and leave it in
+    // its own row, at a place worked out among another row's cards
+    if (crossing && !laneChange) {
+      toast(`There is nothing to set on a task by dropping it into "${lane!.label}"`, "error");
+      return;
+    }
+    // Handing a running task to somebody else is not something a drag should do by accident; it
+    // is done from the task, which says what happens to the run
+    if (laneChange?.field === "assignee" && moved?.execution?.workerId) {
+      toast(`${moved.title} is being executed; change its assignee from the task`, "error");
+      return;
+    }
     // Tasks in the cell dropped into — the column, or the column within the lane — without the dragged one
     const columnTasks = tasks
       .filter(
@@ -519,7 +531,10 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
       const retry = () =>
         api.put(`/api/projects/${projectId}/tasks/${taskId}`, { ...body, force: true });
       if (parkIfHeld(err, taskId, retry)) return;
-      toast("Failed to move task", "error");
+      // A row's value can be refused for a reason the person can act on — somebody who has left,
+      // a deactivated account — and the server says which
+      const reason = laneChange && (err as { body?: { error?: string } })?.body?.error;
+      toast(reason ? `Failed to move task: ${reason}` : "Failed to move task", "error");
       loadData();
     }
   }
