@@ -868,8 +868,6 @@ describe("PUT /api/projects/[projectId] PM settings", () => {
       model: "",
       contextNotes: "notes",
       links: [],
-      dailyTurnCap: 0,
-      dailyTokenCap: 0,
       autonomy,
       mcpServers: [
         {
@@ -929,6 +927,35 @@ describe("PUT /api/projects/[projectId] PM settings", () => {
       "pm.contextNotes",
       "pm.links",
     ]);
+  });
+
+  it.each([
+    ["the switch", { enabled: true }],
+    ["the model", { model: "x/y" }],
+    ["the MCP connections", { mcpServers: [] }],
+  ])("refuses a project owner who is not an instance admin %s, which are the instance's", async (_name, pm) => {
+    getAuthUser.mockResolvedValue(OWNER);
+    check.mockResolvedValue(true);
+    reads(stored("old"));
+
+    const res = await PUT(putRequest({ pm }), ctx());
+
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toMatch(/Only an instance admin can change PM/);
+    expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("takes nothing from a turn or token cap that an older client still sends, and does not refuse the save for it", async () => {
+    getAuthUser.mockResolvedValue(OWNER);
+    check.mockResolvedValue(true);
+    reads(stored("old"));
+    writes({ _id: PROJECT_ID, pm: stored("old") });
+
+    const res = await PUT(putRequest({ pm: { contextNotes: "notes", dailyTurnCap: 5, dailyTokenCap: 9 } }), ctx());
+
+    expect(res.status).toBe(200);
+    const [, update] = projectFindOneAndUpdate.mock.calls[0];
+    expect(Object.keys(update)).toEqual(["pm.contextNotes"]);
   });
 
   it("writes the MCP list only over the list it merged the tokens from", async () => {

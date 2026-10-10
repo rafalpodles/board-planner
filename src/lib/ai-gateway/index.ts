@@ -67,12 +67,12 @@ export async function gatewayChat(
   db: ScopedDb,
   context: GatewayContext,
   opts: Omit<Parameters<typeof chatCompletion>[0], "apiKey">
-): Promise<OrCompletionResult & { refused?: true }> {
+): Promise<OrCompletionResult> {
   const gate = await openGate(db, { error: "The PM agent is not configured on this instance", status: 503 });
-  if (!gate.ok) return { type: "error", error: gate.error, refused: true };
+  if (!gate.ok) return { type: "error", error: gate.error };
 
   // Stopped while the gate was being opened: nothing was sent, so nothing is counted
-  if (opts.signal?.aborted) return { type: "aborted", refused: true };
+  if (opts.signal?.aborted) return { type: "aborted" };
 
   const completion = await chatCompletion({ ...opts, apiKey: gate.key });
   if (completion.type === "text" || completion.type === "tool_calls") {

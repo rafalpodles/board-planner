@@ -1,7 +1,6 @@
 import { forEachServedOrganisation, stillServed } from "@/lib/organisation-jobs";
 import { connectDB } from "@/lib/db";
 import { runPmTurn } from "./agent";
-import { dailyPmSpend, isOverDailyTurnCap } from "./turn-cap";
 import { acquireTurnLock, isTurnRunning, releaseTurnLock } from "./turn-lock";
 import { drainPmTriggers } from "./triggers";
 import { getPmUser } from "./pm-user";
@@ -82,7 +81,7 @@ export type BoardReviewStart =
   | { status: "skipped"; reason: string };
 
 /**
- * Checks the caps and takes the project's turn lock before anything is spent, then runs the review
+ * Checks the AI gate and takes the project's turn lock before anything is spent, then runs the review
  * in `done`. Split this way so the owner's "Run a review now" can answer at once with why a review
  * cannot run, while the scheduler still awaits one review at a time (BP-471).
  */
@@ -90,23 +89,13 @@ export async function startBoardReview(
   db: ScopedDb,
   projectId: string,
   projectKey: string,
-  pm: { dailyTurnCap?: number; autonomy?: { timezone?: string } },
+  pm: { autonomy?: { timezone?: string } },
   pmUserId: string
 ): Promise<BoardReviewStart> {
   // The scheduler starts whether or not a model is configured, and a review without one spent a
   // turn to post a warning into every thread on the board
   const gate = await openGate(db, { error: "the PM agent is not configured on this instance", status: 503 });
   if (!gate.ok) return { status: "skipped", reason: gate.error };
-  const { over, cap } = await isOverDailyTurnCap(db, projectId, pm);
-  if (over) return { status: "skipped", reason: `the daily turn cap (${cap}) is reached` };
-
-  const spend = await dailyPmSpend(db, projectId, pm);
-  if (spend.over) {
-    return {
-      status: "skipped",
-      reason: `the daily token cap is reached (${spend.tokens} of ${spend.cap} across ${spend.calls} calls)`,
-    };
-  }
   const abort = acquireTurnLock(projectId, pmUserId);
   if (!abort) return { status: "skipped", reason: "a PM turn is already running on this project" };
 

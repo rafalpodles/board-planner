@@ -3,8 +3,6 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const projectFind = vi.fn();
 const findOneAndUpdate = vi.fn();
 const runPmTurn = vi.fn();
-const isOverDailyTurnCap = vi.fn();
-const dailyPmSpend = vi.fn();
 const buildBoardDigest = vi.fn();
 const drainPmTriggers = vi.fn();
 
@@ -27,7 +25,6 @@ vi.mock("@/lib/organisation-jobs", async () => {
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/project", () => ({ Project: { find: projectFind, findOneAndUpdate } }));
 vi.mock("./agent", () => ({ runPmTurn }));
-vi.mock("./turn-cap", () => ({ isOverDailyTurnCap, dailyPmSpend }));
 vi.mock("./triggers", () => ({ drainPmTriggers }));
 vi.mock("./pm-user", () => ({ getPmUser: async () => ({ _id: "pm-user" }) }));
 const resolveModelKey = vi.hoisted(() => vi.fn(async () => ({ ok: true, key: "k", source: "own" }) as unknown));
@@ -48,14 +45,12 @@ const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
 const db = scopedToDefaultOrganisation();
 
-const PM = { enabled: true, dailyTurnCap: 100, autonomy: { dailyReview: true, handleNeedsHumanReview: false, reviewHour: 0, reviewIntervalHours: 24, timezone: "UTC", lastReviewSlot: "" } };
+const PM = { enabled: true, autonomy: { dailyReview: true, handleNeedsHumanReview: false, reviewHour: 0, reviewIntervalHours: 24, timezone: "UTC", lastReviewSlot: "" } };
 
 beforeEach(() => {
   vi.clearAllMocks();
   projectFind.mockReturnValue({ lean: async () => [{ _id: "p1", key: "BP", pm: PM }] });
   findOneAndUpdate.mockResolvedValue({ _id: "p1" });
-  isOverDailyTurnCap.mockResolvedValue({ over: false, cap: 100 });
-  dailyPmSpend.mockResolvedValue({ over: false });
   buildBoardDigest.mockResolvedValue({ findings: 2 });
   runPmTurn.mockResolvedValue({ ok: true });
 });
@@ -184,28 +179,6 @@ describe("startBoardReview", () => {
     const start = await startBoardReview(db, "p1", "BP", PM, "pm-user");
 
     expect(start).toEqual({ status: "skipped", reason: expect.stringMatching(/cannot be read.*Enter it again/) });
-  });
-
-  it("refuses at once when the turn cap is reached, and spends nothing", async () => {
-    isOverDailyTurnCap.mockResolvedValue({ over: true, cap: 3 });
-
-    const start = await startBoardReview(db, "p1", "BP", PM, "pm-user");
-
-    expect(start).toEqual({ status: "skipped", reason: "the daily turn cap (3) is reached" });
-    expect(runPmTurn).not.toHaveBeenCalled();
-    // A refusal takes nothing it would have to give back
-    expect(isTurnRunning("p1")).toBe(false);
-  });
-
-  it("refuses at once when the token cap is reached", async () => {
-    dailyPmSpend.mockResolvedValue({ over: true, tokens: 900, cap: 800, calls: 4 });
-
-    expect(await startBoardReview(db, "p1", "BP", PM, "pm-user")).toEqual({
-      status: "skipped",
-      reason: "the daily token cap is reached (900 of 800 across 4 calls)",
-    });
-    expect(runPmTurn).not.toHaveBeenCalled();
-    expect(isTurnRunning("p1")).toBe(false);
   });
 
   it("gives the turn back when the board has nothing to review, without a turn", async () => {

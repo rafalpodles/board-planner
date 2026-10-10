@@ -221,48 +221,24 @@ test.describe("the autonomy form", () => {
     expect(stored.autonomy.timezone).toBe("Europe/Warsaw");
   });
 
-  test("refuses a turn cap that is not a whole number in range", async ({ page }) => {
+  test("offers no turn or token cap: what a project may use is the organisation's allowance", async ({ page }) => {
     await signIn(page);
     await openPmSettings(page);
 
-    const cap = page.getByLabel("Turns per day");
-    // The control: a whole number in range is accepted and saves
-    await cap.fill("40");
-    await expect(page.getByText(/whole number of turns/)).toHaveCount(0);
-    await saveSettings(page);
-    expect((await storedPm()).dailyTurnCap).toBe(40);
-
-    for (const bad of ["12.5", "-1", "1001"]) {
-      await cap.fill(bad);
-      await expect(page.getByText(/whole number of turns/), bad).toBeVisible();
-    }
-
-    // Pressing Save is the part that matters. Without it this only proved the error renders —
-    // the early return could be deleted and the test would stay green.
-    let sent = 0;
-    page.on("request", (r) => {
-      if (r.method() === "PUT" && r.url().includes("/api/projects/")) sent += 1;
-    });
-    await page.getByRole("button", { name: "Save changes" }).click();
-    await page.waitForTimeout(700);
-    expect(sent).toBe(0);
-    expect((await storedPm()).dailyTurnCap).toBe(40);
+    await expect(page.getByTestId("pm-usage-today")).toBeVisible();
+    await expect(page.getByLabel("Turns per day")).toHaveCount(0);
+    await expect(page.getByLabel("Tokens per day")).toHaveCount(0);
   });
 
   /**
-   * BP-453. The cap counted from the *host's* midnight, so the hint could not have said which
-   * day it meant. Now it names the board's own zone, and says a turn the model failed still
-   * counts — the decision that ticket asked to be recorded and made visible.
+   * BP-453. The day was the host's, so the line could not have said which one it meant. It names the board's own zone, and
+   * follows it when the zone changes.
    */
-  test("the turn-cap hint names the board's own day, and follows it when it changes", async ({
-    page,
-  }) => {
+  test("the day's usage line names the board's own day, and follows it when it changes", async ({ page }) => {
     await signIn(page);
     await openPmSettings(page);
 
-    const hint = page.getByText(/Resets at midnight in/);
-    await expect(hint).toContainText("Europe/Warsaw");
-    await expect(hint).toContainText("a turn the model failed");
+    await expect(page.getByTestId("pm-usage-totals")).toContainText("from midnight in Europe/Warsaw");
 
     // The control, and the reason this is not an assertion about a hardcoded string: change the
     // board's zone through the form and the sentence has to follow it.
@@ -271,8 +247,8 @@ test.describe("the autonomy form", () => {
     await saveSettings(page);
     await page.reload();
 
-    await expect(page.getByText(/Resets at midnight in/)).toContainText("Asia/Tokyo");
-    await expect(page.getByText(/Resets at midnight in/)).not.toContainText("Europe/Warsaw");
+    await expect(page.getByTestId("pm-usage-totals")).toContainText("from midnight in Asia/Tokyo");
+    await expect(page.getByTestId("pm-usage-totals")).not.toContainText("Europe/Warsaw");
   });
 
   test("saves the escalation switch on its own", async ({ page }) => {

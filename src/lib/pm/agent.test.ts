@@ -127,7 +127,8 @@ const { NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS, BOARD_REVIEW_DISALLOWED_TOOLS } = a
 
 function toolCall(name: string, args: Record<string, unknown>) {
   return {
-    type: "tools" as const,
+    type: "tool_calls" as const,
+    content: "",
     assistantMessage: { role: "assistant" as const, content: "", tool_calls: [] },
     calls: [{ id: `call-${name}`, name, args }],
   };
@@ -193,7 +194,7 @@ describe("runPmTurn's AI allowance", () => {
     expect(chatCompletion).not.toHaveBeenCalled();
   });
 
-  it("stops the turn, and does not count a call the gate never let out, when the allowance runs out between two calls", async () => {
+  it("stops the turn, with the allowance's words in the thread, when the allowance runs out between two calls", async () => {
     resolveModelKey.mockResolvedValue({ ok: true, key: "sk-ours", source: "managed" });
     checkBudget.mockResolvedValueOnce({ refusal: null, counter: "month" }).mockResolvedValueOnce({ refusal: null, counter: "month" }).mockResolvedValue({ refusal: { scope: "day", used: 3_000_000, limit: 3_000_000, resetsAt: new Date("2026-10-10T00:00:00Z") }, counter: "month" });
     chatCompletion.mockResolvedValueOnce(toolCall("add_comment", { taskKey: "BP-1", body: "answer" }));
@@ -203,7 +204,6 @@ describe("runPmTurn's AI allowance", () => {
 
     expect(chatCompletion).toHaveBeenCalledTimes(1);
     expect(result).toMatchObject({ ok: false, message: { content: expect.stringMatching(/paused for today/) } });
-    expect(createdMessages[createdMessages.length - 1].usage).toMatchObject({ calls: 1 });
   });
 
   it("records what each call cost for the project and for the person the turn was run for", async () => {
@@ -418,21 +418,13 @@ describe("an unattended turn and a project's MCP server", () => {
 });
 
 /**
- * BP-284. `dailyTurnCap` counts turns, and this loop makes up to MAX_STEPS round-trips per turn, so
- * the cap permitted a fifteen-fold range of spend. The provider reports usage on every response and
- * the client discarded it; the turn now records what it cost, on every exit including the ones that
- * fail — a turn that burned nine calls and then met a provider error cost nine calls.
+ * BP-682. Tokens and calls are the gateway's usage rows, one per round-trip. What the thread keeps of a turn's cost is the one
+ * thing the rows cannot say: that it stopped because it ran out of steps, not because it was finished.
  */
-describe("what a turn records about its own cost", () => {
-  const withUsage = (result: object, tokens: number, cached = 0, written = 0) => ({
+describe("what a turn records about its own outcome", () => {
+  const withUsage = (result: object, tokens: number) => ({
     ...result,
-    usage: {
-      promptTokens: tokens,
-      completionTokens: tokens,
-      totalTokens: tokens * 2,
-      cachedPromptTokens: cached,
-      cacheWriteTokens: written,
-    },
+    usage: { promptTokens: tokens, completionTokens: tokens, totalTokens: tokens * 2, cachedPromptTokens: 0, cacheWriteTokens: 0 },
   });
 
   const lastMessage = () => createdMessages[createdMessages.length - 1];
@@ -441,55 +433,12 @@ describe("what a turn records about its own cost", () => {
     createdMessages.length = 0;
   });
 
-  it("sums the round-trips it made, not the one turn it is", async () => {
-    chatCompletion
-      .mockResolvedValueOnce(withUsage(toolCall("add_comment", { taskKey: "BP-1", body: "x" }), 100))
-      .mockResolvedValueOnce(withUsage({ type: "text", content: "done" }, 50));
-
-    await turn([]);
-
-    expect(lastMessage().usage).toMatchObject({
-      calls: 2,
-      promptTokens: 150,
-      completionTokens: 150,
-      totalTokens: 300,
-      hitStepLimit: false,
-    });
-  });
-
-  // The control: one call is one call, so the number is not inflated by the loop itself
-  it("records a single round-trip as one", async () => {
-    chatCompletion.mockResolvedValue(withUsage({ type: "text", content: "done" }, 10));
-
-    await turn([]);
-
-    expect(lastMessage().usage).toMatchObject({ calls: 1, totalTokens: 20 });
-  });
-
-  it("counts a call the provider then failed, because it was still made", async () => {
-    chatCompletion
-      .mockResolvedValueOnce(withUsage(toolCall("add_comment", { taskKey: "BP-1", body: "x" }), 100))
-      .mockResolvedValueOnce({ type: "error", error: "provider exploded" });
-
-    await turn([]);
-
-    expect(lastMessage().usage).toMatchObject({ calls: 2 });
-  });
-
-  /**
-   * The most expensive shape a turn takes, and the one the operator most wants to hear about: it
-   * spent every step and stopped because it ran out, not because it was finished. Nothing asserted
-   * this arm, so the flag, the `$cond` that counts it and the sentence on the settings screen all
-   * rested on one untested line.
-   */
   it("says when it ran out of steps rather than finishing", async () => {
-    chatCompletion.mockResolvedValue(
-      withUsage(toolCall("add_comment", { taskKey: "BP-1", body: "again" }), 10)
-    );
+    chatCompletion.mockResolvedValue(withUsage(toolCall("add_comment", { taskKey: "BP-1", body: "again" }), 10));
 
     await turn([]);
 
-    expect(lastMessage().usage).toMatchObject({ hitStepLimit: true, calls: 15 });
+    expect(lastMessage().usage).toEqual({ hitStepLimit: true });
   });
 
   // The control: a turn that finished says it did, so the flag is not simply always true
@@ -498,45 +447,18 @@ describe("what a turn records about its own cost", () => {
 
     await turn([]);
 
-    expect(lastMessage().usage).toMatchObject({ hitStepLimit: false });
+    expect(lastMessage().usage).toEqual({ hitStepLimit: false });
   });
 
-  // A provider that reports no usage must read as "unknown", never as free
-  it("still counts the calls when the provider reports no usage at all", async () => {
-    chatCompletion.mockResolvedValue({ type: "text", content: "done" });
-
-    await turn([]);
-
-    expect(lastMessage().usage).toMatchObject({ calls: 1, totalTokens: 0 });
-  });
-
-  /**
-   * BP-568. The saving lives in the calls after the first: the first pays a cache write for the
-   * prefix and the rest read it back. Recorded beside the tokens rather than inside them, so the
-   * day's total still means what a budget is set from.
-   */
-  it("sums what its round-trips read from the cache, without touching the total", async () => {
+  it("writes one usage row for every round-trip it makes, with what the provider reported", async () => {
     chatCompletion
-      .mockResolvedValueOnce(withUsage(toolCall("add_comment", { taskKey: "BP-1", body: "x" }), 100, 0, 90))
-      .mockResolvedValueOnce(withUsage({ type: "text", content: "done" }, 100, 90, 0));
+      .mockResolvedValueOnce(withUsage(toolCall("add_comment", { taskKey: "BP-1", body: "x" }), 100))
+      .mockResolvedValueOnce(withUsage({ type: "text", content: "done" }, 50));
 
     await turn([]);
 
-    expect(lastMessage().usage).toMatchObject({
-      calls: 2,
-      totalTokens: 400,
-      cachedPromptTokens: 90,
-      cacheWriteTokens: 90,
-    });
-  });
-
-  // The control: a provider that caches nothing records zero, not the prompt count
-  it("records nothing cached when nothing was", async () => {
-    chatCompletion.mockResolvedValue(withUsage({ type: "text", content: "done" }, 100));
-
-    await turn([]);
-
-    expect(lastMessage().usage).toMatchObject({ cachedPromptTokens: 0, cacheWriteTokens: 0 });
+    expect(recordUsage).toHaveBeenCalledTimes(2);
+    expect(recordUsage.mock.calls.map((call) => call[1].usage.totalTokens)).toEqual([200, 100]);
   });
 });
 

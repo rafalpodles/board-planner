@@ -38,12 +38,12 @@ beforeEach(() => {
   updateSettings.mockImplementation(async (_db, update) => update.$set);
 });
 
-// BP-326: these are the defaults behind every project's PM model and daily turn cap
+// BP-326: the default behind every project's PM model
 describe("PUT /api/settings", () => {
   it("refuses an admin's machine credential and writes nothing", async () => {
     getAuthUser.mockResolvedValue({ ...ADMIN, viaMachineCredential: true });
 
-    const res = await put({ pmDefaultDailyTurnCap: 1000 });
+    const res = await put({ pmDefaultModel: "some/model" });
 
     expect(res.status).toBe(403);
     expect(updateSettings).not.toHaveBeenCalled();
@@ -59,20 +59,30 @@ describe("PUT /api/settings", () => {
     expect(updateSettings).not.toHaveBeenCalled();
   });
 
+  it("writes nothing for a default turn cap, which an older client may still send: there is none", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+
+    await put({ pmDefaultDailyTurnCap: 250 });
+    expect(updateSettings).not.toHaveBeenCalled();
+
+    await put({ pmDefaultModel: "some/model", pmDefaultDailyTurnCap: 250 });
+    expect(updateSettings).toHaveBeenCalledWith(scopedToDefaultOrganisation(), { $set: { pmDefaultModel: "some/model" } });
+  });
+
   it("writes the change for an interactive admin and records who made it", async () => {
     getAuthUser.mockResolvedValue(ADMIN);
 
-    const res = await put({ pmDefaultDailyTurnCap: 250, pmDefaultModel: "some/model" });
+    const res = await put({ pmDefaultModel: "some/model" });
 
     expect(res.status).toBe(200);
     expect(updateSettings).toHaveBeenCalledWith(scopedToDefaultOrganisation(), {
-      $set: { pmDefaultModel: "some/model", pmDefaultDailyTurnCap: 250 },
+      $set: { pmDefaultModel: "some/model" },
     });
     expect(logInstanceAudit).toHaveBeenCalledWith(scopedToDefaultOrganisation(), {
       action: "instance_settings_changed",
       user: "admin-1",
       actorUsername: "root",
-      detail: "pmDefaultModel: some/model, pmDefaultDailyTurnCap: 250",
+      detail: "pmDefaultModel: some/model",
     });
   });
 });

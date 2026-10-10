@@ -37,7 +37,6 @@ function project(over: Partial<ApiProject> = {}): ApiProject {
       model: "",
       contextNotes: "",
       links: [],
-      dailyTurnCap: 0,
       mcpServers: [
         {
           name: "jira",
@@ -167,11 +166,11 @@ describe("PmAgentSection MCP connections — plain member (neither owner nor ins
 });
 
 /**
- * BP-453. The cap counts from midnight in the board's own zone, so the hint has to name the zone
- * the SERVER will actually use — `turn-cap.ts` falls back when the stored one is unreadable, and a
- * truthiness check here would announce a zone nothing counts in.
+ * BP-453. The day's usage counts from midnight in the board's own zone, so the line has to name the zone the SERVER will
+ * actually use: `day-usage.ts` falls back when the stored one is unreadable, and a truthiness check here would announce a zone
+ * nothing counts in.
  */
-describe("the turn-cap hint", () => {
+describe("the day's usage line", () => {
   // Cast because `timezone` is a required string on the type and the row this covers has none —
   // a document written before the field existed, which is exactly the case being asserted.
   const withZone = (timezone: string | undefined) =>
@@ -186,31 +185,42 @@ describe("the turn-cap hint", () => {
       },
     }) as unknown as Pick<NonNullable<ApiProject["pm"]>, "autonomy">;
 
-  it("names the board's own zone", () => {
-    renderSection(true, { pm: { ...project().pm!, ...withZone("Asia/Tokyo") } });
+  const USAGE = { turns: 3, calls: 12, tokens: 120_000, promptTokens: 0, cachedTokens: 0, cacheWriteTokens: 0, stepLimitHits: 0, maxCallsPerTurn: 15 };
 
-    expect(screen.getByText(/Resets at midnight in Asia\/Tokyo/)).toBeTruthy();
+  beforeEach(() => {
+    api.get.mockResolvedValue(USAGE);
+  });
+  afterEach(() => {
+    api.get.mockImplementation(() => Promise.reject(new Error("not stubbed here")));
   });
 
-  it("says a failed turn counts, which is the decision it exists to record", () => {
+  it("names the board's own zone", async () => {
     renderSection(true, { pm: { ...project().pm!, ...withZone("Asia/Tokyo") } });
 
-    expect(screen.getByText(/a turn the model failed/)).toBeTruthy();
+    expect(await screen.findByText(/from midnight in Asia\/Tokyo/)).toBeTruthy();
   });
 
   // The legacy row `validatePmConfig` would refuse on write but which predates it. The server
-  // counts in Europe/Warsaw for this board; the hint must not claim otherwise.
-  it("names the fallback when the stored zone is one the server cannot read", () => {
+  // counts in Europe/Warsaw for this board; the line must not claim otherwise.
+  it("names the fallback when the stored zone is one the server cannot read", async () => {
     renderSection(true, { pm: { ...project().pm!, ...withZone("Warsaw") } });
 
-    expect(screen.getByText(/Resets at midnight in Europe\/Warsaw/)).toBeTruthy();
-    expect(screen.queryByText(/midnight in Warsaw\./)).toBeNull();
+    expect(await screen.findByText(/from midnight in Europe\/Warsaw/)).toBeTruthy();
+    expect(screen.queryByText(/midnight in Warsaw:/)).toBeNull();
   });
 
-  it("names the fallback when the board never stored one at all", () => {
+  it("names the fallback when the board never stored one at all", async () => {
     renderSection(true, { pm: { ...project().pm!, ...withZone(undefined) } });
 
-    expect(screen.getByText(/Resets at midnight in Europe\/Warsaw/)).toBeTruthy();
+    expect(await screen.findByText(/from midnight in Europe\/Warsaw/)).toBeTruthy();
+  });
+
+  it("offers no cap to set: the allowance is the organisation's, counted by the gateway", async () => {
+    renderSection(true);
+
+    await screen.findByTestId("pm-usage-today");
+    expect(screen.queryByLabelText(/Turns per day/)).toBeNull();
+    expect(screen.queryByLabelText(/Tokens per day/)).toBeNull();
   });
 });
 
@@ -278,7 +288,6 @@ describe("the flood warning's arithmetic", () => {
         model: "",
         contextNotes: "",
         links: [],
-        dailyTurnCap: 0,
         mcpServers: [
           {
             name: "notion",
@@ -392,7 +401,6 @@ describe("the rows moving under a disconnect", () => {
         model: "",
         contextNotes: "",
         links: [],
-        dailyTurnCap: 0,
         mcpServers: [
           { name: "spare", url: "https://a.example/mcp", authType: "none", allowWrites: false, toolAllowlist: [], enabled: true, hasAuthToken: false },
           { name: "notion", url: "https://n.example/mcp", authType: "oauth", allowWrites: false, toolAllowlist: [], enabled: true, hasAuthToken: false, oauthStatus: "connected", oauthClientId: "" },
@@ -432,7 +440,7 @@ describe("the rows moving under a disconnect", () => {
       name: "Test Project",
       canAdmin: true,
       pmAvailable: true,
-      pm: { enabled: true, model: "", contextNotes: "saved text", links: [], dailyTurnCap: 0, mcpServers: [] },
+      pm: { enabled: true, model: "", contextNotes: "saved text", links: [], mcpServers: [] },
     });
     await register.mock.calls.at(-1)![0].save();
     await waitFor(() => expect(dirtyCount()).toBe(0));
@@ -476,14 +484,13 @@ describe("when the PM agent cannot run for want of a key", () => {
  */
 describe("PmAgentSection — what today's tokens actually cost", () => {
   const usage = (over: Record<string, unknown> = {}) => ({
-    turns: { used: 3, cap: 100 },
+    turns: 3,
     calls: 12,
     tokens: 120_000,
     // What a cache read is a share of. The day's total is larger because the model also wrote.
     promptTokens: 100_000,
     cachedTokens: 90_000,
     cacheWriteTokens: 0,
-    tokenCap: 0,
     stepLimitHits: 0,
     maxCallsPerTurn: 15,
     ...over,
@@ -603,7 +610,7 @@ describe("PmAgentSection — what today's tokens actually cost", () => {
   // A day with no turns divides by zero. "NaN%" on a settings screen is how that would read.
   it("says nothing at all on a day with no spend", async () => {
     api.get.mockResolvedValue(
-      usage({ tokens: 0, promptTokens: 0, cachedTokens: 0, calls: 0, turns: { used: 0, cap: 100 } })
+      usage({ tokens: 0, promptTokens: 0, cachedTokens: 0, calls: 0, turns: 0 })
     );
 
     renderSection(true);

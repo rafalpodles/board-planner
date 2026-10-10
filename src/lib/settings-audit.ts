@@ -25,8 +25,6 @@ const LABELS: Record<string, string> = {
   "pm.lockedByInstance": "PM agent locked by an instance admin",
   "pm.model": "PM model",
   "pm.contextNotes": "PM project context",
-  "pm.dailyTurnCap": "PM turns per day",
-  "pm.dailyTokenCap": "PM tokens per day",
   "pm.autonomy.dailyReview": "PM scheduled review",
   "pm.autonomy.reviewHour": "PM first review at",
   "pm.autonomy.reviewIntervalHours": "PM review every (hours)",
@@ -47,8 +45,6 @@ const PM_FIELDS = [
   "lockedByInstance",
   "model",
   "contextNotes",
-  "dailyTurnCap",
-  "dailyTokenCap",
   "autonomy.dailyReview",
   "autonomy.reviewHour",
   "autonomy.reviewIntervalHours",
@@ -61,8 +57,6 @@ const PM_DEFAULTS = {
   lockedByInstance: false,
   model: "",
   contextNotes: "",
-  dailyTurnCap: 0,
-  dailyTokenCap: 0,
   autonomy: DEFAULT_PM_AUTONOMY,
 };
 
@@ -170,11 +164,6 @@ function secretChange(label: string, before: unknown, after: unknown): string | 
   return had ? `${label} replaced` : `${label} set`;
 }
 
-const SHOWN_AS: Record<string, (value: unknown) => string> = {
-  "pm.dailyTurnCap": (value) => (value ? auditValue(value) : "server default"),
-  "pm.dailyTokenCap": (value) => (value ? auditValue(value) : "no ceiling"),
-};
-
 function policyChanges(before: Stored, after: Stored): string[] {
   const pinned = (doc: Stored) =>
     new Set(((at(doc, "worker.policyOverrides") as string[] | undefined) ?? []).map(String));
@@ -273,7 +262,7 @@ const shownLinks = (value: unknown) =>
 function pmChanges(before: Stored, after: Stored): string[] {
   const lines = PM_FIELDS.map((field) => {
     const key = `pm.${field}`;
-    return auditChange(LABELS[key], stored(before, key), stored(after, key), SHOWN_AS[key]);
+    return auditChange(LABELS[key], stored(before, key), stored(after, key));
   });
   lines.push(
     auditChange("PM links", links(at(before, "pm.links")), links(at(after, "pm.links")), shownLinks)

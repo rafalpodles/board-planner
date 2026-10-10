@@ -20,7 +20,6 @@ export const GET = withAdmin(async (_request, { db }) => {
     pmKeyUnreadable: availability?.keyUnreadable ?? false,
     defaults: {
       pmDefaultModel: settings.pmDefaultModel || "",
-      pmDefaultDailyTurnCap: settings.pmDefaultDailyTurnCap || 0,
       envModel: DEFAULT_PM_MODEL(),
     },
     projects: projects.map((project) => ({
@@ -31,7 +30,6 @@ export const GET = withAdmin(async (_request, { db }) => {
       enabled: !!project.pm?.enabled,
       lockedByInstance: !!project.pm?.lockedByInstance,
       model: project.pm?.model || "",
-      dailyTurnCap: project.pm?.dailyTurnCap || 0,
       autonomy: {
         dailyReview: !!project.pm?.autonomy?.dailyReview,
         reviewIntervalHours: project.pm?.autonomy?.reviewIntervalHours || 24,

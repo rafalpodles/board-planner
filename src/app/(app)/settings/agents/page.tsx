@@ -19,7 +19,6 @@ interface AgentRow {
   enabled: boolean;
   lockedByInstance: boolean;
   model: string;
-  dailyTurnCap: number;
   autonomy: {
     dailyReview: boolean;
     reviewIntervalHours: number;
@@ -31,7 +30,7 @@ interface AgentsResponse {
   pmAvailable: boolean;
   pmNeedsPlan?: boolean;
   pmKeyUnreadable?: boolean;
-  defaults: { pmDefaultModel: string; pmDefaultDailyTurnCap: number; envModel: string };
+  defaults: { pmDefaultModel: string; envModel: string };
   projects: AgentRow[];
 }
 
@@ -45,7 +44,6 @@ export default function AdminAgentsPage() {
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [defaultModel, setDefaultModel] = useState("");
-  const [defaultCap, setDefaultCap] = useState("0");
   const [savingDefaults, setSavingDefaults] = useState(false);
   const [aiModel, setAiModel] = useState("");
   const [savingAiModel, setSavingAiModel] = useState(false);
@@ -55,7 +53,6 @@ export default function AdminAgentsPage() {
       const res: AgentsResponse = await api.get("/api/admin/agents");
       setData(res);
       setDefaultModel(res.defaults.pmDefaultModel);
-      setDefaultCap(String(res.defaults.pmDefaultDailyTurnCap));
       const settings = await api.get("/api/settings");
       setAiModel(settings?.aiModel ?? "");
     } catch {
@@ -123,16 +120,10 @@ export default function AdminAgentsPage() {
   }
 
   async function saveDefaults() {
-    const cap = Number(defaultCap);
-    if (!Number.isInteger(cap) || cap < 0 || cap > 1000) {
-      toast("Default turn cap must be a whole number between 0 and 1000", "error");
-      return;
-    }
     setSavingDefaults(true);
     try {
       await api.put("/api/settings", {
         pmDefaultModel: defaultModel.trim(),
-        pmDefaultDailyTurnCap: cap,
       });
       toast("Instance defaults saved", "success");
       load();
@@ -236,13 +227,6 @@ export default function AdminAgentsPage() {
             onChange={(e) => setDefaultModel(e.target.value)}
             placeholder={data.defaults.envModel}
           />
-          <Input
-            label="Default daily turn cap"
-            type="number"
-            value={defaultCap}
-            onChange={(e) => setDefaultCap(e.target.value)}
-            placeholder="0 = use the environment value"
-          />
         </div>
         <div className="mt-3">
           <Button size="sm" onClick={saveDefaults} disabled={savingDefaults}>
@@ -259,7 +243,6 @@ export default function AdminAgentsPage() {
                 <th className="text-left px-3 py-2 font-medium">Project</th>
                 <th className="text-left px-3 py-2 font-medium">Agent</th>
                 <th className="text-left px-3 py-2 font-medium">Model</th>
-                <th className="text-left px-3 py-2 font-medium w-28">Turn cap</th>
                 <th className="text-left px-3 py-2 font-medium">Autonomy</th>
               </tr>
             </thead>
@@ -323,29 +306,6 @@ export default function AdminAgentsPage() {
                         }
                       }}
                       placeholder={effectiveDefault}
-                      className="text-xs"
-                    />
-                  </td>
-                  <td className="px-3 py-2">
-                    <Input
-                      type="number"
-                      aria-label={`Daily turn cap for ${row.key} — ${row.name}`}
-                      value={String(row.dailyTurnCap)}
-                      onChange={(e) =>
-                        setData((prev) =>
-                          prev
-                            ? {
-                                ...prev,
-                                projects: prev.projects.map((p) =>
-                                  p._id === row._id
-                                    ? { ...p, dailyTurnCap: Number(e.target.value) || 0 }
-                                    : p
-                                ),
-                              }
-                            : prev
-                        )
-                      }
-                      onBlur={(e) => patch(row, { dailyTurnCap: Number(e.target.value) || 0 })}
                       className="text-xs"
                     />
                   </td>
