@@ -34,6 +34,21 @@ invitationSchema.index(
   { unique: true, partialFilterExpression: { status: "pending" } }
 );
 
+// Revoking is a revoked invitation's last write, so its updatedAt is the revoke time
+const INVITATION_PURGE_AFTER_SECONDS = 90 * 24 * 60 * 60;
+invitationSchema.index(
+  { expiresAt: 1 },
+  { expireAfterSeconds: INVITATION_PURGE_AFTER_SECONDS, partialFilterExpression: { status: "pending" } }
+);
+invitationSchema.index(
+  { acceptedAt: 1 },
+  { expireAfterSeconds: INVITATION_PURGE_AFTER_SECONDS, partialFilterExpression: { status: "accepted" } }
+);
+invitationSchema.index(
+  { updatedAt: 1 },
+  { expireAfterSeconds: INVITATION_PURGE_AFTER_SECONDS, partialFilterExpression: { status: "revoked" } }
+);
+
 withOrganisation(invitationSchema);
 
 export const Invitation: Model<IInvitation> =
