@@ -113,6 +113,25 @@ test.describe("BP-920: the app names the organisation you are in", () => {
     expect(await renamesIn(GLOBEX)).toEqual([]);
   });
 
+  test("BP-1010: a name another organisation has, in any case, or a reserved word, is refused with the reason on screen, and nothing is renamed", async ({ page, request }) => {
+    await openSettings(page, ACME);
+
+    for (const [index, name] of ["GLOBEX", "Glóbex", "login"].entries()) {
+      await page.getByLabel("Name", { exact: true }).fill(name);
+      const saved = page.waitForResponse((res) => res.url().endsWith("/api/organisation") && res.request().method() === "PUT");
+      await page.getByRole("button", { name: "Save" }).click();
+      expect((await saved).status()).toBe(409);
+      if (index === 0) await expect(page.getByText("That name is not available. Try another.").last()).toBeVisible();
+    }
+
+    const acme = await request.get(`${ORGANISATIONS_API}/api/organisation`, { headers: asSession(ACME) });
+    expect((await acme.json()).name).toBe("Acme");
+    expect(await renamesIn(ACME)).toEqual([]);
+
+    const recased = await request.put(`${ORGANISATIONS_API}/api/organisation`, { headers: asSession(ACME), data: { name: "ACME" } });
+    expect(recased.status()).toBe(200);
+  });
+
   test("a member reads the name and cannot change it, on screen or through the API", async ({ browser, request }) => {
     const sessionToken = await aMember(ACME);
     const context = await browser.newContext();

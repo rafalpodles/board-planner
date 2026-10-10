@@ -2,7 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { generateKeyPairSync } from "node:crypto";
 import { Types } from "mongoose";
 
-const { connectDB, findOneAndUpdate, findById, updateOne } = vi.hoisted(() => ({
+const { connectDB, findOneAndUpdate, findById, updateOne, countDocuments, countAttempt } = vi.hoisted(() => ({
+  countAttempt: vi.fn(),
+  countDocuments: vi.fn(),
   connectDB: vi.fn(),
   findOneAndUpdate: vi.fn(),
   findById: vi.fn(),
@@ -10,9 +12,10 @@ const { connectDB, findOneAndUpdate, findById, updateOne } = vi.hoisted(() => ({
 }));
 
 vi.mock("./db", () => ({ connectDB }));
-vi.mock("@/models/organisation", () => ({ Organisation: { findOneAndUpdate, findById, updateOne } }));
+vi.mock("./rate-limit", () => ({ countAttempt }));
+vi.mock("@/models/organisation", () => ({ Organisation: { findOneAndUpdate, findById, updateOne, countDocuments } }));
 
-const { getOrganisation, licenceOf, checkOrganisationName, nameOrganisation, renameOrganisation, organisationIsNamed, ORGANISATION_NAME_MAX } = await import("./organisation");
+const { getOrganisation, licenceOf, checkOrganisationName, nameOrganisation, renameOrganisation, organisationIsNamed, nameIsReserved, nameIsTaken, nameUnavailable, nameChecksSpent, ORGANISATION_NAME_MAX } = await import("./organisation");
 const { DEFAULT_ORGANISATION_ID } = await import("./organisation-field");
 const { signLicence } = await import("./licence");
 
@@ -206,6 +209,11 @@ describe("checkOrganisationName", () => {
     expect(checkOrganisationName("  Rafał-org ")).toEqual({ ok: true, value: "Rafał-org" });
   });
 
+  it("reads runs of spaces, tabs and line breaks as one space, as a page shows them (BP-1010)", () => {
+    expect(checkOrganisationName("Globex   Corp")).toEqual({ ok: true, value: "Globex Corp" });
+    expect(checkOrganisationName("Globex\tCorp\n")).toEqual({ ok: true, value: "Globex Corp" });
+  });
+
   it("refuses anything but a string, and a name over the limit", () => {
     expect(checkOrganisationName(42)).toMatchObject({ ok: false });
     expect(checkOrganisationName("x".repeat(ORGANISATION_NAME_MAX))).toMatchObject({ ok: true });
@@ -259,5 +267,77 @@ describe("organisationIsNamed (BP-920)", () => {
   it("names every organisation on subdomains, \"default\" included", () => {
     process.env.ORGANISATION_DOMAIN = "board-planner.test";
     expect(organisationIsNamed({ name: "default" })).toBe(true);
+  });
+});
+
+describe("organisation names (BP-1010)", () => {
+  it.each(["login", "Login", "  APP  ", "Board Planner", "Board-Planner", "Łogin", "WWW", "MTA STS", "ＬＯＧＩＮ"])("reads %s as a reserved address", (name) => {
+    expect(nameIsReserved(name)).toBe(true);
+  });
+
+  it.each(["Acme", "Login Ltd", "Applications", "Plan"])("lets %s through", (name) => {
+    expect(nameIsReserved(name)).toBe(false);
+  });
+
+  it("asks for a name ignoring case and accents, among organisations not deleted, leaving the caller's own out", async () => {
+    const collation = vi.fn().mockResolvedValue(1);
+    countDocuments.mockReturnValue({ collation });
+
+    expect(await nameIsTaken("Acme", OTHER)).toBe(true);
+    expect(countDocuments).toHaveBeenCalledWith({ name: "Acme", deletedAt: null, _id: { $ne: OTHER } });
+    expect(collation).toHaveBeenCalledWith({ locale: "en", strength: 1 });
+  });
+
+  it("is free when nobody has it", async () => {
+    countDocuments.mockReturnValue({ collation: () => Promise.resolve(0) });
+
+    expect(await nameIsTaken("Initech")).toBe(false);
+    expect(countDocuments).toHaveBeenCalledWith({ name: "Initech", deletedAt: null });
+  });
+
+  describe("nameUnavailable", () => {
+    it("is never so on a single-organisation instance, which has nobody to clash with", async () => {
+      expect(await nameUnavailable("Login", OTHER)).toBe(false);
+      expect(countDocuments).not.toHaveBeenCalled();
+    });
+
+    describe("with organisations on subdomains", () => {
+      beforeEach(() => {
+        process.env.ORGANISATION_DOMAIN = "board-planner.com";
+      });
+
+      it("refuses a reserved word without asking the database", async () => {
+        expect(await nameUnavailable("Login", OTHER)).toBe(true);
+        expect(countDocuments).not.toHaveBeenCalled();
+      });
+
+      it("refuses a name another organisation has, and allows a free one", async () => {
+        countDocuments.mockReturnValueOnce({ collation: () => Promise.resolve(1) }).mockReturnValueOnce({ collation: () => Promise.resolve(0) });
+
+        expect(await nameUnavailable("Globex", OTHER)).toBe(true);
+        expect(await nameUnavailable("Initech", OTHER)).toBe(false);
+      });
+    });
+  });
+});
+
+describe("nameChecksSpent (BP-1010)", () => {
+  it("counts nothing on a single-organisation instance, which has nobody to ask about", async () => {
+    expect(await nameChecksSpent("k")).toBe(false);
+    expect(countAttempt).not.toHaveBeenCalled();
+  });
+
+  describe("with organisations on subdomains", () => {
+    beforeEach(() => {
+      process.env.ORGANISATION_DOMAIN = "board-planner.com";
+    });
+
+    it("takes the slot first and allows ten checks an hour, the eleventh is refused", async () => {
+      countAttempt.mockResolvedValueOnce(10).mockResolvedValueOnce(11);
+
+      expect(await nameChecksSpent("organisation-sign-up:names:x")).toBe(false);
+      expect(await nameChecksSpent("organisation-sign-up:names:x")).toBe(true);
+      expect(countAttempt).toHaveBeenCalledWith("organisation-sign-up:names:x", 60 * 60 * 1000);
+    });
   });
 });

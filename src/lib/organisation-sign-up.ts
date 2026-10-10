@@ -5,7 +5,7 @@ import { seedAgents } from "./agent-seed";
 import { connectDB } from "./db";
 import { scoped } from "./db-scope";
 import { duplicateKeyField } from "./mongo-errors";
-import { checkOrganisationName } from "./organisation";
+import { NAME_UNAVAILABLE, checkOrganisationName, nameIsReserved } from "./organisation";
 import { RESERVED_SLUGS, forgetOrganisationSlugs, isSlug } from "./organisation-host";
 import { purgeOrganisationRows } from "./organisation-life-cycle";
 import { checkNewAccount, type NewAccountFields } from "./new-account";
@@ -47,6 +47,7 @@ export function checkSignUp(email: string, input: SignUpInput): { ok: true; valu
   const name = checkOrganisationName(input.name);
   if (!name.ok) return { ok: false, error: name.error.replace(/^organisation/, "The organisation's name") };
   if (!name.value) return { ok: false, error: "Give the organisation a name" };
+  if (nameIsReserved(name.value)) return { ok: false, error: NAME_UNAVAILABLE };
   const slug = checkSlug(input.slug);
   if (!slug.ok) return slug;
   const account = checkNewAccount({ username: input.username, fullName: input.fullName, email, password: input.password });
