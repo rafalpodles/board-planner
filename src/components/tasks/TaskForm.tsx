@@ -267,7 +267,7 @@ export function TaskForm({
       {aiEnabled && (
         <div className="bg-bg-input border border-border rounded-lg p-3 space-y-2">
           <label className="flex items-center gap-1.5 text-sm font-medium">
-            AI Assist <AiBadge />
+            AI Assist <AiBadge title="Uses an AI model" />
           </label>
           <div className="flex gap-2">
             <input

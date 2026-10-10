@@ -47,3 +47,17 @@ describe("where a row leads", () => {
     expect(link.getAttribute("href")).toBe("/notifications");
   });
 });
+
+// BP-942
+describe("who a row comes from", () => {
+  it("says a notification the PM agent caused came from an AI, and a person's plainly", async () => {
+    api.get.mockResolvedValue([
+      { ...base, _id: "n3", type: "comment_added", task: null, title: "New comment on ORB-5", actor: { _id: "pm1", username: "pm", fullName: "PM Agent" } },
+      { ...base, _id: "n4", type: "comment_added", task: null, title: "New comment on ORB-6" },
+    ]);
+    render(<NotificationsPage />);
+
+    expect((await screen.findByRole("link", { name: /New comment on ORB-5/ })).textContent).toContain("PM Agent (AI)");
+    expect((await screen.findByRole("link", { name: /New comment on ORB-6/ })).textContent).not.toContain("(AI)");
+  });
+});

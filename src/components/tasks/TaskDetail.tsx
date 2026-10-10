@@ -45,6 +45,7 @@ import { useOpenTask } from "@/hooks/use-open-task";
 import { LoadFailed } from "@/components/ui/LoadFailed";
 import { Button } from "@/components/ui/Button";
 import { boardRefusal } from "@/lib/board-load-failure";
+import { withAiMark } from "@/lib/pm/username";
 
 interface TaskDetailProps {
   projectId: string;
@@ -298,7 +299,9 @@ function TaskDetailView({
   // "Unassigned" over it. Same rule the rail's picker uses, so the two cannot disagree.
   const assignee = assigneeToShow(users, draft.assignee, task.assignee);
   const reporter =
-    task.createdBy && typeof task.createdBy === "object" ? task.createdBy.fullName : null;
+    task.createdBy && typeof task.createdBy === "object"
+      ? withAiMark(task.createdBy.fullName, task.createdBy.username)
+      : null;
   const watching = !!currentUser && (task.watchers || []).includes(currentUser._id);
   const projectDefaultAgent = project.worker?.agent ? String(project.worker.agent) : undefined;
 

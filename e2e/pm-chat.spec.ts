@@ -428,6 +428,22 @@ test.describe("a turn, from the box to the bubble", () => {
     await expect(page.getByText(/PM Agent \(AI\) added a comment/)).toBeVisible();
   });
 
+  test("a task the agent creates says on its own page that an AI reported it", async ({ page }) => {
+    await signIn(page);
+    await openChat(page);
+
+    await say(page, "File the release checklist.", {
+      name: "create_task",
+      arguments: { title: "Release checklist written by the agent" },
+    });
+    const chip = page.getByRole("link", { name: new RegExp(`${PROJECT_KEY}-\\d+`) }).last();
+    await expect(chip).toBeVisible();
+    await chip.click();
+
+    await expect(page.getByRole("textbox", { name: "Title" })).toHaveValue("Release checklist written by the agent");
+    await expect(page.getByText(/Reported by PM Agent \(AI\)/)).toBeVisible();
+  });
+
   test("while a turn runs the box is closed, and Send becomes Stop", async ({ page }) => {
     await signIn(page);
     await openChat(page);

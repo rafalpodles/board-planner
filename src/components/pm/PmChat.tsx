@@ -626,7 +626,8 @@ export function PmChat({
         {working && (
           <div className="flex justify-start">
             <div className="max-w-[85%] bg-bg-card border border-border rounded-lg px-3 py-2">
-              <p className="text-[11px] font-medium text-text-muted mb-1">PM Agent</p>
+              <p className="mb-1 mr-1.5 inline-block text-[11px] font-medium text-text-muted">PM Agent</p>
+              <AiBadge />
               <div className="flex items-center gap-2 text-sm text-text-muted">
                 <div className="animate-spin rounded-full h-3.5 w-3.5 border-2 border-primary border-t-transparent shrink-0" />
                 {workingStatus || "PM is working…"}

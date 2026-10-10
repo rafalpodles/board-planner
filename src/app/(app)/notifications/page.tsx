@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { timeAgo } from "@/lib/time";
 import { projectPath, taskPath } from "@/lib/urls";
 import { PageHeader } from "@/components/shell/PageHeader";
+import { withAiMark } from "@/lib/pm/username";
 
 const TYPE_LABELS: Record<NotificationType, string> = {
   task_assigned: "Assigned",
@@ -132,7 +133,7 @@ export default function NotificationsPage() {
                   <span className="inline-block bg-bg-input px-1.5 py-0.5 rounded text-[10px] mr-1.5">
                     {TYPE_LABELS[n.type] || n.type}
                   </span>
-                  {n.actor && typeof n.actor === "object" ? n.actor.fullName : ""}
+                  {n.actor && typeof n.actor === "object" ? withAiMark(n.actor.fullName, n.actor.username) : ""}
                   {" \u00b7 "}
                   {timeAgo(n.createdAt)}
                   {n.project && typeof n.project === "object" && (

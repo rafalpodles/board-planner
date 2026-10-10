@@ -472,3 +472,24 @@ describe("who is answering", () => {
     expect(badges[0].parentElement!.textContent).toContain("PM Agent");
   });
 });
+
+describe("a turn still running", () => {
+  it("is marked as the AI's while it works", async () => {
+    const stream = heldStream();
+    api.stream.mockResolvedValue(stream.response);
+    render(<PmChat projectId="p1" preloadedProject={PROJECT as never} />);
+    const box = await screen.findByRole("textbox");
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(box, "Plan it.");
+      box.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      screen.getByRole("button", { name: /send/i }).click();
+    });
+
+    // An empty thread before the send, so the one badge is the running turn's
+    const badge = await screen.findByTestId("ai-badge");
+    expect(badge.parentElement!.querySelector(".animate-spin")).toBeTruthy();
+    stream.close();
+  });
+});

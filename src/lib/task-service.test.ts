@@ -4542,6 +4542,25 @@ describe("a comment mentioning a watcher", () => {
     });
   });
 
+  // BP-942: the PM's comment reaches people in their mail, their bell and their team chat, where nothing
+  // else says an AI wrote it, and "pm" reads like a colleague's handle
+  it("names the PM as an AI wherever its comment is sent, and a person plainly", async () => {
+    setup([MENTIONED_WATCHER], [WATCHER, MENTIONED_WATCHER]);
+    await addComment(db, "p1", "t1", "@bob look at this", { id: "pm-id", username: "pm" });
+
+    const byType = notificationsByType();
+    expect(byType.mentioned).toMatchObject({ title: "pm (AI) mentioned you in TP-7", digestTitle: "pm (AI) mentioned you" });
+    expect((byType.comment_added.email as { quote: { who: string } }).quote.who).toBe("pm (AI)");
+    expect((byType.mentioned.email as { quote: { who: string } }).quote.who).toBe("pm (AI)");
+
+    const webhook = (dispatchWebhooks as ReturnType<typeof vi.fn>).mock.calls.find((c) => c[2] === "comment_added");
+    expect(webhook?.[3].data.author).toBe("pm (AI)");
+
+    setup([MENTIONED_WATCHER], [WATCHER, MENTIONED_WATCHER]);
+    await addComment(db, "p1", "t1", "@bob look at this", { id: "actor", username: "owner" });
+    expect((notificationsByType().comment_added.email as { quote: { who: string } }).quote.who).toBe("owner");
+  });
+
   // BP-323
   it("refuses a comment past the length cap and stores nothing", async () => {
     setup([], [WATCHER]);
