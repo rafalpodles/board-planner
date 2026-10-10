@@ -553,7 +553,7 @@ test("a PM turn records its field change under the agent's own name", async ({ p
   ]);
 
   const history = await openHistory(page);
-  await expect(history.getByText("PM Agent changed Difficulty from S to L")).toBeVisible();
+  await expect(history.getByText("PM Agent (AI) changed Difficulty from S to L")).toBeVisible();
   await expect(history.getByText(/E2E Admin changed Difficulty/)).toHaveCount(0);
 });
 
