@@ -164,3 +164,90 @@ describe("Column without onStatusChange", () => {
     ).not.toThrow();
   });
 });
+
+describe("Column in a row of the board", () => {
+  const lane = { groupBy: "priority" as const, key: "v:urgent", label: "Urgent" };
+
+  function drop(el: Element, id: string) {
+    const dataTransfer = { getData: () => id, dropEffect: "", setData: () => {} };
+    fireEvent.dragEnter(el, { dataTransfer });
+    fireEvent.dragOver(el, { dataTransfer });
+    fireEvent.drop(el, { dataTransfer });
+  }
+
+  it("says which row it is in, to the address and to a reader", () => {
+    const { container } = renderColumn({ lane, tasks: oneTask });
+    const el = container.firstElementChild!;
+    expect(el.getAttribute("data-lane")).toBe("v:urgent");
+    expect(el.getAttribute("role")).toBe("group");
+    expect(el.getAttribute("aria-label")).toBe("Needs Human Review, Urgent");
+  });
+
+  it("hands the row to the drop, after the position", () => {
+    const onTaskDrop = vi.fn();
+    const { container } = renderColumn({ lane, tasks: oneTask, onTaskDrop });
+    drop(container.firstElementChild!, "t9");
+    expect(onTaskDrop).toHaveBeenCalledWith("t9", "needs_human_review", expect.any(Number), lane);
+  });
+
+  it("takes a drop on the header as a drop at the end of the cell, row and all", () => {
+    const onTaskDrop = vi.fn();
+    const onStatusChange = vi.fn();
+    renderColumn({ lane, tasks: oneTask, onTaskDrop, onStatusChange });
+    drop(screen.getByRole("heading", { name: "Needs Human Review" }), "t9");
+
+    expect(onTaskDrop).toHaveBeenCalledWith("t9", "needs_human_review", 1, lane);
+    expect(onStatusChange).not.toHaveBeenCalled();
+  });
+
+  it("takes a drop on an empty cell's caption the same way", () => {
+    const onTaskDrop = vi.fn();
+    renderColumn({ lane, tasks: [], onTaskDrop });
+    drop(screen.getByText("Drop tasks here"), "t9");
+
+    expect(onTaskDrop).toHaveBeenCalledWith("t9", "needs_human_review", 0, lane);
+  });
+
+  it("still takes a drop outside any row on the header as a plain status change", () => {
+    const onTaskDrop = vi.fn();
+    const onStatusChange = vi.fn();
+    renderColumn({ tasks: oneTask, onTaskDrop, onStatusChange });
+    drop(screen.getByRole("heading", { name: "Needs Human Review" }), "t9");
+
+    expect(onStatusChange).toHaveBeenCalledWith("t9", "needs_human_review");
+    expect(onTaskDrop).not.toHaveBeenCalled();
+  });
+
+  it("hands no row to a drop outside any row", () => {
+    const onTaskDrop = vi.fn();
+    const { container } = renderColumn({ tasks: oneTask, onTaskDrop });
+    drop(container.firstElementChild!, "t9");
+    expect(onTaskDrop).toHaveBeenCalledWith("t9", "needs_human_review", expect.any(Number), undefined);
+  });
+
+  it("gives a cell a height of its own, since the rows are what the board scrolls through", () => {
+    const { container } = renderColumn({ lane, tasks: oneTask });
+    expect(container.firstElementChild!.className).toContain("max-h-[26rem]");
+    expect(container.firstElementChild!.className).not.toContain("lg:h-full");
+  });
+
+  it("lets a wheel over a cell reach the board, which is what scrolls between rows", () => {
+    const inRow = renderColumn({ lane, tasks: oneTask });
+    expect(inRow.container.querySelector("[data-column-body]")!.className).not.toContain("overscroll-y-contain");
+    cleanup();
+
+    const alone = renderColumn({ tasks: oneTask });
+    expect(alone.container.querySelector("[data-column-body]")!.className).toContain("overscroll-y-contain");
+  });
+
+  it("keeps the whole-height column without a row", () => {
+    const { container } = renderColumn({ tasks: oneTask });
+    expect(container.firstElementChild!.className).toContain("lg:h-full");
+    expect(container.firstElementChild!.hasAttribute("data-lane")).toBe(false);
+  });
+
+  it("names the row on its rail too", () => {
+    const { container } = renderColumn({ lane, collapsed: true });
+    expect(container.firstElementChild!.getAttribute("aria-label")).toBe("Expand Needs Human Review");
+  });
+});

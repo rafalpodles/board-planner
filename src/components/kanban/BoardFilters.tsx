@@ -20,7 +20,7 @@ import { categoryColor } from "@/lib/category-colors";
 import { AnyColumn } from "@/lib/columns";
 import { SortContext, sortTasks } from "@/lib/task-sort";
 import { ListColumnId } from "@/lib/list-columns";
-import { GroupBy, groupByOptions } from "@/lib/task-grouping";
+import { GroupBy, groupByOptions, laneGroupBy } from "@/lib/task-grouping";
 import { ColumnPicker } from "./ColumnPicker";
 import { OptionFilter } from "./OptionFilter";
 import { ViewsMenu } from "./ViewsMenu";
@@ -117,6 +117,8 @@ interface BoardFiltersProps {
   /** A view to apply once the stored filters have been read, e.g. from `?view=` */
   pendingView?: ApiSavedView | null;
   onPendingViewApplied?: () => void;
+  /** The board lays out rows for assignee, priority and category only; the list takes every choice */
+  groupByRows?: boolean;
   /** Separate from the handler above: the board has no columns to pick, but it still
       has to hydrate the stored set, or the next load writes an empty one back */
   showColumnPicker?: boolean;
@@ -154,6 +156,7 @@ export function BoardFilters({
   knownAssignees,
   pendingView,
   onPendingViewApplied,
+  groupByRows,
   showColumnPicker,
   onFilter,
   customFields = [],
@@ -826,12 +829,14 @@ export function BoardFilters({
       {showGroupBy && onGroupByChange && (
         <div className="flex h-11 shrink-0 items-center overflow-hidden rounded-lg border border-border bg-bg-card md:ml-auto">
           <select
-            value={groupBy}
+            value={groupByRows ? laneGroupBy(groupBy) : groupBy}
             aria-label="Group tasks by"
             onChange={(e) => onGroupByChange(e.target.value as GroupBy)}
             className="focus-ring-inset h-full max-w-[min(16rem,60vw)] truncate rounded-lg bg-transparent px-2.5 text-[13px] text-text-muted"
           >
-            {groupByOptions(customFields).map((o) => (
+            {groupByOptions(customFields)
+              .filter((o) => !groupByRows || o.value === laneGroupBy(o.value))
+              .map((o) => (
               <option key={o.value} value={o.value}>
                 {o.value ? `Group: ${o.label}` : "No grouping"}
               </option>

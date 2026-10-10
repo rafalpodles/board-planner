@@ -7,7 +7,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { ProjectBoard } from "@/hooks/use-project-board";
 import { ApiSavedView, ApiTask, BOARD_SORT_FIELDS, LIST_SORT_FIELDS, SortKey, SortDir } from "@/types";
 import { effectiveColumns } from "@/lib/columns";
-import { GroupBy, flattenGroups, groupTasks, sanitizeGroupBy } from "@/lib/task-grouping";
+import { GroupBy, flattenGroups, groupTasks, laneGroupBy, sanitizeGroupBy } from "@/lib/task-grouping";
 import { ListColumnId } from "@/lib/list-columns";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Board } from "@/components/kanban/Board";
@@ -171,16 +171,18 @@ export function ProjectBoardView({
     setGroupBy((current) => sanitizeGroupBy(current, customFieldList ?? []));
   }, [customFieldList]);
 
+  // The board draws rows for the three choices it can lay out, and not on a page that pins its view
+  const rowsBy = viewMode === "board" && !pinViewMode ? laneGroupBy(groupBy) : "";
   const groups = useMemo(
     () =>
-      viewMode === "list"
-        ? groupTasks(filteredTasks, groupBy, {
+      viewMode === "list" || rowsBy
+        ? groupTasks(filteredTasks, viewMode === "list" ? groupBy : rowsBy, {
             columns: project?.columns,
             categories: project?.categories,
             customFields: project?.customFields,
           })
         : [],
-    [viewMode, filteredTasks, groupBy, project?.columns, project?.categories, project?.customFields]
+    [viewMode, rowsBy, filteredTasks, groupBy, project?.columns, project?.categories, project?.customFields]
   );
   const listTasks = useMemo(
     () => (groups.length > 0 ? flattenGroups(groups, collapsedGroups) : filteredTasks),
@@ -333,7 +335,8 @@ export function ProjectBoardView({
         onHiddenColumnsChange={setHiddenColumns}
         groupBy={groupBy}
         onGroupByChange={changeGroupBy}
-        showGroupBy={viewMode === "list"}
+        showGroupBy={!pinViewMode || viewMode === "list"}
+        groupByRows={viewMode === "board"}
         views={
           pinViewMode
             ? undefined
@@ -414,6 +417,10 @@ export function ProjectBoardView({
               selectedTasks={readOnly ? undefined : selectedTasks}
               selectionMode={readOnly ? undefined : selectionMode}
               collapseEmptyColumns={user?.collapseEmptyColumns ?? true}
+              lanes={rowsBy ? groups : undefined}
+              laneGroupBy={rowsBy}
+              collapsedLanes={collapsedGroups}
+              onToggleLane={toggleGroup}
               onStatusChange={readOnly ? undefined : handleStatusChange}
               onTaskDrop={readOnly ? undefined : handleTaskDrop}
               onTaskClick={openTask}

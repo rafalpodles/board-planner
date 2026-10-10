@@ -8,6 +8,7 @@ import { ApiProject, ApiSprint, ApiTask, ApiUserSummary, RunConflict } from "@/t
 import { BOARD_POLL_MS } from "@/lib/board-poll";
 import { subscribeBoardRefresh } from "@/lib/board-refresh";
 import { duplicatePayload } from "@/lib/task-duplicate";
+import { LaneRef, laneChangeFor, laneKeyOf } from "@/lib/task-grouping";
 import { useToast } from "@/components/ui/Toast";
 
 export interface ProjectBoard {
@@ -62,7 +63,7 @@ export interface ProjectBoard {
   handleContextRestore: (taskId: string) => Promise<void>;
   handleBulkArchive: () => Promise<void>;
   handleStatusChange: (taskId: string, status: string) => Promise<void>;
-  handleTaskDrop: (taskId: string, status: string, dropIndex: number) => Promise<void>;
+  handleTaskDrop: (taskId: string, status: string, dropIndex: number, lane?: LaneRef) => Promise<void>;
   handleReorder: (orderedIds: string[]) => Promise<void>;
   handleBulkMove: (status: string) => Promise<void>;
   handleBulkSprint: (sprintId: string | null) => Promise<void>;
@@ -443,10 +444,30 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
     }
   }
 
-  async function handleTaskDrop(taskId: string, status: string, dropIndex: number) {
-    // Get tasks in the target column, excluding the dragged task
+  async function handleTaskDrop(taskId: string, status: string, dropIndex: number, lane?: LaneRef) {
+    const moved = tasks.find((t) => t._id === taskId);
+    // A drop into another lane gives the task the lane's value; one inside the lane it already
+    // sits in is a reorder and sends no field
+    const crossing = !!lane && !!moved && laneKeyOf(lane.groupBy, moved) !== lane.key;
+    const laneChange = crossing ? laneChangeFor(lane!.groupBy, lane!.key) : null;
+    // A row with no value to give: dropping there would take the card to the column and leave it in
+    // its own row, at a place worked out among another row's cards
+    if (crossing && !laneChange) {
+      toast(`There is nothing to set on a task by dropping it into "${lane!.label}"`, "error");
+      return;
+    }
+    // Handing a running task to somebody else is not something a drag should do by accident; it
+    // is done from the task, which says what happens to the run
+    if (laneChange?.field === "assignee" && moved?.execution?.workerId) {
+      toast(`${moved.title} is being executed; change its assignee from the task`, "error");
+      return;
+    }
+    // Tasks in the cell dropped into — the column, or the column within the lane — without the dragged one
     const columnTasks = tasks
-      .filter((t) => t.status === status && t._id !== taskId)
+      .filter(
+        (t) =>
+          t.status === status && t._id !== taskId && (!lane || laneKeyOf(lane.groupBy, t) === lane.key)
+      )
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 
     let newOrder: number;
@@ -464,21 +485,35 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
 
     // Optimistic update
     dropReadsInFlight();
+    const optimisticLane: Partial<ApiTask> = laneChange
+      ? {
+          [laneChange.field]:
+            laneChange.field === "assignee"
+              ? laneChange.value === null
+                ? null
+                : ((assignableUsers.find((u) => u.username === laneChange.value) ??
+                    tasks.find((t) => t.assignee && typeof t.assignee === "object" && t.assignee.username === laneChange.value)
+                      ?.assignee ?? { _id: "", username: laneChange.value, fullName: laneChange.value }) as ApiTask["assignee"])
+              : laneChange.value,
+        }
+      : {};
     setTasks((prev) =>
       prev.map((t) =>
         t._id === taskId
-          ? { ...t, status: status as ApiTask["status"], order: newOrder }
+          ? { ...t, status: status as ApiTask["status"], order: newOrder, ...optimisticLane }
           : t
       )
     );
 
-    const moved = tasks.find((t) => t._id === taskId);
     const body = {
       order: newOrder,
       // Status only when it actually changes: a drop inside the same column is a
       // reorder, and sending the status it already has would stamp updatedAt and
       // release the task from any run a worker is holding it for
       ...(moved?.status === status ? {} : { status }),
+      // One request for all of it, so a refusal — a worker holds the task, the assignee is not a
+      // member — is one refusal, and the reload that follows puts the card back as the server has it
+      ...(laneChange ? { [laneChange.field]: laneChange.value } : {}),
     };
 
     try {
@@ -496,7 +531,10 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
       const retry = () =>
         api.put(`/api/projects/${projectId}/tasks/${taskId}`, { ...body, force: true });
       if (parkIfHeld(err, taskId, retry)) return;
-      toast("Failed to move task", "error");
+      // A row's value can be refused for a reason the person can act on — somebody who has left,
+      // a deactivated account — and the server says which
+      const reason = laneChange && (err as { body?: { error?: string } })?.body?.error;
+      toast(reason ? `Failed to move task: ${reason}` : "Failed to move task", "error");
       loadData();
     }
   }

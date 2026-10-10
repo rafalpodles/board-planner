@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiTask, ApiCustomField, ApiProjectCategory, ApiProjectColumn } from "@/types";
+import type { LaneGroupBy, LaneRef, TaskGroup } from "@/lib/task-grouping";
 import { effectiveColumns } from "@/lib/columns";
 import { boardGridTemplate, boardMinWidth, isColumnCollapsed } from "@/lib/board-grid";
 import {
@@ -23,8 +24,13 @@ interface BoardProps {
   selectedTasks?: Set<string>;
   selectionMode?: boolean;
   collapseEmptyColumns?: boolean;
+  /** Rows across the columns; absent or empty, the board is the one strip of columns it always was */
+  lanes?: TaskGroup[];
+  laneGroupBy?: LaneGroupBy | "";
+  collapsedLanes?: ReadonlySet<string>;
+  onToggleLane?: (key: string) => void;
   onStatusChange?: (taskId: string, status: string) => void;
-  onTaskDrop?: (taskId: string, status: string, dropIndex: number) => void;
+  onTaskDrop?: (taskId: string, status: string, dropIndex: number, lane?: LaneRef) => void;
   onTaskClick: (taskId: string) => void;
   onTaskSelect?: (taskId: string) => void;
   onTaskContextMenu?: (taskId: string, x: number, y: number) => void;
@@ -40,6 +46,10 @@ export function Board({
   selectedTasks,
   selectionMode,
   collapseEmptyColumns = true,
+  lanes,
+  laneGroupBy = "",
+  collapsedLanes,
+  onToggleLane,
   onStatusChange,
   onTaskDrop,
   onTaskClick,
@@ -60,6 +70,22 @@ export function Board({
     [tasks, boardColumns]
   );
 
+  const laneRows = lanes && lanes.length > 0 && laneGroupBy ? lanes : null;
+  const laneCells = useMemo(() => {
+    const cells = new Map<string, Record<string, ApiTask[]>>();
+    for (const lane of laneRows ?? []) {
+      const byColumn: Record<string, ApiTask[]> = {};
+      for (const column of boardColumns) byColumn[column.id] = [];
+      for (const task of lane.tasks) byColumn[task.status]?.push(task);
+      cells.set(lane.key, byColumn);
+    }
+    return cells;
+  }, [laneRows, boardColumns]);
+
+  // What a row's header counts is what its cells draw: a task whose status names no column is in none
+  const laneCount = (lane: TaskGroup) =>
+    lane.tasks.filter((t) => boardColumns.some((c) => c.id === t.status)).length;
+
   // Expanding a rail is a reading choice, not a preference — it lasts the session
   const [pinnedColumns, setPinnedColumns] = useState<Set<string>>(new Set());
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
@@ -76,6 +102,17 @@ export function Board({
       collapseEmptyColumns
     )
   );
+
+  useEffect(() => {
+    if (!laneRows) return;
+    const end = () => setDragOverColumn(null);
+    document.addEventListener("dragend", end);
+    document.addEventListener("drop", end);
+    return () => {
+      document.removeEventListener("dragend", end);
+      document.removeEventListener("drop", end);
+    };
+  }, [laneRows]);
 
   const scrollerRef = useRef<HTMLDivElement>(null);
   const [activeColumn, setActiveColumn] = useState(0);
@@ -224,7 +261,7 @@ export function Board({
           // The row must be minmax(0,1fr), not auto: an auto row grows to its tallest
           // column, so h-full on the columns resolves against that instead of the
           // viewport and their internal overflow-y never engages.
-          className="grid gap-4 lg:h-full lg:grid-rows-[minmax(0,1fr)]"
+          className={`grid gap-4 ${laneRows ? "content-start" : "lg:h-full lg:grid-rows-[minmax(0,1fr)]"}`}
           style={
             paged
               ? { gridTemplateColumns: pagedGridTemplate(boardColumns.length) }
@@ -234,46 +271,94 @@ export function Board({
                 }
           }
         >
-          {boardColumns.map((column, i) => (
-            <Column
-              key={column.id}
-              column={column}
-              tasks={grouped[column.id]}
-              projectKey={projectKey}
-              customFields={customFields}
-              projectCategories={projectCategories}
-              selectedTasks={selectedTasks}
-              selectionMode={selectionMode}
-              collapsed={collapsed[i]}
-              // Withheld when the preference is off, and on a phone where a column is a
-              // page: either way nothing can become a rail, so a collapse control would be
-              // a button that does nothing
-              onToggleCollapsed={
-                collapseEmptyColumns && !paged
-                  ? () =>
-                      setPinnedColumns((prev) => {
-                        const next = new Set(prev);
-                        if (!next.delete(column.id)) next.add(column.id);
-                        return next;
-                      })
-                  : undefined
-              }
-              onDragOverColumn={
-                readOnly
-                  ? undefined
-                  : (over) =>
-                      setDragOverColumn((prev) =>
-                        over ? column.id : prev === column.id ? null : prev
-                      )
-              }
-              onStatusChange={readOnly ? undefined : onStatusChange}
-              onTaskDrop={onTaskDrop}
-              onTaskClick={onTaskClick}
-              onTaskSelect={onTaskSelect}
-              onTaskContextMenu={onTaskContextMenu}
-              readOnly={readOnly}
-            />
-          ))}
+          {(laneRows ?? [null]).map((lane) => {
+            const folded = !!lane && !!collapsedLanes?.has(lane.key);
+            const ref: LaneRef | undefined =
+              lane && laneGroupBy ? { groupBy: laneGroupBy, key: lane.key, label: lane.label } : undefined;
+            return (
+              <Fragment key={lane?.key ?? "all"}>
+                {lane && (
+                  <div data-testid="board-lane-header" data-lane={lane.key} className="col-span-full min-w-0">
+                    <button
+                      type="button"
+                      aria-expanded={!folded}
+                      aria-label={`${lane.label}, ${laneCount(lane)} ${laneCount(lane) === 1 ? "task" : "tasks"}`}
+                      onClick={() => onToggleLane?.(lane.key)}
+                      className="focus-ring sticky left-0 flex min-h-9 max-w-[calc(100vw-2rem)] items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-text hover:bg-bg-input"
+                    >
+                      <svg
+                        aria-hidden
+                        className={`h-3 w-3 shrink-0 text-text-muted transition-transform ${folded ? "" : "rotate-90"}`}
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                      </svg>
+                      {lane.color && (
+                        <span aria-hidden className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: lane.color }} />
+                      )}
+                      <span className="truncate font-semibold" title={lane.label}>
+                        {lane.label}
+                      </span>
+                      <span data-testid="board-lane-count" className="text-xs text-text-muted">
+                        {laneCount(lane)}
+                      </span>
+                    </button>
+                  </div>
+                )}
+                {!folded &&
+                  boardColumns.map((column, i) => (
+                    <Column
+                      key={`${lane?.key ?? ""}:${column.id}`}
+                      column={column}
+                      lane={ref}
+                      tasks={lane ? laneCells.get(lane.key)![column.id] : grouped[column.id]}
+                      projectKey={projectKey}
+                      customFields={customFields}
+                      projectCategories={projectCategories}
+                      selectedTasks={selectedTasks}
+                      selectionMode={selectionMode}
+                      collapsed={collapsed[i]}
+                      // Withheld when the preference is off, and on a phone where a column is a
+                      // page: either way nothing can become a rail, so a collapse control would be
+                      // a button that does nothing
+                      onToggleCollapsed={
+                        // Between rows a column is a rail or not for all of them at once, so only a
+                        // column with nothing in any row offers to fold, and a rail always offers to open
+                        collapseEmptyColumns && !paged && (!laneRows || collapsed[i] || grouped[column.id].length === 0)
+                          ? () =>
+                              setPinnedColumns((prev) => {
+                                const next = new Set(prev);
+                                if (!next.delete(column.id)) next.add(column.id);
+                                return next;
+                              })
+                          : undefined
+                      }
+                      onDragOverColumn={
+                        readOnly
+                          ? undefined
+                          : (over) =>
+                              // Between rows the pointer leaves one cell of a column for the next,
+                              // and folding the column back to a rail in between would move
+                              // everything under it; it stays open until the drag ends
+                              laneRows && !over
+                                ? undefined
+                                : setDragOverColumn((prev) =>
+                                    over ? column.id : prev === column.id ? null : prev
+                                  )
+                      }
+                      onStatusChange={readOnly ? undefined : onStatusChange}
+                      onTaskDrop={onTaskDrop}
+                      onTaskClick={onTaskClick}
+                      onTaskSelect={onTaskSelect}
+                      onTaskContextMenu={onTaskContextMenu}
+                      readOnly={readOnly}
+                    />
+                  ))}
+              </Fragment>
+            );
+          })}
         </div>
       </div>
       {/* Scroll hint fades on edges for small screens */}

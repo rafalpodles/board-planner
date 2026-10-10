@@ -128,6 +128,10 @@ const BOARD_READ_SAFE_PROPS = new Set([
   "projectCategories",
   "columns",
   "collapseEmptyColumns",
+  "lanes",
+  "laneGroupBy",
+  "collapsedLanes",
+  "onToggleLane",
   "onTaskClick",
   "readOnly",
 ]);

@@ -3,10 +3,12 @@
 import { useState } from "react";
 import { ApiTask, ApiCustomField, ApiProjectCategory } from "@/types";
 import { AnyColumn } from "@/lib/columns";
+import type { LaneRef } from "@/lib/task-grouping";
 import { TaskCard } from "./TaskCard";
 
 interface ColumnProps {
   column: AnyColumn;
+  lane?: LaneRef;
   tasks: ApiTask[];
   projectKey: string;
   customFields?: ApiCustomField[];
@@ -17,7 +19,7 @@ interface ColumnProps {
   onToggleCollapsed?: () => void;
   onDragOverColumn?: (over: boolean) => void;
   onStatusChange?: (taskId: string, status: string) => void;
-  onTaskDrop?: (taskId: string, status: string, dropIndex: number) => void;
+  onTaskDrop?: (taskId: string, status: string, dropIndex: number, lane?: LaneRef) => void;
   onTaskClick: (taskId: string) => void;
   onTaskSelect?: (taskId: string) => void;
   onTaskContextMenu?: (taskId: string, x: number, y: number) => void;
@@ -26,6 +28,7 @@ interface ColumnProps {
 
 export function Column({
   column,
+  lane,
   tasks,
   projectKey,
   customFields,
@@ -96,8 +99,11 @@ export function Column({
               onDragOverColumn?.(false);
               const taskId = e.dataTransfer.getData("text/plain");
               if (taskId) {
-                if (onTaskDrop && dropIndex !== null) {
-                  onTaskDrop(taskId, column.id, dropIndex);
+                // In a row the plain status write is never enough: it would move the card to the
+                // column and leave the row's value behind, so a drop on the header or the empty
+                // cell's caption takes the end of the cell like one on its body
+                if (onTaskDrop && (dropIndex !== null || lane)) {
+                  onTaskDrop(taskId, column.id, dropIndex ?? tasks.length, lane);
                 } else {
                   onStatusChange?.(taskId, column.id);
                 }
@@ -108,9 +114,14 @@ export function Column({
       onClick={collapsed ? onToggleCollapsed : undefined}
       // The rail has to stay a div — it is also the drop target — so it borrows
       // a button's keyboard contract rather than becoming one
-      role={collapsed ? "button" : undefined}
       tabIndex={collapsed ? 0 : undefined}
-      aria-label={collapsed ? `Expand ${column.label}` : undefined}
+      aria-label={
+        collapsed
+          ? `Expand ${column.label}`
+          : lane
+            ? `${column.label}, ${lane.label}`
+            : undefined
+      }
       onKeyDown={
         collapsed
           ? (e) => {
@@ -125,8 +136,14 @@ export function Column({
       // Addressable by id rather than by its heading text: an e2e test otherwise has to find the
       // label and walk back up the tree, which breaks on any markup change
       data-testid={`column-${column.id}`}
+      data-lane={lane?.key}
+      role={collapsed ? "button" : lane ? "group" : undefined}
       className={`bg-bg-card rounded-xl border border-border
-        border-t-2 flex flex-col max-h-[calc(100vh-12rem)] lg:max-h-full lg:h-full lg:min-h-0
+        border-t-2 flex flex-col ${
+          lane
+            ? "max-h-[26rem] min-h-24"
+            : "max-h-[calc(100vh-12rem)] lg:max-h-full lg:h-full lg:min-h-0"
+        }
         transition-colors ${isDragOver ? "bg-primary/5 border-primary/30" : ""}
         ${collapsed ? "focus-ring items-center gap-2.5 py-2.5 cursor-pointer hover:bg-bg-hover" : ""}`}
       style={{ borderTopColor: column.color }}
@@ -180,7 +197,12 @@ export function Column({
         </div>
       </div>
 
-      <div data-column-body className="flex-1 overflow-y-auto overscroll-y-contain p-2 space-y-2">
+      <div
+        data-column-body
+        // Between rows the board is what scrolls down, so a wheel over a cell that cannot scroll
+        // any further has to reach it; a column that is the whole height keeps its own
+        className={`flex-1 overflow-y-auto p-2 space-y-2 ${lane ? "" : "overscroll-y-contain"}`}
+      >
         {tasks.map((task, i) => (
           <div key={task._id}>
             {dropIndex === i && (

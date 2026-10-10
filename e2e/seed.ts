@@ -438,6 +438,20 @@ export async function seedCustomFields(values: Record<string, unknown> = {}) {
   await mongoose.disconnect();
 }
 
+/** Writes fields straight onto a task row, for states the API refuses to produce */
+export async function setTaskRow(taskId: mongoose.Types.ObjectId, set: Record<string, unknown>) {
+  const db = (await connect()).db!;
+  await db.collection("tasks").updateOne({ _id: taskId }, { $set: set });
+  await mongoose.disconnect();
+}
+
+/** The way a deactivation leaves an account: still on its tasks, no longer assignable */
+export async function deactivateUser(userId: mongoose.Types.ObjectId) {
+  const db = (await connect()).db!;
+  await db.collection("users").updateOne({ _id: userId }, { $set: { deactivatedAt: new Date() } });
+  await mongoose.disconnect();
+}
+
 /** A task whose status names no column, the state the board must cope with. Written straight to the row, since the API refuses it. */
 export async function parkTaskOnMissingColumn(taskId: mongoose.Types.ObjectId, status = "removed_column") {
   const db = (await connect()).db!;

@@ -648,3 +648,52 @@ describe("ProjectBoardView and a ?view= link", () => {
     expect(onScopeChange).not.toHaveBeenCalled();
   });
 });
+
+describe("ProjectBoardView's rows on the board", () => {
+  const stored = (groupBy: string) => localStorage.setItem("board-filters:p1", JSON.stringify({ groupBy }));
+  const manyTasks = [
+    { ...tasks[0], _id: "t1", taskNumber: 1, priority: "urgent" },
+    { ...tasks[0], _id: "t2", taskNumber: 2, priority: "low" },
+  ] as ApiTask[];
+
+  beforeEach(() => localStorage.clear());
+
+  it("draws a row per priority on the board once the grouping is stored", async () => {
+    stored("priority");
+    render(<ProjectBoardView board={makeBoard({ tasks: manyTasks })} />);
+
+    await waitFor(() => expect(screen.getAllByTestId("board-lane-header")).toHaveLength(2));
+    expect(screen.getByLabelText("Group tasks by")).toHaveProperty("value", "priority");
+  });
+
+  it("draws no rows for a grouping the board cannot lay out, and offers the three it can", async () => {
+    stored("status");
+    render(<ProjectBoardView board={makeBoard({ tasks: manyTasks })} />);
+
+    const select = (await screen.findByLabelText("Group tasks by")) as HTMLSelectElement;
+    expect(screen.queryAllByTestId("board-lane-header")).toHaveLength(0);
+    expect([...select.options].map((o) => o.text)).toEqual(["No grouping", "Group: Assignee", "Group: Priority", "Group: Category"]);
+    expect(select.value).toBe("");
+  });
+
+  it("draws no rows where the view is pinned, whatever is stored", async () => {
+    stored("priority");
+    render(<ProjectBoardView board={makeBoard({ tasks: manyTasks })} pinViewMode="board" readOnly />);
+
+    await act(async () => {});
+    expect(screen.queryAllByTestId("board-lane-header")).toHaveLength(0);
+    expect(screen.queryByLabelText("Group tasks by")).toBeNull();
+  });
+
+  it("folding a row drops its tasks from the selection", async () => {
+    stored("priority");
+    const setSelectedTasks = vi.fn();
+    render(<ProjectBoardView board={makeBoard({ tasks: manyTasks, selectedTasks: new Set(["t1", "t2"]), setSelectedTasks })} />);
+    await waitFor(() => expect(screen.getAllByTestId("board-lane-header")).toHaveLength(2));
+
+    fireEvent.click(screen.getAllByTestId("board-lane-header")[0].querySelector("button")!);
+
+    const update = setSelectedTasks.mock.calls.at(-1)![0] as (prev: Set<string>) => Set<string>;
+    expect([...update(new Set(["t1", "t2"]))]).toEqual(["t2"]);
+  });
+});
