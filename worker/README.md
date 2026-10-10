@@ -235,11 +235,11 @@ for a container, where there is no file to protect.
 
 Then install the plist and load it. It ships with four placeholders rather than one developer's
 values, named in the comment at its top: `REPO_DIR`, `HOME_DIR`, `BOARD_URL` and `MACHINE_NAME`.
-Substitute all four as you install it, with your own board's address if it is not the hosted one:
+Substitute all four as you install it, with your own board's address if it is not the example one:
 
 ```bash
 sed -e "s|REPO_DIR|$(cd .. && pwd)|g" -e "s|HOME_DIR|$HOME|g" \
-    -e "s|BOARD_URL|https://app.board-planner.com|g" -e "s|MACHINE_NAME|$(hostname -s)|g" \
+    -e "s|BOARD_URL|https://acme.board-planner.com|g" -e "s|MACHINE_NAME|$(hostname -s)|g" \
   launchd/com.boardplanner.worker.plist > ~/Library/LaunchAgents/com.boardplanner.worker.plist
 launchctl unload ~/Library/LaunchAgents/com.boardplanner.worker.plist 2>/dev/null
 launchctl load ~/Library/LaunchAgents/com.boardplanner.worker.plist

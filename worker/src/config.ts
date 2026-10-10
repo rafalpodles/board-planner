@@ -236,7 +236,7 @@ function boardAddress(env: Env): string {
   }
   if (protocol !== "https:" && protocol !== "http:") {
     throw new Error(
-      `CP_API_URL must be your board's address, such as https://app.board-planner.com, not "${value}"`
+      `CP_API_URL must be your board's address, such as https://acme.board-planner.com, not "${value}"`
     );
   }
   return value;
