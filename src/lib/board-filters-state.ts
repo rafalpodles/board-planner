@@ -35,6 +35,9 @@ export const UNASSIGNED = "@none";
 
 export const UNFILED = "@unfiled";
 
+/** "Me" in the assignee filter, so one saved view shows each person their own tasks */
+export const ME = "@me";
+
 export const EMPTY_FILTERS: BoardFilterValues = {
   fields: {},
   assignee: "",

@@ -71,6 +71,7 @@ export const GROUPS = {
     "board-scope-and-filters.spec.ts",
     "epics.spec.ts",
     "labels.spec.ts",
+    "saved-views.spec.ts",
   ],
   project: [
     "organisation-on-product-writes.spec.ts",

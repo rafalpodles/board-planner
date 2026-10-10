@@ -30,6 +30,23 @@ const taskTemplateSchema = new Schema(
   }
 );
 
+const savedViewSchema = new Schema(
+  {
+    name: { type: String, required: true, trim: true },
+    owner: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    shared: { type: Boolean, default: false },
+    filters: { type: Schema.Types.Mixed, default: () => ({}), minimize: false },
+    search: { type: String, default: "" },
+    sortField: { type: String, default: "manual" },
+    sortDir: { type: String, enum: ["asc", "desc"], default: "asc" },
+    viewMode: { type: String, enum: ["board", "list"], default: "board" },
+    groupBy: { type: String, default: "" },
+    sprintScope: { type: String, default: "all" },
+    hiddenColumns: { type: [String], default: [] },
+  },
+  { timestamps: true }
+);
+
 const customFieldSchema = new Schema(
   {
     name: { type: String, required: true, trim: true },
@@ -88,6 +105,10 @@ const projectSchema = new Schema<IProject>(
     },
     taskTemplates: {
       type: [taskTemplateSchema],
+      default: [],
+    },
+    savedViews: {
+      type: [savedViewSchema],
       default: [],
     },
     customFields: {

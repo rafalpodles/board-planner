@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties } from "react";
 import {
-  ApiTask, ApiCustomField,
+  ApiTask, ApiCustomField, ApiSavedView,
   ApiProjectCategory,
   CATEGORIES,
   PRIORITIES,
@@ -23,6 +23,7 @@ import { ListColumnId } from "@/lib/list-columns";
 import { GroupBy, groupByOptions } from "@/lib/task-grouping";
 import { ColumnPicker } from "./ColumnPicker";
 import { OptionFilter } from "./OptionFilter";
+import { ViewsMenu } from "./ViewsMenu";
 import { usePanelClamp } from "@/hooks/use-panel-clamp";
 import {
   BoardFilterValues,
@@ -37,6 +38,7 @@ import {
   statusOptions,
   statusRoleMap,
   UNASSIGNED,
+  ME,
   type FieldFilter,
   type BuiltInFilterKey,
 } from "@/lib/board-filters-state";
@@ -101,6 +103,20 @@ interface BoardFiltersProps {
   groupBy?: GroupBy;
   onGroupByChange?: (groupBy: GroupBy) => void;
   showGroupBy?: boolean;
+  /** Present on the board's own page: the saved-views menu, and how the parts of a view this bar
+      does not own (layout, sprint scope) are applied */
+  views?: {
+    projectRef: string;
+    canShare: boolean;
+    viewMode: "board" | "list";
+    sprintScope: string;
+    onApplied: (view: ApiSavedView) => void;
+  };
+  /** Who can be assigned here, so a view naming somebody who has left applies without them */
+  knownAssignees?: string[];
+  /** A view to apply once the stored filters have been read, e.g. from `?view=` */
+  pendingView?: ApiSavedView | null;
+  onPendingViewApplied?: () => void;
   /** Separate from the handler above: the board has no columns to pick, but it still
       has to hydrate the stored set, or the next load writes an empty one back */
   showColumnPicker?: boolean;
@@ -134,6 +150,10 @@ export function BoardFilters({
   groupBy = "",
   onGroupByChange,
   showGroupBy,
+  views,
+  knownAssignees,
+  pendingView,
+  onPendingViewApplied,
   showColumnPicker,
   onFilter,
   customFields = [],
@@ -173,6 +193,63 @@ export function BoardFilters({
     // re-hydrate over whatever the user has since chosen
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, currentUsername]);
+
+  const viewAssignee = useRef("");
+  useEffect(() => {
+    const who = viewAssignee.current;
+    if (!who || !knownAssignees?.length) return;
+    viewAssignee.current = "";
+    const onATask = tasks.some((t) => t.assignee && typeof t.assignee === "object" && t.assignee.username === who);
+    if (!knownAssignees.includes(who) && !onATask) {
+      setFilters((f) => (f.assignee === who ? { ...f, assignee: "" } : f));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [knownAssignees]);
+
+  const applyView = useCallback(
+    (view: ApiSavedView) => {
+      const state = migratePersistedFilters(
+        {
+          filters: view.filters,
+          sortField: view.sortField,
+          sortDir: view.sortDir,
+          hiddenColumns: view.hiddenColumns,
+          groupBy: view.groupBy,
+        },
+        currentUsername,
+        customFields,
+        categories.length > 0 ? categories : undefined
+      );
+      const who = state.filters.assignee;
+      // Dropped only when nobody could be given a task by that name and no task carries it:
+      // the roster leaves out machines, and a person who lost access may still hold tasks here
+      const onATask = tasks.some((t) => t.assignee && typeof t.assignee === "object" && t.assignee.username === who);
+      // The tasks to look through are this scope's, so a view that moves to another scope keeps the
+      // person: a filter that finds nobody there can be cleared, one dropped wrongly cannot be told
+      const staysHere = view.sprintScope === (views?.sprintScope ?? "all");
+      if (staysHere && who && who !== ME && who !== UNASSIGNED && knownAssignees?.length && !knownAssignees.includes(who) && !onATask) {
+        state.filters.assignee = "";
+      }
+      // The roster is a request of its own and may not have answered yet: the check is made again
+      // when it does
+      viewAssignee.current = staysHere && !knownAssignees?.length && who !== ME && who !== UNASSIGNED ? who : "";
+      setFilters({ ...EMPTY_FILTERS, ...state.filters, search: view.search ?? "" });
+      onSortChange(state.sortField, state.sortDir);
+      onHiddenColumnsChange?.(state.hiddenColumns);
+      onGroupByChange?.(state.groupBy);
+      onShowArchivedChange?.(false);
+      views?.onApplied(view);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [currentUsername, customFields, categories, knownAssignees, tasks, views?.onApplied, views?.sprintScope]
+  );
+
+  useEffect(() => {
+    if (!pendingView || !initialized) return;
+    applyView(pendingView);
+    onPendingViewApplied?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingView, initialized]);
 
   const persistState = useCallback(() => {
     const { search: _search, ...rest } = filters;
@@ -245,11 +322,12 @@ export function BoardFilters({
     if (filters.assignee === UNASSIGNED) {
       result = result.filter((t) => !t.assignee);
     } else if (filters.assignee) {
+      const wanted = filters.assignee === ME ? currentUsername : filters.assignee;
       result = result.filter(
         (t) =>
           t.assignee &&
           typeof t.assignee === "object" &&
-          t.assignee.username === filters.assignee
+          t.assignee.username === wanted
       );
     }
     if (filters.category) {
@@ -360,9 +438,14 @@ export function BoardFilters({
   if (filters.assignee) {
     chips.push({
       key: "assignee",
-      label: filters.assignee === UNASSIGNED ? "Unassigned" : filters.assignee,
+      label:
+        filters.assignee === UNASSIGNED ? "Unassigned" : filters.assignee === ME ? "Me" : filters.assignee,
       initial:
-        filters.assignee === UNASSIGNED ? "–" : filters.assignee.charAt(0).toUpperCase(),
+        filters.assignee === UNASSIGNED
+          ? "–"
+          : filters.assignee === ME
+            ? "M"
+            : filters.assignee.charAt(0).toUpperCase(),
     });
   }
   if (filters.category) {
@@ -413,6 +496,7 @@ export function BoardFilters({
   }
 
   if (showArchived) chips.push({ key: "archived", label: "Archived shown" });
+  if (filters.search) chips.push({ key: "search", label: `Search: ${filters.search}` });
 
   const selectClass =
     "focus-ring h-8 w-full rounded-lg border border-border bg-bg-input px-2 text-[12px] text-text";
@@ -515,7 +599,9 @@ export function BoardFilters({
                           ? clearFieldFilter(chip.fieldId)
                           : chip.key === "archived"
                             ? onShowArchivedChange?.(false)
-                            : unset(chip.key as BuiltInFilterKey)
+                            : chip.key === "search"
+                              ? setFilters((f) => ({ ...f, search: "" }))
+                              : unset(chip.key as BuiltInFilterKey)
                       }
                     />
                   ))}
@@ -532,6 +618,7 @@ export function BoardFilters({
                   className={selectClass}
                 >
                   <option value="">All assignees</option>
+                  <option value={ME}>Me</option>
                   <option value={UNASSIGNED}>Unassigned</option>
                   {assignees.map((a) => (
                     <option key={a.username} value={a.username}>
@@ -704,6 +791,28 @@ export function BoardFilters({
           </div>
         )}
       </div>
+
+      {views && (
+        <ViewsMenu
+          projectId={projectId}
+          projectRef={views.projectRef}
+          canShare={views.canShare}
+          onApply={applyView}
+          snapshot={() => {
+            const { search, ...rest } = filters;
+            return {
+              filters: rest as unknown as Record<string, unknown>,
+              search,
+              sortField,
+              sortDir,
+              viewMode: views.viewMode,
+              groupBy,
+              sprintScope: views.sprintScope,
+              hiddenColumns: hiddenColumns ?? [],
+            };
+          }}
+        />
+      )}
 
       {hasActiveFilters && (
         <button
