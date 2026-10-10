@@ -232,12 +232,37 @@ describe("Settings → AI key: usage", () => {
   it("says how many PM turns and model calls the month held, beside the tokens, and in the singular for one", async () => {
     api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage() });
     const { unmount } = render(<AiKeys />);
-    expect((await screen.findByTestId("ai-usage-activity")).textContent).toBe("120 PM turns and 1,340 model calls on this service's key this month.");
+    expect((await screen.findByTestId("ai-usage-activity")).textContent).toBe("120 PM turns this month, and 1,340 model calls on this service's key.");
     unmount();
 
     api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ turns: 1, calls: 1 }) });
     render(<AiKeys />);
-    expect((await screen.findByTestId("ai-usage-activity")).textContent).toBe("1 PM turn and 1 model call on this service's key this month.");
+    expect((await screen.findByTestId("ai-usage-activity")).textContent).toBe("1 PM turn this month, and 1 model call on this service's key.");
+  });
+
+  it("says a month with no PM turns had none, and counts the singular of each on its own number", async () => {
+    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ turns: 0, calls: 12 }) });
+    const { unmount } = render(<AiKeys />);
+    expect((await screen.findByTestId("ai-usage-activity")).textContent).toBe("0 PM turns this month, and 12 model calls on this service's key.");
+    unmount();
+
+    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ turns: 1, calls: 2 }) });
+    render(<AiKeys />);
+    expect((await screen.findByTestId("ai-usage-activity")).textContent).toBe("1 PM turn this month, and 2 model calls on this service's key.");
+  });
+
+  it("says a trial's turns are the trial's", async () => {
+    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ scope: "trial", used: 100, limit: 3_000_000, resetsAt: null, dailyCeiling: 600_000, turns: 9, calls: 30 }) });
+    render(<AiKeys />);
+
+    expect((await screen.findByTestId("ai-usage-activity")).textContent).toBe("9 PM turns in your trial, and 30 model calls on this service's key.");
+  });
+
+  it("says what a turn and a call are, since the two are easily read as one", async () => {
+    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage() });
+    render(<AiKeys />);
+
+    expect(await screen.findByText(/A PM turn is up to 15 model calls; AI Assist makes one\./)).toBeTruthy();
   });
 
   it("says nothing of turns where the answer did not count them", async () => {
@@ -294,6 +319,7 @@ describe("Settings → AI key: usage", () => {
     expect((await screen.findByTestId("ai-usage-own")).textContent).toBe("Your own key: 4,000 tokens in 1 call this month, counted and never limited.");
     expect(screen.queryByTestId("ai-usage-month")).toBeNull();
     expect(screen.queryByTestId("ai-usage-today")).toBeNull();
+    expect(screen.queryByTestId("ai-usage-activity")).toBeNull();
     expect(screen.queryByTestId("ai-usage-locked")).toBeNull();
     expect(screen.getAllByText("Your own key").length).toBe(2);
   });

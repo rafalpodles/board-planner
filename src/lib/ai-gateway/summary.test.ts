@@ -144,6 +144,31 @@ describe("aiUsageSummary", () => {
     expect(countDocuments).toHaveBeenCalledWith({ role: "user", createdAt: { $gte: new Date("2026-10-01T00:00:00Z") } });
   });
 
+  it("reads the month from the first of the month at its edges, whatever the zone of the server: the last minutes of the 31st are October's, the first of the 1st November's", async () => {
+    await aiUsageSummary(db, new Date("2026-10-31T23:30:00Z"), { turns: true });
+    expect(countDocuments).toHaveBeenLastCalledWith({ role: "user", createdAt: { $gte: new Date("2026-10-01T00:00:00Z") } });
+
+    await aiUsageSummary(db, new Date("2026-11-01T00:30:00Z"), { turns: true });
+    expect(countDocuments).toHaveBeenLastCalledWith({ role: "user", createdAt: { $gte: new Date("2026-11-01T00:00:00Z") } });
+  });
+
+  it("does not count turns where the screen would not show them: an organisation with no allowance on the service's key", async () => {
+    m.managed = false;
+
+    expect(await aiUsageSummary(db, NOW, { turns: true })).toMatchObject({ included: false, turns: null });
+    expect(countDocuments).not.toHaveBeenCalled();
+  });
+
+  it("counts the calls of a trial from the trial's counter, not the month's", async () => {
+    m.budget = { scope: "trial", limit: 3_000_000, dailyCeiling: 600_000 };
+    m.rows = [
+      { kind: "trial", period: "all", tokens: 1, calls: 7, ownTokens: 0, ownCalls: 2 },
+      { kind: "month", period: "2026-10", tokens: 1, calls: 99, ownTokens: 0, ownCalls: 99 },
+    ];
+
+    expect(await aiUsageSummary(db, NOW)).toMatchObject({ scope: "trial", calls: 7, ownCalls: 2 });
+  });
+
   it("counts every turn of a trial, which is not a calendar month", async () => {
     m.budget = { scope: "trial", limit: 3_000_000, dailyCeiling: 600_000 };
     countDocuments.mockResolvedValue(9);

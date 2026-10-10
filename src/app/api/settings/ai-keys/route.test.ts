@@ -45,8 +45,8 @@ const get = () => GET(new Request("http://x/api/settings/ai-keys"), ctx());
 const KEY = "sk-or-v1-0123456789abcdef";
 
 beforeEach(() => {
-  aiUsageSummary.mockResolvedValue(USAGE);
   vi.clearAllMocks();
+  aiUsageSummary.mockResolvedValue(USAGE);
   row = null;
   getAuthUser.mockResolvedValue(ADMIN);
   getOrganisation.mockResolvedValue({ entitlements: { plan: "free", features: [], source: "none" } });

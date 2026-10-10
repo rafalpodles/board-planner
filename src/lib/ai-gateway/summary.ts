@@ -24,7 +24,7 @@ export interface AiUsageSummary {
   /** Calls on the operator's key in that scope, and on the organisation's own key */
   calls: number;
   ownCalls: number;
-  /** PM turns people or the schedule started in that scope; null where it was not asked, which costs a count */
+  /** PM turns people or the schedule started in that scope, on any key; a trial's are all the organisation has had. Null where not asked or not shown */
   turns: number | null;
   /** The operator has switched off the use of its key for this organisation */
   locked: boolean;
@@ -38,19 +38,21 @@ export interface AiUsageSummary {
 export async function aiUsageSummary(db: ScopedDb, now: Date = new Date(), options: { turns?: boolean } = {}): Promise<AiUsageSummary> {
   const [organisation, budget] = await Promise.all([getOrganisation(db.organisation), budgetOf(db)]);
   const scope = budget?.scope ?? (await counterKindOf(db));
-  const rows = await db.AiBudget.find({
-    $or: [
-      { kind: "day", period: periodOf("day", now) },
-      { kind: scope, period: periodOf(scope, now) },
-    ],
-  }).lean();
-  const row = (kind: string) => rows.find((r) => r.kind === kind);
-  const turns = options.turns
-    ? await db.PmMessage.countDocuments({ role: "user", ...(scope === "month" ? { createdAt: { $gte: startOfUtcMonth(now) } } : {}) })
-    : null;
-
   // An organisation on a plan without managed AI, or on an instance with no key to offer, has no allowance: the key is its own or nothing
   const included = Boolean(process.env.OPENROUTER_API_KEY) && (organisationDomain() === null || can(organisation, "ai.managed"));
+  // Whichever key ran them: a turn is the organisation's activity. Not counted where the screen would not show it
+  const [rows, turns] = await Promise.all([
+    db.AiBudget.find({
+      $or: [
+        { kind: "day", period: periodOf("day", now) },
+        { kind: scope, period: periodOf(scope, now) },
+      ],
+    }).lean(),
+    options.turns && included
+      ? db.PmMessage.countDocuments({ role: "user", ...(scope === "month" ? { createdAt: { $gte: startOfUtcMonth(now) } } : {}) })
+      : Promise.resolve(null),
+  ]);
+  const row = (kind: string) => rows.find((r) => r.kind === kind);
   return {
     scope,
     used: row(scope)?.tokens ?? 0,

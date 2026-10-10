@@ -350,13 +350,25 @@ test("on screen: Settings → AI key says what has been used and when it renews,
   await spend(ACME, "day", 900_000);
   // Three turns this month and two before it, in the organisation's own project; a neighbour's turn that must not count
   const turn = (who: OrganisationFixture, createdAt: Date) => ({ organisation: who.organisation, project: who.projectId, role: "user", content: "hello", actions: [], attachments: [], trigger: { type: "chat", taskKey: "" }, createdAt });
-  const lastMonth = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000);
-  await withDb((db) => db.collection("pmmessages").insertMany([turn(ACME, new Date()), turn(ACME, new Date()), turn(ACME, new Date()), turn(ACME, lastMonth), turn(ACME, lastMonth), turn(GLOBEX, new Date())]));
+  // The first of the month counts and the last millisecond before it does not, on any day of the month; an answer is not a turn
+  const firstOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const beforeIt = new Date(firstOfMonth.getTime() - 1);
+  await withDb((db) =>
+    db.collection("pmmessages").insertMany([
+      turn(ACME, new Date()),
+      turn(ACME, firstOfMonth),
+      turn(ACME, new Date()),
+      turn(ACME, beforeIt),
+      turn(ACME, new Date(now.getTime() - 40 * 24 * 60 * 60 * 1000)),
+      { ...turn(ACME, new Date()), role: "assistant" },
+      turn(GLOBEX, new Date()),
+    ])
+  );
   await signInOn(page.context(), ACME);
 
   await page.goto(`${originOf(ACME)}/settings/ai-keys`);
   const month = page.getByTestId("ai-usage-month");
-  await expect(page.getByTestId("ai-usage-activity")).toHaveText("3 PM turns and 1,340 model calls on this service's key this month.");
+  await expect(page.getByTestId("ai-usage-activity")).toHaveText("3 PM turns this month, and 1,340 model calls on this service's key.");
   await expect(month).toContainText(`4,200,000 of ${limit.toLocaleString("en-US")} tokens used this month. It renews on 1 `);
   await expect(page.getByText(`${Math.floor((4_200_000 / limit) * 100)}% used`)).toBeVisible();
   await expect(page.getByTestId("ai-usage-today")).toContainText(`Today (UTC): 900,000 tokens; one day may use at most ${Math.ceil(limit / 5).toLocaleString("en-US")}.`);

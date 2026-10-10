@@ -44,7 +44,7 @@ function UsageCard({ usage, hosted }: { usage: UsageAnswer; hosted: boolean }) {
   return (
     <SettingsCard
       title="AI usage"
-      description="Counted in tokens on every call of the PM agent and AI Assist."
+      description="Counted in tokens on every call of the PM agent and AI Assist. A PM turn is up to 15 model calls; AI Assist makes one."
       status={
         usage.included
           ? { label: usage.locked ? "Switched off" : share === null ? "Not limited" : `${share}% used`, on: !usage.locked && (share === null || share < 100) }
@@ -79,8 +79,8 @@ function UsageCard({ usage, hosted }: { usage: UsageAnswer; hosted: boolean }) {
           )}
           {usage.turns !== null && (
             <p className="text-sm text-text-muted" data-testid="ai-usage-activity">
-              <strong className="text-text">{tokens(usage.turns)}</strong> PM turn{usage.turns === 1 ? "" : "s"} and{" "}
-              <strong className="text-text">{tokens(usage.calls)}</strong> model call{usage.calls === 1 ? "" : "s"} on this service&apos;s key {period}.
+              <strong className="text-text">{tokens(usage.turns)}</strong> PM turn{usage.turns === 1 ? "" : "s"} {period}, and{" "}
+              <strong className="text-text">{tokens(usage.calls)}</strong> model call{usage.calls === 1 ? "" : "s"} on this service&apos;s key.
             </p>
           )}
           <p className="text-sm text-text-muted" data-testid="ai-usage-today">
