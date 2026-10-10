@@ -464,6 +464,13 @@ describe("when the PM agent cannot run for want of a key", () => {
     expect(screen.queryByText(/OPENROUTER_API_KEY/)).toBeNull();
   });
 
+  it("says the operator has switched its key off, which is not a plan that is missing", () => {
+    renderUnavailable({ pmLocked: true });
+
+    expect(screen.getByTestId("ai-locked").textContent).toMatch(/The PM agent is switched off for this organisation by the operator/);
+    expect(screen.queryByTestId("ai-needs-key")).toBeNull();
+  });
+
   it("says a stored key that cannot be read has to be entered again", () => {
     renderUnavailable({ pmKeyUnreadable: true });
 

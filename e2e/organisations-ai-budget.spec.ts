@@ -239,8 +239,21 @@ test("the operator switches its key off for one organisation: that one is refuse
   expect(refused.status).toBe(403);
   expect(refused.body).toMatchObject({ reason: "ai_locked" });
   expect(refused.body.error).toMatch(/AI is switched off for this organisation by the operator: abuse report 17\. Add your own key in Settings → AI key/);
-  expect((await generate(page)).status).toBe(403);
+  const generation = await generate(page);
+  expect(generation.status).toBe(403);
+  expect(generation.body).toMatchObject({ reason: "ai_locked" });
   expect(await rows(ACME)).toEqual([]);
+
+  // The screens do not offer what would be refused
+  await page.goto(`${originOf(ACME)}/projects/${SHARED_KEY}`);
+  await page.getByRole("button", { name: "New task" }).click();
+  const modal = page.getByRole("dialog", { name: "New Task" });
+  await expect(modal.getByTestId("ai-locked")).toContainText("AI Assist is switched off for this organisation by the operator.");
+  await expect(modal.getByPlaceholder("Describe what you need")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await page.goto(`${originOf(ACME)}/projects/${SHARED_KEY}/pm`);
+  await expect(page.getByTestId("ai-locked")).toContainText("The PM agent is switched off for this organisation by the operator.");
+  await expect(page.getByPlaceholder(/Message the PM/)).toHaveCount(0);
 
   await open(page, GLOBEX);
   expect((await chat(page)).status).toBe(200);
@@ -257,7 +270,7 @@ test("the operator switches its key off for one organisation: that one is refuse
 
   await withDb((db) => db.collection("settings").deleteMany({ organisation: ACME.organisation }));
   expect((await chat(page)).status).toBe(403);
-  const unlocked = await platform(request, "POST", aiLockPath(ACME), { locked: false });
+  const unlocked = await platform(request, "POST", aiLockPath(ACME), { locked: false, reason: "sent with an unlock" });
   expect(await unlocked.json()).toEqual({ locked: false });
   // The turn on the own key may still hold the project's one turn for a moment
   let again = await chat(page);
@@ -277,14 +290,37 @@ test("the lock takes only what an operator may send: a true or false, a short re
     [{}, 400],
     [{ locked: true, reason: "x".repeat(501) }, 400],
     [{ locked: true, reason: 5 }, 400],
+    [{ locked: true, reason: "x".repeat(500) }, 200],
   ] as const) {
     expect((await platform(request, "POST", aiLockPath(ACME), body)).status(), JSON.stringify(body)).toBe(status);
   }
   expect((await platform(request, "POST", "/api/platform/organisations/0123456789abcdef01234567/ai", { locked: true })).status()).toBe(404);
+  expect((await platform(request, "POST", "/api/platform/organisations/000000000000000000000001/ai", { locked: true })).status()).toBe(409);
+  const broken = await request.fetch(`${ORGANISATIONS_API}${aiLockPath(ACME)}`, {
+    method: "POST",
+    headers: { host: PLATFORM_HOST, "content-type": "application/json", ...signPlatformRequest({ method: "POST", host: PLATFORM_HOST, path: aiLockPath(ACME), body: Buffer.from("{not json") }, E2E_PLATFORM_REQUEST_KEY) },
+    data: Buffer.from("{not json"),
+  });
+  expect(broken.status()).toBe(400);
   expect((await platform(request, "POST", "/api/platform/organisations/not-an-id/ai", { locked: true })).status()).toBe(404);
 
-  const locked = await withDb((db) => db.collection("organisations").findOne({ _id: ACME.organisation }, { projection: { aiLockedAt: 1 } }));
-  expect(locked?.aiLockedAt ?? null).toBeNull();
+  // The one that was accepted is the one that is on, with its reason; the refused ones changed nothing
+  const stored = await withDb((db) => db.collection("organisations").findOne({ _id: ACME.organisation }, { projection: { aiLockedAt: 1, aiLockedReason: 1 } }));
+  expect(stored?.aiLockedAt).toBeInstanceOf(Date);
+  expect(stored?.aiLockedReason).toBe("x".repeat(500));
+});
+
+test("a hosted Free organisation is shown no allowance it does not have, on its own screen or in the operator's list", async ({ page, request }) => {
+  await withDb((db) => db.collection("organisations").updateOne({ _id: ACME.organisation }, { $unset: { licenceKey: "" } }));
+  await signInOn(page.context(), ACME);
+
+  await page.goto(`${originOf(ACME)}/settings/ai-keys`);
+  await expect(page.getByText(/Without a key of your own it does not run on the Free plan/)).toBeVisible();
+  await expect(page.getByText("AI usage")).toHaveCount(0);
+  await expect(page.getByRole("progressbar")).toHaveCount(0);
+
+  const list = await (await platform(request, "GET", "/api/platform/organisations")).json();
+  expect(list.organisations.find((o: { id: string }) => o.id === ACME.organisation.toHexString())).toMatchObject({ plan: "free", ai: { included: false, limit: null, dailyCeiling: null } });
 });
 
 test("the operator's list says how much of its allowance each organisation has used and whether its key is switched off", async ({ request }) => {
@@ -325,5 +361,6 @@ test("on screen: Settings → AI key says what has been used and when it renews,
   await page.setViewportSize({ width: 390, height: 800 });
   await page.reload();
   await expect(page.getByTestId("ai-usage-month")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "nothing runs off the screen on a phone").toBe(true);
   await page.screenshot({ path: "e2e/.artifacts/bp680-ai-usage-phone.png" });
 });

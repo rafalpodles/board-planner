@@ -15,7 +15,8 @@ let reviewed: Record<string, unknown> | null = null;
 // The gateway's counters are its own tests' business (src/lib/ai-gateway): these only need the door to open
 const checkBudget = vi.hoisted(() => vi.fn(async () => ({ refusal: null as unknown, counter: "month" })));
 vi.mock("@/lib/ai-gateway/budget", () => ({ counterKindOf: async () => "month", checkBudget }));
-vi.mock("@/lib/organisation", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/organisation")>()), getOrganisation: async () => ({ aiLockedAt: null }) }));
+const getOrganisation = vi.hoisted(() => vi.fn(async () => ({ aiLockedAt: null as Date | null, aiLockedReason: "" })));
+vi.mock("@/lib/organisation", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/organisation")>()), getOrganisation }));
 vi.mock("@/lib/ai-gateway/usage", () => ({ recordUsage: vi.fn() }));
 vi.mock("@/models/project", () => ({
   Project: {
@@ -110,6 +111,18 @@ describe("runPmTrigger", () => {
     expect(runPmTurn).not.toHaveBeenCalled();
     expect(findOneAndUpdate).toHaveBeenCalledWith({ _id: "t1", organisation: DEFAULT_ORGANISATION_ID }, {
       $set: { state: "failed", lastError: expect.stringMatching(/15,000,000 of 15,000,000.*1 November 2026/), active: false },
+    });
+  });
+
+  it("fails the trigger with the operator's words while its key is switched off for the organisation, and runs nothing", async () => {
+    resolveModelKey.mockResolvedValueOnce({ ok: true, key: "k", source: "managed" });
+    getOrganisation.mockResolvedValueOnce({ aiLockedAt: new Date(), aiLockedReason: "abuse report 17" });
+
+    expect(await runPmTrigger(db, trigger)).toBe("ran");
+
+    expect(runPmTurn).not.toHaveBeenCalled();
+    expect(findOneAndUpdate).toHaveBeenCalledWith({ _id: "t1", organisation: DEFAULT_ORGANISATION_ID }, {
+      $set: { state: "failed", lastError: expect.stringMatching(/switched off for this organisation by the operator: abuse report 17/), active: false },
     });
   });
 

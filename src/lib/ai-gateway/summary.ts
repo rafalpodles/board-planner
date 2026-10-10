@@ -1,5 +1,7 @@
 import type { ScopedDb } from "@/lib/db-scope";
+import { can } from "@/lib/entitlements";
 import { getOrganisation } from "@/lib/organisation";
+import { organisationDomain } from "@/lib/organisation-host";
 import { counterKindOf } from "./budget";
 import { budgetOf } from "./limits";
 import { nextUtcMonth, periodOf } from "./periods";
@@ -21,6 +23,8 @@ export interface AiUsageSummary {
   ownTokens: number;
   /** The operator has switched off the use of its key for this organisation */
   locked: boolean;
+  /** The service's key is one this organisation may use: a plan that includes it, or a self-hosted instance's own */
+  included: boolean;
 }
 
 /** What an organisation has used of its AI allowance, for its own Settings and for the operator's list */
@@ -35,14 +39,17 @@ export async function aiUsageSummary(db: ScopedDb, now: Date = new Date()): Prom
   }).lean();
   const row = (kind: string) => rows.find((r) => r.kind === kind);
 
+  // A hosted organisation on a plan without managed AI has no allowance: the key is its own or nothing
+  const included = organisationDomain() === null || can(organisation, "ai.managed");
   return {
     scope,
     used: row(scope)?.tokens ?? 0,
-    limit: budget?.limit ?? null,
+    limit: included ? budget?.limit ?? null : null,
     resetsAt: scope === "month" ? nextUtcMonth(now).toISOString() : null,
     today: row("day")?.tokens ?? 0,
-    dailyCeiling: budget && budget.dailyCeiling > 0 ? budget.dailyCeiling : null,
+    dailyCeiling: included && budget && budget.dailyCeiling > 0 ? budget.dailyCeiling : null,
     ownTokens: row(scope)?.ownTokens ?? 0,
     locked: Boolean(organisation.aiLockedAt),
+    included,
   };
 }

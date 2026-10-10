@@ -218,6 +218,14 @@ describe("a PM page where the key is the problem", () => {
     expect(screen.queryByText(/OPENROUTER_API_KEY/)).toBeNull();
   });
 
+  it("says the operator has switched its key off, with the own key as the way on, instead of a composer that would be refused", async () => {
+    render(<PmChat projectId="p1" preloadedProject={{ ...PROJECT, pmAvailable: false, pmLocked: true } as never} />);
+
+    expect((await screen.findByTestId("ai-locked")).textContent).toMatch(/The PM agent is switched off for this organisation by the operator/);
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.queryByTestId("ai-needs-key")).toBeNull();
+  });
+
   it("says a stored key that cannot be read has to be entered again, not that the server has none", async () => {
     render(<PmChat projectId="p1" preloadedProject={{ ...PROJECT, pmAvailable: false, pmKeyUnreadable: true } as never} />);
 

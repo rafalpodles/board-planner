@@ -1029,6 +1029,7 @@ describe("the project answer says whether the PM agent can run", () => {
     ["with a key", { available: true, needsPlan: false, unreadable: false }, { pmAvailable: true, pmNeedsPlan: false, pmKeyUnreadable: false }],
     ["when only a plan would turn it on", { available: false, needsPlan: true, unreadable: false }, { pmAvailable: false, pmNeedsPlan: true, pmKeyUnreadable: false }],
     ["when the stored key cannot be read", { available: false, needsPlan: false, unreadable: true }, { pmAvailable: false, pmNeedsPlan: false, pmKeyUnreadable: true }],
+    ["when the operator has switched its key off", { available: false, needsPlan: false, unreadable: false, locked: true }, { pmAvailable: false, pmLocked: true, pmNeedsPlan: false }],
   ])("on a read, %s", async (_case, availability, expected) => {
     modelKeyAvailability.mockResolvedValue(availability);
 

@@ -19,9 +19,11 @@ export const POST = withPlatformRequest<{ organisationId: string }>(async (_requ
     return NextResponse.json({ error: `reason must be a string of at most ${MAX_REASON} characters` }, { status: 400 });
   }
 
-  if ((await setAiLocked(params.organisationId, locked, locked ? reason : "")) === "not_found") {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const outcome = await setAiLocked(params.organisationId, locked, locked ? reason : "");
+  if (outcome === "default_organisation") {
+    return NextResponse.json({ error: "The default organisation cannot be locked" }, { status: 409 });
   }
+  if (outcome === "not_found") return NextResponse.json({ error: "Not found" }, { status: 404 });
   await logPlatformAudit({
     action: locked ? "organisation_ai_locked" : "organisation_ai_unlocked",
     keyId,

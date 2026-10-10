@@ -30,7 +30,7 @@ export type ClosedGate = { ok: false; status: number; error: string; body: Recor
 
 /**
  * The one door to a model. It finds the key the call is made with, and refuses it where the organisation may not use the
- * operator's: no plan for it, or what it was allowed to spend is spent. An organisation's own key is never refused for
+ * operator's: no plan for it, the operator has switched it off for the organisation, or what it was allowed to spend is spent. An organisation's own key is never refused for
  * that, and is counted all the same.
  */
 export async function openGate(db: ScopedDb, notConfigured: { error: string; status: number }): Promise<OpenGate | ClosedGate> {
@@ -41,10 +41,12 @@ export async function openGate(db: ScopedDb, notConfigured: { error: string; sta
   }
   if (modelKey.source === "own") return { ok: true, key: modelKey.key, keySource: "own", counter: await counterKindOf(db) };
 
-  const { aiLockedAt, aiLockedReason } = await getOrganisation(db.organisation);
-  if (aiLockedAt) {
-    const error = describeAiLock(aiLockedReason ?? "");
-    return { ok: false, status: 403, error, body: { error, reason: "ai_locked" } };
+  if (modelKey.source === "managed") {
+    const { aiLockedAt, aiLockedReason } = await getOrganisation(db.organisation);
+    if (aiLockedAt) {
+      const error = describeAiLock(aiLockedReason ?? "");
+      return { ok: false, status: 403, error, body: { error, reason: "ai_locked" } };
+    }
   }
 
   const { refusal, counter } = await checkBudget(db);

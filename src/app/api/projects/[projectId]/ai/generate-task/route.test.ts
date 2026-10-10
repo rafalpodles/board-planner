@@ -8,7 +8,8 @@ const modelKeyAvailability = vi.hoisted(() => vi.fn());
 // The gateway's counters are its own tests' business (src/lib/ai-gateway): these only need the door to open
 const checkBudget = vi.hoisted(() => vi.fn(async () => ({ refusal: null as unknown, counter: "month" })));
 vi.mock("@/lib/ai-gateway/budget", () => ({ counterKindOf: async () => "month", checkBudget }));
-vi.mock("@/lib/organisation", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/organisation")>()), getOrganisation: async () => ({ aiLockedAt: null }) }));
+const getOrganisation = vi.hoisted(() => vi.fn(async () => ({ aiLockedAt: null as Date | null, aiLockedReason: "" })));
+vi.mock("@/lib/organisation", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/organisation")>()), getOrganisation }));
 const recordUsage = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/ai-gateway/usage", () => ({ recordUsage }));
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
@@ -90,6 +91,17 @@ describe("which key generate-task spends", () => {
     expect(recordUsage).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ source: "assist", projectId: "p1", userId: "u7", keySource: "own" }), "month");
   });
 
+  it("answers 403 with the operator's words while its key is switched off for the organisation, and generates nothing", async () => {
+    resolveModelKey.mockResolvedValue({ ok: true, key: "sk-ours", source: "managed" });
+    getOrganisation.mockResolvedValueOnce({ aiLockedAt: new Date(), aiLockedReason: "abuse report 17" });
+
+    const res = await generate("a task");
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ reason: "ai_locked", error: expect.stringMatching(/abuse report 17/) });
+    expect(generateTask).not.toHaveBeenCalled();
+  });
+
   it("answers 402 when the plan has no managed AI and there is no key of its own, and generates nothing", async () => {
     resolveModelKey.mockResolvedValue({ ok: false, reason: "needs_plan", plan: "free" });
 
@@ -119,6 +131,9 @@ describe("which key generate-task spends", () => {
 
     modelKeyAvailability.mockResolvedValue({ available: false, needsPlan: false, unreadable: true });
     expect(await (await ask()).json()).toEqual({ enabled: false, needsPlan: false, keyUnreadable: true });
+
+    modelKeyAvailability.mockResolvedValue({ available: false, needsPlan: false, unreadable: false, locked: true });
+    expect(await (await ask()).json()).toEqual({ enabled: false, needsPlan: false, keyUnreadable: false, locked: true });
 
     expect(modelKeyAvailability).toHaveBeenCalledWith(expect.anything());
   });

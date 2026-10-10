@@ -58,6 +58,13 @@ describe("openGate", () => {
     expect(await openGate(db, NOT_CONFIGURED)).toMatchObject({ ok: true, key: "sk-theirs", keySource: "own" });
   });
 
+  it("does not read the lock for a self-hosted instance's own key: it is the owner's, not the operator's", async () => {
+    m.getOrganisation.mockResolvedValue({ aiLockedAt: new Date(), aiLockedReason: "" });
+    m.resolveModelKey.mockResolvedValue({ ok: true, key: "sk-instance", source: "instance" });
+
+    expect(await openGate(db, NOT_CONFIGURED)).toMatchObject({ ok: true, keySource: "instance" });
+  });
+
   it("stops a PM round-trip at the lock and never reaches the provider", async () => {
     m.getOrganisation.mockResolvedValue({ aiLockedAt: new Date(), aiLockedReason: "" });
 

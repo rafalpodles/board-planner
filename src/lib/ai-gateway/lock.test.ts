@@ -40,6 +40,11 @@ describe("setAiLocked", () => {
     expect(updateOne).not.toHaveBeenCalled();
   });
 
+  it("refuses the default organisation, which is the operator's own, without writing", async () => {
+    expect(await setAiLocked("000000000000000000000001", true)).toBe("default_organisation");
+    expect(updateOne).not.toHaveBeenCalled();
+  });
+
   it("says not found for an organisation that is gone or being deleted, which the filter does not match", async () => {
     updateOne.mockResolvedValue({ matchedCount: 0 });
 

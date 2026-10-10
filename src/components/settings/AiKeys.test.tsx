@@ -11,7 +11,7 @@ const { api, toast } = vi.hoisted(() => ({
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast, dismiss: vi.fn() }) }));
 
-const NO_USAGE = { scope: "month", used: 0, limit: null, resetsAt: null, today: 0, dailyCeiling: null, ownTokens: 0, locked: false };
+const NO_USAGE = { scope: "month", used: 0, limit: null, resetsAt: null, today: 0, dailyCeiling: null, ownTokens: 0, locked: false, included: false };
 const FREE_CLOUD = { hosted: true, plan: "free", set: false, hint: "", unreadable: false, included: false, usage: NO_USAGE };
 
 beforeEach(() => {
@@ -210,6 +210,7 @@ describe("Settings → AI key: usage", () => {
     dailyCeiling: 3_000_000,
     ownTokens: 0,
     locked: false,
+    included: true,
     ...over,
   });
   const PRO_CLOUD = { ...FREE_CLOUD, plan: "pro", included: true };
@@ -253,6 +254,32 @@ describe("Settings → AI key: usage", () => {
     render(<AiKeys />);
     await screen.findByTestId("ai-usage-month");
     expect(screen.queryByTestId("ai-usage-own")).toBeNull();
+  });
+
+  it("shows a Free cloud organisation no allowance, which it does not have, and no card at all while it has used no key of its own", async () => {
+    api.get.mockResolvedValue({ ...FREE_CLOUD, usage: usage({ included: false, limit: null, dailyCeiling: null, resetsAt: null }) });
+    render(<AiKeys />);
+
+    await screen.findByText(/Without a key of your own it does not run on the Free plan/);
+    expect(screen.queryByText("AI usage")).toBeNull();
+    expect(screen.queryByRole("progressbar")).toBeNull();
+  });
+
+  it("shows only what its own key used, where the service's key is not one it may use", async () => {
+    api.get.mockResolvedValue({ ...FREE_CLOUD, set: true, hint: "abcd", usage: usage({ included: false, limit: null, dailyCeiling: null, resetsAt: null, ownTokens: 4_000 }) });
+    render(<AiKeys />);
+
+    expect((await screen.findByTestId("ai-usage-own")).textContent).toBe("Your own key: 4,000 tokens this month, counted and never limited.");
+    expect(screen.queryByTestId("ai-usage-month")).toBeNull();
+    expect(screen.queryByTestId("ai-usage-today")).toBeNull();
+    expect(screen.queryByTestId("ai-usage-locked")).toBeNull();
+  });
+
+  it("rounds the share down, so a month that is not yet spent is not shown as spent", async () => {
+    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ used: 14_950_000 }) });
+    render(<AiKeys />);
+
+    expect(await screen.findByText("99% used")).toBeTruthy();
   });
 
   it("says on the key card too that ours is switched off, so it does not promise what the operator took away", async () => {

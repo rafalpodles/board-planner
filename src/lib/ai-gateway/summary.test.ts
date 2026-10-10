@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const m = vi.hoisted(() => ({ budget: null as unknown, rows: [] as Record<string, unknown>[], trial: false, locked: null as Date | null }));
+const m = vi.hoisted(() => ({ budget: null as unknown, rows: [] as Record<string, unknown>[], trial: false, locked: null as Date | null, hosted: true, managed: true }));
 
 vi.mock("./limits", () => ({ budgetOf: async () => m.budget }));
 vi.mock("./budget", () => ({ counterKindOf: async () => (m.trial ? "trial" : "month") }));
 vi.mock("@/lib/organisation", () => ({ getOrganisation: async () => ({ aiLockedAt: m.locked }) }));
+vi.mock("@/lib/organisation-host", () => ({ organisationDomain: () => (m.hosted ? "board-planner.com" : null) }));
+vi.mock("@/lib/entitlements", () => ({ can: () => m.managed }));
 
 const { aiUsageSummary } = await import("./summary");
 
@@ -17,6 +19,8 @@ beforeEach(() => {
   m.rows = [];
   m.trial = false;
   m.locked = null;
+  m.hosted = true;
+  m.managed = true;
   find.mockClear();
 });
 
@@ -37,6 +41,7 @@ describe("aiUsageSummary", () => {
       dailyCeiling: 3_000_000,
       ownTokens: 77_000,
       locked: false,
+      included: true,
     });
     expect(find).toHaveBeenCalledWith({ $or: [{ kind: "day", period: "2026-10-09" }, { kind: "month", period: "2026-10" }] });
   });
@@ -67,6 +72,20 @@ describe("aiUsageSummary", () => {
     m.trial = true;
 
     expect(await aiUsageSummary(db, NOW)).toMatchObject({ scope: "trial", used: 0 });
+  });
+
+  it("gives a hosted organisation on a plan without managed AI no allowance, since the key is its own or nothing", async () => {
+    m.managed = false;
+    m.rows = [{ kind: "month", period: "2026-10", tokens: 0, ownTokens: 500 }];
+
+    expect(await aiUsageSummary(db, NOW)).toMatchObject({ included: false, limit: null, dailyCeiling: null, ownTokens: 500 });
+  });
+
+  it("keeps a self-hosted instance's own key included, whatever the plan says", async () => {
+    m.hosted = false;
+    m.managed = false;
+
+    expect(await aiUsageSummary(db, NOW)).toMatchObject({ included: true });
   });
 
   it("says whether the operator has switched the key off", async () => {

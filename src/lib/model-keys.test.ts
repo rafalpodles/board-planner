@@ -133,7 +133,7 @@ describe("what the screens are told (modelKeyAvailability)", () => {
   it("says a self-hosted server runs where it has a key, and reads nothing about a plan", async () => {
     process.env.OPENROUTER_API_KEY = "sk-instance";
 
-    expect(await modelKeyAvailability(dbWith(null))).toEqual({ available: true, needsPlan: false, unreadable: false });
+    expect(await modelKeyAvailability(dbWith(null))).toEqual({ available: true, needsPlan: false, unreadable: false, locked: false });
     expect(getOrganisation).not.toHaveBeenCalled();
   });
 
@@ -141,8 +141,8 @@ describe("what the screens are told (modelKeyAvailability)", () => {
     const readable = encryptSecret("sk-own", ORGANISATION);
     const copied = encryptSecret("sk-someone-elses", OTHER);
 
-    expect(await modelKeyAvailability(dbWith({ openrouterKey: readable }))).toEqual({ available: true, needsPlan: false, unreadable: false });
-    expect(await modelKeyAvailability(dbWith({ openrouterKey: copied }))).toEqual({ available: false, needsPlan: false, unreadable: true });
+    expect(await modelKeyAvailability(dbWith({ openrouterKey: readable }))).toEqual({ available: true, needsPlan: false, unreadable: false, locked: false });
+    expect(await modelKeyAvailability(dbWith({ openrouterKey: copied }))).toEqual({ available: false, needsPlan: false, unreadable: true, locked: false });
   });
 
   describe("in the cloud", () => {
@@ -153,18 +153,32 @@ describe("what the screens are told (modelKeyAvailability)", () => {
 
     it("says a Free organisation would run with a plan, and a Pro one runs", async () => {
       organisationOn("free");
-      expect(await modelKeyAvailability(dbWith(null))).toEqual({ available: false, needsPlan: true, unreadable: false });
+      expect(await modelKeyAvailability(dbWith(null))).toEqual({ available: false, needsPlan: true, unreadable: false, locked: false });
 
       forgetManagedPlans();
       organisationOn("pro");
-      expect(await modelKeyAvailability(dbWith(null))).toEqual({ available: true, needsPlan: false, unreadable: false });
+      expect(await modelKeyAvailability(dbWith(null))).toEqual({ available: true, needsPlan: false, unreadable: false, locked: false });
     });
 
     it("does not say a plan would help when the operator has no key to give", async () => {
       organisationOn("free");
       delete process.env.OPENROUTER_API_KEY;
 
-      expect(await modelKeyAvailability(dbWith(null))).toEqual({ available: false, needsPlan: false, unreadable: false });
+      expect(await modelKeyAvailability(dbWith(null))).toEqual({ available: false, needsPlan: false, unreadable: false, locked: false });
+    });
+
+    // BP-680: the screens must not offer what the operator has switched off, and an own key is never switched off
+    it("says a Pro organisation is switched off by the operator, with a plan that is not the problem, and that an own key still runs", async () => {
+      getOrganisation.mockResolvedValue({ entitlements: { plan: "pro", features: ["ai.managed"], source: "service" }, aiLockedAt: new Date() });
+
+      expect(await modelKeyAvailability(dbWith(null))).toEqual({ available: false, needsPlan: false, unreadable: false, locked: true });
+      expect(await modelKeyAvailability(dbWith({ openrouterKey: encryptSecret("sk-own", ORGANISATION) }))).toEqual({ available: true, needsPlan: false, unreadable: false, locked: false });
+    });
+
+    it("does not call a Free organisation switched off: it needs a plan whatever the operator did", async () => {
+      getOrganisation.mockResolvedValue({ entitlements: { plan: "free", features: [], source: "service" }, aiLockedAt: new Date() });
+
+      expect(await modelKeyAvailability(dbWith(null))).toMatchObject({ available: false, needsPlan: true, locked: false });
     });
 
     it("remembers the plan for a few seconds, so a board that polls does not read the organisation each time, and then asks again", async () => {

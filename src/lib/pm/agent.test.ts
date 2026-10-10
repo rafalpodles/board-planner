@@ -26,7 +26,8 @@ function pmMessage() {
 // The gateway's counters are its own tests' business (src/lib/ai-gateway): these only need the door to open
 const checkBudget = vi.hoisted(() => vi.fn(async () => ({ refusal: null as unknown, counter: "month" })));
 vi.mock("@/lib/ai-gateway/budget", () => ({ counterKindOf: async () => "month", checkBudget }));
-vi.mock("@/lib/organisation", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/organisation")>()), getOrganisation: async () => ({ aiLockedAt: null }) }));
+const getOrganisation = vi.hoisted(() => vi.fn(async () => ({ aiLockedAt: null as Date | null, aiLockedReason: "" })));
+vi.mock("@/lib/organisation", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/organisation")>()), getOrganisation }));
 const recordUsage = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/ai-gateway/usage", () => ({ recordUsage }));
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
@@ -171,6 +172,16 @@ describe("runPmTurn's model key", () => {
 
     expect(resolveModelKey).toHaveBeenCalledWith(db);
     expect(chatCompletion.mock.calls.map((call) => call[0].apiKey)).toEqual(["sk-the-orgs-own-key", "sk-the-orgs-own-key"]);
+  });
+
+  it("refuses the turn, calling no model, while the operator has switched its key off for the organisation", async () => {
+    resolveModelKey.mockResolvedValue({ ok: true, key: "sk-ours", source: "managed" });
+    getOrganisation.mockResolvedValueOnce({ aiLockedAt: new Date(), aiLockedReason: "" });
+
+    const result = await turn(NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS);
+
+    expect(result).toMatchObject({ ok: false, message: null, error: expect.stringMatching(/switched off for this organisation by the operator/) });
+    expect(chatCompletion).not.toHaveBeenCalled();
   });
 
   it("refuses the turn, calling no model and storing no message, when no key may be used", async () => {

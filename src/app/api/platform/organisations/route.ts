@@ -21,7 +21,7 @@ export const GET = withPlatformRequest(async (request, { keyId }) => {
   const rows = await Organisation.find(after ? { _id: { $gt: after } } : {})
     .sort({ _id: 1 })
     .limit(limit + 1)
-    .select("name slug licenceKey suspendedAt deletedAt aiLockedAt")
+    .select("name slug licenceKey suspendedAt deletedAt")
     .lean();
   const page = rows.slice(0, limit);
 
