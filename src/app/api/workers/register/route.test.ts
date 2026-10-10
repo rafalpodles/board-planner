@@ -6,6 +6,9 @@ const attachWorkerToEnrolment = vi.fn();
 const enrolmentTokenOwner = vi.fn().mockResolvedValue("Owner");
 const enrolmentTokenOwnerId = vi.fn().mockResolvedValue("u1");
 const registerWorker = vi.fn();
+const releaseEnrolmentToken = vi.fn();
+const machineLimitRefusal = vi.fn();
+vi.mock("@/lib/machine-limit", () => ({ machineLimitRefusal }));
 
 const logInstanceAudit = vi.fn();
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
@@ -19,6 +22,7 @@ vi.mock("@/lib/enrolment", () => ({
   attachWorkerToEnrolment,
   enrolmentTokenOwner,
   enrolmentTokenOwnerId,
+  releaseEnrolmentToken,
 }));
 vi.mock("@/lib/worker-service", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/worker-service")>();
@@ -56,6 +60,41 @@ beforeEach(() => {
   consumeEnrolmentToken.mockResolvedValue({ ok: true, tokenId: "e1" });
   attachWorkerToEnrolment.mockResolvedValue(undefined);
   registerWorker.mockResolvedValue({ worker: WORKER, credential: "cpw_secret" });
+  machineLimitRefusal.mockResolvedValue(null);
+});
+
+// BP-989
+describe("POST /api/workers/register past the Free plan's one machine", () => {
+  const refusal = () => Response.json({ error: "The Free plan connects one machine", feature: "workers.multiple" }, { status: 402 });
+
+  it("refuses with 402, registers nothing, and hands the token back so the same file works after an upgrade", async () => {
+    machineLimitRefusal.mockResolvedValue(refusal());
+
+    const response = await POST(request(VALID, "cpe_good"));
+
+    expect(response.status).toBe(402);
+    expect((await response.json()).feature).toBe("workers.multiple");
+    expect(registerWorker).not.toHaveBeenCalled();
+    expect(releaseEnrolmentToken).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "e1");
+    expect(machineLimitRefusal).toHaveBeenCalledWith(scopedToDefaultOrganisation(), {
+      machine: { name: "rig-laptop", host: "mac.home" },
+    });
+  });
+
+  // 402 against 401 would tell a caller holding no token whether this name and host exist
+  it("judges the limit only for a token that is good", async () => {
+    machineLimitRefusal.mockResolvedValue(refusal());
+    consumeEnrolmentToken.mockResolvedValue({ ok: false, reason: "unknown" });
+
+    expect((await POST(request(VALID, "cpe_bad"))).status).toBe(401);
+    expect(machineLimitRefusal).not.toHaveBeenCalled();
+    expect(releaseEnrolmentToken).not.toHaveBeenCalled();
+  });
+
+  it("registers when there is room, as the control", async () => {
+    expect((await POST(request(VALID, "cpe_good"))).status).toBe(200);
+    expect(releaseEnrolmentToken).not.toHaveBeenCalled();
+  });
 });
 
 describe("POST /api/workers/register", () => {

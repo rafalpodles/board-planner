@@ -31,6 +31,12 @@ vi.mock("@/lib/worker-service", async (importOriginal) => {
   return { ...actual, verifyWorkerCredential, touchWorker };
 });
 
+const claimingMachineIds = vi.fn();
+vi.mock("@/lib/machine-limit", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/machine-limit")>();
+  return { ...actual, claimingMachineIds };
+});
+
 const { POST } = await import("./route");
 
 const WORKER_ID = "69a52e3b399b27d3cbb2c5a5";
@@ -92,6 +98,28 @@ beforeEach(() => {
   touchWorker.mockResolvedValue(undefined);
   userFindOne.mockResolvedValue({ _id: OWNER_ID, role: "member" });
   accessibleProjectIds.mockResolvedValue([PROJECT_ID]);
+  claimingMachineIds.mockResolvedValue(null);
+});
+
+// BP-989: on a Free organisation past its one machine, the machines after the first are kept, keep
+// reporting in, and are handed nothing to claim — the claim would refuse it
+describe("POST /api/workers/:workerId/heartbeat on a Free organisation with several machines", () => {
+  it("hands a machine the limit leaves out no assignments, and goes on answering it", async () => {
+    claimingMachineIds.mockResolvedValue(new Set(["69a52e3b399b27d3cbb2c5ff"]));
+    const { req, ctx } = request({ repos: [{ remote: REMOTE, path: "/repo" }] });
+
+    const response = await POST(req, ctx);
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).assignments).toEqual([]);
+  });
+
+  it("hands the first connected machine its assignments, as the control", async () => {
+    claimingMachineIds.mockResolvedValue(new Set([WORKER_ID]));
+    const { req, ctx } = request({ repos: [{ remote: REMOTE, path: "/repo" }] });
+
+    expect((await (await POST(req, ctx)).json()).assignments).toHaveLength(1);
+  });
 });
 
 describe("POST /api/workers/:workerId/heartbeat", () => {

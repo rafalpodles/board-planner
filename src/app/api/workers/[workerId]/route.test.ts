@@ -40,6 +40,13 @@ vi.mock("@/lib/worker-service", async (importOriginal) => {
   return { ...actual, verifyWorkerCredential };
 });
 
+const machineLimitRefusal = vi.fn();
+const claimingMachineIds = vi.fn();
+vi.mock("@/lib/machine-limit", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/machine-limit")>();
+  return { ...actual, machineLimitRefusal, claimingMachineIds };
+});
+
 const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { GET, PATCH } = await import("./route");
 
@@ -110,6 +117,64 @@ beforeEach(() => {
       worker: { enabled: true, policy: { model: "sonnet" }, policyOverrides: ["model"] },
     },
   ]);
+  machineLimitRefusal.mockResolvedValue(null);
+  claimingMachineIds.mockResolvedValue(null);
+});
+
+// BP-989: switching a machine back on connects it again, so past the Free plan's one it is refused
+describe("PATCH enabled on a Free organisation", () => {
+  const refusal = () => Response.json({ feature: "workers.multiple" }, { status: 402 });
+
+  beforeEach(() => getAuthUser.mockResolvedValue(INSTANCE_ADMIN));
+
+  it("refuses to switch a second machine on, counting every connected machine but this one", async () => {
+    workerFindOne.mockResolvedValue({ ...WORKER, enabled: false });
+    machineLimitRefusal.mockResolvedValue(refusal());
+
+    const res = await PATCH(patchRequest({ enabled: true }), ctx());
+
+    expect(res.status).toBe(402);
+    expect(workerFindOneAndUpdate).not.toHaveBeenCalled();
+    expect(machineLimitRefusal).toHaveBeenCalledWith(scopedToDefaultOrganisation(), { workerId: WORKER_ID });
+  });
+
+  it("never judges a switch-off, a rename, or switching on a machine nobody owns", async () => {
+    machineLimitRefusal.mockResolvedValue(refusal());
+
+    expect((await PATCH(patchRequest({ enabled: false }), ctx())).status).toBe(200);
+    expect((await PATCH(patchRequest({ name: "other" }), ctx())).status).toBe(200);
+    workerFindOne.mockResolvedValue({ ...WORKER, enabled: false, owner: null });
+    expect((await PATCH(patchRequest({ enabled: true }), ctx())).status).toBe(200);
+    expect(machineLimitRefusal).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /api/workers/:workerId on a Free organisation with several machines", () => {
+  const workerGet = () =>
+    GET(
+      new Request(`http://localhost/api/workers/${WORKER_ID}`, {
+        headers: { authorization: "Bearer cpw_secret", "x-worker-id": WORKER_ID, "x-cp-protocol": "1" },
+      }),
+      ctx()
+    );
+
+  it("hands a machine the limit leaves out no assignments and says it is held", async () => {
+    claimingMachineIds.mockResolvedValue(new Set(["69a52e3b399b27d3cbb2c5ff"]));
+
+    const body = await (await workerGet()).json();
+
+    expect(body.assignments).toEqual([]);
+    expect(body.condition.state).toBe("held");
+  });
+
+  it("hands the first connected machine its assignments, as the control", async () => {
+    claimingMachineIds.mockResolvedValue(new Set([WORKER_ID]));
+
+    const body = await (await workerGet()).json();
+
+    expect(body.assignments).toHaveLength(1);
+    expect(body.condition.state).toBe("live");
+  });
 });
 
 // BP-358 removed the stored approved set: what a machine may serve is what its owner may serve,

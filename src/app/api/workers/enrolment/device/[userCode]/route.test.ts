@@ -8,6 +8,8 @@ const findPendingByUserCode = vi.fn();
 const projectFind = vi.fn();
 const projectLean = vi.fn();
 const workerFindOne = vi.fn();
+const machineLimitRefusal = vi.fn();
+vi.mock("@/lib/machine-limit", () => ({ machineLimitRefusal }));
 let ownedByCaller: string[] = [];
 const administeredProjectIds = vi.fn(async (_db: unknown, user: { role: string }, ids: string[]) =>
   new Set(user.role === "admin" ? ids : ids.filter((id) => ownedByCaller.includes(id)))
@@ -71,6 +73,24 @@ beforeEach(() => {
     { _id: MINE, name: "Mine", key: "BP", repositoryUrl: "git@github.com:owner/repo.git", worker: { enabled: true } },
   ]);
   workerFindOne.mockResolvedValue(null);
+  machineLimitRefusal.mockResolvedValue(null);
+});
+
+// BP-989: the page says it before the click, rather than after it as a toast
+describe("GET /api/workers/enrolment/device/:userCode on a Free organisation with its machine connected", () => {
+  it("carries the plan's sentence, and nothing when there is room", async () => {
+    expect((await (await GET(request(), ctx())).json()).machineLimit).toBeNull();
+
+    machineLimitRefusal.mockResolvedValue(
+      Response.json({ error: "The Free plan connects one machine.", feature: "workers.multiple" }, { status: 402 })
+    );
+    const body = await (await GET(request(), ctx())).json();
+
+    expect(body.machineLimit).toBe("The Free plan connects one machine.");
+    expect(machineLimitRefusal).toHaveBeenLastCalledWith(scopedToDefaultOrganisation(), {
+      machine: { name: "rig-laptop", host: "mac.home" },
+    });
+  });
 });
 
 // BP-358: this page stopped being admin-only, so the list it renders stopped being "every project

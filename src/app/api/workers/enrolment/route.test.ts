@@ -3,6 +3,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const getAuthUser = vi.fn();
 const check = vi.fn();
 const mintEnrolmentToken = vi.fn();
+const machineLimitRefusal = vi.fn();
+vi.mock("@/lib/machine-limit", () => ({ machineLimitRefusal }));
 
 const logInstanceAudit = vi.fn();
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
@@ -48,6 +50,21 @@ beforeEach(() => {
   mintEnrolmentToken.mockResolvedValue({
     token: "cpe_secret",
     expiresAt: new Date("2026-08-03T13:00:00.000Z"),
+  });
+  machineLimitRefusal.mockResolvedValue(null);
+});
+
+// BP-989: said in Settings, where the token is minted, rather than in a log on the machine an hour later
+describe("POST /api/workers/enrolment past the Free plan's one machine", () => {
+  it("refuses with the plan's 402 and mints nothing, unless the person owns the connected machine", async () => {
+    getAuthUser.mockResolvedValue(MEMBER);
+    machineLimitRefusal.mockResolvedValue(Response.json({ feature: "workers.multiple" }, { status: 402 }));
+
+    const response = await POST(request({}), { params: Promise.resolve({}) });
+
+    expect(response.status).toBe(402);
+    expect(mintEnrolmentToken).not.toHaveBeenCalled();
+    expect(machineLimitRefusal).toHaveBeenCalledWith(scopedToDefaultOrganisation(), { owner: "member-1" });
   });
 });
 

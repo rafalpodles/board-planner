@@ -219,12 +219,13 @@ describe("GET handover readiness", () => {
     expect((await read()).body).toMatchObject({ machine: "live", bindingError: "" });
   });
 
-  it("selects what pause and preflight are read from", async () => {
+  it("selects what pause, preflight and the plan's machine limit are read from", async () => {
     await read();
 
     expect(workerFind.mock.calls[0][1].split(" ").sort()).toEqual(
       [
         "enabled",
+        "owner",
         "lastSeenAt",
         "repos",
         "preflight",
