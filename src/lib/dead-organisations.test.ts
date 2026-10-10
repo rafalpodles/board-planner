@@ -152,13 +152,35 @@ describe("deadOrganisationEmail", () => {
     expect(deadOrganisationEmail("notice", "Acme", null, evening, sentAt(30, 18)).text).toMatch(/by 30 December 2026 cancels/);
   });
 
-  it("counts the days a reminder has left from when it goes out, however late", () => {
-    const left = (now: number) => deadOrganisationEmail("reminder", "Acme", null, deleteOn, now).html;
-    expect(left(sentAt(7))).toContain("Reminder: 7 days left");
-    expect(left(sentAt(4, 18))).toContain("Reminder: 4 days left");
-    expect(left(sentAt(1, 20))).toContain("Reminder: 1 day left");
-    expect(left(sentAt(0, 1))).toContain("Reminder: less than a day left");
-    expect(left(sentAt(4, 18))).not.toMatch(/week/);
+  it("counts the time a reminder has left from when it goes out, however late, in both versions", () => {
+    const mail = (now: number) => deadOrganisationEmail("reminder", "Acme", null, deleteOn, now);
+    expect(mail(sentAt(7)).html).toContain("Reminder: 7 days left");
+    expect(mail(sentAt(4, 18)).html).toContain("Reminder: 4 days left");
+    expect(mail(sentAt(1, 12)).html).toContain("Reminder: 1 day left");
+    expect(mail(sentAt(1, 13)).html).toContain("Reminder: less than a day left");
+    expect(mail(sentAt(0, 1)).html).toContain("Reminder: less than a day left");
+    expect(mail(sentAt(4, 18)).html).not.toMatch(/week/);
+    expect(mail(sentAt(4, 18)).text).toContain("Time left: 4 days.");
+    expect(mail(sentAt(1, 13)).text).toContain("Time left: less than a day.");
+  });
+
+  // A late reminder before a morning suspension: the last day that suits everybody has already gone
+  it("never names a last day already past, and says how long is left instead", () => {
+    const morning = new Date(Date.UTC(2026, 11, 31, 6));
+    const late = deadOrganisationEmail("reminder", "Acme", null, morning, sentAt(1, 20));
+    for (const body of [late.html, late.text]) {
+      expect(body).toContain("Signing in, or choosing a plan, now, before 31 December 2026 at 06:00 UTC, cancels the deletion.");
+      expect(body).not.toMatch(/by 29 December/);
+    }
+    expect(late.html).toContain("Reminder: less than a day left");
+  });
+
+  it("keeps the last day while it is still today, and gives it up at midnight UTC", () => {
+    const morning = new Date(Date.UTC(2026, 11, 31, 6));
+    const stillToday = deadOrganisationEmail("reminder", "Acme", null, morning, Date.UTC(2026, 11, 29, 23, 59)).text;
+    expect(stillToday).toContain("Signing in, or choosing a plan, by 29 December 2026 cancels the deletion.");
+    const nextDay = deadOrganisationEmail("reminder", "Acme", null, morning, Date.UTC(2026, 11, 30, 0, 0)).text;
+    expect(nextDay).toContain("Signing in, or choosing a plan, now, before 31 December 2026 at 06:00 UTC, cancels the deletion.");
   });
 
   it("tells a reminder from the notice", () => {

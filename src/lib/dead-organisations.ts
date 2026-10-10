@@ -115,24 +115,28 @@ const utcDayNumber = (at: number) => Math.floor(at / DAY_MS);
 /** The last calendar day that is still over before the suspension everywhere on Earth, down to UTC−12 */
 const LAST_DAY_MARGIN_MS = 36 * 60 * 60 * 1000;
 
-function daysLeft(deleteOn: Date, now: number): string {
+function timeLeft(deleteOn: Date, now: number): string {
+  if (deleteOn.getTime() - now < DAY_MS) return "less than a day";
   const days = utcDayNumber(deleteOn.getTime()) - utcDayNumber(now);
-  if (days > 1) return `${days} days left`;
-  return days === 1 ? "1 day left" : "less than a day left";
+  return days === 1 ? "1 day" : `${days} days`;
 }
 
 export function deadOrganisationEmail(kind: "notice" | "reminder", label: string, origin: string | null, deleteOn: Date, now: number) {
   const date = dayOf(deleteOn);
-  const lastDay = dayOf(new Date(deleteOn.getTime() - LAST_DAY_MARGIN_MS));
+  const lastDayAt = deleteOn.getTime() - LAST_DAY_MARGIN_MS;
+  const lastDayIsPast = utcDayNumber(lastDayAt) < utcDayNumber(now);
+  const hour = `${deleteOn.toISOString().slice(11, 16)} UTC`;
+  const deadline = lastDayIsPast ? `now, before ${date} at ${hour},` : `by ${dayOf(new Date(lastDayAt))}`;
+  const left = timeLeft(deleteOn, now);
   const { html, text } = renderEmail({
-    preheader: `${label} will be suspended and deleted on ${date} unless somebody signs in or chooses a plan by ${lastDay}.`,
-    kicker: kind === "notice" ? "Your organisation" : `Reminder: ${daysLeft(deleteOn, now)}`,
+    preheader: `${label} will be suspended and deleted on ${date} unless somebody signs in or chooses a plan ${deadline.replace(/,$/, "")}.`,
+    kicker: kind === "notice" ? "Your organisation" : `Reminder: ${left} left`,
     heading: `${label} will be deleted on ${date}`,
     intro: [
       kind === "notice"
         ? `Nobody has used this ${APP_NAME} organisation for a long while, and it has no plan.`
-        : `We wrote earlier that nobody had used this ${APP_NAME} organisation for a long while. Nobody has since, and it still has no plan.`,
-      `Signing in, or choosing a plan, by ${lastDay} cancels the deletion.`,
+        : `We wrote earlier that nobody had used this ${APP_NAME} organisation for a long while. Nobody has since, and it still has no plan. Time left: ${left}.`,
+      `Signing in, or choosing a plan, ${deadline} cancels the deletion.`,
       "To keep a copy of everything in it, download the export from Settings → Export.",
     ],
     alert: {
