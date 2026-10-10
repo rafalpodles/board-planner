@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, FormEvent } from "react";
+import { useState, FormEvent } from "react";
 import Image from "next/image";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -16,8 +16,6 @@ interface Organisation {
 }
 
 type Step =
-  | { name: "loading" }
-  | { name: "remembered"; organisation: { name: string; origin: string } }
   | { name: "email" }
   | { name: "code"; email: string }
   | { name: "organisations"; email: string; organisations: Organisation[]; passwordSignIn: boolean }
@@ -44,7 +42,7 @@ async function send(path: string, method: string, body?: unknown) {
 const hostOf = (origin: string) => new URL(origin).host;
 
 export function PlatformSignIn() {
-  const [step, setStep] = useState<Step>({ name: "loading" });
+  const [step, setStep] = useState<Step>({ name: "email" });
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
@@ -58,19 +56,6 @@ export function PlatformSignIn() {
   const [username, setUsername] = useState("");
   const [acceptTerms, setAcceptTerms] = useState(false);
   const terms = useLegalTerms();
-
-  useEffect(() => {
-    let live = true;
-    send("/api/sign-in/remembered", "GET")
-      .then(({ data }) => {
-        if (!live) return;
-        setStep(data.organisation ? { name: "remembered", organisation: data.organisation } : { name: "email" });
-      })
-      .catch(() => live && setStep({ name: "email" }));
-    return () => {
-      live = false;
-    };
-  }, []);
 
   async function run(work: () => Promise<void>) {
     setError("");
@@ -168,12 +153,6 @@ export function PlatformSignIn() {
     });
   };
 
-  const forget = () =>
-    void run(async () => {
-      await send("/api/sign-in/remembered", "DELETE");
-      backToEmail();
-    });
-
   return (
     <div className="flex items-center justify-center min-h-screen px-4">
       <div className="w-full max-w-sm" data-testid="platform-sign-in">
@@ -186,26 +165,6 @@ export function PlatformSignIn() {
           <p role="alert" data-testid="sign-in-error" className="mb-4 rounded-lg border border-danger/40 bg-danger/10 p-3 text-sm">
             {error}
           </p>
-        )}
-
-        {step.name === "loading" && (
-          <div className="flex justify-center py-6" role="status" aria-label="Loading">
-            <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />
-          </div>
-        )}
-
-        {step.name === "remembered" && (
-          <div className="space-y-3">
-            <a
-              href={`${step.organisation.origin}/projects`}
-              className="focus-ring flex min-h-[44px] w-full items-center justify-center rounded-lg bg-primary-solid px-4 py-2 text-sm font-medium text-white hover:bg-primary-solid-hover"
-            >
-              Continue to {step.organisation.name}
-            </a>
-            <button type="button" onClick={forget} disabled={busy} className="focus-ring w-full text-sm text-text-muted underline">
-              Use another e-mail address
-            </button>
-          </div>
         )}
 
         {step.name === "email" && (

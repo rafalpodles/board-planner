@@ -15,14 +15,10 @@ export const signInCookie = (binder: string) => buildFlowCookie(SIGN_IN_COOKIE, 
 
 export const clearedSignInCookie = () => buildFlowCookie(SIGN_IN_COOKIE, "", 0);
 
-export const rememberedOrganisation = (request: Request) => readFlowCookie(request, REMEMBERED_ORGANISATION_COOKIE);
-
 export const rememberedOrganisationIn = (cookieHeader: string | null) => readFlowCookieFrom(cookieHeader, REMEMBERED_ORGANISATION_COOKIE);
 
 export const rememberCookie = (organisation: string) =>
   buildFlowCookie(REMEMBERED_ORGANISATION_COOKIE, organisation, REMEMBERED_ORGANISATION_TTL_SECONDS);
-
-export const forgetCookie = () => buildFlowCookie(REMEMBERED_ORGANISATION_COOKIE, "", 0);
 
 export async function provenEmail(request: Request): Promise<string | null> {
   return verifiedEmail(signInBinder(request));

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { forgetCookie, rememberCookie, rememberedOrganisationIn, signInCookie } from "./platform-sign-in-route";
+import { rememberCookie, rememberedOrganisationIn, signInCookie } from "./platform-sign-in-route";
 
 afterEach(() => {
   delete process.env.COOKIE_ALLOW_INSECURE;
@@ -28,8 +28,7 @@ describe("the remembered organisation cookie (BP-1009)", () => {
     expect(rememberedOrganisationIn("bp_last_organisation=org-2")).toBe("org-2");
   });
 
-  it("is still forgotten at once, and the sign-in cookie keeps its lifetime", () => {
-    expect(forgetCookie()).toContain("; Max-Age=0;");
+  it("leaves the sign-in cookie its own lifetime", () => {
     expect(signInCookie("bps_x")).toMatch(/; Max-Age=900;/);
   });
 });

@@ -252,7 +252,8 @@ function tokenNamed(header: string, name: string): string | null {
 }
 
 /**
- * A short-lived cookie for a round trip through another site. Named from the deployment alone,
+ * A cookie for a flow that spans requests: a round trip through another site, or the organisation a
+ * person last signed in to. Named from the deployment alone,
  * not the request: the leg that sets it is a POST carrying an Origin and the leg that reads it is a
  * navigation that may carry none, and the two must agree on the name.
  */

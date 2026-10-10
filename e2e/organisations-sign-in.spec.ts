@@ -25,8 +25,8 @@ test.describe("BP-919: signing in on the platform host, e-mail first", () => {
     await expect(page.getByText(ACME.projectName).first()).toBeVisible();
     await page.screenshot({ path: "e2e/.artifacts/bp919-landed.png" });
 
-    await page.goto(`${ORGANISATIONS_PLATFORM_ORIGIN}/?switch`);
-    await expect(page.getByRole("link", { name: "Continue to Acme" })).toHaveAttribute("href", `${originOf(ACME)}/projects`);
+    await page.goto(`${ORGANISATIONS_PLATFORM_ORIGIN}/`);
+    await page.waitForURL(`${originOf(ACME)}/projects`);
   });
 
   test("BP-1009: the remembered organisation outlives the browser session, and opening the platform host leads straight to it", async ({ page }) => {
@@ -51,7 +51,7 @@ test.describe("BP-919: signing in on the platform host, e-mail first", () => {
     await page.screenshot({ path: "e2e/.artifacts/bp1009-straight-in.png" });
   });
 
-  test("BP-1009: ?switch keeps the platform host's own page, and using another address forgets the organisation", async ({ page }) => {
+  test("BP-1009: ?switch opens the sign-in instead of the remembered organisation, and leaves the memory alone", async ({ page }) => {
     const email = freshAddress("switch");
     await giveAddress(GLOBEX, email);
     await provideAddressAndCode(page, email);
@@ -60,28 +60,25 @@ test.describe("BP-919: signing in on the platform host, e-mail first", () => {
     await page.waitForURL(`${originOf(GLOBEX)}/projects`);
 
     await page.goto(`${ORGANISATIONS_PLATFORM_ORIGIN}/?switch`);
-    await expect(page.getByRole("link", { name: "Continue to Globex" })).toBeVisible();
-    await page.screenshot({ path: "e2e/.artifacts/bp1009-switch.png" });
-    await page.getByRole("button", { name: "Use another e-mail address" }).click();
     await expect(page.getByLabel("E-mail address")).toBeVisible();
+    await page.screenshot({ path: "e2e/.artifacts/bp1009-switch.png" });
 
     await page.goto(`${ORGANISATIONS_PLATFORM_ORIGIN}/`);
-    await expect(page.getByLabel("E-mail address")).toBeVisible();
-    expect(page.url()).toBe(`${ORGANISATIONS_PLATFORM_ORIGIN}/`);
+    await page.waitForURL(`${originOf(GLOBEX)}/projects`);
   });
 
-  test("BP-1009: an organisation's own sign-in page leads back to the choice of organisation", async ({ page }) => {
+  test("BP-1009: an organisation's own sign-in page leads back to the choice of organisation, past the remembered one", async ({ page }) => {
+    const signIn = `http://login.${ORGANISATION_DOMAIN}:${ORGANISATIONS_PORT}`;
     const email = freshAddress("both-ways");
     await giveAddress(GLOBEX, email);
-    await provideAddressAndCode(page, email);
+    await provideAddressAndCode(page, email, signIn);
     await page.getByLabel("Password").fill(GLOBEX.password);
     await page.getByRole("button", { name: "Sign in" }).click();
     await page.waitForURL(`${originOf(GLOBEX)}/projects`);
+    expect((await page.context().cookies(signIn)).some((cookie) => cookie.name.endsWith("bp_last_organisation"))).toBe(true);
 
-    await page.context().clearCookies({ domain: new URL(originOf(ACME)).hostname });
     await page.goto(`${originOf(ACME)}/login`);
     const another = page.getByRole("link", { name: "Sign in to another organisation" });
-    const signIn = `http://login.${ORGANISATION_DOMAIN}:${ORGANISATIONS_PORT}`;
     await expect(another).toHaveAttribute("href", `${signIn}/?switch`);
     await page.screenshot({ path: "e2e/.artifacts/bp1009-login-link.png" });
     await another.click();
@@ -211,7 +208,6 @@ test.describe("BP-919: signing in on the platform host, e-mail first", () => {
     for (const path of ["start", "verify", "password"]) {
       expect((await request.post(`${ORGANISATIONS_API}/api/sign-in/${path}`, { headers: asOrganisation(ACME), data: {} })).status()).toBe(404);
     }
-    expect((await request.get(`${ORGANISATIONS_API}/api/sign-in/remembered`, { headers: asOrganisation(ACME) })).status()).toBe(404);
 
     const email = freshAddress("cross");
     await giveAddress(ACME, email);

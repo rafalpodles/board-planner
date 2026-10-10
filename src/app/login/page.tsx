@@ -247,7 +247,7 @@ export default function LoginPage() {
 
         {!isRegister && platformSignIn && (
           <p className="mt-4 text-center text-sm">
-            <a href={`${platformSignIn}/?switch`} className="text-text-muted underline hover:text-text">
+            <a href={`${platformSignIn}/?switch`} className="focus-ring inline-flex min-h-[44px] items-center text-text-muted underline hover:text-text">
               Sign in to another organisation
             </a>
           </p>

@@ -48,7 +48,7 @@ export async function GET(request: Request) {
     // administrator on an instance that may already have one
     if (isDatabaseUnreachable(e)) {
       const unavailable = databaseUnavailable();
-      return NextResponse.json({ ...(await unavailable.json()), passwordSignIn }, unavailable);
+      return NextResponse.json({ ...(await unavailable.json()), passwordSignIn, platformSignIn: platformSignInOrigin() }, unavailable);
     }
     throw e;
   }
