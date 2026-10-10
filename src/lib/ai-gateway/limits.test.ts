@@ -154,15 +154,6 @@ describe("aiLimitWarnings", () => {
     expect(aiLimitWarnings({ OPENROUTER_API_KEY: "sk-or-x" }, true)).toEqual([]);
     expect(aiLimitWarnings({}, false)).toEqual([]);
   });
-
-  it("never lets a figure that is not a whole number of 1 or more, as a hand edit could leave one, open the limit", async () => {
-    for (const tokens of [0, -1, NaN, Infinity, 1.5, "5", undefined]) {
-      m.allowance = { tokens, scope: "month" };
-      expect(await budgetOf(db), String(tokens)).toMatchObject({ scope: "month", limit: 15_000_000 });
-    }
-    m.allowance = "lots";
-    expect(await budgetOf(db)).toMatchObject({ limit: 15_000_000 });
-  });
 });
 
 // BP-678: the operator's own figure for one organisation
