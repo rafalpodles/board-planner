@@ -142,8 +142,10 @@ test("a Free organisation's admin chooses a period and is sent to Stripe, with w
   await expect(page.getByTestId("subscription-price-month")).toHaveText("$29 per month");
   await expect(page.getByTestId("subscription-price-year")).toHaveText("$290 per year");
   await expect(page.getByTestId("subscription-saving")).toHaveText("Saves $58 a year");
-  await expect(page.getByTestId("subscription-includes")).toHaveText("Pro for the whole organisation: 10 members included, then $3 per member per month.");
-  await expect(page.getByTestId("subscription-checkout")).toHaveText("Continue to payment · $29 per month");
+  await expect(page.getByTestId("subscription-price")).toHaveText(
+    "$29 per month (USD), plus VAT where it applies; Stripe shows the total including VAT before you pay, with 10 members included, then $3 per member per month. For your 13 members: $38 per month."
+  );
+  await expect(page.getByTestId("subscription-checkout")).toHaveText("Subscribe with an obligation to pay");
   await page.screenshot({ path: "e2e/.artifacts/bp980-upgrade.png", fullPage: true });
   await page.setViewportSize({ width: 375, height: 812 });
   await page.reload();
@@ -154,8 +156,9 @@ test("a Free organisation's admin chooses a period and is sent to Stripe, with w
   await page.setViewportSize({ width: 1280, height: 720 });
 
   await panel.getByLabel("Yearly").check();
-  await expect(page.getByTestId("subscription-includes")).toHaveText("Pro for the whole organisation: 10 members included, then $30 per member per year.");
-  await expect(page.getByTestId("subscription-checkout")).toHaveText("Continue to payment · $290 per year");
+  await expect(page.getByTestId("subscription-price")).toContainText("$290 per year (USD)");
+  await expect(page.getByTestId("subscription-price")).toContainText("then $30 per member per year. For your 13 members: $380 per year.");
+  await panel.getByRole("radio", { name: /A business/ }).check();
   await page.getByTestId("subscription-checkout").click();
 
   await expect(page).toHaveURL("https://stripe.test/pay/cs_test_1");
@@ -168,6 +171,9 @@ test("a Free organisation's admin chooses a period and is sent to Stripe, with w
     email: "boss@acme.example",
     successUrl: `${originOf(ACME)}/settings/organisation?checkout=success`,
     cancelUrl: `${originOf(ACME)}/settings/organisation?checkout=cancelled`,
+    buyer: "business",
+    immediateStart: false,
+    orderedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
   });
 });
 
@@ -182,7 +188,7 @@ test("a running subscription is shown with its period, and Manage subscription g
   await expect(page.getByTestId("subscription-billed")).toHaveText("3 × $3.00 per year");
   await expect(page.getByTestId("subscription-next-invoice")).toContainText("$54.00");
   const read = (await (await page.request.get(`${originOf(ACME)}/api/admin/billing`)).json()) as { subscription: Record<string, unknown> };
-  expect(Object.keys(read.subscription).sort()).toEqual(["cancelAtPeriodEnd", "currentPeriodEnd", "extraMembers", "interval", "launch", "status"]);
+  expect(Object.keys(read.subscription).sort()).toEqual(["buyer", "cancelAtPeriodEnd", "currentPeriodEnd", "extraMembers", "interval", "launch", "purchasedAt", "status", "withdrawnAt"]);
   await expect(page.getByTestId("subscription-checkout")).toHaveCount(0);
   await page.screenshot({ path: "e2e/.artifacts/bp676-subscribed.png", fullPage: true });
 
@@ -220,6 +226,7 @@ test("a payment service that fails says so and leaves the person where they were
   urlAnswer = { code: 500, body: {} };
   await open(page);
 
+  await page.getByRole("radio", { name: /A business/ }).check();
   await page.getByTestId("subscription-checkout").click();
 
   await expect(page.getByText("Could not reach the payment service. Try again in a moment.")).toBeVisible();
@@ -233,6 +240,7 @@ test("a payment service that answers with something that is not a web page sends
   urlAnswer = { code: 200, body: { url: "javascript:alert(1)" } };
   await open(page);
 
+  await page.getByRole("radio", { name: /A business/ }).check();
   await page.getByTestId("subscription-checkout").click();
 
   await expect(page.getByText("Could not reach the payment service. Try again in a moment.")).toBeVisible();
@@ -243,6 +251,7 @@ test("an organisation that already pays is told so, not sent to pay twice", asyn
   urlAnswer = { code: 409, body: { error: "This organisation already has a subscription", reason: "already_subscribed" } };
   await open(page);
 
+  await page.getByRole("radio", { name: /A business/ }).check();
   await page.getByTestId("subscription-checkout").click();
 
   await expect(page.getByText("This organisation already has a subscription")).toBeVisible();
@@ -430,4 +439,148 @@ test("the panel shows the members, what is billed above ten, and the next invoic
   await expect(page.getByTestId("subscription-members")).toHaveText("13, 10 included");
   await expect(page.getByTestId("subscription-billed")).toHaveText("3 × $3.00 per month");
   await expect(page.getByTestId("subscription-next-invoice")).toContainText("$54.00");
+});
+
+// BP-941: the order step before Stripe, the refusal behind it, and a consumer's withdrawal within 14 days
+const SHOTS = process.env.BP941_SHOTS;
+// The settings page scrolls inside #main-content, so a tall viewport is what shows the whole panel
+const shot = async (page: Page, name: string, target?: string) => {
+  if (!SHOTS) return;
+  if (!target) return void (await page.screenshot({ path: `${SHOTS}/${name}.png` }));
+  const size = page.viewportSize()!;
+  await page.setViewportSize({ width: size.width, height: 2000 });
+  await page.getByTestId(target).screenshot({ path: `${SHOTS}/${name}.png` });
+  await page.setViewportSize(size);
+};
+const checkouts = () => asked.filter((a) => a.path === "/api/billing/checkout");
+
+test("a consumer is told before ordering who sells and what it costs, and orders only after asking for Pro to start at once", async ({ page }) => {
+  await addHeadcount(12, 0);
+  await open(page);
+  const panel = page.getByTestId("subscription");
+  const order = page.getByTestId("subscription-checkout");
+
+  await expect(order).toHaveText("Subscribe with an obligation to pay");
+  await expect(order).toBeDisabled();
+  await expect(page.getByTestId("subscription-order-hint")).toHaveText("Choose who is buying to continue.");
+  await expect(page.getByTestId("subscription-seller")).toContainText("Example Seller, 1 Example Street, 00-001 Warsaw, Poland.");
+  await expect(page.getByRole("link", { name: "Legal notice" })).toHaveAttribute("href", "https://board-planner.com/legal/notice");
+  await expect(page.getByTestId("subscription-order-information")).toContainText("Renews automatically every month");
+  await expect(page.getByTestId("subscription-order-information")).toContainText("Cancel any time under Manage subscription");
+  await expect(page.getByTestId("subscription-withdrawal-right")).toContainText("withdraw within 14 days");
+  // LEGAL_TERMS_VERSION is not set on this server, so no Terms are offered for acceptance
+  await expect(page.getByTestId("subscription-terms")).toHaveCount(0);
+  await expect(panel.locator("s, del, strike")).toHaveCount(0);
+
+  await panel.getByRole("radio", { name: /A consumer/ }).check();
+  const consent = panel.getByRole("checkbox", { name: /I ask for Pro to start immediately/ });
+  await expect(consent).not.toBeChecked();
+  await expect(order).toBeDisabled();
+  await consent.check();
+  await expect(order).toBeEnabled();
+  await shot(page, "order-step-desktop", "subscription");
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.reload();
+  await panel.getByRole("radio", { name: /A consumer/ }).check();
+  await consent.check();
+  await expect(order).toBeEnabled();
+  expect(await page.locator("#main-content").evaluate((main) => main.scrollWidth <= main.clientWidth)).toBe(true);
+  await shot(page, "order-step-phone", "subscription");
+  await page.setViewportSize({ width: 1280, height: 720 });
+
+  await order.click();
+
+  await expect(page).toHaveURL("https://stripe.test/pay/cs_test_1");
+  expect(checkouts()).toHaveLength(1);
+  expect(checkouts()[0]).toMatchObject({ signed: true, body: { buyer: "consumer", immediateStart: true, interval: "month", members: 13 } });
+  const orderedAt = Date.parse(String(checkouts()[0].body.orderedAt));
+  expect(Math.abs(orderedAt - Date.now())).toBeLessThan(60_000);
+  expect(checkouts()[0].body).not.toHaveProperty("termsVersion");
+});
+
+test("a business orders with no request to start at once", async ({ page }) => {
+  await open(page);
+  const panel = page.getByTestId("subscription");
+
+  await panel.getByRole("radio", { name: /A consumer/ }).check();
+  await expect(panel.getByTestId("subscription-consent")).toBeVisible();
+  await panel.getByRole("radio", { name: /A business/ }).check();
+  await expect(panel.getByTestId("subscription-consent")).toHaveCount(0);
+  await page.getByTestId("subscription-checkout").click();
+
+  await expect(page).toHaveURL("https://stripe.test/pay/cs_test_1");
+  expect(checkouts()[0].body).toMatchObject({ buyer: "business", immediateStart: false });
+});
+
+test("the server refuses an order that does not say who buys, and a consumer's without the request to start at once, and the service is never asked", async ({ page }) => {
+  await open(page);
+  await expect(page.getByTestId("subscription")).toBeVisible();
+  const order = (body: Record<string, unknown>) =>
+    page.evaluate(async (body) => {
+      const response = await fetch("/api/admin/billing/checkout", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      return [response.status, (await response.json()).error];
+    }, body);
+
+  expect(await order({ interval: "month" })).toEqual([400, "Say whether a business or a consumer is buying"]);
+  expect(await order({ interval: "month", buyer: "consumer" })).toEqual([400, "A consumer must ask for Pro to start immediately before paying"]);
+  expect(await order({ interval: "month", buyer: "consumer", immediateStart: "yes" })).toEqual([400, "A consumer must ask for Pro to start immediately before paying"]);
+  expect(checkouts()).toHaveLength(0);
+
+  // The control: the same request with the request ticked reaches the service
+  expect((await order({ interval: "month", buyer: "consumer", immediateStart: true }))[0]).toBe(200);
+  expect(checkouts()).toHaveLength(1);
+});
+
+test("a consumer within the 14 days withdraws after a confirmation step, and the licence service is asked to", async ({ page }) => {
+  const purchasedAt = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+  statusAnswer = { code: 200, body: running({ interval: "month", buyer: "consumer", purchasedAt, withdrawnAt: null }) };
+  urlAnswer = { code: 200, body: { status: "withdrawn", at: new Date().toISOString(), refunded: { amount: 3812, currency: "usd" } } };
+  await open(page);
+
+  const control = page.getByTestId("subscription-withdrawal");
+  await expect(control).toContainText("You bought Pro as a consumer");
+  await expect(page.getByTestId("subscription-manage")).toBeVisible();
+  await control.getByRole("button", { name: "Withdraw from the contract" }).click();
+  const dialog = page.getByRole("dialog", { name: "Withdraw from the contract?" });
+  await expect(dialog).toContainText("Pro ends at the end of today");
+  await shot(page, "withdrawal-confirm-desktop");
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.reload();
+  await control.getByRole("button", { name: "Withdraw from the contract" }).click();
+  await expect(dialog.getByRole("button", { name: "Withdraw", exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  await shot(page, "withdrawal-confirm-phone");
+  await page.setViewportSize({ width: 1280, height: 720 });
+  expect(asked.some((a) => a.path === "/api/billing/withdraw")).toBe(false);
+
+  statusAnswer = { code: 200, body: { ...running({ status: "canceled", buyer: "consumer", purchasedAt, withdrawnAt: new Date().toISOString() }), withdrawal: { at: new Date().toISOString(), refunded: { amount: 3812, currency: "usd" } } } };
+  const withdrawn = page.waitForResponse((response) => response.url().endsWith("/api/admin/billing/withdraw"));
+  await dialog.getByRole("button", { name: "Withdraw", exact: true }).click();
+  expect((await withdrawn).status()).toBe(200);
+
+  expect(asked.filter((a) => a.path === "/api/billing/withdraw")).toEqual([{ path: "/api/billing/withdraw", signed: true, body: { organisation: ACME.organisation.toHexString() } }]);
+  await expect(page.getByTestId("subscription-withdrawn")).toContainText("$38.12", { timeout: 5_000 });
+  await expect(page.getByTestId("subscription-withdrawal")).toHaveCount(0);
+});
+
+test("the withdrawal is offered to the last moment of the period, counted in Poland with a day's margin, and not after it, and never to a business", async ({ page }) => {
+  const purchasedAt = "2026-10-03T22:40:00.000Z";
+  statusAnswer = { code: 200, body: running({ interval: "month", buyer: "consumer", purchasedAt, withdrawnAt: null }) };
+
+  // 22:40 UTC on the 3rd is the 4th in Warsaw: 4 + 14 + 1 ends at 21:59:59.999 UTC on the 19th
+  await page.clock.setFixedTime(new Date("2026-10-19T21:59:00.000Z"));
+  await open(page);
+  await expect(page.getByTestId("subscription-withdrawal")).toBeVisible();
+
+  await page.clock.setFixedTime(new Date("2026-10-19T22:00:00.001Z"));
+  await open(page);
+  await expect(page.getByTestId("subscription-details")).toBeVisible();
+  await expect(page.getByTestId("subscription-manage")).toBeVisible();
+  await expect(page.getByTestId("subscription-withdrawal")).toHaveCount(0);
+
+  statusAnswer = { code: 200, body: running({ interval: "month", buyer: "business", purchasedAt, withdrawnAt: null }) };
+  await page.clock.setFixedTime(new Date("2026-10-05T12:00:00.000Z"));
+  await open(page);
+  await expect(page.getByTestId("subscription-details")).toBeVisible();
+  await expect(page.getByTestId("subscription-withdrawal")).toHaveCount(0);
 });

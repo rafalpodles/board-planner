@@ -451,6 +451,8 @@ export default defineConfig({
               LICENCE_SERVICE_URL: `http://127.0.0.1:${LICENCE_STUB_PORT}`,
               LICENCE_PULL_KEY: JSON.stringify(E2E_LICENCE_PULL_KEY),
               LICENCE_PULL_TICK_MS: "0",
+              LEGAL_SELLER_NAME: "Example Seller",
+              LEGAL_SELLER_ADDRESS: "1 Example Street, 00-001 Warsaw, Poland",
               // Run on demand by /api/e2e/member-sync: a tick in the background would add asks to every spec that counts them
               MEMBER_SYNC_TICK_MS: "0",
               // The operator's list, so the seeded stub model runs on the platform's key and any other is refused (BP-1001)
