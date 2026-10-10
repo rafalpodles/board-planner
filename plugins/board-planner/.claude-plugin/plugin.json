@@ -1,0 +1,11 @@
+{
+  "name": "board-planner",
+  "description": "Teaches an agent to work tasks from a Board Planner board over its MCP server: pick, claim, report, escalate and close.",
+  "author": {
+    "name": "Board Planner",
+    "url": "https://board-planner.com"
+  },
+  "homepage": "https://board-planner.com/docs/ai/agent-skill/",
+  "repository": "https://github.com/rafalpodles/board-planner",
+  "license": "AGPL-3.0-only"
+}

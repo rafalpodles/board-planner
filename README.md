@@ -261,6 +261,15 @@ Forty-six tools, in the groups an agent works in — the full list and what each
 Clients that want a connector instead of a pasted token get full **OAuth 2.1 with PKCE** and dynamic
 client registration at the same URL — no client secret.
 
+The server tells every client how to work the board when it connects. For the whole workflow — pick,
+claim, report, escalate, close — install the agent skill in Claude Code:
+
+```
+/plugin install board-planner --marketplace rafalpodles/board-planner
+```
+
+See [Agent skill](https://board-planner.com/docs/ai/agent-skill/).
+
 ## Configuration
 
 Everything is optional except the database. Put overrides in a `.env` file next to

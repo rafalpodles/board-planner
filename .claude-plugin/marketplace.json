@@ -1,0 +1,18 @@
+{
+  "name": "board-planner",
+  "owner": {
+    "name": "Board Planner",
+    "url": "https://board-planner.com"
+  },
+  "metadata": {
+    "description": "Agent skills for working a Board Planner board over MCP"
+  },
+  "plugins": [
+    {
+      "name": "board-planner",
+      "source": "./plugins/board-planner",
+      "description": "Teaches an agent to work tasks from a Board Planner board over its MCP server: pick, claim, report, escalate and close.",
+      "category": "productivity"
+    }
+  ]
+}

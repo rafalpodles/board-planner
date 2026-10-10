@@ -2,6 +2,7 @@ import { test, expect, type APIRequestContext, type Locator, type Page } from "@
 import mongoose from "mongoose";
 import { MONGO_PROXY_CONTROL_URL } from "../playwright.config";
 import { ADMIN_AUTH, SAME_ORIGIN } from "./api";
+import { SERVER_INSTRUCTIONS } from "../src/lib/mcp/instructions";
 import { McpSession, authorize, type ToolCall } from "./mcp";
 import {
   ADMIN_USERNAME,
@@ -111,6 +112,13 @@ test.beforeEach(async () => {
 // restore, and every test after it would read 503s. afterEach runs on a timeout too.
 test.afterEach(async ({ request }) => {
   await request.post(`${MONGO_PROXY_CONTROL_URL}/restore`);
+});
+
+test("initialize hands the client the board's working rules", async ({ request }) => {
+  const session = new McpSession(request, API_TOKEN);
+  const answer = await session.open();
+
+  expect(answer.result?.instructions).toBe(SERVER_INSTRUCTIONS);
 });
 
 test("create_task lands on the board with everything it named", async ({ page, request }) => {
