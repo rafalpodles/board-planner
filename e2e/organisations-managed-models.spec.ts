@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
+import { test, expect, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 import mongoose from "mongoose";
 import { PM_STUB_URL, RUN_ORGANISATIONS_SERVER } from "../playwright.config";
 import { signPlatformRequest } from "../src/lib/platform-request";
@@ -38,6 +38,14 @@ async function withDb<T>(run: (db: mongoose.mongo.Db) => Promise<T>): Promise<T>
   } finally {
     await mongoose.disconnect();
   }
+}
+
+// A fill before the page has hydrated is dropped, and the read-back is what tells
+async function fillStably(field: Locator, value: string) {
+  await expect(async () => {
+    await field.fill(value, { timeout: 3_000 });
+    await expect(field).toHaveValue(value, { timeout: 1_000 });
+  }).toPass({ timeout: 20_000 });
 }
 
 const stub = async (path: string) => (await fetch(`${PM_STUB_URL}${path}`)).json();
@@ -106,7 +114,7 @@ test("on the platform's key a model off the list is refused with the models that
 
   await test.step("control: choosing a model on the list there runs AI Assist on the platform's key", async () => {
     await page.goto(`${originOf(GLOBEX)}/settings/agents`);
-    await page.getByLabel("Model", { exact: true }).fill("gpt-4o-mini");
+    await fillStably(page.getByLabel("Model", { exact: true }), "gpt-4o-mini");
     const saved = page.waitForResponse((r) => r.request().method() === "PUT" && r.url().endsWith("/api/settings"));
     await page.getByRole("button", { name: "Save model" }).click();
     expect((await saved).status()).toBe(200);
@@ -148,7 +156,7 @@ test("AI Assist and a PM agent that names no model of its own run on the one mod
   await page.goto(`${originOf(GLOBEX)}/settings/agents`);
   await expect(page.getByLabel("Model", { exact: true })).toHaveCount(1);
   await expect(page.getByLabel("Default model")).toHaveCount(0);
-  await page.getByLabel("Model", { exact: true }).fill("gpt-4o-mini");
+  await fillStably(page.getByLabel("Model", { exact: true }), "gpt-4o-mini");
   const saved = page.waitForResponse((r) => r.request().method() === "PUT" && r.url().endsWith("/api/settings"));
   await page.getByRole("button", { name: "Save model" }).click();
   expect((await saved).status()).toBe(200);
