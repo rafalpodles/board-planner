@@ -119,6 +119,41 @@ test.describe("BP-919: signing in on the platform host, e-mail first", () => {
     expect(await remembered()).toEqual([]);
   });
 
+  test("BP-1009: the box is never carried over to another organisation or person, and the memory can be dropped without signing in", async ({ page }) => {
+    const email = freshAddress("carry");
+    await giveAddress(ACME, email);
+    await giveAddress(GLOBEX, email);
+    await provideAddressAndCode(page, email);
+    await page.getByTestId("organisation-choices").getByRole("button", { name: /Acme/ }).click();
+    const box = page.getByRole("checkbox", { name: /Open this organisation straight away/ });
+    await expect(box).not.toBeChecked();
+    await box.check();
+    await page.getByRole("button", { name: "Choose another organisation" }).click();
+    await page.getByTestId("organisation-choices").getByRole("button", { name: /Globex/ }).click();
+    await expect(box).not.toBeChecked();
+    await box.check();
+    await page.getByRole("button", { name: "Use another e-mail address" }).click();
+    await page.getByLabel("E-mail address").fill(email);
+    await page.getByRole("button", { name: "Continue" }).click();
+    await page.getByLabel("Code").fill(await codeSentTo(email, 1));
+    await page.getByRole("button", { name: "Continue" }).click();
+    await page.getByTestId("organisation-choices").getByRole("button", { name: /Globex/ }).click();
+    await expect(box).not.toBeChecked();
+
+    await page.context().addCookies([
+      { name: "__Host-bp_last_organisation", value: String(GLOBEX.organisation), domain: new URL(ORGANISATIONS_PLATFORM_ORIGIN).hostname, path: "/", httpOnly: true, secure: true, sameSite: "Lax" },
+    ]);
+    await page.goto(`${ORGANISATIONS_PLATFORM_ORIGIN}/`);
+    await page.waitForURL(`${originOf(GLOBEX)}/projects`);
+    await page.goto(`${ORGANISATIONS_PLATFORM_ORIGIN}/?switch`);
+    await page.screenshot({ path: "e2e/.artifacts/bp1009-forget.png" });
+    await page.getByRole("button", { name: "Stop opening my last organisation automatically" }).click();
+    await expect(page.getByTestId("remembered-forgotten")).toBeVisible();
+    await page.goto(`${ORGANISATIONS_PLATFORM_ORIGIN}/`);
+    await expect(page.getByLabel("E-mail address")).toBeVisible();
+    expect(page.url()).toBe(`${ORGANISATIONS_PLATFORM_ORIGIN}/`);
+  });
+
   test("BP-1009: a remembered organisation that is suspended or gone does not strand the platform host", async ({ page }) => {
     await page.context().addCookies([
       { name: "__Host-bp_last_organisation", value: "0123456789abcdef01234567", domain: new URL(ORGANISATIONS_PLATFORM_ORIGIN).hostname, path: "/", httpOnly: true, secure: true, sameSite: "Lax" },

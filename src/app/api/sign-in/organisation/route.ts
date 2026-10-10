@@ -31,7 +31,7 @@ export const POST = signInRoute(async (request) => {
   const email = await provenEmail(request);
   if (!email) return startAgain();
 
-  const read = await readJsonBody<SignUpInput>(request);
+  const read = await readJsonBody<SignUpInput & { remember?: unknown }>(request);
   if (!read.ok) return read.response;
   const checked = checkSignUp(email, read.value);
   if (!checked.ok) return refused(checked.error);
@@ -65,7 +65,7 @@ export const POST = signInRoute(async (request) => {
     handedOff = true;
 
     const response = NextResponse.json({ location: `${organisation.origin}/api/auth/handoff?code=${encodeURIComponent(code)}` }, { status: 201 });
-    response.headers.append("Set-Cookie", rememberChoiceCookie((read.value as { remember?: unknown }).remember, organisation.id));
+    response.headers.append("Set-Cookie", rememberChoiceCookie(read.value.remember, organisation.id));
     response.headers.append("Set-Cookie", clearedSignInCookie());
     return response;
   } finally {

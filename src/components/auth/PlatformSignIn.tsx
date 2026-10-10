@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, FormEvent } from "react";
+import { useEffect, useState, FormEvent } from "react";
 import Image from "next/image";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -43,13 +43,22 @@ const hostOf = (origin: string) => new URL(origin).host;
 
 function RememberCheckbox({ checked, onChange }: { checked: boolean; onChange: (checked: boolean) => void }) {
   return (
-    <label className="flex items-start gap-2 text-sm" data-testid="remember-organisation">
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="mt-1 h-4 w-4 shrink-0" />
-      <span>
-        Open this organisation straight away next time
-        <span className="block text-xs text-text-muted">Keeps a cookie on this device for 180 days. Leave it unticked and nothing is kept.</span>
-      </span>
-    </label>
+    <div className="flex items-start gap-2 text-sm" data-testid="remember-organisation">
+      <input
+        id="remember-organisation"
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        aria-describedby="remember-organisation-note"
+        className="mt-1 h-4 w-4 shrink-0"
+      />
+      <div>
+        <label htmlFor="remember-organisation">Open this organisation straight away next time</label>
+        <p id="remember-organisation-note" className="text-xs text-text-muted">
+          Keeps a cookie on this device for 180 days. Leave it unticked and nothing is kept.
+        </p>
+      </div>
+    </div>
   );
 }
 
@@ -68,7 +77,23 @@ export function PlatformSignIn() {
   const [username, setUsername] = useState("");
   const [acceptTerms, setAcceptTerms] = useState(false);
   const [remember, setRemember] = useState(false);
+  const [forgotten, setForgotten] = useState(false);
+  const [switching, setSwitching] = useState(false);
   const terms = useLegalTerms();
+
+  useEffect(() => {
+    setRemember(false);
+  }, [step]);
+
+  useEffect(() => {
+    setSwitching(new URLSearchParams(window.location.search).has("switch"));
+  }, []);
+
+  const forget = () =>
+    void run(async () => {
+      await send("/api/sign-in/remembered", "DELETE");
+      setForgotten(true);
+    });
 
   async function run(work: () => Promise<void>) {
     setError("");
@@ -196,6 +221,17 @@ export function PlatformSignIn() {
               {busy ? "Sending…" : "Continue"}
             </Button>
             <p className="text-xs text-text-muted">We will e-mail you a code. You never need your organisation&apos;s address to sign in.</p>
+            {switching && (
+              <div className="border-t border-border pt-3 text-sm">
+                {forgotten ? (
+                  <p role="status" data-testid="remembered-forgotten">Nothing is remembered on this device any more.</p>
+                ) : (
+                  <button type="button" onClick={forget} disabled={busy} className="focus-ring min-h-[44px] w-full text-text-muted underline">
+                    Stop opening my last organisation automatically
+                  </button>
+                )}
+              </div>
+            )}
           </form>
         )}
 
