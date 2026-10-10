@@ -351,7 +351,8 @@ test("on screen: Settings → AI key says what has been used and when it renews,
   // Three turns this month and two before it, in the organisation's own project; a neighbour's turn that must not count
   const turn = (who: OrganisationFixture, createdAt: Date) => ({ organisation: who.organisation, project: who.projectId, role: "user", content: "hello", actions: [], attachments: [], trigger: { type: "chat", taskKey: "" }, createdAt });
   // The first of the month counts and the last millisecond before it does not, on any day of the month; an answer is not a turn
-  const firstOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const today = new Date();
+  const firstOfMonth = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
   const beforeIt = new Date(firstOfMonth.getTime() - 1);
   await withDb((db) =>
     db.collection("pmmessages").insertMany([
@@ -359,7 +360,7 @@ test("on screen: Settings → AI key says what has been used and when it renews,
       turn(ACME, firstOfMonth),
       turn(ACME, new Date()),
       turn(ACME, beforeIt),
-      turn(ACME, new Date(now.getTime() - 40 * 24 * 60 * 60 * 1000)),
+      turn(ACME, new Date(today.getTime() - 40 * 24 * 60 * 60 * 1000)),
       { ...turn(ACME, new Date()), role: "assistant" },
       turn(GLOBEX, new Date()),
     ])
