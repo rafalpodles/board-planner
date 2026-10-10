@@ -1176,7 +1176,7 @@ async function seedBoard(withSessions: boolean) {
       // On, so a turn can actually run against the stubbed model
       enabled: true,
       lockedByInstance: false,
-      model: "e2e/stub-model",
+      model: "openai/e2e-stub-model",
       contextNotes: "",
       autonomy: {
         dailyReview: false,
@@ -1499,7 +1499,7 @@ export async function seedSearchCorpus() {
     pm: {
       enabled: false,
       lockedByInstance: false,
-      model: "e2e/stub-model",
+      model: "openai/e2e-stub-model",
       contextNotes: "",
       autonomy: {
         dailyReview: false,

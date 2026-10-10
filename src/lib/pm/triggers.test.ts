@@ -47,7 +47,8 @@ vi.mock("./turn-lock", () => ({
   acquireTurnLock: () => new AbortController(),
   releaseTurnLock: vi.fn(),
 }));
-vi.mock("./availability", () => ({ isPmRunnable: () => true, resolvePmModel: async (_db: unknown, model?: string) => model || "openai/gpt-6-luna" }));
+const resolvePmModel = vi.hoisted(() => vi.fn(async (_db: unknown, model?: string) => model || "openai/gpt-6-luna"));
+vi.mock("./availability", () => ({ isPmRunnable: () => true, resolvePmModel }));
 const resolveModelKey = vi.hoisted(() => vi.fn(async () => ({ ok: true, key: "k", source: "own" }) as unknown));
 vi.mock("@/lib/model-keys", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/model-keys")>()),
@@ -117,14 +118,14 @@ describe("runPmTrigger", () => {
   // BP-1001: refused for good like a missing key, not retried, since every attempt would be refused alike
   it("settles the trigger as failed, and runs nothing, when the platform's key does not run the project's model", async () => {
     resolveModelKey.mockResolvedValueOnce({ ok: true, key: "k", source: "managed" });
-    process.env.MANAGED_AI_MODELS = "openai/gpt-4o-mini";
+    resolvePmModel.mockResolvedValueOnce("moonshotai/kimi-k2.6");
 
-    const outcome = await runPmTrigger(db, trigger).finally(() => delete process.env.MANAGED_AI_MODELS);
+    const outcome = await runPmTrigger(db, trigger);
 
     expect(outcome).toBe("ran");
     expect(runPmTurn).not.toHaveBeenCalled();
     expect(findOneAndUpdate).toHaveBeenCalledWith({ _id: "t1", organisation: DEFAULT_ORGANISATION_ID }, {
-      $set: { state: "failed", lastError: expect.stringMatching(/^The model openai\/gpt-6-luna is not available on Board Planner's AI key/), active: false },
+      $set: { state: "failed", lastError: expect.stringMatching(/^The model moonshotai\/kimi-k2\.6 is not available on Board Planner's AI key/), active: false },
     });
   });
 
