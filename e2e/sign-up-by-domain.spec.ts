@@ -57,7 +57,7 @@ test("a late answer to the page's own read does not wipe the domains somebody ha
   const gate = new Promise<void>((resolve) => (release = resolve));
   let reads = 0;
   await page.route("**/api/admin/sign-up", async (route) => {
-    if (route.request().method() !== "GET" || ++reads !== 2) return route.continue();
+    if (route.request().method() !== "GET" || ++reads !== 1) return route.continue();
     const answered = await route.fetch();
     await gate;
     return route.fulfill({ response: answered });
@@ -67,7 +67,7 @@ test("a late answer to the page's own read does not wipe the domains somebody ha
   const domains = page.getByLabel("Domains");
   await domains.fill(DOMAIN);
   await expect(page.getByRole("button", { name: "Save domains" })).toBeEnabled();
-  expect(reads, "the page reads twice in development, and the second read is the one held").toBe(2);
+  expect(reads, "the page reads twice in development, and the first read is the one held").toBe(2);
 
   const late = page.waitForResponse((r) => r.url().endsWith("/api/admin/sign-up") && r.request().method() === "GET" && r.status() === 200);
   release();

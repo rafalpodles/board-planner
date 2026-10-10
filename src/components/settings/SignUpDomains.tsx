@@ -26,14 +26,21 @@ export function SignUpDomains() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    let stale = false;
     api
       .get("/api/admin/sign-up")
       .then((data: SignUp) => {
+        if (stale) return;
         if (!Array.isArray(data?.domains)) throw new Error("unexpected answer");
         setSaved(data);
         setText(asText(data.domains));
       })
-      .catch(() => setError("Could not load the sign-up domains."));
+      .catch(() => {
+        if (!stale) setError("Could not load the sign-up domains.");
+      });
+    return () => {
+      stale = true;
+    };
   }, [api]);
 
   async function save(e: FormEvent) {
