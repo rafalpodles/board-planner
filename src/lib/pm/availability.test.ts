@@ -8,7 +8,7 @@ const { resolvePmModel } = await import("./availability");
 
 const db = {} as ScopedDb;
 
-beforeEach(() => getSettings.mockReset().mockResolvedValue({ aiModel: "openai/gpt-6-luna" }));
+beforeEach(() => getSettings.mockReset().mockResolvedValue({ aiModel: "openai/the-one-model" }));
 
 // BP-1006: AI Assist and the PM agent run on one model
 describe("the model a PM turn runs on", () => {
@@ -18,8 +18,8 @@ describe("the model a PM turn runs on", () => {
   });
 
   it("is the instance's one model when the project names none", async () => {
-    expect(await resolvePmModel(db)).toBe("openai/gpt-6-luna");
-    expect(await resolvePmModel(db, "")).toBe("openai/gpt-6-luna");
+    expect(await resolvePmModel(db)).toBe("openai/the-one-model");
+    expect(await resolvePmModel(db, "")).toBe("openai/the-one-model");
   });
 
   it("qualifies a bare name the way AI Assist does, so the same setting means the same model to both", async () => {
@@ -31,7 +31,7 @@ describe("the model a PM turn runs on", () => {
   it("ignores a PM_MODEL left in the environment", async () => {
     vi.stubEnv("PM_MODEL", "env/leftover");
     try {
-      expect(await resolvePmModel(db)).toBe("openai/gpt-6-luna");
+      expect(await resolvePmModel(db)).toBe("openai/the-one-model");
     } finally {
       vi.unstubAllEnvs();
     }
