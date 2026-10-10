@@ -4,10 +4,36 @@ import { connectDB } from "./db";
 import { Organisation, IOrganisation } from "@/models/organisation";
 import { currentLicence, entitlementsFromLicence, storedLicence, type LicenceCheck } from "./licence";
 import { DEFAULT_ORGANISATION_ID } from "./organisation-field";
-import { organisationDomain } from "./organisation-host";
+import { RESERVED_SLUGS, organisationDomain } from "./organisation-host";
 import { duplicateKeyField } from "./mongo-errors";
+import { latinFold } from "./identifiers";
 
 export { ORGANISATION_NAME_MAX, checkOrganisationName } from "./organisation-name";
+
+export const NAME_UNAVAILABLE = "That name is not available. Try another.";
+
+const asAddress = (name: string) =>
+  latinFold(name)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+export const nameIsReserved = (name: string): boolean => RESERVED_SLUGS.includes(asAddress(name));
+
+export async function nameIsTaken(name: string, except?: Types.ObjectId): Promise<boolean> {
+  await connectDB();
+  const count = await Organisation.countDocuments({ name, deletedAt: null, ...(except ? { _id: { $ne: except } } : {}) }).collation({
+    locale: "en",
+    strength: 1,
+  });
+  return count > 0;
+}
+
+// Only where there are other organisations to clash with, or a reserved address to pass for
+export async function nameUnavailable(name: string, except: Types.ObjectId): Promise<boolean> {
+  if (organisationDomain() === null) return false;
+  return nameIsReserved(name) || (await nameIsTaken(name, except));
+}
 
 const FREE = { plan: "free", features: [], source: "none" } as const;
 

@@ -5,6 +5,7 @@ import { passwordSignInEnabled, passwordSignInOff } from "@/lib/password-sign-in
 import { claimProof, endSignIn, issueHandoff, releaseProof, scopedToOrganisation, servedOrganisationById } from "@/lib/platform-sign-in";
 import { clearedSignInCookie, provenEmail, rememberCookie, signInBinder, signInRoute, startAgain } from "@/lib/platform-sign-in-route";
 import { pullNewOrganisationLicence } from "@/lib/licence-pull";
+import { NAME_UNAVAILABLE, nameIsTaken } from "@/lib/organisation";
 import { SLUG_UNAVAILABLE, checkSignUp, createOrganisation, slugTaken, type SignUpInput } from "@/lib/organisation-sign-up";
 import { mailboxOf } from "@/lib/mailbox";
 import { PUBLIC_MAIL_DOMAINS } from "@/lib/public-mail-domains";
@@ -36,6 +37,7 @@ export const POST = signInRoute(async (request) => {
   const checked = checkSignUp(email, read.value);
   if (!checked.ok) return refused(checked.error);
   if (await slugTaken(checked.value.slug)) return refused(SLUG_UNAVAILABLE);
+  if (await nameIsTaken(checked.value.name)) return refused(NAME_UNAVAILABLE);
 
   if (!(await claimProof(binder))) return refused("This sign-in is already creating an organisation.", 409);
   let handedOff = false;

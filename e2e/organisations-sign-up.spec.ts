@@ -67,6 +67,18 @@ test.describe("BP-673: creating an organisation from the platform host", () => {
     expect(await withDb((db) => db.collection("organisations").countDocuments({ name: "Copycat" }))).toBe(0);
   });
 
+  test("BP-1010: a name another organisation has, in any case, or one that reads as a reserved address, is unavailable and creates nothing", async ({ page }) => {
+    await provideAddressAndCode(page, freshAddress("namesake"));
+
+    for (const name of ["Acme", "ACME", "login"]) {
+      await fillTheForm(page, name, { slug: "namesake-ltd" });
+      await page.getByRole("button", { name: "Create the organisation" }).click();
+      await expect(page.getByTestId("sign-in-error")).toHaveText("That name is not available. Try another.");
+      await page.getByRole("button", { name: "Back" }).click();
+    }
+    expect(await organisationWithSlug("namesake-ltd")).toBeNull();
+  });
+
   test("someone with an organisation already can create another, and both stay theirs", async ({ page }) => {
     const email = freshAddress("both");
     await withDb((db) => db.collection("users").updateOne({ _id: ACME.adminId }, { $set: { email, emailVerifiedAt: new Date() } }));
