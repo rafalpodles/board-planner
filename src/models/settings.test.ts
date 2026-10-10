@@ -20,7 +20,7 @@ describe("an organisation's settings row (BP-667)", () => {
   it("is created by a first read with the default model", async () => {
     await getSettings(db);
 
-    expect(findOneAndUpdate).toHaveBeenCalledWith({}, { $setOnInsert: { aiModel: "gpt-4o-mini" } }, { upsert: true, returnDocument: "after" });
+    expect(findOneAndUpdate).toHaveBeenCalledWith({}, { $setOnInsert: { aiModel: "openai/gpt-6-luna" } }, { upsert: true, returnDocument: "after" });
   });
 
   it("retries once when a concurrent first write created the organisation's row", async () => {

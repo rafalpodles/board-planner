@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
+import { test, expect, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 import mongoose from "mongoose";
 import { PM_STUB_URL, RUN_ORGANISATIONS_SERVER } from "../playwright.config";
 import { signPlatformRequest } from "../src/lib/platform-request";
@@ -40,6 +40,14 @@ async function withDb<T>(run: (db: mongoose.mongo.Db) => Promise<T>): Promise<T>
   }
 }
 
+// A fill before the page has hydrated is dropped, and the read-back is what tells
+async function fillStably(field: Locator, value: string) {
+  await expect(async () => {
+    await field.fill(value, { timeout: 3_000 });
+    await expect(field).toHaveValue(value, { timeout: 1_000 });
+  }).toPass({ timeout: 20_000 });
+}
+
 const stub = async (path: string) => (await fetch(`${PM_STUB_URL}${path}`)).json();
 
 async function generateOnScreen(page: Page) {
@@ -65,7 +73,7 @@ test.beforeEach(async ({ request }) => {
   await makePro(request, GLOBEX);
   await withDb(async (db) => {
     await db.collection("settings").deleteMany({ organisation: GLOBEX.organisation });
-    await db.collection("settings").insertOne({ organisation: GLOBEX.organisation, aiModel: ASSIST_MODEL, pmDefaultModel: "", signUpDomains: [] });
+    await db.collection("settings").insertOne({ organisation: GLOBEX.organisation, aiModel: ASSIST_MODEL, signUpDomains: [] });
     await db.collection("projects").updateOne({ _id: GLOBEX.projectId }, { $set: { "pm.model": PM_MODEL } });
   });
   await request.post(`${PM_STUB_URL}/reset`);
@@ -106,7 +114,7 @@ test("on the platform's key a model off the list is refused with the models that
 
   await test.step("control: choosing a model on the list there runs AI Assist on the platform's key", async () => {
     await page.goto(`${originOf(GLOBEX)}/settings/agents`);
-    await page.getByLabel("Model", { exact: true }).fill("gpt-4o-mini");
+    await fillStably(page.getByLabel("Model", { exact: true }), "gpt-4o-mini");
     const saved = page.waitForResponse((r) => r.request().method() === "PUT" && r.url().endsWith("/api/settings"));
     await page.getByRole("button", { name: "Save model" }).click();
     expect((await saved).status()).toBe(200);
@@ -138,4 +146,27 @@ test("the same models run on the organisation's own key", async ({ page }) => {
   await expect(page.getByText("Done.", { exact: true })).toHaveCount(1);
   expect((await stub("/last-authorization")).authorization).toBe(`Bearer ${OWN_KEY}`);
   expect((await stub("/requests")).map((sent: { model?: string }) => sent.model)).toEqual([PM_MODEL]);
+});
+
+// BP-1006. One field, in Settings → Agents, decides the model of both; a project that names none follows it.
+test("AI Assist and a PM agent that names no model of its own run on the one model saved in Settings → Agents", async ({ page }) => {
+  await withDb((db) => db.collection("projects").updateOne({ _id: GLOBEX.projectId }, { $unset: { "pm.model": "" } }));
+  await signInOn(page.context(), GLOBEX);
+
+  await page.goto(`${originOf(GLOBEX)}/settings/agents`);
+  await expect(page.getByLabel("Model", { exact: true })).toHaveCount(1);
+  await expect(page.getByLabel("Default model")).toHaveCount(0);
+  await fillStably(page.getByLabel("Model", { exact: true }), "gpt-4o-mini");
+  const saved = page.waitForResponse((r) => r.request().method() === "PUT" && r.url().endsWith("/api/settings"));
+  await page.getByRole("button", { name: "Save model" }).click();
+  expect((await saved).status()).toBe(200);
+  await expect(page.getByLabel(`PM model for ${SHARED_KEY}`, { exact: false })).toHaveAttribute("placeholder", "openai/gpt-4o-mini");
+
+  expect((await generateOnScreen(page).then((r) => r.response)).status()).toBe(200);
+  expect((await stub("/last-assist-request")).model).toBe("openai/gpt-4o-mini");
+  await page.keyboard.press("Escape");
+
+  expect((await chatOnScreen(page)).status()).toBe(200);
+  await expect(page.getByText("Done.", { exact: true })).toHaveCount(1);
+  expect((await stub("/requests")).map((sent: { model?: string }) => sent.model)).toEqual(["openai/gpt-4o-mini"]);
 });

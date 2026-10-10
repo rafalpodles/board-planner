@@ -7,10 +7,9 @@ const pmAvailability = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ getAuthUser, RateLimitError: class RateLimitError extends Error {} }));
 vi.mock("@/lib/grants", () => ({ check: vi.fn(), accessibleProjectIds: vi.fn() }));
-vi.mock("@/models/settings", () => ({ getSettings: async () => ({ pmDefaultModel: "" }) }));
+vi.mock("@/models/settings", () => ({ getSettings: async () => ({ aiModel: "e2e/model" }) }));
 vi.mock("@/models/project", () => ({ Project: { find: projectFind } }));
 vi.mock("@/lib/pm/config", () => ({ pmAvailability }));
-vi.mock("@/lib/pm/openrouter", () => ({ DEFAULT_PM_MODEL: () => "e2e/model" }));
 
 const { GET } = await import("./route");
 
@@ -47,6 +46,12 @@ describe("GET /api/admin/agents", () => {
     pmAvailability.mockResolvedValue(null);
 
     expect(await (await ask()).json()).toMatchObject({ pmAvailable: false, pmNeedsPlan: false, pmKeyUnreadable: false, pmLocked: false });
+  });
+
+  it("names the one instance model, which AI Assist uses as well", async () => {
+    pmAvailability.mockResolvedValue({ available: true });
+
+    expect((await (await ask()).json()).defaults).toEqual({ aiModel: "e2e/model" });
   });
 
   it("answers no member", async () => {

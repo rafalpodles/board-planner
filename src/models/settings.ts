@@ -2,11 +2,11 @@ import mongoose, { Schema, Model, type UpdateQuery } from "mongoose";
 import { duplicateKeyField } from "@/lib/mongo-errors";
 import type { ScopedDb } from "@/lib/db-scope";
 import { withOrganisation } from "@/lib/organisation-field";
+import { DEFAULT_AI_MODEL } from "@/lib/ai-model";
 
 export interface ISettings {
   _id: mongoose.Types.ObjectId;
   aiModel: string;
-  pmDefaultModel: string;
   signUpDomains: string[];
   openrouterKey?: string;
   openrouterKeyHint?: string;
@@ -15,11 +15,7 @@ export interface ISettings {
 const settingsSchema = new Schema<ISettings>({
   aiModel: {
     type: String,
-    default: "gpt-4o-mini",
-  },
-  pmDefaultModel: {
-    type: String,
-    default: "",
+    default: DEFAULT_AI_MODEL,
   },
   signUpDomains: {
     type: [String],
@@ -47,5 +43,5 @@ export async function updateSettings(db: ScopedDb, update: UpdateQuery<ISettings
 }
 
 export async function getSettings(db: ScopedDb): Promise<ISettings> {
-  return updateSettings(db, { $setOnInsert: { aiModel: "gpt-4o-mini" } });
+  return updateSettings(db, { $setOnInsert: { aiModel: DEFAULT_AI_MODEL } });
 }

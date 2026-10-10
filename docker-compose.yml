@@ -56,7 +56,6 @@ services:
       AI_MEMBER_TOKENS: ${AI_MEMBER_TOKENS:-}
       AI_DAILY_PERCENT: ${AI_DAILY_PERCENT:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      PM_MODEL: ${PM_MODEL:-}
       PM_MAX_TOKENS: ${PM_MAX_TOKENS:-}
       PM_SCHEDULER_TICK_MS: ${PM_SCHEDULER_TICK_MS:-}
       # The exception to the line above, twice over: left empty, this one does not leave a feature

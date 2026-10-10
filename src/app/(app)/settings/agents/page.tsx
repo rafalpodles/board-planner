@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
@@ -10,6 +10,8 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { DEFAULT_PROJECT_ICON } from "@/types";
 import { projectPath } from "@/lib/urls";
+import { DEFAULT_AI_MODEL } from "@/lib/ai-model";
+import { openrouterModel } from "@/lib/managed-models";
 
 interface AgentRow {
   _id: string;
@@ -31,7 +33,7 @@ interface AgentsResponse {
   pmNeedsPlan?: boolean;
   pmKeyUnreadable?: boolean;
   pmLocked?: boolean;
-  defaults: { pmDefaultModel: string; envModel: string };
+  defaults: { aiModel: string };
   projects: AgentRow[];
 }
 
@@ -44,18 +46,16 @@ export default function AdminAgentsPage() {
   const [data, setData] = useState<AgentsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
-  const [defaultModel, setDefaultModel] = useState("");
-  const [savingDefaults, setSavingDefaults] = useState(false);
   const [aiModel, setAiModel] = useState("");
   const [savingAiModel, setSavingAiModel] = useState(false);
+  const savedModels = useRef<Record<string, string>>({});
 
   const load = useCallback(async () => {
     try {
       const res: AgentsResponse = await api.get("/api/admin/agents");
       setData(res);
-      setDefaultModel(res.defaults.pmDefaultModel);
-      const settings = await api.get("/api/settings");
-      setAiModel(settings?.aiModel ?? "");
+      savedModels.current = Object.fromEntries(res.projects.map((p) => [p._id, p.model]));
+      setAiModel(res.defaults.aiModel);
     } catch {
       toast("Failed to load agents", "error");
     } finally {
@@ -85,6 +85,7 @@ export default function AdminAgentsPage() {
           .filter((field) => field in answer)
           .map((field) => [field, answer[field]])
       );
+      if (typeof confirmed.model === "string") savedModels.current[row._id] = confirmed.model;
       setData((prev) =>
         prev
           ? {
@@ -101,37 +102,21 @@ export default function AdminAgentsPage() {
     }
   }
 
-  // Its own endpoint and its own button: it is a different setting from the PM
-  // defaults, and blanking it used to be a silent no-op with the save bar still lit
   async function saveAiModel() {
     const value = aiModel.trim();
     if (!value) {
-      toast("Give the model a name, or the AI task generator has nothing to call.", "error");
+      toast("Give the model a name, or the PM agent and AI task drafting have nothing to call.", "error");
       return;
     }
     setSavingAiModel(true);
     try {
       await api.put("/api/settings", { aiModel: value });
       toast("Model saved", "success");
+      load();
     } catch {
       toast("Failed to save the model", "error");
     } finally {
       setSavingAiModel(false);
-    }
-  }
-
-  async function saveDefaults() {
-    setSavingDefaults(true);
-    try {
-      await api.put("/api/settings", {
-        pmDefaultModel: defaultModel.trim(),
-      });
-      toast("Instance defaults saved", "success");
-      load();
-    } catch (err) {
-      toast(err instanceof Error ? err.message : "Failed to save defaults", "error");
-    } finally {
-      setSavingDefaults(false);
     }
   }
 
@@ -143,8 +128,6 @@ export default function AdminAgentsPage() {
     );
   }
   if (!isAdmin || !data) return null;
-
-  const effectiveDefault = data.defaults.pmDefaultModel || data.defaults.envModel;
 
   return (
     <div className="w-full max-w-5xl mx-auto">
@@ -200,17 +183,17 @@ export default function AdminAgentsPage() {
       )}
 
       <section className="mb-8 rounded-xl border border-border bg-bg-card p-4">
-        <h2 className="font-semibold mb-1">Task generation</h2>
+        <h2 className="font-semibold mb-1">AI model</h2>
         <p className="text-xs text-text-muted mb-4">
-          The model used when a task is drafted with AI. Separate from the PM agent below —
-          it lived in one project&apos;s settings until now, despite applying to all of them.
+          One model for the PM agent and for drafting a task with AI. A project can name its own PM
+          model in the table below; AI task drafting always uses this one.
         </p>
         <div className="grid gap-4 sm:grid-cols-2">
           <Input
             label="Model"
             value={aiModel}
             onChange={(e) => setAiModel(e.target.value)}
-            placeholder="gpt-4o-mini"
+            placeholder={DEFAULT_AI_MODEL}
           />
         </div>
         <p className="mt-2 text-xs text-text-muted">
@@ -219,28 +202,6 @@ export default function AdminAgentsPage() {
         <div className="mt-3">
           <Button size="sm" onClick={saveAiModel} disabled={savingAiModel}>
             {savingAiModel ? "Saving..." : "Save model"}
-          </Button>
-        </div>
-      </section>
-
-      <section className="mb-8 rounded-xl border border-border bg-bg-card p-4">
-        <h2 className="font-semibold mb-1">PM agent defaults</h2>
-        <p className="text-xs text-text-muted mb-4">
-          Used by any project that leaves its own value blank. Without them the fallback is the{" "}
-          <code className="font-mono">PM_MODEL</code> environment variable, which needs a redeploy to
-          change.
-        </p>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Input
-            label="Default model"
-            value={defaultModel}
-            onChange={(e) => setDefaultModel(e.target.value)}
-            placeholder={data.defaults.envModel}
-          />
-        </div>
-        <div className="mt-3">
-          <Button size="sm" onClick={saveDefaults} disabled={savingDefaults}>
-            {savingDefaults ? "Saving..." : "Save defaults"}
           </Button>
         </div>
       </section>
@@ -311,11 +272,11 @@ export default function AdminAgentsPage() {
                         )
                       }
                       onBlur={(e) => {
-                        if (e.target.value !== data.defaults.pmDefaultModel) {
+                        if (e.target.value !== savedModels.current[row._id]) {
                           patch(row, { model: e.target.value });
                         }
                       }}
-                      placeholder={effectiveDefault}
+                      placeholder={openrouterModel(data.defaults.aiModel)}
                       className="text-xs"
                     />
                   </td>

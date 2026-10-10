@@ -4,8 +4,6 @@ import { withCacheBreakpoints } from "./prompt-cache";
 
 export const OPENROUTER_BASE_URL = () => process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1";
 
-export const DEFAULT_PM_MODEL = () => process.env.PM_MODEL || "openai/gpt-6-luna";
-
 export type ProviderPreferences = { data_collection: "deny"; only?: string[] };
 
 // On the platform's key only, where the sub-processor list speaks: no upstream that may train on prompts, and

@@ -488,8 +488,7 @@
           "$oid": "6a710c3924255e8a41ac6c3f"
         },
         "__v": 0,
-        "aiModel": "gpt-4o-mini",
-        "pmDefaultModel": ""
+        "aiModel": "gpt-4o-mini"
       }
     ],
     "sprints": [
