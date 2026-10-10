@@ -59,7 +59,7 @@ export function ColumnPicker({ hidden, onChange, customFields = [] }: ColumnPick
         className={`focus-ring flex h-11 items-center gap-1.5 rounded-lg border px-2.5 text-[13px] font-medium transition-colors ${
           isDefault
             ? "border-border text-text-muted hover:text-text"
-            : "border-primary bg-primary/10 text-primary"
+            : "border-primary bg-primary/10 text-primary-on-tint"
         }`}
       >
         Columns
