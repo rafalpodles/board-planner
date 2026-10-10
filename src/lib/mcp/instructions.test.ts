@@ -66,7 +66,7 @@ describe("the board-planner skill", () => {
   });
 
   it("is about any board, not this repository's", () => {
-    const local = skillFiles().filter(({ text }) => /\bBP-\d|bp-task|ClaudePlanner|board-planner-site|Notion/.test(text));
+    const local = skillFiles().filter(({ text }) => /\bBP-\d|bp-task|board-planner-site|Notion|rafal/.test(text));
     expect(local.map((f) => f.file)).toEqual([]);
   });
 });
