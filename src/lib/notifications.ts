@@ -8,7 +8,6 @@ import { originFor } from "./organisation-host";
 import type { ScopedDb } from "@/lib/db-scope";
 import { withAiMark } from "@/lib/pm/username";
 
-// The webhook payload keeps the username a receiver matches on; only what a person reads marks the PM's as an AI's (BP-942)
 function authorOf(data: Record<string, unknown> | undefined): string {
   const author = String(data?.author || "unknown");
   return withAiMark(author, author);
