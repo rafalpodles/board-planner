@@ -52,4 +52,36 @@ describe("the gateway is the only door to a model", () => {
   it("resolves the key a model call is made with in the gateway alone, so no call is made with a key nobody gated", () => {
     expect(whereIs(/\bresolveModelKey\b/)).toEqual(["src/lib/ai-gateway/index.ts", "src/lib/model-keys.ts"]);
   });
+
+  // BP-682: AI the operator runs for an organisation is counted; an agent a person runs on their own machine is theirs, and is never swept in
+  it("is entered from the PM agent's callers, AI Assist's route and the boot warning alone", () => {
+    const users = whereIs(/@\/lib\/ai-gateway/);
+
+    expect(users).toEqual([
+      "src/app/api/projects/[projectId]/ai/generate-task/route.ts",
+      "src/app/api/projects/[projectId]/pm/chat/route.ts",
+      "src/app/api/projects/[projectId]/pm/review/route.ts",
+      "src/lib/pm/agent.ts",
+      "src/lib/pm/scheduler.ts",
+      "src/lib/pm/triggers.ts",
+      "src/instrumentation-node.ts",
+    ].sort());
+  });
+
+  it("writes and reads the usage rows and counters from the gateway and the PM's day alone, so a worker's run cannot land on them by another road", () => {
+    expect(whereIs(/\bAiUsage\b|\bAiBudget\b|\brecordUsage\b/)).toEqual([
+      "src/lib/ai-gateway/budget.ts",
+      "src/lib/ai-gateway/index.ts",
+      "src/lib/ai-gateway/usage.ts",
+      "src/lib/db-scope.ts",
+      "src/lib/pm/day-usage.ts",
+      "src/models/aiBudget.ts",
+      "src/models/aiUsage.ts",
+    ]);
+  });
+
+  it("is not imported from the PM loop by any file of the worker's", () => {
+    const loop = /lib\/pm\/(agent|scheduler|triggers)\b/;
+    expect(whereIs(loop).filter((file) => /worker/i.test(file))).toEqual([]);
+  });
 });

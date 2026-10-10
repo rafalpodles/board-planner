@@ -165,8 +165,8 @@ function devServerEnv(origin: string) {
     OPENROUTER_BASE_URL: `${PM_STUB_URL}/v1`,
     // Effectively never. The scheduler starts with the app (src/instrumentation.ts), and a
     // spec that switches a project's daily review on leaves it on until the next seed() — so
-    // at the 5-minute default a tick can land mid-run and spend a real turn against the cap
-    // the turn-cap specs are counting.
+    // at the 5-minute default a tick can land mid-run and spend a real turn in the middle of
+    // a spec that is counting them.
     PM_SCHEDULER_TICK_MS: String(24 * 60 * 60 * 1000),
     WEBHOOK_SIGNING_SECRET: WEBHOOK_SECRET,
     // The stub above. Without it the sync reaches the real api.github.com, which is why no

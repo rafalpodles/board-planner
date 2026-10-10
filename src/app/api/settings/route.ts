@@ -12,7 +12,6 @@ export const GET = withAuth(async (_request, { db }) => {
   return NextResponse.json({
     aiModel: settings.aiModel,
     pmDefaultModel: settings.pmDefaultModel || "",
-    pmDefaultDailyTurnCap: settings.pmDefaultDailyTurnCap || 0,
   });
 });
 
@@ -46,17 +45,6 @@ export const PUT = withAdmin(async (request, { user, db }) => {
     updates.pmDefaultModel = body.pmDefaultModel.trim();
   }
 
-  if (body.pmDefaultDailyTurnCap !== undefined) {
-    const cap = body.pmDefaultDailyTurnCap;
-    if (!Number.isInteger(cap) || cap < 0 || cap > 1000) {
-      return NextResponse.json(
-        { error: "pmDefaultDailyTurnCap must be an integer 0-1000 (0 = use the env default)" },
-        { status: 400 }
-      );
-    }
-    updates.pmDefaultDailyTurnCap = cap;
-  }
-
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
   }
@@ -75,6 +63,5 @@ export const PUT = withAdmin(async (request, { user, db }) => {
   return NextResponse.json({
     aiModel: settings.aiModel,
     pmDefaultModel: settings.pmDefaultModel || "",
-    pmDefaultDailyTurnCap: settings.pmDefaultDailyTurnCap || 0,
   });
 });

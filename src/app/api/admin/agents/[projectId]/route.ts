@@ -50,17 +50,6 @@ export const PATCH = withAdmin(async (request, { params, user, db }) => {
     updates["pm.model"] = body.model.trim();
   }
 
-  if (body.dailyTurnCap !== undefined) {
-    const cap = body.dailyTurnCap;
-    if (!Number.isInteger(cap) || cap < 0 || cap > 1000) {
-      return NextResponse.json(
-        { error: "dailyTurnCap must be an integer 0-1000 (0 = inherit)" },
-        { status: 400 }
-      );
-    }
-    updates["pm.dailyTurnCap"] = cap;
-  }
-
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
   }
@@ -75,7 +64,7 @@ export const PATCH = withAdmin(async (request, { params, user, db }) => {
   let project: {
     _id: unknown;
     key?: string;
-    pm?: { enabled?: unknown; lockedByInstance?: unknown; model?: unknown; dailyTurnCap?: unknown };
+    pm?: { enabled?: unknown; lockedByInstance?: unknown; model?: unknown };
   } = {
     ...beforeImage,
     pm: {
@@ -106,6 +95,5 @@ export const PATCH = withAdmin(async (request, { params, user, db }) => {
     enabled: !!project.pm?.enabled,
     lockedByInstance: !!project.pm?.lockedByInstance,
     model: project.pm?.model || "",
-    dailyTurnCap: project.pm?.dailyTurnCap || 0,
   });
 });

@@ -57,8 +57,6 @@ const PM_SAVED_FIELDS = [
   "model",
   "contextNotes",
   "links",
-  "dailyTurnCap",
-  "dailyTokenCap",
 ] as const;
 
 const PM_SAVED_AUTONOMY_FIELDS = [
@@ -239,9 +237,7 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
     if (user.role !== "admin") {
-      // dailyTokenCap belongs here beside dailyTurnCap: the screen puts them in the same
-      // admin-only card, and a gate the API does not enforce is a claim the screen cannot keep
-      const instanceFields = ["enabled", "model", "dailyTurnCap", "dailyTokenCap", "mcpServers"];
+      const instanceFields = ["enabled", "model", "mcpServers"];
       const rejected = instanceFields.filter((f) => body.pm[f] !== undefined);
       if (rejected.length > 0) {
         return NextResponse.json(

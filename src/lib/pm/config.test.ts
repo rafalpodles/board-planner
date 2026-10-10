@@ -297,45 +297,20 @@ describe("mergeMcpServerTokens against a stored project", () => {
   });
 });
 
-/**
- * BP-284. `validatePmConfig` rebuilds `pm` from a whitelist and the PUT then `$set`s the whole
- * subdocument — so a field missing from the rebuild is not merely ignored, it is **erased**. The
- * first cut of the token ceiling shipped with the field absent here: the settings input posted,
- * got a 200, showed a success toast, and wrote nothing. This is the test that would have caught it.
- */
-describe("validatePmConfig and the cost controls", () => {
+// BP-682: the per-project turn and token caps are gone, and the rebuild from a whitelist is what keeps an older client from writing them back
+describe("validatePmConfig and the caps that were removed", () => {
   const base = { enabled: true, model: "m", contextNotes: "", links: [], mcpServers: [] };
-  const valid = (over: Record<string, unknown> = {}) =>
-    validatePmConfig({ ...base, ...over } as never);
 
-  it("keeps the token ceiling, so the input that sets it is not writing into a void", () => {
-    const result = valid({ dailyTokenCap: 500_000 });
+  it("does not keep a turn or token cap that an older client still sends", () => {
+    const result = validatePmConfig({ ...base, dailyTurnCap: 40, dailyTokenCap: 500_000 } as never);
 
     expect(result.valid).toBe(true);
-    expect(result.valid && result.value.dailyTokenCap).toBe(500_000);
+    expect(result.valid && result.value).not.toHaveProperty("dailyTurnCap");
+    expect(result.valid && result.value).not.toHaveProperty("dailyTokenCap");
   });
 
-  // The control beside it: the field it joins is unchanged
-  it("still keeps the turn cap", () => {
-    const result = valid({ dailyTurnCap: 40, dailyTokenCap: 1 });
-
-    expect(result.valid && result.value.dailyTurnCap).toBe(40);
-  });
-
-  it("defaults the ceiling to none rather than dropping it", () => {
-    const result = valid();
-
-    expect(result.valid && result.value.dailyTokenCap).toBe(0);
-  });
-
-  /**
-   * A negative cap would make `cap > 0 && tokens >= cap` false for ever — a ceiling that reads as
-   * set on the screen and enforces nothing, which is worse than no ceiling at all.
-   */
-  it("refuses a ceiling that could never bind", () => {
-    expect(valid({ dailyTokenCap: -1 }).valid).toBe(false);
-    expect(valid({ dailyTokenCap: 1.5 }).valid).toBe(false);
-    expect(valid({ dailyTokenCap: "lots" }).valid).toBe(false);
+  it("does not refuse the save for a cap that used to be invalid", () => {
+    expect(validatePmConfig({ ...base, dailyTurnCap: -5, dailyTokenCap: "lots" } as never).valid).toBe(true);
   });
 });
 

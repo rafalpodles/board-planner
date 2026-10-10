@@ -68,3 +68,21 @@ export async function budgetOf(db: ScopedDb): Promise<Budget | null> {
     dailyCeiling: percent > 0 ? Math.ceil((limit * Math.min(percent, 100)) / 100) : 0,
   };
 }
+
+const REMOVED_CAPS = ["PM_DAILY_TURN_CAP", "PM_DAILY_TOKEN_CAP", "AI_DAILY_GENERATION_CAP"] as const;
+
+/** What an operator should hear at boot: a cap that is no longer read, and an instance whose AI key nothing bounds */
+export function aiLimitWarnings(env: Record<string, string | undefined>, hosted: boolean): string[] {
+  const set = (name: string) => Boolean(env[name]?.trim());
+  // A value that is not a number bounds nothing, so it is not a decision
+  const decided = (name: string) => set(name) && Number.isFinite(Number(env[name]!.trim())) && Number(env[name]!.trim()) >= 0;
+  const warnings = REMOVED_CAPS.filter(set).map(
+    (name) => `WARNING: ${name} is no longer read: AI is counted in tokens per organisation now (AI_MONTHLY_TOKENS, AI_TRIAL_TOKENS, AI_MEMBER_TOKENS, AI_DAILY_PERCENT)`
+  );
+  // Only the allowance itself bounds anything: a daily share or a per-member amount scales a limit that is not there
+  const limited = decided("AI_MONTHLY_TOKENS") || decided("AI_TRIAL_TOKENS");
+  if (!hosted && set("OPENROUTER_API_KEY") && !limited) {
+    warnings.push("WARNING: nothing limits what AI may spend of OPENROUTER_API_KEY: set AI_MONTHLY_TOKENS (and AI_DAILY_PERCENT) to bound it");
+  }
+  return warnings;
+}

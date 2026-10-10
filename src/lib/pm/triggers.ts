@@ -5,7 +5,6 @@ import { pillToneForRole } from "@/lib/email-template";
 import { explicitEscalationColumnId } from "@/lib/escalation";
 import { getPmUser } from "./pm-user";
 import { runPmTurn } from "./agent";
-import { dailyPmSpend, isOverDailyTurnCap } from "./turn-cap";
 import { acquireTurnLock, releaseTurnLock } from "./turn-lock";
 import { NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS, buildNeedsHumanReviewPrompt } from "./autonomy";
 import { getProjectColumns } from "@/lib/columns";
@@ -122,7 +121,7 @@ export async function runPmTrigger(db: ScopedDb, trigger: IPmTrigger): Promise<P
     await settleTrigger(db, trigger, "done");
     return "ran";
   }
-  // Settled, not retried: without a model every attempt is a turn from the cap spent posting the
+  // Settled, not retried: without a model every attempt is a turn spent posting the
   // same warning into every thread
   const gate = await openGate(db, { error: "The PM agent is not configured on this instance", status: 503 });
   if (!gate.ok) {
@@ -134,23 +133,6 @@ export async function runPmTrigger(db: ScopedDb, trigger: IPmTrigger): Promise<P
       return "deferred";
     }
     await settleTrigger(db, trigger, "failed", gate.error);
-    return "ran";
-  }
-
-  const { over, cap } = await isOverDailyTurnCap(db, projectId, project.pm);
-  if (over) {
-    await settleTrigger(db, trigger, "failed", `Daily turn cap (${cap}) reached`);
-    return "ran";
-  }
-
-  const spend = await dailyPmSpend(db, projectId, project.pm);
-  if (spend.over) {
-    await settleTrigger(
-      db,
-      trigger,
-      "failed",
-      `Daily token cap reached: ${spend.tokens.toLocaleString()} of ${spend.cap.toLocaleString()}`
-    );
     return "ran";
   }
 

@@ -1159,13 +1159,11 @@ async function seedBoard(withSessions: boolean) {
     webhooks: [],
     notificationChannels: [],
     pm: {
-      // On, so a turn can actually run against the stubbed model. dailyTurnCap must be positive:
-      // isOverDailyTurnCap compares used >= cap, so a zero cap refuses the very first turn.
+      // On, so a turn can actually run against the stubbed model
       enabled: true,
       lockedByInstance: false,
       model: "e2e/stub-model",
       contextNotes: "",
-      dailyTurnCap: 50,
       autonomy: {
         dailyReview: false,
         reviewHour: 9,
@@ -1489,7 +1487,6 @@ export async function seedSearchCorpus() {
       lockedByInstance: false,
       model: "e2e/stub-model",
       contextNotes: "",
-      dailyTurnCap: 50,
       autonomy: {
         dailyReview: false,
         reviewHour: 9,

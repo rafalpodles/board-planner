@@ -10,7 +10,7 @@ import { startBoardReview } from "@/lib/pm/scheduler";
 export const maxDuration = 300;
 
 /**
- * Runs the board review now, on the same path the schedule uses: the caps, the turn lock, the
+ * Runs the board review now, on the same path the schedule uses: the AI allowance, the turn lock, the
  * digest and the tools it withholds. It does not claim the scheduled slot, so the next scheduled
  * review still happens. An owner switching the review on otherwise waited for the clock to learn
  * what it would say (BP-471).
@@ -20,7 +20,7 @@ export const POST = withProjectOwner(async (_request, { params, user, db }) => {
   if (user.viaMachineCredential) {
     return NextResponse.json({ error: "This action requires an interactive session" }, { status: 403 });
   }
-  // Without a model key a review would still take a turn from the cap and post a warning to the
+  // Without a model key a review would still take a turn and post a warning to the
   // thread; the chat route refuses the same way for the same reason
   const gate = await openGate(db, { error: "The PM agent is not configured on this instance", status: 503 });
   if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });

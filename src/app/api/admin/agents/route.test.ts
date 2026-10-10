@@ -7,7 +7,7 @@ const pmAvailability = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ getAuthUser, RateLimitError: class RateLimitError extends Error {} }));
 vi.mock("@/lib/grants", () => ({ check: vi.fn(), accessibleProjectIds: vi.fn() }));
-vi.mock("@/models/settings", () => ({ getSettings: async () => ({ pmDefaultModel: "", pmDefaultDailyTurnCap: 0 }) }));
+vi.mock("@/models/settings", () => ({ getSettings: async () => ({ pmDefaultModel: "" }) }));
 vi.mock("@/models/project", () => ({ Project: { find: projectFind } }));
 vi.mock("@/lib/pm/config", () => ({ pmAvailability }));
 vi.mock("@/lib/pm/openrouter", () => ({ DEFAULT_PM_MODEL: () => "e2e/model" }));

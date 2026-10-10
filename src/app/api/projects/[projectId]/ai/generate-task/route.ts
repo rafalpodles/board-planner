@@ -18,13 +18,6 @@ import { NOT_ARCHIVED } from "@/lib/task-archive";
 export const MAX_PROMPT_LENGTH = AI_PROMPT_MAX_LENGTH;
 /** Generations one person may start in the rate limiter's 15-minute window */
 export const GENERATIONS_PER_USER_WINDOW = 20;
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-/** Generations one project may run in a day, on the instance's OpenRouter key */
-export function dailyGenerationCap(): number {
-  const configured = Number(process.env.AI_DAILY_GENERATION_CAP);
-  return Number.isInteger(configured) && configured > 0 ? configured : 200;
-}
 
 // One generation at a time per person: nothing else stops a loop from queueing hundreds in parallel
 const inFlight = new Set<string>();
@@ -121,14 +114,6 @@ export const POST = withProjectAccess(async (request, { params, user, db }) => {
         { status: 429 }
       );
     }
-    const cap = dailyGenerationCap();
-    if ((await countAttempt(`ai-generate:day:${projectId}`, DAY_MS)) > cap) {
-      return NextResponse.json(
-        { error: `This project has used its ${cap} AI generations for the day.` },
-        { status: 429 }
-      );
-    }
-
     const project = await db.Project.findById(projectId);
     if (!project) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
