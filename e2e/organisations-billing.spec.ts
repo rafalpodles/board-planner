@@ -143,7 +143,7 @@ test("a Free organisation's admin chooses a period and is sent to Stripe, with w
   await expect(page.getByTestId("subscription-price-year")).toHaveText("$290 per year");
   await expect(page.getByTestId("subscription-saving")).toHaveText("Saves $58 a year");
   await expect(page.getByTestId("subscription-price")).toHaveText(
-    "$29 per month (USD), plus VAT where it applies, which Stripe adds and shows before you pay, with 10 members included, then $3 per member per month. For your 13 members: $38 per month."
+    "$29 per month (USD), plus VAT where it applies; Stripe shows the total including VAT before you pay, with 10 members included, then $3 per member per month. For your 13 members: $38 per month."
   );
   await expect(page.getByTestId("subscription-checkout")).toHaveText("Subscribe with an obligation to pay");
   await page.screenshot({ path: "e2e/.artifacts/bp980-upgrade.png", fullPage: true });
@@ -563,15 +563,16 @@ test("a consumer within the 14 days withdraws after a confirmation step, and the
   await expect(page.getByTestId("subscription-withdrawal")).toHaveCount(0);
 });
 
-test("the withdrawal is offered to the last moment of the fourteenth day after the purchase and not after it, and never to a business", async ({ page }) => {
+test("the withdrawal is offered to the last moment of the period, counted in Poland with a day's margin, and not after it, and never to a business", async ({ page }) => {
   const purchasedAt = "2026-10-03T22:40:00.000Z";
   statusAnswer = { code: 200, body: running({ interval: "month", buyer: "consumer", purchasedAt, withdrawnAt: null }) };
 
-  await page.clock.setFixedTime(new Date("2026-10-17T23:59:00.000Z"));
+  // 22:40 UTC on the 3rd is the 4th in Warsaw: 4 + 14 + 1 ends at 21:59:59.999 UTC on the 19th
+  await page.clock.setFixedTime(new Date("2026-10-19T21:59:00.000Z"));
   await open(page);
   await expect(page.getByTestId("subscription-withdrawal")).toBeVisible();
 
-  await page.clock.setFixedTime(new Date("2026-10-18T00:00:00.001Z"));
+  await page.clock.setFixedTime(new Date("2026-10-19T22:00:00.001Z"));
   await open(page);
   await expect(page.getByTestId("subscription-details")).toBeVisible();
   await expect(page.getByTestId("subscription-manage")).toBeVisible();

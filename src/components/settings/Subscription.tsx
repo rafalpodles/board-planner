@@ -93,7 +93,7 @@ function BuyerChoice({ buyer, onChange, disabled }: { buyer: Buyer | null; onCha
 function OrderInformation({ billing, interval, members }: { billing: Available; interval: Interval; members: number | undefined }) {
   const { offer, seller, termsVersion } = billing;
   const per = interval;
-  const tax = offer?.taxInclusive ? "including VAT" : "plus VAT where it applies, which Stripe adds and shows before you pay";
+  const tax = offer?.taxInclusive ? "including VAT" : "plus VAT where it applies; Stripe shows the total including VAT before you pay";
   const extra = members === undefined ? 0 : Math.max(0, members - (offer?.includedMembers ?? INCLUDED_MEMBERS));
   const total = offer ? { amount: offer[interval].base.amount + extra * offer[interval].member.amount, currency: offer[interval].base.currency } : null;
   const link = "text-primary underline underline-offset-2";
@@ -360,8 +360,9 @@ export function Subscription() {
         <>
           {billing.withdrawal && (
             <p role="status" className="rounded-lg border border-border p-4 text-sm" data-testid="subscription-withdrawn">
-              You withdrew from the contract on {formatPlanDate(billing.withdrawal.at)}. {money(billing.withdrawal.refunded)} is refunded through Stripe to the payment method you
-              used.
+              {billing.withdrawal.pending
+                ? `You withdrew from the contract on ${formatPlanDate(billing.withdrawal.at)}. The refund is being made through Stripe, and a confirmation follows by e-mail.`
+                : `You withdrew from the contract on ${formatPlanDate(billing.withdrawal.at)}. ${money(billing.withdrawal.refunded)} is refunded through Stripe to the payment method you used.`}
             </p>
           )}
           <p className="text-sm text-text-muted">

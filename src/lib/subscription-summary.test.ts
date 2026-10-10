@@ -118,13 +118,16 @@ describe("withdrawal", () => {
     ...over,
   });
 
-  it("ends with the fourteenth day after the purchase, in UTC, as the licence service counts it", () => {
-    expect(withdrawalEndsAt(new Date(purchasedAt))).toEqual(new Date("2026-10-17T23:59:59.999Z"));
+  it("counts the days in Poland, as the licence service does: 00:40 on the 4th there, and a day after the fourteenth", () => {
+    // 22:40 UTC on the 3rd is 00:40 on 4 October in Warsaw; 4 + 14 + 1 is the 19th, ending 21:59:59.999 UTC in CEST
+    expect(withdrawalEndsAt(new Date(purchasedAt))).toEqual(new Date("2026-10-19T21:59:59.999Z"));
+    expect(withdrawalEndsAt(new Date("2026-10-03T21:59:00.000Z"))).toEqual(new Date("2026-10-18T21:59:59.999Z"));
+    expect(withdrawalEndsAt(new Date("2026-10-20T10:00:00.000Z"))).toEqual(new Date("2026-11-04T22:59:59.999Z"));
   });
 
   it("is open to a consumer to the last millisecond of that day, and closed after it", () => {
-    expect(withdrawableUntil(consumer(), new Date("2026-10-17T23:59:59.999Z"))).toEqual(new Date("2026-10-17T23:59:59.999Z"));
-    expect(withdrawableUntil(consumer(), new Date("2026-10-18T00:00:00.000Z"))).toBeNull();
+    expect(withdrawableUntil(consumer(), new Date("2026-10-19T21:59:59.999Z"))).toEqual(new Date("2026-10-19T21:59:59.999Z"));
+    expect(withdrawableUntil(consumer(), new Date("2026-10-19T22:00:00.000Z"))).toBeNull();
   });
 
   it("is never open to a business, a subscription with no buyer or purchase day, or one already withdrawn from", () => {
@@ -138,7 +141,8 @@ describe("withdrawal", () => {
   });
 
   it("reads what a withdrawal refunded, and nothing that is not one", () => {
-    expect(withdrawalSummary({ at: "2026-10-08T10:00:00.000Z", refunded: { amount: 3812, currency: "EUR" }, refunds: ["re_1"] })).toEqual({ at: "2026-10-08T10:00:00.000Z", refunded: { amount: 3812, currency: "eur" } });
+    expect(withdrawalSummary({ at: "2026-10-08T10:00:00.000Z", refunded: { amount: 3812, currency: "EUR" }, refunds: ["re_1"] })).toEqual({ at: "2026-10-08T10:00:00.000Z", refunded: { amount: 3812, currency: "eur" }, pending: false });
+    expect(withdrawalSummary({ at: "2026-10-08T10:00:00.000Z", refunded: { amount: 0, currency: "eur" }, pending: true })).toMatchObject({ pending: true });
     expect(withdrawalSummary({ at: "2026-10-08T10:00:00.000Z" })).toBeNull();
     expect(withdrawalSummary(null)).toBeNull();
   });

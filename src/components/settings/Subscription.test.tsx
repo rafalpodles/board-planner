@@ -425,7 +425,7 @@ describe("Subscription", () => {
       expect(screen.getByTestId("subscription-price-year").textContent).toBe("$290 per year");
       expect(screen.getByTestId("subscription-saving").textContent).toBe("Saves $58 a year");
       expect(screen.getByTestId("subscription-price").textContent).toBe(
-        "$29 per month (USD), plus VAT where it applies, which Stripe adds and shows before you pay, with 10 members included, then $3 per member per month."
+        "$29 per month (USD), plus VAT where it applies; Stripe shows the total including VAT before you pay, with 10 members included, then $3 per member per month."
       );
       expect(screen.getByTestId("subscription-checkout").textContent).toBe("Subscribe with an obligation to pay");
     });
@@ -649,19 +649,19 @@ describe("Subscription", () => {
       expect(m.api.post).not.toHaveBeenCalled();
     });
 
-    it("is offered to the last millisecond of the fourteenth day after the purchase and not after it", async () => {
+    it("is offered to the last millisecond of the period, counted in Poland with a day's margin, and not after it", async () => {
       m.organisation.current = { ...FREE, plan: "pro" };
       const purchasedAt = "2026-10-03T22:40:00.000Z";
       m.api.get.mockResolvedValue(consumer(purchasedAt));
       vi.useFakeTimers({ toFake: ["Date"] });
 
-      vi.setSystemTime(new Date("2026-10-17T23:59:59.999Z"));
+      vi.setSystemTime(new Date("2026-10-19T21:59:59.999Z"));
       const first = render(<Subscription />);
       expect(await screen.findByTestId("subscription-withdrawal")).toBeTruthy();
-      expect(screen.getByTestId("subscription-withdrawal").textContent).toContain(shown("2026-10-17T23:59:59.999Z"));
+      expect(screen.getByTestId("subscription-withdrawal").textContent).toContain(shown("2026-10-19T21:59:59.999Z"));
       first.unmount();
 
-      vi.setSystemTime(new Date("2026-10-18T00:00:00.000Z"));
+      vi.setSystemTime(new Date("2026-10-19T22:00:00.000Z"));
       render(<Subscription />);
       expect(await screen.findByTestId("subscription-details")).toBeTruthy();
       expect(screen.queryByTestId("subscription-withdrawal")).toBeNull();
@@ -685,6 +685,14 @@ describe("Subscription", () => {
 
       expect((await screen.findByTestId("subscription-withdrawn")).textContent).toContain("€38.12");
       expect(screen.getByTestId("subscription-withdrawn").textContent).toContain(shown("2026-10-08T10:00:00.000Z"));
+    });
+
+    it("says a withdrawal that is not yet finished is under way, naming no amount", async () => {
+      m.api.get.mockResolvedValue({ available: true, launchOpen: false, subscription: { ...live().subscription, status: "canceled" }, memberPrice: null, upcoming: null, withdrawal: { at: "2026-10-08T10:00:00.000Z", refunded: { amount: 0, currency: "eur" }, pending: true } });
+      render(<Subscription />);
+
+      expect((await screen.findByTestId("subscription-withdrawn")).textContent).toContain("The refund is being made through Stripe");
+      expect(screen.getByTestId("subscription-withdrawn").textContent).not.toContain("€0.00");
     });
 
     it("says what went wrong and keeps the control when the withdrawal fails", async () => {
