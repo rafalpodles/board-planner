@@ -38,12 +38,12 @@ beforeEach(() => {
   updateSettings.mockImplementation(async (_db, update) => update.$set);
 });
 
-// BP-326: the default behind every project's PM model
+// BP-326: the model behind every project's PM and AI Assist
 describe("PUT /api/settings", () => {
   it("refuses an admin's machine credential and writes nothing", async () => {
     getAuthUser.mockResolvedValue({ ...ADMIN, viaMachineCredential: true });
 
-    const res = await put({ pmDefaultModel: "some/model" });
+    const res = await put({ aiModel: "some/model" });
 
     expect(res.status).toBe(403);
     expect(updateSettings).not.toHaveBeenCalled();
@@ -65,24 +65,33 @@ describe("PUT /api/settings", () => {
     await put({ pmDefaultDailyTurnCap: 250 });
     expect(updateSettings).not.toHaveBeenCalled();
 
-    await put({ pmDefaultModel: "some/model", pmDefaultDailyTurnCap: 250 });
-    expect(updateSettings).toHaveBeenCalledWith(scopedToDefaultOrganisation(), { $set: { pmDefaultModel: "some/model" } });
+    await put({ aiModel: "some/model", pmDefaultDailyTurnCap: 250 });
+    expect(updateSettings).toHaveBeenCalledWith(scopedToDefaultOrganisation(), { $set: { aiModel: "some/model" } });
+  });
+
+  it("writes nothing for a PM default model, which an older client may still send: the PM runs on the one model", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+
+    const res = await put({ pmDefaultModel: "some/model" });
+
+    expect(res.status).toBe(400);
+    expect(updateSettings).not.toHaveBeenCalled();
   });
 
   it("writes the change for an interactive admin and records who made it", async () => {
     getAuthUser.mockResolvedValue(ADMIN);
 
-    const res = await put({ pmDefaultModel: "some/model" });
+    const res = await put({ aiModel: "some/model" });
 
     expect(res.status).toBe(200);
     expect(updateSettings).toHaveBeenCalledWith(scopedToDefaultOrganisation(), {
-      $set: { pmDefaultModel: "some/model" },
+      $set: { aiModel: "some/model" },
     });
     expect(logInstanceAudit).toHaveBeenCalledWith(scopedToDefaultOrganisation(), {
       action: "instance_settings_changed",
       user: "admin-1",
       actorUsername: "root",
-      detail: "pmDefaultModel: some/model",
+      detail: "aiModel: some/model",
     });
   });
 });

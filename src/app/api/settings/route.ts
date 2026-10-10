@@ -11,7 +11,6 @@ export const GET = withAuth(async (_request, { db }) => {
   const settings = await getSettings(db);
   return NextResponse.json({
     aiModel: settings.aiModel,
-    pmDefaultModel: settings.pmDefaultModel || "",
   });
 });
 
@@ -35,16 +34,6 @@ export const PUT = withAdmin(async (request, { user, db }) => {
     updates.aiModel = body.aiModel.trim();
   }
 
-  if (body.pmDefaultModel !== undefined) {
-    if (typeof body.pmDefaultModel !== "string" || body.pmDefaultModel.length > MAX_MODEL_LENGTH) {
-      return NextResponse.json(
-        { error: `pmDefaultModel must be a string up to ${MAX_MODEL_LENGTH} chars` },
-        { status: 400 }
-      );
-    }
-    updates.pmDefaultModel = body.pmDefaultModel.trim();
-  }
-
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
   }
@@ -62,6 +51,5 @@ export const PUT = withAdmin(async (request, { user, db }) => {
 
   return NextResponse.json({
     aiModel: settings.aiModel,
-    pmDefaultModel: settings.pmDefaultModel || "",
   });
 });

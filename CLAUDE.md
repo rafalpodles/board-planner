@@ -151,7 +151,9 @@ OPENROUTER_API_KEY=       # Optional — the PM agent (chat-driven project manag
                           # own key; with ORGANISATION_DOMAIN it is the operator's, used only by an organisation
                           # whose plan includes managed AI (`ai.managed`: Pro and the trial). An organisation's
                           # own key, stored sealed in Settings → AI key, is used first on any plan and is never
-                          # replaced by this one (`src/lib/model-keys.ts`, BP-652)
+                          # replaced by this one (`src/lib/model-keys.ts`, BP-652). Both run on ONE model,
+                          # `Settings.aiModel` (Settings → Agents); a project's `pm.model` overrides it for the
+                          # PM only (`resolvePmModel`); there is no PM_MODEL and no separate PM default (BP-1006)
 AI_TRIAL_TOKENS=          # Optional — tokens a trial may spend of the operator's AI key in all (hosted
 AI_MONTHLY_TOKENS=        # default 3,000,000), and a paid plan per UTC month (15,000,000) plus
 AI_MEMBER_TOKENS=         # AI_MEMBER_TOKENS (1,000,000) for each active member above the ten included;
@@ -161,7 +163,6 @@ AI_DAILY_PERCENT=         # one UTC day may use at most AI_DAILY_PERCENT (20) of
                           # ORGANISATION_DOMAIN, so self-hosted has no limit until one is set. A refusal is
                           # 429 naming the number and the renewal. An organisation's own key is counted, never
                           # refused. Each person is also held to 20 AI Assist generations per 15 minutes (BP-323)
-PM_MODEL=                 # Optional — PM agent model (default: openai/gpt-6-luna)
 PM_MAX_TOKENS=            # Optional — PM agent max output tokens per call (default: 8192)
 PM_SCHEDULER_TICK_MS=     # Optional — PM autonomy scheduler tick (default: 300000)
 WEBHOOK_SIGNING_SECRET=   # Optional — HMACs outgoing webhook deliveries (x-boardplanner-signature)

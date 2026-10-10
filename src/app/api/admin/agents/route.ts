@@ -3,7 +3,6 @@ import { connectDB } from "@/lib/db";
 import { withAdmin } from "@/lib/middleware";
 import { getSettings } from "@/models/settings";
 import { pmAvailability } from "@/lib/pm/config";
-import { DEFAULT_PM_MODEL } from "@/lib/pm/openrouter";
 
 export const GET = withAdmin(async (_request, { db }) => {
   await connectDB();
@@ -19,10 +18,7 @@ export const GET = withAdmin(async (_request, { db }) => {
     pmNeedsPlan: availability?.needsPlan ?? false,
     pmKeyUnreadable: availability?.keyUnreadable ?? false,
     pmLocked: availability?.locked ?? false,
-    defaults: {
-      pmDefaultModel: settings.pmDefaultModel || "",
-      envModel: DEFAULT_PM_MODEL(),
-    },
+    defaults: { aiModel: settings.aiModel },
     projects: projects.map((project) => ({
       _id: String(project._id),
       key: project.key,

@@ -26,22 +26,14 @@ const ROW = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  api.get.mockImplementation(async (url: string) =>
-    url === "/api/settings"
-      ? { aiModel: "" }
-      : { pmAvailable: true, defaults: { pmDefaultModel: "", envModel: "m" }, projects: [ROW] }
-  );
+  api.get.mockImplementation(async () => ({ pmAvailable: true, defaults: { aiModel: "openai/one-model" }, projects: [ROW] }));
 });
 afterEach(cleanup);
 
 // BP-652: the banner says what would fix it, and a fix that is not a server setting is not told as one
 describe("the banner when no agent can run", () => {
   const answer = (over: Record<string, unknown>) =>
-    api.get.mockImplementation(async (url: string) =>
-      url === "/api/settings"
-        ? { aiModel: "" }
-        : { pmAvailable: false, defaults: { pmDefaultModel: "", envModel: "m" }, projects: [ROW], ...over }
-    );
+    api.get.mockImplementation(async () => ({ pmAvailable: false, defaults: { aiModel: "m" }, projects: [ROW], ...over }));
 
   it("offers a Free organisation its own key or Pro", async () => {
     answer({ pmNeedsPlan: true });
@@ -96,5 +88,48 @@ describe("a governance row while one field's save is in flight", () => {
 
     expect(model.value).toBe("e2e/governed-model");
     expect(screen.getByRole("button", { name: "Locked" })).toBeTruthy();
+  });
+});
+
+// BP-1006: AI task drafting and the PM agent run on one model, so there is one field for it
+describe("the instance model", () => {
+  it("is one field, shared by AI task drafting and the PM agent, with no second default beside it", async () => {
+    render(<AdminAgentsPage />);
+
+    expect(((await screen.findByLabelText("Model", { exact: true })) as HTMLInputElement).value).toBe("openai/one-model");
+    expect(screen.getAllByLabelText("Model", { exact: true })).toHaveLength(1);
+    expect(screen.queryByText("PM agent defaults")).toBeNull();
+    expect(screen.queryByText("Default model")).toBeNull();
+  });
+
+  it("is what a project that names no model of its own will run", async () => {
+    render(<AdminAgentsPage />);
+
+    expect(((await screen.findByLabelText("PM model for BP — Board")) as HTMLInputElement).placeholder).toBe("openai/one-model");
+  });
+
+  it("is saved as aiModel, and nothing else is sent", async () => {
+    api.put.mockResolvedValue({});
+    render(<AdminAgentsPage />);
+
+    fireEvent.change(await screen.findByLabelText("Model", { exact: true }), { target: { value: "  openai/next  " } });
+    fireEvent.click(screen.getByRole("button", { name: "Save model" }));
+
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith("/api/settings", { aiModel: "openai/next" }));
+  });
+
+  it("saves a project's own model when it is typed, and clears it when it is emptied", async () => {
+    api.patch.mockResolvedValue({ ...ROW, model: "x/own" });
+    render(<AdminAgentsPage />);
+    const model = await screen.findByLabelText("PM model for BP — Board");
+
+    fireEvent.change(model, { target: { value: "x/own" } });
+    fireEvent.blur(model);
+    await waitFor(() => expect(api.patch).toHaveBeenCalledWith("/api/admin/agents/p1", { model: "x/own" }));
+
+    api.patch.mockResolvedValue({ ...ROW, model: "" });
+    fireEvent.change(model, { target: { value: "" } });
+    fireEvent.blur(model);
+    await waitFor(() => expect(api.patch).toHaveBeenLastCalledWith("/api/admin/agents/p1", { model: "" }));
   });
 });
