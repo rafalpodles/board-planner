@@ -1,7 +1,7 @@
 import { licencePullConfig } from "./licence-pull";
 import { signPlatformRequest } from "./platform-request";
 
-export type BillingAction = "checkout" | "portal" | "status" | "members" | "withdraw";
+export type BillingAction = "checkout" | "portal" | "status" | "members";
 
 export type BillingAnswer =
   | { status: "ok"; body: Record<string, unknown> }
@@ -10,8 +10,6 @@ export type BillingAnswer =
   | { status: "refused"; httpStatus: number; body: Record<string, unknown> };
 
 const TIMEOUT_MS = 10_000;
-// A withdrawal is several of Stripe's calls in a row (refunds, then the cancellation), each allowed its own retry
-const WITHDRAW_TIMEOUT_MS = 30_000;
 const MAX_RESPONSE_BYTES = 64 * 1024;
 
 /**
@@ -36,7 +34,7 @@ export async function askBilling(action: BillingAction, payload: Record<string, 
       method: "POST",
       headers: { ...headers, "content-type": "application/json" },
       body,
-      signal: AbortSignal.timeout(action === "withdraw" ? WITHDRAW_TIMEOUT_MS : TIMEOUT_MS),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
       redirect: "error",
     });
   } catch {

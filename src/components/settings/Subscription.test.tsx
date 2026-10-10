@@ -35,11 +35,7 @@ const setLocation = (search = "") => {
 };
 const DAY = 86_400_000;
 const endsIn = (days: number) => new Date(Date.now() + days * DAY).toISOString();
-// BP-941: the order step asks who is buying, and a consumer for the request to start at once
-const orderAs = async (buyer: "business" | "consumer") => {
-  fireEvent.click(await screen.findByRole("radio", { name: buyer === "business" ? /A business/ : /A consumer/ }));
-  if (buyer === "consumer") fireEvent.click(screen.getByRole("checkbox", { name: /I ask for Pro to start immediately/ }));
-};
+const consent = async () => fireEvent.click(await screen.findByRole("checkbox", { name: /Start Pro now/ }));
 const shown = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
 
 beforeEach(() => {
@@ -101,11 +97,11 @@ describe("Subscription", () => {
     m.api.post.mockResolvedValue({ url: "https://checkout.stripe.test/c/1" });
     render(<Subscription />);
 
-    await orderAs("business");
+    await consent();
     fireEvent.click(await screen.findByTestId("subscription-checkout"));
 
     await waitFor(() => expect(assign).toHaveBeenCalledWith("https://checkout.stripe.test/c/1"));
-    expect(m.api.post).toHaveBeenCalledWith("/api/admin/billing/checkout", { interval: "month", buyer: "business", immediateStart: false }, { relayed: true });
+    expect(m.api.post).toHaveBeenCalledWith("/api/admin/billing/checkout", { interval: "month", immediateStart: true }, { relayed: true });
   });
 
   it("starts a yearly checkout when Yearly is chosen", async () => {
@@ -113,17 +109,17 @@ describe("Subscription", () => {
     render(<Subscription />);
 
     fireEvent.click(await screen.findByLabelText("Yearly"));
-    await orderAs("consumer");
+    await consent();
     fireEvent.click(screen.getByTestId("subscription-checkout"));
 
-    await waitFor(() => expect(m.api.post).toHaveBeenCalledWith("/api/admin/billing/checkout", { interval: "year", buyer: "consumer", immediateStart: true }, { relayed: true }));
+    await waitFor(() => expect(m.api.post).toHaveBeenCalledWith("/api/admin/billing/checkout", { interval: "year", immediateStart: true }, { relayed: true }));
   });
 
   it("says what went wrong and gives the button back when no payment page comes", async () => {
     m.api.post.mockRejectedValue(new Error("Could not reach the payment service. Try again in a moment."));
     render(<Subscription />);
 
-    await orderAs("business");
+    await consent();
     fireEvent.click(await screen.findByTestId("subscription-checkout"));
 
     await waitFor(() => expect(m.toast).toHaveBeenCalledWith("Could not reach the payment service. Try again in a moment.", "error"));
@@ -333,14 +329,12 @@ describe("Subscription", () => {
     setLocation("?checkout=success");
     render(<Subscription />);
     await act(async () => {});
-    fireEvent.click(screen.getByRole("radio", { name: /A business/ }));
 
     expect((screen.getByTestId("subscription-checkout") as HTMLButtonElement).disabled).toBe(true);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(31_000);
     });
-    // The choice was held while the payment was being confirmed
-    fireEvent.click(screen.getByRole("radio", { name: /A business/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Start Pro now/ }));
 
     expect(screen.getByTestId("subscription-returned").textContent).toMatch(/taking longer than usual/);
     expect((screen.getByTestId("subscription-checkout") as HTMLButtonElement).disabled).toBe(false);
@@ -383,7 +377,7 @@ describe("Subscription", () => {
   it("reads the subscription again when the service says the page was out of date", async () => {
     m.api.post.mockRejectedValue(new Error("This organisation already has a subscription"));
     render(<Subscription />);
-    await orderAs("business");
+    await consent();
     fireEvent.click(await screen.findByTestId("subscription-checkout"));
     await waitFor(() => expect(m.toast).toHaveBeenCalled());
 
@@ -393,7 +387,7 @@ describe("Subscription", () => {
   it("is not stuck busy when the browser restores the page after Back from Stripe", async () => {
     m.api.post.mockReturnValue(new Promise(() => {}));
     render(<Subscription />);
-    await orderAs("business");
+    await consent();
     fireEvent.click(await screen.findByTestId("subscription-checkout"));
     const button = screen.getByTestId("subscription-checkout") as HTMLButtonElement;
     expect([button.disabled, button.getAttribute("aria-busy")]).toEqual([true, "true"]);
@@ -403,7 +397,6 @@ describe("Subscription", () => {
     });
 
     expect([button.disabled, button.getAttribute("aria-busy")]).toEqual([false, "false"]);
-    expect(button.textContent).toBe("Subscribe with an obligation to pay");
   });
 
   describe("what is bought (BP-980)", () => {
@@ -414,7 +407,7 @@ describe("Subscription", () => {
       subscription: null,
       memberPrice: null,
       upcoming: null,
-      offer: { launch: true, includedMembers: 10, month: { base: usd(2900), member: usd(300) }, year: { base: usd(29000), member: usd(3000) }, ...over },
+      offer: { launch: true, includedMembers: 10, taxInclusive: false, month: { base: usd(2900), member: usd(300) }, year: { base: usd(29000), member: usd(3000) }, ...over },
     });
 
     it("says the price of each period, what a year saves, what is included and what a member above it costs, and the button names the amount", async () => {
@@ -424,10 +417,8 @@ describe("Subscription", () => {
       expect((await screen.findByTestId("subscription-price-month")).textContent).toBe("$29 per month");
       expect(screen.getByTestId("subscription-price-year").textContent).toBe("$290 per year");
       expect(screen.getByTestId("subscription-saving").textContent).toBe("Saves $58 a year");
-      expect(screen.getByTestId("subscription-price").textContent).toBe(
-        "$29 per month (USD), plus VAT where it applies; Stripe shows the total including VAT before you pay, with 10 members included, then $3 per member per month."
-      );
-      expect(screen.getByTestId("subscription-checkout").textContent).toBe("Subscribe with an obligation to pay");
+      expect(screen.getByTestId("subscription-includes").textContent).toBe("Pro for the whole organisation: 10 members included, then $3 per member per month.");
+      expect(screen.getByTestId("subscription-price").textContent).toBe("$29 per month plus VAT, renews until cancelled.");
     });
 
     it("follows the period that is chosen: the member price and the button name the year, and the checkout is for it", async () => {
@@ -437,11 +428,11 @@ describe("Subscription", () => {
 
       fireEvent.click(await screen.findByRole("radio", { name: /Yearly/ }));
 
-      expect(screen.getByTestId("subscription-price").textContent).toContain("$290 per year (USD)");
-      expect(screen.getByTestId("subscription-price").textContent).toContain("then $30 per member per year.");
-      await orderAs("business");
+      expect(screen.getByTestId("subscription-includes").textContent).toBe("Pro for the whole organisation: 10 members included, then $30 per member per year.");
+      expect(screen.getByTestId("subscription-price").textContent).toBe("$290 per year plus VAT, renews until cancelled.");
+      await consent();
       fireEvent.click(screen.getByTestId("subscription-checkout"));
-      await waitFor(() => expect(m.api.post).toHaveBeenCalledWith("/api/admin/billing/checkout", { interval: "year", buyer: "business", immediateStart: false }, { relayed: true }));
+      await waitFor(() => expect(m.api.post).toHaveBeenCalledWith("/api/admin/billing/checkout", { interval: "year", immediateStart: true }, { relayed: true }));
     });
 
     it("shows the standard prices when that is what a checkout would charge, and no saving where a year saves nothing", async () => {
@@ -460,7 +451,7 @@ describe("Subscription", () => {
 
       expect((await screen.findByTestId("subscription-price-year")).textContent).toBe("$350 per year");
       expect(screen.queryByTestId("subscription-saving")).toBeNull();
-      expect(screen.getByTestId("subscription-price").textContent).toContain("1 member included");
+      expect(screen.getByTestId("subscription-includes").textContent).toContain("1 member included");
     });
 
     it("shows the cents a price has, and only those", async () => {
@@ -468,7 +459,7 @@ describe("Subscription", () => {
       render(<Subscription />);
 
       expect((await screen.findByTestId("subscription-price-month")).textContent).toBe("$29.50 per month");
-      expect(screen.getByTestId("subscription-price").textContent).toContain("then $3.25 per member");
+      expect(screen.getByTestId("subscription-includes").textContent).toContain("then $3.25 per member");
     });
 
     it("names no price it was not given, and still starts a checkout", async () => {
@@ -477,10 +468,10 @@ describe("Subscription", () => {
       render(<Subscription />);
 
       const button = await screen.findByTestId("subscription-checkout");
-      expect(button.textContent).toBe("Subscribe with an obligation to pay");
       expect(screen.queryByTestId("subscription-price-month")).toBeNull();
+      expect(screen.queryByTestId("subscription-includes")).toBeNull();
       expect(screen.queryByTestId("subscription-price")).toBeNull();
-      await orderAs("business");
+      await consent();
       fireEvent.click(button);
       await waitFor(() => expect(assign).toHaveBeenCalledWith("https://checkout.stripe.test/c/4"));
     });
@@ -527,185 +518,43 @@ describe("Subscription", () => {
       subscription: null,
       memberPrice: null,
       upcoming: null,
-      withdrawal: null,
       seller: { name: "Jan Kowalski Board Planner", address: "ul. Prosta 1, 00-001 Warszawa, Poland" },
-      termsVersion: "2026-10",
       offer: { launch: true, includedMembers: 10, taxInclusive: true, month: { base: eur(4999), member: eur(499) }, year: { base: eur(49990), member: eur(4990) } },
       ...over,
     });
     const button = () => screen.getByTestId("subscription-checkout") as HTMLButtonElement;
 
-    it("asks who is buying before anything can be ordered, and the button says the order obliges to pay", async () => {
+    it("says the gross price, that it renews, the right to withdraw with the Terms, and the seller", async () => {
       m.api.get.mockResolvedValue(offered());
       render(<Subscription />);
 
-      await screen.findByTestId("subscription-order-information");
+      expect((await screen.findByTestId("subscription-price")).textContent).toBe("€49.99 per month including VAT, renews until cancelled.");
+      expect(screen.getByTestId("subscription-withdrawal-right").textContent).toBe("You can withdraw within 14 days. Terms");
+      expect(screen.getByRole("link", { name: "Terms" }).getAttribute("href")).toBe("https://board-planner.com/legal/terms");
+      expect(screen.getByTestId("subscription-seller").textContent).toBe("Seller: Jan Kowalski Board Planner, ul. Prosta 1, 00-001 Warszawa, Poland");
+    });
+
+    it("names no seller it was not given", async () => {
+      m.api.get.mockResolvedValue(offered({ seller: null }));
+      render(<Subscription />);
+
+      await screen.findByTestId("subscription-withdrawal-right");
+      expect(screen.queryByTestId("subscription-seller")).toBeNull();
+    });
+
+    it("holds the order until the unticked consent is ticked, and the button says the order obliges to pay", async () => {
+      m.api.get.mockResolvedValue(offered());
+      render(<Subscription />);
+
+      const box = (await screen.findByRole("checkbox", { name: "Start Pro now. If I withdraw within 14 days I pay for the days used." })) as HTMLInputElement;
+      expect(box.checked).toBe(false);
       expect(button().textContent).toBe("Subscribe with an obligation to pay");
       expect(button().disabled).toBe(true);
-      expect(screen.getByTestId("subscription-order-hint").textContent).toBe("Choose who is buying to continue.");
-      expect((screen.getByRole("radio", { name: /A business/ }) as HTMLInputElement).checked).toBe(false);
-      expect((screen.getByRole("radio", { name: /A consumer/ }) as HTMLInputElement).checked).toBe(false);
-    });
 
-    it("lets a business order with no request to start at once", async () => {
-      m.api.get.mockResolvedValue(offered());
-      render(<Subscription />);
-
-      await orderAs("business");
-
-      expect(screen.queryByTestId("subscription-consent")).toBeNull();
+      fireEvent.click(box);
       expect(button().disabled).toBe(false);
-    });
-
-    it("holds a consumer's order until the request to start at once is ticked, which it never is by itself", async () => {
-      m.api.get.mockResolvedValue(offered());
-      render(<Subscription />);
-
-      fireEvent.click(await screen.findByRole("radio", { name: /A consumer/ }));
-      const consent = screen.getByRole("checkbox", { name: /I ask for Pro to start immediately/ }) as HTMLInputElement;
-      expect(consent.checked).toBe(false);
-      expect(screen.getByTestId("subscription-consent").textContent).toContain("I pay for the time used until then");
-      expect(screen.getByTestId("subscription-consent").textContent).toContain("I lose the right of withdrawal once the service has been fully provided");
+      fireEvent.click(box);
       expect(button().disabled).toBe(true);
-      expect(screen.getByTestId("subscription-order-hint").textContent).toBe("Tick the request above to continue.");
-
-      fireEvent.click(consent);
-      expect(button().disabled).toBe(false);
-      fireEvent.click(consent);
-      expect(button().disabled).toBe(true);
-
-      fireEvent.click(consent);
-      fireEvent.click(screen.getByRole("radio", { name: /A business/ }));
-      fireEvent.click(screen.getByRole("radio", { name: /A consumer/ }));
-      expect((screen.getByRole("checkbox", { name: /I ask for Pro to start immediately/ }) as HTMLInputElement).checked).toBe(false);
-    });
-
-    it("says before the order who sells, what it costs with VAT for these members, that it renews, how to cancel and to withdraw, and under which terms", async () => {
-      m.organisation.current = { ...FREE, members: 13 };
-      m.api.get.mockResolvedValue(offered());
-      render(<Subscription />);
-
-      const box = await screen.findByTestId("subscription-order-information");
-      expect(screen.getByTestId("subscription-seller").textContent).toContain("Jan Kowalski Board Planner, ul. Prosta 1, 00-001 Warszawa, Poland.");
-      expect(screen.getByRole("link", { name: "Legal notice" }).getAttribute("href")).toBe("https://board-planner.com/legal/notice");
-      expect(screen.getByTestId("subscription-price").textContent).toBe(
-        "€49.99 per month (EUR), including VAT, with 10 members included, then €4.99 per member per month. For your 13 members: €64.96 per month."
-      );
-      expect(box.textContent).toContain("Renews automatically every month");
-      expect(box.textContent).toContain("Cancel any time under Manage subscription");
-      expect(screen.getByTestId("subscription-withdrawal-right").textContent).toContain("withdraw within 14 days");
-      expect(screen.getByRole("link", { name: "Terms" }).getAttribute("href")).toBe("https://board-planner.com/legal/terms");
-      expect(screen.getByRole("link", { name: "Privacy Policy" }).getAttribute("href")).toBe("https://board-planner.com/legal/privacy");
-      expect(screen.getByTestId("subscription-terms").textContent).toContain("version 2026-10");
-    });
-
-    it("links no Terms while no version is in force, and names no seller it was not given", async () => {
-      m.api.get.mockResolvedValue(offered({ termsVersion: null, seller: null }));
-      render(<Subscription />);
-
-      await screen.findByTestId("subscription-order-information");
-      expect(screen.queryByTestId("subscription-terms")).toBeNull();
-      expect(screen.getByTestId("subscription-seller").textContent).toMatch(/^Seller: Legal notice\./);
-    });
-
-    it("presents the launch price as a price, never as a reduction from another", async () => {
-      m.api.get.mockResolvedValue(offered());
-      const { container } = render(<Subscription />);
-
-      await screen.findByTestId("subscription-order-information");
-      expect(container.querySelectorAll("s, del, strike")).toHaveLength(0);
-      expect(container.textContent).not.toMatch(/regular price|was €|instead of|% off/i);
-    });
-  });
-
-  describe("withdrawal (BP-941)", () => {
-    const consumer = (purchasedAt: string, over: Record<string, unknown> = {}) => live({ buyer: "consumer", purchasedAt, withdrawnAt: null, ...over });
-
-    it("offers a consumer the withdrawal while the 14 days run, with a confirmation step before anything happens", async () => {
-      m.organisation.current = { ...FREE, plan: "pro" };
-      m.api.get.mockResolvedValue(consumer(endsIn(-3)));
-      m.api.post.mockResolvedValue({ withdrawn: true });
-      render(<Subscription />);
-
-      fireEvent.click(await screen.findByRole("button", { name: "Withdraw from the contract" }));
-      expect(m.api.post).not.toHaveBeenCalled();
-      expect(screen.getByText("Withdraw from the contract?")).toBeTruthy();
-      expect(screen.getByText(/Pro ends at the end of today/)).toBeTruthy();
-
-      fireEvent.click(screen.getByRole("button", { name: "Withdraw" }));
-      await waitFor(() => expect(m.api.post).toHaveBeenCalledWith("/api/admin/billing/withdraw", {}, { relayed: true }));
-      await waitFor(() => expect(m.toast).toHaveBeenCalledWith(expect.stringContaining("You have withdrawn from the contract"), "success"));
-      expect(m.reload).toHaveBeenCalled();
-    });
-
-    it("does nothing when the confirmation is cancelled", async () => {
-      m.organisation.current = { ...FREE, plan: "pro" };
-      m.api.get.mockResolvedValue(consumer(endsIn(-3)));
-      render(<Subscription />);
-
-      fireEvent.click(await screen.findByRole("button", { name: "Withdraw from the contract" }));
-      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-
-      expect(m.api.post).not.toHaveBeenCalled();
-    });
-
-    it("is offered to the last millisecond of the period, counted in Poland with a day's margin, and not after it", async () => {
-      m.organisation.current = { ...FREE, plan: "pro" };
-      const purchasedAt = "2026-10-03T22:40:00.000Z";
-      m.api.get.mockResolvedValue(consumer(purchasedAt));
-      vi.useFakeTimers({ toFake: ["Date"] });
-
-      vi.setSystemTime(new Date("2026-10-19T21:59:59.999Z"));
-      const first = render(<Subscription />);
-      expect(await screen.findByTestId("subscription-withdrawal")).toBeTruthy();
-      expect(screen.getByTestId("subscription-withdrawal").textContent).toContain(shown("2026-10-19T21:59:59.999Z"));
-      first.unmount();
-
-      vi.setSystemTime(new Date("2026-10-19T22:00:00.000Z"));
-      render(<Subscription />);
-      expect(await screen.findByTestId("subscription-details")).toBeTruthy();
-      expect(screen.queryByTestId("subscription-withdrawal")).toBeNull();
-    });
-
-    it("is not offered to a business, to a subscription sold before buyers were asked, or once withdrawn", async () => {
-      m.organisation.current = { ...FREE, plan: "pro" };
-      for (const answer of [live({ buyer: "business", purchasedAt: endsIn(-1) }), live(), consumer(endsIn(-1), { withdrawnAt: endsIn(0) })]) {
-        m.api.get.mockResolvedValue(answer);
-        const { unmount } = render(<Subscription />);
-        expect(await screen.findByTestId("subscription-details")).toBeTruthy();
-        expect(screen.queryByTestId("subscription-withdrawal")).toBeNull();
-        expect(screen.getByTestId("subscription-manage")).toBeTruthy();
-        unmount();
-      }
-    });
-
-    it("says, once withdrawn, when and what is refunded", async () => {
-      m.api.get.mockResolvedValue({ available: true, launchOpen: false, subscription: { ...live().subscription, status: "canceled" }, memberPrice: null, upcoming: null, withdrawal: { at: "2026-10-08T10:00:00.000Z", refunded: { amount: 3812, currency: "eur" } } });
-      render(<Subscription />);
-
-      expect((await screen.findByTestId("subscription-withdrawn")).textContent).toContain("€38.12");
-      expect(screen.getByTestId("subscription-withdrawn").textContent).toContain(shown("2026-10-08T10:00:00.000Z"));
-    });
-
-    it("says a withdrawal that is not yet finished is under way, naming no amount", async () => {
-      m.api.get.mockResolvedValue({ available: true, launchOpen: false, subscription: { ...live().subscription, status: "canceled" }, memberPrice: null, upcoming: null, withdrawal: { at: "2026-10-08T10:00:00.000Z", refunded: { amount: 0, currency: "eur" }, pending: true } });
-      render(<Subscription />);
-
-      expect((await screen.findByTestId("subscription-withdrawn")).textContent).toContain("The refund is being made through Stripe");
-      expect(screen.getByTestId("subscription-withdrawn").textContent).not.toContain("€0.00");
-    });
-
-    it("says what went wrong and keeps the control when the withdrawal fails", async () => {
-      m.organisation.current = { ...FREE, plan: "pro" };
-      m.api.get.mockResolvedValue(consumer(endsIn(-3)));
-      m.api.post.mockRejectedValue(new Error("Could not reach the payment service. Try again in a moment."));
-      render(<Subscription />);
-
-      fireEvent.click(await screen.findByRole("button", { name: "Withdraw from the contract" }));
-      fireEvent.click(screen.getByRole("button", { name: "Withdraw" }));
-
-      await waitFor(() => expect(m.toast).toHaveBeenCalledWith("Could not reach the payment service. Try again in a moment.", "error"));
-      expect(screen.getByRole("button", { name: "Withdraw from the contract" })).toBeTruthy();
     });
   });
 });

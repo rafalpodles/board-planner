@@ -13,11 +13,7 @@ export const POST = withAdmin(async (request, { user, db }) => {
   const body = await request.json().catch(() => null);
   const interval = body?.interval;
   if (interval !== "month" && interval !== "year") return NextResponse.json({ error: "interval must be month or year" }, { status: 400 });
-  const buyer = body?.buyer;
-  if (buyer !== "business" && buyer !== "consumer") return NextResponse.json({ error: "Say whether a business or a consumer is buying" }, { status: 400 });
-  if (buyer === "consumer" && body?.immediateStart !== true) {
-    return NextResponse.json({ error: "A consumer must ask for Pro to start immediately before paying" }, { status: 400 });
-  }
+  if (body?.immediateStart !== true) return NextResponse.json({ error: "Agree to start Pro now before paying" }, { status: 400 });
   const origin = await organisationOrigin(db.organisation);
   if (!origin) return NextResponse.json({ error: "This organisation has no address to return to" }, { status: 409 });
 
@@ -31,8 +27,7 @@ export const POST = withAdmin(async (request, { user, db }) => {
     email: user.email,
     successUrl: `${origin}/settings/organisation?checkout=success`,
     cancelUrl: `${origin}/settings/organisation?checkout=cancelled`,
-    buyer,
-    immediateStart: buyer === "consumer",
+    immediateStart: true,
     orderedAt: new Date().toISOString(),
     ...(termsVersion ? { termsVersion } : {}),
   });
