@@ -112,8 +112,6 @@ async function lastActiveOf(organisation: Types.ObjectId, madeAt: Date): Promise
 
 const dayOf = (at: Date) => at.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
 const utcDayNumber = (at: number) => Math.floor(at / DAY_MS);
-/** The last calendar day that is still over before the suspension everywhere on Earth, down to UTC−12 */
-const LAST_DAY_MARGIN_MS = 36 * 60 * 60 * 1000;
 
 function timeLeft(deleteOn: Date, now: number): string {
   if (deleteOn.getTime() - now < DAY_MS) return "less than a day";
@@ -123,13 +121,10 @@ function timeLeft(deleteOn: Date, now: number): string {
 
 export function deadOrganisationEmail(kind: "notice" | "reminder", label: string, origin: string | null, deleteOn: Date, now: number) {
   const date = dayOf(deleteOn);
-  const lastDayAt = deleteOn.getTime() - LAST_DAY_MARGIN_MS;
-  const lastDayIsPast = utcDayNumber(lastDayAt) < utcDayNumber(now);
-  const hour = `${deleteOn.toISOString().slice(11, 16)} UTC`;
-  const deadline = lastDayIsPast ? `now, before ${date} at ${hour},` : `by ${dayOf(new Date(lastDayAt))}`;
+  const deadline = `before ${date} at ${deleteOn.toISOString().slice(11, 16)} UTC`;
   const left = timeLeft(deleteOn, now);
   const { html, text } = renderEmail({
-    preheader: `${label} will be suspended and deleted on ${date} unless somebody signs in or chooses a plan ${deadline.replace(/,$/, "")}.`,
+    preheader: `${label} will be suspended and deleted on ${date} unless somebody signs in or chooses a plan ${deadline}.`,
     kicker: kind === "notice" ? "Your organisation" : `Reminder: ${left} left`,
     heading: `${label} will be deleted on ${date}`,
     intro: [

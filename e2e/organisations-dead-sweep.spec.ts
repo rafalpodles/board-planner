@@ -27,8 +27,10 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const subjectLine = (subject: string) => new RegExp(`^Subject: ${subject.split(" ").join("\\s+")}\\s*$`, "m");
 const dayOf = (at: number) => new Date(at).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
 const deletionDateOf = (noticeAt: Date) => dayOf(noticeAt.getTime() + 30 * DAY_MS);
-// The last day that is over before the suspension everywhere, down to UTC−12
-const lastDayOf = (noticeAt: Date) => dayOf(noticeAt.getTime() + 30 * DAY_MS - 36 * 60 * 60 * 1000);
+const deadlineOf = (noticeAt: Date) => {
+  const deleteOn = noticeAt.getTime() + 30 * DAY_MS;
+  return `Signing in, or choosing a plan, before ${dayOf(deleteOn)} at ${new Date(deleteOn).toISOString().slice(11, 16)} UTC cancels the deletion`;
+};
 
 const organisationRow = (who: { organisation: unknown }) => withDb((db) => db.collection("organisations").findOne({ _id: who.organisation } as never));
 
@@ -64,7 +66,7 @@ test("an organisation with no plan and no sign-in is told first, reminded a week
   const notice = bodyOf((await mailFor("boss@acme.example")).at(-1)!);
   expect(notice).toMatch(/will be deleted/);
   expect(notice).toMatch(subjectLine(`Acme will be suspended and deleted on ${deletionDateOf(noticeAt)}`));
-  expect(notice).toContain(`Signing in, or choosing a plan, by ${lastDayOf(noticeAt)} cancels the deletion`);
+  expect(notice).toContain(deadlineOf(noticeAt));
   expect(notice).toContain(`${originOf(ACME)}/settings/export`);
 
   // Until a week before the end nothing more happens
@@ -76,7 +78,7 @@ test("an organisation with no plan and no sign-in is told first, reminded a week
   await expect.poll(async () => (await mailFor("boss@acme.example")).length).toBe(mailBefore + 2);
   const reminder = bodyOf((await mailFor("boss@acme.example")).at(-1)!);
   expect(reminder).toMatch(subjectLine(`Reminder: Acme will be suspended and deleted on ${deletionDateOf(noticeAt)}`));
-  expect(reminder).toContain(`Signing in, or choosing a plan, by ${lastDayOf(noticeAt)} cancels the deletion`);
+  expect(reminder).toContain(deadlineOf(noticeAt));
   expect(reminder).toContain(`${originOf(ACME)}/settings/export`);
   expect((await organisationRow(ACME))?.deadReminderAt).toBeInstanceOf(Date);
 
