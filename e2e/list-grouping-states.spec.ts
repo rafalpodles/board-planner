@@ -65,6 +65,8 @@ test("an inline edit that changes the grouped value moves the row to its new gro
   });
   expect(urgentRows).toEqual(["TP-1", "TP-2", "TP-3"]);
   await expect(taskRows(page)).toHaveCount(4);
+  const stored = await request.get(`/api/projects/${PROJECT_KEY}/tasks/${DECOY_TASK_NUMBER}`, { headers: ADMIN_AUTH });
+  expect((await stored.json()).priority).toBe("urgent");
 });
 
 test("a group the last task leaves is gone, not drawn empty", async ({ page, request }) => {
