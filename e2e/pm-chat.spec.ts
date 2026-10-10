@@ -343,10 +343,27 @@ test.describe("a turn, from the box to the bubble", () => {
 
     await expect(
       page.getByText(
-        "Talk to the PM: ask it to break a feature into tasks, refine a backlog or report on project state."
+        "Talk to the PM: ask it to break a feature into tasks, refine a backlog or report on project state. The PM agent is an AI model, not a person, and its answers can be wrong."
       )
     ).toBeVisible();
     await expect(bubbles(page)).toHaveCount(0);
+  });
+
+  // BP-942: AI Act art. 50(1). Whoever talks to the PM is told it is an AI, on the answer itself
+  test("every answer is marked as an AI's, and the reader's own message is not", async ({ page }) => {
+    await signIn(page);
+    await openChat(page);
+
+    await say(page, "Who am I talking to?", { say: "A project manager for this board." });
+
+    await expect(reply(page)).toContainText("A project manager for this board.");
+    const badge = reply(page).getByTestId("ai-badge");
+    await expect(badge).toHaveText("AI");
+    await expect(badge).toHaveAttribute("aria-label", "Written by an AI model, not a person");
+    await expect(page.getByTestId("ai-badge")).toHaveCount(1);
+
+    await page.reload();
+    await expect(reply(page).getByTestId("ai-badge")).toBeVisible();
   });
 
   test("the answer arrives under the agent's name and survives a reload", async ({ page }) => {
@@ -387,6 +404,28 @@ test.describe("a turn, from the box to the bubble", () => {
       { headers: ADMIN_AUTH }
     );
     expect((await task.json()).title).toBe("Renamed by the agent");
+  });
+
+  // BP-942: what the PM writes on a task is read away from the chat, where nothing else says it was an AI
+  test("a comment the agent writes is marked as an AI's on the task, and in its history", async ({ page }) => {
+    await signIn(page);
+    await openChat(page);
+
+    await say(page, "Leave a note on that one.", {
+      name: "add_comment",
+      arguments: { taskKey: SIBLING_TASK_KEY, body: "Split this into two smaller tasks." },
+    });
+    const chip = page.getByRole("link", { name: new RegExp(SIBLING_TASK_KEY) });
+    await expect(chip).toBeVisible();
+    await chip.click();
+
+    const comment = page.locator("div.group").filter({ hasText: "Split this into two smaller tasks." });
+    await expect(comment).toBeVisible();
+    await expect(comment).toContainText("PM Agent");
+    await expect(comment.getByTestId("ai-badge")).toHaveText("AI");
+
+    await page.getByRole("tab", { name: /History/ }).click();
+    await expect(page.getByText(/PM Agent \(AI\) added a comment/)).toBeVisible();
   });
 
   test("while a turn runs the box is closed, and Send becomes Stop", async ({ page }) => {

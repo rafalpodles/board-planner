@@ -18,6 +18,7 @@ import { Modal } from "@/components/ui/Modal";
 import { BoardLoadFailed } from "@/components/ui/LoadFailed";
 import { AiKeyUnreadable, AiLocked, AiNeedsKey } from "@/components/AiNeedsKey";
 import { EMPTY_THREAD, withNewestPage, withOlderPage, type ThreadPage } from "./thread-paging";
+import { AiBadge } from "@/components/ui/AiBadge";
 
 const MAX_ATTACHMENTS = 4;
 const MAX_INPUT_HEIGHT = 200;
@@ -570,6 +571,7 @@ export function PmChat({
         {messages.length === 0 && !working && (
           <p className="text-sm text-text-muted text-center py-10">
             Talk to the PM: ask it to break a feature into tasks, refine a backlog or report on project state.
+            The PM agent is an AI model, not a person, and its answers can be wrong.
           </p>
         )}
         {messages.map((m) => (
@@ -582,7 +584,10 @@ export function PmChat({
               }
             >
               {m.role === "assistant" && (
-                <p className="text-[11px] font-medium text-text-muted mb-1">PM Agent</p>
+                <>
+                  <p className="mb-1 mr-1.5 inline-block text-[11px] font-medium text-text-muted">PM Agent</p>
+                  <AiBadge />
+                </>
               )}
               {m.trigger && m.trigger.type !== "chat" && (
                 <span className="inline-flex items-center text-[10px] text-text-muted bg-bg-input rounded-full px-2 py-0.5 mb-1">

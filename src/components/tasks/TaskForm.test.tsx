@@ -57,3 +57,17 @@ describe("the checklist box", () => {
     expect(screen.getAllByDisplayValue("かくにん")).toEqual([input]);
   });
 });
+
+// BP-942: AI Act art. 50 — what AI Assist writes into the form is said to be an AI's before it is saved
+describe("AI Assist", () => {
+  it("is marked as an AI and says its fields are to be checked", async () => {
+    api.get.mockImplementation((url: string) =>
+      Promise.resolve(url.endsWith("/ai/generate-task") ? { enabled: true } : [])
+    );
+    render(<TaskForm projectId="p1" onSaved={() => {}} onCancel={() => {}} />);
+
+    const label = await screen.findByText("AI Assist");
+    expect(label.querySelector("[data-testid='ai-badge']")?.textContent).toBe("AI");
+    expect(screen.getByText("An AI model fills every field below. Check and edit them before saving.")).toBeTruthy();
+  });
+});

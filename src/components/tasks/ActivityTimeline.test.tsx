@@ -546,3 +546,17 @@ describe("ActivityTimeline — what a link did to this task", () => {
     expect(screen.getByText("×").className).toContain("text-danger");
   });
 });
+
+// BP-942
+describe("what the PM agent did", () => {
+  it("is said to be the AI's, and a person's is not", async () => {
+    api.get.mockResolvedValue([
+      { ...log, _id: "l-pm", user: { _id: "pm1", username: "pm", fullName: "PM Agent" } },
+      { ...log, _id: "l-person" },
+    ]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+
+    await waitFor(() => expect(screen.getByText(/PM Agent \(AI\) created this task/)).toBeTruthy());
+    expect(screen.getByText(/Owner Name created this task/).textContent).not.toContain("(AI)");
+  });
+});

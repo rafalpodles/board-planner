@@ -30,6 +30,7 @@ import { MAX_RECURRENCE_INTERVAL, clampInterval } from "@/lib/recurrence";
 import { activeFields, sortedFields, orderedOptions } from "@/lib/custom-fields";
 import type { GeneratedTask } from "@/lib/ai";
 import { AiKeyUnreadable, AiLocked, AiNeedsKey } from "@/components/AiNeedsKey";
+import { AiBadge } from "@/components/ui/AiBadge";
 
 /**
  * Creates a task. An existing one is edited in place by the detail view, which owns
@@ -265,7 +266,9 @@ export function TaskForm({
 
       {aiEnabled && (
         <div className="bg-bg-input border border-border rounded-lg p-3 space-y-2">
-          <label className="text-sm font-medium">AI Assist</label>
+          <label className="flex items-center gap-1.5 text-sm font-medium">
+            AI Assist <AiBadge />
+          </label>
           <div className="flex gap-2">
             <input
               type="text"
@@ -292,7 +295,7 @@ export function TaskForm({
             </Button>
           </div>
           <p className="text-xs text-text-muted">
-            AI will fill all fields below. You can edit before saving.
+            An AI model fills every field below. Check and edit them before saving.
           </p>
         </div>
       )}
