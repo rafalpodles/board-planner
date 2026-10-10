@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor, within, act } from "@testing-library/react";
 import { ViewsMenu, ViewSnapshot } from "./ViewsMenu";
 import type { ApiSavedView } from "@/types";
 
@@ -327,9 +327,9 @@ describe("ViewsMenu", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save view" }));
     await screen.findByText("Fresh");
 
-    releaseFirst([view({ name: "Stale" })]);
-    await Promise.resolve();
-    await Promise.resolve();
+    await act(async () => {
+      releaseFirst([view({ name: "Stale" })]);
+    });
 
     expect(screen.queryByText("Stale")).toBeNull();
     expect(screen.getByText("Fresh")).toBeTruthy();
