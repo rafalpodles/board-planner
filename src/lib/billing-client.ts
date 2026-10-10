@@ -37,7 +37,8 @@ export async function askBilling(action: BillingAction, payload: Record<string, 
       signal: AbortSignal.timeout(TIMEOUT_MS),
       redirect: "error",
     });
-  } catch {
+  } catch (error) {
+    console.warn(`The licence service could not be reached for a billing ${action} request: ${error instanceof Error ? error.name : "unknown error"}`);
     return { status: "unreachable" };
   }
   const text = await response.text().catch(() => "");
@@ -51,7 +52,10 @@ export async function askBilling(action: BillingAction, payload: Record<string, 
   }
   if (parsed.billing === false) return { status: "off" };
   if (response.ok) return { status: "ok", body: parsed };
-  if (response.status >= 500) return { status: "unreachable" };
+  if (response.status >= 500) {
+    console.warn(`The licence service failed a billing ${action} request: ${response.status}`);
+    return { status: "unreachable" };
+  }
   // 404 and 409 are answers about the organisation; the rest (a signature it refused, a request it could not read) are ours to fix
   if (response.status !== 404 && response.status !== 409) console.warn(`The licence service refused a billing ${action} request: ${response.status}`);
   return { status: "refused", httpStatus: response.status, body: parsed };
