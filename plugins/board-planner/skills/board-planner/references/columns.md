@@ -4,7 +4,7 @@ A board's columns are set by its owner. Each has an `id` (what `change_task_stat
 
 | Role | Means | You |
 |------|-------|-----|
-| `backlog` | Ideas, not approved | Never take from it. A new task you were not asked to file lands in `approved`, not here |
+| `backlog` | Proposed, not yet approved | Never take from it. A task you file lands here, unless you were asked otherwise |
 | `approved` | Agreed, ready to be worked | Take work from here |
 | `active` | Being worked | Move a task here when you claim it |
 | `review` | Code complete; being checked | Move a task here when it is ready for review |
@@ -27,11 +27,14 @@ When a role has several columns, take the first in `order` unless the stage belo
 
 ## The escalation column
 
-The column for "a person has to look at this" is the `review` column with `triggersPmReview: true` — Needs Human Review on a new board. With none flagged, use a `blocked` column; with neither, leave the task where it is. In every case the comment carries the question, so the column is a signal and the comment is the content.
+The column for "a person has to look at this" is the `review` column with `triggersPmReview: true` — Needs Human Review on a new board. With none flagged it is the first `review` column, as it is for the board's own workers. The comment carries the question: the column is the signal, the comment is the content.
+
+A `blocked` column is for waiting on something outside the task, such as another team or a vendor, not for a question to a person.
 
 Moving a task into a flagged column can start the board's PM agent on it, when the board has one switched on. That is intended: it is the board's own triage.
 
 ## Moves the board makes itself
 
-- With a repository connected, a pull request whose branch or title carries the task key is linked to the task. When it merges, the task can move on to the next review column. Read the status before moving it yourself.
+- With a GitHub or GitLab repository connected, a pull request whose branch or title carries the task key is linked to the task and shows its CI.
+- On a board that still has the default `in_review` and `ready_to_test` columns and a GitHub repository, a sync run by a person or a connection (`sync_repository`) moves a task from `in_review` to `ready_to_test` once its pull request has merged. Nothing moves a task to `done` for you. Read the status before moving a task yourself.
 - A task with a repetition creates its next occurrence when it reaches `done`.

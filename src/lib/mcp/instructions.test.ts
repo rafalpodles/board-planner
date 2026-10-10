@@ -2,17 +2,26 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { z } from "zod";
 import { registerPlannerTools } from "./tools";
+import { BATCH_LIMIT } from "./batch";
 import { SERVER_INSTRUCTIONS } from "./instructions";
 import { COLUMN_ROLES, DEFAULT_PROJECT_COLUMNS, DEPENDENCY_TYPES } from "@/types";
 
 const SKILL_DIR = path.join(process.cwd(), "plugins/board-planner/skills/board-planner");
 
-function registeredToolNames(): Set<string> {
-  const names = new Set<string>();
-  const server = { registerTool: (name: string) => names.add(name) } as unknown as McpServer;
+function registeredTools(): Map<string, string[]> {
+  const tools = new Map<string, string[]>();
+  const server = {
+    registerTool: (name: string, config: { inputSchema?: z.ZodObject<z.ZodRawShape> }) =>
+      tools.set(name, Object.keys(config.inputSchema?.shape ?? {})),
+  } as unknown as McpServer;
   registerPlannerTools(server);
-  return names;
+  return tools;
+}
+
+function registeredToolNames(): Set<string> {
+  return new Set(registeredTools().keys());
 }
 
 function skillFiles(): { file: string; text: string }[] {
@@ -47,6 +56,23 @@ describe("the board-planner skill", () => {
         .map((name) => `${file}: ${name}`),
     );
     expect(unknown).toEqual([]);
+  });
+
+  it.each([
+    ["list_tasks", ["status", "assignee", "priority", "category", "search", "sprint", "parent", "hasChildren", "fields", "dueBefore", "dueAfter", "updatedSince", "archived", "blocked"]],
+    ["create_task", ["status", "acceptanceCriteria", "minimal", "fields"]],
+    ["update_task", ["assignee", "agent", "acceptanceCriteria", "fields", "minimal"]],
+    ["change_task_status", ["status", "minimal"]],
+    ["create_tasks", []],
+    ["update_tasks", []],
+    ["whoami", []],
+  ])("%s takes every argument the skill names", (tool, args) => {
+    expect(registeredTools().get(tool)).toEqual(expect.arrayContaining(args));
+  });
+
+  it("states the batch limit the server enforces", () => {
+    const tools = skillFiles().find((f) => f.file === "references/tools.md")!.text;
+    expect(tools).toContain(`take up to ${BATCH_LIMIT} items in one call`);
   });
 
   it("lists every column role and no other", () => {
