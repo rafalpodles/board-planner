@@ -352,6 +352,7 @@ test("the search text comes with a view only when asked, and the Me choice is in
   expect((stored.find((v) => v.name === "With search") as unknown as { search: string }).search).toBe("worker");
 
   await page.getByPlaceholder(/^Search tasks/).fill("");
+  await openMenu(page);
   await entry(page, "With search").getByRole("button", { name: "With search" }).click();
   await expect(page.getByPlaceholder(/^Search tasks/)).toHaveValue("worker");
   await openMenu(page);

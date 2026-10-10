@@ -126,6 +126,7 @@ function atomicPush(filter: Record<string, unknown>, update: { $push: { savedVie
 }
 
 let beforeWrite: (() => void) | null = null;
+let beforePull: (() => void) | null = null;
 
 function atomicSet(
   filter: { $and: { savedViews: never }[]; $expr?: { $lt: never } },
@@ -171,6 +172,8 @@ beforeEach(() => {
   projectUpdateOne.mockImplementation(
     async (_filter: unknown, update: { $pull: { savedViews: Elem & { $or?: Elem[] } } }) => {
       const cond = update.$pull.savedViews;
+      beforePull?.();
+      beforePull = null;
       const before = stored.length;
       stored = stored.filter((v) => {
         const hit = cond.$or ? cond.$or.some((c) => elemMatches(v, c)) : true;
@@ -509,6 +512,19 @@ describe("DELETE /views", () => {
     expect((await call(DELETE, "DELETE", { viewId: vid(1) })).status).toBe(200);
     expect((await call(DELETE, "DELETE", { viewId: vid(2) })).status).toBe(404);
     expect(stored.map((v) => v.name)).toEqual(["Theirs"]);
+  });
+
+  it("does not take a view that stopped being shared while the request was out", async () => {
+    asOwner();
+    stored = [row("Theirs", OTHER, true)];
+    beforePull = () => {
+      stored[0].shared = false;
+    };
+
+    const res = await call(DELETE, "DELETE", { viewId: vid(1) });
+
+    expect(res.status).toBe(404);
+    expect(stored).toHaveLength(1);
   });
 
   it("puts the permission in the pull's own condition", async () => {

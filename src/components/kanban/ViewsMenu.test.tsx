@@ -249,6 +249,108 @@ describe("ViewsMenu", () => {
     document.removeEventListener("keydown", heard);
   });
 
+  it("moves the focus into the panel when it opens", async () => {
+    renderMenu();
+    await open();
+    expect(document.activeElement).toBe(screen.getByRole("dialog", { name: "Views" }));
+  });
+
+  it("closes when the focus leaves it for something else, and not when it moves inside it", async () => {
+    renderMenu();
+    await open();
+    const outside = document.createElement("button");
+    document.body.appendChild(outside);
+
+    fireEvent.blur(screen.getByLabelText("View name"), { relatedTarget: screen.getByLabelText("Include the search text") });
+    expect(screen.getByRole("dialog", { name: "Views" })).toBeTruthy();
+
+    fireEvent.blur(screen.getByLabelText("View name"), { relatedTarget: outside });
+    expect(screen.queryByRole("dialog", { name: "Views" })).toBeNull();
+    outside.remove();
+  });
+
+  it("puts the focus back on its button after a view is picked", async () => {
+    renderMenu();
+    await open([view()]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Mine" }));
+
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Views" }));
+  });
+
+  it("cancels a rename on Escape before it closes the menu", async () => {
+    renderMenu();
+    await open([view()]);
+    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+    expect(screen.getByLabelText("New name for Mine")).toBeTruthy();
+
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(screen.queryByLabelText("New name for Mine")).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Views" })).toBeTruthy();
+
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Views" })).toBeNull();
+  });
+
+  it("leaves Escape to the delete confirmation while it is open, and keeps the menu", async () => {
+    renderMenu();
+    await open([view()]);
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await screen.findByRole("dialog", { name: "Delete view" });
+
+    fireEvent.keyDown(document.body, { key: "Escape" });
+
+    expect(screen.getByRole("dialog", { name: "Views" })).toBeTruthy();
+  });
+
+  it("reads the list again when a write is refused, so a view that is gone leaves it", async () => {
+    api.put.mockRejectedValue(new Error("View not found"));
+    renderMenu();
+    await open([view()]);
+    api.get.mockClear();
+
+    fireEvent.click(screen.getByRole("button", { name: "Update to current" }));
+
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(1));
+    expect((await screen.findByRole("alert")).textContent).toContain("View not found");
+  });
+
+  it("keeps the newer list when an older answer arrives late", async () => {
+    let releaseFirst: (v: ApiSavedView[]) => void = () => {};
+    api.get.mockImplementationOnce(() => new Promise((r) => (releaseFirst = r)));
+    renderMenu();
+    fireEvent.click(screen.getByRole("button", { name: "Views" }));
+    await screen.findByRole("dialog", { name: "Views" });
+
+    api.get.mockResolvedValue([view({ name: "Fresh" })]);
+    fireEvent.change(screen.getByLabelText("View name"), { target: { value: "x" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save view" }));
+    await screen.findByText("Fresh");
+
+    releaseFirst([view({ name: "Stale" })]);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(screen.queryByText("Stale")).toBeNull();
+    expect(screen.getByText("Fresh")).toBeTruthy();
+  });
+
+  it("sends one delete however often the confirmation is pressed", async () => {
+    let finish: () => void = () => {};
+    api.del.mockImplementation(() => new Promise<void>((r) => (finish = r)));
+    renderMenu();
+    await open([view()]);
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    const dialog = await screen.findByRole("dialog", { name: "Delete view" });
+    const confirm = within(dialog).getByRole("button", { name: /^Delete$/ });
+
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+
+    expect(api.del).toHaveBeenCalledTimes(1);
+    finish();
+  });
+
   it("closes on a click outside, and not on one inside", async () => {
     renderMenu();
     await open();

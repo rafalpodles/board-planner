@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor, act } from "@testing-library/react";
 import { ProjectBoardView } from "./ProjectBoardView";
 import { ProjectBoard } from "@/hooks/use-project-board";
 import { ApiProject, ApiTask } from "@/types";
@@ -562,6 +562,7 @@ describe("ProjectBoardView and a ?view= link", () => {
     );
 
     await waitFor(() => expect(setViewMode).toHaveBeenCalledWith("list"));
+    expect(onScopeChange).toHaveBeenCalledWith("s9");
     expect(window.location.search).toBe("?sprint=s9");
     expect(window.location.hash).toBe("#top");
     expect(api.get).toHaveBeenCalledWith("/api/projects/p1/views");
@@ -570,10 +571,14 @@ describe("ProjectBoardView and a ?view= link", () => {
   it("asks for the list once, however often it renders", async () => {
     at("/projects/TP?view=v1");
     const { rerender } = render(<ProjectBoardView board={makeBoard({ tasks })} />);
-    rerender(<ProjectBoardView board={makeBoard({ tasks })} />);
-    rerender(<ProjectBoardView board={makeBoard({ tasks })} />);
-
     await waitFor(() => expect(api.get).toHaveBeenCalledTimes(1));
+    // The address is clean now, so only the ref can stop a second read: put the parameter back
+    at("/projects/TP?view=v1");
+    rerender(<ProjectBoardView board={makeBoard({ tasks })} />);
+    rerender(<ProjectBoardView board={makeBoard({ tasks })} />);
+    await act(async () => {});
+
+    expect(api.get).toHaveBeenCalledTimes(1);
   });
 
   it("says so, and still cleans the address, when the view is gone or not for this reader", async () => {
@@ -597,7 +602,7 @@ describe("ProjectBoardView and a ?view= link", () => {
 
   it("does nothing without the parameter", async () => {
     render(<ProjectBoardView board={makeBoard({ tasks })} />);
-    await Promise.resolve();
+    await act(async () => {});
     expect(api.get).not.toHaveBeenCalled();
   });
 
@@ -605,7 +610,7 @@ describe("ProjectBoardView and a ?view= link", () => {
     at("/projects/TP?view=v1");
 
     render(<ProjectBoardView board={makeBoard({ tasks })} pinViewMode="board" readOnly />);
-    await Promise.resolve();
+    await act(async () => {});
 
     expect(api.get).not.toHaveBeenCalled();
     expect(window.location.search).toBe("?view=v1");
