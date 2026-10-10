@@ -59,6 +59,7 @@ export const GROUPS = {
     "board-panels-on-the-screen.spec.ts",
     "board-move-without-drag.spec.ts",
     "board-reorder-vs-poll.spec.ts",
+    "board-swimlanes.spec.ts",
     "shortcut-help-escape.spec.ts",
     "shortcut-help-a11y.spec.ts",
     "list-columns-on-a-phone.spec.ts",
