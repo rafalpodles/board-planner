@@ -93,6 +93,17 @@ describe("askBilling", () => {
     expect(await askBilling("portal", {})).toEqual({ status: "unreachable" });
   });
 
+  it("says in the log when the licence service fails or cannot be reached, so a failed purchase leaves a trace", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    answer(502, "{}");
+    await askBilling("checkout", {});
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("failed a billing checkout request: 502"));
+    fetchMock.mockRejectedValue(new TypeError("fetch failed"));
+    await askBilling("checkout", {});
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("could not be reached for a billing checkout request: TypeError"));
+    warn.mockRestore();
+  });
+
   it("treats an answer that is not JSON as an empty one", async () => {
     answer(200, "<html>");
 
