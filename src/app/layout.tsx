@@ -8,7 +8,8 @@ import { NONCE_HEADER } from "@/lib/csp";
 
 export const metadata: Metadata = {
   title: APP_NAME,
-  description: "Task management with Kanban board",
+  description: "A project board small teams can run — and coding agents can use.",
+  robots: { index: false, follow: false },
 };
 
 export default async function RootLayout({
