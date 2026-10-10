@@ -2,7 +2,8 @@ import { after, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectOwner } from "@/lib/middleware";
 import { isPmRunnable, pmDisabledReason } from "@/lib/pm/gate";
-import { openGate } from "@/lib/ai-gateway";
+import { openGate, refuseUnmanagedModel } from "@/lib/ai-gateway";
+import { resolvePmModel } from "@/lib/pm/availability";
 import { getPmUser } from "@/lib/pm/pm-user";
 import { startBoardReview } from "@/lib/pm/scheduler";
 
@@ -32,6 +33,8 @@ export const POST = withProjectOwner(async (_request, { params, user, db }) => {
   if (!isPmRunnable(project.pm)) {
     return NextResponse.json({ error: pmDisabledReason(project.pm) }, { status: 409 });
   }
+  const unmanaged = refuseUnmanagedModel(gate, await resolvePmModel(db, project.pm.model));
+  if (unmanaged) return NextResponse.json(unmanaged.body, { status: unmanaged.status });
 
   const pmUser = await getPmUser(db);
   const review = await startBoardReview(db, String(project._id), project.key, project.pm, String(pmUser._id));

@@ -166,8 +166,11 @@ MANAGED_AI_MODELS=        # Optional — the models the platform's key runs for 
                           # (keySource "managed"): comma-separated OpenRouter ids, or prefixes ending in *; default
                           # OpenAI's own models (^openai/, not gpt-oss). Any other is refused with 403
                           # model_not_managed before the provider is called, for the PM agent and AI Assist alike
-                          # (src/lib/managed-models.ts). An own key or a self-hosted instance's runs any model. A
-                          # malformed entry stops the app at boot; a default PM model off the list is a warning (BP-1001)
+                          # (src/lib/managed-models.ts), the board review and the needs-human-review queue included.
+                          # No :variant ever runs there (:online is a third party's web search). An own key runs
+                          # any model. Read only with ORGANISATION_DOMAIN: there a malformed entry stops the app, and
+                          # an entry beyond OpenAI's own models warns that the DPA's sub-processor list must be
+                          # updated first; a default PM model off the list is a warning too (BP-1001)
 PM_MAX_TOKENS=            # Optional — PM agent max output tokens per call (default: 8192)
 PM_SCHEDULER_TICK_MS=     # Optional — PM autonomy scheduler tick (default: 300000)
 WEBHOOK_SIGNING_SECRET=   # Optional — HMACs outgoing webhook deliveries (x-boardplanner-signature)

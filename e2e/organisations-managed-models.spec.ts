@@ -93,6 +93,14 @@ test("on the platform's key a model off the list is refused with the models that
     await expect(page.getByText(refusal(PM_MODEL), { exact: true })).toBeVisible();
   });
 
+  await test.step("the owner's Run a review now", async () => {
+    await page.goto(`${originOf(GLOBEX)}/projects/${SHARED_KEY}/settings?section=pm`);
+    const answered = page.waitForResponse((r) => r.url().endsWith("/pm/review") && r.request().method() === "POST");
+    await page.getByRole("button", { name: "Run a review now" }).click();
+    expect((await answered).status()).toBe(403);
+    await expect(page.getByText(refusal(PM_MODEL), { exact: true })).toBeVisible();
+  });
+
   expect(await stub("/requests")).toEqual([]);
   expect((await stub("/last-authorization")).authorization).toBeNull();
   expect((await stub("/last-assist-authorization")).authorization).toBeNull();

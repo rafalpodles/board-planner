@@ -37,7 +37,8 @@ export async function bootNode(): Promise<void> {
     const { assertLicencePullConfig } = await import("@/lib/licence-pull");
     assertLicencePullConfig();
     const { assertManagedModelsConfig } = await import("@/lib/managed-models");
-    assertManagedModelsConfig();
+    const { organisationDomain: hostedDomain } = await import("@/lib/organisation-host");
+    assertManagedModelsConfig(hostedDomain() !== null);
   } catch (err) {
     // Exiting rather than throwing, and this is not belt-and-braces. `NextServer.prepare()`
     // awaits the real prepare only when `dev` (next/dist/server/next.js), so under `next start`
