@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { homedir, tmpdir } from "os";
 import { join } from "path";
 import {
@@ -97,8 +97,16 @@ describe("loadBootstrap", () => {
 
   it("refuses the shipped plist's placeholder address and says what belongs there", () => {
     expect(() => loadBootstrap({ ...base, CP_API_URL: "BOARD_URL" })).toThrow(
-      `CP_API_URL must be your board's address, such as https://app.board-planner.com, not "BOARD_URL"`
+      `CP_API_URL must be your board's address, such as https://acme.board-planner.com, not "BOARD_URL"`
     );
+  });
+
+  it("names no organisation's own host as the example address in what the worker ships", () => {
+    const shipped = ["../README.md", "../launchd/com.boardplanner.worker.plist", "./config.ts"];
+    const naming = shipped.filter((path) =>
+      readFileSync(new URL(path, import.meta.url), "utf8").includes("app.board-planner.com")
+    );
+    expect(naming).toEqual([]);
   });
 
   it("refuses an address that is not http or https", () => {
