@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
+import { StrictMode } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor, act } from "@testing-library/react";
 import { SignUpDomains } from "./SignUpDomains";
 
 const { api, toast } = vi.hoisted(() => ({
@@ -25,6 +26,25 @@ describe("sign-up by domain", () => {
 
     expect(((await screen.findByLabelText("Domains")) as HTMLInputElement).value).toBe("corp.example");
     expect(screen.getByText(/Anyone who signs in with Acme SSO or Google at one of these domains/)).toBeTruthy();
+  });
+
+  it("ignores the read of an effect that was cleaned up, so a late answer cannot wipe what was typed (BP-993)", async () => {
+    const answers: Array<(value: typeof ANSWER) => void> = [];
+    api.get.mockImplementation(() => new Promise((resolve) => answers.push(resolve)));
+    render(
+      <StrictMode>
+        <SignUpDomains />
+      </StrictMode>
+    );
+    expect(answers).toHaveLength(2);
+
+    await act(async () => answers[1](ANSWER));
+    const input = (await screen.findByLabelText("Domains")) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "typed.example" } });
+    await act(async () => answers[0]({ ...ANSWER, domains: ["stale.example"] }));
+
+    expect(input.value).toBe("typed.example");
+    expect((screen.getByRole("button", { name: "Save domains" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("saves the list however it was separated, and shows what was stored", async () => {

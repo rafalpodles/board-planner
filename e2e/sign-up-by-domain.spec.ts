@@ -51,6 +51,33 @@ test.afterEach(async () => {
   if (mongoose.connection.readyState !== 0) await mongoose.disconnect();
 });
 
+test("a late answer to the page's own read does not wipe the domains somebody has already typed", async ({ page }) => {
+  await signIn(page);
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let reads = 0;
+  await page.route("**/api/admin/sign-up", async (route) => {
+    if (route.request().method() !== "GET" || ++reads !== 2) return route.continue();
+    const answered = await route.fetch();
+    await gate;
+    return route.fulfill({ response: answered });
+  });
+
+  await page.goto("/settings/users");
+  const domains = page.getByLabel("Domains");
+  await domains.fill(DOMAIN);
+  await expect(page.getByRole("button", { name: "Save domains" })).toBeEnabled();
+  expect(reads, "the page reads twice in development, and the second read is the one held").toBe(2);
+
+  const late = page.waitForResponse((r) => r.url().endsWith("/api/admin/sign-up") && r.request().method() === "GET" && r.status() === 200);
+  release();
+  await late;
+  await page.waitForTimeout(300);
+
+  await expect(domains).toHaveValue(DOMAIN);
+  await expect(page.getByRole("button", { name: "Save domains" })).toBeEnabled();
+});
+
 test("an administrator opens sign-up to a domain, and a newcomer there makes their own account", async ({ page, browser }) => {
   await signIn(page);
   await page.goto("/settings/users");
