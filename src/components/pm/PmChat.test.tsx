@@ -441,3 +441,55 @@ describe("Task chips", () => {
     expect(api.get).not.toHaveBeenCalledWith("/api/projects/p1/tasks");
   });
 });
+
+// BP-942: AI Act art. 50(1) — a person talking to the PM is told it is an AI, before and during the talk
+describe("who is answering", () => {
+  it("says before the first message that the PM agent is an AI model", async () => {
+    render(<PmChat projectId="p1" preloadedProject={PROJECT as never} />);
+
+    expect(await screen.findByText(/The PM agent is an AI model, not a person, and its answers can be wrong\./)).toBeTruthy();
+  });
+
+  it("marks every answer as the AI's, and none of the reader's own messages", async () => {
+    api.get.mockImplementation((path: string) =>
+      path.includes("/pm/messages")
+        ? Promise.resolve({
+            messages: [
+              { _id: "m1", project: "p1", role: "user", content: "Plan the release", actions: [], trigger: { type: "chat" }, triggeredBy: null, createdAt: "2026-10-10T10:00:00Z" },
+              { _id: "m2", project: "p1", role: "assistant", content: "Here is a plan", actions: [], trigger: { type: "chat" }, triggeredBy: null, createdAt: "2026-10-10T10:00:05Z" },
+            ],
+            nextCursor: null,
+          })
+        : path.includes("/tasks")
+          ? Promise.resolve([])
+          : Promise.resolve(PROJECT)
+    );
+    render(<PmChat projectId="p1" preloadedProject={PROJECT as never} />);
+
+    await screen.findByText("Here is a plan");
+    const badges = screen.getAllByTestId("ai-badge");
+    expect(badges).toHaveLength(1);
+    expect(badges[0].parentElement!.textContent).toContain("PM Agent");
+  });
+});
+
+describe("a turn still running", () => {
+  it("is marked as the AI's while it works", async () => {
+    const stream = heldStream();
+    api.stream.mockResolvedValue(stream.response);
+    render(<PmChat projectId="p1" preloadedProject={PROJECT as never} />);
+    const box = await screen.findByRole("textbox");
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(box, "Plan it.");
+      box.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      screen.getByRole("button", { name: /send/i }).click();
+    });
+
+    // An empty thread before the send, so the one badge is the running turn's
+    const badge = await screen.findByTestId("ai-badge");
+    expect(badge.parentElement!.querySelector(".animate-spin")).toBeTruthy();
+    stream.close();
+  });
+});

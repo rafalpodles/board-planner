@@ -17,6 +17,8 @@ import { useTriggerAutocomplete, type Trigger } from "@/hooks/use-trigger-autoco
 import { SuggestionList } from "@/components/ui/SuggestionList";
 import { useEditorTriggers } from "@/hooks/use-editor-triggers";
 import { COMMENT_BODY_MAX_LENGTH } from "@/lib/identifiers";
+import { AiBadge } from "@/components/ui/AiBadge";
+import { PM_USERNAME } from "@/lib/pm/username";
 
 interface CommentsProps {
   projectId: string;
@@ -238,6 +240,7 @@ export function Comments({
                   ? comment.author.fullName
                   : "Unknown"}
               </span>
+              {comment.author && typeof comment.author === "object" && comment.author.username === PM_USERNAME && <AiBadge />}
               <span className="text-xs text-text-muted">
                 {formatDate(comment.createdAt)}
               </span>

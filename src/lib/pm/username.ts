@@ -3,3 +3,7 @@
  * pulls in bcrypt, crypto and a database connection; `handover.ts` runs in the task detail.
  */
 export const PM_USERNAME = "pm";
+
+export function withAiMark(name: string, username: string | undefined): string {
+  return username === PM_USERNAME ? `${name} (AI)` : name;
+}

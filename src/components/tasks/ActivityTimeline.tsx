@@ -6,6 +6,7 @@ import { LoadFailed } from "@/components/ui/LoadFailed";
 import { ApiActivityLog, DELETED_AGENT, LinkDirection, STATUS_LABELS, TaskStatus } from "@/types";
 import { timeAgo } from "@/lib/time";
 import { describeLinkChange } from "@/lib/link-phrasing";
+import { withAiMark } from "@/lib/pm/username";
 
 interface ActivityTimelineProps {
   projectId: string;
@@ -116,7 +117,7 @@ function linkLabel(url: string): string {
 const SYNC_ACTIONS = new Set(["pr_linked", "pr_unlinked"]);
 
 function actorName(log: ApiActivityLog): string {
-  if (log.user && typeof log.user === "object") return log.user.fullName;
+  if (log.user && typeof log.user === "object") return withAiMark(log.user.fullName, log.user.username);
   if (!log.user && SYNC_ACTIONS.has(log.action)) return "The repository sync";
   // A deleted user also arrives as null, and null is an object to `typeof` — which is why the
   // check above leads with the value itself. For every other action that is what an absence means.

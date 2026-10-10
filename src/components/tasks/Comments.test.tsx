@@ -620,3 +620,20 @@ describe("posting a comment", () => {
     await act(async () => post.resolve(saved));
   });
 });
+
+// BP-942: AI Act art. 50(1). "PM Agent" alone reads as somebody's job title
+describe("a comment the PM agent wrote", () => {
+  it("is marked as written by an AI, and a person's is not", async () => {
+    serve([
+      { ...comment, _id: "c-pm", body: "Split into three tasks", author: { _id: "pm1", username: "pm", fullName: "PM Agent" } },
+      comment,
+    ]);
+    render(<Comments projectId="TP" taskId="t1" />);
+
+    await waitFor(() => expect(screen.getByText("Split into three tasks")).toBeTruthy());
+    const badges = screen.getAllByTestId("ai-badge");
+    expect(badges).toHaveLength(1);
+    expect(badges[0].getAttribute("aria-label")).toBe("Written by an AI model, not a person");
+    expect(badges[0].parentElement!.textContent).toContain("PM Agent");
+  });
+});

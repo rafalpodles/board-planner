@@ -55,6 +55,7 @@ import { pmUserId } from "@/lib/pm/pm-user";
 import { supersedableStates } from "@/lib/task-decisions";
 import { populateWithin, type ScopedDb } from "@/lib/db-scope";
 import { NOT_ARCHIVED } from "@/lib/task-archive";
+import { withAiMark } from "@/lib/pm/username";
 
 export const MAX_EXECUTION_ATTEMPTS = 3;
 
@@ -1493,7 +1494,7 @@ export async function addComment(
       { label: column?.label ?? String(task.status), tone: pillToneForRole(column?.role) },
     ],
     taskMeta: project?.name ?? "",
-    quote: { who: actor.username, text: excerpt },
+    quote: { who: withAiMark(actor.username, actor.username), text: excerpt },
     projectRef: project?.key,
     taskNumber: task.taskNumber,
     assigneeId: assigneeIdOf(task),
@@ -1523,8 +1524,8 @@ export async function addComment(
       taskId,
       projectId,
       actorId: actor.id,
-      title: `${actor.username} mentioned you in ${taskKey}`,
-      digestTitle: `${actor.username} mentioned you`,
+      title: `${withAiMark(actor.username, actor.username)} mentioned you in ${taskKey}`,
+      digestTitle: `${withAiMark(actor.username, actor.username)} mentioned you`,
       body: excerpt,
       recipientIds: mentionedIds,
       email: { kicker: "You were mentioned", ...sharedEmail },

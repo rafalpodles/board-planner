@@ -6,6 +6,12 @@ import { decryptSecret } from "./encryption";
 import { DISCORD_NO_MENTIONS, escapeDiscord, escapeSlack, excerpt } from "./chat-markup";
 import { originFor } from "./organisation-host";
 import type { ScopedDb } from "@/lib/db-scope";
+import { withAiMark } from "@/lib/pm/username";
+
+function authorOf(data: Record<string, unknown> | undefined): string {
+  const author = String(data?.author || "unknown");
+  return withAiMark(author, author);
+}
 
 interface NotificationPayload {
   project: { key: string; name: string };
@@ -108,7 +114,7 @@ function formatSlackPayload(
             elements: [
               {
                 type: "mrkdwn",
-                text: `*By:* ${e(String(data?.author || "unknown"))} | *Project:* ${key}`,
+                text: `*By:* ${e(authorOf(data))} | *Project:* ${key}`,
               },
             ],
           },
@@ -209,7 +215,7 @@ function formatDiscordPayload(
             url: taskUrl || undefined,
             color: colors.comment_added,
             fields: [
-              { name: "Author", value: d(String(data?.author || "unknown")), inline: true },
+              { name: "Author", value: d(authorOf(data)), inline: true },
               { name: "Project", value: name, inline: true },
             ],
           },
