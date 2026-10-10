@@ -155,6 +155,8 @@ test("the position is among the neighbours in the row, not the whole column", as
   await put(request, SIBLING_TASK_ID, { priority: "urgent", order: 50 });
   await put(request, HELD_TASK_ID, { order: 10 });
   await put(request, DECOY_TASK_ID, { priority: "high", status: "in_progress", order: 99 });
+  // Three rows are taller than the default window, and a drag needs both ends on the screen
+  await page.setViewportSize({ width: 1280, height: 1100 });
   await silenceBoardPoll(page);
   await signIn(page);
   await page.goto(BOARD);
