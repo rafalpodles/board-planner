@@ -5,6 +5,15 @@ export interface SubscriptionSummary {
   extraMembers: number;
   currentPeriodEnd: string | null;
   cancelAtPeriodEnd: boolean;
+  buyer: "business" | "consumer" | null;
+  purchasedAt: string | null;
+  withdrawnAt: string | null;
+}
+
+/** What a consumer who withdrew was refunded, for the subscription that ended by it */
+export interface WithdrawalSummary {
+  at: string;
+  refunded: Money;
 }
 
 // `unreachable`: the licence service did not answer, which is not the same as taking no payments
@@ -25,16 +34,45 @@ export interface PlanPrices {
 export interface OfferSummary {
   launch: boolean;
   includedMembers: number;
+  /** Every price already includes the tax Stripe charges */
+  taxInclusive: boolean;
   month: PlanPrices;
   year: PlanPrices;
 }
 
 export type BillingSummary =
   | { available: false; unreachable?: true }
-  | { available: true; launchOpen: boolean; subscription: SubscriptionSummary | null; memberPrice: Money | null; upcoming: Money | null; offer: OfferSummary | null };
+  | {
+      available: true;
+      launchOpen: boolean;
+      subscription: SubscriptionSummary | null;
+      memberPrice: Money | null;
+      upcoming: Money | null;
+      offer: OfferSummary | null;
+      withdrawal: WithdrawalSummary | null;
+      seller: { name: string; address: string } | null;
+      termsVersion: string | null;
+    };
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** The last moment a consumer may withdraw: the end of the fourteenth day after the purchase, in UTC; the licence service holds the same rule */
+export function withdrawalEndsAt(purchasedAt: Date): Date {
+  const day = new Date(purchasedAt.getTime() + 14 * DAY_MS);
+  return new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), 23, 59, 59, 999));
+}
+
+/** Until when this subscription may be withdrawn from, or null when it may not be (any more) */
+export function withdrawableUntil(subscription: SubscriptionSummary | null, now: Date = new Date()): Date | null {
+  if (!subscription || subscription.buyer !== "consumer" || subscription.withdrawnAt || !subscription.purchasedAt) return null;
+  const purchasedAt = new Date(subscription.purchasedAt);
+  if (Number.isNaN(purchasedAt.getTime())) return null;
+  const until = withdrawalEndsAt(purchasedAt);
+  return now.getTime() <= until.getTime() ? until : null;
+}
 
 /** An amount in the currency's smallest unit and the currency, read from what the service says under `field` */
-export function moneyOf(value: unknown, field: "unitAmount" | "amountDue"): Money | null {
+export function moneyOf(value: unknown, field: "unitAmount" | "amountDue" | "amount"): Money | null {
   if (!value || typeof value !== "object") return null;
   const v = value as Record<string, unknown>;
   const amount = v[field];
@@ -58,10 +96,18 @@ export function offerSummary(value: unknown): OfferSummary | null {
   const year = planPricesOf(v.year);
   if (!month || !year || month.base.currency !== year.base.currency) return null;
   if (typeof v.includedMembers !== "number" || !Number.isInteger(v.includedMembers) || v.includedMembers < 1) return null;
-  return { launch: v.launch === true, includedMembers: v.includedMembers, month, year };
+  return { launch: v.launch === true, includedMembers: v.includedMembers, taxInclusive: v.taxInclusive === true, month, year };
 }
 
-/** What the licence service says an organisation pays, cut to the six fields the page shows: nothing else it sends reaches the browser */
+/** What a withdrawal refunded, as the licence service says it */
+export function withdrawalSummary(value: unknown): WithdrawalSummary | null {
+  if (!value || typeof value !== "object") return null;
+  const v = value as Record<string, unknown>;
+  const refunded = moneyOf(v.refunded, "amount");
+  return typeof v.at === "string" && refunded ? { at: v.at, refunded } : null;
+}
+
+/** What the licence service says an organisation pays, cut to the fields the page shows: nothing else it sends reaches the browser */
 export function subscriptionSummary(value: unknown): SubscriptionSummary | null {
   if (!value || typeof value !== "object") return null;
   const v = value as Record<string, unknown>;
@@ -72,5 +118,8 @@ export function subscriptionSummary(value: unknown): SubscriptionSummary | null 
     extraMembers: typeof v.extraMembers === "number" && Number.isFinite(v.extraMembers) ? v.extraMembers : 0,
     currentPeriodEnd: typeof v.currentPeriodEnd === "string" ? v.currentPeriodEnd : null,
     cancelAtPeriodEnd: v.cancelAtPeriodEnd === true,
+    buyer: v.buyer === "business" || v.buyer === "consumer" ? v.buyer : null,
+    purchasedAt: typeof v.purchasedAt === "string" ? v.purchasedAt : null,
+    withdrawnAt: typeof v.withdrawnAt === "string" ? v.withdrawnAt : null,
   };
 }
