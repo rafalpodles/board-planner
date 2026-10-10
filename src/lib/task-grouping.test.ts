@@ -6,6 +6,9 @@ import {
   flattenGroups,
   groupByOptions,
   groupTasks,
+  laneChangeFor,
+  laneGroupBy,
+  laneKeyOf,
   sanitizeGroupBy,
   valueKey,
 } from "./task-grouping";
@@ -218,5 +221,43 @@ describe("group by choices", () => {
     );
     expect(migratePersistedFilters({ groupBy: "field:f-size" }, "me", []).groupBy).toBe("");
     expect(migratePersistedFilters(null, "me", []).groupBy).toBe("");
+  });
+});
+
+describe("rows for the board", () => {
+  it("lays out only assignee, priority and category", () => {
+    expect(laneGroupBy("assignee")).toBe("assignee");
+    expect(laneGroupBy("priority")).toBe("priority");
+    expect(laneGroupBy("category")).toBe("category");
+    expect(laneGroupBy("status")).toBe("");
+    expect(laneGroupBy("field:f-size")).toBe("");
+    expect(laneGroupBy("")).toBe("");
+  });
+
+  it("names the row a task is in with the key groupTasks gives that row", () => {
+    const tasks = [
+      task({ taskNumber: 1, priority: "urgent", category: "bug", assignee: person("amy") }),
+      task({ taskNumber: 2, priority: undefined as unknown as ApiTask["priority"], category: "", assignee: null }),
+      task({ taskNumber: 3, priority: "low", category: "retired", assignee: person("zed") }),
+    ];
+    for (const by of ["assignee", "priority", "category"] as const) {
+      for (const group of groupTasks(tasks, by)) {
+        for (const t of group.tasks) expect(laneKeyOf(by, t)).toBe(group.key);
+      }
+    }
+  });
+
+  it("says which field a drop sets, and that the none rows set nothing a task could not do without", () => {
+    expect(laneChangeFor("priority", valueKey("urgent"))).toEqual({ field: "priority", value: "urgent" });
+    expect(laneChangeFor("category", valueKey("doc"))).toEqual({ field: "category", value: "doc" });
+    expect(laneChangeFor("assignee", valueKey("amy"))).toEqual({ field: "assignee", value: "amy" });
+    expect(laneChangeFor("assignee", NONE_GROUP)).toEqual({ field: "assignee", value: null });
+    expect(laneChangeFor("category", NONE_GROUP)).toBeNull();
+    expect(laneChangeFor("priority", NONE_GROUP)).toBeNull();
+  });
+
+  it("will not set a priority the board does not know", () => {
+    expect(laneChangeFor("priority", valueKey("someday"))).toBeNull();
+    expect(laneChangeFor("priority", "plain")).toBeNull();
   });
 });

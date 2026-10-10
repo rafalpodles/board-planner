@@ -164,3 +164,53 @@ describe("Column without onStatusChange", () => {
     ).not.toThrow();
   });
 });
+
+describe("Column in a row of the board", () => {
+  const lane = { groupBy: "priority" as const, key: "v:urgent", label: "Urgent" };
+
+  function drop(el: Element, id: string) {
+    const dataTransfer = { getData: () => id, dropEffect: "", setData: () => {} };
+    fireEvent.dragEnter(el, { dataTransfer });
+    fireEvent.dragOver(el, { dataTransfer });
+    fireEvent.drop(el, { dataTransfer });
+  }
+
+  it("says which row it is in, to the address and to a reader", () => {
+    const { container } = renderColumn({ lane, tasks: oneTask });
+    const el = container.firstElementChild!;
+    expect(el.getAttribute("data-lane")).toBe("v:urgent");
+    expect(el.getAttribute("role")).toBe("group");
+    expect(el.getAttribute("aria-label")).toBe("Needs Human Review, Urgent");
+  });
+
+  it("hands the row to the drop, after the position", () => {
+    const onTaskDrop = vi.fn();
+    const { container } = renderColumn({ lane, tasks: oneTask, onTaskDrop });
+    drop(container.firstElementChild!, "t9");
+    expect(onTaskDrop).toHaveBeenCalledWith("t9", "needs_human_review", expect.any(Number), lane);
+  });
+
+  it("hands no row to a drop outside any row", () => {
+    const onTaskDrop = vi.fn();
+    const { container } = renderColumn({ tasks: oneTask, onTaskDrop });
+    drop(container.firstElementChild!, "t9");
+    expect(onTaskDrop).toHaveBeenCalledWith("t9", "needs_human_review", expect.any(Number), undefined);
+  });
+
+  it("gives a cell a height of its own, since the rows are what the board scrolls through", () => {
+    const { container } = renderColumn({ lane, tasks: oneTask });
+    expect(container.firstElementChild!.className).toContain("max-h-[26rem]");
+    expect(container.firstElementChild!.className).not.toContain("lg:h-full");
+  });
+
+  it("keeps the whole-height column without a row", () => {
+    const { container } = renderColumn({ tasks: oneTask });
+    expect(container.firstElementChild!.className).toContain("lg:h-full");
+    expect(container.firstElementChild!.hasAttribute("data-lane")).toBe(false);
+  });
+
+  it("names the row on its rail too", () => {
+    const { container } = renderColumn({ lane, collapsed: true });
+    expect(container.firstElementChild!.getAttribute("aria-label")).toBe("Expand Needs Human Review, Urgent");
+  });
+});

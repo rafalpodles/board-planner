@@ -528,3 +528,99 @@ describe("Board on a wide screen", () => {
     expect(grid.style.gridTemplateColumns).toBe("minmax(0, 1fr) minmax(0, 1fr)");
   });
 });
+
+describe("Board in rows", () => {
+  const two: ApiProjectColumn[] = [
+    { _id: "c1", id: "todo", label: "To Do", color: "#0ea5e9", role: "approved", order: 0, triggersPmReview: false },
+    { _id: "c2", id: "done", label: "Done", color: "#22c55e", role: "done", order: 1, triggersPmReview: false },
+  ];
+  const mk = (id: string, status: string, priority: string) =>
+    ({ _id: id, taskNumber: Number(id.slice(1)), title: `Task ${id}`, status, priority, category: "bug", createdAt: "2026-08-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z" }) as ApiTask;
+  const all = [mk("t1", "todo", "urgent"), mk("t2", "todo", "low"), mk("t3", "done", "low")];
+  const lanes = [
+    { key: "v:urgent", label: "Urgent", tasks: [all[0]] },
+    { key: "v:low", label: "Low", tasks: [all[1], all[2]] },
+  ];
+
+  function renderRows(over: Partial<React.ComponentProps<typeof Board>> = {}) {
+    return render(
+      <Board
+        tasks={all}
+        projectKey="TP"
+        columns={two}
+        lanes={lanes}
+        laneGroupBy="priority"
+        onStatusChange={() => {}}
+        onTaskClick={() => {}}
+        {...over}
+      />
+    );
+  }
+
+  it("draws a header per row, with its name and count, and a cell per row and column", () => {
+    renderRows();
+    const headers = screen.getAllByTestId("board-lane-header");
+    expect(headers.map((h) => h.textContent)).toEqual(["Urgent1", "Low2"]);
+    expect(screen.getAllByTestId("column-todo")).toHaveLength(2);
+    expect(screen.getAllByTestId("column-done")).toHaveLength(2);
+  });
+
+  it("puts each task in the cell of its own row and column", () => {
+    const { container } = renderRows();
+    const cell = (lane: string, column: string) =>
+      container.querySelector(`[data-testid="column-${column}"][data-lane="${lane}"]`)!;
+    expect(cell("v:urgent", "todo").textContent).toContain("Task t1");
+    expect(cell("v:urgent", "done").textContent).not.toContain("Task");
+    expect(cell("v:low", "todo").textContent).toContain("Task t2");
+    expect(cell("v:low", "done").textContent).toContain("Task t3");
+  });
+
+  it("draws rows in the order it is given them", () => {
+    const { container } = renderRows({ lanes: [...lanes].reverse() });
+    const order = [...container.querySelectorAll("[data-testid=board-lane-header]")].map((h) => h.getAttribute("data-lane"));
+    expect(order).toEqual(["v:low", "v:urgent"]);
+  });
+
+  it("folds a row to its header: the cells go, the count stays, and the control says so", () => {
+    renderRows({ collapsedLanes: new Set(["v:low"]) });
+    const header = screen.getAllByTestId("board-lane-header")[1];
+    expect(header.querySelector("button")!.getAttribute("aria-expanded")).toBe("false");
+    expect(header.textContent).toBe("Low2");
+    expect(screen.getAllByTestId("column-todo")).toHaveLength(1);
+  });
+
+  it("reports the row that was clicked", () => {
+    const onToggleLane = vi.fn();
+    renderRows({ onToggleLane });
+    fireEvent.click(screen.getAllByTestId("board-lane-header")[0].querySelector("button")!);
+    expect(onToggleLane).toHaveBeenCalledWith("v:urgent");
+  });
+
+  it("hands the row of the cell to a drop", () => {
+    const onTaskDrop = vi.fn();
+    const { container } = renderRows({ onTaskDrop });
+    const target = container.querySelector('[data-testid="column-todo"][data-lane="v:low"]')!;
+    const dataTransfer = { getData: () => "t1", dropEffect: "", setData: () => {} };
+    fireEvent.dragEnter(target, { dataTransfer });
+    fireEvent.dragOver(target, { dataTransfer });
+    fireEvent.drop(target, { dataTransfer });
+    expect(onTaskDrop).toHaveBeenCalledWith("t1", "todo", expect.any(Number), { groupBy: "priority", key: "v:low", label: "Low" });
+  });
+
+  it("is the one strip of columns it was without rows, or with none to draw", () => {
+    const { rerender } = renderRows({ lanes: undefined, laneGroupBy: "" });
+    expect(screen.queryAllByTestId("board-lane-header")).toHaveLength(0);
+    expect(screen.getAllByTestId("column-todo")).toHaveLength(1);
+
+    rerender(<Board tasks={all} projectKey="TP" columns={two} lanes={[]} laneGroupBy="priority" onStatusChange={() => {}} onTaskClick={() => {}} />);
+    expect(screen.queryAllByTestId("board-lane-header")).toHaveLength(0);
+    expect(screen.getAllByTestId("column-todo")).toHaveLength(1);
+  });
+
+  it("rails a column that is empty in every row, and keeps one that is not", () => {
+    renderRows({ tasks: [all[0]], lanes: [lanes[0]], collapseEmptyColumns: true });
+    const done = screen.getAllByTestId("column-done")[0];
+    expect(done.getAttribute("role")).toBe("button");
+    expect(screen.getAllByTestId("column-todo")[0].getAttribute("role")).not.toBe("button");
+  });
+});

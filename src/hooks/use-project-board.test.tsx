@@ -738,3 +738,125 @@ describe("turning Show archived off", () => {
     expect(orderOnScreen()).toBe("t1:0");
   });
 });
+
+describe("a drop into another row of the board", () => {
+  const lane = (key: string, groupBy: "priority" | "assignee" | "category" = "priority", label = key) => ({ groupBy, key, label });
+  const person = (username: string) => ({ _id: `u-${username}`, username, fullName: username });
+  const laneTasks = [
+    { ...task("t1", 0, "todo"), priority: "medium", category: "bug", assignee: null },
+    { ...task("t2", 5, "todo"), priority: "urgent", category: "bug", assignee: person("ann") },
+    { ...task("t3", 3, "in_progress"), priority: "medium", category: "bug", assignee: null },
+    { ...task("t4", 9, "todo"), priority: "urgent", category: "bug", assignee: person("ann") },
+  ];
+
+  async function mountedLanes() {
+    api.get.mockImplementation((path: string) => {
+      if (path.endsWith("/tasks")) return Promise.resolve(laneTasks);
+      if (path.endsWith("/sprints")) return Promise.resolve([]);
+      if (path.endsWith("/assignable-users")) return Promise.resolve([person("ann"), person("bob")]);
+      return Promise.resolve(PROJECT);
+    });
+    probeScope = "all";
+    render(<Probe />);
+    await waitFor(() => expect(board.tasks).toHaveLength(4));
+    await waitFor(() => expect(board.assignableUsers).toHaveLength(2));
+    api.put.mockResolvedValue({});
+  }
+
+  const sent = () => api.put.mock.calls.at(-1)![1];
+  const find = (id: string) => board.tasks.find((t) => t._id === id)!;
+
+  it("gives the task the row's value with the status and the order, in one request", async () => {
+    await mountedLanes();
+
+    await act(async () => {
+      await board.handleTaskDrop("t3", "todo", 0, lane("v:urgent"));
+    });
+
+    expect(api.put).toHaveBeenCalledTimes(1);
+    expect(sent()).toEqual({ order: 4, status: "todo", priority: "urgent" });
+    expect(find("t3")).toMatchObject({ status: "todo", priority: "urgent", order: 4 });
+  });
+
+  it("places it among the row's own neighbours, not the whole column's", async () => {
+    await mountedLanes();
+
+    await act(async () => {
+      await board.handleTaskDrop("t3", "todo", 1, lane("v:medium"));
+    });
+
+    // The medium row's only task in "todo" is t1 at 0; the column also holds t4 at 9
+    expect(sent().order).toBe(1);
+  });
+
+  it("sends no field for a drop in the row the task is already in, and no status within its column", async () => {
+    await mountedLanes();
+
+    await act(async () => {
+      await board.handleTaskDrop("t1", "todo", 0, lane("v:medium"));
+    });
+
+    expect(sent()).toEqual({ order: expect.any(Number) });
+  });
+
+  it("clears the assignee for the Unassigned row, and names the person for theirs, with a user object on screen at once", async () => {
+    await mountedLanes();
+    api.put.mockImplementation(() => new Promise(() => {}));
+
+    act(() => {
+      void board.handleTaskDrop("t2", "todo", 0, lane("@none", "assignee"));
+    });
+    expect(sent()).toMatchObject({ assignee: null });
+    expect(find("t2").assignee).toBeNull();
+
+    act(() => {
+      void board.handleTaskDrop("t1", "todo", 0, lane("v:bob", "assignee"));
+    });
+    expect(sent()).toMatchObject({ assignee: "bob" });
+    expect(find("t1").assignee).toMatchObject({ username: "bob" });
+  });
+
+  it("changes nothing about the category for the row of tasks that have none, and sets a real one", async () => {
+    await mountedLanes();
+
+    await act(async () => {
+      await board.handleTaskDrop("t3", "todo", 0, lane("@none", "category"));
+    });
+    expect(sent()).not.toHaveProperty("category");
+
+    await act(async () => {
+      await board.handleTaskDrop("t3", "todo", 0, lane("v:doc", "category"));
+    });
+    expect(sent()).toMatchObject({ category: "doc" });
+  });
+
+  it("puts everything back from the server when the write is refused, and says so", async () => {
+    await mountedLanes();
+    api.put.mockRejectedValue(Object.assign(new Error("no"), { status: 500 }));
+    const reads = taskReads();
+
+    await act(async () => {
+      await board.handleTaskDrop("t3", "todo", 0, lane("v:urgent"));
+    });
+
+    expect(toast).toHaveBeenCalledWith("Failed to move task", "error");
+    await waitFor(() => expect(taskReads()).toBe(reads + 1));
+  });
+
+  it("asks before taking a held task, and retries the whole body with force", async () => {
+    await mountedLanes();
+    const conflict = { workerName: "mac", phase: "agent" };
+    api.put.mockRejectedValueOnce(Object.assign(new Error("held"), { status: 409, body: { runConflict: conflict } }));
+
+    await act(async () => {
+      await board.handleTaskDrop("t3", "todo", 0, lane("v:urgent"));
+    });
+    expect(board.heldMove).not.toBeNull();
+
+    api.put.mockResolvedValue({});
+    await act(async () => {
+      await board.forceHeldMove();
+    });
+    expect(sent()).toEqual({ order: 4, status: "todo", priority: "urgent", force: true });
+  });
+});
