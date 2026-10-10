@@ -169,6 +169,7 @@ export const GROUPS = {
     "organisations-sign-up.spec.ts",
     "sessions-and-auth.spec.ts",
     "proxied-login-throttle.spec.ts",
+    "search-engines-stay-out.spec.ts",
     "compose-cookie.spec.ts",
     "admin-sets-password.spec.ts",
     "reset-by-email.spec.ts",

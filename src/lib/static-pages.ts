@@ -4,6 +4,9 @@
 export const STATIC_ROUTES_ALLOWED: Record<string, string> = {
   "/_global-error": "Next's own fatal-error page (builtin/app-error.js), always prerendered; its Reload is a plain <form>",
   "/icon.svg": "an image, not a page",
+  "/favicon.ico": "an image, not a page",
+  "/apple-icon.png": "an image, not a page",
+  "/robots.txt": "plain text, not a page",
 };
 
 export function unexpectedStaticRoutes(manifest: unknown): string[] {
