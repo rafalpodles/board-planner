@@ -361,7 +361,7 @@ export function ProjectBoardView({
               }}
               className={`focus-ring flex h-11 items-center text-[13px] px-2.5 rounded-lg border transition-colors
                 ${selectionMode
-                  ? "border-primary bg-primary/10 text-primary"
+                  ? "border-primary bg-primary/10 text-primary-on-tint"
                   : "border-border text-text-muted hover:text-text hover:border-border"
                 }`}
               title="Select multiple tasks, then right-click one of them"

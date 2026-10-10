@@ -749,7 +749,7 @@ export function IntegrationsSection({
                               }
                               className={`rounded-full border px-2 py-0.5 text-xs transition-colors ${
                                 ch.events.includes(evt)
-                                  ? "border-primary bg-primary/10 text-primary"
+                                  ? "border-primary bg-primary/10 text-primary-on-tint"
                                   : "border-border text-text-muted"
                               }`}
                             >
@@ -886,7 +886,7 @@ export function IntegrationsSection({
                               }
                               className={`rounded-full border px-2 py-0.5 text-xs transition-colors ${
                                 wh.events.includes(evt)
-                                  ? "border-primary bg-primary/10 text-primary"
+                                  ? "border-primary bg-primary/10 text-primary-on-tint"
                                   : "border-border text-text-muted"
                               }`}
                             >

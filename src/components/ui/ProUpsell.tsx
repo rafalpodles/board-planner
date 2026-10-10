@@ -2,7 +2,7 @@ export const PRO_TRIAL_URL = "https://board-planner.com/trial/";
 
 export function ProBadge() {
   return (
-    <span className="shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-semibold text-primary">
+    <span className="shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-semibold text-primary-on-tint">
       Pro<span className="sr-only"> feature</span>
     </span>
   );

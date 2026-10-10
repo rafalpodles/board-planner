@@ -56,7 +56,7 @@ export function PlanBadge({ compact }: { compact: boolean }) {
         title={title}
         aria-label={title}
         data-testid="plan-badge"
-        className={`focus-ring mx-auto mb-2 block rounded-full bg-primary/15 px-2 py-1 text-[11px] font-semibold ${notice.kind === "pro" ? "text-primary" : tone}`}
+        className={`focus-ring mx-auto mb-2 block rounded-full bg-primary/15 px-2 py-1 text-[11px] font-semibold ${notice.kind === "pro" ? "text-primary-on-tint" : tone}`}
       >
         {name}
       </Link>
@@ -66,7 +66,7 @@ export function PlanBadge({ compact }: { compact: boolean }) {
   return (
     <div className="mx-2.5 mb-2 rounded-lg border border-border px-2.5 py-2" data-testid="plan-badge">
       <div className="flex items-center gap-2">
-        <span className="shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-semibold text-primary">{name}</span>
+        <span className="shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-semibold text-primary-on-tint">{name}</span>
         <span className={`min-w-0 flex-1 text-xs ${tone}`} data-testid="plan-badge-detail">
           {notice.kind === "free" && "Free plan"}
           {notice.kind === "pro" && (trial && organisation.planEndsAt ? `Ends ${formatPlanDate(organisation.planEndsAt)}` : "Plan active")}

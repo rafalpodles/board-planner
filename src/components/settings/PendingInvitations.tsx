@@ -116,7 +116,7 @@ export function PendingInvitations({
                     <span
                       className={`shrink-0 text-xs px-2 py-0.5 rounded-full ${
                         invitation.role === "admin"
-                          ? "bg-primary/20 text-primary"
+                          ? "bg-primary/20 text-primary-on-tint"
                           : "bg-bg-input text-text-muted"
                       }`}
                     >

@@ -330,7 +330,7 @@ export function Comments({
                     title={users.join(", ")}
                     className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs border transition-colors cursor-pointer ${
                       hasOwn
-                        ? "border-primary bg-primary/15 text-primary"
+                        ? "border-primary bg-primary/15 text-primary-on-tint"
                         : "border-border bg-bg hover:border-primary/50"
                     }`}
                   >

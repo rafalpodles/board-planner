@@ -5,17 +5,25 @@ import { Organisation, IOrganisation } from "@/models/organisation";
 import { currentLicence, entitlementsFromLicence, storedLicence, type LicenceCheck } from "./licence";
 import { DEFAULT_ORGANISATION_ID } from "./organisation-field";
 import { organisationDomain } from "./organisation-host";
+import { duplicateKeyField } from "./mongo-errors";
 
 export { ORGANISATION_NAME_MAX, checkOrganisationName } from "./organisation-name";
 
 const FREE = { plan: "free", features: [], source: "none" } as const;
 
-function ensureDefaultOrganisation(update: Record<string, unknown> = {}) {
-  return Organisation.findOneAndUpdate(
-    { _id: DEFAULT_ORGANISATION_ID },
-    { ...update, $setOnInsert: { entitlements: { ...FREE, features: [] } } },
-    { upsert: true, returnDocument: "after" }
-  ).lean<IOrganisation>();
+async function ensureDefaultOrganisation(update: Record<string, unknown> = {}) {
+  const write = () =>
+    Organisation.findOneAndUpdate(
+      { _id: DEFAULT_ORGANISATION_ID },
+      { ...update, $setOnInsert: { entitlements: { ...FREE, features: [] } } },
+      { upsert: true, returnDocument: "after" }
+    ).lean<IOrganisation>();
+  try {
+    return await write();
+  } catch (err) {
+    if (duplicateKeyField(err) !== "_id") throw err;
+    return write();
+  }
 }
 
 export async function nameOrganisation(name: string): Promise<void> {

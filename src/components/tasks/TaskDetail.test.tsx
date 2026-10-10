@@ -186,6 +186,37 @@ describe("TaskDetail", () => {
     expect(emitBoardRefresh).toHaveBeenCalledWith("TP");
   });
 
+  it("does not let a read that was in flight when somebody started watching take the watch back (BP-994)", async () => {
+    api.patch.mockResolvedValue({});
+    renderDetail();
+    await loaded();
+    const base = api.get.getMockImplementation()!;
+    let server = { ...task } as typeof task;
+    let release: (t: typeof task) => void = () => {};
+    const stale = new Promise<typeof task>((resolve) => (release = resolve));
+    let taskReads = 0;
+    api.get.mockImplementation((url: string) => {
+      if (url !== "/api/projects/TP/tasks/6") return base(url);
+      taskReads += 1;
+      return taskReads === 1 ? stale : Promise.resolve(server);
+    });
+    api.post.mockImplementation(async () => {
+      server = { ...server, watchers: ["u1"] } as typeof task;
+      return { watching: true };
+    });
+
+    await act(async () => screen.getByRole("combobox", { name: "Status" }).click());
+    await act(async () => screen.getByRole("option", { name: /In Progress/i }).click());
+    await act(async () => screen.getAllByRole("button", { name: /^Watch$/ })[0].click());
+    expect(screen.getAllByRole("button", { name: /Watching/ }).length).toBeGreaterThan(0);
+
+    await act(async () => release({ ...task } as typeof task));
+
+    expect(screen.getAllByRole("button", { name: /Watching/ }).length).toBeGreaterThan(0);
+    expect(screen.queryAllByRole("button", { name: /^Watch$/ })).toHaveLength(0);
+    expect(taskReads).toBe(2);
+  });
+
   it("moves status changes through the endpoint that runs the transition", async () => {
     api.patch.mockResolvedValue({});
     renderDetail();

@@ -246,7 +246,7 @@ export function ViewsMenu({ projectId, projectRef, canShare, snapshot, onApply }
                       {view.name}
                     </button>
                     {view.shared && (
-                      <span className="shrink-0 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                      <span className="shrink-0 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary-on-tint">
                         Shared
                       </span>
                     )}

@@ -84,6 +84,11 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
   const [refusal, setRefusal] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
   const shown = useRef(false);
+  const localWrites = useRef(0);
+  const changeTask = useCallback((updater: (prev: ApiTask | null) => ApiTask | null) => {
+    localWrites.current += 1;
+    setTask(updater);
+  }, []);
   // Whole-task reloads finish on their slowest read, so their readiness can land after a newer one
   const readinessReads = useRef({ issued: 0, shown: 0 });
   const showReadiness = (read: number, value: ApiHandoverReadiness | null) => {
@@ -103,19 +108,25 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
   const loadData = useCallback(async () => {
     const readinessRead = ++readinessReads.current.issued;
     try {
-      const [t, p, s, r] = await Promise.all([
-        api.get(`/api/projects/${projectId}/tasks/${taskId}`),
-        api.get(`/api/projects/${projectId}`),
-        api.get(`/api/projects/${projectId}/sprints`),
-        api.get(`/api/projects/${projectId}/handover`).catch(() => null),
-      ]);
-      setTask(t);
-      setProject(p);
-      setSprints(s);
-      showReadiness(readinessRead, r ?? null);
-      setRefusal(null);
-      shown.current = true;
-      onLoaded?.(t, p);
+      for (;;) {
+        const wrote = localWrites.current;
+        const [t, p, s, r] = await Promise.all([
+          api.get(`/api/projects/${projectId}/tasks/${taskId}`),
+          api.get(`/api/projects/${projectId}`),
+          api.get(`/api/projects/${projectId}/sprints`),
+          api.get(`/api/projects/${projectId}/handover`).catch(() => null),
+        ]);
+        // A change made here while this read was in flight may be missing from it: read again
+        if (localWrites.current !== wrote) continue;
+        setTask(t);
+        setProject(p);
+        setSprints(s);
+        showReadiness(readinessRead, r ?? null);
+        setRefusal(null);
+        shown.current = true;
+        onLoaded?.(t, p);
+        break;
+      }
     } catch (err) {
       // With nothing on screen the page itself says so; a toast would say it twice
       if (!refuse(err, true) && shown.current) toast("Failed to load task", "error");
@@ -211,7 +222,7 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
       readiness={readiness}
       onClose={onClose}
       onReload={loadData}
-      onTaskChange={setTask}
+      onTaskChange={changeTask}
       onRefused={(err) => refuse(err)}
     />
   );

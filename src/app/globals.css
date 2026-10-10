@@ -5,6 +5,7 @@
   /* Accent-as-text; overridden per theme so it stays readable on the background */
   --color-primary: #60a5fa;
   --color-primary-hover: #93c5fd;
+  --color-primary-on-tint: #93c5fd;
   --color-danger: #f87171;
   --color-danger-hover: #fca5a5;
   --color-success: #4ade80;
@@ -64,6 +65,7 @@ body {
   --color-text-muted: #475569;
   --color-primary: #1d4ed8;
   --color-primary-hover: #1e40af;
+  --color-primary-on-tint: #1e40af;
   --color-danger: #b91c1c;
   --color-danger-hover: #991b1b;
   --color-success: #166534;

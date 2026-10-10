@@ -378,7 +378,7 @@ export default function UsersPage() {
             aria-pressed={statusFilter === value}
             onClick={() => setStatusFilter(value)}
             className={`px-3 py-1.5 min-h-11 sm:min-h-0 rounded-lg text-sm border transition-colors ${
-              statusFilter === value ? "border-primary bg-primary/20 text-primary" : "border-border text-text-muted hover:border-text"
+              statusFilter === value ? "border-primary bg-primary/20 text-primary-on-tint" : "border-border text-text-muted hover:border-text"
             }`}
           >
             {label} <span className="tabular-nums">{counts[value]}</span>
@@ -409,7 +409,7 @@ export default function UsersPage() {
                   <span
                     className={`shrink-0 text-xs px-2 py-0.5 rounded-full ${
                       u.role === "admin"
-                        ? "bg-primary/20 text-primary"
+                        ? "bg-primary/20 text-primary-on-tint"
                         : "bg-bg-input text-text-muted"
                     }`}
                   >
@@ -527,7 +527,7 @@ export default function UsersPage() {
                   onClick={() => setEditRole("admin")}
                   className={`px-4 py-2 rounded-lg text-sm border transition-colors ${
                     editRole === "admin"
-                      ? "border-primary bg-primary/20 text-primary"
+                      ? "border-primary bg-primary/20 text-primary-on-tint"
                       : "border-border text-text-muted hover:border-text"
                   }`}
                 >
@@ -538,7 +538,7 @@ export default function UsersPage() {
                   onClick={() => setEditRole("member")}
                   className={`px-4 py-2 rounded-lg text-sm border transition-colors ${
                     editRole === "member"
-                      ? "border-primary bg-primary/20 text-primary"
+                      ? "border-primary bg-primary/20 text-primary-on-tint"
                       : "border-border text-text-muted hover:border-text"
                   }`}
                 >

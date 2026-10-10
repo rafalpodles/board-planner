@@ -14,7 +14,7 @@ import { ApiInvitation, GrantRelation, InvitationDelivery } from "@/types";
 type Sent = { invitation: ApiInvitation } & InvitationDelivery;
 
 const ROLE_BUTTON = "px-4 py-2 rounded-lg text-sm border transition-colors";
-const ROLE_ON = "border-primary bg-primary/20 text-primary";
+const ROLE_ON = "border-primary bg-primary/20 text-primary-on-tint";
 const ROLE_OFF = "border-border text-text-muted hover:border-text";
 
 export function InviteModal({
