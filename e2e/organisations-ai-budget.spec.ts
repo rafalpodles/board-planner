@@ -55,11 +55,11 @@ async function monthlyLimit(who: OrganisationFixture): Promise<number> {
   return 15_000_000 + 1_000_000 * Math.max(0, people - 10);
 }
 
-const spend = (who: OrganisationFixture, kind: "day" | "month" | "trial", tokens: number, ownTokens = 0) =>
+const spend = (who: OrganisationFixture, kind: "day" | "month" | "trial", tokens: number, ownTokens = 0, calls = 1, ownCalls = ownTokens ? 1 : 0) =>
   withDb(async (db) => {
     const period = kind === "day" ? TODAY : kind === "month" ? MONTH : "all";
     await db.collection("aibudgets").deleteMany({ organisation: who.organisation, kind, period });
-    await db.collection("aibudgets").insertOne({ organisation: who.organisation, kind, period, tokens, calls: 1, ownTokens, ownCalls: ownTokens ? 1 : 0 });
+    await db.collection("aibudgets").insertOne({ organisation: who.organisation, kind, period, tokens, calls, ownTokens, ownCalls });
   });
 
 const counters = (who: OrganisationFixture) => withDb((db) => db.collection("aibudgets").find({ organisation: who.organisation }).sort({ kind: 1 }).toArray());
@@ -346,16 +346,34 @@ test("the operator's list says how much of its allowance each organisation has u
 
 test("on screen: Settings → AI key says what has been used and when it renews, and that the operator switched the key off", async ({ page, request }) => {
   const limit = await monthlyLimit(ACME);
-  await spend(ACME, "month", 4_200_000, 77_000);
+  await spend(ACME, "month", 4_200_000, 77_000, 1_340, 41);
   await spend(ACME, "day", 900_000);
+  // Three turns this month and two before it, in the organisation's own project; a neighbour's turn that must not count
+  const turn = (who: OrganisationFixture, createdAt: Date) => ({ organisation: who.organisation, project: who.projectId, role: "user", content: "hello", actions: [], attachments: [], trigger: { type: "chat", taskKey: "" }, createdAt });
+  // The first of the month counts and the last millisecond before it does not, on any day of the month; an answer is not a turn
+  const today = new Date();
+  const firstOfMonth = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
+  const beforeIt = new Date(firstOfMonth.getTime() - 1);
+  await withDb((db) =>
+    db.collection("pmmessages").insertMany([
+      turn(ACME, new Date()),
+      turn(ACME, firstOfMonth),
+      turn(ACME, new Date()),
+      turn(ACME, beforeIt),
+      turn(ACME, new Date(today.getTime() - 40 * 24 * 60 * 60 * 1000)),
+      { ...turn(ACME, new Date()), role: "assistant" },
+      turn(GLOBEX, new Date()),
+    ])
+  );
   await signInOn(page.context(), ACME);
 
   await page.goto(`${originOf(ACME)}/settings/ai-keys`);
   const month = page.getByTestId("ai-usage-month");
+  await expect(page.getByTestId("ai-usage-activity")).toHaveText("3 PM turns this month, and 1,340 model calls on this service's key.");
   await expect(month).toContainText(`4,200,000 of ${limit.toLocaleString("en-US")} tokens used this month. It renews on 1 `);
-  await expect(page.getByText(`${Math.round((4_200_000 / limit) * 100)}% used`)).toBeVisible();
+  await expect(page.getByText(`${Math.floor((4_200_000 / limit) * 100)}% used`)).toBeVisible();
   await expect(page.getByTestId("ai-usage-today")).toContainText(`Today (UTC): 900,000 tokens; one day may use at most ${Math.ceil(limit / 5).toLocaleString("en-US")}.`);
-  await expect(page.getByTestId("ai-usage-own")).toContainText("Your own key: 77,000 tokens this month, counted and never limited.");
+  await expect(page.getByTestId("ai-usage-own")).toContainText("Your own key: 77,000 tokens in 41 calls this month, counted and never limited.");
   await expect(page.getByTestId("ai-usage-locked")).toHaveCount(0);
   await page.screenshot({ path: "e2e/.artifacts/bp680-ai-usage.png" });
 

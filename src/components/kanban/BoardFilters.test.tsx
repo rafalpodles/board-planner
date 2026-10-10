@@ -4,6 +4,12 @@ import { render, screen, cleanup, act, fireEvent, waitFor, within } from "@testi
 import { BoardFilters } from "./BoardFilters";
 import { ApiCustomField, ApiTask } from "@/types";
 import { UNFILED } from "@/lib/board-filters-state";
+import type { ApiSavedView } from "@/types";
+
+vi.mock("@/hooks/use-api", () => ({
+  useApi: () => ({ get: vi.fn(async () => []), post: vi.fn(), put: vi.fn(), patch: vi.fn(), del: vi.fn() }),
+}));
+vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast: vi.fn() }) }));
 
 function task(over: Partial<ApiTask> & { _id: string }): ApiTask {
   return {
@@ -586,5 +592,170 @@ describe("BoardFilters epic", () => {
       screen.getByLabelText("Remove Epic filter").click();
     });
     expect(titlesShown(onFilter)).toHaveLength(5);
+  });
+});
+
+const view = (over: Partial<ApiSavedView> = {}): ApiSavedView => ({
+  _id: "v1",
+  name: "A view",
+  shared: false,
+  mine: true,
+  canEdit: true,
+  filters: {},
+  search: "",
+  sortField: "manual",
+  sortDir: "asc",
+  viewMode: "board",
+  groupBy: "",
+  sprintScope: "all",
+  hiddenColumns: [],
+  ...over,
+});
+
+const lastShown = (onFilter: ReturnType<typeof vi.fn>) =>
+  (onFilter.mock.calls.at(-1)![0] as ApiTask[]).map((t) => t.title);
+
+const viewsProp = (onApplied = vi.fn()) => ({
+  projectRef: "TP",
+  canShare: false,
+  viewMode: "board" as const,
+  sprintScope: "all",
+  onApplied,
+});
+
+describe("the assignee filter's Me", () => {
+  const stored = (assignee: string) =>
+    localStorage.setItem("board-filters:TP", JSON.stringify({ filters: { assignee } }));
+
+  it("keeps the tasks of whoever is looking, and a different person sees theirs", async () => {
+    stored("@me");
+    const mine = renderFilters({ currentUsername: "owner" });
+    await waitFor(() => expect(lastShown(mine.onFilter)).toEqual(["Assigned work"]));
+    mine.unmount();
+
+    const other = renderFilters({ currentUsername: "somebody-else" });
+    await waitFor(() => expect(lastShown(other.onFilter)).toEqual([]));
+  });
+
+  it("says Me on the chip and offers it in the picker, and counts as a filter", async () => {
+    stored("@me");
+    renderFilters();
+    await openPopover();
+
+    const popover = screen.getByRole("dialog", { name: "Filters" });
+    expect(within(popover).getByText("Me", { selector: "span" })).toBeTruthy();
+    expect((within(popover).getByLabelText("Assignee") as HTMLSelectElement).value).toBe("@me");
+    expect(screen.getByText("Filters").parentElement!.textContent).toContain("1");
+  });
+});
+
+describe("applying a saved view", () => {
+  it("replaces what was set with the view's filters, sort, grouping and columns, once", async () => {
+    localStorage.setItem("board-filters:TP", JSON.stringify({ filters: { priority: "low" } }));
+    const onGroupByChange = vi.fn();
+    const onHiddenColumnsChange = vi.fn();
+    const onApplied = vi.fn();
+    const onPendingViewApplied = vi.fn();
+    const { onFilter, onSortChange } = renderFilters({
+      onGroupByChange,
+      onHiddenColumnsChange,
+      views: viewsProp(onApplied),
+      pendingView: view({
+        filters: { priority: "urgent" },
+        sortField: "title",
+        sortDir: "desc",
+        groupBy: "priority",
+        hiddenColumns: ["category"],
+      }),
+      onPendingViewApplied,
+    });
+
+    await waitFor(() => expect(onApplied).toHaveBeenCalledTimes(1));
+    expect(lastShown(onFilter)).toEqual(["Urgent bug"]);
+    expect(onSortChange).toHaveBeenLastCalledWith("title", "desc");
+    expect(onGroupByChange).toHaveBeenLastCalledWith("priority");
+    expect(onHiddenColumnsChange).toHaveBeenLastCalledWith(["category"]);
+    expect(onPendingViewApplied).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(localStorage.getItem("board-filters:TP")!).filters.priority).toBe("urgent");
+  });
+
+  it("applies its search text, and shows it as a chip that clears it", async () => {
+    const { onFilter } = renderFilters({ views: viewsProp(), pendingView: view({ search: "chore" }), onPendingViewApplied: vi.fn() });
+    await waitFor(() => expect(lastShown(onFilter)).toEqual(["Low chore"]));
+
+    await openPopover();
+    fireEvent.click(screen.getByRole("button", { name: "Remove Search: chore filter" }));
+
+    await waitFor(() => expect(lastShown(onFilter)).toHaveLength(3));
+  });
+
+  it("waits for the stored filters to be read, so they cannot overwrite the view", async () => {
+    localStorage.setItem("board-filters:TP", JSON.stringify({ filters: { priority: "low" } }));
+    const { onFilter } = renderFilters({
+      views: viewsProp(),
+      pendingView: view({ filters: { category: "bug" } }),
+      onPendingViewApplied: vi.fn(),
+    });
+
+    await waitFor(() => expect(lastShown(onFilter)).toHaveLength(3));
+    expect(JSON.parse(localStorage.getItem("board-filters:TP")!).filters).toMatchObject({ category: "bug", priority: "" });
+  });
+
+  describe("a person it names", () => {
+    const named = (assignee: string, over: Partial<React.ComponentProps<typeof BoardFilters>> = {}) =>
+      renderFilters({
+        views: viewsProp(),
+        knownAssignees: ["owner"],
+        pendingView: view({ filters: { assignee } }),
+        onPendingViewApplied: vi.fn(),
+        ...over,
+      });
+
+    it("is dropped when they are on no task and not on the roster", async () => {
+      const { onFilter } = named("left-the-company");
+      await waitFor(() => expect(lastShown(onFilter)).toHaveLength(3));
+    });
+
+    it("is kept when a task carries them, as a machine does, though the roster leaves them out", async () => {
+      const withBot = [
+        ...tasks,
+        task({ _id: "4", taskNumber: 4, title: "Bot work", assignee: { _id: "m1", username: "worker-bot" } } as Partial<ApiTask> & { _id: string }),
+      ];
+      const { onFilter } = named("worker-bot", { tasks: withBot });
+      await waitFor(() => expect(lastShown(onFilter)).toEqual(["Bot work"]));
+    });
+
+    it("is dropped once a roster that was slow arrives and does not have them either", async () => {
+      const { onFilter, rerender } = named("left-the-company", { knownAssignees: [] });
+      await waitFor(() => expect(lastShown(onFilter)).toEqual([]));
+
+      rerender(
+        <BoardFilters
+          tasks={tasks}
+          categories={["bug", "doc"]}
+          projectKey="TP"
+          projectId="TP"
+          currentUsername="owner"
+          sortField="manual"
+          sortDir="asc"
+          onSortChange={vi.fn()}
+          onFilter={onFilter}
+          views={viewsProp()}
+          knownAssignees={["owner"]}
+        />
+      );
+
+      await waitFor(() => expect(lastShown(onFilter)).toHaveLength(3));
+    });
+
+    it("is kept when the view moves to another sprint scope, whose tasks are not on screen yet", async () => {
+      const { onFilter } = named("worker-bot", { pendingView: view({ filters: { assignee: "worker-bot" }, sprintScope: "backlog" }) });
+      await waitFor(() => expect(lastShown(onFilter)).toEqual([]));
+    });
+
+    it("is kept when the roster has them", async () => {
+      const { onFilter } = named("owner");
+      await waitFor(() => expect(lastShown(onFilter)).toEqual(["Assigned work"]));
+    });
   });
 });

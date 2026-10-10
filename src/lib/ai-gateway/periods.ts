@@ -16,3 +16,5 @@ export function nextUtcMidnight(at: Date): Date {
 export function nextUtcMonth(at: Date): Date {
   return new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth() + 1, 1));
 }
+
+export const startOfUtcMonth = (at: Date): Date => new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), 1));

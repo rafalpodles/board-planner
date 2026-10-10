@@ -2,6 +2,7 @@ import { test, expect, type APIRequestContext, type APIResponse, type Browser } 
 import mongoose from "mongoose";
 import { SAME_ORIGIN } from "./api";
 import {
+  ADMIN_ID,
   ADMIN_USERNAME,
   E2E_MONGODB_URI,
   FIELDS,
@@ -360,7 +361,68 @@ const FORBIDDEN = /^\{"error":"Forbidden"\}$/;
 const NO = /^false$/;
 const YES = /^true$/;
 
+const VIEW_IDS = {
+  shared: new mongoose.Types.ObjectId("e2e0000000000000000f0b01"),
+  member: new mongoose.Types.ObjectId("e2e0000000000000000f0b02"),
+  owner: new mongoose.Types.ObjectId("e2e0000000000000000f0b03"),
+};
+
+/** One shared view the instance admin made, and a personal one for each persona */
+async function savedViews() {
+  const view = (_id: mongoose.Types.ObjectId, name: string, owner: mongoose.Types.ObjectId, shared: boolean) => ({
+    _id,
+    name,
+    owner,
+    shared,
+    filters: {},
+    search: "",
+    sortField: "manual",
+    sortDir: "asc",
+    viewMode: "board",
+    groupBy: "",
+    sprintScope: "all",
+    hiddenColumns: [],
+  });
+  await onProject({
+    savedViews: [
+      view(VIEW_IDS.shared, "Shared by the admin", ADMIN_ID, true),
+      view(VIEW_IDS.member, "The member's", MEMBER_ID, false),
+      view(VIEW_IDS.owner, "The owner's", OWNER_ID, false),
+    ],
+  });
+}
+
 const INLINE_RECIPES: Record<string, InlineRecipe> = {
+  "GET /api/projects/[projectId]/views": {
+    // Whether the reader may change a shared view somebody else made is what the grant decides
+    setup: savedViews,
+    send: get,
+    read: field((views: { shared: boolean; canEdit: boolean }[]) => views.find((v) => v.shared)?.canEdit),
+    member: { status: 200, body: NO },
+    owner: { status: 200, body: YES },
+  },
+  "POST /api/projects/[projectId]/views": {
+    // Only the board's owner shares a view with the board
+    send: withBody("post", { name: "Gate probe", shared: true }),
+    member: { status: 403, body: /Only a project owner shares a view with the project/ },
+    owner: { status: 201, body: /"shared":true/ },
+  },
+  "PUT /api/projects/[projectId]/views": {
+    // Each persona shares a view of its own; only the owner may
+    setup: savedViews,
+    send: (request, path, who) =>
+      request.put(path, { headers: SAME_ORIGIN, data: { viewId: String(VIEW_IDS[who]), shared: true } }),
+    member: { status: 403, body: /Only a project owner shares a view with the project/ },
+    owner: { status: 200, body: /"shared":true/ },
+  },
+  "DELETE /api/projects/[projectId]/views": {
+    // A shared view somebody else made is the board owner's to remove, and nobody else's
+    setup: savedViews,
+    send: (request, path) =>
+      request.delete(path, { headers: SAME_ORIGIN, data: { viewId: String(VIEW_IDS.shared) } }),
+    member: { status: 403, body: /You cannot change this view/ },
+    owner: { status: 200, body: /"ok":true/ },
+  },
   "GET /api/pm/oauth/callback": {
     // Each persona completes a flow it started itself, so only the grant tells the two apart
     setup: oauthStates,

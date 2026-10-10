@@ -11,7 +11,8 @@ vi.mock("@/lib/grants", () => ({ check: vi.fn(), accessibleProjectIds: vi.fn() }
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/lib/organisation", () => ({ getOrganisation }));
 const USAGE = { scope: "month", used: 0, limit: null, resetsAt: null, today: 0, dailyCeiling: null, ownTokens: 0, locked: false };
-vi.mock("@/lib/ai-gateway/summary", () => ({ aiUsageSummary: async () => USAGE }));
+const aiUsageSummary = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/ai-gateway/summary", () => ({ aiUsageSummary }));
 // The host check reads the database in the cloud; the request here always comes from the organisation's own host
 vi.mock("@/lib/organisation-host", async (importOriginal) => {
   const { scopedToDefaultOrganisation } = await vi.importActual<typeof import("@/lib/db-scope")>("@/lib/db-scope");
@@ -45,6 +46,7 @@ const KEY = "sk-or-v1-0123456789abcdef";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  aiUsageSummary.mockResolvedValue(USAGE);
   row = null;
   getAuthUser.mockResolvedValue(ADMIN);
   getOrganisation.mockResolvedValue({ entitlements: { plan: "free", features: [], source: "none" } });
@@ -166,6 +168,12 @@ describe("GET /api/settings/ai-keys", () => {
     await put({ openrouterKey: KEY });
 
     expect((await (await get()).json())).toMatchObject({ set: true, unreadable: false });
+  });
+
+  it("asks for the month's turns too, which only this screen shows", async () => {
+    await get();
+
+    expect(aiUsageSummary).toHaveBeenCalledWith(expect.anything(), expect.any(Date), { turns: true });
   });
 
   it("carries what the organisation has used of its AI allowance, on the read and on the answer to a save", async () => {

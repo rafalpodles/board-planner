@@ -400,6 +400,40 @@ export interface ApiProjectCategory {
   color: string;
 }
 
+export interface ISavedView {
+  _id: Types.ObjectId;
+  name: string;
+  owner: Types.ObjectId;
+  shared: boolean;
+  filters: Record<string, unknown>;
+  search: string;
+  sortField: string;
+  sortDir: "asc" | "desc";
+  viewMode: "board" | "list";
+  groupBy: string;
+  sprintScope: string;
+  hiddenColumns: string[];
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ApiSavedView {
+  _id: string;
+  name: string;
+  shared: boolean;
+  /** Whether the reader may rename, update or delete it */
+  canEdit: boolean;
+  mine: boolean;
+  filters: Record<string, unknown>;
+  search: string;
+  sortField: string;
+  sortDir: "asc" | "desc";
+  viewMode: "board" | "list";
+  groupBy: string;
+  sprintScope: string;
+  hiddenColumns: string[];
+}
+
 export interface ITaskTemplate {
   _id: Types.ObjectId;
   name: string;
@@ -954,6 +988,7 @@ export interface IProject {
   categories: IProjectCategory[];
   columns: IProjectColumn[];
   taskTemplates: ITaskTemplate[];
+  savedViews: ISavedView[];
   customFields: ICustomField[];
   // Which custom field's numeric value sums as this project's estimate. "" means the
   // project does not estimate. Must always name a live number field — cleared by the
