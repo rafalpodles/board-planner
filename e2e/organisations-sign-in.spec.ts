@@ -90,6 +90,13 @@ test.describe("BP-919: signing in on the platform host, e-mail first", () => {
     await expect(page.getByLabel("E-mail address")).toBeVisible();
   });
 
+  test("BP-1008: the e-mail step carries no explanatory line under the field", async ({ page }) => {
+    await page.goto(`${ORGANISATIONS_PLATFORM_ORIGIN}/`);
+    await expect(page.getByLabel("E-mail address")).toBeVisible();
+    await expect(page.getByText("We will e-mail you a code")).toHaveCount(0);
+    await expect(page.getByText("never need your organisation")).toHaveCount(0);
+  });
+
   test("BP-1009: nothing is remembered unless it is asked for, and signing in again without asking withdraws it", async ({ page }) => {
     const email = freshAddress("nocookie");
     await giveAddress(GLOBEX, email);

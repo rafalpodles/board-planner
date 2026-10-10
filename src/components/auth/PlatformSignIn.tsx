@@ -221,7 +221,6 @@ export function PlatformSignIn() {
             <Button type="submit" className="w-full" disabled={busy}>
               {busy ? "Sending…" : "Continue"}
             </Button>
-            <p className="text-xs text-text-muted">We will e-mail you a code. You never need your organisation&apos;s address to sign in.</p>
             {switching && (
               <div className="border-t border-border pt-3 text-sm">
                 {forgotten ? (
