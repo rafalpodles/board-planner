@@ -3,7 +3,7 @@ import { can } from "@/lib/entitlements";
 import { getOrganisation } from "@/lib/organisation";
 import { organisationDomain } from "@/lib/organisation-host";
 import { counterKindOf } from "./budget";
-import { budgetOf } from "./limits";
+import { budgetOf, operatorAllowance } from "./limits";
 import { nextUtcMonth, periodOf } from "./periods";
 
 export interface AiUsageSummary {
@@ -23,6 +23,8 @@ export interface AiUsageSummary {
   ownTokens: number;
   /** The operator has switched off the use of its key for this organisation */
   locked: boolean;
+  /** The operator's own figure, set for the counter this organisation is on now, is the one in force (BP-678) */
+  overridden: boolean;
   /** The service has a key and this organisation may use it: a plan that includes it, or a self-hosted instance's own */
   included: boolean;
 }
@@ -50,6 +52,7 @@ export async function aiUsageSummary(db: ScopedDb, now: Date = new Date()): Prom
     dailyCeiling: included && budget && budget.dailyCeiling > 0 ? budget.dailyCeiling : null,
     ownTokens: row(scope)?.ownTokens ?? 0,
     locked: Boolean(organisation.aiLockedAt),
+    overridden: operatorAllowance(organisation.aiAllowance, scope) !== undefined,
     included,
   };
 }
