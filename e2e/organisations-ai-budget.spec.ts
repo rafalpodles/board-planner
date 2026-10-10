@@ -319,7 +319,7 @@ test("on screen: Settings → AI key says what has been used and when it renews,
   await platform(request, "POST", aiLockPath(ACME), { locked: true, reason: "abuse report 17" });
   await page.reload();
   await expect(page.getByTestId("ai-usage-locked")).toContainText("The operator has switched off the use of its key for this organisation. Add your own key below to keep going.");
-  await expect(page.getByText("Switched off")).toBeVisible();
+  await expect(page.getByText("Switched off", { exact: true })).toHaveCount(2);
   await page.screenshot({ path: "e2e/.artifacts/bp680-ai-usage-locked.png" });
 
   await page.setViewportSize({ width: 390, height: 800 });

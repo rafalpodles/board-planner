@@ -255,12 +255,29 @@ describe("Settings → AI key: usage", () => {
     expect(screen.queryByTestId("ai-usage-own")).toBeNull();
   });
 
+  it("says on the key card too that ours is switched off, so it does not promise what the operator took away", async () => {
+    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ locked: true }) });
+    render(<AiKeys />);
+
+    expect(await screen.findByText(/the operator has switched ours off for this organisation/)).toBeTruthy();
+    expect(screen.queryByText(/which your plan includes/)).toBeNull();
+    expect(screen.queryByText("Included")).toBeNull();
+  });
+
+  it("does not take the own key's word away: a stored key still reads as used first while the lock is on", async () => {
+    api.get.mockResolvedValue({ ...PRO_CLOUD, set: true, hint: "abcd", usage: usage({ locked: true }) });
+    render(<AiKeys />);
+
+    expect(await screen.findByText("Your own key")).toBeTruthy();
+    expect(screen.getByText(/It is used first/)).toBeTruthy();
+  });
+
   it("says the operator has switched the key off, and offers the own key as the way on", async () => {
     api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ locked: true }) });
     render(<AiKeys />);
 
     const alert = await screen.findByTestId("ai-usage-locked");
     expect(alert.textContent).toMatch(/The operator has switched off the use of its key for this organisation\. Add your own key below to keep going\./);
-    expect(screen.getByText("Switched off")).toBeTruthy();
+    expect(screen.getAllByText("Switched off")).toHaveLength(2);
   });
 });

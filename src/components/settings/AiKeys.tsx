@@ -118,7 +118,10 @@ function KeyCard({ state, onSaved }: { state: AiKeysAnswer; onSaved: (answer: Ai
     return send(value.trim(), `${TITLE} saved`);
   };
 
-  const fallback = state.included
+  const switchedOff = state.included && state.usage.locked;
+  const fallback = switchedOff
+    ? "Without a key of your own it does not run: the operator has switched ours off for this organisation."
+    : state.included
     ? hosted
       ? "Without a key of your own it runs on ours, which your plan includes."
       : "Without a key of your own it runs on the key this server was set up with."
@@ -133,8 +136,8 @@ function KeyCard({ state, onSaved }: { state: AiKeysAnswer; onSaved: (answer: Ai
       title={TITLE}
       description={USE}
       status={{
-        label: state.unreadable ? "Cannot be read" : state.set ? "Your own key" : state.included ? (hosted ? "Included" : "Server key") : "Not set",
-        on: !state.unreadable && (state.set || state.included),
+        label: state.unreadable ? "Cannot be read" : state.set ? "Your own key" : switchedOff ? "Switched off" : state.included ? (hosted ? "Included" : "Server key") : "Not set",
+        on: !state.unreadable && (state.set || (state.included && !switchedOff)),
       }}
     >
       {state.unreadable ? (
