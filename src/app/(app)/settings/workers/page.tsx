@@ -461,7 +461,20 @@ export default function AdminWorkersPage() {
                 const status = commandStatus(worker);
                 return [
                   <tr key={worker._id} className="border-b-0">
-                    <td className="px-3 py-2 font-medium whitespace-nowrap">{worker.name}</td>
+                    <td className="px-3 py-2 font-medium whitespace-nowrap">
+                      {worker.name}
+                      {worker.condition?.state === "held" && (
+                        <span data-testid="worker-held" className="mt-1 flex items-center gap-2 text-xs font-normal">
+                          <span className="rounded-full border border-warning/40 bg-warning/10 px-1.5 py-0.5 text-warning">
+                            Waiting · Free plan
+                          </span>
+                          <Link href={UPGRADE_HREF} className="font-medium text-primary underline">
+                            Upgrade
+                          </Link>
+                        </span>
+                      )}
+                      {worker.condition?.state === "held" && <span className="sr-only">{HELD_BY_PLAN}</span>}
+                    </td>
                     <td className="px-3 py-2 text-text-muted whitespace-nowrap">{worker.host || "—"}</td>
                     <td className="px-3 py-2 text-text-muted font-mono text-xs whitespace-nowrap">
                       {worker.version || "—"}
@@ -487,16 +500,6 @@ export default function AdminWorkersPage() {
                       />
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap">
-                      {worker.condition?.state === "held" && (
-                        <span data-testid="worker-held" className="flex items-center gap-2 text-xs" title={HELD_BY_PLAN}>
-                          <span className="rounded-full border border-warning/40 bg-warning/10 px-1.5 py-0.5 text-warning">
-                            Waiting · Free plan
-                          </span>
-                          <Link href={UPGRADE_HREF} className="font-medium text-primary underline">
-                            Upgrade
-                          </Link>
-                        </span>
-                      )}
                       {worker.currentTask ? (
                         <div className="flex items-center gap-2">
                           <span className="font-mono text-xs">{worker.currentTask.taskKey}</span>
@@ -509,7 +512,7 @@ export default function AdminWorkersPage() {
                             </span>
                           )}
                         </div>
-                      ) : worker.condition?.state === "held" ? null : (
+                      ) : (
                         <span className="text-text-muted">—</span>
                       )}
                     </td>

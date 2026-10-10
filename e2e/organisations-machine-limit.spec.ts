@@ -267,7 +267,7 @@ test("after Pro ends with two machines, the first connected claims, the other is
   const held = await claim(request, ACME, SECOND(ACME));
   expect(held.status()).toBe(409);
   expect((await held.json()).error).toBe(
-    "The Free plan runs one machine per organisation, and another one was connected first. Upgrade to Pro, or switch the other machine off in Settings → Workers, for this one to take work."
+    "The Free plan runs one machine per organisation, and another one was connected first. Upgrade to Pro, or have an admin switch the other machine off in Settings → Workers, for this one to take work."
   );
   expect((await claim(request, ACME, ACME.workerId)).status()).toBe(204);
 
@@ -377,6 +377,11 @@ test("on the trial a second machine connects through the menubar's page, and whe
   expect(await assignments(request, ACME, ACME.workerId)).toHaveLength(1);
 
   await expect.poll(laptopClaims, { timeout: 90_000, intervals: [3_000] }).toBe(409);
+  const held = await request.post(`${ORGANISATIONS_API}/api/projects/${ACME.projectId}/tasks/claim`, {
+    headers: laptop,
+    data: { runId: "run-laptop" },
+  });
+  expect((await held.json()).error).toMatch(/^The Free plan runs one machine per organisation/);
   expect((await claim(request, ACME, ACME.workerId)).status()).toBe(204);
   expect(await withDb((db) => db.collection("workers").countDocuments({ organisation: ACME.organisation, enabled: true }))).toBe(2);
 

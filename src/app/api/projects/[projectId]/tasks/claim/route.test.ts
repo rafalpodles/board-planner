@@ -141,7 +141,7 @@ describe("POST /tasks/claim on a Free organisation past its one machine", () => 
 
     expect(response.status).toBe(409);
     expect((await response.json()).error).toBe(
-      "The Free plan runs one machine per organisation, and another one was connected first. Upgrade to Pro, or switch the other machine off in Settings → Workers, for this one to take work."
+      "The Free plan runs one machine per organisation, and another one was connected first. Upgrade to Pro, or have an admin switch the other machine off in Settings → Workers, for this one to take work."
     );
     expect(claimNextTask).not.toHaveBeenCalled();
   });
