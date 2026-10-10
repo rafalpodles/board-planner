@@ -6,8 +6,7 @@
  *
  * The flow: the daily pull gives a trial; Upgrade starts a checkout through the service; Stripe's signed webhooks make
  * the organisation Pro and the key reaches the product by the service's signed push; a change in people reaches the
- * subscription as a member quantity; Manage subscription opens the portal; the consumer who bought it withdraws within
- * the 14 days and is refunded the time not used (BP-941).
+ * subscription as a member quantity; Manage subscription opens the portal.
  *
  * Needs E2E_ORGANISATIONS_SERVER=1 and a checkout of the service with its dependencies installed.
  */
@@ -194,8 +193,7 @@ test("a trial, a checkout, a payment, the members and the portal, through the re
   await expect(panel).toContainText("Subscribe to keep Pro when the trial ends");
   await expect(panel).toContainText("The launch price is open");
   await panel.getByLabel("Yearly").check();
-  await panel.getByRole("radio", { name: /A consumer/ }).check();
-  await panel.getByRole("checkbox", { name: /I ask for Pro to start immediately/ }).check();
+  await panel.getByRole("checkbox", { name: /Start Pro now/ }).check();
   await page.getByTestId("subscription-checkout").click();
   await expect(page).toHaveURL(/^https:\/\/stripe\.test\/pay\/cs_test_/);
   const session = (await stripeRequests()).find((r) => r.path === "/v1/checkout/sessions")!;
@@ -205,14 +203,12 @@ test("a trial, a checkout, a payment, the members and the portal, through the re
     client_reference_id: ACME.organisation.toHexString(),
     "line_items[0][price]": PRICES.launch.year.base,
     "metadata[launch]": "1",
-    "metadata[buyer]": "consumer",
     "metadata[immediate_start]": "1",
-    "subscription_data[metadata][buyer]": "consumer",
+    "subscription_data[metadata][immediate_start]": "1",
   });
 
   // 3. Stripe says it was paid: its own signed webhooks, to the real service, which signs a push to the real product
   const periodEnd = Math.floor(Date.now() / 1000) + 365 * DAY;
-  const periodStart = periodEnd - 365 * DAY;
   const item = (price: string, quantity: number) => ({ id: `si_${price}`, object: "subscription_item", price: { id: price, object: "price", recurring: { interval: "year" } }, quantity, current_period_start: periodEnd - 365 * DAY, current_period_end: periodEnd });
   await fetch(`${STRIPE_URL}/__stub/subscription`, {
     method: "POST",
@@ -223,19 +219,10 @@ test("a trial, a checkout, a payment, the members and the portal, through the re
       customer: "cus_smoke",
       cancel_at_period_end: false,
       cancel_at: null,
-      start_date: periodStart,
-      metadata: {
-        organisation: ACME.organisation.toHexString(),
-        launch: "1",
-        member_price: PRICES.launch.year.member,
-        buyer: session.form["subscription_data[metadata][buyer]"],
-        immediate_start: session.form["subscription_data[metadata][immediate_start]"],
-        ordered_at: session.form["subscription_data[metadata][ordered_at]"],
-      },
+      metadata: { organisation: ACME.organisation.toHexString(), launch: "1", member_price: PRICES.launch.year.member },
       items: { object: "list", has_more: false, data: [item(PRICES.launch.year.base, 1)] },
     }),
   });
-  await fetch(`${STRIPE_URL}/__stub/invoice`, { method: "POST", body: JSON.stringify({ id: "in_smoke", subscription: "sub_smoke", amount_paid: 49000, currency: "usd", lines: { data: [{ period: { start: periodStart, end: periodEnd } }] } }) });
   expect((await webhook("checkout.session.completed", { mode: "subscription", subscription: "sub_smoke", customer: "cus_smoke", client_reference_id: ACME.organisation.toHexString() })).status).toBe(200);
   expect(
     (await webhook("invoice.paid", { id: "in_smoke", amount_paid: 49000, total: 49000, parent: { subscription_details: { subscription: "sub_smoke" } }, lines: { has_more: false, data: [{ period: { start: periodEnd - 365 * DAY, end: periodEnd } }] } })).status
@@ -270,20 +257,4 @@ test("a trial, a checkout, a payment, the members and the portal, through the re
   await expect(page).toHaveURL(/^https:\/\/stripe\.test\/portal\/bps_test_/);
   const portal = (await stripeRequests()).find((r) => r.path === "/v1/billing_portal/sessions")!;
   expect(portal.form).toEqual({ customer: "cus_smoke", return_url: `${originOf(ACME)}/settings/organisation` });
-
-  // 6. The consumer withdraws within the 14 days: refunded through Stripe for the time not used, the subscription ended at
-  // once, and Pro ends today by a key the service pushes
-  await page.goto(`${originOf(ACME)}/settings/organisation`);
-  await page.getByTestId("subscription-withdrawal").getByRole("button", { name: "Withdraw from the contract" }).click();
-  const withdrawn = page.waitForResponse((response) => response.url().endsWith("/api/admin/billing/withdraw"));
-  await page.getByRole("dialog").getByRole("button", { name: "Withdraw", exact: true }).click();
-  expect((await withdrawn).status()).toBe(200);
-  const refund = (await stripeRequests()).find((r) => r.method === "POST" && r.path === "/v1/refunds")!;
-  expect(refund.form).toMatchObject({ payment_intent: "pi_in_smoke", reason: "requested_by_customer", "metadata[withdrawal]": "sub_smoke" });
-  // A few seconds of a year used: all but a few cents of what was paid
-  expect(Number(refund.form.amount)).toBeGreaterThan(48_990);
-  expect(Number(refund.form.amount)).toBeLessThanOrEqual(49_000);
-  expect((await stripeRequests()).some((r) => r.method === "DELETE" && r.path === "/v1/subscriptions/sub_smoke")).toBe(true);
-  await expect(page.getByTestId("subscription-withdrawn")).toBeVisible();
-  await expect.poll(async () => new Date((await organisationOf(request)).planEndsAt!).getTime(), { timeout: 30_000, message: "the withdrawal's key ends Pro today" }).toBeLessThan(Date.now() + DAY * 1000);
 });
