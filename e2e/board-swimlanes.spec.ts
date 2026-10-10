@@ -154,6 +154,7 @@ test("a drop inside the row the task is in changes its status and nothing else, 
 test("the position is among the neighbours in the row, not the whole column", async ({ page, request }) => {
   await put(request, SIBLING_TASK_ID, { priority: "urgent", order: 50 });
   await put(request, HELD_TASK_ID, { order: 10 });
+  await put(request, DECOY_TASK_ID, { priority: "high", status: "in_progress", order: 99 });
   await silenceBoardPoll(page);
   await signIn(page);
   await page.goto(BOARD);
@@ -165,7 +166,7 @@ test("the position is among the neighbours in the row, not the whole column", as
   const sent = (await write).request().postDataJSON();
 
   // The only task in the target cell is TP-1 at 10, so the drop goes after it; the whole column
-  // also held TP-3 at 50, which would have put it at 51 if it had been counted
+  // also held TP-2 at 99 in another row, which would have put it at 100 if it had been counted
   expect(sent.order).toBe(11);
 });
 
