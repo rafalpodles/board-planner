@@ -59,6 +59,7 @@ describe("the gateway is the only door to a model", () => {
 
     expect(users).toEqual(
       [
+        "src/app/api/platform/organisations/[organisationId]/ai-allowance/route.ts",
         "src/app/api/platform/organisations/[organisationId]/ai/route.ts",
         "src/app/api/platform/organisations/route.ts",
         "src/app/api/projects/[projectId]/ai/generate-task/route.ts",
