@@ -1,6 +1,6 @@
 import type { ScopedDb } from "@/lib/db-scope";
 import { modelKeyRefusalBody, resolveModelKey } from "@/lib/model-keys";
-import { chatCompletion, type OrCompletionResult, type OrUsage } from "@/lib/pm/openrouter";
+import { chatCompletion, platformProviderPreferences, type OrCompletionResult, type OrUsage } from "@/lib/pm/openrouter";
 import { checkBudget, counterKindOf } from "./budget";
 import { getOrganisation } from "@/lib/organisation";
 import { describeAiLock, describeBudgetRefusal } from "./refusal";
@@ -83,7 +83,11 @@ export async function gatewayChat(
   // Stopped while the gate was being opened: nothing was sent, so nothing is counted
   if (opts.signal?.aborted) return { type: "aborted" };
 
-  const completion = await chatCompletion({ ...opts, apiKey: gate.key });
+  const completion = await chatCompletion({
+    ...opts,
+    apiKey: gate.key,
+    ...(gate.keySource === "managed" ? { provider: platformProviderPreferences(opts.model) } : {}),
+  });
   if (completion.type === "text" || completion.type === "tool_calls") {
     await record(db, { ...context, keySource: gate.keySource, model: opts.model, usage: completion.usage }, gate.counter);
   } else if (completion.type === "aborted") {
@@ -104,11 +108,11 @@ export async function gatewayAssist<T>(
   context: GatewayContext,
   gate: OpenGate,
   model: string,
-  call: (apiKey: string, report: (usage: OrUsage | undefined) => void) => Promise<T>
+  call: (apiKey: string, report: (usage: OrUsage | undefined) => void, onPlatformKey: boolean) => Promise<T>
 ): Promise<T> {
   let answered: { usage?: OrUsage } | null = null;
   try {
-    return await call(gate.key, (usage) => (answered = { usage }));
+    return await call(gate.key, (usage) => (answered = { usage }), gate.keySource === "managed");
   } finally {
     if (answered) await record(db, { ...context, keySource: gate.keySource, model, usage: (answered as { usage?: OrUsage }).usage }, gate.counter);
   }

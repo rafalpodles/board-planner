@@ -45,7 +45,7 @@ describe("the gateway is the only door to a model", () => {
     const route = readFileSync(join(ROOT, "src/app/api/projects/[projectId]/ai/generate-task/route.ts"), "utf8");
     expect(route.match(/\bgenerateTask\s*\(/g)).toHaveLength(1);
     expect(route).toMatch(
-      /gatewayAssist\([^]*?\(apiKey, report\) =>\s*generateTask\([^]*?\bapiKey\b[^]*?\breport\b/
+      /gatewayAssist\([^]*?\(apiKey, report, onPlatformKey\) =>\s*generateTask\([^]*?\bapiKey\b[^]*?\breport\b[^]*?\bonPlatformKey\b/
     );
   });
 

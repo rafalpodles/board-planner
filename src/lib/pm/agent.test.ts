@@ -65,7 +65,7 @@ vi.mock("./pm-user", () => ({
   getPmUser: vi.fn().mockResolvedValue({ _id: "pm-user-id" }),
   PM_USERNAME: "pm",
 }));
-vi.mock("./openrouter", () => ({ chatCompletion }));
+vi.mock("./openrouter", async (importOriginal) => ({ ...(await importOriginal<typeof import("./openrouter")>()), chatCompletion }));
 vi.mock("@/lib/model-keys", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/model-keys")>()),
   resolveModelKey,
