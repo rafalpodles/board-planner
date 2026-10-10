@@ -3,7 +3,7 @@ import { getClientIp } from "@/lib/client-ip";
 import { sha256 } from "@/lib/oauth";
 import { passwordSignInEnabled, passwordSignInOff } from "@/lib/password-sign-in";
 import { claimProof, endSignIn, issueHandoff, releaseProof, scopedToOrganisation, servedOrganisationById } from "@/lib/platform-sign-in";
-import { clearedSignInCookie, provenEmail, rememberCookie, signInBinder, signInRoute, startAgain } from "@/lib/platform-sign-in-route";
+import { clearedSignInCookie, provenEmail, rememberChoiceCookie, signInBinder, signInRoute, startAgain } from "@/lib/platform-sign-in-route";
 import { pullNewOrganisationLicence } from "@/lib/licence-pull";
 import { SLUG_UNAVAILABLE, checkSignUp, createOrganisation, slugTaken, type SignUpInput } from "@/lib/organisation-sign-up";
 import { mailboxOf } from "@/lib/mailbox";
@@ -65,7 +65,7 @@ export const POST = signInRoute(async (request) => {
     handedOff = true;
 
     const response = NextResponse.json({ location: `${organisation.origin}/api/auth/handoff?code=${encodeURIComponent(code)}` }, { status: 201 });
-    response.headers.append("Set-Cookie", rememberCookie(organisation.id));
+    response.headers.append("Set-Cookie", rememberChoiceCookie((read.value as { remember?: unknown }).remember, organisation.id));
     response.headers.append("Set-Cookie", clearedSignInCookie());
     return response;
   } finally {

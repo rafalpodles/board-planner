@@ -20,6 +20,11 @@ export const rememberedOrganisationIn = (cookieHeader: string | null) => readFlo
 export const rememberCookie = (organisation: string) =>
   buildFlowCookie(REMEMBERED_ORGANISATION_COOKIE, organisation, REMEMBERED_ORGANISATION_TTL_SECONDS);
 
+export const forgetCookie = () => buildFlowCookie(REMEMBERED_ORGANISATION_COOKIE, "", 0);
+
+// Set only when the person asked for it at sign-in, and withdrawn when they sign in again without asking
+export const rememberChoiceCookie = (remember: unknown, organisation: string) => (remember === true ? rememberCookie(organisation) : forgetCookie());
+
 export async function provenEmail(request: Request): Promise<string | null> {
   return verifiedEmail(signInBinder(request));
 }

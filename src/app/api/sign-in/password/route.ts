@@ -3,7 +3,7 @@ import { getClientIp } from "@/lib/client-ip";
 import { verifyCredentials } from "@/lib/auth";
 import { passwordSignInEnabled, passwordSignInOff } from "@/lib/password-sign-in";
 import { accountByEmail, endSignIn, issueHandoff, scopedToOrganisation, servedOrganisationById } from "@/lib/platform-sign-in";
-import { clearedSignInCookie, provenEmail, rememberCookie, signInBinder, startAgain, signInRoute } from "@/lib/platform-sign-in-route";
+import { clearedSignInCookie, provenEmail, rememberChoiceCookie, signInBinder, startAgain, signInRoute } from "@/lib/platform-sign-in-route";
 import { lockoutKey, sourceKey, withLockout } from "@/lib/rate-limit";
 import { readJsonBody } from "@/lib/request-body";
 import { provenanceRefusal } from "@/lib/session";
@@ -18,7 +18,7 @@ export const POST = signInRoute(async (request) => {
   const email = await provenEmail(request);
   if (!email) return startAgain();
 
-  const read = await readJsonBody<{ organisation?: unknown; password?: unknown }>(request);
+  const read = await readJsonBody<{ organisation?: unknown; password?: unknown; remember?: unknown }>(request);
   if (!read.ok) return read.response;
   const { password } = read.value;
   if (typeof password !== "string" || !password) return NextResponse.json({ error: "Enter your password" }, { status: 400 });
@@ -41,7 +41,7 @@ export const POST = signInRoute(async (request) => {
   const code = await issueHandoff(db, user._id);
   await endSignIn(signInBinder(request));
   const response = NextResponse.json({ location: `${organisation.origin}/api/auth/handoff?code=${encodeURIComponent(code)}` });
-  response.headers.append("Set-Cookie", rememberCookie(organisation.id));
+  response.headers.append("Set-Cookie", rememberChoiceCookie(read.value.remember, organisation.id));
   response.headers.append("Set-Cookie", clearedSignInCookie());
   return response;
 });

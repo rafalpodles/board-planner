@@ -19,6 +19,7 @@ test.describe("BP-919: signing in on the platform host, e-mail first", () => {
     await provideAddressAndCode(page, email);
     await expect(page.getByText("Signing in to Acme")).toBeVisible();
     await page.getByLabel("Password").fill(ACME.password);
+    await page.getByRole("checkbox", { name: /Open this organisation straight away/ }).check();
     await page.getByRole("button", { name: "Sign in" }).click();
 
     await page.waitForURL(`${originOf(ACME)}/projects`);
@@ -35,6 +36,7 @@ test.describe("BP-919: signing in on the platform host, e-mail first", () => {
 
     await provideAddressAndCode(page, email);
     await page.getByLabel("Password").fill(GLOBEX.password);
+    await page.getByRole("checkbox", { name: /Open this organisation straight away/ }).check();
     await page.getByRole("button", { name: "Sign in" }).click();
     await page.waitForURL(`${originOf(GLOBEX)}/projects`);
 
@@ -56,6 +58,7 @@ test.describe("BP-919: signing in on the platform host, e-mail first", () => {
     await giveAddress(GLOBEX, email);
     await provideAddressAndCode(page, email);
     await page.getByLabel("Password").fill(GLOBEX.password);
+    await page.getByRole("checkbox", { name: /Open this organisation straight away/ }).check();
     await page.getByRole("button", { name: "Sign in" }).click();
     await page.waitForURL(`${originOf(GLOBEX)}/projects`);
 
@@ -73,6 +76,7 @@ test.describe("BP-919: signing in on the platform host, e-mail first", () => {
     await giveAddress(GLOBEX, email);
     await provideAddressAndCode(page, email, signIn);
     await page.getByLabel("Password").fill(GLOBEX.password);
+    await page.getByRole("checkbox", { name: /Open this organisation straight away/ }).check();
     await page.getByRole("button", { name: "Sign in" }).click();
     await page.waitForURL(`${originOf(GLOBEX)}/projects`);
     expect((await page.context().cookies(signIn)).some((cookie) => cookie.name.endsWith("bp_last_organisation"))).toBe(true);
@@ -84,6 +88,35 @@ test.describe("BP-919: signing in on the platform host, e-mail first", () => {
     await another.click();
     await page.waitForURL(`${signIn}/?switch`);
     await expect(page.getByLabel("E-mail address")).toBeVisible();
+  });
+
+  test("BP-1009: nothing is remembered unless it is asked for, and signing in again without asking withdraws it", async ({ page }) => {
+    const email = freshAddress("nocookie");
+    await giveAddress(GLOBEX, email);
+    await provideAddressAndCode(page, email);
+    await expect(page.getByRole("checkbox", { name: /Open this organisation straight away/ })).not.toBeChecked();
+    await page.screenshot({ path: "e2e/.artifacts/bp1009-remember-box.png" });
+    await page.getByLabel("Password").fill(GLOBEX.password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.waitForURL(`${originOf(GLOBEX)}/projects`);
+    const remembered = () => page.context().cookies(ORGANISATIONS_PLATFORM_ORIGIN).then((cookies) => cookies.filter((cookie) => cookie.name.endsWith("bp_last_organisation")));
+    expect(await remembered()).toEqual([]);
+
+    await page.goto(`${ORGANISATIONS_PLATFORM_ORIGIN}/`);
+    await expect(page.getByLabel("E-mail address")).toBeVisible();
+
+    await page.context().addCookies([
+      { name: "__Host-bp_last_organisation", value: String(GLOBEX.organisation), domain: new URL(ORGANISATIONS_PLATFORM_ORIGIN).hostname, path: "/", httpOnly: true, secure: true, sameSite: "Lax" },
+    ]);
+    await page.goto(`${ORGANISATIONS_PLATFORM_ORIGIN}/?switch`);
+    await page.getByLabel("E-mail address").fill(email);
+    await page.getByRole("button", { name: "Continue" }).click();
+    await page.getByLabel("Code").fill(await codeSentTo(email, 1));
+    await page.getByRole("button", { name: "Continue" }).click();
+    await page.getByLabel("Password").fill(GLOBEX.password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.waitForURL(`${originOf(GLOBEX)}/projects`);
+    expect(await remembered()).toEqual([]);
   });
 
   test("BP-1009: a remembered organisation that is suspended or gone does not strand the platform host", async ({ page }) => {

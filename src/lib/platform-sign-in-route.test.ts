@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { rememberCookie, rememberedOrganisationIn, signInCookie } from "./platform-sign-in-route";
+import { forgetCookie, rememberChoiceCookie, rememberCookie, rememberedOrganisationIn, signInCookie } from "./platform-sign-in-route";
 
 afterEach(() => {
   delete process.env.COOKIE_ALLOW_INSECURE;
@@ -26,6 +26,12 @@ describe("the remembered organisation cookie (BP-1009)", () => {
     expect(rememberedOrganisationIn(null)).toBeNull();
     process.env.COOKIE_ALLOW_INSECURE = "1";
     expect(rememberedOrganisationIn("bp_last_organisation=org-2")).toBe("org-2");
+  });
+
+  it("is set only for an explicit yes, and any other answer withdraws it", () => {
+    expect(rememberChoiceCookie(true, "org-1")).toBe(rememberCookie("org-1"));
+    for (const answer of [false, undefined, null, "true", 1]) expect(rememberChoiceCookie(answer, "org-1")).toBe(forgetCookie());
+    expect(forgetCookie()).toContain("; Max-Age=0;");
   });
 
   it("leaves the sign-in cookie its own lifetime", () => {

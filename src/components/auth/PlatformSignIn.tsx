@@ -41,6 +41,18 @@ async function send(path: string, method: string, body?: unknown) {
 
 const hostOf = (origin: string) => new URL(origin).host;
 
+function RememberCheckbox({ checked, onChange }: { checked: boolean; onChange: (checked: boolean) => void }) {
+  return (
+    <label className="flex items-start gap-2 text-sm" data-testid="remember-organisation">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="mt-1 h-4 w-4 shrink-0" />
+      <span>
+        Open this organisation straight away next time
+        <span className="block text-xs text-text-muted">Keeps a cookie on this device for 180 days. Leave it unticked and nothing is kept.</span>
+      </span>
+    </label>
+  );
+}
+
 export function PlatformSignIn() {
   const [step, setStep] = useState<Step>({ name: "email" });
   const [email, setEmail] = useState("");
@@ -55,6 +67,7 @@ export function PlatformSignIn() {
   const [fullName, setFullName] = useState("");
   const [username, setUsername] = useState("");
   const [acceptTerms, setAcceptTerms] = useState(false);
+  const [remember, setRemember] = useState(false);
   const terms = useLegalTerms();
 
   async function run(work: () => Promise<void>) {
@@ -114,6 +127,7 @@ export function PlatformSignIn() {
       const { ok, data } = await send("/api/sign-in/password", "POST", {
         organisation: step.organisation.id,
         password,
+        remember,
       });
       if (data.restart) {
         backToEmail();
@@ -143,7 +157,7 @@ export function PlatformSignIn() {
   const submitCreate = (e: FormEvent) => {
     e.preventDefault();
     void run(async () => {
-      const { ok, data } = await send("/api/sign-in/organisation", "POST", { name: orgName, slug, fullName, username, password, acceptTerms });
+      const { ok, data } = await send("/api/sign-in/organisation", "POST", { name: orgName, slug, fullName, username, password, acceptTerms, remember });
       if (data.restart) {
         backToEmail();
         return setError(data.error);
@@ -288,6 +302,7 @@ export function PlatformSignIn() {
             <Input label="Username" value={username} maxLength={32} onChange={(e) => setUsername(e.target.value.toLowerCase())} autoComplete="username" required />
             <Input label="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" required />
             <TermsCheckbox terms={terms} checked={acceptTerms} onChange={setAcceptTerms} />
+            <RememberCheckbox checked={remember} onChange={setRemember} />
             <Button type="submit" className="w-full" disabled={busy || terms === undefined}>
               {busy ? "Creating…" : "Create the organisation"}
             </Button>
@@ -341,6 +356,7 @@ export function PlatformSignIn() {
               required
               autoFocus
             />
+            <RememberCheckbox checked={remember} onChange={setRemember} />
             <Button type="submit" className="w-full" disabled={busy}>
               {busy ? "Signing in…" : "Sign in"}
             </Button>
