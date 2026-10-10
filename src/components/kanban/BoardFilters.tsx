@@ -22,6 +22,7 @@ import { SortContext, sortTasks } from "@/lib/task-sort";
 import { ListColumnId } from "@/lib/list-columns";
 import { GroupBy, groupByOptions } from "@/lib/task-grouping";
 import { ColumnPicker } from "./ColumnPicker";
+import { OptionFilter } from "./OptionFilter";
 import { usePanelClamp } from "@/hooks/use-panel-clamp";
 import {
   BoardFilterValues,
@@ -42,9 +43,12 @@ import {
 import {
   activeFields,
   isOptionField,
+  labelMatches,
   matchesAllFieldFilters,
   orderedOptions,
+  pickedOptions,
   sortedFields,
+  taskMatchesLabelSearch,
 } from "@/lib/custom-fields";
 
 interface Filters extends BoardFilterValues {
@@ -229,8 +233,10 @@ export function BoardFilters({
 
     if (filters.search) {
       const q = filters.search.toLowerCase().trim();
+      const labelHits = labelMatches(customFields, q);
       result = result.filter((t) => {
         if (t.title.toLowerCase().includes(q)) return true;
+        if (taskMatchesLabelSearch(t.customFieldValues, labelHits)) return true;
         // Task-key search: "cp-128", "CP-128" and bare "128" all match CP-128
         const key = `${projectKey ?? ""}-${t.taskNumber}`.toLowerCase();
         return key.includes(q) || String(t.taskNumber).startsWith(q);
@@ -393,10 +399,13 @@ export function BoardFilters({
   for (const field of filterableFields) {
     const filter = filters.fields?.[field._id];
     if (!isFieldFilterSet(filter)) continue;
-    const option = orderedOptions(field).find((o) => o.id === filter?.value);
+    const chosen = orderedOptions(field).filter((o) =>
+      field.fieldType === "multiselect" ? pickedOptions(filter).includes(o.id) : o.id === filter?.value
+    );
+    const option = chosen[0];
     const range = [filter?.from, filter?.to];
     const label = option
-      ? `${field.name}: ${option.value}`
+      ? `${field.name}: ${chosen.map((o) => o.value).join(filter?.mode === "all" ? " and " : " or ")}`
       : filter?.value
         ? `${field.name}: ${filter.value}`
         : `${field.name}: ${range[0] || "…"}–${range[1] || "…"}`;
@@ -626,7 +635,15 @@ export function BoardFilters({
               <>
                 <div className="my-3 h-px bg-border" />
                 <div className="grid grid-cols-2 gap-2">
-                  {filterableFields.map((field) => (
+                  {filterableFields.map((field) => field.fieldType === "multiselect" ? (
+                    <div key={field._id} className="col-span-2">
+                      <OptionFilter
+                        field={field}
+                        filter={fieldFilter(field._id)}
+                        onChange={(patch) => setFieldFilter(field._id, patch)}
+                      />
+                    </div>
+                  ) : (
                     <Field key={field._id} label={field.name}>
                       {field.fieldType === "number" || field.fieldType === "date" ? (
                         // From/to rather than one box: a range is what people want from
@@ -809,7 +826,9 @@ function FilterChip({
           {initial}
         </span>
       )}
-      <span className="max-w-[9rem] truncate">{label}</span>
+      <span className="max-w-[9rem] truncate" title={label}>
+        {label}
+      </span>
       <button
         onClick={onRemove}
         aria-label={`Remove ${label} filter`}

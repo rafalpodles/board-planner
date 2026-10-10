@@ -70,7 +70,7 @@ export interface ProjectBoard {
   applySprintChange: (taskIds: string[], sprintId: string | null) => void;
   patchTask: (taskId: string, patch: Record<string, unknown>, label: string) => Promise<void>;
   handleAssigneeChange: (taskId: string, username: string) => Promise<void>;
-  handleFieldValueChange: (taskId: string, fieldId: string, value: string) => Promise<void>;
+  handleFieldValueChange: (taskId: string, fieldId: string, value: string | string[]) => Promise<void>;
   handleRowSprintChange: (taskId: string, sprintId: string | null) => Promise<void>;
   handleContextDuplicate: (taskId: string) => Promise<void>;
   handleContextDelete: (taskId: string) => Promise<void>;
@@ -539,11 +539,17 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
   // Reverts the fields it touched on the one task, rather than restoring a whole
   // snapshot: the 10s poll and any concurrent edit land in between, and putting the
   // old array back would throw their results away too
-  async function patchTask(taskId: string, patch: Record<string, unknown>, label: string) {
+  async function patchTask(
+    taskId: string,
+    patch: Record<string, unknown>,
+    label: string,
+    after?: Promise<unknown>
+  ) {
     dropReadsInFlight();
     const before = tasks.find((t) => t._id === taskId);
     setTasks((prev) => prev.map((t) => (t._id === taskId ? { ...t, ...patch } : t)));
     try {
+      await after;
       await writing(() => api.put(`/api/projects/${projectId}/tasks/${taskId}`, patch));
     } catch {
       toast(`Failed to update ${label}`, "error");
@@ -555,11 +561,17 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
     }
   }
 
-  async function handleFieldValueChange(taskId: string, fieldId: string, value: string) {
+  // Each write carries the whole map, so two of them in flight for one task can land out of order
+  // and leave the older picks on the server; a task's field writes therefore go one after another
+  const fieldWrites = useRef(new Map<string, Promise<unknown>>());
+
+  async function handleFieldValueChange(taskId: string, fieldId: string, value: string | string[]) {
     const task = tasks.find((t) => t._id === taskId);
     if (!task) return;
     const values = { ...(task.customFieldValues || {}), [fieldId]: value };
-    await patchTask(taskId, { customFieldValues: values }, "field");
+    const turn = patchTask(taskId, { customFieldValues: values }, "field", fieldWrites.current.get(taskId));
+    fieldWrites.current.set(taskId, turn);
+    await turn;
   }
 
   async function handleRowSprintChange(taskId: string, sprintId: string | null) {

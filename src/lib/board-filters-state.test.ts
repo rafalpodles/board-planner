@@ -4,6 +4,7 @@ import {
   migratePersistedFilters,
   countActiveFilters,
   EMPTY_FILTERS,
+  isFieldFilterSet,
   sanitizeFieldFilters,
   matchesStatusFilter,
   epicOptions,
@@ -172,6 +173,70 @@ describe("project field filters", () => {
     );
     expect(state.filters.fields).toEqual({ f1: { from: "3", to: "8" } });
   });
+});
+
+describe("a multiselect filter", () => {
+  const labels = {
+    _id: "fl",
+    name: "Labels",
+    fieldType: "multiselect",
+    filterable: true,
+    archived: false,
+    options: [
+      { id: "a", value: "A", order: 0 },
+      { id: "b", value: "B", order: 1 },
+    ],
+  } as unknown as ApiCustomField;
+
+  it("counts as set with several picks and none of the old single value", () => {
+    expect(isFieldFilterSet({ values: ["a", "b"], mode: "all" })).toBe(true);
+    expect(isFieldFilterSet({ values: [], mode: "all" })).toBe(false);
+  });
+
+  it("keeps its picks and its mode across a reload", () => {
+    const state = migratePersistedFilters(
+      { filters: { fields: { fl: { values: ["a", "b"], mode: "all" } } } },
+      undefined,
+      [labels]
+    );
+    expect(state.filters.fields).toEqual({ fl: { values: ["a", "b"], mode: "all" } });
+  });
+
+  it("drops picks whose option is gone, and the whole filter when none is left", () => {
+    expect(sanitizeFieldFilters({ fl: { values: ["a", "gone"], mode: "all" } }, [labels])).toEqual({
+      fl: { values: ["a"], mode: "all" },
+    });
+    expect(sanitizeFieldFilters({ fl: { values: ["gone"] } }, [labels])).toEqual({});
+  });
+
+  it("carries the single value an older version stored over as a pick, and reads an unknown mode as any", () => {
+    expect(sanitizeFieldFilters({ fl: { value: "b" } }, [labels])).toEqual({
+      fl: { values: ["b"], mode: "any" },
+    });
+    expect(sanitizeFieldFilters({ fl: { values: ["a"], mode: "sideways" } }, [labels])).toEqual({
+      fl: { values: ["a"], mode: "any" },
+    });
+  });
+
+  it("keeps only text in the value and range of a single-value filter", () => {
+    const text = { ...labels, _id: "ft", fieldType: "text" } as unknown as ApiCustomField;
+    expect(sanitizeFieldFilters({ ft: { value: 5 } }, [text])).toEqual({});
+    expect(sanitizeFieldFilters({ ft: { value: "x", from: 3 } }, [text])).toEqual({ ft: { value: "x" } });
+  });
+
+  it("survives a stored list that is not a list", () => {
+    expect(sanitizeFieldFilters({ fl: { values: "abc" } }, [labels])).toEqual({});
+    expect(sanitizeFieldFilters({ fl: { values: { length: 1 } } }, [labels])).toEqual({});
+  });
+
+  it("strips picks and mode from a field that is not a multiselect", () => {
+    const dropdown = { ...labels, _id: "fd", fieldType: "dropdown" } as unknown as ApiCustomField;
+    expect(sanitizeFieldFilters({ fd: { values: ["a"], mode: "all" } }, [dropdown])).toEqual({});
+    expect(sanitizeFieldFilters({ fd: { value: "a", values: ["b"] } }, [dropdown])).toEqual({
+      fd: { value: "a" },
+    });
+  });
+
 });
 
 describe("the status filter reads roles, not column ids", () => {

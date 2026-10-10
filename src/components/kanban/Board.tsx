@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ApiTask, ApiLabel, ApiCustomField, ApiProjectCategory, ApiProjectColumn } from "@/types";
+import { ApiTask, ApiCustomField, ApiProjectCategory, ApiProjectColumn } from "@/types";
 import { effectiveColumns } from "@/lib/columns";
 import { boardGridTemplate, boardMinWidth, isColumnCollapsed } from "@/lib/board-grid";
 import {

@@ -70,6 +70,7 @@ export const GROUPS = {
     "card-shows-its-parent.spec.ts",
     "board-scope-and-filters.spec.ts",
     "epics.spec.ts",
+    "labels.spec.ts",
   ],
   project: [
     "organisation-on-product-writes.spec.ts",

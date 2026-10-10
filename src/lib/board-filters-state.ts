@@ -2,13 +2,9 @@ import { ApiCustomField, COLUMN_ROLES, ColumnRole, ROLE_LABELS, SortDir, SortFie
 import { AnyColumn, effectiveColumns } from "./columns";
 import { ListColumnId, defaultHidden, sanitizeHidden } from "./list-columns";
 import { GroupBy, sanitizeGroupBy } from "./task-grouping";
+import { FieldFilter, orderedOptions, pickedOptions } from "./custom-fields";
 
-/** Range for number and date fields; `value` carries every other type */
-export interface FieldFilter {
-  value?: string;
-  from?: string;
-  to?: string;
-}
+export type { FieldFilter };
 
 export interface BoardFilterValues {
   /** Keyed by field id, so the built-in keys stay a closed set */
@@ -57,7 +53,7 @@ export const FILTER_KEYS = Object.keys(EMPTY_FILTERS).filter(
 ) as BuiltInFilterKey[];
 
 export function isFieldFilterSet(filter: FieldFilter | undefined): boolean {
-  return !!(filter?.value || filter?.from || filter?.to);
+  return !!(filter?.value || filter?.from || filter?.to || filter?.values?.length);
 }
 
 /** Drops filters whose field is gone or archived, so none survives where it cannot be cleared */
@@ -66,12 +62,32 @@ export function sanitizeFieldFilters(
   customFields: ApiCustomField[]
 ): Record<string, FieldFilter> {
   if (!raw || typeof raw !== "object") return {};
-  const live = new Set(customFields.filter((f) => !f.archived && f.filterable).map((f) => f._id));
+  const live = new Map(customFields.filter((f) => !f.archived && f.filterable).map((f) => [f._id, f]));
   const result: Record<string, FieldFilter> = {};
   for (const [id, filter] of Object.entries(raw as Record<string, FieldFilter>)) {
-    if (live.has(id) && isFieldFilterSet(filter)) result[id] = filter;
+    const field = live.get(id);
+    if (!field || !filter || typeof filter !== "object") continue;
+    const kept =
+      field.fieldType === "multiselect"
+        ? sanitizeMultiselect(filter, field)
+        : sanitizeScalar(filter);
+    if (isFieldFilterSet(kept)) result[id] = kept;
   }
   return result;
+}
+
+function sanitizeScalar(filter: FieldFilter): FieldFilter {
+  const kept: FieldFilter = {};
+  for (const key of ["value", "from", "to"] as const) {
+    if (typeof filter[key] === "string") kept[key] = filter[key];
+  }
+  return kept;
+}
+
+function sanitizeMultiselect(filter: FieldFilter, field: ApiCustomField): FieldFilter {
+  const known = new Set(orderedOptions(field).map((o) => o.id));
+  const values = [...new Set(pickedOptions(filter).filter((id) => typeof id === "string" && known.has(id)))];
+  return values.length ? { values, mode: filter.mode === "all" ? "all" : "any" } : {};
 }
 
 export function statusLabel(value: string): string {

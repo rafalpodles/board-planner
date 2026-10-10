@@ -6,10 +6,33 @@ import { DEFAULT_PRIORITY } from "@/types";
 import { PROJECT_KEY_PATTERN } from "@/lib/urls";
 import { withApiExecutions } from "@/lib/task-execution-view";
 import { NOT_ARCHIVED } from "@/lib/task-archive";
+import { labelSearchClauses } from "@/lib/custom-fields";
 
 // Lean queries skip schema defaults, so tasks predating the priority field need it applied here
 function withPriorityDefault<T extends { priority?: string }>(tasks: T[]): T[] {
   return tasks.map((t) => ({ ...t, priority: t.priority ?? DEFAULT_PRIORITY }));
+}
+
+const MAX_LABEL_CLAUSES = 200;
+
+// A label is an option of a project's multiselect field, so a name typed here has to be turned
+// into option ids board by board before it can match a task
+async function labelClauses(
+  db: Parameters<Parameters<typeof withAuth>[0]>[1]["db"],
+  allowed: unknown[] | null,
+  query: string
+): Promise<Record<string, unknown>[]> {
+  const reach: Record<string, unknown> = { "customFields.fieldType": "multiselect" };
+  if (allowed) reach._id = { $in: allowed };
+  const boards = await db.Project.find(reach).select("customFields").lean();
+  const clauses: Record<string, unknown>[] = [];
+  for (const board of boards) {
+    for (const clause of labelSearchClauses(board.customFields, query)) {
+      clauses.push({ $and: [{ project: board._id }, clause] });
+    }
+    if (clauses.length >= MAX_LABEL_CLAUSES) break;
+  }
+  return clauses.slice(0, MAX_LABEL_CLAUSES);
 }
 
 export const GET = withAuth(async (request, { user, db }) => {
@@ -74,7 +97,7 @@ export const GET = withAuth(async (request, { user, db }) => {
   // Text search on title and description
   const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const regex = { $regex: escaped, $options: "i" };
-  filter.$or = [{ title: regex }, { description: regex }];
+  filter.$or = [{ title: regex }, { description: regex }, ...(await labelClauses(db, allowed, q))];
 
   const tasks = await db.Task.find(filter)
     .populate("project", "name key")
