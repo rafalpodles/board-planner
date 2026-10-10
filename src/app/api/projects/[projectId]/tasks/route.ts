@@ -25,7 +25,7 @@ const isCalendarDay = (value: string) => {
 };
 
 /** What a card in a list needs, and what an agent reading a board needs to pick work from it. */
-const SUMMARY_FIELDS = "taskNumber title status priority assignee dueDate sprint order updatedAt archivedAt";
+const SUMMARY_FIELDS = "taskNumber title status priority assignee dueDate sprint order updatedAt archivedAt generatedBy";
 
 export const GET = withProjectAccess(async (request, { params, db }) => {
   const { projectId } = await params;

@@ -1,6 +1,7 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { IActivityLog } from "@/types";
 import { withOrganisation } from "@/lib/organisation-field";
+import { generatedBySchema } from "@/lib/ai-generated";
 
 const ACTIONS = [
   "created",
@@ -61,6 +62,7 @@ const activityLogSchema = new Schema<IActivityLog>(
       type: String,
       default: "",
     },
+    generatedBy: { type: generatedBySchema, default: undefined },
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );

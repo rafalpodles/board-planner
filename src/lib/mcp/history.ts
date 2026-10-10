@@ -1,3 +1,5 @@
+import type { GeneratedBy } from "@/types";
+
 const SHOWN_VALUE = 300;
 
 type Person = { username?: string } | string | null | undefined;
@@ -8,6 +10,7 @@ type Comment = {
   body: string;
   createdAt?: string;
   reactions?: { emoji: string }[];
+  generatedBy?: GeneratedBy;
 };
 
 const nameOf = (person: Person) => (person && typeof person === "object" ? (person.username ?? null) : null);
@@ -26,6 +29,7 @@ export function commentLines(comments: Comment[]) {
       body: comment.body,
       createdAt: comment.createdAt ?? null,
       reactions: [...counts].map(([emoji, count]) => ({ emoji, count })),
+      ...(comment.generatedBy ? { generatedBy: comment.generatedBy } : {}),
     };
   });
 }
@@ -39,6 +43,7 @@ type Activity = {
   newValue?: string;
   createdAt?: string;
   cleared?: boolean;
+  generatedBy?: GeneratedBy;
 };
 
 const clip = (value: string) => (value.length > SHOWN_VALUE ? `${value.slice(0, SHOWN_VALUE)}…` : value);
@@ -64,6 +69,7 @@ export function activityLines(logs: Activity[], limit: number) {
       field: log.field || null,
       from: description ? "" : clip(log.oldValue ?? ""),
       to: description ? describedChange(log) : clip(log.newValue ?? ""),
+      ...(log.generatedBy ? { generatedBy: log.generatedBy } : {}),
     };
   });
 }

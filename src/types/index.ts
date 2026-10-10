@@ -39,6 +39,11 @@ export const DEFAULT_PROJECT_CATEGORIES: { name: string; color: string }[] = [
   { name: "idea", color: "#8b5cf6" },
 ];
 export const PRIORITIES: Priority[] = ["low", "medium", "high", "urgent"];
+export interface GeneratedBy {
+  kind: "ai";
+  feature: "pm_agent";
+  model?: string;
+}
 export const DEFAULT_PRIORITY: Priority = "medium";
 
 export const PRIORITY_LABELS: Record<Priority, string> = {
@@ -1199,6 +1204,7 @@ export interface ITask {
   // Absent or null on a task nobody archived, which is nearly all of them
   archivedAt?: Date | null;
   archivedBy?: Types.ObjectId | IUser | null;
+  generatedBy?: GeneratedBy;
   createdBy: Types.ObjectId | IUser;
   createdAt: Date;
   updatedAt: Date;
@@ -1215,6 +1221,7 @@ export interface IComment {
   author: Types.ObjectId | IUser;
   body: string;
   reactions: IReaction[];
+  generatedBy?: GeneratedBy;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -1481,6 +1488,7 @@ export interface ApiTask {
   /** Set while the task is archived: hidden from every list until someone restores it */
   archivedAt?: string | null;
   archivedBy?: ApiUserSummary | string | null;
+  generatedBy?: GeneratedBy;
 }
 
 // Only what a reader needs. lastError is deliberately absent — task-service writes it as "" and
@@ -1517,6 +1525,7 @@ export interface ApiComment {
   author: ApiUser | string;
   body: string;
   reactions: ApiReaction[];
+  generatedBy?: GeneratedBy;
   createdAt: string;
   updatedAt: string;
 }
@@ -1629,6 +1638,7 @@ export interface IActivityLog {
   newValue: string;
   customField?: boolean;
   fieldType?: string;
+  generatedBy?: GeneratedBy;
   createdAt: Date;
 }
 
@@ -1646,6 +1656,7 @@ export interface ApiActivityLog {
   customField?: boolean;
   fieldType?: string;
   cleared?: boolean;
+  generatedBy?: GeneratedBy;
   createdAt: string;
 }
 

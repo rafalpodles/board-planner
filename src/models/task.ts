@@ -1,6 +1,7 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { ITask, PRIORITIES, DEFAULT_PRIORITY, RECURRENCE_FREQUENCIES, TASK_DECISION_STATES } from "@/types";
 import { withOrganisation } from "@/lib/organisation-field";
+import { generatedBySchema } from "@/lib/ai-generated";
 
 const taskSchema = new Schema<ITask>(
   {
@@ -232,6 +233,7 @@ const taskSchema = new Schema<ITask>(
       ref: "User",
       default: null,
     },
+    generatedBy: { type: generatedBySchema, default: undefined },
     createdBy: {
       type: Schema.Types.ObjectId,
       ref: "User",

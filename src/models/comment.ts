@@ -1,6 +1,7 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { IComment } from "@/types";
 import { withOrganisation } from "@/lib/organisation-field";
+import { generatedBySchema } from "@/lib/ai-generated";
 
 const reactionSchema = new Schema(
   {
@@ -33,6 +34,7 @@ const commentSchema = new Schema<IComment>(
       type: [reactionSchema],
       default: [],
     },
+    generatedBy: { type: generatedBySchema, default: undefined },
   },
   { timestamps: true }
 );

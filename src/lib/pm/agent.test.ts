@@ -688,3 +688,22 @@ describe("the history a turn replays", () => {
     expect(replayHistoryMock.mock.calls.at(-1)![3]).toEqual({ olderExist: false });
   });
 });
+
+describe("a tool the PM runs", () => {
+  it("runs under the PM agent's mark", async () => {
+    const { currentGeneratedBy } = await import("@/lib/ai-generated");
+    const seen: unknown[] = [];
+    addCommentExecute.mockImplementation(async () => {
+      seen.push(currentGeneratedBy());
+      return { result: { ok: true } };
+    });
+    chatCompletion
+      .mockResolvedValueOnce(toolCall("add_comment", { taskKey: "BP-1", body: "answer" }))
+      .mockResolvedValueOnce({ type: "text", content: "done" });
+
+    await turn([]);
+
+    expect(seen).toEqual([{ kind: "ai", feature: "pm_agent", model: "test/model" }]);
+    expect(currentGeneratedBy(), "the mark outlived the tool call").toBeUndefined();
+  });
+});
