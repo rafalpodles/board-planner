@@ -73,6 +73,7 @@ describe("GET /api/auth/instance", () => {
     expect(res.status).toBe(503);
     // Read from the environment: an off instance must not fall back to its password form
     expect((await res.clone().json()).passwordSignIn).toBe(false);
+    expect(await res.clone().json()).toHaveProperty("platformSignIn", null);
     expect(await res.json()).not.toMatchObject({ unclaimed: true });
   });
 });
