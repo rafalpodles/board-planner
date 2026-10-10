@@ -147,7 +147,7 @@ test("an instance setting is stored, and a value the instance will not take is r
   await recordToasts(page);
 
   const model = page.getByLabel("Model", { exact: true });
-  await expect(model).toHaveValue("gpt-4o-mini");
+  await expect(model).toHaveValue("openai/gpt-6-luna");
 
   await test.step("a new model is saved and is still there after a reload", async () => {
     const saved = settingsWrite(page);
@@ -166,33 +166,33 @@ test("an instance setting is stored, and a value the instance will not take is r
     await recordToasts(page);
     await fillStably(page.getByLabel("Model", { exact: true }), "   ");
     await page.getByRole("button", { name: "Save model" }).click();
-    await expectToast(page, "Give the model a name, or the AI task generator has nothing to call.");
+    await expectToast(page, "Give the model a name, or the PM agent and AI task drafting have nothing to call.");
 
     await reloadSettled(page);
     await expect(page.getByLabel("Model", { exact: true })).toHaveValue("gpt-4o-mini-2026");
   });
 
-  await test.step("the PM default model is stored, and the screen offers no turn cap to go with it", async () => {
-    await recordToasts(page);
-    const saved = settingsWrite(page);
-    await fillStably(page.getByLabel("Default model"), "e2e/instance-default");
-    await page.getByRole("button", { name: "Save defaults" }).click();
-    await saved;
-
-    await reloadSettled(page);
-    await expect(page.getByLabel("Default model")).toHaveValue("e2e/instance-default");
+  await test.step("there is one model field: no second default for the PM agent, and no turn cap", async () => {
+    await expect(page.getByLabel("Model", { exact: true })).toHaveCount(1);
+    await expect(page.getByLabel("Default model")).toHaveCount(0);
     await expect(page.getByLabel("Default daily turn cap")).toHaveCount(0);
   });
 
-  // A client older than the screen may still send the cap; it is not a setting any more, so the instance takes nothing from it
-  await test.step("the instance writes no turn cap, whoever asks", async () => {
+  // A client older than the screen may still send the cap or a PM default; neither is a setting any more, so the instance takes nothing from them
+  await test.step("the instance writes no turn cap and no PM default model, whoever asks", async () => {
     const stored = await page.request.put("/api/settings", {
       headers: SAME_ORIGIN,
-      data: { pmDefaultModel: "e2e/instance-default", pmDefaultDailyTurnCap: 30 },
+      data: { aiModel: "e2e/instance-default", pmDefaultModel: "e2e/ignored", pmDefaultDailyTurnCap: 30 },
     });
     expect(stored.status()).toBe(200);
-    expect(await stored.json()).not.toHaveProperty("pmDefaultDailyTurnCap");
-    expect(await (await page.request.get("/api/settings")).json()).not.toHaveProperty("pmDefaultDailyTurnCap");
+    expect(await stored.json()).toEqual({ aiModel: "e2e/instance-default" });
+    expect(await (await page.request.get("/api/settings")).json()).toEqual({ aiModel: "e2e/instance-default" });
+
+    const alone = await page.request.put("/api/settings", { headers: SAME_ORIGIN, data: { pmDefaultModel: "e2e/ignored" } });
+    expect(alone.status()).toBe(400);
+
+    const restored = await page.request.put("/api/settings", { headers: SAME_ORIGIN, data: { aiModel: "openai/gpt-6-luna" } });
+    expect(restored.status()).toBe(200);
   });
 });
 

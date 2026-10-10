@@ -99,12 +99,12 @@ test.describe("BP-670: what one organisation can reach of another's, route famil
   test("settings: a change in one organisation leaves the other's alone", async ({ request }) => {
     const put = await request.put(`${ORGANISATIONS_API}/api/settings`, {
       headers: { ...asOrganisation(ACME), cookie: `__Host-bp_session=${ACME.sessionToken}`, origin: originOf(ACME), "content-type": "application/json" },
-      data: { pmDefaultModel: "acme/model" },
+      data: { aiModel: "acme/model" },
     });
     expect(put.status(), await put.text()).toBe(200);
 
-    expect((await (await call(request, "get", "/api/settings", ACME)).json()).pmDefaultModel).toBe("acme/model");
-    expect((await (await call(request, "get", "/api/settings", GLOBEX)).json()).pmDefaultModel).not.toBe("acme/model");
+    expect((await (await call(request, "get", "/api/settings", ACME)).json()).aiModel).toBe("acme/model");
+    expect((await (await call(request, "get", "/api/settings", GLOBEX)).json()).aiModel).not.toBe("acme/model");
   });
 
   test("tokens: each person sees only their own organisation's tokens", async ({ request }) => {
