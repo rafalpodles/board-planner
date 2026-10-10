@@ -154,6 +154,14 @@ test.describe("BP-919: signing in on the platform host, e-mail first", () => {
     expect(page.url()).toBe(`${ORGANISATIONS_PLATFORM_ORIGIN}/`);
   });
 
+  test("BP-1009: a refused forget is reported, never confirmed", async ({ page }) => {
+    await page.route("**/api/sign-in/remembered", (route) => route.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ error: "Forbidden" }) }));
+    await page.goto(`${ORGANISATIONS_PLATFORM_ORIGIN}/?switch`);
+    await page.getByRole("button", { name: "Stop opening my last organisation automatically" }).click();
+    await expect(page.getByTestId("sign-in-error")).toHaveText("Could not forget the organisation. Try again.");
+    await expect(page.getByTestId("remembered-forgotten")).toHaveCount(0);
+  });
+
   test("BP-1009: forgetting the organisation is refused from another origin and off the platform host", async ({ request }) => {
     const crossSite = await request.delete(`${ORGANISATIONS_API}/api/sign-in/remembered`, { headers: { ...onPlatform, "sec-fetch-site": "cross-site", origin: "https://evil.example" } });
     expect(crossSite.status()).toBe(403);
