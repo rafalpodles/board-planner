@@ -13,6 +13,11 @@ vi.mock("@/lib/ai-gateway/budget", () => ({ counterKindOf: async () => "month", 
 const getOrganisation = vi.hoisted(() => vi.fn(async () => ({ aiLockedAt: null as Date | null, aiLockedReason: "" })));
 vi.mock("@/lib/organisation", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/organisation")>()), getOrganisation }));
 vi.mock("@/lib/ai-gateway/usage", () => ({ recordUsage: vi.fn() }));
+// The project's own model, or the default: reading the organisation's setting is a database call these tests do not make
+vi.mock("./availability", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./availability")>()),
+  resolvePmModel: async (_db: unknown, model?: string) => model || "openai/gpt-6-luna",
+}));
 vi.mock("@/lib/organisation-jobs", async () => {
   const { scoped } = await import("@/lib/db-scope");
   const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
@@ -184,6 +189,17 @@ describe("startBoardReview", () => {
 
     expect(start).toEqual({ status: "skipped", reason: expect.stringMatching(/switched off for this organisation by the operator: abuse report 17/) });
     expect(runPmTurn).not.toHaveBeenCalled();
+  });
+
+  // BP-1001
+  it("refuses a review on the platform's key with a model it does not run, naming the model, and runs nothing", async () => {
+    resolveModelKey.mockResolvedValueOnce({ ok: true, key: "k", source: "managed" });
+
+    const start = await startBoardReview(db, "p1", "BP", { ...PM, model: "moonshotai/kimi-k2.6" }, "pm-user");
+
+    expect(start).toEqual({ status: "skipped", reason: expect.stringMatching(/^The model moonshotai\/kimi-k2\.6 is not available on Board Planner's AI key/) });
+    expect(runPmTurn).not.toHaveBeenCalled();
+    expect(isTurnRunning("p1")).toBe(false);
   });
 
   it("says a stored key that cannot be read has to be entered again", async () => {

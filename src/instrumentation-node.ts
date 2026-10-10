@@ -36,6 +36,9 @@ export async function bootNode(): Promise<void> {
     assertOrganisationDomainConfig();
     const { assertLicencePullConfig } = await import("@/lib/licence-pull");
     assertLicencePullConfig();
+    const { assertManagedModelsConfig } = await import("@/lib/managed-models");
+    const { organisationDomain: hostedDomain } = await import("@/lib/organisation-host");
+    assertManagedModelsConfig(hostedDomain() !== null);
   } catch (err) {
     // Exiting rather than throwing, and this is not belt-and-braces. `NextServer.prepare()`
     // awaits the real prepare only when `dev` (next/dist/server/next.js), so under `next start`
@@ -68,6 +71,9 @@ export async function bootNode(): Promise<void> {
 
   const { aiLimitWarnings } = await import("@/lib/ai-gateway/limits");
   for (const line of aiLimitWarnings(process.env, Boolean(organisationDomain()))) console.warn(line);
+  const { managedModelWarnings } = await import("@/lib/managed-models");
+  const { DEFAULT_PM_MODEL } = await import("@/lib/pm/openrouter");
+  for (const line of managedModelWarnings(Boolean(organisationDomain()), DEFAULT_PM_MODEL())) console.warn(line);
 
   await bootWhenDatabaseIsReady();
 }

@@ -8,7 +8,7 @@ import { runPmTurn } from "./agent";
 import { acquireTurnLock, releaseTurnLock } from "./turn-lock";
 import { NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS, buildNeedsHumanReviewPrompt } from "./autonomy";
 import { getProjectColumns } from "@/lib/columns";
-import { isPmRunnable } from "./availability";
+import { isPmRunnable, resolvePmModel } from "./availability";
 import { openGate } from "@/lib/ai-gateway";
 import type { ScopedDb } from "@/lib/db-scope";
 
@@ -123,7 +123,7 @@ export async function runPmTrigger(db: ScopedDb, trigger: IPmTrigger): Promise<P
   }
   // Settled, not retried: without a model every attempt is a turn spent posting the
   // same warning into every thread
-  const gate = await openGate(db, { error: "The PM agent is not configured on this instance", status: 503 });
+  const gate = await openGate(db, { error: "The PM agent is not configured on this instance", status: 503 }, await resolvePmModel(db, project.pm.model));
   if (!gate.ok) {
     if (gate.body.reason === "ai_budget" && gate.body.scope === "day") {
       await db.PmTrigger.findByIdAndUpdate(trigger._id, {

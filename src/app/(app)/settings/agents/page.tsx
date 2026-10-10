@@ -10,6 +10,8 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { DEFAULT_PROJECT_ICON } from "@/types";
 import { projectPath } from "@/lib/urls";
+import { isManagedModel, openrouterModel, type ManagedModels } from "@/lib/managed-models";
+import { APP_NAME } from "@/lib/brand";
 
 interface AgentRow {
   _id: string;
@@ -32,7 +34,47 @@ interface AgentsResponse {
   pmKeyUnreadable?: boolean;
   pmLocked?: boolean;
   defaults: { pmDefaultModel: string; envModel: string };
+  managedModels?: { onPlatformKey: boolean; allowed: ManagedModels; description: string } | null;
   projects: AgentRow[];
+}
+
+type ManagedModelsInfo = NonNullable<AgentsResponse["managedModels"]>;
+
+const refusedOnPlatformKey = (managed: AgentsResponse["managedModels"], model: string) =>
+  !!managed?.onPlatformKey && model.trim() !== "" && !isManagedModel(model.trim(), managed.allowed);
+
+function ManagedModelNote({ managed, model, testId }: { managed: ManagedModelsInfo; model: string; testId: string }) {
+  if (!managed.onPlatformKey) {
+    return (
+      <p className="mt-2 text-xs text-text-muted" data-testid={testId}>
+        Your organisation&apos;s own OpenRouter key is in use, so any OpenRouter model works.
+      </p>
+    );
+  }
+  if (refusedOnPlatformKey(managed, model)) {
+    return (
+      <div className="mt-2 flex gap-2 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs" role="alert" data-testid={testId}>
+        <span aria-hidden="true">⚠</span>
+        <p className="min-w-0 break-words">
+          <strong className="font-semibold">{model.trim()}</strong> is not available on {APP_NAME}&apos;s AI key, so it
+          will be refused. Choose one of: {managed.description}, or{" "}
+          <Link href="/settings/ai-keys" className="underline">
+            add your organisation&apos;s own OpenRouter key
+          </Link>
+          .
+        </p>
+      </div>
+    );
+  }
+  return (
+    <p className="mt-2 text-xs text-text-muted" data-testid={testId}>
+      On {APP_NAME}&apos;s AI key: {managed.description}. Any OpenRouter model works with{" "}
+      <Link href="/settings/ai-keys" className="underline">
+        your organisation&apos;s own key
+      </Link>
+      .
+    </p>
+  );
 }
 
 export default function AdminAgentsPage() {
@@ -216,6 +258,9 @@ export default function AdminAgentsPage() {
         <p className="mt-2 text-xs text-text-muted">
           An OpenRouter model name. One without a provider, such as gpt-4o-mini, is read as openai/gpt-4o-mini.
         </p>
+        {data.managedModels && (
+          <ManagedModelNote managed={data.managedModels} model={aiModel.trim() ? openrouterModel(aiModel.trim()) : ""} testId="ai-model-managed" />
+        )}
         <div className="mt-3">
           <Button size="sm" onClick={saveAiModel} disabled={savingAiModel}>
             {savingAiModel ? "Saving..." : "Save model"}
@@ -238,6 +283,9 @@ export default function AdminAgentsPage() {
             placeholder={data.defaults.envModel}
           />
         </div>
+        {data.managedModels && (
+          <ManagedModelNote managed={data.managedModels} model={defaultModel.trim() || data.defaults.envModel} testId="pm-model-managed" />
+        )}
         <div className="mt-3">
           <Button size="sm" onClick={saveDefaults} disabled={savingDefaults}>
             {savingDefaults ? "Saving..." : "Save defaults"}
@@ -318,6 +366,11 @@ export default function AdminAgentsPage() {
                       placeholder={effectiveDefault}
                       className="text-xs"
                     />
+                    {refusedOnPlatformKey(data.managedModels, row.model) && (
+                      <p className="mt-1 whitespace-nowrap text-xs text-warning" data-testid={`pm-model-refused-${row.key}`}>
+                        Not available on {APP_NAME}&apos;s AI key
+                      </p>
+                    )}
                   </td>
                   <td className="px-3 py-2 text-xs text-text-muted whitespace-nowrap">
                     {row.autonomy.dailyReview

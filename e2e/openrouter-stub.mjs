@@ -225,6 +225,7 @@ serve({
       provider = body.provider ?? null;
       const markedRoles = markedRolesIn(messages);
       requests.push({
+        model: body.model ?? null,
         sessionId: body.session_id ?? null,
         messageCount: messages.length,
         cacheControls: markedRoles.length,

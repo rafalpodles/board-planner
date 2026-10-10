@@ -211,11 +211,24 @@ describe("runPmTurn's AI allowance", () => {
     checkBudget.mockResolvedValueOnce({ refusal: null, counter: "month" }).mockResolvedValueOnce({ refusal: null, counter: "month" }).mockResolvedValue({ refusal: { scope: "day", used: 3_000_000, limit: 3_000_000, resetsAt: new Date("2026-10-10T00:00:00Z") }, counter: "month" });
     chatCompletion.mockResolvedValueOnce(toolCall("add_comment", { taskKey: "BP-1", body: "answer" }));
     createdMessages.length = 0;
+    process.env.MANAGED_AI_MODELS = PROJECT.pm.model;
 
-    const result = await turn(NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS);
+    const result = await turn(NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS).finally(() => delete process.env.MANAGED_AI_MODELS);
 
     expect(chatCompletion).toHaveBeenCalledTimes(1);
     expect(result).toMatchObject({ ok: false, message: { content: expect.stringMatching(/paused for today/) } });
+  });
+
+  // BP-1001
+  it("refuses the turn before anything is written or sent when the platform's key does not run the project's model", async () => {
+    resolveModelKey.mockResolvedValue({ ok: true, key: "sk-ours", source: "managed" });
+    createdMessages.length = 0;
+
+    const result = await turn(NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS);
+
+    expect(result).toMatchObject({ ok: false, message: null, error: expect.stringMatching(/^The model test\/model is not available on Board Planner's AI key/) });
+    expect(chatCompletion).not.toHaveBeenCalled();
+    expect(createdMessages).toEqual([]);
   });
 
   it("records what each call cost for the project and for the person the turn was run for", async () => {

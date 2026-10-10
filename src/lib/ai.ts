@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { APP_DOMAIN, APP_NAME } from "./brand";
 import { selfOrigin } from "./session";
+import { openrouterModel } from "./managed-models";
 import { OPENROUTER_BASE_URL, platformProviderPreferences, usageOf, type OrUsage, type ProviderPreferences } from "./pm/openrouter";
 import type { PromptField } from "./ai-fields";
 
@@ -37,8 +38,7 @@ interface ProjectContext {
   existingTasks?: ExistingTaskSummary[];
 }
 
-/** The model setting predates OpenRouter and holds a bare OpenAI name such as `gpt-4o-mini` */
-export const openrouterModel = (model: string): string => (model.includes("/") ? model : `openai/${model}`);
+export { openrouterModel };
 
 export async function generateTask(
   prompt: string,

@@ -11,6 +11,11 @@ vi.mock("@/lib/ai-gateway/budget", () => ({ counterKindOf: async () => "month", 
 const getOrganisation = vi.hoisted(() => vi.fn(async () => ({ aiLockedAt: null as Date | null, aiLockedReason: "" })));
 vi.mock("@/lib/organisation", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/organisation")>()), getOrganisation }));
 vi.mock("@/lib/ai-gateway/usage", () => ({ recordUsage: vi.fn() }));
+// The project's own model, or the default: reading the organisation's setting is a database call these tests do not make
+vi.mock("@/lib/pm/availability", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/pm/availability")>()),
+  resolvePmModel: async (_db: unknown, model?: string) => model || "openai/gpt-6-luna",
+}));
 vi.mock("next/server", async (importOriginal) => ({ ...(await importOriginal<typeof import("next/server")>()), after }));
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/project", () => ({ Project: { findOne } }));
@@ -56,6 +61,18 @@ describe("POST /api/projects/:projectId/pm/review", () => {
     expect(after).toHaveBeenCalledTimes(1);
     // What after() keeps alive is the review, not some other promise
     expect(after.mock.calls[0][0]()).toBe(done);
+  });
+
+  // BP-1001: the owner who pressed the button is told, rather than a 202 and a line in the server's log
+  it("refuses with 403, naming the model, when the platform's key does not run the project's model", async () => {
+    resolveModelKey.mockResolvedValue({ ok: true, key: "k", source: "managed" });
+    findOne.mockReturnValue({ lean: async () => ({ _id: "p1", key: "BP", pm: { enabled: true, model: "moonshotai/kimi-k2.6" } }) });
+
+    const res = await run();
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ reason: "model_not_managed", model: "moonshotai/kimi-k2.6", error: expect.stringMatching(/^The model moonshotai\/kimi-k2\.6 is not available/) });
+    expect(startBoardReview).not.toHaveBeenCalled();
   });
 
   it("answers 404 for a project that does not exist", async () => {

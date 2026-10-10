@@ -5,7 +5,8 @@ import { withProjectAccess } from "@/lib/middleware";
 import type { HydratedDocument } from "mongoose";
 import type { IProject } from "@/types";
 import { generateTask, ExistingTaskSummary } from "@/lib/ai";
-import { gatewayAssist, openGate } from "@/lib/ai-gateway";
+import { openrouterModel } from "@/lib/managed-models";
+import { gatewayAssist, openGate, UnmanagedModelRefused } from "@/lib/ai-gateway";
 import { modelKeyAvailability } from "@/lib/model-keys";
 import { choiceFieldsForPrompt, resolveGeneratedFields } from "@/lib/ai-fields";
 import { getSettings } from "@/models/settings";
@@ -76,7 +77,8 @@ export const GET = withProjectAccess(async (_request, { db }) => {
 export const POST = withProjectAccess(async (request, { params, user, db }) => {
   const { projectId } = await params;
 
-  const gate = await openGate(db, { error: "AI is not configured. Set the OPENROUTER_API_KEY environment variable.", status: 501 });
+  const { aiModel } = await getSettings(db);
+  const gate = await openGate(db, { error: "AI is not configured. Set the OPENROUTER_API_KEY environment variable.", status: 501 }, openrouterModel(aiModel));
   if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });
 
   await connectDB();
@@ -118,7 +120,7 @@ export const POST = withProjectAccess(async (request, { params, user, db }) => {
     if (!project) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
-    return await generate(db, project, projectId, prompt, gate, String(user._id));
+    return await generate(db, project, projectId, prompt, gate, String(user._id), aiModel);
   } finally {
     inFlight.delete(holder);
   }
@@ -130,7 +132,8 @@ async function generate(
   projectId: string,
   prompt: string,
   gate: Extract<Awaited<ReturnType<typeof openGate>>, { ok: true }>,
-  userId: string
+  userId: string,
+  aiModel: string
 ) {
   const [readme, tasks] = await Promise.all([
     // raw.githubusercontent.com only serves github.com, so a project hosted anywhere else — and
@@ -156,8 +159,7 @@ async function generate(
   const choiceFields = choiceFieldsForPrompt(project.customFields || []);
 
   try {
-    const settings = await getSettings(db);
-    const task = await gatewayAssist(db, { source: "assist", projectId, userId }, gate, settings.aiModel, (apiKey, report, onPlatformKey) =>
+    const task = await gatewayAssist(db, { source: "assist", projectId, userId }, gate, aiModel, (apiKey, report, onPlatformKey) =>
       generateTask(
         prompt.trim(),
         {
@@ -168,7 +170,7 @@ async function generate(
           readme,
           existingTasks,
         },
-        settings.aiModel,
+        aiModel,
         apiKey,
         report,
         onPlatformKey
@@ -181,6 +183,7 @@ async function generate(
 
     return NextResponse.json({ ...task, customFieldValues });
   } catch (err) {
+    if (err instanceof UnmanagedModelRefused) return NextResponse.json(err.gate.body, { status: err.gate.status });
     console.error("AI generation failed:", err);
     return NextResponse.json(
       { error: "AI generation failed. Please try again." },

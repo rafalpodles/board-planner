@@ -6,7 +6,7 @@ import { drainPmTriggers } from "./triggers";
 import { getPmUser } from "./pm-user";
 import { BOARD_REVIEW_DISALLOWED_TOOLS, buildBoardReviewPrompt, dueReviewSlot } from "./autonomy";
 import { buildBoardDigest, digestHeadline, renderBoardDigest } from "./board-review";
-import { PM_RUNNABLE_QUERY } from "./availability";
+import { PM_RUNNABLE_QUERY, resolvePmModel } from "./availability";
 import { openGate } from "@/lib/ai-gateway";
 import { type ScopedDb } from "@/lib/db-scope";
 
@@ -89,12 +89,12 @@ export async function startBoardReview(
   db: ScopedDb,
   projectId: string,
   projectKey: string,
-  pm: { autonomy?: { timezone?: string } },
+  pm: { model?: string; autonomy?: { timezone?: string } },
   pmUserId: string
 ): Promise<BoardReviewStart> {
   // The scheduler starts whether or not a model is configured, and a review without one spent a
   // turn to post a warning into every thread on the board
-  const gate = await openGate(db, { error: "the PM agent is not configured on this instance", status: 503 });
+  const gate = await openGate(db, { error: "the PM agent is not configured on this instance", status: 503 }, await resolvePmModel(db, pm.model));
   if (!gate.ok) return { status: "skipped", reason: gate.error };
   const abort = acquireTurnLock(projectId, pmUserId);
   if (!abort) return { status: "skipped", reason: "a PM turn is already running on this project" };

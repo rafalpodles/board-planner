@@ -185,11 +185,11 @@ export async function runPmTurn(db: ScopedDb, opts: {
   if (!project) return { ok: false, message: null, error: "Project not found" };
   if (!isPmRunnable(project.pm)) return { ok: false, message: null, error: pmDisabledReason(project.pm) };
 
-  const gate = await openGate(db, { error: "The PM agent is not configured on this instance", status: 503 });
+  const model = await resolvePmModel(db, project.pm.model);
+  const gate = await openGate(db, { error: "The PM agent is not configured on this instance", status: 503 }, model);
   if (!gate.ok) return { ok: false, message: null, error: gate.error };
 
   const pmUser = await getPmUser(db);
-  const model = await resolvePmModel(db, project.pm.model);
   const trigger = opts.trigger ?? { type: "chat" as const };
 
   const actor = await resolveActor(db, opts.triggeredByUserId);
