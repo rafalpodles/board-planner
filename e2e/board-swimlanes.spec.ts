@@ -7,11 +7,18 @@ import {
   FINISHED_TASK_ID,
   HELD_TASK_ID,
   HELD_TASK_NUMBER,
+  MEMBER_ID,
   MEMBER_USERNAME,
+  PLANNING_SPRINT_ID,
   PROJECT_KEY,
   SIBLING_TASK_ID,
+  deactivateUser,
+  parkTaskOnMissingColumn,
   seed,
+  seedSprintPlanning,
+  setTaskRow,
 } from "./seed";
+import { AA_TEXT, DARK_SURFACE_MAX_LUMINANCE, surfaceLuminance, textContrast } from "./colour";
 import { signIn } from "./session";
 
 /**
@@ -57,13 +64,13 @@ function taskPut(page: Page, id: { toString(): string }) {
 }
 
 /** Urgent: TP-3 (in progress). High: TP-2 (in review). Medium: TP-1 (in progress, held by a worker) and TP-4 (to do). */
-async function openByPriority(page: Page, request: APIRequestContext) {
+async function openByPriority(page: Page, request: APIRequestContext, cards = SEEDED_TASKS) {
   await put(request, SIBLING_TASK_ID, { priority: "urgent" });
   await put(request, DECOY_TASK_ID, { priority: "high" });
   await silenceBoardPoll(page);
   await signIn(page);
   await page.goto(BOARD);
-  await expect(page.locator("[data-column-body] a[href*='/tasks/']")).toHaveCount(SEEDED_TASKS);
+  await expect(page.locator("[data-column-body] a[href*='/tasks/']")).toHaveCount(cards);
   await groupSelect(page).selectOption({ label: "Group: Priority" });
   await expect(headers(page)).toHaveCount(3);
 }
@@ -347,4 +354,97 @@ test("on a phone the columns still page, the row's name stays on screen, and the
     await expect(medium).toBeInViewport({ ratio: 1 });
     await expect(cell(page, "v:medium", "in_review")).toBeInViewport();
   });
+});
+
+test("a task whose column is gone is in no cell, and no row counts it", async ({ page, request }) => {
+  await parkTaskOnMissingColumn(FINISHED_TASK_ID);
+  await openByPriority(page, request, SEEDED_TASKS - 1);
+
+  await expect(headers(page).nth(2)).toContainText("Medium");
+  await expect(headers(page).nth(2).getByTestId("board-lane-count")).toHaveText("1");
+  await expect(page.locator("[data-column-body] a[href*='/tasks/']")).toHaveCount(SEEDED_TASKS - 1);
+  await expect(cardIn(cell(page, "v:medium", "in_progress"), HELD_TASK_NUMBER)).toBeVisible();
+});
+
+test("the row of tasks with no category takes no drop: the card stays, nothing is written, and the board says why", async ({ page, request }) => {
+  await setTaskRow(FINISHED_TASK_ID, { category: "" });
+  await page.setViewportSize({ width: 1280, height: 1100 });
+  await silenceBoardPoll(page);
+  await signIn(page);
+  await page.goto(BOARD);
+  await expect(page.locator("[data-column-body] a[href*='/tasks/']")).toHaveCount(SEEDED_TASKS);
+  await groupSelect(page).selectOption({ label: "Group: Category" });
+  await expect(header(page, "No category")).toBeVisible();
+
+  const writes: string[] = [];
+  page.on("request", (r) => r.method() === "PUT" && writes.push(r.url()));
+  await dragTo(page, cardIn(cell(page, "v:user-story", "in_progress"), SIBLING), body(cell(page, "@none", "in_progress")));
+
+  await expect(page.getByText(/nothing to set on a task by dropping it into "No category"/)).toBeVisible();
+  await expect(cardIn(cell(page, "v:user-story", "in_progress"), SIBLING)).toBeVisible();
+  expect(writes).toEqual([]);
+  expect(await stored(request, SIBLING)).toMatchObject({ category: "user-story", status: "in_progress" });
+});
+
+test("a person the server will no longer assign to is refused, with the reason, and the card goes back", async ({ page, request }) => {
+  await put(request, DECOY_TASK_ID, { assignee: MEMBER_USERNAME });
+  await put(request, SIBLING_TASK_ID, { assignee: MEMBER_USERNAME });
+  await deactivateUser(MEMBER_ID);
+  await page.setViewportSize({ width: 1280, height: 1100 });
+  await silenceBoardPoll(page);
+  await signIn(page);
+  await page.goto(BOARD);
+  await expect(page.locator("[data-column-body] a[href*='/tasks/']")).toHaveCount(SEEDED_TASKS);
+  await groupSelect(page).selectOption({ label: "Group: Assignee" });
+  await expect(headers(page)).toHaveCount(2);
+
+  await dragTo(page, cardIn(cell(page, "@none", "todo"), FINISHED), body(cell(page, "v:member", "in_review")));
+
+  await expect(page.getByText(/Failed to move task: .*deactivated/)).toBeVisible();
+  await expect(cardIn(cell(page, "@none", "todo"), FINISHED)).toBeVisible();
+  expect(await stored(request, FINISHED)).toMatchObject({ status: "todo", assignee: null });
+});
+
+test("the card's own menu moves it a column and keeps it in its row", async ({ page, request }) => {
+  await openByPriority(page, request);
+
+  await cardIn(cell(page, "v:urgent", "in_progress"), SIBLING).click({ button: "right" });
+  const written = page.waitForResponse((r) => r.request().method() === "PATCH" && r.url().includes("/tasks/") && r.ok());
+  await page.getByRole("button", { name: "In Review", exact: true }).click();
+  await written;
+
+  await expect(cardIn(cell(page, "v:urgent", "in_review"), SIBLING)).toBeVisible();
+  expect(await stored(request, SIBLING)).toMatchObject({ status: "in_review", priority: "urgent" });
+});
+
+test("a board that holds a grouping the sprint page cannot draw still opens there without rows", async ({ page, request }) => {
+  await openByPriority(page, request);
+  await expect(headers(page)).toHaveCount(3);
+  await seedSprintPlanning();
+
+  await page.goto(`${BOARD}/sprints?sprint=${String(PLANNING_SPRINT_ID)}`);
+
+  await expect(page.locator("[data-column-body] a[href*='/tasks/']").first()).toBeVisible();
+  await expect(headers(page)).toHaveCount(0);
+  await expect(page.getByLabel("Group tasks by")).toHaveCount(0);
+});
+
+test("a row's name and count are readable in the dark theme", async ({ page, request }) => {
+  await openByPriority(page, request);
+  await page.getByRole("button", { name: "Account menu" }).click();
+  await page.getByRole("group", { name: "Theme" }).getByRole("button", { name: "Dark", exact: true }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await page.mouse.move(0, 0);
+
+  const label = header(page, "Urgent").getByRole("button").locator("span", { hasText: "Urgent" });
+  await expect(label).toBeVisible();
+  const painted = await label.evaluate((element) => {
+    const backgrounds: string[] = [];
+    for (let node: Element | null = element; node; node = node.parentElement) {
+      backgrounds.push(getComputedStyle(node).backgroundColor);
+    }
+    return { color: getComputedStyle(element).color, backgrounds };
+  });
+  expect(textContrast(painted)).toBeGreaterThanOrEqual(AA_TEXT);
+  expect(surfaceLuminance(painted.backgrounds)).toBeLessThanOrEqual(DARK_SURFACE_MAX_LUMINANCE);
 });
