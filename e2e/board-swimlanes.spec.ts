@@ -414,6 +414,9 @@ test("the card's own menu moves it a column and keeps it in its row", async ({ p
   await written;
 
   await expect(cardIn(cell(page, "v:urgent", "in_review"), SIBLING)).toBeVisible();
+  await expect(page.locator(`a[href="${href(SIBLING)}"]`)).toHaveCount(1);
+  await expect(headers(page)).toHaveCount(3);
+  await expect(headers(page).nth(0).getByTestId("board-lane-count")).toHaveText("1");
   expect(await stored(request, SIBLING)).toMatchObject({ status: "in_review", priority: "urgent" });
 });
 
