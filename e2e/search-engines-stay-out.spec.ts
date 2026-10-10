@@ -10,11 +10,11 @@ import { APP_NAME } from "../src/lib/brand";
 
 test.beforeEach(seed);
 
-test("robots.txt, served without a session, disallows everything", async ({ request }) => {
+test("robots.txt, served without a session, keeps crawlers off the API and lets them read the pages", async ({ request }) => {
   const response = await request.get("/robots.txt");
   expect(response.status()).toBe(200);
   expect(response.headers()["content-type"]).toContain("text/plain");
-  expect(await response.text()).toMatch(/User-Agent: \*\s+Disallow: \//i);
+  expect((await response.text()).trim()).toBe("User-Agent: *\nDisallow: /api/");
 });
 
 test("the sign-in page is named, described and asks not to be indexed", async ({ page }) => {
@@ -22,8 +22,8 @@ test("the sign-in page is named, described and asks not to be indexed", async ({
   await expect(page.getByLabel("Password")).toBeVisible();
 
   await expect(page).toHaveTitle(`Sign in — ${APP_NAME}`);
-  await expect(page.locator('head meta[name="description"]')).toHaveAttribute("content", /^Sign in to Board Planner/);
-  await expect(page.locator('head meta[name="robots"]')).toHaveAttribute("content", /noindex/);
+  await expect(page.locator('head meta[name="description"]')).toHaveAttribute("content", new RegExp(`^Sign in to ${APP_NAME}`));
+  await expect(page.locator('head meta[name="robots"]')).toHaveAttribute("content", /^noindex, nofollow$/);
 });
 
 test("the browser tab and an iPhone's home screen get an icon", async ({ page, request }) => {
