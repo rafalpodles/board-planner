@@ -428,19 +428,19 @@ test("switching what the list is grouped by opens every group again", async ({ p
   await expect(taskRows(page)).toHaveCount(4);
 });
 
-test("the grouping is still there after a look at the board", async ({ page, request }) => {
+test("a grouping the board cannot draw is still there after a look at the board", async ({ page, request }) => {
   await sortOutPriorities(request);
   await openList(page);
-  await groupBy(page, "Group: Priority");
-  await expect(headers(page)).toHaveCount(2);
+  await groupBy(page, "Group: Status");
+  await expect(headers(page)).toHaveCount(3);
 
   await page.getByRole("button", { name: "Board", exact: true }).click();
   await expect(page.getByTestId("column-in_progress")).toBeVisible();
-  await expect(groupSelect(page)).toHaveCount(0);
+  await expect(groupSelect(page), "status is the columns: nothing to draw as rows").toHaveValue("");
   await page.reload();
   await expect(page.getByTestId("column-in_progress")).toBeVisible();
   await page.getByRole("button", { name: "List", exact: true }).click();
 
-  await expect(groupSelect(page)).toHaveValue("priority");
-  await expect(headers(page)).toHaveCount(2);
+  await expect(groupSelect(page)).toHaveValue("status");
+  await expect(headers(page)).toHaveCount(3);
 });
