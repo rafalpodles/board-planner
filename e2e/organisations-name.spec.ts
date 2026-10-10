@@ -121,7 +121,7 @@ test.describe("BP-920: the app names the organisation you are in", () => {
       const saved = page.waitForResponse((res) => res.url().endsWith("/api/organisation") && res.request().method() === "PUT");
       await page.getByRole("button", { name: "Save" }).click();
       expect((await saved).status()).toBe(409);
-      await expect(page.getByText("That name is not available. Try another.")).toBeVisible();
+      await expect(page.getByText("That name is not available. Try another.").last()).toBeVisible();
     }
 
     const acme = await request.get(`${ORGANISATIONS_API}/api/organisation`, { headers: asSession(ACME) });
