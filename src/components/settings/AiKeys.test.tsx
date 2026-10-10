@@ -11,7 +11,7 @@ const { api, toast } = vi.hoisted(() => ({
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast, dismiss: vi.fn() }) }));
 
-const NO_USAGE = { scope: "month", used: 0, limit: null, resetsAt: null, today: 0, dailyCeiling: null, ownTokens: 0, locked: false, included: false };
+const NO_USAGE = { scope: "month", used: 0, limit: null, resetsAt: null, today: 0, dailyCeiling: null, ownTokens: 0, calls: 0, ownCalls: 0, turns: null, locked: false, included: false };
 const FREE_CLOUD = { hosted: true, plan: "free", set: false, hint: "", unreadable: false, included: false, usage: NO_USAGE };
 
 beforeEach(() => {
@@ -209,6 +209,9 @@ describe("Settings → AI key: usage", () => {
     today: 900_000,
     dailyCeiling: 3_000_000,
     ownTokens: 0,
+    calls: 1_340,
+    ownCalls: 0,
+    turns: 120,
     locked: false,
     included: true,
     ...over,
@@ -224,6 +227,25 @@ describe("Settings → AI key: usage", () => {
     expect(screen.getByText("28% used")).toBeTruthy();
     expect(screen.getByRole("progressbar", { name: "AI tokens used this month" }).getAttribute("aria-valuenow")).toBe("4200000");
     expect(screen.getByTestId("ai-usage-today").textContent).toBe("Today (UTC): 900,000 tokens; one day may use at most 3,000,000.");
+  });
+
+  it("says how many PM turns and model calls the month held, beside the tokens, and in the singular for one", async () => {
+    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage() });
+    const { unmount } = render(<AiKeys />);
+    expect((await screen.findByTestId("ai-usage-activity")).textContent).toBe("120 PM turns and 1,340 model calls on this service's key this month.");
+    unmount();
+
+    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ turns: 1, calls: 1 }) });
+    render(<AiKeys />);
+    expect((await screen.findByTestId("ai-usage-activity")).textContent).toBe("1 PM turn and 1 model call on this service's key this month.");
+  });
+
+  it("says nothing of turns where the answer did not count them", async () => {
+    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ turns: null }) });
+    render(<AiKeys />);
+
+    await screen.findByTestId("ai-usage-month");
+    expect(screen.queryByTestId("ai-usage-activity")).toBeNull();
   });
 
   it("says a trial's allowance is for the trial, with nothing renewing", async () => {
@@ -245,9 +267,9 @@ describe("Settings → AI key: usage", () => {
   });
 
   it("shows what an own key used apart, and says it is never limited, only when it used any", async () => {
-    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ ownTokens: 77_000 }) });
+    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ ownTokens: 77_000, ownCalls: 41 }) });
     render(<AiKeys />);
-    expect((await screen.findByTestId("ai-usage-own")).textContent).toBe("Your own key: 77,000 tokens this month, counted and never limited.");
+    expect((await screen.findByTestId("ai-usage-own")).textContent).toBe("Your own key: 77,000 tokens in 41 calls this month, counted and never limited.");
 
     cleanup();
     api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ ownTokens: 0 }) });
@@ -266,10 +288,10 @@ describe("Settings → AI key: usage", () => {
   });
 
   it("shows only what its own key used, where the service's key is not one it may use", async () => {
-    api.get.mockResolvedValue({ ...FREE_CLOUD, set: true, hint: "abcd", usage: usage({ included: false, limit: null, dailyCeiling: null, resetsAt: null, ownTokens: 4_000, locked: true }) });
+    api.get.mockResolvedValue({ ...FREE_CLOUD, set: true, hint: "abcd", usage: usage({ included: false, limit: null, dailyCeiling: null, resetsAt: null, ownTokens: 4_000, ownCalls: 1, locked: true }) });
     render(<AiKeys />);
 
-    expect((await screen.findByTestId("ai-usage-own")).textContent).toBe("Your own key: 4,000 tokens this month, counted and never limited.");
+    expect((await screen.findByTestId("ai-usage-own")).textContent).toBe("Your own key: 4,000 tokens in 1 call this month, counted and never limited.");
     expect(screen.queryByTestId("ai-usage-month")).toBeNull();
     expect(screen.queryByTestId("ai-usage-today")).toBeNull();
     expect(screen.queryByTestId("ai-usage-locked")).toBeNull();

@@ -4,7 +4,7 @@ import { getOrganisation } from "@/lib/organisation";
 import { organisationDomain } from "@/lib/organisation-host";
 import { counterKindOf } from "./budget";
 import { budgetOf, operatorAllowance } from "./limits";
-import { nextUtcMonth, periodOf } from "./periods";
+import { nextUtcMonth, periodOf, startOfUtcMonth } from "./periods";
 
 export interface AiUsageSummary {
   /** The counter the allowance is read from: a trial's own, or the UTC month */
@@ -21,6 +21,11 @@ export interface AiUsageSummary {
   dailyCeiling: number | null;
   /** Tokens on the organisation's own key in that scope: counted, never limited */
   ownTokens: number;
+  /** Calls on the operator's key in that scope, and on the organisation's own key */
+  calls: number;
+  ownCalls: number;
+  /** PM turns people or the schedule started in that scope; null where it was not asked, which costs a count */
+  turns: number | null;
   /** The operator has switched off the use of its key for this organisation */
   locked: boolean;
   /** The operator's own figure, set for the counter this organisation is on now, is the one in force (BP-678) */
@@ -30,7 +35,7 @@ export interface AiUsageSummary {
 }
 
 /** What an organisation has used of its AI allowance, for its own Settings and for the operator's list */
-export async function aiUsageSummary(db: ScopedDb, now: Date = new Date()): Promise<AiUsageSummary> {
+export async function aiUsageSummary(db: ScopedDb, now: Date = new Date(), options: { turns?: boolean } = {}): Promise<AiUsageSummary> {
   const [organisation, budget] = await Promise.all([getOrganisation(db.organisation), budgetOf(db)]);
   const scope = budget?.scope ?? (await counterKindOf(db));
   const rows = await db.AiBudget.find({
@@ -40,6 +45,9 @@ export async function aiUsageSummary(db: ScopedDb, now: Date = new Date()): Prom
     ],
   }).lean();
   const row = (kind: string) => rows.find((r) => r.kind === kind);
+  const turns = options.turns
+    ? await db.PmMessage.countDocuments({ role: "user", ...(scope === "month" ? { createdAt: { $gte: startOfUtcMonth(now) } } : {}) })
+    : null;
 
   // An organisation on a plan without managed AI, or on an instance with no key to offer, has no allowance: the key is its own or nothing
   const included = Boolean(process.env.OPENROUTER_API_KEY) && (organisationDomain() === null || can(organisation, "ai.managed"));
@@ -51,6 +59,9 @@ export async function aiUsageSummary(db: ScopedDb, now: Date = new Date()): Prom
     today: row("day")?.tokens ?? 0,
     dailyCeiling: included && budget && budget.dailyCeiling > 0 ? budget.dailyCeiling : null,
     ownTokens: row(scope)?.ownTokens ?? 0,
+    calls: row(scope)?.calls ?? 0,
+    ownCalls: row(scope)?.ownCalls ?? 0,
+    turns,
     locked: Boolean(organisation.aiLockedAt),
     overridden: operatorAllowance(organisation.aiAllowance, scope) !== undefined,
     included,

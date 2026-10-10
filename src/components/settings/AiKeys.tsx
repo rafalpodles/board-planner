@@ -28,6 +28,9 @@ interface UsageAnswer {
   today: number;
   dailyCeiling: number | null;
   ownTokens: number;
+  calls: number;
+  ownCalls: number;
+  turns: number | null;
   locked: boolean;
   included: boolean;
 }
@@ -74,6 +77,12 @@ function UsageCard({ usage, hosted }: { usage: UsageAnswer; hosted: boolean }) {
               <div className={`h-full ${share >= 90 ? "bg-danger" : "bg-primary"}`} style={{ width: `${share}%` }} />
             </div>
           )}
+          {usage.turns !== null && (
+            <p className="text-sm text-text-muted" data-testid="ai-usage-activity">
+              <strong className="text-text">{tokens(usage.turns)}</strong> PM turn{usage.turns === 1 ? "" : "s"} and{" "}
+              <strong className="text-text">{tokens(usage.calls)}</strong> model call{usage.calls === 1 ? "" : "s"} on this service&apos;s key {period}.
+            </p>
+          )}
           <p className="text-sm text-text-muted" data-testid="ai-usage-today">
             Today (UTC): {tokens(usage.today)} tokens
             {usage.dailyCeiling !== null ? <>; one day may use at most {tokens(usage.dailyCeiling)}</> : null}.
@@ -82,7 +91,7 @@ function UsageCard({ usage, hosted }: { usage: UsageAnswer; hosted: boolean }) {
       )}
       {usage.ownTokens > 0 && (
         <p className="text-sm text-text-muted" data-testid="ai-usage-own">
-          Your own key: {tokens(usage.ownTokens)} tokens {period}, counted and never limited.
+          Your own key: {tokens(usage.ownTokens)} tokens in {tokens(usage.ownCalls)} call{usage.ownCalls === 1 ? "" : "s"} {period}, counted and never limited.
         </p>
       )}
     </SettingsCard>

@@ -26,7 +26,7 @@ async function view(db: ScopedDb) {
   const [settings, organisation, usage] = await Promise.all([
     db.Settings.findOne({}, "openrouterKey openrouterKeyHint").lean(),
     getOrganisation(db.organisation),
-    aiUsageSummary(db),
+    aiUsageSummary(db, new Date(), { turns: true }),
   ]);
   const hosted = organisationDomain() !== null;
   const managed = !hosted || can(organisation, "ai.managed");

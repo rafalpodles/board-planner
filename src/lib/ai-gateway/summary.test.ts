@@ -12,7 +12,8 @@ const { aiUsageSummary } = await import("./summary");
 
 const NOW = new Date("2026-10-09T10:00:00Z");
 const find = vi.fn();
-const db = { organisation: "org", AiBudget: { find: (filter: unknown) => (find(filter), { lean: async () => m.rows }) } } as never;
+const countDocuments = vi.fn();
+const db = { organisation: "org", AiBudget: { find: (filter: unknown) => (find(filter), { lean: async () => m.rows }) }, PmMessage: { countDocuments } } as never;
 
 beforeEach(() => {
   vi.stubEnv("OPENROUTER_API_KEY", "sk-or-x");
@@ -24,6 +25,7 @@ beforeEach(() => {
   m.hosted = true;
   m.managed = true;
   find.mockClear();
+  countDocuments.mockReset().mockResolvedValue(0);
 });
 
 afterEach(() => vi.unstubAllEnvs());
@@ -44,6 +46,9 @@ describe("aiUsageSummary", () => {
       today: 900_000,
       dailyCeiling: 3_000_000,
       ownTokens: 77_000,
+      calls: 0,
+      ownCalls: 0,
+      turns: null,
       locked: false,
       overridden: false,
       included: true,
@@ -122,5 +127,32 @@ describe("aiUsageSummary", () => {
 
     m.allowance = { tokens: 0, scope: "month" };
     expect(await aiUsageSummary(db, NOW)).toMatchObject({ overridden: false });
+  });
+
+  // BP-647: the month's turns and calls beside its tokens
+  it("counts the calls on each key from the counters, and leaves the turns uncounted unless asked", async () => {
+    m.rows = [{ kind: "month", period: "2026-10", tokens: 1_000, calls: 12, ownTokens: 500, ownCalls: 4 }];
+
+    expect(await aiUsageSummary(db, NOW)).toMatchObject({ calls: 12, ownCalls: 4, turns: null });
+    expect(countDocuments).not.toHaveBeenCalled();
+  });
+
+  it("counts the PM turns people or the schedule started since the first of the month when asked, and only those", async () => {
+    countDocuments.mockResolvedValue(120);
+
+    expect(await aiUsageSummary(db, NOW, { turns: true })).toMatchObject({ turns: 120 });
+    expect(countDocuments).toHaveBeenCalledWith({ role: "user", createdAt: { $gte: new Date("2026-10-01T00:00:00Z") } });
+  });
+
+  it("counts every turn of a trial, which is not a calendar month", async () => {
+    m.budget = { scope: "trial", limit: 3_000_000, dailyCeiling: 600_000 };
+    countDocuments.mockResolvedValue(9);
+
+    expect(await aiUsageSummary(db, NOW, { turns: true })).toMatchObject({ scope: "trial", turns: 9 });
+    expect(countDocuments).toHaveBeenCalledWith({ role: "user" });
+  });
+
+  it("reads a month with no calls as zero", async () => {
+    expect(await aiUsageSummary(db, NOW)).toMatchObject({ calls: 0, ownCalls: 0 });
   });
 });
