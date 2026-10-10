@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { withAdmin, withAuth } from "@/lib/middleware";
-import { checkOrganisationName, getOrganisation, organisationIsNamed, renameOrganisation } from "@/lib/organisation";
+import { NAME_UNAVAILABLE, checkOrganisationName, getOrganisation, nameChecksSpent, nameUnavailable, organisationIsNamed, renameOrganisation } from "@/lib/organisation";
 import { organisationDomain, organisationOrigin } from "@/lib/organisation-host";
 import { memberCounts, memberLimitOf } from "@/lib/member-limit";
 import type { ScopedDb } from "@/lib/db-scope";
@@ -43,6 +43,12 @@ export const PUT = withAdmin(async (request, { user, db }) => {
 
   const before = (await getOrganisation(db.organisation)).name;
   if (before !== checked.value) {
+    if (await nameChecksSpent(`organisation-rename:names:${db.organisation}`)) {
+      return NextResponse.json({ error: "Too many names tried. Try again in an hour." }, { status: 429 });
+    }
+    if (await nameUnavailable(checked.value, db.organisation)) {
+      return NextResponse.json({ error: NAME_UNAVAILABLE }, { status: 409 });
+    }
     await renameOrganisation(db.organisation, checked.value);
     void logInstanceAudit(db, {
       action: "organisation_renamed",

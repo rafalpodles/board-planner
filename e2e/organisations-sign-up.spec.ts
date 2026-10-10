@@ -67,6 +67,18 @@ test.describe("BP-673: creating an organisation from the platform host", () => {
     expect(await withDb((db) => db.collection("organisations").countDocuments({ name: "Copycat" }))).toBe(0);
   });
 
+  test("BP-1010: a name another organisation has, in any case, or one that reads as a reserved address, is unavailable and creates nothing", async ({ page }) => {
+    await provideAddressAndCode(page, freshAddress("namesake"));
+
+    for (const name of ["Acme", "ACME", "Àcme", "login"]) {
+      await fillTheForm(page, name, { slug: "namesake-ltd" });
+      await page.getByRole("button", { name: "Create the organisation" }).click();
+      await expect(page.getByTestId("sign-in-error")).toHaveText("That name is not available. Try another.");
+      await page.getByRole("button", { name: "Back" }).click();
+    }
+    expect(await organisationWithSlug("namesake-ltd")).toBeNull();
+  });
+
   test("someone with an organisation already can create another, and both stay theirs", async ({ page }) => {
     const email = freshAddress("both");
     await withDb((db) => db.collection("users").updateOne({ _id: ACME.adminId }, { $set: { email, emailVerifiedAt: new Date() } }));
@@ -113,6 +125,20 @@ test.describe("BP-673: creating an organisation from the platform host", () => {
       });
       if (n <= 3) expect(again.status(), "a sign-in is spent by the organisation it created").toBe(401);
     }
+  });
+
+  test("BP-1010: ten taken names in an hour end the guessing, so a name cannot be probed for a customer", async ({ request }) => {
+    const signedIn = await apiCode(request, freshAddress("probe"));
+    const tryName = (name: string, n: number) =>
+      request.post(`${ORGANISATIONS_API}/api/sign-in/organisation`, {
+        headers: signedIn,
+        data: { name, slug: `probe-${n}-${Date.now()}`, fullName: "Owner", username: "owner", password: PASSWORD },
+      });
+
+    for (let n = 1; n <= 10; n++) expect((await tryName("Acme", n)).status(), `try ${n}`).toBe(400);
+    const stopped = await tryName("Initech Probe", 11);
+    expect(stopped.status()).toBe(429);
+    expect(await stopped.json()).toEqual({ error: "Too many names tried. Try again in an hour." });
   });
 
   // BP-674: the limits are on the mailbox and the company, not on how an address happens to be spelt

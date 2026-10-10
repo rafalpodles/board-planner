@@ -48,6 +48,16 @@ beforeEach(() => {
   purgeOrganisationRows.mockResolvedValue({});
 });
 
+describe("checkSignUp's name (BP-1010)", () => {
+  it.each(["login", "Login", "App", "Board Planner", "Łogin"])("calls %s unavailable: it reads as a reserved address", (name) => {
+    expect(checkSignUp("bill@initech.example", { ...INPUT, name })).toEqual({ ok: false, error: "That name is not available. Try another." });
+  });
+
+  it("takes a name that only contains a reserved word", () => {
+    expect(checkSignUp("bill@initech.example", { ...INPUT, name: "Login Ltd" })).toMatchObject({ ok: true });
+  });
+});
+
 describe("checkSlug (BP-673)", () => {
   it.each(["login", "app", "www", "admin"])("calls the reserved %s unavailable, in the words a taken one gets", (slug) => {
     expect(checkSlug(slug)).toEqual({ ok: false, error: SLUG_UNAVAILABLE });
