@@ -264,9 +264,12 @@ export function buildFlowCookie(base: string, value: string, maxAgeSeconds: numb
   return cookieHeader(flowCookieName(base), value, maxAgeSeconds);
 }
 
-export function readFlowCookie(request: Request, base: string): string | null {
-  const header = request.headers.get("cookie");
+export function readFlowCookieFrom(header: string | null, base: string): string | null {
   return header ? tokenNamed(header, flowCookieName(base)) : null;
+}
+
+export function readFlowCookie(request: Request, base: string): string | null {
+  return readFlowCookieFrom(request.headers.get("cookie"), base);
 }
 
 export function readSessionCookie(header: string | null): string | null {

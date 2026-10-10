@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { isDatabaseUnreachable } from "./db-errors";
 import { databaseUnavailable, hostNotFound } from "./middleware";
 import { organisationOfRequest } from "./organisation-host";
-import { buildFlowCookie, readFlowCookie } from "./session";
-import { REMEMBERED_ORGANISATION_COOKIE, SIGN_IN_COOKIE, VERIFIED_TTL_MS, verifiedEmail } from "./platform-sign-in";
+import { buildFlowCookie, readFlowCookie, readFlowCookieFrom } from "./session";
+import { REMEMBERED_ORGANISATION_COOKIE, REMEMBERED_ORGANISATION_TTL_SECONDS, SIGN_IN_COOKIE, VERIFIED_TTL_MS, verifiedEmail } from "./platform-sign-in";
 
 export async function refusedOffThePlatform(request: Request): Promise<NextResponse | null> {
   return (await organisationOfRequest(request)).kind === "platform" ? null : hostNotFound();
@@ -17,7 +17,10 @@ export const clearedSignInCookie = () => buildFlowCookie(SIGN_IN_COOKIE, "", 0);
 
 export const rememberedOrganisation = (request: Request) => readFlowCookie(request, REMEMBERED_ORGANISATION_COOKIE);
 
-export const rememberCookie = (organisation: string) => buildFlowCookie(REMEMBERED_ORGANISATION_COOKIE, organisation, null);
+export const rememberedOrganisationIn = (cookieHeader: string | null) => readFlowCookieFrom(cookieHeader, REMEMBERED_ORGANISATION_COOKIE);
+
+export const rememberCookie = (organisation: string) =>
+  buildFlowCookie(REMEMBERED_ORGANISATION_COOKIE, organisation, REMEMBERED_ORGANISATION_TTL_SECONDS);
 
 export const forgetCookie = () => buildFlowCookie(REMEMBERED_ORGANISATION_COOKIE, "", 0);
 

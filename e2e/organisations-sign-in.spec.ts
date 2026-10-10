@@ -25,11 +25,11 @@ test.describe("BP-919: signing in on the platform host, e-mail first", () => {
     await expect(page.getByText(ACME.projectName).first()).toBeVisible();
     await page.screenshot({ path: "e2e/.artifacts/bp919-landed.png" });
 
-    await page.goto(`${ORGANISATIONS_PLATFORM_ORIGIN}/`);
+    await page.goto(`${ORGANISATIONS_PLATFORM_ORIGIN}/?switch`);
     await expect(page.getByRole("link", { name: "Continue to Acme" })).toHaveAttribute("href", `${originOf(ACME)}/projects`);
   });
 
-  test("BP-1002: the remembered organisation lasts the browser session only, and still leads back to it", async ({ page }) => {
+  test("BP-1009: the remembered organisation outlives the browser session, and opening the platform host leads straight to it", async ({ page }) => {
     const email = freshAddress("session");
     await giveAddress(GLOBEX, email);
 
@@ -41,10 +41,68 @@ test.describe("BP-919: signing in on the platform host, e-mail first", () => {
     const remembered = (await page.context().cookies(ORGANISATIONS_PLATFORM_ORIGIN)).filter((cookie) => cookie.name.endsWith("bp_last_organisation"));
     expect(remembered).toHaveLength(1);
     expect(remembered[0].value).toBe(String(GLOBEX.organisation));
-    expect(remembered[0].expires).toBe(-1);
+    const days = (remembered[0].expires - Date.now() / 1000) / (24 * 60 * 60);
+    expect(days).toBeGreaterThan(179);
+    expect(days).toBeLessThanOrEqual(180);
 
     await page.goto(`${ORGANISATIONS_PLATFORM_ORIGIN}/`);
-    await expect(page.getByRole("link", { name: "Continue to Globex" })).toHaveAttribute("href", `${originOf(GLOBEX)}/projects`);
+    await page.waitForURL(`${originOf(GLOBEX)}/projects`);
+    await expect(page.getByText(GLOBEX.projectName).first()).toBeVisible();
+    await page.screenshot({ path: "e2e/.artifacts/bp1009-straight-in.png" });
+  });
+
+  test("BP-1009: ?switch keeps the platform host's own page, and using another address forgets the organisation", async ({ page }) => {
+    const email = freshAddress("switch");
+    await giveAddress(GLOBEX, email);
+    await provideAddressAndCode(page, email);
+    await page.getByLabel("Password").fill(GLOBEX.password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.waitForURL(`${originOf(GLOBEX)}/projects`);
+
+    await page.goto(`${ORGANISATIONS_PLATFORM_ORIGIN}/?switch`);
+    await expect(page.getByRole("link", { name: "Continue to Globex" })).toBeVisible();
+    await page.screenshot({ path: "e2e/.artifacts/bp1009-switch.png" });
+    await page.getByRole("button", { name: "Use another e-mail address" }).click();
+    await expect(page.getByLabel("E-mail address")).toBeVisible();
+
+    await page.goto(`${ORGANISATIONS_PLATFORM_ORIGIN}/`);
+    await expect(page.getByLabel("E-mail address")).toBeVisible();
+    expect(page.url()).toBe(`${ORGANISATIONS_PLATFORM_ORIGIN}/`);
+  });
+
+  test("BP-1009: an organisation's own sign-in page leads back to the choice of organisation", async ({ page }) => {
+    const email = freshAddress("both-ways");
+    await giveAddress(GLOBEX, email);
+    await provideAddressAndCode(page, email);
+    await page.getByLabel("Password").fill(GLOBEX.password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.waitForURL(`${originOf(GLOBEX)}/projects`);
+
+    await page.context().clearCookies({ domain: new URL(originOf(ACME)).hostname });
+    await page.goto(`${originOf(ACME)}/login`);
+    const another = page.getByRole("link", { name: "Sign in to another organisation" });
+    await expect(another).toHaveAttribute("href", `${ORGANISATIONS_PLATFORM_ORIGIN}/?switch`);
+    await page.screenshot({ path: "e2e/.artifacts/bp1009-login-link.png" });
+    await another.click();
+    await expect(page.getByRole("link", { name: "Continue to Globex" })).toBeVisible();
+    expect(page.url()).toBe(`${ORGANISATIONS_PLATFORM_ORIGIN}/?switch`);
+  });
+
+  test("BP-1009: a remembered organisation that is suspended or gone does not strand the platform host", async ({ page }) => {
+    await page.context().addCookies([
+      { name: "__Host-bp_last_organisation", value: "0123456789abcdef01234567", domain: new URL(ORGANISATIONS_PLATFORM_ORIGIN).hostname, path: "/", httpOnly: true, secure: true, sameSite: "Lax" },
+    ]);
+    await page.goto(`${ORGANISATIONS_PLATFORM_ORIGIN}/`);
+    await expect(page.getByLabel("E-mail address")).toBeVisible();
+    expect(page.url()).toBe(`${ORGANISATIONS_PLATFORM_ORIGIN}/`);
+
+    await withDb((db) => db.collection("organisations").updateOne({ _id: GLOBEX.organisation }, { $set: { suspendedAt: new Date() } }));
+    await page.context().addCookies([
+      { name: "__Host-bp_last_organisation", value: String(GLOBEX.organisation), domain: new URL(ORGANISATIONS_PLATFORM_ORIGIN).hostname, path: "/", httpOnly: true, secure: true, sameSite: "Lax" },
+    ]);
+    await page.goto(`${ORGANISATIONS_PLATFORM_ORIGIN}/`);
+    await expect(page.getByLabel("E-mail address")).toBeVisible();
+    expect(page.url()).toBe(`${ORGANISATIONS_PLATFORM_ORIGIN}/`);
   });
 
   test("an address with accounts in two organisations picks one, and the other is not signed in", async ({ page }) => {
