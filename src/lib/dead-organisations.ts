@@ -15,8 +15,6 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** From the notice to the deletion */
 export const DEAD_NOTICE_DAYS = 30;
-/** How long before the deletion the administrators are reminded, once */
-export const DEAD_REMINDER_DAYS = 7;
 /** How long past its period a notice stays good, before it is given again */
 export const DEAD_STALE_DAYS = 3;
 const NOTICE_LEASE_MS = 10 * 60 * 1000;
@@ -56,12 +54,11 @@ export interface DeadFacts {
   /** The latest sign-in of any person in it, else when the first of them was made */
   lastActiveAt: Date;
   noticeAt: Date | null;
-  reminderAt: Date | null;
   suspendedAt: Date | null;
   suspendedByTheSweep: boolean;
 }
 
-export type DeadStep = "alive" | "clear" | "notice" | "remind" | "wait" | "suspend" | "delete";
+export type DeadStep = "alive" | "clear" | "notice" | "wait" | "suspend" | "delete";
 
 /** Dead is: no plan, which ended and which nobody has signed in since, for a whole period each. What to do about it follows from how far the notice has got. */
 export function deadStep(f: DeadFacts): DeadStep {
@@ -71,11 +68,7 @@ export function deadStep(f: DeadFacts): DeadStep {
   if (!f.noticeAt) return "notice";
   // A notice nothing followed for days (the sweep was off, or an operator resumed the organisation) is told again
   if (!f.suspendedAt && f.now - f.noticeAt.getTime() >= (DEAD_NOTICE_DAYS + DEAD_STALE_DAYS) * DAY_MS) return "notice";
-  const sinceNotice = f.now - f.noticeAt.getTime();
-  if (sinceNotice < DEAD_NOTICE_DAYS * DAY_MS) {
-    const reminderDue = sinceNotice >= (DEAD_NOTICE_DAYS - DEAD_REMINDER_DAYS) * DAY_MS;
-    return reminderDue && !f.reminderAt && !f.suspendedAt ? "remind" : "wait";
-  }
+  if (f.now - f.noticeAt.getTime() < DEAD_NOTICE_DAYS * DAY_MS) return "wait";
   if (!f.suspendedAt) return "suspend";
   return f.suspendedByTheSweep && settledSince(f.suspendedAt, f.now) ? "delete" : "wait";
 }
@@ -110,59 +103,33 @@ async function lastActiveOf(organisation: Types.ObjectId, madeAt: Date): Promise
   return new Date(Math.max(...times) || madeAt.getTime());
 }
 
-const dayOf = (at: Date) => at.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
-const utcDayNumber = (at: number) => Math.floor(at / DAY_MS);
-
-function timeLeft(deleteOn: Date, now: number): string {
-  if (deleteOn.getTime() - now < DAY_MS) return "less than a day";
-  const days = utcDayNumber(deleteOn.getTime()) - utcDayNumber(now);
-  return days === 1 ? "1 day" : `${days} days`;
-}
-
-export function deadOrganisationEmail(kind: "notice" | "reminder", label: string, origin: string | null, deleteOn: Date, now: number) {
-  const date = dayOf(deleteOn);
-  const deadline = `before ${date} at ${deleteOn.toISOString().slice(11, 16)} UTC`;
-  const left = timeLeft(deleteOn, now);
-  const { html, text } = renderEmail({
-    preheader: `${label} will be suspended and deleted on ${date} unless somebody signs in or chooses a plan ${deadline}.`,
-    kicker: kind === "notice" ? "Your organisation" : `Reminder: ${left} left`,
-    heading: `${label} will be deleted on ${date}`,
-    intro: [
-      kind === "notice"
-        ? `Nobody has used this ${APP_NAME} organisation for a long while, and it has no plan.`
-        : `We wrote earlier that nobody had used this ${APP_NAME} organisation for a long while. Nobody has since, and it still has no plan. Time left: ${left}.`,
-      `Signing in, or choosing a plan, ${deadline} cancels the deletion.`,
-      "To keep a copy of everything in it, download the export from Settings → Export.",
-    ],
-    alert: {
-      tone: "warning",
-      lines: [`On ${date} the organisation is suspended, and it is deleted with everything in it soon after. Nobody can sign in to a suspended organisation.`],
-    },
-    rows: [
-      { label: "Organisation", value: label },
-      { label: "Suspended and deleted", value: date },
-    ],
-    button: origin ? { label: `Sign in to ${APP_NAME}`, url: `${origin}/login` } : undefined,
-    secondaryButton: origin ? { label: "Download the export", url: `${origin}/settings/export` } : undefined,
-    footer: ["Sent to the administrators of an organisation with no plan and no recent use. This notice cannot be turned off."],
-  });
-  const subject = kind === "notice" ? `${label} will be suspended and deleted on ${date}` : `Reminder: ${label} will be suspended and deleted on ${date}`;
-  return { subject, html, text };
-}
-
-async function mailAdmins(
-  kind: "notice" | "reminder",
-  organisation: Types.ObjectId,
-  name: string,
-  slug: string | undefined,
-  deleteOn: Date,
-  now: number
-): Promise<number> {
+async function sendNotice(organisation: Types.ObjectId, name: string, slug: string | undefined, deleteAfter: Date): Promise<number> {
   const to = await adminAddresses(organisation);
-  const mail = deadOrganisationEmail(kind, name || slug || "Your organisation", await organisationOrigin(organisation), deleteOn, now);
+  const origin = await organisationOrigin(organisation);
+  const label = name || slug || "Your organisation";
+  const date = deleteAfter.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
   let sent = 0;
   for (const address of to) {
-    if (await sendEmail({ to: address, ...mail })) sent += 1;
+    const { html, text } = renderEmail({
+      preheader: `${label} will be suspended and deleted on ${date} unless somebody uses it.`,
+      kicker: "Your organisation",
+      heading: `${label} will be deleted`,
+      intro: [
+        `Nobody has used this ${APP_NAME} organisation for a long while, and it has no plan.`,
+        "Settings → Export downloads everything in it. Signing in, or choosing a plan, cancels the deletion.",
+      ],
+      alert: {
+        tone: "warning",
+        lines: [`On ${date} the organisation is suspended, and it is deleted with everything in it soon after. Nobody can sign in to a suspended organisation.`],
+      },
+      rows: [
+        { label: "Organisation", value: label },
+        { label: "Suspended and deleted", value: date },
+      ],
+      button: origin ? { label: `Sign in to ${APP_NAME}`, url: `${origin}/login` } : undefined,
+      footer: ["Sent to the administrators of an organisation with no plan and no recent use. This notice cannot be turned off."],
+    });
+    if (await sendEmail({ to: address, subject: `${label} will be suspended and deleted on ${date}`, text, html })) sent += 1;
   }
   return sent;
 }
@@ -170,7 +137,6 @@ async function mailAdmins(
 export interface SweepSummary {
   looked: number;
   noticed: number;
-  reminded: number;
   cleared: number;
   suspended: number;
   deleted: number;
@@ -185,16 +151,16 @@ async function finishDeletion(row: { _id: Types.ObjectId; slug?: string }, summa
 }
 
 /**
- * One pass, run daily. Per organisation: tell its administrators, give them 30 days, remind them a week
- * before the end, and only then suspend and delete it. Signing in, or a plan, at any point before the
- * deletion cancels it. The default organisation and an operator's own suspension are never touched.
+ * One pass, run daily. Per organisation: tell its administrators, give them 30 days, and only then
+ * suspend and delete it. Signing in, or a plan, at any point before the deletion cancels it. The default
+ * organisation and an operator's own suspension are never touched.
  */
 export async function sweepDeadOrganisations(now: number = Date.now(), days: number = deadOrganisationDays()): Promise<SweepSummary> {
-  const summary: SweepSummary = { looked: 0, noticed: 0, reminded: 0, cleared: 0, suspended: 0, deleted: 0 };
+  const summary: SweepSummary = { looked: 0, noticed: 0, cleared: 0, suspended: 0, deleted: 0 };
   if (days <= 0 || !organisationDomain()) return summary;
   await connectDB();
   const rows = await Organisation.find({ _id: { $ne: DEFAULT_ORGANISATION_ID }, deletedAt: null })
-    .select("name slug licenceKey suspendedAt suspendedReason deadNoticeAt deadReminderAt deletingAt")
+    .select("name slug licenceKey suspendedAt suspendedReason deadNoticeAt deletingAt")
     .lean();
   for (const row of rows) {
     summary.looked += 1;
@@ -224,7 +190,6 @@ export async function sweepDeadOrganisations(now: number = Date.now(), days: num
         endedAt,
         lastActiveAt: await lastActiveOf(row._id, madeAt),
         noticeAt,
-        reminderAt: row.deadReminderAt ?? null,
         suspendedAt: row.suspendedAt ?? null,
         suspendedByTheSweep: byTheSweep,
       });
@@ -240,36 +205,18 @@ export async function sweepDeadOrganisations(now: number = Date.now(), days: num
         if (taken.modifiedCount !== 1) continue;
         let sent = 0;
         try {
-          sent = await mailAdmins("notice", row._id, row.name, row.slug, new Date(now + DEAD_NOTICE_DAYS * DAY_MS), now);
+          sent = await sendNotice(row._id, row.name, row.slug, new Date(now + DEAD_NOTICE_DAYS * DAY_MS));
         } finally {
           await Organisation.updateOne(
             { _id: row._id },
-            sent > 0 ? { $set: { deadNoticeAt: new Date(now), deadReminderAt: null, deadNoticeClaimedAt: null } } : { $set: { deadNoticeClaimedAt: null } }
+            sent > 0 ? { $set: { deadNoticeAt: new Date(now), deadNoticeClaimedAt: null } } : { $set: { deadNoticeClaimedAt: null } }
           );
         }
         if (sent === 0) continue;
         await logPlatformAudit({ action: "organisation_dead_noticed", keyId: SWEEP_KEY, subject: row._id, detail: `${row.slug ?? ""}: ${sent} administrator(s) told` });
         summary.noticed += 1;
-      } else if (step === "remind" && noticeAt) {
-        if (!isEmailConfigured()) continue;
-        // Recorded before it is sent, so a process that dies mid-send leaves a reminder that never went out rather than one that goes out twice
-        const remindedAt = new Date(now);
-        const taken = await Organisation.updateOne(
-          { _id: row._id, deadNoticeAt: noticeAt, deadReminderAt: null, suspendedAt: null },
-          { $set: { deadReminderAt: remindedAt } }
-        );
-        if (taken.modifiedCount !== 1) continue;
-        let sent = 0;
-        try {
-          sent = await mailAdmins("reminder", row._id, row.name, row.slug, new Date(noticeAt.getTime() + DEAD_NOTICE_DAYS * DAY_MS), now);
-        } finally {
-          if (sent === 0) await Organisation.updateOne({ _id: row._id, deadReminderAt: remindedAt }, { $set: { deadReminderAt: null } });
-        }
-        if (sent === 0) continue;
-        await logPlatformAudit({ action: "organisation_dead_reminded", keyId: SWEEP_KEY, subject: row._id, detail: `${row.slug ?? ""}: ${sent} administrator(s) reminded` });
-        summary.reminded += 1;
       } else if (step === "clear") {
-        await Organisation.updateOne({ _id: row._id }, { $set: { deadNoticeAt: null, deadReminderAt: null } });
+        await Organisation.updateOne({ _id: row._id }, { $set: { deadNoticeAt: null } });
         if (byTheSweep) await setSuspended(row._id, false);
         await logPlatformAudit({ action: "organisation_dead_cleared", keyId: SWEEP_KEY, subject: row._id, detail: row.slug ?? "" });
         summary.cleared += 1;

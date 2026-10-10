@@ -162,15 +162,6 @@ AI_DAILY_PERCENT=         # one UTC day may use at most AI_DAILY_PERCENT (20) of
                           # 429 naming the number and the renewal. An organisation's own key is counted, never
                           # refused. Each person is also held to 20 AI Assist generations per 15 minutes (BP-323)
 PM_MODEL=                 # Optional — PM agent model (default: openai/gpt-6-luna)
-MANAGED_AI_MODELS=        # Optional — the models the platform's key runs for an organisation with no key of its own
-                          # (keySource "managed"): comma-separated OpenRouter ids, or prefixes ending in *; default
-                          # OpenAI's own models (^openai/, not gpt-oss). Any other is refused with 403
-                          # model_not_managed before the provider is called, for the PM agent and AI Assist alike
-                          # (src/lib/managed-models.ts), the board review and the needs-human-review queue included.
-                          # No :variant ever runs there (:online is a third party's web search). An own key runs
-                          # any model. Read only with ORGANISATION_DOMAIN: there a malformed entry stops the app, and
-                          # an entry beyond OpenAI's own models warns that the DPA's sub-processor list must be
-                          # updated first; a default PM model off the list is a warning too (BP-1001)
 PM_MAX_TOKENS=            # Optional — PM agent max output tokens per call (default: 8192)
 PM_SCHEDULER_TICK_MS=     # Optional — PM autonomy scheduler tick (default: 300000)
 WEBHOOK_SIGNING_SECRET=   # Optional — HMACs outgoing webhook deliveries (x-boardplanner-signature)
@@ -322,11 +313,10 @@ LEGAL_TERMS_VERSION=      # Optional, with ORGANISATION_DOMAIN only — the date
                           # (src/lib/legal-terms.ts, BP-939)
 DEAD_ORGANISATION_DAYS=   # Optional — an organisation with no plan, whose plan ended that many days ago and where
                           # nobody has used it (a sign-in, a session, an API token, a worker, a connected app) for as
-                          # long, is mailed to its administrators, reminded 7 days before the end, suspended 30 days
-                          # after the notice and deleted after it; use or a plan at any point before the delete
-                          # cancels it, and an operator's resume voids the notice. Default 60 with ORGANISATION_DOMAIN
-                          # set, nothing without; 0 is off, anything under 30 is refused (src/lib/dead-organisations.ts,
-                          # BP-674, BP-999)
+                          # long, is mailed to its administrators, suspended 30 days later and deleted after it; use
+                          # or a plan at any point before the delete cancels it, and an operator's resume voids the
+                          # notice. Default 60 with ORGANISATION_DOMAIN set, nothing without; 0 is off, anything
+                          # under 30 is refused (src/lib/dead-organisations.ts, BP-674)
 APP_ORIGIN=               # Comma-separated origins allowed to write — the CSRF allowlist, together
                           # with PUBLIC_ORIGIN, whenever a request carries no Sec-Fetch-Site (BP-361)
 TRUSTED_PROXY_HOPS=       # Proxies appending to X-Forwarded-For in front of the app; default 0,

@@ -4,8 +4,6 @@ import { withAdmin } from "@/lib/middleware";
 import { getSettings } from "@/models/settings";
 import { pmAvailability } from "@/lib/pm/config";
 import { DEFAULT_PM_MODEL } from "@/lib/pm/openrouter";
-import { describeManagedModels, managedModelsFromEnv } from "@/lib/managed-models";
-import { organisationDomain } from "@/lib/organisation-host";
 
 export const GET = withAdmin(async (_request, { db }) => {
   await connectDB();
@@ -21,10 +19,6 @@ export const GET = withAdmin(async (_request, { db }) => {
     pmNeedsPlan: availability?.needsPlan ?? false,
     pmKeyUnreadable: availability?.keyUnreadable ?? false,
     pmLocked: availability?.locked ?? false,
-    managedModels:
-      organisationDomain() === null
-        ? null
-        : { onPlatformKey: !settings.openrouterKey, allowed: managedModelsFromEnv(), description: describeManagedModels() },
     defaults: {
       pmDefaultModel: settings.pmDefaultModel || "",
       envModel: DEFAULT_PM_MODEL(),

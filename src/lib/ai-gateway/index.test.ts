@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const m = vi.hoisted(() => ({
   resolveModelKey: vi.fn(),
@@ -21,22 +21,16 @@ const { gatewayAssist, gatewayChat, openGate, UnmanagedModelRefused } = await im
 const db = { organisation: "org" } as never;
 const NOT_CONFIGURED = { error: "AI is not configured", status: 501 };
 const USAGE = { promptTokens: 9, completionTokens: 1, totalTokens: 10, cachedPromptTokens: 0, cacheWriteTokens: 0 };
-const CHAT = { model: "m/x", messages: [], tools: [] };
+const CHAT = { model: "openai/x", messages: [], tools: [] };
 const CONTEXT = { source: "pm" as const, projectId: "p1", userId: "u1" };
 
 beforeEach(() => {
   Object.values(m).forEach((fn) => fn.mockReset());
-  // The operator's list, so the fixtures' model may run on the platform's key; BP-1001 below tests the default
-  process.env.MANAGED_AI_MODELS = "m/x,openai/gpt-6-luna";
   m.resolveModelKey.mockResolvedValue({ ok: true, key: "sk-ours", source: "managed" });
   m.checkBudget.mockResolvedValue({ refusal: null, counter: "month" });
   m.counterKindOf.mockResolvedValue("month");
   m.recordUsage.mockResolvedValue(undefined);
   m.getOrganisation.mockResolvedValue({ aiLockedAt: null, aiLockedReason: "" });
-});
-
-afterAll(() => {
-  delete process.env.MANAGED_AI_MODELS;
 });
 
 // BP-679 / BP-680 / BP-681: the one door to a model
@@ -151,8 +145,8 @@ describe("gatewayChat", () => {
     const completion = await gatewayChat(db, CONTEXT, CHAT);
 
     expect(completion).toMatchObject({ type: "text" });
-    expect(m.chatCompletion).toHaveBeenCalledWith({ ...CHAT, apiKey: "sk-ours", provider: { data_collection: "deny" } });
-    expect(m.recordUsage).toHaveBeenCalledWith(db, { source: "pm", projectId: "p1", userId: "u1", keySource: "managed", model: "m/x", usage: USAGE }, "month");
+    expect(m.chatCompletion).toHaveBeenCalledWith({ ...CHAT, apiKey: "sk-ours", provider: { data_collection: "deny", only: ["openai"] } });
+    expect(m.recordUsage).toHaveBeenCalledWith(db, { source: "pm", projectId: "p1", userId: "u1", keySource: "managed", model: "openai/x", usage: USAGE }, "month");
   });
 
   it("holds the platform's key to the providers the sub-processor list names, and leaves any other key to its own settings", async () => {
@@ -249,18 +243,18 @@ describe("gatewayAssist", () => {
   const ASSIST = { source: "assist" as const, projectId: "p1", userId: "u1" };
 
   it("hands the call the key and records what it reported", async () => {
-    const result = await gatewayAssist(db, ASSIST, gate, "m/x", async (key, report) => {
+    const result = await gatewayAssist(db, ASSIST, gate, "openai/x", async (key, report) => {
       report(USAGE);
       return `made with ${key}`;
     });
 
     expect(result).toBe("made with sk-ours");
-    expect(m.recordUsage).toHaveBeenCalledWith(db, { source: "assist", projectId: "p1", userId: "u1", keySource: "managed", model: "m/x", usage: USAGE }, "month");
+    expect(m.recordUsage).toHaveBeenCalledWith(db, { source: "assist", projectId: "p1", userId: "u1", keySource: "managed", model: "openai/x", usage: USAGE }, "month");
   });
 
   it("still records a generation that was answered and then failed, because it was billed, and rethrows", async () => {
     await expect(
-      gatewayAssist(db, ASSIST, gate, "m/x", async (_key, report) => {
+      gatewayAssist(db, ASSIST, gate, "openai/x", async (_key, report) => {
         report(USAGE);
         throw new Error("the answer was not JSON");
       })
@@ -270,7 +264,7 @@ describe("gatewayAssist", () => {
   });
 
   it("records nothing for a call that failed before the provider answered", async () => {
-    await expect(gatewayAssist(db, ASSIST, gate, "m/x", async () => Promise.reject(new Error("no route to host")))).rejects.toThrow("no route");
+    await expect(gatewayAssist(db, ASSIST, gate, "openai/x", async () => Promise.reject(new Error("no route to host")))).rejects.toThrow("no route");
 
     expect(m.recordUsage).not.toHaveBeenCalled();
   });
@@ -282,7 +276,6 @@ describe("models on the platform's key", () => {
   const managed = { ok: true as const, key: "sk-ours", keySource: "managed" as const, counter: "month" as const };
 
   beforeEach(() => {
-    delete process.env.MANAGED_AI_MODELS;
     m.chatCompletion.mockResolvedValue({ type: "text", content: "hi", usage: USAGE });
   });
 
@@ -337,15 +330,5 @@ describe("models on the platform's key", () => {
 
   it("runs any AI Assist model on an organisation's own key", async () => {
     expect(await gatewayAssist(db, ASSIST, { ...managed, keySource: "own" }, "anthropic/claude-haiku", async () => "made")).toBe("made");
-  });
-
-  it("follows the operator's list where one is set", async () => {
-    process.env.MANAGED_AI_MODELS = "anthropic/claude-*";
-
-    expect(await gatewayChat(db, CONTEXT, { ...CHAT, model: "anthropic/claude-haiku" })).toMatchObject({ type: "text" });
-    expect(await gatewayChat(db, CONTEXT, { ...CHAT, model: "openai/gpt-6-luna" })).toMatchObject({
-      type: "error",
-      error: expect.stringMatching(/Choose one of: anthropic\/claude-\*, or add/),
-    });
   });
 });

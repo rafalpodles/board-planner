@@ -11,7 +11,6 @@ export const PLATFORM_AUDIT_ACTIONS = [
   "organisation_deleted",
   "organisation_exported",
   "organisation_dead_noticed",
-  "organisation_dead_reminded",
   "organisation_dead_cleared",
   "ai_allowance_set",
   "ai_allowance_cleared",

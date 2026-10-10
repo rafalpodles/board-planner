@@ -10,19 +10,18 @@ import { GLOBEX, ORGANISATIONS_API, PLATFORM_HOST, SHARED_KEY, originOf, seedTwo
 test.skip(!RUN_ORGANISATIONS_SERVER, "needs the ORGANISATION_DOMAIN server — set E2E_ORGANISATIONS_SERVER=1");
 
 /**
- * BP-1001. The platform's key runs only the models the operator allows on it (MANAGED_AI_MODELS, set for this server in
- * playwright.config.ts); any other is refused before anything reaches the provider. An organisation's own key runs any.
+ * BP-1001. The platform's key runs only OpenAI's own models; any other is refused before anything reaches the provider.
+ * An organisation's own key runs any.
  * GLOBEX is Pro, so it is on the platform's key until it stores its own.
  */
 
 const OWN_KEY = "sk-or-globex-own-e2e-0123456789";
 const ASSIST_MODEL = "anthropic/claude-haiku";
 const PM_MODEL = "openai/gpt-oss-120b";
-const ALLOWED = "e2e/stub-model, openai/gpt-4o-mini";
+const ALLOWED = "OpenAI's own models (openai/…, not gpt-oss)";
 const refusal = (model: string) =>
   `The model ${model} is not available on Board Planner's AI key. Choose one of: ${ALLOWED}, or add your organisation's own OpenRouter key in Settings → AI key.`;
 const SCRIPTED = `a task <<${JSON.stringify({ title: "From the stub", description: "d", category: "bug", acceptanceCriteria: "" })}>>`;
-const SHOTS = "e2e/.artifacts/bp1001";
 
 async function makePro(request: APIRequestContext, who: OrganisationFixture) {
   const path = `/api/platform/organisations/${who.organisation.toHexString()}/licence`;
@@ -105,34 +104,9 @@ test("on the platform's key a model off the list is refused with the models that
   expect((await stub("/last-authorization")).authorization).toBeNull();
   expect((await stub("/last-assist-authorization")).authorization).toBeNull();
 
-  await test.step("Settings → Agents shows both models as refused, at desktop and phone width", async () => {
-    await page.goto(`${originOf(GLOBEX)}/settings/agents`);
-    const assistNote = page.getByTestId("ai-model-managed");
-    await expect(assistNote).toHaveText(
-      `⚠${ASSIST_MODEL} is not available on Board Planner's AI key, so it will be refused. Choose one of: ${ALLOWED}, or add your organisation's own OpenRouter key.`
-    );
-    await expect(page.getByTestId(`pm-model-refused-${SHARED_KEY}`)).toHaveText("Not available on Board Planner's AI key");
-    // Blank here, so the projects that name no model fall back to PM_MODEL, which this server's list leaves out
-    await expect(page.getByTestId("pm-model-managed")).toHaveText(/^⚠openai\/gpt-6-luna is not available on Board Planner's AI key, so it will be refused\./);
-    await page.screenshot({ path: `${SHOTS}/agents-refused-desktop.png` });
-    await page.getByTestId(`pm-model-refused-${SHARED_KEY}`).scrollIntoViewIfNeeded();
-    await page.screenshot({ path: `${SHOTS}/agents-refused-desktop-row.png` });
-
-    await page.setViewportSize({ width: 375, height: 812 });
-    await page.reload();
-    await expect(assistNote).toBeVisible();
-    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
-    await assistNote.scrollIntoViewIfNeeded();
-    await page.screenshot({ path: `${SHOTS}/agents-refused-phone.png` });
-    await page.getByTestId(`pm-model-refused-${SHARED_KEY}`).scrollIntoViewIfNeeded();
-    await page.screenshot({ path: `${SHOTS}/agents-refused-phone-row.png` });
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await page.reload();
-  });
-
   await test.step("control: choosing a model on the list there runs AI Assist on the platform's key", async () => {
+    await page.goto(`${originOf(GLOBEX)}/settings/agents`);
     await page.getByLabel("Model", { exact: true }).fill("gpt-4o-mini");
-    await expect(page.getByTestId("ai-model-managed")).toHaveText(`On Board Planner's AI key: ${ALLOWED}. Any OpenRouter model works with your organisation's own key.`);
     const saved = page.waitForResponse((r) => r.request().method() === "PUT" && r.url().endsWith("/api/settings"));
     await page.getByRole("button", { name: "Save model" }).click();
     expect((await saved).status()).toBe(200);
@@ -164,8 +138,4 @@ test("the same models run on the organisation's own key", async ({ page }) => {
   await expect(page.getByText("Done.", { exact: true })).toHaveCount(1);
   expect((await stub("/last-authorization")).authorization).toBe(`Bearer ${OWN_KEY}`);
   expect((await stub("/requests")).map((sent: { model?: string }) => sent.model)).toEqual([PM_MODEL]);
-
-  await page.goto(`${originOf(GLOBEX)}/settings/agents`);
-  await expect(page.getByTestId("ai-model-managed")).toHaveText("Your organisation's own OpenRouter key is in use, so any OpenRouter model works.");
-  await expect(page.getByTestId(`pm-model-refused-${SHARED_KEY}`)).toHaveCount(0);
 });

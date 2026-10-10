@@ -455,8 +455,6 @@ export default defineConfig({
               LEGAL_SELLER_ADDRESS: "1 Example Street, 00-001 Warsaw, Poland",
               // Run on demand by /api/e2e/member-sync: a tick in the background would add asks to every spec that counts them
               MEMBER_SYNC_TICK_MS: "0",
-              // The operator's list, so the seeded stub model runs on the platform's key and any other is refused (BP-1001)
-              MANAGED_AI_MODELS: "e2e/stub-model,openai/gpt-4o-mini",
               // Off every organisation's host, as login.board-planner.com is (BP-895)
               OIDC_RELAY_ORIGIN: ORGANISATIONS_RELAY_ORIGIN,
               NEXT_DIST_DIR: ".next-organisations",

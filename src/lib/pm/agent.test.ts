@@ -5,6 +5,7 @@ const changeStatusExecute = vi.fn();
 const assignTaskExecute = vi.fn();
 const addCommentExecute = vi.fn();
 const resolveModelKey = vi.hoisted(() => vi.fn());
+const resolvePmModel = vi.hoisted(() => vi.fn(async () => "test/model"));
 
 const PROJECT = {
   _id: "69a52e3b399b27d3cbb2c5a5",
@@ -73,7 +74,7 @@ vi.mock("@/lib/model-keys", async (importOriginal) => ({
 vi.mock("./availability", () => ({
   isPmRunnable: () => true,
   pmDisabledReason: () => "",
-  resolvePmModel: async () => "test/model",
+  resolvePmModel,
 }));
 // A function, not a constant: BP-321's withholding is about which MCP tools a turn is offered, and
 // a mock that always answers "none" can only ever prove the empty case.
@@ -211,9 +212,9 @@ describe("runPmTurn's AI allowance", () => {
     checkBudget.mockResolvedValueOnce({ refusal: null, counter: "month" }).mockResolvedValueOnce({ refusal: null, counter: "month" }).mockResolvedValue({ refusal: { scope: "day", used: 3_000_000, limit: 3_000_000, resetsAt: new Date("2026-10-10T00:00:00Z") }, counter: "month" });
     chatCompletion.mockResolvedValueOnce(toolCall("add_comment", { taskKey: "BP-1", body: "answer" }));
     createdMessages.length = 0;
-    process.env.MANAGED_AI_MODELS = PROJECT.pm.model;
+    resolvePmModel.mockResolvedValueOnce("openai/test-model");
 
-    const result = await turn(NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS).finally(() => delete process.env.MANAGED_AI_MODELS);
+    const result = await turn(NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS);
 
     expect(chatCompletion).toHaveBeenCalledTimes(1);
     expect(result).toMatchObject({ ok: false, message: { content: expect.stringMatching(/paused for today/) } });
