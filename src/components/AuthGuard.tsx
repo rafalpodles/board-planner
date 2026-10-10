@@ -5,7 +5,6 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/Button";
 import { OrganisationSuspended } from "@/components/OrganisationSuspended";
-import { TermsChangedBanner } from "@/components/legal/TermsChangedBanner";
 
 // Backed off rather than a fixed interval: /api/auth/me can take seconds to fail during an outage,
 // and a fixed 10 s left three requests in flight at once on a tab nobody was watching
@@ -16,7 +15,6 @@ export function StatusBanners() {
   const { outage, requestLimit } = useAuth();
   return (
     <div role="status" className="shrink-0" data-testid="status-banners">
-      <TermsChangedBanner />
       {outage && (
         <div className="px-4 py-2 text-center text-sm bg-warning/15 text-text border-b border-border">
           This instance is having trouble reaching its database. You are still signed in; what you

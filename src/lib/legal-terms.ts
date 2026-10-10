@@ -63,8 +63,3 @@ export function checkTermsAccepted(acceptTerms: unknown, now = new Date()): { ok
   if (acceptTerms !== true) return { ok: false, error: TERMS_REFUSAL };
   return { ok: true, fields: { termsAcceptedVersion: version, termsAcceptedAt: now } };
 }
-
-export function termsChangeUnseen(user: { kind?: string; termsAcceptedVersion?: string | null; termsNotifiedVersion?: string | null }): boolean {
-  const version = legalTermsVersion();
-  return version !== null && user.kind !== "machine" && user.termsAcceptedVersion !== version && user.termsNotifiedVersion !== version;
-}

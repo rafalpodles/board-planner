@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/Input";
 import { APP_NAME } from "@/lib/brand";
 import { latinFold } from "@/lib/identifiers";
 import { useLegalTerms } from "@/hooks/use-legal-terms";
-import { TermsCheckbox, termsUnknown } from "@/components/legal/TermsCheckbox";
+import { TermsCheckbox } from "@/components/legal/TermsCheckbox";
 
 interface Organisation {
   id: string;
@@ -57,7 +57,7 @@ export function PlatformSignIn() {
   const [fullName, setFullName] = useState("");
   const [username, setUsername] = useState("");
   const [acceptTerms, setAcceptTerms] = useState(false);
-  const legal = useLegalTerms();
+  const terms = useLegalTerms();
 
   useEffect(() => {
     let live = true;
@@ -328,8 +328,8 @@ export function PlatformSignIn() {
             <Input label="Your name" value={fullName} maxLength={80} onChange={(e) => setFullName(e.target.value)} autoComplete="name" required />
             <Input label="Username" value={username} maxLength={32} onChange={(e) => setUsername(e.target.value.toLowerCase())} autoComplete="username" required />
             <Input label="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" required />
-            <TermsCheckbox legal={legal} checked={acceptTerms} onChange={setAcceptTerms} />
-            <Button type="submit" className="w-full" disabled={busy || termsUnknown(legal)}>
+            <TermsCheckbox terms={terms} checked={acceptTerms} onChange={setAcceptTerms} />
+            <Button type="submit" className="w-full" disabled={busy || terms === undefined}>
               {busy ? "Creating…" : "Create the organisation"}
             </Button>
             <button

@@ -102,7 +102,7 @@ describe("useAuthProvider — telling an outage from a signed-out session", () =
   it("clears the outage as soon as the instance answers again", async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(jsonResponse(503, { error: "down" }))
-      .mockImplementation(async () => jsonResponse(200, USER));
+      .mockResolvedValue(jsonResponse(200, USER));
 
     await renderSettled();
     expect(screen.getByTestId("outage").textContent).toBe("true");
@@ -319,30 +319,3 @@ describe("useAuthProvider — what the rest of the app reports back", () => {
   });
 });
 
-
-// BP-939: the sign-in answer is the bare account, so the terms notice and the rest of /api/auth/me were missing until a reload
-describe("useAuthProvider — after a password sign-in", () => {
-  beforeEach(() => {
-    attempt = { username: "owner", password: "pw" };
-    vi.stubGlobal("fetch", vi.fn());
-  });
-  afterEach(() => {
-    cleanup();
-    vi.unstubAllGlobals();
-  });
-
-  it("reads the account again from /api/auth/me", async () => {
-    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse(401, { error: "Unauthorized" }));
-    await renderSettled();
-    vi.mocked(fetch)
-      .mockResolvedValueOnce(jsonResponse(200, USER))
-      .mockResolvedValueOnce(jsonResponse(200, { ...USER, username: "owner-as-me-says" }));
-
-    await act(async () => {
-      screen.getByText("sign in").click();
-    });
-
-    await waitFor(() => expect(screen.getByTestId("user").textContent).toBe("owner-as-me-says"));
-    expect(vi.mocked(fetch).mock.calls.map(([url]) => url)).toEqual(["/api/auth/me", "/api/auth/login", "/api/auth/me"]);
-  });
-});

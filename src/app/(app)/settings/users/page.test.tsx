@@ -4,9 +4,8 @@ import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";
 import { render, screen, cleanup, act, waitFor, within, fireEvent } from "@testing-library/react";
 import UsersPage from "./page";
 
-const { api, auth, toast, dismiss, passwordSignIn, legalTerms } = vi.hoisted(() => ({
+const { api, auth, toast, dismiss, passwordSignIn } = vi.hoisted(() => ({
   passwordSignIn: { value: true as boolean | null },
-  legalTerms: { value: null as null | { version: string; terms: string; privacy: string; termsPl: string; privacyPl: string } },
   api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), del: vi.fn() },
   auth: { user: { _id: "u1", username: "owner" }, isAdmin: true, isLoading: false },
   toast: vi.fn(),
@@ -14,7 +13,6 @@ const { api, auth, toast, dismiss, passwordSignIn, legalTerms } = vi.hoisted(() 
 }));
 
 vi.mock("@/hooks/use-password-sign-in", () => ({ usePasswordSignIn: () => passwordSignIn.value }));
-vi.mock("@/hooks/use-legal-terms", () => ({ useLegalTerms: () => ({ terms: legalTerms.value, failed: false, retry: vi.fn() }) }));
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/hooks/use-auth", () => ({ useAuth: () => auth }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
@@ -37,7 +35,6 @@ const otherGet = (path: string) =>
 beforeEach(() => {
   vi.clearAllMocks();
   passwordSignIn.value = true;
-  legalTerms.value = null;
   toast.mockClear();
   api.get.mockImplementation((path: string) =>
     path === "/api/users" ? Promise.resolve([OTHER]) : otherGet(path)
@@ -561,46 +558,5 @@ describe("who the list shows, and how they sign in (BP-831)", () => {
     expect(screen.getByText("Ada")).toBeTruthy();
     expect(screen.getByText("Grace")).toBeTruthy();
     expect(screen.queryByText("Linus")).toBeNull();
-  });
-});
-
-describe("each person's accepted terms (BP-939)", () => {
-  const TERMS = { version: "2026-10-15", terms: "t", privacy: "p", termsPl: "tp", privacyPl: "pp" };
-
-  it("names the version and day each person accepted, and the change each has seen", async () => {
-    legalTerms.value = TERMS;
-    api.get.mockImplementation((path: string) =>
-      path === "/api/users"
-        ? Promise.resolve([
-            { ...OTHER, termsAcceptedVersion: "2026-10-15", termsAcceptedAt: "2026-10-20T10:00:00.000Z" },
-            {
-              ...OTHER,
-              _id: "u3",
-              username: "bob",
-              fullName: "Bob",
-              termsAcceptedVersion: "2026-01-01",
-              termsAcceptedAt: "2026-01-05T10:00:00.000Z",
-              termsNotifiedVersion: "2026-10-15",
-              termsNotifiedAt: "2026-10-21T10:00:00.000Z",
-            },
-            { ...OTHER, _id: "u4", username: "cy", fullName: "Cy" },
-          ])
-        : otherGet(path)
-    );
-
-    render(<UsersPage />);
-    await screen.findByText("Ada");
-
-    const lines = screen.getAllByTestId("user-terms").map((p) => p.textContent);
-    expect(lines[0]).toMatch(/^Terms 2026-10-15 accepted [^·]*2026$/);
-    expect(lines[1]).toMatch(/^Terms 2026-01-01 accepted .*2026 · change of 2026-10-15 seen .*2026$/);
-    expect(lines[2]).toBe("Terms not accepted");
-  });
-
-  it("says nothing about terms where none are published", async () => {
-    render(<UsersPage />);
-    await screen.findByText("Ada");
-
-    expect(screen.queryByTestId("user-terms")).toBeNull();
   });
 });

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, act, within } from "@testing-library/react";
+import { render, screen, cleanup, act } from "@testing-library/react";
 import { AuthGuard } from "@/components/AuthGuard";
 import type { AuthState, RequestLimit } from "@/hooks/use-auth";
 import type { ApiUser } from "@/types";
@@ -60,80 +60,6 @@ describe("AuthGuard", () => {
   afterEach(() => {
     cleanup();
     vi.useRealTimers();
-  });
-
-  describe("the terms banner (BP-939)", () => {
-    const TERMS = {
-      version: "2026-12-01",
-      terms: "https://board-planner.com/legal/terms",
-      privacy: "https://board-planner.com/legal/privacy",
-      termsPl: "https://board-planner.com/legal/terms/pl",
-      privacyPl: "https://board-planner.com/legal/privacy/pl",
-    };
-    const DISMISS = "Dismiss the notice of the terms";
-    const message = () => screen.getByTestId("terms-changed-message").textContent;
-    afterEach(() => vi.unstubAllGlobals());
-
-    it("tells a person who accepted an older version that they changed, and blocks nothing", () => {
-      auth.user = { ...SIGNED_IN, termsAcceptedVersion: "2026-10-15", termsChanged: TERMS };
-
-      renderGuard();
-
-      expect(screen.getByTestId("app")).toBeTruthy();
-      expect(message()).toMatch(/^The Terms of Service and Privacy Policy changed on .*2026\. Read them \(Polski\)\.$/);
-      const banner = screen.getByTestId("terms-changed");
-      expect(within(banner).getByRole("link", { name: "Read them" }).getAttribute("href")).toBe(TERMS.terms);
-      expect(within(banner).getByRole("link", { name: "Polski" }).getAttribute("href")).toBe(TERMS.termsPl);
-    });
-
-    it("tells a person who never accepted any version, as one an admin made, that the terms apply to their use", () => {
-      auth.user = { ...SIGNED_IN, termsChanged: TERMS };
-
-      renderGuard();
-
-      expect(screen.getByTestId("app")).toBeTruthy();
-      expect(message()).toBe("Board Planner's Terms of Service and Privacy Policy apply to your use of it. Read them (Polski).");
-    });
-
-    it("records the shown version as seen when dismissed, then reads the account again", async () => {
-      const fetchMock = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
-      vi.stubGlobal("fetch", fetchMock);
-      auth.user = { ...SIGNED_IN, termsChanged: TERMS };
-      auth.refreshUser.mockImplementation(async () => {
-        auth.user = SIGNED_IN;
-      });
-
-      renderGuard();
-      await act(async () => screen.getByRole("button", { name: DISMISS }).click());
-
-      expect(fetchMock).toHaveBeenCalledWith("/api/users/me/terms", expect.objectContaining({ method: "POST", body: JSON.stringify({ version: "2026-12-01" }) }));
-      expect(auth.refreshUser).toHaveBeenCalled();
-      expect(screen.queryByTestId("terms-changed")).toBeNull();
-      expect(screen.getByTestId("app")).toBeTruthy();
-    });
-
-    it.each([
-      ["a refusal", () => Promise.resolve(new Response("{}", { status: 409 }))],
-      ["no answer at all", () => Promise.reject(new TypeError("offline"))],
-    ])("stays up and says so when dismissing meets %s", async (_, answer) => {
-      vi.stubGlobal("fetch", vi.fn().mockImplementation(answer));
-      auth.user = { ...SIGNED_IN, termsChanged: TERMS };
-
-      renderGuard();
-      await act(async () => screen.getByRole("button", { name: DISMISS }).click());
-
-      expect(screen.getByTestId("terms-changed")).toBeTruthy();
-      expect(screen.getByTestId("terms-changed-error").textContent).toBe("Could not hide this notice. Try again.");
-      expect(auth.refreshUser).not.toHaveBeenCalled();
-    });
-
-    it("says nothing when no notice is pending", () => {
-      auth.user = SIGNED_IN;
-
-      renderGuard();
-
-      expect(screen.queryByTestId("terms-changed")).toBeNull();
-    });
   });
 
   it("renders the app for a signed-in user", () => {

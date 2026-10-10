@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { APP_NAME } from "@/lib/brand";
 import { useLegalTerms } from "@/hooks/use-legal-terms";
-import { TermsCheckbox, termsUnknown } from "@/components/legal/TermsCheckbox";
+import { TermsCheckbox } from "@/components/legal/TermsCheckbox";
 
 interface Held {
   email: string;
@@ -25,7 +25,7 @@ function SsoSignUp() {
   const [fullName, setFullName] = useState("");
   const [error, setError] = useState("");
   const [acceptTerms, setAcceptTerms] = useState(false);
-  const legal = useLegalTerms();
+  const terms = useLegalTerms();
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -105,13 +105,13 @@ function SsoSignUp() {
           onChange={(e) => setFullName(e.target.value)}
           required
         />
-        <TermsCheckbox legal={legal} checked={acceptTerms} onChange={setAcceptTerms} />
+        <TermsCheckbox terms={terms} checked={acceptTerms} onChange={setAcceptTerms} />
         {error && (
           <p role="alert" className="text-sm text-danger">
             {error}
           </p>
         )}
-        <Button type="submit" className="w-full" disabled={saving || termsUnknown(legal)}>
+        <Button type="submit" className="w-full" disabled={saving || terms === undefined}>
           {saving ? "Creating your account…" : "Create my account"}
         </Button>
       </form>

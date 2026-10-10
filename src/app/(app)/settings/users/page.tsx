@@ -19,9 +19,6 @@ import { SignUpDomains } from "@/components/settings/SignUpDomains";
 import { generatePassword } from "@/lib/password-generator";
 import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";
 import { timeAgo } from "@/lib/time";
-import { useLegalTerms } from "@/hooks/use-legal-terms";
-
-const acceptedOn = (at: string) => new Date(at).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -37,7 +34,6 @@ const STATUS_FILTERS: [StatusFilter, string][] = [
 export default function UsersPage() {
   const { user: currentUser, isAdmin, isLoading: authLoading } = useAuth();
   const router = useRouter();
-  const { terms } = useLegalTerms();
   const [users, setUsers] = useState<ApiUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNew, setShowNew] = useState(false);
@@ -437,16 +433,6 @@ export default function UsersPage() {
                   {" · "}
                   {u.signInMethods && u.signInMethods.length > 0 ? u.signInMethods.join(", ") : "No way to sign in"}
                 </p>
-                {terms && (
-                  <p className="text-xs text-text-muted" data-testid="user-terms">
-                    {u.termsAcceptedVersion && u.termsAcceptedAt
-                      ? `Terms ${u.termsAcceptedVersion} accepted ${acceptedOn(u.termsAcceptedAt)}`
-                      : "Terms not accepted"}
-                    {u.termsNotifiedVersion && u.termsNotifiedAt && u.termsNotifiedVersion !== u.termsAcceptedVersion
-                      ? ` · change of ${u.termsNotifiedVersion} seen ${acceptedOn(u.termsNotifiedAt)}`
-                      : ""}
-                  </p>
-                )}
               </div>
             </div>
           </Card>

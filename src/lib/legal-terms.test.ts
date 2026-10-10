@@ -5,7 +5,6 @@ import {
   checkTermsAccepted,
   legalTerms,
   legalTermsWarning,
-  termsChangeUnseen,
 } from "./legal-terms";
 
 const VERSION = "2026-10-15";
@@ -77,30 +76,5 @@ describe("checkTermsAccepted (BP-939)", () => {
     vi.stubEnv("LEGAL_TERMS_VERSION", VERSION);
     expect(checkTermsAccepted(undefined)).toEqual({ ok: true, fields: {} });
     expect(checkTermsAccepted(true)).toEqual({ ok: true, fields: {} });
-  });
-});
-
-describe("termsChangeUnseen (BP-939)", () => {
-  it("tells a person who neither accepted nor saw the current version", () => {
-    cloud();
-    expect(termsChangeUnseen({ kind: "human" })).toBe(true);
-    expect(termsChangeUnseen({ kind: "human", termsAcceptedVersion: "2026-01-01" })).toBe(true);
-    expect(termsChangeUnseen({ kind: "human", termsAcceptedVersion: "2026-01-01", termsNotifiedVersion: "2026-05-01" })).toBe(true);
-  });
-
-  it("is quiet once the current version was accepted, or its change seen", () => {
-    cloud();
-    expect(termsChangeUnseen({ kind: "human", termsAcceptedVersion: VERSION })).toBe(false);
-    expect(termsChangeUnseen({ kind: "human", termsAcceptedVersion: "2026-01-01", termsNotifiedVersion: VERSION })).toBe(false);
-  });
-
-  it("never tells a machine", () => {
-    cloud();
-    expect(termsChangeUnseen({ kind: "machine" })).toBe(false);
-  });
-
-  it("tells nobody while the gate is off", () => {
-    vi.stubEnv("LEGAL_TERMS_VERSION", VERSION);
-    expect(termsChangeUnseen({ kind: "human" })).toBe(false);
   });
 });

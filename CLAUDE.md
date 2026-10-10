@@ -318,13 +318,9 @@ LEGAL_TERMS_VERSION=      # Optional, with ORGANISATION_DOMAIN only — the date
                           # Set, every account made in the cloud — organisation sign-up, an invitation, the
                           # SSO join and invitation pages — needs `acceptTerms: true` (400 without), and the
                           # version and time are stored on the user and, at sign-up, on the organisation with
-                          # its creator. A new version is never re-accepted (a changed template binds a
-                          # continuing contract once notified, art. 384¹ k.c., Terms § 19.3): a person who has
-                          # neither accepted nor seen it gets a dismissible banner, and × records it as seen
-                          # (termsNotifiedVersion/At, POST /api/users/me/terms). Nothing blocks a session, OAuth
-                          # or a machine credential. Bump it only for a material change. Unset,
-                          # or without ORGANISATION_DOMAIN, no terms are shown; a malformed date stops the
-                          # app at boot (src/lib/legal-terms.ts, BP-939)
+                          # its creator. Bump it only for a material change. Unset, or without
+                          # ORGANISATION_DOMAIN, no terms are shown; a malformed date stops the app at boot
+                          # (src/lib/legal-terms.ts, BP-939)
 DEAD_ORGANISATION_DAYS=   # Optional — an organisation with no plan, whose plan ended that many days ago and where
                           # nobody has used it (a sign-in, a session, an API token, a worker, a connected app) for as
                           # long, is mailed to its administrators, reminded 7 days before the end, suspended 30 days

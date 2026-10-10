@@ -10,7 +10,7 @@ const { auth, fetchMock, passwordSignIn, legalTerms } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/hooks/use-password-sign-in", () => ({ usePasswordSignIn: () => passwordSignIn.value }));
-vi.mock("@/hooks/use-legal-terms", () => ({ useLegalTerms: () => ({ terms: legalTerms.value, failed: false, retry: vi.fn() }) }));
+vi.mock("@/hooks/use-legal-terms", () => ({ useLegalTerms: () => legalTerms.value }));
 vi.mock("@/hooks/use-auth", () => ({ useAuth: () => auth }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),

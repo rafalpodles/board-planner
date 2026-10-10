@@ -120,19 +120,6 @@ export default function OrganisationSettingsPage() {
               <dd className="tabular-nums" data-testid="organisation-projects">{organisation.projects}</dd>
             </>
           )}
-          {organisation.termsAcceptance && (
-            <>
-              <dt className="text-text-muted">Terms</dt>
-              <dd className="min-w-0 break-words" data-testid="organisation-terms">
-                {organisation.termsAcceptance.version}, accepted
-                {organisation.termsAcceptance.at &&
-                  ` ${new Date(organisation.termsAcceptance.at).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}`}
-                {organisation.termsAcceptance.by &&
-                  ` by ${organisation.termsAcceptance.by.fullName} (@${organisation.termsAcceptance.by.username})`}{" "}
-                at sign-up
-              </dd>
-            </>
-          )}
         </dl>
       </section>
 

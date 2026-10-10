@@ -3,7 +3,6 @@ import { getAuthUser } from "@/lib/auth";
 import { ProvenanceError } from "@/lib/session";
 import { isDatabaseUnreachable } from "@/lib/db-errors";
 import { databaseUnavailable, refusedOnThisHost } from "@/lib/middleware";
-import { legalTerms, termsChangeUnseen } from "@/lib/legal-terms";
 
 export async function GET(request: Request) {
   let user;
@@ -35,10 +34,5 @@ export async function GET(request: Request) {
     collapseEmptyColumns: user.collapseEmptyColumns ?? true,
     role: user.role || "member",
     createdAt: user.createdAt,
-    termsAcceptedVersion: user.termsAcceptedVersion,
-    termsAcceptedAt: user.termsAcceptedAt,
-    termsNotifiedVersion: user.termsNotifiedVersion,
-    termsNotifiedAt: user.termsNotifiedAt,
-    termsChanged: termsChangeUnseen(user) ? legalTerms() : null,
   });
 }
