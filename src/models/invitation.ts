@@ -34,6 +34,22 @@ invitationSchema.index(
   { unique: true, partialFilterExpression: { status: "pending" } }
 );
 
+// BP-947: an invitation is deleted 90 days after it was accepted, revoked or, still pending, expired. Revoking is
+// the last write a revoked invitation gets, so its updatedAt is when that happened
+const INVITATION_PURGE_AFTER_SECONDS = 90 * 24 * 60 * 60;
+invitationSchema.index(
+  { expiresAt: 1 },
+  { expireAfterSeconds: INVITATION_PURGE_AFTER_SECONDS, partialFilterExpression: { status: "pending" } }
+);
+invitationSchema.index(
+  { acceptedAt: 1 },
+  { expireAfterSeconds: INVITATION_PURGE_AFTER_SECONDS, partialFilterExpression: { status: "accepted" } }
+);
+invitationSchema.index(
+  { updatedAt: 1 },
+  { expireAfterSeconds: INVITATION_PURGE_AFTER_SECONDS, partialFilterExpression: { status: "revoked" } }
+);
+
 withOrganisation(invitationSchema);
 
 export const Invitation: Model<IInvitation> =
