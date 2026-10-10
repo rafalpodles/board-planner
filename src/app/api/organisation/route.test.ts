@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { getAuthUser, logInstanceAudit, getOrganisation, renameOrganisation, nameUnavailable, organisationOrigin, memberLimitOf } = vi.hoisted(() => ({
+const { getAuthUser, logInstanceAudit, getOrganisation, renameOrganisation, nameUnavailable, nameChecksSpent, organisationOrigin, memberLimitOf } = vi.hoisted(() => ({
   nameUnavailable: vi.fn(),
+  nameChecksSpent: vi.fn(),
   memberLimitOf: vi.fn(),
   getAuthUser: vi.fn(),
   logInstanceAudit: vi.fn(),
@@ -19,6 +20,7 @@ vi.mock("@/lib/organisation", async (original) => ({
   getOrganisation,
   renameOrganisation,
   nameUnavailable,
+  nameChecksSpent,
 }));
 vi.mock("@/lib/organisation-host", async (original) => ({
   ...(await original<typeof import("@/lib/organisation-host")>()),
@@ -56,6 +58,7 @@ beforeEach(() => {
   vi.spyOn(Invitation, "countDocuments").mockResolvedValue(3 as never);
   memberLimitOf.mockResolvedValue(null);
   nameUnavailable.mockResolvedValue(false);
+  nameChecksSpent.mockResolvedValue(false);
 });
 
 describe("GET /api/organisation (BP-920)", () => {
@@ -188,11 +191,24 @@ describe("PUT /api/organisation (BP-920)", () => {
     expect(logInstanceAudit).not.toHaveBeenCalled();
   });
 
+  it("answers 429 once an organisation has tried ten names in an hour, and neither looks up nor renames (BP-1010)", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+    nameChecksSpent.mockResolvedValue(true);
+
+    const res = await call(PUT, "PUT", { name: "Globex" });
+
+    expect(res.status).toBe(429);
+    expect(nameChecksSpent).toHaveBeenCalledWith(`organisation-rename:names:${DEFAULT_ORGANISATION_ID}`);
+    expect(nameUnavailable).not.toHaveBeenCalled();
+    expect(renameOrganisation).not.toHaveBeenCalled();
+  });
+
   it("does not ask when the name is the one the organisation already has (BP-1010)", async () => {
     getAuthUser.mockResolvedValue(ADMIN);
     nameUnavailable.mockResolvedValue(true);
 
     expect((await call(PUT, "PUT", { name: "Acme" })).status).toBe(200);
     expect(nameUnavailable).not.toHaveBeenCalled();
+    expect(nameChecksSpent).not.toHaveBeenCalled();
   });
 });

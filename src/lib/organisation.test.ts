@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { generateKeyPairSync } from "node:crypto";
 import { Types } from "mongoose";
 
-const { connectDB, findOneAndUpdate, findById, updateOne, countDocuments } = vi.hoisted(() => ({
+const { connectDB, findOneAndUpdate, findById, updateOne, countDocuments, countAttempt } = vi.hoisted(() => ({
+  countAttempt: vi.fn(),
   countDocuments: vi.fn(),
   connectDB: vi.fn(),
   findOneAndUpdate: vi.fn(),
@@ -11,9 +12,10 @@ const { connectDB, findOneAndUpdate, findById, updateOne, countDocuments } = vi.
 }));
 
 vi.mock("./db", () => ({ connectDB }));
+vi.mock("./rate-limit", () => ({ countAttempt }));
 vi.mock("@/models/organisation", () => ({ Organisation: { findOneAndUpdate, findById, updateOne, countDocuments } }));
 
-const { getOrganisation, licenceOf, checkOrganisationName, nameOrganisation, renameOrganisation, organisationIsNamed, nameIsReserved, nameIsTaken, nameUnavailable, ORGANISATION_NAME_MAX } = await import("./organisation");
+const { getOrganisation, licenceOf, checkOrganisationName, nameOrganisation, renameOrganisation, organisationIsNamed, nameIsReserved, nameIsTaken, nameUnavailable, nameChecksSpent, ORGANISATION_NAME_MAX } = await import("./organisation");
 const { DEFAULT_ORGANISATION_ID } = await import("./organisation-field");
 const { signLicence } = await import("./licence");
 
@@ -315,6 +317,27 @@ describe("organisation names (BP-1010)", () => {
         expect(await nameUnavailable("Globex", OTHER)).toBe(true);
         expect(await nameUnavailable("Initech", OTHER)).toBe(false);
       });
+    });
+  });
+});
+
+describe("nameChecksSpent (BP-1010)", () => {
+  it("counts nothing on a single-organisation instance, which has nobody to ask about", async () => {
+    expect(await nameChecksSpent("k")).toBe(false);
+    expect(countAttempt).not.toHaveBeenCalled();
+  });
+
+  describe("with organisations on subdomains", () => {
+    beforeEach(() => {
+      process.env.ORGANISATION_DOMAIN = "board-planner.com";
+    });
+
+    it("takes the slot first and allows ten checks an hour, the eleventh is refused", async () => {
+      countAttempt.mockResolvedValueOnce(10).mockResolvedValueOnce(11);
+
+      expect(await nameChecksSpent("organisation-sign-up:names:x")).toBe(false);
+      expect(await nameChecksSpent("organisation-sign-up:names:x")).toBe(true);
+      expect(countAttempt).toHaveBeenCalledWith("organisation-sign-up:names:x", 60 * 60 * 1000);
     });
   });
 });

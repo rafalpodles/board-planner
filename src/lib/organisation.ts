@@ -7,6 +7,7 @@ import { DEFAULT_ORGANISATION_ID } from "./organisation-field";
 import { RESERVED_SLUGS, organisationDomain } from "./organisation-host";
 import { duplicateKeyField } from "./mongo-errors";
 import { latinFold } from "./identifiers";
+import { countAttempt } from "./rate-limit";
 
 export { ORGANISATION_NAME_MAX, checkOrganisationName } from "./organisation-name";
 
@@ -27,6 +28,15 @@ export async function nameIsTaken(name: string, except?: Types.ObjectId): Promis
     strength: 1,
   });
   return count > 0;
+}
+
+const NAME_CHECKS_PER_HOUR = 10;
+
+// A taken name tells whoever tried it that an organisation has it. The slot is taken before the lookup, so a burst
+// of requests cannot share one; and only where there are other organisations to ask about
+export async function nameChecksSpent(key: string): Promise<boolean> {
+  if (organisationDomain() === null) return false;
+  return (await countAttempt(key, 60 * 60 * 1000)) > NAME_CHECKS_PER_HOUR;
 }
 
 // Only where there are other organisations to clash with, or a reserved address to pass for
