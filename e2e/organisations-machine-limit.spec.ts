@@ -12,6 +12,7 @@ import {
   ORGANISATIONS_API,
   PLATFORM_HOST,
   asOrganisation,
+  SHARED_KEY,
   originOf,
   seedTwoOrganisations,
   signInOn,
@@ -40,10 +41,16 @@ async function withDb<T>(work: (db: mongoose.mongo.Db) => Promise<T>): Promise<T
   }
 }
 
-async function makePro(request: APIRequestContext, who: OrganisationFixture) {
+async function makePro(
+  request: APIRequestContext,
+  who: OrganisationFixture,
+  licence: Parameters<typeof e2eLicence>[0] = {}
+) {
   const path = `/api/platform/organisations/${who.organisation.toHexString()}/licence`;
   const body = Buffer.from(
-    JSON.stringify({ licenceKey: e2eLicence({ customer: `${who.slug} customer`, organisation: who.organisation.toHexString() }) })
+    JSON.stringify({
+      licenceKey: e2eLicence({ customer: `${who.slug} customer`, organisation: who.organisation.toHexString(), ...licence }),
+    })
   );
   const headers = signPlatformRequest({ method: "POST", host: PLATFORM_HOST, path, body }, E2E_PLATFORM_REQUEST_KEY);
   const response = await request.post(`${ORGANISATIONS_API}${path}`, {
@@ -54,8 +61,8 @@ async function makePro(request: APIRequestContext, who: OrganisationFixture) {
 }
 
 /** A member who owns no machine, so the owner's own re-connection is not what lets them through */
-async function addMember(who: OrganisationFixture) {
-  await withDb(async (db) => {
+async function addMember(who: OrganisationFixture): Promise<mongoose.Types.ObjectId> {
+  return withDb(async (db) => {
     const now = new Date();
     const { insertedId } = await db.collection("users").insertOne({
       organisation: who.organisation,
@@ -77,6 +84,7 @@ async function addMember(who: OrganisationFixture) {
       ip: "",
       createdAt: now,
     });
+    return insertedId;
   });
 }
 
@@ -90,7 +98,7 @@ async function boardWithRepository(who: OrganisationFixture) {
 }
 
 /** The board runs machines, and both machines report a checkout of its repository, each on its own host */
-async function twoMachinesOnTheBoard(who: OrganisationFixture) {
+async function twoMachinesOnTheBoard(who: OrganisationFixture, secondOwner?: mongoose.Types.ObjectId) {
   await boardWithRepository(who);
   await withDb(async (db) => {
     const first = await db.collection("workers").findOne({ _id: who.workerId });
@@ -108,6 +116,7 @@ async function twoMachinesOnTheBoard(who: OrganisationFixture) {
       credentialHash: bcrypt.hashSync(WORKER_CREDENTIAL, 4),
       repos: [{ remote: REMOTE(who), path: "/w/rockets" }],
       enabled: true,
+      ...(secondOwner ? { owner: secondOwner } : {}),
       createdAt: new Date(),
     });
   });
@@ -192,6 +201,29 @@ test("on Free, the menubar's confirmation page says so before the click, and con
   await expect(notice.getByRole("link", { name: "Upgrade" })).toHaveAttribute("href", "/settings/organisation");
   await page.getByRole("radio").first().check();
   await expect(page.getByRole("button", { name: "Connect it" })).toBeDisabled();
+  await page.setViewportSize({ width: 390, height: 800 });
+  const box = await notice.boundingBox();
+  expect(box!.x + box!.width).toBeLessThanOrEqual(390);
+  await page.setViewportSize({ width: 1280, height: 800 });
+
+  // A disabled button is a courtesy; the route refuses on its own, before it switches the board on
+  await withDb((db) => db.collection("projects").updateOne({ _id: ACME.projectId }, { $set: { "worker.enabled": false } }));
+  const approved = await page.evaluate(
+    async ({ path, projectId }) => {
+      const res = await fetch(`/api/workers/enrolment/device/${path.split("/").pop()}/approve`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectId }),
+      });
+      return { status: res.status, body: await res.json() };
+    },
+    { path: second, projectId: String(ACME.projectId) }
+  );
+  expect(approved.status).toBe(402);
+  expect(approved.body).toMatchObject({ feature: "workers.multiple", plan: "free" });
+  expect(await withDb((db) => db.collection("workers").countDocuments({ organisation: ACME.organisation, name: "acme-laptop-2" }))).toBe(0);
+  expect((await withDb((db) => db.collection("projects").findOne({ _id: ACME.projectId })))!.worker.enabled).toBe(false);
+  await withDb((db) => db.collection("projects").updateOne({ _id: ACME.projectId }, { $set: { "worker.enabled": true } }));
 
   const same = await withDb((db) => db.collection("workers").findOne({ _id: ACME.workerId }));
   const again = await startDeviceEnrolment(request, ACME, same!.name, same!.host);
@@ -274,4 +306,143 @@ test("on Pro, every machine claims", async ({ request }) => {
   expect(await assignments(request, GLOBEX, GLOBEX.workerId)).toHaveLength(1);
   expect(await assignments(request, GLOBEX, SECOND(GLOBEX))).toHaveLength(1);
   expect((await claim(request, GLOBEX, SECOND(GLOBEX))).status()).toBe(204);
+});
+
+test("on the trial a second machine connects through the menubar's page, and when the trial ends the first connected keeps claiming", async ({ page, request }) => {
+  await boardWithRepository(ACME);
+  await withDb((db) =>
+    db.collection("workers").updateOne(
+      { _id: ACME.workerId },
+      { $set: { createdAt: new Date(Date.now() - 86_400_000), host: "acme-host-1", repos: [{ remote: REMOTE(ACME), path: "/w/rockets" }] } }
+    )
+  );
+  // Ends twenty seconds from now: a trial ends on its day, with no grace, and a lapsed key cannot be pushed
+  await makePro(request, ACME, { trial: true, expiresInDays: 20 / 86_400 });
+
+  const started = await request.post(`${ORGANISATIONS_API}/api/workers/enrolment/device`, {
+    headers: { ...asOrganisation(ACME), "x-cp-protocol": "1", "content-type": "application/json" },
+    data: { name: "acme-laptop-2", host: "acme-laptop-2.local" },
+  });
+  expect(started.status(), await started.text()).toBe(201);
+  const { deviceCode, verificationUrl } = await started.json();
+
+  await signInOn(page.context(), ACME);
+  await page.goto(`${originOf(ACME)}${new URL(verificationUrl).pathname}`);
+  await expect(page.getByRole("heading", { name: "Connect this machine?" })).toBeVisible();
+  await expect(page.getByTestId("machine-limit")).toHaveCount(0);
+  await page.getByRole("radio").first().check();
+  await page.getByRole("button", { name: "Connect it" }).click();
+  await expect(page.getByRole("heading", { name: "Connected" })).toBeVisible();
+
+  // The machine's half, as the menubar app collects its credential
+  const collected = await request.post(`${ORGANISATIONS_API}/api/workers/enrolment/device/token`, {
+    headers: { ...asOrganisation(ACME), "content-type": "application/json" },
+    data: { deviceCode },
+  });
+  expect(collected.status()).toBe(200);
+  const { workerId, credential } = await collected.json();
+  const laptop = {
+    ...asOrganisation(ACME),
+    authorization: `Bearer ${credential}`,
+    "x-worker-id": workerId,
+    "x-cp-protocol": "1",
+  };
+  const laptopAssignments = async () => {
+    const response = await request.post(`${ORGANISATIONS_API}/api/workers/${workerId}/heartbeat`, {
+      headers: laptop,
+      data: { repos: [{ remote: REMOTE(ACME), path: "/w/rockets" }] },
+    });
+    expect(response.status()).toBe(200);
+    return ((await response.json()) as { assignments: unknown[] }).assignments.length;
+  };
+
+  expect(await laptopAssignments()).toBe(1);
+  expect(await assignments(request, ACME, ACME.workerId)).toHaveLength(1);
+
+  await expect.poll(laptopAssignments, { timeout: 40_000, intervals: [2_000] }).toBe(0);
+  expect(await assignments(request, ACME, ACME.workerId)).toHaveLength(1);
+  const refused = await request.post(`${ORGANISATIONS_API}/api/projects/${ACME.projectId}/tasks/claim`, {
+    headers: laptop,
+    data: { runId: "run-laptop" },
+  });
+  expect(refused.status()).toBe(403);
+  expect(await withDb((db) => db.collection("workers").countDocuments({ organisation: ACME.organisation, enabled: true }))).toBe(2);
+
+  await page.goto(`${originOf(ACME)}/settings/machines`);
+  await expect(page.getByTestId("my-machine").filter({ hasText: "acme-laptop-2" }).getByTestId("my-machine-state")).toHaveText(
+    "Waiting: the Free plan runs one machine"
+  );
+});
+
+test("a member whose machine the Free plan holds is told so on their task, and the board's Workers section says it too", async ({ page }) => {
+  const crew = await addMember(ACME);
+  await twoMachinesOnTheBoard(ACME, crew);
+  const agentId = new mongoose.Types.ObjectId();
+  await withDb(async (db) => {
+    const now = new Date();
+    await db.collection("grants").insertOne({
+      organisation: ACME.organisation,
+      subject: crew,
+      relation: "member",
+      objectType: "project",
+      object: ACME.projectId,
+      createdBy: ACME.adminId,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.collection("agents").insertOne({
+      _id: agentId,
+      organisation: ACME.organisation,
+      name: "Acme Runner",
+      description: "",
+      scope: "project",
+      owner: null,
+      project: ACME.projectId,
+      builtIn: false,
+      composition: { analysis: [], implementation: [{ key: "implement" }], verification: [], delivery: [{ key: "push" }, { key: "pull-request" }] },
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.collection("tasks").insertOne({
+      organisation: ACME.organisation,
+      project: ACME.projectId,
+      taskNumber: 1,
+      title: "Handed to the crew's machine",
+      description: "",
+      status: "todo",
+      priority: "medium",
+      category: "user-story",
+      assignee: crew,
+      assignedBy: crew,
+      agent: agentId,
+      checklist: [],
+      linkedPRs: [],
+      blockedBy: [],
+      relations: [],
+      watchers: [],
+      sprint: null,
+      customFieldValues: {},
+      order: 0,
+      createdBy: crew,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.collection("projects").updateOne({ _id: ACME.projectId }, { $max: { taskCounter: 1 } });
+  });
+
+  await signInWithToken(page.context(), ACME, MEMBER_SESSION(ACME));
+  const readiness = page.waitForResponse((r) => r.request().method() === "GET" && r.url().endsWith("/handover"));
+  await page.goto(`${originOf(ACME)}/projects/${SHARED_KEY}/tasks/1`);
+  expect(await (await readiness).json()).toMatchObject({ machine: "held" });
+  const notice = page.getByRole("complementary").getByTestId("handover-notice");
+  await expect(notice).toHaveAttribute("data-reason", "machine-held");
+  await expect(notice).toContainText(
+    "Your machine is connected but not taking work: the Free plan runs one machine per organisation, and another one was connected first. An admin can upgrade to Pro to use it too."
+  );
+
+  await signInOn(page.context(), ACME);
+  await page.goto(`${originOf(ACME)}/projects/${SHARED_KEY}/settings?section=workers`);
+  const offering = (name: string) => page.getByTestId("offering-machine").filter({ hasText: name });
+  await expect(offering("acme-second").getByTestId("offering-machine-state")).toHaveText("waiting: the Free plan runs one machine");
+  await expect(offering("acme-machine").getByTestId("offering-machine-state")).toHaveText("live");
 });
