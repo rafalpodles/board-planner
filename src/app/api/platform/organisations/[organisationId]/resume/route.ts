@@ -11,7 +11,7 @@ export const POST = withPlatformRequest<{ organisationId: string }>(async (_requ
     return NextResponse.json({ error: "The organisation is being deleted" }, { status: 409 });
   }
   // An operator who brings an organisation back means it: whatever the dead-organisation sweep told it is void
-  await Organisation.updateOne({ _id: found.row._id }, { $set: { deadNoticeAt: null } });
+  await Organisation.updateOne({ _id: found.row._id }, { $set: { deadNoticeAt: null, deadReminderAt: null } });
   await logPlatformAudit({ action: "organisation_resumed", keyId, subject: found.row._id });
   return NextResponse.json({ suspended: false });
 }, { maxBodyBytes: 0 });
