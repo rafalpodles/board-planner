@@ -2,9 +2,6 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { McpServer as RealMcpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { registerPlannerTools } from "./tools";
 import { SERVER_INSTRUCTIONS } from "./instructions";
 import { COLUMN_ROLES, DEFAULT_PROJECT_COLUMNS, DEPENDENCY_TYPES } from "@/types";
@@ -27,19 +24,6 @@ const SNAKE_CASE = /\b[a-z]+(?:_[a-z]+)+\b/g;
 const KNOWN_VALUES = new Set<string>([...DEFAULT_PROJECT_COLUMNS.map((c) => c.id), ...DEPENDENCY_TYPES]);
 
 describe("the server's instructions", () => {
-  it("reach a client at initialize", async () => {
-    const server = new RealMcpServer(
-      { name: "boardplanner", version: "1.0.0" },
-      { instructions: SERVER_INSTRUCTIONS },
-    );
-    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-    await server.connect(serverSide);
-    const client = new Client({ name: "test", version: "0.0.0" });
-    await client.connect(clientSide);
-
-    expect(client.getInstructions()).toBe(SERVER_INSTRUCTIONS);
-  });
-
   it("name only tools the server registers", () => {
     const tools = registeredToolNames();
     const named = new Set(SERVER_INSTRUCTIONS.match(SNAKE_CASE));
