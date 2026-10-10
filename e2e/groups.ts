@@ -159,6 +159,7 @@ export const GROUPS = {
     "organisations-limits.spec.ts",
     "organisations-dead-sweep.spec.ts",
     "organisations-member-limit.spec.ts",
+    "organisations-machine-limit.spec.ts",
     "organisations-oidc-relay.spec.ts",
     "organisations-route-families.spec.ts",
     "organisations-addresses.spec.ts",
