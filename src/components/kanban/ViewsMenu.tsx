@@ -281,7 +281,7 @@ export function ViewsMenu({ projectId, projectRef, canShare, snapshot, onApply }
                       >
                         Update to current
                       </button>
-                      {canShare && (
+                      {canShare && view.mine && (
                         <button
                           type="button"
                           disabled={busy}

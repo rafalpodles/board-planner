@@ -128,12 +128,13 @@ function atomicPush(filter: Record<string, unknown>, update: { $push: { savedVie
 let beforeWrite: (() => void) | null = null;
 
 function atomicSet(
-  filter: { $and: { savedViews: never }[] },
+  filter: { $and: { savedViews: never }[]; $expr?: { $lt: never } },
   update: { $set: Record<string, unknown> },
   options: { arrayFilters: { "view._id": Id }[] }
 ) {
   beforeWrite?.();
   beforeWrite = null;
+  if (filter.$expr && !ceilingHolds(filter.$expr.$lt)) return null;
   if (!filter.$and.every((c) => savedViewsCondition(c.savedViews))) return null;
   const target = options.arrayFilters[0]["view._id"];
   for (const v of stored) {
@@ -170,10 +171,12 @@ beforeEach(() => {
   projectUpdateOne.mockImplementation(
     async (_filter: unknown, update: { $pull: { savedViews: Elem & { $or?: Elem[] } } }) => {
       const cond = update.$pull.savedViews;
+      const before = stored.length;
       stored = stored.filter((v) => {
         const hit = cond.$or ? cond.$or.some((c) => elemMatches(v, c)) : true;
         return !(sameId(v._id, cond._id) && hit && elemMatches(v, { owner: cond.owner }));
       });
+      return { modifiedCount: before === stored.length ? 0 : 1 };
     }
   );
 });
@@ -452,6 +455,26 @@ describe("PUT /views, as one write on the view's own id", () => {
     expect(stored[0].name).toBe("Mine");
   });
 
+  it("holds sharing to the shared ceiling too, and says so", async () => {
+    asOwner();
+    stored = [...Array.from({ length: MAX_SHARED_VIEWS }, (_, i) => row(`Shared ${i}`, OTHER, true)), row("Mine", ME)];
+
+    const res = await call(PUT, "PUT", { viewId: vid(MAX_SHARED_VIEWS + 1), shared: true });
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toContain(String(MAX_SHARED_VIEWS));
+    expect(stored[MAX_SHARED_VIEWS].shared).toBe(false);
+  });
+
+  it("keeps what a snapshot leaves out", async () => {
+    stored = [{ ...row("Mine", ME), viewMode: "list", sortField: "title", sprintScope: "backlog", search: "kept" }];
+
+    await call(PUT, "PUT", { viewId: vid(1), filters: { priority: "low" } });
+
+    expect(stored[0]).toMatchObject({ viewMode: "list", sortField: "title", sprintScope: "backlog", search: "kept" });
+    expect(stored[0].filters).toMatchObject({ priority: "low" });
+  });
+
   it("does not let a project owner move somebody else's shared view back to personal", async () => {
     asOwner();
     stored = [row("Team", OTHER, true)];
@@ -501,6 +524,13 @@ describe("DELETE /views", () => {
       { owner: expect.anything() },
       { shared: true },
     ]);
+  });
+
+  it("answers 404 when the pull took nothing, as it does for a view that is gone", async () => {
+    stored = [row("Mine", ME)];
+    projectUpdateOne.mockResolvedValueOnce({ modifiedCount: 0 });
+
+    expect((await call(DELETE, "DELETE", { viewId: vid(1) })).status).toBe(404);
   });
 
   it("refuses a request with no usable id", async () => {

@@ -104,6 +104,18 @@ describe("ViewsMenu", () => {
     expect(within(team).queryByRole("button", { name: "Rename" })).toBeNull();
   });
 
+  it("lets only the person who made a view share or unshare it, whoever may delete it", async () => {
+    renderMenu({ canShare: true });
+    await open([view({ _id: "v3", name: "Theirs", shared: true, canEdit: true, mine: false })]);
+    expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Stop sharing" })).toBeNull();
+    cleanup();
+
+    renderMenu({ canShare: true });
+    await open([view({ _id: "v4", name: "Mine too" })]);
+    expect(screen.getByRole("button", { name: "Share" })).toBeTruthy();
+  });
+
   describe("saving", () => {
     it("sends the whole snapshot, without the search text unless it is ticked", async () => {
       renderMenu();

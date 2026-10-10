@@ -103,7 +103,7 @@ export function parseViewState(
     (board.categories ?? []).map((c) => c.name)
   );
 
-  const liveFields = new Set((board.customFields ?? []).map((f) => f._id));
+  const liveFields = new Set((board.customFields ?? []).filter((f) => !f.archived).map((f) => f._id));
   const sortKnown = SORT_OPTIONS.some((o) => o.value === state.sortField) || liveFields.has(state.sortField);
 
   return {

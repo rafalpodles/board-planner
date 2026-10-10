@@ -186,7 +186,24 @@ export const PUT = withProjectAccess(async (request, { params, user, db }) => {
   const clash = problemWith(views, viewId, name, shared, view.owner.toString());
   if (clash) return NextResponse.json({ error: clash }, { status: 409 });
 
-  const parsed = "filters" in updates ? parseViewState(updates, board(project)) : null;
+  // A snapshot replaces the state, but what it leaves out stays as it was stored
+  const parsed =
+    "filters" in updates
+      ? parseViewState(
+          {
+            filters: view.filters,
+            search: view.search,
+            sortField: view.sortField,
+            sortDir: view.sortDir,
+            viewMode: view.viewMode,
+            groupBy: view.groupBy,
+            sprintScope: view.sprintScope,
+            hiddenColumns: view.hiddenColumns,
+            ...updates,
+          },
+          board(project)
+        )
+      : null;
   if (parsed && "error" in parsed) return NextResponse.json({ error: parsed.error }, { status: 400 });
 
   // One write keyed on the view's id, not its position: another request may add or remove views
@@ -201,9 +218,11 @@ export const PUT = withProjectAccess(async (request, { params, user, db }) => {
   if (parsed && "state" in parsed) {
     for (const [key, value] of Object.entries(parsed.state)) set[`savedViews.$[view].${key}`] = value;
   }
+  const sharing = shared && !view.shared;
   const updated = await db.Project.findOneAndUpdate(
     {
       _id: projectId,
+      ...(sharing ? { $expr: { $lt: [countWhere({ $eq: ["$$view.shared", true] }), MAX_SHARED_VIEWS] } } : {}),
       $and: [
         { savedViews: { $elemMatch: { _id: oid, owner, shared: view.shared } } },
         { savedViews: { $not: { $elemMatch: { _id: { $ne: oid }, ...namespaceOf(shared, owner), name: nameMatcher(name) } } } },
@@ -218,6 +237,9 @@ export const PUT = withProjectAccess(async (request, { params, user, db }) => {
     const now = ((current?.savedViews ?? []) as unknown as Stored[]).find((v) => v._id.toString() === viewId);
     if (!now || !mayReadView(now, userId)) return NextResponse.json({ error: "View not found" }, { status: 404 });
     const taken = problemWith((current?.savedViews ?? []) as unknown as Stored[], viewId, name, shared, view.owner.toString());
+    if (!taken && sharing && ((current?.savedViews ?? []) as unknown as Stored[]).filter((v) => v.shared).length >= MAX_SHARED_VIEWS) {
+      return NextResponse.json({ error: `A project may have at most ${MAX_SHARED_VIEWS} shared views` }, { status: 400 });
+    }
     return NextResponse.json(
       { error: taken ?? "This view was changed at the same time; try again" },
       { status: 409 }
@@ -250,7 +272,7 @@ export const DELETE = withProjectAccess(async (request, { params, user, db }) =>
   // The permission is in the pull's own condition, so a view that was un-shared or handed over
   // between the read above and this write is not taken by somebody who may no longer touch it
   const me = new Types.ObjectId(userId);
-  await db.Project.updateOne(
+  const removed = await db.Project.updateOne(
     { _id: projectId },
     {
       $pull: {
@@ -261,5 +283,6 @@ export const DELETE = withProjectAccess(async (request, { params, user, db }) =>
       },
     }
   );
+  if (removed && removed.modifiedCount === 0) return NextResponse.json({ error: "View not found" }, { status: 404 });
   return NextResponse.json({ ok: true });
 });
