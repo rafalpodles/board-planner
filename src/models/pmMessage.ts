@@ -49,6 +49,8 @@ const pmMessageSchema = new Schema<IPmMessage>(
 );
 
 pmMessageSchema.index({ project: 1, createdAt: -1 });
+// The organisation's turns in a month, for its AI usage in Settings
+pmMessageSchema.index({ organisation: 1, role: 1, createdAt: -1 });
 // Threads are read per user, newest first, with _id as the paging cursor
 pmMessageSchema.index({ project: 1, triggeredBy: 1, _id: -1 });
 
