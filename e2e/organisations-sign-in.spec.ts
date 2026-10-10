@@ -155,7 +155,7 @@ test.describe("BP-919: signing in on the platform host, e-mail first", () => {
   });
 
   test("BP-1009: forgetting the organisation is refused from another origin and off the platform host", async ({ request }) => {
-    const crossSite = await request.delete(`${ORGANISATIONS_API}/api/sign-in/remembered`, { headers: { ...onPlatform, origin: "https://evil.example" } });
+    const crossSite = await request.delete(`${ORGANISATIONS_API}/api/sign-in/remembered`, { headers: { ...onPlatform, "sec-fetch-site": "cross-site", origin: "https://evil.example" } });
     expect(crossSite.status()).toBe(403);
     expect(crossSite.headers()["set-cookie"] ?? "").not.toContain("bp_last_organisation");
     expect((await request.delete(`${ORGANISATIONS_API}/api/sign-in/remembered`, { headers: asOrganisation(ACME) })).status()).toBe(404);
