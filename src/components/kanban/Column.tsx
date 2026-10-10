@@ -197,7 +197,12 @@ export function Column({
         </div>
       </div>
 
-      <div data-column-body className="flex-1 overflow-y-auto overscroll-y-contain p-2 space-y-2">
+      <div
+        data-column-body
+        // Between rows the board is what scrolls down, so a wheel over a cell that cannot scroll
+        // any further has to reach it; a column that is the whole height keeps its own
+        className={`flex-1 overflow-y-auto p-2 space-y-2 ${lane ? "" : "overscroll-y-contain"}`}
+      >
         {tasks.map((task, i) => (
           <div key={task._id}>
             {dropIndex === i && (

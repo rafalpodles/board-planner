@@ -190,7 +190,7 @@ describe("Column in a row of the board", () => {
     expect(onTaskDrop).toHaveBeenCalledWith("t9", "needs_human_review", expect.any(Number), lane);
   });
 
-  it("takes a drop on the header, or the empty cell's caption, as a drop at the end of the cell, row and all", () => {
+  it("takes a drop on the header as a drop at the end of the cell, row and all", () => {
     const onTaskDrop = vi.fn();
     const onStatusChange = vi.fn();
     renderColumn({ lane, tasks: oneTask, onTaskDrop, onStatusChange });
@@ -198,6 +198,14 @@ describe("Column in a row of the board", () => {
 
     expect(onTaskDrop).toHaveBeenCalledWith("t9", "needs_human_review", 1, lane);
     expect(onStatusChange).not.toHaveBeenCalled();
+  });
+
+  it("takes a drop on an empty cell's caption the same way", () => {
+    const onTaskDrop = vi.fn();
+    renderColumn({ lane, tasks: [], onTaskDrop });
+    drop(screen.getByText("Drop tasks here"), "t9");
+
+    expect(onTaskDrop).toHaveBeenCalledWith("t9", "needs_human_review", 0, lane);
   });
 
   it("still takes a drop outside any row on the header as a plain status change", () => {
@@ -221,6 +229,15 @@ describe("Column in a row of the board", () => {
     const { container } = renderColumn({ lane, tasks: oneTask });
     expect(container.firstElementChild!.className).toContain("max-h-[26rem]");
     expect(container.firstElementChild!.className).not.toContain("lg:h-full");
+  });
+
+  it("lets a wheel over a cell reach the board, which is what scrolls between rows", () => {
+    const inRow = renderColumn({ lane, tasks: oneTask });
+    expect(inRow.container.querySelector("[data-column-body]")!.className).not.toContain("overscroll-y-contain");
+    cleanup();
+
+    const alone = renderColumn({ tasks: oneTask });
+    expect(alone.container.querySelector("[data-column-body]")!.className).toContain("overscroll-y-contain");
   });
 
   it("keeps the whole-height column without a row", () => {

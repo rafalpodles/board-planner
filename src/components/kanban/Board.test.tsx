@@ -639,7 +639,21 @@ describe("Board in rows", () => {
 
     cleanup();
     const alone = renderRows({ tasks: [all[0]], lanes: [lanes[0]], collapseEmptyColumns: true });
-    expect(alone.container.querySelector('[data-testid="column-done"]')!.getAttribute("aria-label")).toBe("Expand Done");
+    const rail = alone.container.querySelector('[data-testid="column-done"]')!;
+    expect(rail.getAttribute("aria-label")).toBe("Expand Done");
+    fireEvent.click(rail);
+    expect(alone.container.querySelector('[data-testid="column-done"]')!.getAttribute("role")).toBe("group");
+  });
+
+  it("folds a column that was opened back into rails once a drop lands, though the dragged card is gone and no dragend arrives", () => {
+    const { container } = renderRows({ tasks: [all[0]], lanes: [lanes[0], { key: "v:low", label: "Low", tasks: [] }], collapseEmptyColumns: true });
+    const doneCell = (lane: string) => container.querySelector(`[data-testid="column-done"][data-lane="${lane}"]`)!;
+
+    fireEvent.dragEnter(doneCell("v:urgent"));
+    expect(doneCell("v:low").getAttribute("role")).toBe("group");
+    fireEvent.drop(document);
+
+    expect(doneCell("v:low").getAttribute("role")).toBe("button");
   });
 
   it("counts in a row's header what its cells draw, leaving out a task on a column that is gone", () => {

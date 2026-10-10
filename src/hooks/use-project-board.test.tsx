@@ -753,7 +753,7 @@ describe("a drop into another row of the board", () => {
     api.get.mockImplementation((path: string) => {
       if (path.endsWith("/tasks")) return Promise.resolve(laneTasks.map((t) => ({ ...t, ...patch[t._id] })));
       if (path.endsWith("/sprints")) return Promise.resolve([]);
-      if (path.endsWith("/assignable-users")) return Promise.resolve([person("ann"), person("bob")]);
+      if (path.endsWith("/assignable-users")) return Promise.resolve([person("bob"), person("cy")]);
       return Promise.resolve(PROJECT);
     });
     probeScope = "all";
@@ -815,11 +815,17 @@ describe("a drop into another row of the board", () => {
     expect(sent()).toMatchObject({ assignee: "bob" });
     expect(find("t1").assignee).toMatchObject({ _id: "u-bob", username: "bob", fullName: "Bob Builder" });
 
-    // A person on no card of the roster but on another task is found there
+    // Somebody the roster leaves out, a machine say, is found on another task
     act(() => {
       void board.handleTaskDrop("t1", "todo", 0, lane("v:ann", "assignee"));
     });
     expect(find("t1").assignee).toMatchObject({ _id: "u-ann", fullName: "Ann Builder" });
+
+    // And, with nobody to be found, still a user object the card can be drawn with
+    act(() => {
+      void board.handleTaskDrop("t1", "todo", 0, lane("v:dan", "assignee"));
+    });
+    expect(find("t1").assignee).toMatchObject({ username: "dan" });
   });
 
   it("does nothing for a row that has no value to give, and says so, instead of moving the card to a place worked out among another row's", async () => {

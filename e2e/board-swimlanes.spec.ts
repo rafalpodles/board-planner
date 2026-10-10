@@ -341,7 +341,9 @@ test("on a phone the columns still page, the row's name stays on screen, and the
   await test.step("the rows below the first screen are reached by scrolling the board down", async () => {
     const medium = header(page, "Medium").getByRole("button");
     await expect(medium).not.toBeInViewport();
-    await medium.scrollIntoViewIfNeeded();
+    // As a person scrolls: with the wheel over the board, not by a script that scrolls any box
+    await page.mouse.move(195, 400);
+    await page.mouse.wheel(0, 400);
     await expect(medium).toBeInViewport({ ratio: 1 });
     await expect(cell(page, "v:medium", "in_review")).toBeInViewport();
   });
