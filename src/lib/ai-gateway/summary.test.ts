@@ -56,6 +56,12 @@ describe("aiUsageSummary", () => {
     expect(await aiUsageSummary(db, NOW)).toMatchObject({ scope: "month", used: 12_345, limit: null, dailyCeiling: null });
   });
 
+  it("shows no daily ceiling where the allowance has none, rather than a ceiling of nothing", async () => {
+    m.budget = { scope: "month", limit: 1_000_000, dailyCeiling: 0 };
+
+    expect(await aiUsageSummary(db, NOW)).toMatchObject({ limit: 1_000_000, dailyCeiling: null });
+  });
+
   it("reads a trial's counter where there is no limit too, which is the one the calls are added to", async () => {
     m.budget = null;
     m.trial = true;
