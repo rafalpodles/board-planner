@@ -1,14 +1,16 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, act } from "@testing-library/react";
+import { render, screen, cleanup, act, fireEvent } from "@testing-library/react";
 
-const { auth, fetchMock, passwordSignIn } = vi.hoisted(() => ({
+const { auth, fetchMock, passwordSignIn, legalTerms } = vi.hoisted(() => ({
   passwordSignIn: { value: true as boolean | null },
+  legalTerms: { value: null as null | Record<string, string> },
   auth: { user: null, isLoading: false, logout: vi.fn(), refreshUser: vi.fn() },
   fetchMock: vi.fn(),
 }));
 
 vi.mock("@/hooks/use-password-sign-in", () => ({ usePasswordSignIn: () => passwordSignIn.value }));
+vi.mock("@/hooks/use-legal-terms", () => ({ useLegalTerms: () => legalTerms.value }));
 vi.mock("@/hooks/use-auth", () => ({ useAuth: () => auth }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -28,6 +30,7 @@ const OPEN = { email: "ada@example.com", role: "member", boards: [], invitedBy: 
 beforeEach(() => {
   vi.clearAllMocks();
   passwordSignIn.value = true;
+  legalTerms.value = null;
   vi.stubGlobal("fetch", fetchMock);
 });
 afterEach(() => {
@@ -98,5 +101,49 @@ describe("the invitation page with password sign-in off (BP-830)", () => {
     expect(await screen.findByRole("button", { name: "Accept with Acme" })).toBeTruthy();
     expect(screen.queryByLabelText("Password")).toBeNull();
     expect(screen.queryByRole("button", { name: "Create my account" })).toBeNull();
+  });
+});
+
+describe("the invitation page with the cloud terms published (BP-939)", () => {
+  const TERMS = {
+    version: "2026-10-15",
+    terms: "https://board-planner.com/legal/terms",
+    privacy: "https://board-planner.com/legal/privacy",
+    termsPl: "https://board-planner.com/legal/terms/pl",
+    privacyPl: "https://board-planner.com/legal/privacy/pl",
+  };
+
+  it("offers an unticked box linking both documents, and sends what it says", async () => {
+    legalTerms.value = TERMS;
+    fetchMock.mockReturnValue(answer(200, OPEN));
+
+    render(<InvitePage />);
+
+    const box = (await screen.findByRole("checkbox")) as HTMLInputElement;
+    expect(box.checked).toBe(false);
+    expect(box.required).toBe(true);
+    expect(screen.getByRole("link", { name: "Terms of Service" }).getAttribute("href")).toBe(TERMS.terms);
+    expect(screen.getByRole("link", { name: "Privacy Policy" }).getAttribute("href")).toBe(TERMS.privacy);
+    expect(screen.getAllByRole("link", { name: "Polski" }).map((a) => a.getAttribute("href"))).toEqual([TERMS.termsPl, TERMS.privacyPl]);
+
+    fireEvent.change(screen.getByLabelText("Username"), { target: { value: "ada" } });
+    fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "Ada" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "a-long-password" } });
+    fireEvent.change(screen.getByLabelText("Confirm password"), { target: { value: "a-long-password" } });
+    fireEvent.click(box);
+    fetchMock.mockReturnValue(answer(201, { username: "ada", landing: null }));
+    await act(async () => fireEvent.submit(box.form!));
+
+    const sent = fetchMock.mock.calls.find(([url]) => url === "/api/invitations/accept");
+    expect(JSON.parse(sent![1].body)).toMatchObject({ acceptTerms: true });
+  });
+
+  it("shows no box where no terms are published", async () => {
+    fetchMock.mockReturnValue(answer(200, OPEN));
+
+    render(<InvitePage />);
+
+    expect(await screen.findByText(/Grace invited ada@example.com/)).toBeTruthy();
+    expect(screen.queryByRole("checkbox")).toBeNull();
   });
 });

@@ -5,7 +5,7 @@ import { passwordSignInEnabled, passwordSignInOff } from "@/lib/password-sign-in
 import { claimProof, endSignIn, issueHandoff, releaseProof, scopedToOrganisation, servedOrganisationById } from "@/lib/platform-sign-in";
 import { clearedSignInCookie, provenEmail, rememberCookie, signInBinder, signInRoute, startAgain } from "@/lib/platform-sign-in-route";
 import { pullNewOrganisationLicence } from "@/lib/licence-pull";
-import { SLUG_UNAVAILABLE, checkSignUp, createOrganisation, slugTaken } from "@/lib/organisation-sign-up";
+import { SLUG_UNAVAILABLE, checkSignUp, createOrganisation, slugTaken, type SignUpInput } from "@/lib/organisation-sign-up";
 import { mailboxOf } from "@/lib/mailbox";
 import { PUBLIC_MAIL_DOMAINS } from "@/lib/public-mail-domains";
 import { countAttempt, isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
@@ -31,7 +31,7 @@ export const POST = signInRoute(async (request) => {
   const email = await provenEmail(request);
   if (!email) return startAgain();
 
-  const read = await readJsonBody<{ name?: unknown; slug?: unknown; username?: unknown; fullName?: unknown; password?: unknown }>(request);
+  const read = await readJsonBody<SignUpInput>(request);
   if (!read.ok) return read.response;
   const checked = checkSignUp(email, read.value);
   if (!checked.ok) return refused(checked.error);

@@ -7,6 +7,8 @@ import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { APP_NAME } from "@/lib/brand";
+import { useLegalTerms } from "@/hooks/use-legal-terms";
+import { TermsCheckbox } from "@/components/legal/TermsCheckbox";
 import { usePasswordSignIn } from "@/hooks/use-password-sign-in";
 
 const REFUSALS: Record<string, string> = {
@@ -43,6 +45,8 @@ function SsoAcceptance() {
   const [username, setUsername] = useState("");
   const [fullName, setFullName] = useState("");
   const [error, setError] = useState("");
+  const [acceptTerms, setAcceptTerms] = useState(false);
+  const terms = useLegalTerms();
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -65,7 +69,7 @@ function SsoAcceptance() {
       const res = await fetch("/api/invitations/sso", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ username, fullName }),
+        body: JSON.stringify({ username, fullName, acceptTerms }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -118,12 +122,13 @@ function SsoAcceptance() {
           onChange={(e) => setFullName(e.target.value)}
           required
         />
+        <TermsCheckbox terms={terms} checked={acceptTerms} onChange={setAcceptTerms} />
         {error && (
           <p role="alert" className="text-sm text-danger">
             {error}
           </p>
         )}
-        <Button type="submit" className="w-full" disabled={saving}>
+        <Button type="submit" className="w-full" disabled={saving || terms === undefined}>
           {saving ? "Creating your account…" : "Create my account"}
         </Button>
       </form>

@@ -48,11 +48,14 @@ vi.mock("@/models/grant", () => ({ Grant: { findOneAndUpdate: grantUpsert } }));
 const identityDeleteMany = vi.fn();
 vi.mock("@/models/identity", () => ({ Identity: { deleteMany: identityDeleteMany, create: vi.fn() } }));
 vi.mock("bcryptjs", () => ({ default: { hash } }));
+const checkTermsAccepted = vi.fn();
+vi.mock("@/lib/legal-terms", async (original) => ({ ...(await original<object>()), checkTermsAccepted }));
 
 const { POST } = await import("./route");
 const { resetRateLimits } = await import("@/lib/rate-limit");
 const { INVITATION_REFUSALS } = await import("@/lib/invitation-refusals");
 const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
+const legalTerms = await vi.importActual<typeof import("@/lib/legal-terms")>("@/lib/legal-terms");
 
 const INVITATION = {
   _id: "inv-1",
@@ -82,6 +85,7 @@ beforeEach(async () => {
   recordAcceptance.mockResolvedValue(true);
   userDeleteOne.mockResolvedValue({});
   createSession.mockResolvedValue({ token: "cps_new", absoluteExpiresAt: new Date() });
+  checkTermsAccepted.mockImplementation(legalTerms.checkTermsAccepted);
 });
 
 describe("POST /api/invitations/accept", () => {
@@ -248,6 +252,33 @@ describe("POST /api/invitations/accept", () => {
     expect((await POST(post({ ...FIELDS, password: "short" }))).status).toBe(400);
 
     expect((await POST(post())).status).toBe(429);
+  });
+});
+
+describe("with the cloud terms published (BP-939)", () => {
+  const at = new Date("2026-10-20T10:00:00Z");
+  beforeEach(() => {
+    checkTermsAccepted.mockImplementation((value: unknown) =>
+      value === true
+        ? { ok: true, fields: { termsAcceptedVersion: "2026-10-15", termsAcceptedAt: at } }
+        : { ok: false, error: legalTerms.TERMS_REFUSAL }
+    );
+  });
+
+  it("refuses an invitee who did not accept them, before the link is spent", async () => {
+    const res = await POST(post());
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe(legalTerms.TERMS_REFUSAL);
+    expect(checkTermsAccepted).toHaveBeenCalledWith(undefined);
+    expect(claimInvitation).not.toHaveBeenCalled();
+    expect(userCreate).not.toHaveBeenCalled();
+  });
+
+  it("stores the accepted version on the account", async () => {
+    expect((await POST(post({ ...FIELDS, acceptTerms: true }))).status).toBe(201);
+
+    expect(userCreate.mock.calls[0][0]).toMatchObject({ termsAcceptedVersion: "2026-10-15", termsAcceptedAt: at });
   });
 });
 

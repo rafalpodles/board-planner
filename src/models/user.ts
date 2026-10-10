@@ -65,6 +65,9 @@ const userSchema = new Schema<IUser>({
     type: Date,
     default: null,
   },
+  // The LEGAL_TERMS_VERSION this person accepted, and when; absent where no terms were ever shown (BP-939)
+  termsAcceptedVersion: { type: String },
+  termsAcceptedAt: { type: Date },
   // Superseded by `notifications` below. Still read for accounts that predate the grid, which is
   // why nothing migrates them: this field IS their stored preference until they save the screen.
   emailNotifications: {

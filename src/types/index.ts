@@ -149,6 +149,8 @@ export interface IUser {
   emailVouchedByAdmin?: boolean;
   deactivatedAt?: Date | null;
   lastSignInAt?: Date | null;
+  termsAcceptedVersion?: string;
+  termsAcceptedAt?: Date;
   /** @deprecated Superseded by `notifications`. Kept as the fallback for accounts that predate it. */
   emailNotifications: boolean;
   emailDigest: boolean;
@@ -1218,6 +1220,14 @@ export interface IComment {
 }
 
 // API response types (serialized, no ObjectId)
+export interface LegalTerms {
+  version: string;
+  terms: string;
+  privacy: string;
+  termsPl: string;
+  privacyPl: string;
+}
+
 export interface ApiUser {
   _id: string;
   username: string;

@@ -21,6 +21,7 @@ import { applyAdminGroup } from "@/lib/oidc/admin-group";
 import { providerById } from "@/lib/oidc/providers";
 import { signUpOpenTo } from "@/lib/sign-up-domains";
 import { refusedHost } from "@/lib/middleware";
+import { checkTermsAccepted } from "@/lib/legal-terms";
 
 const ATTEMPTS_PER_SOURCE = 20;
 const EXPIRED = "That sign-in has expired. Sign in again.";
@@ -60,10 +61,12 @@ export async function POST(request: Request) {
   const held = await heldSignUp(db, binder);
   if (!binder || !held?.claims) return NextResponse.json({ error: EXPIRED }, { status: 400 });
 
-  const read = await readJsonBody<{ username?: unknown; fullName?: unknown }>(request);
+  const read = await readJsonBody<{ username?: unknown; fullName?: unknown; acceptTerms?: unknown }>(request);
   if (!read.ok) return read.response;
   const checked = checkProfile(read.value);
   if (!checked.ok) return NextResponse.json({ error: checked.error }, { status: 400 });
+  const terms = checkTermsAccepted(read.value.acceptTerms);
+  if (!terms.ok) return NextResponse.json({ error: terms.error }, { status: 400 });
 
   // Read again now: the list, or the provider, may have changed since the callback held this
   const provider = providerById(held.provider);
@@ -81,6 +84,7 @@ export async function POST(request: Request) {
       email: held.claims.email,
       emailVerifiedAt: new Date(),
       role: "member",
+      ...terms.fields,
     });
   } catch (err) {
     const conflict = duplicateKeyField(err);

@@ -313,6 +313,14 @@ ORGANISATION_REQUESTS_PER_MINUTE= # Optional — authenticated requests one orga
                           # with ORGANISATION_DOMAIN set, off without; 0 is off (BP-894)
 ORGANISATION_STORAGE_MB=  # Optional — uploaded files one organisation may keep; past it an upload is
                           # 413. Default 5120 with ORGANISATION_DOMAIN set, off without; 0 is off
+LEGAL_TERMS_VERSION=      # Optional, with ORGANISATION_DOMAIN only — the date (YYYY-MM-DD) the cloud's Terms of
+                          # Service and Privacy Policy (board-planner.com/legal/terms, /legal/privacy) took effect.
+                          # Set, every account made in the cloud — organisation sign-up, an invitation, the
+                          # SSO join and invitation pages — needs `acceptTerms: true` (400 without), and the
+                          # version and time are stored on the user and, at sign-up, on the organisation with
+                          # its creator. Bump it only for a material change. Unset, or without
+                          # ORGANISATION_DOMAIN, no terms are shown; a malformed date stops the app at boot
+                          # (src/lib/legal-terms.ts, BP-939)
 DEAD_ORGANISATION_DAYS=   # Optional — an organisation with no plan, whose plan ended that many days ago and where
                           # nobody has used it (a sign-in, a session, an API token, a worker, a connected app) for as
                           # long, is mailed to its administrators, reminded 7 days before the end, suspended 30 days

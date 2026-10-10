@@ -27,9 +27,13 @@ vi.mock("@/lib/invitation-acceptance", () => ({ completeAcceptance }));
 vi.mock("@/lib/invitation-view", () => ({ toApiInvitations: vi.fn() }));
 vi.mock("@/models/invitation", () => ({ Invitation: { findOne: vi.fn() } }));
 
+const checkTermsAccepted = vi.fn();
+vi.mock("@/lib/legal-terms", async (original) => ({ ...(await original<object>()), checkTermsAccepted }));
+
 const { POST } = await import("./route");
 const { resetRateLimits } = await import("@/lib/rate-limit");
 const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
+const legalTerms = await vi.importActual<typeof import("@/lib/legal-terms")>("@/lib/legal-terms");
 
 const HELD = {
   provider: "oidc",
@@ -49,6 +53,7 @@ beforeEach(async () => {
   claimInvitationByHash.mockResolvedValue({ ok: true, invitation: { _id: "inv-1", email: "ada@example.com" } });
   completeAcceptance.mockResolvedValue(new Response(JSON.stringify({ username: "ada" }), { status: 201 }));
   providerById.mockReturnValue({ label: "Acme", linksByAddress: true });
+  checkTermsAccepted.mockImplementation(legalTerms.checkTermsAccepted);
 });
 
 describe("POST /api/invitations/sso", () => {
@@ -65,6 +70,7 @@ describe("POST /api/invitations/sso", () => {
       identity: { provider: "oidc", issuer: "https://id.example.com", subject: "s9", email: "ada@example.com" },
       providerProvesAddress: true,
       groups: [],
+      terms: {},
     });
     expect(spendAcceptance).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "cpo_held");
     expect(res.headers.get("set-cookie")).toContain("bp_oidc_accept=");
@@ -132,5 +138,30 @@ describe("POST /api/invitations/sso with no client address", () => {
     for (let i = 0; i < 450; i++) await post();
 
     expect((await post()).status).toBe(400);
+  });
+});
+
+describe("with the cloud terms published (BP-939)", () => {
+  const at = new Date("2026-10-20T10:00:00Z");
+  beforeEach(() => {
+    checkTermsAccepted.mockImplementation((value: unknown) =>
+      value === true
+        ? { ok: true, fields: { termsAcceptedVersion: "2026-10-15", termsAcceptedAt: at } }
+        : { ok: false, error: legalTerms.TERMS_REFUSAL }
+    );
+  });
+
+  it("refuses a sign-up that did not accept them, and spends nothing", async () => {
+    const res = await post();
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe(legalTerms.TERMS_REFUSAL);
+    expect(claimInvitationByHash).not.toHaveBeenCalled();
+  });
+
+  it("passes the accepted version on to the account", async () => {
+    expect((await post({ ...{ username: "Ada", fullName: "Ada Lovelace" }, acceptTerms: true })).status).toBe(201);
+
+    expect(completeAcceptance.mock.calls[0][2].terms).toMatchObject({ termsAcceptedVersion: "2026-10-15", termsAcceptedAt: at });
   });
 });

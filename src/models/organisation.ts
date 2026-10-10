@@ -40,6 +40,10 @@ export interface IOrganisation {
   // The operator's own figure for what this organisation may spend of the operator's key, in place of its plan's, for the
   // counter it was set on (a trial's, or the month's); tokens null is no limit at all (BP-678)
   aiAllowance?: { tokens: number | null; scope: "trial" | "month" } | null;
+  // Accepted by the person who created the organisation at sign-up (BP-939)
+  termsAcceptedVersion?: string;
+  termsAcceptedAt?: Date;
+  termsAcceptedBy?: mongoose.Types.ObjectId;
 }
 
 const entitlementsSchema = new Schema<IOrganisationEntitlements>(
@@ -75,6 +79,9 @@ const organisationSchema = new Schema<IOrganisation>({
     type: new Schema({ tokens: { type: Number, min: 1, default: null }, scope: { type: String, enum: ["trial", "month"], required: true } }, { _id: false }),
     default: null,
   },
+  termsAcceptedVersion: { type: String },
+  termsAcceptedAt: { type: Date },
+  termsAcceptedBy: { type: Schema.Types.ObjectId },
   memberSync: { type: new Schema({ members: { type: Number, required: true, min: 0 }, at: { type: Date, required: true } }, { _id: false }), default: null },
   entitlements: {
     type: entitlementsSchema,
