@@ -91,7 +91,8 @@ export function PlatformSignIn() {
 
   const forget = () =>
     void run(async () => {
-      await send("/api/sign-in/remembered", "DELETE");
+      const { ok, data } = await send("/api/sign-in/remembered", "DELETE");
+      if (!ok) return setError(data.error ?? "Could not forget the organisation. Try again.");
       setForgotten(true);
     });
 

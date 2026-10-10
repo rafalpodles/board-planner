@@ -154,6 +154,13 @@ test.describe("BP-919: signing in on the platform host, e-mail first", () => {
     expect(page.url()).toBe(`${ORGANISATIONS_PLATFORM_ORIGIN}/`);
   });
 
+  test("BP-1009: forgetting the organisation is refused from another origin and off the platform host", async ({ request }) => {
+    const crossSite = await request.delete(`${ORGANISATIONS_API}/api/sign-in/remembered`, { headers: { ...onPlatform, origin: "https://evil.example" } });
+    expect(crossSite.status()).toBe(403);
+    expect(crossSite.headers()["set-cookie"] ?? "").not.toContain("bp_last_organisation");
+    expect((await request.delete(`${ORGANISATIONS_API}/api/sign-in/remembered`, { headers: asOrganisation(ACME) })).status()).toBe(404);
+  });
+
   test("BP-1009: a remembered organisation that is suspended or gone does not strand the platform host", async ({ page }) => {
     await page.context().addCookies([
       { name: "__Host-bp_last_organisation", value: "0123456789abcdef01234567", domain: new URL(ORGANISATIONS_PLATFORM_ORIGIN).hostname, path: "/", httpOnly: true, secure: true, sameSite: "Lax" },
