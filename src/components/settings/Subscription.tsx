@@ -258,11 +258,6 @@ export function Subscription() {
               Terms
             </a>
           </p>
-          {billing.seller && (
-            <p className="text-sm" data-testid="subscription-seller">
-              Seller: {billing.seller.name}, {billing.seller.address}
-            </p>
-          )}
           <label className="flex cursor-pointer items-start gap-3 text-sm" data-testid="subscription-consent">
             <input type="checkbox" className="mt-1" required checked={consented} onChange={(event) => setConsented(event.target.checked)} disabled={busy !== null || confirming} />
             <span>{IMMEDIATE_START_CONSENT}</span>
