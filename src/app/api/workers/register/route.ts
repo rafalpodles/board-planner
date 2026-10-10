@@ -15,7 +15,9 @@ import {
   consumeEnrolmentToken,
   enrolmentTokenOwner,
   enrolmentTokenOwnerId,
+  releaseEnrolmentToken,
 } from "@/lib/enrolment";
+import { machineLimitRefusal } from "@/lib/machine-limit";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { scopedForRequest } from "@/lib/db-scope";
 
@@ -67,6 +69,14 @@ export async function POST(request: Request) {
     // One message for every failure: telling a caller whether a token was real but spent, or never
     // existed, turns this into an oracle for guessing.
     return NextResponse.json({ error: "Invalid or spent enrolment token" }, { status: 401 });
+  }
+
+  // After the token, never before: refusing first would tell a caller holding nothing whether this
+  // name and host already exist. Handed back, so the same file works once the organisation upgrades.
+  const overLimit = await machineLimitRefusal(db, { machine: { name, host } });
+  if (overLimit) {
+    await releaseEnrolmentToken(db, consumed.tokenId);
+    return overLimit;
   }
 
   // The same refusal the browser flow makes: a machine that already belongs to somebody else is

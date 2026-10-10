@@ -11,6 +11,8 @@ import { GETTING_THE_SOFTWARE_URL } from "@/lib/docs-urls";
 import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";
 import { timeAgo } from "@/lib/time";
 import type { ApiMyMachine } from "@/types";
+import { HELD_BY_PLAN } from "@/lib/machine-limit-copy";
+import { UpgradeLink } from "@/components/settings/UpgradeLink";
 
 const POLL_MS = 15_000;
 
@@ -28,6 +30,8 @@ function describeState(machine: ApiMyMachine): { text: string; tone: string } {
       };
     case "stale":
       return { text: "Not reporting", tone: "text-danger" };
+    case "held":
+      return { text: "Waiting: the Free plan runs one machine", tone: "text-warning" };
     case "disabled":
       return { text: "Switched off by an instance admin", tone: "text-danger" };
     case "paused":
@@ -141,6 +145,11 @@ export default function MachinesPage() {
                 >
                   Choose projects
                 </Link>
+                {machine.state === "held" && (
+                  <p data-testid="my-machine-held" className="basis-full text-xs text-text-muted">
+                    {HELD_BY_PLAN} <UpgradeLink />
+                  </p>
+                )}
               </li>
             );
           })}

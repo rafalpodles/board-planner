@@ -7,6 +7,7 @@ import { projectRepositoryUrl } from "@/lib/repository";
 import { isWorkerLockedByInstance } from "@/lib/worker-gate";
 import { machineReadinessFor } from "@/lib/worker-service";
 import type { ApiHandoverReadiness } from "@/types";
+import { claimingMachineIds } from "@/lib/machine-limit";
 
 /**
  * What the task screen needs to say why a hand-over will not run, beyond the task itself: the
@@ -17,17 +18,18 @@ export const GET = withProjectAccess(async (_request, { params, user, db }) => {
   const { projectId } = await params;
   await connectDB();
 
-  const [project, workers, canAdmin] = await Promise.all([
+  const [project, workers, canAdmin, claiming] = await Promise.all([
     db.Project.findById(projectId, "repositoryUrl githubRepo gitlabRepo worker columns").lean(),
     db.Worker.find(
       { owner: user._id },
-      "enabled lastSeenAt repos preflight command commandIssuedAt commandAckedAt bindingError halt"
+      "enabled owner lastSeenAt repos preflight command commandIssuedAt commandAckedAt bindingError halt"
     ).lean(),
     check(db, user, projectId, "admin"),
+    claimingMachineIds(db),
   ]);
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
-  const machine = machineReadinessFor(workers, project);
+  const machine = machineReadinessFor(workers, project, new Date(), claiming);
   const body: ApiHandoverReadiness = {
     canAdmin,
     repositoryUrl: projectRepositoryUrl(project),

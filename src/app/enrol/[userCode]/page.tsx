@@ -8,6 +8,7 @@ import { useToast } from "@/components/ui/Toast";
 import { AuthGuard } from "@/components/AuthGuard";
 import { Button } from "@/components/ui/Button";
 import { APP_NAME } from "@/lib/brand";
+import { UpgradeLink } from "@/components/settings/UpgradeLink";
 
 interface EnrolProject {
   _id: string;
@@ -27,6 +28,8 @@ interface EnrolmentView {
   expiresAt: string;
   projects: EnrolProject[];
   existingWorker: { mine: boolean } | null;
+  /** Why connecting would pass the Free plan's machine limit; null when there is room */
+  machineLimit?: string | null;
 }
 
 // A machine sent you here, so the page carries no sidebar, no search and no chat: nothing inviting
@@ -173,6 +176,15 @@ function Enrol({ params }: { params: Promise<{ userCode: string }> }) {
           </div>
         )}
 
+        {enrolment.machineLimit && (
+          <div
+            data-testid="machine-limit"
+            className="mt-6 rounded-lg border border-danger/40 bg-danger/10 p-4 text-sm text-text"
+          >
+            {enrolment.machineLimit} <UpgradeLink />
+          </div>
+        )}
+
         <section className="mt-8">
           <h2 className="text-sm font-medium text-text">Which repository should it set up first?</h2>
           {/* Where a scope list would be, so it is read as one: this pick is a first checkout, and
@@ -234,7 +246,7 @@ function Enrol({ params }: { params: Promise<{ userCode: string }> }) {
         )}
 
         <div className="mt-8 flex gap-3">
-          <Button disabled={busy || !projectId} onClick={() => decide(false)}>
+          <Button disabled={busy || !projectId || !!enrolment.machineLimit} onClick={() => decide(false)}>
             {busy ? "Connecting…" : "Connect it"}
           </Button>
           <Button variant="secondary" disabled={busy} onClick={() => decide(true)}>

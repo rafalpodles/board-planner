@@ -164,7 +164,11 @@ export function startHeartbeat(deps: HeartbeatDeps): Heartbeat {
         body: JSON.stringify(deps.registration),
       });
       if (!response.ok) {
-        log(`worker registration failed: ${response.status}`);
+        const reason = await response
+          .json()
+          .then((body: { error?: unknown }) => (typeof body?.error === "string" ? body.error : ""))
+          .catch(() => "");
+        log(`worker registration failed: ${response.status}${reason ? ` — ${reason}` : ""}`);
         return null;
       }
       const body = (await response.json()) as {

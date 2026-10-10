@@ -46,6 +46,7 @@ import { assigneeToShow } from "./assignee-display";
 import type { AnyColumn } from "@/lib/columns";
 import { MAX_RECURRENCE_INTERVAL, clampInterval } from "@/lib/recurrence";
 import { formatDateOnly } from "@/lib/date-only";
+import { UPGRADE_HREF } from "@/lib/machine-limit-copy";
 
 const RECURRENCE_UNITS: Record<RecurrenceFrequency, string> = {
   daily: "day",
@@ -231,6 +232,21 @@ function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }
         </>
       );
     }
+    case "machine-held":
+      return (
+        <>
+          Your machine is connected but not taking work: the Free plan runs one machine per
+          organisation, and another one was connected first.{" "}
+          {ctx.viewerIsInstanceAdmin ? (
+            <a href={UPGRADE_HREF} className="underline">
+              Upgrade to Pro
+            </a>
+          ) : (
+            "An admin can upgrade to Pro"
+          )}{" "}
+          to use it too.
+        </>
+      );
     case "machine-unbound":
       return (
         <>

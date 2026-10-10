@@ -16,6 +16,7 @@ import { timeAgo } from "@/lib/time";
 import { workerPolicyRows } from "@/lib/worker-policy-view";
 import { commandStatus, WorkerCommand } from "@/lib/worker-command-status";
 import { ApiWorker, ApiWorkerPreflight } from "@/types";
+import { HELD_BY_PLAN, UPGRADE_HREF } from "@/lib/machine-limit-copy";
 
 const POLL_MS = 5_000;
 
@@ -486,6 +487,14 @@ export default function AdminWorkersPage() {
                       />
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap">
+                      {worker.condition?.state === "held" ? (
+                        <span data-testid="worker-held" className="text-xs text-warning" title={HELD_BY_PLAN}>
+                          Waiting: the Free plan runs one machine.{" "}
+                          <Link href={UPGRADE_HREF} className="underline">
+                            Upgrade
+                          </Link>
+                        </span>
+                      ) : null}
                       {worker.currentTask ? (
                         <div className="flex items-center gap-2">
                           <span className="font-mono text-xs">{worker.currentTask.taskKey}</span>

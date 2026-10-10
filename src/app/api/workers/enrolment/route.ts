@@ -4,6 +4,7 @@ import { withAuth } from "@/lib/middleware";
 import { mintEnrolmentToken } from "@/lib/enrolment";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
+import { machineLimitRefusal } from "@/lib/machine-limit";
 
 // Each mint writes a row and costs a bcrypt hash. Its device-flow sibling has been rate-limited and
 // capped since BP-305; the asymmetry did not matter while this was withAdmin and does now.
@@ -22,6 +23,9 @@ export const POST = withAuth(async (request, { user, db }) => {
   if (user.viaMachineCredential) {
     return NextResponse.json({ error: "Interactive session required" }, { status: 403 });
   }
+
+  const overLimit = await machineLimitRefusal(db, { owner: user._id });
+  if (overLimit) return overLimit;
 
   const throttleKey = sourceKey(String(user._id), "enrolment_token_mint");
   if (await isRateLimited(throttleKey, MINTS_PER_WINDOW)) {

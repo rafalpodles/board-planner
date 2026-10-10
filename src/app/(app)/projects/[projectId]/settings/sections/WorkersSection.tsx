@@ -250,7 +250,7 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
                   <ul className="border border-border rounded-lg divide-y divide-border">
                     {offering.map((w) => {
                       const state = w.condition?.state ?? (w.stale ? "stale" : "live");
-                      const quiet = state === "disabled" || state === "stale";
+                      const quiet = state === "disabled" || state === "stale" || state === "held";
                       const refused = quiet ? "" : bindingErrorFor(w.bindingError, String(project._id));
                       const halted = state === "paused" || state === "stopped" ? state : "";
                       const label =
@@ -258,13 +258,15 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
                           ? "switched off"
                           : state === "stale"
                             ? "not reporting"
-                            : halted ||
+                            : state === "held"
+                              ? "waiting: the Free plan runs one machine"
+                              : halted ||
                               (state === "failing"
                                 ? "failing its sandbox check"
                                 : refused
                                   ? "cannot use its checkout"
                                   : "live");
-                      const tone = halted ? "text-warning" : label === "live" ? "text-success" : "text-danger";
+                      const tone = halted || state === "held" ? "text-warning" : label === "live" ? "text-success" : "text-danger";
                       return (
                         <li
                           key={w._id}

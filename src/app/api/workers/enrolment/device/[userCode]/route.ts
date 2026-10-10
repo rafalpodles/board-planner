@@ -5,6 +5,7 @@ import { accessibleProjectIds, administeredProjectIds } from "@/lib/grants";
 import { isWorkerLockedByInstance, projectRunsWorkers } from "@/lib/worker-gate";
 import { findPendingByUserCode, formatUserCode } from "@/lib/device-enrolment";
 import { projectRepositoryUrl } from "@/lib/repository";
+import { machineLimitRefusal } from "@/lib/machine-limit";
 
 // What the confirmation page renders: which machine is asking, which projects this person can give
 // it, and whether this machine already has a worker — the case that silently killed a running one.
@@ -50,6 +51,10 @@ export const GET = withAuth(async (_request, { params, user, db }) => {
     ? { mine: String(existing.owner ?? "") === String(user._id) || !existing.owner }
     : null;
 
+  const overLimit = await machineLimitRefusal(db, {
+    machine: { name: enrolment.machineName, host: enrolment.machineHost },
+  });
+
   return NextResponse.json({
     userCode: formatUserCode(enrolment.userCode),
     machineName: enrolment.machineName,
@@ -75,5 +80,6 @@ export const GET = withAuth(async (_request, { params, user, db }) => {
       locked: isWorkerLockedByInstance(p.worker),
     })),
     existingWorker,
+    machineLimit: overLimit ? ((await overLimit.json()) as { error: string }).error : null,
   });
 });

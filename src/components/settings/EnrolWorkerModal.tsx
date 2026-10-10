@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
 import { enrolmentExpiry, enrolmentMintBody, ENROLMENT_LABEL_MAX } from "@/lib/enrolment-view";
 import { GETTING_THE_SOFTWARE_URL } from "@/lib/docs-urls";
+import { UpgradeLink } from "@/components/settings/UpgradeLink";
 
 interface MintedEnrolment {
   token: string;
@@ -36,9 +37,11 @@ export function EnrolWorkerModal({ open, onClose, title = "Enrol a worker" }: En
   const [minting, setMinting] = useState(false);
   const [minted, setMinted] = useState<MintedEnrolment | null>(null);
   const [copied, setCopied] = useState(false);
+  const [limit, setLimit] = useState("");
 
   async function mint() {
     setMinting(true);
+    setLimit("");
     try {
       const res: MintedEnrolment = await api.post(
         "/api/workers/enrolment",
@@ -46,6 +49,11 @@ export function EnrolWorkerModal({ open, onClose, title = "Enrol a worker" }: En
       );
       setMinted(res);
     } catch (err) {
+      const body = (err as { body?: { feature?: string } }).body;
+      if ((err as { status?: number }).status === 402 && body?.feature === "workers.multiple") {
+        setLimit((err as Error).message);
+        return;
+      }
       toast(err instanceof Error ? err.message : "Could not mint an enrolment token", "error");
     } finally {
       setMinting(false);
@@ -67,6 +75,7 @@ export function EnrolWorkerModal({ open, onClose, title = "Enrol a worker" }: En
     setMinted(null);
     setLabel("");
     setCopied(false);
+    setLimit("");
     onClose();
   }
 
@@ -96,6 +105,11 @@ export function EnrolWorkerModal({ open, onClose, title = "Enrol a worker" }: En
               }
             }}
           />
+          {limit && (
+            <p role="alert" data-testid="machine-limit" className="rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm text-text">
+              {limit} <UpgradeLink />
+            </p>
+          )}
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={close} disabled={minting}>
               Cancel

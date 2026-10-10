@@ -8,6 +8,7 @@ import { registerWorker, WorkerAlreadyOwned } from "@/lib/worker-service";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { denyDeviceEnrolment, findPendingByUserCode } from "@/lib/device-enrolment";
 import { projectRepositoryUrl } from "@/lib/repository";
+import { machineLimitRefusal } from "@/lib/machine-limit";
 
 // The confirmation itself, and the whole of enrolment (BP-358): there is no admin approval step
 // behind it any more.
@@ -66,6 +67,12 @@ export const POST = withAuth(async (request, { params, user, db }) => {
       { status: 400 }
     );
   }
+
+  // Before the project is switched on for machines, so a refusal leaves nothing behind
+  const overLimit = await machineLimitRefusal(db, {
+    machine: { name: enrolment.machineName, host: enrolment.machineHost },
+  });
+  if (overLimit) return overLimit;
 
   // The same rule PUT /api/projects/:id applies to `worker`: committing a project to machines is
   // its owner's call (or an instance admin's), never a member's, and nobody makes it while an

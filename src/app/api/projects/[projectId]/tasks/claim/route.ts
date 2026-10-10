@@ -6,6 +6,7 @@ import { BoardCannotClaim } from "@/lib/claim-refusal";
 import { ownerReachableProjectIds, verdictFor } from "@/lib/worker-service";
 import { snapshotFor } from "@/lib/agent-snapshot";
 import { releaseTask } from "@/lib/task-service";
+import { claimingMachineIds, HELD_BY_PLAN, isHeldByPlan } from "@/lib/machine-limit";
 
 // The ref, never a populated document: `IWorker["owner"]` admits both since the fleet route
 // populates it, and `String(<document>)` yields something that is not an id — which claimNextTask
@@ -44,6 +45,9 @@ export const POST = withWorker(async (request, { params, worker, db }) => {
     reachable
   );
   if (!verdict.ok) return NextResponse.json({ error: verdict.reason }, { status: 403 });
+  if (isHeldByPlan(worker, await claimingMachineIds(db))) {
+    return NextResponse.json({ error: HELD_BY_PLAN }, { status: 403 });
+  }
 
   const { runId } = (await request.json().catch(() => ({}))) ?? {};
   if (typeof runId !== "string" || !runId.trim()) {
