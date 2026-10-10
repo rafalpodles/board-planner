@@ -5,7 +5,8 @@ import { withProjectAccess } from "@/lib/middleware";
 import type { HydratedDocument } from "mongoose";
 import type { IProject } from "@/types";
 import { generateTask, ExistingTaskSummary } from "@/lib/ai";
-import { modelKeyAvailability, modelKeyRefusalResponse, resolveModelKey } from "@/lib/model-keys";
+import { gatewayAssist, openGate } from "@/lib/ai-gateway";
+import { modelKeyAvailability } from "@/lib/model-keys";
 import { choiceFieldsForPrompt, resolveGeneratedFields } from "@/lib/ai-fields";
 import { getSettings } from "@/models/settings";
 import { bareHost, hostOf, projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
@@ -17,13 +18,6 @@ import { NOT_ARCHIVED } from "@/lib/task-archive";
 export const MAX_PROMPT_LENGTH = AI_PROMPT_MAX_LENGTH;
 /** Generations one person may start in the rate limiter's 15-minute window */
 export const GENERATIONS_PER_USER_WINDOW = 20;
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-/** Generations one project may run in a day, on the instance's OpenRouter key */
-export function dailyGenerationCap(): number {
-  const configured = Number(process.env.AI_DAILY_GENERATION_CAP);
-  return Number.isInteger(configured) && configured > 0 ? configured : 200;
-}
 
 // One generation at a time per person: nothing else stops a loop from queueing hundreds in parallel
 const inFlight = new Set<string>();
@@ -76,19 +70,14 @@ export async function fetchReadme(githubRepo: string): Promise<string | undefine
 
 export const GET = withProjectAccess(async (_request, { db }) => {
   const key = await modelKeyAvailability(db);
-  return NextResponse.json({ enabled: key.available, needsPlan: key.needsPlan, keyUnreadable: key.unreadable });
+  return NextResponse.json({ enabled: key.available, needsPlan: key.needsPlan, keyUnreadable: key.unreadable, locked: key.locked });
 });
 
 export const POST = withProjectAccess(async (request, { params, user, db }) => {
   const { projectId } = await params;
 
-  const modelKey = await resolveModelKey(db);
-  if (!modelKey.ok) {
-    return modelKeyRefusalResponse(modelKey, {
-      error: "AI is not configured. Set the OPENROUTER_API_KEY environment variable.",
-      status: 501,
-    });
-  }
+  const gate = await openGate(db, { error: "AI is not configured. Set the OPENROUTER_API_KEY environment variable.", status: 501 });
+  if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });
 
   await connectDB();
 
@@ -125,19 +114,11 @@ export const POST = withProjectAccess(async (request, { params, user, db }) => {
         { status: 429 }
       );
     }
-    const cap = dailyGenerationCap();
-    if ((await countAttempt(`ai-generate:day:${projectId}`, DAY_MS)) > cap) {
-      return NextResponse.json(
-        { error: `This project has used its ${cap} AI generations for the day.` },
-        { status: 429 }
-      );
-    }
-
     const project = await db.Project.findById(projectId);
     if (!project) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
-    return await generate(db, project, projectId, prompt, modelKey.key);
+    return await generate(db, project, projectId, prompt, gate, String(user._id));
   } finally {
     inFlight.delete(holder);
   }
@@ -148,7 +129,8 @@ async function generate(
   project: HydratedDocument<IProject>,
   projectId: string,
   prompt: string,
-  apiKey: string
+  gate: Extract<Awaited<ReturnType<typeof openGate>>, { ok: true }>,
+  userId: string
 ) {
   const [readme, tasks] = await Promise.all([
     // raw.githubusercontent.com only serves github.com, so a project hosted anywhere else — and
@@ -175,18 +157,21 @@ async function generate(
 
   try {
     const settings = await getSettings(db);
-    const task = await generateTask(
-      prompt.trim(),
-      {
-        name: project.name,
-        description: project.description || "",
-        choiceFields,
-        categories: (project.categories || []).map((c) => c.name),
-        readme,
-        existingTasks,
-      },
-      settings.aiModel,
-      apiKey
+    const task = await gatewayAssist(db, { source: "assist", projectId, userId }, gate, settings.aiModel, (apiKey, report) =>
+      generateTask(
+        prompt.trim(),
+        {
+          name: project.name,
+          description: project.description || "",
+          choiceFields,
+          categories: (project.categories || []).map((c) => c.name),
+          readme,
+          existingTasks,
+        },
+        settings.aiModel,
+        apiKey,
+        report
+      )
     );
 
     // Resolved here, where the field definitions live, so the client never has to work

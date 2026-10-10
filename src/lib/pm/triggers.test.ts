@@ -12,6 +12,12 @@ let reviewed: Record<string, unknown> | null = null;
 
 // Projection-aware, because runPmTrigger asks for the pm config and the notification asks for the
 // board's identity. One answer for both leaves the mail's project name and key untestable.
+// The gateway's counters are its own tests' business (src/lib/ai-gateway): these only need the door to open
+const checkBudget = vi.hoisted(() => vi.fn(async () => ({ refusal: null as unknown, counter: "month" })));
+vi.mock("@/lib/ai-gateway/budget", () => ({ counterKindOf: async () => "month", checkBudget }));
+const getOrganisation = vi.hoisted(() => vi.fn(async () => ({ aiLockedAt: null as Date | null, aiLockedReason: "" })));
+vi.mock("@/lib/organisation", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/organisation")>()), getOrganisation }));
+vi.mock("@/lib/ai-gateway/usage", () => ({ recordUsage: vi.fn() }));
 vi.mock("@/models/project", () => ({
   Project: {
     findOne: (_filter: unknown, projection?: string) => ({
@@ -37,19 +43,6 @@ vi.mock("@/lib/columns", () => ({
 }));
 vi.mock("./pm-user", () => ({ getPmUser: async () => ({ _id: "pm-user-id" }) }));
 vi.mock("./agent", () => ({ runPmTurn }));
-vi.mock("./turn-cap", () => ({
-  isOverDailyTurnCap: async () => ({ over: false, cap: 100 }),
-  // The token ceiling is off by default, which is what an unconfigured project answers (BP-284)
-  dailyPmSpend: async () => ({
-    over: false,
-    cap: 0,
-    tokens: 0,
-    cachedTokens: 0,
-    cacheWriteTokens: 0,
-    calls: 0,
-    stepLimitHits: 0,
-  }),
-}));
 vi.mock("./turn-lock", () => ({
   acquireTurnLock: () => new AbortController(),
   releaseTurnLock: vi.fn(),
@@ -106,6 +99,45 @@ describe("runPmTrigger", () => {
     expect(findOneAndUpdate).toHaveBeenCalledWith({ _id: "t1", organisation: DEFAULT_ORGANISATION_ID }, {
       $set: { state: "failed", lastError: expect.stringMatching(/your own key.*upgrade to Pro/), active: false },
     });
+  });
+
+  // BP-680
+  it("fails the trigger with the number and the renewal once the month's allowance is spent, and runs nothing", async () => {
+    resolveModelKey.mockResolvedValueOnce({ ok: true, key: "k", source: "managed" });
+    checkBudget.mockResolvedValueOnce({ refusal: { scope: "month", used: 15_000_000, limit: 15_000_000, resetsAt: new Date("2026-11-01T00:00:00Z") }, counter: "month" });
+
+    expect(await runPmTrigger(db, trigger)).toBe("ran");
+
+    expect(runPmTurn).not.toHaveBeenCalled();
+    expect(findOneAndUpdate).toHaveBeenCalledWith({ _id: "t1", organisation: DEFAULT_ORGANISATION_ID }, {
+      $set: { state: "failed", lastError: expect.stringMatching(/15,000,000 of 15,000,000.*1 November 2026/), active: false },
+    });
+  });
+
+  it("fails the trigger with the operator's words while its key is switched off for the organisation, and runs nothing", async () => {
+    resolveModelKey.mockResolvedValueOnce({ ok: true, key: "k", source: "managed" });
+    getOrganisation.mockResolvedValueOnce({ aiLockedAt: new Date(), aiLockedReason: "abuse report 17" });
+
+    expect(await runPmTrigger(db, trigger)).toBe("ran");
+
+    expect(runPmTurn).not.toHaveBeenCalled();
+    expect(findOneAndUpdate).toHaveBeenCalledWith({ _id: "t1", organisation: DEFAULT_ORGANISATION_ID }, {
+      $set: { state: "failed", lastError: expect.stringMatching(/switched off for this organisation by the operator: abuse report 17/), active: false },
+    });
+  });
+
+  it("holds the trigger, with no attempt spent, while the day's ceiling pauses AI, and spends no attempt on it", async () => {
+    resolveModelKey.mockResolvedValueOnce({ ok: true, key: "k", source: "managed" });
+    checkBudget.mockResolvedValueOnce({ refusal: { scope: "day", used: 3_000_000, limit: 3_000_000, resetsAt: new Date("2026-10-10T00:00:00Z") }, counter: "month" });
+
+    expect(await runPmTrigger(db, trigger)).toBe("deferred");
+
+    expect(runPmTurn).not.toHaveBeenCalled();
+    expect(findOneAndUpdate).toHaveBeenCalledTimes(1);
+    expect(findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: "t1", organisation: DEFAULT_ORGANISATION_ID },
+      { $set: { state: "pending", lastError: "", active: true }, $inc: { attempts: -1 } }
+    );
   });
 
   it("withholds assign_task and change_status from the turn", async () => {

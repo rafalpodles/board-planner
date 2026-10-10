@@ -16,27 +16,7 @@ const pmMessageSchema = new Schema<IPmMessage>(
     project: { type: Schema.Types.ObjectId, ref: "Project", required: true },
     role: { type: String, enum: ["user", "assistant"], required: true },
     content: { type: String, default: "" },
-    /**
-     * What this turn cost, summed over its round-trips. A turn is up to MAX_STEPS calls, so the
-     * turn cap alone says nothing about spend (BP-284). Stored on the message rather than counted
-     * into the project, so the day's total is derived the same way the turn count already is —
-     * from documents that exist anyway, with no accumulator to drift.
-     */
     usage: {
-      promptTokens: { type: Number, default: 0 },
-      completionTokens: { type: Number, default: 0 },
-      totalTokens: { type: Number, default: 0 },
-      /**
-       * How much of the prompt the provider served from its own cache, and how much it wrote into
-       * it. The READ figure is documented as part of `prompt_tokens`, so a turn's total is
-       * unchanged by caching — what changes is what that total was billed at. The write figure is
-       * reported beside it and is not documented as part of that count, so it is kept as its own
-       * number and never added to a total (BP-568).
-       */
-      cachedPromptTokens: { type: Number, default: 0 },
-      cacheWriteTokens: { type: Number, default: 0 },
-      /** Round-trips to the model. The number the turn cap was mistaken for. */
-      calls: { type: Number, default: 0 },
       /** True when the turn stopped because it ran out of steps, not because it was finished */
       hitStepLimit: { type: Boolean, default: false },
     },
@@ -69,6 +49,8 @@ const pmMessageSchema = new Schema<IPmMessage>(
 );
 
 pmMessageSchema.index({ project: 1, createdAt: -1 });
+// The organisation's turns in a month, for its AI usage in Settings
+pmMessageSchema.index({ organisation: 1, role: 1, createdAt: -1 });
 // Threads are read per user, newest first, with _id as the paging cursor
 pmMessageSchema.index({ project: 1, triggeredBy: 1, _id: -1 });
 

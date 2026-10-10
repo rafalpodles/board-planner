@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { scoped } from "@/lib/db-scope";
+import { aiUsageSummary } from "@/lib/ai-gateway/summary";
 import { licenceOf } from "@/lib/organisation";
+import { organisationUsage } from "@/lib/organisation-limits";
 import { logPlatformAudit, withPlatformRequest } from "@/lib/platform-route";
 import { Organisation } from "@/models/organisation";
 
@@ -26,9 +28,11 @@ export const GET = withPlatformRequest(async (request, { keyId }) => {
   const organisations = await Promise.all(
     page.map(async (row) => {
       const db = scoped(row._id);
-      const [members, projects] = row.deletedAt ? [0, 0] : await Promise.all([
+      const [members, projects, usage, ai] = row.deletedAt ? [0, 0, null, null] : await Promise.all([
         db.User.countDocuments({ kind: { $ne: "machine" }, deactivatedAt: null }),
         db.Project.countDocuments({}),
+        organisationUsage(db),
+        aiUsageSummary(db),
       ]);
       const licence = licenceOf(row);
       const active = licence?.verdict === "valid" || licence?.verdict === "grace";
@@ -41,6 +45,8 @@ export const GET = withPlatformRequest(async (request, { keyId }) => {
         licence: licence ? { verdict: licence.verdict, customer: licence.payload?.customer ?? null, expiresAt: licence.payload?.expiresAt ?? null } : null,
         members,
         projects,
+        usage,
+        ai,
         suspendedAt: row.suspendedAt ?? null,
         deletedAt: row.deletedAt ?? null,
       };

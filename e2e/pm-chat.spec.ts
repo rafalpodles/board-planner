@@ -60,7 +60,7 @@ async function pmSettings(over: Record<string, unknown>) {
   });
 }
 
-/** Turns already spent today, which is all `isOverDailyTurnCap` counts. */
+/** Turns already spent today */
 async function spendTurns(count: number) {
   await withDb(async (db) => {
     await db.collection("pmmessages").insertMany(
@@ -483,31 +483,17 @@ test.describe("when the model does not answer", () => {
   });
 });
 
-test.describe("the daily turn cap", () => {
-  test("names the cap it refused on", async ({ page }) => {
-    await pmSettings({ dailyTurnCap: 3 });
-    await spendTurns(3);
+// BP-679: what a project may use is the organisation's allowance, so no number of turns refuses one
+test.describe("no turn cap", () => {
+  test("answers a project that has had more turns today than the old default allowed", async ({ page }) => {
+    await spendTurns(120);
     await signIn(page);
     await openChat(page);
 
-    await say(page, "One more, please.", { say: "the cap should stop this" });
+    await say(page, "One more, please.", { say: "Still room for this one." });
 
-    await expect(page.getByText("Daily PM turn cap (3) reached for this project")).toBeVisible();
-    // The refusal happens before the agent is ever asked, so there is no reply of any kind
-    await expect(agentSpoke(page)).toHaveCount(0);
-  });
-
-  test("and lets the turn through when there is room", async ({ page }) => {
-    // The control: same board, same message, one turn short of the cap
-    await pmSettings({ dailyTurnCap: 3 });
-    await spendTurns(2);
-    await signIn(page);
-    await openChat(page);
-
-    await say(page, "One more, please.", { say: "Room for this one." });
-
-    await expect(reply(page)).toContainText("Room for this one.");
-    await expect(page.getByText(/Daily PM turn cap/)).toHaveCount(0);
+    await expect(reply(page)).toContainText("Still room for this one.");
+    await expect(page.getByText(/turn cap/i)).toHaveCount(0);
   });
 });
 
@@ -700,23 +686,37 @@ test.describe("attaching a screenshot", () => {
     await expect(page.getByRole("button", { name: "Retry" })).toHaveCount(0);
   });
 
-  test("a Retry with nothing left to send is not offered", async ({ page }) => {
+  test("a Retry with nothing left to send is not offered", async ({ page, browser }) => {
     // An image-only refusal has no typed text, so Retry stands or falls on the thumbnails. It used
-    // to survive them: clicking it called send("") and did nothing at all.
-    await spendTurns(3);
-    await pmSettings({ dailyTurnCap: 3, model: "e2e/vision-model" });
-    await signIn(page);
+    // to survive them: clicking it called send("") and did nothing at all. The refusal is a 409: somebody else holds the turn.
+    await pmSettings({ model: "e2e/vision-model" });
+    await signIn(page, "admin");
     await openChat(page);
+    await say(page, "Hold the line.", { delayMs: 30_000, say: "Eventually." });
+    await expect(page.getByText("PM is thinking…")).toBeVisible();
 
-    await attach(page);
-    await sendButton(page).click();
+    const other = await browser.newContext();
+    await signInContext(other, "member");
+    const second = await other.newPage();
+    try {
+      await second.goto(PM_URL);
+      await expect(chatBox(second)).toBeVisible();
 
-    const retry = page.getByRole("button", { name: "Retry" });
-    await expect(retry).toBeVisible();
+      await attach(second);
+      await sendButton(second).click();
 
-    await page.getByRole("button", { name: "Remove attachment" }).click();
-    await expect(page.getByAltText("Attachment preview")).toHaveCount(0);
-    await expect(retry).toHaveCount(0);
+      const retry = second.getByRole("button", { name: "Retry" });
+      await expect(retry).toBeVisible();
+
+      await second.getByRole("button", { name: "Remove attachment" }).click();
+      await expect(second.getByAltText("Attachment preview")).toHaveCount(0);
+      await expect(retry).toHaveCount(0);
+    } finally {
+      await other.close();
+    }
+
+    await page.getByRole("button", { name: "Stop the PM turn" }).click();
+    await expect(page.getByText("⏹ Stopped by user.")).toBeVisible();
   });
 
   test("a turn that fails mid-stream offers no Retry when it carried a picture", async ({
@@ -741,7 +741,7 @@ test.describe("attaching a screenshot", () => {
     async ({ page, request }) => {
     // Found reviewing this branch's own change. Everything the route checks above is the *shape* of
     // an attachment, so a well-formed fileId naming no file passed — and with no text either, the
-    // turn reached the provider with an empty user content, spending one against the daily cap.
+    // turn reached the provider with an empty user content, spending one on nothing.
     // Driven over the API because the composer can only offer files it has just uploaded.
     await pmSettings({ model: "e2e/vision-model" });
     await signIn(page);

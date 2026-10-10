@@ -3,12 +3,16 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const projectFind = vi.fn();
 const findOneAndUpdate = vi.fn();
 const runPmTurn = vi.fn();
-const isOverDailyTurnCap = vi.fn();
-const dailyPmSpend = vi.fn();
 const buildBoardDigest = vi.fn();
 const drainPmTriggers = vi.fn();
 
 const servedOrganisations = vi.hoisted(() => ({ list: null as null | { _id: unknown; digestHour?: number; timezone?: string }[] }));
+// The gateway's counters are its own tests' business (src/lib/ai-gateway): these only need the door to open
+const checkBudget = vi.hoisted(() => vi.fn(async () => ({ refusal: null as unknown, counter: "month" })));
+vi.mock("@/lib/ai-gateway/budget", () => ({ counterKindOf: async () => "month", checkBudget }));
+const getOrganisation = vi.hoisted(() => vi.fn(async () => ({ aiLockedAt: null as Date | null, aiLockedReason: "" })));
+vi.mock("@/lib/organisation", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/organisation")>()), getOrganisation }));
+vi.mock("@/lib/ai-gateway/usage", () => ({ recordUsage: vi.fn() }));
 vi.mock("@/lib/organisation-jobs", async () => {
   const { scoped } = await import("@/lib/db-scope");
   const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
@@ -23,7 +27,6 @@ vi.mock("@/lib/organisation-jobs", async () => {
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/project", () => ({ Project: { find: projectFind, findOneAndUpdate } }));
 vi.mock("./agent", () => ({ runPmTurn }));
-vi.mock("./turn-cap", () => ({ isOverDailyTurnCap, dailyPmSpend }));
 vi.mock("./triggers", () => ({ drainPmTriggers }));
 vi.mock("./pm-user", () => ({ getPmUser: async () => ({ _id: "pm-user" }) }));
 const resolveModelKey = vi.hoisted(() => vi.fn(async () => ({ ok: true, key: "k", source: "own" }) as unknown));
@@ -44,14 +47,12 @@ const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
 const db = scopedToDefaultOrganisation();
 
-const PM = { enabled: true, dailyTurnCap: 100, autonomy: { dailyReview: true, handleNeedsHumanReview: false, reviewHour: 0, reviewIntervalHours: 24, timezone: "UTC", lastReviewSlot: "" } };
+const PM = { enabled: true, autonomy: { dailyReview: true, handleNeedsHumanReview: false, reviewHour: 0, reviewIntervalHours: 24, timezone: "UTC", lastReviewSlot: "" } };
 
 beforeEach(() => {
   vi.clearAllMocks();
   projectFind.mockReturnValue({ lean: async () => [{ _id: "p1", key: "BP", pm: PM }] });
   findOneAndUpdate.mockResolvedValue({ _id: "p1" });
-  isOverDailyTurnCap.mockResolvedValue({ over: false, cap: 100 });
-  dailyPmSpend.mockResolvedValue({ over: false });
   buildBoardDigest.mockResolvedValue({ findings: 2 });
   runPmTurn.mockResolvedValue({ ok: true });
 });
@@ -163,34 +164,34 @@ describe("startBoardReview", () => {
     expect(runPmTurn).not.toHaveBeenCalled();
   });
 
+  // BP-680: the operator's key is only spent while the organisation has some of its allowance left
+  it("refuses a review the organisation has no AI allowance left for, naming the number and the renewal, and runs nothing", async () => {
+    resolveModelKey.mockResolvedValueOnce({ ok: true, key: "k", source: "managed" });
+    checkBudget.mockResolvedValueOnce({ refusal: { scope: "month", used: 15_000_000, limit: 15_000_000, resetsAt: new Date("2026-11-01T00:00:00Z") }, counter: "month" });
+
+    const start = await startBoardReview(db, "p1", "BP", PM, "pm-user");
+
+    expect(start).toEqual({ status: "skipped", reason: expect.stringMatching(/15,000,000 of 15,000,000.*1 November 2026/) });
+    expect(runPmTurn).not.toHaveBeenCalled();
+  });
+
+  // BP-680: the operator's lock is about its key, and a review would spend it
+  it("refuses a review while the operator has switched its key off for the organisation, naming why, and runs nothing", async () => {
+    resolveModelKey.mockResolvedValueOnce({ ok: true, key: "k", source: "managed" });
+    getOrganisation.mockResolvedValueOnce({ aiLockedAt: new Date(), aiLockedReason: "abuse report 17" });
+
+    const start = await startBoardReview(db, "p1", "BP", PM, "pm-user");
+
+    expect(start).toEqual({ status: "skipped", reason: expect.stringMatching(/switched off for this organisation by the operator: abuse report 17/) });
+    expect(runPmTurn).not.toHaveBeenCalled();
+  });
+
   it("says a stored key that cannot be read has to be entered again", async () => {
     resolveModelKey.mockResolvedValueOnce({ ok: false, reason: "own_key_unreadable", plan: "pro" });
 
     const start = await startBoardReview(db, "p1", "BP", PM, "pm-user");
 
     expect(start).toEqual({ status: "skipped", reason: expect.stringMatching(/cannot be read.*Enter it again/) });
-  });
-
-  it("refuses at once when the turn cap is reached, and spends nothing", async () => {
-    isOverDailyTurnCap.mockResolvedValue({ over: true, cap: 3 });
-
-    const start = await startBoardReview(db, "p1", "BP", PM, "pm-user");
-
-    expect(start).toEqual({ status: "skipped", reason: "the daily turn cap (3) is reached" });
-    expect(runPmTurn).not.toHaveBeenCalled();
-    // A refusal takes nothing it would have to give back
-    expect(isTurnRunning("p1")).toBe(false);
-  });
-
-  it("refuses at once when the token cap is reached", async () => {
-    dailyPmSpend.mockResolvedValue({ over: true, tokens: 900, cap: 800, calls: 4 });
-
-    expect(await startBoardReview(db, "p1", "BP", PM, "pm-user")).toEqual({
-      status: "skipped",
-      reason: "the daily token cap is reached (900 of 800 across 4 calls)",
-    });
-    expect(runPmTurn).not.toHaveBeenCalled();
-    expect(isTurnRunning("p1")).toBe(false);
   });
 
   it("gives the turn back when the board has nothing to review, without a turn", async () => {

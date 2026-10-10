@@ -166,14 +166,18 @@ const declaredPerOrganisationUniques: Spec[] = scopedModelNames().flatMap((model
     .map(([fields, options]) => ({ model, fields: fields as Record<string, number>, options: options as Spec["options"] }))
 );
 
+// A model born scoped has no global twin to keep beside its unique or to retire: nothing existed before it (AiBudget, BP-680)
+const BORN_SCOPED = new Set(["AiBudget"]);
+const uniquesWithGlobalTwin = declaredPerOrganisationUniques.filter((u) => !BORN_SCOPED.has(u.model));
+
 test("the per-organisation uniques build beside the old ones on data that has blank e-mails and answered invitations", async () => {
   await backfillOrganisations(conn, { apply: true });
 
-  for (const model of new Set(declaredPerOrganisationUniques.map((u) => u.model))) {
+  for (const model of new Set(uniquesWithGlobalTwin.map((u) => u.model))) {
     await (conn.model(model, mongoose.model(model).schema) as mongoose.Model<mongoose.AnyObject>).createIndexes();
   }
 
-  for (const { model, fields } of declaredPerOrganisationUniques) {
+  for (const { model, fields } of uniquesWithGlobalTwin) {
     const names = (await col(collectionOf(model)).indexes()).map((i) => i.name);
     expect(names, model).toContain(Object.entries(fields).map(([k, v]) => `${k}_${v}`).join("_"));
     expect(names.length, `${model} keeps its global twin`).toBeGreaterThan(2);
@@ -182,7 +186,7 @@ test("the per-organisation uniques build beside the old ones on data that has bl
 
 async function buildPerOrganisationTwins() {
   await backfillOrganisations(conn, { apply: true });
-  for (const model of new Set(declaredPerOrganisationUniques.map((u) => u.model))) {
+  for (const model of new Set(uniquesWithGlobalTwin.map((u) => u.model))) {
     await (conn.model(model, mongoose.model(model).schema) as mongoose.Model<mongoose.AnyObject>).createIndexes();
   }
 }
@@ -249,8 +253,9 @@ const insertOutcome = (promise: Promise<unknown>) =>
     (err) => ({ refused: duplicateKeyField(err) })
   );
 
-test("seven per-organisation uniques are declared, so none can drop out of the checks below", () => {
-  expect(declaredPerOrganisationUniques).toHaveLength(7);
+test("eight per-organisation uniques are declared, seven of them beside a global one that was retired, so none can drop out of the checks below", () => {
+  expect(declaredPerOrganisationUniques).toHaveLength(8);
+  expect(uniquesWithGlobalTwin).toHaveLength(7);
 });
 
 for (const { model, fields, options } of declaredPerOrganisationUniques) {

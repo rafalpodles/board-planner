@@ -2,7 +2,7 @@ import { connectDB } from "@/lib/db";
 import { IPmMessage, PmAttachment, PmMessageTrigger } from "@/types";
 import { buildUserContent } from "./attachments";
 import { getPmUser, PM_USERNAME } from "./pm-user";
-import { chatCompletion, OrChatMessage } from "./openrouter";
+import { OrChatMessage } from "./openrouter";
 import { pmSessionId } from "./prompt-cache";
 import { isPmRunnable, pmDisabledReason, resolvePmModel } from "./availability";
 import { PM_TOOLS, pmToolDefinitions, PmToolContext, refuseUndeclaredArgs } from "./tools";
@@ -13,10 +13,9 @@ import { pmThreadFilter } from "./thread";
 import { getProjectColumns, defaultStatusFor } from "@/lib/columns";
 import { APP_NAME } from "@/lib/brand";
 import type { ScopedDb } from "@/lib/db-scope";
-import { describeModelKeyRefusal, resolveModelKey } from "@/lib/model-keys";
+import { gatewayChat, openGate } from "@/lib/ai-gateway";
 
-/** Round-trips one turn may make. Exported because the cap the operator sees is in turns, and the
- * screens that show it have to be able to say what a turn can cost (BP-284). */
+/** Round-trips one turn may make. Exported so the screens that show a project's day can say what a turn can cost (BP-284). */
 export const MAX_STEPS = 15;
 const MAX_WRITE_ACTIONS = 10;
 const HISTORY_LIMIT = 30;
@@ -186,11 +185,8 @@ export async function runPmTurn(db: ScopedDb, opts: {
   if (!project) return { ok: false, message: null, error: "Project not found" };
   if (!isPmRunnable(project.pm)) return { ok: false, message: null, error: pmDisabledReason(project.pm) };
 
-  const modelKey = await resolveModelKey(db);
-  if (!modelKey.ok) {
-    const { error } = describeModelKeyRefusal(modelKey, { error: "The PM agent is not configured on this instance", status: 503 });
-    return { ok: false, message: null, error };
-  }
+  const gate = await openGate(db, { error: "The PM agent is not configured on this instance", status: 503 });
+  if (!gate.ok) return { ok: false, message: null, error: gate.error };
 
   const pmUser = await getPmUser(db);
   const model = await resolvePmModel(db, project.pm.model);
@@ -263,26 +259,10 @@ export async function runPmTurn(db: ScopedDb, opts: {
   // screenshot is as likely to mint tasks as to ask what it is for (BP-451).
   const imageOnly = !opts.userMessage.trim() && Array.isArray(userContent);
 
-  /**
-   * What this turn is costing, summed as it goes (BP-284). A turn is up to MAX_STEPS round-trips,
-   * so `dailyTurnCap` — which counts turns — says nothing about spend on its own. Written on every
-   * exit, including the ones that fail: a turn that burned nine calls and then hit a provider error
-   * cost nine calls, and a record that forgave them would understate exactly the runs that hurt.
-   */
-  const spend = {
-    promptTokens: 0,
-    completionTokens: 0,
-    totalTokens: 0,
-    // A subset of promptTokens, recorded beside it rather than added to it: the operator sets a
-    // budget from the total, and needs to know how much of that total was billed at cache-read
-    // price (BP-568)
-    cachedPromptTokens: 0,
-    cacheWriteTokens: 0,
-    calls: 0,
-    hitStepLimit: false,
-  };
+  // What the usage rows cannot say about a turn: that it stopped for want of steps, not because it was finished
+  const outcome = { hitStepLimit: false };
   const record = () => {
-    assistantMessage.usage = { ...spend };
+    assistantMessage.usage = { ...outcome };
   };
 
   const finalize = async (content: string): Promise<PmTurnResult> => {
@@ -294,7 +274,7 @@ export async function runPmTurn(db: ScopedDb, opts: {
 
   // The route checks the *files* document before the turn starts; the bytes are read here, and a
   // file whose chunks are gone fails only at this point. Without this the provider is handed an
-  // empty user message, and the turn is already counted against the cap (BP-451 review).
+  // empty user message, and the turn is already stored (BP-451 review).
   if (!opts.userMessage.trim() && !Array.isArray(userContent)) {
     return finalize("⚠️ That image could not be read, so there was nothing to send.");
   }
@@ -356,9 +336,8 @@ export async function runPmTurn(db: ScopedDb, opts: {
   for (let step = 0; step < MAX_STEPS; step++) {
     if (opts.signal?.aborted) return interrupted();
 
-    const completion = await chatCompletion({
+    const completion = await gatewayChat(db, { source: "pm", projectId: opts.projectId, userId: opts.triggeredByUserId }, {
       model,
-      apiKey: modelKey.key,
       messages,
       tools: toolDefinitions,
       // Everything the loop appends from here — assistant tool calls and their results — grows
@@ -368,16 +347,6 @@ export async function runPmTurn(db: ScopedDb, opts: {
       sessionId,
       signal: opts.signal,
     });
-
-    // Counted before the result is judged: the call was made and billed whatever it answered
-    spend.calls++;
-    if ("usage" in completion && completion.usage) {
-      spend.promptTokens += completion.usage.promptTokens;
-      spend.completionTokens += completion.usage.completionTokens;
-      spend.totalTokens += completion.usage.totalTokens;
-      spend.cachedPromptTokens += completion.usage.cachedPromptTokens;
-      spend.cacheWriteTokens += completion.usage.cacheWriteTokens;
-    }
 
     if (completion.type === "aborted") {
       return interrupted();
@@ -426,10 +395,6 @@ export async function runPmTurn(db: ScopedDb, opts: {
               const summary = `MCP write on ${mcpTool.serverName}: ${mcpTool.toolName}`;
               action = { type: "action", tool: mcpTool.exposedName, summary };
               assistantMessage.actions.push({ tool: mcpTool.exposedName, summary, at: new Date() });
-              // Recorded at the mid-loop saves too: a turn killed by a deploy or the route's
-              // 300s ceiling would otherwise store zero, under-reporting the long turns this
-              // counting exists for — see abandoned.ts, which patches content and never usage.
-              record();
               await assistantMessage.save();
               opts.onEvent?.(action);
             }
@@ -484,7 +449,7 @@ export async function runPmTurn(db: ScopedDb, opts: {
 
   // Falling out of the loop means MAX_STEPS was spent rather than the turn finishing, which is a
   // different event and the most expensive one a turn can be
-  spend.hitStepLimit = true;
+  outcome.hitStepLimit = true;
 
   const summary =
     assistantMessage.actions.length > 0

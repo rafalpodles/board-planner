@@ -51,3 +51,24 @@ export function AiKeyUnreadable({ what, className = "" }: { what: string; classN
     </div>
   );
 }
+
+/** The operator has switched its key off for this organisation, so only a key of its own runs the AI */
+export function AiLocked({ what, className = "" }: { what: string; className?: string }) {
+  const { isAdmin } = useAuth();
+
+  return (
+    <div role="note" data-testid="ai-locked" className={`rounded-lg border border-danger/40 bg-danger/10 p-3 text-sm ${className}`}>
+      <p className="font-medium">{what} is switched off for this organisation by the operator.</p>
+      {isAdmin ? (
+        <p className="mt-1 text-text-muted">
+          <Link href="/settings/ai-keys" className="underline">
+            Add your own key
+          </Link>{" "}
+          in Settings to keep going.
+        </p>
+      ) : (
+        <p className="mt-1 text-text-muted">Ask an administrator of this organisation to add a key of its own.</p>
+      )}
+    </div>
+  );
+}

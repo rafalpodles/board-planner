@@ -79,7 +79,7 @@ export async function loadAttachmentDataUri(
  * Whether any of these attachments is a readable image on this project — without draining bytes.
  *
  * Only the image-only case needs it. A turn with no text whose every attachment fails to load
- * would reach the provider with an empty user content, spending a turn against the cap on nothing
+ * would reach the provider with an empty user content, spending a turn on nothing
  * (BP-451 review): the shape checks in the route pass for a well-formed `fileId` that names no
  * file, or one belonging to another board.
  */

@@ -26,22 +26,32 @@ export interface FieldDraft {
   filterable: boolean;
 }
 
-function draftFrom(field?: ApiCustomField): FieldDraft {
+function draftFrom(field?: ApiCustomField, initial: Partial<FieldDraft> = {}): FieldDraft {
   return {
-    name: field?.name ?? "",
-    fieldType: field?.fieldType ?? "dropdown",
-    options: field ? orderedOptions(field) : [],
-    required: field?.required ?? false,
-    showOnCard: field?.showOnCard ?? false,
-    showInList: field?.showInList ?? true,
-    filterable: field?.filterable ?? true,
+    name: field?.name ?? initial.name ?? "",
+    fieldType: field?.fieldType ?? initial.fieldType ?? "dropdown",
+    options: field ? orderedOptions(field) : (initial.options ?? []),
+    required: field?.required ?? initial.required ?? false,
+    showOnCard: field?.showOnCard ?? initial.showOnCard ?? false,
+    showInList: field?.showInList ?? initial.showInList ?? true,
+    filterable: field?.filterable ?? initial.filterable ?? true,
   };
 }
+
+export const LABELS_FIELD_DRAFT: Partial<FieldDraft> = {
+  name: "Labels",
+  fieldType: "multiselect",
+  showOnCard: true,
+  showInList: true,
+  filterable: true,
+};
 
 interface CustomFieldFormProps {
   canRemoveSavedOptions?: boolean;
   /** Absent when creating. Its presence is the only difference between the two modes. */
   field?: ApiCustomField;
+  /** What a new field starts with; ignored when editing */
+  initial?: Partial<FieldDraft>;
   onSubmit: (draft: FieldDraft) => Promise<void>;
   onCancel: () => void;
 }
@@ -55,12 +65,13 @@ interface CustomFieldFormProps {
  */
 export function CustomFieldForm({
   field,
+  initial,
   onSubmit,
   onCancel,
   canRemoveSavedOptions = true,
 }: CustomFieldFormProps) {
   const savedOptionIds = new Set((field?.options ?? []).map((o) => o.id));
-  const [draft, setDraft] = useState<FieldDraft>(() => draftFrom(field));
+  const [draft, setDraft] = useState<FieldDraft>(() => draftFrom(field, initial));
   // The visible label is the name, pointed at the control rather than left beside it — the way
   // `Select` does it. Without this the field announced as "combo box, text" (BP-498).
   const typeId = useId();

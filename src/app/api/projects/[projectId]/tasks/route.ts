@@ -8,7 +8,7 @@ import { withApiExecutions } from "@/lib/task-execution-view";
 import { parentsOf } from "@/lib/task-parents";
 import { epicClauses, epicProgressFor } from "@/lib/epics";
 import { getColumnIds } from "@/lib/columns";
-import { normalizeOptions } from "@/lib/custom-fields";
+import { labelSearchClauses, normalizeOptions } from "@/lib/custom-fields";
 import { archivedFilter, archivedScopeOf } from "@/lib/task-archive";
 
 
@@ -40,8 +40,9 @@ export const GET = withProjectAccess(async (request, { params, db }) => {
   const category = url.searchParams.get("category");
   // One read, shared by the two project-defined filters below and skipped when neither is asked for
   const fieldParams = url.searchParams.getAll("field");
+  const search = url.searchParams.get("search");
   const board =
-    statusParam || category || fieldParams.length
+    statusParam || category || fieldParams.length || search
       ? await db.Project.findById(projectId, "categories columns customFields").lean()
       : null;
 
@@ -172,12 +173,12 @@ export const GET = withProjectAccess(async (request, { params, db }) => {
     filter.taskNumber = numbers.length === 1 ? Number(numbers[0]) : { $in: numbers.map(Number) };
   }
 
-  const search = url.searchParams.get("search");
   if (search) {
     const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     filter.$or = [
       { title: { $regex: escaped, $options: "i" } },
       { description: { $regex: escaped, $options: "i" } },
+      ...labelSearchClauses(board?.customFields, search),
     ];
   }
 

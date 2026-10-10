@@ -1,12 +1,13 @@
 "use client";
 
-import { ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { ProjectBoard } from "@/hooks/use-project-board";
-import { ApiTask, BOARD_SORT_FIELDS, LIST_SORT_FIELDS, SortKey, SortDir } from "@/types";
+import { ApiSavedView, ApiTask, BOARD_SORT_FIELDS, LIST_SORT_FIELDS, SortKey, SortDir } from "@/types";
 import { effectiveColumns } from "@/lib/columns";
+import { GroupBy, flattenGroups, groupTasks, sanitizeGroupBy } from "@/lib/task-grouping";
 import { ListColumnId } from "@/lib/list-columns";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Board } from "@/components/kanban/Board";
@@ -30,13 +31,19 @@ interface ProjectBoardViewProps {
   // page that renders no view switcher of its own, so a stored "list" preference from
   // elsewhere can't strand it with no way back.
   pinViewMode?: "board" | "list";
+  // How a saved view's sprint scope is applied: the address owns it, so the page does
+  onScopeChange?: (scope: string) => void;
 }
+
+const inGroupHeader = (el: EventTarget | null) =>
+  !!(el as HTMLElement | null)?.closest?.('[data-testid="list-group-header"]');
 
 export function ProjectBoardView({
   board,
   readOnly = false,
   emptyState,
   pinViewMode,
+  onScopeChange,
 }: ProjectBoardViewProps) {
   const { projectId } = useParams<{ projectId: string }>();
   const router = useRouter();
@@ -106,6 +113,10 @@ export function ProjectBoardView({
   const [sortField, setSortField] = useState<SortKey>("manual");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [hiddenColumns, setHiddenColumns] = useState<ListColumnId[]>([]);
+  const [pendingView, setPendingView] = useState<ApiSavedView | null>(null);
+  const viewParamHandled = useRef(false);
+  const [groupBy, setGroupBy] = useState<GroupBy>("");
+  const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(new Set());
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const [focusedTaskIndex, setFocusedTaskIndex] = useState(-1);
 
@@ -125,6 +136,79 @@ export function ProjectBoardView({
     }),
     [project?.columns, project?.customFields, sprints]
   );
+
+  useEffect(() => {
+    if (pinViewMode || viewParamHandled.current) return;
+    const url = new URL(window.location.href);
+    const wanted = url.searchParams.get("view");
+    if (!wanted) return;
+    viewParamHandled.current = true;
+    // Native, not router.replace: this page sits under an @modal parallel route
+    url.searchParams.delete("view");
+    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+    api
+      .get(`/api/projects/${projectId}/views`)
+      .then((all) => {
+        const hit = (all as ApiSavedView[]).find((v) => v._id === wanted);
+        if (hit) setPendingView(hit);
+        else toast("That view is gone, or is not shared with you", "error");
+      })
+      .catch(() => toast("That view could not be opened", "error"));
+  }, [api, projectId, pinViewMode, toast]);
+
+  function viewApplied(view: ApiSavedView) {
+    if (!pinViewMode) setViewMode(view.viewMode);
+    const known =
+      view.sprintScope === "all" ||
+      view.sprintScope === "backlog" ||
+      sprints.some((s) => s._id === view.sprintScope);
+    const next = known ? view.sprintScope : "all";
+    if (next !== scope) onScopeChange?.(next);
+  }
+
+  const customFieldList = project?.customFields;
+  useEffect(() => {
+    setGroupBy((current) => sanitizeGroupBy(current, customFieldList ?? []));
+  }, [customFieldList]);
+
+  const groups = useMemo(
+    () =>
+      viewMode === "list"
+        ? groupTasks(filteredTasks, groupBy, {
+            columns: project?.columns,
+            categories: project?.categories,
+            customFields: project?.customFields,
+          })
+        : [],
+    [viewMode, filteredTasks, groupBy, project?.columns, project?.categories, project?.customFields]
+  );
+  const listTasks = useMemo(
+    () => (groups.length > 0 ? flattenGroups(groups, collapsedGroups) : filteredTasks),
+    [groups, collapsedGroups, filteredTasks]
+  );
+
+  function changeGroupBy(next: GroupBy) {
+    setGroupBy(next);
+    setCollapsedGroups(new Set());
+    setFocusedTaskIndex(-1);
+  }
+
+  function toggleGroup(key: string) {
+    const group = groups.find((g) => g.key === key);
+    if (group && !collapsedGroups.has(key)) {
+      const hidden = new Set(group.tasks.map((t) => t._id));
+      setSelectedTasks((prev) =>
+        [...prev].some((id) => hidden.has(id)) ? new Set([...prev].filter((id) => !hidden.has(id))) : prev
+      );
+    }
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+    setFocusedTaskIndex(-1);
+  }
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -170,10 +254,13 @@ export function ProjectBoardView({
       }
       // J/K navigation in list view — the board draws no indicator for focusedTaskIndex (BP-544)
       const isListView = viewMode === "list";
+      if ((e.key === "j" || e.key === "k") && noMod && isListView && inGroupHeader(document.activeElement)) {
+        (document.activeElement as HTMLElement).blur();
+      }
       if (e.key === "j" && noMod && isListView) {
         e.preventDefault();
         setFocusedTaskIndex((prev) => {
-          const max = filteredTasks.length - 1;
+          const max = listTasks.length - 1;
           return Math.min(prev + 1, max);
         });
         return;
@@ -183,9 +270,9 @@ export function ProjectBoardView({
         setFocusedTaskIndex((prev) => Math.max(prev - 1, 0));
         return;
       }
-      if (e.key === "Enter" && noMod && isListView && focusedTaskIndex >= 0 && focusedTaskIndex < filteredTasks.length) {
+      if (e.key === "Enter" && noMod && isListView && !inGroupHeader(e.target) && focusedTaskIndex >= 0 && focusedTaskIndex < listTasks.length) {
         e.preventDefault();
-        const task = filteredTasks[focusedTaskIndex];
+        const task = listTasks[focusedTaskIndex];
         router.push(taskPath(projectId, task.taskNumber));
         return;
       }
@@ -193,7 +280,7 @@ export function ProjectBoardView({
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [
-    filteredTasks,
+    listTasks,
     focusedTaskIndex,
     projectId,
     router,
@@ -244,6 +331,23 @@ export function ProjectBoardView({
         columns={project.columns}
         hiddenColumns={hiddenColumns}
         onHiddenColumnsChange={setHiddenColumns}
+        groupBy={groupBy}
+        onGroupByChange={changeGroupBy}
+        showGroupBy={viewMode === "list"}
+        views={
+          pinViewMode
+            ? undefined
+            : {
+                projectRef: project.key,
+                canShare: !!project.canAdmin,
+                viewMode,
+                sprintScope: scope ?? "all",
+                onApplied: viewApplied,
+              }
+        }
+        knownAssignees={assignableUsers.map((u) => u.username)}
+        pendingView={pendingView}
+        onPendingViewApplied={() => setPendingView(null)}
         showColumnPicker={viewMode === "list"}
         extraControls={
           readOnly ? undefined : (
@@ -331,7 +435,10 @@ export function ProjectBoardView({
             </div>
           ) : (
             <ListView
-              tasks={filteredTasks}
+              tasks={listTasks}
+              groups={groups}
+              collapsedGroups={collapsedGroups}
+              onToggleGroup={toggleGroup}
               projectKey={project.key}
               projectId={projectId}
               customFields={project.customFields || []}

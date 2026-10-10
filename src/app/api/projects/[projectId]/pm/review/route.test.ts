@@ -5,6 +5,12 @@ const startBoardReview = vi.fn();
 const after = vi.fn();
 let user: Record<string, unknown> = {};
 
+// The gateway's counters are its own tests' business (src/lib/ai-gateway): these only need the door to open
+const checkBudget = vi.hoisted(() => vi.fn(async () => ({ refusal: null as unknown, counter: "month" })));
+vi.mock("@/lib/ai-gateway/budget", () => ({ counterKindOf: async () => "month", checkBudget }));
+const getOrganisation = vi.hoisted(() => vi.fn(async () => ({ aiLockedAt: null as Date | null, aiLockedReason: "" })));
+vi.mock("@/lib/organisation", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/organisation")>()), getOrganisation }));
+vi.mock("@/lib/ai-gateway/usage", () => ({ recordUsage: vi.fn() }));
 vi.mock("next/server", async (importOriginal) => ({ ...(await importOriginal<typeof import("next/server")>()), after }));
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/project", () => ({ Project: { findOne } }));
@@ -72,6 +78,28 @@ describe("POST /api/projects/:projectId/pm/review", () => {
     const res = await run();
 
     expect(res.status).toBe(503);
+    expect(startBoardReview).not.toHaveBeenCalled();
+  });
+
+  it("answers 429 with the number and the renewal when the organisation has used its AI allowance, and starts nothing", async () => {
+    resolveModelKey.mockResolvedValue({ ok: true, key: "k", source: "managed" });
+    checkBudget.mockResolvedValueOnce({ refusal: { scope: "month", used: 15_000_000, limit: 15_000_000, resetsAt: new Date("2026-11-01T00:00:00Z") }, counter: "month" });
+
+    const res = await run();
+
+    expect(res.status).toBe(429);
+    expect(await res.json()).toMatchObject({ reason: "ai_budget", scope: "month", used: 15_000_000, limit: 15_000_000, resetsAt: "2026-11-01T00:00:00.000Z" });
+    expect(startBoardReview).not.toHaveBeenCalled();
+  });
+
+  it("answers 403 with the operator's words while its key is switched off for the organisation, and starts nothing", async () => {
+    resolveModelKey.mockResolvedValue({ ok: true, key: "k", source: "managed" });
+    getOrganisation.mockResolvedValueOnce({ aiLockedAt: new Date(), aiLockedReason: "abuse report 17" });
+
+    const res = await run();
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ reason: "ai_locked" });
     expect(startBoardReview).not.toHaveBeenCalled();
   });
 

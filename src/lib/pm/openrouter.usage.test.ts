@@ -65,6 +65,13 @@ describe("what chatCompletion reports about the call's cost", () => {
     expect(await call()).toMatchObject({ usage: { totalTokens: 42 } });
   });
 
+  // BP-679: a limit is made of this number, so a total of 0 beside tokens that were spent must not read as free
+  it("adds the two halves when the provider reports a total of 0", async () => {
+    respondWith({ ...TEXT, usage: { prompt_tokens: 40, completion_tokens: 2, total_tokens: 0 } });
+
+    expect(await call()).toMatchObject({ usage: { totalTokens: 42 } });
+  });
+
   // The control: a malformed usage block must not become NaN in a number the operator reads
   it("ignores a usage block that carries no numbers at all", async () => {
     respondWith({ ...TEXT, usage: { prompt_tokens: "lots" } });
@@ -138,5 +145,16 @@ describe("what it reports about the cache", () => {
     });
 
     expect(await call()).toMatchObject({ usage: { cachedPromptTokens: 0, cacheWriteTokens: 0 } });
+  });
+
+  // BP-680: a limit is made of these numbers, and one that goes below nothing takes tokens off what was spent
+  it("reads a negative figure as nothing, and the total as what the other two make", async () => {
+    respondWith({ ...TEXT, usage: { prompt_tokens: -1000, completion_tokens: 1500, total_tokens: 0 } });
+
+    expect(await call()).toMatchObject({ usage: { promptTokens: 0, completionTokens: 1500, totalTokens: 1500 } });
+
+    respondWith({ ...TEXT, usage: { prompt_tokens: 1500, completion_tokens: -1000, total_tokens: 0 } });
+
+    expect(await call()).toMatchObject({ usage: { promptTokens: 1500, completionTokens: 0, totalTokens: 1500 } });
   });
 });

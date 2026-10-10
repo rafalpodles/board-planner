@@ -868,8 +868,6 @@ describe("PUT /api/projects/[projectId] PM settings", () => {
       model: "",
       contextNotes: "notes",
       links: [],
-      dailyTurnCap: 0,
-      dailyTokenCap: 0,
       autonomy,
       mcpServers: [
         {
@@ -929,6 +927,35 @@ describe("PUT /api/projects/[projectId] PM settings", () => {
       "pm.contextNotes",
       "pm.links",
     ]);
+  });
+
+  it.each([
+    ["the switch", { enabled: true }],
+    ["the model", { model: "x/y" }],
+    ["the MCP connections", { mcpServers: [] }],
+  ])("refuses a project owner who is not an instance admin %s, which are the instance's", async (_name, pm) => {
+    getAuthUser.mockResolvedValue(OWNER);
+    check.mockResolvedValue(true);
+    reads(stored("old"));
+
+    const res = await PUT(putRequest({ pm }), ctx());
+
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toMatch(/Only an instance admin can change PM/);
+    expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("takes nothing from a turn or token cap that an older client still sends, and does not refuse the save for it", async () => {
+    getAuthUser.mockResolvedValue(OWNER);
+    check.mockResolvedValue(true);
+    reads(stored("old"));
+    writes({ _id: PROJECT_ID, pm: stored("old") });
+
+    const res = await PUT(putRequest({ pm: { contextNotes: "notes", dailyTurnCap: 5, dailyTokenCap: 9 } }), ctx());
+
+    expect(res.status).toBe(200);
+    const [, update] = projectFindOneAndUpdate.mock.calls[0];
+    expect(Object.keys(update)).toEqual(["pm.contextNotes"]);
   });
 
   it("writes the MCP list only over the list it merged the tokens from", async () => {
@@ -1002,6 +1029,7 @@ describe("the project answer says whether the PM agent can run", () => {
     ["with a key", { available: true, needsPlan: false, unreadable: false }, { pmAvailable: true, pmNeedsPlan: false, pmKeyUnreadable: false }],
     ["when only a plan would turn it on", { available: false, needsPlan: true, unreadable: false }, { pmAvailable: false, pmNeedsPlan: true, pmKeyUnreadable: false }],
     ["when the stored key cannot be read", { available: false, needsPlan: false, unreadable: true }, { pmAvailable: false, pmNeedsPlan: false, pmKeyUnreadable: true }],
+    ["when the operator has switched its key off", { available: false, needsPlan: false, unreadable: false, locked: true }, { pmAvailable: false, pmLocked: true, pmNeedsPlan: false }],
   ])("on a read, %s", async (_case, availability, expected) => {
     modelKeyAvailability.mockResolvedValue(availability);
 
@@ -1019,6 +1047,14 @@ describe("the project answer says whether the PM agent can run", () => {
     expect(await res.json()).toMatchObject({ pmAvailable: false, pmNeedsPlan: true });
   });
 
+  it("on a save, the operator's lock too", async () => {
+    modelKeyAvailability.mockResolvedValue({ available: false, needsPlan: false, unreadable: false, locked: true });
+
+    const res = await PUT(putRequest({ name: "Renamed" }), ctx());
+
+    expect(await res.json()).toMatchObject({ pmAvailable: false, pmLocked: true });
+  });
+
   it("answers the project, and leaves the three fields out, when the key cannot be looked up", async () => {
     modelKeyAvailability.mockRejectedValue(new Error("database blip"));
 
@@ -1027,7 +1063,7 @@ describe("the project answer says whether the PM agent can run", () => {
 
     expect(res.status).toBe(200);
     expect(body).toMatchObject({ name: "Test Project" });
-    for (const field of ["pmAvailable", "pmNeedsPlan", "pmKeyUnreadable"]) expect(body).not.toHaveProperty(field);
+    for (const field of ["pmAvailable", "pmNeedsPlan", "pmKeyUnreadable", "pmLocked"]) expect(body).not.toHaveProperty(field);
   });
 
   it("saves, and answers the project without the three fields, when the key cannot be looked up", async () => {
@@ -1037,7 +1073,7 @@ describe("the project answer says whether the PM agent can run", () => {
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    for (const field of ["pmAvailable", "pmNeedsPlan", "pmKeyUnreadable"]) expect(body).not.toHaveProperty(field);
+    for (const field of ["pmAvailable", "pmNeedsPlan", "pmKeyUnreadable", "pmLocked"]) expect(body).not.toHaveProperty(field);
   });
 });
 

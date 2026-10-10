@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import type { Types } from "mongoose";
 import type { IUser, IWorker } from "@/types";
-import { countInWindow } from "./rate-limit";
+import { countInLiveWindow, countInWindow } from "./rate-limit";
+import type { ScopedDb } from "./db-scope";
+import { organisationUploads } from "./upload-ownership";
 import { organisationDomain } from "./organisation-host";
 import { ORGANISATION_LIMIT_HEADER, type RequestLimitScope } from "./organisation-limit-header";
 
@@ -102,4 +104,12 @@ export function storageLimitRefusal(storedBytes: number, incomingBytes: number):
     },
     { status: 413 }
   );
+}
+
+export async function organisationUsage(db: ScopedDb) {
+  const [requestsThisMinute, storedBytes] = await Promise.all([
+    countInLiveWindow(organisationRequestsKey(db.organisation)),
+    organisationUploads(db)?.bytesStored() ?? 0,
+  ]);
+  return { requestsThisMinute, requestsPerMinute: requestsPerMinute(), storedBytes, storageLimitBytes: storageLimitBytes() };
 }

@@ -140,7 +140,8 @@ src/
   the run. Staleness is **not** judged by silence: `agent` reports on tool use rather than on a
   clock, so a worker thinking for minutes is indistinguishable from a dead one. A genuinely
   abandoned run is reclaimed after `EXECUTION_LEASE_MS` (2 h) with attempt accounting.
-- **PM autonomy**: Opt-in per project (Settings → PM Agent → Autonomy). Board reviews run from `pm.autonomy.reviewHour` every `pm.autonomy.reviewIntervalHours` in the project's own timezone; each slot is claimed atomically via `pm.autonomy.lastReviewSlot` (`YYYY-MM-DDTHH`) so it runs at most once. A review gets a server-computed digest (missing acceptance criteria, tasks stuck in a column, duplicate titles — `src/lib/pm/board-review.ts`) and runs with `change_status`/`create_task` withheld. Tasks entering `needs_human_review` are queued in `pmtriggers` and reviewed automatically. Autonomous turns count against `pm.dailyTurnCap` and are attributed to the `pm` user.
+- **AI gateway** (`src/lib/ai-gateway/`, BP-679/680/681/682): the one door to a model, kept so by `only-door.test.ts`. `openGate` resolves the key (`resolveModelKey`: own key first and never replaced by ours, `needs_plan` on Free, the operator's key only with `ai.managed`) and refuses with 429 once an organisation has spent its allowance; `gatewayChat` (one PM round-trip) and `gatewayAssist` (one AI Assist generation) call and record. Every call is an `AiUsage` row and an increment of the organisation's `AiBudget` counters (`day`, and `month` or `trial`; UTC; unique `{kind, period, organisation}`); an own key is counted apart (`ownTokens`) and never refused. The allowance is `AI_TRIAL_TOKENS` / `AI_MONTHLY_TOKENS` + `AI_MEMBER_TOKENS` per active member above ten, a day at most `AI_DAILY_PERCENT` of it (hosted defaults only with `ORGANISATION_DOMAIN`). Checked before a call and recorded after, so it is soft by at most one call per running turn. What the PM page shows for a project's day is read from the `AiUsage` rows (`src/lib/pm/day-usage.ts`); a worker's run never goes through the gateway
+- **PM autonomy**: Opt-in per project (Settings → PM Agent → Autonomy). Board reviews run from `pm.autonomy.reviewHour` every `pm.autonomy.reviewIntervalHours` in the project's own timezone; each slot is claimed atomically via `pm.autonomy.lastReviewSlot` (`YYYY-MM-DDTHH`) so it runs at most once. A review gets a server-computed digest (missing acceptance criteria, tasks stuck in a column, duplicate titles — `src/lib/pm/board-review.ts`) and runs with `change_status`/`create_task` withheld. Tasks entering `needs_human_review` are queued in `pmtriggers` and reviewed automatically. Autonomous turns are counted in the organisation's AI allowance like any other and are attributed to the `pm` user.
 
 ## Environment variables
 ```
@@ -151,16 +152,17 @@ OPENROUTER_API_KEY=       # Optional — the PM agent (chat-driven project manag
                           # whose plan includes managed AI (`ai.managed`: Pro and the trial). An organisation's
                           # own key, stored sealed in Settings → AI key, is used first on any plan and is never
                           # replaced by this one (`src/lib/model-keys.ts`, BP-652)
-AI_DAILY_GENERATION_CAP=  # Optional — AI task generations per project per day (default 200); each
-                          # person is also held to 20 per 15 minutes, one at a time (BP-323)
+AI_TRIAL_TOKENS=          # Optional — tokens a trial may spend of the operator's AI key in all (hosted
+AI_MONTHLY_TOKENS=        # default 3,000,000), and a paid plan per UTC month (15,000,000) plus
+AI_MEMBER_TOKENS=         # AI_MEMBER_TOKENS (1,000,000) for each active member above the ten included;
+AI_DAILY_PERCENT=         # one UTC day may use at most AI_DAILY_PERCENT (20) of that. Counted by the gateway
+                          # (`src/lib/ai-gateway/`, BP-679/680) on every PM and AI Assist call; a set value
+                          # applies anywhere and `0` turns it off, unset the hosted default applies only with
+                          # ORGANISATION_DOMAIN, so self-hosted has no limit until one is set. A refusal is
+                          # 429 naming the number and the renewal. An organisation's own key is counted, never
+                          # refused. Each person is also held to 20 AI Assist generations per 15 minutes (BP-323)
 PM_MODEL=                 # Optional — PM agent model (default: moonshotai/kimi-k2.6)
 PM_MAX_TOKENS=            # Optional — PM agent max output tokens per call (default: 8192)
-PM_DAILY_TURN_CAP=        # Optional — PM agent turns per project per day (default: 100). A RATE
-                          # limit, not a budget: one turn is up to 15 model round-trips, so this
-                          # permits between 100 and 1500 calls (BP-284)
-PM_DAILY_TOKEN_CAP=       # Optional — tokens per project per day; unset means no ceiling. The
-                          # budget, in what the model bills. Settings → PM Agent shows the day's
-                          # real turns, calls and tokens to set it from
 PM_SCHEDULER_TICK_MS=     # Optional — PM autonomy scheduler tick (default: 300000)
 WEBHOOK_SIGNING_SECRET=   # Optional — HMACs outgoing webhook deliveries (x-boardplanner-signature)
                           # as set; with ORGANISATION_DOMAIN each organisation signs with its own key,

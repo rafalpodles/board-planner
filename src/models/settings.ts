@@ -7,7 +7,6 @@ export interface ISettings {
   _id: mongoose.Types.ObjectId;
   aiModel: string;
   pmDefaultModel: string;
-  pmDefaultDailyTurnCap: number;
   signUpDomains: string[];
   openrouterKey?: string;
   openrouterKeyHint?: string;
@@ -21,10 +20,6 @@ const settingsSchema = new Schema<ISettings>({
   pmDefaultModel: {
     type: String,
     default: "",
-  },
-  pmDefaultDailyTurnCap: {
-    type: Number,
-    default: 0,
   },
   signUpDomains: {
     type: [String],

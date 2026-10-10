@@ -24,6 +24,9 @@ export interface IOrganisation {
   entitlements: IOrganisationEntitlements;
   suspendedAt?: Date | null;
   suspendedReason?: string;
+  // The operator switched off what this organisation may spend of the operator's AI key; its own key is not touched (BP-680)
+  aiLockedAt?: Date | null;
+  aiLockedReason?: string;
   deletedAt?: Date | null;
   deletingAt?: Date | null;
   // When the admins were told the organisation will be deleted for want of anybody signing in (BP-674)
@@ -32,6 +35,9 @@ export interface IOrganisation {
   deadNoticeClaimedAt?: Date | null;
   // The people count last told to the licence service, so only a change is told again (BP-949)
   memberSync?: { members: number; at: Date } | null;
+  // The operator's own figure for what this organisation may spend of the operator's key, in place of its plan's, for the
+  // counter it was set on (a trial's, or the month's); tokens null is no limit at all (BP-678)
+  aiAllowance?: { tokens: number | null; scope: "trial" | "month" } | null;
 }
 
 const entitlementsSchema = new Schema<IOrganisationEntitlements>(
@@ -56,10 +62,16 @@ const organisationSchema = new Schema<IOrganisation>({
   licenceKey: { type: String },
   suspendedAt: { type: Date, default: null },
   suspendedReason: { type: String, default: "" },
+  aiLockedAt: { type: Date, default: null },
+  aiLockedReason: { type: String, default: "" },
   deletedAt: { type: Date, default: null },
   deletingAt: { type: Date, default: null },
   deadNoticeAt: { type: Date, default: null },
   deadNoticeClaimedAt: { type: Date, default: null },
+  aiAllowance: {
+    type: new Schema({ tokens: { type: Number, min: 1, default: null }, scope: { type: String, enum: ["trial", "month"], required: true } }, { _id: false }),
+    default: null,
+  },
   memberSync: { type: new Schema({ members: { type: Number, required: true, min: 0 }, at: { type: Date, required: true } }, { _id: false }), default: null },
   entitlements: {
     type: entitlementsSchema,

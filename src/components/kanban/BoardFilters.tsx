@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties } from "react";
 import {
-  ApiTask, ApiCustomField,
+  ApiTask, ApiCustomField, ApiSavedView,
   ApiProjectCategory,
   CATEGORIES,
   PRIORITIES,
@@ -20,7 +20,10 @@ import { categoryColor } from "@/lib/category-colors";
 import { AnyColumn } from "@/lib/columns";
 import { SortContext, sortTasks } from "@/lib/task-sort";
 import { ListColumnId } from "@/lib/list-columns";
+import { GroupBy, groupByOptions } from "@/lib/task-grouping";
 import { ColumnPicker } from "./ColumnPicker";
+import { OptionFilter } from "./OptionFilter";
+import { ViewsMenu } from "./ViewsMenu";
 import { usePanelClamp } from "@/hooks/use-panel-clamp";
 import {
   BoardFilterValues,
@@ -35,15 +38,19 @@ import {
   statusOptions,
   statusRoleMap,
   UNASSIGNED,
+  ME,
   type FieldFilter,
   type BuiltInFilterKey,
 } from "@/lib/board-filters-state";
 import {
   activeFields,
   isOptionField,
+  labelMatches,
   matchesAllFieldFilters,
   orderedOptions,
+  pickedOptions,
   sortedFields,
+  taskMatchesLabelSearch,
 } from "@/lib/custom-fields";
 
 interface Filters extends BoardFilterValues {
@@ -93,6 +100,23 @@ interface BoardFiltersProps {
   hiddenColumns?: ListColumnId[];
   customFields?: ApiCustomField[];
   onHiddenColumnsChange?: (hidden: ListColumnId[]) => void;
+  groupBy?: GroupBy;
+  onGroupByChange?: (groupBy: GroupBy) => void;
+  showGroupBy?: boolean;
+  /** Present on the board's own page: the saved-views menu, and how the parts of a view this bar
+      does not own (layout, sprint scope) are applied */
+  views?: {
+    projectRef: string;
+    canShare: boolean;
+    viewMode: "board" | "list";
+    sprintScope: string;
+    onApplied: (view: ApiSavedView) => void;
+  };
+  /** Who can be assigned here, so a view naming somebody who has left applies without them */
+  knownAssignees?: string[];
+  /** A view to apply once the stored filters have been read, e.g. from `?view=` */
+  pendingView?: ApiSavedView | null;
+  onPendingViewApplied?: () => void;
   /** Separate from the handler above: the board has no columns to pick, but it still
       has to hydrate the stored set, or the next load writes an empty one back */
   showColumnPicker?: boolean;
@@ -123,6 +147,13 @@ export function BoardFilters({
   columns,
   hiddenColumns,
   onHiddenColumnsChange,
+  groupBy = "",
+  onGroupByChange,
+  showGroupBy,
+  views,
+  knownAssignees,
+  pendingView,
+  onPendingViewApplied,
   showColumnPicker,
   onFilter,
   customFields = [],
@@ -155,12 +186,70 @@ export function BoardFilters({
     setFilters((f) => ({ ...f, ...state.filters }));
     onSortChange(state.sortField, state.sortDir);
     onHiddenColumnsChange?.(state.hiddenColumns);
+    onGroupByChange?.(state.groupBy);
     setShowFilters(state.showFilters);
     setInitialized(true);
     // onSortChange is the owner's setter; re-running on its identity would
     // re-hydrate over whatever the user has since chosen
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, currentUsername]);
+
+  const viewAssignee = useRef("");
+  useEffect(() => {
+    const who = viewAssignee.current;
+    if (!who || !knownAssignees?.length) return;
+    viewAssignee.current = "";
+    const onATask = tasks.some((t) => t.assignee && typeof t.assignee === "object" && t.assignee.username === who);
+    if (!knownAssignees.includes(who) && !onATask) {
+      setFilters((f) => (f.assignee === who ? { ...f, assignee: "" } : f));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [knownAssignees]);
+
+  const applyView = useCallback(
+    (view: ApiSavedView) => {
+      const state = migratePersistedFilters(
+        {
+          filters: view.filters,
+          sortField: view.sortField,
+          sortDir: view.sortDir,
+          hiddenColumns: view.hiddenColumns,
+          groupBy: view.groupBy,
+        },
+        currentUsername,
+        customFields,
+        categories.length > 0 ? categories : undefined
+      );
+      const who = state.filters.assignee;
+      // Dropped only when nobody could be given a task by that name and no task carries it:
+      // the roster leaves out machines, and a person who lost access may still hold tasks here
+      const onATask = tasks.some((t) => t.assignee && typeof t.assignee === "object" && t.assignee.username === who);
+      // The tasks to look through are this scope's, so a view that moves to another scope keeps the
+      // person: a filter that finds nobody there can be cleared, one dropped wrongly cannot be told
+      const staysHere = view.sprintScope === (views?.sprintScope ?? "all");
+      if (staysHere && who && who !== ME && who !== UNASSIGNED && knownAssignees?.length && !knownAssignees.includes(who) && !onATask) {
+        state.filters.assignee = "";
+      }
+      // The roster is a request of its own and may not have answered yet: the check is made again
+      // when it does
+      viewAssignee.current = staysHere && !knownAssignees?.length && who !== ME && who !== UNASSIGNED ? who : "";
+      setFilters({ ...EMPTY_FILTERS, ...state.filters, search: view.search ?? "" });
+      onSortChange(state.sortField, state.sortDir);
+      onHiddenColumnsChange?.(state.hiddenColumns);
+      onGroupByChange?.(state.groupBy);
+      onShowArchivedChange?.(false);
+      views?.onApplied(view);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [currentUsername, customFields, categories, knownAssignees, tasks, views?.onApplied, views?.sprintScope]
+  );
+
+  useEffect(() => {
+    if (!pendingView || !initialized) return;
+    applyView(pendingView);
+    onPendingViewApplied?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingView, initialized]);
 
   const persistState = useCallback(() => {
     const { search: _search, ...rest } = filters;
@@ -171,8 +260,9 @@ export function BoardFilters({
       sortDir,
       showFilters,
       hiddenColumns: hiddenColumns ?? [],
+      groupBy,
     });
-  }, [projectId, filters, sortField, sortDir, showFilters, hiddenColumns]);
+  }, [projectId, filters, sortField, sortDir, showFilters, hiddenColumns, groupBy]);
 
   useEffect(() => {
     if (initialized) persistState();
@@ -220,8 +310,10 @@ export function BoardFilters({
 
     if (filters.search) {
       const q = filters.search.toLowerCase().trim();
+      const labelHits = labelMatches(customFields, q);
       result = result.filter((t) => {
         if (t.title.toLowerCase().includes(q)) return true;
+        if (taskMatchesLabelSearch(t.customFieldValues, labelHits)) return true;
         // Task-key search: "cp-128", "CP-128" and bare "128" all match CP-128
         const key = `${projectKey ?? ""}-${t.taskNumber}`.toLowerCase();
         return key.includes(q) || String(t.taskNumber).startsWith(q);
@@ -230,11 +322,12 @@ export function BoardFilters({
     if (filters.assignee === UNASSIGNED) {
       result = result.filter((t) => !t.assignee);
     } else if (filters.assignee) {
+      const wanted = filters.assignee === ME ? currentUsername : filters.assignee;
       result = result.filter(
         (t) =>
           t.assignee &&
           typeof t.assignee === "object" &&
-          t.assignee.username === filters.assignee
+          t.assignee.username === wanted
       );
     }
     if (filters.category) {
@@ -345,9 +438,14 @@ export function BoardFilters({
   if (filters.assignee) {
     chips.push({
       key: "assignee",
-      label: filters.assignee === UNASSIGNED ? "Unassigned" : filters.assignee,
+      label:
+        filters.assignee === UNASSIGNED ? "Unassigned" : filters.assignee === ME ? "Me" : filters.assignee,
       initial:
-        filters.assignee === UNASSIGNED ? "–" : filters.assignee.charAt(0).toUpperCase(),
+        filters.assignee === UNASSIGNED
+          ? "–"
+          : filters.assignee === ME
+            ? "M"
+            : filters.assignee.charAt(0).toUpperCase(),
     });
   }
   if (filters.category) {
@@ -384,10 +482,13 @@ export function BoardFilters({
   for (const field of filterableFields) {
     const filter = filters.fields?.[field._id];
     if (!isFieldFilterSet(filter)) continue;
-    const option = orderedOptions(field).find((o) => o.id === filter?.value);
+    const chosen = orderedOptions(field).filter((o) =>
+      field.fieldType === "multiselect" ? pickedOptions(filter).includes(o.id) : o.id === filter?.value
+    );
+    const option = chosen[0];
     const range = [filter?.from, filter?.to];
     const label = option
-      ? `${field.name}: ${option.value}`
+      ? `${field.name}: ${chosen.map((o) => o.value).join(filter?.mode === "all" ? " and " : " or ")}`
       : filter?.value
         ? `${field.name}: ${filter.value}`
         : `${field.name}: ${range[0] || "…"}–${range[1] || "…"}`;
@@ -395,6 +496,7 @@ export function BoardFilters({
   }
 
   if (showArchived) chips.push({ key: "archived", label: "Archived shown" });
+  if (filters.search) chips.push({ key: "search", label: `Search: ${filters.search}` });
 
   const selectClass =
     "focus-ring h-8 w-full rounded-lg border border-border bg-bg-input px-2 text-[12px] text-text";
@@ -497,7 +599,9 @@ export function BoardFilters({
                           ? clearFieldFilter(chip.fieldId)
                           : chip.key === "archived"
                             ? onShowArchivedChange?.(false)
-                            : unset(chip.key as BuiltInFilterKey)
+                            : chip.key === "search"
+                              ? setFilters((f) => ({ ...f, search: "" }))
+                              : unset(chip.key as BuiltInFilterKey)
                       }
                     />
                   ))}
@@ -514,6 +618,7 @@ export function BoardFilters({
                   className={selectClass}
                 >
                   <option value="">All assignees</option>
+                  <option value={ME}>Me</option>
                   <option value={UNASSIGNED}>Unassigned</option>
                   {assignees.map((a) => (
                     <option key={a.username} value={a.username}>
@@ -617,7 +722,15 @@ export function BoardFilters({
               <>
                 <div className="my-3 h-px bg-border" />
                 <div className="grid grid-cols-2 gap-2">
-                  {filterableFields.map((field) => (
+                  {filterableFields.map((field) => field.fieldType === "multiselect" ? (
+                    <div key={field._id} className="col-span-2">
+                      <OptionFilter
+                        field={field}
+                        filter={fieldFilter(field._id)}
+                        onChange={(patch) => setFieldFilter(field._id, patch)}
+                      />
+                    </div>
+                  ) : (
                     <Field key={field._id} label={field.name}>
                       {field.fieldType === "number" || field.fieldType === "date" ? (
                         // From/to rather than one box: a range is what people want from
@@ -679,6 +792,28 @@ export function BoardFilters({
         )}
       </div>
 
+      {views && (
+        <ViewsMenu
+          projectId={projectId}
+          projectRef={views.projectRef}
+          canShare={views.canShare}
+          onApply={applyView}
+          snapshot={() => {
+            const { search, ...rest } = filters;
+            return {
+              filters: rest as unknown as Record<string, unknown>,
+              search,
+              sortField,
+              sortDir,
+              viewMode: views.viewMode,
+              groupBy,
+              sprintScope: views.sprintScope,
+              hiddenColumns: hiddenColumns ?? [],
+            };
+          }}
+        />
+      )}
+
       {hasActiveFilters && (
         <button
           onClick={clearFilters}
@@ -688,7 +823,28 @@ export function BoardFilters({
         </button>
       )}
 
-      <div className="flex h-11 shrink-0 items-center overflow-hidden rounded-lg border border-border bg-bg-card md:ml-auto">
+      {showGroupBy && onGroupByChange && (
+        <div className="flex h-11 shrink-0 items-center overflow-hidden rounded-lg border border-border bg-bg-card md:ml-auto">
+          <select
+            value={groupBy}
+            aria-label="Group tasks by"
+            onChange={(e) => onGroupByChange(e.target.value as GroupBy)}
+            className="focus-ring-inset h-full max-w-[min(16rem,60vw)] truncate rounded-lg bg-transparent px-2.5 text-[13px] text-text-muted"
+          >
+            {groupByOptions(customFields).map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.value ? `Group: ${o.label}` : "No grouping"}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      <div
+        className={`flex h-11 shrink-0 items-center overflow-hidden rounded-lg border border-border bg-bg-card ${
+          showGroupBy && onGroupByChange ? "" : "md:ml-auto"
+        }`}
+      >
         <select
           value={sortField}
           aria-label="Sort tasks by"
@@ -779,7 +935,9 @@ function FilterChip({
           {initial}
         </span>
       )}
-      <span className="max-w-[9rem] truncate">{label}</span>
+      <span className="max-w-[9rem] truncate" title={label}>
+        {label}
+      </span>
       <button
         onClick={onRemove}
         aria-label={`Remove ${label} filter`}

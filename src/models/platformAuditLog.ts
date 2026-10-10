@@ -5,11 +5,15 @@ export const PLATFORM_AUDIT_ACTIONS = [
   "organisations_listed",
   "organisation_suspended",
   "organisation_resumed",
+  "organisation_ai_locked",
+  "organisation_ai_unlocked",
   "organisation_delete_started",
   "organisation_deleted",
   "organisation_exported",
   "organisation_dead_noticed",
   "organisation_dead_cleared",
+  "ai_allowance_set",
+  "ai_allowance_cleared",
 ] as const;
 export type PlatformAuditAction = (typeof PLATFORM_AUDIT_ACTIONS)[number];
 

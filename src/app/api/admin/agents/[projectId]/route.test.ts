@@ -52,7 +52,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   getAuthUser.mockResolvedValue({ _id: ADMIN, role: "admin", viaMachineCredential: false });
   logProjectAudit.mockResolvedValue(undefined);
-  stored({ enabled: true, model: "x/y", dailyTurnCap: 50 });
+  stored({ enabled: true, model: "x/y" });
 });
 
 describe("PATCH /api/admin/agents/:projectId", () => {
@@ -64,20 +64,19 @@ describe("PATCH /api/admin/agents/:projectId", () => {
   });
 
   it("writes several at once", async () => {
-    await patch({ enabled: true, lockedByInstance: true, model: " a/b ", dailyTurnCap: 12 });
+    await patch({ enabled: true, lockedByInstance: true, model: " a/b " });
 
     expect(written()).toEqual({
       $set: {
         "pm.enabled": true,
         "pm.lockedByInstance": true,
         "pm.model": "a/b",
-        "pm.dailyTurnCap": 12,
       },
     });
   });
 
   it("answers with the shape the settings screen reads, not the whole project", async () => {
-    stored({ enabled: true, lockedByInstance: false, model: "x/y", dailyTurnCap: 7 });
+    stored({ enabled: true, lockedByInstance: false, model: "x/y" });
 
     const body = await (await patch({ enabled: true })).json();
 
@@ -87,7 +86,6 @@ describe("PATCH /api/admin/agents/:projectId", () => {
       enabled: true,
       lockedByInstance: false,
       model: "x/y",
-      dailyTurnCap: 7,
     });
   });
 
@@ -96,28 +94,28 @@ describe("PATCH /api/admin/agents/:projectId", () => {
 
     const body = await (await patch({ lockedByInstance: true })).json();
 
-    expect(body).toMatchObject({ enabled: false, lockedByInstance: true, model: "", dailyTurnCap: 0 });
+    expect(body).toMatchObject({ enabled: false, lockedByInstance: true, model: "" });
   });
 
   it("answers with what it wrote over what it found", async () => {
-    stored({ enabled: true, lockedByInstance: false, model: "x/y", dailyTurnCap: 7 });
+    stored({ enabled: true, lockedByInstance: false, model: "x/y" });
 
     const body = await (await patch({ enabled: false, model: "a/b" })).json();
 
-    expect(body).toMatchObject({ enabled: false, lockedByInstance: false, model: "a/b", dailyTurnCap: 7 });
+    expect(body).toMatchObject({ enabled: false, lockedByInstance: false, model: "a/b" });
   });
 
   // The audit row is what an instance admin's reach over somebody else's board is read from
   // afterwards, so it names each field with its value before and after, and says who it was.
   it("records what was changed on the project's audit log", async () => {
-    await patch({ enabled: false, dailyTurnCap: 0 });
+    await patch({ enabled: false });
 
     expect(logProjectAudit).toHaveBeenCalledWith(
       scopedToDefaultOrganisation(),
       PROJECT_ID,
       ADMIN,
       "settings_updated",
-      ["Instance admin console", "PM agent: on → off", "PM turns per day: 50 → server default"]
+      ["Instance admin console", "PM agent: on → off"]
     );
   });
 
@@ -186,17 +184,21 @@ describe("PATCH /api/admin/agents/:projectId", () => {
       ["lockedByInstance as a number", { lockedByInstance: 1 }],
       ["model as an object", { model: { name: "x" } }],
       ["a model past a hundred characters", { model: "x".repeat(101) }],
-      ["a fractional turn cap", { dailyTurnCap: 1.5 }],
-      ["a negative turn cap", { dailyTurnCap: -1 }],
-      ["a turn cap past a thousand", { dailyTurnCap: 1001 }],
     ])("400s %s", async (_name, body) => {
       expect((await patch(body)).status).toBe(400);
       expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
     });
 
-    it("accepts the ends of the turn-cap range", async () => {
-      expect((await patch({ dailyTurnCap: 0 })).status).toBe(200);
-      expect((await patch({ dailyTurnCap: 1000 })).status).toBe(200);
+    it("takes nothing from a turn cap that an older client still sends beside a field it does change: there is none", async () => {
+      const res = await patch({ enabled: false, dailyTurnCap: 12 });
+
+      expect(res.status).toBe(200);
+      expect(written()).toEqual({ $set: { "pm.enabled": false } });
+    });
+
+    it("answers 400 for a request that carries nothing but the cap", async () => {
+      expect((await patch({ dailyTurnCap: 12 })).status).toBe(400);
+      expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
     });
 
     it("404s a project that does not exist", async () => {

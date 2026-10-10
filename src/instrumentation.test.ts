@@ -240,6 +240,30 @@ describe("register", () => {
     expect(warned).toHaveBeenCalledWith(expect.stringContaining("OPENAI_API_KEY is no longer read"));
   });
 
+  it("says at boot that a removed AI cap is no longer read, and that a self-hosted key is bounded by nothing", async () => {
+    process.env.NEXT_RUNTIME = "nodejs";
+    delete process.env.ENCRYPTION_KEY;
+    delete process.env.ORGANISATION_DOMAIN;
+    delete process.env.AI_MONTHLY_TOKENS;
+    delete process.env.AI_TRIAL_TOKENS;
+    process.env.OPENROUTER_API_KEY = "sk-or-v1-0123456789abcdef";
+    process.env.PM_DAILY_TURN_CAP = "100";
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(process, "exit").mockImplementation((() => {}) as never);
+    const { register } = await import("./instrumentation");
+
+    try {
+      await register();
+    } finally {
+      delete process.env.PM_DAILY_TURN_CAP;
+    }
+
+    expect(warned).toHaveBeenCalledWith(expect.stringContaining("PM_DAILY_TURN_CAP is no longer read"));
+    expect(warned).toHaveBeenCalledWith(expect.stringContaining("nothing limits what AI may spend"));
+  });
+
   it("stays quiet about OPENAI_API_KEY once the OpenRouter key is set", async () => {
     process.env.NEXT_RUNTIME = "nodejs";
     delete process.env.ENCRYPTION_KEY;

@@ -400,6 +400,40 @@ export interface ApiProjectCategory {
   color: string;
 }
 
+export interface ISavedView {
+  _id: Types.ObjectId;
+  name: string;
+  owner: Types.ObjectId;
+  shared: boolean;
+  filters: Record<string, unknown>;
+  search: string;
+  sortField: string;
+  sortDir: "asc" | "desc";
+  viewMode: "board" | "list";
+  groupBy: string;
+  sprintScope: string;
+  hiddenColumns: string[];
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ApiSavedView {
+  _id: string;
+  name: string;
+  shared: boolean;
+  /** Whether the reader may rename, update or delete it */
+  canEdit: boolean;
+  mine: boolean;
+  filters: Record<string, unknown>;
+  search: string;
+  sortField: string;
+  sortDir: "asc" | "desc";
+  viewMode: "board" | "list";
+  groupBy: string;
+  sprintScope: string;
+  hiddenColumns: string[];
+}
+
 export interface ITaskTemplate {
   _id: Types.ObjectId;
   name: string;
@@ -605,9 +639,6 @@ export interface IPmConfig {
   model: string;
   contextNotes: string;
   links: IPmLink[];
-  dailyTurnCap?: number;
-  /** Tokens per project per day; 0 is no ceiling (BP-284) */
-  dailyTokenCap?: number;
   mcpServers?: IPmMcpServer[];
   autonomy?: IPmAutonomy;
 }
@@ -957,6 +988,7 @@ export interface IProject {
   categories: IProjectCategory[];
   columns: IProjectColumn[];
   taskTemplates: ITaskTemplate[];
+  savedViews: ISavedView[];
   customFields: ICustomField[];
   // Which custom field's numeric value sums as this project's estimate. "" means the
   // project does not estimate. Must always name a live number field — cleared by the
@@ -1001,17 +1033,8 @@ export interface PmMessageTrigger {
   taskKey?: string;
 }
 
-/** What one PM turn cost, summed over its round-trips (BP-284) */
+/** What a PM turn records about itself; its cost is the gateway's usage rows */
 export interface IPmUsage {
-  promptTokens: number;
-  completionTokens: number;
-  totalTokens: number;
-  /** Of `promptTokens`, how many were served from the provider's cache — a subset, not an addition */
-  cachedPromptTokens: number;
-  /** Prompt tokens written into the cache, where the provider prices writes separately */
-  cacheWriteTokens: number;
-  /** Round-trips to the model — the number `dailyTurnCap` was mistaken for */
-  calls: number;
   /** The turn stopped because it ran out of steps, not because it was finished */
   hitStepLimit: boolean;
 }
@@ -1286,6 +1309,8 @@ export interface ApiProject {
   pmNeedsPlan?: boolean;
   // The key the organisation stored can no longer be read, so it has to be entered again
   pmKeyUnreadable?: boolean;
+  // The operator has switched its AI key off for this organisation, which has none of its own
+  pmLocked?: boolean;
   createdBy?: ApiUser | string;
   canAdmin?: boolean;
   createdAt: string;
@@ -1325,9 +1350,6 @@ export interface ApiPmConfig {
   model: string;
   contextNotes: string;
   links: IPmLink[];
-  dailyTurnCap?: number;
-  /** Tokens per project per day; 0 is no ceiling (BP-284) */
-  dailyTokenCap?: number;
   mcpServers?: ApiPmMcpServer[];
   autonomy?: IPmAutonomy;
 }

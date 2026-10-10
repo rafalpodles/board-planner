@@ -1,10 +1,17 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const generateTask = vi.fn();
 const projectFindOne = vi.fn();
 const resolveModelKey = vi.hoisted(() => vi.fn());
 const modelKeyAvailability = vi.hoisted(() => vi.fn());
 
+// The gateway's counters are its own tests' business (src/lib/ai-gateway): these only need the door to open
+const checkBudget = vi.hoisted(() => vi.fn(async () => ({ refusal: null as unknown, counter: "month" })));
+vi.mock("@/lib/ai-gateway/budget", () => ({ counterKindOf: async () => "month", checkBudget }));
+const getOrganisation = vi.hoisted(() => vi.fn(async () => ({ aiLockedAt: null as Date | null, aiLockedReason: "" })));
+vi.mock("@/lib/organisation", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/organisation")>()), getOrganisation }));
+const recordUsage = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/ai-gateway/usage", () => ({ recordUsage }));
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/rateLimit", async () => {
   const { inMemoryRateLimitModel } = await import("@/lib/rate-limit-test-store");
@@ -53,10 +60,6 @@ beforeEach(async () => {
   resolveModelKey.mockResolvedValue({ ok: true, key: "sk-the-orgs-key", source: "own" });
 });
 
-afterEach(() => {
-  delete process.env.AI_DAILY_GENERATION_CAP;
-});
-
 // BP-652. Whose key a generation is spent on is decided per organisation, before anything is counted
 describe("which key generate-task spends", () => {
   it("makes the call with the key it resolved for this organisation", async () => {
@@ -64,6 +67,39 @@ describe("which key generate-task spends", () => {
 
     expect(resolveModelKey).toHaveBeenCalledWith(expect.anything());
     expect(generateTask.mock.calls[0][3]).toBe("sk-the-orgs-key");
+  });
+
+  it("answers 429 with the number and the renewal when the organisation has used its AI allowance, and generates nothing", async () => {
+    resolveModelKey.mockResolvedValue({ ok: true, key: "sk-ours", source: "managed" });
+    checkBudget.mockResolvedValueOnce({ refusal: { scope: "month", used: 15_000_000, limit: 15_000_000, resetsAt: new Date("2026-11-01T00:00:00Z") }, counter: "month" });
+
+    const res = await generate("a task");
+
+    expect(res.status).toBe(429);
+    expect(await res.json()).toMatchObject({ reason: "ai_budget", scope: "month", used: 15_000_000, limit: 15_000_000, resetsAt: "2026-11-01T00:00:00.000Z" });
+    expect(generateTask).not.toHaveBeenCalled();
+  });
+
+  it("records what the generation cost for the project and for the person who asked, as AI Assist's", async () => {
+    generateTask.mockImplementation(async (...args: unknown[]) => {
+      (args[4] as (usage: unknown) => void)({ promptTokens: 9, completionTokens: 1, totalTokens: 10, cachedPromptTokens: 0, cacheWriteTokens: 0 });
+      return { title: "T", fields: {} };
+    });
+
+    await generate("a task", "u7", "p1");
+
+    expect(recordUsage).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ source: "assist", projectId: "p1", userId: "u7", keySource: "own" }), "month");
+  });
+
+  it("answers 403 with the operator's words while its key is switched off for the organisation, and generates nothing", async () => {
+    resolveModelKey.mockResolvedValue({ ok: true, key: "sk-ours", source: "managed" });
+    getOrganisation.mockResolvedValueOnce({ aiLockedAt: new Date(), aiLockedReason: "abuse report 17" });
+
+    const res = await generate("a task");
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ reason: "ai_locked", error: expect.stringMatching(/abuse report 17/) });
+    expect(generateTask).not.toHaveBeenCalled();
   });
 
   it("answers 402 when the plan has no managed AI and there is no key of its own, and generates nothing", async () => {
@@ -95,6 +131,9 @@ describe("which key generate-task spends", () => {
 
     modelKeyAvailability.mockResolvedValue({ available: false, needsPlan: false, unreadable: true });
     expect(await (await ask()).json()).toEqual({ enabled: false, needsPlan: false, keyUnreadable: true });
+
+    modelKeyAvailability.mockResolvedValue({ available: false, needsPlan: false, unreadable: false, locked: true });
+    expect(await (await ask()).json()).toEqual({ enabled: false, needsPlan: false, keyUnreadable: false, locked: true });
 
     expect(modelKeyAvailability).toHaveBeenCalledWith(expect.anything());
   });
@@ -138,18 +177,6 @@ describe("POST generate-task", () => {
     expect((await generate("a task", "u2")).status).toBe(200);
   });
 
-  it("stops a project at its daily cap, whoever asks", async () => {
-    process.env.AI_DAILY_GENERATION_CAP = "3";
-    for (const who of ["u1", "u2", "u3"]) expect((await generate("a task", who)).status).toBe(200);
-
-    const res = await generate("a task", "u4");
-
-    expect(res.status).toBe(429);
-    expect(generateTask).toHaveBeenCalledTimes(3);
-    // Another project has its own day
-    expect((await generate("a task", "u4", "p2")).status).toBe(200);
-  });
-
   it("runs one generation per person at a time", async () => {
     let finish!: (v: unknown) => void;
     generateTask.mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
@@ -177,31 +204,13 @@ describe("POST generate-task", () => {
     expect(generateTask).toHaveBeenCalledTimes(1);
   });
 
-  it("holds a daily cap to a burst from many people at once", async () => {
-    process.env.AI_DAILY_GENERATION_CAP = "3";
+  // BP-679: what a project may spend is the organisation's token allowance, counted by the gateway, not a number of generations
+  it("puts no count of generations on a project: many people in a day all get one", async () => {
+    const people = Array.from({ length: 250 }, (_, n) => `person-${n}`);
+    const statuses: number[] = [];
+    for (const who of people) statuses.push((await generate("a task", who)).status);
 
-    const statuses = (await Promise.all(["a", "b", "c", "d", "e", "f"].map((who) => generate("a task", who)))).map(
-      (r) => r.status
-    );
-
-    expect(statuses.filter((s) => s === 200), JSON.stringify(statuses)).toHaveLength(3);
-    expect(generateTask).toHaveBeenCalledTimes(3);
-  });
-
-  it("keeps the project's cap for a day, not for the throttle's fifteen minutes", async () => {
-    process.env.AI_DAILY_GENERATION_CAP = "1";
-    vi.useFakeTimers({ toFake: ["Date"] });
-    try {
-      vi.setSystemTime(new Date("2026-09-16T08:00:00Z"));
-      expect((await generate("a task", "u1")).status).toBe(200);
-
-      vi.setSystemTime(new Date("2026-09-16T09:00:00Z"));
-      expect((await generate("a task", "u2")).status).toBe(429);
-
-      vi.setSystemTime(new Date("2026-09-17T08:01:00Z"));
-      expect((await generate("a task", "u3")).status).toBe(200);
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(new Set(statuses)).toEqual(new Set([200]));
+    expect(generateTask).toHaveBeenCalledTimes(250);
   });
 });

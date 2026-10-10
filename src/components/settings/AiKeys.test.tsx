@@ -11,7 +11,8 @@ const { api, toast } = vi.hoisted(() => ({
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast, dismiss: vi.fn() }) }));
 
-const FREE_CLOUD = { hosted: true, plan: "free", set: false, hint: "", unreadable: false, included: false };
+const NO_USAGE = { scope: "month", used: 0, limit: null, resetsAt: null, today: 0, dailyCeiling: null, ownTokens: 0, calls: 0, ownCalls: 0, turns: null, locked: false, included: false };
+const FREE_CLOUD = { hosted: true, plan: "free", set: false, hint: "", unreadable: false, included: false, usage: NO_USAGE };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -182,7 +183,7 @@ describe("Settings → AI key", () => {
   });
 
   it("describes a self-hosted server's own key, not a plan", async () => {
-    api.get.mockResolvedValue({ hosted: false, plan: "free", set: false, hint: "", unreadable: false, included: true });
+    api.get.mockResolvedValue({ hosted: false, plan: "free", set: false, hint: "", unreadable: false, included: true, usage: NO_USAGE });
     render(<AiKeys />);
 
     expect(await screen.findByText(/runs on the key this server was set up with/)).toBeTruthy();
@@ -191,9 +192,168 @@ describe("Settings → AI key", () => {
   });
 
   it("says a self-hosted server with no key anywhere does not run", async () => {
-    api.get.mockResolvedValue({ hosted: false, plan: "free", set: false, hint: "", unreadable: false, included: false });
+    api.get.mockResolvedValue({ hosted: false, plan: "free", set: false, hint: "", unreadable: false, included: false, usage: NO_USAGE });
     render(<AiKeys />);
 
     expect(await screen.findByText(/no key was set on the server/)).toBeTruthy();
+  });
+});
+
+// BP-680: what the organisation has used of what it may spend of the operator's key
+describe("Settings → AI key: usage", () => {
+  const usage = (over: Record<string, unknown> = {}) => ({
+    scope: "month",
+    used: 4_200_000,
+    limit: 15_000_000,
+    resetsAt: "2026-11-01T00:00:00.000Z",
+    today: 900_000,
+    dailyCeiling: 3_000_000,
+    ownTokens: 0,
+    calls: 1_340,
+    ownCalls: 0,
+    turns: 120,
+    locked: false,
+    included: true,
+    ...over,
+  });
+  const PRO_CLOUD = { ...FREE_CLOUD, plan: "pro", included: true };
+
+  it("says how much of the month's allowance is used and when it renews, with the bar and the share", async () => {
+    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage() });
+    render(<AiKeys />);
+
+    const month = await screen.findByTestId("ai-usage-month");
+    expect(month.textContent).toBe("4,200,000 of 15,000,000 tokens used this month. It renews on 1 November 2026 (UTC).");
+    expect(screen.getByText("28% used")).toBeTruthy();
+    expect(screen.getByRole("progressbar", { name: "AI tokens used this month" }).getAttribute("aria-valuenow")).toBe("4200000");
+    expect(screen.getByTestId("ai-usage-today").textContent).toBe("Today (UTC): 900,000 tokens; one day may use at most 3,000,000.");
+  });
+
+  it("says how many PM turns and model calls the month held, beside the tokens, and in the singular for one", async () => {
+    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage() });
+    const { unmount } = render(<AiKeys />);
+    expect((await screen.findByTestId("ai-usage-activity")).textContent).toBe("120 PM turns this month, and 1,340 model calls on this service's key.");
+    unmount();
+
+    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ turns: 1, calls: 1 }) });
+    render(<AiKeys />);
+    expect((await screen.findByTestId("ai-usage-activity")).textContent).toBe("1 PM turn this month, and 1 model call on this service's key.");
+  });
+
+  it("says a month with no PM turns had none, and counts the singular of each on its own number", async () => {
+    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ turns: 0, calls: 12 }) });
+    const { unmount } = render(<AiKeys />);
+    expect((await screen.findByTestId("ai-usage-activity")).textContent).toBe("0 PM turns this month, and 12 model calls on this service's key.");
+    unmount();
+
+    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ turns: 1, calls: 2 }) });
+    render(<AiKeys />);
+    expect((await screen.findByTestId("ai-usage-activity")).textContent).toBe("1 PM turn this month, and 2 model calls on this service's key.");
+  });
+
+  it("says a trial's turns are the trial's", async () => {
+    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ scope: "trial", used: 100, limit: 3_000_000, resetsAt: null, dailyCeiling: 600_000, turns: 9, calls: 30 }) });
+    render(<AiKeys />);
+
+    expect((await screen.findByTestId("ai-usage-activity")).textContent).toBe("9 PM turns in your trial, and 30 model calls on this service's key.");
+  });
+
+  it("says what a turn and a call are, since the two are easily read as one", async () => {
+    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage() });
+    render(<AiKeys />);
+
+    expect(await screen.findByText(/A PM turn is up to 15 model calls; AI Assist makes one\./)).toBeTruthy();
+  });
+
+  it("says nothing of turns where the answer did not count them", async () => {
+    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ turns: null }) });
+    render(<AiKeys />);
+
+    await screen.findByTestId("ai-usage-month");
+    expect(screen.queryByTestId("ai-usage-activity")).toBeNull();
+  });
+
+  it("says a trial's allowance is for the trial, with nothing renewing", async () => {
+    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ scope: "trial", used: 3_000_000, limit: 3_000_000, resetsAt: null, dailyCeiling: 600_000 }) });
+    render(<AiKeys />);
+
+    expect((await screen.findByTestId("ai-usage-month")).textContent).toBe("3,000,000 of 3,000,000 tokens used in your trial.");
+    expect(screen.getByText("100% used")).toBeTruthy();
+  });
+
+  it("counts and shows tokens where nothing limits them, with no bar", async () => {
+    api.get.mockResolvedValue({ hosted: false, plan: "free", set: false, hint: "", unreadable: false, included: true, usage: usage({ limit: null, resetsAt: null, dailyCeiling: null, used: 12_345, today: 300 }) });
+    render(<AiKeys />);
+
+    expect((await screen.findByTestId("ai-usage-month")).textContent).toBe("12,345 tokens used this month, and nothing limits them.");
+    expect(screen.getByText("Not limited")).toBeTruthy();
+    expect(screen.queryByRole("progressbar")).toBeNull();
+    expect(screen.getByTestId("ai-usage-today").textContent).toBe("Today (UTC): 300 tokens.");
+  });
+
+  it("shows what an own key used apart, and says it is never limited, only when it used any", async () => {
+    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ ownTokens: 77_000, ownCalls: 41 }) });
+    render(<AiKeys />);
+    expect((await screen.findByTestId("ai-usage-own")).textContent).toBe("Your own key: 77,000 tokens in 41 calls this month, counted and never limited.");
+
+    cleanup();
+    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ ownTokens: 0 }) });
+    render(<AiKeys />);
+    await screen.findByTestId("ai-usage-month");
+    expect(screen.queryByTestId("ai-usage-own")).toBeNull();
+  });
+
+  it("shows a Free cloud organisation no allowance, which it does not have, and no card at all while it has used no key of its own", async () => {
+    api.get.mockResolvedValue({ ...FREE_CLOUD, usage: usage({ included: false, limit: null, dailyCeiling: null, resetsAt: null }) });
+    render(<AiKeys />);
+
+    await screen.findByText(/Without a key of your own it does not run on the Free plan/);
+    expect(screen.queryByText("AI usage")).toBeNull();
+    expect(screen.queryByRole("progressbar")).toBeNull();
+  });
+
+  it("shows only what its own key used, where the service's key is not one it may use", async () => {
+    api.get.mockResolvedValue({ ...FREE_CLOUD, set: true, hint: "abcd", usage: usage({ included: false, limit: null, dailyCeiling: null, resetsAt: null, ownTokens: 4_000, ownCalls: 1, locked: true }) });
+    render(<AiKeys />);
+
+    expect((await screen.findByTestId("ai-usage-own")).textContent).toBe("Your own key: 4,000 tokens in 1 call this month, counted and never limited.");
+    expect(screen.queryByTestId("ai-usage-month")).toBeNull();
+    expect(screen.queryByTestId("ai-usage-today")).toBeNull();
+    expect(screen.queryByTestId("ai-usage-activity")).toBeNull();
+    expect(screen.queryByTestId("ai-usage-locked")).toBeNull();
+    expect(screen.getAllByText("Your own key").length).toBe(2);
+  });
+
+  it("rounds the share down, so a month that is not yet spent is not shown as spent", async () => {
+    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ used: 14_950_000 }) });
+    render(<AiKeys />);
+
+    expect(await screen.findByText("99% used")).toBeTruthy();
+  });
+
+  it("says on the key card too that ours is switched off, so it does not promise what the operator took away", async () => {
+    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ locked: true }) });
+    render(<AiKeys />);
+
+    expect(await screen.findByText(/the operator has switched ours off for this organisation/)).toBeTruthy();
+    expect(screen.queryByText(/which your plan includes/)).toBeNull();
+    expect(screen.queryByText("Included")).toBeNull();
+  });
+
+  it("does not take the own key's word away: a stored key still reads as used first while the lock is on", async () => {
+    api.get.mockResolvedValue({ ...PRO_CLOUD, set: true, hint: "abcd", usage: usage({ locked: true }) });
+    render(<AiKeys />);
+
+    expect(await screen.findByText("Your own key")).toBeTruthy();
+    expect(screen.getByText(/It is used first/)).toBeTruthy();
+  });
+
+  it("says the operator has switched the key off, and offers the own key as the way on", async () => {
+    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ locked: true }) });
+    render(<AiKeys />);
+
+    const alert = await screen.findByTestId("ai-usage-locked");
+    expect(alert.textContent).toMatch(/The operator has switched off the use of its key for this organisation\. Add your own key below to keep going\./);
+    expect(screen.getAllByText("Switched off")).toHaveLength(2);
   });
 });

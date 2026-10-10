@@ -17,7 +17,7 @@ const TOKEN_FIELDS = ["githubToken", "gitlabToken", "codaToken"] as const;
 // CP-246 dropped these paths from the schema without a backfill, so every project older than that
 // deploy still stores them. Mongoose keeps unmapped keys in _doc and toObject() clones _doc whole,
 // so they reach the client unless removed here.
-const REMOVED_FIELDS = ["owner", "admins"] as const;
+const REMOVED_FIELDS = ["owner", "admins", "savedViews"] as const;
 
 export function maskSecretUrl(value: string | undefined): string {
   if (!value) return "";

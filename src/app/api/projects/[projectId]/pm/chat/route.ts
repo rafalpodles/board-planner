@@ -5,10 +5,8 @@ import { isDatabaseUnreachable } from "@/lib/db-errors";
 import { getAuthUser } from "@/lib/auth";
 import { ProvenanceError } from "@/lib/session";
 import { runPmTurn } from "@/lib/pm/agent";
-import { modelKeyRefusalResponse, resolveModelKey } from "@/lib/model-keys";
+import { openGate } from "@/lib/ai-gateway";
 import { acquireTurnLock, releaseTurnLock } from "@/lib/pm/turn-lock";
-import { dailyPmSpend, isOverDailyTurnCap } from "@/lib/pm/turn-cap";
-import { MAX_STEPS } from "@/lib/pm/agent";
 import { isPmRunnable, pmDisabledReason, resolvePmModel } from "@/lib/pm/availability";
 import { IMAGE_MIME_TYPES, MAX_ATTACHMENTS_PER_MESSAGE, anyAttachmentReadable, modelAcceptsImages } from "@/lib/pm/attachments";
 import { databaseUnavailable, resolveProjectId, refusedOnThisHost } from "@/lib/middleware";
@@ -58,13 +56,8 @@ async function chat(request: Request, params: Promise<Record<string, string>>, u
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const modelKey = await resolveModelKey(db);
-  if (!modelKey.ok) {
-    return modelKeyRefusalResponse(modelKey, {
-      error: "PM agent is not configured (OPENROUTER_API_KEY missing)",
-      status: 503,
-    });
-  }
+  const gate = await openGate(db, { error: "PM agent is not configured (OPENROUTER_API_KEY missing)", status: 503 });
+  if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });
 
   await connectDB();
 
@@ -138,7 +131,7 @@ async function chat(request: Request, params: Promise<Record<string, string>>, u
     // Better a clear refusal than a provider error the user cannot act on. Unknown
     // capability (network failure, unlisted model) is allowed through rather than blocked.
     const model = await resolvePmModel(db, project.pm.model);
-    if ((await modelAcceptsImages(model, modelKey.key)) === false) {
+    if ((await modelAcceptsImages(model, gate.key)) === false) {
       return NextResponse.json(
         { error: `The configured PM model (${model}) does not accept images. Remove the attachment or switch models in settings.` },
         { status: 400 }
@@ -146,34 +139,11 @@ async function chat(request: Request, params: Promise<Record<string, string>>, u
     }
   }
 
-  const { over, cap } = await isOverDailyTurnCap(db, projectId, project.pm);
-  if (over) {
-    return NextResponse.json(
-      { error: `Daily PM turn cap (${cap}) reached for this project` },
-      { status: 429 }
-    );
-  }
-
-  // The second ceiling, in the units the operator pays in. Off unless configured, so this refuses
-  // nothing that works today (BP-284).
-  const spend = await dailyPmSpend(db, projectId, project.pm);
-  if (spend.over) {
-    return NextResponse.json(
-      {
-        error:
-          `Daily PM token cap reached for this project: ${spend.tokens.toLocaleString()} of ` +
-          `${spend.cap.toLocaleString()} tokens across ${spend.calls} model calls. ` +
-          `A turn is up to ${MAX_STEPS} calls, which is why the turn cap alone does not bound this.`,
-      },
-      { status: 429 }
-    );
-  }
-
   const triggeredByUserId = String(user._id);
 
   // One turn per project even though conversations are private — the agent writes to a
   // board everyone shares
-  // After the cap, because that refusal is a count this request already had to make and this one is
+  // After the gate, because that refusal is a read this request already had to make and this one is
   // a GridFS round trip. An image-only turn stands or falls on the image: everything above checks
   // the *shape* of an attachment, so a well-formed fileId naming no file would otherwise start a
   // turn whose user content is the empty string (BP-451 review).

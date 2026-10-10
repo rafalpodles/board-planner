@@ -49,25 +49,28 @@ export async function resolveModelKey(db: ScopedDb): Promise<ModelKeyResult> {
 }
 
 const MANAGED_PLAN_TTL_MS = 10_000;
-const managedPlan = new Map<string, { at: number; entitled: boolean }>();
+const managedPlan = new Map<string, { at: number; entitled: boolean; locked: boolean }>();
 
 export function forgetManagedPlans(): void {
   managedPlan.clear();
 }
 
-async function entitledToManagedAi(organisation: Types.ObjectId): Promise<boolean> {
+async function managedStateOf(organisation: Types.ObjectId): Promise<{ entitled: boolean; locked: boolean }> {
   const id = String(organisation);
   const seen = managedPlan.get(id);
-  if (seen && Date.now() - seen.at < MANAGED_PLAN_TTL_MS) return seen.entitled;
-  const entitled = can(await getOrganisation(organisation), "ai.managed");
-  managedPlan.set(id, { at: Date.now(), entitled });
-  return entitled;
+  if (seen && Date.now() - seen.at < MANAGED_PLAN_TTL_MS) return seen;
+  const row = await getOrganisation(organisation);
+  const state = { at: Date.now(), entitled: can(row, "ai.managed"), locked: Boolean(row.aiLockedAt) };
+  managedPlan.set(id, state);
+  return state;
 }
 
 export interface ModelKeyAvailability {
   available: boolean;
   needsPlan: boolean;
   unreadable: boolean;
+  /** The operator has switched its key off for this organisation, which has no key of its own */
+  locked: boolean;
 }
 
 /**
@@ -81,17 +84,17 @@ export async function modelKeyAvailability(db: ScopedDb): Promise<ModelKeyAvaila
   if (stored) {
     try {
       decryptSecret(stored, db.organisation);
-      return { available: true, needsPlan: false, unreadable: false };
+      return { available: true, needsPlan: false, unreadable: false, locked: false };
     } catch {
-      return { available: false, needsPlan: false, unreadable: true };
+      return { available: false, needsPlan: false, unreadable: true, locked: false };
     }
   }
 
   const hasInstanceKey = instanceKeyOf() !== undefined;
-  if (organisationDomain() === null) return { available: hasInstanceKey, needsPlan: false, unreadable: false };
-  if (!hasInstanceKey) return { available: false, needsPlan: false, unreadable: false };
-  const entitled = await entitledToManagedAi(db.organisation);
-  return { available: entitled, needsPlan: !entitled, unreadable: false };
+  if (organisationDomain() === null) return { available: hasInstanceKey, needsPlan: false, unreadable: false, locked: false };
+  if (!hasInstanceKey) return { available: false, needsPlan: false, unreadable: false, locked: false };
+  const { entitled, locked } = await managedStateOf(db.organisation);
+  return { available: entitled && !locked, needsPlan: !entitled, unreadable: false, locked: entitled && locked };
 }
 
 const OWN_KEY_OR_PRO =
@@ -115,15 +118,21 @@ export function describeModelKeyRefusal(
   return notConfigured;
 }
 
+export function modelKeyRefusalBody(
+  refusal: ModelKeyRefused,
+  notConfigured: { error: string; status: number }
+): { body: Record<string, unknown>; status: number } {
+  const { error, status } = describeModelKeyRefusal(refusal, notConfigured);
+  return {
+    body: status === 402 ? { error, reason: refusal.reason, feature: "ai.managed", plan: refusal.plan } : { error, reason: refusal.reason },
+    status,
+  };
+}
+
 export function modelKeyRefusalResponse(
   refusal: ModelKeyRefused,
   notConfigured: { error: string; status: number }
 ): NextResponse {
-  const { error, status } = describeModelKeyRefusal(refusal, notConfigured);
-  return NextResponse.json(
-    status === 402
-      ? { error, reason: refusal.reason, feature: "ai.managed", plan: refusal.plan }
-      : { error, reason: refusal.reason },
-    { status }
-  );
+  const { body, status } = modelKeyRefusalBody(refusal, notConfigured);
+  return NextResponse.json(body, { status });
 }

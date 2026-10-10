@@ -629,3 +629,34 @@ describe("TaskFieldsSection estimate field", () => {
     expect(select.value).toBe("");
   });
 });
+
+describe("TaskFieldsSection Labels field offer", () => {
+  const labelsField = {
+    _id: "f-labels",
+    name: "Labels",
+    fieldType: "multiselect",
+    options: [{ id: "a", value: "A", color: "#111", order: 0 }],
+    required: false,
+    order: 5,
+    showOnCard: true,
+    showInList: true,
+    filterable: true,
+    archived: false,
+  } as ApiCustomField;
+
+  it("is offered when the board has no field called Labels, and opens the form prefilled", () => {
+    render(<Harness initial={project} />);
+    fireEvent.click(screen.getByRole("button", { name: "+ Add a Labels field" }));
+
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Labels");
+    expect((screen.getByLabelText("Type") as HTMLSelectElement).value).toBe("multiselect");
+  });
+
+  it("is not offered once a field has that name, in any case or archived", () => {
+    for (const field of [labelsField, { ...labelsField, name: "LABELS" }, { ...labelsField, archived: true }]) {
+      cleanup();
+      render(<Harness initial={{ ...project, customFields: [...project.customFields, field] }} />);
+      expect(screen.queryByRole("button", { name: "+ Add a Labels field" })).toBeNull();
+    }
+  });
+});

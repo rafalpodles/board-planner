@@ -57,7 +57,7 @@ export type OrCompletionResult =
   | { type: "error"; error: string };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function usageOf(data: any): OrUsage | undefined {
+export function usageOf(data: any): OrUsage | undefined {
   const usage = data?.usage;
   if (!usage || typeof usage !== "object") return undefined;
   const prompt = Number(usage.prompt_tokens);
@@ -66,13 +66,13 @@ function usageOf(data: any): OrUsage | undefined {
   if (!Number.isFinite(prompt) && !Number.isFinite(completion) && !Number.isFinite(total)) {
     return undefined;
   }
-  const promptTokens = Number.isFinite(prompt) ? prompt : 0;
-  const completionTokens = Number.isFinite(completion) ? completion : 0;
+  const promptTokens = Number.isFinite(prompt) ? Math.max(0, prompt) : 0;
+  const completionTokens = Number.isFinite(completion) ? Math.max(0, completion) : 0;
   return {
     promptTokens,
     completionTokens,
-    // Some providers omit the total; adding the two is what it means
-    totalTokens: Number.isFinite(total) ? total : promptTokens + completionTokens,
+    // Some providers omit the total, or report 0 for it; adding the two is what it means, and a limit is made of this number
+    totalTokens: Number.isFinite(total) && total > 0 ? total : promptTokens + completionTokens,
     ...cacheTokensOf(usage.prompt_tokens_details),
   };
 }
