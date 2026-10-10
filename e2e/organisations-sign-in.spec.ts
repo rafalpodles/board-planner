@@ -29,6 +29,24 @@ test.describe("BP-919: signing in on the platform host, e-mail first", () => {
     await expect(page.getByRole("link", { name: "Continue to Acme" })).toHaveAttribute("href", `${originOf(ACME)}/projects`);
   });
 
+  test("BP-1002: the remembered organisation lasts the browser session only, and still leads back to it", async ({ page }) => {
+    const email = freshAddress("session");
+    await giveAddress(GLOBEX, email);
+
+    await provideAddressAndCode(page, email);
+    await page.getByLabel("Password").fill(GLOBEX.password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.waitForURL(`${originOf(GLOBEX)}/projects`);
+
+    const remembered = (await page.context().cookies(ORGANISATIONS_PLATFORM_ORIGIN)).filter((cookie) => cookie.name.endsWith("bp_last_organisation"));
+    expect(remembered).toHaveLength(1);
+    expect(remembered[0].value).toBe(String(GLOBEX.organisation));
+    expect(remembered[0].expires).toBe(-1);
+
+    await page.goto(`${ORGANISATIONS_PLATFORM_ORIGIN}/`);
+    await expect(page.getByRole("link", { name: "Continue to Globex" })).toHaveAttribute("href", `${originOf(GLOBEX)}/projects`);
+  });
+
   test("an address with accounts in two organisations picks one, and the other is not signed in", async ({ page }) => {
     const email = freshAddress("pat");
     await giveAddress(ACME, email);

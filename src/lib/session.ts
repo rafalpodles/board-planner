@@ -160,11 +160,11 @@ export function assertSessionConfig(): void {
 
 assertSessionConfig();
 
-function cookieHeader(name: string, value: string, maxAgeSeconds: number): string {
+function cookieHeader(name: string, value: string, maxAgeSeconds: number | null): string {
   const attributes = [
     `${name}=${value}`,
     "Path=/",
-    `Max-Age=${maxAgeSeconds}`,
+    ...(maxAgeSeconds === null ? [] : [`Max-Age=${maxAgeSeconds}`]),
     "HttpOnly",
     "SameSite=Lax",
   ];
@@ -260,7 +260,7 @@ export function flowCookieName(base: string): string {
   return allowsInsecureCookie() ? base : `__Host-${base}`;
 }
 
-export function buildFlowCookie(base: string, value: string, maxAgeSeconds: number): string {
+export function buildFlowCookie(base: string, value: string, maxAgeSeconds: number | null): string {
   return cookieHeader(flowCookieName(base), value, maxAgeSeconds);
 }
 
