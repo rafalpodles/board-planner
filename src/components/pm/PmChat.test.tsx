@@ -218,6 +218,14 @@ describe("a PM page where the key is the problem", () => {
     expect(screen.queryByText(/OPENROUTER_API_KEY/)).toBeNull();
   });
 
+  it("says the operator has switched its key off, with the own key as the way on, instead of a composer that would be refused", async () => {
+    render(<PmChat projectId="p1" preloadedProject={{ ...PROJECT, pmAvailable: false, pmLocked: true } as never} />);
+
+    expect((await screen.findByTestId("ai-locked")).textContent).toMatch(/The PM agent is switched off for this organisation by the operator/);
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.queryByTestId("ai-needs-key")).toBeNull();
+  });
+
   it("says a stored key that cannot be read has to be entered again, not that the server has none", async () => {
     render(<PmChat projectId="p1" preloadedProject={{ ...PROJECT, pmAvailable: false, pmKeyUnreadable: true } as never} />);
 
@@ -257,6 +265,19 @@ describe("a turn the server refuses because of the key", () => {
 
     expect(await screen.findByText(/Enter it again in Settings/)).toBeTruthy();
     expect(screen.queryByText(/OPENROUTER_API_KEY missing/)).toBeNull();
+  });
+
+  it("shows the operator's words for a key it switched off, and offers no Retry for what will not lift by itself", async () => {
+    await sendRefused(403, { error: "AI is switched off for this organisation by the operator: abuse report 17.", reason: "ai_locked" });
+
+    expect(await screen.findByText(/switched off for this organisation by the operator: abuse report 17/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+
+  it("offers a Retry for a refusal that is about the moment, such as another turn running", async () => {
+    await sendRefused(409, { error: "Someone is already talking to the PM agent on this project — try again in a moment" });
+
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeTruthy();
   });
 
   it("keeps the old words for an instance with no key at all", async () => {

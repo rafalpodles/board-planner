@@ -61,6 +61,15 @@ describe("the banner when no agent can run", () => {
     expect(screen.getByRole("link", { name: "Enter it again" }).getAttribute("href")).toBe("/settings/ai-keys");
   });
 
+  it("says the operator has switched its key off, with the own key as the way on, and not that no key is configured", async () => {
+    answer({ pmLocked: true });
+    render(<AdminAgentsPage />);
+
+    expect(await screen.findByText(/the operator has switched its AI key off for this organisation/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Add your own key" }).getAttribute("href")).toBe("/settings/ai-keys");
+    expect(screen.queryByText(/No OpenRouter key is configured/)).toBeNull();
+  });
+
   it("still says no key is configured where nothing else is the matter, and points at where one can be added", async () => {
     answer({});
     render(<AdminAgentsPage />);

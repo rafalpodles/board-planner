@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const m = vi.hoisted(() => ({ hosted: true }));
 vi.mock("@/lib/organisation-host", () => ({ organisationDomain: () => (m.hosted ? "board-planner.com" : null) }));
 
-const { describeBudgetRefusal } = await import("./refusal");
+const { describeAiLock, describeBudgetRefusal } = await import("./refusal");
 
 beforeEach(() => {
   m.hosted = true;
@@ -34,5 +34,22 @@ describe("describeBudgetRefusal", () => {
     m.hosted = false;
 
     expect(describeBudgetRefusal({ scope: "month", used: 5, limit: 5, resetsAt: new Date("2026-11-01T00:00:00Z") })).not.toMatch(/own key/);
+  });
+});
+
+describe("describeAiLock", () => {
+  it("says the operator switched the key off, why, and what keeps AI going on the cloud", () => {
+    expect(describeAiLock("abuse report 17")).toBe("AI is switched off for this organisation by the operator: abuse report 17. Add your own key in Settings → AI key to keep going.");
+  });
+
+  it("ends the reason with one full stop whether it brought one or not, and says nothing of a reason when there is none", () => {
+    expect(describeAiLock("abuse report 17.  ")).toBe(describeAiLock("abuse report 17"));
+    expect(describeAiLock("")).toBe("AI is switched off for this organisation by the operator. Add your own key in Settings → AI key to keep going.");
+  });
+
+  it("does not send a self-hosted owner to a key it sets in its environment", () => {
+    m.hosted = false;
+
+    expect(describeAiLock("")).toBe("AI is switched off for this organisation by the operator.");
   });
 });

@@ -17,6 +17,76 @@ interface AiKeysAnswer {
   hint: string;
   unreadable: boolean;
   included: boolean;
+  usage: UsageAnswer;
+}
+
+interface UsageAnswer {
+  scope: "month" | "trial";
+  used: number;
+  limit: number | null;
+  resetsAt: string | null;
+  today: number;
+  dailyCeiling: number | null;
+  ownTokens: number;
+  locked: boolean;
+  included: boolean;
+}
+
+const tokens = (n: number) => n.toLocaleString("en-US");
+const day = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+
+function UsageCard({ usage, hosted }: { usage: UsageAnswer; hosted: boolean }) {
+  const period = usage.scope === "trial" ? "in your trial" : "this month";
+  const share = usage.limit ? Math.min(100, Math.floor((usage.used / usage.limit) * 100)) : null;
+  return (
+    <SettingsCard
+      title="AI usage"
+      description="Counted in tokens on every call of the PM agent and AI Assist."
+      status={
+        usage.included
+          ? { label: usage.locked ? "Switched off" : share === null ? "Not limited" : `${share}% used`, on: !usage.locked && (share === null || share < 100) }
+          : { label: "Your own key", on: true }
+      }
+    >
+      {usage.included && usage.locked && (
+        <p role="alert" data-testid="ai-usage-locked" className="text-sm text-danger">
+          The operator has switched off the use of its key for this organisation.{" "}
+          {hosted ? "Add your own key below to keep going." : ""}
+        </p>
+      )}
+      {usage.included && (
+        <>
+          <p className="text-sm" data-testid="ai-usage-month">
+            <strong>{tokens(usage.used)}</strong>
+            {usage.limit !== null ? <> of <strong>{tokens(usage.limit)}</strong></> : null} tokens used {period}
+            {usage.limit === null ? ", and nothing limits them" : ""}.
+            {usage.resetsAt && usage.limit !== null ? <> It renews on {day(usage.resetsAt)} (UTC).</> : null}
+          </p>
+          {share !== null && usage.limit !== null && (
+            <div
+              role="progressbar"
+              aria-label={`AI tokens used ${period}`}
+              aria-valuemin={0}
+              aria-valuemax={usage.limit}
+              aria-valuenow={Math.min(usage.used, usage.limit)}
+              className="h-2 w-full overflow-hidden rounded-full bg-bg-input"
+            >
+              <div className={`h-full ${share >= 90 ? "bg-danger" : "bg-primary"}`} style={{ width: `${share}%` }} />
+            </div>
+          )}
+          <p className="text-sm text-text-muted" data-testid="ai-usage-today">
+            Today (UTC): {tokens(usage.today)} tokens
+            {usage.dailyCeiling !== null ? <>; one day may use at most {tokens(usage.dailyCeiling)}</> : null}.
+          </p>
+        </>
+      )}
+      {usage.ownTokens > 0 && (
+        <p className="text-sm text-text-muted" data-testid="ai-usage-own">
+          Your own key: {tokens(usage.ownTokens)} tokens {period}, counted and never limited.
+        </p>
+      )}
+    </SettingsCard>
+  );
 }
 
 const TITLE = "OpenRouter key";
@@ -57,7 +127,10 @@ function KeyCard({ state, onSaved }: { state: AiKeysAnswer; onSaved: (answer: Ai
     return send(value.trim(), `${TITLE} saved`);
   };
 
-  const fallback = state.included
+  const switchedOff = state.included && Boolean(state.usage?.locked);
+  const fallback = switchedOff
+    ? "Without a key of your own it does not run: the operator has switched ours off for this organisation."
+    : state.included
     ? hosted
       ? "Without a key of your own it runs on ours, which your plan includes."
       : "Without a key of your own it runs on the key this server was set up with."
@@ -72,8 +145,8 @@ function KeyCard({ state, onSaved }: { state: AiKeysAnswer; onSaved: (answer: Ai
       title={TITLE}
       description={USE}
       status={{
-        label: state.unreadable ? "Cannot be read" : state.set ? "Your own key" : state.included ? (hosted ? "Included" : "Server key") : "Not set",
-        on: !state.unreadable && (state.set || state.included),
+        label: state.unreadable ? "Cannot be read" : state.set ? "Your own key" : switchedOff ? "Switched off" : state.included ? (hosted ? "Included" : "Server key") : "Not set",
+        on: !state.unreadable && (state.set || (state.included && !switchedOff)),
       }}
     >
       {state.unreadable ? (
@@ -206,7 +279,10 @@ export function AiKeys() {
           </>
         )}
       </p>
-      <KeyCard state={answer} onSaved={setAnswer} />
+      <div className="space-y-4">
+        {answer.usage && (answer.usage.included || answer.usage.ownTokens > 0) && <UsageCard usage={answer.usage} hosted={answer.hosted} />}
+        <KeyCard state={answer} onSaved={setAnswer} />
+      </div>
     </div>
   );
 }

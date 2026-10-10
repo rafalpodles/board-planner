@@ -1029,6 +1029,7 @@ describe("the project answer says whether the PM agent can run", () => {
     ["with a key", { available: true, needsPlan: false, unreadable: false }, { pmAvailable: true, pmNeedsPlan: false, pmKeyUnreadable: false }],
     ["when only a plan would turn it on", { available: false, needsPlan: true, unreadable: false }, { pmAvailable: false, pmNeedsPlan: true, pmKeyUnreadable: false }],
     ["when the stored key cannot be read", { available: false, needsPlan: false, unreadable: true }, { pmAvailable: false, pmNeedsPlan: false, pmKeyUnreadable: true }],
+    ["when the operator has switched its key off", { available: false, needsPlan: false, unreadable: false, locked: true }, { pmAvailable: false, pmLocked: true, pmNeedsPlan: false }],
   ])("on a read, %s", async (_case, availability, expected) => {
     modelKeyAvailability.mockResolvedValue(availability);
 
@@ -1046,6 +1047,14 @@ describe("the project answer says whether the PM agent can run", () => {
     expect(await res.json()).toMatchObject({ pmAvailable: false, pmNeedsPlan: true });
   });
 
+  it("on a save, the operator's lock too", async () => {
+    modelKeyAvailability.mockResolvedValue({ available: false, needsPlan: false, unreadable: false, locked: true });
+
+    const res = await PUT(putRequest({ name: "Renamed" }), ctx());
+
+    expect(await res.json()).toMatchObject({ pmAvailable: false, pmLocked: true });
+  });
+
   it("answers the project, and leaves the three fields out, when the key cannot be looked up", async () => {
     modelKeyAvailability.mockRejectedValue(new Error("database blip"));
 
@@ -1054,7 +1063,7 @@ describe("the project answer says whether the PM agent can run", () => {
 
     expect(res.status).toBe(200);
     expect(body).toMatchObject({ name: "Test Project" });
-    for (const field of ["pmAvailable", "pmNeedsPlan", "pmKeyUnreadable"]) expect(body).not.toHaveProperty(field);
+    for (const field of ["pmAvailable", "pmNeedsPlan", "pmKeyUnreadable", "pmLocked"]) expect(body).not.toHaveProperty(field);
   });
 
   it("saves, and answers the project without the three fields, when the key cannot be looked up", async () => {
@@ -1064,7 +1073,7 @@ describe("the project answer says whether the PM agent can run", () => {
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    for (const field of ["pmAvailable", "pmNeedsPlan", "pmKeyUnreadable"]) expect(body).not.toHaveProperty(field);
+    for (const field of ["pmAvailable", "pmNeedsPlan", "pmKeyUnreadable", "pmLocked"]) expect(body).not.toHaveProperty(field);
   });
 });
 

@@ -298,10 +298,10 @@ export function sanitizeMcpServers(
 }
 
 /** What the PM screens show. A failed read is null, so the answer leaves the three fields out and the screen shows PM as not configured until the next answer */
-export async function pmAvailability(db: ScopedDb): Promise<{ available: boolean; needsPlan: boolean; keyUnreadable: boolean } | null> {
+export async function pmAvailability(db: ScopedDb): Promise<{ available: boolean; needsPlan: boolean; keyUnreadable: boolean; locked: boolean } | null> {
   try {
-    const { available, needsPlan, unreadable } = await modelKeyAvailability(db);
-    return { available, needsPlan, keyUnreadable: unreadable };
+    const { available, needsPlan, unreadable, locked } = await modelKeyAvailability(db);
+    return { available, needsPlan, keyUnreadable: unreadable, locked };
   } catch (err) {
     console.warn("Could not tell whether the PM agent has a key:", err instanceof Error ? err.message : err);
     return null;

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import type { ScopedDb } from "@/lib/db-scope";
 import { decryptSecret, encryptSecret, isEncryptionConfigured } from "@/lib/encryption";
+import { aiUsageSummary } from "@/lib/ai-gateway/summary";
 import { can } from "@/lib/entitlements";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { withAdmin } from "@/lib/middleware";
@@ -22,9 +23,10 @@ function readable(sealed: string, db: ScopedDb): boolean {
 }
 
 async function view(db: ScopedDb) {
-  const [settings, organisation] = await Promise.all([
+  const [settings, organisation, usage] = await Promise.all([
     db.Settings.findOne({}, "openrouterKey openrouterKeyHint").lean(),
     getOrganisation(db.organisation),
+    aiUsageSummary(db),
   ]);
   const hosted = organisationDomain() !== null;
   const managed = !hosted || can(organisation, "ai.managed");
@@ -39,6 +41,7 @@ async function view(db: ScopedDb) {
     // What the instance offers when the organisation stores nothing: its own key where self-hosted,
     // the operator's where the plan includes managed AI
     included: !!process.env.OPENROUTER_API_KEY && managed,
+    usage,
   };
 }
 

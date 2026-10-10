@@ -6,11 +6,13 @@ const m = vi.hoisted(() => ({
   counterKindOf: vi.fn(),
   recordUsage: vi.fn(),
   chatCompletion: vi.fn(),
+  getOrganisation: vi.fn(),
 }));
 
 vi.mock("@/lib/model-keys", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/model-keys")>()), resolveModelKey: m.resolveModelKey }));
 vi.mock("./budget", () => ({ checkBudget: m.checkBudget, counterKindOf: m.counterKindOf }));
 vi.mock("./usage", () => ({ recordUsage: m.recordUsage }));
+vi.mock("@/lib/organisation", () => ({ getOrganisation: m.getOrganisation }));
 vi.mock("@/lib/pm/openrouter", () => ({ chatCompletion: m.chatCompletion }));
 vi.mock("@/lib/organisation-host", () => ({ organisationDomain: () => "board-planner.com" }));
 
@@ -28,6 +30,7 @@ beforeEach(() => {
   m.checkBudget.mockResolvedValue({ refusal: null, counter: "month" });
   m.counterKindOf.mockResolvedValue("month");
   m.recordUsage.mockResolvedValue(undefined);
+  m.getOrganisation.mockResolvedValue({ aiLockedAt: null, aiLockedReason: "" });
 });
 
 // BP-679 / BP-680 / BP-681: the one door to a model
@@ -35,6 +38,38 @@ describe("openGate", () => {
   it("opens with the key and the counter a call is added to, after asking the budget of the operator's key", async () => {
     expect(await openGate(db, NOT_CONFIGURED)).toEqual({ ok: true, key: "sk-ours", keySource: "managed", counter: "month" });
     expect(m.checkBudget).toHaveBeenCalledTimes(1);
+  });
+
+  // BP-680: the operator's lock is about the operator's key, so it is read where that key is about to be used
+  it("refuses with 403 and says the operator switched it off, once the operator has, without asking the budget", async () => {
+    m.getOrganisation.mockResolvedValue({ aiLockedAt: new Date(), aiLockedReason: "abuse report 17" });
+
+    const gate = await openGate(db, NOT_CONFIGURED);
+
+    expect(gate).toMatchObject({ ok: false, status: 403, body: { reason: "ai_locked" } });
+    expect((gate as { error: string }).error).toMatch(/switched off for this organisation by the operator: abuse report 17.*Add your own key/);
+    expect(m.checkBudget).not.toHaveBeenCalled();
+  });
+
+  it("does not let the lock touch an organisation's own key, which the operator does not pay for", async () => {
+    m.getOrganisation.mockResolvedValue({ aiLockedAt: new Date(), aiLockedReason: "" });
+    m.resolveModelKey.mockResolvedValue({ ok: true, key: "sk-theirs", source: "own" });
+
+    expect(await openGate(db, NOT_CONFIGURED)).toMatchObject({ ok: true, key: "sk-theirs", keySource: "own" });
+  });
+
+  it("does not read the lock for a self-hosted instance's own key: it is the owner's, not the operator's", async () => {
+    m.getOrganisation.mockResolvedValue({ aiLockedAt: new Date(), aiLockedReason: "" });
+    m.resolveModelKey.mockResolvedValue({ ok: true, key: "sk-instance", source: "instance" });
+
+    expect(await openGate(db, NOT_CONFIGURED)).toMatchObject({ ok: true, keySource: "instance" });
+  });
+
+  it("stops a PM round-trip at the lock and never reaches the provider", async () => {
+    m.getOrganisation.mockResolvedValue({ aiLockedAt: new Date(), aiLockedReason: "" });
+
+    expect(await gatewayChat(db, CONTEXT, CHAT)).toMatchObject({ type: "error", error: expect.stringMatching(/switched off/) });
+    expect(m.chatCompletion).not.toHaveBeenCalled();
   });
 
   it("opens on the counter the budget says a call is added to: a trial's own, not the month", async () => {

@@ -19,7 +19,7 @@ import type { McpCatalogTool } from "@/components/settings/McpToolPicker";
 import { assessToolBudget, describeToolBudget } from "@/lib/pm/tool-budget";
 import { catalogKey } from "@/lib/pm/catalog-key";
 import { distinctRowNames } from "@/lib/row-names";
-import { AiKeyUnreadable, AiNeedsKey } from "@/components/AiNeedsKey";
+import { AiKeyUnreadable, AiLocked, AiNeedsKey } from "@/components/AiNeedsKey";
 import { SectionProps } from "./types";
 
 interface McpServerDraft {
@@ -477,6 +477,14 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
     return (
       <SettingsCard title="PM agent">
         <AiKeyUnreadable what="The PM agent" />
+      </SettingsCard>
+    );
+  }
+
+  if (!project.pmAvailable && project.pmLocked) {
+    return (
+      <SettingsCard title="PM agent">
+        <AiLocked what="The PM agent" />
       </SettingsCard>
     );
   }

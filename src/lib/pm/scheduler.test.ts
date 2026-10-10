@@ -10,6 +10,8 @@ const servedOrganisations = vi.hoisted(() => ({ list: null as null | { _id: unkn
 // The gateway's counters are its own tests' business (src/lib/ai-gateway): these only need the door to open
 const checkBudget = vi.hoisted(() => vi.fn(async () => ({ refusal: null as unknown, counter: "month" })));
 vi.mock("@/lib/ai-gateway/budget", () => ({ counterKindOf: async () => "month", checkBudget }));
+const getOrganisation = vi.hoisted(() => vi.fn(async () => ({ aiLockedAt: null as Date | null, aiLockedReason: "" })));
+vi.mock("@/lib/organisation", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/organisation")>()), getOrganisation }));
 vi.mock("@/lib/ai-gateway/usage", () => ({ recordUsage: vi.fn() }));
 vi.mock("@/lib/organisation-jobs", async () => {
   const { scoped } = await import("@/lib/db-scope");
@@ -170,6 +172,17 @@ describe("startBoardReview", () => {
     const start = await startBoardReview(db, "p1", "BP", PM, "pm-user");
 
     expect(start).toEqual({ status: "skipped", reason: expect.stringMatching(/15,000,000 of 15,000,000.*1 November 2026/) });
+    expect(runPmTurn).not.toHaveBeenCalled();
+  });
+
+  // BP-680: the operator's lock is about its key, and a review would spend it
+  it("refuses a review while the operator has switched its key off for the organisation, naming why, and runs nothing", async () => {
+    resolveModelKey.mockResolvedValueOnce({ ok: true, key: "k", source: "managed" });
+    getOrganisation.mockResolvedValueOnce({ aiLockedAt: new Date(), aiLockedReason: "abuse report 17" });
+
+    const start = await startBoardReview(db, "p1", "BP", PM, "pm-user");
+
+    expect(start).toEqual({ status: "skipped", reason: expect.stringMatching(/switched off for this organisation by the operator: abuse report 17/) });
     expect(runPmTurn).not.toHaveBeenCalled();
   });
 

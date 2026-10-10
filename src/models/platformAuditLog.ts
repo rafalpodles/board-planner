@@ -5,6 +5,8 @@ export const PLATFORM_AUDIT_ACTIONS = [
   "organisations_listed",
   "organisation_suspended",
   "organisation_resumed",
+  "organisation_ai_locked",
+  "organisation_ai_unlocked",
   "organisation_delete_started",
   "organisation_deleted",
   "organisation_exported",

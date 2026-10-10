@@ -30,6 +30,7 @@ interface AgentsResponse {
   pmAvailable: boolean;
   pmNeedsPlan?: boolean;
   pmKeyUnreadable?: boolean;
+  pmLocked?: boolean;
   defaults: { pmDefaultModel: string; envModel: string };
   projects: AgentRow[];
 }
@@ -162,6 +163,15 @@ export default function AdminAgentsPage() {
                 Enter it again
               </Link>
               .
+            </p>
+          ) : data.pmLocked ? (
+            <p>
+              <strong className="font-semibold">No agent can run</strong>: the operator has switched its AI key off for this
+              organisation.{" "}
+              <Link href="/settings/ai-keys" className="underline">
+                Add your own key
+              </Link>{" "}
+              to keep going.
             </p>
           ) : data.pmNeedsPlan ? (
             <p>

@@ -119,7 +119,7 @@ test.describe("BP-892: the platform operator is the licence service, not an orga
     expect(await platformLogRows()).toEqual([]);
   });
 
-  test("an organisation's administrator can neither suspend, resume, delete, export nor license any organisation, by session, API token or OAuth token, on either host", async ({ request }) => {
+  test("an organisation's administrator can neither suspend, resume, switch off the AI of, delete, export nor license any organisation, by session, API token or OAuth token, on either host", async ({ request }) => {
     const credentials = {
       session: { cookie: `__Host-bp_session=${ACME.sessionToken}` },
       token: bearer(ACME),
@@ -131,6 +131,7 @@ test.describe("BP-892: the platform operator is the licence service, not an orga
       return [
         { method: "POST", path: `${base}/suspend`, body: JSON.stringify({ reason: "x" }) },
         { method: "POST", path: `${base}/resume`, body: "" },
+        { method: "POST", path: `${base}/ai`, body: JSON.stringify({ locked: true, reason: "x" }) },
         { method: "DELETE", path: `${base}?confirm=${who.slug}`, body: "" },
         { method: "DELETE", path: `${base}?dryRun=1`, body: "" },
         { method: "GET", path: `${base}/export`, body: "" },
@@ -159,6 +160,7 @@ test.describe("BP-892: the platform operator is the licence service, not an orga
         expect(row.suspendedAt ?? null, `${row.slug} suspended`).toBeNull();
         expect(row.deletedAt ?? null, `${row.slug} deleted`).toBeNull();
         expect(row.deletingAt ?? null, `${row.slug} being deleted`).toBeNull();
+        expect(row.aiLockedAt ?? null, `${row.slug} AI switched off`).toBeNull();
         expect(row, `${row.slug} licensed`).not.toHaveProperty("licenceKey");
       }
     } finally {

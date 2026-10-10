@@ -1274,6 +1274,8 @@ export interface ApiProject {
   pmNeedsPlan?: boolean;
   // The key the organisation stored can no longer be read, so it has to be entered again
   pmKeyUnreadable?: boolean;
+  // The operator has switched its AI key off for this organisation, which has none of its own
+  pmLocked?: boolean;
   createdBy?: ApiUser | string;
   canAdmin?: boolean;
   createdAt: string;

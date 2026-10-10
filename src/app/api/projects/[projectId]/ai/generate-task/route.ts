@@ -70,7 +70,7 @@ export async function fetchReadme(githubRepo: string): Promise<string | undefine
 
 export const GET = withProjectAccess(async (_request, { db }) => {
   const key = await modelKeyAvailability(db);
-  return NextResponse.json({ enabled: key.available, needsPlan: key.needsPlan, keyUnreadable: key.unreadable });
+  return NextResponse.json({ enabled: key.available, needsPlan: key.needsPlan, keyUnreadable: key.unreadable, locked: key.locked });
 });
 
 export const POST = withProjectAccess(async (request, { params, user, db }) => {
