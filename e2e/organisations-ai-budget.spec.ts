@@ -171,6 +171,17 @@ test("each call is counted by the tokens the provider reports, for the organisat
   expect(await counters(ACME)).toEqual([]);
 });
 
+test("every call on the platform's key tells OpenRouter to use no provider that may train on prompts", async ({ page }) => {
+  await open(page, GLOBEX);
+  expect((await chat(page)).status).toBe(200);
+  expect((await generate(page)).status).toBe(200);
+
+  const pm = await (await fetch(`${PM_STUB_URL}/last`)).json();
+  const assist = await (await fetch(`${PM_STUB_URL}/last-assist-request`)).json();
+  expect(pm.provider).toMatchObject({ data_collection: "deny" });
+  expect(assist.provider).toEqual({ data_collection: "deny", only: ["openai"] });
+});
+
 test("an organisation's own key is never refused however much it has spent of ours, and is counted apart", async ({ page }) => {
   process.env.ENCRYPTION_KEY = E2E_ENCRYPTION_KEY;
   await withDb(async (db) => {
@@ -191,6 +202,7 @@ test("an organisation's own key is never refused however much it has spent of ou
   expect((await chat(page)).status).toBe(200);
 
   expect((await (await fetch(`${PM_STUB_URL}/last-authorization`)).json()).authorization).toBe(`Bearer ${OWN_KEY}`);
+  expect((await (await fetch(`${PM_STUB_URL}/last`)).json()).provider).toBeNull();
   expect(await rows(ACME)).toEqual([expect.objectContaining({ keySource: "own", totalTokens: 1200 })]);
   const [day, month] = await counters(ACME);
   expect(day).toMatchObject({ tokens: Math.ceil(limit / 5), ownTokens: 1200, ownCalls: 1 });

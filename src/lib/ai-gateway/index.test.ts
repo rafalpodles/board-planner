@@ -13,7 +13,7 @@ vi.mock("@/lib/model-keys", async (importOriginal) => ({ ...(await importOrigina
 vi.mock("./budget", () => ({ checkBudget: m.checkBudget, counterKindOf: m.counterKindOf }));
 vi.mock("./usage", () => ({ recordUsage: m.recordUsage }));
 vi.mock("@/lib/organisation", () => ({ getOrganisation: m.getOrganisation }));
-vi.mock("@/lib/pm/openrouter", () => ({ chatCompletion: m.chatCompletion }));
+vi.mock("@/lib/pm/openrouter", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/pm/openrouter")>()), chatCompletion: m.chatCompletion }));
 vi.mock("@/lib/organisation-host", () => ({ organisationDomain: () => "board-planner.com" }));
 
 const { gatewayAssist, gatewayChat, openGate } = await import("./index");
@@ -145,8 +145,18 @@ describe("gatewayChat", () => {
     const completion = await gatewayChat(db, CONTEXT, CHAT);
 
     expect(completion).toMatchObject({ type: "text" });
-    expect(m.chatCompletion).toHaveBeenCalledWith({ ...CHAT, apiKey: "sk-ours" });
+    expect(m.chatCompletion).toHaveBeenCalledWith({ ...CHAT, apiKey: "sk-ours", provider: { data_collection: "deny" } });
     expect(m.recordUsage).toHaveBeenCalledWith(db, { source: "pm", projectId: "p1", userId: "u1", keySource: "managed", model: "m/x", usage: USAGE }, "month");
+  });
+
+  it("holds the platform's key to the providers the sub-processor list names, and leaves any other key to its own settings", async () => {
+    m.chatCompletion.mockResolvedValue({ type: "text", content: "hi", usage: USAGE });
+    await gatewayChat(db, CONTEXT, { ...CHAT, model: "openai/gpt-6-luna" });
+    m.resolveModelKey.mockResolvedValue({ ok: true, key: "sk-instance", source: "instance" });
+    await gatewayChat(db, CONTEXT, CHAT);
+
+    expect(m.chatCompletion.mock.calls[0][0].provider).toEqual({ data_collection: "deny", only: ["openai"] });
+    expect(m.chatCompletion.mock.calls[1][0]).not.toHaveProperty("provider");
   });
 
   it("records a call that asked for tools too, and one the provider reported no usage for", async () => {

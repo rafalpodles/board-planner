@@ -4,7 +4,15 @@ import { withCacheBreakpoints } from "./prompt-cache";
 
 export const OPENROUTER_BASE_URL = () => process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1";
 
-export const DEFAULT_PM_MODEL = () => process.env.PM_MODEL || "moonshotai/kimi-k2.6";
+export const DEFAULT_PM_MODEL = () => process.env.PM_MODEL || "openai/gpt-6-luna";
+
+export type ProviderPreferences = { data_collection: "deny"; only?: string[] };
+
+// On the platform's key only, where the sub-processor list speaks: no upstream that may train on prompts, and
+// OpenAI's own models only from OpenAI. The open-weight gpt-oss models are not served by OpenAI at all.
+export function platformProviderPreferences(model: string): ProviderPreferences {
+  return /^openai\/(?!gpt-oss)/.test(model) ? { data_collection: "deny", only: ["openai"] } : { data_collection: "deny" };
+}
 
 const MAX_TOKENS = () => Number(process.env.PM_MAX_TOKENS) || 8192;
 
@@ -108,6 +116,7 @@ export async function chatCompletion(opts: {
   cachePrefixLength?: number;
   /** Sticky-routing key, so the turn's later calls reach the endpoint its first call warmed */
   sessionId?: string;
+  provider?: ProviderPreferences;
   signal?: AbortSignal;
 }): Promise<OrCompletionResult> {
   const { apiKey } = opts;
@@ -132,6 +141,7 @@ export async function chatCompletion(opts: {
           opts.cachePrefixLength ?? opts.messages.length
         ),
         ...(opts.sessionId ? { session_id: opts.sessionId } : {}),
+        ...(opts.provider ? { provider: opts.provider } : {}),
         max_tokens: MAX_TOKENS(),
         tools: opts.tools.map((t) => ({
           type: "function",

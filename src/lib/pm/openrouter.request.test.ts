@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { chatCompletion } from "./openrouter";
+import { chatCompletion, platformProviderPreferences } from "./openrouter";
 
 /**
  * BP-568. What reaches the provider, read off the request body rather than off the arguments —
@@ -36,6 +36,34 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe("where OpenRouter may send the request", () => {
+  it("is what the caller names", async () => {
+    await send({ provider: { data_collection: "deny" } });
+
+    expect(bodies[0].provider).toEqual({ data_collection: "deny" });
+  });
+
+  it("is OpenRouter's own choice when the caller names nothing", async () => {
+    await send();
+
+    expect(bodies[0]).not.toHaveProperty("provider");
+  });
+});
+
+describe("the platform key's provider preferences", () => {
+  it("allow no provider that may train on prompts", () => {
+    expect(platformProviderPreferences("deepseek/deepseek-v4-flash-0731")).toEqual({ data_collection: "deny" });
+  });
+
+  it("send an OpenAI model only to OpenAI", () => {
+    expect(platformProviderPreferences("openai/gpt-6-luna")).toEqual({ data_collection: "deny", only: ["openai"] });
+  });
+
+  it("leave the open-weight gpt-oss models to the hosts that serve them, since OpenAI does not", () => {
+    expect(platformProviderPreferences("openai/gpt-oss-120b")).toEqual({ data_collection: "deny" });
+  });
 });
 
 describe("the key the call is made with", () => {

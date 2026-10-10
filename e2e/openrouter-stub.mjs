@@ -218,9 +218,11 @@ serve({
     lastAuthorization = req.headers.authorization ?? null;
     let messages = [];
     let offeredTools = [];
+    let provider = null;
     try {
       const body = JSON.parse(raw);
       messages = body.messages ?? [];
+      provider = body.provider ?? null;
       const markedRoles = markedRolesIn(messages);
       requests.push({
         sessionId: body.session_id ?? null,
@@ -250,6 +252,7 @@ serve({
     const users = messages.filter((m) => m?.role === "user");
     received = {
       offeredTools,
+      provider,
       userBlocks: kindsOf(users[users.length - 1]),
       // Across the whole request, so a follow-up turn shows whether history replayed the picture
       images: messages.reduce(

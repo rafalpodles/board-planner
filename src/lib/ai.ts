@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import { APP_DOMAIN, APP_NAME } from "./brand";
 import { selfOrigin } from "./session";
-import { OPENROUTER_BASE_URL, usageOf, type OrUsage } from "./pm/openrouter";
+import { OPENROUTER_BASE_URL, platformProviderPreferences, usageOf, type OrUsage, type ProviderPreferences } from "./pm/openrouter";
 import type { PromptField } from "./ai-fields";
 
 export interface GeneratedTask {
@@ -45,7 +45,8 @@ export async function generateTask(
   context: ProjectContext,
   model: string,
   apiKey: string,
-  onUsage?: (usage: OrUsage | undefined) => void
+  onUsage?: (usage: OrUsage | undefined) => void,
+  onPlatformKey = false
 ): Promise<GeneratedTask> {
   // OpenRouter speaks OpenAI's protocol, so the SDK does the talking. It would otherwise send the
   // OpenAI organisation and project the operator's environment names to a service that is not OpenAI.
@@ -115,8 +116,10 @@ You must respond with a JSON object with these exact fields:
 Write clear, actionable descriptions. Focus on the "what" and "why", not the "how" in detail.
 When analyzing duplicates and dependencies, consider the semantic meaning, not just keyword matching.`;
 
-  const response = await client.chat.completions.create({
-    model: openrouterModel(model),
+  const orModel = openrouterModel(model);
+  const request: OpenAI.ChatCompletionCreateParamsNonStreaming & { provider?: ProviderPreferences } = {
+    model: orModel,
+    ...(onPlatformKey ? { provider: platformProviderPreferences(orModel) } : {}),
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: prompt },
@@ -124,7 +127,8 @@ When analyzing duplicates and dependencies, consider the semantic meaning, not j
     response_format: { type: "json_object" },
     temperature: 0.7,
     max_tokens: 1500,
-  });
+  };
+  const response = await client.chat.completions.create(request);
 
   // Said before the answer is judged: an empty or malformed one was still billed
   onUsage?.(usageOf(response));

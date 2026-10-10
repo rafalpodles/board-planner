@@ -157,7 +157,7 @@ async function generate(
 
   try {
     const settings = await getSettings(db);
-    const task = await gatewayAssist(db, { source: "assist", projectId, userId }, gate, settings.aiModel, (apiKey, report) =>
+    const task = await gatewayAssist(db, { source: "assist", projectId, userId }, gate, settings.aiModel, (apiKey, report, onPlatformKey) =>
       generateTask(
         prompt.trim(),
         {
@@ -170,7 +170,8 @@ async function generate(
         },
         settings.aiModel,
         apiKey,
-        report
+        report,
+        onPlatformKey
       )
     );
 
