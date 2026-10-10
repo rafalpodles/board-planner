@@ -127,6 +127,20 @@ test.describe("BP-673: creating an organisation from the platform host", () => {
     }
   });
 
+  test("BP-1010: ten taken names in an hour end the guessing, so a name cannot be probed for a customer", async ({ request }) => {
+    const signedIn = await apiCode(request, freshAddress("probe"));
+    const tryName = (name: string, n: number) =>
+      request.post(`${ORGANISATIONS_API}/api/sign-in/organisation`, {
+        headers: signedIn,
+        data: { name, slug: `probe-${n}-${Date.now()}`, fullName: "Owner", username: "owner", password: PASSWORD },
+      });
+
+    for (let n = 1; n <= 10; n++) expect((await tryName("Acme", n)).status(), `try ${n}`).toBe(400);
+    const stopped = await tryName("Initech Probe", 11);
+    expect(stopped.status()).toBe(429);
+    expect(await stopped.json()).toEqual({ error: "Too many names tried. Try again in an hour." });
+  });
+
   // BP-674: the limits are on the mailbox and the company, not on how an address happens to be spelt
   const createOne = async (request: Parameters<typeof apiCode>[0], email: string, n: number) => {
     const signedIn = await apiCode(request, email);
