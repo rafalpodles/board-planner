@@ -227,6 +227,7 @@ export const GROUPS = {
     "notification-grid-delivery.spec.ts",
     "daily-digest.spec.ts",
     "pm-chat.spec.ts",
+    "ai-generated-marker.spec.ts",
     "pm-trust-boundary.spec.ts",
     "pm-assignment-is-a-handover.spec.ts",
     "pm-autonomy.spec.ts",

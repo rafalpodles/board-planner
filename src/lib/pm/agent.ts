@@ -6,6 +6,7 @@ import { OrChatMessage } from "./openrouter";
 import { pmSessionId } from "./prompt-cache";
 import { isPmRunnable, pmDisabledReason, resolvePmModel } from "./availability";
 import { PM_TOOLS, pmToolDefinitions, PmToolContext, refuseUndeclaredArgs } from "./tools";
+import { pmAgentMark, writtenBy } from "@/lib/ai-generated";
 import { discoverMcpTools, callMcpTool, McpRuntime, MAX_MCP_CALLS_PER_TURN } from "./mcp-tools";
 import { ACTION_RECORD_LABEL } from "./labels";
 import { replayHistory, stripSpoofedLabels, HISTORY_AUTHOR_PREFIX } from "./history";
@@ -415,7 +416,7 @@ export async function runPmTurn(db: ScopedDb, opts: {
           result = { error: undeclared };
         } else {
           try {
-            const outcome = await tool.execute(db, call.args || {}, ctx);
+            const outcome = await writtenBy(pmAgentMark(model), () => tool.execute(db, call.args || {}, ctx));
             result = outcome.result;
             if (tool.write && !(outcome.result as { error?: string })?.error) {
               writeActions++;

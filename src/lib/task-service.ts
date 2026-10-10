@@ -56,6 +56,7 @@ import { supersedableStates } from "@/lib/task-decisions";
 import { populateWithin, type ScopedDb } from "@/lib/db-scope";
 import { NOT_ARCHIVED } from "@/lib/task-archive";
 import { withAiMark } from "@/lib/pm/username";
+import { currentGeneratedBy } from "@/lib/ai-generated";
 
 export const MAX_EXECUTION_ATTEMPTS = 3;
 
@@ -674,6 +675,7 @@ export async function createTask(
     return { ok: false, error: "Project not found", status: 404 };
   }
 
+  const generatedBy = currentGeneratedBy();
   const task = await db.Task.create({
     project: projectId,
     taskNumber: project.taskCounter,
@@ -693,6 +695,7 @@ export async function createTask(
     customFieldValues,
     recurrence,
     order,
+    ...(generatedBy && { generatedBy }),
     createdBy: actorId,
   });
 
@@ -1451,10 +1454,12 @@ export async function addComment(
     return { ok: false, error: COMMENT_BODY_RULE, status: 400 };
   }
 
+  const generatedBy = currentGeneratedBy();
   const comment = await db.Comment.create({
     task: taskId,
     author: actor.id,
     body: bodyText.trim(),
+    ...(generatedBy && { generatedBy }),
   });
 
   const populated = await db.Comment.findById(comment._id).populate({

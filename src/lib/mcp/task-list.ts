@@ -1,6 +1,7 @@
 import { taskKeyOf } from "@/lib/task-key";
 import { progressLine } from "@/lib/epic-progress";
 import { findSprint, type SprintRow } from "./sprints";
+import type { GeneratedBy } from "@/types";
 
 export { DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT, pageOf } from "./paging";
 
@@ -16,6 +17,7 @@ type Row = {
   parent?: { taskNumber?: number } | null;
   archivedAt?: string | null;
   progress?: { done: number; total: number };
+  generatedBy?: GeneratedBy;
 };
 
 /** One line of a listing: what is needed to pick work from it, and a key to act on it with. */
@@ -31,6 +33,7 @@ export function listedTask(row: Row, projectKey: string) {
     parent: typeof row.parent?.taskNumber === "number" ? taskKeyOf(projectKey, row.parent.taskNumber) : null,
     ...(row.archivedAt ? { archived: true } : {}),
     ...(row.progress ? { progress: progressLine(row.progress) } : {}),
+    ...(row.generatedBy ? { generatedBy: row.generatedBy } : {}),
   };
 }
 

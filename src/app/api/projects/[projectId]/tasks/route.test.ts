@@ -157,7 +157,7 @@ describe("GET /api/projects/:projectId/tasks — archived tasks", () => {
  * that run in the database rather than over a board already loaded.
  */
 describe("GET /api/projects/:projectId/tasks — paging, the summary view and the narrower filters", () => {
-  const SELECT_FIELDS = "taskNumber title status priority assignee dueDate sprint order updatedAt archivedAt";
+  const SELECT_FIELDS = "taskNumber title status priority assignee dueDate sprint order updatedAt archivedAt generatedBy";
   // The scoped db wraps `populate` on the query it is handed, so the spy lives outside that object
   let query: Record<"sort" | "select" | "skip" | "limit" | "populate", ReturnType<typeof vi.fn>>;
   let populateSpy: ReturnType<typeof vi.fn>;

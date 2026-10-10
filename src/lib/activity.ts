@@ -1,6 +1,7 @@
 import { Types } from "mongoose";
 import { ActivityAction } from "@/types";
 import type { ScopedDb } from "@/lib/db-scope";
+import { currentGeneratedBy } from "@/lib/ai-generated";
 
 /**
  * Several rows from one act, in one write.
@@ -30,6 +31,7 @@ export async function logActivities(
   }[]
 ): Promise<void> {
   if (rows.length === 0) return;
+  const generatedBy = currentGeneratedBy();
   try {
     await db.ActivityLog.insertMany(
       rows.map((row) => ({
@@ -41,6 +43,7 @@ export async function logActivities(
         newValue: row.newValue || "",
         ...(row.customField && { customField: true }),
         ...(row.fieldType && { fieldType: row.fieldType }),
+        ...(generatedBy && { generatedBy }),
       }))
     );
   } catch (err) {
@@ -64,6 +67,7 @@ export async function logActivity(
   oldValue?: string,
   newValue?: string
 ): Promise<void> {
+  const generatedBy = currentGeneratedBy();
   try {
     await db.ActivityLog.create({
       task: taskId,
@@ -72,6 +76,7 @@ export async function logActivity(
       field: field || "",
       oldValue: oldValue || "",
       newValue: newValue || "",
+      ...(generatedBy && { generatedBy }),
     });
   } catch {
     // Activity logging should never break the main operation
