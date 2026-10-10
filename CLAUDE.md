@@ -161,7 +161,7 @@ AI_DAILY_PERCENT=         # one UTC day may use at most AI_DAILY_PERCENT (20) of
                           # ORGANISATION_DOMAIN, so self-hosted has no limit until one is set. A refusal is
                           # 429 naming the number and the renewal. An organisation's own key is counted, never
                           # refused. Each person is also held to 20 AI Assist generations per 15 minutes (BP-323)
-PM_MODEL=                 # Optional — PM agent model (default: moonshotai/kimi-k2.6)
+PM_MODEL=                 # Optional — PM agent model (default: openai/gpt-6-luna)
 PM_MAX_TOKENS=            # Optional — PM agent max output tokens per call (default: 8192)
 PM_SCHEDULER_TICK_MS=     # Optional — PM autonomy scheduler tick (default: 300000)
 WEBHOOK_SIGNING_SECRET=   # Optional — HMACs outgoing webhook deliveries (x-boardplanner-signature)

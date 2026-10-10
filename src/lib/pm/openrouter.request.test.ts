@@ -38,6 +38,20 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("where OpenRouter may send the request", () => {
+  it("never to a provider that may train on prompts", async () => {
+    await send();
+
+    expect(bodies[0].provider).toEqual({ data_collection: "deny" });
+  });
+
+  it("only to OpenAI for an OpenAI model", async () => {
+    await send({ model: "openai/gpt-6-luna" });
+
+    expect(bodies[0].provider).toEqual({ data_collection: "deny", only: ["openai"] });
+  });
+});
+
 describe("the key the call is made with", () => {
   /**
    * BP-652. The key is the caller's: an organisation's own key, or the instance's for one that may

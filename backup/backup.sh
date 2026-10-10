@@ -16,7 +16,7 @@ here=$(cd "$(dirname "$(command -v "$0")")" && pwd)
 . "$here/common.sh"
 HOURLY_KEEP="${HOURLY_KEEP:-48h}"
 DAILY_KEEP="${DAILY_KEEP:-720h}"
-MONTHLY_KEEP="${MONTHLY_KEEP:-8784h}"
+MONTHLY_KEEP="${MONTHLY_KEEP:-2160h}"
 EXPECT_COLLECTION="${EXPECT_COLLECTION:-users}"
 
 encrypt() { openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:BACKUP_PASSPHRASE; }

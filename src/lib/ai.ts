@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import { APP_DOMAIN, APP_NAME } from "./brand";
 import { selfOrigin } from "./session";
-import { OPENROUTER_BASE_URL, usageOf, type OrUsage } from "./pm/openrouter";
+import { OPENROUTER_BASE_URL, providerPreferences, usageOf, type OrUsage } from "./pm/openrouter";
 import type { PromptField } from "./ai-fields";
 
 export interface GeneratedTask {
@@ -115,8 +115,11 @@ You must respond with a JSON object with these exact fields:
 Write clear, actionable descriptions. Focus on the "what" and "why", not the "how" in detail.
 When analyzing duplicates and dependencies, consider the semantic meaning, not just keyword matching.`;
 
+  const orModel = openrouterModel(model);
   const response = await client.chat.completions.create({
-    model: openrouterModel(model),
+    model: orModel,
+    // @ts-expect-error OpenRouter's routing field, which OpenAI's request type does not know
+    provider: providerPreferences(orModel),
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: prompt },

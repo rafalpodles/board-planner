@@ -63,6 +63,20 @@ describe("the client generateTask makes", () => {
   });
 });
 
+describe("where OpenRouter may send AI Assist's request", () => {
+  it("only to OpenAI itself for the bare OpenAI name the setting holds", async () => {
+    await generateTask("a task", CONTEXT, "gpt-4o-mini", "sk-given");
+
+    expect(create.mock.calls[0][0]).toMatchObject({ provider: { data_collection: "deny", only: ["openai"] } });
+  });
+
+  it("to no provider that may train on prompts, for any other model", async () => {
+    await generateTask("a task", CONTEXT, "anthropic/claude-haiku", "sk-given");
+
+    expect(create.mock.calls[0][0].provider).toEqual({ data_collection: "deny" });
+  });
+});
+
 describe("the model name AI Assist sends", () => {
   it("prefixes the bare OpenAI name the setting has always held", () => {
     expect(openrouterModel("gpt-4o-mini")).toBe("openai/gpt-4o-mini");

@@ -4,7 +4,12 @@ import { withCacheBreakpoints } from "./prompt-cache";
 
 export const OPENROUTER_BASE_URL = () => process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1";
 
-export const DEFAULT_PM_MODEL = () => process.env.PM_MODEL || "moonshotai/kimi-k2.6";
+export const DEFAULT_PM_MODEL = () => process.env.PM_MODEL || "openai/gpt-6-luna";
+
+// No upstream that may train on prompts, and OpenAI models only from OpenAI: what the sub-processor list names
+export function providerPreferences(model: string): { data_collection: "deny"; only?: string[] } {
+  return model.startsWith("openai/") ? { data_collection: "deny", only: ["openai"] } : { data_collection: "deny" };
+}
 
 const MAX_TOKENS = () => Number(process.env.PM_MAX_TOKENS) || 8192;
 
@@ -132,6 +137,7 @@ export async function chatCompletion(opts: {
           opts.cachePrefixLength ?? opts.messages.length
         ),
         ...(opts.sessionId ? { session_id: opts.sessionId } : {}),
+        provider: providerPreferences(opts.model),
         max_tokens: MAX_TOKENS(),
         tools: opts.tools.map((t) => ({
           type: "function",
