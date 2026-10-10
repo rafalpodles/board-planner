@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/Input";
 import { DEFAULT_PROJECT_ICON } from "@/types";
 import { projectPath } from "@/lib/urls";
 import { DEFAULT_AI_MODEL } from "@/lib/ai-model";
+import { openrouterModel } from "@/lib/managed-models";
 
 interface AgentRow {
   _id: string;
@@ -101,8 +102,6 @@ export default function AdminAgentsPage() {
     }
   }
 
-  // Its own endpoint and its own button: it is a different setting from the PM
-  // defaults, and blanking it used to be a silent no-op with the save bar still lit
   async function saveAiModel() {
     const value = aiModel.trim();
     if (!value) {
@@ -130,7 +129,7 @@ export default function AdminAgentsPage() {
   }
   if (!isAdmin || !data) return null;
 
-    return (
+  return (
     <div className="w-full max-w-5xl mx-auto">
       <h2 className="text-lg font-semibold mb-1">PM agents</h2>
       <p className="text-sm text-text-muted mb-6">
@@ -277,7 +276,7 @@ export default function AdminAgentsPage() {
                           patch(row, { model: e.target.value });
                         }
                       }}
-                      placeholder={data.defaults.aiModel}
+                      placeholder={openrouterModel(data.defaults.aiModel)}
                       className="text-xs"
                     />
                   </td>

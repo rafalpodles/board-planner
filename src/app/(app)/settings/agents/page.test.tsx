@@ -118,6 +118,27 @@ describe("the instance model", () => {
     await waitFor(() => expect(api.put).toHaveBeenCalledWith("/api/settings", { aiModel: "openai/next" }));
   });
 
+  it("sends nothing when a project's model is left as it was saved, or typed and put back", async () => {
+    api.get.mockImplementation(async () => ({ pmAvailable: true, defaults: { aiModel: "openai/one-model" }, projects: [{ ...ROW, model: "x/saved" }] }));
+    render(<AdminAgentsPage />);
+    const model = await screen.findByLabelText("PM model for BP — Board");
+
+    fireEvent.blur(model);
+    fireEvent.change(model, { target: { value: "x/other" } });
+    fireEvent.change(model, { target: { value: "x/saved" } });
+    fireEvent.blur(model);
+
+    await act(async () => {});
+    expect(api.patch).not.toHaveBeenCalled();
+  });
+
+  it("shows the model a bare instance name will run as", async () => {
+    api.get.mockImplementation(async () => ({ pmAvailable: true, defaults: { aiModel: "gpt-4o-mini" }, projects: [ROW] }));
+    render(<AdminAgentsPage />);
+
+    expect(((await screen.findByLabelText("PM model for BP — Board")) as HTMLInputElement).placeholder).toBe("openai/gpt-4o-mini");
+  });
+
   it("saves a project's own model when it is typed, and clears it when it is emptied", async () => {
     api.patch.mockResolvedValue({ ...ROW, model: "x/own" });
     render(<AdminAgentsPage />);
