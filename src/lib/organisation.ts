@@ -13,7 +13,7 @@ export { ORGANISATION_NAME_MAX, checkOrganisationName } from "./organisation-nam
 export const NAME_UNAVAILABLE = "That name is not available. Try another.";
 
 const asAddress = (name: string) =>
-  latinFold(name)
+  latinFold(name.normalize("NFKC"))
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");

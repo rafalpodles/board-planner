@@ -207,6 +207,11 @@ describe("checkOrganisationName", () => {
     expect(checkOrganisationName("  Rafał-org ")).toEqual({ ok: true, value: "Rafał-org" });
   });
 
+  it("reads runs of spaces, tabs and line breaks as one space, as a page shows them (BP-1010)", () => {
+    expect(checkOrganisationName("Globex   Corp")).toEqual({ ok: true, value: "Globex Corp" });
+    expect(checkOrganisationName("Globex\tCorp\n")).toEqual({ ok: true, value: "Globex Corp" });
+  });
+
   it("refuses anything but a string, and a name over the limit", () => {
     expect(checkOrganisationName(42)).toMatchObject({ ok: false });
     expect(checkOrganisationName("x".repeat(ORGANISATION_NAME_MAX))).toMatchObject({ ok: true });
@@ -264,7 +269,7 @@ describe("organisationIsNamed (BP-920)", () => {
 });
 
 describe("organisation names (BP-1010)", () => {
-  it.each(["login", "Login", "  APP  ", "Board Planner", "Board-Planner", "Łogin", "WWW"])("reads %s as a reserved address", (name) => {
+  it.each(["login", "Login", "  APP  ", "Board Planner", "Board-Planner", "Łogin", "WWW", "MTA STS", "ＬＯＧＩＮ"])("reads %s as a reserved address", (name) => {
     expect(nameIsReserved(name)).toBe(true);
   });
 

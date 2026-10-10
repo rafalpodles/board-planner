@@ -70,7 +70,7 @@ test.describe("BP-673: creating an organisation from the platform host", () => {
   test("BP-1010: a name another organisation has, in any case, or one that reads as a reserved address, is unavailable and creates nothing", async ({ page }) => {
     await provideAddressAndCode(page, freshAddress("namesake"));
 
-    for (const name of ["Acme", "ACME", "login"]) {
+    for (const name of ["Acme", "ACME", "Àcme", "login"]) {
       await fillTheForm(page, name, { slug: "namesake-ltd" });
       await page.getByRole("button", { name: "Create the organisation" }).click();
       await expect(page.getByTestId("sign-in-error")).toHaveText("That name is not available. Try another.");

@@ -20,6 +20,9 @@ const ORGANISATIONS_PER_SOURCE_PER_DAY = 10;
 // limit. Counted on organisations created, not on attempts, so nobody can spend a company's share by failing; a
 // wildcard of subdomains is a separate bucket each and is not caught
 const ORGANISATIONS_PER_COMPANY_DOMAIN_PER_DAY = 8;
+const HOUR_MS = 60 * 60 * 1000;
+// A taken name tells whoever tried it that an organisation has it; a slug is public on its own host, a name was not
+const TAKEN_NAMES_PER_ADDRESS_PER_HOUR = 10;
 
 const refused = (error: string, status = 400) => NextResponse.json({ error }, { status });
 
@@ -37,7 +40,12 @@ export const POST = signInRoute(async (request) => {
   const checked = checkSignUp(email, read.value);
   if (!checked.ok) return refused(checked.error);
   if (await slugTaken(checked.value.slug)) return refused(SLUG_UNAVAILABLE);
-  if (await nameIsTaken(checked.value.name)) return refused(NAME_UNAVAILABLE);
+  const takenNames = `organisation-sign-up:names:${sha256(mailboxOf(email).canonical)}`;
+  if (await isRateLimited(takenNames, TAKEN_NAMES_PER_ADDRESS_PER_HOUR)) return refused("Too many names tried. Try again in an hour.", 429);
+  if (await nameIsTaken(checked.value.name)) {
+    await recordFailedAttempt(takenNames, HOUR_MS).catch(() => {});
+    return refused(NAME_UNAVAILABLE);
+  }
 
   if (!(await claimProof(binder))) return refused("This sign-in is already creating an organisation.", 409);
   let handedOff = false;
