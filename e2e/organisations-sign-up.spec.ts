@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { RUN_ORGANISATIONS_SERVER } from "../playwright.config";
+import { ORGANISATIONS_PLATFORM_ORIGIN, RUN_ORGANISATIONS_SERVER } from "../playwright.config";
 import { ACME, ORGANISATIONS_API, asOrganisation, originOf, seedTwoOrganisations } from "./organisations";
 import { apiCode, freshAddress, provideAddressAndCode, withDb } from "./platform-sign-in";
 
@@ -49,6 +49,27 @@ test.describe("BP-673: creating an organisation from the platform host", () => {
     expect(me.status()).toBe(200);
     expect(JSON.stringify(await me.json())).not.toContain(ACME.projectName);
   });
+
+  for (const ticked of [true, false]) {
+    test(`BP-1009: a new organisation is remembered for the next visit only when the box was ${ticked ? "ticked" : "left unticked"}`, async ({ page }) => {
+      const slug = `remember-${ticked ? "yes" : "no"}-${Date.now()}`;
+      await provideAddressAndCode(page, freshAddress("remember"));
+      await fillTheForm(page, `Remember ${ticked ? "yes" : "no"}`, { slug });
+      const box = page.getByRole("checkbox", { name: /Open this organisation straight away/ });
+      await expect(box).not.toBeChecked();
+      if (ticked) await box.check();
+      await page.getByRole("button", { name: "Create the organisation" }).click();
+      await page.waitForURL(`${originOf(slug)}/projects`);
+
+      const remembered = (await page.context().cookies(ORGANISATIONS_PLATFORM_ORIGIN)).filter((cookie) => cookie.name.endsWith("bp_last_organisation"));
+      const created = await organisationWithSlug(slug);
+      expect(remembered.map((cookie) => cookie.value)).toEqual(ticked ? [String(created!._id)] : []);
+
+      await page.goto(`${ORGANISATIONS_PLATFORM_ORIGIN}/`);
+      if (ticked) await page.waitForURL(`${originOf(slug)}/projects`);
+      else await expect(page.getByLabel("E-mail address")).toBeVisible();
+    });
+  }
 
   test("an address already taken, or reserved, is unavailable in the same words, and a malformed one says the rule", async ({ page }) => {
     const email = freshAddress("taken");
