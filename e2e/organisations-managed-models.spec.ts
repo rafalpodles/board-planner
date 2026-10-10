@@ -152,7 +152,7 @@ test("AI Assist and a PM agent that names no model of its own run on the one mod
   const saved = page.waitForResponse((r) => r.request().method() === "PUT" && r.url().endsWith("/api/settings"));
   await page.getByRole("button", { name: "Save model" }).click();
   expect((await saved).status()).toBe(200);
-  await expect(page.getByLabel(`PM model for ${SHARED_KEY}`, { exact: false })).toHaveAttribute("placeholder", "gpt-4o-mini");
+  await expect(page.getByLabel(`PM model for ${SHARED_KEY}`, { exact: false })).toHaveAttribute("placeholder", "openai/gpt-4o-mini");
 
   expect((await generateOnScreen(page).then((r) => r.response)).status()).toBe(200);
   expect((await stub("/last-assist-request")).model).toBe("openai/gpt-4o-mini");
