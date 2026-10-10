@@ -107,18 +107,27 @@ test("a picked label and the filter's own text are readable in the dark theme", 
   await page.mouse.move(0, 0);
 
   // TODO(BP-997): the selected "Any of them" reads at 4.42:1 in the dark theme; add it once that is fixed
+  // TODO(BP-997): the selected "Any of them" reads at 4.42:1 in the dark theme; add it once that is fixed
   for (const target of [option(page, "Frontend"), option(page, "Design"), labelGroup(page).getByRole("button", { name: "All of them" })]) {
     await expect(target).toBeVisible();
     const painted = await target.evaluate((element) => {
       const backgrounds: string[] = [];
+      let opacity = 1;
       for (let node: Element | null = element; node; node = node.parentElement) {
-        backgrounds.push(getComputedStyle(node).backgroundColor);
+        const style = getComputedStyle(node);
+        backgrounds.push(style.backgroundColor);
+        opacity *= Number(style.opacity);
       }
-      return { color: getComputedStyle(element).color, backgrounds };
+      const canvas = document.createElement("canvas").getContext("2d")!;
+      canvas.clearRect(0, 0, 1, 1);
+      canvas.fillStyle = getComputedStyle(element).color;
+      canvas.fillRect(0, 0, 1, 1);
+      const [r, g, b, a] = canvas.getImageData(0, 0, 1, 1).data;
+      return { color: `rgba(${r}, ${g}, ${b}, ${(a / 255) * opacity})`, backgrounds };
     });
     expect(textContrast(painted), (await target.textContent()) ?? "").toBeGreaterThanOrEqual(AA_TEXT);
   }
-  const surface = await option(page, "Design").evaluate((element) => {
+  const surface = await panel(page).evaluate((element) => {
     const backgrounds: string[] = [];
     for (let node: Element | null = element; node; node = node.parentElement) {
       backgrounds.push(getComputedStyle(node).backgroundColor);
@@ -140,6 +149,7 @@ test("MCP finds a task by the name of its label: search_tasks across boards, lis
   expect(listed).not.toContain(DECOY_KEY);
 
   const none = await callMcp(request, "list_tasks", { project: PROJECT_KEY, search: "nosuchlabel" });
+  expect(none).not.toMatch(new RegExp(`${PROJECT_KEY}-\\d`));
   expect(none).not.toContain(HELD_TASK_TITLE);
   expect(none).not.toContain(DECOY_TASK_TITLE);
   expect(none).not.toContain(SIBLING_TASK_TITLE);

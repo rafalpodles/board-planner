@@ -39,9 +39,11 @@ test("the Views menu opens from the keyboard, holds focus inside, and Escape giv
   await expect(trigger(page)).toHaveAttribute("aria-expanded", "true");
   await expect.poll(() => menu(page).evaluate((el) => el.contains(document.activeElement))).toBe(true);
 
-  await page.keyboard.press("Tab");
-  await expect.poll(() => menu(page).evaluate((el) => el.contains(document.activeElement))).toBe(true);
   await expect(menu(page).getByRole("button", { name: "Keyboard view" })).toBeVisible();
+  await page.keyboard.press("Tab");
+  await expect(menu(page).getByRole("button", { name: "Keyboard view" })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(menu(page).getByRole("button", { name: "Copy link" })).toBeFocused();
 
   await page.keyboard.press("Escape");
   await expect(menu(page)).toHaveCount(0);
@@ -78,12 +80,12 @@ test("on a phone the menu stays inside the screen, and nothing scrolls the page 
   expect(box.x + box.width).toBeLessThanOrEqual(390);
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);
-  for (const name of ["Save view"]) {
-    const button = menu(page).getByRole("button", { name });
-    await button.scrollIntoViewIfNeeded();
-    const reach = (await button.boundingBox())!;
-    expect(reach.x + reach.width).toBeLessThanOrEqual(390);
-  }
+  expect(await menu(page).evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
+  expect(await page.locator("#main-content").evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
+  const save = menu(page).getByRole("button", { name: "Save view" });
+  await save.scrollIntoViewIfNeeded();
+  const reach = (await save.boundingBox())!;
+  expect(reach.x + reach.width).toBeLessThanOrEqual(390);
 });
 
 test("the menu is readable in the dark theme", async ({ page, request }) => {
@@ -140,7 +142,7 @@ test("a view that belongs to another board is not opened here, and says so", asy
   await expect(page.getByText("That view is gone")).toBeVisible();
   await expect(page.getByRole("button", { name: /^Filters/ })).not.toContainText(/\b[1-9]\b/);
   expect(new URL(page.url()).searchParams.has("view")).toBe(false);
-  await expect(page.getByRole("button", { name: "Board", exact: true })).toBeVisible();
+  await expect(page.locator("table")).toHaveCount(0);
 });
 
 test("two tabs saving the same name at once keep one view, and the other tab is told why", async ({ browser, request }) => {
@@ -160,9 +162,15 @@ test("two tabs saving the same name at once keep one view, and the other tab is 
     await Promise.all(pages.map((page) => menu(page).getByRole("button", { name: "Save view" }).click()));
 
     await expect.poll(async () => (await (await request.get(`/api/projects/${PROJECT_KEY}/views`, { headers: ADMIN_AUTH })).json()).length).toBe(1);
-    const refused = pages.map((page) => menu(page).getByRole("alert"));
-    const messages = await Promise.all(refused.map(async (alert) => ((await alert.count()) ? alert.textContent() : "")));
-    expect(messages.filter((m) => m?.includes("already exists"))).toHaveLength(1);
+    const refusals = async () => {
+      const found: string[] = [];
+      for (const page of pages) {
+        const alert = menu(page).getByRole("alert");
+        if ((await alert.count()) > 0) found.push((await alert.textContent()) ?? "");
+      }
+      return found.filter((m) => m.includes("already exists")).length;
+    };
+    await expect.poll(refusals).toBe(1);
   } finally {
     await Promise.all(contexts.map((context) => context.close()));
   }

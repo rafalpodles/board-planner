@@ -5,9 +5,13 @@ import {
   DECOY_TASK_NUMBER,
   DECOY_TASK_TITLE,
   HELD_TASK_ID,
+  HELD_TASK_NUMBER,
+  HELD_TASK_TITLE,
   MEMBER_USERNAME,
   PROJECT_KEY,
   SIBLING_TASK_ID,
+  SIBLING_TASK_NUMBER,
+  SIBLING_TASK_TITLE,
   seed,
 } from "./seed";
 import { signIn } from "./session";
@@ -71,14 +75,19 @@ test("an inline edit that changes the grouped value moves the row to its new gro
 
 test("a group the last task leaves is gone, not drawn empty", async ({ page, request }) => {
   await openGroupedByPriority(page, request);
-  await put(request, HELD_TASK_ID, { priority: "medium" });
-  await put(request, SIBLING_TASK_ID, { priority: "medium" });
-  await page.reload();
-  await expect(page.locator("table")).toBeVisible();
+  await expect(header(page, "Urgent")).toHaveCount(1);
+
+  for (const [number, title] of [[HELD_TASK_NUMBER, HELD_TASK_TITLE], [SIBLING_TASK_NUMBER, SIBLING_TASK_TITLE]] as const) {
+    const written = page.waitForResponse((r) => r.request().method() === "PUT" && r.url().includes("/tasks/") && r.ok());
+    await page.getByRole("combobox", { name: `Priority for ${PROJECT_KEY}-${number}: ${title}` }).click();
+    await page.getByRole("option", { name: "Medium", exact: true }).click();
+    await written;
+  }
 
   await expect(headers(page)).toHaveCount(1);
   await expect(header(page, "Urgent")).toHaveCount(0);
   await expect(count(page, "Medium")).toHaveText("4");
+  await expect(taskRows(page)).toHaveCount(4);
 });
 
 test("a filter narrows the groups and their counts, and clearing it brings them back", async ({ page, request }) => {
@@ -108,16 +117,20 @@ test("the group header rows are readable in the dark theme", async ({ page, requ
   await page.mouse.move(0, 0);
 
   for (const label of ["Urgent", "Medium"]) {
-    const name = header(page, label).getByRole("button").locator("span", { hasText: label });
-    await expect(name).toBeVisible();
-    const painted = await name.evaluate((element) => {
-      const backgrounds: string[] = [];
-      for (let node: Element | null = element; node; node = node.parentElement) {
-        backgrounds.push(getComputedStyle(node).backgroundColor);
-      }
-      return { color: getComputedStyle(element).color, backgrounds };
-    });
-    expect(textContrast(painted), `${label} header text`).toBeGreaterThanOrEqual(AA_TEXT);
-    expect(surfaceLuminance(painted.backgrounds), `${label} header surface`).toBeLessThanOrEqual(DARK_SURFACE_MAX_LUMINANCE);
+    for (const [part, name] of [
+      ["name", header(page, label).getByRole("button").locator("span", { hasText: label })],
+      ["count", count(page, label)],
+    ] as const) {
+      await expect(name).toBeVisible();
+      const painted = await name.evaluate((element) => {
+        const backgrounds: string[] = [];
+        for (let node: Element | null = element; node; node = node.parentElement) {
+          backgrounds.push(getComputedStyle(node).backgroundColor);
+        }
+        return { color: getComputedStyle(element).color, backgrounds };
+      });
+      expect(textContrast(painted), `${label} header ${part}`).toBeGreaterThanOrEqual(AA_TEXT);
+      expect(surfaceLuminance(painted.backgrounds), `${label} header surface`).toBeLessThanOrEqual(DARK_SURFACE_MAX_LUMINANCE);
+    }
   }
 });
