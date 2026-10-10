@@ -17,10 +17,10 @@ interface AiKeysAnswer {
   hint: string;
   unreadable: boolean;
   included: boolean;
-  usage: AiUsage;
+  usage: UsageAnswer;
 }
 
-interface AiUsage {
+interface UsageAnswer {
   scope: "month" | "trial";
   used: number;
   limit: number | null;
@@ -35,7 +35,7 @@ interface AiUsage {
 const tokens = (n: number) => n.toLocaleString("en-US");
 const day = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
 
-function UsageCard({ usage, hosted }: { usage: AiUsage; hosted: boolean }) {
+function UsageCard({ usage, hosted }: { usage: UsageAnswer; hosted: boolean }) {
   const period = usage.scope === "trial" ? "in your trial" : "this month";
   const share = usage.limit ? Math.min(100, Math.floor((usage.used / usage.limit) * 100)) : null;
   return (

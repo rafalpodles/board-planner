@@ -280,6 +280,13 @@ test("the operator switches its key off for one organisation: that one is refuse
   }
   expect(again.status).toBe(200);
 
+  // And the screens offer it again
+  await page.goto(`${originOf(ACME)}/projects/${SHARED_KEY}`);
+  await page.getByRole("button", { name: "New task" }).click();
+  const back = page.getByRole("dialog", { name: "New Task" });
+  await expect(back.getByPlaceholder("Describe what you need")).toBeVisible();
+  await expect(back.getByTestId("ai-locked")).toHaveCount(0);
+
   const audit = await withDb((db) => db.collection("platformauditlogs").find({ subject: ACME.organisation, action: /^organisation_ai_/ }).sort({ createdAt: 1 }).toArray());
   expect(audit.map((row) => [row.action, row.detail])).toEqual([["organisation_ai_locked", "abuse report 17"], ["organisation_ai_unlocked", ""]]);
 });
@@ -316,7 +323,7 @@ test("a hosted Free organisation is shown no allowance it does not have, on its 
 
   await page.goto(`${originOf(ACME)}/settings/ai-keys`);
   await expect(page.getByText(/Without a key of your own it does not run on the Free plan/)).toBeVisible();
-  await expect(page.getByText("AI usage")).toHaveCount(0);
+  await expect(page.getByText("AI usage", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("progressbar")).toHaveCount(0);
 
   const list = await (await platform(request, "GET", "/api/platform/organisations")).json();

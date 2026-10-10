@@ -18,6 +18,7 @@ export const GET = withAdmin(async (_request, { db }) => {
     pmAvailable: availability?.available ?? false,
     pmNeedsPlan: availability?.needsPlan ?? false,
     pmKeyUnreadable: availability?.keyUnreadable ?? false,
+    pmLocked: availability?.locked ?? false,
     defaults: {
       pmDefaultModel: settings.pmDefaultModel || "",
       envModel: DEFAULT_PM_MODEL(),

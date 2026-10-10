@@ -23,7 +23,7 @@ export interface AiUsageSummary {
   ownTokens: number;
   /** The operator has switched off the use of its key for this organisation */
   locked: boolean;
-  /** The service's key is one this organisation may use: a plan that includes it, or a self-hosted instance's own */
+  /** The service has a key and this organisation may use it: a plan that includes it, or a self-hosted instance's own */
   included: boolean;
 }
 
@@ -39,8 +39,8 @@ export async function aiUsageSummary(db: ScopedDb, now: Date = new Date()): Prom
   }).lean();
   const row = (kind: string) => rows.find((r) => r.kind === kind);
 
-  // A hosted organisation on a plan without managed AI has no allowance: the key is its own or nothing
-  const included = organisationDomain() === null || can(organisation, "ai.managed");
+  // An organisation on a plan without managed AI, or on an instance with no key to offer, has no allowance: the key is its own or nothing
+  const included = Boolean(process.env.OPENROUTER_API_KEY) && (organisationDomain() === null || can(organisation, "ai.managed"));
   return {
     scope,
     used: row(scope)?.tokens ?? 0,

@@ -29,6 +29,7 @@ describe("GET /api/admin/agents", () => {
     ["can run", { available: true, needsPlan: false, keyUnreadable: false }],
     ["could run on a plan", { available: false, needsPlan: true, keyUnreadable: false }],
     ["has a stored key that cannot be read", { available: false, needsPlan: false, keyUnreadable: true }],
+    ["is switched off by the operator", { available: false, needsPlan: false, keyUnreadable: false, locked: true }],
   ])("passes on whether the PM agent %s", async (_case, availability) => {
     pmAvailability.mockResolvedValue(availability);
 
@@ -38,13 +39,14 @@ describe("GET /api/admin/agents", () => {
       pmAvailable: availability.available,
       pmNeedsPlan: availability.needsPlan,
       pmKeyUnreadable: availability.keyUnreadable,
+      pmLocked: Boolean((availability as { locked?: boolean }).locked),
     });
   });
 
   it("says the agent cannot run, rather than failing, when availability cannot be read", async () => {
     pmAvailability.mockResolvedValue(null);
 
-    expect(await (await ask()).json()).toMatchObject({ pmAvailable: false, pmNeedsPlan: false, pmKeyUnreadable: false });
+    expect(await (await ask()).json()).toMatchObject({ pmAvailable: false, pmNeedsPlan: false, pmKeyUnreadable: false, pmLocked: false });
   });
 
   it("answers no member", async () => {

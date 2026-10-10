@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const m = vi.hoisted(() => ({ budget: null as unknown, rows: [] as Record<string, unknown>[], trial: false, locked: null as Date | null, hosted: true, managed: true }));
 
@@ -15,6 +15,7 @@ const find = vi.fn();
 const db = { organisation: "org", AiBudget: { find: (filter: unknown) => (find(filter), { lean: async () => m.rows }) } } as never;
 
 beforeEach(() => {
+  vi.stubEnv("OPENROUTER_API_KEY", "sk-or-x");
   m.budget = { scope: "month", limit: 15_000_000, dailyCeiling: 3_000_000 };
   m.rows = [];
   m.trial = false;
@@ -23,6 +24,8 @@ beforeEach(() => {
   m.managed = true;
   find.mockClear();
 });
+
+afterEach(() => vi.unstubAllEnvs());
 
 // BP-680: what an organisation has used of what it may spend, for its own Settings and for the operator
 describe("aiUsageSummary", () => {
@@ -79,6 +82,12 @@ describe("aiUsageSummary", () => {
     m.rows = [{ kind: "month", period: "2026-10", tokens: 0, ownTokens: 500 }];
 
     expect(await aiUsageSummary(db, NOW)).toMatchObject({ included: false, limit: null, dailyCeiling: null, ownTokens: 500 });
+  });
+
+  it("has no allowance where the service has no key to offer, whatever the plan says", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "");
+
+    expect(await aiUsageSummary(db, NOW)).toMatchObject({ included: false, limit: null });
   });
 
   it("keeps a self-hosted instance's own key included, whatever the plan says", async () => {

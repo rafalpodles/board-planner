@@ -266,13 +266,14 @@ describe("Settings → AI key: usage", () => {
   });
 
   it("shows only what its own key used, where the service's key is not one it may use", async () => {
-    api.get.mockResolvedValue({ ...FREE_CLOUD, set: true, hint: "abcd", usage: usage({ included: false, limit: null, dailyCeiling: null, resetsAt: null, ownTokens: 4_000 }) });
+    api.get.mockResolvedValue({ ...FREE_CLOUD, set: true, hint: "abcd", usage: usage({ included: false, limit: null, dailyCeiling: null, resetsAt: null, ownTokens: 4_000, locked: true }) });
     render(<AiKeys />);
 
     expect((await screen.findByTestId("ai-usage-own")).textContent).toBe("Your own key: 4,000 tokens this month, counted and never limited.");
     expect(screen.queryByTestId("ai-usage-month")).toBeNull();
     expect(screen.queryByTestId("ai-usage-today")).toBeNull();
     expect(screen.queryByTestId("ai-usage-locked")).toBeNull();
+    expect(screen.getAllByText("Your own key").length).toBe(2);
   });
 
   it("rounds the share down, so a month that is not yet spent is not shown as spent", async () => {

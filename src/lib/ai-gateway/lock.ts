@@ -5,7 +5,7 @@ import { Organisation } from "@/models/organisation";
 
 /**
  * Switches off, or back on, what an organisation may spend of the operator's AI key. Its own key is not touched: the lock is
- * about the operator's spend. Refused for an organisation that is gone or being deleted, and for the default one, which is the operator's own.
+ * about the operator's spend. Refused for an organisation that is gone or being deleted, and for the default one, which stays out of a lock as it stays out of a suspension.
  */
 export async function setAiLocked(organisationId: string, locked: boolean, reason = ""): Promise<"ok" | "not_found" | "default_organisation"> {
   const hex = organisationId.toLowerCase();
