@@ -3,7 +3,12 @@ import { unexpectedStaticRoutes } from "./static-pages";
 
 describe("the prerendered-page allowlist", () => {
   it("passes the routes every build of this app prerenders", () => {
-    expect(unexpectedStaticRoutes({ routes: { "/_global-error": {}, "/icon.svg": {} }, dynamicRoutes: {} })).toEqual([]);
+    expect(
+      unexpectedStaticRoutes({
+        routes: { "/_global-error": {}, "/icon.svg": {}, "/favicon.ico": {}, "/apple-icon.png": {}, "/robots.txt": {} },
+        dynamicRoutes: {},
+      })
+    ).toEqual([]);
   });
 
   it("names a page that became static, which would be served without a nonce", () => {
