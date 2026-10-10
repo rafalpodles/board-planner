@@ -931,7 +931,7 @@ function FilterChip({
         tinted
           ? "chip chip-custom"
           : isAssignee
-            ? "bg-primary/15 text-primary"
+            ? "bg-primary/15 text-primary-on-tint"
             : "bg-bg-input text-text-muted"
       }`}
     >

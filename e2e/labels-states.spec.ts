@@ -107,8 +107,7 @@ test("a picked label and the filter's own text are readable in the dark theme", 
   await page.mouse.move(0, 0);
 
   // TODO(BP-997): the selected "Any of them" reads at 4.42:1 in the dark theme; add it once that is fixed
-  // TODO(BP-997): the selected "Any of them" reads at 4.42:1 in the dark theme; add it once that is fixed
-  for (const target of [option(page, "Frontend"), option(page, "Design"), labelGroup(page).getByRole("button", { name: "All of them" })]) {
+  for (const target of [option(page, "Frontend"), option(page, "Design"), labelGroup(page).getByRole("button", { name: "Any of them" }), labelGroup(page).getByRole("button", { name: "All of them" })]) {
     await expect(target).toBeVisible();
     const painted = await target.evaluate((element) => {
       const backgrounds: string[] = [];

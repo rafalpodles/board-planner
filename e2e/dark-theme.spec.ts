@@ -139,6 +139,23 @@ test("the board, a task, the dashboard and settings all paint dark, with readabl
 });
 
 for (const theme of ["Light", "Dark"] as const) {
+  test(`text on an accent tint reads at AA — ${theme.toLowerCase()} (BP-997)`, async ({ page }) => {
+    await signIn(page);
+    const saved = await page.request.post(`/api/projects/${PROJECT_KEY}/views`, {
+      headers: ADMIN_AUTH,
+      data: { name: "Everybody's view", shared: true },
+    });
+    expect(saved.status(), await saved.text()).toBe(201);
+    await chooseTheme(page, theme);
+    await open(page, board);
+
+    await expectReadable("the plan badge's name", page.getByTestId("plan-badge").getByText("Free", { exact: true }));
+    await page.getByRole("button", { name: "Views", exact: true }).click();
+    await expectReadable("the Shared badge on a view", page.getByRole("dialog", { name: "Views" }).getByText("Shared", { exact: true }));
+  });
+}
+
+for (const theme of ["Light", "Dark"] as const) {
   test(`a project's own column and category colours stay readable — ${theme.toLowerCase()}`, async ({
     page,
   }) => {

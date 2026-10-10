@@ -33,7 +33,7 @@ export function ProjectRail({ projects, pathname }: ProjectRailProps) {
         aria-current={onProjectList ? "page" : undefined}
         className={`${ROW} ${
           onProjectList
-            ? "bg-primary/15 text-primary"
+            ? "bg-primary/15 text-primary-on-tint"
             : "text-text-muted hover:bg-bg-hover hover:text-text"
         }`}
       >
@@ -74,7 +74,7 @@ export function ProjectRail({ projects, pathname }: ProjectRailProps) {
                     aria-current={section.active ? "page" : undefined}
                     className={`focus-ring relative flex h-8 w-full items-center justify-center rounded-md transition-colors ${
                       section.active
-                        ? "bg-primary/15 text-primary"
+                        ? "bg-primary/15 text-primary-on-tint"
                         : "text-text-muted hover:bg-bg-hover hover:text-text"
                     }`}
                   >

@@ -70,7 +70,7 @@ function Details({ subscription, members, memberPrice, upcoming }: { subscriptio
     <dl className="divide-y divide-border rounded-lg border border-border text-sm" data-testid="subscription-details">
       <Row label="Billing">
         {subscription.interval === "year" ? "Yearly" : "Monthly"}
-        {subscription.launch && <span className="ml-2 rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-semibold text-primary">Launch price</span>}
+        {subscription.launch && <span className="ml-2 rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-semibold text-primary-on-tint">Launch price</span>}
       </Row>
       {members !== undefined && (
         <Row label="Members" testId="subscription-members">

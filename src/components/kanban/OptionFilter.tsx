@@ -54,7 +54,7 @@ export function OptionFilter({ field, filter, onChange }: OptionFilterProps) {
               aria-pressed={mode === choice}
               onClick={() => onChange({ mode: choice })}
               className={`focus-ring-inset px-2 py-1 ${
-                mode === choice ? "bg-primary/15 text-primary" : "text-text-muted hover:text-text"
+                mode === choice ? "bg-primary/15 text-primary-on-tint" : "text-text-muted hover:text-text"
               }`}
             >
               {choice === "any" ? "Any of them" : "All of them"}
