@@ -15,6 +15,7 @@ describe("reconcile", () => {
 
   it("allows a difference up to the tolerance in any of the three figures, and no more", () => {
     expect(reconcile([ours({ calls: 101 })], [theirs()], 0.02).within).toBe(true);
+    expect(reconcile([ours({ calls: 102 })], [theirs()], 0.02).within, "exactly at the tolerance is within it").toBe(true);
     expect(reconcile([ours({ calls: 103 })], [theirs()], 0.02).within).toBe(false);
     expect(reconcile([ours({ promptTokens: 1_030_000 })], [theirs()], 0.02).within).toBe(false);
     expect(reconcile([ours({ completionTokens: 48_000 })], [theirs()], 0.02).within).toBe(false);
