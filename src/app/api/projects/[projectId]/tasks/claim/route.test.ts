@@ -132,14 +132,17 @@ beforeEach(() => {
 describe("POST /tasks/claim on a Free organisation past its one machine", () => {
   const ctx = { params: Promise.resolve({ projectId: "CP" }) };
 
-  it("refuses a machine the limit leaves out with 403 and the reason, and claims nothing", async () => {
+  // 409 is the refusal a worker says once and shows in the menubar app; a 403 it logs as a broken cycle every poll
+  it("refuses a machine the limit leaves out with 409 and what to do, and claims nothing", async () => {
     verifyWorkerCredential.mockResolvedValue({ _id: OID, enabled: true, owner: OWNER });
     claimingMachineIds.mockResolvedValue(new Set(["69a52e3b399b27d3cbb2c5ff"]));
 
     const response = await POST(request(authed), ctx);
 
-    expect(response.status).toBe(403);
-    expect((await response.json()).error).toMatch(/^The Free plan runs one machine per organisation/);
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toBe(
+      "The Free plan runs one machine per organisation, and another one was connected first. Upgrade to Pro, or switch the other machine off in Settings → Workers, for this one to take work."
+    );
     expect(claimNextTask).not.toHaveBeenCalled();
   });
 

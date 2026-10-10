@@ -37,16 +37,16 @@ export const GET = withWorker(async (_request, { worker, db }) => {
     ownerReachableProjectIds(db, worker),
     claimingMachineIds(db),
   ]);
-  const held = isHeldByPlan(worker, claiming);
-
   return NextResponse.json({
-    ...toApiWorker(worker, new Date(), undefined, held),
+    ...toApiWorker(worker, new Date(), undefined, isHeldByPlan(worker, claiming)),
     policy: overriddenWorkerPolicy(worker),
     // This is the field the worker actually reads, so the contested-checkout decision has to be
     // applied here and not only on the heartbeat, whose assignments nothing consumes.
-    assignments: held
-      ? []
-      : assignmentsFor(usableRepos(worker as never, others as never), projects as never, reachable),
+    assignments: assignmentsFor(
+      usableRepos(worker as never, others as never),
+      projects as never,
+      reachable
+    ),
     // The other half of the same question: what this machine could serve if it had the checkout.
     // Rendered by the app as the projects you can add, so it carries an address to clone and a name
     // to show — never a path, which stays the machine's own business.

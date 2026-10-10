@@ -88,7 +88,7 @@ describe("GET /api/workers/enrolment/device/:userCode on a Free organisation wit
 
     expect(body.machineLimit).toBe("The Free plan connects one machine.");
     expect(machineLimitRefusal).toHaveBeenLastCalledWith(scopedToDefaultOrganisation(), {
-      machine: { name: "rig-laptop", host: "mac.home" },
+      machine: { name: "rig-laptop", host: "mac.home", owner: "member-1" },
     });
   });
 });

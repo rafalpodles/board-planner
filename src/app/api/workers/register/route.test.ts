@@ -77,7 +77,7 @@ describe("POST /api/workers/register past the Free plan's one machine", () => {
     expect(registerWorker).not.toHaveBeenCalled();
     expect(releaseEnrolmentToken).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "e1");
     expect(machineLimitRefusal).toHaveBeenCalledWith(scopedToDefaultOrganisation(), {
-      machine: { name: "rig-laptop", host: "mac.home" },
+      machine: { name: "rig-laptop", host: "mac.home", owner: "u1" },
     });
   });
 

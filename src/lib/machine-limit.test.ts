@@ -3,27 +3,33 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 const getOrganisation = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/organisation", () => ({ getOrganisation }));
 
-const { FREE_MACHINE_LIMIT, claimingMachineIds, isHeldByPlan, machineLimitOf, machineLimitRefusal } = await import(
-  "./machine-limit"
-);
+const { FREE_MACHINE_LIMIT, claimingMachineIds, isHeldByPlan, machineLimitOf, machineLimitRefusal, ownsConnectedMachine } =
+  await import("./machine-limit");
 
 const FREE = { entitlements: { plan: "free", features: [] } };
 const PRO = { entitlements: { plan: "pro", features: [], expiresAt: new Date(Date.now() + 86_400_000) } };
 const TRIAL = { entitlements: { plan: "pro", features: [], trial: true, expiresAt: new Date(Date.now() + 86_400_000) } };
 const CONNECTED = { enabled: true, owner: { $ne: null } };
 
-function fakeDb({ connected = 0, existing = [] as Record<string, unknown>[], first = [] as string[] } = {}) {
+function fakeDb({
+  connected = 0,
+  existing = [] as Record<string, unknown>[],
+  first = [] as string[],
+  undated = [] as string[],
+} = {}) {
   const countDocuments = vi.fn().mockResolvedValue(connected);
   const exists = vi.fn().mockImplementation(async (filter: Record<string, unknown>) =>
     existing.some((row) => Object.entries(filter).every(([k, v]) => JSON.stringify(row[k]) === JSON.stringify(v)))
       ? { _id: "w" }
       : null
   );
-  const lean = vi.fn().mockResolvedValue(first.map((_id) => ({ _id })));
-  const select = vi.fn(() => ({ lean }));
-  const limit = vi.fn(() => ({ select }));
+  const limit = vi.fn((n: number) => ({ select: () => ({ lean: async () => rows.slice(0, n).map((_id) => ({ _id })) }) }));
+  let rows: string[] = [];
   const sort = vi.fn(() => ({ limit }));
-  const find = vi.fn(() => ({ sort }));
+  const find = vi.fn((filter: { createdAt: unknown }) => {
+    rows = filter.createdAt === null ? undated : first;
+    return { sort };
+  });
   return {
     db: { organisation: "org-1", Worker: { countDocuments, exists, find } } as never,
     countDocuments,
@@ -67,12 +73,21 @@ describe("machineLimitOf", () => {
 
 describe("claimingMachineIds", () => {
   it("is the first connected machine on Free, read in the order machines were connected", async () => {
-    const { db, find, sort, limit } = fakeDb({ first: ["a"] });
+    const { db, find, sort, limit } = fakeDb({ first: ["a", "b"], undated: ["legacy"] });
 
     expect(await claimingMachineIds(db)).toEqual(new Set(["a"]));
-    expect(find).toHaveBeenCalledWith(CONNECTED);
+    expect(find).toHaveBeenCalledTimes(1);
+    expect(find).toHaveBeenCalledWith({ ...CONNECTED, createdAt: { $ne: null } });
     expect(sort).toHaveBeenCalledWith({ createdAt: 1, _id: 1 });
     expect(limit).toHaveBeenCalledWith(1);
+  });
+
+  // lostCheckouts puts an undated record last for the same reason: it must never win by accident
+  it("falls back to a record with no createdAt only when no dated one is connected", async () => {
+    const { db, find } = fakeDb({ undated: ["legacy"] });
+
+    expect(await claimingMachineIds(db)).toEqual(new Set(["legacy"]));
+    expect(find).toHaveBeenLastCalledWith({ ...CONNECTED, createdAt: null });
   });
 
   it("is null, every machine claiming, where there is no limit, and asks nothing of the database", async () => {
@@ -104,10 +119,9 @@ describe("machineLimitRefusal", () => {
     expect(refused?.status).toBe(402);
     expect(await refused!.json()).toEqual({
       error:
-        "This organisation is on the Free plan, which connects one machine for workers and agents, and has 1 connected. Upgrade to Pro to connect more.",
+        "This organisation is on the Free plan, which connects one machine for workers and agents, and one is already connected. Pro connects any number.",
       feature: "workers.multiple",
       plan: "free",
-      machines: 1,
       limit: 1,
     });
     expect(countDocuments).toHaveBeenCalledWith(CONNECTED);
@@ -123,23 +137,41 @@ describe("machineLimitRefusal", () => {
     expect(await machineLimitRefusal(fakeDb({ connected: 5 }).db)).toBeNull();
   });
 
-  it("lets a machine that already exists register again: that connects nothing new", async () => {
-    const existing = [{ name: "mac", host: "mac.local" }];
-    expect(await machineLimitRefusal(fakeDb({ connected: 1, existing }).db, { machine: { name: "mac", host: "mac.local" } })).toBeNull();
-    expect(
-      (await machineLimitRefusal(fakeDb({ connected: 1, existing }).db, { machine: { name: "other", host: "mac.local" } }))?.status
-    ).toBe(402);
+  it("lets a person register their own machine again: that connects nothing new", async () => {
+    const existing = [{ name: "mac", host: "mac.local", owner: "ada" }];
+    const again = (machine: { name: string; host: string; owner: string }) =>
+      machineLimitRefusal(fakeDb({ connected: 1, existing }).db, { machine });
+
+    expect(await again({ name: "mac", host: "mac.local", owner: "ada" })).toBeNull();
+    expect((await again({ name: "other", host: "mac.local", owner: "ada" }))?.status).toBe(402);
   });
 
-  it("lets the owner of the connected machine mint a token to connect it again, and nobody else", async () => {
-    const existing = [{ ...CONNECTED, owner: "ada" }];
-    expect(await machineLimitRefusal(fakeDb({ connected: 1, existing }).db, { owner: "ada" })).toBeNull();
-    expect((await machineLimitRefusal(fakeDb({ connected: 1, existing }).db, { owner: "bob" }))?.status).toBe(402);
+  // Adopting a record nobody owns connects a machine, whatever the record's age: otherwise a released
+  // machine enrolled again would pass as a re-registration and take the claiming slot from the one in use
+  it("counts adopting a machine nobody owns, or somebody else's, as connecting a new one", async () => {
+    const released = [{ name: "mac", host: "mac.local", owner: null }];
+    expect(
+      (await machineLimitRefusal(fakeDb({ connected: 1, existing: released }).db, { machine: { name: "mac", host: "mac.local", owner: "ada" } }))
+        ?.status
+    ).toBe(402);
+    const theirs = [{ name: "mac", host: "mac.local", owner: "bob" }];
+    expect(
+      (await machineLimitRefusal(fakeDb({ connected: 1, existing: theirs }).db, { machine: { name: "mac", host: "mac.local", owner: "ada" } }))
+        ?.status
+    ).toBe(402);
   });
 
   it("does not count the machine being switched back on against itself", async () => {
     const { db, countDocuments } = fakeDb({ connected: 0 });
     expect(await machineLimitRefusal(db, { workerId: "w2" })).toBeNull();
     expect(countDocuments).toHaveBeenCalledWith({ ...CONNECTED, _id: { $ne: "w2" } });
+  });
+});
+
+describe("ownsConnectedMachine", () => {
+  it("is whether the person owns an enabled machine", async () => {
+    const existing = [{ ...CONNECTED, owner: "ada" }];
+    expect(await ownsConnectedMachine(fakeDb({ existing }).db, "ada")).toBe(true);
+    expect(await ownsConnectedMachine(fakeDb({ existing }).db, "bob")).toBe(false);
   });
 });

@@ -70,7 +70,7 @@ export const POST = withAuth(async (request, { params, user, db }) => {
 
   // Before the project is switched on for machines, so a refusal leaves nothing behind
   const overLimit = await machineLimitRefusal(db, {
-    machine: { name: enrolment.machineName, host: enrolment.machineHost },
+    machine: { name: enrolment.machineName, host: enrolment.machineHost, owner: user._id },
   });
   if (overLimit) return overLimit;
 

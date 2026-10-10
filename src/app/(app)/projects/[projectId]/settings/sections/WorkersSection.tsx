@@ -23,6 +23,8 @@ import { useStore } from "@/app/(app)/agents/store";
 import { LoadFailed } from "@/components/ui/LoadFailed";
 import { isWorkerLockedByInstance } from "@/lib/worker-gate";
 import { bindingErrorFor, describeBindingError } from "@/lib/binding-error";
+import { HELD_BY_PLAN } from "@/lib/machine-limit-copy";
+import { UpgradeLink } from "@/components/settings/UpgradeLink";
 
 function sentence(clause: string): string {
   return clause.charAt(0).toUpperCase() + clause.slice(1);
@@ -285,6 +287,11 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
                               title={refused}
                             >
                               {sentence(describeBindingError(refused))}
+                            </p>
+                          )}
+                          {state === "held" && (
+                            <p data-testid="offering-machine-held" className="basis-full text-xs text-text-muted">
+                              {HELD_BY_PLAN} <UpgradeLink />
                             </p>
                           )}
                         </li>

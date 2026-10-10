@@ -4,7 +4,8 @@ const getAuthUser = vi.fn();
 const check = vi.fn();
 const mintEnrolmentToken = vi.fn();
 const machineLimitRefusal = vi.fn();
-vi.mock("@/lib/machine-limit", () => ({ machineLimitRefusal }));
+const ownsConnectedMachine = vi.fn();
+vi.mock("@/lib/machine-limit", () => ({ machineLimitRefusal, ownsConnectedMachine }));
 
 const logInstanceAudit = vi.fn();
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
@@ -52,11 +53,12 @@ beforeEach(() => {
     expiresAt: new Date("2026-08-03T13:00:00.000Z"),
   });
   machineLimitRefusal.mockResolvedValue(null);
+  ownsConnectedMachine.mockResolvedValue(false);
 });
 
 // BP-989: said in Settings, where the token is minted, rather than in a log on the machine an hour later
 describe("POST /api/workers/enrolment past the Free plan's one machine", () => {
-  it("refuses with the plan's 402 and mints nothing, unless the person owns the connected machine", async () => {
+  it("refuses with the plan's 402 and mints nothing for a person who owns no connected machine", async () => {
     getAuthUser.mockResolvedValue(MEMBER);
     machineLimitRefusal.mockResolvedValue(Response.json({ feature: "workers.multiple" }, { status: 402 }));
 
@@ -64,7 +66,28 @@ describe("POST /api/workers/enrolment past the Free plan's one machine", () => {
 
     expect(response.status).toBe(402);
     expect(mintEnrolmentToken).not.toHaveBeenCalled();
-    expect(machineLimitRefusal).toHaveBeenCalledWith(scopedToDefaultOrganisation(), { owner: "member-1" });
+    expect(ownsConnectedMachine).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "member-1");
+  });
+
+  // The usual way to add a second machine; without the note it learns of the refusal only in the machine's log
+  it("mints for the owner of the connected machine, to reconnect it, and says that is all it can do", async () => {
+    getAuthUser.mockResolvedValue(MEMBER);
+    machineLimitRefusal.mockResolvedValue(Response.json({ feature: "workers.multiple" }, { status: 402 }));
+    ownsConnectedMachine.mockResolvedValue(true);
+
+    const response = await POST(request({}), { params: Promise.resolve({}) });
+
+    expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({ token: "cpe_secret", reconnectOnly: true });
+  });
+
+  it("says nothing of reconnecting where there is room, as the control", async () => {
+    getAuthUser.mockResolvedValue(MEMBER);
+
+    const body = await (await POST(request({}), { params: Promise.resolve({}) })).json();
+
+    expect(body).not.toHaveProperty("reconnectOnly");
+    expect(ownsConnectedMachine).not.toHaveBeenCalled();
   });
 });
 

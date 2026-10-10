@@ -487,14 +487,16 @@ export default function AdminWorkersPage() {
                       />
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap">
-                      {worker.condition?.state === "held" ? (
-                        <span data-testid="worker-held" className="text-xs text-warning" title={HELD_BY_PLAN}>
-                          Waiting: the Free plan runs one machine.{" "}
-                          <Link href={UPGRADE_HREF} className="underline">
+                      {worker.condition?.state === "held" && (
+                        <span data-testid="worker-held" className="flex items-center gap-2 text-xs" title={HELD_BY_PLAN}>
+                          <span className="rounded-full border border-warning/40 bg-warning/10 px-1.5 py-0.5 text-warning">
+                            Waiting · Free plan
+                          </span>
+                          <Link href={UPGRADE_HREF} className="font-medium text-primary underline">
                             Upgrade
                           </Link>
                         </span>
-                      ) : null}
+                      )}
                       {worker.currentTask ? (
                         <div className="flex items-center gap-2">
                           <span className="font-mono text-xs">{worker.currentTask.taskKey}</span>
@@ -507,7 +509,7 @@ export default function AdminWorkersPage() {
                             </span>
                           )}
                         </div>
-                      ) : (
+                      ) : worker.condition?.state === "held" ? null : (
                         <span className="text-text-muted">—</span>
                       )}
                     </td>

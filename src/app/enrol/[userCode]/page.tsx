@@ -176,15 +176,6 @@ function Enrol({ params }: { params: Promise<{ userCode: string }> }) {
           </div>
         )}
 
-        {enrolment.machineLimit && (
-          <div
-            data-testid="machine-limit"
-            className="mt-6 rounded-lg border border-danger/40 bg-danger/10 p-4 text-sm text-text"
-          >
-            {enrolment.machineLimit} <UpgradeLink />
-          </div>
-        )}
-
         <section className="mt-8">
           <h2 className="text-sm font-medium text-text">Which repository should it set up first?</h2>
           {/* Where a scope list would be, so it is read as one: this pick is a first checkout, and
@@ -245,8 +236,22 @@ function Enrol({ params }: { params: Promise<{ userCode: string }> }) {
           </div>
         )}
 
-        <div className="mt-8 flex gap-3">
-          <Button disabled={busy || !projectId || !!enrolment.machineLimit} onClick={() => decide(false)}>
+        {enrolment.machineLimit && (
+          <div
+            id="machine-limit"
+            data-testid="machine-limit"
+            className="mt-8 rounded-lg border border-warning/40 bg-warning/10 p-4 text-sm text-text"
+          >
+            {enrolment.machineLimit} <UpgradeLink />
+          </div>
+        )}
+
+        <div className={`${enrolment.machineLimit ? "mt-4" : "mt-8"} flex gap-3`}>
+          <Button
+            disabled={busy || !projectId || !!enrolment.machineLimit}
+            aria-describedby={enrolment.machineLimit ? "machine-limit" : undefined}
+            onClick={() => decide(false)}
+          >
             {busy ? "Connecting…" : "Connect it"}
           </Button>
           <Button variant="secondary" disabled={busy} onClick={() => decide(true)}>

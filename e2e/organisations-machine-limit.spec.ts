@@ -178,8 +178,8 @@ test("on Free, a member connecting a second machine is told the limit where the 
   const free = await mintFromMachinesPage(page, ACME);
   expect(free.status).toBe(402);
   const refusal = free.dialog.getByTestId("machine-limit");
-  await expect(refusal).toContainText("which connects one machine for workers and agents, and has 1 connected");
-  await expect(refusal).toContainText("Ask an admin to upgrade.");
+  await expect(refusal).toContainText("which connects one machine for workers and agents, and one is already connected");
+  await expect(refusal).toContainText("Ask an admin to upgrade to Pro.");
   await expect(free.dialog.getByText("Copy this token now")).toHaveCount(0);
   expect(await withDb((db) => db.collection("enrolmenttokens").countDocuments({ organisation: ACME.organisation }))).toBe(0);
 
@@ -197,7 +197,7 @@ test("on Free, the menubar's confirmation page says so before the click, and con
 
   await page.goto(`${originOf(ACME)}${second}`);
   const notice = page.getByTestId("machine-limit");
-  await expect(notice).toContainText("which connects one machine for workers and agents, and has 1 connected");
+  await expect(notice).toContainText("which connects one machine for workers and agents, and one is already connected");
   await expect(notice.getByRole("link", { name: "Upgrade" })).toHaveAttribute("href", "/settings/organisation");
   await page.getByRole("radio").first().check();
   await expect(page.getByRole("button", { name: "Connect it" })).toBeDisabled();
@@ -234,13 +234,13 @@ test("on Free, the menubar's confirmation page says so before the click, and con
   await expect(page.getByRole("button", { name: "Connect it" })).toBeEnabled();
 });
 
-test("on Free, a machine registering with a token is refused and keeps its token, which works once the organisation upgrades", async ({ page, request }) => {
+test("on Free, the owner of the connected machine is told a token only reconnects it, and a new machine registering with it is refused and keeps it until an upgrade", async ({ page, request }) => {
   await signInOn(page.context(), ACME);
-  await withDb((db) => db.collection("workers").updateOne({ _id: ACME.workerId }, { $set: { enabled: false } }));
   const minted = await mintFromMachinesPage(page, ACME);
   expect(minted.status).toBe(201);
+  await expect(minted.dialog.getByTestId("reconnect-only")).toContainText("this token can only connect that machine again");
+  await expect(minted.dialog.getByTestId("reconnect-only").getByRole("link", { name: "Upgrade" })).toBeVisible();
   const token = (await minted.dialog.locator("code").first().innerText()).trim();
-  await withDb((db) => db.collection("workers").updateOne({ _id: ACME.workerId }, { $set: { enabled: true } }));
 
   const register = () =>
     request.post(`${ORGANISATIONS_API}/api/workers/register`, {
@@ -250,7 +250,7 @@ test("on Free, a machine registering with a token is refused and keeps its token
 
   const refused = await register();
   expect(refused.status()).toBe(402);
-  expect(await refused.json()).toMatchObject({ feature: "workers.multiple", plan: "free", machines: 1, limit: 1 });
+  expect(await refused.json()).toMatchObject({ feature: "workers.multiple", plan: "free", limit: 1 });
   expect(await withDb((db) => db.collection("workers").countDocuments({ organisation: ACME.organisation, name: "acme-box" }))).toBe(0);
   expect(await withDb((db) => db.collection("enrolmenttokens").findOne({ organisation: ACME.organisation }))).toMatchObject({ usedAt: null });
 
@@ -262,10 +262,13 @@ test("after Pro ends with two machines, the first connected claims, the other is
   await twoMachinesOnTheBoard(ACME);
 
   expect(await assignments(request, ACME, ACME.workerId)).toHaveLength(1);
-  expect(await assignments(request, ACME, SECOND(ACME))).toEqual([]);
+  // Its bindings stay, so a refused change a person answers still settles on that machine; only the claim stops
+  expect(await assignments(request, ACME, SECOND(ACME))).toHaveLength(1);
   const held = await claim(request, ACME, SECOND(ACME));
-  expect(held.status()).toBe(403);
-  expect((await held.json()).error).toMatch(/^The Free plan runs one machine per organisation, and another one was connected first/);
+  expect(held.status()).toBe(409);
+  expect((await held.json()).error).toBe(
+    "The Free plan runs one machine per organisation, and another one was connected first. Upgrade to Pro, or switch the other machine off in Settings → Workers, for this one to take work."
+  );
   expect((await claim(request, ACME, ACME.workerId)).status()).toBe(204);
 
   await signInOn(page.context(), ACME);
@@ -277,7 +280,8 @@ test("after Pro ends with two machines, the first connected claims, the other is
 
   await page.goto(`${originOf(ACME)}/settings/workers`);
   const row = (name: string) => page.getByRole("row").filter({ hasText: name }).first();
-  await expect(row("acme-second").getByTestId("worker-held")).toContainText("Waiting: the Free plan runs one machine");
+  await expect(row("acme-second").getByTestId("worker-held")).toContainText("Waiting · Free plan");
+  await expect(row("acme-second").getByTestId("worker-held").getByRole("link", { name: "Upgrade" })).toHaveAttribute("href", "/settings/organisation");
   await expect(row("acme-machine").getByTestId("worker-held")).toHaveCount(0);
 
   const [off] = await Promise.all([
@@ -285,17 +289,20 @@ test("after Pro ends with two machines, the first connected claims, the other is
     row("acme-machine").getByRole("button", { name: "On", exact: true }).click(),
   ]);
   expect(off.status()).toBe(200);
-  expect(await assignments(request, ACME, SECOND(ACME))).toHaveLength(1);
   expect((await claim(request, ACME, SECOND(ACME))).status()).toBe(204);
 
+  const reloaded = page.waitForResponse((r) => r.url().endsWith("/api/admin/workers") && r.request().method() === "GET");
   await page.reload();
+  await reloaded;
+  await expect(row("acme-machine").getByRole("button", { name: "Off", exact: true })).toBeVisible();
+  await expect(row("acme-second")).toContainText("acme-host-2");
   await expect(row("acme-second").getByTestId("worker-held")).toHaveCount(0);
   const [on] = await Promise.all([
     page.waitForResponse((r) => r.url().endsWith(`/api/workers/${ACME.workerId}`) && r.request().method() === "PATCH"),
     row("acme-machine").getByRole("button", { name: "Off", exact: true }).click(),
   ]);
   expect(on.status()).toBe(402);
-  await expect(page.getByText("which connects one machine for workers and agents, and has 1 connected").last()).toBeVisible();
+  await expect(page.getByText("which connects one machine for workers and agents, and one is already connected", { exact: false }).last()).toBeVisible();
   expect(await withDb((db) => db.collection("workers").countDocuments({ organisation: ACME.organisation }))).toBe(2);
 });
 
@@ -309,6 +316,7 @@ test("on Pro, every machine claims", async ({ request }) => {
 });
 
 test("on the trial a second machine connects through the menubar's page, and when the trial ends the first connected keeps claiming", async ({ page, request }) => {
+  test.setTimeout(180_000);
   await boardWithRepository(ACME);
   await withDb((db) =>
     db.collection("workers").updateOne(
@@ -316,8 +324,8 @@ test("on the trial a second machine connects through the menubar's page, and whe
       { $set: { createdAt: new Date(Date.now() - 86_400_000), host: "acme-host-1", repos: [{ remote: REMOTE(ACME), path: "/w/rockets" }] } }
     )
   );
-  // Ends twenty seconds from now: a trial ends on its day, with no grace, and a lapsed key cannot be pushed
-  await makePro(request, ACME, { trial: true, expiresInDays: 20 / 86_400 });
+  // Ends a minute from now: a trial ends on its day, with no grace, and a lapsed key cannot be pushed
+  await makePro(request, ACME, { trial: true, expiresInDays: 60 / 86_400 });
 
   const started = await request.post(`${ORGANISATIONS_API}/api/workers/enrolment/device`, {
     headers: { ...asOrganisation(ACME), "x-cp-protocol": "1", "content-type": "application/json" },
@@ -356,16 +364,20 @@ test("on the trial a second machine connects through the menubar's page, and whe
     return ((await response.json()) as { assignments: unknown[] }).assignments.length;
   };
 
+  const laptopClaims = async () =>
+    (
+      await request.post(`${ORGANISATIONS_API}/api/projects/${ACME.projectId}/tasks/claim`, {
+        headers: laptop,
+        data: { runId: "run-laptop" },
+      })
+    ).status();
+
   expect(await laptopAssignments()).toBe(1);
+  expect(await laptopClaims()).toBe(204);
   expect(await assignments(request, ACME, ACME.workerId)).toHaveLength(1);
 
-  await expect.poll(laptopAssignments, { timeout: 40_000, intervals: [2_000] }).toBe(0);
-  expect(await assignments(request, ACME, ACME.workerId)).toHaveLength(1);
-  const refused = await request.post(`${ORGANISATIONS_API}/api/projects/${ACME.projectId}/tasks/claim`, {
-    headers: laptop,
-    data: { runId: "run-laptop" },
-  });
-  expect(refused.status()).toBe(403);
+  await expect.poll(laptopClaims, { timeout: 90_000, intervals: [3_000] }).toBe(409);
+  expect((await claim(request, ACME, ACME.workerId)).status()).toBe(204);
   expect(await withDb((db) => db.collection("workers").countDocuments({ organisation: ACME.organisation, enabled: true }))).toBe(2);
 
   await page.goto(`${originOf(ACME)}/settings/machines`);
@@ -444,5 +456,6 @@ test("a member whose machine the Free plan holds is told so on their task, and t
   await page.goto(`${originOf(ACME)}/projects/${SHARED_KEY}/settings?section=workers`);
   const offering = (name: string) => page.getByTestId("offering-machine").filter({ hasText: name });
   await expect(offering("acme-second").getByTestId("offering-machine-state")).toHaveText("waiting: the Free plan runs one machine");
+  await expect(offering("acme-second").getByTestId("offering-machine-held")).toContainText("another one was connected first. Upgrade");
   await expect(offering("acme-machine").getByTestId("offering-machine-state")).toHaveText("live");
 });

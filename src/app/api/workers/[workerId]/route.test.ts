@@ -158,16 +158,17 @@ describe("GET /api/workers/:workerId on a Free organisation with several machine
       ctx()
     );
 
-  it("hands a machine the limit leaves out no assignments and says it is held", async () => {
+  // Its bindings are what settle a refused change a person answers on the task; only the claim is refused
+  it("says a machine the limit leaves out is held, and keeps its assignments", async () => {
     claimingMachineIds.mockResolvedValue(new Set(["69a52e3b399b27d3cbb2c5ff"]));
 
     const body = await (await workerGet()).json();
 
-    expect(body.assignments).toEqual([]);
+    expect(body.assignments).toHaveLength(1);
     expect(body.condition.state).toBe("held");
   });
 
-  it("hands the first connected machine its assignments, as the control", async () => {
+  it("says the first connected machine is live, as the control", async () => {
     claimingMachineIds.mockResolvedValue(new Set([WORKER_ID]));
 
     const body = await (await workerGet()).json();

@@ -6,7 +6,6 @@ import { RepoReport } from "@/lib/repo-match";
 import { WorkerHalt, WorkerPreflight, WorkerPreflightCheck } from "@/types";
 import { assignmentsFor, ownerReachableProjectIds, overriddenWorkerPolicy, touchWorker, usableRepos } from "@/lib/worker-service";
 import { PROJECT_RUNS_WORKERS_QUERY } from "@/lib/worker-gate";
-import { claimingMachineIds, isHeldByPlan } from "@/lib/machine-limit";
 
 /**
  * Every other worker's claim and heartbeat read this inventory back, so one machine inflating its
@@ -166,12 +165,11 @@ export const POST = withWorker(async (request, { worker, db }) => {
     others as never
   );
 
-  const [projects, reachable, claiming] = await Promise.all([
+  const [projects, reachable] = await Promise.all([
     db.Project.find(PROJECT_RUNS_WORKERS_QUERY)
       .select("_id key name repositoryUrl githubRepo gitlabRepo gitlabHost worker")
       .lean(),
     ownerReachableProjectIds(db, worker),
-    claimingMachineIds(db),
   ]);
 
   return NextResponse.json({
@@ -180,6 +178,6 @@ export const POST = withWorker(async (request, { worker, db }) => {
     // Only what an operator set: everything else resolves against the worker's own defaults, so
     // raising a default reaches every machine that never pinned it
     policy: overriddenWorkerPolicy(worker),
-    assignments: isHeldByPlan(worker, claiming) ? [] : assignmentsFor(inventory, projects as never, reachable),
+    assignments: assignmentsFor(inventory, projects as never, reachable),
   });
 });

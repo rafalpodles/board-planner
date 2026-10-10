@@ -72,8 +72,12 @@ export async function POST(request: Request) {
   }
 
   // After the token, never before: refusing first would tell a caller holding nothing whether this
-  // name and host already exist. Handed back, so the same file works once the organisation upgrades.
-  const overLimit = await machineLimitRefusal(db, { machine: { name, host } });
+  // name and host already exist. Handed back, so the same file works within the token's hour once the
+  // organisation upgrades.
+  const tokenOwnerId = await enrolmentTokenOwnerId(db, consumed.tokenId);
+  const overLimit = tokenOwnerId
+    ? await machineLimitRefusal(db, { machine: { name, host, owner: tokenOwnerId } })
+    : await machineLimitRefusal(db);
   if (overLimit) {
     await releaseEnrolmentToken(db, consumed.tokenId);
     return overLimit;
@@ -91,7 +95,7 @@ export async function POST(request: Request) {
       version: String(body.version ?? "").slice(0, 100),
       // Names the machine's identity after the person who enrolled it — "Owner · MacBook"
       owner: await enrolmentTokenOwner(db, consumed.tokenId),
-      ownerId: (await enrolmentTokenOwnerId(db, consumed.tokenId)) ?? undefined,
+      ownerId: tokenOwnerId ?? undefined,
     });
   } catch (error) {
     if (error instanceof WorkerAlreadyOwned) {

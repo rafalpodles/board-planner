@@ -52,7 +52,7 @@ export const GET = withAuth(async (_request, { params, user, db }) => {
     : null;
 
   const overLimit = await machineLimitRefusal(db, {
-    machine: { name: enrolment.machineName, host: enrolment.machineHost },
+    machine: { name: enrolment.machineName, host: enrolment.machineHost, owner: user._id },
   });
 
   return NextResponse.json({

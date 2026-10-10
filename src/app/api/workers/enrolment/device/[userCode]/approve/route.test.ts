@@ -115,7 +115,7 @@ describe("POST /api/workers/enrolment/device/:userCode/approve past the Free pla
     expect(registerWorker).not.toHaveBeenCalled();
     expect(deviceEnrolmentUpdateOne).not.toHaveBeenCalled();
     expect(machineLimitRefusal).toHaveBeenCalledWith(scopedToDefaultOrganisation(), {
-      machine: { name: "rig-laptop", host: "mac.home" },
+      machine: { name: "rig-laptop", host: "mac.home", owner: "member-1" },
     });
   });
 

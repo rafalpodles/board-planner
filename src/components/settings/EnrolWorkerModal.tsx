@@ -9,10 +9,12 @@ import { Modal } from "@/components/ui/Modal";
 import { enrolmentExpiry, enrolmentMintBody, ENROLMENT_LABEL_MAX } from "@/lib/enrolment-view";
 import { GETTING_THE_SOFTWARE_URL } from "@/lib/docs-urls";
 import { UpgradeLink } from "@/components/settings/UpgradeLink";
+import { RECONNECT_ONLY } from "@/lib/machine-limit-copy";
 
 interface MintedEnrolment {
   token: string;
   expiresAt: string;
+  reconnectOnly?: boolean;
 }
 
 interface EnrolWorkerModalProps {
@@ -121,6 +123,11 @@ export function EnrolWorkerModal({ open, onClose, title = "Enrol a worker" }: En
         </div>
       ) : (
         <div className="space-y-4">
+          {minted.reconnectOnly && (
+            <p role="status" data-testid="reconnect-only" className="rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm text-text">
+              {RECONNECT_ONLY} <UpgradeLink />
+            </p>
+          )}
           <div className="bg-warning/10 border border-warning/30 rounded-lg p-4">
             <p className="text-sm font-medium text-warning mb-2">
               Copy this token now — it is shown once and cannot be retrieved again. Only its hash is
