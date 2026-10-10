@@ -7,6 +7,8 @@ description: Use when picking up, implementing, reviewing, shipping or cleaning 
 
 A task is done when it is merged, documented, cleaned up after, and nobody was asked. Every stage below moves the task on the board. Skipping a stage is not finishing early; it is not finishing. Board comments, commits, PR text and docs are in English.
 
+This is the board-planner skill (`plugins/board-planner/skills/board-planner/SKILL.md`, the one users install) with this repository's process on top. Read it once: its pick, claim, escalate and close rules hold here, and the stages below add what this repository asks for.
+
 ## 0. Pick
 
 - A task named in the request wins. Otherwise pick from `todo`, never from `planned`: assigned to the board's own account first, then highest priority, then oldest.
