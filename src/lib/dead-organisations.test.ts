@@ -130,25 +130,45 @@ describe("deadOrganisationDays", () => {
 
 describe("deadOrganisationEmail", () => {
   const deleteOn = new Date(Date.UTC(2026, 11, 31, 12));
+  const sentAt = (daysBefore: number, hour = 12) => Date.UTC(2026, 11, 31 - daysBefore, hour);
 
-  it.each(["notice", "reminder"] as const)("the %s names the date, what cancels it, and links to the organisation's export", (kind) => {
-    const { subject, html, text } = deadOrganisationEmail(kind, "Acme", "https://acme.board-planner.com", deleteOn);
+  it.each(["notice", "reminder"] as const)("the %s names the date, the last day to act, and links to the organisation's export", (kind) => {
+    const { subject, html, text } = deadOrganisationEmail(kind, "Acme", "https://acme.board-planner.com", deleteOn, sentAt(7));
     expect(subject).toContain("31 December 2026");
     for (const body of [html, text]) {
       expect(body).toContain("31 December 2026");
-      expect(body).toMatch(/Signing in, or choosing a plan, before 31 December 2026 cancels the deletion/);
+      expect(body).toMatch(/Signing in, or choosing a plan, by 30 December 2026 cancels the deletion/);
+      expect(body).not.toMatch(/before 31 December/);
       expect(body).toContain("https://acme.board-planner.com/settings/export");
       expect(body).toContain("https://acme.board-planner.com/login");
     }
   });
 
+  // A suspension in the morning, UTC, falls while it is still the evening before at UTC−12
+  it("moves the last day back by one more when the suspension falls before noon, UTC", () => {
+    const morning = new Date(Date.UTC(2026, 11, 31, 6));
+    expect(deadOrganisationEmail("notice", "Acme", null, morning, sentAt(30, 6)).text).toMatch(/by 29 December 2026 cancels/);
+    const evening = new Date(Date.UTC(2026, 11, 31, 18));
+    expect(deadOrganisationEmail("notice", "Acme", null, evening, sentAt(30, 18)).text).toMatch(/by 30 December 2026 cancels/);
+  });
+
+  it("counts the days a reminder has left from when it goes out, however late", () => {
+    const left = (now: number) => deadOrganisationEmail("reminder", "Acme", null, deleteOn, now).html;
+    expect(left(sentAt(7))).toContain("Reminder: 7 days left");
+    expect(left(sentAt(4, 18))).toContain("Reminder: 4 days left");
+    expect(left(sentAt(1, 20))).toContain("Reminder: 1 day left");
+    expect(left(sentAt(0, 1))).toContain("Reminder: less than a day left");
+    expect(left(sentAt(4, 18))).not.toMatch(/week/);
+  });
+
   it("tells a reminder from the notice", () => {
-    expect(deadOrganisationEmail("reminder", "Acme", null, deleteOn).subject).toMatch(/^Reminder: /);
-    expect(deadOrganisationEmail("notice", "Acme", null, deleteOn).subject).not.toMatch(/Reminder/);
+    expect(deadOrganisationEmail("reminder", "Acme", null, deleteOn, sentAt(7)).subject).toMatch(/^Reminder: /);
+    expect(deadOrganisationEmail("notice", "Acme", null, deleteOn, sentAt(30)).subject).not.toMatch(/Reminder/);
+    expect(deadOrganisationEmail("notice", "Acme", null, deleteOn, sentAt(30)).html).not.toMatch(/days? left|Reminder/);
   });
 
   it("names the export page without a link when the organisation has no address", () => {
-    const { text } = deadOrganisationEmail("notice", "Acme", null, deleteOn);
+    const { text } = deadOrganisationEmail("notice", "Acme", null, deleteOn, sentAt(30));
     expect(text).toContain("Settings → Export");
     expect(text).not.toMatch(/https?:\/\//);
   });

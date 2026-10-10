@@ -110,17 +110,29 @@ async function lastActiveOf(organisation: Types.ObjectId, madeAt: Date): Promise
   return new Date(Math.max(...times) || madeAt.getTime());
 }
 
-export function deadOrganisationEmail(kind: "notice" | "reminder", label: string, origin: string | null, deleteOn: Date) {
-  const date = deleteOn.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+const dayOf = (at: Date) => at.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+const utcDayNumber = (at: number) => Math.floor(at / DAY_MS);
+/** The last calendar day that is still over before the suspension everywhere on Earth, down to UTC−12 */
+const LAST_DAY_MARGIN_MS = 36 * 60 * 60 * 1000;
+
+function daysLeft(deleteOn: Date, now: number): string {
+  const days = utcDayNumber(deleteOn.getTime()) - utcDayNumber(now);
+  if (days > 1) return `${days} days left`;
+  return days === 1 ? "1 day left" : "less than a day left";
+}
+
+export function deadOrganisationEmail(kind: "notice" | "reminder", label: string, origin: string | null, deleteOn: Date, now: number) {
+  const date = dayOf(deleteOn);
+  const lastDay = dayOf(new Date(deleteOn.getTime() - LAST_DAY_MARGIN_MS));
   const { html, text } = renderEmail({
-    preheader: `${label} will be suspended and deleted on ${date} unless somebody signs in or chooses a plan.`,
-    kicker: kind === "notice" ? "Your organisation" : "Reminder: one week left",
+    preheader: `${label} will be suspended and deleted on ${date} unless somebody signs in or chooses a plan by ${lastDay}.`,
+    kicker: kind === "notice" ? "Your organisation" : `Reminder: ${daysLeft(deleteOn, now)}`,
     heading: `${label} will be deleted on ${date}`,
     intro: [
       kind === "notice"
         ? `Nobody has used this ${APP_NAME} organisation for a long while, and it has no plan.`
         : `We wrote earlier that nobody had used this ${APP_NAME} organisation for a long while. Nobody has since, and it still has no plan.`,
-      `Signing in, or choosing a plan, before ${date} cancels the deletion.`,
+      `Signing in, or choosing a plan, by ${lastDay} cancels the deletion.`,
       "To keep a copy of everything in it, download the export from Settings → Export.",
     ],
     alert: {
@@ -139,9 +151,16 @@ export function deadOrganisationEmail(kind: "notice" | "reminder", label: string
   return { subject, html, text };
 }
 
-async function mailAdmins(kind: "notice" | "reminder", organisation: Types.ObjectId, name: string, slug: string | undefined, deleteOn: Date): Promise<number> {
+async function mailAdmins(
+  kind: "notice" | "reminder",
+  organisation: Types.ObjectId,
+  name: string,
+  slug: string | undefined,
+  deleteOn: Date,
+  now: number
+): Promise<number> {
   const to = await adminAddresses(organisation);
-  const mail = deadOrganisationEmail(kind, name || slug || "Your organisation", await organisationOrigin(organisation), deleteOn);
+  const mail = deadOrganisationEmail(kind, name || slug || "Your organisation", await organisationOrigin(organisation), deleteOn, now);
   let sent = 0;
   for (const address of to) {
     if (await sendEmail({ to: address, ...mail })) sent += 1;
@@ -222,7 +241,7 @@ export async function sweepDeadOrganisations(now: number = Date.now(), days: num
         if (taken.modifiedCount !== 1) continue;
         let sent = 0;
         try {
-          sent = await mailAdmins("notice", row._id, row.name, row.slug, new Date(now + DEAD_NOTICE_DAYS * DAY_MS));
+          sent = await mailAdmins("notice", row._id, row.name, row.slug, new Date(now + DEAD_NOTICE_DAYS * DAY_MS), now);
         } finally {
           await Organisation.updateOne(
             { _id: row._id },
@@ -243,7 +262,7 @@ export async function sweepDeadOrganisations(now: number = Date.now(), days: num
         if (taken.modifiedCount !== 1) continue;
         let sent = 0;
         try {
-          sent = await mailAdmins("reminder", row._id, row.name, row.slug, new Date(noticeAt.getTime() + DEAD_NOTICE_DAYS * DAY_MS));
+          sent = await mailAdmins("reminder", row._id, row.name, row.slug, new Date(noticeAt.getTime() + DEAD_NOTICE_DAYS * DAY_MS), now);
         } finally {
           if (sent === 0) await Organisation.updateOne({ _id: row._id, deadReminderAt: remindedAt }, { $set: { deadReminderAt: null } });
         }
