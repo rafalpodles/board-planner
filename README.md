@@ -16,7 +16,7 @@ REST API, so coding agents pick up the same tasks under the same rules as everyb
 <img src="https://img.shields.io/badge/Next.js-16-000?logo=nextdotjs&logoColor=white" alt="Next.js 16">
 <img src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white" alt="TypeScript">
 <img src="https://img.shields.io/badge/MongoDB-4.4%2B-47A248?logo=mongodb&logoColor=white" alt="MongoDB 4.4+">
-<img src="https://img.shields.io/badge/MCP-14%20tools-5b8cff" alt="MCP: 14 tools">
+<img src="https://img.shields.io/badge/MCP-46%20tools-5b8cff" alt="MCP: 46 tools">
 <img src="https://img.shields.io/badge/self--hosted-docker%20compose-2496ED?logo=docker&logoColor=white" alt="Self-hosted">
 
 <br><br>
@@ -149,7 +149,7 @@ fields you define per project, every comment and every change since it was creat
 
 ### Your agents work the same board
 
-Fourteen MCP tools over HTTP put the board in your terminal, so Claude Code reads the backlog, claims
+Forty-six MCP tools over HTTP put the board in your terminal, so Claude Code reads the backlog, claims
 a task and moves it — through the same permissions a teammate gets. API tokens can be scoped to
 specific projects, and the scope is enforced centrally, so it holds for REST and MCP alike.
 
@@ -488,7 +488,7 @@ on merge, so a page there is never behind the product.
 | [What is Board Planner](https://board-planner.com/docs/getting-started/what-is-board-planner/) | The idea, who it is for, what it is not |
 | [Quick start](https://board-planner.com/docs/getting-started/quick-start/) | First project, first task, first agent |
 | [PM agent](https://board-planner.com/docs/ai/pm-agent/) | Turning it on, what it may change, the allowance it spends against |
-| [Claude Code and MCP](https://board-planner.com/docs/ai/claude-code-and-mcp/) | The fourteen tools, scoped tokens, the OAuth connector |
+| [Claude Code and MCP](https://board-planner.com/docs/ai/claude-code-and-mcp/) | The forty-six tools, scoped tokens, the OAuth connector |
 | [Agents](https://board-planner.com/docs/ai/agents/) | Steps, gates, and what a run actually does |
 | [Execution workers](https://board-planner.com/docs/ai/execution-workers/) | Enrolling a machine, which tasks get picked up, how to stop one |
 | [Installing and running](https://board-planner.com/docs/administration/installing-and-running/) | Every environment variable, build and deploy |
