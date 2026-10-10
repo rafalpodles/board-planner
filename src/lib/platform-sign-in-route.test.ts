@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { forgetCookie, rememberCookie, signInCookie } from "./platform-sign-in-route";
+import { forgetCookie, rememberChoiceCookie, rememberCookie, rememberedOrganisationIn, signInCookie } from "./platform-sign-in-route";
 
 afterEach(() => {
   delete process.env.COOKIE_ALLOW_INSECURE;
@@ -7,22 +7,34 @@ afterEach(() => {
 
 const attributes = (header: string) => header.split("; ").slice(1);
 
-describe("the remembered organisation cookie (BP-1002)", () => {
-  it("lives only as long as the browser session: no Max-Age, no Expires", () => {
+describe("the remembered organisation cookie (BP-1009)", () => {
+  it("outlives the browser session: 180 days, set as Max-Age", () => {
     const cookie = rememberCookie("org-1");
     expect(cookie.startsWith("__Host-bp_last_organisation=org-1; ")).toBe(true);
-    expect(cookie).not.toMatch(/Max-Age/i);
-    expect(cookie).not.toMatch(/Expires/i);
+    expect(cookie).toContain(`; Max-Age=${180 * 24 * 60 * 60};`);
   });
 
   it("keeps its other attributes", () => {
-    expect(attributes(rememberCookie("org-1"))).toEqual(["Path=/", "HttpOnly", "SameSite=Lax", "Secure"]);
+    expect(attributes(rememberCookie("org-1")).filter((attribute) => !attribute.startsWith("Max-Age"))).toEqual(["Path=/", "HttpOnly", "SameSite=Lax", "Secure"]);
     process.env.COOKIE_ALLOW_INSECURE = "1";
-    expect(attributes(rememberCookie("org-1"))).toEqual(["Path=/", "HttpOnly", "SameSite=Lax"]);
+    expect(attributes(rememberCookie("org-1")).filter((attribute) => !attribute.startsWith("Max-Age"))).toEqual(["Path=/", "HttpOnly", "SameSite=Lax"]);
   });
 
-  it("is still forgotten at once, and the sign-in cookie keeps its lifetime", () => {
+  it("is read back from a request's cookie header, and only under the name this deployment sets", () => {
+    expect(rememberedOrganisationIn("a=1; __Host-bp_last_organisation=org-1; b=2")).toBe("org-1");
+    expect(rememberedOrganisationIn("bp_last_organisation=org-2")).toBeNull();
+    expect(rememberedOrganisationIn(null)).toBeNull();
+    process.env.COOKIE_ALLOW_INSECURE = "1";
+    expect(rememberedOrganisationIn("bp_last_organisation=org-2")).toBe("org-2");
+  });
+
+  it("is set only for an explicit yes, and any other answer withdraws it", () => {
+    expect(rememberChoiceCookie(true, "org-1")).toBe(rememberCookie("org-1"));
+    for (const answer of [false, undefined, null, "true", 1]) expect(rememberChoiceCookie(answer, "org-1")).toBe(forgetCookie());
     expect(forgetCookie()).toContain("; Max-Age=0;");
+  });
+
+  it("leaves the sign-in cookie its own lifetime", () => {
     expect(signInCookie("bps_x")).toMatch(/; Max-Age=900;/);
   });
 });

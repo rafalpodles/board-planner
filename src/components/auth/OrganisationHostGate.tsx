@@ -20,7 +20,7 @@ function NoOrganisationHere({ kind, signIn }: { kind: "none" | "platform"; signI
             : "Check the address you were given. If you do not remember your organisation's address, sign in with your e-mail address instead."}
         </p>
         <a
-          href={kind === "platform" ? "/" : (signIn ?? "/")}
+          href={kind === "platform" ? "/?switch" : signIn ? `${signIn}/?switch` : "/"}
           className="focus-ring inline-flex min-h-[44px] items-center justify-center rounded-lg bg-primary-solid px-4 py-2 text-sm font-medium text-white hover:bg-primary-solid-hover"
         >
           Sign in with your e-mail address

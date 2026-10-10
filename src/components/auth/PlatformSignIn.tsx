@@ -16,8 +16,6 @@ interface Organisation {
 }
 
 type Step =
-  | { name: "loading" }
-  | { name: "remembered"; organisation: { name: string; origin: string } }
   | { name: "email" }
   | { name: "code"; email: string }
   | { name: "organisations"; email: string; organisations: Organisation[]; passwordSignIn: boolean }
@@ -43,8 +41,29 @@ async function send(path: string, method: string, body?: unknown) {
 
 const hostOf = (origin: string) => new URL(origin).host;
 
+function RememberCheckbox({ checked, onChange }: { checked: boolean; onChange: (checked: boolean) => void }) {
+  return (
+    <div className="flex items-start gap-2 text-sm" data-testid="remember-organisation">
+      <input
+        id="remember-organisation"
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        aria-describedby="remember-organisation-note"
+        className="mt-1 h-4 w-4 shrink-0"
+      />
+      <div>
+        <label htmlFor="remember-organisation">Open this organisation straight away next time</label>
+        <p id="remember-organisation-note" className="text-xs text-text-muted">
+          Keeps a cookie on this device for 180 days. Leave it unticked and nothing is kept.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export function PlatformSignIn() {
-  const [step, setStep] = useState<Step>({ name: "loading" });
+  const [step, setStep] = useState<Step>({ name: "email" });
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
@@ -57,20 +76,25 @@ export function PlatformSignIn() {
   const [fullName, setFullName] = useState("");
   const [username, setUsername] = useState("");
   const [acceptTerms, setAcceptTerms] = useState(false);
+  const [remember, setRemember] = useState(false);
+  const [forgotten, setForgotten] = useState(false);
+  const [switching, setSwitching] = useState(false);
   const terms = useLegalTerms();
 
   useEffect(() => {
-    let live = true;
-    send("/api/sign-in/remembered", "GET")
-      .then(({ data }) => {
-        if (!live) return;
-        setStep(data.organisation ? { name: "remembered", organisation: data.organisation } : { name: "email" });
-      })
-      .catch(() => live && setStep({ name: "email" }));
-    return () => {
-      live = false;
-    };
+    setRemember(false);
+  }, [step]);
+
+  useEffect(() => {
+    setSwitching(new URLSearchParams(window.location.search).has("switch"));
   }, []);
+
+  const forget = () =>
+    void run(async () => {
+      const { ok } = await send("/api/sign-in/remembered", "DELETE");
+      if (!ok) return setError("Could not forget the organisation. Try again.");
+      setForgotten(true);
+    });
 
   async function run(work: () => Promise<void>) {
     setError("");
@@ -129,6 +153,7 @@ export function PlatformSignIn() {
       const { ok, data } = await send("/api/sign-in/password", "POST", {
         organisation: step.organisation.id,
         password,
+        remember,
       });
       if (data.restart) {
         backToEmail();
@@ -158,7 +183,7 @@ export function PlatformSignIn() {
   const submitCreate = (e: FormEvent) => {
     e.preventDefault();
     void run(async () => {
-      const { ok, data } = await send("/api/sign-in/organisation", "POST", { name: orgName, slug, fullName, username, password, acceptTerms });
+      const { ok, data } = await send("/api/sign-in/organisation", "POST", { name: orgName, slug, fullName, username, password, acceptTerms, remember });
       if (data.restart) {
         backToEmail();
         return setError(data.error);
@@ -167,12 +192,6 @@ export function PlatformSignIn() {
       window.location.assign(data.location);
     });
   };
-
-  const forget = () =>
-    void run(async () => {
-      await send("/api/sign-in/remembered", "DELETE");
-      backToEmail();
-    });
 
   return (
     <div className="flex items-center justify-center min-h-screen px-4">
@@ -186,26 +205,6 @@ export function PlatformSignIn() {
           <p role="alert" data-testid="sign-in-error" className="mb-4 rounded-lg border border-danger/40 bg-danger/10 p-3 text-sm">
             {error}
           </p>
-        )}
-
-        {step.name === "loading" && (
-          <div className="flex justify-center py-6" role="status" aria-label="Loading">
-            <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />
-          </div>
-        )}
-
-        {step.name === "remembered" && (
-          <div className="space-y-3">
-            <a
-              href={`${step.organisation.origin}/projects`}
-              className="focus-ring flex min-h-[44px] w-full items-center justify-center rounded-lg bg-primary-solid px-4 py-2 text-sm font-medium text-white hover:bg-primary-solid-hover"
-            >
-              Continue to {step.organisation.name}
-            </a>
-            <button type="button" onClick={forget} disabled={busy} className="focus-ring w-full text-sm text-text-muted underline">
-              Use another e-mail address
-            </button>
-          </div>
         )}
 
         {step.name === "email" && (
@@ -223,6 +222,17 @@ export function PlatformSignIn() {
               {busy ? "Sending…" : "Continue"}
             </Button>
             <p className="text-xs text-text-muted">We will e-mail you a code. You never need your organisation&apos;s address to sign in.</p>
+            {switching && (
+              <div className="border-t border-border pt-3 text-sm">
+                {forgotten ? (
+                  <p role="status" data-testid="remembered-forgotten">Nothing is remembered on this device any more.</p>
+                ) : (
+                  <button type="button" onClick={forget} disabled={busy} className="focus-ring min-h-[44px] w-full text-text-muted underline">
+                    Stop opening my last organisation automatically
+                  </button>
+                )}
+              </div>
+            )}
           </form>
         )}
 
@@ -329,6 +339,7 @@ export function PlatformSignIn() {
             <Input label="Username" value={username} maxLength={32} onChange={(e) => setUsername(e.target.value.toLowerCase())} autoComplete="username" required />
             <Input label="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" required />
             <TermsCheckbox terms={terms} checked={acceptTerms} onChange={setAcceptTerms} />
+            <RememberCheckbox checked={remember} onChange={setRemember} />
             <Button type="submit" className="w-full" disabled={busy || terms === undefined}>
               {busy ? "Creating…" : "Create the organisation"}
             </Button>
@@ -382,6 +393,7 @@ export function PlatformSignIn() {
               required
               autoFocus
             />
+            <RememberCheckbox checked={remember} onChange={setRemember} />
             <Button type="submit" className="w-full" disabled={busy}>
               {busy ? "Signing in…" : "Sign in"}
             </Button>

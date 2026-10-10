@@ -37,7 +37,7 @@ describe("GET /api/auth/instance", () => {
   it("says an empty instance is unclaimed", async () => {
     countDocuments.mockResolvedValue(0);
 
-    expect(await (await GET(new Request("http://localhost/api/auth/instance"))).json()).toEqual({ unclaimed: true, passwordSignIn: true });
+    expect(await (await GET(new Request("http://localhost/api/auth/instance"))).json()).toEqual({ unclaimed: true, passwordSignIn: true, platformSignIn: null });
   });
 
   // The control, and the half the bug was on: without it "answers unclaimed" and "answers the
@@ -45,7 +45,7 @@ describe("GET /api/auth/instance", () => {
   it("says an instance with one user is not", async () => {
     countDocuments.mockResolvedValue(1);
 
-    expect(await (await GET(new Request("http://localhost/api/auth/instance"))).json()).toEqual({ unclaimed: false, passwordSignIn: true });
+    expect(await (await GET(new Request("http://localhost/api/auth/instance"))).json()).toEqual({ unclaimed: false, passwordSignIn: true, platformSignIn: null });
   });
 
   it("says when the operator turned password sign-in off", async () => {
@@ -73,6 +73,7 @@ describe("GET /api/auth/instance", () => {
     expect(res.status).toBe(503);
     // Read from the environment: an off instance must not fall back to its password form
     expect((await res.clone().json()).passwordSignIn).toBe(false);
+    expect(await res.clone().json()).toHaveProperty("platformSignIn", null);
     expect(await res.json()).not.toMatchObject({ unclaimed: true });
   });
 });
