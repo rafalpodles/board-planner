@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const m = vi.hoisted(() => ({ budget: null as unknown, rows: [] as Record<string, unknown>[], trial: false, locked: null as Date | null, hosted: true, managed: true }));
+const m = vi.hoisted(() => ({ budget: null as unknown, rows: [] as Record<string, unknown>[], trial: false, locked: null as Date | null, allowance: undefined as unknown, hosted: true, managed: true }));
 
-vi.mock("./limits", () => ({ budgetOf: async () => m.budget }));
+vi.mock("./limits", async () => ({ ...(await vi.importActual<typeof import("./limits")>("./limits")), budgetOf: async () => m.budget }));
 vi.mock("./budget", () => ({ counterKindOf: async () => (m.trial ? "trial" : "month") }));
-vi.mock("@/lib/organisation", () => ({ getOrganisation: async () => ({ aiLockedAt: m.locked }) }));
+vi.mock("@/lib/organisation", () => ({ getOrganisation: async () => ({ aiLockedAt: m.locked, aiAllowance: m.allowance }) }));
 vi.mock("@/lib/organisation-host", () => ({ organisationDomain: () => (m.hosted ? "board-planner.com" : null) }));
 vi.mock("@/lib/entitlements", () => ({ can: () => m.managed }));
 
@@ -20,6 +20,7 @@ beforeEach(() => {
   m.rows = [];
   m.trial = false;
   m.locked = null;
+  m.allowance = undefined;
   m.hosted = true;
   m.managed = true;
   find.mockClear();
@@ -44,6 +45,7 @@ describe("aiUsageSummary", () => {
       dailyCeiling: 3_000_000,
       ownTokens: 77_000,
       locked: false,
+      overridden: false,
       included: true,
     });
     expect(find).toHaveBeenCalledWith({ $or: [{ kind: "day", period: "2026-10-09" }, { kind: "month", period: "2026-10" }] });
@@ -105,5 +107,20 @@ describe("aiUsageSummary", () => {
 
   it("reads a day or a month with nothing counted as zero", async () => {
     expect(await aiUsageSummary(db, NOW)).toMatchObject({ used: 0, today: 0, ownTokens: 0 });
+  });
+
+  // BP-678
+  it("says whether the operator's own figure is the one in force, which it is only on the counter it was set on", async () => {
+    m.allowance = { tokens: 2_000_000, scope: "month" };
+    expect(await aiUsageSummary(db, NOW)).toMatchObject({ overridden: true });
+
+    m.allowance = { tokens: null, scope: "month" };
+    expect(await aiUsageSummary(db, NOW)).toMatchObject({ overridden: true });
+
+    m.allowance = { tokens: 2_000_000, scope: "trial" };
+    expect(await aiUsageSummary(db, NOW)).toMatchObject({ overridden: false });
+
+    m.allowance = { tokens: 0, scope: "month" };
+    expect(await aiUsageSummary(db, NOW)).toMatchObject({ overridden: false });
   });
 });

@@ -5,9 +5,10 @@ const m = vi.hoisted(() => ({
   entitlements: { plan: "pro", trial: false, expiresAt: undefined as Date | undefined } as Record<string, unknown>,
   active: 10,
   pending: 0,
+  allowance: undefined as unknown,
 }));
 
-vi.mock("@/lib/organisation", () => ({ getOrganisation: async () => ({ entitlements: m.entitlements }) }));
+vi.mock("@/lib/organisation", () => ({ getOrganisation: async () => ({ entitlements: m.entitlements, aiAllowance: m.allowance }) }));
 vi.mock("@/lib/member-limit", () => ({ memberCounts: async () => ({ active: m.active, pending: m.pending }) }));
 vi.mock("@/lib/organisation-host", () => ({ organisationDomain: () => (m.hosted ? "board-planner.com" : null) }));
 
@@ -20,6 +21,7 @@ beforeEach(() => {
   m.entitlements = { plan: "pro", trial: false };
   m.active = 10;
   m.pending = 0;
+  m.allowance = undefined;
 });
 afterEach(() => vi.unstubAllEnvs());
 
@@ -151,5 +153,66 @@ describe("aiLimitWarnings", () => {
     expect(aiLimitWarnings({ OPENROUTER_API_KEY: "sk-or-x", AI_TRIAL_TOKENS: "3000000" }, false)).toEqual([]);
     expect(aiLimitWarnings({ OPENROUTER_API_KEY: "sk-or-x" }, true)).toEqual([]);
     expect(aiLimitWarnings({}, false)).toEqual([]);
+  });
+
+  it("never lets a figure that is not a whole number of 1 or more, as a hand edit could leave one, open the limit", async () => {
+    for (const tokens of [0, -1, NaN, Infinity, 1.5, "5", undefined]) {
+      m.allowance = { tokens, scope: "month" };
+      expect(await budgetOf(db), String(tokens)).toMatchObject({ scope: "month", limit: 15_000_000 });
+    }
+    m.allowance = "lots";
+    expect(await budgetOf(db)).toMatchObject({ limit: 15_000_000 });
+  });
+});
+
+// BP-678: the operator's own figure for one organisation
+describe("budgetOf with the operator's allowance", () => {
+  it("replaces the monthly figure, the members' share with it, and the daily ceiling follows it", async () => {
+    m.active = 14;
+    m.allowance = { tokens: 2_000_000, scope: "month" };
+
+    expect(await budgetOf(db)).toEqual({ scope: "month", limit: 2_000_000, dailyCeiling: 400_000 });
+  });
+
+  it("replaces a trial's figure when it was set for the trial, and a trial stays counted as a trial", async () => {
+    m.entitlements = { plan: "pro", trial: true };
+    m.allowance = { tokens: 10_000, scope: "trial" };
+
+    expect(await budgetOf(db)).toEqual({ scope: "trial", limit: 10_000, dailyCeiling: 2_000 });
+  });
+
+  it("is no limit at all when the operator lifted it, even where the environment sets one", async () => {
+    vi.stubEnv("AI_MONTHLY_TOKENS", "1000");
+    m.allowance = { tokens: null, scope: "month" };
+
+    expect(await budgetOf(db)).toBeNull();
+  });
+
+  it("means nothing once the organisation is on the other counter: a trial's figure does not become a month's", async () => {
+    m.allowance = { tokens: 1_000_000, scope: "trial" };
+    expect(await budgetOf(db)).toMatchObject({ scope: "month", limit: 15_000_000 });
+
+    m.entitlements = { plan: "pro", trial: true };
+    m.allowance = { tokens: 1_000_000, scope: "month" };
+    expect(await budgetOf(db)).toMatchObject({ scope: "trial", limit: 3_000_000 });
+
+    m.allowance = { tokens: null, scope: "month" };
+    expect(await budgetOf(db)).toMatchObject({ scope: "trial", limit: 3_000_000 });
+  });
+
+  it("gives the plan's figure back when there is none, whether it was never set or cleared", async () => {
+    for (const none of [undefined, null]) {
+      m.allowance = none;
+      expect(await budgetOf(db)).toMatchObject({ scope: "month", limit: 15_000_000 });
+    }
+  });
+
+  it("never lets a figure that is not a whole number of 1 or more, as a hand edit could leave one, open the limit", async () => {
+    for (const tokens of [0, -1, NaN, Infinity, 1.5, "5", undefined]) {
+      m.allowance = { tokens, scope: "month" };
+      expect(await budgetOf(db), String(tokens)).toMatchObject({ scope: "month", limit: 15_000_000 });
+    }
+    m.allowance = "lots";
+    expect(await budgetOf(db)).toMatchObject({ limit: 15_000_000 });
   });
 });

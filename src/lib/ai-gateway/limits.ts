@@ -4,6 +4,7 @@ import { getOrganisation } from "@/lib/organisation";
 import { organisationDomain } from "@/lib/organisation-host";
 import { INCLUDED_MEMBERS } from "@/lib/subscription-summary";
 import type { AiBudgetKind } from "@/models/aiBudget";
+import type { IOrganisation } from "@/models/organisation";
 
 export const HOSTED_DEFAULTS = {
   AI_TRIAL_TOKENS: 3_000_000,
@@ -30,6 +31,17 @@ export function limitFromEnv(name: LimitVariable): number {
   return organisationDomain() !== null ? HOSTED_DEFAULTS[name] : 0;
 }
 
+/**
+ * The operator's figure for one organisation, when it is a well-formed one for the counter the organisation is on now:
+ * null is no limit at all, undefined is none set. A figure set during a trial means nothing once it is paying, and one
+ * that is not a whole number of 1 or more (a hand edit) is ignored, so it can never open the limit by accident.
+ */
+export function operatorAllowance(stored: IOrganisation["aiAllowance"] | undefined, scope: "trial" | "month"): number | null | undefined {
+  if (!stored || stored.scope !== scope) return undefined;
+  if (stored.tokens === null) return null;
+  return Number.isInteger(stored.tokens) && stored.tokens >= 1 ? stored.tokens : undefined;
+}
+
 export interface Budget {
   /** The counter the limit is read from: a trial's own, or the UTC month */
   scope: Exclude<AiBudgetKind, "day">;
@@ -45,7 +57,7 @@ export interface Budget {
  * month and grows by what each member above the included ones brings.
  */
 export async function budgetOf(db: ScopedDb): Promise<Budget | null> {
-  const { entitlements } = await getOrganisation(db.organisation);
+  const { entitlements, aiAllowance } = await getOrganisation(db.organisation);
   const trial = entitlements.plan === "pro" && entitlements.trial === true;
 
   let limit: number;
@@ -59,6 +71,10 @@ export async function budgetOf(db: ScopedDb): Promise<Budget | null> {
       limit += perMember * Math.max(0, active - INCLUDED_MEMBERS);
     }
   }
+  // The operator's figure for this organisation replaces the plan's, members' share included
+  const operator = operatorAllowance(aiAllowance, trial ? "trial" : "month");
+  if (operator === null) return null;
+  if (operator !== undefined) limit = operator;
   if (limit <= 0) return null;
 
   const percent = limitFromEnv("AI_DAILY_PERCENT");
