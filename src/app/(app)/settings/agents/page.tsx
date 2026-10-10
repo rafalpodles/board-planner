@@ -367,7 +367,7 @@ export default function AdminAgentsPage() {
                       className="text-xs"
                     />
                     {refusedOnPlatformKey(data.managedModels, row.model) && (
-                      <p className="mt-1 text-xs text-warning" data-testid={`pm-model-refused-${row.key}`}>
+                      <p className="mt-1 whitespace-nowrap text-xs text-warning" data-testid={`pm-model-refused-${row.key}`}>
                         Not available on {APP_NAME}&apos;s AI key
                       </p>
                     )}

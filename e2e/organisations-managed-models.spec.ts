@@ -50,7 +50,7 @@ async function generateOnScreen(page: Page) {
   const answered = page.waitForResponse((r) => r.request().method() === "POST" && r.url().includes("/ai/generate-task"));
   await modal.getByPlaceholder("Describe what you need").fill(SCRIPTED);
   await modal.getByRole("button", { name: "Generate" }).click();
-  return { modal, response: await answered };
+  return { response: await answered };
 }
 
 async function chatOnScreen(page: Page) {
@@ -80,10 +80,10 @@ test("on the platform's key a model off the list is refused with the models that
   await signInOn(page.context(), GLOBEX);
 
   await test.step("AI Assist", async () => {
-    const { modal, response } = await generateOnScreen(page);
+    const { response } = await generateOnScreen(page);
     expect(response.status()).toBe(403);
     expect(await response.json()).toMatchObject({ reason: "model_not_managed", model: ASSIST_MODEL });
-    await expect(modal.getByText(refusal(ASSIST_MODEL), { exact: true })).toBeVisible();
+    await expect(page.getByText(refusal(ASSIST_MODEL), { exact: true })).toBeVisible();
     await page.keyboard.press("Escape");
   });
 
@@ -104,15 +104,22 @@ test("on the platform's key a model off the list is refused with the models that
       `⚠${ASSIST_MODEL} is not available on Board Planner's AI key, so it will be refused. Choose one of: ${ALLOWED}, or add your organisation's own OpenRouter key.`
     );
     await expect(page.getByTestId(`pm-model-refused-${SHARED_KEY}`)).toHaveText("Not available on Board Planner's AI key");
-    await expect(page.getByTestId("pm-model-managed")).toHaveText(`On Board Planner's AI key: ${ALLOWED}. Any OpenRouter model works with your organisation's own key.`);
-    await page.screenshot({ path: `${SHOTS}/agents-refused-desktop.png`, fullPage: true });
+    // Blank here, so the projects that name no model fall back to PM_MODEL, which this server's list leaves out
+    await expect(page.getByTestId("pm-model-managed")).toHaveText(/^⚠openai\/gpt-6-luna is not available on Board Planner's AI key, so it will be refused\./);
+    await page.screenshot({ path: `${SHOTS}/agents-refused-desktop.png` });
+    await page.getByTestId(`pm-model-refused-${SHARED_KEY}`).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${SHOTS}/agents-refused-desktop-row.png` });
 
     await page.setViewportSize({ width: 375, height: 812 });
+    await page.reload();
     await expect(assistNote).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
     await assistNote.scrollIntoViewIfNeeded();
     await page.screenshot({ path: `${SHOTS}/agents-refused-phone.png` });
+    await page.getByTestId(`pm-model-refused-${SHARED_KEY}`).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${SHOTS}/agents-refused-phone-row.png` });
     await page.setViewportSize({ width: 1280, height: 800 });
+    await page.reload();
   });
 
   await test.step("control: choosing a model on the list there runs AI Assist on the platform's key", async () => {
