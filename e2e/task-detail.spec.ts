@@ -306,6 +306,43 @@ test("watching puts a person on the list and their feed keeps following the task
   });
 });
 
+test("a read of the task that was in flight when someone unwatches does not put them back on the list", async ({ page }) => {
+  await openTask(page, DECOY_TASK_NUMBER);
+  const watched = taskWrite(page, "POST", `/tasks/${DECOY_TASK_ID}/watch`);
+  await page.getByRole("button", { name: "Watch", exact: true }).click();
+  await expectWritten(watched, 200);
+  await expect(page.getByRole("button", { name: /Watching\s*\(1\)/ })).toBeVisible();
+
+  // The status change ends in a re-read of the task. Hold that read after the server has answered
+  // it, so what it carries is the task as it was before the unwatch.
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let held: () => void = () => {};
+  const heldRead = new Promise<void>((resolve) => (held = resolve));
+  const taskRead = new RegExp(`/api/projects/[^/]+/tasks/${DECOY_TASK_NUMBER}$`);
+  await page.route(taskRead, async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    const answered = await route.fetch();
+    held();
+    await gate;
+    return route.fulfill({ response: answered });
+  });
+
+  await page.getByRole("combobox", { name: "Status" }).click();
+  await page.getByRole("option", { name: "In Progress" }).click();
+  await heldRead;
+
+  const unwatched = taskWrite(page, "POST", `/tasks/${DECOY_TASK_ID}/watch`);
+  await page.getByRole("button", { name: /Watching\s*\(1\)/ }).click();
+  await expectWritten(unwatched, 200);
+  await expect(page.getByRole("button", { name: /^Watch(?!ing)/ })).toBeVisible();
+
+  release();
+  await expect(page.getByRole("combobox", { name: "Status" })).toContainText("In Progress");
+  await expect(page.getByRole("button", { name: /^Watch(?!ing)/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Watching/ })).toHaveCount(0);
+});
+
 test("acceptance criteria tick, count, persist and reach the card", async ({ page, request }) => {
   await openTask(page, FINISHED_TASK_NUMBER);
 
