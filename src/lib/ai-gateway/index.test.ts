@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 
 const m = vi.hoisted(() => ({
   resolveModelKey: vi.fn(),
@@ -16,7 +16,7 @@ vi.mock("@/lib/organisation", () => ({ getOrganisation: m.getOrganisation }));
 vi.mock("@/lib/pm/openrouter", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/pm/openrouter")>()), chatCompletion: m.chatCompletion }));
 vi.mock("@/lib/organisation-host", () => ({ organisationDomain: () => "board-planner.com" }));
 
-const { gatewayAssist, gatewayChat, openGate } = await import("./index");
+const { gatewayAssist, gatewayChat, openGate, UnmanagedModelRefused } = await import("./index");
 
 const db = { organisation: "org" } as never;
 const NOT_CONFIGURED = { error: "AI is not configured", status: 501 };
@@ -26,11 +26,17 @@ const CONTEXT = { source: "pm" as const, projectId: "p1", userId: "u1" };
 
 beforeEach(() => {
   Object.values(m).forEach((fn) => fn.mockReset());
+  // The operator's list, so the fixtures' model may run on the platform's key; BP-1001 below tests the default
+  process.env.MANAGED_AI_MODELS = "m/x,openai/gpt-6-luna";
   m.resolveModelKey.mockResolvedValue({ ok: true, key: "sk-ours", source: "managed" });
   m.checkBudget.mockResolvedValue({ refusal: null, counter: "month" });
   m.counterKindOf.mockResolvedValue("month");
   m.recordUsage.mockResolvedValue(undefined);
   m.getOrganisation.mockResolvedValue({ aiLockedAt: null, aiLockedReason: "" });
+});
+
+afterAll(() => {
+  delete process.env.MANAGED_AI_MODELS;
 });
 
 // BP-679 / BP-680 / BP-681: the one door to a model
@@ -267,5 +273,79 @@ describe("gatewayAssist", () => {
     await expect(gatewayAssist(db, ASSIST, gate, "m/x", async () => Promise.reject(new Error("no route to host")))).rejects.toThrow("no route");
 
     expect(m.recordUsage).not.toHaveBeenCalled();
+  });
+});
+
+// BP-1001: the platform's key runs the models the operator allows on it, and is refused before anything is sent for any other
+describe("models on the platform's key", () => {
+  const ASSIST = { source: "assist" as const, projectId: "p1", userId: "u1" };
+  const managed = { ok: true as const, key: "sk-ours", keySource: "managed" as const, counter: "month" as const };
+
+  beforeEach(() => {
+    delete process.env.MANAGED_AI_MODELS;
+    m.chatCompletion.mockResolvedValue({ type: "text", content: "hi", usage: USAGE });
+  });
+
+  it("refuses a PM round-trip with a model off the list, saying which ones run and that an own key runs any, and never reaches the provider", async () => {
+    const completion = await gatewayChat(db, CONTEXT, { ...CHAT, model: "moonshotai/kimi-k2.6" });
+
+    expect(completion).toEqual({
+      type: "error",
+      error:
+        "The model moonshotai/kimi-k2.6 is not available on Board Planner's AI key. Choose one of: OpenAI's own models (openai/…, not gpt-oss), or add your organisation's own OpenRouter key in Settings → AI key.",
+    });
+    expect(m.chatCompletion).not.toHaveBeenCalled();
+    expect(m.recordUsage).not.toHaveBeenCalled();
+  });
+
+  it("refuses at the gate with 403 and the model, for a caller that names it", async () => {
+    expect(await openGate(db, NOT_CONFIGURED, "openai/gpt-oss-120b")).toMatchObject({
+      ok: false,
+      status: 403,
+      body: { reason: "model_not_managed", model: "openai/gpt-oss-120b", error: expect.stringMatching(/^The model openai\/gpt-oss-120b is not available/) },
+    });
+    expect(await openGate(db, NOT_CONFIGURED, "openai/gpt-6-luna")).toMatchObject({ ok: true, keySource: "managed" });
+  });
+
+  it("lets the default PM model through on the platform's key", async () => {
+    expect(await gatewayChat(db, CONTEXT, { ...CHAT, model: "openai/gpt-6-luna" })).toMatchObject({ type: "text" });
+    expect(m.chatCompletion).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs any model on an organisation's own key and on a self-hosted instance's", async () => {
+    for (const source of ["own", "instance"]) {
+      m.resolveModelKey.mockResolvedValue({ ok: true, key: `sk-${source}`, source });
+      expect(await gatewayChat(db, CONTEXT, { ...CHAT, model: "moonshotai/kimi-k2.6" })).toMatchObject({ type: "text" });
+    }
+    expect(m.chatCompletion).toHaveBeenCalledTimes(2);
+  });
+
+  it("refuses an AI Assist generation with a model off the list before the call is made", async () => {
+    const call = vi.fn();
+
+    const refused = gatewayAssist(db, ASSIST, managed, "anthropic/claude-haiku", call);
+
+    await expect(refused).rejects.toBeInstanceOf(UnmanagedModelRefused);
+    await expect(refused).rejects.toMatchObject({ gate: { status: 403, body: { reason: "model_not_managed", model: "anthropic/claude-haiku" } } });
+    expect(call).not.toHaveBeenCalled();
+    expect(m.recordUsage).not.toHaveBeenCalled();
+  });
+
+  it("reads AI Assist's bare default as the OpenAI model it is, and lets it through", async () => {
+    expect(await gatewayAssist(db, ASSIST, managed, "gpt-4o-mini", async () => "made")).toBe("made");
+  });
+
+  it("runs any AI Assist model on an organisation's own key", async () => {
+    expect(await gatewayAssist(db, ASSIST, { ...managed, keySource: "own" }, "anthropic/claude-haiku", async () => "made")).toBe("made");
+  });
+
+  it("follows the operator's list where one is set", async () => {
+    process.env.MANAGED_AI_MODELS = "anthropic/claude-*";
+
+    expect(await gatewayChat(db, CONTEXT, { ...CHAT, model: "anthropic/claude-haiku" })).toMatchObject({ type: "text" });
+    expect(await gatewayChat(db, CONTEXT, { ...CHAT, model: "openai/gpt-6-luna" })).toMatchObject({
+      type: "error",
+      error: expect.stringMatching(/Choose one of: anthropic\/claude-\*, or add/),
+    });
   });
 });

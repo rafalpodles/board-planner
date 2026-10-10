@@ -162,6 +162,12 @@ AI_DAILY_PERCENT=         # one UTC day may use at most AI_DAILY_PERCENT (20) of
                           # 429 naming the number and the renewal. An organisation's own key is counted, never
                           # refused. Each person is also held to 20 AI Assist generations per 15 minutes (BP-323)
 PM_MODEL=                 # Optional — PM agent model (default: openai/gpt-6-luna)
+MANAGED_AI_MODELS=        # Optional — the models the platform's key runs for an organisation with no key of its own
+                          # (keySource "managed"): comma-separated OpenRouter ids, or prefixes ending in *; default
+                          # OpenAI's own models (^openai/, not gpt-oss). Any other is refused with 403
+                          # model_not_managed before the provider is called, for the PM agent and AI Assist alike
+                          # (src/lib/managed-models.ts). An own key or a self-hosted instance's runs any model. A
+                          # malformed entry stops the app at boot; a default PM model off the list is a warning (BP-1001)
 PM_MAX_TOKENS=            # Optional — PM agent max output tokens per call (default: 8192)
 PM_SCHEDULER_TICK_MS=     # Optional — PM autonomy scheduler tick (default: 300000)
 WEBHOOK_SIGNING_SECRET=   # Optional — HMACs outgoing webhook deliveries (x-boardplanner-signature)

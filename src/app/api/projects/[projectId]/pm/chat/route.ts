@@ -5,7 +5,7 @@ import { isDatabaseUnreachable } from "@/lib/db-errors";
 import { getAuthUser } from "@/lib/auth";
 import { ProvenanceError } from "@/lib/session";
 import { runPmTurn } from "@/lib/pm/agent";
-import { openGate } from "@/lib/ai-gateway";
+import { openGate, refuseUnmanagedModel } from "@/lib/ai-gateway";
 import { acquireTurnLock, releaseTurnLock } from "@/lib/pm/turn-lock";
 import { isPmRunnable, pmDisabledReason, resolvePmModel } from "@/lib/pm/availability";
 import { IMAGE_MIME_TYPES, MAX_ATTACHMENTS_PER_MESSAGE, anyAttachmentReadable, modelAcceptsImages } from "@/lib/pm/attachments";
@@ -68,6 +68,9 @@ async function chat(request: Request, params: Promise<Record<string, string>>, u
   if (!isPmRunnable(project.pm)) {
     return NextResponse.json({ error: pmDisabledReason(project.pm) }, { status: 400 });
   }
+  const model = await resolvePmModel(db, project.pm.model);
+  const unmanaged = refuseUnmanagedModel(gate, model);
+  if (unmanaged) return NextResponse.json(unmanaged.body, { status: unmanaged.status });
 
   let message: unknown;
   let attachments: unknown;
@@ -130,7 +133,6 @@ async function chat(request: Request, params: Promise<Record<string, string>>, u
 
     // Better a clear refusal than a provider error the user cannot act on. Unknown
     // capability (network failure, unlisted model) is allowed through rather than blocked.
-    const model = await resolvePmModel(db, project.pm.model);
     if ((await modelAcceptsImages(model, gate.key)) === false) {
       return NextResponse.json(
         { error: `The configured PM model (${model}) does not accept images. Remove the attachment or switch models in settings.` },
