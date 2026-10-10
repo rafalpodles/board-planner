@@ -67,7 +67,9 @@ describe("the board-planner skill", () => {
     ["update_tasks", []],
     ["whoami", []],
   ])("%s takes every argument the skill names", (tool, args) => {
-    expect(registeredTools().get(tool)).toEqual(expect.arrayContaining(args));
+    const tools = registeredTools();
+    expect(tools.has(tool)).toBe(true);
+    expect(tools.get(tool)).toEqual(expect.arrayContaining(args));
   });
 
   it("states the batch limit the server enforces", () => {
