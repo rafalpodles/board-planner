@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { ORGANISATIONS_PLATFORM_ORIGIN, RUN_ORGANISATIONS_SERVER } from "../playwright.config";
+import { ORGANISATION_DOMAIN, ORGANISATIONS_PLATFORM_ORIGIN, ORGANISATIONS_PORT, RUN_ORGANISATIONS_SERVER } from "../playwright.config";
 import { mailFor } from "./mailbox";
 import { ACME, GLOBEX, ORGANISATIONS_API, asOrganisation, hostOf, originOf, seedTwoOrganisations } from "./organisations";
 import { apiCode, codeSentTo, freshAddress, giveAddress, onPlatform, provideAddressAndCode, withDb } from "./platform-sign-in";
@@ -81,11 +81,12 @@ test.describe("BP-919: signing in on the platform host, e-mail first", () => {
     await page.context().clearCookies({ domain: new URL(originOf(ACME)).hostname });
     await page.goto(`${originOf(ACME)}/login`);
     const another = page.getByRole("link", { name: "Sign in to another organisation" });
-    await expect(another).toHaveAttribute("href", `${ORGANISATIONS_PLATFORM_ORIGIN}/?switch`);
+    const signIn = `http://login.${ORGANISATION_DOMAIN}:${ORGANISATIONS_PORT}`;
+    await expect(another).toHaveAttribute("href", `${signIn}/?switch`);
     await page.screenshot({ path: "e2e/.artifacts/bp1009-login-link.png" });
     await another.click();
-    await expect(page.getByRole("link", { name: "Continue to Globex" })).toBeVisible();
-    expect(page.url()).toBe(`${ORGANISATIONS_PLATFORM_ORIGIN}/?switch`);
+    await page.waitForURL(`${signIn}/?switch`);
+    await expect(page.getByLabel("E-mail address")).toBeVisible();
   });
 
   test("BP-1009: a remembered organisation that is suspended or gone does not strand the platform host", async ({ page }) => {
