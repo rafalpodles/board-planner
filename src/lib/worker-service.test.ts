@@ -24,6 +24,7 @@ vi.mock("@/models/grant", () => ({ Grant: { find: grantFind } }));
 
 const {
   assignmentsFor,
+  machineCondition,
   machineStateFor,
   machineReadinessFor,
   catalogueFor,
@@ -1129,5 +1130,48 @@ describe("the halt the fleet console is sent", () => {
       commandAckedAt: new Date(NOW.getTime() - 30_000),
     };
     expect(toApiWorker(older as never, NOW).condition).toEqual({ state: "stopped", haltedBy: "board" });
+  });
+});
+
+// BP-989. A Free organisation past its one machine keeps every machine; the ones after the first say
+// why they take nothing, in the same places a machine that cannot use its checkout says why
+describe("a machine the Free plan's limit holds", () => {
+  const NOW = new Date("2026-10-10T12:00:00Z");
+  const board = { _id: "p1", repositoryUrl: "https://github.com/acme/orbit" };
+  const fresh = new Date(NOW.getTime() - 1000);
+  const old = new Date(NOW.getTime() - WORKER_STALE_MS - 1000);
+  const orbit = [{ remote: "git@github.com:acme/orbit.git", path: "/w/orbit" }];
+  const machine = (_id: string, over: Record<string, unknown> = {}) =>
+    ({ _id, owner: "ada", enabled: true, lastSeenAt: fresh, repos: orbit, ...over }) as never;
+  const first = new Set(["first"]);
+
+  it("is held, and says so over a pause or a failing sandbox, which nothing on the machine can lift", () => {
+    expect(machineCondition(machine("second"), NOW, true)).toEqual({ state: "held", haltedBy: null });
+    expect(
+      machineCondition(machine("second", { command: "pause", commandIssuedAt: new Date(NOW.getTime() - 60_000), commandAckedAt: fresh }), NOW, true)
+    ).toEqual({ state: "held", haltedBy: null });
+  });
+
+  it("is switched off or not reporting before it is held: those are what to see to first", () => {
+    expect(machineCondition(machine("second", { enabled: false }), NOW, true).state).toBe("disabled");
+    expect(machineCondition(machine("second", { lastSeenAt: old }), NOW, true).state).toBe("stale");
+    expect(machineCondition(machine("second"), NOW, false).state).toBe("live");
+  });
+
+  it("is held for the board when it is the only machine with the checkout and not the first connected", () => {
+    expect(machineReadinessFor([machine("second")], board, NOW, first)).toEqual({
+      state: "held",
+      bindingError: "",
+      haltedBy: null,
+    });
+    expect(machineReadinessFor([machine("first")], board, NOW, first).state).toBe("live");
+    expect(machineReadinessFor([machine("second")], board, NOW, null).state).toBe("live");
+  });
+
+  it("gives way to the reader's machine that does claim, and outranks one that only stopped reporting", () => {
+    expect(machineReadinessFor([machine("second"), machine("first")], board, NOW, first).state).toBe("live");
+    expect(machineReadinessFor([machine("first", { lastSeenAt: old }), machine("second")], board, NOW, first).state).toBe(
+      "held"
+    );
   });
 });

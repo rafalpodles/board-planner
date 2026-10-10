@@ -7,6 +7,8 @@ const logInstanceAudit = vi.fn();
 const denyDeviceEnrolment = vi.fn();
 const findPendingByUserCode = vi.fn();
 const registerWorker = vi.fn();
+const machineLimitRefusal = vi.fn();
+vi.mock("@/lib/machine-limit", () => ({ machineLimitRefusal }));
 
 const projectSelect = vi.fn();
 const projectUpdateOne = vi.fn();
@@ -97,6 +99,31 @@ beforeEach(() => {
   });
   deviceEnrolmentUpdateOne.mockResolvedValue({});
   denyDeviceEnrolment.mockResolvedValue(true);
+  machineLimitRefusal.mockResolvedValue(null);
+});
+
+// BP-989: the menubar's path. Refused before the project is switched on, so a refusal leaves nothing behind.
+describe("POST /api/workers/enrolment/device/:userCode/approve past the Free plan's one machine", () => {
+  it("refuses with the plan's 402 before it enables the project or registers the machine", async () => {
+    grants(true, true);
+    machineLimitRefusal.mockResolvedValue(Response.json({ feature: "workers.multiple" }, { status: 402 }));
+
+    const response = await POST(request({ projectId: PROJECT_ID }), ctx());
+
+    expect(response.status).toBe(402);
+    expect(projectUpdateOne).not.toHaveBeenCalled();
+    expect(registerWorker).not.toHaveBeenCalled();
+    expect(deviceEnrolmentUpdateOne).not.toHaveBeenCalled();
+    expect(machineLimitRefusal).toHaveBeenCalledWith(scopedToDefaultOrganisation(), {
+      machine: { name: "rig-laptop", host: "mac.home", owner: "member-1" },
+    });
+  });
+
+  it("connects when there is room, as the control", async () => {
+    grants(true, true);
+    expect((await POST(request({ projectId: PROJECT_ID }), ctx())).status).toBe(200);
+    expect(registerWorker).toHaveBeenCalled();
+  });
 });
 
 // BP-358: this is "the path people actually take" — one click connects a machine, and the person

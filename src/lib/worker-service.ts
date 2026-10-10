@@ -14,6 +14,7 @@ import type { ApiMachineCondition, MachineState, WorkerHalt, WorkerHaltSource } 
 import { bindingErrorFor } from "@/lib/binding-error";
 import type { ScopedDb } from "@/lib/db-scope";
 import { acrossOrganisations } from "./organisation-wall";
+import { isHeldByPlan } from "./machine-limit";
 
 export const PROTOCOL_VERSION = 1;
 export const WORKER_STALE_MS = 5 * 60 * 1000;
@@ -147,6 +148,7 @@ function isLive(worker: IWorker, now: Date): boolean {
 }
 
 type ServingMachine = Pick<IWorker, "enabled" | "lastSeenAt" | "repos"> &
+  Partial<Pick<IWorker, "_id" | "owner">> &
   Partial<
     Pick<
       IWorker,
@@ -205,11 +207,12 @@ const MACHINE_RANK: Record<MachineState, number> = {
   none: 0,
   disabled: 1,
   stale: 2,
-  unbound: 3,
-  failing: 4,
-  stopped: 5,
-  paused: 6,
-  live: 7,
+  held: 3,
+  unbound: 4,
+  failing: 5,
+  stopped: 6,
+  paused: 7,
+  live: 8,
 };
 
 export interface MachineReadiness {
@@ -227,9 +230,10 @@ export type MachineCondition = ApiMachineCondition;
  * is refused its heartbeat, so it goes stale too, and "check it is running" is advice its owner
  * cannot act on.
  */
-export function machineCondition(worker: ServingMachine, now = new Date()): MachineCondition {
+export function machineCondition(worker: ServingMachine, now = new Date(), heldByPlan = false): MachineCondition {
   if (!worker.enabled) return { state: "disabled", haltedBy: null };
   if (!isLive(worker as IWorker, now)) return { state: "stale", haltedBy: null };
+  if (heldByPlan) return { state: "held", haltedBy: null };
   const halt = haltOf(worker, now);
   if (halt) return { state: halt.state, haltedBy: halt.by };
   return { state: sandboxFailed(worker) ? "failing" : "live", haltedBy: null };
@@ -243,14 +247,16 @@ export function machineCondition(worker: ServingMachine, now = new Date()): Mach
 export function machineReadinessFor(
   workers: ServingMachine[],
   project: ServedProject,
-  now = new Date()
+  now = new Date(),
+  // claimingMachineIds(): the machines a Free organisation's limit lets claim, null for all of them
+  claiming: Set<string> | null = null
 ): MachineReadiness {
   let best: MachineReadiness = { state: "none", bindingError: "", haltedBy: null };
   const projectId = project._id ? String(project._id) : "";
   for (const worker of workers) {
     if (!matchRepo(project, worker.repos ?? [])) continue;
     const refused = bindingErrorFor(worker.bindingError, projectId);
-    const condition = machineCondition(worker, now);
+    const condition = machineCondition(worker, now, isHeldByPlan(worker as never, claiming));
     const state: MachineState =
       condition.state !== "live" ? condition.state : refused ? "unbound" : "live";
     if (MACHINE_RANK[state] > MACHINE_RANK[best.state]) {
@@ -605,7 +611,8 @@ function apiOwner(owner: IWorker["owner"]): ApiUserSummary | null {
 export function toApiWorker(
   worker: IWorker,
   now = new Date(),
-  currentTask?: ApiWorkerTask
+  currentTask?: ApiWorkerTask,
+  heldByPlan = false
 ): ApiWorker {
   const seenAt = worker.lastSeenAt ? new Date(worker.lastSeenAt).getTime() : NaN;
   const stale = !Number.isFinite(seenAt) || now.getTime() - seenAt > WORKER_STALE_MS;
@@ -642,7 +649,7 @@ export function toApiWorker(
     commandIssuedAt: worker.commandIssuedAt ? new Date(worker.commandIssuedAt).toISOString() : null,
     commandAckedAt: worker.commandAckedAt ? new Date(worker.commandAckedAt).toISOString() : null,
     halt: halt ? { paused: halt.paused, by: halt.by ?? null, command: halt.command ?? null } : null,
-    condition: machineCondition(worker, now),
+    condition: machineCondition(worker, now, heldByPlan),
     createdAt: new Date(worker.createdAt).toISOString(),
     updatedAt: new Date(worker.updatedAt).toISOString(),
     stale,

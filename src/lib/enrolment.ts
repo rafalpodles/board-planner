@@ -85,6 +85,11 @@ export async function consumeEnrolmentToken(
   return { ok: false, reason: "unknown" };
 }
 
+/** Unspends a token whose registration was refused for a reason its holder can fix, so the same file works again. */
+export async function releaseEnrolmentToken(db: ScopedDb, tokenId: string): Promise<void> {
+  await db.EnrolmentToken.updateOne({ _id: tokenId, usedByWorker: null }, { $set: { usedAt: null } });
+}
+
 export async function attachWorkerToEnrolment(db: ScopedDb, tokenId: string, workerId: string): Promise<void> {
   await db.EnrolmentToken.findByIdAndUpdate(tokenId, { $set: { usedByWorker: workerId } });
 }

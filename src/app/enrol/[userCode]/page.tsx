@@ -8,6 +8,7 @@ import { useToast } from "@/components/ui/Toast";
 import { AuthGuard } from "@/components/AuthGuard";
 import { Button } from "@/components/ui/Button";
 import { APP_NAME } from "@/lib/brand";
+import { UpgradeLink } from "@/components/settings/UpgradeLink";
 
 interface EnrolProject {
   _id: string;
@@ -27,6 +28,8 @@ interface EnrolmentView {
   expiresAt: string;
   projects: EnrolProject[];
   existingWorker: { mine: boolean } | null;
+  /** Why connecting would pass the Free plan's machine limit; null when there is room */
+  machineLimit?: string | null;
 }
 
 // A machine sent you here, so the page carries no sidebar, no search and no chat: nothing inviting
@@ -233,8 +236,22 @@ function Enrol({ params }: { params: Promise<{ userCode: string }> }) {
           </div>
         )}
 
-        <div className="mt-8 flex gap-3">
-          <Button disabled={busy || !projectId} onClick={() => decide(false)}>
+        {enrolment.machineLimit && (
+          <div
+            id="machine-limit"
+            data-testid="machine-limit"
+            className="mt-8 rounded-lg border border-warning/40 bg-warning/10 p-4 text-sm text-text"
+          >
+            {enrolment.machineLimit} <UpgradeLink />
+          </div>
+        )}
+
+        <div className={`${enrolment.machineLimit ? "mt-4" : "mt-8"} flex gap-3`}>
+          <Button
+            disabled={busy || !projectId || !!enrolment.machineLimit}
+            aria-describedby={enrolment.machineLimit ? "machine-limit" : undefined}
+            onClick={() => decide(false)}
+          >
             {busy ? "Connecting…" : "Connect it"}
           </Button>
           <Button variant="secondary" disabled={busy} onClick={() => decide(true)}>

@@ -4,6 +4,7 @@ import { withAdmin } from "@/lib/middleware";
 import type { ScopedDb } from "@/lib/db-scope";
 import { toApiWorker } from "@/lib/worker-service";
 import { ApiWorkerTask } from "@/types";
+import { claimingMachineIds, isHeldByPlan } from "@/lib/machine-limit";
 
 // Phase lives on the task, not the worker, so the fleet view has to join the two. A task is only
 // reported while its run still holds it: every exit from the active column clears the run identity,
@@ -50,9 +51,14 @@ export const GET = withAdmin(async (_request, { db }) => {
     .populate("owner", "username fullName")
     .sort({ name: 1, host: 1 });
   const now = new Date();
-  const running = await currentTasks(db, workers.map((worker) => String(worker._id)));
+  const [running, claiming] = await Promise.all([
+    currentTasks(db, workers.map((worker) => String(worker._id))),
+    claimingMachineIds(db),
+  ]);
 
   return NextResponse.json(
-    workers.map((worker) => toApiWorker(worker, now, running.get(String(worker._id))))
+    workers.map((worker) =>
+      toApiWorker(worker, now, running.get(String(worker._id)), isHeldByPlan(worker, claiming))
+    )
   );
 });

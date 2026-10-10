@@ -1224,6 +1224,23 @@ describe("the hand-over notice, with the board judged too", () => {
     expect(screen.queryByTestId("handover-waiting")).toBeNull();
   });
 
+  // BP-989
+  it("tells a member their machine waits on the Free plan's one machine, and that an admin can upgrade", () => {
+    withBoard({ machine: "held" });
+
+    expect(notice().dataset.reason).toBe("machine-held");
+    expect(notice().textContent).toBe(
+      "Nothing will run this yet. Your machine is connected but not taking work: the Free plan runs one machine per organisation, and another one was connected first. An admin can upgrade to Pro to use it too."
+    );
+    expect(screen.queryByRole("link", { name: "Upgrade to Pro" })).toBeNull();
+  });
+
+  it("gives an admin whose machine waits on the Free plan the way to upgrade", () => {
+    withBoard({ machine: "held" }, {}, { viewerIsInstanceAdmin: true });
+
+    expect(screen.getByRole("link", { name: "Upgrade to Pro" }).getAttribute("href")).toBe("/settings/organisation");
+  });
+
   // The sandbox check is the one that stops the claim itself
   it("says a machine whose sandbox check failed is not taking work", () => {
     withBoard({ machine: "failing" });

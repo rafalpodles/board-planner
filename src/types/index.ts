@@ -804,7 +804,7 @@ export interface ApiWorkerHalt {
 
 /** Whether a machine is taking work at all, whatever project is asking */
 export interface ApiMachineCondition {
-  state: "disabled" | "stale" | "paused" | "stopped" | "failing" | "live";
+  state: "disabled" | "stale" | "held" | "paused" | "stopped" | "failing" | "live";
   haltedBy: WorkerHaltSource | null;
 }
 
@@ -1948,6 +1948,7 @@ export type MachineState =
   | "none"
   | "disabled"
   | "stale"
+  | "held"
   | "unbound"
   | "paused"
   | "stopped"
