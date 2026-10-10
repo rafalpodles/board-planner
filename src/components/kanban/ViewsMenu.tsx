@@ -272,7 +272,8 @@ export function ViewsMenu({ projectId, projectRef, canShare, snapshot, onApply }
                         disabled={busy}
                         onClick={() =>
                           void write(
-                            () => api.put(base, { viewId: view._id, ...snapshot() }),
+                            // The search text is a view's own only if it kept one when it was saved
+                            () => api.put(base, { viewId: view._id, ...snapshot(), search: view.search ? snapshot().search : "" }),
                             `Updated ${view.name}`
                           )
                         }

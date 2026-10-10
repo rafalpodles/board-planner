@@ -193,12 +193,20 @@ describe("ViewsMenu", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Update to current" }));
     await waitFor(() =>
-      expect(api.put).toHaveBeenLastCalledWith("/api/projects/p1/views", { viewId: "v1", ...snapshot })
+      expect(api.put).toHaveBeenLastCalledWith("/api/projects/p1/views", { viewId: "v1", ...snapshot, search: "" })
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Share" }));
     await waitFor(() => expect(api.put).toHaveBeenLastCalledWith("/api/projects/p1/views", { viewId: "v1", shared: true }));
 
+  });
+
+  it("keeps the search text in a view that had one, and leaves it out of one that had none, when updating", async () => {
+    renderMenu();
+    await open([view({ search: "old" })]);
+    fireEvent.click(screen.getByRole("button", { name: "Update to current" }));
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+    expect(api.put.mock.calls[0][1].search).toBe("login");
   });
 
   it("asks before it deletes, and deletes only on the answer", async () => {
