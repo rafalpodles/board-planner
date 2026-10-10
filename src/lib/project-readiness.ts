@@ -12,6 +12,7 @@ export type ReadinessGap =
   | "no-machine"
   | "machine-disabled"
   | "machine-stale"
+  | "machine-held"
   | "machine-unbound"
   | "machine-paused"
   | "machine-stopped"
@@ -48,6 +49,7 @@ const MACHINE_GAPS: Partial<Record<MachineState, ReadinessGap>> = {
   none: "no-machine",
   disabled: "machine-disabled",
   stale: "machine-stale",
+  held: "machine-held",
   unbound: "machine-unbound",
   paused: "machine-paused",
   stopped: "machine-stopped",

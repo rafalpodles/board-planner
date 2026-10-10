@@ -6,6 +6,7 @@ export const FEATURE_KEYS = [
   "integrations.coda",
   "integrations.jira",
   "audit.export",
+  "workers.multiple",
 ] as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[number];

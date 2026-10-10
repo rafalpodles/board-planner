@@ -630,3 +630,34 @@ test("what a finished run said is read from the fleet page, not out of the datab
   await expect(page.getByText("Refused: diff-size")).toBeVisible();
   await expect(page.getByTestId("run-detail-empty")).toContainText("diff-size");
 });
+
+// BP-989: the one-machine limit is the cloud's Free plan. A self-hosted instance connects as many as it likes.
+test("a self-hosted instance connects a person's second machine, and neither one waits", async ({ page, request }) => {
+  await signIn(page, MEMBER_USERNAME, MEMBER_PASSWORD);
+  await page.goto("/settings/machines");
+
+  for (const name of ["e2e-member-box-1", "e2e-member-box-2"]) {
+    await page.getByRole("button", { name: "Connect a machine" }).click();
+    const dialog = page.getByRole("dialog", { name: "Connect a machine" });
+    const [minted] = await Promise.all([
+      page.waitForResponse(
+        (r) => new URL(r.url()).pathname === "/api/workers/enrolment" && r.request().method() === "POST"
+      ),
+      dialog.getByRole("button", { name: "Mint token" }).click(),
+    ]);
+    expect(minted.status(), await minted.text()).toBe(201);
+    await expect(dialog.getByTestId("machine-limit")).toHaveCount(0);
+    const token = (await dialog.getByText(/^cpe_[0-9a-f]+$/).innerText()).trim();
+    const registered = await request.post("/api/workers/register", {
+      headers: { Authorization: `Bearer ${token}`, "x-cp-protocol": PROTOCOL },
+      data: { name, host: `${name}.local`, platform: "linux", version: "1.1.3" },
+    });
+    expect(registered.status(), await registered.text()).toBe(200);
+    await dialog.getByRole("button", { name: "Done" }).click();
+  }
+
+  const rows = page.getByTestId("my-machine");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.getByTestId("my-machine-state")).toHaveText(["Running, no checkouts yet", "Running, no checkouts yet"]);
+  await expect(page.getByTestId("my-machine-held")).toHaveCount(0);
+});

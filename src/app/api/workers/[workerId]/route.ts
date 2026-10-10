@@ -7,6 +7,7 @@ import { assignmentsFor, catalogueFor, offersFor, overriddenWorkerPolicy, ownerR
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { decisionsForWorker } from "@/lib/task-decisions";
 import { InstanceAuditAction } from "@/types";
+import { claimingMachineIds, isHeldByPlan, machineLimitRefusal } from "@/lib/machine-limit";
 
 // Everything a worker document still carries is fleet management: what this machine is called,
 // whether it may run, and how often it asks. What the work looks like moved to the project, so
@@ -25,7 +26,7 @@ export const GET = withWorker(async (_request, { worker, db }) => {
   }
 
   await connectDB();
-  const [projects, others, reachable] = await Promise.all([
+  const [projects, others, reachable, claiming] = await Promise.all([
     // Not narrowed to `worker.enabled` any more: the catalogue below has to carry the switched-off
     // projects too, because the screen that renders it is where somebody switches one on. The
     // enabled test still happens, inside assignmentsFor and offersFor, where it decides work.
@@ -34,10 +35,10 @@ export const GET = withWorker(async (_request, { worker, db }) => {
       "_id name host repos enabled lastSeenAt createdAt"
     ),
     ownerReachableProjectIds(db, worker),
+    claimingMachineIds(db),
   ]);
-
   return NextResponse.json({
-    ...toApiWorker(worker),
+    ...toApiWorker(worker, new Date(), undefined, isHeldByPlan(worker, claiming)),
     policy: overriddenWorkerPolicy(worker),
     // This is the field the worker actually reads, so the contested-checkout decision has to be
     // applied here and not only on the heartbeat, whose assignments nothing consumes.
@@ -167,6 +168,12 @@ export const PATCH = withAuth(async (request, { params, user, db }) => {
     return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
   }
 
+  const connectsAnother = update.enabled === true && !worker.enabled && !!worker.owner && update.owner !== null;
+  if (connectsAnother) {
+    const overLimit = await machineLimitRefusal(db, { workerId: worker._id });
+    if (overLimit) return overLimit;
+  }
+
   // Populated, like the fleet list is: without it toApiWorker answers `owner: null` for a machine
   // that has one, the console merges that into the row, and its Owner column flashes the red
   // "claims nothing" flag until the next poll corrects it — a false alarm on the very indicator
@@ -185,7 +192,7 @@ export const PATCH = withAuth(async (request, { params, user, db }) => {
     void logInstanceAudit(db, { ...entry, user: String(user._id), actorUsername: user.username });
   }
 
-  return NextResponse.json(toApiWorker(updated));
+  return NextResponse.json(toApiWorker(updated, new Date(), undefined, isHeldByPlan(updated, await claimingMachineIds(db))));
 });
 
 interface WorkerBefore {

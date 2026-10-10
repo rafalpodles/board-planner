@@ -67,6 +67,12 @@ vi.mock("@/lib/middleware", async () => {
   };
 });
 
+const claimingMachineIds = vi.fn();
+vi.mock("@/lib/machine-limit", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/machine-limit")>();
+  return { ...actual, claimingMachineIds };
+});
+
 const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { POST } = await import("./route");
 
@@ -119,6 +125,34 @@ beforeEach(() => {
   releaseExpiredTasks.mockResolvedValue(0);
   releaseTask.mockResolvedValue(undefined);
   agentRunFindOne.mockResolvedValue(null);
+  claimingMachineIds.mockResolvedValue(null);
+});
+
+// BP-989
+describe("POST /tasks/claim on a Free organisation past its one machine", () => {
+  const ctx = { params: Promise.resolve({ projectId: "CP" }) };
+
+  // 409 is the refusal a worker says once and shows in the menubar app; a 403 it logs as a broken cycle every poll
+  it("refuses a machine the limit leaves out with 409 and what to do, and claims nothing", async () => {
+    verifyWorkerCredential.mockResolvedValue({ _id: OID, enabled: true, owner: OWNER });
+    claimingMachineIds.mockResolvedValue(new Set(["69a52e3b399b27d3cbb2c5ff"]));
+
+    const response = await POST(request(authed), ctx);
+
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toBe(
+      "The Free plan runs one machine per organisation, and another one was connected first. Upgrade to Pro, or have an admin switch the other machine off in Settings → Workers, for this one to take work."
+    );
+    expect(claimNextTask).not.toHaveBeenCalled();
+  });
+
+  it("claims for the first connected machine, as the control", async () => {
+    verifyWorkerCredential.mockResolvedValue({ _id: OID, enabled: true, owner: OWNER });
+    claimingMachineIds.mockResolvedValue(new Set([OID]));
+
+    expect((await POST(request(authed), ctx)).status).toBe(200);
+    expect(claimNextTask).toHaveBeenCalled();
+  });
 });
 
 describe("POST /tasks/claim", () => {

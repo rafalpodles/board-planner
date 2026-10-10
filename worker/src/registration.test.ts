@@ -18,6 +18,7 @@ function depsWith(
     handlers?: CommandHandlers;
     enrolmentToken?: string;
     registerStatus?: number;
+    registerError?: unknown;
     forgetEnrolmentToken?: () => void;
     enrolmentTokenFile?: string;
     enrolmentTokenError?: string;
@@ -35,7 +36,11 @@ function depsWith(
     if (opts.throws) throw opts.throws;
     if (String(url).endsWith("/api/workers/register")) {
       if (opts.registerStatus && opts.registerStatus >= 400) {
-        return { ok: false, status: opts.registerStatus, json: async () => ({}) };
+        return {
+          ok: false,
+          status: opts.registerStatus,
+          json: async () => (opts.registerError === undefined ? {} : { error: opts.registerError }),
+        };
       }
       return {
         ok: true,
@@ -197,6 +202,18 @@ describe("startHeartbeat", () => {
     await startHeartbeat(deps).tick();
 
     expect(onRegistered).not.toHaveBeenCalled();
+  });
+
+  // BP-989: a Free organisation's second machine is refused with a sentence saying why, and a bare
+  // "402" in the log sent the operator looking for a fault on the machine
+  it("logs the server's reason for refusing the registration, and only the status when it gives none", async () => {
+    const refused = depsWith({ stored: null, registerStatus: 402, registerError: "The Free plan connects one machine." });
+    await startHeartbeat(refused).tick();
+    expect(refused.log).toHaveBeenCalledWith("worker registration failed: 402 — The Free plan connects one machine.");
+
+    const bare = depsWith({ stored: null, registerStatus: 401, registerError: { not: "a sentence" } });
+    await startHeartbeat(bare).tick();
+    expect(bare.log).toHaveBeenCalledWith("worker registration failed: 401");
   });
 
   it("keeps the token when registration fails", async () => {

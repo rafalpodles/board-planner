@@ -233,7 +233,7 @@ export function Subscription() {
               ? "Subscribe to keep Pro when the trial ends."
               : organisation.plan === "pro"
                 ? "Subscribe to keep Pro when this plan ends."
-                : "Upgrade to Pro: more than 10 members, managed AI and the rest of the Pro features."}
+                : "Upgrade to Pro: more than 10 members, more than one machine, managed AI and the rest of the Pro features."}
             {billing.launchOpen && " The launch price is open: a subscription that starts at it keeps it for as long as it runs without a gap."}
           </p>
           <PeriodChoice offer={billing.offer} interval={interval} onChange={setInterval} disabled={busy !== null || confirming} />
