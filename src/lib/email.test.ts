@@ -164,6 +164,10 @@ describe("addresses", () => {
       "a,b@example.com",
       "a;b@example.com",
       "victim@corp..com",
+      "x:victim@a.com",
+      "victim@a.com\u0085",
+      "victim@a.com ",
+      "a\tb@example.com",
     ]) {
       expect(isValidEmail(squat), squat).toBe(false);
     }
