@@ -990,8 +990,15 @@ export interface ApiTaskDecision {
   createdAt: string;
 }
 
+export interface GroupRole {
+  group: string;
+  role: GrantRelation;
+}
+
 export interface IProject {
   _id: Types.ObjectId;
+  /** Which identity provider groups give which role on the board; empty means the board is not mapped. */
+  groupRoleMap?: GroupRole[];
   name: string;
   key: string;
   /** Keys this project used to have, so a rename does not orphan its pull requests */

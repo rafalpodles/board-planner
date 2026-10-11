@@ -15,6 +15,7 @@ import { DangerAction } from "@/components/settings/DangerAction";
 import { SettingRow } from "@/components/settings/SettingRow";
 import { LoadFailed } from "@/components/ui/LoadFailed";
 import { BoardInvitations } from "@/components/settings/BoardInvitations";
+import { BoardGroupRoles } from "@/components/settings/BoardGroupRoles";
 import { useDirtyGroup } from "@/components/settings/settings-context";
 import { SectionProps } from "./types";
 
@@ -389,6 +390,7 @@ export function GeneralSection({
       </SettingsCard>
 
       {membersRead === "loaded" && <BoardInvitations projectId={projectId} />}
+      {membersRead === "loaded" && <BoardGroupRoles projectId={projectId} />}
 
       {project.canAdmin && (
         <SettingsCard
