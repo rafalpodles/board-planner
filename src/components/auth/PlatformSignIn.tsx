@@ -53,9 +53,9 @@ function RememberCheckbox({ checked, onChange }: { checked: boolean; onChange: (
         className="mt-1 h-4 w-4 shrink-0"
       />
       <div>
-        <label htmlFor="remember-organisation">Remember my choice</label>
+        <label htmlFor="remember-organisation" className="font-semibold">Next time you go straight to this organisation.</label>
         <p id="remember-organisation-note" className="text-xs text-text-muted">
-          Next time you go straight to this organisation. Saves a small cookie on this device.
+          Saves this decision in a cookie on this device.
         </p>
       </div>
     </div>
