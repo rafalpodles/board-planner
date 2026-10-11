@@ -38,6 +38,7 @@ const GROUPS: SettingsGroup[] = [
       { id: "email", label: "Email" },
       { id: "agents", label: "PM Agents" },
       { id: "ai-keys", label: "AI key" },
+      { id: "sso", label: "Single sign-on" },
       { id: "workers", label: "Workers" },
       { id: "audit", label: "Audit log" },
       { id: "export", label: "Export" },
