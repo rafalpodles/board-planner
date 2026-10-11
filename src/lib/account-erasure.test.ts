@@ -6,6 +6,7 @@ vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/upload-ownership", () => ({ organisationUploads: () => ({ remove: removeUploads }) }));
 
 const { eraseAccountTraces, erasedLabel, scrubNames } = await import("./account-erasure");
+const { isErasedLabel } = await import("./erased-label");
 
 const JAN = "6a9d0f0b5d781bded2cb975a";
 const OLA = "6a9d0f0b5d781bded2cb975b";
@@ -36,6 +37,9 @@ describe("the label a deleted account is left under", () => {
     expect(LABEL).not.toContain("jan");
     expect(erasedLabel(JAN)).toBe(LABEL);
     expect(erasedLabel(OLA)).not.toBe(LABEL);
+    // The server mints it and the client and the username rules recognise it: one shape, two files
+    expect(isErasedLabel(LABEL)).toBe(true);
+    expect(isErasedLabel("deleted-user")).toBe(false);
   });
 });
 

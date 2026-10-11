@@ -34,6 +34,7 @@
     "src/app/api/projects/[projectId]/tasks/[taskId]/route.ts": "by key and by link, and a relation's other end is shown whatever its state",
     "src/app/api/projects/[projectId]/tasks/[taskId]/watch/route.ts": "by id",
     "src/app/api/projects/[projectId]/tasks/reorder/route.ts": "the order is one sequence over the whole board",
+    "src/lib/account-erasure.ts": "a deleted account's references are cleared from every task, archived or not",
     "src/lib/account-export.ts": "the tasks the person created, archived or not: an export that left some out would not be their data",
     "src/lib/github-sync.ts": "a pull request is linked to its task by key, archived or not",
     "src/lib/middleware.ts": "resolves a task key to an id, and a worker's run to its task",
