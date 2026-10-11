@@ -110,7 +110,7 @@ describe("POST /api/auth/login — an organisation that requires single sign-on 
 
 describe("POST /api/auth/login — the database is down while the organisation's setting is read (BP-362, BP-951)", () => {
   it("says the database is unavailable rather than failing with a 500", async () => {
-    ssoEnforced.mockRejectedValue(new DatabaseUnavailableError());
+    ssoEnforced.mockRejectedValue(new DatabaseUnavailableError(new Error("connect ECONNREFUSED")));
 
     const response = await POST(request());
 
