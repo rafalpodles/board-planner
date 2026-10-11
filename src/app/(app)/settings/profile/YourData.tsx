@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/Button";
@@ -10,7 +9,6 @@ import { Modal } from "@/components/ui/Modal";
 
 export function YourData({ asksPassword }: { asksPassword: boolean }) {
   const api = useApi();
-  const router = useRouter();
   const { logout } = useAuth();
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState("");
@@ -59,8 +57,7 @@ export function YourData({ asksPassword }: { asksPassword: boolean }) {
       return;
     }
     const signIn = await logout();
-    if (signIn) window.location.assign(signIn);
-    else router.replace("/login");
+    window.location.assign(signIn ?? "/login");
   }
 
   return (
