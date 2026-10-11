@@ -22,7 +22,7 @@ export default function NewProjectPage() {
   const api = useApi();
   const router = useRouter();
   const { isAdmin, isLoading: authLoading } = useAuth();
-  const { projects } = useProjects();
+  const { projects, reload } = useProjects();
   const takenKeys = projects.map((p) => p.key).join(",");
 
   // The board list can arrive after the name was typed; a suggestion made without it could be taken
@@ -47,6 +47,7 @@ export default function NewProjectPage() {
         key: key.toUpperCase(),
         description,
       });
+      await reload();
       router.push(projectPath(project.key));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create project");

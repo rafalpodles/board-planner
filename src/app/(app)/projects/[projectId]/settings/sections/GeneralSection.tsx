@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
+import { useProjects } from "@/hooks/use-projects";
 import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";
 import { useDraft } from "@/hooks/use-draft";
 import { useToast } from "@/components/ui/Toast";
@@ -52,6 +53,7 @@ export function GeneralSection({
   stats,
 }: SectionProps) {
   const api = useApi();
+  const { reload: reloadProjects } = useProjects();
   const router = useRouter();
   const { toast } = useToast();
 
@@ -126,6 +128,7 @@ export function GeneralSection({
         try {
           const updated = await api.put(`/api/projects/${projectId}`, identity.value);
           replaceProject(updated);
+          void reloadProjects();
           identity.commit({
             name: updated.name,
             description: updated.description,
@@ -218,6 +221,7 @@ export function GeneralSection({
     // Stepping down changes what this page may show, and the members list is an owner's to read
     if (ownLanded && !isAdmin) {
       if (ownLanded === "none") {
+        void reloadProjects();
         router.replace("/projects");
         return;
       }
@@ -260,6 +264,7 @@ export function GeneralSection({
   async function handleDelete() {
     try {
       await api.del(`/api/projects/${projectId}`);
+      await reloadProjects();
       router.replace("/projects");
     } catch {
       toast("Failed to delete project", "error");
