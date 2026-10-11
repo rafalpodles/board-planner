@@ -24,6 +24,11 @@ vi.mock("@/lib/invitation-view", () => ({
     })),
 }));
 vi.mock("@/models/user", () => ({ User: { exists: userExists } }));
+vi.mock("@/lib/organisation", () => ({ getOrganisation: async () => ({ name: "Acme" }) }));
+vi.mock("@/lib/organisation-host", async (original) => ({
+  ...(await original<typeof import("@/lib/organisation-host")>()),
+  originFor: async () => "https://acme.board-planner.com",
+}));
 
 const { POST } = await import("./route");
 const { resetRateLimits } = await import("@/lib/rate-limit");
@@ -49,12 +54,29 @@ describe("POST /api/invitations/lookup", () => {
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
+      organisation: null,
+      address: null,
       email: "ada@example.com",
       role: "member",
       boards: [{ name: "Test", relation: "owner" }],
       invitedBy: "Grace",
       expiresAt: "2026-10-09T00:00:00.000Z",
     });
+  });
+
+  // BP-922. An invitation in the cloud is to somebody's organisation, at an address of its own
+  it("names the organisation and the address the invitee will sign in at, in the cloud only", async () => {
+    process.env.ORGANISATION_DOMAIN = "board-planner.com";
+    process.env.ORGANISATION_DEFAULT_HOST = "app.board-planner.com";
+    try {
+      const res = await POST(
+        new Request("http://x/api/invitations/lookup", { method: "POST", headers: { host: "app.board-planner.com" }, body: JSON.stringify({ token: "cpi_good" }) })
+      );
+      expect(await res.json()).toMatchObject({ organisation: "Acme", address: "acme.board-planner.com" });
+    } finally {
+      delete process.env.ORGANISATION_DOMAIN;
+      delete process.env.ORGANISATION_DEFAULT_HOST;
+    }
   });
 
   it("says why a link cannot be used, and names nobody", async () => {

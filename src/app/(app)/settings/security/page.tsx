@@ -1,5 +1,7 @@
 "use client";
 
+import { useOrganisation } from "@/hooks/use-organisation";
+import { noPasswordNoMail } from "@/lib/cloud-copy";
 import { useCallback, useEffect, useState, FormEvent } from "react";
 import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
@@ -20,6 +22,7 @@ const MIN_PASSWORD_LENGTH = 8;
 
 export default function SecurityPage() {
   const api = useApi();
+  const cloud = useOrganisation().organisation?.cloud === true;
   const { toast } = useToast();
 
   const [currentPassword, setCurrentPassword] = useState("");
@@ -144,7 +147,7 @@ export default function SecurityPage() {
         <h2 className="text-lg font-semibold mb-1">Password</h2>
         <p className="text-sm text-text-muted">
           {methods.mailWorks === false ? (
-            <>This account has no password, and this instance sends no mail. Ask an administrator to set one.</>
+            <>{noPasswordNoMail(cloud)}</>
           ) : (
             <>
               This account has no password. To add one, use{" "}

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import type { ScopedDb } from "@/lib/db-scope";
 import { withProjectAccess } from "@/lib/middleware";
+import { organisationDomain } from "@/lib/organisation-host";
 import type { HydratedDocument } from "mongoose";
 import type { IProject } from "@/types";
 import { generateTask, ExistingTaskSummary } from "@/lib/ai";
@@ -78,7 +79,11 @@ export const POST = withProjectAccess(async (request, { params, user, db }) => {
   const { projectId } = await params;
 
   const { aiModel } = await getSettings(db);
-  const gate = await openGate(db, { error: "AI is not configured. Set the OPENROUTER_API_KEY environment variable.", status: 501 }, openrouterModel(aiModel));
+  const gate = await openGate(
+    db,
+    { error: organisationDomain() ? "AI is not available right now." : "AI is not configured. Set the OPENROUTER_API_KEY environment variable.", status: 501 },
+    openrouterModel(aiModel)
+  );
   if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });
 
   await connectDB();

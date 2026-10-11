@@ -1,3 +1,4 @@
+import { organisationDomain } from "@/lib/organisation-host";
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { scopedFor, type ScopedDb } from "@/lib/db-scope";
@@ -56,7 +57,10 @@ async function chat(request: Request, params: Promise<Record<string, string>>, u
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const gate = await openGate(db, { error: "PM agent is not configured (OPENROUTER_API_KEY missing)", status: 503 });
+  const gate = await openGate(db, {
+    error: organisationDomain() ? "The PM agent is unavailable right now." : "PM agent is not configured (OPENROUTER_API_KEY missing)",
+    status: 503,
+  });
   if (!gate.ok) return NextResponse.json(gate.body, { status: gate.status });
 
   await connectDB();

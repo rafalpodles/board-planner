@@ -32,6 +32,7 @@ export default function LoginPage() {
   const [passwordSignIn, setPasswordSignIn] = useState<boolean | null>(null);
   const [suspended, setSuspended] = useState(false);
   const [platformSignIn, setPlatformSignIn] = useState<string | null>(null);
+  const [hostOrganisation, setHostOrganisation] = useState<string | null>(null);
   const [next, setNext] = useState<string | undefined>(undefined);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -54,6 +55,7 @@ export default function LoginPage() {
         setPasswordSignIn(data.passwordSignIn !== false);
         setSuspended(data.suspended === true);
         setPlatformSignIn(typeof data.platformSignIn === "string" ? data.platformSignIn : null);
+        setHostOrganisation(data.cloud === true && typeof data.organisation === "string" && data.organisation ? data.organisation : null);
       })
       .catch((err) => {
         // Says why rather than failing silently: on a fresh instance whose database is flapping,
@@ -140,7 +142,7 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center mb-8">
           <Image src="/logo.svg" alt={APP_NAME} width={48} height={48} className="mb-3" />
-          <h1 className="text-2xl font-bold">{APP_NAME}</h1>
+          <h1 className="text-2xl font-bold">{hostOrganisation ? `Sign in to ${hostOrganisation}` : APP_NAME}</h1>
         </div>
 
         {passwordSignIn !== false && (
@@ -173,7 +175,7 @@ export default function LoginPage() {
                 label="Organisation name (optional)"
                 value={organisation}
                 onChange={(e) => setOrganisation(e.target.value)}
-                placeholder="default"
+                placeholder="e.g. Acme"
                 maxLength={80}
               />
             )}

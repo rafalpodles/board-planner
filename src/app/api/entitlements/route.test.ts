@@ -7,7 +7,10 @@ const { getAuthUser, getOrganisation } = vi.hoisted(() => ({
 
 vi.mock("@/lib/auth", () => ({ getAuthUser }));
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
-vi.mock("@/lib/organisation", () => ({ getOrganisation }));
+vi.mock("@/lib/organisation", async (original) => ({
+  ...(await original<typeof import("@/lib/organisation")>()),
+  getOrganisation,
+}));
 
 const { GET } = await import("./route");
 
@@ -42,10 +45,14 @@ describe("GET /api/entitlements", () => {
     expect(await res.json()).toEqual({ organisation: "Acme", plan: "pro", features: ["integrations.coda"], expiresAt: null });
   });
 
-  it("calls an organisation that was never named the default one", async () => {
-    getAuthUser.mockResolvedValue({ _id: "u1", username: "member", role: "member" });
-    getOrganisation.mockResolvedValue({ entitlements: { plan: "free", features: [] } });
+  // BP-922. "default" is what an unnamed organisation is stored as, and no screen is to show it as a name
+  it.each([[{ entitlements: { plan: "free", features: [] } }], [{ name: "default", entitlements: { plan: "free", features: [] } }]])(
+    "gives an organisation that was never named no name, not the word default (%j)",
+    async (row) => {
+      getAuthUser.mockResolvedValue({ _id: "u1", username: "member", role: "member" });
+      getOrganisation.mockResolvedValue(row);
 
-    expect(await (await get()).json()).toMatchObject({ organisation: "default" });
-  });
+      expect((await (await get()).json()).organisation).toBeNull();
+    }
+  );
 });

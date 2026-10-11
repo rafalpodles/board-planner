@@ -1,5 +1,7 @@
 "use client";
 
+import { useOrganisation } from "@/hooks/use-organisation";
+import { pmNeedsKey } from "@/lib/cloud-copy";
 import { useEffect, useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { isValidTimezone } from "@/lib/time";
@@ -116,6 +118,7 @@ function cachedShare(usage: PmUsageToday): number | null {
 }
 
 export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: SectionProps) {
+  const cloud = useOrganisation().organisation?.cloud === true;
   const api = useApi();
   const { toast } = useToast();
 
@@ -500,11 +503,7 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
   if (!project.pmAvailable) {
     return (
       <SettingsCard title="PM agent">
-        <p className="text-sm text-text-muted">
-          Set the <code>OPENROUTER_API_KEY</code> environment variable on the server to enable the PM
-          agent, or have an admin add a key in
-          Settings → AI key.
-        </p>
+        <p className="text-sm text-text-muted">{pmNeedsKey(cloud)}</p>
       </SettingsCard>
     );
   }

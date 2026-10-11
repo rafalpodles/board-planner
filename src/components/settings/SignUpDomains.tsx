@@ -1,5 +1,7 @@
 "use client";
 
+import { useOrganisation } from "@/hooks/use-organisation";
+import { signUpNeedsProvider } from "@/lib/cloud-copy";
 import { FormEvent, useEffect, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/Toast";
@@ -19,6 +21,7 @@ const typedDomains = (text: string) => text.split(/[\s,]+/).filter(Boolean);
 
 export function SignUpDomains() {
   const api = useApi();
+  const cloud = useOrganisation().organisation?.cloud === true;
   const { toast } = useToast();
   const [saved, setSaved] = useState<SignUp | null>(null);
   const [text, setText] = useState("");
@@ -75,7 +78,7 @@ export function SignUpDomains() {
       <p className="text-sm text-text-muted mb-3">
         {providers
           ? `Anyone who signs in with ${providers} at one of these domains can make their own account, as a member with no boards.`
-          : "Needs single sign-on or Google sign-in configured on this instance."}
+          : signUpNeedsProvider(cloud)}
         {saved.adminGroup &&
           ` Each sign-in with ${saved.adminGroup.provider} makes members of the group ${saved.adminGroup.group} administrators, and makes anyone else a member.`}
       </p>

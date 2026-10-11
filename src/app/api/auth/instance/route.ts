@@ -6,6 +6,7 @@ import { isDatabaseUnreachable } from "@/lib/db-errors";
 import { databaseUnavailable, hostNotFound, organisationSuspended } from "@/lib/middleware";
 import { organisationOfRequest, platformSignInOrigin } from "@/lib/organisation-host";
 import { passwordSignInEnabled, passwordSignInFor } from "@/lib/password-sign-in";
+import { getOrganisation } from "@/lib/organisation";
 
 /**
  * Whether this instance has been claimed — that is, whether it has any user at all.
@@ -43,13 +44,22 @@ export async function GET(request: Request) {
     await connectDB();
     passwordSignIn = await passwordSignInFor(db);
     const users = await db.User.countDocuments();
-    return NextResponse.json({ unclaimed: users === 0 && !organisationDomain(), passwordSignIn, platformSignIn: platformSignInOrigin() });
+    // Only the cloud names its organisations to somebody who has not signed in: a self-hosted instance keeps the product's own name
+    const cloud = organisationDomain() !== null;
+    const name = cloud ? (await getOrganisation(db.organisation)).name : null;
+    return NextResponse.json({
+      unclaimed: users === 0 && !cloud,
+      passwordSignIn,
+      platformSignIn: platformSignInOrigin(),
+      cloud,
+      organisation: name || null,
+    });
   } catch (e) {
     // Unreachable is not "unclaimed": answering true here would offer to create the first
     // administrator on an instance that may already have one
     if (isDatabaseUnreachable(e)) {
       const unavailable = databaseUnavailable();
-      return NextResponse.json({ ...(await unavailable.json()), passwordSignIn, platformSignIn: platformSignInOrigin() }, unavailable);
+      return NextResponse.json({ ...(await unavailable.json()), passwordSignIn, platformSignIn: platformSignInOrigin(), cloud: organisationDomain() !== null, organisation: null }, unavailable);
     }
     throw e;
   }

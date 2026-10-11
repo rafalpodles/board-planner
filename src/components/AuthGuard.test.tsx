@@ -79,7 +79,7 @@ describe("AuthGuard", () => {
     const { rerender } = renderGuard();
 
     expect(screen.getByRole("status").textContent).toBe(
-      `Your organisation has made more requests this minute than it may. Pages will load again after ${until.toLocaleTimeString()}.`
+      `Your organisation has made more requests this minute than it may. Try again after ${until.toLocaleTimeString()}.`
     );
     expect(screen.getByTestId("app")).toBeTruthy();
 
@@ -90,7 +90,7 @@ describe("AuthGuard", () => {
       </AuthGuard>
     );
     expect(screen.getByRole("status").textContent).toBe(
-      `You have made more requests this minute than one account may. Pages will load again after ${until.toLocaleTimeString()}.`
+      `You have made more requests this minute than one account may; that share includes your machines and API tokens. Try again after ${until.toLocaleTimeString()}.`
     );
   });
 
@@ -102,6 +102,40 @@ describe("AuthGuard", () => {
     expect(screen.getByRole("status").textContent).toContain("This organisation is suspended");
     expect(screen.queryByTestId("app")).toBeNull();
     expect(nav.replace).not.toHaveBeenCalled();
+  });
+
+  // BP-922. A suspended organisation's admin is told whose it is, who to write to, and can leave
+  it("names the address, gives a contact and offers to sign out when the organisation is suspended", async () => {
+    auth.suspended = true;
+    auth.logout.mockResolvedValue(null);
+    const assign = vi.fn();
+    vi.stubGlobal("location", { host: "acme.board-planner.com", assign });
+
+    renderGuard();
+
+    expect(screen.getByTestId("suspended-address").textContent).toBe("acme.board-planner.com");
+    expect(screen.getByRole("link", { name: "contact@board-planner.com" }).getAttribute("href")).toBe("mailto:contact@board-planner.com");
+    await act(async () => {
+      screen.getByRole("button", { name: "Sign out" }).click();
+    });
+    expect(auth.logout).toHaveBeenCalledTimes(1);
+    expect(assign).toHaveBeenCalledWith("/login");
+    vi.unstubAllGlobals();
+  });
+
+  it("goes to the platform's sign-in after signing out when the server names one", async () => {
+    auth.suspended = true;
+    auth.logout.mockResolvedValue("https://login.board-planner.com");
+    const assign = vi.fn();
+    vi.stubGlobal("location", { host: "acme.board-planner.com", assign });
+
+    renderGuard();
+    await act(async () => {
+      screen.getByRole("button", { name: "Sign out" }).click();
+    });
+
+    expect(assign).toHaveBeenCalledWith("https://login.board-planner.com");
+    vi.unstubAllGlobals();
   });
 
   it("keeps asking while suspended, and shows the app again once the suspension is lifted (BP-893)", async () => {
@@ -146,12 +180,12 @@ describe("AuthGuard", () => {
     expect(nav.replace).not.toHaveBeenCalled();
   });
 
-  it("says the instance is having trouble, and that nobody was signed out", () => {
+  it("says Board Planner is having trouble, and that nobody was signed out", () => {
     auth.outage = true;
 
     renderGuard();
 
-    expect(screen.getByText(/this instance is having trouble/i)).toBeTruthy();
+    expect(screen.getByText(/board planner is having trouble/i)).toBeTruthy();
     expect(screen.getByText(/have not been signed out/i)).toBeTruthy();
     expect(screen.queryByTestId("app")).toBeNull();
   });

@@ -17,6 +17,7 @@ import {
   SHARED_KEY,
   asOrganisation,
   bearer,
+  hostOf,
   originOf,
   seedOrganisationWork,
   seedTwoOrganisations,
@@ -135,6 +136,10 @@ test.describe("BP-893: an organisation's life cycle", () => {
     await page.goto(`${originOf(GLOBEX)}/projects/${SHARED_KEY}`);
     await expect(page.getByRole("heading", { name: "This organisation is suspended" })).toBeVisible();
     await expect(page).toHaveURL(/\/projects\//);
+    // BP-922: whose it is, who to write to, and a way out
+    await expect(page.getByTestId("suspended-address")).toHaveText(hostOf(GLOBEX));
+    await expect(page.getByRole("link", { name: "contact@board-planner.com" })).toHaveAttribute("href", "mailto:contact@board-planner.com");
+    await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
     await page.screenshot({ path: "e2e/.artifacts/bp893-suspended-desktop.png" });
     await page.setViewportSize({ width: 390, height: 844 });
     await page.reload();
@@ -147,6 +152,16 @@ test.describe("BP-893: an organisation's life cycle", () => {
     await expect(visitor.getByRole("heading", { name: "This organisation is suspended" })).toBeVisible();
     await expect(visitor.getByLabel("Password")).toHaveCount(0);
     await visitor.close();
+
+    // Signing out ends the session and leaves the page: the cookie is gone, so the next visit is a visitor's
+    const leaving = await browser.newContext();
+    await signInOn(leaving, GLOBEX);
+    const leaver = await leaving.newPage();
+    await leaver.goto(`${originOf(GLOBEX)}/projects/${SHARED_KEY}`);
+    await leaver.getByRole("button", { name: "Sign out" }).click();
+    await expect(leaver).toHaveURL(/\/login|login\./);
+    expect((await leaving.cookies()).filter((c) => c.name.endsWith("bp_session") && c.value)).toHaveLength(0);
+    await leaving.close();
 
     const other = await browser.newContext();
     await signInOn(other, ACME);

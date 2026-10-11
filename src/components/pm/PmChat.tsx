@@ -1,5 +1,7 @@
 "use client";
 
+import { useOrganisation } from "@/hooks/use-organisation";
+import { pmUnavailable } from "@/lib/cloud-copy";
 import { useCallback, useEffect, useRef, useState, KeyboardEvent } from "react";
 import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
@@ -57,6 +59,7 @@ export function PmChat({
   showTitle?: boolean;
 }) {
   const api = useApi();
+  const cloud = useOrganisation().organisation?.cloud === true;
 
   const [project, setProject] = useState<ApiProject | null>(preloadedProject ?? null);
   const [thread, setThread] = useState<ThreadPage>(EMPTY_THREAD);
@@ -353,7 +356,7 @@ export function PmChat({
       if (response.status === 402 || (response.status === 503 && err.reason === "own_key_unreadable") || (response.status === 403 && err.reason === "ai_locked")) {
         unsend(err.error || "The PM agent needs your own key or the Pro plan.", false);
       } else if (response.status === 503) {
-        unsend("PM is not configured on the server (OPENROUTER_API_KEY missing).", false);
+        unsend(err.error || pmUnavailable(cloud), false);
       } else {
         // A 400 is deterministic in the request; a 409 or 429 is about the moment
         unsend(err.error || "Request failed.", response.status !== 400);
@@ -535,7 +538,7 @@ export function PmChat({
         <h1 className="text-xl font-bold">PM Agent</h1>
         <p className="text-sm text-text-muted">
           {!project?.pmAvailable
-            ? "PM is not configured on the server (OPENROUTER_API_KEY missing)."
+            ? pmUnavailable(cloud)
             : locked
               ? `${pmDisabledReason(project?.pm)} — it cannot be re-enabled from project settings.`
               : "The PM agent is disabled for this project — enable it in settings."}
