@@ -1,5 +1,34 @@
 # Changelog
 
+## [1.8.0](https://github.com/rafalpodles/board-planner/compare/v1.7.0...v1.8.0) (2026-10-11)
+
+
+### Features
+
+* a board maps identity provider groups to roles, applied at sign-in (BP-862) ([#664](https://github.com/rafalpodles/board-planner/issues/664)) ([3660cad](https://github.com/rafalpodles/board-planner/commit/3660cad8640a78b19ce45b46631e7bff6fbdd4b2))
+* a grant records whether a person or a group mapping made it (BP-861) ([#660](https://github.com/rafalpodles/board-planner/issues/660)) ([080918f](https://github.com/rafalpodles/board-planner/commit/080918f0a5f21f1c08ec98262f7c7b644b068bd1))
+* a person can download their data and delete their own account, and deletion erases what names them (BP-946) ([#663](https://github.com/rafalpodles/board-planner/issues/663)) ([3456984](https://github.com/rafalpodles/board-planner/commit/3456984d18712101b0663a0495c0b62d3576dda3))
+* an organisation can require its single sign-on (BP-951) ([#653](https://github.com/rafalpodles/board-planner/issues/653)) ([826416c](https://github.com/rafalpodles/board-planner/commit/826416cbd57fdd4dbad02683b4912687193d8b54))
+* an organisation sets an admin group for its own sign-in provider (BP-951) ([#659](https://github.com/rafalpodles/board-planner/issues/659)) ([bb30d85](https://github.com/rafalpodles/board-planner/commit/bb30d851f3acfa3948d37636464eb0bf3bad9ebe))
+* an organisation switches Google and GitHub sign-in off for itself (BP-1027) ([#662](https://github.com/rafalpodles/board-planner/issues/662)) ([3b6fe95](https://github.com/rafalpodles/board-planner/commit/3b6fe95e287e7f2bc83e188a2403d1ce516bc242))
+* an organisation's own sign-in provider, set up in Settings, on Pro and the trial (BP-951) ([#648](https://github.com/rafalpodles/board-planner/issues/648)) ([b08e65e](https://github.com/rafalpodles/board-planner/commit/b08e65e46c425e10332a1e2da16c1239525a70e8))
+* Anthropic, Google and Mistral models run on the platform's AI key, each pinned to its own provider (BP-1026) ([#661](https://github.com/rafalpodles/board-planner/issues/661)) ([6fd73b7](https://github.com/rafalpodles/board-planner/commit/6fd73b712275637ba8067957ac2cdbdb79cfa68d))
+* logging out on the hosted service goes to the sign-in at login.&lt;domain&gt; (BP-1023) ([#649](https://github.com/rafalpodles/board-planner/issues/649)) ([9a0954b](https://github.com/rafalpodles/board-planner/commit/9a0954b29cea681c69a7995f01f9f0450fcdcb4b))
+* opening the sign-in host goes straight to the organisation you chose to remember (BP-1009) ([#636](https://github.com/rafalpodles/board-planner/issues/636)) ([8106adf](https://github.com/rafalpodles/board-planner/commit/8106adf55333b16dab103de01d736d5d23d17d24))
+* the AI model is chosen beside the AI key from what the key in use runs, and checked when saved (BP-1024) ([#652](https://github.com/rafalpodles/board-planner/issues/652)) ([f73abaf](https://github.com/rafalpodles/board-planner/commit/f73abaf1c193db94c96acf507a8847bf22370df6))
+* uploads per organisation follow the plan, 1 GB on Free and 20 GB on Pro, and Settings shows the usage (BP-967) ([#650](https://github.com/rafalpodles/board-planner/issues/650)) ([3fb789c](https://github.com/rafalpodles/board-planner/commit/3fb789c88eee32e20631dee260d83bb7f188c0aa))
+
+
+### Bug Fixes
+
+* drop the helper line under the e-mail field of the sign-in (BP-1008) ([#646](https://github.com/rafalpodles/board-planner/issues/646)) ([a7b378d](https://github.com/rafalpodles/board-planner/commit/a7b378d26f3e7f59f8d57df1e9ce59c2daaaf576))
+* forgot and the setup code are no longer one bucket for every caller with no address, and a lockout of administrators is warned of where it happens (BP-847) ([#656](https://github.com/rafalpodles/board-planner/issues/656)) ([1a3612c](https://github.com/rafalpodles/board-planner/commit/1a3612ce40c0f8671e54e5e838a57c1ac4ea861b))
+* isValidEmail refuses group-name prefixes and non-printable characters (BP-835) ([#651](https://github.com/rafalpodles/board-planner/issues/651)) ([7edc1a6](https://github.com/rafalpodles/board-planner/commit/7edc1a6f3fba68825784eaefb7c39b1d4ca76af9))
+* REST write routes answer a body that is not JSON with 400, sprints are validated alike, a task names its parent, webhook payloads name board and task (BP-1019, BP-1021, BP-1020, BP-1018) ([#654](https://github.com/rafalpodles/board-planner/issues/654)) ([e0ede60](https://github.com/rafalpodles/board-planner/commit/e0ede60eddc55c1c3e812ca090879f6a6bca6f7c))
+* the cloud's copy says admin and organisation, names the organisation at sign-in, and stops giving operator instructions to an organisation's admin (BP-922) ([#658](https://github.com/rafalpodles/board-planner/issues/658)) ([3b28154](https://github.com/rafalpodles/board-planner/commit/3b281545b8e05714879277ee115c90e67d43e0bf))
+* the Origin fallback is per organisation, the wall checks inserts, invitations are budgeted per organisation and an export notices a delete (BP-923) ([#657](https://github.com/rafalpodles/board-planner/issues/657)) ([3275db0](https://github.com/rafalpodles/board-planner/commit/3275db029b015c69ead81ca97e4f135bbef948aa))
+* the remember box on the sign-in says what it does, with the cookie in small print (BP-1022) ([#647](https://github.com/rafalpodles/board-planner/issues/647)) ([ab4dcba](https://github.com/rafalpodles/board-planner/commit/ab4dcba209b85f3954644a127894bca1f578637b))
+
 ## [1.7.0](https://github.com/rafalpodles/board-planner/compare/v1.6.0...v1.7.0) (2026-10-10)
 
 
