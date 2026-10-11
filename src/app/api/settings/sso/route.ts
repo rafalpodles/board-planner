@@ -11,7 +11,18 @@ import { getOrganisation } from "@/lib/organisation";
 import { organisationDomain, originFor } from "@/lib/organisation-host";
 import { readJsonBody } from "@/lib/request-body";
 import { BlockedDestinationError } from "@/lib/safe-fetch";
-import { updateSettings } from "@/models/settings";
+import { duplicateKeyField } from "@/lib/mongo-errors";
+
+// Two first writes of one organisation's settings race on the unique index; the loser retries
+async function writeSettings(db: ScopedDb, update: Record<string, Record<string, unknown>>) {
+  const write = () => db.Settings.findOneAndUpdate({}, update, { upsert: true });
+  try {
+    await write();
+  } catch (err) {
+    if (duplicateKeyField(err) !== "organisation") throw err;
+    await write();
+  }
+}
 
 const CLOUD_ONLY = { error: "A sign-in provider of its own is set up per organisation in the cloud; here it comes from the environment" };
 
@@ -93,7 +104,7 @@ export const PUT = withAdmin(async (request, { user, db }) => {
     return NextResponse.json({ error: "Could not read the provider's discovery document. Check the issuer address, it must serve /.well-known/openid-configuration." }, { status: 400 });
   }
 
-  await updateSettings(db, { $set: { sso: { issuer, clientId, clientSecret: encryptSecret(secret, db.organisation), clientSecretHint: secret.slice(-4), label } } });
+  await writeSettings(db, { $set: { sso: { issuer, clientId, clientSecret: encryptSecret(secret, db.organisation), clientSecretHint: secret.slice(-4), label } } });
   // What changed, never the secret: the log is read by every admin
   void logInstanceAudit(db, {
     action: "instance_settings_changed",
@@ -108,7 +119,7 @@ export const DELETE = withAdmin(async (_request, { user, db }) => {
   if (user.viaMachineCredential) return NextResponse.json({ error: "Interactive admin session required" }, { status: 403 });
   if (organisationDomain() === null) return NextResponse.json(CLOUD_ONLY, { status: 404 });
   await connectDB();
-  await updateSettings(db, { $unset: { sso: 1 } });
+  await writeSettings(db, { $unset: { sso: 1 } });
   void logInstanceAudit(db, { action: "instance_settings_changed", user: user._id, actorUsername: user.username, detail: "single sign-on: removed" });
   return NextResponse.json(await view(db));
 });

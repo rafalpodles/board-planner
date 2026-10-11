@@ -31,7 +31,6 @@ vi.mock("@/models/settings", () => {
   };
   return {
     Settings: { findOne: () => ({ lean: async () => row }), findOneAndUpdate: (_filter: unknown, update: Parameters<typeof apply>[0]) => apply(update) },
-    updateSettings: (_db: unknown, update: Parameters<typeof apply>[0]) => apply(update),
   };
 });
 
