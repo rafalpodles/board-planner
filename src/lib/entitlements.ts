@@ -7,6 +7,7 @@ export const FEATURE_KEYS = [
   "integrations.jira",
   "audit.export",
   "workers.multiple",
+  "identity.sso",
 ] as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[number];

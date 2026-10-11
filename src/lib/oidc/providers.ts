@@ -1,4 +1,9 @@
 import { githubWebBase } from "@/lib/github-host";
+import { can } from "@/lib/entitlements";
+import { decryptSecret } from "@/lib/encryption";
+import { getOrganisation } from "@/lib/organisation";
+import { organisationDomain } from "@/lib/organisation-host";
+import type { ScopedDb } from "@/lib/db-scope";
 
 export type OidcProviderId = "oidc" | "google" | "github";
 
@@ -16,6 +21,8 @@ export interface OidcProvider {
   issuer: string;
   clientId: string;
   clientSecret: string;
+  /** Set by an organisation's admin, so every request to it goes through the guard against internal addresses (BP-951). */
+  own?: true;
 }
 
 /**
@@ -23,8 +30,8 @@ export interface OidcProvider {
  * Repointing a provider orphans the old issuer's links, so they are no way in and must not count
  * as one. Matches nothing when no provider is configured.
  */
-export function liveIdentityFilter(): Record<string, unknown> {
-  const live = configuredProviders().map((p) => ({ provider: p.id, issuer: { $in: issuerSpellings(p.issuer) } }));
+export function liveIdentityFilter(providers: OidcProvider[] = configuredProviders()): Record<string, unknown> {
+  const live = providers.map((p) => ({ provider: p.id, issuer: { $in: issuerSpellings(p.issuer) } }));
   // An `$or` either way, so spreading it never overwrites a caller's own `_id`
   return { $or: live.length > 0 ? live : [{ _id: null }] };
 }
@@ -122,4 +129,47 @@ export function providerById(id: string): OidcProvider | null {
 
 export function publicProviders(): { id: OidcProviderId; label: string }[] {
   return configuredProviders().map(({ id, label }) => ({ id, label }));
+}
+
+/**
+ * The organisation's own provider, while its plan includes one: the configuration is kept when the plan ends and
+ * comes back with the next one, so nothing is lost to a lapse. Null when none is stored, the plan does not include
+ * it, or the secret is sealed under a key this server no longer has.
+ */
+async function organisationProvider(db: ScopedDb): Promise<OidcProvider | null> {
+  const sso = (await db.Settings.findOne({}, "sso").lean())?.sso;
+  if (!sso) return null;
+  if (!can(await getOrganisation(db.organisation), "identity.sso")) return null;
+  let clientSecret: string;
+  try {
+    clientSecret = decryptSecret(sso.clientSecret, db.organisation);
+  } catch {
+    console.warn(`An organisation's sign-in provider secret cannot be read, so it is not offered (${db.organisation})`);
+    return null;
+  }
+  return { id: "oidc", kind: "oidc", linksByAddress: true, label: sso.label || "Single sign-on", issuer: sso.issuer, clientId: sso.clientId, clientSecret, own: true };
+}
+
+/**
+ * What the host a request arrived on offers. Where one organisation is the whole instance that is the
+ * operator's environment. In the cloud the environment's generic provider is every organisation's at once and so
+ * nobody's: only Google and GitHub are shared, and the generic one is the organisation's own.
+ */
+export async function providersFor(db: ScopedDb): Promise<OidcProvider[]> {
+  if (organisationDomain() === null) return configuredProviders();
+  const own = await organisationProvider(db);
+  const shared = configuredProviders().filter((p) => p.id !== "oidc");
+  return own ? [...shared, own] : shared;
+}
+
+export async function providerFor(db: ScopedDb, id: string): Promise<OidcProvider | null> {
+  return (await providersFor(db)).find((p) => p.id === id) ?? null;
+}
+
+export async function publicProvidersFor(db: ScopedDb): Promise<{ id: OidcProviderId; label: string }[]> {
+  return (await providersFor(db)).map(({ id, label }) => ({ id, label }));
+}
+
+export async function liveIdentityFilterFor(db: ScopedDb): Promise<Record<string, unknown>> {
+  return liveIdentityFilter(await providersFor(db));
 }
