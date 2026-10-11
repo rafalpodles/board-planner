@@ -47,14 +47,17 @@ export function normaliseEmail(value: string): string {
 // network this product is self-hosted on, and demanding a dot locks those deployments out of
 // their own email entirely.
 //
-// The characters that let one person lay claim to another's mailbox are not: `<victim@corp.com>`
-// and `victim@corp.com.` both deliver to the victim while being different strings to the unique
-// index, so both would pass uniqueness and then send that person somebody else's reset link.
+// The characters that let one person lay claim to another's mailbox are not: `<victim@corp.com>`,
+// `victim@corp.com.` and `x:victim@corp.com` (nodemailer reads `x:` as a group name) all deliver
+// to the victim while being different strings to the unique index, so each would pass uniqueness
+// and then send that person somebody else's reset link. Only printable ASCII is accepted, because
+// nodemailer strips control characters such as U+0085 on the way out.
 const MAX_EMAIL_LENGTH = 254;
 
 export function isValidEmail(value: string): boolean {
   if (value.length > MAX_EMAIL_LENGTH) return false;
-  if (/[\s<>,;()[\]\\"]/.test(value)) return false;
+  if (!/^[\x21-\x7e]+$/.test(value)) return false;
+  if (/[<>,;:()[\]\\"]/.test(value)) return false;
 
   const parts = value.split("@");
   if (parts.length !== 2) return false;
