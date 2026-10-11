@@ -93,8 +93,9 @@ test.describe("BP-951: an organisation's own sign-in provider", () => {
 
     // A save that leaves the secret blank keeps the stored one: the new name is offered and sign-in still works
     await page.getByLabel("Button name").fill("Acme SSO");
+    const saved = page.waitForResponse((response) => response.url().endsWith("/api/settings/sso") && response.request().method() === "PUT");
     await page.getByRole("button", { name: "Save changes" }).click();
-    await expect(page.getByText("Sign-in provider saved").last()).toBeVisible();
+    expect((await saved).status()).toBe(200);
     const again = await browser.newContext();
     const second = await again.newPage();
     await script({ sub: `sub-acme-${Date.now()}-b`, email: `boss@${ACME.slug}.example`, email_verified: true });

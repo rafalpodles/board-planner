@@ -55,7 +55,10 @@ export const guardedFetch: client.CustomFetch = async (url, options) => {
   const body = await readBoundedText(response, MAX_PROVIDER_RESPONSE_BYTES);
   // A status that carries no body is refused one by the Response constructor
   const bodiless = [101, 204, 205, 304].includes(response.status);
-  return new Response(bodiless ? null : body, { status: response.status, statusText: response.statusText, headers: { "content-type": response.headers.get("content-type") ?? "application/json" } });
+  const headers = new Headers(response.headers);
+  for (const name of ["content-encoding", "content-length", "transfer-encoding"]) headers.delete(name);
+  if (!headers.has("content-type")) headers.set("content-type", "application/json");
+  return new Response(bodiless ? null : body, { status: response.status, statusText: response.statusText, headers });
 };
 
 function discover(provider: OidcProvider): Promise<client.Configuration> {

@@ -138,8 +138,8 @@ describe("a provider an organisation named (BP-951)", () => {
     }
     discovery.mockClear();
 
-    // The oldest has been let go, the newest is still kept
-    await beginFlow(scopedToDefaultOrganisation(), { provider: { ...OWN, issuer: "https://many-0.example" }, origin: ORIGIN, intent: "signin" });
+    // 200 are kept: the 60 oldest of 260 have been let go, the next one and the newest are still there
+    await beginFlow(scopedToDefaultOrganisation(), { provider: { ...OWN, issuer: "https://many-59.example" }, origin: ORIGIN, intent: "signin" });
     expect(discovery).toHaveBeenCalledTimes(1);
     await beginFlow(scopedToDefaultOrganisation(), { provider: { ...OWN, issuer: "https://many-259.example" }, origin: ORIGIN, intent: "signin" });
     expect(discovery).toHaveBeenCalledTimes(1);

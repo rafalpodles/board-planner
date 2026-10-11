@@ -161,6 +161,19 @@ describe("Settings → Single sign-on (BP-951)", () => {
 
     await waitFor(() => expect(api.del).toHaveBeenCalledWith("/api/settings/sso"));
     await waitFor(() => expect(toast).toHaveBeenCalledWith("Sign-in provider removed", "success"));
+    // The dialog's buttons are not the form's: removing never saves
+    expect(api.put).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when the confirmation is cancelled, and saves nothing either", async () => {
+    api.get.mockResolvedValue(SAVED);
+    render(<SingleSignOn />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Remove" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(api.del).not.toHaveBeenCalled();
+    expect(api.put).not.toHaveBeenCalled();
   });
 
   it("says where the provider is set when the instance is not the cloud", async () => {

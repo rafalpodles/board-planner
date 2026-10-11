@@ -82,6 +82,10 @@ describe("PUT /api/settings/sso (BP-951)", () => {
     expect(JSON.parse(text)).toMatchObject({ set: true, active: true, issuer: FORM.issuer, secretHint: "1234", label: "Acme login", redirectUri: "https://acme.board.example/api/auth/oidc/oidc/callback" });
   });
 
+  it("takes a secret of the least length", async () => {
+    expect((await call("PUT", { ...FORM, clientSecret: "a".repeat(12) })).status).toBe(200);
+  });
+
   it("is a trial's too", async () => {
     plan({ trial: true, expiresAt: new Date(Date.now() + 86_400_000) });
 
@@ -125,6 +129,7 @@ describe("PUT /api/settings/sso (BP-951)", () => {
     ["no issuer", { issuer: "" }],
     ["a client id with a space", { clientId: "acme app" }],
     ["a short secret", { clientSecret: "short" }],
+    ["a secret one short of the least", { clientSecret: "a".repeat(11) }],
     ["a button name with markup", { label: "<b>Acme</b>" }],
     ["a button name that is too long", { label: "x".repeat(41) }],
   ])("refuses %s", async (_name, over) => {
