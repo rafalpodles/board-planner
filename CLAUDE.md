@@ -301,7 +301,11 @@ ORGANISATION_REQUESTS_PER_MINUTE= # Optional — authenticated requests one orga
                           # organisation's minute, so they can stop a runaway credential. Default 6000
                           # with ORGANISATION_DOMAIN set, off without; 0 is off (BP-894)
 ORGANISATION_STORAGE_MB=  # Optional — uploaded files one organisation may keep; past it an upload is
-                          # 413. Default 5120 with ORGANISATION_DOMAIN set, off without; 0 is off
+                          # 413. With ORGANISATION_DOMAIN set the default follows the plan: 1024 on Free,
+                          # 20480 on Pro and its trial (`storageLimitFor`, BP-967); off without it. A value
+                          # set here holds for every plan and offers no upgrade; 0 is off. Over the ceiling
+                          # after a downgrade, nothing is deleted and uploads wait until it is under.
+                          # Settings → Organisation shows an admin the usage (`/api/organisation/storage`)
 LEGAL_TERMS_VERSION=      # Optional, with ORGANISATION_DOMAIN only — the date (YYYY-MM-DD) the cloud's Terms of
                           # Service and Privacy Policy (board-planner.com/legal/terms, /legal/privacy) took effect.
                           # Set, every account made in the cloud — organisation sign-up, an invitation, the
