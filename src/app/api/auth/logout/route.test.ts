@@ -32,6 +32,7 @@ beforeEach(() => {
   delete process.env.COOKIE_ALLOW_INSECURE;
   delete process.env.APP_ORIGIN;
   delete process.env.PUBLIC_ORIGIN;
+  delete process.env.ORGANISATION_DOMAIN;
   revokeSession.mockResolvedValue(true);
 });
 
@@ -138,5 +139,23 @@ describe("POST /api/auth/logout", () => {
 
     expect(revokeSession).toHaveBeenCalledWith("cps_deadbeef");
     expect(setCookies(response)).toHaveLength(2);
+  });
+});
+
+describe("POST /api/auth/logout — where the person goes next (BP-1023)", () => {
+  it("names no hosted sign-in on an instance without organisations on subdomains", async () => {
+    const response = await POST(withSession());
+
+    expect(await response.json()).toEqual({ ok: true, signIn: null });
+  });
+
+  it("names the hosted sign-in page, login.<domain>, when organisations live on subdomains", async () => {
+    process.env.ORGANISATION_DOMAIN = "board-planner.com";
+    process.env.PUBLIC_ORIGIN = "https://login.board-planner.com";
+
+    const response = await POST(withSession());
+
+    expect(await response.json()).toEqual({ ok: true, signIn: "https://login.board-planner.com" });
+    expect(revokeSession).toHaveBeenCalledWith("cps_deadbeef");
   });
 });

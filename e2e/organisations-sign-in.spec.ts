@@ -1,7 +1,8 @@
 import { test, expect } from "@playwright/test";
 import { ORGANISATION_DOMAIN, ORGANISATIONS_PLATFORM_ORIGIN, ORGANISATIONS_PORT, RUN_ORGANISATIONS_SERVER } from "../playwright.config";
+import crypto from "node:crypto";
 import { mailFor } from "./mailbox";
-import { ACME, GLOBEX, ORGANISATIONS_API, asOrganisation, hostOf, originOf, seedTwoOrganisations } from "./organisations";
+import { ACME, GLOBEX, ORGANISATIONS_API, asOrganisation, hostOf, originOf, seedTwoOrganisations, signInOn } from "./organisations";
 import { apiCode, codeSentTo, freshAddress, giveAddress, onPlatform, provideAddressAndCode, withDb } from "./platform-sign-in";
 
 test.skip(!RUN_ORGANISATIONS_SERVER, "needs the ORGANISATION_DOMAIN server — set E2E_ORGANISATIONS_SERVER=1");
@@ -176,6 +177,24 @@ test.describe("BP-919: signing in on the platform host, e-mail first", () => {
     expect(crossSite.status()).toBe(403);
     expect(crossSite.headers()["set-cookie"] ?? "").not.toContain("bp_last_organisation");
     expect((await request.delete(`${ORGANISATIONS_API}/api/sign-in/remembered`, { headers: asOrganisation(ACME) })).status()).toBe(404);
+  });
+
+  test("BP-1023: logging out of an organisation lands on the hosted sign-in's e-mail step, not back in the organisation it was remembered as", async ({ page }) => {
+    const signIn = `http://login.${ORGANISATION_DOMAIN}:${ORGANISATIONS_PORT}`;
+    await signInOn(page.context(), ACME);
+    await page.context().addCookies([
+      { name: "__Host-bp_last_organisation", value: String(ACME.organisation), domain: new URL(signIn).hostname, path: "/", httpOnly: true, secure: true, sameSite: "Lax" },
+    ]);
+    const sessionRows = () => withDb((db) => db.collection("sessions").countDocuments({ tokenHash: crypto.createHash("sha256").update(ACME.sessionToken).digest("hex") }));
+    expect(await sessionRows()).toBe(1);
+
+    await page.goto(`${originOf(ACME)}/projects`);
+    await page.getByRole("button", { name: /Account menu/ }).click();
+    await page.getByRole("button", { name: "Logout" }).click();
+
+    await page.waitForURL(`${signIn}/?switch`);
+    await expect(page.getByLabel("E-mail address")).toBeVisible();
+    expect(await sessionRows()).toBe(0);
   });
 
   test("BP-1009: a remembered organisation that is suspended or gone does not strand the platform host", async ({ page }) => {
