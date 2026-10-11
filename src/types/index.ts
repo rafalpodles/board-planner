@@ -165,7 +165,7 @@ export interface IUser {
   digestRetry?: { day: string; attempts: number };
   collapseEmptyColumns: boolean;
   /** Boards whose "Get this board ready" list this person hid; capped, see MAX_DISMISSED_BOARD_READY */
-  dismissedBoardReady?: Types.ObjectId[];
+  dismissedSetupGuides?: Types.ObjectId[];
   role: UserRole;
   // A worker's identity is a user record so authorship, mentions, avatars and history keep
   // working unchanged — but it is not a person, so it stays out of the lists where people are
@@ -2008,20 +2008,27 @@ export interface ApiHandoverReadiness {
   haltedBy: WorkerHaltSource | null;
 }
 
-export type BoardReadyStepId = "board" | "tasks" | "team" | "repository" | "runs" | "machine";
+export type SetupGuideStepId =
+  | "tasks" | "team" | "columns" | "fields" | "sprint"
+  | "repository" | "channel" | "webhook" | "token"
+  | "pm" | "aiKey"
+  | "runs" | "machine" | "handover"
+  | "sso" | "plan";
 
-export interface ApiBoardReadyStep {
-  id: BoardReadyStepId;
-  group: "setup" | "agents";
+export type SetupGuideGroupId = "board" | "connections" | "ai" | "agents" | "organisation";
+
+export interface ApiSetupGuideStep {
+  id: SetupGuideStepId;
+  group: SetupGuideGroupId;
   done: boolean;
   /** Only an instance admin can take this step: they locked agent runs off for the board */
   locked: boolean;
 }
 
-/** What GET /ready answers: the checklist for this reader, or nothing to show */
-export interface ApiBoardReady {
+/** What GET /setup-guide answers: the guide for this reader on this board, or nothing to show */
+export interface ApiSetupGuide {
   show: boolean;
-  steps: ApiBoardReadyStep[];
+  steps: ApiSetupGuideStep[];
 }
 
 /** One of the reader's own machines, as Settings → Machines lists it */

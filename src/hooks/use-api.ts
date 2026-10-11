@@ -4,6 +4,14 @@ import { useAuth } from "./use-auth";
 import { useCallback, useMemo } from "react";
 import { ORGANISATION_LIMIT_HEADER, ORGANISATION_SUSPENDED_HEADER, type RequestLimitScope } from "@/lib/organisation-limit-header";
 
+/** Fired on window after any write that succeeded, so what is derived from the data can read it again */
+export const API_WRITE_EVENT = "bp:api-write";
+
+function announceWrite(method: string, url: string) {
+  if (method === "GET" || typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(API_WRITE_EVENT, { detail: { url } }));
+}
+
 interface ApiOptions {
   body?: unknown;
   headers?: Record<string, string>;
@@ -60,6 +68,7 @@ export function useApi() {
         });
       }
 
+      announceWrite(method, url);
       return res.json();
     },
     [onUnauthorized, noteApiStatus]

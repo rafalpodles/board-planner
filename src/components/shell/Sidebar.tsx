@@ -13,6 +13,9 @@ import { useFocusTrap } from "@/hooks/use-focus-trap";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { isNavItemActive } from "@/lib/nav-active";
 import { useProjects } from "@/hooks/use-projects";
+import { useSetupGuide } from "@/hooks/use-setup-guide";
+import { SetupGuideCard, SetupGuidePanel } from "./SetupGuide";
+import { projectRefFromPathname } from "@/lib/urls";
 import { useOrganisation } from "@/hooks/use-organisation";
 import { PlanBadge } from "./PlanBadge";
 import { ProjectTree } from "./ProjectTree";
@@ -172,6 +175,7 @@ export function Sidebar({
   const [dragging, setDragging] = useState(false);
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -264,6 +268,11 @@ export function Sidebar({
     returnFocusTo: menuButtonRef,
   });
 
+  const projectRef = projectRefFromPathname(pathname);
+  const { guide, hide: hideGuide } = useSetupGuide(projectRef, pathname, !!user);
+
+  useEffect(() => setGuideOpen(false), [projectRef]);
+
   if (!user) return null;
 
   // The drawer is always full width, so the icon-only rail is a desktop-only state
@@ -345,6 +354,17 @@ export function Sidebar({
         </Link>
       )}
 
+      {guide && projectRef && guideOpen && !compact ? (
+        <SetupGuidePanel
+          guide={guide}
+          projectRef={projectRef}
+          onClose={() => setGuideOpen(false)}
+          onHide={() => {
+            setGuideOpen(false);
+            void hideGuide();
+          }}
+        />
+      ) : (
       <nav className="flex flex-1 flex-col gap-4 overflow-y-auto px-2.5 pb-2.5">
         <div>
           {/* In the drawer this is a page like the two rows under it, because the phone's
@@ -402,6 +422,18 @@ export function Sidebar({
           />
         )}
       </nav>
+      )}
+
+      {guide && !(guideOpen && !compact) && (
+        <SetupGuideCard
+          guide={guide}
+          compact={compact}
+          onOpen={() => {
+            if (compact) chooseMode("expanded");
+            setGuideOpen(true);
+          }}
+        />
+      )}
 
       <PlanBadge compact={compact} />
 

@@ -9,7 +9,6 @@ import { ProjectBoardView } from "@/components/kanban/ProjectBoardView";
 import { useCanonicalUrl } from "@/hooks/use-canonical-url";
 import { projectPath } from "@/lib/urls";
 import { BoardHeader } from "@/components/kanban/BoardHeader";
-import { BoardReady } from "@/components/kanban/BoardReady";
 import { sprintScopeFromParam, sprintScopeToQuery, isSprintScopeShape } from "@/lib/sprint-scope";
 import { APP_NAME } from "@/lib/brand";
 import { useDocumentTitle } from "@/hooks/use-document-title";
@@ -81,7 +80,6 @@ export default function KanbanPage() {
         onRefresh={board.reload}
         onNewTask={() => board.setShowNewTask(true)}
       />
-      <BoardReady projectId={projectId} projectRef={projectId} />
       <ProjectBoardView
         board={board}
         onScopeChange={(next) => router.push(projectPath(projectId) + sprintScopeToQuery(next))}

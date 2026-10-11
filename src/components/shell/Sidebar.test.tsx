@@ -20,6 +20,7 @@ const { api, auth, nav, theme, projectsState, replace } = vi.hoisted(() => ({
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/hooks/use-auth", () => ({ useAuth: () => auth }));
 vi.mock("@/hooks/use-projects", () => ({ useProjects: () => projectsState }));
+vi.mock("@/hooks/use-setup-guide", () => ({ useSetupGuide: () => ({ guide: null, hide: vi.fn() }) }));
 vi.mock("@/components/ThemeProvider", () => ({ useTheme: () => theme }));
 vi.mock("next/navigation", () => ({
   usePathname: () => nav.pathname,

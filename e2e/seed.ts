@@ -2630,6 +2630,13 @@ export async function removeNonOwnerGrants() {
   await mongoose.disconnect();
 }
 
+/** Leaves the seeded board with no task on it at all, as a board nobody has used yet. */
+export async function removeAllTasks() {
+  const db = (await connect()).db!;
+  await db.collection("tasks").deleteMany({ project: PROJECT_ID });
+  await mongoose.disconnect();
+}
+
 /** A machine `owner` enrolled, holding a checkout of `remote`, last seen `seenAgoMs` ago. */
 export async function seedMachine(
   remote: string,

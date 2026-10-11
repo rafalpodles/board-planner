@@ -1,7 +1,7 @@
 "use client";
 
 import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { ProjectBoard } from "@/hooks/use-project-board";
@@ -136,6 +136,17 @@ export function ProjectBoardView({
     }),
     [project?.columns, project?.customFields, sprints]
   );
+
+  // A link to ?new=1 from the setup guide arrives as a soft navigation on this very page, so the
+  // address is watched, not read once on mount
+  const wantsNewTask = useSearchParams()?.get("new") === "1";
+  useEffect(() => {
+    if (!wantsNewTask || readOnly) return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("new");
+    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+    setShowNewTask(true);
+  }, [wantsNewTask, readOnly, setShowNewTask]);
 
   useEffect(() => {
     if (pinViewMode || viewParamHandled.current) return;

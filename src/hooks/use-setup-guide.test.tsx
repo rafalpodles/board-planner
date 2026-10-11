@@ -1,0 +1,125 @@
+// @vitest-environment happy-dom
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { renderHook, act, waitFor, cleanup } from "@testing-library/react";
+import type { ApiSetupGuide } from "@/types";
+
+const api = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn() }));
+vi.mock("@/hooks/use-api", () => ({ useApi: () => api, API_WRITE_EVENT: "bp:api-write" }));
+vi.mock("@/hooks/use-poll-while-visible", () => ({ usePollWhileVisible: vi.fn() }));
+
+const { useSetupGuide } = await import("./use-setup-guide");
+
+const answer = (done: number): ApiSetupGuide => ({
+  show: true,
+  steps: [
+    { id: "tasks", group: "board", done: done > 0, locked: false },
+    { id: "team", group: "board", done: done > 1, locked: false },
+  ],
+});
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  api.get.mockResolvedValue(answer(0));
+  api.put.mockResolvedValue({ ok: true });
+});
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
+
+describe("useSetupGuide", () => {
+  it("reads the guide of the board in the address", async () => {
+    const { result } = renderHook(() => useSetupGuide("ORB", "/projects/ORB", true));
+
+    await waitFor(() => expect(result.current.guide).not.toBeNull());
+    expect(api.get).toHaveBeenCalledWith("/api/projects/ORB/setup-guide");
+  });
+
+  it("reads nothing when there is no board in the address, or the reader is not signed in", () => {
+    renderHook(() => useSetupGuide(undefined, "/projects", true));
+    renderHook(() => useSetupGuide("ORB", "/projects/ORB", false));
+
+    expect(api.get).not.toHaveBeenCalled();
+  });
+
+  it("shows nothing when the server says there is nothing to show", async () => {
+    api.get.mockResolvedValue({ show: false, steps: [] });
+    const { result } = renderHook(() => useSetupGuide("ORB", "/projects/ORB", true));
+
+    await waitFor(() => expect(api.get).toHaveBeenCalled());
+    expect(result.current.guide).toBeNull();
+  });
+
+  it("reads again when the reader moves to another page", async () => {
+    const { rerender } = renderHook(({ path }) => useSetupGuide("ORB", path, true), {
+      initialProps: { path: "/projects/ORB" },
+    });
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(1));
+
+    rerender({ path: "/projects/ORB/settings" });
+
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2));
+  });
+
+  it("reads again just after a write lands, and only once for a burst of them", async () => {
+    renderHook(() => useSetupGuide("ORB", "/projects/ORB", true));
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(1));
+    vi.useFakeTimers();
+
+    for (let i = 0; i < 3; i++) {
+      window.dispatchEvent(new CustomEvent("bp:api-write", { detail: { url: "/api/projects/p/tasks" } }));
+    }
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+
+    expect(api.get).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not read again for its own write", async () => {
+    renderHook(() => useSetupGuide("ORB", "/projects/ORB", true));
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(1));
+    vi.useFakeTimers();
+
+    window.dispatchEvent(new CustomEvent("bp:api-write", { detail: { url: "/api/projects/ORB/setup-guide" } }));
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+
+    expect(api.get).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides at once, and an answer that was already on its way does not bring it back", async () => {
+    let late: (value: ApiSetupGuide) => void = () => undefined;
+    const { result } = renderHook(() => useSetupGuide("ORB", "/projects/ORB", true));
+    await waitFor(() => expect(result.current.guide).not.toBeNull());
+    api.get.mockReturnValueOnce(new Promise<ApiSetupGuide>((resolve) => (late = resolve)));
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+
+    await act(async () => {
+      await result.current.hide();
+    });
+    expect(result.current.guide).toBeNull();
+    expect(api.put).toHaveBeenCalledWith("/api/projects/ORB/setup-guide", { body: {} });
+
+    await act(async () => {
+      late(answer(1));
+    });
+    expect(result.current.guide).toBeNull();
+  });
+
+  it("reads again when hiding is refused, so the screen does not claim it was saved", async () => {
+    api.put.mockRejectedValue(new Error("down"));
+    const { result } = renderHook(() => useSetupGuide("ORB", "/projects/ORB", true));
+    await waitFor(() => expect(result.current.guide).not.toBeNull());
+    api.get.mockClear();
+
+    await act(async () => {
+      await result.current.hide();
+    });
+
+    expect(api.get).toHaveBeenCalledTimes(1);
+  });
+});

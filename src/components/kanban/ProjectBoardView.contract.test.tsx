@@ -33,9 +33,11 @@ vi.mock("@/hooks/use-api", () => ({
 vi.mock("@/hooks/use-auth", () => ({
   useAuth: () => ({ user: { username: "owner", collapseEmptyColumns: false }, isAdmin: false }),
 }));
+const search = vi.hoisted(() => ({ value: "" }));
 vi.mock("next/navigation", () => ({
   useParams: () => ({ projectId: "p1" }),
   useRouter: () => ({ push: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(search.value),
 }));
 vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast: vi.fn() }) }));
 
