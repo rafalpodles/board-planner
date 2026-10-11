@@ -193,3 +193,55 @@ describe("Settings → Single sign-on (BP-951)", () => {
     expect(await field("Issuer")).toBeTruthy();
   });
 });
+
+describe("Require single sign-on (BP-951)", () => {
+  it("is not offered before a provider is set up and active", async () => {
+    render(<SingleSignOn />);
+    await field("Issuer");
+
+    expect(screen.queryByTestId("sso-enforce-warning")).toBeNull();
+  });
+
+  it("warns that a wrong setup locks everybody out, and requires it only after a confirmation", async () => {
+    api.get.mockResolvedValue(SAVED);
+    api.put.mockResolvedValue({ ...SAVED, enforced: true });
+    render(<SingleSignOn />);
+
+    expect((await screen.findByTestId("sso-enforce-warning")).textContent).toContain("nobody can sign in");
+    fireEvent.click(screen.getByRole("button", { name: "Require single sign-on" }));
+    expect(api.put).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("button", { name: "Require it" }));
+
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith("/api/settings/sso/enforce", { enforced: true }));
+    expect(await screen.findByText("Required")).toBeTruthy();
+  });
+
+  it("does not require it when the confirmation is cancelled", async () => {
+    api.get.mockResolvedValue(SAVED);
+    render(<SingleSignOn />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Require single sign-on" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+
+    expect(api.put).not.toHaveBeenCalled();
+  });
+
+  it("stops requiring it with one click, since that is the way back", async () => {
+    api.get.mockResolvedValue({ ...SAVED, enforced: true });
+    api.put.mockResolvedValue({ ...SAVED, enforced: false });
+    render(<SingleSignOn />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Stop requiring single sign-on" }));
+
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith("/api/settings/sso/enforce", { enforced: false }));
+    expect(await screen.findByText("Not required")).toBeTruthy();
+  });
+
+  it("is not offered where the plan does not include the provider", async () => {
+    api.get.mockResolvedValue({ ...SAVED, available: false, active: false, enforced: false });
+    render(<SingleSignOn />);
+    await screen.findByTestId("sso-upgrade");
+
+    expect(screen.queryByTestId("sso-enforce-warning")).toBeNull();
+  });
+});

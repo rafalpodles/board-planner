@@ -2,7 +2,8 @@ import { test, expect, type Page } from "@playwright/test";
 import mongoose from "mongoose";
 import { OIDC_STUB_URL, ORGANISATIONS_RELAY_ORIGIN, RUN_ORGANISATIONS_SERVER } from "../playwright.config";
 import { E2E_MONGODB_URI } from "./seed";
-import { ACME, GLOBEX, SSO_CLIENT, SSO_LABEL, makePro, originOf, seedTwoOrganisations, signInOn, storeSso, type OrganisationFixture } from "./organisations";
+import { ACME, GLOBEX, ORGANISATIONS_API, SSO_CLIENT, SSO_LABEL, USERNAME, asOrganisation, makePro, originOf, seedTwoOrganisations, signInOn, storeSso, type OrganisationFixture } from "./organisations";
+import { freshAddress, giveAddress, provideAddressAndCode, apiCode } from "./platform-sign-in";
 
 test.skip(!RUN_ORGANISATIONS_SERVER, "needs the ORGANISATION_DOMAIN server — set E2E_ORGANISATIONS_SERVER=1");
 
@@ -168,5 +169,98 @@ test.describe("BP-951: an organisation's own sign-in provider", () => {
     const silent = await putFrom(page, { issuer: "https://127.0.0.1:9", clientId: SSO_CLIENT.clientId, clientSecret: SSO_CLIENT.clientSecret });
     expect(silent.status).toBe(400);
     expect(await withDb((db) => db.collection("settings").findOne({ organisation: ACME.organisation, sso: { $exists: true } }))).toBeNull();
+  });
+});
+
+test.describe("BP-951: requiring single sign-on", () => {
+  const passwordLogin = (request: import("@playwright/test").APIRequestContext, who: OrganisationFixture) =>
+    request.post(`${ORGANISATIONS_API}/api/auth/login`, { headers: { ...asOrganisation(who), origin: originOf(who) }, data: { username: USERNAME, password: who.password } });
+
+  test("an administrator turns it on after the warning, and the login page offers the provider alone", async ({ page, browser, request }) => {
+    await makePro(request, ACME);
+    await storeSso(ACME);
+    await openSettings(page, ACME);
+
+    await expect(page.getByTestId("sso-enforce-warning")).toContainText("nobody can sign in");
+    await page.getByRole("button", { name: "Require single sign-on" }).click();
+    await page.screenshot({ path: "e2e/.artifacts/bp951-enforce-confirm.png" });
+    await page.getByRole("dialog").getByRole("button", { name: "Require it" }).click();
+    await expect(page.getByText("Single sign-on is now required")).toBeVisible();
+    await expect(page.getByText("Required", { exact: true })).toBeVisible();
+    await page.screenshot({ path: "e2e/.artifacts/bp951-enforce-on.png" });
+    expect((await withDb((db) => db.collection("settings").findOne({ organisation: ACME.organisation })))?.sso.enforced).toBe(true);
+
+    const visitorContext = await browser.newContext();
+    const visitor = await visitorContext.newPage();
+    await openLogin(visitor, ACME);
+    await expect(visitor.getByRole("button", { name: `Continue with ${SSO_LABEL}` })).toBeVisible();
+    await expect(visitor.getByRole("button", { name: /^Continue with (Google|GitHub)/ })).toHaveCount(0);
+    await expect(visitor.getByLabel("Password")).toHaveCount(0);
+    await visitor.screenshot({ path: "e2e/.artifacts/bp951-enforced-login.png" });
+
+    await confirmAddress(ACME);
+    await script({ sub: `sub-enforced-${Date.now()}`, email: `boss@${ACME.slug}.example`, email_verified: true });
+    await visitor.getByRole("button", { name: `Continue with ${SSO_LABEL}` }).click();
+    await expect(visitor).toHaveURL(`${originOf(ACME)}/projects`);
+    await visitorContext.close();
+  });
+
+  test("every other way in is refused for that organisation and stays open for the others", async ({ request }) => {
+    await makePro(request, ACME);
+    await makePro(request, GLOBEX);
+    await storeSso(ACME, SSO_LABEL, true);
+    await storeSso(GLOBEX);
+
+    const refused = await passwordLogin(request, ACME);
+    expect(refused.status()).toBe(403);
+    expect(await refused.json()).toMatchObject({ ssoRequired: true });
+    expect((await request.post(`${ORGANISATIONS_API}/api/auth/forgot`, { headers: { ...asOrganisation(ACME), origin: originOf(ACME) }, data: { identifier: USERNAME } })).status()).toBe(403);
+    expect(await (await request.get(`${ORGANISATIONS_API}/api/auth/oidc/providers`, { headers: asOrganisation(ACME) })).json()).toEqual([{ id: "oidc", label: SSO_LABEL }]);
+    expect((await request.get(`${ORGANISATIONS_API}/api/auth/instance`, { headers: asOrganisation(ACME) })).status()).toBe(200);
+    expect((await (await request.get(`${ORGANISATIONS_API}/api/auth/instance`, { headers: asOrganisation(ACME) })).json()).passwordSignIn).toBe(false);
+
+    const github = await request.post(`${ORGANISATIONS_API}/api/auth/oidc/github/start`, { headers: { ...asOrganisation(ACME), origin: originOf(ACME) }, data: {} });
+    expect(github.status()).toBe(404);
+
+    expect((await passwordLogin(request, GLOBEX)).status()).toBe(200);
+    expect((await (await request.get(`${ORGANISATIONS_API}/api/auth/oidc/providers`, { headers: asOrganisation(GLOBEX) })).json()).map((p: { id: string }) => p.id)).toContain("github");
+  });
+
+  test("on the platform host the organisation is a link to its own page, and a password is refused", async ({ page, request }) => {
+    await makePro(request, ACME);
+    await storeSso(ACME, SSO_LABEL, true);
+    const email = freshAddress("sso");
+    await giveAddress(ACME, email);
+
+    const signedIn = await apiCode(request, email);
+    const verified = await request.post(`${ORGANISATIONS_API}/api/sign-in/password`, { headers: signedIn, data: { organisation: String(ACME.organisation), password: ACME.password } });
+    expect(verified.status()).toBe(403);
+    expect(await verified.json()).toMatchObject({ ssoRequired: true });
+
+    await provideAddressAndCode(page, email);
+    await expect(page.getByText("signs in through its own page")).toBeVisible();
+    await expect(page.getByLabel("Password")).toHaveCount(0);
+    await expect(page.getByRole("link", { name: /^Continue on / })).toHaveAttribute("href", `${originOf(ACME)}/login`);
+    await page.screenshot({ path: "e2e/.artifacts/bp951-enforced-platform.png" });
+  });
+
+  test("it is off where the plan no longer offers the provider, and back with the plan", async ({ request }) => {
+    await storeSso(ACME, SSO_LABEL, true);
+
+    expect((await passwordLogin(request, ACME)).status()).toBe(200);
+
+    await makePro(request, ACME);
+    expect((await passwordLogin(request, ACME)).status()).toBe(403);
+  });
+
+  test("stopping it opens the other ways in again", async ({ page, request }) => {
+    await makePro(request, ACME);
+    await storeSso(ACME, SSO_LABEL, true);
+    await openSettings(page, ACME);
+
+    await page.getByRole("button", { name: "Stop requiring single sign-on" }).click();
+    await expect(page.getByText("Single sign-on is no longer required")).toBeVisible();
+
+    expect((await passwordLogin(request, ACME)).status()).toBe(200);
   });
 });

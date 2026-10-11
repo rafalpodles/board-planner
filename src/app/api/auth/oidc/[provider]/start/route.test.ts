@@ -27,6 +27,7 @@ vi.mock("@/lib/session", () => ({
 }));
 vi.mock("@/lib/oidc/providers", () => ({
   providerFor: async (_db: unknown, id: string) => (id === "oidc" ? { id: "oidc", label: "Acme" } : null),
+  ssoEnforced: async () => false,
 }));
 vi.mock("@/lib/oidc/flow", () => ({ beginFlow, FLOW_COOKIE: "bp_oidc", FLOW_TTL_MS: 600_000 }));
 vi.mock("@/lib/invitations", () => ({ findInvitationByToken }));
