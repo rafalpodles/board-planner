@@ -1,3 +1,4 @@
+import { readAuthenticatedJsonBody } from "@/lib/request-body";
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectOwner } from "@/lib/middleware";
@@ -8,7 +9,9 @@ import { serverNamed } from "@/lib/pm/oauth-writes";
 export const POST = withProjectOwner(async (request, { params, user, db }) => {
   await connectDB();
   const { projectId } = await params;
-  const { name } = await request.json();
+  const read = await readAuthenticatedJsonBody(request);
+  if (!read.ok) return read.response;
+  const { name } = read.value;
 
   // Keep the client registration and endpoints; drop only the tokens
   const before =

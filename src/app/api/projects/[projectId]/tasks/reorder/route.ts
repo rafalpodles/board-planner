@@ -1,3 +1,4 @@
+import { readAuthenticatedJsonBody } from "@/lib/request-body";
 import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
@@ -17,7 +18,9 @@ export const PUT = withProjectAccess(async (request, { params, db }) => {
   const { projectId } = await params;
   await connectDB();
 
-  const body = await request.json();
+  const read = await readAuthenticatedJsonBody(request);
+  if (!read.ok) return read.response;
+  const body = read.value;
   const ids: unknown = body?.order;
 
   if (!Array.isArray(ids) || ids.some((id) => typeof id !== "string")) {

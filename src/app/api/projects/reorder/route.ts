@@ -1,3 +1,4 @@
+import { readAuthenticatedJsonBody } from "@/lib/request-body";
 import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
@@ -10,7 +11,9 @@ const MAX_IDS = 1000;
 export const PUT = withAdmin(async (request, { db }) => {
   await connectDB();
 
-  const body = await request.json();
+  const read = await readAuthenticatedJsonBody(request);
+  if (!read.ok) return read.response;
+  const body = read.value;
   const ids: unknown = body?.order;
 
   if (!Array.isArray(ids) || ids.some((id) => typeof id !== "string")) {

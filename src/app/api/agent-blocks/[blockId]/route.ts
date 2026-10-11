@@ -1,3 +1,4 @@
+import { readAuthenticatedJsonBody } from "@/lib/request-body";
 import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
@@ -127,7 +128,9 @@ export const PUT = withAuth(async (request, { params, user, db }) => {
     );
   }
 
-  const body = await request.json();
+  const read = await readAuthenticatedJsonBody(request);
+  if (!read.ok) return read.response;
+  const body = read.value;
   const refusal = fieldRefusal(block, body);
   if (refusal) return NextResponse.json({ error: refusal }, { status: 400 });
 

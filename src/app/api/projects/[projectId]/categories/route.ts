@@ -1,3 +1,4 @@
+import { readAuthenticatedJsonBody } from "@/lib/request-body";
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 // A category name lands in the PM's SYSTEM prompt, and any member can write one (BP-321)
@@ -13,7 +14,9 @@ export const POST = withProjectAccess(async (request, { params, user, db }) => {
   const { projectId } = await params;
   await connectDB();
 
-  const { name, color } = await request.json();
+  const read = await readAuthenticatedJsonBody(request);
+  if (!read.ok) return read.response;
+  const { name, color } = read.value;
   if (
     !name ||
     typeof name !== "string" ||
@@ -73,7 +76,9 @@ export const PATCH = withProjectAccess(async (request, { params, user, db }) => 
   const { projectId } = await params;
   await connectDB();
 
-  const { name, newName, color } = await request.json();
+  const read = await readAuthenticatedJsonBody(request);
+  if (!read.ok) return read.response;
+  const { name, newName, color } = read.value;
   if (!name || typeof name !== "string") {
     return NextResponse.json({ error: "name is required" }, { status: 400 });
   }
@@ -149,7 +154,9 @@ export const DELETE = withProjectOwner(async (request, { params, user, db }) => 
   const { projectId } = await params;
   await connectDB();
 
-  const { name } = await request.json();
+  const read = await readAuthenticatedJsonBody(request);
+  if (!read.ok) return read.response;
+  const { name } = read.value;
   if (!name || typeof name !== "string") {
     return NextResponse.json({ error: "name is required" }, { status: 400 });
   }

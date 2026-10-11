@@ -1,3 +1,4 @@
+import { readAuthenticatedJsonBody } from "@/lib/request-body";
 import { NextResponse } from "next/server";
 import { COMMENT_BODY_MAX_LENGTH, COMMENT_BODY_RULE } from "@/lib/identifiers";
 import { connectDB } from "@/lib/db";
@@ -22,7 +23,9 @@ export const PUT = withProjectAccess(async (request, { params, user, db }) => {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const { body } = await request.json();
+  const read = await readAuthenticatedJsonBody(request);
+  if (!read.ok) return read.response;
+  const { body } = read.value;
   if (!body || typeof body !== "string" || !body.trim()) {
     return NextResponse.json(
       { error: "Comment body is required" },
@@ -63,7 +66,9 @@ export const PATCH = withProjectAccess(async (request, { params, user, db }) => 
     return NextResponse.json({ error: "Comment not found" }, { status: 404 });
   }
 
-  const { emoji } = await request.json();
+  const read = await readAuthenticatedJsonBody(request);
+  if (!read.ok) return read.response;
+  const { emoji } = read.value;
   if (!emoji || !ALLOWED_EMOJIS.includes(emoji)) {
     return NextResponse.json({ error: "Invalid emoji" }, { status: 400 });
   }

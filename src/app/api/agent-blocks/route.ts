@@ -1,3 +1,4 @@
+import { readAuthenticatedJsonBody } from "@/lib/request-body";
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withAdmin, withAuth } from "@/lib/middleware";
@@ -23,7 +24,9 @@ export const GET = withAuth(async (_request, { db }) => {
 // member reaching the machine. BP-345.
 export const POST = withAdmin(async (request, { user, db }) => {
   await connectDB();
-  const body = await request.json();
+  const read = await readAuthenticatedJsonBody(request);
+  if (!read.ok) return read.response;
+  const body = read.value;
 
   const kind = BLOCK_KINDS.find((k) => k === body.kind);
   if (!kind) return NextResponse.json({ error: "kind must be step or gate" }, { status: 400 });
