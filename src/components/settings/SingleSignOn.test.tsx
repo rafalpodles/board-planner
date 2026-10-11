@@ -45,7 +45,7 @@ describe("Settings → Single sign-on (BP-951)", () => {
     type(await field("Client secret"), "s3cret-value-1234");
     fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
 
-    await waitFor(() => expect(api.put).toHaveBeenCalledWith("/api/settings/sso", { issuer: "https://login.acme.example", clientId: "acme-app", clientSecret: "s3cret-value-1234", label: "Acme login" }));
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith("/api/settings/sso", { issuer: "https://login.acme.example", clientId: "acme-app", clientSecret: "s3cret-value-1234", label: "Acme login", adminGroup: "", groupsClaim: "" }));
     await waitFor(() => expect(toast).toHaveBeenCalledWith("Sign-in provider saved", "success"));
     expect(await screen.findByText("Active")).toBeTruthy();
     expect(((await field("Client secret")) as HTMLInputElement).value).toBe("");
@@ -84,7 +84,7 @@ describe("Settings → Single sign-on (BP-951)", () => {
     type(await field("Button name"), "Acme SSO");
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
-    await waitFor(() => expect(api.put).toHaveBeenCalledWith("/api/settings/sso", { issuer: SAVED.issuer, clientId: SAVED.clientId, clientSecret: "", label: "Acme SSO" }));
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith("/api/settings/sso", { issuer: SAVED.issuer, clientId: SAVED.clientId, clientSecret: "", label: "Acme SSO", adminGroup: "", groupsClaim: "" }));
   });
 
   it("asks for the secret again when the stored one cannot be read, even for the same issuer", async () => {
@@ -242,5 +242,29 @@ describe("Require single sign-on (BP-951)", () => {
     await screen.findByTestId("sso-upgrade");
 
     expect(screen.queryByTestId("sso-enforce-warning")).toBeNull();
+  });
+});
+
+describe("Admin group (BP-951)", () => {
+  it("says what the group does once one is typed, and sends it with the claim", async () => {
+    api.get.mockResolvedValue(SAVED);
+    api.put.mockResolvedValue({ ...SAVED, adminGroup: "acme-admins", groupsClaim: "roles" });
+    render(<SingleSignOn />);
+
+    expect(screen.queryByTestId("sso-admin-group-note")).toBeNull();
+    type(await field("Admin group (optional)"), "acme-admins");
+    type(await field("Groups claim (optional)"), "roles");
+    expect(screen.getByTestId("sso-admin-group-note").textContent).toContain("everybody else a member");
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith("/api/settings/sso", expect.objectContaining({ adminGroup: "acme-admins", groupsClaim: "roles" })));
+  });
+
+  it("shows the stored group", async () => {
+    api.get.mockResolvedValue({ ...SAVED, adminGroup: "acme-admins", groupsClaim: "roles" });
+    render(<SingleSignOn />);
+
+    expect(((await field("Admin group (optional)")) as HTMLInputElement).value).toBe("acme-admins");
+    expect(((await field("Groups claim (optional)")) as HTMLInputElement).value).toBe("roles");
   });
 });

@@ -33,7 +33,12 @@ vi.mock("@/models/settings", () => {
       if (rest.length === 0) row = { ...(row ?? {}), [head]: value };
       else row = { ...(row ?? {}), [head]: { ...(((row ?? {})[head] as Record<string, unknown>) ?? {}), [rest.join(".")]: value } };
     }
-    for (const field of Object.keys(update.$unset ?? {})) if (row) delete row[field];
+    for (const path of Object.keys(update.$unset ?? {})) {
+      const [head, ...rest] = path.split(".");
+      if (!row) continue;
+      if (rest.length === 0) delete row[head];
+      else delete (row[head] as Record<string, unknown>)?.[rest.join(".")];
+    }
     return row;
   };
   return {
@@ -169,6 +174,31 @@ describe("PUT /api/settings/sso (BP-951)", () => {
     expect(decryptSecret(sealed(), scopedToDefaultOrganisation().organisation)).toBe(FORM.clientSecret);
     expect(row?.sso).toMatchObject({ label: "Acme SSO" });
     expect(sealed()).not.toBe(before);
+  });
+
+  it("stores the admin group and the groups claim, says them in the audit log, and clears them when the form leaves them blank", async () => {
+    const res = await call("PUT", { ...FORM, adminGroup: "acme-admins", groupsClaim: "https://acme.example/groups" });
+
+    expect(res.status).toBe(200);
+    expect(row?.sso).toMatchObject({ adminGroup: "acme-admins", groupsClaim: "https://acme.example/groups" });
+    expect(await res.json()).toMatchObject({ adminGroup: "acme-admins", groupsClaim: "https://acme.example/groups" });
+    expect(logInstanceAudit).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ detail: expect.stringContaining("admin group acme-admins") }));
+
+    await call("PUT", { ...FORM, clientSecret: "", adminGroup: "", groupsClaim: "" });
+    expect(row?.sso).not.toHaveProperty("adminGroup");
+    expect(row?.sso).not.toHaveProperty("groupsClaim");
+  });
+
+  it.each([
+    ["an admin group that is too long", { adminGroup: "g".repeat(201) }],
+    ["a groups claim with a space", { groupsClaim: "my groups" }],
+    ["a groups claim that is too long", { groupsClaim: "g".repeat(101) }],
+    ["an admin group that is not text", { adminGroup: 5 }],
+  ])("refuses %s", async (_name, over) => {
+    const res = await call("PUT", { ...FORM, ...over });
+
+    expect(res.status).toBe(400);
+    expect(row).toBeNull();
   });
 
   it("saving the form does not end a requirement of single sign-on", async () => {

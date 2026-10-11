@@ -11,7 +11,7 @@ export interface ISettings {
   openrouterKey?: string;
   openrouterKeyHint?: string;
   // The organisation's own OpenID Connect provider (BP-951); the secret is sealed under the organisation's key
-  sso?: { issuer: string; clientId: string; clientSecret: string; clientSecretHint: string; label: string; enforced?: boolean };
+  sso?: { issuer: string; clientId: string; clientSecret: string; clientSecretHint: string; label: string; enforced?: boolean; adminGroup?: string; groupsClaim?: string };
   // The trial end the admins were last told single sign-on stops at, so a trial is told once (BP-951)
   ssoTrialNoticeFor?: Date | null;
 }
@@ -36,6 +36,8 @@ const settingsSchema = new Schema<ISettings>({
         clientSecretHint: { type: String, default: "" },
         label: { type: String, default: "Single sign-on", maxlength: 40 },
         enforced: { type: Boolean, default: false },
+        adminGroup: { type: String, maxlength: 200 },
+        groupsClaim: { type: String, maxlength: 100 },
       },
       { _id: false }
     ),

@@ -238,7 +238,7 @@ function idTokenPerson(
     emailVerified,
     verifiedEmails: emailVerified ? [email] : [],
     name: typeof claims.name === "string" ? claims.name : "",
-    groups: provider.id === "oidc" ? groupsIn(claims) : [],
+    groups: provider.id === "oidc" ? groupsIn(claims, provider) : [],
   };
 }
 

@@ -23,6 +23,9 @@ export interface OidcProvider {
   clientSecret: string;
   /** Set by an organisation's admin, so every request to it goes through the guard against internal addresses (BP-951). */
   own?: true;
+  /** An organisation's own provider: the group that makes its members administrators at sign-in, and the ID token claim that names groups. */
+  adminGroup?: string;
+  groupsClaim?: string;
 }
 
 /**
@@ -152,7 +155,7 @@ async function organisationSso(db: ScopedDb): Promise<{ provider: OidcProvider; 
     }
     return null;
   }
-  const provider: OidcProvider = { id: "oidc", kind: "oidc", linksByAddress: true, label: sso.label || "Single sign-on", issuer: sso.issuer, clientId: sso.clientId, clientSecret, own: true };
+  const provider: OidcProvider = { id: "oidc", kind: "oidc", linksByAddress: true, label: sso.label || "Single sign-on", issuer: sso.issuer, clientId: sso.clientId, clientSecret, own: true, adminGroup: sso.adminGroup || undefined, groupsClaim: sso.groupsClaim || undefined };
   return { provider, enforced: sso.enforced === true };
 }
 

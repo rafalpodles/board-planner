@@ -7,8 +7,10 @@ const warnIfAdminsLockedOut = vi.fn();
 vi.mock("@/models/user", () => ({ User: { updateOne, countDocuments } }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/lib/password-sign-in", () => ({ warnIfAdminsLockedOut }));
+const providerFor = vi.fn();
+vi.mock("@/lib/oidc/providers", () => ({ providerFor }));
 
-const { applyAdminGroup } = await import("./admin-group");
+const { applyAdminGroup, groupsIn } = await import("./admin-group");
 const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
 
@@ -24,6 +26,7 @@ beforeEach(() => {
 
 afterEach(() => {
   delete process.env.OIDC_ADMIN_GROUP;
+  delete process.env.ORGANISATION_DOMAIN;
 });
 
 describe("the admin group", () => {
@@ -144,5 +147,77 @@ describe("the admin group", () => {
     await applyAdminGroup(scopedToDefaultOrganisation(), account("member", { deactivatedAt: new Date() }), "oidc", ["planner-admins"]);
 
     expect(updateOne).not.toHaveBeenCalled();
+  });
+});
+
+describe("an organisation's own admin group in the cloud (BP-951)", () => {
+  beforeEach(() => {
+    process.env.ORGANISATION_DOMAIN = "board.example";
+    delete process.env.OIDC_ADMIN_GROUP;
+    providerFor.mockResolvedValue({ id: "oidc", own: true, adminGroup: "acme-admins" });
+  });
+
+  it("makes a member in the group an admin, and an admin outside it a member", async () => {
+    const member = account("member");
+    await applyAdminGroup(scopedToDefaultOrganisation(), member, "oidc", ["acme-admins"]);
+    expect(member.role).toBe("admin");
+
+    const admin = account("admin");
+    await applyAdminGroup(scopedToDefaultOrganisation(), admin, "oidc", ["staff"]);
+    expect(admin.role).toBe("member");
+  });
+
+  it("never demotes the last administrator", async () => {
+    countDocuments.mockResolvedValue(1);
+    const admin = account("admin");
+
+    await applyAdminGroup(scopedToDefaultOrganisation(), admin, "oidc", []);
+
+    expect(admin.role).toBe("admin");
+    expect(updateOne).not.toHaveBeenCalled();
+  });
+
+  it("changes nothing when the organisation set no group, or its provider is no longer offered", async () => {
+    providerFor.mockResolvedValue({ id: "oidc", own: true });
+    await applyAdminGroup(scopedToDefaultOrganisation(), account("admin"), "oidc", ["staff"]);
+    providerFor.mockResolvedValue(null);
+    await applyAdminGroup(scopedToDefaultOrganisation(), account("admin"), "oidc", ["staff"]);
+
+    expect(updateOne).not.toHaveBeenCalled();
+  });
+
+  it("never reads the environment's group, which is nobody's in particular here", async () => {
+    process.env.OIDC_ADMIN_GROUP = "planner-admins";
+    providerFor.mockResolvedValue({ id: "oidc", own: true });
+    const member = account("member");
+
+    await applyAdminGroup(scopedToDefaultOrganisation(), member, "oidc", ["planner-admins"]);
+
+    expect(member.role).toBe("member");
+  });
+
+  it("applies to no other provider", async () => {
+    const member = account("member");
+
+    await applyAdminGroup(scopedToDefaultOrganisation(), member, "google", ["acme-admins"]);
+
+    expect(member.role).toBe("member");
+  });
+});
+
+describe("the groups an ID token names", () => {
+  it("reads the organisation's own claim, and the environment's for the environment's provider", () => {
+    process.env.OIDC_GROUPS_CLAIM = "env-groups";
+    const claims = { groups: ["a"], roles: ["b", "c"], "env-groups": ["d"] };
+
+    expect(groupsIn(claims, { own: true, groupsClaim: "roles" })).toEqual(["b", "c"]);
+    expect(groupsIn(claims, { own: true })).toEqual(["a"]);
+    expect(groupsIn(claims)).toEqual(["d"]);
+    delete process.env.OIDC_GROUPS_CLAIM;
+  });
+
+  it("takes a single string as one group and a missing claim as none", () => {
+    expect(groupsIn({ groups: "solo" }, { own: true })).toEqual(["solo"]);
+    expect(groupsIn({}, { own: true })).toEqual([]);
   });
 });
