@@ -23,7 +23,7 @@ const db = {
   Settings: { findOne: () => ({ lean: async () => saved }) },
 } as unknown as ScopedDb;
 
-const CATALOGUE = ["openai/gpt-4o-mini", "openai/gpt-6-luna", "openai/gpt-oss-120b", "anthropic/claude-haiku-5.5"].map((id) => ({ id, name: id }));
+const CATALOGUE = ["openai/gpt-4o-mini", "openai/gpt-6-luna", "openai/gpt-oss-120b", "moonshotai/kimi-k2.6", "anthropic/claude-haiku-5.5", "google/gemini-2.5-flash", "mistralai/mistral-large"].map((id) => ({ id, name: id }));
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -43,11 +43,15 @@ afterEach(() => {
 // BP-1024
 describe("a model that is saved", () => {
   it("is refused on a key that runs only the allowed providers' models, with the refusal the call would give", async () => {
-    expect(await refuseModel(db, "anthropic/claude-haiku-5.5")).toBe(
-      "The model anthropic/claude-haiku-5.5 is not available on Board Planner's AI key. Choose one of: OpenAI's own models (openai/…, not gpt-oss), or add your organisation's own OpenRouter key in Settings → AI key."
+    expect(await refuseModel(db, "moonshotai/kimi-k2.6")).toBe(
+      "The model moonshotai/kimi-k2.6 is not available on Board Planner's AI key. Choose one of: OpenAI's own models (openai/…, not gpt-oss), Anthropic's own models (anthropic/…), Google's models on Vertex AI (google/…, not gemma), Mistral's own models (mistralai/…), or add your organisation's own OpenRouter key in Settings → AI key."
     );
     expect(await refuseModel(db, "openai/gpt-oss-120b")).toMatch(/is not available on Board Planner's AI key/);
     expect(await refuseModel(db, "openai/gpt-4o:online")).toMatch(/is not available on Board Planner's AI key/);
+  });
+
+  it.each(["anthropic/claude-haiku-5.5", "google/gemini-2.5-flash", "mistralai/mistral-large"])("is accepted there when it is %s, a provider the DPA names", async (model) => {
+    expect(await refuseModel(db, model)).toBeNull();
   });
 
   it("is accepted there when it is an allowed provider's, a bare OpenAI name included", async () => {
@@ -58,22 +62,22 @@ describe("a model that is saved", () => {
   it("is accepted on the organisation's own key whatever the provider, when OpenRouter lists it", async () => {
     modelsRestricted.mockResolvedValue(false);
 
-    expect(await refuseModel(db, "anthropic/claude-haiku-5.5")).toBeNull();
+    expect(await refuseModel(db, "moonshotai/kimi-k2.6")).toBeNull();
     expect(await refuseModel(db, "openai/gpt-oss-120b")).toBeNull();
   });
 
   it("is refused when OpenRouter lists no such model, on either key, with a variant suffix not part of the name", async () => {
     expect(await refuseModel(db, "openai/gpt-9-typo")).toBe("OpenRouter has no model openai/gpt-9-typo. Check the name against openrouter.ai/models.");
     modelsRestricted.mockResolvedValue(false);
-    expect(await refuseModel(db, "anthropic/claude-haiku-5")).toMatch(/OpenRouter has no model anthropic\/claude-haiku-5\./);
-    expect(await refuseModel(db, "anthropic/claude-haiku-5.5:online")).toBeNull();
+    expect(await refuseModel(db, "moonshotai/kimi-k2")).toMatch(/OpenRouter has no model moonshotai\/kimi-k2\./);
+    expect(await refuseModel(db, "moonshotai/kimi-k2.6:online")).toBeNull();
   });
 
   it("is judged by the allowed providers alone when OpenRouter's list cannot be read: unknown is not absent", async () => {
     listCatalogue.mockResolvedValue(null);
 
     expect(await refuseModel(db, "openai/gpt-9-typo")).toBeNull();
-    expect(await refuseModel(db, "anthropic/claude-haiku-5.5")).toMatch(/is not available on Board Planner's AI key/);
+    expect(await refuseModel(db, "moonshotai/kimi-k2.6")).toMatch(/is not available on Board Planner's AI key/);
   });
 
   it("is no choice at all when empty: a project that names none follows the default, and nothing is asked", async () => {
@@ -90,14 +94,14 @@ describe("the models only the organisation's own key runs", () => {
   });
 
   it("are the default's and every project's that the platform's key would refuse, once each, when removing the key hands the calls to ours", async () => {
-    saved = { aiModel: "anthropic/claude-haiku-5.5" };
-    projects = [{ pm: { model: "anthropic/claude-haiku-5.5" } }, { pm: { model: "openai/gpt-6-luna" } }, { pm: { model: "moonshotai/kimi-k2.6" } }, { pm: {} }];
+    saved = { aiModel: "moonshotai/kimi-k2.6" };
+    projects = [{ pm: { model: "moonshotai/kimi-k2.6" } }, { pm: { model: "openai/gpt-6-luna" } }, { pm: { model: "deepseek/deepseek-v4" } }, { pm: {} }];
 
-    expect(await modelsLostWithOwnKey(db)).toEqual(["anthropic/claude-haiku-5.5", "moonshotai/kimi-k2.6"]);
+    expect(await modelsLostWithOwnKey(db)).toEqual(["moonshotai/kimi-k2.6", "deepseek/deepseek-v4"]);
   });
 
   it("are none where ours would not run the calls anyway: a plan without managed AI, no operator key, or a self-hosted instance", async () => {
-    saved = { aiModel: "anthropic/claude-haiku-5.5" };
+    saved = { aiModel: "moonshotai/kimi-k2.6" };
 
     can.mockReturnValue(false);
     expect(await modelsLostWithOwnKey(db)).toEqual([]);
@@ -121,8 +125,8 @@ describe("the models only the organisation's own key runs", () => {
 describe("the model saved for the organisation", () => {
   it("is the stored one, and the default where nothing is stored yet", async () => {
     const { savedAiModel } = await import("./model-check");
-    saved = { aiModel: "anthropic/claude-haiku-5.5" };
-    expect(await savedAiModel(db)).toBe("anthropic/claude-haiku-5.5");
+    saved = { aiModel: "moonshotai/kimi-k2.6" };
+    expect(await savedAiModel(db)).toBe("moonshotai/kimi-k2.6");
 
     saved = null;
     expect(await savedAiModel(db)).toBe("openai/gpt-6-luna");

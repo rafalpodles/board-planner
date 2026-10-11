@@ -52,7 +52,7 @@ export function AiModel() {
   if (failed) return <LoadFailed testId="ai-model-error" message="Failed to read the models this key runs." onRetry={load} />;
   if (!catalogue) return null;
 
-  const providers = catalogue.providers?.map((p) => p.label).join(", ");
+  const providers = catalogue.providers && new Intl.ListFormat("en", { style: "long", type: "conjunction" }).format(catalogue.providers.map((p) => p.label));
   return (
     <SettingsCard
       title="Model"
@@ -61,7 +61,7 @@ export function AiModel() {
       <div data-testid="ai-model-card" className="space-y-3">
         {catalogue.restricted ? (
           <p className="text-sm text-text-muted" data-testid="ai-model-note">
-            {APP_NAME}&apos;s key runs only {providers} models. To use any other model or provider, add your own OpenRouter key above.
+            {APP_NAME}&apos;s key runs only models from {providers}. To use any other model or provider, add your own OpenRouter key above.
           </p>
         ) : (
           <p className="text-sm text-text-muted" data-testid="ai-model-note">

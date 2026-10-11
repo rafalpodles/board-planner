@@ -382,7 +382,7 @@ describe("Settings → AI key, the model", () => {
     expect(model.value).toBe("openai/gpt-6-luna");
     expect(Array.from(model.options).map((o) => o.textContent)).toEqual(["OpenAI: GPT-4o", "OpenAI: GPT-6 Luna"]);
     expect(screen.getByTestId("ai-model-note").textContent).toBe(
-      "Board Planner's key runs only OpenAI models. To use any other model or provider, add your own OpenRouter key above."
+      "Board Planner's key runs only models from OpenAI. To use any other model or provider, add your own OpenRouter key above."
     );
   });
 

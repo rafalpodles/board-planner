@@ -6,22 +6,51 @@ import { platformProviderPreferences } from "./pm/openrouter";
 describe("the list of allowed providers", () => {
   it("is all it takes to allow another: the check, the routing and the refusal follow it", () => {
     const list = MANAGED_MODEL_PROVIDERS as ManagedProvider[];
-    expect(isManagedModel("mistralai/mistral-large")).toBe(false);
+    expect(isManagedModel("cohere/command-r")).toBe(false);
 
-    list.push({ id: "mistralai", label: "Mistral", servedBy: ["mistral"], description: "Mistral's own models (mistralai/…)" });
+    list.push({ id: "cohere", label: "Cohere", servedBy: ["cohere"], description: "Cohere's own models (cohere/…)" });
     try {
-      expect(isManagedModel("mistralai/mistral-large")).toBe(true);
-      expect(isManagedModel("mistralai/mistral-large:online")).toBe(false);
-      expect(platformProviderPreferences("mistralai/mistral-large")).toEqual({ data_collection: "deny", only: ["mistral"] });
-      expect(unmanagedModelError("x/y")).toContain("Choose one of: OpenAI's own models (openai/…, not gpt-oss), Mistral's own models (mistralai/…), or add");
+      expect(isManagedModel("cohere/command-r")).toBe(true);
+      expect(isManagedModel("cohere/command-r:online")).toBe(false);
+      expect(platformProviderPreferences("cohere/command-r")).toEqual({ data_collection: "deny", only: ["cohere"] });
+      expect(unmanagedModelError("x/y")).toContain("(mistralai/…), Cohere's own models (cohere/…), or add");
     } finally {
       list.pop();
     }
-    expect(isManagedModel("mistralai/mistral-large")).toBe(false);
+    expect(isManagedModel("cohere/command-r")).toBe(false);
   });
 
-  it("holds OpenAI alone until the DPA's sub-processor list says more", () => {
-    expect(MANAGED_MODEL_PROVIDERS.map((p) => p.id)).toEqual(["openai"]);
+  // BP-1026: what the DPA's Annex 3 and the sub-processor page name; a provider is added here only after they do
+  it("holds the providers the DPA's sub-processor list names, each pinned to its own OpenRouter slug, and nobody else", () => {
+    expect(MANAGED_MODEL_PROVIDERS.map((p) => [p.id, p.servedBy])).toEqual([
+      ["openai", ["openai"]],
+      ["anthropic", ["anthropic"]],
+      ["google", ["google-vertex"]],
+      ["mistralai", ["mistral"]],
+    ]);
+  });
+
+  it.each([
+    ["anthropic/claude-haiku-5.5", "anthropic"],
+    ["google/gemini-2.5-flash", "google-vertex"],
+    ["mistralai/mistral-large", "mistral"],
+    ["openai/gpt-6-luna", "openai"],
+  ])("runs %s on the platform's key, pinned to %s and to no upstream that may train on it", (model, slug) => {
+    expect(isManagedModel(model)).toBe(true);
+    expect(platformProviderPreferences(model)).toEqual({ data_collection: "deny", only: [slug] });
+  });
+
+  it("leaves out the open-weight models each provider's name is on but which OpenRouter hosts elsewhere", () => {
+    for (const model of ["openai/gpt-oss-120b", "google/gemma-3-27b-it"]) {
+      expect(isManagedModel(model), model).toBe(false);
+      expect(platformProviderPreferences(model)).toEqual({ data_collection: "deny" });
+    }
+  });
+
+  it("allows no other provider, and no name that only ends or starts like an allowed one", () => {
+    for (const model of ["moonshotai/kimi-k2.6", "deepseek/deepseek-v4", "x-anthropic/claude", "anthropic", "google/", "/gemini", "xgoogle/gemini-2.5-pro"]) {
+      expect(isManagedModel(model), model).toBe(false);
+    }
   });
 });
 
@@ -33,7 +62,6 @@ describe("the models the platform's key runs", () => {
     expect(isManagedModel("openai/gpt-4o")).toBe(true);
     expect(isManagedModel("openai/gpt-oss-120b")).toBe(false);
     expect(isManagedModel("moonshotai/kimi-k2.6")).toBe(false);
-    expect(isManagedModel("anthropic/claude-haiku")).toBe(false);
     expect(isManagedModel("gpt-4o-mini")).toBe(false);
     expect(isManagedModel("xopenai/gpt-4o")).toBe(false);
   });
@@ -44,7 +72,7 @@ describe("the models the platform's key runs", () => {
 
   it("are named in the refusal, with the organisation's own key as the other way", () => {
     expect(unmanagedModelError("openai/gpt-oss-120b")).toBe(
-      "The model openai/gpt-oss-120b is not available on Board Planner's AI key. Choose one of: OpenAI's own models (openai/…, not gpt-oss), or add your organisation's own OpenRouter key in Settings → AI key."
+      "The model openai/gpt-oss-120b is not available on Board Planner's AI key. Choose one of: OpenAI's own models (openai/…, not gpt-oss), Anthropic's own models (anthropic/…), Google's models on Vertex AI (google/…, not gemma), Mistral's own models (mistralai/…), or add your organisation's own OpenRouter key in Settings → AI key."
     );
   });
 });
