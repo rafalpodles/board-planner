@@ -235,6 +235,10 @@ export interface IApiToken {
 export const GRANT_RELATIONS = ["owner", "member"] as const;
 export type GrantRelation = (typeof GRANT_RELATIONS)[number];
 
+/** Who made a grant: a person (every grant before this field existed), or the identity provider's group mapping. */
+export const GRANT_SOURCES = ["manual", "idp"] as const;
+export type GrantSource = (typeof GRANT_SOURCES)[number];
+
 export interface IIdentity {
   _id: Types.ObjectId;
   user: Types.ObjectId;
@@ -326,6 +330,8 @@ export interface IGrant {
   objectType: "project";
   object: Types.ObjectId;
   createdBy: Types.ObjectId | null;
+  /** Absent on a row older than the field, which reads as manual. */
+  source?: GrantSource;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -1339,6 +1345,8 @@ export interface ApiProjectMember {
   username: string;
   fullName: string;
   relation: GrantRelation | null;
+  /** Set by the identity provider's group mapping, until somebody changes it by hand. */
+  source?: GrantSource;
   instanceAdmin: boolean;
   deactivated?: boolean;
 }

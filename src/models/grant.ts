@@ -1,5 +1,5 @@
 import mongoose, { Schema, Model } from "mongoose";
-import { IGrant, GRANT_RELATIONS } from "@/types";
+import { IGrant, GRANT_RELATIONS, GRANT_SOURCES } from "@/types";
 import { withOrganisation } from "@/lib/organisation-field";
 
 const grantSchema = new Schema<IGrant>(
@@ -9,6 +9,7 @@ const grantSchema = new Schema<IGrant>(
     objectType: { type: String, enum: ["project"], required: true, default: "project" },
     object: { type: Schema.Types.ObjectId, required: true },
     createdBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
+    source: { type: String, enum: GRANT_SOURCES, default: "manual" },
   },
   { timestamps: true }
 );

@@ -37,7 +37,7 @@ function withAccessApplied(
 ): ApiProjectMember[] {
   if (relation === "none") return rows.filter((m) => m._id !== id);
   if (rows.some((m) => m._id === id)) {
-    return rows.map((m) => (m._id === id ? { ...m, relation } : m));
+    return rows.map((m) => (m._id === id ? { ...m, relation, source: "manual" } : m));
   }
   return newcomer ? [...rows, { ...newcomer, relation, instanceAdmin: false }] : rows;
 }
@@ -357,6 +357,9 @@ export function GeneralSection({
               <ListRow key={m._id}>
                 <span className="flex-1 text-sm font-medium">
                   {m.fullName || m.username}
+                  {"source" in m && m.source === "idp" && (
+                    <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-bg-hover text-text-muted" title="Set by the identity provider's group mapping">IdP</span>
+                  )}
                   {"deactivated" in m && m.deactivated && (
                     <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-danger/15 text-danger">Deactivated</span>
                   )}

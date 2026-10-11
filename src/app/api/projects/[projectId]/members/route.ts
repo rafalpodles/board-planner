@@ -6,7 +6,7 @@ import { withProjectOwner } from "@/lib/middleware";
 import { audienceFilterFrom, ownerCount, recipientsWithAccess } from "@/lib/grants";
 import { createNotifications } from "@/lib/in-app-notifications";
 import { logProjectAudit } from "@/lib/projectAudit";
-import { GRANT_RELATIONS, GrantRelation } from "@/types";
+import { GRANT_RELATIONS, GrantRelation, GrantSource } from "@/types";
 
 function auditAccess(
   db: ScopedDb,
@@ -14,7 +14,8 @@ function auditAccess(
   actorId: unknown,
   username: string,
   from: GrantRelation | undefined,
-  to: GrantRelation | undefined
+  to: GrantRelation | undefined,
+  takenOver = false
 ): void {
   const action = !from ? "member_added" : !to ? "member_removed" : "member_role_changed";
   void logProjectAudit(
@@ -22,7 +23,7 @@ function auditAccess(
     projectId,
     String(actorId),
     action,
-    `${username}: ${from ?? "no access"} → ${to ?? "no access"}`
+    `${username}: ${from ?? "no access"} → ${to ?? "no access"}${takenOver ? " (set by hand; the identity provider's group had set it)" : ""}`
   );
 }
 
@@ -31,7 +32,7 @@ export const GET = withProjectOwner(async (_request, { params, db }) => {
   const { projectId } = await params;
 
   const grants = await db.Grant.find({ objectType: "project", object: projectId })
-    .select("subject relation")
+    .select("subject relation source")
     .lean();
 
   // The same filter the assignable-users endpoint builds on, rather than a second copy of the
@@ -46,6 +47,7 @@ export const GET = withProjectOwner(async (_request, { params, db }) => {
     .lean();
 
   const byUser = new Map(grants.map((g) => [String(g.subject), g.relation]));
+  const sourceOf = new Map(grants.map((g) => [String(g.subject), g.source ?? "manual"]));
 
   return NextResponse.json(
     users.map((u) => ({
@@ -53,6 +55,7 @@ export const GET = withProjectOwner(async (_request, { params, db }) => {
       username: u.username,
       fullName: u.fullName,
       relation: byUser.get(String(u._id)) ?? null,
+      source: sourceOf.get(String(u._id)),
       instanceAdmin: u.role === "admin",
       deactivated: !!u.deactivatedAt,
     }))
@@ -96,14 +99,15 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
     }
   }
 
-  let before: { relation: GrantRelation } | null;
+  let before: { relation: GrantRelation; source?: GrantSource } | null;
   try {
+    // A person's decision wins over a group mapping: the grant is theirs from here on, and the next sign-in does not undo it
     before = await db.Grant.findOneAndUpdate(
       { subject: userId, objectType: "project", object: projectId },
-      { $set: { relation }, $setOnInsert: { createdBy: user._id } },
+      { $set: { relation, source: "manual" }, $setOnInsert: { createdBy: user._id } },
       { upsert: true, returnDocument: "before" }
     )
-      .select("relation")
+      .select("relation source")
       .lean();
   } catch (e) {
     // Two concurrent grants of the same pair race the unique index; the row exists either way,
@@ -118,7 +122,7 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
     // An upsert, since a concurrent removal may have taken the row this would put back
     const restored = await db.Grant.updateOne(
       { subject: userId, objectType: "project", object: projectId },
-      { $set: { relation: "owner" }, $setOnInsert: { createdBy: user._id } },
+      { $set: { relation: "owner", source: before.source ?? "manual" }, $setOnInsert: { createdBy: user._id } },
       { upsert: true }
     );
     // Re-created after somebody else removed it: an owner's access granted, so it is recorded
@@ -126,8 +130,9 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
     return NextResponse.json({ error: "A board must keep at least one owner" }, { status: 409 });
   }
 
-  if (before?.relation !== relation) {
-    auditAccess(db, projectId, user._id, target.username, before?.relation, relation);
+  const takenOver = before?.source === "idp";
+  if (before?.relation !== relation || takenOver) {
+    auditAccess(db, projectId, user._id, target.username, before?.relation, relation, takenOver);
     void announceAccess(db, {
       projectId,
       recipientId: userId,
