@@ -1,5 +1,6 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
-import { MEMBER_USERNAME, OUTSIDER_FULL_NAME, PROJECT_KEY, seed, seedAssignmentOutsider } from "./seed";
+import mongoose from "mongoose";
+import { E2E_MONGODB_URI, MEMBER_ID, MEMBER_USERNAME, OUTSIDER_FULL_NAME, PROJECT_KEY, seed, seedAssignmentOutsider } from "./seed";
 import { signIn } from "./session";
 
 /**
@@ -238,6 +239,37 @@ test("every grant, promotion and removal is a row naming whom, from and to", asy
   expect(stored.every((row) => row.user?.username === "admin")).toBe(true);
 
   await expect(cells(rows(page).first()).nth(2)).toHaveText("member removed");
+});
+
+/**
+ * BP-861. A grant records whether a person or the identity provider's group mapping made it. The members list marks
+ * a group's grant, and an owner changing it by hand takes it over: the marker goes, the grant reads as manual so the
+ * next sign-in does not undo it, and the audit row says so.
+ */
+test("a grant a group made is marked until somebody changes it by hand, and the audit log says so", async ({ page }) => {
+  await mongoose.connect(E2E_MONGODB_URI);
+  try {
+    await mongoose.connection.db!.collection("grants").updateOne({ subject: MEMBER_ID }, { $set: { source: "idp" } });
+    await signIn(page);
+    await page.goto(`${SETTINGS}?section=general`);
+    const row = page.locator("div").filter({ has: page.getByLabel(`Access for ${MEMBER_USERNAME}`) }).filter({ hasText: "IdP" }).last();
+    await expect(row.getByText("IdP", { exact: true })).toBeVisible();
+    await expect(page.getByText("IdP", { exact: true })).toHaveCount(1);
+    await page.screenshot({ path: "e2e/.artifacts/bp861-idp-marker.png" });
+
+    await page.getByLabel(`Access for ${MEMBER_USERNAME}`).selectOption("owner");
+    await saveChanges(page);
+    await expect(page.getByText("IdP", { exact: true })).toHaveCount(0);
+
+    const grant = await mongoose.connection.db!.collection("grants").findOne({ subject: MEMBER_ID });
+    expect(grant).toMatchObject({ relation: "owner", source: "manual" });
+    const stored = await detailsOnceStored(page, 1);
+    expect(stored.map(({ action, detail }) => `${action} ${detail}`)).toEqual([
+      `member_role_changed ${MEMBER_USERNAME}: member → owner (set by hand; the identity provider's group had set it)`,
+    ]);
+  } finally {
+    await mongoose.disconnect();
+  }
 });
 
 test("a member is not shown the log at all", async ({ page }) => {
