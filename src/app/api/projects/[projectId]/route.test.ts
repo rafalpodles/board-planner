@@ -1129,3 +1129,19 @@ describe("the project answer names this instance's GitHub", () => {
     expect((await res.json()).githubWebBase).toBe("https://ghe.corp.example");
   });
 });
+
+// BP-862. Which groups give which role is the owners' to read, on their own route
+describe("the project answer leaves out the group mapping", () => {
+  it("for every reader, since a member, a worker and a connector can all read the board", async () => {
+    check.mockResolvedValue(true);
+    projectFindOne.mockReturnValue({
+      toObject: () => ({ _id: PROJECT_ID, name: "Test Project", groupRoleMap: [{ group: "staff", role: "member" }] }),
+      populate: () => Promise.resolve({ _id: PROJECT_ID, toObject: () => ({ _id: PROJECT_ID, name: "Test Project", groupRoleMap: [{ group: "staff", role: "member" }] }) }),
+    });
+
+    const body = await (await GET(new Request("http://localhost/api/projects/p1"), ctx())).json();
+
+    expect(body.name).toBe("Test Project");
+    expect(body).not.toHaveProperty("groupRoleMap");
+  });
+});

@@ -11,6 +11,7 @@ import { authorityAtAcceptance } from "@/lib/invitation-authority";
 import { INVITATION_REFUSALS } from "@/lib/invitation-refusals";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { applyAdminGroup } from "@/lib/oidc/admin-group";
+import { applyGroupRoles } from "@/lib/oidc/group-roles";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { IInvitation } from "@/types";
 import type { ScopedDb } from "@/lib/db-scope";
@@ -27,6 +28,7 @@ export interface NewAccount {
   providerProvesAddress?: boolean;
   /** The groups that identity's provider named, for `OIDC_ADMIN_GROUP`. */
   groups?: string[];
+  groupsKnown?: boolean;
   terms: TermsAcceptance;
 }
 
@@ -144,7 +146,10 @@ export async function completeAcceptance(
     detail: `as ${authority.role === "admin" ? "an administrator" : "a member"}, account ${user.username}${account.identity ? `, signing in with ${account.identity.provider}` : ""}`,
   });
 
-  if (account.identity) await applyAdminGroup(db, user, account.identity.provider, account.groups ?? []);
+  if (account.identity) {
+    await applyAdminGroup(db, user, account.identity.provider, account.groups ?? []);
+    await applyGroupRoles(db, user, account.identity.provider, account.groups ?? [], account.groupsKnown);
+  }
 
   const { token: sessionToken, absoluteExpiresAt } = await createSession({
     userId: user._id,

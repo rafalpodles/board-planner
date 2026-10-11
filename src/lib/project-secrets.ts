@@ -82,6 +82,9 @@ export function sanitizeProjectSecrets<T extends object>(project: T, organisatio
     delete obj[field];
   }
 
+  // Which identity provider groups give which role is the board's owners' to read, on their own route (BP-862)
+  delete obj.groupRoleMap;
+
   if (Array.isArray(obj.notificationChannels)) {
     const projectLabel = String(obj.key || obj._id || "unknown");
     obj.notificationChannels = obj.notificationChannels.map((channel, index) => {

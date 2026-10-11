@@ -220,6 +220,7 @@ describe("finishing a sign-in", () => {
         verifiedEmails: ["ada@example.com"],
         name: "Ada",
         groups: [],
+        groupsKnown: false,
       },
     });
   });
@@ -482,6 +483,14 @@ describe("the groups an ID token names (BP-833)", () => {
     const outcome = await finishFlow(scopedToDefaultOrganisation(), { provider, binder: "cpo_b", origin: ORIGIN, query: "" });
     return outcome.ok ? outcome.claims.groups : null;
   };
+  const knownWith = async (provider: OidcProvider, claims: Record<string, unknown>) => {
+    findOneAndDelete.mockResolvedValue({ ...FLOW, provider: provider.id });
+    authorizationCodeGrant.mockResolvedValue({
+      claims: () => ({ iss: provider.issuer, sub: "s1", email: "ada@corp.com", email_verified: true, hd: "corp.com", ...claims }),
+    });
+    const outcome = await finishFlow(scopedToDefaultOrganisation(), { provider, binder: "cpo_b", origin: ORIGIN, query: "" });
+    return outcome.ok ? outcome.claims.groupsKnown : null;
+  };
 
   afterEach(() => {
     delete process.env.OIDC_GROUPS_CLAIM;
@@ -491,6 +500,20 @@ describe("the groups an ID token names (BP-833)", () => {
     expect(await finishWith(PROVIDER, { groups: ["staff", "admins", 7] })).toEqual(["staff", "admins"]);
     expect(await finishWith(PROVIDER, { groups: "admins" })).toEqual(["admins"]);
     expect(await finishWith(PROVIDER, {})).toEqual([]);
+  });
+
+  // BP-862. A token with no groups claim at all says nothing, and so must take no board role away
+  it("knows the groups only when the claim is there, even when it is empty", async () => {
+    expect(await knownWith(PROVIDER, { groups: ["staff"] })).toBe(true);
+    expect(await knownWith(PROVIDER, { groups: [] })).toBe(true);
+    expect(await knownWith(PROVIDER, {})).toBe(false);
+  });
+
+  it("looks for the claim OIDC_GROUPS_CLAIM names when deciding whether it knows", async () => {
+    process.env.OIDC_GROUPS_CLAIM = "roles";
+
+    expect(await knownWith(PROVIDER, { groups: ["staff"] })).toBe(false);
+    expect(await knownWith(PROVIDER, { roles: [] })).toBe(true);
   });
 
   it("reads the claim OIDC_GROUPS_CLAIM names instead", async () => {

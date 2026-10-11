@@ -2,7 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 import mongoose from "mongoose";
 import { OIDC_STUB_URL, ORGANISATIONS_RELAY_ORIGIN, RUN_ORGANISATIONS_SERVER } from "../playwright.config";
 import { E2E_MONGODB_URI } from "./seed";
-import { ACME, GLOBEX, ORGANISATIONS_API, SSO_CLIENT, SSO_LABEL, USERNAME, asOrganisation, makePro, originOf, seedTwoOrganisations, signInOn, storeSso, type OrganisationFixture } from "./organisations";
+import { ACME, GLOBEX, ORGANISATIONS_API, SHARED_KEY, SSO_CLIENT, SSO_LABEL, USERNAME, asOrganisation, makePro, originOf, seedTwoOrganisations, signInOn, storeSso, type OrganisationFixture } from "./organisations";
 import { freshAddress, giveAddress, provideAddressAndCode, apiCode } from "./platform-sign-in";
 
 test.skip(!RUN_ORGANISATIONS_SERVER, "needs the ORGANISATION_DOMAIN server — set E2E_ORGANISATIONS_SERVER=1");
@@ -274,38 +274,39 @@ test.describe("BP-951: requiring single sign-on", () => {
   });
 });
 
-test.describe("BP-951: an organisation's admin group", () => {
-  const addMember = (who: OrganisationFixture, role: "member" | "admin") =>
-    withDb(async (db) => {
-      const email = `ada-${Date.now()}@${who.slug}.example`;
-      const _id = new mongoose.Types.ObjectId();
-      await db.collection("users").insertOne({
-        _id,
-        organisation: who.organisation,
-        username: `ada${Date.now()}`,
-        fullName: "Ada",
-        email,
-        emailVerifiedAt: new Date(),
-        emailNotifications: false,
-        collapseEmptyColumns: false,
-        kind: "human",
-        role,
-        createdAt: new Date(),
-      });
-      return { _id, email };
+const addMember = (who: OrganisationFixture, role: "member" | "admin") =>
+  withDb(async (db) => {
+    const email = `ada-${Date.now()}@${who.slug}.example`;
+    const _id = new mongoose.Types.ObjectId();
+    await db.collection("users").insertOne({
+      _id,
+      organisation: who.organisation,
+      username: `ada${Date.now()}`,
+      fullName: "Ada",
+      email,
+      emailVerifiedAt: new Date(),
+      emailNotifications: false,
+      collapseEmptyColumns: false,
+      kind: "human",
+      role,
+      createdAt: new Date(),
     });
-  const roleOf = (id: mongoose.Types.ObjectId) => withDb(async (db) => (await db.collection("users").findOne({ _id: id }))?.role);
+    return { _id, email };
+  });
+const roleOf = (id: mongoose.Types.ObjectId) => withDb(async (db) => (await db.collection("users").findOne({ _id: id }))?.role);
 
-  async function signInThrough(browser: import("@playwright/test").Browser, who: OrganisationFixture, email: string, groups?: string[], claims: Record<string, unknown> = {}) {
-    await script({ sub: `sub-${Date.now()}-${Math.random()}`, email, email_verified: true, ...(groups ? { groups } : {}), ...claims });
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    await page.goto(`${originOf(who)}/login`);
-    await page.getByRole("button", { name: `Continue with ${SSO_LABEL}` }).click();
-    await expect(page).toHaveURL(`${originOf(who)}/projects`);
-    await context.close();
-  }
+async function signInThrough(browser: import("@playwright/test").Browser, who: OrganisationFixture, email: string, groups?: string[], claims: Record<string, unknown> = {}) {
+  await script({ sub: `sub-${Date.now()}-${Math.random()}`, email, email_verified: true, ...(groups ? { groups } : {}), ...claims });
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  await page.goto(`${originOf(who)}/login`);
+  await page.getByRole("button", { name: `Continue with ${SSO_LABEL}` }).click();
+  await expect(page).toHaveURL(`${originOf(who)}/projects`);
+  await context.close();
+}
 
+
+test.describe("BP-951: an organisation's admin group", () => {
   test("an administrator sets it on the page; people in the group become administrators at sign-in and the others members", async ({ page, browser, request }) => {
     await makePro(request, ACME);
     await storeSso(ACME);
@@ -355,5 +356,82 @@ test.describe("BP-951: an organisation's admin group", () => {
     const stranger = await addMember(GLOBEX, "member");
     await signInThrough(browser, GLOBEX, stranger.email, ["acme-admins"]);
     expect(await roleOf(stranger._id)).toBe("member");
+  });
+});
+
+test.describe("BP-862: roles from identity provider groups", () => {
+  const grantOf = (who: OrganisationFixture, user: mongoose.Types.ObjectId) =>
+    withDb((db) => db.collection("grants").findOne({ organisation: who.organisation, subject: user, object: who.projectId }));
+  const mapGroups = (who: OrganisationFixture, map: { group: string; role: string }[]) =>
+    withDb((db) => db.collection("projects").updateOne({ _id: who.projectId }, { $set: { groupRoleMap: map } }));
+
+  test("an owner maps a group on the board's settings, and people get and lose the role at sign-in", async ({ page, browser, request }) => {
+    await makePro(request, ACME);
+    await storeSso(ACME);
+    const ada = await addMember(ACME, "member");
+    await signInOn(page.context(), ACME);
+    await page.goto(`${originOf(ACME)}/projects/${SHARED_KEY}/settings`);
+
+    await page.getByRole("button", { name: "Add a group" }).click();
+    await page.getByLabel("Group", { exact: true }).fill("staff");
+    const saved = page.waitForResponse((response) => response.url().endsWith("/group-roles") && response.request().method() === "PUT");
+    await page.getByRole("button", { name: "Save group mapping" }).click();
+    expect((await saved).status()).toBe(200);
+    await expect(page.getByText("Group mapping saved")).toBeVisible();
+    await page.getByRole("heading", { name: "Roles from identity provider groups" }).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: "e2e/.artifacts/bp862-group-mapping.png" });
+    expect((await withDb((db) => db.collection("projects").findOne({ _id: ACME.projectId })))?.groupRoleMap).toEqual([{ group: "staff", role: "member" }]);
+
+    await signInThrough(browser, ACME, ada.email, ["staff", "other"]);
+    expect(await grantOf(ACME, ada._id)).toMatchObject({ relation: "member", source: "idp" });
+    const audit = await withDb((db) => db.collection("projectauditlogs").find({ project: ACME.projectId, action: "member_added" }).toArray());
+    expect(audit.map((row) => row.detail).join(" ")).toContain("by the identity provider's group mapping");
+
+    await signInThrough(browser, ACME, ada.email, ["other"]);
+    expect(await grantOf(ACME, ada._id), "leaving the group takes the role away").toBeNull();
+  });
+
+  test("a token without the groups claim changes nothing, and a role set by hand is never touched", async ({ browser, request }) => {
+    await makePro(request, ACME);
+    await storeSso(ACME);
+    await mapGroups(ACME, [{ group: "staff", role: "member" }]);
+    const ada = await addMember(ACME, "member");
+    const bo = await addMember(ACME, "member");
+
+    await signInThrough(browser, ACME, ada.email, ["staff"]);
+    await signInThrough(browser, ACME, ada.email);
+    expect(await grantOf(ACME, ada._id), "no claim says nothing").toMatchObject({ source: "idp" });
+
+    await withDb((db) => db.collection("grants").insertOne({ organisation: ACME.organisation, subject: bo._id, objectType: "project", object: ACME.projectId, relation: "owner", source: "manual", createdAt: new Date(), updatedAt: new Date() }));
+    await signInThrough(browser, ACME, bo.email, ["other"]);
+    expect(await grantOf(ACME, bo._id), "a manual grant stays").toMatchObject({ relation: "owner", source: "manual" });
+  });
+
+  test("the last owner is never removed or demoted by the mapping, and the highest role of several groups wins", async ({ browser, request }) => {
+    await makePro(request, ACME);
+    await storeSso(ACME);
+    await mapGroups(ACME, [{ group: "staff", role: "member" }, { group: "leads", role: "owner" }]);
+    const ada = await addMember(ACME, "member");
+
+    await signInThrough(browser, ACME, ada.email, ["staff", "leads"]);
+    expect(await grantOf(ACME, ada._id)).toMatchObject({ relation: "owner", source: "idp" });
+
+    await signInThrough(browser, ACME, ada.email, ["other"]);
+    expect(await grantOf(ACME, ada._id), "the only owner stays").toMatchObject({ relation: "owner", source: "idp" });
+
+    await withDb((db) => db.collection("grants").insertOne({ organisation: ACME.organisation, subject: ACME.adminId, objectType: "project", object: ACME.projectId, relation: "owner", source: "manual", createdAt: new Date(), updatedAt: new Date() }));
+    await signInThrough(browser, ACME, ada.email, ["staff"]);
+    expect(await grantOf(ACME, ada._id), "with another owner it steps down to the group's role").toMatchObject({ relation: "member", source: "idp" });
+  });
+
+  test("the mapping is part of Pro: refused on Free with the 402", async ({ page }) => {
+    await signInOn(page.context(), GLOBEX);
+    await page.goto(`${originOf(GLOBEX)}/projects/${SHARED_KEY}/settings`);
+    const refused = await page.evaluate(async (project) => {
+      const res = await fetch(`/api/projects/${project}/group-roles`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ map: [{ group: "staff", role: "member" }] }) });
+      return { status: res.status, body: await res.json().catch(() => ({})) };
+    }, String(GLOBEX.projectId));
+    expect(refused.status).toBe(402);
+    expect(refused.body).toMatchObject({ feature: "identity.sso" });
   });
 });

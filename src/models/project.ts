@@ -1,5 +1,5 @@
 import mongoose, { Schema, Model } from "mongoose";
-import { IProject, DEFAULT_PROJECT_CATEGORIES, DEFAULT_PROJECT_COLUMNS, COLUMN_ROLES, WEBHOOK_EVENTS, NOTIFICATION_CHANNEL_TYPES, CUSTOM_FIELD_TYPES } from "@/types";
+import { IProject, DEFAULT_PROJECT_CATEGORIES, DEFAULT_PROJECT_COLUMNS, COLUMN_ROLES, GRANT_RELATIONS, WEBHOOK_EVENTS, NOTIFICATION_CHANNEL_TYPES, CUSTOM_FIELD_TYPES } from "@/types";
 import { withOrganisation } from "@/lib/organisation-field";
 
 const categorySchema = new Schema(
@@ -295,6 +295,11 @@ const projectSchema = new Schema<IProject>(
       type: Schema.Types.ObjectId,
       ref: "User",
       default: null,
+    },
+    // Which identity provider groups give which role on the board, reconciled at sign-in (BP-862)
+    groupRoleMap: {
+      type: [new Schema({ group: { type: String, required: true, maxlength: 200 }, role: { type: String, enum: GRANT_RELATIONS, required: true } }, { _id: false })],
+      default: [],
     },
   },
   { timestamps: true }

@@ -63,6 +63,13 @@ describe("sanitizeProjectSecrets", () => {
     expect(sanitized).not.toHaveProperty("codaToken");
   });
 
+  it("removes the group mapping, which is the owners' to read on their own route (BP-862)", () => {
+    const sanitized = sanitizeProjectSecrets({ name: "Test", groupRoleMap: [{ group: "staff", role: "member" }] }, TEST_ORGANISATION);
+
+    expect(sanitized).toMatchObject({ name: "Test" });
+    expect(sanitized).not.toHaveProperty("groupRoleMap");
+  });
+
   it("reports a token as unset rather than omitting the flag", () => {
     const sanitized = sanitizeProjectSecrets({ name: "Test" }, TEST_ORGANISATION);
 

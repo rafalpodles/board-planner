@@ -4,7 +4,7 @@ import { normaliseEmail } from "@/lib/email";
 import { randomToken, sha256 } from "@/lib/oauth";
 import { githubApiBase, githubWebBase } from "@/lib/github-host";
 import { OidcIntent } from "@/types";
-import { groupsIn } from "@/lib/oidc/admin-group";
+import { groupsIn, hasGroupsClaim } from "@/lib/oidc/admin-group";
 import { OidcProvider } from "./providers";
 import { relayOrigin } from "./relay";
 import { readBoundedText, safeFetch } from "@/lib/safe-fetch";
@@ -153,6 +153,8 @@ export interface VerifiedClaims {
   name: string;
   /** The groups the generic OIDC provider names, for `OIDC_ADMIN_GROUP`; empty for any other. */
   groups: string[];
+  /** Whether the token carried the groups claim at all; one that did not names no groups and takes none away. */
+  groupsKnown?: boolean;
 }
 
 export type FlowOutcome =
@@ -239,6 +241,7 @@ function idTokenPerson(
     verifiedEmails: emailVerified ? [email] : [],
     name: typeof claims.name === "string" ? claims.name : "",
     groups: provider.id === "oidc" ? groupsIn(claims, provider) : [],
+    groupsKnown: provider.id === "oidc" && hasGroupsClaim(claims, provider),
   };
 }
 
@@ -348,7 +351,7 @@ export async function holdForAcceptance(db: ScopedDb, input: {
 }
 
 function heldClaims(claims: VerifiedClaims) {
-  return { issuer: claims.issuer, subject: claims.subject, email: claims.email, name: claims.name, groups: claims.groups };
+  return { issuer: claims.issuer, subject: claims.subject, email: claims.email, name: claims.name, groups: claims.groups, groupsKnown: claims.groupsKnown === true };
 }
 
 export async function heldAcceptance(db: ScopedDb, binder: string | null) {
