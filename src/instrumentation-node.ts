@@ -149,6 +149,15 @@ async function bootWhenDatabaseIsReady(): Promise<void> {
       setInterval(sweepDead, 24 * 60 * 60 * 1000).unref();
     }
 
+    // Tells the administrators of a trial that ends within a week that its single sign-on stops with it (BP-951)
+    const { noticeEndingTrials } = await import("@/lib/sso-trial-notice");
+    const noticeTrials = () =>
+      noticeEndingTrials()
+        .then((done) => done.noticed > 0 && console.log(`Trial sign-in notices: ${JSON.stringify(done)}`))
+        .catch((error) => console.error("Failed to notice ending trials:", error));
+    void noticeTrials();
+    setInterval(noticeTrials, 24 * 60 * 60 * 1000).unref();
+
     // Said, not refused: the state can arise at runtime (a demotion, a deactivation, an unlink), and
     // exiting would turn a restart into an outage for every member, not only the administrators
     const { adminsLockedOut } = await import("@/lib/password-sign-in");
