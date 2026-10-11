@@ -116,7 +116,7 @@ export function BoardReady({ projectId, projectRef }: { projectId: string; proje
     <section
       data-testid="board-ready"
       aria-label="Get this board ready"
-      className="mx-4 mb-3 rounded-xl border border-border bg-bg-card p-4 lg:mx-6"
+      className="mx-4 mb-3 mt-2 rounded-xl border border-border bg-bg-card p-4 lg:mx-6"
     >
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-sm font-medium text-text">Get this board ready</h2>
@@ -137,17 +137,21 @@ export function BoardReady({ projectId, projectRef }: { projectId: string; proje
       <div className="my-2 h-1 overflow-hidden rounded bg-border" aria-hidden="true">
         <div className="h-full bg-success" style={{ width: `${Math.round((done / ready.steps.length) * 100)}%` }} />
       </div>
-      <ul>
-        {group("setup").map((s) => (
-          <Row key={s.id} step={s} projectRef={projectRef} />
-        ))}
-      </ul>
-      <p className="mt-2 text-xs text-text-muted">Agents (optional)</p>
-      <ul>
-        {group("agents").map((s) => (
-          <Row key={s.id} step={s} projectRef={projectRef} />
-        ))}
-      </ul>
+      <div className="lg:grid lg:grid-cols-2 lg:gap-x-8">
+        <ul>
+          {group("setup").map((s) => (
+            <Row key={s.id} step={s} projectRef={projectRef} />
+          ))}
+        </ul>
+        <div>
+          <p className="mt-2 text-xs text-text-muted lg:mt-0 lg:border-b lg:border-border lg:py-2">Agents (optional)</p>
+          <ul>
+            {group("agents").map((s) => (
+              <Row key={s.id} step={s} projectRef={projectRef} />
+            ))}
+          </ul>
+        </div>
+      </div>
     </section>
   );
 }
