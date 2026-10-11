@@ -431,6 +431,15 @@ describe("GET /api/auth/oidc/:provider/callback, the admin group (BP-833)", () =
     expect(applyGroupRoles).toHaveBeenCalledWith(scopedToDefaultOrganisation(), ADA, "oidc", ["staff"], true);
     expect(createSession).toHaveBeenCalled();
   });
+
+  it("hands over a token without the claim as one that knows nothing", async () => {
+    finishes("signin", { groups: [] });
+    identityFindOne.mockReturnValue(lean({ _id: "i1", user: "u1" }));
+
+    await callback();
+
+    expect(applyGroupRoles.mock.calls[0][4]).not.toBe(true);
+  });
 });
 
 describe("GET /api/auth/oidc/:provider/callback, a round trip that failed (BP-843)", () => {

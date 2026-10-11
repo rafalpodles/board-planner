@@ -122,6 +122,18 @@ describe("completing an acceptance through a sign-in provider", () => {
     expect(applyGroupRoles).toHaveBeenCalledWith(scopedToDefaultOrganisation(), expect.objectContaining({ _id: "u-new" }), "oidc", ["staff"], true);
   });
 
+  it("hands over groups from a token without the claim as unknown", async () => {
+    await completeAcceptance(
+      scopedToDefaultOrganisation(),
+      INVITATION as never,
+      { username: "ada", fullName: "Ada", passwordHash: null, identity: IDENTITY, providerProvesAddress: true, groups: [], terms: {} },
+      new Request("http://x"),
+      null
+    );
+
+    expect(applyGroupRoles.mock.calls[0][4]).not.toBe(true);
+  });
+
   it("asks no group anything for a password acceptance", async () => {
     await accept();
 

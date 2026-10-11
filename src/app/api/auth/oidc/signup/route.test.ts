@@ -122,6 +122,14 @@ describe("POST /api/auth/oidc/signup", () => {
     expect(applyAdminGroup).toHaveBeenCalledWith(scopedToDefaultOrganisation(), GRACE, "oidc", ["staff"]);
   });
 
+  it("hands a held token that had no groups claim over as unknown, and one stored before the field too (BP-862)", async () => {
+    heldSignUp.mockResolvedValue({ ...HELD, claims: { ...HELD.claims, groupsKnown: undefined } });
+
+    await post();
+
+    expect(applyGroupRoles.mock.calls[0][4]).not.toBe(true);
+  });
+
   it("hands them to each board's group mapping too, with whether the token carried the claim (BP-862)", async () => {
     applyGroupRoles.mockImplementationOnce(async () => expect(createSession).not.toHaveBeenCalled());
 

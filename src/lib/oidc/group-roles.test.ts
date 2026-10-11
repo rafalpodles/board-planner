@@ -163,7 +163,21 @@ describe("the group mapping of a board, applied at sign-in (BP-862)", () => {
 
     await run(["other"]);
 
-    expect(updateOne).toHaveBeenCalledWith(expect.anything(), { $set: { relation: "owner", source: "idp" }, $setOnInsert: { createdBy: null } }, { upsert: true });
+    expect(updateOne).toHaveBeenCalledWith(
+      { subject: USER._id, objectType: "project", object: BOARD },
+      { $setOnInsert: { relation: "owner", source: "idp", createdBy: null } },
+      { upsert: true }
+    );
+    expect(logProjectAudit).not.toHaveBeenCalled();
+  });
+
+  it("puts a demoted owner back only where the row is still the mapping's, never over a grant made by hand meanwhile", async () => {
+    grants.set(String(BOARD), { relation: "owner", source: "idp" });
+    ownerCount.mockResolvedValueOnce(2).mockResolvedValueOnce(0);
+
+    await run(["staff"]);
+
+    expect(updateOne).toHaveBeenLastCalledWith({ subject: USER._id, objectType: "project", object: BOARD, source: "idp" }, { $set: { relation: "owner" } });
     expect(logProjectAudit).not.toHaveBeenCalled();
   });
 

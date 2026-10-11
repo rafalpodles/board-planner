@@ -106,7 +106,7 @@ describe("PUT /api/projects/:id/group-roles (BP-862)", () => {
     expect(updateOne).not.toHaveBeenCalled();
   });
 
-  it("in the cloud is part of Pro: the 402 the page upsells on on Free, the mapping stored on Pro and the trial", async () => {
+  it("in the cloud is part of Pro: the 402 the page upsells on on Free, the mapping stored on Pro", async () => {
     process.env.ORGANISATION_DOMAIN = "board.example";
     plan({ plan: "free" });
     const refused = await put({ map: [{ group: "staff", role: "member" }] });

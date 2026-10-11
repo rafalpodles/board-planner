@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor, act } from "@testing-library/react";
 import { BoardGroupRoles } from "./BoardGroupRoles";
 
 const { api, toast } = vi.hoisted(() => ({ api: { get: vi.fn(), put: vi.fn() }, toast: vi.fn() }));
@@ -18,7 +18,10 @@ describe("Roles from identity provider groups (BP-862)", () => {
     api.get.mockResolvedValue({ map: [], hasProvider: false });
     const { container } = render(<BoardGroupRoles projectId="p1" />);
 
-    await waitFor(() => expect(api.get).toHaveBeenCalled());
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(api.get).toHaveBeenCalled();
     expect(container.textContent).toBe("");
   });
 
