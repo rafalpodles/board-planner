@@ -5,7 +5,7 @@ import { withAdmin } from "@/lib/middleware";
 import { isSwitchable, membersOnlyThrough, providerSwitchView } from "@/lib/oidc/provider-switch";
 import { organisationDomain } from "@/lib/organisation-host";
 import { readJsonBody } from "@/lib/request-body";
-import { updateSettings } from "@/models/settings";
+import { writeSettings } from "@/lib/settings-write";
 
 const CLOUD_ONLY = { error: "Here the sign-in providers come from the environment; in the cloud an organisation switches each one on or off" };
 
@@ -42,7 +42,7 @@ export const PUT = withAdmin(async (request, { user, db }) => {
         );
       }
     }
-    await updateSettings(db, enabled ? { $pull: { disabledProviders: provider } } : { $addToSet: { disabledProviders: provider } });
+    await writeSettings(db, enabled ? { $pull: { disabledProviders: provider } } : { $addToSet: { disabledProviders: provider } });
     void logInstanceAudit(db, {
       action: "instance_settings_changed",
       user: user._id,

@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import type { ScopedDb } from "@/lib/db-scope";
 import { decryptSecret, encryptSecret, isEncryptionConfigured } from "@/lib/encryption";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { entitlementRefusal, withAdmin } from "@/lib/middleware";
@@ -11,7 +10,7 @@ import { countInLiveWindow, recordFailedAttempt, sourceKey } from "@/lib/rate-li
 import { readJsonBody } from "@/lib/request-body";
 import { ssoView } from "@/lib/oidc/sso-view";
 import { BlockedDestinationError } from "@/lib/safe-fetch";
-import { duplicateKeyField } from "@/lib/mongo-errors";
+import { writeSettings } from "@/lib/settings-write";
 
 // The OpenID client wraps what its fetch threw, so the refusal of an internal address is found down the cause chain
 function isBlocked(error: unknown): boolean {
@@ -19,17 +18,6 @@ function isBlocked(error: unknown): boolean {
     if (e instanceof BlockedDestinationError) return true;
   }
   return false;
-}
-
-// Two first writes of one organisation's settings race on the unique index; the loser retries
-async function writeSettings(db: ScopedDb, update: Record<string, Record<string, unknown>>) {
-  const write = () => db.Settings.findOneAndUpdate({}, update, { upsert: true });
-  try {
-    await write();
-  } catch (err) {
-    if (duplicateKeyField(err) !== "organisation") throw err;
-    await write();
-  }
 }
 
 // Each save makes the server read an address the administrator typed, for up to a few seconds

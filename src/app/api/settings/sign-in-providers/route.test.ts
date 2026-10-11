@@ -29,8 +29,7 @@ vi.mock("@/models/settings", () => {
     return row;
   };
   return {
-    Settings: { findOne: () => ({ lean: async () => row }) },
-    updateSettings: (_db: unknown, update: Parameters<typeof apply>[0]) => apply(update),
+    Settings: { findOne: () => ({ lean: async () => row }), findOneAndUpdate: (_filter: unknown, update: Parameters<typeof apply>[0]) => apply(update) },
   };
 });
 
