@@ -30,7 +30,9 @@ export function assertSignInConfig(): void {
   }
   if (raw === "off" && sharedProviders().length === 0) {
     throw new Error(
-      "PASSWORD_SIGN_IN=off needs a sign-in provider: set OIDC_ISSUER/OIDC_CLIENT_ID/OIDC_CLIENT_SECRET, GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET or GITHUB_OAUTH_CLIENT_ID/GITHUB_OAUTH_CLIENT_SECRET"
+      organisationDomain() !== null
+        ? "PASSWORD_SIGN_IN=off needs a sign-in provider every organisation is offered: set GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET or GITHUB_OAUTH_CLIENT_ID/GITHUB_OAUTH_CLIENT_SECRET (an organisation's own provider is set under Settings → Single sign-on)"
+        : "PASSWORD_SIGN_IN=off needs a sign-in provider: set OIDC_ISSUER/OIDC_CLIENT_ID/OIDC_CLIENT_SECRET, GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET or GITHUB_OAUTH_CLIENT_ID/GITHUB_OAUTH_CLIENT_SECRET"
     );
   }
 }

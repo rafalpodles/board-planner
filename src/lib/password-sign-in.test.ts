@@ -55,7 +55,7 @@ describe("passwords off in the cloud, where the generic provider is each organis
     withOidc();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    expect(() => assertSignInConfig()).toThrow(/needs a sign-in provider/);
+    expect(() => assertSignInConfig()).toThrow(/every organisation is offered: set GOOGLE_CLIENT_ID/);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("OIDC_ISSUER is ignored with ORGANISATION_DOMAIN set"));
     warn.mockRestore();
   });
