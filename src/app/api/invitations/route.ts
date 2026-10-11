@@ -7,12 +7,16 @@ import { isValidEmail, normaliseEmail } from "@/lib/email";
 import { originFor } from "@/lib/organisation-host";
 import { issueInvitation, InvitationBoardInput, recordDelivery } from "@/lib/invitations";
 import { memberLimitRefusal } from "@/lib/member-limit";
+import { isRateLimited, recordFailedAttempt } from "@/lib/rate-limit";
+import { deliverWithinBudget, invitationRefusal, tooManyInvitations } from "@/lib/invitation-throttle";
 import { deliverTo, INTERACTIVE_ONLY, NO_ORIGIN_ERROR } from "@/lib/invitation-mail";
 import { describeInvitation, toApiInvitations } from "@/lib/invitation-view";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { GRANT_RELATIONS, GrantRelation } from "@/types";
 
 const MAX_BOARDS = 100;
+// An administrator's own budget, as an owner's is on a board: the organisation and the address have theirs
+const INVITES_PER_ADMIN = 30;
 
 
 export const GET = withAdmin(async (_request, { user, db }) => {
@@ -57,6 +61,9 @@ export const POST = withAdmin(async (request, { user, db }) => {
   if (user.viaMachineCredential) {
     return NextResponse.json({ error: INTERACTIVE_ONLY }, { status: 403 });
   }
+  const adminKey = `invite:${String(user._id)}`;
+  if (await isRateLimited(adminKey, INVITES_PER_ADMIN)) return tooManyInvitations();
+
   const read = await readJsonBody<{ email?: unknown; role?: unknown; boards?: unknown }>(request);
   if (!read.ok) return read.response;
   const body = read.value;
@@ -79,12 +86,17 @@ export const POST = withAdmin(async (request, { user, db }) => {
   if (!origin) return NextResponse.json({ error: NO_ORIGIN_ERROR }, { status: 500 });
 
   await connectDB();
+  // Spent before the account check, so the answer to "does this address have an account" is
+  // budgeted like everything else this route answers
+  await recordFailedAttempt(adminKey);
   if (await db.User.exists({ email })) {
     return NextResponse.json(
       { error: "That address already has an account. Add them to a board instead." },
       { status: 409 }
     );
   }
+  const refused = await invitationRefusal(db, email);
+  if (refused) return refused;
   const full = await memberLimitRefusal(db, { email });
   if (full) return full;
   const projects = await db.Project.find({ _id: { $in: boards.value.map((b) => b.project) } })
@@ -100,7 +112,9 @@ export const POST = withAdmin(async (request, { user, db }) => {
     boards: boards.value,
     invitedBy: user._id,
   });
-  const delivery = await deliverTo(invitation.email, token, origin, user, role, boards.value, projects);
+  const delivery = await deliverWithinBudget(db, email, origin, token, () =>
+    deliverTo(invitation.email, token, origin, user, role, boards.value, projects)
+  );
   await recordDelivery(db, invitation._id, token, delivery.delivery);
 
   void logInstanceAudit(db, {

@@ -9,17 +9,24 @@ const userExists = vi.fn();
 const projectFind = vi.fn();
 const logInstanceAudit = vi.fn();
 const selfOrigin = vi.fn();
+const ORGANISATION = DEFAULT_ORGANISATION_ID.toHexString();
 const memberLimitRefusal = vi.fn();
 let caller: Record<string, unknown>;
 
 vi.mock("@/lib/middleware", async () => {
   const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
+const { resetRateLimits, recordFailedAttempt } = await import("@/lib/rate-limit");
   return {
     withAdmin:
       (handler: (r: Request, c: unknown) => unknown) =>
       (request: Request, ctx: { params: Promise<Record<string, string>> }) =>
         handler(request, { params: ctx.params, user: caller, db: scopedToDefaultOrganisation() }),
   };
+});
+vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+vi.mock("@/models/rateLimit", async () => {
+  const { inMemoryRateLimitModel } = await import("@/lib/rate-limit-test-store");
+  return { RateLimit: inMemoryRateLimitModel() };
 });
 vi.mock("@/lib/session", () => ({ selfOrigin }));
 vi.mock("@/lib/member-limit", () => ({ memberLimitRefusal }));
@@ -38,6 +45,7 @@ vi.mock("@/models/user", () => ({ User: { exists: userExists } }));
 vi.mock("@/models/project", () => ({ Project: { find: projectFind } }));
 
 const { POST } = await import("./route");
+const { resetRateLimits, recordFailedAttempt } = await import("@/lib/rate-limit");
 const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 
 const ID = "64b0000000000000000000aa";
@@ -50,7 +58,8 @@ const resend = (body?: unknown) =>
     { params: Promise.resolve({ invitationId: ID }) }
   );
 
-beforeEach(() => {
+beforeEach(async () => {
+  await resetRateLimits();
   vi.clearAllMocks();
   caller = { _id: "admin-2", username: "second", fullName: "Second Admin", role: "admin" };
   selfOrigin.mockReturnValue("https://planner.example");
@@ -66,6 +75,37 @@ beforeEach(() => {
     dropped: [],
   });
   deliverTo.mockResolvedValue({ delivery: "email" });
+});
+
+// BP-923. A resend mails the address again, so it spends what sending one spends
+describe("POST /api/invitations/:id/resend: what it may send", () => {
+  it("is refused, writing nothing, once the organisation's sending budget is spent", async () => {
+    for (let i = 0; i < 100; i++) await recordFailedAttempt(`invite-send:${ORGANISATION}`);
+
+    const res = await resend();
+
+    expect(res.status).toBe(429);
+    expect(reissueInvitation).not.toHaveBeenCalled();
+  });
+
+  it("hands back the link instead of mailing an address whose inbox is past its ceiling, and says nothing of why", async () => {
+    for (let i = 0; i < 20; i++) await recordFailedAttempt("board-invite-to:ada@example.com");
+
+    const res = await resend();
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ delivery: "link", reason: "mail_failed" });
+    expect(deliverTo).not.toHaveBeenCalled();
+  });
+
+  it("asks for a link without spending the budget, since nothing is sent", async () => {
+    for (let i = 0; i < 100; i++) await recordFailedAttempt(`invite-send:${ORGANISATION}`);
+
+    const res = await resend({ delivery: "link" });
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).delivery).toBe("link");
+  });
 });
 
 describe("POST /api/invitations/:id/resend", () => {

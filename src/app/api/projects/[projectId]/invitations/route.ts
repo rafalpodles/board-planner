@@ -8,16 +8,14 @@ import { originFor } from "@/lib/organisation-host";
 import { inviteToBoard, recordDelivery } from "@/lib/invitations";
 import { memberLimitRefusal } from "@/lib/member-limit";
 import { deliverTo, INTERACTIVE_ONLY, NO_ORIGIN_ERROR } from "@/lib/invitation-mail";
+import { deliverWithinBudget, invitationRefusal } from "@/lib/invitation-throttle";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { ApiBoardInvitation, GRANT_RELATIONS, GrantRelation } from "@/types";
 
-// Each one may send mail to an address the sender chooses, so an owner gets a budget, not a hose;
-// and one address gets a ceiling of its own, however many owners take turns
+// Each one may send mail to an address the sender chooses, so an owner gets a budget, not a hose; the
+// organisation and the address get ceilings of their own (invitation-throttle.ts)
 const INVITES_PER_OWNER = 30;
-const INVITES_PER_ADDRESS = 5;
-// Across every organisation, so the address's inbox keeps a ceiling however many organisations there are
-const INVITES_PER_ADDRESS_EVERYWHERE = 20;
 
 export const GET = withProjectOwner(async (_request, { params, user, db }) => {
   if (user.viaMachineCredential) {
@@ -101,17 +99,8 @@ export const POST = withProjectOwner(async (request, { params, user, db }) => {
     );
   }
 
-  const addressKey = `board-invite-to:${db.organisation.toHexString()}:${email}`;
-  const inboxKey = `board-invite-to:${email}`;
-  if (
-    (await isRateLimited(addressKey, INVITES_PER_ADDRESS)) ||
-    (await isRateLimited(inboxKey, INVITES_PER_ADDRESS_EVERYWHERE))
-  ) {
-    return NextResponse.json(
-      { error: "That address has been invited too often. Try again in 15 minutes." },
-      { status: 429 }
-    );
-  }
+  const refused = await invitationRefusal(db, email);
+  if (refused) return refused;
 
   // An address that is already a pending invitation joins that seat; only a new one needs room
   const full = await memberLimitRefusal(db, { email });
@@ -149,16 +138,16 @@ export const POST = withProjectOwner(async (request, { params, user, db }) => {
     return NextResponse.json({ outcome: outcome.kind });
   }
 
-  await recordFailedAttempt(addressKey);
-  await recordFailedAttempt(inboxKey);
-  const delivery = await deliverTo(
-    email,
-    outcome.token,
-    origin,
-    user,
-    "member",
-    [{ project: projectId, relation: relation as GrantRelation }],
-    [project]
+  const delivery = await deliverWithinBudget(db, email, origin, outcome.token, () =>
+    deliverTo(
+      email,
+      outcome.token,
+      origin,
+      user,
+      "member",
+      [{ project: projectId, relation: relation as GrantRelation }],
+      [project]
+    )
   );
   await recordDelivery(db, outcome.invitation._id, outcome.token, delivery.delivery);
 
