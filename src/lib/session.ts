@@ -315,11 +315,22 @@ export function checkProvenance(request: Request): ProvenanceVerdict {
   if (!origin) return { ok: false, reason: "no-provenance" };
 
   warnOnceSecFetchMissing();
-  const own = selfOrigin();
-  const allowed = own ? [...appOrigins(), own] : appOrigins();
-  return allowed.includes(normaliseOrigin(origin))
+  return acceptedOrigins(request).includes(normaliseOrigin(origin))
     ? { ok: true }
     : { ok: false, reason: "origin-mismatch" };
+}
+
+// With organisations on their own hosts the allowlist is the wrong question: `app.<domain>` is not a
+// reason to accept a write sent to `acme.<domain>`, and `acme.<domain>` is no reason to refuse one.
+// The host the request arrived on is what the organisation was already chosen by (BP-923)
+function acceptedOrigins(request: Request): string[] {
+  if (process.env.ORGANISATION_DOMAIN?.trim()) {
+    const host = request.headers.get("host")?.trim().toLowerCase();
+    if (!host) return [];
+    return [`${selfOrigin()?.startsWith("http://") ? "http:" : "https:"}//${host}`];
+  }
+  const own = selfOrigin();
+  return own ? [...appOrigins(), own] : appOrigins();
 }
 
 // Once, not per request: a browser always sends Sec-Fetch-Site, so its absence may mean a stripping proxy

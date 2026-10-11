@@ -411,6 +411,70 @@ describe("provenance", () => {
     });
   });
 
+  // BP-923. With ORGANISATION_DOMAIN the Host names the organisation, so the Origin a write must
+  // carry when a proxy strips Sec-Fetch-* is that host's own, not a global allowlist
+  describe("with organisations on their own hosts", () => {
+    const cloud = () => {
+      process.env.ORGANISATION_DOMAIN = "board-planner.com";
+      process.env.PUBLIC_ORIGIN = "https://app.board-planner.com";
+      process.env.APP_ORIGIN = "https://app.board-planner.com";
+    };
+    afterEach(() => delete process.env.ORGANISATION_DOMAIN);
+
+    it("accepts the origin of the organisation's own host, which no allowlist names", () => {
+      cloud();
+
+      expect(checkProvenance(mutating({ host: "acme.board-planner.com", origin: "https://acme.board-planner.com" })).ok).toBe(true);
+    });
+
+    it("refuses app.<domain> sent to an organisation's host, though PUBLIC_ORIGIN names it", () => {
+      cloud();
+
+      expect(checkProvenance(mutating({ host: "acme.board-planner.com", origin: "https://app.board-planner.com" }))).toEqual({
+        ok: false,
+        reason: "origin-mismatch",
+      });
+    });
+
+    it("refuses another organisation's origin", () => {
+      cloud();
+
+      expect(checkProvenance(mutating({ host: "acme.board-planner.com", origin: "https://globex.board-planner.com" })).ok).toBe(false);
+    });
+
+    it("still accepts the default organisation's own host, which is app.<domain>", () => {
+      cloud();
+
+      expect(checkProvenance(mutating({ host: "app.board-planner.com", origin: "https://app.board-planner.com" })).ok).toBe(true);
+    });
+
+    it("keeps the port in the comparison, as a browser sends it", () => {
+      process.env.ORGANISATION_DOMAIN = "organisations.localhost";
+      process.env.PUBLIC_ORIGIN = "http://organisations.localhost:4000";
+
+      expect(checkProvenance(mutating({ host: "acme.organisations.localhost:4000", origin: "http://acme.organisations.localhost:4000" })).ok).toBe(true);
+      expect(checkProvenance(mutating({ host: "acme.organisations.localhost:4000", origin: "http://acme.organisations.localhost:4001" })).ok).toBe(false);
+    });
+
+    it("refuses an origin with nothing to compare it with", () => {
+      cloud();
+
+      expect(checkProvenance(mutating({ origin: "https://acme.board-planner.com" })).ok).toBe(false);
+    });
+
+    it("leaves Sec-Fetch-Site in charge when the browser sends it", () => {
+      cloud();
+
+      expect(checkProvenance(mutating({ host: "acme.board-planner.com", "sec-fetch-site": "same-origin" })).ok).toBe(true);
+    });
+
+    it("is not what a self-hosted instance runs — the control", () => {
+      process.env.APP_ORIGIN = "https://app.example.com";
+
+      expect(checkProvenance(mutating({ host: "elsewhere.example.com", origin: "https://app.example.com" })).ok).toBe(true);
+    });
+  });
+
   it("refuses when both signals are absent", () => {
     expect(checkProvenance(mutating())).toEqual({ ok: false, reason: "no-provenance" });
   });
