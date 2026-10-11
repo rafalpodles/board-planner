@@ -102,6 +102,21 @@ test.describe("an instance nobody has claimed", () => {
     await expect(page.getByTestId("sidebar-organisation")).toHaveCount(0);
   });
 
+  // BP-847: with no client address every caller shared one bucket, and a few hundred wrong codes
+  // from anybody shut the operator out of the instance they had just deployed
+  test("a flood of wrong setup codes does not shut the right one out", async ({ request }) => {
+    const create = (setupCode: string) =>
+      request.post("/api/users", {
+        headers: { "sec-fetch-site": "none" },
+        data: { username: "firstadmin", password: "test1234", fullName: "First Admin", setupCode },
+      });
+
+    for (let i = 0; i < 210; i++) expect((await create(`wrong-${i}`)).status(), `wrong code ${i}`).toBe(403);
+
+    const created = await create(BOOTSTRAP_TOKEN);
+    expect(created.status(), await created.text()).toBe(201);
+  });
+
   test("refuses an organisation name that is too long, before making the account", async ({ request }) => {
     const refused = await request.post("/api/users", {
       headers: { "sec-fetch-site": "none" },

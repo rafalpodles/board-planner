@@ -9,6 +9,7 @@ const isEmailConfigured = vi.fn();
 const userFindOne = vi.fn();
 const logInstanceAudit = vi.fn();
 const signedInRecently = vi.fn();
+const warnIfAdminsLockedOut = vi.fn();
 let caller: Record<string, unknown>;
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
@@ -23,6 +24,10 @@ const LIVE = { $or: [{ provider: "oidc", issuer: { $in: ["https://id.example.com
 vi.mock("@/lib/oidc/providers", () => ({ providerFor: async () => ({ label: "Acme" }), liveIdentityFilterFor: async () => LIVE }));
 const identityExists = vi.fn();
 vi.mock("@/lib/email", () => ({ isEmailConfigured }));
+vi.mock("@/lib/password-sign-in", async (original) => ({
+  ...(await original<typeof import("@/lib/password-sign-in")>()),
+  warnIfAdminsLockedOut,
+}));
 vi.mock("@/lib/session", () => ({ signedInRecently, RECENT_SIGN_IN_REQUIRED: "sign in again" }));
 vi.mock("@/models/identity", () => ({
   Identity: {
@@ -80,6 +85,17 @@ describe("DELETE /api/users/me/identities/:id", () => {
     expect(identityExists).toHaveBeenCalledWith({ _id: ID, ...LIVE, organisation: DEFAULT_ORGANISATION_ID });
     expect(identityDelete).toHaveBeenCalled();
     expect(identityInsert).not.toHaveBeenCalled();
+  });
+
+  it("checks that the administrators left can still sign in after an administrator unlinks, and not after a member", async () => {
+    caller = { _id: "u1", username: "ada", role: "admin" };
+    expect((await unlink()).status).toBe(200);
+    expect(warnIfAdminsLockedOut).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "an administrator unlinking a provider");
+
+    warnIfAdminsLockedOut.mockClear();
+    caller = { _id: "u2", username: "bob", role: "member" };
+    expect((await unlink()).status).toBe(200);
+    expect(warnIfAdminsLockedOut).not.toHaveBeenCalled();
   });
 
   it("unlinks a provider from an account that also has a password", async () => {

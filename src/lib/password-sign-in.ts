@@ -79,3 +79,13 @@ export async function adminsLockedOut(db: ScopedDb): Promise<string | null> {
     "Turn passwords on, link a provider under Settings → Security (or confirm an administrator's address), then off again."
   );
 }
+
+/** The startup warning, said again where the state is reached: nothing here may fail the request that got it there. */
+export async function warnIfAdminsLockedOut(db: ScopedDb, after: string): Promise<void> {
+  try {
+    const lockedOut = await adminsLockedOut(db);
+    if (lockedOut) console.error(`WARNING (after ${after}): ${lockedOut}`);
+  } catch (error) {
+    console.error("The check for administrators with no way in failed:", error);
+  }
+}

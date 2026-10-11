@@ -6,7 +6,8 @@ const isEmailConfigured = vi.fn();
 const issueResetToken = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
-vi.mock("@/lib/auth", () => ({ getClientIp: () => "203.0.113.7" }));
+const caller = vi.hoisted(() => ({ ip: "203.0.113.7" as string | null }));
+vi.mock("@/lib/auth", () => ({ getClientIp: () => caller.ip }));
 vi.mock("@/models/rateLimit", async () => {
   const { inMemoryRateLimitModel } = await import("@/lib/rate-limit-test-store");
   return { RateLimit: inMemoryRateLimitModel() };
@@ -42,6 +43,7 @@ const UNIFORM = "If that account exists and has an email address, a link is on i
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  caller.ip = "203.0.113.7";
   await resetRateLimits();
   isEmailConfigured.mockReturnValue(true);
   issueResetToken.mockResolvedValue("cpr_deadbeef");
@@ -195,6 +197,68 @@ describe("POST /api/auth/forgot", () => {
 
       expect((await POST(oversized())).status).toBe(413);
     });
+  });
+});
+
+/**
+ * BP-847. With no trusted proxy there is no client address, and the one bucket every such caller
+ * shared let anybody hold every account's reset for the window. What is counted instead is the
+ * links sent for one account.
+ */
+describe("with no client address", () => {
+  beforeEach(() => {
+    caller.ip = null;
+  });
+
+  it("holds one account's reset after five asks, and says the same thing as a source ceiling does", async () => {
+    for (let i = 0; i < 5; i++) expect((await POST(post("owner"))).status).toBe(200);
+
+    const res = await POST(post("owner"));
+
+    expect(res.status).toBe(429);
+    expect(await res.json()).toEqual({ error: "Too many requests. Try again in 15 minutes." });
+    expect(sendEmail).toHaveBeenCalledTimes(5);
+  });
+
+  it("does not hold anybody else's reset — the control", async () => {
+    for (let i = 0; i < 6; i++) await POST(post("owner"));
+    expect((await POST(post("owner"))).status).toBe(429);
+
+    found({ _id: "u2", username: "other", email: "other@example.com", fullName: "Other" });
+
+    expect((await POST(post("other"))).status).toBe(200);
+  });
+
+  it("is not a ceiling on the whole instance: forty different names are all answered", async () => {
+    for (let i = 0; i < 40; i++) expect((await POST(post(`person-${i}`))).status).toBe(200);
+  });
+
+  it("counts the account by what it is called, not by how it was typed", async () => {
+    for (const typed of ["owner", "Owner", " OWNER ", "owner", "owner"]) await POST(post(typed));
+
+    expect((await POST(post("oWnEr"))).status).toBe(429);
+  });
+
+  it("counts a request that found nothing, so naming a stranger is metered too", async () => {
+    found(null);
+    for (let i = 0; i < 5; i++) await POST(post("ghost"));
+
+    expect((await POST(post("ghost"))).status).toBe(429);
+  });
+
+  it("reads the body before it counts, and still caps it", async () => {
+    const oversized = new Request("http://x/api/auth/forgot", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ identifier: "x".repeat(70 * 1024) }),
+    });
+
+    expect((await POST(oversized)).status).toBe(413);
+  });
+
+  it("leaves a source with an address on its own, larger ceiling — the control", async () => {
+    caller.ip = "203.0.113.7";
+    for (let i = 0; i < 10; i++) expect((await POST(post("owner"))).status).toBe(200);
   });
 });
 

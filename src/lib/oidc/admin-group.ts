@@ -1,6 +1,7 @@
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { IUser } from "@/types";
 import type { ScopedDb } from "@/lib/db-scope";
+import { warnIfAdminsLockedOut } from "@/lib/password-sign-in";
 
 const ACTIVE_ADMINS = { role: "admin", deactivatedAt: null } as const;
 
@@ -50,6 +51,7 @@ export async function applyAdminGroup(db: ScopedDb, user: IUser, providerId: str
     }
     user.role = "member";
     record(db, user, "admin → member", `no longer in the identity provider's group ${group}`);
+    void warnIfAdminsLockedOut(db, "an admin-group demotion");
   }
 }
 

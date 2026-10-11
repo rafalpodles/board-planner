@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { passwordSignInEnabled, passwordSignInOff } from "@/lib/password-sign-in";
+import { passwordSignInEnabled, passwordSignInOff, warnIfAdminsLockedOut } from "@/lib/password-sign-in";
 import { HydratedDocument, isValidObjectId } from "mongoose";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
@@ -262,6 +262,7 @@ export const PUT = withAdmin(async (request, { params, user: admin, db }) => {
       detail: `${previousRole} → ${target.role}`,
     });
   }
+  if (roleWasChanged && previousRole === "admin") void warnIfAdminsLockedOut(db, "an administrator's demotion");
 
   if (passwordWasSet) {
     // Handing somebody a password is the administrator's answer to "I cannot get in", so it has to
@@ -441,6 +442,7 @@ export const DELETE = withAdmin(async (_request, { params, user: admin, db }) =>
   // A link left behind would refuse the same person's provider as "already linked" for good
   await db.Identity.deleteMany({ user: user._id });
   await revokeUserSessions(user._id);
+  if (user.role === "admin") void warnIfAdminsLockedOut(db, "an administrator's deletion");
 
   return NextResponse.json({ message: "User deleted" });
 });
@@ -526,6 +528,7 @@ async function accountAction(
       target: target.username,
       detail: "",
     });
+    if (target.role === "admin") void warnIfAdminsLockedOut(db, "an administrator's deactivation");
     return NextResponse.json({ ok: true });
   }
   if (action === "reactivate") {
@@ -559,5 +562,8 @@ async function accountAction(
     target: target.username,
     detail: `${revoked?.identitiesUnlinked ?? 0} sign-in provider(s) unlinked`,
   });
+  if (target.role === "admin" && revoked?.identitiesUnlinked) {
+    void warnIfAdminsLockedOut(db, "an administrator's sign-in providers being unlinked");
+  }
   return NextResponse.json({ ok: true });
 }

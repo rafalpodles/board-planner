@@ -246,6 +246,11 @@ export function sourceKey(clientIp: string, scope = "login"): string {
   return `${scope}:source:${clientIp}`;
 }
 
+/** The target dimension: one key per account named, for a route with no caller to tell apart. */
+export function targetKey(organisation: Types.ObjectId, identifier: string, scope: string): string {
+  return `${scope}:target:${accountDigest(organisation, identifier)}`;
+}
+
 /**
  * A per-address ceiling collapses into a per-*instance* ceiling when there is no address, and the
  * two want very different numbers. At the per-address figure, one anonymous caller sending ten

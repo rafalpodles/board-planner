@@ -7,7 +7,7 @@ import { isEmailConfigured } from "@/lib/email";
 import { liveIdentityFilterFor, providerFor } from "@/lib/oidc/providers";
 import { Identity } from "@/models/identity";
 import { RECENT_SIGN_IN_REQUIRED, signedInRecently } from "@/lib/session";
-import { passwordSignInEnabled } from "@/lib/password-sign-in";
+import { passwordSignInEnabled, warnIfAdminsLockedOut } from "@/lib/password-sign-in";
 
 export const DELETE = withAuth(async (_request, { params, user, db }) => {
   if (user.viaMachineCredential) {
@@ -61,5 +61,6 @@ export const DELETE = withAuth(async (_request, { params, user, db }) => {
     target: user.username,
     detail: (await providerFor(db, identity.provider))?.label ?? identity.provider,
   });
+  if (user.role === "admin") void warnIfAdminsLockedOut(db, "an administrator unlinking a provider");
   return NextResponse.json({ ok: true });
 });
