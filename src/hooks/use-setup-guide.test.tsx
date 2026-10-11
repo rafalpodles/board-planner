@@ -47,6 +47,7 @@ describe("useSetupGuide", () => {
     const { result } = renderHook(() => useSetupGuide("ORB", "/projects/ORB", true));
 
     await waitFor(() => expect(api.get).toHaveBeenCalled());
+    await act(async () => {});
     expect(result.current.guide).toBeNull();
   });
 
@@ -87,6 +88,50 @@ describe("useSetupGuide", () => {
     });
 
     expect(api.get).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops reading once there is nothing to show, for a reader who is not shown one", async () => {
+    api.get.mockResolvedValue({ show: false, steps: [] });
+    renderHook(() => useSetupGuide("ORB", "/projects/ORB", true));
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(1));
+    await act(async () => {});
+
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    window.dispatchEvent(new CustomEvent("bp:api-write", { detail: { url: "/api/projects/p/tasks" } }));
+    await act(async () => {});
+
+    expect(api.get).toHaveBeenCalledTimes(1);
+    expect(api.put).not.toHaveBeenCalled();
+  });
+
+  it("keeps a finished guide finished: a machine going quiet overnight does not bring it back", async () => {
+    api.get.mockResolvedValue({ show: false, steps: answer(2).steps });
+    renderHook(() => useSetupGuide("ORB", "/projects/ORB", true));
+
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith("/api/projects/ORB/setup-guide", { body: {} }));
+    await act(async () => {});
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await act(async () => {});
+
+    expect(api.put).toHaveBeenCalledTimes(1);
+    expect(api.get).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads a board it has just been moved to once, though its address changed too", async () => {
+    const { rerender } = renderHook(({ ref, path }) => useSetupGuide(ref, path, true), {
+      initialProps: { ref: "ORB", path: "/projects/ORB" },
+    });
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(1));
+
+    rerender({ ref: "NOV", path: "/projects/NOV" });
+    await act(async () => {});
+
+    expect(api.get).toHaveBeenCalledTimes(2);
+    expect(api.get).toHaveBeenLastCalledWith("/api/projects/NOV/setup-guide");
   });
 
   it("hides at once, and an answer that was already on its way does not bring it back", async () => {

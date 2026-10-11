@@ -7,6 +7,7 @@ import { isWorkerLockedByInstance } from "@/lib/worker-gate";
 import { machineReadinessFor } from "@/lib/worker-service";
 import { claimingMachineIds } from "@/lib/machine-limit";
 import { getOrganisation } from "@/lib/organisation";
+import { resolveModelKey } from "@/lib/model-keys";
 import { organisationDomain } from "@/lib/organisation-host";
 import {
   columnsCustomised,
@@ -31,8 +32,14 @@ export const GET = withProjectAccess(async (_request, { params, user, db }) => {
 
   if (!(await check(db, user, projectId, "admin"))) return NextResponse.json(NOTHING);
 
+  // Hidden, or finished and then hidden: nothing else is worth reading
+  const me = await db.User.findById(user._id, "dismissedSetupGuides").lean();
+  if ((me?.dismissedSetupGuides ?? []).some((id) => String(id) === String(projectId))) {
+    return NextResponse.json(NOTHING);
+  }
+
   const instanceAdmin = user.role === "admin";
-  const [project, workers, claiming, hasTasks, grantCount, hasSprint, handedOver, mcpClient, me, settings, organisation] =
+  const [project, workers, claiming, hasTasks, grantCount, hasSprint, handedOver, mcpClient, settings, organisation, modelKey] =
     await Promise.all([
       db.Project.findById(
         projectId,
@@ -48,9 +55,9 @@ export const GET = withProjectAccess(async (_request, { params, user, db }) => {
       db.Sprint.exists({ project: projectId }),
       db.Task.exists({ project: projectId, agent: { $ne: null } }),
       db.OAuthToken.exists({ user: user._id, refreshExpiresAt: { $gt: new Date() } }),
-      db.User.findById(user._id, "dismissedSetupGuides").lean(),
       instanceAdmin ? db.Settings.findOne({}, "openrouterKey sso").lean() : null,
       instanceAdmin ? getOrganisation(db.organisation) : null,
+      instanceAdmin ? resolveModelKey(db) : null,
     ]);
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
@@ -65,7 +72,7 @@ export const GET = withProjectAccess(async (_request, { params, user, db }) => {
     hasWebhook: (project.webhooks?.length ?? 0) > 0,
     mcpConnected: !!mcpClient,
     pmEnabled: !!project.pm?.enabled,
-    ownAiKey: !!settings?.openrouterKey,
+    aiKeySet: !!settings?.openrouterKey || !!modelKey?.ok,
     workerEnabled: !!project.worker?.enabled,
     lockedByInstance: isWorkerLockedByInstance(project.worker),
     machine: machineReadinessFor(workers, project, new Date(), claiming).state,
@@ -76,14 +83,16 @@ export const GET = withProjectAccess(async (_request, { params, user, db }) => {
     hosted: organisationDomain() !== null,
   });
 
-  const dismissed = (me?.dismissedSetupGuides ?? []).some((id) => String(id) === String(projectId));
-  const body: ApiSetupGuide = { show: !dismissed && !setupGuideComplete(steps), steps };
+  const body: ApiSetupGuide = { show: !setupGuideComplete(steps), steps };
   return NextResponse.json(body);
 });
 
 export const PUT = withProjectAccess(async (_request, { params, user, db }) => {
   const { projectId } = await params;
   await connectDB();
+
+  // Only somebody who is shown a guide has one to hide; a narrowed token or a member hides nothing
+  if (!(await check(db, user, projectId, "admin"))) return NextResponse.json({ ok: true });
 
   const me = await db.User.findById(user._id, "dismissedSetupGuides").lean();
   if (!(me?.dismissedSetupGuides ?? []).some((id) => String(id) === String(projectId))) {

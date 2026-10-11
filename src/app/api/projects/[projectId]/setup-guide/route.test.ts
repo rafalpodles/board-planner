@@ -13,6 +13,7 @@ const userLean = vi.fn();
 const userUpdate = vi.fn();
 const settingsLean = vi.fn();
 const getOrganisation = vi.fn();
+const resolveModelKey = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({
@@ -24,6 +25,7 @@ vi.mock("@/lib/grants", async (importOriginal) => {
   return { ...actual, check, accessibleProjectIds: vi.fn() };
 });
 vi.mock("@/lib/organisation", () => ({ getOrganisation }));
+vi.mock("@/lib/model-keys", () => ({ resolveModelKey }));
 vi.mock("@/models/project", () => ({
   Project: { findOne: () => ({ lean: projectLean }) },
 }));
@@ -57,6 +59,7 @@ beforeEach(() => {
   userLean.mockResolvedValue({ dismissedSetupGuides: [] });
   settingsLean.mockResolvedValue(null);
   getOrganisation.mockResolvedValue({ entitlements: { plan: "free" } });
+  resolveModelKey.mockResolvedValue({ ok: false, reason: "not_configured", plan: "free" });
 });
 
 async function read() {
@@ -142,13 +145,36 @@ describe("GET setup guide", () => {
     expect(ids).not.toContain("plan");
   });
 
-  it("is hidden for a person who hid it, though steps are still open", async () => {
+  it("is hidden for a person who hid it, and reads nothing of the board for it", async () => {
     userLean.mockResolvedValue({ dismissedSetupGuides: [PROJECT] });
 
     const { body } = await read();
 
-    expect(body.show).toBe(false);
-    expect(body.steps.some((s: { done: boolean }) => !s.done)).toBe(true);
+    expect(body).toEqual({ show: false, steps: [] });
+    expect(projectLean).not.toHaveBeenCalled();
+    expect(workerFind).not.toHaveBeenCalled();
+    expect(grantCount).not.toHaveBeenCalled();
+  });
+
+  it("counts the AI key as set when the server or the plan supplies one, not only the organisation's own", async () => {
+    getAuthUser.mockResolvedValue({ _id: READER, role: "admin" });
+    resolveModelKey.mockResolvedValue({ ok: true, key: "k", source: "managed" });
+
+    expect(doneOf((await read()).body).aiKey).toBe(true);
+  });
+
+  it("counts an own key it cannot read as set, rather than asking for one again", async () => {
+    getAuthUser.mockResolvedValue({ _id: READER, role: "admin" });
+    settingsLean.mockResolvedValue({ openrouterKey: "sealed" });
+    resolveModelKey.mockResolvedValue({ ok: false, reason: "own_key_unreadable", plan: "free" });
+
+    expect(doneOf((await read()).body).aiKey).toBe(true);
+  });
+
+  it("does not look for a model key for somebody who is not an instance admin", async () => {
+    await read();
+
+    expect(resolveModelKey).not.toHaveBeenCalled();
   });
 
   it("answers 404 for a board that is gone", async () => {
@@ -169,6 +195,15 @@ describe("PUT setup guide", () => {
     const [filter, update] = userUpdate.mock.calls[0];
     expect(filter).toEqual({ _id: READER, organisation: DEFAULT_ORGANISATION_ID });
     expect(update).toEqual({ $push: { dismissedSetupGuides: { $each: [PROJECT], $slice: -200 } } });
+  });
+
+  it("records nothing for somebody who is shown no guide", async () => {
+    check.mockImplementation(async (_db: unknown, _user: unknown, _project: string, need: string) => need === "access");
+
+    const res = await hide();
+
+    expect(res.status).toBe(200);
+    expect(userUpdate).not.toHaveBeenCalled();
   });
 
   it("does not record it twice", async () => {

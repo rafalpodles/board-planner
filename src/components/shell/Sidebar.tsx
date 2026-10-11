@@ -176,6 +176,10 @@ export function Sidebar({
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
+  const returnFocusToCard = useRef(false);
+  useEffect(() => {
+    returnFocusToCard.current = false;
+  });
   const [unreadCount, setUnreadCount] = useState(0);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -214,6 +218,7 @@ export function Sidebar({
   }, []);
 
   const toggleCollapsed = useCallback(() => {
+    setGuideOpen(false);
     chooseMode(mode === "expanded" ? narrowMode : "expanded");
   }, [chooseMode, mode, narrowMode]);
 
@@ -277,7 +282,9 @@ export function Sidebar({
 
   // The drawer is always full width, so the icon-only rail is a desktop-only state
   const peeking = mode === "hover" && (hovered || focusedWithin || menuOpen || dragging);
-  const compact = (mode === "collapsed" || (mode === "hover" && !peeking)) && !mobileOpen;
+  // The guide is read in the full sidebar, which opens for it without changing what the person chose
+  const guideOpenNow = guideOpen && !!guide && !!projectRef;
+  const compact = (mode === "collapsed" || (mode === "hover" && !peeking)) && !mobileOpen && !guideOpenNow;
   const floats = mode === "hover";
 
   const isActive = (href: string) => isNavItemActive(pathname, href);
@@ -354,11 +361,14 @@ export function Sidebar({
         </Link>
       )}
 
-      {guide && projectRef && guideOpen && !compact ? (
+      {guide && projectRef && guideOpenNow ? (
         <SetupGuidePanel
           guide={guide}
           projectRef={projectRef}
-          onClose={() => setGuideOpen(false)}
+          onClose={() => {
+            returnFocusToCard.current = true;
+            setGuideOpen(false);
+          }}
           onHide={() => {
             setGuideOpen(false);
             void hideGuide();
@@ -424,14 +434,12 @@ export function Sidebar({
       </nav>
       )}
 
-      {guide && !(guideOpen && !compact) && (
+      {guide && !guideOpenNow && (
         <SetupGuideCard
           guide={guide}
           compact={compact}
-          onOpen={() => {
-            if (compact) chooseMode("expanded");
-            setGuideOpen(true);
-          }}
+          focusOnMount={returnFocusToCard.current}
+          onOpen={() => setGuideOpen(true)}
         />
       )}
 

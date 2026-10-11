@@ -12,15 +12,24 @@ export function useSetupGuide(projectRef: string | undefined, pathname: string, 
   const api = useApi();
   const [guide, setGuide] = useState<ApiSetupGuide | null>(null);
   const reads = useRef({ issued: 0, hiddenAfter: 0 });
+  // Nothing shown is nothing to watch: hidden, finished or not this reader's to see
+  const settled = useRef(false);
+  const readAt = useRef(pathname);
 
   const load = useCallback(() => {
-    if (!projectRef) return;
+    if (!projectRef || settled.current) return;
     const read = ++reads.current.issued;
     api
       .get(`/api/projects/${projectRef}/setup-guide`)
       .then((body: ApiSetupGuide) => {
         // A read begun before Hide may answer after it with the guide still shown
-        if (read > reads.current.hiddenAfter) setGuide(body);
+        if (read <= reads.current.hiddenAfter) return;
+        setGuide(body);
+        if (body.show) return;
+        settled.current = true;
+        // Finished, as opposed to hidden or not this reader's: a machine going quiet overnight must
+        // not bring a completed guide back, so the finish is kept the way Hide is
+        if (body.steps.length > 0) void api.put(`/api/projects/${projectRef}/setup-guide`, { body: {} }).catch(() => undefined);
       })
       .catch(() => {
         if (read > reads.current.hiddenAfter) setGuide(null);
@@ -30,17 +39,19 @@ export function useSetupGuide(projectRef: string | undefined, pathname: string, 
 
   useEffect(() => {
     reads.current.hiddenAfter = reads.current.issued;
+    settled.current = false;
     setGuide(null);
     if (!enabled || !projectRef) return;
+    readAt.current = pathname;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectRef, enabled]);
 
   // A step is taken somewhere else, so the answer is read again on every move and on coming back
-  const firstPath = useRef(pathname);
   useEffect(() => {
-    if (firstPath.current === pathname) return;
-    firstPath.current = pathname;
+    // The read for a new board has just been made, whatever its path
+    if (readAt.current === pathname) return;
+    readAt.current = pathname;
     if (enabled && projectRef) load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname]);
@@ -73,10 +84,12 @@ export function useSetupGuide(projectRef: string | undefined, pathname: string, 
   const hide = useCallback(async () => {
     if (!projectRef) return;
     reads.current.hiddenAfter = reads.current.issued;
+    settled.current = true;
     setGuide(null);
     try {
       await api.put(`/api/projects/${projectRef}/setup-guide`, { body: {} });
     } catch {
+      settled.current = false;
       load();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

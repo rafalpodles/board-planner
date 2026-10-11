@@ -15,7 +15,8 @@ export interface SetupGuideFacts {
   /** An MCP client the reader approved, listed under Connected apps */
   mcpConnected: boolean;
   pmEnabled: boolean;
-  ownAiKey: boolean;
+  /** Something to run the PM and AI Assist on: the organisation's own key, the server's, or the managed one */
+  aiKeySet: boolean;
   workerEnabled: boolean;
   lockedByInstance: boolean;
   machine: MachineState;
@@ -58,23 +59,31 @@ export function setupGuideSteps(facts: SetupGuideFacts): ApiSetupGuideStep[] {
     webhook: facts.hasWebhook,
     mcp: facts.mcpConnected,
     pm: facts.pmEnabled,
-    aiKey: facts.ownAiKey,
+    aiKey: facts.aiKeySet,
     runs: facts.workerEnabled && !facts.lockedByInstance,
     machine: facts.machine === "live",
     handover: facts.handedOver,
     sso: facts.ssoConfigured,
     plan: facts.paidPlan,
   };
-  return STEPS.filter((s) => (!s.instanceAdminOnly || facts.readerIsInstanceAdmin) && (!s.hostedOnly || facts.hosted)).map(({ id, group }) => ({
+  // With agent runs locked off by an instance admin, nothing after the switch is the owner's to do
+  const lockedOut = facts.lockedByInstance && !facts.readerIsInstanceAdmin;
+  return STEPS.filter(
+    (s) =>
+      (!s.instanceAdminOnly || facts.readerIsInstanceAdmin) &&
+      (!s.hostedOnly || facts.hosted) &&
+      !(lockedOut && (s.id === "machine" || s.id === "handover"))
+  ).map(({ id, group }) => ({
     id,
     group,
     done: done[id],
-    locked: id === "runs" && facts.lockedByInstance && !facts.readerIsInstanceAdmin,
+    locked: id === "runs" && lockedOut,
   }));
 }
 
 export function setupGuideComplete(steps: ApiSetupGuideStep[]): boolean {
-  return steps.every((s) => s.done);
+  // A step locked by somebody else is not left for this reader to do
+  return steps.every((s) => s.done || s.locked);
 }
 
 type Stored = { id?: string; label?: string; role?: string };

@@ -3,6 +3,17 @@
 import { useEffect } from "react";
 
 const pending: string[] = [];
+
+// A link to another section of the page that is open leaves nothing behind: every section stays mounted
+function sameSearchBesidesSection(a: string, b: string): boolean {
+  const strip = (search: string) => {
+    const params = new URLSearchParams(search);
+    params.delete("section");
+    params.sort();
+    return params.toString();
+  };
+  return strip(a) === strip(b);
+}
 // Once a person has said yes, the same leave is not asked about again: not by a link's own
 // handler navigating in code, and not by the browser's prompt on the full load that follows
 const APPROVAL_MS = 1_000;
@@ -40,7 +51,7 @@ export function useLeaveGuard(dirty: boolean, message: string) {
       if (!(anchor instanceof HTMLAnchorElement) || anchor.target === "_blank") return;
       const next = new URL(anchor.href, window.location.href);
       if (next.origin !== window.location.origin) return;
-      if (next.pathname === window.location.pathname && next.search === window.location.search) return;
+      if (next.pathname === window.location.pathname && sameSearchBesidesSection(next.search, window.location.search)) return;
       if (!mayLeave()) {
         e.preventDefault();
         e.stopPropagation();

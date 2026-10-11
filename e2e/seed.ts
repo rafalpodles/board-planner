@@ -2689,16 +2689,10 @@ export async function seedMcpConnection(user: mongoose.Types.ObjectId) {
   await stampOrganisationAndDisconnect();
 }
 
-/** The organisation's own AI key, as saved: OpenRouter checks a pasted key against its API, which a test cannot reach. */
-export async function seedOwnAiKey() {
+/** Every machine last heard of a day ago, as after a laptop was closed overnight. */
+export async function makeMachinesStale() {
   const db = (await connect()).db!;
-  await db
-    .collection("settings")
-    .updateOne(
-      { organisation: DEFAULT_ORGANISATION_ID },
-      { $set: { openrouterKey: "enc:e2e-placeholder", openrouterKeyHint: "…e2e" } },
-      { upsert: true }
-    );
+  await db.collection("workers").updateMany({}, { $set: { lastSeenAt: new Date(Date.now() - 24 * 60 * 60_000) } });
   await mongoose.disconnect();
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type { ApiSetupGuide, ApiSetupGuideStep, SetupGuideGroupId } from "@/types";
 import { GROUP_TITLES, STEP_COPY } from "./setup-guide-copy";
@@ -40,16 +40,25 @@ export function SetupGuideCard({
   guide,
   compact,
   onOpen,
+  focusOnMount = false,
 }: {
   guide: ApiSetupGuide;
   compact: boolean;
   onOpen: () => void;
+  /** Coming back from the panel, whose Back button this card has just replaced */
+  focusOnMount?: boolean;
 }) {
   const { done, total, next } = progress(guide);
+  const button = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (focusOnMount) button.current?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const label = `Setup guide, ${done} of ${total} done${next ? `. Next: ${STEP_COPY[next.id].title}` : ""}`;
   if (compact) {
     return (
       <button
+        ref={button}
         type="button"
         onClick={onOpen}
         title={label}
@@ -63,6 +72,7 @@ export function SetupGuideCard({
   }
   return (
     <button
+      ref={button}
       type="button"
       onClick={onOpen}
       data-testid="setup-guide-card"
@@ -121,6 +131,11 @@ export function SetupGuidePanel({
   const [open, setOpen] = useState<SetupGuideGroupId | null>(next?.group ?? groups[0] ?? null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const left = total - done;
+  // The button that opened this is gone, so focus is put where the reader's attention now is
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    heading.current?.focus();
+  }, []);
 
   return (
     <div className="flex flex-1 flex-col gap-1 overflow-y-auto px-2.5 pb-3 [&>*]:shrink-0" data-testid="setup-guide-panel">
@@ -135,7 +150,9 @@ export function SetupGuidePanel({
       <div className="flex items-center gap-3 px-1 pb-2">
         <Ring done={done} total={total} size={44} />
         <div>
-          <h2 className="text-[15px] font-medium">Setup guide</h2>
+          <h2 ref={heading} tabIndex={-1} className="text-[15px] font-medium outline-none">
+            Setup guide
+          </h2>
           <p className="text-xs text-text-muted">{left === 1 ? "1 step left" : `${left} steps left`}</p>
         </div>
       </div>
@@ -211,7 +228,12 @@ export function SetupGuidePanel({
 
       <p className="px-1.5 pt-2 text-[11px] text-text-muted">
         Steps tick themselves when you do them.{" "}
-        <button type="button" onClick={onHide} data-testid="setup-guide-hide" className="focus-ring rounded text-primary hover:underline">
+        <button
+          type="button"
+          onClick={onHide}
+          data-testid="setup-guide-hide"
+          className="focus-ring inline-flex min-h-[44px] items-center rounded text-primary hover:underline md:min-h-0"
+        >
           Hide guide
         </button>
       </p>

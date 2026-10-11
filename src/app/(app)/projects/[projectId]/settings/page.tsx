@@ -261,6 +261,8 @@ export default function ProjectSettingsPage() {
   }, [visible, section]);
 
   const goToSection = useCallback((id: string, scroll = true) => {
+    // The address below is this page's own doing, not a link arriving
+    lastRequested.current = id;
     setSection(id);
     window.history.replaceState(
       null,

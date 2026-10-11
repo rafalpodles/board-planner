@@ -19,7 +19,7 @@ const BARE: SetupGuideFacts = {
   hasWebhook: false,
   mcpConnected: false,
   pmEnabled: false,
-  ownAiKey: false,
+  aiKeySet: false,
   workerEnabled: false,
   lockedByInstance: false,
   machine: "none",
@@ -111,7 +111,7 @@ describe("setupGuideSteps", () => {
 
   it.each([
     ["pm", { pmEnabled: true }],
-    ["aiKey", { ownAiKey: true }],
+    ["aiKey", { aiKeySet: true }],
     ["sso", { ssoConfigured: true }],
     ["plan", { paidPlan: true }],
   ] as const)("marks the organisation's %s done for an instance admin", (id, facts) => {
@@ -133,10 +133,39 @@ describe("setupGuideSteps", () => {
     it("is not set when nothing is locked", () => {
       expect(locked({ lockedByInstance: false })).toBe(false);
     });
+
+    it("takes the machine and the hand-over away from an owner who cannot lift it, as they have nothing to do there", () => {
+      const ids = (facts: Partial<SetupGuideFacts>) =>
+        setupGuideSteps({ ...BARE, lockedByInstance: true, workerEnabled: true, ...facts }).map((s) => s.id);
+
+      expect(ids({})).not.toContain("machine");
+      expect(ids({})).not.toContain("handover");
+      expect(ids({ readerIsInstanceAdmin: true })).toEqual(expect.arrayContaining(["machine", "handover"]));
+    });
   });
 });
 
 describe("setupGuideComplete", () => {
+  it("is reached by an owner of a board locked off, with everything else they can do done", () => {
+    const steps = setupGuideSteps({
+      ...BARE,
+      hasTasks: true,
+      grantCount: 2,
+      columnsCustomised: true,
+      fieldsCustomised: true,
+      hasSprint: true,
+      repositoryUrl: "https://github.com/acme/orbit",
+      hasChannel: true,
+      hasWebhook: true,
+      mcpConnected: true,
+      workerEnabled: true,
+      lockedByInstance: true,
+    });
+
+    expect(steps.find((s) => s.id === "runs")).toMatchObject({ done: false, locked: true });
+    expect(setupGuideComplete(steps)).toBe(true);
+  });
+
   it("needs every step the reader sees to be done", () => {
     const all: SetupGuideFacts = {
       ...BARE,

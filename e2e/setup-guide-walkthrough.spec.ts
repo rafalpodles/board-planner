@@ -5,7 +5,7 @@ import {
   seedAssignmentOutsider,
   seedMachine,
   seedMcpConnection,
-  seedOwnAiKey,
+  makeMachinesStale,
   makeBoardFresh,
   setBoardReadiness,
   HANDOVER_REPOSITORY,
@@ -46,8 +46,14 @@ const doneIds = (guide: Guide) => guide.steps.filter((s) => s.done).map((s) => s
 /** After a step: the server says it is done, and the card in the sidebar caught up without a reload */
 async function expectTicked(page: Page, id: string, doneCount: number, total: number) {
   await expect.poll(async () => doneIds(await guideOf(page)), { timeout: 15_000 }).toContain(id);
+  // The card is replaced by the panel while the guide is open, which says the same in its own words
+  const left = total - doneCount;
   if (await card(page).count()) {
     await expect(count(page)).toHaveText(`${doneCount} of ${total} done`, { timeout: 15_000 });
+  } else {
+    await expect(page.getByTestId("setup-guide-panel")).toContainText(left === 1 ? "1 step left" : `${left} steps left`, {
+      timeout: 15_000,
+    });
   }
 }
 
@@ -62,7 +68,8 @@ async function saved(page: Page, action: () => Promise<void>, match: (url: URL, 
 test("an owner who is no instance admin takes all twelve steps", async ({ page }) => {
   await signIn(page, "owner");
   await page.goto(`/projects/${PROJECT_KEY}`);
-  await expect(card(page)).toBeVisible();
+  // The first read of a cold server compiles the route
+  await expect(card(page)).toBeVisible({ timeout: 20_000 });
   const before = await guideOf(page);
   expect(before.steps).toHaveLength(12);
   expect(doneIds(before)).toEqual([]);
@@ -213,21 +220,29 @@ test("an owner who is no instance admin takes all twelve steps", async ({ page }
     await expect(page.getByText("First task").first()).toBeVisible();
     await expect(card(page)).toHaveCount(0);
   });
+
+  await test.step("done stays done: the machine going quiet overnight does not bring the guide back", async () => {
+    await expect.poll(async () => guideOf(page), { timeout: 15_000 }).toEqual({ show: false, steps: [] });
+    await makeMachinesStale();
+    await page.reload();
+    await expect(page.getByText("First task").first()).toBeVisible();
+    await expect(card(page)).toHaveCount(0);
+    expect(await guideOf(page)).toEqual({ show: false, steps: [] });
+  });
 });
 
-test("an instance admin has two steps more, and takes them", async ({ page }) => {
+test("an instance admin has two steps more: the AI key counts when the server has one, and the PM agent is taken", async ({ page }) => {
   await setBoardReadiness({ workerEnabled: false });
   await signIn(page, "admin");
   await page.goto(`/projects/${PROJECT_KEY}`);
   const before = await guideOf(page);
   expect(before.steps).toHaveLength(14);
   expect(before.steps.map((s) => s.id)).toEqual(expect.arrayContaining(["pm", "aiKey"]));
-  await expect(count(page)).toHaveText("0 of 14 done");
 
-  await test.step("aiKey: the organisation has its own key", async () => {
-    await seedOwnAiKey();
-    await page.goto(`/projects/${PROJECT_KEY}`);
-    await expectTicked(page, "aiKey", 1, 14);
+  await test.step("aiKey: a key the server was started with is a key, so there is nothing to ask for", async () => {
+    // The rig starts the app with one for the model stand-in
+    expect(doneIds(before)).toEqual(["aiKey"]);
+    await expect(count(page)).toHaveText("1 of 14 done");
   });
 
   await test.step("pm: the agent is turned on for the board", async () => {
