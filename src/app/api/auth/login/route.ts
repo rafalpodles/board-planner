@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { passwordSignInEnabled, passwordSignInOff } from "@/lib/password-sign-in";
+import { passwordRefusal, passwordSignInEnabled, passwordSignInOff } from "@/lib/password-sign-in";
 import { readJsonBody } from "@/lib/request-body";
 import { getClientIp, verifyCredentials } from "@/lib/auth";
 import { isDatabaseUnreachable } from "@/lib/db-errors";
@@ -25,6 +25,8 @@ export async function POST(request: Request) {
     throw e;
   }
   if (!db) return refusedHost(request);
+  const closed = await passwordRefusal(db);
+  if (closed) return closed;
 
   const read = await readJsonBody<{ username?: unknown; password?: unknown }>(request);
   if (!read.ok) return read.response;

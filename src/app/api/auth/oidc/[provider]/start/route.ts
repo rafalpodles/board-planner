@@ -23,7 +23,7 @@ import { beginFlow, FLOW_COOKIE, FLOW_TTL_MS } from "@/lib/oidc/flow";
 import { findInvitationByToken } from "@/lib/invitations";
 import { INVITATION_REFUSALS } from "@/lib/invitation-refusals";
 import { NO_ORIGIN_ERROR } from "@/lib/invitation-mail";
-import { passwordSignInEnabled } from "@/lib/password-sign-in";
+import { passwordSignInEnabled, passwordSignInFor } from "@/lib/password-sign-in";
 import { safeNextPath } from "@/lib/next-path";
 import { refuseSetupCode } from "@/lib/setup-code";
 import { checkProfile } from "@/lib/new-account";
@@ -82,7 +82,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
     // A linked provider is a standing way in, so a borrowed session must not be enough to add one:
     // the password where there is one that signs in, otherwise a sign-in made minutes ago
     const record = await scopedFor(current).User.findById(current._id).select("+password");
-    if (!(record?.password && passwordSignInEnabled())) {
+    if (!(record?.password && (await passwordSignInFor(db)))) {
       if (!(await signedInRecently(current.sessionId))) {
         return NextResponse.json({ error: RECENT_SIGN_IN_REQUIRED }, { status: 403 });
       }
