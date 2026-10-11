@@ -226,6 +226,16 @@ describe("GET and DELETE /api/settings/sso", () => {
     expect(await (await call("GET")).json()).toMatchObject({ set: true, available: true, active: true });
   });
 
+  it("says a requirement of single sign-on holds only while the provider is offered", async () => {
+    await call("PUT", FORM);
+    (row!.sso as Record<string, unknown>).enforced = true;
+
+    expect(await (await call("GET")).json()).toMatchObject({ active: true, enforced: true });
+
+    plan({ plan: "free" });
+    expect(await (await call("GET")).json()).toMatchObject({ active: false, enforced: false });
+  });
+
   it("says a secret sealed under a key the server no longer has has to be entered again", async () => {
     row = { sso: { issuer: FORM.issuer, clientId: "acme-app", clientSecret: "enc:v3:not-a-real-secret", clientSecretHint: "1234", label: "Acme" } };
 
