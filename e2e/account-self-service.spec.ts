@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { test, expect, type Page } from "@playwright/test";
 import mongoose from "mongoose";
@@ -8,13 +9,16 @@ import {
   MEMBER_PASSWORD,
   MEMBER_USERNAME,
   OWNER_ID,
+  OWNER_PASSWORD,
   PROJECT_ID,
   PROJECT_KEY,
+  PROJECT_NAME,
   SIBLING_TASK_ID,
   SIBLING_TASK_NUMBER,
   seed,
 } from "./seed";
 import { signIn } from "./session";
+import { taskFactory } from "./seed";
 
 /**
  * BP-946. Export and erasure of one's own account were administrator-only, and erasing left the
@@ -26,6 +30,10 @@ import { signIn } from "./session";
  */
 
 const COMMENT = "Written by the member before they left";
+const ADMINS_COMMENT = "Written by somebody who stays";
+const ADMINS_QUESTION = "A question the admin asked the PM";
+const MEMBERS_TASK_NUMBER = 90;
+const label = (id: unknown) => `deleted-${createHash("sha256").update(String(id)).digest("hex").slice(0, 8)}`;
 
 async function db() {
   if (mongoose.connection.readyState === 0) await mongoose.connect(E2E_MONGODB_URI);
@@ -46,6 +54,21 @@ async function seedWhatNamesTheMember() {
     createdAt: now,
     updatedAt: now,
   });
+  await handle.collection("comments").insertOne({
+    task: SIBLING_TASK_ID,
+    author: ADMIN_ID,
+    body: ADMINS_COMMENT,
+    reactions: [],
+    createdAt: now,
+    updatedAt: now,
+  });
+  await handle.collection("tasks").insertOne(
+    taskFactory(now)({ _id: new mongoose.Types.ObjectId(), taskNumber: MEMBERS_TASK_NUMBER, title: "Made by the member", status: "todo", createdBy: MEMBER_ID })
+  );
+  await handle.collection("projectauditlogs").insertMany([
+    { project: PROJECT_ID, user: ADMIN_ID, action: "member_added", detail: `${MEMBER_USERNAME}: no access → member`, createdAt: now },
+    { project: PROJECT_ID, user: ADMIN_ID, action: "member_role_changed", detail: "olga: member → owner", createdAt: now },
+  ]);
   await handle.collection("activitylogs").insertMany([
     { task: SIBLING_TASK_ID, user: ADMIN_ID, action: "updated", field: "assignee", oldValue: "", newValue: MEMBER_USERNAME, createdAt: now },
     { task: SIBLING_TASK_ID, user: ADMIN_ID, action: "updated", field: "assignee", oldValue: MEMBER_USERNAME, newValue: "admin", createdAt: now },
@@ -59,6 +82,14 @@ async function seedWhatNamesTheMember() {
     role: "user",
     content: "What is left on the board?",
     triggeredBy: MEMBER_ID,
+    trigger: { type: "chat", taskKey: "" },
+    createdAt: now,
+  });
+  await handle.collection("pmmessages").insertOne({
+    project: PROJECT_ID,
+    role: "user",
+    content: ADMINS_QUESTION,
+    triggeredBy: ADMIN_ID,
     trigger: { type: "chat", taskKey: "" },
     createdAt: now,
   });
@@ -110,7 +141,10 @@ test("a person downloads their data, deletes their account, and nothing that nam
   expect(exported.comments).toEqual([expect.objectContaining({ task: `${PROJECT_KEY}-${SIBLING_TASK_NUMBER}`, body: COMMENT })]);
   expect(exported.pmMessages).toEqual([expect.objectContaining({ board: PROJECT_KEY, content: "What is left on the board?" })]);
   expect(exported.notifications).toHaveLength(1);
+  expect(exported.tasksCreated).toEqual([expect.objectContaining({ key: `${PROJECT_KEY}-${MEMBERS_TASK_NUMBER}`, title: "Made by the member" })]);
+  expect(exported.boardAccess).toEqual([expect.objectContaining({ board: PROJECT_KEY, relation: "member" })]);
   expect(raw).not.toMatch(/\$2[aby]\$/);
+  for (const theirs of [ADMINS_COMMENT, ADMINS_QUESTION, `${MEMBER_USERNAME} mentioned you`]) expect(raw).not.toContain(theirs);
 
   await startDeleting(page);
   const dialog = confirmation(page);
@@ -132,9 +166,15 @@ test("a person downloads their data, deletes their account, and nothing that nam
   const history = await handle.collection("activitylogs").find({ field: "assignee" }).toArray();
   expect(JSON.stringify(history)).not.toContain(`"${MEMBER_USERNAME}"`);
   expect(history.map((row) => row.newValue)).toContain("admin");
-  const audit = JSON.stringify(await handle.collection("instanceauditlogs").find({}).toArray());
-  expect(audit).not.toMatch(new RegExp(`"${MEMBER_USERNAME}"|${MEMBER_USERNAME}@example\\.com`));
-  expect(audit).toContain("deleted-");
+  const erased = label(MEMBER_ID);
+  const audit = await handle.collection("instanceauditlogs").find({}).toArray();
+  expect(JSON.stringify(audit)).not.toMatch(new RegExp(`"${MEMBER_USERNAME}"|${MEMBER_USERNAME}@example\\.com|old@example\\.com`));
+  const rewritten = audit.find((row) => row.action === "user_email_changed_self");
+  expect(rewritten).toMatchObject({ actorUsername: erased, target: erased, detail: erased });
+  expect(audit.find((row) => row.action === "user_deleted")).toMatchObject({ target: erased, actorUsername: erased });
+  const access = (await handle.collection("projectauditlogs").find({}).sort({ _id: 1 }).toArray()).map((row) => row.detail);
+  expect(access).toEqual([`${erased}: no access → member`, "olga: member → owner"]);
+  expect(await handle.collection("tasks").countDocuments({ taskNumber: MEMBERS_TASK_NUMBER, createdBy: MEMBER_ID })).toBe(1);
 
   await page.goto("/login");
   await page.getByLabel("Username").fill(MEMBER_USERNAME);
@@ -143,13 +183,15 @@ test("a person downloads their data, deletes their account, and nothing that nam
     page.waitForResponse((r) => new URL(r.url()).pathname === "/api/auth/login"),
     page.getByRole("button", { name: "Sign In" }).click(),
   ]);
-  expect(attempt.status()).toBeGreaterThanOrEqual(400);
+  expect(attempt.status()).toBe(401);
   await expect(page).not.toHaveURL(/\/projects/);
 
   await signIn(page, "admin");
   await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
-  await expect(page.getByText(COMMENT)).toBeVisible();
-  await expect(page.getByText("Deleted user").first()).toBeVisible();
+  const theirs = page.locator("div.group", { hasText: COMMENT });
+  await expect(theirs).toBeVisible();
+  await expect(theirs.getByText("Deleted user")).toBeVisible();
+  await expect(page.locator("div.group", { hasText: ADMINS_COMMENT })).not.toContainText("Deleted user");
 });
 
 test("a wrong password keeps the account, and says so", async ({ page }) => {
@@ -173,12 +215,12 @@ test("the only owner of a board is told which one to hand over, and keeps the ac
   await openProfile(page);
   await startDeleting(page);
   const dialog = confirmation(page);
-  await dialog.getByLabel("Current password").fill(MEMBER_PASSWORD);
+  await dialog.getByLabel("Current password").fill(OWNER_PASSWORD);
   const [refusal] = await Promise.all([
     page.waitForResponse((r) => new URL(r.url()).pathname === "/api/users/me" && r.request().method() === "DELETE"),
     dialog.getByRole("button", { name: "Delete my account" }).click(),
   ]);
   expect(refusal.status()).toBe(409);
-  await expect(dialog.getByRole("alert")).toContainText("the only owner of");
+  await expect(dialog.getByRole("alert")).toContainText(`the only owner of ${PROJECT_NAME} (${PROJECT_KEY})`);
   expect(await (await db()).collection("users").countDocuments({ _id: OWNER_ID })).toBe(1);
 });
