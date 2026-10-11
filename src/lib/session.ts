@@ -14,7 +14,7 @@ import { OAuthCode } from "@/models/oauthCode";
 import { OAuthToken } from "@/models/oauthToken";
 import { Worker } from "@/models/worker";
 import { User } from "@/models/user";
-import { acrossOrganisations } from "./organisation-wall";
+import { acrossOrganisations, insertingInto } from "./organisation-wall";
 
 const BY_CREDENTIAL = "a credential names its organisation only once it is found";
 const BY_USER_ID = "keyed by one user's id, which is unique across organisations";
@@ -366,7 +366,7 @@ export async function createSession(params: {
   const absoluteExpiresAt = new Date(now + SESSION_ABSOLUTE_TTL_MS);
   const expiresAt = new Date(Math.min(now + SESSION_IDLE_TTL_MS, absoluteExpiresAt.getTime()));
 
-  const row = await Session.create({
+  const row = await insertingInto(params.organisation, () => Session.create({
     organisation: params.organisation,
     tokenHash: sha256(token),
     user: params.userId,
@@ -375,7 +375,7 @@ export async function createSession(params: {
     lastUsedAt: new Date(now),
     userAgent: (params.userAgent ?? "").slice(0, 512),
     ip: (params.ip ?? "").slice(0, 128),
-  });
+  }));
   // A stamp the Users screen reads; failing to write it must not fail the sign-in
   await User.updateOne({ _id: params.userId, organisation: params.organisation }, { $set: { lastSignInAt: new Date(now) } }).catch(() => {});
 
