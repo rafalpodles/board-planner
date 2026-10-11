@@ -5,36 +5,54 @@ import { countInLiveWindow, countInWindow } from "./rate-limit";
 import type { ScopedDb } from "./db-scope";
 import { organisationUploads } from "./upload-ownership";
 import { organisationDomain } from "./organisation-host";
+import { getOrganisation } from "./organisation";
+import type { Plan } from "./entitlements";
+import { ENTERPRISE_CONTACT, FREE_STORAGE_MB, PAID_STORAGE_MB, formatStorage } from "./storage-size";
 import { ORGANISATION_LIMIT_HEADER, type RequestLimitScope } from "./organisation-limit-header";
 
 const MINUTE_MS = 60_000;
 const MB = 1024 * 1024;
 
 export const CLOUD_REQUESTS_PER_MINUTE = 6000;
-export const CLOUD_STORAGE_MB = 5120;
 
 const warned = new Set<string>();
 
-// 0 is off. Set, the value holds on any instance; unset, only organisations on ORGANISATION_DOMAIN get one
-function configuredLimit(name: string, cloudDefault: number): number {
-  const fallback = organisationDomain() ? cloudDefault : 0;
+function explicitLimit(name: string): number | null {
   const raw = process.env[name]?.trim();
-  if (!raw) return fallback;
+  if (!raw) return null;
   const value = Number(raw);
   if (Number.isInteger(value) && value >= 0) return value;
   if (!warned.has(name)) {
     warned.add(name);
-    console.warn(`${name}="${raw}" is not a whole number of 0 or more; using ${fallback}`);
+    console.warn(`${name}="${raw}" is not a whole number of 0 or more; ignoring it`);
   }
-  return fallback;
+  return null;
+}
+
+// 0 is off. Set, the value holds on any instance; unset, only organisations on ORGANISATION_DOMAIN get one
+function configuredLimit(name: string, cloudDefault: number): number {
+  return explicitLimit(name) ?? (organisationDomain() ? cloudDefault : 0);
 }
 
 export function requestsPerMinute(): number {
   return configuredLimit("ORGANISATION_REQUESTS_PER_MINUTE", CLOUD_REQUESTS_PER_MINUTE);
 }
 
-export function storageLimitBytes(): number {
-  return configuredLimit("ORGANISATION_STORAGE_MB", CLOUD_STORAGE_MB) * MB;
+export interface StorageLimit {
+  bytes: number;
+  raisedBy: "pro" | "enterprise" | null;
+}
+
+export function storageLimitFor(plan: Plan): StorageLimit {
+  const explicit = explicitLimit("ORGANISATION_STORAGE_MB");
+  const bytes = configuredLimit("ORGANISATION_STORAGE_MB", plan === "pro" ? PAID_STORAGE_MB : FREE_STORAGE_MB) * MB;
+  const hosted = explicit === null && organisationDomain() !== null && bytes > 0;
+  return { bytes, raisedBy: hosted ? (plan === "pro" ? "enterprise" : "pro") : null };
+}
+
+export async function storageLimitOf(db: ScopedDb): Promise<StorageLimit> {
+  if (explicitLimit("ORGANISATION_STORAGE_MB") !== null || organisationDomain() === null) return storageLimitFor("free");
+  return storageLimitFor((await getOrganisation(db.organisation)).entitlements.plan);
 }
 
 // One account or machine may spend at most this share of its organisation's minute, so a runaway
@@ -89,17 +107,20 @@ export async function requestLimitRefusal(
   return null;
 }
 
-function megabytes(bytes: number): string {
-  return `${Math.ceil(bytes / MB)} MB`;
-}
-
-export function storageLimitRefusal(storedBytes: number, incomingBytes: number): NextResponse | null {
-  const limit = storageLimitBytes();
-  if (!limit || storedBytes + incomingBytes <= limit) return null;
+export function storageLimitRefusal(storedBytes: number, incomingBytes: number, { bytes, raisedBy }: StorageLimit): NextResponse | null {
+  if (!bytes || storedBytes + incomingBytes <= bytes) return null;
+  const used = `This organisation has used ${formatStorage(storedBytes)} of its ${formatStorage(bytes)} of file storage${raisedBy === "pro" ? " on the Free plan" : ""}, so no more files can be uploaded.`;
+  const next =
+    raisedBy === "pro"
+      ? ` Upgrade to Pro for ${formatStorage(PAID_STORAGE_MB * MB)}.`
+      : raisedBy === "enterprise"
+        ? ` Write to ${ENTERPRISE_CONTACT} about Enterprise for more.`
+        : "";
   return NextResponse.json(
     {
-      error: `This organisation has used ${megabytes(storedBytes)} of its ${megabytes(limit)} of file storage, so no more files can be uploaded.`,
-      limit,
+      error: `${used}${next}`,
+      ...(raisedBy ? { feature: "storage.limit", plan: raisedBy === "pro" ? "free" : "pro" } : {}),
+      limit: bytes,
       stored: storedBytes,
     },
     { status: 413 }
@@ -107,9 +128,10 @@ export function storageLimitRefusal(storedBytes: number, incomingBytes: number):
 }
 
 export async function organisationUsage(db: ScopedDb) {
-  const [requestsThisMinute, storedBytes] = await Promise.all([
+  const [requestsThisMinute, storedBytes, storage] = await Promise.all([
     countInLiveWindow(organisationRequestsKey(db.organisation)),
     organisationUploads(db)?.bytesStored() ?? 0,
+    storageLimitOf(db),
   ]);
-  return { requestsThisMinute, requestsPerMinute: requestsPerMinute(), storedBytes, storageLimitBytes: storageLimitBytes() };
+  return { requestsThisMinute, requestsPerMinute: requestsPerMinute(), storedBytes, storageLimitBytes: storage.bytes };
 }
