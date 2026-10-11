@@ -111,6 +111,7 @@ test.describe("BP-951: an organisation's own sign-in provider", () => {
     await expect(page.getByText("Sign-in provider removed")).toBeVisible();
     await expect(page.getByText("Not set up")).toBeVisible();
     await openLogin(page, ACME);
+    await expect(page.getByRole("button", { name: "Continue with GitHub" })).toBeVisible();
     await expect(page.getByRole("button", { name: /^Continue with Acme/ })).toHaveCount(0);
   });
 
@@ -120,7 +121,9 @@ test.describe("BP-951: an organisation's own sign-in provider", () => {
     await storeSso(ACME);
 
     await openLogin(page, GLOBEX);
-    await expect(page.getByRole("button", { name: /^Continue with/ })).toHaveCount(0);
+    // The operator's GitHub app is everybody's: waiting for its button is what says the list was drawn, so an absence below is a measurement
+    await expect(page.getByRole("button", { name: "Continue with GitHub" })).toBeVisible();
+    await expect(page.getByRole("button", { name: `Continue with ${SSO_LABEL}` })).toHaveCount(0);
     // The operator's GitHub app is everybody's; ACME's own provider is nobody else's
     expect(await (await page.request.get(`${originOf(GLOBEX)}/api/auth/oidc/providers`)).json()).not.toContainEqual(expect.objectContaining({ id: "oidc" }));
     const started = await page.evaluate(async () => {
@@ -151,7 +154,9 @@ test.describe("BP-951: an organisation's own sign-in provider", () => {
     await storeSso(GLOBEX);
 
     await openLogin(page, GLOBEX);
-    await expect(page.getByRole("button", { name: /^Continue with/ })).toHaveCount(0);
+    // The operator's GitHub app is everybody's: waiting for its button is what says the list was drawn, so an absence below is a measurement
+    await expect(page.getByRole("button", { name: "Continue with GitHub" })).toBeVisible();
+    await expect(page.getByRole("button", { name: `Continue with ${SSO_LABEL}` })).toHaveCount(0);
 
     await makePro(request, GLOBEX);
     await page.goto(`${originOf(GLOBEX)}/login`);
