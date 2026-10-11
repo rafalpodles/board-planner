@@ -33,7 +33,9 @@ board, the REST API and the MCP server are three doors into one model, with the 
 checks behind each. An agent moving a task to *In Review* passes the same status rules as a person
 dragging the card, and leaves the same trail in the same history.
 
-Self-hosted, single instance, no organisations. `docker compose up` and it is yours.
+Two ways to run it: on your own server, where `docker compose up` gives you one organisation of your
+own, or in the cloud, where [signing up](https://login.board-planner.com) puts a new organisation on
+a subdomain of board-planner.com.
 
 ## Handing work to a machine
 
