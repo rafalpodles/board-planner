@@ -215,6 +215,12 @@ test.describe("BP-951: requiring single sign-on", () => {
     expect(refused.status()).toBe(403);
     expect(await refused.json()).toMatchObject({ ssoRequired: true });
     expect((await request.post(`${ORGANISATIONS_API}/api/auth/forgot`, { headers: { ...asOrganisation(ACME), origin: originOf(ACME) }, data: { identifier: USERNAME } })).status()).toBe(403);
+    // A link already in somebody's mailbox does not set a password either
+    for (const path of ["reset", "../invitations/accept"]) {
+      const closed = await request.post(`${ORGANISATIONS_API}/api/auth/${path}`, { headers: { ...asOrganisation(ACME), origin: originOf(ACME) }, data: { token: "not-a-real-token", newPassword: "long-enough-password", username: "x", fullName: "X", password: "long-enough-password" } });
+      expect(closed.status(), path).toBe(403);
+      expect(await closed.json()).toMatchObject({ ssoRequired: true });
+    }
     expect(await (await request.get(`${ORGANISATIONS_API}/api/auth/oidc/providers`, { headers: asOrganisation(ACME) })).json()).toEqual([{ id: "oidc", label: SSO_LABEL }]);
     expect((await request.get(`${ORGANISATIONS_API}/api/auth/instance`, { headers: asOrganisation(ACME) })).status()).toBe(200);
     expect((await (await request.get(`${ORGANISATIONS_API}/api/auth/instance`, { headers: asOrganisation(ACME) })).json()).passwordSignIn).toBe(false);
