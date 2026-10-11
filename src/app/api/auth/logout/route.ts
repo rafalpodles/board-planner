@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { platformSignInOrigin } from "@/lib/organisation-host";
 import {
   clearSessionCookies,
   provenanceRefusal,
@@ -17,7 +18,7 @@ export async function POST(request: Request) {
     await revokeSession(token);
   }
 
-  const response = NextResponse.json({ ok: true });
+  const response = NextResponse.json({ ok: true, signIn: platformSignInOrigin() });
   for (const cookie of clearSessionCookies()) {
     response.headers.append("Set-Cookie", cookie);
   }

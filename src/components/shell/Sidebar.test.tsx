@@ -4,7 +4,8 @@ import { render, screen, cleanup, waitFor, act, fireEvent } from "@testing-libra
 import { Sidebar } from "./Sidebar";
 import { useLeaveGuard } from "@/hooks/use-leave-guard";
 
-const { api, auth, nav, theme, projectsState } = vi.hoisted(() => ({
+const { api, auth, nav, theme, projectsState, replace } = vi.hoisted(() => ({
+  replace: vi.fn(),
   api: { get: vi.fn() },
   auth: {
     user: null as { fullName: string; role: string } | null,
@@ -22,7 +23,7 @@ vi.mock("@/hooks/use-projects", () => ({ useProjects: () => projectsState }));
 vi.mock("@/components/ThemeProvider", () => ({ useTheme: () => theme }));
 vi.mock("next/navigation", () => ({
   usePathname: () => nav.pathname,
-  useRouter: () => ({ replace: vi.fn() }),
+  useRouter: () => ({ replace }),
 }));
 vi.mock("next/image", () => ({
   default: (props: { alt?: string }) => <span data-testid="logo" aria-label={props.alt} />,
@@ -499,5 +500,45 @@ describe("signing out with unsaved work on screen", () => {
     expect(confirm).toHaveBeenCalledWith("Leave without saving?");
     expect(auth.logout).not.toHaveBeenCalled();
     confirm.mockRestore();
+  });
+});
+
+describe("Logout (BP-1023)", () => {
+  const assign = vi.fn();
+  const realLocation = window.location;
+
+  beforeEach(() => {
+    replace.mockReset();
+    assign.mockReset();
+    Object.defineProperty(window, "location", { configurable: true, value: { ...realLocation, assign } });
+    auth.user = { fullName: "Owner Name", role: "admin" };
+  });
+
+  afterEach(() => {
+    Object.defineProperty(window, "location", { configurable: true, value: realLocation });
+  });
+
+  async function logOut() {
+    renderSidebar();
+    await act(async () => screen.getByRole("button", { name: /Owner Name/ }).click());
+    await act(async () => screen.getByRole("button", { name: "Logout" }).click());
+  }
+
+  it("goes to the e-mail step of the hosted sign-in, not back to the organisation the person is leaving", async () => {
+    auth.logout.mockResolvedValue("https://login.board-planner.com");
+
+    await logOut();
+
+    expect(assign).toHaveBeenCalledWith("https://login.board-planner.com/?switch");
+    expect(replace).not.toHaveBeenCalled();
+  });
+
+  it("goes to the instance's own /login where there is no hosted sign-in", async () => {
+    auth.logout.mockResolvedValue(null);
+
+    await logOut();
+
+    expect(replace).toHaveBeenCalledWith("/login");
+    expect(assign).not.toHaveBeenCalled();
   });
 });

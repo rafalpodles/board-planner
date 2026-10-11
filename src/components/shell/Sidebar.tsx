@@ -486,8 +486,9 @@ export function Sidebar({
                 onClick={async () => {
                   setMenuOpen(false);
                   if (!mayLeave()) return;
-                  await logout();
-                  router.replace("/login");
+                  const signIn = await logout();
+                  if (signIn) window.location.assign(`${signIn}/?switch`);
+                  else router.replace("/login");
                 }}
                 className="focus-ring-inset flex min-h-[44px] w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-sm text-text-muted hover:bg-bg-hover hover:text-text md:min-h-0"
               >

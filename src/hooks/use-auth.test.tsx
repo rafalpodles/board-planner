@@ -33,7 +33,16 @@ function Probe() {
       >
         sign in
       </button>
-      <button onClick={() => void logout()}>sign out</button>
+      <span data-testid="destination" />
+      <button
+        onClick={async () => {
+          const destination = await logout();
+          const slot = document.querySelector('[data-testid="destination"]');
+          if (slot) slot.textContent = destination ?? "none";
+        }}
+      >
+        sign out
+      </button>
       <button onClick={() => void refreshUser()}>refresh</button>
       <button onClick={() => onUnauthorized()}>rejected</button>
       <button onClick={() => noteApiStatus(503)}>saw 503</button>
@@ -283,6 +292,36 @@ describe("useAuthProvider — what the rest of the app reports back", () => {
     });
 
     expect(screen.getByTestId("outage").textContent).toBe("false");
+    expect(screen.getByTestId("user").textContent).toBe("-");
+  });
+
+  async function signOutAnsweredWith(answer: () => Promise<Response>) {
+    await signedIn();
+    vi.mocked(fetch).mockImplementationOnce(answer);
+    await act(async () => {
+      screen.getByText("sign out").click();
+    });
+  }
+
+  it("hands back the hosted sign-in's address from the logout answer (BP-1023)", async () => {
+    await signOutAnsweredWith(async () => jsonResponse(200, { ok: true, signIn: "https://login.board-planner.com" }));
+
+    expect(screen.getByTestId("destination").textContent).toBe("https://login.board-planner.com");
+    expect(screen.getByTestId("user").textContent).toBe("-");
+  });
+
+  it("hands back nothing where the answer names no hosted sign-in (BP-1023)", async () => {
+    await signOutAnsweredWith(async () => jsonResponse(200, { ok: true, signIn: null }));
+
+    expect(screen.getByTestId("destination").textContent).toBe("none");
+  });
+
+  it("still signs out locally, and hands back nothing, when the call fails (BP-1023)", async () => {
+    await signOutAnsweredWith(async () => {
+      throw new Error("offline");
+    });
+
+    expect(screen.getByTestId("destination").textContent).toBe("none");
     expect(screen.getByTestId("user").textContent).toBe("-");
   });
 

@@ -38,7 +38,7 @@ export interface AuthState {
   /** The organisation this host serves is suspended: no session can be read or used (BP-893) */
   suspended: boolean;
   login: (username: string, password: string) => Promise<LoginResult>;
-  logout: () => Promise<void>;
+  logout: () => Promise<string | null>;
   refreshUser: () => Promise<void>;
   onUnauthorized: () => void;
   /**
@@ -141,9 +141,11 @@ export function useAuthProvider(): AuthState {
   );
 
   const logout = useCallback(async () => {
-    await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+    const res = await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
+    const body = await res?.json().catch(() => null);
     setUser(null);
     setOutage(false);
+    return typeof body?.signIn === "string" ? body.signIn : null;
   }, []);
 
   const onUnauthorized = useCallback(() => {
