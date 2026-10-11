@@ -1,3 +1,4 @@
+import { parentsOf } from "@/lib/task-parents";
 import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
@@ -67,6 +68,7 @@ export const GET = withProjectAccess(async (_request, { params, user, db }) => {
 
   const progress = (await epicProgressFor(db, projectId, [taskId])).get(String(task._id));
   if (progress) taskObj.progress = progress;
+  taskObj.parent = (await parentsOf(db, projectId, [String(task._id)])).get(String(task._id)) ?? null;
 
   taskObj.attemptsExhausted = (task.execution?.attempts ?? 0) >= MAX_EXECUTION_ATTEMPTS;
   taskObj.execution = toApiExecution(task.execution, await workerNamesFor(db, [task.execution]));
