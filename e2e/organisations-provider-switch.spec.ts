@@ -56,6 +56,14 @@ async function openLogin(page: Page, who: OrganisationFixture) {
   await answered;
 }
 
+// An absence on a page that fetches what it shows is true before it has rendered: ask the server what it offers, then let the page settle
+async function expectNoGitHub(page: Page, who: OrganisationFixture) {
+  expect(await (await page.request.get(`${originOf(who)}/api/auth/oidc/providers`)).json()).not.toContainEqual(expect.objectContaining({ id: "github" }));
+  await expect(page.getByRole("button", { name: "Sign In", exact: true })).toBeVisible();
+  await page.waitForTimeout(1_000);
+  await expect(page.getByRole("button", { name: "Continue with GitHub" })).toHaveCount(0);
+}
+
 async function openSettings(page: Page) {
   await signInOn(page.context(), ACME);
   await page.goto(`${originOf(ACME)}/settings/sso`);
@@ -90,7 +98,7 @@ test.describe("BP-1027: switching GitHub off for an organisation", () => {
     expect(await disabled(ACME)).toEqual(["github"]);
 
     await openLogin(visitor, ACME);
-    await expect(visitor.getByRole("button", { name: "Continue with GitHub" })).toHaveCount(0);
+    await expectNoGitHub(visitor, ACME);
     const started = await visitor.evaluate(async () => {
       const res = await fetch("/api/auth/oidc/github/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
       return { status: res.status, body: await res.json().catch(() => ({})) };
@@ -152,7 +160,7 @@ test.describe("BP-1027: switching GitHub off for an organisation", () => {
     expect(await disabled(ACME)).toEqual(["github"]);
     expect(await withDb((db) => db.collection("identities").countDocuments({ user: GITHUB_ONLY, provider: "github" }))).toBe(1);
     await openLogin(visitor, ACME);
-    await expect(visitor.getByRole("button", { name: "Continue with GitHub" })).toHaveCount(0);
+    await expectNoGitHub(visitor, ACME);
     await visitorContext.close();
   });
 
