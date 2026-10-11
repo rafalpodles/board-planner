@@ -143,7 +143,7 @@ test("an instance setting is stored, and a value the instance will not take is r
   page,
 }) => {
   await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
-  await openSettled(page, "/settings/agents");
+  await openSettled(page, "/settings/ai-keys");
   await recordToasts(page);
 
   const model = page.getByLabel("Model", { exact: true });
@@ -162,20 +162,32 @@ test("an instance setting is stored, and a value the instance will not take is r
 
   // The control on the step above: a screen that saves everything it is given passes that one and
   // fails this, and a screen that saves nothing fails that one and passes this.
-  await test.step("a blank model is refused and nothing is written", async () => {
-    await recordToasts(page);
+  await test.step("a blank model cannot be saved", async () => {
     await fillStably(page.getByLabel("Model", { exact: true }), "   ");
+    await expect(page.getByRole("button", { name: "Save model" })).toBeDisabled();
+  });
+
+  // BP-1024: a name OpenRouter does not list is said so when it is saved, with the reason, not when the PM agent is first asked
+  await test.step("a name OpenRouter does not list is refused with the reason and nothing is written", async () => {
+    await fillStably(page.getByLabel("Model", { exact: true }), "openai/gpt-9-typo");
+    const refused = page.waitForResponse(
+      (r) => r.request().method() === "PUT" && new URL(r.url()).pathname === "/api/settings" && r.status() === 400
+    );
     await page.getByRole("button", { name: "Save model" }).click();
-    await expectToast(page, "Give the model a name, or the PM agent and AI task drafting have nothing to call.");
+    await refused;
+    await expect(page.getByRole("alert").filter({ hasText: "OpenRouter has no model openai/gpt-9-typo" })).toBeVisible();
 
     await reloadSettled(page);
     await expect(page.getByLabel("Model", { exact: true })).toHaveValue("gpt-4o-mini-2026");
   });
 
-  await test.step("there is one model field: no second default for the PM agent, and no turn cap", async () => {
+  await test.step("there is one model field, beside the key: none on the agents page, no second default for the PM agent, and no turn cap", async () => {
     await expect(page.getByLabel("Model", { exact: true })).toHaveCount(1);
     await expect(page.getByLabel("Default model")).toHaveCount(0);
     await expect(page.getByLabel("Default daily turn cap")).toHaveCount(0);
+    await openSettled(page, "/settings/agents");
+    await expect(page.getByTestId("ai-model-moved")).toBeVisible();
+    await expect(page.getByLabel("Model", { exact: true })).toHaveCount(0);
   });
 
   // A client older than the screen may still send the cap or a PM default; neither is a setting any more, so the instance takes nothing from them

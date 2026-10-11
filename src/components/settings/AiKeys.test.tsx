@@ -14,9 +14,20 @@ vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast, dismiss: vi.
 const NO_USAGE = { scope: "month", used: 0, limit: null, resetsAt: null, today: 0, dailyCeiling: null, ownTokens: 0, calls: 0, ownCalls: 0, turns: null, locked: false, included: false };
 const FREE_CLOUD = { hosted: true, plan: "free", set: false, hint: "", unreadable: false, included: false, usage: NO_USAGE };
 
+// On the platform's key, which the key answers below do not replace, only the allowed providers' models run
+const PLATFORM_MODELS = {
+  restricted: true,
+  model: "openai/gpt-6-luna",
+  models: [{ id: "openai/gpt-4o", name: "OpenAI: GPT-4o" }, { id: "openai/gpt-6-luna", name: "OpenAI: GPT-6 Luna" }],
+  providers: [{ id: "openai", label: "OpenAI" }],
+};
+let models: unknown = PLATFORM_MODELS;
+const answerKey = (key: unknown) => api.get.mockImplementation(async (url: string) => (url === "/api/settings/ai-models" ? models : key));
+
 beforeEach(() => {
+  models = PLATFORM_MODELS;
   vi.clearAllMocks();
-  api.get.mockResolvedValue(FREE_CLOUD);
+  answerKey(FREE_CLOUD);
 });
 afterEach(cleanup);
 
@@ -28,7 +39,7 @@ describe("Settings → AI key", () => {
 
     expect(await screen.findByText(/Runs the PM agent .* and AI Assist/)).toBeTruthy();
     expect(document.querySelectorAll("input[type=password]")).toHaveLength(1);
-    expect(screen.queryByText(/OpenAI/)).toBeNull();
+    expect(screen.queryByText(/OpenAI key/)).toBeNull();
   });
 
   it("is headed in the singular", async () => {
@@ -44,7 +55,7 @@ describe("Settings → AI key", () => {
   });
 
   it("says a Pro organisation with no key of its own, on a service with none to offer, gets no AI either, without naming the Free plan", async () => {
-    api.get.mockResolvedValue({ ...FREE_CLOUD, plan: "pro" });
+    answerKey({ ...FREE_CLOUD, plan: "pro" });
     render(<AiKeys />);
 
     expect(await screen.findByText(/this service has no key to offer/)).toBeTruthy();
@@ -52,14 +63,14 @@ describe("Settings → AI key", () => {
   });
 
   it("says a plan that includes managed AI covers an organisation with no key of its own", async () => {
-    api.get.mockResolvedValue({ ...FREE_CLOUD, plan: "pro", included: true });
+    answerKey({ ...FREE_CLOUD, plan: "pro", included: true });
     render(<AiKeys />);
 
     expect(await screen.findByText(/runs on ours, which your plan includes/)).toBeTruthy();
   });
 
   it("does not claim the key is free of limits, which this screen does not decide", async () => {
-    api.get.mockResolvedValue({ ...FREE_CLOUD, set: true, hint: "abcd" });
+    answerKey({ ...FREE_CLOUD, set: true, hint: "abcd" });
     render(<AiKeys />);
     await screen.findByText("abcd");
 
@@ -67,7 +78,7 @@ describe("Settings → AI key", () => {
   });
 
   it("shows a stored key by its last four characters only, and offers to replace or remove it", async () => {
-    api.get.mockResolvedValue({ ...FREE_CLOUD, set: true, hint: "abcd" });
+    answerKey({ ...FREE_CLOUD, set: true, hint: "abcd" });
     render(<AiKeys />);
 
     expect(await screen.findByText("abcd")).toBeTruthy();
@@ -77,7 +88,7 @@ describe("Settings → AI key", () => {
   });
 
   it("does not print an empty hint when a key was stored without one", async () => {
-    api.get.mockResolvedValue({ ...FREE_CLOUD, set: true, hint: "" });
+    answerKey({ ...FREE_CLOUD, set: true, hint: "" });
     render(<AiKeys />);
 
     expect(await screen.findByText(/A key is stored\./)).toBeTruthy();
@@ -85,7 +96,7 @@ describe("Settings → AI key", () => {
   });
 
   it("says a stored key that cannot be opened is broken, and asks for it again rather than showing it as set", async () => {
-    api.get.mockResolvedValue({ ...FREE_CLOUD, set: true, hint: "abcd", unreadable: true });
+    answerKey({ ...FREE_CLOUD, set: true, hint: "abcd", unreadable: true });
     render(<AiKeys />);
 
     expect((await screen.findByRole("alert")).textContent).toMatch(/cannot be read, so every call fails/);
@@ -121,7 +132,7 @@ describe("Settings → AI key", () => {
   });
 
   it("asks before removing the key, and sends null only once confirmed", async () => {
-    api.get.mockResolvedValue({ ...FREE_CLOUD, set: true, hint: "wxyz" });
+    answerKey({ ...FREE_CLOUD, set: true, hint: "wxyz" });
     api.put.mockResolvedValue(FREE_CLOUD);
     render(<AiKeys />);
 
@@ -138,7 +149,7 @@ describe("Settings → AI key", () => {
   });
 
   it("leaves the key where it is when the removal is called off", async () => {
-    api.get.mockResolvedValue({ ...FREE_CLOUD, set: true, hint: "wxyz" });
+    answerKey({ ...FREE_CLOUD, set: true, hint: "wxyz" });
     render(<AiKeys />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Remove key" }));
@@ -183,7 +194,7 @@ describe("Settings → AI key", () => {
   });
 
   it("describes a self-hosted server's own key, not a plan", async () => {
-    api.get.mockResolvedValue({ hosted: false, plan: "free", set: false, hint: "", unreadable: false, included: true, usage: NO_USAGE });
+    answerKey({ hosted: false, plan: "free", set: false, hint: "", unreadable: false, included: true, usage: NO_USAGE });
     render(<AiKeys />);
 
     expect(await screen.findByText(/runs on the key this server was set up with/)).toBeTruthy();
@@ -192,7 +203,7 @@ describe("Settings → AI key", () => {
   });
 
   it("says a self-hosted server with no key anywhere does not run", async () => {
-    api.get.mockResolvedValue({ hosted: false, plan: "free", set: false, hint: "", unreadable: false, included: false, usage: NO_USAGE });
+    answerKey({ hosted: false, plan: "free", set: false, hint: "", unreadable: false, included: false, usage: NO_USAGE });
     render(<AiKeys />);
 
     expect(await screen.findByText(/no key was set on the server/)).toBeTruthy();
@@ -219,7 +230,7 @@ describe("Settings → AI key: usage", () => {
   const PRO_CLOUD = { ...FREE_CLOUD, plan: "pro", included: true };
 
   it("says how much of the month's allowance is used and when it renews, with the bar and the share", async () => {
-    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage() });
+    answerKey({ ...PRO_CLOUD, usage: usage() });
     render(<AiKeys />);
 
     const month = await screen.findByTestId("ai-usage-month");
@@ -230,43 +241,43 @@ describe("Settings → AI key: usage", () => {
   });
 
   it("says how many PM turns and model calls the month held, beside the tokens, and in the singular for one", async () => {
-    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage() });
+    answerKey({ ...PRO_CLOUD, usage: usage() });
     const { unmount } = render(<AiKeys />);
     expect((await screen.findByTestId("ai-usage-activity")).textContent).toBe("120 PM turns this month, and 1,340 model calls on this service's key.");
     unmount();
 
-    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ turns: 1, calls: 1 }) });
+    answerKey({ ...PRO_CLOUD, usage: usage({ turns: 1, calls: 1 }) });
     render(<AiKeys />);
     expect((await screen.findByTestId("ai-usage-activity")).textContent).toBe("1 PM turn this month, and 1 model call on this service's key.");
   });
 
   it("says a month with no PM turns had none, and counts the singular of each on its own number", async () => {
-    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ turns: 0, calls: 12 }) });
+    answerKey({ ...PRO_CLOUD, usage: usage({ turns: 0, calls: 12 }) });
     const { unmount } = render(<AiKeys />);
     expect((await screen.findByTestId("ai-usage-activity")).textContent).toBe("0 PM turns this month, and 12 model calls on this service's key.");
     unmount();
 
-    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ turns: 1, calls: 2 }) });
+    answerKey({ ...PRO_CLOUD, usage: usage({ turns: 1, calls: 2 }) });
     render(<AiKeys />);
     expect((await screen.findByTestId("ai-usage-activity")).textContent).toBe("1 PM turn this month, and 2 model calls on this service's key.");
   });
 
   it("says a trial's turns are the trial's", async () => {
-    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ scope: "trial", used: 100, limit: 3_000_000, resetsAt: null, dailyCeiling: 600_000, turns: 9, calls: 30 }) });
+    answerKey({ ...PRO_CLOUD, usage: usage({ scope: "trial", used: 100, limit: 3_000_000, resetsAt: null, dailyCeiling: 600_000, turns: 9, calls: 30 }) });
     render(<AiKeys />);
 
     expect((await screen.findByTestId("ai-usage-activity")).textContent).toBe("9 PM turns in your trial, and 30 model calls on this service's key.");
   });
 
   it("says what a turn and a call are, since the two are easily read as one", async () => {
-    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage() });
+    answerKey({ ...PRO_CLOUD, usage: usage() });
     render(<AiKeys />);
 
     expect(await screen.findByText(/A PM turn is up to 15 model calls; AI Assist makes one\./)).toBeTruthy();
   });
 
   it("says nothing of turns where the answer did not count them", async () => {
-    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ turns: null }) });
+    answerKey({ ...PRO_CLOUD, usage: usage({ turns: null }) });
     render(<AiKeys />);
 
     await screen.findByTestId("ai-usage-month");
@@ -274,7 +285,7 @@ describe("Settings → AI key: usage", () => {
   });
 
   it("says a trial's allowance is for the trial, with nothing renewing", async () => {
-    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ scope: "trial", used: 3_000_000, limit: 3_000_000, resetsAt: null, dailyCeiling: 600_000 }) });
+    answerKey({ ...PRO_CLOUD, usage: usage({ scope: "trial", used: 3_000_000, limit: 3_000_000, resetsAt: null, dailyCeiling: 600_000 }) });
     render(<AiKeys />);
 
     expect((await screen.findByTestId("ai-usage-month")).textContent).toBe("3,000,000 of 3,000,000 tokens used in your trial.");
@@ -282,7 +293,7 @@ describe("Settings → AI key: usage", () => {
   });
 
   it("counts and shows tokens where nothing limits them, with no bar", async () => {
-    api.get.mockResolvedValue({ hosted: false, plan: "free", set: false, hint: "", unreadable: false, included: true, usage: usage({ limit: null, resetsAt: null, dailyCeiling: null, used: 12_345, today: 300 }) });
+    answerKey({ hosted: false, plan: "free", set: false, hint: "", unreadable: false, included: true, usage: usage({ limit: null, resetsAt: null, dailyCeiling: null, used: 12_345, today: 300 }) });
     render(<AiKeys />);
 
     expect((await screen.findByTestId("ai-usage-month")).textContent).toBe("12,345 tokens used this month, and nothing limits them.");
@@ -292,19 +303,19 @@ describe("Settings → AI key: usage", () => {
   });
 
   it("shows what an own key used apart, and says it is never limited, only when it used any", async () => {
-    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ ownTokens: 77_000, ownCalls: 41 }) });
+    answerKey({ ...PRO_CLOUD, usage: usage({ ownTokens: 77_000, ownCalls: 41 }) });
     render(<AiKeys />);
     expect((await screen.findByTestId("ai-usage-own")).textContent).toBe("Your own key: 77,000 tokens in 41 calls this month, counted and never limited.");
 
     cleanup();
-    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ ownTokens: 0 }) });
+    answerKey({ ...PRO_CLOUD, usage: usage({ ownTokens: 0 }) });
     render(<AiKeys />);
     await screen.findByTestId("ai-usage-month");
     expect(screen.queryByTestId("ai-usage-own")).toBeNull();
   });
 
   it("shows a Free cloud organisation no allowance, which it does not have, and no card at all while it has used no key of its own", async () => {
-    api.get.mockResolvedValue({ ...FREE_CLOUD, usage: usage({ included: false, limit: null, dailyCeiling: null, resetsAt: null }) });
+    answerKey({ ...FREE_CLOUD, usage: usage({ included: false, limit: null, dailyCeiling: null, resetsAt: null }) });
     render(<AiKeys />);
 
     await screen.findByText(/Without a key of your own it does not run on the Free plan/);
@@ -313,7 +324,7 @@ describe("Settings → AI key: usage", () => {
   });
 
   it("shows only what its own key used, where the service's key is not one it may use", async () => {
-    api.get.mockResolvedValue({ ...FREE_CLOUD, set: true, hint: "abcd", usage: usage({ included: false, limit: null, dailyCeiling: null, resetsAt: null, ownTokens: 4_000, ownCalls: 1, locked: true }) });
+    answerKey({ ...FREE_CLOUD, set: true, hint: "abcd", usage: usage({ included: false, limit: null, dailyCeiling: null, resetsAt: null, ownTokens: 4_000, ownCalls: 1, locked: true }) });
     render(<AiKeys />);
 
     expect((await screen.findByTestId("ai-usage-own")).textContent).toBe("Your own key: 4,000 tokens in 1 call this month, counted and never limited.");
@@ -325,14 +336,14 @@ describe("Settings → AI key: usage", () => {
   });
 
   it("rounds the share down, so a month that is not yet spent is not shown as spent", async () => {
-    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ used: 14_950_000 }) });
+    answerKey({ ...PRO_CLOUD, usage: usage({ used: 14_950_000 }) });
     render(<AiKeys />);
 
     expect(await screen.findByText("99% used")).toBeTruthy();
   });
 
   it("says on the key card too that ours is switched off, so it does not promise what the operator took away", async () => {
-    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ locked: true }) });
+    answerKey({ ...PRO_CLOUD, usage: usage({ locked: true }) });
     render(<AiKeys />);
 
     expect(await screen.findByText(/the operator has switched ours off for this organisation/)).toBeTruthy();
@@ -341,7 +352,7 @@ describe("Settings → AI key: usage", () => {
   });
 
   it("does not take the own key's word away: a stored key still reads as used first while the lock is on", async () => {
-    api.get.mockResolvedValue({ ...PRO_CLOUD, set: true, hint: "abcd", usage: usage({ locked: true }) });
+    answerKey({ ...PRO_CLOUD, set: true, hint: "abcd", usage: usage({ locked: true }) });
     render(<AiKeys />);
 
     expect(await screen.findByText("Your own key")).toBeTruthy();
@@ -349,11 +360,114 @@ describe("Settings → AI key: usage", () => {
   });
 
   it("says the operator has switched the key off, and offers the own key as the way on", async () => {
-    api.get.mockResolvedValue({ ...PRO_CLOUD, usage: usage({ locked: true }) });
+    answerKey({ ...PRO_CLOUD, usage: usage({ locked: true }) });
     render(<AiKeys />);
 
     const alert = await screen.findByTestId("ai-usage-locked");
     expect(alert.textContent).toMatch(/The operator has switched off the use of its key for this organisation\. Add your own key below to keep going\./);
     expect(screen.getAllByText("Switched off")).toHaveLength(2);
+  });
+});
+
+// BP-1024: the model is chosen beside the key, from what the key in use runs
+describe("Settings → AI key, the model", () => {
+  const card = async () => within(await screen.findByTestId("ai-model-card"));
+
+  it("is a list of what the platform's key runs, with a note that any other model needs the organisation's own key", async () => {
+    render(<AiKeys />);
+
+    const model = (await (await card()).findByLabelText("Model")) as HTMLSelectElement;
+
+    expect(model.tagName).toBe("SELECT");
+    expect(model.value).toBe("openai/gpt-6-luna");
+    expect(Array.from(model.options).map((o) => o.textContent)).toEqual(["OpenAI: GPT-4o", "OpenAI: GPT-6 Luna"]);
+    expect(screen.getByTestId("ai-model-note").textContent).toBe(
+      "Board Planner's key runs only OpenAI models. To use any other model or provider, add your own OpenRouter key above."
+    );
+  });
+
+  it("shows a model saved as a bare name, from before OpenRouter, as the option that carries it, and keeps Save off", async () => {
+    models = { ...PLATFORM_MODELS, model: "gpt-6-luna" };
+    render(<AiKeys />);
+
+    const model = (await (await card()).findByLabelText("Model")) as HTMLSelectElement;
+
+    // Not the first option, which is what a select with no match for its value falls back to
+    expect(model.value).toBe("openai/gpt-6-luna");
+    expect(model.selectedOptions[0].textContent).toBe("OpenAI: GPT-6 Luna");
+    expect((screen.getByRole("button", { name: "Save model" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("saves the one chosen as aiModel, only once it differs from what is saved", async () => {
+    api.put.mockResolvedValue({ aiModel: "openai/gpt-4o" });
+    render(<AiKeys />);
+    const model = await (await card()).findByLabelText("Model");
+    const save = screen.getByRole("button", { name: "Save model" }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+
+    fireEvent.change(model, { target: { value: "openai/gpt-4o" } });
+    expect(save.disabled).toBe(false);
+    fireEvent.click(save);
+
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith("/api/settings", { aiModel: "openai/gpt-4o" }));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("Model saved", "success"));
+    expect(save.disabled).toBe(true);
+  });
+
+  it("says why when the server refuses the model, and keeps the choice unsaved", async () => {
+    api.put.mockRejectedValue(new Error("OpenRouter has no model openai/gpt-9-typo. Check the name against openrouter.ai/models."));
+    models = { ...PLATFORM_MODELS, restricted: false, providers: null };
+    render(<AiKeys />);
+    const model = await (await card()).findByLabelText("Model");
+
+    fireEvent.change(model, { target: { value: "openai/gpt-9-typo" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save model" }));
+
+    expect((await screen.findByText(/OpenRouter has no model openai\/gpt-9-typo/)).getAttribute("role")).toBe("alert");
+    expect(toast).not.toHaveBeenCalledWith("Model saved", "success");
+    expect((screen.getByRole("button", { name: "Save model" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("is a field with OpenRouter's models offered, and the own key said to run any, when the key in use is the organisation's own", async () => {
+    models = { ...PLATFORM_MODELS, restricted: false, providers: null, models: [{ id: "anthropic/claude-haiku-5.5", name: "Anthropic: Claude Haiku 5.5" }] };
+    render(<AiKeys />);
+
+    const model = (await (await card()).findByLabelText("Model")) as HTMLInputElement;
+
+    expect(model.tagName).toBe("INPUT");
+    expect(document.querySelector(`datalist#${CSS.escape(model.getAttribute("list") ?? "")} option`)?.getAttribute("value")).toBe("anthropic/claude-haiku-5.5");
+    expect(screen.getByTestId("ai-model-note").textContent).toMatch(/Any OpenRouter model runs on this key/);
+  });
+
+  it("is a field to type in when OpenRouter's list cannot be read", async () => {
+    models = { ...PLATFORM_MODELS, models: null };
+    render(<AiKeys />);
+
+    expect(((await (await card()).findByLabelText("Model")) as HTMLInputElement).tagName).toBe("INPUT");
+  });
+
+  it("is read again once the key is saved, since which models run depends on the key", async () => {
+    api.put.mockResolvedValue({ ...FREE_CLOUD, set: true, hint: "wxyz" });
+    render(<AiKeys />);
+    await card();
+    const reads = () => api.get.mock.calls.filter(([url]) => url === "/api/settings/ai-models").length;
+    expect(reads()).toBe(1);
+
+    fireEvent.change(await keyField(), { target: { value: "sk-or-v1-0123456789abcdef" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save key" }));
+
+    await waitFor(() => expect(reads()).toBe(2));
+  });
+
+  it("says why a key cannot be removed while its model is in use, and keeps the key", async () => {
+    answerKey({ ...FREE_CLOUD, plan: "pro", set: true, hint: "wxyz" });
+    api.put.mockRejectedValue(new Error("Your own key is what runs anthropic/claude-haiku-5.5, and Board Planner's key does not. Choose a model it runs under Model, or keep your key."));
+    render(<AiKeys />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Remove key" }));
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Remove key" }));
+
+    expect((await screen.findByText(/Your own key is what runs anthropic\/claude-haiku-5\.5/)).getAttribute("role")).toBe("alert");
+    expect(screen.getByText(/A key ending in/)).toBeTruthy();
   });
 });

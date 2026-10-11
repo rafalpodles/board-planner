@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/Input";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { LoadFailed } from "@/components/ui/LoadFailed";
 import { SettingsCard } from "@/components/settings/SettingsCard";
+import { AiModel } from "@/components/settings/AiModel";
 
 interface AiKeysAnswer {
   hosted: boolean;
@@ -291,6 +292,7 @@ export function AiKeys() {
       <div className="space-y-4">
         {answer.usage && (answer.usage.included || answer.usage.ownTokens > 0) && <UsageCard usage={answer.usage} hosted={answer.hosted} />}
         <KeyCard state={answer} onSaved={setAnswer} />
+        <AiModel key={`${answer.set}-${answer.hint}`} />
       </div>
     </div>
   );

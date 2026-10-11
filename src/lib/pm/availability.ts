@@ -14,6 +14,6 @@ export type { PmGateFields } from "./gate";
 
 // project value → the instance's one AI model, which AI Assist uses too
 export async function resolvePmModel(db: ScopedDb, projectModel?: string): Promise<string> {
-  if (projectModel) return projectModel;
+  if (projectModel) return openrouterModel(projectModel);
   return openrouterModel((await getSettings(db)).aiModel);
 }

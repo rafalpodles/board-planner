@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withAdmin } from "@/lib/middleware";
+import { refuseModel } from "@/lib/model-check";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { describeSettingsChanges } from "@/lib/settings-audit";
 import { projectWriteImages } from "@/lib/project-write-images";
@@ -50,6 +51,8 @@ export const PATCH = withAdmin(async (request, { params, user, db }) => {
         { status: 400 }
       );
     }
+    const refused = await refuseModel(db, body.model);
+    if (refused) return NextResponse.json({ error: refused }, { status: 400 });
     updates["pm.model"] = body.model.trim();
   }
 

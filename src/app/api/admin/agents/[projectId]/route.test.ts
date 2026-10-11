@@ -3,8 +3,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const getAuthUser = vi.fn();
 const projectFindOneAndUpdate = vi.fn();
 const logProjectAudit = vi.fn();
+const refuseModel = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+vi.mock("@/lib/model-check", () => ({ refuseModel }));
 vi.mock("@/lib/auth", () => ({ getAuthUser, RateLimitError: class extends Error {} }));
 vi.mock("@/models/project", () => ({ Project: { findOneAndUpdate: projectFindOneAndUpdate } }));
 vi.mock("@/lib/projectAudit", () => ({ logProjectAudit }));
@@ -52,10 +54,23 @@ beforeEach(() => {
   vi.clearAllMocks();
   getAuthUser.mockResolvedValue({ _id: ADMIN, role: "admin", viaMachineCredential: false });
   logProjectAudit.mockResolvedValue(undefined);
+  refuseModel.mockResolvedValue(null);
   stored({ enabled: true, model: "x/y" });
 });
 
 describe("PATCH /api/admin/agents/:projectId", () => {
+  // BP-1024
+  it("refuses a model the key in use cannot run, with the reason, and writes nothing", async () => {
+    refuseModel.mockResolvedValue("The model a/b is not available on Board Planner's AI key.");
+
+    const res = await patch({ model: "a/b" });
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "The model a/b is not available on Board Planner's AI key." });
+    expect(refuseModel).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "a/b");
+    expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
+  });
+
   it("writes only the fields the request named", async () => {
     const res = await patch({ enabled: false });
 

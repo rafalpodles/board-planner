@@ -36,10 +36,25 @@ const LOOPBACK = "127.0.0.1";
 const PORT = Number(process.env.PM_STUB_PORT ?? 3988);
 
 // The models `modelAcceptsImages` will find. A model that is not here is unknown, not text-only.
+// It is also the list the model pickers offer and a saved model is checked against (BP-1024): a model a spec saves
+// has to be listed, and a name that is not is what a typo looks like.
+const LISTED = [
+  ["e2e/vision-model", "E2E: Vision"],
+  ["e2e/instance-default", "E2E: Instance default"],
+  ["e2e/governed-model", "E2E: Governed"],
+  ["anthropic/e2e-stub-model", "E2E: Marking provider"],
+  ["openai/gpt-6-luna", "OpenAI: GPT-6 Luna"],
+  ["openai/gpt-4o", "OpenAI: GPT-4o"],
+  ["openai/gpt-4o-mini", "OpenAI: GPT-4o Mini"],
+  ["openai/gpt-4o-mini-2026", "OpenAI: GPT-4o Mini 2026"],
+  ["openai/gpt-oss-120b", "OpenAI: gpt-oss-120b"],
+  ["anthropic/claude-haiku", "Anthropic: Claude Haiku"],
+  ["anthropic/claude-haiku-5.5", "Anthropic: Claude Haiku 5.5"],
+];
 const MODELS = {
   data: [
-    { id: "e2e/vision-model", architecture: { input_modalities: ["text", "image"] } },
-    { id: "e2e/text-only-model", architecture: { input_modalities: ["text"] } },
+    ...LISTED.map(([id, name]) => ({ id, name, architecture: { input_modalities: ["text", "image"] } })),
+    { id: "e2e/text-only-model", name: "E2E: Text only", architecture: { input_modalities: ["text"] } },
   ],
 };
 
@@ -176,6 +191,16 @@ serve({
 
     if (req.url?.endsWith("/models")) {
       reply(res, MODELS);
+      return;
+    }
+
+    // Whether OpenRouter knows the key being saved: one that says "rejected" is refused, as a revoked one would be
+    if (req.url?.endsWith("/key")) {
+      if ((req.headers.authorization ?? "").includes("rejected")) {
+        res.writeHead(401, { "Content-Type": "application/json" }).end(JSON.stringify({ error: { message: "No auth credentials found" } }));
+        return;
+      }
+      reply(res, { data: { label: "e2e", limit: null } });
       return;
     }
 

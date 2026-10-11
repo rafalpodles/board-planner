@@ -152,7 +152,7 @@ OPENROUTER_API_KEY=       # Optional — the PM agent (chat-driven project manag
                           # whose plan includes managed AI (`ai.managed`: Pro and the trial). An organisation's
                           # own key, stored sealed in Settings → AI key, is used first on any plan and is never
                           # replaced by this one (`src/lib/model-keys.ts`, BP-652). Both run on ONE model,
-                          # `Settings.aiModel` (Settings → Agents). Rows created since BP-1006 default to
+                          # `Settings.aiModel` (Settings → AI key). Rows created since BP-1006 default to
                           # `openai/gpt-6-luna`; older rows keep what they stored. A project's `pm.model` overrides
                           # it for the PM only (`resolvePmModel`); there is no PM_MODEL and no separate PM default (BP-1006)
 AI_TRIAL_TOKENS=          # Optional — tokens a trial may spend of the operator's AI key in all (hosted

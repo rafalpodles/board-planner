@@ -6,7 +6,7 @@ const getOrganisation = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/organisation", () => ({ getOrganisation }));
 
 const { encryptSecret } = await import("./encryption");
-const { describeModelKeyRefusal, forgetManagedPlans, modelKeyAvailability, modelKeyRefusalResponse, resolveModelKey } = await import("./model-keys");
+const { describeModelKeyRefusal, forgetManagedPlans, modelKeyAvailability, modelKeyRefusalResponse, modelsRestricted, resolveModelKey } = await import("./model-keys");
 
 const ORGANISATION = new Types.ObjectId();
 const OTHER = new Types.ObjectId();
@@ -238,5 +238,42 @@ describe("what a refusal says, beyond the plan", () => {
     expect(await plan.json()).toMatchObject({ reason: "needs_plan", feature: "ai.managed", plan: "free" });
     expect(unreadable.status).toBe(503);
     expect(await unreadable.json()).toMatchObject({ reason: "own_key_unreadable" });
+  });
+});
+
+// BP-1024: which key a model is chosen for decides which models may be chosen
+describe("whether the models that may be chosen are restricted to the allowed providers'", () => {
+  const sealed = () => encryptSecret("sk-own-0123456789", ORGANISATION);
+
+  it("is so only on the operator's key, and on a Free plan that would get it on upgrading", async () => {
+    process.env.ORGANISATION_DOMAIN = "board-planner.test";
+    process.env.OPENROUTER_API_KEY = "sk-operators";
+
+    organisationOn("pro");
+    expect(await modelsRestricted(dbWith(null))).toBe(true);
+
+    organisationOn("free");
+    expect(await modelsRestricted(dbWith(null))).toBe(true);
+  });
+
+  it("is not on the organisation's own key, whatever its plan, nor on one that cannot be read", async () => {
+    process.env.ORGANISATION_DOMAIN = "board-planner.test";
+    process.env.OPENROUTER_API_KEY = "sk-operators";
+    organisationOn("free");
+
+    expect(await modelsRestricted(dbWith({ openrouterKey: sealed() }))).toBe(false);
+    expect(await modelsRestricted(dbWith({ openrouterKey: encryptSecret("sk-other-0123456789", OTHER) }))).toBe(false);
+  });
+
+  it("is not on a self-hosted instance's key, nor where there is no key at all", async () => {
+    process.env.OPENROUTER_API_KEY = "sk-instance";
+    expect(await modelsRestricted(dbWith(null))).toBe(false);
+
+    delete process.env.OPENROUTER_API_KEY;
+    expect(await modelsRestricted(dbWith(null))).toBe(false);
+
+    process.env.ORGANISATION_DOMAIN = "board-planner.test";
+    organisationOn("pro");
+    expect(await modelsRestricted(dbWith(null))).toBe(false);
   });
 });

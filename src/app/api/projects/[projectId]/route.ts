@@ -9,6 +9,7 @@ import { parseProjectWorkerConfig } from "@/lib/project-worker-config";
 import { isWorkerLockedByInstance, WORKERS_LOCKED_MESSAGE } from "@/lib/worker-gate";
 import { PROJECT_POLICY_FIELDS_MOVED_TO_BLOCKS } from "@/lib/worker-policy";
 import { logInstanceAudit } from "@/lib/instanceAudit";
+import { refuseModel } from "@/lib/model-check";
 import { InstanceAuditAction } from "@/types";
 import { dropProjectReferences } from "@/lib/project-references";
 import { logProjectAudit } from "@/lib/projectAudit";
@@ -257,6 +258,11 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
       return NextResponse.json({ error: pmResult.error }, { status: 400 });
     }
     const pm = pmResult.value;
+    // Only a model that changes is judged: an unrelated save must not fail on one stored earlier
+    if (sent.has("model") && typeof pm.model === "string" && pm.model.trim() !== (existing.pm?.model ?? "")) {
+      const refused = await refuseModel(db, pm.model);
+      if (refused) return NextResponse.json({ error: refused }, { status: 400 });
+    }
     for (const key of PM_SAVED_FIELDS) {
       if (sent.has(key)) updates[`pm.${key}`] = pm[key];
     }

@@ -1,4 +1,5 @@
 import { APP_NAME, APP_DOMAIN } from "@/lib/brand";
+import { managedProviderOf } from "@/lib/managed-models";
 import { selfOrigin } from "@/lib/session";
 import { withCacheBreakpoints } from "./prompt-cache";
 
@@ -7,9 +8,10 @@ export const OPENROUTER_BASE_URL = () => process.env.OPENROUTER_BASE_URL || "htt
 export type ProviderPreferences = { data_collection: "deny"; only?: string[] };
 
 // On the platform's key only, where the sub-processor list speaks: no upstream that may train on prompts, and
-// OpenAI's own models only from OpenAI. The open-weight gpt-oss models are not served by OpenAI at all.
+// a provider's own models only from that provider. The open-weight gpt-oss models are not served by OpenAI at all.
 export function platformProviderPreferences(model: string): ProviderPreferences {
-  return /^openai\/(?!gpt-oss)/.test(model) ? { data_collection: "deny", only: ["openai"] } : { data_collection: "deny" };
+  const provider = managedProviderOf(model);
+  return provider ? { data_collection: "deny", only: provider.servedBy } : { data_collection: "deny" };
 }
 
 const MAX_TOKENS = () => Number(process.env.PM_MAX_TOKENS) || 8192;
