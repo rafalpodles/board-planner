@@ -141,4 +141,14 @@ describe("where the steps send you", () => {
     expect(hrefOf("webhook")).toBe("/projects/ORB/settings?section=integrations");
     expect(hrefOf("repository")).toBe("/projects/ORB/settings?section=integrations");
   });
+
+  it("sends the MCP client step to the docs page that explains it, outside the app", () => {
+    const g: ApiSetupGuide = { show: true, steps: [{ id: "mcp", group: "connections", done: false, locked: false }] };
+    render(<SetupGuidePanel guide={g} projectRef="ORB" onClose={vi.fn()} onHide={vi.fn()} />);
+
+    const link = screen.getByTestId("setup-guide-next").querySelector("a")!;
+    expect(link.getAttribute("href")).toBe("https://board-planner.com/docs/ai/claude-code-and-mcp/");
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(screen.getByTestId("setup-guide-next").textContent).toContain("Connect an MCP client");
+  });
 });

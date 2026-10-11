@@ -8,7 +8,6 @@ const workerFind = vi.fn();
 const taskExists = vi.fn();
 const grantCount = vi.fn();
 const sprintExists = vi.fn();
-const tokenExists = vi.fn();
 const oauthExists = vi.fn();
 const userLean = vi.fn();
 const userUpdate = vi.fn();
@@ -34,7 +33,6 @@ vi.mock("@/models/worker", () => ({
 vi.mock("@/models/task", () => ({ Task: { exists: taskExists } }));
 vi.mock("@/models/grant", () => ({ Grant: { countDocuments: grantCount } }));
 vi.mock("@/models/sprint", () => ({ Sprint: { exists: sprintExists } }));
-vi.mock("@/models/apiToken", () => ({ ApiToken: { exists: tokenExists } }));
 vi.mock("@/models/oauthToken", () => ({ OAuthToken: { exists: oauthExists } }));
 vi.mock("@/models/settings", () => ({ Settings: { findOne: () => ({ lean: settingsLean }) } }));
 vi.mock("@/models/user", () => ({
@@ -55,7 +53,6 @@ beforeEach(() => {
   taskExists.mockResolvedValue(null);
   grantCount.mockResolvedValue(1);
   sprintExists.mockResolvedValue(null);
-  tokenExists.mockResolvedValue(null);
   oauthExists.mockResolvedValue(null);
   userLean.mockResolvedValue({ dismissedSetupGuides: [] });
   settingsLean.mockResolvedValue(null);
@@ -84,11 +81,11 @@ describe("GET setup guide", () => {
     expect(settingsLean).not.toHaveBeenCalled();
   });
 
-  it("derives each step from what exists and asks only about the reader's own machines and tokens", async () => {
+  it("derives each step from what exists and asks only about the reader's own machines and connections", async () => {
     taskExists.mockResolvedValue({ _id: "t" });
     grantCount.mockResolvedValue(2);
     sprintExists.mockResolvedValue({ _id: "s" });
-    tokenExists.mockResolvedValue({ _id: "k" });
+    oauthExists.mockResolvedValue({ _id: "o" });
     projectLean.mockResolvedValue({
       _id: PROJECT,
       repositoryUrl: "",
@@ -105,7 +102,7 @@ describe("GET setup guide", () => {
       tasks: true,
       team: true,
       sprint: true,
-      token: true,
+      mcp: true,
       webhook: true,
       channel: false,
       repository: false,
@@ -113,13 +110,15 @@ describe("GET setup guide", () => {
       machine: false,
     });
     expect(workerFind.mock.calls[0][0]).toEqual({ owner: READER, organisation: DEFAULT_ORGANISATION_ID });
-    expect(tokenExists.mock.calls[0][0]).toEqual({ user: READER, organisation: DEFAULT_ORGANISATION_ID });
+    const asked = oauthExists.mock.calls[0][0];
+    expect(asked).toMatchObject({ user: READER, organisation: DEFAULT_ORGANISATION_ID });
+    expect(asked.refreshExpiresAt.$gt).toBeInstanceOf(Date);
   });
 
-  it("counts an OAuth connection as a token", async () => {
-    oauthExists.mockResolvedValue({ _id: "o" });
+  it("is not done for a reader with no live connection, though they may hold an API token", async () => {
+    oauthExists.mockResolvedValue(null);
 
-    expect(doneOf((await read()).body).token).toBe(true);
+    expect(doneOf((await read()).body).mcp).toBe(false);
   });
 
   it("leaves the organisation's steps out for somebody who is not an instance admin", async () => {

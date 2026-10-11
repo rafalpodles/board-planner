@@ -1,4 +1,4 @@
-import { EXECUTION_DOCS_URL } from "@/lib/docs-urls";
+import { EXECUTION_DOCS_URL, MCP_DOCS_URL } from "@/lib/docs-urls";
 import { projectPath } from "@/lib/urls";
 import type { SetupGuideGroupId, SetupGuideStepId } from "@/types";
 
@@ -69,11 +69,12 @@ export const STEP_COPY: Record<SetupGuideStepId, StepCopy> = {
     action: "Settings › Integrations",
     href: settings("integrations"),
   },
-  token: {
-    title: "Connect an AI client",
-    why: "Let Claude or any MCP client work your board with a token.",
-    action: "API tokens",
-    href: () => "/settings/tokens",
+  mcp: {
+    title: "Connect an MCP client",
+    why: "Let Claude or any MCP client work your board. Add the server, then approve it when it asks.",
+    action: "How to connect",
+    href: () => MCP_DOCS_URL,
+    external: true,
   },
   pm: {
     title: "Turn on the PM agent",

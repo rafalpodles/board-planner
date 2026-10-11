@@ -4,6 +4,8 @@ import {
   seedAgents,
   seedAssignmentOutsider,
   seedMachine,
+  seedMcpConnection,
+  seedOwnAiKey,
   makeBoardFresh,
   setBoardReadiness,
   HANDOVER_REPOSITORY,
@@ -93,6 +95,7 @@ test("an owner who is no instance admin takes all twelve steps", async ({ page }
   });
 
   await test.step("columns: one is renamed", async () => {
+    await page.goto(`/projects/${PROJECT_KEY}/settings?section=board`);
     await page.getByLabel("Column name").first().fill("Backlog");
     await saved(
       page,
@@ -103,6 +106,7 @@ test("an owner who is no instance admin takes all twelve steps", async ({ page }
   });
 
   await test.step("fields: a category is added", async () => {
+    await page.goto(`/projects/${PROJECT_KEY}/settings?section=fields`);
     await page.getByRole("button", { name: "+ Add category" }).click();
     await page.getByLabel("Category name").last().fill("support");
     await saved(
@@ -136,6 +140,7 @@ test("an owner who is no instance admin takes all twelve steps", async ({ page }
   });
 
   await test.step("channel: a Slack channel is added", async () => {
+    await page.getByRole("button", { name: "+ Add integration" }).click();
     await page.getByRole("button", { name: /^Team channels/ }).click();
     await page.getByPlaceholder("Channel name...").fill("team-orbit");
     await page.getByPlaceholder(/^https:\/\/hooks\.slack\.com/).fill("https://hooks.slack.com/services/T000/B000/e2e");
@@ -149,7 +154,8 @@ test("an owner who is no instance admin takes all twelve steps", async ({ page }
   });
 
   await test.step("webhook: an endpoint is added", async () => {
-    await page.getByRole("button", { name: /^WebhooksNo endpoints/ }).click();
+    await page.getByRole("button", { name: "+ Add integration" }).click();
+    await page.getByRole("button", { name: /^Webhooks/ }).click();
     await page.getByPlaceholder("https://example.com/webhook").fill("https://example.com/webhook");
     await page
       .getByPlaceholder("https://example.com/webhook")
@@ -164,21 +170,21 @@ test("an owner who is no instance admin takes all twelve steps", async ({ page }
     await expectTicked(page, "webhook", 8, 12);
   });
 
-  await test.step("token: one is made", async () => {
-    await page.goto("/settings/tokens");
-    await page.getByPlaceholder(/^Token name/).fill("MCP");
-    await saved(
-      page,
-      () => page.getByRole("button", { name: "Create", exact: true }).click(),
-      (url, method) => method === "POST" && url.pathname.endsWith("/api/tokens")
+  await test.step("mcp: a client is connected, and the guide sends the reader to the docs for how", async () => {
+    await card(page).click();
+    await expect(page.getByTestId("setup-guide-next")).toContainText("Connect an MCP client");
+    await expect(page.getByTestId("setup-guide-next").getByRole("link", { name: "How to connect" })).toHaveAttribute(
+      "href",
+      "https://board-planner.com/docs/ai/claude-code-and-mcp/"
     );
-    await page.goto(`/projects/${PROJECT_KEY}`);
-    await expectTicked(page, "token", 9, 12);
+    await seedMcpConnection(OWNER_ID);
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expectTicked(page, "mcp", 9, 12);
   });
 
   await test.step("runs: the owner lets workers run tasks", async () => {
     await page.goto(`/projects/${PROJECT_KEY}/settings?section=workers`);
-    await page.getByLabel(/Let workers run tasks/).check();
+    await page.getByText(/Let workers run tasks/).click();
     await saved(
       page,
       () => saveChanges(page).click(),
@@ -196,8 +202,7 @@ test("an owner who is no instance admin takes all twelve steps", async ({ page }
   await test.step("handover: an agent is picked on a task", async () => {
     await page.goto(`/projects/${PROJECT_KEY}`);
     await page.getByText("First task").first().click();
-    await page.getByRole("button", { name: "All details" }).click();
-    await page.getByRole("combobox", { name: "Agent" }).click();
+    await page.getByRole("combobox", { name: "Agent" }).first().click();
     await page.getByRole("option", { name: new RegExp(PROJECT_AGENT_NAME) }).click();
     await expect.poll(async () => doneIds(await guideOf(page)), { timeout: 15_000 }).toContain("handover");
   });
@@ -219,25 +224,19 @@ test("an instance admin has two steps more, and takes them", async ({ page }) =>
   expect(before.steps.map((s) => s.id)).toEqual(expect.arrayContaining(["pm", "aiKey"]));
   await expect(count(page)).toHaveText("0 of 14 done");
 
-  await test.step("aiKey: the organisation's own key is saved", async () => {
-    await page.goto("/settings/ai-keys");
-    await page.getByPlaceholder(/^sk-or-v1/).fill("sk-or-v1-e2e-key");
-    await saved(
-      page,
-      () => page.getByRole("button", { name: "Save key" }).click(),
-      (url, method) => method !== "GET" && url.pathname.includes("/ai-key")
-    );
+  await test.step("aiKey: the organisation has its own key", async () => {
+    await seedOwnAiKey();
     await page.goto(`/projects/${PROJECT_KEY}`);
     await expectTicked(page, "aiKey", 1, 14);
   });
 
   await test.step("pm: the agent is turned on for the board", async () => {
     await page.goto(`/projects/${PROJECT_KEY}/settings?section=pm`);
-    await page.getByLabel(/Run the PM agent on this project/).check();
+    await page.getByText(/Run the PM agent on this project/).click();
     await saved(
       page,
       () => saveChanges(page).click(),
-      (url, method) => method === "PUT" && url.pathname.includes("/pm")
+      (url, method) => method === "PUT" && /\/api\/projects\/[^/]+$/.test(url.pathname)
     );
     await expectTicked(page, "pm", 2, 14);
   });

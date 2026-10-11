@@ -2010,7 +2010,7 @@ export interface ApiHandoverReadiness {
 
 export type SetupGuideStepId =
   | "tasks" | "team" | "columns" | "fields" | "sprint"
-  | "repository" | "channel" | "webhook" | "token"
+  | "repository" | "channel" | "webhook" | "mcp"
   | "pm" | "aiKey"
   | "runs" | "machine" | "handover"
   | "sso" | "plan";

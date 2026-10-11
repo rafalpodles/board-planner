@@ -2671,6 +2671,37 @@ export async function makeBoardFresh() {
   await mongoose.disconnect();
 }
 
+/** An MCP client `user` approved: what Connected apps lists, valid for another hour. */
+export async function seedMcpConnection(user: mongoose.Types.ObjectId) {
+  const db = (await connect()).db!;
+  const now = new Date();
+  await db.collection("oauthtokens").insertOne({
+    accessTokenHash: "e2e-access-hash",
+    refreshTokenHash: "e2e-refresh-hash",
+    clientId: "e2e-mcp-client",
+    user,
+    scope: "mcp",
+    allowedProjects: [],
+    accessExpiresAt: new Date(now.getTime() + 60 * 60_000),
+    refreshExpiresAt: new Date(now.getTime() + 60 * 60_000),
+    createdAt: now,
+  });
+  await stampOrganisationAndDisconnect();
+}
+
+/** The organisation's own AI key, as saved: OpenRouter checks a pasted key against its API, which a test cannot reach. */
+export async function seedOwnAiKey() {
+  const db = (await connect()).db!;
+  await db
+    .collection("settings")
+    .updateOne(
+      { organisation: DEFAULT_ORGANISATION_ID },
+      { $set: { openrouterKey: "enc:e2e-placeholder", openrouterKeyHint: "…e2e" } },
+      { upsert: true }
+    );
+  await mongoose.disconnect();
+}
+
 /** A machine `owner` enrolled, holding a checkout of `remote`, last seen `seenAgoMs` ago. */
 export async function seedMachine(
   remote: string,

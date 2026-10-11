@@ -32,7 +32,7 @@ export const GET = withProjectAccess(async (_request, { params, user, db }) => {
   if (!(await check(db, user, projectId, "admin"))) return NextResponse.json(NOTHING);
 
   const instanceAdmin = user.role === "admin";
-  const [project, workers, claiming, hasTasks, grantCount, hasSprint, handedOver, ownToken, oauthToken, me, settings, organisation] =
+  const [project, workers, claiming, hasTasks, grantCount, hasSprint, handedOver, mcpClient, me, settings, organisation] =
     await Promise.all([
       db.Project.findById(
         projectId,
@@ -47,8 +47,7 @@ export const GET = withProjectAccess(async (_request, { params, user, db }) => {
       db.Grant.countDocuments({ objectType: "project", object: projectId }),
       db.Sprint.exists({ project: projectId }),
       db.Task.exists({ project: projectId, agent: { $ne: null } }),
-      db.ApiToken.exists({ user: user._id }),
-      db.OAuthToken.exists({ user: user._id }),
+      db.OAuthToken.exists({ user: user._id, refreshExpiresAt: { $gt: new Date() } }),
       db.User.findById(user._id, "dismissedSetupGuides").lean(),
       instanceAdmin ? db.Settings.findOne({}, "openrouterKey sso").lean() : null,
       instanceAdmin ? getOrganisation(db.organisation) : null,
@@ -64,7 +63,7 @@ export const GET = withProjectAccess(async (_request, { params, user, db }) => {
     repositoryUrl: projectRepositoryUrl(project),
     hasChannel: (project.notificationChannels?.length ?? 0) > 0,
     hasWebhook: (project.webhooks?.length ?? 0) > 0,
-    hasToken: !!ownToken || !!oauthToken,
+    mcpConnected: !!mcpClient,
     pmEnabled: !!project.pm?.enabled,
     ownAiKey: !!settings?.openrouterKey,
     workerEnabled: !!project.worker?.enabled,

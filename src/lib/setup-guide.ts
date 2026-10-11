@@ -12,7 +12,8 @@ export interface SetupGuideFacts {
   repositoryUrl: string;
   hasChannel: boolean;
   hasWebhook: boolean;
-  hasToken: boolean;
+  /** An MCP client the reader approved, listed under Connected apps */
+  mcpConnected: boolean;
   pmEnabled: boolean;
   ownAiKey: boolean;
   workerEnabled: boolean;
@@ -35,7 +36,7 @@ const STEPS: readonly { id: SetupGuideStepId; group: SetupGuideGroupId; instance
   { id: "repository", group: "connections" },
   { id: "channel", group: "connections" },
   { id: "webhook", group: "connections" },
-  { id: "token", group: "connections" },
+  { id: "mcp", group: "connections" },
   { id: "pm", group: "ai", instanceAdminOnly: true },
   { id: "aiKey", group: "ai", instanceAdminOnly: true },
   { id: "runs", group: "agents" },
@@ -55,7 +56,7 @@ export function setupGuideSteps(facts: SetupGuideFacts): ApiSetupGuideStep[] {
     repository: facts.repositoryUrl.trim() !== "",
     channel: facts.hasChannel,
     webhook: facts.hasWebhook,
-    token: facts.hasToken,
+    mcp: facts.mcpConnected,
     pm: facts.pmEnabled,
     aiKey: facts.ownAiKey,
     runs: facts.workerEnabled && !facts.lockedByInstance,
