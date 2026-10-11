@@ -254,6 +254,7 @@ test("a grant a group made is marked until somebody changes it by hand, and the 
     await page.goto(`${SETTINGS}?section=general`);
     await expect(page.getByText("IdP", { exact: true })).toHaveCount(1);
     await expect(page.getByText("E2E Member")).toContainText("IdP");
+    await page.getByText("E2E Member").scrollIntoViewIfNeeded();
     await page.screenshot({ path: "e2e/.artifacts/bp861-idp-marker.png" });
 
     await page.getByLabel(`Access for ${MEMBER_USERNAME}`).selectOption("owner");
