@@ -445,7 +445,7 @@ test.describe("deleting a user", () => {
       await expect(deletionRow).toBeVisible({ timeout: 3_000 });
     }).toPass({ timeout: 20_000 });
     await expect(deletionRow.locator("td").nth(1)).toHaveText(ADMIN_USERNAME);
-    await expect(deletionRow).toContainText(erased);
-    await expect(deletionRow).not.toContainText(MEMBER_USERNAME);
+    // The target's own cell: the detail beside it says "a member", which is a role and not a name
+    await expect(deletionRow.locator("td").nth(3)).toHaveText(erased);
   });
 });

@@ -81,12 +81,15 @@ export async function accountExport(db: ScopedDb, user: IdentifiedSubject) {
         ? { key: taskKey(t), title: t.title, description: t.description, status: t.status, createdAt: t.createdAt }
         : { key: taskKey(t), createdAt: t.createdAt }
     ),
-    pmMessages: pmMessages.map((m) => ({
-      board: keyOf.get(String(m.project)) ?? String(m.project),
-      role: m.role,
-      content: m.content,
-      createdAt: m.createdAt,
-    })),
+    // On a board they no longer reach, only what they wrote: the replies summarise that board's work
+    pmMessages: pmMessages
+      .filter((m) => mayRead(m.project) || m.role === "user")
+      .map((m) => ({
+        board: keyOf.get(String(m.project)) ?? String(m.project),
+        role: m.role,
+        content: m.content,
+        createdAt: m.createdAt,
+      })),
     notifications: notifications.map((n) => ({ type: n.type, title: n.title, body: n.body, createdAt: n.createdAt })),
   };
 }

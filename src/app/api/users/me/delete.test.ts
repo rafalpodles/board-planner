@@ -203,10 +203,16 @@ describe("DELETE /api/users/me — a person deletes their own account", () => {
   });
 
   it("forgets earlier wrong guesses once the right password is given", async () => {
-    compare.mockResolvedValueOnce(false);
-    await DELETE(request({ currentPassword: "wrong" }), context);
-
-    expect((await DELETE(request({ currentPassword: "correct horse" }), context)).status).toBe(200);
+    const guesses = EXCLUSIVE_SOURCE_ATTEMPTS - 1;
+    for (let round = 0; round < 2; round++) {
+      compare.mockResolvedValue(false);
+      for (let attempt = 0; attempt < guesses; attempt++) await DELETE(request({ currentPassword: "wrong" }), context);
+      compare.mockResolvedValue(true);
+      // Without the reset the second round's right password would be the 2·N-th guess, and be locked out
+      const res = await DELETE(request({ currentPassword: "correct horse" }), context);
+      expect(res.status).toBe(200);
+      accountRecord();
+    }
   });
 
   it("answers 404 when the account is already gone", async () => {

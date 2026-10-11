@@ -49,6 +49,8 @@ function database() {
     ],
     PmMessage: [
       { project: OPEN, role: "user", content: "plan it", triggeredBy: JAN, createdAt: "2026-06-01" },
+      { project: CLOSED, role: "user", content: "what I asked", triggeredBy: JAN, createdAt: "2026-06-03" },
+      { project: CLOSED, role: "assistant", content: "a summary of the closed board", triggeredBy: JAN, createdAt: "2026-06-04" },
       { project: OPEN, role: "user", content: "olas question", triggeredBy: OLA, createdAt: "2026-06-02" },
     ],
     Notification: [
@@ -71,7 +73,7 @@ describe("a person's own export", () => {
     expect(data.account).toMatchObject({ username: "jan", fullName: "Jan Kowalski", email: "jan@example.com", personalChat: "slack" });
     expect(data.boardAccess).toEqual([{ board: "BP", relation: "owner", since: "2026-01-01" }]);
     expect(data.comments).toEqual([{ task: "BP-7", createdAt: "2026-05-01", body: "hello" }]);
-    expect(data.pmMessages).toEqual([expect.objectContaining({ board: "BP", content: "plan it" })]);
+    expect(data.pmMessages.map((m) => m.content)).toEqual(["plan it", "what I asked"]);
     expect(data.notifications).toEqual([expect.objectContaining({ title: "x mentioned you" })]);
     expect(data.signInProviders).toEqual([expect.objectContaining({ provider: "google" })]);
     expect(data.apiTokens).toEqual([expect.objectContaining({ name: "ci", prefix: "cp_ab12" })]);
@@ -97,6 +99,12 @@ describe("a person's own export", () => {
       { key: "BP-7", title: "Mine", description: "d", status: "todo", createdAt: "2026-04-01" },
       { key: "SEC-2", createdAt: "2026-04-02" },
     ]);
+  });
+
+  it("keeps the assistant's replies from a board they no longer reach out, and what they asked in", async () => {
+    const text = JSON.stringify(await accountExport(database().db, ME));
+    expect(text).toContain("what I asked");
+    expect(text).not.toContain("a summary of the closed board");
   });
 
   it("shows everything they created when they reach every board", async () => {

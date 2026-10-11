@@ -3,9 +3,17 @@ type Filter = Record<string, unknown>;
 
 const same = (a: unknown, b: unknown) => String(a) === String(b);
 
+const KNOWN = new Set(["$in", "$ne", "$regex", "$options"]);
+
 function matchesValue(actual: unknown, wanted: unknown): boolean {
+  // Mongo matches null against a missing field too
+  if (wanted === null) return actual === null || actual === undefined;
   if (wanted && typeof wanted === "object" && !Array.isArray(wanted) && !(wanted instanceof Date)) {
     const condition = wanted as Record<string, unknown>;
+    // A query this fake cannot run must fail loudly: silently matching nothing satisfies every negative assertion
+    for (const key of Object.keys(condition)) {
+      if (key.startsWith("$") && !KNOWN.has(key)) throw new Error(`memoryDb does not understand ${key}`);
+    }
     if ("$in" in condition) return (condition.$in as unknown[]).some((w) => matchesValue(actual, w));
     if ("$ne" in condition) return !matchesValue(actual, condition.$ne);
     if ("$regex" in condition) {
@@ -18,9 +26,19 @@ function matchesValue(actual: unknown, wanted: unknown): boolean {
 
 export function matches(row: Row, filter: Filter): boolean {
   return Object.entries(filter).every(([key, wanted]) => {
+    if (key.startsWith("$") && key !== "$or") throw new Error(`memoryDb does not understand ${key}`);
+    if (key.includes(".")) throw new Error(`memoryDb does not understand the path ${key}`);
     if (key === "$or") return (wanted as Filter[]).some((branch) => matches(row, branch));
     return matchesValue(row[key], wanted);
   });
+}
+
+// What `.select()` asks for, so a query that forgets a field it reads is as blind here as it is in Mongo
+function project(row: Row, fields: string[] | null): Row {
+  if (!fields) return { ...row };
+  const out: Row = { _id: row._id };
+  for (const field of fields) if (field in row) out[field] = row[field];
+  return out;
 }
 
 /**
@@ -43,14 +61,28 @@ export function memoryDb(seed: Record<string, Row[]> = {}) {
   const model = (name: string) => ({
     find: (filter: Filter = {}) => {
       calls.push({ model: name, op: "find", filter });
-      const found = rowsOf(name).filter((row) => matches(row, filter)).map((row) => ({ ...row }));
-      const chain = { select: () => chain, sort: () => chain, lean: async () => found };
+      let fields: string[] | null = null;
+      const chain = {
+        select: (list: string) => {
+          fields = list.split(/\s+/).filter(Boolean);
+          return chain;
+        },
+        sort: () => chain,
+        lean: async () => rowsOf(name).filter((row) => matches(row, filter)).map((row) => project(row, fields)),
+      };
       return chain;
     },
     findById: (id: unknown) => {
       calls.push({ model: name, op: "findById", filter: { _id: id } });
       const found = rowsOf(name).find((row) => same(row._id, id));
-      const chain = { select: () => chain, lean: async () => (found ? { ...found } : null) };
+      let fields: string[] | null = null;
+      const chain = {
+        select: (list: string) => {
+          fields = list.split(/\s+/).filter(Boolean);
+          return chain;
+        },
+        lean: async () => (found ? project(found, fields) : null),
+      };
       return chain;
     },
     deleteMany: async (filter: Filter) => {

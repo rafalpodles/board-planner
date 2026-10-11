@@ -71,7 +71,8 @@ describe("erasing the traces of a deleted account", () => {
     });
     await eraseAccountTraces(db, USER);
     expect(rows("PmMessage").map((m) => m._id)).toEqual(["m3"]);
-    expect(removeUploads).toHaveBeenCalledWith(["f1", "f2"]);
+    // Scoped to the uploader: a message may name any file of its board, and those are not this person's
+    expect(removeUploads).toHaveBeenCalledWith(["f1", "f2"], JAN);
   });
 
   it("deletes consents and the invitations the person accepted or that were sent to their address", async () => {
@@ -129,35 +130,74 @@ describe("erasing the traces of a deleted account", () => {
           { _id: "a1", user: JAN, action: "user_email_changed_self", actorUsername: "jan", target: "jan", detail: "old@example.com → jan@example.com" },
           { _id: "a2", user: JAN, action: "user_full_name_changed_self", actorUsername: "jan", target: "jan", detail: "Jan K → Jan Kowalski" },
           { _id: "a3", user: OLA, action: "user_role_changed", actorUsername: "ola", target: "jan", detail: "member → admin" },
-          { _id: "a4", user: JAN, action: "invitation_sent", actorUsername: "jan", target: "bob@example.com", detail: "by jan, as a link" },
+          { _id: "a4", user: JAN, action: "invitation_sent", actorUsername: "jan", target: "bob@example.com", detail: "as a member, TP (owner), as a link" },
           { _id: "a5", user: OLA, action: "user_role_changed", actorUsername: "ola", target: "bob", detail: "member → admin" },
-          { _id: "a6", user: OLA, action: "user_password_set", actorUsername: "ola", target: "admin", detail: "admin asked for it" },
+          { _id: "a6", user: OLA, action: "user_email_confirmed", actorUsername: "ola", target: "jan", detail: "jan@example.com" },
+          { _id: "a7", user: OLA, action: "organisation_exported", actorUsername: "ola", target: "jan", detail: "" },
+          { _id: "a8", user: OLA, action: "worker_registered", actorUsername: "ola", target: "jan", detail: "" },
+          { _id: "a9", user: JAN, action: "worker_enabled", actorUsername: "jan.old", target: "", detail: "" },
+          { _id: "a10", user: OLA, action: "user_email_confirmed", actorUsername: "ola", target: "jan@example.com", detail: "jan@example.com" },
         ],
       });
+    const byId = (rows: Record<string, unknown>[]) => Object.fromEntries(rows.map((r) => [String(r._id), r]));
 
     it("names the person by the label wherever they are the actor or the target", async () => {
       const { db, rows } = seed();
       await eraseAccountTraces(db, USER);
-      const byId = Object.fromEntries(rows("InstanceAuditLog").map((r) => [String(r._id), r]));
-      expect(byId.a3).toMatchObject({ actorUsername: "ola", target: LABEL, detail: "member → admin" });
-      expect(byId.a4).toMatchObject({ actorUsername: LABEL, target: "bob@example.com", detail: `by ${LABEL}, as a link` });
+      const got = byId(rows("InstanceAuditLog"));
+      expect(got.a3).toMatchObject({ actorUsername: "ola", target: LABEL, detail: "member → admin" });
+      expect(got.a4).toMatchObject({ actorUsername: LABEL, target: "bob@example.com", detail: "as a member, TP (owner), as a link" });
+      expect(got.a6).toMatchObject({ target: LABEL, detail: LABEL });
     });
 
     it("drops the old address and name an account's own change rows carry, not only the current one", async () => {
       const { db, rows } = seed();
       await eraseAccountTraces(db, USER);
-      const byId = Object.fromEntries(rows("InstanceAuditLog").map((r) => [String(r._id), r]));
-      expect(byId.a1).toMatchObject({ actorUsername: LABEL, target: LABEL, detail: LABEL });
-      expect(byId.a2).toMatchObject({ actorUsername: LABEL, target: LABEL, detail: LABEL });
+      const got = byId(rows("InstanceAuditLog"));
+      expect(got.a1).toMatchObject({ actorUsername: LABEL, target: LABEL, detail: LABEL });
+      expect(got.a2).toMatchObject({ actorUsername: LABEL, target: LABEL, detail: LABEL });
       expect(JSON.stringify(rows("InstanceAuditLog"))).not.toMatch(/old@example\.com|Jan K/);
     });
 
+    it("finds a row by the account that did it even when the name it was written under has changed since", async () => {
+      const { db, rows } = seed();
+      await eraseAccountTraces(db, USER);
+      expect(byId(rows("InstanceAuditLog")).a9).toMatchObject({ user: JAN, actorUsername: "jan.old" });
+      const { db: other, rows: otherRows } = memoryDb({
+        InstanceAuditLog: [{ _id: "x", user: JAN, action: "worker_enabled", actorUsername: "jan", target: "", detail: "" }],
+      });
+      await eraseAccountTraces(other, USER);
+      expect(otherRows("InstanceAuditLog")[0].actorUsername).toBe(LABEL);
+    });
+
+    it("finds a row about the person's address when it names them by it", async () => {
+      const { db, rows } = seed();
+      await eraseAccountTraces(db, USER);
+      expect(byId(rows("InstanceAuditLog")).a10).toMatchObject({ target: LABEL, detail: LABEL });
+    });
+
+    it("leaves a target that is not a person alone, even when it spells the username", async () => {
+      const { db, rows } = seed();
+      await eraseAccountTraces(db, USER);
+      const got = byId(rows("InstanceAuditLog"));
+      expect(got.a7.target).toBe("jan");
+      expect(got.a8.target).toBe("jan");
+    });
+
     it("leaves other people's rows alone, whatever words they share with the person's name", async () => {
-      const { db, rows, calls } = seed();
+      const { db, rows } = seed();
       await eraseAccountTraces(db, { _id: JAN, username: "admin", email: "jan@example.com" });
-      const byId = Object.fromEntries(rows("InstanceAuditLog").map((r) => [String(r._id), r]));
-      expect(byId.a5).toMatchObject({ target: "bob", detail: "member → admin" });
-      expect(calls.some((c) => c.model === "InstanceAuditLog" && c.op === "updateOne" && (c.filter as { _id: string })._id === "a5")).toBe(false);
+      const got = byId(rows("InstanceAuditLog"));
+      expect(got.a5).toMatchObject({ target: "bob", detail: "member → admin" });
+      expect(got.a3).toMatchObject({ target: "jan", detail: "member → admin" });
+    });
+
+    it("does not rewrite a role that shares the person's name, in a row about that person", async () => {
+      const { db, rows } = memoryDb({
+        InstanceAuditLog: [{ _id: "r1", user: OLA, action: "user_role_changed", actorUsername: "ola", target: "member", detail: "admin → member" }],
+      });
+      await eraseAccountTraces(db, { _id: JAN, username: "member", email: "" });
+      expect(rows("InstanceAuditLog")[0]).toMatchObject({ target: LABEL, detail: "admin → member" });
     });
   });
 
@@ -169,6 +209,7 @@ describe("erasing the traces of a deleted account", () => {
           { _id: "p2", action: "member_role_changed", detail: "bob: viewer → editor" },
           { _id: "p3", action: "member_invited", detail: "jan@example.com: invited as member" },
           { _id: "p4", action: "settings_updated", detail: "jan: not a person here" },
+          { _id: "p5", action: "member_invitation_removed", detail: "jan@example.com: invitation to this board withdrawn" },
         ],
       });
 
@@ -180,6 +221,7 @@ describe("erasing the traces of a deleted account", () => {
         "bob: viewer → editor",
         `${LABEL}: invited as member`,
         "jan: not a person here",
+        `${LABEL}: invitation to this board withdrawn`,
       ]);
     });
 
@@ -191,6 +233,7 @@ describe("erasing the traces of a deleted account", () => {
         "bob: viewer → editor",
         "jan@example.com: invited as member",
         "jan: not a person here",
+        "jan@example.com: invitation to this board withdrawn",
       ]);
     });
   });
