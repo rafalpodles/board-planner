@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/use-auth";
 import { SingleSignOn } from "@/components/settings/SingleSignOn";
+import { SignInProviders } from "@/components/settings/SignInProviders";
 
 export default function SingleSignOnSettingsPage() {
   const router = useRouter();
@@ -15,5 +16,10 @@ export default function SingleSignOnSettingsPage() {
 
   if (isLoading || !isAdmin) return null;
 
-  return <SingleSignOn />;
+  return (
+    <>
+      <SingleSignOn />
+      <SignInProviders />
+    </>
+  );
 }

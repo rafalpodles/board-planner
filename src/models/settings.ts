@@ -14,6 +14,8 @@ export interface ISettings {
   sso?: { issuer: string; clientId: string; clientSecret: string; clientSecretHint: string; label: string; enforced?: boolean };
   // The trial end the admins were last told single sign-on stops at, so a trial is told once (BP-951)
   ssoTrialNoticeFor?: Date | null;
+  // Shared providers (google, github) this organisation's administrators turned off for it; absent means every one is offered (BP-1027)
+  disabledProviders?: string[];
 }
 
 const settingsSchema = new Schema<ISettings>({
@@ -42,6 +44,7 @@ const settingsSchema = new Schema<ISettings>({
     default: undefined,
   },
   ssoTrialNoticeFor: { type: Date, default: null },
+  disabledProviders: { type: [String], default: undefined },
 });
 
 withOrganisation(settingsSchema);

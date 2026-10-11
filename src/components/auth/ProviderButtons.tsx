@@ -112,6 +112,7 @@ export const SIGN_IN_REFUSALS_PASSWORDS_OFF: Record<string, string> = {
 
 export const SIGN_IN_REFUSALS: Record<string, string> = {
   failed: "Signing in with that provider did not work. Try again.",
+  provider_off: "Signing in with that provider is turned off for this organisation.",
   no_account: "No account here uses that address. Ask an administrator for an invitation.",
   unverified: "That provider has not confirmed your address, so it cannot sign you in here.",
   unproven:
