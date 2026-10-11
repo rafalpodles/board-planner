@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import AdminAgentsPage from "./page";
@@ -68,6 +69,22 @@ describe("the banner when no agent can run", () => {
 
     expect(await screen.findByText(/No OpenRouter key is configured/)).toBeTruthy();
     expect(screen.getByRole("link", { name: "Add one here" }).getAttribute("href")).toBe("/settings/ai-keys");
+  });
+});
+
+// BP-1024: React runs the load effect twice in development; a second answer landing after the first put back what was typed between them
+describe("the page's read", () => {
+  it("is made once even where the load effect runs twice, so a model typed meanwhile is not put back", async () => {
+    render(
+      <StrictMode>
+        <AdminAgentsPage />
+      </StrictMode>
+    );
+    await screen.findByLabelText("PM model for BP — Board");
+
+    const reads = (url: string) => api.get.mock.calls.filter(([called]) => called === url).length;
+    expect(reads("/api/admin/agents")).toBe(1);
+    expect(reads("/api/settings/ai-models")).toBe(1);
   });
 });
 

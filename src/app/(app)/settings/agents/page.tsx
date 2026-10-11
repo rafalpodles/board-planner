@@ -48,21 +48,28 @@ export default function AdminAgentsPage() {
   const [catalogue, setCatalogue] = useState<ModelCatalogue | null>(null);
   const savedModels = useRef<Record<string, string>>({});
 
-  const load = useCallback(async () => {
-    try {
-      const [res, models]: [AgentsResponse, ModelCatalogue] = await Promise.all([
-        api.get("/api/admin/agents"),
-        // Without the list the field takes a typed name, and the server still judges it
-        api.get("/api/settings/ai-models").catch(() => ({ restricted: false, model: "", models: null, providers: null })),
-      ]);
-      setData(res);
-      setCatalogue(models);
-      savedModels.current = Object.fromEntries(res.projects.map((p) => [p._id, p.model]));
-    } catch {
-      toast("Failed to load agents", "error");
-    } finally {
-      setLoading(false);
-    }
+  const inflight = useRef<Promise<void> | null>(null);
+
+  // One read at a time: a second answer landing after the first would put back the model typed in between
+  const load = useCallback(() => {
+    inflight.current ??= (async () => {
+      try {
+        const [res, models]: [AgentsResponse, ModelCatalogue] = await Promise.all([
+          api.get("/api/admin/agents"),
+          // Without the list the field takes a typed name, and the server still judges it
+          api.get("/api/settings/ai-models").catch(() => ({ restricted: false, model: "", models: null, providers: null })),
+        ]);
+        setData(res);
+        setCatalogue(models);
+        savedModels.current = Object.fromEntries(res.projects.map((p) => [p._id, p.model]));
+      } catch {
+        toast("Failed to load agents", "error");
+      } finally {
+        setLoading(false);
+        inflight.current = null;
+      }
+    })();
+    return inflight.current;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
