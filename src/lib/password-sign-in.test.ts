@@ -25,7 +25,7 @@ vi.mock("@/models/identity", () => ({
   },
 }));
 
-const { adminsLockedOut, assertSignInConfig, passwordSignInEnabled } = await import("./password-sign-in");
+const { adminsLockedOut, assertSignInConfig, passwordSignInEnabled, warnIfAdminsLockedOut } = await import("./password-sign-in");
 const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
 
@@ -204,5 +204,50 @@ describe("whether passwords off would lock every administrator out", () => {
     admins = [];
 
     expect(await adminsLockedOut(scopedToDefaultOrganisation())).toBeNull();
+  });
+
+  describe("said again where the state is reached (BP-847)", () => {
+    it("logs the lockout with what led to it", async () => {
+      withOidc();
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      await warnIfAdminsLockedOut(scopedToDefaultOrganisation(), "an administrator's deactivation");
+
+      expect(error).toHaveBeenCalledTimes(1);
+      expect(error.mock.calls[0][0]).toMatch(/^WARNING \(after an administrator's deactivation\): PASSWORD_SIGN_IN=off, but no active administrator/);
+      error.mockRestore();
+    });
+
+    it("says nothing while an administrator can still come back — the control", async () => {
+      withOidc();
+      admins = [{ _id: "a1", emailVerifiedAt: new Date() }];
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      await warnIfAdminsLockedOut(scopedToDefaultOrganisation(), "an administrator's deletion");
+
+      expect(error).not.toHaveBeenCalled();
+      error.mockRestore();
+    });
+
+    it("reads nothing at all while passwords are on, so the common case costs no query", async () => {
+      process.env.PASSWORD_SIGN_IN = "on";
+
+      await warnIfAdminsLockedOut(scopedToDefaultOrganisation(), "an administrator's demotion");
+
+      expect(userFind).not.toHaveBeenCalled();
+    });
+
+    it("never fails the request that reached the state", async () => {
+      withOidc();
+      userFind.mockImplementationOnce(() => {
+        throw new Error("database gone");
+      });
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      await expect(warnIfAdminsLockedOut(scopedToDefaultOrganisation(), "an unlink")).resolves.toBeUndefined();
+
+      expect(error.mock.calls[0][0]).toContain("failed");
+      error.mockRestore();
+    });
   });
 });

@@ -10,6 +10,7 @@ const revokeUserSessions = vi.fn();
 const revokeUserCredentials = vi.fn();
 const invalidateResetTokens = vi.fn();
 const logInstanceAudit = vi.fn();
+const warnIfAdminsLockedOut = vi.fn();
 const notifyPasswordChanged = vi.fn();
 const notifyAddressChanged = vi.fn();
 const hash = vi.fn();
@@ -40,6 +41,10 @@ vi.mock("@/lib/password-reset", () => ({ invalidateResetTokens }));
 const cancelEmailChange = vi.fn();
 vi.mock("@/lib/email-change", () => ({ cancelEmailChange }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
+vi.mock("@/lib/password-sign-in", async (original) => ({
+  ...(await original<typeof import("@/lib/password-sign-in")>()),
+  warnIfAdminsLockedOut,
+}));
 vi.mock("@/lib/security-mail", () => ({ notifyPasswordChanged, notifyAddressChanged }));
 vi.mock("bcryptjs", () => ({ default: { hash } }));
 const userFindOneAndDelete = vi.fn();
@@ -781,6 +786,21 @@ describe("DELETE /api/users/:id", () => {
     );
   });
 
+  it("checks that the administrators left can still sign in, but only when it was an administrator", async () => {
+    found(person({ role: "admin" }));
+    userFindOneAndDelete.mockResolvedValue(person({ role: "admin" }));
+
+    expect((await DELETE(...del(TARGET_HEX))).status).toBe(200);
+    expect(warnIfAdminsLockedOut).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "an administrator's deletion");
+
+    warnIfAdminsLockedOut.mockClear();
+    userFindOneAndDelete.mockResolvedValue(person({ role: "member" }));
+    found(person({ role: "member" }));
+
+    expect((await DELETE(...del(TARGET_HEX))).status).toBe(200);
+    expect(warnIfAdminsLockedOut).not.toHaveBeenCalled();
+  });
+
   // A machine's account is not a person. The Users list does not offer one, and deleting it takes
   // the fleet's identity with it — every worker call then fails with "no identity yet".
   it("refuses a machine account", async () => {
@@ -916,6 +936,20 @@ describe("PUT /api/users/:id — the guards that keep an administrator standing"
     // Already written: the save must not write it again over a promotion landing in between
     expect(target.unmarkModified).toHaveBeenCalledWith("role");
     expect(target.unmarkModified.mock.invocationCallOrder[0]).toBeLessThan(target.save.mock.invocationCallOrder[0]);
+  });
+
+  it("checks that the administrators left can still sign in after a demotion, and not after a promotion", async () => {
+    found(targetDoc({ role: "admin" }));
+    userCountDocuments.mockResolvedValue(2);
+
+    expect((await PUT(put({ role: "member" }), ctx())).status).toBe(200);
+    expect(warnIfAdminsLockedOut).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "an administrator's demotion");
+
+    warnIfAdminsLockedOut.mockClear();
+    found(targetDoc({ role: "member" }));
+
+    expect((await PUT(put({ role: "admin" }), ctx())).status).toBe(200);
+    expect(warnIfAdminsLockedOut).not.toHaveBeenCalled();
   });
 
   // BP-841. The other administrator was demoted or deactivated by a request that counted this one
@@ -1080,6 +1114,28 @@ describe("PUT /api/users/:id — account actions", () => {
     }
   });
 
+  it("checks that the administrators left can still sign in only when providers were really unlinked from an administrator", async () => {
+    found(targetDoc({ role: "admin" }));
+    revokeUserCredentials.mockResolvedValue({ identitiesUnlinked: 1 });
+
+    expect((await PUT(put({ signOutEverywhere: true }), ctx())).status).toBe(200);
+    expect(warnIfAdminsLockedOut).toHaveBeenCalledWith(
+      scopedToDefaultOrganisation(),
+      "an administrator's sign-in providers being unlinked"
+    );
+
+    warnIfAdminsLockedOut.mockClear();
+    revokeUserCredentials.mockResolvedValue({ identitiesUnlinked: 0 });
+    found(targetDoc({ role: "admin" }));
+    await PUT(put({ signOutEverywhere: true }), ctx());
+
+    found(targetDoc({ role: "member" }));
+    revokeUserCredentials.mockResolvedValue({ identitiesUnlinked: 2 });
+    await PUT(put({ signOutEverywhere: true }), ctx());
+
+    expect(warnIfAdminsLockedOut).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["on your own account", () => found(targetDoc({ _id: "admin-1" })), {}],
     ["on a machine account", () => found(targetDoc({ kind: "machine" })), {}],
@@ -1112,6 +1168,20 @@ describe("PUT /api/users/:id — deactivating and reactivating", () => {
       scopedToDefaultOrganisation(),
       expect.objectContaining({ action: "user_deactivated", user: "admin-1", target: "target" })
     );
+  });
+
+  it("checks that the administrators left can still sign in after deactivating one, and not after a member", async () => {
+    found(targetDoc({ role: "admin" }));
+    userCountDocuments.mockResolvedValue(2);
+
+    expect((await PUT(put({ deactivate: true }), ctx())).status).toBe(200);
+    expect(warnIfAdminsLockedOut).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "an administrator's deactivation");
+
+    warnIfAdminsLockedOut.mockClear();
+    found(targetDoc({ role: "member" }));
+
+    expect((await PUT(put({ deactivate: true }), ctx())).status).toBe(200);
+    expect(warnIfAdminsLockedOut).not.toHaveBeenCalled();
   });
 
   // Two administrators deactivating each other at once each counted the other as still active

@@ -10,11 +10,11 @@ import { isEmailConfigured, normaliseEmail, sendEmail } from "@/lib/email";
 import { renderEmail } from "@/lib/email-template";
 import { issueResetToken } from "@/lib/password-reset";
 import {
-  anonymousMultiplier,
   isRateLimited,
   normaliseUsername,
   recordFailedAttempt,
   sourceKey,
+  targetKey,
 } from "@/lib/rate-limit";
 import { provenanceRefusal } from "@/lib/session";
 import { originFor } from "@/lib/organisation-host";
@@ -31,6 +31,12 @@ const UNIFORM_ANSWER = {
 // the limit is per source, to stop one caller filling somebody's inbox or burning the instance's
 // sending reputation, rather than per account.
 const REQUESTS_PER_SOURCE = 10;
+// With no client address there is no source to tell apart, so what is bounded is the inbox: links
+// sent for one account. Anybody can hold one account's reset for the window, but not everybody's
+const REQUESTS_PER_ACCOUNT = 5;
+
+const TOO_MANY = () =>
+  NextResponse.json({ error: "Too many requests. Try again in 15 minutes." }, { status: 429 });
 
 export async function POST(request: Request) {
   const db = await scopedForRequest(request);
@@ -44,20 +50,13 @@ export async function POST(request: Request) {
   // knowing: past the ceiling an SMTP-less instance answers 429 rather than the 503 below that
   // exists to stop somebody waiting for a link nothing will send.
   const clientIp = getClientIp(request);
-  const throttleKey = sourceKey(clientIp ?? "-", "password-reset");
-  // anonymousMultiplier, because with no trusted proxy configured getClientIp returns null and
-  // every caller on earth shares the key "-". A flat ceiling there is not a per-address limit at
-  // all: eleven requests from one attacker would close password reset for everybody, which is a
-  // lever an idle attacker can hold down. The registration and enrolment routes already do this.
-  if (await isRateLimited(throttleKey, anonymousMultiplier(clientIp, REQUESTS_PER_SOURCE))) {
-    return NextResponse.json(
-      { error: "Too many requests. Try again in 15 minutes." },
-      { status: 429 }
-    );
+  if (clientIp) {
+    const throttleKey = sourceKey(clientIp, "password-reset");
+    if (await isRateLimited(throttleKey, REQUESTS_PER_SOURCE)) return TOO_MANY();
+    // Counted on every request, not only the ones that find an account: counting failures alone
+    // would leave the cheap path unmetered and time the difference for the caller.
+    await recordFailedAttempt(throttleKey);
   }
-  // Counted on every request, not only the ones that find an account: counting failures alone
-  // would leave the cheap path unmetered and time the difference for the caller.
-  await recordFailedAttempt(throttleKey);
 
   const read = await readJsonBody<{ identifier?: unknown }>(request);
   if (!read.ok) return read.response;
@@ -66,6 +65,12 @@ export async function POST(request: Request) {
   const { identifier } = body;
   if (typeof identifier !== "string" || !identifier.trim()) {
     return NextResponse.json({ error: "Enter your username or email address" }, { status: 400 });
+  }
+
+  if (!clientIp) {
+    const accountKey = targetKey(db.organisation, identifier.trim(), "password-reset");
+    if (await isRateLimited(accountKey, REQUESTS_PER_ACCOUNT)) return TOO_MANY();
+    await recordFailedAttempt(accountKey);
   }
 
   // Said plainly, and it is not a leak: this is a fact about the deployment, not about any
