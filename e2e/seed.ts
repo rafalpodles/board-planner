@@ -2623,6 +2623,13 @@ export async function setBoardReadiness(fields: {
   await mongoose.disconnect();
 }
 
+/** Leaves the seeded board with its owner alone on it: no other grant, so nobody has been invited. */
+export async function removeNonOwnerGrants() {
+  const db = (await connect()).db!;
+  await db.collection("grants").deleteMany({ object: PROJECT_ID, relation: { $ne: "owner" } });
+  await mongoose.disconnect();
+}
+
 /** A machine `owner` enrolled, holding a checkout of `remote`, last seen `seenAgoMs` ago. */
 export async function seedMachine(
   remote: string,

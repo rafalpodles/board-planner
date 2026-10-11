@@ -29,6 +29,7 @@ export const GROUPS = {
     "picker-stays-open.spec.ts",
     "task-detail-remainder.spec.ts",
     "handover-readiness.spec.ts",
+    "board-ready.spec.ts",
     "link-leaves-a-trace.spec.ts",
     "history-says-what-changed.spec.ts",
     "first-use-gaps.spec.ts",

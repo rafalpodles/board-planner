@@ -121,6 +121,10 @@ const userSchema = new Schema<IUser>({
     type: Boolean,
     default: true,
   },
+  dismissedBoardReady: {
+    type: [Schema.Types.ObjectId],
+    default: [],
+  },
   role: {
     type: String,
     enum: ["admin", "member"],

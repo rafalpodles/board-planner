@@ -164,6 +164,8 @@ export interface IUser {
   /** Today's failed digest attempts, so a permanently undeliverable address is not retried all day. */
   digestRetry?: { day: string; attempts: number };
   collapseEmptyColumns: boolean;
+  /** Boards whose "Get this board ready" list this person hid; capped, see MAX_DISMISSED_BOARD_READY */
+  dismissedBoardReady?: Types.ObjectId[];
   role: UserRole;
   // A worker's identity is a user record so authorship, mentions, avatars and history keep
   // working unchanged — but it is not a person, so it stays out of the lists where people are
@@ -2004,6 +2006,22 @@ export interface ApiHandoverReadiness {
   bindingError: string;
   /** Who halted the reader's machine, when `machine` is "paused" or "stopped" */
   haltedBy: WorkerHaltSource | null;
+}
+
+export type BoardReadyStepId = "board" | "tasks" | "team" | "repository" | "runs" | "machine";
+
+export interface ApiBoardReadyStep {
+  id: BoardReadyStepId;
+  group: "setup" | "agents";
+  done: boolean;
+  /** Only an instance admin can take this step: they locked agent runs off for the board */
+  locked: boolean;
+}
+
+/** What GET /ready answers: the checklist for this reader, or nothing to show */
+export interface ApiBoardReady {
+  show: boolean;
+  steps: ApiBoardReadyStep[];
 }
 
 /** One of the reader's own machines, as Settings → Machines lists it */
