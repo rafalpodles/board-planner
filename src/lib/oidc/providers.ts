@@ -128,6 +128,11 @@ export function providerById(id: string): OidcProvider | null {
   return configuredProviders().find((p) => p.id === id) ?? null;
 }
 
+/** Google or GitHub, which the operator set up but this organisation is not offered: its administrators switched it off, or it requires its own sign-in. */
+export function setUpButNotOffered(id: string): boolean {
+  return SWITCHABLE_PROVIDERS.includes(id as OidcProviderId) && providerById(id) !== null;
+}
+
 export function publicProviders(): { id: OidcProviderId; label: string }[] {
   return configuredProviders().map(({ id, label }) => ({ id, label }));
 }

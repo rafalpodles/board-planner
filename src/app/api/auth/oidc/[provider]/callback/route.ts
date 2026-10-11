@@ -12,7 +12,7 @@ import {
   readFlowCookie,
 } from "@/lib/session";
 import { originFor, organisationDomain } from "@/lib/organisation-host";
-import { providerById, providerFor, OidcProvider } from "@/lib/oidc/providers";
+import { providerFor, setUpButNotOffered, OidcProvider } from "@/lib/oidc/providers";
 import {
   ACCEPT_COOKIE,
   ACCEPT_TTL_MS,
@@ -119,7 +119,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
   await connectDB();
   const id = (await params).provider;
   const provider = await providerFor(db, id);
-  if (!provider) return redirectTo(origin, providerById(id) ? "/login?sso=provider_off" : "/login?sso=failed");
+  if (!provider) return redirectTo(origin, setUpButNotOffered(id) ? "/login?sso=provider_off" : "/login?sso=failed");
 
   const clientIp = getClientIp(request);
   // Not with no address, where it would be one bucket for everybody (see start); and only failures

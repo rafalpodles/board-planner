@@ -27,8 +27,8 @@ vi.mock("@/lib/session", () => ({
 }));
 vi.mock("@/lib/oidc/providers", () => ({
   providerFor: async (_db: unknown, id: string) => (id === "oidc" ? { id: "oidc", label: "Acme" } : null),
-  // What the environment sets up, whichever of it this organisation is offered
-  providerById: (id: string) => (["oidc", "google"].includes(id) ? { id } : null),
+  // Google and GitHub as the environment sets them up, whichever of them this organisation is offered
+  setUpButNotOffered: (id: string) => id === "google",
   ssoEnforced: async () => false,
 }));
 vi.mock("@/lib/oidc/flow", () => ({ beginFlow, FLOW_COOKIE: "bp_oidc", FLOW_TTL_MS: 600_000 }));
@@ -105,7 +105,7 @@ describe("POST /api/auth/oidc/:provider/start", () => {
   it("refuses a provider the server has but this organisation turned off, and says so (BP-1027)", async () => {
     const res = await start({}, "google");
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: "That sign-in is turned off for this organisation" });
     expect(beginFlow).not.toHaveBeenCalled();
   });
