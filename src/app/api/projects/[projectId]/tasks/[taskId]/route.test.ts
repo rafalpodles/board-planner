@@ -16,6 +16,7 @@ const taskUpdateMany = vi.fn();
 const severLinksToDeletedTask = vi.fn();
 const check = vi.fn();
 const epicProgressFor = vi.fn(async () => new Map());
+const parentsOf = vi.fn(async () => new Map());
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/grants", () => ({ check }));
@@ -31,6 +32,8 @@ vi.mock("@/lib/task-service", () => ({
 vi.mock("@/lib/task-links", () => ({ severLinksToDeletedTask }));
 // What it reads and how it counts is epics.test.ts's job; here the route only has to hand it this task
 vi.mock("@/lib/epics", () => ({ epicProgressFor }));
+// Which task is whose parent is task-parents.test.ts's job; here the route only has to ask for this one
+vi.mock("@/lib/task-parents", () => ({ parentsOf }));
 vi.mock("@/models/task", () => ({
   Task: { findOne: taskFindOne, find: taskFind, updateMany: taskUpdateMany, deleteOne: taskDeleteOne, findOneAndDelete: vi.fn() },
 }));
@@ -418,6 +421,39 @@ describe("GET: whether machines have given up on the task", () => {
     [{ attempts: 4 }, true],
   ])("with execution %o answers %s", async (execution, expected) => {
     expect(await served(execution)).toBe(expected);
+  });
+});
+
+describe("GET: a child's parent", () => {
+  const parent = { _id: "t-epic", taskNumber: 1, title: "Ship the docs", status: "todo" };
+
+  async function served(parents: Map<string, unknown>) {
+    const task = {
+      _id: "t-child",
+      decision: null,
+      relations: [],
+      toObject: () => ({ taskNumber: 2 }),
+    };
+    taskFindOne.mockReturnValue({
+      select: () => ({ populate: () => ({ populate: () => Promise.resolve(task) }) }),
+    });
+    workerFindOne.mockReturnValue({ select: () => ({ lean: async () => null }) });
+    parentsOf.mockResolvedValueOnce(parents);
+    const res = await GET(new Request(`https://app.example.com/api/projects/p1/tasks/${TASK}`), ctx());
+    return res.json();
+  }
+
+  it("is served with the task, as the list serves it", async () => {
+    const body = await served(new Map([["t-child", parent]]));
+
+    expect(body.parent).toEqual(parent);
+    expect(parentsOf).toHaveBeenCalledWith(expect.anything(), "p1", ["t-child"]);
+  });
+
+  it("is null for a task that has none", async () => {
+    const body = await served(new Map());
+
+    expect(body.parent).toBeNull();
   });
 });
 

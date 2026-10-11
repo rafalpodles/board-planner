@@ -25,12 +25,11 @@ test.beforeEach(async () => {
 });
 
 async function send(request: APIRequestContext, method: string, path: string, body: unknown) {
+  const raw = typeof body === "string";
   return request.fetch(path, {
     method,
-    headers: ADMIN_AUTH,
-    ...(typeof body === "string"
-      ? { headers: { ...ADMIN_AUTH, "Content-Type": "text/plain" }, data: body }
-      : { data: body }),
+    headers: raw ? { ...ADMIN_AUTH, "Content-Type": "text/plain" } : ADMIN_AUTH,
+    data: body,
   });
 }
 
