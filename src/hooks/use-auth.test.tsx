@@ -38,7 +38,7 @@ function Probe() {
         onClick={async () => {
           const destination = await logout();
           const slot = document.querySelector('[data-testid="destination"]');
-          if (slot) slot.textContent = destination ?? "none";
+          if (slot) slot.textContent = destination === null ? "none" : String(destination);
         }}
       >
         sign out
@@ -314,6 +314,13 @@ describe("useAuthProvider — what the rest of the app reports back", () => {
     await signOutAnsweredWith(async () => jsonResponse(200, { ok: true, signIn: null }));
 
     expect(screen.getByTestId("destination").textContent).toBe("none");
+  });
+
+  it("still signs out locally, and hands back nothing, when a proxy answers with a page instead of JSON (BP-1023)", async () => {
+    await signOutAnsweredWith(async () => new Response("<html>Bad gateway</html>", { status: 502 }));
+
+    expect(screen.getByTestId("destination").textContent).toBe("none");
+    expect(screen.getByTestId("user").textContent).toBe("-");
   });
 
   it("still signs out locally, and hands back nothing, when the call fails (BP-1023)", async () => {
