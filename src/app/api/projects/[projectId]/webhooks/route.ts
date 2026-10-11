@@ -1,3 +1,4 @@
+import { readAuthenticatedJsonBody } from "@/lib/request-body";
 import type { Types } from "mongoose";
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
@@ -23,7 +24,9 @@ export const POST = withProjectOwner(async (request, { params, user, db }) => {
   const { projectId } = await params;
   await connectDB();
 
-  const { url, events } = await request.json();
+  const read = await readAuthenticatedJsonBody(request);
+  if (!read.ok) return read.response;
+  const { url, events } = read.value;
   const parsedUrl = parseWebhookUrl(url);
   if (!parsedUrl) {
     return NextResponse.json(
@@ -66,7 +69,9 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
   const { projectId } = await params;
   await connectDB();
 
-  const { webhookId: rawWebhookId, ...updates } = await request.json();
+  const read = await readAuthenticatedJsonBody(request);
+  if (!read.ok) return read.response;
+  const { webhookId: rawWebhookId, ...updates } = read.value;
   const webhookId = canonicalObjectId(rawWebhookId);
   if (!webhookId) {
     return NextResponse.json({ error: "webhookId is required" }, { status: 400 });
@@ -124,7 +129,9 @@ export const DELETE = withProjectOwner(async (request, { params, user, db }) => 
   const { projectId } = await params;
   await connectDB();
 
-  const webhookId = canonicalObjectId((await request.json()).webhookId);
+  const read = await readAuthenticatedJsonBody(request);
+  if (!read.ok) return read.response;
+  const webhookId = canonicalObjectId(read.value.webhookId);
   if (!webhookId) {
     return NextResponse.json({ error: "webhookId is required" }, { status: 400 });
   }

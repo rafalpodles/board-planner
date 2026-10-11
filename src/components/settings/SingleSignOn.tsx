@@ -23,6 +23,7 @@ interface SsoAnswer {
   secretHint?: string;
   unreadable?: boolean;
   active?: boolean;
+  enforced?: boolean;
   redirectUri?: string | null;
 }
 
@@ -179,6 +180,53 @@ function Form({ state, onSaved }: { state: SsoAnswer; onSaved: (answer: SsoAnswe
   );
 }
 
+function Enforcement({ state, onSaved }: { state: SsoAnswer; onSaved: (answer: SsoAnswer) => void }) {
+  const api = useApi();
+  const { toast } = useToast();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const enforced = state.enforced === true;
+
+  async function set(value: boolean) {
+    setBusy(true);
+    setError("");
+    try {
+      onSaved(await api.put("/api/settings/sso/enforce", { enforced: value }));
+      toast(value ? "Single sign-on is now required" : "Single sign-on is no longer required", "success");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <SettingsCard
+      title="Require single sign-on"
+      description={`Everybody signs in only through ${state.label || "your provider"}. Password, Google and GitHub sign-in stop working for this organisation.`}
+      status={{ label: enforced ? "Required" : "Not required", on: enforced }}
+    >
+      <p className="text-sm text-text-muted" data-testid="sso-enforce-warning">
+        If your provider is set up wrong or goes down, nobody can sign in, you included, and this page cannot be opened to undo it. Sign in through it yourself before you turn this on.
+      </p>
+      {error && (
+        <p role="alert" className="text-sm text-danger">
+          {error}
+        </p>
+      )}
+      {enforced ? (
+        <Button type="button" variant="secondary" disabled={busy} onClick={() => set(false)}>
+          {busy ? "Saving…" : "Stop requiring single sign-on"}
+        </Button>
+      ) : (
+        <Button type="button" disabled={busy} onClick={() => set(true)}>
+          {busy ? "Saving…" : "Require single sign-on"}
+        </Button>
+      )}
+    </SettingsCard>
+  );
+}
+
 function Card({ state, onSaved }: { state: SsoAnswer; onSaved: (answer: SsoAnswer) => void }) {
   const available = state.available === true;
   const status = state.unreadable
@@ -284,6 +332,7 @@ export function SingleSignOn() {
       {answer.hosted ? (
         <div className="space-y-4">
           <Card state={answer} onSaved={setAnswer} />
+          {answer.active && <Enforcement state={answer} onSaved={setAnswer} />}
         </div>
       ) : (
         <p className="mb-4 text-sm text-text-muted" data-testid="sso-environment">

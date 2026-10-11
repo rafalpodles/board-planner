@@ -28,8 +28,12 @@ vi.mock("@/lib/organisation-host", async (importOriginal) => {
 });
 vi.mock("@/models/settings", () => {
   const apply = async (update: { $set?: Record<string, unknown>; $unset?: Record<string, 1> }) => {
-    row = { ...(row ?? {}), ...(update.$set ?? {}) };
-    for (const field of Object.keys(update.$unset ?? {})) delete row[field];
+    for (const [path, value] of Object.entries(update.$set ?? {})) {
+      const [head, ...rest] = path.split(".");
+      if (rest.length === 0) row = { ...(row ?? {}), [head]: value };
+      else row = { ...(row ?? {}), [head]: { ...(((row ?? {})[head] as Record<string, unknown>) ?? {}), [rest.join(".")]: value } };
+    }
+    for (const field of Object.keys(update.$unset ?? {})) if (row) delete row[field];
     return row;
   };
   return {
@@ -167,6 +171,17 @@ describe("PUT /api/settings/sso (BP-951)", () => {
     expect(sealed()).not.toBe(before);
   });
 
+  it("saving the form does not end a requirement of single sign-on", async () => {
+    await call("PUT", FORM);
+    (row!.sso as Record<string, unknown>).enforced = true;
+
+    const res = await call("PUT", { ...FORM, clientSecret: "", label: "Acme SSO" });
+
+    expect(res.status).toBe(200);
+    expect(row?.sso).toMatchObject({ label: "Acme SSO", enforced: true });
+    expect(await res.json()).toMatchObject({ enforced: true });
+  });
+
   it("asks for the secret again when the issuer or the client changes, so the old one is never sent to a new address", async () => {
     await call("PUT", FORM);
     discoverProvider.mockClear();
@@ -213,6 +228,16 @@ describe("GET and DELETE /api/settings/sso", () => {
 
     plan();
     expect(await (await call("GET")).json()).toMatchObject({ set: true, available: true, active: true });
+  });
+
+  it("says a requirement of single sign-on holds only while the provider is offered", async () => {
+    await call("PUT", FORM);
+    (row!.sso as Record<string, unknown>).enforced = true;
+
+    expect(await (await call("GET")).json()).toMatchObject({ active: true, enforced: true });
+
+    plan({ plan: "free" });
+    expect(await (await call("GET")).json()).toMatchObject({ active: false, enforced: false });
   });
 
   it("says a secret sealed under a key the server no longer has has to be entered again", async () => {

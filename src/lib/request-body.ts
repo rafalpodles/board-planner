@@ -113,6 +113,13 @@ export async function readJsonBody<T = Record<string, unknown>>(
   }
 }
 
+export const MAX_AUTHENTICATED_JSON_BODY_BYTES = 4 * 1024 * 1024;
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- the callers typed `request.json()` as any; narrowing each is not this reader's job
+export function readAuthenticatedJsonBody<T = any>(request: Request): Promise<JsonBody<T>> {
+  return readJsonBody<T>(request, MAX_AUTHENTICATED_JSON_BODY_BYTES);
+}
+
 /**
  * The same bound over a form-encoded or multipart body.
  *

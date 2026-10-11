@@ -140,8 +140,16 @@ async function say(page: Page, prompt: string, directive: Record<string, unknown
   await sendButton(page).click();
 }
 
+// "PM is thinking…" is set before the request leaves the browser; the stub logs a completion request on
+// arrival, which is after the turn's lock was taken, so only from here do Stop and a second sender see a turn
+async function turnIsHeld(request: APIRequestContext) {
+  await expect
+    .poll(async () => (await (await request.get(`${PM_STUB_URL}/requests`)).json()).length)
+    .toBeGreaterThan(0);
+}
+
 test.describe("a turn somebody else is running", () => {
-  test("is refused without wedging the second reader's composer shut", async ({ page, browser }) => {
+  test("is refused without wedging the second reader's composer shut", async ({ page, browser, request }) => {
     // BP-452. The 409 used to put this reader into the recovery state, which only ever exits when
     // an assistant message lands in *their own* thread — and threads are private, so the turn that
     // caused the refusal can never end it. Box disabled, Send replaced by a Stop that is refused
@@ -150,6 +158,7 @@ test.describe("a turn somebody else is running", () => {
     await openChat(page);
     await say(page, "Hold the line.", { delayMs: 30_000, say: "Eventually." });
     await expect(page.getByText("PM is thinking…")).toBeVisible();
+    await turnIsHeld(request);
 
     const other = await browser.newContext();
     await signInContext(other, "member");
@@ -460,7 +469,7 @@ test.describe("a turn, from the box to the bubble", () => {
     await expect(sendButton(page)).toBeVisible();
   });
 
-  test("a turn can be stopped, and says so in the thread", async ({ page }) => {
+  test("a turn can be stopped, and says so in the thread", async ({ page, request }) => {
     await signIn(page);
     await openChat(page);
 
@@ -469,6 +478,7 @@ test.describe("a turn, from the box to the bubble", () => {
     // stayed green with the whole /pm/interrupt route deleted, because the turn simply finished.
     await say(page, "Never mind, actually.", { delayMs: 60_000, say: "Too late." });
     await expect(page.getByText("PM is thinking…")).toBeVisible();
+    await turnIsHeld(request);
 
     await page.getByRole("button", { name: "Stop the PM turn" }).click();
     await expect(page.getByText("Stopping…")).toBeVisible();
@@ -741,7 +751,7 @@ test.describe("attaching a screenshot", () => {
     await expect(page.getByRole("button", { name: "Retry" })).toHaveCount(0);
   });
 
-  test("a Retry with nothing left to send is not offered", async ({ page, browser }) => {
+  test("a Retry with nothing left to send is not offered", async ({ page, browser, request }) => {
     // An image-only refusal has no typed text, so Retry stands or falls on the thumbnails. It used
     // to survive them: clicking it called send("") and did nothing at all. The refusal is a 409: somebody else holds the turn.
     await pmSettings({ model: "e2e/vision-model" });
@@ -749,6 +759,7 @@ test.describe("attaching a screenshot", () => {
     await openChat(page);
     await say(page, "Hold the line.", { delayMs: 30_000, say: "Eventually." });
     await expect(page.getByText("PM is thinking…")).toBeVisible();
+    await turnIsHeld(request);
 
     const other = await browser.newContext();
     await signInContext(other, "member");

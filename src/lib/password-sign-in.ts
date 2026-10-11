@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { organisationDomain } from "@/lib/organisation-host";
-import { configuredProviders, liveIdentityFilter, providersFor, sharedProviders } from "@/lib/oidc/providers";
+import { configuredProviders, liveIdentityFilter, providersFor, sharedProviders, ssoEnforced } from "@/lib/oidc/providers";
 import { relayOrigin } from "@/lib/oidc/relay";
 import type { ScopedDb } from "@/lib/db-scope";
 
@@ -13,6 +13,20 @@ export const PASSWORD_SIGN_IN_OFF = "Password sign-in is turned off on this inst
 
 export function passwordSignInOff(): NextResponse {
   return NextResponse.json({ error: PASSWORD_SIGN_IN_OFF }, { status: 403 });
+}
+
+export const SSO_REQUIRED = "This organisation requires single sign-on. Sign in with it instead.";
+
+/** Whether a password gets somebody into this organisation: the instance allows them and the organisation has not required single sign-on. */
+export async function passwordSignInFor(db: ScopedDb): Promise<boolean> {
+  return passwordSignInEnabled() && !(await ssoEnforced(db));
+}
+
+/** The 403 for a password step the instance or the organisation has closed, or null while it is open. */
+export async function passwordRefusal(db: ScopedDb): Promise<NextResponse | null> {
+  if (!passwordSignInEnabled()) return passwordSignInOff();
+  if (await ssoEnforced(db)) return NextResponse.json({ error: SSO_REQUIRED, ssoRequired: true }, { status: 403 });
+  return null;
 }
 
 /**

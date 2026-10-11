@@ -743,6 +743,42 @@ test.describe("the controls, used rather than navigated around", () => {
     await form.getByRole("button", { name: "Create", exact: true }).click();
     expect((await written).ok()).toBe(true);
   });
+
+  // BP-1021: the server refuses an end before the start, and a refused save is only a generic
+  // toast, so the form stops it first
+  test("an end before the start is stopped in the form and nothing is sent", async ({ page, request }) => {
+    await signIn(page);
+    await openSprints(page);
+
+    await page.getByRole("button", { name: "New Sprint" }).click();
+    const form = page.getByRole("dialog", { name: "New Sprint" });
+    const start = form.locator('input[type="date"]').first();
+    const end = form.locator('input[type="date"]').nth(1);
+    const sprintCount = async () =>
+      (await (await request.get(`/api/projects/${PROJECT_KEY}/sprints`, { headers: ADMIN_AUTH })).json()).length;
+    const before = await sprintCount();
+
+    await start.fill("2030-12-10");
+    await end.fill("2030-12-20");
+    await expect(end).toHaveAttribute("min", "2030-12-10");
+
+    await end.fill("2030-12-01");
+    const posts: string[] = [];
+    page.on("request", (r) => {
+      if (r.method() === "POST" && new URL(r.url()).pathname === `/api/projects/${PROJECT_KEY}/sprints`) posts.push(r.url());
+    });
+    await form.getByRole("button", { name: "Create", exact: true }).click();
+    await expect.poll(() => end.evaluate((el: HTMLInputElement) => el.validity.rangeUnderflow)).toBe(true);
+    await page.waitForTimeout(1_000);
+    expect(posts).toHaveLength(0);
+    expect(await sprintCount()).toBe(before);
+
+    await end.fill("2030-12-20");
+    const written = sprintWrite(page, "POST");
+    await form.getByRole("button", { name: "Create", exact: true }).click();
+    expect((await written).ok()).toBe(true);
+    expect(await sprintCount()).toBe(before + 1);
+  });
 });
 
 test.describe("the sprint list once there are more closed sprints than it shows", () => {

@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const countDocuments = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+vi.mock("@/lib/oidc/providers", () => ({ ssoEnforced: async () => false }));
 vi.mock("@/models/user", () => ({ User: { countDocuments } }));
 vi.mock("@/lib/organisation-host", async (importOriginal) => {
   const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");

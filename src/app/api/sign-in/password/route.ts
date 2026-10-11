@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getClientIp } from "@/lib/client-ip";
 import { verifyCredentials } from "@/lib/auth";
-import { passwordSignInEnabled, passwordSignInOff } from "@/lib/password-sign-in";
+import { passwordRefusal, passwordSignInEnabled, passwordSignInOff } from "@/lib/password-sign-in";
 import { accountByEmail, endSignIn, issueHandoff, scopedToOrganisation, servedOrganisationById } from "@/lib/platform-sign-in";
 import { clearedSignInCookie, provenEmail, rememberChoiceCookie, signInBinder, startAgain, signInRoute } from "@/lib/platform-sign-in-route";
 import { lockoutKey, sourceKey, withLockout } from "@/lib/rate-limit";
@@ -26,6 +26,8 @@ export const POST = signInRoute(async (request) => {
   const organisation = await servedOrganisationById(read.value.organisation);
   if (!organisation) return invalid();
   const db = scopedToOrganisation(organisation);
+  const closed = await passwordRefusal(db);
+  if (closed) return closed;
   const account = await accountByEmail(db, email);
   const username = account?.username ?? email;
 

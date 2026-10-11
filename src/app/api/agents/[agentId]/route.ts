@@ -1,3 +1,4 @@
+import { readAuthenticatedJsonBody } from "@/lib/request-body";
 import { NextResponse } from "next/server";
 import { isValidObjectId, Types } from "mongoose";
 import { connectDB } from "@/lib/db";
@@ -125,7 +126,9 @@ export const PUT = withAuth(async (request, { params, user, db }) => {
     return NextResponse.json({ error: "Not yours to change" }, { status: 403 });
   }
 
-  const body = await request.json();
+  const read = await readAuthenticatedJsonBody(request);
+  if (!read.ok) return read.response;
+  const body = read.value;
   if (typeof body.name === "string" && body.name.trim()) agent.name = body.name.trim();
   if (typeof body.description === "string") agent.description = body.description.trim();
   if (body.composition) {

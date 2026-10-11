@@ -1,3 +1,4 @@
+import { readAuthenticatedJsonBody } from "@/lib/request-body";
 import { NextResponse } from "next/server";
 import crypto from "crypto";
 import { isValidObjectId } from "mongoose";
@@ -53,7 +54,9 @@ export const GET = withAuth(async (_request, { user, db }) => {
 export const POST = withAuth(async (request, { user, db }) => {
   await connectDB();
 
-  const { name, allowedProjects } = await request.json();
+  const read = await readAuthenticatedJsonBody(request);
+  if (!read.ok) return read.response;
+  const { name, allowedProjects } = read.value;
   if (!name || typeof name !== "string" || !name.trim()) {
     return NextResponse.json({ error: "Token name is required" }, { status: 400 });
   }
@@ -123,7 +126,9 @@ export const POST = withAuth(async (request, { user, db }) => {
 export const DELETE = withAuth(async (request, { user, db }) => {
   await connectDB();
 
-  const { id } = await request.json();
+  const read = await readAuthenticatedJsonBody(request);
+  if (!read.ok) return read.response;
+  const { id } = read.value;
   // Typed, not merely truthy: a JSON body can carry an operator object, and {"$ne": null} would
   // delete an arbitrary token of the caller's own rather than the one named
   if (typeof id !== "string" || !isValidObjectId(id)) {

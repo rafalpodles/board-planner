@@ -1,3 +1,4 @@
+import { readAuthenticatedJsonBody } from "@/lib/request-body";
 import crypto from "crypto";
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
@@ -21,7 +22,9 @@ export const maxDuration = 60;
 export const POST = withProjectOwner(async (request, { params, user, db }) => {
   await connectDB();
   const { projectId } = await params;
-  const { name } = await request.json();
+  const bodyRead = await readAuthenticatedJsonBody(request);
+  if (!bodyRead.ok) return bodyRead.response;
+  const { name } = bodyRead.value;
 
   const project = await db.Project.findById(projectId).select("pm.mcpServers").lean();
   if (!project) {

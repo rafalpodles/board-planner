@@ -1,9 +1,10 @@
+import { readAuthenticatedJsonBody } from "@/lib/request-body";
+import { checkSprintFields } from "@/lib/sprint-fields";
 import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import type { ScopedDb } from "@/lib/db-scope";
 import { withProjectAccess } from "@/lib/middleware";
-import { SprintStatus, SPRINT_STATUSES } from "@/types";
 import { columnIdsWithRole } from "@/lib/columns";
 import { NOT_ARCHIVED } from "@/lib/task-archive";
 
@@ -66,31 +67,24 @@ export const PUT = withProjectAccess(async (request, { params, db }) => {
     return NextResponse.json({ error: "Sprint not found" }, { status: 404 });
   }
 
-  const body = await request.json();
+  const read = await readAuthenticatedJsonBody(request);
+  if (!read.ok) return read.response;
+  const body = read.value;
 
-  const allowed = ["name", "startDate", "endDate", "goal", "status"];
-  const updates: Record<string, unknown> = {};
-  for (const field of allowed) {
-    if (body[field] !== undefined) {
-      updates[field] = field === "startDate" || field === "endDate"
-        ? new Date(body[field])
-        : body[field];
-    }
-  }
-
-  if (updates.status && !SPRINT_STATUSES.includes(updates.status as SprintStatus)) {
-    return NextResponse.json({ error: "Invalid sprint status" }, { status: 400 });
-  }
+  const oneDateOnly = (body.startDate === undefined) !== (body.endDate === undefined);
+  const stored = oneDateOnly
+    ? await db.Sprint.findOne({ _id: sprintId, project: projectId }).select("startDate endDate").lean()
+    : null;
   // Every refusal ahead of every write: the move of unfinished tasks below runs before the update, so a
   // name or a date the update would then refuse left the sprint open with its tasks already carried away
-  if (typeof updates.name === "string" && updates.name.trim() === "") {
-    return NextResponse.json({ error: "A sprint needs a name" }, { status: 400 });
+  const checked = checkSprintFields(
+    body,
+    stored ? { startDate: stored.startDate, endDate: stored.endDate } : undefined
+  );
+  if (!checked.ok) {
+    return NextResponse.json({ error: checked.error }, { status: 400 });
   }
-  for (const field of ["startDate", "endDate"] as const) {
-    if (updates[field] instanceof Date && Number.isNaN((updates[field] as Date).getTime())) {
-      return NextResponse.json({ error: `Invalid ${field}` }, { status: 400 });
-    }
-  }
+  const updates = checked.updates;
 
   // If activating, deactivate other active sprints in this project
   if (updates.status === "active") {

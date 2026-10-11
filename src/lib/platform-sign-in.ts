@@ -6,6 +6,7 @@ import { normaliseEmail } from "./email";
 import { randomToken, sha256 } from "./oauth";
 import { acrossOrganisations } from "./organisation-wall";
 import { organisationDomain, organisationOrigin } from "./organisation-host";
+import { ssoEnforced } from "./oidc/providers";
 import { Organisation } from "@/models/organisation";
 import { PlatformSignIn } from "@/models/platformSignIn";
 import { User } from "@/models/user";
@@ -106,6 +107,8 @@ export interface PlatformOrganisation {
   name: string;
   slug: string | null;
   origin: string;
+  /** The organisation has closed every way in but its own single sign-on. */
+  ssoOnly?: boolean;
 }
 
 const servedOrganisation = { suspendedAt: null, deletingAt: null, deletedAt: null };
@@ -126,7 +129,8 @@ export async function organisationsFor(email: string): Promise<PlatformOrganisat
       return origin && onThePlatformsSite(origin) ? { id: String(row._id), name: row.name, slug: row.slug ?? null, origin } : null;
     })
   );
-  return listed.filter((row): row is PlatformOrganisation => row !== null);
+  const shown = listed.filter((row): row is PlatformOrganisation => row !== null);
+  return Promise.all(shown.map(async (row) => ((await ssoEnforced(scopedToOrganisation(row))) ? { ...row, ssoOnly: true } : row)));
 }
 
 function onThePlatformsSite(origin: string): boolean {

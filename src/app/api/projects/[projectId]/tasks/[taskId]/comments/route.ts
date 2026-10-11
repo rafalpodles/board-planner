@@ -1,3 +1,4 @@
+import { readAuthenticatedJsonBody } from "@/lib/request-body";
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess, withProjectAccessOrWorker } from "@/lib/middleware";
@@ -25,7 +26,9 @@ export const POST = withProjectAccessOrWorker(async (request, { params, user, db
   const { projectId, taskId } = await params;
   await connectDB();
 
-  const { body } = await request.json();
+  const read = await readAuthenticatedJsonBody(request);
+  if (!read.ok) return read.response;
+  const { body } = read.value;
 
   const result = await addComment(db, projectId, taskId, body, {
     id: String(user._id),

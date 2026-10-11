@@ -78,6 +78,7 @@ export const GROUPS = {
     "saved-views-states.spec.ts",
   ],
   project: [
+    "rest-contract.spec.ts",
     "organisation-on-product-writes.spec.ts",
     "cross-organisation-projects.spec.ts",
     "project-lifecycle.spec.ts",

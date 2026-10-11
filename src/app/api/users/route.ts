@@ -1,6 +1,6 @@
 import { organisationDomain } from "@/lib/organisation-host";
 import { NextResponse } from "next/server";
-import { passwordSignInEnabled } from "@/lib/password-sign-in";
+import { passwordSignInEnabled, passwordSignInFor } from "@/lib/password-sign-in";
 import { readJsonBody } from "@/lib/request-body";
 import { checkOrganisationName, nameOrganisation } from "@/lib/organisation";
 import bcrypt from "bcryptjs";
@@ -40,7 +40,7 @@ export const GET = withAdmin(async (request, { db }) => {
 async function withSignInMethods(db: ScopedDb, users: HydratedDocument<IUser>[]) {
   const ids = users.map((u) => u._id);
   const [withPassword, identities, sessionUse] = await Promise.all([
-    passwordSignInEnabled()
+    (await passwordSignInFor(db))
       ? db.User.find({ _id: { $in: ids }, password: { $nin: [null, ""] } }).select("_id").lean()
       : Promise.resolve([] as { _id: unknown }[]),
     db.Identity.find({ user: { $in: ids }, ...(await liveIdentityFilterFor(db)) }).select("user provider").sort({ linkedAt: 1 }).lean(),

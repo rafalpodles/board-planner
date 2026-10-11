@@ -1,3 +1,4 @@
+import { readAuthenticatedJsonBody } from "@/lib/request-body";
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectAccessOrWorker } from "@/lib/middleware";
@@ -32,7 +33,9 @@ export const POST = withProjectAccessOrWorker(async (request, { params, workerId
   const { projectId } = await params;
   await connectDB();
 
-  const body = await request.json();
+  const read = await readAuthenticatedJsonBody(request);
+  if (!read.ok) return read.response;
+  const body = read.value;
   const outcome = AGENT_RUN_OUTCOMES.find((o) => o === body.outcome) as AgentRunOutcome | undefined;
   if (!outcome) return NextResponse.json({ error: "Unknown outcome" }, { status: 400 });
   if (typeof body.taskId !== "string" || typeof body.taskKey !== "string") {

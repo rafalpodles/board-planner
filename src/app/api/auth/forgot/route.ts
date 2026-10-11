@@ -1,6 +1,6 @@
 import { refusedHost } from "@/lib/middleware";
 import { NextResponse } from "next/server";
-import { passwordSignInEnabled, passwordSignInOff } from "@/lib/password-sign-in";
+import { passwordRefusal } from "@/lib/password-sign-in";
 import { readJsonBody } from "@/lib/request-body";
 import { connectDB } from "@/lib/db";
 import { scopedForRequest } from "@/lib/db-scope";
@@ -41,7 +41,8 @@ const TOO_MANY = () =>
 export async function POST(request: Request) {
   const db = await scopedForRequest(request);
   if (!db) return refusedHost(request);
-  if (!passwordSignInEnabled()) return passwordSignInOff();
+  const closed = await passwordRefusal(db);
+  if (closed) return closed;
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
 
