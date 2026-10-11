@@ -3,6 +3,7 @@ import { connectDB } from "@/lib/db";
 import { withAuth, withAdmin } from "@/lib/middleware";
 import { getSettings, updateSettings } from "@/models/settings";
 import { logInstanceAudit } from "@/lib/instanceAudit";
+import { refuseModel } from "@/lib/model-check";
 
 const MAX_MODEL_LENGTH = 100;
 
@@ -31,6 +32,8 @@ export const PUT = withAdmin(async (request, { user, db }) => {
         { status: 400 }
       );
     }
+    const refused = await refuseModel(db, body.aiModel);
+    if (refused) return NextResponse.json({ error: refused }, { status: 400 });
     updates.aiModel = body.aiModel.trim();
   }
 

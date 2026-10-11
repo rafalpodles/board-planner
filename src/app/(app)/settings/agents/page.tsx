@@ -7,10 +7,9 @@ import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Input";
+import { ModelPicker, type ModelCatalogue } from "@/components/settings/ModelPicker";
 import { DEFAULT_PROJECT_ICON } from "@/types";
 import { projectPath } from "@/lib/urls";
-import { DEFAULT_AI_MODEL } from "@/lib/ai-model";
 import { openrouterModel } from "@/lib/managed-models";
 
 interface AgentRow {
@@ -46,16 +45,19 @@ export default function AdminAgentsPage() {
   const [data, setData] = useState<AgentsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
-  const [aiModel, setAiModel] = useState("");
-  const [savingAiModel, setSavingAiModel] = useState(false);
+  const [catalogue, setCatalogue] = useState<ModelCatalogue | null>(null);
   const savedModels = useRef<Record<string, string>>({});
 
   const load = useCallback(async () => {
     try {
-      const res: AgentsResponse = await api.get("/api/admin/agents");
+      const [res, models]: [AgentsResponse, ModelCatalogue] = await Promise.all([
+        api.get("/api/admin/agents"),
+        // Without the list the field takes a typed name, and the server still judges it
+        api.get("/api/settings/ai-models").catch(() => ({ restricted: false, model: "", models: null, providers: null })),
+      ]);
       setData(res);
+      setCatalogue(models);
       savedModels.current = Object.fromEntries(res.projects.map((p) => [p._id, p.model]));
-      setAiModel(res.defaults.aiModel);
     } catch {
       toast("Failed to load agents", "error");
     } finally {
@@ -102,24 +104,6 @@ export default function AdminAgentsPage() {
     }
   }
 
-  async function saveAiModel() {
-    const value = aiModel.trim();
-    if (!value) {
-      toast("Give the model a name, or the PM agent and AI task drafting have nothing to call.", "error");
-      return;
-    }
-    setSavingAiModel(true);
-    try {
-      await api.put("/api/settings", { aiModel: value });
-      toast("Model saved", "success");
-      load();
-    } catch {
-      toast("Failed to save the model", "error");
-    } finally {
-      setSavingAiModel(false);
-    }
-  }
-
   if (authLoading || loading) {
     return (
       <div className="flex justify-center py-12">
@@ -127,7 +111,7 @@ export default function AdminAgentsPage() {
       </div>
     );
   }
-  if (!isAdmin || !data) return null;
+  if (!isAdmin || !data || !catalogue) return null;
 
   return (
     <div className="w-full max-w-5xl mx-auto">
@@ -182,29 +166,13 @@ export default function AdminAgentsPage() {
         </div>
       )}
 
-      <section className="mb-8 rounded-xl border border-border bg-bg-card p-4">
-        <h2 className="font-semibold mb-1">AI model</h2>
-        <p className="text-xs text-text-muted mb-4">
-          One model for the PM agent and for drafting a task with AI. A project can name its own PM
-          model in the table below; AI task drafting always uses this one.
-        </p>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Input
-            label="Model"
-            value={aiModel}
-            onChange={(e) => setAiModel(e.target.value)}
-            placeholder={DEFAULT_AI_MODEL}
-          />
-        </div>
-        <p className="mt-2 text-xs text-text-muted">
-          An OpenRouter model name. One without a provider, such as gpt-4o-mini, is read as openai/gpt-4o-mini.
-        </p>
-        <div className="mt-3">
-          <Button size="sm" onClick={saveAiModel} disabled={savingAiModel}>
-            {savingAiModel ? "Saving..." : "Save model"}
-          </Button>
-        </div>
-      </section>
+      <p className="mb-6 text-sm text-text-muted" data-testid="ai-model-moved">
+        The model for the PM agent and for drafting a task with AI is set next to the key:{" "}
+        <Link href="/settings/ai-keys" className="underline">
+          Settings → AI key
+        </Link>
+        . A project can name its own PM model in the table below; AI task drafting always uses the one default.
+      </p>
 
       <div className="border border-border rounded-lg overflow-hidden">
         <div className="overflow-x-auto">
@@ -256,28 +224,26 @@ export default function AdminAgentsPage() {
                     </div>
                   </td>
                   <td className="px-3 py-2">
-                    <Input
-                      aria-label={`PM model for ${row.key} — ${row.name}`}
+                    <ModelPicker
+                      ariaLabel={`PM model for ${row.key} — ${row.name}`}
                       value={row.model}
-                      onChange={(e) =>
+                      catalogue={catalogue}
+                      emptyLabel={`Default — ${openrouterModel(data.defaults.aiModel)}`}
+                      placeholder={openrouterModel(data.defaults.aiModel)}
+                      className="text-xs"
+                      onChange={(model) =>
                         setData((prev) =>
                           prev
                             ? {
                                 ...prev,
-                                projects: prev.projects.map((p) =>
-                                  p._id === row._id ? { ...p, model: e.target.value } : p
-                                ),
+                                projects: prev.projects.map((p) => (p._id === row._id ? { ...p, model } : p)),
                               }
                             : prev
                         )
                       }
-                      onBlur={(e) => {
-                        if (e.target.value !== savedModels.current[row._id]) {
-                          patch(row, { model: e.target.value });
-                        }
+                      onCommit={(model) => {
+                        if (model !== savedModels.current[row._id]) patch(row, { model });
                       }}
-                      placeholder={openrouterModel(data.defaults.aiModel)}
-                      className="text-xs"
                     />
                   </td>
                   <td className="px-3 py-2 text-xs text-text-muted whitespace-nowrap">

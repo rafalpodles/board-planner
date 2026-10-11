@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import AdminAgentsPage from "./page";
 
 const { api } = vi.hoisted(() => ({
@@ -92,14 +92,15 @@ describe("a governance row while one field's save is in flight", () => {
 });
 
 // BP-1006: AI task drafting and the PM agent run on one model, so there is one field for it
+// BP-1024: and it is set next to the key, not here
 describe("the instance model", () => {
-  it("is one field, shared by AI task drafting and the PM agent, with no second default beside it", async () => {
+  it("is not set on this page: a link says where it is, beside the key", async () => {
     render(<AdminAgentsPage />);
 
-    expect(((await screen.findByLabelText("Model", { exact: true })) as HTMLInputElement).value).toBe("openai/one-model");
-    expect(screen.getAllByLabelText("Model", { exact: true })).toHaveLength(1);
-    expect(screen.queryByText("PM agent defaults")).toBeNull();
-    expect(screen.queryByText("Default model")).toBeNull();
+    const note = await screen.findByTestId("ai-model-moved");
+    expect(within(note).getByRole("link", { name: "Settings → AI key" }).getAttribute("href")).toBe("/settings/ai-keys");
+    expect(screen.queryByLabelText("Model", { exact: true })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save model" })).toBeNull();
   });
 
   it("is what a project that names no model of its own will run", async () => {
@@ -108,14 +109,77 @@ describe("the instance model", () => {
     expect(((await screen.findByLabelText("PM model for BP — Board")) as HTMLInputElement).placeholder).toBe("openai/one-model");
   });
 
-  it("is saved as aiModel, and nothing else is sent", async () => {
-    api.put.mockResolvedValue({});
+  // On the platform's key only the allowed providers' models run, so a project picks from them
+  describe("in the table, on the platform's key", () => {
+    const CATALOGUE = {
+      restricted: true,
+      model: "openai/one-model",
+      models: [{ id: "openai/gpt-4o", name: "OpenAI: GPT-4o" }, { id: "openai/gpt-6-luna", name: "OpenAI: GPT-6 Luna" }],
+      providers: [{ id: "openai", label: "OpenAI" }],
+    };
+    const AGENTS = { pmAvailable: true, defaults: { aiModel: "openai/one-model" }, projects: [ROW] };
+    beforeEach(() => {
+      api.get.mockImplementation(async (url: string) => (url === "/api/settings/ai-models" ? CATALOGUE : AGENTS));
+    });
+
+    it("is a list of those models, led by the default, and not a field to type in", async () => {
+      render(<AdminAgentsPage />);
+
+      const select = (await screen.findByLabelText("PM model for BP — Board")) as HTMLSelectElement;
+
+      expect(select.tagName).toBe("SELECT");
+      expect(Array.from(select.options).map((o) => o.textContent)).toEqual(["Default — openai/one-model", "OpenAI: GPT-4o", "OpenAI: GPT-6 Luna"]);
+      expect(within(select).getByRole("group", { name: "OpenAI" })).toBeTruthy();
+    });
+
+    it("saves the model at once when one is picked, and clears it when the default is", async () => {
+      api.patch.mockResolvedValue({ ...ROW, model: "openai/gpt-4o" });
+      render(<AdminAgentsPage />);
+      const select = await screen.findByLabelText("PM model for BP — Board");
+
+      fireEvent.change(select, { target: { value: "openai/gpt-4o" } });
+      await waitFor(() => expect(api.patch).toHaveBeenCalledWith("/api/admin/agents/p1", { model: "openai/gpt-4o" }));
+
+      api.patch.mockResolvedValue({ ...ROW, model: "" });
+      fireEvent.change(select, { target: { value: "" } });
+      await waitFor(() => expect(api.patch).toHaveBeenLastCalledWith("/api/admin/agents/p1", { model: "" }));
+    });
+
+    it("keeps a model the platform's key does not run, saved earlier, as the choice shown, and says so", async () => {
+      api.get.mockImplementation(async (url: string) =>
+        url === "/api/settings/ai-models" ? CATALOGUE : { ...AGENTS, projects: [{ ...ROW, model: "anthropic/claude-haiku-5.5" }] }
+      );
+      render(<AdminAgentsPage />);
+
+      const select = (await screen.findByLabelText("PM model for BP — Board")) as HTMLSelectElement;
+
+      expect(select.value).toBe("anthropic/claude-haiku-5.5");
+      expect(select.selectedOptions[0].textContent).toBe("anthropic/claude-haiku-5.5 — not available on our key");
+    });
+  });
+
+  it("is a field to type in, with OpenRouter's models offered, on the organisation's own key", async () => {
+    api.get.mockImplementation(async (url: string) =>
+      url === "/api/settings/ai-models"
+        ? { restricted: false, model: "openai/one-model", models: [{ id: "anthropic/claude-haiku-5.5", name: "Anthropic: Claude Haiku 5.5" }], providers: null }
+        : { pmAvailable: true, defaults: { aiModel: "openai/one-model" }, projects: [ROW] }
+    );
     render(<AdminAgentsPage />);
 
-    fireEvent.change(await screen.findByLabelText("Model", { exact: true }), { target: { value: "  openai/next  " } });
-    fireEvent.click(screen.getByRole("button", { name: "Save model" }));
+    const field = (await screen.findByLabelText("PM model for BP — Board")) as HTMLInputElement;
 
-    await waitFor(() => expect(api.put).toHaveBeenCalledWith("/api/settings", { aiModel: "openai/next" }));
+    expect(field.tagName).toBe("INPUT");
+    expect(document.querySelector(`datalist#${CSS.escape(field.getAttribute("list") ?? "")} option`)?.getAttribute("value")).toBe("anthropic/claude-haiku-5.5");
+  });
+
+  it("is still a field to type in when the list of models cannot be read, and the page still loads", async () => {
+    api.get.mockImplementation(async (url: string) => {
+      if (url === "/api/settings/ai-models") throw new Error("down");
+      return { pmAvailable: true, defaults: { aiModel: "openai/one-model" }, projects: [ROW] };
+    });
+    render(<AdminAgentsPage />);
+
+    expect(((await screen.findByLabelText("PM model for BP — Board")) as HTMLInputElement).tagName).toBe("INPUT");
   });
 
   it("sends nothing when a project's model is left as it was saved, or typed and put back", async () => {

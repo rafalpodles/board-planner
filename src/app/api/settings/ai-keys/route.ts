@@ -9,6 +9,9 @@ import { withAdmin } from "@/lib/middleware";
 import { getOrganisation } from "@/lib/organisation";
 import { organisationDomain } from "@/lib/organisation-host";
 import { duplicateKeyField } from "@/lib/mongo-errors";
+import { APP_NAME } from "@/lib/brand";
+import { modelsLostWithOwnKey } from "@/lib/model-check";
+import { checkKey } from "@/lib/openrouter-catalogue";
 
 const MAX_KEY_LENGTH = 300;
 // Long enough that the four characters shown afterwards are not half of it
@@ -81,6 +84,15 @@ export const PUT = withAdmin(async (request, { user, db }) => {
   let update: Record<string, Record<string, unknown>>;
   let changed: string;
   if (incoming === null || incoming === "") {
+    const stranded = await modelsLostWithOwnKey(db);
+    if (stranded.length > 0) {
+      return NextResponse.json(
+        {
+          error: `Your own key is what runs ${stranded.slice(0, 3).join(", ")}${stranded.length > 3 ? " and more" : ""}, and ${APP_NAME}'s key does not. Choose a model it runs under Model, or keep your key.`,
+        },
+        { status: 409 }
+      );
+    }
     update = { $unset: { openrouterKey: 1, openrouterKeyHint: 1 } };
     changed = "openrouterKey: removed";
   } else {
@@ -95,6 +107,9 @@ export const PUT = withAdmin(async (request, { user, db }) => {
         { error: "ENCRYPTION_KEY is not configured on the server, so a key cannot be stored" },
         { status: 503 }
       );
+    }
+    if ((await checkKey(incoming)) === "rejected") {
+      return NextResponse.json({ error: "OpenRouter does not accept this key. Check that it is copied whole and has not been revoked." }, { status: 400 });
     }
     update = { $set: { openrouterKey: encryptSecret(incoming, db.organisation), openrouterKeyHint: incoming.slice(-4) } };
     changed = "openrouterKey: set";

@@ -1,12 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { getAuthUser, updateSettings, logInstanceAudit } = vi.hoisted(() => ({
+const { getAuthUser, updateSettings, logInstanceAudit, refuseModel } = vi.hoisted(() => ({
   getAuthUser: vi.fn(),
   updateSettings: vi.fn(),
   logInstanceAudit: vi.fn(),
+  refuseModel: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+vi.mock("@/lib/model-check", () => ({ refuseModel }));
 vi.mock("@/lib/auth", () => ({
   getAuthUser,
   RateLimitError: class RateLimitError extends Error {},
@@ -36,6 +38,7 @@ function put(body: unknown) {
 beforeEach(() => {
   vi.clearAllMocks();
   updateSettings.mockImplementation(async (_db, update) => update.$set);
+  refuseModel.mockResolvedValue(null);
 });
 
 // BP-326: the model behind every project's PM and AI Assist
@@ -76,6 +79,20 @@ describe("PUT /api/settings", () => {
 
     expect(res.status).toBe(400);
     expect(updateSettings).not.toHaveBeenCalled();
+  });
+
+  // BP-1024: a model the key in use would refuse is said so when it is saved, not when the PM is first asked something
+  it("refuses a model the key in use cannot run with the reason, before anything is written", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+    refuseModel.mockResolvedValue("The model anthropic/claude-haiku-5.5 is not available on Board Planner's AI key.");
+
+    const res = await put({ aiModel: "anthropic/claude-haiku-5.5" });
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "The model anthropic/claude-haiku-5.5 is not available on Board Planner's AI key." });
+    expect(refuseModel).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "anthropic/claude-haiku-5.5");
+    expect(updateSettings).not.toHaveBeenCalled();
+    expect(logInstanceAudit).not.toHaveBeenCalled();
   });
 
   it("writes the change for an interactive admin and records who made it", async () => {

@@ -3,9 +3,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 const getAuthUser = vi.fn();
 const logInstanceAudit = vi.fn();
 const getOrganisation = vi.fn();
+const { checkKey, modelsLostWithOwnKey } = vi.hoisted(() => ({ checkKey: vi.fn(), modelsLostWithOwnKey: vi.fn() }));
 let row: Record<string, string> | null = null;
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+vi.mock("@/lib/openrouter-catalogue", () => ({ checkKey }));
+vi.mock("@/lib/model-check", () => ({ modelsLostWithOwnKey }));
 vi.mock("@/lib/auth", () => ({ getAuthUser, RateLimitError: class RateLimitError extends Error {} }));
 vi.mock("@/lib/grants", () => ({ check: vi.fn(), accessibleProjectIds: vi.fn() }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
@@ -48,6 +51,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   aiUsageSummary.mockResolvedValue(USAGE);
   row = null;
+  checkKey.mockResolvedValue("valid");
+  modelsLostWithOwnKey.mockResolvedValue([]);
   getAuthUser.mockResolvedValue(ADMIN);
   getOrganisation.mockResolvedValue({ entitlements: { plan: "free", features: [], source: "none" } });
   process.env.ENCRYPTION_KEY = "ab".repeat(32);
@@ -108,6 +113,44 @@ describe("PUT /api/settings/ai-keys", () => {
 
     expect(res.status).toBe(400);
     expect(row).toBeNull();
+  });
+
+  // BP-1024: a key OpenRouter does not know is said so when it is saved, not on the first message to the PM
+  it("asks OpenRouter whether it accepts the key, and stores nothing when it does not", async () => {
+    checkKey.mockResolvedValue("rejected");
+
+    const res = await put({ openrouterKey: KEY });
+
+    expect(checkKey).toHaveBeenCalledWith(KEY);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/OpenRouter does not accept this key/);
+    expect(row).toBeNull();
+    expect(logInstanceAudit).not.toHaveBeenCalled();
+  });
+
+  it("stores the key when OpenRouter cannot be reached, since an outage is no verdict on it", async () => {
+    checkKey.mockResolvedValue("unknown");
+
+    expect((await put({ openrouterKey: KEY })).status).toBe(200);
+    expect(row?.openrouterKey).toMatch(/^enc:v3:/);
+  });
+
+  it("keeps the key when removing it would hand the model in use to ours, which does not run it, and names the model", async () => {
+    await put({ openrouterKey: KEY });
+    modelsLostWithOwnKey.mockResolvedValue(["anthropic/claude-haiku-5.5"]);
+
+    const res = await put({ openrouterKey: null });
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/runs anthropic\/claude-haiku-5\.5, and Board Planner's key does not/);
+    expect(row?.openrouterKey).toMatch(/^enc:v3:/);
+    expect(logInstanceAudit).toHaveBeenCalledTimes(1);
+  });
+
+  it("names no more than three of the models in use, and says there are more", async () => {
+    modelsLostWithOwnKey.mockResolvedValue(["a/1", "b/2", "c/3", "d/4"]);
+
+    expect((await (await put({ openrouterKey: null })).json()).error).toMatch(/runs a\/1, b\/2, c\/3 and more,/);
   });
 
   it("refuses a body that names nothing to change", async () => {

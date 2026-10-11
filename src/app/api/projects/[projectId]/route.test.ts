@@ -21,7 +21,9 @@ const logInstanceAudit = vi.fn();
 const logProjectAudit = vi.fn();
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 const modelKeyAvailability = vi.hoisted(() => vi.fn());
+const refuseModel = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/model-keys", () => ({ modelKeyAvailability }));
+vi.mock("@/lib/model-check", () => ({ refuseModel }));
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({
   getAuthUser,
@@ -130,6 +132,7 @@ const saved = () => Promise.resolve(SAVED);
 beforeEach(() => {
   vi.clearAllMocks();
   modelKeyAvailability.mockResolvedValue({ available: true, needsPlan: false, unreadable: false });
+  refuseModel.mockResolvedValue(null);
   plan.value = "pro";
   getAuthUser.mockResolvedValue(OWNER);
   projectFindOne.mockReturnValue({
@@ -943,6 +946,32 @@ describe("PUT /api/projects/[projectId] PM settings", () => {
     expect(res.status).toBe(403);
     expect((await res.json()).error).toMatch(/Only an instance admin can change PM/);
     expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  // BP-1024
+  it("refuses a PM model the key in use cannot run, with the reason, and writes nothing", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+    refuseModel.mockResolvedValue("The model x/y is not available on Board Planner's AI key.");
+    reads(stored("old"));
+
+    const res = await PUT(putRequest({ pm: { ...adminSave.pm, model: "x/y" } }), ctx());
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("The model x/y is not available on Board Planner's AI key.");
+    expect(refuseModel).toHaveBeenCalledWith(expect.anything(), "x/y");
+    expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("does not judge a model that is not changing, so a model stored earlier does not stop an unrelated save", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+    refuseModel.mockResolvedValue("refused");
+    reads({ ...stored("old"), model: "x/y" });
+    writes({ _id: PROJECT_ID, pm: { ...stored("old"), model: "x/y" } });
+
+    const res = await PUT(putRequest({ pm: { ...adminSave.pm, model: " x/y " } }), ctx());
+
+    expect(res.status).toBe(200);
+    expect(refuseModel).not.toHaveBeenCalled();
   });
 
   it("takes nothing from a turn or token cap that an older client still sends, and does not refuse the save for it", async () => {

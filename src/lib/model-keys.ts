@@ -48,6 +48,12 @@ export async function resolveModelKey(db: ScopedDb): Promise<ModelKeyResult> {
   return { ok: true, key: instanceKey, source: "managed" };
 }
 
+/** Whether the key this organisation's calls use, or would use on upgrading, runs only the allowed providers' models */
+export async function modelsRestricted(db: ScopedDb): Promise<boolean> {
+  const key = await resolveModelKey(db);
+  return key.ok ? key.source === "managed" : key.reason === "needs_plan";
+}
+
 const MANAGED_PLAN_TTL_MS = 10_000;
 const managedPlan = new Map<string, { at: number; entitled: boolean; locked: boolean }>();
 
