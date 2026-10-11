@@ -46,6 +46,11 @@ function githubConfig(provider: OidcProvider): client.Configuration {
 const guardedFetch: client.CustomFetch = (url, options) =>
   safeFetch(url, options as RequestInit, { allowLoopback: allowLoopbackIn() });
 
+/** Reads the provider's discovery document now, so a mistyped issuer is refused when it is saved and not at somebody's first sign-in. */
+export async function discoverProvider(provider: OidcProvider): Promise<void> {
+  await configFor(provider);
+}
+
 function configFor(provider: OidcProvider): Promise<client.Configuration> {
   if (provider.kind === "github") return Promise.resolve(githubConfig(provider));
   // The secret is part of the key: two organisations may name the same issuer and client with different secrets
@@ -71,7 +76,7 @@ export function redirectUri(provider: Pick<OidcProvider, "id">, origin: string):
   return `${origin}/api/auth/oidc/${provider.id}/callback`;
 }
 
-function returnAddress(provider: OidcProvider, origin: string): string {
+export function returnAddress(provider: Pick<OidcProvider, "id">, origin: string): string {
   const relay = relayOrigin();
   return relay ? `${relay}/api/auth/oidc/${provider.id}/relay` : redirectUri(provider, origin);
 }
