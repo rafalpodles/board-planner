@@ -4,6 +4,7 @@ import { withAdmin } from "@/lib/middleware";
 import { originFor } from "@/lib/organisation-host";
 import { recordDelivery, reissueInvitation } from "@/lib/invitations";
 import { memberLimitRefusal } from "@/lib/member-limit";
+import { deliverWithinBudget, invitationRefusal } from "@/lib/invitation-throttle";
 import { deliverTo, INTERACTIVE_ONLY, invitationLink, NO_ORIGIN_ERROR } from "@/lib/invitation-mail";
 import { describeInvitation, toApiInvitations } from "@/lib/invitation-view";
 import { logInstanceAudit } from "@/lib/instanceAudit";
@@ -37,6 +38,11 @@ export const POST = withAdmin(async (request, { params, user, db }) => {
     const full = await memberLimitRefusal(db);
     if (full) return full;
   }
+  // The same ceilings as sending one, ahead of the write: a link handed back sends nothing
+  if (current && !linkOnly) {
+    const refused = await invitationRefusal(db, current.email);
+    if (refused) return refused;
+  }
   const reissued = await reissueInvitation(db, invitationId, user._id);
   if (!reissued) return NextResponse.json({ error: "Invitation not found" }, { status: 404 });
   const { invitation, token, dropped } = reissued;
@@ -46,7 +52,9 @@ export const POST = withAdmin(async (request, { params, user, db }) => {
     .lean();
   const delivery: InvitationDelivery = linkOnly
     ? { delivery: "link", link: invitationLink(origin, token), reason: "requested" }
-    : await deliverTo(invitation.email, token, origin, user, invitation.role, invitation.boards, projects);
+    : await deliverWithinBudget(db, invitation.email, origin, token, () =>
+        deliverTo(invitation.email, token, origin, user, invitation.role, invitation.boards, projects)
+      );
   await recordDelivery(db, invitation._id, token, delivery.delivery);
 
   void logInstanceAudit(db, {

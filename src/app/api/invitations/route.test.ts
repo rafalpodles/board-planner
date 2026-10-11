@@ -14,6 +14,10 @@ const memberLimitRefusal = vi.fn();
 let caller: Record<string, unknown>;
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+vi.mock("@/models/rateLimit", async () => {
+  const { inMemoryRateLimitModel } = await import("@/lib/rate-limit-test-store");
+  return { RateLimit: inMemoryRateLimitModel() };
+});
 vi.mock("@/lib/middleware", async () => {
   const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
   return {
@@ -40,6 +44,7 @@ vi.mock("@/models/project", () => ({ Project: { find: projectFind } }));
 vi.mock("@/models/invitation", () => ({ Invitation: { find: invitationFind } }));
 
 const { GET, POST } = await import("./route");
+const { resetRateLimits, recordFailedAttempt } = await import("@/lib/rate-limit");
 const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 
 const P1 = "64b000000000000000000001";
@@ -60,7 +65,8 @@ function boardsExist(ids: string[]) {
   }));
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  await resetRateLimits();
   vi.clearAllMocks();
   caller = { _id: "admin-1", username: "owner", fullName: "Owner", role: "admin" };
   selfOrigin.mockReturnValue("https://planner.example");
@@ -72,6 +78,56 @@ beforeEach(() => {
     token: "cpi_secret",
   });
   deliverTo.mockResolvedValue({ delivery: "email" });
+});
+
+const OTHER_ORGANISATION = "0000000000000000000000b2";
+const ORGANISATION = DEFAULT_ORGANISATION_ID.toHexString();
+
+// BP-923. The route sent mail to any address, as often as it was asked
+describe("POST /api/invitations: what it may send", () => {
+  it("holds an administrator to a budget of their own, an address that has an account included", async () => {
+    userExists.mockResolvedValue({ _id: "u2" });
+    for (let i = 0; i < 30; i++) await POST(post({ email: `probe${i}@example.com` }), CTX);
+    userExists.mockResolvedValue(null);
+
+    const res = await POST(post({ email: "ada@example.com" }), CTX);
+
+    expect(res.status).toBe(429);
+    expect(issueInvitation).not.toHaveBeenCalled();
+  });
+
+  it("does not hold another administrator to it — the control", async () => {
+    for (let i = 0; i < 30; i++) await recordFailedAttempt("invite:admin-9");
+
+    expect((await POST(post({ email: "ada@example.com" }), CTX)).status).toBe(201);
+  });
+
+  it("holds the organisation to a sending budget of its own", async () => {
+    for (let i = 0; i < 100; i++) await recordFailedAttempt(`invite-send:${ORGANISATION}`);
+
+    const res = await POST(post({ email: "ada@example.com" }), CTX);
+
+    expect(res.status).toBe(429);
+    expect(issueInvitation).not.toHaveBeenCalled();
+  });
+
+  it("holds one address to five invitations a window in this organisation", async () => {
+    for (let i = 0; i < 5; i++) expect((await POST(post({ email: "ada@example.com" }), CTX)).status).toBe(201);
+
+    expect((await POST(post({ email: "ada@example.com" }), CTX)).status).toBe(429);
+    expect((await POST(post({ email: "someone-else@example.com" }), CTX)).status).toBe(201);
+  });
+
+  it("is not held up by another organisation's invitations to the address, nor told of them", async () => {
+    for (let i = 0; i < 5; i++) await recordFailedAttempt(`board-invite-to:${OTHER_ORGANISATION}:ada@example.com`);
+    for (let i = 0; i < 20; i++) await recordFailedAttempt("board-invite-to:ada@example.com");
+
+    const res = await POST(post({ email: "ada@example.com" }), CTX);
+
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({ delivery: "link", reason: "mail_failed" });
+    expect(deliverTo).not.toHaveBeenCalled();
+  });
 });
 
 describe("POST /api/invitations", () => {

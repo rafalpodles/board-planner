@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import mongoose, { Schema, Types } from "mongoose";
 import { withOrganisation } from "./organisation-field";
-import { acrossOrganisations, expectOrganisation, OrganisationWallError } from "./organisation-wall";
+import { acrossOrganisations, expectOrganisation, insertingInto, OrganisationWallError } from "./organisation-wall";
 
 const ACME = new Types.ObjectId("0000000000000000000000a1");
 const GLOBEX = new Types.ObjectId("0000000000000000000000b2");
@@ -145,5 +145,50 @@ describe("organisationWall: what counts as naming the organisation", () => {
 
   it("sets the organisation as the shard key, so a document's own save, update and delete name it", () => {
     expect(Thing.schema.get("shardKey")).toEqual({ organisation: 1 });
+  });
+});
+
+// BP-923. Every insert used to take whatever organisation the caller wrote; today each takes it from a
+// scoped handle, and this is what keeps the next one honest
+describe("organisationWall: an insert carries the organisation it was scoped to", () => {
+  const acme = () => ({ title: "x", organisation: ACME });
+
+  it("refuses a new document saved with no scope, whichever organisation it names", async () => {
+    expect(await verdict(() => new Thing(acme()).save())).toBe("walled");
+  });
+
+  it("refuses a raw create and a raw insertMany", async () => {
+    expect(await verdict(() => Thing.create(acme()))).toBe("walled");
+    expect(await verdict(() => Thing.insertMany([acme()]))).toBe("walled");
+  });
+
+  it("lets a document through that was built for the organisation it names — the control", async () => {
+    expect(await verdict(() => expectOrganisation(new Thing(acme()), ACME).save())).toBe("passed");
+  });
+
+  it("refuses a document built for one organisation that names another", async () => {
+    expect(await verdict(() => expectOrganisation(new Thing({ ...acme(), organisation: GLOBEX }), ACME).save())).toBe("walled");
+  });
+
+  it("lets create and insertMany through inside the scope of the organisation they name — the control", async () => {
+    expect(await verdict(() => insertingInto(ACME, () => Thing.create(acme())))).toBe("passed");
+    expect(await verdict(() => insertingInto(ACME, () => Thing.insertMany([acme(), acme()])))).toBe("passed");
+  });
+
+  it("refuses them inside another organisation's scope, one document of several being enough", async () => {
+    expect(await verdict(() => insertingInto(ACME, () => Thing.create({ ...acme(), organisation: GLOBEX } as never)))).toBe("walled");
+    expect(await verdict(() => insertingInto(ACME, () => Thing.insertMany([acme(), { ...acme(), organisation: GLOBEX }] as never)))).toBe("walled");
+  });
+
+  it("does not check a document that is already stored, which cannot change its organisation anyway", async () => {
+    const stored = Thing.hydrate({ _id: new Types.ObjectId(), title: "x", organisation: ACME } as never);
+
+    expect(await verdict(() => stored.save())).toBe("passed");
+  });
+
+  it("does not carry the scope past the call that opened it", async () => {
+    await insertingInto(ACME, async () => undefined);
+
+    expect(await verdict(() => Thing.create(acme()))).toBe("walled");
   });
 });

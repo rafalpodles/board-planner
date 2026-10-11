@@ -14,7 +14,7 @@ import { OAuthCode } from "@/models/oauthCode";
 import { OAuthToken } from "@/models/oauthToken";
 import { Worker } from "@/models/worker";
 import { User } from "@/models/user";
-import { acrossOrganisations } from "./organisation-wall";
+import { acrossOrganisations, insertingInto } from "./organisation-wall";
 
 const BY_CREDENTIAL = "a credential names its organisation only once it is found";
 const BY_USER_ID = "keyed by one user's id, which is unique across organisations";
@@ -315,11 +315,22 @@ export function checkProvenance(request: Request): ProvenanceVerdict {
   if (!origin) return { ok: false, reason: "no-provenance" };
 
   warnOnceSecFetchMissing();
-  const own = selfOrigin();
-  const allowed = own ? [...appOrigins(), own] : appOrigins();
-  return allowed.includes(normaliseOrigin(origin))
+  return acceptedOrigins(request).includes(normaliseOrigin(origin))
     ? { ok: true }
     : { ok: false, reason: "origin-mismatch" };
+}
+
+// With organisations on their own hosts the allowlist is the wrong question: `app.<domain>` is not a
+// reason to accept a write sent to `acme.<domain>`, and `acme.<domain>` is no reason to refuse one.
+// The host the request arrived on is what the organisation was already chosen by (BP-923)
+function acceptedOrigins(request: Request): string[] {
+  if (process.env.ORGANISATION_DOMAIN?.trim()) {
+    const host = request.headers.get("host")?.trim().toLowerCase();
+    if (!host) return [];
+    return [`${selfOrigin()?.startsWith("http://") ? "http:" : "https:"}//${host}`];
+  }
+  const own = selfOrigin();
+  return own ? [...appOrigins(), own] : appOrigins();
 }
 
 // Once, not per request: a browser always sends Sec-Fetch-Site, so its absence may mean a stripping proxy
@@ -355,7 +366,7 @@ export async function createSession(params: {
   const absoluteExpiresAt = new Date(now + SESSION_ABSOLUTE_TTL_MS);
   const expiresAt = new Date(Math.min(now + SESSION_IDLE_TTL_MS, absoluteExpiresAt.getTime()));
 
-  const row = await Session.create({
+  const row = await insertingInto(params.organisation, () => Session.create({
     organisation: params.organisation,
     tokenHash: sha256(token),
     user: params.userId,
@@ -364,7 +375,7 @@ export async function createSession(params: {
     lastUsedAt: new Date(now),
     userAgent: (params.userAgent ?? "").slice(0, 512),
     ip: (params.ip ?? "").slice(0, 128),
-  });
+  }));
   // A stamp the Users screen reads; failing to write it must not fail the sign-in
   await User.updateOne({ _id: params.userId, organisation: params.organisation }, { $set: { lastSignInAt: new Date(now) } }).catch(() => {});
 

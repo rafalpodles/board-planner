@@ -129,3 +129,23 @@ test("a resend drops a board whose adder can no longer grant it, and keeps one s
   const after = await (await db()).collection("invitations").findOne({ email, status: "pending" });
   expect(after?.boards.map((b: { project: unknown }) => String(b.project))).toEqual([String(backed._id)]);
 });
+
+// BP-923. The administrators' route sent mail to any address as often as it was asked, and one
+// organisation's invitations to a person counted against everybody else's
+test("an address is invited five times a window by an organisation, and a sixth is refused", async ({ page }) => {
+  await signIn(page);
+  const address = fresh("often");
+  const invite = (email: string) =>
+    page.request.post("/api/invitations", { headers: { "sec-fetch-site": "same-origin" }, data: { email, boards: [] } });
+
+  for (let i = 0; i < 5; i++) {
+    const sent = await invite(address);
+    expect(sent.status(), `invitation ${i + 1}: ${await sent.text()}`).toBe(201);
+  }
+  const refused = await invite(address);
+  expect(refused.status()).toBe(429);
+  expect((await refused.json()).error).toBe("That address has been invited too often. Try again in 15 minutes.");
+
+  const other = await invite(fresh("other"));
+  expect(other.status(), "another address is not held up").toBe(201);
+});

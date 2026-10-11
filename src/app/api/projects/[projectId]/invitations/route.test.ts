@@ -13,6 +13,7 @@ const logInstanceAudit = vi.fn();
 const logProjectAudit = vi.fn();
 const selfOrigin = vi.fn();
 let caller: Record<string, unknown>;
+const OTHER_ORGANISATION = "0000000000000000000000b2";
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/rateLimit", async () => {
@@ -188,11 +189,43 @@ describe("POST /api/projects/:id/invitations", () => {
     expect((await post({ email: "someone-else@example.com" })).status).toBe(201);
   });
 
-  it("keeps a ceiling for the address across every organisation, so its inbox is not one per organisation (BP-894)", async () => {
+  // BP-894, BP-923. The ceiling stays, but a 429 here would tell the inviter that somebody else is writing to
+  // this address, so past it the invitation is made and handed back as a link, as when a mail fails
+  it("keeps a ceiling for the address across every organisation, and answers as if the mail had failed", async () => {
     for (let i = 0; i < 20; i++) await recordFailedAttempt("board-invite-to:ada@example.com");
 
-    expect((await post({ email: "ada@example.com" })).status).toBe(429);
+    const res = await post({ email: "ada@example.com" });
+
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({ outcome: "created", delivery: "link", reason: "mail_failed" });
+    expect(deliverTo).not.toHaveBeenCalled();
     expect((await post({ email: "someone-else@example.com" })).status).toBe(201);
+    expect(deliverTo).toHaveBeenCalledTimes(1);
+  });
+
+  it("is not held up by another organisation's invitations to the same address — the control", async () => {
+    for (let i = 0; i < 5; i++) await recordFailedAttempt(`board-invite-to:${OTHER_ORGANISATION}:ada@example.com`);
+
+    const res = await post({ email: "ada@example.com" });
+
+    expect(res.status).toBe(201);
+    expect((await res.json()).delivery).toBe("email");
+  });
+
+  it("holds an organisation to a sending budget of its own, whoever sends", async () => {
+    for (let i = 0; i < 100; i++) await recordFailedAttempt(`invite-send:${DEFAULT_ORGANISATION_ID.toHexString()}`);
+
+    const res = await post({ email: "ada@example.com" });
+
+    expect(res.status).toBe(429);
+    expect((await res.json()).error).toBe("Too many invitations. Try again in 15 minutes.");
+    expect(inviteToBoard).not.toHaveBeenCalled();
+  });
+
+  it("does not spend another organisation's budget", async () => {
+    for (let i = 0; i < 100; i++) await recordFailedAttempt(`invite-send:${OTHER_ORGANISATION}`);
+
+    expect((await post({ email: "ada@example.com" })).status).toBe(201);
   });
 
   it("answers 404 for a board that has gone", async () => {

@@ -140,6 +140,19 @@ export async function sweepDeletedOrganisations(now = Date.now()): Promise<numbe
 
 const line = (value: unknown) => `${mongoose.mongo.BSON.EJSON.stringify(value, { relaxed: false })}\n`;
 
+export class ExportCutShortError extends Error {
+  constructor() {
+    super("The organisation was deleted while this export was being made, so what was sent is incomplete");
+    this.name = "ExportCutShortError";
+  }
+}
+
+// Asked between pages, not once at the start: a delete begun during a long stream would otherwise leave
+// a partial copy that ends as cleanly as a whole one
+async function stillThere(organisation: Types.ObjectId): Promise<void> {
+  if ((await Organisation.exists({ _id: organisation, deletedAt: null, deletingAt: null })) === null) throw new ExportCutShortError();
+}
+
 // Paged by _id rather than one long cursor, which the server closes after ten idle minutes of a slow download
 export async function* organisationExport(db: ScopedDb): AsyncGenerator<string> {
   const names = scopedModelNames().sort();
@@ -157,6 +170,7 @@ export async function* organisationExport(db: ScopedDb): AsyncGenerator<string> 
     const hidden = hiddenPaths(name);
     let after: Types.ObjectId | null = null;
     while (true) {
+      await stillThere(db.organisation);
       const page = (await model
         .find(after ? { _id: { $gt: after } } : {})
         .select(hidden.join(" "))
@@ -169,5 +183,11 @@ export async function* organisationExport(db: ScopedDb): AsyncGenerator<string> 
     }
   }
   const uploads = organisationUploads(db);
-  if (uploads) for await (const row of uploads.rows()) yield line(row);
+  if (uploads) {
+    let sent = 0;
+    for await (const row of uploads.rows()) {
+      if (sent++ % EXPORT_PAGE === 0) await stillThere(db.organisation);
+      yield line(row);
+    }
+  }
 }

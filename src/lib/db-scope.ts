@@ -34,7 +34,7 @@ import { Task } from "@/models/task";
 import { User } from "@/models/user";
 import { Worker } from "@/models/worker";
 import { DEFAULT_ORGANISATION_ID } from "./organisation-field";
-import { expectOrganisation } from "./organisation-wall";
+import { expectOrganisation, insertingInto } from "./organisation-wall";
 
 // Thunks: a test that mocks one model must not fail on the exports of the others
 export const SCOPED_MODELS = {
@@ -266,11 +266,11 @@ function scopeModel(model: Model<never>, organisation: Types.ObjectId): unknown 
     countDocuments: (filter, ...rest) => call("countDocuments", scopeFilter(filter, organisation), ...rest),
     exists: (filter) => call("exists", scopeFilter(filter, organisation)),
     distinct: (field, filter, ...rest) => call("distinct", field, scopeFilter(filter, organisation), ...rest),
-    create: (...args) => call("create", ...stampCreate(args, organisation)),
-    insertMany: (docs, ...rest) => call("insertMany", stampAll(docs, organisation), ...rest),
+    create: (...args) => insertingInto(organisation, () => call("create", ...stampCreate(args, organisation))),
+    insertMany: (docs, ...rest) => insertingInto(organisation, () => call("insertMany", stampAll(docs, organisation), ...rest)),
     aggregate: (pipeline, ...rest) => call("aggregate", scopePipeline(pipeline, organisation), ...rest),
     bulkWrite: (operations, ...rest) => call("bulkWrite", scopeBulk(operations, organisation), ...rest),
-    build: (doc) => new (model as unknown as new (doc: unknown) => unknown)(stamp(doc ?? {}, organisation)),
+    build: (doc) => expectOrganisation(new (model as unknown as new (doc: unknown) => object)(stamp(doc ?? {}, organisation)), organisation),
   };
   return methods;
 }
