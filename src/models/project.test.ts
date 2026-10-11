@@ -13,7 +13,7 @@ describe("Project.groupRoleMap (BP-862)", () => {
   it("keeps the groups and roles it is given, on the board itself and not on its saved views", () => {
     const project = new Project({ ...row, groupRoleMap: [{ group: "staff", role: "member" }] });
 
-    expect(project.groupRoleMap.map(({ group, role }) => ({ group, role }))).toEqual([{ group: "staff", role: "member" }]);
+    expect(project.groupRoleMap?.map(({ group, role }) => ({ group, role }))).toEqual([{ group: "staff", role: "member" }]);
     expect(Project.schema.path("groupRoleMap")).toBeDefined();
     expect(Project.schema.path("savedViews")).toBeDefined();
     expect(Object.keys((Project.schema.path("savedViews") as unknown as { schema: { paths: object } }).schema.paths)).not.toContain("groupRoleMap");
