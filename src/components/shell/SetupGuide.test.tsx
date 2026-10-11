@@ -122,3 +122,23 @@ describe("SetupGuidePanel", () => {
     expect(onHide).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("where the steps send you", () => {
+  const hrefOf = (id: string) => {
+    const g: ApiSetupGuide = {
+      show: true,
+      steps: [{ id: id as ApiSetupGuide["steps"][number]["id"], group: "connections", done: false, locked: false }],
+    };
+    const { unmount } = render(<SetupGuidePanel guide={g} projectRef="ORB" onClose={vi.fn()} onHide={vi.fn()} />);
+    const href = screen.getByTestId("setup-guide-next").querySelector("a")!.getAttribute("href");
+    unmount();
+    return href;
+  };
+
+  // The team's channel is added under Integrations; Notifications is the reader's own grid
+  it("puts the team channel and the webhook under Integrations, not under the reader's own notifications", () => {
+    expect(hrefOf("channel")).toBe("/projects/ORB/settings?section=integrations");
+    expect(hrefOf("webhook")).toBe("/projects/ORB/settings?section=integrations");
+    expect(hrefOf("repository")).toBe("/projects/ORB/settings?section=integrations");
+  });
+});

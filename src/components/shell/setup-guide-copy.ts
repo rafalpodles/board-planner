@@ -60,8 +60,8 @@ export const STEP_COPY: Record<SetupGuideStepId, StepCopy> = {
   channel: {
     title: "Pick a team channel",
     why: "Slack or Discord gets the events your team cares about.",
-    action: "Settings › Notifications",
-    href: settings("notifications"),
+    action: "Settings › Integrations",
+    href: settings("integrations"),
   },
   webhook: {
     title: "Add a webhook",
