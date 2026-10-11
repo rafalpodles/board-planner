@@ -387,13 +387,14 @@ describe("Settings → AI key, the model", () => {
   });
 
   it("shows a model saved as a bare name, from before OpenRouter, as the option that carries it, and keeps Save off", async () => {
-    models = { ...PLATFORM_MODELS, model: "gpt-4o" };
+    models = { ...PLATFORM_MODELS, model: "gpt-6-luna" };
     render(<AiKeys />);
 
     const model = (await (await card()).findByLabelText("Model")) as HTMLSelectElement;
 
-    expect(model.value).toBe("openai/gpt-4o");
-    expect(model.selectedOptions[0].textContent).toBe("OpenAI: GPT-4o");
+    // Not the first option, which is what a select with no match for its value falls back to
+    expect(model.value).toBe("openai/gpt-6-luna");
+    expect(model.selectedOptions[0].textContent).toBe("OpenAI: GPT-6 Luna");
     expect((screen.getByRole("button", { name: "Save model" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
