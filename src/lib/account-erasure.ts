@@ -17,9 +17,9 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// A username inside a longer one ("al" in "alice") is somebody else's name
-const NAME_EDGE_BEFORE = "(?<![a-z0-9_-])";
-const NAME_EDGE_AFTER = "(?![a-z0-9_-])";
+// A username inside a longer one ("al" in "alice", or in "al.k@example.com") is somebody else's name
+const NAME_EDGE_BEFORE = "(?<![a-z0-9_.-])";
+const NAME_EDGE_AFTER = "(?![a-z0-9_-]|[.@][a-z0-9])";
 
 function nameMatcher(name: string): RegExp {
   return new RegExp(`${NAME_EDGE_BEFORE}${escapeRegExp(name)}${NAME_EDGE_AFTER}`, "gi");
@@ -27,7 +27,8 @@ function nameMatcher(name: string): RegExp {
 
 export function scrubNames(text: string, names: string[], label: string): string {
   let out = text;
-  for (const name of names) out = out.replace(nameMatcher(name), label);
+  // The address first: the username is a part of it
+  for (const name of [...names].sort((a, b) => b.length - a.length)) out = out.replace(nameMatcher(name), label);
   return out;
 }
 
