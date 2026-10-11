@@ -131,8 +131,9 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
   }
 
   const takenOver = before?.source === "idp";
-  if (before?.relation !== relation || takenOver) {
-    auditAccess(db, projectId, user._id, target.username, before?.relation, relation, takenOver);
+  const changed = before?.relation !== relation;
+  if (changed || takenOver) auditAccess(db, projectId, user._id, target.username, before?.relation, relation, takenOver);
+  if (changed) {
     void announceAccess(db, {
       projectId,
       recipientId: userId,
