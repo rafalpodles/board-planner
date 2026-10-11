@@ -36,14 +36,15 @@ vi.mock("@/lib/session", () => ({
   legacySessionCookies: () => [],
   createSession,
 }));
-vi.mock("@/lib/oidc/providers", () => ({
-  providerById: (id: string) =>
+vi.mock("@/lib/oidc/providers", () => {
+  const providerById = (id: string) =>
     id === "oidc"
       ? { id: "oidc", label: "Acme", linksByAddress: true }
       : id === "github"
         ? { id: "github", label: "GitHub", linksByAddress: false }
-        : null,
-}));
+        : null;
+  return { providerById, providerFor: async (_db: unknown, id: string) => providerById(id) };
+});
 vi.mock("@/lib/oidc/flow", () => ({
   FLOW_COOKIE: "bp_oidc",
   ACCEPT_COOKIE: "bp_oidc_accept",

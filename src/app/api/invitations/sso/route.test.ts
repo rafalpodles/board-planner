@@ -21,7 +21,7 @@ vi.mock("@/lib/session", () => ({
 }));
 vi.mock("@/lib/oidc/flow", () => ({ ACCEPT_COOKIE: "bp_oidc_accept", heldAcceptance, spendAcceptance }));
 const providerById = vi.fn();
-vi.mock("@/lib/oidc/providers", () => ({ providerById }));
+vi.mock("@/lib/oidc/providers", () => ({ providerFor: async (_db: unknown, id: string) => providerById(id) }));
 vi.mock("@/lib/invitations", () => ({ claimInvitationByHash, releaseInvitation }));
 vi.mock("@/lib/invitation-acceptance", () => ({ completeAcceptance }));
 vi.mock("@/lib/invitation-view", () => ({ toApiInvitations: vi.fn() }));

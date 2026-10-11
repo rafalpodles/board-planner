@@ -15,7 +15,7 @@ import { withAdmin, refusedOnThisHost, refusedHost } from "@/lib/middleware";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { revokePendingInvitationsFor } from "@/lib/invitations";
 import { memberLimitRefusal } from "@/lib/member-limit";
-import { liveIdentityFilter, providerById } from "@/lib/oidc/providers";
+import { liveIdentityFilterFor, providersFor } from "@/lib/oidc/providers";
 import { HydratedDocument } from "mongoose";
 import { IUser } from "@/types";
 
@@ -43,7 +43,7 @@ async function withSignInMethods(db: ScopedDb, users: HydratedDocument<IUser>[])
     passwordSignInEnabled()
       ? db.User.find({ _id: { $in: ids }, password: { $nin: [null, ""] } }).select("_id").lean()
       : Promise.resolve([] as { _id: unknown }[]),
-    db.Identity.find({ user: { $in: ids }, ...liveIdentityFilter() }).select("user provider").sort({ linkedAt: 1 }).lean(),
+    db.Identity.find({ user: { $in: ids }, ...(await liveIdentityFilterFor(db)) }).select("user provider").sort({ linkedAt: 1 }).lean(),
     db.Session.aggregate<{ _id: unknown; lastUsedAt: Date }>([
       { $match: { user: { $in: ids } } },
       { $group: { _id: "$user", lastUsedAt: { $max: "$lastUsedAt" } } },
@@ -52,8 +52,9 @@ async function withSignInMethods(db: ScopedDb, users: HydratedDocument<IUser>[])
   const lastSessionUse = new Map(sessionUse.map((s) => [String(s._id), new Date(s.lastUsedAt).getTime()]));
   const hasPassword = new Set(withPassword.map((u) => String(u._id)));
   const providersOf = new Map<string, string[]>();
+  const configured = await providersFor(db);
   for (const identity of identities) {
-    const provider = providerById(identity.provider);
+    const provider = configured.find((p) => p.id === identity.provider);
     if (!provider) continue;
     const label = provider.label;
     const list = providersOf.get(String(identity.user)) ?? [];

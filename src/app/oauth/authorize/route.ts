@@ -1,7 +1,7 @@
 import { connectDB } from "@/lib/db";
 import { type ScopedDb, organisationOf, scopedForRequest } from "@/lib/db-scope";
 import { passwordSignInEnabled } from "@/lib/password-sign-in";
-import { configuredProviders } from "@/lib/oidc/providers";
+import { providersFor } from "@/lib/oidc/providers";
 import { getClientIp, verifyCredentials } from "@/lib/auth";
 import {
   buildSessionCookie,
@@ -176,7 +176,7 @@ function originOf(redirectUri: string): string {
   }
 }
 
-function loginForm(p: AuthParams, clientName: string, error?: string): Response {
+async function loginForm(db: ScopedDb, p: AuthParams, clientName: string, error?: string): Promise<Response> {
   const label = clientName ? escapeHtml(clientName) : "An application";
   if (!passwordSignInEnabled()) {
     // Signed in at the instance's own sign-in page, with a provider, and brought back here
@@ -204,7 +204,7 @@ function loginForm(p: AuthParams, clientName: string, error?: string): Response 
       <button class="primary" type="submit">Continue</button>
     </form>${
       // An account made through a provider has no password to type here (BP-840)
-      configuredProviders().length > 0
+      (await providersFor(db)).length > 0
         ? `
     <form method="get" action="/login">
       <input type="hidden" name="next" value="${escapeHtml(authorizeHref(p))}">
@@ -460,7 +460,7 @@ export async function GET(req: Request) {
     }
   }
 
-  return loginForm(p, client.clientName);
+  return loginForm(db, p, client.clientName);
 }
 
 export async function POST(req: Request) {
@@ -508,7 +508,7 @@ export async function POST(req: Request) {
     return errorPage("PKCE required: code_challenge with code_challenge_method=S256.");
   }
 
-  if (!passwordSignInEnabled()) return loginForm(p, client.clientName);
+  if (!passwordSignInEnabled()) return loginForm(db, p, client.clientName);
   const username = String(form.get("username") || "");
   const password = String(form.get("password") || "");
   const clientIp = getClientIp(req);
@@ -518,9 +518,9 @@ export async function POST(req: Request) {
     clientIp ? sourceKey(clientIp) : undefined
   );
   if (lockedOut) {
-    return loginForm(p, client.clientName, "Too many failed attempts. Try again later.");
+    return loginForm(db, p, client.clientName, "Too many failed attempts. Try again later.");
   }
-  if (!user) return loginForm(p, client.clientName, "Invalid username or password.");
+  if (!user) return loginForm(db, p, client.clientName, "Invalid username or password.");
 
   // Post/Redirect/Get. The consent page must not be a POST result: no-store keeps it out of the
   // back/forward cache, so Back re-fetches — and re-fetching a POST replays the password from the

@@ -31,7 +31,7 @@ vi.mock("@/lib/session", () => ({
   createSession,
 }));
 vi.mock("@/lib/oidc/flow", () => ({ JOIN_COOKIE: "bp_oidc_join", heldSignUp, spendAcceptance }));
-vi.mock("@/lib/oidc/providers", () => ({ providerById }));
+vi.mock("@/lib/oidc/providers", () => ({ providerFor: async (_db: unknown, id: string) => providerById(id) }));
 vi.mock("@/lib/oidc/admin-group", () => ({ applyAdminGroup }));
 vi.mock("@/lib/sign-up-domains", () => ({ signUpOpenTo }));
 vi.mock("@/lib/member-limit", () => ({ memberLimitRefusal }));

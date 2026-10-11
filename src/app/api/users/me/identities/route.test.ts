@@ -11,8 +11,8 @@ vi.mock("@/lib/middleware", () => ({
     handler(request, { user: caller, db: scopedToDefaultOrganisation() }),
 }));
 vi.mock("@/lib/oidc/providers", () => ({
-  providerById: () => ({ label: "Acme" }),
-  liveIdentityFilter: () => ({ live: "only" }),
+  providersFor: async () => [{ id: "oidc", label: "Acme" }],
+  liveIdentityFilterFor: async () => ({ live: "only" }),
 }));
 vi.mock("@/lib/password-sign-in", () => ({ passwordSignInEnabled: () => true }));
 vi.mock("@/models/identity", () => ({

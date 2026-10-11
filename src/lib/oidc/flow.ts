@@ -58,7 +58,7 @@ function configFor(provider: OidcProvider): Promise<client.Configuration> {
   return config;
 }
 
-export function redirectUri(provider: OidcProvider, origin: string): string {
+export function redirectUri(provider: Pick<OidcProvider, "id">, origin: string): string {
   return `${origin}/api/auth/oidc/${provider.id}/callback`;
 }
 

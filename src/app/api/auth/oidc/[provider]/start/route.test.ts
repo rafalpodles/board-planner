@@ -26,7 +26,7 @@ vi.mock("@/lib/session", () => ({
   RECENT_SIGN_IN_REQUIRED: "sign in again",
 }));
 vi.mock("@/lib/oidc/providers", () => ({
-  providerById: (id: string) => (id === "oidc" ? { id: "oidc", label: "Acme" } : null),
+  providerFor: async (_db: unknown, id: string) => (id === "oidc" ? { id: "oidc", label: "Acme" } : null),
 }));
 vi.mock("@/lib/oidc/flow", () => ({ beginFlow, FLOW_COOKIE: "bp_oidc", FLOW_TTL_MS: 600_000 }));
 vi.mock("@/lib/invitations", () => ({ findInvitationByToken }));

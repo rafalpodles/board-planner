@@ -13,7 +13,7 @@ vi.mock("@/models/settings", () => ({ getSettings: async () => ({ signUpDomains:
 const OIDC = { id: "oidc", label: "Acme SSO", linksByAddress: true };
 const GITHUB = { id: "github", label: "GitHub", linksByAddress: false };
 let providers = [OIDC, GITHUB];
-vi.mock("@/lib/oidc/providers", () => ({ configuredProviders: () => providers }));
+vi.mock("@/lib/oidc/providers", () => ({ configuredProviders: () => providers, providersFor: async () => providers }));
 
 const { GET, PUT } = await import("./route");
 const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
