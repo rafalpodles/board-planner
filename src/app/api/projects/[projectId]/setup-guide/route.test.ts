@@ -13,7 +13,7 @@ const userLean = vi.fn();
 const userUpdate = vi.fn();
 const settingsLean = vi.fn();
 const getOrganisation = vi.fn();
-const resolveModelKey = vi.fn();
+const modelKeyAvailability = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({
@@ -25,7 +25,7 @@ vi.mock("@/lib/grants", async (importOriginal) => {
   return { ...actual, check, accessibleProjectIds: vi.fn() };
 });
 vi.mock("@/lib/organisation", () => ({ getOrganisation }));
-vi.mock("@/lib/model-keys", () => ({ resolveModelKey }));
+vi.mock("@/lib/model-keys", () => ({ modelKeyAvailability }));
 vi.mock("@/models/project", () => ({
   Project: { findOne: () => ({ lean: projectLean }) },
 }));
@@ -59,7 +59,7 @@ beforeEach(() => {
   userLean.mockResolvedValue({ dismissedSetupGuides: [] });
   settingsLean.mockResolvedValue(null);
   getOrganisation.mockResolvedValue({ entitlements: { plan: "free" } });
-  resolveModelKey.mockResolvedValue({ ok: false, reason: "not_configured", plan: "free" });
+  modelKeyAvailability.mockResolvedValue({ available: false, needsPlan: false, unreadable: false, locked: false });
 });
 
 async function read() {
@@ -134,7 +134,8 @@ describe("GET setup guide", () => {
 
   it("adds the AI key for an instance admin, and leaves sso and the plan out where nothing is hosted", async () => {
     getAuthUser.mockResolvedValue({ _id: READER, role: "admin" });
-    settingsLean.mockResolvedValue({ openrouterKey: "sealed", sso: { issuer: "https://idp" } });
+    settingsLean.mockResolvedValue({ sso: { issuer: "https://idp" } });
+    modelKeyAvailability.mockResolvedValue({ available: true, needsPlan: false, unreadable: false, locked: false });
     projectLean.mockResolvedValue({ _id: PROJECT, repositoryUrl: "", worker: { enabled: false }, pm: { enabled: true } });
 
     const { body } = await read();
@@ -158,15 +159,14 @@ describe("GET setup guide", () => {
 
   it("counts the AI key as set when the server or the plan supplies one, not only the organisation's own", async () => {
     getAuthUser.mockResolvedValue({ _id: READER, role: "admin" });
-    resolveModelKey.mockResolvedValue({ ok: true, key: "k", source: "managed" });
+    modelKeyAvailability.mockResolvedValue({ available: true, needsPlan: false, unreadable: false, locked: false });
 
     expect(doneOf((await read()).body).aiKey).toBe(true);
   });
 
   it("counts an own key it cannot read as set, rather than asking for one again", async () => {
     getAuthUser.mockResolvedValue({ _id: READER, role: "admin" });
-    settingsLean.mockResolvedValue({ openrouterKey: "sealed" });
-    resolveModelKey.mockResolvedValue({ ok: false, reason: "own_key_unreadable", plan: "free" });
+    modelKeyAvailability.mockResolvedValue({ available: false, needsPlan: false, unreadable: true, locked: false });
 
     expect(doneOf((await read()).body).aiKey).toBe(true);
   });
@@ -174,7 +174,7 @@ describe("GET setup guide", () => {
   it("does not look for a model key for somebody who is not an instance admin", async () => {
     await read();
 
-    expect(resolveModelKey).not.toHaveBeenCalled();
+    expect(modelKeyAvailability).not.toHaveBeenCalled();
   });
 
   it("answers 404 for a board that is gone", async () => {

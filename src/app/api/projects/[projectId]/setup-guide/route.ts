@@ -7,7 +7,7 @@ import { isWorkerLockedByInstance } from "@/lib/worker-gate";
 import { machineReadinessFor } from "@/lib/worker-service";
 import { claimingMachineIds } from "@/lib/machine-limit";
 import { getOrganisation } from "@/lib/organisation";
-import { resolveModelKey } from "@/lib/model-keys";
+import { modelKeyAvailability } from "@/lib/model-keys";
 import { organisationDomain } from "@/lib/organisation-host";
 import {
   columnsCustomised,
@@ -55,9 +55,9 @@ export const GET = withProjectAccess(async (_request, { params, user, db }) => {
       db.Sprint.exists({ project: projectId }),
       db.Task.exists({ project: projectId, agent: { $ne: null } }),
       db.OAuthToken.exists({ user: user._id, refreshExpiresAt: { $gt: new Date() } }),
-      instanceAdmin ? db.Settings.findOne({}, "openrouterKey sso").lean() : null,
+      instanceAdmin ? db.Settings.findOne({}, "sso").lean() : null,
       instanceAdmin ? getOrganisation(db.organisation) : null,
-      instanceAdmin ? resolveModelKey(db) : null,
+      instanceAdmin ? modelKeyAvailability(db) : null,
     ]);
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
@@ -72,7 +72,8 @@ export const GET = withProjectAccess(async (_request, { params, user, db }) => {
     hasWebhook: (project.webhooks?.length ?? 0) > 0,
     mcpConnected: !!mcpClient,
     pmEnabled: !!project.pm?.enabled,
-    aiKeySet: !!settings?.openrouterKey || !!modelKey?.ok,
+    // Something to run on, whoever supplies it; a key of its own that cannot be read is still one to re-enter elsewhere
+    aiKeySet: !!modelKey && (modelKey.available || modelKey.unreadable),
     workerEnabled: !!project.worker?.enabled,
     lockedByInstance: isWorkerLockedByInstance(project.worker),
     machine: machineReadinessFor(workers, project, new Date(), claiming).state,

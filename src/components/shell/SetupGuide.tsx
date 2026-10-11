@@ -150,7 +150,7 @@ export function SetupGuidePanel({
       <div className="flex items-center gap-3 px-1 pb-2">
         <Ring done={done} total={total} size={44} />
         <div>
-          <h2 ref={heading} tabIndex={-1} className="text-[15px] font-medium outline-none">
+          <h2 ref={heading} tabIndex={-1} className="text-[15px] font-medium">
             Setup guide
           </h2>
           <p className="text-xs text-text-muted">{left === 1 ? "1 step left" : `${left} steps left`}</p>
