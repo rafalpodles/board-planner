@@ -3,7 +3,7 @@ import { getClientIp } from "@/lib/client-ip";
 import { sha256 } from "@/lib/oauth";
 import { passwordSignInEnabled, passwordSignInOff } from "@/lib/password-sign-in";
 import { claimProof, endSignIn, issueHandoff, releaseProof, scopedToOrganisation, servedOrganisationById } from "@/lib/platform-sign-in";
-import { clearedSignInCookie, provenEmail, rememberCookie, signInBinder, signInRoute, startAgain } from "@/lib/platform-sign-in-route";
+import { clearedSignInCookie, provenEmail, rememberChoiceCookie, signInBinder, signInRoute, startAgain } from "@/lib/platform-sign-in-route";
 import { pullNewOrganisationLicence } from "@/lib/licence-pull";
 import { NAME_UNAVAILABLE, nameChecksSpent, nameIsTaken } from "@/lib/organisation";
 import { SLUG_UNAVAILABLE, checkSignUp, createOrganisation, slugTaken, type SignUpInput } from "@/lib/organisation-sign-up";
@@ -32,7 +32,7 @@ export const POST = signInRoute(async (request) => {
   const email = await provenEmail(request);
   if (!email) return startAgain();
 
-  const read = await readJsonBody<SignUpInput>(request);
+  const read = await readJsonBody<SignUpInput & { remember?: unknown }>(request);
   if (!read.ok) return read.response;
   const checked = checkSignUp(email, read.value);
   if (!checked.ok) return refused(checked.error);
@@ -70,7 +70,7 @@ export const POST = signInRoute(async (request) => {
     handedOff = true;
 
     const response = NextResponse.json({ location: `${organisation.origin}/api/auth/handoff?code=${encodeURIComponent(code)}` }, { status: 201 });
-    response.headers.append("Set-Cookie", rememberCookie(organisation.id));
+    response.headers.append("Set-Cookie", rememberChoiceCookie(read.value.remember, organisation.id));
     response.headers.append("Set-Cookie", clearedSignInCookie());
     return response;
   } finally {

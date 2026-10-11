@@ -251,11 +251,8 @@ function tokenNamed(header: string, name: string): string | null {
   return soleValue(cookieValues(header, name));
 }
 
-/**
- * A short-lived cookie for a round trip through another site. Named from the deployment alone,
- * not the request: the leg that sets it is a POST carrying an Origin and the leg that reads it is a
- * navigation that may carry none, and the two must agree on the name.
- */
+// Named from the deployment alone, not the request: the leg that sets it is a POST carrying an Origin and
+// the leg that reads it is a navigation that may carry none, and the two must agree on the name.
 export function flowCookieName(base: string): string {
   return allowsInsecureCookie() ? base : `__Host-${base}`;
 }
@@ -264,9 +261,12 @@ export function buildFlowCookie(base: string, value: string, maxAgeSeconds: numb
   return cookieHeader(flowCookieName(base), value, maxAgeSeconds);
 }
 
-export function readFlowCookie(request: Request, base: string): string | null {
-  const header = request.headers.get("cookie");
+export function readFlowCookieFrom(header: string | null, base: string): string | null {
   return header ? tokenNamed(header, flowCookieName(base)) : null;
+}
+
+export function readFlowCookie(request: Request, base: string): string | null {
+  return readFlowCookieFrom(request.headers.get("cookie"), base);
 }
 
 export function readSessionCookie(header: string | null): string | null {

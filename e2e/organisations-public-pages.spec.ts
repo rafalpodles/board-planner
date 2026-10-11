@@ -33,14 +33,14 @@ test.describe("BP-921: public pages on a host that serves no organisation", () =
       await page.goto(`${originOf("nosuch")}${path}`);
       const screen = page.getByTestId("no-organisation-here");
       await expect(screen.getByRole("heading")).toHaveText(`There is no organisation at nosuch.${ORGANISATION_DOMAIN}:${ORGANISATIONS_PORT}`);
-      await expect(screen.getByRole("link", { name: "Sign in with your e-mail address" })).toHaveAttribute("href", SIGN_IN);
+      await expect(screen.getByRole("link", { name: "Sign in with your e-mail address" })).toHaveAttribute("href", `${SIGN_IN}/?switch`);
       await expect(page.getByLabel("Password")).toHaveCount(0);
     });
   }
 
   test("the platform's own /login sends people to its front page", async ({ page }) => {
     await page.goto(`${SIGN_IN}/login`);
-    await expect(page.getByTestId("no-organisation-here").getByRole("link")).toHaveAttribute("href", "/");
+    await expect(page.getByTestId("no-organisation-here").getByRole("link")).toHaveAttribute("href", "/?switch");
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto(`${originOf("nosuch")}/login`);
     await expect(page.getByTestId("no-organisation-here")).toBeVisible();

@@ -12,6 +12,7 @@ import { User } from "@/models/user";
 
 export const SIGN_IN_COOKIE = "bp_platform_signin";
 export const REMEMBERED_ORGANISATION_COOKIE = "bp_last_organisation";
+export const REMEMBERED_ORGANISATION_TTL_SECONDS = 180 * 24 * 60 * 60;
 export const CODE_TTL_MS = 10 * 60 * 1000;
 export const VERIFIED_TTL_MS = 15 * 60 * 1000;
 export const MAX_CODE_ATTEMPTS = 5;

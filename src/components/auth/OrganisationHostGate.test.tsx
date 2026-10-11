@@ -17,7 +17,13 @@ describe("OrganisationHostGate (BP-921)", () => {
     render(<OrganisationHostGate><p>the form</p></OrganisationHostGate>);
     expect(await screen.findByTestId("no-organisation-here")).toBeTruthy();
     expect(screen.queryByText("the form")).toBeNull();
-    expect(screen.getByRole("link").getAttribute("href")).toBe("https://login.board-planner.com");
+    expect(screen.getByRole("link").getAttribute("href")).toBe("https://login.board-planner.com/?switch");
+  });
+
+  it("sends the platform host's own visitor to its choice of organisation, not to a remembered one (BP-1009)", async () => {
+    answer(404, { error: "Not found", host: "platform", signIn: "https://login.board-planner.com" });
+    render(<OrganisationHostGate><p>the form</p></OrganisationHostGate>);
+    expect((await screen.findByRole("link")).getAttribute("href")).toBe("/?switch");
   });
 
   it("says the organisation is suspended when its host answers so", async () => {

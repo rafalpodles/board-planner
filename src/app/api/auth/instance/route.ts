@@ -42,13 +42,13 @@ export async function GET(request: Request) {
   try {
     await connectDB();
     const users = await db.User.countDocuments();
-    return NextResponse.json({ unclaimed: users === 0 && !organisationDomain(), passwordSignIn });
+    return NextResponse.json({ unclaimed: users === 0 && !organisationDomain(), passwordSignIn, platformSignIn: platformSignInOrigin() });
   } catch (e) {
     // Unreachable is not "unclaimed": answering true here would offer to create the first
     // administrator on an instance that may already have one
     if (isDatabaseUnreachable(e)) {
       const unavailable = databaseUnavailable();
-      return NextResponse.json({ ...(await unavailable.json()), passwordSignIn }, unavailable);
+      return NextResponse.json({ ...(await unavailable.json()), passwordSignIn, platformSignIn: platformSignInOrigin() }, unavailable);
     }
     throw e;
   }

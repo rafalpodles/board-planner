@@ -31,6 +31,7 @@ export default function LoginPage() {
   // that turned it off the form only refuses itself until the answer replaces it
   const [passwordSignIn, setPasswordSignIn] = useState<boolean | null>(null);
   const [suspended, setSuspended] = useState(false);
+  const [platformSignIn, setPlatformSignIn] = useState<string | null>(null);
   const [next, setNext] = useState<string | undefined>(undefined);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -52,6 +53,7 @@ export default function LoginPage() {
         setUnclaimed(ok && data.unclaimed === true);
         setPasswordSignIn(data.passwordSignIn !== false);
         setSuspended(data.suspended === true);
+        setPlatformSignIn(typeof data.platformSignIn === "string" ? data.platformSignIn : null);
       })
       .catch((err) => {
         // Says why rather than failing silently: on a fresh instance whose database is flapping,
@@ -240,6 +242,14 @@ export default function LoginPage() {
             <Link href="/forgot" className="text-text-muted underline hover:text-text">
               Forgot your password?
             </Link>
+          </p>
+        )}
+
+        {!isRegister && platformSignIn && (
+          <p className="mt-4 text-center text-sm">
+            <a href={`${platformSignIn}/?switch`} className="focus-ring inline-flex min-h-[44px] items-center text-text-muted underline hover:text-text">
+              Sign in to another organisation
+            </a>
           </p>
         )}
 
