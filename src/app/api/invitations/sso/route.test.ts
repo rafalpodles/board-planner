@@ -77,6 +77,14 @@ describe("POST /api/invitations/sso", () => {
     expect(res.headers.get("set-cookie")).toContain("bp_oidc_accept=");
   });
 
+  it("carries the held groups, and whether the token had the claim, to the account it makes (BP-862)", async () => {
+    heldAcceptance.mockResolvedValue({ ...HELD, claims: { ...HELD.claims, groups: ["staff"], groupsKnown: true } });
+
+    await post();
+
+    expect(completeAcceptance.mock.calls[0][2]).toMatchObject({ groups: ["staff"], groupsKnown: true });
+  });
+
   it("does not count GitHub, whose word is no proof of the mailbox, as proving the address", async () => {
     providerById.mockReturnValue({ label: "GitHub", linksByAddress: false });
 

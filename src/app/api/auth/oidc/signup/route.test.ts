@@ -6,6 +6,7 @@ const spendAcceptance = vi.fn();
 const provenanceRefusal = vi.fn();
 const signUpOpenTo = vi.fn();
 const applyAdminGroup = vi.fn();
+const applyGroupRoles = vi.fn();
 const revokePendingInvitationsFor = vi.fn();
 const logInstanceAudit = vi.fn();
 const createSession = vi.fn();
@@ -33,6 +34,7 @@ vi.mock("@/lib/session", () => ({
 vi.mock("@/lib/oidc/flow", () => ({ JOIN_COOKIE: "bp_oidc_join", heldSignUp, spendAcceptance }));
 vi.mock("@/lib/oidc/providers", () => ({ providerFor: async (_db: unknown, id: string) => providerById(id) }));
 vi.mock("@/lib/oidc/admin-group", () => ({ applyAdminGroup }));
+vi.mock("@/lib/oidc/group-roles", () => ({ applyGroupRoles }));
 vi.mock("@/lib/sign-up-domains", () => ({ signUpOpenTo }));
 vi.mock("@/lib/member-limit", () => ({ memberLimitRefusal }));
 vi.mock("@/lib/invitations", () => ({ revokePendingInvitationsFor }));
@@ -50,7 +52,7 @@ const legalTerms = await vi.importActual<typeof import("@/lib/legal-terms")>("@/
 
 const HELD = {
   provider: "oidc",
-  claims: { issuer: "https://id.example.com", subject: "s9", email: "grace@corp.example", name: "Grace Hopper", groups: ["staff"] },
+  claims: { issuer: "https://id.example.com", subject: "s9", email: "grace@corp.example", name: "Grace Hopper", groups: ["staff"], groupsKnown: true },
 };
 const GRACE = { _id: "u9", username: "grace", email: "grace@corp.example", role: "member" };
 const post = (body: unknown = { username: "Grace", fullName: "Grace Hopper" }) =>
@@ -118,6 +120,14 @@ describe("POST /api/auth/oidc/signup", () => {
     await post();
 
     expect(applyAdminGroup).toHaveBeenCalledWith(scopedToDefaultOrganisation(), GRACE, "oidc", ["staff"]);
+  });
+
+  it("hands them to each board's group mapping too, with whether the token carried the claim (BP-862)", async () => {
+    applyGroupRoles.mockImplementationOnce(async () => expect(createSession).not.toHaveBeenCalled());
+
+    await post();
+
+    expect(applyGroupRoles).toHaveBeenCalledWith(scopedToDefaultOrganisation(), GRACE, "oidc", ["staff"], true);
   });
 
   // BP-948: sign-up by company domain is a way in, so a full Free organisation refuses it

@@ -25,7 +25,9 @@ vi.mock("@/lib/invitations", () => ({
 vi.mock("@/lib/invitation-authority", () => ({ authorityAtAcceptance }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit: vi.fn() }));
 const applyAdminGroup = vi.fn();
+const applyGroupRoles = vi.fn();
 vi.mock("@/lib/oidc/admin-group", () => ({ applyAdminGroup }));
+vi.mock("@/lib/oidc/group-roles", () => ({ applyGroupRoles }));
 vi.mock("@/lib/projectAudit", () => ({ logProjectAudit: vi.fn() }));
 vi.mock("@/models/grant", () => ({ Grant: { findOneAndUpdate: vi.fn() } }));
 vi.mock("@/models/identity", () => ({ Identity: { create: identityCreate, deleteMany: identityDeleteMany } }));
@@ -108,9 +110,22 @@ describe("completing an acceptance through a sign-in provider", () => {
     expect(createSession).toHaveBeenCalled();
   });
 
+  it("lets each board's group mapping read the groups too, knowing whether the claim was there (BP-862)", async () => {
+    await completeAcceptance(
+      scopedToDefaultOrganisation(),
+      INVITATION as never,
+      { username: "ada", fullName: "Ada", passwordHash: null, identity: IDENTITY, providerProvesAddress: true, groups: ["staff"], groupsKnown: true, terms: {} },
+      new Request("http://x"),
+      null
+    );
+
+    expect(applyGroupRoles).toHaveBeenCalledWith(scopedToDefaultOrganisation(), expect.objectContaining({ _id: "u-new" }), "oidc", ["staff"], true);
+  });
+
   it("asks no group anything for a password acceptance", async () => {
     await accept();
 
+    expect(applyGroupRoles).not.toHaveBeenCalled();
     expect(applyAdminGroup).not.toHaveBeenCalled();
   });
 

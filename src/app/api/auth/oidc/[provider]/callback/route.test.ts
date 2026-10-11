@@ -6,6 +6,7 @@ const holdForAcceptance = vi.fn();
 const holdForSignUp = vi.fn();
 const signUpOpenTo = vi.fn();
 const applyAdminGroup = vi.fn();
+const applyGroupRoles = vi.fn();
 const identityFindOne = vi.fn();
 const identityCreate = vi.fn();
 const identityUpdateOne = vi.fn();
@@ -59,6 +60,7 @@ vi.mock("@/lib/oidc/flow", () => ({
 }));
 vi.mock("@/lib/sign-up-domains", () => ({ signUpOpenTo }));
 vi.mock("@/lib/oidc/admin-group", () => ({ applyAdminGroup }));
+vi.mock("@/lib/oidc/group-roles", () => ({ applyGroupRoles }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/lib/security-mail", () => ({ notifyIdentityLinked }));
 vi.mock("@/models/identity", () => ({
@@ -415,6 +417,18 @@ describe("GET /api/auth/oidc/:provider/callback, the admin group (BP-833)", () =
     await callback();
 
     expect(applyAdminGroup).toHaveBeenCalledWith(scopedToDefaultOrganisation(), ADA, "oidc", ["admins"]);
+    expect(createSession).toHaveBeenCalled();
+  });
+
+  // BP-862
+  it("hands them to each board's group mapping too, with whether the token carried the claim, before the session is made", async () => {
+    finishes("signin", { groups: ["staff"], groupsKnown: true });
+    identityFindOne.mockReturnValue(lean({ _id: "i1", user: "u1" }));
+    applyGroupRoles.mockImplementationOnce(async () => expect(createSession).not.toHaveBeenCalled());
+
+    await callback();
+
+    expect(applyGroupRoles).toHaveBeenCalledWith(scopedToDefaultOrganisation(), ADA, "oidc", ["staff"], true);
     expect(createSession).toHaveBeenCalled();
   });
 });
