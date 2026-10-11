@@ -7,6 +7,7 @@ import {
   FULL_NAME_MAX_LENGTH,
   PROJECT_KEY_MAX_LENGTH,
   TASK_TITLE_MAX_LENGTH,
+  isReservedUsername,
   isValidCriterionText,
   isValidFullName,
   isValidProjectKey,
@@ -292,5 +293,19 @@ describe("suggestProjectKey", () => {
       const key = suggestProjectKey(name);
       if (key) expect(isValidProjectKey(key)).toBe(true);
     }
+  });
+});
+
+describe("reserved usernames", () => {
+  it("reserves the label a deleted account is left under, so nobody can sign up as a deleted person", () => {
+    expect(isReservedUsername("deleted-1a2b3c4d")).toBe(true);
+    expect(isReservedUsername("deleted-1a2b3c4")).toBe(false);
+    expect(isReservedUsername("deleted-user")).toBe(false);
+  });
+
+  it("still reserves the PM and the machines, and no ordinary name", () => {
+    expect(isReservedUsername("pm")).toBe(true);
+    expect(isReservedUsername(`worker-${"a".repeat(24)}`)).toBe(true);
+    expect(isReservedUsername("olga")).toBe(false);
   });
 });

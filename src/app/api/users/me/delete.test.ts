@@ -51,7 +51,7 @@ vi.mock("@/models/user", () => ({
 }));
 
 const { DELETE } = await import("./route");
-const { resetRateLimits } = await import("@/lib/rate-limit");
+const { resetRateLimits, EXCLUSIVE_SOURCE_ATTEMPTS } = await import("@/lib/rate-limit");
 
 const ME = { _id: "u1", username: "jan", role: "member", kind: "human", sessionId: "s1", viaMachineCredential: false };
 
@@ -175,5 +175,79 @@ describe("DELETE /api/users/me — a person deletes their own account", () => {
     await DELETE(request({ currentPassword: "correct horse" }), context);
 
     expect(eraseAccountTraces.mock.invocationCallOrder[0]).toBeLessThan(userFindByIdAndDelete.mock.invocationCallOrder[0]);
+  });
+
+  it("treats an account with a password as having none while password sign-in is off", async () => {
+    process.env.PASSWORD_SIGN_IN = "off";
+    signedInRecently.mockResolvedValue(false);
+
+    expect((await DELETE(request({ currentPassword: "correct horse" }), context)).status).toBe(403);
+    expect(compare).not.toHaveBeenCalled();
+    expect(userFindByIdAndDelete).not.toHaveBeenCalled();
+
+    signedInRecently.mockResolvedValue(true);
+    expect((await DELETE(request({}), context)).status).toBe(200);
+  });
+
+  it("locks out guessing: after enough wrong passwords even the right one is refused", async () => {
+    compare.mockResolvedValue(false);
+    for (let attempt = 0; attempt < EXCLUSIVE_SOURCE_ATTEMPTS; attempt++) {
+      await DELETE(request({ currentPassword: "wrong" }), context);
+    }
+    compare.mockResolvedValue(true);
+
+    const res = await DELETE(request({ currentPassword: "correct horse" }), context);
+
+    expect(res.status).toBe(429);
+    expect(userFindByIdAndDelete).not.toHaveBeenCalled();
+  });
+
+  it("forgets earlier wrong guesses once the right password is given", async () => {
+    compare.mockResolvedValueOnce(false);
+    await DELETE(request({ currentPassword: "wrong" }), context);
+
+    expect((await DELETE(request({ currentPassword: "correct horse" }), context)).status).toBe(200);
+  });
+
+  it("answers 404 when the account is already gone", async () => {
+    userFindById.mockReturnValue(Object.assign(Promise.resolve(null), { select: () => Promise.resolve(null) }));
+
+    expect((await DELETE(request({ currentPassword: "correct horse" }), context)).status).toBe(404);
+    expect(userFindByIdAndDelete).not.toHaveBeenCalled();
+  });
+
+  it("gives back its deactivation mark when a board would be left ownerless by a racing change", async () => {
+    boardsLeftWithoutOwner.mockResolvedValueOnce(["p1"]);
+
+    const res = await DELETE(request({ currentPassword: "correct horse" }), context);
+
+    expect(res.status).toBe(409);
+    const marked = userUpdateOne.mock.calls[0][1].$set.deactivatedAt;
+    expect(userUpdateOne).toHaveBeenLastCalledWith(
+      expect.objectContaining({ deactivatedAt: marked }),
+      { $set: { deactivatedAt: null } }
+    );
+    expect(userFindByIdAndDelete).not.toHaveBeenCalled();
+    expect(eraseAccountTraces).not.toHaveBeenCalled();
+  });
+
+  it("is not stranded by a failed erasure: the mark is given back, nothing is deleted or revoked", async () => {
+    eraseAccountTraces.mockRejectedValueOnce(new Error("mongo is away"));
+
+    await expect(DELETE(request({ currentPassword: "correct horse" }), context)).rejects.toThrow("mongo is away");
+
+    const marked = userUpdateOne.mock.calls[0][1].$set.deactivatedAt;
+    expect(userUpdateOne).toHaveBeenLastCalledWith(
+      expect.objectContaining({ deactivatedAt: marked }),
+      { $set: { deactivatedAt: null } }
+    );
+    expect(userFindByIdAndDelete).not.toHaveBeenCalled();
+    expect(revokeUserCredentials).not.toHaveBeenCalled();
+  });
+
+  it("ends the credentials only after the account is gone, so a failure never unlinks a way in", async () => {
+    await DELETE(request({ currentPassword: "correct horse" }), context);
+
+    expect(revokeUserCredentials.mock.invocationCallOrder[0]).toBeGreaterThan(userFindByIdAndDelete.mock.invocationCallOrder[0]);
   });
 });

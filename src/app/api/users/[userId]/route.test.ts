@@ -682,13 +682,20 @@ describe("DELETE /api/users/:id", () => {
     expect(eraseAccountTraces.mock.invocationCallOrder[0]).toBeLessThan(userFindOneAndDelete.mock.invocationCallOrder[0]);
   });
 
-  it("keeps the account, deactivated, when erasing its traces fails", async () => {
+  it("gives back its own deactivation mark, and deletes nothing, when erasing its traces fails", async () => {
     found(person());
     eraseAccountTraces.mockRejectedValueOnce(new Error("mongo is away"));
 
     await expect(DELETE(...del(TARGET_HEX))).rejects.toThrow();
 
+    const marked = userUpdateOne.mock.calls[0][1].$set.deactivatedAt;
+    expect(userUpdateOne).toHaveBeenLastCalledWith(
+      { _id: TARGET_HEX, deactivatedAt: marked, organisation: DEFAULT_ORGANISATION_ID },
+      { $set: { deactivatedAt: null } }
+    );
+    expect(userUpdateOne.mock.invocationCallOrder[0]).toBeLessThan(eraseAccountTraces.mock.invocationCallOrder[0]);
     expect(userFindOneAndDelete).not.toHaveBeenCalled();
+    expect(revokeUserCredentials).not.toHaveBeenCalled();
     expect(logInstanceAudit).not.toHaveBeenCalled();
   });
 

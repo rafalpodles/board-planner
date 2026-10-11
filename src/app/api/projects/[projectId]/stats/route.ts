@@ -124,7 +124,7 @@ export const GET = withProjectAccess(async (_request, { params, db }) => {
 
   const assigneeBreakdown: Record<string, number> = {};
   for (const [id, count] of assigneeCounts) {
-    const name = id ? nameById.get(id) || "Deleted user" : "Unassigned";
+    const name = id ? nameById.get(id) || "Unknown" : "Unassigned";
     assigneeBreakdown[name] = (assigneeBreakdown[name] || 0) + count;
   }
 

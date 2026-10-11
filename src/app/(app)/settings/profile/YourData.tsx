@@ -87,39 +87,42 @@ export function YourData({ asksPassword }: { asksPassword: boolean }) {
       </Button>
 
       <Modal open={open} onClose={close} closeDisabled={deleting} title="Delete your account?">
-        <p className="text-sm text-text-muted mb-4">
-          You will be signed out and nobody, you included, can get this account back.
-          {asksPassword
-            ? " Enter your password to confirm."
-            : " You need to have signed in within the last 10 minutes."}
-        </p>
-        {asksPassword && (
-          <Input
-            label="Current password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="current-password"
-          />
-        )}
-        {deleteError && (
-          <p role="alert" className="mt-3 text-sm text-danger">
-            {deleteError}
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!deleting && (!asksPassword || password)) void deleteAccount();
+          }}
+        >
+          <p className="text-sm text-text-muted mb-4">
+            You will be signed out and nobody, you included, can get this account back.
+            {asksPassword
+              ? " Enter your password to confirm."
+              : " You need to have signed in within the last 10 minutes."}
           </p>
-        )}
-        <div className="mt-6 flex justify-end gap-3">
-          <Button variant="secondary" size="sm" onClick={close} disabled={deleting}>
-            Cancel
-          </Button>
-          <Button
-            variant="danger"
-            size="sm"
-            onClick={() => void deleteAccount()}
-            disabled={deleting || (asksPassword && !password)}
-          >
-            {deleting ? "Deleting…" : "Delete my account"}
-          </Button>
-        </div>
+          {asksPassword && (
+            <Input
+              label="Current password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+              autoFocus
+            />
+          )}
+          {deleteError && (
+            <p role="alert" className="mt-3 text-sm text-danger">
+              {deleteError}
+            </p>
+          )}
+          <div className="mt-6 flex justify-end gap-3">
+            <Button type="button" variant="secondary" size="sm" onClick={close} disabled={deleting}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="danger" size="sm" disabled={deleting || (asksPassword && !password)}>
+              {deleting ? "Deleting…" : "Delete my account"}
+            </Button>
+          </div>
+        </form>
       </Modal>
     </section>
   );

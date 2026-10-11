@@ -39,6 +39,18 @@ describe("ActivityTimeline", () => {
     await waitFor(() => expect(screen.getByText(/Deleted user created this task/)).toBeTruthy());
   });
 
+  // History stores the assignee as a username, and a deleted account's is rewritten to an identifier
+  it("reads a deleted assignee as a deleted user, not as the identifier it was rewritten to", async () => {
+    api.get.mockResolvedValue([
+      { ...log, action: "updated", field: "assignee", oldValue: "deleted-1a2b3c4d", newValue: "bob" },
+      { ...log, _id: "l2", action: "updated", field: "assignee", oldValue: "", newValue: "deleted-1a2b3c4d" },
+    ]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    await waitFor(() => expect(screen.getByText(/changed assignee from a deleted user to bob/)).toBeTruthy());
+    expect(screen.getByText(/changed assignee from unassigned to a deleted user/)).toBeTruthy();
+    expect(screen.queryByText(/deleted-1a2b3c4d/)).toBeNull();
+  });
+
   // "updated Difficulty" is not history — a reader wants to know what it became
   it("says what a field changed from and to", async () => {
     api.get.mockResolvedValue([

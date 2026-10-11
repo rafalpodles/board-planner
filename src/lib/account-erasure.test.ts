@@ -1,46 +1,16 @@
 import { describe, it, expect, vi } from "vitest";
+import { memoryDb } from "./memory-db-test-store";
 
+const removeUploads = vi.fn(async (_ids: string[]) => {});
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+vi.mock("@/lib/upload-ownership", () => ({ organisationUploads: () => ({ remove: removeUploads }) }));
 
 const { eraseAccountTraces, erasedLabel, scrubNames } = await import("./account-erasure");
 
-const USER = { _id: "6a9d0f0b5d781bded2cb975a", username: "jan", email: "jan@example.com", fullName: "Jan Kowalski" };
-const LABEL = erasedLabel(USER._id);
-
-type Rows = Record<string, unknown>[];
-
-function fakeDb(seed: Partial<Record<"InstanceAuditLog" | "ProjectAuditLog" | "Worker" | "User", Rows>> = {}) {
-  const calls: { model: string; op: string; args: unknown[] }[] = [];
-  const record = (model: string, op: string) => async (...args: unknown[]) => {
-    calls.push({ model, op, args });
-    return { deletedCount: 0, modifiedCount: 0 };
-  };
-  const reader = (model: string) => (...args: unknown[]) => {
-    calls.push({ model, op: "find", args });
-    const chain = { select: () => chain, sort: () => chain, lean: async () => seed[model as keyof typeof seed] ?? [] };
-    return chain;
-  };
-  const model = (name: string) => ({
-    find: reader(name),
-    findById: (...args: unknown[]) => {
-      calls.push({ model: name, op: "findById", args });
-      const found = (seed[name as keyof typeof seed] ?? [])[0];
-      return { select: async () => found };
-    },
-    deleteMany: record(name, "deleteMany"),
-    updateMany: record(name, "updateMany"),
-    updateOne: record(name, "updateOne"),
-  });
-  const models = new Map<string, ReturnType<typeof model>>();
-  const db = new Proxy({} as Record<string, unknown>, {
-    get: (_t, name: string) => {
-      if (!models.has(name)) models.set(name, model(name));
-      return models.get(name);
-    },
-  });
-  const of = (modelName: string, op: string) => calls.filter((c) => c.model === modelName && c.op === op);
-  return { db: db as never, calls, of };
-}
+const JAN = "6a9d0f0b5d781bded2cb975a";
+const OLA = "6a9d0f0b5d781bded2cb975b";
+const USER = { _id: JAN, username: "jan", email: "jan@example.com" };
+const LABEL = erasedLabel(JAN);
 
 describe("scrubNames", () => {
   it("replaces a username wherever it stands as a word, in any case, mentions included", () => {
@@ -53,82 +23,190 @@ describe("scrubNames", () => {
     expect(scrubNames("janusz, jan-pawel and ex_jan and jan2", ["jan"], LABEL)).toBe("janusz, jan-pawel and ex_jan and jan2");
   });
 
-  it("replaces an e-mail address whole, dots and plus signs included", () => {
-    expect(scrubNames("jan+x@example.com → b@example.com", ["jan+x@example.com"], LABEL)).toBe(`${LABEL} → b@example.com`);
+  it("replaces an e-mail address whole, dots and plus signs included, and not a neighbour's", () => {
+    expect(scrubNames("jan+x@example.com → jan.k@example.com", ["jan+x@example.com", "jan"], LABEL)).toBe(
+      `${LABEL} → jan.k@example.com`
+    );
+  });
+});
+
+describe("the label a deleted account is left under", () => {
+  it("is opaque, stable for the same account and different for another", () => {
+    expect(LABEL).toMatch(/^deleted-[0-9a-f]{8}$/);
+    expect(LABEL).not.toContain("jan");
+    expect(erasedLabel(JAN)).toBe(LABEL);
+    expect(erasedLabel(OLA)).not.toBe(LABEL);
   });
 });
 
 describe("erasing the traces of a deleted account", () => {
-  it("returns a label that is opaque yet stable for the same account", async () => {
-    const { db } = fakeDb();
-    expect(await eraseAccountTraces(db, USER)).toBe(LABEL);
-    expect(LABEL).toMatch(/^deleted-[0-9a-f]{8}$/);
-    expect(LABEL).not.toContain(USER.username);
+  it("returns the label", async () => {
+    expect(await eraseAccountTraces(memoryDb().db, USER)).toBe(LABEL);
   });
 
-  it("deletes the notifications the person received or caused, their PM conversations and consents", async () => {
-    const { db, of } = fakeDb();
-    await eraseAccountTraces(db, USER);
-
-    expect(of("Notification", "deleteMany")[0].args[0]).toEqual({ $or: [{ recipient: USER._id }, { actor: USER._id }] });
-    expect(of("PmMessage", "deleteMany")[0].args[0]).toEqual({ triggeredBy: USER._id });
-    expect(of("OAuthConsent", "deleteMany")[0].args[0]).toEqual({ user: USER._id });
-  });
-
-  it("deletes invitations the person accepted or that were sent to their address", async () => {
-    const { db, of } = fakeDb();
-    await eraseAccountTraces(db, USER);
-    expect(of("Invitation", "deleteMany")[0].args[0]).toEqual({ $or: [{ acceptedBy: USER._id }, { email: USER.email }] });
-  });
-
-  it("rewrites the username the history keeps as the assignee, on both sides of a change", async () => {
-    const { db, of } = fakeDb();
-    await eraseAccountTraces(db, USER);
-
-    const writes = of("ActivityLog", "updateMany").map((c) => c.args);
-    expect(writes).toContainEqual([{ field: "assignee", oldValue: "jan" }, { $set: { oldValue: LABEL } }]);
-    expect(writes).toContainEqual([{ field: "assignee", newValue: "jan" }, { $set: { newValue: LABEL } }]);
-  });
-
-  it("rewrites audit rows that name the person, in the actor, the target and the detail, and nothing else", async () => {
-    const { db, of } = fakeDb({
-      InstanceAuditLog: [
-        { _id: "a1", actorUsername: "jan", target: "jan", detail: "jan@example.com → jan.k@example.com" },
-        { _id: "a2", actorUsername: "ola", target: "jan", detail: "a member" },
-        { _id: "a3", actorUsername: "ola", target: "ola", detail: "nothing here" },
+  it("deletes the notifications the person received or caused, and only those", async () => {
+    const { db, rows } = memoryDb({
+      Notification: [
+        { _id: "n1", recipient: JAN, actor: OLA },
+        { _id: "n2", recipient: OLA, actor: JAN },
+        { _id: "n3", recipient: OLA, actor: OLA },
       ],
     });
     await eraseAccountTraces(db, USER);
-
-    const updates = of("InstanceAuditLog", "updateOne").map((c) => c.args);
-    expect(updates).toContainEqual([
-      { _id: "a1" },
-      { $set: { actorUsername: LABEL, target: LABEL, detail: `${LABEL} → jan.k@example.com` } },
-    ]);
-    expect(updates).toContainEqual([{ _id: "a2" }, { $set: { target: LABEL } }]);
-    expect(updates.find(([filter]) => (filter as { _id: string })._id === "a3")).toBeUndefined();
+    expect(rows("Notification").map((n) => n._id)).toEqual(["n3"]);
   });
 
-  it("rewrites a board's log where the detail or a line names the person", async () => {
-    const { db, of } = fakeDb({
-      ProjectAuditLog: [{ _id: "p1", detail: "jan was made owner", lines: ["role: member → owner (jan)", "unrelated"] }],
+  it("deletes the person's PM conversations and the files attached to them, nobody else's", async () => {
+    removeUploads.mockClear();
+    const { db, rows } = memoryDb({
+      PmMessage: [
+        { _id: "m1", triggeredBy: JAN, attachments: [{ fileId: "f1" }, { fileId: "f2" }] },
+        { _id: "m2", triggeredBy: JAN, attachments: [] },
+        { _id: "m3", triggeredBy: OLA, attachments: [{ fileId: "f3" }] },
+      ],
     });
     await eraseAccountTraces(db, USER);
+    expect(rows("PmMessage").map((m) => m._id)).toEqual(["m3"]);
+    expect(removeUploads).toHaveBeenCalledWith(["f1", "f2"]);
+  });
 
-    expect(of("ProjectAuditLog", "updateOne")[0].args).toEqual([
-      { _id: "p1" },
-      { $set: { detail: `${LABEL} was made owner`, lines: [`role: member → owner (${LABEL})`, "unrelated"] } },
+  it("deletes consents and the invitations the person accepted or that were sent to their address", async () => {
+    const { db, rows } = memoryDb({
+      OAuthConsent: [{ _id: "c1", user: JAN }, { _id: "c2", user: OLA }],
+      Invitation: [
+        { _id: "i1", acceptedBy: JAN, email: "x@example.com" },
+        { _id: "i2", acceptedBy: null, email: "jan@example.com" },
+        { _id: "i3", acceptedBy: OLA, email: "ola@example.com" },
+      ],
+    });
+    await eraseAccountTraces(db, USER);
+    expect(rows("OAuthConsent").map((c) => c._id)).toEqual(["c2"]);
+    expect(rows("Invitation").map((i) => i._id)).toEqual(["i3"]);
+  });
+
+  it("leaves no task pointing at the person, quietly, and keeps everybody else's", async () => {
+    const { db, rows, calls } = memoryDb({
+      Task: [
+        { _id: "t1", assignee: JAN, assignedBy: OLA, pmAssignedFor: null, watchers: [JAN, OLA] },
+        { _id: "t2", assignee: OLA, assignedBy: JAN, pmAssignedFor: JAN, watchers: [OLA] },
+      ],
+    });
+    await eraseAccountTraces(db, USER);
+    expect(rows("Task")).toEqual([
+      { _id: "t1", assignee: null, assignedBy: OLA, pmAssignedFor: null, watchers: [OLA] },
+      { _id: "t2", assignee: OLA, assignedBy: null, pmAssignedFor: null, watchers: [OLA] },
+    ]);
+    // An edit time that moved would show a task as changed by a person who left
+    expect(calls.filter((c) => c.model === "Task" && c.op === "updateMany").every((c) => (c.options as { timestamps: boolean }).timestamps === false)).toBe(true);
+  });
+
+  it("rewrites the username history keeps as the assignee, on both sides of a change", async () => {
+    const { db, rows } = memoryDb({
+      ActivityLog: [
+        { _id: "a1", field: "assignee", oldValue: "", newValue: "jan" },
+        { _id: "a2", field: "assignee", oldValue: "jan", newValue: "ola" },
+        { _id: "a3", field: "assignee", oldValue: "ola", newValue: "" },
+        { _id: "a4", field: "title", oldValue: "jan", newValue: "Jan's task" },
+      ],
+    });
+    await eraseAccountTraces(db, USER);
+    expect(rows("ActivityLog").map((r) => [r.oldValue, r.newValue])).toEqual([
+      ["", LABEL],
+      [LABEL, "ola"],
+      ["ola", ""],
+      ["jan", "Jan's task"],
     ]);
   });
 
-  it("releases the person's machines and takes their name off the machine's own", async () => {
-    const { db, of } = fakeDb({
-      Worker: [{ _id: "w1", name: "MacBook", identity: "m1" }],
-      User: [{ _id: "m1", fullName: "Jan Kowalski · MacBook" }],
+  describe("the instance log", () => {
+    const seed = () =>
+      memoryDb({
+        InstanceAuditLog: [
+          { _id: "a1", user: JAN, action: "user_email_changed_self", actorUsername: "jan", target: "jan", detail: "old@example.com → jan@example.com" },
+          { _id: "a2", user: JAN, action: "user_full_name_changed_self", actorUsername: "jan", target: "jan", detail: "Jan K → Jan Kowalski" },
+          { _id: "a3", user: OLA, action: "user_role_changed", actorUsername: "ola", target: "jan", detail: "member → admin" },
+          { _id: "a4", user: JAN, action: "invitation_sent", actorUsername: "jan", target: "bob@example.com", detail: "by jan, as a link" },
+          { _id: "a5", user: OLA, action: "user_role_changed", actorUsername: "ola", target: "bob", detail: "member → admin" },
+          { _id: "a6", user: OLA, action: "user_password_set", actorUsername: "ola", target: "admin", detail: "admin asked for it" },
+        ],
+      });
+
+    it("names the person by the label wherever they are the actor or the target", async () => {
+      const { db, rows } = seed();
+      await eraseAccountTraces(db, USER);
+      const byId = Object.fromEntries(rows("InstanceAuditLog").map((r) => [String(r._id), r]));
+      expect(byId.a3).toMatchObject({ actorUsername: "ola", target: LABEL, detail: "member → admin" });
+      expect(byId.a4).toMatchObject({ actorUsername: LABEL, target: "bob@example.com", detail: `by ${LABEL}, as a link` });
+    });
+
+    it("drops the old address and name an account's own change rows carry, not only the current one", async () => {
+      const { db, rows } = seed();
+      await eraseAccountTraces(db, USER);
+      const byId = Object.fromEntries(rows("InstanceAuditLog").map((r) => [String(r._id), r]));
+      expect(byId.a1).toMatchObject({ actorUsername: LABEL, target: LABEL, detail: LABEL });
+      expect(byId.a2).toMatchObject({ actorUsername: LABEL, target: LABEL, detail: LABEL });
+      expect(JSON.stringify(rows("InstanceAuditLog"))).not.toMatch(/old@example\.com|Jan K/);
+    });
+
+    it("leaves other people's rows alone, whatever words they share with the person's name", async () => {
+      const { db, rows, calls } = seed();
+      await eraseAccountTraces(db, { _id: JAN, username: "admin", email: "jan@example.com" });
+      const byId = Object.fromEntries(rows("InstanceAuditLog").map((r) => [String(r._id), r]));
+      expect(byId.a5).toMatchObject({ target: "bob", detail: "member → admin" });
+      expect(calls.some((c) => c.model === "InstanceAuditLog" && c.op === "updateOne" && (c.filter as { _id: string })._id === "a5")).toBe(false);
+    });
+  });
+
+  describe("a board's access log", () => {
+    const seed = () =>
+      memoryDb({
+        ProjectAuditLog: [
+          { _id: "p1", action: "member_added", detail: "jan: no access → member" },
+          { _id: "p2", action: "member_role_changed", detail: "bob: viewer → editor" },
+          { _id: "p3", action: "member_invited", detail: "jan@example.com: invited as member" },
+          { _id: "p4", action: "settings_updated", detail: "jan: not a person here" },
+        ],
+      });
+
+    it("rewrites who a grant was about, and nothing else on the line", async () => {
+      const { db, rows } = seed();
+      await eraseAccountTraces(db, USER);
+      expect(rows("ProjectAuditLog").map((r) => r.detail)).toEqual([
+        `${LABEL}: no access → member`,
+        "bob: viewer → editor",
+        `${LABEL}: invited as member`,
+        "jan: not a person here",
+      ]);
+    });
+
+    it("does not take a role for a person: an account called viewer leaves other people's lines alone", async () => {
+      const { db, rows } = seed();
+      await eraseAccountTraces(db, { _id: JAN, username: "viewer", email: "" });
+      expect(rows("ProjectAuditLog").map((r) => r.detail)).toEqual([
+        "jan: no access → member",
+        "bob: viewer → editor",
+        "jan@example.com: invited as member",
+        "jan: not a person here",
+      ]);
+    });
+  });
+
+  it("releases the person's machines only: disabled, ownerless, with a credential nobody holds and no name of theirs", async () => {
+    const { db, rows } = memoryDb({
+      Worker: [
+        { _id: "w1", owner: JAN, name: "MacBook", identity: "m1", enabled: true, credentialHash: "held" },
+        { _id: "w2", owner: OLA, name: "Studio", identity: "m2", enabled: true, credentialHash: "held" },
+      ],
+      User: [
+        { _id: "m1", fullName: "Jan Kowalski · MacBook" },
+        { _id: "m2", fullName: "Ola Nowak · Studio" },
+      ],
     });
     await eraseAccountTraces(db, USER);
-
-    expect(of("Worker", "updateOne")[0].args).toEqual([{ _id: "w1" }, { $set: { owner: null, enabled: false } }]);
-    expect(of("User", "updateOne")[0].args).toEqual([{ _id: "m1" }, { $set: { fullName: "MacBook" } }]);
+    const [mine, theirs] = rows("Worker");
+    expect(mine).toMatchObject({ owner: null, enabled: false });
+    expect(mine.credentialHash).not.toBe("held");
+    expect(theirs).toMatchObject({ owner: OLA, enabled: true, credentialHash: "held" });
+    expect(rows("User").map((u) => u.fullName)).toEqual(["MacBook", "Ola Nowak · Studio"]);
   });
 });
