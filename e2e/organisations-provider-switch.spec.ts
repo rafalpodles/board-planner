@@ -101,10 +101,10 @@ test.describe("BP-1027: switching GitHub off for an organisation", () => {
     // A browser that was already on its way back from GitHub is sent to the page that says why
     await visitor.goto(`${originOf(ACME)}/api/auth/oidc/github/callback?code=c&state=s`);
     await expect(visitor).toHaveURL(`${originOf(ACME)}/login?sso=provider_off`);
-    await expect(visitor.getByRole("alert")).toContainText("Signing in with that provider is turned off for this organisation.");
+    await expect(visitor.getByText("Signing in with that provider is turned off for this organisation.")).toBeVisible();
 
     // What is open stays open, and the other organisation is not touched
-    expect(await page.evaluate(async () => (await fetch("/api/users/me")).status)).toBe(200);
+    expect(await page.evaluate(async () => (await fetch("/api/auth/me")).status)).toBe(200);
     await openLogin(visitor, GLOBEX);
     await expect(visitor.getByRole("button", { name: "Continue with GitHub" })).toBeVisible();
 
@@ -144,6 +144,7 @@ test.describe("BP-1027: switching GitHub off for an organisation", () => {
 
     // Confirmed: it goes, and the member's link is still stored for the day it comes back
     await clickGitHub(page);
+    await expect(page.getByRole("dialog")).toContainText("1 member signs in only through GitHub");
     const off = switchSaved(page);
     await page.getByRole("dialog").getByRole("button", { name: "Turn off" }).click();
     expect((await off).status()).toBe(200);
