@@ -270,7 +270,7 @@ describe("who is in the audience at all", () => {
     expect(await boardFeedSubscribers(db, PROJECT)).toEqual([]);
   });
 
-  it("selects an instance admin, who reaches the board without a grant row", async () => {
+  it("selects an admin, who reaches the board without a grant row", async () => {
     stored = [
       { ...member(1, { defaults: { task_created: row({ inApp: true }) } }), role: "admin" },
     ];

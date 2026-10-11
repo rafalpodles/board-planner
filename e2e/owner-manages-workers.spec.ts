@@ -83,7 +83,7 @@ async function assignedProjects(request: APIRequestContext): Promise<string[]> {
   return ((await response.json()).assignments as { project: string }[]).map((a) => a.project);
 }
 
-test("a project owner who is not an instance admin switches workers on and sets the base branch", async ({
+test("a project owner who is not an admin switches workers on and sets the base branch", async ({
   page,
 }) => {
   await signIn(page, "owner");
@@ -117,7 +117,7 @@ test("a member is shown no Workers section, and the API refuses them 403", async
   expect((await storedWorker()).enabled).toBe(false);
 });
 
-test("an instance admin's lock wins over the owner, on the screen, on the API and on the machine", async ({
+test("an admin's lock wins over the owner, on the screen, on the API and on the machine", async ({
   page,
   browser,
   request,
@@ -140,7 +140,7 @@ test("an instance admin's lock wins over the owner, on the screen, on the API an
   await signIn(ownerPage, "owner");
   await openWorkers(ownerPage);
   await expect(ownerPage.getByTestId("workers-locked")).toContainText(
-    "An instance admin has locked workers off."
+    "An admin has locked workers off."
   );
   await expect(lockSwitch(ownerPage)).toHaveCount(0);
 
@@ -155,7 +155,7 @@ test("an instance admin's lock wins over the owner, on the screen, on the API an
   const refused = await putWorker(ownerContext.request, { enabled: true });
   expect(refused.status()).toBe(403);
   expect((await refused.json()).error).toBe(
-    "An instance admin has locked workers off for this project"
+    "An admin has locked workers off for this project"
   );
   const unlock = await putWorker(ownerContext.request, { lockedByInstance: false });
   expect(unlock.status()).toBe(403);

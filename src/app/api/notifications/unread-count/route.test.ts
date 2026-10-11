@@ -61,7 +61,7 @@ describe("GET /api/notifications/unread-count", () => {
     expect(countDocuments).not.toHaveBeenCalled();
   });
 
-  it("leaves an instance admin's count unconstrained", async () => {
+  it("leaves an admin's count unconstrained", async () => {
     getAuthUser.mockImplementation(async () => ({ _id: READER, role: "admin" }));
 
     await GET(request(), noParams);

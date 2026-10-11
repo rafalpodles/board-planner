@@ -57,7 +57,7 @@ export default function FleetRunsPage() {
       <div className="mb-6">
         <h2 className="text-lg font-semibold mb-1">Run history</h2>
         <p className="text-sm text-text-muted">
-          Every run that has finished on this instance, newest first, with what it said on the way
+          Every run that has finished in this organisation, newest first, with what it said on the way
           out. A project&apos;s own recent runs are on that project, under Workers.
         </p>
         <Link href="/settings/workers" className="mt-2 inline-block text-sm text-text-muted underline">

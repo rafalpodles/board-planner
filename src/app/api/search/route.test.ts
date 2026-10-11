@@ -101,7 +101,7 @@ describe("GET /api/search", () => {
     expect(lastQuery.filter).toMatchObject({ project: "p1", taskNumber: 10, archivedAt: null });
   });
 
-  it("leaves an instance admin unfiltered", async () => {
+  it("leaves an admin unfiltered", async () => {
     getAuthUser.mockResolvedValue(ADMIN);
 
     await search("zeppelin");

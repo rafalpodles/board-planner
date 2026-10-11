@@ -529,7 +529,7 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
 
         {!decision.canDecide && LIVE.includes(state) && (
           <p className="text-xs text-text-muted" data-testid="decision-not-yours">
-            Only {decision.workerName || FALLBACK_MACHINE}&apos;s owner, or an instance admin, can
+            Only {decision.workerName || FALLBACK_MACHINE}&apos;s owner, or an admin, can
             answer this.
           </p>
         )}

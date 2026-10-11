@@ -54,7 +54,7 @@ export function SettingsCard({
       >
         <h3 className={`text-[15px] font-semibold ${danger ? "text-danger" : ""}`}>{title}</h3>
         {instanceScoped && (
-          <Chip className="text-text-muted border-border bg-bg-input">Instance admin</Chip>
+          <Chip className="text-text-muted border-border bg-bg-input">Admin</Chip>
         )}
         {status && <StatusPill label={status.label} on={status.on} />}
         <span className="flex-1" />

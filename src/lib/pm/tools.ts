@@ -211,7 +211,7 @@ function whyThisGap(gap: ReadinessGap, columns: AnyColumn[]): string {
     case "runs-off":
       return "this project is not enabled for workers, so nothing will run it";
     case "runs-locked":
-      return "an instance admin has locked workers off for this project, so nothing will run it";
+      return "an admin has locked workers off for this project, so nothing will run it";
     case "missing-columns":
       return `the board has no ${missingRolesText(columns)} column, so no machine can claim from it`;
     default:

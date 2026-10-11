@@ -124,7 +124,7 @@ export default function AdminAgentsPage() {
     <div className="w-full max-w-5xl mx-auto">
       <h2 className="text-lg font-semibold mb-1">PM agents</h2>
       <p className="text-sm text-text-muted mb-6">
-        Every project on this instance. Only an instance admin can change what is on this page.
+        Every project in this organisation. Only an admin can change what is on this page.
       </p>
 
       {!data.pmAvailable && (

@@ -37,7 +37,7 @@ async function answer(request: APIRequestContext, path: string, headers: Record<
 }
 
 // BP-664: another organisation's project is not there, whoever asks and however they name it
-test("an instance admin gets for another organisation's project exactly what a project that does not exist gets", async ({ request }) => {
+test("an admin gets for another organisation's project exactly what a project that does not exist gets", async ({ request }) => {
   for (const suffix of ["", "/tasks", "/sprints"]) {
     const foreign = await answer(request, `/api/projects/${FOREIGN}${suffix}`, ADMIN_AUTH);
     const missing = await answer(request, `/api/projects/${NOWHERE}${suffix}`, ADMIN_AUTH);

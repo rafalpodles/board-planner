@@ -269,7 +269,7 @@ describe("saving the machine's projects", () => {
     expect(screen.queryByText(/ticking it turns that on/)).toBeNull();
   });
 
-  it("says a project is locked by an instance admin rather than that the reader cannot switch it", async () => {
+  it("says a project is locked by an admin rather than that the reader cannot switch it", async () => {
     api.get.mockResolvedValue({
       ...VIEW,
       catalogue: [
@@ -286,7 +286,7 @@ describe("saving the machine's projects", () => {
     api.put.mockResolvedValueOnce({ leftDisabled: ["BP"] });
     render(<MachineProjectsPage />);
 
-    expect(await screen.findByText("an instance admin has locked machines off for this project")).toBeTruthy();
+    expect(await screen.findByText("an admin has locked machines off for this project")).toBeTruthy();
     await act(async () => {
       (screen.getByRole("checkbox") as HTMLInputElement).click();
     });
@@ -296,7 +296,7 @@ describe("saving the machine's projects", () => {
 
     expect(
       await screen.findByText(
-        "Saved. BP is locked off by an instance admin — the machine will leave it alone until somebody does."
+        "Saved. BP is locked off by an admin — the machine will leave it alone until somebody does."
       )
     ).toBeTruthy();
   });
@@ -414,7 +414,7 @@ describe("the way back from a machine's projects", () => {
     expect(back.getAttribute("href")).toBe("/settings/machines");
   });
 
-  it("leads an instance admin back to the fleet console", async () => {
+  it("leads an admin back to the fleet console", async () => {
     auth.isAdmin = true;
     render(<MachineProjectsPage />);
 

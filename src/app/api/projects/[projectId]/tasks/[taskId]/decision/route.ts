@@ -111,7 +111,7 @@ export const POST = withProjectAccess(async (request, { params, user, db }) => {
     return NextResponse.json(
       {
         error:
-          "only the machine holding this work — its owner — or an instance admin can answer a refused change",
+          "only the machine holding this work — its owner — or an admin can answer a refused change",
       },
       { status: 403 }
     );

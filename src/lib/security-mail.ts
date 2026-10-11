@@ -72,7 +72,7 @@ export async function notifyPasswordChanged(n: PasswordChangedNotice): Promise<v
           tone: "warning",
           lines: [
             "If this wasn't you, whoever did it can sign in as you right now.",
-            "Ask an instance administrator to set a password on the account — that is the only step that locks them out.",
+            "Ask an administrator to set a password on the account — that is the only step that locks them out.",
           ],
         },
     rows: [
@@ -114,7 +114,7 @@ export async function notifyAddressChanged(n: AddressChangedNotice): Promise<voi
       tone: "warning",
       lines: [
         "If this wasn't you, whoever made the change can now request a reset link to their own inbox.",
-        "Ask an instance administrator to set a password on the account — that is the only step that locks them out.",
+        "Ask an administrator to set a password on the account — that is the only step that locks them out.",
       ],
     },
     rows: [

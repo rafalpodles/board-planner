@@ -305,7 +305,7 @@ export function GeneralSection({
 
       <SettingsCard
         title="Who can use this board"
-        description="Owners can change everything on this page. Members work on tasks and sprints. Instance admins always have full access and are listed for reference."
+        description="Owners can change everything on this page. Members work on tasks and sprints. Admins always have full access and are listed for reference."
       >
         {membersRead === "loading" && (
           <p role="status" className="text-sm text-text-muted">
@@ -365,7 +365,7 @@ export function GeneralSection({
                   )}
                 </span>
                 {m.instanceAdmin ? (
-                  <span className="text-sm text-text-muted">Instance admin</span>
+                  <span className="text-sm text-text-muted">Admin</span>
                 ) : (
                   <select
                     value={accessEdits[m._id] ?? m.relation ?? "none"}

@@ -146,7 +146,7 @@ test.afterEach(async () => {
 });
 
 for (const [what, change] of [
-  ["an instance admin locks the project", { lockedByInstance: true }],
+  ["an admin locks the project", { lockedByInstance: true }],
   ["the project switches its workers off", { workerEnabled: false }],
 ] as const) {
   test(`${what} mid-run: the run finishes, reports, and its record is kept once`, async ({
@@ -209,7 +209,7 @@ test("a record for anything but the run this machine ran is refused, finally", a
 
 for (const [what, lock] of [
   ["without a lock", false],
-  ["under an instance admin's lock", true],
+  ["under an admin's lock", true],
 ] as const) {
   test(`holding one run reaches no other task on the board, ${what}`, async ({ request }) => {
     if (lock) await setBoardReadiness({ lockedByInstance: true });

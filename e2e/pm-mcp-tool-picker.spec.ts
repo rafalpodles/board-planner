@@ -309,7 +309,7 @@ test.describe("choosing an MCP server's tools", () => {
   });
 
   // The control: the same board, the same servers, seen by the person who can act on it
-  test("an instance admin is", async ({ page }) => {
+  test("an admin is", async ({ page }) => {
     await connectServers([server("wide", "/wide"), server("narrow", "/narrow")]);
     await signIn(page, "admin");
     await page.goto(SETTINGS_URL);

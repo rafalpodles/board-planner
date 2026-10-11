@@ -49,7 +49,7 @@ beforeEach(() => {
  * a filter quietly dropped here widens the list without any test data noticing.
  */
 describe("GET assignable-users", () => {
-  it("asks only for people this board reaches, plus instance admins", async () => {
+  it("asks only for people this board reaches, plus admins", async () => {
     grantFindLean.mockResolvedValue([{ subject: U1 }]);
 
     await GET(new Request("http://x"), { params });

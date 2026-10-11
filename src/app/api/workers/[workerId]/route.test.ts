@@ -257,7 +257,7 @@ describe("PATCH releases a machine from its owner", () => {
     expect(logInstanceAudit).not.toHaveBeenCalled();
   });
 
-  it("is refused to anyone but an instance admin", async () => {
+  it("is refused to anyone but an admin", async () => {
     getAuthUser.mockResolvedValue(PLAIN_MEMBER);
 
     expect((await PATCH(patchRequest({ owner: null }), ctx())).status).toBe(403);
@@ -266,7 +266,7 @@ describe("PATCH releases a machine from its owner", () => {
 });
 
 describe("PATCH /api/workers/:workerId", () => {
-  it("lets an instance admin rename a machine and switch it off", async () => {
+  it("lets an admin rename a machine and switch it off", async () => {
     getAuthUser.mockResolvedValue(INSTANCE_ADMIN);
 
     const response = await PATCH(patchRequest({ name: "rig", enabled: false }), ctx());

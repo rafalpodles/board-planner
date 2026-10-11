@@ -205,7 +205,7 @@ describe("POST /api/workers/enrolment/device/:userCode/approve", () => {
     });
 
     // Switched off under the lock, so an enable is exactly what the route would otherwise write
-    it("leaves a locked project off, for its owner and for an instance admin alike", async () => {
+    it("leaves a locked project off, for its owner and for an admin alike", async () => {
       projectSelect.mockResolvedValue(
         project({ worker: { enabled: false, lockedByInstance: true } })
       );
@@ -220,7 +220,7 @@ describe("POST /api/workers/enrolment/device/:userCode/approve", () => {
       expect(projectUpdateOne).not.toHaveBeenCalled();
     });
 
-    it("turns it on, and records that, for an instance admin", async () => {
+    it("turns it on, and records that, for an admin", async () => {
       getAuthUser.mockResolvedValue(ADMIN);
 
       const response = await POST(request({ projectId: PROJECT_ID }), ctx());

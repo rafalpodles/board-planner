@@ -90,6 +90,10 @@ test.describe("BP-891: each organisation carries its own licence", () => {
     await page.context().clearCookies();
     await openLicence(page, GLOBEX);
     await expect(page.getByTestId("licence-free")).toContainText("Free plan");
+    // BP-922: nothing here to set or restart, and no self-hosted guide to read
+    await expect(page.getByTestId("licence-free")).toContainText("The plan is managed by Board Planner.");
+    await expect(page.getByTestId("licence-page")).not.toContainText("LICENCE_KEY");
+    await expect(page.getByRole("link", { name: "About licences" })).toHaveCount(0);
   });
 
   test("a LICENCE_KEY on the instance changes nobody's plan", async ({ request }) => {

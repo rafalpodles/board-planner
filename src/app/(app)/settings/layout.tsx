@@ -1,5 +1,6 @@
 "use client";
 
+import { useOrganisation } from "@/hooks/use-organisation";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -53,6 +54,7 @@ export default function SettingsLayout({
 }) {
   const pathname = usePathname();
   const { isAdmin } = useAuth();
+  const { organisation } = useOrganisation();
 
   const section = pathname?.split("/")[2] ?? "";
   // A machine's project picker lives under the fleet console's path, which only an admin's nav lists
@@ -70,7 +72,7 @@ export default function SettingsLayout({
 
   return (
     <SettingsShell
-      subtitle="This account and this instance"
+      subtitle={isAdmin && organisation?.named ? `Your account and ${organisation.name}` : "Your account"}
       groups={groups}
       active={active}
     >

@@ -586,7 +586,7 @@ describe("PUT /api/projects/[projectId] worker settings", () => {
     expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
   });
 
-  it("refuses the owner an enable while an instance admin's lock is on", async () => {
+  it("refuses the owner an enable while an admin's lock is on", async () => {
     stored({ enabled: false, lockedByInstance: true });
 
     const response = await PUT(putRequest({ worker: { enabled: true } }), ctx());
@@ -616,7 +616,7 @@ describe("PUT /api/projects/[projectId] worker settings", () => {
     expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
   });
 
-  it("lets an instance admin lock a project, and records it for the instance", async () => {
+  it("lets an admin lock a project, and records it for the instance", async () => {
     getAuthUser.mockResolvedValue(ADMIN);
     stored({ enabled: true });
 
@@ -630,7 +630,7 @@ describe("PUT /api/projects/[projectId] worker settings", () => {
     );
   });
 
-  it("lets an instance admin switch a locked project on, since the lock is theirs", async () => {
+  it("lets an admin switch a locked project on, since the lock is theirs", async () => {
     getAuthUser.mockResolvedValue(ADMIN);
     stored({ enabled: false, lockedByInstance: true });
 
@@ -686,7 +686,7 @@ describe("PUT /api/projects/[projectId] worker settings", () => {
     expect(lastUpdate()).toMatchObject({ "worker.policy.model": "opus", "worker.policyOverrides": [] });
   });
 
-  it("still lets an instance admin set one", async () => {
+  it("still lets an admin set one", async () => {
     getAuthUser.mockResolvedValue(ADMIN);
 
     const response = await PUT(putRequest({ worker: { policy: { model: "sonnet" } } }), ctx());
@@ -695,7 +695,7 @@ describe("PUT /api/projects/[projectId] worker settings", () => {
     expect(lastUpdate()).toMatchObject({ "worker.policy.model": "sonnet" });
   });
 
-  it("refuses an instance admin's API token the lock", async () => {
+  it("refuses an admin's API token the lock", async () => {
     getAuthUser.mockResolvedValue({ ...ADMIN, viaMachineCredential: true });
 
     const response = await PUT(putRequest({ worker: { lockedByInstance: true } }), ctx());
@@ -936,7 +936,7 @@ describe("PUT /api/projects/[projectId] PM settings", () => {
     ["the switch", { enabled: true }],
     ["the model", { model: "x/y" }],
     ["the MCP connections", { mcpServers: [] }],
-  ])("refuses a project owner who is not an instance admin %s, which are the instance's", async (_name, pm) => {
+  ])("refuses a project owner who is not an admin %s, which are the instance's", async (_name, pm) => {
     getAuthUser.mockResolvedValue(OWNER);
     check.mockResolvedValue(true);
     reads(stored("old"));
@@ -944,7 +944,7 @@ describe("PUT /api/projects/[projectId] PM settings", () => {
     const res = await PUT(putRequest({ pm }), ctx());
 
     expect(res.status).toBe(403);
-    expect((await res.json()).error).toMatch(/Only an instance admin can change PM/);
+    expect((await res.json()).error).toMatch(/Only an admin can change PM/);
     expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
   });
 

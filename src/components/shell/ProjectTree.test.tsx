@@ -138,7 +138,7 @@ describe("ProjectTree", () => {
     expect(screen.getByText("Settings")).toBeTruthy();
   });
 
-  it("shows Settings to a project admin who is not an instance admin", () => {
+  it("shows Settings to a project admin who is not an admin", () => {
     renderTree({
       isAdmin: false,
       projects: [project({ _id: "1", key: "TP", canAdmin: true })],
@@ -154,7 +154,7 @@ describe("ProjectTree", () => {
     expect(screen.getByText("Settings")).toBeTruthy();
   });
 
-  it("still keeps New project to instance admins even for a project admin", () => {
+  it("still keeps New project to admins even for a project admin", () => {
     renderTree({
       isAdmin: false,
       projects: [project({ _id: "1", key: "TP", canAdmin: true })],

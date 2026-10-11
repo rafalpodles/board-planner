@@ -60,7 +60,7 @@ test.beforeEach(async () => {
   // the name and the Rename affordance is offered to somebody who may use it
   const inserted = await handle.collection("agents").insertOne({
     name: "A global one",
-    description: "Composed by an instance admin",
+    description: "Composed by an admin",
     scope: "global",
     owner: null,
     project: null,
@@ -102,7 +102,7 @@ test("a member is shown the composition and none of the controls that edit it", 
   await expect(page.getByRole("button", { name: /^Remove / })).toHaveCount(0);
 });
 
-test("an instance admin is offered all of them", async ({ page }) => {
+test("an admin is offered all of them", async ({ page }) => {
   await signIn(page, "admin");
   await openAgent(page);
 

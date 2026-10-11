@@ -37,7 +37,7 @@ function fakeUser(over: Partial<IUser> = {}) {
 }
 
 describe("decide", () => {
-  it("gives an instance admin both access and admin without any grant", () => {
+  it("gives an admin both access and admin without any grant", () => {
     const p = principal({ instanceAdmin: true });
     expect(decide(p, null, "access", HERE)).toBe(true);
     expect(decide(p, null, "admin", HERE)).toBe(true);
@@ -74,20 +74,20 @@ describe("decide", () => {
 
   // The regression the spec is built around: applyTokenScope downgrades an instance admin to
   // member, and instance admins hold no grant rows, so a naive lookup strips all their access.
-  it("keeps an instance admin's scoped token working inside its scope", () => {
+  it("keeps an admin's scoped token working inside its scope", () => {
     const p = principal({ tokenScoped: true, tokenScope: [P], instanceAdminBeforeScope: true });
     expect(decide(p, null, "access", HERE)).toBe(true);
     expect(decide(p, null, "admin", HERE)).toBe(false);
   });
 
-  it("still confines an instance admin's scoped token to its scope", () => {
+  it("still confines an admin's scoped token to its scope", () => {
     const p = principal({ tokenScoped: true, tokenScope: [OTHER], instanceAdminBeforeScope: true });
     expect(decide(p, null, "access", HERE)).toBe(false);
   });
 });
 
 describe("decide across organisations (BP-664)", () => {
-  it("refuses a project of another organisation before anything else, even to an instance admin or an owner", () => {
+  it("refuses a project of another organisation before anything else, even to an admin or an owner", () => {
     const elsewhere = { id: P, organisation: ELSEWHERE };
     expect(decide(principal({ instanceAdmin: true }), null, "access", elsewhere)).toBe(false);
     expect(decide(principal({ instanceAdminBeforeScope: true, tokenScope: [P] }), null, "access", elsewhere)).toBe(false);
@@ -115,7 +115,7 @@ describe("principalOf", () => {
     });
   });
 
-  it("maps an instance admin correctly", () => {
+  it("maps an admin correctly", () => {
     const user = fakeUser({ role: "admin" });
     const result = principalOf(user);
     expect(result.instanceAdmin).toBe(true);
@@ -227,13 +227,13 @@ describe("check", () => {
     expect(await check(scopedToDefaultOrganisation(), user, P, "access")).toBe(false);
   });
 
-  it("answers for an instance admin without reading a grant", async () => {
+  it("answers for an admin without reading a grant", async () => {
     const user = { _id: "a1", role: "admin" } as never;
     expect(await check(scopedToDefaultOrganisation(), user, P, "admin")).toBe(true);
     expect(findOne).not.toHaveBeenCalled();
   });
 
-  it("refuses a project of another organisation even to an instance admin, without reading a grant (BP-664)", async () => {
+  it("refuses a project of another organisation even to an admin, without reading a grant (BP-664)", async () => {
     projectsElsewhere.add(P);
     const admin = { _id: "a1", role: "admin" } as never;
     expect(await check(scopedToDefaultOrganisation(), admin, P, "access")).toBe(false);
@@ -268,12 +268,12 @@ describe("accessibleProjectIds", () => {
     find.mockReset();
   });
 
-  it("returns null for an unscoped instance admin", async () => {
+  it("returns null for an unscoped admin", async () => {
     const user = { _id: "a1", role: "admin" } as never;
     expect(await accessibleProjectIds(scopedToDefaultOrganisation(), user)).toBe(null);
   });
 
-  it("returns the scope for an instance admin's scoped token", async () => {
+  it("returns the scope for an admin's scoped token", async () => {
     const user = {
       _id: "a1",
       role: "member",
@@ -331,7 +331,7 @@ describe("administeredProjectIds", () => {
     expect((await administeredProjectIds(scopedToDefaultOrganisation(), user, [P])).has(P)).toBe(true);
   });
 
-  it("gives an instance admin every project without querying", async () => {
+  it("gives an admin every project without querying", async () => {
     const user = { _id: "a1", role: "admin" } as never;
 
     expect([...(await administeredProjectIds(scopedToDefaultOrganisation(), user, [P, OTHER]))]).toEqual([P, OTHER]);
@@ -358,7 +358,7 @@ describe("administeredProjectIds", () => {
 // from it — including the mutation that treats every recipient as an instance admin and turns the
 // whole access filter into a no-op. Found by an independent review of this branch.
 describe("administeredProjectIds across organisations (BP-664)", () => {
-  it("leaves out a project of another organisation, even for an instance admin", async () => {
+  it("leaves out a project of another organisation, even for an admin", async () => {
     projectsElsewhere.add(OTHER);
     const admin = { _id: "a1", role: "admin" } as never;
     expect([...(await administeredProjectIds(scopedToDefaultOrganisation(), admin, [P, OTHER]))]).toEqual([P]);
@@ -416,7 +416,7 @@ describe("recipientsWithAccess", () => {
   });
 
   // BP-832. Sees nothing, so is told nothing and can be handed nothing — admin or not
-  it("drops a deactivated recipient, grant or instance admin role notwithstanding", async () => {
+  it("drops a deactivated recipient, grant or admin role notwithstanding", async () => {
     grant(MEMBER);
     deactivated = new Set([MEMBER, ADMIN]);
 
@@ -437,11 +437,11 @@ describe("recipientsWithAccess", () => {
   // An instance admin reaches every board without a Grant row ever being written, so a filter
   // written as "has a grant" would silently stop notifying them — a regression wearing the
   // costume of a security fix.
-  it("keeps an instance admin who holds no grant at all", async () => {
+  it("keeps an admin who holds no grant at all", async () => {
     expect(await recipientsWithAccess(scopedToDefaultOrganisation(), [ADMIN], P)).toEqual([ADMIN]);
   });
 
-  it("does not mistake an ordinary member for an instance admin", async () => {
+  it("does not mistake an ordinary member for an admin", async () => {
     roles = { [MEMBER]: "member" };
     expect(await recipientsWithAccess(scopedToDefaultOrganisation(), [MEMBER], P)).toEqual([]);
   });
@@ -450,7 +450,7 @@ describe("recipientsWithAccess", () => {
    * BP-400. Assignment asks the same question delivery has asked since BP-328, so that a task
    * cannot be handed to somebody who will never be told about it and cannot open it.
    */
-  it("keeps nobody when the project is not in this organisation, an instance admin included (BP-664)", async () => {
+  it("keeps nobody when the project is not in this organisation, an admin included (BP-664)", async () => {
     grant(MEMBER);
     projectsElsewhere.add(P);
     expect(await recipientsWithAccess(scopedToDefaultOrganisation(), [MEMBER, ADMIN], P)).toEqual([]);
@@ -476,7 +476,7 @@ describe("recipientsWithAccess", () => {
      * reaches every board from their role and never has a row written for them. On an instance with
      * one admin, refusing this takes the only person who can see everything out of every picker.
      */
-    it("accepts an instance admin who holds no grant at all", async () => {
+    it("accepts an admin who holds no grant at all", async () => {
       expect(await canBeAssigned(scopedToDefaultOrganisation(), ADMIN, P)).toBe(true);
     });
 

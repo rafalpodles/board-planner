@@ -154,7 +154,7 @@ describe("machines offering this repository", () => {
   });
 
   // BP-762. Switched off, it is refused its heartbeat, and read here as not reporting
-  it("says a machine an instance admin switched off is switched off, not that it has gone quiet", async () => {
+  it("says a machine an admin switched off is switched off, not that it has gone quiet", async () => {
     await listed([worker({ stale: true, condition: { state: "disabled", haltedBy: null } })]);
 
     expect(screen.getByTestId("offering-machine-state").textContent).toBe("switched off");
@@ -429,7 +429,7 @@ describe("the project's default agent", () => {
 });
 
 // BP-736: the project's owner manages this section; an instance admin keeps a lock over it.
-describe("WorkersSection for a project owner who is not an instance admin", () => {
+describe("WorkersSection for a project owner who is not an admin", () => {
   const register = vi.fn();
 
   function renderWith(isAdmin: boolean, over: Partial<ApiProject> = {}) {
@@ -501,7 +501,7 @@ describe("WorkersSection for a project owner who is not an instance admin", () =
   it("says the instance lock is on and holds the owner's switch off", () => {
     renderWith(false, { worker: { ...project().worker, enabled: false, lockedByInstance: true } });
 
-    expect(screen.getByTestId("workers-locked").textContent).toMatch(/instance admin has locked workers off/i);
+    expect(screen.getByTestId("workers-locked").textContent).toMatch(/admin has locked workers off/i);
     expect(enableSwitch().disabled).toBe(true);
   });
 
@@ -528,13 +528,13 @@ describe("WorkersSection for a project owner who is not an instance admin", () =
     expect(enableSwitch().checked).toBe(true);
   });
 
-  it("leaves an instance admin's own switch usable under the lock", () => {
+  it("leaves an admin's own switch usable under the lock", () => {
     renderWith(true, { worker: { ...project().worker, enabled: false, lockedByInstance: true } });
 
     expect(enableSwitch().disabled).toBe(false);
   });
 
-  it("lets an instance admin lift the lock from the screen", async () => {
+  it("lets an admin lift the lock from the screen", async () => {
     api.put.mockResolvedValue(project({ worker: { ...project().worker, lockedByInstance: false } }));
     renderWith(true, { worker: { ...project().worker, enabled: true, lockedByInstance: true } });
     const lock = screen.getByRole("switch", { name: /lock workers off for this project/i }) as HTMLInputElement;
@@ -546,7 +546,7 @@ describe("WorkersSection for a project owner who is not an instance admin", () =
     expect(api.put).toHaveBeenCalledWith("/api/projects/TP", { worker: { lockedByInstance: false } });
   });
 
-  it("gives an instance admin the lock, and saves it", async () => {
+  it("gives an admin the lock, and saves it", async () => {
     api.put.mockResolvedValue(project({ worker: { ...project().worker, lockedByInstance: true } }));
     renderWith(true);
 

@@ -58,7 +58,7 @@ describe("POST /api/agent-blocks", () => {
   });
 
   // The refusals above prove nothing on their own if the route rejects everybody
-  it("lets an instance admin author one", async () => {
+  it("lets an admin author one", async () => {
     getAuthUser.mockResolvedValue(ADMIN);
 
     const response = await post(STEP);

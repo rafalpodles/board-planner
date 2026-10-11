@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { ENTITLEMENT_GRACE_MS } from "@/lib/entitlements";
 import { withAdmin } from "@/lib/middleware";
+import { organisationDomain } from "@/lib/organisation-host";
 import { getOrganisation, licenceOf } from "@/lib/organisation";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -13,13 +14,15 @@ function utcDay(ms: number): number {
 export const GET = withAdmin(async (_request, { db }) => {
   const now = Date.now();
   const check = licenceOf(await getOrganisation(db.organisation), now);
-  if (!check) return NextResponse.json({ configured: false });
-  if (!check.payload) return NextResponse.json({ configured: true, verdict: check.verdict });
+  const managedByPlatform = organisationDomain() !== null;
+  if (!check) return NextResponse.json({ configured: false, managedByPlatform });
+  if (!check.payload) return NextResponse.json({ configured: true, verdict: check.verdict, managedByPlatform });
 
   const expiresAt = Date.parse(check.payload.expiresAt);
   const graceEndsAt = expiresAt + (check.payload.trial || check.payload.subscription === "ending" ? 0 : ENTITLEMENT_GRACE_MS);
   return NextResponse.json({
     configured: true,
+    managedByPlatform,
     verdict: check.verdict,
     customer: check.payload.customer,
     trial: check.payload.trial === true,

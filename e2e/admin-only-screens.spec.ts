@@ -44,7 +44,7 @@ const SCREENS: Screen[] = [
   { path: "/settings/ai-keys", heading: "AI key", api: "/api/settings/ai-keys" },
   { path: "/settings/workers", heading: "Worker fleet", api: "/api/admin/workers" },
   { path: "/settings/workers/runs", heading: "Run history", api: "/api/admin/runs" },
-  { path: "/settings/audit", heading: "Instance audit log", api: "/api/admin/audit" },
+  { path: "/settings/audit", heading: "Audit log", api: "/api/admin/audit" },
 ];
 
 /**

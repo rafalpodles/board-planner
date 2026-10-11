@@ -44,12 +44,46 @@ describe("LicenceDetails", () => {
     ["unknown_key", "signed by a key this build does not know"],
     ["invalid_signature", "its signature does not match its contents"],
     ["malformed", "is not a licence key"],
-    ["wrong_organisation", "issued for another organisation"],
+    ["wrong_organisation", "belongs to a cloud organisation, not to this instance"],
   ] as const)("names %s and stays on the Free plan", (verdict, words) => {
     render(<LicenceDetails licence={{ configured: true, verdict }} />);
 
     expect(screen.getByText("Free plan")).toBeTruthy();
     expect(screen.getByRole("alert").textContent).toContain(words);
+  });
+
+  // BP-922. In the cloud the key is Board Planner's to set: no variable to name, no restart to ask for
+  describe("where the plan is managed by Board Planner", () => {
+    it.each(["unknown_key", "invalid_signature", "malformed", "wrong_organisation"] as const)(
+      "says %s as a matter for support, naming no environment variable",
+      (verdict) => {
+        render(<LicenceDetails licence={{ configured: true, verdict, managedByPlatform: true }} />);
+
+        const said = screen.getByRole("alert").textContent ?? "";
+        expect(said).toBe("The licence on file for this organisation could not be read. Contact Board Planner support.");
+        expect(said).not.toContain("LICENCE_KEY");
+      }
+    );
+
+    it("offers no self-hosted licence guide on the Free plan, and says who manages the plan", () => {
+      render(<LicenceDetails licence={{ configured: false, managedByPlatform: true }} />);
+
+      expect(screen.getByText("The plan is managed by Board Planner.")).toBeTruthy();
+      expect(screen.queryByRole("link", { name: "About licences" })).toBeNull();
+    });
+
+    it("speaks of the organisation, not the instance, when a licence ends", () => {
+      render(<LicenceDetails licence={valid({ managedByPlatform: true, verdict: "expired", trial: true, daysLeft: -3 })} />);
+
+      expect(screen.getByTestId("licence-warning").textContent).toContain("this organisation is on the Free plan");
+      expect(screen.getByTestId("licence-warning").textContent).not.toContain("instance");
+    });
+  });
+
+  it("keeps the self-hosted wording where nothing says the plan is managed — the control", () => {
+    render(<LicenceDetails licence={valid({ verdict: "expired", trial: true, daysLeft: -3 })} />);
+
+    expect(screen.getByTestId("licence-warning").textContent).toContain("this instance is on the Free plan");
   });
 
   it("lists customer, plan, features, dates and days left for a valid key", () => {

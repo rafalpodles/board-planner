@@ -202,13 +202,13 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
         >
           <span aria-hidden="true">⛔</span>
           <p>
-            <strong className="font-semibold">An instance admin has locked workers off.</strong> No
+            <strong className="font-semibold">An admin has locked workers off.</strong> No
             machine runs this project, and the switch below cannot override it.
           </p>
         </div>
       )}
       {isAdmin && (
-        <SettingsCard title="Instance lock" instanceScoped>
+        <SettingsCard title="Admin lock" instanceScoped>
           <Switch
             checked={!!draft.value.lockedByInstance}
             onChange={(v) => draft.set("lockedByInstance", v)}

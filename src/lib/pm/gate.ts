@@ -20,7 +20,7 @@ export const PM_RUNNABLE_QUERY = {
 };
 
 export function pmDisabledReason(pm: PmGateFields | undefined | null): string {
-  if (pm?.lockedByInstance) return "PM agent is disabled for this project by an instance admin";
+  if (pm?.lockedByInstance) return "PM agent is disabled for this project by an admin";
   return "PM agent is not enabled for this project";
 }
 

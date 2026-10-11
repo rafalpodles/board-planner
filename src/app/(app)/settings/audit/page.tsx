@@ -50,9 +50,9 @@ export default function InstanceAuditPage() {
   return (
     <div className="max-w-6xl mx-auto">
       <div className="mb-6">
-        <h2 className="text-lg font-semibold mb-1">Instance audit log</h2>
+        <h2 className="text-lg font-semibold mb-1">Audit log</h2>
         <p className="text-sm text-text-muted">
-          Instance-wide actions: stopping a machine, enrolling one, committing a project to
+          Organisation-wide actions: stopping a machine, enrolling one, committing a project to
           workers, an account created, made an administrator or deleted, and anything that changes
           how an account is signed into — a password set for somebody, a reset by email, or an
           address moved, whether by an administrator or by the account itself. Each project keeps

@@ -288,10 +288,10 @@ test.describe("the catalog as it ships", () => {
 
     await page.getByRole("tab", { name: "Gates" }).click();
     await expect(page.getByRole("button", { name: "New gate" })).toHaveCount(0);
-    await expect(page.getByText("An instance admin authors gates")).toBeVisible();
+    await expect(page.getByText("An admin authors gates")).toBeVisible();
 
     await page.getByRole("tab", { name: "Steps" }).click();
-    await expect(page.getByText("An instance admin authors steps")).toBeVisible();
+    await expect(page.getByText("An admin authors steps")).toBeVisible();
   });
 });
 

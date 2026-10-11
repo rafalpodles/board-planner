@@ -203,7 +203,7 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
     const isInstanceAdmin = user.role === "admin";
     if ("worker.lockedByInstance" in parsed.update && !isInstanceAdmin) {
       return NextResponse.json(
-        { error: "Only an instance admin can lock or unlock workers for a project" },
+        { error: "Only an admin can lock or unlock workers for a project" },
         { status: 403 }
       );
     }
@@ -213,7 +213,7 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
     if (blockFields.length > 0 && !isInstanceAdmin) {
       return NextResponse.json(
         {
-          error: `Only an instance admin can set ${blockFields.join(", ")} — they belong to the agent's steps and gates now`,
+          error: `Only an admin can set ${blockFields.join(", ")} — they belong to the agent's steps and gates now`,
         },
         { status: 403 }
       );
@@ -246,7 +246,7 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
       const rejected = instanceFields.filter((f) => body.pm[f] !== undefined);
       if (rejected.length > 0) {
         return NextResponse.json(
-          { error: `Only an instance admin can change PM ${rejected.join(", ")}` },
+          { error: `Only an admin can change PM ${rejected.join(", ")}` },
           { status: 403 }
         );
       }

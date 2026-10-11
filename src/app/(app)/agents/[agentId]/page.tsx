@@ -290,7 +290,7 @@ export default function AgentDetailPage() {
         >
           {agent.scope === "project"
             ? "A project admin composes this project's agents. You can read it here."
-            : "An instance admin composes the shipped agents. You can read it here."}
+            : "An admin composes the shipped agents. You can read it here."}
         </p>
       )}
 

@@ -316,7 +316,7 @@ describe("describeSettingsChanges", () => {
       expect(changes({ pm }, { pm: { ...pm, dailyTurnCap: 50, dailyTokenCap: 200_000 } })).toEqual([]);
     });
 
-    it("reads an instance admin's single-field change the same way", () => {
+    it("reads an admin's single-field change the same way", () => {
       expect(changes({ pm: { model: "a" } }, { "pm.model": "b", "pm.enabled": true })).toEqual([
         "PM agent: off → on",
         "PM model: a → b",

@@ -89,7 +89,7 @@ export function verdictFor(
     return {
       ok: false,
       reason: isWorkerLockedByInstance(project?.worker)
-        ? "an instance admin has locked workers off for this project"
+        ? "an admin has locked workers off for this project"
         : "this project is not enabled for workers",
     };
   }

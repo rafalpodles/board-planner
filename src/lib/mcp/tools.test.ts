@@ -175,7 +175,7 @@ describe("update_task and the agent that runs it", () => {
   it("tells the caller who may actually choose an agent, not the retired instance-admin rule", () => {
     const description = registered().get("update_task")!.schema.shape.agent.description;
 
-    expect(description).not.toMatch(/instance admin/i);
+    expect(description).not.toMatch(/admin/i);
     expect(description).toMatch(/a project agent may be chosen by anyone who can edit the task/i);
   });
 });

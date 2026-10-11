@@ -99,7 +99,7 @@ describe("GET /api/notifications", () => {
     expect(await res.json()).toEqual([]);
   });
 
-  it("leaves an instance admin's feed unconstrained, since they reach every board", async () => {
+  it("leaves an admin's feed unconstrained, since they reach every board", async () => {
     getAuthUser.mockImplementation(async () => ({ _id: READER, role: "admin" }));
 
     await GET(request(), noParams);

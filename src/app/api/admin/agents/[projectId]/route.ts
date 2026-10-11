@@ -90,7 +90,7 @@ export const PATCH = withAdmin(async (request, { params, user, db }) => {
   }
   if (changes.length > 0) {
     await logProjectAudit(db, projectId, String(user._id), "settings_updated", [
-      "Instance admin console",
+      "Admin console",
       ...changes,
     ]);
   }

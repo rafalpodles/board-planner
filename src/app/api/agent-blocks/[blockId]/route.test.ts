@@ -95,7 +95,7 @@ describe("changing a block", () => {
     expect(doc.save).not.toHaveBeenCalled();
   });
 
-  it("lets an instance admin change the prompt", async () => {
+  it("lets an admin change the prompt", async () => {
     getAuthUser.mockResolvedValue(ADMIN);
     const doc = block();
     blockFindOne.mockResolvedValue(doc);
@@ -477,7 +477,7 @@ describe("deleting a block", () => {
     expect((await del()).status).toBe(400);
   });
 
-  it("lets an instance admin delete one nothing uses", async () => {
+  it("lets an admin delete one nothing uses", async () => {
     getAuthUser.mockResolvedValue(ADMIN);
     const doc = block();
     blockFindOne.mockResolvedValue(doc);

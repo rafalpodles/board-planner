@@ -428,7 +428,7 @@ describe("the Agent row", () => {
 
     expect(agentRow()?.getAttribute("role")).toBe("combobox");
     expect(screen.queryByTestId("agent-not-yours")).toBeNull();
-    expect(screen.getByText("Agent").closest("div")?.textContent).not.toMatch(/instance admin/i);
+    expect(screen.getByText("Agent").closest("div")?.textContent).not.toMatch(/admin/i);
   });
 
   // "Project default" was honest while an empty field fell back to the project's agent. Since BP-358
@@ -1067,12 +1067,12 @@ describe("the hand-over notice, with the board judged too", () => {
   });
 
   // Only an instance admin lifts the lock: never the owners, and "you" only for an instance admin
-  it("names a lock on agent runs as an instance admin's, not the owners'", () => {
+  it("names a lock on agent runs as an admin's, not the owners'", () => {
     withBoard({ lockedByInstance: true });
 
     expect(notice().dataset.reason).toBe("runs-locked");
     expect(notice().textContent).toBe(
-      "Nothing will run this yet. An instance admin has locked agent runs off for this board — an instance admin can lift the lock in Project settings → Workers."
+      "Nothing will run this yet. An admin has locked agent runs off for this board — an admin can lift the lock in Project settings → Workers."
     );
     expect(notice().textContent).not.toContain("owner");
     expect(screen.queryByTestId("handover-waiting")).toBeNull();
@@ -1081,7 +1081,7 @@ describe("the hand-over notice, with the board judged too", () => {
   it("tells an owner the lock is not theirs to lift", () => {
     withBoard({ lockedByInstance: true, canAdmin: true });
 
-    expect(notice().textContent).toContain("— an instance admin can lift the lock");
+    expect(notice().textContent).toContain("— an admin can lift the lock");
   });
 
   // Off and locked: both said, the lock first, and the owners' switch only after the lock
@@ -1094,7 +1094,7 @@ describe("the hand-over notice, with the board judged too", () => {
     );
   });
 
-  it("tells an instance admin they can lift the lock", () => {
+  it("tells an admin they can lift the lock", () => {
     withBoard({ lockedByInstance: true }, {}, { viewerIsInstanceAdmin: true });
 
     expect(notice().textContent).toContain("— you can lift the lock");
@@ -1150,14 +1150,14 @@ describe("the hand-over notice, with the board judged too", () => {
 
     expect(notice().dataset.reason).toBe(reason);
     expect(notice().textContent).toBe(
-      `Nothing will run this yet. Your machine is connected but not taking work: an instance admin ${state} it. Resume it from the menubar app on that machine, or ask an instance admin to.`
+      `Nothing will run this yet. Your machine is connected but not taking work: an admin ${state} it. Resume it from the menubar app on that machine, or ask an admin to.`
     );
     expect(screen.queryByRole("link", { name: "Settings → Workers" })).toBeNull();
     expect(screen.queryByTestId("handover-waiting")).toBeNull();
   });
 
   it.each(["paused", "stopped"] as const)(
-    "tells an instance admin their %s machine can be resumed in Settings → Workers",
+    "tells an admin their %s machine can be resumed in Settings → Workers",
     (state) => {
       withBoard({ machine: state }, {}, { viewerIsInstanceAdmin: true });
 
@@ -1188,17 +1188,17 @@ describe("the hand-over notice, with the board judged too", () => {
 
   // BP-762. Switched off by an instance admin, it is refused its heartbeat and went stale, and the
   // task told its owner to check it was running — which they cannot fix.
-  it("tells a non-admin their machine was switched off by an instance admin, with no advice they cannot take", () => {
+  it("tells a non-admin their machine was switched off by an admin, with no advice they cannot take", () => {
     withBoard({ machine: "disabled" });
 
     expect(notice().dataset.reason).toBe("machine-disabled");
     expect(notice().textContent).toBe(
-      "Nothing will run this yet. An instance admin switched your machine off, so it takes no work, and only an instance admin can switch it back on."
+      "Nothing will run this yet. An admin switched your machine off, so it takes no work, and only an admin can switch it back on."
     );
     expect(screen.queryByRole("link", { name: "Check it is running" })).toBeNull();
   });
 
-  it("tells an instance admin where their switched-off machine is switched back on", () => {
+  it("tells an admin where their switched-off machine is switched back on", () => {
     withBoard({ machine: "disabled" }, {}, { viewerIsInstanceAdmin: true });
 
     expect(notice().textContent).toBe(

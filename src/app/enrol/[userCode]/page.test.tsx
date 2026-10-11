@@ -128,14 +128,14 @@ describe("the enrolment confirmation screen", () => {
     });
 
     // BP-736: the owner cannot lift a lock, so the warning must not send anybody to them
-    it("names the lock, not the owner, when an instance admin has locked the project", async () => {
+    it("names the lock, not the owner, when an admin has locked the project", async () => {
       await show({
         projects: [{ ...view().projects[0], workersEnabled: false, canEnable: false, locked: true }],
       });
       await chooseTheProject();
 
       const warning = screen.getByTestId("workers-off-warning").textContent ?? "";
-      expect(warning).toMatch(/An instance admin has locked machines off for that project/);
+      expect(warning).toMatch(/An admin has locked machines off for that project/);
       expect(warning).not.toMatch(/owner/);
     });
 

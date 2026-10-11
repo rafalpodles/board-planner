@@ -163,8 +163,8 @@ function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }
     case "runs-locked":
       return (
         <>
-          An instance admin has locked agent runs off for this board —{" "}
-          {ctx.viewerIsInstanceAdmin ? "you" : "an instance admin"} can lift the lock in Project
+          An admin has locked agent runs off for this board —{" "}
+          {ctx.viewerIsInstanceAdmin ? "you" : "an admin"} can lift the lock in Project
           settings → Workers.
         </>
       );
@@ -200,7 +200,7 @@ function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }
         </>
       ) : (
         <>
-          An instance admin switched your machine off, so it takes no work, and only an instance
+          An admin switched your machine off, so it takes no work, and only an
           admin can switch it back on.
         </>
       );
@@ -227,8 +227,8 @@ function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }
         </>
       ) : (
         <>
-          Your machine is connected but not taking work: an instance admin {done} it. Resume it from
-          the menubar app on that machine, or ask an instance admin to.
+          Your machine is connected but not taking work: an admin {done} it. Resume it from
+          the menubar app on that machine, or ask an admin to.
         </>
       );
     }

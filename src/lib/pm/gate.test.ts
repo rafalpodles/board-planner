@@ -38,9 +38,9 @@ describe("isPmLockedByInstance", () => {
 });
 
 describe("pmDisabledReason", () => {
-  it("names the instance admin when locked", () => {
+  it("names the admin when locked", () => {
     expect(pmDisabledReason({ enabled: true, lockedByInstance: true })).toMatch(
-      /instance admin/i
+      /admin/i
     );
   });
 

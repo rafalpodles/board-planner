@@ -24,4 +24,4 @@ export function isWorkerLockedByInstance(worker: ProjectWorkerGateFields | undef
 }
 
 export const WORKERS_LOCKED_MESSAGE =
-  "An instance admin has locked workers off for this project";
+  "An admin has locked workers off for this project";
