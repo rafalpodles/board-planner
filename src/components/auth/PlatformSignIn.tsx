@@ -53,9 +53,9 @@ function RememberCheckbox({ checked, onChange }: { checked: boolean; onChange: (
         className="mt-1 h-4 w-4 shrink-0"
       />
       <div>
-        <label htmlFor="remember-organisation">Open this organisation straight away next time</label>
+        <label htmlFor="remember-organisation">Remember my choice</label>
         <p id="remember-organisation-note" className="text-xs text-text-muted">
-          Keeps a cookie on this device for 180 days. Leave it unticked and nothing is kept.
+          Next time you go straight to this organisation. Saves a small cookie on this device.
         </p>
       </div>
     </div>
