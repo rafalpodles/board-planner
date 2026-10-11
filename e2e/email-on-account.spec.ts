@@ -154,6 +154,29 @@ test("a rejected address is reported next to the field", async ({ page }) => {
   expect(member?.email).toBe("");
 });
 
+// The browser's own type="email" check turns these away before the form submits, so the server's
+// refusal is only reachable from a client that skips the form
+test("an address that reaches another mailbox under a different name is refused", async ({ page }) => {
+  await signInAsAdmin(page);
+  const save = (email: string) =>
+    page.request.put(`/api/users/${MEMBER_ID.toString()}`, {
+      headers: { "sec-fetch-site": "same-origin" },
+      data: { email },
+    });
+
+  for (const squat of ["x:victim@example.com", "victim@example.com\u0085"]) {
+    const refused = await save(squat);
+    expect(refused.status(), squat).toBe(400);
+    expect((await refused.json()).error).toBe("That does not look like an email address");
+  }
+  const handle = await db();
+  expect((await handle.collection("users").findOne({ _id: MEMBER_ID }))?.email).toBe("");
+
+  const accepted = await save("someone@intranet");
+  expect(accepted.status()).toBe(200);
+  expect((await handle.collection("users").findOne({ _id: MEMBER_ID }))?.email).toBe("someone@intranet");
+});
+
 test("an address already on another account is reported next to the field", async ({ page }) => {
   await signInAsAdmin(page);
   await page.goto("/settings/users");
