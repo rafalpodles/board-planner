@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { createHash, randomBytes } from "crypto";
 import mongoose from "mongoose";
+import { SAME_ORIGIN } from "./api";
 import { E2E_MONGODB_URI, MEMBER_ID, MEMBER_PASSWORD, MEMBER_USERNAME, seed } from "./seed";
 
 /**
@@ -216,4 +217,17 @@ test("a reset link with no token explains itself rather than failing oddly", asy
   await page.goto("/reset");
 
   await expect(page.getByText("This link is incomplete")).toBeVisible();
+});
+
+// BP-847: with no client address every caller shared one bucket, so a couple of hundred asks from
+// anybody held every account's reset. What is counted instead is the links sent for one account.
+test("with no client address one account's reset is held, and nobody else's", async ({ request }) => {
+  const ask = (identifier: string) => request.post("/api/auth/forgot", { headers: SAME_ORIGIN, data: { identifier } });
+
+  for (let i = 0; i < 5; i++) expect((await ask(MEMBER_USERNAME)).status(), `ask ${i}`).toBe(200);
+  const held = await ask(MEMBER_USERNAME);
+  expect(held.status()).toBe(429);
+  expect(await held.json()).toEqual({ error: "Too many requests. Try again in 15 minutes." });
+
+  for (let i = 0; i < 210; i++) expect((await ask(`nobody-${i}`)).status(), `other name ${i}`).toBe(200);
 });
