@@ -27,6 +27,7 @@ beforeEach(() => {
 afterEach(() => {
   delete process.env.OIDC_ADMIN_GROUP;
   delete process.env.ORGANISATION_DOMAIN;
+  delete process.env.OIDC_GROUPS_CLAIM;
 });
 
 describe("the admin group", () => {
@@ -213,7 +214,6 @@ describe("the groups an ID token names", () => {
     expect(groupsIn(claims, { own: true, groupsClaim: "roles" })).toEqual(["b", "c"]);
     expect(groupsIn(claims, { own: true })).toEqual(["a"]);
     expect(groupsIn(claims)).toEqual(["d"]);
-    delete process.env.OIDC_GROUPS_CLAIM;
   });
 
   it("takes a single string as one group and a missing claim as none", () => {
