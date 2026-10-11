@@ -167,6 +167,7 @@ export const GROUPS = {
     "organisations-oidc-relay.spec.ts",
     "organisations-sso.spec.ts",
     "organisations-route-families.spec.ts",
+    "organisations-origin.spec.ts",
     "organisations-addresses.spec.ts",
     "organisations-boards.spec.ts",
     "organisations-name.spec.ts",
