@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import mongoose from "mongoose";
 
 const getAuthUser = vi.fn();
@@ -6,6 +6,7 @@ const check = vi.fn();
 const resolveProjectId = vi.fn();
 const openUploadStream = vi.fn();
 const aggregate = vi.fn();
+const getOrganisation = vi.fn();
 let storedBytes = 0;
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
@@ -14,6 +15,10 @@ vi.mock("@/lib/auth", () => ({
   RateLimitError: class RateLimitError extends Error {},
 }));
 vi.mock("@/lib/grants", () => ({ check }));
+vi.mock("@/lib/organisation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/organisation")>()),
+  getOrganisation,
+}));
 vi.mock("@/lib/middleware", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/middleware")>()),
   resolveProjectId,
@@ -37,7 +42,7 @@ function png(name = "shot.png", bytes = 10) {
 }
 
 function request(body: FormData) {
-  return new Request("https://app.example.com/api/uploads", { method: "POST", body });
+  return new Request("https://app.example.com/api/uploads", { method: "POST", body, headers: { host: "app.example.com" } });
 }
 
 const ctx = () => ({ params: Promise.resolve({}) });
@@ -64,6 +69,8 @@ beforeEach(() => {
   );
   storedBytes = 0;
   delete process.env.ORGANISATION_STORAGE_MB;
+  delete process.env.ORGANISATION_DOMAIN;
+  getOrganisation.mockResolvedValue({ entitlements: { plan: "free", features: [] } });
   aggregate.mockImplementation(() => ({ toArray: async () => [{ bytes: storedBytes }] }));
   vi.spyOn(mongoose, "connection", "get").mockReturnValue({
     db: { collection: () => ({ aggregate }) },
@@ -161,7 +168,7 @@ describe("POST /api/uploads", () => {
     const response = await POST(request(form({ file: png("big.png", 10), projectId: "BP" })), ctx());
 
     expect(response.status).toBe(413);
-    expect((await response.json()).error).toMatch(/of its 1 MB of file storage/);
+    expect((await response.json()).error).toMatch(/of its 1 MB of file storage, so no more files/);
     expect(openUploadStream).not.toHaveBeenCalled();
     expect(aggregate.mock.calls[0][0][0]).toEqual({
       $match: { "metadata.organisation": scopedToDefaultOrganisation().organisation },
@@ -169,5 +176,40 @@ describe("POST /api/uploads", () => {
 
     storedBytes = 1024 * 1024 - 10;
     expect((await POST(request(form({ file: png("fits.png", 10), projectId: "BP" })), ctx())).status).toBe(200);
+  });
+
+  describe("storage follows the plan on the hosted service (BP-967)", () => {
+    const MB = 1024 * 1024;
+
+    beforeEach(() => {
+      process.env.ORGANISATION_DOMAIN = "board-planner.com";
+      process.env.ORGANISATION_DEFAULT_HOST = "app.example.com";
+      process.env.ORGANISATION_REQUESTS_PER_MINUTE = "0";
+      storedBytes = 1024 * MB - 5;
+    });
+
+    afterEach(() => {
+      delete process.env.ORGANISATION_DEFAULT_HOST;
+      delete process.env.ORGANISATION_REQUESTS_PER_MINUTE;
+    });
+
+    it("stops a Free organisation at 1 GB and says Pro holds more", async () => {
+      const response = await POST(request(form({ file: png("big.png", 10), projectId: "BP" })), ctx());
+
+      expect(response.status).toBe(413);
+      expect((await response.json()).error).toMatch(/of its 1 GB of file storage on the Free plan.*Upgrade to Pro for 20 GB\.$/);
+      expect(openUploadStream).not.toHaveBeenCalled();
+    });
+
+    it("lets a Pro organisation, or its trial, past 1 GB up to 20 GB", async () => {
+      getOrganisation.mockResolvedValue({ entitlements: { plan: "pro", features: [] } });
+
+      expect((await POST(request(form({ file: png("big.png", 10), projectId: "BP" })), ctx())).status).toBe(200);
+
+      storedBytes = 20480 * MB - 5;
+      const full = await POST(request(form({ file: png("past.png", 10), projectId: "BP" })), ctx());
+      expect(full.status).toBe(413);
+      expect((await full.json()).error).toMatch(/of its 20 GB of file storage, so no more files/);
+    });
   });
 });

@@ -12,6 +12,7 @@ import { LoadFailed } from "@/components/ui/LoadFailed";
 import { useToast } from "@/components/ui/Toast";
 import { LicenceDetails, type LicenceSummary } from "@/components/settings/LicenceDetails";
 import { Subscription } from "@/components/settings/Subscription";
+import { StorageUsage } from "@/components/settings/StorageUsage";
 
 export default function OrganisationSettingsPage() {
   const api = useApi();
@@ -118,6 +119,7 @@ export default function OrganisationSettingsPage() {
               <dd className="tabular-nums" data-testid="organisation-members">{organisation.members}</dd>
               <dt className="text-text-muted">Boards</dt>
               <dd className="tabular-nums" data-testid="organisation-projects">{organisation.projects}</dd>
+              <StorageUsage />
             </>
           )}
         </dl>

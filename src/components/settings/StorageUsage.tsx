@@ -1,0 +1,78 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useApi } from "@/hooks/use-api";
+import { PAID_STORAGE_MB, formatStorage } from "@/lib/storage-size";
+
+const MB = 1024 * 1024;
+
+interface Storage {
+  storedBytes: number;
+  limitBytes: number | null;
+  upgradeLifts: boolean;
+}
+
+/** The files this organisation holds against what its plan allows, as one row of the organisation's list. */
+export function StorageUsage() {
+  const api = useApi();
+  const [storage, setStorage] = useState<Storage | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let current = true;
+    api
+      .get("/api/organisation/storage")
+      .then((answer: Storage) => current && setStorage(answer))
+      .catch(() => current && setFailed(true));
+    return () => {
+      current = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const share = storage?.limitBytes ? Math.min(100, Math.round((storage.storedBytes / storage.limitBytes) * 100)) : null;
+  const full = storage?.limitBytes ? storage.storedBytes >= storage.limitBytes : false;
+
+  return (
+    <>
+      <dt className="text-text-muted">Storage</dt>
+      <dd className="min-w-0" data-testid="organisation-storage">
+        {failed ? (
+          <span className="text-danger">Could not be read.</span>
+        ) : storage === null ? (
+          <span className="text-text-muted">…</span>
+        ) : (
+          <>
+            <span className="tabular-nums" data-testid="organisation-storage-used">
+              {formatStorage(storage.storedBytes)}
+              {storage.limitBytes !== null ? ` of ${formatStorage(storage.limitBytes)}` : ""}
+            </span>
+            {share !== null && storage.limitBytes !== null && (
+              <div
+                role="progressbar"
+                aria-label="File storage used"
+                aria-valuemin={0}
+                aria-valuemax={storage.limitBytes}
+                aria-valuenow={Math.min(storage.storedBytes, storage.limitBytes)}
+                className="mt-1 h-2 w-full max-w-xs overflow-hidden rounded-full bg-bg-input"
+              >
+                <div className={`h-full ${share >= 90 ? "bg-danger" : "bg-primary"}`} style={{ width: `${share}%` }} />
+              </div>
+            )}
+            {full && (
+              <p role="alert" className="mt-1 text-text-muted" data-testid="organisation-storage-full">
+                Full, so no more files can be uploaded.
+                {storage.upgradeLifts && ` Upgrade to Pro for ${formatStorage(PAID_STORAGE_MB * MB)}.`}
+              </p>
+            )}
+            {!full && storage.upgradeLifts && (
+              <p className="mt-1 text-text-muted" data-testid="organisation-storage-free">
+                Pro holds {formatStorage(PAID_STORAGE_MB * MB)}.
+              </p>
+            )}
+          </>
+        )}
+      </dd>
+    </>
+  );
+}

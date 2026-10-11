@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Types } from "mongoose";
 
+const { getOrganisation } = vi.hoisted(() => ({ getOrganisation: vi.fn() }));
+
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+vi.mock("./organisation", () => ({ getOrganisation }));
 vi.mock("@/models/rateLimit", async () => {
   const { inMemoryRateLimitModel } = await import("@/lib/rate-limit-test-store");
   return { RateLimit: inMemoryRateLimitModel() };
@@ -11,14 +14,14 @@ import { resetRateLimits } from "./rate-limit";
 import type { ScopedDb } from "./db-scope";
 import {
   CLOUD_REQUESTS_PER_MINUTE,
-  CLOUD_STORAGE_MB,
   machinePrincipal,
   organisationUsage,
   requestLimitRefusal,
   requestsPerMinute,
-  storageLimitBytes,
+  storageLimitFor,
   storageLimitRefusal,
 } from "./organisation-limits";
+import { FREE_STORAGE_MB, PAID_STORAGE_MB } from "./storage-size";
 
 const ACME = new Types.ObjectId("0000000000000000000000a1");
 const GLOBEX = new Types.ObjectId("0000000000000000000000b2");
@@ -28,6 +31,7 @@ beforeEach(async () => {
   delete process.env.ORGANISATION_DOMAIN;
   delete process.env.ORGANISATION_REQUESTS_PER_MINUTE;
   delete process.env.ORGANISATION_STORAGE_MB;
+  getOrganisation.mockImplementation(async (id: Types.ObjectId) => ({ entitlements: { plan: id.equals(GLOBEX) ? "pro" : "free" } }));
   await resetRateLimits();
 });
 
@@ -39,18 +43,42 @@ afterEach(() => {
 describe("organisation limits (BP-894)", () => {
   it("are off on a self-hosted instance until set, and on by default with organisations on subdomains", () => {
     expect(requestsPerMinute()).toBe(0);
-    expect(storageLimitBytes()).toBe(0);
+    expect(storageLimitFor("free").bytes).toBe(0);
 
     process.env.ORGANISATION_DOMAIN = "board-planner.com";
     expect(requestsPerMinute()).toBe(CLOUD_REQUESTS_PER_MINUTE);
-    expect(storageLimitBytes()).toBe(CLOUD_STORAGE_MB * MB);
 
     process.env.ORGANISATION_REQUESTS_PER_MINUTE = "0";
     expect(requestsPerMinute()).toBe(0);
 
     delete process.env.ORGANISATION_DOMAIN;
     process.env.ORGANISATION_STORAGE_MB = "10";
-    expect(storageLimitBytes()).toBe(10 * MB);
+    expect(storageLimitFor("free").bytes).toBe(10 * MB);
+  });
+
+  describe("storage follows the plan (BP-967)", () => {
+    it("is 1 GB on Free and 20 GB on Pro or its trial, and only the Free one says an upgrade lifts it", () => {
+      process.env.ORGANISATION_DOMAIN = "board-planner.com";
+
+      expect(storageLimitFor("free")).toEqual({ bytes: FREE_STORAGE_MB * MB, upgradeLifts: true });
+      expect(storageLimitFor("pro")).toEqual({ bytes: PAID_STORAGE_MB * MB, upgradeLifts: false });
+      expect([FREE_STORAGE_MB, PAID_STORAGE_MB]).toEqual([1024, 20480]);
+    });
+
+    it("lets an operator's value hold for every plan, and 0 switch it off, with no upgrade offered", () => {
+      process.env.ORGANISATION_DOMAIN = "board-planner.com";
+      process.env.ORGANISATION_STORAGE_MB = "300";
+      expect(storageLimitFor("free")).toEqual({ bytes: 300 * MB, upgradeLifts: false });
+      expect(storageLimitFor("pro")).toEqual({ bytes: 300 * MB, upgradeLifts: false });
+
+      process.env.ORGANISATION_STORAGE_MB = "0";
+      expect(storageLimitFor("free")).toEqual({ bytes: 0, upgradeLifts: false });
+    });
+
+    it("is no limit for any plan on a self-hosted instance until set, and never offers an upgrade", () => {
+      expect(storageLimitFor("free")).toEqual({ bytes: 0, upgradeLifts: false });
+      expect(storageLimitFor("pro")).toEqual({ bytes: 0, upgradeLifts: false });
+    });
   });
 
   it("falls back to the default for a value that is not a whole number, and says so", () => {
@@ -128,13 +156,31 @@ describe("organisation limits (BP-894)", () => {
 
   it("lets through an upload that fills the storage exactly, and refuses one byte more", async () => {
     process.env.ORGANISATION_STORAGE_MB = "10";
+    const limit = storageLimitFor("free");
 
-    expect(storageLimitRefusal(9 * MB, MB)).toBeNull();
-    const refused = storageLimitRefusal(9 * MB, MB + 1);
+    expect(storageLimitRefusal(9 * MB, MB, limit)).toBeNull();
+    const refused = storageLimitRefusal(9 * MB, MB + 1, limit);
     expect(refused?.status).toBe(413);
     expect((await refused!.json()).error).toBe(
       "This organisation has used 9 MB of its 10 MB of file storage, so no more files can be uploaded."
     );
+  });
+
+  it("names the Free plan and what Pro holds when the Free default is what refuses (BP-967)", async () => {
+    process.env.ORGANISATION_DOMAIN = "board-planner.com";
+
+    const refused = storageLimitRefusal(1000 * MB, 100 * MB, storageLimitFor("free"));
+
+    expect(refused?.status).toBe(413);
+    expect(await refused!.json()).toEqual({
+      error: "This organisation has used 1000 MB of its 1 GB of file storage on the Free plan, so no more files can be uploaded. Upgrade to Pro for 20 GB.",
+      feature: "storage.limit",
+      plan: "free",
+      limit: 1024 * MB,
+      stored: 1000 * MB,
+    });
+    expect(storageLimitRefusal(1000 * MB, 24 * MB, storageLimitFor("free"))).toBeNull();
+    expect(storageLimitRefusal(1000 * MB, 100 * MB, storageLimitFor("pro"))).toBeNull();
   });
 });
 
@@ -149,9 +195,16 @@ describe("organisationUsage (BP-678)", () => {
     await requestLimitRefusal(GLOBEX, principal);
 
     const first = await organisationUsage(asDb(ACME));
-    expect(first).toEqual({ requestsThisMinute: 2, requestsPerMinute: CLOUD_REQUESTS_PER_MINUTE, storedBytes: 0, storageLimitBytes: CLOUD_STORAGE_MB * MB });
+    expect(first).toEqual({ requestsThisMinute: 2, requestsPerMinute: CLOUD_REQUESTS_PER_MINUTE, storedBytes: 0, storageLimitBytes: FREE_STORAGE_MB * MB });
     expect((await organisationUsage(asDb(ACME))).requestsThisMinute).toBe(2);
     expect((await organisationUsage(asDb(GLOBEX))).requestsThisMinute).toBe(1);
+  });
+
+  it("reports each organisation's storage ceiling by its own plan (BP-967)", async () => {
+    process.env.ORGANISATION_DOMAIN = "board-planner.com";
+
+    expect((await organisationUsage(asDb(ACME))).storageLimitBytes).toBe(FREE_STORAGE_MB * MB);
+    expect((await organisationUsage(asDb(GLOBEX))).storageLimitBytes).toBe(PAID_STORAGE_MB * MB);
   });
 
   it("counts nothing once the minute has run out", async () => {
