@@ -53,6 +53,20 @@ export function organisationUploads(db: ScopedDb) {
         }
       }
     },
+    // The files named, when they are this organisation's: chunks before the file row, as below
+    remove: async (ids: string[]): Promise<void> => {
+      const objectIds = ids.filter((id) => mongoose.isValidObjectId(id)).map((id) => new mongoose.Types.ObjectId(id));
+      if (objectIds.length === 0) return;
+      const files = mongoose.connection.db!.collection(`${UPLOAD_BUCKET}.files`);
+      const chunks = mongoose.connection.db!.collection(`${UPLOAD_BUCKET}.chunks`);
+      const owned = await files
+        .find({ _id: { $in: objectIds }, "metadata.organisation": db.organisation }, { projection: { _id: 1 } })
+        .toArray();
+      for (const { _id } of owned) {
+        await chunks.deleteMany({ files_id: _id });
+        await files.deleteOne({ _id });
+      }
+    },
     // Chunks before their file row, so an interrupted run leaves a row it can find again
     deleteAll: async (): Promise<number> => {
       const files = mongoose.connection.db!.collection(`${UPLOAD_BUCKET}.files`);

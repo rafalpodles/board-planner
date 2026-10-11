@@ -1,16 +1,19 @@
+import { createHash, randomBytes } from "node:crypto";
+import bcrypt from "bcryptjs";
 import type { Types } from "mongoose";
 import { connectDB } from "@/lib/db";
 import type { ScopedDb } from "@/lib/db-scope";
+import { organisationUploads } from "@/lib/upload-ownership";
+import { workerDisplayName } from "@/lib/worker-user";
 
 export interface ErasedAccount {
   _id: Types.ObjectId | string;
   username: string;
   email?: string;
-  fullName?: string;
 }
 
 export function erasedLabel(userId: Types.ObjectId | string): string {
-  return `deleted-${String(userId).slice(-8)}`;
+  return `deleted-${createHash("sha256").update(String(userId)).digest("hex").slice(0, 8)}`;
 }
 
 function escapeRegExp(value: string): string {
@@ -32,59 +35,71 @@ export function scrubNames(text: string, names: string[], label: string): string
   return out;
 }
 
-const SCRUBBED_AUDIT_FIELDS = ["actorUsername", "target", "detail"] as const;
+// The two actions whose detail is "before → after" of something personal, old values included
+const PERSONAL_CHANGE = /email_changed|full_name_changed/;
+const BOARD_ACCESS_ACTIONS = ["member_added", "member_role_changed", "member_removed", "member_invited"] as const;
 
 async function scrubInstanceAudit(db: ScopedDb, user: ErasedAccount, names: string[], label: string) {
+  const email = user.email ?? "";
   const rows = await db.InstanceAuditLog.find({
     $or: [
       { user: user._id },
       { actorUsername: user.username },
       { target: user.username },
-      { detail: { $regex: nameMatcher(user.username).source, $options: "i" } },
-      ...(user.email ? [{ detail: { $regex: nameMatcher(user.email).source, $options: "i" } }] : []),
+      ...(email ? [{ target: email }] : []),
     ],
   })
-    .select("actorUsername target detail")
+    .select("action actorUsername target detail")
     .lean();
+
+  const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
   for (const row of rows) {
     const set: Record<string, string> = {};
-    for (const field of SCRUBBED_AUDIT_FIELDS) {
-      const before = (row as unknown as Record<string, string | undefined>)[field] ?? "";
-      const after = scrubNames(before, names, label);
-      if (after !== before) set[field] = after;
-    }
+    const actor = row.actorUsername ?? "";
+    const target = row.target ?? "";
+    if (same(actor, user.username)) set.actorUsername = label;
+    if (same(target, user.username) || (email && same(target, email))) set.target = label;
+    const detail = row.detail ?? "";
+    const scrubbed = PERSONAL_CHANGE.test(row.action) && set.target ? label : scrubNames(detail, names, label);
+    if (scrubbed !== detail) set.detail = scrubbed;
     if (Object.keys(set).length > 0) await db.InstanceAuditLog.updateOne({ _id: row._id }, { $set: set });
   }
 }
 
-async function scrubProjectAudit(db: ScopedDb, user: ErasedAccount, names: string[], label: string) {
-  const mentions = names.map((name) => ({ $regex: nameMatcher(name).source, $options: "i" }));
+// "<person>: viewer → editor" opens with whoever the grant was about, and is read only there:
+// a role named "editor" or "viewer" elsewhere in the log is not a person
+async function scrubBoardAccessAudit(db: ScopedDb, user: ErasedAccount, label: string) {
+  const who = [user.username, ...(user.email ? [user.email] : [])].map(escapeRegExp).join("|");
   const rows = await db.ProjectAuditLog.find({
-    $or: mentions.flatMap((m) => [{ detail: m }, { lines: m }]),
+    action: { $in: [...BOARD_ACCESS_ACTIONS] },
+    detail: { $regex: `^(?:${who}): `, $options: "i" },
   })
-    .select("detail lines")
+    .select("detail")
     .lean();
+  const leading = new RegExp(`^(?:${who})(?=: )`, "i");
   for (const row of rows) {
-    const detail = scrubNames(row.detail ?? "", names, label);
-    const lines = (row.lines ?? []).map((line: string) => scrubNames(line, names, label));
-    await db.ProjectAuditLog.updateOne({ _id: row._id }, { $set: { detail, ...(row.lines ? { lines } : {}) } });
+    await db.ProjectAuditLog.updateOne({ _id: row._id }, { $set: { detail: (row.detail ?? "").replace(leading, label) } });
   }
 }
 
 async function releaseMachinesOf(db: ScopedDb, user: ErasedAccount) {
   const workers = await db.Worker.find({ owner: user._id }).select("_id name identity").lean();
   for (const worker of workers) {
-    await db.Worker.updateOne({ _id: worker._id }, { $set: { owner: null, enabled: false } });
-    if (worker.identity && user.fullName) {
-      const machine = await db.User.findById(worker.identity).select("fullName");
-      if (machine?.fullName) {
-        const prefix = `${user.fullName} · `;
-        if (machine.fullName.startsWith(prefix)) {
-          await db.User.updateOne({ _id: machine._id }, { $set: { fullName: machine.fullName.slice(prefix.length) } });
-        }
-      }
+    // The credential too: once the owner is gone, revoking "this owner's machines" no longer finds it
+    const unmatchable = await bcrypt.hash(randomBytes(32).toString("hex"), 10);
+    await db.Worker.updateOne({ _id: worker._id }, { $set: { owner: null, enabled: false, credentialHash: unmatchable } });
+    // The machine's account is named after its owner and machine; the owner is the part that goes
+    if (worker.identity) {
+      await db.User.updateOne({ _id: worker.identity }, { $set: { fullName: workerDisplayName(worker.name, "") } });
     }
   }
+}
+
+async function deleteConversations(db: ScopedDb, user: ErasedAccount) {
+  const messages = await db.PmMessage.find({ triggeredBy: user._id }).select("attachments").lean();
+  const files = messages.flatMap((m) => (m.attachments ?? []).map((a: { fileId: string }) => a.fileId));
+  await organisationUploads(db)?.remove(files);
+  await db.PmMessage.deleteMany({ triggeredBy: user._id });
 }
 
 /**
@@ -96,20 +111,28 @@ export async function eraseAccountTraces(db: ScopedDb, user: ErasedAccount): Pro
   await connectDB();
   const label = erasedLabel(user._id);
   const names = [user.username, ...(user.email ? [user.email] : [])];
+  const quiet = { timestamps: false };
 
   await db.Notification.deleteMany({ $or: [{ recipient: user._id }, { actor: user._id }] });
-  await db.PmMessage.deleteMany({ triggeredBy: user._id });
+  await deleteConversations(db, user);
   await db.OAuthConsent.deleteMany({ user: user._id });
   await db.Invitation.deleteMany({
     $or: [{ acceptedBy: user._id }, ...(user.email ? [{ email: user.email }] : [])],
   });
+
+  // A reference to nobody reads as unassigned everywhere it is shown, so it is stored as that: the
+  // dashboard, the assignee filter and "assign it again" otherwise disagree with the board
+  await db.Task.updateMany({ assignee: user._id }, { $set: { assignee: null } }, quiet);
+  await db.Task.updateMany({ assignedBy: user._id }, { $set: { assignedBy: null } }, quiet);
+  await db.Task.updateMany({ pmAssignedFor: user._id }, { $set: { pmAssignedFor: null } }, quiet);
+  await db.Task.updateMany({ watchers: user._id }, { $pull: { watchers: user._id } }, quiet);
 
   // The assignee is written into history as a username, not as a reference
   await db.ActivityLog.updateMany({ field: "assignee", oldValue: user.username }, { $set: { oldValue: label } });
   await db.ActivityLog.updateMany({ field: "assignee", newValue: user.username }, { $set: { newValue: label } });
 
   await scrubInstanceAudit(db, user, names, label);
-  await scrubProjectAudit(db, user, names, label);
+  await scrubBoardAccessAudit(db, user, label);
   await releaseMachinesOf(db, user);
   return label;
 }

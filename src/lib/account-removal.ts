@@ -58,15 +58,16 @@ export async function removeAccount(
   // A delete cannot be undone, so the account first stops counting, as a deactivated one does, and
   // the two invariants are counted again without it: a demotion, deactivation or removal racing
   // this one counted this account as still there (BP-841)
+  let markedAt: Date | null = null;
   if (!user.deactivatedAt) {
-    const markedAt = new Date();
-    const marked = await db.User.updateOne({ _id: user._id, deactivatedAt: null }, { $set: { deactivatedAt: markedAt } });
+    const mark = new Date();
+    const marked = await db.User.updateOne({ _id: user._id, deactivatedAt: null }, { $set: { deactivatedAt: mark } });
     if (marked.modifiedCount > 0) {
+      markedAt = mark;
       const lastAdminGone = user.role === "admin" && (await db.User.countDocuments(ACTIVE_ADMINS)) === 0;
       const ownerless = lastAdminGone ? [] : await boardsLeftWithoutOwner(db, String(user._id));
       if (lastAdminGone || ownerless.length > 0) {
-        // Only this request's own mark: a deactivation landing meanwhile stays
-        await db.User.updateOne({ _id: user._id, deactivatedAt: markedAt }, { $set: { deactivatedAt: null } });
+        await unmark(db, user, mark);
         return {
           ok: false,
           status: 409,
@@ -76,19 +77,23 @@ export async function removeAccount(
     }
   }
 
-  // Before the delete, and after the mark above: a failure here leaves a deactivated account that
-  // can be deleted again, where erasing afterwards would leave traces nobody can name any more
-  const label = await eraseAccountTraces(db, user);
+  // Before the delete, and after the mark above. A failure here gives the mark back, so a person who
+  // asked for this is not left locked out of an account half emptied; erasing again is harmless
+  let label: string;
+  try {
+    label = await eraseAccountTraces(db, user);
+  } catch (error) {
+    if (markedAt) await unmark(db, user, markedAt).catch(() => {});
+    throw error;
+  }
 
   // The delete's own answer, not a discarded one: two requests deleting the same account otherwise
   // both hear that they did it, and the checks above are read-then-write.
   const deleted = await db.User.findByIdAndDelete(user._id);
   if (!deleted) return { ok: false, status: 404, error: "User not found" };
 
-  // After the delete and BEFORE the revoke, which is the opposite order to the password path: there,
-  // nothing is committed until the save, so a failed revoke must leave the account untouched. Here
-  // the account is already gone, and a revoke that throws would take the only record of it having
-  // existed with it. Named by an opaque label, not the username, so the log does not keep it.
+  // After the delete: the account is already gone, and a step that throws would take the only record
+  // of it having existed with it. Named by an opaque label, not the username, so the log does not keep it.
   void logInstanceAudit(db, {
     action: "user_deleted",
     user: actor._id,
@@ -98,8 +103,14 @@ export async function removeAccount(
   });
 
   await db.Grant.deleteMany({ subject: user._id });
+  // Last, so a failed erasure above never unlinks the one way a person has to sign in
   await revokeUserCredentials(user._id);
   if (user.role === "admin") void warnIfAdminsLockedOut(db, "an administrator's deletion");
 
   return { ok: true };
+}
+
+// Only this request's own mark: a deactivation landing meanwhile stays
+async function unmark(db: ScopedDb, user: HydratedDocument<IUser>, markedAt: Date) {
+  await db.User.updateOne({ _id: user._id, deactivatedAt: markedAt }, { $set: { deactivatedAt: null } });
 }

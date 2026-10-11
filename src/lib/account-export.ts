@@ -1,5 +1,6 @@
 import type { Types } from "mongoose";
 import type { ScopedDb } from "@/lib/db-scope";
+import { accessibleProjectIds, type IdentifiedSubject } from "@/lib/grants";
 
 type Id = Types.ObjectId | string;
 
@@ -9,8 +10,10 @@ type Id = Types.ObjectId | string;
  * created and their conversations with the PM agent. Never a password hash, a token's hash or a
  * webhook address — a download is not a way to carry a credential out.
  */
-export async function accountExport(db: ScopedDb, user: { _id: Id }) {
+export async function accountExport(db: ScopedDb, user: IdentifiedSubject) {
   const userId = user._id as Id;
+  const reach = await accessibleProjectIds(db, user);
+  const mayRead = (project: unknown) => reach === null || reach.includes(String(project));
   const [record, grants, identities, apiTokens, tasks, comments, pmMessages, notifications] = await Promise.all([
     db.User.findById(userId).lean(),
     db.Grant.find({ subject: userId }).lean(),
@@ -71,13 +74,13 @@ export async function accountExport(db: ScopedDb, user: { _id: Id }) {
       createdAt: c.createdAt,
       body: c.body,
     })),
-    tasksCreated: tasks.map((t) => ({
-      key: taskKey(t),
-      title: t.title,
-      description: t.description,
-      status: t.status,
-      createdAt: t.createdAt,
-    })),
+    // A board the person no longer reaches shows them only that they made the task: what it says now
+    // is other people's work, and an export is not a way back in
+    tasksCreated: tasks.map((t) =>
+      mayRead(t.project)
+        ? { key: taskKey(t), title: t.title, description: t.description, status: t.status, createdAt: t.createdAt }
+        : { key: taskKey(t), createdAt: t.createdAt }
+    ),
     pmMessages: pmMessages.map((m) => ({
       board: keyOf.get(String(m.project)) ?? String(m.project),
       role: m.role,
