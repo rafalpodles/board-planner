@@ -122,6 +122,7 @@ export function SprintFormModal({
             <input
               type="date"
               value={endDate}
+              min={startDate || undefined}
               onChange={(e) => setEndDate(e.target.value)}
               required
               className="focus-ring w-full bg-bg-input border border-border rounded px-3 py-1.5 text-sm"
