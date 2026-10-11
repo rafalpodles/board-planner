@@ -98,7 +98,7 @@ export const PUT = withProjectAccess(async (_request, { params, user, db }) => {
   const me = await db.User.findById(user._id, "dismissedSetupGuides").lean();
   if (!(me?.dismissedSetupGuides ?? []).some((id) => String(id) === String(projectId))) {
     await db.User.updateOne(
-      { _id: user._id },
+      { _id: user._id, dismissedSetupGuides: { $ne: projectId } },
       { $push: { dismissedSetupGuides: { $each: [projectId], $slice: -MAX_DISMISSED_SETUP_GUIDES } } }
     );
   }

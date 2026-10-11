@@ -29,7 +29,8 @@ export function useSetupGuide(projectRef: string | undefined, pathname: string, 
         settled.current = true;
         // Finished, as opposed to hidden or not this reader's: a machine going quiet overnight must
         // not bring a completed guide back, so the finish is kept the way Hide is
-        if (body.steps.length > 0) void api.put(`/api/projects/${projectRef}/setup-guide`, { body: {} }).catch(() => undefined);
+        // A step locked by somebody else is not a finish: lifting the lock must bring the rest back
+        if (body.steps.length > 0 && !body.steps.some((s) => s.locked)) void api.put(`/api/projects/${projectRef}/setup-guide`, { body: {} }).catch(() => undefined);
       })
       .catch(() => {
         if (read > reads.current.hiddenAfter) setGuide(null);

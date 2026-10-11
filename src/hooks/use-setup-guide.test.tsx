@@ -95,14 +95,33 @@ describe("useSetupGuide", () => {
     renderHook(() => useSetupGuide("ORB", "/projects/ORB", true));
     await waitFor(() => expect(api.get).toHaveBeenCalledTimes(1));
     await act(async () => {});
+    vi.useFakeTimers();
 
     act(() => {
       window.dispatchEvent(new Event("focus"));
     });
     window.dispatchEvent(new CustomEvent("bp:api-write", { detail: { url: "/api/projects/p/tasks" } }));
-    await act(async () => {});
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
 
     expect(api.get).toHaveBeenCalledTimes(1);
+    expect(api.put).not.toHaveBeenCalled();
+  });
+
+  it("does not keep a finish when a step in it is locked by somebody else, so lifting the lock brings the rest back", async () => {
+    api.get.mockResolvedValue({
+      show: false,
+      steps: [
+        { id: "tasks", group: "board", done: true, locked: false },
+        { id: "runs", group: "agents", done: false, locked: true },
+      ],
+    });
+    renderHook(() => useSetupGuide("ORB", "/projects/ORB", true));
+
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(1));
+    await act(async () => {});
+
     expect(api.put).not.toHaveBeenCalled();
   });
 

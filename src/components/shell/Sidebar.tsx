@@ -177,8 +177,10 @@ export function Sidebar({
   const [menuOpen, setMenuOpen] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
   const returnFocusToCard = useRef(false);
+  const focusPanelOnMount = useRef(false);
   useEffect(() => {
     returnFocusToCard.current = false;
+    focusPanelOnMount.current = false;
   });
   const [unreadCount, setUnreadCount] = useState(0);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -289,7 +291,16 @@ export function Sidebar({
 
   const isActive = (href: string) => isNavItemActive(pathname, href);
 
-  const drawerAwareCollapseLabel = isDrawer
+  // With the guide open on a rail the person chose, the button gives the guide up and nothing else
+  const guideOnRail = guideOpenNow && mode !== "expanded" && !isDrawer;
+  const collapseButton = () => {
+    if (guideOnRail) setGuideOpen(false);
+    else toggleCollapsed();
+  };
+
+  const drawerAwareCollapseLabel = guideOnRail
+    ? "Close setup guide"
+    : isDrawer
     ? "Close navigation"
     : mode === "hover"
       ? "Pin sidebar open"
@@ -323,7 +334,7 @@ export function Sidebar({
         floats ? "md:fixed md:top-0 md:z-[45]" : "md:sticky md:top-0 md:z-30"
       } ${mobileOpen ? "translate-x-0" : "-translate-x-full"} ${
         compact ? "md:w-14" : "md:w-[260px]"
-      } ${floats && peeking ? "md:shadow-xl" : ""}`}
+      } ${floats && (peeking || guideOpenNow) ? "md:shadow-xl" : ""}`}
     >
       <div
         className={`flex items-center gap-2 px-3.5 pb-2.5 pt-3.5 ${
@@ -340,7 +351,7 @@ export function Sidebar({
           {!compact && <span className="truncate text-[15px] font-bold">{APP_NAME}</span>}
         </Link>
         <button
-          onClick={isDrawer ? onCloseMobile : toggleCollapsed}
+          onClick={isDrawer ? onCloseMobile : collapseButton}
           title={drawerAwareCollapseLabel}
           aria-label={drawerAwareCollapseLabel}
           className={`focus-ring flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md text-text-muted transition-colors hover:bg-bg-hover hover:text-text md:min-h-0 md:min-w-0 md:p-1 ${
@@ -365,6 +376,7 @@ export function Sidebar({
         <SetupGuidePanel
           guide={guide}
           projectRef={projectRef}
+          focusOnMount={focusPanelOnMount.current}
           onClose={() => {
             returnFocusToCard.current = true;
             setGuideOpen(false);
@@ -439,7 +451,10 @@ export function Sidebar({
           guide={guide}
           compact={compact}
           focusOnMount={returnFocusToCard.current}
-          onOpen={() => setGuideOpen(true)}
+          onOpen={() => {
+            focusPanelOnMount.current = true;
+            setGuideOpen(true);
+          }}
         />
       )}
 

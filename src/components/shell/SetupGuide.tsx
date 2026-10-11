@@ -120,11 +120,14 @@ export function SetupGuidePanel({
   projectRef,
   onClose,
   onHide,
+  focusOnMount = false,
 }: {
   guide: ApiSetupGuide;
   projectRef: string;
   onClose: () => void;
   onHide: () => void;
+  /** Only when the person has just opened it: a panel that comes back after a failed read keeps their place */
+  focusOnMount?: boolean;
 }) {
   const { done, total, next } = progress(guide);
   const groups = [...new Set(guide.steps.map((s) => s.group))] as SetupGuideGroupId[];
@@ -134,7 +137,8 @@ export function SetupGuidePanel({
   // The button that opened this is gone, so focus is put where the reader's attention now is
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
-    heading.current?.focus();
+    if (focusOnMount) heading.current?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (

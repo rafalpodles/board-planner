@@ -151,4 +151,18 @@ describe("where the steps send you", () => {
     expect(link.getAttribute("target")).toBe("_blank");
     expect(screen.getByTestId("setup-guide-next").textContent).toContain("Connect an MCP client");
   });
+
+  describe("focus", () => {
+    const g = guide([]);
+
+    it("goes to the heading only when the person has just opened the panel", () => {
+      render(<SetupGuidePanel guide={g} projectRef="ORB" onClose={vi.fn()} onHide={vi.fn()} focusOnMount />);
+      expect(document.activeElement?.textContent?.trim()).toBe("Setup guide");
+    });
+
+    it("stays where it was when the panel comes back by itself after a failed read", () => {
+      render(<SetupGuidePanel guide={g} projectRef="ORB" onClose={vi.fn()} onHide={vi.fn()} />);
+      expect(document.activeElement).toBe(document.body);
+    });
+  });
 });

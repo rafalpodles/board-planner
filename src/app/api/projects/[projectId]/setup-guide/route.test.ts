@@ -193,7 +193,8 @@ describe("PUT setup guide", () => {
     expect(res.status).toBe(200);
     expect(userUpdate).toHaveBeenCalledTimes(1);
     const [filter, update] = userUpdate.mock.calls[0];
-    expect(filter).toEqual({ _id: READER, organisation: DEFAULT_ORGANISATION_ID });
+    // The filter keeps two quick PUTs, as StrictMode makes, from pushing the board twice
+    expect(filter).toEqual({ _id: READER, dismissedSetupGuides: { $ne: PROJECT }, organisation: DEFAULT_ORGANISATION_ID });
     expect(update).toEqual({ $push: { dismissedSetupGuides: { $each: [PROJECT], $slice: -200 } } });
   });
 

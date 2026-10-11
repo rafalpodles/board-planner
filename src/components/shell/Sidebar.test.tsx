@@ -600,4 +600,15 @@ describe("Sidebar and the setup guide", () => {
 
     expect(screen.queryByTestId("setup-guide-panel")).toBeNull();
   });
+
+  it("gives only the guide up with the collapse button when the person chose the rail, and says so", async () => {
+    localStorage.setItem("sidebar-mode", "collapsed");
+    renderSidebar();
+    fireEvent.click(await screen.findByTestId("setup-guide-card"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Close setup guide" }));
+
+    expect(screen.queryByTestId("setup-guide-panel")).toBeNull();
+    expect(localStorage.getItem("sidebar-mode")).toBe("collapsed");
+  });
 });
