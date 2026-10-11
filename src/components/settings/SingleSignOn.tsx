@@ -29,28 +29,23 @@ interface SsoAnswer {
 const TITLE = "Your identity provider";
 const day = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
 
-// Removal is allowed on any plan: what an organisation stored stays stored after a downgrade, and it can take it away
-function Removal({ busy, onRemove }: { busy: boolean; onRemove: () => Promise<void> }) {
-  const [confirming, setConfirming] = useState(false);
+// Removal is allowed on any plan: what an organisation stored stays stored after a downgrade, and it can take it away.
+// The dialog stands outside the form: its buttons would otherwise submit it.
+function RemovalDialog({ open, busy, onClose, onRemove }: { open: boolean; busy: boolean; onClose: () => void; onRemove: () => Promise<void> }) {
   return (
-    <>
-      <Button type="button" variant="secondary" disabled={busy} onClick={() => setConfirming(true)}>
-        Remove
-      </Button>
-      <ConfirmDialog
-        open={confirming}
-        onClose={() => setConfirming(false)}
-        onConfirm={async () => {
-          await onRemove();
-          setConfirming(false);
-        }}
-        title="Remove your identity provider?"
-        message="Signing in with it stops at once. People who only ever signed in through it use Forgot password to set a password. You will need the client secret to add it again."
-        confirmLabel="Remove"
-        loadingLabel="Removing…"
-        loading={busy}
-      />
-    </>
+    <ConfirmDialog
+      open={open}
+      onClose={onClose}
+      onConfirm={async () => {
+        await onRemove();
+        onClose();
+      }}
+      title="Remove your identity provider?"
+      message="Signing in with it stops at once. People who only ever signed in through it use Forgot password to set a password. You will need the client secret to add it again."
+      confirmLabel="Remove"
+      loadingLabel="Removing…"
+      loading={busy}
+    />
   );
 }
 
@@ -59,6 +54,7 @@ function RemoveStored({ onSaved }: { onSaved: (answer: SsoAnswer) => void }) {
   const { toast } = useToast();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [confirming, setConfirming] = useState(false);
 
   async function remove() {
     setBusy(true);
@@ -80,7 +76,10 @@ function RemoveStored({ onSaved }: { onSaved: (answer: SsoAnswer) => void }) {
           {error}
         </p>
       )}
-      <Removal busy={busy} onRemove={remove} />
+      <Button type="button" variant="secondary" disabled={busy} onClick={() => setConfirming(true)}>
+        Remove
+      </Button>
+      <RemovalDialog open={confirming} busy={busy} onClose={() => setConfirming(false)} onRemove={remove} />
     </div>
   );
 }
@@ -95,6 +94,7 @@ function Form({ state, onSaved }: { state: SsoAnswer; onSaved: (answer: SsoAnswe
   const [clientSecret, setClientSecret] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
   // The stored secret belongs to the issuer and client it was given for; the server asks again when either changes
   const needsSecret = !state.set || state.unreadable === true || issuer.trim() !== state.issuer || clientId.trim() !== state.clientId;
@@ -167,9 +167,14 @@ function Form({ state, onSaved }: { state: SsoAnswer; onSaved: (answer: SsoAnswe
           <Button type="submit" disabled={busy || !issuer.trim() || !clientId.trim() || (needsSecret && !clientSecret)}>
             {busy ? "Checking…" : state.set ? "Save changes" : "Save provider"}
           </Button>
-          {state.set && <Removal busy={busy} onRemove={() => send(() => api.del("/api/settings/sso"), "Sign-in provider removed")} />}
+          {state.set && (
+            <Button type="button" variant="secondary" disabled={busy} onClick={() => setConfirming(true)}>
+              Remove
+            </Button>
+          )}
         </div>
       </form>
+      <RemovalDialog open={confirming} busy={busy} onClose={() => setConfirming(false)} onRemove={() => send(() => api.del("/api/settings/sso"), "Sign-in provider removed")} />
     </>
   );
 }
