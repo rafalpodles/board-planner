@@ -312,10 +312,19 @@ describe("DELETE members", () => {
     expect(res.status).toBe(409);
     expect(grantUpdateOne).toHaveBeenCalledWith(
       { subject: U2, objectType: "project", object: PROJECT, organisation: DEFAULT_ORGANISATION_ID },
-      { $setOnInsert: { relation: "owner", createdBy: "o0" } },
+      { $setOnInsert: { relation: "owner", createdBy: "o0", source: "manual" } },
       { upsert: true }
     );
     expect(logProjectAudit).not.toHaveBeenCalled();
+  });
+
+  it("puts a group-made owner's grant back as a group-made one", async () => {
+    grantDeleteLean.mockResolvedValue({ relation: "owner", createdBy: "o0", source: "idp" });
+    ownerCount.mockResolvedValueOnce(2).mockResolvedValueOnce(0);
+
+    await DELETE(new Request(`http://x/api/projects/${PROJECT}/members?userId=${U2}`, { method: "DELETE" }), { params });
+
+    expect(grantUpdateOne).toHaveBeenCalledWith(expect.anything(), { $setOnInsert: { relation: "owner", createdBy: "o0", source: "idp" } }, { upsert: true });
   });
 
   it("makes them owner again when a concurrent write re-added them as a member meanwhile", async () => {

@@ -252,9 +252,8 @@ test("a grant a group made is marked until somebody changes it by hand, and the 
     await mongoose.connection.db!.collection("grants").updateOne({ subject: MEMBER_ID }, { $set: { source: "idp" } });
     await signIn(page);
     await page.goto(`${SETTINGS}?section=general`);
-    const row = page.locator("div").filter({ has: page.getByLabel(`Access for ${MEMBER_USERNAME}`) }).filter({ hasText: "IdP" }).last();
-    await expect(row.getByText("IdP", { exact: true })).toBeVisible();
     await expect(page.getByText("IdP", { exact: true })).toHaveCount(1);
+    await expect(page.getByText("E2E Member")).toContainText("IdP");
     await page.screenshot({ path: "e2e/.artifacts/bp861-idp-marker.png" });
 
     await page.getByLabel(`Access for ${MEMBER_USERNAME}`).selectOption("owner");

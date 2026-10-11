@@ -221,13 +221,13 @@ export const DELETE = withProjectOwner(async (request, { params, user, db }) => 
   // Read before the delete: nothing after it may turn into a failed response
   const person = await db.User.findById(subject).select("username");
   const removed = await db.Grant.findOneAndDelete({ subject, objectType: "project", object: projectId })
-    .select("relation createdBy")
+    .select("relation createdBy source")
     .lean();
   // Put back if a concurrent removal or deactivation left the board with no active owner (BP-841)
   if (removed?.relation === "owner" && subjectActive && (await ownerCount(db, projectId)) === 0) {
     await db.Grant.updateOne(
       { subject, objectType: "project", object: projectId },
-      { $setOnInsert: { relation: "owner", createdBy: removed.createdBy } },
+      { $setOnInsert: { relation: "owner", createdBy: removed.createdBy, source: removed.source ?? "manual" } },
       { upsert: true }
     );
     // Somebody re-added them as a member meanwhile, so the insert did nothing: they are made owner
