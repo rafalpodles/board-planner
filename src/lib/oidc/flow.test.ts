@@ -8,6 +8,7 @@ const buildAuthorizationUrl = vi.fn();
 const findOneAndDelete = vi.fn();
 const create = vi.fn();
 const allowInsecureRequests = vi.fn();
+const customFetch = Symbol("custom-fetch");
 const Configuration = vi.fn(function (this: Record<string, unknown>, ...args: unknown[]) {
   this.args = args;
 });
@@ -17,6 +18,7 @@ vi.mock("openid-client", () => ({
   authorizationCodeGrant,
   buildAuthorizationUrl,
   allowInsecureRequests,
+  customFetch,
   Configuration,
   ClientSecretPost: (secret: string) => ({ post: secret }),
   skipStateCheck: Symbol("skip-state-check"),
@@ -90,6 +92,32 @@ describe("beginning a sign-in", () => {
 
     expect(discovery.mock.calls[0][4]).toEqual({ execute: [allowInsecureRequests] });
     expect(discovery.mock.calls[1][4]).toEqual({ execute: [] });
+  });
+});
+
+describe("a provider an organisation named (BP-951)", () => {
+  const OWN = { ...PROVIDER, own: true as const, issuer: "https://id.acme.example" };
+
+  it("is reached only through the guard against internal addresses, which the operator's own provider is not", async () => {
+    await beginFlow(scopedToDefaultOrganisation(), { provider: OWN, origin: ORIGIN, intent: "signin" });
+    await beginFlow(scopedToDefaultOrganisation(), { provider: { ...PROVIDER, issuer: "https://id.operator.example" }, origin: ORIGIN, intent: "signin" });
+
+    expect(typeof discovery.mock.calls[0][4][customFetch]).toBe("function");
+    expect(discovery.mock.calls[1][4][customFetch]).toBeUndefined();
+  });
+
+  it("does not hand one organisation's discovered client to another that names the same issuer with another secret", async () => {
+    const issuer = "https://shared-idp.example";
+    const start = (clientSecret: string) =>
+      beginFlow(scopedToDefaultOrganisation(), { provider: { ...OWN, issuer, clientSecret }, origin: ORIGIN, intent: "signin" });
+
+    await start("secret-a");
+    await start("secret-a");
+    expect(discovery).toHaveBeenCalledTimes(1);
+
+    await start("secret-b");
+    expect(discovery).toHaveBeenCalledTimes(2);
+    expect(discovery.mock.calls[1][2]).toBe("secret-b");
   });
 });
 

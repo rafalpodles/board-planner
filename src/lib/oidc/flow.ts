@@ -7,6 +7,8 @@ import { OidcIntent } from "@/types";
 import { groupsIn } from "@/lib/oidc/admin-group";
 import { OidcProvider } from "./providers";
 import { relayOrigin } from "./relay";
+import { safeFetch } from "@/lib/safe-fetch";
+import { allowLoopbackIn } from "@/lib/github";
 import type { ScopedDb } from "@/lib/db-scope";
 
 export const FLOW_COOKIE = "bp_oidc";
@@ -39,15 +41,22 @@ function githubConfig(provider: OidcProvider): client.Configuration {
   return config;
 }
 
+// Every request to a provider an organisation named goes through the guard against internal addresses, at each
+// redirect hop: its issuer is an address a customer typed, and the server fetches it
+const guardedFetch: client.CustomFetch = (url, options) =>
+  safeFetch(url, options as RequestInit, { allowLoopback: allowLoopbackIn() });
+
 function configFor(provider: OidcProvider): Promise<client.Configuration> {
   if (provider.kind === "github") return Promise.resolve(githubConfig(provider));
-  const key = `${provider.id}:${provider.issuer}:${provider.clientId}`;
+  // The secret is part of the key: two organisations may name the same issuer and client with different secrets
+  const key = `${provider.id}:${provider.issuer}:${provider.clientId}:${sha256(provider.clientSecret)}`;
   let config = configs.get(key);
   if (!config) {
     const issuer = new URL(provider.issuer);
     config = client
       .discovery(issuer, provider.clientId, provider.clientSecret, undefined, {
         execute: issuer.protocol === "http:" && isLoopback(issuer) ? [client.allowInsecureRequests] : [],
+        ...(provider.own ? { [client.customFetch]: guardedFetch } : {}),
       })
       .catch((err) => {
         configs.delete(key);
