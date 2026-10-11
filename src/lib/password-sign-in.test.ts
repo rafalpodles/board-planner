@@ -40,11 +40,35 @@ const KEYS = [
   "GOOGLE_CLIENT_ID",
   "GOOGLE_CLIENT_SECRET",
   "OIDC_RELAY_ORIGIN",
+  "ORGANISATION_DOMAIN",
 ];
 afterEach(() => KEYS.forEach((k) => delete process.env[k]));
 
 const withOidc = () =>
   Object.assign(process.env, { OIDC_ISSUER: "https://id.example.com", OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s" });
+
+describe("passwords off in the cloud, where the generic provider is each organisation's own (BP-951)", () => {
+  const cloud = () => Object.assign(process.env, { ORGANISATION_DOMAIN: "board.example", PASSWORD_SIGN_IN: "off", OIDC_RELAY_ORIGIN: "https://login.board.example" });
+
+  it("is not saved by an environment OIDC provider, which no organisation is offered, and says so", () => {
+    cloud();
+    withOidc();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    expect(() => assertSignInConfig()).toThrow(/needs a sign-in provider/);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("OIDC_ISSUER is ignored with ORGANISATION_DOMAIN set"));
+    warn.mockRestore();
+  });
+
+  it("is saved by Google, which every organisation is offered", () => {
+    cloud();
+    withOidc();
+    Object.assign(process.env, { GOOGLE_CLIENT_ID: "g", GOOGLE_CLIENT_SECRET: "gs" });
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    expect(() => assertSignInConfig()).not.toThrow();
+  });
+});
 
 describe("OIDC_RELAY_ORIGIN at startup", () => {
   it("stops the app on a relay that is not a bare origin", () => {

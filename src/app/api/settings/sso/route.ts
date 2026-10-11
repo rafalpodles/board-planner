@@ -9,6 +9,7 @@ import { discoverProvider, returnAddress } from "@/lib/oidc/flow";
 import { parseSsoInput, SSO_LABEL_DEFAULT } from "@/lib/oidc/organisation-sso";
 import { getOrganisation } from "@/lib/organisation";
 import { organisationDomain, originFor } from "@/lib/organisation-host";
+import { isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
 import { readJsonBody } from "@/lib/request-body";
 import { BlockedDestinationError } from "@/lib/safe-fetch";
 import { duplicateKeyField } from "@/lib/mongo-errors";
@@ -31,6 +32,9 @@ async function writeSettings(db: ScopedDb, update: Record<string, Record<string,
     await write();
   }
 }
+
+// Each save makes the server read an address the administrator typed, for up to a few seconds
+const SAVES_PER_WINDOW = 10;
 
 const CLOUD_ONLY = { error: "A sign-in provider of its own is set up per organisation in the cloud; here it comes from the environment" };
 
@@ -79,6 +83,12 @@ export const PUT = withAdmin(async (request, { user, db }) => {
   await connectDB();
   const refusal = await entitlementRefusal(db, "identity.sso");
   if (refusal) return refusal;
+
+  const throttleKey = sourceKey(String(db.organisation), "sso-save");
+  if (await isRateLimited(throttleKey, SAVES_PER_WINDOW)) {
+    return NextResponse.json({ error: "Too many saves. Try again in 15 minutes." }, { status: 429 });
+  }
+  await recordFailedAttempt(throttleKey);
 
   const read = await readJsonBody<unknown>(request);
   if (!read.ok) return read.response;

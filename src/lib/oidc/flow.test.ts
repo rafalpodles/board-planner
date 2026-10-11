@@ -34,7 +34,8 @@ vi.mock("@/models/oidcFlow", () => ({
   OidcFlow: { findOneAndDelete, create, findOne: (...a: unknown[]) => flowFindOne(...a), deleteOne: (...a: unknown[]) => flowDeleteOne(...a) },
 }));
 
-const { beginFlow, finishFlow, holdForSignUp, heldAcceptance, heldSignUp, spendAcceptance } = await import("./flow");
+const { beginFlow, finishFlow, holdForSignUp, heldAcceptance, heldSignUp, spendAcceptance, discoverProvider, guardedFetch } = await import("./flow");
+const { BlockedDestinationError } = await import("@/lib/safe-fetch");
 const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
 
@@ -104,6 +105,44 @@ describe("a provider an organisation named (BP-951)", () => {
 
     expect(typeof discovery.mock.calls[0][4][customFetch]).toBe("function");
     expect(discovery.mock.calls[1][4][customFetch]).toBeUndefined();
+  });
+
+  it("refuses an internal address at the guard itself, whatever the provider's metadata says the endpoints are", async () => {
+    await expect(guardedFetch("https://10.0.0.1/token", { method: "POST" } as never)).rejects.toBeInstanceOf(BlockedDestinationError);
+    await expect(guardedFetch("https://169.254.169.254/latest/meta-data", {} as never)).rejects.toBeInstanceOf(BlockedDestinationError);
+  });
+
+  it("reads a discovery document again after an hour, and again whenever it is saved, not from what is kept", async () => {
+    const issuer = "https://moving-idp.example";
+    const start = () => beginFlow(scopedToDefaultOrganisation(), { provider: { ...OWN, issuer }, origin: ORIGIN, intent: "signin" });
+    vi.useFakeTimers();
+    try {
+      await start();
+      await start();
+      expect(discovery).toHaveBeenCalledTimes(1);
+
+      await discoverProvider({ ...OWN, issuer });
+      expect(discovery).toHaveBeenCalledTimes(2);
+
+      vi.advanceTimersByTime(60 * 60 * 1000 + 1000);
+      await start();
+      expect(discovery).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a bounded number of discovered clients, so an organisation cannot fill the process with its own", async () => {
+    for (let i = 0; i < 260; i++) {
+      await beginFlow(scopedToDefaultOrganisation(), { provider: { ...OWN, issuer: `https://many-${i}.example` }, origin: ORIGIN, intent: "signin" });
+    }
+    discovery.mockClear();
+
+    // The oldest has been let go, the newest is still kept
+    await beginFlow(scopedToDefaultOrganisation(), { provider: { ...OWN, issuer: "https://many-0.example" }, origin: ORIGIN, intent: "signin" });
+    expect(discovery).toHaveBeenCalledTimes(1);
+    await beginFlow(scopedToDefaultOrganisation(), { provider: { ...OWN, issuer: "https://many-259.example" }, origin: ORIGIN, intent: "signin" });
+    expect(discovery).toHaveBeenCalledTimes(1);
   });
 
   it("does not hand one organisation's discovered client to another that names the same issuer with another secret", async () => {

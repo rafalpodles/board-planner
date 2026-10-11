@@ -29,7 +29,7 @@ async function script(body: Record<string, unknown>) {
 const confirmAddress = (who: OrganisationFixture) => withDb((db) => db.collection("users").updateOne({ _id: who.adminId }, { $set: { emailVerifiedAt: new Date() } }));
 
 // From the organisation's own page, so the browser sends what a browser sends: the session cookie and the same-origin marker
-async function putFrom(page: Page, who: OrganisationFixture, body: Record<string, unknown>) {
+async function putFrom(page: Page, body: Record<string, unknown>) {
   return page.evaluate(
     async (data) => {
       const res = await fetch("/api/settings/sso", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
@@ -37,6 +37,13 @@ async function putFrom(page: Page, who: OrganisationFixture, body: Record<string
     },
     { ...body }
   );
+}
+
+// What a sign-in page offers is read from the server after it loads: an absence is only worth asserting once that answer is in
+async function openLogin(page: Page, who: OrganisationFixture) {
+  const answered = page.waitForResponse((response) => response.url().includes("/api/auth/oidc/providers"));
+  await page.goto(`${originOf(who)}/login`);
+  await answered;
 }
 
 async function openSettings(page: Page, who: OrganisationFixture) {
@@ -62,7 +69,7 @@ test.describe("BP-951: an organisation's own sign-in provider", () => {
     await page.getByRole("button", { name: "Save provider" }).click();
 
     await expect(page.getByText("Sign-in provider saved")).toBeVisible();
-    await expect(page.getByText("Signing in", { exact: true })).toBeVisible();
+    await expect(page.getByText("Active", { exact: true })).toBeVisible();
     await expect(page.getByLabel("Client secret")).toHaveValue("");
     await expect(page.getByLabel("Client secret")).toHaveAttribute("placeholder", /ending in/);
     await page.screenshot({ path: "e2e/.artifacts/bp951-settings.png" });
@@ -77,10 +84,32 @@ test.describe("BP-951: an organisation's own sign-in provider", () => {
     // Somebody who is not signed in uses it
     await confirmAddress(ACME);
     await script({ sub: `sub-acme-${Date.now()}`, email: `boss@${ACME.slug}.example`, email_verified: true });
-    const visitor = await (await browser.newContext()).newPage();
+    const visitorContext = await browser.newContext();
+    const visitor = await visitorContext.newPage();
     await visitor.goto(`${originOf(ACME)}/login`);
     await visitor.getByRole("button", { name: `Continue with ${SSO_LABEL}` }).click();
     await expect(visitor).toHaveURL(`${originOf(ACME)}/projects`);
+    await visitorContext.close();
+
+    // A save that leaves the secret blank keeps the stored one: the new name is offered and sign-in still works
+    await page.getByLabel("Button name").fill("Acme SSO");
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await expect(page.getByText("Sign-in provider saved").last()).toBeVisible();
+    const again = await browser.newContext();
+    const second = await again.newPage();
+    await script({ sub: `sub-acme-${Date.now()}-b`, email: `boss@${ACME.slug}.example`, email_verified: true });
+    await second.goto(`${originOf(ACME)}/login`);
+    await second.getByRole("button", { name: "Continue with Acme SSO" }).click();
+    await expect(second).toHaveURL(`${originOf(ACME)}/projects`);
+    await again.close();
+
+    // Removing it takes the button away, after a confirmation
+    await page.getByRole("button", { name: "Remove", exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Remove", exact: true }).click();
+    await expect(page.getByText("Sign-in provider removed")).toBeVisible();
+    await expect(page.getByText("Not set up")).toBeVisible();
+    await openLogin(page, ACME);
+    await expect(page.getByRole("button", { name: /^Continue with Acme/ })).toHaveCount(0);
   });
 
   test("another organisation is not offered it and cannot start a sign-in through it", async ({ page, request }) => {
@@ -88,7 +117,7 @@ test.describe("BP-951: an organisation's own sign-in provider", () => {
     await makePro(request, GLOBEX);
     await storeSso(ACME);
 
-    await page.goto(`${originOf(GLOBEX)}/login`);
+    await openLogin(page, GLOBEX);
     await expect(page.getByRole("button", { name: /^Continue with/ })).toHaveCount(0);
     // The operator's GitHub app is everybody's; ACME's own provider is nobody else's
     expect(await (await page.request.get(`${originOf(GLOBEX)}/api/auth/oidc/providers`)).json()).not.toContainEqual(expect.objectContaining({ id: "oidc" }));
@@ -99,7 +128,7 @@ test.describe("BP-951: an organisation's own sign-in provider", () => {
     expect(started.status).toBe(404);
     expect(started.body.error).toContain("not set up here");
 
-    await page.goto(`${originOf(ACME)}/login`);
+    await openLogin(page, ACME);
     await expect(page.getByRole("button", { name: `Continue with ${SSO_LABEL}` })).toBeVisible();
     expect(await (await page.request.get(`${originOf(ACME)}/api/auth/oidc/providers`)).json()).toContainEqual({ id: "oidc", label: SSO_LABEL });
   });
@@ -109,7 +138,7 @@ test.describe("BP-951: an organisation's own sign-in provider", () => {
 
     await expect(page.getByTestId("sso-upgrade")).toContainText("included in Pro and in the trial");
     await expect(page.getByTestId("sso-form")).toHaveCount(0);
-    const refused = await putFrom(page, GLOBEX, { issuer: OIDC_STUB_URL, clientId: SSO_CLIENT.clientId, clientSecret: SSO_CLIENT.clientSecret });
+    const refused = await putFrom(page, { issuer: OIDC_STUB_URL, clientId: SSO_CLIENT.clientId, clientSecret: SSO_CLIENT.clientSecret });
     expect(refused.status).toBe(402);
     expect(refused.body).toMatchObject({ feature: "identity.sso", plan: "free" });
     expect(await withDb((db) => db.collection("settings").findOne({ organisation: GLOBEX.organisation, sso: { $exists: true } }))).toBeNull();
@@ -119,7 +148,7 @@ test.describe("BP-951: an organisation's own sign-in provider", () => {
   test("what was stored stays while the plan does not include it, and is offered again with the plan", async ({ page, request }) => {
     await storeSso(GLOBEX);
 
-    await page.goto(`${originOf(GLOBEX)}/login`);
+    await openLogin(page, GLOBEX);
     await expect(page.getByRole("button", { name: /^Continue with/ })).toHaveCount(0);
 
     await makePro(request, GLOBEX);
@@ -131,11 +160,11 @@ test.describe("BP-951: an organisation's own sign-in provider", () => {
     await makePro(request, ACME);
     await openSettings(page, ACME);
 
-    const inside = await putFrom(page, ACME, { issuer: "https://10.0.0.1", clientId: SSO_CLIENT.clientId, clientSecret: SSO_CLIENT.clientSecret });
+    const inside = await putFrom(page, { issuer: "https://10.0.0.1", clientId: SSO_CLIENT.clientId, clientSecret: SSO_CLIENT.clientSecret });
     expect(inside.status).toBe(400);
     expect(inside.body.error).toContain("not one this server may call");
 
-    const silent = await putFrom(page, ACME, { issuer: "https://127.0.0.1:9", clientId: SSO_CLIENT.clientId, clientSecret: SSO_CLIENT.clientSecret });
+    const silent = await putFrom(page, { issuer: "https://127.0.0.1:9", clientId: SSO_CLIENT.clientId, clientSecret: SSO_CLIENT.clientSecret });
     expect(silent.status).toBe(400);
     expect(await withDb((db) => db.collection("settings").findOne({ organisation: ACME.organisation, sso: { $exists: true } }))).toBeNull();
   });

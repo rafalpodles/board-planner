@@ -17,7 +17,8 @@ let served: { name: string }[] = [];
 const db = { organisation: ORGANISATION, Settings: { findOne: () => ({ lean: async () => settingsFindOne() }), updateOne: (...a: unknown[]) => settingsUpdateOne(...a) } };
 vi.mock("@/lib/organisation-jobs", () => ({
   forEachServedOrganisation: async (_job: string, work: (db: unknown) => Promise<void>) => {
-    for (const _ of served) await work(db);
+    // As the real one: an organisation that fails is logged and the next one goes on
+    for (const _ of served) await work(db).catch(() => {});
   },
 }));
 vi.mock("@/lib/organisation", () => ({ getOrganisation }));
@@ -90,6 +91,13 @@ describe("telling an ending trial that its single sign-on stops with it (BP-951)
 
   it("lets go of the claim when nobody could be reached, so the next pass tries again", async () => {
     sendEmail.mockResolvedValue(false);
+
+    expect(await noticeEndingTrials(NOW)).toEqual({ looked: 1, noticed: 0 });
+    expect(settingsUpdateOne).toHaveBeenLastCalledWith({ ssoTrialNoticeFor: ENDS }, { $set: { ssoTrialNoticeFor: null } });
+  });
+
+  it("lets go of the claim when the sending itself fails, so the next pass tries again", async () => {
+    adminAddresses.mockRejectedValue(new Error("mongo went away"));
 
     expect(await noticeEndingTrials(NOW)).toEqual({ looked: 1, noticed: 0 });
     expect(settingsUpdateOne).toHaveBeenLastCalledWith({ ssoTrialNoticeFor: ENDS }, { $set: { ssoTrialNoticeFor: null } });

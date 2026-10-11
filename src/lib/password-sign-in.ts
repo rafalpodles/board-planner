@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { configuredProviders, liveIdentityFilter } from "@/lib/oidc/providers";
+import { organisationDomain } from "@/lib/organisation-host";
+import { configuredProviders, liveIdentityFilter, providersFor, sharedProviders } from "@/lib/oidc/providers";
 import { relayOrigin } from "@/lib/oidc/relay";
 import type { ScopedDb } from "@/lib/db-scope";
 
@@ -24,7 +25,10 @@ export function assertSignInConfig(): void {
   if (raw && raw !== "on" && raw !== "off") {
     throw new Error(`PASSWORD_SIGN_IN must be "on" or "off", not "${process.env.PASSWORD_SIGN_IN}"`);
   }
-  if (raw === "off" && configuredProviders().length === 0) {
+  if (organisationDomain() !== null && configuredProviders().some((p) => p.id === "oidc")) {
+    console.warn("OIDC_ISSUER is ignored with ORGANISATION_DOMAIN set: in the cloud an organisation's own provider is set under Settings → Single sign-on");
+  }
+  if (raw === "off" && sharedProviders().length === 0) {
     throw new Error(
       "PASSWORD_SIGN_IN=off needs a sign-in provider: set OIDC_ISSUER/OIDC_CLIENT_ID/OIDC_CLIENT_SECRET, GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET or GITHUB_OAUTH_CLIENT_ID/GITHUB_OAUTH_CLIENT_SECRET"
     );
@@ -43,7 +47,7 @@ export async function adminsLockedOut(db: ScopedDb): Promise<string | null> {
     .select("_id email emailVerifiedAt")
     .lean();
   if (admins.length === 0) return null;
-  const providers = configuredProviders();
+  const providers = await providersFor(db);
   // A proven address is a way in only where a provider will vouch for that mailbox: a generic
   // issuer may, Google only for its own domains (a Workspace's cannot be told from here)
   const genericLinks = providers.some((p) => p.id === "oidc");
@@ -51,7 +55,7 @@ export async function adminsLockedOut(db: ScopedDb): Promise<string | null> {
   const vouched = (email: string) => genericLinks || (googleLinks && /@(gmail|googlemail)\.com$/.test(email));
   if (admins.some((a) => a.emailVerifiedAt && vouched(a.email ?? ""))) return null;
   // A link only counts while its provider still signs as the issuer that made it (BP-842)
-  const linked = await db.Identity.exists({ $and: [{ user: { $in: admins.map((a) => a._id) } }, liveIdentityFilter()] });
+  const linked = await db.Identity.exists({ $and: [{ user: { $in: admins.map((a) => a._id) } }, liveIdentityFilter(providers)] });
   if (linked) return null;
   return (
     "PASSWORD_SIGN_IN=off, but no active administrator can sign in through a configured provider: none has one linked, " +

@@ -12,7 +12,7 @@ vi.mock("@/lib/middleware", () => ({
 }));
 vi.mock("@/lib/oidc/providers", () => ({
   providersFor: async () => [{ id: "oidc", label: "Acme" }],
-  liveIdentityFilterFor: async () => ({ live: "only" }),
+  liveIdentityFilter: () => ({ live: "only" }),
 }));
 vi.mock("@/lib/password-sign-in", () => ({ passwordSignInEnabled: () => true }));
 vi.mock("@/models/identity", () => ({

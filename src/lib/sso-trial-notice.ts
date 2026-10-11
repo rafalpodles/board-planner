@@ -60,11 +60,14 @@ export async function noticeEndingTrials(now: number = Date.now(), days: number 
     // Claimed before sending, so two processes do not both write: the claim is let go when nobody could be reached
     const claimed = await db.Settings.updateOne({ ssoTrialNoticeFor: { $ne: endsAt } }, { $set: { ssoTrialNoticeFor: endsAt } });
     if (claimed.modifiedCount !== 1) return;
-    if ((await tell(db.organisation, organisation.name || organisation.slug || "Your organisation", endsAt)) > 0) {
-      summary.noticed += 1;
-    } else {
-      await db.Settings.updateOne({ ssoTrialNoticeFor: endsAt }, { $set: { ssoTrialNoticeFor: null } });
+    let sent = 0;
+    try {
+      sent = await tell(db.organisation, organisation.name || organisation.slug || "Your organisation", endsAt);
+    } finally {
+      // Nobody reached, or the sending itself failed: the next pass tries again
+      if (sent === 0) await db.Settings.updateOne({ ssoTrialNoticeFor: endsAt }, { $set: { ssoTrialNoticeFor: null } });
     }
+    if (sent > 0) summary.noticed += 1;
   });
   return summary;
 }

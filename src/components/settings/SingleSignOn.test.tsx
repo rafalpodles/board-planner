@@ -47,7 +47,7 @@ describe("Settings → Single sign-on (BP-951)", () => {
 
     await waitFor(() => expect(api.put).toHaveBeenCalledWith("/api/settings/sso", { issuer: "https://login.acme.example", clientId: "acme-app", clientSecret: "s3cret-value-1234", label: "Acme login" }));
     await waitFor(() => expect(toast).toHaveBeenCalledWith("Sign-in provider saved", "success"));
-    expect(await screen.findByText("Signing in")).toBeTruthy();
+    expect(await screen.findByText("Active")).toBeTruthy();
     expect(((await field("Client secret")) as HTMLInputElement).value).toBe("");
   });
 
@@ -68,9 +68,33 @@ describe("Settings → Single sign-on (BP-951)", () => {
     expect(secret.placeholder).toContain("ending in 1234");
     type(await field("Button name"), "Acme SSO");
     expect((screen.getByRole("button", { name: "Save changes" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByTestId("sso-issuer-changed")).toBeNull();
 
     type(await field("Issuer"), "https://elsewhere.example");
     expect((screen.getByRole("button", { name: "Save changes" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId("sso-issuer-changed").textContent).toContain("ends sign-in for everyone who linked the old one");
+    expect(screen.getByText("Enter the client secret to save.")).toBeTruthy();
+  });
+
+  it("sends a blank secret, as the server's word for keeping the stored one, when only the button name changed", async () => {
+    api.get.mockResolvedValue(SAVED);
+    api.put.mockResolvedValue({ ...SAVED, label: "Acme SSO" });
+    render(<SingleSignOn />);
+
+    type(await field("Button name"), "Acme SSO");
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith("/api/settings/sso", { issuer: SAVED.issuer, clientId: SAVED.clientId, clientSecret: "", label: "Acme SSO" }));
+  });
+
+  it("asks for the secret again when the stored one cannot be read, even for the same issuer", async () => {
+    api.get.mockResolvedValue({ ...SAVED, unreadable: true, active: false });
+    render(<SingleSignOn />);
+
+    expect(((await field("Client secret")) as HTMLInputElement).placeholder).toBe("");
+    expect((screen.getByRole("button", { name: "Save changes" }) as HTMLButtonElement).disabled).toBe(true);
+    type(await field("Client secret"), "s3cret-value-1234");
+    expect((screen.getByRole("button", { name: "Save changes" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("says what the server refused, and keeps what was typed", async () => {
@@ -99,11 +123,23 @@ describe("Settings → Single sign-on (BP-951)", () => {
     expect(screen.queryByTestId("sso-redirect")).toBeNull();
   });
 
+  it("lets a Free organisation take away what it stored, since removal has no plan", async () => {
+    api.get.mockResolvedValue({ ...SAVED, plan: "free", available: false, active: false });
+    api.del.mockResolvedValue({ ...PRO_EMPTY, plan: "free", available: false });
+    render(<SingleSignOn />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Remove" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Remove" }).at(-1)!);
+
+    await waitFor(() => expect(api.del).toHaveBeenCalledWith("/api/settings/sso"));
+    expect(await screen.findByText("Not set up")).toBeTruthy();
+  });
+
   it("on a trial says until when it is included", async () => {
     api.get.mockResolvedValue({ ...PRO_EMPTY, trial: true, trialEndsAt: "2026-11-09T21:59:59.000Z" });
     render(<SingleSignOn />);
 
-    expect((await screen.findByTestId("sso-trial")).textContent).toContain("9 November 2026");
+    expect((await screen.findByTestId("sso-trial")).textContent).toContain("9 November 2026 (UTC)");
   });
 
   it("says a secret sealed under a key the server no longer has has to be entered again", async () => {
@@ -120,7 +156,7 @@ describe("Settings → Single sign-on (BP-951)", () => {
     render(<SingleSignOn />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Remove" }));
-    expect(screen.getByText(/Forgot password/)).toBeTruthy();
+    expect(screen.getByText(/use Forgot password to set a password/)).toBeTruthy();
     fireEvent.click(screen.getAllByRole("button", { name: "Remove" }).at(-1)!);
 
     await waitFor(() => expect(api.del).toHaveBeenCalledWith("/api/settings/sso"));

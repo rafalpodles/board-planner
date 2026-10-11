@@ -13,7 +13,8 @@ vi.mock("@/models/settings", () => ({ getSettings: async () => ({ signUpDomains:
 const OIDC = { id: "oidc", label: "Acme SSO", linksByAddress: true };
 const GITHUB = { id: "github", label: "GitHub", linksByAddress: false };
 let providers = [OIDC, GITHUB];
-vi.mock("@/lib/oidc/providers", () => ({ configuredProviders: () => providers, providersFor: async () => providers }));
+const providersFor = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/oidc/providers", () => ({ providersFor }));
 
 const { GET, PUT } = await import("./route");
 const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
@@ -27,6 +28,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   stored = ["old.example"];
   providers = [OIDC, GITHUB];
+  providersFor.mockImplementation(async () => providers);
   getAuthUser.mockResolvedValue(ADMIN);
   updateSettings.mockImplementation(async (_db: unknown, update: { $set: { signUpDomains: string[] } }) => ({
     signUpDomains: update.$set.signUpDomains,
@@ -36,6 +38,14 @@ beforeEach(() => {
 
 afterEach(() => {
   delete process.env.OIDC_ADMIN_GROUP;
+});
+
+describe("GET /api/admin/sign-up, which providers (BP-951)", () => {
+  it("lists those of the organisation the request came to, so another organisation's own provider is never named", async () => {
+    await GET(new Request("http://x/api/admin/sign-up"), ctx());
+
+    expect(providersFor).toHaveBeenCalledWith(expect.objectContaining({ organisation: expect.anything() }));
+  });
 });
 
 describe("GET /api/admin/sign-up", () => {

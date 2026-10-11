@@ -3,7 +3,7 @@ import { allowLoopbackIn } from "@/lib/github";
 export const SSO_LABEL_DEFAULT = "Single sign-on";
 const MAX_FIELD = 300;
 const MAX_LABEL = 40;
-const MIN_SECRET = 8;
+const MIN_SECRET = 12;
 const MAX_SECRET = 500;
 
 export interface SsoInput {
@@ -25,9 +25,12 @@ function checkIssuer(raw: string): string | null {
   } catch {
     return null;
   }
-  const loopback = ["127.0.0.1", "[::1]", "localhost"].includes(url.hostname);
+  const loopback = ["127.0.0.1", "[::1]"].includes(url.hostname);
   const schemeOk = url.protocol === "https:" || (url.protocol === "http:" && loopback && allowLoopbackIn());
   if (!schemeOk || url.username || url.password || url.search || url.hash) return null;
+  // The identifier is what the provider's document names, not the address of that document; and Google's is
+  // offered already, with its own rule about whose addresses it vouches for
+  if (url.pathname.includes("/.well-known/") || url.hostname === "accounts.google.com") return null;
   return issuer;
 }
 
@@ -37,7 +40,7 @@ export function parseSsoInput(body: unknown): { ok: true; value: SsoInput } | { 
   const { issuer, clientId, clientSecret, label } = body as Record<string, unknown>;
 
   const checkedIssuer = typeof issuer === "string" ? checkIssuer(issuer) : null;
-  if (!checkedIssuer) return { ok: false, error: "The issuer must be an https address with no query, fragment or credentials" };
+  if (!checkedIssuer) return { ok: false, error: "The issuer must be your provider's https address with no query, fragment or credentials, and not its /.well-known/ document or Google, which is offered already" };
   if (typeof clientId !== "string" || !clientId.trim() || clientId.length > MAX_FIELD || !token(clientId.trim())) {
     return { ok: false, error: "The client ID must be 1 to 300 printable characters with no spaces" };
   }

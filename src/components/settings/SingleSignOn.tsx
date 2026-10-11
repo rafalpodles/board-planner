@@ -29,6 +29,62 @@ interface SsoAnswer {
 const TITLE = "Your identity provider";
 const day = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
 
+// Removal is allowed on any plan: what an organisation stored stays stored after a downgrade, and it can take it away
+function Removal({ busy, onRemove }: { busy: boolean; onRemove: () => Promise<void> }) {
+  const [confirming, setConfirming] = useState(false);
+  return (
+    <>
+      <Button type="button" variant="secondary" disabled={busy} onClick={() => setConfirming(true)}>
+        Remove
+      </Button>
+      <ConfirmDialog
+        open={confirming}
+        onClose={() => setConfirming(false)}
+        onConfirm={async () => {
+          await onRemove();
+          setConfirming(false);
+        }}
+        title="Remove your identity provider?"
+        message="Signing in with it stops at once. People who only ever signed in through it use Forgot password to set a password. You will need the client secret to add it again."
+        confirmLabel="Remove"
+        loadingLabel="Removing…"
+        loading={busy}
+      />
+    </>
+  );
+}
+
+function RemoveStored({ onSaved }: { onSaved: (answer: SsoAnswer) => void }) {
+  const api = useApi();
+  const { toast } = useToast();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function remove() {
+    setBusy(true);
+    setError("");
+    try {
+      onSaved(await api.del("/api/settings/sso"));
+      toast("Sign-in provider removed", "success");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not remove it.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      {error && (
+        <p role="alert" className="text-sm text-danger">
+          {error}
+        </p>
+      )}
+      <Removal busy={busy} onRemove={remove} />
+    </div>
+  );
+}
+
 function Form({ state, onSaved }: { state: SsoAnswer; onSaved: (answer: SsoAnswer) => void }) {
   const api = useApi();
   const { toast } = useToast();
@@ -39,10 +95,10 @@ function Form({ state, onSaved }: { state: SsoAnswer; onSaved: (answer: SsoAnswe
   const [clientSecret, setClientSecret] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [confirmingRemoval, setConfirmingRemoval] = useState(false);
 
   // The stored secret belongs to the issuer and client it was given for; the server asks again when either changes
-  const needsSecret = !state.set || issuer.trim() !== state.issuer || clientId.trim() !== state.clientId;
+  const needsSecret = !state.set || state.unreadable === true || issuer.trim() !== state.issuer || clientId.trim() !== state.clientId;
+  const issuerChanged = state.set === true && issuer.trim() !== state.issuer;
 
   async function send(work: () => Promise<SsoAnswer>, done: string) {
     setBusy(true);
@@ -50,12 +106,10 @@ function Form({ state, onSaved }: { state: SsoAnswer; onSaved: (answer: SsoAnswe
     try {
       const answer = await work();
       setClientSecret("");
-      setConfirmingRemoval(false);
       onSaved(answer);
       toast(done, "success");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save.");
-      setConfirmingRemoval(false);
     } finally {
       setBusy(false);
     }
@@ -90,11 +144,20 @@ function Form({ state, onSaved }: { state: SsoAnswer; onSaved: (answer: SsoAnswe
           spellCheck={false}
           value={clientSecret}
           onChange={(e) => setClientSecret(e.target.value)}
-          placeholder={state.set && !needsSecret ? `Stored, ending in ${state.secretHint}. Leave blank to keep it` : ""}
+          placeholder={state.set && !needsSecret ? `Stored, ending in ${state.secretHint}` : ""}
           required={needsSecret}
           aria-invalid={error ? true : undefined}
           aria-describedby={error ? errorId : undefined}
         />
+        {state.set && !needsSecret && <p className="text-xs text-text-muted">Leave the client secret blank to keep the stored one.</p>}
+        {issuerChanged && (
+          <p className="text-xs text-text-muted" data-testid="sso-issuer-changed">
+            Changing the issuer ends sign-in for everyone who linked the old one; they sign in another way and link it again.
+          </p>
+        )}
+        {needsSecret && !clientSecret && issuer.trim() && clientId.trim() && (
+          <p className="text-xs text-text-muted">Enter the client secret to save.</p>
+        )}
         {error && (
           <p id={errorId} role="alert" className="text-sm text-danger">
             {error}
@@ -104,23 +167,9 @@ function Form({ state, onSaved }: { state: SsoAnswer; onSaved: (answer: SsoAnswe
           <Button type="submit" disabled={busy || !issuer.trim() || !clientId.trim() || (needsSecret && !clientSecret)}>
             {busy ? "Checking…" : state.set ? "Save changes" : "Save provider"}
           </Button>
-          {state.set && (
-            <Button type="button" variant="secondary" disabled={busy} onClick={() => setConfirmingRemoval(true)}>
-              Remove
-            </Button>
-          )}
+          {state.set && <Removal busy={busy} onRemove={() => send(() => api.del("/api/settings/sso"), "Sign-in provider removed")} />}
         </div>
       </form>
-      <ConfirmDialog
-        open={confirmingRemoval}
-        onClose={() => setConfirmingRemoval(false)}
-        onConfirm={() => send(() => api.del("/api/settings/sso"), "Sign-in provider removed")}
-        title="Remove your identity provider?"
-        message="Signing in with it stops at once. People who only ever signed in through it can sign in with an e-mailed code and the Forgot password link, which sets a password. You will need the client secret to add it again."
-        confirmLabel="Remove"
-        loadingLabel="Removing…"
-        loading={busy}
-      />
     </>
   );
 }
@@ -130,7 +179,7 @@ function Card({ state, onSaved }: { state: SsoAnswer; onSaved: (answer: SsoAnswe
   const status = state.unreadable
     ? { label: "Cannot be read", on: false }
     : state.active
-      ? { label: "Signing in", on: true }
+      ? { label: "Active", on: true }
       : state.set
         ? { label: "Saved, not offered", on: false }
         : { label: "Not set up", on: false };
@@ -148,7 +197,7 @@ function Card({ state, onSaved }: { state: SsoAnswer; onSaved: (answer: SsoAnswe
       )}
       {available && state.trial && state.trialEndsAt && (
         <p className="text-sm text-text-muted" data-testid="sso-trial">
-          Included in your trial until {day(state.trialEndsAt)}. It stops being offered then unless you choose Pro; what you enter here is kept.
+          Included in your trial until {day(state.trialEndsAt)} (UTC). It stops being offered then unless you choose Pro; what you enter here is kept.
         </p>
       )}
       {!available && (
@@ -182,6 +231,9 @@ function Card({ state, onSaved }: { state: SsoAnswer; onSaved: (answer: SsoAnswe
             </div>
           </dl>
         )
+      )}
+      {!available && state.set && (
+        <RemoveStored onSaved={onSaved} />
       )}
     </SettingsCard>
   );

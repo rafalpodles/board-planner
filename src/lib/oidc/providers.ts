@@ -136,6 +136,8 @@ export function publicProviders(): { id: OidcProviderId; label: string }[] {
  * comes back with the next one, so nothing is lost to a lapse. Null when none is stored, the plan does not include
  * it, or the secret is sealed under a key this server no longer has.
  */
+const warnedUnreadable = new Set<string>();
+
 async function organisationProvider(db: ScopedDb): Promise<OidcProvider | null> {
   const sso = (await db.Settings.findOne({}, "sso").lean())?.sso;
   if (!sso) return null;
@@ -144,7 +146,10 @@ async function organisationProvider(db: ScopedDb): Promise<OidcProvider | null> 
   try {
     clientSecret = decryptSecret(sso.clientSecret, db.organisation);
   } catch {
-    console.warn(`An organisation's sign-in provider secret cannot be read, so it is not offered (${db.organisation})`);
+    if (!warnedUnreadable.has(String(db.organisation))) {
+      warnedUnreadable.add(String(db.organisation));
+      console.warn(`An organisation's sign-in provider secret cannot be read, so it is not offered (${db.organisation})`);
+    }
     return null;
   }
   return { id: "oidc", kind: "oidc", linksByAddress: true, label: sso.label || "Single sign-on", issuer: sso.issuer, clientId: sso.clientId, clientSecret, own: true };
@@ -156,10 +161,15 @@ async function organisationProvider(db: ScopedDb): Promise<OidcProvider | null> 
  * nobody's: only Google and GitHub are shared, and the generic one is the organisation's own.
  */
 export async function providersFor(db: ScopedDb): Promise<OidcProvider[]> {
-  if (organisationDomain() === null) return configuredProviders();
+  const shared = sharedProviders();
+  if (organisationDomain() === null) return shared;
   const own = await organisationProvider(db);
-  const shared = configuredProviders().filter((p) => p.id !== "oidc");
   return own ? [...shared, own] : shared;
+}
+
+/** What every organisation of the instance is offered: the environment's providers, less the generic one in the cloud, where it would be nobody's in particular. */
+export function sharedProviders(): OidcProvider[] {
+  return organisationDomain() === null ? configuredProviders() : configuredProviders().filter((p) => p.id !== "oidc");
 }
 
 export async function providerFor(db: ScopedDb, id: string): Promise<OidcProvider | null> {

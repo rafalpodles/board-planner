@@ -4,6 +4,8 @@ const getAuthUser = vi.fn();
 const logInstanceAudit = vi.fn();
 const getOrganisation = vi.fn();
 const discoverProvider = vi.fn();
+const isRateLimited = vi.fn();
+const recordFailedAttempt = vi.fn();
 let row: Record<string, unknown> | null = null;
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
@@ -11,6 +13,7 @@ vi.mock("@/lib/auth", () => ({ getAuthUser, RateLimitError: class RateLimitError
 vi.mock("@/lib/grants", () => ({ check: vi.fn(), accessibleProjectIds: vi.fn() }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/lib/organisation", () => ({ getOrganisation }));
+vi.mock("@/lib/rate-limit", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/rate-limit")>()), isRateLimited, recordFailedAttempt }));
 vi.mock("@/lib/oidc/flow", () => ({
   discoverProvider,
   returnAddress: (provider: { id: string }, origin: string) => `${origin}/api/auth/oidc/${provider.id}/callback`,
@@ -54,6 +57,8 @@ beforeEach(() => {
   row = null;
   getAuthUser.mockResolvedValue(ADMIN);
   discoverProvider.mockResolvedValue(undefined);
+  isRateLimited.mockResolvedValue(false);
+  recordFailedAttempt.mockResolvedValue(undefined);
   plan();
   process.env.ENCRYPTION_KEY = "ab".repeat(32);
   process.env.ORGANISATION_DOMAIN = "board.example";
@@ -114,6 +119,9 @@ describe("PUT /api/settings/sso (BP-951)", () => {
     ["an http issuer", { issuer: "http://login.acme.example" }],
     ["an issuer with credentials", { issuer: "https://user:pw@login.acme.example" }],
     ["an issuer with a query", { issuer: "https://login.acme.example/?a=1" }],
+    ["the address of the discovery document", { issuer: "https://login.acme.example/.well-known/openid-configuration" }],
+    ["Google's issuer, which is offered already", { issuer: "https://accounts.google.com" }],
+    ["localhost over http", { issuer: "http://localhost:3000" }],
     ["no issuer", { issuer: "" }],
     ["a client id with a space", { clientId: "acme app" }],
     ["a short secret", { clientSecret: "short" }],
@@ -151,7 +159,7 @@ describe("PUT /api/settings/sso (BP-951)", () => {
     expect(discoverProvider).toHaveBeenLastCalledWith(expect.objectContaining({ clientSecret: FORM.clientSecret }));
     expect(decryptSecret(sealed(), scopedToDefaultOrganisation().organisation)).toBe(FORM.clientSecret);
     expect(row?.sso).toMatchObject({ label: "Acme SSO" });
-    expect(before).toMatch(/^enc:v3:/);
+    expect(sealed()).not.toBe(before);
   });
 
   it("asks for the secret again when the issuer or the client changes, so the old one is never sent to a new address", async () => {
@@ -165,6 +173,19 @@ describe("PUT /api/settings/sso (BP-951)", () => {
     expect(clientChanged.status).toBe(400);
     expect(discoverProvider).not.toHaveBeenCalled();
     expect(row?.sso).toMatchObject({ issuer: FORM.issuer, clientId: "acme-app" });
+  });
+
+  it("counts every save, and refuses past ten in a quarter of an hour before reading any address", async () => {
+    await call("PUT", FORM);
+    expect(recordFailedAttempt).toHaveBeenCalledWith(expect.stringContaining("sso-save"));
+
+    isRateLimited.mockResolvedValue(true);
+    discoverProvider.mockClear();
+    const res = await call("PUT", { ...FORM, label: "Again" });
+
+    expect(res.status).toBe(429);
+    expect(isRateLimited).toHaveBeenLastCalledWith(expect.stringContaining("sso-save"), 10);
+    expect(discoverProvider).not.toHaveBeenCalled();
   });
 
   it("records that it was set and where, never the secret", async () => {

@@ -7,7 +7,7 @@ import { OidcIntent } from "@/types";
 import { groupsIn } from "@/lib/oidc/admin-group";
 import { OidcProvider } from "./providers";
 import { relayOrigin } from "./relay";
-import { safeFetch } from "@/lib/safe-fetch";
+import { readBoundedText, safeFetch } from "@/lib/safe-fetch";
 import { allowLoopbackIn } from "@/lib/github";
 import type { ScopedDb } from "@/lib/db-scope";
 
@@ -17,7 +17,11 @@ export const JOIN_COOKIE = "bp_oidc_join";
 export const FLOW_TTL_MS = 10 * 60 * 1000;
 export const ACCEPT_TTL_MS = 15 * 60 * 1000;
 
-const configs = new Map<string, Promise<client.Configuration>>();
+// A discovered client is kept for an hour and at most this many: the entries an organisation adds are its own to
+// grow, and a provider that moves its endpoints is read again
+const CONFIG_TTL_MS = 60 * 60 * 1000;
+const CONFIG_CAP = 200;
+const configs = new Map<string, { at: number; config: Promise<client.Configuration> }>();
 
 // Plain http is accepted only from an issuer on this machine: a local identity provider in
 // development and the e2e rig's stub. Addresses, not names, so no resolver decides it.
@@ -43,32 +47,41 @@ function githubConfig(provider: OidcProvider): client.Configuration {
 
 // Every request to a provider an organisation named goes through the guard against internal addresses, at each
 // redirect hop: its issuer is an address a customer typed, and the server fetches it
-const guardedFetch: client.CustomFetch = (url, options) =>
-  safeFetch(url, options as RequestInit, { allowLoopback: allowLoopbackIn() });
+// What a provider an organisation named may answer with: discovery, the token endpoint and the key set are small
+const MAX_PROVIDER_RESPONSE_BYTES = 256 * 1024;
+export const guardedFetch: client.CustomFetch = async (url, options) => {
+  const response = await safeFetch(url, options as RequestInit, { allowLoopback: allowLoopbackIn() });
+  // Read bounded and handed on whole: the library reads it with no limit of its own
+  const body = await readBoundedText(response, MAX_PROVIDER_RESPONSE_BYTES);
+  return new Response(body, { status: response.status, statusText: response.statusText, headers: { "content-type": response.headers.get("content-type") ?? "application/json" } });
+};
 
-/** Reads the provider's discovery document now, so a mistyped issuer is refused when it is saved and not at somebody's first sign-in. */
+function discover(provider: OidcProvider): Promise<client.Configuration> {
+  const issuer = new URL(provider.issuer);
+  return client.discovery(issuer, provider.clientId, provider.clientSecret, undefined, {
+    execute: issuer.protocol === "http:" && isLoopback(issuer) ? [client.allowInsecureRequests] : [],
+    ...(provider.own ? { [client.customFetch]: guardedFetch } : {}),
+  });
+}
+
+/** Reads the provider's discovery document now, from the network and not from what is kept, so a mistyped issuer is refused when it is saved and not at somebody's first sign-in. */
 export async function discoverProvider(provider: OidcProvider): Promise<void> {
-  await configFor(provider);
+  await discover(provider);
 }
 
 function configFor(provider: OidcProvider): Promise<client.Configuration> {
   if (provider.kind === "github") return Promise.resolve(githubConfig(provider));
   // The secret is part of the key: two organisations may name the same issuer and client with different secrets
   const key = `${provider.id}:${provider.issuer}:${provider.clientId}:${sha256(provider.clientSecret)}`;
-  let config = configs.get(key);
-  if (!config) {
-    const issuer = new URL(provider.issuer);
-    config = client
-      .discovery(issuer, provider.clientId, provider.clientSecret, undefined, {
-        execute: issuer.protocol === "http:" && isLoopback(issuer) ? [client.allowInsecureRequests] : [],
-        ...(provider.own ? { [client.customFetch]: guardedFetch } : {}),
-      })
-      .catch((err) => {
-        configs.delete(key);
-        throw err;
-      });
-    configs.set(key, config);
-  }
+  const kept = configs.get(key);
+  if (kept && Date.now() - kept.at < CONFIG_TTL_MS) return kept.config;
+  const config = discover(provider).catch((err) => {
+    configs.delete(key);
+    throw err;
+  });
+  configs.delete(key);
+  while (configs.size >= CONFIG_CAP) configs.delete(configs.keys().next().value as string);
+  configs.set(key, { at: Date.now(), config });
   return config;
 }
 
