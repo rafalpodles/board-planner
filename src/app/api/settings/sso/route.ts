@@ -1,16 +1,15 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import type { ScopedDb } from "@/lib/db-scope";
-import { can } from "@/lib/entitlements";
 import { decryptSecret, encryptSecret, isEncryptionConfigured } from "@/lib/encryption";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { entitlementRefusal, withAdmin } from "@/lib/middleware";
-import { discoverProvider, returnAddress } from "@/lib/oidc/flow";
-import { parseSsoInput, SSO_LABEL_DEFAULT } from "@/lib/oidc/organisation-sso";
-import { getOrganisation } from "@/lib/organisation";
-import { organisationDomain, originFor } from "@/lib/organisation-host";
+import { discoverProvider } from "@/lib/oidc/flow";
+import { parseSsoInput } from "@/lib/oidc/organisation-sso";
+import { organisationDomain } from "@/lib/organisation-host";
 import { countInLiveWindow, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
 import { readJsonBody } from "@/lib/request-body";
+import { ssoView } from "@/lib/oidc/sso-view";
 import { BlockedDestinationError } from "@/lib/safe-fetch";
 import { duplicateKeyField } from "@/lib/mongo-errors";
 
@@ -38,42 +37,10 @@ const SAVES_PER_WINDOW = 10;
 
 const CLOUD_ONLY = { error: "A sign-in provider of its own is set up per organisation in the cloud; here it comes from the environment" };
 
-async function view(db: ScopedDb) {
-  const [settings, organisation, origin] = await Promise.all([db.Settings.findOne({}, "sso").lean(), getOrganisation(db.organisation), originFor(db)]);
-  const sso = settings?.sso;
-  const available = can(organisation, "identity.sso");
-  let unreadable = false;
-  if (sso) {
-    try {
-      decryptSecret(sso.clientSecret, db.organisation);
-    } catch {
-      // Sealed under a key this server no longer has: the secret has to be entered again
-      unreadable = true;
-    }
-  }
-  const trial = organisation.entitlements.trial === true;
-  return {
-    hosted: true,
-    plan: organisation.entitlements.plan,
-    trial,
-    trialEndsAt: trial && organisation.entitlements.expiresAt ? new Date(organisation.entitlements.expiresAt).toISOString() : null,
-    available,
-    set: !!sso,
-    issuer: sso?.issuer ?? "",
-    clientId: sso?.clientId ?? "",
-    label: sso?.label ?? SSO_LABEL_DEFAULT,
-    secretHint: sso?.clientSecretHint ?? "",
-    unreadable,
-    // Offered at sign-in right now: stored, readable, and the plan includes it
-    active: !!sso && available && !unreadable,
-    redirectUri: origin ? returnAddress({ id: "oidc" }, origin) : null,
-  };
-}
-
 export const GET = withAdmin(async (_request, { db }) => {
   if (organisationDomain() === null) return NextResponse.json({ hosted: false });
   await connectDB();
-  return NextResponse.json(await view(db));
+  return NextResponse.json(await ssoView(db));
 });
 
 export const PUT = withAdmin(async (request, { user, db }) => {
@@ -123,7 +90,16 @@ export const PUT = withAdmin(async (request, { user, db }) => {
     return NextResponse.json({ error: "Could not read the provider's discovery document. Check the issuer address, it must serve /.well-known/openid-configuration." }, { status: 400 });
   }
 
-  await writeSettings(db, { $set: { sso: { issuer, clientId, clientSecret: encryptSecret(secret, db.organisation), clientSecretHint: secret.slice(-4), label } } });
+  // Field by field, so a save that took seconds to check the provider cannot put back a requirement somebody changed meanwhile
+  await writeSettings(db, {
+    $set: {
+      "sso.issuer": issuer,
+      "sso.clientId": clientId,
+      "sso.clientSecret": encryptSecret(secret, db.organisation),
+      "sso.clientSecretHint": secret.slice(-4),
+      "sso.label": label,
+    },
+  });
   // What changed, never the secret: the log is read by every admin
   void logInstanceAudit(db, {
     action: "instance_settings_changed",
@@ -131,7 +107,7 @@ export const PUT = withAdmin(async (request, { user, db }) => {
     actorUsername: user.username,
     detail: `single sign-on: set (${issuer}, client ${clientId})`,
   });
-  return NextResponse.json(await view(db));
+  return NextResponse.json(await ssoView(db));
 });
 
 export const DELETE = withAdmin(async (_request, { user, db }) => {
@@ -140,5 +116,5 @@ export const DELETE = withAdmin(async (_request, { user, db }) => {
   await connectDB();
   await writeSettings(db, { $unset: { sso: 1 } });
   void logInstanceAudit(db, { action: "instance_settings_changed", user: user._id, actorUsername: user.username, detail: "single sign-on: removed" });
-  return NextResponse.json(await view(db));
+  return NextResponse.json(await ssoView(db));
 });

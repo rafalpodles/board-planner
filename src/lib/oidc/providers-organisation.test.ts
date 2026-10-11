@@ -4,7 +4,7 @@ import { Types } from "mongoose";
 const getOrganisation = vi.fn();
 vi.mock("@/lib/organisation", () => ({ getOrganisation }));
 
-const { providersFor, providerFor, publicProvidersFor, liveIdentityFilterFor } = await import("./providers");
+const { providersFor, providerFor, publicProvidersFor, liveIdentityFilterFor, ssoEnforced } = await import("./providers");
 const { encryptSecret } = await import("@/lib/encryption");
 
 const ENV_KEYS = ["ORGANISATION_DOMAIN", "OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "ENCRYPTION_KEY"];
@@ -88,6 +88,49 @@ describe("the sign-in providers of a cloud organisation (BP-951)", () => {
     expect(filter.$or[0]).toMatchObject({ provider: "oidc" });
     expect(filter.$or[0].issuer.$in).toContain("https://login.acme.example");
     expect(filter.$or[0].issuer.$in).not.toContain("https://shared.example");
+  });
+});
+
+describe("an organisation that requires its single sign-on (BP-951)", () => {
+  beforeEach(() => Object.assign(process.env, { GOOGLE_CLIENT_ID: "g", GOOGLE_CLIENT_SECRET: "gs" }));
+
+  it("is offered its own provider alone, with Google and the environment's closed", async () => {
+    const db = dbOf(acme, stored(acme, { enforced: true }));
+
+    expect(await ssoEnforced(db)).toBe(true);
+    expect((await providersFor(db)).map((p) => p.id)).toEqual(["oidc"]);
+    expect(await providerFor(db, "google")).toBeNull();
+  });
+
+  it("is not required unless the flag is on", async () => {
+    const db = dbOf(acme, stored(acme));
+
+    expect(await ssoEnforced(db)).toBe(false);
+    expect((await providersFor(db)).map((p) => p.id)).toEqual(["google", "oidc"]);
+  });
+
+  it("stops being required where the plan stops offering the provider, and is back with the next plan", async () => {
+    const db = dbOf(acme, stored(acme, { enforced: true }));
+
+    plan({ plan: "free" });
+    expect(await ssoEnforced(db)).toBe(false);
+    expect((await providersFor(db)).map((p) => p.id)).toEqual(["google"]);
+
+    plan();
+    expect(await ssoEnforced(db)).toBe(true);
+  });
+
+  it("is not required when its secret cannot be read, since nobody could meet it", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    expect(await ssoEnforced(dbOf(globex, stored(acme, { enforced: true })))).toBe(false);
+    warn.mockRestore();
+  });
+
+  it("is never required where one organisation is the whole instance", async () => {
+    delete process.env.ORGANISATION_DOMAIN;
+
+    expect(await ssoEnforced(dbOf(acme, stored(acme, { enforced: true })))).toBe(false);
   });
 });
 

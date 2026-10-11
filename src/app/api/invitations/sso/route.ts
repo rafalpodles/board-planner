@@ -69,6 +69,10 @@ export async function POST(request: Request) {
   const terms = checkTermsAccepted(read.value.acceptTerms);
   if (!terms.ok) return NextResponse.json({ error: terms.error }, { status: 400 });
 
+  // Read again now: the provider may have been closed since the identity was proven, and the invitation is not spent on it
+  const provider = await providerFor(db, held.provider);
+  if (!provider) return NextResponse.json({ error: EXPIRED }, { status: 400 });
+
   const claimed = await claimInvitationByHash(db, held.invitationTokenHash);
   if (!claimed.ok) {
     return NextResponse.json({ error: INVITATION_REFUSALS[claimed.reason] }, { status: 400 });
@@ -91,7 +95,7 @@ export async function POST(request: Request) {
         subject: held.claims.subject,
         email: held.claims.email,
       },
-      providerProvesAddress: (await providerFor(db, held.provider))?.linksByAddress === true,
+      providerProvesAddress: provider.linksByAddress === true,
       groups: held.claims.groups ?? [],
       terms: terms.fields,
     },

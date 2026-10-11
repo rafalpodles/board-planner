@@ -14,7 +14,7 @@ vi.mock("@/lib/oidc/providers", () => ({
   providersFor: async () => [{ id: "oidc", label: "Acme" }],
   liveIdentityFilter: (providers: unknown) => ({ live: "only", providers }),
 }));
-vi.mock("@/lib/password-sign-in", () => ({ passwordSignInEnabled: () => true }));
+vi.mock("@/lib/password-sign-in", () => ({ passwordSignInEnabled: () => true, passwordSignInFor: async () => true }));
 vi.mock("@/models/identity", () => ({
   Identity: {
     find: (filter: unknown) => {

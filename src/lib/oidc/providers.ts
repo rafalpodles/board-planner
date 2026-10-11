@@ -138,7 +138,7 @@ export function publicProviders(): { id: OidcProviderId; label: string }[] {
  */
 const warnedUnreadable = new Set<string>();
 
-async function organisationProvider(db: ScopedDb): Promise<OidcProvider | null> {
+async function organisationSso(db: ScopedDb): Promise<{ provider: OidcProvider; enforced: boolean } | null> {
   const sso = (await db.Settings.findOne({}, "sso").lean())?.sso;
   if (!sso) return null;
   if (!can(await getOrganisation(db.organisation), "identity.sso")) return null;
@@ -152,7 +152,21 @@ async function organisationProvider(db: ScopedDb): Promise<OidcProvider | null> 
     }
     return null;
   }
-  return { id: "oidc", kind: "oidc", linksByAddress: true, label: sso.label || "Single sign-on", issuer: sso.issuer, clientId: sso.clientId, clientSecret, own: true };
+  const provider: OidcProvider = { id: "oidc", kind: "oidc", linksByAddress: true, label: sso.label || "Single sign-on", issuer: sso.issuer, clientId: sso.clientId, clientSecret, own: true };
+  return { provider, enforced: sso.enforced === true };
+}
+
+async function organisationProvider(db: ScopedDb): Promise<OidcProvider | null> {
+  return (await organisationSso(db))?.provider ?? null;
+}
+
+/**
+ * Whether this organisation has closed every other way in. Only while its own provider is offered, so a plan that
+ * ends or a secret that cannot be read never leaves a requirement nobody can meet.
+ */
+export async function ssoEnforced(db: ScopedDb): Promise<boolean> {
+  if (organisationDomain() === null) return false;
+  return (await organisationSso(db))?.enforced === true;
 }
 
 /**
@@ -163,8 +177,9 @@ async function organisationProvider(db: ScopedDb): Promise<OidcProvider | null> 
 export async function providersFor(db: ScopedDb): Promise<OidcProvider[]> {
   const shared = sharedProviders();
   if (organisationDomain() === null) return shared;
-  const own = await organisationProvider(db);
-  return own ? [...shared, own] : shared;
+  const sso = await organisationSso(db);
+  if (!sso) return shared;
+  return sso.enforced ? [sso.provider] : [...shared, sso.provider];
 }
 
 /** What every organisation of the instance is offered: the environment's providers, less the generic one in the cloud, where it would be nobody's in particular. */

@@ -76,15 +76,22 @@ describe("POST /api/invitations/sso", () => {
     expect(res.headers.get("set-cookie")).toContain("bp_oidc_accept=");
   });
 
-  it.each([
-    ["GitHub, whose word is no proof of the mailbox", { label: "GitHub", linksByAddress: false }],
-    ["a provider no longer configured", null],
-  ])("does not count %s as proving the address", async (_label, provider) => {
-    providerById.mockReturnValue(provider);
+  it("does not count GitHub, whose word is no proof of the mailbox, as proving the address", async () => {
+    providerById.mockReturnValue({ label: "GitHub", linksByAddress: false });
 
     await post();
 
     expect(completeAcceptance.mock.calls[0][2].providerProvesAddress).toBe(false);
+  });
+
+  it("refuses without spending the invitation when the provider is no longer offered, as when an organisation starts requiring its own", async () => {
+    providerById.mockReturnValue(null);
+
+    const res = await post();
+
+    expect(res.status).toBe(400);
+    expect(claimInvitationByHash).not.toHaveBeenCalled();
+    expect(completeAcceptance).not.toHaveBeenCalled();
   });
 
   it("reads the held sign-in from its own cookie", async () => {

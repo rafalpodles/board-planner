@@ -1,6 +1,6 @@
 import { connectDB } from "@/lib/db";
 import { type ScopedDb, organisationOf, scopedForRequest } from "@/lib/db-scope";
-import { passwordSignInEnabled } from "@/lib/password-sign-in";
+import { passwordSignInFor } from "@/lib/password-sign-in";
 import { providersFor } from "@/lib/oidc/providers";
 import { getClientIp, verifyCredentials } from "@/lib/auth";
 import {
@@ -178,7 +178,7 @@ function originOf(redirectUri: string): string {
 
 async function loginForm(db: ScopedDb, p: AuthParams, clientName: string, error?: string): Promise<Response> {
   const label = clientName ? escapeHtml(clientName) : "An application";
-  if (!passwordSignInEnabled()) {
+  if (!(await passwordSignInFor(db))) {
     // Signed in at the instance's own sign-in page, with a provider, and brought back here
     return htmlPage(`
     <h1>Sign in to ${APP_NAME}</h1>
@@ -508,7 +508,7 @@ export async function POST(req: Request) {
     return errorPage("PKCE required: code_challenge with code_challenge_method=S256.");
   }
 
-  if (!passwordSignInEnabled()) return loginForm(db, p, client.clientName);
+  if (!(await passwordSignInFor(db))) return loginForm(db, p, client.clientName);
   const username = String(form.get("username") || "");
   const password = String(form.get("password") || "");
   const clientIp = getClientIp(req);
