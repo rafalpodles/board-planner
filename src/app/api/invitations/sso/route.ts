@@ -97,6 +97,7 @@ export async function POST(request: Request) {
       },
       providerProvesAddress: provider.linksByAddress === true,
       groups: held.claims.groups ?? [],
+      groupsKnown: held.claims.groupsKnown === true,
       terms: terms.fields,
     },
     request,

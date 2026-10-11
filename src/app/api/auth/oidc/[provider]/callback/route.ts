@@ -25,6 +25,7 @@ import {
   VerifiedClaims,
 } from "@/lib/oidc/flow";
 import { applyAdminGroup } from "@/lib/oidc/admin-group";
+import { applyGroupRoles } from "@/lib/oidc/group-roles";
 import { signUpOpenTo } from "@/lib/sign-up-domains";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { notifyIdentityLinked } from "@/lib/security-mail";
@@ -223,6 +224,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
   }
   if (found.user.kind === "machine") return redirectTo(origin, "/login?sso=no_account");
   await applyAdminGroup(db, found.user, provider.id, claims.groups);
+  await applyGroupRoles(db, found.user, provider.id, claims.groups, claims.groupsKnown);
   return signInAs(found.user, request, origin, clientIp, outcome.next ?? "/projects");
 }
 

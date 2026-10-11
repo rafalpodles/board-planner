@@ -70,6 +70,7 @@ describe("POST /api/invitations/sso", () => {
       identity: { provider: "oidc", issuer: "https://id.example.com", subject: "s9", email: "ada@example.com" },
       providerProvesAddress: true,
       groups: [],
+      groupsKnown: false,
       terms: {},
     });
     expect(spendAcceptance).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "cpo_held");

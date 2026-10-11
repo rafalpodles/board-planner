@@ -18,6 +18,7 @@ import { memberLimitRefusal } from "@/lib/member-limit";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { JOIN_COOKIE, heldSignUp, spendAcceptance } from "@/lib/oidc/flow";
 import { applyAdminGroup } from "@/lib/oidc/admin-group";
+import { applyGroupRoles } from "@/lib/oidc/group-roles";
 import { providerFor } from "@/lib/oidc/providers";
 import { signUpOpenTo } from "@/lib/sign-up-domains";
 import { refusedHost } from "@/lib/middleware";
@@ -123,6 +124,7 @@ export async function POST(request: Request) {
     detail: `signed up with ${provider.label}, ${user.email} being in an allowed domain`,
   });
   await applyAdminGroup(db, user, provider.id, held.claims.groups ?? []);
+  await applyGroupRoles(db, user, provider.id, held.claims.groups ?? [], held.claims.groupsKnown);
 
   const { token, absoluteExpiresAt } = await createSession({
     userId: user._id,

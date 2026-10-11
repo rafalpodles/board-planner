@@ -267,7 +267,7 @@ export interface IOidcFlow {
   next: string | null;
   /** The first account's profile, for a flow that sets up an empty instance */
   bootstrap: { username: string; fullName: string } | null;
-  claims: { issuer: string; subject: string; email: string; name?: string; groups?: string[] } | null;
+  claims: { issuer: string; subject: string; email: string; name?: string; groups?: string[]; groupsKnown?: boolean } | null;
   expiresAt: Date;
   createdAt: Date;
 }

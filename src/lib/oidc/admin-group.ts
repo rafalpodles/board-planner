@@ -25,6 +25,11 @@ export function groupsIn(claims: Record<string, unknown>, provider?: Pick<OidcPr
   return Array.isArray(value) ? value.filter((g): g is string => typeof g === "string") : [];
 }
 
+/** Whether the ID token carries the groups claim at all: a token without it says nothing about a person's groups. */
+export function hasGroupsClaim(claims: Record<string, unknown>, provider?: Pick<OidcProvider, "own" | "groupsClaim">): boolean {
+  return claims[(provider?.own ? provider.groupsClaim : process.env.OIDC_GROUPS_CLAIM?.trim()) || "groups"] !== undefined;
+}
+
 /**
  * At each sign-in through the generic OIDC provider, `OIDC_ADMIN_GROUP` (in the cloud, the organisation's own admin
  * group) decides whether the account is an admin — never leaving no active admin. Nothing re-reads the group

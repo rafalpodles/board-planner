@@ -3,7 +3,7 @@ import { IOidcFlow } from "@/types";
 import { withOrganisation } from "@/lib/organisation-field";
 
 const claimsSchema = new Schema(
-  { issuer: String, subject: String, email: String, name: String, groups: [String] },
+  { issuer: String, subject: String, email: String, name: String, groups: [String], groupsKnown: Boolean },
   { _id: false }
 );
 const bootstrapSchema = new Schema({ username: String, fullName: String }, { _id: false });
