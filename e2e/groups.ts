@@ -165,6 +165,7 @@ export const GROUPS = {
     "organisations-member-limit.spec.ts",
     "organisations-machine-limit.spec.ts",
     "organisations-oidc-relay.spec.ts",
+    "organisations-sso.spec.ts",
     "organisations-route-families.spec.ts",
     "organisations-addresses.spec.ts",
     "organisations-boards.spec.ts",

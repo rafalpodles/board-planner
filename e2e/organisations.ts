@@ -1,9 +1,12 @@
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import mongoose from "mongoose";
-import type { BrowserContext } from "@playwright/test";
-import { E2E_MONGODB_URI, PROJECT_ID, WORKER_CREDENTIAL, WORKER_ID, seed } from "./seed";
-import { ORGANISATION_DOMAIN, ORGANISATIONS_PORT } from "../playwright.config";
+import { expect, type APIRequestContext, type BrowserContext } from "@playwright/test";
+import { E2E_ENCRYPTION_KEY, E2E_MONGODB_URI, PROJECT_ID, WORKER_CREDENTIAL, WORKER_ID, seed } from "./seed";
+import { OIDC_STUB_URL, ORGANISATION_DOMAIN, ORGANISATIONS_PORT } from "../playwright.config";
+import { signPlatformRequest } from "../src/lib/platform-request";
+import { encryptSecret } from "../src/lib/encryption";
+import { E2E_PLATFORM_REQUEST_KEY, e2eLicence } from "./licence-key";
 
 const id = (hex: string) => new mongoose.Types.ObjectId(hex);
 
@@ -218,5 +221,35 @@ export async function seedOrganisationWork(): Promise<void> {
     ]);
     await handle.collection("projectauditlogs").insertOne({ ...base, project: who.projectId, user: who.adminId, action: "settings_updated", detail: `${who.slug} board settings` });
   }
+  await mongoose.disconnect();
+}
+
+/** Pro, through the licence service's own push, as the real thing arrives */
+export async function makePro(request: APIRequestContext, who: OrganisationFixture): Promise<void> {
+  const path = `/api/platform/organisations/${who.organisation.toHexString()}/licence`;
+  const body = Buffer.from(JSON.stringify({ licenceKey: e2eLicence({ customer: `${who.slug} customer`, organisation: who.organisation.toHexString() }) }));
+  const headers = signPlatformRequest({ method: "POST", host: PLATFORM_HOST, path, body }, E2E_PLATFORM_REQUEST_KEY);
+  const response = await request.post(`${ORGANISATIONS_API}${path}`, { headers: { host: PLATFORM_HOST, "content-type": "application/json", ...headers }, data: body });
+  expect(response.status(), await response.text()).toBe(200);
+}
+
+// What the OIDC stand-in accepts as its client (e2e/oidc-stub.mjs)
+export const SSO_CLIENT = { clientId: "board-planner-e2e", clientSecret: "e2e-oidc-secret" };
+export const SSO_LABEL = "Acme login";
+
+/** A provider an administrator stored on Settings → Single sign-on: the secret sealed under the organisation's key, as the page seals it */
+export async function storeSso(who: OrganisationFixture, label = SSO_LABEL): Promise<void> {
+  process.env.ENCRYPTION_KEY = E2E_ENCRYPTION_KEY;
+  const handle = await db();
+  await handle.collection("settings").updateOne(
+    { organisation: who.organisation },
+    {
+      $set: {
+        sso: { issuer: OIDC_STUB_URL, clientId: SSO_CLIENT.clientId, clientSecret: encryptSecret(SSO_CLIENT.clientSecret, who.organisation), clientSecretHint: SSO_CLIENT.clientSecret.slice(-4), label },
+      },
+      $setOnInsert: { signUpDomains: [] },
+    },
+    { upsert: true }
+  );
   await mongoose.disconnect();
 }
