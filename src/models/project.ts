@@ -43,11 +43,6 @@ const savedViewSchema = new Schema(
     groupBy: { type: String, default: "" },
     sprintScope: { type: String, default: "all" },
     hiddenColumns: { type: [String], default: [] },
-    // Which identity provider groups give which role on the board, reconciled at sign-in (BP-862)
-    groupRoleMap: {
-      type: [new Schema({ group: { type: String, required: true, maxlength: 200 }, role: { type: String, enum: GRANT_RELATIONS, required: true } }, { _id: false })],
-      default: [],
-    },
   },
   { timestamps: true }
 );
@@ -300,6 +295,11 @@ const projectSchema = new Schema<IProject>(
       type: Schema.Types.ObjectId,
       ref: "User",
       default: null,
+    },
+    // Which identity provider groups give which role on the board, reconciled at sign-in (BP-862)
+    groupRoleMap: {
+      type: [new Schema({ group: { type: String, required: true, maxlength: 200 }, role: { type: String, enum: GRANT_RELATIONS, required: true } }, { _id: false })],
+      default: [],
     },
   },
   { timestamps: true }
