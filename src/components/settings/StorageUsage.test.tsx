@@ -20,6 +20,7 @@ describe("storage on the organisation page (BP-967)", () => {
     expect((await screen.findByTestId("organisation-storage-used")).textContent).toBe("300 MB of 1 GB");
     const bar = screen.getByRole("progressbar", { name: "File storage used" });
     expect(bar.getAttribute("aria-valuenow")).toBe(String(300 * MB));
+    expect(bar.getAttribute("aria-valuetext")).toBe("300 MB of 1 GB");
     expect((bar.firstElementChild as HTMLElement).style.width).toBe("29%");
     expect(api.get).toHaveBeenCalledWith("/api/organisation/storage");
   });
@@ -28,7 +29,7 @@ describe("storage on the organisation page (BP-967)", () => {
     api.get.mockResolvedValue({ storedBytes: 300 * MB, limitBytes: 1024 * MB, upgradeLifts: true });
     show();
 
-    expect((await screen.findByTestId("organisation-storage-free")).textContent).toBe("Pro holds 20 GB.");
+    expect((await screen.findByTestId("organisation-storage-free")).textContent).toBe("Pro includes 20 GB.");
     expect(screen.queryByTestId("organisation-storage-full")).toBeNull();
   });
 
@@ -38,6 +39,7 @@ describe("storage on the organisation page (BP-967)", () => {
 
     const full = await screen.findByTestId("organisation-storage-full");
     expect(full.textContent).toBe("Full, so no more files can be uploaded. Upgrade to Pro for 20 GB.");
+    expect(full.getAttribute("role")).toBeNull();
     expect(screen.getByRole("progressbar").firstElementChild?.className).toContain("bg-danger");
   });
 

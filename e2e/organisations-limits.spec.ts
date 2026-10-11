@@ -232,7 +232,7 @@ test.describe("BP-894: one organisation's limits do not touch another's", () => 
 
     await expect(page.getByTestId("organisation-storage-used")).toHaveText("300 MB of 1 GB");
     await expect(page.getByRole("progressbar", { name: "File storage used" })).toHaveAttribute("aria-valuenow", String(300 * 1024 * 1024));
-    await expect(page.getByTestId("organisation-storage-free")).toHaveText("Pro holds 20 GB.");
+    await expect(page.getByTestId("organisation-storage-free")).toHaveText("Pro includes 20 GB.");
     await expect(page.getByTestId("organisation-storage-full")).toHaveCount(0);
     await page.screenshot({ path: "e2e/.artifacts/bp967-storage-desktop.png" });
 
