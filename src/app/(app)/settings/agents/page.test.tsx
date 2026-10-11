@@ -145,6 +145,18 @@ describe("the instance model", () => {
       await waitFor(() => expect(api.patch).toHaveBeenLastCalledWith("/api/admin/agents/p1", { model: "" }));
     });
 
+    it("shows a project's model saved as a bare name as the option that carries it, not as the default", async () => {
+      api.get.mockImplementation(async (url: string) =>
+        url === "/api/settings/ai-models" ? CATALOGUE : { ...AGENTS, projects: [{ ...ROW, model: "gpt-4o" }] }
+      );
+      render(<AdminAgentsPage />);
+
+      const select = (await screen.findByLabelText("PM model for BP — Board")) as HTMLSelectElement;
+
+      expect(select.value).toBe("openai/gpt-4o");
+      expect(select.selectedOptions[0].textContent).toBe("OpenAI: GPT-4o");
+    });
+
     it("keeps a model the platform's key does not run, saved earlier, as the choice shown, and says so", async () => {
       api.get.mockImplementation(async (url: string) =>
         url === "/api/settings/ai-models" ? CATALOGUE : { ...AGENTS, projects: [{ ...ROW, model: "anthropic/claude-haiku-5.5" }] }

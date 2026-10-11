@@ -17,6 +17,12 @@ describe("the model a PM turn runs on", () => {
     expect(getSettings).not.toHaveBeenCalled();
   });
 
+  // BP-1024: the save check reads a bare name as OpenAI's, so the call must too, or a model that was accepted is refused at the first turn
+  it("qualifies a bare name of the project's own the same way, and leaves a qualified one alone", async () => {
+    expect(await resolvePmModel(db, "gpt-4o-mini")).toBe("openai/gpt-4o-mini");
+    expect(await resolvePmModel(db, "anthropic/claude-haiku-5.5")).toBe("anthropic/claude-haiku-5.5");
+  });
+
   it("is the instance's one model when the project names none", async () => {
     expect(await resolvePmModel(db)).toBe("openai/the-one-model");
     expect(await resolvePmModel(db, "")).toBe("openai/the-one-model");

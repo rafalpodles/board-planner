@@ -34,7 +34,9 @@ export function ModelPicker({ value, onChange, onCommit, catalogue, label, ariaL
   const { models, restricted, providers } = catalogue;
 
   if (models && restricted) {
-    const listed = models.some((m) => m.id === openrouterModel(value));
+    // A bare name saved before OpenRouter (`gpt-4o-mini`) is the option that carries its qualified id
+    const qualified = value ? openrouterModel(value) : "";
+    const listed = models.some((m) => m.id === qualified);
     const groups = new Map<string, { id: string; name: string }[]>();
     for (const m of models) groups.set(m.id.split("/")[0], [...(groups.get(m.id.split("/")[0]) ?? []), m]);
     return (
@@ -47,7 +49,7 @@ export function ModelPicker({ value, onChange, onCommit, catalogue, label, ariaL
         <select
           id={id}
           aria-label={label ? undefined : ariaLabel}
-          value={value}
+          value={listed ? qualified : value}
           onChange={(e) => {
             onChange(e.target.value);
             onCommit?.(e.target.value);

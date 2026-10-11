@@ -22,8 +22,14 @@ export async function listCatalogue(): Promise<CatalogueModel[] | null> {
     if (!res.ok) return null;
     const rows = (await res.json())?.data;
     if (!Array.isArray(rows)) return null;
-    const models = rows
-      .filter((row): row is { id: string; name?: unknown } => typeof row?.id === "string")
+    type Row = { id?: unknown; name?: unknown; architecture?: { output_modalities?: unknown } };
+    const models = (rows as Row[])
+      .filter((row): row is Row & { id: string } => typeof row?.id === "string")
+      // A model that writes no text cannot run the PM agent or AI Assist; one that says nothing about it is kept
+      .filter((row) => {
+        const out = row.architecture?.output_modalities;
+        return !Array.isArray(out) || out.includes("text");
+      })
       .map((row) => ({ id: row.id, name: typeof row.name === "string" ? row.name : row.id }))
       .sort((a, b) => a.id.localeCompare(b.id));
     if (models.length === 0) return null;
@@ -34,10 +40,10 @@ export async function listCatalogue(): Promise<CatalogueModel[] | null> {
   }
 }
 
-/** A variant suffix (`:online`, `:free`) is not part of the id OpenRouter lists */
+/** A variant suffix (`:online`) is not part of the id OpenRouter lists, though some variants (`:free`) are listed as ids of their own */
 export const isListed = (catalogue: CatalogueModel[], model: string): boolean => {
-  const id = model.split(":")[0];
-  return catalogue.some((m) => m.id === id);
+  const base = model.split(":")[0];
+  return catalogue.some((m) => m.id === model || m.id === base);
 };
 
 export type KeyCheck = "valid" | "rejected" | "unknown";

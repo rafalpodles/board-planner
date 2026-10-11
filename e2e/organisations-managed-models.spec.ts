@@ -214,7 +214,7 @@ test("on the platform's key the Model card lists only what that key runs, and a 
     "OpenAI: GPT-6 Luna",
   ]);
   await expect(page.getByTestId("ai-model-note")).toHaveText(
-    "On Board Planner's key only OpenAI models run. To use any other model or provider, add your own OpenRouter key above."
+    "Board Planner's key runs only OpenAI models. To use any other model or provider, add your own OpenRouter key above."
   );
 
   const refused = await putSettings(page, { aiModel: "anthropic/claude-haiku-5.5" });
@@ -231,7 +231,7 @@ test("on the organisation's own key any model OpenRouter lists can be chosen, an
   await signInOn(page.context(), GLOBEX);
   await page.goto(`${originOf(GLOBEX)}/settings/ai-keys`);
   const model = page.getByLabel("Model", { exact: true });
-  await expect(page.getByTestId("ai-model-note")).toContainText("Your own key runs any OpenRouter model");
+  await expect(page.getByTestId("ai-model-note")).toContainText("Any OpenRouter model runs on this key");
 
   const saved = page.waitForResponse((r) => r.request().method() === "PUT" && r.url().endsWith("/api/settings"));
   await fillStably(model, "anthropic/claude-haiku-5.5");

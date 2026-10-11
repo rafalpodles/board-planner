@@ -230,7 +230,7 @@ export default function AdminAgentsPage() {
                       catalogue={catalogue}
                       emptyLabel={`Default — ${openrouterModel(data.defaults.aiModel)}`}
                       placeholder={openrouterModel(data.defaults.aiModel)}
-                      className="text-xs"
+                      className="min-w-[12rem] text-xs"
                       onChange={(model) =>
                         setData((prev) =>
                           prev

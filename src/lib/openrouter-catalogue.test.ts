@@ -26,6 +26,21 @@ describe("OpenRouter's list of models", () => {
     expect(fetchMock).toHaveBeenCalledWith("http://or.test/api/v1/models", expect.not.objectContaining({ headers: expect.anything() }));
   });
 
+  it("leaves out a model that writes no text, which neither the PM agent nor AI Assist can run, and keeps one that says nothing about it", async () => {
+    vi.stubGlobal("fetch", async () =>
+      json({
+        data: [
+          { id: "a/chat", name: "Chat", architecture: { output_modalities: ["text"] } },
+          { id: "a/image", name: "Image", architecture: { output_modalities: ["image"] } },
+          { id: "a/both", name: "Both", architecture: { output_modalities: ["image", "text"] } },
+          { id: "a/silent", name: "Silent" },
+        ],
+      })
+    );
+
+    expect((await listCatalogue())?.map((m) => m.id)).toEqual(["a/both", "a/chat", "a/silent"]);
+  });
+
   it("is asked once for ten minutes", async () => {
     const fetchMock = vi.fn(async () => json({ data: [{ id: "a/b", name: "B" }] }));
     vi.stubGlobal("fetch", fetchMock);
@@ -58,11 +73,13 @@ describe("OpenRouter's list of models", () => {
     expect(await listCatalogue()).toBeNull();
   });
 
-  it("lists a model by its id with a variant suffix taken off", () => {
-    const catalogue = [{ id: "openai/gpt-4o", name: "GPT-4o" }];
+  it("lists a model by its id with a variant suffix taken off, and a variant that is listed as an id of its own as it is", () => {
+    const catalogue = [{ id: "openai/gpt-4o", name: "GPT-4o" }, { id: "vendor/only-free:free", name: "Only free" }];
 
     expect(isListed(catalogue, "openai/gpt-4o")).toBe(true);
     expect(isListed(catalogue, "openai/gpt-4o:online")).toBe(true);
+    expect(isListed(catalogue, "vendor/only-free:free")).toBe(true);
+    expect(isListed(catalogue, "vendor/only-free")).toBe(false);
     expect(isListed(catalogue, "openai/gpt-4")).toBe(false);
   });
 });

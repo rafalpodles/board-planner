@@ -382,8 +382,19 @@ describe("Settings → AI key, the model", () => {
     expect(model.value).toBe("openai/gpt-6-luna");
     expect(Array.from(model.options).map((o) => o.textContent)).toEqual(["OpenAI: GPT-4o", "OpenAI: GPT-6 Luna"]);
     expect(screen.getByTestId("ai-model-note").textContent).toBe(
-      "On Board Planner's key only OpenAI models run. To use any other model or provider, add your own OpenRouter key above."
+      "Board Planner's key runs only OpenAI models. To use any other model or provider, add your own OpenRouter key above."
     );
+  });
+
+  it("shows a model saved as a bare name, from before OpenRouter, as the option that carries it, and keeps Save off", async () => {
+    models = { ...PLATFORM_MODELS, model: "gpt-4o" };
+    render(<AiKeys />);
+
+    const model = (await (await card()).findByLabelText("Model")) as HTMLSelectElement;
+
+    expect(model.value).toBe("openai/gpt-4o");
+    expect(model.selectedOptions[0].textContent).toBe("OpenAI: GPT-4o");
+    expect((screen.getByRole("button", { name: "Save model" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("saves the one chosen as aiModel, only once it differs from what is saved", async () => {
@@ -424,7 +435,7 @@ describe("Settings → AI key, the model", () => {
 
     expect(model.tagName).toBe("INPUT");
     expect(document.querySelector(`datalist#${CSS.escape(model.getAttribute("list") ?? "")} option`)?.getAttribute("value")).toBe("anthropic/claude-haiku-5.5");
-    expect(screen.getByTestId("ai-model-note").textContent).toMatch(/Your own key runs any OpenRouter model/);
+    expect(screen.getByTestId("ai-model-note").textContent).toMatch(/Any OpenRouter model runs on this key/);
   });
 
   it("is a field to type in when OpenRouter's list cannot be read", async () => {

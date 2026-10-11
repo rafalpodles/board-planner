@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
@@ -12,7 +12,6 @@ import { APP_NAME } from "@/lib/brand";
 export function AiModel() {
   const api = useApi();
   const { toast } = useToast();
-  const errorId = useId();
   const [catalogue, setCatalogue] = useState<ModelCatalogue | null>(null);
   const [saved, setSaved] = useState("");
   const [value, setValue] = useState("");
@@ -62,11 +61,11 @@ export function AiModel() {
       <div data-testid="ai-model-card" className="space-y-3">
         {catalogue.restricted ? (
           <p className="text-sm text-text-muted" data-testid="ai-model-note">
-            On {APP_NAME}&apos;s key only {providers} models run. To use any other model or provider, add your own OpenRouter key above.
+            {APP_NAME}&apos;s key runs only {providers} models. To use any other model or provider, add your own OpenRouter key above.
           </p>
         ) : (
           <p className="text-sm text-text-muted" data-testid="ai-model-note">
-            Your own key runs any OpenRouter model: pick from the list or type a name, such as <code>anthropic/claude-haiku-5.5</code>.
+            Any OpenRouter model runs on this key: pick one from the list or type a name, such as <code>anthropic/claude-haiku-5.5</code>.
           </p>
         )}
         <ModelPicker
@@ -79,7 +78,7 @@ export function AiModel() {
           catalogue={catalogue}
         />
         {error && (
-          <p id={errorId} role="alert" className="text-sm text-danger">
+          <p role="alert" className="text-sm text-danger">
             {error}
           </p>
         )}
