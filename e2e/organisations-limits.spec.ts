@@ -3,7 +3,8 @@ import crypto from "node:crypto";
 import mongoose from "mongoose";
 import { ORGANISATION_DOMAIN, RUN_ORGANISATIONS_SERVER } from "../playwright.config";
 import { E2E_MONGODB_URI } from "./seed";
-import { CLOUD_REQUESTS_PER_MINUTE, CLOUD_STORAGE_MB, organisationRequestsKey, principalRequestsKey } from "../src/lib/organisation-limits";
+import { CLOUD_REQUESTS_PER_MINUTE, organisationRequestsKey, principalRequestsKey } from "../src/lib/organisation-limits";
+import { FREE_STORAGE_MB, PAID_STORAGE_MB } from "../src/lib/storage-size";
 import {
   ACME,
   GLOBEX,
@@ -11,6 +12,7 @@ import {
   SHARED_KEY,
   asOrganisation,
   bearer,
+  makePro,
   originOf,
   seedTwoOrganisations,
   signInOn,
@@ -186,24 +188,77 @@ test.describe("BP-894: one organisation's limits do not touch another's", () => 
     expect(await counted(principalRequestsKey(String(GLOBEX.adminId)))).toBe(0);
   });
 
-  test("an organisation whose files fill its storage cannot upload another, while the other can", async ({ request }) => {
-    await withDb((db) =>
+  const filesOf = (who: OrganisationFixture, megabytes: number) =>
+    withDb((db) =>
       db.collection("uploads.files").insertOne({
-        length: CLOUD_STORAGE_MB * 1024 * 1024,
+        length: megabytes * 1024 * 1024,
         chunkSize: 255 * 1024,
         uploadDate: new Date(),
         filename: "archive.zip",
-        metadata: { organisation: ACME.organisation, project: ACME.projectId },
+        metadata: { organisation: who.organisation, project: who.projectId },
       })
     );
+
+  test("a Free organisation whose files fill its 1 GB cannot upload another, Pro lifts it, and the other organisation is untouched (BP-967)", async ({ request }) => {
+    await filesOf(ACME, FREE_STORAGE_MB);
 
     const refused = await upload(request, ACME);
     expect(refused.status()).toBe(413);
     expect((await refused.json()).error).toBe(
-      `This organisation has used ${CLOUD_STORAGE_MB} MB of its ${CLOUD_STORAGE_MB} MB of file storage, so no more files can be uploaded.`
+      "This organisation has used 1 GB of its 1 GB of file storage on the Free plan, so no more files can be uploaded. Upgrade to Pro for 20 GB."
     );
-
     expect((await upload(request, GLOBEX)).status()).toBe(200);
+
+    await makePro(request, ACME);
+    expect((await upload(request, ACME)).status()).toBe(200);
+  });
+
+  test("a Pro organisation stops at 20 GB, and is not offered an upgrade (BP-967)", async ({ request }) => {
+    await makePro(request, ACME);
+    await filesOf(ACME, PAID_STORAGE_MB);
+
+    const refused = await upload(request, ACME);
+    expect(refused.status()).toBe(413);
+    expect((await refused.json()).error).toBe("This organisation has used 20 GB of its 20 GB of file storage, so no more files can be uploaded.");
+    expect((await upload(request, GLOBEX)).status()).toBe(200);
+  });
+
+  test("on screen: Settings → Organisation shows an administrator the storage used against the plan, full on Free and 20 GB on Pro (BP-967)", async ({ browser, request }) => {
+    await filesOf(ACME, 300);
+    const admin = await browser.newContext();
+    await signInOn(admin, ACME);
+    const page = await admin.newPage();
+    await page.goto(`${originOf(ACME)}/settings/organisation`);
+
+    await expect(page.getByTestId("organisation-storage-used")).toHaveText("300 MB of 1 GB");
+    await expect(page.getByRole("progressbar", { name: "File storage used" })).toHaveAttribute("aria-valuenow", String(300 * 1024 * 1024));
+    await expect(page.getByTestId("organisation-storage-free")).toHaveText("Pro holds 20 GB.");
+    await expect(page.getByTestId("organisation-storage-full")).toHaveCount(0);
+    await page.screenshot({ path: "e2e/.artifacts/bp967-storage-desktop.png" });
+
+    await filesOf(ACME, FREE_STORAGE_MB);
+    await page.reload();
+    await expect(page.getByTestId("organisation-storage-used")).toHaveText("1.3 GB of 1 GB");
+    await expect(page.getByTestId("organisation-storage-full")).toHaveText("Full, so no more files can be uploaded. Upgrade to Pro for 20 GB.");
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.reload();
+    await expect(page.getByTestId("organisation-storage-full")).toBeVisible();
+    await page.screenshot({ path: "e2e/.artifacts/bp967-storage-full-phone.png" });
+
+    await makePro(request, ACME);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.reload();
+    await expect(page.getByTestId("organisation-storage-used")).toHaveText("1.3 GB of 20 GB");
+    await expect(page.getByTestId("organisation-storage-full")).toHaveCount(0);
+    await expect(page.getByTestId("organisation-storage-free")).toHaveCount(0);
+    await admin.close();
+
+    const other = await browser.newContext();
+    await signInOn(other, GLOBEX);
+    const otherPage = await other.newPage();
+    await otherPage.goto(`${originOf(GLOBEX)}/settings/organisation`);
+    await expect(otherPage.getByTestId("organisation-storage-used")).toHaveText("0 MB of 1 GB");
+    await other.close();
   });
 
   test("invitations to one address are counted per organisation, so one cannot use up another's", async ({ request }) => {
