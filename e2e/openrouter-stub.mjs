@@ -50,6 +50,9 @@ const LISTED = [
   ["openai/gpt-oss-120b", "OpenAI: gpt-oss-120b"],
   ["anthropic/claude-haiku", "Anthropic: Claude Haiku"],
   ["anthropic/claude-haiku-5.5", "Anthropic: Claude Haiku 5.5"],
+  ["google/gemini-2.5-flash", "Google: Gemini 2.5 Flash"],
+  ["mistralai/mistral-large", "Mistral: Large"],
+  ["moonshotai/kimi-k2.6", "MoonshotAI: Kimi K2.6"],
 ];
 const MODELS = {
   data: [

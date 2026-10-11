@@ -285,7 +285,7 @@ describe("models on the platform's key", () => {
     expect(completion).toEqual({
       type: "error",
       error:
-        "The model moonshotai/kimi-k2.6 is not available on Board Planner's AI key. Choose one of: OpenAI's own models (openai/…, not gpt-oss), or add your organisation's own OpenRouter key in Settings → AI key.",
+        "The model moonshotai/kimi-k2.6 is not available on Board Planner's AI key. Choose one of: OpenAI's own models (openai/…, not gpt-oss), Anthropic's own models (anthropic/…), Google's models on Vertex AI (google/…, not gemma), Mistral's own models (mistralai/…), or add your organisation's own OpenRouter key in Settings → AI key.",
     });
     expect(m.chatCompletion).not.toHaveBeenCalled();
     expect(m.recordUsage).not.toHaveBeenCalled();
@@ -316,10 +316,10 @@ describe("models on the platform's key", () => {
   it("refuses an AI Assist generation with a model off the list before the call is made", async () => {
     const call = vi.fn();
 
-    const refused = gatewayAssist(db, ASSIST, managed, "anthropic/claude-haiku", call);
+    const refused = gatewayAssist(db, ASSIST, managed, "moonshotai/kimi-k2.6", call);
 
     await expect(refused).rejects.toBeInstanceOf(UnmanagedModelRefused);
-    await expect(refused).rejects.toMatchObject({ gate: { status: 403, body: { reason: "model_not_managed", model: "anthropic/claude-haiku" } } });
+    await expect(refused).rejects.toMatchObject({ gate: { status: 403, body: { reason: "model_not_managed", model: "moonshotai/kimi-k2.6" } } });
     expect(call).not.toHaveBeenCalled();
     expect(m.recordUsage).not.toHaveBeenCalled();
   });
@@ -329,6 +329,6 @@ describe("models on the platform's key", () => {
   });
 
   it("runs any AI Assist model on an organisation's own key", async () => {
-    expect(await gatewayAssist(db, ASSIST, { ...managed, keySource: "own" }, "anthropic/claude-haiku", async () => "made")).toBe("made");
+    expect(await gatewayAssist(db, ASSIST, { ...managed, keySource: "own" }, "moonshotai/kimi-k2.6", async () => "made")).toBe("made");
   });
 });

@@ -70,8 +70,18 @@ describe("where OpenRouter may send AI Assist's request", () => {
     expect(create.mock.calls[0][0]).toMatchObject({ provider: { data_collection: "deny", only: ["openai"] } });
   });
 
+  it.each([
+    ["anthropic/claude-haiku", "anthropic"],
+    ["google/gemini-2.5-flash", "google-vertex"],
+    ["mistralai/mistral-large", "mistral"],
+  ])("on the platform's key, a model of an allowed provider (%s) only to that provider (%s)", async (model, slug) => {
+    await generateTask("a task", CONTEXT, model, "sk-given", undefined, true);
+
+    expect(create.mock.calls[0][0].provider).toEqual({ data_collection: "deny", only: [slug] });
+  });
+
   it("on the platform's key, to no provider that may train on prompts, for any other model", async () => {
-    await generateTask("a task", CONTEXT, "anthropic/claude-haiku", "sk-given", undefined, true);
+    await generateTask("a task", CONTEXT, "moonshotai/kimi-k2.6", "sk-given", undefined, true);
 
     expect(create.mock.calls[0][0].provider).toEqual({ data_collection: "deny" });
   });

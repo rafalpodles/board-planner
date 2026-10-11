@@ -10,15 +10,15 @@ import { GLOBEX, ORGANISATIONS_API, PLATFORM_HOST, SHARED_KEY, originOf, seedTwo
 test.skip(!RUN_ORGANISATIONS_SERVER, "needs the ORGANISATION_DOMAIN server — set E2E_ORGANISATIONS_SERVER=1");
 
 /**
- * BP-1001. The platform's key runs only OpenAI's own models; any other is refused before anything reaches the provider.
+ * BP-1001, BP-1026. The platform's key runs only the allowed providers' models (OpenAI, Anthropic, Google, Mistral); any other is refused before anything reaches the provider.
  * An organisation's own key runs any.
  * GLOBEX is Pro, so it is on the platform's key until it stores its own.
  */
 
 const OWN_KEY = "sk-or-globex-own-e2e-0123456789";
-const ASSIST_MODEL = "anthropic/claude-haiku";
+const ASSIST_MODEL = "moonshotai/kimi-k2.6";
 const PM_MODEL = "openai/gpt-oss-120b";
-const ALLOWED = "OpenAI's own models (openai/…, not gpt-oss)";
+const ALLOWED = "OpenAI's own models (openai/…, not gpt-oss), Anthropic's own models (anthropic/…), Google's models on Vertex AI (google/…, not gemma), Mistral's own models (mistralai/…)";
 const refusal = (model: string) =>
   `The model ${model} is not available on Board Planner's AI key. Choose one of: ${ALLOWED}, or add your organisation's own OpenRouter key in Settings → AI key.`;
 const SCRIPTED = `a task <<${JSON.stringify({ title: "From the stub", description: "d", category: "bug", acceptanceCriteria: "" })}>>`;
@@ -208,22 +208,29 @@ test("on the platform's key the Model card lists only what that key runs, and a 
   // The model saved before is off the list: it stays the choice shown, and is marked
   await expect(model.locator("option")).toHaveText([
     `${ASSIST_MODEL} — not available on our key`,
+    "Anthropic: Claude Haiku",
+    "Anthropic: Claude Haiku 5.5",
+    "E2E: Marking provider",
+    "Google: Gemini 2.5 Flash",
+    "Mistral: Large",
     "OpenAI: GPT-4o",
     "OpenAI: GPT-4o Mini",
     "OpenAI: GPT-4o Mini 2026",
     "OpenAI: GPT-6 Luna",
   ]);
+  await expect(model.locator("optgroup")).toHaveCount(4);
   await expect(page.getByTestId("ai-model-note")).toHaveText(
-    "Board Planner's key runs only OpenAI models. To use any other model or provider, add your own OpenRouter key above."
+    "Board Planner's key runs only models from OpenAI, Anthropic, Google, and Mistral. To use any other model or provider, add your own OpenRouter key above."
   );
 
-  const refused = await putSettings(page, { aiModel: "anthropic/claude-haiku-5.5" });
-  expect(refused).toEqual({ status: 400, body: { error: refusal("anthropic/claude-haiku-5.5") } });
+  // A provider the DPA does not name is refused, with all four named; one it does is saved
+  const refused = await putSettings(page, { aiModel: "deepseek/deepseek-v4" });
+  expect(refused).toEqual({ status: 400, body: { error: refusal("deepseek/deepseek-v4") } });
   expect((await stored()).settings?.aiModel).toBe(ASSIST_MODEL);
 
   // The control: a model on the list is saved
-  expect((await putSettings(page, { aiModel: "openai/gpt-4o" })).status).toBe(200);
-  expect((await stored()).settings?.aiModel).toBe("openai/gpt-4o");
+  expect((await putSettings(page, { aiModel: "anthropic/claude-haiku-5.5" })).status).toBe(200);
+  expect((await stored()).settings?.aiModel).toBe("anthropic/claude-haiku-5.5");
 });
 
 test("on the organisation's own key any model OpenRouter lists can be chosen, and one it does not list is refused with the reason", async ({ page }) => {

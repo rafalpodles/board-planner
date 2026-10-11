@@ -50,8 +50,16 @@ describe("GET /api/settings/ai-models", () => {
     expect(body).toEqual({
       restricted: true,
       model: "openai/gpt-4o",
-      models: [{ id: "openai/gpt-4o", name: "OpenAI: GPT-4o" }],
-      providers: [{ id: "openai", label: "OpenAI" }],
+      models: [
+        { id: "anthropic/claude-haiku-5.5", name: "Anthropic: Claude Haiku 5.5" },
+        { id: "openai/gpt-4o", name: "OpenAI: GPT-4o" },
+      ],
+      providers: [
+        { id: "openai", label: "OpenAI" },
+        { id: "anthropic", label: "Anthropic" },
+        { id: "google", label: "Google" },
+        { id: "mistralai", label: "Mistral" },
+      ],
     });
   });
 

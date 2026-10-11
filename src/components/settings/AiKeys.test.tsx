@@ -382,8 +382,24 @@ describe("Settings → AI key, the model", () => {
     expect(model.value).toBe("openai/gpt-6-luna");
     expect(Array.from(model.options).map((o) => o.textContent)).toEqual(["OpenAI: GPT-4o", "OpenAI: GPT-6 Luna"]);
     expect(screen.getByTestId("ai-model-note").textContent).toBe(
-      "Board Planner's key runs only OpenAI models. To use any other model or provider, add your own OpenRouter key above."
+      "Board Planner's key runs only models from OpenAI. To use any other model or provider, add your own OpenRouter key above."
     );
+  });
+
+  it("names every provider the platform's key runs, as a list, and groups the models by them", async () => {
+    models = {
+      ...PLATFORM_MODELS,
+      models: [{ id: "anthropic/claude-haiku-5.5", name: "Anthropic: Claude Haiku 5.5" }, ...PLATFORM_MODELS.models],
+      providers: [{ id: "openai", label: "OpenAI" }, { id: "anthropic", label: "Anthropic" }, { id: "google", label: "Google" }, { id: "mistralai", label: "Mistral" }],
+    };
+    render(<AiKeys />);
+
+    const model = (await (await card()).findByLabelText("Model")) as HTMLSelectElement;
+
+    expect(screen.getByTestId("ai-model-note").textContent).toBe(
+      "Board Planner's key runs only models from OpenAI, Anthropic, Google, and Mistral. To use any other model or provider, add your own OpenRouter key above."
+    );
+    expect(Array.from(model.querySelectorAll("optgroup")).map((g) => g.label)).toEqual(["Anthropic", "OpenAI"]);
   });
 
   it("shows a model saved as a bare name, from before OpenRouter, as the option that carries it, and keeps Save off", async () => {
