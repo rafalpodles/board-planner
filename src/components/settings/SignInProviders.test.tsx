@@ -117,4 +117,73 @@ describe("Settings → Single sign-on, Google and GitHub (BP-1027)", () => {
 
     expect((await switchFor("Sign in with Google")).checked).toBe(true);
   });
+
+  it("keeps its switches enabled while a save runs, so a keyboard user keeps their place, and ignores a second change meanwhile", async () => {
+    let finish: (answer: unknown) => void = () => {};
+    api.put.mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
+    render(<SignInProviders />);
+    const google = await switchFor("Sign in with Google");
+    const github = await switchFor("Sign in with GitHub");
+
+    fireEvent.click(google);
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+    expect(google.disabled).toBe(false);
+    expect(github.disabled).toBe(false);
+    fireEvent.click(github);
+    expect(api.put).toHaveBeenCalledTimes(1);
+
+    finish(GOOGLE_OFF);
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("Sign-in with Google turned off", "success"));
+  });
+
+  it("tells somebody who can use a password to use Forgot password, and says open sessions stay", async () => {
+    api.put.mockRejectedValueOnce(Object.assign(new Error("2 members sign in only through Google."), { status: 409, body: { affected: 2 } }));
+    render(<SignInProviders />);
+
+    fireEvent.click(await switchFor("Sign in with Google"));
+
+    const question = await screen.findByText(/2 members sign in only through Google/);
+    expect(question.textContent).toContain("Their open sessions stay active");
+    expect(question.textContent).toContain("Forgot password");
+  });
+
+  it("does not suggest a password where none signs in", async () => {
+    api.get.mockResolvedValue({ ...BOTH_ON, passwordSignIn: false });
+    api.put.mockRejectedValueOnce(Object.assign(new Error("2 members sign in only through Google."), { status: 409, body: { affected: 2 } }));
+    render(<SignInProviders />);
+
+    fireEvent.click(await switchFor("Sign in with Google"));
+
+    expect((await screen.findByText(/2 members sign in only through Google/)).textContent).not.toContain("password");
+  });
+
+  it("keeps the question open and says why when confirming fails", async () => {
+    api.put
+      .mockRejectedValueOnce(Object.assign(new Error("1 member signs in only through Google."), { status: 409, body: { affected: 1 } }))
+      .mockRejectedValueOnce(Object.assign(new Error("Interactive admin session required"), { status: 403, body: {} }));
+    render(<SignInProviders />);
+
+    fireEvent.click(await switchFor("Sign in with Google"));
+    await screen.findByText(/1 member signs in only through Google/);
+    fireEvent.click(screen.getByRole("button", { name: "Turn off" }));
+
+    expect((await screen.findByRole("alert")).textContent).toBe("Interactive admin session required");
+    expect(screen.getByText(/1 member signs in only through Google/)).toBeTruthy();
+  });
+
+  it("says a provider is switched on but closed while single sign-on is required", async () => {
+    api.get.mockResolvedValue({ ...BOTH_ON, enforced: true });
+    render(<SignInProviders />);
+
+    await switchFor("Sign in with Google");
+
+    expect(screen.getAllByText("Switched on, but closed while your own single sign-on is required.")).toHaveLength(2);
+  });
+
+  it("is named after the providers the operator set up", async () => {
+    api.get.mockResolvedValue({ ...BOTH_ON, providers: [BOTH_ON.providers[1]] });
+    render(<SignInProviders />);
+
+    expect((await screen.findByRole("heading", { name: "GitHub" })).textContent).toBe("GitHub");
+  });
 });

@@ -4,6 +4,7 @@ const getAuthUser = vi.fn();
 const logInstanceAudit = vi.fn();
 const getOrganisation = vi.fn();
 const membersOnlyThrough = vi.fn();
+const warnIfAdminsLockedOut = vi.fn();
 let row: Record<string, unknown> | null = null;
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
@@ -11,6 +12,7 @@ vi.mock("@/lib/auth", () => ({ getAuthUser, RateLimitError: class RateLimitError
 vi.mock("@/lib/grants", () => ({ check: vi.fn(), accessibleProjectIds: vi.fn() }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/lib/organisation", () => ({ getOrganisation }));
+vi.mock("@/lib/password-sign-in", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/password-sign-in")>()), warnIfAdminsLockedOut }));
 vi.mock("@/lib/oidc/provider-switch", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/oidc/provider-switch")>()), membersOnlyThrough }));
 vi.mock("@/lib/organisation-host", async (importOriginal) => {
   const { scopedToDefaultOrganisation } = await vi.importActual<typeof import("@/lib/db-scope")>("@/lib/db-scope");
@@ -39,7 +41,7 @@ const ADMIN = { _id: "a1", username: "root", role: "admin", viaMachineCredential
 const ctx = () => ({ params: Promise.resolve({}) });
 const get = () => GET(new Request("http://x/api/settings/sign-in-providers"), ctx());
 const put = (body: unknown) => PUT(new Request("http://x/api/settings/sign-in-providers", { method: "PUT", body: JSON.stringify(body) }), ctx());
-const ENV = ["ORGANISATION_DOMAIN", "ORGANISATION_REQUESTS_PER_MINUTE", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GITHUB_OAUTH_CLIENT_ID", "GITHUB_OAUTH_CLIENT_SECRET"];
+const ENV = ["ORGANISATION_DOMAIN", "ORGANISATION_REQUESTS_PER_MINUTE", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GITHUB_OAUTH_CLIENT_ID", "GITHUB_OAUTH_CLIENT_SECRET", "PASSWORD_SIGN_IN"];
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -65,6 +67,7 @@ describe("GET /api/settings/sign-in-providers", () => {
     expect(body).toEqual({
       hosted: true,
       enforced: false,
+      passwordSignIn: true,
       providers: [
         { id: "google", label: "Google", enabled: true },
         { id: "github", label: "GitHub", enabled: true },
@@ -184,5 +187,61 @@ describe("PUT /api/settings/sign-in-providers", () => {
 
     expect((await put({ provider: "google", enabled: false })).status).toBe(404);
     expect(row).toBeNull();
+  });
+
+  it("is not for a member", async () => {
+    getAuthUser.mockResolvedValue({ ...ADMIN, role: "member" });
+
+    expect((await put({ provider: "google", enabled: false })).status).toBe(403);
+    expect(row).toBeNull();
+  });
+
+  it("takes only a true confirm as one, never the string", async () => {
+    membersOnlyThrough.mockResolvedValue(2);
+
+    expect((await put({ provider: "google", enabled: false, confirm: "true" })).status).toBe(409);
+    expect(row).toBeNull();
+  });
+
+  it("says the instance's administrators may now be locked out, after the write that switched a provider off, and not after one that switched it on", async () => {
+    await put({ provider: "google", enabled: false });
+    expect(warnIfAdminsLockedOut).toHaveBeenCalledTimes(1);
+
+    await put({ provider: "google", enabled: true });
+    expect(warnIfAdminsLockedOut).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("PUT /api/settings/sign-in-providers where passwords do not sign in", () => {
+  beforeEach(() => {
+    process.env.PASSWORD_SIGN_IN = "off";
+  });
+
+  it("refuses to switch off the last provider that is offered, however it is confirmed, and writes nothing", async () => {
+    row = { disabledProviders: ["github"] };
+
+    for (const confirm of [undefined, true]) {
+      const res = await put({ provider: "google", enabled: false, confirm });
+
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toContain("Google is the only way in");
+    }
+    expect(row).toEqual({ disabledProviders: ["github"] });
+    expect(membersOnlyThrough).not.toHaveBeenCalled();
+    expect(warnIfAdminsLockedOut).not.toHaveBeenCalled();
+  });
+
+  it("lets one go while another stays", async () => {
+    const res = await put({ provider: "google", enabled: false });
+
+    expect(res.status).toBe(200);
+    expect(row?.disabledProviders).toEqual(["google"]);
+  });
+
+  it("lets the last one be switched on, which is the way back", async () => {
+    row = { disabledProviders: ["google", "github"] };
+
+    expect((await put({ provider: "google", enabled: true })).status).toBe(200);
+    expect(row?.disabledProviders).toEqual(["github"]);
   });
 });

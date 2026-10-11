@@ -84,6 +84,14 @@ test.describe("BP-1027: switching GitHub off for an organisation", () => {
     await openSettings(page);
     await expect(github(page)).toBeChecked();
     await page.screenshot({ path: "e2e/.artifacts/bp1027-settings.png" });
+    const desktop = page.viewportSize()!;
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.reload();
+    await expect(github(page)).toBeVisible();
+    await page.screenshot({ path: "e2e/.artifacts/bp1027-settings-phone.png", fullPage: true });
+    await page.setViewportSize(desktop);
+    await page.reload();
+    await expect(github(page)).toBeVisible();
 
     const visitorContext = await browser.newContext();
     const visitor = await visitorContext.newPage();
@@ -104,12 +112,12 @@ test.describe("BP-1027: switching GitHub off for an organisation", () => {
       return { status: res.status, body: await res.json().catch(() => ({})) };
     });
     expect(started.status).toBe(404);
-    expect(started.body.error).toBe("That sign-in is turned off for this organisation");
+    expect(started.body.error).toBe("That sign-in is not available for this organisation");
 
     // A browser that was already on its way back from GitHub is sent to the page that says why
     await visitor.goto(`${originOf(ACME)}/api/auth/oidc/github/callback?code=c&state=s`);
     await expect(visitor).toHaveURL(`${originOf(ACME)}/login?sso=provider_off`);
-    await expect(visitor.getByText("Signing in with that provider is turned off for this organisation.")).toBeVisible();
+    await expect(visitor.getByText("That sign-in is not available for this organisation. Use another way to sign in, or ask an administrator.")).toBeVisible();
 
     // What is open stays open, and the other organisation is not touched
     expect(await page.evaluate(async () => (await fetch("/api/auth/me")).status)).toBe(200);
@@ -140,6 +148,17 @@ test.describe("BP-1027: switching GitHub off for an organisation", () => {
     const dialog = page.getByRole("dialog");
     await expect(dialog).toContainText("1 member signs in only through GitHub");
     await page.screenshot({ path: "e2e/.artifacts/bp1027-warning.png" });
+    const desktop = page.viewportSize()!;
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.reload();
+    await clickGitHub(page);
+    await expect(dialog).toBeVisible();
+    await page.screenshot({ path: "e2e/.artifacts/bp1027-warning-phone.png" });
+    await page.setViewportSize(desktop);
+    await page.reload();
+    await clickGitHub(page);
+    await expect(dialog).toBeVisible();
 
     // Declined: it stays on, and still offered
     await dialog.getByRole("button", { name: "Cancel" }).click();

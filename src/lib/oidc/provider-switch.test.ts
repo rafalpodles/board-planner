@@ -2,6 +2,8 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { Types } from "mongoose";
 
 vi.mock("@/lib/organisation", () => ({ getOrganisation: vi.fn() }));
+const ssoEnforced = vi.hoisted(() => vi.fn(async () => false));
+vi.mock("@/lib/oidc/providers", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/oidc/providers")>()), ssoEnforced }));
 
 const { isSwitchable, membersOnlyThrough, providerSwitchView } = await import("./provider-switch");
 
@@ -31,6 +33,7 @@ function fakeDb({ settings = {}, linked, users, stillIn = [] }: Fake) {
 }
 
 beforeEach(() => {
+  ssoEnforced.mockResolvedValue(false);
   Object.assign(process.env, { ORGANISATION_DOMAIN: "board.example", GOOGLE_CLIENT_ID: "g", GOOGLE_CLIENT_SECRET: "gs", GITHUB_OAUTH_CLIENT_ID: "gh", GITHUB_OAUTH_CLIENT_SECRET: "ghs" });
 });
 afterEach(() => ENV_KEYS.forEach((key) => delete process.env[key]));
@@ -112,5 +115,32 @@ describe("the members left with no way in by switching a provider off (BP-1027)"
 
     expect(await membersOnlyThrough(db, "github")).toBe(0);
     expect(identityFind).not.toHaveBeenCalled();
+  });
+
+  it("is nobody while single sign-on is required, since Google and GitHub are closed already", async () => {
+    ssoEnforced.mockResolvedValue(true);
+    const { db, identityFind } = fakeDb({ linked: [{ user: u1 }], users: [{ _id: u1 }] });
+
+    expect(await membersOnlyThrough(db, "google")).toBe(0);
+    expect(identityFind).not.toHaveBeenCalled();
+  });
+
+  it("asks for this provider's links of the issuer it signs as, then for the remaining providers' links of only those members", async () => {
+    const { db, identityFind } = fakeDb({ linked: [{ user: u1 }, { user: u1 }], users: [{ _id: u1 }] });
+
+    expect(await membersOnlyThrough(db, "google")).toBe(1);
+
+    const [first, second] = identityFind.mock.calls.map((call) => call[0] as Record<string, unknown>);
+    expect(first.provider).toBe("google");
+    expect((first.$or as { provider: string }[]).map((clause) => clause.provider)).toEqual(["google"]);
+    expect(second.user).toEqual({ $in: [u1] });
+    expect((second.$or as { provider: string }[]).map((clause) => clause.provider)).toEqual(["github"]);
+  });
+
+  it("counts a member with two links to the same provider once", async () => {
+    const { db, userFind } = fakeDb({ linked: [{ user: u1 }, { user: u1 }], users: [{ _id: u1 }] });
+
+    expect(await membersOnlyThrough(db, "google")).toBe(1);
+    expect(userFind).toHaveBeenCalledWith(expect.objectContaining({ _id: { $in: [String(u1)] } }));
   });
 });

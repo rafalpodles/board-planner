@@ -11,6 +11,7 @@ import { SettingsCard } from "@/components/settings/SettingsCard";
 interface ProviderAnswer {
   hosted: boolean;
   enforced?: boolean;
+  passwordSignIn?: boolean;
   providers?: { id: string; label: string; enabled: boolean }[];
 }
 
@@ -18,6 +19,7 @@ interface Warning {
   id: string;
   label: string;
   message: string;
+  error?: string;
 }
 
 export function SignInProviders() {
@@ -51,11 +53,15 @@ export function SignInProviders() {
       toast(`Sign-in with ${label} turned ${enabled ? "on" : "off"}`, "success");
     } catch (err) {
       const refusal = err as { status?: number; body?: { affected?: number } };
+      const message = err instanceof Error ? err.message : "Could not save.";
       if (refusal.status === 409 && typeof refusal.body?.affected === "number") {
-        setWarning({ id, label, message: (err as Error).message });
+        setWarning({ id, label, message });
+      } else if (confirm) {
+        // The question is still open and the reason belongs in it, not behind it
+        setWarning((open) => (open ? { ...open, error: message } : open));
       } else {
         setWarning(null);
-        setError(err instanceof Error ? err.message : "Could not save.");
+        setError(message);
       }
     } finally {
       setBusy(null);
@@ -74,7 +80,7 @@ export function SignInProviders() {
   return (
     <div className="max-w-2xl" data-testid="sign-in-providers">
       <SettingsCard
-        title="Google and GitHub"
+        title={answer.providers.map((provider) => provider.label).join(" and ")}
         description="Choose which of the shared sign-in providers your people are offered. Turning one off hides its button and refuses it on the server; accounts, links and open sessions stay as they are."
       >
         {answer.enforced && (
@@ -92,10 +98,16 @@ export function SignInProviders() {
             <li key={provider.id}>
               <Switch
                 checked={provider.enabled}
-                disabled={busy !== null}
-                onChange={(on) => set(provider.id, provider.label, on)}
+                // Not disabled while it saves: a control that becomes disabled drops keyboard focus
+                onChange={(on) => busy === null && set(provider.id, provider.label, on)}
                 label={`Sign in with ${provider.label}`}
-                hint={provider.enabled ? `People can sign in and link ${provider.label}.` : `${provider.label} is not offered to anybody in this organisation.`}
+                hint={
+                  !provider.enabled
+                    ? `${provider.label} is not offered to anybody in this organisation.`
+                    : answer.enforced
+                      ? "Switched on, but closed while your own single sign-on is required."
+                      : `People can sign in and link ${provider.label}.`
+                }
               />
             </li>
           ))}
@@ -106,7 +118,8 @@ export function SignInProviders() {
         onClose={() => setWarning(null)}
         onConfirm={() => warning && set(warning.id, warning.label, false, true)}
         title={`Turn off ${warning?.label ?? "sign-in"}?`}
-        message={`${warning?.message ?? ""} Turn it back on, or have them set a password, to let them in again.`}
+        message={`${warning?.message ?? ""} Their open sessions stay active. To let them back in, turn ${warning?.label ?? "it"} on again${answer.passwordSignIn === false ? "." : ", or they can use Forgot password to set a password."}`}
+        error={warning?.error}
         confirmLabel="Turn off"
         loadingLabel="Turning off…"
         loading={busy !== null}

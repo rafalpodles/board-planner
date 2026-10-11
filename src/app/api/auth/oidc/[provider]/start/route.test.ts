@@ -106,8 +106,16 @@ describe("POST /api/auth/oidc/:provider/start", () => {
     const res = await start({}, "google");
 
     expect(res.status).toBe(404);
-    expect(await res.json()).toEqual({ error: "That sign-in is turned off for this organisation" });
+    expect(await res.json()).toEqual({ error: "That sign-in is not available for this organisation" });
     expect(beginFlow).not.toHaveBeenCalled();
+  });
+
+  it("refuses it whatever the sign-in is for: to link from Settings, to accept an invitation, or to sign in (BP-1027)", async () => {
+    for (const body of [{ intent: "link" }, { intent: "invite", invitationToken: "t" }, { intent: "signin" }]) {
+      expect((await start(body, "google")).status).toBe(404);
+    }
+    expect(beginFlow).not.toHaveBeenCalled();
+    expect(findInvitationByToken).not.toHaveBeenCalled();
   });
 
   it("starts an acceptance only for an invitation that can still be used", async () => {

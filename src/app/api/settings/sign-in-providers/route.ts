@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { withAdmin } from "@/lib/middleware";
+import { passwordSignInFor, warnIfAdminsLockedOut } from "@/lib/password-sign-in";
 import { isSwitchable, membersOnlyThrough, providerSwitchView } from "@/lib/oidc/provider-switch";
+import { providersFor } from "@/lib/oidc/providers";
 import { organisationDomain } from "@/lib/organisation-host";
 import { readJsonBody } from "@/lib/request-body";
 import { writeSettings } from "@/lib/settings-write";
@@ -29,10 +31,17 @@ export const PUT = withAdmin(async (request, { user, db }) => {
   await connectDB();
   const current = (await providerSwitchView(db)).providers.find((p) => p.id === provider);
   if (current?.enabled !== enabled) {
+    const label = current?.label ?? provider;
+    // Where passwords do not sign in, the last provider offered is the last way in for everybody: no confirmation lifts that
+    if (!enabled && !(await passwordSignInFor(db)) && (await providersFor(db)).every((p) => p.id === provider)) {
+      return NextResponse.json(
+        { error: `Passwords do not sign in on this server, so ${label} is the only way in. Turn another sign-in on, or set up your own single sign-on, first.` },
+        { status: 409 }
+      );
+    }
     if (!enabled && confirm !== true) {
       const affected = await membersOnlyThrough(db, provider);
       if (affected > 0) {
-        const label = current?.label ?? provider;
         return NextResponse.json(
           {
             error: `${affected} ${affected === 1 ? "member signs" : "members sign"} in only through ${label}. They cannot sign in while it is off.`,
@@ -47,8 +56,9 @@ export const PUT = withAdmin(async (request, { user, db }) => {
       action: "instance_settings_changed",
       user: user._id,
       actorUsername: user.username,
-      detail: `sign-in with ${current?.label ?? provider}: ${enabled ? "turned on" : "turned off"}`,
+      detail: `sign-in with ${label}: ${enabled ? "turned on" : "turned off"}`,
     });
+    if (!enabled) void warnIfAdminsLockedOut(db, "a sign-in provider being switched off");
   }
   return NextResponse.json(await providerSwitchView(db));
 });

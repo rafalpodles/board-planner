@@ -56,7 +56,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
   const id = (await params).provider;
   const provider = await providerFor(db, id);
   if (!provider) {
-    return NextResponse.json({ error: setUpButNotOffered(id) ? "That sign-in is turned off for this organisation" : "That sign-in is not set up here" }, { status: 404 });
+    return NextResponse.json({ error: setUpButNotOffered(id) ? "That sign-in is not available for this organisation" : "That sign-in is not set up here" }, { status: 404 });
   }
 
   const origin = await originFor(db);

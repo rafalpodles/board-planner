@@ -4,7 +4,7 @@ import { Types } from "mongoose";
 const getOrganisation = vi.fn();
 vi.mock("@/lib/organisation", () => ({ getOrganisation }));
 
-const { providersFor, providerFor, publicProvidersFor, liveIdentityFilterFor, ssoEnforced } = await import("./providers");
+const { providersFor, providerFor, publicProvidersFor, liveIdentityFilterFor, ssoEnforced, setUpButNotOffered } = await import("./providers");
 const { encryptSecret } = await import("@/lib/encryption");
 
 const ENV_KEYS = ["ORGANISATION_DOMAIN", "OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GITHUB_OAUTH_CLIENT_ID", "GITHUB_OAUTH_CLIENT_SECRET", "ENCRYPTION_KEY"];
@@ -180,5 +180,11 @@ describe("Google and GitHub switched off by an organisation (BP-1027)", () => {
     const filter = (await liveIdentityFilterFor(dbOf(acme, null, ["google"]))) as { $or: { provider: string }[] };
 
     expect(filter.$or.map((clause) => clause.provider)).toEqual(["github"]);
+  });
+
+  it("knows which providers the server has but an organisation may not be offered: Google and GitHub as set up, never its own, never an unknown one", () => {
+    expect(["google", "github", "oidc", "gitlab"].map(setUpButNotOffered)).toEqual([true, true, false, false]);
+    delete process.env.GITHUB_OAUTH_CLIENT_ID;
+    expect(setUpButNotOffered("github")).toBe(false);
   });
 });
