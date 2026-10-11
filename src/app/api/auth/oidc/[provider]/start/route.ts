@@ -18,7 +18,7 @@ import {
   RECENT_SIGN_IN_REQUIRED,
   signedInRecently,
 } from "@/lib/session";
-import { providerFor } from "@/lib/oidc/providers";
+import { providerFor, setUpButNotOffered } from "@/lib/oidc/providers";
 import { beginFlow, FLOW_COOKIE, FLOW_TTL_MS } from "@/lib/oidc/flow";
 import { findInvitationByToken } from "@/lib/invitations";
 import { INVITATION_REFUSALS } from "@/lib/invitation-refusals";
@@ -53,8 +53,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
 
   // After the throttle: it reads the organisation's settings and its plan, which anybody may ask for
   await connectDB();
-  const provider = await providerFor(db, (await params).provider);
-  if (!provider) return NextResponse.json({ error: "That sign-in is not set up here" }, { status: 404 });
+  const id = (await params).provider;
+  const provider = await providerFor(db, id);
+  if (!provider) {
+    return NextResponse.json({ error: setUpButNotOffered(id) ? "That sign-in is not available for this organisation" : "That sign-in is not set up here" }, { status: 404 });
+  }
 
   const origin = await originFor(db);
   if (!origin) return NextResponse.json({ error: NO_ORIGIN_ERROR }, { status: 500 });

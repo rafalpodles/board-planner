@@ -27,6 +27,8 @@ vi.mock("@/lib/session", () => ({
 }));
 vi.mock("@/lib/oidc/providers", () => ({
   providerFor: async (_db: unknown, id: string) => (id === "oidc" ? { id: "oidc", label: "Acme" } : null),
+  // Google and GitHub as the environment sets them up, whichever of them this organisation is offered
+  setUpButNotOffered: (id: string) => id === "google",
   ssoEnforced: async () => false,
 }));
 vi.mock("@/lib/oidc/flow", () => ({ beginFlow, FLOW_COOKIE: "bp_oidc", FLOW_TTL_MS: 600_000 }));
@@ -98,6 +100,22 @@ describe("POST /api/auth/oidc/:provider/start", () => {
   it("refuses a provider that is not set up", async () => {
     expect((await start({}, "github")).status).toBe(404);
     expect(beginFlow).not.toHaveBeenCalled();
+  });
+
+  it("refuses a provider the server has but this organisation turned off, and says so (BP-1027)", async () => {
+    const res = await start({}, "google");
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "That sign-in is not available for this organisation" });
+    expect(beginFlow).not.toHaveBeenCalled();
+  });
+
+  it("refuses it whatever the sign-in is for: to link from Settings, to accept an invitation, or to sign in (BP-1027)", async () => {
+    for (const body of [{ intent: "link" }, { intent: "invite", invitationToken: "t" }, { intent: "signin" }]) {
+      expect((await start(body, "google")).status).toBe(404);
+    }
+    expect(beginFlow).not.toHaveBeenCalled();
+    expect(findInvitationByToken).not.toHaveBeenCalled();
   });
 
   it("starts an acceptance only for an invitation that can still be used", async () => {

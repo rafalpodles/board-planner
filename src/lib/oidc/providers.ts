@@ -4,6 +4,7 @@ import { decryptSecret } from "@/lib/encryption";
 import { getOrganisation } from "@/lib/organisation";
 import { organisationDomain } from "@/lib/organisation-host";
 import type { ScopedDb } from "@/lib/db-scope";
+import type { ISettings } from "@/models/settings";
 
 export type OidcProviderId = "oidc" | "google" | "github";
 
@@ -127,6 +128,11 @@ export function providerById(id: string): OidcProvider | null {
   return configuredProviders().find((p) => p.id === id) ?? null;
 }
 
+/** Google or GitHub, which the operator set up but this organisation is not offered: its administrators switched it off, or it requires its own sign-in. */
+export function setUpButNotOffered(id: string): boolean {
+  return SWITCHABLE_PROVIDERS.includes(id as OidcProviderId) && providerById(id) !== null;
+}
+
 export function publicProviders(): { id: OidcProviderId; label: string }[] {
   return configuredProviders().map(({ id, label }) => ({ id, label }));
 }
@@ -138,8 +144,8 @@ export function publicProviders(): { id: OidcProviderId; label: string }[] {
  */
 const warnedUnreadable = new Set<string>();
 
-async function organisationSso(db: ScopedDb): Promise<{ provider: OidcProvider; enforced: boolean } | null> {
-  const sso = (await db.Settings.findOne({}, "sso").lean())?.sso;
+async function organisationSso(db: ScopedDb, stored?: Pick<ISettings, "sso"> | null): Promise<{ provider: OidcProvider; enforced: boolean } | null> {
+  const sso = (stored === undefined ? await db.Settings.findOne({}, "sso").lean() : stored)?.sso;
   if (!sso) return null;
   if (!can(await getOrganisation(db.organisation), "identity.sso")) return null;
   let clientSecret: string;
@@ -175,12 +181,17 @@ export async function ssoEnforced(db: ScopedDb): Promise<boolean> {
  * nobody's: only Google and GitHub are shared, and the generic one is the organisation's own.
  */
 export async function providersFor(db: ScopedDb): Promise<OidcProvider[]> {
-  const shared = sharedProviders();
-  if (organisationDomain() === null) return shared;
-  const sso = await organisationSso(db);
-  if (!sso) return shared;
-  return sso.enforced ? [sso.provider] : [...shared, sso.provider];
+  if (organisationDomain() === null) return sharedProviders();
+  const stored = await db.Settings.findOne({}, "sso disabledProviders").lean();
+  const sso = await organisationSso(db, stored);
+  if (sso?.enforced) return [sso.provider];
+  const off = new Set(stored?.disabledProviders ?? []);
+  const shared = sharedProviders().filter((p) => !off.has(p.id));
+  return sso ? [...shared, sso.provider] : shared;
 }
+
+/** The shared providers an organisation's administrators may switch off for it: the operator's, never the organisation's own. */
+export const SWITCHABLE_PROVIDERS: readonly OidcProviderId[] = ["google", "github"];
 
 /** What every organisation of the instance is offered: the environment's providers, less the generic one in the cloud, where it would be nobody's in particular. */
 export function sharedProviders(): OidcProvider[] {
