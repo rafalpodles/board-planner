@@ -19,7 +19,7 @@ test.describe("BP-919: signing in on the platform host, e-mail first", () => {
     await provideAddressAndCode(page, email);
     await expect(page.getByText("Signing in to Acme")).toBeVisible();
     await page.getByLabel("Password").fill(ACME.password);
-    await page.getByRole("checkbox", { name: /Open this organisation straight away/ }).check();
+    await page.getByRole("checkbox", { name: /Next time you go straight to this organisation/ }).check();
     await page.getByRole("button", { name: "Sign in" }).click();
 
     await page.waitForURL(`${originOf(ACME)}/projects`);
@@ -36,7 +36,7 @@ test.describe("BP-919: signing in on the platform host, e-mail first", () => {
 
     await provideAddressAndCode(page, email);
     await page.getByLabel("Password").fill(GLOBEX.password);
-    await page.getByRole("checkbox", { name: /Open this organisation straight away/ }).check();
+    await page.getByRole("checkbox", { name: /Next time you go straight to this organisation/ }).check();
     await page.getByRole("button", { name: "Sign in" }).click();
     await page.waitForURL(`${originOf(GLOBEX)}/projects`);
 
@@ -58,7 +58,7 @@ test.describe("BP-919: signing in on the platform host, e-mail first", () => {
     await giveAddress(GLOBEX, email);
     await provideAddressAndCode(page, email);
     await page.getByLabel("Password").fill(GLOBEX.password);
-    await page.getByRole("checkbox", { name: /Open this organisation straight away/ }).check();
+    await page.getByRole("checkbox", { name: /Next time you go straight to this organisation/ }).check();
     await page.getByRole("button", { name: "Sign in" }).click();
     await page.waitForURL(`${originOf(GLOBEX)}/projects`);
 
@@ -76,7 +76,7 @@ test.describe("BP-919: signing in on the platform host, e-mail first", () => {
     await giveAddress(GLOBEX, email);
     await provideAddressAndCode(page, email, signIn);
     await page.getByLabel("Password").fill(GLOBEX.password);
-    await page.getByRole("checkbox", { name: /Open this organisation straight away/ }).check();
+    await page.getByRole("checkbox", { name: /Next time you go straight to this organisation/ }).check();
     await page.getByRole("button", { name: "Sign in" }).click();
     await page.waitForURL(`${originOf(GLOBEX)}/projects`);
     expect((await page.context().cookies(signIn)).some((cookie) => cookie.name.endsWith("bp_last_organisation"))).toBe(true);
@@ -101,7 +101,7 @@ test.describe("BP-919: signing in on the platform host, e-mail first", () => {
     const email = freshAddress("nocookie");
     await giveAddress(GLOBEX, email);
     await provideAddressAndCode(page, email);
-    await expect(page.getByRole("checkbox", { name: /Open this organisation straight away/ })).not.toBeChecked();
+    await expect(page.getByRole("checkbox", { name: /Next time you go straight to this organisation/ })).not.toBeChecked();
     await page.screenshot({ path: "e2e/.artifacts/bp1009-remember-box.png" });
     await page.getByLabel("Password").fill(GLOBEX.password);
     await page.getByRole("button", { name: "Sign in" }).click();
@@ -132,7 +132,7 @@ test.describe("BP-919: signing in on the platform host, e-mail first", () => {
     await giveAddress(GLOBEX, email);
     await provideAddressAndCode(page, email);
     await page.getByTestId("organisation-choices").getByRole("button", { name: /Acme/ }).click();
-    const box = page.getByRole("checkbox", { name: /Open this organisation straight away/ });
+    const box = page.getByRole("checkbox", { name: /Next time you go straight to this organisation/ });
     await expect(box).not.toBeChecked();
     await box.check();
     await page.getByRole("button", { name: "Choose another organisation" }).click();

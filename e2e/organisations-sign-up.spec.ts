@@ -55,7 +55,7 @@ test.describe("BP-673: creating an organisation from the platform host", () => {
       const slug = `remember-${ticked ? "yes" : "no"}-${Date.now()}`;
       await provideAddressAndCode(page, freshAddress("remember"));
       await fillTheForm(page, `Remember ${ticked ? "yes" : "no"}`, { slug });
-      const box = page.getByRole("checkbox", { name: /Open this organisation straight away/ });
+      const box = page.getByRole("checkbox", { name: /Next time you go straight to this organisation/ });
       await expect(box).not.toBeChecked();
       if (ticked) await box.check();
       await page.getByRole("button", { name: "Create the organisation" }).click();
