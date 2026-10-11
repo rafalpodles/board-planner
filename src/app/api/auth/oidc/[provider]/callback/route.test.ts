@@ -45,7 +45,9 @@ const providerFor = vi.hoisted(() =>
         : null
   )
 );
-vi.mock("@/lib/oidc/providers", () => ({ providerFor }));
+// What the environment sets up, whichever of it an organisation is offered
+const providerById = vi.hoisted(() => vi.fn((id: string) => (["oidc", "github", "google"].includes(id) ? { id } : null)));
+vi.mock("@/lib/oidc/providers", () => ({ providerFor, providerById }));
 vi.mock("@/lib/oidc/flow", () => ({
   FLOW_COOKIE: "bp_oidc",
   ACCEPT_COOKIE: "bp_oidc_accept",
@@ -125,12 +127,22 @@ beforeEach(async () => {
 describe("GET /api/auth/oidc/:provider/callback, which provider (BP-951)", () => {
   it("asks for the provider of the organisation the request arrived on, and refuses one that organisation has not got", async () => {
     providerFor.mockResolvedValueOnce(null as never);
+    providerById.mockReturnValueOnce(null);
 
     const res = await callback();
 
     expect(providerFor).toHaveBeenCalledWith(expect.objectContaining({ organisation: DEFAULT_ORGANISATION_ID }), "oidc");
     expect(location(res)).toBe("/login?sso=failed");
     expect(finishFlow).not.toHaveBeenCalled();
+  });
+
+  it("says a provider the server has but this organisation does not offer is turned off, and finishes nothing (BP-1027)", async () => {
+    const res = await callback("google");
+
+    expect(location(res)).toBe("/login?sso=provider_off");
+    expect(finishFlow).not.toHaveBeenCalled();
+    expect(identityCreate).not.toHaveBeenCalled();
+    expect(createSession).not.toHaveBeenCalled();
   });
 });
 

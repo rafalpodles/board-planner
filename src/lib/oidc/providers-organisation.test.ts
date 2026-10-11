@@ -7,7 +7,7 @@ vi.mock("@/lib/organisation", () => ({ getOrganisation }));
 const { providersFor, providerFor, publicProvidersFor, liveIdentityFilterFor, ssoEnforced } = await import("./providers");
 const { encryptSecret } = await import("@/lib/encryption");
 
-const ENV_KEYS = ["ORGANISATION_DOMAIN", "OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "ENCRYPTION_KEY"];
+const ENV_KEYS = ["ORGANISATION_DOMAIN", "OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GITHUB_OAUTH_CLIENT_ID", "GITHUB_OAUTH_CLIENT_SECRET", "ENCRYPTION_KEY"];
 const acme = new Types.ObjectId();
 const globex = new Types.ObjectId();
 
@@ -19,8 +19,8 @@ const stored = (organisation: Types.ObjectId, over: Record<string, unknown> = {}
   label: "Acme login",
   ...over,
 });
-const dbOf = (organisation: Types.ObjectId, sso: unknown) =>
-  ({ organisation, Settings: { findOne: () => ({ lean: async () => (sso ? { sso } : {}) }) } }) as never;
+const dbOf = (organisation: Types.ObjectId, sso: unknown, disabledProviders?: string[]) =>
+  ({ organisation, Settings: { findOne: () => ({ lean: async () => ({ ...(sso ? { sso } : {}), ...(disabledProviders ? { disabledProviders } : {}) }) }) } }) as never;
 const plan = (over: Record<string, unknown> = {}) => getOrganisation.mockResolvedValue({ entitlements: { plan: "pro", features: [], ...over } });
 
 beforeEach(() => {
@@ -139,5 +139,46 @@ describe("where one organisation is the whole instance", () => {
     delete process.env.ORGANISATION_DOMAIN;
 
     expect((await providersFor(dbOf(acme, stored(acme)))).map((p) => p.issuer)).toEqual(["https://shared.example"]);
+  });
+});
+
+describe("Google and GitHub switched off by an organisation (BP-1027)", () => {
+  beforeEach(() => Object.assign(process.env, { GOOGLE_CLIENT_ID: "g", GOOGLE_CLIENT_SECRET: "gs", GITHUB_OAUTH_CLIENT_ID: "gh", GITHUB_OAUTH_CLIENT_SECRET: "ghs" }));
+
+  it("offers both while nothing is stored, so no organisation has to be migrated", async () => {
+    expect((await providersFor(dbOf(acme, null))).map((p) => p.id)).toEqual(["google", "github"]);
+    expect((await providersFor(dbOf(acme, null, []))).map((p) => p.id)).toEqual(["google", "github"]);
+  });
+
+  it("leaves out the one that was switched off, and only for that organisation", async () => {
+    const off = dbOf(acme, null, ["google"]);
+
+    expect((await providersFor(off)).map((p) => p.id)).toEqual(["github"]);
+    expect(await providerFor(off, "google")).toBeNull();
+    expect(await publicProvidersFor(off)).toEqual([{ id: "github", label: "GitHub" }]);
+    expect((await providersFor(dbOf(globex, null))).map((p) => p.id)).toEqual(["google", "github"]);
+  });
+
+  it("closes both when both were switched off, and keeps the organisation's own provider", async () => {
+    expect(await providersFor(dbOf(acme, null, ["google", "github"]))).toEqual([]);
+    expect((await providersFor(dbOf(acme, stored(acme), ["google", "github"]))).map((p) => p.id)).toEqual(["oidc"]);
+    expect((await providersFor(dbOf(acme, stored(acme), ["github"]))).map((p) => p.id)).toEqual(["google", "oidc"]);
+  });
+
+  it("is not what is left when single sign-on is required: that offers its own provider alone either way", async () => {
+    expect((await providersFor(dbOf(acme, stored(acme, { enforced: true }), ["google"]))).map((p) => p.id)).toEqual(["oidc"]);
+    expect((await providersFor(dbOf(acme, stored(acme, { enforced: true }), []))).map((p) => p.id)).toEqual(["oidc"]);
+  });
+
+  it("is read from the organisation, never applied where one organisation is the whole instance", async () => {
+    delete process.env.ORGANISATION_DOMAIN;
+
+    expect((await providersFor(dbOf(acme, null, ["google", "github"]))).map((p) => p.id)).toEqual(["oidc", "google", "github"]);
+  });
+
+  it("stops counting the identities of a provider that is off as a way in, without forgetting them", async () => {
+    const filter = (await liveIdentityFilterFor(dbOf(acme, null, ["google"]))) as { $or: { provider: string }[] };
+
+    expect(filter.$or.map((clause) => clause.provider)).toEqual(["github"]);
   });
 });
