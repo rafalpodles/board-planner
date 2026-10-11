@@ -33,9 +33,20 @@ board, the REST API and the MCP server are three doors into one model, with the 
 checks behind each. An agent moving a task to *In Review* passes the same status rules as a person
 dragging the card, and leaves the same trail in the same history.
 
-Two ways to run it: on your own server, where `docker compose up` gives you one organisation of your
-own, or in the cloud, where [signing up](https://login.board-planner.com) puts a new organisation on
-a subdomain of board-planner.com.
+## Cloud or self-hosted
+
+**In the cloud**, [signing up](https://login.board-planner.com) puts a new organisation on its own
+subdomain of board-planner.com. It starts with a 30-day Pro trial, no card, and then becomes **Free**
+— up to 10 members, unlimited projects and tasks, the REST API, the MCP server, and workers and
+agents on one machine — or **Pro**, which adds more members, any number of machines, a monthly AI
+allowance on our key and Coda sync. Agents, workers and API tokens never count as members.
+
+**On your own server**, `docker compose up` gives you one organisation of your own. The **Community**
+edition is AGPL-3.0, has no member or machine limit and runs the AI features on your own key; Pro
+self-hosted adds Coda sync and e-mail support.
+
+AI on your own key is free on every plan, and nothing that ships in Free will move to Pro. Prices and
+the full comparison are on [board-planner.com/pricing](https://board-planner.com/pricing/).
 
 ## Handing work to a machine
 
