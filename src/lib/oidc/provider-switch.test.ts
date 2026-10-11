@@ -49,6 +49,13 @@ describe("what an administrator may switch (BP-1027)", () => {
     expect(isSwitchable("github")).toBe(false);
   });
 
+  it("says single sign-on is required when it is, and whether passwords sign in", async () => {
+    ssoEnforced.mockResolvedValue(true);
+    const { db } = fakeDb({ linked: [], users: [] });
+
+    expect(await providerSwitchView(db)).toMatchObject({ enforced: true, passwordSignIn: false });
+  });
+
   it("is shown with each provider on, until it is switched off", async () => {
     const { db } = fakeDb({ linked: [], users: [], settings: { disabledProviders: ["github"] } });
 

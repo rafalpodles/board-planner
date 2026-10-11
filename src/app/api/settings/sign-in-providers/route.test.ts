@@ -244,4 +244,37 @@ describe("PUT /api/settings/sign-in-providers where passwords do not sign in", (
     expect((await put({ provider: "google", enabled: true })).status).toBe(200);
     expect(row?.disabledProviders).toEqual(["github"]);
   });
+
+  it("puts a provider back when somebody else switched off the other between the check and the write, so the last way in is never lost", async () => {
+    membersOnlyThrough.mockImplementation(async () => {
+      row = { disabledProviders: ["github"] };
+      return 0;
+    });
+
+    const res = await put({ provider: "google", enabled: false });
+
+    expect(res.status).toBe(409);
+    expect(row).toEqual({ disabledProviders: ["github"] });
+    expect(logInstanceAudit).not.toHaveBeenCalled();
+    expect(warnIfAdminsLockedOut).not.toHaveBeenCalled();
+  });
+});
+
+describe("PUT /api/settings/sign-in-providers where passwords sign in", () => {
+  it("lets the last provider be switched off, since people can still use a password", async () => {
+    row = { disabledProviders: ["github"] };
+
+    const res = await put({ provider: "google", enabled: false });
+
+    expect(res.status).toBe(200);
+    expect(row?.disabledProviders).toEqual(["github", "google"]);
+  });
+});
+
+describe("GET /api/settings/sign-in-providers, what the card is told", () => {
+  it("says whether passwords sign in", async () => {
+    process.env.PASSWORD_SIGN_IN = "off";
+
+    expect((await (await get()).json()).passwordSignIn).toBe(false);
+  });
 });

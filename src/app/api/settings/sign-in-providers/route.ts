@@ -33,11 +33,9 @@ export const PUT = withAdmin(async (request, { user, db }) => {
   if (current?.enabled !== enabled) {
     const label = current?.label ?? provider;
     // Where passwords do not sign in, the last provider offered is the last way in for everybody: no confirmation lifts that
+    const lastWayIn = `Passwords do not sign in here, so ${label} is the only way in. Turn another sign-in on, or set up your own single sign-on, first.`;
     if (!enabled && !(await passwordSignInFor(db)) && (await providersFor(db)).every((p) => p.id === provider)) {
-      return NextResponse.json(
-        { error: `Passwords do not sign in on this server, so ${label} is the only way in. Turn another sign-in on, or set up your own single sign-on, first.` },
-        { status: 409 }
-      );
+      return NextResponse.json({ error: lastWayIn }, { status: 409 });
     }
     if (!enabled && confirm !== true) {
       const affected = await membersOnlyThrough(db, provider);
@@ -52,6 +50,11 @@ export const PUT = withAdmin(async (request, { user, db }) => {
       }
     }
     await writeSettings(db, enabled ? { $pull: { disabledProviders: provider } } : { $addToSet: { disabledProviders: provider } });
+    // Two administrators switching off the last two providers at once each saw the other still on: read again, and put this one back
+    if (!enabled && !(await passwordSignInFor(db)) && (await providersFor(db)).length === 0) {
+      await writeSettings(db, { $pull: { disabledProviders: provider } });
+      return NextResponse.json({ error: lastWayIn }, { status: 409 });
+    }
     void logInstanceAudit(db, {
       action: "instance_settings_changed",
       user: user._id,

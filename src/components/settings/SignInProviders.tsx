@@ -47,6 +47,7 @@ export function SignInProviders() {
   async function set(id: string, label: string, enabled: boolean, confirm = false) {
     setBusy(id);
     setError("");
+    setWarning((open) => (open ? { ...open, error: undefined } : open));
     try {
       setAnswer(await api.put("/api/settings/sign-in-providers", { provider: id, enabled, confirm }));
       setWarning(null);
@@ -80,7 +81,7 @@ export function SignInProviders() {
   return (
     <div className="max-w-2xl" data-testid="sign-in-providers">
       <SettingsCard
-        title={answer.providers.map((provider) => provider.label).join(" and ")}
+        title={new Intl.ListFormat("en", { type: "conjunction" }).format(answer.providers.map((provider) => provider.label))}
         description="Choose which of the shared sign-in providers your people are offered. Turning one off hides its button and refuses it on the server; accounts, links and open sessions stay as they are."
       >
         {answer.enforced && (
