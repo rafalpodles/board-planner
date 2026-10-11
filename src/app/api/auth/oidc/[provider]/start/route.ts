@@ -18,7 +18,7 @@ import {
   RECENT_SIGN_IN_REQUIRED,
   signedInRecently,
 } from "@/lib/session";
-import { providerById } from "@/lib/oidc/providers";
+import { providerFor } from "@/lib/oidc/providers";
 import { beginFlow, FLOW_COOKIE, FLOW_TTL_MS } from "@/lib/oidc/flow";
 import { findInvitationByToken } from "@/lib/invitations";
 import { INVITATION_REFUSALS } from "@/lib/invitation-refusals";
@@ -39,9 +39,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
 
-  const provider = providerById((await params).provider);
-  if (!provider) return NextResponse.json({ error: "That sign-in is not set up here" }, { status: 404 });
-
   const clientIp = getClientIp(request);
   // With no address every caller would share one bucket, which anybody could fill to stop every
   // sign-in. That lifts the flood limit too; what is guessed here (an invitation token, a setup
@@ -53,6 +50,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
     }
     await recordFailedAttempt(throttleKey);
   }
+
+  // After the throttle: it reads the organisation's settings and its plan, which anybody may ask for
+  await connectDB();
+  const provider = await providerFor(db, (await params).provider);
+  if (!provider) return NextResponse.json({ error: "That sign-in is not set up here" }, { status: 404 });
 
   const origin = await originFor(db);
   if (!origin) return NextResponse.json({ error: NO_ORIGIN_ERROR }, { status: 500 });

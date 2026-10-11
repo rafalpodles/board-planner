@@ -73,7 +73,7 @@ export function deadStep(f: DeadFacts): DeadStep {
   return f.suspendedByTheSweep && settledSince(f.suspendedAt, f.now) ? "delete" : "wait";
 }
 
-async function adminAddresses(organisation: Types.ObjectId): Promise<string[]> {
+export async function adminAddresses(organisation: Types.ObjectId): Promise<string[]> {
   const db = scoped(organisation);
   const admins = await db.User.find({ role: "admin", kind: { $ne: "machine" }, deactivatedAt: null, email: { $nin: [null, ""] } })
     .select("email")

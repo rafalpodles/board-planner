@@ -392,6 +392,9 @@ export function PlatformSignIn() {
               required
               autoFocus
             />
+            <p className="text-xs text-text-muted" data-testid="sso-hint">
+              Used your company&apos;s single sign-on before? Choose Sign in another way. If it has stopped and you have no password, use Forgot password to set one.
+            </p>
             <RememberCheckbox checked={remember} onChange={setRemember} />
             <Button type="submit" className="w-full" disabled={busy}>
               {busy ? "Signing in…" : "Sign in"}

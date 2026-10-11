@@ -18,6 +18,8 @@ test.describe("BP-919: signing in on the platform host, e-mail first", () => {
 
     await provideAddressAndCode(page, email);
     await expect(page.getByText("Signing in to Acme")).toBeVisible();
+    // BP-951: said to everyone here, so that somebody whose single sign-on has stopped is told how to get a password
+    await expect(page.getByTestId("sso-hint")).toContainText("Forgot password");
     await page.getByLabel("Password").fill(ACME.password);
     await page.getByRole("checkbox", { name: /Next time you go straight to this organisation/ }).check();
     await page.getByRole("button", { name: "Sign in" }).click();

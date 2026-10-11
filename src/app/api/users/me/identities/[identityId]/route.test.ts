@@ -20,7 +20,7 @@ vi.mock("@/lib/middleware", () => ({
 }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 const LIVE = { $or: [{ provider: "oidc", issuer: { $in: ["https://id.example.com", "https://id.example.com/"] } }] };
-vi.mock("@/lib/oidc/providers", () => ({ providerById: () => ({ label: "Acme" }), liveIdentityFilter: () => LIVE }));
+vi.mock("@/lib/oidc/providers", () => ({ providerFor: async () => ({ label: "Acme" }), liveIdentityFilterFor: async () => LIVE }));
 const identityExists = vi.fn();
 vi.mock("@/lib/email", () => ({ isEmailConfigured }));
 vi.mock("@/lib/session", () => ({ signedInRecently, RECENT_SIGN_IN_REQUIRED: "sign in again" }));

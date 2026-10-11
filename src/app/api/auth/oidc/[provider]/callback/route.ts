@@ -12,7 +12,7 @@ import {
   readFlowCookie,
 } from "@/lib/session";
 import { originFor, organisationDomain } from "@/lib/organisation-host";
-import { providerById, OidcProvider } from "@/lib/oidc/providers";
+import { providerFor, OidcProvider } from "@/lib/oidc/providers";
 import {
   ACCEPT_COOKIE,
   ACCEPT_TTL_MS,
@@ -116,7 +116,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
   if (!db) return refusedHost(request);
   const origin = await originFor(db);
   if (!origin) return NextResponse.json({ error: "PUBLIC_ORIGIN is not set" }, { status: 500 });
-  const provider = providerById((await params).provider);
+  await connectDB();
+  const provider = await providerFor(db, (await params).provider);
   if (!provider) return redirectTo(origin, "/login?sso=failed");
 
   const clientIp = getClientIp(request);

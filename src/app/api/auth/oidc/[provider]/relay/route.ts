@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { providerById } from "@/lib/oidc/providers";
+import { organisationDomain } from "@/lib/organisation-host";
 import { redirectUri } from "@/lib/oidc/flow";
 import { relayedHome, relayOrigin } from "@/lib/oidc/relay";
 
@@ -33,7 +34,9 @@ function expired() {
 
 export async function GET(request: Request, { params }: { params: Promise<{ provider: string }> }) {
   if (!relayOrigin()) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  const provider = providerById((await params).provider);
+  const id = (await params).provider;
+  // In the cloud the generic provider is each organisation's own: the relay knows only which flow the state belongs to
+  const provider = providerById(id) ?? (organisationDomain() !== null && id === "oidc" ? { id } : null);
   const { search, searchParams } = new URL(request.url);
   const state = searchParams.get("state");
   if (!provider || !state) return expired();

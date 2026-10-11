@@ -18,7 +18,7 @@ import { memberLimitRefusal } from "@/lib/member-limit";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { JOIN_COOKIE, heldSignUp, spendAcceptance } from "@/lib/oidc/flow";
 import { applyAdminGroup } from "@/lib/oidc/admin-group";
-import { providerById } from "@/lib/oidc/providers";
+import { providerFor } from "@/lib/oidc/providers";
 import { signUpOpenTo } from "@/lib/sign-up-domains";
 import { refusedHost } from "@/lib/middleware";
 import { checkTermsAccepted } from "@/lib/legal-terms";
@@ -36,7 +36,7 @@ export async function GET(request: Request) {
   return NextResponse.json({
     email: held.claims.email,
     name: held.claims.name ?? "",
-    provider: providerById(held.provider)?.label ?? held.provider,
+    provider: (await providerFor(db, held.provider))?.label ?? held.provider,
   });
 }
 
@@ -69,7 +69,7 @@ export async function POST(request: Request) {
   if (!terms.ok) return NextResponse.json({ error: terms.error }, { status: 400 });
 
   // Read again now: the list, or the provider, may have changed since the callback held this
-  const provider = providerById(held.provider);
+  const provider = await providerFor(db, held.provider);
   if (!provider?.linksByAddress || !(await signUpOpenTo(db, held.claims.email))) {
     return NextResponse.json({ error: CLOSED }, { status: 403 });
   }

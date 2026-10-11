@@ -3,7 +3,7 @@ import { randomBytes } from "crypto";
 import mongoose from "mongoose";
 import { OIDC_STUB_LABEL, OIDC_STUB_URL, ORGANISATIONS_RELAY_ORIGIN, RUN_ORGANISATIONS_SERVER } from "../playwright.config";
 import { E2E_MONGODB_URI } from "./seed";
-import { ACME, GLOBEX, USERNAME, originOf, seedTwoOrganisations, type OrganisationFixture } from "./organisations";
+import { ACME, GLOBEX, USERNAME, makePro, originOf, seedTwoOrganisations, storeSso, type OrganisationFixture } from "./organisations";
 
 test.skip(!RUN_ORGANISATIONS_SERVER, "needs the ORGANISATION_DOMAIN server — set E2E_ORGANISATIONS_SERVER=1");
 
@@ -29,8 +29,13 @@ async function whoAmI(page: Page, who: OrganisationFixture) {
 const confirm = (who: OrganisationFixture) =>
   withDb((db) => db.collection("users").updateOne({ _id: who.adminId }, { $set: { emailVerifiedAt: new Date() } }));
 
-test.beforeEach(async () => {
+// BP-951: in the cloud the provider is each organisation's own, on a plan that includes it
+test.beforeEach(async ({ request }) => {
   await seedTwoOrganisations();
+  for (const who of [ACME, GLOBEX]) {
+    await makePro(request, who);
+    await storeSso(who, OIDC_STUB_LABEL);
+  }
 });
 
 test.describe("BP-895: provider sign-in returns through the platform's relay to the organisation that began it", () => {

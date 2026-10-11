@@ -36,14 +36,16 @@ vi.mock("@/lib/session", () => ({
   legacySessionCookies: () => [],
   createSession,
 }));
-vi.mock("@/lib/oidc/providers", () => ({
-  providerById: (id: string) =>
+const providerFor = vi.hoisted(() =>
+  vi.fn(async (_db: unknown, id: string) =>
     id === "oidc"
       ? { id: "oidc", label: "Acme", linksByAddress: true }
       : id === "github"
         ? { id: "github", label: "GitHub", linksByAddress: false }
-        : null,
-}));
+        : null
+  )
+);
+vi.mock("@/lib/oidc/providers", () => ({ providerFor }));
 vi.mock("@/lib/oidc/flow", () => ({
   FLOW_COOKIE: "bp_oidc",
   ACCEPT_COOKIE: "bp_oidc_accept",
@@ -118,6 +120,18 @@ beforeEach(async () => {
   signUpOpenTo.mockResolvedValue(false);
   holdForSignUp.mockResolvedValue("cpo_join");
   invitationFindOne.mockReturnValue(lean(null));
+});
+
+describe("GET /api/auth/oidc/:provider/callback, which provider (BP-951)", () => {
+  it("asks for the provider of the organisation the request arrived on, and refuses one that organisation has not got", async () => {
+    providerFor.mockResolvedValueOnce(null as never);
+
+    const res = await callback();
+
+    expect(providerFor).toHaveBeenCalledWith(expect.objectContaining({ organisation: DEFAULT_ORGANISATION_ID }), "oidc");
+    expect(location(res)).toBe("/login?sso=failed");
+    expect(finishFlow).not.toHaveBeenCalled();
+  });
 });
 
 describe("GET /api/auth/oidc/:provider/callback, signing in", () => {

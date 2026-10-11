@@ -42,8 +42,11 @@ vi.mock("@/models/identity", () => ({
 }));
 vi.mock("@/models/session", () => ({ Session: { aggregate: async () => sessionUse } }));
 vi.mock("@/lib/oidc/providers", () => ({
-  liveIdentityFilter: () => ({ live: "only" }),
-  providerById: (id: string) => (id === "oidc" ? { label: "Acme SSO" } : id === "github" ? { label: "GitHub" } : null),
+  liveIdentityFilterFor: async () => ({ live: "only" }),
+  providersFor: async () => [
+    { id: "oidc", label: "Acme SSO" },
+    { id: "github", label: "GitHub" },
+  ],
 }));
 vi.mock("@/lib/auth", () => ({
   getAuthUser: (...a: unknown[]) => getAuthUser(...a),

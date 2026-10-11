@@ -11,7 +11,7 @@ import { INVITATION_REFUSALS } from "@/lib/invitation-refusals";
 import { toApiInvitations } from "@/lib/invitation-view";
 import { completeAcceptance } from "@/lib/invitation-acceptance";
 import { ACCEPT_COOKIE, heldAcceptance, spendAcceptance } from "@/lib/oidc/flow";
-import { providerById } from "@/lib/oidc/providers";
+import { providerFor } from "@/lib/oidc/providers";
 import { checkTermsAccepted } from "@/lib/legal-terms";
 
 const ATTEMPTS_PER_SOURCE = 20;
@@ -35,7 +35,7 @@ export async function GET(request: Request) {
     role: view.role,
     boards: view.boards.map(({ name, relation }) => ({ name, relation })),
     invitedBy: view.invitedBy ? view.invitedBy.fullName || view.invitedBy.username : null,
-    provider: providerById(held.provider)?.label ?? held.provider,
+    provider: (await providerFor(db, held.provider))?.label ?? held.provider,
   });
 }
 
@@ -91,7 +91,7 @@ export async function POST(request: Request) {
         subject: held.claims.subject,
         email: held.claims.email,
       },
-      providerProvesAddress: providerById(held.provider)?.linksByAddress === true,
+      providerProvesAddress: (await providerFor(db, held.provider))?.linksByAddress === true,
       groups: held.claims.groups ?? [],
       terms: terms.fields,
     },

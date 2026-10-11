@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { withAuth } from "@/lib/middleware";
 import { connectDB } from "@/lib/db";
-import { liveIdentityFilter, providerById } from "@/lib/oidc/providers";
+import { liveIdentityFilter, providersFor } from "@/lib/oidc/providers";
 import { passwordSignInEnabled } from "@/lib/password-sign-in";
 import { isEmailConfigured } from "@/lib/email";
 
@@ -10,8 +10,9 @@ export const GET = withAuth(async (_request, { user, db }) => {
     return NextResponse.json({ error: "This action requires an interactive session" }, { status: 403 });
   }
   await connectDB();
+  const providers = await providersFor(db);
   const [identities, record] = await Promise.all([
-    db.Identity.find({ user: user._id, ...liveIdentityFilter() }).sort({ linkedAt: 1 }).lean(),
+    db.Identity.find({ user: user._id, ...liveIdentityFilter(providers) }).sort({ linkedAt: 1 }).lean(),
     db.User.findById(user._id).select("+password").lean(),
   ]);
   return NextResponse.json({
@@ -22,7 +23,7 @@ export const GET = withAuth(async (_request, { user, db }) => {
     identities: identities.map((i) => ({
       _id: String(i._id),
       provider: i.provider,
-      label: providerById(i.provider)?.label ?? i.provider,
+      label: providers.find((p) => p.id === i.provider)?.label ?? i.provider,
       email: i.email,
       linkedAt: i.linkedAt,
       lastUsedAt: i.lastUsedAt,

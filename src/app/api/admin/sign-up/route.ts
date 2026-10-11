@@ -5,11 +5,10 @@ import { readJsonBody } from "@/lib/request-body";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { parseSignUpDomains } from "@/lib/sign-up-domains";
 import { adminGroup } from "@/lib/oidc/admin-group";
-import { configuredProviders } from "@/lib/oidc/providers";
+import { type OidcProvider, providersFor } from "@/lib/oidc/providers";
 import { getSettings, updateSettings } from "@/models/settings";
 
-function view(domains: string[]) {
-  const providers = configuredProviders();
+function view(domains: string[], providers: OidcProvider[]) {
   const oidc = providers.find((p) => p.id === "oidc");
   const group = adminGroup();
   return {
@@ -22,7 +21,7 @@ function view(domains: string[]) {
 
 export const GET = withAdmin(async (_request, { db }) => {
   await connectDB();
-  return NextResponse.json(view((await getSettings(db)).signUpDomains ?? []));
+  return NextResponse.json(view((await getSettings(db)).signUpDomains ?? [], await providersFor(db)));
 });
 
 export const PUT = withAdmin(async (request, { user, db }) => {
@@ -43,5 +42,5 @@ export const PUT = withAdmin(async (request, { user, db }) => {
     actorUsername: user.username,
     detail: `sign-up domains: ${before.join(", ") || "none"} → ${parsed.value.join(", ") || "none"}`,
   });
-  return NextResponse.json(view(settings.signUpDomains ?? []));
+  return NextResponse.json(view(settings.signUpDomains ?? [], await providersFor(db)));
 });

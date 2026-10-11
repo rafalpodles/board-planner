@@ -4,7 +4,7 @@ import { withAuth } from "@/lib/middleware";
 import { connectDB } from "@/lib/db";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { isEmailConfigured } from "@/lib/email";
-import { liveIdentityFilter, providerById } from "@/lib/oidc/providers";
+import { liveIdentityFilterFor, providerFor } from "@/lib/oidc/providers";
 import { Identity } from "@/models/identity";
 import { RECENT_SIGN_IN_REQUIRED, signedInRecently } from "@/lib/session";
 import { passwordSignInEnabled } from "@/lib/password-sign-in";
@@ -30,7 +30,7 @@ export const DELETE = withAuth(async (_request, { params, user, db }) => {
       ? "This is your only way to sign in. Set a password first, from Forgot your password."
       : "This is your only way to sign in. Ask an administrator to set a password for you first.";
   // Only a link a configured provider still signs in through is a way in, on either side of this
-  const live = liveIdentityFilter();
+  const live = await liveIdentityFilterFor(db);
   const removesAWayIn = !!(await db.Identity.exists({ _id: identity._id, ...live }));
   if (
     !passwordSignsIn &&
@@ -59,7 +59,7 @@ export const DELETE = withAuth(async (_request, { params, user, db }) => {
     user: user._id,
     actorUsername: user.username,
     target: user.username,
-    detail: providerById(identity.provider)?.label ?? identity.provider,
+    detail: (await providerFor(db, identity.provider))?.label ?? identity.provider,
   });
   return NextResponse.json({ ok: true });
 });

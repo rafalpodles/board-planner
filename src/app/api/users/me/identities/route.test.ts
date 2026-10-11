@@ -11,8 +11,8 @@ vi.mock("@/lib/middleware", () => ({
     handler(request, { user: caller, db: scopedToDefaultOrganisation() }),
 }));
 vi.mock("@/lib/oidc/providers", () => ({
-  providerById: () => ({ label: "Acme" }),
-  liveIdentityFilter: () => ({ live: "only" }),
+  providersFor: async () => [{ id: "oidc", label: "Acme" }],
+  liveIdentityFilter: (providers: unknown) => ({ live: "only", providers }),
 }));
 vi.mock("@/lib/password-sign-in", () => ({ passwordSignInEnabled: () => true }));
 vi.mock("@/models/identity", () => ({
@@ -38,6 +38,7 @@ describe("GET /api/users/me/identities", () => {
     const res = await GET(new Request("http://x/api/users/me/identities"), { params: Promise.resolve({}) });
 
     expect(res.status).toBe(200);
-    expect(identityFind).toHaveBeenCalledWith({ user: "u1", live: "only", organisation: DEFAULT_ORGANISATION_ID });
+    // The links counted are those of what this organisation is offered, not of the environment
+    expect(identityFind).toHaveBeenCalledWith({ user: "u1", live: "only", providers: [{ id: "oidc", label: "Acme" }], organisation: DEFAULT_ORGANISATION_ID });
   });
 });
