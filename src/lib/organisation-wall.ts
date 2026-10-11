@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { Types, type Schema } from "mongoose";
 
 export class OrganisationWallError extends Error {
@@ -7,17 +8,31 @@ export class OrganisationWallError extends Error {
   }
 }
 
-type Marks = { expected: WeakMap<object, Types.ObjectId>; crossing: WeakMap<object, string> };
+type Marks = {
+  expected: WeakMap<object, Types.ObjectId>;
+  crossing: WeakMap<object, string>;
+  inserting: AsyncLocalStorage<Types.ObjectId>;
+};
 // Shared across Next's copies of this module: Mongoose keeps only the hooks of the copy that registered first
 const MARKS = Symbol.for("board-planner.organisation-wall");
 const shared = globalThis as typeof globalThis & { [MARKS]?: Marks };
-const { expected, crossing } = (shared[MARKS] ??= { expected: new WeakMap(), crossing: new WeakMap() });
+const { expected, crossing, inserting } = (shared[MARKS] ??= {
+  expected: new WeakMap(),
+  crossing: new WeakMap(),
+  inserting: new AsyncLocalStorage(),
+});
 
 const isMarkable = (value: unknown): value is object => (typeof value === "object" || typeof value === "function") && value !== null;
 
 export function expectOrganisation<Q>(query: Q, organisation: Types.ObjectId): Q {
   if (isMarkable(query)) expected.set(query, organisation);
   return query;
+}
+
+// What an insert is checked against: a document built through the scoped handle carries its mark, and
+// `create` / `insertMany` called through it run inside this scope. A raw insert has neither (BP-923)
+export function insertingInto<T>(organisation: Types.ObjectId, run: () => T): T {
+  return inserting.run(organisation, run);
 }
 
 export function acrossOrganisations<Q>(query: Q, reason: string): Q {
@@ -162,6 +177,14 @@ function guardBulk(modelName: string, operations: unknown): void {
   }
 }
 
+function guardInsert(what: string, organisation: unknown, mark: Types.ObjectId | undefined): void {
+  const want = mark ?? inserting.getStore();
+  if (!want) throw new OrganisationWallError(`${what} was not made through a scoped handle`);
+  const id = asId(organisation);
+  if (!id) throw new OrganisationWallError(`${what} names no organisation`);
+  if (!id.equals(want)) throw new OrganisationWallError(`${what} names another organisation than the one it was scoped to`);
+}
+
 const QUERY_OPERATIONS = [
   "countDocuments",
   "distinct",
@@ -195,6 +218,21 @@ export function organisationWall(schema: Schema): void {
     "aggregate",
     builtIn(function (this: unknown) {
       guardAggregate(this as GuardedAggregate);
+    })
+  );
+  schema.pre(
+    "save",
+    { document: true, query: false },
+    builtIn(function (this: { isNew: boolean; organisation?: unknown; constructor: { modelName: string } }) {
+      if (this.isNew) guardInsert(`A save of a new ${this.constructor.modelName}`, this.organisation, expected.get(this));
+    })
+  );
+  schema.pre(
+    "insertMany",
+    builtIn(function (this: { modelName: string }, docs: unknown) {
+      for (const doc of Array.isArray(docs) ? docs : [docs]) {
+        guardInsert(`An insertMany on ${this.modelName}`, isDoc(doc) ? doc.organisation : undefined, undefined);
+      }
     })
   );
   schema.pre(
