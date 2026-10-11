@@ -101,9 +101,9 @@ describe("GeneralSection member access", () => {
     expect(screen.getByText("Alice A").parentElement?.textContent).not.toContain("IdP");
   });
 
-  it("takes the marker off once the access was changed by hand and saved", async () => {
+  it("takes the marker off once the access was changed by hand and saved, even when the list cannot be re-read", async () => {
     api.get.mockResolvedValueOnce([{ _id: "u2", username: "bob", fullName: "Bob B", relation: "member", source: "idp", instanceAdmin: false }]);
-    api.get.mockResolvedValue([{ _id: "u2", username: "bob", fullName: "Bob B", relation: "owner", source: "manual", instanceAdmin: false }]);
+    api.get.mockRejectedValue(new Error("offline"));
     renderSection();
 
     fireEvent.change(await screen.findByLabelText("Access for bob"), { target: { value: "owner" } });
