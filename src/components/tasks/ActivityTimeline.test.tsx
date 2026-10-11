@@ -33,10 +33,10 @@ describe("ActivityTimeline", () => {
   });
 
   // typeof null === "object", so a deleted user used to take the populated branch and throw
-  it("falls back to Unknown when the user was deleted", async () => {
+  it("says Deleted user when the user was deleted", async () => {
     api.get.mockResolvedValue([{ ...log, user: null }]);
     render(<ActivityTimeline projectId="TP" taskId="t1" />);
-    await waitFor(() => expect(screen.getByText(/Unknown created this task/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Deleted user created this task/)).toBeTruthy());
   });
 
   // "updated Difficulty" is not history — a reader wants to know what it became
@@ -415,10 +415,10 @@ describe("ActivityTimeline — what a sync did to the links", () => {
   });
 
   // The control for the line above: the same absence on any other action is still a lost author
-  it("still calls a missing author Unknown everywhere else", async () => {
+  it("still calls a missing author Deleted user everywhere else", async () => {
     api.get.mockResolvedValue([{ ...log, user: null, action: "comment_added" }]);
     render(<ActivityTimeline projectId="TP" taskId="t1" />);
-    await waitFor(() => expect(screen.getByText("Unknown added a comment")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Deleted user added a comment")).toBeTruthy());
   });
 
   // `formatValue` cuts the tail, which on a pull request url is the repository and the number

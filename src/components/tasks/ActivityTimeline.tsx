@@ -121,7 +121,7 @@ function actorName(log: ApiActivityLog): string {
   if (!log.user && SYNC_ACTIONS.has(log.action)) return "The repository sync";
   // A deleted user also arrives as null, and null is an object to `typeof` — which is why the
   // check above leads with the value itself. For every other action that is what an absence means.
-  return "Unknown";
+  return "Deleted user";
 }
 
 function describeAction(log: ApiActivityLog): string {

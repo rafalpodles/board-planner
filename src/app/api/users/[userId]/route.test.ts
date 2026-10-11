@@ -34,8 +34,9 @@ const grantDeleteMany = vi.fn();
 const boardsLeftWithoutOwner = vi.fn(async (_id?: string) => [] as string[]);
 vi.mock("@/lib/grants", () => ({ check, accessibleProjectIds: vi.fn(), boardsOnlyOwnedBy, boardsLeftWithoutOwner }));
 vi.mock("@/models/grant", () => ({ Grant: { deleteMany: grantDeleteMany } }));
-const identityDeleteMany = vi.fn();
-vi.mock("@/models/identity", () => ({ Identity: { deleteMany: identityDeleteMany } }));
+const ERASED_LABEL = "deleted-label";
+const eraseAccountTraces = vi.fn(async (..._args: unknown[]) => ERASED_LABEL);
+vi.mock("@/lib/account-erasure", () => ({ eraseAccountTraces }));
 vi.mock("@/lib/session", () => ({ revokeUserSessions, revokeUserCredentials }));
 vi.mock("@/lib/password-reset", () => ({ invalidateResetTokens }));
 const cancelEmailChange = vi.fn();
@@ -649,7 +650,7 @@ describe("DELETE /api/users/:id", () => {
     expect(boardsOnlyOwnedBy).toHaveBeenCalledWith(scopedToDefaultOrganisation(), TARGET_HEX);
     expect(userFindOneAndDelete).not.toHaveBeenCalled();
     expect(grantDeleteMany).not.toHaveBeenCalled();
-    expect(revokeUserSessions).not.toHaveBeenCalled();
+    expect(revokeUserCredentials).not.toHaveBeenCalled();
     expect(logInstanceAudit).not.toHaveBeenCalled();
   });
 
@@ -662,13 +663,33 @@ describe("DELETE /api/users/:id", () => {
     expect(grantDeleteMany).toHaveBeenCalledWith({ subject: TARGET_HEX, organisation: DEFAULT_ORGANISATION_ID });
   });
 
-  // A link left behind would refuse the same person's provider as "already linked" for good (BP-828)
-  it("removes every sign-in provider the deleted account had linked", async () => {
+  // A link left behind would refuse the same person's provider as "already linked" for good (BP-828),
+  // and a token left behind would outlive the account that issued it
+  it("revokes every credential the deleted account held, linked providers included", async () => {
     found(person());
 
     await DELETE(...del(TARGET_HEX));
 
-    expect(identityDeleteMany).toHaveBeenCalledWith({ user: TARGET_HEX, organisation: DEFAULT_ORGANISATION_ID });
+    expect(revokeUserCredentials).toHaveBeenCalledWith(TARGET_HEX);
+  });
+
+  it("erases what names the person before the account row goes", async () => {
+    found(person());
+
+    await DELETE(...del(TARGET_HEX));
+
+    expect(eraseAccountTraces).toHaveBeenCalledWith(scopedToDefaultOrganisation(), expect.objectContaining({ _id: TARGET_HEX, username: "target" }));
+    expect(eraseAccountTraces.mock.invocationCallOrder[0]).toBeLessThan(userFindOneAndDelete.mock.invocationCallOrder[0]);
+  });
+
+  it("keeps the account, deactivated, when erasing its traces fails", async () => {
+    found(person());
+    eraseAccountTraces.mockRejectedValueOnce(new Error("mongo is away"));
+
+    await expect(DELETE(...del(TARGET_HEX))).rejects.toThrow();
+
+    expect(userFindOneAndDelete).not.toHaveBeenCalled();
+    expect(logInstanceAudit).not.toHaveBeenCalled();
   });
 
   it("leaves the grants alone when the account was not deleted", async () => {
@@ -689,7 +710,7 @@ describe("DELETE /api/users/:id", () => {
     // Which account, not merely that one was deleted: both of these read an id out of scope, and
     // the caller's own is in the same scope
     expect(userFindOneAndDelete).toHaveBeenCalledWith({ _id: TARGET_HEX, organisation: DEFAULT_ORGANISATION_ID });
-    expect(revokeUserSessions).toHaveBeenCalledWith(TARGET_HEX);
+    expect(revokeUserCredentials).toHaveBeenCalledWith(TARGET_HEX);
   });
 
   // The fix's own thesis, at the two places it is spent: the document's id is what the delete and
@@ -702,7 +723,7 @@ describe("DELETE /api/users/:id", () => {
 
     expect(res.status).toBe(200);
     expect(userFindOneAndDelete).toHaveBeenCalledWith({ _id: TARGET_HEX, organisation: DEFAULT_ORGANISATION_ID });
-    expect(revokeUserSessions).toHaveBeenCalledWith(TARGET_HEX);
+    expect(revokeUserCredentials).toHaveBeenCalledWith(TARGET_HEX);
   });
 
   // The refusal its siblings on this route already make. Sharper here than for any of them: this is
@@ -715,7 +736,7 @@ describe("DELETE /api/users/:id", () => {
 
     expect(res.status).toBe(403);
     expect(userFindOneAndDelete).not.toHaveBeenCalled();
-    expect(revokeUserSessions).not.toHaveBeenCalled();
+    expect(revokeUserCredentials).not.toHaveBeenCalled();
   });
 
   it("refuses the caller their own account", async () => {
@@ -826,14 +847,14 @@ describe("DELETE /api/users/:id", () => {
 
     expect(res.status).toBe(404);
     expect(userFindOneAndDelete).not.toHaveBeenCalled();
-    expect(revokeUserSessions).not.toHaveBeenCalled();
+    expect(revokeUserCredentials).not.toHaveBeenCalled();
   });
 
   // The gap between the check and the write. Two administrators on the same account: the loser
   // used to be told they had deleted it, because the delete's own answer was thrown away.
   // BP-538. The account is gone, so this row is the only place it is recorded that it ever existed
-  // or who removed it — which is why `target` is the username and not a reference.
-  it("records the deletion, naming the account and who did it", async () => {
+  // or who removed it. It names the account by an opaque label, not the username (BP-946).
+  it("records the deletion, naming the account by its label and who did it", async () => {
     found(person({ role: "member" }));
 
     await DELETE(...del(TARGET_HEX));
@@ -842,7 +863,7 @@ describe("DELETE /api/users/:id", () => {
       action: "user_deleted",
       user: ADMIN_HEX,
       actorUsername: "owner",
-      target: "target",
+      target: ERASED_LABEL,
       detail: "a member",
     });
   });
@@ -851,13 +872,13 @@ describe("DELETE /api/users/:id", () => {
   // point the account is already gone, so a revoke that throws must not take the record with it.
   it("records the deletion even if ending the sessions fails", async () => {
     found(person());
-    revokeUserSessions.mockRejectedValueOnce(new Error("mongo is away"));
+    revokeUserCredentials.mockRejectedValueOnce(new Error("mongo is away"));
 
     await expect(DELETE(...del(TARGET_HEX))).rejects.toThrow();
 
     expect(logInstanceAudit).toHaveBeenCalledWith(
       scopedToDefaultOrganisation(),
-      expect.objectContaining({ action: "user_deleted", target: "target" })
+      expect.objectContaining({ action: "user_deleted", target: ERASED_LABEL })
     );
   });
 
@@ -877,7 +898,7 @@ describe("DELETE /api/users/:id", () => {
     const res = await DELETE(...del(TARGET_HEX));
 
     expect(res.status).toBe(404);
-    expect(revokeUserSessions).not.toHaveBeenCalled();
+    expect(revokeUserCredentials).not.toHaveBeenCalled();
     // Nor a row about a deletion that did not happen: the log goes in after the delete's own answer
     expect(logInstanceAudit).not.toHaveBeenCalled();
   });
