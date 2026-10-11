@@ -48,6 +48,25 @@ describe("the invitation page", () => {
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ token: "cpi_held" });
   });
 
+  // BP-922. In the cloud an invitation is to somebody's organisation, at an address of its own
+  it("names the organisation and where the invitee will sign in, when the server does", async () => {
+    fetchMock.mockReturnValue(answer(200, { ...OPEN, organisation: "Acme", address: "acme.board-planner.com" }));
+
+    render(<InvitePage />);
+
+    expect(await screen.findByRole("heading", { name: "Join Acme on Board Planner" })).toBeTruthy();
+    expect(screen.getByText(/You'll sign in at acme\.board-planner\.com\./)).toBeTruthy();
+  });
+
+  it("keeps the product's own name, and says nothing of an address, when the server names none — the control", async () => {
+    fetchMock.mockReturnValue(answer(200, { ...OPEN, organisation: null, address: null }));
+
+    render(<InvitePage />);
+
+    expect(await screen.findByRole("heading", { name: "Join Board Planner" })).toBeTruthy();
+    expect(screen.queryByText(/sign in at/)).toBeNull();
+  });
+
   it("says why a refused link cannot be used", async () => {
     fetchMock.mockReturnValue(
       answer(400, { error: "This invitation has expired. Ask whoever invited you for a new one.", reason: "expired" })

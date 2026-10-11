@@ -382,7 +382,7 @@ describe("who may answer", () => {
     expect(await mayDecide(db, WORKER, { _id: OWNER, role: "member" })).toBe(true);
   });
 
-  it("lets an instance admin, without reading the machine at all", async () => {
+  it("lets an admin, without reading the machine at all", async () => {
     expect(await mayDecide(db, WORKER, { _id: OTHER, role: "admin" })).toBe(true);
     expect(workerFindOne).not.toHaveBeenCalled();
   });
@@ -562,7 +562,7 @@ describe("what the machine is told is waiting on it", () => {
   });
 
   // BP-736: the lock stops a machine acting on an acceptance, without making it drop the worktree
-  describe("on a project an instance admin has locked workers off", () => {
+  describe("on a project an admin has locked workers off", () => {
     beforeEach(() => {
       storedProjects = [
         { _id: "p1", organisation: DEFAULT_ORGANISATION_ID, worker: { lockedByInstance: true } },

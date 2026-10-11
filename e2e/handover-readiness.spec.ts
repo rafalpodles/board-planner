@@ -135,12 +135,12 @@ test.describe("a member's own task, as the board changes under it", () => {
 
     await expect(notice(page)).toHaveAttribute("data-reason", "runs-locked");
     await expect(notice(page)).toHaveText(
-      "Nothing will run this yet. An instance admin has locked agent runs off for this board — an instance admin can lift the lock in Project settings → Workers."
+      "Nothing will run this yet. An admin has locked agent runs off for this board — an admin can lift the lock in Project settings → Workers."
     );
     await expect(waiting(page)).toHaveCount(0);
   });
 
-  test("an instance admin reading a locked board is told they can lift it", async ({ page }) => {
+  test("an admin reading a locked board is told they can lift it", async ({ page }) => {
     await setBoardReadiness({
       repositoryUrl: HANDOVER_REPOSITORY,
       workerEnabled: true,
@@ -200,7 +200,7 @@ test.describe("a member's own task, as the board changes under it", () => {
 
     await expect(notice(page)).toHaveAttribute("data-reason", "machine-paused");
     await expect(notice(page)).toHaveText(
-      "Nothing will run this yet. Your machine is connected but not taking work: an instance admin paused it. Resume it from the menubar app on that machine, or ask an instance admin to."
+      "Nothing will run this yet. Your machine is connected but not taking work: an admin paused it. Resume it from the menubar app on that machine, or ask an admin to."
     );
     await expect(waiting(page)).toHaveCount(0);
   });
@@ -378,7 +378,7 @@ test.describe("a member's own task, as the board changes under it", () => {
     await expect(notice(page)).toHaveCount(0);
   });
 
-  test("a machine an instance admin switched off says so, and not that it should be checked", async ({
+  test("a machine an admin switched off says so, and not that it should be checked", async ({
     page,
   }) => {
     await setBoardReadiness({ repositoryUrl: HANDOVER_REPOSITORY, workerEnabled: true });
@@ -391,7 +391,7 @@ test.describe("a member's own task, as the board changes under it", () => {
 
     await expect(notice(page)).toHaveAttribute("data-reason", "machine-disabled");
     await expect(notice(page)).toHaveText(
-      "Nothing will run this yet. An instance admin switched your machine off, so it takes no work, and only an instance admin can switch it back on."
+      "Nothing will run this yet. An admin switched your machine off, so it takes no work, and only an admin can switch it back on."
     );
     await expect(notice(page).getByRole("link", { name: "Check it is running" })).toHaveCount(0);
   });

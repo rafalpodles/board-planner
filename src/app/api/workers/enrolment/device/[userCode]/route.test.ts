@@ -125,7 +125,7 @@ describe("GET /api/workers/enrolment/device/:userCode", () => {
 
   // Rendered so the page can say the machine will connect and then sit idle, which is the one
   // outcome nothing on the machine itself can explain
-  it("says an instance admin could turn machines on", async () => {
+  it("says an admin could turn machines on", async () => {
     getAuthUser.mockResolvedValue({ ...MEMBER, role: "admin" });
 
     const json = await (await GET(request(), ctx())).json();
@@ -170,7 +170,7 @@ describe("GET /api/workers/enrolment/device/:userCode", () => {
     expect(json.projects[0].canEnable).toBe(true);
   });
 
-  it("offers nobody the switch while an instance admin's lock is on, and reports it off", async () => {
+  it("offers nobody the switch while an admin's lock is on, and reports it off", async () => {
     getAuthUser.mockResolvedValue({ ...MEMBER, role: "admin" });
     projectLean.mockResolvedValue([
       {

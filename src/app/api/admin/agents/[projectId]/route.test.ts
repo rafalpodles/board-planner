@@ -130,7 +130,7 @@ describe("PATCH /api/admin/agents/:projectId", () => {
       PROJECT_ID,
       ADMIN,
       "settings_updated",
-      ["Instance admin console", "PM agent: on → off"]
+      ["Admin console", "PM agent: on → off"]
     );
   });
 

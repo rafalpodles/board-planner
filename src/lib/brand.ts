@@ -7,3 +7,6 @@ export const APP_NAME = "Board Planner";
 
 /** Where the product lives. Used for defaults that need an address rather than a name. */
 export const APP_DOMAIN = "board-planner.com";
+
+/** Where an organisation in the cloud writes when the service has done something to it, such as suspending it. */
+export const CONTACT_EMAIL = `contact@${APP_DOMAIN}`;

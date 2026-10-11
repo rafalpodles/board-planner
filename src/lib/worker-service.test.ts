@@ -462,7 +462,7 @@ describe("ownerReachableProjectIds", () => {
     expect(await ownerReachableProjectIds(scopedToDefaultOrganisation(), { owner: "u1" } as never)).toEqual([PROJECT_ID, "p2"]);
   });
 
-  it("is unrestricted when its owner is an instance admin", async () => {
+  it("is unrestricted when its owner is an admin", async () => {
     userFindOne.mockResolvedValue({ _id: "u1", role: "admin" });
 
     expect(await ownerReachableProjectIds(scopedToDefaultOrganisation(), { owner: "u1" } as never)).toBeNull();
@@ -822,7 +822,7 @@ describe("catalogueFor", () => {
 
 // BP-736: the owner sets `enabled`, an instance admin sets the lock, and the lock wins everywhere a
 // machine is told what it may run.
-describe("an instance admin's lock on the project", () => {
+describe("an admin's lock on the project", () => {
   const reported = [{ remote: REMOTE, path: "/repo" }];
   const locked = () =>
     project({ worker: { enabled: true, lockedByInstance: true, policy: {}, policyOverrides: [] } });
@@ -832,7 +832,7 @@ describe("an instance admin's lock on the project", () => {
 
     expect(verdict.ok).toBe(false);
     expect((verdict as { reason: string }).reason).toBe(
-      "an instance admin has locked workers off for this project"
+      "an admin has locked workers off for this project"
     );
   });
 

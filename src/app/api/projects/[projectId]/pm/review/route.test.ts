@@ -126,7 +126,7 @@ describe("POST /api/projects/:projectId/pm/review", () => {
     const res = await run();
 
     expect(res.status).toBe(409);
-    expect((await res.json()).error).toContain("disabled for this project by an instance admin");
+    expect((await res.json()).error).toContain("disabled for this project by an admin");
     expect(startBoardReview).not.toHaveBeenCalled();
   });
 

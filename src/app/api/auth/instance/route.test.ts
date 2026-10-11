@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const countDocuments = vi.fn();
+const organisationName = vi.hoisted(() => ({ value: "Acme" as string | undefined }));
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/oidc/providers", () => ({ ssoEnforced: async () => false }));
 vi.mock("@/models/user", () => ({ User: { countDocuments } }));
+vi.mock("@/lib/organisation", () => ({ getOrganisation: async () => ({ name: organisationName.value }) }));
 vi.mock("@/lib/organisation-host", async (importOriginal) => {
   const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
   return {
@@ -35,10 +37,39 @@ describe("GET /api/auth/instance", () => {
     }
   });
 
+  // BP-922. The sign-in page says whose it is, and only where that is not the product's own name
+  it("names the host's organisation in the cloud, and says it is the cloud", async () => {
+    process.env.ORGANISATION_DOMAIN = "board-planner.com";
+    countDocuments.mockResolvedValue(1);
+    try {
+      expect(await (await GET(new Request("http://localhost/api/auth/instance"))).json()).toMatchObject({ cloud: true, organisation: "Acme" });
+    } finally {
+      delete process.env.ORGANISATION_DOMAIN;
+    }
+  });
+
+  it("does not call an organisation that was never named by the word default", async () => {
+    process.env.ORGANISATION_DOMAIN = "board-planner.com";
+    organisationName.value = "default";
+    countDocuments.mockResolvedValue(1);
+    try {
+      expect((await (await GET(new Request("http://localhost/api/auth/instance"))).json()).organisation).toBeNull();
+    } finally {
+      delete process.env.ORGANISATION_DOMAIN;
+      organisationName.value = "Acme";
+    }
+  });
+
+  it("names nobody on a self-hosted instance, whatever its one organisation is called — the control", async () => {
+    countDocuments.mockResolvedValue(1);
+
+    expect(await (await GET(new Request("http://localhost/api/auth/instance"))).json()).toMatchObject({ cloud: false, organisation: null });
+  });
+
   it("says an empty instance is unclaimed", async () => {
     countDocuments.mockResolvedValue(0);
 
-    expect(await (await GET(new Request("http://localhost/api/auth/instance"))).json()).toEqual({ unclaimed: true, passwordSignIn: true, platformSignIn: null });
+    expect(await (await GET(new Request("http://localhost/api/auth/instance"))).json()).toEqual({ unclaimed: true, passwordSignIn: true, platformSignIn: null, cloud: false, organisation: null });
   });
 
   // The control, and the half the bug was on: without it "answers unclaimed" and "answers the
@@ -46,7 +77,7 @@ describe("GET /api/auth/instance", () => {
   it("says an instance with one user is not", async () => {
     countDocuments.mockResolvedValue(1);
 
-    expect(await (await GET(new Request("http://localhost/api/auth/instance"))).json()).toEqual({ unclaimed: false, passwordSignIn: true, platformSignIn: null });
+    expect(await (await GET(new Request("http://localhost/api/auth/instance"))).json()).toEqual({ unclaimed: false, passwordSignIn: true, platformSignIn: null, cloud: false, organisation: null });
   });
 
   it("says when the operator turned password sign-in off", async () => {

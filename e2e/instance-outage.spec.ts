@@ -18,7 +18,7 @@ import { signIn } from "./session";
  * Nothing has ever looked at the screen, which is where the bug was.
  */
 
-const PANEL = "This instance is having trouble";
+const PANEL = "Board Planner is having trouble";
 const BANNER = /You are still signed in/;
 
 const cut = (request: APIRequestContext) => request.post(`${MONGO_PROXY_CONTROL_URL}/outage`);

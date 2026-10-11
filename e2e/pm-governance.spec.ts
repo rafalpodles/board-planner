@@ -64,7 +64,7 @@ test("the lock on a project's row holds its agent off, whatever the project's ow
   // The on/off switch is not the project's to flip while it is locked
   await expect(row(page).getByRole("button", { name: /^(On|Off)$/ })).toBeDisabled();
   expect(await storedPm()).toMatchObject({ lockedByInstance: true, enabled: true });
-  expect(await reviewRefusal(page)).toBe("PM agent is disabled for this project by an instance admin");
+  expect(await reviewRefusal(page)).toBe("PM agent is disabled for this project by an admin");
 
   await openAgents(page);
   await row(page).getByRole("button", { name: "Locked", exact: true }).click();

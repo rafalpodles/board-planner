@@ -16,7 +16,7 @@ import { signIn } from "./session";
  */
 test.beforeEach(seed);
 
-test("a genuine project owner (not instance admin) passes a withProjectOwner route", async ({
+test("a genuine project owner (not admin) passes a withProjectOwner route", async ({
   page,
 }) => {
   await signIn(page, "owner");

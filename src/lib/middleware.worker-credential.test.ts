@@ -204,7 +204,7 @@ describe("the grant is re-derived on every call", () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
-  it("refuses a project an instance admin locked, though its owner switched workers on", async () => {
+  it("refuses a project an admin locked, though its owner switched workers on", async () => {
     projectFindOne.mockReturnValue({
       select: () => ({
         lean: () =>
@@ -377,7 +377,7 @@ describe("the grant is re-derived on every call", () => {
       });
     });
 
-    describe("when an instance admin has locked the project", () => {
+    describe("when an admin has locked the project", () => {
       const lockedContext = taskContext;
 
       beforeEach(() => {

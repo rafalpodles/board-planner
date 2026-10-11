@@ -480,7 +480,7 @@ describe("delivery to somebody who can no longer reach the board", () => {
     expect(mails.map((m) => m.to)).toEqual(["assignee@example.com"]);
   });
 
-  it("still notifies an instance admin, who reaches the board without a grant row", async () => {
+  it("still notifies an admin, who reaches the board without a grant row", async () => {
     granted = [];
 
     await createNotifications(scopedToDefaultOrganisation(), { ...NOTIFICATION, recipientIds: [WATCHER, ADMIN] });

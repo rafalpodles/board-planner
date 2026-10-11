@@ -93,7 +93,7 @@ test("committing a project to workers is recorded, and readable afterwards", asy
   await page.goto("/settings/workers");
   await page.getByRole("link", { name: "Audit log" }).first().click();
   await expect(page).toHaveURL(/\/settings\/audit/);
-  await expect(page.getByRole("heading", { name: "Instance audit log" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Audit log" })).toBeVisible();
 
   // Scoped to one row rather than asserted as three loose strings: the project key also appears in
   // the sidebar, and "somewhere on the page" would not prove who did what to which project
@@ -241,7 +241,7 @@ test("a machine told to stop reads as loudly as one that was locked, and a resum
   }
 
   await page.goto("/settings/audit");
-  await expect(page.getByRole("heading", { name: "Instance audit log" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Audit log" })).toBeVisible();
 
   // Which command, not that a command happened: the actions on this page are deliberately separate
   // verbs so nobody has to read the next column to find out what was done

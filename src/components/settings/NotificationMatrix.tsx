@@ -1,5 +1,7 @@
 "use client";
 
+import { useOrganisation } from "@/hooks/use-organisation";
+import { mailOff } from "@/lib/cloud-copy";
 import { useId } from "react";
 import Link from "next/link";
 import { NOTIFICATION_TYPES, NotificationMatrix, NotificationType } from "@/types";
@@ -38,13 +40,8 @@ export function mailUnavailable(mail: MailAvailability | undefined): MailUnavail
 }
 
 function MailHint({ reason, withDigest }: { reason: MailUnavailable; withDigest: boolean }) {
-  if (reason === "server") {
-    return withDigest ? (
-      <>This instance has no mail server, so e-mail and the daily digest are off — ask an administrator.</>
-    ) : (
-      <>This instance has no mail server, so e-mail is off — ask an administrator.</>
-    );
-  }
+  const cloud = useOrganisation().organisation?.cloud === true;
+  if (reason === "server") return <>{mailOff(cloud, withDigest)}</>;
   return (
     <>
       Add an e-mail address to{" "}

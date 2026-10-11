@@ -64,16 +64,16 @@ describe("who is offered the catalog's actions", () => {
     await openTab(tab);
 
     expect(screen.queryByRole("button", { name: `New ${tab.toLowerCase().slice(0, -1)}` })).toBeNull();
-    expect(screen.getByText(/instance admin authors/i)).not.toBeNull();
+    expect(screen.getByText(/admin authors/i)).not.toBeNull();
   });
 
   // Without this the two refusals above would pass on a page that offers nothing to anybody
-  it.each(["Gates", "Steps"])("offers the %s action to an instance admin", async (tab) => {
+  it.each(["Gates", "Steps"])("offers the %s action to an admin", async (tab) => {
     await openTab(tab);
 
     const name = `New ${tab.toLowerCase().slice(0, -1)}`;
     expect(screen.queryByRole("button", { name })).not.toBeNull();
-    expect(screen.queryByText(/instance admin authors/i)).toBeNull();
+    expect(screen.queryByText(/admin authors/i)).toBeNull();
   });
 });
 
@@ -303,7 +303,7 @@ describe("who is offered Delete on a block", () => {
     expect(screen.queryByRole("button", { name: "Delete Mine" })).toBeNull();
   });
 
-  it("offers it to an instance admin", async () => {
+  it("offers it to an admin", async () => {
     catalog.steps = [MINE];
     await openTab("Steps");
 

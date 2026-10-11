@@ -113,7 +113,7 @@ export const PUT = withAuth(async (request, { params, user, db }) => {
   if (!block) return NextResponse.json({ error: "No such block" }, { status: 404 });
   if (block.builtIn && user.role !== "admin") {
     return NextResponse.json(
-      { error: "Only an instance admin can change a built-in block" },
+      { error: "Only an admin can change a built-in block" },
       { status: 403 }
     );
   }
@@ -123,7 +123,7 @@ export const PUT = withAuth(async (request, { params, user, db }) => {
   // is empty for any reason used to leave the block editable by anyone at all.
   if (user.role !== "admin") {
     return NextResponse.json(
-      { error: "Only an instance admin can change a block" },
+      { error: "Only an admin can change a block" },
       { status: 403 }
     );
   }
@@ -177,7 +177,7 @@ export const DELETE = withAuth(async (_request, { params, user, db }) => {
   // pre-BP-345 member-authored blocks, and any block with an empty createdBy, open to anyone.
   if (user.role !== "admin") {
     return NextResponse.json(
-      { error: "Only an instance admin can delete a block" },
+      { error: "Only an admin can delete a block" },
       { status: 403 }
     );
   }

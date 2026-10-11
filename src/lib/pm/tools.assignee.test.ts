@@ -126,7 +126,7 @@ describe("the PM's assign_task and a username the writer refuses", () => {
 });
 
 // BP-736: the owner switches workers on, an instance admin's lock wins — and the PM says which
-describe("the PM's assign_task on a project an instance admin locked off", () => {
+describe("the PM's assign_task on a project an admin locked off", () => {
   beforeEach(() => {
     taskFindOne.mockResolvedValue({ _id: "t1", taskNumber: 9 });
     assignTaskMock.mockResolvedValue({
@@ -162,7 +162,7 @@ describe("the PM's assign_task on a project an instance admin locked off", () =>
       task: "BP-9",
       assignee: "kuba",
       willRun: false,
-      note: "Assigned, but an instance admin has locked workers off for this project, so nothing will run it.",
+      note: "Assigned, but an admin has locked workers off for this project, so nothing will run it.",
     });
   });
 

@@ -1,5 +1,8 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+const hosted = vi.hoisted(() => ({ cloud: false }));
+vi.mock("@/hooks/use-organisation", () => ({ useOrganisation: () => ({ organisation: { cloud: hosted.cloud } }) }));
 import { render, screen, cleanup, act, waitFor } from "@testing-library/react";
 import { BoardInvitations } from "./BoardInvitations";
 import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";

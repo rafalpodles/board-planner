@@ -106,7 +106,7 @@ export default function AgentsPage() {
             </Button>
           ) : (
             <p className="text-[13px] text-text-muted">
-              An instance admin authors {tab}
+              An admin authors {tab}
             </p>
           )
         }

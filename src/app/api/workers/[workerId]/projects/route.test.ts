@@ -129,7 +129,7 @@ describe("GET the picker's own view", () => {
     expect(await canEnable()).toEqual({ BP: true, SB: true });
   });
 
-  it("offers nobody the switch on a project an instance admin has locked, not even an admin", async () => {
+  it("offers nobody the switch on a project an admin has locked, not even an admin", async () => {
     getAuthUser.mockResolvedValue(ADMIN);
     projectFind.mockResolvedValue([
       { _id: OFF, key: "SB", name: "Sandbox", githubRepo: "owner/sandbox", worker: { enabled: true, lockedByInstance: true } },
@@ -175,7 +175,7 @@ describe("PUT the selection", () => {
     expect(json.leftDisabled).toEqual([]);
   });
 
-  it("leaves a locked project switched off and says so, even for an instance admin", async () => {
+  it("leaves a locked project switched off and says so, even for an admin", async () => {
     getAuthUser.mockResolvedValue(ADMIN);
     projectFind.mockResolvedValue([
       { _id: OFF, key: "SB", name: "Sandbox", githubRepo: "owner/sandbox", worker: { enabled: false, lockedByInstance: true } },
@@ -200,7 +200,7 @@ describe("PUT the selection", () => {
     expect(projectUpdateOne).not.toHaveBeenCalled();
   });
 
-  it("switches workers on for a picked project when an instance admin is confirming", async () => {
+  it("switches workers on for a picked project when an admin is confirming", async () => {
     getAuthUser.mockResolvedValue(ADMIN);
 
     const json = await (await PUT(putRequest({ projects: [SERVED, OFF] }), ctx())).json();

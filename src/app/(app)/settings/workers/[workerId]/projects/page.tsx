@@ -46,7 +46,7 @@ function leftDisabledMessage(left: string[], rows: CatalogueRow[]): string {
   }
   if (locked.length) {
     parts.push(
-      `${locked.join(", ")} ${locked.length === 1 ? "is" : "are"} locked off by an instance admin`
+      `${locked.join(", ")} ${locked.length === 1 ? "is" : "are"} locked off by an admin`
     );
   }
   return `Saved. ${parts.join("; ")} — the machine will leave ${them} alone until somebody does.`;
@@ -212,7 +212,7 @@ export default function MachineProjectsPage() {
               {row.available && !row.workersEnabled && (
                 <span className="block text-xs text-warning">
                   {row.locked
-                    ? "an instance admin has locked machines off for this project"
+                    ? "an admin has locked machines off for this project"
                     : row.canEnable
                       ? "does not run machines yet — ticking it turns that on"
                       : "does not run machines yet, and you cannot turn that on"}

@@ -29,7 +29,7 @@ test("answers the organisation's plan and features for any authenticated user", 
 
   expect(response.status(), await response.text()).toBe(200);
   const body = await response.json();
-  expect(body).toEqual({ organisation: "default", plan: "free", features: [], expiresAt: null });
+  expect(body).toEqual({ organisation: null, plan: "free", features: [], expiresAt: null });
 });
 
 test("401s without credentials", async ({ request }) => {
@@ -59,7 +59,7 @@ test("reads the existing organisation row rather than inserting a fresh default 
   const first = await request.get("/api/entitlements", { headers: ADMIN_AUTH });
   const second = await request.get("/api/entitlements", { headers: MEMBER_AUTH });
 
-  const expected = { organisation: "default", plan: "pro", features: ["integrations.jira"], expiresAt: null };
+  const expected = { organisation: null, plan: "pro", features: ["integrations.jira"], expiresAt: null };
   expect(await first.json()).toEqual(expected);
   expect(await second.json()).toEqual(expected);
 });

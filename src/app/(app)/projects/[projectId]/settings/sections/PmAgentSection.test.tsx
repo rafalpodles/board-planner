@@ -92,7 +92,7 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-describe("PmAgentSection MCP connections — owner (not instance admin)", () => {
+describe("PmAgentSection MCP connections — owner (not admin)", () => {
   it("shows Connect, Reconnect, Disconnect and Test connection, one named per server", () => {
     renderSection(false);
 
@@ -127,7 +127,7 @@ describe("PmAgentSection MCP connections — owner (not instance admin)", () => 
   });
 });
 
-describe("PmAgentSection MCP connections — instance admin", () => {
+describe("PmAgentSection MCP connections — admin", () => {
   it("shows the server-definition inputs alongside Connect/Disconnect/Test", () => {
     renderSection(true);
 
@@ -157,7 +157,7 @@ describe("PmAgentSection MCP connections — instance admin", () => {
   });
 });
 
-describe("PmAgentSection MCP connections — plain member (neither owner nor instance admin)", () => {
+describe("PmAgentSection MCP connections — plain member (neither owner nor admin)", () => {
   it("renders nothing, since project.canAdmin gates the whole card", () => {
     renderSection(false, { canAdmin: false });
 

@@ -172,7 +172,7 @@ function Enrol({ params }: { params: Promise<{ userCode: string }> }) {
             className="mt-6 rounded-lg border border-danger/40 bg-danger/10 p-4 text-sm text-text"
           >
             A machine with this name is already enrolled to somebody else, so connecting will be
-            refused. If it is yours, ask an instance admin to release it under Settings → Workers.
+            refused. If it is yours, ask an admin to release it under Settings → Workers.
           </div>
         )}
 
@@ -223,8 +223,8 @@ function Enrol({ params }: { params: Promise<{ userCode: string }> }) {
           >
             {chosen?.locked ? (
               <>
-                An instance admin has locked machines off for that project. The machine will connect
-                and sit idle until an instance admin lifts the lock.
+                An admin has locked machines off for that project. The machine will connect
+                and sit idle until an admin lifts the lock.
               </>
             ) : (
               <>

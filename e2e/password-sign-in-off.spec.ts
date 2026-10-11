@@ -248,7 +248,7 @@ test("the address on the profile is the administrator's to change", async ({ pag
 
   await page.goto(at("/settings/profile"));
 
-  await expect(page.getByText("An administrator changes it on this instance.")).toBeVisible();
+  await expect(page.getByText("An administrator changes it.")).toBeVisible();
   await expect(page.getByLabel("Email")).toHaveAttribute("readonly", "");
 });
 

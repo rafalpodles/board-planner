@@ -1,5 +1,8 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const hosted = vi.hoisted(() => ({ cloud: false }));
+vi.mock("@/hooks/use-organisation", () => ({ useOrganisation: () => ({ organisation: { cloud: hosted.cloud } }) }));
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { NotificationsSection } from "./NotificationsSection";
 import { NotificationMatrix, NotificationType } from "@/types";

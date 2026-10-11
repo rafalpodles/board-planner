@@ -404,7 +404,7 @@ export function EditBlockDialog({
       <div className="flex flex-col gap-4">
         {readOnly && (
           <p className="text-[13px] text-text-muted">
-            An instance admin changes {block.kind === "step" ? "steps" : "gates"}. You can read this
+            An admin changes {block.kind === "step" ? "steps" : "gates"}. You can read this
             one here.
           </p>
         )}

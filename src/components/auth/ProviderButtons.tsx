@@ -120,7 +120,7 @@ export const SIGN_IN_REFUSALS: Record<string, string> = {
   not_linked:
     "That sign-in is not linked to an account here yet. Sign in with your password and link it under Settings → Security, or ask for an invitation.",
   throttled: "Too many attempts. Try again in 15 minutes.",
-  claimed: "This instance is already set up. Sign in instead.",
+  claimed: "This has already been set up. Sign in instead.",
   deactivated: "This account is deactivated. Ask an administrator.",
   no_email: "That provider gave no address, and the first account needs one. Try another provider.",
   linked: "That sign-in already belongs to an account here. Sign in with it instead.",

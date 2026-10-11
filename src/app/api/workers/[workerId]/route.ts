@@ -102,7 +102,7 @@ export const PATCH = withAuth(async (request, { params, user, db }) => {
   }
 
   if (user.role !== "admin") {
-    return NextResponse.json({ error: "Instance admin only" }, { status: 403 });
+    return NextResponse.json({ error: "Admin only" }, { status: 403 });
   }
 
   const update: Record<string, unknown> = {};

@@ -364,7 +364,7 @@ test("a project member who does not own the machine is offered nothing, and refu
   expect(refused.status()).toBe(403);
   // Named, not just counted: the provenance check answers 403 too, and a bare status cannot tell
   // this refusal from that one
-  expect(await refused.text()).toContain("instance admin");
+  expect(await refused.text()).toContain("admin");
   expect(await storedDecision().then((d) => d?.state)).toBe("pending");
 });
 

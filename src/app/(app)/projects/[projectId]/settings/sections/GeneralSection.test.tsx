@@ -112,11 +112,11 @@ describe("GeneralSection member access", () => {
     await waitFor(() => expect(screen.queryByText("IdP")).toBeNull());
   });
 
-  it("lists an instance admin for reference instead of a select", async () => {
+  it("lists an admin for reference instead of a select", async () => {
     renderSection();
     await screen.findByLabelText("Access for alice");
 
-    expect(screen.getByText("Instance admin")).toBeTruthy();
+    expect(screen.getByText("Admin")).toBeTruthy();
     expect(screen.queryByLabelText("Access for carol")).toBeNull();
   });
 
@@ -261,7 +261,7 @@ describe("GeneralSection member access", () => {
    * an admin who also holds a grant is a label too, and no revocation on this screen can reach the
    * one kind of row the endpoint returns without a grant.
    */
-  it("gives an instance admin a label whether or not they hold a grant", async () => {
+  it("gives an admin a label whether or not they hold a grant", async () => {
     api.get.mockResolvedValue([
       ...members,
       { _id: "u4", username: "dan", fullName: "Dan D", relation: "owner", instanceAdmin: true },
@@ -271,7 +271,7 @@ describe("GeneralSection member access", () => {
 
     expect(screen.queryByLabelText("Access for carol")).toBeNull();
     expect(screen.queryByLabelText("Access for dan")).toBeNull();
-    expect(screen.getAllByText("Instance admin")).toHaveLength(2);
+    expect(screen.getAllByText("Admin")).toHaveLength(2);
   });
 
   // The control: a write that genuinely fails must still be reported as the write's failure, and
@@ -416,7 +416,7 @@ describe("GeneralSection member access", () => {
     });
 
     // An instance admin keeps the board whatever their own grant says
-    it("keeps an instance admin where they are", async () => {
+    it("keeps an admin where they are", async () => {
       renderSection({ currentUserId: "u1", isAdmin: true });
       fireEvent.change(await screen.findByLabelText("Access for alice"), {
         target: { value: "none" },

@@ -17,7 +17,7 @@ export function StatusBanners() {
     <div role="status" className="shrink-0" data-testid="status-banners">
       {outage && (
         <div className="px-4 py-2 text-center text-sm bg-warning/15 text-text border-b border-border">
-          This instance is having trouble reaching its database. You are still signed in; what you
+          Board Planner is having trouble reaching its database. You are still signed in; what you
           are looking at may be out of date.
         </div>
       )}
@@ -25,8 +25,8 @@ export function StatusBanners() {
         <div className="px-4 py-2 text-center text-sm bg-warning/15 text-text border-b border-border">
           {requestLimit.scope === "organisation"
             ? "Your organisation has made more requests this minute than it may."
-            : "You have made more requests this minute than one account may."}{" "}
-          Pages will load again after {requestLimit.until.toLocaleTimeString()}.
+            : "You have made more requests this minute than one account may; that share includes your machines and API tokens."}{" "}
+          Try again after {requestLimit.until.toLocaleTimeString()}.
         </div>
       )}
     </div>
@@ -101,7 +101,7 @@ export function AuthGuard({ children, bannersInShell = false }: { children: Reac
     return (
       <div className="flex items-center justify-center min-h-screen px-4">
         <div role="status" className="w-full max-w-sm text-center">
-          <h1 className="text-lg font-semibold mb-2">This instance is having trouble</h1>
+          <h1 className="text-lg font-semibold mb-2">Board Planner is having trouble</h1>
           <p className="text-sm text-text mb-6">
             It cannot reach its database, or is restarting, so it cannot tell who you are. You have
             not been signed out — this page will keep trying, and come back on its own.

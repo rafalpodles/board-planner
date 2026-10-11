@@ -31,7 +31,7 @@ beforeEach(() => {
   check.mockResolvedValue(true);
 });
 
-describe("a project the grant layer refuses to an instance admin (BP-664)", () => {
+describe("a project the grant layer refuses to an admin (BP-664)", () => {
   it("answers exactly as for a project that does not exist, so another organisation's ids are no oracle", async () => {
     getAuthUser.mockResolvedValue(INSTANCE_ADMIN);
     projectFindOne.mockReturnValue({ select: () => Promise.resolve(null) });
@@ -96,7 +96,7 @@ describe("withProjectAccess", () => {
   });
 
   // An unknown key must look the same to a non-admin as one they cannot reach
-  it("answers an unresolvable project with 403 to a member and 404 to an instance admin", async () => {
+  it("answers an unresolvable project with 403 to a member and 404 to an admin", async () => {
     projectFindOne.mockReturnValue({ select: () => Promise.resolve(null) });
     const handler = vi.fn();
 

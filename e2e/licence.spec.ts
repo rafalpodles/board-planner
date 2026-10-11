@@ -71,7 +71,7 @@ test("a key bound to an organisation, even this instance's own, is refused in LI
   await openLicenceSettings(page);
 
   await expect(page.getByTestId("licence-free")).toContainText("Free plan");
-  await expect(page.getByTestId("licence-page")).toContainText("issued for another organisation");
+  await expect(page.getByTestId("licence-page")).toContainText("belongs to a cloud organisation, not to this instance");
   expect(await planSeenByAMember(request)).toBe("free");
 });
 

@@ -19,6 +19,8 @@ interface Invitation {
   role: "admin" | "member";
   boards: { name: string; relation: "owner" | "member" }[];
   invitedBy: string | null;
+  organisation?: string | null;
+  address?: string | null;
 }
 
 type Lookup =
@@ -173,10 +175,13 @@ function AcceptForm() {
 
   return (
     <div className="w-full max-w-sm">
-      <h1 className="text-2xl font-bold text-center mb-2">Join {APP_NAME}</h1>
+      <h1 className="text-2xl font-bold text-center mb-2">
+        {invitation.organisation ? `Join ${invitation.organisation} on ${APP_NAME}` : `Join ${APP_NAME}`}
+      </h1>
       <p className="text-sm text-text-muted text-center mb-6">
         {invitation.invitedBy ?? "An administrator"} invited {invitation.email}
         {invitation.role === "admin" ? " as an administrator" : ""}.
+        {invitation.address && <> You&apos;ll sign in at {invitation.address}.</>}
       </p>
       {invitation.boards.length > 0 && (
         <ul className="mb-6 rounded-lg border border-border divide-y divide-border text-sm">

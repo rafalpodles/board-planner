@@ -47,13 +47,13 @@ describe("GET /api/admin/licence", () => {
   });
 
   it("says no key is configured when LICENCE_KEY is unset", async () => {
-    expect(await (await get()).json()).toEqual({ configured: false });
+    expect(await (await get()).json()).toEqual({ configured: false, managedByPlatform: false });
   });
 
   it("names the verdict and nothing from the payload for a key that does not verify", async () => {
     process.env.LICENCE_KEY = "garbage";
 
-    expect(await (await get()).json()).toEqual({ configured: true, verdict: "malformed" });
+    expect(await (await get()).json()).toEqual({ configured: true, verdict: "malformed", managedByPlatform: false });
   });
 
   describe("with the clock at 2027-10-01 12:00 UTC", () => {
@@ -88,6 +88,7 @@ describe("GET /api/admin/licence", () => {
 
       expect(await (await get()).json()).toEqual({
         configured: true,
+        managedByPlatform: false,
         verdict: "valid",
         customer: "Acme Ltd",
         trial: false,

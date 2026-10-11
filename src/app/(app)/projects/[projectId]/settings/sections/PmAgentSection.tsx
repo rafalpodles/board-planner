@@ -1,5 +1,7 @@
 "use client";
 
+import { useOrganisation } from "@/hooks/use-organisation";
+import { pmNeedsKey } from "@/lib/cloud-copy";
 import { useEffect, useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { isValidTimezone } from "@/lib/time";
@@ -116,6 +118,7 @@ function cachedShare(usage: PmUsageToday): number | null {
 }
 
 export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: SectionProps) {
+  const cloud = useOrganisation().organisation?.cloud === true;
   const api = useApi();
   const { toast } = useToast();
 
@@ -500,11 +503,7 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
   if (!project.pmAvailable) {
     return (
       <SettingsCard title="PM agent">
-        <p className="text-sm text-text-muted">
-          Set the <code>OPENROUTER_API_KEY</code> environment variable on the server to enable the PM
-          agent, or have an instance admin add a key in
-          Settings → AI key.
-        </p>
+        <p className="text-sm text-text-muted">{pmNeedsKey(cloud)}</p>
       </SettingsCard>
     );
   }
@@ -517,7 +516,7 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
         <div className="mb-4 flex gap-3 rounded-xl border border-danger/40 bg-danger/10 px-4 py-3 text-sm">
           <span aria-hidden="true">⛔</span>
           <p>
-            <strong className="font-semibold">An instance admin has locked this agent off.</strong> It
+            <strong className="font-semibold">An admin has locked this agent off.</strong> It
             will not run for this project, and the switch below cannot override it.
           </p>
         </div>
@@ -589,9 +588,9 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
         <div className="mb-4 flex gap-3 rounded-xl border border-primary/40 bg-primary/10 px-4 py-3 text-sm">
           <span aria-hidden="true">ℹ</span>
           <p>
-            <strong className="font-semibold">Model and turn budget are set by the instance admin.</strong>{" "}
+            <strong className="font-semibold">Model and turn budget are set by the admin.</strong>{" "}
             You can still change what the agent knows, when it acts, and connect or test the MCP
-            servers the instance admin has configured.
+            servers the admin has configured.
           </p>
         </div>
       )}
@@ -746,7 +745,7 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
           description={
             isAdmin
               ? "External MCP servers the agent may read at the start of a turn. Writing is off unless you allow it per server."
-              : "External MCP servers the agent may read at the start of a turn. The instance admin manages which servers exist — you can connect, disconnect and test what's already set up."
+              : "External MCP servers the agent may read at the start of a turn. The admin manages which servers exist — you can connect, disconnect and test what's already set up."
           }
         >
           {isAdmin && budgetWarning && (

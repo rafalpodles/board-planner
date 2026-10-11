@@ -49,7 +49,7 @@ describe("the settings nav", () => {
     expect(current().length).toBeGreaterThan(0);
   });
 
-  it("keeps Workers marked for an instance admin, whose way in is the fleet console", () => {
+  it("keeps Workers marked for an admin, whose way in is the fleet console", () => {
     shown("/settings/workers/6a7309535eb49af333b85a04/projects", true);
 
     expect(current().length).toBeGreaterThan(0);

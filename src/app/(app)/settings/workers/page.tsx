@@ -382,7 +382,7 @@ export default function AdminWorkersPage() {
         <div>
           <h2 className="text-lg font-semibold mb-1">Worker fleet</h2>
           <p className="text-sm text-text-muted">
-            Every worker registered on this instance. Only an instance admin can change what is on this page.
+            Every worker in this organisation. Only an admin can change what is on this page.
           </p>
           {/* This page can only say what a machine is doing right now: every exit clears the run
               identity it reads. What a finished run said is next door. */}

@@ -133,7 +133,7 @@ test.describe("BP-894: one organisation's limits do not touch another's", () => 
     const page = await member.newPage();
     await page.goto(`${originOf(ACME)}/projects/${SHARED_KEY}`);
     await expect(page.getByRole("status").filter({ hasText: "Your organisation has made more requests this minute than it may." })).toContainText(
-      /Pages will load again after \d/
+      /Try again after \d/
     );
     await expect(page.getByRole("alert").filter({ hasText: "Failed to load this board." })).toBeVisible();
     await page.screenshot({ path: "e2e/.artifacts/bp894-limit-desktop.png" });

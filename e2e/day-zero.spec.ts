@@ -34,7 +34,7 @@ test.describe("an instance nobody has claimed", () => {
     // The server's own answer, asserted before the page is read: if this were false the toggle's
     // absence below would be correct rather than a bug
     const instance = await request.get("/api/auth/instance");
-    expect(await instance.json()).toEqual({ unclaimed: true, passwordSignIn: true, platformSignIn: null });
+    expect(await instance.json()).toEqual({ unclaimed: true, passwordSignIn: true, platformSignIn: null, cloud: false, organisation: null });
 
     await page.goto("/login");
     await expect(page.getByRole("button", { name: TOGGLE })).toBeVisible();
@@ -59,7 +59,7 @@ test.describe("an instance nobody has claimed", () => {
     const me = await page.request.get("/api/auth/me");
     expect(await me.json()).toMatchObject({ username: "firstadmin", role: "admin" });
 
-    expect(await (await request.get("/api/auth/instance")).json()).toEqual({ unclaimed: false, passwordSignIn: true, platformSignIn: null });
+    expect(await (await request.get("/api/auth/instance")).json()).toEqual({ unclaimed: false, passwordSignIn: true, platformSignIn: null, cloud: false, organisation: null });
   });
 
   test("names the organisation when the first account does, and Settings shows it", async ({ page }) => {
@@ -95,7 +95,7 @@ test.describe("an instance nobody has claimed", () => {
     await page.getByRole("button", { name: "Sign In" }).click();
     await expect(page).not.toHaveURL(/\/login/);
 
-    expect(await (await page.request.get("/api/entitlements")).json()).toMatchObject({ organisation: "default" });
+    expect(await (await page.request.get("/api/entitlements")).json()).toMatchObject({ organisation: null });
     // BP-920: a self-hosted instance nobody named has no organisation worth naming in the sidebar
     await page.goto("/settings/organisation");
     await expect(page.getByLabel("Name", { exact: true })).toHaveValue("default");
@@ -147,7 +147,7 @@ test.describe("an instance nobody has claimed", () => {
 
     await expect(page.getByText("The setup code is missing or wrong")).toBeVisible();
     await expect(page).toHaveURL(/\/login/);
-    expect(await (await request.get("/api/auth/instance")).json()).toEqual({ unclaimed: true, passwordSignIn: true, platformSignIn: null });
+    expect(await (await request.get("/api/auth/instance")).json()).toEqual({ unclaimed: true, passwordSignIn: true, platformSignIn: null, cloud: false, organisation: null });
   });
 
   test("stops offering it once the instance has been claimed", async ({ page, request }) => {

@@ -1,6 +1,9 @@
 // @vitest-environment happy-dom
 import { StrictMode } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+const hosted = vi.hoisted(() => ({ cloud: false }));
+vi.mock("@/hooks/use-organisation", () => ({ useOrganisation: () => ({ organisation: { cloud: hosted.cloud } }) }));
 import { render, screen, cleanup, fireEvent, waitFor, act } from "@testing-library/react";
 import { SignUpDomains } from "./SignUpDomains";
 
@@ -79,6 +82,19 @@ describe("sign-up by domain", () => {
     expect(await screen.findByText(/Needs single sign-on or Google sign-in/)).toBeTruthy();
     expect((screen.getByLabelText("Domains") as HTMLInputElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Save domains" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("points an organisation at its own single sign-on, not at a server's configuration, in the cloud", async () => {
+    hosted.cloud = true;
+    try {
+      api.get.mockResolvedValue({ ...ANSWER, domains: [], providers: [] });
+      render(<SignUpDomains />);
+
+      expect(await screen.findByText("Needs single sign-on set up for this organisation, under Settings → Single sign-on.")).toBeTruthy();
+      expect(screen.queryByText(/configured on this instance/)).toBeNull();
+    } finally {
+      hosted.cloud = false;
+    }
   });
 
   it("names the admin group when one decides administrators", async () => {

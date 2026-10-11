@@ -56,11 +56,11 @@ describe("Settings → Machines", () => {
     [{ checkouts: 0 }, "Running, no checkouts yet"],
     [{ state: "failing" }, "Sandbox check failing — the menubar app or the worker's log says what to fix"],
     [{ state: "stale" }, "Not reporting"],
-    [{ state: "disabled" }, "Switched off by an instance admin"],
+    [{ state: "disabled" }, "Switched off by an admin"],
     [{ state: "paused", haltedBy: "machine" }, "Paused on the machine"],
-    [{ state: "paused", haltedBy: "board" }, "Paused by an instance admin"],
+    [{ state: "paused", haltedBy: "board" }, "Paused by an admin"],
     [{ state: "stopped", haltedBy: "machine" }, "Stopped on the machine"],
-    [{ state: "stopped", haltedBy: "board" }, "Stopped by an instance admin"],
+    [{ state: "stopped", haltedBy: "board" }, "Stopped by an admin"],
   ])("says %o as %s", async (over, text) => {
     api.get.mockResolvedValue([machine(over)]);
 

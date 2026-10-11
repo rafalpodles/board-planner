@@ -1,13 +1,14 @@
 "use client";
 
+import { useOrganisation } from "@/hooks/use-organisation";
+import { invitationNoMail } from "@/lib/cloud-copy";
 import { useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import { InvitationLinkReason } from "@/types";
 
-const HEADLINE: Record<InvitationLinkReason, (email: string) => string> = {
-  no_mail_server: (email) =>
-    `No email was sent — this instance has no mail server. Send this link to ${email} yourself.`,
+const HEADLINE: Record<InvitationLinkReason, (email: string, cloud: boolean) => string> = {
+  no_mail_server: (email, cloud) => invitationNoMail(cloud, email),
   mail_failed: (email) => `The email to ${email} could not be sent. Send this link yourself.`,
   requested: (email) => `No email was sent. Send this link to ${email} yourself.`,
 };
@@ -22,6 +23,7 @@ export function InvitationLink({
   reason: InvitationLinkReason;
 }) {
   const { toast } = useToast();
+  const cloud = useOrganisation().organisation?.cloud === true;
   const [copied, setCopied] = useState(false);
 
   async function copy() {
@@ -37,7 +39,7 @@ export function InvitationLink({
   return (
     <div className="bg-warning/10 border border-warning/30 rounded-lg p-4 space-y-2">
       <p className="text-sm font-medium text-warning">
-        {HEADLINE[reason](email)}
+        {HEADLINE[reason](email, cloud)}
       </p>
       <div className="flex gap-2">
         <code

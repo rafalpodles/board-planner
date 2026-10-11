@@ -1,5 +1,8 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const hosted = vi.hoisted(() => ({ cloud: false }));
+vi.mock("@/hooks/use-organisation", () => ({ useOrganisation: () => ({ organisation: { cloud: hosted.cloud } }) }));
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { PmChat } from "./PmChat";
 
@@ -280,10 +283,30 @@ describe("a turn the server refuses because of the key", () => {
     expect(await screen.findByRole("button", { name: "Retry" })).toBeTruthy();
   });
 
-  it("keeps the old words for an instance with no key at all", async () => {
+  it("says what the server says for an instance with no key at all", async () => {
     await sendRefused(503, { error: "PM agent is not configured (OPENROUTER_API_KEY missing)", reason: "not_configured" });
 
-    expect(await screen.findByText(/PM is not configured on the server \(OPENROUTER_API_KEY missing\)/)).toBeTruthy();
+    expect(await screen.findByText(/PM agent is not configured \(OPENROUTER_API_KEY missing\)/)).toBeTruthy();
+  });
+
+  // BP-922. Every 503 used to be read as a missing key, an outage included
+  it("says what the server says for a 503 that is an outage, and does not blame a key", async () => {
+    await sendRefused(503, { error: "Database unavailable" });
+
+    expect(await screen.findByText("Database unavailable")).toBeTruthy();
+    expect(screen.queryByText(/OPENROUTER_API_KEY/)).toBeNull();
+  });
+
+  it("falls back to wording an organisation's admin can act on when a 503 says nothing", async () => {
+    hosted.cloud = true;
+    try {
+      await sendRefused(503, {});
+
+      expect(await screen.findByText(/The PM agent is unavailable right now/)).toBeTruthy();
+      expect(screen.queryByText(/OPENROUTER_API_KEY/)).toBeNull();
+    } finally {
+      hosted.cloud = false;
+    }
   });
 });
 

@@ -132,7 +132,7 @@ describe("answering a refused change", () => {
     expect(recordVerdict).not.toHaveBeenCalled();
   });
 
-  it("refuses somebody who is neither the machine's owner nor an instance admin", async () => {
+  it("refuses somebody who is neither the machine's owner nor an admin", async () => {
     mayDecide.mockResolvedValue(false);
     const { req, ctx } = call({ verdict: "accept" });
 

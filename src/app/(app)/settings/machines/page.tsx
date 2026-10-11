@@ -33,15 +33,15 @@ function describeState(machine: ApiMyMachine): { text: string; tone: string } {
     case "held":
       return { text: "Waiting: the Free plan runs one machine", tone: "text-warning" };
     case "disabled":
-      return { text: "Switched off by an instance admin", tone: "text-danger" };
+      return { text: "Switched off by an admin", tone: "text-danger" };
     case "paused":
       return {
-        text: byMachine ? "Paused on the machine" : "Paused by an instance admin",
+        text: byMachine ? "Paused on the machine" : "Paused by an admin",
         tone: "text-warning",
       };
     case "stopped":
       return {
-        text: byMachine ? "Stopped on the machine" : "Stopped by an instance admin",
+        text: byMachine ? "Stopped on the machine" : "Stopped by an admin",
         tone: "text-warning",
       };
   }

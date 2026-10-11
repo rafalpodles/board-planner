@@ -1,5 +1,8 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+const hosted = vi.hoisted(() => ({ cloud: false }));
+vi.mock("@/hooks/use-organisation", () => ({ useOrganisation: () => ({ organisation: { cloud: hosted.cloud } }) }));
 import { cleanup, render, screen } from "@testing-library/react";
 import { mailUnavailable, NotificationMatrixEditor } from "./NotificationMatrix";
 import { NOTIFICATION_TYPES, NotificationMatrix } from "@/types";
@@ -39,6 +42,21 @@ describe("the e-mail column", () => {
     expect(column("— E-mail").every((box) => box.getAttribute("aria-describedby") === hint.id)).toBe(true);
     expect(column("— In app").every((box) => !box.disabled)).toBe(true);
     expect(screen.getByText("unavailable")).toBeTruthy();
+  });
+
+  // BP-922. An organisation's admin cannot add a mail server, and is not told to ask one to
+  it("says mail is not available, and asks nobody for a server, in the cloud", () => {
+    hosted.cloud = true;
+    try {
+      render(<NotificationMatrixEditor value={grid} onChange={vi.fn()} emailUnavailable="server" />);
+
+      expect(screen.getByText(/Mail is not available right now/).textContent).toBe(
+        "Mail is not available right now, so e-mail and the daily digest are off."
+      );
+      expect(screen.queryByText(/no mail server/)).toBeNull();
+    } finally {
+      hosted.cloud = false;
+    }
   });
 
   it("points an account with no address at its profile", () => {

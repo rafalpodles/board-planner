@@ -196,7 +196,7 @@ export default function ProfilePage() {
         />
         {passwordSignIn === false && (
           <p id="emailByAdmin" className="-mt-2 text-xs text-text-muted">
-            An administrator changes it on this instance.
+            An administrator changes it.
           </p>
         )}
 

@@ -129,7 +129,7 @@ describe("GET members", () => {
     });
   });
 
-  it("marks instance admins, who hold no grants", async () => {
+  it("marks admins, who hold no grants", async () => {
     userFindLean.mockResolvedValue([{ _id: "a1", username: "root", fullName: "Root", role: "admin" }]);
     const body = await (await GET(new Request("http://x"), { params })).json();
     expect(body[0]).toMatchObject({ relation: null, instanceAdmin: true });

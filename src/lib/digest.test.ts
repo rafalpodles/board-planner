@@ -827,7 +827,7 @@ describe("a digest for somebody who lost the board", () => {
     expect(sendEmail).not.toHaveBeenCalled();
   });
 
-  it("leaves an instance admin's digest unconstrained, since they reach every board", async () => {
+  it("leaves an admin's digest unconstrained, since they reach every board", async () => {
     userFind.mockReturnValue({
       lean: async () => [{ ...WAITING[0], role: "admin" }],
     });
