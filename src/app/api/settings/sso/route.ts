@@ -50,7 +50,7 @@ export const PUT = withAdmin(async (request, { user, db }) => {
   if (!read.ok) return read.response;
   const parsed = parseSsoInput(read.value);
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
-  const { issuer, clientId, label } = parsed.value;
+  const { issuer, clientId, label, adminGroup, groupsClaim } = parsed.value;
   if (!isEncryptionConfigured()) {
     return NextResponse.json({ error: "ENCRYPTION_KEY is not configured on the server, so a secret cannot be stored" }, { status: 503 });
   }
@@ -86,14 +86,17 @@ export const PUT = withAdmin(async (request, { user, db }) => {
       "sso.clientSecret": encryptSecret(secret, db.organisation),
       "sso.clientSecretHint": secret.slice(-4),
       "sso.label": label,
+      ...(adminGroup ? { "sso.adminGroup": adminGroup } : {}),
+      ...(groupsClaim ? { "sso.groupsClaim": groupsClaim } : {}),
     },
+    ...(!adminGroup || !groupsClaim ? { $unset: { ...(adminGroup ? {} : { "sso.adminGroup": 1 }), ...(groupsClaim ? {} : { "sso.groupsClaim": 1 }) } } : {}),
   });
   // What changed, never the secret: the log is read by every admin
   void logInstanceAudit(db, {
     action: "instance_settings_changed",
     user: user._id,
     actorUsername: user.username,
-    detail: `single sign-on: set (${issuer}, client ${clientId})`,
+    detail: `single sign-on: set (${issuer}, client ${clientId}${adminGroup ? `, admin group ${adminGroup}` : ""})`,
   });
   return NextResponse.json(await ssoView(db));
 });

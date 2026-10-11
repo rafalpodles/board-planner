@@ -2,6 +2,8 @@ import { logInstanceAudit } from "@/lib/instanceAudit";
 import { IUser } from "@/types";
 import type { ScopedDb } from "@/lib/db-scope";
 import { warnIfAdminsLockedOut } from "@/lib/password-sign-in";
+import { organisationDomain } from "@/lib/organisation-host";
+import { providerFor, type OidcProvider } from "@/lib/oidc/providers";
 
 const ACTIVE_ADMINS = { role: "admin", deactivatedAt: null } as const;
 
@@ -11,11 +13,11 @@ export function adminGroup(): string | null {
 
 let warnedMissingClaim = false;
 
-/** The groups the generic OIDC provider's ID token names; none when the claim is missing. */
-export function groupsIn(claims: Record<string, unknown>): string[] {
-  const claim = process.env.OIDC_GROUPS_CLAIM?.trim() || "groups";
+/** The groups the generic OIDC provider's ID token names; none when the claim is missing. An organisation's own provider says which claim. */
+export function groupsIn(claims: Record<string, unknown>, provider?: Pick<OidcProvider, "own" | "groupsClaim">): string[] {
+  const claim = (provider?.own ? provider.groupsClaim : process.env.OIDC_GROUPS_CLAIM?.trim()) || "groups";
   const value = claims[claim];
-  if (value === undefined && adminGroup() && !warnedMissingClaim) {
+  if (value === undefined && !provider?.own && adminGroup() && !warnedMissingClaim) {
     warnedMissingClaim = true;
     console.warn(`OIDC_ADMIN_GROUP is set but the ID token has no "${claim}" claim; its administrators are demoted`);
   }
@@ -24,12 +26,14 @@ export function groupsIn(claims: Record<string, unknown>): string[] {
 }
 
 /**
- * At each sign-in through the generic OIDC provider, `OIDC_ADMIN_GROUP` decides whether the account
- * is an admin — never leaving no active admin. Nothing re-reads the group between sign-ins.
+ * At each sign-in through the generic OIDC provider, `OIDC_ADMIN_GROUP` (in the cloud, the organisation's own admin
+ * group) decides whether the account is an admin — never leaving no active admin. Nothing re-reads the group
+ * between sign-ins.
  */
 export async function applyAdminGroup(db: ScopedDb, user: IUser, providerId: string, groups: string[]): Promise<void> {
-  const group = adminGroup();
-  if (!group || providerId !== "oidc" || user.kind === "machine" || user.deactivatedAt) return;
+  if (providerId !== "oidc" || user.kind === "machine" || user.deactivatedAt) return;
+  const group = organisationDomain() === null ? adminGroup() : ((await providerFor(db, "oidc"))?.adminGroup ?? null);
+  if (!group) return;
   const member = groups.includes(group);
 
   if (member && user.role !== "admin") {

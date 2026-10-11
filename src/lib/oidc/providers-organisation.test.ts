@@ -91,6 +91,21 @@ describe("the sign-in providers of a cloud organisation (BP-951)", () => {
   });
 });
 
+describe("an organisation's admin group (BP-951)", () => {
+  it("is carried by its own provider, with the claim that names groups", async () => {
+    const [own] = await providersFor(dbOf(acme, stored(acme, { adminGroup: "acme-admins", groupsClaim: "roles" })));
+
+    expect(own).toMatchObject({ own: true, adminGroup: "acme-admins", groupsClaim: "roles" });
+  });
+
+  it("is absent when none was set", async () => {
+    const [own] = await providersFor(dbOf(acme, stored(acme)));
+
+    expect(own.adminGroup).toBeUndefined();
+    expect(own.groupsClaim).toBeUndefined();
+  });
+});
+
 describe("an organisation that requires its single sign-on (BP-951)", () => {
   beforeEach(() => Object.assign(process.env, { GOOGLE_CLIENT_ID: "g", GOOGLE_CLIENT_SECRET: "gs" }));
 

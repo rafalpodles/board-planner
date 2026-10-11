@@ -238,7 +238,7 @@ export const SSO_CLIENT = { clientId: "board-planner-e2e", clientSecret: "e2e-oi
 export const SSO_LABEL = "Acme login";
 
 /** A provider an administrator stored on Settings → Single sign-on: the secret sealed under the organisation's key, as the page seals it */
-export async function storeSso(who: OrganisationFixture, label = SSO_LABEL, enforced = false): Promise<void> {
+export async function storeSso(who: OrganisationFixture, label = SSO_LABEL, enforced = false, groups: { adminGroup?: string; groupsClaim?: string } = {}): Promise<void> {
   process.env.ENCRYPTION_KEY = E2E_ENCRYPTION_KEY;
   const handle = await db();
   await handle.collection("settings").updateOne(
@@ -246,7 +246,7 @@ export async function storeSso(who: OrganisationFixture, label = SSO_LABEL, enfo
     {
       $set: {
         organisation: who.organisation,
-        sso: { issuer: OIDC_STUB_URL, clientId: SSO_CLIENT.clientId, clientSecret: encryptSecret(SSO_CLIENT.clientSecret, who.organisation), clientSecretHint: SSO_CLIENT.clientSecret.slice(-4), label, enforced },
+        sso: { issuer: OIDC_STUB_URL, clientId: SSO_CLIENT.clientId, clientSecret: encryptSecret(SSO_CLIENT.clientSecret, who.organisation), clientSecretHint: SSO_CLIENT.clientSecret.slice(-4), label, enforced, ...groups },
       },
       $setOnInsert: { signUpDomains: [] },
     },

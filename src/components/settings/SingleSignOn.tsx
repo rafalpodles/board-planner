@@ -24,6 +24,8 @@ interface SsoAnswer {
   unreadable?: boolean;
   active?: boolean;
   enforced?: boolean;
+  adminGroup?: string;
+  groupsClaim?: string;
   redirectUri?: string | null;
 }
 
@@ -93,6 +95,8 @@ function Form({ state, onSaved }: { state: SsoAnswer; onSaved: (answer: SsoAnswe
   const [issuer, setIssuer] = useState(state.issuer ?? "");
   const [clientId, setClientId] = useState(state.clientId ?? "");
   const [clientSecret, setClientSecret] = useState("");
+  const [adminGroup, setAdminGroup] = useState(state.adminGroup ?? "");
+  const [groupsClaim, setGroupsClaim] = useState(state.groupsClaim ?? "");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -118,7 +122,7 @@ function Form({ state, onSaved }: { state: SsoAnswer; onSaved: (answer: SsoAnswe
 
   const save = (e: FormEvent) => {
     e.preventDefault();
-    return send(() => api.put("/api/settings/sso", { issuer: issuer.trim(), clientId: clientId.trim(), clientSecret, label: label.trim() }), "Sign-in provider saved");
+    return send(() => api.put("/api/settings/sso", { issuer: issuer.trim(), clientId: clientId.trim(), clientSecret, label: label.trim(), adminGroup: adminGroup.trim(), groupsClaim: groupsClaim.trim() }), "Sign-in provider saved");
   };
 
   return (
@@ -151,6 +155,13 @@ function Form({ state, onSaved }: { state: SsoAnswer; onSaved: (answer: SsoAnswe
           aria-describedby={error ? errorId : undefined}
         />
         {state.set && !needsSecret && <p className="text-xs text-text-muted">Leave the client secret blank to keep the stored one.</p>}
+        <Input label="Admin group (optional)" value={adminGroup} onChange={(e) => setAdminGroup(e.target.value)} maxLength={200} spellCheck={false} autoComplete="off" placeholder="board-planner-admins" />
+        <Input label="Groups claim (optional)" value={groupsClaim} onChange={(e) => setGroupsClaim(e.target.value)} maxLength={100} spellCheck={false} autoComplete="off" placeholder="groups" />
+        {adminGroup.trim() && (
+          <p className="text-xs text-text-muted" data-testid="sso-admin-group-note">
+            At each sign-in through this provider, people in this group become administrators and everybody else a member. The last administrator is never demoted. It is read at sign-in only, so a person already signed in keeps their role until they sign in again.
+          </p>
+        )}
         {issuerChanged && (
           <p className="text-xs text-text-muted" data-testid="sso-issuer-changed">
             Changing the issuer ends sign-in for everyone who linked the old one; they sign in another way and link it again.
@@ -270,7 +281,7 @@ function Card({ state, onSaved }: { state: SsoAnswer; onSaved: (answer: SsoAnswe
         </div>
       )}
       {available ? (
-        <Form key={`${state.issuer}|${state.clientId}|${state.label}`} state={state} onSaved={onSaved} />
+        <Form key={`${state.issuer}|${state.clientId}|${state.label}|${state.adminGroup}|${state.groupsClaim}`} state={state} onSaved={onSaved} />
       ) : (
         state.set && (
           <dl className="space-y-1 text-sm">

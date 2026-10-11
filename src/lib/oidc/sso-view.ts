@@ -31,6 +31,8 @@ export async function ssoView(db: ScopedDb) {
     clientId: sso?.clientId ?? "",
     label: sso?.label ?? SSO_LABEL_DEFAULT,
     secretHint: sso?.clientSecretHint ?? "",
+    adminGroup: sso?.adminGroup ?? "",
+    groupsClaim: sso?.groupsClaim ?? "",
     unreadable,
     // Offered at sign-in right now: stored, readable, and the plan includes it
     active: !!sso && available && !unreadable,
