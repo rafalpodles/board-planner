@@ -167,6 +167,17 @@ describe("PUT /api/settings/sso (BP-951)", () => {
     expect(sealed()).not.toBe(before);
   });
 
+  it("saving the form does not end a requirement of single sign-on", async () => {
+    await call("PUT", FORM);
+    (row!.sso as Record<string, unknown>).enforced = true;
+
+    const res = await call("PUT", { ...FORM, clientSecret: "", label: "Acme SSO" });
+
+    expect(res.status).toBe(200);
+    expect(row?.sso).toMatchObject({ label: "Acme SSO", enforced: true });
+    expect(await res.json()).toMatchObject({ enforced: true });
+  });
+
   it("asks for the secret again when the issuer or the client changes, so the old one is never sent to a new address", async () => {
     await call("PUT", FORM);
     discoverProvider.mockClear();
