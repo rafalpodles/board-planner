@@ -9,7 +9,7 @@ import { discoverProvider, returnAddress } from "@/lib/oidc/flow";
 import { parseSsoInput, SSO_LABEL_DEFAULT } from "@/lib/oidc/organisation-sso";
 import { getOrganisation } from "@/lib/organisation";
 import { organisationDomain, originFor } from "@/lib/organisation-host";
-import { isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
+import { countInLiveWindow, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
 import { readJsonBody } from "@/lib/request-body";
 import { BlockedDestinationError } from "@/lib/safe-fetch";
 import { duplicateKeyField } from "@/lib/mongo-errors";
@@ -85,10 +85,11 @@ export const PUT = withAdmin(async (request, { user, db }) => {
   if (refusal) return refusal;
 
   const throttleKey = sourceKey(String(db.organisation), "sso-save");
-  if (await isRateLimited(throttleKey, SAVES_PER_WINDOW)) {
+  // Counted first and compared after, so a burst of parallel saves each finds its own place in the count
+  await recordFailedAttempt(throttleKey);
+  if ((await countInLiveWindow(throttleKey)) > SAVES_PER_WINDOW) {
     return NextResponse.json({ error: "Too many saves. Try again in 15 minutes." }, { status: 429 });
   }
-  await recordFailedAttempt(throttleKey);
 
   const read = await readJsonBody<unknown>(request);
   if (!read.ok) return read.response;

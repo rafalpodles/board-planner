@@ -4,7 +4,7 @@ const getAuthUser = vi.fn();
 const logInstanceAudit = vi.fn();
 const getOrganisation = vi.fn();
 const discoverProvider = vi.fn();
-const isRateLimited = vi.fn();
+const countInLiveWindow = vi.fn();
 const recordFailedAttempt = vi.fn();
 let row: Record<string, unknown> | null = null;
 
@@ -13,7 +13,7 @@ vi.mock("@/lib/auth", () => ({ getAuthUser, RateLimitError: class RateLimitError
 vi.mock("@/lib/grants", () => ({ check: vi.fn(), accessibleProjectIds: vi.fn() }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/lib/organisation", () => ({ getOrganisation }));
-vi.mock("@/lib/rate-limit", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/rate-limit")>()), isRateLimited, recordFailedAttempt }));
+vi.mock("@/lib/rate-limit", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/rate-limit")>()), countInLiveWindow, recordFailedAttempt }));
 vi.mock("@/lib/oidc/flow", () => ({
   discoverProvider,
   returnAddress: (provider: { id: string }, origin: string) => `${origin}/api/auth/oidc/${provider.id}/callback`,
@@ -57,7 +57,7 @@ beforeEach(() => {
   row = null;
   getAuthUser.mockResolvedValue(ADMIN);
   discoverProvider.mockResolvedValue(undefined);
-  isRateLimited.mockResolvedValue(false);
+  countInLiveWindow.mockResolvedValue(1);
   recordFailedAttempt.mockResolvedValue(undefined);
   plan();
   process.env.ENCRYPTION_KEY = "ab".repeat(32);
@@ -175,16 +175,18 @@ describe("PUT /api/settings/sso (BP-951)", () => {
     expect(row?.sso).toMatchObject({ issuer: FORM.issuer, clientId: "acme-app" });
   });
 
-  it("counts every save, and refuses past ten in a quarter of an hour before reading any address", async () => {
-    await call("PUT", FORM);
+  it("counts every save before reading any address, and refuses the eleventh in a quarter of an hour", async () => {
+    countInLiveWindow.mockResolvedValue(10);
+    expect((await call("PUT", FORM)).status).toBe(200);
     expect(recordFailedAttempt).toHaveBeenCalledWith(expect.stringContaining("sso-save"));
 
-    isRateLimited.mockResolvedValue(true);
+    // Counted before it is compared: parallel saves each see their own place in the count
+    countInLiveWindow.mockResolvedValue(11);
     discoverProvider.mockClear();
     const res = await call("PUT", { ...FORM, label: "Again" });
 
     expect(res.status).toBe(429);
-    expect(isRateLimited).toHaveBeenLastCalledWith(expect.stringContaining("sso-save"), 10);
+    expect(recordFailedAttempt.mock.invocationCallOrder.at(-1)!).toBeLessThan(countInLiveWindow.mock.invocationCallOrder.at(-1)!);
     expect(discoverProvider).not.toHaveBeenCalled();
   });
 

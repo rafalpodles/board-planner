@@ -16,6 +16,14 @@ describe("what a provider an organisation named may answer with (BP-951)", () =>
     expect(safeFetch).toHaveBeenCalledWith("https://login.acme.example/.well-known/openid-configuration", {}, { allowLoopback: expect.any(Boolean) });
   });
 
+  it("hands on a status that has no body, which a Response cannot be given one for", async () => {
+    safeFetch.mockResolvedValue(new Response(null, { status: 204 }));
+
+    const response = await guardedFetch("https://login.acme.example/jwks", {} as never);
+
+    expect(response.status).toBe(204);
+  });
+
   it("hands on the status, so a refusal is still a refusal", async () => {
     safeFetch.mockResolvedValue(new Response('{"error":"invalid_client"}', { status: 401, headers: { "content-type": "application/json" } }));
 

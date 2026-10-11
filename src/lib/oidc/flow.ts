@@ -53,7 +53,9 @@ export const guardedFetch: client.CustomFetch = async (url, options) => {
   const response = await safeFetch(url, options as RequestInit, { allowLoopback: allowLoopbackIn() });
   // Read bounded and handed on whole: the library reads it with no limit of its own
   const body = await readBoundedText(response, MAX_PROVIDER_RESPONSE_BYTES);
-  return new Response(body, { status: response.status, statusText: response.statusText, headers: { "content-type": response.headers.get("content-type") ?? "application/json" } });
+  // A status that carries no body is refused one by the Response constructor
+  const bodiless = [101, 204, 205, 304].includes(response.status);
+  return new Response(bodiless ? null : body, { status: response.status, statusText: response.statusText, headers: { "content-type": response.headers.get("content-type") ?? "application/json" } });
 };
 
 function discover(provider: OidcProvider): Promise<client.Configuration> {
