@@ -210,6 +210,7 @@ test("on the platform's key the Model card lists only what that key runs, and a 
     `${ASSIST_MODEL} — not available on our key`,
     "Anthropic: Claude Haiku",
     "Anthropic: Claude Haiku 5.5",
+    "E2E: Marking provider",
     "Google: Gemini 2.5 Flash",
     "Mistral: Large",
     "OpenAI: GPT-4o",
