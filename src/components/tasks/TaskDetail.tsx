@@ -309,10 +309,13 @@ function TaskDetailView({
   // assigned before somebody lost access resolved to nothing and the mobile chip printed
   // "Unassigned" over it. Same rule the rail's picker uses, so the two cannot disagree.
   const assignee = assigneeToShow(users, draft.assignee, task.assignee);
+  // A task's creator is required, so a reference that resolves to nobody is a deleted account
   const reporter =
     task.createdBy && typeof task.createdBy === "object"
       ? withAiMark(task.createdBy.fullName, task.createdBy.username)
-      : null;
+      : task.createdBy === null
+        ? "Deleted user"
+        : null;
   const watching = !!currentUser && (task.watchers || []).includes(currentUser._id);
   const projectDefaultAgent = project.worker?.agent ? String(project.worker.agent) : undefined;
 

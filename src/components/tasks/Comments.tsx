@@ -197,7 +197,7 @@ export function Comments({
       grouped[r.emoji].count++;
       const populated = r.user && typeof r.user === "object" ? r.user : null;
       const username = populated ? populated.username : r.user;
-      grouped[r.emoji].users.push(populated ? populated.fullName : "Unknown");
+      grouped[r.emoji].users.push(populated ? populated.fullName : "Deleted user");
       if (user && username === user.username) {
         grouped[r.emoji].hasOwn = true;
       }
@@ -238,7 +238,7 @@ export function Comments({
               <span className="text-sm font-medium">
                 {comment.author && typeof comment.author === "object"
                   ? comment.author.fullName
-                  : "Unknown"}
+                  : "Deleted user"}
               </span>
               {comment.author && typeof comment.author === "object" && comment.author.username === PM_USERNAME && <AiBadge />}
               <span className="text-xs text-text-muted">

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
 import mongoose from "mongoose";
 import { ADMIN_AUTH, MEMBER_AUTH, SAME_ORIGIN } from "./api";
@@ -418,9 +419,9 @@ test.describe("deleting a user", () => {
     await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
     const comment = page.locator("div.group", { hasText: "Said before the account went" });
     await expect(comment).toBeVisible();
-    // Inside the comment rather than anywhere on the page: "Unknown" is the fallback several
-    // surfaces use, and an unscoped match would be satisfied by any of them
-    await expect(comment.getByText("Unknown")).toBeVisible();
+    // Inside the comment rather than anywhere on the page: the fallback is shared by several
+    // surfaces, and an unscoped match would be satisfied by any of them
+    await expect(comment.getByText("Deleted user")).toBeVisible();
 
     await page.goto(`/projects/${PROJECT_KEY}/settings`);
     await expect(page.getByRole("heading", { name: "Who can use this board" })).toBeVisible();
@@ -428,11 +429,12 @@ test.describe("deleting a user", () => {
 
     await page.goto("/settings/audit");
     await expect(auditRow).toBeVisible();
-    // Both halves of the row outlive the account now: `target` was always a stored username, and
-    // since BP-539 so is the actor. Before that this read "system" — the word this screen reserves
-    // for a machine — so deleting somebody rewrote every row they had ever written.
-    await expect(actorCell).toHaveText(MEMBER_USERNAME);
-    await expect(auditRow).toContainText(MEMBER_USERNAME);
+    // The row outlives the account, but not its name: since BP-946 a deletion rewrites the username
+    // the log kept (BP-539) to an opaque label, so the log still says that one account did this
+    // without saying who it was. Before BP-539 this read "system", the word reserved for a machine.
+    const erased = `deleted-${createHash("sha256").update(String(MEMBER_ID)).digest("hex").slice(0, 8)}`;
+    await expect(actorCell).toHaveText(erased);
+    await expect(auditRow).not.toContainText(MEMBER_USERNAME);
 
     // And the deletion itself, which nothing recorded before BP-538: the account is gone, so this
     // row is the only place it is written down that it existed and who removed it. Retried through
@@ -443,6 +445,7 @@ test.describe("deleting a user", () => {
       await expect(deletionRow).toBeVisible({ timeout: 3_000 });
     }).toPass({ timeout: 20_000 });
     await expect(deletionRow.locator("td").nth(1)).toHaveText(ADMIN_USERNAME);
-    await expect(deletionRow).toContainText(MEMBER_USERNAME);
+    // The target's own cell: the detail beside it says "a member", which is a role and not a name
+    await expect(deletionRow.locator("td").nth(3)).toHaveText(erased);
   });
 });

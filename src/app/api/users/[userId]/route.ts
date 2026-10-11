@@ -16,6 +16,7 @@ import { clearAccountAttempts } from "@/lib/rate-limit";
 import { duplicateKeyField } from "@/lib/mongo-errors";
 import { withAdmin } from "@/lib/middleware";
 import { boardsLeftWithoutOwner, boardsOnlyOwnedBy } from "@/lib/grants";
+import { removeAccount } from "@/lib/account-removal";
 import { revokeUserCredentials, revokeUserSessions } from "@/lib/session";
 import { IUser } from "@/types";
 
@@ -369,80 +370,13 @@ export const DELETE = withAdmin(async (_request, { params, user: admin, db }) =>
     );
   }
 
-  // The invariant PUT keeps for demotion, kept here too. Unreachable while the guard above holds —
-  // an admin cannot be looking at the last admin unless they are looking at themselves — which is
-  // exactly why it is here: that guard failed once, and an instance with no administrator cannot be
-  // repaired from the product.
-  if (user.role === "admin" && !user.deactivatedAt) {
-    const adminCount = await db.User.countDocuments(ACTIVE_ADMINS);
-    if (adminCount <= 1) {
-      return NextResponse.json(
-        { error: "Cannot delete the last admin" },
-        { status: 400 }
-      );
-    }
-  }
-
-  const soleOwned = await boardsOnlyOwnedBy(db, String(user._id));
-  if (soleOwned.length > 0) {
-    const names = soleOwned.map((b) => `${b.name} (${b.key})`).join(", ");
+  const removed = await removeAccount(db, user, admin, { subject: "this account" });
+  if (!removed.ok) {
     return NextResponse.json(
-      {
-        error: `${user.username} is the only owner of ${names}. Make someone else an owner there before deleting this account.`,
-        boards: soleOwned,
-      },
-      { status: 409 }
+      { error: removed.error, ...(removed.boards ? { boards: removed.boards } : {}) },
+      { status: removed.status }
     );
   }
-
-  // A delete cannot be undone, so the account first stops counting, as a deactivated one does, and
-  // the two invariants are counted again without it: a demotion, deactivation or removal racing
-  // this one counted this account as still there (BP-841)
-  if (!user.deactivatedAt) {
-    const markedAt = new Date();
-    const marked = await db.User.updateOne({ _id: user._id, deactivatedAt: null }, { $set: { deactivatedAt: markedAt } });
-    if (marked.modifiedCount > 0) {
-      const lastAdminGone = user.role === "admin" && (await db.User.countDocuments(ACTIVE_ADMINS)) === 0;
-      const ownerless = lastAdminGone ? [] : await boardsLeftWithoutOwner(db, String(user._id));
-      if (lastAdminGone || ownerless.length > 0) {
-        // Only this request's own mark: a deactivation landing meanwhile stays
-        await db.User.updateOne({ _id: user._id, deactivatedAt: markedAt }, { $set: { deactivatedAt: null } });
-        return NextResponse.json(
-          {
-            error: lastAdminGone
-              ? "Cannot delete the last admin"
-              : "Another owner of the same board was removed meanwhile",
-          },
-          { status: 409 }
-        );
-      }
-    }
-  }
-
-  // The delete's own answer, not a discarded one: two administrators deleting the same account
-  // otherwise both hear that they did it, and the checks above are read-then-write.
-  const deleted = await db.User.findByIdAndDelete(user._id);
-  if (!deleted) {
-    return NextResponse.json({ error: "User not found" }, { status: 404 });
-  }
-
-  // After the delete and BEFORE the revoke, which is the opposite order to the password path
-  // above — and for the same reason it uses that one. There, nothing is committed until the save,
-  // so a failed revoke must leave the account untouched. Here the account is already gone, and a
-  // revoke that throws would take the only record of it having existed with it.
-  void logInstanceAudit(db, {
-    action: "user_deleted",
-    user: admin._id,
-    actorUsername: admin.username,
-    target: user.username,
-    detail: user.role === "admin" ? "an administrator" : "a member",
-  });
-
-  await db.Grant.deleteMany({ subject: user._id });
-  // A link left behind would refuse the same person's provider as "already linked" for good
-  await db.Identity.deleteMany({ user: user._id });
-  await revokeUserSessions(user._id);
-  if (user.role === "admin") void warnIfAdminsLockedOut(db, "an administrator's deletion");
 
   return NextResponse.json({ message: "User deleted" });
 });

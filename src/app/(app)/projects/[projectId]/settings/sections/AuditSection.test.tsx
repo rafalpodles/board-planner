@@ -54,8 +54,17 @@ describe("AuditSection", () => {
   });
 
   // typeof null === "object", so a deleted user used to take the populated branch and throw
-  it("falls back to system when the user was deleted", async () => {
+  it("says Deleted user when the account that did it was deleted", async () => {
     api.get.mockResolvedValue([{ ...entry, user: null }]);
+    render(<AuditSection projectId="TP" active />);
+    await waitFor(() => expect(screen.getByText("Deleted user")).toBeTruthy());
+    expect(screen.queryByText("system")).toBeNull();
+  });
+
+  // "system" is the word this log reserves for a machine, which has no person behind it
+  it("keeps system for a row nobody is recorded against", async () => {
+    const { user: _user, ...machine } = entry;
+    api.get.mockResolvedValue([machine]);
     render(<AuditSection projectId="TP" active />);
     await waitFor(() => expect(screen.getByText("system")).toBeTruthy());
   });

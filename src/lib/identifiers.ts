@@ -1,3 +1,4 @@
+import { isErasedLabel } from "@/lib/erased-label";
 import { PROJECT_KEY_MAX_LENGTH, PROJECT_KEY_PATTERN } from "@/lib/urls";
 import { PM_USERNAME } from "@/lib/pm/username";
 
@@ -68,9 +69,9 @@ export function suggestProjectKey(name: string, taken: Iterable<string> = []): s
   }
 }
 
-// The identities this instance mints for itself; a person holding one would be taken for it
+// The identities this instance mints for itself, and the label a deleted account is left under; a person holding one would be taken for it
 export function isReservedUsername(username: string): boolean {
-  return username === PM_USERNAME || /^worker-[0-9a-f]{24}$/.test(username);
+  return username === PM_USERNAME || /^worker-[0-9a-f]{24}$/.test(username) || isErasedLabel(username);
 }
 
 export function isValidUsername(username: string): boolean {

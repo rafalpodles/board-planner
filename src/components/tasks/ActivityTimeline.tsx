@@ -1,5 +1,6 @@
 "use client";
 
+import { isErasedLabel } from "@/lib/erased-label";
 import { useEffect, useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { LoadFailed } from "@/components/ui/LoadFailed";
@@ -121,7 +122,13 @@ function actorName(log: ApiActivityLog): string {
   if (!log.user && SYNC_ACTIONS.has(log.action)) return "The repository sync";
   // A deleted user also arrives as null, and null is an object to `typeof` — which is why the
   // check above leads with the value itself. For every other action that is what an absence means.
-  return "Unknown";
+  return "Deleted user";
+}
+
+// What a deleted account was rewritten to in history, which is an identifier and not a name
+function assigneeLabel(value: string): string {
+  if (!value) return "unassigned";
+  return isErasedLabel(value) ? "a deleted user" : value;
 }
 
 function describeAction(log: ApiActivityLog): string {
@@ -134,8 +141,8 @@ function describeAction(log: ApiActivityLog): string {
       return `${userName} changed status from ${formatValue("status", log.oldValue)} to ${formatValue("status", log.newValue)}`;
     case "updated":
       if (log.field === "assignee") {
-        const from = log.oldValue || "unassigned";
-        const to = log.newValue || "unassigned";
+        const from = assigneeLabel(log.oldValue);
+        const to = assigneeLabel(log.newValue);
         return `${userName} changed assignee from ${from} to ${to}`;
       }
       if (log.field === "agent" && !log.customField) {

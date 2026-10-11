@@ -46,7 +46,7 @@ describe("Comments", () => {
   it("renders a comment whose author was deleted", async () => {
     serve([{ ...comment, author: null }]);
     render(<Comments projectId="TP" taskId="t1" />);
-    await waitFor(() => expect(screen.getByText("Unknown")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Deleted user")).toBeTruthy());
     expect(screen.getByText("A remark")).toBeTruthy();
   });
 
@@ -54,8 +54,8 @@ describe("Comments", () => {
     serve([{ ...comment, reactions: [{ emoji: "👍", user: null }] }]);
     render(<Comments projectId="TP" taskId="t1" />);
     await waitFor(() => expect(screen.getByText("A remark")).toBeTruthy());
-    // The pill carries the reactor's name in its title; a deleted user reads as Unknown
-    expect(screen.getByTitle(/Unknown/)).toBeTruthy();
+    // The pill carries the reactor's name in its title; a deleted user reads as Deleted user
+    expect(screen.getByTitle(/Deleted user/)).toBeTruthy();
   });
 });
 

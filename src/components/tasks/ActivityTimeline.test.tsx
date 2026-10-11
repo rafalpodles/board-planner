@@ -33,10 +33,22 @@ describe("ActivityTimeline", () => {
   });
 
   // typeof null === "object", so a deleted user used to take the populated branch and throw
-  it("falls back to Unknown when the user was deleted", async () => {
+  it("says Deleted user when the user was deleted", async () => {
     api.get.mockResolvedValue([{ ...log, user: null }]);
     render(<ActivityTimeline projectId="TP" taskId="t1" />);
-    await waitFor(() => expect(screen.getByText(/Unknown created this task/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Deleted user created this task/)).toBeTruthy());
+  });
+
+  // History stores the assignee as a username, and a deleted account's is rewritten to an identifier
+  it("reads a deleted assignee as a deleted user, not as the identifier it was rewritten to", async () => {
+    api.get.mockResolvedValue([
+      { ...log, action: "updated", field: "assignee", oldValue: "deleted-1a2b3c4d", newValue: "bob" },
+      { ...log, _id: "l2", action: "updated", field: "assignee", oldValue: "", newValue: "deleted-1a2b3c4d" },
+    ]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    await waitFor(() => expect(screen.getByText(/changed assignee from a deleted user to bob/)).toBeTruthy());
+    expect(screen.getByText(/changed assignee from unassigned to a deleted user/)).toBeTruthy();
+    expect(screen.queryByText(/deleted-1a2b3c4d/)).toBeNull();
   });
 
   // "updated Difficulty" is not history — a reader wants to know what it became
@@ -415,10 +427,10 @@ describe("ActivityTimeline — what a sync did to the links", () => {
   });
 
   // The control for the line above: the same absence on any other action is still a lost author
-  it("still calls a missing author Unknown everywhere else", async () => {
+  it("still calls a missing author Deleted user everywhere else", async () => {
     api.get.mockResolvedValue([{ ...log, user: null, action: "comment_added" }]);
     render(<ActivityTimeline projectId="TP" taskId="t1" />);
-    await waitFor(() => expect(screen.getByText("Unknown added a comment")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Deleted user added a comment")).toBeTruthy());
   });
 
   // `formatValue` cuts the tail, which on a pull request url is the repository and the number

@@ -141,7 +141,8 @@ describe("TaskDetail", () => {
     await loaded();
 
     expect(screen.getByLabelText("Task title")).toBeTruthy();
-    expect(screen.queryByText(/Reported by/)).toBeNull();
+    // Said, not left out: a task with no reporter reads as if nobody made it
+    expect(screen.getAllByText(/Deleted user/).length).toBeGreaterThan(0);
   });
 
   it("puts the title in an editable field rather than a heading", async () => {

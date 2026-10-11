@@ -356,5 +356,5 @@ test("a row the scheduled sync wrote names the sync, not Unknown", async ({ page
     createdAt: new Date(),
   });
   const again = await openHistory(page, SIBLING_TASK_NUMBER);
-  await expect(again.getByText("Unknown added a comment")).toBeVisible();
+  await expect(again.getByText("Deleted user added a comment")).toBeVisible();
 });

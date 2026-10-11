@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/Input";
 import { useToast } from "@/components/ui/Toast";
 import Link from "next/link";
 import { usePasswordSignIn } from "@/hooks/use-password-sign-in";
+import { YourData } from "./YourData";
 
 export default function ProfilePage() {
   const api = useApi();
@@ -287,6 +288,8 @@ export default function ProfilePage() {
           {saving ? "Saving..." : "Save"}
         </Button>
       </div>
+
+      <YourData asksPassword={passwordSignIn !== false && hasPassword !== false} />
     </div>
   );
 }

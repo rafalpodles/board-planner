@@ -78,7 +78,7 @@ export function AuditSection({ projectId, active }: { projectId: string; active:
                     {new Date(log.createdAt).toLocaleString()}
                   </td>
                   <td className="align-top font-medium sm:table-cell sm:whitespace-nowrap sm:py-1.5 sm:pr-3">
-                    {log.user && typeof log.user === "object" ? log.user.username : "system"}
+                    {log.user && typeof log.user === "object" ? log.user.username : log.user === null ? "Deleted user" : "system"}
                   </td>
                   <td className="align-top text-text-muted sm:table-cell sm:whitespace-nowrap sm:py-1.5 sm:pr-3">
                     {log.action.replace(/_/g, " ")}

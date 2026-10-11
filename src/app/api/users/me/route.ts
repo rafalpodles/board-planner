@@ -10,6 +10,10 @@ import { isEmailConfigured } from "@/lib/email";
 import { originFor } from "@/lib/organisation-host";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { withAuth } from "@/lib/middleware";
+import { removeAccount } from "@/lib/account-removal";
+import { confirmOwnAccount } from "@/lib/confirm-own-account";
+import { platformSignInOrigin } from "@/lib/organisation-host";
+import { clearSessionCookies } from "@/lib/session";
 import { FULL_NAME_RULE, isValidFullName, normaliseFullName } from "@/lib/identifiers";
 import { duplicateKeyField } from "@/lib/mongo-errors";
 import { invalidateResetTokens } from "@/lib/password-reset";
@@ -290,3 +294,44 @@ function withPending(user: unknown, pendingEmail?: string) {
   return { ...(typeof doc.toJSON === "function" ? doc.toJSON() : doc), pendingEmail };
 }
 
+
+export const DELETE = withAuth(async (request, { user, db }) => {
+  await connectDB();
+
+  // The one thing on this route that cannot be undone, and the only one a stolen token could be
+  // made to do to its owner
+  if (user.viaMachineCredential) {
+    return NextResponse.json({ error: "This action requires an interactive session" }, { status: 403 });
+  }
+  if (user.kind === "machine") {
+    return NextResponse.json(
+      { error: "A machine account is released under Settings → Workers, not deleted here" },
+      { status: 400 }
+    );
+  }
+
+  let body: { currentPassword?: unknown };
+  try {
+    body = await request.json();
+  } catch {
+    body = {};
+  }
+
+  const refused = await confirmOwnAccount(db, request, user, "account-delete", body?.currentPassword);
+  if (refused) return refused;
+
+  const record = await db.User.findById(user._id);
+  if (!record) return NextResponse.json({ error: "User not found" }, { status: 404 });
+
+  const removed = await removeAccount(db, record, user, { subject: "their own account" });
+  if (!removed.ok) {
+    return NextResponse.json(
+      { error: removed.error, ...(removed.boards ? { boards: removed.boards } : {}) },
+      { status: removed.status }
+    );
+  }
+
+  const response = NextResponse.json({ ok: true, signIn: platformSignInOrigin() });
+  for (const cookie of clearSessionCookies()) response.headers.append("Set-Cookie", cookie);
+  return response;
+});
