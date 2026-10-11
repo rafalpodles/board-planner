@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { readJsonBody, readFormBody, MAX_JSON_BODY_BYTES, MAX_DRAINED_BYTES } from "./request-body";
+import {
+  readJsonBody,
+  readFormBody,
+  readAuthenticatedJsonBody,
+  MAX_JSON_BODY_BYTES,
+  MAX_AUTHENTICATED_JSON_BODY_BYTES,
+  MAX_DRAINED_BYTES,
+} from "./request-body";
 
 /**
  * BP-322. The point of the cap is what does NOT happen: an oversized body must be refused without
@@ -132,6 +139,36 @@ describe("readJsonBody", () => {
 
   it("honours a caller-supplied cap below the default", async () => {
     const result = await readJsonBody(request(JSON.stringify({ a: "x".repeat(200) })), 64);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.response.status).toBe(413);
+  });
+});
+
+describe("readAuthenticatedJsonBody", () => {
+  it("accepts a body the anonymous cap would refuse, so a long description still saves — the control", async () => {
+    const description = "d".repeat(MAX_JSON_BODY_BYTES * 2);
+
+    const result = await readAuthenticatedJsonBody(request(JSON.stringify({ description })));
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.description).toHaveLength(description.length);
+  });
+
+  it("answers 400 and an error body for something that is not JSON", async () => {
+    const result = await readAuthenticatedJsonBody(request("not json", { "content-type": "text/plain" }));
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.response.status).toBe(400);
+      expect(await result.response.json()).toEqual({ error: "Invalid JSON body" });
+    }
+  });
+
+  it("still refuses a body over its own cap", async () => {
+    const result = await readAuthenticatedJsonBody(
+      request(JSON.stringify({ a: "x" }), { "content-length": String(MAX_AUTHENTICATED_JSON_BODY_BYTES + 1) })
+    );
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.response.status).toBe(413);

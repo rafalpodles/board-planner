@@ -1,3 +1,4 @@
+import { readAuthenticatedJsonBody } from "@/lib/request-body";
 import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
@@ -11,7 +12,9 @@ interface ParsedBody {
 }
 
 async function parse(request: Request): Promise<ParsedBody | NextResponse> {
-  const body = await request.json();
+  const read = await readAuthenticatedJsonBody(request);
+  if (!read.ok) return read.response;
+  const body = read.value;
   // blockedByTaskId is the pre-CP-143 field name, still accepted
   const targetTaskId: unknown = body.taskId || body.blockedByTaskId;
   const type: DependencyType = body.type || "blocked_by";

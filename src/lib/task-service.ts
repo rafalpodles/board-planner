@@ -915,19 +915,18 @@ function capitalise(value: string): string {
 
 async function announceStatusChange(db: ScopedDb, a: StatusChangeAnnouncement): Promise<void> {
   const status = String(a.task.status);
-  const eventPayload = {
-    project: { key: "", name: "" },
-    task: { taskKey: `${a.oldTask.taskNumber}`, title: a.task.title, status },
-    data: { oldStatus: a.oldTask.status, newStatus: status },
-  };
-  dispatchWebhooks(db, a.projectId, "status_changed", eventPayload);
-  dispatchNotifications(db, a.projectId, "status_changed", eventPayload);
-
   const [project, actor] = await Promise.all([
     db.Project.findById(a.projectId, "key name").lean(),
     usernameOf(db, a.actorId),
   ]);
   const taskKey = taskKeyOf(project?.key, a.task.taskNumber);
+  const eventPayload = {
+    project: { key: project?.key ?? "", name: project?.name ?? "" },
+    task: { taskKey, title: a.task.title, status },
+    data: { oldStatus: a.oldTask.status, newStatus: status },
+  };
+  dispatchWebhooks(db, a.projectId, "status_changed", eventPayload);
+  dispatchNotifications(db, a.projectId, "status_changed", eventPayload);
   // The column's own label, not its id: since CP-128 a project names its columns, and
   // "BP-142 → in_review" is the seeded id showing through on a board that may call it anything.
   const columns = getProjectColumns(a.project);
@@ -1473,23 +1472,18 @@ export async function addComment(
     db.Task.findByIdAndUpdate(taskId, { $addToSet: { watchers: actor.id } }),
   ]);
 
-  const eventPayload = {
-    project: { key: "", name: "" },
-    task: {
-      taskKey: `${task.taskNumber}`,
-      title: task.title,
-      status: task.status,
-    },
-    data: { commentBody: bodyText.trim().substring(0, 200), author: actor.username },
-  };
-  dispatchWebhooks(db, projectId, "comment_added", eventPayload);
-  dispatchNotifications(db, projectId, "comment_added", eventPayload);
-
   const [project, mentionedIds] = await Promise.all([
     db.Project.findById(projectId, "key name columns").lean(),
     resolveMentions(db, bodyText),
   ]);
   const taskKey = taskKeyOf(project?.key, task.taskNumber);
+  const eventPayload = {
+    project: { key: project?.key ?? "", name: project?.name ?? "" },
+    task: { taskKey, title: task.title, status: task.status },
+    data: { commentBody: bodyText.trim().substring(0, 200), author: actor.username },
+  };
+  dispatchWebhooks(db, projectId, "comment_added", eventPayload);
+  dispatchNotifications(db, projectId, "comment_added", eventPayload);
   const column = getProjectColumns(project).find((c) => c.id === String(task.status));
   const excerpt = bodyText.trim().substring(0, 120);
   const sharedEmail = {

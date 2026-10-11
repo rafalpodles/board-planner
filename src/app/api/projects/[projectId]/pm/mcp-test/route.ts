@@ -1,3 +1,4 @@
+import { readAuthenticatedJsonBody } from "@/lib/request-body";
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectOwner } from "@/lib/middleware";
@@ -9,7 +10,9 @@ import { isReadSafe } from "@/lib/pm/read-safe";
 export const POST = withProjectOwner(async (request, { params, db }) => {
   await connectDB();
   const { projectId } = await params;
-  const body = await request.json();
+  const read = await readAuthenticatedJsonBody(request);
+  if (!read.ok) return read.response;
+  const body = read.value;
 
   let url = String(body.url ?? "").trim();
   let token: string | undefined;

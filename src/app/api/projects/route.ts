@@ -1,3 +1,4 @@
+import { readAuthenticatedJsonBody } from "@/lib/request-body";
 import { NextResponse } from "next/server";
 import { duplicateKeyField } from "@/lib/mongo-errors";
 import { isValidProjectKey, PROJECT_KEY_RULE } from "@/lib/identifiers";
@@ -58,7 +59,9 @@ export const GET = withAuth(async (_request, { user, db }) => {
 
 export const POST = withAdmin(async (request, { user, db }) => {
   await connectDB();
-  const body = await request.json();
+  const read = await readAuthenticatedJsonBody(request);
+  if (!read.ok) return read.response;
+  const body = read.value;
   const { name, key, description } = body;
 
   if (!name || !key) {

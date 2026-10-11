@@ -1,3 +1,4 @@
+import { readAuthenticatedJsonBody } from "@/lib/request-body";
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withAuth, withAdmin } from "@/lib/middleware";
@@ -21,7 +22,9 @@ export const PUT = withAdmin(async (request, { user, db }) => {
   }
   await connectDB();
 
-  const body = await request.json();
+  const read = await readAuthenticatedJsonBody(request);
+  if (!read.ok) return read.response;
+  const body = read.value;
   const updates: Record<string, unknown> = {};
 
   if (body.aiModel !== undefined) {

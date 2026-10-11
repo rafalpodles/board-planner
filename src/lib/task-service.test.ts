@@ -1956,6 +1956,11 @@ describe("a status change announces the same things whichever path made it", () 
     await changeStatus(db, "p1", "t1", "shipped", "actor");
     expect(webhookPayloads()).toHaveLength(1);
     expect(webhookPayloads()[0][0]).toBe("status_changed");
+    // A receiver listening to several boards has nothing else to tell them apart (BP-1018)
+    expect(webhookPayloads()[0][1]).toMatchObject({
+      project: { key: "TP" },
+      task: { taskKey: "TP-7", status: "shipped" },
+    });
   });
 
   it("dispatches the identical webhook from the edit form", async () => {
@@ -4556,6 +4561,10 @@ describe("a comment mentioning a watcher", () => {
     // The signed webhook is a contract on the username; the team chat marks it where it is rendered
     const webhook = (dispatchWebhooks as ReturnType<typeof vi.fn>).mock.calls.find((c) => c[2] === "comment_added");
     expect(webhook?.[3].data.author).toBe("pm");
+    expect(webhook?.[3]).toMatchObject({
+      project: { key: "TP", name: "Test Project" },
+      task: { taskKey: "TP-7", title: "x" },
+    });
 
     setup([MENTIONED_WATCHER], [WATCHER, MENTIONED_WATCHER]);
     await addComment(db, "p1", "t1", "@bob look at this", { id: "actor", username: "owner" });

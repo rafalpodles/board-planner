@@ -1,3 +1,4 @@
+import { readAuthenticatedJsonBody } from "@/lib/request-body";
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import type { ScopedDb } from "@/lib/db-scope";
@@ -19,7 +20,9 @@ export const PUT = withProjectAccess(async (request, { params, user, db }) => {
     return NextResponse.json({ error: "Only a project admin can change this" }, { status: 403 });
   }
 
-  const body = await request.json();
+  const read = await readAuthenticatedJsonBody(request);
+  if (!read.ok) return read.response;
+  const body = read.value;
   const raw = (body as { agentId?: unknown }).agentId;
   // Absent, null, or the wrong type is a malformed request and not a request to clear. Coercing
   // it to "" made `{}` and a typo'd key answer 200 and null the field — "did not say" and
