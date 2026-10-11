@@ -50,7 +50,7 @@ async function openLogin(page: Page, who: OrganisationFixture) {
 async function openSettings(page: Page, who: OrganisationFixture) {
   await signInOn(page.context(), who);
   await page.goto(`${originOf(who)}/settings/sso`);
-  await expect(page.getByRole("heading", { name: "Single sign-on" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Single sign-on", exact: true })).toBeVisible();
 }
 
 test.beforeEach(async () => {
