@@ -57,22 +57,22 @@ describe("organisation limits (BP-894)", () => {
   });
 
   describe("storage follows the plan (BP-967)", () => {
-    it("is 1 GB on Free and 20 GB on Pro or its trial, and only the Free one says an upgrade lifts it", () => {
+    it("is 1 GB on Free and 20 GB on Pro or its trial, and each says what raises it: Pro for Free, Enterprise for Pro", () => {
       process.env.ORGANISATION_DOMAIN = "board-planner.com";
 
-      expect(storageLimitFor("free")).toEqual({ bytes: FREE_STORAGE_MB * MB, upgradeLifts: true });
-      expect(storageLimitFor("pro")).toEqual({ bytes: PAID_STORAGE_MB * MB, upgradeLifts: false });
+      expect(storageLimitFor("free")).toEqual({ bytes: FREE_STORAGE_MB * MB, raisedBy: "pro" });
+      expect(storageLimitFor("pro")).toEqual({ bytes: PAID_STORAGE_MB * MB, raisedBy: "enterprise" });
       expect([FREE_STORAGE_MB, PAID_STORAGE_MB]).toEqual([1024, 20480]);
     });
 
     it("lets an operator's value hold for every plan, and 0 switch it off, with no upgrade offered", () => {
       process.env.ORGANISATION_DOMAIN = "board-planner.com";
       process.env.ORGANISATION_STORAGE_MB = "300";
-      expect(storageLimitFor("free")).toEqual({ bytes: 300 * MB, upgradeLifts: false });
-      expect(storageLimitFor("pro")).toEqual({ bytes: 300 * MB, upgradeLifts: false });
+      expect(storageLimitFor("free")).toEqual({ bytes: 300 * MB, raisedBy: null });
+      expect(storageLimitFor("pro")).toEqual({ bytes: 300 * MB, raisedBy: null });
 
       process.env.ORGANISATION_STORAGE_MB = "0";
-      expect(storageLimitFor("free")).toEqual({ bytes: 0, upgradeLifts: false });
+      expect(storageLimitFor("free")).toEqual({ bytes: 0, raisedBy: null });
     });
 
     it("ignores a value that is not a whole number, so the plan default and its upgrade offer stay, and says so once", () => {
@@ -80,14 +80,14 @@ describe("organisation limits (BP-894)", () => {
       process.env.ORGANISATION_DOMAIN = "board-planner.com";
       process.env.ORGANISATION_STORAGE_MB = "5GB";
 
-      expect(storageLimitFor("free")).toEqual({ bytes: FREE_STORAGE_MB * MB, upgradeLifts: true });
-      expect(storageLimitFor("pro")).toEqual({ bytes: PAID_STORAGE_MB * MB, upgradeLifts: false });
+      expect(storageLimitFor("free")).toEqual({ bytes: FREE_STORAGE_MB * MB, raisedBy: "pro" });
+      expect(storageLimitFor("pro")).toEqual({ bytes: PAID_STORAGE_MB * MB, raisedBy: "enterprise" });
       expect(warn.mock.calls.filter(([line]) => String(line).includes("ORGANISATION_STORAGE_MB"))).toHaveLength(1);
     });
 
     it("is no limit for any plan on a self-hosted instance until set, and never offers an upgrade", () => {
-      expect(storageLimitFor("free")).toEqual({ bytes: 0, upgradeLifts: false });
-      expect(storageLimitFor("pro")).toEqual({ bytes: 0, upgradeLifts: false });
+      expect(storageLimitFor("free")).toEqual({ bytes: 0, raisedBy: null });
+      expect(storageLimitFor("pro")).toEqual({ bytes: 0, raisedBy: null });
     });
   });
 
@@ -191,6 +191,21 @@ describe("organisation limits (BP-894)", () => {
     });
     expect(storageLimitRefusal(1000 * MB, 24 * MB, storageLimitFor("free"))).toBeNull();
     expect(storageLimitRefusal(1000 * MB, 100 * MB, storageLimitFor("pro"))).toBeNull();
+  });
+
+  it("sends a Pro organisation at its 20 GB to Enterprise, by e-mail (BP-967)", async () => {
+    process.env.ORGANISATION_DOMAIN = "board-planner.com";
+
+    const refused = storageLimitRefusal(20400 * MB, 100 * MB, storageLimitFor("pro"));
+
+    expect(refused?.status).toBe(413);
+    expect(await refused!.json()).toEqual({
+      error: "This organisation has used 19.9 GB of its 20 GB of file storage, so no more files can be uploaded. Write to contact@board-planner.com about Enterprise for more.",
+      feature: "storage.limit",
+      plan: "pro",
+      limit: 20480 * MB,
+      stored: 20400 * MB,
+    });
   });
 });
 

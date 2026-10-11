@@ -14,7 +14,7 @@ afterEach(cleanup);
 
 describe("storage on the organisation page (BP-967)", () => {
   it("shows what is used against the ceiling, as a bar", async () => {
-    api.get.mockResolvedValue({ storedBytes: 300 * MB, limitBytes: 1024 * MB, upgradeLifts: true });
+    api.get.mockResolvedValue({ storedBytes: 300 * MB, limitBytes: 1024 * MB, raisedBy: "pro" });
     show();
 
     expect((await screen.findByTestId("organisation-storage-used")).textContent).toBe("300 MB of 1 GB");
@@ -28,7 +28,7 @@ describe("storage on the organisation page (BP-967)", () => {
   it("turns the bar red from 90% of the ceiling and not before, and never draws past the end", async () => {
     const fill = async (stored: number) => {
       cleanup();
-      api.get.mockResolvedValue({ storedBytes: stored * MB, limitBytes: 1000 * MB, upgradeLifts: false });
+      api.get.mockResolvedValue({ storedBytes: stored * MB, limitBytes: 1000 * MB, raisedBy: null });
       show();
       await screen.findByTestId("organisation-storage-used");
       return screen.getByRole("progressbar");
@@ -42,7 +42,7 @@ describe("storage on the organisation page (BP-967)", () => {
   });
 
   it("tells a Free organisation what Pro includes while there is room", async () => {
-    api.get.mockResolvedValue({ storedBytes: 300 * MB, limitBytes: 1024 * MB, upgradeLifts: true });
+    api.get.mockResolvedValue({ storedBytes: 300 * MB, limitBytes: 1024 * MB, raisedBy: "pro" });
     show();
 
     expect((await screen.findByTestId("organisation-storage-free")).textContent).toBe("Pro includes 20 GB.");
@@ -50,7 +50,7 @@ describe("storage on the organisation page (BP-967)", () => {
   });
 
   it("says a full Free organisation can upload no more, and what lifts it", async () => {
-    api.get.mockResolvedValue({ storedBytes: 1024 * MB, limitBytes: 1024 * MB, upgradeLifts: true });
+    api.get.mockResolvedValue({ storedBytes: 1024 * MB, limitBytes: 1024 * MB, raisedBy: "pro" });
     show();
 
     const full = await screen.findByTestId("organisation-storage-full");
@@ -59,8 +59,18 @@ describe("storage on the organisation page (BP-967)", () => {
     expect(screen.getByRole("progressbar").firstElementChild?.className).toContain("bg-danger");
   });
 
-  it("offers no upgrade where a plan does not lift the ceiling", async () => {
-    api.get.mockResolvedValue({ storedBytes: 20480 * MB, limitBytes: 20480 * MB, upgradeLifts: false });
+  it("sends a full Pro organisation to Enterprise by e-mail, and offers it no upgrade", async () => {
+    api.get.mockResolvedValue({ storedBytes: 20480 * MB, limitBytes: 20480 * MB, raisedBy: "enterprise" });
+    show();
+
+    const full = await screen.findByTestId("organisation-storage-full");
+    expect(full.textContent).toBe("Full, so no more files can be uploaded. Write to contact@board-planner.com about Enterprise for more.");
+    expect(full.querySelector("a")?.getAttribute("href")).toBe("mailto:contact@board-planner.com");
+    expect(screen.queryByTestId("organisation-storage-free")).toBeNull();
+  });
+
+  it("offers nothing where no plan raises the ceiling, an operator's value or a self-hosted one", async () => {
+    api.get.mockResolvedValue({ storedBytes: 300 * MB, limitBytes: 300 * MB, raisedBy: null });
     show();
 
     expect((await screen.findByTestId("organisation-storage-full")).textContent).toBe("Full, so no more files can be uploaded.");
@@ -68,7 +78,7 @@ describe("storage on the organisation page (BP-967)", () => {
   });
 
   it("shows the size alone, with no bar, where nothing limits it", async () => {
-    api.get.mockResolvedValue({ storedBytes: 2048 * MB, limitBytes: null, upgradeLifts: false });
+    api.get.mockResolvedValue({ storedBytes: 2048 * MB, limitBytes: null, raisedBy: null });
     show();
 
     expect((await screen.findByTestId("organisation-storage-used")).textContent).toBe("2 GB");

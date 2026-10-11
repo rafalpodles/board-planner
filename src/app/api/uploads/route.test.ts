@@ -209,7 +209,7 @@ describe("POST /api/uploads", () => {
       storedBytes = 20480 * MB - 5;
       const full = await POST(request(form({ file: png("past.png", 10), projectId: "BP" })), ctx());
       expect(full.status).toBe(413);
-      expect((await full.json()).error).toMatch(/of its 20 GB of file storage, so no more files/);
+      expect((await full.json()).error).toMatch(/of its 20 GB of file storage, so no more files can be uploaded\. Write to contact@board-planner\.com about Enterprise for more\.$/);
     });
   });
 });

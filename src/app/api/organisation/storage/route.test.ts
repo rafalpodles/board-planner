@@ -34,24 +34,24 @@ beforeEach(() => {
 });
 
 describe("GET /api/organisation/storage (BP-967)", () => {
-  it("gives an administrator what the organisation holds against its plan's ceiling, and says Pro lifts a Free one", async () => {
+  it("gives an administrator what the organisation holds against its plan's ceiling, and says Pro raises a Free one", async () => {
     process.env.ORGANISATION_DOMAIN = "board-planner.com";
 
     const response = await read();
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ storedBytes: 300 * MB, limitBytes: 1024 * MB, upgradeLifts: true });
+    expect(await response.json()).toEqual({ storedBytes: 300 * MB, limitBytes: 1024 * MB, raisedBy: "pro" });
   });
 
-  it("gives a Pro organisation 20 GB and nothing to upgrade to", async () => {
+  it("gives a Pro organisation 20 GB and points it to Enterprise", async () => {
     process.env.ORGANISATION_DOMAIN = "board-planner.com";
     getOrganisation.mockResolvedValue({ entitlements: { plan: "pro", features: [] } });
 
-    expect(await (await read()).json()).toEqual({ storedBytes: 300 * MB, limitBytes: 20480 * MB, upgradeLifts: false });
+    expect(await (await read()).json()).toEqual({ storedBytes: 300 * MB, limitBytes: 20480 * MB, raisedBy: "enterprise" });
   });
 
   it("has no ceiling on a self-hosted instance", async () => {
-    expect(await (await read()).json()).toEqual({ storedBytes: 300 * MB, limitBytes: null, upgradeLifts: false });
+    expect(await (await read()).json()).toEqual({ storedBytes: 300 * MB, limitBytes: null, raisedBy: null });
   });
 
   it("is for administrators: a member is refused", async () => {

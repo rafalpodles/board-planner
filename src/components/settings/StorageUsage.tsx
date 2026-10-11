@@ -2,14 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { useApi } from "@/hooks/use-api";
-import { PAID_STORAGE_MB, formatStorage } from "@/lib/storage-size";
+import { ENTERPRISE_CONTACT, PAID_STORAGE_MB, formatStorage } from "@/lib/storage-size";
 
 const MB = 1024 * 1024;
 
 interface Storage {
   storedBytes: number;
   limitBytes: number | null;
-  upgradeLifts: boolean;
+  raisedBy: "pro" | "enterprise" | null;
 }
 
 export function StorageUsage() {
@@ -65,10 +65,20 @@ export function StorageUsage() {
             {full && (
               <p className="mt-1 text-text-muted" data-testid="organisation-storage-full">
                 Full, so no more files can be uploaded.
-                {storage.upgradeLifts && ` Upgrade to Pro for ${formatStorage(PAID_STORAGE_MB * MB)}.`}
+                {storage.raisedBy === "pro" && ` Upgrade to Pro for ${formatStorage(PAID_STORAGE_MB * MB)}.`}
+                {storage.raisedBy === "enterprise" && (
+                  <>
+                    {" "}
+                    Write to{" "}
+                    <a href={`mailto:${ENTERPRISE_CONTACT}`} className="font-medium text-primary underline">
+                      {ENTERPRISE_CONTACT}
+                    </a>{" "}
+                    about Enterprise for more.
+                  </>
+                )}
               </p>
             )}
-            {!full && storage.upgradeLifts && (
+            {!full && storage.raisedBy === "pro" && (
               <p className="mt-1 text-text-muted" data-testid="organisation-storage-free">
                 Pro includes {formatStorage(PAID_STORAGE_MB * MB)}.
               </p>

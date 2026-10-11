@@ -7,7 +7,7 @@ import { organisationUploads } from "./upload-ownership";
 import { organisationDomain } from "./organisation-host";
 import { getOrganisation } from "./organisation";
 import type { Plan } from "./entitlements";
-import { FREE_STORAGE_MB, PAID_STORAGE_MB, formatStorage } from "./storage-size";
+import { ENTERPRISE_CONTACT, FREE_STORAGE_MB, PAID_STORAGE_MB, formatStorage } from "./storage-size";
 import { ORGANISATION_LIMIT_HEADER, type RequestLimitScope } from "./organisation-limit-header";
 
 const MINUTE_MS = 60_000;
@@ -40,13 +40,14 @@ export function requestsPerMinute(): number {
 
 export interface StorageLimit {
   bytes: number;
-  upgradeLifts: boolean;
+  raisedBy: "pro" | "enterprise" | null;
 }
 
 export function storageLimitFor(plan: Plan): StorageLimit {
   const explicit = explicitLimit("ORGANISATION_STORAGE_MB");
   const bytes = configuredLimit("ORGANISATION_STORAGE_MB", plan === "pro" ? PAID_STORAGE_MB : FREE_STORAGE_MB) * MB;
-  return { bytes, upgradeLifts: explicit === null && plan === "free" && organisationDomain() !== null && bytes > 0 };
+  const hosted = explicit === null && organisationDomain() !== null && bytes > 0;
+  return { bytes, raisedBy: hosted ? (plan === "pro" ? "enterprise" : "pro") : null };
 }
 
 export async function storageLimitOf(db: ScopedDb): Promise<StorageLimit> {
@@ -106,13 +107,19 @@ export async function requestLimitRefusal(
   return null;
 }
 
-export function storageLimitRefusal(storedBytes: number, incomingBytes: number, { bytes, upgradeLifts }: StorageLimit): NextResponse | null {
+export function storageLimitRefusal(storedBytes: number, incomingBytes: number, { bytes, raisedBy }: StorageLimit): NextResponse | null {
   if (!bytes || storedBytes + incomingBytes <= bytes) return null;
-  const used = `This organisation has used ${formatStorage(storedBytes)} of its ${formatStorage(bytes)} of file storage${upgradeLifts ? " on the Free plan" : ""}, so no more files can be uploaded.`;
+  const used = `This organisation has used ${formatStorage(storedBytes)} of its ${formatStorage(bytes)} of file storage${raisedBy === "pro" ? " on the Free plan" : ""}, so no more files can be uploaded.`;
+  const next =
+    raisedBy === "pro"
+      ? ` Upgrade to Pro for ${formatStorage(PAID_STORAGE_MB * MB)}.`
+      : raisedBy === "enterprise"
+        ? ` Write to ${ENTERPRISE_CONTACT} about Enterprise for more.`
+        : "";
   return NextResponse.json(
     {
-      error: upgradeLifts ? `${used} Upgrade to Pro for ${formatStorage(PAID_STORAGE_MB * MB)}.` : used,
-      ...(upgradeLifts ? { feature: "storage.limit", plan: "free" } : {}),
+      error: `${used}${next}`,
+      ...(raisedBy ? { feature: "storage.limit", plan: raisedBy === "pro" ? "free" : "pro" } : {}),
       limit: bytes,
       stored: storedBytes,
     },

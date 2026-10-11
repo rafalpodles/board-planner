@@ -213,14 +213,33 @@ test.describe("BP-894: one organisation's limits do not touch another's", () => 
     expect((await upload(request, ACME)).status()).toBe(200);
   });
 
-  test("a Pro organisation stops at 20 GB, and is not offered an upgrade (BP-967)", async ({ request }) => {
+  test("a Pro organisation stops at 20 GB and is pointed to Enterprise, not offered an upgrade (BP-967)", async ({ request }) => {
     await makePro(request, ACME);
     await filesOf(ACME, PAID_STORAGE_MB);
 
     const refused = await upload(request, ACME);
     expect(refused.status()).toBe(413);
-    expect((await refused.json()).error).toBe("This organisation has used 20 GB of its 20 GB of file storage, so no more files can be uploaded.");
+    expect((await refused.json()).error).toBe(
+      "This organisation has used 20 GB of its 20 GB of file storage, so no more files can be uploaded. Write to contact@board-planner.com about Enterprise for more."
+    );
     expect((await upload(request, GLOBEX)).status()).toBe(200);
+  });
+
+  test("on screen: a full Pro organisation is told to write about Enterprise, with the address as a link (BP-967)", async ({ browser, request }) => {
+    await makePro(request, ACME);
+    await filesOf(ACME, PAID_STORAGE_MB);
+    const admin = await browser.newContext();
+    await signInOn(admin, ACME);
+    const page = await admin.newPage();
+    await page.goto(`${originOf(ACME)}/settings/organisation`);
+
+    await expect(page.getByTestId("organisation-storage-used")).toHaveText("20 GB of 20 GB");
+    const full = page.getByTestId("organisation-storage-full");
+    await expect(full).toHaveText("Full, so no more files can be uploaded. Write to contact@board-planner.com about Enterprise for more.");
+    await expect(full.getByRole("link", { name: "contact@board-planner.com" })).toHaveAttribute("href", "mailto:contact@board-planner.com");
+    await expect(page.getByTestId("organisation-storage-free")).toHaveCount(0);
+    await page.screenshot({ path: "e2e/.artifacts/bp967-storage-pro-full-desktop.png" });
+    await admin.close();
   });
 
   test("on screen: Settings → Organisation shows an administrator the storage used against the plan, full on Free and 20 GB on Pro (BP-967)", async ({ browser, request }) => {
