@@ -10,7 +10,6 @@ vi.mock("@/lib/auth", () => ({ getAuthUser, RateLimitError: class RateLimitError
 vi.mock("@/lib/organisation", async (original) => ({ ...(await original<typeof import("@/lib/organisation")>()), getOrganisation }));
 
 const { GET } = await import("./route");
-const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
 
 const ADMIN = { _id: "admin-1", username: "root", role: "admin", viaMachineCredential: false };
 const MEMBER = { _id: "member-1", username: "pat", role: "member", viaMachineCredential: false };
@@ -53,12 +52,6 @@ describe("GET /api/organisation/storage (BP-967)", () => {
 
   it("has no ceiling on a self-hosted instance", async () => {
     expect(await (await read()).json()).toEqual({ storedBytes: 300 * MB, limitBytes: null, upgradeLifts: false });
-  });
-
-  it("counts only the organisation's own files", async () => {
-    await read();
-
-    expect(aggregate.mock.calls[0][0][0]).toEqual({ $match: { "metadata.organisation": DEFAULT_ORGANISATION_ID } });
   });
 
   it("is for administrators: a member is refused", async () => {

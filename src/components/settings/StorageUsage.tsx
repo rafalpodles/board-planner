@@ -12,7 +12,6 @@ interface Storage {
   upgradeLifts: boolean;
 }
 
-/** The files this organisation holds against what its plan allows, as one row of the organisation's list. */
 export function StorageUsage() {
   const api = useApi();
   const [storage, setStorage] = useState<Storage | null>(null);

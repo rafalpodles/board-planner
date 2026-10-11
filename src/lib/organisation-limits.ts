@@ -17,18 +17,21 @@ export const CLOUD_REQUESTS_PER_MINUTE = 6000;
 
 const warned = new Set<string>();
 
-// 0 is off. Set, the value holds on any instance; unset, only organisations on ORGANISATION_DOMAIN get one
-function configuredLimit(name: string, cloudDefault: number): number {
-  const fallback = organisationDomain() ? cloudDefault : 0;
+function explicitLimit(name: string): number | null {
   const raw = process.env[name]?.trim();
-  if (!raw) return fallback;
+  if (!raw) return null;
   const value = Number(raw);
   if (Number.isInteger(value) && value >= 0) return value;
   if (!warned.has(name)) {
     warned.add(name);
-    console.warn(`${name}="${raw}" is not a whole number of 0 or more; using ${fallback}`);
+    console.warn(`${name}="${raw}" is not a whole number of 0 or more; ignoring it`);
   }
-  return fallback;
+  return null;
+}
+
+// 0 is off. Set, the value holds on any instance; unset, only organisations on ORGANISATION_DOMAIN get one
+function configuredLimit(name: string, cloudDefault: number): number {
+  return explicitLimit(name) ?? (organisationDomain() ? cloudDefault : 0);
 }
 
 export function requestsPerMinute(): number {
@@ -36,20 +39,18 @@ export function requestsPerMinute(): number {
 }
 
 export interface StorageLimit {
-  // 0 is no limit
   bytes: number;
-  // Only the cloud's Free default, which Pro lifts; a value an operator set holds for every plan
   upgradeLifts: boolean;
 }
 
-// An operator's ORGANISATION_STORAGE_MB holds for every plan; unset, the cloud's default follows the plan
 export function storageLimitFor(plan: Plan): StorageLimit {
-  const set = Boolean(process.env.ORGANISATION_STORAGE_MB?.trim());
+  const explicit = explicitLimit("ORGANISATION_STORAGE_MB");
   const bytes = configuredLimit("ORGANISATION_STORAGE_MB", plan === "pro" ? PAID_STORAGE_MB : FREE_STORAGE_MB) * MB;
-  return { bytes, upgradeLifts: !set && plan === "free" && organisationDomain() !== null && bytes > 0 };
+  return { bytes, upgradeLifts: explicit === null && plan === "free" && organisationDomain() !== null && bytes > 0 };
 }
 
 export async function storageLimitOf(db: ScopedDb): Promise<StorageLimit> {
+  if (explicitLimit("ORGANISATION_STORAGE_MB") !== null || organisationDomain() === null) return storageLimitFor("free");
   return storageLimitFor((await getOrganisation(db.organisation)).entitlements.plan);
 }
 

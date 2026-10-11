@@ -75,6 +75,16 @@ describe("organisation limits (BP-894)", () => {
       expect(storageLimitFor("free")).toEqual({ bytes: 0, upgradeLifts: false });
     });
 
+    it("ignores a value that is not a whole number, so the plan default and its upgrade offer stay, and says so once", () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      process.env.ORGANISATION_DOMAIN = "board-planner.com";
+      process.env.ORGANISATION_STORAGE_MB = "5GB";
+
+      expect(storageLimitFor("free")).toEqual({ bytes: FREE_STORAGE_MB * MB, upgradeLifts: true });
+      expect(storageLimitFor("pro")).toEqual({ bytes: PAID_STORAGE_MB * MB, upgradeLifts: false });
+      expect(warn.mock.calls.filter(([line]) => String(line).includes("ORGANISATION_STORAGE_MB"))).toHaveLength(1);
+    });
+
     it("is no limit for any plan on a self-hosted instance until set, and never offers an upgrade", () => {
       expect(storageLimitFor("free")).toEqual({ bytes: 0, upgradeLifts: false });
       expect(storageLimitFor("pro")).toEqual({ bytes: 0, upgradeLifts: false });
@@ -198,6 +208,16 @@ describe("organisationUsage (BP-678)", () => {
     expect(first).toEqual({ requestsThisMinute: 2, requestsPerMinute: CLOUD_REQUESTS_PER_MINUTE, storedBytes: 0, storageLimitBytes: FREE_STORAGE_MB * MB });
     expect((await organisationUsage(asDb(ACME))).requestsThisMinute).toBe(2);
     expect((await organisationUsage(asDb(GLOBEX))).requestsThisMinute).toBe(1);
+  });
+
+  it("does not read the organisation when no plan can matter, on a self-hosted instance or with a value set (BP-967)", async () => {
+    expect((await organisationUsage(asDb(ACME))).storageLimitBytes).toBe(0);
+
+    process.env.ORGANISATION_DOMAIN = "board-planner.com";
+    process.env.ORGANISATION_STORAGE_MB = "10";
+    expect((await organisationUsage(asDb(ACME))).storageLimitBytes).toBe(10 * MB);
+
+    expect(getOrganisation).not.toHaveBeenCalled();
   });
 
   it("reports each organisation's storage ceiling by its own plan (BP-967)", async () => {

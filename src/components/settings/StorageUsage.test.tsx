@@ -25,7 +25,23 @@ describe("storage on the organisation page (BP-967)", () => {
     expect(api.get).toHaveBeenCalledWith("/api/organisation/storage");
   });
 
-  it("tells a Free organisation what Pro holds while there is room", async () => {
+  it("turns the bar red from 90% of the ceiling and not before, and never draws past the end", async () => {
+    const fill = async (stored: number) => {
+      cleanup();
+      api.get.mockResolvedValue({ storedBytes: stored * MB, limitBytes: 1000 * MB, upgradeLifts: false });
+      show();
+      await screen.findByTestId("organisation-storage-used");
+      return screen.getByRole("progressbar");
+    };
+
+    expect((await fill(899)).firstElementChild?.className).toContain("bg-primary");
+    expect((await fill(900)).firstElementChild?.className).toContain("bg-danger");
+    const over = await fill(1500);
+    expect(over.getAttribute("aria-valuenow")).toBe(String(1000 * MB));
+    expect((over.firstElementChild as HTMLElement).style.width).toBe("100%");
+  });
+
+  it("tells a Free organisation what Pro includes while there is room", async () => {
     api.get.mockResolvedValue({ storedBytes: 300 * MB, limitBytes: 1024 * MB, upgradeLifts: true });
     show();
 
