@@ -128,7 +128,8 @@ describe("PUT /api/settings/sso (BP-951)", () => {
   });
 
   it("refuses an address the server may not call, and one whose discovery document it cannot read, storing neither", async () => {
-    discoverProvider.mockRejectedValueOnce(new BlockedDestinationError("internal"));
+    // As the OpenID client throws it: the refusal is the cause of its own error
+    discoverProvider.mockRejectedValueOnce(new Error("fetch failed", { cause: new BlockedDestinationError("internal") }));
     const blocked = await call("PUT", FORM);
     expect(blocked.status).toBe(400);
     expect((await blocked.json()).error).toContain("not one this server may call");

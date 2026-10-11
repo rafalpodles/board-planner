@@ -36,7 +36,7 @@ export function ProviderButtons({
 
   useEffect(() => {
     let live = true;
-    fetch("/api/auth/oidc/providers")
+    fetch("/api/auth/oidc/providers", { cache: "no-store" })
       .then((res) => (res.ok ? res.json() : []))
       .then((list: Provider[]) => live && setProviders(Array.isArray(list) ? list : []))
       .catch(() => live && setProviders([]));

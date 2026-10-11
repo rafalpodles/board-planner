@@ -13,6 +13,14 @@ import { readJsonBody } from "@/lib/request-body";
 import { BlockedDestinationError } from "@/lib/safe-fetch";
 import { duplicateKeyField } from "@/lib/mongo-errors";
 
+// The OpenID client wraps what its fetch threw, so the refusal of an internal address is found down the cause chain
+function isBlocked(error: unknown): boolean {
+  for (let hop = 0, e = error; e && hop < 5; hop++, e = (e as { cause?: unknown }).cause) {
+    if (e instanceof BlockedDestinationError) return true;
+  }
+  return false;
+}
+
 // Two first writes of one organisation's settings race on the unique index; the loser retries
 async function writeSettings(db: ScopedDb, update: Record<string, Record<string, unknown>>) {
   const write = () => db.Settings.findOneAndUpdate({}, update, { upsert: true });
@@ -98,7 +106,7 @@ export const PUT = withAdmin(async (request, { user, db }) => {
   try {
     await discoverProvider({ id: "oidc", kind: "oidc", linksByAddress: true, label, issuer, clientId, clientSecret: secret, own: true });
   } catch (err) {
-    if (err instanceof BlockedDestinationError) {
+    if (isBlocked(err)) {
       return NextResponse.json({ error: "That address is not one this server may call. Use the public address of your provider." }, { status: 400 });
     }
     return NextResponse.json({ error: "Could not read the provider's discovery document. Check the issuer address, it must serve /.well-known/openid-configuration." }, { status: 400 });

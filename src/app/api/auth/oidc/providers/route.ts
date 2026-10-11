@@ -8,5 +8,6 @@ export async function GET(request: Request) {
   const db = await scopedForRequest(request);
   if (!db) return refusedHost(request);
   await connectDB();
-  return NextResponse.json(await publicProvidersFor(db));
+  // What is offered depends on the organisation and its plan, and changes with it: never a stored answer
+  return NextResponse.json(await publicProvidersFor(db), { headers: { "Cache-Control": "no-store" } });
 }

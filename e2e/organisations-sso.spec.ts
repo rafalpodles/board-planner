@@ -90,11 +90,12 @@ test.describe("BP-951: an organisation's own sign-in provider", () => {
 
     await page.goto(`${originOf(GLOBEX)}/login`);
     await expect(page.getByRole("button", { name: /^Continue with/ })).toHaveCount(0);
-    expect(await (await page.request.get(`${originOf(GLOBEX)}/api/auth/oidc/providers`)).json()).toEqual([]);
+    // The operator's GitHub app is everybody's; ACME's own provider is nobody else's
+    expect(await (await page.request.get(`${originOf(GLOBEX)}/api/auth/oidc/providers`)).json()).not.toContainEqual(expect.objectContaining({ id: "oidc" }));
 
     await page.goto(`${originOf(ACME)}/login`);
     await expect(page.getByRole("button", { name: `Continue with ${SSO_LABEL}` })).toBeVisible();
-    expect(await (await page.request.get(`${originOf(ACME)}/api/auth/oidc/providers`)).json()).toEqual([{ id: "oidc", label: SSO_LABEL }]);
+    expect(await (await page.request.get(`${originOf(ACME)}/api/auth/oidc/providers`)).json()).toContainEqual({ id: "oidc", label: SSO_LABEL });
 
     const started = await page.evaluate(async (origin) => (await fetch(`${origin}/api/auth/oidc/oidc/start`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).status, originOf(GLOBEX));
     expect(started).not.toBe(200);
