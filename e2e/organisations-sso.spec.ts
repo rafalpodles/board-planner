@@ -92,13 +92,16 @@ test.describe("BP-951: an organisation's own sign-in provider", () => {
     await expect(page.getByRole("button", { name: /^Continue with/ })).toHaveCount(0);
     // The operator's GitHub app is everybody's; ACME's own provider is nobody else's
     expect(await (await page.request.get(`${originOf(GLOBEX)}/api/auth/oidc/providers`)).json()).not.toContainEqual(expect.objectContaining({ id: "oidc" }));
+    const started = await page.evaluate(async () => {
+      const res = await fetch("/api/auth/oidc/oidc/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      return { status: res.status, body: await res.json().catch(() => ({})) };
+    });
+    expect(started.status).toBe(404);
+    expect(started.body.error).toContain("not set up here");
 
     await page.goto(`${originOf(ACME)}/login`);
     await expect(page.getByRole("button", { name: `Continue with ${SSO_LABEL}` })).toBeVisible();
     expect(await (await page.request.get(`${originOf(ACME)}/api/auth/oidc/providers`)).json()).toContainEqual({ id: "oidc", label: SSO_LABEL });
-
-    const started = await page.evaluate(async (origin) => (await fetch(`${origin}/api/auth/oidc/oidc/start`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).status, originOf(GLOBEX));
-    expect(started).not.toBe(200);
   });
 
   test("a Free organisation is told it is part of Pro and the trial, and the server refuses it with a 402", async ({ page }) => {
