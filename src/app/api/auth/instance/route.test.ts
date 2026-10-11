@@ -48,6 +48,18 @@ describe("GET /api/auth/instance", () => {
     }
   });
 
+  it("does not call an organisation that was never named by the word default", async () => {
+    process.env.ORGANISATION_DOMAIN = "board-planner.com";
+    organisationName.value = "default";
+    countDocuments.mockResolvedValue(1);
+    try {
+      expect((await (await GET(new Request("http://localhost/api/auth/instance"))).json()).organisation).toBeNull();
+    } finally {
+      delete process.env.ORGANISATION_DOMAIN;
+      organisationName.value = "Acme";
+    }
+  });
+
   it("names nobody on a self-hosted instance, whatever its one organisation is called — the control", async () => {
     countDocuments.mockResolvedValue(1);
 

@@ -52,7 +52,7 @@ export async function GET(request: Request) {
       passwordSignIn,
       platformSignIn: platformSignInOrigin(),
       cloud,
-      organisation: name || null,
+      organisation: name && name !== "default" ? name : null,
     });
   } catch (e) {
     // Unreachable is not "unclaimed": answering true here would offer to create the first

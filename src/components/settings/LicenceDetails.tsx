@@ -79,7 +79,7 @@ function expiresWhen(daysLeft: number): string {
   return `in ${daysLeft} days`;
 }
 
-function Notice({ verdict, daysLeft, expiresAt, graceEndsAt, trial, subscription, where }: {
+function Notice({ verdict, daysLeft, expiresAt, graceEndsAt, trial, subscription, where, managed }: {
   verdict: LicenceVerdict;
   daysLeft: number;
   expiresAt: string;
@@ -87,6 +87,7 @@ function Notice({ verdict, daysLeft, expiresAt, graceEndsAt, trial, subscription
   trial?: boolean;
   subscription?: "renewing" | "ending" | null;
   where: string;
+  managed: boolean;
 }) {
   // The key ends with its UTC day and the renewal is paid some time after the period ends: that day is the renewal's, not a failure
   if (verdict === "grace" && subscription === "renewing" && daysLeft >= -1) return null;
@@ -117,8 +118,8 @@ function Notice({ verdict, daysLeft, expiresAt, graceEndsAt, trial, subscription
   if (verdict === "expired" && trial) {
     return (
       <p role="alert" className="mb-4 rounded-lg border border-danger p-4 text-sm text-danger" data-testid="licence-warning">
-        This trial ended on {formatDate(expiresAt)}, so {where} is on the Free plan. No data was removed,
-        and a licence key restores the plan.
+        This trial ended on {formatDate(expiresAt)}, so {where} is on the Free plan. No data was removed,{" "}
+        {managed ? "and subscribing restores the plan." : "and a licence key restores the plan."}
       </p>
     );
   }
@@ -126,8 +127,8 @@ function Notice({ verdict, daysLeft, expiresAt, graceEndsAt, trial, subscription
     return (
       <p role="alert" className="mb-4 rounded-lg border border-danger p-4 text-sm text-danger" data-testid="licence-warning">
         This licence expired on {formatDate(expiresAt)} and its grace period ended on{" "}
-        {formatDate(graceEndsAt)}, so {where} is on the Free plan. No data was removed, and a
-        renewed key restores the licence.
+        {formatDate(graceEndsAt)}, so {where} is on the Free plan. No data was removed, and{" "}
+        {managed ? "subscribing restores the plan." : "a renewed key restores the licence."}
       </p>
     );
   }
@@ -143,14 +144,14 @@ function Notice({ verdict, daysLeft, expiresAt, graceEndsAt, trial, subscription
   if (trial) {
     return (
       <p role="status" className="mb-4 rounded-lg border border-border p-4 text-sm" data-testid="licence-warning">
-        This trial ends {expiresWhen(daysLeft)}, on {formatDate(expiresAt)}. After that {where} is on the Free plan unless a licence key is set.
+        This trial ends {expiresWhen(daysLeft)}, on {formatDate(expiresAt)}. After that {where} is on the Free plan{managed ? " unless you subscribe." : " unless a licence key is set."}
       </p>
     );
   }
   if (daysLeft <= EXPIRY_WARNING_DAYS) {
     return (
       <p role="status" className="mb-4 rounded-lg border border-border p-4 text-sm" data-testid="licence-warning">
-        This licence expires {expiresWhen(daysLeft)}, on {formatDate(expiresAt)}. Renew it before then.
+        This licence expires {expiresWhen(daysLeft)}, on {formatDate(expiresAt)}. {managed ? "Contact Board Planner support to renew it." : "Renew it before then."}
       </p>
     );
   }
@@ -181,6 +182,7 @@ export function LicenceDetails({ licence }: { licence: LicenceSummary }) {
         trial={licence.trial}
         subscription={licence.subscription}
         where={managed ? "this organisation" : "this instance"}
+        managed={managed}
       />
       <dl className="divide-y divide-border rounded-lg border border-border text-sm" data-testid="licence-details">
         {rows.map(([label, value]) => (

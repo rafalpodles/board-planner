@@ -2,12 +2,12 @@
 
 export const pmUnavailable = (cloud: boolean) =>
   cloud
-    ? "The PM agent is unavailable right now. Try again in a moment, or add your own key under Settings → AI key."
+    ? "The PM agent is unavailable right now. Try again in a moment, or ask an admin to add your own key under Settings → AI key."
     : "PM is not configured on the server (OPENROUTER_API_KEY missing).";
 
 export const pmNeedsKey = (cloud: boolean) =>
   cloud
-    ? "The PM agent is not available for this organisation right now. Add your own key under Settings → AI key, or try again later."
+    ? "The PM agent is not available for this organisation right now. Ask an admin to add your own key under Settings → AI key, or try again later."
     : "Set the OPENROUTER_API_KEY environment variable on the server to enable the PM agent, or have an admin add a key in Settings → AI key.";
 
 export const signUpNeedsProvider = (cloud: boolean) =>
@@ -29,5 +29,5 @@ export const mailOff = (cloud: boolean, withDigest: boolean) => {
 
 export const noPasswordNoMail = (cloud: boolean) =>
   cloud
-    ? "This account has no password, and mail is not available right now. Contact Board Planner support."
+    ? "This account has no password, and mail is not available right now. Ask an admin to set one."
     : "This account has no password, and this instance sends no mail. Ask an administrator to set one.";

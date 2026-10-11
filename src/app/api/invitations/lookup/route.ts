@@ -13,6 +13,8 @@ import { organisationDomain, originFor } from "@/lib/organisation-host";
 
 const LOOKUPS_PER_SOURCE = 60;
 
+const namedOrNull = (name: string | undefined) => (name && name !== "default" ? name : null);
+
 export async function POST(request: Request) {
   const db = await scopedForRequest(request);
   if (!db) return refusedHost(request);
@@ -56,7 +58,7 @@ export async function POST(request: Request) {
   const cloud = organisationDomain() !== null;
   const origin = cloud ? await originFor(db) : null;
   return NextResponse.json({
-    organisation: cloud ? (await getOrganisation(db.organisation)).name || null : null,
+    organisation: cloud ? namedOrNull((await getOrganisation(db.organisation)).name) : null,
     address: origin ? new URL(origin).host : null,
     email: view.email,
     role: view.role,

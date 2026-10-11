@@ -72,6 +72,17 @@ describe("LicenceDetails", () => {
       expect(screen.queryByRole("link", { name: "About licences" })).toBeNull();
     });
 
+    it.each([
+      ["a trial that ended", { verdict: "expired", trial: true, daysLeft: -3 }],
+      ["a trial that is running", { verdict: "valid", trial: true, daysLeft: 5 }],
+      ["a licence that ended", { verdict: "expired", daysLeft: -30 }],
+      ["a licence about to end", { verdict: "valid", daysLeft: 5 }],
+    ] as const)("asks an organisation's admin for no licence key when %s", (_, change) => {
+      render(<LicenceDetails licence={valid({ managedByPlatform: true, ...change })} />);
+
+      expect(screen.getByTestId("licence-warning").textContent).not.toMatch(/licen[cs]e key|renewed key|Renew it/);
+    });
+
     it("speaks of the organisation, not the instance, when a licence ends", () => {
       render(<LicenceDetails licence={valid({ managedByPlatform: true, verdict: "expired", trial: true, daysLeft: -3 })} />);
 
