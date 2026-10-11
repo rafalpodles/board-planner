@@ -1,3 +1,4 @@
+import { readAuthenticatedJsonBody } from "@/lib/request-body";
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess, withProjectOwner } from "@/lib/middleware";
@@ -66,7 +67,9 @@ export const POST = withProjectAccess(async (request, { params, user, db }) => {
   const { projectId } = await params;
   await connectDB();
 
-  const body = await request.json();
+  const read = await readAuthenticatedJsonBody(request);
+  if (!read.ok) return read.response;
+  const body = read.value;
   const { name, title, description, category, acceptanceCriteria } = body;
 
   if (name === undefined) {
@@ -124,7 +127,9 @@ export const PUT = withProjectAccess(async (request, { params, user, db }) => {
   const { projectId } = await params;
   await connectDB();
 
-  const { templateId, ...updates } = await request.json();
+  const read = await readAuthenticatedJsonBody(request);
+  if (!read.ok) return read.response;
+  const { templateId, ...updates } = read.value;
   if (!templateId) {
     return NextResponse.json({ error: "templateId is required" }, { status: 400 });
   }
@@ -170,7 +175,9 @@ export const DELETE = withProjectOwner(async (request, { params, user, db }) => 
   const { projectId } = await params;
   await connectDB();
 
-  const { templateId } = await request.json();
+  const read = await readAuthenticatedJsonBody(request);
+  if (!read.ok) return read.response;
+  const { templateId } = read.value;
   if (!templateId) {
     return NextResponse.json({ error: "templateId is required" }, { status: 400 });
   }

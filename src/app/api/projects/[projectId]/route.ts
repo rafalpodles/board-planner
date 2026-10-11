@@ -1,3 +1,4 @@
+import { readAuthenticatedJsonBody } from "@/lib/request-body";
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import type { ScopedDb } from "@/lib/db-scope";
@@ -111,7 +112,9 @@ async function writeProjectSettings(
 export const PUT = withProjectOwner(async (request, { params, user, db }) => {
   await connectDB();
   const { projectId } = await params;
-  const body = await request.json();
+  const read = await readAuthenticatedJsonBody(request);
+  if (!read.ok) return read.response;
+  const body = read.value;
 
   const allowed = ["name", "description", "icon", "estimateFieldId", "repositoryUrl", "githubToken", "gitlabHost", "gitlabToken", "codaHost", "codaDocId", "codaTableId", "codaToken"];
   const updates: Record<string, unknown> = {};

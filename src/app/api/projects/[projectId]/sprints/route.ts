@@ -1,3 +1,5 @@
+import { readAuthenticatedJsonBody } from "@/lib/request-body";
+import { checkSprintFields } from "@/lib/sprint-fields";
 import { NextResponse } from "next/server";
 import mongoose from "mongoose";
 import { connectDB } from "@/lib/db";
@@ -78,7 +80,9 @@ export const POST = withProjectAccess(async (request, { params, db }) => {
   const { projectId } = await params;
   await connectDB();
 
-  const body = await request.json();
+  const read = await readAuthenticatedJsonBody(request);
+  if (!read.ok) return read.response;
+  const body = read.value;
 
   if (!body.name || !body.startDate || !body.endDate) {
     return NextResponse.json(
@@ -87,13 +91,19 @@ export const POST = withProjectAccess(async (request, { params, db }) => {
     );
   }
 
+  const checked = checkSprintFields({ ...body, goal: body.goal || undefined, status: body.status || undefined });
+  if (!checked.ok) {
+    return NextResponse.json({ error: checked.error }, { status: 400 });
+  }
+  const { updates } = checked;
+
   const sprint = await db.Sprint.create({
     project: projectId,
-    name: body.name,
-    startDate: new Date(body.startDate),
-    endDate: new Date(body.endDate),
-    goal: body.goal || "",
-    status: body.status || "planned",
+    name: updates.name,
+    startDate: updates.startDate,
+    endDate: updates.endDate,
+    goal: updates.goal ?? "",
+    status: updates.status ?? "planned",
   });
 
   return NextResponse.json(sprint, { status: 201 });

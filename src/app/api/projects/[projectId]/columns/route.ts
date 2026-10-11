@@ -1,3 +1,4 @@
+import { readAuthenticatedJsonBody } from "@/lib/request-body";
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectOwner } from "@/lib/middleware";
@@ -121,7 +122,9 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
   const { projectId } = await params;
   await connectDB();
 
-  const { columns } = await request.json();
+  const read = await readAuthenticatedJsonBody(request);
+  if (!read.ok) return read.response;
+  const { columns } = read.value;
   if (!Array.isArray(columns) || columns.length === 0 || columns.length > MAX_COLUMNS) {
     return NextResponse.json(
       { error: `columns must be an array of 1-${MAX_COLUMNS} entries` },

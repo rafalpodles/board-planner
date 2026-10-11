@@ -7,6 +7,7 @@ const verifyCredentials = vi.fn();
 const createSession = vi.fn();
 const revokeSession = vi.fn();
 const revokeUserSessions = vi.fn();
+const ssoEnforced = vi.fn();
 
 // The real module, so DatabaseUnavailableError is the class the route checks against — a bare
 // stub makes `instanceof` throw inside the catch instead of answering
@@ -20,6 +21,7 @@ vi.mock("@/models/rateLimit", async () => {
 });
 
 vi.mock("@/models/session", () => ({ Session: {} }));
+vi.mock("@/lib/oidc/providers", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/oidc/providers")>()), ssoEnforced }));
 vi.mock("@/lib/auth", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/auth")>();
   return { ...actual, verifyCredentials };
@@ -78,6 +80,7 @@ beforeEach(async () => {
   delete process.env.COOKIE_ALLOW_INSECURE;
   delete process.env.APP_ORIGIN;
   delete process.env.PUBLIC_ORIGIN;
+  ssoEnforced.mockResolvedValue(false);
   verifyCredentials.mockResolvedValue(USER);
   createSession.mockResolvedValue({
     token: "cps_deadbeef",
@@ -89,6 +92,31 @@ beforeEach(async () => {
 
 afterEach(() => {
   delete process.env.TRUSTED_PROXY_HOPS;
+});
+
+describe("POST /api/auth/login — an organisation that requires single sign-on (BP-951)", () => {
+  it("refuses a password before it is checked, and starts no session", async () => {
+    ssoEnforced.mockResolvedValue(true);
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ ssoRequired: true });
+    expect(verifyCredentials).not.toHaveBeenCalled();
+    expect(createSession).not.toHaveBeenCalled();
+    expect(setCookies(response)).toEqual([]);
+  });
+});
+
+describe("POST /api/auth/login — the database is down while the organisation's setting is read (BP-362, BP-951)", () => {
+  it("says the database is unavailable rather than failing with a 500", async () => {
+    ssoEnforced.mockRejectedValue(new DatabaseUnavailableError(new Error("connect ECONNREFUSED")));
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(503);
+    expect(verifyCredentials).not.toHaveBeenCalled();
+  });
 });
 
 describe("POST /api/auth/login — provenance", () => {

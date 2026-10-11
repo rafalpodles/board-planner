@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 
+vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+vi.mock("@/models/rateLimit", async () => {
+  const { inMemoryRateLimitModel } = await import("@/lib/rate-limit-test-store");
+  return { RateLimit: inMemoryRateLimitModel() };
+});
+
 afterEach(() => {
   delete process.env.BOOTSTRAP_TOKEN;
   delete (globalThis as Record<symbol, unknown>)[Symbol.for("board-planner.setup-code")];
@@ -50,5 +56,44 @@ describe("setupCode", () => {
     const { setupCodeMatches } = await load();
 
     expect(setupCodeMatches(candidate)).toBe(false);
+  });
+});
+
+describe("refuseSetupCode (BP-847)", () => {
+  const TOKEN = "chosen-by-the-operator";
+
+  it("stops a source with an address after ten wrong codes, the right one included", async () => {
+    process.env.BOOTSTRAP_TOKEN = TOKEN;
+    const { refuseSetupCode } = await load();
+    for (let i = 0; i < 10; i++) expect((await refuseSetupCode("203.0.113.7", `wrong-${i}`))?.status).toBe(403);
+
+    expect((await refuseSetupCode("203.0.113.7", "wrong-again"))?.status).toBe(429);
+    expect((await refuseSetupCode("203.0.113.7", TOKEN))?.status).toBe(429);
+    expect(await refuseSetupCode("203.0.113.8", TOKEN), "another source is not held up").toBeNull();
+  });
+
+  it("with no address, never refuses the right code however many wrong ones were sent", async () => {
+    process.env.BOOTSTRAP_TOKEN = TOKEN;
+    const { refuseSetupCode } = await load();
+    for (let i = 0; i < 300; i++) expect((await refuseSetupCode(null, `wrong-${i}`))?.status).toBe(403);
+
+    expect(await refuseSetupCode(null, TOKEN)).toBeNull();
+  });
+
+  it("with no address, a wrong code is the same 403 it always was, not a 429", async () => {
+    process.env.BOOTSTRAP_TOKEN = TOKEN;
+    const { refuseSetupCode } = await load();
+
+    const refused = await refuseSetupCode(null, "wrong");
+
+    expect(refused?.status).toBe(403);
+    expect(await refused?.json()).toEqual({ error: "The setup code is missing or wrong." });
+  });
+
+  it("accepts the generated code from a caller with no address", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { refuseSetupCode, setupCode } = await load();
+
+    expect(await refuseSetupCode(null, setupCode())).toBeNull();
   });
 });

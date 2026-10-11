@@ -1,3 +1,4 @@
+import { readAuthenticatedJsonBody } from "@/lib/request-body";
 import type { Types } from "mongoose";
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
@@ -51,7 +52,9 @@ export const POST = withProjectOwner(async (request, { params, user, db }) => {
   const { projectId } = await params;
   await connectDB();
 
-  const { type, name, webhookUrl, events } = await request.json();
+  const read = await readAuthenticatedJsonBody(request);
+  if (!read.ok) return read.response;
+  const { type, name, webhookUrl, events } = read.value;
 
   if (!type || !NOTIFICATION_CHANNEL_TYPES.includes(type as NotificationChannelType)) {
     return NextResponse.json(
@@ -129,7 +132,9 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
   const { projectId } = await params;
   await connectDB();
 
-  const { channelId: rawChannelId, ...updates } = await request.json();
+  const read = await readAuthenticatedJsonBody(request);
+  if (!read.ok) return read.response;
+  const { channelId: rawChannelId, ...updates } = read.value;
   const channelId = canonicalObjectId(rawChannelId);
   if (!channelId) {
     return NextResponse.json({ error: "channelId is required" }, { status: 400 });
@@ -217,7 +222,9 @@ export const DELETE = withProjectOwner(async (request, { params, user, db }) => 
   const { projectId } = await params;
   await connectDB();
 
-  const channelId = canonicalObjectId((await request.json()).channelId);
+  const read = await readAuthenticatedJsonBody(request);
+  if (!read.ok) return read.response;
+  const channelId = canonicalObjectId(read.value.channelId);
   if (!channelId) {
     return NextResponse.json({ error: "channelId is required" }, { status: 400 });
   }

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { withAuth } from "@/lib/middleware";
 import { connectDB } from "@/lib/db";
 import { liveIdentityFilter, providersFor } from "@/lib/oidc/providers";
-import { passwordSignInEnabled } from "@/lib/password-sign-in";
+import { passwordSignInFor } from "@/lib/password-sign-in";
 import { isEmailConfigured } from "@/lib/email";
 
 export const GET = withAuth(async (_request, { user, db }) => {
@@ -17,7 +17,7 @@ export const GET = withAuth(async (_request, { user, db }) => {
   ]);
   return NextResponse.json({
     hasPassword: !!record?.password,
-    passwordSignIn: passwordSignInEnabled(),
+    passwordSignIn: await passwordSignInFor(db),
     // Whether "Forgot your password" can reach this account at all
     mailWorks: isEmailConfigured(),
     identities: identities.map((i) => ({

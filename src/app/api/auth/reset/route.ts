@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { passwordSignInEnabled, passwordSignInOff } from "@/lib/password-sign-in";
+import { passwordRefusal } from "@/lib/password-sign-in";
 import { readJsonBody } from "@/lib/request-body";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
@@ -33,7 +33,8 @@ const REFUSALS: Record<string, string> = {
 export async function POST(request: Request) {
   const db = await scopedForRequest(request);
   if (!db) return refusedHost(request);
-  if (!passwordSignInEnabled()) return passwordSignInOff();
+  const closed = await passwordRefusal(db);
+  if (closed) return closed;
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
 

@@ -1,3 +1,4 @@
+import { readAuthenticatedJsonBody } from "@/lib/request-body";
 import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
@@ -23,7 +24,9 @@ export const PATCH = withAdmin(async (request, { params, user, db }) => {
     return NextResponse.json({ error: "Invalid project id" }, { status: 400 });
   }
 
-  const body = await request.json();
+  const read = await readAuthenticatedJsonBody(request);
+  if (!read.ok) return read.response;
+  const body = read.value;
   const updates: Record<string, unknown> = {};
 
   if (body.enabled !== undefined) {

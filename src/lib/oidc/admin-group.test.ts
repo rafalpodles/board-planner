@@ -3,8 +3,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 const updateOne = vi.fn();
 const countDocuments = vi.fn();
 const logInstanceAudit = vi.fn();
+const warnIfAdminsLockedOut = vi.fn();
 vi.mock("@/models/user", () => ({ User: { updateOne, countDocuments } }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
+vi.mock("@/lib/password-sign-in", () => ({ warnIfAdminsLockedOut }));
 
 const { applyAdminGroup } = await import("./admin-group");
 const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
@@ -52,6 +54,17 @@ describe("the admin group", () => {
   });
 
   // BP-845. A deactivated admin administers nothing, so is no admin left
+  it("checks that the administrators left can still sign in after a demotion, and after nothing else", async () => {
+    await applyAdminGroup(scopedToDefaultOrganisation(), account("admin"), "oidc", ["staff"]);
+    expect(warnIfAdminsLockedOut).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "an admin-group demotion");
+
+    warnIfAdminsLockedOut.mockClear();
+    await applyAdminGroup(scopedToDefaultOrganisation(), account("member"), "oidc", ["planner-admins"]);
+    await applyAdminGroup(scopedToDefaultOrganisation(), account("admin"), "oidc", ["planner-admins"]);
+
+    expect(warnIfAdminsLockedOut).not.toHaveBeenCalled();
+  });
+
   it("counts only active administrators when deciding whether one would be left", async () => {
     await applyAdminGroup(scopedToDefaultOrganisation(), account("admin"), "oidc", []);
 

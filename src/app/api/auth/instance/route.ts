@@ -5,7 +5,7 @@ import { scopedForRequest } from "@/lib/db-scope";
 import { isDatabaseUnreachable } from "@/lib/db-errors";
 import { databaseUnavailable, hostNotFound, organisationSuspended } from "@/lib/middleware";
 import { organisationOfRequest, platformSignInOrigin } from "@/lib/organisation-host";
-import { passwordSignInEnabled } from "@/lib/password-sign-in";
+import { passwordSignInEnabled, passwordSignInFor } from "@/lib/password-sign-in";
 
 /**
  * Whether this instance has been claimed — that is, whether it has any user at all.
@@ -38,9 +38,10 @@ export async function GET(request: Request) {
   if (!db) return hostNotFound();
   // Read from the environment, so it is answered even when the database is not: a page that waited
   // on it rendered nothing, and one that guessed showed a password form an off instance refuses
-  const passwordSignIn = passwordSignInEnabled();
+  let passwordSignIn = passwordSignInEnabled();
   try {
     await connectDB();
+    passwordSignIn = await passwordSignInFor(db);
     const users = await db.User.countDocuments();
     return NextResponse.json({ unclaimed: users === 0 && !organisationDomain(), passwordSignIn, platformSignIn: platformSignInOrigin() });
   } catch (e) {

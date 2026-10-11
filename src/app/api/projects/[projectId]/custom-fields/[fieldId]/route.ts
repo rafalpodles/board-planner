@@ -1,3 +1,4 @@
+import { readAuthenticatedJsonBody } from "@/lib/request-body";
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import type { ScopedDb } from "@/lib/db-scope";
@@ -36,7 +37,9 @@ export const PATCH = withProjectAccess(async (request, { params, user, db }) => 
   if (!fieldId) {
     return NextResponse.json({ error: "Field not found" }, { status: 404 });
   }
-  const body = await request.json();
+  const read = await readAuthenticatedJsonBody(request);
+  if (!read.ok) return read.response;
+  const body = read.value;
   const project = await db.Project.findById(projectId).select("customFields").lean();
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });

@@ -13,6 +13,7 @@ interface Organisation {
   id: string;
   name: string;
   origin: string;
+  ssoOnly?: boolean;
 }
 
 type Step =
@@ -359,7 +360,7 @@ export function PlatformSignIn() {
           </form>
         )}
 
-        {step.name === "password" && !step.passwordSignIn && (
+        {step.name === "password" && (!step.passwordSignIn || step.organisation.ssoOnly) && (
           <div className="space-y-3">
             <p className="text-sm break-words">
               <strong>{step.organisation.name}</strong> signs in through its own page.
@@ -376,7 +377,7 @@ export function PlatformSignIn() {
           </div>
         )}
 
-        {step.name === "password" && step.passwordSignIn && (
+        {step.name === "password" && step.passwordSignIn && !step.organisation.ssoOnly && (
           <form onSubmit={submitPassword} className="space-y-4">
             <p className="text-sm break-words">
               Signing in to <strong>{step.organisation.name}</strong>{" "}
