@@ -48,6 +48,14 @@ async function fillStably(field: Locator, value: string) {
   }).toPass({ timeout: 20_000 });
 }
 
+// A change before the page has hydrated is dropped, and the read-back is what tells
+async function selectStably(field: Locator, value: string) {
+  await expect(async () => {
+    await field.selectOption(value, { timeout: 3_000 });
+    await expect(field).toHaveValue(value, { timeout: 1_000 });
+  }).toPass({ timeout: 20_000 });
+}
+
 const stub = async (path: string) => (await fetch(`${PM_STUB_URL}${path}`)).json();
 
 async function generateOnScreen(page: Page) {
@@ -113,8 +121,8 @@ test("on the platform's key a model off the list is refused with the models that
   expect((await stub("/last-assist-authorization")).authorization).toBeNull();
 
   await test.step("control: choosing a model on the list there runs AI Assist on the platform's key", async () => {
-    await page.goto(`${originOf(GLOBEX)}/settings/agents`);
-    await fillStably(page.getByLabel("Model", { exact: true }), "gpt-4o-mini");
+    await page.goto(`${originOf(GLOBEX)}/settings/ai-keys`);
+    await selectStably(page.getByLabel("Model", { exact: true }), "openai/gpt-4o-mini");
     const saved = page.waitForResponse((r) => r.request().method() === "PUT" && r.url().endsWith("/api/settings"));
     await page.getByRole("button", { name: "Save model" }).click();
     expect((await saved).status()).toBe(200);
@@ -148,19 +156,20 @@ test("the same models run on the organisation's own key", async ({ page }) => {
   expect((await stub("/requests")).map((sent: { model?: string }) => sent.model)).toEqual([PM_MODEL]);
 });
 
-// BP-1006. One field, in Settings → Agents, decides the model of both; a project that names none follows it.
-test("AI Assist and a PM agent that names no model of its own run on the one model saved in Settings → Agents", async ({ page }) => {
+// BP-1006. One field, in Settings → AI key (BP-1024), decides the model of both; a project that names none follows it.
+test("AI Assist and a PM agent that names no model of its own run on the one model saved in Settings → AI key", async ({ page }) => {
   await withDb((db) => db.collection("projects").updateOne({ _id: GLOBEX.projectId }, { $unset: { "pm.model": "" } }));
   await signInOn(page.context(), GLOBEX);
 
-  await page.goto(`${originOf(GLOBEX)}/settings/agents`);
+  await page.goto(`${originOf(GLOBEX)}/settings/ai-keys`);
   await expect(page.getByLabel("Model", { exact: true })).toHaveCount(1);
   await expect(page.getByLabel("Default model")).toHaveCount(0);
-  await fillStably(page.getByLabel("Model", { exact: true }), "gpt-4o-mini");
+  await selectStably(page.getByLabel("Model", { exact: true }), "openai/gpt-4o-mini");
   const saved = page.waitForResponse((r) => r.request().method() === "PUT" && r.url().endsWith("/api/settings"));
   await page.getByRole("button", { name: "Save model" }).click();
   expect((await saved).status()).toBe(200);
-  await expect(page.getByLabel(`PM model for ${SHARED_KEY}`, { exact: false })).toHaveAttribute("placeholder", "openai/gpt-4o-mini");
+  await page.goto(`${originOf(GLOBEX)}/settings/agents`);
+  await expect(page.getByLabel(`PM model for ${SHARED_KEY}`, { exact: false }).locator("option").first()).toHaveText("Default — openai/gpt-4o-mini");
 
   expect((await generateOnScreen(page).then((r) => r.response)).status()).toBe(200);
   expect((await stub("/last-assist-request")).model).toBe("openai/gpt-4o-mini");
@@ -169,4 +178,117 @@ test("AI Assist and a PM agent that names no model of its own run on the one mod
   expect((await chatOnScreen(page)).status()).toBe(200);
   await expect(page.getByText("Done.", { exact: true })).toHaveCount(1);
   expect((await stub("/requests")).map((sent: { model?: string }) => sent.model)).toEqual(["openai/gpt-4o-mini"]);
+});
+
+// BP-1024. The model is chosen beside the key, from what the key in use runs, and a refusal comes when it is saved
+const ownKey = () =>
+  withDb(async (db) => {
+    process.env.ENCRYPTION_KEY = E2E_ENCRYPTION_KEY;
+    await db.collection("settings").updateOne(
+      { organisation: GLOBEX.organisation },
+      { $set: { openrouterKey: encryptSecret(OWN_KEY, GLOBEX.organisation), openrouterKeyHint: OWN_KEY.slice(-4) } }
+    );
+  });
+const stored = () =>
+  withDb(async (db) => ({
+    settings: await db.collection("settings").findOne({ organisation: GLOBEX.organisation }),
+    pmModel: (await db.collection("projects").findOne({ _id: GLOBEX.projectId }))?.pm?.model as string | undefined,
+  }));
+const putSettings = (page: Page, body: unknown) =>
+  page.evaluate(async (data) => {
+    const response = await fetch("/api/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(data) });
+    return { status: response.status, body: await response.json() };
+  }, body);
+
+test("on the platform's key the Model card lists only what that key runs, and a model it would refuse is refused when saved", async ({ page }) => {
+  await signInOn(page.context(), GLOBEX);
+  await page.goto(`${originOf(GLOBEX)}/settings/ai-keys`);
+  const model = page.getByLabel("Model", { exact: true });
+
+  // The model saved before is off the list: it stays the choice shown, and is marked
+  await expect(model.locator("option")).toHaveText([
+    `${ASSIST_MODEL} — not available on our key`,
+    "OpenAI: GPT-4o",
+    "OpenAI: GPT-4o Mini",
+    "OpenAI: GPT-4o Mini 2026",
+    "OpenAI: GPT-6 Luna",
+  ]);
+  await expect(page.getByTestId("ai-model-note")).toHaveText(
+    "On Board Planner's key only OpenAI models run. To use any other model or provider, add your own OpenRouter key above."
+  );
+
+  const refused = await putSettings(page, { aiModel: "anthropic/claude-haiku-5.5" });
+  expect(refused).toEqual({ status: 400, body: { error: refusal("anthropic/claude-haiku-5.5") } });
+  expect((await stored()).settings?.aiModel).toBe(ASSIST_MODEL);
+
+  // The control: a model on the list is saved
+  expect((await putSettings(page, { aiModel: "openai/gpt-4o" })).status).toBe(200);
+  expect((await stored()).settings?.aiModel).toBe("openai/gpt-4o");
+});
+
+test("on the organisation's own key any model OpenRouter lists can be chosen, and one it does not list is refused with the reason", async ({ page }) => {
+  await ownKey();
+  await signInOn(page.context(), GLOBEX);
+  await page.goto(`${originOf(GLOBEX)}/settings/ai-keys`);
+  const model = page.getByLabel("Model", { exact: true });
+  await expect(page.getByTestId("ai-model-note")).toContainText("Your own key runs any OpenRouter model");
+
+  const saved = page.waitForResponse((r) => r.request().method() === "PUT" && r.url().endsWith("/api/settings"));
+  await fillStably(model, "anthropic/claude-haiku-5.5");
+  await page.getByRole("button", { name: "Save model" }).click();
+  expect((await saved).status()).toBe(200);
+  expect((await stored()).settings?.aiModel).toBe("anthropic/claude-haiku-5.5");
+
+  const typo = page.waitForResponse((r) => r.request().method() === "PUT" && r.url().endsWith("/api/settings"));
+  await fillStably(model, "anthropic/claude-haiku-9");
+  await page.getByRole("button", { name: "Save model" }).click();
+  expect((await typo).status()).toBe(400);
+  await expect(page.getByRole("alert").filter({ hasText: "OpenRouter has no model anthropic/claude-haiku-9" })).toBeVisible();
+  expect((await stored()).settings?.aiModel).toBe("anthropic/claude-haiku-5.5");
+});
+
+test("the own key cannot be removed while a model only it runs is in use, and can once none is", async ({ page }) => {
+  await ownKey();
+  await signInOn(page.context(), GLOBEX);
+  await page.goto(`${originOf(GLOBEX)}/settings/ai-keys`);
+
+  const attempt = async () => {
+    const answered = page.waitForResponse((r) => r.request().method() === "PUT" && r.url().includes("/api/settings/ai-keys"));
+    await page.getByRole("button", { name: "Remove key" }).first().click();
+    await page.getByRole("dialog").getByRole("button", { name: "Remove key" }).click();
+    return answered;
+  };
+
+  expect((await attempt()).status()).toBe(409);
+  await expect(page.getByRole("alert").filter({ hasText: `Your own key is what runs ${ASSIST_MODEL}, ${PM_MODEL}, and Board Planner's key does not.` })).toBeVisible();
+  expect((await stored()).settings?.openrouterKey).toBeTruthy();
+
+  // The control: with models the platform's key runs, the same removal goes through
+  await withDb(async (db) => {
+    await db.collection("settings").updateOne({ organisation: GLOBEX.organisation }, { $set: { aiModel: "openai/gpt-4o" } });
+    await db.collection("projects").updateOne({ _id: GLOBEX.projectId }, { $unset: { "pm.model": "" } });
+  });
+  await page.reload();
+  expect((await attempt()).status()).toBe(200);
+  expect((await stored()).settings?.openrouterKey).toBeUndefined();
+});
+
+test("a key OpenRouter rejects is refused when saved and stored nowhere, and one it accepts is stored", async ({ page }) => {
+  await signInOn(page.context(), GLOBEX);
+  await page.goto(`${originOf(GLOBEX)}/settings/ai-keys`);
+  const field = page.getByLabel("Add your OpenRouter key");
+  const save = () => page.waitForResponse((r) => r.request().method() === "PUT" && r.url().includes("/api/settings/ai-keys"));
+
+  const rejected = save();
+  await fillStably(field, "sk-or-v1-rejected-0123456789");
+  await page.getByRole("button", { name: "Save key" }).click();
+  expect((await rejected).status()).toBe(400);
+  await expect(page.getByRole("alert").filter({ hasText: "OpenRouter does not accept this key" })).toBeVisible();
+  expect((await stored()).settings?.openrouterKey).toBeUndefined();
+
+  const accepted = save();
+  await fillStably(field, "sk-or-v1-accepted-0123456789");
+  await page.getByRole("button", { name: "Save key" }).click();
+  expect((await accepted).status()).toBe(200);
+  expect((await stored()).settings?.openrouterKey).toMatch(/^enc:v3:/);
 });
