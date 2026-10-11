@@ -18,14 +18,15 @@ export async function POST(request: Request) {
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
   let db;
+  let closed;
   try {
     db = await scopedForRequest(request);
+    if (db) closed = await passwordRefusal(db);
   } catch (e) {
     if (isDatabaseUnreachable(e)) return databaseUnavailable();
     throw e;
   }
   if (!db) return refusedHost(request);
-  const closed = await passwordRefusal(db);
   if (closed) return closed;
 
   const read = await readJsonBody<{ username?: unknown; password?: unknown }>(request);

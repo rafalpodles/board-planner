@@ -202,28 +202,27 @@ describe("Require single sign-on (BP-951)", () => {
     expect(screen.queryByTestId("sso-enforce-warning")).toBeNull();
   });
 
-  it("warns that a wrong setup locks everybody out, and requires it only after a confirmation", async () => {
+  it("warns that a wrong setup locks everybody out, and requires it with one click", async () => {
     api.get.mockResolvedValue(SAVED);
     api.put.mockResolvedValue({ ...SAVED, enforced: true });
     render(<SingleSignOn />);
 
     expect((await screen.findByTestId("sso-enforce-warning")).textContent).toContain("nobody can sign in");
     fireEvent.click(screen.getByRole("button", { name: "Require single sign-on" }));
-    expect(api.put).not.toHaveBeenCalled();
-    fireEvent.click(await screen.findByRole("button", { name: "Require it" }));
 
     await waitFor(() => expect(api.put).toHaveBeenCalledWith("/api/settings/sso/enforce", { enforced: true }));
     expect(await screen.findByText("Required")).toBeTruthy();
   });
 
-  it("does not require it when the confirmation is cancelled", async () => {
+  it("says why when the server refuses it", async () => {
     api.get.mockResolvedValue(SAVED);
+    api.put.mockRejectedValue(new Error("Set up your single sign-on provider first"));
     render(<SingleSignOn />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Require single sign-on" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
 
-    expect(api.put).not.toHaveBeenCalled();
+    expect((await screen.findByRole("alert")).textContent).toContain("Set up your single sign-on provider first");
+    expect(screen.queryByText("Required")).toBeNull();
   });
 
   it("stops requiring it with one click, since that is the way back", async () => {

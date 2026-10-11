@@ -28,8 +28,12 @@ vi.mock("@/lib/organisation-host", async (importOriginal) => {
 });
 vi.mock("@/models/settings", () => {
   const apply = async (update: { $set?: Record<string, unknown>; $unset?: Record<string, 1> }) => {
-    row = { ...(row ?? {}), ...(update.$set ?? {}) };
-    for (const field of Object.keys(update.$unset ?? {})) delete row[field];
+    for (const [path, value] of Object.entries(update.$set ?? {})) {
+      const [head, ...rest] = path.split(".");
+      if (rest.length === 0) row = { ...(row ?? {}), [head]: value };
+      else row = { ...(row ?? {}), [head]: { ...(((row ?? {})[head] as Record<string, unknown>) ?? {}), [rest.join(".")]: value } };
+    }
+    for (const field of Object.keys(update.$unset ?? {})) if (row) delete row[field];
     return row;
   };
   return {

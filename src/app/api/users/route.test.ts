@@ -42,6 +42,7 @@ vi.mock("@/models/identity", () => ({
 }));
 vi.mock("@/models/session", () => ({ Session: { aggregate: async () => sessionUse } }));
 vi.mock("@/lib/oidc/providers", () => ({
+  ssoEnforced: async () => false,
   liveIdentityFilterFor: async () => ({ live: "only" }),
   providersFor: async () => [
     { id: "oidc", label: "Acme SSO" },

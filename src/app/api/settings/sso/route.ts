@@ -90,7 +90,16 @@ export const PUT = withAdmin(async (request, { user, db }) => {
     return NextResponse.json({ error: "Could not read the provider's discovery document. Check the issuer address, it must serve /.well-known/openid-configuration." }, { status: 400 });
   }
 
-  await writeSettings(db, { $set: { sso: { issuer, clientId, clientSecret: encryptSecret(secret, db.organisation), clientSecretHint: secret.slice(-4), label, enforced: stored?.enforced === true } } });
+  // Field by field, so a save that took seconds to check the provider cannot put back a requirement somebody changed meanwhile
+  await writeSettings(db, {
+    $set: {
+      "sso.issuer": issuer,
+      "sso.clientId": clientId,
+      "sso.clientSecret": encryptSecret(secret, db.organisation),
+      "sso.clientSecretHint": secret.slice(-4),
+      "sso.label": label,
+    },
+  });
   // What changed, never the secret: the log is read by every admin
   void logInstanceAudit(db, {
     action: "instance_settings_changed",

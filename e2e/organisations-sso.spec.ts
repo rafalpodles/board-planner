@@ -176,15 +176,13 @@ test.describe("BP-951: requiring single sign-on", () => {
   const passwordLogin = (request: import("@playwright/test").APIRequestContext, who: OrganisationFixture) =>
     request.post(`${ORGANISATIONS_API}/api/auth/login`, { headers: { ...asOrganisation(who), origin: originOf(who) }, data: { username: USERNAME, password: who.password } });
 
-  test("an administrator turns it on after the warning, and the login page offers the provider alone", async ({ page, browser, request }) => {
+  test("an administrator turns it on, with the warning in front of them, and the login page offers the provider alone", async ({ page, browser, request }) => {
     await makePro(request, ACME);
     await storeSso(ACME);
     await openSettings(page, ACME);
 
     await expect(page.getByTestId("sso-enforce-warning")).toContainText("nobody can sign in");
     await page.getByRole("button", { name: "Require single sign-on" }).click();
-    await page.screenshot({ path: "e2e/.artifacts/bp951-enforce-confirm.png" });
-    await page.getByRole("dialog").getByRole("button", { name: "Require it" }).click();
     await expect(page.getByText("Single sign-on is now required")).toBeVisible();
     await expect(page.getByText("Required", { exact: true })).toBeVisible();
     await page.screenshot({ path: "e2e/.artifacts/bp951-enforce-on.png" });

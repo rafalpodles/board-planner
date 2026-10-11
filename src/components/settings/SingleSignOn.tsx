@@ -185,7 +185,6 @@ function Enforcement({ state, onSaved }: { state: SsoAnswer; onSaved: (answer: S
   const { toast } = useToast();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [confirming, setConfirming] = useState(false);
   const enforced = state.enforced === true;
 
   async function set(value: boolean) {
@@ -220,23 +219,10 @@ function Enforcement({ state, onSaved }: { state: SsoAnswer; onSaved: (answer: S
           {busy ? "Saving…" : "Stop requiring single sign-on"}
         </Button>
       ) : (
-        <Button type="button" disabled={busy} onClick={() => setConfirming(true)}>
-          Require single sign-on
+        <Button type="button" disabled={busy} onClick={() => set(true)}>
+          {busy ? "Saving…" : "Require single sign-on"}
         </Button>
       )}
-      <ConfirmDialog
-        open={confirming}
-        onClose={() => setConfirming(false)}
-        onConfirm={async () => {
-          await set(true);
-          setConfirming(false);
-        }}
-        title="Require single sign-on?"
-        message="From now on nobody signs in with a password, Google or GitHub. If the provider does not work, everybody is locked out, you included."
-        confirmLabel="Require it"
-        loadingLabel="Saving…"
-        loading={busy}
-      />
     </SettingsCard>
   );
 }

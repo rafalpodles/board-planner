@@ -108,6 +108,17 @@ describe("POST /api/auth/login — an organisation that requires single sign-on 
   });
 });
 
+describe("POST /api/auth/login — the database is down while the organisation's setting is read (BP-362, BP-951)", () => {
+  it("says the database is unavailable rather than failing with a 500", async () => {
+    ssoEnforced.mockRejectedValue(new DatabaseUnavailableError());
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(503);
+    expect(verifyCredentials).not.toHaveBeenCalled();
+  });
+});
+
 describe("POST /api/auth/login — provenance", () => {
   it("refuses a cross-site post before any credential check", async () => {
     const response = await POST(request({ "sec-fetch-site": "cross-site" }));
