@@ -10,7 +10,7 @@ A Kanban board, sprints and a dashboard small teams can actually run — plus an
 REST API, so coding agents pick up the same tasks under the same rules as everybody else.
 
 <a href="https://board-planner.com"><img src="https://img.shields.io/badge/%F0%9F%8C%90_board--planner.com-see_it_move-5b8cff?style=for-the-badge" alt="Website"></a>
-<a href="https://board-planner.com/docs"><img src="https://img.shields.io/badge/%F0%9F%93%96_Documentation-28_pages-1f2937?style=for-the-badge" alt="Documentation"></a>
+<a href="https://board-planner.com/docs"><img src="https://img.shields.io/badge/%F0%9F%93%96_Documentation-33_pages-1f2937?style=for-the-badge" alt="Documentation"></a>
 <a href="https://board-planner.com/docs/getting-started/quick-start/"><img src="https://img.shields.io/badge/%E2%9A%A1_Quick_start-5_minutes-22c55e?style=for-the-badge" alt="Quick start"></a>
 
 <img src="https://img.shields.io/badge/Next.js-16-000?logo=nextdotjs&logoColor=white" alt="Next.js 16">
@@ -463,7 +463,7 @@ password.
 
 ```
 src/
-  app/api/          REST API — ~90 routes, plus the MCP endpoint at /api/mcp
+  app/api/          REST API — ~150 routes, plus the MCP endpoint at /api/mcp
   app/              board, task detail, sprints, dashboard, search, settings
   components/       kanban/, tasks/, search/, shell/, pm/, settings/, ui/
   lib/              auth, notifications, webhooks, custom fields, PM agent, force guard
@@ -492,7 +492,7 @@ E2E_PORT=3200 PM_STUB_PORT=3201 E2E_MONGODB_URI=mongodb://localhost:27017/local_
 **[board-planner.com](https://board-planner.com)** is the product tour — a board you can actually
 drag a card on, a worker run you can try to interrupt while it is going, and the gate that refuses.
 
-**[board-planner.com/docs](https://board-planner.com/docs)** is the manual, twenty-eight pages of
+**[board-planner.com/docs](https://board-planner.com/docs)** is the manual, thirty-three pages of
 it, and the single source of truth: it lives in the `board-planner-site` repository and publishes
 on merge, so a page there is never behind the product.
 
@@ -512,5 +512,5 @@ on merge, so a page there is never behind the product.
 Board Planner is free software under the [GNU Affero General Public License v3](LICENSE). One
 directory is the exception: [`src/ee/`](src/ee/) is the commercial Enterprise Edition, licensed
 under [its own terms](src/ee/LICENSE) and usable with a Board Planner subscription or licence
-key. It is empty today; paid connectors and paid AI features will live there. Contributions are
-welcome to everything else, see [CONTRIBUTING.md](CONTRIBUTING.md).
+key. It holds the paid connectors, today the Coda sync; paid AI features will live there too.
+Contributions are welcome to everything else, see [CONTRIBUTING.md](CONTRIBUTING.md).
