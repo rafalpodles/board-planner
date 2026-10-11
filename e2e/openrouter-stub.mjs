@@ -42,6 +42,7 @@ const LISTED = [
   ["e2e/vision-model", "E2E: Vision"],
   ["e2e/instance-default", "E2E: Instance default"],
   ["e2e/governed-model", "E2E: Governed"],
+  ["anthropic/e2e-stub-model", "E2E: Marking provider"],
   ["openai/gpt-6-luna", "OpenAI: GPT-6 Luna"],
   ["openai/gpt-4o", "OpenAI: GPT-4o"],
   ["openai/gpt-4o-mini", "OpenAI: GPT-4o Mini"],
