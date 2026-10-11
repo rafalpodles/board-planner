@@ -20,23 +20,9 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// A username inside a longer one ("al" in "alice", or in "al.k@example.com") is somebody else's name
-const NAME_EDGE_BEFORE = "(?<![a-z0-9_.-])";
-const NAME_EDGE_AFTER = "(?![a-z0-9_-]|[.@][a-z0-9])";
-
-function nameMatcher(name: string): RegExp {
-  return new RegExp(`${NAME_EDGE_BEFORE}${escapeRegExp(name)}${NAME_EDGE_AFTER}`, "gi");
-}
-
-export function scrubNames(text: string, names: string[], label: string): string {
-  let out = text;
-  // The address first: the username is a part of it
-  for (const name of [...names].sort((a, b) => b.length - a.length)) out = out.replace(nameMatcher(name), label);
-  return out;
-}
-
-// The two actions whose detail is "before → after" of something personal, old values included
-const PERSONAL_CHANGE = /email_changed|full_name_changed/;
+// Actions about a person whose detail is theirs whole: old values of a change, an address confirmed
+// earlier, the sentence a sign-up or an invitation wrote about them, the address a reset came from
+const PERSONAL_DETAIL = /^(user_email_changed|user_email_confirmed|user_full_name_changed|user_created|user_password_reset_by_email|invitation_accepted)/;
 // A target is a person only on these; elsewhere it is a machine, a board key or an organisation's slug
 const PERSON_TARGET = /^(user_|invitation_)/;
 const BOARD_ACCESS_ACTIONS = [
@@ -67,10 +53,8 @@ async function scrubInstanceAudit(db: ScopedDb, user: ErasedAccount, label: stri
     if (same(row.actorUsername ?? "", user.username)) set.actorUsername = label;
     const aboutThem = PERSON_TARGET.test(row.action) && isThem(row.target ?? "");
     if (aboutThem) set.target = label;
-    // The detail is text only where it IS the person: their own change rows carry the old values, and
-    // a confirmation carries their address. Anywhere else a word of it may be a role that shares their name.
-    const detail = row.detail ?? "";
-    if (aboutThem && (PERSONAL_CHANGE.test(row.action) || isThem(detail))) set.detail = label;
+    // Whole or not at all: a word of free text may be a role that shares their name
+    if (aboutThem && (PERSONAL_DETAIL.test(row.action) || isThem(row.detail ?? ""))) set.detail = label;
     if (Object.keys(set).length > 0) await db.InstanceAuditLog.updateOne({ _id: row._id }, { $set: set });
   }
 }

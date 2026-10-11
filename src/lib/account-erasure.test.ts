@@ -5,31 +5,13 @@ const removeUploads = vi.fn(async (_ids: string[]) => {});
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/upload-ownership", () => ({ organisationUploads: () => ({ remove: removeUploads }) }));
 
-const { eraseAccountTraces, erasedLabel, scrubNames } = await import("./account-erasure");
+const { eraseAccountTraces, erasedLabel } = await import("./account-erasure");
 const { isErasedLabel } = await import("./erased-label");
 
 const JAN = "6a9d0f0b5d781bded2cb975a";
 const OLA = "6a9d0f0b5d781bded2cb975b";
 const USER = { _id: JAN, username: "jan", email: "jan@example.com" };
 const LABEL = erasedLabel(JAN);
-
-describe("scrubNames", () => {
-  it("replaces a username wherever it stands as a word, in any case, mentions included", () => {
-    expect(scrubNames("Jan changed it; @jan said so, and JAN.", ["jan"], LABEL)).toBe(
-      `${LABEL} changed it; @${LABEL} said so, and ${LABEL}.`
-    );
-  });
-
-  it("leaves a longer name that merely contains it alone", () => {
-    expect(scrubNames("janusz, jan-pawel and ex_jan and jan2", ["jan"], LABEL)).toBe("janusz, jan-pawel and ex_jan and jan2");
-  });
-
-  it("replaces an e-mail address whole, dots and plus signs included, and not a neighbour's", () => {
-    expect(scrubNames("jan+x@example.com → jan.k@example.com", ["jan+x@example.com", "jan"], LABEL)).toBe(
-      `${LABEL} → jan.k@example.com`
-    );
-  });
-});
 
 describe("the label a deleted account is left under", () => {
   it("is opaque, stable for the same account and different for another", () => {
@@ -137,6 +119,10 @@ describe("erasing the traces of a deleted account", () => {
           { _id: "a8", user: OLA, action: "worker_registered", actorUsername: "ola", target: "jan", detail: "" },
           { _id: "a9", user: JAN, action: "worker_enabled", actorUsername: "jan.old", target: "", detail: "" },
           { _id: "a10", user: OLA, action: "user_email_confirmed", actorUsername: "ola", target: "jan@example.com", detail: "jan@example.com" },
+          { _id: "a11", user: JAN, action: "user_email_confirmed_self", actorUsername: "jan", target: "jan", detail: "old@example.com" },
+          { _id: "a12", user: JAN, action: "user_created", actorUsername: "", target: "jan", detail: "signed up with Google, jan@example.com being in an allowed domain" },
+          { _id: "a13", user: JAN, action: "invitation_accepted", actorUsername: "", target: "jan@example.com", detail: "as a member, account jan, signing in with google" },
+          { _id: "a14", user: JAN, action: "user_password_reset_by_email", actorUsername: "", target: "jan", detail: "from 203.0.113.7" },
         ],
       });
     const byId = (rows: Record<string, unknown>[]) => Object.fromEntries(rows.map((r) => [String(r._id), r]));
@@ -174,6 +160,14 @@ describe("erasing the traces of a deleted account", () => {
       const { db, rows } = seed();
       await eraseAccountTraces(db, USER);
       expect(byId(rows("InstanceAuditLog")).a10).toMatchObject({ target: LABEL, detail: LABEL });
+    });
+
+    it("drops what the person's own sign-up, confirmation, invitation and reset rows say about them", async () => {
+      const { db, rows } = seed();
+      await eraseAccountTraces(db, USER);
+      const got = byId(rows("InstanceAuditLog"));
+      for (const id of ["a11", "a12", "a13", "a14"]) expect(got[id].detail).toBe(LABEL);
+      expect(JSON.stringify(rows("InstanceAuditLog"))).not.toMatch(/203\.113|old@example\.com|account jan/);
     });
 
     it("leaves a target that is not a person alone, even when it spells the username", async () => {
