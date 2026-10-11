@@ -88,6 +88,30 @@ describe("GeneralSection member access", () => {
     expect(screen.getByLabelText("Access for bob")).toHaveProperty("value", "none");
   });
 
+  it("marks a grant the identity provider's group made, and only that one", async () => {
+    api.get.mockResolvedValue([
+      { _id: "u1", username: "alice", fullName: "Alice A", relation: "owner", source: "manual", instanceAdmin: false },
+      { _id: "u2", username: "bob", fullName: "Bob B", relation: "member", source: "idp", instanceAdmin: false },
+    ]);
+    renderSection();
+    await screen.findByLabelText("Access for bob");
+
+    expect(screen.getAllByText("IdP")).toHaveLength(1);
+    expect(screen.getByText("Bob B").parentElement?.textContent).toContain("IdP");
+    expect(screen.getByText("Alice A").parentElement?.textContent).not.toContain("IdP");
+  });
+
+  it("takes the marker off once the access was changed by hand and saved", async () => {
+    api.get.mockResolvedValueOnce([{ _id: "u2", username: "bob", fullName: "Bob B", relation: "member", source: "idp", instanceAdmin: false }]);
+    api.get.mockResolvedValue([{ _id: "u2", username: "bob", fullName: "Bob B", relation: "owner", source: "manual", instanceAdmin: false }]);
+    renderSection();
+
+    fireEvent.change(await screen.findByLabelText("Access for bob"), { target: { value: "owner" } });
+    await save();
+
+    await waitFor(() => expect(screen.queryByText("IdP")).toBeNull());
+  });
+
   it("lists an instance admin for reference instead of a select", async () => {
     renderSection();
     await screen.findByLabelText("Access for alice");
