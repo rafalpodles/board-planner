@@ -67,9 +67,11 @@ async function reconcile(db: ScopedDb, user: IUser, board: { _id: Types.ObjectId
   // Two last owners signing in at once each counted the other: one of them stays. Only the mapping's own row is put
   // back: a grant somebody made by hand meanwhile is theirs, whatever it says
   if (losesOwner && (await ownerCount(db, projectId)) === 0) {
-    if (want) await db.Grant.updateOne({ ...where, source: "idp" }, { $set: { relation: "owner" } });
-    else await db.Grant.updateOne(where, { $setOnInsert: { relation: "owner", source: "idp", createdBy: null } }, { upsert: true });
-    return;
+    const back = want
+      ? (await db.Grant.updateOne({ ...where, source: "idp" }, { $set: { relation: "owner" } })).modifiedCount > 0
+      : (await db.Grant.updateOne(where, { $setOnInsert: { relation: "owner", source: "idp", createdBy: null } }, { upsert: true })).upsertedCount > 0;
+    // Put back: nothing changed. Not, because a grant made by hand took its place meanwhile: the change stands and is recorded
+    if (back) return;
   }
   record(db, user, board, projectId, current.relation, want ?? undefined, want ? "member_role_changed" : "member_removed");
 }

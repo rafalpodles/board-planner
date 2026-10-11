@@ -181,6 +181,23 @@ describe("the group mapping of a board, applied at sign-in (BP-862)", () => {
     expect(logProjectAudit).not.toHaveBeenCalled();
   });
 
+  it("records the change when the restore found a grant made by hand in the row's place, which it leaves alone", async () => {
+    grants.set(String(BOARD), { relation: "owner", source: "idp" });
+    ownerCount.mockResolvedValueOnce(2).mockResolvedValueOnce(0);
+    deleteOne.mockResolvedValue({ deletedCount: 1 });
+    updateOne.mockResolvedValue({ upsertedCount: 0, modifiedCount: 0 });
+
+    await run(["other"]);
+    expect(logProjectAudit).toHaveBeenCalledWith(db, String(BOARD), USER._id, "member_removed", expect.stringContaining("owner → no access"));
+
+    logProjectAudit.mockClear();
+    grants.set(String(BOARD), { relation: "owner", source: "idp" });
+    ownerCount.mockResolvedValueOnce(2).mockResolvedValueOnce(0);
+    updateOne.mockResolvedValueOnce({ upsertedCount: 0, modifiedCount: 1 }).mockResolvedValueOnce({ upsertedCount: 0, modifiedCount: 0 });
+    await run(["staff"]);
+    expect(logProjectAudit).toHaveBeenCalledWith(db, String(BOARD), USER._id, "member_role_changed", expect.stringContaining("owner → member"));
+  });
+
   it("goes on to the next board when one fails, and never fails the sign-in", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     boards = [mapped(["staff", "member"]), { ...mapped(["staff", "member"]), _id: OTHER_BOARD, key: "OB" }];

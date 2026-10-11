@@ -43,8 +43,6 @@ export const GET = withProjectAccessOrWorker(async (_request, { params, user, db
   obj.githubWebBase = githubWebBase();
   delete obj.githubRepo;
   delete obj.gitlabRepo;
-  // Who owns the board is its owners' to read, on their own route: not every member's, worker's and connector's
-  delete obj.groupRoleMap;
   if (obj.pm) obj.pm.mcpServers = sanitizeMcpServers(obj.pm.mcpServers);
   const pmAccess = await pmAvailability(db);
   if (pmAccess) {
