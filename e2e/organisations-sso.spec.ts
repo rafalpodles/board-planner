@@ -268,3 +268,87 @@ test.describe("BP-951: requiring single sign-on", () => {
     expect((await passwordLogin(request, ACME)).status()).toBe(200);
   });
 });
+
+test.describe("BP-951: an organisation's admin group", () => {
+  const addMember = (who: OrganisationFixture, role: "member" | "admin") =>
+    withDb(async (db) => {
+      const email = `ada-${Date.now()}@${who.slug}.example`;
+      const _id = new mongoose.Types.ObjectId();
+      await db.collection("users").insertOne({
+        _id,
+        organisation: who.organisation,
+        username: `ada${Date.now()}`,
+        fullName: "Ada",
+        email,
+        emailVerifiedAt: new Date(),
+        emailNotifications: false,
+        collapseEmptyColumns: false,
+        kind: "human",
+        role,
+        createdAt: new Date(),
+      });
+      return { _id, email };
+    });
+  const roleOf = (id: mongoose.Types.ObjectId) => withDb(async (db) => (await db.collection("users").findOne({ _id: id }))?.role);
+
+  async function signInThrough(browser: import("@playwright/test").Browser, who: OrganisationFixture, email: string, groups?: string[], claims: Record<string, unknown> = {}) {
+    await script({ sub: `sub-${Date.now()}-${Math.random()}`, email, email_verified: true, ...(groups ? { groups } : {}), ...claims });
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await page.goto(`${originOf(who)}/login`);
+    await page.getByRole("button", { name: `Continue with ${SSO_LABEL}` }).click();
+    await expect(page).toHaveURL(`${originOf(who)}/projects`);
+    await context.close();
+  }
+
+  test("an administrator sets it on the page; people in the group become administrators at sign-in and the others members", async ({ page, browser, request }) => {
+    await makePro(request, ACME);
+    await storeSso(ACME);
+    const member = await addMember(ACME, "member");
+    const admin = await addMember(ACME, "admin");
+    await openSettings(page, ACME);
+
+    await page.getByLabel("Admin group (optional)").fill("acme-admins");
+    await expect(page.getByTestId("sso-admin-group-note")).toContainText("everybody else a member");
+    const saved = page.waitForResponse((response) => response.url().endsWith("/api/settings/sso") && response.request().method() === "PUT");
+    await page.getByRole("button", { name: "Save changes" }).click();
+    expect((await saved).status()).toBe(200);
+    await expect(page.getByLabel("Admin group (optional)")).toHaveValue("acme-admins");
+    await page.screenshot({ path: "e2e/.artifacts/bp951-admin-group.png" });
+
+    await signInThrough(browser, ACME, member.email, ["staff", "acme-admins"]);
+    expect(await roleOf(member._id)).toBe("admin");
+
+    await signInThrough(browser, ACME, admin.email, ["staff"]);
+    expect(await roleOf(admin._id)).toBe("member");
+    const audit = await withDb((db) => db.collection("instanceauditlogs").find({ organisation: ACME.organisation, action: "user_role_changed" }).toArray());
+    expect(audit.map((row) => row.detail).join(" ")).toContain("acme-admins");
+  });
+
+  test("a different groups claim is read when the organisation names one", async ({ browser, request }) => {
+    await makePro(request, ACME);
+    await storeSso(ACME, SSO_LABEL, false, { adminGroup: "acme-admins", groupsClaim: "roles" });
+    const member = await addMember(ACME, "member");
+
+    await signInThrough(browser, ACME, member.email, ["acme-admins"]);
+    expect(await roleOf(member._id), "the groups claim is not the one named").toBe("member");
+
+    await signInThrough(browser, ACME, member.email, undefined, { roles: ["acme-admins"] });
+    expect(await roleOf(member._id)).toBe("admin");
+  });
+
+  test("it never demotes the last administrator, and is not read for another organisation", async ({ browser, request }) => {
+    await makePro(request, ACME);
+    await makePro(request, GLOBEX);
+    await storeSso(ACME, SSO_LABEL, false, { adminGroup: "acme-admins" });
+    await storeSso(GLOBEX);
+    await confirmAddress(ACME);
+
+    await signInThrough(browser, ACME, `boss@${ACME.slug}.example`, ["staff"]);
+    expect(await roleOf(ACME.adminId), "the last administrator stays").toBe("admin");
+
+    const stranger = await addMember(GLOBEX, "member");
+    await signInThrough(browser, GLOBEX, stranger.email, ["acme-admins"]);
+    expect(await roleOf(stranger._id)).toBe("member");
+  });
+});
