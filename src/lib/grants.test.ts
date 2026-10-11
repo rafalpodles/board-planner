@@ -207,6 +207,20 @@ describe("check", () => {
     expect(findOne).toHaveBeenCalledWith({ subject: "u1", objectType: "project", object: P, organisation: DEFAULT_ORGANISATION_ID });
   });
 
+  // BP-861. A group mapping and a person make the same grant as far as access goes
+  it.each(["owner", "member"] as const)("answers a %s grant alike whoever made it, for each need", async (relation) => {
+    const user = { _id: "u1", role: "member" } as never;
+    const answers = [];
+    for (const source of [undefined, "manual", "idp"]) {
+      findOne.mockReturnValue(lean({ relation, ...(source ? { source } : {}) }));
+      answers.push([await check(scopedToDefaultOrganisation(), user, P, "access"), await check(scopedToDefaultOrganisation(), user, P, "admin")]);
+    }
+
+    expect(answers[0]).toEqual(relation === "owner" ? [true, true] : [true, false]);
+    expect(answers[1]).toEqual(answers[0]);
+    expect(answers[2]).toEqual(answers[0]);
+  });
+
   it("denies when the user has no grant on this project", async () => {
     findOne.mockReturnValue(lean(null));
     const user = { _id: "u1", role: "member" } as never;

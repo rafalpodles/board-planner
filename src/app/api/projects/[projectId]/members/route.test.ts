@@ -110,7 +110,7 @@ describe("GET members", () => {
     const body = await (await GET(new Request("http://x"), { params })).json();
 
     expect(body).toEqual([
-      { _id: "u1", username: "ann", fullName: "Ann", relation: "owner", instanceAdmin: false, deactivated: false },
+      { _id: "u1", username: "ann", fullName: "Ann", relation: "owner", source: "manual", instanceAdmin: false, deactivated: false },
       { _id: "u2", username: "bo", fullName: "Bo", relation: null, instanceAdmin: false, deactivated: false },
     ]);
   });
@@ -152,7 +152,7 @@ describe("PUT members", () => {
     expect(res.status).toBe(200);
     expect(grantUpsert).toHaveBeenCalledWith(
       { subject: U1, objectType: "project", object: PROJECT, organisation: DEFAULT_ORGANISATION_ID },
-      { $set: { relation: "owner" }, $setOnInsert: { createdBy: "o1" } },
+      { $set: { relation: "owner", source: "manual" }, $setOnInsert: { createdBy: "o1" } },
       { upsert: true, returnDocument: "before" }
     );
   });
@@ -201,7 +201,7 @@ describe("PUT members", () => {
     expect(res.status).toBe(200);
     expect(grantUpsert).toHaveBeenCalledWith(
       { subject: U2, objectType: "project", object: PROJECT, organisation: DEFAULT_ORGANISATION_ID },
-      { $set: { relation: "member" }, $setOnInsert: { createdBy: "o1" } },
+      { $set: { relation: "member", source: "manual" }, $setOnInsert: { createdBy: "o1" } },
       { upsert: true, returnDocument: "before" }
     );
   });
@@ -222,7 +222,7 @@ describe("PUT members", () => {
     expect(res.status).toBe(200);
     expect(grantUpsert).toHaveBeenCalledWith(
       { subject: U2, objectType: "project", object: PROJECT, organisation: DEFAULT_ORGANISATION_ID },
-      { $set: { relation: "member" }, $setOnInsert: { createdBy: "o1" } },
+      { $set: { relation: "member", source: "manual" }, $setOnInsert: { createdBy: "o1" } },
       { upsert: true, returnDocument: "before" }
     );
   });
@@ -239,11 +239,21 @@ describe("PUT members", () => {
     // An upsert: a concurrent removal may have taken the row this puts back
     expect(grantUpdateOne).toHaveBeenCalledWith(
       { subject: U2, objectType: "project", object: PROJECT, organisation: DEFAULT_ORGANISATION_ID },
-      { $set: { relation: "owner" }, $setOnInsert: { createdBy: "o1" } },
+      { $set: { relation: "owner", source: "manual" }, $setOnInsert: { createdBy: "o1" } },
       { upsert: true }
     );
     expect(logProjectAudit).not.toHaveBeenCalled();
     expect(createNotifications).not.toHaveBeenCalled();
+  });
+
+  it("puts a group-made owner back as a group-made one", async () => {
+    grantFindOneLean.mockResolvedValue({ relation: "owner" });
+    grantUpsertLean.mockResolvedValue({ relation: "owner", source: "idp" });
+    ownerCount.mockResolvedValueOnce(2).mockResolvedValueOnce(0);
+
+    await PUT(put({ userId: U2, relation: "member" }), { params });
+
+    expect(grantUpdateOne).toHaveBeenCalledWith(expect.anything(), { $set: { relation: "owner", source: "idp" }, $setOnInsert: { createdBy: "o1" } }, { upsert: true });
   });
 
   it("records an owner re-created after somebody else removed them meanwhile", async () => {
@@ -302,10 +312,19 @@ describe("DELETE members", () => {
     expect(res.status).toBe(409);
     expect(grantUpdateOne).toHaveBeenCalledWith(
       { subject: U2, objectType: "project", object: PROJECT, organisation: DEFAULT_ORGANISATION_ID },
-      { $setOnInsert: { relation: "owner", createdBy: "o0" } },
+      { $setOnInsert: { relation: "owner", createdBy: "o0", source: "manual" } },
       { upsert: true }
     );
     expect(logProjectAudit).not.toHaveBeenCalled();
+  });
+
+  it("puts a group-made owner's grant back as a group-made one", async () => {
+    grantDeleteLean.mockResolvedValue({ relation: "owner", createdBy: "o0", source: "idp" });
+    ownerCount.mockResolvedValueOnce(2).mockResolvedValueOnce(0);
+
+    await DELETE(new Request(`http://x/api/projects/${PROJECT}/members?userId=${U2}`, { method: "DELETE" }), { params });
+
+    expect(grantUpdateOne).toHaveBeenCalledWith(expect.anything(), { $setOnInsert: { relation: "owner", createdBy: "o0", source: "idp" } }, { upsert: true });
   });
 
   it("makes them owner again when a concurrent write re-added them as a member meanwhile", async () => {
@@ -449,6 +468,68 @@ describe("DELETE members", () => {
 });
 
 // BP-753: being given a board, or a different role on one, used to arrive in silence
+describe("who made a grant (BP-861)", () => {
+  const audited = async () => {
+    await vi.waitFor(() => expect(logProjectAudit).toHaveBeenCalled());
+    return logProjectAudit.mock.calls[0];
+  };
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+  it("says in the member list which grants a group made, and reads a grant older than the field as made by hand", async () => {
+    userFindLean.mockResolvedValue([
+      { _id: "u1", username: "ann", fullName: "Ann", role: "member" },
+      { _id: "u2", username: "bo", fullName: "Bo", role: "member" },
+      { _id: "u3", username: "cy", fullName: "Cy", role: "member" },
+    ]);
+    grantFindLean.mockResolvedValue([
+      { subject: "u1", relation: "member", source: "idp" },
+      { subject: "u2", relation: "member" },
+      { subject: "u3", relation: "owner", source: "manual" },
+    ]);
+
+    const body = await (await GET(new Request("http://x"), { params })).json();
+
+    expect(body.map((m: { source: string }) => m.source)).toEqual(["idp", "manual", "manual"]);
+  });
+
+  it("makes a grant by hand whatever made it before, so the next sign-in does not undo it", async () => {
+    grantUpsertLean.mockResolvedValue({ relation: "member", source: "idp" });
+
+    await PUT(put({ userId: U1, relation: "owner" }), { params });
+
+    expect(grantUpsert.mock.calls[0][1]).toEqual({ $set: { relation: "owner", source: "manual" }, $setOnInsert: { createdBy: "o1" } });
+  });
+
+  it("audits taking a group's grant over by hand, with the role it changed to", async () => {
+    grantUpsertLean.mockResolvedValue({ relation: "member", source: "idp" });
+
+    await PUT(put({ userId: U1, relation: "owner" }), { params });
+
+    expect((await audited())[4]).toBe("uma: member → owner (set by hand; the identity provider's group had set it)");
+  });
+
+  it("audits taking it over even when the role stays the same, and tells the person nothing since nothing changed for them", async () => {
+    grantUpsertLean.mockResolvedValue({ relation: "member", source: "idp" });
+
+    await PUT(put({ userId: U1, relation: "member" }), { params });
+    await settle();
+
+    expect(logProjectAudit).toHaveBeenCalledTimes(1);
+    expect(logProjectAudit.mock.calls[0][4]).toContain("member → member (set by hand");
+    expect(createNotifications).not.toHaveBeenCalled();
+  });
+
+  it("audits nothing, and notifies nobody, when a grant made by hand is set to the role it holds", async () => {
+    grantUpsertLean.mockResolvedValue({ relation: "member", source: "manual" });
+
+    await PUT(put({ userId: U1, relation: "member" }), { params });
+    await settle();
+
+    expect(logProjectAudit).not.toHaveBeenCalled();
+    expect(createNotifications).not.toHaveBeenCalled();
+  });
+});
+
 describe("PUT members tells the person", () => {
   const announced = async () => {
     await vi.waitFor(() => expect(createNotifications).toHaveBeenCalled());
