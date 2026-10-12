@@ -57,6 +57,27 @@ async function open(page: Page, path: string): Promise<void> {
   await settle(page);
 }
 
+// The wizard on its first step with something typed, so the key suggestion is on the screen
+async function newProject(page: Page): Promise<void> {
+  await open(page, "/projects/new");
+  await page.getByLabel("Project Name").fill("Mobile Companion");
+  await page.getByLabel("Description").fill("The companion app for engineers in the field.");
+  await page.getByLabel("Project Key").waitFor();
+  await settle(page);
+}
+
+// Step four, with the people search open
+async function newProjectAccess(page: Page): Promise<void> {
+  await newProject(page);
+  await page.getByRole("button", { name: /^Next: Workflow/ }).click();
+  await page.getByRole("button", { name: /^Next: Task fields/ }).click();
+  await page.getByRole("button", { name: /^Next: Automation/ }).click();
+  await page.getByLabel("Repository URL").fill("https://github.com/acme/mobile-companion");
+  await page.getByLabel("Who can use this board").fill("ma");
+  await page.getByRole("option").first().waitFor();
+  await settle(page);
+}
+
 async function board(page: Page): Promise<void> {
   await open(page, `/projects/${await projectId(page, "ORB")}`);
   await page.getByText("Usage-based invoice preview").first().waitFor();
@@ -110,7 +131,8 @@ const SCENARIOS: Record<string, Scenario> = {
     },
   },
   login: { viewport: DESKTOP, signedOut: true, run: (page) => open(page, "/login") },
-  "new-project": { viewport: DESKTOP, run: (page) => open(page, "/projects/new") },
+  "new-project": { viewport: DESKTOP, run: newProject },
+  "new-project-access": { viewport: DESKTOP, run: newProjectAccess },
   "board-kanban": { viewport: DESKTOP, run: board },
   "board-dark": { viewport: DESKTOP, dark: true, run: board },
   "board-mobile": { viewport: PHONE, run: board },
