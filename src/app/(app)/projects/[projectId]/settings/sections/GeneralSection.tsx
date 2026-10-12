@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/Textarea";
 import { IconPicker } from "@/components/ui/IconPicker";
 import { SettingsCard, ListRow } from "@/components/settings/SettingsCard";
 import { DangerAction } from "@/components/settings/DangerAction";
+import { ProjectExport } from "@/components/settings/ProjectExport";
 import { SettingRow } from "@/components/settings/SettingRow";
 import { LoadFailed } from "@/components/ui/LoadFailed";
 import { BoardInvitations } from "@/components/settings/BoardInvitations";
@@ -396,6 +397,8 @@ export function GeneralSection({
 
       {membersRead === "loaded" && <BoardInvitations projectId={projectId} />}
       {membersRead === "loaded" && <BoardGroupRoles projectId={projectId} />}
+
+      {project.canAdmin && <ProjectExport projectId={projectId} projectName={project.name} />}
 
       {project.canAdmin && (
         <SettingsCard

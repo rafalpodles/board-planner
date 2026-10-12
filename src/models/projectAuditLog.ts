@@ -23,6 +23,7 @@ const ACTIONS = [
   "worker_updated",
   "webhook_secret_revealed",
   "webhook_secret_rotated",
+  "project_exported",
 ];
 
 const projectAuditLogSchema = new Schema<IProjectAuditLog>(

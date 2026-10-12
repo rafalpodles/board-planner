@@ -1,11 +1,7 @@
 import type { ScopedDb } from "./db-scope";
 import { organisationExport } from "./organisation-life-cycle";
 
-// Recorded before the first byte: a download abandoned near its end has still carried the data away
-export async function organisationExportResponse(db: ScopedDb, slug: string, record: () => Promise<void>): Promise<Response> {
-  await record();
-  const filename = `${slug.replace(/[^a-z0-9-]/g, "") || "organisation"}-export-${new Date().toISOString().slice(0, 10)}.ndjson.gz`;
-  const lines = organisationExport(db);
+export function gzipLinesResponse(lines: AsyncGenerator<string>, filename: string): Response {
   const body = new ReadableStream<string>({
     async pull(controller) {
       const next = await lines.next();
@@ -25,4 +21,13 @@ export async function organisationExportResponse(db: ScopedDb, slug: string, rec
       "Cache-Control": "no-store",
     },
   });
+}
+
+export const exportFilename = (name: string, fallback: string) =>
+  `${name.replace(/[^a-z0-9-]/g, "") || fallback}-export-${new Date().toISOString().slice(0, 10)}.ndjson.gz`;
+
+// Recorded before the first byte: a download abandoned near its end has still carried the data away
+export async function organisationExportResponse(db: ScopedDb, slug: string, record: () => Promise<void>): Promise<Response> {
+  await record();
+  return gzipLinesResponse(organisationExport(db), exportFilename(slug, "organisation"));
 }
