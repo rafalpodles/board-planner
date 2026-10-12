@@ -179,6 +179,7 @@ export const GROUPS = {
     "organisations-copy.spec.ts",
     "organisations-addresses.spec.ts",
     "organisations-boards.spec.ts",
+    "organisations-project-export.spec.ts",
     "organisations-name.spec.ts",
     "organisations-public-pages.spec.ts",
     "organisations-sign-in.spec.ts",
