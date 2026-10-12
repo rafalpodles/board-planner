@@ -44,7 +44,7 @@ function project(row: Row, fields: string[] | null): Row {
 /**
  * A scoped database held in memory, whose filters really select: a fake that returns its seed
  * whatever it is asked cannot tell a query on the right person from one on everybody. Understands
- * equality, $or, $in, $ne and $regex, and $set / $pull in updates.
+ * equality, $or, $in, $ne and $regex, distinct, and $set / $pull in updates.
  */
 export function memoryDb(seed: Record<string, Row[]> = {}) {
   const store: Record<string, Row[]> = Object.fromEntries(Object.entries(seed).map(([name, rows]) => [name, rows.map((r) => ({ ...r }))]));
@@ -84,6 +84,17 @@ export function memoryDb(seed: Record<string, Row[]> = {}) {
         lean: async () => (found ? project(found, fields) : null),
       };
       return chain;
+    },
+    distinct: async (field: string, filter: Filter = {}) => {
+      calls.push({ model: name, op: "distinct", filter });
+      const seen = new Map<string, unknown>();
+      for (const row of rowsOf(name).filter((r) => matches(r, filter))) {
+        const value = row[field];
+        for (const item of Array.isArray(value) ? value : [value]) {
+          if (item !== null && item !== undefined) seen.set(String(item), item);
+        }
+      }
+      return [...seen.values()];
     },
     deleteMany: async (filter: Filter) => {
       calls.push({ model: name, op: "deleteMany", filter });
