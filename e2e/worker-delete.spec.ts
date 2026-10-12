@@ -126,7 +126,7 @@ test("an admin deletes a machine that has gone quiet, and its credential stops w
   await expect(logged).toContainText(MACHINE.name);
 });
 
-test("a machine that still holds a run is not deleted, and the refusal names the tasks", async ({
+test("a machine whose run is still inside its lease is not deleted, and one past it is", async ({
   page,
   request,
 }) => {
@@ -135,15 +135,29 @@ test("a machine that still holds a run is not deleted, and the refusal names the
   await openFleet(page);
   const row = fleetRow(page, WORKER_NAME);
   await expect(row.getByText("stale")).toBeVisible();
-  await expect(row.getByRole("button", { name: "Delete" })).toBeDisabled();
-
-  await signInApi(request, ADMIN_USERNAME, ADMIN_PASSWORD);
-  const refused = await request.delete(`/api/workers/${WORKER_ID}`, { headers: SAME_ORIGIN });
+  await row.getByRole("button", { name: "Delete" }).click();
+  const dialog = page.getByRole("dialog", { name: `Delete ${WORKER_NAME}?` });
+  const [refused] = await Promise.all([
+    page.waitForResponse(
+      (r) => new URL(r.url()).pathname === `/api/workers/${WORKER_ID}` && r.request().method() === "DELETE"
+    ),
+    dialog.getByRole("button", { name: "Delete" }).click(),
+  ]);
   expect(refused.status()).toBe(409);
-  const body = await refused.json();
-  expect(body.taskKeys).toEqual([HELD_TASK_KEY]);
-  expect(body.error).toContain(HELD_TASK_KEY);
+  expect((await refused.json()).taskKeys).toEqual([HELD_TASK_KEY]);
+  await expect(page.getByText(new RegExp(`still holds ${HELD_TASK_KEY}`))).toBeVisible();
+  await expect(fleetRow(page, WORKER_NAME).getByText(WORKER_NAME)).toBeVisible();
   expect(await workerCount({ _id: WORKER_ID })).toBe(1);
+
+  // The control: the same machine, once the run's lease has run out, goes
+  await (await handle()).collection("tasks").updateMany(
+    { "execution.workerId": String(WORKER_ID) },
+    { $set: { "execution.startedAt": new Date(Date.now() - 3 * 60 * 60_000) } }
+  );
+  await signInApi(request, ADMIN_USERNAME, ADMIN_PASSWORD);
+  const allowed = await request.delete(`/api/workers/${WORKER_ID}`, { headers: SAME_ORIGIN });
+  expect(allowed.status(), await allowed.text()).toBe(200);
+  expect(await workerCount({ _id: WORKER_ID })).toBe(0);
 });
 
 test("only an administrator in a browser session can delete a machine", async ({ request }) => {

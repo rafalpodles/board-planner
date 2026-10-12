@@ -5,6 +5,7 @@ import { withAuth, withWorker } from "@/lib/middleware";
 import { stripControlCharacters } from "@/lib/identifiers";
 import { assignmentsFor, catalogueFor, offersFor, overriddenWorkerPolicy, ownerReachableProjectIds, toApiWorker, usableRepos, WORKER_STALE_MS } from "@/lib/worker-service";
 import { taskKeyOf } from "@/lib/task-key";
+import { EXECUTION_LEASE_MS } from "@/lib/execution-lease";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { decisionsForWorker } from "@/lib/task-decisions";
 import { InstanceAuditAction } from "@/types";
@@ -218,6 +219,7 @@ export const DELETE = withAuth(async (_request, { params, user, db }) => {
   const held = await db.Task.find({
     "execution.workerId": workerId,
     "execution.runId": { $nin: [null, ""] },
+    "execution.startedAt": { $gte: new Date(Date.now() - EXECUTION_LEASE_MS) },
   })
     .select("taskNumber project")
     .populate("project", "key")
@@ -229,7 +231,7 @@ export const DELETE = withAuth(async (_request, { params, user, db }) => {
     );
     return NextResponse.json(
       {
-        error: `${worker.name} still holds ${keys.join(", ")}. Release the task or wait for its lease to run out, then delete the worker.`,
+        error: `${worker.name} still holds ${keys.join(", ")}. Wait for its lease to run out, up to two hours after the run started, then delete the worker.`,
         taskKeys: keys,
       },
       { status: 409 }

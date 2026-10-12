@@ -784,6 +784,18 @@ describe("DELETE removes a machine's record and with it its credential", () => {
     expect(logInstanceAudit).not.toHaveBeenCalled();
   });
 
+  // Past its lease the board takes the task back whether or not the machine exists, so a run that
+  // old is no reason to keep a dead machine's row
+  it("counts only runs still inside their lease as held", async () => {
+    const before = Date.now();
+    await DELETE(deleteRequest(), ctx());
+
+    const [filter] = taskFind.mock.calls.at(-1) as unknown as [Record<string, { $gte: Date }>];
+    const cutoff = filter["execution.startedAt"].$gte.getTime();
+    expect(before - cutoff).toBeGreaterThanOrEqual(2 * 60 * 60_000 - 1_000);
+    expect(before - cutoff).toBeLessThan(2 * 60 * 60_000 + 5_000);
+  });
+
   it("is a 404 for a machine that is not there, and for an id that is not one", async () => {
     workerFindOne.mockResolvedValue(null);
     expect((await DELETE(deleteRequest(), ctx())).status).toBe(404);

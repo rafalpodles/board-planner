@@ -624,13 +624,11 @@ export default function AdminWorkersPage() {
                             label="Delete"
                             danger
                             title={
-                              worker.currentTask
-                                ? `Holds ${worker.currentTask.taskKey} — release the task first`
-                                : worker.stale
-                                  ? "Delete this worker"
-                                  : "Seen in the last five minutes — switch it off and stop it first"
+                              worker.stale
+                                ? "Delete this worker"
+                                : "Seen in the last five minutes — switch it off and stop it first"
                             }
-                            disabled={savingId === worker._id || !worker.stale || !!worker.currentTask}
+                            disabled={savingId === worker._id || !worker.stale}
                             onClick={() => setDeleting(worker)}
                           >
                             <path d="M9 3h6l1 2h4v2H4V5h4zM6 9h12l-1 11a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2z" />
