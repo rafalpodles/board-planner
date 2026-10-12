@@ -41,26 +41,33 @@ calling job grants.
   *GitHub Actions is not permitted to create or approve pull requests*.
 - **Run the required checks on it.** `main`'s ruleset (*All CI green*) requires two checks on the
   pull request's head commit: `CI passed`, from `ci.yml`, and `Sign-off present, src/ee untouched`,
-  from `contributions.yml`. A branch pushed with `GITHUB_TOKEN` starts neither workflow, so the
-  release PR sits blocked with both checks missing. The live rules, including whether the branch
-  must also be up to date, are `gh api repos/rafalpodles/board-planner/rules/branches/main`.
+  from `contributions.yml`. A branch pushed with `GITHUB_TOKEN` starts no `ci.yml` run, and the
+  `pull_request` run of `contributions.yml` that the bot's pull request does start is held at
+  `action_required`, so the pull request sits blocked with neither check on it. The live rules,
+  including whether the branch must also be up to date, are
+  `gh api repos/rafalpodles/board-planner/rules/branches/main`.
 
-  A manual run does not unblock it: **Actions → CI → Run workflow** goes green, but a dispatch run's
-  check suite is not part of the pull request's status. Do this as the repository owner instead, in
-  this order, because checks attach to the head commit:
+  A manual run does not unblock it: **Actions → CI → Run workflow** goes green and leaves a
+  `CI passed` check run on the commit, but the pull request's checks stay empty and it stays
+  blocked. Do this as the repository owner instead, in this order, because checks attach to the
+  head commit:
 
   1. Push an empty commit to the release branch (`git commit --allow-empty`). A `push` made by a
      person starts `ci.yml`, and that run counts.
-  2. Close the pull request and reopen it. The `pull_request` event starts `contributions.yml`,
-     whose job is skipped for a branch of this repository, and a skipped required check counts as
-     passed.
+  2. Close the pull request and reopen it. The `pull_request` event, made by a person, starts
+     `contributions.yml`, whose job is skipped for a branch of this repository, and a skipped
+     required check counts as passed.
+
+  Release-please force-pushes the branch whenever `main` moves, which drops the empty commit and the
+  checks with it. Do the two steps after the last merge to `main` that belongs in the release, and
+  again if another lands.
 
   Making both run on their own takes a token that is not `GITHUB_TOKEN`. The least privilege is a
   GitHub App installed on this repository alone with *Contents* and *Pull requests* read-and-write,
   its token minted per run by `actions/create-github-app-token` and passed as the action's `token`.
-  Its pushes then start `ci.yml` and `contributions.yml` by themselves, as does its tag push
-  `release.yml`, so the `release` job in `release-please.yml` has to go in the same change, or every
-  release builds twice.
+  Its pushes and pull requests are then ordinary events, which should start both workflows; this
+  repository has not tried it. Its tag push also starts `release.yml` by itself, so the `release`
+  job in `release-please.yml` has to be removed in the same change, or every release builds twice.
 
 A tag pushed by hand still releases (below), but release-please does not know about it: bump
 `.release-please-manifest.json` and `package.json` to that version in a commit, or the next release
