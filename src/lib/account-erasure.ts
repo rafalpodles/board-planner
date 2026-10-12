@@ -104,16 +104,21 @@ async function deleteConversations(db: ScopedDb, userId: Id) {
 // cleared is reachable only through the series it belongs to
 async function withTheirRecurrenceChain(db: ScopedDb, start: Types.ObjectId[]): Promise<Types.ObjectId[]> {
   const found = new Map<string, Types.ObjectId>(start.map((id) => [String(id), id]));
-  for (let round = 0; round < 50; round += 1) {
-    const ids = [...found.values()];
-    if (ids.length === 0) break;
+  // Each round asks only about what the last one found, and the set only grows, so a series of any
+  // length ends, and so does one whose parent links loop
+  let frontier = [...found.values()];
+  while (frontier.length > 0) {
     const [children, parents] = await Promise.all([
-      db.Task.distinct("_id", { recurringParentId: { $in: ids } }),
-      db.Task.distinct("recurringParentId", { _id: { $in: ids } }),
+      db.Task.distinct("_id", { recurringParentId: { $in: frontier } }),
+      db.Task.distinct("recurringParentId", { _id: { $in: frontier } }),
     ]);
-    const before = found.size;
-    for (const id of [...children, ...parents] as Types.ObjectId[]) if (id) found.set(String(id), id);
-    if (found.size === before) break;
+    frontier = [];
+    for (const id of [...children, ...parents] as Types.ObjectId[]) {
+      if (id && !found.has(String(id))) {
+        found.set(String(id), id);
+        frontier.push(id);
+      }
+    }
   }
   return [...found.values()];
 }

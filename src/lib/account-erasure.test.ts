@@ -404,6 +404,31 @@ describe("what a person authored for the machines", () => {
     ]);
   });
 
+  it("reaches the end of a long series, and ends on one whose parent links loop", async () => {
+    const length = 120;
+    const tasks = Array.from({ length }, (_, i) => ({
+      _id: `s${i}`,
+      agent: null,
+      recurringParentId: i === 0 ? null : `s${i - 1}`,
+      watchers: [],
+    }));
+    const { db, rows } = memoryDb({
+      Agent: [{ _id: "g1", scope: "user", owner: JAN, name: "Jan's refactorer" }],
+      Task: [...tasks, { _id: "c1", agent: null, recurringParentId: "c2", watchers: [] }, { _id: "c2", agent: null, recurringParentId: "c1", watchers: [] }],
+      ActivityLog: [
+        { _id: "first", task: "s0", user: JAN, field: "agent", oldValue: "", newValue: "Jan's refactorer" },
+        { _id: "last", task: `s${length - 1}`, user: OLA, field: "agent", oldValue: "Jan's refactorer", newValue: "" },
+        { _id: "loop", task: "c1", user: JAN, field: "agent", oldValue: "", newValue: "Jan's refactorer" },
+      ],
+    });
+    await eraseAccountTraces(db, USER);
+    expect(rows("ActivityLog").map((r) => [r._id, r.oldValue, r.newValue])).toEqual([
+      ["first", "", DELETED_AGENT],
+      ["last", DELETED_AGENT, ""],
+      ["loop", "", DELETED_AGENT],
+    ]);
+  });
+
   it("leaves history alone when the person had no personal agent", async () => {
     const { db, rows } = memoryDb({
       ActivityLog: [{ _id: "h1", task: "t1", user: JAN, field: "agent", oldValue: "", newValue: "Default" }],
