@@ -224,6 +224,38 @@ test.describe("BP-951: requiring single sign-on", () => {
       expect(closed.status(), path).toBe(403);
       expect(await closed.json()).toMatchObject({ ssoRequired: true });
     }
+    // The page an MCP client sends a person to is a password form of its own, and is closed too (BP-1031)
+    const authorizeOn = async (who: OrganisationFixture) => {
+      const registered = await request.post(`${ORGANISATIONS_API}/oauth/register`, {
+        headers: { ...asOrganisation(who), origin: originOf(who) },
+        data: { client_name: "E2E MCP Client", redirect_uris: ["https://client.example/callback"] },
+      });
+      expect(registered.status(), await registered.text()).toBe(201);
+      const fields = {
+        client_id: (await registered.json()).client_id as string,
+        redirect_uri: "https://client.example/callback",
+        code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+        code_challenge_method: "S256",
+        response_type: "code",
+        scope: "mcp",
+        state: "s",
+      };
+      const form = await request.get(`${ORGANISATIONS_API}/oauth/authorize?${new URLSearchParams(fields)}`, { headers: asOrganisation(who) });
+      const posted = await request.post(`${ORGANISATIONS_API}/oauth/authorize`, {
+        headers: { ...asOrganisation(who), origin: originOf(who), "sec-fetch-site": "same-origin" },
+        form: { phase: "login", ...fields, username: USERNAME, password: who.password },
+        maxRedirects: 0,
+      });
+      return { form: await form.text(), posted };
+    };
+    const closed = await authorizeOn(ACME);
+    expect(closed.form).toContain("Sign in to continue");
+    expect(closed.form).not.toContain('type="password"');
+    // A correct password posted to it starts no session: no redirect to the consent, no cookie
+    expect(closed.posted.status()).toBe(200);
+    expect(closed.posted.headers()["set-cookie"] ?? "").not.toContain("cps_");
+    expect(await closed.posted.text()).toContain("Sign in to continue");
+
     expect(await (await request.get(`${ORGANISATIONS_API}/api/auth/oidc/providers`, { headers: asOrganisation(ACME) })).json()).toEqual([{ id: "oidc", label: SSO_LABEL }]);
     expect((await request.get(`${ORGANISATIONS_API}/api/auth/instance`, { headers: asOrganisation(ACME) })).status()).toBe(200);
     expect((await (await request.get(`${ORGANISATIONS_API}/api/auth/instance`, { headers: asOrganisation(ACME) })).json()).passwordSignIn).toBe(false);
@@ -233,6 +265,14 @@ test.describe("BP-951: requiring single sign-on", () => {
 
     expect((await passwordLogin(request, GLOBEX)).status()).toBe(200);
     expect((await (await request.get(`${ORGANISATIONS_API}/api/auth/oidc/providers`, { headers: asOrganisation(GLOBEX) })).json()).map((p: { id: string }) => p.id)).toContain("github");
+
+    // The control for the authorize page, last because its sign-in puts a session in this jar: the
+    // organisation that does not require single sign-on still asks for the password, and signs in
+    const open = await authorizeOn(GLOBEX);
+    expect(open.form).toContain('type="password"');
+    expect(open.posted.status()).toBe(303);
+    expect(open.posted.headers()["location"]).toContain("/oauth/authorize");
+    expect(open.posted.headers()["set-cookie"]).toContain("cps_");
   });
 
   test("on the platform host the organisation is a link to its own page, and a password is refused", async ({ page, request }) => {
