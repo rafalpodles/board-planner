@@ -255,10 +255,6 @@ test.describe("BP-951: requiring single sign-on", () => {
     expect(closed.posted.status()).toBe(200);
     expect(closed.posted.headers()["set-cookie"] ?? "").not.toContain("cps_");
     expect(await closed.posted.text()).toContain("Sign in to continue");
-    // The control: the organisation that does not require it still asks for the password
-    const open = await authorizeOn(GLOBEX);
-    expect(open.form).toContain('type="password"');
-    expect(open.posted.status()).toBe(303);
 
     expect(await (await request.get(`${ORGANISATIONS_API}/api/auth/oidc/providers`, { headers: asOrganisation(ACME) })).json()).toEqual([{ id: "oidc", label: SSO_LABEL }]);
     expect((await request.get(`${ORGANISATIONS_API}/api/auth/instance`, { headers: asOrganisation(ACME) })).status()).toBe(200);
@@ -269,6 +265,14 @@ test.describe("BP-951: requiring single sign-on", () => {
 
     expect((await passwordLogin(request, GLOBEX)).status()).toBe(200);
     expect((await (await request.get(`${ORGANISATIONS_API}/api/auth/oidc/providers`, { headers: asOrganisation(GLOBEX) })).json()).map((p: { id: string }) => p.id)).toContain("github");
+
+    // The control for the authorize page, last because its sign-in puts a session in this jar: the
+    // organisation that does not require single sign-on still asks for the password, and signs in
+    const open = await authorizeOn(GLOBEX);
+    expect(open.form).toContain('type="password"');
+    expect(open.posted.status()).toBe(303);
+    expect(open.posted.headers()["location"]).toContain("/oauth/authorize");
+    expect(open.posted.headers()["set-cookie"]).toContain("cps_");
   });
 
   test("on the platform host the organisation is a link to its own page, and a password is refused", async ({ page, request }) => {

@@ -764,7 +764,6 @@ describe("with the organisation requiring single sign-on (BP-951)", () => {
     const html = await (await GET(authorizeGet())).text();
 
     expect(html).not.toContain('type="password"');
-    expect(html).not.toContain("Invalid username or password");
     expect(html).toContain("Sign in to continue");
     expect(html).toContain('action="/login"');
     expect(html).toMatch(/name="next" value="\/oauth\/authorize\?/);

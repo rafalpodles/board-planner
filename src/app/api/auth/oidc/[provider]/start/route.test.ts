@@ -30,7 +30,7 @@ vi.mock("@/lib/oidc/providers", () => ({
   providerFor: async (_db: unknown, id: string) => (id === "oidc" ? { id: "oidc", label: "Acme" } : null),
   // Google and GitHub as the environment sets them up, whichever of them this organisation is offered
   setUpButNotOffered: (id: string) => id === "google",
-  ssoEnforced: (...args: unknown[]) => (ssoEnforced as (...a: unknown[]) => Promise<boolean>)(...args),
+  ssoEnforced,
 }));
 vi.mock("@/lib/oidc/flow", () => ({ beginFlow, FLOW_COOKIE: "bp_oidc", FLOW_TTL_MS: 600_000 }));
 vi.mock("@/lib/invitations", () => ({ findInvitationByToken }));
