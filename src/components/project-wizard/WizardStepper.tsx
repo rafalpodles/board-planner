@@ -4,17 +4,19 @@ import { STEPS } from "./wizard-model";
 
 interface WizardStepperProps {
   current: number;
+  /** Steps the person has been on; a step jumped over is not "done" */
+  visited: number[];
   /** A later step is closed until the basics are valid */
   isOpen: (index: number) => boolean;
   onGo: (index: number) => void;
 }
 
-export function WizardStepper({ current, isOpen, onGo }: WizardStepperProps) {
+export function WizardStepper({ current, visited, isOpen, onGo }: WizardStepperProps) {
   return (
     <nav aria-label="Setup steps">
       <ol className="hidden sm:flex">
         {STEPS.map((step, i) => {
-          const state = i < current ? "done" : i === current ? "current" : "todo";
+          const state = i === current ? "current" : visited.includes(i) ? "done" : "todo";
           return (
             <li key={step.id} className="min-w-0 flex-1">
               <button
@@ -30,7 +32,7 @@ export function WizardStepper({ current, isOpen, onGo }: WizardStepperProps) {
                   <span
                     aria-hidden="true"
                     className={`absolute right-1/2 top-[18px] h-0.5 w-full ${
-                      i <= current ? "bg-primary-solid" : "bg-border"
+                      visited.includes(i) || i === current ? "bg-primary-solid" : "bg-border"
                     }`}
                   />
                 )}
@@ -46,7 +48,10 @@ export function WizardStepper({ current, isOpen, onGo }: WizardStepperProps) {
                 >
                   {state === "done" ? "✓" : i + 1}
                 </span>
-                <span>{step.title}</span>
+                <span>
+                  {step.title}
+                  {state === "done" && <span className="sr-only">, visited</span>}
+                </span>
                 <span className="-mt-1 text-[10.5px] font-normal text-text-muted">
                   {step.optional ? "optional" : " "}
                 </span>
@@ -67,7 +72,7 @@ export function WizardStepper({ current, isOpen, onGo }: WizardStepperProps) {
           {STEPS.map((step, i) => (
             <i
               key={step.id}
-              className={`h-1 rounded-sm ${i <= current ? "bg-primary-solid" : "bg-border"}`}
+              className={`h-1 rounded-sm ${visited.includes(i) || i === current ? "bg-primary-solid" : "bg-border"}`}
             />
           ))}
         </div>

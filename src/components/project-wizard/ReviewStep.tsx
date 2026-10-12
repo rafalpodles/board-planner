@@ -8,6 +8,7 @@ import { columnsOf, type WizardState } from "./wizard-model";
 interface ReviewStepProps {
   state: WizardState;
   you: string;
+  githubWebBase?: string;
   error: string;
   onEdit: (stepIndex: number) => void;
 }
@@ -53,10 +54,10 @@ function list(names: string[]) {
   return names.length > 0 ? names.join(", ") : none;
 }
 
-export function ReviewStep({ state, you, error, onEdit }: ReviewStepProps) {
+export function ReviewStep({ state, you, githubWebBase, error, onEdit }: ReviewStepProps) {
   const columns = columnsOf(state);
   const url = state.repositoryUrl.trim();
-  const provider = url ? repositoryProvider({ repositoryUrl: url }, "https://github.com") : "";
+  const provider = url ? repositoryProvider({ repositoryUrl: url }, githubWebBase ?? "https://github.com") : "";
   const categories = state.categories.mode === "empty" ? [] : state.categories.items.map((c) => c.name);
   const components = state.components.mode === "empty" ? [] : state.components.items;
   const labels = state.labels.mode === "empty" ? [] : state.labels.items;
@@ -69,7 +70,12 @@ export function ReviewStep({ state, you, error, onEdit }: ReviewStepProps) {
   return (
     <>
       {error && (
-        <p role="alert" className="rounded-xl border border-danger/50 bg-danger/10 px-3 py-2.5 text-[13px]">
+        <p
+          id="wizard-create-error"
+          role="alert"
+          tabIndex={-1}
+          className="rounded-xl border border-danger/50 bg-danger/10 px-3 py-2.5 text-[13px]"
+        >
           <b className="text-danger">Project not created.</b> {error} Nothing was saved.
         </p>
       )}

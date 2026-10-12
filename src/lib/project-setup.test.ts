@@ -41,22 +41,37 @@ describe("parseProjectSetup", () => {
       expect(ids).toEqual(["backlog", "doing", "done", "done_2"]);
     });
 
-    it("lets one review column hand over to the PM, and only one", () => {
+    it("lets one review column hand over to the PM", () => {
       const columns = ok({
-        columns: [
-          ...BOARD,
-          { label: "Check A", role: "review", triggersPmReview: true },
-          { label: "Check B", role: "review", triggersPmReview: true },
-        ],
+        columns: [...BOARD, { label: "Check A", role: "review", triggersPmReview: true }],
       }).columns!;
       expect(columns.filter((c) => c.triggersPmReview).map((c) => c.id)).toEqual(["check_a"]);
     });
 
-    it("ignores the hand-over on a column that is not a review column", () => {
-      const columns = ok({
-        columns: [{ label: "Doing", role: "active", triggersPmReview: true }, { label: "Done", role: "done" }],
-      }).columns!;
-      expect(columns.some((c) => c.triggersPmReview)).toBe(false);
+    it("refuses a second hand-over column and a hand-over on a column that is not a review column", () => {
+      expect(
+        refusal({
+          columns: [
+            ...BOARD,
+            { label: "Check A", role: "review", triggersPmReview: true },
+            { label: "Check B", role: "review", triggersPmReview: true },
+          ],
+        })
+      ).toMatch(/Only one column/);
+      expect(
+        refusal({ columns: [{ label: "Doing", role: "active", triggersPmReview: true }, { label: "Done", role: "done" }] })
+      ).toMatch(/Awaiting review/);
+    });
+
+    it("keeps the colour it was given, and refuses more columns than a board may have", () => {
+      expect(ok({ columns: [{ label: "Doing", role: "active", color: "#123456" }, { label: "Done", role: "done" }] }).columns![0].color).toBe("#123456");
+      const tooMany = [
+        { label: "Doing", role: "active" },
+        { label: "Done", role: "done" },
+        ...Array.from({ length: 11 }, (_, i) => ({ label: `Extra ${i}`, role: "backlog" })),
+      ];
+      expect(tooMany).toHaveLength(13);
+      expect(refusal({ columns: tooMany })).toMatch(/1-12/);
     });
 
     it.each([
@@ -72,6 +87,12 @@ describe("parseProjectSetup", () => {
     });
   });
 
+  it("reads null as a field that was not sent", () => {
+    expect(ok({ icon: null, columns: null, categories: null, components: null, labels: null, repositoryUrl: null, pm: null, access: null })).toEqual({
+      access: [],
+    });
+  });
+
   describe("categories", () => {
     it("takes an empty list, which is how a board starts with none", () => {
       expect(ok({ categories: [] }).categories).toEqual([]);
@@ -79,6 +100,11 @@ describe("parseProjectSetup", () => {
 
     it("trims names and gives a colour to one that has none", () => {
       expect(ok({ categories: [{ name: "  bug " }] }).categories).toEqual([{ name: "bug", color: "#3b82f6" }]);
+    });
+
+    it("refuses more categories than a board may have", () => {
+      const many = Array.from({ length: 51 }, (_, i) => ({ name: `c${i}` }));
+      expect(refusal({ categories: many })).toMatch(/at most 50/);
     });
 
     it.each([
@@ -132,12 +158,15 @@ describe("parseProjectSetup", () => {
       expect(ok({ repositoryUrl: " https://github.com/acme/web " }).repositoryUrl).toBe("https://github.com/acme/web");
       expect(refusal({ repositoryUrl: { url: "x" } })).toMatch(/string/);
       expect(refusal({ repositoryUrl: "x".repeat(2049) })).toMatch(/valid address/);
+      expect(refusal({ repositoryUrl: "https://example.com/a\nb" })).toMatch(/valid address/);
     });
 
     it("keeps whether the PM agent is on, and refuses anything but a boolean", () => {
       expect(ok({ pm: { enabled: true } }).pmEnabled).toBe(true);
       expect(ok({ pm: {} }).pmEnabled).toBeUndefined();
       expect(refusal({ pm: { enabled: "yes" } })).toMatch(/true or false/);
+      expect(refusal({ pm: true })).toMatch(/true or false/);
+      expect(ok({ pm: { enabled: false } }).pmEnabled).toBe(false);
     });
   });
 

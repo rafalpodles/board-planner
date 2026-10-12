@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor, within, act } from "@testing-library/react";
 import type { AuthState } from "@/hooks/use-auth";
 import type { ApiUser } from "@/types";
 
@@ -345,7 +345,8 @@ describe("the task fields", () => {
     expect(screen.getByText("user-story")).toBeTruthy();
   });
 
-  it("adds components inline and refuses the same name twice", () => {
+  it("adds components inline and refuses the same name in another case", async () => {
+    api.post.mockResolvedValue({ key: "ORB" });
     render(<NewProjectPage />);
     toFields();
 
@@ -356,7 +357,27 @@ describe("the task fields", () => {
     type(screen.getByLabelText("New component"), "API");
     fireEvent.click(screen.getAllByRole("button", { name: "Add" })[0]);
 
-    expect(screen.getAllByText("api")).toHaveLength(1);
+    expect(screen.queryAllByText(/^api$/i)).toHaveLength(1);
+    fireEvent.click(button("Skip"));
+    fireEvent.click(button("Skip"));
+    fireEvent.click(button("Create Project"));
+    await waitFor(() => expect(api.post).toHaveBeenCalled());
+    expect(lastPost()[1].components).toEqual(["api"]);
+  });
+
+  it("puts focus back in the field after adding, and after removing", () => {
+    render(<NewProjectPage />);
+    toFields();
+    const group = screen.getByRole("group", { name: "Components to start with" });
+    fireEvent.click(within(group).getByRole("button", { name: "Add a few" }));
+    const field = screen.getByLabelText("New component");
+
+    type(field, "api");
+    fireEvent.click(screen.getAllByRole("button", { name: "Add" })[0]);
+    expect(document.activeElement).toBe(field);
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove api" }));
+    expect(document.activeElement).toBe(field);
   });
 });
 
@@ -384,8 +405,12 @@ describe("automation and access", () => {
     toAccess();
     const search = await screen.findByRole("combobox");
 
+    vi.useFakeTimers();
     type(search, "a");
-    await new Promise((r) => setTimeout(r, 300));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    vi.useRealTimers();
     expect(api.get.mock.calls.some(([url]) => String(url).includes("setup/people"))).toBe(false);
 
     type(search, "an");
@@ -420,7 +445,7 @@ describe("creating the project", () => {
     await waitFor(() => expect(nav.push).toHaveBeenCalledWith("/projects/ORB"));
     const [url, body] = lastPost();
     expect(url).toBe("/api/projects");
-    expect(Object.keys(body).sort()).toEqual(["description", "icon", "key", "name"]);
+    expect(Object.keys(body).sort()).toEqual(["description", "key", "name"]);
     expect(body).toMatchObject({ name: "Orbit", key: "ORB" });
   });
 
@@ -501,5 +526,244 @@ describe("creating the project", () => {
     expect(button("Create Project").disabled).toBe(true);
     fireEvent.submit(button("Create Project").closest("form")!);
     expect(api.post).not.toHaveBeenCalled();
+  });
+});
+
+describe("saying why it cannot go on", () => {
+  it("names what is wrong with a key that is not taken", () => {
+    render(<NewProjectPage />);
+    type(nameField(), "Orbit");
+
+    type(keyField(), "2fa");
+
+    const reason = document.getElementById("project-key-problem");
+    expect(reason?.textContent).toMatch(/starts with a letter/);
+    expect(keyField().getAttribute("aria-describedby")).toContain("project-key-problem");
+    expect(keyField().getAttribute("aria-invalid")).toBe("true");
+    expect(button(/^Next: Workflow/).disabled).toBe(true);
+  });
+
+  it("says nothing before anything was typed", () => {
+    render(<NewProjectPage />);
+
+    expect(document.getElementById("project-key-problem")).toBeNull();
+    expect(keyField().getAttribute("aria-invalid")).toBeNull();
+  });
+
+  it("does not let Skip apply a custom board that cannot be made", () => {
+    render(<NewProjectPage />);
+    toWorkflow();
+    fireEvent.click(screen.getByRole("radio", { name: /^Custom/ }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove Done" }));
+
+    expect(button("Skip").disabled).toBe(true);
+  });
+});
+
+describe("Enter", () => {
+  it("is Next in the name and the key, and nothing in a column row", () => {
+    render(<NewProjectPage />);
+
+    expect(fireEvent.keyDown(nameField(), { key: "Enter" })).toBe(true);
+    expect(fireEvent.keyDown(keyField(), { key: "Enter" })).toBe(true);
+
+    type(nameField(), "Orbit");
+    fireEvent.click(button(/^Next: Workflow/));
+    fireEvent.click(screen.getByRole("radio", { name: /^Custom/ }));
+    expect(fireEvent.keyDown(screen.getAllByLabelText("Column name")[0], { key: "Enter" })).toBe(false);
+  });
+});
+
+describe("the custom columns", () => {
+  function custom() {
+    render(<NewProjectPage />);
+    toWorkflow();
+    fireEvent.click(screen.getByRole("radio", { name: /^Custom/ }));
+  }
+  const names = () => screen.getAllByLabelText("Column name").map((i) => (i as HTMLInputElement).value);
+
+  it("moves a column and keeps focus on the same button of the same column", () => {
+    custom();
+
+    fireEvent.click(screen.getByRole("button", { name: "Move To Do down" }));
+
+    expect(names()).toEqual(["Backlog", "In Progress", "To Do", "Done"]);
+    expect((document.activeElement as HTMLElement).getAttribute("aria-label")).toBe("Move To Do down");
+  });
+
+  it("carries focus to the neighbour when a column is removed", () => {
+    custom();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove Done" }));
+
+    expect(names()).toEqual(["Backlog", "To Do", "In Progress"]);
+    expect((document.activeElement as HTMLInputElement).value).toBe("In Progress");
+  });
+
+  it("stops adding at twelve columns", () => {
+    custom();
+    for (let i = 0; i < 8; i++) {
+      type(screen.getByLabelText("New column name"), `Extra ${i}`);
+      fireEvent.click(button("Add column"));
+    }
+    expect(names()).toHaveLength(12);
+
+    type(screen.getByLabelText("New column name"), "One too many");
+
+    expect(button("Add column").disabled).toBe(true);
+  });
+});
+
+describe("the people search", () => {
+  async function opened(people: unknown = PEOPLE) {
+    answer(SETUP_OK, people);
+    render(<NewProjectPage />);
+    toAccess();
+    return screen.findByRole("combobox");
+  }
+
+  it("is driven by the arrow keys and Enter, which does not leave the step", async () => {
+    const search = await opened();
+    type(search, "an");
+    await screen.findByRole("option");
+
+    fireEvent.keyDown(search, { key: "ArrowDown" });
+    const prevented = !fireEvent.keyDown(search, { key: "Enter" });
+
+    expect(prevented).toBe(true);
+    expect(screen.getByLabelText("Access for anna")).toBeTruthy();
+    expect(stepHeading()).toBe("Automation & access");
+    expect(document.activeElement).toBe(search);
+  });
+
+  it("closes on a tap outside it, and on Escape", async () => {
+    const search = await opened();
+    type(search, "an");
+    await screen.findByRole("option");
+
+    fireEvent.pointerDown(document.body);
+    await waitFor(() => expect(screen.queryByRole("option")).toBeNull());
+
+    type(search, "ann");
+    await screen.findByRole("option");
+    fireEvent.keyDown(search, { key: "Escape" });
+    expect(screen.queryByRole("option")).toBeNull();
+  });
+
+  it("says so when the search fails, outside the list of people", async () => {
+    api.get.mockImplementation(async (url: string) => {
+      if (url === "/api/projects/setup") return SETUP_OK;
+      throw new Error("down");
+    });
+    render(<NewProjectPage />);
+    toAccess();
+    const search = await screen.findByRole("combobox");
+
+    type(search, "an");
+
+    expect((await screen.findAllByText(/Could not search/)).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  it("removes a person and puts focus back in the search", async () => {
+    const search = await opened();
+    type(search, "an");
+    fireEvent.click(await screen.findByRole("option"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove anna" }));
+
+    expect(screen.queryByLabelText("Access for anna")).toBeNull();
+    expect(document.activeElement).toBe(search);
+  });
+
+  it("shows the first three and the rest as a count on Review", async () => {
+    const four = ["anna", "piotr", "marta", "tomek"].map((username, i) => ({
+      _id: `64b0000000000000000000b${i}`,
+      username,
+      fullName: username.toUpperCase(),
+    }));
+    const search = await opened(four);
+    for (let i = 0; i < 4; i++) {
+      type(search, "a");
+      type(search, "ab");
+      type(search, "");
+      type(search, "an");
+      // The listbox's options, not the <option>s of the access selects of people already added
+      const found = within(await screen.findByRole("listbox")).getAllByRole("option");
+      expect(found).toHaveLength(4 - i);
+      fireEvent.click(found[0]);
+    }
+
+    fireEvent.click(button("Skip"));
+
+    expect(stepHeading()).toBe("Review");
+    expect(screen.getByText(/and 2 more/)).toBeTruthy();
+  });
+});
+
+describe("the PM agent", () => {
+  it("says it is looking while the instance has not answered", () => {
+    render(<NewProjectPage />);
+    toAccess();
+
+    expect(screen.getByText(/Checking whether the PM agent can run/)).toBeTruthy();
+    expect(screen.queryByRole("switch")).toBeNull();
+  });
+
+  it("says so when the instance could not be asked", async () => {
+    api.get.mockRejectedValue(new Error("down"));
+    render(<NewProjectPage />);
+    toAccess();
+
+    expect(await screen.findByText(/Could not check whether the PM agent can run/)).toBeTruthy();
+  });
+
+  it.each([
+    ["an administrator has locked it", { pmLocked: true }, /locked the PM agent off/],
+    ["the plan does not include it", { pmNeedsPlan: true }, /needs a plan with managed AI/],
+    ["its key cannot be read", { pmKeyUnreadable: true }, /cannot be read/],
+  ])("explains it when %s", async (_why, reason, message) => {
+    answer({ ...SETUP_OK, pmAvailable: false, ...reason });
+    render(<NewProjectPage />);
+    toAccess();
+
+    expect(await screen.findByText(message)).toBeTruthy();
+    expect(screen.queryByRole("switch")).toBeNull();
+  });
+});
+
+describe("the create", () => {
+  it("is made once however many times the button is pressed", async () => {
+    let finish: (v: unknown) => void = () => {};
+    api.post.mockReturnValue(new Promise((resolve) => (finish = resolve)));
+    render(<NewProjectPage />);
+    toReview();
+
+    fireEvent.click(button("Create Project"));
+    fireEvent.click(button("Creating..."));
+    fireEvent.click(button("Creating..."));
+    await act(async () => finish({ key: "ORB" }));
+
+    expect(api.post).toHaveBeenCalledTimes(1);
+  });
+
+  it("brings the refusal into view where the action is", async () => {
+    api.post.mockRejectedValue(new Error("Key taken"));
+    render(<NewProjectPage />);
+    toReview();
+
+    fireEvent.click(button("Create Project"));
+
+    const alert = await screen.findByRole("alert");
+    await waitFor(() => expect(document.activeElement).toBe(alert));
+  });
+
+  it("goes back from Basics with Cancel", () => {
+    render(<NewProjectPage />);
+
+    fireEvent.click(button("Cancel"));
+
+    expect(nav.back).toHaveBeenCalled();
   });
 });

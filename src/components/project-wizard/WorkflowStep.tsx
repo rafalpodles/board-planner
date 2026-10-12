@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { MAX_COLUMNS, MAX_COLUMN_LABEL } from "@/lib/columns";
 import { COLUMN_ROLES, ColumnRole, ROLE_LABELS } from "@/types";
@@ -8,6 +8,7 @@ import {
   DEFAULT_COLUMNS,
   SIMPLE_COLUMNS,
   columnsOf,
+  nextColumnUid,
   roleSummary,
   workflowProblem,
   type ColumnDraft,
@@ -36,40 +37,74 @@ function Strip({ columns }: { columns: ColumnDraft[] }) {
   );
 }
 
+type Focus =
+  | { kind: "control"; uid: string; control: "up" | "down" | "remove" }
+  | { kind: "name"; uid: string }
+  | { kind: "new" };
+
 export function WorkflowStep({ state, onChange }: WorkflowStepProps) {
   const [newLabel, setNewLabel] = useState("");
+  const [announcement, setAnnouncement] = useState("");
+  const pending = useRef<Focus | null>(null);
   const columns = columnsOf(state);
   const custom = state.customColumns;
   const problem = workflowProblem(state);
+
+  // Focus follows the column a button acted on, not the position it was in: the row at that
+  // position is somebody else's after a move or a removal
+  useEffect(() => {
+    const target = pending.current;
+    if (!target) return;
+    pending.current = null;
+    const root = document.getElementById("wizard-columns");
+    if (target.kind === "new") {
+      document.getElementById("wizard-new-column")?.focus();
+    } else if (target.kind === "name") {
+      root?.querySelector<HTMLElement>(`[data-uid="${target.uid}"] [data-control="name"]`)?.focus();
+    } else {
+      const wanted = root?.querySelector<HTMLButtonElement>(`[data-uid="${target.uid}"] [data-control="${target.control}"]`);
+      const fallback = root?.querySelector<HTMLElement>(`[data-uid="${target.uid}"] [data-control="name"]`);
+      (wanted && !wanted.disabled ? wanted : fallback)?.focus();
+    }
+  });
 
   function setCustom(next: ColumnDraft[]) {
     onChange({ customColumns: next });
   }
   function update(index: number, patch: Partial<ColumnDraft>) {
-    setCustom(
-      custom.map((c, i) => {
-        if (i !== index) return c;
-        const next = { ...c, ...patch };
-        return next.role === "review" ? next : { ...next, triggersPmReview: false };
-      })
-    );
+    setCustom(custom.map((c, i) => (i === index ? { ...c, ...patch } : c)));
   }
-  function move(index: number, to: number) {
+  function move(index: number, to: number, control: "up" | "down") {
     if (to < 0 || to >= custom.length) return;
     const next = [...custom];
     const [moved] = next.splice(index, 1);
     next.splice(to, 0, moved);
+    pending.current = { kind: "control", uid: moved.uid, control };
+    setAnnouncement(`${moved.label || "Column"} moved to position ${to + 1} of ${next.length}`);
     setCustom(next);
+  }
+  function remove(index: number) {
+    const gone = custom[index];
+    const neighbour = custom[index + 1] ?? custom[index - 1];
+    pending.current = neighbour ? { kind: "name", uid: neighbour.uid } : { kind: "new" };
+    setAnnouncement(`${gone.label || "Column"} removed`);
+    setCustom(custom.filter((_, i) => i !== index));
   }
   function add() {
     const label = newLabel.trim();
     if (!label || custom.length >= MAX_COLUMNS) return;
-    setCustom([...custom, { label, role: "active", color: "#6b7280", triggersPmReview: false }]);
+    const created = { uid: nextColumnUid(), label, role: "active" as ColumnRole, color: "#6b7280", triggersPmReview: false };
+    pending.current = { kind: "new" };
+    setAnnouncement(`${label} added`);
+    setCustom([...custom, created]);
     setNewLabel("");
   }
 
   return (
     <>
+      <p role="status" aria-live="polite" className="sr-only">
+        {announcement}
+      </p>
       <div role="radiogroup" aria-label="Column preset" className="grid gap-2.5 sm:grid-cols-3">
         {PRESETS.map((preset) => {
           const shown =
@@ -101,14 +136,16 @@ export function WorkflowStep({ state, onChange }: WorkflowStepProps) {
       {state.preset === "custom" ? (
         <div>
           <p className="mb-2 text-[13.5px] font-semibold">Columns</p>
-          <ul className="space-y-2">
+          <ul id="wizard-columns" className="space-y-2">
             {custom.map((col, i) => (
               <li
-                key={i}
+                key={col.uid}
+                data-uid={col.uid}
                 className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-lg border border-border bg-bg-input/30 p-2 sm:grid-cols-[minmax(0,1fr)_190px_auto]"
               >
                 <input
                   value={col.label}
+                  data-control="name"
                   aria-label="Column name"
                   maxLength={MAX_COLUMN_LABEL}
                   onChange={(e) => update(i, { label: e.target.value })}
@@ -117,27 +154,30 @@ export function WorkflowStep({ state, onChange }: WorkflowStepProps) {
                 <div className="flex items-center gap-0.5 sm:order-3">
                   <button
                     type="button"
-                    onClick={() => move(i, i - 1)}
+                    data-control="up"
+                    onClick={() => move(i, i - 1, "up")}
                     disabled={i === 0}
                     aria-label={`Move ${col.label || "column"} up`}
-                    className="focus-ring h-10 w-9 rounded-lg text-text-muted hover:bg-bg-hover hover:text-text disabled:opacity-30"
+                    className="focus-ring h-11 w-11 rounded-lg text-text-muted hover:bg-bg-hover hover:text-text disabled:opacity-30 sm:h-10 sm:w-9"
                   >
                     ↑
                   </button>
                   <button
                     type="button"
-                    onClick={() => move(i, i + 1)}
+                    data-control="down"
+                    onClick={() => move(i, i + 1, "down")}
                     disabled={i === custom.length - 1}
                     aria-label={`Move ${col.label || "column"} down`}
-                    className="focus-ring h-10 w-9 rounded-lg text-text-muted hover:bg-bg-hover hover:text-text disabled:opacity-30"
+                    className="focus-ring h-11 w-11 rounded-lg text-text-muted hover:bg-bg-hover hover:text-text disabled:opacity-30 sm:h-10 sm:w-9"
                   >
                     ↓
                   </button>
                   <button
                     type="button"
-                    onClick={() => setCustom(custom.filter((_, j) => j !== i))}
+                    data-control="remove"
+                    onClick={() => remove(i)}
                     aria-label={`Remove ${col.label || "column"}`}
-                    className="focus-ring h-10 w-9 rounded-lg text-text-muted hover:bg-bg-hover hover:text-text"
+                    className="focus-ring h-11 w-11 rounded-lg text-text-muted hover:bg-bg-hover hover:text-text sm:h-10 sm:w-9"
                   >
                     ✕
                   </button>
@@ -159,6 +199,7 @@ export function WorkflowStep({ state, onChange }: WorkflowStepProps) {
           </ul>
           <div className="mt-2 flex gap-2">
             <input
+              id="wizard-new-column"
               value={newLabel}
               aria-label="New column name"
               placeholder="New column"
@@ -182,6 +223,10 @@ export function WorkflowStep({ state, onChange }: WorkflowStepProps) {
               Add column
             </Button>
           </div>
+          <p className="mt-2 text-xs text-text-muted">
+            Column colours and which column hands over to the PM are set in Settings → Board once the
+            project exists.
+          </p>
         </div>
       ) : (
         <div>
@@ -191,7 +236,7 @@ export function WorkflowStep({ state, onChange }: WorkflowStepProps) {
           <ul className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
             {columns.map((c, i) => (
               <li
-                key={i}
+                key={c.uid}
                 className="min-w-0 rounded-lg border border-border bg-bg-input/30 px-2.5 py-1.5"
                 style={{ borderLeft: `3px solid ${c.color}` }}
               >

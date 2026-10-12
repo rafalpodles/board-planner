@@ -12,6 +12,7 @@ const grantCreate = vi.fn();
 const grantInsertMany = vi.fn();
 const grantDeleteMany = vi.fn();
 const userFind = vi.fn();
+const logProjectAudit = vi.fn();
 const auditAccess = vi.fn();
 const announceAccess = vi.fn();
 const taskAggregate = vi.fn();
@@ -31,6 +32,7 @@ vi.mock("@/models/grant", () => ({
 }));
 vi.mock("@/models/user", () => ({ User: { find: userFind } }));
 vi.mock("@/lib/board-access", () => ({ auditAccess, announceAccess }));
+vi.mock("@/lib/projectAudit", () => ({ logProjectAudit }));
 vi.mock("@/models/task", () => ({ Task: { aggregate: taskAggregate, findOne: vi.fn() } }));
 vi.mock("@/models/sprint", () => ({ Sprint: { find: sprintFind } }));
 
@@ -242,6 +244,57 @@ describe("POST /api/projects — a project created with its setup", () => {
     expect(created.pm).toEqual({ enabled: true });
   });
 
+  // Empty and false are answers, not absences: an empty list is a board with none, and "" is no icon
+  it("passes empty and false values on, rather than treating them as not sent", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+
+    await POST(post({ name: "Bare", key: "BAR", categories: [], icon: "", pm: { enabled: false } }), ctx());
+
+    const created = projectCreate.mock.calls[0][0];
+    expect(created.categories).toEqual([]);
+    expect(created.icon).toBe("");
+    expect(created.pm).toEqual({ enabled: false });
+  });
+
+  it("treats null like a field that was not sent", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+
+    const response = await POST(
+      post({ name: "Nulls", key: "NUL", columns: null, categories: null, icon: null, access: null }),
+      ctx()
+    );
+
+    expect(response.status).toBe(201);
+    for (const field of ["icon", "columns", "categories"]) {
+      expect(projectCreate.mock.calls[0][0]).not.toHaveProperty(field);
+    }
+  });
+
+  it("leaves a trace of the PM agent and the repository it was created with", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+
+    await POST(
+      post({ name: "Traced", key: "TRC", pm: { enabled: true }, repositoryUrl: "https://github.com/acme/web" }),
+      ctx()
+    );
+
+    expect(logProjectAudit).toHaveBeenCalledWith(
+      expect.anything(),
+      NEW_PROJECT_ID,
+      ADMIN._id,
+      "settings_updated",
+      ["PM agent: enabled at creation", "Repository: https://github.com/acme/web"]
+    );
+  });
+
+  it("writes no settings trace for a project created with none of it", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+
+    await POST(post({ name: "Plain", key: "PLN" }), ctx());
+
+    expect(logProjectAudit).not.toHaveBeenCalled();
+  });
+
   // Without this the test above would pass on a route that always writes every field
   it("leaves the schema defaults alone for everything it was not given", async () => {
     getAuthUser.mockResolvedValue(ADMIN);
@@ -332,6 +385,30 @@ describe("POST /api/projects — a project created with its setup", () => {
     expect(grantCreate).toHaveBeenCalledTimes(1);
     expect(grantCreate.mock.calls[0][0]).toMatchObject({ relation: "owner" });
     expect(grantInsertMany).not.toHaveBeenCalled();
+    // Told nothing: the creator is not somebody who was added
+    expect(auditAccess).not.toHaveBeenCalled();
+    expect(announceAccess).not.toHaveBeenCalled();
+  });
+
+  it("records and announces only the others when the request also lists the creator", async () => {
+    getAuthUser.mockResolvedValue({ ...ADMIN, _id: ANNA });
+    people({ _id: PIOTR, username: "piotr" });
+
+    await POST(
+      post({
+        name: "Mine",
+        key: "MNE",
+        access: [
+          { userId: ANNA, relation: "member" },
+          { userId: PIOTR, relation: "member" },
+        ],
+      }),
+      ctx()
+    );
+
+    expect(auditAccess).toHaveBeenCalledTimes(1);
+    expect(announceAccess).toHaveBeenCalledTimes(1);
+    expect(announceAccess.mock.calls[0][1]).toMatchObject({ recipientId: PIOTR });
   });
 
   it("creates nothing when somebody it was asked to add is gone or deactivated", async () => {
@@ -373,6 +450,19 @@ describe("POST /api/projects — a project created with its setup", () => {
     expect(projectDeleteOne).toHaveBeenCalledWith({ _id: NEW_PROJECT_ID, organisation: DEFAULT_ORGANISATION_ID });
   });
 
+  it("still removes the project when removing the grants fails too", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+    people({ _id: ANNA, username: "anna" });
+    grantInsertMany.mockRejectedValue(new Error("write failed"));
+    grantDeleteMany.mockRejectedValue(new Error("still down"));
+
+    await expect(
+      POST(post({ name: "Shared", key: "SHR", access: [{ userId: ANNA, relation: "member" }] }), ctx())
+    ).rejects.toThrow("write failed");
+
+    expect(projectDeleteOne).toHaveBeenCalledWith({ _id: NEW_PROJECT_ID, organisation: DEFAULT_ORGANISATION_ID });
+  });
+
   it("records and announces each person it added, and nobody else", async () => {
     getAuthUser.mockResolvedValue({ ...ADMIN, fullName: "Ada Admin", username: "ada" });
     people({ _id: ANNA, username: "anna" });
@@ -398,7 +488,20 @@ describe("POST /api/projects — a project created with its setup", () => {
   it.each([
     ["no column means Done", { columns: [{ label: "Doing", role: "active" }] }],
     ["no column means In progress", { columns: [{ label: "Done", role: "done" }] }],
-    ["more columns than a board may have", { columns: Array.from({ length: 13 }, (_, i) => ({ label: `C${i}`, role: "done" })) }],
+    [
+      "more columns than a board may have, on a board that has every role it needs",
+      {
+        columns: [
+          { label: "Doing", role: "active" },
+          { label: "Done", role: "done" },
+          ...Array.from({ length: 11 }, (_, i) => ({ label: `C${i}`, role: "backlog" })),
+        ],
+      },
+    ],
+    ["a second column handing over to the PM", { columns: [
+      { label: "Doing", role: "active" }, { label: "Done", role: "done" },
+      { label: "A", role: "review", triggersPmReview: true }, { label: "B", role: "review", triggersPmReview: true },
+    ] }],
     ["a category named twice", { categories: [{ name: "Bug" }, { name: "bug" }] }],
     ["an icon the picker does not offer", { icon: "not-an-icon" }],
     ["a person with a role that does not exist", { access: [{ userId: "64b0000000000000000000a1", relation: "viewer" }] }],

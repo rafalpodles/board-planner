@@ -8,6 +8,7 @@ import { accessibleProjectIds, administeredProjectIds } from "@/lib/grants";
 import { LEGACY_FIELD_NAMES, legacyFieldSeeds } from "@/lib/legacy-fields";
 import { auditAccess, announceAccess } from "@/lib/board-access";
 import { parseProjectSetup } from "@/lib/project-setup";
+import { logProjectAudit } from "@/lib/projectAudit";
 import { sanitizeMcpServers } from "@/lib/pm/config";
 import { sanitizeProjectSecrets } from "@/lib/project-secrets";
 import { NOT_ARCHIVED } from "@/lib/task-archive";
@@ -156,10 +157,21 @@ export const POST = withAdmin(async (request, { user, db }) => {
       );
     }
   } catch (e) {
-    // Nothing of a half-made board survives: not the project, and not the grants that did land
-    await db.Grant.deleteMany({ objectType: "project", object: project._id });
-    await db.Project.deleteOne({ _id: project._id });
+    // Nothing of a half-made board survives: not the project, and not the grants that did land.
+    // Both are tried whatever the other does, so one more failure cannot keep the project
+    await Promise.allSettled([
+      db.Grant.deleteMany({ objectType: "project", object: project._id }),
+      db.Project.deleteOne({ _id: project._id }),
+    ]);
     throw e;
+  }
+
+  const chosen = [
+    ...(setup.pmEnabled ? ["PM agent: enabled at creation"] : []),
+    ...(setup.repositoryUrl ? [`Repository: ${setup.repositoryUrl}`] : []),
+  ];
+  if (chosen.length > 0) {
+    void logProjectAudit(db, String(project._id), user._id, "settings_updated", chosen);
   }
 
   const names = new Map(people.map((p) => [String(p._id), p.username]));

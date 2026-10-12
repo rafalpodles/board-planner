@@ -58,9 +58,9 @@ async function openCreateForm(page: Page, key: string) {
   await expect(keyInput).toHaveValue(key.toUpperCase());
 }
 
-/** Through the wizard's optional steps to Review, then the one request that creates the board */
+/** From Review: the one request that creates the board */
 async function submitCreate(page: Page) {
-  if (await page.getByRole("button", { name: /^Next: Workflow/ }).isVisible()) await skipToReview(page);
+  await expect(page.getByRole("heading", { level: 2, name: "Review" })).toBeVisible();
   const answered = page.waitForResponse(
     (r) => new URL(r.url()).pathname === "/api/projects" && r.request().method() === "POST"
   );
@@ -88,6 +88,7 @@ test.describe("creating a board", () => {
 
     await openCreateForm(page, NEW_KEY);
     await page.getByLabel("Project Name").fill(NEW_NAME);
+    await skipToReview(page);
     const response = await submitCreate(page);
     expect(response.status()).toBe(201);
 
@@ -116,6 +117,9 @@ test.describe("creating a board", () => {
     const next = page.getByRole("button", { name: /^Next: Workflow/ });
     await expect(next).toBeDisabled();
     await expect(page.getByRole("button", { name: /^Workflow/ })).toBeDisabled();
+    // Even Enter in the field, which is the one way left to try
+    await page.getByLabel("Project Name").press("Enter");
+    await expect(page.getByRole("heading", { level: 2, name: "Basics" })).toBeVisible();
     expect(posted).toBe(false);
     await expect(sidebarLink(page, "Second board on a taken key")).toHaveCount(0);
 
@@ -124,6 +128,7 @@ test.describe("creating a board", () => {
     await keyInput.fill(SECOND_KEY.toLowerCase());
     await expect(keyInput).toHaveValue(SECOND_KEY);
     await expect(next).toBeEnabled();
+    await skipToReview(page);
     const accepted = await submitCreate(page);
     expect(accepted.status()).toBe(201);
     await expect(page).toHaveURL(new RegExp(`/projects/${SECOND_KEY}$`));
@@ -152,10 +157,16 @@ test.describe("creating a board", () => {
     await expect(alert).toContainText("Nothing was saved");
     await expect(page).toHaveURL(/\/projects\/new$/);
     await expect(page.getByRole("heading", { level: 2, name: "Review" })).toBeVisible();
+    // Nothing of the refused board exists: the rival holds the key, and there is no second board
+    const boards = await request.get("/api/projects", { headers: { Authorization: `Bearer ${API_TOKEN}` } });
+    const names = ((await boards.json()) as { name: string }[]).map((p) => p.name);
+    expect(names).toContain("Rival board");
+    expect(names).not.toContain(NEW_NAME);
 
     // Back to the key, a free one, and the same wizard creates the board
     await page.getByRole("button", { name: "Edit Basics" }).click();
     await page.getByLabel("Project Key").fill(SECOND_KEY.toLowerCase());
+    await skipToReview(page);
     const accepted = await submitCreate(page);
     expect(accepted.status()).toBe(201);
     await expect(page).toHaveURL(new RegExp(`/projects/${SECOND_KEY}$`));
@@ -214,6 +225,7 @@ test.describe("deleting a board", () => {
   async function createBoard(page: Page, name: string, key: string) {
     await openCreateForm(page, key);
     await page.getByLabel("Project Name").fill(name);
+    await skipToReview(page);
     expect((await submitCreate(page)).status()).toBe(201);
     await expect(page).toHaveURL(new RegExp(`/projects/${key}$`));
   }

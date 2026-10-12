@@ -70,9 +70,15 @@ function parseColumns(raw: unknown): { columns: SetupColumn[] } | { error: strin
     if (!id) return { error: `Column label "${label.label}" produces an empty id` };
     taken.push(id);
 
-    // One column hands over to the PM, and only a review column can
-    const triggersPmReview = entry.triggersPmReview === true && role === "review" && !flagged;
-    if (triggersPmReview) flagged = true;
+    // One review column hands over to the PM. The columns editor saves a flag on any column and
+    // reads back whichever it finds first, which is how boards came to hold flags nothing honours;
+    // a board made here starts without that
+    const triggersPmReview = entry.triggersPmReview === true;
+    if (triggersPmReview) {
+      if (role !== "review") return { error: "Only a column with the Awaiting review role can hand over to the PM" };
+      if (flagged) return { error: "Only one column can hand over to the PM" };
+      flagged = true;
+    }
 
     columns.push({
       id,
@@ -160,11 +166,14 @@ function parseAccess(raw: unknown): { access: ProjectSetup["access"] } | { error
 }
 
 /**
- * What a new project may be created with beyond its name and key. Each field is judged by the rule
- * of the settings screen that edits it later, so a project made here is one those screens could
- * have produced; nothing is written until every field has passed.
+ * What a new project may be created with beyond its name and key. Each field is held to the rules
+ * the settings screens apply to the same field (limits, role requirements, duplicates), and
+ * nothing is written until every field has passed. A field sent as `null` is a field not sent.
  */
-export function parseProjectSetup(body: Record<string, unknown>): ParsedSetup {
+export function parseProjectSetup(input: Record<string, unknown>): ParsedSetup {
+  const body: Record<string, unknown> = Object.fromEntries(
+    Object.entries(input).filter(([, v]) => v !== null)
+  );
   const value: ProjectSetup = { access: [] };
 
   if (body.icon !== undefined) {

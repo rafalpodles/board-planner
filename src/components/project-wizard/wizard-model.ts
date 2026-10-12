@@ -23,6 +23,8 @@ export type StepId = (typeof STEPS)[number]["id"];
 export type Preset = "default" | "simple" | "custom";
 
 export interface ColumnDraft {
+  /** Identifies a row across reorders and removals, so focus and keys follow the column */
+  uid: string;
   label: string;
   role: ColumnRole;
   color: string;
@@ -56,7 +58,11 @@ export interface WizardState {
   people: { person: Person; relation: GrantRelation }[];
 }
 
+let uidCounter = 0;
+export const nextColumnUid = () => `c${++uidCounter}`;
+
 const column = (label: string, role: ColumnRole, color: string): ColumnDraft => ({
+  uid: nextColumnUid(),
   label,
   role,
   color,
@@ -64,6 +70,7 @@ const column = (label: string, role: ColumnRole, color: string): ColumnDraft => 
 });
 
 export const DEFAULT_COLUMNS: ColumnDraft[] = DEFAULT_PROJECT_COLUMNS.map((c) => ({
+  uid: nextColumnUid(),
   label: c.label,
   role: c.role,
   color: c.color,
@@ -88,7 +95,7 @@ export function initialState(): WizardState {
     icon: DEFAULT_PROJECT_ICON,
     description: "",
     preset: "default",
-    customColumns: SIMPLE_COLUMNS.map((c) => ({ ...c })),
+    customColumns: SIMPLE_COLUMNS.map((c) => ({ ...c, uid: nextColumnUid() })),
     categories: { mode: "default", items: DEFAULT_PROJECT_CATEGORIES.map((c) => ({ name: c.name, color: c.color })) },
     components: { mode: "empty", items: [] },
     labels: { mode: "empty", items: [] },
@@ -147,7 +154,7 @@ export interface CreatePayload {
   name: string;
   key: string;
   description: string;
-  icon: string;
+  icon?: string;
   columns?: { label: string; role: ColumnRole; color: string; triggersPmReview: boolean }[];
   categories?: NamedDraft[];
   components?: string[];
@@ -159,15 +166,15 @@ export interface CreatePayload {
 
 /**
  * Only what differs from what a plain create gives is sent, so a project made by clicking straight
- * through is exactly the project the old form made.
+ * through is stored exactly as the old form stored it.
  */
 export function buildPayload(state: WizardState): CreatePayload {
   const payload: CreatePayload = {
     name: state.name.trim(),
     key: state.key.trim().toUpperCase(),
     description: state.description.trim(),
-    icon: state.icon,
   };
+  if (state.icon !== DEFAULT_PROJECT_ICON) payload.icon = state.icon;
   if (state.preset !== "default") {
     payload.columns = columnsOf(state).map((c) => ({
       label: c.label.trim(),

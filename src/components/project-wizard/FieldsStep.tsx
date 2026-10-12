@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { MAX_CATEGORIES, CATEGORY_NAME_MAX_LENGTH } from "@/lib/identifiers";
 import { MAX_OPTION_VALUE_LENGTH } from "@/lib/custom-fields";
@@ -61,6 +61,15 @@ function namesOf(state: WizardState, group: Group): string[] {
 
 export function FieldsStep({ state, onChange }: FieldsStepProps) {
   const [drafts, setDrafts] = useState<Record<Group, string>>({ categories: "", components: "", labels: "" });
+  const [announcement, setAnnouncement] = useState("");
+  const refocus = useRef<Group | null>(null);
+
+  // The button that was pressed goes away or goes grey; the field it fed is where to carry on
+  useEffect(() => {
+    if (!refocus.current) return;
+    document.getElementById(`wizard-add-${refocus.current}`)?.focus();
+    refocus.current = null;
+  });
 
   function setMode(group: Group, mode: string) {
     if (group === "categories") {
@@ -81,8 +90,12 @@ export function FieldsStep({ state, onChange }: FieldsStepProps) {
       onChange({ [group]: { ...state[group], items: [...state[group].items, name] } } as Partial<WizardState>);
     }
     setDrafts({ ...drafts, [group]: "" });
+    refocus.current = group;
+    setAnnouncement(`${name} added`);
   }
   function remove(group: Group, index: number) {
+    refocus.current = group;
+    setAnnouncement(`${namesOf(state, group)[index]} removed`);
     if (group === "categories") {
       onChange({
         categories: { ...state.categories, items: state.categories.items.filter((_, i) => i !== index) },
@@ -96,6 +109,9 @@ export function FieldsStep({ state, onChange }: FieldsStepProps) {
 
   return (
     <>
+      <p role="status" aria-live="polite" className="sr-only">
+        {announcement}
+      </p>
       {GROUPS.map((g) => {
         const mode = state[g.id].mode;
         const names = namesOf(state, g.id);
@@ -118,7 +134,7 @@ export function FieldsStep({ state, onChange }: FieldsStepProps) {
                     type="button"
                     aria-pressed={mode === value}
                     onClick={() => setMode(g.id, value)}
-                    className={`focus-ring min-h-9 rounded-md px-3 text-sm ${
+                    className={`focus-ring min-h-11 rounded-md px-3 text-sm sm:min-h-9 ${
                       mode === value ? "bg-primary-solid font-semibold text-white" : "text-text-muted hover:text-text"
                     }`}
                   >
@@ -138,7 +154,7 @@ export function FieldsStep({ state, onChange }: FieldsStepProps) {
                 return (
                   <li
                     key={`${name}-${i}`}
-                    className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold"
+                    className="inline-flex min-w-0 max-w-full items-center gap-1 break-words rounded-full px-2.5 py-0.5 text-xs font-semibold"
                     style={{
                       background: `color-mix(in srgb, ${color} 18%, var(--color-bg-card))`,
                       color: `color-mix(in srgb, ${color} 40%, var(--color-text))`,
@@ -150,7 +166,7 @@ export function FieldsStep({ state, onChange }: FieldsStepProps) {
                         type="button"
                         onClick={() => remove(g.id, i)}
                         aria-label={`Remove ${name}`}
-                        className="focus-ring -mr-1 grid h-5 w-5 place-items-center rounded-full leading-none"
+                        className="focus-ring -my-2 -mr-2 grid h-9 w-9 shrink-0 place-items-center rounded-full leading-none"
                       >
                         ✕
                       </button>
@@ -162,6 +178,7 @@ export function FieldsStep({ state, onChange }: FieldsStepProps) {
             {editable && (
               <div className="flex gap-2">
                 <input
+                  id={`wizard-add-${g.id}`}
                   value={drafts[g.id]}
                   aria-label={g.placeholder}
                   placeholder={g.placeholder}

@@ -26,7 +26,7 @@ describe("GET /api/projects/setup", () => {
 
     const body = await (await GET(request(), ctx())).json();
 
-    expect(body).toEqual({ pmAvailable: false, pmNeedsPlan: true, pmKeyUnreadable: false, pmLocked: false });
+    expect(body).toMatchObject({ pmAvailable: false, pmNeedsPlan: true, pmKeyUnreadable: false, pmLocked: false });
   });
 
   it("says the PM agent is not available when the instance could not be asked", async () => {
@@ -35,6 +35,14 @@ describe("GET /api/projects/setup", () => {
     const body = await (await GET(request(), ctx())).json();
 
     expect(body.pmAvailable).toBe(false);
+  });
+
+  it("says where a repository address counts as GitHub", async () => {
+    pmAvailability.mockResolvedValue(null);
+
+    const body = await (await GET(request(), ctx())).json();
+
+    expect(body.githubWebBase).toMatch(/^https?:\/\//);
   });
 
   it("is an administrator's", async () => {

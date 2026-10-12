@@ -11,7 +11,7 @@ A board's columns are set by its owner. Each has an `id` (what `change_task_stat
 | `blocked` | Waiting on something outside the task | Move here when you cannot go on for an outside reason |
 | `done` | Finished | Move here after the pull request merges |
 
-A board can have several columns with one role. New boards start with seven:
+A board can have several columns with one role. New boards start with these seven, unless their creator chose the Simple preset (Backlog, To Do, In Progress and Done, with no `review` column):
 
 | id | label | role |
 |----|-------|------|
@@ -27,7 +27,7 @@ When a role has several columns, take the first in `order` unless the stage belo
 
 ## The escalation column
 
-The column for "a person has to look at this" is the `review` column with `triggersPmReview: true` — Needs Human Review on a new board. With none flagged it is the first `review` column, as it is for the board's own workers; with no `review` column at all, leave the task where it is. The comment carries the question: the column is the signal, the comment is the content.
+The column for "a person has to look at this" is the `review` column with `triggersPmReview: true` — Needs Human Review on a board with the default columns. With none flagged it is the first `review` column, as it is for the board's own workers; with no `review` column at all, leave the task where it is. The comment carries the question: the column is the signal, the comment is the content.
 
 A `blocked` column is for waiting on something outside the task, such as another team or a vendor, not for a question to a person.
 

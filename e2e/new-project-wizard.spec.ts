@@ -38,6 +38,11 @@ test("creates the board that Review showed, with its workflow, fields and people
   await expect(heading(page, "Basics")).toBeVisible();
   await nameTheProject(page, NAME, KEY);
   await page.getByLabel("Description").fill("Airships, on a schedule.");
+  await page.getByRole("button", { name: "Choose project icon" }).click();
+  const chosenIcon = page.getByRole("dialog", { name: "Choose project icon" }).getByRole("button").nth(2);
+  const icon = await chosenIcon.getAttribute("aria-label");
+  await chosenIcon.click();
+  await expect(page.getByRole("button", { name: "Choose project icon" })).toHaveText(icon!);
 
   await page.getByRole("button", { name: /^Next: Workflow/ }).click();
   await expect(heading(page, "Workflow")).toBeVisible();
@@ -49,6 +54,19 @@ test("creates the board that Review showed, with its workflow, fields and people
 
   await page.getByRole("button", { name: /^Next: Task fields/ }).click();
   await expect(heading(page, "Task fields")).toBeVisible();
+  await page
+    .getByRole("group", { name: "Categories to start with" })
+    .getByRole("button", { name: "Edit" })
+    .click();
+  await page.getByLabel("New category").fill("spike");
+  await page.getByLabel("New category").press("Enter");
+  await page.getByRole("button", { name: "Remove idea" }).click();
+  await page
+    .getByRole("group", { name: "Labels to start with" })
+    .getByRole("button", { name: "Add a few" })
+    .click();
+  await page.getByLabel("New label").fill("Security");
+  await page.getByLabel("New label").press("Enter");
   await page
     .getByRole("group", { name: "Components to start with" })
     .getByRole("button", { name: "Add a few" })
@@ -63,7 +81,8 @@ test("creates the board that Review showed, with its workflow, fields and people
 
   await page.getByRole("button", { name: /^Next: Automation/ }).click();
   await expect(heading(page, "Automation & access")).toBeVisible();
-  const search = page.getByRole("combobox");
+  await page.getByLabel("Repository URL").fill("https://github.com/acme/zeppelin");
+  const search = page.getByLabel("Who can use this board");
   await search.fill("E2E Mem");
   await page.getByRole("option", { name: /E2E Member/ }).click();
   await page.getByLabel(`Access for ${MEMBER_USERNAME}`).selectOption("owner");
@@ -107,14 +126,21 @@ test("creates the board that Review showed, with its workflow, fields and people
   // Read back what the screens above do not show: the starting component options
   const stored = await page.request.get(`/api/projects/${KEY}`);
   const body = (await stored.json()) as {
+    description: string;
+    icon: string;
+    repositoryUrl: string;
     customFields: { name: string; options: { value: string }[] }[];
     categories: { name: string }[];
   };
-  expect(body.customFields.find((f) => f.name === "Component")?.options.map((o) => o.value)).toEqual([
-    "airframe",
-    "envelope",
-  ]);
-  expect(body.categories.map((c) => c.name)).toEqual(["bug", "doc", "user-story", "idea"]);
+  const optionsOf = (field: string) =>
+    body.customFields.find((f) => f.name === field)?.options.map((o) => o.value);
+  expect(optionsOf("Component")).toEqual(["airframe", "envelope"]);
+  expect(optionsOf("Labels")).toEqual(["Security"]);
+  expect(optionsOf("Difficulty")).toEqual(["S", "M", "L", "XL"]);
+  expect(body.categories.map((c) => c.name)).toEqual(["bug", "doc", "user-story", "spike"]);
+  expect(body.description).toBe("Airships, on a schedule.");
+  expect(body.icon).toBe(icon);
+  expect(body.repositoryUrl).toBe("https://github.com/acme/zeppelin");
 });
 
 test("a board nobody was added to stays closed to the person who was not", async ({ page, browser }) => {
@@ -157,7 +183,7 @@ test("a person is found by typing, ten at most, and never the caller", async ({ 
   await page.getByRole("button", { name: "Skip" }).click();
   await expect(heading(page, "Automation & access")).toBeVisible();
 
-  const search = page.getByRole("combobox");
+  const search = page.getByLabel("Who can use this board");
   const asked: string[] = [];
   page.on("request", (r) => {
     if (new URL(r.url()).pathname === "/api/projects/setup/people") asked.push(r.url());
@@ -171,7 +197,7 @@ test("a person is found by typing, ten at most, and never the caller", async ({ 
   // Fourteen people match; ten come back, and the list says to keep typing
   await search.fill("crew");
   await expect(page.getByRole("option")).toHaveCount(10);
-  await expect(page.getByText("Showing the first 10. Keep typing to narrow the list.")).toBeVisible();
+  await expect(page.getByText("Showing the first 10. Keep typing to narrow the list.").first()).toBeVisible();
 
   // Typing more narrows it to the one person
   await search.fill("crew-13");
@@ -180,10 +206,10 @@ test("a person is found by typing, ten at most, and never the caller", async ({ 
 
   // The caller is never offered to themselves
   await search.fill("E2E Admin");
-  await expect(page.getByText("No matches")).toBeVisible();
+  await expect(page.getByText("No matches").first()).toBeVisible();
 });
 
-test("on a phone it is one step per screen and nothing is covered", async ({ page }) => {
+test("on a phone it is one step per screen, inside the screen", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await signIn(page);
   await page.goto("/projects/new");
@@ -193,20 +219,28 @@ test("on a phone it is one step per screen and nothing is covered", async ({ pag
   const next = page.getByRole("button", { name: /^Next: Workflow/ });
   await expect(next).toBeVisible();
 
-  // The PM launcher sits in the same corner; the bar raises it, so the button's centre is the
-  // button's own and not the launcher's
-  const covered = await next.evaluate((el) => {
+  // Fully on the screen, and nothing painted over its centre
+  const reachable = await next.evaluate((el) => {
     const r = el.getBoundingClientRect();
     const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-    return !(hit === el || el.contains(hit));
+    return {
+      inside: r.left >= 0 && r.right <= window.innerWidth && r.bottom <= window.innerHeight,
+      own: hit === el || el.contains(hit),
+    };
   });
-  expect(covered).toBe(false);
+  expect(reachable).toEqual({ inside: true, own: true });
 
   await next.click();
   await expect(page.getByText("Step 2 of 5", { exact: true })).toBeVisible();
   await page.locator("label", { hasText: /^Custom/ }).click();
-  const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth - document.documentElement.clientWidth
-  );
+  // The scroller is <main>, not the document, so that is where a sideways overflow would be
+  const overflow = await page.locator("#main-content").evaluate((el) => el.scrollWidth - el.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);
+
+  // Targets a thumb can hit
+  for (const name of ["Move To Do up", "Move To Do down", "Remove To Do"]) {
+    const box = await page.getByRole("button", { name }).boundingBox();
+    expect(box!.width).toBeGreaterThanOrEqual(44);
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+  }
 });

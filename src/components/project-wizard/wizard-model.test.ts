@@ -11,6 +11,7 @@ import {
   type WizardState,
 } from "./wizard-model";
 import { parseProjectSetup } from "@/lib/project-setup";
+import { DEFAULT_PROJECT_ICON, PROJECT_ICONS } from "@/types";
 
 function filled(patch: Partial<WizardState> = {}): WizardState {
   return { ...initialState(), name: "Orbit", key: "orb", ...patch };
@@ -20,14 +21,36 @@ describe("buildPayload", () => {
   it("sends only the basics for a project nobody customised, as the old form did", () => {
     const payload = buildPayload(filled({ description: " Launch control " }));
 
-    expect(Object.keys(payload).sort()).toEqual(["description", "icon", "key", "name"]);
+    expect(Object.keys(payload).sort()).toEqual(["description", "key", "name"]);
     expect(payload).toMatchObject({ name: "Orbit", key: "ORB", description: "Launch control" });
+  });
+
+  it("sends the icon only when it is not the default, as it is stored", () => {
+    const other = PROJECT_ICONS.find((i) => i !== DEFAULT_PROJECT_ICON)!;
+
+    expect(buildPayload(filled({ icon: DEFAULT_PROJECT_ICON })).icon).toBeUndefined();
+    expect(buildPayload(filled({ icon: other })).icon).toBe(other);
+  });
+
+  it("sends a column's PM hand-over flag as it was set", () => {
+    const payload = buildPayload(
+      filled({
+        preset: "custom",
+        customColumns: [
+          { uid: "a", label: "Doing", role: "active", color: "#111", triggersPmReview: false },
+          { uid: "b", label: "Check", role: "review", color: "#222", triggersPmReview: true },
+          { uid: "c", label: "Done", role: "done", color: "#333", triggersPmReview: false },
+        ],
+      })
+    );
+
+    expect(payload.columns?.map((c) => c.triggersPmReview)).toEqual([false, true, false]);
   });
 
   it("sends columns once the preset is not the default one", () => {
     const simple = buildPayload(filled({ preset: "simple" }));
     const custom = buildPayload(
-      filled({ preset: "custom", customColumns: [{ label: " Doing ", role: "active", color: "#111111", triggersPmReview: false }] })
+      filled({ preset: "custom", customColumns: [{ uid: "x1", label: " Doing ", role: "active", color: "#111111", triggersPmReview: false }] })
     );
 
     expect(simple.columns?.map((c) => c.label)).toEqual(["Backlog", "To Do", "In Progress", "Done"]);
@@ -64,13 +87,13 @@ describe("buildPayload", () => {
       filled({
         repositoryUrl: " https://github.com/acme/orbit ",
         pmEnabled: true,
-        people: [{ person: { _id: "u1", username: "anna", fullName: "Anna K" }, relation: "owner" }],
+        people: [{ person: { _id: "64b0000000000000000000a1", username: "anna", fullName: "Anna K" }, relation: "owner" }],
       })
     );
 
     expect(payload.repositoryUrl).toBe("https://github.com/acme/orbit");
     expect(payload.pm).toEqual({ enabled: true });
-    expect(payload.access).toEqual([{ userId: "u1", relation: "owner" }]);
+    expect(payload.access).toEqual([{ userId: "64b0000000000000000000a1", relation: "owner" }]);
   });
 
   // The client and the server judge the same board; this is the seam between them
@@ -82,6 +105,9 @@ describe("buildPayload", () => {
           components: { mode: "custom", items: ["api", "web"] },
           labels: { mode: "custom", items: ["Security"] },
           categories: { mode: "custom", items: [{ name: "spike", color: "#3b82f6" }] },
+          repositoryUrl: "https://github.com/acme/orbit",
+          pmEnabled: true,
+          people: [{ person: { _id: "64b0000000000000000000a1", username: "anna", fullName: "Anna K" }, relation: "member" }],
         })
       );
 
@@ -108,6 +134,12 @@ describe("workflowProblem", () => {
       customColumns: SIMPLE_COLUMNS.filter((c) => c.role !== "active"),
     });
 
+    // The same words the server answers with, from the parser itself rather than a copy of its regex
+    for (const board of [withoutDone, withoutActive]) {
+      const server = parseProjectSetup({ columns: buildPayload(board).columns });
+      expect(server.ok).toBe(false);
+      expect(!server.ok && server.error).toBe(workflowProblem(board));
+    }
     expect(workflowProblem(withoutDone)).toMatch(/needs a column meaning Done/);
     expect(workflowProblem(withoutActive)).toMatch(/needs a column meaning In progress/);
   });
@@ -147,7 +179,7 @@ describe("roleSummary", () => {
   });
 
   it("shows Blocked once a column carries it", () => {
-    const rows = roleSummary([...SIMPLE_COLUMNS, { label: "Parked", role: "blocked", color: "#000", triggersPmReview: false }]);
+    const rows = roleSummary([...SIMPLE_COLUMNS, { uid: "x2", label: "Parked", role: "blocked", color: "#000", triggersPmReview: false }]);
 
     expect(rows.find((r) => r.role === "blocked")?.columns).toEqual(["Parked"]);
   });
