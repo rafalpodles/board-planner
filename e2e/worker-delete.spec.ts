@@ -8,7 +8,6 @@ import {
   HELD_TASK_KEY,
   MEMBER_PASSWORD,
   MEMBER_USERNAME,
-  SECOND_HELD_TASK_KEY,
   WORKER_CREDENTIAL,
   WORKER_ID,
   WORKER_NAME,
@@ -58,7 +57,8 @@ async function openFleet(page: Page) {
 }
 
 async function enrolLostLaptop(request: APIRequestContext) {
-  const minted = await request.post("/api/workers/enrolment", { headers: ADMIN_AUTH, data: {} });
+  await signInApi(request, ADMIN_USERNAME, ADMIN_PASSWORD);
+  const minted = await request.post("/api/workers/enrolment", { headers: SAME_ORIGIN, data: {} });
   expect(minted.status(), await minted.text()).toBe(201);
   const { token } = await minted.json();
   const registered = await request.post("/api/workers/register", {
@@ -141,7 +141,8 @@ test("a machine that still holds a run is not deleted, and the refusal names the
   const refused = await request.delete(`/api/workers/${WORKER_ID}`, { headers: SAME_ORIGIN });
   expect(refused.status()).toBe(409);
   const body = await refused.json();
-  expect(body.taskKeys).toEqual(expect.arrayContaining([HELD_TASK_KEY, SECOND_HELD_TASK_KEY]));
+  expect(body.taskKeys).toEqual([HELD_TASK_KEY]);
+  expect(body.error).toContain(HELD_TASK_KEY);
   expect(await workerCount({ _id: WORKER_ID })).toBe(1);
 });
 
