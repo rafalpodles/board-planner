@@ -118,7 +118,7 @@ async function seedWhatTheMemberAuthored() {
       field: "title",
       oldValue: "Before",
       newValue: "Run by the member's agent",
-      createdAt: now,
+      createdAt: new Date(now.getTime() - 60_000),
     },
     { task: AGENT_TASK_ID, user: MEMBER_ID, action: "updated", field: "agent", oldValue: "", newValue: AGENT_NAME, createdAt: now },
   ]);
