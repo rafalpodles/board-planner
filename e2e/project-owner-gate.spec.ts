@@ -144,6 +144,15 @@ const RECIPES: Record<string, Recipe> = {
     send: (request, path) => request.delete(path, { headers: SAME_ORIGIN }),
     handled: { status: 400, body: /userId is required/ },
   },
+  // BP-862: which identity provider groups give which role on the board
+  "GET /api/projects/[projectId]/group-roles": {
+    send: get,
+    handled: { status: 200, body: /^\{"map":\[\],"hasProvider":(true|false)\}$/ },
+  },
+  "PUT /api/projects/[projectId]/group-roles": {
+    send: withBody("put", { map: "not a list" }),
+    handled: { status: 400, body: /map must be a list of groups and roles/ },
+  },
   "GET /api/projects/[projectId]/invitations": { send: get, handled: { status: 200, body: JSON_ARRAY } },
   "POST /api/projects/[projectId]/invitations": {
     send: withBody("post", {}),
