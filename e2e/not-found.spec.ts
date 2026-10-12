@@ -69,6 +69,8 @@ test(`the lost card and its recovery fit a phone in ${theme} theme`, async ({ pa
     await recovery.scrollIntoViewIfNeeded();
     await expect(recovery).toBeInViewport();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    // The shell clips overflow, so document width alone cannot detect an oversized recovery.
+    expect((await page.getByTestId("missing-page").boundingBox())!.width).toBeLessThanOrEqual(390);
     const rect = await recovery.boundingBox();
     expect(rect!.height).toBeGreaterThanOrEqual(44);
     await page.screenshot({ path: `e2e/.artifacts/BP-262-phone-${theme}.png` });
